@@ -47,5 +47,6 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /runs", listRunsHandler(s.store, s.log))
 	mux.Handle("GET /runs/{id}", getRunHandler(s.store, s.log))
 	mux.Handle("GET /runs/{id}/logs", runLogsHandler(s.store, s.log))
+	mux.Handle("GET /runs/{id}/events", runEventsHandler(s.store, s.log))
 	return mux
 }

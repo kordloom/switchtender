@@ -7,6 +7,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/dcadolph/yardmaster/internal/event"
 	"github.com/dcadolph/yardmaster/internal/run"
 )
 
@@ -23,6 +24,14 @@ type listRunsResponse struct {
 	// Runs is the ordered list of runs.
 	Runs []*run.Run `json:"runs"`
 	// Count is the number of runs returned.
+	Count int `json:"count"`
+}
+
+// eventsResponse wraps a run's structured events.
+type eventsResponse struct {
+	// Events is the ordered list of events.
+	Events []event.Event `json:"events"`
+	// Count is the number of events returned.
 	Count int `json:"count"`
 }
 
@@ -118,5 +127,26 @@ func runLogsHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
 		if _, err := w.Write(body); err != nil {
 			log.Error("server: write run log: " + err.Error())
 		}
+	}
+}
+
+// runEventsHandler returns a run's structured events as JSON.
+func runEventsHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
+	if store == nil {
+		panic("server: runEventsHandler: Store required")
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		events, err := store.Events(r.Context(), r.PathValue("id"))
+		if err != nil {
+			if errors.Is(err, run.ErrNotFound) {
+				respondError(w, log, http.StatusNotFound, "run not found")
+				return
+			}
+			log.Error("server: get run events: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not get run events")
+			return
+		}
+		respondJSON(w, log, http.StatusOK,
+			eventsResponse{Events: events, Count: len(events)}, wantsPretty(r))
 	}
 }
