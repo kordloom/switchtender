@@ -9,6 +9,8 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"sync"
 )
 
 // Spec describes a single playbook execution.
@@ -23,6 +25,8 @@ type Spec struct {
 	Env []string
 	// Dir is the working directory for the process. When empty, the current directory is used.
 	Dir string
+	// EventsPath, when set, enables the structured event callback and names the file it writes.
+	EventsPath string
 }
 
 // Result is the outcome of a completed execution.
@@ -52,6 +56,12 @@ type ansibleRunner struct {
 	binary string
 	// baseEnv is the environment inherited by every execution.
 	baseEnv []string
+	// pluginOnce guards one time materialization of the callback plugin.
+	pluginOnce sync.Once
+	// pluginDir is the temp directory holding the materialized callback plugin.
+	pluginDir string
+	// pluginErr records a failure to materialize the callback plugin.
+	pluginErr error
 }
 
 // Option configures an ansibleRunner.
@@ -80,17 +90,34 @@ func NewAnsibleRunner(opts ...Option) Runner {
 	return a
 }
 
+// pluginName is the callback plugin name, matching the embedded file and its CALLBACK_NAME.
+const pluginName = "yardmaster"
+
 // Run executes the playbook described by spec and streams combined stdout and stderr to out.
+// When spec.EventsPath is set, the structured event callback is enabled and writes to that file.
 func (a *ansibleRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Result, error) {
 	if spec.Playbook == "" {
 		return Result{ExitCode: -1}, ErrNoPlaybook
+	}
+
+	env := append(append([]string{}, a.baseEnv...), spec.Env...)
+	if spec.EventsPath != "" {
+		dir, err := a.ensurePlugin()
+		if err != nil {
+			return Result{ExitCode: -1}, fmt.Errorf("%w: %w", ErrLaunch, err)
+		}
+		env = append(env,
+			"ANSIBLE_CALLBACK_PLUGINS="+dir,
+			"ANSIBLE_CALLBACKS_ENABLED="+pluginName,
+			"YARDMASTER_EVENTS_PATH="+spec.EventsPath,
+		)
 	}
 
 	cmd := exec.CommandContext(ctx, a.binary, a.args(spec)...)
 	cmd.Stdout = out
 	cmd.Stderr = out
 	cmd.Dir = spec.Dir
-	cmd.Env = append(append([]string{}, a.baseEnv...), spec.Env...)
+	cmd.Env = env
 
 	err := cmd.Run()
 	if err == nil {
@@ -102,6 +129,23 @@ func (a *ansibleRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Resu
 		return Result{ExitCode: exitErr.ExitCode()}, nil
 	}
 	return Result{ExitCode: -1}, fmt.Errorf("%w: %w", ErrLaunch, err)
+}
+
+// ensurePlugin materializes the embedded callback plugin to a temp directory once and returns it.
+func (a *ansibleRunner) ensurePlugin() (string, error) {
+	a.pluginOnce.Do(func() {
+		dir, err := os.MkdirTemp("", "yardmaster-plugin-")
+		if err != nil {
+			a.pluginErr = err
+			return
+		}
+		if err := os.WriteFile(filepath.Join(dir, pluginName+".py"), []byte(callbackPlugin), 0o600); err != nil {
+			a.pluginErr = err
+			return
+		}
+		a.pluginDir = dir
+	})
+	return a.pluginDir, a.pluginErr
 }
 
 // args builds the ansible-playbook argument list for spec.
