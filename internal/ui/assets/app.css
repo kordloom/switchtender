@@ -1,0 +1,133 @@
+:root {
+	--bg: #f5f6f8;
+	--surface: #ffffff;
+	--surface-2: #eef0f4;
+	--border: #d7dbe2;
+	--text: #1b1f27;
+	--muted: #5d6470;
+	--accent: #2f6fed;
+	--ok: #2e9e5b;
+	--changed: #c98a13;
+	--failed: #d23b3b;
+	--unreachable: #8a4fd0;
+	--skipped: #8b919c;
+	--none: #c7ccd5;
+}
+
+@media (prefers-color-scheme: dark) {
+	:root {
+		--bg: #0f1217;
+		--surface: #171b22;
+		--surface-2: #1f2530;
+		--border: #2a313d;
+		--text: #e6e9ef;
+		--muted: #9aa3b2;
+		--accent: #5b8cff;
+		--ok: #3fbf72;
+		--changed: #e0a93a;
+		--failed: #f2585a;
+		--unreachable: #b07ef0;
+		--skipped: #7e8694;
+		--none: #2b323d;
+	}
+}
+
+* { box-sizing: border-box; }
+
+body {
+	margin: 0;
+	font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+	background: var(--bg);
+	color: var(--text);
+}
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+.topbar {
+	display: flex;
+	align-items: baseline;
+	gap: 16px;
+	padding: 14px 24px;
+	background: var(--surface);
+	border-bottom: 1px solid var(--border);
+	position: sticky;
+	top: 0;
+	z-index: 5;
+}
+.brand { font-size: 18px; font-weight: 700; }
+.brand a { color: var(--text); }
+.tagline { color: var(--muted); font-size: 13px; }
+
+.content { max-width: 1200px; margin: 0 auto; padding: 24px; }
+h1 { font-size: 22px; margin: 0 0 16px; }
+h2 { font-size: 16px; margin: 0; }
+.muted { color: var(--muted); }
+.back { display: inline-block; margin-bottom: 12px; font-size: 14px; }
+
+table.runs { width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+table.runs th, table.runs td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+table.runs th { background: var(--surface-2); font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+table.runs tbody tr { cursor: pointer; }
+table.runs tbody tr:hover { background: var(--surface-2); }
+table.runs td.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+
+.badge { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; color: #fff; }
+.badge.succeeded { background: var(--ok); }
+.badge.failed { background: var(--failed); }
+.badge.running { background: var(--accent); }
+.badge.pending { background: var(--skipped); }
+.badge.canceled { background: var(--unreachable); }
+
+.run-header { display: flex; flex-wrap: wrap; gap: 24px; align-items: center; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 18px; }
+.run-header .field { display: flex; flex-direction: column; }
+.run-header .field .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.run-header .field .value { font-size: 15px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+.panel { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 18px; }
+.panel-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; gap: 16px; flex-wrap: wrap; }
+.legend { display: flex; gap: 10px; flex-wrap: wrap; }
+.chip { font-size: 12px; padding: 2px 8px; border-radius: 4px; color: #fff; }
+.chip.ok { background: var(--ok); }
+.chip.changed { background: var(--changed); }
+.chip.failed { background: var(--failed); }
+.chip.unreachable { background: var(--unreachable); }
+.chip.skipped { background: var(--skipped); }
+.chip.none { background: var(--none); color: var(--muted); }
+
+.matrix-scroll { overflow: auto; max-height: 70vh; border: 1px solid var(--border); border-radius: 6px; }
+table.matrix { border-collapse: separate; border-spacing: 0; }
+table.matrix th, table.matrix td { padding: 0; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+table.matrix thead th { position: sticky; top: 0; z-index: 3; background: var(--surface-2); padding: 8px 10px; font-size: 12px; white-space: nowrap; text-align: left; }
+table.matrix tbody th { position: sticky; left: 0; z-index: 2; background: var(--surface-2); padding: 8px 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; white-space: nowrap; text-align: left; }
+table.matrix thead th.corner { position: sticky; left: 0; z-index: 4; }
+.cell { width: 34px; height: 30px; cursor: pointer; }
+.cell.ok { background: var(--ok); }
+.cell.changed { background: var(--changed); }
+.cell.failed { background: var(--failed); }
+.cell.unreachable { background: var(--unreachable); }
+.cell.skipped { background: var(--skipped); }
+.cell.none { background: var(--none); cursor: default; }
+.cell:hover:not(.none) { outline: 2px solid var(--text); outline-offset: -2px; }
+
+.timeline { display: flex; flex-direction: column; gap: 6px; }
+.tl-row { display: grid; grid-template-columns: 220px 1fr 70px; align-items: center; gap: 12px; }
+.tl-name { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tl-track { background: var(--surface-2); border-radius: 4px; height: 18px; position: relative; }
+.tl-bar { position: absolute; top: 0; bottom: 0; border-radius: 4px; min-width: 3px; cursor: pointer; }
+.tl-bar.ok { background: var(--ok); }
+.tl-bar.changed { background: var(--changed); }
+.tl-bar.failed { background: var(--failed); }
+.tl-bar.skipped { background: var(--skipped); }
+.tl-dur { font-size: 12px; color: var(--muted); text-align: right; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+.actions { margin-top: 8px; }
+.button { display: inline-block; padding: 8px 14px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-size: 14px; }
+.button:hover { text-decoration: none; border-color: var(--accent); }
+
+.drill { position: fixed; top: 0; right: 0; width: 340px; height: 100%; background: var(--surface); border-left: 1px solid var(--border); box-shadow: -8px 0 24px rgba(0,0,0,0.25); padding: 20px; overflow: auto; z-index: 10; }
+.drill-close { position: absolute; top: 12px; right: 12px; background: none; border: none; color: var(--muted); font-size: 18px; cursor: pointer; }
+.drill h3 { margin: 0 0 14px; font-size: 15px; }
+.drill .field { margin-bottom: 12px; }
+.drill .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.drill .value { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 14px; word-break: break-word; }

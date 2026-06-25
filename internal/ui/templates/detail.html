@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Run {{.RunID}} - Yardmaster</title>
+	<link rel="stylesheet" href="/ui/assets/app.css">
+</head>
+<body data-page="detail" data-run-id="{{.RunID}}">
+	<header class="topbar">
+		<div class="brand"><a href="/ui/">Yardmaster</a></div>
+		<div class="tagline">Run detail</div>
+	</header>
+
+	<main class="content">
+		<a class="back" href="/ui/">Back to runs</a>
+		<div id="status" class="muted">Loading run.</div>
+
+		<section id="run-header" class="run-header" hidden></section>
+
+		<section class="panel" id="matrix-panel" hidden>
+			<div class="panel-head">
+				<h2>Host matrix</h2>
+				<div class="legend">
+					<span class="chip ok">ok</span>
+					<span class="chip changed">changed</span>
+					<span class="chip failed">failed</span>
+					<span class="chip unreachable">unreachable</span>
+					<span class="chip skipped">skipped</span>
+					<span class="chip none">not run</span>
+				</div>
+			</div>
+			<div class="matrix-scroll">
+				<table class="matrix" id="matrix"></table>
+			</div>
+		</section>
+
+		<section class="panel" id="timeline-panel" hidden>
+			<div class="panel-head"><h2>Timeline</h2></div>
+			<div class="timeline" id="timeline"></div>
+		</section>
+
+		<div class="actions">
+			<a id="full-log" class="button" href="#" target="_blank" rel="noopener">View full log</a>
+		</div>
+	</main>
+
+	<aside id="drill" class="drill" hidden>
+		<button class="drill-close" id="drill-close" aria-label="Close">x</button>
+		<div id="drill-body"></div>
+	</aside>
+
+	<script src="/ui/assets/app.js"></script>
+</body>
+</html>
