@@ -8,6 +8,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/dcadolph/yardmaster/internal/run"
+	"github.com/dcadolph/yardmaster/internal/ui"
 )
 
 // Submitter accepts a run request and returns the created run. The dispatcher satisfies it.
@@ -23,6 +24,8 @@ type Server struct {
 	submitter Submitter
 	// log records request handling activity.
 	log *zap.Logger
+	// web serves the embedded user interface.
+	web *ui.UI
 }
 
 // New returns a Server. It panics if store or submitter is nil; a nil logger becomes a no-op.
@@ -36,10 +39,10 @@ func New(store run.Store, submitter Submitter, log *zap.Logger) *Server {
 	if log == nil {
 		log = zap.NewNop()
 	}
-	return &Server{store: store, submitter: submitter, log: log}
+	return &Server{store: store, submitter: submitter, log: log, web: ui.New(log)}
 }
 
-// Handler returns the HTTP handler serving the Yardmaster API.
+// Handler returns the HTTP handler serving the Yardmaster API and web interface.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("GET /healthz", healthHandler())
@@ -48,5 +51,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /runs/{id}", getRunHandler(s.store, s.log))
 	mux.Handle("GET /runs/{id}/logs", runLogsHandler(s.store, s.log))
 	mux.Handle("GET /runs/{id}/events", runEventsHandler(s.store, s.log))
+	mux.Handle("/ui/", s.web.Handler())
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/ui/", http.StatusFound)
+	})
 	return mux
 }

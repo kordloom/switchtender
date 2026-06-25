@@ -207,6 +207,28 @@ func TestHealth(t *testing.T) {
 	}
 }
 
+func TestUIMountAndRedirect(t *testing.T) {
+	t.Parallel()
+	handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop()).Handler()
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusFound {
+		t.Errorf("GET / status = %d, want 302", rec.Code)
+	}
+	if loc := rec.Header().Get("Location"); loc != "/ui/" {
+		t.Errorf("GET / Location = %q, want /ui/", loc)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/ui/", nil)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("GET /ui/ status = %d, want 200", rec.Code)
+	}
+}
+
 func TestNewPanicsOnNilDeps(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
