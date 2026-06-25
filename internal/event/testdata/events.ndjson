@@ -1,0 +1,4 @@
+{"type":"play_start","ts":1719000000,"play":"Yardmaster smoke test"}
+{"type":"task_start","ts":1719000000.5,"play":"Yardmaster smoke test","task":"Say hello"}
+{"type":"runner_ok","ts":1719000001,"play":"Yardmaster smoke test","task":"Say hello","host":"localhost","changed":false}
+{"type":"stats","ts":1719000001.5,"stats":{"localhost":{"ok":1,"changed":0,"failures":0,"unreachable":0,"skipped":0,"rescued":0,"ignored":0}}}
