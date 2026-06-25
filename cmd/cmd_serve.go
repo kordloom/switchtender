@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os/signal"
 	"syscall"
@@ -15,13 +16,15 @@ import (
 	"github.com/dcadolph/yardmaster/internal/dispatch"
 	"github.com/dcadolph/yardmaster/internal/logutil"
 	"github.com/dcadolph/yardmaster/internal/roundhouse"
-	"github.com/dcadolph/yardmaster/internal/run"
 	"github.com/dcadolph/yardmaster/internal/server"
+	"github.com/dcadolph/yardmaster/internal/sqlitestore"
 )
 
 const (
 	// defaultServeAddr is the address the server listens on when --addr is not set.
 	defaultServeAddr = ":8080"
+	// defaultDBPath is the SQLite database file used when --db is not set.
+	defaultDBPath = "yardmaster.db"
 	// shutdownTimeout bounds how long graceful HTTP shutdown waits for in-flight requests.
 	shutdownTimeout = 15 * time.Second
 	// readHeaderTimeout bounds how long the server waits to read request headers.
@@ -30,6 +33,9 @@ const (
 
 // serveAddr holds the value of the --addr flag.
 var serveAddr string
+
+// serveDB holds the value of the --db flag.
+var serveDB string
 
 // serveCmd runs the Yardmaster HTTP server (the dispatcher).
 var serveCmd = &cobra.Command{
@@ -41,6 +47,7 @@ var serveCmd = &cobra.Command{
 // init registers serve command flags.
 func init() {
 	serveCmd.Flags().StringVar(&serveAddr, "addr", defaultServeAddr, "Address the server listens on.")
+	serveCmd.Flags().StringVar(&serveDB, "db", defaultDBPath, "Path to the SQLite database file.")
 }
 
 // runServe builds the server dependencies and serves until interrupted.
@@ -51,7 +58,14 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	}
 	defer func() { _ = log.Sync() }()
 
-	store := run.NewMemStore()
+	store, err := sqlitestore.New(serveDB)
+	if err != nil {
+		return fmt.Errorf("open store: %w", err)
+	}
+	if closer, ok := store.(io.Closer); ok {
+		defer func() { _ = closer.Close() }()
+	}
+
 	runner := roundhouse.NewAnsibleRunner()
 	disp := dispatch.New(store, runner, log)
 	defer disp.Close()
