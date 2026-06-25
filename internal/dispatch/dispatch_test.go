@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/dcadolph/yardmaster/internal/event"
 	"github.com/dcadolph/yardmaster/internal/roundhouse"
 	"github.com/dcadolph/yardmaster/internal/run"
 )
@@ -94,6 +96,36 @@ func TestDispatcherExecute(t *testing.T) {
 				t.Errorf("log %q does not contain %q", body, test.WantOutput)
 			}
 		})
+	}
+}
+
+func TestDispatcherStoresEvents(t *testing.T) {
+	t.Parallel()
+	store := run.NewMemStore()
+	runner := roundhouse.RunnerFunc(
+		func(_ context.Context, spec roundhouse.Spec, _ io.Writer) (roundhouse.Result, error) {
+			line := `{"type":"play_start","ts":1719000000,"play":"demo"}` + "\n"
+			if err := os.WriteFile(spec.EventsPath, []byte(line), 0o600); err != nil {
+				return roundhouse.Result{ExitCode: -1}, err
+			}
+			return roundhouse.Result{ExitCode: 0}, nil
+		},
+	)
+	d := New(store, runner, nil)
+	defer d.Close()
+
+	created, err := d.Submit(context.Background(), "play.yml", "inv")
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+
+	waitTerminal(t, store, created.ID)
+	events, err := store.Events(context.Background(), created.ID)
+	if err != nil {
+		t.Fatalf("Events() error = %v", err)
+	}
+	if len(events) != 1 || events[0].Type != event.TypePlayStart || events[0].Play != "demo" {
+		t.Errorf("Events() = %+v, want one play_start for demo", events)
 	}
 }
 

@@ -8,6 +8,8 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+
+	"github.com/dcadolph/yardmaster/internal/event"
 )
 
 func TestMemStoreSaveGet(t *testing.T) {
@@ -108,5 +110,51 @@ func TestMemStoreLog(t *testing.T) {
 	}
 	if again[0] != 'h' {
 		t.Error("mutating returned log changed stored state")
+	}
+}
+
+func TestMemStoreEvents(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := NewMemStore()
+
+	batch := []event.Event{{Type: event.TypePlayStart, Play: "demo"}}
+	if err := store.AppendEvents(ctx, "missing", batch); !errors.Is(err, ErrNotFound) {
+		t.Errorf("AppendEvents() on missing run = %v, want ErrNotFound", err)
+	}
+	if _, err := store.Events(ctx, "missing"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("Events() on missing run = %v, want ErrNotFound", err)
+	}
+
+	if err := store.Save(ctx, &Run{ID: "x", CreatedAt: time.Now()}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	if err := store.AppendEvents(ctx, "x", batch); err != nil {
+		t.Fatalf("AppendEvents() error = %v", err)
+	}
+	if err := store.AppendEvents(ctx, "x",
+		[]event.Event{{Type: event.TypeTaskStart, Task: "go"}}); err != nil {
+		t.Fatalf("AppendEvents() error = %v", err)
+	}
+
+	got, err := store.Events(ctx, "x")
+	if err != nil {
+		t.Fatalf("Events() error = %v", err)
+	}
+	want := []event.Event{
+		{Type: event.TypePlayStart, Play: "demo"},
+		{Type: event.TypeTaskStart, Task: "go"},
+	}
+	if diff := cmp.Diff(want, got, cmpopts.EquateEmpty()); diff != "" {
+		t.Errorf("Events() mismatch (-want +got):\n%s", diff)
+	}
+
+	got[0].Play = "mutated"
+	again, err := store.Events(ctx, "x")
+	if err != nil {
+		t.Fatalf("Events() error = %v", err)
+	}
+	if again[0].Play != "demo" {
+		t.Error("mutating returned events changed stored state")
 	}
 }

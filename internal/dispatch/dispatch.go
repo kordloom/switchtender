@@ -4,11 +4,13 @@ package dispatch
 
 import (
 	"context"
+	"os"
 	"sync"
 	"time"
 
 	"go.uber.org/zap"
 
+	"github.com/dcadolph/yardmaster/internal/event"
 	"github.com/dcadolph/yardmaster/internal/roundhouse"
 	"github.com/dcadolph/yardmaster/internal/run"
 )
@@ -131,9 +133,14 @@ func (d *Dispatcher) execute(r *run.Run) {
 	r.StartedAt = &started
 	d.save(r)
 
+	eventsPath, cleanup := d.eventsFile(r.ID)
+	defer cleanup()
+
 	sink := &logSink{store: d.store, id: r.ID, log: d.log}
-	spec := roundhouse.Spec{Playbook: r.Playbook, Inventory: r.Inventory}
+	spec := roundhouse.Spec{Playbook: r.Playbook, Inventory: r.Inventory, EventsPath: eventsPath}
 	res, err := d.runner.Run(d.ctx, spec, sink)
+
+	d.storeEvents(r.ID, eventsPath)
 
 	switch {
 	case err != nil && d.ctx.Err() != nil:
@@ -161,5 +168,43 @@ func (d *Dispatcher) finalize(r *run.Run, status run.Status, exitCode *int, fail
 func (d *Dispatcher) save(r *run.Run) {
 	if err := d.store.Save(context.Background(), r); err != nil {
 		d.log.Error("dispatch: save run: "+err.Error(), zap.String("run_id", r.ID))
+	}
+}
+
+// eventsFile creates a temp file for the run's structured events and returns its path and a
+// cleanup func. On failure it logs and returns an empty path, which disables event capture.
+func (d *Dispatcher) eventsFile(id string) (string, func()) {
+	f, err := os.CreateTemp("", "yardmaster-events-*.ndjson")
+	if err != nil {
+		d.log.Error("dispatch: create events file: "+err.Error(), zap.String("run_id", id))
+		return "", func() {}
+	}
+	path := f.Name()
+	_ = f.Close()
+	return path, func() { _ = os.Remove(path) }
+}
+
+// storeEvents parses the run's event file and appends the parsed events to the store.
+func (d *Dispatcher) storeEvents(id, path string) {
+	if path == "" {
+		return
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		d.log.Error("dispatch: open events file: "+err.Error(), zap.String("run_id", id))
+		return
+	}
+	defer func() { _ = f.Close() }()
+
+	events, err := event.Parse(f)
+	if err != nil {
+		d.log.Error("dispatch: parse events: "+err.Error(), zap.String("run_id", id))
+		return
+	}
+	if len(events) == 0 {
+		return
+	}
+	if err := d.store.AppendEvents(context.Background(), id, events); err != nil {
+		d.log.Error("dispatch: append events: "+err.Error(), zap.String("run_id", id))
 	}
 }

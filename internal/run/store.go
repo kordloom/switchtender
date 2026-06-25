@@ -4,9 +4,11 @@ import (
 	"context"
 	"sort"
 	"sync"
+
+	"github.com/dcadolph/yardmaster/internal/event"
 )
 
-// Store persists runs and their captured log output.
+// Store persists runs, their captured log output, and their structured events.
 // Implementations must be safe for concurrent use.
 type Store interface {
 	// Save inserts or replaces the run identified by r.ID.
@@ -19,23 +21,30 @@ type Store interface {
 	AppendLog(ctx context.Context, id string, p []byte) error
 	// Log returns a copy of the run's captured output, or ErrNotFound.
 	Log(ctx context.Context, id string) ([]byte, error)
+	// AppendEvents appends structured events to the run. Returns ErrNotFound if the run is absent.
+	AppendEvents(ctx context.Context, id string, events []event.Event) error
+	// Events returns a copy of the run's structured events, or ErrNotFound.
+	Events(ctx context.Context, id string) ([]event.Event, error)
 }
 
 // memStore is an in-memory Store backed by maps guarded by a read-write mutex.
 type memStore struct {
-	// mu guards runs and logs.
+	// mu guards runs, logs, and events.
 	mu sync.RWMutex
 	// runs maps run id to the stored run.
 	runs map[string]*Run
 	// logs maps run id to accumulated output bytes.
 	logs map[string][]byte
+	// events maps run id to accumulated structured events.
+	events map[string][]event.Event
 }
 
 // NewMemStore returns an empty in-memory Store.
 func NewMemStore() Store {
 	return &memStore{
-		runs: make(map[string]*Run),
-		logs: make(map[string][]byte),
+		runs:   make(map[string]*Run),
+		logs:   make(map[string][]byte),
+		events: make(map[string][]event.Event),
 	}
 }
 
@@ -98,5 +107,28 @@ func (m *memStore) Log(_ context.Context, id string) ([]byte, error) {
 	}
 	out := make([]byte, len(m.logs[id]))
 	copy(out, m.logs[id])
+	return out, nil
+}
+
+// AppendEvents appends structured events to the run. Returns ErrNotFound if the run is absent.
+func (m *memStore) AppendEvents(_ context.Context, id string, events []event.Event) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.runs[id]; !ok {
+		return ErrNotFound
+	}
+	m.events[id] = append(m.events[id], events...)
+	return nil
+}
+
+// Events returns a copy of the run's structured events, or ErrNotFound.
+func (m *memStore) Events(_ context.Context, id string) ([]event.Event, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if _, ok := m.runs[id]; !ok {
+		return nil, ErrNotFound
+	}
+	out := make([]event.Event, len(m.events[id]))
+	copy(out, m.events[id])
 	return out, nil
 }
