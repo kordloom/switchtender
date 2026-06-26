@@ -12,8 +12,20 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/dcadolph/yardmaster/internal/live"
 	"github.com/dcadolph/yardmaster/internal/run"
 )
+
+// fakeStreamer returns a fixed channel for any run.
+type fakeStreamer struct {
+	// ch is handed to every subscriber.
+	ch chan live.Message
+}
+
+// Subscribe returns the fixed channel and a no-op cancel.
+func (f *fakeStreamer) Subscribe(string) (<-chan live.Message, func()) {
+	return f.ch, func() {}
+}
 
 // fakeSubmitter records the last submission and returns canned results.
 type fakeSubmitter struct {
@@ -226,6 +238,75 @@ func TestUIMountAndRedirect(t *testing.T) {
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Errorf("GET /ui/ status = %d, want 200", rec.Code)
+	}
+}
+
+func TestRunStreamTerminalEndsImmediately(t *testing.T) {
+	t.Parallel()
+	store := run.NewMemStore()
+	if err := store.Save(context.Background(),
+		&run.Run{ID: "run_done", Status: run.StatusSucceeded, CreatedAt: time.Now()}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	streamer := &fakeStreamer{ch: make(chan live.Message, 1)}
+	handler := New(store, &fakeSubmitter{}, zap.NewNop(), WithStreamer(streamer)).Handler()
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/runs/run_done/stream", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "event: end") {
+		t.Errorf("body %q does not end the stream", rec.Body.String())
+	}
+}
+
+func TestRunStreamRelaysMessages(t *testing.T) {
+	t.Parallel()
+	store := run.NewMemStore()
+	if err := store.Save(context.Background(),
+		&run.Run{ID: "run_live", Status: run.StatusRunning, CreatedAt: time.Now()}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	ch := make(chan live.Message, 2)
+	ch <- live.Message{Type: "event", Data: []byte(`{"type":"play_start"}`)}
+	ch <- live.Message{Type: "end"}
+	handler := New(store, &fakeSubmitter{}, zap.NewNop(), WithStreamer(&fakeStreamer{ch: ch})).Handler()
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/runs/run_live/stream", nil))
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "event: event") || !strings.Contains(body, "play_start") {
+		t.Errorf("body %q missing the relayed event", body)
+	}
+	if !strings.Contains(body, "event: end") {
+		t.Errorf("body %q missing the end", body)
+	}
+}
+
+func TestRunStreamNotFoundAndDisabled(t *testing.T) {
+	t.Parallel()
+	store := run.NewMemStore()
+	if err := store.Save(context.Background(),
+		&run.Run{ID: "run_live", Status: run.StatusRunning, CreatedAt: time.Now()}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	withStream := New(store, &fakeSubmitter{}, zap.NewNop(),
+		WithStreamer(&fakeStreamer{ch: make(chan live.Message)})).Handler()
+	rec := httptest.NewRecorder()
+	withStream.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/runs/missing/stream", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("unknown run status = %d, want 404", rec.Code)
+	}
+
+	noStream := New(store, &fakeSubmitter{}, zap.NewNop()).Handler()
+	rec = httptest.NewRecorder()
+	noStream.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/runs/run_live/stream", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("disabled streamer status = %d, want 404", rec.Code)
 	}
 }
 

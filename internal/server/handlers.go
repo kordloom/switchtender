@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"go.uber.org/zap"
@@ -149,4 +150,70 @@ func runEventsHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
 		respondJSON(w, log, http.StatusOK,
 			eventsResponse{Events: events, Count: len(events)}, wantsPretty(r))
 	}
+}
+
+// runStreamHandler streams a run's live events and log over Server Sent Events. The stream ends when
+// the run finishes or, for a run already terminal in the store, immediately.
+func runStreamHandler(streamer Streamer, store run.Store, log *zap.Logger) http.HandlerFunc {
+	if store == nil {
+		panic("server: runStreamHandler: Store required")
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		if streamer == nil {
+			respondError(w, log, http.StatusNotFound, "streaming not enabled")
+			return
+		}
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			respondError(w, log, http.StatusInternalServerError, "streaming unsupported")
+			return
+		}
+
+		id := r.PathValue("id")
+		if _, err := store.Get(r.Context(), id); errors.Is(err, run.ErrNotFound) {
+			respondError(w, log, http.StatusNotFound, "run not found")
+			return
+		}
+
+		ch, cancel := streamer.Subscribe(id)
+		defer cancel()
+
+		header := w.Header()
+		header.Set("Content-Type", "text/event-stream")
+		header.Set("Cache-Control", "no-cache")
+		header.Set("Connection", "keep-alive")
+		w.WriteHeader(http.StatusOK)
+		flusher.Flush()
+
+		// Re-read after subscribing so a run that finished around now still ends the stream.
+		if rn, err := store.Get(r.Context(), id); err == nil && rn.Status.Terminal() {
+			writeSSE(w, "end", nil)
+			flusher.Flush()
+			return
+		}
+
+		for {
+			select {
+			case <-r.Context().Done():
+				return
+			case msg, ok := <-ch:
+				if !ok {
+					return
+				}
+				writeSSE(w, msg.Type, msg.Data)
+				flusher.Flush()
+				if msg.Type == "end" {
+					return
+				}
+			}
+		}
+	}
+}
+
+// writeSSE writes one Server Sent Event with the given event name and JSON data.
+func writeSSE(w http.ResponseWriter, name string, data []byte) {
+	if len(data) == 0 {
+		data = []byte("null")
+	}
+	fmt.Fprintf(w, "event: %s\ndata: %s\n\n", name, data)
 }
