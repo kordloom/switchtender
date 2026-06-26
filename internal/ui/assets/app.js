@@ -100,27 +100,78 @@ function badge(status) {
 	return span;
 }
 
-// loadDetail loads one run and renders its header, matrix, and timeline.
+// detailState holds the current run and its accumulated events for incremental rendering.
+let detailState = null;
+
+// loadDetail loads one run, renders it, and opens a live stream when the run is still active.
 async function loadDetail(runId) {
+	document.getElementById("full-log").href = "/runs/" + runId + "/logs";
 	try {
 		const [run, ev] = await Promise.all([
 			getJSON("/runs/" + runId),
 			getJSON("/runs/" + runId + "/events"),
 		]);
-		renderHeader(run);
-		const model = buildModel(ev.events || []);
-		renderMatrix(model);
-		renderTimeline(model);
-		document.getElementById("full-log").href = "/runs/" + runId + "/logs";
+		detailState = { runId, run, events: ev.events || [] };
+		renderDetail();
 		setStatus("");
+		if (!isTerminal(run.status)) {
+			openStream(runId);
+		}
 	} catch (e) {
 		setStatus("Failed to load run: " + e.message);
 	}
 }
 
+// isTerminal reports whether a run status is final.
+function isTerminal(status) {
+	return status === "succeeded" || status === "failed" || status === "canceled";
+}
+
+// renderDetail redraws the header, matrix, and timeline from the current state.
+function renderDetail() {
+	renderHeader(detailState.run);
+	const model = buildModel(detailState.events);
+	renderMatrix(model);
+	renderTimeline(model);
+}
+
+// openStream subscribes to the run's live output and applies events, logs, and the end signal.
+function openStream(runId) {
+	const indicator = document.getElementById("live-indicator");
+	if (indicator) indicator.hidden = false;
+
+	const source = new EventSource("/runs/" + runId + "/stream");
+	source.addEventListener("event", (e) => {
+		try {
+			detailState.events.push(JSON.parse(e.data));
+			renderDetail();
+		} catch (_) { /* ignore a malformed event */ }
+	});
+	source.addEventListener("log", (e) => {
+		try { appendLog(JSON.parse(e.data)); } catch (_) { /* ignore a malformed chunk */ }
+	});
+	source.addEventListener("end", async () => {
+		source.close();
+		if (indicator) indicator.hidden = true;
+		try {
+			detailState.run = await getJSON("/runs/" + runId);
+			renderHeader(detailState.run);
+		} catch (_) { /* keep the last header on refresh failure */ }
+	});
+}
+
+// appendLog adds a chunk to the live log pane and keeps it scrolled to the end.
+function appendLog(chunk) {
+	const pre = document.getElementById("log");
+	pre.textContent += chunk;
+	document.getElementById("log-panel").hidden = false;
+	pre.scrollTop = pre.scrollHeight;
+}
+
 // renderHeader fills the run header fields.
 function renderHeader(run) {
 	const el = document.getElementById("run-header");
+	el.innerHTML = "";
 	el.appendChild(field("Status", null, badge(run.status)));
 	el.appendChild(field("Run", run.id));
 	el.appendChild(field("Playbook", run.playbook || ""));
@@ -191,8 +242,9 @@ function addTask(tasks, seen, task) {
 // renderMatrix draws the host by task outcome grid.
 function renderMatrix(model) {
 	const { tasks, hosts, cells } = model;
-	if (hosts.length === 0 || tasks.length === 0) return;
 	const table = document.getElementById("matrix");
+	table.innerHTML = "";
+	if (hosts.length === 0 || tasks.length === 0) return;
 
 	const thead = document.createElement("thead");
 	const htr = document.createElement("tr");
@@ -235,13 +287,14 @@ function renderMatrix(model) {
 // renderTimeline draws a bar per task scaled to the run span.
 function renderTimeline(model) {
 	const { tasks, taskStart, cells, hosts, end } = model;
+	const container = document.getElementById("timeline");
+	container.innerHTML = "";
 	const ordered = tasks.filter(t => taskStart[t] !== undefined).sort((a, b) => taskStart[a] - taskStart[b]);
 	if (ordered.length === 0) return;
 
 	const t0 = taskStart[ordered[0]];
 	const tEnd = end || taskStart[ordered[ordered.length - 1]];
 	const span = Math.max(tEnd - t0, 1);
-	const container = document.getElementById("timeline");
 
 	for (let i = 0; i < ordered.length; i++) {
 		const task = ordered[i];
