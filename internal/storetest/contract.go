@@ -5,6 +5,7 @@ package storetest
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -25,6 +26,7 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Run("list newest first", func(t *testing.T) { testList(t, newStore()) })
 	t.Run("log append and read", func(t *testing.T) { testLog(t, newStore()) })
 	t.Run("events append and read", func(t *testing.T) { testEvents(t, newStore()) })
+	t.Run("shards excluded from list", func(t *testing.T) { testShards(t, newStore()) })
 }
 
 // sampleRun returns a fully populated terminal run with deterministic times.
@@ -204,5 +206,56 @@ func testEvents(t *testing.T, store run.Store) {
 	}
 	if again[0].Play != "demo" {
 		t.Error("mutating the returned events changed stored state")
+	}
+}
+
+// testShards verifies that shard runs are excluded from List and returned by Shards in order.
+func testShards(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	parentID := "run_parent"
+	if err := store.Save(ctx,
+		&run.Run{ID: parentID, Status: run.StatusRunning, CreatedAt: time.Now()}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	for i := 0; i < 2; i++ {
+		idx, count := i, 2
+		child := &run.Run{
+			ID: fmt.Sprintf("run_child_%d", i), Status: run.StatusSucceeded, CreatedAt: time.Now(),
+			ParentID: &parentID, ShardIndex: &idx, ShardCount: &count, Limit: "host" + fmt.Sprint(i),
+		}
+		if err := store.Save(ctx, child); err != nil {
+			t.Fatalf("Save() error = %v", err)
+		}
+	}
+
+	top, err := store.List(ctx)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	parentSeen := false
+	for _, r := range top {
+		if r.ParentID != nil {
+			t.Errorf("List returned shard run %s", r.ID)
+		}
+		if r.ID == parentID {
+			parentSeen = true
+		}
+	}
+	if !parentSeen {
+		t.Error("List did not return the parent run")
+	}
+
+	shards, err := store.Shards(ctx, parentID)
+	if err != nil {
+		t.Fatalf("Shards() error = %v", err)
+	}
+	if len(shards) != 2 {
+		t.Fatalf("Shards len = %d, want 2", len(shards))
+	}
+	if shards[0].ShardIndex == nil || *shards[0].ShardIndex != 0 {
+		t.Errorf("first shard index = %v, want 0", shards[0].ShardIndex)
+	}
+	if shards[0].Limit != "host0" {
+		t.Errorf("shard limit = %q, want host0", shards[0].Limit)
 	}
 }

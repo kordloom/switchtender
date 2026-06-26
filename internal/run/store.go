@@ -15,8 +15,10 @@ type Store interface {
 	Save(ctx context.Context, r *Run) error
 	// Get returns the run with the given id, or ErrNotFound.
 	Get(ctx context.Context, id string) (*Run, error)
-	// List returns all runs ordered by creation time, newest first.
+	// List returns top-level runs, excluding shard runs, ordered by creation time, newest first.
 	List(ctx context.Context) ([]*Run, error)
+	// Shards returns the shard runs of a parent ordered by shard index.
+	Shards(ctx context.Context, parentID string) ([]*Run, error)
 	// AppendLog appends raw output bytes to the run's log. Returns ErrNotFound if the run is absent.
 	AppendLog(ctx context.Context, id string, p []byte) error
 	// Log returns a copy of the run's captured output, or ErrNotFound.
@@ -70,12 +72,15 @@ func (m *memStore) Get(_ context.Context, id string) (*Run, error) {
 	return r.Clone(), nil
 }
 
-// List returns all runs ordered by creation time, newest first.
+// List returns top-level runs, excluding shard runs, ordered by creation time, newest first.
 func (m *memStore) List(_ context.Context) ([]*Run, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	out := make([]*Run, 0, len(m.runs))
 	for _, r := range m.runs {
+		if r.ParentID != nil {
+			continue
+		}
 		out = append(out, r.Clone())
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -85,6 +90,30 @@ func (m *memStore) List(_ context.Context) ([]*Run, error) {
 		return out[i].CreatedAt.After(out[j].CreatedAt)
 	})
 	return out, nil
+}
+
+// Shards returns the shard runs of a parent ordered by shard index.
+func (m *memStore) Shards(_ context.Context, parentID string) ([]*Run, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var out []*Run
+	for _, r := range m.runs {
+		if r.ParentID != nil && *r.ParentID == parentID {
+			out = append(out, r.Clone())
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return shardIndex(out[i]) < shardIndex(out[j])
+	})
+	return out, nil
+}
+
+// shardIndex returns a run's shard index for ordering, or a large value when unset.
+func shardIndex(r *Run) int {
+	if r.ShardIndex == nil {
+		return 1 << 30
+	}
+	return *r.ShardIndex
 }
 
 // AppendLog appends raw output bytes to the run's log. Returns ErrNotFound if the run is absent.

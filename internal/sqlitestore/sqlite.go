@@ -21,17 +21,22 @@ import (
 // schema is the table layout created on open. It is idempotent so open doubles as migration.
 const schema = `
 CREATE TABLE IF NOT EXISTS runs (
-	id         TEXT PRIMARY KEY,
-	playbook   TEXT NOT NULL,
-	inventory  TEXT NOT NULL,
-	status     TEXT NOT NULL,
-	exit_code  INTEGER,
-	error      TEXT NOT NULL DEFAULT '',
-	created_at TEXT NOT NULL,
-	started_at TEXT,
-	ended_at   TEXT
+	id            TEXT PRIMARY KEY,
+	playbook      TEXT NOT NULL,
+	inventory     TEXT NOT NULL,
+	status        TEXT NOT NULL,
+	exit_code     INTEGER,
+	error         TEXT NOT NULL DEFAULT '',
+	created_at    TEXT NOT NULL,
+	started_at    TEXT,
+	ended_at      TEXT,
+	parent_id     TEXT,
+	shard_index   INTEGER,
+	shard_count   INTEGER,
+	limit_pattern TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_runs_created_at ON runs(created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_runs_parent ON runs(parent_id, shard_index);
 CREATE TABLE IF NOT EXISTS run_logs (
 	seq    INTEGER PRIMARY KEY AUTOINCREMENT,
 	run_id TEXT NOT NULL,
@@ -87,18 +92,27 @@ func (s *store) Close() error {
 	return s.db.Close()
 }
 
+// runColumns is the shared select list so every read scans the same columns in the same order.
+const runColumns = `id, playbook, inventory, status, exit_code, error, created_at, started_at,
+	ended_at, parent_id, shard_index, shard_count, limit_pattern`
+
 // Save inserts or replaces the run identified by r.ID.
 func (s *store) Save(ctx context.Context, r *run.Run) error {
 	const q = `
-INSERT INTO runs (id, playbook, inventory, status, exit_code, error, created_at, started_at, ended_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO runs
+	(id, playbook, inventory, status, exit_code, error, created_at, started_at, ended_at,
+	 parent_id, shard_index, shard_count, limit_pattern)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
 	playbook=excluded.playbook, inventory=excluded.inventory, status=excluded.status,
 	exit_code=excluded.exit_code, error=excluded.error, created_at=excluded.created_at,
-	started_at=excluded.started_at, ended_at=excluded.ended_at`
+	started_at=excluded.started_at, ended_at=excluded.ended_at,
+	parent_id=excluded.parent_id, shard_index=excluded.shard_index,
+	shard_count=excluded.shard_count, limit_pattern=excluded.limit_pattern`
 	_, err := s.db.ExecContext(ctx, q,
 		r.ID, r.Playbook, r.Inventory, string(r.Status), nullInt(r.ExitCode), r.Error,
 		formatTime(r.CreatedAt), nullTime(r.StartedAt), nullTime(r.EndedAt),
+		nullString(r.ParentID), nullInt(r.ShardIndex), nullInt(r.ShardCount), r.Limit,
 	)
 	if err != nil {
 		return fmt.Errorf("save run: %w", err)
@@ -108,9 +122,7 @@ ON CONFLICT(id) DO UPDATE SET
 
 // Get returns the run with the given id, or run.ErrNotFound.
 func (s *store) Get(ctx context.Context, id string) (*run.Run, error) {
-	const q = `
-SELECT id, playbook, inventory, status, exit_code, error, created_at, started_at, ended_at
-FROM runs WHERE id=?`
+	const q = "SELECT " + runColumns + " FROM runs WHERE id=?"
 	r, err := scanRun(s.db.QueryRowContext(ctx, q, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, run.ErrNotFound
@@ -121,14 +133,24 @@ FROM runs WHERE id=?`
 	return r, nil
 }
 
-// List returns all runs ordered by creation time, newest first.
+// List returns top-level runs, excluding shard runs, ordered by creation time, newest first.
 func (s *store) List(ctx context.Context) ([]*run.Run, error) {
-	const q = `
-SELECT id, playbook, inventory, status, exit_code, error, created_at, started_at, ended_at
-FROM runs ORDER BY created_at DESC, id DESC`
-	rows, err := s.db.QueryContext(ctx, q)
+	const q = "SELECT " + runColumns +
+		" FROM runs WHERE parent_id IS NULL ORDER BY created_at DESC, id DESC"
+	return s.queryRuns(ctx, "list runs", q)
+}
+
+// Shards returns the shard runs of a parent ordered by shard index.
+func (s *store) Shards(ctx context.Context, parentID string) ([]*run.Run, error) {
+	const q = "SELECT " + runColumns + " FROM runs WHERE parent_id=? ORDER BY shard_index"
+	return s.queryRuns(ctx, "list shards", q, parentID)
+}
+
+// queryRuns runs a select that returns run rows and scans them all.
+func (s *store) queryRuns(ctx context.Context, label, query string, args ...any) ([]*run.Run, error) {
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("list runs: %w", err)
+		return nil, fmt.Errorf("%s: %w", label, err)
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -136,12 +158,12 @@ FROM runs ORDER BY created_at DESC, id DESC`
 	for rows.Next() {
 		r, err := scanRun(rows)
 		if err != nil {
-			return nil, fmt.Errorf("list runs: %w", err)
+			return nil, fmt.Errorf("%s: %w", label, err)
 		}
 		out = append(out, r)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list runs: %w", err)
+		return nil, fmt.Errorf("%s: %w", label, err)
 	}
 	return out, nil
 }
@@ -276,15 +298,18 @@ func (s *store) exists(ctx context.Context, id string) (bool, error) {
 // scanRun reads one run row from a scanner.
 func scanRun(s scanner) (*run.Run, error) {
 	var (
-		r       run.Run
-		status  string
-		exit    sql.NullInt64
-		created string
-		started sql.NullString
-		ended   sql.NullString
+		r        run.Run
+		status   string
+		exit     sql.NullInt64
+		created  string
+		started  sql.NullString
+		ended    sql.NullString
+		parent   sql.NullString
+		shardIdx sql.NullInt64
+		shardCnt sql.NullInt64
 	)
 	if err := s.Scan(&r.ID, &r.Playbook, &r.Inventory, &status, &exit, &r.Error,
-		&created, &started, &ended); err != nil {
+		&created, &started, &ended, &parent, &shardIdx, &shardCnt, &r.Limit); err != nil {
 		return nil, err
 	}
 	r.Status = run.Status(status)
@@ -303,6 +328,18 @@ func scanRun(s scanner) (*run.Run, error) {
 	if r.EndedAt, err = parseNullTime(ended); err != nil {
 		return nil, err
 	}
+	if parent.Valid {
+		p := parent.String
+		r.ParentID = &p
+	}
+	if shardIdx.Valid {
+		i := int(shardIdx.Int64)
+		r.ShardIndex = &i
+	}
+	if shardCnt.Valid {
+		c := int(shardCnt.Int64)
+		r.ShardCount = &c
+	}
 	return &r, nil
 }
 
@@ -318,6 +355,14 @@ func parseTime(s string) (time.Time, error) {
 
 // nullInt maps an optional int to a database value.
 func nullInt(v *int) any {
+	if v == nil {
+		return nil
+	}
+	return *v
+}
+
+// nullString maps an optional string to a database value.
+func nullString(v *string) any {
 	if v == nil {
 		return nil
 	}

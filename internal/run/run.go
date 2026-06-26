@@ -54,6 +54,14 @@ type Run struct {
 	StartedAt *time.Time `json:"started_at,omitempty"`
 	// EndedAt is when execution finished.
 	EndedAt *time.Time `json:"ended_at,omitempty"`
+	// ParentID links a shard run to its parent split run.
+	ParentID *string `json:"parent_id,omitempty"`
+	// ShardIndex is this shard's position within the split, zero based.
+	ShardIndex *int `json:"shard_index,omitempty"`
+	// ShardCount is the total number of shards in the split.
+	ShardCount *int `json:"shard_count,omitempty"`
+	// Limit restricts execution to a host pattern, used to target a shard's hosts.
+	Limit string `json:"limit,omitempty"`
 }
 
 // Clone returns a deep copy so callers cannot mutate stored state through shared pointers.
@@ -73,6 +81,18 @@ func (r *Run) Clone() *Run {
 	if r.EndedAt != nil {
 		t := *r.EndedAt
 		out.EndedAt = &t
+	}
+	if r.ParentID != nil {
+		id := *r.ParentID
+		out.ParentID = &id
+	}
+	if r.ShardIndex != nil {
+		i := *r.ShardIndex
+		out.ShardIndex = &i
+	}
+	if r.ShardCount != nil {
+		c := *r.ShardCount
+		out.ShardCount = &c
 	}
 	return &out
 }
