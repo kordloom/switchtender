@@ -3,6 +3,8 @@
 package dispatch
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"os"
 	"sync"
@@ -17,6 +19,32 @@ import (
 
 // DefaultWorkers is the number of concurrent runs when none is configured.
 const DefaultWorkers = 4
+
+// tailPollInterval is how often the event tailer checks the sidecar file for new lines.
+const tailPollInterval = 75 * time.Millisecond
+
+// Publisher receives live run output for streaming to clients. All methods must be safe for
+// concurrent use and must not block.
+type Publisher interface {
+	// PublishEvents delivers newly parsed events for a run.
+	PublishEvents(id string, events []event.Event)
+	// PublishLog delivers a newly written log chunk for a run.
+	PublishLog(id string, chunk []byte)
+	// CloseRun signals that a run has finished producing output.
+	CloseRun(id string)
+}
+
+// noopPublisher discards all output. It is the default when no Publisher is configured.
+type noopPublisher struct{}
+
+// PublishEvents discards events.
+func (noopPublisher) PublishEvents(string, []event.Event) {}
+
+// PublishLog discards a log chunk.
+func (noopPublisher) PublishLog(string, []byte) {}
+
+// CloseRun does nothing.
+func (noopPublisher) CloseRun(string) {}
 
 // Dispatcher accepts run requests and executes them across a bounded worker pool.
 type Dispatcher struct {
@@ -34,6 +62,8 @@ type Dispatcher struct {
 	ctx context.Context
 	// cancel cancels ctx.
 	cancel context.CancelFunc
+	// publisher receives live output for streaming.
+	publisher Publisher
 }
 
 // Option configures a Dispatcher.
@@ -43,11 +73,18 @@ type Option func(*config)
 type config struct {
 	// workers is the worker pool size.
 	workers int
+	// publisher receives live output for streaming.
+	publisher Publisher
 }
 
 // WithWorkers sets the worker pool size. Values below one fall back to DefaultWorkers.
 func WithWorkers(n int) Option {
 	return func(c *config) { c.workers = n }
+}
+
+// WithPublisher sets the Publisher that receives live events and log chunks.
+func WithPublisher(p Publisher) Option {
+	return func(c *config) { c.publisher = p }
 }
 
 // New returns a Dispatcher. It panics if store or runner is nil; a nil logger becomes a no-op.
@@ -69,15 +106,19 @@ func New(store run.Store, runner roundhouse.Runner, log *zap.Logger, opts ...Opt
 	if cfg.workers < 1 {
 		cfg.workers = DefaultWorkers
 	}
+	if cfg.publisher == nil {
+		cfg.publisher = noopPublisher{}
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Dispatcher{
-		store:  store,
-		runner: runner,
-		log:    log,
-		sem:    make(chan struct{}, cfg.workers),
-		ctx:    ctx,
-		cancel: cancel,
+		store:     store,
+		runner:    runner,
+		log:       log,
+		sem:       make(chan struct{}, cfg.workers),
+		ctx:       ctx,
+		cancel:    cancel,
+		publisher: cfg.publisher,
 	}
 }
 
@@ -136,11 +177,19 @@ func (d *Dispatcher) execute(r *run.Run) {
 	eventsPath, cleanup := d.eventsFile(r.ID)
 	defer cleanup()
 
-	sink := &logSink{store: d.store, id: r.ID, log: d.log}
+	stop := make(chan struct{})
+	tailed := make(chan struct{})
+	go func() {
+		defer close(tailed)
+		d.tailEvents(r.ID, eventsPath, stop)
+	}()
+
+	sink := &logSink{store: d.store, id: r.ID, log: d.log, publisher: d.publisher}
 	spec := roundhouse.Spec{Playbook: r.Playbook, Inventory: r.Inventory, EventsPath: eventsPath}
 	res, err := d.runner.Run(d.ctx, spec, sink)
 
-	d.storeEvents(r.ID, eventsPath)
+	close(stop)
+	<-tailed
 
 	switch {
 	case err != nil && d.ctx.Err() != nil:
@@ -152,6 +201,8 @@ func (d *Dispatcher) execute(r *run.Run) {
 	default:
 		d.finalize(r, run.StatusFailed, &res.ExitCode, "")
 	}
+
+	d.publisher.CloseRun(r.ID)
 }
 
 // finalize records the terminal status, exit code, failure detail, and end time of r.
@@ -184,21 +235,61 @@ func (d *Dispatcher) eventsFile(id string) (string, func()) {
 	return path, func() { _ = os.Remove(path) }
 }
 
-// storeEvents parses the run's event file and appends the parsed events to the store.
-func (d *Dispatcher) storeEvents(id, path string) {
+// tailEvents follows the run's event sidecar file, parsing, storing, and publishing each complete
+// line as it appears, until stop is closed and a final drain has run.
+func (d *Dispatcher) tailEvents(id, path string, stop <-chan struct{}) {
 	if path == "" {
+		<-stop
 		return
 	}
 	f, err := os.Open(path)
 	if err != nil {
 		d.log.Error("dispatch: open events file: "+err.Error(), zap.String("run_id", id))
+		<-stop
 		return
 	}
 	defer func() { _ = f.Close() }()
 
-	events, err := event.Parse(f)
+	reader := bufio.NewReader(f)
+	var partial []byte
+	drain := func() {
+		for {
+			chunk, err := reader.ReadBytes('\n')
+			if len(chunk) > 0 {
+				partial = append(partial, chunk...)
+				if partial[len(partial)-1] == '\n' {
+					d.handleEventLine(id, partial)
+					partial = partial[:0]
+				}
+			}
+			if err != nil {
+				return
+			}
+		}
+	}
+
+	ticker := time.NewTicker(tailPollInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-stop:
+			drain()
+			return
+		case <-ticker.C:
+			drain()
+		}
+	}
+}
+
+// handleEventLine parses a single event line, stores it, and publishes it.
+func (d *Dispatcher) handleEventLine(id string, raw []byte) {
+	line := bytes.TrimSpace(raw)
+	if len(line) == 0 {
+		return
+	}
+	events, err := event.Parse(bytes.NewReader(line))
 	if err != nil {
-		d.log.Error("dispatch: parse events: "+err.Error(), zap.String("run_id", id))
+		d.log.Error("dispatch: parse event line: "+err.Error(), zap.String("run_id", id))
 		return
 	}
 	if len(events) == 0 {
@@ -207,4 +298,5 @@ func (d *Dispatcher) storeEvents(id, path string) {
 	if err := d.store.AppendEvents(context.Background(), id, events); err != nil {
 		d.log.Error("dispatch: append events: "+err.Error(), zap.String("run_id", id))
 	}
+	d.publisher.PublishEvents(id, events)
 }
