@@ -174,6 +174,126 @@ func TestDispatcherCloseCancelsRun(t *testing.T) {
 	}
 }
 
+// fakeRunnerLister is a Runner that also lists a fixed set of hosts for split tests.
+type fakeRunnerLister struct {
+	// hosts is returned by Hosts.
+	hosts []string
+}
+
+// Run reports success without doing anything.
+func (f *fakeRunnerLister) Run(context.Context, roundhouse.Spec, io.Writer) (roundhouse.Result, error) {
+	return roundhouse.Result{ExitCode: 0}, nil
+}
+
+// Hosts returns the fixed host set.
+func (f *fakeRunnerLister) Hosts(context.Context, string) ([]string, error) {
+	return f.hosts, nil
+}
+
+func TestPartition(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Hosts      []string
+		Shards     int
+		WantGroups int
+	}{
+		{Hosts: []string{"a", "b", "c", "d"}, Shards: 2, WantGroups: 2}, // Test 0: Even split.
+		{Hosts: []string{"a", "b", "c"}, Shards: 2, WantGroups: 2},      // Test 1: Uneven split.
+		{Hosts: []string{"a"}, Shards: 4, WantGroups: 1},                // Test 2: Fewer hosts than shards.
+		{Hosts: []string{"a", "b", "c", "d"}, Shards: 3, WantGroups: 3}, // Test 3: Three groups.
+	}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			groups := partition(test.Hosts, test.Shards)
+			if len(groups) != test.WantGroups {
+				t.Errorf("groups = %d, want %d", len(groups), test.WantGroups)
+			}
+			total := 0
+			for _, g := range groups {
+				total += len(g)
+			}
+			if total != len(test.Hosts) {
+				t.Errorf("placed %d hosts, want %d", total, len(test.Hosts))
+			}
+		})
+	}
+}
+
+func TestDispatcherSubmitSplit(t *testing.T) {
+	t.Parallel()
+	store := run.NewMemStore()
+	d := New(store, &fakeRunnerLister{hosts: []string{"a", "b", "c", "d"}}, nil)
+	defer d.Close()
+
+	parent, err := d.SubmitSplit(context.Background(), "play.yml", "inv", 2)
+	if err != nil {
+		t.Fatalf("SubmitSplit() error = %v", err)
+	}
+	if parent.ShardCount == nil || *parent.ShardCount != 2 {
+		t.Fatalf("parent ShardCount = %v, want 2", parent.ShardCount)
+	}
+
+	got := waitTerminal(t, store, parent.ID)
+	if got.Status != run.StatusSucceeded {
+		t.Errorf("parent status = %q, want succeeded", got.Status)
+	}
+
+	shards, err := store.Shards(context.Background(), parent.ID)
+	if err != nil {
+		t.Fatalf("Shards() error = %v", err)
+	}
+	if len(shards) != 2 {
+		t.Fatalf("shards = %d, want 2", len(shards))
+	}
+	for _, s := range shards {
+		if strings.Count(s.Limit, ",") != 1 {
+			t.Errorf("shard limit %q should target two hosts", s.Limit)
+		}
+		if s.Status != run.StatusSucceeded {
+			t.Errorf("shard status = %q, want succeeded", s.Status)
+		}
+	}
+
+	top, err := store.List(context.Background())
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	for _, r := range top {
+		if r.ParentID != nil {
+			t.Errorf("List returned shard %s", r.ID)
+		}
+	}
+}
+
+func TestDispatcherSplitFallsBackAndErrors(t *testing.T) {
+	t.Parallel()
+
+	// A runner that cannot list hosts rejects a split.
+	plain := roundhouse.RunnerFunc(
+		func(context.Context, roundhouse.Spec, io.Writer) (roundhouse.Result, error) {
+			return roundhouse.Result{}, nil
+		},
+	)
+	d := New(run.NewMemStore(), plain, nil)
+	defer d.Close()
+	if _, err := d.SubmitSplit(context.Background(), "play.yml", "inv", 2); !errors.Is(err, ErrNoHostLister) {
+		t.Errorf("SubmitSplit() error = %v, want ErrNoHostLister", err)
+	}
+
+	// One shard falls back to a single non-shard run.
+	store := run.NewMemStore()
+	d2 := New(store, &fakeRunnerLister{hosts: []string{"a", "b"}}, nil)
+	defer d2.Close()
+	single, err := d2.SubmitSplit(context.Background(), "play.yml", "inv", 1)
+	if err != nil {
+		t.Fatalf("SubmitSplit() error = %v", err)
+	}
+	if single.ShardCount != nil || single.ParentID != nil {
+		t.Errorf("single run should not be a split: %+v", single)
+	}
+}
+
 func TestNewPanicsOnNilDeps(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

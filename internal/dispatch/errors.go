@@ -2,5 +2,9 @@ package dispatch
 
 import "errors"
 
-// ErrNoPlaybook is returned when a run is submitted without a playbook path.
-var ErrNoPlaybook = errors.New("no playbook")
+var (
+	// ErrNoPlaybook is returned when a run is submitted without a playbook path.
+	ErrNoPlaybook = errors.New("no playbook")
+	// ErrNoHostLister is returned when a split is requested but the runner cannot list hosts.
+	ErrNoHostLister = errors.New("host listing unavailable")
+)

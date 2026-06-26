@@ -6,7 +6,9 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -64,6 +66,8 @@ type Dispatcher struct {
 	cancel context.CancelFunc
 	// publisher receives live output for streaming.
 	publisher Publisher
+	// hostLister enumerates inventory hosts for split runs, nil when the runner cannot list hosts.
+	hostLister roundhouse.HostLister
 }
 
 // Option configures a Dispatcher.
@@ -110,15 +114,17 @@ func New(store run.Store, runner roundhouse.Runner, log *zap.Logger, opts ...Opt
 		cfg.publisher = noopPublisher{}
 	}
 
+	lister, _ := runner.(roundhouse.HostLister)
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Dispatcher{
-		store:     store,
-		runner:    runner,
-		log:       log,
-		sem:       make(chan struct{}, cfg.workers),
-		ctx:       ctx,
-		cancel:    cancel,
-		publisher: cfg.publisher,
+		store:      store,
+		runner:     runner,
+		log:        log,
+		sem:        make(chan struct{}, cfg.workers),
+		ctx:        ctx,
+		cancel:     cancel,
+		publisher:  cfg.publisher,
+		hostLister: lister,
 	}
 }
 
@@ -144,6 +150,116 @@ func (d *Dispatcher) Submit(ctx context.Context, playbook, inventory string) (*r
 	go d.work(r.Clone())
 
 	return r, nil
+}
+
+// SubmitSplit shards a run across the inventory and returns the parent run in pending state. Each
+// shard runs the same playbook limited to its slice of hosts, and the parent rolls up their result.
+// When shards is below two or the inventory has fewer than two hosts, it falls back to a single run.
+func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string, shards int) (*run.Run, error) {
+	if playbook == "" {
+		return nil, ErrNoPlaybook
+	}
+	if shards < 2 {
+		return d.Submit(ctx, playbook, inventory)
+	}
+	if d.hostLister == nil {
+		return nil, ErrNoHostLister
+	}
+
+	hosts, err := d.hostLister.Hosts(ctx, inventory)
+	if err != nil {
+		return nil, fmt.Errorf("list hosts: %w", err)
+	}
+	if len(hosts) < 2 {
+		return d.Submit(ctx, playbook, inventory)
+	}
+
+	groups := partition(hosts, shards)
+	count := len(groups)
+	parent := &run.Run{
+		ID: run.NewID(), Playbook: playbook, Inventory: inventory,
+		Status: run.StatusPending, CreatedAt: time.Now(), ShardCount: &count,
+	}
+	if err := d.store.Save(ctx, parent); err != nil {
+		return nil, err
+	}
+
+	parentID := parent.ID
+	children := make([]*run.Run, 0, count)
+	for i, group := range groups {
+		idx, shardCount := i, count
+		child := &run.Run{
+			ID: run.NewID(), Playbook: playbook, Inventory: inventory,
+			Status: run.StatusPending, CreatedAt: time.Now(),
+			ParentID: &parentID, ShardIndex: &idx, ShardCount: &shardCount,
+			Limit: strings.Join(group, ","),
+		}
+		if err := d.store.Save(ctx, child); err != nil {
+			return nil, err
+		}
+		children = append(children, child)
+	}
+
+	d.wg.Add(1)
+	go d.coordinate(parent.Clone(), children)
+
+	return parent, nil
+}
+
+// coordinate runs each shard through the worker pool and finalizes the parent from their results.
+func (d *Dispatcher) coordinate(parent *run.Run, children []*run.Run) {
+	defer d.wg.Done()
+
+	started := time.Now()
+	parent.Status = run.StatusRunning
+	parent.StartedAt = &started
+	d.save(parent)
+
+	statuses := make([]run.Status, len(children))
+	var shards sync.WaitGroup
+	for i := range children {
+		shards.Add(1)
+		go func(i int, child *run.Run) {
+			defer shards.Done()
+			select {
+			case d.sem <- struct{}{}:
+			case <-d.ctx.Done():
+				d.finalize(child, run.StatusCanceled, nil, "")
+				statuses[i] = run.StatusCanceled
+				return
+			}
+			defer func() { <-d.sem }()
+
+			d.execute(child)
+			if latest, err := d.store.Get(context.Background(), child.ID); err == nil {
+				statuses[i] = latest.Status
+			}
+		}(i, children[i].Clone())
+	}
+	shards.Wait()
+
+	for _, status := range statuses {
+		if status != run.StatusSucceeded {
+			code := 1
+			d.finalize(parent, run.StatusFailed, &code, "")
+			return
+		}
+	}
+	code := 0
+	d.finalize(parent, run.StatusSucceeded, &code, "")
+}
+
+// partition splits hosts into at most shards groups balanced by host count using round robin.
+func partition(hosts []string, shards int) [][]string {
+	n := shards
+	if n > len(hosts) {
+		n = len(hosts)
+	}
+	groups := make([][]string, n)
+	for i, host := range hosts {
+		groups[i%n] = append(groups[i%n], host)
+	}
+	return groups
 }
 
 // Close stops accepting new work, cancels in-flight runs, and waits for workers to drain.
@@ -185,7 +301,9 @@ func (d *Dispatcher) execute(r *run.Run) {
 	}()
 
 	sink := &logSink{store: d.store, id: r.ID, log: d.log, publisher: d.publisher}
-	spec := roundhouse.Spec{Playbook: r.Playbook, Inventory: r.Inventory, EventsPath: eventsPath}
+	spec := roundhouse.Spec{
+		Playbook: r.Playbook, Inventory: r.Inventory, EventsPath: eventsPath, Limit: r.Limit,
+	}
 	res, err := d.runner.Run(d.ctx, spec, sink)
 
 	close(stop)
