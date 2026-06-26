@@ -14,6 +14,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/dcadolph/yardmaster/internal/dispatch"
+	"github.com/dcadolph/yardmaster/internal/live"
 	"github.com/dcadolph/yardmaster/internal/logutil"
 	"github.com/dcadolph/yardmaster/internal/roundhouse"
 	"github.com/dcadolph/yardmaster/internal/server"
@@ -66,13 +67,14 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		defer func() { _ = closer.Close() }()
 	}
 
+	hub := live.NewHub()
 	runner := roundhouse.NewAnsibleRunner()
-	disp := dispatch.New(store, runner, log)
+	disp := dispatch.New(store, runner, log, dispatch.WithPublisher(hub))
 	defer disp.Close()
 
 	httpServer := &http.Server{
 		Addr:              serveAddr,
-		Handler:           server.New(store, disp, log).Handler(),
+		Handler:           server.New(store, disp, log, server.WithStreamer(hub)).Handler(),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 
