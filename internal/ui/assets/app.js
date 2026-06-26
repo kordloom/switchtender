@@ -103,23 +103,74 @@ function badge(status) {
 // detailState holds the current run and its accumulated events for incremental rendering.
 let detailState = null;
 
-// loadDetail loads one run, renders it, and opens a live stream when the run is still active.
+// loadDetail loads one run and dispatches to the split or single render path.
 async function loadDetail(runId) {
 	document.getElementById("full-log").href = "/runs/" + runId + "/logs";
 	try {
-		const [run, ev] = await Promise.all([
-			getJSON("/runs/" + runId),
-			getJSON("/runs/" + runId + "/events"),
-		]);
-		detailState = { runId, run, events: ev.events || [] };
-		renderDetail();
-		setStatus("");
-		if (!isTerminal(run.status)) {
-			openStream(runId);
+		const run = await getJSON("/runs/" + runId);
+		if (run.shard_count && !run.parent_id) {
+			await loadParent(runId);
+		} else {
+			await loadSingle(run);
 		}
 	} catch (e) {
 		setStatus("Failed to load run: " + e.message);
 	}
+}
+
+// loadSingle renders a normal run and streams it live while it is active.
+async function loadSingle(run) {
+	const ev = await getJSON("/runs/" + run.id + "/events");
+	detailState = { runId: run.id, run, events: ev.events || [] };
+	renderDetail();
+	setStatus("");
+	if (!isTerminal(run.status)) {
+		openStream(run.id);
+	}
+}
+
+// loadParent renders a split run by merging every shard's events into one matrix, polling while
+// the parent is still active so the merged grid keeps filling in.
+async function loadParent(parentId) {
+	const run = await getJSON("/runs/" + parentId);
+	const shardData = await getJSON("/runs/" + parentId + "/shards");
+	const shards = shardData.shards || [];
+	const perShard = await Promise.all(shards.map((s) =>
+		getJSON("/runs/" + s.id + "/events").then((r) => r.events || []).catch(() => [])));
+
+	detailState = { runId: parentId, run, events: [].concat.apply([], perShard) };
+	renderDetail();
+	renderShards(shards);
+	setStatus("");
+
+	if (!isTerminal(run.status)) {
+		setTimeout(() => { loadParent(parentId).catch(() => {}); }, 1500);
+	}
+}
+
+// renderShards lists the shard runs of a split with status and host count.
+function renderShards(shards) {
+	const panel = document.getElementById("shards-panel");
+	const list = document.getElementById("shards");
+	list.innerHTML = "";
+	if (!shards.length) {
+		panel.hidden = true;
+		return;
+	}
+	for (const s of shards) {
+		const hostCount = s.limit ? s.limit.split(",").length : 0;
+		const idx = (s.shard_index !== undefined && s.shard_index !== null) ? s.shard_index : "?";
+		const row = document.createElement("a");
+		row.className = "shard-row";
+		row.href = "/ui/runs/" + s.id;
+		row.appendChild(badge(s.status));
+		const label = document.createElement("span");
+		label.className = "shard-label";
+		label.textContent = "Shard " + idx + "  ·  " + hostCount + " host" + (hostCount === 1 ? "" : "s");
+		row.appendChild(label);
+		list.appendChild(row);
+	}
+	panel.hidden = false;
 }
 
 // isTerminal reports whether a run status is final.
@@ -176,6 +227,9 @@ function renderHeader(run) {
 	el.appendChild(field("Run", run.id));
 	el.appendChild(field("Playbook", run.playbook || ""));
 	el.appendChild(field("Inventory", run.inventory || ""));
+	if (run.shard_count) {
+		el.appendChild(field("Shards", String(run.shard_count)));
+	}
 	if (run.exit_code !== undefined && run.exit_code !== null) {
 		el.appendChild(field("Exit", String(run.exit_code)));
 	}
