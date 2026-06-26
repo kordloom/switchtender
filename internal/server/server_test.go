@@ -33,16 +33,29 @@ type fakeSubmitter struct {
 	run *run.Run
 	// err is returned instead of run when non-nil.
 	err error
-	// gotPlaybook is the playbook from the most recent Submit call.
+	// gotPlaybook is the playbook from the most recent submit call.
 	gotPlaybook string
-	// gotInventory is the inventory from the most recent Submit call.
+	// gotInventory is the inventory from the most recent submit call.
 	gotInventory string
+	// gotShards is the shard count from the most recent SubmitSplit call.
+	gotShards int
 }
 
 // Submit records the arguments and returns the configured run or error.
 func (f *fakeSubmitter) Submit(_ context.Context, playbook, inventory string) (*run.Run, error) {
 	f.gotPlaybook = playbook
 	f.gotInventory = inventory
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.run, nil
+}
+
+// SubmitSplit records the arguments including shard count and returns the configured run or error.
+func (f *fakeSubmitter) SubmitSplit(_ context.Context, playbook, inventory string, shards int) (*run.Run, error) {
+	f.gotPlaybook = playbook
+	f.gotInventory = inventory
+	f.gotShards = shards
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -112,6 +125,58 @@ func TestCreateRunForwardsArgsAndLocation(t *testing.T) {
 	}
 	if loc := rec.Header().Get("Location"); loc != "/runs/run_42" {
 		t.Errorf("Location = %q, want /runs/run_42", loc)
+	}
+}
+
+func TestCreateRunSplitRoutesToSubmitSplit(t *testing.T) {
+	t.Parallel()
+	sub := &fakeSubmitter{run: &run.Run{ID: "run_p", Status: run.StatusPending}}
+	handler := New(run.NewMemStore(), sub, zap.NewNop()).Handler()
+	req := httptest.NewRequest(http.MethodPost, "/runs",
+		strings.NewReader(`{"playbook":"site.yml","inventory":"hosts","shards":3}`))
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202", rec.Code)
+	}
+	if sub.gotShards != 3 {
+		t.Errorf("SubmitSplit shards = %d, want 3", sub.gotShards)
+	}
+}
+
+func TestRunShards(t *testing.T) {
+	t.Parallel()
+	store := run.NewMemStore()
+	parentID := "run_parent"
+	if err := store.Save(context.Background(),
+		&run.Run{ID: parentID, Status: run.StatusRunning, CreatedAt: time.Now()}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	idx, count := 0, 1
+	if err := store.Save(context.Background(), &run.Run{
+		ID: "run_child", Status: run.StatusSucceeded, CreatedAt: time.Now(),
+		ParentID: &parentID, ShardIndex: &idx, ShardCount: &count,
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	handler := New(store, &fakeSubmitter{}, zap.NewNop()).Handler()
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/runs/"+parentID+"/shards", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "run_child") || !strings.Contains(body, `"count":1`) {
+		t.Errorf("body %q missing shard", body)
+	}
+
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/runs/missing/shards", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("unknown parent status = %d, want 404", rec.Code)
 	}
 }
 

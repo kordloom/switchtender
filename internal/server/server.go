@@ -15,6 +15,7 @@ import (
 // Submitter accepts a run request and returns the created run. The dispatcher satisfies it.
 type Submitter interface {
 	Submit(ctx context.Context, playbook, inventory string) (*run.Run, error)
+	SubmitSplit(ctx context.Context, playbook, inventory string, shards int) (*run.Run, error)
 }
 
 // Streamer subscribes to a run's live output. The live Hub satisfies it.
@@ -69,6 +70,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /runs", createRunHandler(s.submitter, s.log))
 	mux.Handle("GET /runs", listRunsHandler(s.store, s.log))
 	mux.Handle("GET /runs/{id}", getRunHandler(s.store, s.log))
+	mux.Handle("GET /runs/{id}/shards", runShardsHandler(s.store, s.log))
 	mux.Handle("GET /runs/{id}/logs", runLogsHandler(s.store, s.log))
 	mux.Handle("GET /runs/{id}/events", runEventsHandler(s.store, s.log))
 	mux.Handle("GET /runs/{id}/stream", runStreamHandler(s.streamer, s.store, s.log))

@@ -18,6 +18,8 @@ type createRunRequest struct {
 	Playbook string `json:"playbook"`
 	// Inventory is the path to the inventory to target. Optional.
 	Inventory string `json:"inventory"`
+	// Shards, when two or more, splits the run across that many inventory slices.
+	Shards int `json:"shards,omitempty"`
 }
 
 // listRunsResponse wraps a run list. The envelope leaves room for pagination fields later.
@@ -33,6 +35,14 @@ type eventsResponse struct {
 	// Events is the ordered list of events.
 	Events []event.Event `json:"events"`
 	// Count is the number of events returned.
+	Count int `json:"count"`
+}
+
+// shardsResponse wraps a parent run's shard runs.
+type shardsResponse struct {
+	// Shards is the ordered list of shard runs.
+	Shards []*run.Run `json:"shards"`
+	// Count is the number of shards returned.
 	Count int `json:"count"`
 }
 
@@ -59,7 +69,13 @@ func createRunHandler(submitter Submitter, log *zap.Logger) http.HandlerFunc {
 			return
 		}
 
-		created, err := submitter.Submit(r.Context(), req.Playbook, req.Inventory)
+		var created *run.Run
+		var err error
+		if req.Shards >= 2 {
+			created, err = submitter.SubmitSplit(r.Context(), req.Playbook, req.Inventory, req.Shards)
+		} else {
+			created, err = submitter.Submit(r.Context(), req.Playbook, req.Inventory)
+		}
 		if err != nil {
 			log.Error("server: submit run: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not submit run")
@@ -104,6 +120,28 @@ func getRunHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
 			return
 		}
 		respondJSON(w, log, http.StatusOK, got, wantsPretty(r))
+	}
+}
+
+// runShardsHandler returns the shard runs of a parent run.
+func runShardsHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
+	if store == nil {
+		panic("server: runShardsHandler: Store required")
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if _, err := store.Get(r.Context(), id); errors.Is(err, run.ErrNotFound) {
+			respondError(w, log, http.StatusNotFound, "run not found")
+			return
+		}
+		shards, err := store.Shards(r.Context(), id)
+		if err != nil {
+			log.Error("server: list shards: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not list shards")
+			return
+		}
+		respondJSON(w, log, http.StatusOK,
+			shardsResponse{Shards: shards, Count: len(shards)}, wantsPretty(r))
 	}
 }
 
