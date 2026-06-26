@@ -65,9 +65,16 @@ func TestAnsibleRunnerRun(t *testing.T) {
 func TestAnsibleRunnerArgs(t *testing.T) {
 	t.Parallel()
 	a := &ansibleRunner{binary: "ansible-playbook"}
+
 	got := a.args(Spec{Playbook: "site.yml", Inventory: "hosts.ini"})
 	want := []string{"-i", "hosts.ini", "site.yml"}
 	if strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Errorf("args = %v, want %v", got, want)
+	}
+
+	gotLimit := a.args(Spec{Playbook: "site.yml", Inventory: "hosts.ini", Limit: "web01,web02"})
+	wantLimit := []string{"-i", "hosts.ini", "--limit", "web01,web02", "site.yml"}
+	if strings.Join(gotLimit, " ") != strings.Join(wantLimit, " ") {
+		t.Errorf("args with limit = %v, want %v", gotLimit, wantLimit)
 	}
 }

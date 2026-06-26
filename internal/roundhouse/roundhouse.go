@@ -27,6 +27,8 @@ type Spec struct {
 	Dir string
 	// EventsPath, when set, enables the structured event callback and names the file it writes.
 	EventsPath string
+	// Limit restricts execution to a host pattern, passed as ansible-playbook --limit.
+	Limit string
 }
 
 // Result is the outcome of a completed execution.
@@ -150,9 +152,12 @@ func (a *ansibleRunner) ensurePlugin() (string, error) {
 
 // args builds the ansible-playbook argument list for spec.
 func (a *ansibleRunner) args(spec Spec) []string {
-	args := make([]string, 0, 4+2*len(spec.ExtraVars))
+	args := make([]string, 0, 6+2*len(spec.ExtraVars))
 	if spec.Inventory != "" {
 		args = append(args, "-i", spec.Inventory)
+	}
+	if spec.Limit != "" {
+		args = append(args, "--limit", spec.Limit)
 	}
 	for k, v := range spec.ExtraVars {
 		args = append(args, "--extra-vars", k+"="+v)
