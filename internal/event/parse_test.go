@@ -43,6 +43,31 @@ func TestParseFixture(t *testing.T) {
 	}
 }
 
+func TestParseResultFields(t *testing.T) {
+	t.Parallel()
+	line := `{"type":"runner_failed","ts":1719000002,"play":"p","task":"t","host":"db01",` +
+		`"message":"boom","stdout":"out","stderr":"err","rc":2,"diff":"-a\n+b","truncated":true}`
+
+	got, err := Parse(strings.NewReader(line))
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len = %d, want 1", len(got))
+	}
+
+	e := got[0]
+	if e.Message != "boom" || e.Stdout != "out" || e.Stderr != "err" {
+		t.Errorf("message/stdout/stderr = %q/%q/%q", e.Message, e.Stdout, e.Stderr)
+	}
+	if e.Diff != "-a\n+b" || !e.Truncated {
+		t.Errorf("diff = %q truncated = %v", e.Diff, e.Truncated)
+	}
+	if e.RC == nil || *e.RC != 2 {
+		t.Errorf("rc = %v, want 2", e.RC)
+	}
+}
+
 func TestParse(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

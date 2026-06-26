@@ -22,6 +22,9 @@ class CallbackModule(CallbackBase):
     CALLBACK_NAME = "yardmaster"
     CALLBACK_NEEDS_ENABLED = True
 
+    # MAX_FIELD caps each captured result field so a single event stays small.
+    MAX_FIELD = 4000
+
     def __init__(self):
         super().__init__()
         self._play = ""
@@ -47,6 +50,31 @@ class CallbackModule(CallbackBase):
     def _changed(result):
         return bool(result._result.get("changed", False))
 
+    def _summary(self, result):
+        data = result._result
+        out = {}
+        truncated = False
+
+        def take(key, value):
+            nonlocal truncated
+            text = value if isinstance(value, str) else json.dumps(value)
+            if len(text) > self.MAX_FIELD:
+                text = text[: self.MAX_FIELD]
+                truncated = True
+            out[key] = text
+
+        for key in ("msg", "stdout", "stderr"):
+            value = data.get(key)
+            if value:
+                take("message" if key == "msg" else key, value)
+        if isinstance(data.get("rc"), int):
+            out["rc"] = data["rc"]
+        if data.get("diff"):
+            take("diff", data["diff"])
+        if truncated:
+            out["truncated"] = True
+        return out
+
     def v2_playbook_on_play_start(self, play):
         self._play = play.get_name()
         self._emit("play_start", play=self._play)
@@ -62,16 +90,29 @@ class CallbackModule(CallbackBase):
             task=self._task,
             host=self._host(result),
             changed=self._changed(result),
+            **self._summary(result),
         )
 
     def v2_runner_on_failed(self, result, ignore_errors=False):
-        self._emit("runner_failed", play=self._play, task=self._task, host=self._host(result))
+        self._emit(
+            "runner_failed",
+            play=self._play,
+            task=self._task,
+            host=self._host(result),
+            **self._summary(result),
+        )
 
     def v2_runner_on_skipped(self, result):
         self._emit("runner_skipped", play=self._play, task=self._task, host=self._host(result))
 
     def v2_runner_on_unreachable(self, result):
-        self._emit("runner_unreachable", play=self._play, task=self._task, host=self._host(result))
+        self._emit(
+            "runner_unreachable",
+            play=self._play,
+            task=self._task,
+            host=self._host(result),
+            **self._summary(result),
+        )
 
     def v2_playbook_on_stats(self, stats):
         summary = {}

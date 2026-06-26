@@ -39,6 +39,18 @@ type Event struct {
 	Host string `json:"host,omitempty"`
 	// Changed reports whether a runner event changed state on the host.
 	Changed bool `json:"changed,omitempty"`
+	// Message is the task result message, when present on a runner event.
+	Message string `json:"message,omitempty"`
+	// Stdout is captured standard output, when present on a runner event.
+	Stdout string `json:"stdout,omitempty"`
+	// Stderr is captured standard error, when present on a runner event.
+	Stderr string `json:"stderr,omitempty"`
+	// RC is the module return code, when present on a runner event.
+	RC *int `json:"rc,omitempty"`
+	// Diff is a captured change diff, when present on a runner event.
+	Diff string `json:"diff,omitempty"`
+	// Truncated reports that one or more captured fields were cut to a length cap.
+	Truncated bool `json:"truncated,omitempty"`
 	// Stats holds per host recap totals, set only on stats events.
 	Stats map[string]HostStats `json:"stats,omitempty"`
 }

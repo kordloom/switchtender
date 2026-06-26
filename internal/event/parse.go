@@ -24,6 +24,18 @@ type wireEvent struct {
 	Host string `json:"host"`
 	// Changed reports a state change on the host.
 	Changed bool `json:"changed"`
+	// Message is the task result message.
+	Message string `json:"message"`
+	// Stdout is captured standard output.
+	Stdout string `json:"stdout"`
+	// Stderr is captured standard error.
+	Stderr string `json:"stderr"`
+	// RC is the module return code.
+	RC *int `json:"rc"`
+	// Diff is a captured change diff.
+	Diff string `json:"diff"`
+	// Truncated reports that captured fields were cut.
+	Truncated bool `json:"truncated"`
 	// Stats holds per host recap totals on stats events.
 	Stats map[string]HostStats `json:"stats"`
 }
@@ -31,13 +43,19 @@ type wireEvent struct {
 // event converts a wireEvent into an Event.
 func (w wireEvent) event() Event {
 	return Event{
-		Type:    Type(w.Type),
-		Time:    unixFloat(w.Ts),
-		Play:    w.Play,
-		Task:    w.Task,
-		Host:    w.Host,
-		Changed: w.Changed,
-		Stats:   w.Stats,
+		Type:      Type(w.Type),
+		Time:      unixFloat(w.Ts),
+		Play:      w.Play,
+		Task:      w.Task,
+		Host:      w.Host,
+		Changed:   w.Changed,
+		Message:   w.Message,
+		Stdout:    w.Stdout,
+		Stderr:    w.Stderr,
+		RC:        w.RC,
+		Diff:      w.Diff,
+		Truncated: w.Truncated,
+		Stats:     w.Stats,
 	}
 }
 
