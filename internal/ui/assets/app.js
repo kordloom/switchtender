@@ -224,7 +224,15 @@ function buildModel(events) {
 				: e.type.slice("runner_".length);
 			hosts.add(e.host);
 			if (!cells[e.host]) cells[e.host] = {};
-			cells[e.host][e.task] = outcome;
+			cells[e.host][e.task] = {
+				outcome,
+				message: e.message,
+				stdout: e.stdout,
+				stderr: e.stderr,
+				rc: e.rc,
+				diff: e.diff,
+				truncated: e.truncated,
+			};
 			addTask(tasks, taskSeen, e.task);
 		} else if (e.type === "stats") {
 			statsTime = t;
@@ -267,13 +275,14 @@ function renderMatrix(model) {
 		th.textContent = host;
 		tr.appendChild(th);
 		for (const task of tasks) {
-			const outcome = (cells[host] && cells[host][task]) || "none";
+			const info = cells[host] && cells[host][task];
+			const outcome = info ? info.outcome : "none";
 			const cell = document.createElement("td");
 			const div = document.createElement("div");
 			div.className = "cell " + outcome;
 			div.title = host + " / " + task + ": " + outcome;
-			if (outcome !== "none") {
-				div.addEventListener("click", () => showDrill({ host, task, outcome }));
+			if (info) {
+				div.addEventListener("click", () => showDrill(Object.assign({ host, task }, info)));
 			}
 			cell.appendChild(div);
 			tr.appendChild(cell);
@@ -333,10 +342,10 @@ function worstOutcome(task, cells, hosts) {
 	let worst = null;
 	let rank = -1;
 	for (const host of hosts) {
-		const o = cells[host] && cells[host][task];
-		if (!o) continue;
-		const r = OUTCOME_RANK[o] === undefined ? 0 : OUTCOME_RANK[o];
-		if (r > rank) { rank = r; worst = o; }
+		const info = cells[host] && cells[host][task];
+		if (!info) continue;
+		const r = OUTCOME_RANK[info.outcome] === undefined ? 0 : OUTCOME_RANK[info.outcome];
+		if (r > rank) { rank = r; worst = info.outcome; }
 	}
 	if (worst === null) return "skipped";
 	if (worst === "unreachable") return "failed";
@@ -350,11 +359,41 @@ function showDrill(info) {
 	const h = document.createElement("h3");
 	h.textContent = info.host ? (info.host + " / " + info.task) : info.task;
 	body.appendChild(h);
+
 	if (info.host) body.appendChild(drillField("Host", info.host));
-	body.appendChild(drillField("Task", info.task));
+	if (info.task) body.appendChild(drillField("Task", info.task));
 	if (info.outcome) body.appendChild(drillField("Outcome", info.outcome));
 	if (info.duration) body.appendChild(drillField("Duration", info.duration));
+	if (info.rc !== undefined && info.rc !== null) {
+		body.appendChild(drillField("Return code", String(info.rc)));
+	}
+	if (info.message) body.appendChild(drillBlock("Message", info.message));
+	if (info.stdout) body.appendChild(drillBlock("Stdout", info.stdout));
+	if (info.stderr) body.appendChild(drillBlock("Stderr", info.stderr));
+	if (info.diff) body.appendChild(drillBlock("Diff", info.diff));
+	if (info.truncated) {
+		const note = document.createElement("div");
+		note.className = "drill-note";
+		note.textContent = "Output truncated.";
+		body.appendChild(note);
+	}
+
 	document.getElementById("drill").hidden = false;
+}
+
+// drillBlock builds a labeled monospace block for multi line output.
+function drillBlock(label, value) {
+	const f = document.createElement("div");
+	f.className = "field";
+	const l = document.createElement("div");
+	l.className = "label";
+	l.textContent = label;
+	const pre = document.createElement("pre");
+	pre.className = "drill-pre";
+	pre.textContent = value;
+	f.appendChild(l);
+	f.appendChild(pre);
+	return f;
 }
 
 // drillField builds a labeled value in the drill panel.
