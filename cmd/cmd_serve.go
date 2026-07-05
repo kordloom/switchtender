@@ -26,6 +26,8 @@ const (
 	defaultServeAddr = ":8080"
 	// defaultDBPath is the SQLite database file used when --db is not set.
 	defaultDBPath = "yardmaster.db"
+	// defaultScheduleInterval is how often the scheduler checks for due schedules.
+	defaultScheduleInterval = 15 * time.Second
 	// shutdownTimeout bounds how long graceful HTTP shutdown waits for in-flight requests.
 	shutdownTimeout = 15 * time.Second
 	// readHeaderTimeout bounds how long the server waits to read request headers.
@@ -38,6 +40,9 @@ var serveAddr string
 // serveDB holds the value of the --db flag.
 var serveDB string
 
+// scheduleInterval holds the value of the --schedule-interval flag.
+var scheduleInterval time.Duration
+
 // serveCmd runs the Yardmaster HTTP server (the dispatcher).
 var serveCmd = &cobra.Command{
 	Use:   "serve",
@@ -49,6 +54,8 @@ var serveCmd = &cobra.Command{
 func init() {
 	serveCmd.Flags().StringVar(&serveAddr, "addr", defaultServeAddr, "Address the server listens on.")
 	serveCmd.Flags().StringVar(&serveDB, "db", defaultDBPath, "Path to the SQLite database file.")
+	serveCmd.Flags().DurationVar(&scheduleInterval, "schedule-interval", defaultScheduleInterval,
+		"How often the scheduler checks for due schedules.")
 }
 
 // runServe builds the server dependencies and serves until interrupted.
@@ -77,7 +84,8 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		log.Info("reconciled interrupted runs", zap.Int("count", n))
 	}
 
-	scheduler := schedule.NewScheduler(db.Schedules(), disp, log)
+	scheduler := schedule.NewScheduler(db.Schedules(), disp, log,
+		schedule.WithInterval(scheduleInterval))
 	scheduler.Start()
 	defer scheduler.Close()
 
