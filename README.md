@@ -68,8 +68,10 @@ Add `"shards": 4` to split it. Ansible is the only runtime dependency: `ansible-
   dragging a whole shard; hosts with no history balance by count.
 - Shard retry. Retry a finished split and only its failed shards run again, with their exact
   host groups, linked back to the original run.
-- Pipelines. Ordered playbook steps under one parent run. Stop on failure by default, continue
-  per step when asked, and each step is a full run with its own matrix and history.
+- Pipelines. Playbook steps under one parent run, in order or as a dependency graph: declare
+  depends_on and independent branches run in parallel, a failed step skips what depends on it,
+  and continue_on_failure lets downstream proceed anyway. Each step is a full run with its own
+  matrix and history.
 - Scheduling. Cron schedules fire runs, splits, or pipelines and every fire keeps full
   structured history.
 - Fleet health. Per-host outcomes persist at the end of every run, and the fleet view ranks
@@ -129,7 +131,7 @@ the API, the UI, and everything you operate speak plain Ansible. No glossary req
 
 ## Roadmap
 
-- DAG pipelines with branching, per-step retry, and outputs passed between steps
+- Per-step retry and outputs passed between pipeline steps
 - Integration tests against real multi-node clusters via kind
 - Postgres store backend for multi-instance deployments
 - Distributed workers for remote execution

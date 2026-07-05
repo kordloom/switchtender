@@ -233,7 +233,12 @@ func createPipelineHandler(submitter Submitter, log *zap.Logger) http.HandlerFun
 		}
 
 		created, err := submitter.SubmitPipeline(r.Context(), req.Name, req.Inventory, req.Steps)
-		if err != nil {
+		switch {
+		case errors.Is(err, dispatch.ErrUnnamedStep), errors.Is(err, dispatch.ErrDuplicateStep),
+			errors.Is(err, dispatch.ErrUnknownDependency), errors.Is(err, dispatch.ErrDependencyCycle):
+			respondError(w, log, http.StatusBadRequest, err.Error())
+			return
+		case err != nil:
 			log.Error("server: submit pipeline: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not submit pipeline")
 			return

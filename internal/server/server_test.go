@@ -523,6 +523,21 @@ func TestFleet(t *testing.T) {
 	}
 }
 
+func TestCreatePipelineBadGraph(t *testing.T) {
+	t.Parallel()
+	sub := &fakeSubmitter{err: fmt.Errorf("%w: %q", dispatch.ErrUnknownDependency, "ghost")}
+	handler := New(run.NewMemStore(), sub, zap.NewNop()).Handler()
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/pipelines", strings.NewReader(
+		`{"steps":[{"name":"a","playbook":"a.yml","depends_on":["ghost"]}]}`)))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "unknown dependency") {
+		t.Errorf("body %q missing validation detail", rec.Body.String())
+	}
+}
+
 func TestHostHistory(t *testing.T) {
 	t.Parallel()
 	store := run.NewMemStore()
