@@ -564,8 +564,10 @@ function renderTimeline(model) {
 		track.className = "tl-track";
 		const bar = document.createElement("div");
 		bar.className = "tl-bar " + outcome;
-		bar.style.left = (((start - t0) / span) * 100) + "%";
-		bar.style.width = Math.max((dur / span) * 100, 1) + "%";
+		const leftPct = Math.min(Math.max(((start - t0) / span) * 100, 0), 99);
+		const widthPct = Math.min(Math.max((dur / span) * 100, 1), 100 - leftPct);
+		bar.style.left = leftPct + "%";
+		bar.style.width = widthPct + "%";
 		bar.addEventListener("click", () => showDrill({ task, outcome, duration: fmtMs(dur) }));
 		track.appendChild(bar);
 		const durEl = document.createElement("div");

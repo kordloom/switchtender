@@ -165,7 +165,7 @@ table.matrix thead th.corner { position: sticky; left: 0; z-index: 4; }
 .timeline { display: flex; flex-direction: column; gap: 6px; }
 .tl-row { display: grid; grid-template-columns: 220px 1fr 72px; align-items: center; gap: 14px; }
 .tl-name { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.tl-track { background: var(--surface-2); border: 1px solid var(--border-muted); border-radius: var(--radius); height: 20px; position: relative; }
+.tl-track { background: var(--surface-2); border: 1px solid var(--border-muted); border-radius: var(--radius); height: 20px; position: relative; overflow: hidden; }
 .tl-bar { position: absolute; top: 0; bottom: 0; border-radius: 4px; min-width: 3px; cursor: pointer; opacity: 0.9; }
 .tl-bar.ok { background: var(--ok); }
 .tl-bar.changed { background: var(--changed); }
