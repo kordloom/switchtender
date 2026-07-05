@@ -1,4 +1,11 @@
-# Yardmaster
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-train-dark.png">
+    <img src="assets/logo-train.png" alt="Yardmaster" width="200">
+  </picture>
+</p>
+
+<h1 align="center">Yardmaster</h1>
 
 Playbook execution and fleet orchestration in one binary. Run Ansible against a fleet, watch every
 host and task as a live status matrix instead of a text scroll, split big jobs across parallel
