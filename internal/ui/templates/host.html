@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Host {{.Host}} - Yardmaster</title>
+	<link rel="icon" type="image/png" href="/ui/assets/favicon.png">
+	<link rel="stylesheet" href="/ui/assets/app.css">
+</head>
+<body data-page="host" data-host="{{.Host}}">
+	<header class="topbar">
+		<div class="brand"><a href="/ui/"><img class="brand-logo" src="/ui/assets/logo.png" alt="">Yardmaster</a></div>
+		<div class="tagline">Host history</div>
+	</header>
+
+	<main class="content">
+		<a class="back" href="/ui/fleet">Back to fleet</a>
+		<h1 class="mono">{{.Host}}</h1>
+		<p class="muted">This host's outcome in its most recent runs, newest first.</p>
+		<div id="status" class="muted">Loading host history.</div>
+		<table class="runs" hidden>
+			<thead>
+				<tr>
+					<th>Run</th>
+					<th>Outcome</th>
+					<th>OK</th>
+					<th>Changed</th>
+					<th>Failed</th>
+					<th>Busy time</th>
+					<th>When</th>
+				</tr>
+			</thead>
+			<tbody id="host-history"></tbody>
+		</table>
+	</main>
+
+	<script src="/ui/assets/app.js"></script>
+</body>
+</html>

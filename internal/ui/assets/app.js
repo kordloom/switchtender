@@ -15,6 +15,8 @@ document.addEventListener("DOMContentLoaded", () => {
 		loadDetail(document.body.dataset.runId);
 	} else if (page === "fleet") {
 		loadFleet();
+	} else if (page === "host") {
+		loadHost(document.body.dataset.host);
 	} else if (page === "schedules") {
 		loadSchedules();
 	}
@@ -153,7 +155,13 @@ async function loadFleet() {
 		const tbody = document.getElementById("fleet");
 		for (const h of hosts) {
 			const tr = document.createElement("tr");
-			tr.appendChild(td(h.host, "mono"));
+			const hostCell = document.createElement("td");
+			hostCell.className = "mono";
+			const hostLink = document.createElement("a");
+			hostLink.href = "/ui/hosts/" + encodeURIComponent(h.host);
+			hostLink.textContent = h.host;
+			hostCell.appendChild(hostLink);
+			tr.appendChild(hostCell);
 			const fails = document.createElement("td");
 			fails.textContent = h.failures + " / " + h.total;
 			if (h.failures > 0) {
@@ -177,6 +185,42 @@ async function loadFleet() {
 		document.querySelector("table.runs").hidden = false;
 	} catch (e) {
 		setStatus("Failed to load fleet health: " + e.message);
+	}
+}
+
+// loadHost populates one host's run history table, newest first.
+async function loadHost(host) {
+	try {
+		const data = await getJSON("/hosts/" + encodeURIComponent(host) + "/runs");
+		const runs = data.runs || [];
+		if (runs.length === 0) {
+			setStatus("No history for this host yet.");
+			return;
+		}
+		const tbody = document.getElementById("host-history");
+		for (const r of runs) {
+			const tr = document.createElement("tr");
+			const runCell = document.createElement("td");
+			runCell.className = "mono";
+			const link = document.createElement("a");
+			link.href = "/ui/runs/" + r.run_id;
+			link.textContent = r.run_id;
+			runCell.appendChild(link);
+			tr.appendChild(runCell);
+			const outcome = document.createElement("td");
+			outcome.appendChild(outcomeChip(r.worst));
+			tr.appendChild(outcome);
+			tr.appendChild(td(String(r.ok)));
+			tr.appendChild(td(String(r.changed)));
+			tr.appendChild(td(String(r.failures)));
+			tr.appendChild(td(r.duration_seconds ? r.duration_seconds.toFixed(1) + "s" : "0s"));
+			tr.appendChild(td(fmtTime(r.ran_at)));
+			tbody.appendChild(tr);
+		}
+		setStatus("");
+		document.querySelector("table.runs").hidden = false;
+	} catch (e) {
+		setStatus("Failed to load host history: " + e.message);
 	}
 }
 
