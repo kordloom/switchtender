@@ -53,6 +53,8 @@ type fakeSubmitter struct {
 	gotInventory string
 	// gotShards is the shard count from the most recent SubmitSplit call.
 	gotShards int
+	// gotSteps is the step count from the most recent SubmitPipeline call.
+	gotSteps int
 }
 
 // Submit records the arguments and returns the configured run or error.
@@ -70,6 +72,17 @@ func (f *fakeSubmitter) SubmitSplit(_ context.Context, playbook, inventory strin
 	f.gotPlaybook = playbook
 	f.gotInventory = inventory
 	f.gotShards = shards
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.run, nil
+}
+
+// SubmitPipeline records the step count and returns the configured run or error.
+func (f *fakeSubmitter) SubmitPipeline(_ context.Context, name, inventory string, steps []run.PipelineStep) (*run.Run, error) {
+	f.gotPlaybook = name
+	f.gotInventory = inventory
+	f.gotSteps = len(steps)
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -191,6 +204,81 @@ func TestRunShards(t *testing.T) {
 	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/runs/missing/shards", nil))
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("unknown parent status = %d, want 404", rec.Code)
+	}
+}
+
+func TestCreatePipeline(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Name       string
+		Body       string
+		WantStatus int
+		WantSteps  int
+	}{
+		{ // Test 0: Valid pipeline is accepted.
+			Name: "valid", WantStatus: http.StatusAccepted, WantSteps: 2,
+			Body: `{"name":"deploy","steps":[{"name":"a","playbook":"a.yml"},` +
+				`{"name":"b","playbook":"b.yml"}]}`,
+		},
+		{ // Test 1: No steps is rejected.
+			Name: "no steps", Body: `{"name":"deploy","steps":[]}`, WantStatus: http.StatusBadRequest,
+		},
+		{ // Test 2: A step without a playbook is rejected.
+			Name: "missing playbook", Body: `{"steps":[{"name":"a"}]}`, WantStatus: http.StatusBadRequest,
+		},
+		{ // Test 3: Malformed JSON is rejected.
+			Name: "bad json", Body: `{`, WantStatus: http.StatusBadRequest,
+		},
+	}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			sub := &fakeSubmitter{run: &run.Run{ID: "run_p", Status: run.StatusPending}}
+			handler := New(run.NewMemStore(), sub, zap.NewNop()).Handler()
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec,
+				httptest.NewRequest(http.MethodPost, "/pipelines", strings.NewReader(test.Body)))
+			if rec.Code != test.WantStatus {
+				t.Fatalf("status = %d, want %d", rec.Code, test.WantStatus)
+			}
+			if test.WantSteps > 0 && sub.gotSteps != test.WantSteps {
+				t.Errorf("gotSteps = %d, want %d", sub.gotSteps, test.WantSteps)
+			}
+		})
+	}
+}
+
+func TestRunSteps(t *testing.T) {
+	t.Parallel()
+	store := run.NewMemStore()
+	parentID := "run_pipe"
+	if err := store.Save(context.Background(), &run.Run{
+		ID: parentID, Kind: run.KindPipeline, Status: run.StatusRunning, CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	idx := 0
+	if err := store.Save(context.Background(), &run.Run{
+		ID: "run_s", Status: run.StatusSucceeded, CreatedAt: time.Now(),
+		ParentID: &parentID, StepIndex: &idx, StepName: "first",
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	handler := New(store, &fakeSubmitter{}, zap.NewNop()).Handler()
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/runs/"+parentID+"/steps", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if body := rec.Body.String(); !strings.Contains(body, "first") || !strings.Contains(body, `"count":1`) {
+		t.Errorf("body %q missing step", body)
+	}
+
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/runs/missing/steps", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", rec.Code)
 	}
 }
 

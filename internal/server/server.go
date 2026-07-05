@@ -16,6 +16,7 @@ import (
 type Submitter interface {
 	Submit(ctx context.Context, playbook, inventory string) (*run.Run, error)
 	SubmitSplit(ctx context.Context, playbook, inventory string, shards int) (*run.Run, error)
+	SubmitPipeline(ctx context.Context, name, inventory string, steps []run.PipelineStep) (*run.Run, error)
 }
 
 // Streamer subscribes to a run's live output. The live Hub satisfies it.
@@ -81,10 +82,12 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /healthz", healthHandler())
 	mux.Handle("GET /fleet", fleetHandler(s.store, s.log))
 	mux.Handle("POST /runs", createRunHandler(s.submitter, s.log))
+	mux.Handle("POST /pipelines", createPipelineHandler(s.submitter, s.log))
 	mux.Handle("POST /runs/{id}/cancel", cancelRunHandler(s.store, s.canceler, s.log))
 	mux.Handle("GET /runs", listRunsHandler(s.store, s.log))
 	mux.Handle("GET /runs/{id}", getRunHandler(s.store, s.log))
 	mux.Handle("GET /runs/{id}/shards", runShardsHandler(s.store, s.log))
+	mux.Handle("GET /runs/{id}/steps", runStepsHandler(s.store, s.log))
 	mux.Handle("GET /runs/{id}/logs", runLogsHandler(s.store, s.log))
 	mux.Handle("GET /runs/{id}/events", runEventsHandler(s.store, s.log))
 	mux.Handle("GET /runs/{id}/stream", runStreamHandler(s.streamer, s.store, s.log))

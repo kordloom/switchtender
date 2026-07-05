@@ -26,6 +26,16 @@ type createRunRequest struct {
 	Shards int `json:"shards,omitempty"`
 }
 
+// createPipelineRequest is the JSON body accepted by POST /pipelines.
+type createPipelineRequest struct {
+	// Name identifies the pipeline. Optional.
+	Name string `json:"name"`
+	// Inventory is the default inventory for steps that do not set their own. Optional.
+	Inventory string `json:"inventory"`
+	// Steps is the ordered list of steps to run. Required, at least one.
+	Steps []run.PipelineStep `json:"steps"`
+}
+
 // listRunsResponse wraps a run list. The envelope leaves room for pagination fields later.
 type listRunsResponse struct {
 	// Runs is the ordered list of runs.
@@ -47,6 +57,14 @@ type shardsResponse struct {
 	// Shards is the ordered list of shard runs.
 	Shards []*run.Run `json:"shards"`
 	// Count is the number of shards returned.
+	Count int `json:"count"`
+}
+
+// stepsResponse wraps a pipeline run's step runs.
+type stepsResponse struct {
+	// Steps is the ordered list of step runs.
+	Steps []*run.Run `json:"steps"`
+	// Count is the number of steps returned.
 	Count int `json:"count"`
 }
 
@@ -119,6 +137,39 @@ func createRunHandler(submitter Submitter, log *zap.Logger) http.HandlerFunc {
 			return
 		}
 
+		w.Header().Set("Location", "/runs/"+created.ID)
+		respondJSON(w, log, http.StatusAccepted, created, wantsPretty(r))
+	}
+}
+
+// createPipelineHandler accepts a pipeline request and submits it for execution.
+func createPipelineHandler(submitter Submitter, log *zap.Logger) http.HandlerFunc {
+	if submitter == nil {
+		panic("server: createPipelineHandler: Submitter required")
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req createPipelineRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			respondError(w, log, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		if len(req.Steps) == 0 {
+			respondError(w, log, http.StatusBadRequest, "at least one step is required")
+			return
+		}
+		for _, step := range req.Steps {
+			if step.Playbook == "" {
+				respondError(w, log, http.StatusBadRequest, "each step requires a playbook")
+				return
+			}
+		}
+
+		created, err := submitter.SubmitPipeline(r.Context(), req.Name, req.Inventory, req.Steps)
+		if err != nil {
+			log.Error("server: submit pipeline: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not submit pipeline")
+			return
+		}
 		w.Header().Set("Location", "/runs/"+created.ID)
 		respondJSON(w, log, http.StatusAccepted, created, wantsPretty(r))
 	}
@@ -213,6 +264,28 @@ func runShardsHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
 		}
 		respondJSON(w, log, http.StatusOK,
 			shardsResponse{Shards: shards, Count: len(shards)}, wantsPretty(r))
+	}
+}
+
+// runStepsHandler returns the step runs of a pipeline run.
+func runStepsHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
+	if store == nil {
+		panic("server: runStepsHandler: Store required")
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if _, err := store.Get(r.Context(), id); errors.Is(err, run.ErrNotFound) {
+			respondError(w, log, http.StatusNotFound, "run not found")
+			return
+		}
+		steps, err := store.Steps(r.Context(), id)
+		if err != nil {
+			log.Error("server: list steps: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not list steps")
+			return
+		}
+		respondJSON(w, log, http.StatusOK,
+			stepsResponse{Steps: steps, Count: len(steps)}, wantsPretty(r))
 	}
 }
 
