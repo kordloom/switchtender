@@ -472,7 +472,11 @@ function renderSteps(steps) {
 		row.appendChild(badge(s.status));
 		const label = document.createElement("span");
 		label.className = "shard-label";
-		label.textContent = idx + ". " + (s.step_name || "step") + "  ·  " + (s.playbook || "");
+		let text = idx + ". " + (s.step_name || "step") + "  ·  " + (s.playbook || "");
+		if (s.attempt) {
+			text += "  ·  retry " + s.attempt;
+		}
+		label.textContent = text;
 		row.appendChild(label);
 		list.appendChild(row);
 	}
