@@ -389,6 +389,30 @@ func TestRunStreamNotFoundAndDisabled(t *testing.T) {
 	}
 }
 
+func TestFleet(t *testing.T) {
+	t.Parallel()
+	store := run.NewMemStore()
+	ctx := context.Background()
+	if err := store.SaveHostSummary(ctx, "r1", []run.HostSummary{
+		{Host: "db01", Worst: "failed", RanAt: time.Now()},
+		{Host: "web01", Worst: "ok", RanAt: time.Now()},
+	}); err != nil {
+		t.Fatalf("SaveHostSummary() error = %v", err)
+	}
+	handler := New(store, &fakeSubmitter{}, zap.NewNop()).Handler()
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/fleet?window=5", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "db01") || !strings.Contains(body, `"window":5`) {
+		t.Errorf("body %q missing fleet data", body)
+	}
+}
+
 func TestCancelRun(t *testing.T) {
 	t.Parallel()
 	seed := func(status run.Status) run.Store {

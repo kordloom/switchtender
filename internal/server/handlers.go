@@ -5,12 +5,16 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 
 	"go.uber.org/zap"
 
 	"github.com/dcadolph/yardmaster/internal/event"
 	"github.com/dcadolph/yardmaster/internal/run"
 )
+
+// defaultFleetWindow is the number of recent runs per host considered when no window is given.
+const defaultFleetWindow = 10
 
 // createRunRequest is the JSON body accepted by POST /runs.
 type createRunRequest struct {
@@ -44,6 +48,39 @@ type shardsResponse struct {
 	Shards []*run.Run `json:"shards"`
 	// Count is the number of shards returned.
 	Count int `json:"count"`
+}
+
+// fleetResponse wraps the fleet health ranking.
+type fleetResponse struct {
+	// Hosts is the ranking of hosts by recent failures, worst first.
+	Hosts []run.HostHealth `json:"hosts"`
+	// Count is the number of hosts returned.
+	Count int `json:"count"`
+	// Window is the number of recent runs per host considered.
+	Window int `json:"window"`
+}
+
+// fleetHandler ranks hosts by recent failures across runs.
+func fleetHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
+	if store == nil {
+		panic("server: fleetHandler: Store required")
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		window := defaultFleetWindow
+		if v := r.URL.Query().Get("window"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				window = n
+			}
+		}
+		hosts, err := store.FleetHealth(r.Context(), window)
+		if err != nil {
+			log.Error("server: fleet health: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not compute fleet health")
+			return
+		}
+		respondJSON(w, log, http.StatusOK,
+			fleetResponse{Hosts: hosts, Count: len(hosts), Window: window}, wantsPretty(r))
+	}
 }
 
 // healthHandler reports service liveness.

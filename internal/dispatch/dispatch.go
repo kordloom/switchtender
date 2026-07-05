@@ -353,8 +353,26 @@ func (d *Dispatcher) execute(ctx context.Context, r *run.Run) run.Status {
 	<-tailed
 
 	status := d.outcome(ctx, r, res, err)
+	d.summarize(r)
 	d.publisher.CloseRun(r.ID)
 	return status
+}
+
+// summarize computes the run's per host outcome summary from its events and stores it for cross run
+// queries. It is best effort; a failure is logged and does not affect the run result.
+func (d *Dispatcher) summarize(r *run.Run) {
+	events, err := d.store.Events(context.Background(), r.ID)
+	if err != nil {
+		d.log.Error("dispatch: read events for summary: "+err.Error(), zap.String("run_id", r.ID))
+		return
+	}
+	summaries := run.HostSummariesFromStats(events, r.CreatedAt)
+	if len(summaries) == 0 {
+		return
+	}
+	if err := d.store.SaveHostSummary(context.Background(), r.ID, summaries); err != nil {
+		d.log.Error("dispatch: save host summary: "+err.Error(), zap.String("run_id", r.ID))
+	}
 }
 
 // outcome finalizes r from the run result and returns the terminal status.

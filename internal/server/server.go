@@ -79,6 +79,7 @@ func New(store run.Store, submitter Submitter, log *zap.Logger, opts ...Option) 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("GET /healthz", healthHandler())
+	mux.Handle("GET /fleet", fleetHandler(s.store, s.log))
 	mux.Handle("POST /runs", createRunHandler(s.submitter, s.log))
 	mux.Handle("POST /runs/{id}/cancel", cancelRunHandler(s.store, s.canceler, s.log))
 	mux.Handle("GET /runs", listRunsHandler(s.store, s.log))
