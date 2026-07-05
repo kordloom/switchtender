@@ -175,8 +175,11 @@ table.matrix thead th.corner { position: sticky; left: 0; z-index: 4; }
 
 /* Buttons */
 .actions { margin-top: 8px; }
-.button { display: inline-block; padding: 6px 14px; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); font-size: 13px; font-weight: 500; transition: background 0.08s ease; }
+.button { display: inline-block; padding: 6px 14px; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); font-size: 13px; font-weight: 500; transition: background 0.08s ease; cursor: pointer; font-family: inherit; }
 .button:hover { text-decoration: none; background: var(--surface-3); border-color: var(--muted); }
+.button:disabled { opacity: 0.5; cursor: default; }
+.button.danger { color: var(--failed); border-color: var(--failed); }
+.button.danger:hover { background: var(--failed); color: #fff; }
 
 /* Shard and step rows */
 .shards { display: flex; flex-direction: column; gap: 8px; }

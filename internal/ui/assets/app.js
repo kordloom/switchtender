@@ -255,6 +255,7 @@ let detailState = null;
 // loadDetail loads one run and dispatches to the split or single render path.
 async function loadDetail(runId) {
 	document.getElementById("full-log").href = "/runs/" + runId + "/logs";
+	wireActions(runId);
 	try {
 		const run = await getJSON("/runs/" + runId);
 		if (run.kind === "pipeline" && !run.parent_id) {
@@ -267,6 +268,53 @@ async function loadDetail(runId) {
 	} catch (e) {
 		setStatus("Failed to load run: " + e.message);
 	}
+}
+
+// postAction sends a POST to the API and returns the parsed JSON body, throwing on an error reply.
+async function postAction(path) {
+	const res = await fetch(path, { method: "POST" });
+	const body = await res.json().catch(() => ({}));
+	if (!res.ok) {
+		throw new Error(body.error || ("HTTP " + res.status));
+	}
+	return body;
+}
+
+// wireActions hooks up the cancel and retry buttons for the run being viewed.
+function wireActions(runId) {
+	const cancel = document.getElementById("cancel-run");
+	cancel.addEventListener("click", async () => {
+		if (!window.confirm("Cancel this run?")) return;
+		cancel.disabled = true;
+		try {
+			await postAction("/runs/" + runId + "/cancel");
+		} catch (e) {
+			setStatus("Cancel failed: " + e.message);
+			cancel.disabled = false;
+		}
+	});
+	const retry = document.getElementById("retry-run");
+	retry.addEventListener("click", async () => {
+		retry.disabled = true;
+		try {
+			const created = await postAction("/runs/" + runId + "/retry");
+			window.location.href = "/ui/runs/" + created.id;
+		} catch (e) {
+			setStatus("Retry failed: " + e.message);
+			retry.disabled = false;
+		}
+	});
+}
+
+// updateActions shows cancel while the run is active and retry on a finished split that did not
+// fully succeed.
+function updateActions(run) {
+	const cancel = document.getElementById("cancel-run");
+	const retry = document.getElementById("retry-run");
+	if (!cancel || !retry) return;
+	cancel.hidden = isTerminal(run.status);
+	const splitParent = (run.kind === "split" || run.shard_count) && !run.parent_id;
+	retry.hidden = !(splitParent && isTerminal(run.status) && run.status !== "succeeded");
 }
 
 // loadPipeline renders a pipeline run as an ordered list of step runs, polling while it is active.
@@ -423,6 +471,7 @@ function renderHeader(run) {
 	}
 	el.appendChild(field("Duration", fmtDuration(run.started_at, run.ended_at)));
 	el.hidden = false;
+	updateActions(run);
 }
 
 // field builds a labeled field, using node when provided otherwise a text value.
