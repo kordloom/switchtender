@@ -19,6 +19,8 @@ type Store interface {
 	List(ctx context.Context) ([]*Run, error)
 	// Shards returns the shard runs of a parent ordered by shard index.
 	Shards(ctx context.Context, parentID string) ([]*Run, error)
+	// NonTerminal returns all runs, including shards, that are not in a terminal state.
+	NonTerminal(ctx context.Context) ([]*Run, error)
 	// AppendLog appends raw output bytes to the run's log. Returns ErrNotFound if the run is absent.
 	AppendLog(ctx context.Context, id string, p []byte) error
 	// Log returns a copy of the run's captured output, or ErrNotFound.
@@ -114,6 +116,19 @@ func shardIndex(r *Run) int {
 		return 1 << 30
 	}
 	return *r.ShardIndex
+}
+
+// NonTerminal returns all runs, including shards, that are not in a terminal state.
+func (m *memStore) NonTerminal(_ context.Context) ([]*Run, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var out []*Run
+	for _, r := range m.runs {
+		if !r.Status.Terminal() {
+			out = append(out, r.Clone())
+		}
+	}
+	return out, nil
 }
 
 // AppendLog appends raw output bytes to the run's log. Returns ErrNotFound if the run is absent.

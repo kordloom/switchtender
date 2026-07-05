@@ -268,6 +268,28 @@ func (d *Dispatcher) Close() {
 	d.wg.Wait()
 }
 
+// Reconcile marks runs left non-terminal by a previous process as interrupted, since their owning
+// process is gone and they cannot resume. It returns the number reconciled and is meant to run once
+// at startup before serving.
+func (d *Dispatcher) Reconcile(ctx context.Context) (int, error) {
+	runs, err := d.store.NonTerminal(ctx)
+	if err != nil {
+		return 0, err
+	}
+	for _, r := range runs {
+		ended := time.Now()
+		r.Status = run.StatusInterrupted
+		r.EndedAt = &ended
+		if r.Error == "" {
+			r.Error = "interrupted: server restarted"
+		}
+		if err := d.store.Save(ctx, r); err != nil {
+			return 0, err
+		}
+	}
+	return len(runs), nil
+}
+
 // work acquires a worker slot then executes r, marking it canceled if shutdown wins the race.
 func (d *Dispatcher) work(r *run.Run) {
 	defer d.wg.Done()

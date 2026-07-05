@@ -146,6 +146,12 @@ func (s *store) Shards(ctx context.Context, parentID string) ([]*run.Run, error)
 	return s.queryRuns(ctx, "list shards", q, parentID)
 }
 
+// NonTerminal returns all runs, including shards, that are not in a terminal state.
+func (s *store) NonTerminal(ctx context.Context) ([]*run.Run, error) {
+	const q = "SELECT " + runColumns + " FROM runs WHERE status IN ('pending', 'running')"
+	return s.queryRuns(ctx, "list non-terminal runs", q)
+}
+
 // queryRuns runs a select that returns run rows and scans them all.
 func (s *store) queryRuns(ctx context.Context, label, query string, args ...any) ([]*run.Run, error) {
 	rows, err := s.db.QueryContext(ctx, query, args...)

@@ -22,12 +22,14 @@ const (
 	StatusFailed Status = "failed"
 	// StatusCanceled means the run was stopped before completion.
 	StatusCanceled Status = "canceled"
+	// StatusInterrupted means the run was abandoned when the server stopped and cannot resume.
+	StatusInterrupted Status = "interrupted"
 )
 
 // Terminal reports whether the status is a final state.
 func (s Status) Terminal() bool {
 	switch s {
-	case StatusSucceeded, StatusFailed, StatusCanceled:
+	case StatusSucceeded, StatusFailed, StatusCanceled, StatusInterrupted:
 		return true
 	default:
 		return false

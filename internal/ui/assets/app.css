@@ -78,6 +78,7 @@ table.runs td.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace
 .badge.running { background: var(--accent); }
 .badge.pending { background: var(--skipped); }
 .badge.canceled { background: var(--unreachable); }
+.badge.interrupted { background: var(--changed); }
 
 .run-header { display: flex; flex-wrap: wrap; gap: 24px; align-items: center; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 18px; }
 .run-header .field { display: flex; flex-direction: column; }

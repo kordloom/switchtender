@@ -175,7 +175,8 @@ function renderShards(shards) {
 
 // isTerminal reports whether a run status is final.
 function isTerminal(status) {
-	return status === "succeeded" || status === "failed" || status === "canceled";
+	return status === "succeeded" || status === "failed" ||
+		status === "canceled" || status === "interrupted";
 }
 
 // renderDetail redraws the header, matrix, and timeline from the current state.

@@ -27,6 +27,7 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Run("log append and read", func(t *testing.T) { testLog(t, newStore()) })
 	t.Run("events append and read", func(t *testing.T) { testEvents(t, newStore()) })
 	t.Run("shards excluded from list", func(t *testing.T) { testShards(t, newStore()) })
+	t.Run("non-terminal runs", func(t *testing.T) { testNonTerminal(t, newStore()) })
 }
 
 // sampleRun returns a fully populated terminal run with deterministic times.
@@ -257,5 +258,41 @@ func testShards(t *testing.T, store run.Store) {
 	}
 	if shards[0].Limit != "host0" {
 		t.Errorf("shard limit = %q, want host0", shards[0].Limit)
+	}
+}
+
+// testNonTerminal verifies only pending and running runs are returned, including shards.
+func testNonTerminal(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	parentID := "p"
+	idx, count := 0, 1
+	for _, r := range []*run.Run{
+		{ID: "pending", Status: run.StatusPending, CreatedAt: time.Now()},
+		{ID: "running", Status: run.StatusRunning, CreatedAt: time.Now()},
+		{ID: "done", Status: run.StatusSucceeded, CreatedAt: time.Now()},
+		{ID: "gone", Status: run.StatusInterrupted, CreatedAt: time.Now()},
+		{
+			ID: "shard", Status: run.StatusRunning, CreatedAt: time.Now(),
+			ParentID: &parentID, ShardIndex: &idx, ShardCount: &count,
+		},
+	} {
+		if err := store.Save(ctx, r); err != nil {
+			t.Fatalf("Save() error = %v", err)
+		}
+	}
+
+	got, err := store.NonTerminal(ctx)
+	if err != nil {
+		t.Fatalf("NonTerminal() error = %v", err)
+	}
+	seen := make(map[string]bool, len(got))
+	for _, r := range got {
+		seen[r.ID] = true
+	}
+	if !seen["pending"] || !seen["running"] || !seen["shard"] {
+		t.Errorf("NonTerminal missing active runs, got %v", seen)
+	}
+	if seen["done"] || seen["gone"] {
+		t.Error("NonTerminal returned a terminal run")
 	}
 }
