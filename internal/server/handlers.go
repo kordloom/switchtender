@@ -9,6 +9,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/dcadolph/yardmaster/internal/dispatch"
 	"github.com/dcadolph/yardmaster/internal/event"
 	"github.com/dcadolph/yardmaster/internal/run"
 )
@@ -206,6 +207,37 @@ func cancelRunHandler(store run.Store, canceler Canceler, log *zap.Logger) http.
 		}
 		respondJSON(w, log, http.StatusAccepted,
 			map[string]string{"status": "canceling"}, wantsPretty(r))
+	}
+}
+
+// retryRunHandler starts a new split run from the failed shards of a finished one.
+func retryRunHandler(retrier Retrier, log *zap.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if retrier == nil {
+			respondError(w, log, http.StatusNotFound, "retry not enabled")
+			return
+		}
+		created, err := retrier.RetryFailedShards(r.Context(), r.PathValue("id"))
+		switch {
+		case errors.Is(err, run.ErrNotFound):
+			respondError(w, log, http.StatusNotFound, "run not found")
+			return
+		case errors.Is(err, dispatch.ErrNotSplit):
+			respondError(w, log, http.StatusConflict, "only split runs can retry failed shards")
+			return
+		case errors.Is(err, dispatch.ErrNotFinished):
+			respondError(w, log, http.StatusConflict, "run has not finished")
+			return
+		case errors.Is(err, dispatch.ErrNoFailedShards):
+			respondError(w, log, http.StatusConflict, "no failed shards to retry")
+			return
+		case err != nil:
+			log.Error("server: retry run: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not retry run")
+			return
+		}
+		w.Header().Set("Location", "/runs/"+created.ID)
+		respondJSON(w, log, http.StatusAccepted, created, wantsPretty(r))
 	}
 }
 

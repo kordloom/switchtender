@@ -73,6 +73,8 @@ type Run struct {
 	Limit string `json:"limit,omitempty"`
 	// Kind distinguishes a plain run from a split or pipeline parent. Empty means a plain run.
 	Kind string `json:"kind,omitempty"`
+	// RetryOf links a split created by a failed shard retry back to the run it retries.
+	RetryOf *string `json:"retry_of,omitempty"`
 	// StepName is the step name when this run is a pipeline step.
 	StepName string `json:"step_name,omitempty"`
 	// StepIndex is the step order when this run is a pipeline step.
@@ -112,6 +114,10 @@ func (r *Run) Clone() *Run {
 	if r.StepIndex != nil {
 		i := *r.StepIndex
 		out.StepIndex = &i
+	}
+	if r.RetryOf != nil {
+		id := *r.RetryOf
+		out.RetryOf = &id
 	}
 	return &out
 }

@@ -30,6 +30,12 @@ type Canceler interface {
 	Cancel(id string) bool
 }
 
+// Retrier starts a new split run from the failed shards of a finished one. The dispatcher
+// satisfies it.
+type Retrier interface {
+	RetryFailedShards(ctx context.Context, parentID string) (*run.Run, error)
+}
+
 // Option configures a Server.
 type Option func(*Server)
 
@@ -41,6 +47,11 @@ func WithStreamer(s Streamer) Option {
 // WithCanceler enables the cancel endpoint backed by c.
 func WithCanceler(c Canceler) Option {
 	return func(srv *Server) { srv.canceler = c }
+}
+
+// WithRetrier enables the failed shard retry endpoint backed by r.
+func WithRetrier(r Retrier) Option {
+	return func(srv *Server) { srv.retrier = r }
 }
 
 // WithSchedules enables the schedule endpoints backed by the given store.
@@ -62,6 +73,8 @@ type Server struct {
 	streamer Streamer
 	// canceler backs the cancel endpoint when configured.
 	canceler Canceler
+	// retrier backs the failed shard retry endpoint when configured.
+	retrier Retrier
 	// schedules backs the schedule endpoints when configured.
 	schedules schedule.Store
 }
@@ -92,6 +105,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /runs", createRunHandler(s.submitter, s.log))
 	mux.Handle("POST /pipelines", createPipelineHandler(s.submitter, s.log))
 	mux.Handle("POST /runs/{id}/cancel", cancelRunHandler(s.store, s.canceler, s.log))
+	mux.Handle("POST /runs/{id}/retry", retryRunHandler(s.retrier, s.log))
 	mux.Handle("GET /runs", listRunsHandler(s.store, s.log))
 	mux.Handle("GET /runs/{id}", getRunHandler(s.store, s.log))
 	mux.Handle("GET /runs/{id}/shards", runShardsHandler(s.store, s.log))

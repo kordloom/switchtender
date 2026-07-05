@@ -24,6 +24,8 @@ type HostSummary struct {
 	Skipped int `json:"skipped"`
 	// Worst is the most severe outcome for the host in the run.
 	Worst string `json:"worst"`
+	// DurationSeconds is the host's estimated busy time in the run, used to balance future splits.
+	DurationSeconds float64 `json:"duration_seconds"`
 	// RanAt is when the run was created, used to order host history by recency.
 	RanAt time.Time `json:"ran_at"`
 }
@@ -55,14 +57,39 @@ func HostSummariesFromStats(events []event.Event, ranAt time.Time) []HostSummary
 		return nil
 	}
 
+	durations := hostDurations(events)
 	out := make([]HostSummary, 0, len(stats))
 	for host, s := range stats {
 		out = append(out, HostSummary{
 			Host: host, OK: s.OK, Changed: s.Changed, Failures: s.Failures,
-			Unreachable: s.Unreachable, Skipped: s.Skipped, Worst: worstFromStats(s), RanAt: ranAt,
+			Unreachable: s.Unreachable, Skipped: s.Skipped, Worst: worstFromStats(s),
+			DurationSeconds: durations[host], RanAt: ranAt,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Host < out[j].Host })
+	return out
+}
+
+// hostDurations estimates each host's busy seconds by attributing the gap between a task start and
+// the host's result for that task to the host. Parallel strategies overlap hosts, so the estimate
+// is not wall clock, but it preserves the relative weight between hosts that split balancing needs.
+func hostDurations(events []event.Event) map[string]float64 {
+	out := make(map[string]float64)
+	var taskStart time.Time
+	for _, e := range events {
+		switch e.Type {
+		case event.TypeTaskStart:
+			taskStart = e.Time
+		case event.TypeRunnerOK, event.TypeRunnerFailed, event.TypeRunnerSkipped,
+			event.TypeRunnerUnreachable:
+			if e.Host == "" || taskStart.IsZero() {
+				continue
+			}
+			if gap := e.Time.Sub(taskStart).Seconds(); gap > 0 {
+				out[e.Host] += gap
+			}
+		}
+	}
 	return out
 }
 

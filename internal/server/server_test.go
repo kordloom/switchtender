@@ -13,6 +13,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/dcadolph/yardmaster/internal/dispatch"
 	"github.com/dcadolph/yardmaster/internal/live"
 	"github.com/dcadolph/yardmaster/internal/run"
 	"github.com/dcadolph/yardmaster/internal/schedule"
@@ -41,6 +42,25 @@ type fakeCanceler struct {
 func (f *fakeCanceler) Cancel(id string) bool {
 	f.gotID = id
 	return f.ok
+}
+
+// fakeRetrier records the retried id and returns canned results.
+type fakeRetrier struct {
+	// run is returned on success.
+	run *run.Run
+	// err is returned instead of run when non-nil.
+	err error
+	// gotID is the id from the most recent retry call.
+	gotID string
+}
+
+// RetryFailedShards records the id and returns the configured run or error.
+func (f *fakeRetrier) RetryFailedShards(_ context.Context, parentID string) (*run.Run, error) {
+	f.gotID = parentID
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.run, nil
 }
 
 // fakeSubmitter records the last submission and returns canned results.
@@ -102,7 +122,7 @@ func TestCreateRun(t *testing.T) {
 	}{
 		{ // Test 0: Valid request is accepted.
 			Name: "valid", Body: `{"playbook":"play.yml","inventory":"inv"}`,
-			Submitter: &fakeSubmitter{run: &run.Run{ID: "run_1", Status: run.StatusPending}},
+			Submitter:  &fakeSubmitter{run: &run.Run{ID: "run_1", Status: run.StatusPending}},
 			WantStatus: http.StatusAccepted, WantBodyContains: "run_1",
 		},
 		{ // Test 1: Missing playbook is rejected.
@@ -116,7 +136,7 @@ func TestCreateRun(t *testing.T) {
 		},
 		{ // Test 3: Submitter failure maps to 500.
 			Name: "submit error", Body: `{"playbook":"play.yml"}`,
-			Submitter: &fakeSubmitter{err: errors.New("boom")},
+			Submitter:  &fakeSubmitter{err: errors.New("boom")},
 			WantStatus: http.StatusInternalServerError, WantBodyContains: "could not submit run",
 		},
 	}
@@ -354,7 +374,7 @@ func TestRunLogs(t *testing.T) {
 		WantBody   string
 	}{
 		{Name: "found", Path: "/runs/run_1/logs", WantStatus: http.StatusOK, WantBody: "PLAY RECAP"}, // Test 0.
-		{Name: "missing", Path: "/runs/nope/logs", WantStatus: http.StatusNotFound},                 // Test 1.
+		{Name: "missing", Path: "/runs/nope/logs", WantStatus: http.StatusNotFound},                  // Test 1.
 	}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
@@ -555,6 +575,67 @@ func TestCancelRun(t *testing.T) {
 	}
 }
 
+func TestRetryRun(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Name             string
+		Retrier          Retrier
+		WantStatus       int
+		WantBodyContains string
+	}{
+		{ // Test 0: A failed split retries and returns the new parent.
+			Name: "retried",
+			Retrier: &fakeRetrier{run: &run.Run{
+				ID: "run_retry", Kind: run.KindSplit, Status: run.StatusPending,
+			}},
+			WantStatus: http.StatusAccepted, WantBodyContains: "run_retry",
+		},
+		{ // Test 1: An unknown run is not found.
+			Name: "unknown", Retrier: &fakeRetrier{err: run.ErrNotFound},
+			WantStatus: http.StatusNotFound, WantBodyContains: "run not found",
+		},
+		{ // Test 2: A non split run conflicts.
+			Name: "not split", Retrier: &fakeRetrier{err: dispatch.ErrNotSplit},
+			WantStatus: http.StatusConflict, WantBodyContains: "only split runs",
+		},
+		{ // Test 3: An unfinished run conflicts.
+			Name: "not finished", Retrier: &fakeRetrier{err: dispatch.ErrNotFinished},
+			WantStatus: http.StatusConflict, WantBodyContains: "has not finished",
+		},
+		{ // Test 4: Nothing to retry conflicts.
+			Name: "nothing failed", Retrier: &fakeRetrier{err: dispatch.ErrNoFailedShards},
+			WantStatus: http.StatusConflict, WantBodyContains: "no failed shards",
+		},
+		{ // Test 5: Retrier failure maps to 500.
+			Name: "retrier error", Retrier: &fakeRetrier{err: errors.New("boom")},
+			WantStatus: http.StatusInternalServerError, WantBodyContains: "could not retry run",
+		},
+		{ // Test 6: Retry disabled is not found.
+			Name: "disabled", Retrier: nil,
+			WantStatus: http.StatusNotFound, WantBodyContains: "retry not enabled",
+		},
+	}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			opts := []Option{}
+			if test.Retrier != nil {
+				opts = append(opts, WithRetrier(test.Retrier))
+			}
+			handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(), opts...).Handler()
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec,
+				httptest.NewRequest(http.MethodPost, "/runs/run_1/retry", nil))
+			if rec.Code != test.WantStatus {
+				t.Errorf("status = %d, want %d", rec.Code, test.WantStatus)
+			}
+			if !strings.Contains(rec.Body.String(), test.WantBodyContains) {
+				t.Errorf("body %q does not contain %q", rec.Body.String(), test.WantBodyContains)
+			}
+		})
+	}
+}
+
 func TestSchedules(t *testing.T) {
 	t.Parallel()
 	handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(),
@@ -642,8 +723,8 @@ func TestNewPanicsOnNilDeps(t *testing.T) {
 		Store     run.Store
 		Submitter Submitter
 	}{
-		{Name: "nil store", Store: nil, Submitter: &fakeSubmitter{}},        // Test 0.
-		{Name: "nil submitter", Store: run.NewMemStore(), Submitter: nil},   // Test 1.
+		{Name: "nil store", Store: nil, Submitter: &fakeSubmitter{}},      // Test 0.
+		{Name: "nil submitter", Store: run.NewMemStore(), Submitter: nil}, // Test 1.
 	}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {

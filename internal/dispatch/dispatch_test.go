@@ -7,8 +7,11 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/google/go-cmp/cmp"
 
 	"github.com/dcadolph/yardmaster/internal/event"
 	"github.com/dcadolph/yardmaster/internal/roundhouse"
@@ -194,27 +197,49 @@ func TestPartition(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		Hosts      []string
+		Costs      map[string]float64
 		Shards     int
-		WantGroups int
+		WantGroups [][]string
 	}{
-		{Hosts: []string{"a", "b", "c", "d"}, Shards: 2, WantGroups: 2}, // Test 0: Even split.
-		{Hosts: []string{"a", "b", "c"}, Shards: 2, WantGroups: 2},      // Test 1: Uneven split.
-		{Hosts: []string{"a"}, Shards: 4, WantGroups: 1},                // Test 2: Fewer hosts than shards.
-		{Hosts: []string{"a", "b", "c", "d"}, Shards: 3, WantGroups: 3}, // Test 3: Three groups.
+		{ // Test 0: No costs balances by host count.
+			Hosts: []string{"a", "b", "c", "d"}, Shards: 2,
+			WantGroups: [][]string{{"a", "c"}, {"b", "d"}},
+		},
+		{ // Test 1: Uneven host count without costs.
+			Hosts: []string{"a", "b", "c"}, Shards: 2,
+			WantGroups: [][]string{{"a", "c"}, {"b"}},
+		},
+		{ // Test 2: Fewer hosts than shards collapses to one group per host.
+			Hosts: []string{"a"}, Shards: 4,
+			WantGroups: [][]string{{"a"}},
+		},
+		{ // Test 3: One expensive host gets its own shard.
+			Hosts: []string{"a", "b", "c", "d"}, Shards: 2,
+			Costs:      map[string]float64{"a": 10, "b": 1, "c": 1, "d": 1},
+			WantGroups: [][]string{{"a"}, {"b", "c", "d"}},
+		},
+		{ // Test 4: A host without history weighs the average of the known costs.
+			Hosts: []string{"a", "b", "c"}, Shards: 2,
+			Costs:      map[string]float64{"a": 6, "b": 2},
+			WantGroups: [][]string{{"a"}, {"c", "b"}},
+		},
+		{ // Test 5: Zero recorded cost counts as no history, not as free.
+			Hosts: []string{"a", "b", "c", "d"}, Shards: 2,
+			Costs:      map[string]float64{"a": 0, "b": 0, "c": 0, "d": 0},
+			WantGroups: [][]string{{"a", "c"}, {"b", "d"}},
+		},
+		{ // Test 6: Costs spread across three shards.
+			Hosts: []string{"a", "b", "c", "d", "e", "f"}, Shards: 3,
+			Costs:      map[string]float64{"a": 9, "b": 8, "c": 7, "d": 3, "e": 2, "f": 1},
+			WantGroups: [][]string{{"a", "f"}, {"b", "e"}, {"c", "d"}},
+		},
 	}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
-			groups := partition(test.Hosts, test.Shards)
-			if len(groups) != test.WantGroups {
-				t.Errorf("groups = %d, want %d", len(groups), test.WantGroups)
-			}
-			total := 0
-			for _, g := range groups {
-				total += len(g)
-			}
-			if total != len(test.Hosts) {
-				t.Errorf("placed %d hosts, want %d", total, len(test.Hosts))
+			got := partition(test.Hosts, test.Shards, test.Costs)
+			if diff := cmp.Diff(test.WantGroups, got); diff != "" {
+				t.Errorf("partition mismatch (-want +got):\n%s", diff)
 			}
 		})
 	}
@@ -291,6 +316,140 @@ func TestDispatcherSplitFallsBackAndErrors(t *testing.T) {
 	}
 	if single.ShardCount != nil || single.ParentID != nil {
 		t.Errorf("single run should not be a split: %+v", single)
+	}
+}
+
+// flakyRunnerLister lists fixed hosts and fails any run whose limit includes failHost until fixed
+// flips, after which every run succeeds.
+type flakyRunnerLister struct {
+	// hosts is returned by Hosts.
+	hosts []string
+	// failHost fails a run whose limit contains it.
+	failHost string
+	// fixed disables failures once set.
+	fixed atomic.Bool
+}
+
+// Run fails when the spec limit targets the failing host and the runner is not fixed.
+func (f *flakyRunnerLister) Run(_ context.Context, spec roundhouse.Spec, _ io.Writer) (roundhouse.Result, error) {
+	if !f.fixed.Load() && strings.Contains(spec.Limit, f.failHost) {
+		return roundhouse.Result{ExitCode: 2}, nil
+	}
+	return roundhouse.Result{ExitCode: 0}, nil
+}
+
+// Hosts returns the fixed host set.
+func (f *flakyRunnerLister) Hosts(context.Context, string) ([]string, error) {
+	return f.hosts, nil
+}
+
+func TestDispatcherRetryFailedShards(t *testing.T) {
+	t.Parallel()
+	store := run.NewMemStore()
+	runner := &flakyRunnerLister{hosts: []string{"a", "b", "c", "d"}, failHost: "b"}
+	d := New(store, runner, nil)
+	defer d.Close()
+
+	parent, err := d.SubmitSplit(context.Background(), "play.yml", "inv", 2)
+	if err != nil {
+		t.Fatalf("SubmitSplit() error = %v", err)
+	}
+	if got := waitTerminal(t, store, parent.ID); got.Status != run.StatusFailed {
+		t.Fatalf("parent status = %q, want failed", got.Status)
+	}
+
+	shards, err := store.Shards(context.Background(), parent.ID)
+	if err != nil {
+		t.Fatalf("Shards() error = %v", err)
+	}
+	var failedLimit string
+	for _, s := range shards {
+		if s.Status == run.StatusFailed {
+			failedLimit = s.Limit
+		}
+	}
+	if !strings.Contains(failedLimit, "b") {
+		t.Fatalf("failed shard limit = %q, want the one containing b", failedLimit)
+	}
+
+	runner.fixed.Store(true)
+	retry, err := d.RetryFailedShards(context.Background(), parent.ID)
+	if err != nil {
+		t.Fatalf("RetryFailedShards() error = %v", err)
+	}
+	if retry.RetryOf == nil || *retry.RetryOf != parent.ID {
+		t.Errorf("RetryOf = %v, want %s", retry.RetryOf, parent.ID)
+	}
+	if retry.Kind != run.KindSplit {
+		t.Errorf("retry kind = %q, want %q", retry.Kind, run.KindSplit)
+	}
+	if retry.ShardCount == nil || *retry.ShardCount != 1 {
+		t.Errorf("retry ShardCount = %v, want 1", retry.ShardCount)
+	}
+
+	if got := waitTerminal(t, store, retry.ID); got.Status != run.StatusSucceeded {
+		t.Errorf("retry status = %q, want succeeded", got.Status)
+	}
+	retryShards, err := store.Shards(context.Background(), retry.ID)
+	if err != nil {
+		t.Fatalf("Shards() error = %v", err)
+	}
+	if len(retryShards) != 1 || retryShards[0].Limit != failedLimit {
+		t.Errorf("retry shards = %+v, want one shard with limit %q", retryShards, failedLimit)
+	}
+
+	original, err := store.Get(context.Background(), parent.ID)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if original.Status != run.StatusFailed {
+		t.Errorf("original parent status = %q, want failed left untouched", original.Status)
+	}
+}
+
+func TestDispatcherRetryFailedShardsErrors(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := run.NewMemStore()
+	d := New(store, &fakeRunnerLister{}, nil)
+	defer d.Close()
+
+	code := 0
+	parentID := "run_ok_split"
+	idx, count := 0, 1
+	for _, r := range []*run.Run{
+		{ID: "run_plain", Status: run.StatusFailed, CreatedAt: time.Now()},
+		{ID: "run_live_split", Kind: run.KindSplit, Status: run.StatusRunning, CreatedAt: time.Now()},
+		{
+			ID: parentID, Kind: run.KindSplit, Status: run.StatusSucceeded,
+			ExitCode: &code, CreatedAt: time.Now(),
+		},
+		{
+			ID: "run_ok_shard", Status: run.StatusSucceeded, CreatedAt: time.Now(),
+			ParentID: &parentID, ShardIndex: &idx, ShardCount: &count,
+		},
+	} {
+		if err := store.Save(ctx, r); err != nil {
+			t.Fatalf("Save() error = %v", err)
+		}
+	}
+
+	tests := []struct {
+		ID   string
+		Want error
+	}{
+		{ID: "missing", Want: run.ErrNotFound},       // Test 0: Unknown run.
+		{ID: "run_plain", Want: ErrNotSplit},         // Test 1: Not a split parent.
+		{ID: "run_live_split", Want: ErrNotFinished}, // Test 2: Split still running.
+		{ID: parentID, Want: ErrNoFailedShards},      // Test 3: Every shard succeeded.
+	}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			if _, err := d.RetryFailedShards(ctx, test.ID); !errors.Is(err, test.Want) {
+				t.Errorf("RetryFailedShards() error = %v, want %v", err, test.Want)
+			}
+		})
 	}
 }
 

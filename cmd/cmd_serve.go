@@ -90,9 +90,10 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	defer scheduler.Close()
 
 	httpServer := &http.Server{
-		Addr:              serveAddr,
+		Addr: serveAddr,
 		Handler: server.New(store, disp, log, server.WithStreamer(hub),
-			server.WithCanceler(disp), server.WithSchedules(db.Schedules())).Handler(),
+			server.WithCanceler(disp), server.WithRetrier(disp),
+			server.WithSchedules(db.Schedules())).Handler(),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 

@@ -27,6 +27,9 @@ type Store interface {
 	SaveHostSummary(ctx context.Context, runID string, summaries []HostSummary) error
 	// FleetHealth ranks hosts by failures over their most recent window runs, worst first.
 	FleetHealth(ctx context.Context, window int) ([]HostHealth, error)
+	// HostCosts returns each host's average recorded duration in seconds over its most recent
+	// window runs, for balancing splits by past cost.
+	HostCosts(ctx context.Context, window int) (map[string]float64, error)
 	// AppendLog appends raw output bytes to the run's log. Returns ErrNotFound if the run is absent.
 	AppendLog(ctx context.Context, id string, p []byte) error
 	// Log returns a copy of the run's captured output, or ErrNotFound.
@@ -217,6 +220,38 @@ func (m *memStore) FleetHealth(_ context.Context, window int) ([]HostHealth, err
 		}
 		return out[i].Host < out[j].Host
 	})
+	return out, nil
+}
+
+// HostCosts returns each host's average recorded duration in seconds over its most recent window
+// runs, for balancing splits by past cost.
+func (m *memStore) HostCosts(_ context.Context, window int) (map[string]float64, error) {
+	if window < 1 {
+		window = 1
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	byHost := make(map[string][]HostSummary)
+	for _, list := range m.summaries {
+		for _, hs := range list {
+			byHost[hs.Host] = append(byHost[hs.Host], hs)
+		}
+	}
+
+	out := make(map[string]float64, len(byHost))
+	for host, list := range byHost {
+		sort.Slice(list, func(i, j int) bool { return list[i].RanAt.After(list[j].RanAt) })
+		recent := list
+		if len(recent) > window {
+			recent = recent[:window]
+		}
+		total := 0.0
+		for _, hs := range recent {
+			total += hs.DurationSeconds
+		}
+		out[host] = total / float64(len(recent))
+	}
 	return out, nil
 }
 

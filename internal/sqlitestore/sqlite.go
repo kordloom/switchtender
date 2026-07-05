@@ -37,7 +37,8 @@ CREATE TABLE IF NOT EXISTS runs (
 	limit_pattern TEXT NOT NULL DEFAULT '',
 	kind          TEXT NOT NULL DEFAULT '',
 	step_name     TEXT NOT NULL DEFAULT '',
-	step_index    INTEGER
+	step_index    INTEGER,
+	retry_of      TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_runs_created_at ON runs(created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_parent ON runs(parent_id, shard_index);
@@ -62,6 +63,7 @@ CREATE TABLE IF NOT EXISTS run_host_summary (
 	unreachable INTEGER NOT NULL,
 	skipped     INTEGER NOT NULL,
 	worst       TEXT NOT NULL,
+	duration_seconds REAL NOT NULL DEFAULT 0,
 	ran_at      TEXT NOT NULL,
 	PRIMARY KEY (run_id, host)
 );
@@ -82,6 +84,13 @@ CREATE TABLE IF NOT EXISTS schedules (
 );
 CREATE INDEX IF NOT EXISTS idx_schedules_created ON schedules(created_at, id);
 `
+
+// alterations add columns to tables created before the column existed. New databases already have
+// them from the schema, so a duplicate column error is expected and ignored.
+var alterations = []string{
+	"ALTER TABLE runs ADD COLUMN retry_of TEXT",
+	"ALTER TABLE run_host_summary ADD COLUMN duration_seconds REAL NOT NULL DEFAULT 0",
+}
 
 // store is a run.Store backed by a SQLite database.
 type store struct {
@@ -125,6 +134,13 @@ func Open(path string) (*DB, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate schema: %w", err)
 	}
+	for _, alter := range alterations {
+		if _, err := db.Exec(alter); err != nil &&
+			!strings.Contains(err.Error(), "duplicate column name") {
+			_ = db.Close()
+			return nil, fmt.Errorf("migrate schema: %w", err)
+		}
+	}
 	return &DB{db: db, runs: &store{db: db}, schedules: &scheduleStore{db: db}}, nil
 }
 
@@ -145,27 +161,29 @@ func (d *DB) Close() error {
 
 // runColumns is the shared select list so every read scans the same columns in the same order.
 const runColumns = `id, playbook, inventory, status, exit_code, error, created_at, started_at,
-	ended_at, parent_id, shard_index, shard_count, limit_pattern, kind, step_name, step_index`
+	ended_at, parent_id, shard_index, shard_count, limit_pattern, kind, step_name, step_index,
+	retry_of`
 
 // Save inserts or replaces the run identified by r.ID.
 func (s *store) Save(ctx context.Context, r *run.Run) error {
 	const q = `
 INSERT INTO runs
 	(id, playbook, inventory, status, exit_code, error, created_at, started_at, ended_at,
-	 parent_id, shard_index, shard_count, limit_pattern, kind, step_name, step_index)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	 parent_id, shard_index, shard_count, limit_pattern, kind, step_name, step_index, retry_of)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
 	playbook=excluded.playbook, inventory=excluded.inventory, status=excluded.status,
 	exit_code=excluded.exit_code, error=excluded.error, created_at=excluded.created_at,
 	started_at=excluded.started_at, ended_at=excluded.ended_at,
 	parent_id=excluded.parent_id, shard_index=excluded.shard_index,
 	shard_count=excluded.shard_count, limit_pattern=excluded.limit_pattern,
-	kind=excluded.kind, step_name=excluded.step_name, step_index=excluded.step_index`
+	kind=excluded.kind, step_name=excluded.step_name, step_index=excluded.step_index,
+	retry_of=excluded.retry_of`
 	_, err := s.db.ExecContext(ctx, q,
 		r.ID, r.Playbook, r.Inventory, string(r.Status), nullInt(r.ExitCode), r.Error,
 		formatTime(r.CreatedAt), nullTime(r.StartedAt), nullTime(r.EndedAt),
 		nullString(r.ParentID), nullInt(r.ShardIndex), nullInt(r.ShardCount), r.Limit,
-		r.Kind, r.StepName, nullInt(r.StepIndex),
+		r.Kind, r.StepName, nullInt(r.StepIndex), nullString(r.RetryOf),
 	)
 	if err != nil {
 		return fmt.Errorf("save run: %w", err)
@@ -223,8 +241,9 @@ func (s *store) SaveHostSummary(ctx context.Context, runID string, summaries []r
 		return fmt.Errorf("save host summary: %w", err)
 	}
 	stmt, err := tx.PrepareContext(ctx, `
-INSERT INTO run_host_summary (run_id, host, ok, changed, failures, unreachable, skipped, worst, ran_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+INSERT INTO run_host_summary
+	(run_id, host, ok, changed, failures, unreachable, skipped, worst, duration_seconds, ran_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return fmt.Errorf("save host summary: %w", err)
 	}
@@ -232,7 +251,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 
 	for _, hs := range summaries {
 		if _, err := stmt.ExecContext(ctx, runID, hs.Host, hs.OK, hs.Changed, hs.Failures,
-			hs.Unreachable, hs.Skipped, hs.Worst, formatTime(hs.RanAt)); err != nil {
+			hs.Unreachable, hs.Skipped, hs.Worst, hs.DurationSeconds, formatTime(hs.RanAt)); err != nil {
 			return fmt.Errorf("save host summary: %w", err)
 		}
 	}
@@ -287,6 +306,43 @@ ORDER BY failures DESC, host`
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("fleet health: %w", err)
+	}
+	return out, nil
+}
+
+// HostCosts returns each host's average recorded duration in seconds over its most recent window
+// runs, for balancing splits by past cost.
+func (s *store) HostCosts(ctx context.Context, window int) (map[string]float64, error) {
+	if window < 1 {
+		window = 1
+	}
+	const q = `
+WITH ranked AS (
+	SELECT host, duration_seconds,
+		ROW_NUMBER() OVER (PARTITION BY host ORDER BY ran_at DESC) AS rn
+	FROM run_host_summary
+)
+SELECT host, AVG(duration_seconds) FROM ranked WHERE rn <= ? GROUP BY host`
+
+	rows, err := s.db.QueryContext(ctx, q, window)
+	if err != nil {
+		return nil, fmt.Errorf("host costs: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := make(map[string]float64)
+	for rows.Next() {
+		var (
+			host string
+			cost float64
+		)
+		if err := rows.Scan(&host, &cost); err != nil {
+			return nil, fmt.Errorf("host costs: %w", err)
+		}
+		out[host] = cost
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("host costs: %w", err)
 	}
 	return out, nil
 }
@@ -453,10 +509,11 @@ func scanRun(s scanner) (*run.Run, error) {
 		shardIdx sql.NullInt64
 		shardCnt sql.NullInt64
 		stepIdx  sql.NullInt64
+		retryOf  sql.NullString
 	)
 	if err := s.Scan(&r.ID, &r.Playbook, &r.Inventory, &status, &exit, &r.Error,
 		&created, &started, &ended, &parent, &shardIdx, &shardCnt, &r.Limit,
-		&r.Kind, &r.StepName, &stepIdx); err != nil {
+		&r.Kind, &r.StepName, &stepIdx, &retryOf); err != nil {
 		return nil, err
 	}
 	r.Status = run.Status(status)
@@ -490,6 +547,10 @@ func scanRun(s scanner) (*run.Run, error) {
 	if stepIdx.Valid {
 		i := int(stepIdx.Int64)
 		r.StepIndex = &i
+	}
+	if retryOf.Valid {
+		id := retryOf.String
+		r.RetryOf = &id
 	}
 	return &r, nil
 }

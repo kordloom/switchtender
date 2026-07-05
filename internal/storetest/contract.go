@@ -30,6 +30,7 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Run("pipeline steps ordered", func(t *testing.T) { testSteps(t, newStore()) })
 	t.Run("non-terminal runs", func(t *testing.T) { testNonTerminal(t, newStore()) })
 	t.Run("fleet health ranking", func(t *testing.T) { testFleetHealth(t, newStore()) })
+	t.Run("host costs", func(t *testing.T) { testHostCosts(t, newStore()) })
 }
 
 // sampleRun returns a fully populated terminal run with deterministic times.
@@ -38,10 +39,12 @@ func sampleRun(id string) *run.Run {
 	started := created.Add(time.Second)
 	ended := created.Add(2 * time.Second)
 	code := 0
+	retryOf := "run_prior"
 	return &run.Run{
 		ID: id, Playbook: "play.yml", Inventory: "inventory.ini",
 		Status: run.StatusSucceeded, ExitCode: &code,
 		CreatedAt: created, StartedAt: &started, EndedAt: &ended,
+		RetryOf: &retryOf,
 	}
 }
 
@@ -395,5 +398,49 @@ func testFleetHealth(t *testing.T, store run.Store) {
 		if h.Host == "db01" && h.Failures != 0 {
 			t.Errorf("db01 window 1 failures = %d, want 0 since most recent run was ok", h.Failures)
 		}
+	}
+}
+
+// testHostCosts verifies per host durations persist and average over the recent window.
+func testHostCosts(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	base := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	save := func(runID string, at time.Time, durations map[string]float64) {
+		var sums []run.HostSummary
+		for host, d := range durations {
+			sums = append(sums, run.HostSummary{Host: host, Worst: "ok", DurationSeconds: d, RanAt: at})
+		}
+		if err := store.SaveHostSummary(ctx, runID, sums); err != nil {
+			t.Fatalf("SaveHostSummary() error = %v", err)
+		}
+	}
+	save("r1", base, map[string]float64{"db01": 30, "web01": 4})
+	save("r2", base.Add(time.Hour), map[string]float64{"db01": 20, "web01": 2})
+	save("r3", base.Add(2*time.Hour), map[string]float64{"db01": 10})
+
+	costs, err := store.HostCosts(ctx, 10)
+	if err != nil {
+		t.Fatalf("HostCosts() error = %v", err)
+	}
+	want := map[string]float64{"db01": 20, "web01": 3}
+	if diff := cmp.Diff(want, costs, cmpopts.EquateEmpty()); diff != "" {
+		t.Errorf("HostCosts() mismatch (-want +got):\n%s", diff)
+	}
+
+	windowed, err := store.HostCosts(ctx, 1)
+	if err != nil {
+		t.Fatalf("HostCosts() error = %v", err)
+	}
+	wantWindowed := map[string]float64{"db01": 10, "web01": 2}
+	if diff := cmp.Diff(wantWindowed, windowed, cmpopts.EquateEmpty()); diff != "" {
+		t.Errorf("HostCosts(window 1) mismatch (-want +got):\n%s", diff)
+	}
+
+	empty, err := store.HostCosts(ctx, 0)
+	if err != nil {
+		t.Fatalf("HostCosts() error = %v", err)
+	}
+	if diff := cmp.Diff(wantWindowed, empty, cmpopts.EquateEmpty()); diff != "" {
+		t.Errorf("HostCosts(window 0) should clamp to 1 (-want +got):\n%s", diff)
 	}
 }

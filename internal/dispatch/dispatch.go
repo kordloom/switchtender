@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -24,6 +25,9 @@ const DefaultWorkers = 4
 
 // tailPollInterval is how often the event tailer checks the sidecar file for new lines.
 const tailPollInterval = 75 * time.Millisecond
+
+// costWindow is how many recent runs per host feed the average duration used to balance splits.
+const costWindow = 5
 
 // Publisher receives live run output for streaming to clients. All methods must be safe for
 // concurrent use and must not block.
@@ -159,7 +163,9 @@ func (d *Dispatcher) Submit(ctx context.Context, playbook, inventory string) (*r
 
 // SubmitSplit shards a run across the inventory and returns the parent run in pending state. Each
 // shard runs the same playbook limited to its slice of hosts, and the parent rolls up their result.
-// When shards is below two or the inventory has fewer than two hosts, it falls back to a single run.
+// Hosts are packed into shards by their average duration in recent runs so each shard carries a
+// similar amount of work; hosts without history balance by count. When shards is below two or the
+// inventory has fewer than two hosts, it falls back to a single run.
 func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string, shards int) (*run.Run, error) {
 	if playbook == "" {
 		return nil, ErrNoPlaybook
@@ -179,7 +185,13 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 		return d.Submit(ctx, playbook, inventory)
 	}
 
-	groups := partition(hosts, shards)
+	costs, err := d.store.HostCosts(ctx, costWindow)
+	if err != nil {
+		d.log.Warn("dispatch: host costs unavailable: balancing by host count: " + err.Error())
+		costs = nil
+	}
+
+	groups := partition(hosts, shards, costs)
 	count := len(groups)
 	parent := &run.Run{
 		ID: run.NewID(), Playbook: playbook, Inventory: inventory, Kind: run.KindSplit,
@@ -209,6 +221,67 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 	go d.coordinate(parent.Clone(), children)
 
 	return parent, nil
+}
+
+// RetryFailedShards creates and starts a new split run that re-runs only the failed shards of a
+// finished split parent, keeping each failed shard's host group. Shards that succeeded do not run
+// again. The new parent links back to the run it retries through RetryOf.
+func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string) (*run.Run, error) {
+	parent, err := d.store.Get(ctx, parentID)
+	if err != nil {
+		return nil, err
+	}
+	if parent.Kind != run.KindSplit {
+		return nil, ErrNotSplit
+	}
+	if !parent.Status.Terminal() {
+		return nil, ErrNotFinished
+	}
+
+	shards, err := d.store.Shards(ctx, parentID)
+	if err != nil {
+		return nil, fmt.Errorf("list shards: %w", err)
+	}
+	var failed []*run.Run
+	for _, s := range shards {
+		if s.Status != run.StatusSucceeded {
+			failed = append(failed, s)
+		}
+	}
+	if len(failed) == 0 {
+		return nil, ErrNoFailedShards
+	}
+
+	count := len(failed)
+	retry := &run.Run{
+		ID: run.NewID(), Playbook: parent.Playbook, Inventory: parent.Inventory,
+		Kind: run.KindSplit, Status: run.StatusPending, CreatedAt: time.Now(),
+		ShardCount: &count, RetryOf: &parent.ID,
+	}
+	if err := d.store.Save(ctx, retry); err != nil {
+		return nil, err
+	}
+
+	retryID := retry.ID
+	children := make([]*run.Run, 0, count)
+	for i, shard := range failed {
+		idx, shardCount := i, count
+		child := &run.Run{
+			ID: run.NewID(), Playbook: retry.Playbook, Inventory: retry.Inventory,
+			Status: run.StatusPending, CreatedAt: time.Now(),
+			ParentID: &retryID, ShardIndex: &idx, ShardCount: &shardCount,
+			Limit: shard.Limit,
+		}
+		if err := d.store.Save(ctx, child); err != nil {
+			return nil, err
+		}
+		children = append(children, child)
+	}
+
+	d.wg.Add(1)
+	go d.coordinate(retry.Clone(), children)
+
+	return retry, nil
 }
 
 // coordinate runs each shard through the worker pool and finalizes the parent from their results.
@@ -351,17 +424,67 @@ func (d *Dispatcher) runPipeline(parent *run.Run, steps []run.PipelineStep) {
 	}
 }
 
-// partition splits hosts into at most shards groups balanced by host count using round robin.
-func partition(hosts []string, shards int) [][]string {
-	n := shards
-	if n > len(hosts) {
-		n = len(hosts)
-	}
+// partition splits hosts into at most shards groups balanced by expected cost. Each host weighs
+// its average duration from costs; a host without history weighs the average of the known costs,
+// or one when nothing is known, which degrades to balancing by host count. Hosts are placed
+// heaviest first into the group with the least total weight, breaking ties by fewer hosts and then
+// lower group index so the result is deterministic.
+func partition(hosts []string, shards int, costs map[string]float64) [][]string {
+	n := min(shards, len(hosts))
+	weights := hostWeights(hosts, costs)
+
+	order := make([]string, len(hosts))
+	copy(order, hosts)
+	sort.SliceStable(order, func(i, j int) bool {
+		if weights[order[i]] != weights[order[j]] {
+			return weights[order[i]] > weights[order[j]]
+		}
+		return order[i] < order[j]
+	})
+
 	groups := make([][]string, n)
-	for i, host := range hosts {
-		groups[i%n] = append(groups[i%n], host)
+	totals := make([]float64, n)
+	for _, host := range order {
+		lightest := 0
+		for i := 1; i < n; i++ {
+			switch {
+			case totals[i] < totals[lightest]:
+				lightest = i
+			case totals[i] == totals[lightest] && len(groups[i]) < len(groups[lightest]):
+				lightest = i
+			}
+		}
+		groups[lightest] = append(groups[lightest], host)
+		totals[lightest] += weights[host]
 	}
 	return groups
+}
+
+// hostWeights maps each host to its expected cost. Hosts missing from costs get the average known
+// cost so they neither dominate nor vanish, and a flat one when no host has a usable cost.
+func hostWeights(hosts []string, costs map[string]float64) map[string]float64 {
+	known := 0.0
+	knownCount := 0
+	for _, host := range hosts {
+		if c, ok := costs[host]; ok && c > 0 {
+			known += c
+			knownCount++
+		}
+	}
+	fallback := 1.0
+	if knownCount > 0 {
+		fallback = known / float64(knownCount)
+	}
+
+	out := make(map[string]float64, len(hosts))
+	for _, host := range hosts {
+		if c, ok := costs[host]; ok && c > 0 {
+			out[host] = c
+			continue
+		}
+		out[host] = fallback
+	}
+	return out
 }
 
 // Close stops accepting new work, cancels in-flight runs, and waits for workers to drain.
