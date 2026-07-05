@@ -28,6 +28,7 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Run("events append and read", func(t *testing.T) { testEvents(t, newStore()) })
 	t.Run("shards excluded from list", func(t *testing.T) { testShards(t, newStore()) })
 	t.Run("non-terminal runs", func(t *testing.T) { testNonTerminal(t, newStore()) })
+	t.Run("fleet health ranking", func(t *testing.T) { testFleetHealth(t, newStore()) })
 }
 
 // sampleRun returns a fully populated terminal run with deterministic times.
@@ -294,5 +295,54 @@ func testNonTerminal(t *testing.T, store run.Store) {
 	}
 	if seen["done"] || seen["gone"] {
 		t.Error("NonTerminal returned a terminal run")
+	}
+}
+
+// testFleetHealth verifies host summaries persist and rank hosts by recent failures with windowing.
+func testFleetHealth(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	base := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	save := func(runID string, at time.Time, hosts map[string]string) {
+		var sums []run.HostSummary
+		for host, worst := range hosts {
+			sums = append(sums, run.HostSummary{Host: host, Worst: worst, RanAt: at})
+		}
+		if err := store.SaveHostSummary(ctx, runID, sums); err != nil {
+			t.Fatalf("SaveHostSummary() error = %v", err)
+		}
+	}
+	save("r1", base, map[string]string{"db01": "failed", "web01": "ok"})
+	save("r2", base.Add(time.Hour), map[string]string{"db01": "failed", "web01": "ok"})
+	save("r3", base.Add(2*time.Hour), map[string]string{"db01": "ok", "web01": "changed"})
+
+	health, err := store.FleetHealth(ctx, 10)
+	if err != nil {
+		t.Fatalf("FleetHealth() error = %v", err)
+	}
+	byHost := make(map[string]run.HostHealth, len(health))
+	for _, h := range health {
+		byHost[h.Host] = h
+	}
+	if db := byHost["db01"]; db.Failures != 2 || db.Total != 3 || db.LastOutcome != "ok" {
+		t.Errorf("db01 = %+v, want failures 2 total 3 last ok", db)
+	}
+	if web := byHost["web01"]; web.Failures != 0 {
+		t.Errorf("web01 failures = %d, want 0", web.Failures)
+	}
+	if len(health) < 2 || health[0].Host != "db01" {
+		t.Errorf("ranking = %+v, want db01 first", health)
+	}
+
+	windowed, err := store.FleetHealth(ctx, 1)
+	if err != nil {
+		t.Fatalf("FleetHealth() error = %v", err)
+	}
+	for _, h := range windowed {
+		if h.Total != 1 {
+			t.Errorf("window 1 total for %s = %d, want 1", h.Host, h.Total)
+		}
+		if h.Host == "db01" && h.Failures != 0 {
+			t.Errorf("db01 window 1 failures = %d, want 0 since most recent run was ok", h.Failures)
+		}
 	}
 }

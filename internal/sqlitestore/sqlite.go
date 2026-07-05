@@ -49,6 +49,19 @@ CREATE TABLE IF NOT EXISTS run_events (
 	data   TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_run_events_run ON run_events(run_id, seq);
+CREATE TABLE IF NOT EXISTS run_host_summary (
+	run_id      TEXT NOT NULL,
+	host        TEXT NOT NULL,
+	ok          INTEGER NOT NULL,
+	changed     INTEGER NOT NULL,
+	failures    INTEGER NOT NULL,
+	unreachable INTEGER NOT NULL,
+	skipped     INTEGER NOT NULL,
+	worst       TEXT NOT NULL,
+	ran_at      TEXT NOT NULL,
+	PRIMARY KEY (run_id, host)
+);
+CREATE INDEX IF NOT EXISTS idx_host_summary_host ON run_host_summary(host, ran_at DESC);
 `
 
 // store is a run.Store backed by a SQLite database.
@@ -150,6 +163,86 @@ func (s *store) Shards(ctx context.Context, parentID string) ([]*run.Run, error)
 func (s *store) NonTerminal(ctx context.Context) ([]*run.Run, error) {
 	const q = "SELECT " + runColumns + " FROM runs WHERE status IN ('pending', 'running')"
 	return s.queryRuns(ctx, "list non-terminal runs", q)
+}
+
+// SaveHostSummary replaces the stored per host summaries for a run.
+func (s *store) SaveHostSummary(ctx context.Context, runID string, summaries []run.HostSummary) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("save host summary: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, "DELETE FROM run_host_summary WHERE run_id=?", runID); err != nil {
+		return fmt.Errorf("save host summary: %w", err)
+	}
+	stmt, err := tx.PrepareContext(ctx, `
+INSERT INTO run_host_summary (run_id, host, ok, changed, failures, unreachable, skipped, worst, ran_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		return fmt.Errorf("save host summary: %w", err)
+	}
+	defer func() { _ = stmt.Close() }()
+
+	for _, hs := range summaries {
+		if _, err := stmt.ExecContext(ctx, runID, hs.Host, hs.OK, hs.Changed, hs.Failures,
+			hs.Unreachable, hs.Skipped, hs.Worst, formatTime(hs.RanAt)); err != nil {
+			return fmt.Errorf("save host summary: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("save host summary: %w", err)
+	}
+	return nil
+}
+
+// FleetHealth ranks hosts by failures over their most recent window runs, worst first.
+func (s *store) FleetHealth(ctx context.Context, window int) ([]run.HostHealth, error) {
+	if window < 1 {
+		window = 1
+	}
+	const q = `
+WITH ranked AS (
+	SELECT host, worst, ran_at,
+		ROW_NUMBER() OVER (PARTITION BY host ORDER BY ran_at DESC) AS rn
+	FROM run_host_summary
+)
+SELECT host,
+	SUM(CASE WHEN worst IN ('failed', 'unreachable') THEN 1 ELSE 0 END) AS failures,
+	COUNT(*) AS total,
+	MAX(CASE WHEN rn = 1 THEN worst END) AS last_outcome,
+	MAX(ran_at) AS last_run
+FROM ranked
+WHERE rn <= ?
+GROUP BY host
+ORDER BY failures DESC, host`
+
+	rows, err := s.db.QueryContext(ctx, q, window)
+	if err != nil {
+		return nil, fmt.Errorf("fleet health: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []run.HostHealth
+	for rows.Next() {
+		var (
+			h       run.HostHealth
+			lastOut string
+			lastRun string
+		)
+		if err := rows.Scan(&h.Host, &h.Failures, &h.Total, &lastOut, &lastRun); err != nil {
+			return nil, fmt.Errorf("fleet health: %w", err)
+		}
+		h.LastOutcome = lastOut
+		if h.LastRun, err = parseTime(lastRun); err != nil {
+			return nil, fmt.Errorf("fleet health: %w", err)
+		}
+		out = append(out, h)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("fleet health: %w", err)
+	}
+	return out, nil
 }
 
 // queryRuns runs a select that returns run rows and scans them all.

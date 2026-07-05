@@ -21,6 +21,10 @@ type Store interface {
 	Shards(ctx context.Context, parentID string) ([]*Run, error)
 	// NonTerminal returns all runs, including shards, that are not in a terminal state.
 	NonTerminal(ctx context.Context) ([]*Run, error)
+	// SaveHostSummary replaces the stored per host summaries for a run.
+	SaveHostSummary(ctx context.Context, runID string, summaries []HostSummary) error
+	// FleetHealth ranks hosts by failures over their most recent window runs, worst first.
+	FleetHealth(ctx context.Context, window int) ([]HostHealth, error)
 	// AppendLog appends raw output bytes to the run's log. Returns ErrNotFound if the run is absent.
 	AppendLog(ctx context.Context, id string, p []byte) error
 	// Log returns a copy of the run's captured output, or ErrNotFound.
@@ -41,14 +45,17 @@ type memStore struct {
 	logs map[string][]byte
 	// events maps run id to accumulated structured events.
 	events map[string][]event.Event
+	// summaries maps run id to its per host outcome summaries.
+	summaries map[string][]HostSummary
 }
 
 // NewMemStore returns an empty in-memory Store.
 func NewMemStore() Store {
 	return &memStore{
-		runs:   make(map[string]*Run),
-		logs:   make(map[string][]byte),
-		events: make(map[string][]event.Event),
+		runs:      make(map[string]*Run),
+		logs:      make(map[string][]byte),
+		events:    make(map[string][]event.Event),
+		summaries: make(map[string][]HostSummary),
 	}
 }
 
@@ -128,6 +135,62 @@ func (m *memStore) NonTerminal(_ context.Context) ([]*Run, error) {
 			out = append(out, r.Clone())
 		}
 	}
+	return out, nil
+}
+
+// SaveHostSummary replaces the stored per host summaries for a run.
+func (m *memStore) SaveHostSummary(_ context.Context, runID string, summaries []HostSummary) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(summaries) == 0 {
+		delete(m.summaries, runID)
+		return nil
+	}
+	cp := make([]HostSummary, len(summaries))
+	copy(cp, summaries)
+	m.summaries[runID] = cp
+	return nil
+}
+
+// FleetHealth ranks hosts by failures over their most recent window runs, worst first.
+func (m *memStore) FleetHealth(_ context.Context, window int) ([]HostHealth, error) {
+	if window < 1 {
+		window = 1
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	byHost := make(map[string][]HostSummary)
+	for _, list := range m.summaries {
+		for _, hs := range list {
+			byHost[hs.Host] = append(byHost[hs.Host], hs)
+		}
+	}
+
+	out := make([]HostHealth, 0, len(byHost))
+	for host, list := range byHost {
+		sort.Slice(list, func(i, j int) bool { return list[i].RanAt.After(list[j].RanAt) })
+		recent := list
+		if len(recent) > window {
+			recent = recent[:window]
+		}
+		failures := 0
+		for _, hs := range recent {
+			if FailedOutcome(hs.Worst) {
+				failures++
+			}
+		}
+		out = append(out, HostHealth{
+			Host: host, Failures: failures, Total: len(recent),
+			LastOutcome: recent[0].Worst, LastRun: recent[0].RanAt,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Failures != out[j].Failures {
+			return out[i].Failures > out[j].Failures
+		}
+		return out[i].Host < out[j].Host
+	})
 	return out, nil
 }
 
