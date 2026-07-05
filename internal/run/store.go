@@ -150,7 +150,10 @@ func (m *memStore) Steps(_ context.Context, parentID string) ([]*Run, error) {
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {
-		return stepIndex(out[i]) < stepIndex(out[j])
+		if stepIndex(out[i]) != stepIndex(out[j]) {
+			return stepIndex(out[i]) < stepIndex(out[j])
+		}
+		return out[i].Attempt < out[j].Attempt
 	})
 	return out, nil
 }

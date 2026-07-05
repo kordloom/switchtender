@@ -79,6 +79,8 @@ type Run struct {
 	StepName string `json:"step_name,omitempty"`
 	// StepIndex is the step order when this run is a pipeline step.
 	StepIndex *int `json:"step_index,omitempty"`
+	// Attempt is the retry attempt number for a pipeline step run, zero for the first try.
+	Attempt int `json:"attempt,omitempty"`
 }
 
 // Clone returns a deep copy so callers cannot mutate stored state through shared pointers.

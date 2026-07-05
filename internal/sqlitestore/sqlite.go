@@ -38,7 +38,8 @@ CREATE TABLE IF NOT EXISTS runs (
 	kind          TEXT NOT NULL DEFAULT '',
 	step_name     TEXT NOT NULL DEFAULT '',
 	step_index    INTEGER,
-	retry_of      TEXT
+	retry_of      TEXT,
+	attempt       INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_runs_created_at ON runs(created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_parent ON runs(parent_id, shard_index);
@@ -97,6 +98,7 @@ CREATE INDEX IF NOT EXISTS idx_schedules_created ON schedules(created_at, id);
 // them from the schema, so a duplicate column error is expected and ignored.
 var alterations = []string{
 	"ALTER TABLE runs ADD COLUMN retry_of TEXT",
+	"ALTER TABLE runs ADD COLUMN attempt INTEGER NOT NULL DEFAULT 0",
 	"ALTER TABLE run_host_summary ADD COLUMN duration_seconds REAL NOT NULL DEFAULT 0",
 }
 
@@ -170,15 +172,16 @@ func (d *DB) Close() error {
 // runColumns is the shared select list so every read scans the same columns in the same order.
 const runColumns = `id, playbook, inventory, status, exit_code, error, created_at, started_at,
 	ended_at, parent_id, shard_index, shard_count, limit_pattern, kind, step_name, step_index,
-	retry_of`
+	retry_of, attempt`
 
 // Save inserts or replaces the run identified by r.ID.
 func (s *store) Save(ctx context.Context, r *run.Run) error {
 	const q = `
 INSERT INTO runs
 	(id, playbook, inventory, status, exit_code, error, created_at, started_at, ended_at,
-	 parent_id, shard_index, shard_count, limit_pattern, kind, step_name, step_index, retry_of)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	 parent_id, shard_index, shard_count, limit_pattern, kind, step_name, step_index, retry_of,
+	 attempt)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
 	playbook=excluded.playbook, inventory=excluded.inventory, status=excluded.status,
 	exit_code=excluded.exit_code, error=excluded.error, created_at=excluded.created_at,
@@ -186,12 +189,12 @@ ON CONFLICT(id) DO UPDATE SET
 	parent_id=excluded.parent_id, shard_index=excluded.shard_index,
 	shard_count=excluded.shard_count, limit_pattern=excluded.limit_pattern,
 	kind=excluded.kind, step_name=excluded.step_name, step_index=excluded.step_index,
-	retry_of=excluded.retry_of`
+	retry_of=excluded.retry_of, attempt=excluded.attempt`
 	_, err := s.db.ExecContext(ctx, q,
 		r.ID, r.Playbook, r.Inventory, string(r.Status), nullInt(r.ExitCode), r.Error,
 		formatTime(r.CreatedAt), nullTime(r.StartedAt), nullTime(r.EndedAt),
 		nullString(r.ParentID), nullInt(r.ShardIndex), nullInt(r.ShardCount), r.Limit,
-		r.Kind, r.StepName, nullInt(r.StepIndex), nullString(r.RetryOf),
+		r.Kind, r.StepName, nullInt(r.StepIndex), nullString(r.RetryOf), r.Attempt,
 	)
 	if err != nil {
 		return fmt.Errorf("save run: %w", err)
@@ -227,7 +230,7 @@ func (s *store) Shards(ctx context.Context, parentID string) ([]*run.Run, error)
 
 // Steps returns the pipeline step runs of a parent ordered by step index.
 func (s *store) Steps(ctx context.Context, parentID string) ([]*run.Run, error) {
-	const q = "SELECT " + runColumns + " FROM runs WHERE parent_id=? ORDER BY step_index"
+	const q = "SELECT " + runColumns + " FROM runs WHERE parent_id=? ORDER BY step_index, attempt"
 	return s.queryRuns(ctx, "list steps", q, parentID)
 }
 
@@ -643,7 +646,7 @@ func scanRun(s scanner) (*run.Run, error) {
 	)
 	if err := s.Scan(&r.ID, &r.Playbook, &r.Inventory, &status, &exit, &r.Error,
 		&created, &started, &ended, &parent, &shardIdx, &shardCnt, &r.Limit,
-		&r.Kind, &r.StepName, &stepIdx, &retryOf); err != nil {
+		&r.Kind, &r.StepName, &stepIdx, &retryOf, &r.Attempt); err != nil {
 		return nil, err
 	}
 	r.Status = run.Status(status)

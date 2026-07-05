@@ -411,22 +411,7 @@ func (d *Dispatcher) runStepsLinear(ctx context.Context, parent *run.Run, steps 
 			return failed, true
 		}
 
-		idx := i
-		inventory := step.Inventory
-		if inventory == "" {
-			inventory = parent.Inventory
-		}
-		child := &run.Run{
-			ID: run.NewID(), Playbook: step.Playbook, Inventory: inventory,
-			Status: run.StatusPending, CreatedAt: time.Now(),
-			ParentID: &parent.ID, StepIndex: &idx, StepName: step.Name,
-		}
-		if err := d.store.Save(context.Background(), child); err != nil {
-			d.log.Error("dispatch: save pipeline step: "+err.Error(), zap.String("run_id", parent.ID))
-			return true, canceled
-		}
-
-		status := d.executeManaged(ctx, child)
+		status := d.runStepAttempts(ctx, parent, step, i)
 		if status == run.StatusCanceled {
 			return failed, true
 		}
@@ -438,6 +423,38 @@ func (d *Dispatcher) runStepsLinear(ctx context.Context, parent *run.Run, steps 
 		}
 	}
 	return failed, canceled
+}
+
+// runStepAttempts executes one pipeline step, re-running it until it succeeds or its retry budget
+// is spent. Every attempt is its own child run with an attempt number, so each try keeps a full
+// matrix, events, and history. It returns the final attempt's status.
+func (d *Dispatcher) runStepAttempts(ctx context.Context, parent *run.Run, step run.PipelineStep, idx int) run.Status {
+	inventory := step.Inventory
+	if inventory == "" {
+		inventory = parent.Inventory
+	}
+
+	status := run.StatusFailed
+	for attempt := 0; attempt <= step.Retries; attempt++ {
+		if ctx.Err() != nil {
+			return run.StatusCanceled
+		}
+		i := idx
+		child := &run.Run{
+			ID: run.NewID(), Playbook: step.Playbook, Inventory: inventory,
+			Status: run.StatusPending, CreatedAt: time.Now(),
+			ParentID: &parent.ID, StepIndex: &i, StepName: step.Name, Attempt: attempt,
+		}
+		if err := d.store.Save(context.Background(), child); err != nil {
+			d.log.Error("dispatch: save pipeline step: "+err.Error(), zap.String("run_id", parent.ID))
+			return run.StatusFailed
+		}
+		status = d.executeManaged(ctx, child)
+		if status == run.StatusSucceeded || status == run.StatusCanceled {
+			return status
+		}
+	}
+	return status
 }
 
 // partition splits hosts into at most shards groups balanced by expected cost. Each host weighs

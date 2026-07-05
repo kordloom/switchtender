@@ -217,6 +217,131 @@ func TestDispatcherPipelineDAGRunsBranchesInParallel(t *testing.T) {
 	}
 }
 
+// flakyStepRunner fails the named playbook failCount times, then succeeds. Other playbooks always
+// succeed.
+type flakyStepRunner struct {
+	// flakyOn is the playbook that fails at first.
+	flakyOn string
+	// failCount is how many failures happen before success.
+	failCount int
+	// calls counts invocations of the flaky playbook.
+	calls int
+	// mu guards calls.
+	mu sync.Mutex
+}
+
+// Run fails the flaky playbook until its failure budget is used up.
+func (r *flakyStepRunner) Run(_ context.Context, spec roundhouse.Spec, _ io.Writer) (roundhouse.Result, error) {
+	if spec.Playbook != r.flakyOn {
+		return roundhouse.Result{ExitCode: 0}, nil
+	}
+	r.mu.Lock()
+	r.calls++
+	failing := r.calls <= r.failCount
+	r.mu.Unlock()
+	if failing {
+		return roundhouse.Result{ExitCode: 2}, nil
+	}
+	return roundhouse.Result{ExitCode: 0}, nil
+}
+
+func TestDispatcherPipelineStepRetries(t *testing.T) {
+	t.Parallel()
+	store := run.NewMemStore()
+	d := New(store, &flakyStepRunner{flakyOn: "b.yml", failCount: 2}, nil)
+	defer d.Close()
+
+	parent, err := d.SubmitPipeline(context.Background(), "deploy", "inv", []run.PipelineStep{
+		{Name: "a", Playbook: "a.yml"},
+		{Name: "b", Playbook: "b.yml", Retries: 2},
+		{Name: "c", Playbook: "c.yml"},
+	})
+	if err != nil {
+		t.Fatalf("SubmitPipeline() error = %v", err)
+	}
+	got := waitTerminal(t, store, parent.ID)
+	if got.Status != run.StatusSucceeded {
+		t.Errorf("parent status = %q, want succeeded after retries", got.Status)
+	}
+
+	steps, err := store.Steps(context.Background(), parent.ID)
+	if err != nil {
+		t.Fatalf("Steps() error = %v", err)
+	}
+	var bAttempts []run.Status
+	for _, s := range steps {
+		if s.StepName == "b" {
+			if s.Attempt != len(bAttempts) {
+				t.Errorf("b attempt order = %d at position %d", s.Attempt, len(bAttempts))
+			}
+			bAttempts = append(bAttempts, s.Status)
+		}
+	}
+	want := []run.Status{run.StatusFailed, run.StatusFailed, run.StatusSucceeded}
+	if len(bAttempts) != 3 || bAttempts[0] != want[0] || bAttempts[1] != want[1] || bAttempts[2] != want[2] {
+		t.Errorf("b attempts = %v, want %v", bAttempts, want)
+	}
+}
+
+func TestDispatcherPipelineStepRetriesExhausted(t *testing.T) {
+	t.Parallel()
+	store := run.NewMemStore()
+	d := New(store, &scriptedRunner{failOn: "b.yml"}, nil)
+	defer d.Close()
+
+	parent, err := d.SubmitPipeline(context.Background(), "deploy", "inv", []run.PipelineStep{
+		{Name: "a", Playbook: "a.yml"},
+		{Name: "b", Playbook: "b.yml", Retries: 1},
+		{Name: "c", Playbook: "c.yml"},
+	})
+	if err != nil {
+		t.Fatalf("SubmitPipeline() error = %v", err)
+	}
+	got := waitTerminal(t, store, parent.ID)
+	if got.Status != run.StatusFailed {
+		t.Errorf("parent status = %q, want failed once retries are spent", got.Status)
+	}
+
+	steps, err := store.Steps(context.Background(), parent.ID)
+	if err != nil {
+		t.Fatalf("Steps() error = %v", err)
+	}
+	attempts := 0
+	for _, s := range steps {
+		if s.StepName == "b" {
+			attempts++
+		}
+		if s.StepName == "c" {
+			t.Error("step c ran after b exhausted its retries")
+		}
+	}
+	if attempts != 2 {
+		t.Errorf("b ran %d times, want 2, the first try plus one retry", attempts)
+	}
+}
+
+func TestDispatcherPipelineDAGRetries(t *testing.T) {
+	t.Parallel()
+	store := run.NewMemStore()
+	d := New(store, &flakyStepRunner{flakyOn: "b.yml", failCount: 1}, nil)
+	defer d.Close()
+
+	steps := diamond(false)
+	steps[1].Retries = 1
+	parent, err := d.SubmitPipeline(context.Background(), "deploy", "inv", steps)
+	if err != nil {
+		t.Fatalf("SubmitPipeline() error = %v", err)
+	}
+	got := waitTerminal(t, store, parent.ID)
+	if got.Status != run.StatusSucceeded {
+		t.Errorf("parent status = %q, want succeeded, b recovered on retry so d ran", got.Status)
+	}
+	names := stepNames(t, store, parent.ID)
+	if len(names) != 5 {
+		t.Errorf("step runs = %v, want 5, four steps plus one retry attempt", names)
+	}
+}
+
 func TestDispatcherPipelineDAGValidation(t *testing.T) {
 	t.Parallel()
 	d := New(run.NewMemStore(), &scriptedRunner{}, nil)

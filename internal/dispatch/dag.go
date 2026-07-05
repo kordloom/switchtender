@@ -3,7 +3,6 @@ package dispatch
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/dcadolph/yardmaster/internal/run"
 )
@@ -126,24 +125,8 @@ func (d *Dispatcher) runStepsDAG(ctx context.Context, parent *run.Run, steps []r
 		running++
 		idx := i
 		step := steps[i]
-		inventory := step.Inventory
-		if inventory == "" {
-			inventory = parent.Inventory
-		}
-		child := &run.Run{
-			ID: run.NewID(), Playbook: step.Playbook, Inventory: inventory,
-			Status: run.StatusPending, CreatedAt: time.Now(),
-			ParentID: &parent.ID, StepIndex: &idx, StepName: step.Name,
-		}
-		if err := d.store.Save(context.Background(), child); err != nil {
-			d.log.Error("dispatch: save pipeline step: " + err.Error())
-			running--
-			states[i] = stepDone
-			results[i] = run.StatusFailed
-			return
-		}
 		go func() {
-			done <- stepResult{idx: idx, status: d.executeManaged(ctx, child)}
+			done <- stepResult{idx: idx, status: d.runStepAttempts(ctx, parent, step, idx)}
 		}()
 	}
 
