@@ -53,6 +53,7 @@ func (u *UI) Handler() http.Handler {
 	mux.HandleFunc("GET /ui/runs/{id}", u.detail)
 	mux.HandleFunc("GET /ui/fleet", u.fleet)
 	mux.HandleFunc("GET /ui/hosts/{host}", u.host)
+	mux.HandleFunc("GET /ui/tasks", u.tasks)
 	mux.HandleFunc("GET /ui/schedules", u.schedules)
 	mux.HandleFunc("GET /ui/", u.index)
 	return mux
@@ -76,6 +77,11 @@ func (u *UI) fleet(w http.ResponseWriter, _ *http.Request) {
 // host renders one host's run history page.
 func (u *UI) host(w http.ResponseWriter, r *http.Request) {
 	u.render(w, "host.html", map[string]string{"Host": r.PathValue("host")})
+}
+
+// tasks renders the task duration trends page.
+func (u *UI) tasks(w http.ResponseWriter, _ *http.Request) {
+	u.render(w, "tasks.html", nil)
 }
 
 // schedules renders the schedules page.

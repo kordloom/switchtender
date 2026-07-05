@@ -17,6 +17,8 @@ document.addEventListener("DOMContentLoaded", () => {
 		loadFleet();
 	} else if (page === "host") {
 		loadHost(document.body.dataset.host);
+	} else if (page === "tasks") {
+		loadTasks();
 	} else if (page === "schedules") {
 		loadSchedules();
 	}
@@ -222,6 +224,60 @@ async function loadHost(host) {
 	} catch (e) {
 		setStatus("Failed to load host history: " + e.message);
 	}
+}
+
+// loadTasks populates the task trends table with each task's recent duration aggregate.
+async function loadTasks() {
+	try {
+		const data = await getJSON("/tasks");
+		const tasks = data.tasks || [];
+		if (tasks.length === 0) {
+			setStatus("No task history yet. Run a playbook to build trends.");
+			return;
+		}
+		tasks.sort((a, b) => b.avg_seconds - a.avg_seconds);
+		const tbody = document.getElementById("tasks");
+		for (const t of tasks) {
+			const tr = document.createElement("tr");
+			tr.appendChild(td(t.task));
+			const trend = document.createElement("td");
+			trend.appendChild(trendChip(t.avg_seconds, t.last_seconds, t.runs));
+			tr.appendChild(trend);
+			tr.appendChild(td(String(t.runs)));
+			tr.appendChild(td(fmtSeconds(t.avg_seconds)));
+			tr.appendChild(td(fmtSeconds(t.last_seconds)));
+			tr.appendChild(td(fmtTime(t.last_run)));
+			tbody.appendChild(tr);
+		}
+		setStatus("");
+		document.querySelector("table.runs").hidden = false;
+	} catch (e) {
+		setStatus("Failed to load task trends: " + e.message);
+	}
+}
+
+// trendChip labels how a task's latest duration compares to its own recent average.
+function trendChip(avg, last, runs) {
+	const chip = document.createElement("span");
+	if (runs < 2 || avg <= 0) {
+		chip.className = "chip none";
+		chip.textContent = "new";
+	} else if (last > avg * 1.25) {
+		chip.className = "chip flaky";
+		chip.textContent = "slower";
+	} else if (last < avg * 0.8) {
+		chip.className = "chip ok";
+		chip.textContent = "faster";
+	} else {
+		chip.className = "chip none";
+		chip.textContent = "steady";
+	}
+	return chip;
+}
+
+// fmtSeconds renders a duration in seconds with one decimal.
+function fmtSeconds(s) {
+	return (s || 0).toFixed(1) + "s";
 }
 
 // loadSchedules populates the schedules table.
