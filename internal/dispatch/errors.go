@@ -15,4 +15,12 @@ var (
 	ErrNotFinished = errors.New("run not finished")
 	// ErrNoFailedShards is returned when a shard retry finds nothing to retry.
 	ErrNoFailedShards = errors.New("no failed shards")
+	// ErrUnnamedStep is returned when a dependency declaring pipeline has a step without a name.
+	ErrUnnamedStep = errors.New("step missing name")
+	// ErrDuplicateStep is returned when two pipeline steps share a name.
+	ErrDuplicateStep = errors.New("duplicate step name")
+	// ErrUnknownDependency is returned when a step depends on a name no step carries.
+	ErrUnknownDependency = errors.New("unknown dependency")
+	// ErrDependencyCycle is returned when pipeline dependencies form a cycle.
+	ErrDependencyCycle = errors.New("dependency cycle")
 )

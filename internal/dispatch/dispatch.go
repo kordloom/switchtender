@@ -333,9 +333,10 @@ func (d *Dispatcher) coordinate(parent *run.Run, children []*run.Run) {
 	d.publisher.CloseRun(parent.ID)
 }
 
-// SubmitPipeline runs an ordered sequence of playbook steps as one pipeline and returns the parent
-// run in pending state. Each step is a child run, so it gets the full matrix, events, and cross run
-// treatment. A step that fails stops the pipeline unless the step is marked continue on failure.
+// SubmitPipeline runs playbook steps as one pipeline and returns the parent run in pending state.
+// Each step is a child run, so it gets the full matrix, events, and cross run treatment. Steps run
+// in order, or as a dependency graph when any step declares depends_on. A step that fails stops
+// what follows or depends on it unless the step is marked continue on failure.
 func (d *Dispatcher) SubmitPipeline(ctx context.Context, name, inventory string, steps []run.PipelineStep) (*run.Run, error) {
 	if len(steps) == 0 {
 		return nil, ErrNoSteps
@@ -343,6 +344,11 @@ func (d *Dispatcher) SubmitPipeline(ctx context.Context, name, inventory string,
 	for _, s := range steps {
 		if s.Playbook == "" {
 			return nil, ErrNoPlaybook
+		}
+	}
+	if hasDependencies(steps) {
+		if err := validateDAG(steps); err != nil {
+			return nil, err
 		}
 	}
 
@@ -360,9 +366,9 @@ func (d *Dispatcher) SubmitPipeline(ctx context.Context, name, inventory string,
 	return parent, nil
 }
 
-// runPipeline executes pipeline steps in order, honoring each step's failure policy, and finalizes
-// the parent. The parent registers its own cancel so stopping the parent stops the current step and
-// halts the sequence.
+// runPipeline executes pipeline steps, in order or as a dependency graph, and finalizes the
+// parent. The parent registers its own cancel so stopping the parent stops the running steps and
+// halts everything that has not started.
 func (d *Dispatcher) runPipeline(parent *run.Run, steps []run.PipelineStep) {
 	defer d.wg.Done()
 
@@ -376,12 +382,33 @@ func (d *Dispatcher) runPipeline(parent *run.Run, steps []run.PipelineStep) {
 	parent.StartedAt = &started
 	d.save(parent)
 
-	failed := false
-	canceled := false
+	var failed, canceled bool
+	if hasDependencies(steps) {
+		failed, canceled = d.runStepsDAG(pipeCtx, parent.Clone(), steps)
+	} else {
+		failed, canceled = d.runStepsLinear(pipeCtx, parent.Clone(), steps)
+	}
+
+	switch {
+	case canceled:
+		d.finalize(parent, run.StatusCanceled, nil, "")
+	case failed:
+		code := 1
+		d.finalize(parent, run.StatusFailed, &code, "")
+	default:
+		code := 0
+		d.finalize(parent, run.StatusSucceeded, &code, "")
+	}
+	d.publisher.CloseRun(parent.ID)
+}
+
+// runStepsLinear executes the steps one after another, stopping at a failure unless the failing
+// step continues on failure. It returns whether any step failed and whether execution was
+// canceled.
+func (d *Dispatcher) runStepsLinear(ctx context.Context, parent *run.Run, steps []run.PipelineStep) (failed, canceled bool) {
 	for i, step := range steps {
-		if pipeCtx.Err() != nil {
-			canceled = true
-			break
+		if ctx.Err() != nil {
+			return failed, true
 		}
 
 		idx := i
@@ -396,34 +423,21 @@ func (d *Dispatcher) runPipeline(parent *run.Run, steps []run.PipelineStep) {
 		}
 		if err := d.store.Save(context.Background(), child); err != nil {
 			d.log.Error("dispatch: save pipeline step: "+err.Error(), zap.String("run_id", parent.ID))
-			failed = true
-			break
+			return true, canceled
 		}
 
-		status := d.executeManaged(pipeCtx, child)
+		status := d.executeManaged(ctx, child)
 		if status == run.StatusCanceled {
-			canceled = true
-			break
+			return failed, true
 		}
 		if status != run.StatusSucceeded {
 			failed = true
 			if !step.ContinueOnFailure {
-				break
+				return failed, canceled
 			}
 		}
 	}
-
-	switch {
-	case canceled:
-		d.finalize(parent, run.StatusCanceled, nil, "")
-	case failed:
-		code := 1
-		d.finalize(parent, run.StatusFailed, &code, "")
-	default:
-		code := 0
-		d.finalize(parent, run.StatusSucceeded, &code, "")
-	}
-	d.publisher.CloseRun(parent.ID)
+	return failed, canceled
 }
 
 // partition splits hosts into at most shards groups balanced by expected cost. Each host weighs
