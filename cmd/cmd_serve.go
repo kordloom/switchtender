@@ -16,6 +16,7 @@ import (
 	"github.com/dcadolph/yardmaster/internal/live"
 	"github.com/dcadolph/yardmaster/internal/logutil"
 	"github.com/dcadolph/yardmaster/internal/roundhouse"
+	"github.com/dcadolph/yardmaster/internal/schedule"
 	"github.com/dcadolph/yardmaster/internal/server"
 	"github.com/dcadolph/yardmaster/internal/sqlitestore"
 )
@@ -75,6 +76,10 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	} else if n > 0 {
 		log.Info("reconciled interrupted runs", zap.Int("count", n))
 	}
+
+	scheduler := schedule.NewScheduler(db.Schedules(), disp, log)
+	scheduler.Start()
+	defer scheduler.Close()
 
 	httpServer := &http.Server{
 		Addr:              serveAddr,

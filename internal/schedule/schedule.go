@@ -4,6 +4,8 @@
 package schedule
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"time"
@@ -12,6 +14,15 @@ import (
 
 	"github.com/dcadolph/yardmaster/internal/run"
 )
+
+// NewID returns a random schedule identifier prefixed with "sch_".
+func NewID() string {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		panic("schedule: read random: " + err.Error())
+	}
+	return "sch_" + hex.EncodeToString(b[:])
+}
 
 var (
 	// ErrBadCron is returned when a cron expression cannot be parsed.
