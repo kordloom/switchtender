@@ -105,3 +105,20 @@ func TestParse(t *testing.T) {
 		})
 	}
 }
+
+func TestParseStatsOutputs(t *testing.T) {
+	t.Parallel()
+	line := `{"type":"stats","ts":1719000000,"stats":{"web01":{"ok":1}},` +
+		`"outputs":{"version":"1.2.3","count":2}}` + "\n"
+	events, err := Parse(strings.NewReader(line))
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("events = %d, want 1", len(events))
+	}
+	got := events[0].Outputs
+	if got["version"] != "1.2.3" || got["count"] != float64(2) {
+		t.Errorf("Outputs = %v, want version 1.2.3 and count 2", got)
+	}
+}

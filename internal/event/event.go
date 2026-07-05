@@ -53,6 +53,9 @@ type Event struct {
 	Truncated bool `json:"truncated,omitempty"`
 	// Stats holds per host recap totals, set only on stats events.
 	Stats map[string]HostStats `json:"stats,omitempty"`
+	// Outputs holds values a playbook published with set_stats, set only on stats events. A
+	// pipeline feeds them to dependent steps as extra vars.
+	Outputs map[string]any `json:"outputs,omitempty"`
 }
 
 // HostStats holds the recap totals for a single host.

@@ -127,4 +127,11 @@ class CallbackModule(CallbackBase):
                 "rescued": totals["rescued"],
                 "ignored": totals["ignored"],
             }
-        self._emit("stats", stats=summary)
+        fields = {"stats": summary}
+        # set_stats data aggregated across the run lands under the _run key. Surfacing it lets a
+        # pipeline step publish outputs for the steps that depend on it.
+        custom = getattr(stats, "custom", None) or {}
+        outputs = custom.get("_run") or {}
+        if isinstance(outputs, dict) and outputs:
+            fields["outputs"] = outputs
+        self._emit("stats", **fields)

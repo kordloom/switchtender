@@ -4,6 +4,7 @@ package roundhouse
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -19,8 +20,9 @@ type Spec struct {
 	Playbook string
 	// Inventory is the path to the Ansible inventory. When empty, no -i flag is passed.
 	Inventory string
-	// ExtraVars are passed to ansible-playbook as repeated --extra-vars key=value flags.
-	ExtraVars map[string]string
+	// ExtraVars are passed to ansible-playbook as one JSON --extra-vars argument so values keep
+	// their types.
+	ExtraVars map[string]any
 	// Env holds additional environment entries (KEY=VALUE) layered over the base environment.
 	Env []string
 	// Dir is the working directory for the process. When empty, the current directory is used.
@@ -158,15 +160,17 @@ func (a *ansibleRunner) ensurePlugin() (string, error) {
 
 // args builds the ansible-playbook argument list for spec.
 func (a *ansibleRunner) args(spec Spec) []string {
-	args := make([]string, 0, 6+2*len(spec.ExtraVars))
+	args := make([]string, 0, 8)
 	if spec.Inventory != "" {
 		args = append(args, "-i", spec.Inventory)
 	}
 	if spec.Limit != "" {
 		args = append(args, "--limit", spec.Limit)
 	}
-	for k, v := range spec.ExtraVars {
-		args = append(args, "--extra-vars", k+"="+v)
+	if len(spec.ExtraVars) > 0 {
+		if data, err := json.Marshal(spec.ExtraVars); err == nil {
+			args = append(args, "--extra-vars", string(data))
+		}
 	}
 	return append(args, spec.Playbook)
 }

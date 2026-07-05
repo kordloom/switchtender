@@ -38,6 +38,8 @@ type wireEvent struct {
 	Truncated bool `json:"truncated"`
 	// Stats holds per host recap totals on stats events.
 	Stats map[string]HostStats `json:"stats"`
+	// Outputs holds set_stats values published by the playbook.
+	Outputs map[string]any `json:"outputs"`
 }
 
 // event converts a wireEvent into an Event.
@@ -56,6 +58,7 @@ func (w wireEvent) event() Event {
 		Diff:      w.Diff,
 		Truncated: w.Truncated,
 		Stats:     w.Stats,
+		Outputs:   w.Outputs,
 	}
 }
 

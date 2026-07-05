@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 )
 
 func TestAnsibleRunnerRun(t *testing.T) {
@@ -93,5 +95,15 @@ func TestAnsibleRunnerArgs(t *testing.T) {
 	wantLimit := []string{"-i", "hosts.ini", "--limit", "web01,web02", "site.yml"}
 	if strings.Join(gotLimit, " ") != strings.Join(wantLimit, " ") {
 		t.Errorf("args with limit = %v, want %v", gotLimit, wantLimit)
+	}
+}
+
+func TestArgsExtraVarsJSON(t *testing.T) {
+	t.Parallel()
+	a := &ansibleRunner{binary: "ansible-playbook"}
+	args := a.args(Spec{Playbook: "p.yml", ExtraVars: map[string]any{"version": "1.2.3"}})
+	want := []string{"--extra-vars", `{"version":"1.2.3"}`, "p.yml"}
+	if diff := cmp.Diff(want, args); diff != "" {
+		t.Errorf("args mismatch (-want +got):\n%s", diff)
 	}
 }
