@@ -52,6 +52,7 @@ func (u *UI) Handler() http.Handler {
 	mux.Handle("GET /ui/assets/", http.StripPrefix("/ui/assets/", http.FileServer(http.FS(assets))))
 	mux.HandleFunc("GET /ui/runs/{id}", u.detail)
 	mux.HandleFunc("GET /ui/fleet", u.fleet)
+	mux.HandleFunc("GET /ui/schedules", u.schedules)
 	mux.HandleFunc("GET /ui/", u.index)
 	return mux
 }
@@ -69,6 +70,11 @@ func (u *UI) detail(w http.ResponseWriter, r *http.Request) {
 // fleet renders the fleet health page.
 func (u *UI) fleet(w http.ResponseWriter, _ *http.Request) {
 	u.render(w, "fleet.html", nil)
+}
+
+// schedules renders the schedules page.
+func (u *UI) schedules(w http.ResponseWriter, _ *http.Request) {
+	u.render(w, "schedules.html", nil)
 }
 
 // render executes the named template with data.

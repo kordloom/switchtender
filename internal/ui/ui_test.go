@@ -38,6 +38,10 @@ func TestUIRoutes(t *testing.T) {
 		{ // Test 4: Fleet page renders.
 			Name: "fleet", Path: "/ui/fleet", WantStatus: http.StatusOK, WantContains: `data-page="fleet"`,
 		},
+		{ // Test 5: Schedules page renders.
+			Name: "schedules", Path: "/ui/schedules", WantStatus: http.StatusOK,
+			WantContains: `data-page="schedules"`,
+		},
 	}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {

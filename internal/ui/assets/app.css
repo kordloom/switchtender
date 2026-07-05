@@ -59,7 +59,8 @@ a:hover { text-decoration: underline; }
 .brand a { color: var(--text); }
 .tagline { color: var(--muted); font-size: 13px; }
 
-.nav-link { margin-left: auto; font-size: 14px; }
+.nav { margin-left: auto; display: flex; gap: 18px; }
+.nav a { font-size: 14px; }
 
 .content { max-width: 1200px; margin: 0 auto; padding: 24px; }
 .fail-count { color: var(--failed); font-weight: 700; }

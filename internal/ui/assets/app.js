@@ -15,6 +15,8 @@ document.addEventListener("DOMContentLoaded", () => {
 		loadDetail(document.body.dataset.runId);
 	} else if (page === "fleet") {
 		loadFleet();
+	} else if (page === "schedules") {
+		loadSchedules();
 	}
 });
 
@@ -133,6 +135,59 @@ async function loadFleet() {
 	} catch (e) {
 		setStatus("Failed to load fleet health: " + e.message);
 	}
+}
+
+// loadSchedules populates the schedules table.
+async function loadSchedules() {
+	try {
+		const data = await getJSON("/schedules");
+		const schedules = data.schedules || [];
+		if (schedules.length === 0) {
+			setStatus("No schedules yet. Create one with POST /schedules.");
+			return;
+		}
+		const tbody = document.getElementById("schedules");
+		for (const s of schedules) {
+			const tr = document.createElement("tr");
+			tr.appendChild(td(s.name || "(unnamed)"));
+			tr.appendChild(td(s.cron, "mono"));
+			tr.appendChild(td(scheduleTarget(s)));
+
+			const enabled = document.createElement("td");
+			const chip = document.createElement("span");
+			chip.className = "chip " + (s.enabled ? "ok" : "skipped");
+			chip.textContent = s.enabled ? "enabled" : "disabled";
+			enabled.appendChild(chip);
+			tr.appendChild(enabled);
+
+			tr.appendChild(td(fmtTime(s.next_run_at)));
+
+			const last = document.createElement("td");
+			if (s.last_run_id) {
+				const link = document.createElement("a");
+				link.href = "/ui/runs/" + s.last_run_id;
+				link.textContent = fmtTime(s.last_run_at) || "view run";
+				last.appendChild(link);
+			}
+			tr.appendChild(last);
+			tbody.appendChild(tr);
+		}
+		setStatus("");
+		document.querySelector("table.runs").hidden = false;
+	} catch (e) {
+		setStatus("Failed to load schedules: " + e.message);
+	}
+}
+
+// scheduleTarget describes what a schedule fires.
+function scheduleTarget(s) {
+	if (s.steps && s.steps.length) {
+		return "pipeline, " + s.steps.length + " steps";
+	}
+	if (s.shards) {
+		return "split x" + s.shards + "  " + (s.playbook || "");
+	}
+	return s.playbook || "";
 }
 
 // outcomeChip builds a colored chip for a host outcome label.
