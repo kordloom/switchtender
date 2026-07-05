@@ -159,7 +159,9 @@ async function loadDetail(runId) {
 	document.getElementById("full-log").href = "/runs/" + runId + "/logs";
 	try {
 		const run = await getJSON("/runs/" + runId);
-		if (run.shard_count && !run.parent_id) {
+		if (run.kind === "pipeline" && !run.parent_id) {
+			await loadPipeline(runId);
+		} else if ((run.kind === "split" || run.shard_count) && !run.parent_id) {
 			await loadParent(runId);
 		} else {
 			await loadSingle(run);
@@ -167,6 +169,42 @@ async function loadDetail(runId) {
 	} catch (e) {
 		setStatus("Failed to load run: " + e.message);
 	}
+}
+
+// loadPipeline renders a pipeline run as an ordered list of step runs, polling while it is active.
+async function loadPipeline(pipelineId) {
+	const run = await getJSON("/runs/" + pipelineId);
+	const stepData = await getJSON("/runs/" + pipelineId + "/steps");
+	renderHeader(run);
+	renderSteps(stepData.steps || []);
+	setStatus("");
+	if (!isTerminal(run.status)) {
+		setTimeout(() => { loadPipeline(pipelineId).catch(() => {}); }, 1500);
+	}
+}
+
+// renderSteps lists a pipeline's step runs in order with status and playbook.
+function renderSteps(steps) {
+	const panel = document.getElementById("steps-panel");
+	const list = document.getElementById("steps");
+	list.innerHTML = "";
+	if (!steps.length) {
+		panel.hidden = true;
+		return;
+	}
+	for (const s of steps) {
+		const idx = (s.step_index !== undefined && s.step_index !== null) ? Number(s.step_index) + 1 : "?";
+		const row = document.createElement("a");
+		row.className = "shard-row";
+		row.href = "/ui/runs/" + s.id;
+		row.appendChild(badge(s.status));
+		const label = document.createElement("span");
+		label.className = "shard-label";
+		label.textContent = idx + ". " + (s.step_name || "step") + "  ·  " + (s.playbook || "");
+		row.appendChild(label);
+		list.appendChild(row);
+	}
+	panel.hidden = false;
 }
 
 // loadSingle renders a normal run and streams it live while it is active.
