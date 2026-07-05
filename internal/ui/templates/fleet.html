@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Fleet health - Yardmaster</title>
+	<link rel="stylesheet" href="/ui/assets/app.css">
+</head>
+<body data-page="fleet">
+	<header class="topbar">
+		<div class="brand"><a href="/ui/">Yardmaster</a></div>
+		<div class="tagline">Fleet health</div>
+	</header>
+
+	<main class="content">
+		<a class="back" href="/ui/">Back to runs</a>
+		<h1>Fleet health</h1>
+		<p class="muted">Hosts ranked by failures across their most recent runs.</p>
+		<div id="status" class="muted">Loading fleet health.</div>
+		<table class="runs" hidden>
+			<thead>
+				<tr>
+					<th>Host</th>
+					<th>Recent failures</th>
+					<th>Runs</th>
+					<th>Last outcome</th>
+					<th>Last run</th>
+				</tr>
+			</thead>
+			<tbody id="fleet"></tbody>
+		</table>
+	</main>
+
+	<script src="/ui/assets/app.js"></script>
+</body>
+</html>

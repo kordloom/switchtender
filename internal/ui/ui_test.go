@@ -35,6 +35,9 @@ func TestUIRoutes(t *testing.T) {
 		{ // Test 3: Script is served.
 			Name: "js", Path: "/ui/assets/app.js", WantStatus: http.StatusOK, WantContains: "buildModel",
 		},
+		{ // Test 4: Fleet page renders.
+			Name: "fleet", Path: "/ui/fleet", WantStatus: http.StatusOK, WantContains: `data-page="fleet"`,
+		},
 	}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {

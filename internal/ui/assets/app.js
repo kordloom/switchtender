@@ -13,6 +13,8 @@ document.addEventListener("DOMContentLoaded", () => {
 		loadRuns();
 	} else if (page === "detail") {
 		loadDetail(document.body.dataset.runId);
+	} else if (page === "fleet") {
+		loadFleet();
 	}
 });
 
@@ -97,6 +99,55 @@ function badge(status) {
 	const span = document.createElement("span");
 	span.className = "badge " + status;
 	span.textContent = status;
+	return span;
+}
+
+// loadFleet populates the fleet health table, hosts ranked by recent failures.
+async function loadFleet() {
+	try {
+		const data = await getJSON("/fleet");
+		const hosts = data.hosts || [];
+		if (hosts.length === 0) {
+			setStatus("No host history yet. Run a playbook to build fleet health.");
+			return;
+		}
+		const tbody = document.getElementById("fleet");
+		for (const h of hosts) {
+			const tr = document.createElement("tr");
+			tr.appendChild(td(h.host, "mono"));
+			const fails = document.createElement("td");
+			fails.textContent = h.failures + " / " + h.total;
+			if (h.failures > 0) {
+				fails.className = "fail-count";
+			}
+			tr.appendChild(fails);
+			tr.appendChild(td(String(h.total)));
+			const last = document.createElement("td");
+			last.appendChild(outcomeChip(h.last_outcome));
+			tr.appendChild(last);
+			tr.appendChild(td(fmtTime(h.last_run)));
+			tbody.appendChild(tr);
+		}
+		setStatus("");
+		document.querySelector("table.runs").hidden = false;
+	} catch (e) {
+		setStatus("Failed to load fleet health: " + e.message);
+	}
+}
+
+// outcomeChip builds a colored chip for a host outcome label.
+function outcomeChip(outcome) {
+	let cls = "ok";
+	if (outcome === "failed" || outcome === "unreachable") {
+		cls = "failed";
+	} else if (outcome === "changed") {
+		cls = "changed";
+	} else if (outcome === "skipped") {
+		cls = "skipped";
+	}
+	const span = document.createElement("span");
+	span.className = "chip " + cls;
+	span.textContent = outcome;
 	return span;
 }
 

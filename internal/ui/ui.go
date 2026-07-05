@@ -51,6 +51,7 @@ func (u *UI) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("GET /ui/assets/", http.StripPrefix("/ui/assets/", http.FileServer(http.FS(assets))))
 	mux.HandleFunc("GET /ui/runs/{id}", u.detail)
+	mux.HandleFunc("GET /ui/fleet", u.fleet)
 	mux.HandleFunc("GET /ui/", u.index)
 	return mux
 }
@@ -63,6 +64,11 @@ func (u *UI) index(w http.ResponseWriter, _ *http.Request) {
 // detail renders the run detail page for a single run.
 func (u *UI) detail(w http.ResponseWriter, r *http.Request) {
 	u.render(w, "detail.html", map[string]string{"RunID": r.PathValue("id")})
+}
+
+// fleet renders the fleet health page.
+func (u *UI) fleet(w http.ResponseWriter, _ *http.Request) {
+	u.render(w, "fleet.html", nil)
 }
 
 // render executes the named template with data.
