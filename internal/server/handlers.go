@@ -491,10 +491,11 @@ func runStreamHandler(streamer Streamer, store run.Store, log *zap.Logger) http.
 	}
 }
 
-// writeSSE writes one Server Sent Event with the given event name and JSON data.
+// writeSSE writes one Server Sent Event with the given event name and JSON data. A write failure
+// means the client went away; the stream loop ends on the closed request context.
 func writeSSE(w http.ResponseWriter, name string, data []byte) {
 	if len(data) == 0 {
 		data = []byte("null")
 	}
-	fmt.Fprintf(w, "event: %s\ndata: %s\n\n", name, data)
+	_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", name, data)
 }
