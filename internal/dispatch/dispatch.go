@@ -68,6 +68,10 @@ type Dispatcher struct {
 	publisher Publisher
 	// hostLister enumerates inventory hosts for split runs, nil when the runner cannot list hosts.
 	hostLister roundhouse.HostLister
+	// cmu guards cancels.
+	cmu sync.Mutex
+	// cancels maps a pending or executing run id to its cancel func.
+	cancels map[string]context.CancelFunc
 }
 
 // Option configures a Dispatcher.
@@ -125,6 +129,7 @@ func New(store run.Store, runner roundhouse.Runner, log *zap.Logger, opts ...Opt
 		cancel:     cancel,
 		publisher:  cfg.publisher,
 		hostLister: lister,
+		cancels:    make(map[string]context.CancelFunc),
 	}
 }
 
@@ -207,8 +212,14 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 }
 
 // coordinate runs each shard through the worker pool and finalizes the parent from their results.
+// The parent registers its own cancel so stopping the parent stops every shard.
 func (d *Dispatcher) coordinate(parent *run.Run, children []*run.Run) {
 	defer d.wg.Done()
+
+	parentCtx, cancelParent := context.WithCancel(d.ctx)
+	d.register(parent.ID, cancelParent)
+	defer d.unregister(parent.ID)
+	defer cancelParent()
 
 	started := time.Now()
 	parent.Status = run.StatusRunning
@@ -221,32 +232,31 @@ func (d *Dispatcher) coordinate(parent *run.Run, children []*run.Run) {
 		shards.Add(1)
 		go func(i int, child *run.Run) {
 			defer shards.Done()
-			select {
-			case d.sem <- struct{}{}:
-			case <-d.ctx.Done():
-				d.finalize(child, run.StatusCanceled, nil, "")
-				statuses[i] = run.StatusCanceled
-				return
-			}
-			defer func() { <-d.sem }()
-
-			d.execute(child)
-			if latest, err := d.store.Get(context.Background(), child.ID); err == nil {
-				statuses[i] = latest.Status
-			}
+			statuses[i] = d.executeManaged(parentCtx, child)
 		}(i, children[i].Clone())
 	}
 	shards.Wait()
 
+	allSucceeded := true
+	anyCanceled := false
 	for _, status := range statuses {
 		if status != run.StatusSucceeded {
-			code := 1
-			d.finalize(parent, run.StatusFailed, &code, "")
-			return
+			allSucceeded = false
+		}
+		if status == run.StatusCanceled {
+			anyCanceled = true
 		}
 	}
-	code := 0
-	d.finalize(parent, run.StatusSucceeded, &code, "")
+	switch {
+	case allSucceeded:
+		code := 0
+		d.finalize(parent, run.StatusSucceeded, &code, "")
+	case parentCtx.Err() != nil && anyCanceled:
+		d.finalize(parent, run.StatusCanceled, nil, "")
+	default:
+		code := 1
+		d.finalize(parent, run.StatusFailed, &code, "")
+	}
 }
 
 // partition splits hosts into at most shards groups balanced by host count using round robin.
@@ -290,23 +300,34 @@ func (d *Dispatcher) Reconcile(ctx context.Context) (int, error) {
 	return len(runs), nil
 }
 
-// work acquires a worker slot then executes r, marking it canceled if shutdown wins the race.
+// work runs a single submitted run through the pool.
 func (d *Dispatcher) work(r *run.Run) {
 	defer d.wg.Done()
+	d.executeManaged(d.ctx, r)
+}
+
+// executeManaged registers cancellation for r, acquires a worker slot, executes it, and returns the
+// terminal status. The run context derives from base so canceling base (a shutdown or a parent
+// cancel) also stops this run.
+func (d *Dispatcher) executeManaged(base context.Context, r *run.Run) run.Status {
+	runCtx, cancel := context.WithCancel(base)
+	d.register(r.ID, cancel)
+	defer d.unregister(r.ID)
+	defer cancel()
 
 	select {
 	case d.sem <- struct{}{}:
-	case <-d.ctx.Done():
+	case <-runCtx.Done():
 		d.finalize(r, run.StatusCanceled, nil, "")
-		return
+		return run.StatusCanceled
 	}
 	defer func() { <-d.sem }()
 
-	d.execute(r)
+	return d.execute(runCtx, r)
 }
 
-// execute runs the playbook, streaming output to the store and recording the terminal state.
-func (d *Dispatcher) execute(r *run.Run) {
+// execute runs the playbook, streaming output to the store, and returns the terminal status.
+func (d *Dispatcher) execute(ctx context.Context, r *run.Run) run.Status {
 	started := time.Now()
 	r.Status = run.StatusRunning
 	r.StartedAt = &started
@@ -326,23 +347,58 @@ func (d *Dispatcher) execute(r *run.Run) {
 	spec := roundhouse.Spec{
 		Playbook: r.Playbook, Inventory: r.Inventory, EventsPath: eventsPath, Limit: r.Limit,
 	}
-	res, err := d.runner.Run(d.ctx, spec, sink)
+	res, err := d.runner.Run(ctx, spec, sink)
 
 	close(stop)
 	<-tailed
 
+	status := d.outcome(ctx, r, res, err)
+	d.publisher.CloseRun(r.ID)
+	return status
+}
+
+// outcome finalizes r from the run result and returns the terminal status.
+func (d *Dispatcher) outcome(ctx context.Context, r *run.Run, res roundhouse.Result, err error) run.Status {
 	switch {
-	case err != nil && d.ctx.Err() != nil:
+	case err != nil && ctx.Err() != nil:
 		d.finalize(r, run.StatusCanceled, nil, "")
+		return run.StatusCanceled
 	case err != nil:
 		d.finalize(r, run.StatusFailed, nil, err.Error())
+		return run.StatusFailed
 	case res.ExitCode == 0:
 		d.finalize(r, run.StatusSucceeded, &res.ExitCode, "")
+		return run.StatusSucceeded
 	default:
 		d.finalize(r, run.StatusFailed, &res.ExitCode, "")
+		return run.StatusFailed
 	}
+}
 
-	d.publisher.CloseRun(r.ID)
+// register records a cancel func for a run so it can be stopped by id.
+func (d *Dispatcher) register(id string, cancel context.CancelFunc) {
+	d.cmu.Lock()
+	d.cancels[id] = cancel
+	d.cmu.Unlock()
+}
+
+// unregister drops a run's cancel func once it is no longer cancelable.
+func (d *Dispatcher) unregister(id string) {
+	d.cmu.Lock()
+	delete(d.cancels, id)
+	d.cmu.Unlock()
+}
+
+// Cancel stops the pending or executing run with the given id, including a parent split and its
+// shards. It reports whether a cancelable run was found.
+func (d *Dispatcher) Cancel(id string) bool {
+	d.cmu.Lock()
+	cancel, ok := d.cancels[id]
+	d.cmu.Unlock()
+	if ok {
+		cancel()
+	}
+	return ok
 }
 
 // finalize records the terminal status, exit code, failure detail, and end time of r.

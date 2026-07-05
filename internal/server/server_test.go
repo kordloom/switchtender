@@ -27,6 +27,20 @@ func (f *fakeStreamer) Subscribe(string) (<-chan live.Message, func()) {
 	return f.ch, func() {}
 }
 
+// fakeCanceler records the canceled id and returns a fixed result.
+type fakeCanceler struct {
+	// ok is the value returned by Cancel.
+	ok bool
+	// gotID is the id from the most recent Cancel call.
+	gotID string
+}
+
+// Cancel records the id and returns the fixed result.
+func (f *fakeCanceler) Cancel(id string) bool {
+	f.gotID = id
+	return f.ok
+}
+
 // fakeSubmitter records the last submission and returns canned results.
 type fakeSubmitter struct {
 	// run is returned on success.
@@ -372,6 +386,58 @@ func TestRunStreamNotFoundAndDisabled(t *testing.T) {
 	noStream.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/runs/run_live/stream", nil))
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("disabled streamer status = %d, want 404", rec.Code)
+	}
+}
+
+func TestCancelRun(t *testing.T) {
+	t.Parallel()
+	seed := func(status run.Status) run.Store {
+		s := run.NewMemStore()
+		_ = s.Save(context.Background(), &run.Run{ID: "run_1", Status: status, CreatedAt: time.Now()})
+		return s
+	}
+	tests := []struct {
+		Name       string
+		Store      run.Store
+		Canceler   Canceler
+		Path       string
+		WantStatus int
+	}{
+		{ // Test 0: A running run is canceled.
+			Name: "running", Store: seed(run.StatusRunning), Canceler: &fakeCanceler{ok: true},
+			Path: "/runs/run_1/cancel", WantStatus: http.StatusAccepted,
+		},
+		{ // Test 1: A finished run conflicts.
+			Name: "terminal", Store: seed(run.StatusSucceeded), Canceler: &fakeCanceler{ok: true},
+			Path: "/runs/run_1/cancel", WantStatus: http.StatusConflict,
+		},
+		{ // Test 2: An unknown run is not found.
+			Name: "unknown", Store: run.NewMemStore(), Canceler: &fakeCanceler{ok: true},
+			Path: "/runs/none/cancel", WantStatus: http.StatusNotFound,
+		},
+		{ // Test 3: A run the dispatcher cannot cancel conflicts.
+			Name: "not cancelable", Store: seed(run.StatusRunning), Canceler: &fakeCanceler{ok: false},
+			Path: "/runs/run_1/cancel", WantStatus: http.StatusConflict,
+		},
+		{ // Test 4: Cancellation disabled is not found.
+			Name: "disabled", Store: seed(run.StatusRunning), Canceler: nil,
+			Path: "/runs/run_1/cancel", WantStatus: http.StatusNotFound,
+		},
+	}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			opts := []Option{}
+			if test.Canceler != nil {
+				opts = append(opts, WithCanceler(test.Canceler))
+			}
+			handler := New(test.Store, &fakeSubmitter{}, zap.NewNop(), opts...).Handler()
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, test.Path, nil))
+			if rec.Code != test.WantStatus {
+				t.Errorf("status = %d, want %d", rec.Code, test.WantStatus)
+			}
+		})
 	}
 }
 

@@ -294,6 +294,38 @@ func TestDispatcherSplitFallsBackAndErrors(t *testing.T) {
 	}
 }
 
+func TestDispatcherCancel(t *testing.T) {
+	t.Parallel()
+	store := run.NewMemStore()
+	started := make(chan struct{})
+	runner := roundhouse.RunnerFunc(
+		func(ctx context.Context, _ roundhouse.Spec, _ io.Writer) (roundhouse.Result, error) {
+			close(started)
+			<-ctx.Done()
+			return roundhouse.Result{ExitCode: -1}, ctx.Err()
+		},
+	)
+	d := New(store, runner, nil)
+	defer d.Close()
+
+	r, err := d.Submit(context.Background(), "play.yml", "inv")
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+	<-started
+
+	if !d.Cancel(r.ID) {
+		t.Fatal("Cancel returned false for a running run")
+	}
+	got := waitTerminal(t, store, r.ID)
+	if got.Status != run.StatusCanceled {
+		t.Errorf("status = %q, want canceled", got.Status)
+	}
+	if d.Cancel("nope") {
+		t.Error("Cancel returned true for an unknown run")
+	}
+}
+
 func TestDispatcherReconcile(t *testing.T) {
 	t.Parallel()
 	store := run.NewMemStore()

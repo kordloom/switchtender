@@ -80,7 +80,8 @@ func runServe(cmd *cobra.Command, _ []string) error {
 
 	httpServer := &http.Server{
 		Addr:              serveAddr,
-		Handler:           server.New(store, disp, log, server.WithStreamer(hub)).Handler(),
+		Handler: server.New(store, disp, log,
+			server.WithStreamer(hub), server.WithCanceler(disp)).Handler(),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 

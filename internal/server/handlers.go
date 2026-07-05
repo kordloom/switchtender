@@ -87,6 +87,40 @@ func createRunHandler(submitter Submitter, log *zap.Logger) http.HandlerFunc {
 	}
 }
 
+// cancelRunHandler stops a pending or executing run.
+func cancelRunHandler(store run.Store, canceler Canceler, log *zap.Logger) http.HandlerFunc {
+	if store == nil {
+		panic("server: cancelRunHandler: Store required")
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		if canceler == nil {
+			respondError(w, log, http.StatusNotFound, "cancellation not enabled")
+			return
+		}
+		id := r.PathValue("id")
+		existing, err := store.Get(r.Context(), id)
+		if errors.Is(err, run.ErrNotFound) {
+			respondError(w, log, http.StatusNotFound, "run not found")
+			return
+		}
+		if err != nil {
+			log.Error("server: cancel run: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not cancel run")
+			return
+		}
+		if existing.Status.Terminal() {
+			respondError(w, log, http.StatusConflict, "run already finished")
+			return
+		}
+		if !canceler.Cancel(id) {
+			respondError(w, log, http.StatusConflict, "run is not cancelable")
+			return
+		}
+		respondJSON(w, log, http.StatusAccepted,
+			map[string]string{"status": "canceling"}, wantsPretty(r))
+	}
+}
+
 // listRunsHandler returns all runs newest first.
 func listRunsHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
 	if store == nil {

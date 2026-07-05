@@ -62,6 +62,23 @@ func TestAnsibleRunnerRun(t *testing.T) {
 	}
 }
 
+func TestAnsibleRunnerCanceledContext(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	runner := NewAnsibleRunner(WithBinary("sleep"))
+	var buf bytes.Buffer
+	res, err := runner.Run(ctx, Spec{Playbook: "5"}, &buf)
+
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("Run() error = %v, want context.Canceled", err)
+	}
+	if res.ExitCode != -1 {
+		t.Errorf("ExitCode = %d, want -1", res.ExitCode)
+	}
+}
+
 func TestAnsibleRunnerArgs(t *testing.T) {
 	t.Parallel()
 	a := &ansibleRunner{binary: "ansible-playbook"}

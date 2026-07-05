@@ -126,6 +126,12 @@ func (a *ansibleRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Resu
 		return Result{ExitCode: 0}, nil
 	}
 
+	// A canceled context kills the process, which surfaces as an ExitError. Report the context error
+	// so the caller treats it as cancellation rather than a playbook failure.
+	if ctx.Err() != nil {
+		return Result{ExitCode: -1}, ctx.Err()
+	}
+
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
 		return Result{ExitCode: exitErr.ExitCode()}, nil

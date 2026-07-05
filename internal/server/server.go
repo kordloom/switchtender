@@ -23,12 +23,22 @@ type Streamer interface {
 	Subscribe(id string) (<-chan live.Message, func())
 }
 
+// Canceler stops a pending or executing run. The dispatcher satisfies it.
+type Canceler interface {
+	Cancel(id string) bool
+}
+
 // Option configures a Server.
 type Option func(*Server)
 
 // WithStreamer enables the live stream endpoint backed by s.
 func WithStreamer(s Streamer) Option {
 	return func(srv *Server) { srv.streamer = s }
+}
+
+// WithCanceler enables the cancel endpoint backed by c.
+func WithCanceler(c Canceler) Option {
+	return func(srv *Server) { srv.canceler = c }
 }
 
 // Server wires the run store and submitter into an HTTP handler.
@@ -43,6 +53,8 @@ type Server struct {
 	web *ui.UI
 	// streamer backs the live stream endpoint when configured.
 	streamer Streamer
+	// canceler backs the cancel endpoint when configured.
+	canceler Canceler
 }
 
 // New returns a Server. It panics if store or submitter is nil; a nil logger becomes a no-op.
@@ -68,6 +80,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("GET /healthz", healthHandler())
 	mux.Handle("POST /runs", createRunHandler(s.submitter, s.log))
+	mux.Handle("POST /runs/{id}/cancel", cancelRunHandler(s.store, s.canceler, s.log))
 	mux.Handle("GET /runs", listRunsHandler(s.store, s.log))
 	mux.Handle("GET /runs/{id}", getRunHandler(s.store, s.log))
 	mux.Handle("GET /runs/{id}/shards", runShardsHandler(s.store, s.log))
