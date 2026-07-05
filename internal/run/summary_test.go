@@ -62,6 +62,84 @@ func TestHostSummariesFromStats(t *testing.T) {
 	}
 }
 
+func TestFlipCount(t *testing.T) {
+	t.Parallel()
+	sum := func(worsts ...string) []HostSummary {
+		out := make([]HostSummary, len(worsts))
+		for i, w := range worsts {
+			out[i].Worst = w
+		}
+		return out
+	}
+	tests := []struct {
+		In   []HostSummary
+		Want int
+	}{
+		{In: nil, Want: 0},                                      // Test 0: Empty history.
+		{In: sum("ok", "ok", "changed"), Want: 0},               // Test 1: Steady passing.
+		{In: sum("failed", "failed"), Want: 0},                  // Test 2: Steady failing.
+		{In: sum("ok", "failed", "failed"), Want: 1},            // Test 3: Fixed once.
+		{In: sum("failed", "ok", "failed"), Want: 2},            // Test 4: Intermittent.
+		{In: sum("ok", "unreachable", "ok", "failed"), Want: 3}, // Test 5: Unreachable counts.
+	}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			if got := FlipCount(test.In); got != test.Want {
+				t.Errorf("FlipCount() = %d, want %d", got, test.Want)
+			}
+		})
+	}
+}
+
+func TestTaskSummariesFromEvents(t *testing.T) {
+	t.Parallel()
+	ranAt := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	base := ranAt.Add(time.Second)
+	tests := []struct {
+		In   []event.Event
+		Want []TaskSummary
+	}{
+		{ // Test 0: No task results yields nil.
+			In:   []event.Event{{Type: event.TypePlayStart, Time: base}},
+			Want: nil,
+		},
+		{ // Test 1: Each task spans start to its last result.
+			In: []event.Event{
+				{Type: event.TypeTaskStart, Time: base, Task: "install"},
+				{Type: event.TypeRunnerOK, Time: base.Add(time.Second), Host: "a"},
+				{Type: event.TypeRunnerOK, Time: base.Add(3 * time.Second), Host: "b"},
+				{Type: event.TypeTaskStart, Time: base.Add(3 * time.Second), Task: "restart"},
+				{Type: event.TypeRunnerFailed, Time: base.Add(4 * time.Second), Host: "a"},
+			},
+			Want: []TaskSummary{
+				{Task: "install", Seconds: 3, RanAt: ranAt},
+				{Task: "restart", Seconds: 1, RanAt: ranAt},
+			},
+		},
+		{ // Test 2: A repeated task name accumulates across plays.
+			In: []event.Event{
+				{Type: event.TypeTaskStart, Time: base, Task: "sync"},
+				{Type: event.TypeRunnerOK, Time: base.Add(time.Second), Host: "a"},
+				{Type: event.TypeTaskStart, Time: base.Add(10 * time.Second), Task: "sync"},
+				{Type: event.TypeRunnerOK, Time: base.Add(12 * time.Second), Host: "a"},
+			},
+			Want: []TaskSummary{
+				{Task: "sync", Seconds: 3, RanAt: ranAt},
+			},
+		},
+	}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			got := TaskSummariesFromEvents(test.In, ranAt)
+			if diff := cmp.Diff(test.Want, got, cmpopts.EquateEmpty()); diff != "" {
+				t.Errorf("TaskSummariesFromEvents() mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
 func TestHostDurations(t *testing.T) {
 	t.Parallel()
 	base := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)

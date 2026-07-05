@@ -30,6 +30,12 @@ type Store interface {
 	// HostCosts returns each host's average recorded duration in seconds over its most recent
 	// window runs, for balancing splits by past cost.
 	HostCosts(ctx context.Context, window int) (map[string]float64, error)
+	// HostHistory returns a host's most recent per run summaries, newest first, with run ids.
+	HostHistory(ctx context.Context, host string, limit int) ([]HostSummary, error)
+	// SaveTaskSummary replaces the stored per task summaries for a run.
+	SaveTaskSummary(ctx context.Context, runID string, summaries []TaskSummary) error
+	// TaskTrends aggregates each task's durations over its most recent window runs.
+	TaskTrends(ctx context.Context, window int) ([]TaskTrend, error)
 	// AppendLog appends raw output bytes to the run's log. Returns ErrNotFound if the run is absent.
 	AppendLog(ctx context.Context, id string, p []byte) error
 	// Log returns a copy of the run's captured output, or ErrNotFound.
@@ -52,6 +58,8 @@ type memStore struct {
 	events map[string][]event.Event
 	// summaries maps run id to its per host outcome summaries.
 	summaries map[string][]HostSummary
+	// tasks maps run id to its per task duration summaries.
+	tasks map[string][]TaskSummary
 }
 
 // NewMemStore returns an empty in-memory Store.
@@ -61,6 +69,7 @@ func NewMemStore() Store {
 		logs:      make(map[string][]byte),
 		events:    make(map[string][]event.Event),
 		summaries: make(map[string][]HostSummary),
+		tasks:     make(map[string][]TaskSummary),
 	}
 }
 
@@ -177,8 +186,28 @@ func (m *memStore) SaveHostSummary(_ context.Context, runID string, summaries []
 	}
 	cp := make([]HostSummary, len(summaries))
 	copy(cp, summaries)
+	for i := range cp {
+		cp[i].RunID = runID
+	}
 	m.summaries[runID] = cp
 	return nil
+}
+
+// recentByHost groups all host summaries by host, newest first, trimmed to window per host.
+func (m *memStore) recentByHost(window int) map[string][]HostSummary {
+	byHost := make(map[string][]HostSummary)
+	for _, list := range m.summaries {
+		for _, hs := range list {
+			byHost[hs.Host] = append(byHost[hs.Host], hs)
+		}
+	}
+	for host, list := range byHost {
+		sort.Slice(list, func(i, j int) bool { return list[i].RanAt.After(list[j].RanAt) })
+		if len(list) > window {
+			byHost[host] = list[:window]
+		}
+	}
+	return byHost
 }
 
 // FleetHealth ranks hosts by failures over their most recent window runs, worst first.
@@ -189,29 +218,20 @@ func (m *memStore) FleetHealth(_ context.Context, window int) ([]HostHealth, err
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	byHost := make(map[string][]HostSummary)
-	for _, list := range m.summaries {
-		for _, hs := range list {
-			byHost[hs.Host] = append(byHost[hs.Host], hs)
-		}
-	}
-
+	byHost := m.recentByHost(window)
 	out := make([]HostHealth, 0, len(byHost))
-	for host, list := range byHost {
-		sort.Slice(list, func(i, j int) bool { return list[i].RanAt.After(list[j].RanAt) })
-		recent := list
-		if len(recent) > window {
-			recent = recent[:window]
-		}
+	for host, recent := range byHost {
 		failures := 0
 		for _, hs := range recent {
 			if FailedOutcome(hs.Worst) {
 				failures++
 			}
 		}
+		flips := FlipCount(recent)
 		out = append(out, HostHealth{
 			Host: host, Failures: failures, Total: len(recent),
 			LastOutcome: recent[0].Worst, LastRun: recent[0].RanAt,
+			Flips: flips, Flaky: flips >= 2,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -220,6 +240,81 @@ func (m *memStore) FleetHealth(_ context.Context, window int) ([]HostHealth, err
 		}
 		return out[i].Host < out[j].Host
 	})
+	return out, nil
+}
+
+// HostHistory returns a host's most recent per run summaries, newest first, with run ids.
+func (m *memStore) HostHistory(_ context.Context, host string, limit int) ([]HostSummary, error) {
+	if limit < 1 {
+		limit = 1
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var out []HostSummary
+	for _, list := range m.summaries {
+		for _, hs := range list {
+			if hs.Host == host {
+				out = append(out, hs)
+			}
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].RanAt.After(out[j].RanAt) })
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+// SaveTaskSummary replaces the stored per task summaries for a run.
+func (m *memStore) SaveTaskSummary(_ context.Context, runID string, summaries []TaskSummary) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(summaries) == 0 {
+		delete(m.tasks, runID)
+		return nil
+	}
+	cp := make([]TaskSummary, len(summaries))
+	copy(cp, summaries)
+	for i := range cp {
+		cp[i].RunID = runID
+	}
+	m.tasks[runID] = cp
+	return nil
+}
+
+// TaskTrends aggregates each task's durations over its most recent window runs.
+func (m *memStore) TaskTrends(_ context.Context, window int) ([]TaskTrend, error) {
+	if window < 1 {
+		window = 1
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	byTask := make(map[string][]TaskSummary)
+	for _, list := range m.tasks {
+		for _, ts := range list {
+			byTask[ts.Task] = append(byTask[ts.Task], ts)
+		}
+	}
+
+	out := make([]TaskTrend, 0, len(byTask))
+	for task, list := range byTask {
+		sort.Slice(list, func(i, j int) bool { return list[i].RanAt.After(list[j].RanAt) })
+		recent := list
+		if len(recent) > window {
+			recent = recent[:window]
+		}
+		total := 0.0
+		for _, ts := range recent {
+			total += ts.Seconds
+		}
+		out = append(out, TaskTrend{
+			Task: task, Runs: len(recent), AvgSeconds: total / float64(len(recent)),
+			LastSeconds: recent[0].Seconds, LastRun: recent[0].RanAt,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Task < out[j].Task })
 	return out, nil
 }
 

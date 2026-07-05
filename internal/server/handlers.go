@@ -79,6 +79,26 @@ type fleetResponse struct {
 	Window int `json:"window"`
 }
 
+// hostHistoryResponse wraps one host's recent per run outcomes.
+type hostHistoryResponse struct {
+	// Host is the target host.
+	Host string `json:"host"`
+	// Runs is the host's recent summaries, newest first.
+	Runs []run.HostSummary `json:"runs"`
+	// Count is the number of summaries returned.
+	Count int `json:"count"`
+}
+
+// taskTrendsResponse wraps the task duration trends.
+type taskTrendsResponse struct {
+	// Tasks is the per task aggregate over recent runs.
+	Tasks []run.TaskTrend `json:"tasks"`
+	// Count is the number of tasks returned.
+	Count int `json:"count"`
+	// Window is the number of recent runs per task considered.
+	Window int `json:"window"`
+}
+
 // fleetHandler ranks hosts by recent failures across runs.
 func fleetHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
 	if store == nil {
@@ -99,6 +119,53 @@ func fleetHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
 		}
 		respondJSON(w, log, http.StatusOK,
 			fleetResponse{Hosts: hosts, Count: len(hosts), Window: window}, wantsPretty(r))
+	}
+}
+
+// hostHistoryHandler returns one host's recent per run outcomes, newest first.
+func hostHistoryHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
+	if store == nil {
+		panic("server: hostHistoryHandler: Store required")
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		host := r.PathValue("host")
+		limit := defaultFleetWindow
+		if v := r.URL.Query().Get("limit"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				limit = n
+			}
+		}
+		history, err := store.HostHistory(r.Context(), host, limit)
+		if err != nil {
+			log.Error("server: host history: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not read host history")
+			return
+		}
+		respondJSON(w, log, http.StatusOK,
+			hostHistoryResponse{Host: host, Runs: history, Count: len(history)}, wantsPretty(r))
+	}
+}
+
+// taskTrendsHandler returns per task duration aggregates over recent runs.
+func taskTrendsHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
+	if store == nil {
+		panic("server: taskTrendsHandler: Store required")
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		window := defaultFleetWindow
+		if v := r.URL.Query().Get("window"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				window = n
+			}
+		}
+		tasks, err := store.TaskTrends(r.Context(), window)
+		if err != nil {
+			log.Error("server: task trends: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not compute task trends")
+			return
+		}
+		respondJSON(w, log, http.StatusOK,
+			taskTrendsResponse{Tasks: tasks, Count: len(tasks), Window: window}, wantsPretty(r))
 	}
 }
 

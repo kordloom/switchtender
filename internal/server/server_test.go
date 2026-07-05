@@ -523,6 +523,56 @@ func TestFleet(t *testing.T) {
 	}
 }
 
+func TestHostHistory(t *testing.T) {
+	t.Parallel()
+	store := run.NewMemStore()
+	base := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	if err := store.SaveHostSummary(context.Background(), "run_1", []run.HostSummary{
+		{Host: "db01", Worst: "failed", RanAt: base},
+	}); err != nil {
+		t.Fatalf("SaveHostSummary() error = %v", err)
+	}
+	handler := New(store, &fakeSubmitter{}, zap.NewNop()).Handler()
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/hosts/db01/runs", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "run_1") || !strings.Contains(body, `"count":1`) {
+		t.Errorf("body %q missing history entry", body)
+	}
+
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/hosts/ghost/runs", nil))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"count":0`) {
+		t.Errorf("unknown host = %d %q, want 200 with empty history", rec.Code, rec.Body.String())
+	}
+}
+
+func TestTaskTrends(t *testing.T) {
+	t.Parallel()
+	store := run.NewMemStore()
+	base := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	if err := store.SaveTaskSummary(context.Background(), "run_1", []run.TaskSummary{
+		{Task: "install", Seconds: 12.5, RanAt: base},
+	}); err != nil {
+		t.Fatalf("SaveTaskSummary() error = %v", err)
+	}
+	handler := New(store, &fakeSubmitter{}, zap.NewNop()).Handler()
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/tasks?window=5", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "install") || !strings.Contains(body, `"window":5`) {
+		t.Errorf("body %q missing trend", body)
+	}
+}
+
 func TestCancelRun(t *testing.T) {
 	t.Parallel()
 	seed := func(status run.Status) run.Store {

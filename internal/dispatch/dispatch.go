@@ -573,20 +573,23 @@ func (d *Dispatcher) execute(ctx context.Context, r *run.Run) run.Status {
 	return status
 }
 
-// summarize computes the run's per host outcome summary from its events and stores it for cross run
-// queries. It is best effort; a failure is logged and does not affect the run result.
+// summarize computes the run's per host and per task summaries from its events and stores them for
+// cross run queries. It is best effort; a failure is logged and does not affect the run result.
 func (d *Dispatcher) summarize(r *run.Run) {
 	events, err := d.store.Events(context.Background(), r.ID)
 	if err != nil {
 		d.log.Error("dispatch: read events for summary: "+err.Error(), zap.String("run_id", r.ID))
 		return
 	}
-	summaries := run.HostSummariesFromStats(events, r.CreatedAt)
-	if len(summaries) == 0 {
-		return
+	if summaries := run.HostSummariesFromStats(events, r.CreatedAt); len(summaries) > 0 {
+		if err := d.store.SaveHostSummary(context.Background(), r.ID, summaries); err != nil {
+			d.log.Error("dispatch: save host summary: "+err.Error(), zap.String("run_id", r.ID))
+		}
 	}
-	if err := d.store.SaveHostSummary(context.Background(), r.ID, summaries); err != nil {
-		d.log.Error("dispatch: save host summary: "+err.Error(), zap.String("run_id", r.ID))
+	if tasks := run.TaskSummariesFromEvents(events, r.CreatedAt); len(tasks) > 0 {
+		if err := d.store.SaveTaskSummary(context.Background(), r.ID, tasks); err != nil {
+			d.log.Error("dispatch: save task summary: "+err.Error(), zap.String("run_id", r.ID))
+		}
 	}
 }
 

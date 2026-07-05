@@ -57,8 +57,9 @@ Add `"shards": 4` to split it. Ansible is the only runtime dependency: `ansible-
 - Scheduling. Cron schedules fire runs, splits, or pipelines and every fire keeps full
   structured history.
 - Fleet health. Per-host outcomes persist at the end of every run, and the fleet view ranks
-  hosts by failures across their recent runs. The event history makes cross-run questions
-  cheap to answer.
+  hosts by failures across their recent runs and flags flaky hosts, the ones that flip between
+  failing and passing instead of breaking cleanly. Every host has a queryable run history, and
+  per-task duration trends show which tasks are getting slower.
 - Recovery. Cancellation stops a run, a whole split, or a pipeline mid-flight and records it as
   canceled, not failed. A server that dies mid-run marks its orphans interrupted on the next
   start.
@@ -82,7 +83,9 @@ Add `"shards": 4` to split it. Ansible is the only runtime dependency: `ansible-
 | GET    | `/schedules`            | List schedules                                          |
 | GET    | `/schedules/{id}`       | One schedule                                            |
 | DELETE | `/schedules/{id}`       | Delete a schedule                                       |
-| GET    | `/fleet`                | Hosts ranked by failures over recent runs               |
+| GET    | `/fleet`                | Hosts ranked by failures over recent runs, flaky flags  |
+| GET    | `/hosts/{host}/runs`    | One host's recent per-run outcomes                      |
+| GET    | `/tasks`                | Per-task duration trends over recent runs               |
 | GET    | `/healthz`              | Liveness                                                |
 
 The web UI lives at `/ui/` and the root redirects to it.
@@ -104,20 +107,13 @@ with a bounded worker pool, the cron scheduler, and the embedded UI.
 ## The name
 
 A yardmaster runs a rail yard: which engine takes which track, what gets coupled into the next
-train out, what waits on a siding. Good name for the job this tool does. The metaphor stays under
-the hood as component codenames and never leaks into the API, the UI, or anything you operate.
-
-| Codename   | Component                                          |
-|------------|----------------------------------------------------|
-| Roundhouse | The runner that shells out to ansible-playbook     |
-| Dispatcher | The run coordinator and cron scheduler             |
-| Brakeman   | Cancellation                                       |
-| Yardgoat   | The distributed worker (planned)                   |
+train out, what waits on a siding. Good name for the job this tool does. A few internal packages
+carry yard codenames, the roundhouse runs the playbooks and the dispatcher coordinates them, but
+the API, the UI, and everything you operate speak plain Ansible. No glossary required.
 
 ## Roadmap
 
 - DAG pipelines with branching, per-step retry, and outputs passed between steps
-- Flaky host detection and task duration trends on top of the persisted event history
 - Integration tests against real multi-node clusters via kind
 - Postgres store backend for multi-instance deployments
 - Distributed workers for remote execution

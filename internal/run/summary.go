@@ -10,6 +10,8 @@ import (
 // HostSummary is a single run's outcome for one host, derived from the run recap. It is persisted so
 // cross run questions can be answered without reparsing every event.
 type HostSummary struct {
+	// RunID is the run the summary belongs to, stamped by the store.
+	RunID string `json:"run_id,omitempty"`
 	// Host is the target host.
 	Host string `json:"host"`
 	// OK is the count of successful tasks.
@@ -41,6 +43,40 @@ type HostHealth struct {
 	// LastOutcome is the host's worst outcome in its most recent run.
 	LastOutcome string `json:"last_outcome"`
 	// LastRun is when the host most recently ran.
+	LastRun time.Time `json:"last_run"`
+	// Flips is how many times the host switched between failing and passing across the window,
+	// most recent first.
+	Flips int `json:"flips"`
+	// Flaky reports that the host switched between failing and passing at least twice in the
+	// window, so its failures are intermittent rather than a steady break or a single fix.
+	Flaky bool `json:"flaky"`
+}
+
+// TaskSummary is a single run's wall clock cost for one task, persisted at finalize so task trends
+// can be answered without reparsing events.
+type TaskSummary struct {
+	// RunID is the run the summary belongs to, stamped by the store.
+	RunID string `json:"run_id,omitempty"`
+	// Task is the task name.
+	Task string `json:"task"`
+	// Seconds is the wall clock time from the task start to its last host result, summed over the
+	// task's occurrences in the run.
+	Seconds float64 `json:"seconds"`
+	// RanAt is when the run was created, used to order task history by recency.
+	RanAt time.Time `json:"ran_at"`
+}
+
+// TaskTrend aggregates a task's recent durations so a task that is getting slower stands out.
+type TaskTrend struct {
+	// Task is the task name.
+	Task string `json:"task"`
+	// Runs is the number of recent runs the task appeared in.
+	Runs int `json:"runs"`
+	// AvgSeconds is the average duration across those runs.
+	AvgSeconds float64 `json:"avg_seconds"`
+	// LastSeconds is the duration in the most recent run.
+	LastSeconds float64 `json:"last_seconds"`
+	// LastRun is when the task most recently ran.
 	LastRun time.Time `json:"last_run"`
 }
 
@@ -112,4 +148,54 @@ func worstFromStats(s event.HostStats) string {
 // FailedOutcome reports whether a worst outcome counts as a failure for reliability ranking.
 func FailedOutcome(worst string) bool {
 	return worst == "failed" || worst == "unreachable"
+}
+
+// FlipCount returns how many times the outcomes switch between failing and passing. The summaries
+// must already be ordered; the count is direction agnostic.
+func FlipCount(summaries []HostSummary) int {
+	flips := 0
+	for i := 1; i < len(summaries); i++ {
+		if FailedOutcome(summaries[i].Worst) != FailedOutcome(summaries[i-1].Worst) {
+			flips++
+		}
+	}
+	return flips
+}
+
+// TaskSummariesFromEvents builds per task wall clock costs from the event stream. Each task start
+// opens a block that closes at its last host result, and repeated task names accumulate. It
+// returns nil when the run produced no timed task results.
+func TaskSummariesFromEvents(events []event.Event, ranAt time.Time) []TaskSummary {
+	totals := make(map[string]float64)
+	var task string
+	var taskStart, lastResult time.Time
+
+	flush := func() {
+		if task != "" && lastResult.After(taskStart) {
+			totals[task] += lastResult.Sub(taskStart).Seconds()
+		}
+	}
+	for _, e := range events {
+		switch e.Type {
+		case event.TypeTaskStart:
+			flush()
+			task, taskStart, lastResult = e.Task, e.Time, time.Time{}
+		case event.TypeRunnerOK, event.TypeRunnerFailed, event.TypeRunnerSkipped,
+			event.TypeRunnerUnreachable:
+			if e.Time.After(lastResult) {
+				lastResult = e.Time
+			}
+		}
+	}
+	flush()
+
+	if len(totals) == 0 {
+		return nil
+	}
+	out := make([]TaskSummary, 0, len(totals))
+	for name, seconds := range totals {
+		out = append(out, TaskSummary{Task: name, Seconds: seconds, RanAt: ranAt})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Task < out[j].Task })
+	return out
 }

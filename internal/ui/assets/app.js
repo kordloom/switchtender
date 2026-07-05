@@ -160,6 +160,12 @@ async function loadFleet() {
 				fails.className = "fail-count";
 			}
 			tr.appendChild(fails);
+			const stability = document.createElement("td");
+			const chip = document.createElement("span");
+			chip.className = h.flaky ? "chip flaky" : "chip none";
+			chip.textContent = h.flaky ? "flaky" : "steady";
+			stability.appendChild(chip);
+			tr.appendChild(stability);
 			tr.appendChild(td(String(h.total)));
 			const last = document.createElement("td");
 			last.appendChild(outcomeChip(h.last_outcome));

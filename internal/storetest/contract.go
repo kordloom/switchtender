@@ -31,6 +31,9 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Run("non-terminal runs", func(t *testing.T) { testNonTerminal(t, newStore()) })
 	t.Run("fleet health ranking", func(t *testing.T) { testFleetHealth(t, newStore()) })
 	t.Run("host costs", func(t *testing.T) { testHostCosts(t, newStore()) })
+	t.Run("flaky detection", func(t *testing.T) { testFlaky(t, newStore()) })
+	t.Run("host history", func(t *testing.T) { testHostHistory(t, newStore()) })
+	t.Run("task trends", func(t *testing.T) { testTaskTrends(t, newStore()) })
 }
 
 // sampleRun returns a fully populated terminal run with deterministic times.
@@ -398,6 +401,141 @@ func testFleetHealth(t *testing.T, store run.Store) {
 		if h.Host == "db01" && h.Failures != 0 {
 			t.Errorf("db01 window 1 failures = %d, want 0 since most recent run was ok", h.Failures)
 		}
+	}
+}
+
+// testFlaky verifies flip counting marks intermittent hosts flaky and steady hosts not.
+func testFlaky(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	base := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	save := func(runID string, at time.Time, hosts map[string]string) {
+		var sums []run.HostSummary
+		for host, worst := range hosts {
+			sums = append(sums, run.HostSummary{Host: host, Worst: worst, RanAt: at})
+		}
+		if err := store.SaveHostSummary(ctx, runID, sums); err != nil {
+			t.Fatalf("SaveHostSummary() error = %v", err)
+		}
+	}
+	// flappy alternates, fixed fails then recovers once, solid never fails.
+	save("r1", base, map[string]string{"flappy": "failed", "fixed": "failed", "solid": "ok"})
+	save("r2", base.Add(time.Hour), map[string]string{"flappy": "ok", "fixed": "failed", "solid": "ok"})
+	save("r3", base.Add(2*time.Hour), map[string]string{"flappy": "failed", "fixed": "ok", "solid": "changed"})
+	save("r4", base.Add(3*time.Hour), map[string]string{"flappy": "ok", "fixed": "ok", "solid": "ok"})
+
+	health, err := store.FleetHealth(ctx, 10)
+	if err != nil {
+		t.Fatalf("FleetHealth() error = %v", err)
+	}
+	byHost := make(map[string]run.HostHealth, len(health))
+	for _, h := range health {
+		byHost[h.Host] = h
+	}
+	if h := byHost["flappy"]; h.Flips != 3 || !h.Flaky {
+		t.Errorf("flappy = flips %d flaky %v, want 3 true", h.Flips, h.Flaky)
+	}
+	if h := byHost["fixed"]; h.Flips != 1 || h.Flaky {
+		t.Errorf("fixed = flips %d flaky %v, want 1 false", h.Flips, h.Flaky)
+	}
+	if h := byHost["solid"]; h.Flips != 0 || h.Flaky {
+		t.Errorf("solid = flips %d flaky %v, want 0 false", h.Flips, h.Flaky)
+	}
+}
+
+// testHostHistory verifies per host history comes back newest first with run ids and windowing.
+func testHostHistory(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	base := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	for i, worst := range []string{"ok", "failed", "changed"} {
+		sums := []run.HostSummary{
+			{Host: "db01", Worst: worst, DurationSeconds: float64(i + 1), RanAt: base.Add(time.Duration(i) * time.Hour)},
+			{Host: "web01", Worst: "ok", RanAt: base.Add(time.Duration(i) * time.Hour)},
+		}
+		if err := store.SaveHostSummary(ctx, fmt.Sprintf("r%d", i), sums); err != nil {
+			t.Fatalf("SaveHostSummary() error = %v", err)
+		}
+	}
+
+	history, err := store.HostHistory(ctx, "db01", 10)
+	if err != nil {
+		t.Fatalf("HostHistory() error = %v", err)
+	}
+	if len(history) != 3 {
+		t.Fatalf("history len = %d, want 3", len(history))
+	}
+	if history[0].RunID != "r2" || history[0].Worst != "changed" {
+		t.Errorf("newest = %+v, want run r2 worst changed", history[0])
+	}
+	for _, hs := range history {
+		if hs.Host != "db01" {
+			t.Errorf("history returned host %q", hs.Host)
+		}
+		if hs.RunID == "" {
+			t.Error("history entry missing run id")
+		}
+	}
+
+	limited, err := store.HostHistory(ctx, "db01", 1)
+	if err != nil {
+		t.Fatalf("HostHistory() error = %v", err)
+	}
+	if len(limited) != 1 || limited[0].RunID != "r2" {
+		t.Errorf("limited = %+v, want only r2", limited)
+	}
+
+	empty, err := store.HostHistory(ctx, "ghost", 5)
+	if err != nil {
+		t.Fatalf("HostHistory() error = %v", err)
+	}
+	if len(empty) != 0 {
+		t.Errorf("unknown host history = %+v, want empty", empty)
+	}
+}
+
+// testTaskTrends verifies task durations persist and aggregate over the recent window.
+func testTaskTrends(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	base := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	save := func(runID string, at time.Time, tasks map[string]float64) {
+		var sums []run.TaskSummary
+		for task, seconds := range tasks {
+			sums = append(sums, run.TaskSummary{Task: task, Seconds: seconds, RanAt: at})
+		}
+		if err := store.SaveTaskSummary(ctx, runID, sums); err != nil {
+			t.Fatalf("SaveTaskSummary() error = %v", err)
+		}
+	}
+	save("r1", base, map[string]float64{"install": 10, "restart": 1})
+	save("r2", base.Add(time.Hour), map[string]float64{"install": 20, "restart": 1})
+	save("r3", base.Add(2*time.Hour), map[string]float64{"install": 30})
+
+	trends, err := store.TaskTrends(ctx, 10)
+	if err != nil {
+		t.Fatalf("TaskTrends() error = %v", err)
+	}
+	byTask := make(map[string]run.TaskTrend, len(trends))
+	for _, tr := range trends {
+		byTask[tr.Task] = tr
+	}
+	install := byTask["install"]
+	if install.Runs != 3 || install.AvgSeconds != 20 || install.LastSeconds != 30 {
+		t.Errorf("install = %+v, want runs 3 avg 20 last 30", install)
+	}
+	restart := byTask["restart"]
+	if restart.Runs != 2 || restart.AvgSeconds != 1 {
+		t.Errorf("restart = %+v, want runs 2 avg 1", restart)
+	}
+
+	windowed, err := store.TaskTrends(ctx, 1)
+	if err != nil {
+		t.Fatalf("TaskTrends() error = %v", err)
+	}
+	byTask = make(map[string]run.TaskTrend, len(windowed))
+	for _, tr := range windowed {
+		byTask[tr.Task] = tr
+	}
+	if w := byTask["install"]; w.Runs != 1 || w.AvgSeconds != 30 {
+		t.Errorf("windowed install = %+v, want runs 1 avg 30", w)
 	}
 }
 
