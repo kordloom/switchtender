@@ -9,6 +9,7 @@ import (
 
 	"github.com/dcadolph/yardmaster/internal/live"
 	"github.com/dcadolph/yardmaster/internal/run"
+	"github.com/dcadolph/yardmaster/internal/schedule"
 	"github.com/dcadolph/yardmaster/internal/ui"
 )
 
@@ -42,6 +43,11 @@ func WithCanceler(c Canceler) Option {
 	return func(srv *Server) { srv.canceler = c }
 }
 
+// WithSchedules enables the schedule endpoints backed by the given store.
+func WithSchedules(store schedule.Store) Option {
+	return func(srv *Server) { srv.schedules = store }
+}
+
 // Server wires the run store and submitter into an HTTP handler.
 type Server struct {
 	// store reads runs and their logs for the query endpoints.
@@ -56,6 +62,8 @@ type Server struct {
 	streamer Streamer
 	// canceler backs the cancel endpoint when configured.
 	canceler Canceler
+	// schedules backs the schedule endpoints when configured.
+	schedules schedule.Store
 }
 
 // New returns a Server. It panics if store or submitter is nil; a nil logger becomes a no-op.
@@ -91,6 +99,10 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /runs/{id}/logs", runLogsHandler(s.store, s.log))
 	mux.Handle("GET /runs/{id}/events", runEventsHandler(s.store, s.log))
 	mux.Handle("GET /runs/{id}/stream", runStreamHandler(s.streamer, s.store, s.log))
+	mux.Handle("POST /schedules", createScheduleHandler(s.schedules, s.log))
+	mux.Handle("GET /schedules", listSchedulesHandler(s.schedules, s.log))
+	mux.Handle("GET /schedules/{id}", getScheduleHandler(s.schedules, s.log))
+	mux.Handle("DELETE /schedules/{id}", deleteScheduleHandler(s.schedules, s.log))
 	mux.Handle("/ui/", s.web.Handler())
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/ui/", http.StatusFound)

@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/dcadolph/yardmaster/internal/live"
 	"github.com/dcadolph/yardmaster/internal/run"
+	"github.com/dcadolph/yardmaster/internal/schedule"
 )
 
 // fakeStreamer returns a fixed channel for any run.
@@ -550,6 +552,86 @@ func TestCancelRun(t *testing.T) {
 				t.Errorf("status = %d, want %d", rec.Code, test.WantStatus)
 			}
 		})
+	}
+}
+
+func TestSchedules(t *testing.T) {
+	t.Parallel()
+	handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(),
+		WithSchedules(schedule.NewMemStore())).Handler()
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/schedules",
+		strings.NewReader(`{"name":"nightly","cron":"0 2 * * *","playbook":"site.yml"}`)))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, want 201", rec.Code)
+	}
+	var created schedule.Schedule
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode created: %v", err)
+	}
+	if created.ID == "" || created.NextRunAt == nil || !created.Enabled {
+		t.Fatalf("schedule not fully populated: %+v", created)
+	}
+
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/schedules", nil))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "nightly") {
+		t.Errorf("list = %d %q", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/schedules/"+created.ID, nil))
+	if rec.Code != http.StatusOK {
+		t.Errorf("get status = %d, want 200", rec.Code)
+	}
+
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/schedules/"+created.ID, nil))
+	if rec.Code != http.StatusOK {
+		t.Errorf("delete status = %d, want 200", rec.Code)
+	}
+
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/schedules/"+created.ID, nil))
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("get after delete = %d, want 404", rec.Code)
+	}
+}
+
+func TestScheduleValidation(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Name string
+		Body string
+		Want int
+	}{
+		{Name: "bad cron", Body: `{"cron":"nope","playbook":"p.yml"}`, Want: http.StatusBadRequest},
+		{Name: "no target", Body: `{"cron":"* * * * *"}`, Want: http.StatusBadRequest},
+		{Name: "bad json", Body: `{`, Want: http.StatusBadRequest},
+	}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(),
+				WithSchedules(schedule.NewMemStore())).Handler()
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec,
+				httptest.NewRequest(http.MethodPost, "/schedules", strings.NewReader(test.Body)))
+			if rec.Code != test.Want {
+				t.Errorf("status = %d, want %d", rec.Code, test.Want)
+			}
+		})
+	}
+}
+
+func TestSchedulesDisabled(t *testing.T) {
+	t.Parallel()
+	handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop()).Handler()
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/schedules", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404 when scheduling is disabled", rec.Code)
 	}
 }
 
