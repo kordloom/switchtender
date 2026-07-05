@@ -27,6 +27,7 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Run("log append and read", func(t *testing.T) { testLog(t, newStore()) })
 	t.Run("events append and read", func(t *testing.T) { testEvents(t, newStore()) })
 	t.Run("shards excluded from list", func(t *testing.T) { testShards(t, newStore()) })
+	t.Run("pipeline steps ordered", func(t *testing.T) { testSteps(t, newStore()) })
 	t.Run("non-terminal runs", func(t *testing.T) { testNonTerminal(t, newStore()) })
 	t.Run("fleet health ranking", func(t *testing.T) { testFleetHealth(t, newStore()) })
 }
@@ -259,6 +260,56 @@ func testShards(t *testing.T, store run.Store) {
 	}
 	if shards[0].Limit != "host0" {
 		t.Errorf("shard limit = %q, want host0", shards[0].Limit)
+	}
+}
+
+// testSteps verifies pipeline step runs are ordered by step index and excluded from List.
+func testSteps(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	parentID := "run_pipeline"
+	if err := store.Save(ctx, &run.Run{
+		ID: parentID, Kind: run.KindPipeline, Status: run.StatusRunning, CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	for i := 0; i < 2; i++ {
+		idx := i
+		if err := store.Save(ctx, &run.Run{
+			ID: fmt.Sprintf("run_step_%d", i), Playbook: fmt.Sprintf("step%d.yml", i),
+			Status: run.StatusSucceeded, CreatedAt: time.Now(),
+			ParentID: &parentID, StepIndex: &idx, StepName: fmt.Sprintf("step-%d", i),
+		}); err != nil {
+			t.Fatalf("Save() error = %v", err)
+		}
+	}
+
+	steps, err := store.Steps(ctx, parentID)
+	if err != nil {
+		t.Fatalf("Steps() error = %v", err)
+	}
+	if len(steps) != 2 {
+		t.Fatalf("steps = %d, want 2", len(steps))
+	}
+	if steps[0].StepName != "step-0" || steps[0].StepIndex == nil || *steps[0].StepIndex != 0 {
+		t.Errorf("first step = %+v, want name step-0 index 0", steps[0])
+	}
+
+	parent, err := store.Get(ctx, parentID)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if parent.Kind != run.KindPipeline {
+		t.Errorf("parent kind = %q, want %q", parent.Kind, run.KindPipeline)
+	}
+
+	top, err := store.List(ctx)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	for _, r := range top {
+		if r.ParentID != nil {
+			t.Errorf("List returned step run %s", r.ID)
+		}
 	}
 }
 

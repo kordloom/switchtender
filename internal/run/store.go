@@ -19,6 +19,8 @@ type Store interface {
 	List(ctx context.Context) ([]*Run, error)
 	// Shards returns the shard runs of a parent ordered by shard index.
 	Shards(ctx context.Context, parentID string) ([]*Run, error)
+	// Steps returns the pipeline step runs of a parent ordered by step index.
+	Steps(ctx context.Context, parentID string) ([]*Run, error)
 	// NonTerminal returns all runs, including shards, that are not in a terminal state.
 	NonTerminal(ctx context.Context) ([]*Run, error)
 	// SaveHostSummary replaces the stored per host summaries for a run.
@@ -123,6 +125,30 @@ func shardIndex(r *Run) int {
 		return 1 << 30
 	}
 	return *r.ShardIndex
+}
+
+// Steps returns the pipeline step runs of a parent ordered by step index.
+func (m *memStore) Steps(_ context.Context, parentID string) ([]*Run, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var out []*Run
+	for _, r := range m.runs {
+		if r.ParentID != nil && *r.ParentID == parentID {
+			out = append(out, r.Clone())
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return stepIndex(out[i]) < stepIndex(out[j])
+	})
+	return out, nil
+}
+
+// stepIndex returns a run's step index for ordering, or a large value when unset.
+func stepIndex(r *Run) int {
+	if r.StepIndex == nil {
+		return 1 << 30
+	}
+	return *r.StepIndex
 }
 
 // NonTerminal returns all runs, including shards, that are not in a terminal state.

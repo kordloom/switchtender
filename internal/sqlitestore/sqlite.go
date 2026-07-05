@@ -33,7 +33,10 @@ CREATE TABLE IF NOT EXISTS runs (
 	parent_id     TEXT,
 	shard_index   INTEGER,
 	shard_count   INTEGER,
-	limit_pattern TEXT NOT NULL DEFAULT ''
+	limit_pattern TEXT NOT NULL DEFAULT '',
+	kind          TEXT NOT NULL DEFAULT '',
+	step_name     TEXT NOT NULL DEFAULT '',
+	step_index    INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_runs_created_at ON runs(created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_parent ON runs(parent_id, shard_index);
@@ -107,25 +110,27 @@ func (s *store) Close() error {
 
 // runColumns is the shared select list so every read scans the same columns in the same order.
 const runColumns = `id, playbook, inventory, status, exit_code, error, created_at, started_at,
-	ended_at, parent_id, shard_index, shard_count, limit_pattern`
+	ended_at, parent_id, shard_index, shard_count, limit_pattern, kind, step_name, step_index`
 
 // Save inserts or replaces the run identified by r.ID.
 func (s *store) Save(ctx context.Context, r *run.Run) error {
 	const q = `
 INSERT INTO runs
 	(id, playbook, inventory, status, exit_code, error, created_at, started_at, ended_at,
-	 parent_id, shard_index, shard_count, limit_pattern)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	 parent_id, shard_index, shard_count, limit_pattern, kind, step_name, step_index)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
 	playbook=excluded.playbook, inventory=excluded.inventory, status=excluded.status,
 	exit_code=excluded.exit_code, error=excluded.error, created_at=excluded.created_at,
 	started_at=excluded.started_at, ended_at=excluded.ended_at,
 	parent_id=excluded.parent_id, shard_index=excluded.shard_index,
-	shard_count=excluded.shard_count, limit_pattern=excluded.limit_pattern`
+	shard_count=excluded.shard_count, limit_pattern=excluded.limit_pattern,
+	kind=excluded.kind, step_name=excluded.step_name, step_index=excluded.step_index`
 	_, err := s.db.ExecContext(ctx, q,
 		r.ID, r.Playbook, r.Inventory, string(r.Status), nullInt(r.ExitCode), r.Error,
 		formatTime(r.CreatedAt), nullTime(r.StartedAt), nullTime(r.EndedAt),
 		nullString(r.ParentID), nullInt(r.ShardIndex), nullInt(r.ShardCount), r.Limit,
+		r.Kind, r.StepName, nullInt(r.StepIndex),
 	)
 	if err != nil {
 		return fmt.Errorf("save run: %w", err)
@@ -157,6 +162,12 @@ func (s *store) List(ctx context.Context) ([]*run.Run, error) {
 func (s *store) Shards(ctx context.Context, parentID string) ([]*run.Run, error) {
 	const q = "SELECT " + runColumns + " FROM runs WHERE parent_id=? ORDER BY shard_index"
 	return s.queryRuns(ctx, "list shards", q, parentID)
+}
+
+// Steps returns the pipeline step runs of a parent ordered by step index.
+func (s *store) Steps(ctx context.Context, parentID string) ([]*run.Run, error) {
+	const q = "SELECT " + runColumns + " FROM runs WHERE parent_id=? ORDER BY step_index"
+	return s.queryRuns(ctx, "list steps", q, parentID)
 }
 
 // NonTerminal returns all runs, including shards, that are not in a terminal state.
@@ -406,9 +417,11 @@ func scanRun(s scanner) (*run.Run, error) {
 		parent   sql.NullString
 		shardIdx sql.NullInt64
 		shardCnt sql.NullInt64
+		stepIdx  sql.NullInt64
 	)
 	if err := s.Scan(&r.ID, &r.Playbook, &r.Inventory, &status, &exit, &r.Error,
-		&created, &started, &ended, &parent, &shardIdx, &shardCnt, &r.Limit); err != nil {
+		&created, &started, &ended, &parent, &shardIdx, &shardCnt, &r.Limit,
+		&r.Kind, &r.StepName, &stepIdx); err != nil {
 		return nil, err
 	}
 	r.Status = run.Status(status)
@@ -438,6 +451,10 @@ func scanRun(s scanner) (*run.Run, error) {
 	if shardCnt.Valid {
 		c := int(shardCnt.Int64)
 		r.ShardCount = &c
+	}
+	if stepIdx.Valid {
+		i := int(stepIdx.Int64)
+		r.StepIndex = &i
 	}
 	return &r, nil
 }

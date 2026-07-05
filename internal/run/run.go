@@ -26,6 +26,13 @@ const (
 	StatusInterrupted Status = "interrupted"
 )
 
+const (
+	// KindSplit marks a parent run whose children are inventory shards.
+	KindSplit = "split"
+	// KindPipeline marks a parent run whose children are pipeline steps.
+	KindPipeline = "pipeline"
+)
+
 // Terminal reports whether the status is a final state.
 func (s Status) Terminal() bool {
 	switch s {
@@ -64,6 +71,12 @@ type Run struct {
 	ShardCount *int `json:"shard_count,omitempty"`
 	// Limit restricts execution to a host pattern, used to target a shard's hosts.
 	Limit string `json:"limit,omitempty"`
+	// Kind distinguishes a plain run from a split or pipeline parent. Empty means a plain run.
+	Kind string `json:"kind,omitempty"`
+	// StepName is the step name when this run is a pipeline step.
+	StepName string `json:"step_name,omitempty"`
+	// StepIndex is the step order when this run is a pipeline step.
+	StepIndex *int `json:"step_index,omitempty"`
 }
 
 // Clone returns a deep copy so callers cannot mutate stored state through shared pointers.
@@ -95,6 +108,10 @@ func (r *Run) Clone() *Run {
 	if r.ShardCount != nil {
 		c := *r.ShardCount
 		out.ShardCount = &c
+	}
+	if r.StepIndex != nil {
+		i := *r.StepIndex
+		out.StepIndex = &i
 	}
 	return &out
 }
