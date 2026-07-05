@@ -16,6 +16,7 @@ import (
 
 	"github.com/dcadolph/yardmaster/internal/event"
 	"github.com/dcadolph/yardmaster/internal/run"
+	"github.com/dcadolph/yardmaster/internal/schedule"
 )
 
 // schema is the table layout created on open. It is idempotent so open doubles as migration.
@@ -65,6 +66,21 @@ CREATE TABLE IF NOT EXISTS run_host_summary (
 	PRIMARY KEY (run_id, host)
 );
 CREATE INDEX IF NOT EXISTS idx_host_summary_host ON run_host_summary(host, ran_at DESC);
+CREATE TABLE IF NOT EXISTS schedules (
+	id          TEXT PRIMARY KEY,
+	name        TEXT NOT NULL DEFAULT '',
+	cron        TEXT NOT NULL,
+	playbook    TEXT NOT NULL DEFAULT '',
+	inventory   TEXT NOT NULL DEFAULT '',
+	shards      INTEGER NOT NULL DEFAULT 0,
+	steps       TEXT NOT NULL DEFAULT '',
+	enabled     INTEGER NOT NULL DEFAULT 0,
+	created_at  TEXT NOT NULL,
+	next_run_at TEXT,
+	last_run_at TEXT,
+	last_run_id TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_schedules_created ON schedules(created_at, id);
 `
 
 // store is a run.Store backed by a SQLite database.
@@ -78,9 +94,18 @@ type scanner interface {
 	Scan(dest ...any) error
 }
 
-// New opens the SQLite database at path, applies the schema, and returns a run.Store. The returned
-// value also implements io.Closer so callers can close the database on shutdown.
-func New(path string) (run.Store, error) {
+// DB holds the SQLite backed run and schedule stores sharing one database.
+type DB struct {
+	// db is the open database handle.
+	db *sql.DB
+	// runs is the run store.
+	runs *store
+	// schedules is the schedule store.
+	schedules *scheduleStore
+}
+
+// Open opens the SQLite database at path, applies the schema, and returns the bundled stores.
+func Open(path string) (*DB, error) {
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
@@ -100,12 +125,22 @@ func New(path string) (run.Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate schema: %w", err)
 	}
-	return &store{db: db}, nil
+	return &DB{db: db, runs: &store{db: db}, schedules: &scheduleStore{db: db}}, nil
+}
+
+// Runs returns the run store.
+func (d *DB) Runs() run.Store {
+	return d.runs
+}
+
+// Schedules returns the schedule store.
+func (d *DB) Schedules() schedule.Store {
+	return d.schedules
 }
 
 // Close closes the underlying database.
-func (s *store) Close() error {
-	return s.db.Close()
+func (d *DB) Close() error {
+	return d.db.Close()
 }
 
 // runColumns is the shared select list so every read scans the same columns in the same order.

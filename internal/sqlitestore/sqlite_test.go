@@ -1,11 +1,12 @@
 package sqlitestore_test
 
 import (
-	"io"
 	"path/filepath"
 	"testing"
 
 	"github.com/dcadolph/yardmaster/internal/run"
+	"github.com/dcadolph/yardmaster/internal/schedule"
+	"github.com/dcadolph/yardmaster/internal/scheduletest"
 	"github.com/dcadolph/yardmaster/internal/sqlitestore"
 	"github.com/dcadolph/yardmaster/internal/storetest"
 )
@@ -13,13 +14,23 @@ import (
 func TestStoreContract(t *testing.T) {
 	t.Parallel()
 	storetest.Contract(t, func() run.Store {
-		store, err := sqlitestore.New(filepath.Join(t.TempDir(), "yardmaster.db"))
+		db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "yardmaster.db"))
 		if err != nil {
-			t.Fatalf("New() error = %v", err)
+			t.Fatalf("Open() error = %v", err)
 		}
-		if c, ok := store.(io.Closer); ok {
-			t.Cleanup(func() { _ = c.Close() })
+		t.Cleanup(func() { _ = db.Close() })
+		return db.Runs()
+	})
+}
+
+func TestScheduleStoreContract(t *testing.T) {
+	t.Parallel()
+	scheduletest.Contract(t, func() schedule.Store {
+		db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "yardmaster.db"))
+		if err != nil {
+			t.Fatalf("Open() error = %v", err)
 		}
-		return store
+		t.Cleanup(func() { _ = db.Close() })
+		return db.Schedules()
 	})
 }

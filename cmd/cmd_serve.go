@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"os/signal"
 	"syscall"
@@ -59,13 +58,12 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	}
 	defer func() { _ = log.Sync() }()
 
-	store, err := sqlitestore.New(serveDB)
+	db, err := sqlitestore.Open(serveDB)
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
-	if closer, ok := store.(io.Closer); ok {
-		defer func() { _ = closer.Close() }()
-	}
+	defer func() { _ = db.Close() }()
+	store := db.Runs()
 
 	hub := live.NewHub()
 	runner := roundhouse.NewAnsibleRunner()
