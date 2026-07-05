@@ -5,6 +5,7 @@ package run
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"maps"
 	"time"
 )
 
@@ -81,6 +82,11 @@ type Run struct {
 	StepIndex *int `json:"step_index,omitempty"`
 	// Attempt is the retry attempt number for a pipeline step run, zero for the first try.
 	Attempt int `json:"attempt,omitempty"`
+	// ExtraVars are the variables injected into the run, for a pipeline step the merged outputs
+	// of the steps it depends on.
+	ExtraVars map[string]any `json:"extra_vars,omitempty"`
+	// Outputs are the values the playbook published with set_stats for downstream steps.
+	Outputs map[string]any `json:"outputs,omitempty"`
 }
 
 // Clone returns a deep copy so callers cannot mutate stored state through shared pointers.
@@ -121,6 +127,8 @@ func (r *Run) Clone() *Run {
 		id := *r.RetryOf
 		out.RetryOf = &id
 	}
+	out.ExtraVars = maps.Clone(r.ExtraVars)
+	out.Outputs = maps.Clone(r.Outputs)
 	return &out
 }
 

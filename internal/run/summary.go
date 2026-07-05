@@ -145,6 +145,18 @@ func worstFromStats(s event.HostStats) string {
 	}
 }
 
+// OutputsFromEvents returns the values the playbook published with set_stats, taken from the
+// last stats event, or nil when the run published nothing.
+func OutputsFromEvents(events []event.Event) map[string]any {
+	var out map[string]any
+	for _, e := range events {
+		if e.Type == event.TypeStats && len(e.Outputs) > 0 {
+			out = e.Outputs
+		}
+	}
+	return out
+}
+
 // FailedOutcome reports whether a worst outcome counts as a failure for reliability ranking.
 func FailedOutcome(worst string) bool {
 	return worst == "failed" || worst == "unreachable"

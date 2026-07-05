@@ -39,7 +39,9 @@ CREATE TABLE IF NOT EXISTS runs (
 	step_name     TEXT NOT NULL DEFAULT '',
 	step_index    INTEGER,
 	retry_of      TEXT,
-	attempt       INTEGER NOT NULL DEFAULT 0
+	attempt       INTEGER NOT NULL DEFAULT 0,
+	extra_vars    TEXT NOT NULL DEFAULT '',
+	outputs       TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_runs_created_at ON runs(created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_parent ON runs(parent_id, shard_index);
@@ -99,6 +101,8 @@ CREATE INDEX IF NOT EXISTS idx_schedules_created ON schedules(created_at, id);
 var alterations = []string{
 	"ALTER TABLE runs ADD COLUMN retry_of TEXT",
 	"ALTER TABLE runs ADD COLUMN attempt INTEGER NOT NULL DEFAULT 0",
+	"ALTER TABLE runs ADD COLUMN extra_vars TEXT NOT NULL DEFAULT ''",
+	"ALTER TABLE runs ADD COLUMN outputs TEXT NOT NULL DEFAULT ''",
 	"ALTER TABLE run_host_summary ADD COLUMN duration_seconds REAL NOT NULL DEFAULT 0",
 }
 
@@ -172,7 +176,7 @@ func (d *DB) Close() error {
 // runColumns is the shared select list so every read scans the same columns in the same order.
 const runColumns = `id, playbook, inventory, status, exit_code, error, created_at, started_at,
 	ended_at, parent_id, shard_index, shard_count, limit_pattern, kind, step_name, step_index,
-	retry_of, attempt`
+	retry_of, attempt, extra_vars, outputs`
 
 // Save inserts or replaces the run identified by r.ID.
 func (s *store) Save(ctx context.Context, r *run.Run) error {
@@ -180,8 +184,8 @@ func (s *store) Save(ctx context.Context, r *run.Run) error {
 INSERT INTO runs
 	(id, playbook, inventory, status, exit_code, error, created_at, started_at, ended_at,
 	 parent_id, shard_index, shard_count, limit_pattern, kind, step_name, step_index, retry_of,
-	 attempt)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	 attempt, extra_vars, outputs)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
 	playbook=excluded.playbook, inventory=excluded.inventory, status=excluded.status,
 	exit_code=excluded.exit_code, error=excluded.error, created_at=excluded.created_at,
@@ -189,12 +193,14 @@ ON CONFLICT(id) DO UPDATE SET
 	parent_id=excluded.parent_id, shard_index=excluded.shard_index,
 	shard_count=excluded.shard_count, limit_pattern=excluded.limit_pattern,
 	kind=excluded.kind, step_name=excluded.step_name, step_index=excluded.step_index,
-	retry_of=excluded.retry_of, attempt=excluded.attempt`
+	retry_of=excluded.retry_of, attempt=excluded.attempt, extra_vars=excluded.extra_vars,
+	outputs=excluded.outputs`
 	_, err := s.db.ExecContext(ctx, q,
 		r.ID, r.Playbook, r.Inventory, string(r.Status), nullInt(r.ExitCode), r.Error,
 		formatTime(r.CreatedAt), nullTime(r.StartedAt), nullTime(r.EndedAt),
 		nullString(r.ParentID), nullInt(r.ShardIndex), nullInt(r.ShardCount), r.Limit,
 		r.Kind, r.StepName, nullInt(r.StepIndex), nullString(r.RetryOf), r.Attempt,
+		jsonMap(r.ExtraVars), jsonMap(r.Outputs),
 	)
 	if err != nil {
 		return fmt.Errorf("save run: %w", err)
@@ -643,12 +649,24 @@ func scanRun(s scanner) (*run.Run, error) {
 		shardCnt sql.NullInt64
 		stepIdx  sql.NullInt64
 		retryOf  sql.NullString
+		extra    string
+		outputs  string
 	)
 	if err := s.Scan(&r.ID, &r.Playbook, &r.Inventory, &status, &exit, &r.Error,
 		&created, &started, &ended, &parent, &shardIdx, &shardCnt, &r.Limit,
-		&r.Kind, &r.StepName, &stepIdx, &retryOf, &r.Attempt); err != nil {
+		&r.Kind, &r.StepName, &stepIdx, &retryOf, &r.Attempt, &extra, &outputs); err != nil {
 		return nil, err
 	}
+	extraVars, err := parseMap(extra)
+	if err != nil {
+		return nil, err
+	}
+	r.ExtraVars = extraVars
+	outs, err := parseMap(outputs)
+	if err != nil {
+		return nil, err
+	}
+	r.Outputs = outs
 	r.Status = run.Status(status)
 	if exit.Valid {
 		v := int(exit.Int64)
@@ -686,6 +704,30 @@ func scanRun(s scanner) (*run.Run, error) {
 		r.RetryOf = &id
 	}
 	return &r, nil
+}
+
+// jsonMap renders a map as JSON for storage, empty string for an empty map.
+func jsonMap(m map[string]any) string {
+	if len(m) == 0 {
+		return ""
+	}
+	data, err := json.Marshal(m)
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+// parseMap parses a stored JSON map, nil for an empty string.
+func parseMap(s string) (map[string]any, error) {
+	if s == "" {
+		return nil, nil
+	}
+	var m map[string]any
+	if err := json.Unmarshal([]byte(s), &m); err != nil {
+		return nil, fmt.Errorf("parse stored map: %w", err)
+	}
+	return m, nil
 }
 
 // formatTime renders a time as a sortable UTC string.
