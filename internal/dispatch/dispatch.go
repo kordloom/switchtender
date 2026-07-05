@@ -330,6 +330,7 @@ func (d *Dispatcher) coordinate(parent *run.Run, children []*run.Run) {
 		code := 1
 		d.finalize(parent, run.StatusFailed, &code, "")
 	}
+	d.publisher.CloseRun(parent.ID)
 }
 
 // SubmitPipeline runs an ordered sequence of playbook steps as one pipeline and returns the parent
@@ -422,6 +423,7 @@ func (d *Dispatcher) runPipeline(parent *run.Run, steps []run.PipelineStep) {
 		code := 0
 		d.finalize(parent, run.StatusSucceeded, &code, "")
 	}
+	d.publisher.CloseRun(parent.ID)
 }
 
 // partition splits hosts into at most shards groups balanced by expected cost. Each host weighs
@@ -551,11 +553,15 @@ func (d *Dispatcher) execute(ctx context.Context, r *run.Run) run.Status {
 	eventsPath, cleanup := d.eventsFile(r.ID)
 	defer cleanup()
 
+	parent := ""
+	if r.ParentID != nil {
+		parent = *r.ParentID
+	}
 	stop := make(chan struct{})
 	tailed := make(chan struct{})
 	go func() {
 		defer close(tailed)
-		d.tailEvents(r.ID, eventsPath, stop)
+		d.tailEvents(r.ID, parent, eventsPath, stop)
 	}()
 
 	sink := &logSink{store: d.store, id: r.ID, log: d.log, publisher: d.publisher}
@@ -668,8 +674,9 @@ func (d *Dispatcher) eventsFile(id string) (string, func()) {
 }
 
 // tailEvents follows the run's event sidecar file, parsing, storing, and publishing each complete
-// line as it appears, until stop is closed and a final drain has run.
-func (d *Dispatcher) tailEvents(id, path string, stop <-chan struct{}) {
+// line as it appears, until stop is closed and a final drain has run. Events from a child run are
+// also published under its parent so a split or pipeline page streams live.
+func (d *Dispatcher) tailEvents(id, parent, path string, stop <-chan struct{}) {
 	if path == "" {
 		<-stop
 		return
@@ -690,7 +697,7 @@ func (d *Dispatcher) tailEvents(id, path string, stop <-chan struct{}) {
 			if len(chunk) > 0 {
 				partial = append(partial, chunk...)
 				if partial[len(partial)-1] == '\n' {
-					d.handleEventLine(id, partial)
+					d.handleEventLine(id, parent, partial)
 					partial = partial[:0]
 				}
 			}
@@ -713,8 +720,9 @@ func (d *Dispatcher) tailEvents(id, path string, stop <-chan struct{}) {
 	}
 }
 
-// handleEventLine parses a single event line, stores it, and publishes it.
-func (d *Dispatcher) handleEventLine(id string, raw []byte) {
+// handleEventLine parses a single event line, stores it, and publishes it, echoing child events to
+// the parent topic when the run belongs to a split or pipeline.
+func (d *Dispatcher) handleEventLine(id, parent string, raw []byte) {
 	line := bytes.TrimSpace(raw)
 	if len(line) == 0 {
 		return
@@ -731,4 +739,7 @@ func (d *Dispatcher) handleEventLine(id string, raw []byte) {
 		d.log.Error("dispatch: append events: "+err.Error(), zap.String("run_id", id))
 	}
 	d.publisher.PublishEvents(id, events)
+	if parent != "" {
+		d.publisher.PublishEvents(parent, events)
+	}
 }

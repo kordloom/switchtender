@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -338,6 +339,125 @@ func (f *flakyRunnerLister) Run(_ context.Context, spec roundhouse.Spec, _ io.Wr
 // Hosts returns the fixed host set.
 func (f *flakyRunnerLister) Hosts(context.Context, string) ([]string, error) {
 	return f.hosts, nil
+}
+
+// capturingPublisher records published events and closed runs by id for stream assertions.
+type capturingPublisher struct {
+	// mu guards events and closed.
+	mu sync.Mutex
+	// events maps a topic id to the events published under it.
+	events map[string][]event.Event
+	// closed lists the ids whose topics were closed.
+	closed []string
+}
+
+// newCapturingPublisher returns an empty capturingPublisher.
+func newCapturingPublisher() *capturingPublisher {
+	return &capturingPublisher{events: make(map[string][]event.Event)}
+}
+
+// PublishEvents records events under the topic id.
+func (c *capturingPublisher) PublishEvents(id string, events []event.Event) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.events[id] = append(c.events[id], events...)
+}
+
+// PublishLog discards log chunks.
+func (c *capturingPublisher) PublishLog(string, []byte) {}
+
+// CloseRun records the closed topic id.
+func (c *capturingPublisher) CloseRun(id string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.closed = append(c.closed, id)
+}
+
+// eventCount returns how many events were published under id.
+func (c *capturingPublisher) eventCount(id string) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.events[id])
+}
+
+// closedIDs returns a copy of the closed topic ids.
+func (c *capturingPublisher) closedIDs() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make([]string, len(c.closed))
+	copy(out, c.closed)
+	return out
+}
+
+// eventWritingLister lists fixed hosts and writes one play_start event line per run.
+type eventWritingLister struct {
+	// hosts is returned by Hosts.
+	hosts []string
+}
+
+// Run writes a single event line to the sidecar and succeeds.
+func (f *eventWritingLister) Run(_ context.Context, spec roundhouse.Spec, _ io.Writer) (roundhouse.Result, error) {
+	if spec.EventsPath != "" {
+		line := `{"type":"play_start","ts":1719000000,"play":"demo"}` + "\n"
+		if err := os.WriteFile(spec.EventsPath, []byte(line), 0o600); err != nil {
+			return roundhouse.Result{ExitCode: -1}, err
+		}
+	}
+	return roundhouse.Result{ExitCode: 0}, nil
+}
+
+// Hosts returns the fixed host set.
+func (f *eventWritingLister) Hosts(context.Context, string) ([]string, error) {
+	return f.hosts, nil
+}
+
+func TestDispatcherEchoesChildEventsToParent(t *testing.T) {
+	t.Parallel()
+	store := run.NewMemStore()
+	pub := newCapturingPublisher()
+	d := New(store, &eventWritingLister{hosts: []string{"a", "b", "c", "d"}}, nil, WithPublisher(pub))
+	defer d.Close()
+
+	parent, err := d.SubmitSplit(context.Background(), "play.yml", "inv", 2)
+	if err != nil {
+		t.Fatalf("SubmitSplit() error = %v", err)
+	}
+	waitTerminal(t, store, parent.ID)
+
+	if got := pub.eventCount(parent.ID); got != 2 {
+		t.Errorf("parent topic events = %d, want 2, one echoed from each shard", got)
+	}
+	closed := pub.closedIDs()
+	parentClosed := false
+	for _, id := range closed {
+		if id == parent.ID {
+			parentClosed = true
+		}
+	}
+	if !parentClosed {
+		t.Errorf("parent topic was not closed, closed = %v", closed)
+	}
+}
+
+func TestDispatcherEchoesStepEventsToPipeline(t *testing.T) {
+	t.Parallel()
+	store := run.NewMemStore()
+	pub := newCapturingPublisher()
+	d := New(store, &eventWritingLister{}, nil, WithPublisher(pub))
+	defer d.Close()
+
+	parent, err := d.SubmitPipeline(context.Background(), "deploy", "inv", []run.PipelineStep{
+		{Name: "one", Playbook: "one.yml"},
+		{Name: "two", Playbook: "two.yml"},
+	})
+	if err != nil {
+		t.Fatalf("SubmitPipeline() error = %v", err)
+	}
+	waitTerminal(t, store, parent.ID)
+
+	if got := pub.eventCount(parent.ID); got != 2 {
+		t.Errorf("pipeline topic events = %d, want 2, one echoed from each step", got)
+	}
 }
 
 func TestDispatcherRetryFailedShards(t *testing.T) {
