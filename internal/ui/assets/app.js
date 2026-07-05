@@ -417,7 +417,8 @@ function updateActions(run) {
 	retry.hidden = !(splitParent && isTerminal(run.status) && run.status !== "succeeded");
 }
 
-// loadPipeline renders a pipeline run as an ordered list of step runs, polling while it is active.
+// loadPipeline renders a pipeline run as an ordered list of step runs, refreshed live over the
+// pipeline's event stream while it is active.
 async function loadPipeline(pipelineId) {
 	const run = await getJSON("/runs/" + pipelineId);
 	const stepData = await getJSON("/runs/" + pipelineId + "/steps");
@@ -425,8 +426,33 @@ async function loadPipeline(pipelineId) {
 	renderSteps(stepData.steps || []);
 	setStatus("");
 	if (!isTerminal(run.status)) {
-		setTimeout(() => { loadPipeline(pipelineId).catch(() => {}); }, 1500);
+		openPipelineStream(pipelineId);
 	}
+}
+
+// openPipelineStream refreshes the header and step list as step events arrive, coalescing bursts
+// into one refresh, and settles on the final state at the end signal.
+function openPipelineStream(pipelineId) {
+	const source = new EventSource("/runs/" + pipelineId + "/stream");
+	let pending = null;
+	const refresh = async () => {
+		pending = null;
+		try {
+			const run = await getJSON("/runs/" + pipelineId);
+			const stepData = await getJSON("/runs/" + pipelineId + "/steps");
+			renderHeader(run);
+			renderSteps(stepData.steps || []);
+		} catch (_) { /* keep the last view on a refresh failure */ }
+	};
+	source.addEventListener("event", () => {
+		if (!pending) {
+			pending = setTimeout(refresh, 250);
+		}
+	});
+	source.addEventListener("end", () => {
+		source.close();
+		refresh();
+	});
 }
 
 // renderSteps lists a pipeline's step runs in order with status and playbook.
@@ -464,8 +490,9 @@ async function loadSingle(run) {
 	}
 }
 
-// loadParent renders a split run by merging every shard's events into one matrix, polling while
-// the parent is still active so the merged grid keeps filling in.
+// loadParent renders a split run by merging every shard's events into one matrix. While the parent
+// is active the merged grid fills in live from the parent's event stream, which carries every
+// shard's events.
 async function loadParent(parentId) {
 	const run = await getJSON("/runs/" + parentId);
 	const shardData = await getJSON("/runs/" + parentId + "/shards");
@@ -479,8 +506,38 @@ async function loadParent(parentId) {
 	setStatus("");
 
 	if (!isTerminal(run.status)) {
-		setTimeout(() => { loadParent(parentId).catch(() => {}); }, 1500);
+		openParentStream(parentId);
 	}
+}
+
+// openParentStream applies shard events to the merged matrix as they arrive. A stats event means a
+// shard finished, so the shard list refreshes, and the end signal settles the final state.
+function openParentStream(parentId) {
+	const source = new EventSource("/runs/" + parentId + "/stream");
+	const refreshShards = async () => {
+		try {
+			const shardData = await getJSON("/runs/" + parentId + "/shards");
+			renderShards(shardData.shards || []);
+		} catch (_) { /* keep the last shard list on a refresh failure */ }
+	};
+	source.addEventListener("event", (e) => {
+		try {
+			const ev = JSON.parse(e.data);
+			detailState.events.push(ev);
+			renderDetail();
+			if (ev.type === "stats") {
+				refreshShards();
+			}
+		} catch (_) { /* ignore a malformed event */ }
+	});
+	source.addEventListener("end", async () => {
+		source.close();
+		try {
+			detailState.run = await getJSON("/runs/" + parentId);
+			renderDetail();
+		} catch (_) { /* keep the last header on refresh failure */ }
+		refreshShards();
+	});
 }
 
 // renderShards lists the shard runs of a split with status and host count.
