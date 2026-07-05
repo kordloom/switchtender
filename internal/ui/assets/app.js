@@ -63,6 +63,7 @@ async function loadRuns() {
 		const data = await getJSON("/runs");
 		const runs = data.runs || [];
 		if (runs.length === 0) { setStatus("No runs yet."); return; }
+		renderSummary(runs);
 		const tbody = document.getElementById("runs");
 		for (const r of runs) {
 			const tr = document.createElement("tr");
@@ -79,6 +80,42 @@ async function loadRuns() {
 	} catch (e) {
 		setStatus("Failed to load runs: " + e.message);
 	}
+}
+
+// renderSummary draws the at-a-glance stat cards above the run history.
+function renderSummary(runs) {
+	const counts = { total: runs.length, succeeded: 0, failed: 0, active: 0 };
+	for (const r of runs) {
+		if (r.status === "succeeded") {
+			counts.succeeded++;
+		} else if (r.status === "failed") {
+			counts.failed++;
+		} else if (r.status === "running" || r.status === "pending") {
+			counts.active++;
+		}
+	}
+	const el = document.getElementById("summary");
+	el.innerHTML = "";
+	el.appendChild(statCard(counts.total, "Total runs", ""));
+	el.appendChild(statCard(counts.succeeded, "Succeeded", "ok"));
+	el.appendChild(statCard(counts.failed, "Failed", "failed"));
+	el.appendChild(statCard(counts.active, "Active", "running"));
+	el.hidden = false;
+}
+
+// statCard builds one summary stat card.
+function statCard(value, label, cls) {
+	const card = document.createElement("div");
+	card.className = "stat-card";
+	const v = document.createElement("div");
+	v.className = "stat-value" + (cls ? " " + cls : "");
+	v.textContent = value;
+	const l = document.createElement("div");
+	l.className = "stat-label";
+	l.textContent = label;
+	card.appendChild(v);
+	card.appendChild(l);
+	return card;
 }
 
 // td builds a table cell.
