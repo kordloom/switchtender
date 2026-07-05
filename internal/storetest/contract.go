@@ -223,7 +223,7 @@ func testShards(t *testing.T, store run.Store) {
 		&run.Run{ID: parentID, Status: run.StatusRunning, CreatedAt: time.Now()}); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		idx, count := i, 2
 		child := &run.Run{
 			ID: fmt.Sprintf("run_child_%d", i), Status: run.StatusSucceeded, CreatedAt: time.Now(),
@@ -275,7 +275,7 @@ func testSteps(t *testing.T, store run.Store) {
 	}); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		idx := i
 		if err := store.Save(ctx, &run.Run{
 			ID: fmt.Sprintf("run_step_%d", i), Playbook: fmt.Sprintf("step%d.yml", i),

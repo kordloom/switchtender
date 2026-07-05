@@ -34,9 +34,6 @@ func waitTerminal(t *testing.T, store run.Store, id string) *run.Run {
 	}
 }
 
-// intPtr returns a pointer to v for table expectations.
-func intPtr(v int) *int { return &v }
-
 func TestDispatcherExecute(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -49,11 +46,11 @@ func TestDispatcherExecute(t *testing.T) {
 	}{
 		{ // Test 0: Zero exit succeeds.
 			Name: "success", Result: roundhouse.Result{ExitCode: 0},
-			WantStatus: run.StatusSucceeded, WantExitCode: intPtr(0), WantOutput: "ran",
+			WantStatus: run.StatusSucceeded, WantExitCode: new(0), WantOutput: "ran",
 		},
 		{ // Test 1: Non-zero exit fails with the recorded code.
 			Name: "playbook failed", Result: roundhouse.Result{ExitCode: 2},
-			WantStatus: run.StatusFailed, WantExitCode: intPtr(2), WantOutput: "ran",
+			WantStatus: run.StatusFailed, WantExitCode: new(2), WantOutput: "ran",
 		},
 		{ // Test 2: Launch error fails with no exit code.
 			Name: "launch error", RunErr: errors.New("boom"),
