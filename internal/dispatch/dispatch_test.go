@@ -370,6 +370,107 @@ func TestDispatcherReconcile(t *testing.T) {
 	}
 }
 
+// scriptedRunner succeeds for every playbook except failOn, which exits non-zero.
+type scriptedRunner struct {
+	// failOn is the playbook that fails.
+	failOn string
+}
+
+// Run succeeds unless the spec playbook matches failOn.
+func (s *scriptedRunner) Run(_ context.Context, spec roundhouse.Spec, _ io.Writer) (roundhouse.Result, error) {
+	if spec.Playbook == s.failOn {
+		return roundhouse.Result{ExitCode: 2}, nil
+	}
+	return roundhouse.Result{ExitCode: 0}, nil
+}
+
+func TestDispatcherSubmitPipeline(t *testing.T) {
+	t.Parallel()
+	store := run.NewMemStore()
+	d := New(store, &scriptedRunner{}, nil)
+	defer d.Close()
+
+	parent, err := d.SubmitPipeline(context.Background(), "deploy", "inv", []run.PipelineStep{
+		{Name: "one", Playbook: "one.yml"},
+		{Name: "two", Playbook: "two.yml"},
+	})
+	if err != nil {
+		t.Fatalf("SubmitPipeline() error = %v", err)
+	}
+	if parent.Kind != run.KindPipeline {
+		t.Errorf("parent kind = %q, want %q", parent.Kind, run.KindPipeline)
+	}
+
+	got := waitTerminal(t, store, parent.ID)
+	if got.Status != run.StatusSucceeded {
+		t.Errorf("parent status = %q, want succeeded", got.Status)
+	}
+	steps, err := store.Steps(context.Background(), parent.ID)
+	if err != nil {
+		t.Fatalf("Steps() error = %v", err)
+	}
+	if len(steps) != 2 || steps[0].StepName != "one" || steps[1].StepName != "two" {
+		t.Errorf("steps = %+v, want ordered one then two", steps)
+	}
+}
+
+func TestDispatcherPipelineStopOnFailure(t *testing.T) {
+	t.Parallel()
+	store := run.NewMemStore()
+	d := New(store, &scriptedRunner{failOn: "two.yml"}, nil)
+	defer d.Close()
+
+	parent, err := d.SubmitPipeline(context.Background(), "deploy", "inv", []run.PipelineStep{
+		{Name: "one", Playbook: "one.yml"},
+		{Name: "two", Playbook: "two.yml"},
+		{Name: "three", Playbook: "three.yml"},
+	})
+	if err != nil {
+		t.Fatalf("SubmitPipeline() error = %v", err)
+	}
+	got := waitTerminal(t, store, parent.ID)
+	if got.Status != run.StatusFailed {
+		t.Errorf("parent status = %q, want failed", got.Status)
+	}
+	steps, _ := store.Steps(context.Background(), parent.ID)
+	if len(steps) != 2 {
+		t.Errorf("ran %d steps, want 2 with the third skipped", len(steps))
+	}
+}
+
+func TestDispatcherPipelineContinueOnFailure(t *testing.T) {
+	t.Parallel()
+	store := run.NewMemStore()
+	d := New(store, &scriptedRunner{failOn: "two.yml"}, nil)
+	defer d.Close()
+
+	parent, err := d.SubmitPipeline(context.Background(), "deploy", "inv", []run.PipelineStep{
+		{Name: "one", Playbook: "one.yml"},
+		{Name: "two", Playbook: "two.yml", ContinueOnFailure: true},
+		{Name: "three", Playbook: "three.yml"},
+	})
+	if err != nil {
+		t.Fatalf("SubmitPipeline() error = %v", err)
+	}
+	got := waitTerminal(t, store, parent.ID)
+	if got.Status != run.StatusFailed {
+		t.Errorf("parent status = %q, want failed since a step failed", got.Status)
+	}
+	steps, _ := store.Steps(context.Background(), parent.ID)
+	if len(steps) != 3 {
+		t.Errorf("ran %d steps, want 3 since the failure continues", len(steps))
+	}
+}
+
+func TestDispatcherPipelineNoSteps(t *testing.T) {
+	t.Parallel()
+	d := New(run.NewMemStore(), &scriptedRunner{}, nil)
+	defer d.Close()
+	if _, err := d.SubmitPipeline(context.Background(), "x", "inv", nil); !errors.Is(err, ErrNoSteps) {
+		t.Errorf("SubmitPipeline() error = %v, want ErrNoSteps", err)
+	}
+}
+
 func TestNewPanicsOnNilDeps(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

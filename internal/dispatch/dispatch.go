@@ -182,7 +182,7 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 	groups := partition(hosts, shards)
 	count := len(groups)
 	parent := &run.Run{
-		ID: run.NewID(), Playbook: playbook, Inventory: inventory,
+		ID: run.NewID(), Playbook: playbook, Inventory: inventory, Kind: run.KindSplit,
 		Status: run.StatusPending, CreatedAt: time.Now(), ShardCount: &count,
 	}
 	if err := d.store.Save(ctx, parent); err != nil {
@@ -256,6 +256,98 @@ func (d *Dispatcher) coordinate(parent *run.Run, children []*run.Run) {
 	default:
 		code := 1
 		d.finalize(parent, run.StatusFailed, &code, "")
+	}
+}
+
+// SubmitPipeline runs an ordered sequence of playbook steps as one pipeline and returns the parent
+// run in pending state. Each step is a child run, so it gets the full matrix, events, and cross run
+// treatment. A step that fails stops the pipeline unless the step is marked continue on failure.
+func (d *Dispatcher) SubmitPipeline(ctx context.Context, name, inventory string, steps []run.PipelineStep) (*run.Run, error) {
+	if len(steps) == 0 {
+		return nil, ErrNoSteps
+	}
+	for _, s := range steps {
+		if s.Playbook == "" {
+			return nil, ErrNoPlaybook
+		}
+	}
+
+	parent := &run.Run{
+		ID: run.NewID(), Playbook: name, Inventory: inventory, Kind: run.KindPipeline,
+		Status: run.StatusPending, CreatedAt: time.Now(),
+	}
+	if err := d.store.Save(ctx, parent); err != nil {
+		return nil, err
+	}
+
+	d.wg.Add(1)
+	go d.runPipeline(parent.Clone(), steps)
+
+	return parent, nil
+}
+
+// runPipeline executes pipeline steps in order, honoring each step's failure policy, and finalizes
+// the parent. The parent registers its own cancel so stopping the parent stops the current step and
+// halts the sequence.
+func (d *Dispatcher) runPipeline(parent *run.Run, steps []run.PipelineStep) {
+	defer d.wg.Done()
+
+	pipeCtx, cancelPipe := context.WithCancel(d.ctx)
+	d.register(parent.ID, cancelPipe)
+	defer d.unregister(parent.ID)
+	defer cancelPipe()
+
+	started := time.Now()
+	parent.Status = run.StatusRunning
+	parent.StartedAt = &started
+	d.save(parent)
+
+	failed := false
+	canceled := false
+	for i, step := range steps {
+		if pipeCtx.Err() != nil {
+			canceled = true
+			break
+		}
+
+		idx := i
+		inventory := step.Inventory
+		if inventory == "" {
+			inventory = parent.Inventory
+		}
+		child := &run.Run{
+			ID: run.NewID(), Playbook: step.Playbook, Inventory: inventory,
+			Status: run.StatusPending, CreatedAt: time.Now(),
+			ParentID: &parent.ID, StepIndex: &idx, StepName: step.Name,
+		}
+		if err := d.store.Save(context.Background(), child); err != nil {
+			d.log.Error("dispatch: save pipeline step: "+err.Error(), zap.String("run_id", parent.ID))
+			failed = true
+			break
+		}
+
+		status := d.executeManaged(pipeCtx, child)
+		if status == run.StatusCanceled {
+			canceled = true
+			break
+		}
+		if status != run.StatusSucceeded {
+			failed = true
+			if !step.ContinueOnFailure {
+				break
+			}
+		}
+	}
+
+	switch {
+	case canceled:
+		d.finalize(parent, run.StatusCanceled, nil, "")
+	case failed:
+		code := 1
+		d.finalize(parent, run.StatusFailed, &code, "")
+	default:
+		code := 0
+		d.finalize(parent, run.StatusSucceeded, &code, "")
 	}
 }
 
