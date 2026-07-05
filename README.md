@@ -7,6 +7,12 @@
 
 <h1 align="center">Yardmaster</h1>
 
+<p align="center">
+  <a href="https://github.com/dcadolph/yardmaster/actions/workflows/ci.yml"><img
+    src="https://github.com/dcadolph/yardmaster/actions/workflows/ci.yml/badge.svg?branch=mvp"
+    alt="CI status"></a>
+</p>
+
 Playbook execution and fleet orchestration in one binary. Run Ansible against a fleet, watch every
 host and task as a live status matrix instead of a text scroll, split big jobs across parallel
 shards, and read the results back as one merged view. No Kubernetes operator, no Postgres, no
@@ -25,6 +31,16 @@ bet: a run is structured data, so store it and show it that way.
 - Split jobs that work. Shard an inventory, run the shards in parallel, and get one merged matrix
   back. Shards are packed by each host's measured duration in past runs, and a failed split
   retries only the shards that failed.
+
+## See it
+
+A finished two-shard split, merged back into one host matrix with a per-task timeline:
+
+<img src="assets/screenshot-run.png" alt="Run detail with host matrix and timeline" width="100%">
+
+Fleet health across recent runs, with flaky hosts called out:
+
+<img src="assets/screenshot-fleet.png" alt="Fleet health with flaky detection" width="100%">
 
 ## Quick start
 
