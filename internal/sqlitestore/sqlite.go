@@ -303,7 +303,8 @@ SELECT host,
 	COUNT(*) AS total,
 	MAX(CASE WHEN rn = 1 THEN worst END) AS last_outcome,
 	MAX(ran_at) AS last_run,
-	SUM(CASE WHEN prev_bad IS NOT NULL AND bad != prev_bad THEN 1 ELSE 0 END) AS flips
+	SUM(CASE WHEN prev_bad IS NOT NULL AND bad != prev_bad THEN 1 ELSE 0 END) AS flips,
+	GROUP_CONCAT(worst, ',' ORDER BY rn) AS recent
 FROM recent
 GROUP BY host
 ORDER BY failures DESC, host`
@@ -320,8 +321,10 @@ ORDER BY failures DESC, host`
 			h       run.HostHealth
 			lastOut string
 			lastRun string
+			recent  string
 		)
-		if err := rows.Scan(&h.Host, &h.Failures, &h.Total, &lastOut, &lastRun, &h.Flips); err != nil {
+		if err := rows.Scan(&h.Host, &h.Failures, &h.Total, &lastOut, &lastRun, &h.Flips,
+			&recent); err != nil {
 			return nil, fmt.Errorf("fleet health: %w", err)
 		}
 		h.LastOutcome = lastOut
@@ -329,6 +332,9 @@ ORDER BY failures DESC, host`
 			return nil, fmt.Errorf("fleet health: %w", err)
 		}
 		h.Flaky = h.Flips >= 2
+		if recent != "" {
+			h.Recent = strings.Split(recent, ",")
+		}
 		out = append(out, h)
 	}
 	if err := rows.Err(); err != nil {

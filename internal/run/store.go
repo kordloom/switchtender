@@ -231,10 +231,14 @@ func (m *memStore) FleetHealth(_ context.Context, window int) ([]HostHealth, err
 			}
 		}
 		flips := FlipCount(recent)
+		outcomes := make([]string, len(recent))
+		for i, hs := range recent {
+			outcomes[i] = hs.Worst
+		}
 		out = append(out, HostHealth{
 			Host: host, Failures: failures, Total: len(recent),
 			LastOutcome: recent[0].Worst, LastRun: recent[0].RanAt,
-			Flips: flips, Flaky: flips >= 2,
+			Flips: flips, Flaky: flips >= 2, Recent: outcomes,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {

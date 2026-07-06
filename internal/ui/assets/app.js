@@ -176,6 +176,9 @@ async function loadFleet() {
 			chip.textContent = h.flaky ? "flaky" : "steady";
 			stability.appendChild(chip);
 			tr.appendChild(stability);
+			const sparkCell = document.createElement("td");
+			sparkCell.appendChild(sparkline(h.recent || []));
+			tr.appendChild(sparkCell);
 			tr.appendChild(td(String(h.total)));
 			const last = document.createElement("td");
 			last.appendChild(outcomeChip(h.last_outcome));
@@ -331,6 +334,19 @@ function scheduleTarget(s) {
 		return "split x" + s.shards + "  " + (s.playbook || "");
 	}
 	return s.playbook || "";
+}
+
+// sparkline builds a row of outcome ticks, oldest on the left, newest on the right.
+function sparkline(recent) {
+	const wrap = document.createElement("span");
+	wrap.className = "spark";
+	for (let i = recent.length - 1; i >= 0; i--) {
+		const tick = document.createElement("span");
+		tick.className = "tick " + (recent[i] || "none");
+		tick.title = recent[i];
+		wrap.appendChild(tick);
+	}
+	return wrap;
 }
 
 // outcomeChip builds a colored chip for a host outcome label.

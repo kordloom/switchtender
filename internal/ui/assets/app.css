@@ -141,6 +141,13 @@ table.runs tbody tr:hover { background: var(--surface-2); }
 .chip.skipped { background: var(--skipped); }
 .chip.none { background: var(--surface-3); color: var(--muted); }
 .chip.flaky { background: var(--changed); }
+.spark { display: inline-flex; gap: 2px; align-items: center; }
+.tick { width: 7px; height: 15px; border-radius: 2px; background: var(--surface-3); }
+.tick.ok { background: var(--ok); }
+.tick.changed { background: var(--changed); }
+.tick.failed { background: var(--failed); }
+.tick.unreachable { background: var(--unreachable); }
+.tick.skipped { background: var(--skipped); }
 
 @media (prefers-color-scheme: dark) {
 	.chip.changed, .chip.unreachable, .chip.flaky { color: #0d1117; }

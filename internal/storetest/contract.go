@@ -436,6 +436,10 @@ func testFlaky(t *testing.T, store run.Store) {
 	if h := byHost["flappy"]; h.Flips != 3 || !h.Flaky {
 		t.Errorf("flappy = flips %d flaky %v, want 3 true", h.Flips, h.Flaky)
 	}
+	wantRecent := []string{"ok", "failed", "ok", "failed"}
+	if diff := cmp.Diff(wantRecent, byHost["flappy"].Recent); diff != "" {
+		t.Errorf("flappy recent mismatch (-want +got):\n%s", diff)
+	}
 	if h := byHost["fixed"]; h.Flips != 1 || h.Flaky {
 		t.Errorf("fixed = flips %d flaky %v, want 1 false", h.Flips, h.Flaky)
 	}

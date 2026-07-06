@@ -50,6 +50,9 @@ type HostHealth struct {
 	// Flaky reports that the host switched between failing and passing at least twice in the
 	// window, so its failures are intermittent rather than a steady break or a single fix.
 	Flaky bool `json:"flaky"`
+	// Recent lists the host's worst outcome per run across the window, newest first, for
+	// sparkline style displays.
+	Recent []string `json:"recent,omitempty"`
 }
 
 // TaskSummary is a single run's wall clock cost for one task, persisted at finalize so task trends
