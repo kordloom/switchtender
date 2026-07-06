@@ -95,6 +95,10 @@ type Run struct {
 	CancelRequested bool `json:"cancel_requested,omitempty"`
 	// CredentialIDs names the stored credentials materialized for this run.
 	CredentialIDs []string `json:"credential_ids,omitempty"`
+	// ProjectID names the git project the playbook and inventory paths resolve inside.
+	ProjectID string `json:"project_id,omitempty"`
+	// CommitSHA is the exact commit the run executed, stamped after the project sync.
+	CommitSHA string `json:"commit_sha,omitempty"`
 }
 
 // Clone returns a deep copy so callers cannot mutate stored state through shared pointers.
@@ -143,6 +147,26 @@ func (r *Run) Clone() *Run {
 	}
 	out.CredentialIDs = append([]string(nil), r.CredentialIDs...)
 	return &out
+}
+
+// SubmitOption customizes a run at submission.
+type SubmitOption func(*Run)
+
+// WithCredentialIDs attaches stored credentials to the run.
+func WithCredentialIDs(ids []string) SubmitOption {
+	return func(r *Run) { r.CredentialIDs = append([]string(nil), ids...) }
+}
+
+// WithProject sources the run's playbook and inventory paths from a git project.
+func WithProject(id string) SubmitOption {
+	return func(r *Run) { r.ProjectID = id }
+}
+
+// ApplyOptions applies opts to r.
+func ApplyOptions(r *Run, opts []SubmitOption) {
+	for _, opt := range opts {
+		opt(r)
+	}
 }
 
 // NewID returns a random run identifier prefixed with "run_".

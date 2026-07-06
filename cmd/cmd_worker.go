@@ -12,6 +12,7 @@ import (
 	"github.com/dcadolph/yardmaster/internal/credential"
 	"github.com/dcadolph/yardmaster/internal/dispatch"
 	"github.com/dcadolph/yardmaster/internal/logutil"
+	"github.com/dcadolph/yardmaster/internal/project"
 	"github.com/dcadolph/yardmaster/internal/roundhouse"
 )
 
@@ -57,7 +58,14 @@ func runWorker(cmd *cobra.Command, _ []string) error {
 	if !sealer.Enabled() {
 		log.Warn("credentials disabled: set YARDMASTER_ENCRYPTION_KEY to enable them")
 	}
-	opts := []dispatch.Option{dispatch.WithCredentials(bundle.Credentials(), sealer)}
+	syncer, err := project.NewSyncer(projectCacheDir())
+	if err != nil {
+		return fmt.Errorf("project cache: %w", err)
+	}
+	opts := []dispatch.Option{
+		dispatch.WithCredentials(bundle.Credentials(), sealer),
+		dispatch.WithProjects(bundle.Projects(), syncer),
+	}
 	if workerName != "" {
 		opts = append(opts, dispatch.WithOwner(workerName))
 	}

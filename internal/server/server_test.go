@@ -81,7 +81,7 @@ type fakeSubmitter struct {
 }
 
 // Submit records the arguments and returns the configured run or error.
-func (f *fakeSubmitter) Submit(_ context.Context, playbook, inventory string, _ ...string) (*run.Run, error) {
+func (f *fakeSubmitter) Submit(_ context.Context, playbook, inventory string, _ ...run.SubmitOption) (*run.Run, error) {
 	f.gotPlaybook = playbook
 	f.gotInventory = inventory
 	if f.err != nil {
@@ -91,7 +91,7 @@ func (f *fakeSubmitter) Submit(_ context.Context, playbook, inventory string, _ 
 }
 
 // SubmitSplit records the arguments including shard count and returns the configured run or error.
-func (f *fakeSubmitter) SubmitSplit(_ context.Context, playbook, inventory string, shards int, _ ...string) (*run.Run, error) {
+func (f *fakeSubmitter) SubmitSplit(_ context.Context, playbook, inventory string, shards int, _ ...run.SubmitOption) (*run.Run, error) {
 	f.gotPlaybook = playbook
 	f.gotInventory = inventory
 	f.gotShards = shards
@@ -102,7 +102,7 @@ func (f *fakeSubmitter) SubmitSplit(_ context.Context, playbook, inventory strin
 }
 
 // SubmitPipeline records the step count and returns the configured run or error.
-func (f *fakeSubmitter) SubmitPipeline(_ context.Context, name, inventory string, steps []run.PipelineStep, _ ...string) (*run.Run, error) {
+func (f *fakeSubmitter) SubmitPipeline(_ context.Context, name, inventory string, steps []run.PipelineStep, _ ...run.SubmitOption) (*run.Run, error) {
 	f.gotPlaybook = name
 	f.gotInventory = inventory
 	f.gotSteps = len(steps)

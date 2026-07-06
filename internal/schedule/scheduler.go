@@ -15,11 +15,11 @@ const DefaultInterval = 15 * time.Second
 // Submitter fires a schedule's target. The dispatcher satisfies it.
 type Submitter interface {
 	// Submit fires a single run.
-	Submit(ctx context.Context, playbook, inventory string, credentialIDs ...string) (*run.Run, error)
+	Submit(ctx context.Context, playbook, inventory string, opts ...run.SubmitOption) (*run.Run, error)
 	// SubmitSplit fires a split run.
-	SubmitSplit(ctx context.Context, playbook, inventory string, shards int, credentialIDs ...string) (*run.Run, error)
+	SubmitSplit(ctx context.Context, playbook, inventory string, shards int, opts ...run.SubmitOption) (*run.Run, error)
 	// SubmitPipeline fires a pipeline run.
-	SubmitPipeline(ctx context.Context, name, inventory string, steps []run.PipelineStep, credentialIDs ...string) (*run.Run, error)
+	SubmitPipeline(ctx context.Context, name, inventory string, steps []run.PipelineStep, opts ...run.SubmitOption) (*run.Run, error)
 }
 
 // Scheduler fires due schedules on a fixed cadence.

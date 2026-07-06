@@ -6,6 +6,8 @@ import (
 	"github.com/dcadolph/yardmaster/internal/authtest"
 	"github.com/dcadolph/yardmaster/internal/credential"
 	"github.com/dcadolph/yardmaster/internal/credtest"
+	"github.com/dcadolph/yardmaster/internal/project"
+	"github.com/dcadolph/yardmaster/internal/projecttest"
 	"os"
 	"testing"
 
@@ -125,5 +127,32 @@ func truncateCredentials(t *testing.T, dsn string) {
 	defer func() { _ = db.Close() }()
 	if _, err := db.Exec("TRUNCATE credentials"); err != nil {
 		t.Fatalf("truncate credentials: %v", err)
+	}
+}
+
+func TestProjectStoreContract(t *testing.T) {
+	dsn := testDSN(t)
+	db, err := pgstore.Open(dsn)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	projecttest.Contract(t, func() project.Store {
+		truncateProjects(t, dsn)
+		return db.Projects()
+	})
+}
+
+// truncateProjects clears the projects table between contract subtests.
+func truncateProjects(t *testing.T, dsn string) {
+	t.Helper()
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatalf("open postgres: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	if _, err := db.Exec("TRUNCATE projects"); err != nil {
+		t.Fatalf("truncate projects: %v", err)
 	}
 }

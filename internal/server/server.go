@@ -10,6 +10,7 @@ import (
 	"github.com/dcadolph/yardmaster/internal/auth"
 	"github.com/dcadolph/yardmaster/internal/credential"
 	"github.com/dcadolph/yardmaster/internal/live"
+	"github.com/dcadolph/yardmaster/internal/project"
 	"github.com/dcadolph/yardmaster/internal/run"
 	"github.com/dcadolph/yardmaster/internal/schedule"
 	"github.com/dcadolph/yardmaster/internal/ui"
@@ -17,9 +18,9 @@ import (
 
 // Submitter accepts a run request and returns the created run. The dispatcher satisfies it.
 type Submitter interface {
-	Submit(ctx context.Context, playbook, inventory string, credentialIDs ...string) (*run.Run, error)
-	SubmitSplit(ctx context.Context, playbook, inventory string, shards int, credentialIDs ...string) (*run.Run, error)
-	SubmitPipeline(ctx context.Context, name, inventory string, steps []run.PipelineStep, credentialIDs ...string) (*run.Run, error)
+	Submit(ctx context.Context, playbook, inventory string, opts ...run.SubmitOption) (*run.Run, error)
+	SubmitSplit(ctx context.Context, playbook, inventory string, shards int, opts ...run.SubmitOption) (*run.Run, error)
+	SubmitPipeline(ctx context.Context, name, inventory string, steps []run.PipelineStep, opts ...run.SubmitOption) (*run.Run, error)
 }
 
 // Streamer subscribes to a run's live output. The live Hub satisfies it.
@@ -67,6 +68,11 @@ func WithTokens(tokens auth.Store) Option {
 	return func(srv *Server) { srv.tokens = tokens }
 }
 
+// WithProjects enables the project endpoints backed by the given store.
+func WithProjects(store project.Store) Option {
+	return func(srv *Server) { srv.projects = store }
+}
+
 // WithCredentials enables the credential endpoints backed by the given store and sealer.
 func WithCredentials(store credential.Store, sealer *credential.Sealer) Option {
 	return func(srv *Server) {
@@ -99,6 +105,8 @@ type Server struct {
 	credentials credential.Store
 	// sealer encrypts credential secrets.
 	sealer *credential.Sealer
+	// projects backs the project endpoints when configured.
+	projects project.Store
 }
 
 // New returns a Server. It panics if store or submitter is nil; a nil logger becomes a no-op.
@@ -149,6 +157,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /credentials", createCredentialHandler(s.credentials, s.sealer, s.log))
 	mux.Handle("GET /credentials", listCredentialsHandler(s.credentials, s.log))
 	mux.Handle("DELETE /credentials/{id}", deleteCredentialHandler(s.credentials, s.log))
+	mux.Handle("POST /projects", createProjectHandler(s.projects, s.log))
+	mux.Handle("GET /projects", listProjectsHandler(s.projects, s.log))
+	mux.Handle("DELETE /projects/{id}", deleteProjectHandler(s.projects, s.log))
 	if s.tokens != nil {
 		gate := &authGate{tokens: s.tokens, log: s.log}
 		return gate.wrap(mux)

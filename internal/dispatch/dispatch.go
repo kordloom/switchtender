@@ -19,6 +19,7 @@ import (
 
 	"github.com/dcadolph/yardmaster/internal/credential"
 	"github.com/dcadolph/yardmaster/internal/event"
+	"github.com/dcadolph/yardmaster/internal/project"
 	"github.com/dcadolph/yardmaster/internal/roundhouse"
 	"github.com/dcadolph/yardmaster/internal/run"
 )
@@ -99,6 +100,10 @@ type Dispatcher struct {
 	credentials credential.Store
 	// sealer decrypts credential secrets.
 	sealer *credential.Sealer
+	// projects resolves git projects, nil when the feature is off.
+	projects project.Store
+	// syncer maintains project checkouts.
+	syncer *project.Syncer
 }
 
 // Option configures a Dispatcher.
@@ -118,6 +123,10 @@ type config struct {
 	credentials credential.Store
 	// sealer decrypts credential secrets.
 	sealer *credential.Sealer
+	// projects resolves git projects, nil when the feature is off.
+	projects project.Store
+	// syncer maintains project checkouts.
+	syncer *project.Syncer
 }
 
 // WithWorkers sets the worker pool size. Values below one fall back to DefaultWorkers.
@@ -185,6 +194,8 @@ func New(store run.Store, runner roundhouse.Runner, log *zap.Logger, opts ...Opt
 		claimInterval: cfg.claimInterval,
 		credentials:   cfg.credentials,
 		sealer:        cfg.sealer,
+		projects:      cfg.projects,
+		syncer:        cfg.syncer,
 	}
 	d.wg.Add(2)
 	go d.claimLoop()
@@ -270,23 +281,31 @@ func (d *Dispatcher) janitor() {
 	}
 }
 
+// validateRun checks a run's credential and project references before it is accepted.
+func (d *Dispatcher) validateRun(ctx context.Context, r *run.Run) error {
+	if err := d.validateCredentials(ctx, r.CredentialIDs); err != nil {
+		return err
+	}
+	return d.validateProject(ctx, r.ProjectID)
+}
+
 // Submit accepts a run for playbook against inventory and returns the created run in pending state.
 // Execution proceeds asynchronously; callers observe progress through the store.
-func (d *Dispatcher) Submit(ctx context.Context, playbook, inventory string, credentialIDs ...string) (*run.Run, error) {
+func (d *Dispatcher) Submit(ctx context.Context, playbook, inventory string, opts ...run.SubmitOption) (*run.Run, error) {
 	if playbook == "" {
 		return nil, ErrNoPlaybook
 	}
-	if err := d.validateCredentials(ctx, credentialIDs); err != nil {
-		return nil, err
-	}
 
 	r := &run.Run{
-		ID:            run.NewID(),
-		Playbook:      playbook,
-		Inventory:     inventory,
-		Status:        run.StatusPending,
-		CreatedAt:     time.Now(),
-		CredentialIDs: credentialIDs,
+		ID:        run.NewID(),
+		Playbook:  playbook,
+		Inventory: inventory,
+		Status:    run.StatusPending,
+		CreatedAt: time.Now(),
+	}
+	run.ApplyOptions(r, opts)
+	if err := d.validateRun(ctx, r); err != nil {
+		return nil, err
 	}
 	if err := d.store.Save(ctx, r); err != nil {
 		return nil, err
@@ -300,15 +319,12 @@ func (d *Dispatcher) Submit(ctx context.Context, playbook, inventory string, cre
 // Hosts are packed into shards by their average duration in recent runs so each shard carries a
 // similar amount of work; hosts without history balance by count. When shards is below two or the
 // inventory has fewer than two hosts, it falls back to a single run.
-func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string, shards int, credentialIDs ...string) (*run.Run, error) {
+func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string, shards int, opts ...run.SubmitOption) (*run.Run, error) {
 	if playbook == "" {
 		return nil, ErrNoPlaybook
 	}
-	if err := d.validateCredentials(ctx, credentialIDs); err != nil {
-		return nil, err
-	}
 	if shards < 2 {
-		return d.Submit(ctx, playbook, inventory, credentialIDs...)
+		return d.Submit(ctx, playbook, inventory, opts...)
 	}
 	if d.hostLister == nil {
 		return nil, ErrNoHostLister
@@ -319,7 +335,7 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 		return nil, fmt.Errorf("list hosts: %w", err)
 	}
 	if len(hosts) < 2 {
-		return d.Submit(ctx, playbook, inventory, credentialIDs...)
+		return d.Submit(ctx, playbook, inventory, opts...)
 	}
 
 	costs, err := d.store.HostCosts(ctx, costWindow)
@@ -333,7 +349,10 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 	parent := &run.Run{
 		ID: run.NewID(), Playbook: playbook, Inventory: inventory, Kind: run.KindSplit,
 		Status: run.StatusPending, CreatedAt: time.Now(), ShardCount: &count,
-		CredentialIDs: credentialIDs,
+	}
+	run.ApplyOptions(parent, opts)
+	if err := d.validateRun(ctx, parent); err != nil {
+		return nil, err
 	}
 	if err := d.store.Save(ctx, parent); err != nil {
 		return nil, err
@@ -347,7 +366,8 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 			ID: run.NewID(), Playbook: playbook, Inventory: inventory,
 			Status: run.StatusPending, CreatedAt: time.Now(),
 			ParentID: &parentID, ShardIndex: &idx, ShardCount: &shardCount,
-			Limit: strings.Join(group, ","), CredentialIDs: credentialIDs,
+			Limit: strings.Join(group, ","), CredentialIDs: parent.CredentialIDs,
+			ProjectID: parent.ProjectID,
 		}
 		if err := d.store.Save(ctx, child); err != nil {
 			return nil, err
@@ -409,6 +429,7 @@ func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string) (*r
 			Status: run.StatusPending, CreatedAt: time.Now(),
 			ParentID: &retryID, ShardIndex: &idx, ShardCount: &shardCount,
 			Limit: shard.Limit, CredentialIDs: shard.CredentialIDs,
+			ProjectID: shard.ProjectID,
 		}
 		if err := d.store.Save(ctx, child); err != nil {
 			return nil, err
@@ -475,12 +496,9 @@ func (d *Dispatcher) coordinate(parent *run.Run, children []*run.Run) {
 // Each step is a child run, so it gets the full matrix, events, and cross run treatment. Steps run
 // in order, or as a dependency graph when any step declares depends_on. A step that fails stops
 // what follows or depends on it unless the step is marked continue on failure.
-func (d *Dispatcher) SubmitPipeline(ctx context.Context, name, inventory string, steps []run.PipelineStep, credentialIDs ...string) (*run.Run, error) {
+func (d *Dispatcher) SubmitPipeline(ctx context.Context, name, inventory string, steps []run.PipelineStep, opts ...run.SubmitOption) (*run.Run, error) {
 	if len(steps) == 0 {
 		return nil, ErrNoSteps
-	}
-	if err := d.validateCredentials(ctx, credentialIDs); err != nil {
-		return nil, err
 	}
 	for _, s := range steps {
 		if s.Playbook == "" {
@@ -495,7 +513,11 @@ func (d *Dispatcher) SubmitPipeline(ctx context.Context, name, inventory string,
 
 	parent := &run.Run{
 		ID: run.NewID(), Playbook: name, Inventory: inventory, Kind: run.KindPipeline,
-		Status: run.StatusPending, CreatedAt: time.Now(), CredentialIDs: credentialIDs,
+		Status: run.StatusPending, CreatedAt: time.Now(),
+	}
+	run.ApplyOptions(parent, opts)
+	if err := d.validateRun(ctx, parent); err != nil {
+		return nil, err
 	}
 	if err := d.store.Save(ctx, parent); err != nil {
 		return nil, err
@@ -599,7 +621,7 @@ func (d *Dispatcher) runStepAttempts(ctx context.Context, parent *run.Run, step 
 			ID: run.NewID(), Playbook: step.Playbook, Inventory: inventory,
 			Status: run.StatusPending, CreatedAt: time.Now(),
 			ParentID: &parent.ID, StepIndex: &i, StepName: step.Name, Attempt: attempt,
-			ExtraVars: vars, CredentialIDs: parent.CredentialIDs,
+			ExtraVars: vars, CredentialIDs: parent.CredentialIDs, ProjectID: parent.ProjectID,
 		}
 		if err := d.store.Save(context.Background(), child); err != nil {
 			d.log.Error("dispatch: save pipeline step: "+err.Error(), zap.String("run_id", parent.ID))
@@ -766,6 +788,14 @@ func (d *Dispatcher) execute(ctx context.Context, r *run.Run) run.Status {
 		Playbook: r.Playbook, Inventory: r.Inventory, EventsPath: eventsPath, Limit: r.Limit,
 		ExtraVars: r.ExtraVars,
 	}
+	if err := d.resolveProject(r, &spec); err != nil {
+		close(stop)
+		<-tailed
+		d.finalize(r, run.StatusFailed, nil, err.Error())
+		d.publisher.CloseRun(r.ID)
+		return run.StatusFailed
+	}
+
 	credCleanup, err := d.materializeCredentials(r, &spec)
 	if err != nil {
 		credCleanup()

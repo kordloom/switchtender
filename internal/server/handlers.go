@@ -12,6 +12,7 @@ import (
 	"github.com/dcadolph/yardmaster/internal/credential"
 	"github.com/dcadolph/yardmaster/internal/dispatch"
 	"github.com/dcadolph/yardmaster/internal/event"
+	"github.com/dcadolph/yardmaster/internal/project"
 	"github.com/dcadolph/yardmaster/internal/run"
 )
 
@@ -28,6 +29,8 @@ type createRunRequest struct {
 	Shards int `json:"shards,omitempty"`
 	// CredentialIDs names stored credentials to materialize for the run.
 	CredentialIDs []string `json:"credential_ids,omitempty"`
+	// ProjectID sources the playbook and inventory from a git project.
+	ProjectID string `json:"project_id,omitempty"`
 }
 
 // createPipelineRequest is the JSON body accepted by POST /pipelines.
@@ -40,6 +43,8 @@ type createPipelineRequest struct {
 	Steps []run.PipelineStep `json:"steps"`
 	// CredentialIDs names stored credentials to materialize for every step.
 	CredentialIDs []string `json:"credential_ids,omitempty"`
+	// ProjectID sources every step's playbook from a git project.
+	ProjectID string `json:"project_id,omitempty"`
 }
 
 // listRunsResponse wraps a run list. The envelope leaves room for pagination fields later.
@@ -199,15 +204,19 @@ func createRunHandler(submitter Submitter, log *zap.Logger) http.HandlerFunc {
 
 		var created *run.Run
 		var err error
+		opts := []run.SubmitOption{run.WithCredentialIDs(req.CredentialIDs)}
+		if req.ProjectID != "" {
+			opts = append(opts, run.WithProject(req.ProjectID))
+		}
 		if req.Shards >= 2 {
 			created, err = submitter.SubmitSplit(r.Context(), req.Playbook, req.Inventory,
-				req.Shards, req.CredentialIDs...)
+				req.Shards, opts...)
 		} else {
-			created, err = submitter.Submit(r.Context(), req.Playbook, req.Inventory,
-				req.CredentialIDs...)
+			created, err = submitter.Submit(r.Context(), req.Playbook, req.Inventory, opts...)
 		}
 		switch {
-		case errors.Is(err, credential.ErrNotFound), errors.Is(err, credential.ErrNoKey):
+		case errors.Is(err, credential.ErrNotFound), errors.Is(err, credential.ErrNoKey),
+			errors.Is(err, project.ErrNotFound):
 			respondError(w, log, http.StatusBadRequest, err.Error())
 			return
 		case err != nil:
@@ -243,10 +252,15 @@ func createPipelineHandler(submitter Submitter, log *zap.Logger) http.HandlerFun
 			}
 		}
 
+		popts := []run.SubmitOption{run.WithCredentialIDs(req.CredentialIDs)}
+		if req.ProjectID != "" {
+			popts = append(popts, run.WithProject(req.ProjectID))
+		}
 		created, err := submitter.SubmitPipeline(r.Context(), req.Name, req.Inventory, req.Steps,
-			req.CredentialIDs...)
+			popts...)
 		switch {
-		case errors.Is(err, credential.ErrNotFound), errors.Is(err, credential.ErrNoKey):
+		case errors.Is(err, credential.ErrNotFound), errors.Is(err, credential.ErrNoKey),
+			errors.Is(err, project.ErrNotFound):
 			respondError(w, log, http.StatusBadRequest, err.Error())
 			return
 		case errors.Is(err, dispatch.ErrUnnamedStep), errors.Is(err, dispatch.ErrDuplicateStep),

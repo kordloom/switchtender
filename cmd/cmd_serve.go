@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"github.com/dcadolph/yardmaster/internal/live"
 	"github.com/dcadolph/yardmaster/internal/logutil"
 	"github.com/dcadolph/yardmaster/internal/pgstore"
+	"github.com/dcadolph/yardmaster/internal/project"
 	"github.com/dcadolph/yardmaster/internal/roundhouse"
 	"github.com/dcadolph/yardmaster/internal/run"
 	"github.com/dcadolph/yardmaster/internal/schedule"
@@ -75,6 +77,8 @@ type storeBundle interface {
 	Tokens() auth.Store
 	// Credentials returns the execution secret store.
 	Credentials() credential.Store
+	// Projects returns the git project store.
+	Projects() project.Store
 	// Close closes the underlying database.
 	Close() error
 }
@@ -86,6 +90,16 @@ func openBundle(db string) (storeBundle, error) {
 		return pgstore.Open(db)
 	}
 	return sqlitestore.Open(db)
+}
+
+// projectCacheDir returns where project checkouts live: the user cache directory when available,
+// the system temp directory otherwise.
+func projectCacheDir() string {
+	base, err := os.UserCacheDir()
+	if err != nil {
+		base = os.TempDir()
+	}
+	return filepath.Join(base, "yardmaster", "projects")
 }
 
 // runServe builds the server dependencies and serves until interrupted.
@@ -110,8 +124,13 @@ func runServe(cmd *cobra.Command, _ []string) error {
 
 	hub := live.NewHub()
 	runner := roundhouse.NewAnsibleRunner()
+	syncer, err := project.NewSyncer(projectCacheDir())
+	if err != nil {
+		return fmt.Errorf("project cache: %w", err)
+	}
 	disp := dispatch.New(store, runner, log, dispatch.WithPublisher(hub),
-		dispatch.WithCredentials(bundle.Credentials(), sealer))
+		dispatch.WithCredentials(bundle.Credentials(), sealer),
+		dispatch.WithProjects(bundle.Projects(), syncer))
 	defer disp.Close()
 
 	scheduler := schedule.NewScheduler(schedules, disp, log,
@@ -124,7 +143,8 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		Handler: server.New(store, disp, log, server.WithStreamer(hub),
 			server.WithCanceler(disp), server.WithRetrier(disp),
 			server.WithSchedules(schedules), server.WithTokens(bundle.Tokens()),
-			server.WithCredentials(bundle.Credentials(), sealer)).Handler(),
+			server.WithCredentials(bundle.Credentials(), sealer),
+			server.WithProjects(bundle.Projects())).Handler(),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 
