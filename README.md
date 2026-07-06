@@ -9,8 +9,16 @@
 
 <p align="center">
   <a href="https://github.com/dcadolph/yardmaster/actions/workflows/ci.yml"><img
-    src="https://github.com/dcadolph/yardmaster/actions/workflows/ci.yml/badge.svg?branch=mvp"
+    src="https://github.com/dcadolph/yardmaster/actions/workflows/ci.yml/badge.svg?branch=main"
     alt="CI status"></a>
+  <a href="https://github.com/dcadolph/yardmaster/releases"><img
+    src="https://img.shields.io/github/v/release/dcadolph/yardmaster"
+    alt="Latest release"></a>
+  <img src="https://img.shields.io/github/go-mod/go-version/dcadolph/yardmaster"
+    alt="Go version">
+  <a href="LICENSE"><img
+    src="https://img.shields.io/github/license/dcadolph/yardmaster"
+    alt="License"></a>
 </p>
 
 Playbook execution and fleet orchestration in one binary. Run Ansible against a fleet, watch every
