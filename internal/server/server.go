@@ -13,6 +13,7 @@ import (
 	"github.com/dcadolph/yardmaster/internal/project"
 	"github.com/dcadolph/yardmaster/internal/run"
 	"github.com/dcadolph/yardmaster/internal/schedule"
+	"github.com/dcadolph/yardmaster/internal/template"
 	"github.com/dcadolph/yardmaster/internal/ui"
 )
 
@@ -68,6 +69,11 @@ func WithTokens(tokens auth.Store) Option {
 	return func(srv *Server) { srv.tokens = tokens }
 }
 
+// WithTemplates enables the template endpoints backed by the given store.
+func WithTemplates(store template.Store) Option {
+	return func(srv *Server) { srv.templates = store }
+}
+
 // WithProjects enables the project endpoints backed by the given store.
 func WithProjects(store project.Store) Option {
 	return func(srv *Server) { srv.projects = store }
@@ -107,6 +113,8 @@ type Server struct {
 	sealer *credential.Sealer
 	// projects backs the project endpoints when configured.
 	projects project.Store
+	// templates backs the template endpoints when configured.
+	templates template.Store
 }
 
 // New returns a Server. It panics if store or submitter is nil; a nil logger becomes a no-op.
@@ -160,6 +168,10 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /projects", createProjectHandler(s.projects, s.log))
 	mux.Handle("GET /projects", listProjectsHandler(s.projects, s.log))
 	mux.Handle("DELETE /projects/{id}", deleteProjectHandler(s.projects, s.log))
+	mux.Handle("POST /templates", createTemplateHandler(s.templates, s.log))
+	mux.Handle("GET /templates", listTemplatesHandler(s.templates, s.log))
+	mux.Handle("DELETE /templates/{id}", deleteTemplateHandler(s.templates, s.log))
+	mux.Handle("POST /templates/{id}/launch", launchTemplateHandler(s.templates, s.submitter, s.log))
 	if s.tokens != nil {
 		gate := &authGate{tokens: s.tokens, log: s.log}
 		return gate.wrap(mux)

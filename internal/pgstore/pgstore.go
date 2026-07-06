@@ -20,6 +20,7 @@ import (
 	"github.com/dcadolph/yardmaster/internal/project"
 	"github.com/dcadolph/yardmaster/internal/run"
 	"github.com/dcadolph/yardmaster/internal/schedule"
+	"github.com/dcadolph/yardmaster/internal/template"
 )
 
 // schema is the table layout created on open. It is idempotent so open doubles as migration.
@@ -119,6 +120,17 @@ CREATE TABLE IF NOT EXISTS projects (
 	credential_id TEXT NOT NULL DEFAULT '',
 	created_at    TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS templates (
+	id             TEXT PRIMARY KEY,
+	name           TEXT NOT NULL DEFAULT '',
+	project_id     TEXT NOT NULL DEFAULT '',
+	playbook       TEXT NOT NULL,
+	inventory      TEXT NOT NULL DEFAULT '',
+	shards         INTEGER NOT NULL DEFAULT 0,
+	credential_ids TEXT NOT NULL DEFAULT '',
+	extra_vars     TEXT NOT NULL DEFAULT '',
+	created_at     TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS credentials (
 	id         TEXT PRIMARY KEY,
 	name       TEXT NOT NULL DEFAULT '',
@@ -159,6 +171,8 @@ type DB struct {
 	credentials *credentialStore
 	// projects is the git project store.
 	projects *projectStore
+	// templates is the job template store.
+	templates *templateStore
 }
 
 // Open connects to the PostgreSQL database at dsn, applies the schema, and returns the bundled
@@ -178,7 +192,8 @@ func Open(dsn string) (*DB, error) {
 	}
 	return &DB{db: db, runs: &store{db: db}, schedules: &scheduleStore{db: db}, tokens: &tokenStore{db: db},
 		credentials: &credentialStore{db: db},
-		projects:    &projectStore{db: db}}, nil
+		projects:    &projectStore{db: db},
+		templates:   &templateStore{db: db}}, nil
 }
 
 // Runs returns the run store.
@@ -204,6 +219,11 @@ func (d *DB) Credentials() credential.Store {
 // Projects returns the git project store.
 func (d *DB) Projects() project.Store {
 	return d.projects
+}
+
+// Templates returns the job template store.
+func (d *DB) Templates() template.Store {
+	return d.templates
 }
 
 // Close closes the underlying database.

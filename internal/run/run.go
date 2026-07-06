@@ -162,6 +162,16 @@ func WithProject(id string) SubmitOption {
 	return func(r *Run) { r.ProjectID = id }
 }
 
+// WithExtraVars injects variables into the run.
+func WithExtraVars(vars map[string]any) SubmitOption {
+	return func(r *Run) {
+		if len(vars) == 0 {
+			return
+		}
+		r.ExtraVars = maps.Clone(vars)
+	}
+}
+
 // ApplyOptions applies opts to r.
 func ApplyOptions(r *Run, opts []SubmitOption) {
 	for _, opt := range opts {
