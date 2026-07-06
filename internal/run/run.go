@@ -87,6 +87,12 @@ type Run struct {
 	ExtraVars map[string]any `json:"extra_vars,omitempty"`
 	// Outputs are the values the playbook published with set_stats for downstream steps.
 	Outputs map[string]any `json:"outputs,omitempty"`
+	// ClaimedBy names the process that leased this run for execution, empty while queued.
+	ClaimedBy string `json:"claimed_by,omitempty"`
+	// ClaimedAt is when the lease was taken or last renewed.
+	ClaimedAt *time.Time `json:"claimed_at,omitempty"`
+	// CancelRequested asks whichever process holds the run to stop it.
+	CancelRequested bool `json:"cancel_requested,omitempty"`
 }
 
 // Clone returns a deep copy so callers cannot mutate stored state through shared pointers.
@@ -129,6 +135,10 @@ func (r *Run) Clone() *Run {
 	}
 	out.ExtraVars = maps.Clone(r.ExtraVars)
 	out.Outputs = maps.Clone(r.Outputs)
+	if r.ClaimedAt != nil {
+		t := *r.ClaimedAt
+		out.ClaimedAt = &t
+	}
 	return &out
 }
 

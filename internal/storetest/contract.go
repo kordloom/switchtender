@@ -34,6 +34,9 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Run("flaky detection", func(t *testing.T) { testFlaky(t, newStore()) })
 	t.Run("host history", func(t *testing.T) { testHostHistory(t, newStore()) })
 	t.Run("task trends", func(t *testing.T) { testTaskTrends(t, newStore()) })
+	t.Run("claim leases oldest", func(t *testing.T) { testClaim(t, newStore()) })
+	t.Run("heartbeat and reclaim", func(t *testing.T) { testLeaseLifecycle(t, newStore()) })
+	t.Run("cancel request", func(t *testing.T) { testRequestCancel(t, newStore()) })
 }
 
 // sampleRun returns a fully populated terminal run with deterministic times.
@@ -542,6 +545,139 @@ func testTaskTrends(t *testing.T, store run.Store) {
 	}
 	if w := byTask["install"]; w.Runs != 1 || w.AvgSeconds != 30 {
 		t.Errorf("windowed install = %+v, want runs 1 avg 30", w)
+	}
+}
+
+// testClaim verifies claiming takes the oldest unclaimed plain run exactly once and skips
+// children, parents, and non-pending runs.
+func testClaim(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	base := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	parentID := "run_split"
+	idx, count := 0, 1
+	for _, r := range []*run.Run{
+		{ID: "run_new", Playbook: "p", Status: run.StatusPending, CreatedAt: base.Add(time.Minute)},
+		{ID: "run_old", Playbook: "p", Status: run.StatusPending, CreatedAt: base},
+		{ID: "run_done", Playbook: "p", Status: run.StatusSucceeded, CreatedAt: base},
+		{ID: parentID, Playbook: "p", Kind: run.KindSplit, Status: run.StatusPending, CreatedAt: base},
+		{
+			ID: "run_shard", Playbook: "p", Status: run.StatusPending, CreatedAt: base,
+			ParentID: &parentID, ShardIndex: &idx, ShardCount: &count,
+		},
+	} {
+		if err := store.Save(ctx, r); err != nil {
+			t.Fatalf("Save() error = %v", err)
+		}
+	}
+
+	first, err := store.Claim(ctx, "worker-a")
+	if err != nil {
+		t.Fatalf("Claim() error = %v", err)
+	}
+	if first.ID != "run_old" || first.ClaimedBy != "worker-a" || first.ClaimedAt == nil {
+		t.Errorf("first claim = %+v, want run_old leased by worker-a", first)
+	}
+
+	second, err := store.Claim(ctx, "worker-b")
+	if err != nil {
+		t.Fatalf("Claim() error = %v", err)
+	}
+	if second.ID != "run_new" {
+		t.Errorf("second claim = %s, want run_new", second.ID)
+	}
+
+	if _, err := store.Claim(ctx, "worker-c"); !errors.Is(err, run.ErrNonePending) {
+		t.Errorf("third claim error = %v, want ErrNonePending", err)
+	}
+}
+
+// testLeaseLifecycle verifies heartbeats renew a lease and stale leases requeue pending runs and
+// interrupt running ones.
+func testLeaseLifecycle(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	if err := store.Save(ctx, &run.Run{
+		ID: "run_q", Playbook: "p", Status: run.StatusPending, CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	claimed, err := store.Claim(ctx, "worker-a")
+	if err != nil {
+		t.Fatalf("Claim() error = %v", err)
+	}
+
+	if err := store.Heartbeat(ctx, claimed.ID, "worker-a"); err != nil {
+		t.Errorf("Heartbeat() error = %v", err)
+	}
+	if err := store.Heartbeat(ctx, claimed.ID, "impostor"); !errors.Is(err, run.ErrNotFound) {
+		t.Errorf("Heartbeat() wrong owner error = %v, want ErrNotFound", err)
+	}
+
+	// A fresh lease survives a sweep with an old cutoff.
+	n, err := store.ReclaimStale(ctx, time.Now().Add(-time.Minute))
+	if err != nil {
+		t.Fatalf("ReclaimStale() error = %v", err)
+	}
+	if n != 0 {
+		t.Errorf("ReclaimStale() = %d, want 0 while the lease is fresh", n)
+	}
+
+	// A future cutoff makes the lease stale: the pending run goes back in the queue.
+	n, err = store.ReclaimStale(ctx, time.Now().Add(time.Minute))
+	if err != nil {
+		t.Fatalf("ReclaimStale() error = %v", err)
+	}
+	if n != 1 {
+		t.Errorf("ReclaimStale() = %d, want 1 requeued", n)
+	}
+	back, err := store.Get(ctx, claimed.ID)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if back.ClaimedBy != "" || back.Status != run.StatusPending {
+		t.Errorf("requeued run = %+v, want unclaimed pending", back)
+	}
+
+	// A stale lease on a running run interrupts it instead.
+	reclaimed, err := store.Claim(ctx, "worker-b")
+	if err != nil {
+		t.Fatalf("Claim() error = %v", err)
+	}
+	reclaimed.Status = run.StatusRunning
+	if err := store.Save(ctx, reclaimed); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	if n, err = store.ReclaimStale(ctx, time.Now().Add(time.Minute)); err != nil || n != 1 {
+		t.Fatalf("ReclaimStale() = %d, %v, want 1 interrupted", n, err)
+	}
+	gone, err := store.Get(ctx, reclaimed.ID)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if gone.Status != run.StatusInterrupted || gone.EndedAt == nil {
+		t.Errorf("stale running run = %+v, want interrupted with an end time", gone)
+	}
+}
+
+// testRequestCancel verifies the cancel flag round trips and unknown runs report ErrNotFound.
+func testRequestCancel(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	if err := store.Save(ctx, &run.Run{
+		ID: "run_c", Playbook: "p", Status: run.StatusRunning, CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	if err := store.RequestCancel(ctx, "run_c"); err != nil {
+		t.Fatalf("RequestCancel() error = %v", err)
+	}
+	got, err := store.Get(ctx, "run_c")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if !got.CancelRequested {
+		t.Error("CancelRequested not set after RequestCancel")
+	}
+	if err := store.RequestCancel(ctx, "ghost"); !errors.Is(err, run.ErrNotFound) {
+		t.Errorf("RequestCancel(ghost) error = %v, want ErrNotFound", err)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/dcadolph/yardmaster/internal/event"
 )
@@ -23,6 +24,17 @@ type Store interface {
 	Steps(ctx context.Context, parentID string) ([]*Run, error)
 	// NonTerminal returns all runs, including shards, that are not in a terminal state.
 	NonTerminal(ctx context.Context) ([]*Run, error)
+	// Claim leases the oldest unclaimed pending top-level plain run to owner and returns it, or
+	// ErrNonePending when nothing is waiting. The claim must be atomic across processes.
+	Claim(ctx context.Context, owner string) (*Run, error)
+	// Heartbeat renews owner's lease on a run. It returns ErrNotFound when the run is gone or the
+	// lease is no longer held by owner.
+	Heartbeat(ctx context.Context, id, owner string) error
+	// ReclaimStale requeues pending runs whose lease renewal is older than cutoff and marks stale
+	// running runs interrupted, returning how many rows changed. It sweeps up after dead workers.
+	ReclaimStale(ctx context.Context, cutoff time.Time) (int, error)
+	// RequestCancel marks the run so whichever process holds it stops it, or ErrNotFound.
+	RequestCancel(ctx context.Context, id string) error
 	// SaveHostSummary replaces the stored per host summaries for a run.
 	SaveHostSummary(ctx context.Context, runID string, summaries []HostSummary) error
 	// FleetHealth ranks hosts by failures over their most recent window runs, worst first.
@@ -177,6 +189,81 @@ func (m *memStore) NonTerminal(_ context.Context) ([]*Run, error) {
 		}
 	}
 	return out, nil
+}
+
+// Claim leases the oldest unclaimed pending top-level plain run to owner and returns it.
+func (m *memStore) Claim(_ context.Context, owner string) (*Run, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var oldest *Run
+	for _, r := range m.runs {
+		if r.Status != StatusPending || r.ClaimedBy != "" || r.ParentID != nil || r.Kind != "" {
+			continue
+		}
+		if oldest == nil || r.CreatedAt.Before(oldest.CreatedAt) ||
+			(r.CreatedAt.Equal(oldest.CreatedAt) && r.ID < oldest.ID) {
+			oldest = r
+		}
+	}
+	if oldest == nil {
+		return nil, ErrNonePending
+	}
+	now := time.Now()
+	oldest.ClaimedBy = owner
+	oldest.ClaimedAt = &now
+	return oldest.Clone(), nil
+}
+
+// Heartbeat renews owner's lease on a run.
+func (m *memStore) Heartbeat(_ context.Context, id, owner string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r, ok := m.runs[id]
+	if !ok || r.ClaimedBy != owner {
+		return ErrNotFound
+	}
+	now := time.Now()
+	r.ClaimedAt = &now
+	return nil
+}
+
+// ReclaimStale requeues stale claimed pending runs and interrupts stale running runs.
+func (m *memStore) ReclaimStale(_ context.Context, cutoff time.Time) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	changed := 0
+	for _, r := range m.runs {
+		if r.ClaimedBy == "" || r.ClaimedAt == nil || !r.ClaimedAt.Before(cutoff) {
+			continue
+		}
+		switch r.Status {
+		case StatusPending:
+			r.ClaimedBy = ""
+			r.ClaimedAt = nil
+			changed++
+		case StatusRunning:
+			now := time.Now()
+			r.Status = StatusInterrupted
+			r.EndedAt = &now
+			if r.Error == "" {
+				r.Error = "interrupted: executor lease expired"
+			}
+			changed++
+		}
+	}
+	return changed, nil
+}
+
+// RequestCancel marks the run so whichever process holds it stops it.
+func (m *memStore) RequestCancel(_ context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r, ok := m.runs[id]
+	if !ok {
+		return ErrNotFound
+	}
+	r.CancelRequested = true
+	return nil
 }
 
 // SaveHostSummary replaces the stored per host summaries for a run.

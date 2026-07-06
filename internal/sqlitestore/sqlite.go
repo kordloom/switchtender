@@ -41,7 +41,10 @@ CREATE TABLE IF NOT EXISTS runs (
 	retry_of      TEXT,
 	attempt       INTEGER NOT NULL DEFAULT 0,
 	extra_vars    TEXT NOT NULL DEFAULT '',
-	outputs       TEXT NOT NULL DEFAULT ''
+	outputs       TEXT NOT NULL DEFAULT '',
+	claimed_by    TEXT NOT NULL DEFAULT '',
+	claimed_at    TEXT,
+	cancel_requested INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_runs_created_at ON runs(created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_parent ON runs(parent_id, shard_index);
@@ -103,6 +106,9 @@ var alterations = []string{
 	"ALTER TABLE runs ADD COLUMN attempt INTEGER NOT NULL DEFAULT 0",
 	"ALTER TABLE runs ADD COLUMN extra_vars TEXT NOT NULL DEFAULT ''",
 	"ALTER TABLE runs ADD COLUMN outputs TEXT NOT NULL DEFAULT ''",
+	"ALTER TABLE runs ADD COLUMN claimed_by TEXT NOT NULL DEFAULT ''",
+	"ALTER TABLE runs ADD COLUMN claimed_at TEXT",
+	"ALTER TABLE runs ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0",
 	"ALTER TABLE run_host_summary ADD COLUMN duration_seconds REAL NOT NULL DEFAULT 0",
 }
 
@@ -176,7 +182,7 @@ func (d *DB) Close() error {
 // runColumns is the shared select list so every read scans the same columns in the same order.
 const runColumns = `id, playbook, inventory, status, exit_code, error, created_at, started_at,
 	ended_at, parent_id, shard_index, shard_count, limit_pattern, kind, step_name, step_index,
-	retry_of, attempt, extra_vars, outputs`
+	retry_of, attempt, extra_vars, outputs, claimed_by, claimed_at, cancel_requested`
 
 // Save inserts or replaces the run identified by r.ID.
 func (s *store) Save(ctx context.Context, r *run.Run) error {
@@ -184,8 +190,8 @@ func (s *store) Save(ctx context.Context, r *run.Run) error {
 INSERT INTO runs
 	(id, playbook, inventory, status, exit_code, error, created_at, started_at, ended_at,
 	 parent_id, shard_index, shard_count, limit_pattern, kind, step_name, step_index, retry_of,
-	 attempt, extra_vars, outputs)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	 attempt, extra_vars, outputs, claimed_by, claimed_at, cancel_requested)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
 	playbook=excluded.playbook, inventory=excluded.inventory, status=excluded.status,
 	exit_code=excluded.exit_code, error=excluded.error, created_at=excluded.created_at,
@@ -194,13 +200,15 @@ ON CONFLICT(id) DO UPDATE SET
 	shard_count=excluded.shard_count, limit_pattern=excluded.limit_pattern,
 	kind=excluded.kind, step_name=excluded.step_name, step_index=excluded.step_index,
 	retry_of=excluded.retry_of, attempt=excluded.attempt, extra_vars=excluded.extra_vars,
-	outputs=excluded.outputs`
+	outputs=excluded.outputs, claimed_by=excluded.claimed_by, claimed_at=excluded.claimed_at,
+	cancel_requested=excluded.cancel_requested`
 	_, err := s.db.ExecContext(ctx, q,
 		r.ID, r.Playbook, r.Inventory, string(r.Status), nullInt(r.ExitCode), r.Error,
 		formatTime(r.CreatedAt), nullTime(r.StartedAt), nullTime(r.EndedAt),
 		nullString(r.ParentID), nullInt(r.ShardIndex), nullInt(r.ShardCount), r.Limit,
 		r.Kind, r.StepName, nullInt(r.StepIndex), nullString(r.RetryOf), r.Attempt,
-		jsonMap(r.ExtraVars), jsonMap(r.Outputs),
+		jsonMap(r.ExtraVars), jsonMap(r.Outputs), r.ClaimedBy, nullTime(r.ClaimedAt),
+		boolToInt(r.CancelRequested),
 	)
 	if err != nil {
 		return fmt.Errorf("save run: %w", err)
@@ -657,12 +665,16 @@ func scanRun(s scanner) (*run.Run, error) {
 		retryOf  sql.NullString
 		extra    string
 		outputs  string
+		claimed  sql.NullString
+		cancelI  int
 	)
 	if err := s.Scan(&r.ID, &r.Playbook, &r.Inventory, &status, &exit, &r.Error,
 		&created, &started, &ended, &parent, &shardIdx, &shardCnt, &r.Limit,
-		&r.Kind, &r.StepName, &stepIdx, &retryOf, &r.Attempt, &extra, &outputs); err != nil {
+		&r.Kind, &r.StepName, &stepIdx, &retryOf, &r.Attempt, &extra, &outputs,
+		&r.ClaimedBy, &claimed, &cancelI); err != nil {
 		return nil, err
 	}
+	r.CancelRequested = cancelI != 0
 	extraVars, err := parseMap(extra)
 	if err != nil {
 		return nil, err
@@ -673,6 +685,9 @@ func scanRun(s scanner) (*run.Run, error) {
 		return nil, err
 	}
 	r.Outputs = outs
+	if r.ClaimedAt, err = parseNullTime(claimed); err != nil {
+		return nil, err
+	}
 	r.Status = run.Status(status)
 	if exit.Valid {
 		v := int(exit.Int64)
@@ -710,6 +725,14 @@ func scanRun(s scanner) (*run.Run, error) {
 		r.RetryOf = &id
 	}
 	return &r, nil
+}
+
+// boolToInt maps a bool to a database integer.
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 // jsonMap renders a map as JSON for storage, empty string for an empty map.
@@ -780,4 +803,84 @@ func parseNullTime(s sql.NullString) (*time.Time, error) {
 		return nil, err
 	}
 	return &t, nil
+}
+
+// Claim leases the oldest unclaimed pending top-level plain run to owner and returns it.
+func (s *store) Claim(ctx context.Context, owner string) (*run.Run, error) {
+	const q = `
+UPDATE runs SET claimed_by=?, claimed_at=?
+WHERE id = (
+	SELECT id FROM runs
+	WHERE status='pending' AND claimed_by='' AND parent_id IS NULL AND kind=''
+	ORDER BY created_at, id LIMIT 1
+)
+RETURNING ` + runColumns
+	r, err := scanRun(s.db.QueryRowContext(ctx, q, owner, formatTime(time.Now())))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, run.ErrNonePending
+	}
+	if err != nil {
+		return nil, fmt.Errorf("claim run: %w", err)
+	}
+	return r, nil
+}
+
+// Heartbeat renews owner's lease on a run.
+func (s *store) Heartbeat(ctx context.Context, id, owner string) error {
+	res, err := s.db.ExecContext(ctx,
+		"UPDATE runs SET claimed_at=? WHERE id=? AND claimed_by=?",
+		formatTime(time.Now()), id, owner)
+	if err != nil {
+		return fmt.Errorf("heartbeat: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("heartbeat: %w", err)
+	}
+	if n == 0 {
+		return run.ErrNotFound
+	}
+	return nil
+}
+
+// ReclaimStale requeues stale claimed pending runs and interrupts stale running runs.
+func (s *store) ReclaimStale(ctx context.Context, cutoff time.Time) (int, error) {
+	cut := formatTime(cutoff)
+	res, err := s.db.ExecContext(ctx, `
+UPDATE runs SET claimed_by='', claimed_at=NULL
+WHERE status='pending' AND claimed_by!='' AND claimed_at < ?`, cut)
+	if err != nil {
+		return 0, fmt.Errorf("reclaim stale: %w", err)
+	}
+	requeued, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("reclaim stale: %w", err)
+	}
+	res, err = s.db.ExecContext(ctx, `
+UPDATE runs SET status='interrupted', ended_at=?, error='interrupted: executor lease expired'
+WHERE status='running' AND claimed_by!='' AND claimed_at < ?`, formatTime(time.Now()), cut)
+	if err != nil {
+		return 0, fmt.Errorf("reclaim stale: %w", err)
+	}
+	interrupted, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("reclaim stale: %w", err)
+	}
+	return int(requeued + interrupted), nil
+}
+
+// RequestCancel marks the run so whichever process holds it stops it.
+func (s *store) RequestCancel(ctx context.Context, id string) error {
+	res, err := s.db.ExecContext(ctx, "UPDATE runs SET cancel_requested=1 WHERE id=?", id)
+	if err != nil {
+		return fmt.Errorf("request cancel: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("request cancel: %w", err)
+	}
+	if n == 0 {
+		return run.ErrNotFound
+	}
+	return nil
 }
