@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-train-dark.png">
-    <img src="assets/logo-train.png" alt="Yardmaster" width="200">
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-train-tracks-dark.png">
+    <img src="assets/logo-train-tracks.png" alt="Yardmaster" width="240">
   </picture>
 </p>
 
