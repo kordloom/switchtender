@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -15,7 +16,9 @@ import (
 	"github.com/dcadolph/yardmaster/internal/dispatch"
 	"github.com/dcadolph/yardmaster/internal/live"
 	"github.com/dcadolph/yardmaster/internal/logutil"
+	"github.com/dcadolph/yardmaster/internal/pgstore"
 	"github.com/dcadolph/yardmaster/internal/roundhouse"
+	"github.com/dcadolph/yardmaster/internal/run"
 	"github.com/dcadolph/yardmaster/internal/schedule"
 	"github.com/dcadolph/yardmaster/internal/server"
 	"github.com/dcadolph/yardmaster/internal/sqlitestore"
@@ -53,9 +56,27 @@ var serveCmd = &cobra.Command{
 // init registers serve command flags.
 func init() {
 	serveCmd.Flags().StringVar(&serveAddr, "addr", defaultServeAddr, "Address the server listens on.")
-	serveCmd.Flags().StringVar(&serveDB, "db", defaultDBPath, "Path to the SQLite database file.")
+	serveCmd.Flags().StringVar(&serveDB, "db", defaultDBPath,
+		"SQLite file path, or a postgres:// DSN for the PostgreSQL backend.")
 	serveCmd.Flags().DurationVar(&scheduleInterval, "schedule-interval", defaultScheduleInterval,
 		"How often the scheduler checks for due schedules.")
+}
+
+// openStores opens the run and schedule stores for the --db value: a postgres:// or
+// postgresql:// DSN selects the PostgreSQL backend, anything else is a SQLite file path.
+func openStores(db string) (run.Store, schedule.Store, func() error, error) {
+	if strings.HasPrefix(db, "postgres://") || strings.HasPrefix(db, "postgresql://") {
+		pg, err := pgstore.Open(db)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		return pg.Runs(), pg.Schedules(), pg.Close, nil
+	}
+	lite, err := sqlitestore.Open(db)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return lite.Runs(), lite.Schedules(), lite.Close, nil
 }
 
 // runServe builds the server dependencies and serves until interrupted.
@@ -66,12 +87,11 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	}
 	defer func() { _ = log.Sync() }()
 
-	db, err := sqlitestore.Open(serveDB)
+	store, schedules, closeStores, err := openStores(serveDB)
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
-	defer func() { _ = db.Close() }()
-	store := db.Runs()
+	defer func() { _ = closeStores() }()
 
 	hub := live.NewHub()
 	runner := roundhouse.NewAnsibleRunner()
@@ -84,7 +104,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		log.Info("reconciled interrupted runs", zap.Int("count", n))
 	}
 
-	scheduler := schedule.NewScheduler(db.Schedules(), disp, log,
+	scheduler := schedule.NewScheduler(schedules, disp, log,
 		schedule.WithInterval(scheduleInterval))
 	scheduler.Start()
 	defer scheduler.Close()
@@ -93,7 +113,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		Addr: serveAddr,
 		Handler: server.New(store, disp, log, server.WithStreamer(hub),
 			server.WithCanceler(disp), server.WithRetrier(disp),
-			server.WithSchedules(db.Schedules())).Handler(),
+			server.WithSchedules(schedules)).Handler(),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 
