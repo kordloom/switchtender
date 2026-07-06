@@ -139,6 +139,10 @@ func Open(path string) (*DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
+	// One connection serializes every reader and writer. Concurrent deferred transactions on
+	// separate connections deadlock on SQLite's read to write upgrade with an immediate
+	// SQLITE_BUSY that busy_timeout never retries, which silently drops writes under load.
+	db.SetMaxOpenConns(1)
 	pragmas := []string{
 		"PRAGMA journal_mode=WAL",
 		"PRAGMA busy_timeout=5000",

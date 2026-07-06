@@ -755,11 +755,17 @@ func (d *Dispatcher) execute(ctx context.Context, r *run.Run) run.Status {
 	return status
 }
 
+// leaseMissLimit is how many consecutive heartbeat failures mean the lease is really gone. A
+// single miss can be a transient store error or a first save that has not landed yet, so one
+// failure never kills a run.
+const leaseMissLimit = 3
+
 // watch renews the executing run's lease and cancels it when another process requests a stop or
-// steals the lease. It exits when the run's context ends.
+// the lease is convincingly lost. It exits when the run's context ends.
 func (d *Dispatcher) watch(ctx context.Context, id string) {
 	ticker := time.NewTicker(watchInterval)
 	defer ticker.Stop()
+	misses := 0
 	for {
 		select {
 		case <-ctx.Done():
@@ -767,10 +773,15 @@ func (d *Dispatcher) watch(ctx context.Context, id string) {
 		case <-ticker.C:
 		}
 		if err := d.store.Heartbeat(context.Background(), id, d.owner); err != nil {
+			misses++
+			if misses < leaseMissLimit {
+				continue
+			}
 			d.log.Warn("dispatch: lease lost: "+err.Error(), zap.String("run_id", id))
 			d.Cancel(id)
 			return
 		}
+		misses = 0
 		r, err := d.store.Get(context.Background(), id)
 		if err != nil {
 			continue
@@ -791,12 +802,16 @@ func (d *Dispatcher) summarize(r *run.Run) {
 		return
 	}
 	if summaries := run.HostSummariesFromStats(events, r.CreatedAt); len(summaries) > 0 {
-		if err := d.store.SaveHostSummary(context.Background(), r.ID, summaries); err != nil {
+		if err := withRetries(func() error {
+			return d.store.SaveHostSummary(context.Background(), r.ID, summaries)
+		}); err != nil {
 			d.log.Error("dispatch: save host summary: "+err.Error(), zap.String("run_id", r.ID))
 		}
 	}
 	if tasks := run.TaskSummariesFromEvents(events, r.CreatedAt); len(tasks) > 0 {
-		if err := d.store.SaveTaskSummary(context.Background(), r.ID, tasks); err != nil {
+		if err := withRetries(func() error {
+			return d.store.SaveTaskSummary(context.Background(), r.ID, tasks)
+		}); err != nil {
 			d.log.Error("dispatch: save task summary: "+err.Error(), zap.String("run_id", r.ID))
 		}
 	}
@@ -859,14 +874,24 @@ func (d *Dispatcher) finalize(r *run.Run, status run.Status, exitCode *int, fail
 // save persists r using a background context so terminal state is recorded even during shutdown.
 // A failed save retries briefly, since losing a terminal status strands the run as running.
 func (d *Dispatcher) save(r *run.Run) {
-	var err error
-	for attempt := 0; attempt < 3; attempt++ {
-		if err = d.store.Save(context.Background(), r); err == nil {
-			return
-		}
-		time.Sleep(time.Duration(attempt+1) * 50 * time.Millisecond)
+	if err := withRetries(func() error {
+		return d.store.Save(context.Background(), r)
+	}); err != nil {
+		d.log.Error("dispatch: save run: "+err.Error(), zap.String("run_id", r.ID))
 	}
-	d.log.Error("dispatch: save run: "+err.Error(), zap.String("run_id", r.ID))
+}
+
+// withRetries runs a store write, retrying transient failures with a short backoff. Concurrent
+// executors contend on a single writer under SQLite, so one busy moment must not lose state.
+func withRetries(f func() error) error {
+	var err error
+	for attempt := 0; attempt < 4; attempt++ {
+		if err = f(); err == nil {
+			return nil
+		}
+		time.Sleep(time.Duration(attempt+1) * 75 * time.Millisecond)
+	}
+	return err
 }
 
 // eventsFile creates a temp file for the run's structured events and returns its path and a
@@ -944,7 +969,9 @@ func (d *Dispatcher) handleEventLine(id, parent string, raw []byte) {
 	if len(events) == 0 {
 		return
 	}
-	if err := d.store.AppendEvents(context.Background(), id, events); err != nil {
+	if err := withRetries(func() error {
+		return d.store.AppendEvents(context.Background(), id, events)
+	}); err != nil {
 		d.log.Error("dispatch: append events: "+err.Error(), zap.String("run_id", id))
 	}
 	d.publisher.PublishEvents(id, events)
