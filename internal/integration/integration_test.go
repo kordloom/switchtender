@@ -22,6 +22,8 @@ import (
 	"testing"
 	"time"
 
+	"go.uber.org/zap/zaptest"
+
 	"github.com/dcadolph/yardmaster/internal/dispatch"
 	"github.com/dcadolph/yardmaster/internal/live"
 	"github.com/dcadolph/yardmaster/internal/roundhouse"
@@ -160,7 +162,8 @@ func startServer(t *testing.T) string {
 	t.Cleanup(func() { _ = db.Close() })
 
 	hub := live.NewHub()
-	disp := dispatch.New(db.Runs(), roundhouse.NewAnsibleRunner(), nil, dispatch.WithPublisher(hub))
+	disp := dispatch.New(db.Runs(), roundhouse.NewAnsibleRunner(), zaptest.NewLogger(t),
+		dispatch.WithPublisher(hub))
 	t.Cleanup(disp.Close)
 
 	srv := httptest.NewServer(server.New(db.Runs(), disp, nil,
@@ -388,6 +391,10 @@ func TestRealSSHFailureIsolation(t *testing.T) {
 	}
 
 	shards := waitShardsTerminal(t, base, parent.ID, 3)
+	for _, s := range shards {
+		t.Logf("post-split shard %s limit=%s status=%s claimed_by=%s error=%q",
+			s.ID, s.Limit, s.Status, s.ClaimedBy, s.Error)
+	}
 	var failedLimit string
 	failedCount := 0
 	for _, s := range shards {
@@ -405,6 +412,10 @@ func TestRealSSHFailureIsolation(t *testing.T) {
 	if out, err := exec.Command("docker", "exec", hosts[0].Container,
 		"rm", "/tmp/yardmaster-break").CombinedOutput(); err != nil {
 		t.Fatalf("clear break marker: %v\n%s", err, out)
+	}
+	preRetry := waitShardsTerminal(t, base, parent.ID, 3)
+	for _, s := range preRetry {
+		t.Logf("pre-retry shard %s limit=%s status=%s error=%q", s.ID, s.Limit, s.Status, s.Error)
 	}
 	var retry run.Run
 	postJSON(t, base+"/runs/"+parent.ID+"/retry", "", &retry)
