@@ -2,12 +2,14 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"os/signal"
 	"syscall"
 
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 
+	"github.com/dcadolph/yardmaster/internal/credential"
 	"github.com/dcadolph/yardmaster/internal/dispatch"
 	"github.com/dcadolph/yardmaster/internal/logutil"
 	"github.com/dcadolph/yardmaster/internal/roundhouse"
@@ -51,7 +53,11 @@ func runWorker(cmd *cobra.Command, _ []string) error {
 	defer func() { _ = bundle.Close() }()
 	store := bundle.Runs()
 
-	opts := []dispatch.Option{}
+	sealer := credential.NewSealer(os.Getenv("YARDMASTER_ENCRYPTION_KEY"))
+	if !sealer.Enabled() {
+		log.Warn("credentials disabled: set YARDMASTER_ENCRYPTION_KEY to enable them")
+	}
+	opts := []dispatch.Option{dispatch.WithCredentials(bundle.Credentials(), sealer)}
 	if workerName != "" {
 		opts = append(opts, dispatch.WithOwner(workerName))
 	}

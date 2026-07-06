@@ -15,6 +15,7 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/dcadolph/yardmaster/internal/auth"
+	"github.com/dcadolph/yardmaster/internal/credential"
 	"github.com/dcadolph/yardmaster/internal/event"
 	"github.com/dcadolph/yardmaster/internal/run"
 	"github.com/dcadolph/yardmaster/internal/schedule"
@@ -45,7 +46,8 @@ CREATE TABLE IF NOT EXISTS runs (
 	outputs       TEXT NOT NULL DEFAULT '',
 	claimed_by    TEXT NOT NULL DEFAULT '',
 	claimed_at    TEXT,
-	cancel_requested INTEGER NOT NULL DEFAULT 0
+	cancel_requested INTEGER NOT NULL DEFAULT 0,
+	credential_ids TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_runs_created_at ON runs(created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_parent ON runs(parent_id, shard_index);
@@ -106,6 +108,13 @@ CREATE TABLE IF NOT EXISTS tokens (
 	last_used_at TEXT
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_tokens_hash ON tokens(hash);
+CREATE TABLE IF NOT EXISTS credentials (
+	id         TEXT PRIMARY KEY,
+	name       TEXT NOT NULL DEFAULT '',
+	kind       TEXT NOT NULL,
+	secret     TEXT NOT NULL,
+	created_at TEXT NOT NULL
+);
 `
 
 // alterations add columns to tables created before the column existed. New databases already have
@@ -118,6 +127,7 @@ var alterations = []string{
 	"ALTER TABLE runs ADD COLUMN claimed_by TEXT NOT NULL DEFAULT ''",
 	"ALTER TABLE runs ADD COLUMN claimed_at TEXT",
 	"ALTER TABLE runs ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0",
+	"ALTER TABLE runs ADD COLUMN credential_ids TEXT NOT NULL DEFAULT ''",
 	"ALTER TABLE run_host_summary ADD COLUMN duration_seconds REAL NOT NULL DEFAULT 0",
 }
 
@@ -142,6 +152,8 @@ type DB struct {
 	schedules *scheduleStore
 	// tokens is the API token store.
 	tokens *tokenStore
+	// credentials is the execution secret store.
+	credentials *credentialStore
 }
 
 // Open opens the SQLite database at path, applies the schema, and returns the bundled stores.
@@ -176,7 +188,8 @@ func Open(path string) (*DB, error) {
 			return nil, fmt.Errorf("migrate schema: %w", err)
 		}
 	}
-	return &DB{db: db, runs: &store{db: db}, schedules: &scheduleStore{db: db}, tokens: &tokenStore{db: db}}, nil
+	return &DB{db: db, runs: &store{db: db}, schedules: &scheduleStore{db: db}, tokens: &tokenStore{db: db},
+		credentials: &credentialStore{db: db}}, nil
 }
 
 // Runs returns the run store.
@@ -194,6 +207,11 @@ func (d *DB) Tokens() auth.Store {
 	return d.tokens
 }
 
+// Credentials returns the execution secret store.
+func (d *DB) Credentials() credential.Store {
+	return d.credentials
+}
+
 // Close closes the underlying database.
 func (d *DB) Close() error {
 	return d.db.Close()
@@ -202,7 +220,8 @@ func (d *DB) Close() error {
 // runColumns is the shared select list so every read scans the same columns in the same order.
 const runColumns = `id, playbook, inventory, status, exit_code, error, created_at, started_at,
 	ended_at, parent_id, shard_index, shard_count, limit_pattern, kind, step_name, step_index,
-	retry_of, attempt, extra_vars, outputs, claimed_by, claimed_at, cancel_requested`
+	retry_of, attempt, extra_vars, outputs, claimed_by, claimed_at, cancel_requested,
+	credential_ids`
 
 // Save inserts or replaces the run identified by r.ID.
 func (s *store) Save(ctx context.Context, r *run.Run) error {
@@ -210,8 +229,8 @@ func (s *store) Save(ctx context.Context, r *run.Run) error {
 INSERT INTO runs
 	(id, playbook, inventory, status, exit_code, error, created_at, started_at, ended_at,
 	 parent_id, shard_index, shard_count, limit_pattern, kind, step_name, step_index, retry_of,
-	 attempt, extra_vars, outputs, claimed_by, claimed_at, cancel_requested)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	 attempt, extra_vars, outputs, claimed_by, claimed_at, cancel_requested, credential_ids)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
 	playbook=excluded.playbook, inventory=excluded.inventory, status=excluded.status,
 	exit_code=excluded.exit_code, error=excluded.error, created_at=excluded.created_at,
@@ -221,14 +240,14 @@ ON CONFLICT(id) DO UPDATE SET
 	kind=excluded.kind, step_name=excluded.step_name, step_index=excluded.step_index,
 	retry_of=excluded.retry_of, attempt=excluded.attempt, extra_vars=excluded.extra_vars,
 	outputs=excluded.outputs, claimed_by=excluded.claimed_by, claimed_at=excluded.claimed_at,
-	cancel_requested=excluded.cancel_requested`
+	cancel_requested=excluded.cancel_requested, credential_ids=excluded.credential_ids`
 	_, err := s.db.ExecContext(ctx, q,
 		r.ID, r.Playbook, r.Inventory, string(r.Status), nullInt(r.ExitCode), r.Error,
 		formatTime(r.CreatedAt), nullTime(r.StartedAt), nullTime(r.EndedAt),
 		nullString(r.ParentID), nullInt(r.ShardIndex), nullInt(r.ShardCount), r.Limit,
 		r.Kind, r.StepName, nullInt(r.StepIndex), nullString(r.RetryOf), r.Attempt,
 		jsonMap(r.ExtraVars), jsonMap(r.Outputs), r.ClaimedBy, nullTime(r.ClaimedAt),
-		boolToInt(r.CancelRequested),
+		boolToInt(r.CancelRequested), joinIDs(r.CredentialIDs),
 	)
 	if err != nil {
 		return fmt.Errorf("save run: %w", err)
@@ -687,14 +706,16 @@ func scanRun(s scanner) (*run.Run, error) {
 		outputs  string
 		claimed  sql.NullString
 		cancelI  int
+		credIDs  string
 	)
 	if err := s.Scan(&r.ID, &r.Playbook, &r.Inventory, &status, &exit, &r.Error,
 		&created, &started, &ended, &parent, &shardIdx, &shardCnt, &r.Limit,
 		&r.Kind, &r.StepName, &stepIdx, &retryOf, &r.Attempt, &extra, &outputs,
-		&r.ClaimedBy, &claimed, &cancelI); err != nil {
+		&r.ClaimedBy, &claimed, &cancelI, &credIDs); err != nil {
 		return nil, err
 	}
 	r.CancelRequested = cancelI != 0
+	r.CredentialIDs = splitIDs(credIDs)
 	extraVars, err := parseMap(extra)
 	if err != nil {
 		return nil, err
@@ -745,6 +766,19 @@ func scanRun(s scanner) (*run.Run, error) {
 		r.RetryOf = &id
 	}
 	return &r, nil
+}
+
+// joinIDs renders an id list for storage, empty string for none.
+func joinIDs(ids []string) string {
+	return strings.Join(ids, ",")
+}
+
+// splitIDs parses a stored id list, nil for an empty string.
+func splitIDs(s string) []string {
+	if s == "" {
+		return nil
+	}
+	return strings.Split(s, ",")
 }
 
 // boolToInt maps a bool to a database integer.

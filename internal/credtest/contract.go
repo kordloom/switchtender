@@ -1,0 +1,75 @@
+// Package credtest provides a shared behavior contract for credential.Store implementations so
+// the in-memory, SQLite, and PostgreSQL backends cannot drift apart.
+package credtest
+
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+
+	"github.com/dcadolph/yardmaster/internal/credential"
+)
+
+// Contract runs the credential.Store contract against a fresh store from newStore.
+func Contract(t *testing.T, newStore func() credential.Store) {
+	t.Helper()
+	t.Run("lifecycle", func(t *testing.T) { testLifecycle(t, newStore()) })
+	t.Run("list ordered", func(t *testing.T) { testList(t, newStore()) })
+}
+
+// testLifecycle verifies a credential round trips with its sealed secret, updates, and deletes.
+func testLifecycle(t *testing.T, store credential.Store) {
+	ctx := context.Background()
+	created := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	c := &credential.Credential{
+		ID: "cred_1", Name: "fleet-key", Kind: credential.KindSSHKey,
+		Secret: "sealed-bytes", CreatedAt: created,
+	}
+	if err := store.Save(ctx, c); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	got, err := store.Get(ctx, "cred_1")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.Name != "fleet-key" || got.Kind != credential.KindSSHKey || got.Secret != "sealed-bytes" {
+		t.Errorf("Get() = %+v, want the saved credential with its sealed secret", got)
+	}
+	if !got.CreatedAt.Equal(created) {
+		t.Errorf("CreatedAt = %v, want %v", got.CreatedAt, created)
+	}
+
+	if _, err := store.Get(ctx, "ghost"); !errors.Is(err, credential.ErrNotFound) {
+		t.Errorf("Get(ghost) error = %v, want ErrNotFound", err)
+	}
+
+	if err := store.Delete(ctx, "cred_1"); err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+	if err := store.Delete(ctx, "cred_1"); !errors.Is(err, credential.ErrNotFound) {
+		t.Errorf("Delete(gone) error = %v, want ErrNotFound", err)
+	}
+}
+
+// testList verifies credentials come back oldest first.
+func testList(t *testing.T, store credential.Store) {
+	ctx := context.Background()
+	base := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	for i, id := range []string{"cred_b", "cred_a"} {
+		if err := store.Save(ctx, &credential.Credential{
+			ID: id, Name: id, Kind: credential.KindVaultPassword, Secret: "s",
+			CreatedAt: base.Add(time.Duration(1-i) * time.Hour),
+		}); err != nil {
+			t.Fatalf("Save() error = %v", err)
+		}
+	}
+	list, err := store.List(ctx)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(list) != 2 || list[0].ID != "cred_a" || list[1].ID != "cred_b" {
+		t.Errorf("List() order = %+v, want cred_a then cred_b", list)
+	}
+}

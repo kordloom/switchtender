@@ -8,6 +8,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/dcadolph/yardmaster/internal/auth"
+	"github.com/dcadolph/yardmaster/internal/credential"
 	"github.com/dcadolph/yardmaster/internal/live"
 	"github.com/dcadolph/yardmaster/internal/run"
 	"github.com/dcadolph/yardmaster/internal/schedule"
@@ -16,9 +17,9 @@ import (
 
 // Submitter accepts a run request and returns the created run. The dispatcher satisfies it.
 type Submitter interface {
-	Submit(ctx context.Context, playbook, inventory string) (*run.Run, error)
-	SubmitSplit(ctx context.Context, playbook, inventory string, shards int) (*run.Run, error)
-	SubmitPipeline(ctx context.Context, name, inventory string, steps []run.PipelineStep) (*run.Run, error)
+	Submit(ctx context.Context, playbook, inventory string, credentialIDs ...string) (*run.Run, error)
+	SubmitSplit(ctx context.Context, playbook, inventory string, shards int, credentialIDs ...string) (*run.Run, error)
+	SubmitPipeline(ctx context.Context, name, inventory string, steps []run.PipelineStep, credentialIDs ...string) (*run.Run, error)
 }
 
 // Streamer subscribes to a run's live output. The live Hub satisfies it.
@@ -66,6 +67,14 @@ func WithTokens(tokens auth.Store) Option {
 	return func(srv *Server) { srv.tokens = tokens }
 }
 
+// WithCredentials enables the credential endpoints backed by the given store and sealer.
+func WithCredentials(store credential.Store, sealer *credential.Sealer) Option {
+	return func(srv *Server) {
+		srv.credentials = store
+		srv.sealer = sealer
+	}
+}
+
 // Server wires the run store and submitter into an HTTP handler.
 type Server struct {
 	// store reads runs and their logs for the query endpoints.
@@ -86,6 +95,10 @@ type Server struct {
 	schedules schedule.Store
 	// tokens backs API authentication when configured.
 	tokens auth.Store
+	// credentials backs the credential endpoints when configured.
+	credentials credential.Store
+	// sealer encrypts credential secrets.
+	sealer *credential.Sealer
 }
 
 // New returns a Server. It panics if store or submitter is nil; a nil logger becomes a no-op.
@@ -133,6 +146,9 @@ func (s *Server) Handler() http.Handler {
 		http.Redirect(w, r, "/ui/", http.StatusFound)
 	})
 	mux.Handle("POST /auth/check", authCheckHandler())
+	mux.Handle("POST /credentials", createCredentialHandler(s.credentials, s.sealer, s.log))
+	mux.Handle("GET /credentials", listCredentialsHandler(s.credentials, s.log))
+	mux.Handle("DELETE /credentials/{id}", deleteCredentialHandler(s.credentials, s.log))
 	if s.tokens != nil {
 		gate := &authGate{tokens: s.tokens, log: s.log}
 		return gate.wrap(mux)

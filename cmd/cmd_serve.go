@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"os/signal"
 	"strings"
 	"syscall"
@@ -14,6 +15,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/dcadolph/yardmaster/internal/auth"
+	"github.com/dcadolph/yardmaster/internal/credential"
 	"github.com/dcadolph/yardmaster/internal/dispatch"
 	"github.com/dcadolph/yardmaster/internal/live"
 	"github.com/dcadolph/yardmaster/internal/logutil"
@@ -71,6 +73,8 @@ type storeBundle interface {
 	Schedules() schedule.Store
 	// Tokens returns the API token store.
 	Tokens() auth.Store
+	// Credentials returns the execution secret store.
+	Credentials() credential.Store
 	// Close closes the underlying database.
 	Close() error
 }
@@ -99,9 +103,15 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	defer func() { _ = bundle.Close() }()
 	store, schedules := bundle.Runs(), bundle.Schedules()
 
+	sealer := credential.NewSealer(os.Getenv("YARDMASTER_ENCRYPTION_KEY"))
+	if !sealer.Enabled() {
+		log.Warn("credentials disabled: set YARDMASTER_ENCRYPTION_KEY to enable them")
+	}
+
 	hub := live.NewHub()
 	runner := roundhouse.NewAnsibleRunner()
-	disp := dispatch.New(store, runner, log, dispatch.WithPublisher(hub))
+	disp := dispatch.New(store, runner, log, dispatch.WithPublisher(hub),
+		dispatch.WithCredentials(bundle.Credentials(), sealer))
 	defer disp.Close()
 
 	scheduler := schedule.NewScheduler(schedules, disp, log,
@@ -113,7 +123,8 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		Addr: serveAddr,
 		Handler: server.New(store, disp, log, server.WithStreamer(hub),
 			server.WithCanceler(disp), server.WithRetrier(disp),
-			server.WithSchedules(schedules), server.WithTokens(bundle.Tokens())).Handler(),
+			server.WithSchedules(schedules), server.WithTokens(bundle.Tokens()),
+			server.WithCredentials(bundle.Credentials(), sealer)).Handler(),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 

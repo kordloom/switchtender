@@ -9,6 +9,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/dcadolph/yardmaster/internal/credential"
 	"github.com/dcadolph/yardmaster/internal/dispatch"
 	"github.com/dcadolph/yardmaster/internal/event"
 	"github.com/dcadolph/yardmaster/internal/run"
@@ -25,6 +26,8 @@ type createRunRequest struct {
 	Inventory string `json:"inventory"`
 	// Shards, when two or more, splits the run across that many inventory slices.
 	Shards int `json:"shards,omitempty"`
+	// CredentialIDs names stored credentials to materialize for the run.
+	CredentialIDs []string `json:"credential_ids,omitempty"`
 }
 
 // createPipelineRequest is the JSON body accepted by POST /pipelines.
@@ -35,6 +38,8 @@ type createPipelineRequest struct {
 	Inventory string `json:"inventory"`
 	// Steps is the ordered list of steps to run. Required, at least one.
 	Steps []run.PipelineStep `json:"steps"`
+	// CredentialIDs names stored credentials to materialize for every step.
+	CredentialIDs []string `json:"credential_ids,omitempty"`
 }
 
 // listRunsResponse wraps a run list. The envelope leaves room for pagination fields later.
@@ -195,11 +200,17 @@ func createRunHandler(submitter Submitter, log *zap.Logger) http.HandlerFunc {
 		var created *run.Run
 		var err error
 		if req.Shards >= 2 {
-			created, err = submitter.SubmitSplit(r.Context(), req.Playbook, req.Inventory, req.Shards)
+			created, err = submitter.SubmitSplit(r.Context(), req.Playbook, req.Inventory,
+				req.Shards, req.CredentialIDs...)
 		} else {
-			created, err = submitter.Submit(r.Context(), req.Playbook, req.Inventory)
+			created, err = submitter.Submit(r.Context(), req.Playbook, req.Inventory,
+				req.CredentialIDs...)
 		}
-		if err != nil {
+		switch {
+		case errors.Is(err, credential.ErrNotFound), errors.Is(err, credential.ErrNoKey):
+			respondError(w, log, http.StatusBadRequest, err.Error())
+			return
+		case err != nil:
 			log.Error("server: submit run: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not submit run")
 			return
@@ -232,8 +243,12 @@ func createPipelineHandler(submitter Submitter, log *zap.Logger) http.HandlerFun
 			}
 		}
 
-		created, err := submitter.SubmitPipeline(r.Context(), req.Name, req.Inventory, req.Steps)
+		created, err := submitter.SubmitPipeline(r.Context(), req.Name, req.Inventory, req.Steps,
+			req.CredentialIDs...)
 		switch {
+		case errors.Is(err, credential.ErrNotFound), errors.Is(err, credential.ErrNoKey):
+			respondError(w, log, http.StatusBadRequest, err.Error())
+			return
 		case errors.Is(err, dispatch.ErrUnnamedStep), errors.Is(err, dispatch.ErrDuplicateStep),
 			errors.Is(err, dispatch.ErrUnknownDependency), errors.Is(err, dispatch.ErrDependencyCycle):
 			respondError(w, log, http.StatusBadRequest, err.Error())

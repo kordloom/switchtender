@@ -93,6 +93,8 @@ type Run struct {
 	ClaimedAt *time.Time `json:"claimed_at,omitempty"`
 	// CancelRequested asks whichever process holds the run to stop it.
 	CancelRequested bool `json:"cancel_requested,omitempty"`
+	// CredentialIDs names the stored credentials materialized for this run.
+	CredentialIDs []string `json:"credential_ids,omitempty"`
 }
 
 // Clone returns a deep copy so callers cannot mutate stored state through shared pointers.
@@ -139,6 +141,7 @@ func (r *Run) Clone() *Run {
 		t := *r.ClaimedAt
 		out.ClaimedAt = &t
 	}
+	out.CredentialIDs = append([]string(nil), r.CredentialIDs...)
 	return &out
 }
 

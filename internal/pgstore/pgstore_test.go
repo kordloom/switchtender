@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"github.com/dcadolph/yardmaster/internal/auth"
 	"github.com/dcadolph/yardmaster/internal/authtest"
+	"github.com/dcadolph/yardmaster/internal/credential"
+	"github.com/dcadolph/yardmaster/internal/credtest"
 	"os"
 	"testing"
 
@@ -96,5 +98,32 @@ func truncateTokens(t *testing.T, dsn string) {
 	defer func() { _ = db.Close() }()
 	if _, err := db.Exec("TRUNCATE tokens"); err != nil {
 		t.Fatalf("truncate tokens: %v", err)
+	}
+}
+
+func TestCredentialStoreContract(t *testing.T) {
+	dsn := testDSN(t)
+	db, err := pgstore.Open(dsn)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	credtest.Contract(t, func() credential.Store {
+		truncateCredentials(t, dsn)
+		return db.Credentials()
+	})
+}
+
+// truncateCredentials clears the credentials table between contract subtests.
+func truncateCredentials(t *testing.T, dsn string) {
+	t.Helper()
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatalf("open postgres: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	if _, err := db.Exec("TRUNCATE credentials"); err != nil {
+		t.Fatalf("truncate credentials: %v", err)
 	}
 }

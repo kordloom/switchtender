@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"github.com/dcadolph/yardmaster/internal/auth"
 	"github.com/dcadolph/yardmaster/internal/authtest"
+	"github.com/dcadolph/yardmaster/internal/credential"
+	"github.com/dcadolph/yardmaster/internal/credtest"
 	"path/filepath"
 	"testing"
 	"time"
@@ -137,5 +139,17 @@ func TestTokenStoreContract(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = db.Close() })
 		return db.Tokens()
+	})
+}
+
+func TestCredentialStoreContract(t *testing.T) {
+	t.Parallel()
+	credtest.Contract(t, func() credential.Store {
+		db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "yardmaster.db"))
+		if err != nil {
+			t.Fatalf("Open() error = %v", err)
+		}
+		t.Cleanup(func() { _ = db.Close() })
+		return db.Credentials()
 	})
 }
