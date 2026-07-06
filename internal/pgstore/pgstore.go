@@ -14,6 +14,7 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
+	"github.com/dcadolph/yardmaster/internal/auth"
 	"github.com/dcadolph/yardmaster/internal/event"
 	"github.com/dcadolph/yardmaster/internal/run"
 	"github.com/dcadolph/yardmaster/internal/schedule"
@@ -97,6 +98,14 @@ CREATE TABLE IF NOT EXISTS schedules (
 	last_run_id TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_schedules_created ON schedules(created_at, id);
+CREATE TABLE IF NOT EXISTS tokens (
+	id           TEXT PRIMARY KEY,
+	name         TEXT NOT NULL DEFAULT '',
+	hash         TEXT NOT NULL,
+	created_at   TEXT NOT NULL,
+	last_used_at TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tokens_hash ON tokens(hash);
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS claimed_by TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS claimed_at TEXT;
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS cancel_requested INTEGER NOT NULL DEFAULT 0;
@@ -121,6 +130,8 @@ type DB struct {
 	runs *store
 	// schedules is the schedule store.
 	schedules *scheduleStore
+	// tokens is the API token store.
+	tokens *tokenStore
 }
 
 // Open connects to the PostgreSQL database at dsn, applies the schema, and returns the bundled
@@ -138,7 +149,7 @@ func Open(dsn string) (*DB, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate schema: %w", err)
 	}
-	return &DB{db: db, runs: &store{db: db}, schedules: &scheduleStore{db: db}}, nil
+	return &DB{db: db, runs: &store{db: db}, schedules: &scheduleStore{db: db}, tokens: &tokenStore{db: db}}, nil
 }
 
 // Runs returns the run store.
@@ -149,6 +160,11 @@ func (d *DB) Runs() run.Store {
 // Schedules returns the schedule store.
 func (d *DB) Schedules() schedule.Store {
 	return d.schedules
+}
+
+// Tokens returns the API token store.
+func (d *DB) Tokens() auth.Store {
+	return d.tokens
 }
 
 // Close closes the underlying database.

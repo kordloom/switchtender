@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 
+	"github.com/dcadolph/yardmaster/internal/auth"
 	"github.com/dcadolph/yardmaster/internal/dispatch"
 	"github.com/dcadolph/yardmaster/internal/live"
 	"github.com/dcadolph/yardmaster/internal/logutil"
@@ -62,21 +63,25 @@ func init() {
 		"How often the scheduler checks for due schedules.")
 }
 
-// openStores opens the run and schedule stores for the --db value: a postgres:// or
-// postgresql:// DSN selects the PostgreSQL backend, anything else is a SQLite file path.
-func openStores(db string) (run.Store, schedule.Store, func() error, error) {
+// storeBundle is the store set both database backends expose.
+type storeBundle interface {
+	// Runs returns the run store.
+	Runs() run.Store
+	// Schedules returns the schedule store.
+	Schedules() schedule.Store
+	// Tokens returns the API token store.
+	Tokens() auth.Store
+	// Close closes the underlying database.
+	Close() error
+}
+
+// openBundle opens the stores for the --db value: a postgres:// or postgresql:// DSN selects the
+// PostgreSQL backend, anything else is a SQLite file path.
+func openBundle(db string) (storeBundle, error) {
 	if strings.HasPrefix(db, "postgres://") || strings.HasPrefix(db, "postgresql://") {
-		pg, err := pgstore.Open(db)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		return pg.Runs(), pg.Schedules(), pg.Close, nil
+		return pgstore.Open(db)
 	}
-	lite, err := sqlitestore.Open(db)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	return lite.Runs(), lite.Schedules(), lite.Close, nil
+	return sqlitestore.Open(db)
 }
 
 // runServe builds the server dependencies and serves until interrupted.
@@ -87,11 +92,12 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	}
 	defer func() { _ = log.Sync() }()
 
-	store, schedules, closeStores, err := openStores(serveDB)
+	bundle, err := openBundle(serveDB)
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
-	defer func() { _ = closeStores() }()
+	defer func() { _ = bundle.Close() }()
+	store, schedules := bundle.Runs(), bundle.Schedules()
 
 	hub := live.NewHub()
 	runner := roundhouse.NewAnsibleRunner()
@@ -107,7 +113,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		Addr: serveAddr,
 		Handler: server.New(store, disp, log, server.WithStreamer(hub),
 			server.WithCanceler(disp), server.WithRetrier(disp),
-			server.WithSchedules(schedules)).Handler(),
+			server.WithSchedules(schedules), server.WithTokens(bundle.Tokens())).Handler(),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 

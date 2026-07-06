@@ -44,11 +44,12 @@ func runWorker(cmd *cobra.Command, _ []string) error {
 	}
 	defer func() { _ = log.Sync() }()
 
-	store, _, closeStores, err := openStores(workerDB)
+	bundle, err := openBundle(workerDB)
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
-	defer func() { _ = closeStores() }()
+	defer func() { _ = bundle.Close() }()
+	store := bundle.Runs()
 
 	opts := []dispatch.Option{}
 	if workerName != "" {

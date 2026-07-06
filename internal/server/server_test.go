@@ -13,6 +13,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/dcadolph/yardmaster/internal/auth"
 	"github.com/dcadolph/yardmaster/internal/dispatch"
 	"github.com/dcadolph/yardmaster/internal/live"
 	"github.com/dcadolph/yardmaster/internal/run"
@@ -801,5 +802,66 @@ func TestNewPanicsOnNilDeps(t *testing.T) {
 			}()
 			New(test.Store, test.Submitter, zap.NewNop())
 		})
+	}
+}
+
+func TestAuthGate(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	tokens := auth.NewMemStore()
+	handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(), WithTokens(tokens)).Handler()
+
+	get := func(path, bearer string) int {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		if bearer != "" {
+			req.Header.Set("Authorization", "Bearer "+bearer)
+		}
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		return rec.Code
+	}
+
+	// Open mode: no tokens exist, everything passes.
+	if code := get("/runs", ""); code != http.StatusOK {
+		t.Fatalf("open mode /runs = %d, want 200", code)
+	}
+
+	plain, tok, err := auth.New("ci")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := tokens.Save(ctx, tok); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	// The enforcement cache holds the open answer briefly; a fresh handler sees the token now.
+	handler = New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(), WithTokens(tokens)).Handler()
+
+	if code := get("/runs", ""); code != http.StatusUnauthorized {
+		t.Errorf("no token = %d, want 401", code)
+	}
+	if code := get("/runs", "ymt_wrong"); code != http.StatusUnauthorized {
+		t.Errorf("wrong token = %d, want 401", code)
+	}
+	if code := get("/runs", plain); code != http.StatusOK {
+		t.Errorf("good token = %d, want 200", code)
+	}
+	if code := get("/healthz", ""); code != http.StatusOK {
+		t.Errorf("healthz = %d, want 200 exempt", code)
+	}
+	if code := get("/ui/", ""); code != http.StatusOK {
+		t.Errorf("ui shell = %d, want 200 exempt", code)
+	}
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/auth/check", nil))
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("auth check without token = %d, want 401", rec.Code)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/auth/check", nil)
+	req.Header.Set("Authorization", "Bearer "+plain)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Errorf("auth check with token = %d, want 204", rec.Code)
 	}
 }

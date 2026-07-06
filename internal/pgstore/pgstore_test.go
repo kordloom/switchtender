@@ -2,6 +2,8 @@ package pgstore_test
 
 import (
 	"database/sql"
+	"github.com/dcadolph/yardmaster/internal/auth"
+	"github.com/dcadolph/yardmaster/internal/authtest"
 	"os"
 	"testing"
 
@@ -68,4 +70,31 @@ func TestScheduleStoreContract(t *testing.T) {
 		truncateAll(t, dsn)
 		return db.Schedules()
 	})
+}
+
+func TestTokenStoreContract(t *testing.T) {
+	dsn := testDSN(t)
+	db, err := pgstore.Open(dsn)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	authtest.Contract(t, func() auth.Store {
+		truncateTokens(t, dsn)
+		return db.Tokens()
+	})
+}
+
+// truncateTokens clears the tokens table between contract subtests.
+func truncateTokens(t *testing.T, dsn string) {
+	t.Helper()
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatalf("open postgres: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	if _, err := db.Exec("TRUNCATE tokens"); err != nil {
+		t.Fatalf("truncate tokens: %v", err)
+	}
 }

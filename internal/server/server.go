@@ -7,6 +7,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/dcadolph/yardmaster/internal/auth"
 	"github.com/dcadolph/yardmaster/internal/live"
 	"github.com/dcadolph/yardmaster/internal/run"
 	"github.com/dcadolph/yardmaster/internal/schedule"
@@ -59,6 +60,12 @@ func WithSchedules(store schedule.Store) Option {
 	return func(srv *Server) { srv.schedules = store }
 }
 
+// WithTokens guards the API with bearer tokens from the given store. The API stays open until the
+// first token exists.
+func WithTokens(tokens auth.Store) Option {
+	return func(srv *Server) { srv.tokens = tokens }
+}
+
 // Server wires the run store and submitter into an HTTP handler.
 type Server struct {
 	// store reads runs and their logs for the query endpoints.
@@ -77,6 +84,8 @@ type Server struct {
 	retrier Retrier
 	// schedules backs the schedule endpoints when configured.
 	schedules schedule.Store
+	// tokens backs API authentication when configured.
+	tokens auth.Store
 }
 
 // New returns a Server. It panics if store or submitter is nil; a nil logger becomes a no-op.
@@ -123,5 +132,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/ui/", http.StatusFound)
 	})
+	mux.Handle("POST /auth/check", authCheckHandler())
+	if s.tokens != nil {
+		gate := &authGate{tokens: s.tokens, log: s.log}
+		return gate.wrap(mux)
+	}
 	return mux
 }
