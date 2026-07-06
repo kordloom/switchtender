@@ -248,16 +248,14 @@ func createPipelineHandler(submitter Submitter, log *zap.Logger) http.HandlerFun
 	}
 }
 
-// cancelRunHandler stops a pending or executing run.
+// cancelRunHandler stops a pending or executing run. The cancel request persists in the store so
+// the process holding the run honors it even when that is not this one; a local cancel is also
+// attempted for an immediate stop.
 func cancelRunHandler(store run.Store, canceler Canceler, log *zap.Logger) http.HandlerFunc {
 	if store == nil {
 		panic("server: cancelRunHandler: Store required")
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
-		if canceler == nil {
-			respondError(w, log, http.StatusNotFound, "cancellation not enabled")
-			return
-		}
 		id := r.PathValue("id")
 		existing, err := store.Get(r.Context(), id)
 		if errors.Is(err, run.ErrNotFound) {
@@ -273,9 +271,13 @@ func cancelRunHandler(store run.Store, canceler Canceler, log *zap.Logger) http.
 			respondError(w, log, http.StatusConflict, "run already finished")
 			return
 		}
-		if !canceler.Cancel(id) {
-			respondError(w, log, http.StatusConflict, "run is not cancelable")
+		if err := store.RequestCancel(r.Context(), id); err != nil {
+			log.Error("server: cancel run: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not cancel run")
 			return
+		}
+		if canceler != nil {
+			canceler.Cancel(id)
 		}
 		respondJSON(w, log, http.StatusAccepted,
 			map[string]string{"status": "canceling"}, wantsPretty(r))

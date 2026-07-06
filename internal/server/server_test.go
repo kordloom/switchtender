@@ -614,13 +614,13 @@ func TestCancelRun(t *testing.T) {
 			Name: "unknown", Store: run.NewMemStore(), Canceler: &fakeCanceler{ok: true},
 			Path: "/runs/none/cancel", WantStatus: http.StatusNotFound,
 		},
-		{ // Test 3: A run the dispatcher cannot cancel conflicts.
-			Name: "not cancelable", Store: seed(run.StatusRunning), Canceler: &fakeCanceler{ok: false},
-			Path: "/runs/run_1/cancel", WantStatus: http.StatusConflict,
+		{ // Test 3: A run another process holds still accepts, the store carries the request.
+			Name: "held elsewhere", Store: seed(run.StatusRunning), Canceler: &fakeCanceler{ok: false},
+			Path: "/runs/run_1/cancel", WantStatus: http.StatusAccepted,
 		},
-		{ // Test 4: Cancellation disabled is not found.
-			Name: "disabled", Store: seed(run.StatusRunning), Canceler: nil,
-			Path: "/runs/run_1/cancel", WantStatus: http.StatusNotFound,
+		{ // Test 4: No local canceler still accepts through the store.
+			Name: "store only", Store: seed(run.StatusRunning), Canceler: nil,
+			Path: "/runs/run_1/cancel", WantStatus: http.StatusAccepted,
 		},
 	}
 	for testNum, test := range tests {
