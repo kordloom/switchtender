@@ -52,6 +52,9 @@ var serveDB string
 // scheduleInterval holds the value of the --schedule-interval flag.
 var scheduleInterval time.Duration
 
+// notifyWebhooks holds the values of the repeatable --notify-webhook flag.
+var notifyWebhooks []string
+
 // serveCmd runs the Yardmaster HTTP server (the dispatcher).
 var serveCmd = &cobra.Command{
 	Use:   "serve",
@@ -66,6 +69,8 @@ func init() {
 		"SQLite file path, or a postgres:// DSN for the PostgreSQL backend.")
 	serveCmd.Flags().DurationVar(&scheduleInterval, "schedule-interval", defaultScheduleInterval,
 		"How often the scheduler checks for due schedules.")
+	serveCmd.Flags().StringArrayVar(&notifyWebhooks, "notify-webhook", nil,
+		"URL that receives a JSON notification when a run finishes. Repeatable.")
 }
 
 // storeBundle is the store set both database backends expose.
@@ -133,7 +138,8 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	}
 	disp := dispatch.New(store, runner, log, dispatch.WithPublisher(hub),
 		dispatch.WithCredentials(bundle.Credentials(), sealer),
-		dispatch.WithProjects(bundle.Projects(), syncer))
+		dispatch.WithProjects(bundle.Projects(), syncer),
+		dispatch.WithWebhooks(notifyWebhooks))
 	defer disp.Close()
 
 	scheduler := schedule.NewScheduler(schedules, disp, log,

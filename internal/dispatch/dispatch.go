@@ -104,6 +104,8 @@ type Dispatcher struct {
 	projects project.Store
 	// syncer maintains project checkouts.
 	syncer *project.Syncer
+	// webhooks receive terminal run notifications.
+	webhooks []string
 }
 
 // Option configures a Dispatcher.
@@ -127,6 +129,8 @@ type config struct {
 	projects project.Store
 	// syncer maintains project checkouts.
 	syncer *project.Syncer
+	// webhooks receive terminal run notifications.
+	webhooks []string
 }
 
 // WithWorkers sets the worker pool size. Values below one fall back to DefaultWorkers.
@@ -196,6 +200,7 @@ func New(store run.Store, runner roundhouse.Runner, log *zap.Logger, opts ...Opt
 		sealer:        cfg.sealer,
 		projects:      cfg.projects,
 		syncer:        cfg.syncer,
+		webhooks:      cfg.webhooks,
 	}
 	d.wg.Add(2)
 	go d.claimLoop()
@@ -924,7 +929,8 @@ func (d *Dispatcher) Cancel(id string) bool {
 	return ok
 }
 
-// finalize records the terminal status, exit code, failure detail, and end time of r.
+// finalize records the terminal status, exit code, failure detail, and end time of r, and sends
+// webhook notifications for top-level runs.
 func (d *Dispatcher) finalize(r *run.Run, status run.Status, exitCode *int, failure string) {
 	ended := time.Now()
 	r.Status = status
@@ -932,6 +938,7 @@ func (d *Dispatcher) finalize(r *run.Run, status run.Status, exitCode *int, fail
 	r.Error = failure
 	r.EndedAt = &ended
 	d.save(r)
+	d.notify(r)
 }
 
 // save persists r using a background context so terminal state is recorded even during shutdown.

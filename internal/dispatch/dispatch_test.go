@@ -2,9 +2,12 @@ package dispatch
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"sync"
@@ -723,5 +726,48 @@ func TestNewPanicsOnNilDeps(t *testing.T) {
 			}()
 			New(test.Store, test.Runner, nil)
 		})
+	}
+}
+
+func TestDispatcherNotifiesWebhook(t *testing.T) {
+	t.Parallel()
+	received := make(chan string, 4)
+	hook := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var n struct {
+			Event string `json:"event"`
+			Run   struct {
+				ID     string `json:"id"`
+				Status string `json:"status"`
+			} `json:"run"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&n); err == nil {
+			received <- n.Event + ":" + n.Run.ID + ":" + n.Run.Status
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer hook.Close()
+
+	store := run.NewMemStore()
+	runner := roundhouse.RunnerFunc(
+		func(context.Context, roundhouse.Spec, io.Writer) (roundhouse.Result, error) {
+			return roundhouse.Result{ExitCode: 0}, nil
+		})
+	d := New(store, runner, nil, WithWebhooks([]string{hook.URL}))
+	defer d.Close()
+
+	created, err := d.Submit(context.Background(), "play.yml", "inv")
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+	waitTerminal(t, store, created.ID)
+
+	select {
+	case got := <-received:
+		want := "run.finished:" + created.ID + ":succeeded"
+		if got != want {
+			t.Errorf("notification = %q, want %q", got, want)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("webhook never received the notification")
 	}
 }
