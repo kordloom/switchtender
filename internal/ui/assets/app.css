@@ -169,6 +169,10 @@ textarea.input { resize: vertical; font-size: 12.5px; }
 select.input[multiple] { padding: 4px; }
 @media (max-width: 900px) { .launch-grid { grid-template-columns: 1fr; } }
 
+.alt-auth { margin-top: 18px; }
+.alt-auth summary { cursor: pointer; font-size: 13px; }
+.alt-auth .stack { margin-top: 10px; }
+
 /* Host matrix */
 .matrix-scroll { overflow: auto; max-height: 72vh; border: 1px solid var(--border); border-radius: var(--radius); }
 table.matrix { border-collapse: separate; border-spacing: 0; }

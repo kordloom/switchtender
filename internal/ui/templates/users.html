@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Users - Yardmaster</title>
+	<link rel="icon" type="image/png" href="/ui/assets/favicon.png">
+	<link rel="stylesheet" href="/ui/assets/app.css">
+</head>
+<body data-page="users">
+	<header class="topbar">
+		<div class="brand"><a href="/ui/"><img class="brand-logo" src="/ui/assets/logo.png" alt="">Yardmaster</a></div>
+		<div class="tagline">Users</div>
+	</header>
+
+	<main class="content">
+		<a class="back" href="/ui/">Back to runs</a>
+		<h1>Users</h1>
+		<p class="muted">Viewers read, operators launch and stop work, admins manage everything.</p>
+
+		<section class="panel">
+			<div class="panel-head"><h2>Add a user</h2></div>
+			<form id="user-form" class="launch-grid">
+				<label class="field-label">Username
+					<input id="user-name" class="input" autocomplete="off" required>
+				</label>
+				<label class="field-label">Password
+					<input id="user-password" class="input" type="password" autocomplete="new-password" required>
+				</label>
+				<label class="field-label">Role
+					<select id="user-role" class="input">
+						<option value="viewer">Viewer</option>
+						<option value="operator" selected>Operator</option>
+						<option value="admin">Admin</option>
+					</select>
+				</label>
+				<div class="launch-actions">
+					<button type="submit" class="button primary">Save</button>
+					<span id="user-status" class="muted"></span>
+				</div>
+			</form>
+		</section>
+
+		<div id="status" class="muted">Loading users.</div>
+		<table class="runs" hidden>
+			<thead>
+				<tr>
+					<th>Username</th>
+					<th>Role</th>
+					<th>Created</th>
+					<th></th>
+				</tr>
+			</thead>
+			<tbody id="users"></tbody>
+		</table>
+	</main>
+
+	<script src="/ui/assets/app.js"></script>
+</body>
+</html>

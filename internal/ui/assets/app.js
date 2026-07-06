@@ -33,8 +33,24 @@ document.addEventListener("DOMContentLoaded", () => {
 	} else if (page === "jobtemplates") {
 		wireTemplateForm();
 		loadTemplates();
+	} else if (page === "users") {
+		wireUserForm();
+		loadUsers();
 	}
+	hideAdminNav();
 });
+
+// hideAdminNav hides management links from signed in non-admins. The server enforces the real
+// policy; this only trims the menu.
+function hideAdminNav() {
+	const role = localStorage.getItem("ym_role");
+	if (!role || role === "admin") return;
+	for (const a of document.querySelectorAll(".nav a")) {
+		if (["/ui/credentials", "/ui/projects", "/ui/users"].includes(a.getAttribute("href"))) {
+			a.remove();
+		}
+	}
+}
 
 // apiToken returns the stored API token, empty when the server runs open.
 function apiToken() {
@@ -727,10 +743,34 @@ function streamURL(path) {
 	return token ? path + "?access_token=" + encodeURIComponent(token) : path;
 }
 
-// loadLogin wires the sign in form: verify the token against the API, store it, and return.
+// loadLogin wires both sign in forms: account login mints a session token, and the raw token
+// form verifies a pasted token against the API.
 function loadLogin() {
-	const form = document.getElementById("login-form");
-	form.addEventListener("submit", async (e) => {
+	document.getElementById("account-form").addEventListener("submit", async (e) => {
+		e.preventDefault();
+		try {
+			const res = await fetch("/auth/login", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					username: document.getElementById("username-input").value.trim(),
+					password: document.getElementById("password-input").value,
+				}),
+			});
+			if (!res.ok) {
+				setStatus("Sign in failed. Check the username and password.");
+				return;
+			}
+			const session = await res.json();
+			localStorage.setItem("ym_token", session.token);
+			localStorage.setItem("ym_role", session.role);
+			localStorage.setItem("ym_user", session.username);
+			location.href = sessionStorage.getItem("ym_return") || "/ui/";
+		} catch (err) {
+			setStatus("Sign in failed: " + err.message);
+		}
+	});
+	document.getElementById("login-form").addEventListener("submit", async (e) => {
 		e.preventDefault();
 		const token = document.getElementById("token-input").value.trim();
 		if (!token) return;
@@ -739,11 +779,60 @@ function loadLogin() {
 		});
 		if (res.status === 204) {
 			localStorage.setItem("ym_token", token);
+			localStorage.removeItem("ym_role");
+			localStorage.removeItem("ym_user");
 			location.href = sessionStorage.getItem("ym_return") || "/ui/";
 			return;
 		}
 		setStatus("That token was not accepted.");
 	});
+}
+
+// wireUserForm hooks the add user form up to POST /users.
+function wireUserForm() {
+	document.getElementById("user-form").addEventListener("submit", async (e) => {
+		e.preventDefault();
+		const status = document.getElementById("user-status");
+		try {
+			await postAction("/users", {
+				username: document.getElementById("user-name").value.trim(),
+				password: document.getElementById("user-password").value,
+				role: document.getElementById("user-role").value,
+			});
+			document.getElementById("user-name").value = "";
+			document.getElementById("user-password").value = "";
+			status.textContent = "Saved.";
+			document.getElementById("users").innerHTML = "";
+			loadUsers();
+		} catch (err) {
+			status.textContent = "Save failed: " + err.message;
+		}
+	});
+}
+
+// loadUsers populates the user table with delete actions.
+async function loadUsers() {
+	try {
+		const data = await getJSON("/users");
+		const users = data.users || [];
+		if (users.length === 0) {
+			setStatus("No users yet.");
+			return;
+		}
+		const tbody = document.getElementById("users");
+		for (const u of users) {
+			const tr = document.createElement("tr");
+			tr.appendChild(td(u.username));
+			tr.appendChild(td(u.role, "mono"));
+			tr.appendChild(td(fmtTime(u.created_at)));
+			tr.appendChild(deleteCell("/users/" + u.id, "user " + u.username, tr));
+			tbody.appendChild(tr);
+		}
+		setStatus("");
+		document.querySelector("table.runs").hidden = false;
+	} catch (e) {
+		setStatus("Failed to load users: " + e.message);
+	}
 }
 
 // wireActions hooks up the cancel and retry buttons for the run being viewed.

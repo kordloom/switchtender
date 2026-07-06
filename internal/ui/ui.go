@@ -55,6 +55,7 @@ func (u *UI) Handler() http.Handler {
 	mux.HandleFunc("GET /ui/hosts/{host}", u.host)
 	mux.HandleFunc("GET /ui/tasks", u.tasks)
 	mux.HandleFunc("GET /ui/login", u.login)
+	mux.HandleFunc("GET /ui/users", u.users)
 	mux.HandleFunc("GET /ui/credentials", u.credentials)
 	mux.HandleFunc("GET /ui/projects", u.projects)
 	mux.HandleFunc("GET /ui/templates", u.jobTemplates)
@@ -101,6 +102,11 @@ func (u *UI) projects(w http.ResponseWriter, _ *http.Request) {
 // jobTemplates renders the job template management page.
 func (u *UI) jobTemplates(w http.ResponseWriter, _ *http.Request) {
 	u.render(w, "jobtemplates.html", nil)
+}
+
+// users renders the account management page.
+func (u *UI) users(w http.ResponseWriter, _ *http.Request) {
+	u.render(w, "users.html", nil)
 }
 
 // login renders the token sign in page.
