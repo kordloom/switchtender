@@ -30,8 +30,9 @@ func testSaveGet(t *testing.T, store schedule.Store) {
 	next := time.Date(2026, 7, 6, 1, 0, 0, 0, time.UTC)
 	want := &schedule.Schedule{
 		ID: "sch_1", Name: "nightly", Cron: "0 2 * * *", Inventory: "hosts",
-		Steps:   []run.PipelineStep{{Name: "one", Playbook: "one.yml", ContinueOnFailure: true}},
-		Enabled: true, CreatedAt: time.Date(2026, 7, 5, 0, 0, 0, 0, time.UTC), NextRunAt: &next,
+		Steps:      []run.PipelineStep{{Name: "one", Playbook: "one.yml", ContinueOnFailure: true}},
+		TemplateID: "tpl_x",
+		Enabled:    true, CreatedAt: time.Date(2026, 7, 5, 0, 0, 0, 0, time.UTC), NextRunAt: &next,
 	}
 	if err := store.Save(ctx, want); err != nil {
 		t.Fatalf("Save() error = %v", err)

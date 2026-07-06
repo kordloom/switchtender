@@ -6,7 +6,10 @@ import (
 	"testing"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/dcadolph/yardmaster/internal/run"
+	"github.com/dcadolph/yardmaster/internal/template"
 )
 
 // fakeSubmitter records how it was fired for scheduler tests.
@@ -123,5 +126,40 @@ func TestSchedulerFireRouting(t *testing.T) {
 				t.Errorf("kind = %q, want %q", sub.kind, test.WantKind)
 			}
 		})
+	}
+}
+
+func TestSchedulerFiresTemplate(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := NewMemStore()
+	templates := template.NewMemStore()
+	if err := templates.Save(ctx, &template.Template{
+		ID: "tpl_1", Name: "preset", Playbook: "preset.yml", Inventory: "inv.ini",
+		CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("Save template error = %v", err)
+	}
+	past := time.Now().Add(-time.Minute)
+	if err := store.Save(ctx, &Schedule{
+		ID: "sch_t", Cron: "@every 1h", TemplateID: "tpl_1", Enabled: true,
+		CreatedAt: time.Now(), NextRunAt: &past,
+	}); err != nil {
+		t.Fatalf("Save schedule error = %v", err)
+	}
+
+	sub := &fakeSubmitter{runID: "run_t"}
+	s := NewScheduler(store, sub, zap.NewNop(), WithTemplates(templates))
+	s.tick(time.Now())
+
+	if sub.calls != 1 || sub.kind != "single" {
+		t.Fatalf("calls = %d kind = %q, want one single submit", sub.calls, sub.kind)
+	}
+	got, err := store.Get(ctx, "sch_t")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.LastRunID != "run_t" {
+		t.Errorf("LastRunID = %q, want run_t", got.LastRunID)
 	}
 }

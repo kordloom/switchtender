@@ -12,7 +12,7 @@ import (
 
 // scheduleColumns is the shared select list for schedule reads.
 const scheduleColumns = `id, name, cron, playbook, inventory, shards, steps, enabled,
-	created_at, next_run_at, last_run_at, last_run_id`
+	created_at, next_run_at, last_run_at, last_run_id, template_id`
 
 // scheduleStore is a schedule.Store backed by the shared PostgreSQL database.
 type scheduleStore struct {
@@ -29,17 +29,18 @@ func (s *scheduleStore) Save(ctx context.Context, sc *schedule.Schedule) error {
 	const q = `
 INSERT INTO schedules
 	(id, name, cron, playbook, inventory, shards, steps, enabled, created_at,
-	 next_run_at, last_run_at, last_run_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+	 next_run_at, last_run_at, last_run_id, template_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 ON CONFLICT(id) DO UPDATE SET
 	name=excluded.name, cron=excluded.cron, playbook=excluded.playbook,
 	inventory=excluded.inventory, shards=excluded.shards, steps=excluded.steps,
 	enabled=excluded.enabled, created_at=excluded.created_at, next_run_at=excluded.next_run_at,
-	last_run_at=excluded.last_run_at, last_run_id=excluded.last_run_id`
+	last_run_at=excluded.last_run_at, last_run_id=excluded.last_run_id,
+	template_id=excluded.template_id`
 	_, err = s.db.ExecContext(ctx, q,
 		sc.ID, sc.Name, sc.Cron, sc.Playbook, sc.Inventory, sc.Shards, string(steps),
 		boolInt(sc.Enabled), formatTime(sc.CreatedAt), nullTime(sc.NextRunAt), nullTime(sc.LastRunAt),
-		sc.LastRunID,
+		sc.LastRunID, sc.TemplateID,
 	)
 	if err != nil {
 		return fmt.Errorf("save schedule: %w", err)
@@ -110,7 +111,8 @@ func scanSchedule(sc scanner) (*schedule.Schedule, error) {
 		lastRun sql.NullString
 	)
 	if err := sc.Scan(&out.ID, &out.Name, &out.Cron, &out.Playbook, &out.Inventory, &out.Shards,
-		&steps, &enabled, &created, &nextRun, &lastRun, &out.LastRunID); err != nil {
+		&steps, &enabled, &created, &nextRun, &lastRun, &out.LastRunID,
+		&out.TemplateID); err != nil {
 		return nil, err
 	}
 	out.Enabled = enabled != 0

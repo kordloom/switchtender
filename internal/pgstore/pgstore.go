@@ -104,7 +104,8 @@ CREATE TABLE IF NOT EXISTS schedules (
 	created_at  TEXT NOT NULL,
 	next_run_at TEXT,
 	last_run_at TEXT,
-	last_run_id TEXT NOT NULL DEFAULT ''
+	last_run_id TEXT NOT NULL DEFAULT '',
+	template_id TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_schedules_created ON schedules(created_at, id);
 CREATE TABLE IF NOT EXISTS users (
@@ -164,6 +165,7 @@ ALTER TABLE runs ADD COLUMN IF NOT EXISTS project_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS commit_sha TEXT NOT NULL DEFAULT '';
 ALTER TABLE tokens ADD COLUMN IF NOT EXISTS user_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS inventory_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE schedules ADD COLUMN IF NOT EXISTS template_id TEXT NOT NULL DEFAULT '';
 `
 
 // store is a run.Store backed by a PostgreSQL database.

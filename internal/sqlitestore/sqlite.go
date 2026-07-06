@@ -104,7 +104,8 @@ CREATE TABLE IF NOT EXISTS schedules (
 	created_at  TEXT NOT NULL,
 	next_run_at TEXT,
 	last_run_at TEXT,
-	last_run_id TEXT NOT NULL DEFAULT ''
+	last_run_id TEXT NOT NULL DEFAULT '',
+	template_id TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_schedules_created ON schedules(created_at, id);
 CREATE TABLE IF NOT EXISTS users (
@@ -173,6 +174,7 @@ var alterations = []string{
 	"ALTER TABLE runs ADD COLUMN commit_sha TEXT NOT NULL DEFAULT ''",
 	"ALTER TABLE tokens ADD COLUMN user_id TEXT NOT NULL DEFAULT ''",
 	"ALTER TABLE runs ADD COLUMN inventory_id TEXT NOT NULL DEFAULT ''",
+	"ALTER TABLE schedules ADD COLUMN template_id TEXT NOT NULL DEFAULT ''",
 	"ALTER TABLE run_host_summary ADD COLUMN duration_seconds REAL NOT NULL DEFAULT 0",
 }
 
