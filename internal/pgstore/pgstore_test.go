@@ -2,6 +2,14 @@ package pgstore_test
 
 import (
 	"database/sql"
+	"github.com/dcadolph/yardmaster/internal/auth"
+	"github.com/dcadolph/yardmaster/internal/authtest"
+	"github.com/dcadolph/yardmaster/internal/credential"
+	"github.com/dcadolph/yardmaster/internal/credtest"
+	"github.com/dcadolph/yardmaster/internal/project"
+	"github.com/dcadolph/yardmaster/internal/projecttest"
+	"github.com/dcadolph/yardmaster/internal/template"
+	"github.com/dcadolph/yardmaster/internal/templatetest"
 	"os"
 	"testing"
 
@@ -68,4 +76,112 @@ func TestScheduleStoreContract(t *testing.T) {
 		truncateAll(t, dsn)
 		return db.Schedules()
 	})
+}
+
+func TestTokenStoreContract(t *testing.T) {
+	dsn := testDSN(t)
+	db, err := pgstore.Open(dsn)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	authtest.Contract(t, func() auth.Store {
+		truncateTokens(t, dsn)
+		return db.Tokens()
+	})
+}
+
+// truncateTokens clears the tokens table between contract subtests.
+func truncateTokens(t *testing.T, dsn string) {
+	t.Helper()
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatalf("open postgres: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	if _, err := db.Exec("TRUNCATE tokens"); err != nil {
+		t.Fatalf("truncate tokens: %v", err)
+	}
+}
+
+func TestCredentialStoreContract(t *testing.T) {
+	dsn := testDSN(t)
+	db, err := pgstore.Open(dsn)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	credtest.Contract(t, func() credential.Store {
+		truncateCredentials(t, dsn)
+		return db.Credentials()
+	})
+}
+
+// truncateCredentials clears the credentials table between contract subtests.
+func truncateCredentials(t *testing.T, dsn string) {
+	t.Helper()
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatalf("open postgres: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	if _, err := db.Exec("TRUNCATE credentials"); err != nil {
+		t.Fatalf("truncate credentials: %v", err)
+	}
+}
+
+func TestProjectStoreContract(t *testing.T) {
+	dsn := testDSN(t)
+	db, err := pgstore.Open(dsn)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	projecttest.Contract(t, func() project.Store {
+		truncateProjects(t, dsn)
+		return db.Projects()
+	})
+}
+
+// truncateProjects clears the projects table between contract subtests.
+func truncateProjects(t *testing.T, dsn string) {
+	t.Helper()
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatalf("open postgres: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	if _, err := db.Exec("TRUNCATE projects"); err != nil {
+		t.Fatalf("truncate projects: %v", err)
+	}
+}
+
+func TestTemplateStoreContract(t *testing.T) {
+	dsn := testDSN(t)
+	db, err := pgstore.Open(dsn)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	templatetest.Contract(t, func() template.Store {
+		truncateTemplates(t, dsn)
+		return db.Templates()
+	})
+}
+
+// truncateTemplates clears the templates table between contract subtests.
+func truncateTemplates(t *testing.T, dsn string) {
+	t.Helper()
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatalf("open postgres: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	if _, err := db.Exec("TRUNCATE templates"); err != nil {
+		t.Fatalf("truncate templates: %v", err)
+	}
 }

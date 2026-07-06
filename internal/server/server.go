@@ -7,17 +7,21 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/dcadolph/yardmaster/internal/auth"
+	"github.com/dcadolph/yardmaster/internal/credential"
 	"github.com/dcadolph/yardmaster/internal/live"
+	"github.com/dcadolph/yardmaster/internal/project"
 	"github.com/dcadolph/yardmaster/internal/run"
 	"github.com/dcadolph/yardmaster/internal/schedule"
+	"github.com/dcadolph/yardmaster/internal/template"
 	"github.com/dcadolph/yardmaster/internal/ui"
 )
 
 // Submitter accepts a run request and returns the created run. The dispatcher satisfies it.
 type Submitter interface {
-	Submit(ctx context.Context, playbook, inventory string) (*run.Run, error)
-	SubmitSplit(ctx context.Context, playbook, inventory string, shards int) (*run.Run, error)
-	SubmitPipeline(ctx context.Context, name, inventory string, steps []run.PipelineStep) (*run.Run, error)
+	Submit(ctx context.Context, playbook, inventory string, opts ...run.SubmitOption) (*run.Run, error)
+	SubmitSplit(ctx context.Context, playbook, inventory string, shards int, opts ...run.SubmitOption) (*run.Run, error)
+	SubmitPipeline(ctx context.Context, name, inventory string, steps []run.PipelineStep, opts ...run.SubmitOption) (*run.Run, error)
 }
 
 // Streamer subscribes to a run's live output. The live Hub satisfies it.
@@ -59,6 +63,30 @@ func WithSchedules(store schedule.Store) Option {
 	return func(srv *Server) { srv.schedules = store }
 }
 
+// WithTokens guards the API with bearer tokens from the given store. The API stays open until the
+// first token exists.
+func WithTokens(tokens auth.Store) Option {
+	return func(srv *Server) { srv.tokens = tokens }
+}
+
+// WithTemplates enables the template endpoints backed by the given store.
+func WithTemplates(store template.Store) Option {
+	return func(srv *Server) { srv.templates = store }
+}
+
+// WithProjects enables the project endpoints backed by the given store.
+func WithProjects(store project.Store) Option {
+	return func(srv *Server) { srv.projects = store }
+}
+
+// WithCredentials enables the credential endpoints backed by the given store and sealer.
+func WithCredentials(store credential.Store, sealer *credential.Sealer) Option {
+	return func(srv *Server) {
+		srv.credentials = store
+		srv.sealer = sealer
+	}
+}
+
 // Server wires the run store and submitter into an HTTP handler.
 type Server struct {
 	// store reads runs and their logs for the query endpoints.
@@ -77,6 +105,16 @@ type Server struct {
 	retrier Retrier
 	// schedules backs the schedule endpoints when configured.
 	schedules schedule.Store
+	// tokens backs API authentication when configured.
+	tokens auth.Store
+	// credentials backs the credential endpoints when configured.
+	credentials credential.Store
+	// sealer encrypts credential secrets.
+	sealer *credential.Sealer
+	// projects backs the project endpoints when configured.
+	projects project.Store
+	// templates backs the template endpoints when configured.
+	templates template.Store
 }
 
 // New returns a Server. It panics if store or submitter is nil; a nil logger becomes a no-op.
@@ -101,6 +139,7 @@ func New(store run.Store, submitter Submitter, log *zap.Logger, opts ...Option) 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("GET /healthz", healthHandler())
+	mux.Handle("GET /metrics", metricsHandler(s.store, s.log))
 	mux.Handle("GET /fleet", fleetHandler(s.store, s.log))
 	mux.Handle("GET /hosts/{host}/runs", hostHistoryHandler(s.store, s.log))
 	mux.Handle("GET /tasks", taskTrendsHandler(s.store, s.log))
@@ -123,5 +162,20 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/ui/", http.StatusFound)
 	})
+	mux.Handle("POST /auth/check", authCheckHandler())
+	mux.Handle("POST /credentials", createCredentialHandler(s.credentials, s.sealer, s.log))
+	mux.Handle("GET /credentials", listCredentialsHandler(s.credentials, s.log))
+	mux.Handle("DELETE /credentials/{id}", deleteCredentialHandler(s.credentials, s.log))
+	mux.Handle("POST /projects", createProjectHandler(s.projects, s.log))
+	mux.Handle("GET /projects", listProjectsHandler(s.projects, s.log))
+	mux.Handle("DELETE /projects/{id}", deleteProjectHandler(s.projects, s.log))
+	mux.Handle("POST /templates", createTemplateHandler(s.templates, s.log))
+	mux.Handle("GET /templates", listTemplatesHandler(s.templates, s.log))
+	mux.Handle("DELETE /templates/{id}", deleteTemplateHandler(s.templates, s.log))
+	mux.Handle("POST /templates/{id}/launch", launchTemplateHandler(s.templates, s.submitter, s.log))
+	if s.tokens != nil {
+		gate := &authGate{tokens: s.tokens, log: s.log}
+		return gate.wrap(mux)
+	}
 	return mux
 }

@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -13,15 +15,19 @@ import (
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 
+	"github.com/dcadolph/yardmaster/internal/auth"
+	"github.com/dcadolph/yardmaster/internal/credential"
 	"github.com/dcadolph/yardmaster/internal/dispatch"
 	"github.com/dcadolph/yardmaster/internal/live"
 	"github.com/dcadolph/yardmaster/internal/logutil"
 	"github.com/dcadolph/yardmaster/internal/pgstore"
+	"github.com/dcadolph/yardmaster/internal/project"
 	"github.com/dcadolph/yardmaster/internal/roundhouse"
 	"github.com/dcadolph/yardmaster/internal/run"
 	"github.com/dcadolph/yardmaster/internal/schedule"
 	"github.com/dcadolph/yardmaster/internal/server"
 	"github.com/dcadolph/yardmaster/internal/sqlitestore"
+	"github.com/dcadolph/yardmaster/internal/template"
 )
 
 const (
@@ -46,6 +52,9 @@ var serveDB string
 // scheduleInterval holds the value of the --schedule-interval flag.
 var scheduleInterval time.Duration
 
+// notifyWebhooks holds the values of the repeatable --notify-webhook flag.
+var notifyWebhooks []string
+
 // serveCmd runs the Yardmaster HTTP server (the dispatcher).
 var serveCmd = &cobra.Command{
 	Use:   "serve",
@@ -60,23 +69,45 @@ func init() {
 		"SQLite file path, or a postgres:// DSN for the PostgreSQL backend.")
 	serveCmd.Flags().DurationVar(&scheduleInterval, "schedule-interval", defaultScheduleInterval,
 		"How often the scheduler checks for due schedules.")
+	serveCmd.Flags().StringArrayVar(&notifyWebhooks, "notify-webhook", nil,
+		"URL that receives a JSON notification when a run finishes. Repeatable.")
 }
 
-// openStores opens the run and schedule stores for the --db value: a postgres:// or
-// postgresql:// DSN selects the PostgreSQL backend, anything else is a SQLite file path.
-func openStores(db string) (run.Store, schedule.Store, func() error, error) {
+// storeBundle is the store set both database backends expose.
+type storeBundle interface {
+	// Runs returns the run store.
+	Runs() run.Store
+	// Schedules returns the schedule store.
+	Schedules() schedule.Store
+	// Tokens returns the API token store.
+	Tokens() auth.Store
+	// Credentials returns the execution secret store.
+	Credentials() credential.Store
+	// Projects returns the git project store.
+	Projects() project.Store
+	// Templates returns the job template store.
+	Templates() template.Store
+	// Close closes the underlying database.
+	Close() error
+}
+
+// openBundle opens the stores for the --db value: a postgres:// or postgresql:// DSN selects the
+// PostgreSQL backend, anything else is a SQLite file path.
+func openBundle(db string) (storeBundle, error) {
 	if strings.HasPrefix(db, "postgres://") || strings.HasPrefix(db, "postgresql://") {
-		pg, err := pgstore.Open(db)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		return pg.Runs(), pg.Schedules(), pg.Close, nil
+		return pgstore.Open(db)
 	}
-	lite, err := sqlitestore.Open(db)
+	return sqlitestore.Open(db)
+}
+
+// projectCacheDir returns where project checkouts live: the user cache directory when available,
+// the system temp directory otherwise.
+func projectCacheDir() string {
+	base, err := os.UserCacheDir()
 	if err != nil {
-		return nil, nil, nil, err
+		base = os.TempDir()
 	}
-	return lite.Runs(), lite.Schedules(), lite.Close, nil
+	return filepath.Join(base, "yardmaster", "projects")
 }
 
 // runServe builds the server dependencies and serves until interrupted.
@@ -87,22 +118,29 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	}
 	defer func() { _ = log.Sync() }()
 
-	store, schedules, closeStores, err := openStores(serveDB)
+	bundle, err := openBundle(serveDB)
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
-	defer func() { _ = closeStores() }()
+	defer func() { _ = bundle.Close() }()
+	store, schedules := bundle.Runs(), bundle.Schedules()
+
+	sealer := credential.NewSealer(os.Getenv("YARDMASTER_ENCRYPTION_KEY"))
+	if !sealer.Enabled() {
+		log.Warn("credentials disabled: set YARDMASTER_ENCRYPTION_KEY to enable them")
+	}
 
 	hub := live.NewHub()
 	runner := roundhouse.NewAnsibleRunner()
-	disp := dispatch.New(store, runner, log, dispatch.WithPublisher(hub))
-	defer disp.Close()
-
-	if n, err := disp.Reconcile(context.Background()); err != nil {
-		log.Warn("reconcile interrupted runs: " + err.Error())
-	} else if n > 0 {
-		log.Info("reconciled interrupted runs", zap.Int("count", n))
+	syncer, err := project.NewSyncer(projectCacheDir())
+	if err != nil {
+		return fmt.Errorf("project cache: %w", err)
 	}
+	disp := dispatch.New(store, runner, log, dispatch.WithPublisher(hub),
+		dispatch.WithCredentials(bundle.Credentials(), sealer),
+		dispatch.WithProjects(bundle.Projects(), syncer),
+		dispatch.WithWebhooks(notifyWebhooks))
+	defer disp.Close()
 
 	scheduler := schedule.NewScheduler(schedules, disp, log,
 		schedule.WithInterval(scheduleInterval))
@@ -113,7 +151,10 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		Addr: serveAddr,
 		Handler: server.New(store, disp, log, server.WithStreamer(hub),
 			server.WithCanceler(disp), server.WithRetrier(disp),
-			server.WithSchedules(schedules)).Handler(),
+			server.WithSchedules(schedules), server.WithTokens(bundle.Tokens()),
+			server.WithCredentials(bundle.Credentials(), sealer),
+			server.WithProjects(bundle.Projects()),
+			server.WithTemplates(bundle.Templates())).Handler(),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 

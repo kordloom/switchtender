@@ -87,6 +87,18 @@ type Run struct {
 	ExtraVars map[string]any `json:"extra_vars,omitempty"`
 	// Outputs are the values the playbook published with set_stats for downstream steps.
 	Outputs map[string]any `json:"outputs,omitempty"`
+	// ClaimedBy names the process that leased this run for execution, empty while queued.
+	ClaimedBy string `json:"claimed_by,omitempty"`
+	// ClaimedAt is when the lease was taken or last renewed.
+	ClaimedAt *time.Time `json:"claimed_at,omitempty"`
+	// CancelRequested asks whichever process holds the run to stop it.
+	CancelRequested bool `json:"cancel_requested,omitempty"`
+	// CredentialIDs names the stored credentials materialized for this run.
+	CredentialIDs []string `json:"credential_ids,omitempty"`
+	// ProjectID names the git project the playbook and inventory paths resolve inside.
+	ProjectID string `json:"project_id,omitempty"`
+	// CommitSHA is the exact commit the run executed, stamped after the project sync.
+	CommitSHA string `json:"commit_sha,omitempty"`
 }
 
 // Clone returns a deep copy so callers cannot mutate stored state through shared pointers.
@@ -129,7 +141,42 @@ func (r *Run) Clone() *Run {
 	}
 	out.ExtraVars = maps.Clone(r.ExtraVars)
 	out.Outputs = maps.Clone(r.Outputs)
+	if r.ClaimedAt != nil {
+		t := *r.ClaimedAt
+		out.ClaimedAt = &t
+	}
+	out.CredentialIDs = append([]string(nil), r.CredentialIDs...)
 	return &out
+}
+
+// SubmitOption customizes a run at submission.
+type SubmitOption func(*Run)
+
+// WithCredentialIDs attaches stored credentials to the run.
+func WithCredentialIDs(ids []string) SubmitOption {
+	return func(r *Run) { r.CredentialIDs = append([]string(nil), ids...) }
+}
+
+// WithProject sources the run's playbook and inventory paths from a git project.
+func WithProject(id string) SubmitOption {
+	return func(r *Run) { r.ProjectID = id }
+}
+
+// WithExtraVars injects variables into the run.
+func WithExtraVars(vars map[string]any) SubmitOption {
+	return func(r *Run) {
+		if len(vars) == 0 {
+			return
+		}
+		r.ExtraVars = maps.Clone(vars)
+	}
+}
+
+// ApplyOptions applies opts to r.
+func ApplyOptions(r *Run, opts []SubmitOption) {
+	for _, opt := range opts {
+		opt(r)
+	}
 }
 
 // NewID returns a random run identifier prefixed with "run_".

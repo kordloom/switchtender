@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Projects - Yardmaster</title>
+	<link rel="icon" type="image/png" href="/ui/assets/favicon.png">
+	<link rel="stylesheet" href="/ui/assets/app.css">
+</head>
+<body data-page="projects">
+	<header class="topbar">
+		<div class="brand"><a href="/ui/"><img class="brand-logo" src="/ui/assets/logo.png" alt="">Yardmaster</a></div>
+		<div class="tagline">Projects</div>
+	</header>
+
+	<main class="content">
+		<a class="back" href="/ui/">Back to runs</a>
+		<h1>Projects</h1>
+		<p class="muted">Playbooks sourced from git. Every run records the commit it executed.</p>
+
+		<section class="panel">
+			<div class="panel-head"><h2>Add a project</h2></div>
+			<form id="project-form" class="launch-grid">
+				<label class="field-label">Name
+					<input id="project-name" class="input" placeholder="site" required>
+				</label>
+				<label class="field-label">Repository URL
+					<input id="project-repo" class="input mono" placeholder="git@github.com:org/site.git" required>
+				</label>
+				<label class="field-label">Branch
+					<input id="project-branch" class="input mono" placeholder="main">
+				</label>
+				<label class="field-label">SSH credential
+					<select id="project-credential" class="input"><option value="">None</option></select>
+				</label>
+				<div class="launch-actions">
+					<button type="submit" class="button primary">Save</button>
+					<span id="project-status" class="muted"></span>
+				</div>
+			</form>
+		</section>
+
+		<div id="status" class="muted">Loading projects.</div>
+		<table class="runs" hidden>
+			<thead>
+				<tr>
+					<th>Name</th>
+					<th>Repository</th>
+					<th>Branch</th>
+					<th>Created</th>
+					<th></th>
+				</tr>
+			</thead>
+			<tbody id="projects"></tbody>
+		</table>
+	</main>
+
+	<script src="/ui/assets/app.js"></script>
+</body>
+</html>

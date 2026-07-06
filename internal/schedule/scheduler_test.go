@@ -20,21 +20,21 @@ type fakeSubmitter struct {
 }
 
 // Submit records a single submission.
-func (f *fakeSubmitter) Submit(context.Context, string, string) (*run.Run, error) {
+func (f *fakeSubmitter) Submit(context.Context, string, string, ...run.SubmitOption) (*run.Run, error) {
 	f.calls++
 	f.kind = "single"
 	return &run.Run{ID: f.runID}, nil
 }
 
 // SubmitSplit records a split submission.
-func (f *fakeSubmitter) SubmitSplit(context.Context, string, string, int) (*run.Run, error) {
+func (f *fakeSubmitter) SubmitSplit(context.Context, string, string, int, ...run.SubmitOption) (*run.Run, error) {
 	f.calls++
 	f.kind = "split"
 	return &run.Run{ID: f.runID}, nil
 }
 
 // SubmitPipeline records a pipeline submission.
-func (f *fakeSubmitter) SubmitPipeline(context.Context, string, string, []run.PipelineStep) (*run.Run, error) {
+func (f *fakeSubmitter) SubmitPipeline(context.Context, string, string, []run.PipelineStep, ...run.SubmitOption) (*run.Run, error) {
 	f.calls++
 	f.kind = "pipeline"
 	return &run.Run{ID: f.runID}, nil

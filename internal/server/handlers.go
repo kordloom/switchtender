@@ -9,8 +9,10 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/dcadolph/yardmaster/internal/credential"
 	"github.com/dcadolph/yardmaster/internal/dispatch"
 	"github.com/dcadolph/yardmaster/internal/event"
+	"github.com/dcadolph/yardmaster/internal/project"
 	"github.com/dcadolph/yardmaster/internal/run"
 )
 
@@ -25,6 +27,10 @@ type createRunRequest struct {
 	Inventory string `json:"inventory"`
 	// Shards, when two or more, splits the run across that many inventory slices.
 	Shards int `json:"shards,omitempty"`
+	// CredentialIDs names stored credentials to materialize for the run.
+	CredentialIDs []string `json:"credential_ids,omitempty"`
+	// ProjectID sources the playbook and inventory from a git project.
+	ProjectID string `json:"project_id,omitempty"`
 }
 
 // createPipelineRequest is the JSON body accepted by POST /pipelines.
@@ -35,6 +41,10 @@ type createPipelineRequest struct {
 	Inventory string `json:"inventory"`
 	// Steps is the ordered list of steps to run. Required, at least one.
 	Steps []run.PipelineStep `json:"steps"`
+	// CredentialIDs names stored credentials to materialize for every step.
+	CredentialIDs []string `json:"credential_ids,omitempty"`
+	// ProjectID sources every step's playbook from a git project.
+	ProjectID string `json:"project_id,omitempty"`
 }
 
 // listRunsResponse wraps a run list. The envelope leaves room for pagination fields later.
@@ -194,12 +204,22 @@ func createRunHandler(submitter Submitter, log *zap.Logger) http.HandlerFunc {
 
 		var created *run.Run
 		var err error
-		if req.Shards >= 2 {
-			created, err = submitter.SubmitSplit(r.Context(), req.Playbook, req.Inventory, req.Shards)
-		} else {
-			created, err = submitter.Submit(r.Context(), req.Playbook, req.Inventory)
+		opts := []run.SubmitOption{run.WithCredentialIDs(req.CredentialIDs)}
+		if req.ProjectID != "" {
+			opts = append(opts, run.WithProject(req.ProjectID))
 		}
-		if err != nil {
+		if req.Shards >= 2 {
+			created, err = submitter.SubmitSplit(r.Context(), req.Playbook, req.Inventory,
+				req.Shards, opts...)
+		} else {
+			created, err = submitter.Submit(r.Context(), req.Playbook, req.Inventory, opts...)
+		}
+		switch {
+		case errors.Is(err, credential.ErrNotFound), errors.Is(err, credential.ErrNoKey),
+			errors.Is(err, project.ErrNotFound):
+			respondError(w, log, http.StatusBadRequest, err.Error())
+			return
+		case err != nil:
 			log.Error("server: submit run: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not submit run")
 			return
@@ -232,8 +252,17 @@ func createPipelineHandler(submitter Submitter, log *zap.Logger) http.HandlerFun
 			}
 		}
 
-		created, err := submitter.SubmitPipeline(r.Context(), req.Name, req.Inventory, req.Steps)
+		popts := []run.SubmitOption{run.WithCredentialIDs(req.CredentialIDs)}
+		if req.ProjectID != "" {
+			popts = append(popts, run.WithProject(req.ProjectID))
+		}
+		created, err := submitter.SubmitPipeline(r.Context(), req.Name, req.Inventory, req.Steps,
+			popts...)
 		switch {
+		case errors.Is(err, credential.ErrNotFound), errors.Is(err, credential.ErrNoKey),
+			errors.Is(err, project.ErrNotFound):
+			respondError(w, log, http.StatusBadRequest, err.Error())
+			return
 		case errors.Is(err, dispatch.ErrUnnamedStep), errors.Is(err, dispatch.ErrDuplicateStep),
 			errors.Is(err, dispatch.ErrUnknownDependency), errors.Is(err, dispatch.ErrDependencyCycle):
 			respondError(w, log, http.StatusBadRequest, err.Error())
@@ -248,16 +277,14 @@ func createPipelineHandler(submitter Submitter, log *zap.Logger) http.HandlerFun
 	}
 }
 
-// cancelRunHandler stops a pending or executing run.
+// cancelRunHandler stops a pending or executing run. The cancel request persists in the store so
+// the process holding the run honors it even when that is not this one; a local cancel is also
+// attempted for an immediate stop.
 func cancelRunHandler(store run.Store, canceler Canceler, log *zap.Logger) http.HandlerFunc {
 	if store == nil {
 		panic("server: cancelRunHandler: Store required")
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
-		if canceler == nil {
-			respondError(w, log, http.StatusNotFound, "cancellation not enabled")
-			return
-		}
 		id := r.PathValue("id")
 		existing, err := store.Get(r.Context(), id)
 		if errors.Is(err, run.ErrNotFound) {
@@ -273,9 +300,13 @@ func cancelRunHandler(store run.Store, canceler Canceler, log *zap.Logger) http.
 			respondError(w, log, http.StatusConflict, "run already finished")
 			return
 		}
-		if !canceler.Cancel(id) {
-			respondError(w, log, http.StatusConflict, "run is not cancelable")
+		if err := store.RequestCancel(r.Context(), id); err != nil {
+			log.Error("server: cancel run: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not cancel run")
 			return
+		}
+		if canceler != nil {
+			canceler.Cancel(id)
 		}
 		respondJSON(w, log, http.StatusAccepted,
 			map[string]string{"status": "canceling"}, wantsPretty(r))

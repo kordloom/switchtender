@@ -13,6 +13,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/dcadolph/yardmaster/internal/auth"
 	"github.com/dcadolph/yardmaster/internal/dispatch"
 	"github.com/dcadolph/yardmaster/internal/live"
 	"github.com/dcadolph/yardmaster/internal/run"
@@ -80,7 +81,7 @@ type fakeSubmitter struct {
 }
 
 // Submit records the arguments and returns the configured run or error.
-func (f *fakeSubmitter) Submit(_ context.Context, playbook, inventory string) (*run.Run, error) {
+func (f *fakeSubmitter) Submit(_ context.Context, playbook, inventory string, _ ...run.SubmitOption) (*run.Run, error) {
 	f.gotPlaybook = playbook
 	f.gotInventory = inventory
 	if f.err != nil {
@@ -90,7 +91,7 @@ func (f *fakeSubmitter) Submit(_ context.Context, playbook, inventory string) (*
 }
 
 // SubmitSplit records the arguments including shard count and returns the configured run or error.
-func (f *fakeSubmitter) SubmitSplit(_ context.Context, playbook, inventory string, shards int) (*run.Run, error) {
+func (f *fakeSubmitter) SubmitSplit(_ context.Context, playbook, inventory string, shards int, _ ...run.SubmitOption) (*run.Run, error) {
 	f.gotPlaybook = playbook
 	f.gotInventory = inventory
 	f.gotShards = shards
@@ -101,7 +102,7 @@ func (f *fakeSubmitter) SubmitSplit(_ context.Context, playbook, inventory strin
 }
 
 // SubmitPipeline records the step count and returns the configured run or error.
-func (f *fakeSubmitter) SubmitPipeline(_ context.Context, name, inventory string, steps []run.PipelineStep) (*run.Run, error) {
+func (f *fakeSubmitter) SubmitPipeline(_ context.Context, name, inventory string, steps []run.PipelineStep, _ ...run.SubmitOption) (*run.Run, error) {
 	f.gotPlaybook = name
 	f.gotInventory = inventory
 	f.gotSteps = len(steps)
@@ -614,13 +615,13 @@ func TestCancelRun(t *testing.T) {
 			Name: "unknown", Store: run.NewMemStore(), Canceler: &fakeCanceler{ok: true},
 			Path: "/runs/none/cancel", WantStatus: http.StatusNotFound,
 		},
-		{ // Test 3: A run the dispatcher cannot cancel conflicts.
-			Name: "not cancelable", Store: seed(run.StatusRunning), Canceler: &fakeCanceler{ok: false},
-			Path: "/runs/run_1/cancel", WantStatus: http.StatusConflict,
+		{ // Test 3: A run another process holds still accepts, the store carries the request.
+			Name: "held elsewhere", Store: seed(run.StatusRunning), Canceler: &fakeCanceler{ok: false},
+			Path: "/runs/run_1/cancel", WantStatus: http.StatusAccepted,
 		},
-		{ // Test 4: Cancellation disabled is not found.
-			Name: "disabled", Store: seed(run.StatusRunning), Canceler: nil,
-			Path: "/runs/run_1/cancel", WantStatus: http.StatusNotFound,
+		{ // Test 4: No local canceler still accepts through the store.
+			Name: "store only", Store: seed(run.StatusRunning), Canceler: nil,
+			Path: "/runs/run_1/cancel", WantStatus: http.StatusAccepted,
 		},
 	}
 	for testNum, test := range tests {
@@ -801,5 +802,94 @@ func TestNewPanicsOnNilDeps(t *testing.T) {
 			}()
 			New(test.Store, test.Submitter, zap.NewNop())
 		})
+	}
+}
+
+func TestAuthGate(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	tokens := auth.NewMemStore()
+	handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(), WithTokens(tokens)).Handler()
+
+	get := func(path, bearer string) int {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		if bearer != "" {
+			req.Header.Set("Authorization", "Bearer "+bearer)
+		}
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		return rec.Code
+	}
+
+	// Open mode: no tokens exist, everything passes.
+	if code := get("/runs", ""); code != http.StatusOK {
+		t.Fatalf("open mode /runs = %d, want 200", code)
+	}
+
+	plain, tok, err := auth.New("ci")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := tokens.Save(ctx, tok); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	// The enforcement cache holds the open answer briefly; a fresh handler sees the token now.
+	handler = New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(), WithTokens(tokens)).Handler()
+
+	if code := get("/runs", ""); code != http.StatusUnauthorized {
+		t.Errorf("no token = %d, want 401", code)
+	}
+	if code := get("/runs", "ymt_wrong"); code != http.StatusUnauthorized {
+		t.Errorf("wrong token = %d, want 401", code)
+	}
+	if code := get("/runs", plain); code != http.StatusOK {
+		t.Errorf("good token = %d, want 200", code)
+	}
+	if code := get("/healthz", ""); code != http.StatusOK {
+		t.Errorf("healthz = %d, want 200 exempt", code)
+	}
+	if code := get("/ui/", ""); code != http.StatusOK {
+		t.Errorf("ui shell = %d, want 200 exempt", code)
+	}
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/auth/check", nil))
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("auth check without token = %d, want 401", rec.Code)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/auth/check", nil)
+	req.Header.Set("Authorization", "Bearer "+plain)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Errorf("auth check with token = %d, want 204", rec.Code)
+	}
+}
+
+func TestMetrics(t *testing.T) {
+	t.Parallel()
+	store := run.NewMemStore()
+	for i, status := range []run.Status{run.StatusSucceeded, run.StatusSucceeded, run.StatusFailed} {
+		if err := store.Save(context.Background(), &run.Run{
+			ID: fmt.Sprintf("run_%d", i), Status: status, CreatedAt: time.Now(),
+		}); err != nil {
+			t.Fatalf("Save() error = %v", err)
+		}
+	}
+	handler := New(store, &fakeSubmitter{}, zap.NewNop()).Handler()
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		`yardmaster_runs_total{status="succeeded"} 2`,
+		`yardmaster_runs_total{status="failed"} 1`,
+		"# TYPE yardmaster_runs_total gauge",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("metrics missing %q", want)
+		}
 	}
 }

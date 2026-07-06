@@ -14,9 +14,13 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
+	"github.com/dcadolph/yardmaster/internal/auth"
+	"github.com/dcadolph/yardmaster/internal/credential"
 	"github.com/dcadolph/yardmaster/internal/event"
+	"github.com/dcadolph/yardmaster/internal/project"
 	"github.com/dcadolph/yardmaster/internal/run"
 	"github.com/dcadolph/yardmaster/internal/schedule"
+	"github.com/dcadolph/yardmaster/internal/template"
 )
 
 // schema is the table layout created on open. It is idempotent so open doubles as migration.
@@ -41,7 +45,13 @@ CREATE TABLE IF NOT EXISTS runs (
 	retry_of      TEXT,
 	attempt       INTEGER NOT NULL DEFAULT 0,
 	extra_vars    TEXT NOT NULL DEFAULT '',
-	outputs       TEXT NOT NULL DEFAULT ''
+	outputs       TEXT NOT NULL DEFAULT '',
+	claimed_by    TEXT NOT NULL DEFAULT '',
+	claimed_at    TEXT,
+	cancel_requested INTEGER NOT NULL DEFAULT 0,
+	credential_ids TEXT NOT NULL DEFAULT '',
+	project_id    TEXT NOT NULL DEFAULT '',
+	commit_sha    TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_runs_created_at ON runs(created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_parent ON runs(parent_id, shard_index);
@@ -94,6 +104,46 @@ CREATE TABLE IF NOT EXISTS schedules (
 	last_run_id TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_schedules_created ON schedules(created_at, id);
+CREATE TABLE IF NOT EXISTS tokens (
+	id           TEXT PRIMARY KEY,
+	name         TEXT NOT NULL DEFAULT '',
+	hash         TEXT NOT NULL,
+	created_at   TEXT NOT NULL,
+	last_used_at TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tokens_hash ON tokens(hash);
+CREATE TABLE IF NOT EXISTS projects (
+	id            TEXT PRIMARY KEY,
+	name          TEXT NOT NULL DEFAULT '',
+	repo_url      TEXT NOT NULL,
+	branch        TEXT NOT NULL DEFAULT '',
+	credential_id TEXT NOT NULL DEFAULT '',
+	created_at    TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS templates (
+	id             TEXT PRIMARY KEY,
+	name           TEXT NOT NULL DEFAULT '',
+	project_id     TEXT NOT NULL DEFAULT '',
+	playbook       TEXT NOT NULL,
+	inventory      TEXT NOT NULL DEFAULT '',
+	shards         INTEGER NOT NULL DEFAULT 0,
+	credential_ids TEXT NOT NULL DEFAULT '',
+	extra_vars     TEXT NOT NULL DEFAULT '',
+	created_at     TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS credentials (
+	id         TEXT PRIMARY KEY,
+	name       TEXT NOT NULL DEFAULT '',
+	kind       TEXT NOT NULL,
+	secret     TEXT NOT NULL,
+	created_at TEXT NOT NULL
+);
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS claimed_by TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS claimed_at TEXT;
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS cancel_requested INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS credential_ids TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS project_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS commit_sha TEXT NOT NULL DEFAULT '';
 `
 
 // store is a run.Store backed by a PostgreSQL database.
@@ -115,6 +165,14 @@ type DB struct {
 	runs *store
 	// schedules is the schedule store.
 	schedules *scheduleStore
+	// tokens is the API token store.
+	tokens *tokenStore
+	// credentials is the execution secret store.
+	credentials *credentialStore
+	// projects is the git project store.
+	projects *projectStore
+	// templates is the job template store.
+	templates *templateStore
 }
 
 // Open connects to the PostgreSQL database at dsn, applies the schema, and returns the bundled
@@ -132,7 +190,10 @@ func Open(dsn string) (*DB, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate schema: %w", err)
 	}
-	return &DB{db: db, runs: &store{db: db}, schedules: &scheduleStore{db: db}}, nil
+	return &DB{db: db, runs: &store{db: db}, schedules: &scheduleStore{db: db}, tokens: &tokenStore{db: db},
+		credentials: &credentialStore{db: db},
+		projects:    &projectStore{db: db},
+		templates:   &templateStore{db: db}}, nil
 }
 
 // Runs returns the run store.
@@ -145,6 +206,26 @@ func (d *DB) Schedules() schedule.Store {
 	return d.schedules
 }
 
+// Tokens returns the API token store.
+func (d *DB) Tokens() auth.Store {
+	return d.tokens
+}
+
+// Credentials returns the execution secret store.
+func (d *DB) Credentials() credential.Store {
+	return d.credentials
+}
+
+// Projects returns the git project store.
+func (d *DB) Projects() project.Store {
+	return d.projects
+}
+
+// Templates returns the job template store.
+func (d *DB) Templates() template.Store {
+	return d.templates
+}
+
 // Close closes the underlying database.
 func (d *DB) Close() error {
 	return d.db.Close()
@@ -153,7 +234,8 @@ func (d *DB) Close() error {
 // runColumns is the shared select list so every read scans the same columns in the same order.
 const runColumns = `id, playbook, inventory, status, exit_code, error, created_at, started_at,
 	ended_at, parent_id, shard_index, shard_count, limit_pattern, kind, step_name, step_index,
-	retry_of, attempt, extra_vars, outputs`
+	retry_of, attempt, extra_vars, outputs, claimed_by, claimed_at, cancel_requested,
+	credential_ids, project_id, commit_sha`
 
 // Save inserts or replaces the run identified by r.ID.
 func (s *store) Save(ctx context.Context, r *run.Run) error {
@@ -161,8 +243,10 @@ func (s *store) Save(ctx context.Context, r *run.Run) error {
 INSERT INTO runs
 	(id, playbook, inventory, status, exit_code, error, created_at, started_at, ended_at,
 	 parent_id, shard_index, shard_count, limit_pattern, kind, step_name, step_index, retry_of,
-	 attempt, extra_vars, outputs)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+	 attempt, extra_vars, outputs, claimed_by, claimed_at, cancel_requested, credential_ids,
+	 project_id, commit_sha)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
+	$21, $22, $23, $24, $25, $26)
 ON CONFLICT(id) DO UPDATE SET
 	playbook=excluded.playbook, inventory=excluded.inventory, status=excluded.status,
 	exit_code=excluded.exit_code, error=excluded.error, created_at=excluded.created_at,
@@ -171,13 +255,16 @@ ON CONFLICT(id) DO UPDATE SET
 	shard_count=excluded.shard_count, limit_pattern=excluded.limit_pattern,
 	kind=excluded.kind, step_name=excluded.step_name, step_index=excluded.step_index,
 	retry_of=excluded.retry_of, attempt=excluded.attempt, extra_vars=excluded.extra_vars,
-	outputs=excluded.outputs`
+	outputs=excluded.outputs, claimed_by=excluded.claimed_by, claimed_at=excluded.claimed_at,
+	cancel_requested=excluded.cancel_requested, credential_ids=excluded.credential_ids,
+	project_id=excluded.project_id, commit_sha=excluded.commit_sha`
 	_, err := s.db.ExecContext(ctx, q,
 		r.ID, r.Playbook, r.Inventory, string(r.Status), nullInt(r.ExitCode), r.Error,
 		formatTime(r.CreatedAt), nullTime(r.StartedAt), nullTime(r.EndedAt),
 		nullString(r.ParentID), nullInt(r.ShardIndex), nullInt(r.ShardCount), r.Limit,
 		r.Kind, r.StepName, nullInt(r.StepIndex), nullString(r.RetryOf), r.Attempt,
-		jsonMap(r.ExtraVars), jsonMap(r.Outputs),
+		jsonMap(r.ExtraVars), jsonMap(r.Outputs), r.ClaimedBy, nullTime(r.ClaimedAt),
+		boolToInt(r.CancelRequested), joinIDs(r.CredentialIDs), r.ProjectID, r.CommitSHA,
 	)
 	if err != nil {
 		return fmt.Errorf("save run: %w", err)
@@ -637,12 +724,18 @@ func scanRun(s scanner) (*run.Run, error) {
 		retryOf  sql.NullString
 		extra    string
 		outputs  string
+		claimed  sql.NullString
+		cancelI  int
+		credIDs  string
 	)
 	if err := s.Scan(&r.ID, &r.Playbook, &r.Inventory, &status, &exit, &r.Error,
 		&created, &started, &ended, &parent, &shardIdx, &shardCnt, &r.Limit,
-		&r.Kind, &r.StepName, &stepIdx, &retryOf, &r.Attempt, &extra, &outputs); err != nil {
+		&r.Kind, &r.StepName, &stepIdx, &retryOf, &r.Attempt, &extra, &outputs,
+		&r.ClaimedBy, &claimed, &cancelI, &credIDs, &r.ProjectID, &r.CommitSHA); err != nil {
 		return nil, err
 	}
+	r.CancelRequested = cancelI != 0
+	r.CredentialIDs = splitIDs(credIDs)
 	r.Status = run.Status(status)
 	if exit.Valid {
 		v := int(exit.Int64)
@@ -685,7 +778,31 @@ func scanRun(s scanner) (*run.Run, error) {
 	if r.Outputs, err = parseMap(outputs); err != nil {
 		return nil, err
 	}
+	if r.ClaimedAt, err = parseNullTime(claimed); err != nil {
+		return nil, err
+	}
 	return &r, nil
+}
+
+// joinIDs renders an id list for storage, empty string for none.
+func joinIDs(ids []string) string {
+	return strings.Join(ids, ",")
+}
+
+// splitIDs parses a stored id list, nil for an empty string.
+func splitIDs(s string) []string {
+	if s == "" {
+		return nil
+	}
+	return strings.Split(s, ",")
+}
+
+// boolToInt maps a bool to a database integer.
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 // jsonMap renders a map as JSON for storage, empty string for an empty map.
@@ -756,4 +873,86 @@ func parseNullTime(s sql.NullString) (*time.Time, error) {
 		return nil, err
 	}
 	return &t, nil
+}
+
+// Claim leases the oldest unclaimed pending top-level plain run to owner and returns it. The row
+// is locked with SKIP LOCKED so concurrent workers never claim the same run.
+func (s *store) Claim(ctx context.Context, owner string) (*run.Run, error) {
+	const q = `
+UPDATE runs SET claimed_by=$1, claimed_at=$2
+WHERE id = (
+	SELECT id FROM runs
+	WHERE status='pending' AND claimed_by='' AND parent_id IS NULL AND kind=''
+	ORDER BY created_at, id LIMIT 1
+	FOR UPDATE SKIP LOCKED
+)
+RETURNING ` + runColumns
+	r, err := scanRun(s.db.QueryRowContext(ctx, q, owner, formatTime(time.Now())))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, run.ErrNonePending
+	}
+	if err != nil {
+		return nil, fmt.Errorf("claim run: %w", err)
+	}
+	return r, nil
+}
+
+// Heartbeat renews owner's lease on a run.
+func (s *store) Heartbeat(ctx context.Context, id, owner string) error {
+	res, err := s.db.ExecContext(ctx,
+		"UPDATE runs SET claimed_at=$1 WHERE id=$2 AND claimed_by=$3",
+		formatTime(time.Now()), id, owner)
+	if err != nil {
+		return fmt.Errorf("heartbeat: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("heartbeat: %w", err)
+	}
+	if n == 0 {
+		return run.ErrNotFound
+	}
+	return nil
+}
+
+// ReclaimStale requeues stale claimed pending runs and interrupts stale running runs.
+func (s *store) ReclaimStale(ctx context.Context, cutoff time.Time) (int, error) {
+	cut := formatTime(cutoff)
+	res, err := s.db.ExecContext(ctx, `
+UPDATE runs SET claimed_by='', claimed_at=NULL
+WHERE status='pending' AND claimed_by!='' AND claimed_at < $1`, cut)
+	if err != nil {
+		return 0, fmt.Errorf("reclaim stale: %w", err)
+	}
+	requeued, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("reclaim stale: %w", err)
+	}
+	res, err = s.db.ExecContext(ctx, `
+UPDATE runs SET status='interrupted', ended_at=$1, error='interrupted: executor lease expired'
+WHERE status='running' AND claimed_by!='' AND claimed_at < $2`, formatTime(time.Now()), cut)
+	if err != nil {
+		return 0, fmt.Errorf("reclaim stale: %w", err)
+	}
+	interrupted, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("reclaim stale: %w", err)
+	}
+	return int(requeued + interrupted), nil
+}
+
+// RequestCancel marks the run so whichever process holds it stops it.
+func (s *store) RequestCancel(ctx context.Context, id string) error {
+	res, err := s.db.ExecContext(ctx, "UPDATE runs SET cancel_requested=1 WHERE id=$1", id)
+	if err != nil {
+		return fmt.Errorf("request cancel: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("request cancel: %w", err)
+	}
+	if n == 0 {
+		return run.ErrNotFound
+	}
+	return nil
 }

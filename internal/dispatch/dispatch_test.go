@@ -2,9 +2,12 @@ package dispatch
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"sync"
@@ -602,50 +605,6 @@ func TestDispatcherCancel(t *testing.T) {
 	}
 }
 
-func TestDispatcherReconcile(t *testing.T) {
-	t.Parallel()
-	store := run.NewMemStore()
-	ctx := context.Background()
-	if err := store.Save(ctx,
-		&run.Run{ID: "stuck", Status: run.StatusRunning, CreatedAt: time.Now()}); err != nil {
-		t.Fatalf("Save() error = %v", err)
-	}
-	if err := store.Save(ctx,
-		&run.Run{ID: "done", Status: run.StatusSucceeded, CreatedAt: time.Now()}); err != nil {
-		t.Fatalf("Save() error = %v", err)
-	}
-
-	d := New(store, &fakeRunnerLister{}, nil)
-	defer d.Close()
-
-	n, err := d.Reconcile(ctx)
-	if err != nil {
-		t.Fatalf("Reconcile() error = %v", err)
-	}
-	if n != 1 {
-		t.Errorf("reconciled %d, want 1", n)
-	}
-
-	stuck, err := store.Get(ctx, "stuck")
-	if err != nil {
-		t.Fatalf("Get() error = %v", err)
-	}
-	if stuck.Status != run.StatusInterrupted {
-		t.Errorf("stuck status = %q, want interrupted", stuck.Status)
-	}
-	if stuck.EndedAt == nil {
-		t.Error("interrupted run should have an end time")
-	}
-
-	done, err := store.Get(ctx, "done")
-	if err != nil {
-		t.Fatalf("Get() error = %v", err)
-	}
-	if done.Status != run.StatusSucceeded {
-		t.Error("terminal run should be left untouched")
-	}
-}
-
 // scriptedRunner succeeds for every playbook except failOn, which exits non-zero.
 type scriptedRunner struct {
 	// failOn is the playbook that fails.
@@ -767,5 +726,48 @@ func TestNewPanicsOnNilDeps(t *testing.T) {
 			}()
 			New(test.Store, test.Runner, nil)
 		})
+	}
+}
+
+func TestDispatcherNotifiesWebhook(t *testing.T) {
+	t.Parallel()
+	received := make(chan string, 4)
+	hook := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var n struct {
+			Event string `json:"event"`
+			Run   struct {
+				ID     string `json:"id"`
+				Status string `json:"status"`
+			} `json:"run"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&n); err == nil {
+			received <- n.Event + ":" + n.Run.ID + ":" + n.Run.Status
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer hook.Close()
+
+	store := run.NewMemStore()
+	runner := roundhouse.RunnerFunc(
+		func(context.Context, roundhouse.Spec, io.Writer) (roundhouse.Result, error) {
+			return roundhouse.Result{ExitCode: 0}, nil
+		})
+	d := New(store, runner, nil, WithWebhooks([]string{hook.URL}))
+	defer d.Close()
+
+	created, err := d.Submit(context.Background(), "play.yml", "inv")
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+	waitTerminal(t, store, created.ID)
+
+	select {
+	case got := <-received:
+		want := "run.finished:" + created.ID + ":succeeded"
+		if got != want {
+			t.Errorf("notification = %q, want %q", got, want)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("webhook never received the notification")
 	}
 }

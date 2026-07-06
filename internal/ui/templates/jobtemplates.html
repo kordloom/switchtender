@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Templates - Yardmaster</title>
+	<link rel="icon" type="image/png" href="/ui/assets/favicon.png">
+	<link rel="stylesheet" href="/ui/assets/app.css">
+</head>
+<body data-page="jobtemplates">
+	<header class="topbar">
+		<div class="brand"><a href="/ui/"><img class="brand-logo" src="/ui/assets/logo.png" alt="">Yardmaster</a></div>
+		<div class="tagline">Templates</div>
+	</header>
+
+	<main class="content">
+		<a class="back" href="/ui/">Back to runs</a>
+		<h1>Templates</h1>
+		<p class="muted">Saved launch presets. One click runs the whole thing.</p>
+
+		<section class="panel">
+			<div class="panel-head"><h2>Add a template</h2></div>
+			<form id="template-form" class="launch-grid">
+				<label class="field-label">Name
+					<input id="tpl-name" class="input" placeholder="deploy production" required>
+				</label>
+				<label class="field-label">Project
+					<select id="tpl-project" class="input"><option value="">None, local paths</option></select>
+				</label>
+				<label class="field-label">Playbook
+					<input id="tpl-playbook" class="input mono" placeholder="plays/site.yml" required>
+				</label>
+				<label class="field-label">Inventory
+					<input id="tpl-inventory" class="input mono" placeholder="inventory.ini">
+				</label>
+				<label class="field-label">Shards
+					<input id="tpl-shards" class="input" type="number" min="0" max="64" placeholder="0">
+				</label>
+				<label class="field-label">Credentials
+					<select id="tpl-credentials" class="input" multiple size="3"></select>
+				</label>
+				<label class="field-label">Extra vars, JSON
+					<textarea id="tpl-vars" class="input mono" rows="2" placeholder='{"env": "prod"}'></textarea>
+				</label>
+				<div class="launch-actions">
+					<button type="submit" class="button primary">Save</button>
+					<span id="tpl-status" class="muted"></span>
+				</div>
+			</form>
+		</section>
+
+		<div id="status" class="muted">Loading templates.</div>
+		<table class="runs" hidden>
+			<thead>
+				<tr>
+					<th>Name</th>
+					<th>Playbook</th>
+					<th>Shards</th>
+					<th>Created</th>
+					<th></th>
+				</tr>
+			</thead>
+			<tbody id="templates"></tbody>
+		</table>
+	</main>
+
+	<script src="/ui/assets/app.js"></script>
+</body>
+</html>

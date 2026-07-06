@@ -10,6 +10,7 @@ document.addEventListener("DOMContentLoaded", () => {
 	}
 	const page = document.body.dataset.page;
 	if (page === "index") {
+		wireLaunchForm();
 		loadRuns();
 	} else if (page === "detail") {
 		loadDetail(document.body.dataset.runId);
@@ -21,12 +22,45 @@ document.addEventListener("DOMContentLoaded", () => {
 		loadTasks();
 	} else if (page === "schedules") {
 		loadSchedules();
+	} else if (page === "login") {
+		loadLogin();
+	} else if (page === "credentials") {
+		wireCredentialForm();
+		loadCredentials();
+	} else if (page === "projects") {
+		wireProjectForm();
+		loadProjects();
+	} else if (page === "jobtemplates") {
+		wireTemplateForm();
+		loadTemplates();
 	}
 });
 
-// getJSON fetches and decodes a JSON endpoint.
+// apiToken returns the stored API token, empty when the server runs open.
+function apiToken() {
+	return localStorage.getItem("ym_token") || "";
+}
+
+// authHeaders builds the Authorization header when a token is stored.
+function authHeaders() {
+	const token = apiToken();
+	return token ? { "Authorization": "Bearer " + token } : {};
+}
+
+// requireLogin sends the browser to the sign in page, remembering where it was.
+function requireLogin() {
+	if (document.body.dataset.page === "login") return;
+	sessionStorage.setItem("ym_return", location.pathname);
+	location.href = "/ui/login";
+}
+
+// getJSON fetches and decodes a JSON endpoint, redirecting to sign in on a 401.
 async function getJSON(url) {
-	const res = await fetch(url);
+	const res = await fetch(url, { headers: authHeaders() });
+	if (res.status === 401) {
+		requireLogin();
+		throw new Error("authentication required");
+	}
 	if (!res.ok) {
 		throw new Error(url + " returned " + res.status);
 	}
@@ -59,6 +93,285 @@ function fmtTime(iso) {
 	if (!iso) return "";
 	const d = new Date(iso);
 	return isNaN(d) ? iso : d.toLocaleString();
+}
+
+// wireLaunchForm hooks the launch panel up to POST /runs and fills the credential picker.
+function wireLaunchForm() {
+	const form = document.getElementById("launch-form");
+	if (!form) return;
+	fillCredentialPicker();
+	fillSelect(document.getElementById("launch-project"), "/projects", "projects", (p) => p.name);
+	form.addEventListener("submit", async (e) => {
+		e.preventDefault();
+		const status = document.getElementById("launch-status");
+		const payload = {
+			playbook: document.getElementById("launch-playbook").value.trim(),
+			inventory: document.getElementById("launch-inventory").value.trim(),
+		};
+		const projectID = document.getElementById("launch-project").value;
+		if (projectID) payload.project_id = projectID;
+		const shards = parseInt(document.getElementById("launch-shards").value, 10);
+		if (shards >= 2) payload.shards = shards;
+		const picked = Array.from(document.getElementById("launch-credentials").selectedOptions)
+			.map((o) => o.value);
+		if (picked.length) payload.credential_ids = picked;
+		status.textContent = "Launching.";
+		try {
+			const created = await postAction("/runs", payload);
+			location.href = "/ui/runs/" + created.id;
+		} catch (err) {
+			status.textContent = "Launch failed: " + err.message;
+		}
+	});
+}
+
+// fillCredentialPicker loads stored credentials into the launch multiselect.
+async function fillCredentialPicker() {
+	const picker = document.getElementById("launch-credentials");
+	if (!picker) return;
+	try {
+		const data = await getJSON("/credentials");
+		for (const c of data.credentials || []) {
+			const opt = document.createElement("option");
+			opt.value = c.id;
+			opt.textContent = c.name + " (" + c.kind + ")";
+			picker.appendChild(opt);
+		}
+	} catch (_) { /* credentials disabled or unauthorized; picker stays empty */ }
+}
+
+// wireCredentialForm hooks the add credential form up to POST /credentials.
+function wireCredentialForm() {
+	const form = document.getElementById("cred-form");
+	form.addEventListener("submit", async (e) => {
+		e.preventDefault();
+		const status = document.getElementById("cred-status");
+		const payload = {
+			name: document.getElementById("cred-name").value.trim(),
+			kind: document.getElementById("cred-kind").value,
+			secret: document.getElementById("cred-secret").value,
+		};
+		try {
+			await postAction("/credentials", payload);
+			document.getElementById("cred-name").value = "";
+			document.getElementById("cred-secret").value = "";
+			status.textContent = "Saved.";
+			document.getElementById("credentials").innerHTML = "";
+			loadCredentials();
+		} catch (err) {
+			status.textContent = "Save failed: " + err.message;
+		}
+	});
+}
+
+// loadCredentials populates the credential table with delete actions.
+async function loadCredentials() {
+	try {
+		const data = await getJSON("/credentials");
+		const creds = data.credentials || [];
+		if (creds.length === 0) {
+			setStatus("No credentials yet.");
+			return;
+		}
+		const tbody = document.getElementById("credentials");
+		for (const c of creds) {
+			const tr = document.createElement("tr");
+			tr.appendChild(td(c.name));
+			tr.appendChild(td(c.kind, "mono"));
+			tr.appendChild(td(fmtTime(c.created_at)));
+			const actions = document.createElement("td");
+			const del = document.createElement("button");
+			del.className = "button danger";
+			del.textContent = "Delete";
+			del.addEventListener("click", async (e) => {
+				e.preventDefault();
+				if (!window.confirm("Delete credential " + c.name + "?")) return;
+				try {
+					const res = await fetch("/credentials/" + c.id, {
+						method: "DELETE", headers: authHeaders(),
+					});
+					if (!res.ok) throw new Error("HTTP " + res.status);
+					tr.remove();
+				} catch (err) {
+					setStatus("Delete failed: " + err.message);
+				}
+			});
+			actions.appendChild(del);
+			tr.appendChild(actions);
+			tbody.appendChild(tr);
+		}
+		setStatus("");
+		document.querySelector("table.runs").hidden = false;
+	} catch (e) {
+		setStatus("Failed to load credentials: " + e.message);
+	}
+}
+
+// fillSelect loads options into a select from a list endpoint.
+async function fillSelect(el, url, listKey, labelFor) {
+	try {
+		const data = await getJSON(url);
+		for (const item of data[listKey] || []) {
+			const opt = document.createElement("option");
+			opt.value = item.id;
+			opt.textContent = labelFor(item);
+			el.appendChild(opt);
+		}
+	} catch (_) { /* feature disabled or unauthorized; the select keeps its defaults */ }
+}
+
+// wireProjectForm hooks the add project form up to POST /projects.
+function wireProjectForm() {
+	fillSelect(document.getElementById("project-credential"), "/credentials", "credentials",
+		(c) => c.name + " (" + c.kind + ")");
+	document.getElementById("project-form").addEventListener("submit", async (e) => {
+		e.preventDefault();
+		const status = document.getElementById("project-status");
+		try {
+			await postAction("/projects", {
+				name: document.getElementById("project-name").value.trim(),
+				repo_url: document.getElementById("project-repo").value.trim(),
+				branch: document.getElementById("project-branch").value.trim(),
+				credential_id: document.getElementById("project-credential").value,
+			});
+			status.textContent = "Saved.";
+			document.getElementById("projects").innerHTML = "";
+			loadProjects();
+		} catch (err) {
+			status.textContent = "Save failed: " + err.message;
+		}
+	});
+}
+
+// loadProjects populates the project table with delete actions.
+async function loadProjects() {
+	try {
+		const data = await getJSON("/projects");
+		const projects = data.projects || [];
+		if (projects.length === 0) {
+			setStatus("No projects yet.");
+			return;
+		}
+		const tbody = document.getElementById("projects");
+		for (const p of projects) {
+			const tr = document.createElement("tr");
+			tr.appendChild(td(p.name));
+			tr.appendChild(td(p.repo_url, "mono"));
+			tr.appendChild(td(p.branch || "default", "mono"));
+			tr.appendChild(td(fmtTime(p.created_at)));
+			tr.appendChild(deleteCell("/projects/" + p.id, "project " + p.name, tr));
+			tbody.appendChild(tr);
+		}
+		setStatus("");
+		document.querySelector("table.runs").hidden = false;
+	} catch (e) {
+		setStatus("Failed to load projects: " + e.message);
+	}
+}
+
+// wireTemplateForm hooks the add template form up to POST /templates.
+function wireTemplateForm() {
+	fillSelect(document.getElementById("tpl-project"), "/projects", "projects", (p) => p.name);
+	fillSelect(document.getElementById("tpl-credentials"), "/credentials", "credentials",
+		(c) => c.name + " (" + c.kind + ")");
+	document.getElementById("template-form").addEventListener("submit", async (e) => {
+		e.preventDefault();
+		const status = document.getElementById("tpl-status");
+		const payload = {
+			name: document.getElementById("tpl-name").value.trim(),
+			project_id: document.getElementById("tpl-project").value,
+			playbook: document.getElementById("tpl-playbook").value.trim(),
+			inventory: document.getElementById("tpl-inventory").value.trim(),
+		};
+		const shards = parseInt(document.getElementById("tpl-shards").value, 10);
+		if (shards >= 2) payload.shards = shards;
+		const picked = Array.from(document.getElementById("tpl-credentials").selectedOptions)
+			.map((o) => o.value);
+		if (picked.length) payload.credential_ids = picked;
+		const varsText = document.getElementById("tpl-vars").value.trim();
+		if (varsText) {
+			try {
+				payload.extra_vars = JSON.parse(varsText);
+			} catch (_) {
+				status.textContent = "Extra vars must be valid JSON.";
+				return;
+			}
+		}
+		try {
+			await postAction("/templates", payload);
+			status.textContent = "Saved.";
+			document.getElementById("templates").innerHTML = "";
+			loadTemplates();
+		} catch (err) {
+			status.textContent = "Save failed: " + err.message;
+		}
+	});
+}
+
+// loadTemplates populates the template table with launch and delete actions.
+async function loadTemplates() {
+	try {
+		const data = await getJSON("/templates");
+		const templates = data.templates || [];
+		if (templates.length === 0) {
+			setStatus("No templates yet.");
+			return;
+		}
+		const tbody = document.getElementById("templates");
+		for (const t of templates) {
+			const tr = document.createElement("tr");
+			tr.appendChild(td(t.name));
+			tr.appendChild(td(t.playbook, "mono"));
+			tr.appendChild(td(String(t.shards || 1)));
+			tr.appendChild(td(fmtTime(t.created_at)));
+			const actions = document.createElement("td");
+			const launch = document.createElement("button");
+			launch.className = "button primary";
+			launch.textContent = "Launch";
+			launch.addEventListener("click", async (e) => {
+				e.preventDefault();
+				launch.disabled = true;
+				try {
+					const created = await postAction("/templates/" + t.id + "/launch");
+					location.href = "/ui/runs/" + created.id;
+				} catch (err) {
+					setStatus("Launch failed: " + err.message);
+					launch.disabled = false;
+				}
+			});
+			actions.appendChild(launch);
+			actions.appendChild(document.createTextNode(" "));
+			const delBtn = deleteCell("/templates/" + t.id, "template " + t.name, tr);
+			actions.appendChild(delBtn.firstChild);
+			tr.appendChild(actions);
+			tbody.appendChild(tr);
+		}
+		setStatus("");
+		document.querySelector("table.runs").hidden = false;
+	} catch (e) {
+		setStatus("Failed to load templates: " + e.message);
+	}
+}
+
+// deleteCell builds a table cell holding a delete button for a resource.
+function deleteCell(path, label, tr) {
+	const cell = document.createElement("td");
+	const del = document.createElement("button");
+	del.className = "button danger";
+	del.textContent = "Delete";
+	del.addEventListener("click", async (e) => {
+		e.preventDefault();
+		if (!window.confirm("Delete " + label + "?")) return;
+		try {
+			const res = await fetch(path, { method: "DELETE", headers: authHeaders() });
+			if (!res.ok) throw new Error("HTTP " + res.status);
+			tr.remove();
+		} catch (err) {
+			setStatus("Delete failed: " + err.message);
+		}
+	});
+	cell.appendChild(del);
+	return cell;
 }
 
 // loadRuns populates the run history table.
@@ -387,13 +700,50 @@ async function loadDetail(runId) {
 }
 
 // postAction sends a POST to the API and returns the parsed JSON body, throwing on an error reply.
-async function postAction(path) {
-	const res = await fetch(path, { method: "POST" });
+async function postAction(path, payload) {
+	const opts = { method: "POST", headers: authHeaders() };
+	if (payload !== undefined) {
+		opts.headers["Content-Type"] = "application/json";
+		opts.body = JSON.stringify(payload);
+	}
+	const res = await fetch(path, opts);
+	if (res.status === 401) {
+		requireLogin();
+		throw new Error("authentication required");
+	}
+	if (res.status === 204) {
+		return {};
+	}
 	const body = await res.json().catch(() => ({}));
 	if (!res.ok) {
 		throw new Error(body.error || ("HTTP " + res.status));
 	}
 	return body;
+}
+
+// streamURL appends the stored token to a stream path, since EventSource cannot set headers.
+function streamURL(path) {
+	const token = apiToken();
+	return token ? path + "?access_token=" + encodeURIComponent(token) : path;
+}
+
+// loadLogin wires the sign in form: verify the token against the API, store it, and return.
+function loadLogin() {
+	const form = document.getElementById("login-form");
+	form.addEventListener("submit", async (e) => {
+		e.preventDefault();
+		const token = document.getElementById("token-input").value.trim();
+		if (!token) return;
+		const res = await fetch("/auth/check", {
+			method: "POST", headers: { "Authorization": "Bearer " + token },
+		});
+		if (res.status === 204) {
+			localStorage.setItem("ym_token", token);
+			location.href = sessionStorage.getItem("ym_return") || "/ui/";
+			return;
+		}
+		setStatus("That token was not accepted.");
+	});
 }
 
 // wireActions hooks up the cancel and retry buttons for the run being viewed.
@@ -449,7 +799,7 @@ async function loadPipeline(pipelineId) {
 // openPipelineStream refreshes the header and step list as step events arrive, coalescing bursts
 // into one refresh, and settles on the final state at the end signal.
 function openPipelineStream(pipelineId) {
-	const source = new EventSource("/runs/" + pipelineId + "/stream");
+	const source = new EventSource(streamURL("/runs/" + pipelineId + "/stream"));
 	let pending = null;
 	const refresh = async () => {
 		pending = null;
@@ -533,7 +883,7 @@ async function loadParent(parentId) {
 // openParentStream applies shard events to the merged matrix as they arrive. A stats event means a
 // shard finished, so the shard list refreshes, and the end signal settles the final state.
 function openParentStream(parentId) {
-	const source = new EventSource("/runs/" + parentId + "/stream");
+	const source = new EventSource(streamURL("/runs/" + parentId + "/stream"));
 	const refreshShards = async () => {
 		try {
 			const shardData = await getJSON("/runs/" + parentId + "/shards");
@@ -604,7 +954,7 @@ function openStream(runId) {
 	const indicator = document.getElementById("live-indicator");
 	if (indicator) indicator.hidden = false;
 
-	const source = new EventSource("/runs/" + runId + "/stream");
+	const source = new EventSource(streamURL("/runs/" + runId + "/stream"));
 	source.addEventListener("event", (e) => {
 		try {
 			detailState.events.push(JSON.parse(e.data));

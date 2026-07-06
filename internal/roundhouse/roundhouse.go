@@ -31,6 +31,10 @@ type Spec struct {
 	EventsPath string
 	// Limit restricts execution to a host pattern, passed as ansible-playbook --limit.
 	Limit string
+	// PrivateKeyPath, when set, is passed as ansible-playbook --private-key.
+	PrivateKeyPath string
+	// VaultPasswordFile, when set, is passed as ansible-playbook --vault-password-file.
+	VaultPasswordFile string
 }
 
 // Result is the outcome of a completed execution.
@@ -171,6 +175,12 @@ func (a *ansibleRunner) args(spec Spec) []string {
 		if data, err := json.Marshal(spec.ExtraVars); err == nil {
 			args = append(args, "--extra-vars", string(data))
 		}
+	}
+	if spec.PrivateKeyPath != "" {
+		args = append(args, "--private-key", spec.PrivateKeyPath)
+	}
+	if spec.VaultPasswordFile != "" {
+		args = append(args, "--vault-password-file", spec.VaultPasswordFile)
 	}
 	return append(args, spec.Playbook)
 }
