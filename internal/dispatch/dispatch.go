@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -29,6 +30,18 @@ const tailPollInterval = 75 * time.Millisecond
 
 // costWindow is how many recent runs per host feed the average duration used to balance splits.
 const costWindow = 5
+
+const (
+	// DefaultClaimInterval is how often an idle executor polls the store for pending runs.
+	DefaultClaimInterval = 250 * time.Millisecond
+	// watchInterval is how often an executing run renews its lease and checks for a cancel
+	// request from another process.
+	watchInterval = 3 * time.Second
+	// leaseTTL is how stale a lease may grow before the janitor treats its holder as dead.
+	leaseTTL = 30 * time.Second
+	// janitorInterval is how often stale leases are swept.
+	janitorInterval = 10 * time.Second
+)
 
 // Publisher receives live run output for streaming to clients. All methods must be safe for
 // concurrent use and must not block.
@@ -77,6 +90,10 @@ type Dispatcher struct {
 	cmu sync.Mutex
 	// cancels maps a pending or executing run id to its cancel func.
 	cancels map[string]context.CancelFunc
+	// owner identifies this process on the leases it takes.
+	owner string
+	// claimInterval is how often the claim loop polls when idle.
+	claimInterval time.Duration
 }
 
 // Option configures a Dispatcher.
@@ -88,6 +105,10 @@ type config struct {
 	workers int
 	// publisher receives live output for streaming.
 	publisher Publisher
+	// owner identifies this process on leases.
+	owner string
+	// claimInterval is how often the claim loop polls when idle.
+	claimInterval time.Duration
 }
 
 // WithWorkers sets the worker pool size. Values below one fall back to DefaultWorkers.
@@ -98,6 +119,16 @@ func WithWorkers(n int) Option {
 // WithPublisher sets the Publisher that receives live events and log chunks.
 func WithPublisher(p Publisher) Option {
 	return func(c *config) { c.publisher = p }
+}
+
+// WithOwner sets the name this process stamps on the runs it leases.
+func WithOwner(owner string) Option {
+	return func(c *config) { c.owner = owner }
+}
+
+// WithClaimInterval sets how often the claim loop polls the store when idle.
+func WithClaimInterval(d time.Duration) Option {
+	return func(c *config) { c.claimInterval = d }
 }
 
 // New returns a Dispatcher. It panics if store or runner is nil; a nil logger becomes a no-op.
@@ -122,19 +153,109 @@ func New(store run.Store, runner roundhouse.Runner, log *zap.Logger, opts ...Opt
 	if cfg.publisher == nil {
 		cfg.publisher = noopPublisher{}
 	}
+	if cfg.owner == "" {
+		cfg.owner = defaultOwner()
+	}
+	if cfg.claimInterval <= 0 {
+		cfg.claimInterval = DefaultClaimInterval
+	}
 
 	lister, _ := runner.(roundhouse.HostLister)
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Dispatcher{
-		store:      store,
-		runner:     runner,
-		log:        log,
-		sem:        make(chan struct{}, cfg.workers),
-		ctx:        ctx,
-		cancel:     cancel,
-		publisher:  cfg.publisher,
-		hostLister: lister,
-		cancels:    make(map[string]context.CancelFunc),
+	d := &Dispatcher{
+		store:         store,
+		runner:        runner,
+		log:           log,
+		sem:           make(chan struct{}, cfg.workers),
+		ctx:           ctx,
+		cancel:        cancel,
+		publisher:     cfg.publisher,
+		hostLister:    lister,
+		cancels:       make(map[string]context.CancelFunc),
+		owner:         cfg.owner,
+		claimInterval: cfg.claimInterval,
+	}
+	d.wg.Add(2)
+	go d.claimLoop()
+	go d.janitor()
+	return d
+}
+
+// defaultOwner builds a lease owner name from the host and process so leases are attributable.
+func defaultOwner() string {
+	host, err := os.Hostname()
+	if err != nil || host == "" {
+		host = "yardmaster"
+	}
+	return fmt.Sprintf("%s-%d", host, os.Getpid())
+}
+
+// Owner returns the name this process stamps on its leases.
+func (d *Dispatcher) Owner() string {
+	return d.owner
+}
+
+// claimLoop leases pending runs from the store and executes them, one claim per free worker slot,
+// until the dispatcher closes. Every process running a dispatcher takes part, so a lone server
+// executes its own queue and added workers simply compete for the same leases.
+func (d *Dispatcher) claimLoop() {
+	defer d.wg.Done()
+	for {
+		select {
+		case d.sem <- struct{}{}:
+		case <-d.ctx.Done():
+			return
+		}
+
+		r, err := d.store.Claim(d.ctx, d.owner)
+		if err != nil {
+			<-d.sem
+			if !errors.Is(err, run.ErrNonePending) && d.ctx.Err() == nil {
+				d.log.Error("dispatch: claim: " + err.Error())
+			}
+			select {
+			case <-time.After(d.claimInterval):
+			case <-d.ctx.Done():
+				return
+			}
+			continue
+		}
+
+		d.wg.Add(1)
+		go func() {
+			defer d.wg.Done()
+			defer func() { <-d.sem }()
+			d.executeLeased(d.ctx, r)
+		}()
+	}
+}
+
+// janitor sweeps stale leases so runs owned by dead processes requeue or resolve. It runs once
+// immediately, covering restarts, then on an interval.
+func (d *Dispatcher) janitor() {
+	defer d.wg.Done()
+	sweep := func() {
+		n, err := d.store.ReclaimStale(d.ctx, time.Now().Add(-leaseTTL))
+		if err != nil {
+			if d.ctx.Err() == nil {
+				d.log.Error("dispatch: reclaim stale: " + err.Error())
+			}
+			return
+		}
+		if n > 0 {
+			d.log.Info("dispatch: reclaimed stale runs", zap.Int("count", n))
+		}
+	}
+	sweep()
+	ticker := time.NewTicker(janitorInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-d.ctx.Done():
+			return
+		case <-ticker.C:
+			sweep()
+		}
 	}
 }
 
@@ -155,10 +276,7 @@ func (d *Dispatcher) Submit(ctx context.Context, playbook, inventory string) (*r
 	if err := d.store.Save(ctx, r); err != nil {
 		return nil, err
 	}
-
-	d.wg.Add(1)
-	go d.work(r.Clone())
-
+	// Execution happens through the claim loop, here or in any worker sharing the store.
 	return r, nil
 }
 
@@ -562,34 +680,6 @@ func (d *Dispatcher) Close() {
 	d.wg.Wait()
 }
 
-// Reconcile marks runs left non-terminal by a previous process as interrupted, since their owning
-// process is gone and they cannot resume. It returns the number reconciled and is meant to run once
-// at startup before serving.
-func (d *Dispatcher) Reconcile(ctx context.Context) (int, error) {
-	runs, err := d.store.NonTerminal(ctx)
-	if err != nil {
-		return 0, err
-	}
-	for _, r := range runs {
-		ended := time.Now()
-		r.Status = run.StatusInterrupted
-		r.EndedAt = &ended
-		if r.Error == "" {
-			r.Error = "interrupted: server restarted"
-		}
-		if err := d.store.Save(ctx, r); err != nil {
-			return 0, err
-		}
-	}
-	return len(runs), nil
-}
-
-// work runs a single submitted run through the pool.
-func (d *Dispatcher) work(r *run.Run) {
-	defer d.wg.Done()
-	d.executeManaged(d.ctx, r)
-}
-
 // executeManaged registers cancellation for r, acquires a worker slot, executes it, and returns the
 // terminal status. The run context derives from base so canceling base (a shutdown or a parent
 // cancel) also stops this run.
@@ -610,12 +700,30 @@ func (d *Dispatcher) executeManaged(base context.Context, r *run.Run) run.Status
 	return d.execute(runCtx, r)
 }
 
-// execute runs the playbook, streaming output to the store, and returns the terminal status.
+// executeLeased runs a claimed run on the worker slot the claim loop already holds.
+func (d *Dispatcher) executeLeased(base context.Context, r *run.Run) run.Status {
+	runCtx, cancel := context.WithCancel(base)
+	d.register(r.ID, cancel)
+	defer d.unregister(r.ID)
+	defer cancel()
+
+	return d.execute(runCtx, r)
+}
+
+// execute runs the playbook, streaming output to the store, and returns the terminal status. The
+// run carries this process's lease while it executes: a watcher renews it and honors cancel
+// requests written to the store by any process.
 func (d *Dispatcher) execute(ctx context.Context, r *run.Run) run.Status {
 	started := time.Now()
 	r.Status = run.StatusRunning
 	r.StartedAt = &started
+	r.ClaimedBy = d.owner
+	r.ClaimedAt = &started
 	d.save(r)
+
+	watchCtx, stopWatch := context.WithCancel(ctx)
+	defer stopWatch()
+	go d.watch(watchCtx, r.ID)
 
 	eventsPath, cleanup := d.eventsFile(r.ID)
 	defer cleanup()
@@ -645,6 +753,33 @@ func (d *Dispatcher) execute(ctx context.Context, r *run.Run) run.Status {
 	d.summarize(r)
 	d.publisher.CloseRun(r.ID)
 	return status
+}
+
+// watch renews the executing run's lease and cancels it when another process requests a stop or
+// steals the lease. It exits when the run's context ends.
+func (d *Dispatcher) watch(ctx context.Context, id string) {
+	ticker := time.NewTicker(watchInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		if err := d.store.Heartbeat(context.Background(), id, d.owner); err != nil {
+			d.log.Warn("dispatch: lease lost: "+err.Error(), zap.String("run_id", id))
+			d.Cancel(id)
+			return
+		}
+		r, err := d.store.Get(context.Background(), id)
+		if err != nil {
+			continue
+		}
+		if r.CancelRequested {
+			d.Cancel(id)
+			return
+		}
+	}
 }
 
 // summarize computes the run's per host and per task summaries from its events and stores them for

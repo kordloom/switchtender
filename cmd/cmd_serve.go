@@ -98,12 +98,6 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	disp := dispatch.New(store, runner, log, dispatch.WithPublisher(hub))
 	defer disp.Close()
 
-	if n, err := disp.Reconcile(context.Background()); err != nil {
-		log.Warn("reconcile interrupted runs: " + err.Error())
-	} else if n > 0 {
-		log.Info("reconciled interrupted runs", zap.Int("count", n))
-	}
-
 	scheduler := schedule.NewScheduler(schedules, disp, log,
 		schedule.WithInterval(scheduleInterval))
 	scheduler.Start()
