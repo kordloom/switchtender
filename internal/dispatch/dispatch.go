@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"maps"
 	"os"
 	"sort"
 	"strings"
@@ -406,12 +407,13 @@ func (d *Dispatcher) runPipeline(parent *run.Run, steps []run.PipelineStep) {
 // step continues on failure. It returns whether any step failed and whether execution was
 // canceled.
 func (d *Dispatcher) runStepsLinear(ctx context.Context, parent *run.Run, steps []run.PipelineStep) (failed, canceled bool) {
+	vars := make(map[string]any)
 	for i, step := range steps {
 		if ctx.Err() != nil {
 			return failed, true
 		}
 
-		status := d.runStepAttempts(ctx, parent, step, i)
+		status, outputs := d.runStepAttempts(ctx, parent, step, i, cloneVars(vars))
 		if status == run.StatusCanceled {
 			return failed, true
 		}
@@ -420,15 +422,28 @@ func (d *Dispatcher) runStepsLinear(ctx context.Context, parent *run.Run, steps 
 			if !step.ContinueOnFailure {
 				return failed, canceled
 			}
+			continue
 		}
+		maps.Copy(vars, outputs)
 	}
 	return failed, canceled
 }
 
+// cloneVars copies a variable map, returning nil for an empty one so runs without inputs stay
+// clean.
+func cloneVars(vars map[string]any) map[string]any {
+	if len(vars) == 0 {
+		return nil
+	}
+	return maps.Clone(vars)
+}
+
 // runStepAttempts executes one pipeline step, re-running it until it succeeds or its retry budget
 // is spent. Every attempt is its own child run with an attempt number, so each try keeps a full
-// matrix, events, and history. It returns the final attempt's status.
-func (d *Dispatcher) runStepAttempts(ctx context.Context, parent *run.Run, step run.PipelineStep, idx int) run.Status {
+// matrix, events, and history. The step receives vars as its extra vars, and on success the
+// values it published with set_stats come back for its dependents.
+func (d *Dispatcher) runStepAttempts(ctx context.Context, parent *run.Run, step run.PipelineStep,
+	idx int, vars map[string]any) (run.Status, map[string]any) {
 	inventory := step.Inventory
 	if inventory == "" {
 		inventory = parent.Inventory
@@ -437,24 +452,45 @@ func (d *Dispatcher) runStepAttempts(ctx context.Context, parent *run.Run, step 
 	status := run.StatusFailed
 	for attempt := 0; attempt <= step.Retries; attempt++ {
 		if ctx.Err() != nil {
-			return run.StatusCanceled
+			return run.StatusCanceled, nil
 		}
 		i := idx
 		child := &run.Run{
 			ID: run.NewID(), Playbook: step.Playbook, Inventory: inventory,
 			Status: run.StatusPending, CreatedAt: time.Now(),
 			ParentID: &parent.ID, StepIndex: &i, StepName: step.Name, Attempt: attempt,
+			ExtraVars: vars,
 		}
 		if err := d.store.Save(context.Background(), child); err != nil {
 			d.log.Error("dispatch: save pipeline step: "+err.Error(), zap.String("run_id", parent.ID))
-			return run.StatusFailed
+			return run.StatusFailed, nil
 		}
 		status = d.executeManaged(ctx, child)
-		if status == run.StatusSucceeded || status == run.StatusCanceled {
-			return status
+		if status == run.StatusSucceeded {
+			return status, d.stepOutputs(child)
+		}
+		if status == run.StatusCanceled {
+			return status, nil
 		}
 	}
-	return status
+	return status, nil
+}
+
+// stepOutputs reads a finished step's published outputs from its events and records them on the
+// run. It is best effort; a read failure just means no outputs flow downstream.
+func (d *Dispatcher) stepOutputs(child *run.Run) map[string]any {
+	events, err := d.store.Events(context.Background(), child.ID)
+	if err != nil {
+		d.log.Error("dispatch: read events for outputs: "+err.Error(), zap.String("run_id", child.ID))
+		return nil
+	}
+	outputs := run.OutputsFromEvents(events)
+	if len(outputs) == 0 {
+		return nil
+	}
+	child.Outputs = outputs
+	d.save(child)
+	return outputs
 }
 
 // partition splits hosts into at most shards groups balanced by expected cost. Each host weighs
@@ -598,6 +634,7 @@ func (d *Dispatcher) execute(ctx context.Context, r *run.Run) run.Status {
 	sink := &logSink{store: d.store, id: r.ID, log: d.log, publisher: d.publisher}
 	spec := roundhouse.Spec{
 		Playbook: r.Playbook, Inventory: r.Inventory, EventsPath: eventsPath, Limit: r.Limit,
+		ExtraVars: r.ExtraVars,
 	}
 	res, err := d.runner.Run(ctx, spec, sink)
 

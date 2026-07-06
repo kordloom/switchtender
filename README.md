@@ -71,8 +71,10 @@ Add `"shards": 4` to split it. Ansible is the only runtime dependency: `ansible-
 - Pipelines. Playbook steps under one parent run, in order or as a dependency graph: declare
   depends_on and independent branches run in parallel, a failed step skips what depends on it,
   and continue_on_failure lets downstream proceed anyway. Give a step retries and it re-runs
-  until it succeeds or the budget is spent, every attempt kept as its own run. Each step is a
-  full run with its own matrix and history.
+  until it succeeds or the budget is spent, every attempt kept as its own run. Values a step
+  publishes with set_stats flow to the steps that depend on it as extra vars, so a build step
+  can hand its artifact version to the deploy step. Each step is a full run with its own matrix
+  and history.
 - Scheduling. Cron schedules fire runs, splits, or pipelines and every fire keeps full
   structured history.
 - Fleet health. Per-host outcomes persist at the end of every run, and the fleet view ranks
@@ -132,7 +134,6 @@ the API, the UI, and everything you operate speak plain Ansible. No glossary req
 
 ## Roadmap
 
-- Outputs passed between pipeline steps
 - Integration tests against real multi-node clusters via kind
 - Postgres store backend for multi-instance deployments
 - Distributed workers for remote execution

@@ -3,6 +3,7 @@ package dispatch
 import (
 	"context"
 	"fmt"
+	"maps"
 
 	"github.com/dcadolph/yardmaster/internal/run"
 )
@@ -22,12 +23,41 @@ const (
 	stepSkipped
 )
 
-// stepResult carries one step's terminal status back to the graph walk.
+// stepResult carries one step's terminal status and published outputs back to the graph walk.
 type stepResult struct {
 	// idx is the step's declaration index.
 	idx int
 	// status is the child run's terminal status.
 	status run.Status
+	// outputs holds the values the step published for its dependents.
+	outputs map[string]any
+}
+
+// depClosures returns, per step, which steps it transitively depends on.
+func depClosures(steps []run.PipelineStep, byName map[string]int) [][]bool {
+	closures := make([][]bool, len(steps))
+	var build func(i int) []bool
+	build = func(i int) []bool {
+		if closures[i] != nil {
+			return closures[i]
+		}
+		closure := make([]bool, len(steps))
+		closures[i] = closure
+		for _, dep := range steps[i].DependsOn {
+			j := byName[dep]
+			closure[j] = true
+			for k, in := range build(j) {
+				if in {
+					closure[k] = true
+				}
+			}
+		}
+		return closure
+	}
+	for i := range steps {
+		build(i)
+	}
+	return closures
 }
 
 // hasDependencies reports whether any step declares a dependency, which switches the pipeline
@@ -98,17 +128,36 @@ func validateDAG(steps []run.PipelineStep) error {
 
 // runStepsDAG executes the steps as a dependency graph. Steps whose dependencies are settled run
 // concurrently through the worker pool. A step runs when every dependency succeeded, or failed
-// with continue on failure set; otherwise the step is skipped and creates no run. It returns
-// whether any step failed and whether execution was canceled.
+// with continue on failure set; otherwise the step is skipped and creates no run. Each step
+// receives the merged outputs of its transitive dependencies as extra vars. It returns whether
+// any step failed and whether execution was canceled.
 func (d *Dispatcher) runStepsDAG(ctx context.Context, parent *run.Run, steps []run.PipelineStep) (failed, canceled bool) {
 	byName := make(map[string]int, len(steps))
 	for i, s := range steps {
 		byName[s.Name] = i
 	}
+	closures := depClosures(steps, byName)
 	states := make([]stepState, len(steps))
 	results := make([]run.Status, len(steps))
+	outputs := make([]map[string]any, len(steps))
 	done := make(chan stepResult, len(steps))
 	running := 0
+
+	// inputsFor merges the outputs of the step's transitive dependencies in declaration order, so
+	// the result does not depend on which branch finished first.
+	inputsFor := func(i int) map[string]any {
+		var vars map[string]any
+		for j := range steps {
+			if !closures[i][j] || len(outputs[j]) == 0 {
+				continue
+			}
+			if vars == nil {
+				vars = make(map[string]any)
+			}
+			maps.Copy(vars, outputs[j])
+		}
+		return vars
+	}
 
 	// depSettled reports whether the dependency at j is finished for good, and depAllows whether
 	// its outcome lets a dependent run.
@@ -125,8 +174,10 @@ func (d *Dispatcher) runStepsDAG(ctx context.Context, parent *run.Run, steps []r
 		running++
 		idx := i
 		step := steps[i]
+		vars := inputsFor(i)
 		go func() {
-			done <- stepResult{idx: idx, status: d.runStepAttempts(ctx, parent, step, idx)}
+			status, published := d.runStepAttempts(ctx, parent, step, idx, vars)
+			done <- stepResult{idx: idx, status: status, outputs: published}
 		}()
 	}
 
@@ -176,6 +227,7 @@ func (d *Dispatcher) runStepsDAG(ctx context.Context, parent *run.Run, steps []r
 		running--
 		states[res.idx] = stepDone
 		results[res.idx] = res.status
+		outputs[res.idx] = res.outputs
 		switch res.status {
 		case run.StatusCanceled:
 			canceled = true

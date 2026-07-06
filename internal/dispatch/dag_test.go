@@ -2,9 +2,11 @@ package dispatch
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -339,6 +341,126 @@ func TestDispatcherPipelineDAGRetries(t *testing.T) {
 	names := stepNames(t, store, parent.ID)
 	if len(names) != 5 {
 		t.Errorf("step runs = %v, want 5, four steps plus one retry attempt", names)
+	}
+}
+
+// outputsRunner publishes fixed outputs per playbook and records the extra vars each playbook
+// received, so tests can assert what flowed between steps.
+type outputsRunner struct {
+	// publish maps a playbook to the outputs its stats event carries.
+	publish map[string]map[string]any
+	// mu guards received.
+	mu sync.Mutex
+	// received maps a playbook to the extra vars it ran with.
+	received map[string]map[string]any
+}
+
+// newOutputsRunner returns an outputsRunner publishing the given outputs per playbook.
+func newOutputsRunner(publish map[string]map[string]any) *outputsRunner {
+	return &outputsRunner{publish: publish, received: make(map[string]map[string]any)}
+}
+
+// Run records the received extra vars and writes a stats event carrying the playbook's outputs.
+func (r *outputsRunner) Run(_ context.Context, spec roundhouse.Spec, _ io.Writer) (roundhouse.Result, error) {
+	r.mu.Lock()
+	r.received[spec.Playbook] = spec.ExtraVars
+	r.mu.Unlock()
+
+	if out := r.publish[spec.Playbook]; len(out) > 0 && spec.EventsPath != "" {
+		record := map[string]any{"type": "stats", "ts": 1719000000, "outputs": out}
+		data, err := json.Marshal(record)
+		if err != nil {
+			return roundhouse.Result{ExitCode: -1}, err
+		}
+		if err := os.WriteFile(spec.EventsPath, append(data, '\n'), 0o600); err != nil {
+			return roundhouse.Result{ExitCode: -1}, err
+		}
+	}
+	return roundhouse.Result{ExitCode: 0}, nil
+}
+
+// vars returns the extra vars a playbook ran with.
+func (r *outputsRunner) vars(playbook string) map[string]any {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.received[playbook]
+}
+
+func TestDispatcherPipelineOutputsFlowLinear(t *testing.T) {
+	t.Parallel()
+	store := run.NewMemStore()
+	runner := newOutputsRunner(map[string]map[string]any{
+		"a.yml": {"version": "1.2.3"},
+		"b.yml": {"digest": "abc"},
+	})
+	d := New(store, runner, nil)
+	defer d.Close()
+
+	parent, err := d.SubmitPipeline(context.Background(), "deploy", "inv", []run.PipelineStep{
+		{Name: "a", Playbook: "a.yml"},
+		{Name: "b", Playbook: "b.yml"},
+		{Name: "c", Playbook: "c.yml"},
+	})
+	if err != nil {
+		t.Fatalf("SubmitPipeline() error = %v", err)
+	}
+	if got := waitTerminal(t, store, parent.ID); got.Status != run.StatusSucceeded {
+		t.Fatalf("parent status = %q, want succeeded", got.Status)
+	}
+
+	if got := runner.vars("a.yml"); len(got) != 0 {
+		t.Errorf("a received vars %v, want none", got)
+	}
+	if got := runner.vars("b.yml"); got["version"] != "1.2.3" {
+		t.Errorf("b received vars %v, want version from a", got)
+	}
+	c := runner.vars("c.yml")
+	if c["version"] != "1.2.3" || c["digest"] != "abc" {
+		t.Errorf("c received vars %v, want merged outputs of a and b", c)
+	}
+
+	steps, err := store.Steps(context.Background(), parent.ID)
+	if err != nil {
+		t.Fatalf("Steps() error = %v", err)
+	}
+	for _, s := range steps {
+		if s.StepName == "a" && s.Outputs["version"] != "1.2.3" {
+			t.Errorf("step a stored outputs %v, want version recorded", s.Outputs)
+		}
+		if s.StepName == "b" && s.ExtraVars["version"] != "1.2.3" {
+			t.Errorf("step b stored extra vars %v, want its inputs recorded", s.ExtraVars)
+		}
+	}
+}
+
+func TestDispatcherPipelineOutputsFlowDAG(t *testing.T) {
+	t.Parallel()
+	store := run.NewMemStore()
+	runner := newOutputsRunner(map[string]map[string]any{
+		"a.yml": {"base": "img-9"},
+		"b.yml": {"web": "w-1"},
+		"c.yml": {"db": "d-1"},
+	})
+	d := New(store, runner, nil)
+	defer d.Close()
+
+	parent, err := d.SubmitPipeline(context.Background(), "deploy", "inv", diamond(false))
+	if err != nil {
+		t.Fatalf("SubmitPipeline() error = %v", err)
+	}
+	if got := waitTerminal(t, store, parent.ID); got.Status != run.StatusSucceeded {
+		t.Fatalf("parent status = %q, want succeeded", got.Status)
+	}
+
+	if got := runner.vars("b.yml"); got["base"] != "img-9" || len(got) != 1 {
+		t.Errorf("b received vars %v, want only a's outputs", got)
+	}
+	if got := runner.vars("c.yml"); got["base"] != "img-9" || len(got) != 1 {
+		t.Errorf("c received vars %v, want only a's outputs", got)
+	}
+	dVars := runner.vars("d.yml")
+	if dVars["base"] != "img-9" || dVars["web"] != "w-1" || dVars["db"] != "d-1" {
+		t.Errorf("d received vars %v, want merged outputs of its whole closure", dVars)
 	}
 }
 
