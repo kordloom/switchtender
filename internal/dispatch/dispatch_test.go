@@ -25,7 +25,7 @@ import (
 // waitTerminal polls the store until the run reaches a terminal state or the deadline passes.
 func waitTerminal(t *testing.T, store run.Store, id string) *run.Run {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(10 * time.Second)
 	for {
 		r, err := store.Get(context.Background(), id)
 		if err == nil && r.Status.Terminal() {

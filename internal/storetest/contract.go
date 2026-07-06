@@ -37,6 +37,7 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Run("claim leases oldest", func(t *testing.T) { testClaim(t, newStore()) })
 	t.Run("heartbeat and reclaim", func(t *testing.T) { testLeaseLifecycle(t, newStore()) })
 	t.Run("cancel request", func(t *testing.T) { testRequestCancel(t, newStore()) })
+	t.Run("workers", func(t *testing.T) { testWorkers(t, newStore()) })
 }
 
 // sampleRun returns a fully populated terminal run with deterministic times.
@@ -561,8 +562,9 @@ func testClaim(t *testing.T, store run.Store) {
 		{ID: "run_done", Playbook: "p", Status: run.StatusSucceeded, CreatedAt: base},
 		{ID: parentID, Playbook: "p", Kind: run.KindSplit, Status: run.StatusPending, CreatedAt: base},
 		{
-			ID: "run_shard", Playbook: "p", Status: run.StatusPending, CreatedAt: base,
-			ParentID: &parentID, ShardIndex: &idx, ShardCount: &count,
+			ID: "run_shard", Playbook: "p", Status: run.StatusPending,
+			CreatedAt: base.Add(30 * time.Minute),
+			ParentID:  &parentID, ShardIndex: &idx, ShardCount: &count,
 		},
 	} {
 		if err := store.Save(ctx, r); err != nil {
@@ -586,8 +588,16 @@ func testClaim(t *testing.T, store run.Store) {
 		t.Errorf("second claim = %s, want run_new", second.ID)
 	}
 
-	if _, err := store.Claim(ctx, "worker-c"); !errors.Is(err, run.ErrNonePending) {
-		t.Errorf("third claim error = %v, want ErrNonePending", err)
+	third, err := store.Claim(ctx, "worker-c")
+	if err != nil {
+		t.Fatalf("Claim() error = %v", err)
+	}
+	if third.ID != "run_shard" {
+		t.Errorf("third claim = %s, want run_shard, children are executable", third.ID)
+	}
+
+	if _, err := store.Claim(ctx, "worker-d"); !errors.Is(err, run.ErrNonePending) {
+		t.Errorf("fourth claim error = %v, want ErrNonePending", err)
 	}
 }
 
@@ -678,6 +688,37 @@ func testRequestCancel(t *testing.T, store run.Store) {
 	}
 	if err := store.RequestCancel(ctx, "ghost"); !errors.Is(err, run.ErrNotFound) {
 		t.Errorf("RequestCancel(ghost) error = %v, want ErrNotFound", err)
+	}
+}
+
+// testWorkers verifies executors are listed from their leases with active counts and freshness.
+func testWorkers(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	base := time.Date(2026, 7, 6, 0, 0, 0, 0, time.UTC)
+	older, newer := base, base.Add(time.Minute)
+	for _, r := range []*run.Run{
+		{ID: "r1", Playbook: "p", Status: run.StatusRunning, CreatedAt: base, ClaimedBy: "goat-1", ClaimedAt: &newer},
+		{ID: "r2", Playbook: "p", Status: run.StatusSucceeded, CreatedAt: base, ClaimedBy: "goat-1", ClaimedAt: &older},
+		{ID: "r3", Playbook: "p", Status: run.StatusRunning, CreatedAt: base, ClaimedBy: "serve-1", ClaimedAt: &older},
+		{ID: "r4", Playbook: "p", Status: run.StatusPending, CreatedAt: base},
+	} {
+		if err := store.Save(ctx, r); err != nil {
+			t.Fatalf("Save() error = %v", err)
+		}
+	}
+
+	workers, err := store.Workers(ctx)
+	if err != nil {
+		t.Fatalf("Workers() error = %v", err)
+	}
+	if len(workers) != 2 {
+		t.Fatalf("workers = %d, want 2", len(workers))
+	}
+	if workers[0].Owner != "goat-1" || workers[0].Active != 1 || !workers[0].LastSeen.Equal(newer) {
+		t.Errorf("first worker = %+v, want goat-1 active 1 seen %v", workers[0], newer)
+	}
+	if workers[1].Owner != "serve-1" || workers[1].Active != 1 {
+		t.Errorf("second worker = %+v, want serve-1 active 1", workers[1])
 	}
 }
 

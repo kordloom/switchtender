@@ -56,6 +56,8 @@ func (u *UI) Handler() http.Handler {
 	mux.HandleFunc("GET /ui/tasks", u.tasks)
 	mux.HandleFunc("GET /ui/login", u.login)
 	mux.HandleFunc("GET /ui/users", u.users)
+	mux.HandleFunc("GET /ui/workers", u.workers)
+	mux.HandleFunc("GET /ui/inventories", u.inventories)
 	mux.HandleFunc("GET /ui/credentials", u.credentials)
 	mux.HandleFunc("GET /ui/projects", u.projects)
 	mux.HandleFunc("GET /ui/templates", u.jobTemplates)
@@ -107,6 +109,16 @@ func (u *UI) jobTemplates(w http.ResponseWriter, _ *http.Request) {
 // users renders the account management page.
 func (u *UI) users(w http.ResponseWriter, _ *http.Request) {
 	u.render(w, "users.html", nil)
+}
+
+// workers renders the executor fleet page.
+func (u *UI) workers(w http.ResponseWriter, _ *http.Request) {
+	u.render(w, "workers.html", nil)
+}
+
+// inventories renders the stored inventory management page.
+func (u *UI) inventories(w http.ResponseWriter, _ *http.Request) {
+	u.render(w, "inventories.html", nil)
 }
 
 // login renders the token sign in page.

@@ -7,8 +7,10 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/dcadolph/yardmaster/internal/audit"
 	"github.com/dcadolph/yardmaster/internal/auth"
 	"github.com/dcadolph/yardmaster/internal/credential"
+	"github.com/dcadolph/yardmaster/internal/inventory"
 	"github.com/dcadolph/yardmaster/internal/live"
 	"github.com/dcadolph/yardmaster/internal/project"
 	"github.com/dcadolph/yardmaster/internal/run"
@@ -75,6 +77,16 @@ func WithUsers(users user.Store) Option {
 	return func(srv *Server) { srv.users = users }
 }
 
+// WithAudit records authenticated mutations to the given store and serves the trail.
+func WithAudit(store audit.Store) Option {
+	return func(srv *Server) { srv.audits = store }
+}
+
+// WithInventories enables the inventory endpoints backed by the given store.
+func WithInventories(store inventory.Store) Option {
+	return func(srv *Server) { srv.inventories = store }
+}
+
 // WithTemplates enables the template endpoints backed by the given store.
 func WithTemplates(store template.Store) Option {
 	return func(srv *Server) { srv.templates = store }
@@ -123,6 +135,10 @@ type Server struct {
 	templates template.Store
 	// users backs accounts when configured.
 	users user.Store
+	// inventories backs the inventory endpoints when configured.
+	inventories inventory.Store
+	// audits backs the audit trail when configured.
+	audits audit.Store
 }
 
 // New returns a Server. It panics if store or submitter is nil; a nil logger becomes a no-op.
@@ -151,6 +167,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /fleet", fleetHandler(s.store, s.log))
 	mux.Handle("GET /hosts/{host}/runs", hostHistoryHandler(s.store, s.log))
 	mux.Handle("GET /tasks", taskTrendsHandler(s.store, s.log))
+	mux.Handle("GET /workers", workersHandler(s.store, s.log))
+	mux.Handle("GET /audit", auditHandler(s.audits, s.log))
 	mux.Handle("POST /runs", createRunHandler(s.submitter, s.log))
 	mux.Handle("POST /pipelines", createPipelineHandler(s.submitter, s.log))
 	mux.Handle("POST /runs/{id}/cancel", cancelRunHandler(s.store, s.canceler, s.log))
@@ -181,12 +199,15 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /projects", createProjectHandler(s.projects, s.log))
 	mux.Handle("GET /projects", listProjectsHandler(s.projects, s.log))
 	mux.Handle("DELETE /projects/{id}", deleteProjectHandler(s.projects, s.log))
+	mux.Handle("POST /inventories", createInventoryHandler(s.inventories, s.log))
+	mux.Handle("GET /inventories", listInventoriesHandler(s.inventories, s.log))
+	mux.Handle("DELETE /inventories/{id}", deleteInventoryHandler(s.inventories, s.log))
 	mux.Handle("POST /templates", createTemplateHandler(s.templates, s.log))
 	mux.Handle("GET /templates", listTemplatesHandler(s.templates, s.log))
 	mux.Handle("DELETE /templates/{id}", deleteTemplateHandler(s.templates, s.log))
 	mux.Handle("POST /templates/{id}/launch", launchTemplateHandler(s.templates, s.submitter, s.log))
 	if s.tokens != nil {
-		gate := &authGate{tokens: s.tokens, users: s.users, log: s.log}
+		gate := &authGate{tokens: s.tokens, users: s.users, audits: s.audits, log: s.log}
 		return gate.wrap(mux)
 	}
 	return mux

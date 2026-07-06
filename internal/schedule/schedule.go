@@ -50,6 +50,8 @@ type Schedule struct {
 	Shards int `json:"shards,omitempty"`
 	// Steps, when set, fires a pipeline of these steps.
 	Steps []run.PipelineStep `json:"steps,omitempty"`
+	// TemplateID, when set, fires a stored job template instead of the inline fields.
+	TemplateID string `json:"template_id,omitempty"`
 	// Enabled reports whether the schedule fires.
 	Enabled bool `json:"enabled"`
 	// CreatedAt is when the schedule was created.
@@ -88,7 +90,7 @@ func (s *Schedule) Validate() error {
 	if _, err := NextFire(s.Cron, time.Now()); err != nil {
 		return err
 	}
-	if s.Playbook == "" && len(s.Steps) == 0 {
+	if s.Playbook == "" && len(s.Steps) == 0 && s.TemplateID == "" {
 		return ErrNoTarget
 	}
 	return nil

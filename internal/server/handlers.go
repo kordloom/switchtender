@@ -6,12 +6,15 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/dcadolph/yardmaster/internal/credential"
 	"github.com/dcadolph/yardmaster/internal/dispatch"
 	"github.com/dcadolph/yardmaster/internal/event"
+	"github.com/dcadolph/yardmaster/internal/inventory"
+	"github.com/dcadolph/yardmaster/internal/live"
 	"github.com/dcadolph/yardmaster/internal/project"
 	"github.com/dcadolph/yardmaster/internal/run"
 )
@@ -31,6 +34,8 @@ type createRunRequest struct {
 	CredentialIDs []string `json:"credential_ids,omitempty"`
 	// ProjectID sources the playbook and inventory from a git project.
 	ProjectID string `json:"project_id,omitempty"`
+	// InventoryID targets a stored inventory instead of a path.
+	InventoryID string `json:"inventory_id,omitempty"`
 }
 
 // createPipelineRequest is the JSON body accepted by POST /pipelines.
@@ -179,6 +184,31 @@ func taskTrendsHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
 	}
 }
 
+// workersResponse wraps the executor list.
+type workersResponse struct {
+	// Workers is the list of executors, most recently seen first.
+	Workers []run.WorkerInfo `json:"workers"`
+	// Count is the number returned.
+	Count int `json:"count"`
+}
+
+// workersHandler lists the fleet's executors from the leases they hold.
+func workersHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
+	if store == nil {
+		panic("server: workersHandler: Store required")
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		workers, err := store.Workers(r.Context())
+		if err != nil {
+			log.Error("server: list workers: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not list workers")
+			return
+		}
+		respondJSON(w, log, http.StatusOK,
+			workersResponse{Workers: workers, Count: len(workers)}, wantsPretty(r))
+	}
+}
+
 // healthHandler reports service liveness.
 func healthHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -208,6 +238,9 @@ func createRunHandler(submitter Submitter, log *zap.Logger) http.HandlerFunc {
 		if req.ProjectID != "" {
 			opts = append(opts, run.WithProject(req.ProjectID))
 		}
+		if req.InventoryID != "" {
+			opts = append(opts, run.WithInventory(req.InventoryID))
+		}
 		if req.Shards >= 2 {
 			created, err = submitter.SubmitSplit(r.Context(), req.Playbook, req.Inventory,
 				req.Shards, opts...)
@@ -216,7 +249,7 @@ func createRunHandler(submitter Submitter, log *zap.Logger) http.HandlerFunc {
 		}
 		switch {
 		case errors.Is(err, credential.ErrNotFound), errors.Is(err, credential.ErrNoKey),
-			errors.Is(err, project.ErrNotFound):
+			errors.Is(err, project.ErrNotFound), errors.Is(err, inventory.ErrNotFound):
 			respondError(w, log, http.StatusBadRequest, err.Error())
 			return
 		case err != nil:
@@ -469,17 +502,19 @@ func runEventsHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
 	}
 }
 
-// runStreamHandler streams a run's live events and log over Server Sent Events. The stream ends when
-// the run finishes or, for a run already terminal in the store, immediately.
+// streamPollInterval is how often the stream handler drains new events from the store when no
+// in-process signal arrives, which is how runs executing on other processes stream live.
+const streamPollInterval = time.Second
+
+// runStreamHandler streams a run's live events and log over Server Sent Events. The store is the
+// source of truth: new rows beyond what the client has seen are emitted on a poll tick, and hub
+// messages from a local executor only wake the drain early. Runs executing on any process in the
+// fleet therefore stream the same way, and the stream ends when the stored run turns terminal.
 func runStreamHandler(streamer Streamer, store run.Store, log *zap.Logger) http.HandlerFunc {
 	if store == nil {
 		panic("server: runStreamHandler: Store required")
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
-		if streamer == nil {
-			respondError(w, log, http.StatusNotFound, "streaming not enabled")
-			return
-		}
 		flusher, ok := w.(http.Flusher)
 		if !ok {
 			respondError(w, log, http.StatusInternalServerError, "streaming unsupported")
@@ -492,8 +527,12 @@ func runStreamHandler(streamer Streamer, store run.Store, log *zap.Logger) http.
 			return
 		}
 
-		ch, cancel := streamer.Subscribe(id)
-		defer cancel()
+		var wake <-chan live.Message
+		if streamer != nil {
+			ch, cancel := streamer.Subscribe(id)
+			defer cancel()
+			wake = ch
+		}
 
 		header := w.Header()
 		header.Set("Content-Type", "text/event-stream")
@@ -502,26 +541,50 @@ func runStreamHandler(streamer Streamer, store run.Store, log *zap.Logger) http.
 		w.WriteHeader(http.StatusOK)
 		flusher.Flush()
 
-		// Re-read after subscribing so a run that finished around now still ends the stream.
-		if rn, err := store.Get(r.Context(), id); err == nil && rn.Status.Terminal() {
-			writeSSE(w, "end", nil)
-			flusher.Flush()
-			return
+		// The browser already fetched history before subscribing; stream only what lands after.
+		emittedEvents := 0
+		emittedLog := 0
+		if evs, err := store.Events(r.Context(), id); err == nil {
+			emittedEvents = len(evs)
+		}
+		if body, err := store.Log(r.Context(), id); err == nil {
+			emittedLog = len(body)
 		}
 
+		drain := func() bool {
+			if evs, err := store.Events(r.Context(), id); err == nil {
+				for ; emittedEvents < len(evs); emittedEvents++ {
+					data, err := json.Marshal(evs[emittedEvents])
+					if err != nil {
+						continue
+					}
+					writeSSE(w, "event", data)
+				}
+			}
+			if body, err := store.Log(r.Context(), id); err == nil && len(body) > emittedLog {
+				if chunk, err := json.Marshal(string(body[emittedLog:])); err == nil {
+					writeSSE(w, "log", chunk)
+					emittedLog = len(body)
+				}
+			}
+			flusher.Flush()
+			rn, err := store.Get(r.Context(), id)
+			return err == nil && rn.Status.Terminal()
+		}
+
+		ticker := time.NewTicker(streamPollInterval)
+		defer ticker.Stop()
 		for {
+			if drain() {
+				writeSSE(w, "end", nil)
+				flusher.Flush()
+				return
+			}
 			select {
 			case <-r.Context().Done():
 				return
-			case msg, ok := <-ch:
-				if !ok {
-					return
-				}
-				writeSSE(w, msg.Type, msg.Data)
-				flusher.Flush()
-				if msg.Type == "end" {
-					return
-				}
+			case <-wake:
+			case <-ticker.C:
 			}
 		}
 	}

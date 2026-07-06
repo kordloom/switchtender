@@ -2,11 +2,13 @@ package schedule
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/dcadolph/yardmaster/internal/run"
+	"github.com/dcadolph/yardmaster/internal/template"
 )
 
 // DefaultInterval is how often the scheduler checks for due schedules when none is configured.
@@ -28,6 +30,8 @@ type Scheduler struct {
 	store Store
 	// submitter fires a schedule's target.
 	submitter Submitter
+	// templates resolves schedules that fire stored templates, nil when unused.
+	templates template.Store
 	// log records scheduler activity.
 	log *zap.Logger
 	// interval is how often due schedules are checked.
@@ -42,6 +46,11 @@ type Scheduler struct {
 
 // SchedulerOption configures a Scheduler.
 type SchedulerOption func(*Scheduler)
+
+// WithTemplates lets schedules fire stored job templates by id.
+func WithTemplates(store template.Store) SchedulerOption {
+	return func(s *Scheduler) { s.templates = store }
+}
 
 // WithInterval sets how often due schedules are checked. Values below one are ignored.
 func WithInterval(d time.Duration) SchedulerOption {
@@ -137,6 +146,8 @@ func (s *Scheduler) fire(ctx context.Context, sc *Schedule) (string, error) {
 		err     error
 	)
 	switch {
+	case sc.TemplateID != "":
+		created, err = s.fireTemplate(ctx, sc)
 	case len(sc.Steps) > 0:
 		created, err = s.submitter.SubmitPipeline(ctx, sc.Name, sc.Inventory, sc.Steps)
 	case sc.Shards >= 2:
@@ -150,4 +161,27 @@ func (s *Scheduler) fire(ctx context.Context, sc *Schedule) (string, error) {
 	s.log.Info("schedule fired",
 		zap.String("schedule_id", sc.ID), zap.String("run_id", created.ID))
 	return created.ID, nil
+}
+
+// fireTemplate launches the schedule's stored template with its full preset: project,
+// credentials, extra vars, and shards.
+func (s *Scheduler) fireTemplate(ctx context.Context, sc *Schedule) (*run.Run, error) {
+	if s.templates == nil {
+		return nil, fmt.Errorf("schedule %s names a template but templates are not configured", sc.ID)
+	}
+	t, err := s.templates.Get(ctx, sc.TemplateID)
+	if err != nil {
+		return nil, fmt.Errorf("schedule %s: %w", sc.ID, err)
+	}
+	opts := []run.SubmitOption{
+		run.WithCredentialIDs(t.CredentialIDs),
+		run.WithExtraVars(t.ExtraVars),
+	}
+	if t.ProjectID != "" {
+		opts = append(opts, run.WithProject(t.ProjectID))
+	}
+	if t.Shards >= 2 {
+		return s.submitter.SubmitSplit(ctx, t.Playbook, t.Inventory, t.Shards, opts...)
+	}
+	return s.submitter.Submit(ctx, t.Playbook, t.Inventory, opts...)
 }

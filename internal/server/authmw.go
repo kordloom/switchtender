@@ -9,6 +9,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/dcadolph/yardmaster/internal/audit"
 	"github.com/dcadolph/yardmaster/internal/auth"
 	"github.com/dcadolph/yardmaster/internal/user"
 )
@@ -24,6 +25,8 @@ type authGate struct {
 	tokens auth.Store
 	// users resolves token owners to roles, nil when accounts are not configured.
 	users user.Store
+	// audits records authenticated mutations, nil when the trail is off.
+	audits audit.Store
 	// log records authentication activity, never token material.
 	log *zap.Logger
 	// mu guards enforced and checkedAt.
@@ -67,8 +70,25 @@ func (g *authGate) wrap(next http.Handler) http.Handler {
 			return
 		}
 		g.touch(tok)
+		g.record(tok, r)
 		next.ServeHTTP(w, r)
 	})
+}
+
+// record appends an audit entry for an authenticated mutation without blocking the request.
+func (g *authGate) record(tok *auth.Token, r *http.Request) {
+	if g.audits == nil || r.Method == http.MethodGet || r.Method == http.MethodHead {
+		return
+	}
+	entry := &audit.Entry{
+		ID: audit.NewID(), At: time.Now(), Actor: tok.Name,
+		Method: r.Method, Path: r.URL.Path,
+	}
+	go func() {
+		if err := g.audits.Append(context.Background(), entry); err != nil {
+			g.log.Error("server: append audit entry: " + err.Error())
+		}
+	}()
 }
 
 // roleFor resolves a token to its user's role. Tokens without an owner come from the command
@@ -90,6 +110,10 @@ func (g *authGate) roleFor(ctx context.Context, tok *auth.Token) (user.Role, err
 // requiredRole maps a request to the minimum role that may perform it. Reads are for viewers,
 // launching and stopping work is for operators, and managing configuration is for admins.
 func requiredRole(r *http.Request) user.Role {
+	// The audit trail is management data even to read.
+	if r.URL.Path == "/audit" {
+		return user.RoleAdmin
+	}
 	if r.Method == http.MethodGet || r.Method == http.MethodHead {
 		return user.RoleViewer
 	}

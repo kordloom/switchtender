@@ -2,6 +2,8 @@ package pgstore_test
 
 import (
 	"database/sql"
+	"github.com/dcadolph/yardmaster/internal/audit"
+	"github.com/dcadolph/yardmaster/internal/audittest"
 	"github.com/dcadolph/yardmaster/internal/auth"
 	"github.com/dcadolph/yardmaster/internal/authtest"
 	"github.com/dcadolph/yardmaster/internal/credential"
@@ -212,5 +214,32 @@ func truncateUsers(t *testing.T, dsn string) {
 	defer func() { _ = db.Close() }()
 	if _, err := db.Exec("TRUNCATE users"); err != nil {
 		t.Fatalf("truncate users: %v", err)
+	}
+}
+
+func TestAuditStoreContract(t *testing.T) {
+	dsn := testDSN(t)
+	db, err := pgstore.Open(dsn)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	audittest.Contract(t, func() audit.Store {
+		truncateAudit(t, dsn)
+		return db.Audits()
+	})
+}
+
+// truncateAudit clears the audit table between contract subtests.
+func truncateAudit(t *testing.T, dsn string) {
+	t.Helper()
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatalf("open postgres: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	if _, err := db.Exec("TRUNCATE audit_entries"); err != nil {
+		t.Fatalf("truncate audit_entries: %v", err)
 	}
 }

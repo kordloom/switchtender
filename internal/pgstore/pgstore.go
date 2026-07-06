@@ -14,9 +14,11 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
+	"github.com/dcadolph/yardmaster/internal/audit"
 	"github.com/dcadolph/yardmaster/internal/auth"
 	"github.com/dcadolph/yardmaster/internal/credential"
 	"github.com/dcadolph/yardmaster/internal/event"
+	"github.com/dcadolph/yardmaster/internal/inventory"
 	"github.com/dcadolph/yardmaster/internal/project"
 	"github.com/dcadolph/yardmaster/internal/run"
 	"github.com/dcadolph/yardmaster/internal/schedule"
@@ -52,7 +54,8 @@ CREATE TABLE IF NOT EXISTS runs (
 	cancel_requested INTEGER NOT NULL DEFAULT 0,
 	credential_ids TEXT NOT NULL DEFAULT '',
 	project_id    TEXT NOT NULL DEFAULT '',
-	commit_sha    TEXT NOT NULL DEFAULT ''
+	commit_sha    TEXT NOT NULL DEFAULT '',
+	inventory_id  TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_runs_created_at ON runs(created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_parent ON runs(parent_id, shard_index);
@@ -102,7 +105,8 @@ CREATE TABLE IF NOT EXISTS schedules (
 	created_at  TEXT NOT NULL,
 	next_run_at TEXT,
 	last_run_at TEXT,
-	last_run_id TEXT NOT NULL DEFAULT ''
+	last_run_id TEXT NOT NULL DEFAULT '',
+	template_id TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_schedules_created ON schedules(created_at, id);
 CREATE TABLE IF NOT EXISTS users (
@@ -141,6 +145,20 @@ CREATE TABLE IF NOT EXISTS templates (
 	extra_vars     TEXT NOT NULL DEFAULT '',
 	created_at     TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS audit_entries (
+	id     TEXT PRIMARY KEY,
+	at     TEXT NOT NULL,
+	actor  TEXT NOT NULL DEFAULT '',
+	method TEXT NOT NULL,
+	path   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_audit_at ON audit_entries(at DESC);
+CREATE TABLE IF NOT EXISTS inventories (
+	id         TEXT PRIMARY KEY,
+	name       TEXT NOT NULL DEFAULT '',
+	content    TEXT NOT NULL,
+	created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS credentials (
 	id         TEXT PRIMARY KEY,
 	name       TEXT NOT NULL DEFAULT '',
@@ -155,6 +173,8 @@ ALTER TABLE runs ADD COLUMN IF NOT EXISTS credential_ids TEXT NOT NULL DEFAULT '
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS project_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS commit_sha TEXT NOT NULL DEFAULT '';
 ALTER TABLE tokens ADD COLUMN IF NOT EXISTS user_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS inventory_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE schedules ADD COLUMN IF NOT EXISTS template_id TEXT NOT NULL DEFAULT '';
 `
 
 // store is a run.Store backed by a PostgreSQL database.
@@ -186,6 +206,10 @@ type DB struct {
 	templates *templateStore
 	// users is the account store.
 	users *userStore
+	// inventories is the stored inventory store.
+	inventories *inventoryStore
+	// audits is the audit trail store.
+	audits *auditStore
 }
 
 // Open connects to the PostgreSQL database at dsn, applies the schema, and returns the bundled
@@ -199,15 +223,28 @@ func Open(dsn string) (*DB, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("ping postgres: %w", err)
 	}
-	if _, err := db.Exec(schema); err != nil {
+	// Several processes, a server and its workers, may open the same database at once, and
+	// concurrent ALTER TABLE statements deadlock. A session advisory lock serializes migration.
+	if _, err := db.Exec("SELECT pg_advisory_lock(7973821001)"); err != nil {
 		_ = db.Close()
-		return nil, fmt.Errorf("migrate schema: %w", err)
+		return nil, fmt.Errorf("migration lock: %w", err)
+	}
+	_, migrateErr := db.Exec(schema)
+	if _, err := db.Exec("SELECT pg_advisory_unlock(7973821001)"); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("migration unlock: %w", err)
+	}
+	if migrateErr != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("migrate schema: %w", migrateErr)
 	}
 	return &DB{db: db, runs: &store{db: db}, schedules: &scheduleStore{db: db}, tokens: &tokenStore{db: db},
 		credentials: &credentialStore{db: db},
 		projects:    &projectStore{db: db},
 		templates:   &templateStore{db: db},
-		users:       &userStore{db: db}}, nil
+		users:       &userStore{db: db},
+		inventories: &inventoryStore{db: db},
+		audits:      &auditStore{db: db}}, nil
 }
 
 // Runs returns the run store.
@@ -245,6 +282,16 @@ func (d *DB) Users() user.Store {
 	return d.users
 }
 
+// Inventories returns the stored inventory store.
+func (d *DB) Inventories() inventory.Store {
+	return d.inventories
+}
+
+// Audits returns the audit trail store.
+func (d *DB) Audits() audit.Store {
+	return d.audits
+}
+
 // Close closes the underlying database.
 func (d *DB) Close() error {
 	return d.db.Close()
@@ -254,7 +301,7 @@ func (d *DB) Close() error {
 const runColumns = `id, playbook, inventory, status, exit_code, error, created_at, started_at,
 	ended_at, parent_id, shard_index, shard_count, limit_pattern, kind, step_name, step_index,
 	retry_of, attempt, extra_vars, outputs, claimed_by, claimed_at, cancel_requested,
-	credential_ids, project_id, commit_sha`
+	credential_ids, project_id, commit_sha, inventory_id`
 
 // Save inserts or replaces the run identified by r.ID.
 func (s *store) Save(ctx context.Context, r *run.Run) error {
@@ -263,9 +310,9 @@ INSERT INTO runs
 	(id, playbook, inventory, status, exit_code, error, created_at, started_at, ended_at,
 	 parent_id, shard_index, shard_count, limit_pattern, kind, step_name, step_index, retry_of,
 	 attempt, extra_vars, outputs, claimed_by, claimed_at, cancel_requested, credential_ids,
-	 project_id, commit_sha)
+	 project_id, commit_sha, inventory_id)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
-	$21, $22, $23, $24, $25, $26)
+	$21, $22, $23, $24, $25, $26, $27)
 ON CONFLICT(id) DO UPDATE SET
 	playbook=excluded.playbook, inventory=excluded.inventory, status=excluded.status,
 	exit_code=excluded.exit_code, error=excluded.error, created_at=excluded.created_at,
@@ -276,7 +323,8 @@ ON CONFLICT(id) DO UPDATE SET
 	retry_of=excluded.retry_of, attempt=excluded.attempt, extra_vars=excluded.extra_vars,
 	outputs=excluded.outputs, claimed_by=excluded.claimed_by, claimed_at=excluded.claimed_at,
 	cancel_requested=excluded.cancel_requested, credential_ids=excluded.credential_ids,
-	project_id=excluded.project_id, commit_sha=excluded.commit_sha`
+	project_id=excluded.project_id, commit_sha=excluded.commit_sha,
+	inventory_id=excluded.inventory_id`
 	_, err := s.db.ExecContext(ctx, q,
 		r.ID, r.Playbook, r.Inventory, string(r.Status), nullInt(r.ExitCode), r.Error,
 		formatTime(r.CreatedAt), nullTime(r.StartedAt), nullTime(r.EndedAt),
@@ -284,6 +332,7 @@ ON CONFLICT(id) DO UPDATE SET
 		r.Kind, r.StepName, nullInt(r.StepIndex), nullString(r.RetryOf), r.Attempt,
 		jsonMap(r.ExtraVars), jsonMap(r.Outputs), r.ClaimedBy, nullTime(r.ClaimedAt),
 		boolToInt(r.CancelRequested), joinIDs(r.CredentialIDs), r.ProjectID, r.CommitSHA,
+		r.InventoryID,
 	)
 	if err != nil {
 		return fmt.Errorf("save run: %w", err)
@@ -575,6 +624,43 @@ ORDER BY task`
 	return out, nil
 }
 
+// Workers lists executors by the leases they hold, most recently seen first.
+func (s *store) Workers(ctx context.Context) ([]run.WorkerInfo, error) {
+	const q = `
+SELECT claimed_by,
+	SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) AS active,
+	MAX(claimed_at) AS last_seen
+FROM runs
+WHERE claimed_by != '' AND claimed_at IS NOT NULL
+GROUP BY claimed_by
+ORDER BY last_seen DESC, claimed_by`
+
+	rows, err := s.db.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("list workers: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []run.WorkerInfo
+	for rows.Next() {
+		var (
+			w    run.WorkerInfo
+			seen string
+		)
+		if err := rows.Scan(&w.Owner, &w.Active, &seen); err != nil {
+			return nil, fmt.Errorf("list workers: %w", err)
+		}
+		if w.LastSeen, err = parseTime(seen); err != nil {
+			return nil, fmt.Errorf("list workers: %w", err)
+		}
+		out = append(out, w)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list workers: %w", err)
+	}
+	return out, nil
+}
+
 // queryRuns runs a select that returns run rows and scans them all.
 func (s *store) queryRuns(ctx context.Context, label, query string, args ...any) ([]*run.Run, error) {
 	rows, err := s.db.QueryContext(ctx, query, args...)
@@ -750,7 +836,8 @@ func scanRun(s scanner) (*run.Run, error) {
 	if err := s.Scan(&r.ID, &r.Playbook, &r.Inventory, &status, &exit, &r.Error,
 		&created, &started, &ended, &parent, &shardIdx, &shardCnt, &r.Limit,
 		&r.Kind, &r.StepName, &stepIdx, &retryOf, &r.Attempt, &extra, &outputs,
-		&r.ClaimedBy, &claimed, &cancelI, &credIDs, &r.ProjectID, &r.CommitSHA); err != nil {
+		&r.ClaimedBy, &claimed, &cancelI, &credIDs, &r.ProjectID, &r.CommitSHA,
+		&r.InventoryID); err != nil {
 		return nil, err
 	}
 	r.CancelRequested = cancelI != 0
@@ -901,7 +988,7 @@ func (s *store) Claim(ctx context.Context, owner string) (*run.Run, error) {
 UPDATE runs SET claimed_by=$1, claimed_at=$2
 WHERE id = (
 	SELECT id FROM runs
-	WHERE status='pending' AND claimed_by='' AND parent_id IS NULL AND kind=''
+	WHERE status='pending' AND claimed_by='' AND kind=''
 	ORDER BY created_at, id LIMIT 1
 	FOR UPDATE SKIP LOCKED
 )

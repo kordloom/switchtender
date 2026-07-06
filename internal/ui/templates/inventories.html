@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Inventories - Yardmaster</title>
+	<link rel="icon" type="image/png" href="/ui/assets/favicon.png">
+	<link rel="stylesheet" href="/ui/assets/app.css">
+</head>
+<body data-page="inventories">
+	<header class="topbar">
+		<div class="brand"><a href="/ui/"><img class="brand-logo" src="/ui/assets/logo.png" alt="">Yardmaster</a></div>
+		<div class="tagline">Inventories</div>
+	</header>
+
+	<main class="content">
+		<a class="back" href="/ui/">Back to runs</a>
+		<h1>Inventories</h1>
+		<p class="muted">Stored inventories travel with the run to whichever executor picks it up.</p>
+
+		<section class="panel">
+			<div class="panel-head"><h2>Add an inventory</h2></div>
+			<form id="inventory-form" class="stack">
+				<label class="field-label">Name
+					<input id="inv-name" class="input" placeholder="production fleet" required>
+				</label>
+				<label class="field-label">Content
+					<textarea id="inv-content" class="input mono" rows="8"
+						placeholder="[web]&#10;web01 ansible_host=10.0.0.5" required></textarea>
+				</label>
+				<div class="launch-actions">
+					<button type="submit" class="button primary">Save</button>
+					<span id="inv-status" class="muted"></span>
+				</div>
+			</form>
+		</section>
+
+		<div id="status" class="muted">Loading inventories.</div>
+		<table class="runs" hidden>
+			<thead>
+				<tr>
+					<th>Name</th>
+					<th>Created</th>
+					<th></th>
+				</tr>
+			</thead>
+			<tbody id="inventories"></tbody>
+		</table>
+	</main>
+
+	<script src="/ui/assets/app.js"></script>
+</body>
+</html>

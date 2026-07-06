@@ -20,6 +20,8 @@ type createScheduleRequest struct {
 	Cron string `json:"cron"`
 	// Playbook is the playbook to run for a single or split schedule.
 	Playbook string `json:"playbook"`
+	// TemplateID fires a stored job template instead of the inline fields.
+	TemplateID string `json:"template_id,omitempty"`
 	// Inventory is the inventory to target.
 	Inventory string `json:"inventory"`
 	// Shards, when two or more, fires a split.
@@ -52,7 +54,8 @@ func createScheduleHandler(store schedule.Store, log *zap.Logger) http.HandlerFu
 		sc := &schedule.Schedule{
 			ID: schedule.NewID(), Name: req.Name, Cron: req.Cron, Playbook: req.Playbook,
 			Inventory: req.Inventory, Shards: req.Shards, Steps: req.Steps,
-			Enabled: true, CreatedAt: time.Now(),
+			TemplateID: req.TemplateID,
+			Enabled:    true, CreatedAt: time.Now(),
 		}
 		if err := sc.Validate(); err != nil {
 			msg := "invalid schedule"
@@ -60,7 +63,7 @@ func createScheduleHandler(store schedule.Store, log *zap.Logger) http.HandlerFu
 			case errors.Is(err, schedule.ErrBadCron):
 				msg = "invalid cron expression"
 			case errors.Is(err, schedule.ErrNoTarget):
-				msg = "a playbook or steps are required"
+				msg = "a playbook, steps, or a template_id is required"
 			}
 			respondError(w, log, http.StatusBadRequest, msg)
 			return

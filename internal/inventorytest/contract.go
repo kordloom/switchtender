@@ -1,0 +1,69 @@
+// Package inventorytest provides a shared behavior contract for inventory.Store implementations
+// so the in-memory, SQLite, and PostgreSQL backends cannot drift apart.
+package inventorytest
+
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+
+	"github.com/dcadolph/yardmaster/internal/inventory"
+)
+
+// Contract runs the inventory.Store contract against a fresh store from newStore.
+func Contract(t *testing.T, newStore func() inventory.Store) {
+	t.Helper()
+	t.Run("lifecycle", func(t *testing.T) { testLifecycle(t, newStore()) })
+	t.Run("list ordered", func(t *testing.T) { testList(t, newStore()) })
+}
+
+// testLifecycle verifies an inventory round trips with its content and deletes.
+func testLifecycle(t *testing.T, store inventory.Store) {
+	ctx := context.Background()
+	created := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	i := &inventory.Inventory{
+		ID: "inv_1", Name: "fleet", Content: "[web]\nweb01\n", CreatedAt: created,
+	}
+	if err := store.Save(ctx, i); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	got, err := store.Get(ctx, "inv_1")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.Name != "fleet" || got.Content != "[web]\nweb01\n" || !got.CreatedAt.Equal(created) {
+		t.Errorf("Get() = %+v, want the saved inventory", got)
+	}
+
+	if _, err := store.Get(ctx, "ghost"); !errors.Is(err, inventory.ErrNotFound) {
+		t.Errorf("Get(ghost) error = %v, want ErrNotFound", err)
+	}
+	if err := store.Delete(ctx, "inv_1"); err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+	if err := store.Delete(ctx, "inv_1"); !errors.Is(err, inventory.ErrNotFound) {
+		t.Errorf("Delete(gone) error = %v, want ErrNotFound", err)
+	}
+}
+
+// testList verifies inventories come back oldest first.
+func testList(t *testing.T, store inventory.Store) {
+	ctx := context.Background()
+	base := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	for i, id := range []string{"inv_b", "inv_a"} {
+		if err := store.Save(ctx, &inventory.Inventory{
+			ID: id, Name: id, Content: "x", CreatedAt: base.Add(time.Duration(1-i) * time.Hour),
+		}); err != nil {
+			t.Fatalf("Save() error = %v", err)
+		}
+	}
+	list, err := store.List(ctx)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(list) != 2 || list[0].ID != "inv_a" || list[1].ID != "inv_b" {
+		t.Errorf("List() order = %+v, want inv_a then inv_b", list)
+	}
+}

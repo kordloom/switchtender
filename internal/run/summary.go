@@ -69,6 +69,16 @@ type TaskSummary struct {
 	RanAt time.Time `json:"ran_at"`
 }
 
+// WorkerInfo describes one executor seen through the leases it holds.
+type WorkerInfo struct {
+	// Owner is the executor's lease name, host and pid or a worker's configured name.
+	Owner string `json:"owner"`
+	// Active is how many runs the executor holds right now.
+	Active int `json:"active"`
+	// LastSeen is the freshest lease renewal from this executor.
+	LastSeen time.Time `json:"last_seen"`
+}
+
 // TaskTrend aggregates a task's recent durations so a task that is getting slower stands out.
 type TaskTrend struct {
 	// Task is the task name.
