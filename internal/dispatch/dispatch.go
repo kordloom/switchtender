@@ -448,8 +448,10 @@ func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string) (*r
 	return retry, nil
 }
 
-// coordinate runs each shard through the worker pool and finalizes the parent from their results.
-// The parent registers its own cancel so stopping the parent stops every shard.
+// coordinate waits for the parent's shards, which execute wherever a claim loop picks them up,
+// and finalizes the parent from their stored results. The parent carries this process's lease so
+// a dead coordinator is swept, and canceling the parent propagates through the store to every
+// shard no matter which process holds it.
 func (d *Dispatcher) coordinate(parent *run.Run, children []*run.Run) {
 	defer d.wg.Done()
 
@@ -461,18 +463,19 @@ func (d *Dispatcher) coordinate(parent *run.Run, children []*run.Run) {
 	started := time.Now()
 	parent.Status = run.StatusRunning
 	parent.StartedAt = &started
+	parent.ClaimedBy = d.owner
+	parent.ClaimedAt = &started
 	d.save(parent)
 
-	statuses := make([]run.Status, len(children))
-	var shards sync.WaitGroup
-	for i := range children {
-		shards.Add(1)
-		go func(i int, child *run.Run) {
-			defer shards.Done()
-			statuses[i] = d.executeManaged(parentCtx, child)
-		}(i, children[i].Clone())
+	watchCtx, stopWatch := context.WithCancel(parentCtx)
+	defer stopWatch()
+	go d.watch(watchCtx, parent.ID)
+
+	ids := make([]string, len(children))
+	for i, c := range children {
+		ids[i] = c.ID
 	}
-	shards.Wait()
+	statuses := d.waitChildren(parentCtx, ids)
 
 	allSucceeded := true
 	anyCanceled := false
@@ -488,13 +491,78 @@ func (d *Dispatcher) coordinate(parent *run.Run, children []*run.Run) {
 	case allSucceeded:
 		code := 0
 		d.finalize(parent, run.StatusSucceeded, &code, "")
-	case parentCtx.Err() != nil && anyCanceled:
+	case anyCanceled:
 		d.finalize(parent, run.StatusCanceled, nil, "")
 	default:
 		code := 1
 		d.finalize(parent, run.StatusFailed, &code, "")
 	}
 	d.publisher.CloseRun(parent.ID)
+}
+
+// childPollInterval is how often a coordinator checks its children's stored states.
+const childPollInterval = 500 * time.Millisecond
+
+// waitChildren polls the store until every child reaches a terminal state and returns their
+// statuses in order. When ctx is canceled the children are cancel-requested through the store,
+// and any that no executor has claimed yet are finalized canceled directly.
+func (d *Dispatcher) waitChildren(ctx context.Context, ids []string) []run.Status {
+	statuses := make([]run.Status, len(ids))
+	canceled := false
+	for {
+		done := 0
+		for i, id := range ids {
+			if statuses[i].Terminal() {
+				done++
+				continue
+			}
+			r, err := d.store.Get(context.Background(), id)
+			if err != nil {
+				continue
+			}
+			if ctx.Err() != nil && !canceled {
+				continue
+			}
+			if r.Status.Terminal() {
+				statuses[i] = r.Status
+				done++
+			}
+		}
+		if done == len(ids) {
+			return statuses
+		}
+		if ctx.Err() != nil && !canceled {
+			canceled = true
+			d.cancelChildren(ids)
+		}
+		select {
+		case <-time.After(childPollInterval):
+		case <-ctx.Done():
+			if !canceled {
+				canceled = true
+				d.cancelChildren(ids)
+			}
+			time.Sleep(childPollInterval)
+		}
+	}
+}
+
+// cancelChildren asks every non-terminal child to stop: claimed children through their executor's
+// cancel watch, unclaimed ones finalized canceled directly since no executor will ever run them.
+func (d *Dispatcher) cancelChildren(ids []string) {
+	for _, id := range ids {
+		r, err := d.store.Get(context.Background(), id)
+		if err != nil || r.Status.Terminal() {
+			continue
+		}
+		if err := d.store.RequestCancel(context.Background(), id); err != nil {
+			d.log.Warn("dispatch: request child cancel: "+err.Error(), zap.String("run_id", id))
+		}
+		d.Cancel(id)
+		if r.Status == run.StatusPending && r.ClaimedBy == "" {
+			d.finalize(r, run.StatusCanceled, nil, "")
+		}
+	}
 }
 
 // SubmitPipeline runs playbook steps as one pipeline and returns the parent run in pending state.
@@ -548,7 +616,13 @@ func (d *Dispatcher) runPipeline(parent *run.Run, steps []run.PipelineStep) {
 	started := time.Now()
 	parent.Status = run.StatusRunning
 	parent.StartedAt = &started
+	parent.ClaimedBy = d.owner
+	parent.ClaimedAt = &started
 	d.save(parent)
+
+	watchCtx, stopWatch := context.WithCancel(pipeCtx)
+	defer stopWatch()
+	go d.watch(watchCtx, parent.ID)
 
 	var failed, canceled bool
 	if hasDependencies(steps) {
@@ -632,7 +706,7 @@ func (d *Dispatcher) runStepAttempts(ctx context.Context, parent *run.Run, step 
 			d.log.Error("dispatch: save pipeline step: "+err.Error(), zap.String("run_id", parent.ID))
 			return run.StatusFailed, nil
 		}
-		status = d.executeManaged(ctx, child)
+		status = d.waitChildren(ctx, []string{child.ID})[0]
 		if status == run.StatusSucceeded {
 			return status, d.stepOutputs(child)
 		}
@@ -727,26 +801,6 @@ func hostWeights(hosts []string, costs map[string]float64) map[string]float64 {
 func (d *Dispatcher) Close() {
 	d.cancel()
 	d.wg.Wait()
-}
-
-// executeManaged registers cancellation for r, acquires a worker slot, executes it, and returns the
-// terminal status. The run context derives from base so canceling base (a shutdown or a parent
-// cancel) also stops this run.
-func (d *Dispatcher) executeManaged(base context.Context, r *run.Run) run.Status {
-	runCtx, cancel := context.WithCancel(base)
-	d.register(r.ID, cancel)
-	defer d.unregister(r.ID)
-	defer cancel()
-
-	select {
-	case d.sem <- struct{}{}:
-	case <-runCtx.Done():
-		d.finalize(r, run.StatusCanceled, nil, "")
-		return run.StatusCanceled
-	}
-	defer func() { <-d.sem }()
-
-	return d.execute(runCtx, r)
 }
 
 // executeLeased runs a claimed run on the worker slot the claim loop already holds.

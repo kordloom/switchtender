@@ -24,8 +24,10 @@ type Store interface {
 	Steps(ctx context.Context, parentID string) ([]*Run, error)
 	// NonTerminal returns all runs, including shards, that are not in a terminal state.
 	NonTerminal(ctx context.Context) ([]*Run, error)
-	// Claim leases the oldest unclaimed pending top-level plain run to owner and returns it, or
-	// ErrNonePending when nothing is waiting. The claim must be atomic across processes.
+	// Claim leases the oldest unclaimed pending executable run to owner and returns it, or
+	// ErrNonePending when nothing is waiting. Plain runs, shard children, and pipeline step
+	// children are executable; split and pipeline parents are coordination records and are not.
+	// The claim must be atomic across processes.
 	Claim(ctx context.Context, owner string) (*Run, error)
 	// Heartbeat renews owner's lease on a run. It returns ErrNotFound when the run is gone or the
 	// lease is no longer held by owner.
@@ -197,7 +199,7 @@ func (m *memStore) Claim(_ context.Context, owner string) (*Run, error) {
 	defer m.mu.Unlock()
 	var oldest *Run
 	for _, r := range m.runs {
-		if r.Status != StatusPending || r.ClaimedBy != "" || r.ParentID != nil || r.Kind != "" {
+		if r.Status != StatusPending || r.ClaimedBy != "" || r.Kind != "" {
 			continue
 		}
 		if oldest == nil || r.CreatedAt.Before(oldest.CreatedAt) ||

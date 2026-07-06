@@ -561,8 +561,9 @@ func testClaim(t *testing.T, store run.Store) {
 		{ID: "run_done", Playbook: "p", Status: run.StatusSucceeded, CreatedAt: base},
 		{ID: parentID, Playbook: "p", Kind: run.KindSplit, Status: run.StatusPending, CreatedAt: base},
 		{
-			ID: "run_shard", Playbook: "p", Status: run.StatusPending, CreatedAt: base,
-			ParentID: &parentID, ShardIndex: &idx, ShardCount: &count,
+			ID: "run_shard", Playbook: "p", Status: run.StatusPending,
+			CreatedAt: base.Add(30 * time.Minute),
+			ParentID:  &parentID, ShardIndex: &idx, ShardCount: &count,
 		},
 	} {
 		if err := store.Save(ctx, r); err != nil {
@@ -586,8 +587,16 @@ func testClaim(t *testing.T, store run.Store) {
 		t.Errorf("second claim = %s, want run_new", second.ID)
 	}
 
-	if _, err := store.Claim(ctx, "worker-c"); !errors.Is(err, run.ErrNonePending) {
-		t.Errorf("third claim error = %v, want ErrNonePending", err)
+	third, err := store.Claim(ctx, "worker-c")
+	if err != nil {
+		t.Fatalf("Claim() error = %v", err)
+	}
+	if third.ID != "run_shard" {
+		t.Errorf("third claim = %s, want run_shard, children are executable", third.ID)
+	}
+
+	if _, err := store.Claim(ctx, "worker-d"); !errors.Is(err, run.ErrNonePending) {
+		t.Errorf("fourth claim error = %v, want ErrNonePending", err)
 	}
 }
 

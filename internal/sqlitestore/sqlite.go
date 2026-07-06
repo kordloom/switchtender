@@ -927,7 +927,7 @@ func (s *store) Claim(ctx context.Context, owner string) (*run.Run, error) {
 UPDATE runs SET claimed_by=?, claimed_at=?
 WHERE id = (
 	SELECT id FROM runs
-	WHERE status='pending' AND claimed_by='' AND parent_id IS NULL AND kind=''
+	WHERE status='pending' AND claimed_by='' AND kind=''
 	ORDER BY created_at, id LIMIT 1
 )
 RETURNING ` + runColumns

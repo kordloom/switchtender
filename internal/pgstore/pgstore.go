@@ -199,9 +199,20 @@ func Open(dsn string) (*DB, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("ping postgres: %w", err)
 	}
-	if _, err := db.Exec(schema); err != nil {
+	// Several processes, a server and its workers, may open the same database at once, and
+	// concurrent ALTER TABLE statements deadlock. A session advisory lock serializes migration.
+	if _, err := db.Exec("SELECT pg_advisory_lock(7973821001)"); err != nil {
 		_ = db.Close()
-		return nil, fmt.Errorf("migrate schema: %w", err)
+		return nil, fmt.Errorf("migration lock: %w", err)
+	}
+	_, migrateErr := db.Exec(schema)
+	if _, err := db.Exec("SELECT pg_advisory_unlock(7973821001)"); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("migration unlock: %w", err)
+	}
+	if migrateErr != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("migrate schema: %w", migrateErr)
 	}
 	return &DB{db: db, runs: &store{db: db}, schedules: &scheduleStore{db: db}, tokens: &tokenStore{db: db},
 		credentials: &credentialStore{db: db},
@@ -901,7 +912,7 @@ func (s *store) Claim(ctx context.Context, owner string) (*run.Run, error) {
 UPDATE runs SET claimed_by=$1, claimed_at=$2
 WHERE id = (
 	SELECT id FROM runs
-	WHERE status='pending' AND claimed_by='' AND parent_id IS NULL AND kind=''
+	WHERE status='pending' AND claimed_by='' AND kind=''
 	ORDER BY created_at, id LIMIT 1
 	FOR UPDATE SKIP LOCKED
 )
