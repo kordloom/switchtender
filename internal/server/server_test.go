@@ -865,3 +865,31 @@ func TestAuthGate(t *testing.T) {
 		t.Errorf("auth check with token = %d, want 204", rec.Code)
 	}
 }
+
+func TestMetrics(t *testing.T) {
+	t.Parallel()
+	store := run.NewMemStore()
+	for i, status := range []run.Status{run.StatusSucceeded, run.StatusSucceeded, run.StatusFailed} {
+		if err := store.Save(context.Background(), &run.Run{
+			ID: fmt.Sprintf("run_%d", i), Status: status, CreatedAt: time.Now(),
+		}); err != nil {
+			t.Fatalf("Save() error = %v", err)
+		}
+	}
+	handler := New(store, &fakeSubmitter{}, zap.NewNop()).Handler()
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		`yardmaster_runs_total{status="succeeded"} 2`,
+		`yardmaster_runs_total{status="failed"} 1`,
+		"# TYPE yardmaster_runs_total gauge",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("metrics missing %q", want)
+		}
+	}
+}

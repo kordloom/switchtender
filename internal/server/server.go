@@ -139,6 +139,7 @@ func New(store run.Store, submitter Submitter, log *zap.Logger, opts ...Option) 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("GET /healthz", healthHandler())
+	mux.Handle("GET /metrics", metricsHandler(s.store, s.log))
 	mux.Handle("GET /fleet", fleetHandler(s.store, s.log))
 	mux.Handle("GET /hosts/{host}/runs", hostHistoryHandler(s.store, s.log))
 	mux.Handle("GET /tasks", taskTrendsHandler(s.store, s.log))
