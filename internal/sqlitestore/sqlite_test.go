@@ -11,6 +11,8 @@ import (
 	"github.com/dcadolph/yardmaster/internal/projecttest"
 	"github.com/dcadolph/yardmaster/internal/template"
 	"github.com/dcadolph/yardmaster/internal/templatetest"
+	"github.com/dcadolph/yardmaster/internal/user"
+	"github.com/dcadolph/yardmaster/internal/usertest"
 	"path/filepath"
 	"testing"
 	"time"
@@ -179,5 +181,17 @@ func TestTemplateStoreContract(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = db.Close() })
 		return db.Templates()
+	})
+}
+
+func TestUserStoreContract(t *testing.T) {
+	t.Parallel()
+	usertest.Contract(t, func() user.Store {
+		db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "yardmaster.db"))
+		if err != nil {
+			t.Fatalf("Open() error = %v", err)
+		}
+		t.Cleanup(func() { _ = db.Close() })
+		return db.Users()
 	})
 }

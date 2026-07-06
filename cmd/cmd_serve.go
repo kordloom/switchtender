@@ -28,6 +28,7 @@ import (
 	"github.com/dcadolph/yardmaster/internal/server"
 	"github.com/dcadolph/yardmaster/internal/sqlitestore"
 	"github.com/dcadolph/yardmaster/internal/template"
+	"github.com/dcadolph/yardmaster/internal/user"
 )
 
 const (
@@ -87,6 +88,8 @@ type storeBundle interface {
 	Projects() project.Store
 	// Templates returns the job template store.
 	Templates() template.Store
+	// Users returns the account store.
+	Users() user.Store
 	// Close closes the underlying database.
 	Close() error
 }
@@ -154,7 +157,8 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			server.WithSchedules(schedules), server.WithTokens(bundle.Tokens()),
 			server.WithCredentials(bundle.Credentials(), sealer),
 			server.WithProjects(bundle.Projects()),
-			server.WithTemplates(bundle.Templates())).Handler(),
+			server.WithTemplates(bundle.Templates()),
+			server.WithUsers(bundle.Users())).Handler(),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 

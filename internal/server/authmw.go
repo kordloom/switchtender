@@ -10,16 +10,20 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/dcadolph/yardmaster/internal/auth"
+	"github.com/dcadolph/yardmaster/internal/user"
 )
 
 // enforcementCacheTTL bounds how often the middleware re-checks whether any tokens exist.
 const enforcementCacheTTL = 5 * time.Second
 
-// authGate authenticates API requests with bearer tokens. While no token exists the API stays
-// open, so a fresh install works immediately; creating the first token turns enforcement on.
+// authGate authenticates API requests with bearer tokens and enforces the owning user's role.
+// While no token exists the API stays open, so a fresh install works immediately; creating the
+// first token turns enforcement on.
 type authGate struct {
 	// tokens is the token store.
 	tokens auth.Store
+	// users resolves token owners to roles, nil when accounts are not configured.
+	users user.Store
 	// log records authentication activity, never token material.
 	log *zap.Logger
 	// mu guards enforced and checkedAt.
@@ -53,9 +57,69 @@ func (g *authGate) wrap(next http.Handler) http.Handler {
 			unauthorized(w)
 			return
 		}
+		role, err := g.roleFor(r.Context(), tok)
+		if err != nil {
+			unauthorized(w)
+			return
+		}
+		if !roleAllows(role, requiredRole(r)) {
+			forbidden(w)
+			return
+		}
 		g.touch(tok)
 		next.ServeHTTP(w, r)
 	})
+}
+
+// roleFor resolves a token to its user's role. Tokens without an owner come from the command
+// line and carry admin rights; tokens whose owner is gone stop working.
+func (g *authGate) roleFor(ctx context.Context, tok *auth.Token) (user.Role, error) {
+	if tok.UserID == "" {
+		return user.RoleAdmin, nil
+	}
+	if g.users == nil {
+		return user.RoleAdmin, nil
+	}
+	u, err := g.users.Get(ctx, tok.UserID)
+	if err != nil {
+		return "", err
+	}
+	return u.Role, nil
+}
+
+// requiredRole maps a request to the minimum role that may perform it. Reads are for viewers,
+// launching and stopping work is for operators, and managing configuration is for admins.
+func requiredRole(r *http.Request) user.Role {
+	if r.Method == http.MethodGet || r.Method == http.MethodHead {
+		return user.RoleViewer
+	}
+	p := r.URL.Path
+	switch {
+	case p == "/auth/check":
+		return user.RoleViewer
+	case p == "/runs", p == "/pipelines":
+		return user.RoleOperator
+	case strings.HasPrefix(p, "/runs/") &&
+		(strings.HasSuffix(p, "/cancel") || strings.HasSuffix(p, "/retry")):
+		return user.RoleOperator
+	case strings.HasPrefix(p, "/templates/") && strings.HasSuffix(p, "/launch"):
+		return user.RoleOperator
+	default:
+		return user.RoleAdmin
+	}
+}
+
+// roleAllows reports whether a role meets a requirement, with admin above operator above viewer.
+func roleAllows(have, need user.Role) bool {
+	rank := map[user.Role]int{user.RoleViewer: 1, user.RoleOperator: 2, user.RoleAdmin: 3}
+	return rank[have] >= rank[need]
+}
+
+// forbidden writes a 403 with a JSON error body.
+func forbidden(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusForbidden)
+	_, _ = w.Write([]byte(`{"error":"forbidden"}`))
 }
 
 // protects reports whether the request needs authentication. Liveness and the UI shell stay
@@ -66,6 +130,10 @@ func (g *authGate) protects(r *http.Request) bool {
 	}
 	if r.Method == http.MethodGet &&
 		(r.URL.Path == "/" || strings.HasPrefix(r.URL.Path, "/ui/")) {
+		return false
+	}
+	// Sign in must be reachable while the API is enforced.
+	if r.Method == http.MethodPost && r.URL.Path == "/auth/login" {
 		return false
 	}
 	return true

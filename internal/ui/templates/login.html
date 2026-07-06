@@ -14,14 +14,25 @@
 	</header>
 
 	<main class="content narrow">
-		<h1>API token</h1>
-		<p class="muted">This server requires a token. Create one with <code>yardmaster token new</code>.</p>
-		<form id="login-form" class="stack">
-			<input id="token-input" class="input mono" type="password"
-				placeholder="ymt_..." autocomplete="off" autofocus>
+		<h1>Sign in</h1>
+		<form id="account-form" class="stack">
+			<label class="field-label">Username
+				<input id="username-input" class="input" autocomplete="username" autofocus>
+			</label>
+			<label class="field-label">Password
+				<input id="password-input" class="input" type="password" autocomplete="current-password">
+			</label>
 			<button type="submit" class="button primary">Sign in</button>
-			<div id="status" class="muted" hidden></div>
 		</form>
+		<details class="alt-auth">
+			<summary class="muted">Use an API token instead</summary>
+			<form id="login-form" class="stack">
+				<input id="token-input" class="input mono" type="password"
+					placeholder="ymt_..." autocomplete="off">
+				<button type="submit" class="button">Sign in with token</button>
+			</form>
+		</details>
+		<div id="status" class="muted" hidden></div>
 	</main>
 
 	<script src="/ui/assets/app.js"></script>

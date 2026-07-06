@@ -10,6 +10,8 @@ import (
 	"github.com/dcadolph/yardmaster/internal/projecttest"
 	"github.com/dcadolph/yardmaster/internal/template"
 	"github.com/dcadolph/yardmaster/internal/templatetest"
+	"github.com/dcadolph/yardmaster/internal/user"
+	"github.com/dcadolph/yardmaster/internal/usertest"
 	"os"
 	"testing"
 
@@ -183,5 +185,32 @@ func truncateTemplates(t *testing.T, dsn string) {
 	defer func() { _ = db.Close() }()
 	if _, err := db.Exec("TRUNCATE templates"); err != nil {
 		t.Fatalf("truncate templates: %v", err)
+	}
+}
+
+func TestUserStoreContract(t *testing.T) {
+	dsn := testDSN(t)
+	db, err := pgstore.Open(dsn)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	usertest.Contract(t, func() user.Store {
+		truncateUsers(t, dsn)
+		return db.Users()
+	})
+}
+
+// truncateUsers clears the users table between contract subtests.
+func truncateUsers(t *testing.T, dsn string) {
+	t.Helper()
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatalf("open postgres: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	if _, err := db.Exec("TRUNCATE users"); err != nil {
+		t.Fatalf("truncate users: %v", err)
 	}
 }

@@ -81,7 +81,7 @@ Add `"shards": 4` to split it. Ansible is the only runtime dependency: `ansible-
 | Storage      | SQLite out of the box; the same flag takes a PostgreSQL DSN for multi-instance  |
 | Projects     | Playbooks sourced from git with clone-or-fetch sync; every run records the exact commit it executed |
 | Templates    | Saved launch presets bundling project, playbook, credentials, shards, and extra vars; one click or one POST launches |
-| Auth         | Bearer tokens, hashed at rest; the API locks down the moment the first token exists |
+| Auth         | User accounts with admin, operator, and viewer roles enforced per route; bearer tokens hashed at rest; the API locks down the moment the first token exists |
 | Credentials  | SSH keys and vault passwords encrypted with AES-256-GCM, decrypted only at execution, never returned by the API |
 | Observability| A Prometheus metrics endpoint and webhook notifications when runs finish        |
 
@@ -117,7 +117,11 @@ Add `"shards": 4` to split it. Ansible is the only runtime dependency: `ansible-
 | POST   | `/credentials`          | Store an SSH key or vault password, encrypted at rest   |
 | GET    | `/credentials`          | List credentials, secrets never included                |
 | DELETE | `/credentials/{id}`     | Delete a credential                                     |
+| POST   | `/auth/login`           | Sign in with username and password, returns a token     |
 | POST   | `/auth/check`           | Verify an API token                                     |
+| POST   | `/users`                | Create an account with a role                           |
+| GET    | `/users`                | List accounts                                           |
+| DELETE | `/users/{id}`           | Delete an account; its tokens stop working              |
 | GET    | `/metrics`              | Prometheus gauges for runs and fleet health             |
 | GET    | `/healthz`              | Liveness                                                |
 
