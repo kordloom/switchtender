@@ -24,6 +24,9 @@ type Token struct {
 	ID string `json:"id"`
 	// Name labels the token for humans, for example ci or laptop.
 	Name string `json:"name"`
+	// UserID names the account the token authenticates as. Empty means an unscoped token from
+	// the command line, which carries admin rights.
+	UserID string `json:"user_id,omitempty"`
 	// Hash is the hex encoded SHA-256 of the plaintext token.
 	Hash string `json:"-"`
 	// CreatedAt is when the token was created.

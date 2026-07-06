@@ -18,6 +18,7 @@ import (
 	"github.com/dcadolph/yardmaster/internal/live"
 	"github.com/dcadolph/yardmaster/internal/run"
 	"github.com/dcadolph/yardmaster/internal/schedule"
+	"github.com/dcadolph/yardmaster/internal/user"
 )
 
 // fakeStreamer returns a fixed channel for any run.
@@ -890,6 +891,62 @@ func TestMetrics(t *testing.T) {
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("metrics missing %q", want)
+		}
+	}
+}
+
+func TestAuthGateRoles(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	tokens := auth.NewMemStore()
+	users := user.NewMemStore()
+
+	mint := func(role user.Role) string {
+		u, err := user.New(string(role)+"-person", "pw", role)
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+		if err := users.Save(ctx, u); err != nil {
+			t.Fatalf("Save() error = %v", err)
+		}
+		plain, tok, err := auth.New("t-" + string(role))
+		if err != nil {
+			t.Fatalf("New token error = %v", err)
+		}
+		tok.UserID = u.ID
+		if err := tokens.Save(ctx, tok); err != nil {
+			t.Fatalf("Save token error = %v", err)
+		}
+		return plain
+	}
+	viewer, operator, admin := mint(user.RoleViewer), mint(user.RoleOperator), mint(user.RoleAdmin)
+
+	handler := New(run.NewMemStore(), &fakeSubmitter{run: &run.Run{ID: "run_x"}}, zap.NewNop(),
+		WithTokens(tokens), WithUsers(users)).Handler()
+	do := func(method, path, bearer string) int {
+		req := httptest.NewRequest(method, path, strings.NewReader(`{"playbook":"p.yml"}`))
+		req.Header.Set("Authorization", "Bearer "+bearer)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		return rec.Code
+	}
+
+	tests := []struct {
+		Method string
+		Path   string
+		Token  string
+		Want   int
+	}{
+		{http.MethodGet, "/runs", viewer, http.StatusOK},               // Test 0: Viewer reads.
+		{http.MethodPost, "/runs", viewer, http.StatusForbidden},       // Test 1: Viewer cannot launch.
+		{http.MethodPost, "/runs", operator, http.StatusAccepted},      // Test 2: Operator launches.
+		{http.MethodPost, "/projects", operator, http.StatusForbidden}, // Test 3: Operator cannot manage.
+		{http.MethodPost, "/projects", admin, http.StatusNotFound},     // Test 4: Admin passes the gate; feature off here.
+		{http.MethodGet, "/fleet", operator, http.StatusOK},            // Test 5: Operator reads.
+	}
+	for i, test := range tests {
+		if got := do(test.Method, test.Path, test.Token); got != test.Want {
+			t.Errorf("test %d: %s %s = %d, want %d", i, test.Method, test.Path, got, test.Want)
 		}
 	}
 }

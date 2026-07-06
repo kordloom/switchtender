@@ -21,6 +21,7 @@ import (
 	"github.com/dcadolph/yardmaster/internal/run"
 	"github.com/dcadolph/yardmaster/internal/schedule"
 	"github.com/dcadolph/yardmaster/internal/template"
+	"github.com/dcadolph/yardmaster/internal/user"
 )
 
 // schema is the table layout created on open. It is idempotent so open doubles as migration.
@@ -104,10 +105,19 @@ CREATE TABLE IF NOT EXISTS schedules (
 	last_run_id TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_schedules_created ON schedules(created_at, id);
+CREATE TABLE IF NOT EXISTS users (
+	id            TEXT PRIMARY KEY,
+	username      TEXT NOT NULL,
+	password_hash TEXT NOT NULL,
+	role          TEXT NOT NULL,
+	created_at    TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username);
 CREATE TABLE IF NOT EXISTS tokens (
 	id           TEXT PRIMARY KEY,
 	name         TEXT NOT NULL DEFAULT '',
 	hash         TEXT NOT NULL,
+	user_id      TEXT NOT NULL DEFAULT '',
 	created_at   TEXT NOT NULL,
 	last_used_at TEXT
 );
@@ -153,6 +163,7 @@ var alterations = []string{
 	"ALTER TABLE runs ADD COLUMN credential_ids TEXT NOT NULL DEFAULT ''",
 	"ALTER TABLE runs ADD COLUMN project_id TEXT NOT NULL DEFAULT ''",
 	"ALTER TABLE runs ADD COLUMN commit_sha TEXT NOT NULL DEFAULT ''",
+	"ALTER TABLE tokens ADD COLUMN user_id TEXT NOT NULL DEFAULT ''",
 	"ALTER TABLE run_host_summary ADD COLUMN duration_seconds REAL NOT NULL DEFAULT 0",
 }
 
@@ -183,6 +194,8 @@ type DB struct {
 	projects *projectStore
 	// templates is the job template store.
 	templates *templateStore
+	// users is the account store.
+	users *userStore
 }
 
 // Open opens the SQLite database at path, applies the schema, and returns the bundled stores.
@@ -220,7 +233,8 @@ func Open(path string) (*DB, error) {
 	return &DB{db: db, runs: &store{db: db}, schedules: &scheduleStore{db: db}, tokens: &tokenStore{db: db},
 		credentials: &credentialStore{db: db},
 		projects:    &projectStore{db: db},
-		templates:   &templateStore{db: db}}, nil
+		templates:   &templateStore{db: db},
+		users:       &userStore{db: db}}, nil
 }
 
 // Runs returns the run store.
@@ -251,6 +265,11 @@ func (d *DB) Projects() project.Store {
 // Templates returns the job template store.
 func (d *DB) Templates() template.Store {
 	return d.templates
+}
+
+// Users returns the account store.
+func (d *DB) Users() user.Store {
+	return d.users
 }
 
 // Close closes the underlying database.

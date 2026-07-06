@@ -15,6 +15,7 @@ import (
 	"github.com/dcadolph/yardmaster/internal/schedule"
 	"github.com/dcadolph/yardmaster/internal/template"
 	"github.com/dcadolph/yardmaster/internal/ui"
+	"github.com/dcadolph/yardmaster/internal/user"
 )
 
 // Submitter accepts a run request and returns the created run. The dispatcher satisfies it.
@@ -69,6 +70,11 @@ func WithTokens(tokens auth.Store) Option {
 	return func(srv *Server) { srv.tokens = tokens }
 }
 
+// WithUsers enables accounts: role enforcement on the gate, sign in, and the user endpoints.
+func WithUsers(users user.Store) Option {
+	return func(srv *Server) { srv.users = users }
+}
+
 // WithTemplates enables the template endpoints backed by the given store.
 func WithTemplates(store template.Store) Option {
 	return func(srv *Server) { srv.templates = store }
@@ -115,6 +121,8 @@ type Server struct {
 	projects project.Store
 	// templates backs the template endpoints when configured.
 	templates template.Store
+	// users backs accounts when configured.
+	users user.Store
 }
 
 // New returns a Server. It panics if store or submitter is nil; a nil logger becomes a no-op.
@@ -163,6 +171,10 @@ func (s *Server) Handler() http.Handler {
 		http.Redirect(w, r, "/ui/", http.StatusFound)
 	})
 	mux.Handle("POST /auth/check", authCheckHandler())
+	mux.Handle("POST /auth/login", loginHandler(s.users, s.tokens, s.log))
+	mux.Handle("POST /users", createUserHandler(s.users, s.log))
+	mux.Handle("GET /users", listUsersHandler(s.users, s.log))
+	mux.Handle("DELETE /users/{id}", deleteUserHandler(s.users, s.log))
 	mux.Handle("POST /credentials", createCredentialHandler(s.credentials, s.sealer, s.log))
 	mux.Handle("GET /credentials", listCredentialsHandler(s.credentials, s.log))
 	mux.Handle("DELETE /credentials/{id}", deleteCredentialHandler(s.credentials, s.log))
@@ -174,7 +186,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("DELETE /templates/{id}", deleteTemplateHandler(s.templates, s.log))
 	mux.Handle("POST /templates/{id}/launch", launchTemplateHandler(s.templates, s.submitter, s.log))
 	if s.tokens != nil {
-		gate := &authGate{tokens: s.tokens, log: s.log}
+		gate := &authGate{tokens: s.tokens, users: s.users, log: s.log}
 		return gate.wrap(mux)
 	}
 	return mux
