@@ -17,6 +17,7 @@ import (
 	"github.com/dcadolph/yardmaster/internal/auth"
 	"github.com/dcadolph/yardmaster/internal/credential"
 	"github.com/dcadolph/yardmaster/internal/event"
+	"github.com/dcadolph/yardmaster/internal/inventory"
 	"github.com/dcadolph/yardmaster/internal/project"
 	"github.com/dcadolph/yardmaster/internal/run"
 	"github.com/dcadolph/yardmaster/internal/schedule"
@@ -52,7 +53,8 @@ CREATE TABLE IF NOT EXISTS runs (
 	cancel_requested INTEGER NOT NULL DEFAULT 0,
 	credential_ids TEXT NOT NULL DEFAULT '',
 	project_id    TEXT NOT NULL DEFAULT '',
-	commit_sha    TEXT NOT NULL DEFAULT ''
+	commit_sha    TEXT NOT NULL DEFAULT '',
+	inventory_id  TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_runs_created_at ON runs(created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_parent ON runs(parent_id, shard_index);
@@ -141,6 +143,12 @@ CREATE TABLE IF NOT EXISTS templates (
 	extra_vars     TEXT NOT NULL DEFAULT '',
 	created_at     TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS inventories (
+	id         TEXT PRIMARY KEY,
+	name       TEXT NOT NULL DEFAULT '',
+	content    TEXT NOT NULL,
+	created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS credentials (
 	id         TEXT PRIMARY KEY,
 	name       TEXT NOT NULL DEFAULT '',
@@ -155,6 +163,7 @@ ALTER TABLE runs ADD COLUMN IF NOT EXISTS credential_ids TEXT NOT NULL DEFAULT '
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS project_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS commit_sha TEXT NOT NULL DEFAULT '';
 ALTER TABLE tokens ADD COLUMN IF NOT EXISTS user_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS inventory_id TEXT NOT NULL DEFAULT '';
 `
 
 // store is a run.Store backed by a PostgreSQL database.
@@ -186,6 +195,8 @@ type DB struct {
 	templates *templateStore
 	// users is the account store.
 	users *userStore
+	// inventories is the stored inventory store.
+	inventories *inventoryStore
 }
 
 // Open connects to the PostgreSQL database at dsn, applies the schema, and returns the bundled
@@ -218,7 +229,8 @@ func Open(dsn string) (*DB, error) {
 		credentials: &credentialStore{db: db},
 		projects:    &projectStore{db: db},
 		templates:   &templateStore{db: db},
-		users:       &userStore{db: db}}, nil
+		users:       &userStore{db: db},
+		inventories: &inventoryStore{db: db}}, nil
 }
 
 // Runs returns the run store.
@@ -256,6 +268,11 @@ func (d *DB) Users() user.Store {
 	return d.users
 }
 
+// Inventories returns the stored inventory store.
+func (d *DB) Inventories() inventory.Store {
+	return d.inventories
+}
+
 // Close closes the underlying database.
 func (d *DB) Close() error {
 	return d.db.Close()
@@ -265,7 +282,7 @@ func (d *DB) Close() error {
 const runColumns = `id, playbook, inventory, status, exit_code, error, created_at, started_at,
 	ended_at, parent_id, shard_index, shard_count, limit_pattern, kind, step_name, step_index,
 	retry_of, attempt, extra_vars, outputs, claimed_by, claimed_at, cancel_requested,
-	credential_ids, project_id, commit_sha`
+	credential_ids, project_id, commit_sha, inventory_id`
 
 // Save inserts or replaces the run identified by r.ID.
 func (s *store) Save(ctx context.Context, r *run.Run) error {
@@ -274,9 +291,9 @@ INSERT INTO runs
 	(id, playbook, inventory, status, exit_code, error, created_at, started_at, ended_at,
 	 parent_id, shard_index, shard_count, limit_pattern, kind, step_name, step_index, retry_of,
 	 attempt, extra_vars, outputs, claimed_by, claimed_at, cancel_requested, credential_ids,
-	 project_id, commit_sha)
+	 project_id, commit_sha, inventory_id)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
-	$21, $22, $23, $24, $25, $26)
+	$21, $22, $23, $24, $25, $26, $27)
 ON CONFLICT(id) DO UPDATE SET
 	playbook=excluded.playbook, inventory=excluded.inventory, status=excluded.status,
 	exit_code=excluded.exit_code, error=excluded.error, created_at=excluded.created_at,
@@ -287,7 +304,8 @@ ON CONFLICT(id) DO UPDATE SET
 	retry_of=excluded.retry_of, attempt=excluded.attempt, extra_vars=excluded.extra_vars,
 	outputs=excluded.outputs, claimed_by=excluded.claimed_by, claimed_at=excluded.claimed_at,
 	cancel_requested=excluded.cancel_requested, credential_ids=excluded.credential_ids,
-	project_id=excluded.project_id, commit_sha=excluded.commit_sha`
+	project_id=excluded.project_id, commit_sha=excluded.commit_sha,
+	inventory_id=excluded.inventory_id`
 	_, err := s.db.ExecContext(ctx, q,
 		r.ID, r.Playbook, r.Inventory, string(r.Status), nullInt(r.ExitCode), r.Error,
 		formatTime(r.CreatedAt), nullTime(r.StartedAt), nullTime(r.EndedAt),
@@ -295,6 +313,7 @@ ON CONFLICT(id) DO UPDATE SET
 		r.Kind, r.StepName, nullInt(r.StepIndex), nullString(r.RetryOf), r.Attempt,
 		jsonMap(r.ExtraVars), jsonMap(r.Outputs), r.ClaimedBy, nullTime(r.ClaimedAt),
 		boolToInt(r.CancelRequested), joinIDs(r.CredentialIDs), r.ProjectID, r.CommitSHA,
+		r.InventoryID,
 	)
 	if err != nil {
 		return fmt.Errorf("save run: %w", err)
@@ -798,7 +817,8 @@ func scanRun(s scanner) (*run.Run, error) {
 	if err := s.Scan(&r.ID, &r.Playbook, &r.Inventory, &status, &exit, &r.Error,
 		&created, &started, &ended, &parent, &shardIdx, &shardCnt, &r.Limit,
 		&r.Kind, &r.StepName, &stepIdx, &retryOf, &r.Attempt, &extra, &outputs,
-		&r.ClaimedBy, &claimed, &cancelI, &credIDs, &r.ProjectID, &r.CommitSHA); err != nil {
+		&r.ClaimedBy, &claimed, &cancelI, &credIDs, &r.ProjectID, &r.CommitSHA,
+		&r.InventoryID); err != nil {
 		return nil, err
 	}
 	r.CancelRequested = cancelI != 0

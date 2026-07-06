@@ -9,6 +9,7 @@ import (
 
 	"github.com/dcadolph/yardmaster/internal/auth"
 	"github.com/dcadolph/yardmaster/internal/credential"
+	"github.com/dcadolph/yardmaster/internal/inventory"
 	"github.com/dcadolph/yardmaster/internal/live"
 	"github.com/dcadolph/yardmaster/internal/project"
 	"github.com/dcadolph/yardmaster/internal/run"
@@ -75,6 +76,11 @@ func WithUsers(users user.Store) Option {
 	return func(srv *Server) { srv.users = users }
 }
 
+// WithInventories enables the inventory endpoints backed by the given store.
+func WithInventories(store inventory.Store) Option {
+	return func(srv *Server) { srv.inventories = store }
+}
+
 // WithTemplates enables the template endpoints backed by the given store.
 func WithTemplates(store template.Store) Option {
 	return func(srv *Server) { srv.templates = store }
@@ -123,6 +129,8 @@ type Server struct {
 	templates template.Store
 	// users backs accounts when configured.
 	users user.Store
+	// inventories backs the inventory endpoints when configured.
+	inventories inventory.Store
 }
 
 // New returns a Server. It panics if store or submitter is nil; a nil logger becomes a no-op.
@@ -182,6 +190,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /projects", createProjectHandler(s.projects, s.log))
 	mux.Handle("GET /projects", listProjectsHandler(s.projects, s.log))
 	mux.Handle("DELETE /projects/{id}", deleteProjectHandler(s.projects, s.log))
+	mux.Handle("POST /inventories", createInventoryHandler(s.inventories, s.log))
+	mux.Handle("GET /inventories", listInventoriesHandler(s.inventories, s.log))
+	mux.Handle("DELETE /inventories/{id}", deleteInventoryHandler(s.inventories, s.log))
 	mux.Handle("POST /templates", createTemplateHandler(s.templates, s.log))
 	mux.Handle("GET /templates", listTemplatesHandler(s.templates, s.log))
 	mux.Handle("DELETE /templates/{id}", deleteTemplateHandler(s.templates, s.log))

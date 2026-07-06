@@ -18,6 +18,7 @@ import (
 	"github.com/dcadolph/yardmaster/internal/auth"
 	"github.com/dcadolph/yardmaster/internal/credential"
 	"github.com/dcadolph/yardmaster/internal/dispatch"
+	"github.com/dcadolph/yardmaster/internal/inventory"
 	"github.com/dcadolph/yardmaster/internal/live"
 	"github.com/dcadolph/yardmaster/internal/logutil"
 	"github.com/dcadolph/yardmaster/internal/pgstore"
@@ -90,6 +91,8 @@ type storeBundle interface {
 	Templates() template.Store
 	// Users returns the account store.
 	Users() user.Store
+	// Inventories returns the stored inventory store.
+	Inventories() inventory.Store
 	// Close closes the underlying database.
 	Close() error
 }
@@ -142,7 +145,8 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	disp := dispatch.New(store, runner, log, dispatch.WithPublisher(hub),
 		dispatch.WithCredentials(bundle.Credentials(), sealer),
 		dispatch.WithProjects(bundle.Projects(), syncer),
-		dispatch.WithWebhooks(notifyWebhooks))
+		dispatch.WithWebhooks(notifyWebhooks),
+		dispatch.WithInventories(bundle.Inventories()))
 	defer disp.Close()
 
 	scheduler := schedule.NewScheduler(schedules, disp, log,
@@ -158,7 +162,8 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			server.WithCredentials(bundle.Credentials(), sealer),
 			server.WithProjects(bundle.Projects()),
 			server.WithTemplates(bundle.Templates()),
-			server.WithUsers(bundle.Users())).Handler(),
+			server.WithUsers(bundle.Users()),
+			server.WithInventories(bundle.Inventories())).Handler(),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 

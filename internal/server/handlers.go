@@ -13,6 +13,7 @@ import (
 	"github.com/dcadolph/yardmaster/internal/credential"
 	"github.com/dcadolph/yardmaster/internal/dispatch"
 	"github.com/dcadolph/yardmaster/internal/event"
+	"github.com/dcadolph/yardmaster/internal/inventory"
 	"github.com/dcadolph/yardmaster/internal/live"
 	"github.com/dcadolph/yardmaster/internal/project"
 	"github.com/dcadolph/yardmaster/internal/run"
@@ -33,6 +34,8 @@ type createRunRequest struct {
 	CredentialIDs []string `json:"credential_ids,omitempty"`
 	// ProjectID sources the playbook and inventory from a git project.
 	ProjectID string `json:"project_id,omitempty"`
+	// InventoryID targets a stored inventory instead of a path.
+	InventoryID string `json:"inventory_id,omitempty"`
 }
 
 // createPipelineRequest is the JSON body accepted by POST /pipelines.
@@ -235,6 +238,9 @@ func createRunHandler(submitter Submitter, log *zap.Logger) http.HandlerFunc {
 		if req.ProjectID != "" {
 			opts = append(opts, run.WithProject(req.ProjectID))
 		}
+		if req.InventoryID != "" {
+			opts = append(opts, run.WithInventory(req.InventoryID))
+		}
 		if req.Shards >= 2 {
 			created, err = submitter.SubmitSplit(r.Context(), req.Playbook, req.Inventory,
 				req.Shards, opts...)
@@ -243,7 +249,7 @@ func createRunHandler(submitter Submitter, log *zap.Logger) http.HandlerFunc {
 		}
 		switch {
 		case errors.Is(err, credential.ErrNotFound), errors.Is(err, credential.ErrNoKey),
-			errors.Is(err, project.ErrNotFound):
+			errors.Is(err, project.ErrNotFound), errors.Is(err, inventory.ErrNotFound):
 			respondError(w, log, http.StatusBadRequest, err.Error())
 			return
 		case err != nil:

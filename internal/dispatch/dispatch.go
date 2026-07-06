@@ -19,6 +19,7 @@ import (
 
 	"github.com/dcadolph/yardmaster/internal/credential"
 	"github.com/dcadolph/yardmaster/internal/event"
+	"github.com/dcadolph/yardmaster/internal/inventory"
 	"github.com/dcadolph/yardmaster/internal/project"
 	"github.com/dcadolph/yardmaster/internal/roundhouse"
 	"github.com/dcadolph/yardmaster/internal/run"
@@ -106,6 +107,8 @@ type Dispatcher struct {
 	syncer *project.Syncer
 	// webhooks receive terminal run notifications.
 	webhooks []string
+	// inventories resolves stored inventories, nil when the feature is off.
+	inventories inventory.Store
 }
 
 // Option configures a Dispatcher.
@@ -131,6 +134,8 @@ type config struct {
 	syncer *project.Syncer
 	// webhooks receive terminal run notifications.
 	webhooks []string
+	// inventories resolves stored inventories, nil when the feature is off.
+	inventories inventory.Store
 }
 
 // WithWorkers sets the worker pool size. Values below one fall back to DefaultWorkers.
@@ -201,6 +206,7 @@ func New(store run.Store, runner roundhouse.Runner, log *zap.Logger, opts ...Opt
 		projects:      cfg.projects,
 		syncer:        cfg.syncer,
 		webhooks:      cfg.webhooks,
+		inventories:   cfg.inventories,
 	}
 	d.wg.Add(2)
 	go d.claimLoop()
@@ -291,6 +297,9 @@ func (d *Dispatcher) validateRun(ctx context.Context, r *run.Run) error {
 	if err := d.validateCredentials(ctx, r.CredentialIDs); err != nil {
 		return err
 	}
+	if err := d.validateInventory(ctx, r.InventoryID); err != nil {
+		return err
+	}
 	return d.validateProject(ctx, r.ProjectID)
 }
 
@@ -335,7 +344,19 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 		return nil, ErrNoHostLister
 	}
 
-	hosts, err := d.hostLister.Hosts(ctx, inventory)
+	// A stored inventory must exist as a file before its hosts can be enumerated for sharding.
+	listPath := inventory
+	probe := &run.Run{}
+	run.ApplyOptions(probe, opts)
+	if probe.InventoryID != "" {
+		path, cleanup, err := d.inventoryFile(probe.InventoryID)
+		if err != nil {
+			return nil, err
+		}
+		defer cleanup()
+		listPath = path
+	}
+	hosts, err := d.hostLister.Hosts(ctx, listPath)
 	if err != nil {
 		return nil, fmt.Errorf("list hosts: %w", err)
 	}
@@ -847,6 +868,16 @@ func (d *Dispatcher) execute(ctx context.Context, r *run.Run) run.Status {
 		Playbook: r.Playbook, Inventory: r.Inventory, EventsPath: eventsPath, Limit: r.Limit,
 		ExtraVars: r.ExtraVars,
 	}
+	invCleanup, err := d.materializeInventory(r, &spec)
+	if err != nil {
+		close(stop)
+		<-tailed
+		d.finalize(r, run.StatusFailed, nil, err.Error())
+		d.publisher.CloseRun(r.ID)
+		return run.StatusFailed
+	}
+	defer invCleanup()
+
 	if err := d.resolveProject(r, &spec); err != nil {
 		close(stop)
 		<-tailed

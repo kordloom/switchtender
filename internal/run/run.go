@@ -99,6 +99,8 @@ type Run struct {
 	ProjectID string `json:"project_id,omitempty"`
 	// CommitSHA is the exact commit the run executed, stamped after the project sync.
 	CommitSHA string `json:"commit_sha,omitempty"`
+	// InventoryID names a stored inventory materialized for this run instead of a file path.
+	InventoryID string `json:"inventory_id,omitempty"`
 }
 
 // Clone returns a deep copy so callers cannot mutate stored state through shared pointers.
@@ -160,6 +162,11 @@ func WithCredentialIDs(ids []string) SubmitOption {
 // WithProject sources the run's playbook and inventory paths from a git project.
 func WithProject(id string) SubmitOption {
 	return func(r *Run) { r.ProjectID = id }
+}
+
+// WithInventory targets a stored inventory instead of a file path.
+func WithInventory(id string) SubmitOption {
+	return func(r *Run) { r.InventoryID = id }
 }
 
 // WithExtraVars injects variables into the run.
