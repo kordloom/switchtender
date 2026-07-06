@@ -490,7 +490,7 @@ func TestRunStreamDrainsStore(t *testing.T) {
 	reader := bufio.NewReader(res.Body)
 	deadline := time.Now().Add(5 * time.Second)
 	var sawEvent, sawLog bool
-	for !(sawEvent && sawLog) {
+	for !sawEvent || !sawLog {
 		if time.Now().After(deadline) {
 			t.Fatalf("stream never delivered store rows: event=%v log=%v", sawEvent, sawLog)
 		}
