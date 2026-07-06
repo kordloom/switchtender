@@ -722,10 +722,16 @@ func (d *Dispatcher) finalize(r *run.Run, status run.Status, exitCode *int, fail
 }
 
 // save persists r using a background context so terminal state is recorded even during shutdown.
+// A failed save retries briefly, since losing a terminal status strands the run as running.
 func (d *Dispatcher) save(r *run.Run) {
-	if err := d.store.Save(context.Background(), r); err != nil {
-		d.log.Error("dispatch: save run: "+err.Error(), zap.String("run_id", r.ID))
+	var err error
+	for attempt := 0; attempt < 3; attempt++ {
+		if err = d.store.Save(context.Background(), r); err == nil {
+			return
+		}
+		time.Sleep(time.Duration(attempt+1) * 50 * time.Millisecond)
 	}
+	d.log.Error("dispatch: save run: "+err.Error(), zap.String("run_id", r.ID))
 }
 
 // eventsFile creates a temp file for the run's structured events and returns its path and a
