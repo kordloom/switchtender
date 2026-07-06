@@ -10,6 +10,7 @@ document.addEventListener("DOMContentLoaded", () => {
 	}
 	const page = document.body.dataset.page;
 	if (page === "index") {
+		wireLaunchForm();
 		loadRuns();
 	} else if (page === "detail") {
 		loadDetail(document.body.dataset.runId);
@@ -23,6 +24,9 @@ document.addEventListener("DOMContentLoaded", () => {
 		loadSchedules();
 	} else if (page === "login") {
 		loadLogin();
+	} else if (page === "credentials") {
+		wireCredentialForm();
+		loadCredentials();
 	}
 });
 
@@ -83,6 +87,115 @@ function fmtTime(iso) {
 	if (!iso) return "";
 	const d = new Date(iso);
 	return isNaN(d) ? iso : d.toLocaleString();
+}
+
+// wireLaunchForm hooks the launch panel up to POST /runs and fills the credential picker.
+function wireLaunchForm() {
+	const form = document.getElementById("launch-form");
+	if (!form) return;
+	fillCredentialPicker();
+	form.addEventListener("submit", async (e) => {
+		e.preventDefault();
+		const status = document.getElementById("launch-status");
+		const payload = {
+			playbook: document.getElementById("launch-playbook").value.trim(),
+			inventory: document.getElementById("launch-inventory").value.trim(),
+		};
+		const shards = parseInt(document.getElementById("launch-shards").value, 10);
+		if (shards >= 2) payload.shards = shards;
+		const picked = Array.from(document.getElementById("launch-credentials").selectedOptions)
+			.map((o) => o.value);
+		if (picked.length) payload.credential_ids = picked;
+		status.textContent = "Launching.";
+		try {
+			const created = await postAction("/runs", payload);
+			location.href = "/ui/runs/" + created.id;
+		} catch (err) {
+			status.textContent = "Launch failed: " + err.message;
+		}
+	});
+}
+
+// fillCredentialPicker loads stored credentials into the launch multiselect.
+async function fillCredentialPicker() {
+	const picker = document.getElementById("launch-credentials");
+	if (!picker) return;
+	try {
+		const data = await getJSON("/credentials");
+		for (const c of data.credentials || []) {
+			const opt = document.createElement("option");
+			opt.value = c.id;
+			opt.textContent = c.name + " (" + c.kind + ")";
+			picker.appendChild(opt);
+		}
+	} catch (_) { /* credentials disabled or unauthorized; picker stays empty */ }
+}
+
+// wireCredentialForm hooks the add credential form up to POST /credentials.
+function wireCredentialForm() {
+	const form = document.getElementById("cred-form");
+	form.addEventListener("submit", async (e) => {
+		e.preventDefault();
+		const status = document.getElementById("cred-status");
+		const payload = {
+			name: document.getElementById("cred-name").value.trim(),
+			kind: document.getElementById("cred-kind").value,
+			secret: document.getElementById("cred-secret").value,
+		};
+		try {
+			await postAction("/credentials", payload);
+			document.getElementById("cred-name").value = "";
+			document.getElementById("cred-secret").value = "";
+			status.textContent = "Saved.";
+			document.getElementById("credentials").innerHTML = "";
+			loadCredentials();
+		} catch (err) {
+			status.textContent = "Save failed: " + err.message;
+		}
+	});
+}
+
+// loadCredentials populates the credential table with delete actions.
+async function loadCredentials() {
+	try {
+		const data = await getJSON("/credentials");
+		const creds = data.credentials || [];
+		if (creds.length === 0) {
+			setStatus("No credentials yet.");
+			return;
+		}
+		const tbody = document.getElementById("credentials");
+		for (const c of creds) {
+			const tr = document.createElement("tr");
+			tr.appendChild(td(c.name));
+			tr.appendChild(td(c.kind, "mono"));
+			tr.appendChild(td(fmtTime(c.created_at)));
+			const actions = document.createElement("td");
+			const del = document.createElement("button");
+			del.className = "button danger";
+			del.textContent = "Delete";
+			del.addEventListener("click", async (e) => {
+				e.preventDefault();
+				if (!window.confirm("Delete credential " + c.name + "?")) return;
+				try {
+					const res = await fetch("/credentials/" + c.id, {
+						method: "DELETE", headers: authHeaders(),
+					});
+					if (!res.ok) throw new Error("HTTP " + res.status);
+					tr.remove();
+				} catch (err) {
+					setStatus("Delete failed: " + err.message);
+				}
+			});
+			actions.appendChild(del);
+			tr.appendChild(actions);
+			tbody.appendChild(tr);
+		}
+		setStatus("");
+		document.querySelector("table.runs").hidden = false;
+	} catch (e) {
+		setStatus("Failed to load credentials: " + e.message);
+	}
 }
 
 // loadRuns populates the run history table.

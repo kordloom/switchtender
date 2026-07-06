@@ -14,11 +14,36 @@
 		<nav class="nav">
 			<a href="/ui/fleet">Fleet health</a>
 			<a href="/ui/tasks">Task trends</a>
+			<a href="/ui/credentials">Credentials</a>
 			<a href="/ui/schedules">Schedules</a>
 		</nav>
 	</header>
 
 	<main class="content">
+		<section class="panel" id="launch-panel">
+			<div class="panel-head">
+				<h2>Launch a run</h2>
+			</div>
+			<form id="launch-form" class="launch-grid">
+				<label class="field-label">Playbook
+					<input id="launch-playbook" class="input mono" placeholder="/srv/ansible/site.yml" required>
+				</label>
+				<label class="field-label">Inventory
+					<input id="launch-inventory" class="input mono" placeholder="/srv/ansible/hosts.ini">
+				</label>
+				<label class="field-label">Shards
+					<input id="launch-shards" class="input" type="number" min="0" max="64" placeholder="0">
+				</label>
+				<label class="field-label">Credentials
+					<select id="launch-credentials" class="input" multiple size="3"></select>
+				</label>
+				<div class="launch-actions">
+					<button type="submit" class="button primary">Launch</button>
+					<span id="launch-status" class="muted"></span>
+				</div>
+			</form>
+		</section>
+
 		<h1>Runs</h1>
 		<div id="status" class="muted">Loading runs.</div>
 		<div class="summary" id="summary" hidden></div>
