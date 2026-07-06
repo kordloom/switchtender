@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/dcadolph/yardmaster/internal/auth"
 	"github.com/dcadolph/yardmaster/internal/dispatch"
+	"github.com/dcadolph/yardmaster/internal/event"
 	"github.com/dcadolph/yardmaster/internal/live"
 	"github.com/dcadolph/yardmaster/internal/run"
 	"github.com/dcadolph/yardmaster/internal/schedule"
@@ -453,51 +455,99 @@ func TestRunStreamTerminalEndsImmediately(t *testing.T) {
 	}
 }
 
-func TestRunStreamRelaysMessages(t *testing.T) {
+func TestRunStreamDrainsStore(t *testing.T) {
 	t.Parallel()
+	ctx := context.Background()
 	store := run.NewMemStore()
-	if err := store.Save(context.Background(),
+	if err := store.Save(ctx,
 		&run.Run{ID: "run_live", Status: run.StatusRunning, CreatedAt: time.Now()}); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
-	ch := make(chan live.Message, 2)
-	ch <- live.Message{Type: "event", Data: []byte(`{"type":"play_start"}`)}
-	ch <- live.Message{Type: "end"}
-	handler := New(store, &fakeSubmitter{}, zap.NewNop(), WithStreamer(&fakeStreamer{ch: ch})).Handler()
+	wake := make(chan live.Message, 4)
+	handler := New(store, &fakeSubmitter{}, zap.NewNop(),
+		WithStreamer(&fakeStreamer{ch: wake})).Handler()
 
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/runs/run_live/stream", nil))
-
-	body := rec.Body.String()
-	if !strings.Contains(body, "event: event") || !strings.Contains(body, "play_start") {
-		t.Errorf("body %q missing the relayed event", body)
+	srv := httptest.NewServer(handler)
+	defer srv.Close()
+	res, err := http.Get(srv.URL + "/runs/run_live/stream")
+	if err != nil {
+		t.Fatalf("GET stream: %v", err)
 	}
-	if !strings.Contains(body, "event: end") {
-		t.Errorf("body %q missing the end", body)
+	defer func() { _ = res.Body.Close() }()
+
+	// New store rows stream out, whether written by this process or any other; the hub message
+	// only wakes the drain early.
+	at := time.Date(2026, 7, 6, 0, 0, 0, 0, time.UTC)
+	if err := store.AppendEvents(ctx, "run_live",
+		[]event.Event{{Type: event.TypeTaskStart, Time: at, Task: "deploy"}}); err != nil {
+		t.Fatalf("AppendEvents() error = %v", err)
+	}
+	if err := store.AppendLog(ctx, "run_live", []byte("remote says hello")); err != nil {
+		t.Fatalf("AppendLog() error = %v", err)
+	}
+	wake <- live.Message{Type: "event"}
+
+	reader := bufio.NewReader(res.Body)
+	deadline := time.Now().Add(5 * time.Second)
+	var sawEvent, sawLog bool
+	for !(sawEvent && sawLog) {
+		if time.Now().After(deadline) {
+			t.Fatalf("stream never delivered store rows: event=%v log=%v", sawEvent, sawLog)
+		}
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			t.Fatalf("read stream: %v", err)
+		}
+		if strings.Contains(line, "deploy") {
+			sawEvent = true
+		}
+		if strings.Contains(line, "remote says hello") {
+			sawLog = true
+		}
+	}
+
+	// A terminal store state ends the stream on the next drain.
+	done := &run.Run{ID: "run_live", Status: run.StatusSucceeded, CreatedAt: time.Now()}
+	if err := store.Save(ctx, done); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	wake <- live.Message{Type: "event"}
+	sawEnd := false
+	for time.Now().Before(deadline) {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			break
+		}
+		if strings.Contains(line, "event: end") {
+			sawEnd = true
+			break
+		}
+	}
+	if !sawEnd {
+		t.Error("stream did not end after the run turned terminal")
 	}
 }
 
-func TestRunStreamNotFoundAndDisabled(t *testing.T) {
+func TestRunStreamWithoutHub(t *testing.T) {
 	t.Parallel()
+	ctx := context.Background()
 	store := run.NewMemStore()
-	if err := store.Save(context.Background(),
-		&run.Run{ID: "run_live", Status: run.StatusRunning, CreatedAt: time.Now()}); err != nil {
+	if err := store.Save(ctx,
+		&run.Run{ID: "run_done", Status: run.StatusSucceeded, CreatedAt: time.Now()}); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
-
-	withStream := New(store, &fakeSubmitter{}, zap.NewNop(),
-		WithStreamer(&fakeStreamer{ch: make(chan live.Message)})).Handler()
+	// No streamer configured: the store poll alone serves the stream.
+	handler := New(store, &fakeSubmitter{}, zap.NewNop()).Handler()
 	rec := httptest.NewRecorder()
-	withStream.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/runs/missing/stream", nil))
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("unknown run status = %d, want 404", rec.Code)
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/runs/run_done/stream", nil))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "event: end") {
+		t.Errorf("no-hub stream = %d %q, want 200 with end", rec.Code, rec.Body.String())
 	}
 
-	noStream := New(store, &fakeSubmitter{}, zap.NewNop()).Handler()
 	rec = httptest.NewRecorder()
-	noStream.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/runs/run_live/stream", nil))
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/runs/ghost/stream", nil))
 	if rec.Code != http.StatusNotFound {
-		t.Errorf("disabled streamer status = %d, want 404", rec.Code)
+		t.Errorf("unknown run = %d, want 404", rec.Code)
 	}
 }
 
