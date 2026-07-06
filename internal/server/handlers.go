@@ -181,6 +181,31 @@ func taskTrendsHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
 	}
 }
 
+// workersResponse wraps the executor list.
+type workersResponse struct {
+	// Workers is the list of executors, most recently seen first.
+	Workers []run.WorkerInfo `json:"workers"`
+	// Count is the number returned.
+	Count int `json:"count"`
+}
+
+// workersHandler lists the fleet's executors from the leases they hold.
+func workersHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
+	if store == nil {
+		panic("server: workersHandler: Store required")
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		workers, err := store.Workers(r.Context())
+		if err != nil {
+			log.Error("server: list workers: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not list workers")
+			return
+		}
+		respondJSON(w, log, http.StatusOK,
+			workersResponse{Workers: workers, Count: len(workers)}, wantsPretty(r))
+	}
+}
+
 // healthHandler reports service liveness.
 func healthHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

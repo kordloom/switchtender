@@ -37,6 +37,8 @@ type Store interface {
 	ReclaimStale(ctx context.Context, cutoff time.Time) (int, error)
 	// RequestCancel marks the run so whichever process holds it stops it, or ErrNotFound.
 	RequestCancel(ctx context.Context, id string) error
+	// Workers lists executors by the leases they hold, most recently seen first.
+	Workers(ctx context.Context) ([]WorkerInfo, error)
 	// SaveHostSummary replaces the stored per host summaries for a run.
 	SaveHostSummary(ctx context.Context, runID string, summaries []HostSummary) error
 	// FleetHealth ranks hosts by failures over their most recent window runs, worst first.
@@ -266,6 +268,40 @@ func (m *memStore) RequestCancel(_ context.Context, id string) error {
 	}
 	r.CancelRequested = true
 	return nil
+}
+
+// Workers lists executors by the leases they hold, most recently seen first.
+func (m *memStore) Workers(_ context.Context) ([]WorkerInfo, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	byOwner := make(map[string]*WorkerInfo)
+	for _, r := range m.runs {
+		if r.ClaimedBy == "" || r.ClaimedAt == nil {
+			continue
+		}
+		w, ok := byOwner[r.ClaimedBy]
+		if !ok {
+			w = &WorkerInfo{Owner: r.ClaimedBy}
+			byOwner[r.ClaimedBy] = w
+		}
+		if r.Status == StatusRunning {
+			w.Active++
+		}
+		if r.ClaimedAt.After(w.LastSeen) {
+			w.LastSeen = *r.ClaimedAt
+		}
+	}
+	out := make([]WorkerInfo, 0, len(byOwner))
+	for _, w := range byOwner {
+		out = append(out, *w)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].LastSeen.Equal(out[j].LastSeen) {
+			return out[i].Owner < out[j].Owner
+		}
+		return out[i].LastSeen.After(out[j].LastSeen)
+	})
+	return out, nil
 }
 
 // SaveHostSummary replaces the stored per host summaries for a run.

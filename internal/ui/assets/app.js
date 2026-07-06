@@ -36,6 +36,8 @@ document.addEventListener("DOMContentLoaded", () => {
 	} else if (page === "users") {
 		wireUserForm();
 		loadUsers();
+	} else if (page === "workers") {
+		loadWorkers();
 	}
 	hideAdminNav();
 });
@@ -388,6 +390,37 @@ function deleteCell(path, label, tr) {
 	});
 	cell.appendChild(del);
 	return cell;
+}
+
+// loadWorkers populates the executor table, marking anyone silent past the lease window stale.
+async function loadWorkers() {
+	try {
+		const data = await getJSON("/workers");
+		const workers = data.workers || [];
+		if (workers.length === 0) {
+			setStatus("No executors seen yet. Run something.");
+			return;
+		}
+		const tbody = document.getElementById("workers");
+		for (const w of workers) {
+			const tr = document.createElement("tr");
+			tr.appendChild(td(w.owner, "mono"));
+			const health = document.createElement("td");
+			const fresh = Date.now() - new Date(w.last_seen).getTime() < 30000;
+			const chip = document.createElement("span");
+			chip.className = fresh ? "chip ok" : "chip none";
+			chip.textContent = fresh ? "alive" : "stale";
+			health.appendChild(chip);
+			tr.appendChild(health);
+			tr.appendChild(td(String(w.active)));
+			tr.appendChild(td(fmtTime(w.last_seen)));
+			tbody.appendChild(tr);
+		}
+		setStatus("");
+		document.querySelector("table.runs").hidden = false;
+	} catch (e) {
+		setStatus("Failed to load workers: " + e.message);
+	}
 }
 
 // loadRuns populates the run history table.

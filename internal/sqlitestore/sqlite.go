@@ -601,6 +601,43 @@ SELECT host, AVG(duration_seconds) FROM ranked WHERE rn <= ? GROUP BY host`
 	return out, nil
 }
 
+// Workers lists executors by the leases they hold, most recently seen first.
+func (s *store) Workers(ctx context.Context) ([]run.WorkerInfo, error) {
+	const q = `
+SELECT claimed_by,
+	SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) AS active,
+	MAX(claimed_at) AS last_seen
+FROM runs
+WHERE claimed_by != '' AND claimed_at IS NOT NULL
+GROUP BY claimed_by
+ORDER BY last_seen DESC, claimed_by`
+
+	rows, err := s.db.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("list workers: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []run.WorkerInfo
+	for rows.Next() {
+		var (
+			w    run.WorkerInfo
+			seen string
+		)
+		if err := rows.Scan(&w.Owner, &w.Active, &seen); err != nil {
+			return nil, fmt.Errorf("list workers: %w", err)
+		}
+		if w.LastSeen, err = parseTime(seen); err != nil {
+			return nil, fmt.Errorf("list workers: %w", err)
+		}
+		out = append(out, w)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list workers: %w", err)
+	}
+	return out, nil
+}
+
 // queryRuns runs a select that returns run rows and scans them all.
 func (s *store) queryRuns(ctx context.Context, label, query string, args ...any) ([]*run.Run, error) {
 	rows, err := s.db.QueryContext(ctx, query, args...)
