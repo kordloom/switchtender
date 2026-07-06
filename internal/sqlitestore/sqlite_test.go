@@ -3,6 +3,8 @@ package sqlitestore_test
 import (
 	"context"
 	"database/sql"
+	"github.com/dcadolph/yardmaster/internal/audit"
+	"github.com/dcadolph/yardmaster/internal/audittest"
 	"github.com/dcadolph/yardmaster/internal/auth"
 	"github.com/dcadolph/yardmaster/internal/authtest"
 	"github.com/dcadolph/yardmaster/internal/credential"
@@ -207,5 +209,17 @@ func TestInventoryStoreContract(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = db.Close() })
 		return db.Inventories()
+	})
+}
+
+func TestAuditStoreContract(t *testing.T) {
+	t.Parallel()
+	audittest.Contract(t, func() audit.Store {
+		db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "yardmaster.db"))
+		if err != nil {
+			t.Fatalf("Open() error = %v", err)
+		}
+		t.Cleanup(func() { _ = db.Close() })
+		return db.Audits()
 	})
 }

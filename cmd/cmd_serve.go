@@ -15,6 +15,7 @@ import (
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 
+	"github.com/dcadolph/yardmaster/internal/audit"
 	"github.com/dcadolph/yardmaster/internal/auth"
 	"github.com/dcadolph/yardmaster/internal/credential"
 	"github.com/dcadolph/yardmaster/internal/dispatch"
@@ -93,6 +94,8 @@ type storeBundle interface {
 	Users() user.Store
 	// Inventories returns the stored inventory store.
 	Inventories() inventory.Store
+	// Audits returns the audit trail store.
+	Audits() audit.Store
 	// Close closes the underlying database.
 	Close() error
 }
@@ -163,7 +166,8 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			server.WithProjects(bundle.Projects()),
 			server.WithTemplates(bundle.Templates()),
 			server.WithUsers(bundle.Users()),
-			server.WithInventories(bundle.Inventories())).Handler(),
+			server.WithInventories(bundle.Inventories()),
+			server.WithAudit(bundle.Audits())).Handler(),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 

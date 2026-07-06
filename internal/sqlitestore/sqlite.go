@@ -14,6 +14,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
+	"github.com/dcadolph/yardmaster/internal/audit"
 	"github.com/dcadolph/yardmaster/internal/auth"
 	"github.com/dcadolph/yardmaster/internal/credential"
 	"github.com/dcadolph/yardmaster/internal/event"
@@ -144,6 +145,14 @@ CREATE TABLE IF NOT EXISTS templates (
 	extra_vars     TEXT NOT NULL DEFAULT '',
 	created_at     TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS audit_entries (
+	id     TEXT PRIMARY KEY,
+	at     TEXT NOT NULL,
+	actor  TEXT NOT NULL DEFAULT '',
+	method TEXT NOT NULL,
+	path   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_audit_at ON audit_entries(at DESC);
 CREATE TABLE IF NOT EXISTS inventories (
 	id         TEXT PRIMARY KEY,
 	name       TEXT NOT NULL DEFAULT '',
@@ -209,6 +218,8 @@ type DB struct {
 	users *userStore
 	// inventories is the stored inventory store.
 	inventories *inventoryStore
+	// audits is the audit trail store.
+	audits *auditStore
 }
 
 // Open opens the SQLite database at path, applies the schema, and returns the bundled stores.
@@ -248,7 +259,8 @@ func Open(path string) (*DB, error) {
 		projects:    &projectStore{db: db},
 		templates:   &templateStore{db: db},
 		users:       &userStore{db: db},
-		inventories: &inventoryStore{db: db}}, nil
+		inventories: &inventoryStore{db: db},
+		audits:      &auditStore{db: db}}, nil
 }
 
 // Runs returns the run store.
@@ -289,6 +301,11 @@ func (d *DB) Users() user.Store {
 // Inventories returns the stored inventory store.
 func (d *DB) Inventories() inventory.Store {
 	return d.inventories
+}
+
+// Audits returns the audit trail store.
+func (d *DB) Audits() audit.Store {
+	return d.audits
 }
 
 // Close closes the underlying database.
