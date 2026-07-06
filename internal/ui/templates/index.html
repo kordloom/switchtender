@@ -14,6 +14,8 @@
 		<nav class="nav">
 			<a href="/ui/fleet">Fleet health</a>
 			<a href="/ui/tasks">Task trends</a>
+			<a href="/ui/projects">Projects</a>
+			<a href="/ui/templates">Templates</a>
 			<a href="/ui/credentials">Credentials</a>
 			<a href="/ui/schedules">Schedules</a>
 		</nav>
@@ -25,8 +27,11 @@
 				<h2>Launch a run</h2>
 			</div>
 			<form id="launch-form" class="launch-grid">
+				<label class="field-label">Project
+					<select id="launch-project" class="input"><option value="">None, local paths</option></select>
+				</label>
 				<label class="field-label">Playbook
-					<input id="launch-playbook" class="input mono" placeholder="/srv/ansible/site.yml" required>
+					<input id="launch-playbook" class="input mono" placeholder="plays/site.yml" required>
 				</label>
 				<label class="field-label">Inventory
 					<input id="launch-inventory" class="input mono" placeholder="/srv/ansible/hosts.ini">

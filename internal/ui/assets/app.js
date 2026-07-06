@@ -27,6 +27,12 @@ document.addEventListener("DOMContentLoaded", () => {
 	} else if (page === "credentials") {
 		wireCredentialForm();
 		loadCredentials();
+	} else if (page === "projects") {
+		wireProjectForm();
+		loadProjects();
+	} else if (page === "jobtemplates") {
+		wireTemplateForm();
+		loadTemplates();
 	}
 });
 
@@ -94,6 +100,7 @@ function wireLaunchForm() {
 	const form = document.getElementById("launch-form");
 	if (!form) return;
 	fillCredentialPicker();
+	fillSelect(document.getElementById("launch-project"), "/projects", "projects", (p) => p.name);
 	form.addEventListener("submit", async (e) => {
 		e.preventDefault();
 		const status = document.getElementById("launch-status");
@@ -101,6 +108,8 @@ function wireLaunchForm() {
 			playbook: document.getElementById("launch-playbook").value.trim(),
 			inventory: document.getElementById("launch-inventory").value.trim(),
 		};
+		const projectID = document.getElementById("launch-project").value;
+		if (projectID) payload.project_id = projectID;
 		const shards = parseInt(document.getElementById("launch-shards").value, 10);
 		if (shards >= 2) payload.shards = shards;
 		const picked = Array.from(document.getElementById("launch-credentials").selectedOptions)
@@ -196,6 +205,173 @@ async function loadCredentials() {
 	} catch (e) {
 		setStatus("Failed to load credentials: " + e.message);
 	}
+}
+
+// fillSelect loads options into a select from a list endpoint.
+async function fillSelect(el, url, listKey, labelFor) {
+	try {
+		const data = await getJSON(url);
+		for (const item of data[listKey] || []) {
+			const opt = document.createElement("option");
+			opt.value = item.id;
+			opt.textContent = labelFor(item);
+			el.appendChild(opt);
+		}
+	} catch (_) { /* feature disabled or unauthorized; the select keeps its defaults */ }
+}
+
+// wireProjectForm hooks the add project form up to POST /projects.
+function wireProjectForm() {
+	fillSelect(document.getElementById("project-credential"), "/credentials", "credentials",
+		(c) => c.name + " (" + c.kind + ")");
+	document.getElementById("project-form").addEventListener("submit", async (e) => {
+		e.preventDefault();
+		const status = document.getElementById("project-status");
+		try {
+			await postAction("/projects", {
+				name: document.getElementById("project-name").value.trim(),
+				repo_url: document.getElementById("project-repo").value.trim(),
+				branch: document.getElementById("project-branch").value.trim(),
+				credential_id: document.getElementById("project-credential").value,
+			});
+			status.textContent = "Saved.";
+			document.getElementById("projects").innerHTML = "";
+			loadProjects();
+		} catch (err) {
+			status.textContent = "Save failed: " + err.message;
+		}
+	});
+}
+
+// loadProjects populates the project table with delete actions.
+async function loadProjects() {
+	try {
+		const data = await getJSON("/projects");
+		const projects = data.projects || [];
+		if (projects.length === 0) {
+			setStatus("No projects yet.");
+			return;
+		}
+		const tbody = document.getElementById("projects");
+		for (const p of projects) {
+			const tr = document.createElement("tr");
+			tr.appendChild(td(p.name));
+			tr.appendChild(td(p.repo_url, "mono"));
+			tr.appendChild(td(p.branch || "default", "mono"));
+			tr.appendChild(td(fmtTime(p.created_at)));
+			tr.appendChild(deleteCell("/projects/" + p.id, "project " + p.name, tr));
+			tbody.appendChild(tr);
+		}
+		setStatus("");
+		document.querySelector("table.runs").hidden = false;
+	} catch (e) {
+		setStatus("Failed to load projects: " + e.message);
+	}
+}
+
+// wireTemplateForm hooks the add template form up to POST /templates.
+function wireTemplateForm() {
+	fillSelect(document.getElementById("tpl-project"), "/projects", "projects", (p) => p.name);
+	fillSelect(document.getElementById("tpl-credentials"), "/credentials", "credentials",
+		(c) => c.name + " (" + c.kind + ")");
+	document.getElementById("template-form").addEventListener("submit", async (e) => {
+		e.preventDefault();
+		const status = document.getElementById("tpl-status");
+		const payload = {
+			name: document.getElementById("tpl-name").value.trim(),
+			project_id: document.getElementById("tpl-project").value,
+			playbook: document.getElementById("tpl-playbook").value.trim(),
+			inventory: document.getElementById("tpl-inventory").value.trim(),
+		};
+		const shards = parseInt(document.getElementById("tpl-shards").value, 10);
+		if (shards >= 2) payload.shards = shards;
+		const picked = Array.from(document.getElementById("tpl-credentials").selectedOptions)
+			.map((o) => o.value);
+		if (picked.length) payload.credential_ids = picked;
+		const varsText = document.getElementById("tpl-vars").value.trim();
+		if (varsText) {
+			try {
+				payload.extra_vars = JSON.parse(varsText);
+			} catch (_) {
+				status.textContent = "Extra vars must be valid JSON.";
+				return;
+			}
+		}
+		try {
+			await postAction("/templates", payload);
+			status.textContent = "Saved.";
+			document.getElementById("templates").innerHTML = "";
+			loadTemplates();
+		} catch (err) {
+			status.textContent = "Save failed: " + err.message;
+		}
+	});
+}
+
+// loadTemplates populates the template table with launch and delete actions.
+async function loadTemplates() {
+	try {
+		const data = await getJSON("/templates");
+		const templates = data.templates || [];
+		if (templates.length === 0) {
+			setStatus("No templates yet.");
+			return;
+		}
+		const tbody = document.getElementById("templates");
+		for (const t of templates) {
+			const tr = document.createElement("tr");
+			tr.appendChild(td(t.name));
+			tr.appendChild(td(t.playbook, "mono"));
+			tr.appendChild(td(String(t.shards || 1)));
+			tr.appendChild(td(fmtTime(t.created_at)));
+			const actions = document.createElement("td");
+			const launch = document.createElement("button");
+			launch.className = "button primary";
+			launch.textContent = "Launch";
+			launch.addEventListener("click", async (e) => {
+				e.preventDefault();
+				launch.disabled = true;
+				try {
+					const created = await postAction("/templates/" + t.id + "/launch");
+					location.href = "/ui/runs/" + created.id;
+				} catch (err) {
+					setStatus("Launch failed: " + err.message);
+					launch.disabled = false;
+				}
+			});
+			actions.appendChild(launch);
+			actions.appendChild(document.createTextNode(" "));
+			const delBtn = deleteCell("/templates/" + t.id, "template " + t.name, tr);
+			actions.appendChild(delBtn.firstChild);
+			tr.appendChild(actions);
+			tbody.appendChild(tr);
+		}
+		setStatus("");
+		document.querySelector("table.runs").hidden = false;
+	} catch (e) {
+		setStatus("Failed to load templates: " + e.message);
+	}
+}
+
+// deleteCell builds a table cell holding a delete button for a resource.
+function deleteCell(path, label, tr) {
+	const cell = document.createElement("td");
+	const del = document.createElement("button");
+	del.className = "button danger";
+	del.textContent = "Delete";
+	del.addEventListener("click", async (e) => {
+		e.preventDefault();
+		if (!window.confirm("Delete " + label + "?")) return;
+		try {
+			const res = await fetch(path, { method: "DELETE", headers: authHeaders() });
+			if (!res.ok) throw new Error("HTTP " + res.status);
+			tr.remove();
+		} catch (err) {
+			setStatus("Delete failed: " + err.message);
+		}
+	});
+	cell.appendChild(del);
+	return cell;
 }
 
 // loadRuns populates the run history table.

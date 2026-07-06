@@ -79,6 +79,11 @@ Add `"shards": 4` to split it. Ansible is the only runtime dependency: `ansible-
 | Fleet memory | Failure rankings, flaky-host detection, outcome sparklines, per-host history, task duration trends, all from persisted structured events |
 | Recovery     | Cancellation across processes recorded as canceled, orphaned runs interrupted by lease expiry, terminal saves retried |
 | Storage      | SQLite out of the box; the same flag takes a PostgreSQL DSN for multi-instance  |
+| Projects     | Playbooks sourced from git with clone-or-fetch sync; every run records the exact commit it executed |
+| Templates    | Saved launch presets bundling project, playbook, credentials, shards, and extra vars; one click or one POST launches |
+| Auth         | Bearer tokens, hashed at rest; the API locks down the moment the first token exists |
+| Credentials  | SSH keys and vault passwords encrypted with AES-256-GCM, decrypted only at execution, never returned by the API |
+| Observability| A Prometheus metrics endpoint and webhook notifications when runs finish        |
 
 ## HTTP API
 
@@ -102,6 +107,18 @@ Add `"shards": 4` to split it. Ansible is the only runtime dependency: `ansible-
 | GET    | `/fleet`                | Hosts ranked by failures over recent runs, flaky flags  |
 | GET    | `/hosts/{host}/runs`    | One host's recent per-run outcomes                      |
 | GET    | `/tasks`                | Per-task duration trends over recent runs               |
+| POST   | `/projects`             | Register a git project; runs record their commit       |
+| GET    | `/projects`             | List projects                                           |
+| DELETE | `/projects/{id}`        | Delete a project                                        |
+| POST   | `/templates`            | Save a launch preset                                    |
+| GET    | `/templates`            | List templates                                          |
+| POST   | `/templates/{id}/launch`| Launch a template in one action                         |
+| DELETE | `/templates/{id}`       | Delete a template                                       |
+| POST   | `/credentials`          | Store an SSH key or vault password, encrypted at rest   |
+| GET    | `/credentials`          | List credentials, secrets never included                |
+| DELETE | `/credentials/{id}`     | Delete a credential                                     |
+| POST   | `/auth/check`           | Verify an API token                                     |
+| GET    | `/metrics`              | Prometheus gauges for runs and fleet health             |
 | GET    | `/healthz`              | Liveness                                                |
 
 The web UI lives at `/ui/` and the root redirects to it.

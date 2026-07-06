@@ -161,7 +161,7 @@ table.runs tbody tr:hover { background: var(--surface-2); }
 .button.primary { background: var(--ok); border-color: var(--ok); color: #fff; }
 .button.primary:hover { filter: brightness(1.1); background: var(--ok); }
 
-.launch-grid { display: grid; grid-template-columns: 2fr 2fr 90px 1.4fr; gap: 14px; align-items: end; }
+.launch-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; align-items: end; }
 .launch-actions { display: flex; align-items: center; gap: 12px; grid-column: 1 / -1; }
 .field-label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; }
 .field-label .input { font-weight: 400; text-transform: none; letter-spacing: normal; }
