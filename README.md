@@ -42,13 +42,15 @@ bet: a run is structured data, so store it and show it that way.
 
 ## See it
 
-A finished two-shard split, merged back into one host matrix with a per-task timeline:
+A two-shard split executing live: the merged host matrix fills in as hosts report, one shard
+fails on the broken database host while the other lands clean, and the timeline draws itself:
 
-<img src="assets/screenshot-run.png" alt="Run detail with host matrix and timeline" width="100%">
+<img src="assets/demo-run.gif" alt="A split run executing live in the host matrix" width="100%">
 
-Fleet health across recent runs, with flaky hosts called out:
+Fleet health after a few runs: failure counts, flaky-host detection, and outcome sparklines per
+host, remembered across every run:
 
-<img src="assets/screenshot-fleet.png" alt="Fleet health with flaky detection" width="100%">
+<img src="assets/screenshot-fleet.png" alt="Fleet health with flaky detection and sparklines" width="100%">
 
 ## Quick start
 
@@ -65,33 +67,18 @@ Add `"shards": 4` to split it. Ansible is the only runtime dependency: `ansible-
 
 ## What it does today
 
-- Runs. Submit over HTTP, execute ansible-playbook, capture both the human log and a structured
-  event stream through an embedded callback plugin.
-- Live view. Server-Sent Events stream events and log chunks as the run executes; the UI paints
-  the matrix in real time.
-- Drill-down. Message, stdout, stderr, return code, and diff for any host and task in the run.
-- Splits. `shards` on a run partitions the inventory, runs the slices through a bounded worker
-  pool, rolls their status up to one parent, and merges every shard's events into one matrix.
-  Placement uses each host's average duration over its recent runs, so a slow host stops
-  dragging a whole shard; hosts with no history balance by count.
-- Shard retry. Retry a finished split and only its failed shards run again, with their exact
-  host groups, linked back to the original run.
-- Pipelines. Playbook steps under one parent run, in order or as a dependency graph: declare
-  depends_on and independent branches run in parallel, a failed step skips what depends on it,
-  and continue_on_failure lets downstream proceed anyway. Give a step retries and it re-runs
-  until it succeeds or the budget is spent, every attempt kept as its own run. Values a step
-  publishes with set_stats flow to the steps that depend on it as extra vars, so a build step
-  can hand its artifact version to the deploy step. Each step is a full run with its own matrix
-  and history.
-- Scheduling. Cron schedules fire runs, splits, or pipelines and every fire keeps full
-  structured history.
-- Fleet health. Per-host outcomes persist at the end of every run, and the fleet view ranks
-  hosts by failures across their recent runs and flags flaky hosts, the ones that flip between
-  failing and passing instead of breaking cleanly. Every host has a queryable run history, and
-  per-task duration trends show which tasks are getting slower.
-- Recovery. Cancellation stops a run, a whole split, or a pipeline mid-flight and records it as
-  canceled, not failed. A server that dies mid-run marks its orphans interrupted on the next
-  start.
+| Capability   | What you get                                                                    |
+|--------------|---------------------------------------------------------------------------------|
+| Runs         | Submit over HTTP, real ansible-playbook underneath, human log plus a structured event stream, per-task drill-down with stdout, stderr, rc, and diff |
+| Live view    | Server-Sent Events paint the host matrix and log as the run executes            |
+| Splits       | Shard an inventory across parallel slices, merged back into one matrix; hosts packed by measured duration from past runs |
+| Shard retry  | Retry a finished split and only its failed shards run again, lineage recorded   |
+| Pipelines    | Ordered steps or a dependency graph with parallel branches; failures skip exactly their dependents, per-step retry budgets, set_stats outputs flow to dependent steps as extra vars |
+| Workers      | Point `yardmaster worker` at the same database and it competes for queued runs; leases, heartbeats, and a janitor make dead workers safe |
+| Scheduling   | Cron schedules fire runs, splits, or pipelines with full history per fire       |
+| Fleet memory | Failure rankings, flaky-host detection, outcome sparklines, per-host history, task duration trends, all from persisted structured events |
+| Recovery     | Cancellation across processes recorded as canceled, orphaned runs interrupted by lease expiry, terminal saves retried |
+| Storage      | SQLite out of the box; the same flag takes a PostgreSQL DSN for multi-instance  |
 
 ## HTTP API
 
