@@ -38,6 +38,9 @@ document.addEventListener("DOMContentLoaded", () => {
 		loadUsers();
 	} else if (page === "workers") {
 		loadWorkers();
+	} else if (page === "inventories") {
+		wireInventoryForm();
+		loadInventories();
 	}
 	hideAdminNav();
 });
@@ -48,7 +51,7 @@ function hideAdminNav() {
 	const role = localStorage.getItem("ym_role");
 	if (!role || role === "admin") return;
 	for (const a of document.querySelectorAll(".nav a")) {
-		if (["/ui/credentials", "/ui/projects", "/ui/users"].includes(a.getAttribute("href"))) {
+		if (["/ui/credentials", "/ui/projects", "/ui/users", "/ui/inventories"].includes(a.getAttribute("href"))) {
 			a.remove();
 		}
 	}
@@ -119,6 +122,8 @@ function wireLaunchForm() {
 	if (!form) return;
 	fillCredentialPicker();
 	fillSelect(document.getElementById("launch-project"), "/projects", "projects", (p) => p.name);
+	fillSelect(document.getElementById("launch-inventory-id"), "/inventories", "inventories",
+		(i) => i.name);
 	form.addEventListener("submit", async (e) => {
 		e.preventDefault();
 		const status = document.getElementById("launch-status");
@@ -128,6 +133,11 @@ function wireLaunchForm() {
 		};
 		const projectID = document.getElementById("launch-project").value;
 		if (projectID) payload.project_id = projectID;
+		const inventoryID = document.getElementById("launch-inventory-id").value;
+		if (inventoryID) {
+			payload.inventory_id = inventoryID;
+			delete payload.inventory;
+		}
 		const shards = parseInt(document.getElementById("launch-shards").value, 10);
 		if (shards >= 2) payload.shards = shards;
 		const picked = Array.from(document.getElementById("launch-credentials").selectedOptions)
@@ -390,6 +400,51 @@ function deleteCell(path, label, tr) {
 	});
 	cell.appendChild(del);
 	return cell;
+}
+
+// wireInventoryForm hooks the add inventory form up to POST /inventories.
+function wireInventoryForm() {
+	document.getElementById("inventory-form").addEventListener("submit", async (e) => {
+		e.preventDefault();
+		const status = document.getElementById("inv-status");
+		try {
+			await postAction("/inventories", {
+				name: document.getElementById("inv-name").value.trim(),
+				content: document.getElementById("inv-content").value,
+			});
+			document.getElementById("inv-name").value = "";
+			document.getElementById("inv-content").value = "";
+			status.textContent = "Saved.";
+			document.getElementById("inventories").innerHTML = "";
+			loadInventories();
+		} catch (err) {
+			status.textContent = "Save failed: " + err.message;
+		}
+	});
+}
+
+// loadInventories populates the inventory table with delete actions.
+async function loadInventories() {
+	try {
+		const data = await getJSON("/inventories");
+		const inventories = data.inventories || [];
+		if (inventories.length === 0) {
+			setStatus("No inventories yet.");
+			return;
+		}
+		const tbody = document.getElementById("inventories");
+		for (const i of inventories) {
+			const tr = document.createElement("tr");
+			tr.appendChild(td(i.name));
+			tr.appendChild(td(fmtTime(i.created_at)));
+			tr.appendChild(deleteCell("/inventories/" + i.id, "inventory " + i.name, tr));
+			tbody.appendChild(tr);
+		}
+		setStatus("");
+		document.querySelector("table.runs").hidden = false;
+	} catch (e) {
+		setStatus("Failed to load inventories: " + e.message);
+	}
 }
 
 // loadWorkers populates the executor table, marking anyone silent past the lease window stale.

@@ -16,6 +16,7 @@
 			<a href="/ui/tasks">Task trends</a>
 			<a href="/ui/workers">Workers</a>
 			<a href="/ui/projects">Projects</a>
+			<a href="/ui/inventories">Inventories</a>
 			<a href="/ui/templates">Templates</a>
 			<a href="/ui/credentials">Credentials</a>
 			<a href="/ui/users">Users</a>
@@ -37,6 +38,9 @@
 				</label>
 				<label class="field-label">Inventory
 					<input id="launch-inventory" class="input mono" placeholder="/srv/ansible/hosts.ini">
+				</label>
+				<label class="field-label">Stored inventory
+					<select id="launch-inventory-id" class="input"><option value="">None, use the path</option></select>
 				</label>
 				<label class="field-label">Shards
 					<input id="launch-shards" class="input" type="number" min="0" max="64" placeholder="0">

@@ -83,7 +83,8 @@ Add `"shards": 4` to split it. Ansible is the only runtime dependency: `ansible-
 | Templates    | Saved launch presets bundling project, playbook, credentials, shards, and extra vars; one click or one POST launches |
 | Auth         | User accounts with admin, operator, and viewer roles enforced per route; bearer tokens hashed at rest; the API locks down the moment the first token exists |
 | Credentials  | SSH keys and vault passwords encrypted with AES-256-GCM, decrypted only at execution, never returned by the API |
-| Observability| A Prometheus metrics endpoint and webhook notifications when runs finish        |
+| Observability| A Prometheus metrics endpoint, webhook notifications when runs finish, and an audit trail of every mutation |
+| Inventories  | Stored inventories referenced by id, materialized on whichever executor runs the play |
 
 ## HTTP API
 
@@ -100,7 +101,7 @@ Add `"shards": 4` to split it. Ansible is the only runtime dependency: `ansible-
 | GET    | `/runs/{id}/events`     | Structured events as JSON                               |
 | GET    | `/runs/{id}/stream`     | Live events and log over Server-Sent Events             |
 | POST   | `/pipelines`            | Submit ordered playbook steps as one pipeline           |
-| POST   | `/schedules`            | Create a cron schedule for a run, split, or pipeline    |
+| POST   | `/schedules`            | Cron schedule for a run, split, pipeline, or template   |
 | GET    | `/schedules`            | List schedules                                          |
 | GET    | `/schedules/{id}`       | One schedule                                            |
 | DELETE | `/schedules/{id}`       | Delete a schedule                                       |
@@ -122,6 +123,11 @@ Add `"shards": 4` to split it. Ansible is the only runtime dependency: `ansible-
 | POST   | `/users`                | Create an account with a role                           |
 | GET    | `/users`                | List accounts                                           |
 | DELETE | `/users/{id}`           | Delete an account; its tokens stop working              |
+| GET    | `/workers`              | The executor fleet with lease freshness                 |
+| POST   | `/inventories`          | Store an inventory; runs reference it by id anywhere    |
+| GET    | `/inventories`          | List stored inventories                                 |
+| DELETE | `/inventories/{id}`     | Delete a stored inventory                               |
+| GET    | `/audit`                | The mutation trail, admin only                          |
 | GET    | `/metrics`              | Prometheus gauges for runs and fleet health             |
 | GET    | `/healthz`              | Liveness                                                |
 
