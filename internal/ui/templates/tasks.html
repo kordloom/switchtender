@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Task trends - Yardmaster</title>
+	<link rel="icon" type="image/png" href="/ui/assets/favicon.png">
+	<link rel="stylesheet" href="/ui/assets/app.css">
+</head>
+<body data-page="tasks">
+	<header class="topbar">
+		<div class="brand"><a href="/ui/"><img class="brand-logo" src="/ui/assets/logo.png" alt="">Yardmaster</a></div>
+		<div class="tagline">Task trends</div>
+	</header>
+
+	<main class="content">
+		<a class="back" href="/ui/">Back to runs</a>
+		<h1>Task trends</h1>
+		<p class="muted">Each task's duration across its most recent runs. A task drifting above its own average stands out.</p>
+		<div id="status" class="muted">Loading task trends.</div>
+		<table class="runs" hidden>
+			<thead>
+				<tr>
+					<th>Task</th>
+					<th>Trend</th>
+					<th>Runs</th>
+					<th>Average</th>
+					<th>Latest</th>
+					<th>Last run</th>
+				</tr>
+			</thead>
+			<tbody id="tasks"></tbody>
+		</table>
+	</main>
+
+	<script src="/ui/assets/app.js"></script>
+</body>
+</html>

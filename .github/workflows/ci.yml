@@ -1,0 +1,61 @@
+name: ci
+
+on:
+  push:
+    branches: [main, mvp]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: yard
+          POSTGRES_PASSWORD: yard
+          POSTGRES_DB: yard
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U yard"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      YARDMASTER_POSTGRES_DSN: postgres://yard:yard@localhost:5432/yard?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build
+        run: go build ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test -race ./...
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.12.2
+
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Install ansible
+        run: pipx install ansible-core
+      - name: Run the real SSH fleet suite
+        run: go test -tags integration -v -timeout 10m ./internal/integration/...

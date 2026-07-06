@@ -13,6 +13,11 @@ vendor/
 go.work
 go.work.sum
 
+# SQLite database files
+*.db
+*.db-shm
+*.db-wal
+
 # OS
 .DS_Store
 Thumbs.db
