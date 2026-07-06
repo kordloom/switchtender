@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Sign in - Yardmaster</title>
+	<link rel="icon" type="image/png" href="/ui/assets/favicon.png">
+	<link rel="stylesheet" href="/ui/assets/app.css">
+</head>
+<body data-page="login">
+	<header class="topbar">
+		<div class="brand"><img class="brand-logo" src="/ui/assets/logo.png" alt="">Yardmaster</div>
+		<div class="tagline">Sign in</div>
+	</header>
+
+	<main class="content narrow">
+		<h1>API token</h1>
+		<p class="muted">This server requires a token. Create one with <code>yardmaster token new</code>.</p>
+		<form id="login-form" class="stack">
+			<input id="token-input" class="input mono" type="password"
+				placeholder="ymt_..." autocomplete="off" autofocus>
+			<button type="submit" class="button primary">Sign in</button>
+			<div id="status" class="muted" hidden></div>
+		</form>
+	</main>
+
+	<script src="/ui/assets/app.js"></script>
+</body>
+</html>

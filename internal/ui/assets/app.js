@@ -21,12 +21,36 @@ document.addEventListener("DOMContentLoaded", () => {
 		loadTasks();
 	} else if (page === "schedules") {
 		loadSchedules();
+	} else if (page === "login") {
+		loadLogin();
 	}
 });
 
-// getJSON fetches and decodes a JSON endpoint.
+// apiToken returns the stored API token, empty when the server runs open.
+function apiToken() {
+	return localStorage.getItem("ym_token") || "";
+}
+
+// authHeaders builds the Authorization header when a token is stored.
+function authHeaders() {
+	const token = apiToken();
+	return token ? { "Authorization": "Bearer " + token } : {};
+}
+
+// requireLogin sends the browser to the sign in page, remembering where it was.
+function requireLogin() {
+	if (document.body.dataset.page === "login") return;
+	sessionStorage.setItem("ym_return", location.pathname);
+	location.href = "/ui/login";
+}
+
+// getJSON fetches and decodes a JSON endpoint, redirecting to sign in on a 401.
 async function getJSON(url) {
-	const res = await fetch(url);
+	const res = await fetch(url, { headers: authHeaders() });
+	if (res.status === 401) {
+		requireLogin();
+		throw new Error("authentication required");
+	}
 	if (!res.ok) {
 		throw new Error(url + " returned " + res.status);
 	}
@@ -387,13 +411,50 @@ async function loadDetail(runId) {
 }
 
 // postAction sends a POST to the API and returns the parsed JSON body, throwing on an error reply.
-async function postAction(path) {
-	const res = await fetch(path, { method: "POST" });
+async function postAction(path, payload) {
+	const opts = { method: "POST", headers: authHeaders() };
+	if (payload !== undefined) {
+		opts.headers["Content-Type"] = "application/json";
+		opts.body = JSON.stringify(payload);
+	}
+	const res = await fetch(path, opts);
+	if (res.status === 401) {
+		requireLogin();
+		throw new Error("authentication required");
+	}
+	if (res.status === 204) {
+		return {};
+	}
 	const body = await res.json().catch(() => ({}));
 	if (!res.ok) {
 		throw new Error(body.error || ("HTTP " + res.status));
 	}
 	return body;
+}
+
+// streamURL appends the stored token to a stream path, since EventSource cannot set headers.
+function streamURL(path) {
+	const token = apiToken();
+	return token ? path + "?access_token=" + encodeURIComponent(token) : path;
+}
+
+// loadLogin wires the sign in form: verify the token against the API, store it, and return.
+function loadLogin() {
+	const form = document.getElementById("login-form");
+	form.addEventListener("submit", async (e) => {
+		e.preventDefault();
+		const token = document.getElementById("token-input").value.trim();
+		if (!token) return;
+		const res = await fetch("/auth/check", {
+			method: "POST", headers: { "Authorization": "Bearer " + token },
+		});
+		if (res.status === 204) {
+			localStorage.setItem("ym_token", token);
+			location.href = sessionStorage.getItem("ym_return") || "/ui/";
+			return;
+		}
+		setStatus("That token was not accepted.");
+	});
 }
 
 // wireActions hooks up the cancel and retry buttons for the run being viewed.
@@ -449,7 +510,7 @@ async function loadPipeline(pipelineId) {
 // openPipelineStream refreshes the header and step list as step events arrive, coalescing bursts
 // into one refresh, and settles on the final state at the end signal.
 function openPipelineStream(pipelineId) {
-	const source = new EventSource("/runs/" + pipelineId + "/stream");
+	const source = new EventSource(streamURL("/runs/" + pipelineId + "/stream"));
 	let pending = null;
 	const refresh = async () => {
 		pending = null;
@@ -533,7 +594,7 @@ async function loadParent(parentId) {
 // openParentStream applies shard events to the merged matrix as they arrive. A stats event means a
 // shard finished, so the shard list refreshes, and the end signal settles the final state.
 function openParentStream(parentId) {
-	const source = new EventSource("/runs/" + parentId + "/stream");
+	const source = new EventSource(streamURL("/runs/" + parentId + "/stream"));
 	const refreshShards = async () => {
 		try {
 			const shardData = await getJSON("/runs/" + parentId + "/shards");
@@ -604,7 +665,7 @@ function openStream(runId) {
 	const indicator = document.getElementById("live-indicator");
 	if (indicator) indicator.hidden = false;
 
-	const source = new EventSource("/runs/" + runId + "/stream");
+	const source = new EventSource(streamURL("/runs/" + runId + "/stream"));
 	source.addEventListener("event", (e) => {
 		try {
 			detailState.events.push(JSON.parse(e.data));

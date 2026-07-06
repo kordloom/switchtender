@@ -153,6 +153,14 @@ table.runs tbody tr:hover { background: var(--surface-2); }
 	.chip.changed, .chip.unreachable, .chip.flaky { color: #0d1117; }
 }
 
+/* Forms */
+.content.narrow { max-width: 460px; }
+.stack { display: flex; flex-direction: column; gap: 12px; margin-top: 14px; }
+.input { padding: 8px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); font-size: 14px; }
+.input:focus { outline: 2px solid var(--accent); outline-offset: 0; border-color: var(--accent); }
+.button.primary { background: var(--ok); border-color: var(--ok); color: #fff; }
+.button.primary:hover { filter: brightness(1.1); background: var(--ok); }
+
 /* Host matrix */
 .matrix-scroll { overflow: auto; max-height: 72vh; border: 1px solid var(--border); border-radius: var(--radius); }
 table.matrix { border-collapse: separate; border-spacing: 0; }
