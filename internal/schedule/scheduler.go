@@ -118,15 +118,24 @@ func (s *Scheduler) tick(now time.Time) {
 			continue
 		}
 
-		runID, err := s.fire(s.ctx, sc)
-		if err != nil {
-			s.log.Error("schedule: fire: "+err.Error(), zap.String("schedule_id", sc.ID))
-		}
-
 		next, err := NextFire(sc.Cron, now)
 		if err != nil {
 			s.log.Error("schedule: next fire: "+err.Error(), zap.String("schedule_id", sc.ID))
 			continue
+		}
+		// Win the row before firing so concurrent scheduler instances never double-launch.
+		won, err := s.store.ClaimDue(s.ctx, sc.ID, *sc.NextRunAt, next)
+		if err != nil {
+			s.log.Error("schedule: claim due: "+err.Error(), zap.String("schedule_id", sc.ID))
+			continue
+		}
+		if !won {
+			continue
+		}
+
+		runID, err := s.fire(s.ctx, sc)
+		if err != nil {
+			s.log.Error("schedule: fire: "+err.Error(), zap.String("schedule_id", sc.ID))
 		}
 		sc.LastRunAt = &now
 		if runID != "" {

@@ -22,6 +22,7 @@ func Contract(t *testing.T, newStore func() schedule.Store) {
 	t.Run("get missing", func(t *testing.T) { testGetMissing(t, newStore()) })
 	t.Run("list ordered", func(t *testing.T) { testList(t, newStore()) })
 	t.Run("delete", func(t *testing.T) { testDelete(t, newStore()) })
+	t.Run("claim due", func(t *testing.T) { testClaimDue(t, newStore()) })
 }
 
 // testSaveGet verifies a schedule round trips including steps and returns independent copies.
@@ -103,5 +104,40 @@ func testDelete(t *testing.T, store schedule.Store) {
 	}
 	if _, err := store.Get(ctx, "sch_1"); !errors.Is(err, schedule.ErrNotFound) {
 		t.Errorf("Get() after delete = %v, want ErrNotFound", err)
+	}
+}
+
+// testClaimDue verifies exactly one caller wins the advance of a due schedule.
+func testClaimDue(t *testing.T, store schedule.Store) {
+	ctx := context.Background()
+	oldNext := time.Date(2026, 7, 6, 1, 0, 0, 0, time.UTC)
+	newNext := oldNext.Add(time.Hour)
+	if err := store.Save(ctx, &schedule.Schedule{
+		ID: "sch_cas", Cron: "@hourly", Playbook: "p.yml", Enabled: true,
+		CreatedAt: time.Now(), NextRunAt: &oldNext,
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	won, err := store.ClaimDue(ctx, "sch_cas", oldNext, newNext)
+	if err != nil {
+		t.Fatalf("ClaimDue() error = %v", err)
+	}
+	if !won {
+		t.Fatal("first claim lost, want it to win")
+	}
+	again, err := store.ClaimDue(ctx, "sch_cas", oldNext, newNext.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("ClaimDue() second error = %v", err)
+	}
+	if again {
+		t.Error("second claim with the stale next time won, want it to lose")
+	}
+	got, err := store.Get(ctx, "sch_cas")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.NextRunAt == nil || !got.NextRunAt.Equal(newNext) {
+		t.Errorf("NextRunAt = %v, want the winner's %v", got.NextRunAt, newNext)
 	}
 }
