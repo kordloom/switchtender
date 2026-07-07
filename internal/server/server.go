@@ -16,6 +16,7 @@ import (
 	"github.com/dcadolph/yardmaster/internal/project"
 	"github.com/dcadolph/yardmaster/internal/run"
 	"github.com/dcadolph/yardmaster/internal/schedule"
+	"github.com/dcadolph/yardmaster/internal/team"
 	"github.com/dcadolph/yardmaster/internal/template"
 	"github.com/dcadolph/yardmaster/internal/trigger"
 	"github.com/dcadolph/yardmaster/internal/ui"
@@ -94,6 +95,11 @@ func WithTriggers(store trigger.Store) Option {
 	return func(srv *Server) { srv.triggers = store }
 }
 
+// WithTeams enables the team endpoints backed by the given store.
+func WithTeams(store team.Store) Option {
+	return func(srv *Server) { srv.teams = store }
+}
+
 // WithInventorySources enables the dynamic inventory source endpoints.
 func WithInventorySources(store invsource.Store, refresher SourceRefresher) Option {
 	return func(srv *Server) {
@@ -160,6 +166,8 @@ type Server struct {
 	refresher SourceRefresher
 	// triggers backs webhook triggers when configured.
 	triggers trigger.Store
+	// teams backs the team endpoints when configured.
+	teams team.Store
 }
 
 // New returns a Server. It panics if store or submitter is nil; a nil logger becomes a no-op.
@@ -235,6 +243,12 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /templates", listTemplatesHandler(s.templates, s.log))
 	mux.Handle("DELETE /templates/{id}", deleteTemplateHandler(s.templates, s.log))
 	mux.Handle("POST /templates/{id}/launch", launchTemplateHandler(s.templates, s.submitter, s.log))
+	mux.Handle("POST /teams", createTeamHandler(s.teams, s.log))
+	mux.Handle("GET /teams", listTeamsHandler(s.teams, s.log))
+	mux.Handle("DELETE /teams/{id}", deleteTeamHandler(s.teams, s.log))
+	mux.Handle("GET /teams/{id}/members", listTeamMembersHandler(s.teams, s.log))
+	mux.Handle("POST /teams/{id}/members", addTeamMemberHandler(s.teams, s.log))
+	mux.Handle("DELETE /teams/{id}/members/{userID}", removeTeamMemberHandler(s.teams, s.log))
 	if s.tokens != nil {
 		gate := &authGate{tokens: s.tokens, users: s.users, audits: s.audits, log: s.log}
 		return gate.wrap(mux)

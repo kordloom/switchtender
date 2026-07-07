@@ -30,6 +30,7 @@ import (
 	"github.com/dcadolph/yardmaster/internal/schedule"
 	"github.com/dcadolph/yardmaster/internal/server"
 	"github.com/dcadolph/yardmaster/internal/sqlitestore"
+	"github.com/dcadolph/yardmaster/internal/team"
 	"github.com/dcadolph/yardmaster/internal/template"
 	"github.com/dcadolph/yardmaster/internal/trigger"
 	"github.com/dcadolph/yardmaster/internal/user"
@@ -107,6 +108,8 @@ type storeBundle interface {
 	InventorySources() invsource.Store
 	// Triggers returns the webhook trigger store.
 	Triggers() trigger.Store
+	// Teams returns the team store.
+	Teams() team.Store
 	// Close closes the underlying database.
 	Close() error
 }
@@ -181,7 +184,8 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			server.WithInventories(bundle.Inventories()),
 			server.WithAudit(bundle.Audits()),
 			server.WithInventorySources(bundle.InventorySources(), disp),
-			server.WithTriggers(bundle.Triggers())).Handler(),
+			server.WithTriggers(bundle.Triggers()),
+			server.WithTeams(bundle.Teams())).Handler(),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 

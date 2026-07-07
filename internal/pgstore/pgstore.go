@@ -23,6 +23,7 @@ import (
 	"github.com/dcadolph/yardmaster/internal/project"
 	"github.com/dcadolph/yardmaster/internal/run"
 	"github.com/dcadolph/yardmaster/internal/schedule"
+	"github.com/dcadolph/yardmaster/internal/team"
 	"github.com/dcadolph/yardmaster/internal/template"
 	"github.com/dcadolph/yardmaster/internal/trigger"
 	"github.com/dcadolph/yardmaster/internal/user"
@@ -195,6 +196,17 @@ CREATE TABLE IF NOT EXISTS credentials (
 	secret     TEXT NOT NULL,
 	created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS teams (
+	id         TEXT PRIMARY KEY,
+	name       TEXT NOT NULL DEFAULT '',
+	created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS team_members (
+	team_id TEXT NOT NULL,
+	user_id TEXT NOT NULL,
+	PRIMARY KEY (team_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_team_members_user ON team_members(user_id);
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS claimed_by TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS claimed_at TEXT;
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS cancel_requested INTEGER NOT NULL DEFAULT 0;
@@ -250,6 +262,8 @@ type DB struct {
 	invSources *invSourceStore
 	// triggers is the webhook trigger store.
 	triggers *triggerStore
+	// teams is the team store.
+	teams *teamStore
 }
 
 // Open connects to the PostgreSQL database at dsn, applies the schema, and returns the bundled
@@ -286,7 +300,8 @@ func Open(dsn string) (*DB, error) {
 		inventories: &inventoryStore{db: db},
 		audits:      &auditStore{db: db},
 		invSources:  &invSourceStore{db: db},
-		triggers:    &triggerStore{db: db}}, nil
+		triggers:    &triggerStore{db: db},
+		teams:       &teamStore{db: db}}, nil
 }
 
 // Runs returns the run store.
@@ -342,6 +357,11 @@ func (d *DB) InventorySources() invsource.Store {
 // Triggers returns the webhook trigger store.
 func (d *DB) Triggers() trigger.Store {
 	return d.triggers
+}
+
+// Teams returns the team store.
+func (d *DB) Teams() team.Store {
+	return d.teams
 }
 
 // Close closes the underlying database.
