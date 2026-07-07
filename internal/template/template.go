@@ -61,6 +61,9 @@ type Template struct {
 	Playbook string `json:"playbook"`
 	// Inventory is the inventory path, relative to the project when one is set.
 	Inventory string `json:"inventory,omitempty"`
+	// InventoryID names a stored inventory to materialize for the run, taking precedence over the
+	// Inventory path when set.
+	InventoryID string `json:"inventory_id,omitempty"`
 	// Shards, when two or more, splits the run across that many inventory slices.
 	Shards int `json:"shards,omitempty"`
 	// Queue restricts launches to workers serving this queue.

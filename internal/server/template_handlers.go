@@ -23,6 +23,8 @@ type createTemplateRequest struct {
 	Playbook string `json:"playbook"`
 	// Inventory is the inventory path. Optional.
 	Inventory string `json:"inventory,omitempty"`
+	// InventoryID names a stored inventory, taking precedence over the path. Optional.
+	InventoryID string `json:"inventory_id,omitempty"`
 	// Shards, when two or more, splits launches across that many slices.
 	Shards int `json:"shards,omitempty"`
 	// Queue restricts launches to workers serving the queue.
@@ -61,7 +63,8 @@ func createTemplateHandler(store template.Store, log *zap.Logger) http.HandlerFu
 		}
 		t := &template.Template{
 			ID: template.NewID(), Name: req.Name, ProjectID: req.ProjectID,
-			Playbook: req.Playbook, Inventory: req.Inventory, Shards: req.Shards,
+			Playbook: req.Playbook, Inventory: req.Inventory, InventoryID: req.InventoryID,
+			Shards:        req.Shards,
 			CredentialIDs: req.CredentialIDs, ExtraVars: req.ExtraVars, Survey: req.Survey,
 			Queue: req.Queue, CreatedAt: time.Now(),
 		}
@@ -170,6 +173,9 @@ func launchTemplateHandler(store template.Store, submitter Submitter, authz *aut
 		}
 		if t.ProjectID != "" {
 			opts = append(opts, run.WithProject(t.ProjectID))
+		}
+		if t.InventoryID != "" {
+			opts = append(opts, run.WithInventory(t.InventoryID))
 		}
 		if t.Queue != "" {
 			opts = append(opts, run.WithQueue(t.Queue))
