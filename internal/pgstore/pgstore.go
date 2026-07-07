@@ -146,6 +146,7 @@ CREATE TABLE IF NOT EXISTS templates (
 	shards         INTEGER NOT NULL DEFAULT 0,
 	credential_ids TEXT NOT NULL DEFAULT '',
 	extra_vars     TEXT NOT NULL DEFAULT '',
+	survey         TEXT NOT NULL DEFAULT '',
 	created_at     TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS inventory_sources (
@@ -199,6 +200,7 @@ ALTER TABLE tokens ADD COLUMN IF NOT EXISTS user_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS inventory_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE schedules ADD COLUMN IF NOT EXISTS template_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE tokens ADD COLUMN IF NOT EXISTS expires_at TEXT;
+ALTER TABLE templates ADD COLUMN IF NOT EXISTS survey TEXT NOT NULL DEFAULT '';
 `
 
 // store is a run.Store backed by a PostgreSQL database.

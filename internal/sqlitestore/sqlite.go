@@ -146,6 +146,7 @@ CREATE TABLE IF NOT EXISTS templates (
 	shards         INTEGER NOT NULL DEFAULT 0,
 	credential_ids TEXT NOT NULL DEFAULT '',
 	extra_vars     TEXT NOT NULL DEFAULT '',
+	survey         TEXT NOT NULL DEFAULT '',
 	created_at     TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS inventory_sources (
@@ -208,6 +209,7 @@ var alterations = []string{
 	"ALTER TABLE runs ADD COLUMN inventory_id TEXT NOT NULL DEFAULT ''",
 	"ALTER TABLE schedules ADD COLUMN template_id TEXT NOT NULL DEFAULT ''",
 	"ALTER TABLE tokens ADD COLUMN expires_at TEXT",
+	"ALTER TABLE templates ADD COLUMN survey TEXT NOT NULL DEFAULT ''",
 	"ALTER TABLE run_host_summary ADD COLUMN duration_seconds REAL NOT NULL DEFAULT 0",
 }
 

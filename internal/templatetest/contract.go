@@ -29,6 +29,7 @@ func testLifecycle(t *testing.T, store template.Store) {
 		Playbook: "plays/site.yml", Inventory: "inventory.ini", Shards: 3,
 		CredentialIDs: []string{"cred_1", "cred_2"},
 		ExtraVars:     map[string]any{"env": "prod", "batch": float64(5)},
+		Survey:        []template.SurveyField{{Var: "region", Label: "Region", Type: template.FieldChoice, Required: true, Choices: []string{"us", "eu"}}},
 		CreatedAt:     time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC),
 	}
 	if err := store.Save(ctx, want); err != nil {
