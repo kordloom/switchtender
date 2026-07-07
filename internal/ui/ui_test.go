@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"go.uber.org/zap"
 
@@ -14,7 +15,7 @@ import (
 
 func TestUIRoutes(t *testing.T) {
 	t.Parallel()
-	handler := ui.New(zap.NewNop()).Handler()
+	handler := ui.New(zap.NewNop(), nil).Handler()
 
 	tests := []struct {
 		Name         string
@@ -53,6 +54,51 @@ func TestUIRoutes(t *testing.T) {
 				t.Fatalf("status = %d, want %d", rec.Code, test.WantStatus)
 			}
 			if !strings.Contains(rec.Body.String(), test.WantContains) {
+				t.Errorf("body does not contain %q", test.WantContains)
+			}
+		})
+	}
+}
+
+func TestUIDocs(t *testing.T) {
+	t.Parallel()
+	docs := fstest.MapFS{
+		"README.md":   {Data: []byte("# Overview\n\nWelcome to the docs.\n")},
+		"concepts.md": {Data: []byte("# Concepts\n\n| A | B |\n|---|---|\n| 1 | 2 |\n")},
+	}
+	handler := ui.New(zap.NewNop(), docs).Handler()
+
+	tests := []struct {
+		Name         string
+		Path         string
+		WantStatus   int
+		WantContains string
+	}{
+		{ // Test 0: The docs root renders the overview and the sidebar.
+			Name: "root", Path: "/ui/docs", WantStatus: http.StatusOK,
+			WantContains: `data-page="docs"`,
+		},
+		{ // Test 1: A page renders its markdown, including GFM tables.
+			Name: "page", Path: "/ui/docs/concepts", WantStatus: http.StatusOK,
+			WantContains: "<table>",
+		},
+		{ // Test 2: A missing page is a 404, not a server error.
+			Name: "missing", Path: "/ui/docs/nope", WantStatus: http.StatusNotFound,
+		},
+		{ // Test 3: A traversal attempt is rejected.
+			Name: "traversal", Path: "/ui/docs/..%2f..%2fetc", WantStatus: http.StatusNotFound,
+		},
+	}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			req := httptest.NewRequest(http.MethodGet, test.Path, nil)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if rec.Code != test.WantStatus {
+				t.Fatalf("status = %d, want %d", rec.Code, test.WantStatus)
+			}
+			if test.WantContains != "" && !strings.Contains(rec.Body.String(), test.WantContains) {
 				t.Errorf("body does not contain %q", test.WantContains)
 			}
 		})

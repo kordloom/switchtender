@@ -3,6 +3,7 @@ package server
 
 import (
 	"context"
+	"io/fs"
 	"net/http"
 
 	"go.uber.org/zap"
@@ -110,6 +111,11 @@ func WithGrants(store grant.Store, strict bool) Option {
 	}
 }
 
+// WithDocs serves the documentation tree inside the web UI. A nil filesystem disables the pages.
+func WithDocs(docs fs.FS) Option {
+	return func(srv *Server) { srv.docs = docs }
+}
+
 // WithInventorySources enables the dynamic inventory source endpoints.
 func WithInventorySources(store invsource.Store, refresher SourceRefresher) Option {
 	return func(srv *Server) {
@@ -182,6 +188,8 @@ type Server struct {
 	grants grant.Store
 	// strictGrants makes an object with no grants deny non-admins.
 	strictGrants bool
+	// docs is the documentation tree rendered inside the UI, nil when not wired.
+	docs fs.FS
 }
 
 // New returns a Server. It panics if store or submitter is nil; a nil logger becomes a no-op.
@@ -195,10 +203,11 @@ func New(store run.Store, submitter Submitter, log *zap.Logger, opts ...Option) 
 	if log == nil {
 		log = zap.NewNop()
 	}
-	srv := &Server{store: store, submitter: submitter, log: log, web: ui.New(log)}
+	srv := &Server{store: store, submitter: submitter, log: log}
 	for _, opt := range opts {
 		opt(srv)
 	}
+	srv.web = ui.New(srv.log, srv.docs)
 	return srv
 }
 

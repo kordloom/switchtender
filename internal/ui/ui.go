@@ -9,6 +9,8 @@ import (
 	"io/fs"
 	"net/http"
 
+	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/extension"
 	"go.uber.org/zap"
 )
 
@@ -28,17 +30,24 @@ type UI struct {
 	tmpl *template.Template
 	// log records render failures.
 	log *zap.Logger
+	// docs is the documentation tree rendered in-app, nil when not wired.
+	docs fs.FS
+	// md renders documentation markdown to HTML.
+	md goldmark.Markdown
 }
 
 // New parses the embedded templates and returns a UI. It panics if the embedded templates fail to
-// parse, which is a build time programming error.
-func New(log *zap.Logger) *UI {
+// parse, which is a build time programming error. docs, when non-nil, is the documentation tree
+// served under /ui/docs.
+func New(log *zap.Logger, docs fs.FS) *UI {
 	if log == nil {
 		log = zap.NewNop()
 	}
 	return &UI{
 		tmpl: template.Must(template.ParseFS(templateFS, "templates/*.html")),
 		log:  log,
+		docs: docs,
+		md:   goldmark.New(goldmark.WithExtensions(extension.GFM)),
 	}
 }
 
@@ -63,6 +72,10 @@ func (u *UI) Handler() http.Handler {
 	mux.HandleFunc("GET /ui/projects", u.projects)
 	mux.HandleFunc("GET /ui/templates", u.jobTemplates)
 	mux.HandleFunc("GET /ui/schedules", u.schedules)
+	if u.docs != nil {
+		mux.HandleFunc("GET /ui/docs", u.docsPage)
+		mux.HandleFunc("GET /ui/docs/{page}", u.docsPage)
+	}
 	mux.HandleFunc("GET /ui/", u.index)
 	return mux
 }

@@ -288,7 +288,8 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			server.WithInventorySources(bundle.InventorySources(), disp),
 			server.WithTriggers(bundle.Triggers()),
 			server.WithTeams(bundle.Teams()),
-			server.WithGrants(bundle.Grants(), serveStrictGrants)).Handler(),
+			server.WithGrants(bundle.Grants(), serveStrictGrants),
+			server.WithDocs(DocsFS)).Handler(),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 
