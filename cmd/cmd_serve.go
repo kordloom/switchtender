@@ -20,6 +20,7 @@ import (
 	"github.com/dcadolph/yardmaster/internal/credential"
 	"github.com/dcadolph/yardmaster/internal/dispatch"
 	"github.com/dcadolph/yardmaster/internal/inventory"
+	"github.com/dcadolph/yardmaster/internal/invsource"
 	"github.com/dcadolph/yardmaster/internal/live"
 	"github.com/dcadolph/yardmaster/internal/logutil"
 	"github.com/dcadolph/yardmaster/internal/pgstore"
@@ -96,6 +97,8 @@ type storeBundle interface {
 	Inventories() inventory.Store
 	// Audits returns the audit trail store.
 	Audits() audit.Store
+	// InventorySources returns the dynamic inventory source store.
+	InventorySources() invsource.Store
 	// Close closes the underlying database.
 	Close() error
 }
@@ -149,7 +152,8 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		dispatch.WithCredentials(bundle.Credentials(), sealer),
 		dispatch.WithProjects(bundle.Projects(), syncer),
 		dispatch.WithWebhooks(notifyWebhooks),
-		dispatch.WithInventories(bundle.Inventories()))
+		dispatch.WithInventories(bundle.Inventories()),
+		dispatch.WithInventorySources(bundle.InventorySources()))
 	defer disp.Close()
 
 	scheduler := schedule.NewScheduler(schedules, disp, log,
@@ -167,7 +171,8 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			server.WithTemplates(bundle.Templates()),
 			server.WithUsers(bundle.Users()),
 			server.WithInventories(bundle.Inventories()),
-			server.WithAudit(bundle.Audits())).Handler(),
+			server.WithAudit(bundle.Audits()),
+			server.WithInventorySources(bundle.InventorySources(), disp)).Handler(),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 

@@ -20,6 +20,7 @@ import (
 	"github.com/dcadolph/yardmaster/internal/credential"
 	"github.com/dcadolph/yardmaster/internal/event"
 	"github.com/dcadolph/yardmaster/internal/inventory"
+	"github.com/dcadolph/yardmaster/internal/invsource"
 	"github.com/dcadolph/yardmaster/internal/project"
 	"github.com/dcadolph/yardmaster/internal/roundhouse"
 	"github.com/dcadolph/yardmaster/internal/run"
@@ -109,6 +110,10 @@ type Dispatcher struct {
 	webhooks []string
 	// inventories resolves stored inventories, nil when the feature is off.
 	inventories inventory.Store
+	// invSources resolves dynamic inventory sources, nil when the feature is off.
+	invSources invsource.Store
+	// dumper renders inventory sources to JSON.
+	dumper roundhouse.InventoryDumper
 }
 
 // Option configures a Dispatcher.
@@ -136,6 +141,8 @@ type config struct {
 	webhooks []string
 	// inventories resolves stored inventories, nil when the feature is off.
 	inventories inventory.Store
+	// invSources resolves dynamic inventory sources, nil when the feature is off.
+	invSources invsource.Store
 }
 
 // WithWorkers sets the worker pool size. Values below one fall back to DefaultWorkers.
@@ -188,6 +195,7 @@ func New(store run.Store, runner roundhouse.Runner, log *zap.Logger, opts ...Opt
 	}
 
 	lister, _ := runner.(roundhouse.HostLister)
+	dumper, _ := runner.(roundhouse.InventoryDumper)
 	ctx, cancel := context.WithCancel(context.Background())
 	d := &Dispatcher{
 		store:         store,
@@ -198,6 +206,7 @@ func New(store run.Store, runner roundhouse.Runner, log *zap.Logger, opts ...Opt
 		cancel:        cancel,
 		publisher:     cfg.publisher,
 		hostLister:    lister,
+		dumper:        dumper,
 		cancels:       make(map[string]context.CancelFunc),
 		owner:         cfg.owner,
 		claimInterval: cfg.claimInterval,
@@ -207,6 +216,7 @@ func New(store run.Store, runner roundhouse.Runner, log *zap.Logger, opts ...Opt
 		syncer:        cfg.syncer,
 		webhooks:      cfg.webhooks,
 		inventories:   cfg.inventories,
+		invSources:    cfg.invSources,
 	}
 	d.wg.Add(2)
 	go d.claimLoop()
