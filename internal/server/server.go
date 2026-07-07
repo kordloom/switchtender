@@ -116,6 +116,11 @@ func WithDocs(docs fs.FS) Option {
 	return func(srv *Server) { srv.docs = docs }
 }
 
+// WithReadOnly rejects every mutating request, so a public demo cannot be changed by its visitors.
+func WithReadOnly() Option {
+	return func(srv *Server) { srv.readOnly = true }
+}
+
 // WithInventorySources enables the dynamic inventory source endpoints.
 func WithInventorySources(store invsource.Store, refresher SourceRefresher) Option {
 	return func(srv *Server) {
@@ -190,6 +195,8 @@ type Server struct {
 	strictGrants bool
 	// docs is the documentation tree rendered inside the UI, nil when not wired.
 	docs fs.FS
+	// readOnly rejects mutating requests when set, for a public demo.
+	readOnly bool
 }
 
 // New returns a Server. It panics if store or submitter is nil; a nil logger becomes a no-op.
@@ -276,9 +283,28 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /grants", createGrantHandler(s.grants, s.log))
 	mux.Handle("GET /grants", listGrantsHandler(s.grants, s.log))
 	mux.Handle("DELETE /grants/{id}", deleteGrantHandler(s.grants, s.log))
+	var handler http.Handler = mux
 	if s.tokens != nil {
 		gate := &authGate{tokens: s.tokens, users: s.users, audits: s.audits, log: s.log}
-		return gate.wrap(mux)
+		handler = gate.wrap(mux)
 	}
-	return mux
+	if s.readOnly {
+		handler = readOnlyGate(handler)
+	}
+	return handler
+}
+
+// readOnlyGate rejects every request that would change state, so a demo cannot be mutated. Reads
+// and the UI pass through.
+func readOnlyGate(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet, http.MethodHead, http.MethodOptions:
+			next.ServeHTTP(w, r)
+		default:
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"error":"this is a read-only demo"}`))
+		}
+	})
 }
