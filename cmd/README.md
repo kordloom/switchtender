@@ -7,28 +7,43 @@
 
 # Yardmaster CLI
 
-One binary, a handful of commands.
+One binary, a handful of commands. This page is a map; the full flag and environment reference is in
+[docs/configuration.md](../docs/configuration.md).
 
 ## serve
 
-Runs everything: the HTTP API, the executor, the cron scheduler, and the web UI.
+Runs the HTTP API, the executor, the cron scheduler, the retention sweeper, and the web UI.
 
     yardmaster serve --addr :8080 --db yardmaster.db
 
-| Flag                  | Default         | What                                          |
-|-----------------------|-----------------|-----------------------------------------------|
-| `--addr`              | `:8080`         | Address the server listens on                 |
-| `--db`                | `yardmaster.db` | Path to the SQLite database file              |
-| `--schedule-interval` | `15s`           | How often the scheduler checks due schedules  |
+The `--db` value is a SQLite file path, or a `postgres://` DSN for the PostgreSQL backend. The
+schema carries forward on every open, so upgrading in place is just restarting with the new binary.
 
-The database file is created on first start and carries the full schema forward on every open, so
-upgrading in place is just restarting with the new binary.
+## worker
+
+Leases pending runs from the shared store and executes them. Point a worker and a server at the
+same database, a PostgreSQL DSN for separate machines, and they compete for work.
+
+    yardmaster worker --db postgres://user:pass@host:5432/yard?sslmode=disable --name worker-1
+
+## import
+
+Migrates from AWX or Semaphore. Reports what it would create, then writes it with `--apply`.
+
+    yardmaster import awx export.json --db yardmaster.db --apply
+
+## token
+
+Manages API tokens. Creating the first token turns authentication on.
+
+    yardmaster token new --name ci --db yardmaster.db
+
+## user
+
+Manages accounts with admin, operator, and viewer roles.
+
+    yardmaster user new operator-jane --role operator --db yardmaster.db
 
 ## version
 
 Prints the build version.
-
-## worker
-
-Reserved for the distributed worker. It parses and exits today; remote execution is on the
-roadmap.

@@ -196,13 +196,15 @@ the API, the UI, and everything you operate speak plain Ansible. No glossary req
 
 ## Roadmap
 
-- Integration tests against real multi-node clusters via kind
-- Postgres store backend for multi-instance deployments
-- Distributed workers for remote execution
+- Pluggable runtimes beyond Ansible, starting with Terraform or OpenTofu
+- SSO and LDAP for enterprise sign-in
+- A seeded public demo and a hosted option
+- Broader notification channels and expanded onboarding docs
 
 ## Status
 
-Pre-alpha, moving fast, APIs change without notice.
+Source-available under the Business Source License 1.1. Ten releases shipped; the execution engine
+and the one-command AWX and Semaphore migration are complete. The API may still change before 1.0.
 
 ## License
 
