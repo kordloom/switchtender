@@ -9,6 +9,8 @@ import (
 	"github.com/dcadolph/yardmaster/internal/authtest"
 	"github.com/dcadolph/yardmaster/internal/credential"
 	"github.com/dcadolph/yardmaster/internal/credtest"
+	"github.com/dcadolph/yardmaster/internal/grant"
+	"github.com/dcadolph/yardmaster/internal/granttest"
 	"github.com/dcadolph/yardmaster/internal/inventory"
 	"github.com/dcadolph/yardmaster/internal/inventorytest"
 	"github.com/dcadolph/yardmaster/internal/invsource"
@@ -263,5 +265,17 @@ func TestTeamStoreContract(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = db.Close() })
 		return db.Teams()
+	})
+}
+
+func TestGrantStoreContract(t *testing.T) {
+	t.Parallel()
+	granttest.Contract(t, func() grant.Store {
+		db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "yardmaster.db"))
+		if err != nil {
+			t.Fatalf("Open() error = %v", err)
+		}
+		t.Cleanup(func() { _ = db.Close() })
+		return db.Grants()
 	})
 }

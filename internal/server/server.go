@@ -10,6 +10,7 @@ import (
 	"github.com/dcadolph/yardmaster/internal/audit"
 	"github.com/dcadolph/yardmaster/internal/auth"
 	"github.com/dcadolph/yardmaster/internal/credential"
+	"github.com/dcadolph/yardmaster/internal/grant"
 	"github.com/dcadolph/yardmaster/internal/inventory"
 	"github.com/dcadolph/yardmaster/internal/invsource"
 	"github.com/dcadolph/yardmaster/internal/live"
@@ -100,6 +101,15 @@ func WithTeams(store team.Store) Option {
 	return func(srv *Server) { srv.teams = store }
 }
 
+// WithGrants enables per-object access grants. When strict is set, an object with no grants denies
+// non-admins; otherwise the global role decides for ungranted objects.
+func WithGrants(store grant.Store, strict bool) Option {
+	return func(srv *Server) {
+		srv.grants = store
+		srv.strictGrants = strict
+	}
+}
+
 // WithInventorySources enables the dynamic inventory source endpoints.
 func WithInventorySources(store invsource.Store, refresher SourceRefresher) Option {
 	return func(srv *Server) {
@@ -168,6 +178,10 @@ type Server struct {
 	triggers trigger.Store
 	// teams backs the team endpoints when configured.
 	teams team.Store
+	// grants backs per-object access grants when configured.
+	grants grant.Store
+	// strictGrants makes an object with no grants deny non-admins.
+	strictGrants bool
 }
 
 // New returns a Server. It panics if store or submitter is nil; a nil logger becomes a no-op.
@@ -242,13 +256,17 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /templates", createTemplateHandler(s.templates, s.log))
 	mux.Handle("GET /templates", listTemplatesHandler(s.templates, s.log))
 	mux.Handle("DELETE /templates/{id}", deleteTemplateHandler(s.templates, s.log))
-	mux.Handle("POST /templates/{id}/launch", launchTemplateHandler(s.templates, s.submitter, s.log))
+	authz := &authorizer{grants: s.grants, teams: s.teams, strict: s.strictGrants}
+	mux.Handle("POST /templates/{id}/launch", launchTemplateHandler(s.templates, s.submitter, authz, s.log))
 	mux.Handle("POST /teams", createTeamHandler(s.teams, s.log))
 	mux.Handle("GET /teams", listTeamsHandler(s.teams, s.log))
 	mux.Handle("DELETE /teams/{id}", deleteTeamHandler(s.teams, s.log))
 	mux.Handle("GET /teams/{id}/members", listTeamMembersHandler(s.teams, s.log))
 	mux.Handle("POST /teams/{id}/members", addTeamMemberHandler(s.teams, s.log))
 	mux.Handle("DELETE /teams/{id}/members/{userID}", removeTeamMemberHandler(s.teams, s.log))
+	mux.Handle("POST /grants", createGrantHandler(s.grants, s.log))
+	mux.Handle("GET /grants", listGrantsHandler(s.grants, s.log))
+	mux.Handle("DELETE /grants/{id}", deleteGrantHandler(s.grants, s.log))
 	if s.tokens != nil {
 		gate := &authGate{tokens: s.tokens, users: s.users, audits: s.audits, log: s.log}
 		return gate.wrap(mux)

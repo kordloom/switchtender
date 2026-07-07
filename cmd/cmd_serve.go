@@ -19,6 +19,7 @@ import (
 	"github.com/dcadolph/yardmaster/internal/auth"
 	"github.com/dcadolph/yardmaster/internal/credential"
 	"github.com/dcadolph/yardmaster/internal/dispatch"
+	"github.com/dcadolph/yardmaster/internal/grant"
 	"github.com/dcadolph/yardmaster/internal/inventory"
 	"github.com/dcadolph/yardmaster/internal/invsource"
 	"github.com/dcadolph/yardmaster/internal/live"
@@ -64,6 +65,9 @@ var notifyWebhooks []string
 // serveAllowContainerEE holds the value of the --allow-container-ee flag.
 var serveAllowContainerEE bool
 
+// serveStrictGrants holds the value of the --strict-grants flag.
+var serveStrictGrants bool
+
 // serveCmd runs the Yardmaster HTTP server (the dispatcher).
 var serveCmd = &cobra.Command{
 	Use:   "serve",
@@ -82,6 +86,8 @@ func init() {
 		"URL that receives a JSON notification when a run finishes. Repeatable.")
 	serveCmd.Flags().BoolVar(&serveAllowContainerEE, "allow-container-ee", false,
 		"Allow runs whose project pins a container image to execute inside that image. Needs Docker.")
+	serveCmd.Flags().BoolVar(&serveStrictGrants, "strict-grants", false,
+		"Deny non-admins access to an object that has no grants, instead of deferring to the role.")
 }
 
 // storeBundle is the store set both database backends expose.
@@ -110,6 +116,8 @@ type storeBundle interface {
 	Triggers() trigger.Store
 	// Teams returns the team store.
 	Teams() team.Store
+	// Grants returns the per-object access grant store.
+	Grants() grant.Store
 	// Close closes the underlying database.
 	Close() error
 }
@@ -185,7 +193,8 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			server.WithAudit(bundle.Audits()),
 			server.WithInventorySources(bundle.InventorySources(), disp),
 			server.WithTriggers(bundle.Triggers()),
-			server.WithTeams(bundle.Teams())).Handler(),
+			server.WithTeams(bundle.Teams()),
+			server.WithGrants(bundle.Grants(), serveStrictGrants)).Handler(),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 

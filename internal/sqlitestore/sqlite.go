@@ -18,6 +18,7 @@ import (
 	"github.com/dcadolph/yardmaster/internal/auth"
 	"github.com/dcadolph/yardmaster/internal/credential"
 	"github.com/dcadolph/yardmaster/internal/event"
+	"github.com/dcadolph/yardmaster/internal/grant"
 	"github.com/dcadolph/yardmaster/internal/inventory"
 	"github.com/dcadolph/yardmaster/internal/invsource"
 	"github.com/dcadolph/yardmaster/internal/project"
@@ -207,6 +208,14 @@ CREATE TABLE IF NOT EXISTS team_members (
 	PRIMARY KEY (team_id, user_id)
 );
 CREATE INDEX IF NOT EXISTS idx_team_members_user ON team_members(user_id);
+CREATE TABLE IF NOT EXISTS grants (
+	id         TEXT PRIMARY KEY,
+	subject    TEXT NOT NULL,
+	object     TEXT NOT NULL,
+	access     TEXT NOT NULL,
+	created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_grants_object ON grants(object);
 `
 
 // alterations add columns to tables created before the column existed. New databases already have
@@ -274,6 +283,8 @@ type DB struct {
 	triggers *triggerStore
 	// teams is the team store.
 	teams *teamStore
+	// grants is the per-object access grant store.
+	grants *grantStore
 }
 
 // Open opens the SQLite database at path, applies the schema, and returns the bundled stores.
@@ -317,7 +328,8 @@ func Open(path string) (*DB, error) {
 		audits:      &auditStore{db: db},
 		invSources:  &invSourceStore{db: db},
 		triggers:    &triggerStore{db: db},
-		teams:       &teamStore{db: db}}, nil
+		teams:       &teamStore{db: db},
+		grants:      &grantStore{db: db}}, nil
 }
 
 // Runs returns the run store.
@@ -378,6 +390,11 @@ func (d *DB) Triggers() trigger.Store {
 // Teams returns the team store.
 func (d *DB) Teams() team.Store {
 	return d.teams
+}
+
+// Grants returns the per-object access grant store.
+func (d *DB) Grants() grant.Store {
+	return d.grants
 }
 
 // Close closes the underlying database.

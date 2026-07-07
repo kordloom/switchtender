@@ -8,6 +8,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/dcadolph/yardmaster/internal/grant"
 	"github.com/dcadolph/yardmaster/internal/run"
 	"github.com/dcadolph/yardmaster/internal/template"
 )
@@ -113,7 +114,7 @@ func deleteTemplateHandler(store template.Store, log *zap.Logger) http.HandlerFu
 }
 
 // launchTemplateHandler submits a run from a saved template in one action.
-func launchTemplateHandler(store template.Store, submitter Submitter, log *zap.Logger) http.HandlerFunc {
+func launchTemplateHandler(store template.Store, submitter Submitter, authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	if submitter == nil {
 		panic("server: launchTemplateHandler: Submitter required")
 	}
@@ -122,7 +123,17 @@ func launchTemplateHandler(store template.Store, submitter Submitter, log *zap.L
 			respondError(w, log, http.StatusNotFound, "templates not enabled")
 			return
 		}
-		t, err := store.Get(r.Context(), r.PathValue("id"))
+		id := r.PathValue("id")
+		if err := authz.authorize(r.Context(), id, grant.AccessUse); err != nil {
+			if errors.Is(err, errForbiddenGrant) {
+				forbidden(w)
+				return
+			}
+			log.Error("server: authorize launch: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not authorize launch")
+			return
+		}
+		t, err := store.Get(r.Context(), id)
 		if errors.Is(err, template.ErrNotFound) {
 			respondError(w, log, http.StatusNotFound, "template not found")
 			return

@@ -77,8 +77,31 @@ func (g *authGate) wrap(next http.Handler) http.Handler {
 		}
 		g.touch(tok)
 		g.record(tok, r)
-		next.ServeHTTP(w, r)
+		ctx := context.WithValue(r.Context(), actorKey{},
+			Actor{UserID: tok.UserID, Role: role, Name: tok.Name})
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// actorKey is the context key under which the authenticated actor is stored.
+type actorKey struct{}
+
+// Actor is the authenticated caller resolved by the gate, carried in the request context so
+// object-level authorization can identify the user and role behind a request.
+type Actor struct {
+	// UserID is the caller's account id, empty for a command-line admin token.
+	UserID string
+	// Role is the caller's global role.
+	Role user.Role
+	// Name is the token name, used for audit attribution.
+	Name string
+}
+
+// actorFrom returns the authenticated actor from the context, and whether one was present. It is
+// absent when the API is not enforcing tokens, in which case authorization is open.
+func actorFrom(ctx context.Context) (Actor, bool) {
+	a, ok := ctx.Value(actorKey{}).(Actor)
+	return a, ok
 }
 
 // record appends an audit entry for an authenticated mutation without blocking the request.
