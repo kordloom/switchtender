@@ -17,4 +17,5 @@ func init() {
 	rootCmd.AddCommand(workerCmd)
 	rootCmd.AddCommand(tokenCmd)
 	rootCmd.AddCommand(versionCmd)
+	rootCmd.AddCommand(importCmd)
 }
