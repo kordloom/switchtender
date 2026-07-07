@@ -87,6 +87,11 @@ func (d *Dispatcher) materializeCredentials(r *run.Run, spec *roundhouse.Spec) (
 			spec.PrivateKeyPath = f.Name()
 		case credential.KindVaultPassword:
 			spec.VaultPasswordFile = f.Name()
+		case credential.KindEnv:
+			// Environment pairs go straight into the process; the temp file is not needed.
+			paths = paths[:len(paths)-1]
+			_ = os.Remove(f.Name())
+			spec.Env = append(spec.Env, credential.EnvLines(plain)...)
 		default:
 			return cleanup, fmt.Errorf("%w: %s", credential.ErrBadKind, c.Kind)
 		}

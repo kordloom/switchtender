@@ -50,3 +50,12 @@ func TestSealerDisabled(t *testing.T) {
 		t.Errorf("Open() error = %v, want ErrNoKey", err)
 	}
 }
+
+func TestEnvLines(t *testing.T) {
+	t.Parallel()
+	got := credential.EnvLines("AWS_ACCESS_KEY_ID=abc\n# comment\n\nAWS_SECRET_ACCESS_KEY=xyz\nnot a pair\n")
+	want := []string{"AWS_ACCESS_KEY_ID=abc", "AWS_SECRET_ACCESS_KEY=xyz"}
+	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("EnvLines() = %v, want %v", got, want)
+	}
+}

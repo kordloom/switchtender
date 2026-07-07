@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"strings"
 	"time"
 )
 
@@ -19,6 +20,9 @@ const (
 	KindSSHKey Kind = "ssh_key"
 	// KindVaultPassword is an Ansible Vault password handed over as --vault-password-file.
 	KindVaultPassword Kind = "vault_password"
+	// KindEnv is newline separated KEY=VALUE pairs injected into the execution environment,
+	// which is how cloud SDK credentials reach inventory plugins and playbook modules.
+	KindEnv Kind = "env"
 )
 
 var (
@@ -32,7 +36,20 @@ var (
 
 // ValidKind reports whether k names a supported credential kind.
 func ValidKind(k Kind) bool {
-	return k == KindSSHKey || k == KindVaultPassword
+	return k == KindSSHKey || k == KindVaultPassword || k == KindEnv
+}
+
+// EnvLines splits env credential material into KEY=VALUE entries, dropping blanks and comments.
+func EnvLines(secret string) []string {
+	var out []string
+	for _, line := range strings.Split(secret, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") || !strings.Contains(line, "=") {
+			continue
+		}
+		out = append(out, line)
+	}
+	return out
 }
 
 // Credential is one stored secret. Secret carries ciphertext inside the store and plaintext only
