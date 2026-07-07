@@ -35,5 +35,13 @@ services:
       postgres:
         condition: service_healthy
 
+  # A seeded, read-only demo on its own. Start it with: docker compose --profile demo up --build.
+  demo:
+    build: .
+    profiles: ["demo"]
+    command: ["demo", "--addr", ":8080"]
+    ports:
+      - "${YARDMASTER_PORT:-8080}:8080"
+
 volumes:
   pgdata:

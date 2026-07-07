@@ -24,4 +24,5 @@ func init() {
 	rootCmd.AddCommand(tokenCmd)
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(importCmd)
+	rootCmd.AddCommand(demoCmd)
 }

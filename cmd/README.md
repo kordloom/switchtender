@@ -44,6 +44,12 @@ Manages accounts with admin, operator, and viewer roles.
 
     yardmaster user new operator-jane --role operator --db yardmaster.db
 
+## demo
+
+Seeds a fresh database with sample data and real runs, then serves it read-only. Safe to expose.
+
+    yardmaster demo --addr :8080
+
 ## version
 
 Prints the build version.

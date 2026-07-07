@@ -62,3 +62,13 @@ Create user accounts with roles for sign-in:
 
 This starts a server, a PostgreSQL database, and a worker. The server listens on port 8080; set
 `YARDMASTER_PORT` to change the host port.
+
+## Try the demo
+
+To look around without setting anything up, run the seeded demo. It fills a fresh database with
+sample projects, templates, inventories, and real runs, including a flaky host, a split, and a
+pipeline, then serves it read-only so it is safe to expose:
+
+    ./yardmaster demo --addr :8080
+
+Or with Docker: `docker compose --profile demo up --build`.
