@@ -1,0 +1,45 @@
+{
+  "projects": [
+    {"name": "Web", "scm_type": "git", "scm_url": "https://github.com/acme/web.git", "scm_branch": "main"},
+    {"name": "Manual", "scm_type": "", "scm_url": ""}
+  ],
+  "inventory": [
+    {
+      "name": "Production",
+      "hosts": [{"name": "web1.acme.internal", "variables": {"ansible_user": "deploy"}}],
+      "groups": [
+        {"name": "web", "hosts": [{"name": "web1.acme.internal"}, {"name": "web2.acme.internal"}]},
+        {"name": "db", "hosts": [{"name": "db1.acme.internal"}]}
+      ]
+    }
+  ],
+  "credentials": [
+    {"name": "prod-ssh", "credential_type": "Machine"},
+    {"name": "vault-pw", "credential_type": "Vault"},
+    {"name": "aws-keys", "credential_type": "Amazon Web Services"}
+  ],
+  "job_templates": [
+    {
+      "name": "Deploy Web",
+      "playbook": "site.yml",
+      "project": "Web",
+      "inventory": "Production",
+      "extra_vars": "---\nrelease: stable\nreplicas: 3",
+      "job_slice_count": 2,
+      "credentials": ["prod-ssh", "vault-pw"],
+      "survey_spec": {
+        "spec": [
+          {"variable": "version", "question_name": "Release version", "type": "text", "required": true, "default": "1.0.0"},
+          {"variable": "count", "question_name": "How many", "type": "integer", "required": false, "default": 1},
+          {"variable": "region", "question_name": "Region", "type": "multiplechoice", "required": true, "choices": ["us-east", "us-west", "eu"]}
+        ]
+      },
+      "related": {
+        "schedules": [
+          {"name": "Nightly", "rrule": "DTSTART:20260101T090000Z\nRRULE:FREQ=DAILY;INTERVAL=1;BYHOUR=2;BYMINUTE=30", "enabled": true},
+          {"name": "Every 3 days", "rrule": "DTSTART:20260101T090000Z\nRRULE:FREQ=DAILY;INTERVAL=3"}
+        ]
+      }
+    }
+  ]
+}
