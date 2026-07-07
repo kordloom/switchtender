@@ -14,10 +14,11 @@ import (
 //go:embed docs
 var docsDir embed.FS
 
-// main runs the Yardmaster CLI.
+// main runs the Yardmaster CLI, handing it the embedded documentation to serve in the UI.
 func main() {
-	if sub, err := fs.Sub(docsDir, "docs"); err == nil {
-		cmd.DocsFS = sub
+	docs, err := fs.Sub(docsDir, "docs")
+	if err != nil {
+		docs = nil
 	}
-	cmd.Execute()
+	cmd.Execute(docs)
 }

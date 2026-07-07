@@ -41,17 +41,22 @@ Redis, no message bus. One process, one SQLite file.
 
 ## Why
 
-AWX wants a Kubernetes operator, Postgres, Redis, and Receptor before it runs a single playbook.
-Semaphore is far lighter but still treats a run as a text log. Yardmaster is built on a different
-bet: a run is structured data, so store it and show it that way.
+AWX makes you stand up Kubernetes, Postgres, Redis, and Receptor before it runs a single playbook,
+and it has not shipped a release in over a year. Semaphore is lighter, but a run is still a text
+log. Yardmaster runs the same playbooks from one binary and treats every run as structured data you
+can read, split, and remember.
 
-- Deploy in seconds. `yardmaster serve` is the API, the executor, the scheduler, and the web UI.
-- See structure, not scrollback. Every run is a stream of play, task, and host events rendered as
-  a host-by-task matrix with a timeline and drill-down into real per-task output, live while it
-  executes.
-- Split jobs that work. Shard an inventory, run the shards in parallel, and get one merged matrix
-  back. Shards are packed by each host's measured duration in past runs, and a failed split
-  retries only the shards that failed.
+|                    | Yardmaster                                                        | AWX                                    | Semaphore        |
+|--------------------|-------------------------------------------------------------------|----------------------------------------|------------------|
+| Deploy             | One binary, one SQLite file, seconds to start                     | Kubernetes, Postgres, Redis, Receptor  | One binary       |
+| A run is           | A live host-by-task matrix with per-task drill-down               | A text log                             | A text log       |
+| Big jobs           | Sharded by measured host duration, retry only the failed shards   | Job slicing, round-robin               | Not available    |
+| Memory across runs | Flaky-host detection, sparklines, host history, task trends       | None                                   | None             |
+| Pipelines          | Dependency graph with typed outputs passed between steps          | Visual workflows                       | Limited chaining |
+| Moving in          | One command imports your AWX or Semaphore export                  | Not applicable                         | Not applicable   |
+
+The full head-to-head, including where Yardmaster is behind, is in the
+[comparison](docs/comparison.md).
 
 ## See it
 

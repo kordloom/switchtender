@@ -289,7 +289,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			server.WithTriggers(bundle.Triggers()),
 			server.WithTeams(bundle.Teams()),
 			server.WithGrants(bundle.Grants(), serveStrictGrants),
-			server.WithDocs(DocsFS)).Handler(),
+			server.WithDocs(docsFS)).Handler(),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 
