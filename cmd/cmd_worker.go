@@ -66,6 +66,7 @@ func runWorker(cmd *cobra.Command, _ []string) error {
 		dispatch.WithCredentials(bundle.Credentials(), sealer),
 		dispatch.WithProjects(bundle.Projects(), syncer),
 		dispatch.WithInventories(bundle.Inventories()),
+		dispatch.WithInventorySources(bundle.InventorySources()),
 	}
 	if workerName != "" {
 		opts = append(opts, dispatch.WithOwner(workerName))

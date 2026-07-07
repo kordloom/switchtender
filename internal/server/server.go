@@ -11,6 +11,7 @@ import (
 	"github.com/dcadolph/yardmaster/internal/auth"
 	"github.com/dcadolph/yardmaster/internal/credential"
 	"github.com/dcadolph/yardmaster/internal/inventory"
+	"github.com/dcadolph/yardmaster/internal/invsource"
 	"github.com/dcadolph/yardmaster/internal/live"
 	"github.com/dcadolph/yardmaster/internal/project"
 	"github.com/dcadolph/yardmaster/internal/run"
@@ -87,6 +88,14 @@ func WithInventories(store inventory.Store) Option {
 	return func(srv *Server) { srv.inventories = store }
 }
 
+// WithInventorySources enables the dynamic inventory source endpoints.
+func WithInventorySources(store invsource.Store, refresher SourceRefresher) Option {
+	return func(srv *Server) {
+		srv.invSources = store
+		srv.refresher = refresher
+	}
+}
+
 // WithTemplates enables the template endpoints backed by the given store.
 func WithTemplates(store template.Store) Option {
 	return func(srv *Server) { srv.templates = store }
@@ -139,6 +148,10 @@ type Server struct {
 	inventories inventory.Store
 	// audits backs the audit trail when configured.
 	audits audit.Store
+	// invSources backs the dynamic inventory source endpoints when configured.
+	invSources invsource.Store
+	// refresher refreshes inventory sources when configured.
+	refresher SourceRefresher
 }
 
 // New returns a Server. It panics if store or submitter is nil; a nil logger becomes a no-op.
@@ -202,6 +215,10 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /inventories", createInventoryHandler(s.inventories, s.log))
 	mux.Handle("GET /inventories", listInventoriesHandler(s.inventories, s.log))
 	mux.Handle("DELETE /inventories/{id}", deleteInventoryHandler(s.inventories, s.log))
+	mux.Handle("POST /inventory-sources", createSourceHandler(s.invSources, s.inventories, s.log))
+	mux.Handle("GET /inventory-sources", listSourcesHandler(s.invSources, s.log))
+	mux.Handle("DELETE /inventory-sources/{id}", deleteSourceHandler(s.invSources, s.log))
+	mux.Handle("POST /inventory-sources/{id}/refresh", refreshSourceHandler(s.refresher, s.log))
 	mux.Handle("POST /templates", createTemplateHandler(s.templates, s.log))
 	mux.Handle("GET /templates", listTemplatesHandler(s.templates, s.log))
 	mux.Handle("DELETE /templates/{id}", deleteTemplateHandler(s.templates, s.log))

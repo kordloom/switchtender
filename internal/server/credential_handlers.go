@@ -52,7 +52,7 @@ func createCredentialHandler(store credential.Store, sealer *credential.Sealer, 
 			return
 		}
 		if !credential.ValidKind(req.Kind) {
-			respondError(w, log, http.StatusBadRequest, "kind must be ssh_key or vault_password")
+			respondError(w, log, http.StatusBadRequest, "kind must be ssh_key, vault_password, or env")
 			return
 		}
 

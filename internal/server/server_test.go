@@ -1000,3 +1000,27 @@ func TestAuthGateRoles(t *testing.T) {
 		}
 	}
 }
+
+func TestAuthGateExpiredToken(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	tokens := auth.NewMemStore()
+	plain, tok, err := auth.New("short-lived")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	past := time.Now().Add(-time.Minute)
+	tok.ExpiresAt = &past
+	if err := tokens.Save(ctx, tok); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(), WithTokens(tokens)).Handler()
+	req := httptest.NewRequest(http.MethodGet, "/runs", nil)
+	req.Header.Set("Authorization", "Bearer "+plain)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("expired token = %d, want 401", rec.Code)
+	}
+}

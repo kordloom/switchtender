@@ -41,6 +41,9 @@ document.addEventListener("DOMContentLoaded", () => {
 	} else if (page === "inventories") {
 		wireInventoryForm();
 		loadInventories();
+	} else if (page === "sources") {
+		wireSourceForm();
+		loadSources();
 	}
 	hideAdminNav();
 });
@@ -51,7 +54,7 @@ function hideAdminNav() {
 	const role = localStorage.getItem("ym_role");
 	if (!role || role === "admin") return;
 	for (const a of document.querySelectorAll(".nav a")) {
-		if (["/ui/credentials", "/ui/projects", "/ui/users", "/ui/inventories"].includes(a.getAttribute("href"))) {
+		if (["/ui/credentials", "/ui/projects", "/ui/users", "/ui/inventories", "/ui/sources"].includes(a.getAttribute("href"))) {
 			a.remove();
 		}
 	}
@@ -444,6 +447,82 @@ async function loadInventories() {
 		document.querySelector("table.runs").hidden = false;
 	} catch (e) {
 		setStatus("Failed to load inventories: " + e.message);
+	}
+}
+
+// wireSourceForm hooks the add source form up to POST /inventory-sources.
+function wireSourceForm() {
+	fillSelect(document.getElementById("src-credential"), "/credentials", "credentials",
+		(c) => c.name + " (" + c.kind + ")");
+	fillSelect(document.getElementById("src-project"), "/projects", "projects", (p) => p.name);
+	document.getElementById("source-form").addEventListener("submit", async (e) => {
+		e.preventDefault();
+		const status = document.getElementById("src-status");
+		try {
+			await postAction("/inventory-sources", {
+				name: document.getElementById("src-name").value.trim(),
+				source: document.getElementById("src-source").value.trim(),
+				credential_id: document.getElementById("src-credential").value,
+				project_id: document.getElementById("src-project").value,
+			});
+			status.textContent = "Saved.";
+			document.getElementById("sources").innerHTML = "";
+			loadSources();
+		} catch (err) {
+			status.textContent = "Save failed: " + err.message;
+		}
+	});
+}
+
+// loadSources populates the source table with refresh and delete actions.
+async function loadSources() {
+	try {
+		const data = await getJSON("/inventory-sources");
+		const sources = data.sources || [];
+		if (sources.length === 0) {
+			setStatus("No inventory sources yet.");
+			return;
+		}
+		const tbody = document.getElementById("sources");
+		for (const src of sources) {
+			const tr = document.createElement("tr");
+			tr.appendChild(td(src.name));
+			tr.appendChild(td(src.source, "mono"));
+			tr.appendChild(td(src.synced_at ? fmtTime(src.synced_at) : "never"));
+			const state = document.createElement("td");
+			const chip = document.createElement("span");
+			chip.className = src.last_error ? "chip failed" : (src.synced_at ? "chip ok" : "chip none");
+			chip.textContent = src.last_error ? "error" : (src.synced_at ? "synced" : "pending");
+			if (src.last_error) chip.title = src.last_error;
+			state.appendChild(chip);
+			tr.appendChild(state);
+			const actions = document.createElement("td");
+			const refresh = document.createElement("button");
+			refresh.className = "button primary";
+			refresh.textContent = "Refresh";
+			refresh.addEventListener("click", async (e) => {
+				e.preventDefault();
+				refresh.disabled = true;
+				try {
+					await postAction("/inventory-sources/" + src.id + "/refresh");
+					document.getElementById("sources").innerHTML = "";
+					loadSources();
+				} catch (err) {
+					setStatus("Refresh failed: " + err.message);
+					refresh.disabled = false;
+				}
+			});
+			actions.appendChild(refresh);
+			actions.appendChild(document.createTextNode(" "));
+			const del = deleteCell("/inventory-sources/" + src.id, "source " + src.name, tr);
+			actions.appendChild(del.firstChild);
+			tr.appendChild(actions);
+			tbody.appendChild(tr);
+		}
+		setStatus("");
+		document.querySelector("table.runs").hidden = false;
+	} catch (e) {
+		setStatus("Failed to load sources: " + e.message);
 	}
 }
 

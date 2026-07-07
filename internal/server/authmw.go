@@ -60,6 +60,12 @@ func (g *authGate) wrap(next http.Handler) http.Handler {
 			unauthorized(w)
 			return
 		}
+		if tok.Expired(time.Now()) {
+			// A dead token is useless forever; clear it out as it is caught.
+			go func() { _ = g.tokens.Delete(context.Background(), tok.ID) }()
+			unauthorized(w)
+			return
+		}
 		role, err := g.roleFor(r.Context(), tok)
 		if err != nil {
 			unauthorized(w)

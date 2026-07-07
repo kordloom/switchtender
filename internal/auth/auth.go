@@ -33,6 +33,13 @@ type Token struct {
 	CreatedAt time.Time `json:"created_at"`
 	// LastUsedAt is when the token last authenticated a request.
 	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
+	// ExpiresAt is when the token stops working. Nil means it never expires.
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+}
+
+// Expired reports whether the token is past its expiry.
+func (t *Token) Expired(now time.Time) bool {
+	return t.ExpiresAt != nil && now.After(*t.ExpiresAt)
 }
 
 // Store persists API tokens. Implementations must be safe for concurrent use.

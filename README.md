@@ -85,6 +85,9 @@ Add `"shards": 4` to split it. Ansible is the only runtime dependency: `ansible-
 | Credentials  | SSH keys and vault passwords encrypted with AES-256-GCM, decrypted only at execution, never returned by the API |
 | Observability| A Prometheus metrics endpoint, webhook notifications when runs finish, and an audit trail of every mutation |
 | Inventories  | Stored inventories referenced by id, materialized on whichever executor runs the play |
+| Dynamic sources | Inventory plugins and scripts refreshed into stored inventories, with cloud auth from an env credential |
+| Credentials  | SSH keys, vault passwords, and env variable bundles for cloud SDKs, all encrypted at rest |
+| High availability | Two servers on one database share the schedule without double-firing; tokens can carry a lifetime |
 
 ## HTTP API
 
@@ -124,6 +127,10 @@ Add `"shards": 4` to split it. Ansible is the only runtime dependency: `ansible-
 | GET    | `/users`                | List accounts                                           |
 | DELETE | `/users/{id}`           | Delete an account; its tokens stop working              |
 | GET    | `/workers`              | The executor fleet with lease freshness                 |
+| POST   | `/inventory-sources`    | Register a dynamic inventory source                     |
+| GET    | `/inventory-sources`    | List inventory sources                                  |
+| POST   | `/inventory-sources/{id}/refresh` | Refresh a source into its inventory now       |
+| DELETE | `/inventory-sources/{id}` | Delete an inventory source                            |
 | POST   | `/inventories`          | Store an inventory; runs reference it by id anywhere    |
 | GET    | `/inventories`          | List stored inventories                                 |
 | DELETE | `/inventories/{id}`     | Delete a stored inventory                               |

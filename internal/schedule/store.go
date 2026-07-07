@@ -4,6 +4,7 @@ import (
 	"context"
 	"sort"
 	"sync"
+	"time"
 )
 
 // Store persists schedules. Implementations must be safe for concurrent use.
@@ -16,6 +17,26 @@ type Store interface {
 	List(ctx context.Context) ([]*Schedule, error)
 	// Delete removes the schedule with the given id, or returns ErrNotFound.
 	Delete(ctx context.Context, id string) error
+	// ClaimDue atomically advances a schedule's next fire time from oldNext to newNext and
+	// reports whether this caller won. Concurrent scheduler instances race on the same row; only
+	// the winner fires, so a highly available pair never double-launches.
+	ClaimDue(ctx context.Context, id string, oldNext, newNext time.Time) (bool, error)
+}
+
+// ClaimDue atomically advances a schedule's next fire time and reports whether this caller won.
+func (m *memStore) ClaimDue(_ context.Context, id string, oldNext, newNext time.Time) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	sc, ok := m.schedules[id]
+	if !ok {
+		return false, ErrNotFound
+	}
+	if sc.NextRunAt == nil || !sc.NextRunAt.Equal(oldNext) {
+		return false, nil
+	}
+	next := newNext
+	sc.NextRunAt = &next
+	return true, nil
 }
 
 // memStore is an in-memory Store guarded by a read-write mutex.

@@ -8,6 +8,8 @@ import (
 	"github.com/dcadolph/yardmaster/internal/authtest"
 	"github.com/dcadolph/yardmaster/internal/credential"
 	"github.com/dcadolph/yardmaster/internal/credtest"
+	"github.com/dcadolph/yardmaster/internal/invsource"
+	"github.com/dcadolph/yardmaster/internal/invsourcetest"
 	"github.com/dcadolph/yardmaster/internal/project"
 	"github.com/dcadolph/yardmaster/internal/projecttest"
 	"github.com/dcadolph/yardmaster/internal/template"
@@ -241,5 +243,32 @@ func truncateAudit(t *testing.T, dsn string) {
 	defer func() { _ = db.Close() }()
 	if _, err := db.Exec("TRUNCATE audit_entries"); err != nil {
 		t.Fatalf("truncate audit_entries: %v", err)
+	}
+}
+
+func TestInvSourceStoreContract(t *testing.T) {
+	dsn := testDSN(t)
+	db, err := pgstore.Open(dsn)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	invsourcetest.Contract(t, func() invsource.Store {
+		truncateSources(t, dsn)
+		return db.InventorySources()
+	})
+}
+
+// truncateSources clears the inventory source table between contract subtests.
+func truncateSources(t *testing.T, dsn string) {
+	t.Helper()
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatalf("open postgres: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	if _, err := db.Exec("TRUNCATE inventory_sources"); err != nil {
+		t.Fatalf("truncate inventory_sources: %v", err)
 	}
 }

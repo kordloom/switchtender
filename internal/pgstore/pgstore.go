@@ -19,6 +19,7 @@ import (
 	"github.com/dcadolph/yardmaster/internal/credential"
 	"github.com/dcadolph/yardmaster/internal/event"
 	"github.com/dcadolph/yardmaster/internal/inventory"
+	"github.com/dcadolph/yardmaster/internal/invsource"
 	"github.com/dcadolph/yardmaster/internal/project"
 	"github.com/dcadolph/yardmaster/internal/run"
 	"github.com/dcadolph/yardmaster/internal/schedule"
@@ -123,7 +124,8 @@ CREATE TABLE IF NOT EXISTS tokens (
 	hash         TEXT NOT NULL,
 	user_id      TEXT NOT NULL DEFAULT '',
 	created_at   TEXT NOT NULL,
-	last_used_at TEXT
+	last_used_at TEXT,
+	expires_at   TEXT
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_tokens_hash ON tokens(hash);
 CREATE TABLE IF NOT EXISTS projects (
@@ -144,6 +146,17 @@ CREATE TABLE IF NOT EXISTS templates (
 	credential_ids TEXT NOT NULL DEFAULT '',
 	extra_vars     TEXT NOT NULL DEFAULT '',
 	created_at     TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS inventory_sources (
+	id            TEXT PRIMARY KEY,
+	name          TEXT NOT NULL DEFAULT '',
+	source        TEXT NOT NULL,
+	credential_id TEXT NOT NULL DEFAULT '',
+	project_id    TEXT NOT NULL DEFAULT '',
+	inventory_id  TEXT NOT NULL DEFAULT '',
+	synced_at     TEXT,
+	last_error    TEXT NOT NULL DEFAULT '',
+	created_at    TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS audit_entries (
 	id     TEXT PRIMARY KEY,
@@ -175,6 +188,7 @@ ALTER TABLE runs ADD COLUMN IF NOT EXISTS commit_sha TEXT NOT NULL DEFAULT '';
 ALTER TABLE tokens ADD COLUMN IF NOT EXISTS user_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS inventory_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE schedules ADD COLUMN IF NOT EXISTS template_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE tokens ADD COLUMN IF NOT EXISTS expires_at TEXT;
 `
 
 // store is a run.Store backed by a PostgreSQL database.
@@ -210,6 +224,8 @@ type DB struct {
 	inventories *inventoryStore
 	// audits is the audit trail store.
 	audits *auditStore
+	// invSources is the dynamic inventory source store.
+	invSources *invSourceStore
 }
 
 // Open connects to the PostgreSQL database at dsn, applies the schema, and returns the bundled
@@ -244,7 +260,8 @@ func Open(dsn string) (*DB, error) {
 		templates:   &templateStore{db: db},
 		users:       &userStore{db: db},
 		inventories: &inventoryStore{db: db},
-		audits:      &auditStore{db: db}}, nil
+		audits:      &auditStore{db: db},
+		invSources:  &invSourceStore{db: db}}, nil
 }
 
 // Runs returns the run store.
@@ -290,6 +307,11 @@ func (d *DB) Inventories() inventory.Store {
 // Audits returns the audit trail store.
 func (d *DB) Audits() audit.Store {
 	return d.audits
+}
+
+// InventorySources returns the dynamic inventory source store.
+func (d *DB) InventorySources() invsource.Store {
+	return d.invSources
 }
 
 // Close closes the underlying database.

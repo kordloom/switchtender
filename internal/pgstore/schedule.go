@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/dcadolph/yardmaster/internal/schedule"
 )
@@ -141,4 +142,19 @@ func boolInt(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+// ClaimDue atomically advances a schedule's next fire time and reports whether this caller won.
+func (s *scheduleStore) ClaimDue(ctx context.Context, id string, oldNext, newNext time.Time) (bool, error) {
+	res, err := s.db.ExecContext(ctx,
+		"UPDATE schedules SET next_run_at=$1 WHERE id=$2 AND next_run_at=$3",
+		formatTime(newNext), id, formatTime(oldNext))
+	if err != nil {
+		return false, fmt.Errorf("claim due schedule: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("claim due schedule: %w", err)
+	}
+	return n > 0, nil
 }
