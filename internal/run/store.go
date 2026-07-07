@@ -61,6 +61,13 @@ type Store interface {
 	AppendEvents(ctx context.Context, id string, events []event.Event) error
 	// Events returns a copy of the run's structured events, or ErrNotFound.
 	Events(ctx context.Context, id string) ([]event.Event, error)
+	// PurgeEventsBefore drops the events and logs of terminal runs created before cutoff, keeping
+	// the run records and their summaries. It returns how many runs were trimmed.
+	PurgeEventsBefore(ctx context.Context, cutoff time.Time) (int, error)
+	// PurgeRunsBefore deletes terminal runs created before cutoff along with their events and logs,
+	// keeping the per host and per task summaries that power the cross-run views. It returns how
+	// many runs were deleted. Non-terminal runs are never purged.
+	PurgeRunsBefore(ctx context.Context, cutoff time.Time) (int, error)
 }
 
 // memStore is an in-memory Store backed by maps guarded by a read-write mutex.
@@ -534,4 +541,42 @@ func (m *memStore) Events(_ context.Context, id string) ([]event.Event, error) {
 	out := make([]event.Event, len(m.events[id]))
 	copy(out, m.events[id])
 	return out, nil
+}
+
+// PurgeEventsBefore drops the events and logs of terminal runs created before cutoff, keeping the
+// run records and their summaries. It returns how many runs were trimmed.
+func (m *memStore) PurgeEventsBefore(_ context.Context, cutoff time.Time) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	trimmed := 0
+	for id, r := range m.runs {
+		if !r.Status.Terminal() || !r.CreatedAt.Before(cutoff) {
+			continue
+		}
+		if len(m.events[id]) == 0 && len(m.logs[id]) == 0 {
+			continue
+		}
+		delete(m.events, id)
+		delete(m.logs, id)
+		trimmed++
+	}
+	return trimmed, nil
+}
+
+// PurgeRunsBefore deletes terminal runs created before cutoff along with their events and logs,
+// keeping the per host and per task summaries. It returns how many runs were deleted.
+func (m *memStore) PurgeRunsBefore(_ context.Context, cutoff time.Time) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	deleted := 0
+	for id, r := range m.runs {
+		if !r.Status.Terminal() || !r.CreatedAt.Before(cutoff) {
+			continue
+		}
+		delete(m.runs, id)
+		delete(m.events, id)
+		delete(m.logs, id)
+		deleted++
+	}
+	return deleted, nil
 }

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -26,6 +27,7 @@ import (
 	"github.com/dcadolph/yardmaster/internal/logutil"
 	"github.com/dcadolph/yardmaster/internal/pgstore"
 	"github.com/dcadolph/yardmaster/internal/project"
+	"github.com/dcadolph/yardmaster/internal/retention"
 	"github.com/dcadolph/yardmaster/internal/roundhouse"
 	"github.com/dcadolph/yardmaster/internal/run"
 	"github.com/dcadolph/yardmaster/internal/schedule"
@@ -68,6 +70,15 @@ var serveAllowContainerEE bool
 // serveStrictGrants holds the value of the --strict-grants flag.
 var serveStrictGrants bool
 
+// retainRuns holds the value of the --retain-runs flag, a duration like 90d.
+var retainRuns string
+
+// retainEvents holds the value of the --retain-events flag, a duration like 30d.
+var retainEvents string
+
+// retentionInterval holds the value of the --retention-interval flag.
+var retentionInterval time.Duration
+
 // serveCmd runs the Yardmaster HTTP server (the dispatcher).
 var serveCmd = &cobra.Command{
 	Use:   "serve",
@@ -88,6 +99,32 @@ func init() {
 		"Allow runs whose project pins a container image to execute inside that image. Needs Docker.")
 	serveCmd.Flags().BoolVar(&serveStrictGrants, "strict-grants", false,
 		"Deny non-admins access to an object that has no grants, instead of deferring to the role.")
+	serveCmd.Flags().StringVar(&retainRuns, "retain-runs", "",
+		"Delete terminal runs older than this, for example 90d. Empty keeps them forever.")
+	serveCmd.Flags().StringVar(&retainEvents, "retain-events", "",
+		"Drop run events and logs older than this, for example 30d. Empty keeps them forever.")
+	serveCmd.Flags().DurationVar(&retentionInterval, "retention-interval", retention.DefaultInterval,
+		"How often the retention sweeper runs.")
+}
+
+// parseRetention converts a retention flag into a duration. An empty value means no window. A
+// trailing d counts whole days; otherwise the Go duration syntax applies.
+func parseRetention(s string) (time.Duration, error) {
+	if s == "" {
+		return 0, nil
+	}
+	if days, ok := strings.CutSuffix(s, "d"); ok {
+		n, err := strconv.Atoi(days)
+		if err != nil {
+			return 0, fmt.Errorf("invalid retention %q: %w", s, err)
+		}
+		return time.Duration(n) * 24 * time.Hour, nil
+	}
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		return 0, fmt.Errorf("invalid retention %q: %w", s, err)
+	}
+	return d, nil
 }
 
 // storeBundle is the store set both database backends expose.
@@ -179,6 +216,20 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		schedule.WithInterval(scheduleInterval), schedule.WithTemplates(bundle.Templates()))
 	scheduler.Start()
 	defer scheduler.Close()
+
+	runsWindow, err := parseRetention(retainRuns)
+	if err != nil {
+		return err
+	}
+	eventsWindow, err := parseRetention(retainEvents)
+	if err != nil {
+		return err
+	}
+	sweeper := retention.NewSweeper(store, log,
+		retention.WithRetainRuns(runsWindow), retention.WithRetainEvents(eventsWindow),
+		retention.WithInterval(retentionInterval))
+	sweeper.Start()
+	defer sweeper.Close()
 
 	httpServer := &http.Server{
 		Addr: serveAddr,
