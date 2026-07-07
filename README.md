@@ -26,6 +26,19 @@ host and task as a live status matrix instead of a text scroll, split big jobs a
 shards, and read the results back as one merged view. No Kubernetes operator, no Postgres, no
 Redis, no message bus. One process, one SQLite file.
 
+## Contents
+
+- [Why](#why)
+- [See it](#see-it)
+- [Requirements](#requirements)
+- [Quick start](#quick-start)
+- [Documentation](#documentation)
+- [Design](#design)
+- [The name](#the-name)
+- [Roadmap](#roadmap)
+- [Status](#status)
+- [License](#license)
+
 ## Why
 
 AWX wants a Kubernetes operator, Postgres, Redis, and Receptor before it runs a single playbook.
@@ -52,6 +65,13 @@ host, remembered across every run:
 
 <img src="assets/screenshot-fleet.png" alt="Fleet health with flaky detection and sparklines" width="100%">
 
+## Requirements
+
+- Ansible on the PATH: `ansible-playbook` and `ansible-inventory`.
+- Go 1.26 to build from source, or the container image and Helm chart to deploy.
+- Nothing else for the default SQLite setup. PostgreSQL is optional, for running more than one
+  instance.
+
 ## Quick start
 
     go build -o yardmaster .
@@ -62,8 +82,7 @@ Open http://localhost:8080 and submit a run:
     curl -X POST localhost:8080/runs \
       -d '{"playbook": "site.yml", "inventory": "hosts.ini"}'
 
-Add `"shards": 4` to split it. Ansible is the only runtime dependency: `ansible-playbook` and
-`ansible-inventory` on PATH.
+Add `"shards": 4` to split it across four slices of the inventory.
 
 Migrating from AWX or Semaphore is one command. Point it at an export to see what it would create,
 then apply:
@@ -71,107 +90,26 @@ then apply:
     ./yardmaster import awx awx-export.json           # dry-run report
     ./yardmaster import awx awx-export.json --apply    # create the objects
 
-Credentials come across as shells; re-enter their secrets, since exports omit them by design.
+Credentials come across as shells; re-enter their secrets, since exports omit them by design. The
+[switching-from-AWX guide](docs/switching-from-awx.md) walks the whole move.
 
-Full documentation is in [docs/](docs/): quickstart, a configuration reference for every flag and
-environment variable, the concepts, a migration guide, and a comparison with AWX and Semaphore. A
-`docker-compose.yml` and a Helm chart under `deploy/helm` cover deployment.
+## Documentation
 
-## What it does today
+The docs live in [docs/](docs/) and also render inside the app at `/ui/docs`.
 
-| Capability   | What you get                                                                    |
-|--------------|---------------------------------------------------------------------------------|
-| Runs         | Submit over HTTP, real ansible-playbook underneath, human log plus a structured event stream, per-task drill-down with stdout, stderr, rc, and diff |
-| Live view    | Server-Sent Events paint the host matrix and log as the run executes            |
-| Splits       | Shard an inventory across parallel slices, merged back into one matrix; hosts packed by measured duration from past runs |
-| Shard retry  | Retry a finished split and only its failed shards run again, lineage recorded   |
-| Pipelines    | Ordered steps or a dependency graph with parallel branches; failures skip exactly their dependents, per-step retry budgets, set_stats outputs flow to dependent steps as extra vars |
-| Workers      | Point `yardmaster worker` at the same database and it competes for queued runs; leases, heartbeats, and a janitor make dead workers safe |
-| Scheduling   | Cron schedules fire runs, splits, or pipelines with full history per fire       |
-| Fleet memory | Failure rankings, flaky-host detection, outcome sparklines, per-host history, task duration trends, all from persisted structured events |
-| Recovery     | Cancellation across processes recorded as canceled, orphaned runs interrupted by lease expiry, terminal saves retried |
-| Storage      | SQLite out of the box; the same flag takes a PostgreSQL DSN for multi-instance  |
-| Projects     | Playbooks sourced from git with clone-or-fetch sync; every run records the exact commit it executed |
-| Templates    | Saved launch presets bundling project, playbook, credentials, shards, and extra vars; one click or one POST launches |
-| Auth         | User accounts with admin, operator, and viewer roles enforced per route; bearer tokens hashed at rest; the API locks down the moment the first token exists |
-| Observability| A Prometheus metrics endpoint, webhook notifications when runs finish, and an audit trail of every mutation |
-| Inventories  | Stored inventories referenced by id, materialized on whichever executor runs the play |
-| Dynamic sources | Inventory plugins and scripts refreshed into stored inventories, with cloud auth from an env credential |
-| Credentials  | SSH keys, vault passwords, env bundles for cloud SDKs, become passwords, and registry logins, all encrypted at rest |
-| High availability | Two servers on one database share the schedule without double-firing; tokens can carry a lifetime |
-| Git triggers | A webhook URL launches a template on push; the project syncs fresh, so it deploys the commit just pushed |
-| Surveys      | Templates declare typed launch prompts, validated and injected as extra vars |
-| Worker queues | Target a run at a named queue; a worker serving that queue runs it and default workers leave it alone |
-| Dependency sync | A project's requirements.yml roles and collections install on each sync, so playbooks that need them just run |
-| Execution environments | A project can pin a container image; its runs execute inside it with their own ansible and system dependencies |
-| Teams and grants | Group users into teams and grant use or manage on a specific project, template, inventory, or credential; grants layer on the global role and default open |
-| Retention | A sweeper drops old run events and deletes terminal runs past a configurable age, keeping the summaries the cross-run views need |
-| Email | An SMTP notification on every finished run or on failures only, alongside the finish webhooks |
-| Migration | `yardmaster import awx` and `import semaphore` read an export and create the equivalent projects, inventories, templates, surveys, schedules, and credential shells, with a dry-run report first |
+| Guide | What |
+|-------|------|
+| [Quickstart](docs/quickstart.md) | Zero to a first run in a few minutes |
+| [Switching from AWX](docs/switching-from-awx.md) | Import what you have, or set up from scratch |
+| [Concepts](docs/concepts.md) | Runs, splits, pipelines, projects, templates, and the rest |
+| [Configuration](docs/configuration.md) | Every command, flag, and environment variable |
+| [Features](docs/features.md) | The full capability list |
+| [HTTP API](docs/api.md) | Every endpoint the server exposes |
+| [Migration](docs/migration.md) | Moving off AWX or Semaphore in detail |
+| [Comparison](docs/comparison.md) | How Yardmaster compares to AWX and Semaphore |
 
-## HTTP API
-
-| Method | Path                    | What                                                    |
-|--------|-------------------------|---------------------------------------------------------|
-| POST   | `/runs`                 | Submit a run; `shards` of two or more splits it         |
-| GET    | `/runs`                 | Run history, newest first                               |
-| GET    | `/runs/{id}`            | One run                                                 |
-| POST   | `/runs/{id}/cancel`     | Cancel a pending or running run                         |
-| POST   | `/runs/{id}/retry`      | New split from only the failed shards of a finished one |
-| GET    | `/runs/{id}/shards`     | Shard runs of a split                                   |
-| GET    | `/runs/{id}/steps`      | Step runs of a pipeline                                 |
-| GET    | `/runs/{id}/logs`       | Captured output as plain text                           |
-| GET    | `/runs/{id}/events`     | Structured events as JSON                               |
-| GET    | `/runs/{id}/stream`     | Live events and log over Server-Sent Events             |
-| POST   | `/pipelines`            | Submit ordered playbook steps as one pipeline           |
-| POST   | `/schedules`            | Cron schedule for a run, split, pipeline, or template   |
-| GET    | `/schedules`            | List schedules                                          |
-| GET    | `/schedules/{id}`       | One schedule                                            |
-| DELETE | `/schedules/{id}`       | Delete a schedule                                       |
-| GET    | `/fleet`                | Hosts ranked by failures over recent runs, flaky flags  |
-| GET    | `/hosts/{host}/runs`    | One host's recent per-run outcomes                      |
-| GET    | `/tasks`                | Per-task duration trends over recent runs               |
-| POST   | `/projects`             | Register a git project; runs record their commit       |
-| GET    | `/projects`             | List projects                                           |
-| DELETE | `/projects/{id}`        | Delete a project                                        |
-| POST   | `/templates`            | Save a launch preset                                    |
-| GET    | `/templates`            | List templates                                          |
-| POST   | `/templates/{id}/launch`| Launch a template, answering its survey if it has one   |
-| POST   | `/triggers`             | Create a webhook trigger for a template                 |
-| GET    | `/triggers`             | List webhook triggers                                   |
-| DELETE | `/triggers/{id}`        | Delete a trigger, revoking its webhook                  |
-| POST   | `/hooks/{token}`        | Fire a trigger from a git push, no auth header needed   |
-| DELETE | `/templates/{id}`       | Delete a template                                       |
-| POST   | `/credentials`          | Store a credential (ssh_key, vault_password, env, become_password, registry), encrypted at rest |
-| GET    | `/credentials`          | List credentials, secrets never included                |
-| DELETE | `/credentials/{id}`     | Delete a credential                                     |
-| POST   | `/auth/login`           | Sign in with username and password, returns a token     |
-| POST   | `/auth/check`           | Verify an API token                                     |
-| POST   | `/users`                | Create an account with a role                           |
-| GET    | `/users`                | List accounts                                           |
-| DELETE | `/users/{id}`           | Delete an account; its tokens stop working              |
-| POST   | `/teams`                | Create a team of users                                  |
-| GET    | `/teams`                | List teams                                              |
-| DELETE | `/teams/{id}`           | Delete a team and its memberships                       |
-| POST   | `/teams/{id}/members`   | Add a user to a team                                    |
-| GET    | `/teams/{id}/members`   | List a team's members                                   |
-| DELETE | `/teams/{id}/members/{userID}` | Remove a user from a team                        |
-| POST   | `/grants`               | Grant a user or team use or manage on an object         |
-| GET    | `/grants`               | List access grants                                      |
-| DELETE | `/grants/{id}`          | Delete an access grant                                  |
-| GET    | `/workers`              | The executor fleet with lease freshness                 |
-| POST   | `/inventory-sources`    | Register a dynamic inventory source                     |
-| GET    | `/inventory-sources`    | List inventory sources                                  |
-| POST   | `/inventory-sources/{id}/refresh` | Refresh a source into its inventory now       |
-| DELETE | `/inventory-sources/{id}` | Delete an inventory source                            |
-| POST   | `/inventories`          | Store an inventory; runs reference it by id anywhere    |
-| GET    | `/inventories`          | List stored inventories                                 |
-| DELETE | `/inventories/{id}`     | Delete a stored inventory                               |
-| GET    | `/audit`                | The mutation trail, admin only                          |
-| GET    | `/metrics`              | Prometheus gauges for runs and fleet health             |
-| GET    | `/healthz`              | Liveness                                                |
-
-The web UI lives at `/ui/` and the root redirects to it.
+Deploy with the `docker-compose.yml` at the root, which brings up a server, a database, and a
+worker, or the Helm chart under [deploy/helm](deploy/helm).
 
 ## Design
 
@@ -179,8 +117,7 @@ A single-binary monolith on purpose. The serve command hosts the HTTP API, an in
 with a bounded worker pool, the cron scheduler, and the embedded UI.
 
 - Storage is SQLite through a pure Go driver in WAL mode. No cgo, one file to back up, and the
-  store sits behind an interface a Postgres backend can satisfy later for multi-instance
-  deployments.
+  store sits behind an interface a Postgres backend can satisfy for multi-instance deployments.
 - Structured events come from an embedded Ansible callback plugin that writes one JSON object per
   event to a sidecar file. The dispatcher tails the sidecar as the run executes, storing and
   publishing events without touching the human-readable log.

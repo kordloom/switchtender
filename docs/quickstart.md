@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="../assets/logo-letters-dark.png">
+    <img src="../assets/logo-letters.png" alt="Yardmaster" width="140">
+  </picture>
+</p>
+
 # Quickstart
 
 ## Requirements

@@ -5,13 +5,32 @@ import (
 	"html/template"
 	"io/fs"
 	"net/http"
+	"path"
+	"regexp"
 	"strings"
 )
 
 // docOrder is the order documentation pages appear in the sidebar. Files not listed follow, sorted.
 var docOrder = []string{
-	"README", "quickstart", "switching-from-awx", "concepts", "configuration", "migration",
-	"comparison",
+	"README", "quickstart", "switching-from-awx", "concepts", "configuration", "features", "api",
+	"migration", "comparison",
+}
+
+// mdLinkPattern matches links between documentation pages, which are relative markdown file names on
+// disk. In the app they must point at the docs routes instead.
+var mdLinkPattern = regexp.MustCompile(`href="([a-zA-Z0-9._/-]+?)\.md(#[^"]*)?"`)
+
+// rewriteDocLinks turns relative markdown links into app documentation routes, so cross-page links
+// that resolve on disk also resolve at /ui/docs.
+func rewriteDocLinks(html string) string {
+	return mdLinkPattern.ReplaceAllStringFunc(html, func(match string) string {
+		parts := mdLinkPattern.FindStringSubmatch(match)
+		slug, anchor := path.Base(parts[1]), parts[2]
+		if slug == "README" {
+			return `href="/ui/docs` + anchor + `"`
+		}
+		return `href="/ui/docs/` + slug + anchor + `"`
+	})
 }
 
 // docLink is one sidebar entry.
@@ -49,8 +68,9 @@ func (u *UI) docsPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u.render(w, "docs.html", map[string]any{
-		"Title":   docTitle(data, slug),
-		"Content": template.HTML(body.String()), //nolint:gosec // Rendered from trusted embedded docs.
+		"Title": docTitle(data, slug),
+		//nolint:gosec // Rendered from trusted embedded docs.
+		"Content": template.HTML(rewriteDocLinks(body.String())),
 		"Pages":   u.docList(slug),
 	})
 }
