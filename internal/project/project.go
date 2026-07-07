@@ -30,6 +30,9 @@ type Project struct {
 	Branch string `json:"branch,omitempty"`
 	// CredentialID names an ssh_key credential for private remotes. Empty for public or local.
 	CredentialID string `json:"credential_id,omitempty"`
+	// InstallDeps installs the project's Ansible role and collection requirements on each sync so
+	// playbooks that need them run without manual setup. It defaults to true.
+	InstallDeps bool `json:"install_deps"`
 	// CreatedAt is when the project was created.
 	CreatedAt time.Time `json:"created_at"`
 }

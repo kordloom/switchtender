@@ -21,6 +21,9 @@ type createProjectRequest struct {
 	Branch string `json:"branch,omitempty"`
 	// CredentialID names an ssh_key credential for private remotes. Optional.
 	CredentialID string `json:"credential_id,omitempty"`
+	// InstallDeps installs the project's Ansible requirements on each sync. Optional, defaults to
+	// true when omitted; set it false to skip dependency installation.
+	InstallDeps *bool `json:"install_deps,omitempty"`
 }
 
 // listProjectsResponse wraps the project list.
@@ -49,7 +52,8 @@ func createProjectHandler(store project.Store, log *zap.Logger) http.HandlerFunc
 		}
 		p := &project.Project{
 			ID: project.NewID(), Name: req.Name, RepoURL: req.RepoURL,
-			Branch: req.Branch, CredentialID: req.CredentialID, CreatedAt: time.Now(),
+			Branch: req.Branch, CredentialID: req.CredentialID,
+			InstallDeps: req.InstallDeps == nil || *req.InstallDeps, CreatedAt: time.Now(),
 		}
 		if err := store.Save(r.Context(), p); err != nil {
 			log.Error("server: save project: " + err.Error())

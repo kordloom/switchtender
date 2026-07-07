@@ -266,6 +266,7 @@ function wireProjectForm() {
 				repo_url: document.getElementById("project-repo").value.trim(),
 				branch: document.getElementById("project-branch").value.trim(),
 				credential_id: document.getElementById("project-credential").value,
+				install_deps: document.getElementById("project-deps").checked,
 			});
 			status.textContent = "Saved.";
 			document.getElementById("projects").innerHTML = "";

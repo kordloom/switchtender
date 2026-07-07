@@ -60,10 +60,11 @@ func (d *Dispatcher) resolveProject(r *run.Run, spec *roundhouse.Spec) error {
 		}
 	}
 
-	dir, sha, err := d.syncer.Sync(p, sshKey)
+	dir, sha, galaxyEnv, err := d.syncer.Sync(p, sshKey)
 	if err != nil {
 		return fmt.Errorf("sync project %s: %w", p.Name, err)
 	}
+	spec.Env = append(spec.Env, galaxyEnv...)
 
 	playbook, err := project.WithinRepo(dir, r.Playbook)
 	if err != nil {

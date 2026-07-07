@@ -136,6 +136,7 @@ CREATE TABLE IF NOT EXISTS projects (
 	repo_url      TEXT NOT NULL,
 	branch        TEXT NOT NULL DEFAULT '',
 	credential_id TEXT NOT NULL DEFAULT '',
+	install_deps  INTEGER NOT NULL DEFAULT 1,
 	created_at    TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS templates (
@@ -205,6 +206,7 @@ ALTER TABLE tokens ADD COLUMN IF NOT EXISTS expires_at TEXT;
 ALTER TABLE templates ADD COLUMN IF NOT EXISTS survey TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS queue TEXT NOT NULL DEFAULT '';
 ALTER TABLE templates ADD COLUMN IF NOT EXISTS queue TEXT NOT NULL DEFAULT '';
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS install_deps INTEGER NOT NULL DEFAULT 1;
 `
 
 // store is a run.Store backed by a PostgreSQL database.

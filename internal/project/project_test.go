@@ -54,7 +54,7 @@ func TestSyncerCloneAndUpdate(t *testing.T) {
 	}
 	p := &project.Project{ID: "proj_x", RepoURL: repo, Branch: "main"}
 
-	dir, sha1, err := s.Sync(p, "")
+	dir, sha1, _, err := s.Sync(p, "")
 	if err != nil {
 		t.Fatalf("Sync() clone error = %v", err)
 	}
@@ -71,7 +71,7 @@ func TestSyncerCloneAndUpdate(t *testing.T) {
 	}
 	runGit(t, repo, "commit", "-am", "second")
 
-	dir2, sha2, err := s.Sync(p, "")
+	dir2, sha2, _, err := s.Sync(p, "")
 	if err != nil {
 		t.Fatalf("Sync() update error = %v", err)
 	}
