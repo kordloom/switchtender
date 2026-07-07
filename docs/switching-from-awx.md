@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="../assets/logo-letters-dark.png">
+    <img src="../assets/logo-letters.png" alt="Yardmaster" width="140">
+  </picture>
+</p>
+
 # Switching from AWX
 
 This guide assumes you know AWX and have never run Yardmaster. It gets you from an AWX setup to a
