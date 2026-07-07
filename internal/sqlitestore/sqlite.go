@@ -137,6 +137,8 @@ CREATE TABLE IF NOT EXISTS projects (
 	branch        TEXT NOT NULL DEFAULT '',
 	credential_id TEXT NOT NULL DEFAULT '',
 	install_deps  INTEGER NOT NULL DEFAULT 1,
+	image         TEXT NOT NULL DEFAULT '',
+	pull_credential_id TEXT NOT NULL DEFAULT '',
 	created_at    TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS templates (
@@ -217,6 +219,8 @@ var alterations = []string{
 	"ALTER TABLE templates ADD COLUMN queue TEXT NOT NULL DEFAULT ''",
 	"ALTER TABLE run_host_summary ADD COLUMN duration_seconds REAL NOT NULL DEFAULT 0",
 	"ALTER TABLE projects ADD COLUMN install_deps INTEGER NOT NULL DEFAULT 1",
+	"ALTER TABLE projects ADD COLUMN image TEXT NOT NULL DEFAULT ''",
+	"ALTER TABLE projects ADD COLUMN pull_credential_id TEXT NOT NULL DEFAULT ''",
 }
 
 // store is a run.Store backed by a SQLite database.

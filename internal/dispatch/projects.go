@@ -80,5 +80,33 @@ func (d *Dispatcher) resolveProject(r *run.Run, spec *roundhouse.Spec) error {
 	}
 	spec.Dir = dir
 	r.CommitSHA = sha
+
+	if p.Image != "" {
+		spec.Image = p.Image
+		if err := d.resolvePullCredential(p, spec); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// resolvePullCredential decrypts the project's registry credential, when set, onto the spec so the
+// container runner can pull a private execution environment image.
+func (d *Dispatcher) resolvePullCredential(p *project.Project, spec *roundhouse.Spec) error {
+	if p.PullCredentialID == "" {
+		return nil
+	}
+	if d.credentials == nil || d.sealer == nil {
+		return credential.ErrNoKey
+	}
+	c, err := d.credentials.Get(context.Background(), p.PullCredentialID)
+	if err != nil {
+		return fmt.Errorf("pull credential %s: %w", p.PullCredentialID, err)
+	}
+	plain, err := d.sealer.Open(c.Secret)
+	if err != nil {
+		return fmt.Errorf("decrypt pull credential: %w", err)
+	}
+	spec.RegistryUsername, spec.RegistryPassword = credential.RegistryLogin(plain)
 	return nil
 }

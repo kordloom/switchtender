@@ -10,7 +10,7 @@ import (
 )
 
 // projectColumns is the shared select list for project reads.
-const projectColumns = `id, name, repo_url, branch, credential_id, install_deps, created_at`
+const projectColumns = `id, name, repo_url, branch, credential_id, install_deps, image, pull_credential_id, created_at`
 
 // projectStore is a project.Store backed by the shared SQLite database.
 type projectStore struct {
@@ -21,15 +21,17 @@ type projectStore struct {
 // Save inserts or replaces the project.
 func (s *projectStore) Save(ctx context.Context, p *project.Project) error {
 	const q = `
-INSERT INTO projects (id, name, repo_url, branch, credential_id, install_deps, created_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO projects
+	(id, name, repo_url, branch, credential_id, install_deps, image, pull_credential_id, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 ON CONFLICT(id) DO UPDATE SET
 	name=excluded.name, repo_url=excluded.repo_url, branch=excluded.branch,
 	credential_id=excluded.credential_id, install_deps=excluded.install_deps,
+	image=excluded.image, pull_credential_id=excluded.pull_credential_id,
 	created_at=excluded.created_at`
 	_, err := s.db.ExecContext(ctx, q,
 		p.ID, p.Name, p.RepoURL, p.Branch, p.CredentialID,
-		boolToInt(p.InstallDeps), formatTime(p.CreatedAt))
+		boolToInt(p.InstallDeps), p.Image, p.PullCredentialID, formatTime(p.CreatedAt))
 	if err != nil {
 		return fmt.Errorf("save project: %w", err)
 	}
@@ -96,7 +98,7 @@ func scanProject(sc scanner) (*project.Project, error) {
 		created     string
 	)
 	if err := sc.Scan(&p.ID, &p.Name, &p.RepoURL, &p.Branch, &p.CredentialID,
-		&installDeps, &created); err != nil {
+		&installDeps, &p.Image, &p.PullCredentialID, &created); err != nil {
 		return nil, err
 	}
 	p.InstallDeps = installDeps != 0

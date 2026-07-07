@@ -24,6 +24,10 @@ type createProjectRequest struct {
 	// InstallDeps installs the project's Ansible requirements on each sync. Optional, defaults to
 	// true when omitted; set it false to skip dependency installation.
 	InstallDeps *bool `json:"install_deps,omitempty"`
+	// Image names a container image the project's runs execute inside. Optional.
+	Image string `json:"image,omitempty"`
+	// PullCredentialID names a registry credential for pulling a private Image. Optional.
+	PullCredentialID string `json:"pull_credential_id,omitempty"`
 }
 
 // listProjectsResponse wraps the project list.
@@ -53,7 +57,8 @@ func createProjectHandler(store project.Store, log *zap.Logger) http.HandlerFunc
 		p := &project.Project{
 			ID: project.NewID(), Name: req.Name, RepoURL: req.RepoURL,
 			Branch: req.Branch, CredentialID: req.CredentialID,
-			InstallDeps: req.InstallDeps == nil || *req.InstallDeps, CreatedAt: time.Now(),
+			InstallDeps: req.InstallDeps == nil || *req.InstallDeps,
+			Image:       req.Image, PullCredentialID: req.PullCredentialID, CreatedAt: time.Now(),
 		}
 		if err := store.Save(r.Context(), p); err != nil {
 			log.Error("server: save project: " + err.Error())

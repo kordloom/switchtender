@@ -25,6 +25,9 @@ var workerName string
 // workerQueues holds the values of the repeatable worker --queue flag.
 var workerQueues []string
 
+// workerAllowContainerEE holds the value of the worker --allow-container-ee flag.
+var workerAllowContainerEE bool
+
 // workerCmd runs a Yardmaster worker: a process that leases pending runs from the shared store,
 // executes them, and streams results back. Point it and a server at the same database, a
 // PostgreSQL DSN for separate machines, and they compete for work.
@@ -42,6 +45,8 @@ func init() {
 		"Worker name stamped on the runs it executes. Defaults to host and pid.")
 	workerCmd.Flags().StringArrayVar(&workerQueues, "queue", nil,
 		"Queue this worker serves. Repeatable. Without any, it serves the default pool.")
+	workerCmd.Flags().BoolVar(&workerAllowContainerEE, "allow-container-ee", false,
+		"Allow runs whose project pins a container image to execute inside that image. Needs Docker.")
 }
 
 // runWorker leases and executes runs until interrupted.
@@ -79,7 +84,7 @@ func runWorker(cmd *cobra.Command, _ []string) error {
 	if len(workerQueues) > 0 {
 		opts = append(opts, dispatch.WithQueues(workerQueues))
 	}
-	disp := dispatch.New(store, roundhouse.NewAnsibleRunner(), log, opts...)
+	disp := dispatch.New(store, roundhouse.NewSelectiveRunner(workerAllowContainerEE), log, opts...)
 	defer disp.Close()
 
 	log.Info("yardmaster worker started",
