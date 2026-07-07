@@ -17,6 +17,7 @@ import (
 	"github.com/dcadolph/yardmaster/internal/run"
 	"github.com/dcadolph/yardmaster/internal/schedule"
 	"github.com/dcadolph/yardmaster/internal/template"
+	"github.com/dcadolph/yardmaster/internal/trigger"
 	"github.com/dcadolph/yardmaster/internal/ui"
 	"github.com/dcadolph/yardmaster/internal/user"
 )
@@ -88,6 +89,11 @@ func WithInventories(store inventory.Store) Option {
 	return func(srv *Server) { srv.inventories = store }
 }
 
+// WithTriggers enables webhook triggers that launch templates from inbound git pushes.
+func WithTriggers(store trigger.Store) Option {
+	return func(srv *Server) { srv.triggers = store }
+}
+
 // WithInventorySources enables the dynamic inventory source endpoints.
 func WithInventorySources(store invsource.Store, refresher SourceRefresher) Option {
 	return func(srv *Server) {
@@ -152,6 +158,8 @@ type Server struct {
 	invSources invsource.Store
 	// refresher refreshes inventory sources when configured.
 	refresher SourceRefresher
+	// triggers backs webhook triggers when configured.
+	triggers trigger.Store
 }
 
 // New returns a Server. It panics if store or submitter is nil; a nil logger becomes a no-op.
@@ -219,6 +227,10 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /inventory-sources", listSourcesHandler(s.invSources, s.log))
 	mux.Handle("DELETE /inventory-sources/{id}", deleteSourceHandler(s.invSources, s.log))
 	mux.Handle("POST /inventory-sources/{id}/refresh", refreshSourceHandler(s.refresher, s.log))
+	mux.Handle("POST /triggers", createTriggerHandler(s.triggers, s.templates, s.log))
+	mux.Handle("GET /triggers", listTriggersHandler(s.triggers, s.log))
+	mux.Handle("DELETE /triggers/{id}", deleteTriggerHandler(s.triggers, s.log))
+	mux.Handle("POST /hooks/{token}", hookHandler(s.triggers, s.templates, s.submitter, s.log))
 	mux.Handle("POST /templates", createTemplateHandler(s.templates, s.log))
 	mux.Handle("GET /templates", listTemplatesHandler(s.templates, s.log))
 	mux.Handle("DELETE /templates/{id}", deleteTemplateHandler(s.templates, s.log))

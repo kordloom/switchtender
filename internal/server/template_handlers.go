@@ -24,10 +24,14 @@ type createTemplateRequest struct {
 	Inventory string `json:"inventory,omitempty"`
 	// Shards, when two or more, splits launches across that many slices.
 	Shards int `json:"shards,omitempty"`
+	// Queue restricts launches to workers serving the queue.
+	Queue string `json:"queue,omitempty"`
 	// CredentialIDs names stored credentials for launches.
 	CredentialIDs []string `json:"credential_ids,omitempty"`
 	// ExtraVars are injected into every launch.
 	ExtraVars map[string]any `json:"extra_vars,omitempty"`
+	// Survey prompts the launcher for typed values that become extra vars.
+	Survey []template.SurveyField `json:"survey,omitempty"`
 }
 
 // listTemplatesResponse wraps the template list.
@@ -57,7 +61,8 @@ func createTemplateHandler(store template.Store, log *zap.Logger) http.HandlerFu
 		t := &template.Template{
 			ID: template.NewID(), Name: req.Name, ProjectID: req.ProjectID,
 			Playbook: req.Playbook, Inventory: req.Inventory, Shards: req.Shards,
-			CredentialIDs: req.CredentialIDs, ExtraVars: req.ExtraVars, CreatedAt: time.Now(),
+			CredentialIDs: req.CredentialIDs, ExtraVars: req.ExtraVars, Survey: req.Survey,
+			Queue: req.Queue, CreatedAt: time.Now(),
 		}
 		if err := store.Save(r.Context(), t); err != nil {
 			log.Error("server: save template: " + err.Error())
@@ -128,12 +133,35 @@ func launchTemplateHandler(store template.Store, submitter Submitter, log *zap.L
 			return
 		}
 
+		vars := map[string]any{}
+		for k, v := range t.ExtraVars {
+			vars[k] = v
+		}
+		if len(t.Survey) > 0 {
+			answers := map[string]any{}
+			// Answers are optional in the body; an empty body still validates required-free surveys.
+			if r.Body != nil {
+				_ = json.NewDecoder(r.Body).Decode(&answers)
+			}
+			resolved, err := template.ResolveSurvey(t.Survey, answers)
+			if err != nil {
+				respondError(w, log, http.StatusBadRequest, err.Error())
+				return
+			}
+			for k, v := range resolved {
+				vars[k] = v
+			}
+		}
+
 		opts := []run.SubmitOption{
 			run.WithCredentialIDs(t.CredentialIDs),
-			run.WithExtraVars(t.ExtraVars),
+			run.WithExtraVars(vars),
 		}
 		if t.ProjectID != "" {
 			opts = append(opts, run.WithProject(t.ProjectID))
+		}
+		if t.Queue != "" {
+			opts = append(opts, run.WithQueue(t.Queue))
 		}
 		var created *run.Run
 		if t.Shards >= 2 {

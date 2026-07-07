@@ -24,6 +24,7 @@ import (
 	"github.com/dcadolph/yardmaster/internal/run"
 	"github.com/dcadolph/yardmaster/internal/schedule"
 	"github.com/dcadolph/yardmaster/internal/template"
+	"github.com/dcadolph/yardmaster/internal/trigger"
 	"github.com/dcadolph/yardmaster/internal/user"
 )
 
@@ -56,7 +57,8 @@ CREATE TABLE IF NOT EXISTS runs (
 	credential_ids TEXT NOT NULL DEFAULT '',
 	project_id    TEXT NOT NULL DEFAULT '',
 	commit_sha    TEXT NOT NULL DEFAULT '',
-	inventory_id  TEXT NOT NULL DEFAULT ''
+	inventory_id  TEXT NOT NULL DEFAULT '',
+	queue         TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_runs_created_at ON runs(created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_parent ON runs(parent_id, shard_index);
@@ -145,6 +147,8 @@ CREATE TABLE IF NOT EXISTS templates (
 	shards         INTEGER NOT NULL DEFAULT 0,
 	credential_ids TEXT NOT NULL DEFAULT '',
 	extra_vars     TEXT NOT NULL DEFAULT '',
+	survey         TEXT NOT NULL DEFAULT '',
+	queue          TEXT NOT NULL DEFAULT '',
 	created_at     TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS inventory_sources (
@@ -158,6 +162,15 @@ CREATE TABLE IF NOT EXISTS inventory_sources (
 	last_error    TEXT NOT NULL DEFAULT '',
 	created_at    TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS triggers (
+	id            TEXT PRIMARY KEY,
+	name          TEXT NOT NULL DEFAULT '',
+	template_id   TEXT NOT NULL,
+	token_hash    TEXT NOT NULL,
+	last_fired_at TEXT,
+	created_at    TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_triggers_hash ON triggers(token_hash);
 CREATE TABLE IF NOT EXISTS audit_entries (
 	id     TEXT PRIMARY KEY,
 	at     TEXT NOT NULL,
@@ -189,6 +202,9 @@ ALTER TABLE tokens ADD COLUMN IF NOT EXISTS user_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS inventory_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE schedules ADD COLUMN IF NOT EXISTS template_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE tokens ADD COLUMN IF NOT EXISTS expires_at TEXT;
+ALTER TABLE templates ADD COLUMN IF NOT EXISTS survey TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS queue TEXT NOT NULL DEFAULT '';
+ALTER TABLE templates ADD COLUMN IF NOT EXISTS queue TEXT NOT NULL DEFAULT '';
 `
 
 // store is a run.Store backed by a PostgreSQL database.
@@ -226,6 +242,8 @@ type DB struct {
 	audits *auditStore
 	// invSources is the dynamic inventory source store.
 	invSources *invSourceStore
+	// triggers is the webhook trigger store.
+	triggers *triggerStore
 }
 
 // Open connects to the PostgreSQL database at dsn, applies the schema, and returns the bundled
@@ -261,7 +279,8 @@ func Open(dsn string) (*DB, error) {
 		users:       &userStore{db: db},
 		inventories: &inventoryStore{db: db},
 		audits:      &auditStore{db: db},
-		invSources:  &invSourceStore{db: db}}, nil
+		invSources:  &invSourceStore{db: db},
+		triggers:    &triggerStore{db: db}}, nil
 }
 
 // Runs returns the run store.
@@ -314,6 +333,11 @@ func (d *DB) InventorySources() invsource.Store {
 	return d.invSources
 }
 
+// Triggers returns the webhook trigger store.
+func (d *DB) Triggers() trigger.Store {
+	return d.triggers
+}
+
 // Close closes the underlying database.
 func (d *DB) Close() error {
 	return d.db.Close()
@@ -323,7 +347,7 @@ func (d *DB) Close() error {
 const runColumns = `id, playbook, inventory, status, exit_code, error, created_at, started_at,
 	ended_at, parent_id, shard_index, shard_count, limit_pattern, kind, step_name, step_index,
 	retry_of, attempt, extra_vars, outputs, claimed_by, claimed_at, cancel_requested,
-	credential_ids, project_id, commit_sha, inventory_id`
+	credential_ids, project_id, commit_sha, inventory_id, queue`
 
 // Save inserts or replaces the run identified by r.ID.
 func (s *store) Save(ctx context.Context, r *run.Run) error {
@@ -332,9 +356,9 @@ INSERT INTO runs
 	(id, playbook, inventory, status, exit_code, error, created_at, started_at, ended_at,
 	 parent_id, shard_index, shard_count, limit_pattern, kind, step_name, step_index, retry_of,
 	 attempt, extra_vars, outputs, claimed_by, claimed_at, cancel_requested, credential_ids,
-	 project_id, commit_sha, inventory_id)
+	 project_id, commit_sha, inventory_id, queue)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
-	$21, $22, $23, $24, $25, $26, $27)
+	$21, $22, $23, $24, $25, $26, $27, $28)
 ON CONFLICT(id) DO UPDATE SET
 	playbook=excluded.playbook, inventory=excluded.inventory, status=excluded.status,
 	exit_code=excluded.exit_code, error=excluded.error, created_at=excluded.created_at,
@@ -346,7 +370,7 @@ ON CONFLICT(id) DO UPDATE SET
 	outputs=excluded.outputs, claimed_by=excluded.claimed_by, claimed_at=excluded.claimed_at,
 	cancel_requested=excluded.cancel_requested, credential_ids=excluded.credential_ids,
 	project_id=excluded.project_id, commit_sha=excluded.commit_sha,
-	inventory_id=excluded.inventory_id`
+	inventory_id=excluded.inventory_id, queue=excluded.queue`
 	_, err := s.db.ExecContext(ctx, q,
 		r.ID, r.Playbook, r.Inventory, string(r.Status), nullInt(r.ExitCode), r.Error,
 		formatTime(r.CreatedAt), nullTime(r.StartedAt), nullTime(r.EndedAt),
@@ -354,7 +378,7 @@ ON CONFLICT(id) DO UPDATE SET
 		r.Kind, r.StepName, nullInt(r.StepIndex), nullString(r.RetryOf), r.Attempt,
 		jsonMap(r.ExtraVars), jsonMap(r.Outputs), r.ClaimedBy, nullTime(r.ClaimedAt),
 		boolToInt(r.CancelRequested), joinIDs(r.CredentialIDs), r.ProjectID, r.CommitSHA,
-		r.InventoryID,
+		r.InventoryID, r.Queue,
 	)
 	if err != nil {
 		return fmt.Errorf("save run: %w", err)
@@ -859,7 +883,7 @@ func scanRun(s scanner) (*run.Run, error) {
 		&created, &started, &ended, &parent, &shardIdx, &shardCnt, &r.Limit,
 		&r.Kind, &r.StepName, &stepIdx, &retryOf, &r.Attempt, &extra, &outputs,
 		&r.ClaimedBy, &claimed, &cancelI, &credIDs, &r.ProjectID, &r.CommitSHA,
-		&r.InventoryID); err != nil {
+		&r.InventoryID, &r.Queue); err != nil {
 		return nil, err
 	}
 	r.CancelRequested = cancelI != 0
@@ -1005,17 +1029,19 @@ func parseNullTime(s sql.NullString) (*time.Time, error) {
 
 // Claim leases the oldest unclaimed pending top-level plain run to owner and returns it. The row
 // is locked with SKIP LOCKED so concurrent workers never claim the same run.
-func (s *store) Claim(ctx context.Context, owner string) (*run.Run, error) {
-	const q = `
+func (s *store) Claim(ctx context.Context, owner string, queues []string) (*run.Run, error) {
+	placeholders, args := queuePlaceholders(queues, "$")
+	q := `
 UPDATE runs SET claimed_by=$1, claimed_at=$2
 WHERE id = (
 	SELECT id FROM runs
-	WHERE status='pending' AND claimed_by='' AND kind=''
+	WHERE status='pending' AND claimed_by='' AND kind='' AND queue IN (` + placeholders + `)
 	ORDER BY created_at, id LIMIT 1
 	FOR UPDATE SKIP LOCKED
 )
 RETURNING ` + runColumns
-	r, err := scanRun(s.db.QueryRowContext(ctx, q, owner, formatTime(time.Now())))
+	full := append([]any{owner, formatTime(time.Now())}, args...)
+	r, err := scanRun(s.db.QueryRowContext(ctx, q, full...))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, run.ErrNonePending
 	}
@@ -1023,6 +1049,25 @@ RETURNING ` + runColumns
 		return nil, fmt.Errorf("claim run: %w", err)
 	}
 	return r, nil
+}
+
+// queuePlaceholders builds a comma separated placeholder list and the matching queue args,
+// numbered from $3 since owner and claim time take $1 and $2.
+func queuePlaceholders(queues []string, style string) (string, []any) {
+	if len(queues) == 0 {
+		queues = []string{""}
+	}
+	parts := make([]string, len(queues))
+	args := make([]any, len(queues))
+	for i, q := range queues {
+		if style == "?" {
+			parts[i] = "?"
+		} else {
+			parts[i] = fmt.Sprintf("$%d", i+3)
+		}
+		args[i] = q
+	}
+	return strings.Join(parts, ", "), args
 }
 
 // Heartbeat renews owner's lease on a run.

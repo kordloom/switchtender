@@ -36,6 +36,8 @@ type createRunRequest struct {
 	ProjectID string `json:"project_id,omitempty"`
 	// InventoryID targets a stored inventory instead of a path.
 	InventoryID string `json:"inventory_id,omitempty"`
+	// Queue restricts execution to workers serving the queue.
+	Queue string `json:"queue,omitempty"`
 }
 
 // createPipelineRequest is the JSON body accepted by POST /pipelines.
@@ -50,6 +52,8 @@ type createPipelineRequest struct {
 	CredentialIDs []string `json:"credential_ids,omitempty"`
 	// ProjectID sources every step's playbook from a git project.
 	ProjectID string `json:"project_id,omitempty"`
+	// Queue restricts execution to workers serving the queue.
+	Queue string `json:"queue,omitempty"`
 }
 
 // listRunsResponse wraps a run list. The envelope leaves room for pagination fields later.
@@ -241,6 +245,9 @@ func createRunHandler(submitter Submitter, log *zap.Logger) http.HandlerFunc {
 		if req.InventoryID != "" {
 			opts = append(opts, run.WithInventory(req.InventoryID))
 		}
+		if req.Queue != "" {
+			opts = append(opts, run.WithQueue(req.Queue))
+		}
 		if req.Shards >= 2 {
 			created, err = submitter.SubmitSplit(r.Context(), req.Playbook, req.Inventory,
 				req.Shards, opts...)
@@ -288,6 +295,9 @@ func createPipelineHandler(submitter Submitter, log *zap.Logger) http.HandlerFun
 		popts := []run.SubmitOption{run.WithCredentialIDs(req.CredentialIDs)}
 		if req.ProjectID != "" {
 			popts = append(popts, run.WithProject(req.ProjectID))
+		}
+		if req.Queue != "" {
+			popts = append(popts, run.WithQueue(req.Queue))
 		}
 		created, err := submitter.SubmitPipeline(r.Context(), req.Name, req.Inventory, req.Steps,
 			popts...)

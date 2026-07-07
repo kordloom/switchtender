@@ -101,6 +101,8 @@ type Run struct {
 	CommitSHA string `json:"commit_sha,omitempty"`
 	// InventoryID names a stored inventory materialized for this run instead of a file path.
 	InventoryID string `json:"inventory_id,omitempty"`
+	// Queue restricts execution to workers serving this queue. Empty runs on the default pool.
+	Queue string `json:"queue,omitempty"`
 }
 
 // Clone returns a deep copy so callers cannot mutate stored state through shared pointers.
@@ -167,6 +169,11 @@ func WithProject(id string) SubmitOption {
 // WithInventory targets a stored inventory instead of a file path.
 func WithInventory(id string) SubmitOption {
 	return func(r *Run) { r.InventoryID = id }
+}
+
+// WithQueue restricts the run to workers serving the named queue.
+func WithQueue(queue string) SubmitOption {
+	return func(r *Run) { r.Queue = queue }
 }
 
 // WithExtraVars injects variables into the run.

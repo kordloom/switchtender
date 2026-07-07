@@ -98,6 +98,8 @@ type Dispatcher struct {
 	owner string
 	// claimInterval is how often the claim loop polls when idle.
 	claimInterval time.Duration
+	// queues names the queues this process serves; empty serves the default pool.
+	queues []string
 	// credentials resolves stored execution secrets, nil when the feature is off.
 	credentials credential.Store
 	// sealer decrypts credential secrets.
@@ -129,6 +131,8 @@ type config struct {
 	owner string
 	// claimInterval is how often the claim loop polls when idle.
 	claimInterval time.Duration
+	// queues names the queues this process serves; empty serves the default pool.
+	queues []string
 	// credentials resolves stored execution secrets, nil when the feature is off.
 	credentials credential.Store
 	// sealer decrypts credential secrets.
@@ -165,6 +169,12 @@ func WithClaimInterval(d time.Duration) Option {
 	return func(c *config) { c.claimInterval = d }
 }
 
+// WithQueues sets the queues this process serves. A worker given named queues runs only work
+// targeted at them; the default when unset is the empty default pool.
+func WithQueues(queues []string) Option {
+	return func(c *config) { c.queues = queues }
+}
+
 // New returns a Dispatcher. It panics if store or runner is nil; a nil logger becomes a no-op.
 func New(store run.Store, runner roundhouse.Runner, log *zap.Logger, opts ...Option) *Dispatcher {
 	if store == nil {
@@ -193,6 +203,9 @@ func New(store run.Store, runner roundhouse.Runner, log *zap.Logger, opts ...Opt
 	if cfg.claimInterval <= 0 {
 		cfg.claimInterval = DefaultClaimInterval
 	}
+	if len(cfg.queues) == 0 {
+		cfg.queues = []string{""}
+	}
 
 	lister, _ := runner.(roundhouse.HostLister)
 	dumper, _ := runner.(roundhouse.InventoryDumper)
@@ -210,6 +223,7 @@ func New(store run.Store, runner roundhouse.Runner, log *zap.Logger, opts ...Opt
 		cancels:       make(map[string]context.CancelFunc),
 		owner:         cfg.owner,
 		claimInterval: cfg.claimInterval,
+		queues:        cfg.queues,
 		credentials:   cfg.credentials,
 		sealer:        cfg.sealer,
 		projects:      cfg.projects,
@@ -250,7 +264,7 @@ func (d *Dispatcher) claimLoop() {
 			return
 		}
 
-		r, err := d.store.Claim(d.ctx, d.owner)
+		r, err := d.store.Claim(d.ctx, d.owner, d.queues)
 		if err != nil {
 			<-d.sem
 			if !errors.Is(err, run.ErrNonePending) && d.ctx.Err() == nil {
@@ -403,7 +417,7 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 			Status: run.StatusPending, CreatedAt: time.Now(),
 			ParentID: &parentID, ShardIndex: &idx, ShardCount: &shardCount,
 			Limit: strings.Join(group, ","), CredentialIDs: parent.CredentialIDs,
-			ProjectID: parent.ProjectID,
+			ProjectID: parent.ProjectID, Queue: parent.Queue,
 		}
 		if err := d.store.Save(ctx, child); err != nil {
 			return nil, err
@@ -465,7 +479,7 @@ func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string) (*r
 			Status: run.StatusPending, CreatedAt: time.Now(),
 			ParentID: &retryID, ShardIndex: &idx, ShardCount: &shardCount,
 			Limit: shard.Limit, CredentialIDs: shard.CredentialIDs,
-			ProjectID: shard.ProjectID,
+			ProjectID: shard.ProjectID, Queue: shard.Queue,
 		}
 		if err := d.store.Save(ctx, child); err != nil {
 			return nil, err
@@ -732,6 +746,7 @@ func (d *Dispatcher) runStepAttempts(ctx context.Context, parent *run.Run, step 
 			Status: run.StatusPending, CreatedAt: time.Now(),
 			ParentID: &parent.ID, StepIndex: &i, StepName: step.Name, Attempt: attempt,
 			ExtraVars: vars, CredentialIDs: parent.CredentialIDs, ProjectID: parent.ProjectID,
+			Queue: parent.Queue,
 		}
 		if err := d.store.Save(context.Background(), child); err != nil {
 			d.log.Error("dispatch: save pipeline step: "+err.Error(), zap.String("run_id", parent.ID))

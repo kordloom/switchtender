@@ -36,11 +36,17 @@
 				<label class="field-label">Shards
 					<input id="tpl-shards" class="input" type="number" min="0" max="64" placeholder="0">
 				</label>
+				<label class="field-label">Queue
+					<input id="tpl-queue" class="input mono" placeholder="default">
+				</label>
 				<label class="field-label">Credentials
 					<select id="tpl-credentials" class="input" multiple size="3"></select>
 				</label>
 				<label class="field-label">Extra vars, JSON
 					<textarea id="tpl-vars" class="input mono" rows="2" placeholder='{"env": "prod"}'></textarea>
+				</label>
+				<label class="field-label">Survey, JSON array
+					<textarea id="tpl-survey" class="input mono" rows="2" placeholder='[{"var":"env","label":"Environment","type":"choice","required":true,"choices":["prod","stage"]}]'></textarea>
 				</label>
 				<div class="launch-actions">
 					<button type="submit" class="button primary">Save</button>
@@ -63,6 +69,18 @@
 			<tbody id="templates"></tbody>
 		</table>
 	</main>
+
+	<div id="survey-modal" class="modal" hidden>
+		<div class="modal-card">
+			<h2 id="survey-title">Launch</h2>
+			<form id="survey-form" class="stack"></form>
+			<div class="launch-actions">
+				<button id="survey-go" class="button primary" type="button">Launch</button>
+				<button id="survey-cancel" class="button" type="button">Cancel</button>
+				<span id="survey-status" class="muted"></span>
+			</div>
+		</div>
+	</div>
 
 	<script src="/ui/assets/app.js"></script>
 </body>

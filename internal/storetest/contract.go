@@ -35,6 +35,7 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Run("host history", func(t *testing.T) { testHostHistory(t, newStore()) })
 	t.Run("task trends", func(t *testing.T) { testTaskTrends(t, newStore()) })
 	t.Run("claim leases oldest", func(t *testing.T) { testClaim(t, newStore()) })
+	t.Run("claim respects queue", func(t *testing.T) { testClaimQueue(t, newStore()) })
 	t.Run("heartbeat and reclaim", func(t *testing.T) { testLeaseLifecycle(t, newStore()) })
 	t.Run("cancel request", func(t *testing.T) { testRequestCancel(t, newStore()) })
 	t.Run("workers", func(t *testing.T) { testWorkers(t, newStore()) })
@@ -572,7 +573,7 @@ func testClaim(t *testing.T, store run.Store) {
 		}
 	}
 
-	first, err := store.Claim(ctx, "worker-a")
+	first, err := store.Claim(ctx, "worker-a", []string{""})
 	if err != nil {
 		t.Fatalf("Claim() error = %v", err)
 	}
@@ -580,7 +581,7 @@ func testClaim(t *testing.T, store run.Store) {
 		t.Errorf("first claim = %+v, want run_old leased by worker-a", first)
 	}
 
-	second, err := store.Claim(ctx, "worker-b")
+	second, err := store.Claim(ctx, "worker-b", []string{""})
 	if err != nil {
 		t.Fatalf("Claim() error = %v", err)
 	}
@@ -588,7 +589,7 @@ func testClaim(t *testing.T, store run.Store) {
 		t.Errorf("second claim = %s, want run_new", second.ID)
 	}
 
-	third, err := store.Claim(ctx, "worker-c")
+	third, err := store.Claim(ctx, "worker-c", []string{""})
 	if err != nil {
 		t.Fatalf("Claim() error = %v", err)
 	}
@@ -596,8 +597,43 @@ func testClaim(t *testing.T, store run.Store) {
 		t.Errorf("third claim = %s, want run_shard, children are executable", third.ID)
 	}
 
-	if _, err := store.Claim(ctx, "worker-d"); !errors.Is(err, run.ErrNonePending) {
+	if _, err := store.Claim(ctx, "worker-d", []string{""}); !errors.Is(err, run.ErrNonePending) {
 		t.Errorf("fourth claim error = %v, want ErrNonePending", err)
+	}
+}
+
+// testClaimQueue verifies a queued run is only claimable by an executor serving that queue.
+func testClaimQueue(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	base := time.Date(2026, 7, 6, 0, 0, 0, 0, time.UTC)
+	for _, r := range []*run.Run{
+		{ID: "run_default", Playbook: "p", Status: run.StatusPending, CreatedAt: base},
+		{ID: "run_dmz", Playbook: "p", Status: run.StatusPending, CreatedAt: base, Queue: "dmz"},
+	} {
+		if err := store.Save(ctx, r); err != nil {
+			t.Fatalf("Save() error = %v", err)
+		}
+	}
+
+	// A default executor claims the default run and never the dmz run.
+	got, err := store.Claim(ctx, "serve", []string{""})
+	if err != nil {
+		t.Fatalf("Claim() error = %v", err)
+	}
+	if got.ID != "run_default" {
+		t.Errorf("default executor claimed %s, want run_default", got.ID)
+	}
+	if _, err := store.Claim(ctx, "serve", []string{""}); !errors.Is(err, run.ErrNonePending) {
+		t.Errorf("default executor second claim = %v, want ErrNonePending, the dmz run is off limits", err)
+	}
+
+	// A dmz worker claims the dmz run.
+	dmz, err := store.Claim(ctx, "dmz-worker", []string{"dmz"})
+	if err != nil {
+		t.Fatalf("Claim() error = %v", err)
+	}
+	if dmz.ID != "run_dmz" {
+		t.Errorf("dmz worker claimed %s, want run_dmz", dmz.ID)
 	}
 }
 
@@ -610,7 +646,7 @@ func testLeaseLifecycle(t *testing.T, store run.Store) {
 	}); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
-	claimed, err := store.Claim(ctx, "worker-a")
+	claimed, err := store.Claim(ctx, "worker-a", []string{""})
 	if err != nil {
 		t.Fatalf("Claim() error = %v", err)
 	}
@@ -648,7 +684,7 @@ func testLeaseLifecycle(t *testing.T, store run.Store) {
 	}
 
 	// A stale lease on a running run interrupts it instead.
-	reclaimed, err := store.Claim(ctx, "worker-b")
+	reclaimed, err := store.Claim(ctx, "worker-b", []string{""})
 	if err != nil {
 		t.Fatalf("Claim() error = %v", err)
 	}
