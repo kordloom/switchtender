@@ -5,6 +5,7 @@ binary: `serve` is the API, the executor, the scheduler, and the web UI; `worker
 State lives in one database, SQLite by default or PostgreSQL by DSN.
 
 - [Quickstart](quickstart.md): zero to a first run in a few minutes.
+- [Switching from AWX](switching-from-awx.md): import what you have, or set it up from scratch.
 - [Configuration](configuration.md): every command, flag, and environment variable.
 - [Concepts](concepts.md): runs, splits, pipelines, projects, templates, inventories, sources,
   triggers, credentials, teams, grants, queues, and workers.
