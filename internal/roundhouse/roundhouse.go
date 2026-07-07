@@ -23,6 +23,9 @@ type Spec struct {
 	// ExtraVars are passed to ansible-playbook as one JSON --extra-vars argument so values keep
 	// their types.
 	ExtraVars map[string]any
+	// ExtraVarsFiles are passed to ansible-playbook as --extra-vars @file arguments. They carry
+	// values that must stay off the command line, such as a become password.
+	ExtraVarsFiles []string
 	// Env holds additional environment entries (KEY=VALUE) layered over the base environment.
 	Env []string
 	// Dir is the working directory for the process. When empty, the current directory is used.
@@ -175,6 +178,9 @@ func (a *ansibleRunner) args(spec Spec) []string {
 		if data, err := json.Marshal(spec.ExtraVars); err == nil {
 			args = append(args, "--extra-vars", string(data))
 		}
+	}
+	for _, file := range spec.ExtraVarsFiles {
+		args = append(args, "--extra-vars", "@"+file)
 	}
 	if spec.PrivateKeyPath != "" {
 		args = append(args, "--private-key", spec.PrivateKeyPath)
