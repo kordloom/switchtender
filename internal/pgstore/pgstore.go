@@ -149,6 +149,7 @@ CREATE TABLE IF NOT EXISTS templates (
 	project_id     TEXT NOT NULL DEFAULT '',
 	playbook       TEXT NOT NULL,
 	inventory      TEXT NOT NULL DEFAULT '',
+	inventory_id   TEXT NOT NULL DEFAULT '',
 	shards         INTEGER NOT NULL DEFAULT 0,
 	credential_ids TEXT NOT NULL DEFAULT '',
 	extra_vars     TEXT NOT NULL DEFAULT '',
@@ -232,6 +233,7 @@ ALTER TABLE templates ADD COLUMN IF NOT EXISTS queue TEXT NOT NULL DEFAULT '';
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS install_deps INTEGER NOT NULL DEFAULT 1;
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS image TEXT NOT NULL DEFAULT '';
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS pull_credential_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE templates ADD COLUMN IF NOT EXISTS inventory_id TEXT NOT NULL DEFAULT '';
 `
 
 // store is a run.Store backed by a PostgreSQL database.

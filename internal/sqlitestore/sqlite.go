@@ -149,6 +149,7 @@ CREATE TABLE IF NOT EXISTS templates (
 	project_id     TEXT NOT NULL DEFAULT '',
 	playbook       TEXT NOT NULL,
 	inventory      TEXT NOT NULL DEFAULT '',
+	inventory_id   TEXT NOT NULL DEFAULT '',
 	shards         INTEGER NOT NULL DEFAULT 0,
 	credential_ids TEXT NOT NULL DEFAULT '',
 	extra_vars     TEXT NOT NULL DEFAULT '',
@@ -242,6 +243,7 @@ var alterations = []string{
 	"ALTER TABLE projects ADD COLUMN install_deps INTEGER NOT NULL DEFAULT 1",
 	"ALTER TABLE projects ADD COLUMN image TEXT NOT NULL DEFAULT ''",
 	"ALTER TABLE projects ADD COLUMN pull_credential_id TEXT NOT NULL DEFAULT ''",
+	"ALTER TABLE templates ADD COLUMN inventory_id TEXT NOT NULL DEFAULT ''",
 }
 
 // store is a run.Store backed by a SQLite database.

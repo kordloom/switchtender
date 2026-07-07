@@ -65,6 +65,14 @@ Open http://localhost:8080 and submit a run:
 Add `"shards": 4` to split it. Ansible is the only runtime dependency: `ansible-playbook` and
 `ansible-inventory` on PATH.
 
+Migrating from AWX or Semaphore is one command. Point it at an export to see what it would create,
+then apply:
+
+    ./yardmaster import awx awx-export.json           # dry-run report
+    ./yardmaster import awx awx-export.json --apply    # create the objects
+
+Credentials come across as shells; re-enter their secrets, since exports omit them by design.
+
 ## What it does today
 
 | Capability   | What you get                                                                    |
@@ -95,6 +103,7 @@ Add `"shards": 4` to split it. Ansible is the only runtime dependency: `ansible-
 | Teams and grants | Group users into teams and grant use or manage on a specific project, template, inventory, or credential; grants layer on the global role and default open |
 | Retention | A sweeper drops old run events and deletes terminal runs past a configurable age, keeping the summaries the cross-run views need |
 | Email | An SMTP notification on every finished run or on failures only, alongside the finish webhooks |
+| Migration | `yardmaster import awx` and `import semaphore` read an export and create the equivalent projects, inventories, templates, surveys, schedules, and credential shells, with a dry-run report first |
 
 ## HTTP API
 

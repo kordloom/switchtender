@@ -11,8 +11,8 @@ import (
 )
 
 // templateColumns is the shared select list for template reads.
-const templateColumns = `id, name, project_id, playbook, inventory, shards, credential_ids,
-	extra_vars, survey, queue, created_at`
+const templateColumns = `id, name, project_id, playbook, inventory, inventory_id, shards,
+	credential_ids, extra_vars, survey, queue, created_at`
 
 // templateStore is a template.Store backed by the shared SQLite database.
 type templateStore struct {
@@ -32,15 +32,16 @@ func (s *templateStore) Save(ctx context.Context, t *template.Template) error {
 	}
 	const q = `
 INSERT INTO templates
-	(id, name, project_id, playbook, inventory, shards, credential_ids, extra_vars, survey, queue, created_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+	(id, name, project_id, playbook, inventory, inventory_id, shards, credential_ids, extra_vars,
+	 survey, queue, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 ON CONFLICT(id) DO UPDATE SET
 	name=excluded.name, project_id=excluded.project_id, playbook=excluded.playbook,
-	inventory=excluded.inventory, shards=excluded.shards,
+	inventory=excluded.inventory, inventory_id=excluded.inventory_id, shards=excluded.shards,
 	credential_ids=excluded.credential_ids, extra_vars=excluded.extra_vars,
 	survey=excluded.survey, queue=excluded.queue, created_at=excluded.created_at`
 	_, err = s.db.ExecContext(ctx, q,
-		t.ID, t.Name, t.ProjectID, t.Playbook, t.Inventory, t.Shards,
+		t.ID, t.Name, t.ProjectID, t.Playbook, t.Inventory, t.InventoryID, t.Shards,
 		joinIDs(t.CredentialIDs), string(vars), string(survey), t.Queue, formatTime(t.CreatedAt))
 	if err != nil {
 		return fmt.Errorf("save template: %w", err)
@@ -109,8 +110,8 @@ func scanTemplate(sc scanner) (*template.Template, error) {
 		survey  string
 		created string
 	)
-	if err := sc.Scan(&t.ID, &t.Name, &t.ProjectID, &t.Playbook, &t.Inventory, &t.Shards,
-		&creds, &vars, &survey, &t.Queue, &created); err != nil {
+	if err := sc.Scan(&t.ID, &t.Name, &t.ProjectID, &t.Playbook, &t.Inventory, &t.InventoryID,
+		&t.Shards, &creds, &vars, &survey, &t.Queue, &created); err != nil {
 		return nil, err
 	}
 	t.CredentialIDs = splitIDs(creds)
