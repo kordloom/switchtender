@@ -138,6 +138,9 @@ func hookHandler(triggers trigger.Store, templates template.Store, submitter Sub
 		if t.ProjectID != "" {
 			opts = append(opts, run.WithProject(t.ProjectID))
 		}
+		if t.Queue != "" {
+			opts = append(opts, run.WithQueue(t.Queue))
+		}
 		var created *run.Run
 		if t.Shards >= 2 {
 			created, err = submitter.SubmitSplit(r.Context(), t.Playbook, t.Inventory, t.Shards, opts...)

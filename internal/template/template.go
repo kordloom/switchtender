@@ -63,6 +63,8 @@ type Template struct {
 	Inventory string `json:"inventory,omitempty"`
 	// Shards, when two or more, splits the run across that many inventory slices.
 	Shards int `json:"shards,omitempty"`
+	// Queue restricts launches to workers serving this queue.
+	Queue string `json:"queue,omitempty"`
 	// CredentialIDs names stored credentials materialized for the run.
 	CredentialIDs []string `json:"credential_ids,omitempty"`
 	// ExtraVars are injected into the run as extra vars, under any survey answers.

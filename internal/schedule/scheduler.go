@@ -189,6 +189,9 @@ func (s *Scheduler) fireTemplate(ctx context.Context, sc *Schedule) (*run.Run, e
 	if t.ProjectID != "" {
 		opts = append(opts, run.WithProject(t.ProjectID))
 	}
+	if t.Queue != "" {
+		opts = append(opts, run.WithQueue(t.Queue))
+	}
 	if t.Shards >= 2 {
 		return s.submitter.SubmitSplit(ctx, t.Playbook, t.Inventory, t.Shards, opts...)
 	}

@@ -22,6 +22,9 @@ var workerDB string
 // workerName holds the value of the worker --name flag.
 var workerName string
 
+// workerQueues holds the values of the repeatable worker --queue flag.
+var workerQueues []string
+
 // workerCmd runs a Yardmaster worker: a process that leases pending runs from the shared store,
 // executes them, and streams results back. Point it and a server at the same database, a
 // PostgreSQL DSN for separate machines, and they compete for work.
@@ -37,6 +40,8 @@ func init() {
 		"SQLite file path, or a postgres:// DSN for the PostgreSQL backend.")
 	workerCmd.Flags().StringVar(&workerName, "name", "",
 		"Worker name stamped on the runs it executes. Defaults to host and pid.")
+	workerCmd.Flags().StringArrayVar(&workerQueues, "queue", nil,
+		"Queue this worker serves. Repeatable. Without any, it serves the default pool.")
 }
 
 // runWorker leases and executes runs until interrupted.
@@ -70,6 +75,9 @@ func runWorker(cmd *cobra.Command, _ []string) error {
 	}
 	if workerName != "" {
 		opts = append(opts, dispatch.WithOwner(workerName))
+	}
+	if len(workerQueues) > 0 {
+		opts = append(opts, dispatch.WithQueues(workerQueues))
 	}
 	disp := dispatch.New(store, roundhouse.NewAnsibleRunner(), log, opts...)
 	defer disp.Close()

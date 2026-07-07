@@ -24,11 +24,12 @@ type Store interface {
 	Steps(ctx context.Context, parentID string) ([]*Run, error)
 	// NonTerminal returns all runs, including shards, that are not in a terminal state.
 	NonTerminal(ctx context.Context) ([]*Run, error)
-	// Claim leases the oldest unclaimed pending executable run to owner and returns it, or
-	// ErrNonePending when nothing is waiting. Plain runs, shard children, and pipeline step
-	// children are executable; split and pipeline parents are coordination records and are not.
-	// The claim must be atomic across processes.
-	Claim(ctx context.Context, owner string) (*Run, error)
+	// Claim leases the oldest unclaimed pending executable run whose queue this owner serves and
+	// returns it, or ErrNonePending when nothing is waiting. queues is the set of queue names the
+	// caller serves; a run with an empty queue is on the default pool. Plain runs, shard
+	// children, and pipeline step children are executable; split and pipeline parents are
+	// coordination records and are not. The claim must be atomic across processes.
+	Claim(ctx context.Context, owner string, queues []string) (*Run, error)
 	// Heartbeat renews owner's lease on a run. It returns ErrNotFound when the run is gone or the
 	// lease is no longer held by owner.
 	Heartbeat(ctx context.Context, id, owner string) error
@@ -196,12 +197,19 @@ func (m *memStore) NonTerminal(_ context.Context) ([]*Run, error) {
 }
 
 // Claim leases the oldest unclaimed pending top-level plain run to owner and returns it.
-func (m *memStore) Claim(_ context.Context, owner string) (*Run, error) {
+func (m *memStore) Claim(_ context.Context, owner string, queues []string) (*Run, error) {
+	serves := make(map[string]bool, len(queues))
+	for _, q := range queues {
+		serves[q] = true
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var oldest *Run
 	for _, r := range m.runs {
 		if r.Status != StatusPending || r.ClaimedBy != "" || r.Kind != "" {
+			continue
+		}
+		if !serves[r.Queue] {
 			continue
 		}
 		if oldest == nil || r.CreatedAt.Before(oldest.CreatedAt) ||

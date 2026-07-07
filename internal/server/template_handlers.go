@@ -24,6 +24,8 @@ type createTemplateRequest struct {
 	Inventory string `json:"inventory,omitempty"`
 	// Shards, when two or more, splits launches across that many slices.
 	Shards int `json:"shards,omitempty"`
+	// Queue restricts launches to workers serving the queue.
+	Queue string `json:"queue,omitempty"`
 	// CredentialIDs names stored credentials for launches.
 	CredentialIDs []string `json:"credential_ids,omitempty"`
 	// ExtraVars are injected into every launch.
@@ -60,7 +62,7 @@ func createTemplateHandler(store template.Store, log *zap.Logger) http.HandlerFu
 			ID: template.NewID(), Name: req.Name, ProjectID: req.ProjectID,
 			Playbook: req.Playbook, Inventory: req.Inventory, Shards: req.Shards,
 			CredentialIDs: req.CredentialIDs, ExtraVars: req.ExtraVars, Survey: req.Survey,
-			CreatedAt: time.Now(),
+			Queue: req.Queue, CreatedAt: time.Now(),
 		}
 		if err := store.Save(r.Context(), t); err != nil {
 			log.Error("server: save template: " + err.Error())
@@ -157,6 +159,9 @@ func launchTemplateHandler(store template.Store, submitter Submitter, log *zap.L
 		}
 		if t.ProjectID != "" {
 			opts = append(opts, run.WithProject(t.ProjectID))
+		}
+		if t.Queue != "" {
+			opts = append(opts, run.WithQueue(t.Queue))
 		}
 		var created *run.Run
 		if t.Shards >= 2 {
