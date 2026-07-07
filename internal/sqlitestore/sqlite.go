@@ -123,7 +123,8 @@ CREATE TABLE IF NOT EXISTS tokens (
 	hash         TEXT NOT NULL,
 	user_id      TEXT NOT NULL DEFAULT '',
 	created_at   TEXT NOT NULL,
-	last_used_at TEXT
+	last_used_at TEXT,
+	expires_at   TEXT
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_tokens_hash ON tokens(hash);
 CREATE TABLE IF NOT EXISTS projects (
@@ -184,6 +185,7 @@ var alterations = []string{
 	"ALTER TABLE tokens ADD COLUMN user_id TEXT NOT NULL DEFAULT ''",
 	"ALTER TABLE runs ADD COLUMN inventory_id TEXT NOT NULL DEFAULT ''",
 	"ALTER TABLE schedules ADD COLUMN template_id TEXT NOT NULL DEFAULT ''",
+	"ALTER TABLE tokens ADD COLUMN expires_at TEXT",
 	"ALTER TABLE run_host_summary ADD COLUMN duration_seconds REAL NOT NULL DEFAULT 0",
 }
 

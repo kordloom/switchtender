@@ -12,6 +12,9 @@ import (
 	"github.com/dcadolph/yardmaster/internal/user"
 )
 
+// sessionTokenTTL is how long a browser session token stays valid.
+const sessionTokenTTL = 30 * 24 * time.Hour
+
 // loginRequest is the JSON body accepted by POST /auth/login.
 type loginRequest struct {
 	// Username is the account name.
@@ -74,6 +77,8 @@ func loginHandler(users user.Store, tokens auth.Store, log *zap.Logger) http.Han
 			return
 		}
 		tok.UserID = u.ID
+		expires := time.Now().Add(sessionTokenTTL)
+		tok.ExpiresAt = &expires
 		if err := tokens.Save(r.Context(), tok); err != nil {
 			log.Error("server: save session token: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not sign in")

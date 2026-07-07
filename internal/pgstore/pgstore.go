@@ -123,7 +123,8 @@ CREATE TABLE IF NOT EXISTS tokens (
 	hash         TEXT NOT NULL,
 	user_id      TEXT NOT NULL DEFAULT '',
 	created_at   TEXT NOT NULL,
-	last_used_at TEXT
+	last_used_at TEXT,
+	expires_at   TEXT
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_tokens_hash ON tokens(hash);
 CREATE TABLE IF NOT EXISTS projects (
@@ -175,6 +176,7 @@ ALTER TABLE runs ADD COLUMN IF NOT EXISTS commit_sha TEXT NOT NULL DEFAULT '';
 ALTER TABLE tokens ADD COLUMN IF NOT EXISTS user_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS inventory_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE schedules ADD COLUMN IF NOT EXISTS template_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE tokens ADD COLUMN IF NOT EXISTS expires_at TEXT;
 `
 
 // store is a run.Store backed by a PostgreSQL database.

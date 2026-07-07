@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -17,6 +18,9 @@ var tokenName string
 
 // tokenPretty holds the value of the token --pretty flag.
 var tokenPretty bool
+
+// tokenTTL holds the value of the token new --ttl flag.
+var tokenTTL time.Duration
 
 // tokenCmd groups API token management.
 var tokenCmd = &cobra.Command{
@@ -52,6 +56,8 @@ func init() {
 		"SQLite file path, or a postgres:// DSN for the PostgreSQL backend.")
 	tokenCmd.PersistentFlags().BoolVar(&tokenPretty, "pretty", false, "Indent JSON output.")
 	tokenNewCmd.Flags().StringVar(&tokenName, "name", "", "Label for the token, for example ci.")
+	tokenNewCmd.Flags().DurationVar(&tokenTTL, "ttl", 0,
+		"Lifetime, for example 720h. Zero means the token never expires.")
 	tokenCmd.AddCommand(tokenNewCmd, tokenListCmd, tokenRevokeCmd)
 }
 
@@ -85,6 +91,10 @@ func runTokenNew(cmd *cobra.Command, _ []string) error {
 	plain, tok, err := auth.New(tokenName)
 	if err != nil {
 		return fmt.Errorf("mint token: %w", err)
+	}
+	if tokenTTL > 0 {
+		expires := time.Now().Add(tokenTTL)
+		tok.ExpiresAt = &expires
 	}
 	if err := tokens.Save(cmd.Context(), tok); err != nil {
 		return fmt.Errorf("save token: %w", err)
