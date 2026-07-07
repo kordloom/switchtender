@@ -31,6 +31,7 @@ import (
 	"github.com/dcadolph/yardmaster/internal/server"
 	"github.com/dcadolph/yardmaster/internal/sqlitestore"
 	"github.com/dcadolph/yardmaster/internal/template"
+	"github.com/dcadolph/yardmaster/internal/trigger"
 	"github.com/dcadolph/yardmaster/internal/user"
 )
 
@@ -99,6 +100,8 @@ type storeBundle interface {
 	Audits() audit.Store
 	// InventorySources returns the dynamic inventory source store.
 	InventorySources() invsource.Store
+	// Triggers returns the webhook trigger store.
+	Triggers() trigger.Store
 	// Close closes the underlying database.
 	Close() error
 }
@@ -172,7 +175,8 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			server.WithUsers(bundle.Users()),
 			server.WithInventories(bundle.Inventories()),
 			server.WithAudit(bundle.Audits()),
-			server.WithInventorySources(bundle.InventorySources(), disp)).Handler(),
+			server.WithInventorySources(bundle.InventorySources(), disp),
+			server.WithTriggers(bundle.Triggers())).Handler(),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 

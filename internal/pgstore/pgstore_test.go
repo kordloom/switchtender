@@ -14,6 +14,8 @@ import (
 	"github.com/dcadolph/yardmaster/internal/projecttest"
 	"github.com/dcadolph/yardmaster/internal/template"
 	"github.com/dcadolph/yardmaster/internal/templatetest"
+	"github.com/dcadolph/yardmaster/internal/trigger"
+	"github.com/dcadolph/yardmaster/internal/triggertest"
 	"github.com/dcadolph/yardmaster/internal/user"
 	"github.com/dcadolph/yardmaster/internal/usertest"
 	"os"
@@ -270,5 +272,32 @@ func truncateSources(t *testing.T, dsn string) {
 	defer func() { _ = db.Close() }()
 	if _, err := db.Exec("TRUNCATE inventory_sources"); err != nil {
 		t.Fatalf("truncate inventory_sources: %v", err)
+	}
+}
+
+func TestTriggerStoreContract(t *testing.T) {
+	dsn := testDSN(t)
+	db, err := pgstore.Open(dsn)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	triggertest.Contract(t, func() trigger.Store {
+		truncateTriggers(t, dsn)
+		return db.Triggers()
+	})
+}
+
+// truncateTriggers clears the triggers table between contract subtests.
+func truncateTriggers(t *testing.T, dsn string) {
+	t.Helper()
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatalf("open postgres: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	if _, err := db.Exec("TRUNCATE triggers"); err != nil {
+		t.Fatalf("truncate triggers: %v", err)
 	}
 }

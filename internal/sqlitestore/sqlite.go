@@ -24,6 +24,7 @@ import (
 	"github.com/dcadolph/yardmaster/internal/run"
 	"github.com/dcadolph/yardmaster/internal/schedule"
 	"github.com/dcadolph/yardmaster/internal/template"
+	"github.com/dcadolph/yardmaster/internal/trigger"
 	"github.com/dcadolph/yardmaster/internal/user"
 )
 
@@ -158,6 +159,15 @@ CREATE TABLE IF NOT EXISTS inventory_sources (
 	last_error    TEXT NOT NULL DEFAULT '',
 	created_at    TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS triggers (
+	id            TEXT PRIMARY KEY,
+	name          TEXT NOT NULL DEFAULT '',
+	template_id   TEXT NOT NULL,
+	token_hash    TEXT NOT NULL,
+	last_fired_at TEXT,
+	created_at    TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_triggers_hash ON triggers(token_hash);
 CREATE TABLE IF NOT EXISTS audit_entries (
 	id     TEXT PRIMARY KEY,
 	at     TEXT NOT NULL,
@@ -236,6 +246,8 @@ type DB struct {
 	audits *auditStore
 	// invSources is the dynamic inventory source store.
 	invSources *invSourceStore
+	// triggers is the webhook trigger store.
+	triggers *triggerStore
 }
 
 // Open opens the SQLite database at path, applies the schema, and returns the bundled stores.
@@ -277,7 +289,8 @@ func Open(path string) (*DB, error) {
 		users:       &userStore{db: db},
 		inventories: &inventoryStore{db: db},
 		audits:      &auditStore{db: db},
-		invSources:  &invSourceStore{db: db}}, nil
+		invSources:  &invSourceStore{db: db},
+		triggers:    &triggerStore{db: db}}, nil
 }
 
 // Runs returns the run store.
@@ -328,6 +341,11 @@ func (d *DB) Audits() audit.Store {
 // InventorySources returns the dynamic inventory source store.
 func (d *DB) InventorySources() invsource.Store {
 	return d.invSources
+}
+
+// Triggers returns the webhook trigger store.
+func (d *DB) Triggers() trigger.Store {
+	return d.triggers
 }
 
 // Close closes the underlying database.

@@ -17,6 +17,8 @@ import (
 	"github.com/dcadolph/yardmaster/internal/projecttest"
 	"github.com/dcadolph/yardmaster/internal/template"
 	"github.com/dcadolph/yardmaster/internal/templatetest"
+	"github.com/dcadolph/yardmaster/internal/trigger"
+	"github.com/dcadolph/yardmaster/internal/triggertest"
 	"github.com/dcadolph/yardmaster/internal/user"
 	"github.com/dcadolph/yardmaster/internal/usertest"
 	"path/filepath"
@@ -235,5 +237,17 @@ func TestInvSourceStoreContract(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = db.Close() })
 		return db.InventorySources()
+	})
+}
+
+func TestTriggerStoreContract(t *testing.T) {
+	t.Parallel()
+	triggertest.Contract(t, func() trigger.Store {
+		db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "yardmaster.db"))
+		if err != nil {
+			t.Fatalf("Open() error = %v", err)
+		}
+		t.Cleanup(func() { _ = db.Close() })
+		return db.Triggers()
 	})
 }
