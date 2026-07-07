@@ -1,0 +1,6 @@
+apiVersion: v2
+name: yardmaster
+description: Playbook execution and fleet orchestration, an alternative to AWX and Semaphore.
+type: application
+version: 0.1.0
+appVersion: "0.8.0"

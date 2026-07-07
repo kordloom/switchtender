@@ -1,0 +1,39 @@
+# Default values for the Yardmaster chart.
+
+image:
+  # repository is the Yardmaster image, built from the repository Dockerfile.
+  repository: yardmaster
+  # tag defaults to the chart appVersion when empty.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+server:
+  # replicas runs this many servers; they share the database and coordinate through it.
+  replicas: 1
+  # addr is the listen address inside the container.
+  addr: ":8080"
+  # extraArgs are appended to the serve command, for example ["--strict-grants"].
+  extraArgs: []
+
+worker:
+  # enabled deploys dedicated workers alongside the server.
+  enabled: true
+  # replicas runs this many workers.
+  replicas: 1
+  # extraArgs are appended to the worker command, for example ["--queue", "dmz"].
+  extraArgs: []
+
+database:
+  # dsn is the PostgreSQL connection string every server and worker shares.
+  dsn: "postgres://yard:yard@postgres:5432/yard?sslmode=disable"
+
+# encryptionKey seals credentials at rest. It is required; set it with --set encryptionKey=...
+# or point existingSecret at a Secret that holds a YARDMASTER_ENCRYPTION_KEY key.
+encryptionKey: ""
+existingSecret: ""
+
+service:
+  type: ClusterIP
+  port: 8080
+
+resources: {}
