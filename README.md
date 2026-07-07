@@ -17,7 +17,7 @@
   <img src="https://img.shields.io/github/go-mod/go-version/dcadolph/yardmaster"
     alt="Go version">
   <a href="LICENSE"><img
-    src="https://img.shields.io/github/license/dcadolph/yardmaster"
+    src="https://img.shields.io/badge/license-BSL%201.1-blue"
     alt="License"></a>
 </p>
 
@@ -206,4 +206,7 @@ Pre-alpha, moving fast, APIs change without notice.
 
 ## License
 
-Apache-2.0. See `LICENSE`.
+Business Source License 1.1. You can read the source, run it, and use it in production; you may not
+offer it to others as a hosted or managed service that competes with the maintainers. Each version
+converts to Apache-2.0 four years after its release. See `LICENSE` for the exact terms, and open an
+issue for commercial licensing.
