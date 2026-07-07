@@ -173,6 +173,11 @@ select.input[multiple] { padding: 4px; }
 .alt-auth summary { cursor: pointer; font-size: 13px; }
 .alt-auth .stack { margin-top: 10px; }
 
+.modal { position: fixed; inset: 0; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center; z-index: 50; }
+.modal[hidden] { display: none; }
+.modal-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 22px 24px; width: 420px; max-width: 92vw; box-shadow: var(--shadow); }
+.modal-card h2 { margin-bottom: 14px; }
+
 /* Host matrix */
 .matrix-scroll { overflow: auto; max-height: 72vh; border: 1px solid var(--border); border-radius: var(--radius); }
 table.matrix { border-collapse: separate; border-spacing: 0; }

@@ -88,6 +88,8 @@ Add `"shards": 4` to split it. Ansible is the only runtime dependency: `ansible-
 | Dynamic sources | Inventory plugins and scripts refreshed into stored inventories, with cloud auth from an env credential |
 | Credentials  | SSH keys, vault passwords, and env variable bundles for cloud SDKs, all encrypted at rest |
 | High availability | Two servers on one database share the schedule without double-firing; tokens can carry a lifetime |
+| Git triggers | A webhook URL launches a template on push; the project syncs fresh, so it deploys the commit just pushed |
+| Surveys      | Templates declare typed launch prompts, validated and injected as extra vars |
 
 ## HTTP API
 
@@ -116,7 +118,11 @@ Add `"shards": 4` to split it. Ansible is the only runtime dependency: `ansible-
 | DELETE | `/projects/{id}`        | Delete a project                                        |
 | POST   | `/templates`            | Save a launch preset                                    |
 | GET    | `/templates`            | List templates                                          |
-| POST   | `/templates/{id}/launch`| Launch a template in one action                         |
+| POST   | `/templates/{id}/launch`| Launch a template, answering its survey if it has one   |
+| POST   | `/triggers`             | Create a webhook trigger for a template                 |
+| GET    | `/triggers`             | List webhook triggers                                   |
+| DELETE | `/triggers/{id}`        | Delete a trigger, revoking its webhook                  |
+| POST   | `/hooks/{token}`        | Fire a trigger from a git push, no auth header needed   |
 | DELETE | `/templates/{id}`       | Delete a template                                       |
 | POST   | `/credentials`          | Store an SSH key or vault password, encrypted at rest   |
 | GET    | `/credentials`          | List credentials, secrets never included                |

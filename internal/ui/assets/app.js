@@ -328,6 +328,15 @@ function wireTemplateForm() {
 				return;
 			}
 		}
+		const surveyText = document.getElementById("tpl-survey").value.trim();
+		if (surveyText) {
+			try {
+				payload.survey = JSON.parse(surveyText);
+			} catch (_) {
+				status.textContent = "Survey must be a valid JSON array.";
+				return;
+			}
+		}
 		try {
 			await postAction("/templates", payload);
 			status.textContent = "Saved.";
@@ -361,6 +370,10 @@ async function loadTemplates() {
 			launch.textContent = "Launch";
 			launch.addEventListener("click", async (e) => {
 				e.preventDefault();
+				if (t.survey && t.survey.length) {
+					openSurvey(t);
+					return;
+				}
 				launch.disabled = true;
 				try {
 					const created = await postAction("/templates/" + t.id + "/launch");
@@ -382,6 +395,66 @@ async function loadTemplates() {
 	} catch (e) {
 		setStatus("Failed to load templates: " + e.message);
 	}
+}
+
+// openSurvey renders a template's survey as a form and launches with the collected answers.
+function openSurvey(t) {
+	const modal = document.getElementById("survey-modal");
+	const form = document.getElementById("survey-form");
+	document.getElementById("survey-title").textContent = "Launch " + t.name;
+	document.getElementById("survey-status").textContent = "";
+	form.innerHTML = "";
+	for (const f of t.survey) {
+		const label = document.createElement("label");
+		label.className = "field-label";
+		label.textContent = (f.label || f.var) + (f.required ? " *" : "");
+		let input;
+		if (f.type === "choice") {
+			input = document.createElement("select");
+			for (const c of f.choices || []) {
+				const opt = document.createElement("option");
+				opt.value = c;
+				opt.textContent = c;
+				input.appendChild(opt);
+			}
+		} else if (f.type === "bool") {
+			input = document.createElement("select");
+			for (const v of ["false", "true"]) {
+				const opt = document.createElement("option");
+				opt.value = v;
+				opt.textContent = v;
+				input.appendChild(opt);
+			}
+		} else {
+			input = document.createElement("input");
+			input.type = f.type === "int" ? "number" : "text";
+		}
+		input.className = "input";
+		input.dataset.var = f.var;
+		input.dataset.type = f.type || "text";
+		if (f.default !== undefined && f.default !== null) input.value = f.default;
+		label.appendChild(input);
+		form.appendChild(label);
+	}
+	modal.hidden = false;
+
+	document.getElementById("survey-cancel").onclick = () => { modal.hidden = true; };
+	document.getElementById("survey-go").onclick = async () => {
+		const answers = {};
+		for (const el of form.querySelectorAll("[data-var]")) {
+			const raw = el.value;
+			if (raw === "") continue;
+			if (el.dataset.type === "int") answers[el.dataset.var] = parseInt(raw, 10);
+			else if (el.dataset.type === "bool") answers[el.dataset.var] = raw === "true";
+			else answers[el.dataset.var] = raw;
+		}
+		try {
+			const created = await postAction("/templates/" + t.id + "/launch", answers);
+			location.href = "/ui/runs/" + created.id;
+		} catch (err) {
+			document.getElementById("survey-status").textContent = "Launch failed: " + err.message;
+		}
+	};
 }
 
 // deleteCell builds a table cell holding a delete button for a resource.
