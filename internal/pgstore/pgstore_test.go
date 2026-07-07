@@ -8,10 +8,14 @@ import (
 	"github.com/dcadolph/yardmaster/internal/authtest"
 	"github.com/dcadolph/yardmaster/internal/credential"
 	"github.com/dcadolph/yardmaster/internal/credtest"
+	"github.com/dcadolph/yardmaster/internal/grant"
+	"github.com/dcadolph/yardmaster/internal/granttest"
 	"github.com/dcadolph/yardmaster/internal/invsource"
 	"github.com/dcadolph/yardmaster/internal/invsourcetest"
 	"github.com/dcadolph/yardmaster/internal/project"
 	"github.com/dcadolph/yardmaster/internal/projecttest"
+	"github.com/dcadolph/yardmaster/internal/team"
+	"github.com/dcadolph/yardmaster/internal/teamtest"
 	"github.com/dcadolph/yardmaster/internal/template"
 	"github.com/dcadolph/yardmaster/internal/templatetest"
 	"github.com/dcadolph/yardmaster/internal/trigger"
@@ -299,5 +303,59 @@ func truncateTriggers(t *testing.T, dsn string) {
 	defer func() { _ = db.Close() }()
 	if _, err := db.Exec("TRUNCATE triggers"); err != nil {
 		t.Fatalf("truncate triggers: %v", err)
+	}
+}
+
+func TestTeamStoreContract(t *testing.T) {
+	dsn := testDSN(t)
+	db, err := pgstore.Open(dsn)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	teamtest.Contract(t, func() team.Store {
+		truncateTeams(t, dsn)
+		return db.Teams()
+	})
+}
+
+// truncateTeams clears the team tables between contract subtests.
+func truncateTeams(t *testing.T, dsn string) {
+	t.Helper()
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatalf("open postgres: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	if _, err := db.Exec("TRUNCATE teams, team_members"); err != nil {
+		t.Fatalf("truncate teams: %v", err)
+	}
+}
+
+func TestGrantStoreContract(t *testing.T) {
+	dsn := testDSN(t)
+	db, err := pgstore.Open(dsn)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	granttest.Contract(t, func() grant.Store {
+		truncateGrants(t, dsn)
+		return db.Grants()
+	})
+}
+
+// truncateGrants clears the grants table between contract subtests.
+func truncateGrants(t *testing.T, dsn string) {
+	t.Helper()
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatalf("open postgres: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	if _, err := db.Exec("TRUNCATE grants"); err != nil {
+		t.Fatalf("truncate grants: %v", err)
 	}
 }

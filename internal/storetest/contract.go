@@ -39,6 +39,7 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Run("heartbeat and reclaim", func(t *testing.T) { testLeaseLifecycle(t, newStore()) })
 	t.Run("cancel request", func(t *testing.T) { testRequestCancel(t, newStore()) })
 	t.Run("workers", func(t *testing.T) { testWorkers(t, newStore()) })
+	t.Run("retention purge", func(t *testing.T) { testPurge(t, newStore()) })
 }
 
 // sampleRun returns a fully populated terminal run with deterministic times.
@@ -799,5 +800,84 @@ func testHostCosts(t *testing.T, store run.Store) {
 	}
 	if diff := cmp.Diff(wantWindowed, empty, cmpopts.EquateEmpty()); diff != "" {
 		t.Errorf("HostCosts(window 0) should clamp to 1 (-want +got):\n%s", diff)
+	}
+}
+
+// testPurge verifies retention: events and runs older than the cutoff are removed while newer runs,
+// non-terminal runs, and the summaries that power cross-run views survive.
+func testPurge(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	old := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	recent := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	cutoff := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+
+	// An old terminal run with events, a log, and a summary.
+	if err := store.Save(ctx, &run.Run{ID: "old", Status: run.StatusSucceeded, CreatedAt: old}); err != nil {
+		t.Fatalf("Save(old) error = %v", err)
+	}
+	if err := store.AppendEvents(ctx, "old",
+		[]event.Event{{Type: event.TypePlayStart, Time: old, Play: "p"}}); err != nil {
+		t.Fatalf("AppendEvents(old) error = %v", err)
+	}
+	if err := store.AppendLog(ctx, "old", []byte("old output")); err != nil {
+		t.Fatalf("AppendLog(old) error = %v", err)
+	}
+	if err := store.SaveHostSummary(ctx, "old",
+		[]run.HostSummary{{Host: "h1", Worst: "ok", RanAt: old}}); err != nil {
+		t.Fatalf("SaveHostSummary(old) error = %v", err)
+	}
+	// A recent terminal run and an old run still running.
+	if err := store.Save(ctx, &run.Run{ID: "recent", Status: run.StatusSucceeded, CreatedAt: recent}); err != nil {
+		t.Fatalf("Save(recent) error = %v", err)
+	}
+	if err := store.AppendEvents(ctx, "recent",
+		[]event.Event{{Type: event.TypePlayStart, Time: recent, Play: "p"}}); err != nil {
+		t.Fatalf("AppendEvents(recent) error = %v", err)
+	}
+	if err := store.Save(ctx, &run.Run{ID: "running", Status: run.StatusRunning, CreatedAt: old}); err != nil {
+		t.Fatalf("Save(running) error = %v", err)
+	}
+
+	// Trimming events keeps the run record but drops its events.
+	trimmed, err := store.PurgeEventsBefore(ctx, cutoff)
+	if err != nil {
+		t.Fatalf("PurgeEventsBefore() error = %v", err)
+	}
+	if trimmed != 1 {
+		t.Errorf("PurgeEventsBefore() trimmed = %d, want 1", trimmed)
+	}
+	if evs, err := store.Events(ctx, "old"); err != nil || len(evs) != 0 {
+		t.Errorf("old events = %v (err %v), want empty", evs, err)
+	}
+	if _, err := store.Get(ctx, "old"); err != nil {
+		t.Errorf("old run gone after event purge: %v", err)
+	}
+	if evs, _ := store.Events(ctx, "recent"); len(evs) != 1 {
+		t.Errorf("recent events = %v, want kept", evs)
+	}
+
+	// Deleting old runs removes the record but keeps its summary and never touches newer or running.
+	deleted, err := store.PurgeRunsBefore(ctx, cutoff)
+	if err != nil {
+		t.Fatalf("PurgeRunsBefore() error = %v", err)
+	}
+	if deleted != 1 {
+		t.Errorf("PurgeRunsBefore() deleted = %d, want 1", deleted)
+	}
+	if _, err := store.Get(ctx, "old"); !errors.Is(err, run.ErrNotFound) {
+		t.Errorf("Get(old) error = %v, want ErrNotFound", err)
+	}
+	if _, err := store.Get(ctx, "recent"); err != nil {
+		t.Errorf("recent run deleted: %v", err)
+	}
+	if _, err := store.Get(ctx, "running"); err != nil {
+		t.Errorf("running run deleted despite being non-terminal: %v", err)
+	}
+	history, err := store.HostHistory(ctx, "h1", 10)
+	if err != nil {
+		t.Fatalf("HostHistory() error = %v", err)
+	}
+	if len(history) != 1 {
+		t.Errorf("HostHistory() = %v, want the summary kept after run purge", history)
 	}
 }

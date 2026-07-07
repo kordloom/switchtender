@@ -92,6 +92,9 @@ Add `"shards": 4` to split it. Ansible is the only runtime dependency: `ansible-
 | Worker queues | Target a run at a named queue; a worker serving that queue runs it and default workers leave it alone |
 | Dependency sync | A project's requirements.yml roles and collections install on each sync, so playbooks that need them just run |
 | Execution environments | A project can pin a container image; its runs execute inside it with their own ansible and system dependencies |
+| Teams and grants | Group users into teams and grant use or manage on a specific project, template, inventory, or credential; grants layer on the global role and default open |
+| Retention | A sweeper drops old run events and deletes terminal runs past a configurable age, keeping the summaries the cross-run views need |
+| Email | An SMTP notification on every finished run or on failures only, alongside the finish webhooks |
 
 ## HTTP API
 
@@ -134,6 +137,15 @@ Add `"shards": 4` to split it. Ansible is the only runtime dependency: `ansible-
 | POST   | `/users`                | Create an account with a role                           |
 | GET    | `/users`                | List accounts                                           |
 | DELETE | `/users/{id}`           | Delete an account; its tokens stop working              |
+| POST   | `/teams`                | Create a team of users                                  |
+| GET    | `/teams`                | List teams                                              |
+| DELETE | `/teams/{id}`           | Delete a team and its memberships                       |
+| POST   | `/teams/{id}/members`   | Add a user to a team                                    |
+| GET    | `/teams/{id}/members`   | List a team's members                                   |
+| DELETE | `/teams/{id}/members/{userID}` | Remove a user from a team                        |
+| POST   | `/grants`               | Grant a user or team use or manage on an object         |
+| GET    | `/grants`               | List access grants                                      |
+| DELETE | `/grants/{id}`          | Delete an access grant                                  |
 | GET    | `/workers`              | The executor fleet with lease freshness                 |
 | POST   | `/inventory-sources`    | Register a dynamic inventory source                     |
 | GET    | `/inventory-sources`    | List inventory sources                                  |

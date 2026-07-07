@@ -110,6 +110,10 @@ type Dispatcher struct {
 	syncer *project.Syncer
 	// webhooks receive terminal run notifications.
 	webhooks []string
+	// emailer sends terminal run notifications by email, nil when email is off.
+	emailer Emailer
+	// emailOnFailureOnly limits email notifications to failed runs.
+	emailOnFailureOnly bool
 	// inventories resolves stored inventories, nil when the feature is off.
 	inventories inventory.Store
 	// invSources resolves dynamic inventory sources, nil when the feature is off.
@@ -143,6 +147,10 @@ type config struct {
 	syncer *project.Syncer
 	// webhooks receive terminal run notifications.
 	webhooks []string
+	// emailer sends terminal run notifications by email, nil when email is off.
+	emailer Emailer
+	// emailOnFailureOnly limits email notifications to failed runs.
+	emailOnFailureOnly bool
 	// inventories resolves stored inventories, nil when the feature is off.
 	inventories inventory.Store
 	// invSources resolves dynamic inventory sources, nil when the feature is off.
@@ -211,26 +219,28 @@ func New(store run.Store, runner roundhouse.Runner, log *zap.Logger, opts ...Opt
 	dumper, _ := runner.(roundhouse.InventoryDumper)
 	ctx, cancel := context.WithCancel(context.Background())
 	d := &Dispatcher{
-		store:         store,
-		runner:        runner,
-		log:           log,
-		sem:           make(chan struct{}, cfg.workers),
-		ctx:           ctx,
-		cancel:        cancel,
-		publisher:     cfg.publisher,
-		hostLister:    lister,
-		dumper:        dumper,
-		cancels:       make(map[string]context.CancelFunc),
-		owner:         cfg.owner,
-		claimInterval: cfg.claimInterval,
-		queues:        cfg.queues,
-		credentials:   cfg.credentials,
-		sealer:        cfg.sealer,
-		projects:      cfg.projects,
-		syncer:        cfg.syncer,
-		webhooks:      cfg.webhooks,
-		inventories:   cfg.inventories,
-		invSources:    cfg.invSources,
+		store:              store,
+		runner:             runner,
+		log:                log,
+		sem:                make(chan struct{}, cfg.workers),
+		ctx:                ctx,
+		cancel:             cancel,
+		publisher:          cfg.publisher,
+		hostLister:         lister,
+		dumper:             dumper,
+		cancels:            make(map[string]context.CancelFunc),
+		owner:              cfg.owner,
+		claimInterval:      cfg.claimInterval,
+		queues:             cfg.queues,
+		credentials:        cfg.credentials,
+		sealer:             cfg.sealer,
+		projects:           cfg.projects,
+		syncer:             cfg.syncer,
+		webhooks:           cfg.webhooks,
+		emailer:            cfg.emailer,
+		emailOnFailureOnly: cfg.emailOnFailureOnly,
+		inventories:        cfg.inventories,
+		invSources:         cfg.invSources,
 	}
 	d.wg.Add(2)
 	go d.claimLoop()
