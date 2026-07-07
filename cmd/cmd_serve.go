@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"net/smtp"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -79,6 +81,22 @@ var retainEvents string
 // retentionInterval holds the value of the --retention-interval flag.
 var retentionInterval time.Duration
 
+// smtpAddr holds the value of the --smtp-addr flag, the SMTP server host:port.
+var smtpAddr string
+
+// smtpFrom holds the value of the --smtp-from flag, the sender address.
+var smtpFrom string
+
+// smtpTo holds the values of the repeatable --smtp-to flag, the recipient addresses.
+var smtpTo []string
+
+// smtpUsername holds the value of the --smtp-username flag; the password comes from the
+// YARDMASTER_SMTP_PASSWORD environment variable.
+var smtpUsername string
+
+// notifyOn holds the value of the --notify-on flag: failure or finish.
+var notifyOn string
+
 // serveCmd runs the Yardmaster HTTP server (the dispatcher).
 var serveCmd = &cobra.Command{
 	Use:   "serve",
@@ -105,6 +123,29 @@ func init() {
 		"Drop run events and logs older than this, for example 30d. Empty keeps them forever.")
 	serveCmd.Flags().DurationVar(&retentionInterval, "retention-interval", retention.DefaultInterval,
 		"How often the retention sweeper runs.")
+	serveCmd.Flags().StringVar(&smtpAddr, "smtp-addr", "",
+		"SMTP server host:port for run notification emails. Empty disables email.")
+	serveCmd.Flags().StringVar(&smtpFrom, "smtp-from", "", "Sender address for notification emails.")
+	serveCmd.Flags().StringArrayVar(&smtpTo, "smtp-to", nil,
+		"Recipient address for notification emails. Repeatable.")
+	serveCmd.Flags().StringVar(&smtpUsername, "smtp-username", "",
+		"SMTP username. The password comes from YARDMASTER_SMTP_PASSWORD.")
+	serveCmd.Flags().StringVar(&notifyOn, "notify-on", "failure",
+		"When to email: failure for failed runs only, or finish for every terminal run.")
+}
+
+// buildEmailer constructs the SMTP notifier from the flags, or returns nil when email is not
+// configured. It reports whether notifications should fire only on failure.
+func buildEmailer() (dispatch.Emailer, bool) {
+	if smtpAddr == "" || smtpFrom == "" || len(smtpTo) == 0 {
+		return nil, true
+	}
+	var auth smtp.Auth
+	if smtpUsername != "" {
+		host, _, _ := net.SplitHostPort(smtpAddr)
+		auth = smtp.PlainAuth("", smtpUsername, os.Getenv("YARDMASTER_SMTP_PASSWORD"), host)
+	}
+	return dispatch.NewSMTPEmailer(smtpAddr, smtpFrom, smtpTo, auth), notifyOn != "finish"
 }
 
 // parseRetention converts a retention flag into a duration. An empty value means no window. A
@@ -204,10 +245,12 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("project cache: %w", err)
 	}
+	emailer, onFailureOnly := buildEmailer()
 	disp := dispatch.New(store, runner, log, dispatch.WithPublisher(hub),
 		dispatch.WithCredentials(bundle.Credentials(), sealer),
 		dispatch.WithProjects(bundle.Projects(), syncer),
 		dispatch.WithWebhooks(notifyWebhooks),
+		dispatch.WithEmail(emailer, onFailureOnly),
 		dispatch.WithInventories(bundle.Inventories()),
 		dispatch.WithInventorySources(bundle.InventorySources()))
 	defer disp.Close()

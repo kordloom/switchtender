@@ -771,3 +771,66 @@ func TestDispatcherNotifiesWebhook(t *testing.T) {
 		t.Fatal("webhook never received the notification")
 	}
 }
+
+// captureEmailer records the subjects it is asked to send.
+type captureEmailer struct {
+	// sent receives one subject per Send call.
+	sent chan string
+}
+
+// Send records the subject and reports success.
+func (c *captureEmailer) Send(_ context.Context, subject, _ string) error {
+	c.sent <- subject
+	return nil
+}
+
+func TestDispatcherEmailsOnFailure(t *testing.T) {
+	t.Parallel()
+	emailer := &captureEmailer{sent: make(chan string, 4)}
+	store := run.NewMemStore()
+	fail := roundhouse.RunnerFunc(
+		func(context.Context, roundhouse.Spec, io.Writer) (roundhouse.Result, error) {
+			return roundhouse.Result{ExitCode: 2}, nil
+		})
+	d := New(store, fail, nil, WithEmail(emailer, true))
+	defer d.Close()
+
+	created, err := d.Submit(context.Background(), "play.yml", "inv")
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+	waitTerminal(t, store, created.ID)
+
+	select {
+	case subject := <-emailer.sent:
+		if !strings.Contains(subject, created.ID) || !strings.Contains(subject, "failed") {
+			t.Errorf("subject = %q, want it to name the failed run", subject)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("email was never sent for a failed run")
+	}
+}
+
+func TestDispatcherSkipsEmailOnSuccessWhenFailureOnly(t *testing.T) {
+	t.Parallel()
+	emailer := &captureEmailer{sent: make(chan string, 4)}
+	store := run.NewMemStore()
+	ok := roundhouse.RunnerFunc(
+		func(context.Context, roundhouse.Spec, io.Writer) (roundhouse.Result, error) {
+			return roundhouse.Result{ExitCode: 0}, nil
+		})
+	d := New(store, ok, nil, WithEmail(emailer, true))
+	defer d.Close()
+
+	created, err := d.Submit(context.Background(), "play.yml", "inv")
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+	waitTerminal(t, store, created.ID)
+
+	select {
+	case subject := <-emailer.sent:
+		t.Errorf("unexpected email for a succeeded run: %q", subject)
+	case <-time.After(500 * time.Millisecond):
+	}
+}

@@ -29,10 +29,19 @@ type notification struct {
 	Run *run.Run `json:"run"`
 }
 
-// notify delivers a terminal top-level run to every configured webhook without blocking the
+// notify delivers a terminal top-level run to every configured channel without blocking the
 // executor. Failures are logged and dropped; the store remains the source of truth.
 func (d *Dispatcher) notify(r *run.Run) {
-	if len(d.webhooks) == 0 || r.ParentID != nil || !r.Status.Terminal() {
+	if r.ParentID != nil || !r.Status.Terminal() {
+		return
+	}
+	d.notifyWebhooks(r)
+	d.notifyEmail(r)
+}
+
+// notifyWebhooks posts a terminal top-level run to every configured webhook.
+func (d *Dispatcher) notifyWebhooks(r *run.Run) {
+	if len(d.webhooks) == 0 {
 		return
 	}
 	body, err := json.Marshal(notification{Event: "run.finished", Run: r})
