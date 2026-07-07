@@ -1,0 +1,14 @@
+---
+- name: Site deploy
+  hosts: all
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Fetch configuration
+      command: "sleep {{ work | default(1) }}"
+    - name: Apply configuration
+      command: /bin/false
+      when: inventory_hostname == (fail_host | default(''))
+    - name: Restart service
+      debug:
+        msg: "restarted {{ inventory_hostname }}"

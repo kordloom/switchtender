@@ -93,6 +93,11 @@ then apply:
 Credentials come across as shells; re-enter their secrets, since exports omit them by design. The
 [switching-from-AWX guide](docs/switching-from-awx.md) walks the whole move.
 
+To see it without any setup, run the seeded read-only demo. It fills a fresh database with sample
+projects, templates, and real runs, then serves it with every change blocked:
+
+    ./yardmaster demo --addr :8080         # or: docker compose --profile demo up --build
+
 ## Documentation
 
 The docs live in [docs/](docs/) and also render inside the app at `/ui/docs`.

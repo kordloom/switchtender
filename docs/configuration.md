@@ -86,6 +86,16 @@ Migrates from AWX or Semaphore. See [Migration](migration.md).
 Both take `--db` for the target database. Without `--apply` the command only reports what it would
 create.
 
+## demo
+
+Seeds a fresh database with sample data and real runs, then serves it read-only, so a public
+instance is safe to expose. It needs ansible on the PATH to run the sample playbooks.
+
+| Flag | Default | Purpose |
+|------|---------|---------|
+| `--addr` | `:8080` | Address the demo listens on. |
+| `--db` | temporary file | Database to seed and serve. Empty uses a fresh temporary SQLite file. |
+
 ## Global flags
 
 | Flag | Purpose |

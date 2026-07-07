@@ -1024,3 +1024,25 @@ func TestAuthGateExpiredToken(t *testing.T) {
 		t.Errorf("expired token = %d, want 401", rec.Code)
 	}
 }
+
+func TestReadOnlyRejectsMutations(t *testing.T) {
+	t.Parallel()
+	store := run.NewMemStore()
+	handler := New(store, &fakeSubmitter{}, zap.NewNop(), WithReadOnly()).Handler()
+
+	// A read passes through.
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/runs", nil))
+	if rec.Code != http.StatusOK {
+		t.Errorf("GET /runs status = %d, want 200", rec.Code)
+	}
+
+	// Every mutating method is refused with 403.
+	for _, method := range []string{http.MethodPost, http.MethodDelete, http.MethodPut, http.MethodPatch} {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(method, "/runs", nil))
+		if rec.Code != http.StatusForbidden {
+			t.Errorf("%s /runs status = %d, want 403", method, rec.Code)
+		}
+	}
+}
