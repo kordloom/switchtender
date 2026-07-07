@@ -51,6 +51,47 @@ func TestSealerDisabled(t *testing.T) {
 	}
 }
 
+func TestValidKind(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		In   credential.Kind
+		Want bool
+	}{
+		{In: credential.KindSSHKey, Want: true},         // Test 0: SSH key.
+		{In: credential.KindVaultPassword, Want: true},  // Test 1: Vault password.
+		{In: credential.KindEnv, Want: true},            // Test 2: Environment.
+		{In: credential.KindBecomePassword, Want: true}, // Test 3: Become password.
+		{In: credential.KindRegistry, Want: true},       // Test 4: Registry login.
+		{In: credential.Kind("nonsense"), Want: false},  // Test 5: Unknown kind.
+		{In: credential.Kind(""), Want: false},          // Test 6: Empty kind.
+	}
+	for i, test := range tests {
+		if got := credential.ValidKind(test.In); got != test.Want {
+			t.Errorf("test %d: ValidKind(%q) = %v, want %v", i, test.In, got, test.Want)
+		}
+	}
+}
+
+func TestRegistryLogin(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		In       string
+		WantUser string
+		WantPass string
+	}{
+		{In: "admin\ns3cret", WantUser: "admin", WantPass: "s3cret"},               // Test 0: Basic split.
+		{In: "admin\np:a/s\ns=w0rd", WantUser: "admin", WantPass: "p:a/s\ns=w0rd"}, // Test 1: Password keeps newlines and symbols.
+		{In: "solo", WantUser: "solo", WantPass: ""},                               // Test 2: Username only.
+	}
+	for i, test := range tests {
+		user, pass := credential.RegistryLogin(test.In)
+		if user != test.WantUser || pass != test.WantPass {
+			t.Errorf("test %d: RegistryLogin() = (%q, %q), want (%q, %q)",
+				i, user, pass, test.WantUser, test.WantPass)
+		}
+	}
+}
+
 func TestEnvLines(t *testing.T) {
 	t.Parallel()
 	got := credential.EnvLines("AWS_ACCESS_KEY_ID=abc\n# comment\n\nAWS_SECRET_ACCESS_KEY=xyz\nnot a pair\n")

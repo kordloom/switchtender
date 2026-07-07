@@ -23,6 +23,9 @@ type Spec struct {
 	// ExtraVars are passed to ansible-playbook as one JSON --extra-vars argument so values keep
 	// their types.
 	ExtraVars map[string]any
+	// ExtraVarsFiles are passed to ansible-playbook as --extra-vars @file arguments. They carry
+	// values that must stay off the command line, such as a become password.
+	ExtraVarsFiles []string
 	// Env holds additional environment entries (KEY=VALUE) layered over the base environment.
 	Env []string
 	// Dir is the working directory for the process. When empty, the current directory is used.
@@ -35,6 +38,12 @@ type Spec struct {
 	PrivateKeyPath string
 	// VaultPasswordFile, when set, is passed as ansible-playbook --vault-password-file.
 	VaultPasswordFile string
+	// Image, when set, names a container image to run the playbook inside instead of on the host.
+	Image string
+	// RegistryUsername is the login for pulling a private Image. Empty needs no login.
+	RegistryUsername string
+	// RegistryPassword is the password for RegistryUsername, fed to docker login on stdin.
+	RegistryPassword string
 }
 
 // Result is the outcome of a completed execution.
@@ -58,18 +67,41 @@ func (f RunnerFunc) Run(ctx context.Context, spec Spec, out io.Writer) (Result, 
 	return f(ctx, spec, out)
 }
 
+// pluginCache materializes the embedded callback plugin to a temp directory once and reuses it.
+type pluginCache struct {
+	// once guards one time materialization of the callback plugin.
+	once sync.Once
+	// dir is the temp directory holding the materialized callback plugin.
+	dir string
+	// err records a failure to materialize the callback plugin.
+	err error
+}
+
+// ensure materializes the embedded callback plugin to a temp directory once and returns it.
+func (p *pluginCache) ensure() (string, error) {
+	p.once.Do(func() {
+		dir, err := os.MkdirTemp("", "yardmaster-plugin-")
+		if err != nil {
+			p.err = err
+			return
+		}
+		if err := os.WriteFile(filepath.Join(dir, pluginName+".py"), []byte(callbackPlugin), 0o600); err != nil {
+			p.err = err
+			return
+		}
+		p.dir = dir
+	})
+	return p.dir, p.err
+}
+
 // ansibleRunner runs ansible-playbook as a child process.
 type ansibleRunner struct {
 	// binary is the ansible-playbook executable name or path.
 	binary string
 	// baseEnv is the environment inherited by every execution.
 	baseEnv []string
-	// pluginOnce guards one time materialization of the callback plugin.
-	pluginOnce sync.Once
-	// pluginDir is the temp directory holding the materialized callback plugin.
-	pluginDir string
-	// pluginErr records a failure to materialize the callback plugin.
-	pluginErr error
+	// plugin materializes the callback plugin on first use.
+	plugin pluginCache
 }
 
 // Option configures an ansibleRunner.
@@ -88,6 +120,12 @@ func WithBaseEnv(env []string) Option {
 // NewAnsibleRunner returns a Runner that shells out to ansible-playbook.
 // By default it resolves ansible-playbook from PATH and inherits the process environment.
 func NewAnsibleRunner(opts ...Option) Runner {
+	return newAnsibleRunner(opts...)
+}
+
+// newAnsibleRunner builds the concrete host runner so callers that need its HostLister and
+// InventoryDumper methods, such as the selective runner, can hold the concrete type.
+func newAnsibleRunner(opts ...Option) *ansibleRunner {
 	a := &ansibleRunner{
 		binary:  "ansible-playbook",
 		baseEnv: os.Environ(),
@@ -96,6 +134,41 @@ func NewAnsibleRunner(opts ...Option) Runner {
 		opt(a)
 	}
 	return a
+}
+
+// selectRunner routes each Spec to the host runner or a container runner by its Image field. It
+// embeds the host runner so its HostLister and InventoryDumper methods are promoted, which the
+// dispatcher relies on for split runs and dynamic inventory.
+type selectRunner struct {
+	// ansibleRunner is the host runner, used when a Spec has no image and for host listing.
+	*ansibleRunner
+	// container runs a Spec inside its image.
+	container *containerRunner
+	// allowContainer gates container execution; when false an image-bound Spec fails clearly.
+	allowContainer bool
+}
+
+// NewSelectiveRunner returns a Runner that executes on the host by default and inside a container
+// when a Spec names an image. Container execution is refused unless allowContainer is set.
+func NewSelectiveRunner(allowContainer bool, opts ...Option) Runner {
+	host := newAnsibleRunner(opts...)
+	return &selectRunner{
+		ansibleRunner:  host,
+		container:      newContainerRunner(host.baseEnv, &host.plugin),
+		allowContainer: allowContainer,
+	}
+}
+
+// Run executes on the host when the Spec has no image, otherwise inside the image when container
+// execution is allowed.
+func (s *selectRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Result, error) {
+	if spec.Image == "" {
+		return s.ansibleRunner.Run(ctx, spec, out)
+	}
+	if !s.allowContainer {
+		return Result{ExitCode: -1}, ErrContainerDisabled
+	}
+	return s.container.Run(ctx, spec, out)
 }
 
 // pluginName is the callback plugin name, matching the embedded file and its CALLBACK_NAME.
@@ -110,18 +183,14 @@ func (a *ansibleRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Resu
 
 	env := append(append([]string{}, a.baseEnv...), spec.Env...)
 	if spec.EventsPath != "" {
-		dir, err := a.ensurePlugin()
+		dir, err := a.plugin.ensure()
 		if err != nil {
 			return Result{ExitCode: -1}, fmt.Errorf("%w: %w", ErrLaunch, err)
 		}
-		env = append(env,
-			"ANSIBLE_CALLBACK_PLUGINS="+dir,
-			"ANSIBLE_CALLBACKS_ENABLED="+pluginName,
-			"YARDMASTER_EVENTS_PATH="+spec.EventsPath,
-		)
+		env = append(env, callbackEnv(dir, spec.EventsPath)...)
 	}
 
-	cmd := exec.CommandContext(ctx, a.binary, a.args(spec)...)
+	cmd := exec.CommandContext(ctx, a.binary, playbookArgs(spec)...)
 	cmd.Stdout = out
 	cmd.Stderr = out
 	cmd.Dir = spec.Dir
@@ -145,25 +214,19 @@ func (a *ansibleRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Resu
 	return Result{ExitCode: -1}, fmt.Errorf("%w: %w", ErrLaunch, err)
 }
 
-// ensurePlugin materializes the embedded callback plugin to a temp directory once and returns it.
-func (a *ansibleRunner) ensurePlugin() (string, error) {
-	a.pluginOnce.Do(func() {
-		dir, err := os.MkdirTemp("", "yardmaster-plugin-")
-		if err != nil {
-			a.pluginErr = err
-			return
-		}
-		if err := os.WriteFile(filepath.Join(dir, pluginName+".py"), []byte(callbackPlugin), 0o600); err != nil {
-			a.pluginErr = err
-			return
-		}
-		a.pluginDir = dir
-	})
-	return a.pluginDir, a.pluginErr
+// callbackEnv returns the environment entries that enable the structured event callback and point
+// it at the events sidecar file.
+func callbackEnv(pluginDir, eventsPath string) []string {
+	return []string{
+		"ANSIBLE_CALLBACK_PLUGINS=" + pluginDir,
+		"ANSIBLE_CALLBACKS_ENABLED=" + pluginName,
+		"YARDMASTER_EVENTS_PATH=" + eventsPath,
+	}
 }
 
-// args builds the ansible-playbook argument list for spec.
-func (a *ansibleRunner) args(spec Spec) []string {
+// playbookArgs builds the ansible-playbook argument list for spec, shared by the host and container
+// runners so both invoke ansible-playbook identically.
+func playbookArgs(spec Spec) []string {
 	args := make([]string, 0, 8)
 	if spec.Inventory != "" {
 		args = append(args, "-i", spec.Inventory)
@@ -175,6 +238,9 @@ func (a *ansibleRunner) args(spec Spec) []string {
 		if data, err := json.Marshal(spec.ExtraVars); err == nil {
 			args = append(args, "--extra-vars", string(data))
 		}
+	}
+	for _, file := range spec.ExtraVarsFiles {
+		args = append(args, "--extra-vars", "@"+file)
 	}
 	if spec.PrivateKeyPath != "" {
 		args = append(args, "--private-key", spec.PrivateKeyPath)

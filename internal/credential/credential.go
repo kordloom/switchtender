@@ -23,6 +23,12 @@ const (
 	// KindEnv is newline separated KEY=VALUE pairs injected into the execution environment,
 	// which is how cloud SDK credentials reach inventory plugins and playbook modules.
 	KindEnv Kind = "env"
+	// KindBecomePassword is a privilege escalation password handed to a run as the
+	// ansible_become_password variable through a file, so it never appears on the command line.
+	KindBecomePassword Kind = "become_password"
+	// KindRegistry is a container registry username and password, the username on the first line
+	// and the password on the rest, used to pull execution environment images.
+	KindRegistry Kind = "registry"
 )
 
 var (
@@ -36,7 +42,22 @@ var (
 
 // ValidKind reports whether k names a supported credential kind.
 func ValidKind(k Kind) bool {
-	return k == KindSSHKey || k == KindVaultPassword || k == KindEnv
+	switch k {
+	case KindSSHKey, KindVaultPassword, KindEnv, KindBecomePassword, KindRegistry:
+		return true
+	default:
+		return false
+	}
+}
+
+// RegistryLogin splits registry credential material into its username and password. The first line
+// is the username; everything after it is the password, so a password may contain any character.
+func RegistryLogin(secret string) (username, password string) {
+	username, password, found := strings.Cut(secret, "\n")
+	if !found {
+		return strings.TrimSpace(secret), ""
+	}
+	return strings.TrimSpace(username), password
 }
 
 // EnvLines splits env credential material into KEY=VALUE entries, dropping blanks and comments.

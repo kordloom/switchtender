@@ -89,7 +89,7 @@ func (d *Dispatcher) dumpSource(ctx context.Context, src *invsource.Source) ([]b
 		if err != nil {
 			return nil, fmt.Errorf("source project %s: %w", src.ProjectID, err)
 		}
-		dir, _, err := d.syncer.Sync(p, "")
+		dir, _, _, err := d.syncer.Sync(p, "")
 		if err != nil {
 			return nil, fmt.Errorf("sync source project: %w", err)
 		}

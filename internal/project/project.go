@@ -30,6 +30,14 @@ type Project struct {
 	Branch string `json:"branch,omitempty"`
 	// CredentialID names an ssh_key credential for private remotes. Empty for public or local.
 	CredentialID string `json:"credential_id,omitempty"`
+	// InstallDeps installs the project's Ansible role and collection requirements on each sync so
+	// playbooks that need them run without manual setup. It defaults to true.
+	InstallDeps bool `json:"install_deps"`
+	// Image, when set, names a container image the project's runs execute inside, pinning its own
+	// ansible and system dependencies. Empty runs on the host.
+	Image string `json:"image,omitempty"`
+	// PullCredentialID names a registry credential for pulling a private Image. Empty for public.
+	PullCredentialID string `json:"pull_credential_id,omitempty"`
 	// CreatedAt is when the project was created.
 	CreatedAt time.Time `json:"created_at"`
 }

@@ -82,15 +82,16 @@ Add `"shards": 4` to split it. Ansible is the only runtime dependency: `ansible-
 | Projects     | Playbooks sourced from git with clone-or-fetch sync; every run records the exact commit it executed |
 | Templates    | Saved launch presets bundling project, playbook, credentials, shards, and extra vars; one click or one POST launches |
 | Auth         | User accounts with admin, operator, and viewer roles enforced per route; bearer tokens hashed at rest; the API locks down the moment the first token exists |
-| Credentials  | SSH keys and vault passwords encrypted with AES-256-GCM, decrypted only at execution, never returned by the API |
 | Observability| A Prometheus metrics endpoint, webhook notifications when runs finish, and an audit trail of every mutation |
 | Inventories  | Stored inventories referenced by id, materialized on whichever executor runs the play |
 | Dynamic sources | Inventory plugins and scripts refreshed into stored inventories, with cloud auth from an env credential |
-| Credentials  | SSH keys, vault passwords, and env variable bundles for cloud SDKs, all encrypted at rest |
+| Credentials  | SSH keys, vault passwords, env bundles for cloud SDKs, become passwords, and registry logins, all encrypted at rest |
 | High availability | Two servers on one database share the schedule without double-firing; tokens can carry a lifetime |
 | Git triggers | A webhook URL launches a template on push; the project syncs fresh, so it deploys the commit just pushed |
 | Surveys      | Templates declare typed launch prompts, validated and injected as extra vars |
 | Worker queues | Target a run at a named queue; a worker serving that queue runs it and default workers leave it alone |
+| Dependency sync | A project's requirements.yml roles and collections install on each sync, so playbooks that need them just run |
+| Execution environments | A project can pin a container image; its runs execute inside it with their own ansible and system dependencies |
 
 ## HTTP API
 
@@ -125,7 +126,7 @@ Add `"shards": 4` to split it. Ansible is the only runtime dependency: `ansible-
 | DELETE | `/triggers/{id}`        | Delete a trigger, revoking its webhook                  |
 | POST   | `/hooks/{token}`        | Fire a trigger from a git push, no auth header needed   |
 | DELETE | `/templates/{id}`       | Delete a template                                       |
-| POST   | `/credentials`          | Store an SSH key or vault password, encrypted at rest   |
+| POST   | `/credentials`          | Store a credential (ssh_key, vault_password, env, become_password, registry), encrypted at rest |
 | GET    | `/credentials`          | List credentials, secrets never included                |
 | DELETE | `/credentials/{id}`     | Delete a credential                                     |
 | POST   | `/auth/login`           | Sign in with username and password, returns a token     |

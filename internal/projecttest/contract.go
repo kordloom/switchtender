@@ -24,7 +24,8 @@ func testLifecycle(t *testing.T, store project.Store) {
 	created := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
 	p := &project.Project{
 		ID: "proj_1", Name: "site", RepoURL: "ssh://git@example.com/site.git",
-		Branch: "main", CredentialID: "cred_9", CreatedAt: created,
+		Branch: "main", CredentialID: "cred_9", InstallDeps: true,
+		Image: "quay.io/ansible/creator-ee:v0.1", PullCredentialID: "cred_reg", CreatedAt: created,
 	}
 	if err := store.Save(ctx, p); err != nil {
 		t.Fatalf("Save() error = %v", err)
@@ -35,7 +36,8 @@ func testLifecycle(t *testing.T, store project.Store) {
 		t.Fatalf("Get() error = %v", err)
 	}
 	if got.Name != "site" || got.RepoURL != p.RepoURL || got.Branch != "main" ||
-		got.CredentialID != "cred_9" || !got.CreatedAt.Equal(created) {
+		got.CredentialID != "cred_9" || !got.InstallDeps || got.Image != p.Image ||
+		got.PullCredentialID != "cred_reg" || !got.CreatedAt.Equal(created) {
 		t.Errorf("Get() = %+v, want the saved project", got)
 	}
 

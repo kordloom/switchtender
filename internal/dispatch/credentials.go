@@ -2,6 +2,7 @@ package dispatch
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 
@@ -92,6 +93,20 @@ func (d *Dispatcher) materializeCredentials(r *run.Run, spec *roundhouse.Spec) (
 			paths = paths[:len(paths)-1]
 			_ = os.Remove(f.Name())
 			spec.Env = append(spec.Env, credential.EnvLines(plain)...)
+		case credential.KindBecomePassword:
+			// The password reaches the play as a var through a file so it never lands on argv.
+			vars, err := json.Marshal(map[string]string{"ansible_become_password": plain})
+			if err != nil {
+				return cleanup, fmt.Errorf("encode become credential %s: %w", id, err)
+			}
+			if err := os.WriteFile(f.Name(), vars, 0o600); err != nil {
+				return cleanup, fmt.Errorf("materialize credential %s: %w", id, err)
+			}
+			spec.ExtraVarsFiles = append(spec.ExtraVarsFiles, f.Name())
+		case credential.KindRegistry:
+			// Registry logins are consumed by the container runner for image pulls, not the play.
+			paths = paths[:len(paths)-1]
+			_ = os.Remove(f.Name())
 		default:
 			return cleanup, fmt.Errorf("%w: %s", credential.ErrBadKind, c.Kind)
 		}

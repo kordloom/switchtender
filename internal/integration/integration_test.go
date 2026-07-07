@@ -11,6 +11,7 @@
 package integration_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -429,5 +430,63 @@ func TestRealSSHFailureIsolation(t *testing.T) {
 	retryShards := waitShardsTerminal(t, base, retry.ID, 1)
 	if retryShards[0].Limit != hosts[0].Name {
 		t.Fatalf("retry shards = %+v, want only %s", retryShards, hosts[0].Name)
+	}
+}
+
+// eeImage is a small public Ansible image pinned to an ansible-core version distinct from the host,
+// so a run inside it proves execution is isolated from the host's ansible.
+const eeImage = "willhallonline/ansible:2.15-alpine-3.19"
+
+// TestContainerExecutionEnvironment runs a playbook inside a pinned container image and confirms the
+// ansible-core reported by the play is the image's, not the host's, proving execution isolation.
+func TestContainerExecutionEnvironment(t *testing.T) {
+	if _, err := exec.LookPath("docker"); err != nil {
+		t.Skip("docker not on PATH")
+	}
+	if err := exec.Command("docker", "info").Run(); err != nil {
+		t.Skip("docker daemon not running")
+	}
+	pull, cancelPull := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancelPull()
+	if out, err := exec.CommandContext(pull, "docker", "pull", eeImage).CombinedOutput(); err != nil {
+		t.Skipf("cannot pull %s: %v\n%s", eeImage, err, out)
+	}
+
+	dir := t.TempDir()
+	playbook := filepath.Join(dir, "play.yml")
+	if err := os.WriteFile(playbook, []byte(`---
+- hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - debug:
+        msg: "running ansible-core {{ ansible_version.full }}"
+`), 0o600); err != nil {
+		t.Fatalf("write playbook: %v", err)
+	}
+	inventory := filepath.Join(dir, "inv.ini")
+	if err := os.WriteFile(inventory, []byte("[local]\nlocalhost ansible_connection=local\n"), 0o600); err != nil {
+		t.Fatalf("write inventory: %v", err)
+	}
+	events := filepath.Join(dir, "events.ndjson")
+	if err := os.WriteFile(events, nil, 0o600); err != nil {
+		t.Fatalf("create events file: %v", err)
+	}
+
+	runner := roundhouse.NewSelectiveRunner(true)
+	var buf strings.Builder
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	res, err := runner.Run(ctx, roundhouse.Spec{
+		Playbook: playbook, Inventory: inventory, Dir: dir, Image: eeImage, EventsPath: events,
+	}, &buf)
+	if err != nil {
+		t.Fatalf("Run() error = %v\n%s", err, buf.String())
+	}
+	if res.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0\n%s", res.ExitCode, buf.String())
+	}
+	if !strings.Contains(buf.String(), "running ansible-core 2.15.13") {
+		t.Errorf("output did not report the image's ansible-core:\n%s", buf.String())
 	}
 }

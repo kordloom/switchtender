@@ -257,6 +257,8 @@ async function fillSelect(el, url, listKey, labelFor) {
 function wireProjectForm() {
 	fillSelect(document.getElementById("project-credential"), "/credentials", "credentials",
 		(c) => c.name + " (" + c.kind + ")");
+	fillSelect(document.getElementById("project-pull-credential"), "/credentials", "credentials",
+		(c) => c.name + " (" + c.kind + ")");
 	document.getElementById("project-form").addEventListener("submit", async (e) => {
 		e.preventDefault();
 		const status = document.getElementById("project-status");
@@ -266,6 +268,9 @@ function wireProjectForm() {
 				repo_url: document.getElementById("project-repo").value.trim(),
 				branch: document.getElementById("project-branch").value.trim(),
 				credential_id: document.getElementById("project-credential").value,
+				install_deps: document.getElementById("project-deps").checked,
+				image: document.getElementById("project-image").value.trim(),
+				pull_credential_id: document.getElementById("project-pull-credential").value,
 			});
 			status.textContent = "Saved.";
 			document.getElementById("projects").innerHTML = "";
