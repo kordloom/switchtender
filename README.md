@@ -73,6 +73,10 @@ then apply:
 
 Credentials come across as shells; re-enter their secrets, since exports omit them by design.
 
+Full documentation is in [docs/](docs/): quickstart, a configuration reference for every flag and
+environment variable, the concepts, a migration guide, and a comparison with AWX and Semaphore. A
+`docker-compose.yml` and a Helm chart under `deploy/helm` cover deployment.
+
 ## What it does today
 
 | Capability   | What you get                                                                    |
