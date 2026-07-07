@@ -53,7 +53,7 @@ can read, split, and remember.
 | Big jobs              | Sharded across hosts, balanced by their measured duration, only failed shards retried. | Sliced round-robin, with no balancing.     | No splitting at all.     |
 | Memory across runs    | Flaky hosts flagged, durations trended, every host's history kept.               | Forgotten the moment a run ends.                | Forgotten the moment a run ends. |
 | Pipelines             | A dependency graph that passes typed outputs from one step to the next.          | A visual workflow builder.                      | Basic chaining.          |
-| Leaving your old tool | One command imports your entire AWX or Semaphore setup.                          | Not applicable.                                 | Not applicable.          |
+| Leaving your old tool | One command imports your AWX or Semaphore projects, inventories, templates, surveys, and schedules. | Not applicable.                     | Not applicable.          |
 
 The full head-to-head, including where Yardmaster is behind, is in the
 [comparison](docs/comparison.md).
