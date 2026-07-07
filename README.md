@@ -90,6 +90,7 @@ Add `"shards": 4` to split it. Ansible is the only runtime dependency: `ansible-
 | High availability | Two servers on one database share the schedule without double-firing; tokens can carry a lifetime |
 | Git triggers | A webhook URL launches a template on push; the project syncs fresh, so it deploys the commit just pushed |
 | Surveys      | Templates declare typed launch prompts, validated and injected as extra vars |
+| Worker queues | Target a run at a named queue; a worker serving that queue runs it and default workers leave it alone |
 
 ## HTTP API
 

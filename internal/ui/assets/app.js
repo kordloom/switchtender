@@ -141,6 +141,8 @@ function wireLaunchForm() {
 			payload.inventory_id = inventoryID;
 			delete payload.inventory;
 		}
+		const queue = document.getElementById("launch-queue").value.trim();
+		if (queue) payload.queue = queue;
 		const shards = parseInt(document.getElementById("launch-shards").value, 10);
 		if (shards >= 2) payload.shards = shards;
 		const picked = Array.from(document.getElementById("launch-credentials").selectedOptions)
@@ -316,6 +318,8 @@ function wireTemplateForm() {
 		};
 		const shards = parseInt(document.getElementById("tpl-shards").value, 10);
 		if (shards >= 2) payload.shards = shards;
+		const tqueue = document.getElementById("tpl-queue").value.trim();
+		if (tqueue) payload.queue = tqueue;
 		const picked = Array.from(document.getElementById("tpl-credentials").selectedOptions)
 			.map((o) => o.value);
 		if (picked.length) payload.credential_ids = picked;
