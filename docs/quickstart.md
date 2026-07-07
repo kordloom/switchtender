@@ -1,0 +1,57 @@
+# Quickstart
+
+## Requirements
+
+Ansible on the PATH: `ansible-playbook` and `ansible-inventory`. Nothing else for the default
+SQLite setup. Go 1.26 to build from source, or use the container image.
+
+## Run the server
+
+    go build -o yardmaster .
+    YARDMASTER_ENCRYPTION_KEY=change-me ./yardmaster serve --addr :8080 --db yardmaster.db
+
+The encryption key seals stored credentials at rest. Without it the server still runs, but
+credential features stay off.
+
+Open http://localhost:8080 for the web UI, or use the API directly.
+
+## Submit a run
+
+    curl -X POST localhost:8080/runs \
+      -d '{"playbook": "site.yml", "inventory": "hosts.ini"}'
+
+The response carries a run id. Fetch its status, its structured events, or its log:
+
+    curl localhost:8080/runs/<id>
+    curl localhost:8080/runs/<id>/events
+    curl localhost:8080/runs/<id>/logs
+
+Add `"shards": 4` to the body to split the run across four slices of the inventory, balanced by
+each host's measured duration in recent runs.
+
+## Add a worker
+
+Point a worker at the same database and it competes for queued runs:
+
+    YARDMASTER_ENCRYPTION_KEY=change-me ./yardmaster worker --db yardmaster.db --name laptop
+
+For more than one machine, use a PostgreSQL DSN as the `--db` value on every process.
+
+## Lock down the API
+
+Creating the first token turns on authentication; until then the API is open so a fresh install
+works immediately.
+
+    ./yardmaster token new --db yardmaster.db --name ci
+
+Create user accounts with roles for sign-in:
+
+    YARDMASTER_PASSWORD=secret ./yardmaster user new operator-jane --role operator --db yardmaster.db
+
+## Run with Docker
+
+    export YARDMASTER_ENCRYPTION_KEY=change-me
+    docker compose up --build
+
+This starts a server, a PostgreSQL database, and a worker. The server listens on port 8080; set
+`YARDMASTER_PORT` to change the host port.
