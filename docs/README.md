@@ -14,14 +14,14 @@ the app at `/ui/docs`.
 
 | Guide | What |
 |-------|------|
-| [Quickstart](quickstart.md) | Zero to a first run in a few minutes |
-| [Switching from AWX](switching-from-awx.md) | Import what you have, or set up from scratch |
-| [Concepts](concepts.md) | Runs, splits, pipelines, projects, templates, and the rest |
-| [Configuration](configuration.md) | Every command, flag, and environment variable |
-| [Features](features.md) | The full capability list |
-| [HTTP API](api.md) | Every endpoint the server exposes |
-| [Migration](migration.md) | Moving off AWX or Semaphore in detail |
-| [Comparison](comparison.md) | How Yardmaster compares to AWX and Semaphore |
+| [Quickstart](quickstart.md) | Zero to a first run in a few minutes.|
+| [Switching from AWX](switching-from-awx.md) | Import what you have, or set up from scratch.|
+| [Concepts](concepts.md) | Runs, splits, pipelines, projects, templates, and the rest.|
+| [Configuration](configuration.md) | Every command, flag, and environment variable.|
+| [Features](features.md) | The full capability list.|
+| [HTTP API](api.md) | Every endpoint the server exposes.|
+| [Migration](migration.md) | Moving off AWX or Semaphore in detail.|
+| [Comparison](comparison.md) | How Yardmaster compares to AWX and Semaphore.|
 
 For deployment, the repository root holds a `docker-compose.yml` for a server, a database, and a
 worker, and [deploy/helm](../deploy/helm) holds a Helm chart.

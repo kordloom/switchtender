@@ -16,14 +16,14 @@ on them.
 
 | Capability | Yardmaster | AWX | Semaphore |
 |------------|------------|-----|-----------|
-| Deployment | One binary, SQLite by default, PostgreSQL optional | Kubernetes plus PostgreSQL, Redis, and Receptor | One binary |
-| Run view | Structured host-by-task matrix with per-task drill-down, painted live over Server-Sent Events | Text log stream | Text log stream |
-| Job splitting | Shards balanced by each host's measured past duration, with retry of only the failed shards | Job slicing, round-robin | Not available |
-| Pipelines | Dependency graph with parallel branches, per-step retries, and typed `set_stats` outputs passed to dependents | Visual workflows | Limited task chaining |
-| Fleet memory | Flaky-host detection, outcome sparklines, per-host history, and task duration trends across runs | Not available | Not available |
-| Distributed workers | Store leasing, the same single binary adds capacity, with leases and a janitor | Receptor mesh | Runners, a paid tier |
-| Per-run provenance | Every run records the exact commit it executed | Partial | Partial |
-| Migration in | One command imports an AWX or Semaphore export | Not applicable | Not applicable |
+| Deployment | One binary, SQLite by default and PostgreSQL optional. | Kubernetes plus PostgreSQL, Redis, and Receptor. | One binary. |
+| Run view | A structured host-by-task matrix with per-task drill-down, painted live over Server-Sent Events. | A text log stream. | A text log stream. |
+| Job splitting | Shards balanced by each host's measured past duration, with only the failed shards retried. | Job slicing, round-robin. | Not available. |
+| Pipelines | A dependency graph with parallel branches, per-step retries, and typed set_stats outputs passed to dependents. | Visual workflows. | Limited task chaining. |
+| Fleet memory | Flaky-host detection, outcome sparklines, per-host history, and task duration trends across runs. | Not available. | Not available. |
+| Distributed workers | Store leasing, where the same single binary adds capacity, held together by leases and a janitor. | A Receptor mesh. | Runners, in a paid tier. |
+| Per-run provenance | Every run records the exact commit it executed. | Partial. | Partial. |
+| Migration in | One command imports an AWX or Semaphore export. | Not applicable. | Not applicable. |
 
 ## Where they are even
 

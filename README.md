@@ -143,10 +143,10 @@ the API, the UI, and everything you operate speak plain Ansible. No glossary req
 
 ## Roadmap
 
-- Pluggable runtimes beyond Ansible, starting with Terraform or OpenTofu
-- SSO and LDAP for enterprise sign-in
-- A seeded public demo and a hosted option
-- Broader notification channels and expanded onboarding docs
+- Pluggable runtimes beyond Ansible, starting with Terraform or OpenTofu.
+- SSO and LDAP for enterprise sign-in.
+- A seeded public demo and a hosted option.
+- Broader notification channels and expanded onboarding docs.
 
 ## Status
 

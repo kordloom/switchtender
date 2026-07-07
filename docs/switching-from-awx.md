@@ -23,18 +23,18 @@ just live behind a smaller, faster surface.
 
 | In AWX | In Yardmaster |
 |--------|---------------|
-| Organization | No direct equivalent; scope access with teams and grants instead |
-| Project (git) | Project |
-| Inventory | Stored inventory, or a dynamic inventory source that refreshes into one |
-| Job template | Template |
-| Survey | Template survey, the same typed questions |
-| Schedule | Schedule, cron instead of a recurrence rule |
-| Credential | Credential, secret sealed at rest |
-| Job | Run |
-| Job slicing | Split, balanced by measured host duration |
-| Workflow | Pipeline, ordered steps or a dependency graph |
-| Instance group | Worker queue |
-| Execution environment | A container image pinned on a project |
+| Organization | No direct equivalent; scope access with teams and grants instead.|
+| Project (git) | Project.|
+| Inventory | Stored inventory, or a dynamic inventory source that refreshes into one.|
+| Job template | Template.|
+| Survey | Template survey, the same typed questions.|
+| Schedule | Schedule, cron instead of a recurrence rule.|
+| Credential | Credential, secret sealed at rest.|
+| Job | Run.|
+| Job slicing | Split, balanced by measured host duration.|
+| Workflow | Pipeline, ordered steps or a dependency graph.|
+| Instance group | Worker queue.|
+| Execution environment | A container image pinned on a project.|
 
 ## Path A: import your AWX
 

@@ -80,8 +80,8 @@ All user subcommands take `--db`.
 
 Migrates from AWX or Semaphore. See [Migration](migration.md).
 
-- `import awx <export.json> [--apply]`
-- `import semaphore <export.json> [--apply]`
+- `import awx <export.json> [--apply]`.
+- `import semaphore <export.json> [--apply]`.
 
 Both take `--db` for the target database. Without `--apply` the command only reports what it would
 create.

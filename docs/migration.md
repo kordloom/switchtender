@@ -36,17 +36,17 @@ Semaphore works the same way with `import semaphore`.
 
 | Source | Becomes |
 |--------|---------|
-| AWX git project | Project |
-| AWX inventory | Stored inventory, rendered as INI from its hosts and groups |
-| AWX job template | Template, with job slicing becoming shard count |
-| AWX survey | Template survey, field for field, with the field types translated |
-| AWX schedule | Schedule, with the recurrence rule converted to cron |
-| AWX credential | Credential shell with its kind mapped, secret omitted |
-| Semaphore repository | Project |
-| Semaphore static inventory | Stored inventory |
-| Semaphore template | Template, with survey variables mapped |
-| Semaphore key | Credential shell |
-| Semaphore schedule | Schedule |
+| AWX git project | Project.|
+| AWX inventory | Stored inventory, rendered as INI from its hosts and groups.|
+| AWX job template | Template, with job slicing becoming shard count.|
+| AWX survey | Template survey, field for field, with the field types translated.|
+| AWX schedule | Schedule, with the recurrence rule converted to cron.|
+| AWX credential | Credential shell with its kind mapped, secret omitted.|
+| Semaphore repository | Project.|
+| Semaphore static inventory | Stored inventory.|
+| Semaphore template | Template, with survey variables mapped.|
+| Semaphore key | Credential shell.|
+| Semaphore schedule | Schedule.|
 
 ## Re-enter secrets
 
