@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/dcadolph/yardmaster/internal/credential"
-	"github.com/dcadolph/yardmaster/internal/inventory"
 	"github.com/dcadolph/yardmaster/internal/invsource"
 	"github.com/dcadolph/yardmaster/internal/project"
 	"github.com/dcadolph/yardmaster/internal/run"
@@ -101,20 +100,4 @@ func (d *Dispatcher) dumpSource(ctx context.Context, src *invsource.Source) ([]b
 	return d.dumper.Dump(ctx, sourcePath, env)
 }
 
-// ensureSourceInventory returns the backing inventory id for a new source, creating an empty
-// stored inventory the source will populate on first refresh.
-func (d *Dispatcher) ensureSourceInventory(ctx context.Context, name string) (string, error) {
-	if d.inventories == nil {
-		return "", inventory.ErrNotFound
-	}
-	inv := &inventory.Inventory{
-		ID: inventory.NewID(), Name: name + " (dynamic)", Content: "{}", CreatedAt: time.Now(),
-	}
-	if err := d.inventories.Save(ctx, inv); err != nil {
-		return "", err
-	}
-	return inv.ID, nil
-}
-
-// runInventoryID is unused today but reserved so a run can resolve a source directly later.
 var _ = run.WithInventory
