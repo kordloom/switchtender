@@ -87,7 +87,7 @@ func hostLine(h importHost) string {
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
-		line.WriteString(fmt.Sprintf(" %s=%v", k, h.Variables[k]))
+		fmt.Fprintf(&line, " %s=%v", k, h.Variables[k])
 	}
 	return line.String() + "\n"
 }

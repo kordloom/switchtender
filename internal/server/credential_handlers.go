@@ -136,7 +136,6 @@ func updateCredentialHandler(store credential.Store, sealer *credential.Sealer, 
 				return
 			}
 			sealed, err := sealer.Seal(secret)
-			secret = ""
 			if err != nil {
 				log.Error("server: seal credential: " + err.Error())
 				respondError(w, log, http.StatusInternalServerError, "could not update credential")
