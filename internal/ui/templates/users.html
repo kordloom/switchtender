@@ -13,12 +13,23 @@
 	</header>
 
 	<main class="content">
-		<a class="back" href="/ui/">Back to runs</a>
-		<h1>Users</h1>
-		<p class="muted">Viewers read, operators launch and stop work, admins manage everything.</p>
+		<div class="page-head">
+			<div class="page-head-text">
+				<h1>Users</h1>
+				<p class="muted">Viewers read, operators launch and stop work, admins manage everything.</p>
+			</div>
+			<button id="user-open" class="button primary">
+				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+				New user
+			</button>
+		</div>
 
-		<section class="panel">
-			<div class="panel-head"><h2>Add a user</h2></div>
+		<div id="user-modal" class="modal" hidden>
+			<div class="modal-card wide">
+				<div class="modal-head">
+					<h2>Add a user</h2>
+					<button type="button" class="modal-close" id="user-close" aria-label="Close">&times;</button>
+				</div>
 			<form id="user-form" class="launch-grid">
 				<label class="field-label">Username
 					<input id="user-name" class="input" autocomplete="off" required>
@@ -38,7 +49,8 @@
 					<span id="user-status" class="muted"></span>
 				</div>
 			</form>
-		</section>
+			</div>
+		</div>
 
 		<div id="status" class="muted">Loading users.</div>
 		<table class="runs" hidden>

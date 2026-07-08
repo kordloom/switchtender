@@ -13,12 +13,23 @@
 	</header>
 
 	<main class="content">
-		<a class="back" href="/ui/">Back to runs</a>
-		<h1>Projects</h1>
-		<p class="muted">Playbooks sourced from git. Every run records the commit it executed.</p>
+		<div class="page-head">
+			<div class="page-head-text">
+				<h1>Projects</h1>
+				<p class="muted">Playbooks sourced from git. Every run records the commit it executed.</p>
+			</div>
+			<button id="project-open" class="button primary">
+				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+				New project
+			</button>
+		</div>
 
-		<section class="panel">
-			<div class="panel-head"><h2>Add a project</h2></div>
+		<div id="project-modal" class="modal" hidden>
+			<div class="modal-card wide">
+				<div class="modal-head">
+					<h2>Add a project</h2>
+					<button type="button" class="modal-close" id="project-close" aria-label="Close">&times;</button>
+				</div>
 			<form id="project-form" class="launch-grid">
 				<label class="field-label">Name
 					<input id="project-name" class="input" placeholder="site" required>
@@ -46,7 +57,8 @@
 					<span id="project-status" class="muted"></span>
 				</div>
 			</form>
-		</section>
+			</div>
+		</div>
 
 		<div id="status" class="muted">Loading projects.</div>
 		<table class="runs" hidden>

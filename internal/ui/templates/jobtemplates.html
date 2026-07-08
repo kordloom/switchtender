@@ -13,12 +13,23 @@
 	</header>
 
 	<main class="content">
-		<a class="back" href="/ui/">Back to runs</a>
-		<h1>Templates</h1>
-		<p class="muted">Saved launch presets. One click runs the whole thing.</p>
+		<div class="page-head">
+			<div class="page-head-text">
+				<h1>Templates</h1>
+				<p class="muted">Saved launch presets. One click runs the whole thing.</p>
+			</div>
+			<button id="template-open" class="button primary">
+				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+				New template
+			</button>
+		</div>
 
-		<section class="panel">
-			<div class="panel-head"><h2>Add a template</h2></div>
+		<div id="template-modal" class="modal" hidden>
+			<div class="modal-card wide">
+				<div class="modal-head">
+					<h2>Add a template</h2>
+					<button type="button" class="modal-close" id="template-close" aria-label="Close">&times;</button>
+				</div>
 			<form id="template-form" class="launch-grid">
 				<label class="field-label">Name
 					<input id="tpl-name" class="input" placeholder="deploy production" required>
@@ -52,7 +63,8 @@
 					<span id="tpl-status" class="muted"></span>
 				</div>
 			</form>
-		</section>
+			</div>
+		</div>
 
 		<div id="status" class="muted">Loading templates.</div>
 		<table class="runs" hidden>

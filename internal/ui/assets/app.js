@@ -63,7 +63,7 @@ document.addEventListener("DOMContentLoaded", () => {
 	if (page === "overview") {
 		loadOverview();
 	} else if (page === "runs") {
-		wireLaunchModal();
+		wireModal("launch");
 		if (!isReadOnly()) wireLaunchForm();
 		loadRuns();
 	} else if (page === "detail") {
@@ -79,23 +79,29 @@ document.addEventListener("DOMContentLoaded", () => {
 	} else if (page === "login") {
 		loadLogin();
 	} else if (page === "credentials") {
+		wireModal("cred");
 		wireCredentialForm();
 		loadCredentials();
 	} else if (page === "projects") {
+		wireModal("project");
 		wireProjectForm();
 		loadProjects();
 	} else if (page === "jobtemplates") {
+		wireModal("template");
 		wireTemplateForm();
 		loadTemplates();
 	} else if (page === "users") {
+		wireModal("user");
 		wireUserForm();
 		loadUsers();
 	} else if (page === "workers") {
 		loadWorkers();
 	} else if (page === "inventories") {
+		wireModal("inventory");
 		wireInventoryForm();
 		loadInventories();
 	} else if (page === "sources") {
+		wireModal("source");
 		wireSourceForm();
 		loadSources();
 	}
@@ -355,18 +361,24 @@ function refreshRelTimes() {
 	}
 }
 
-// wireLaunchModal opens and closes the launch dialog on the runs page. The form inside posts through
-// wireLaunchForm, which navigates to the new run on success.
-function wireLaunchModal() {
-	const openBtn = document.getElementById("launch-open");
-	const modal = document.getElementById("launch-modal");
+// wireModal wires a create dialog: the open button shows it; the close button, a backdrop click, and
+// Escape hide it. name is the shared id prefix for the open, modal, and close elements.
+function wireModal(name) {
+	const openBtn = document.getElementById(name + "-open");
+	const modal = document.getElementById(name + "-modal");
 	if (!openBtn || !modal) return;
 	const close = () => { modal.hidden = true; };
 	openBtn.addEventListener("click", () => { modal.hidden = false; });
-	const closeBtn = document.getElementById("launch-close");
+	const closeBtn = document.getElementById(name + "-close");
 	if (closeBtn) closeBtn.addEventListener("click", close);
 	modal.addEventListener("click", (e) => { if (e.target === modal) close(); });
 	document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !modal.hidden) close(); });
+}
+
+// closeModal hides a create dialog by name, used after a successful save.
+function closeModal(name) {
+	const modal = document.getElementById(name + "-modal");
+	if (modal) modal.hidden = true;
 }
 
 // wireLaunchForm hooks the launch panel up to POST /runs and fills the credential picker.
@@ -439,6 +451,7 @@ function wireCredentialForm() {
 			document.getElementById("cred-name").value = "";
 			document.getElementById("cred-secret").value = "";
 			status.textContent = "Saved.";
+			closeModal("cred");
 			document.getElementById("credentials").innerHTML = "";
 			loadCredentials();
 		} catch (err) {
@@ -523,6 +536,7 @@ function wireProjectForm() {
 				pull_credential_id: document.getElementById("project-pull-credential").value,
 			});
 			status.textContent = "Saved.";
+			closeModal("project");
 			document.getElementById("projects").innerHTML = "";
 			loadProjects();
 		} catch (err) {
@@ -599,6 +613,7 @@ function wireTemplateForm() {
 		try {
 			await postAction("/templates", payload);
 			status.textContent = "Saved.";
+			closeModal("template");
 			document.getElementById("templates").innerHTML = "";
 			loadTemplates();
 		} catch (err) {
@@ -750,6 +765,7 @@ function wireInventoryForm() {
 			document.getElementById("inv-name").value = "";
 			document.getElementById("inv-content").value = "";
 			status.textContent = "Saved.";
+			closeModal("inventory");
 			document.getElementById("inventories").innerHTML = "";
 			loadInventories();
 		} catch (err) {
@@ -798,6 +814,7 @@ function wireSourceForm() {
 				project_id: document.getElementById("src-project").value,
 			});
 			status.textContent = "Saved.";
+			closeModal("source");
 			document.getElementById("sources").innerHTML = "";
 			loadSources();
 		} catch (err) {
@@ -1489,6 +1506,7 @@ function wireUserForm() {
 			document.getElementById("user-name").value = "";
 			document.getElementById("user-password").value = "";
 			status.textContent = "Saved.";
+			closeModal("user");
 			document.getElementById("users").innerHTML = "";
 			loadUsers();
 		} catch (err) {

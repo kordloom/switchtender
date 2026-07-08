@@ -13,12 +13,23 @@
 	</header>
 
 	<main class="content">
-		<a class="back" href="/ui/">Back to runs</a>
-		<h1>Inventory sources</h1>
-		<p class="muted">A source runs an inventory plugin or script and refreshes the hosts into a stored inventory you can run against.</p>
+		<div class="page-head">
+			<div class="page-head-text">
+				<h1>Inventory sources</h1>
+				<p class="muted">A source runs an inventory plugin or script and refreshes the hosts into a stored inventory you can run against.</p>
+			</div>
+			<button id="source-open" class="button primary">
+				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+				New source
+			</button>
+		</div>
 
-		<section class="panel">
-			<div class="panel-head"><h2>Add a source</h2></div>
+		<div id="source-modal" class="modal" hidden>
+			<div class="modal-card wide">
+				<div class="modal-head">
+					<h2>Add a source</h2>
+					<button type="button" class="modal-close" id="source-close" aria-label="Close">&times;</button>
+				</div>
 			<form id="source-form" class="launch-grid">
 				<label class="field-label">Name
 					<input id="src-name" class="input" placeholder="aws production" required>
@@ -37,7 +48,8 @@
 					<span id="src-status" class="muted"></span>
 				</div>
 			</form>
-		</section>
+			</div>
+		</div>
 
 		<div id="status" class="muted">Loading sources.</div>
 		<table class="runs" hidden>
