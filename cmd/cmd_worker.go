@@ -45,6 +45,7 @@ func init() {
 		"Queue this worker serves. Repeatable. Without any, it serves the default pool.")
 	workerCmd.Flags().BoolVar(&workerAllowContainerEE, "allow-container-ee", false,
 		"Allow runs whose project pins a container image to execute inside that image. Needs Docker.")
+	registerContainerFlags(workerCmd)
 }
 
 // runWorker leases and executes runs until interrupted.
@@ -79,7 +80,7 @@ func runWorker(cmd *cobra.Command, _ []string) error {
 	if len(workerQueues) > 0 {
 		opts = append(opts, dispatch.WithQueues(workerQueues))
 	}
-	disp := dispatch.New(store, roundhouse.NewSelectiveRunner(workerAllowContainerEE), log, opts...)
+	disp := dispatch.New(store, roundhouse.NewSelectiveRunner(workerAllowContainerEE, containerLimitsFromFlags()), log, opts...)
 	defer disp.Close()
 
 	log.Info("yardmaster worker started",

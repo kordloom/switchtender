@@ -11,8 +11,47 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"sync"
 )
+
+// ContainerLimits caps the resources and network a containerized run may use, so a foot-gun or
+// malicious project cannot exhaust the host. An empty string or non-positive value omits that one
+// cap.
+type ContainerLimits struct {
+	// Memory is the docker --memory value, for example "2g".
+	Memory string
+	// CPUs is the docker --cpus value, for example "2".
+	CPUs string
+	// PidsLimit is the docker --pids-limit value, capping the container's process table.
+	PidsLimit int
+	// Network is the docker --network value, for example "bridge" or "none".
+	Network string
+}
+
+// DefaultContainerLimits returns bounded defaults that keep normal runs working while stopping a
+// single container from exhausting host memory, CPU, or process tables.
+func DefaultContainerLimits() ContainerLimits {
+	return ContainerLimits{Memory: "2g", CPUs: "2", PidsLimit: 2048, Network: "bridge"}
+}
+
+// args returns the docker run flags for the configured limits, omitting any that are unset.
+func (l ContainerLimits) args() []string {
+	var a []string
+	if l.Memory != "" {
+		a = append(a, "--memory", l.Memory)
+	}
+	if l.CPUs != "" {
+		a = append(a, "--cpus", l.CPUs)
+	}
+	if l.PidsLimit > 0 {
+		a = append(a, "--pids-limit", strconv.Itoa(l.PidsLimit))
+	}
+	if l.Network != "" {
+		a = append(a, "--network", l.Network)
+	}
+	return a
+}
 
 // Spec describes a single playbook execution.
 type Spec struct {
@@ -149,12 +188,13 @@ type selectRunner struct {
 }
 
 // NewSelectiveRunner returns a Runner that executes on the host by default and inside a container
-// when a Spec names an image. Container execution is refused unless allowContainer is set.
-func NewSelectiveRunner(allowContainer bool, opts ...Option) Runner {
+// when a Spec names an image. Container execution is refused unless allowContainer is set, and every
+// container run is bounded by limits.
+func NewSelectiveRunner(allowContainer bool, limits ContainerLimits, opts ...Option) Runner {
 	host := newAnsibleRunner(opts...)
 	return &selectRunner{
 		ansibleRunner:  host,
-		container:      newContainerRunner(host.baseEnv, &host.plugin),
+		container:      newContainerRunner(host.baseEnv, &host.plugin, limits),
 		allowContainer: allowContainer,
 	}
 }

@@ -100,6 +100,40 @@ var smtpUsername string
 // notifyOn holds the value of the --notify-on flag: failure or finish.
 var notifyOn string
 
+// Container execution limit flags, shared by serve and worker so both executors cap the same way.
+var (
+	// containerMemory holds the --container-memory flag, the docker --memory cap.
+	containerMemory string
+	// containerCPUs holds the --container-cpus flag, the docker --cpus cap.
+	containerCPUs string
+	// containerPidsLimit holds the --container-pids-limit flag, the docker --pids-limit cap.
+	containerPidsLimit int
+	// containerNetwork holds the --container-network flag, the docker --network mode.
+	containerNetwork string
+)
+
+// registerContainerFlags adds the container resource and network flags to cmd, defaulting to the
+// bounded ContainerLimits so runs stay capped even when an operator sets nothing.
+func registerContainerFlags(cmd *cobra.Command) {
+	d := roundhouse.DefaultContainerLimits()
+	cmd.Flags().StringVar(&containerMemory, "container-memory", d.Memory,
+		"Memory cap for containerized runs, as docker --memory. Empty removes the cap.")
+	cmd.Flags().StringVar(&containerCPUs, "container-cpus", d.CPUs,
+		"CPU cap for containerized runs, as docker --cpus. Empty removes the cap.")
+	cmd.Flags().IntVar(&containerPidsLimit, "container-pids-limit", d.PidsLimit,
+		"Process cap for containerized runs, as docker --pids-limit. Zero removes the cap.")
+	cmd.Flags().StringVar(&containerNetwork, "container-network", d.Network,
+		"Network mode for containerized runs, as docker --network, for example bridge or none.")
+}
+
+// containerLimitsFromFlags builds the ContainerLimits from the shared container flag values.
+func containerLimitsFromFlags() roundhouse.ContainerLimits {
+	return roundhouse.ContainerLimits{
+		Memory: containerMemory, CPUs: containerCPUs,
+		PidsLimit: containerPidsLimit, Network: containerNetwork,
+	}
+}
+
 // serveCmd runs the Yardmaster HTTP server (the dispatcher).
 var serveCmd = &cobra.Command{
 	Use:   "serve",
@@ -118,6 +152,7 @@ func init() {
 		"URL that receives a JSON notification when a run finishes. Repeatable.")
 	serveCmd.Flags().BoolVar(&serveAllowContainerEE, "allow-container-ee", false,
 		"Allow runs whose project pins a container image to execute inside that image. Needs Docker.")
+	registerContainerFlags(serveCmd)
 	serveCmd.Flags().BoolVar(&serveStrictGrants, "strict-grants", false,
 		"Deny non-admins access to an object that has no grants, instead of deferring to the role.")
 	serveCmd.Flags().BoolVar(&serveReadOnly, "read-only", false,
@@ -260,7 +295,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	sealer := newSealerFromEnv(log)
 
 	hub := live.NewHub()
-	runner := roundhouse.NewSelectiveRunner(serveAllowContainerEE)
+	runner := roundhouse.NewSelectiveRunner(serveAllowContainerEE, containerLimitsFromFlags())
 	syncer, err := project.NewSyncer(projectCacheDir())
 	if err != nil {
 		return fmt.Errorf("project cache: %w", err)

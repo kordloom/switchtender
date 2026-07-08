@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -22,12 +23,14 @@ type containerRunner struct {
 	baseEnv []string
 	// plugin materializes the callback plugin on first use, shared into the container read-only.
 	plugin *pluginCache
+	// limits caps the memory, CPU, process count, and network of every container run.
+	limits ContainerLimits
 }
 
 // newContainerRunner builds a container runner sharing the host runner's plugin cache and base
-// environment.
-func newContainerRunner(baseEnv []string, plugin *pluginCache) *containerRunner {
-	return &containerRunner{docker: "docker", baseEnv: baseEnv, plugin: plugin}
+// environment, bounded by limits.
+func newContainerRunner(baseEnv []string, plugin *pluginCache, limits ContainerLimits) *containerRunner {
+	return &containerRunner{docker: "docker", baseEnv: baseEnv, plugin: plugin, limits: limits}
 }
 
 // Run executes the playbook inside spec.Image, mounting the checkout, inventory, credential files,
@@ -37,8 +40,8 @@ func (c *containerRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Re
 	if spec.Playbook == "" {
 		return Result{ExitCode: -1}, ErrNoPlaybook
 	}
-	if spec.Image == "" {
-		return Result{ExitCode: -1}, ErrNoImage
+	if err := validateImage(spec.Image); err != nil {
+		return Result{ExitCode: -1}, err
 	}
 
 	if spec.RegistryUsername != "" {
@@ -95,28 +98,38 @@ func (c *containerRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Re
 // an env file for variables and secrets, the image, and the ansible-playbook command.
 func (c *containerRunner) dockerArgs(spec Spec, name, envFile string) ([]string, error) {
 	args := []string{"run", "--rm", "--name", name}
+	args = append(args, c.limits.args()...)
 	if spec.Dir != "" {
 		args = append(args, "-w", spec.Dir)
 	}
 	args = append(args, "--env-file", envFile)
 
 	mounts := newMountSet()
-	mounts.add(spec.Dir, true)
-	mounts.add(filepath.Dir(spec.Playbook), true)
-	mounts.add(spec.Inventory, true)
-	mounts.add(spec.PrivateKeyPath, true)
-	mounts.add(spec.VaultPasswordFile, true)
+	var addErr error
+	addMount := func(path string, ro bool) {
+		if addErr == nil {
+			addErr = mounts.add(path, ro)
+		}
+	}
+	addMount(spec.Dir, true)
+	addMount(filepath.Dir(spec.Playbook), true)
+	addMount(spec.Inventory, true)
+	addMount(spec.PrivateKeyPath, true)
+	addMount(spec.VaultPasswordFile, true)
 	for _, f := range spec.ExtraVarsFiles {
-		mounts.add(f, true)
+		addMount(f, true)
 	}
 	if spec.EventsPath != "" {
 		dir, err := c.plugin.ensure()
 		if err != nil {
 			return nil, err
 		}
-		mounts.add(dir, true)
+		addMount(dir, true)
 		// The plugin writes NDJSON into the sidecar, which the host tails, so it mounts writable.
-		mounts.add(spec.EventsPath, false)
+		addMount(spec.EventsPath, false)
+	}
+	if addErr != nil {
+		return nil, addErr
 	}
 	args = append(args, mounts.args()...)
 
@@ -188,10 +201,14 @@ func newMountSet() *mountSet {
 }
 
 // add records a bind mount for path at the same path inside the container, read-only when ro is
-// set. Empty and duplicate paths are ignored.
-func (m *mountSet) add(path string, ro bool) {
+// set. Empty and duplicate paths are ignored. It returns ErrForbiddenMount when the path would
+// expose a sensitive host location.
+func (m *mountSet) add(path string, ro bool) error {
 	if path == "" || m.seen[path] {
-		return
+		return nil
+	}
+	if err := checkMountPath(path); err != nil {
+		return err
 	}
 	m.seen[path] = true
 	spec := path + ":" + path
@@ -199,6 +216,50 @@ func (m *mountSet) add(path string, ro bool) {
 		spec += ":ro"
 	}
 	m.specs = append(m.specs, "-v", spec)
+	return nil
+}
+
+// sensitiveMountRoots are host directories that must never be bind mounted whole into a container.
+// Subpaths stay allowed, since project checkouts and temp files legitimately live under some of
+// these, but mounting the directory itself would hand the container the host's configuration,
+// secrets, or entire filesystem.
+var sensitiveMountRoots = map[string]bool{
+	"/": true, "/etc": true, "/var": true, "/usr": true, "/bin": true,
+	"/sbin": true, "/lib": true, "/lib64": true, "/boot": true, "/proc": true,
+	"/sys": true, "/dev": true, "/root": true, "/home": true, "/Users": true,
+}
+
+// checkMountPath rejects a host path that would expose a sensitive root directory or the docker
+// socket to the container. An empty path is not a mount and passes.
+func checkMountPath(path string) error {
+	if path == "" {
+		return nil
+	}
+	clean := filepath.Clean(path)
+	if sensitiveMountRoots[clean] {
+		return fmt.Errorf("%w: %s", ErrForbiddenMount, clean)
+	}
+	if filepath.Base(clean) == "docker.sock" {
+		return fmt.Errorf("%w: %s", ErrForbiddenMount, clean)
+	}
+	return nil
+}
+
+// imageRefPattern matches a conservative container image reference: it must start with an
+// alphanumeric character, so the container CLI cannot read it as a flag, and hold only characters
+// that appear in registries, repositories, tags, and digests.
+var imageRefPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/@-]*$`)
+
+// validateImage reports whether image is a well-formed, safe container reference. It returns
+// ErrNoImage when empty and ErrBadImage when malformed.
+func validateImage(image string) error {
+	if image == "" {
+		return ErrNoImage
+	}
+	if len(image) > 512 || strings.Contains(image, "..") || !imageRefPattern.MatchString(image) {
+		return fmt.Errorf("%w: %q", ErrBadImage, image)
+	}
+	return nil
 }
 
 // args returns the accumulated docker -v arguments.
