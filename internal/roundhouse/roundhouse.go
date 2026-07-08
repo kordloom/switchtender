@@ -230,13 +230,17 @@ func (a *ansibleRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Resu
 		env = append(env, callbackEnv(dir, spec.EventsPath)...)
 	}
 
-	cmd := exec.CommandContext(ctx, a.binary, playbookArgs(spec)...)
+	pargs, err := playbookArgs(spec)
+	if err != nil {
+		return Result{ExitCode: -1}, fmt.Errorf("%w: %w", ErrLaunch, err)
+	}
+	cmd := exec.CommandContext(ctx, a.binary, pargs...)
 	cmd.Stdout = out
 	cmd.Stderr = out
 	cmd.Dir = spec.Dir
 	cmd.Env = env
 
-	err := cmd.Run()
+	err = cmd.Run()
 	if err == nil {
 		return Result{ExitCode: 0}, nil
 	}
@@ -265,8 +269,10 @@ func callbackEnv(pluginDir, eventsPath string) []string {
 }
 
 // playbookArgs builds the ansible-playbook argument list for spec, shared by the host and container
-// runners so both invoke ansible-playbook identically.
-func playbookArgs(spec Spec) []string {
+// runners so both invoke ansible-playbook identically. It errors when the extra vars cannot be
+// encoded, so a run fails loudly rather than silently executing without a variable that may gate a
+// destructive task.
+func playbookArgs(spec Spec) ([]string, error) {
 	args := make([]string, 0, 8)
 	if spec.Inventory != "" {
 		args = append(args, "-i", spec.Inventory)
@@ -275,9 +281,11 @@ func playbookArgs(spec Spec) []string {
 		args = append(args, "--limit", spec.Limit)
 	}
 	if len(spec.ExtraVars) > 0 {
-		if data, err := json.Marshal(spec.ExtraVars); err == nil {
-			args = append(args, "--extra-vars", string(data))
+		data, err := json.Marshal(spec.ExtraVars)
+		if err != nil {
+			return nil, fmt.Errorf("marshal extra vars: %w", err)
 		}
+		args = append(args, "--extra-vars", string(data))
 	}
 	for _, file := range spec.ExtraVarsFiles {
 		args = append(args, "--extra-vars", "@"+file)
@@ -288,5 +296,5 @@ func playbookArgs(spec Spec) []string {
 	if spec.VaultPasswordFile != "" {
 		args = append(args, "--vault-password-file", spec.VaultPasswordFile)
 	}
-	return append(args, spec.Playbook)
+	return append(args, spec.Playbook), nil
 }

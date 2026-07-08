@@ -83,13 +83,19 @@ func TestAnsibleRunnerCanceledContext(t *testing.T) {
 
 func TestAnsibleRunnerArgs(t *testing.T) {
 	t.Parallel()
-	got := playbookArgs(Spec{Playbook: "site.yml", Inventory: "hosts.ini"})
+	got, err := playbookArgs(Spec{Playbook: "site.yml", Inventory: "hosts.ini"})
+	if err != nil {
+		t.Fatalf("playbookArgs() error = %v", err)
+	}
 	want := []string{"-i", "hosts.ini", "site.yml"}
 	if strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Errorf("args = %v, want %v", got, want)
 	}
 
-	gotLimit := playbookArgs(Spec{Playbook: "site.yml", Inventory: "hosts.ini", Limit: "web01,web02"})
+	gotLimit, err := playbookArgs(Spec{Playbook: "site.yml", Inventory: "hosts.ini", Limit: "web01,web02"})
+	if err != nil {
+		t.Fatalf("playbookArgs() error = %v", err)
+	}
 	wantLimit := []string{"-i", "hosts.ini", "--limit", "web01,web02", "site.yml"}
 	if strings.Join(gotLimit, " ") != strings.Join(wantLimit, " ") {
 		t.Errorf("args with limit = %v, want %v", gotLimit, wantLimit)
@@ -98,9 +104,22 @@ func TestAnsibleRunnerArgs(t *testing.T) {
 
 func TestArgsExtraVarsJSON(t *testing.T) {
 	t.Parallel()
-	args := playbookArgs(Spec{Playbook: "p.yml", ExtraVars: map[string]any{"version": "1.2.3"}})
+	args, err := playbookArgs(Spec{Playbook: "p.yml", ExtraVars: map[string]any{"version": "1.2.3"}})
+	if err != nil {
+		t.Fatalf("playbookArgs() error = %v", err)
+	}
 	want := []string{"--extra-vars", `{"version":"1.2.3"}`, "p.yml"}
 	if diff := cmp.Diff(want, args); diff != "" {
 		t.Errorf("args mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestArgsExtraVarsMarshalError(t *testing.T) {
+	t.Parallel()
+	// A channel cannot be JSON encoded. Building the args must fail rather than silently run the
+	// playbook without the extra vars, which could drop a variable gating a destructive task.
+	_, err := playbookArgs(Spec{Playbook: "p.yml", ExtraVars: map[string]any{"bad": make(chan int)}})
+	if err == nil {
+		t.Fatal("playbookArgs() with unmarshalable extra vars = nil error, want failure")
 	}
 }

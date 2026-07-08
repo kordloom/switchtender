@@ -133,8 +133,12 @@ func (c *containerRunner) dockerArgs(spec Spec, name, envFile string) ([]string,
 	}
 	args = append(args, mounts.args()...)
 
+	pargs, err := playbookArgs(spec)
+	if err != nil {
+		return nil, err
+	}
 	args = append(args, spec.Image, "ansible-playbook")
-	return append(args, playbookArgs(spec)...), nil
+	return append(args, pargs...), nil
 }
 
 // writeEnvFile writes the run's environment, plus the callback variables, to a temp file passed as
