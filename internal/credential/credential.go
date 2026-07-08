@@ -93,6 +93,9 @@ type Credential struct {
 type Store interface {
 	// Save inserts or replaces the credential identified by c.ID.
 	Save(ctx context.Context, c *Credential) error
+	// Update changes an existing credential's name, kind, and sealed secret, preserving its creation
+	// time, or returns ErrNotFound.
+	Update(ctx context.Context, c *Credential) error
 	// Get returns the credential with the given id, or ErrNotFound.
 	Get(ctx context.Context, id string) (*Credential, error)
 	// List returns all credentials ordered by creation time, oldest first.

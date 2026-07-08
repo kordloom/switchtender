@@ -34,6 +34,25 @@ ON CONFLICT(id) DO UPDATE SET
 	return nil
 }
 
+// Update changes an existing credential's name, kind, and sealed secret, or returns
+// credential.ErrNotFound.
+func (s *credentialStore) Update(ctx context.Context, c *credential.Credential) error {
+	res, err := s.db.ExecContext(ctx,
+		"UPDATE credentials SET name=$1, kind=$2, secret=$3 WHERE id=$4",
+		c.Name, string(c.Kind), c.Secret, c.ID)
+	if err != nil {
+		return fmt.Errorf("update credential: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("update credential: %w", err)
+	}
+	if n == 0 {
+		return credential.ErrNotFound
+	}
+	return nil
+}
+
 // Get returns the credential with the given id, or credential.ErrNotFound.
 func (s *credentialStore) Get(ctx context.Context, id string) (*credential.Credential, error) {
 	const q = "SELECT " + credentialColumns + " FROM credentials WHERE id=$1"

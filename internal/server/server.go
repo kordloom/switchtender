@@ -256,6 +256,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /users", listUsersHandler(s.users, s.log))
 	mux.Handle("DELETE /users/{id}", deleteUserHandler(s.users, s.log))
 	mux.Handle("POST /credentials", createCredentialHandler(s.credentials, s.sealer, s.log))
+	mux.Handle("PUT /credentials/{id}", updateCredentialHandler(s.credentials, s.sealer, s.log))
 	mux.Handle("GET /credentials", listCredentialsHandler(s.credentials, s.log))
 	mux.Handle("DELETE /credentials/{id}", deleteCredentialHandler(s.credentials, s.log))
 	mux.Handle("POST /projects", createProjectHandler(s.projects, s.log))

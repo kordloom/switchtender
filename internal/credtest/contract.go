@@ -16,6 +16,39 @@ func Contract(t *testing.T, newStore func() credential.Store) {
 	t.Helper()
 	t.Run("lifecycle", func(t *testing.T) { testLifecycle(t, newStore()) })
 	t.Run("list ordered", func(t *testing.T) { testList(t, newStore()) })
+	t.Run("update", func(t *testing.T) { testUpdate(t, newStore()) })
+}
+
+// testUpdate verifies an update changes the name, kind, and sealed secret, preserves the creation
+// time, and reports ErrNotFound for an unknown id.
+func testUpdate(t *testing.T, store credential.Store) {
+	ctx := context.Background()
+	created := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	if err := store.Save(ctx, &credential.Credential{
+		ID: "cred_1", Name: "old", Kind: credential.KindSSHKey, Secret: "sealed-old", CreatedAt: created,
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	if err := store.Update(ctx, &credential.Credential{
+		ID: "cred_1", Name: "new", Kind: credential.KindVaultPassword, Secret: "sealed-new",
+	}); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	got, err := store.Get(ctx, "cred_1")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.Name != "new" || got.Kind != credential.KindVaultPassword || got.Secret != "sealed-new" {
+		t.Errorf("Get() = %+v, want the updated credential", got)
+	}
+	if !got.CreatedAt.Equal(created) {
+		t.Errorf("CreatedAt = %v, want preserved %v", got.CreatedAt, created)
+	}
+
+	if err := store.Update(ctx, &credential.Credential{ID: "ghost", Name: "x", Kind: credential.KindSSHKey, Secret: "s"}); !errors.Is(err, credential.ErrNotFound) {
+		t.Errorf("Update(ghost) error = %v, want ErrNotFound", err)
+	}
 }
 
 // testLifecycle verifies a credential round trips with its sealed secret, updates, and deletes.

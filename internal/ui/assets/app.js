@@ -455,21 +455,59 @@ async function fillCredentialPicker() {
 	} catch (_) { /* credentials disabled or unauthorized; picker stays empty */ }
 }
 
-// wireCredentialForm hooks the add credential form up to POST /credentials.
+// openCredentialEdit fills the credential dialog with an existing record and switches it to edit
+// mode. The secret field becomes optional, so a blank keeps the stored secret; the list never
+// returns secret material, so the field always starts empty.
+function openCredentialEdit(c) {
+	const form = document.getElementById("cred-form");
+	form.dataset.editId = c.id;
+	document.getElementById("cred-name").value = c.name;
+	document.getElementById("cred-kind").value = c.kind;
+	const sec = document.getElementById("cred-secret");
+	sec.value = "";
+	sec.required = false;
+	sec.placeholder = "Leave blank to keep the current secret";
+	document.getElementById("cred-status").textContent = "";
+	setModalTitle("cred", "Edit credential");
+	document.getElementById("cred-modal").hidden = false;
+}
+
+// wireCredentialForm hooks the credential dialog up to POST /credentials for a new record and PUT
+// /credentials/{id} when editing. The New button resets the dialog to add mode, where a secret is
+// required; on edit the secret is only sent when changed.
 function wireCredentialForm() {
 	const form = document.getElementById("cred-form");
+	const secPlaceholder = document.getElementById("cred-secret").placeholder;
+	const resetToCreate = () => {
+		delete form.dataset.editId;
+		document.getElementById("cred-name").value = "";
+		const sec = document.getElementById("cred-secret");
+		sec.value = "";
+		sec.required = true;
+		sec.placeholder = secPlaceholder;
+		document.getElementById("cred-status").textContent = "";
+		setModalTitle("cred", "Add a credential");
+	};
+	const openBtn = document.getElementById("cred-open");
+	if (openBtn) openBtn.addEventListener("click", resetToCreate);
+
 	form.addEventListener("submit", async (e) => {
 		e.preventDefault();
 		const status = document.getElementById("cred-status");
+		const editId = form.dataset.editId;
 		const payload = {
 			name: document.getElementById("cred-name").value.trim(),
 			kind: document.getElementById("cred-kind").value,
-			secret: document.getElementById("cred-secret").value,
 		};
+		const secret = document.getElementById("cred-secret").value;
+		if (secret) payload.secret = secret;
 		try {
-			await postAction("/credentials", payload);
-			document.getElementById("cred-name").value = "";
-			document.getElementById("cred-secret").value = "";
+			if (editId) {
+				await postAction("/credentials/" + editId, payload, "PUT");
+			} else {
+				await postAction("/credentials", payload);
+			}
+			resetToCreate();
 			status.textContent = "Saved.";
 			closeModal("cred");
 			document.getElementById("credentials").innerHTML = "";
@@ -512,6 +550,8 @@ async function loadCredentials() {
 					setStatus("Delete failed: " + err.message);
 				}
 			});
+			actions.appendChild(editButton(() => openCredentialEdit(c)));
+			actions.appendChild(document.createTextNode(" "));
 			actions.appendChild(del);
 			tr.appendChild(actions);
 			tbody.appendChild(tr);

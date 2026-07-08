@@ -28,6 +28,21 @@ func (m *memStore) Save(_ context.Context, c *Credential) error {
 	return nil
 }
 
+// Update changes an existing credential's name, kind, and sealed secret, preserving its creation
+// time, or returns ErrNotFound.
+func (m *memStore) Update(_ context.Context, c *Credential) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	existing, ok := m.creds[c.ID]
+	if !ok {
+		return ErrNotFound
+	}
+	existing.Name = c.Name
+	existing.Kind = c.Kind
+	existing.Secret = c.Secret
+	return nil
+}
+
 // Get returns the credential with the given id, or ErrNotFound.
 func (m *memStore) Get(_ context.Context, id string) (*Credential, error) {
 	m.mu.RLock()
