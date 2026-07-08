@@ -28,6 +28,20 @@ func (m *memStore) Save(_ context.Context, i *Inventory) error {
 	return nil
 }
 
+// Update changes an existing inventory's name and content, preserving its creation time, or
+// returns ErrNotFound.
+func (m *memStore) Update(_ context.Context, i *Inventory) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	existing, ok := m.inventories[i.ID]
+	if !ok {
+		return ErrNotFound
+	}
+	existing.Name = i.Name
+	existing.Content = i.Content
+	return nil
+}
+
 // Get returns the inventory with the given id, or ErrNotFound.
 func (m *memStore) Get(_ context.Context, id string) (*Inventory, error) {
 	m.mu.RLock()

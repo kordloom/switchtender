@@ -381,6 +381,26 @@ function closeModal(name) {
 	if (modal) modal.hidden = true;
 }
 
+// setModalTitle rewrites a dialog's heading, used to switch a create dialog between add and edit.
+function setModalTitle(name, text) {
+	const h = document.querySelector("#" + name + "-modal .modal-head h2");
+	if (h) h.textContent = text;
+}
+
+// editButton builds an inline Edit action for a table row. Its click does not bubble, so the row's
+// inspect drawer stays closed.
+function editButton(onClick) {
+	const b = document.createElement("button");
+	b.className = "button";
+	b.textContent = "Edit";
+	b.addEventListener("click", (e) => {
+		e.preventDefault();
+		e.stopPropagation();
+		onClick();
+	});
+	return b;
+}
+
 // wireLaunchForm hooks the launch panel up to POST /runs and fills the credential picker.
 function wireLaunchForm() {
 	const form = document.getElementById("launch-form");
@@ -763,18 +783,47 @@ function deleteCell(path, label, tr) {
 	return cell;
 }
 
-// wireInventoryForm hooks the add inventory form up to POST /inventories.
+// openInventoryEdit fills the inventory dialog with an existing record and switches it to edit mode
+// so the next save issues a PUT rather than a create.
+function openInventoryEdit(inv) {
+	const form = document.getElementById("inventory-form");
+	form.dataset.editId = inv.id;
+	document.getElementById("inv-name").value = inv.name;
+	document.getElementById("inv-content").value = inv.content || "";
+	document.getElementById("inv-status").textContent = "";
+	setModalTitle("inventory", "Edit inventory");
+	document.getElementById("inventory-modal").hidden = false;
+}
+
+// wireInventoryForm hooks the inventory dialog up to POST /inventories for a new record and PUT
+// /inventories/{id} when editing. The New button resets the dialog to add mode.
 function wireInventoryForm() {
-	document.getElementById("inventory-form").addEventListener("submit", async (e) => {
+	const form = document.getElementById("inventory-form");
+	const resetToCreate = () => {
+		delete form.dataset.editId;
+		document.getElementById("inv-name").value = "";
+		document.getElementById("inv-content").value = "";
+		document.getElementById("inv-status").textContent = "";
+		setModalTitle("inventory", "Add an inventory");
+	};
+	const openBtn = document.getElementById("inventory-open");
+	if (openBtn) openBtn.addEventListener("click", resetToCreate);
+
+	form.addEventListener("submit", async (e) => {
 		e.preventDefault();
 		const status = document.getElementById("inv-status");
+		const editId = form.dataset.editId;
+		const payload = {
+			name: document.getElementById("inv-name").value.trim(),
+			content: document.getElementById("inv-content").value,
+		};
 		try {
-			await postAction("/inventories", {
-				name: document.getElementById("inv-name").value.trim(),
-				content: document.getElementById("inv-content").value,
-			});
-			document.getElementById("inv-name").value = "";
-			document.getElementById("inv-content").value = "";
+			if (editId) {
+				await postAction("/inventories/" + editId, payload, "PUT");
+			} else {
+				await postAction("/inventories", payload);
+			}
+			resetToCreate();
 			status.textContent = "Saved.";
 			closeModal("inventory");
 			document.getElementById("inventories").innerHTML = "";
@@ -799,7 +848,9 @@ async function loadInventories() {
 			const tr = document.createElement("tr");
 			tr.appendChild(td(i.name));
 			tr.appendChild(tdTime(i.created_at));
-			tr.appendChild(deleteCell("/inventories/" + i.id, "inventory " + i.name, tr));
+			const actions = deleteCell("/inventories/" + i.id, "inventory " + i.name, tr);
+			actions.insertBefore(editButton(() => openInventoryEdit(i)), actions.firstChild);
+			tr.appendChild(actions);
 			inspectable(tr, i.name, [
 				{ label: "Created", value: fmtTime(i.created_at) },
 				{ label: "ID", value: i.id },
@@ -1436,8 +1487,8 @@ async function loadDetail(runId) {
 }
 
 // postAction sends a POST to the API and returns the parsed JSON body, throwing on an error reply.
-async function postAction(path, payload) {
-	const opts = { method: "POST", headers: authHeaders() };
+async function postAction(path, payload, method) {
+	const opts = { method: method || "POST", headers: authHeaders() };
 	if (payload !== undefined) {
 		opts.headers["Content-Type"] = "application/json";
 		opts.body = JSON.stringify(payload);

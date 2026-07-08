@@ -32,6 +32,23 @@ ON CONFLICT(id) DO UPDATE SET
 	return nil
 }
 
+// Update changes an existing inventory's name and content, or returns inventory.ErrNotFound.
+func (s *inventoryStore) Update(ctx context.Context, i *inventory.Inventory) error {
+	res, err := s.db.ExecContext(ctx,
+		"UPDATE inventories SET name=?, content=? WHERE id=?", i.Name, i.Content, i.ID)
+	if err != nil {
+		return fmt.Errorf("update inventory: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("update inventory: %w", err)
+	}
+	if n == 0 {
+		return inventory.ErrNotFound
+	}
+	return nil
+}
+
 // Get returns the inventory with the given id, or inventory.ErrNotFound.
 func (s *inventoryStore) Get(ctx context.Context, id string) (*inventory.Inventory, error) {
 	const q = "SELECT " + inventoryColumns + " FROM inventories WHERE id=?"

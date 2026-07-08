@@ -55,6 +55,44 @@ func createInventoryHandler(store inventory.Store, log *zap.Logger) http.Handler
 	}
 }
 
+// updateInventoryHandler changes an existing inventory's name and content, keeping its id and
+// creation time.
+func updateInventoryHandler(store inventory.Store, log *zap.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if store == nil {
+			respondError(w, log, http.StatusNotFound, "inventories not enabled")
+			return
+		}
+		var req createInventoryRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			respondError(w, log, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		if req.Name == "" || req.Content == "" {
+			respondError(w, log, http.StatusBadRequest, "name and content are required")
+			return
+		}
+		id := r.PathValue("id")
+		err := store.Update(r.Context(), &inventory.Inventory{ID: id, Name: req.Name, Content: req.Content})
+		if errors.Is(err, inventory.ErrNotFound) {
+			respondError(w, log, http.StatusNotFound, "inventory not found")
+			return
+		}
+		if err != nil {
+			log.Error("server: update inventory: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not update inventory")
+			return
+		}
+		updated, err := store.Get(r.Context(), id)
+		if err != nil {
+			log.Error("server: read updated inventory: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not read inventory")
+			return
+		}
+		respondJSON(w, log, http.StatusOK, updated, wantsPretty(r))
+	}
+}
+
 // listInventoriesHandler returns all inventories.
 func listInventoriesHandler(store inventory.Store, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

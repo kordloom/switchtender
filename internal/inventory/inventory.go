@@ -30,6 +30,9 @@ type Inventory struct {
 type Store interface {
 	// Save inserts or replaces the inventory identified by i.ID.
 	Save(ctx context.Context, i *Inventory) error
+	// Update changes an existing inventory's name and content, preserving its creation time, or
+	// returns ErrNotFound.
+	Update(ctx context.Context, i *Inventory) error
 	// Get returns the inventory with the given id, or ErrNotFound.
 	Get(ctx context.Context, id string) (*Inventory, error)
 	// List returns all inventories ordered by creation time, oldest first.
