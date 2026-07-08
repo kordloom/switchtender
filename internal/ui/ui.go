@@ -95,52 +95,52 @@ func (u *UI) detail(w http.ResponseWriter, r *http.Request) {
 
 // fleet renders the fleet health page.
 func (u *UI) fleet(w http.ResponseWriter, _ *http.Request) {
-	u.render(w, "fleet.html", nil)
+	u.render(w, "fleet.html", map[string]any{"ReadOnly": u.readOnly})
 }
 
 // host renders one host's run history page.
 func (u *UI) host(w http.ResponseWriter, r *http.Request) {
-	u.render(w, "host.html", map[string]string{"Host": r.PathValue("host")})
+	u.render(w, "host.html", map[string]any{"Host": r.PathValue("host"), "ReadOnly": u.readOnly})
 }
 
 // tasks renders the task duration trends page.
 func (u *UI) tasks(w http.ResponseWriter, _ *http.Request) {
-	u.render(w, "tasks.html", nil)
+	u.render(w, "tasks.html", map[string]any{"ReadOnly": u.readOnly})
 }
 
 // credentials renders the credential management page.
 func (u *UI) credentials(w http.ResponseWriter, _ *http.Request) {
-	u.render(w, "credentials.html", nil)
+	u.render(w, "credentials.html", map[string]any{"ReadOnly": u.readOnly})
 }
 
 // projects renders the git project management page.
 func (u *UI) projects(w http.ResponseWriter, _ *http.Request) {
-	u.render(w, "projects.html", nil)
+	u.render(w, "projects.html", map[string]any{"ReadOnly": u.readOnly})
 }
 
 // jobTemplates renders the job template management page.
 func (u *UI) jobTemplates(w http.ResponseWriter, _ *http.Request) {
-	u.render(w, "jobtemplates.html", nil)
+	u.render(w, "jobtemplates.html", map[string]any{"ReadOnly": u.readOnly})
 }
 
 // users renders the account management page.
 func (u *UI) users(w http.ResponseWriter, _ *http.Request) {
-	u.render(w, "users.html", nil)
+	u.render(w, "users.html", map[string]any{"ReadOnly": u.readOnly})
 }
 
 // workers renders the executor fleet page.
 func (u *UI) workers(w http.ResponseWriter, _ *http.Request) {
-	u.render(w, "workers.html", nil)
+	u.render(w, "workers.html", map[string]any{"ReadOnly": u.readOnly})
 }
 
 // inventories renders the stored inventory management page.
 func (u *UI) inventories(w http.ResponseWriter, _ *http.Request) {
-	u.render(w, "inventories.html", nil)
+	u.render(w, "inventories.html", map[string]any{"ReadOnly": u.readOnly})
 }
 
 // sources renders the dynamic inventory source page.
 func (u *UI) sources(w http.ResponseWriter, _ *http.Request) {
-	u.render(w, "sources.html", nil)
+	u.render(w, "sources.html", map[string]any{"ReadOnly": u.readOnly})
 }
 
 // login renders the token sign in page.
@@ -150,7 +150,7 @@ func (u *UI) login(w http.ResponseWriter, _ *http.Request) {
 
 // schedules renders the schedules page.
 func (u *UI) schedules(w http.ResponseWriter, _ *http.Request) {
-	u.render(w, "schedules.html", nil)
+	u.render(w, "schedules.html", map[string]any{"ReadOnly": u.readOnly})
 }
 
 // render executes the named template with data.
