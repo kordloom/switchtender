@@ -204,7 +204,7 @@ CREATE TABLE IF NOT EXISTS teams (
 	created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS team_members (
-	team_id TEXT NOT NULL,
+	team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
 	user_id TEXT NOT NULL,
 	PRIMARY KEY (team_id, user_id)
 );
@@ -303,6 +303,9 @@ func Open(path string) (*DB, error) {
 		"PRAGMA journal_mode=WAL",
 		"PRAGMA busy_timeout=5000",
 		"PRAGMA synchronous=NORMAL",
+		// modernc defaults foreign keys off. Turn them on so declared references, such as a team
+		// member pointing at its team, are enforced. The single connection keeps this in effect.
+		"PRAGMA foreign_keys=ON",
 	}
 	for _, p := range pragmas {
 		if _, err := db.Exec(p); err != nil {

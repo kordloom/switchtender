@@ -268,6 +268,36 @@ func TestTeamStoreContract(t *testing.T) {
 	})
 }
 
+func TestTeamForeignKeyEnforced(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "yardmaster.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	teams := db.Teams()
+
+	// With foreign keys enforced, a membership cannot reference a team that does not exist.
+	if err := teams.AddMember(ctx, "team_ghost", "user_1"); err == nil {
+		t.Error("AddMember to a nonexistent team succeeded, want a foreign key error")
+	}
+
+	// A member of a real team is dropped when the team is deleted, leaving no orphan row.
+	if err := teams.Save(ctx, &team.Team{ID: "team_1", Name: "ops", CreatedAt: time.Now()}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	if err := teams.AddMember(ctx, "team_1", "user_1"); err != nil {
+		t.Fatalf("AddMember() error = %v", err)
+	}
+	if err := teams.Delete(ctx, "team_1"); err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+	if got, _ := teams.TeamsForUser(ctx, "user_1"); len(got) != 0 {
+		t.Errorf("TeamsForUser after delete = %v, want none", got)
+	}
+}
+
 func TestGrantStoreContract(t *testing.T) {
 	t.Parallel()
 	granttest.Contract(t, func() grant.Store {

@@ -204,7 +204,7 @@ CREATE TABLE IF NOT EXISTS teams (
 	created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS team_members (
-	team_id TEXT NOT NULL,
+	team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
 	user_id TEXT NOT NULL,
 	PRIMARY KEY (team_id, user_id)
 );

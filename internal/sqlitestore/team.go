@@ -63,12 +63,19 @@ func (s *teamStore) List(ctx context.Context) ([]*team.Team, error) {
 	return out, nil
 }
 
-// Delete removes the team and its memberships, or returns team.ErrNotFound.
+// Delete removes the team and its memberships in one transaction, or returns team.ErrNotFound. The
+// transaction keeps the two deletes atomic so an interrupt cannot orphan membership rows.
 func (s *teamStore) Delete(ctx context.Context, id string) error {
-	if _, err := s.db.ExecContext(ctx, "DELETE FROM team_members WHERE team_id=?", id); err != nil {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("delete team: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, "DELETE FROM team_members WHERE team_id=?", id); err != nil {
 		return fmt.Errorf("delete team members: %w", err)
 	}
-	res, err := s.db.ExecContext(ctx, "DELETE FROM teams WHERE id=?", id)
+	res, err := tx.ExecContext(ctx, "DELETE FROM teams WHERE id=?", id)
 	if err != nil {
 		return fmt.Errorf("delete team: %w", err)
 	}
@@ -78,6 +85,9 @@ func (s *teamStore) Delete(ctx context.Context, id string) error {
 	}
 	if n == 0 {
 		return team.ErrNotFound
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("delete team: %w", err)
 	}
 	return nil
 }
