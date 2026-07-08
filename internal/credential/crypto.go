@@ -7,10 +7,28 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
+
+	"golang.org/x/crypto/argon2"
+)
+
+// Argon2id parameters for deriving the AES key from the operator passphrase. The derivation runs
+// once at startup, so a single deployment pays the cost one time while an offline guess against a
+// leaked database stays expensive. Memory is in KiB.
+const (
+	// argonTime is the number of argon2id passes.
+	argonTime = 3
+	// argonMemory is the argon2id memory cost in KiB, here 64 MiB.
+	argonMemory = 64 * 1024
+	// argonThreads is the argon2id parallelism.
+	argonThreads = 4
+	// argonKeyLen is the derived key length in bytes, matching AES-256.
+	argonKeyLen = 32
 )
 
 // Sealer encrypts and decrypts credential secrets with AES-256-GCM. The key derives from an
-// operator supplied passphrase, so the database alone never suffices to read secrets.
+// operator supplied passphrase through argon2id salted with a per-deployment value, so a leaked
+// database plus a weak passphrase is expensive to brute force and a key is never shared across
+// deployments.
 type Sealer struct {
 	// key is the derived 32 byte AES key.
 	key [32]byte
@@ -18,14 +36,25 @@ type Sealer struct {
 	ok bool
 }
 
-// NewSealer derives a Sealer from a passphrase. An empty passphrase yields a disabled Sealer
-// whose operations return ErrNoKey, so credential features fail loudly instead of storing
-// plaintext.
-func NewSealer(passphrase string) *Sealer {
-	if passphrase == "" {
+// NewSealer derives a Sealer from a passphrase and a per-deployment salt using argon2id. Both must
+// be non-empty; an empty passphrase or salt yields a disabled Sealer whose operations return
+// ErrNoKey, so credential features fail loudly instead of storing plaintext. The salt must stay
+// stable across restarts or existing ciphertext cannot be decrypted.
+func NewSealer(passphrase, salt string) *Sealer {
+	if passphrase == "" || salt == "" {
 		return &Sealer{}
 	}
-	return &Sealer{key: sha256.Sum256([]byte(passphrase)), ok: true}
+	// Normalize the operator salt to a fixed width so any salt string is a valid argon2id salt; its
+	// uniqueness, not its length or encoding, is what matters.
+	saltSum := sha256.Sum256([]byte(salt))
+	derived := argon2.IDKey([]byte(passphrase), saltSum[:], argonTime, argonMemory, argonThreads, argonKeyLen)
+	s := &Sealer{ok: true}
+	copy(s.key[:], derived)
+	// Wipe the transient derived slice; the fixed array holds the working key.
+	for i := range derived {
+		derived[i] = 0
+	}
+	return s
 }
 
 // Enabled reports whether the Sealer has a key.

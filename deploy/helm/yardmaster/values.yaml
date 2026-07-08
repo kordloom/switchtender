@@ -27,9 +27,12 @@ database:
   # dsn is the PostgreSQL connection string every server and worker shares.
   dsn: "postgres://yard:yard@postgres:5432/yard?sslmode=disable"
 
-# encryptionKey seals credentials at rest. It is required; set it with --set encryptionKey=...
-# or point existingSecret at a Secret that holds a YARDMASTER_ENCRYPTION_KEY key.
+# encryptionKey and encryptionSalt seal credentials at rest with argon2id and AES-256-GCM. Both are
+# required; set them with --set encryptionKey=... --set encryptionSalt=... or point existingSecret
+# at a Secret that holds YARDMASTER_ENCRYPTION_KEY and YARDMASTER_ENCRYPTION_SALT keys. The salt
+# must stay stable across restarts or existing credentials cannot be decrypted.
 encryptionKey: ""
+encryptionSalt: ""
 existingSecret: ""
 
 service:

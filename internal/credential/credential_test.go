@@ -15,7 +15,7 @@ func TestMemStoreContract(t *testing.T) {
 
 func TestSealerRoundTrip(t *testing.T) {
 	t.Parallel()
-	s := credential.NewSealer("passphrase")
+	s := credential.NewSealer("passphrase", "salt-a")
 	sealed, err := s.Seal("-----BEGIN OPENSSH PRIVATE KEY-----")
 	if err != nil {
 		t.Fatalf("Seal() error = %v", err)
@@ -31,23 +31,60 @@ func TestSealerRoundTrip(t *testing.T) {
 		t.Errorf("Open() = %q, want the original plaintext", plain)
 	}
 
-	other := credential.NewSealer("different")
+	other := credential.NewSealer("different", "salt-a")
 	if _, err := other.Open(sealed); err == nil {
-		t.Error("Open() with the wrong key succeeded, want failure")
+		t.Error("Open() with the wrong passphrase succeeded, want failure")
+	}
+}
+
+func TestSealerSaltStabilityAndSeparation(t *testing.T) {
+	t.Parallel()
+	// Same passphrase and salt rebuilt independently must open each other's ciphertext, which is
+	// what lets a restarted process decrypt what a prior one sealed.
+	first := credential.NewSealer("pass", "deploy-salt")
+	sealed, err := first.Seal("secret")
+	if err != nil {
+		t.Fatalf("Seal() error = %v", err)
+	}
+	second := credential.NewSealer("pass", "deploy-salt")
+	plain, err := second.Open(sealed)
+	if err != nil {
+		t.Fatalf("Open() across a rebuilt sealer error = %v", err)
+	}
+	if plain != "secret" {
+		t.Errorf("Open() = %q, want %q", plain, "secret")
+	}
+
+	// A different salt with the same passphrase derives a different key, so it cannot open the
+	// ciphertext. This is the per-deployment separation the salt provides.
+	otherSalt := credential.NewSealer("pass", "other-salt")
+	if _, err := otherSalt.Open(sealed); err == nil {
+		t.Error("Open() with a different salt succeeded, want failure")
 	}
 }
 
 func TestSealerDisabled(t *testing.T) {
 	t.Parallel()
-	s := credential.NewSealer("")
-	if s.Enabled() {
-		t.Error("empty passphrase Sealer reports enabled")
+	tests := []struct {
+		Name       string
+		Passphrase string
+		Salt       string
+	}{
+		{Name: "no passphrase", Passphrase: "", Salt: "salt"}, // Test 0: Missing key.
+		{Name: "no salt", Passphrase: "passphrase", Salt: ""}, // Test 1: Missing salt.
+		{Name: "neither", Passphrase: "", Salt: ""},           // Test 2: Missing both.
 	}
-	if _, err := s.Seal("x"); !errors.Is(err, credential.ErrNoKey) {
-		t.Errorf("Seal() error = %v, want ErrNoKey", err)
-	}
-	if _, err := s.Open("x"); !errors.Is(err, credential.ErrNoKey) {
-		t.Errorf("Open() error = %v, want ErrNoKey", err)
+	for i, test := range tests {
+		s := credential.NewSealer(test.Passphrase, test.Salt)
+		if s.Enabled() {
+			t.Errorf("test %d (%s): Sealer reports enabled", i, test.Name)
+		}
+		if _, err := s.Seal("x"); !errors.Is(err, credential.ErrNoKey) {
+			t.Errorf("test %d (%s): Seal() error = %v, want ErrNoKey", i, test.Name, err)
+		}
+		if _, err := s.Open("x"); !errors.Is(err, credential.ErrNoKey) {
+			t.Errorf("test %d (%s): Open() error = %v, want ErrNoKey", i, test.Name, err)
+		}
 	}
 }
 

@@ -39,7 +39,7 @@ func createCredentialHandler(store credential.Store, sealer *credential.Sealer, 
 		}
 		if !sealer.Enabled() {
 			respondError(w, log, http.StatusConflict,
-				"no encryption key: set YARDMASTER_ENCRYPTION_KEY on the server")
+				"credentials disabled: set YARDMASTER_ENCRYPTION_KEY and YARDMASTER_ENCRYPTION_SALT on the server")
 			return
 		}
 		var req createCredentialRequest

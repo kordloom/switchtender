@@ -2,14 +2,12 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 	"os/signal"
 	"syscall"
 
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/yardmaster/internal/credential"
 	"github.com/dcadolph/yardmaster/internal/dispatch"
 	"github.com/dcadolph/yardmaster/internal/logutil"
 	"github.com/dcadolph/yardmaster/internal/project"
@@ -64,10 +62,7 @@ func runWorker(cmd *cobra.Command, _ []string) error {
 	defer func() { _ = bundle.Close() }()
 	store := bundle.Runs()
 
-	sealer := credential.NewSealer(os.Getenv("YARDMASTER_ENCRYPTION_KEY"))
-	if !sealer.Enabled() {
-		log.Warn("credentials disabled: set YARDMASTER_ENCRYPTION_KEY to enable them")
-	}
+	sealer := newSealerFromEnv(log)
 	syncer, err := project.NewSyncer(projectCacheDir())
 	if err != nil {
 		return fmt.Errorf("project cache: %w", err)

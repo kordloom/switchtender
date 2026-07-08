@@ -36,6 +36,11 @@ spec:
                 secretKeyRef:
                   name: {{ include "yardmaster.secretName" . }}
                   key: YARDMASTER_ENCRYPTION_KEY
+            - name: YARDMASTER_ENCRYPTION_SALT
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "yardmaster.secretName" . }}
+                  key: YARDMASTER_ENCRYPTION_SALT
           ports:
             - name: http
               containerPort: 8080

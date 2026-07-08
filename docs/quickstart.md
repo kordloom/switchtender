@@ -15,10 +15,12 @@ SQLite setup. Go 1.26 to build from source, or use the container image.
 ## Run the server
 
     go build -o yardmaster .
-    YARDMASTER_ENCRYPTION_KEY=change-me ./yardmaster serve --addr :8080 --db yardmaster.db
+    YARDMASTER_ENCRYPTION_KEY=change-me YARDMASTER_ENCRYPTION_SALT=change-me-too \
+      ./yardmaster serve --addr :8080 --db yardmaster.db
 
-The encryption key seals stored credentials at rest. Without it the server still runs, but
-credential features stay off.
+The key and salt together seal stored credentials at rest with argon2id and AES-256-GCM. Without
+both the server still runs, but credential features stay off. Keep the salt stable across restarts
+or existing credentials cannot be decrypted.
 
 Open http://localhost:8080 for the web UI, or use the API directly.
 
@@ -40,7 +42,8 @@ each host's measured duration in recent runs.
 
 Point a worker at the same database and it competes for queued runs:
 
-    YARDMASTER_ENCRYPTION_KEY=change-me ./yardmaster worker --db yardmaster.db --name laptop
+    YARDMASTER_ENCRYPTION_KEY=change-me YARDMASTER_ENCRYPTION_SALT=change-me-too \
+      ./yardmaster worker --db yardmaster.db --name laptop
 
 For more than one machine, use a PostgreSQL DSN as the `--db` value on every process.
 
@@ -58,6 +61,7 @@ Create user accounts with roles for sign-in:
 ## Run with Docker
 
     export YARDMASTER_ENCRYPTION_KEY=change-me
+    export YARDMASTER_ENCRYPTION_SALT=change-me-too
     docker compose up --build
 
 This starts a server, a PostgreSQL database, and a worker. The server listens on port 8080; set

@@ -41,6 +41,11 @@ spec:
                 secretKeyRef:
                   name: {{ include "yardmaster.secretName" . }}
                   key: YARDMASTER_ENCRYPTION_KEY
+            - name: YARDMASTER_ENCRYPTION_SALT
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "yardmaster.secretName" . }}
+                  key: YARDMASTER_ENCRYPTION_SALT
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
 {{- end }}

@@ -214,6 +214,24 @@ func openBundle(db string) (storeBundle, error) {
 	return sqlitestore.Open(db)
 }
 
+// newSealerFromEnv builds a credential Sealer from the encryption environment. Credentials need
+// both YARDMASTER_ENCRYPTION_KEY and a stable YARDMASTER_ENCRYPTION_SALT; when either is missing
+// the Sealer is disabled and the reason is logged so the operator knows which value to set.
+func newSealerFromEnv(log *zap.Logger) *credential.Sealer {
+	key := os.Getenv("YARDMASTER_ENCRYPTION_KEY")
+	salt := os.Getenv("YARDMASTER_ENCRYPTION_SALT")
+	sealer := credential.NewSealer(key, salt)
+	if sealer.Enabled() {
+		return sealer
+	}
+	if key == "" {
+		log.Warn("credentials disabled: set YARDMASTER_ENCRYPTION_KEY to enable them")
+	} else {
+		log.Warn("credentials disabled: set a stable YARDMASTER_ENCRYPTION_SALT alongside the key")
+	}
+	return sealer
+}
+
 // projectCacheDir returns where project checkouts live: the user cache directory when available,
 // the system temp directory otherwise.
 func projectCacheDir() string {
@@ -239,10 +257,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	defer func() { _ = bundle.Close() }()
 	store, schedules := bundle.Runs(), bundle.Schedules()
 
-	sealer := credential.NewSealer(os.Getenv("YARDMASTER_ENCRYPTION_KEY"))
-	if !sealer.Enabled() {
-		log.Warn("credentials disabled: set YARDMASTER_ENCRYPTION_KEY to enable them")
-	}
+	sealer := newSealerFromEnv(log)
 
 	hub := live.NewHub()
 	runner := roundhouse.NewSelectiveRunner(serveAllowContainerEE)

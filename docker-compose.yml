@@ -1,5 +1,6 @@
 # A full Yardmaster deployment: the server, a PostgreSQL database, and one worker sharing it.
-# Set YARDMASTER_ENCRYPTION_KEY in the environment before running, then: docker compose up --build.
+# Set YARDMASTER_ENCRYPTION_KEY and YARDMASTER_ENCRYPTION_SALT in the environment before running,
+# then: docker compose up --build.
 services:
   postgres:
     image: postgres:16
@@ -20,6 +21,7 @@ services:
     command: ["serve", "--addr", ":8080", "--db", "postgres://yard:yard@postgres:5432/yard?sslmode=disable"]
     environment:
       YARDMASTER_ENCRYPTION_KEY: ${YARDMASTER_ENCRYPTION_KEY:?set YARDMASTER_ENCRYPTION_KEY}
+      YARDMASTER_ENCRYPTION_SALT: ${YARDMASTER_ENCRYPTION_SALT:?set YARDMASTER_ENCRYPTION_SALT}
     ports:
       - "${YARDMASTER_PORT:-8080}:8080"
     depends_on:
@@ -31,6 +33,7 @@ services:
     command: ["worker", "--db", "postgres://yard:yard@postgres:5432/yard?sslmode=disable", "--name", "worker-1"]
     environment:
       YARDMASTER_ENCRYPTION_KEY: ${YARDMASTER_ENCRYPTION_KEY:?set YARDMASTER_ENCRYPTION_KEY}
+      YARDMASTER_ENCRYPTION_SALT: ${YARDMASTER_ENCRYPTION_SALT:?set YARDMASTER_ENCRYPTION_SALT}
     depends_on:
       postgres:
         condition: service_healthy

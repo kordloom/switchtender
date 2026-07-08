@@ -12,7 +12,6 @@ import (
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/yardmaster/internal/credential"
 	"github.com/dcadolph/yardmaster/internal/demo"
 	"github.com/dcadolph/yardmaster/internal/dispatch"
 	"github.com/dcadolph/yardmaster/internal/live"
@@ -82,7 +81,7 @@ func runDemo(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("seed demo: %w", err)
 	}
 
-	sealer := credential.NewSealer(os.Getenv("YARDMASTER_ENCRYPTION_KEY"))
+	sealer := newSealerFromEnv(log)
 	httpServer := &http.Server{
 		Addr: demoAddr,
 		Handler: server.New(store, disp, log, server.WithStreamer(hub),

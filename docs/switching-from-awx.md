@@ -67,10 +67,12 @@ job template in AWX.
 
 ### 1. Start the server
 
-    YARDMASTER_ENCRYPTION_KEY=change-me ./yardmaster serve --addr :8080 --db yardmaster.db
+    YARDMASTER_ENCRYPTION_KEY=change-me YARDMASTER_ENCRYPTION_SALT=change-me-too \
+      ./yardmaster serve --addr :8080 --db yardmaster.db
 
-The encryption key seals credentials at rest. Open http://localhost:8080 for the UI. The API is open
-until you create the first account or token, so you can set up before locking it down.
+The key and salt seal credentials at rest; keep the salt stable across restarts. Open
+http://localhost:8080 for the UI. The API is open until you create the first account or token, so
+you can set up before locking it down.
 
 ### 2. Create your first account
 
