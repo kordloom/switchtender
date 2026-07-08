@@ -123,7 +123,21 @@ async function getJSON(url) {
 function setStatus(msg) {
 	const el = document.getElementById("status");
 	if (!el) return;
+	el.className = "muted";
 	if (msg) { el.textContent = msg; el.hidden = false; } else { el.hidden = true; }
+}
+
+// showEmpty renders a centered empty-state card in place of the status line.
+function showEmpty(msg) {
+	const el = document.getElementById("status");
+	if (!el) return;
+	el.hidden = false;
+	el.className = "empty-state";
+	el.innerHTML = '<svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor" ' +
+		'stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">' +
+		'<path d="M3 7l1.6 12.2A2 2 0 0 0 6.6 21h10.8a2 2 0 0 0 2-1.8L21 7"/>' +
+		'<path d="M3 7h18M8.5 7V5.5a2 2 0 0 1 2-2h3a2 2 0 0 1 2 2V7"/></svg><p></p>';
+	el.querySelector("p").textContent = msg;
 }
 
 // fmtDuration renders the span between two ISO times.
@@ -285,7 +299,7 @@ async function loadCredentials() {
 		const data = await getJSON("/credentials");
 		const creds = data.credentials || [];
 		if (creds.length === 0) {
-			setStatus("No credentials yet.");
+			showEmpty("No credentials yet.");
 			return;
 		}
 		const tbody = document.getElementById("credentials");
@@ -369,7 +383,7 @@ async function loadProjects() {
 		const data = await getJSON("/projects");
 		const projects = data.projects || [];
 		if (projects.length === 0) {
-			setStatus("No projects yet.");
+			showEmpty("No projects yet.");
 			return;
 		}
 		const tbody = document.getElementById("projects");
@@ -445,7 +459,7 @@ async function loadTemplates() {
 		const data = await getJSON("/templates");
 		const templates = data.templates || [];
 		if (templates.length === 0) {
-			setStatus("No templates yet.");
+			showEmpty("No templates yet.");
 			return;
 		}
 		const tbody = document.getElementById("templates");
@@ -596,7 +610,7 @@ async function loadInventories() {
 		const data = await getJSON("/inventories");
 		const inventories = data.inventories || [];
 		if (inventories.length === 0) {
-			setStatus("No inventories yet.");
+			showEmpty("No inventories yet.");
 			return;
 		}
 		const tbody = document.getElementById("inventories");
@@ -644,7 +658,7 @@ async function loadSources() {
 		const data = await getJSON("/inventory-sources");
 		const sources = data.sources || [];
 		if (sources.length === 0) {
-			setStatus("No inventory sources yet.");
+			showEmpty("No inventory sources yet.");
 			return;
 		}
 		const tbody = document.getElementById("sources");
@@ -696,7 +710,7 @@ async function loadWorkers() {
 		const data = await getJSON("/workers");
 		const workers = data.workers || [];
 		if (workers.length === 0) {
-			setStatus("No executors seen yet. Run something.");
+			showEmpty("No executors seen yet. Run something.");
 			return;
 		}
 		const tbody = document.getElementById("workers");
@@ -732,7 +746,7 @@ async function loadRuns() {
 		const data = await getJSON("/runs");
 		const runs = data.runs || [];
 		tbody.innerHTML = "";
-		if (runs.length === 0) { table.hidden = true; setStatus("No runs yet."); return; }
+		if (runs.length === 0) { table.hidden = true; showEmpty("No runs yet."); return; }
 		renderSummary(runs);
 		for (const r of runs) {
 			const tr = document.createElement("tr");
@@ -831,7 +845,7 @@ async function loadFleet() {
 		const data = await getJSON("/fleet");
 		const hosts = data.hosts || [];
 		if (hosts.length === 0) {
-			setStatus("No host history yet. Run a playbook to build fleet health.");
+			showEmpty("No host history yet. Run a playbook to build fleet health.");
 			return;
 		}
 		const tbody = document.getElementById("fleet");
@@ -879,7 +893,7 @@ async function loadHost(host) {
 		const data = await getJSON("/hosts/" + encodeURIComponent(host) + "/runs");
 		const runs = data.runs || [];
 		if (runs.length === 0) {
-			setStatus("No history for this host yet.");
+			showEmpty("No history for this host yet.");
 			return;
 		}
 		const tbody = document.getElementById("host-history");
@@ -915,7 +929,7 @@ async function loadTasks() {
 		const data = await getJSON("/tasks");
 		const tasks = data.tasks || [];
 		if (tasks.length === 0) {
-			setStatus("No task history yet. Run a playbook to build trends.");
+			showEmpty("No task history yet. Run a playbook to build trends.");
 			return;
 		}
 		tasks.sort((a, b) => b.avg_seconds - a.avg_seconds);
@@ -969,7 +983,7 @@ async function loadSchedules() {
 		const data = await getJSON("/schedules");
 		const schedules = data.schedules || [];
 		if (schedules.length === 0) {
-			setStatus("No schedules yet. Create one with POST /schedules.");
+			showEmpty("No schedules yet. Create one with POST /schedules.");
 			return;
 		}
 		const tbody = document.getElementById("schedules");
@@ -1167,7 +1181,7 @@ async function loadUsers() {
 		const data = await getJSON("/users");
 		const users = data.users || [];
 		if (users.length === 0) {
-			setStatus("No users yet.");
+			showEmpty("No users yet.");
 			return;
 		}
 		const tbody = document.getElementById("users");
@@ -1537,12 +1551,14 @@ function renderMatrix(model) {
 	table.appendChild(thead);
 
 	const counts = {};
+	const colCells = tasks.map(() => []);
 	const tbody = document.createElement("tbody");
 	for (const host of hosts) {
 		const tr = document.createElement("tr");
 		const rowTh = document.createElement("th");
 		rowTh.textContent = host;
 		tr.appendChild(rowTh);
+		const rowCells = [];
 		tasks.forEach((task, ci) => {
 			const info = cells[host] && cells[host][task];
 			const outcome = info ? info.outcome : "none";
@@ -1551,9 +1567,21 @@ function renderMatrix(model) {
 			const div = document.createElement("div");
 			div.className = "cell " + outcome;
 			div.title = host + " / " + task + ": " + outcome;
-			// Highlight the row and column headers so a cell is easy to trace across a wide matrix.
-			div.addEventListener("mouseenter", () => { rowTh.classList.add("hi"); taskThs[ci].classList.add("hi"); });
-			div.addEventListener("mouseleave", () => { rowTh.classList.remove("hi"); taskThs[ci].classList.remove("hi"); });
+			colCells[ci].push(div);
+			rowCells.push(div);
+			// Trace a cell across a wide matrix: light up its row and column, headers included.
+			div.addEventListener("mouseenter", () => {
+				rowTh.classList.add("hi");
+				taskThs[ci].classList.add("hi");
+				rowCells.forEach((c) => c.classList.add("row-hi"));
+				colCells[ci].forEach((c) => c.classList.add("col-hi"));
+			});
+			div.addEventListener("mouseleave", () => {
+				rowTh.classList.remove("hi");
+				taskThs[ci].classList.remove("hi");
+				rowCells.forEach((c) => c.classList.remove("row-hi"));
+				colCells[ci].forEach((c) => c.classList.remove("col-hi"));
+			});
 			if (info) {
 				div.addEventListener("click", () => showDrill(Object.assign({ host, task }, info)));
 			}
@@ -1653,11 +1681,15 @@ function showDrill(info) {
 	body.innerHTML = "";
 	const h = document.createElement("h3");
 	h.textContent = info.host ? (info.host + " / " + info.task) : info.task;
+	if (info.outcome) {
+		const b = document.createElement("span");
+		b.className = "chip " + info.outcome;
+		b.textContent = info.outcome;
+		h.appendChild(document.createTextNode(" "));
+		h.appendChild(b);
+	}
 	body.appendChild(h);
 
-	if (info.host) body.appendChild(drillField("Host", info.host));
-	if (info.task) body.appendChild(drillField("Task", info.task));
-	if (info.outcome) body.appendChild(drillField("Outcome", info.outcome));
 	if (info.duration) body.appendChild(drillField("Duration", info.duration));
 	if (info.rc !== undefined && info.rc !== null) {
 		body.appendChild(drillField("Return code", String(info.rc)));
