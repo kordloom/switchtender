@@ -38,6 +38,25 @@ ON CONFLICT(id) DO UPDATE SET
 	return nil
 }
 
+// Update changes an existing source's editable fields, leaving its backing inventory and sync
+// state intact, or returns invsource.ErrNotFound.
+func (s *invSourceStore) Update(ctx context.Context, src *invsource.Source) error {
+	res, err := s.db.ExecContext(ctx,
+		"UPDATE inventory_sources SET name=?, source=?, credential_id=?, project_id=? WHERE id=?",
+		src.Name, src.Source, src.CredentialID, src.ProjectID, src.ID)
+	if err != nil {
+		return fmt.Errorf("update inventory source: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("update inventory source: %w", err)
+	}
+	if n == 0 {
+		return invsource.ErrNotFound
+	}
+	return nil
+}
+
 // Get returns the source with the given id, or invsource.ErrNotFound.
 func (s *invSourceStore) Get(ctx context.Context, id string) (*invsource.Source, error) {
 	const q = "SELECT " + invSourceColumns + " FROM inventory_sources WHERE id=?"

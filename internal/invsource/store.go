@@ -37,6 +37,22 @@ func (m *memStore) Save(_ context.Context, s *Source) error {
 	return nil
 }
 
+// Update changes an existing source's editable fields, leaving its backing inventory and sync
+// state intact, or returns ErrNotFound.
+func (m *memStore) Update(_ context.Context, s *Source) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	existing, ok := m.sources[s.ID]
+	if !ok {
+		return ErrNotFound
+	}
+	existing.Name = s.Name
+	existing.Source = s.Source
+	existing.CredentialID = s.CredentialID
+	existing.ProjectID = s.ProjectID
+	return nil
+}
+
 // Get returns the source with the given id, or ErrNotFound.
 func (m *memStore) Get(_ context.Context, id string) (*Source, error) {
 	m.mu.RLock()

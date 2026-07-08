@@ -908,21 +908,56 @@ async function loadInventories() {
 	}
 }
 
-// wireSourceForm hooks the add source form up to POST /inventory-sources.
+// openSourceEdit fills the source dialog with an existing record and switches it to edit mode so
+// the next save issues a PUT rather than a create.
+function openSourceEdit(src) {
+	const form = document.getElementById("source-form");
+	form.dataset.editId = src.id;
+	document.getElementById("src-name").value = src.name;
+	document.getElementById("src-source").value = src.source;
+	document.getElementById("src-credential").value = src.credential_id || "";
+	document.getElementById("src-project").value = src.project_id || "";
+	document.getElementById("src-status").textContent = "";
+	setModalTitle("source", "Edit source");
+	document.getElementById("source-modal").hidden = false;
+}
+
+// wireSourceForm hooks the source dialog up to POST /inventory-sources for a new record and PUT
+// /inventory-sources/{id} when editing. The New button resets the dialog to add mode.
 function wireSourceForm() {
 	fillSelect(document.getElementById("src-credential"), "/credentials", "credentials",
 		(c) => c.name + " (" + c.kind + ")");
 	fillSelect(document.getElementById("src-project"), "/projects", "projects", (p) => p.name);
-	document.getElementById("source-form").addEventListener("submit", async (e) => {
+	const form = document.getElementById("source-form");
+	const resetToCreate = () => {
+		delete form.dataset.editId;
+		document.getElementById("src-name").value = "";
+		document.getElementById("src-source").value = "";
+		document.getElementById("src-credential").value = "";
+		document.getElementById("src-project").value = "";
+		document.getElementById("src-status").textContent = "";
+		setModalTitle("source", "Add a source");
+	};
+	const openBtn = document.getElementById("source-open");
+	if (openBtn) openBtn.addEventListener("click", resetToCreate);
+
+	form.addEventListener("submit", async (e) => {
 		e.preventDefault();
 		const status = document.getElementById("src-status");
+		const editId = form.dataset.editId;
+		const payload = {
+			name: document.getElementById("src-name").value.trim(),
+			source: document.getElementById("src-source").value.trim(),
+			credential_id: document.getElementById("src-credential").value,
+			project_id: document.getElementById("src-project").value,
+		};
 		try {
-			await postAction("/inventory-sources", {
-				name: document.getElementById("src-name").value.trim(),
-				source: document.getElementById("src-source").value.trim(),
-				credential_id: document.getElementById("src-credential").value,
-				project_id: document.getElementById("src-project").value,
-			});
+			if (editId) {
+				await postAction("/inventory-sources/" + editId, payload, "PUT");
+			} else {
+				await postAction("/inventory-sources", payload);
+			}
+			resetToCreate();
 			status.textContent = "Saved.";
 			closeModal("source");
 			document.getElementById("sources").innerHTML = "";
@@ -972,6 +1007,8 @@ async function loadSources() {
 				}
 			});
 			actions.appendChild(refresh);
+			actions.appendChild(document.createTextNode(" "));
+			actions.appendChild(editButton(() => openSourceEdit(src)));
 			actions.appendChild(document.createTextNode(" "));
 			const del = deleteCell("/inventory-sources/" + src.id, "source " + src.name, tr);
 			actions.appendChild(del.firstChild);

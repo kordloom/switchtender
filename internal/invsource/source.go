@@ -46,6 +46,9 @@ type Source struct {
 type Store interface {
 	// Save inserts or replaces the source identified by s.ID.
 	Save(ctx context.Context, s *Source) error
+	// Update changes an existing source's name, source, and referenced credential and project,
+	// leaving its backing inventory and sync state intact, or returns ErrNotFound.
+	Update(ctx context.Context, s *Source) error
 	// Get returns the source with the given id, or ErrNotFound.
 	Get(ctx context.Context, id string) (*Source, error)
 	// List returns all sources ordered by creation time, oldest first.

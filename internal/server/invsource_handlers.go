@@ -84,6 +84,51 @@ func createSourceHandler(sources invsource.Store, inventories inventory.Store, a
 	}
 }
 
+// updateSourceHandler changes an existing source's editable fields, keeping its backing inventory
+// and sync state. Like create, it authorizes the referenced project and credential.
+func updateSourceHandler(sources invsource.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if sources == nil {
+			respondError(w, log, http.StatusNotFound, "inventory sources not enabled")
+			return
+		}
+		var req createSourceRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			respondError(w, log, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		if req.Name == "" || req.Source == "" {
+			respondError(w, log, http.StatusBadRequest, "name and source are required")
+			return
+		}
+		if denyOnAuthzError(w, log,
+			authz.authorizeAll(r.Context(), grant.AccessUse, req.ProjectID, req.CredentialID)) {
+			return
+		}
+		id := r.PathValue("id")
+		err := sources.Update(r.Context(), &invsource.Source{
+			ID: id, Name: req.Name, Source: req.Source,
+			CredentialID: req.CredentialID, ProjectID: req.ProjectID,
+		})
+		if errors.Is(err, invsource.ErrNotFound) {
+			respondError(w, log, http.StatusNotFound, "source not found")
+			return
+		}
+		if err != nil {
+			log.Error("server: update source: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not update source")
+			return
+		}
+		updated, err := sources.Get(r.Context(), id)
+		if err != nil {
+			log.Error("server: read updated source: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not read source")
+			return
+		}
+		respondJSON(w, log, http.StatusOK, updated, wantsPretty(r))
+	}
+}
+
 // listSourcesHandler returns all sources.
 func listSourcesHandler(sources invsource.Store, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
