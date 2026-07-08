@@ -15,7 +15,7 @@ import (
 
 func TestUIRoutes(t *testing.T) {
 	t.Parallel()
-	handler := ui.New(zap.NewNop(), nil).Handler()
+	handler := ui.New(zap.NewNop(), nil, false).Handler()
 
 	tests := []struct {
 		Name         string
@@ -66,7 +66,7 @@ func TestUIDocs(t *testing.T) {
 		"README.md":   {Data: []byte("# Overview\n\nWelcome to the docs.\n")},
 		"concepts.md": {Data: []byte("# Concepts\n\n| A | B |\n|---|---|\n| 1 | 2 |\n")},
 	}
-	handler := ui.New(zap.NewNop(), docs).Handler()
+	handler := ui.New(zap.NewNop(), docs, false).Handler()
 
 	tests := []struct {
 		Name         string

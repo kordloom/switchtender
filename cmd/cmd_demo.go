@@ -97,7 +97,7 @@ func runDemo(cmd *cobra.Command, _ []string) error {
 			server.WithGrants(bundle.Grants(), false),
 			server.WithAudit(bundle.Audits()),
 			server.WithDocs(docsFS),
-			server.WithReadOnly()).Handler(),
+			server.WithReadOnly(true)).Handler(),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 

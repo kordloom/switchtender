@@ -7,7 +7,7 @@
 	<link rel="icon" type="image/png" href="/ui/assets/favicon.png">
 	<link rel="stylesheet" href="/ui/assets/app.css">
 </head>
-<body data-page="index">
+<body data-page="index"{{if .ReadOnly}} data-readonly="true"{{end}}>
 	<header class="topbar">
 		<div class="brand"><img class="brand-logo" src="/ui/assets/logo.png" alt="">Yardmaster</div>
 		<div class="tagline">Playbook execution and fleet orchestration</div>

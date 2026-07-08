@@ -10,7 +10,12 @@ document.addEventListener("DOMContentLoaded", () => {
 	}
 	const page = document.body.dataset.page;
 	if (page === "index") {
-		wireLaunchForm();
+		if (isReadOnly()) {
+			const panel = document.getElementById("launch-panel");
+			if (panel) panel.hidden = true;
+		} else {
+			wireLaunchForm();
+		}
 		loadRuns();
 	} else if (page === "detail") {
 		loadDetail(document.body.dataset.runId);
@@ -117,6 +122,41 @@ function fmtTime(iso) {
 	if (!iso) return "";
 	const d = new Date(iso);
 	return isNaN(d) ? iso : d.toLocaleString();
+}
+
+// relTime renders an ISO time as a short relative age, such as "2m ago", falling back to the date
+// for anything older than a month.
+function relTime(iso) {
+	if (!iso) return "";
+	const d = new Date(iso);
+	if (isNaN(d)) return iso;
+	const s = Math.round((Date.now() - d.getTime()) / 1000);
+	if (s < 5) return "just now";
+	if (s < 60) return s + "s ago";
+	const m = Math.round(s / 60);
+	if (m < 60) return m + "m ago";
+	const h = Math.round(m / 60);
+	if (h < 24) return h + "h ago";
+	const days = Math.round(h / 24);
+	if (days < 30) return days + "d ago";
+	return d.toLocaleDateString();
+}
+
+// baseName returns the last path segment, so a run shows its playbook file rather than a long path.
+function baseName(p) {
+	if (!p) return "";
+	const i = p.lastIndexOf("/");
+	return i >= 0 ? p.slice(i + 1) : p;
+}
+
+// shortId truncates a long identifier for display, keeping the full value for a tooltip.
+function shortId(id) {
+	return id && id.length > 15 ? id.slice(0, 13) + "…" : (id || "");
+}
+
+// isReadOnly reports whether the server serves a read-only demo, which hides mutating controls.
+function isReadOnly() {
+	return document.body.dataset.readonly === "true";
 }
 
 // wireLaunchForm hooks the launch panel up to POST /runs and fills the credential picker.
@@ -651,9 +691,26 @@ async function loadRuns() {
 			const tr = document.createElement("tr");
 			tr.addEventListener("click", () => { location.href = "/ui/runs/" + r.id; });
 			tr.appendChild(tdBadge(r.status));
-			tr.appendChild(td(r.id, "mono"));
-			tr.appendChild(td(r.playbook || ""));
-			tr.appendChild(td(fmtTime(r.started_at || r.created_at)));
+
+			const runCell = td(shortId(r.id), "mono");
+			runCell.title = r.id;
+			if (r.kind === "split" || r.kind === "pipeline") {
+				const tag = document.createElement("span");
+				tag.className = "run-kind " + r.kind;
+				tag.textContent = r.kind;
+				runCell.appendChild(document.createTextNode(" "));
+				runCell.appendChild(tag);
+			}
+			tr.appendChild(runCell);
+
+			const pbCell = td(baseName(r.playbook) || (r.playbook || ""));
+			pbCell.title = r.playbook || "";
+			tr.appendChild(pbCell);
+
+			const startedCell = td(relTime(r.started_at || r.created_at));
+			startedCell.title = fmtTime(r.started_at || r.created_at);
+			tr.appendChild(startedCell);
+
 			tr.appendChild(td(fmtDuration(r.started_at, r.ended_at)));
 			tbody.appendChild(tr);
 		}
@@ -1116,6 +1173,11 @@ function updateActions(run) {
 	const cancel = document.getElementById("cancel-run");
 	const retry = document.getElementById("retry-run");
 	if (!cancel || !retry) return;
+	if (isReadOnly()) {
+		cancel.hidden = true;
+		retry.hidden = true;
+		return;
+	}
 	cancel.hidden = isTerminal(run.status);
 	const splitParent = (run.kind === "split" || run.shard_count) && !run.parent_id;
 	retry.hidden = !(splitParent && isTerminal(run.status) && run.status !== "succeeded");
@@ -1325,9 +1387,11 @@ function renderHeader(run) {
 	const el = document.getElementById("run-header");
 	el.innerHTML = "";
 	el.appendChild(field("Status", null, badge(run.status)));
-	el.appendChild(field("Run", run.id));
-	el.appendChild(field("Playbook", run.playbook || ""));
-	el.appendChild(field("Inventory", run.inventory || ""));
+	el.appendChild(field("Run", shortId(run.id), null, run.id));
+	el.appendChild(field("Playbook", baseName(run.playbook) || (run.playbook || ""), null, run.playbook || ""));
+	if (run.inventory) {
+		el.appendChild(field("Inventory", baseName(run.inventory), null, run.inventory));
+	}
 	if (run.shard_count) {
 		el.appendChild(field("Shards", String(run.shard_count)));
 	}
@@ -1340,7 +1404,7 @@ function renderHeader(run) {
 }
 
 // field builds a labeled field, using node when provided otherwise a text value.
-function field(label, value, node) {
+function field(label, value, node, title) {
 	const f = document.createElement("div");
 	f.className = "field";
 	const l = document.createElement("span");
@@ -1353,6 +1417,7 @@ function field(label, value, node) {
 		const v = document.createElement("span");
 		v.className = "value";
 		v.textContent = value;
+		if (title) v.title = title;
 		f.appendChild(v);
 	}
 	return f;
