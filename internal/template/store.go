@@ -37,6 +37,21 @@ func (m *memStore) Save(_ context.Context, t *Template) error {
 	return nil
 }
 
+// Update changes an existing template's fields, preserving its creation time, or returns
+// ErrNotFound.
+func (m *memStore) Update(_ context.Context, t *Template) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	existing, ok := m.templates[t.ID]
+	if !ok {
+		return ErrNotFound
+	}
+	cp := clone(t)
+	cp.CreatedAt = existing.CreatedAt
+	m.templates[t.ID] = cp
+	return nil
+}
+
 // Get returns the template with the given id, or ErrNotFound.
 func (m *memStore) Get(_ context.Context, id string) (*Template, error) {
 	m.mu.RLock()

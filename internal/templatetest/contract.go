@@ -19,6 +19,44 @@ func Contract(t *testing.T, newStore func() template.Store) {
 	t.Helper()
 	t.Run("lifecycle", func(t *testing.T) { testLifecycle(t, newStore()) })
 	t.Run("list ordered", func(t *testing.T) { testList(t, newStore()) })
+	t.Run("update", func(t *testing.T) { testUpdate(t, newStore()) })
+}
+
+// testUpdate verifies an update rewrites every field, preserves the creation time, and reports
+// ErrNotFound for an unknown id.
+func testUpdate(t *testing.T, store template.Store) {
+	ctx := context.Background()
+	created := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	if err := store.Save(ctx, &template.Template{
+		ID: "tpl_1", Name: "old", Playbook: "old.yml",
+		CredentialIDs: []string{"cred_1"}, CreatedAt: created,
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	want := &template.Template{
+		ID: "tpl_1", Name: "new", ProjectID: "proj_2",
+		Playbook: "plays/new.yml", Inventory: "hosts.ini", InventoryID: "inv_2", Shards: 4,
+		Queue:         "batch",
+		CredentialIDs: []string{"cred_2", "cred_3"},
+		ExtraVars:     map[string]any{"env": "stg"},
+		Survey:        []template.SurveyField{{Var: "tier", Label: "Tier", Type: template.FieldText}},
+		CreatedAt:     created,
+	}
+	if err := store.Update(ctx, want); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	got, err := store.Get(ctx, "tpl_1")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if diff := cmp.Diff(want, got, cmpopts.EquateEmpty()); diff != "" {
+		t.Errorf("Get() after update mismatch (-want +got):\n%s", diff)
+	}
+
+	if err := store.Update(ctx, &template.Template{ID: "ghost", Name: "x", Playbook: "p.yml"}); !errors.Is(err, template.ErrNotFound) {
+		t.Errorf("Update(ghost) error = %v, want ErrNotFound", err)
+	}
 }
 
 // testLifecycle verifies a fully loaded template round trips and deletes.

@@ -275,6 +275,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("DELETE /triggers/{id}", deleteTriggerHandler(s.triggers, s.log))
 	mux.Handle("POST /hooks/{token}", hookHandler(s.triggers, s.templates, s.submitter, s.log))
 	mux.Handle("POST /templates", createTemplateHandler(s.templates, s.log))
+	mux.Handle("PUT /templates/{id}", updateTemplateHandler(s.templates, s.log))
 	mux.Handle("GET /templates", listTemplatesHandler(s.templates, s.log))
 	mux.Handle("DELETE /templates/{id}", deleteTemplateHandler(s.templates, s.log))
 	mux.Handle("POST /templates/{id}/launch", launchTemplateHandler(s.templates, s.submitter, authz, s.log))

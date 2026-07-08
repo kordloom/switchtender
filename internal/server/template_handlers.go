@@ -78,6 +78,50 @@ func createTemplateHandler(store template.Store, log *zap.Logger) http.HandlerFu
 	}
 }
 
+// updateTemplateHandler changes an existing template's fields, keeping its id and creation time.
+func updateTemplateHandler(store template.Store, log *zap.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if store == nil {
+			respondError(w, log, http.StatusNotFound, "templates not enabled")
+			return
+		}
+		var req createTemplateRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			respondError(w, log, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		if req.Name == "" || req.Playbook == "" {
+			respondError(w, log, http.StatusBadRequest, "name and playbook are required")
+			return
+		}
+		id := r.PathValue("id")
+		t := &template.Template{
+			ID: id, Name: req.Name, ProjectID: req.ProjectID,
+			Playbook: req.Playbook, Inventory: req.Inventory, InventoryID: req.InventoryID,
+			Shards:        req.Shards,
+			CredentialIDs: req.CredentialIDs, ExtraVars: req.ExtraVars, Survey: req.Survey,
+			Queue: req.Queue,
+		}
+		err := store.Update(r.Context(), t)
+		if errors.Is(err, template.ErrNotFound) {
+			respondError(w, log, http.StatusNotFound, "template not found")
+			return
+		}
+		if err != nil {
+			log.Error("server: update template: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not update template")
+			return
+		}
+		updated, err := store.Get(r.Context(), id)
+		if err != nil {
+			log.Error("server: read updated template: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not read template")
+			return
+		}
+		respondJSON(w, log, http.StatusOK, updated, wantsPretty(r))
+	}
+}
+
 // listTemplatesHandler returns all templates.
 func listTemplatesHandler(store template.Store, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

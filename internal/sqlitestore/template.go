@@ -49,6 +49,36 @@ ON CONFLICT(id) DO UPDATE SET
 	return nil
 }
 
+// Update changes an existing template's fields, or returns template.ErrNotFound.
+func (s *templateStore) Update(ctx context.Context, t *template.Template) error {
+	vars, err := json.Marshal(t.ExtraVars)
+	if err != nil {
+		return fmt.Errorf("update template: %w", err)
+	}
+	survey, err := json.Marshal(t.Survey)
+	if err != nil {
+		return fmt.Errorf("update template: %w", err)
+	}
+	const q = `UPDATE templates SET
+	name=?, project_id=?, playbook=?, inventory=?, inventory_id=?, shards=?,
+	credential_ids=?, extra_vars=?, survey=?, queue=?
+	WHERE id=?`
+	res, err := s.db.ExecContext(ctx, q,
+		t.Name, t.ProjectID, t.Playbook, t.Inventory, t.InventoryID, t.Shards,
+		joinIDs(t.CredentialIDs), string(vars), string(survey), t.Queue, t.ID)
+	if err != nil {
+		return fmt.Errorf("update template: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("update template: %w", err)
+	}
+	if n == 0 {
+		return template.ErrNotFound
+	}
+	return nil
+}
+
 // Get returns the template with the given id, or template.ErrNotFound.
 func (s *templateStore) Get(ctx context.Context, id string) (*template.Template, error) {
 	const q = "SELECT " + templateColumns + " FROM templates WHERE id=?"

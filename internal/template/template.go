@@ -146,6 +146,9 @@ func coerce(f SurveyField, raw any) (any, error) {
 type Store interface {
 	// Save inserts or replaces the template identified by t.ID.
 	Save(ctx context.Context, t *Template) error
+	// Update changes an existing template's fields, preserving its creation time, or returns
+	// ErrNotFound.
+	Update(ctx context.Context, t *Template) error
 	// Get returns the template with the given id, or ErrNotFound.
 	Get(ctx context.Context, id string) (*Template, error)
 	// List returns all templates ordered by creation time, oldest first.

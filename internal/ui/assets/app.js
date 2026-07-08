@@ -644,12 +644,50 @@ async function loadProjects() {
 	}
 }
 
-// wireTemplateForm hooks the add template form up to POST /templates.
+// openTemplateEdit fills the template dialog with an existing record and switches it to edit mode.
+// The dialog does not expose inventory_id, so it is carried through the form dataset to avoid
+// dropping a stored inventory reference on save.
+function openTemplateEdit(t) {
+	const form = document.getElementById("template-form");
+	form.dataset.editId = t.id;
+	form.dataset.inventoryId = t.inventory_id || "";
+	document.getElementById("tpl-name").value = t.name;
+	document.getElementById("tpl-project").value = t.project_id || "";
+	document.getElementById("tpl-playbook").value = t.playbook;
+	document.getElementById("tpl-inventory").value = t.inventory || "";
+	document.getElementById("tpl-shards").value = t.shards ? String(t.shards) : "";
+	document.getElementById("tpl-queue").value = t.queue || "";
+	const chosen = new Set(t.credential_ids || []);
+	for (const opt of document.getElementById("tpl-credentials").options) {
+		opt.selected = chosen.has(opt.value);
+	}
+	document.getElementById("tpl-vars").value = t.extra_vars ? JSON.stringify(t.extra_vars, null, 2) : "";
+	document.getElementById("tpl-survey").value =
+		(t.survey && t.survey.length) ? JSON.stringify(t.survey, null, 2) : "";
+	document.getElementById("tpl-status").textContent = "";
+	setModalTitle("template", "Edit template");
+	document.getElementById("template-modal").hidden = false;
+}
+
+// wireTemplateForm hooks the template dialog up to POST /templates for a new record and PUT
+// /templates/{id} when editing. The New button resets the dialog to add mode.
 function wireTemplateForm() {
 	fillSelect(document.getElementById("tpl-project"), "/projects", "projects", (p) => p.name);
 	fillSelect(document.getElementById("tpl-credentials"), "/credentials", "credentials",
 		(c) => c.name + " (" + c.kind + ")");
-	document.getElementById("template-form").addEventListener("submit", async (e) => {
+	const form = document.getElementById("template-form");
+	const resetToCreate = () => {
+		delete form.dataset.editId;
+		delete form.dataset.inventoryId;
+		form.reset();
+		for (const opt of document.getElementById("tpl-credentials").options) opt.selected = false;
+		document.getElementById("tpl-status").textContent = "";
+		setModalTitle("template", "Add a template");
+	};
+	const openBtn = document.getElementById("template-open");
+	if (openBtn) openBtn.addEventListener("click", resetToCreate);
+
+	form.addEventListener("submit", async (e) => {
 		e.preventDefault();
 		const status = document.getElementById("tpl-status");
 		const payload = {
@@ -683,8 +721,15 @@ function wireTemplateForm() {
 				return;
 			}
 		}
+		const editId = form.dataset.editId;
+		if (editId && form.dataset.inventoryId) payload.inventory_id = form.dataset.inventoryId;
 		try {
-			await postAction("/templates", payload);
+			if (editId) {
+				await postAction("/templates/" + editId, payload, "PUT");
+			} else {
+				await postAction("/templates", payload);
+			}
+			resetToCreate();
 			status.textContent = "Saved.";
 			closeModal("template");
 			document.getElementById("templates").innerHTML = "";
@@ -731,6 +776,8 @@ async function loadTemplates() {
 				}
 			});
 			actions.appendChild(launch);
+			actions.appendChild(document.createTextNode(" "));
+			actions.appendChild(editButton(() => openTemplateEdit(t)));
 			actions.appendChild(document.createTextNode(" "));
 			const delBtn = deleteCell("/templates/" + t.id, "template " + t.name, tr);
 			actions.appendChild(delBtn.firstChild);
