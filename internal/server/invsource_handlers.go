@@ -9,6 +9,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/dcadolph/yardmaster/internal/grant"
 	"github.com/dcadolph/yardmaster/internal/inventory"
 	"github.com/dcadolph/yardmaster/internal/invsource"
 )
@@ -39,8 +40,10 @@ type listSourcesResponse struct {
 	Count int `json:"count"`
 }
 
-// createSourceHandler stores a new source and creates the inventory it maintains.
-func createSourceHandler(sources invsource.Store, inventories inventory.Store, log *zap.Logger) http.HandlerFunc {
+// createSourceHandler stores a new source and creates the inventory it maintains. A source runs a
+// project's config and an env credential, so the actor must hold use access on each referenced
+// object before it is stored.
+func createSourceHandler(sources invsource.Store, inventories inventory.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if sources == nil || inventories == nil {
 			respondError(w, log, http.StatusNotFound, "inventory sources not enabled")
@@ -53,6 +56,10 @@ func createSourceHandler(sources invsource.Store, inventories inventory.Store, l
 		}
 		if req.Name == "" || req.Source == "" {
 			respondError(w, log, http.StatusBadRequest, "name and source are required")
+			return
+		}
+		if denyOnAuthzError(w, log,
+			authz.authorizeAll(r.Context(), grant.AccessUse, req.ProjectID, req.CredentialID)) {
 			return
 		}
 		inv := &inventory.Inventory{

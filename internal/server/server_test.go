@@ -17,6 +17,7 @@ import (
 	"github.com/dcadolph/yardmaster/internal/auth"
 	"github.com/dcadolph/yardmaster/internal/dispatch"
 	"github.com/dcadolph/yardmaster/internal/event"
+	"github.com/dcadolph/yardmaster/internal/grant"
 	"github.com/dcadolph/yardmaster/internal/live"
 	"github.com/dcadolph/yardmaster/internal/run"
 	"github.com/dcadolph/yardmaster/internal/schedule"
@@ -1043,6 +1044,85 @@ func TestReadOnlyRejectsMutations(t *testing.T) {
 		handler.ServeHTTP(rec, httptest.NewRequest(method, "/runs", nil))
 		if rec.Code != http.StatusForbidden {
 			t.Errorf("%s /runs status = %d, want 403", method, rec.Code)
+		}
+	}
+}
+
+func TestMutationsAuthorizeReferencedObjects(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	tokens := auth.NewMemStore()
+	users := user.NewMemStore()
+	grants := grant.NewMemStore()
+
+	// mint creates a user with the given role and returns a bearer token and the user id.
+	mint := func(name string, role user.Role) (string, string) {
+		u, err := user.New(name, "pw", role)
+		if err != nil {
+			t.Fatalf("user.New() error = %v", err)
+		}
+		if err := users.Save(ctx, u); err != nil {
+			t.Fatalf("users.Save() error = %v", err)
+		}
+		plain, tok, err := auth.New("t-" + name)
+		if err != nil {
+			t.Fatalf("auth.New() error = %v", err)
+		}
+		tok.UserID = u.ID
+		if err := tokens.Save(ctx, tok); err != nil {
+			t.Fatalf("tokens.Save() error = %v", err)
+		}
+		return plain, u.ID
+	}
+	ownerTok, ownerID := mint("owner", user.RoleOperator)
+	otherTok, _ := mint("other", user.RoleOperator)
+	adminTok, _ := mint("boss", user.RoleAdmin)
+
+	// The owner holds use on the secret credential and project; the open credential has no grant.
+	for _, object := range []string{"cred_secret", "proj_secret"} {
+		if err := grants.Save(ctx, &grant.Grant{
+			ID: grant.NewID(), Subject: ownerID, Object: object, Access: grant.AccessUse,
+		}); err != nil {
+			t.Fatalf("grants.Save() error = %v", err)
+		}
+	}
+
+	handler := New(run.NewMemStore(), &fakeSubmitter{run: &run.Run{ID: "run_x"}}, zap.NewNop(),
+		WithTokens(tokens), WithUsers(users), WithGrants(grants, false)).Handler()
+
+	do := func(method, path, bearer, body string) int {
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+bearer)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		return rec.Code
+	}
+
+	// Runs and pipelines are the mutation paths an operator may reach by role, so object grants are
+	// enforced there. Inventory-source create is admin only at the role gate, so its object check is
+	// defense in depth and not exercised through an operator here.
+	runSecret := `{"playbook":"p.yml","credential_ids":["cred_secret"]}`
+	runOpen := `{"playbook":"p.yml","credential_ids":["cred_open"]}`
+	pipeSecret := `{"steps":[{"playbook":"p.yml"}],"project_id":"proj_secret"}`
+
+	tests := []struct {
+		Name   string
+		Method string
+		Path   string
+		Token  string
+		Body   string
+		Want   int
+	}{
+		{"run other denied secret credential", http.MethodPost, "/runs", otherTok, runSecret, http.StatusForbidden},         // Test 0.
+		{"run owner uses granted credential", http.MethodPost, "/runs", ownerTok, runSecret, http.StatusAccepted},           // Test 1.
+		{"run admin bypasses grants", http.MethodPost, "/runs", adminTok, runSecret, http.StatusAccepted},                   // Test 2.
+		{"run ungranted credential defers to role", http.MethodPost, "/runs", otherTok, runOpen, http.StatusAccepted},       // Test 3.
+		{"pipeline other denied secret project", http.MethodPost, "/pipelines", otherTok, pipeSecret, http.StatusForbidden}, // Test 4.
+		{"pipeline owner uses granted project", http.MethodPost, "/pipelines", ownerTok, pipeSecret, http.StatusAccepted},   // Test 5.
+	}
+	for i, test := range tests {
+		if got := do(test.Method, test.Path, test.Token, test.Body); got != test.Want {
+			t.Errorf("test %d (%s): status = %d, want %d", i, test.Name, got, test.Want)
 		}
 	}
 }

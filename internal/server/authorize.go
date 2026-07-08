@@ -3,6 +3,9 @@ package server
 import (
 	"context"
 	"errors"
+	"net/http"
+
+	"go.uber.org/zap"
 
 	"github.com/dcadolph/yardmaster/internal/grant"
 	"github.com/dcadolph/yardmaster/internal/team"
@@ -82,4 +85,35 @@ func (a *authorizer) subjectsFor(ctx context.Context, actor Actor) (map[string]b
 		subjects[tid] = true
 	}
 	return subjects, nil
+}
+
+// authorizeAll requires want access on every non-empty object, returning the first denial. Handlers
+// that reference several grantable objects at once, such as a run naming a project, an inventory,
+// and credentials, use it to authorize each before acting.
+func (a *authorizer) authorizeAll(ctx context.Context, want grant.Access, objects ...string) error {
+	for _, obj := range objects {
+		if obj == "" {
+			continue
+		}
+		if err := a.authorize(ctx, obj, want); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// denyOnAuthzError writes the response for an authorization failure and reports whether the request
+// was denied. A forbidden grant becomes 403; any other error becomes 500. A nil error is not a
+// denial and returns false so the caller proceeds.
+func denyOnAuthzError(w http.ResponseWriter, log *zap.Logger, err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, errForbiddenGrant) {
+		forbidden(w)
+		return true
+	}
+	log.Error("server: authorize: " + err.Error())
+	respondError(w, log, http.StatusInternalServerError, "could not authorize request")
+	return true
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/dcadolph/yardmaster/internal/credential"
 	"github.com/dcadolph/yardmaster/internal/dispatch"
 	"github.com/dcadolph/yardmaster/internal/event"
+	"github.com/dcadolph/yardmaster/internal/grant"
 	"github.com/dcadolph/yardmaster/internal/inventory"
 	"github.com/dcadolph/yardmaster/internal/live"
 	"github.com/dcadolph/yardmaster/internal/project"
@@ -220,8 +221,10 @@ func healthHandler() http.HandlerFunc {
 	}
 }
 
-// createRunHandler accepts a run request and submits it for execution.
-func createRunHandler(submitter Submitter, log *zap.Logger) http.HandlerFunc {
+// createRunHandler accepts a run request and submits it for execution. It authorizes the actor for
+// every object the run references, so a run cannot borrow another user's project, inventory, or
+// credentials to reach hosts they were never granted.
+func createRunHandler(submitter Submitter, authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	if submitter == nil {
 		panic("server: createRunHandler: Submitter required")
 	}
@@ -233,6 +236,11 @@ func createRunHandler(submitter Submitter, log *zap.Logger) http.HandlerFunc {
 		}
 		if req.Playbook == "" {
 			respondError(w, log, http.StatusBadRequest, "playbook is required")
+			return
+		}
+
+		objects := append([]string{req.ProjectID, req.InventoryID}, req.CredentialIDs...)
+		if denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse, objects...)) {
 			return
 		}
 
@@ -270,8 +278,10 @@ func createRunHandler(submitter Submitter, log *zap.Logger) http.HandlerFunc {
 	}
 }
 
-// createPipelineHandler accepts a pipeline request and submits it for execution.
-func createPipelineHandler(submitter Submitter, log *zap.Logger) http.HandlerFunc {
+// createPipelineHandler accepts a pipeline request and submits it for execution. Like a run, a
+// pipeline reaches hosts through a project and credentials, so the actor must hold use access on
+// each before it is submitted.
+func createPipelineHandler(submitter Submitter, authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	if submitter == nil {
 		panic("server: createPipelineHandler: Submitter required")
 	}
@@ -290,6 +300,11 @@ func createPipelineHandler(submitter Submitter, log *zap.Logger) http.HandlerFun
 				respondError(w, log, http.StatusBadRequest, "each step requires a playbook")
 				return
 			}
+		}
+
+		objects := append([]string{req.ProjectID}, req.CredentialIDs...)
+		if denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse, objects...)) {
+			return
 		}
 
 		popts := []run.SubmitOption{run.WithCredentialIDs(req.CredentialIDs)}

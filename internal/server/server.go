@@ -222,6 +222,7 @@ func New(store run.Store, submitter Submitter, log *zap.Logger, opts ...Option) 
 // Handler returns the HTTP handler serving the Yardmaster API and web interface.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	authz := &authorizer{grants: s.grants, teams: s.teams, strict: s.strictGrants}
 	mux.Handle("GET /healthz", healthHandler())
 	mux.Handle("GET /metrics", metricsHandler(s.store, s.log))
 	mux.Handle("GET /fleet", fleetHandler(s.store, s.log))
@@ -229,8 +230,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /tasks", taskTrendsHandler(s.store, s.log))
 	mux.Handle("GET /workers", workersHandler(s.store, s.log))
 	mux.Handle("GET /audit", auditHandler(s.audits, s.log))
-	mux.Handle("POST /runs", createRunHandler(s.submitter, s.log))
-	mux.Handle("POST /pipelines", createPipelineHandler(s.submitter, s.log))
+	mux.Handle("POST /runs", createRunHandler(s.submitter, authz, s.log))
+	mux.Handle("POST /pipelines", createPipelineHandler(s.submitter, authz, s.log))
 	mux.Handle("POST /runs/{id}/cancel", cancelRunHandler(s.store, s.canceler, s.log))
 	mux.Handle("POST /runs/{id}/retry", retryRunHandler(s.retrier, s.log))
 	mux.Handle("GET /runs", listRunsHandler(s.store, s.log))
@@ -262,7 +263,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /inventories", createInventoryHandler(s.inventories, s.log))
 	mux.Handle("GET /inventories", listInventoriesHandler(s.inventories, s.log))
 	mux.Handle("DELETE /inventories/{id}", deleteInventoryHandler(s.inventories, s.log))
-	mux.Handle("POST /inventory-sources", createSourceHandler(s.invSources, s.inventories, s.log))
+	mux.Handle("POST /inventory-sources", createSourceHandler(s.invSources, s.inventories, authz, s.log))
 	mux.Handle("GET /inventory-sources", listSourcesHandler(s.invSources, s.log))
 	mux.Handle("DELETE /inventory-sources/{id}", deleteSourceHandler(s.invSources, s.log))
 	mux.Handle("POST /inventory-sources/{id}/refresh", refreshSourceHandler(s.refresher, s.log))
@@ -273,7 +274,6 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /templates", createTemplateHandler(s.templates, s.log))
 	mux.Handle("GET /templates", listTemplatesHandler(s.templates, s.log))
 	mux.Handle("DELETE /templates/{id}", deleteTemplateHandler(s.templates, s.log))
-	authz := &authorizer{grants: s.grants, teams: s.teams, strict: s.strictGrants}
 	mux.Handle("POST /templates/{id}/launch", launchTemplateHandler(s.templates, s.submitter, authz, s.log))
 	mux.Handle("POST /teams", createTeamHandler(s.teams, s.log))
 	mux.Handle("GET /teams", listTeamsHandler(s.teams, s.log))
