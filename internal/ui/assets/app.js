@@ -562,6 +562,16 @@ async function loadProjects() {
 			tr.appendChild(td(p.branch || "default", "mono"));
 			tr.appendChild(tdTime(p.created_at));
 			tr.appendChild(deleteCell("/projects/" + p.id, "project " + p.name, tr));
+			inspectable(tr, p.name, [
+				{ label: "Repository", value: p.repo_url },
+				{ label: "Branch", value: p.branch || "default" },
+				{ label: "Credential", value: p.credential_id },
+				{ label: "Image", value: p.image },
+				{ label: "Install deps", value: p.install_deps ? "yes" : "no" },
+				{ label: "Pull credential", value: p.pull_credential_id },
+				{ label: "Created", value: fmtTime(p.created_at) },
+				{ label: "ID", value: p.id },
+			]);
 			tbody.appendChild(tr);
 		}
 		setStatus("");
@@ -739,6 +749,7 @@ function deleteCell(path, label, tr) {
 	del.textContent = "Delete";
 	del.addEventListener("click", async (e) => {
 		e.preventDefault();
+		e.stopPropagation();
 		if (!window.confirm("Delete " + label + "?")) return;
 		try {
 			const res = await fetch(path, { method: "DELETE", headers: authHeaders() });
@@ -789,6 +800,11 @@ async function loadInventories() {
 			tr.appendChild(td(i.name));
 			tr.appendChild(tdTime(i.created_at));
 			tr.appendChild(deleteCell("/inventories/" + i.id, "inventory " + i.name, tr));
+			inspectable(tr, i.name, [
+				{ label: "Created", value: fmtTime(i.created_at) },
+				{ label: "ID", value: i.id },
+				{ label: "Content", value: i.content, block: true },
+			]);
 			tbody.appendChild(tr);
 		}
 		setStatus("");
@@ -2076,4 +2092,50 @@ function drillField(label, value) {
 	f.appendChild(l);
 	f.appendChild(v);
 	return f;
+}
+
+// ensureDrill returns the shared inspect panel's body, creating the slide-in panel on pages that do
+// not declare it so any resource list can reuse the run-detail drawer.
+function ensureDrill() {
+	let drill = document.getElementById("drill");
+	if (!drill) {
+		drill = document.createElement("aside");
+		drill.id = "drill";
+		drill.className = "drill";
+		drill.hidden = true;
+		const close = document.createElement("button");
+		close.className = "drill-close";
+		close.id = "drill-close";
+		close.setAttribute("aria-label", "Close");
+		close.innerHTML = "&times;";
+		close.addEventListener("click", () => { drill.hidden = true; });
+		const body = document.createElement("div");
+		body.id = "drill-body";
+		drill.appendChild(close);
+		drill.appendChild(body);
+		document.body.appendChild(drill);
+	}
+	return document.getElementById("drill-body");
+}
+
+// inspectDrawer opens the shared panel with a title and a list of fields. A field marked block
+// renders as a monospace block, for multi line values such as inventory content. Empty fields are
+// skipped so the panel stays terse.
+function inspectDrawer(title, fields) {
+	const body = ensureDrill();
+	body.innerHTML = "";
+	const h = document.createElement("h3");
+	h.textContent = title;
+	body.appendChild(h);
+	for (const f of fields) {
+		if (f.value === undefined || f.value === null || f.value === "") continue;
+		body.appendChild(f.block ? drillBlock(f.label, f.value) : drillField(f.label, f.value));
+	}
+	document.getElementById("drill").hidden = false;
+}
+
+// inspectable marks a table row as clickable and opens the inspect drawer for it on click.
+function inspectable(tr, title, fields) {
+	tr.classList.add("row-inspect");
+	tr.addEventListener("click", () => inspectDrawer(title, fields));
 }
