@@ -116,9 +116,10 @@ func WithDocs(docs fs.FS) Option {
 	return func(srv *Server) { srv.docs = docs }
 }
 
-// WithReadOnly rejects every mutating request, so a public demo cannot be changed by its visitors.
-func WithReadOnly() Option {
-	return func(srv *Server) { srv.readOnly = true }
+// WithReadOnly rejects every mutating request when set, so a public instance cannot be changed by
+// its visitors.
+func WithReadOnly(readOnly bool) Option {
+	return func(srv *Server) { srv.readOnly = readOnly }
 }
 
 // WithInventorySources enables the dynamic inventory source endpoints.
@@ -214,7 +215,7 @@ func New(store run.Store, submitter Submitter, log *zap.Logger, opts ...Option) 
 	for _, opt := range opts {
 		opt(srv)
 	}
-	srv.web = ui.New(srv.log, srv.docs)
+	srv.web = ui.New(srv.log, srv.docs, srv.readOnly)
 	return srv
 }
 

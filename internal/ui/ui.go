@@ -34,20 +34,23 @@ type UI struct {
 	docs fs.FS
 	// md renders documentation markdown to HTML.
 	md goldmark.Markdown
+	// readOnly hides mutating controls in the pages for a read-only demo.
+	readOnly bool
 }
 
 // New parses the embedded templates and returns a UI. It panics if the embedded templates fail to
 // parse, which is a build time programming error. docs, when non-nil, is the documentation tree
-// served under /ui/docs.
-func New(log *zap.Logger, docs fs.FS) *UI {
+// served under /ui/docs; readOnly hides the launch panel and run action buttons for a demo.
+func New(log *zap.Logger, docs fs.FS, readOnly bool) *UI {
 	if log == nil {
 		log = zap.NewNop()
 	}
 	return &UI{
-		tmpl: template.Must(template.ParseFS(templateFS, "templates/*.html")),
-		log:  log,
-		docs: docs,
-		md:   goldmark.New(goldmark.WithExtensions(extension.GFM)),
+		tmpl:     template.Must(template.ParseFS(templateFS, "templates/*.html")),
+		log:      log,
+		docs:     docs,
+		md:       goldmark.New(goldmark.WithExtensions(extension.GFM)),
+		readOnly: readOnly,
 	}
 }
 
@@ -82,12 +85,12 @@ func (u *UI) Handler() http.Handler {
 
 // index renders the run history page.
 func (u *UI) index(w http.ResponseWriter, _ *http.Request) {
-	u.render(w, "index.html", nil)
+	u.render(w, "index.html", map[string]any{"ReadOnly": u.readOnly})
 }
 
 // detail renders the run detail page for a single run.
 func (u *UI) detail(w http.ResponseWriter, r *http.Request) {
-	u.render(w, "detail.html", map[string]string{"RunID": r.PathValue("id")})
+	u.render(w, "detail.html", map[string]any{"RunID": r.PathValue("id"), "ReadOnly": u.readOnly})
 }
 
 // fleet renders the fleet health page.

@@ -1028,7 +1028,7 @@ func TestAuthGateExpiredToken(t *testing.T) {
 func TestReadOnlyRejectsMutations(t *testing.T) {
 	t.Parallel()
 	store := run.NewMemStore()
-	handler := New(store, &fakeSubmitter{}, zap.NewNop(), WithReadOnly()).Handler()
+	handler := New(store, &fakeSubmitter{}, zap.NewNop(), WithReadOnly(true)).Handler()
 
 	// A read passes through.
 	rec := httptest.NewRecorder()
