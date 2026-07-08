@@ -63,6 +63,7 @@ func (u *UI) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("GET /ui/assets/", http.StripPrefix("/ui/assets/", http.FileServer(http.FS(assets))))
 	mux.HandleFunc("GET /ui/runs/{id}", u.detail)
+	mux.HandleFunc("GET /ui/runs", u.runs)
 	mux.HandleFunc("GET /ui/fleet", u.fleet)
 	mux.HandleFunc("GET /ui/hosts/{host}", u.host)
 	mux.HandleFunc("GET /ui/tasks", u.tasks)
@@ -83,9 +84,14 @@ func (u *UI) Handler() http.Handler {
 	return mux
 }
 
-// index renders the run history page.
+// index renders the overview home page.
 func (u *UI) index(w http.ResponseWriter, _ *http.Request) {
-	u.render(w, "index.html", map[string]any{"ReadOnly": u.readOnly})
+	u.render(w, "overview.html", map[string]any{"ReadOnly": u.readOnly})
+}
+
+// runs renders the run history page.
+func (u *UI) runs(w http.ResponseWriter, _ *http.Request) {
+	u.render(w, "runs.html", map[string]any{"ReadOnly": u.readOnly})
 }
 
 // detail renders the run detail page for a single run.

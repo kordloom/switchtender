@@ -3,33 +3,48 @@
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
-	<title>Yardmaster</title>
+	<title>Runs - Yardmaster</title>
 	<link rel="icon" type="image/png" href="/ui/assets/favicon.png">
 	<link rel="stylesheet" href="/ui/assets/app.css">
 </head>
-<body data-page="index"{{if .ReadOnly}} data-readonly="true"{{end}}>
+<body data-page="runs"{{if .ReadOnly}} data-readonly="true"{{end}}>
 	<header class="topbar">
-		<div class="brand"><img class="brand-logo" src="/ui/assets/logo.png" alt="">Yardmaster</div>
-		<div class="tagline">Playbook execution and fleet orchestration</div>
-		<nav class="nav">
-			<a href="/ui/fleet">Fleet health</a>
-			<a href="/ui/tasks">Task trends</a>
-			<a href="/ui/workers">Workers</a>
-			<a href="/ui/projects">Projects</a>
-			<a href="/ui/inventories">Inventories</a>
-			<a href="/ui/sources">Sources</a>
-			<a href="/ui/templates">Templates</a>
-			<a href="/ui/credentials">Credentials</a>
-			<a href="/ui/users">Users</a>
-			<a href="/ui/schedules">Schedules</a>
-			<a href="/ui/docs">Docs</a>
-		</nav>
+		<div class="brand"><picture><source media="(prefers-color-scheme: dark)" srcset="/ui/assets/logo-train-tracks-dark.png"><img class="brand-logo" src="/ui/assets/logo-train-tracks.png" alt="Yardmaster"></picture>Yardmaster</div>
 	</header>
 
 	<main class="content">
-		<section class="panel" id="launch-panel">
-			<div class="panel-head">
+		<div class="page-head">
+			<div class="page-head-text">
+				<h1>Runs</h1>
+				<p class="muted">Every playbook execution across the fleet, newest first.</p>
+			</div>
+			<button id="launch-open" class="button primary">
+				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+				Launch run
+			</button>
+		</div>
+
+		<div class="summary" id="summary" hidden></div>
+		<div id="status" class="muted">Loading runs.</div>
+		<table class="runs" hidden>
+			<thead>
+				<tr>
+					<th>Status</th>
+					<th>Run</th>
+					<th>Playbook</th>
+					<th>Started</th>
+					<th>Duration</th>
+				</tr>
+			</thead>
+			<tbody id="runs"></tbody>
+		</table>
+	</main>
+
+	<div id="launch-modal" class="modal" hidden>
+		<div class="modal-card wide">
+			<div class="modal-head">
 				<h2>Launch a run</h2>
+				<button type="button" class="modal-close" id="launch-close" aria-label="Close">&times;</button>
 			</div>
 			<form id="launch-form" class="launch-grid">
 				<label class="field-label">Project
@@ -58,24 +73,8 @@
 					<span id="launch-status" class="muted"></span>
 				</div>
 			</form>
-		</section>
-
-		<h1>Runs</h1>
-		<div id="status" class="muted">Loading runs.</div>
-		<div class="summary" id="summary" hidden></div>
-		<table class="runs" hidden>
-			<thead>
-				<tr>
-					<th>Status</th>
-					<th>Run</th>
-					<th>Playbook</th>
-					<th>Started</th>
-					<th>Duration</th>
-				</tr>
-			</thead>
-			<tbody id="runs"></tbody>
-		</table>
-	</main>
+		</div>
+	</div>
 
 	<script src="/ui/assets/app.js"></script>
 </body>

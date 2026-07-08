@@ -23,23 +23,27 @@ func TestUIRoutes(t *testing.T) {
 		WantStatus   int
 		WantContains string
 	}{
-		{ // Test 0: History page renders.
-			Name: "index", Path: "/ui/", WantStatus: http.StatusOK, WantContains: `data-page="index"`,
+		{ // Test 0: Overview home renders.
+			Name: "overview", Path: "/ui/", WantStatus: http.StatusOK,
+			WantContains: `data-page="overview"`,
 		},
-		{ // Test 1: Detail page carries the run id.
+		{ // Test 1: Runs page renders.
+			Name: "runs", Path: "/ui/runs", WantStatus: http.StatusOK, WantContains: `data-page="runs"`,
+		},
+		{ // Test 2: Detail page carries the run id.
 			Name: "detail", Path: "/ui/runs/run_1", WantStatus: http.StatusOK,
 			WantContains: `data-run-id="run_1"`,
 		},
-		{ // Test 2: Stylesheet is served.
+		{ // Test 3: Stylesheet is served.
 			Name: "css", Path: "/ui/assets/app.css", WantStatus: http.StatusOK, WantContains: "--bg",
 		},
-		{ // Test 3: Script is served.
+		{ // Test 4: Script is served.
 			Name: "js", Path: "/ui/assets/app.js", WantStatus: http.StatusOK, WantContains: "buildModel",
 		},
-		{ // Test 4: Fleet page renders.
+		{ // Test 5: Fleet page renders.
 			Name: "fleet", Path: "/ui/fleet", WantStatus: http.StatusOK, WantContains: `data-page="fleet"`,
 		},
-		{ // Test 5: Schedules page renders.
+		{ // Test 6: Schedules page renders.
 			Name: "schedules", Path: "/ui/schedules", WantStatus: http.StatusOK,
 			WantContains: `data-page="schedules"`,
 		},

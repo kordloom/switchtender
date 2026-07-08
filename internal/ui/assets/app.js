@@ -3,13 +3,67 @@
 // OUTCOME_RANK orders outcomes from least to most severe for rollups.
 const OUTCOME_RANK = { skipped: 0, ok: 1, changed: 2, unreachable: 3, failed: 4 };
 
+// NAV_GROUPS defines the drawer navigation, grouped by concern. Items marked admin are hidden from
+// signed in non-admins; the server still enforces the real policy.
+const NAV_GROUPS = [
+	{ label: "Execution", items: [
+		{ key: "overview", href: "/ui/", label: "Overview", desc: "At a glance" },
+		{ key: "runs", href: "/ui/runs", label: "Runs", desc: "Every playbook execution" },
+		{ key: "fleet", href: "/ui/fleet", label: "Fleet health", desc: "Flaky host detection" },
+		{ key: "tasks", href: "/ui/tasks", label: "Task trends", desc: "Duration trends per task" },
+		{ key: "workers", href: "/ui/workers", label: "Workers", desc: "Executor fleet status" },
+	] },
+	{ label: "Automation", items: [
+		{ key: "projects", href: "/ui/projects", label: "Projects", desc: "Git-sourced playbooks", admin: true },
+		{ key: "inventories", href: "/ui/inventories", label: "Inventories", desc: "Stored host inventories", admin: true },
+		{ key: "sources", href: "/ui/sources", label: "Sources", desc: "Dynamic inventory sync", admin: true },
+		{ key: "templates", href: "/ui/templates", label: "Templates", desc: "Saved launch presets" },
+		{ key: "schedules", href: "/ui/schedules", label: "Schedules", desc: "Cron-driven runs" },
+	] },
+	{ label: "Access", items: [
+		{ key: "credentials", href: "/ui/credentials", label: "Credentials", desc: "Secrets and keys", admin: true },
+		{ key: "users", href: "/ui/users", label: "Users", desc: "Accounts and roles", admin: true },
+	] },
+	{ label: "Help", items: [
+		{ key: "docs", href: "/ui/docs", label: "Docs", desc: "Guides and reference" },
+	] },
+];
+
+// PAGE_NAV maps a page identifier to the nav key it should highlight.
+const PAGE_NAV = {
+	overview: "overview", runs: "runs", detail: "runs", fleet: "fleet", host: "fleet",
+	tasks: "tasks", workers: "workers", projects: "projects", inventories: "inventories",
+	sources: "sources", jobtemplates: "templates", schedules: "schedules",
+	credentials: "credentials", users: "users", docs: "docs",
+};
+
+// NAV_ICONS holds the inline SVG body for each nav key, stroked in the current color.
+const NAV_ICONS = {
+	overview: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/>',
+	runs: '<circle cx="12" cy="12" r="9"/><polygon points="10 8 16 12 10 16"/>',
+	fleet: '<path d="M3 12h4l2 6 4-12 2 6h6"/>',
+	tasks: '<path d="M3 17l6-6 4 4 8-8"/><path d="M17 7h4v4"/>',
+	workers: '<rect x="3" y="4" width="18" height="7" rx="1"/><rect x="3" y="13" width="18" height="7" rx="1"/><line x1="7" y1="7.5" x2="7.01" y2="7.5"/><line x1="7" y1="16.5" x2="7.01" y2="16.5"/>',
+	projects: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+	inventories: '<line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>',
+	sources: '<path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>',
+	templates: '<polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/>',
+	schedules: '<circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/>',
+	credentials: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+	users: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
+	docs: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>',
+};
+
 document.addEventListener("DOMContentLoaded", () => {
 	const close = document.getElementById("drill-close");
 	if (close) {
 		close.addEventListener("click", () => { document.getElementById("drill").hidden = true; });
 	}
 	const page = document.body.dataset.page;
-	if (page === "index") {
+	if (page === "overview") {
+		loadOverview();
+	} else if (page === "runs") {
+		wireLaunchModal();
 		if (!isReadOnly()) wireLaunchForm();
 		loadRuns();
 	} else if (page === "detail") {
@@ -45,7 +99,7 @@ document.addEventListener("DOMContentLoaded", () => {
 		wireSourceForm();
 		loadSources();
 	}
-	hideAdminNav();
+	buildNav();
 	if (isReadOnly()) applyReadOnly();
 	setInterval(refreshRelTimes, 20000);
 });
@@ -67,25 +121,111 @@ function showSkeletonRows(tbody, rows, cols) {
 	}
 }
 
-// applyReadOnly hides every add form and its panel so a read-only demo shows no controls that would
-// be rejected. Row action buttons are hidden by CSS.
+// applyReadOnly keeps the forms and controls visible so the demo conveys what the product does, but
+// disables the actions that would mutate and adds a banner. Row action buttons are dimmed by CSS.
 function applyReadOnly() {
-	document.querySelectorAll("form").forEach((f) => {
-		const panel = f.closest(".panel");
-		(panel || f).hidden = true;
+	const main = document.querySelector(".content");
+	if (main && !main.querySelector(".ro-banner")) {
+		const banner = document.createElement("div");
+		banner.className = "ro-banner";
+		banner.textContent = "Read-only demo. Browse the data freely; changes are disabled.";
+		main.insertBefore(banner, main.firstChild);
+	}
+	for (const form of document.querySelectorAll("form")) {
+		for (const btn of form.querySelectorAll("button")) btn.disabled = true;
+		const actions = form.querySelector(".launch-actions") || form;
+		if (!actions.querySelector(".ro-note")) {
+			const note = document.createElement("span");
+			note.className = "ro-note";
+			note.textContent = "Disabled in the demo";
+			actions.appendChild(note);
+		}
+	}
+}
+
+// buildNav injects the menu toggle and the slide-in drawer on every page but sign in, highlighting
+// the current page and hiding admin links from non-admins. The toggle opens and closes the drawer.
+function buildNav() {
+	if (document.body.dataset.page === "login") return;
+	const topbar = document.querySelector(".topbar");
+	if (!topbar) return;
+
+	const role = localStorage.getItem("ym_role");
+	const showAdmin = !role || role === "admin";
+	const activeKey = PAGE_NAV[document.body.dataset.page] || "";
+
+	const burger = '<line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/>' +
+		'<line x1="3" y1="18" x2="21" y2="18"/>';
+	const cross = '<line x1="6" y1="6" x2="18" y2="18"/><line x1="6" y1="18" x2="18" y2="6"/>';
+
+	const toggle = document.createElement("button");
+	toggle.className = "nav-toggle";
+	toggle.setAttribute("aria-label", "Open menu");
+	toggle.setAttribute("aria-expanded", "false");
+	toggle.innerHTML = svgIcon(burger);
+	topbar.insertBefore(toggle, topbar.firstChild);
+
+	const backdrop = document.createElement("div");
+	backdrop.className = "nav-backdrop";
+	backdrop.hidden = true;
+
+	const drawer = document.createElement("nav");
+	drawer.className = "nav-drawer";
+	drawer.hidden = true;
+	drawer.setAttribute("aria-label", "Main navigation");
+
+	for (const group of NAV_GROUPS) {
+		const items = group.items.filter((it) => showAdmin || !it.admin);
+		if (!items.length) continue;
+		const g = document.createElement("div");
+		g.className = "nav-group";
+		const gl = document.createElement("div");
+		gl.className = "nav-group-label";
+		gl.textContent = group.label;
+		g.appendChild(gl);
+		for (const it of items) {
+			const a = document.createElement("a");
+			a.className = "nav-item" + (it.key === activeKey ? " active" : "");
+			a.href = it.href;
+			a.innerHTML = svgIcon(NAV_ICONS[it.key] || "");
+			a.appendChild(document.createTextNode(it.label));
+			if (it.key === activeKey) a.setAttribute("aria-current", "page");
+			g.appendChild(a);
+		}
+		drawer.appendChild(g);
+	}
+
+	document.body.appendChild(backdrop);
+	document.body.appendChild(drawer);
+
+	// Pin the drawer directly under the top bar, tracking its height across zoom and resize.
+	const syncHeight = () => document.documentElement.style
+		.setProperty("--topbar-h", topbar.offsetHeight + "px");
+	syncHeight();
+	window.addEventListener("resize", syncHeight);
+
+	let isOpen = false;
+	const setOpen = (v) => {
+		isOpen = v;
+		backdrop.hidden = !v;
+		drawer.hidden = !v;
+		document.body.classList.toggle("nav-open", v);
+		toggle.setAttribute("aria-expanded", v ? "true" : "false");
+		toggle.setAttribute("aria-label", v ? "Close menu" : "Open menu");
+		toggle.innerHTML = svgIcon(v ? cross : burger);
+		if (v) { const first = drawer.querySelector(".nav-item"); if (first) first.focus(); }
+	};
+	toggle.addEventListener("click", () => setOpen(!isOpen));
+	backdrop.addEventListener("click", () => setOpen(false));
+	document.addEventListener("keydown", (e) => {
+		if (e.key === "Escape" && isOpen) { setOpen(false); toggle.focus(); }
 	});
 }
 
-// hideAdminNav hides management links from signed in non-admins. The server enforces the real
-// policy; this only trims the menu.
-function hideAdminNav() {
-	const role = localStorage.getItem("ym_role");
-	if (!role || role === "admin") return;
-	for (const a of document.querySelectorAll(".nav a")) {
-		if (["/ui/credentials", "/ui/projects", "/ui/users", "/ui/inventories", "/ui/sources"].includes(a.getAttribute("href"))) {
-			a.remove();
-		}
-	}
+// svgIcon wraps inner SVG markup in a stroked 24 by 24 icon that inherits the current color.
+function svgIcon(inner) {
+	return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" ' +
+		'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + inner + '</svg>';
 }
 
 // apiToken returns the stored API token, empty when the server runs open.
@@ -213,6 +353,20 @@ function refreshRelTimes() {
 	for (const el of document.querySelectorAll(".reltime[data-time]")) {
 		el.textContent = relTime(el.dataset.time);
 	}
+}
+
+// wireLaunchModal opens and closes the launch dialog on the runs page. The form inside posts through
+// wireLaunchForm, which navigates to the new run on success.
+function wireLaunchModal() {
+	const openBtn = document.getElementById("launch-open");
+	const modal = document.getElementById("launch-modal");
+	if (!openBtn || !modal) return;
+	const close = () => { modal.hidden = true; };
+	openBtn.addEventListener("click", () => { modal.hidden = false; });
+	const closeBtn = document.getElementById("launch-close");
+	if (closeBtn) closeBtn.addEventListener("click", close);
+	modal.addEventListener("click", (e) => { if (e.target === modal) close(); });
+	document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !modal.hidden) close(); });
 }
 
 // wireLaunchForm hooks the launch panel up to POST /runs and fills the credential picker.
@@ -733,6 +887,174 @@ async function loadWorkers() {
 	} catch (e) {
 		setStatus("Failed to load workers: " + e.message);
 	}
+}
+
+// loadOverview draws the home dashboard: headline metrics, recent runs, a fleet snapshot, and the
+// jump tiles that navigate to every section.
+async function loadOverview() {
+	renderJumpTiles();
+	wireTileFilter();
+	const [runsRes, fleetRes] = await Promise.all([
+		getJSON("/runs").catch(() => ({ runs: [] })),
+		getJSON("/fleet").catch(() => ({ hosts: [] })),
+	]);
+	const runs = runsRes.runs || [];
+	const hosts = fleetRes.hosts || [];
+	renderOverviewMetrics(runs, hosts);
+	renderRecentRuns(runs.slice(0, 6));
+	renderFleetSnapshot(hosts.slice(0, 6));
+	setStatus("");
+}
+
+// renderOverviewMetrics fills the headline metric strip from the run and fleet data.
+function renderOverviewMetrics(runs, hosts) {
+	let succeeded = 0;
+	let failed = 0;
+	for (const r of runs) {
+		if (r.status === "succeeded") succeeded++;
+		else if (r.status === "failed") failed++;
+	}
+	const rate = runs.length ? Math.round((succeeded / runs.length) * 100) + "%" : "—";
+	const el = document.getElementById("ov-metrics");
+	el.innerHTML = "";
+	el.appendChild(statCard(runs.length, "Total runs", ""));
+	el.appendChild(statCard(rate, "Success rate", ""));
+	el.appendChild(statCard(failed, "Failed", failed ? "failed" : ""));
+	el.appendChild(statCard(hosts.length, "Hosts tracked", ""));
+	el.hidden = false;
+}
+
+// renderRecentRuns lists the latest runs, each a link to its detail page.
+function renderRecentRuns(runs) {
+	const el = document.getElementById("recent");
+	el.innerHTML = "";
+	if (!runs.length) { el.appendChild(emptyLine("No runs yet.")); return; }
+	for (const r of runs) {
+		const row = document.createElement("a");
+		row.className = "ov-row";
+		row.href = "/ui/runs/" + r.id;
+		row.appendChild(badge(r.status));
+		const name = document.createElement("span");
+		name.className = "ov-row-name";
+		name.textContent = baseName(r.playbook) || r.id;
+		name.title = r.playbook || r.id;
+		row.appendChild(name);
+		const started = r.started_at || r.created_at;
+		const meta = document.createElement("span");
+		meta.className = "ov-row-meta";
+		if (started) {
+			meta.textContent = relTime(started);
+			meta.title = fmtTime(started);
+			meta.dataset.time = started;
+			meta.classList.add("reltime");
+		}
+		row.appendChild(meta);
+		el.appendChild(row);
+	}
+}
+
+// renderFleetSnapshot lists the top hosts by recent activity, each a link to its history.
+function renderFleetSnapshot(hosts) {
+	const el = document.getElementById("fleet-snap");
+	el.innerHTML = "";
+	if (!hosts.length) { el.appendChild(emptyLine("No host history yet.")); return; }
+	for (const h of hosts) {
+		const row = document.createElement("a");
+		row.className = "ov-row";
+		row.href = "/ui/hosts/" + encodeURIComponent(h.host);
+		const name = document.createElement("span");
+		name.className = "ov-row-name mono";
+		name.textContent = h.host;
+		row.appendChild(name);
+		const chip = document.createElement("span");
+		chip.className = h.flaky ? "chip flaky" : "chip none";
+		chip.textContent = h.flaky ? "flaky" : "steady";
+		row.appendChild(chip);
+		row.appendChild(outcomeChip(h.last_outcome));
+		el.appendChild(row);
+	}
+}
+
+// renderJumpTiles draws the navigation tiles for every section but the overview itself, sorted
+// alphabetically, each with an icon chip, a label, and a one-line description.
+function renderJumpTiles() {
+	const el = document.getElementById("tiles");
+	if (!el) return;
+	const role = localStorage.getItem("ym_role");
+	const showAdmin = !role || role === "admin";
+	const items = [];
+	for (const group of NAV_GROUPS) {
+		for (const it of group.items) {
+			if (it.key === "overview") continue;
+			if (it.admin && !showAdmin) continue;
+			items.push(it);
+		}
+	}
+	items.sort((a, b) => a.label.localeCompare(b.label));
+
+	el.innerHTML = "";
+	for (const it of items) {
+		const tile = document.createElement("a");
+		tile.className = "tile";
+		tile.href = it.href;
+
+		const icon = document.createElement("span");
+		icon.className = "tile-icon";
+		icon.innerHTML = svgIcon(NAV_ICONS[it.key] || "");
+		tile.appendChild(icon);
+
+		const text = document.createElement("span");
+		text.className = "tile-text";
+		const label = document.createElement("span");
+		label.className = "tile-label";
+		label.textContent = it.label;
+		text.appendChild(label);
+		if (it.desc) {
+			const desc = document.createElement("span");
+			desc.className = "tile-desc";
+			desc.textContent = it.desc;
+			text.appendChild(desc);
+		}
+		tile.appendChild(text);
+		el.appendChild(tile);
+	}
+}
+
+// wireTileFilter filters the jump tiles as the user types and jumps to the first match on Enter.
+function wireTileFilter() {
+	const input = document.getElementById("tile-filter");
+	const el = document.getElementById("tiles");
+	if (!input || !el) return;
+	const empty = document.createElement("p");
+	empty.className = "tiles-empty";
+	empty.textContent = "No sections match.";
+	empty.hidden = true;
+	el.after(empty);
+
+	input.addEventListener("input", () => {
+		const q = input.value.trim().toLowerCase();
+		let shown = 0;
+		for (const tile of el.querySelectorAll(".tile")) {
+			const match = tile.textContent.toLowerCase().includes(q);
+			tile.hidden = !match;
+			if (match) shown++;
+		}
+		empty.hidden = shown > 0;
+	});
+	input.addEventListener("keydown", (e) => {
+		if (e.key === "Enter") {
+			const first = el.querySelector(".tile:not([hidden])");
+			if (first) first.click();
+		}
+	});
+}
+
+// emptyLine builds a muted placeholder line for an empty list.
+function emptyLine(text) {
+	const p = document.createElement("p");
+	p.className = "muted ov-empty";
+	p.textContent = text;
+	return p;
 }
 
 // loadRuns populates the run history table.
