@@ -130,6 +130,74 @@ func createUserHandler(users user.Store, log *zap.Logger) http.HandlerFunc {
 	}
 }
 
+// updateUserRequest is the JSON body accepted by PUT /users/{id}. A blank password keeps the
+// current one, so an operator can change a role or rename an account without resetting the login.
+type updateUserRequest struct {
+	// Username is the sign in name. Required.
+	Username string `json:"username"`
+	// Password sets a new password when non-empty; blank keeps the current one. Never logged.
+	Password string `json:"password,omitempty"`
+	// Role is admin, operator, or viewer. Required.
+	Role user.Role `json:"role"`
+}
+
+// updateUserHandler changes an account's username, role, and optionally its password, keeping the
+// id and creation time. It rejects a username already taken by a different account.
+func updateUserHandler(users user.Store, log *zap.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if users == nil {
+			respondError(w, log, http.StatusNotFound, "accounts not enabled")
+			return
+		}
+		var req updateUserRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			respondError(w, log, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		password := req.Password
+		req.Password = ""
+		if req.Username == "" {
+			respondError(w, log, http.StatusBadRequest, "username is required")
+			return
+		}
+		if !user.ValidRole(req.Role) {
+			respondError(w, log, http.StatusBadRequest, "role must be admin, operator, or viewer")
+			return
+		}
+		id := r.PathValue("id")
+		u, err := users.Get(r.Context(), id)
+		if errors.Is(err, user.ErrNotFound) {
+			respondError(w, log, http.StatusNotFound, "user not found")
+			return
+		}
+		if err != nil {
+			log.Error("server: get user: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not read user")
+			return
+		}
+		if clash, err := users.FindByUsername(r.Context(), req.Username); err == nil && clash.ID != id {
+			respondError(w, log, http.StatusConflict, "username already exists")
+			return
+		}
+
+		u.Username = req.Username
+		u.Role = req.Role
+		if password != "" {
+			if err := u.SetPassword(password); err != nil {
+				log.Error("server: hash password: " + err.Error())
+				respondError(w, log, http.StatusInternalServerError, "could not update user")
+				return
+			}
+		}
+		if err := users.Update(r.Context(), u); err != nil {
+			log.Error("server: update user: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not update user")
+			return
+		}
+		respondJSON(w, log, http.StatusOK, u, wantsPretty(r))
+	}
+}
+
 // listUsersHandler returns all accounts without password material.
 func listUsersHandler(users user.Store, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

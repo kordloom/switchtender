@@ -252,6 +252,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /auth/check", authCheckHandler())
 	mux.Handle("POST /auth/login", loginHandler(s.users, s.tokens, s.log))
 	mux.Handle("POST /users", createUserHandler(s.users, s.log))
+	mux.Handle("PUT /users/{id}", updateUserHandler(s.users, s.log))
 	mux.Handle("GET /users", listUsersHandler(s.users, s.log))
 	mux.Handle("DELETE /users/{id}", deleteUserHandler(s.users, s.log))
 	mux.Handle("POST /credentials", createCredentialHandler(s.credentials, s.sealer, s.log))

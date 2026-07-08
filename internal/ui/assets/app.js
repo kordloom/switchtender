@@ -1686,19 +1686,57 @@ function loadLogin() {
 	});
 }
 
-// wireUserForm hooks the add user form up to POST /users.
+// openUserEdit fills the user dialog with an existing account and switches it to edit mode. The
+// password field becomes optional, so a blank leaves the current password unchanged.
+function openUserEdit(u) {
+	const form = document.getElementById("user-form");
+	form.dataset.editId = u.id;
+	document.getElementById("user-name").value = u.username;
+	const pw = document.getElementById("user-password");
+	pw.value = "";
+	pw.required = false;
+	pw.placeholder = "Leave blank to keep current";
+	document.getElementById("user-role").value = u.role;
+	document.getElementById("user-status").textContent = "";
+	setModalTitle("user", "Edit user");
+	document.getElementById("user-modal").hidden = false;
+}
+
+// wireUserForm hooks the user dialog up to POST /users for a new account and PUT /users/{id} when
+// editing. The New button resets the dialog to add mode, where a password is required.
 function wireUserForm() {
-	document.getElementById("user-form").addEventListener("submit", async (e) => {
+	const form = document.getElementById("user-form");
+	const resetToCreate = () => {
+		delete form.dataset.editId;
+		document.getElementById("user-name").value = "";
+		const pw = document.getElementById("user-password");
+		pw.value = "";
+		pw.required = true;
+		pw.placeholder = "";
+		document.getElementById("user-role").value = "operator";
+		document.getElementById("user-status").textContent = "";
+		setModalTitle("user", "Add a user");
+	};
+	const openBtn = document.getElementById("user-open");
+	if (openBtn) openBtn.addEventListener("click", resetToCreate);
+
+	form.addEventListener("submit", async (e) => {
 		e.preventDefault();
 		const status = document.getElementById("user-status");
+		const editId = form.dataset.editId;
+		const payload = {
+			username: document.getElementById("user-name").value.trim(),
+			role: document.getElementById("user-role").value,
+		};
+		const pw = document.getElementById("user-password").value;
+		if (pw) payload.password = pw;
 		try {
-			await postAction("/users", {
-				username: document.getElementById("user-name").value.trim(),
-				password: document.getElementById("user-password").value,
-				role: document.getElementById("user-role").value,
-			});
-			document.getElementById("user-name").value = "";
-			document.getElementById("user-password").value = "";
+			if (editId) {
+				await postAction("/users/" + editId, payload, "PUT");
+			} else {
+				await postAction("/users", payload);
+			}
+			resetToCreate();
 			status.textContent = "Saved.";
 			closeModal("user");
 			document.getElementById("users").innerHTML = "";
@@ -1724,7 +1762,9 @@ async function loadUsers() {
 			tr.appendChild(td(u.username));
 			tr.appendChild(td(u.role, "mono"));
 			tr.appendChild(tdTime(u.created_at));
-			tr.appendChild(deleteCell("/users/" + u.id, "user " + u.username, tr));
+			const actions = deleteCell("/users/" + u.id, "user " + u.username, tr);
+			actions.insertBefore(editButton(() => openUserEdit(u)), actions.firstChild);
+			tr.appendChild(actions);
 			tbody.appendChild(tr);
 		}
 		setStatus("");

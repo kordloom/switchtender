@@ -34,6 +34,24 @@ ON CONFLICT(id) DO UPDATE SET
 	return nil
 }
 
+// Update changes an existing user's username, role, and password hash, or returns user.ErrNotFound.
+func (s *userStore) Update(ctx context.Context, u *user.User) error {
+	res, err := s.db.ExecContext(ctx,
+		"UPDATE users SET username=?, password_hash=?, role=? WHERE id=?",
+		u.Username, u.PasswordHash, string(u.Role), u.ID)
+	if err != nil {
+		return fmt.Errorf("update user: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("update user: %w", err)
+	}
+	if n == 0 {
+		return user.ErrNotFound
+	}
+	return nil
+}
+
 // Get returns the user with the given id, or user.ErrNotFound.
 func (s *userStore) Get(ctx context.Context, id string) (*user.User, error) {
 	const q = "SELECT " + userColumns + " FROM users WHERE id=?"

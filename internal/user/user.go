@@ -56,6 +56,9 @@ type User struct {
 type Store interface {
 	// Save inserts or replaces the user identified by u.ID.
 	Save(ctx context.Context, u *User) error
+	// Update changes an existing user's username, role, and password hash, preserving the creation
+	// time, or returns ErrNotFound.
+	Update(ctx context.Context, u *User) error
 	// Get returns the user with the given id, or ErrNotFound.
 	Get(ctx context.Context, id string) (*User, error)
 	// FindByUsername returns the user with the given username, or ErrNotFound.
@@ -86,6 +89,16 @@ func New(username, password string, role Role) (*User, error) {
 		Role:         role,
 		CreatedAt:    time.Now(),
 	}, nil
+}
+
+// SetPassword replaces the user's password with a freshly hashed one.
+func (u *User) SetPassword(password string) error {
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	u.PasswordHash = string(hash)
+	return nil
 }
 
 // Authenticate checks a username and password against the store and returns the user.

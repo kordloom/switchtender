@@ -16,6 +16,47 @@ func Contract(t *testing.T, newStore func() user.Store) {
 	t.Helper()
 	t.Run("lifecycle", func(t *testing.T) { testLifecycle(t, newStore()) })
 	t.Run("list ordered", func(t *testing.T) { testList(t, newStore()) })
+	t.Run("update", func(t *testing.T) { testUpdate(t, newStore()) })
+}
+
+// testUpdate verifies an update changes the username, role, and password hash, preserves the
+// creation time, and reports ErrNotFound for an unknown id.
+func testUpdate(t *testing.T, store user.Store) {
+	ctx := context.Background()
+	created := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	if err := store.Save(ctx, &user.User{
+		ID: "user_1", Username: "old", PasswordHash: "$2a$10$old",
+		Role: user.RoleViewer, CreatedAt: created,
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	if err := store.Update(ctx, &user.User{
+		ID: "user_1", Username: "new", PasswordHash: "$2a$10$new", Role: user.RoleAdmin,
+	}); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	got, err := store.Get(ctx, "user_1")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.Username != "new" || got.Role != user.RoleAdmin || got.PasswordHash != "$2a$10$new" {
+		t.Errorf("Get() = %+v, want the updated user", got)
+	}
+	if !got.CreatedAt.Equal(created) {
+		t.Errorf("CreatedAt = %v, want preserved %v", got.CreatedAt, created)
+	}
+	// The old username no longer resolves; the new one does.
+	if _, err := store.FindByUsername(ctx, "old"); !errors.Is(err, user.ErrNotFound) {
+		t.Errorf("FindByUsername(old) error = %v, want ErrNotFound", err)
+	}
+	if byName, err := store.FindByUsername(ctx, "new"); err != nil || byName.ID != "user_1" {
+		t.Errorf("FindByUsername(new) = %v, %v, want user_1", byName, err)
+	}
+
+	if err := store.Update(ctx, &user.User{ID: "ghost", Username: "x", Role: user.RoleViewer}); !errors.Is(err, user.ErrNotFound) {
+		t.Errorf("Update(ghost) error = %v, want ErrNotFound", err)
+	}
 }
 
 // testLifecycle verifies a user round trips by id and username, updates, and deletes.

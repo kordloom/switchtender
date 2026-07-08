@@ -28,6 +28,21 @@ func (m *memStore) Save(_ context.Context, u *User) error {
 	return nil
 }
 
+// Update changes an existing user's username, role, and password hash, preserving the creation
+// time, or returns ErrNotFound.
+func (m *memStore) Update(_ context.Context, u *User) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	existing, ok := m.users[u.ID]
+	if !ok {
+		return ErrNotFound
+	}
+	existing.Username = u.Username
+	existing.Role = u.Role
+	existing.PasswordHash = u.PasswordHash
+	return nil
+}
+
 // Get returns the user with the given id, or ErrNotFound.
 func (m *memStore) Get(_ context.Context, id string) (*User, error) {
 	m.mu.RLock()
