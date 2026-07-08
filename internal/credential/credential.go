@@ -63,7 +63,7 @@ func RegistryLogin(secret string) (username, password string) {
 // EnvLines splits env credential material into KEY=VALUE entries, dropping blanks and comments.
 func EnvLines(secret string) []string {
 	var out []string
-	for _, line := range strings.Split(secret, "\n") {
+	for line := range strings.SplitSeq(secret, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") || !strings.Contains(line, "=") {
 			continue

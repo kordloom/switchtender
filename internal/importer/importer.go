@@ -79,16 +79,17 @@ func buildInventoryINI(hosts []importHost, groups []importGroup) string {
 
 // hostLine renders one inventory host with any host variables as inline key=value pairs.
 func hostLine(h importHost) string {
-	line := h.Name
+	var line strings.Builder
+	line.WriteString(h.Name)
 	keys := make([]string, 0, len(h.Variables))
 	for k := range h.Variables {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
-		line += fmt.Sprintf(" %s=%v", k, h.Variables[k])
+		line.WriteString(fmt.Sprintf(" %s=%v", k, h.Variables[k]))
 	}
-	return line + "\n"
+	return line.String() + "\n"
 }
 
 // importHost is a host with optional variables, shared by the export parsers.
@@ -151,7 +152,7 @@ func choicesFrom(v any) []string {
 		return out
 	case string:
 		var out []string
-		for _, line := range strings.Split(c, "\n") {
+		for line := range strings.SplitSeq(c, "\n") {
 			if line = strings.TrimSpace(line); line != "" {
 				out = append(out, line)
 			}

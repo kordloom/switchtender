@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 )
 
@@ -132,10 +133,8 @@ func coerce(f SurveyField, raw any) (any, error) {
 		if !ok {
 			return nil, fmt.Errorf("%w: %q must be one of its choices", ErrSurvey, f.Var)
 		}
-		for _, c := range f.Choices {
-			if c == s {
-				return s, nil
-			}
+		if slices.Contains(f.Choices, s) {
+			return s, nil
 		}
 		return nil, fmt.Errorf("%w: %q is not an allowed choice for %q", ErrSurvey, s, f.Var)
 	default:

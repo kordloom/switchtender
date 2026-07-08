@@ -56,13 +56,13 @@ func RRULEToCron(rrule string) (string, bool) {
 // DTSTART line AWX prepends.
 func parseRRULE(rrule string) map[string]string {
 	out := map[string]string{}
-	for _, line := range strings.Split(rrule, "\n") {
+	for line := range strings.SplitSeq(rrule, "\n") {
 		line = strings.TrimSpace(line)
 		rule, ok := strings.CutPrefix(line, "RRULE:")
 		if !ok {
 			continue
 		}
-		for _, kv := range strings.Split(rule, ";") {
+		for kv := range strings.SplitSeq(rule, ";") {
 			if k, v, ok := strings.Cut(kv, "="); ok {
 				out[strings.ToUpper(strings.TrimSpace(k))] = strings.TrimSpace(v)
 			}
@@ -84,8 +84,8 @@ func firstOr(s, fallback string) string {
 	if s == "" {
 		return fallback
 	}
-	if i := strings.IndexByte(s, ','); i != -1 {
-		return s[:i]
+	if before, _, ok := strings.Cut(s, ","); ok {
+		return before
 	}
 	return s
 }
@@ -97,7 +97,7 @@ func cronDays(byday string) (string, bool) {
 		return "*", true
 	}
 	var days []string
-	for _, code := range strings.Split(byday, ",") {
+	for code := range strings.SplitSeq(byday, ",") {
 		n, ok := weekdayCron[strings.ToUpper(strings.TrimSpace(code))]
 		if !ok {
 			return "", false

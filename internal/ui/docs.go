@@ -122,7 +122,7 @@ func docHref(slug string) string {
 
 // docTitle returns a page's first level-one heading, or the slug when it has none.
 func docTitle(data []byte, slug string) string {
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		if heading, ok := strings.CutPrefix(line, "# "); ok {
 			return strings.TrimSpace(heading)
 		}

@@ -86,9 +86,7 @@ func (s *Sweeper) Start() {
 	if !s.Enabled() {
 		return
 	}
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
+	s.wg.Go(func() {
 		s.sweep(time.Now())
 		ticker := time.NewTicker(s.interval)
 		defer ticker.Stop()
@@ -100,7 +98,7 @@ func (s *Sweeper) Start() {
 				s.sweep(now)
 			}
 		}
-	}()
+	})
 }
 
 // sweep trims events older than the events window, then deletes runs older than the runs window.

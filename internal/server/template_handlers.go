@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
 	"time"
 
@@ -148,9 +149,7 @@ func launchTemplateHandler(store template.Store, submitter Submitter, authz *aut
 		}
 
 		vars := map[string]any{}
-		for k, v := range t.ExtraVars {
-			vars[k] = v
-		}
+		maps.Copy(vars, t.ExtraVars)
 		if len(t.Survey) > 0 {
 			answers := map[string]any{}
 			// Answers are optional in the body; an empty body still validates required-free surveys.
@@ -162,9 +161,7 @@ func launchTemplateHandler(store template.Store, submitter Submitter, authz *aut
 				respondError(w, log, http.StatusBadRequest, err.Error())
 				return
 			}
-			for k, v := range resolved {
-				vars[k] = v
-			}
+			maps.Copy(vars, resolved)
 		}
 
 		opts := []run.SubmitOption{

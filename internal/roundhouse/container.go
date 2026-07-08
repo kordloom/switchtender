@@ -274,11 +274,11 @@ func (m *mountSet) args() []string {
 // registryHost returns the registry portion of a container image reference, or empty for Docker
 // Hub. A first path segment containing a dot, a colon, or the localhost name is a registry host.
 func registryHost(image string) string {
-	slash := strings.IndexByte(image, '/')
-	if slash == -1 {
+	before, _, ok := strings.Cut(image, "/")
+	if !ok {
 		return ""
 	}
-	first := image[:slash]
+	first := before
 	if strings.ContainsAny(first, ".:") || first == "localhost" {
 		return first
 	}
