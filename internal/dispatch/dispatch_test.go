@@ -178,6 +178,44 @@ func TestDispatcherCloseCancelsRun(t *testing.T) {
 	}
 }
 
+func TestWaitChildrenReturnsPromptlyOnCancel(t *testing.T) {
+	t.Parallel()
+	store := run.NewMemStore()
+	now := time.Now()
+	ids := []string{"run_c1", "run_c2"}
+	// Children already leased by another process that never finish, so only cancellation, not a
+	// terminal state, can end the wait.
+	for _, id := range ids {
+		if err := store.Save(context.Background(), &run.Run{
+			ID: id, Status: run.StatusRunning, ClaimedBy: "ghost", ClaimedAt: &now, CreatedAt: now,
+		}); err != nil {
+			t.Fatalf("Save() error = %v", err)
+		}
+	}
+	d := New(store, roundhouse.RunnerFunc(
+		func(context.Context, roundhouse.Spec, io.Writer) (roundhouse.Result, error) {
+			return roundhouse.Result{}, nil
+		}), nil)
+	defer d.Close()
+
+	// The parent context is already canceled, as it would be during shutdown.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	done := make(chan []run.Status, 1)
+	go func() { done <- d.waitChildren(ctx, ids) }()
+	select {
+	case statuses := <-done:
+		for i, s := range statuses {
+			if s != run.StatusCanceled {
+				t.Errorf("child %d status = %q, want %q", i, s, run.StatusCanceled)
+			}
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("waitChildren did not return promptly after cancellation")
+	}
+}
+
 // fakeRunnerLister is a Runner that also lists a fixed set of hosts for split tests.
 type fakeRunnerLister struct {
 	// hosts is returned by Hosts.

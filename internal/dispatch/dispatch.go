@@ -559,8 +559,10 @@ func (d *Dispatcher) coordinate(parent *run.Run, children []*run.Run) {
 const childPollInterval = 500 * time.Millisecond
 
 // waitChildren polls the store until every child reaches a terminal state and returns their
-// statuses in order. When ctx is canceled the children are cancel-requested through the store,
-// and any that no executor has claimed yet are finalized canceled directly.
+// statuses in order. Reads use ctx, so a shutdown or a canceled parent stops the poll promptly
+// rather than spinning against a closing store. On cancellation the children are cancel-requested
+// through the store, any that no executor has claimed yet are finalized canceled directly, and any
+// child not yet terminal is reported canceled, the honest summary for an interrupted parent.
 func (d *Dispatcher) waitChildren(ctx context.Context, ids []string) []run.Status {
 	statuses := make([]run.Status, len(ids))
 	canceled := false
@@ -571,7 +573,7 @@ func (d *Dispatcher) waitChildren(ctx context.Context, ids []string) []run.Statu
 				done++
 				continue
 			}
-			r, err := d.store.Get(context.Background(), id)
+			r, err := d.store.Get(ctx, id)
 			if err != nil {
 				continue
 			}
@@ -593,11 +595,18 @@ func (d *Dispatcher) waitChildren(ctx context.Context, ids []string) []run.Statu
 		select {
 		case <-time.After(childPollInterval):
 		case <-ctx.Done():
+			// Shutting down or the parent was canceled: request cancellation once, then stop waiting
+			// instead of polling a store that may be closing. Children still running are reported
+			// canceled so the parent finalizes as canceled.
 			if !canceled {
-				canceled = true
 				d.cancelChildren(ids)
 			}
-			time.Sleep(childPollInterval)
+			for i := range statuses {
+				if !statuses[i].Terminal() {
+					statuses[i] = run.StatusCanceled
+				}
+			}
+			return statuses
 		}
 	}
 }
