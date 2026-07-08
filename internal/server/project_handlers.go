@@ -54,6 +54,10 @@ func createProjectHandler(store project.Store, log *zap.Logger) http.HandlerFunc
 			respondError(w, log, http.StatusBadRequest, "name and repo_url are required")
 			return
 		}
+		if err := project.ValidateRepoURL(req.RepoURL); err != nil {
+			respondError(w, log, http.StatusBadRequest, err.Error())
+			return
+		}
 		p := &project.Project{
 			ID: project.NewID(), Name: req.Name, RepoURL: req.RepoURL,
 			Branch: req.Branch, CredentialID: req.CredentialID,

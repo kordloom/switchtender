@@ -16,6 +16,9 @@ var (
 	ErrNotFound = errors.New("project not found")
 	// ErrEscapesRepo is returned when a run path points outside its project's repository.
 	ErrEscapesRepo = errors.New("path escapes the repository")
+	// ErrBadRepoURL is returned when a repository URL uses a disallowed scheme or points at a
+	// blocked host, such as loopback or a cloud metadata address.
+	ErrBadRepoURL = errors.New("invalid repository url")
 )
 
 // Project is one git-sourced playbook repository.

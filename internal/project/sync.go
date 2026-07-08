@@ -2,6 +2,8 @@ package project
 
 import (
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -52,6 +54,10 @@ func (s *Syncer) lock(id string) *sync.Mutex {
 // otherwise. When the project has InstallDeps set, a present requirements file triggers an
 // ansible-galaxy install into a project-scoped path under the checkout, all under the sync lock.
 func (s *Syncer) Sync(p *Project, sshKey string) (dir, sha string, galaxyEnv []string, err error) {
+	if err := ValidateRepoURL(p.RepoURL); err != nil {
+		return "", "", nil, err
+	}
+
 	l := s.lock(p.ID)
 	l.Lock()
 	defer l.Unlock()
@@ -195,6 +201,82 @@ func fetchAndReset(repo *git.Repository, p *Project, auth transport.AuthMethod) 
 	}
 	if err := wt.Reset(&git.ResetOptions{Commit: remote.Hash(), Mode: git.HardReset}); err != nil {
 		return fmt.Errorf("reset to origin/%s: %w", branch, err)
+	}
+	return nil
+}
+
+// blockedRepoHosts are hostnames a repository must never resolve to. The cloud metadata service in
+// particular can hand back instance credentials, so a clone against it is a server-side request
+// forgery.
+var blockedRepoHosts = map[string]bool{
+	"localhost":                true,
+	"metadata.google.internal": true,
+}
+
+// allowedRepoSchemes are the transport schemes a repository URL may use. Plain http and git are
+// refused for being unauthenticated and cleartext; only ssh, https, and a local file path pass.
+var allowedRepoSchemes = map[string]bool{
+	"ssh":   true,
+	"https": true,
+	"file":  true,
+}
+
+// ValidateRepoURL reports whether raw is a repository URL safe to clone. It allows only the ssh,
+// https, and file transports, and rejects loopback, link-local, and cloud metadata hosts so a
+// stored project cannot drive the executor into a server-side request forgery.
+func ValidateRepoURL(raw string) error {
+	if strings.TrimSpace(raw) == "" {
+		return fmt.Errorf("%w: empty url", ErrBadRepoURL)
+	}
+	host, scheme, err := repoURLParts(raw)
+	if err != nil {
+		return err
+	}
+	if !allowedRepoSchemes[scheme] {
+		return fmt.Errorf("%w: scheme %q is not allowed", ErrBadRepoURL, scheme)
+	}
+	if scheme == "file" {
+		return nil
+	}
+	return checkRepoHost(host)
+}
+
+// repoURLParts extracts the host and transport scheme from a repository URL, handling both the
+// scheme-prefixed form and git's scp-like user@host:path shorthand, which is ssh.
+func repoURLParts(raw string) (host, scheme string, err error) {
+	if strings.Contains(raw, "://") {
+		u, perr := url.Parse(raw)
+		if perr != nil {
+			return "", "", fmt.Errorf("%w: %v", ErrBadRepoURL, perr)
+		}
+		return u.Hostname(), u.Scheme, nil
+	}
+	// The scp-like shorthand is [user@]host:path, where the host part carries no slash. Anything
+	// without this colon and without a scheme is a local filesystem path.
+	if i := strings.IndexByte(raw, ':'); i >= 0 && !strings.Contains(raw[:i], "/") {
+		hostPart := raw[:i]
+		if at := strings.LastIndexByte(hostPart, '@'); at >= 0 {
+			hostPart = hostPart[at+1:]
+		}
+		return hostPart, "ssh", nil
+	}
+	return "", "file", nil
+}
+
+// checkRepoHost rejects a repository host that is empty, explicitly blocked, or a loopback,
+// unspecified, or link-local address, the last of which covers the cloud metadata endpoint.
+func checkRepoHost(host string) error {
+	if host == "" {
+		return fmt.Errorf("%w: missing host", ErrBadRepoURL)
+	}
+	if blockedRepoHosts[strings.ToLower(host)] {
+		return fmt.Errorf("%w: host %q is not allowed", ErrBadRepoURL, host)
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		if ip.IsLoopback() || ip.IsUnspecified() ||
+			ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+			return fmt.Errorf("%w: address %q is not allowed", ErrBadRepoURL, host)
+		}
 	}
 	return nil
 }
