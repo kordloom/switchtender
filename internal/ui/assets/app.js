@@ -10,12 +10,7 @@ document.addEventListener("DOMContentLoaded", () => {
 	}
 	const page = document.body.dataset.page;
 	if (page === "index") {
-		if (isReadOnly()) {
-			const panel = document.getElementById("launch-panel");
-			if (panel) panel.hidden = true;
-		} else {
-			wireLaunchForm();
-		}
+		if (!isReadOnly()) wireLaunchForm();
 		loadRuns();
 	} else if (page === "detail") {
 		loadDetail(document.body.dataset.runId);
@@ -51,7 +46,35 @@ document.addEventListener("DOMContentLoaded", () => {
 		loadSources();
 	}
 	hideAdminNav();
+	if (isReadOnly()) applyReadOnly();
+	setInterval(refreshRelTimes, 20000);
 });
+
+// showSkeletonRows fills a table body with shimmering placeholders while its data loads.
+function showSkeletonRows(tbody, rows, cols) {
+	tbody.innerHTML = "";
+	for (let i = 0; i < rows; i++) {
+		const tr = document.createElement("tr");
+		tr.className = "skeleton-row";
+		for (let c = 0; c < cols; c++) {
+			const cell = document.createElement("td");
+			const bar = document.createElement("span");
+			bar.className = "skeleton";
+			cell.appendChild(bar);
+			tr.appendChild(cell);
+		}
+		tbody.appendChild(tr);
+	}
+}
+
+// applyReadOnly hides every add form and its panel so a read-only demo shows no controls that would
+// be rejected. Row action buttons are hidden by CSS.
+function applyReadOnly() {
+	document.querySelectorAll("form").forEach((f) => {
+		const panel = f.closest(".panel");
+		(panel || f).hidden = true;
+	});
+}
 
 // hideAdminNav hides management links from signed in non-admins. The server enforces the real
 // policy; this only trims the menu.
@@ -159,6 +182,25 @@ function isReadOnly() {
 	return document.body.dataset.readonly === "true";
 }
 
+// tdTime builds a table cell showing a relative age with the full timestamp on hover. It carries
+// the timestamp so a background timer can keep the age current.
+function tdTime(iso, empty) {
+	const el = td(iso ? relTime(iso) : (empty || ""));
+	if (iso) {
+		el.title = fmtTime(iso);
+		el.dataset.time = iso;
+		el.classList.add("reltime");
+	}
+	return el;
+}
+
+// refreshRelTimes rewrites every relative-age cell so ages stay current without a reload.
+function refreshRelTimes() {
+	for (const el of document.querySelectorAll(".reltime[data-time]")) {
+		el.textContent = relTime(el.dataset.time);
+	}
+}
+
 // wireLaunchForm hooks the launch panel up to POST /runs and fills the credential picker.
 function wireLaunchForm() {
 	const form = document.getElementById("launch-form");
@@ -251,7 +293,7 @@ async function loadCredentials() {
 			const tr = document.createElement("tr");
 			tr.appendChild(td(c.name));
 			tr.appendChild(td(c.kind, "mono"));
-			tr.appendChild(td(fmtTime(c.created_at)));
+			tr.appendChild(tdTime(c.created_at));
 			const actions = document.createElement("td");
 			const del = document.createElement("button");
 			del.className = "button danger";
@@ -336,7 +378,7 @@ async function loadProjects() {
 			tr.appendChild(td(p.name));
 			tr.appendChild(td(p.repo_url, "mono"));
 			tr.appendChild(td(p.branch || "default", "mono"));
-			tr.appendChild(td(fmtTime(p.created_at)));
+			tr.appendChild(tdTime(p.created_at));
 			tr.appendChild(deleteCell("/projects/" + p.id, "project " + p.name, tr));
 			tbody.appendChild(tr);
 		}
@@ -412,7 +454,7 @@ async function loadTemplates() {
 			tr.appendChild(td(t.name));
 			tr.appendChild(td(t.playbook, "mono"));
 			tr.appendChild(td(String(t.shards || 1)));
-			tr.appendChild(td(fmtTime(t.created_at)));
+			tr.appendChild(tdTime(t.created_at));
 			const actions = document.createElement("td");
 			const launch = document.createElement("button");
 			launch.className = "button primary";
@@ -561,7 +603,7 @@ async function loadInventories() {
 		for (const i of inventories) {
 			const tr = document.createElement("tr");
 			tr.appendChild(td(i.name));
-			tr.appendChild(td(fmtTime(i.created_at)));
+			tr.appendChild(tdTime(i.created_at));
 			tr.appendChild(deleteCell("/inventories/" + i.id, "inventory " + i.name, tr));
 			tbody.appendChild(tr);
 		}
@@ -610,7 +652,7 @@ async function loadSources() {
 			const tr = document.createElement("tr");
 			tr.appendChild(td(src.name));
 			tr.appendChild(td(src.source, "mono"));
-			tr.appendChild(td(src.synced_at ? fmtTime(src.synced_at) : "never"));
+			tr.appendChild(tdTime(src.synced_at, "never"));
 			const state = document.createElement("td");
 			const chip = document.createElement("span");
 			chip.className = src.last_error ? "chip failed" : (src.synced_at ? "chip ok" : "chip none");
@@ -669,7 +711,7 @@ async function loadWorkers() {
 			health.appendChild(chip);
 			tr.appendChild(health);
 			tr.appendChild(td(String(w.active)));
-			tr.appendChild(td(fmtTime(w.last_seen)));
+			tr.appendChild(tdTime(w.last_seen));
 			tbody.appendChild(tr);
 		}
 		setStatus("");
@@ -681,12 +723,17 @@ async function loadWorkers() {
 
 // loadRuns populates the run history table.
 async function loadRuns() {
+	const tbody = document.getElementById("runs");
+	const table = document.querySelector("table.runs");
+	setStatus("");
+	showSkeletonRows(tbody, 6, 5);
+	table.hidden = false;
 	try {
 		const data = await getJSON("/runs");
 		const runs = data.runs || [];
-		if (runs.length === 0) { setStatus("No runs yet."); return; }
+		tbody.innerHTML = "";
+		if (runs.length === 0) { table.hidden = true; setStatus("No runs yet."); return; }
 		renderSummary(runs);
-		const tbody = document.getElementById("runs");
 		for (const r of runs) {
 			const tr = document.createElement("tr");
 			tr.addEventListener("click", () => { location.href = "/ui/runs/" + r.id; });
@@ -707,16 +754,14 @@ async function loadRuns() {
 			pbCell.title = r.playbook || "";
 			tr.appendChild(pbCell);
 
-			const startedCell = td(relTime(r.started_at || r.created_at));
-			startedCell.title = fmtTime(r.started_at || r.created_at);
-			tr.appendChild(startedCell);
+			tr.appendChild(tdTime(r.started_at || r.created_at));
 
 			tr.appendChild(td(fmtDuration(r.started_at, r.ended_at)));
 			tbody.appendChild(tr);
 		}
-		setStatus("");
-		document.querySelector("table.runs").hidden = false;
 	} catch (e) {
+		tbody.innerHTML = "";
+		table.hidden = true;
 		setStatus("Failed to load runs: " + e.message);
 	}
 }
@@ -818,7 +863,7 @@ async function loadFleet() {
 			const last = document.createElement("td");
 			last.appendChild(outcomeChip(h.last_outcome));
 			tr.appendChild(last);
-			tr.appendChild(td(fmtTime(h.last_run)));
+			tr.appendChild(tdTime(h.last_run));
 			tbody.appendChild(tr);
 		}
 		setStatus("");
@@ -854,7 +899,7 @@ async function loadHost(host) {
 			tr.appendChild(td(String(r.changed)));
 			tr.appendChild(td(String(r.failures)));
 			tr.appendChild(td(r.duration_seconds ? r.duration_seconds.toFixed(1) + "s" : "0s"));
-			tr.appendChild(td(fmtTime(r.ran_at)));
+			tr.appendChild(tdTime(r.ran_at));
 			tbody.appendChild(tr);
 		}
 		setStatus("");
@@ -884,7 +929,7 @@ async function loadTasks() {
 			tr.appendChild(td(String(t.runs)));
 			tr.appendChild(td(fmtSeconds(t.avg_seconds)));
 			tr.appendChild(td(fmtSeconds(t.last_seconds)));
-			tr.appendChild(td(fmtTime(t.last_run)));
+			tr.appendChild(tdTime(t.last_run));
 			tbody.appendChild(tr);
 		}
 		setStatus("");
@@ -1130,7 +1175,7 @@ async function loadUsers() {
 			const tr = document.createElement("tr");
 			tr.appendChild(td(u.username));
 			tr.appendChild(td(u.role, "mono"));
-			tr.appendChild(td(fmtTime(u.created_at)));
+			tr.appendChild(tdTime(u.created_at));
 			tr.appendChild(deleteCell("/users/" + u.id, "user " + u.username, tr));
 			tbody.appendChild(tr);
 		}
@@ -1481,37 +1526,64 @@ function renderMatrix(model) {
 	corner.className = "corner";
 	corner.textContent = "host \\ task";
 	htr.appendChild(corner);
+	const taskThs = [];
 	for (const task of tasks) {
 		const th = document.createElement("th");
 		th.textContent = task;
 		htr.appendChild(th);
+		taskThs.push(th);
 	}
 	thead.appendChild(htr);
 	table.appendChild(thead);
 
+	const counts = {};
 	const tbody = document.createElement("tbody");
 	for (const host of hosts) {
 		const tr = document.createElement("tr");
-		const th = document.createElement("th");
-		th.textContent = host;
-		tr.appendChild(th);
-		for (const task of tasks) {
+		const rowTh = document.createElement("th");
+		rowTh.textContent = host;
+		tr.appendChild(rowTh);
+		tasks.forEach((task, ci) => {
 			const info = cells[host] && cells[host][task];
 			const outcome = info ? info.outcome : "none";
+			counts[outcome] = (counts[outcome] || 0) + 1;
 			const cell = document.createElement("td");
 			const div = document.createElement("div");
 			div.className = "cell " + outcome;
 			div.title = host + " / " + task + ": " + outcome;
+			// Highlight the row and column headers so a cell is easy to trace across a wide matrix.
+			div.addEventListener("mouseenter", () => { rowTh.classList.add("hi"); taskThs[ci].classList.add("hi"); });
+			div.addEventListener("mouseleave", () => { rowTh.classList.remove("hi"); taskThs[ci].classList.remove("hi"); });
 			if (info) {
 				div.addEventListener("click", () => showDrill(Object.assign({ host, task }, info)));
 			}
 			cell.appendChild(div);
 			tr.appendChild(cell);
-		}
+		});
 		tbody.appendChild(tr);
 	}
 	table.appendChild(tbody);
+	renderMatrixSummary(hosts.length, tasks.length, counts);
 	document.getElementById("matrix-panel").hidden = false;
+}
+
+// renderMatrixSummary shows the matrix size and a per-outcome rollup above the grid.
+function renderMatrixSummary(hostCount, taskCount, counts) {
+	const el = document.getElementById("matrix-summary");
+	if (!el) return;
+	el.innerHTML = "";
+	const scope = document.createElement("span");
+	scope.className = "muted";
+	scope.textContent = hostCount + (hostCount === 1 ? " host" : " hosts") + " × " +
+		taskCount + (taskCount === 1 ? " task" : " tasks");
+	el.appendChild(scope);
+	for (const o of ["ok", "changed", "failed", "unreachable", "skipped"]) {
+		if (!counts[o]) continue;
+		const chip = document.createElement("span");
+		chip.className = "roll " + o;
+		chip.textContent = counts[o] + " " + o;
+		el.appendChild(chip);
+	}
 }
 
 // renderTimeline draws a bar per task scaled to the run span.
