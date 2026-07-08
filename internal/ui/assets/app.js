@@ -536,25 +536,66 @@ async function fillSelect(el, url, listKey, labelFor) {
 	} catch (_) { /* feature disabled or unauthorized; the select keeps its defaults */ }
 }
 
-// wireProjectForm hooks the add project form up to POST /projects.
+// openProjectEdit fills the project dialog with an existing record and switches it to edit mode so
+// the next save issues a PUT rather than a create.
+function openProjectEdit(p) {
+	const form = document.getElementById("project-form");
+	form.dataset.editId = p.id;
+	document.getElementById("project-name").value = p.name;
+	document.getElementById("project-repo").value = p.repo_url;
+	document.getElementById("project-branch").value = p.branch || "";
+	document.getElementById("project-credential").value = p.credential_id || "";
+	document.getElementById("project-deps").checked = p.install_deps !== false;
+	document.getElementById("project-image").value = p.image || "";
+	document.getElementById("project-pull-credential").value = p.pull_credential_id || "";
+	document.getElementById("project-status").textContent = "";
+	setModalTitle("project", "Edit project");
+	document.getElementById("project-modal").hidden = false;
+}
+
+// wireProjectForm hooks the project dialog up to POST /projects for a new record and PUT
+// /projects/{id} when editing. The New button resets the dialog to add mode.
 function wireProjectForm() {
 	fillSelect(document.getElementById("project-credential"), "/credentials", "credentials",
 		(c) => c.name + " (" + c.kind + ")");
 	fillSelect(document.getElementById("project-pull-credential"), "/credentials", "credentials",
 		(c) => c.name + " (" + c.kind + ")");
-	document.getElementById("project-form").addEventListener("submit", async (e) => {
+	const form = document.getElementById("project-form");
+	const resetToCreate = () => {
+		delete form.dataset.editId;
+		document.getElementById("project-name").value = "";
+		document.getElementById("project-repo").value = "";
+		document.getElementById("project-branch").value = "";
+		document.getElementById("project-credential").value = "";
+		document.getElementById("project-deps").checked = true;
+		document.getElementById("project-image").value = "";
+		document.getElementById("project-pull-credential").value = "";
+		document.getElementById("project-status").textContent = "";
+		setModalTitle("project", "Add a project");
+	};
+	const openBtn = document.getElementById("project-open");
+	if (openBtn) openBtn.addEventListener("click", resetToCreate);
+
+	form.addEventListener("submit", async (e) => {
 		e.preventDefault();
 		const status = document.getElementById("project-status");
+		const editId = form.dataset.editId;
+		const payload = {
+			name: document.getElementById("project-name").value.trim(),
+			repo_url: document.getElementById("project-repo").value.trim(),
+			branch: document.getElementById("project-branch").value.trim(),
+			credential_id: document.getElementById("project-credential").value,
+			install_deps: document.getElementById("project-deps").checked,
+			image: document.getElementById("project-image").value.trim(),
+			pull_credential_id: document.getElementById("project-pull-credential").value,
+		};
 		try {
-			await postAction("/projects", {
-				name: document.getElementById("project-name").value.trim(),
-				repo_url: document.getElementById("project-repo").value.trim(),
-				branch: document.getElementById("project-branch").value.trim(),
-				credential_id: document.getElementById("project-credential").value,
-				install_deps: document.getElementById("project-deps").checked,
-				image: document.getElementById("project-image").value.trim(),
-				pull_credential_id: document.getElementById("project-pull-credential").value,
-			});
+			if (editId) {
+				await postAction("/projects/" + editId, payload, "PUT");
+			} else {
+				await postAction("/projects", payload);
+			}
+			resetToCreate();
 			status.textContent = "Saved.";
 			closeModal("project");
 			document.getElementById("projects").innerHTML = "";
@@ -581,7 +622,9 @@ async function loadProjects() {
 			tr.appendChild(td(p.repo_url, "mono"));
 			tr.appendChild(td(p.branch || "default", "mono"));
 			tr.appendChild(tdTime(p.created_at));
-			tr.appendChild(deleteCell("/projects/" + p.id, "project " + p.name, tr));
+			const actions = deleteCell("/projects/" + p.id, "project " + p.name, tr);
+			actions.insertBefore(editButton(() => openProjectEdit(p)), actions.firstChild);
+			tr.appendChild(actions);
 			inspectable(tr, p.name, [
 				{ label: "Repository", value: p.repo_url },
 				{ label: "Branch", value: p.branch || "default" },

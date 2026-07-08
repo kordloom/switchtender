@@ -49,6 +49,9 @@ type Project struct {
 type Store interface {
 	// Save inserts or replaces the project identified by p.ID.
 	Save(ctx context.Context, p *Project) error
+	// Update changes an existing project's mutable fields, preserving its creation time, or returns
+	// ErrNotFound.
+	Update(ctx context.Context, p *Project) error
 	// Get returns the project with the given id, or ErrNotFound.
 	Get(ctx context.Context, id string) (*Project, error)
 	// List returns all projects ordered by creation time, oldest first.

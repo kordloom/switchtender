@@ -28,6 +28,21 @@ func (m *memStore) Save(_ context.Context, p *Project) error {
 	return nil
 }
 
+// Update changes an existing project's mutable fields, preserving its creation time, or returns
+// ErrNotFound.
+func (m *memStore) Update(_ context.Context, p *Project) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	existing, ok := m.projects[p.ID]
+	if !ok {
+		return ErrNotFound
+	}
+	cp := *p
+	cp.CreatedAt = existing.CreatedAt
+	m.projects[p.ID] = &cp
+	return nil
+}
+
 // Get returns the project with the given id, or ErrNotFound.
 func (m *memStore) Get(_ context.Context, id string) (*Project, error) {
 	m.mu.RLock()

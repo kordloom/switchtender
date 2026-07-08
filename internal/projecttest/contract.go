@@ -16,6 +16,44 @@ func Contract(t *testing.T, newStore func() project.Store) {
 	t.Helper()
 	t.Run("lifecycle", func(t *testing.T) { testLifecycle(t, newStore()) })
 	t.Run("list ordered", func(t *testing.T) { testList(t, newStore()) })
+	t.Run("update", func(t *testing.T) { testUpdate(t, newStore()) })
+}
+
+// testUpdate verifies an update changes the mutable fields, preserves the creation time, and
+// reports ErrNotFound for an unknown id.
+func testUpdate(t *testing.T, store project.Store) {
+	ctx := context.Background()
+	created := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	if err := store.Save(ctx, &project.Project{
+		ID: "proj_1", Name: "old", RepoURL: "https://example.com/old.git",
+		Branch: "main", InstallDeps: true, CreatedAt: created,
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	if err := store.Update(ctx, &project.Project{
+		ID: "proj_1", Name: "new", RepoURL: "https://example.com/new.git",
+		Branch: "dev", CredentialID: "cred_1", InstallDeps: false,
+		Image: "img:1", PullCredentialID: "cred_2",
+	}); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	got, err := store.Get(ctx, "proj_1")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.Name != "new" || got.RepoURL != "https://example.com/new.git" || got.Branch != "dev" ||
+		got.CredentialID != "cred_1" || got.InstallDeps || got.Image != "img:1" ||
+		got.PullCredentialID != "cred_2" {
+		t.Errorf("Get() = %+v, want the updated project", got)
+	}
+	if !got.CreatedAt.Equal(created) {
+		t.Errorf("CreatedAt = %v, want preserved %v", got.CreatedAt, created)
+	}
+
+	if err := store.Update(ctx, &project.Project{ID: "ghost", Name: "x", RepoURL: "r"}); !errors.Is(err, project.ErrNotFound) {
+		t.Errorf("Update(ghost) error = %v, want ErrNotFound", err)
+	}
 }
 
 // testLifecycle verifies a project round trips, updates, and deletes.

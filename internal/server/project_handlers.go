@@ -73,6 +73,53 @@ func createProjectHandler(store project.Store, log *zap.Logger) http.HandlerFunc
 	}
 }
 
+// updateProjectHandler changes an existing project's fields, keeping its id and creation time.
+func updateProjectHandler(store project.Store, log *zap.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if store == nil {
+			respondError(w, log, http.StatusNotFound, "projects not enabled")
+			return
+		}
+		var req createProjectRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			respondError(w, log, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		if req.Name == "" || req.RepoURL == "" {
+			respondError(w, log, http.StatusBadRequest, "name and repo_url are required")
+			return
+		}
+		if err := project.ValidateRepoURL(req.RepoURL); err != nil {
+			respondError(w, log, http.StatusBadRequest, err.Error())
+			return
+		}
+		id := r.PathValue("id")
+		p := &project.Project{
+			ID: id, Name: req.Name, RepoURL: req.RepoURL,
+			Branch: req.Branch, CredentialID: req.CredentialID,
+			InstallDeps: req.InstallDeps == nil || *req.InstallDeps,
+			Image:       req.Image, PullCredentialID: req.PullCredentialID,
+		}
+		err := store.Update(r.Context(), p)
+		if errors.Is(err, project.ErrNotFound) {
+			respondError(w, log, http.StatusNotFound, "project not found")
+			return
+		}
+		if err != nil {
+			log.Error("server: update project: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not update project")
+			return
+		}
+		updated, err := store.Get(r.Context(), id)
+		if err != nil {
+			log.Error("server: read updated project: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not read project")
+			return
+		}
+		respondJSON(w, log, http.StatusOK, updated, wantsPretty(r))
+	}
+}
+
 // listProjectsHandler returns all projects.
 func listProjectsHandler(store project.Store, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

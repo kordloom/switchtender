@@ -38,6 +38,27 @@ ON CONFLICT(id) DO UPDATE SET
 	return nil
 }
 
+// Update changes an existing project's mutable fields, or returns project.ErrNotFound.
+func (s *projectStore) Update(ctx context.Context, p *project.Project) error {
+	const q = `UPDATE projects SET
+	name=?, repo_url=?, branch=?, credential_id=?, install_deps=?, image=?, pull_credential_id=?
+	WHERE id=?`
+	res, err := s.db.ExecContext(ctx, q,
+		p.Name, p.RepoURL, p.Branch, p.CredentialID,
+		boolToInt(p.InstallDeps), p.Image, p.PullCredentialID, p.ID)
+	if err != nil {
+		return fmt.Errorf("update project: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("update project: %w", err)
+	}
+	if n == 0 {
+		return project.ErrNotFound
+	}
+	return nil
+}
+
 // Get returns the project with the given id, or project.ErrNotFound.
 func (s *projectStore) Get(ctx context.Context, id string) (*project.Project, error) {
 	const q = "SELECT " + projectColumns + " FROM projects WHERE id=?"
