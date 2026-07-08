@@ -46,14 +46,14 @@ and it has not shipped a release in over a year. Semaphore is lighter, but a run
 log. Yardmaster runs the same playbooks from one binary and treats every run as structured data you
 can read, split, and remember.
 
-|                       | Yardmaster                                                                        | AWX                                             | Semaphore                |
-|-----------------------|-----------------------------------------------------------------------------------|-------------------------------------------------|--------------------------|
-| Deploy                | One binary and one SQLite file, running in seconds.                               | A Kubernetes operator, Postgres, Redis, and Receptor first. | One binary.              |
-| Every run             | A live host-by-task matrix you read like a dashboard, with per-task drill-down.   | A text log you scroll.                          | A text log you scroll.   |
-| Big jobs              | Sharded across hosts, balanced by their measured duration, only failed shards retried. | Sliced round-robin, with no balancing.     | No splitting at all.     |
-| Memory across runs    | Flaky hosts flagged, durations trended, every host's history kept.               | Forgotten the moment a run ends.                | Forgotten the moment a run ends. |
-| Pipelines             | A dependency graph that passes typed outputs from one step to the next.          | A visual workflow builder.                      | Basic chaining.          |
-| Leaving your old tool | One command imports your AWX or Semaphore projects, inventories, templates, surveys, and schedules. | Not applicable.                     | Not applicable.          |
+|                                      | Yardmaster                                                                        | AWX                                             | Semaphore                |
+|--------------------------------------|-----------------------------------------------------------------------------------|-------------------------------------------------|--------------------------|
+| Deploy                               | One binary and one SQLite file, running in seconds.                               | A Kubernetes operator, Postgres, Redis, and Receptor first. | One binary.              |
+| Every&nbsp;run                       | A live host-by-task matrix you read like a dashboard, with per-task drill-down.   | A text log you scroll.                          | A text log you scroll.   |
+| Big&nbsp;jobs                        | Sharded across hosts, balanced by their measured duration, only failed shards retried. | Sliced round-robin, with no balancing.     | No splitting at all.     |
+| Memory&nbsp;across&nbsp;runs         | Flaky hosts flagged, durations trended, every host's history kept.               | Forgotten the moment a run ends.                | Forgotten the moment a run ends. |
+| Pipelines                            | A dependency graph that passes typed outputs from one step to the next.          | A visual workflow builder.                      | Basic chaining.          |
+| Leaving&nbsp;your&nbsp;old&nbsp;tool | One command imports your AWX or Semaphore projects, inventories, templates, surveys, and schedules. | Not applicable.                     | Not applicable.          |
 
 The full head-to-head, including where Yardmaster is behind, is in the
 [comparison](docs/comparison.md).
