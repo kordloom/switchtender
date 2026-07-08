@@ -15,6 +15,10 @@ import (
 // ErrNotFound is returned when a source does not exist in the store.
 var ErrNotFound = errors.New("inventory source not found")
 
+// ErrInvalidSource is returned when a source path is unsafe to hand to ansible-inventory, such as an
+// executable file or a path that traverses out of its intended location.
+var ErrInvalidSource = errors.New("invalid inventory source")
+
 // Source is one dynamic inventory source.
 type Source struct {
 	// ID is the unique source identifier.

@@ -3,6 +3,9 @@ package dispatch
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/dcadolph/yardmaster/internal/credential"
@@ -96,8 +99,34 @@ func (d *Dispatcher) dumpSource(ctx context.Context, src *invsource.Source) ([]b
 		if sourcePath, err = project.WithinRepo(dir, src.Source); err != nil {
 			return nil, fmt.Errorf("source path %q: %w", src.Source, err)
 		}
+	} else if err := validateBareSource(src.Source); err != nil {
+		return nil, err
 	}
 	return d.dumper.Dump(ctx, sourcePath, env)
+}
+
+// validateBareSource guards a non-project inventory source path. A bare source has no project repo
+// to contain it, so it is a raw host path handed to ansible-inventory, which executes it when it is
+// an executable file. It rejects directory traversal and executable files so a stored source cannot
+// run arbitrary code or reach outside its intended location as the executor.
+func validateBareSource(source string) error {
+	if source == "" {
+		return fmt.Errorf("%w: empty path", invsource.ErrInvalidSource)
+	}
+	for _, seg := range strings.Split(filepath.ToSlash(source), "/") {
+		if seg == ".." {
+			return fmt.Errorf("%w: %q traverses directories", invsource.ErrInvalidSource, source)
+		}
+	}
+	info, err := os.Stat(source)
+	if err != nil {
+		// A missing or unreadable path is not an execution surface; let ansible-inventory report it.
+		return nil //nolint:nilerr // Absence is handled downstream, not a validation failure.
+	}
+	if info.Mode().IsRegular() && info.Mode().Perm()&0o111 != 0 {
+		return fmt.Errorf("%w: %q is executable", invsource.ErrInvalidSource, source)
+	}
+	return nil
 }
 
 var _ = run.WithInventory
