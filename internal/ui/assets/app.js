@@ -2263,14 +2263,48 @@ function addTask(tasks, seen, task) {
 }
 
 // renderMatrix draws the host by task outcome grid.
+// matrixCap returns the configured host matrix cell limit from the page, or zero for no limit.
+function matrixCap() {
+	const v = parseInt(document.body.dataset.matrixCap || "0", 10);
+	return isNaN(v) ? 0 : v;
+}
+
+// renderMatrixTooLarge shows a notice in place of the grid when the host matrix has more cells
+// than the configured cap. The timeline and summary still render, and the grid returns once the
+// view is narrowed to fewer hosts or tasks or an individual shard is opened.
+function renderMatrixTooLarge(hostCount, taskCount, cellCount, cap) {
+	const table = document.getElementById("matrix");
+	const tbody = document.createElement("tbody");
+	const tr = document.createElement("tr");
+	const cell = document.createElement("td");
+	cell.className = "matrix-too-large";
+	cell.textContent = "Host matrix is " + hostCount + " × " + taskCount + " = " +
+		cellCount.toLocaleString() + " cells, over the display cap of " + cap.toLocaleString() +
+		". Filter to fewer hosts or tasks, or open a shard, to see the grid.";
+	tr.appendChild(cell);
+	tbody.appendChild(tr);
+	table.appendChild(tbody);
+	renderMatrixSummary(hostCount, taskCount, {});
+	document.getElementById("matrix-panel").hidden = false;
+}
+
 function renderMatrix(model) {
 	const { tasks, hosts, cells } = model;
 	const table = document.getElementById("matrix");
 	table.innerHTML = "";
 	detailState.cellIndex = {};
 	detailState.counts = {};
+	detailState.overCap = false;
 	if (hosts.length === 0 || tasks.length === 0) {
 		renderMatrixSummary(hosts.length, tasks.length, detailState.counts);
+		return;
+	}
+
+	const cap = matrixCap();
+	const cellCount = hosts.length * tasks.length;
+	if (cap > 0 && cellCount > cap) {
+		detailState.overCap = true;
+		renderMatrixTooLarge(hosts.length, tasks.length, cellCount, cap);
 		return;
 	}
 
@@ -2393,7 +2427,7 @@ function applyLiveEvent(ev) {
 	if (change.structural) {
 		renderMatrix(detailState.model);
 		renderTimeline(detailState.model);
-	} else if (change.host && change.task) {
+	} else if (!detailState.overCap && change.host && change.task) {
 		if (!updateCell(change.host, change.task)) {
 			renderMatrix(detailState.model);
 			renderTimeline(detailState.model);

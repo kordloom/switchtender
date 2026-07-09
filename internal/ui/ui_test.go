@@ -15,7 +15,7 @@ import (
 
 func TestUIRoutes(t *testing.T) {
 	t.Parallel()
-	handler := ui.New(zap.NewNop(), nil, false).Handler()
+	handler := ui.New(zap.NewNop(), nil, false, 50000).Handler()
 
 	tests := []struct {
 		Name         string
@@ -33,6 +33,10 @@ func TestUIRoutes(t *testing.T) {
 		{ // Test 2: Detail page carries the run id.
 			Name: "detail", Path: "/ui/runs/run_1", WantStatus: http.StatusOK,
 			WantContains: `data-run-id="run_1"`,
+		},
+		{ // Test 2b: Detail page carries the configured matrix cap.
+			Name: "detail matrix cap", Path: "/ui/runs/run_1", WantStatus: http.StatusOK,
+			WantContains: `data-matrix-cap="50000"`,
 		},
 		{ // Test 3: Stylesheet is served.
 			Name: "css", Path: "/ui/assets/app.css", WantStatus: http.StatusOK, WantContains: "--bg",
@@ -70,7 +74,7 @@ func TestUIDocs(t *testing.T) {
 		"README.md":   {Data: []byte("# Overview\n\nWelcome to the docs.\n")},
 		"concepts.md": {Data: []byte("# Concepts\n\n| A | B |\n|---|---|\n| 1 | 2 |\n")},
 	}
-	handler := ui.New(zap.NewNop(), docs, false).Handler()
+	handler := ui.New(zap.NewNop(), docs, false, 0).Handler()
 
 	tests := []struct {
 		Name         string

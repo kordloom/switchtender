@@ -36,21 +36,25 @@ type UI struct {
 	md goldmark.Markdown
 	// readOnly hides mutating controls in the pages for a read-only demo.
 	readOnly bool
+	// matrixCap is the largest host matrix, in cells, the detail page draws before showing a
+	// notice instead. Zero or less means no limit.
+	matrixCap int
 }
 
 // New parses the embedded templates and returns a UI. It panics if the embedded templates fail to
 // parse, which is a build time programming error. docs, when non-nil, is the documentation tree
 // served under /ui/docs; readOnly hides the launch panel and run action buttons for a demo.
-func New(log *zap.Logger, docs fs.FS, readOnly bool) *UI {
+func New(log *zap.Logger, docs fs.FS, readOnly bool, matrixCap int) *UI {
 	if log == nil {
 		log = zap.NewNop()
 	}
 	return &UI{
-		tmpl:     template.Must(template.ParseFS(templateFS, "templates/*.html")),
-		log:      log,
-		docs:     docs,
-		md:       goldmark.New(goldmark.WithExtensions(extension.GFM)),
-		readOnly: readOnly,
+		tmpl:      template.Must(template.ParseFS(templateFS, "templates/*.html")),
+		log:       log,
+		docs:      docs,
+		md:        goldmark.New(goldmark.WithExtensions(extension.GFM)),
+		readOnly:  readOnly,
+		matrixCap: matrixCap,
 	}
 }
 
@@ -96,7 +100,9 @@ func (u *UI) runs(w http.ResponseWriter, _ *http.Request) {
 
 // detail renders the run detail page for a single run.
 func (u *UI) detail(w http.ResponseWriter, r *http.Request) {
-	u.render(w, "detail.html", map[string]any{"RunID": r.PathValue("id"), "ReadOnly": u.readOnly})
+	u.render(w, "detail.html", map[string]any{
+		"RunID": r.PathValue("id"), "ReadOnly": u.readOnly, "MatrixCap": u.matrixCap,
+	})
 }
 
 // fleet renders the fleet health page.

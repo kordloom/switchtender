@@ -75,6 +75,9 @@ var serveStrictGrants bool
 // serveReadOnly holds the value of the --read-only flag.
 var serveReadOnly bool
 
+// serveMatrixCap holds the value of the --matrix-cap flag.
+var serveMatrixCap int
+
 // retainRuns holds the value of the --retain-runs flag, a duration like 90d.
 var retainRuns string
 
@@ -157,6 +160,8 @@ func init() {
 		"Deny non-admins access to an object that has no grants, instead of deferring to the role.")
 	serveCmd.Flags().BoolVar(&serveReadOnly, "read-only", false,
 		"Reject every mutating request, for a safely exposable instance.")
+	serveCmd.Flags().IntVar(&serveMatrixCap, "matrix-cap", server.DefaultMatrixCap,
+		"Largest host matrix, in cells, the UI draws before showing a notice. 0 means no limit.")
 	serveCmd.Flags().StringVar(&retainRuns, "retain-runs", "",
 		"Delete terminal runs older than this, for example 90d. Empty keeps them forever.")
 	serveCmd.Flags().StringVar(&retainEvents, "retain-events", "",
@@ -345,6 +350,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			server.WithTeams(bundle.Teams()),
 			server.WithGrants(bundle.Grants(), serveStrictGrants),
 			server.WithReadOnly(serveReadOnly),
+			server.WithMatrixCap(serveMatrixCap),
 			server.WithDocs(docsFS)).Handler(),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}

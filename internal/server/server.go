@@ -122,6 +122,16 @@ func WithReadOnly(readOnly bool) Option {
 	return func(srv *Server) { srv.readOnly = readOnly }
 }
 
+// DefaultMatrixCap is the host matrix cell limit used when none is configured. It is generous
+// enough for large runs while keeping the browser from drawing a grid too big to read or render.
+const DefaultMatrixCap = 50000
+
+// WithMatrixCap sets the largest host matrix, in cells, the UI will draw. Past it the detail page
+// shows a notice instead of the grid. A value of zero or less means no limit.
+func WithMatrixCap(cap int) Option {
+	return func(srv *Server) { srv.matrixCap = cap }
+}
+
 // WithInventorySources enables the dynamic inventory source endpoints.
 func WithInventorySources(store invsource.Store, refresher SourceRefresher) Option {
 	return func(srv *Server) {
@@ -198,6 +208,8 @@ type Server struct {
 	docs fs.FS
 	// readOnly rejects mutating requests when set, for a public demo.
 	readOnly bool
+	// matrixCap is the largest host matrix, in cells, the UI draws. Zero or less means no limit.
+	matrixCap int
 }
 
 // New returns a Server. It panics if store or submitter is nil; a nil logger becomes a no-op.
@@ -215,7 +227,7 @@ func New(store run.Store, submitter Submitter, log *zap.Logger, opts ...Option) 
 	for _, opt := range opts {
 		opt(srv)
 	}
-	srv.web = ui.New(srv.log, srv.docs, srv.readOnly)
+	srv.web = ui.New(srv.log, srv.docs, srv.readOnly, srv.matrixCap)
 	return srv
 }
 
