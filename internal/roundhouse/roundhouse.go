@@ -194,6 +194,8 @@ type toolRouter struct {
 	*ansibleRunner
 	// bash runs bash Specs on the host.
 	bash *bashRunner
+	// terraform runs terraform Specs on the host.
+	terraform *terraformRunner
 	// container runs an image-bound Ansible Spec inside its image.
 	container *containerRunner
 	// allowContainer gates container execution; when false an image-bound Spec fails clearly.
@@ -213,6 +215,7 @@ func newToolRouter(allowContainer bool, limits ContainerLimits, opts ...Option) 
 	return &toolRouter{
 		ansibleRunner:  host,
 		bash:           newBashRunner(host.baseEnv),
+		terraform:      newTerraformRunner(host.baseEnv),
 		container:      newContainerRunner(host.baseEnv, &host.plugin, limits),
 		allowContainer: allowContainer,
 	}
@@ -223,6 +226,8 @@ func (t *toolRouter) Run(ctx context.Context, spec Spec, out io.Writer) (Result,
 	switch run.NormalizeTool(spec.Tool) {
 	case run.ToolBash:
 		return t.bash.Run(ctx, spec, out)
+	case run.ToolTerraform:
+		return t.terraform.Run(ctx, spec, out)
 	case run.ToolAnsible:
 		if spec.Image == "" {
 			return t.ansibleRunner.Run(ctx, spec, out)

@@ -9,6 +9,8 @@ var (
 	ErrNoCommand = errors.New("no command")
 	// ErrUnknownTool is returned when a Spec names an execution tool the runner does not support.
 	ErrUnknownTool = errors.New("unknown execution tool")
+	// ErrBadWorkDir is returned when a tool's working directory escapes its project checkout.
+	ErrBadWorkDir = errors.New("working directory escapes the project")
 	// ErrNoInventory is returned when host enumeration is requested without an inventory.
 	ErrNoInventory = errors.New("no inventory")
 	// ErrLaunch is returned when the executor could not start or supervise the process.
