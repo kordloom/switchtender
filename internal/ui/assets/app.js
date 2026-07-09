@@ -421,7 +421,9 @@ function editButton(onClick) {
 	return b;
 }
 
-// wireLaunchForm hooks the launch panel up to POST /runs and fills the credential picker.
+// wireLaunchForm hooks the launch panel up to POST /runs and fills the credential picker. The tool
+// selector swaps the Ansible fields for a single command box, so bash, terraform, and python launch
+// from the same panel.
 function wireLaunchForm() {
 	const form = document.getElementById("launch-form");
 	if (!form) return;
@@ -429,27 +431,54 @@ function wireLaunchForm() {
 	fillSelect(document.getElementById("launch-project"), "/projects", "projects", (p) => p.name);
 	fillSelect(document.getElementById("launch-inventory-id"), "/inventories", "inventories",
 		(i) => i.name);
+
+	const toolSel = document.getElementById("launch-tool");
+	const ansibleFields = ["launch-field-playbook", "launch-field-inventory",
+		"launch-field-inventory-id", "launch-field-shards"];
+	const commandField = document.getElementById("launch-field-command");
+	const commandInput = document.getElementById("launch-command");
+	const syncTool = () => {
+		const tool = toolSel.value;
+		const ansible = tool === "ansible" || tool === "";
+		for (const id of ansibleFields) {
+			const el = document.getElementById(id);
+			if (el) el.hidden = !ansible;
+		}
+		commandField.hidden = ansible;
+		if (tool === "terraform") commandInput.placeholder = "working directory, e.g. infra";
+		else if (tool === "python") commandInput.placeholder = "print('hello from python')";
+		else commandInput.placeholder = "echo hello";
+	};
+	toolSel.addEventListener("change", syncTool);
+	syncTool();
+
 	form.addEventListener("submit", async (e) => {
 		e.preventDefault();
 		const status = document.getElementById("launch-status");
-		const payload = {
-			playbook: document.getElementById("launch-playbook").value.trim(),
-			inventory: document.getElementById("launch-inventory").value.trim(),
-		};
+		const tool = toolSel.value;
+		const payload = {};
+		if (tool && tool !== "ansible") {
+			payload.tool = tool;
+			payload.command = commandInput.value.trim();
+		} else {
+			payload.playbook = document.getElementById("launch-playbook").value.trim();
+			payload.inventory = document.getElementById("launch-inventory").value.trim();
+			const inventoryID = document.getElementById("launch-inventory-id").value;
+			if (inventoryID) {
+				payload.inventory_id = inventoryID;
+				delete payload.inventory;
+			}
+			const shards = parseInt(document.getElementById("launch-shards").value, 10);
+			if (shards >= 2) payload.shards = shards;
+		}
 		const projectID = document.getElementById("launch-project").value;
 		if (projectID) payload.project_id = projectID;
-		const inventoryID = document.getElementById("launch-inventory-id").value;
-		if (inventoryID) {
-			payload.inventory_id = inventoryID;
-			delete payload.inventory;
-		}
 		const queue = document.getElementById("launch-queue").value.trim();
 		if (queue) payload.queue = queue;
-		const shards = parseInt(document.getElementById("launch-shards").value, 10);
-		if (shards >= 2) payload.shards = shards;
 		const picked = Array.from(document.getElementById("launch-credentials").selectedOptions)
 			.map((o) => o.value);
 		if (picked.length) payload.credential_ids = picked;
+		if (document.getElementById("launch-dry-run").checked) payload.dry_run = true;
 		status.textContent = "Launching.";
 		try {
 			const created = await postAction("/runs", payload);
@@ -704,6 +733,19 @@ async function loadProjects() {
 	}
 }
 
+// syncTemplateTool shows the Ansible fields or the command box in the template dialog to match the
+// selected tool, so a bash, terraform, or python template hides playbook, inventory, and shards.
+function syncTemplateTool() {
+	const tool = document.getElementById("tpl-tool").value;
+	const ansible = tool === "ansible" || tool === "";
+	for (const id of ["tpl-field-playbook", "tpl-field-inventory", "tpl-field-shards"]) {
+		const el = document.getElementById(id);
+		if (el) el.hidden = !ansible;
+	}
+	const cmd = document.getElementById("tpl-field-command");
+	if (cmd) cmd.hidden = ansible;
+}
+
 // openTemplateEdit fills the template dialog with an existing record and switches it to edit mode.
 // The dialog does not expose inventory_id, so it is carried through the form dataset to avoid
 // dropping a stored inventory reference on save.
@@ -724,6 +766,10 @@ function openTemplateEdit(t) {
 	document.getElementById("tpl-vars").value = t.extra_vars ? JSON.stringify(t.extra_vars, null, 2) : "";
 	document.getElementById("tpl-survey").value =
 		(t.survey && t.survey.length) ? JSON.stringify(t.survey, null, 2) : "";
+	document.getElementById("tpl-tool").value = t.tool || "ansible";
+	document.getElementById("tpl-command").value = t.command || "";
+	document.getElementById("tpl-dry-run").checked = !!t.dry_run;
+	syncTemplateTool();
 	document.getElementById("tpl-status").textContent = "";
 	setModalTitle("template", "Edit template");
 	document.getElementById("template-modal").hidden = false;
@@ -736,11 +782,14 @@ function wireTemplateForm() {
 	fillSelect(document.getElementById("tpl-credentials"), "/credentials", "credentials",
 		(c) => c.name + " (" + c.kind + ")");
 	const form = document.getElementById("template-form");
+	document.getElementById("tpl-tool").addEventListener("change", syncTemplateTool);
+	syncTemplateTool();
 	const resetToCreate = () => {
 		delete form.dataset.editId;
 		delete form.dataset.inventoryId;
 		form.reset();
 		for (const opt of document.getElementById("tpl-credentials").options) opt.selected = false;
+		syncTemplateTool();
 		document.getElementById("tpl-status").textContent = "";
 		setModalTitle("template", "Add a template");
 	};
@@ -750,14 +799,21 @@ function wireTemplateForm() {
 	form.addEventListener("submit", async (e) => {
 		e.preventDefault();
 		const status = document.getElementById("tpl-status");
+		const tool = document.getElementById("tpl-tool").value;
 		const payload = {
 			name: document.getElementById("tpl-name").value.trim(),
 			project_id: document.getElementById("tpl-project").value,
-			playbook: document.getElementById("tpl-playbook").value.trim(),
-			inventory: document.getElementById("tpl-inventory").value.trim(),
 		};
-		const shards = parseInt(document.getElementById("tpl-shards").value, 10);
-		if (shards >= 2) payload.shards = shards;
+		if (tool && tool !== "ansible") {
+			payload.tool = tool;
+			payload.command = document.getElementById("tpl-command").value.trim();
+		} else {
+			payload.playbook = document.getElementById("tpl-playbook").value.trim();
+			payload.inventory = document.getElementById("tpl-inventory").value.trim();
+			const shards = parseInt(document.getElementById("tpl-shards").value, 10);
+			if (shards >= 2) payload.shards = shards;
+		}
+		if (document.getElementById("tpl-dry-run").checked) payload.dry_run = true;
 		const tqueue = document.getElementById("tpl-queue").value.trim();
 		if (tqueue) payload.queue = tqueue;
 		const picked = Array.from(document.getElementById("tpl-credentials").selectedOptions)
@@ -1353,6 +1409,24 @@ async function loadRuns() {
 	}
 }
 
+// toolLabel returns a short label for what a run executed: its playbook file, or its command for a
+// non-Ansible tool, collapsed and truncated so a long command does not stretch the row.
+function toolLabel(r) {
+	if (r.playbook) return baseName(r.playbook) || r.playbook;
+	const cmd = (r.command || "").replace(/\s+/g, " ").trim();
+	return cmd.length > 48 ? cmd.slice(0, 47) + "…" : cmd;
+}
+
+// toolBadgeEl returns a small tool badge for a non-Ansible run, or null for Ansible so the common
+// case stays uncluttered.
+function toolBadgeEl(r) {
+	if (!r.tool || r.tool === "ansible") return null;
+	const badge = document.createElement("span");
+	badge.className = "tool-badge " + r.tool;
+	badge.textContent = r.tool;
+	return badge;
+}
+
 // appendRunRows appends one table row per run, so a page can be added without rebuilding the
 // rows already shown.
 function appendRunRows(tbody, runs) {
@@ -1372,8 +1446,21 @@ function appendRunRows(tbody, runs) {
 		}
 		tr.appendChild(runCell);
 
-		const pbCell = td(baseName(r.playbook) || (r.playbook || ""));
-		pbCell.title = r.playbook || "";
+		const pbCell = td("");
+		const badge = toolBadgeEl(r);
+		if (badge) {
+			pbCell.appendChild(badge);
+			pbCell.appendChild(document.createTextNode(" "));
+		}
+		pbCell.appendChild(document.createTextNode(toolLabel(r)));
+		pbCell.title = r.playbook || r.command || "";
+		if (r.dry_run) {
+			const dry = document.createElement("span");
+			dry.className = "run-kind dry";
+			dry.textContent = "dry";
+			pbCell.appendChild(document.createTextNode(" "));
+			pbCell.appendChild(dry);
+		}
 		tr.appendChild(pbCell);
 
 		tr.appendChild(tdTime(r.started_at || r.created_at));

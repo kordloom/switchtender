@@ -47,19 +47,30 @@
 				<button type="button" class="modal-close" id="launch-close" aria-label="Close">&times;</button>
 			</div>
 			<form id="launch-form" class="launch-grid">
+				<label class="field-label">Tool
+					<select id="launch-tool" class="input">
+						<option value="ansible">Ansible</option>
+						<option value="bash">Bash</option>
+						<option value="terraform">Terraform</option>
+						<option value="python">Python</option>
+					</select>
+				</label>
 				<label class="field-label">Project
 					<select id="launch-project" class="input"><option value="">None, local paths</option></select>
 				</label>
-				<label class="field-label">Playbook
-					<input id="launch-playbook" class="input mono" placeholder="plays/site.yml" required>
+				<label class="field-label" id="launch-field-playbook">Playbook
+					<input id="launch-playbook" class="input mono" placeholder="plays/site.yml">
 				</label>
-				<label class="field-label">Inventory
+				<label class="field-label" id="launch-field-command" hidden>Command
+					<textarea id="launch-command" class="input mono" rows="4" placeholder="echo hello"></textarea>
+				</label>
+				<label class="field-label" id="launch-field-inventory">Inventory
 					<input id="launch-inventory" class="input mono" placeholder="/srv/ansible/hosts.ini">
 				</label>
-				<label class="field-label">Stored inventory
+				<label class="field-label" id="launch-field-inventory-id">Stored inventory
 					<select id="launch-inventory-id" class="input"><option value="">None, use the path</option></select>
 				</label>
-				<label class="field-label">Shards
+				<label class="field-label" id="launch-field-shards">Shards
 					<input id="launch-shards" class="input" type="number" min="0" max="64" placeholder="0">
 				</label>
 				<label class="field-label">Queue
@@ -67,6 +78,9 @@
 				</label>
 				<label class="field-label">Credentials
 					<select id="launch-credentials" class="input" multiple size="3"></select>
+				</label>
+				<label class="field-label check-label">
+					<input type="checkbox" id="launch-dry-run"> Dry run, no changes
 				</label>
 				<div class="launch-actions">
 					<button type="submit" class="button primary">Launch</button>

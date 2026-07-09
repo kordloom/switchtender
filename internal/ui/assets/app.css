@@ -220,6 +220,15 @@ table.runs td button + button { margin-left: 8px; }
 .run-kind.split { background: rgba(47, 129, 247, 0.16); color: var(--accent); }
 .run-kind.pipeline { background: rgba(163, 113, 247, 0.2); color: #8957e5; }
 @media (prefers-color-scheme: dark) { .run-kind.pipeline { color: #d2a8ff; } }
+.run-kind.dry { background: rgba(210, 153, 34, 0.18); color: #9a6700; }
+@media (prefers-color-scheme: dark) { .run-kind.dry { color: #e3b341; } }
+/* Tool badge */
+.tool-badge { display: inline-block; margin-right: 6px; padding: 1px 7px; border-radius: 999px; font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; background: var(--surface-3); color: var(--muted); vertical-align: middle; }
+.tool-badge.bash { background: rgba(63, 185, 80, 0.18); color: #1a7f37; }
+.tool-badge.terraform { background: rgba(124, 58, 237, 0.18); color: #6e40c9; }
+.tool-badge.python { background: rgba(47, 129, 247, 0.16); color: var(--accent); }
+@media (prefers-color-scheme: dark) { .tool-badge.bash { color: #56d364; } .tool-badge.terraform { color: #d2a8ff; } }
+.check-label { flex-direction: row; align-items: center; gap: 8px; font-weight: 600; }
 
 /* Run header */
 .run-header { display: flex; flex-wrap: wrap; gap: 12px 28px; align-items: center; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 20px; margin-bottom: 18px; }
