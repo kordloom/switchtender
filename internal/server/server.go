@@ -12,6 +12,7 @@ import (
 	"github.com/dcadolph/yardmaster/internal/auth"
 	"github.com/dcadolph/yardmaster/internal/credential"
 	"github.com/dcadolph/yardmaster/internal/grant"
+	"github.com/dcadolph/yardmaster/internal/importer"
 	"github.com/dcadolph/yardmaster/internal/inventory"
 	"github.com/dcadolph/yardmaster/internal/invsource"
 	"github.com/dcadolph/yardmaster/internal/live"
@@ -321,6 +322,16 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /grants", createGrantHandler(s.grants, s.log))
 	mux.Handle("GET /grants", listGrantsHandler(s.grants, s.log))
 	mux.Handle("DELETE /grants/{id}", deleteGrantHandler(s.grants, s.log))
+	mux.Handle("POST /import/{format}", importHandler(func() (importer.ApplyStores, bool) {
+		if s.projects == nil || s.inventories == nil || s.credentials == nil ||
+			s.templates == nil || s.schedules == nil {
+			return importer.ApplyStores{}, false
+		}
+		return importer.ApplyStores{
+			Projects: s.projects, Inventories: s.inventories, Credentials: s.credentials,
+			Templates: s.templates, Schedules: s.schedules,
+		}, true
+	}, s.log))
 	var handler http.Handler = mux
 	if s.tokens != nil {
 		gate := &authGate{tokens: s.tokens, users: s.users, audits: s.audits, log: s.log}

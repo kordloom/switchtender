@@ -19,6 +19,7 @@ const NAV_GROUPS = [
 		{ key: "sources", href: "/ui/sources", label: "Sources", desc: "Dynamic inventory sync", admin: true },
 		{ key: "templates", href: "/ui/templates", label: "Templates", desc: "Saved launch presets" },
 		{ key: "schedules", href: "/ui/schedules", label: "Schedules", desc: "Cron-driven runs" },
+		{ key: "migrate", href: "/ui/migrate", label: "Migrate", desc: "Import from AWX or Semaphore", admin: true },
 	] },
 	{ label: "Access", items: [
 		{ key: "credentials", href: "/ui/credentials", label: "Credentials", desc: "Secrets and keys", admin: true },
@@ -34,7 +35,7 @@ const PAGE_NAV = {
 	overview: "overview", runs: "runs", detail: "runs", fleet: "fleet", host: "fleet",
 	tasks: "tasks", workers: "workers", projects: "projects", inventories: "inventories",
 	sources: "sources", jobtemplates: "templates", schedules: "schedules",
-	credentials: "credentials", users: "users", docs: "docs",
+	migrate: "migrate", credentials: "credentials", users: "users", docs: "docs",
 };
 
 // NAV_ICONS holds the inline SVG body for each nav key, stroked in the current color.
@@ -49,6 +50,7 @@ const NAV_ICONS = {
 	sources: '<path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>',
 	templates: '<polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/>',
 	schedules: '<circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/>',
+	migrate: '<path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>',
 	credentials: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
 	users: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
 	docs: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>',
@@ -165,6 +167,8 @@ document.addEventListener("DOMContentLoaded", () => {
 		wireModal("source");
 		wireSourceForm();
 		loadSources();
+	} else if (page === "migrate") {
+		wireMigrate();
 	}
 	buildNav();
 	if (isReadOnly()) applyReadOnly();
@@ -799,6 +803,96 @@ async function loadProjects() {
 	} catch (e) {
 		setStatus("Failed to load projects: " + e.message);
 	}
+}
+
+// wireMigrate hooks the Preview and Import buttons up to the import endpoint. Preview shows the plan;
+// Import writes it. The buttons are wired even in the read-only demo, where applyReadOnly disables
+// them.
+function wireMigrate() {
+	const preview = document.getElementById("migrate-preview");
+	const apply = document.getElementById("migrate-apply");
+	if (preview) preview.addEventListener("click", () => runMigrate(false));
+	if (apply) apply.addEventListener("click", () => runMigrate(true));
+}
+
+// runMigrate posts the raw export text to the import endpoint and renders the result. It sends the
+// textarea contents verbatim as the body, since the endpoint reads the export document itself rather
+// than a JSON wrapper, and reuses the same bearer auth and 401 handling as the other API calls.
+async function runMigrate(apply) {
+	const status = document.getElementById("migrate-status");
+	const format = document.getElementById("migrate-format").value;
+	const body = document.getElementById("migrate-export").value;
+	if (!body.trim()) {
+		status.textContent = "Paste an export first.";
+		return;
+	}
+	document.getElementById("migrate-plan").innerHTML = "";
+	status.textContent = apply ? "Importing." : "Building preview.";
+	try {
+		const path = "/import/" + format + (apply ? "?apply=true" : "");
+		const res = await fetch(path, { method: "POST", headers: authHeaders(), body });
+		if (res.status === 401) {
+			requireLogin();
+			throw new Error("authentication required");
+		}
+		const data = await res.json().catch(() => ({}));
+		if (!res.ok) throw new Error(data.error || ("HTTP " + res.status));
+		status.textContent = "";
+		renderMigratePlan(data);
+	} catch (err) {
+		status.textContent = (apply ? "Import failed: " : "Preview failed: ") + err.message;
+	}
+}
+
+// renderMigratePlan draws the import plan: each non-empty resource list with its names, any warnings,
+// and, once applied, the count written plus the reminder to set every imported credential's secret,
+// since imports create credential shells with no secret.
+function renderMigratePlan(data) {
+	const el = document.getElementById("migrate-plan");
+	el.innerHTML = "";
+
+	if (data.applied) {
+		const done = document.createElement("div");
+		done.className = "migrate-applied";
+		done.textContent = "Imported " + (data.created || 0) + " objects. Set the secret on each " +
+			"imported credential before running templates that need it.";
+		el.appendChild(done);
+	}
+
+	const groups = [
+		["Projects", data.projects],
+		["Inventories", data.inventories],
+		["Credentials", data.credentials],
+		["Templates", data.templates],
+		["Schedules", data.schedules],
+	];
+	for (const [label, names] of groups) {
+		if (names && names.length) el.appendChild(migrateGroup(label, names));
+	}
+
+	if (data.warnings && data.warnings.length) {
+		el.appendChild(migrateGroup("Warnings", data.warnings));
+	}
+
+	if (!el.children.length) el.appendChild(emptyLine("Nothing to import from this export."));
+}
+
+// migrateGroup builds a labeled block listing the names in one import category.
+function migrateGroup(label, names) {
+	const group = document.createElement("div");
+	group.className = "migrate-group";
+	const heading = document.createElement("h2");
+	heading.textContent = label + " (" + names.length + ")";
+	group.appendChild(heading);
+	const list = document.createElement("ul");
+	list.className = "migrate-list";
+	for (const name of names) {
+		const item = document.createElement("li");
+		item.textContent = name;
+		list.appendChild(item);
+	}
+	group.appendChild(list);
+	return group;
 }
 
 // syncTemplateTool shows the Ansible fields or the command box in the template dialog to match the

@@ -83,6 +83,7 @@ func (u *UI) Handler() http.Handler {
 	mux.HandleFunc("GET /ui/projects", u.projects)
 	mux.HandleFunc("GET /ui/templates", u.jobTemplates)
 	mux.HandleFunc("GET /ui/schedules", u.schedules)
+	mux.HandleFunc("GET /ui/migrate", u.migrate)
 	if u.docs != nil {
 		mux.HandleFunc("GET /ui/docs", u.docsPage)
 		mux.HandleFunc("GET /ui/docs/{page}", u.docsPage)
@@ -131,6 +132,11 @@ func (u *UI) credentials(w http.ResponseWriter, _ *http.Request) {
 // projects renders the git project management page.
 func (u *UI) projects(w http.ResponseWriter, _ *http.Request) {
 	u.render(w, "projects.html", map[string]any{"ReadOnly": u.readOnly})
+}
+
+// migrate renders the AWX and Semaphore import page.
+func (u *UI) migrate(w http.ResponseWriter, _ *http.Request) {
+	u.render(w, "migrate.html", map[string]any{"ReadOnly": u.readOnly})
 }
 
 // jobTemplates renders the job template management page.

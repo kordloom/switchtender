@@ -121,38 +121,11 @@ func applyPlan(ctx context.Context, plan *importer.Plan) (int, error) {
 	}
 	defer func() { _ = bundle.Close() }()
 
-	created := 0
-	for _, p := range plan.Projects {
-		if err := bundle.Projects().Save(ctx, p); err != nil {
-			return created, fmt.Errorf("save project %q: %w", p.Name, err)
-		}
-		created++
-	}
-	for _, inv := range plan.Inventories {
-		if err := bundle.Inventories().Save(ctx, inv); err != nil {
-			return created, fmt.Errorf("save inventory %q: %w", inv.Name, err)
-		}
-		created++
-	}
-	for _, c := range plan.Credentials {
-		if err := bundle.Credentials().Save(ctx, c); err != nil {
-			return created, fmt.Errorf("save credential %q: %w", c.Name, err)
-		}
-		created++
-	}
-	for _, t := range plan.Templates {
-		if err := bundle.Templates().Save(ctx, t); err != nil {
-			return created, fmt.Errorf("save template %q: %w", t.Name, err)
-		}
-		created++
-	}
-	for _, s := range plan.Schedules {
-		if err := bundle.Schedules().Save(ctx, s); err != nil {
-			return created, fmt.Errorf("save schedule %q: %w", s.Name, err)
-		}
-		created++
-	}
-	return created, nil
+	return plan.Apply(ctx, importer.ApplyStores{
+		Projects: bundle.Projects(), Inventories: bundle.Inventories(),
+		Credentials: bundle.Credentials(), Templates: bundle.Templates(),
+		Schedules: bundle.Schedules(),
+	})
 }
 
 // branchOrDefault names a branch for display, calling out the remote default when unset.
