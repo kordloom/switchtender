@@ -117,6 +117,9 @@ h1.mono { font-size: 24px; }
 .pagesize-label { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
 .pagesize-input { width: 84px; }
 .pagesize-hint { font-size: 12px; }
+.list-filter { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; }
+.list-filter-input { max-width: 320px; }
+.list-filter-count { font-size: 12px; }
 .migrate-callout { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: var(--radius); padding: 12px 16px; margin-bottom: 22px; color: var(--muted); font-size: 14px; }
 .migrate-callout:hover { text-decoration: none; border-color: var(--accent); }
 .migrate-callout strong { color: var(--text); }

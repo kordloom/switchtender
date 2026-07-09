@@ -78,9 +78,44 @@ function mountTopbar() {
 	bar.appendChild(nav);
 }
 
+// LIST_PAGES are the pages whose main table is a searchable list.
+const LIST_PAGES = ["runs", "jobtemplates", "credentials", "projects", "inventories",
+	"sources", "schedules", "users", "workers", "fleet", "tasks", "host"];
+
+// mountListFilter adds a search box above the main list table and filters its rows by text as you
+// type, so every list is searchable. It reads the rows live, so it works no matter when they load.
+function mountListFilter() {
+	const table = document.querySelector("main.content table");
+	if (!table || !table.tBodies[0]) return;
+	const tbody = table.tBodies[0];
+	const wrap = document.createElement("div");
+	wrap.className = "list-filter";
+	const input = document.createElement("input");
+	input.type = "search";
+	input.className = "input list-filter-input";
+	input.placeholder = "Filter this list…";
+	input.setAttribute("aria-label", "Filter list");
+	const count = document.createElement("span");
+	count.className = "muted list-filter-count";
+	wrap.appendChild(input);
+	wrap.appendChild(count);
+	table.parentNode.insertBefore(wrap, table);
+	input.addEventListener("input", () => {
+		const q = input.value.trim().toLowerCase();
+		let shown = 0;
+		for (const row of tbody.rows) {
+			const match = q === "" || row.textContent.toLowerCase().includes(q);
+			row.hidden = !match;
+			if (match) shown++;
+		}
+		count.textContent = q ? shown + " shown" : "";
+	});
+}
+
 document.addEventListener("DOMContentLoaded", () => {
 	consumeSSOFragment();
 	mountTopbar();
+	if (LIST_PAGES.includes(document.body.dataset.page)) mountListFilter();
 	const close = document.getElementById("drill-close");
 	if (close) {
 		close.addEventListener("click", () => { document.getElementById("drill").hidden = true; });
