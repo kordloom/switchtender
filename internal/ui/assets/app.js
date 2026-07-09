@@ -1980,7 +1980,7 @@ function openParentStream(parentId) {
 		try {
 			const ev = JSON.parse(e.data);
 			detailState.events.push(ev);
-			renderDetail();
+			applyLiveEvent(ev);
 			if (ev.type === "stats") {
 				refreshShards();
 			}
@@ -2030,9 +2030,9 @@ function isTerminal(status) {
 // renderDetail redraws the header, matrix, and timeline from the current state.
 function renderDetail() {
 	renderHeader(detailState.run);
-	const model = buildModel(detailState.events);
-	renderMatrix(model);
-	renderTimeline(model);
+	detailState.model = buildModel(detailState.events);
+	renderMatrix(detailState.model);
+	renderTimeline(detailState.model);
 }
 
 // openStream subscribes to the run's live output and applies events, logs, and the end signal.
@@ -2050,7 +2050,7 @@ function openStream(runId, afterSeq) {
 			if (ev.seq && ev.seq <= (detailState.lastSeq || 0)) return;
 			detailState.events.push(ev);
 			if (ev.seq) detailState.lastSeq = ev.seq;
-			renderDetail();
+			applyLiveEvent(ev);
 		} catch (_) { /* ignore a malformed event */ }
 	});
 	source.addEventListener("log", (e) => {
@@ -2066,10 +2066,21 @@ function openStream(runId, afterSeq) {
 	});
 }
 
-// appendLog adds a chunk to the live log pane and keeps it scrolled to the end.
+// logCap bounds how many characters the live log pane keeps, so a long run cannot grow it
+// without bound. The tail is what matters live; the full log is available on the run itself.
+const logCap = 262144;
+
+// appendLog adds a chunk to the live log pane and keeps it scrolled to the end. It appends a
+// text node rather than rebuilding the whole string, which keeps a long stream from getting
+// quadratic, and trims the pane back to the cap when it grows past it.
 function appendLog(chunk) {
 	const pre = document.getElementById("log");
-	pre.textContent += chunk;
+	pre.appendChild(document.createTextNode(chunk));
+	detailState.logLen = (detailState.logLen || 0) + chunk.length;
+	if (detailState.logLen > logCap * 2) {
+		pre.textContent = pre.textContent.slice(-logCap);
+		detailState.logLen = pre.textContent.length;
+	}
 	document.getElementById("log-panel").hidden = false;
 	pre.scrollTop = pre.scrollHeight;
 }
@@ -2152,7 +2163,54 @@ function buildModel(events) {
 			if (e.stats) for (const h of Object.keys(e.stats)) hosts.add(h);
 		}
 	}
-	return { tasks, hosts: Array.from(hosts).sort(), cells, taskStart, end: statsTime || lastTime };
+	return {
+		tasks, taskSeen, taskStart, cells,
+		hosts: Array.from(hosts).sort(), hostSet: hosts,
+		lastTime, statsTime, end: statsTime || lastTime,
+	};
+}
+
+// applyEvent folds one live event into an existing model, the same way buildModel folds it on
+// a full pass. It returns whether the grid gained a host or task, which needs a structural
+// rebuild, along with the host and task the event touched so a cell update can target one cell.
+function applyEvent(model, e) {
+	const t = e.time ? new Date(e.time).getTime() : null;
+	if (t && (model.lastTime === null || t > model.lastTime)) model.lastTime = t;
+	let structural = false;
+	if (e.type === "task_start") {
+		if (!model.taskSeen.has(e.task)) structural = true;
+		addTask(model.tasks, model.taskSeen, e.task);
+		if (model.taskStart[e.task] === undefined && t) model.taskStart[e.task] = t;
+	} else if (e.type && e.type.indexOf("runner_") === 0) {
+		const outcome = e.type === "runner_ok"
+			? (e.changed ? "changed" : "ok")
+			: e.type.slice("runner_".length);
+		if (!model.hostSet.has(e.host)) {
+			model.hostSet.add(e.host);
+			model.hosts = Array.from(model.hostSet).sort();
+			structural = true;
+		}
+		if (!model.taskSeen.has(e.task)) structural = true;
+		addTask(model.tasks, model.taskSeen, e.task);
+		if (!model.cells[e.host]) model.cells[e.host] = {};
+		model.cells[e.host][e.task] = {
+			outcome, message: e.message, stdout: e.stdout, stderr: e.stderr,
+			rc: e.rc, diff: e.diff, truncated: e.truncated,
+		};
+	} else if (e.type === "stats") {
+		model.statsTime = t;
+		if (e.stats) {
+			for (const h of Object.keys(e.stats)) {
+				if (!model.hostSet.has(h)) {
+					model.hostSet.add(h);
+					model.hosts = Array.from(model.hostSet).sort();
+					structural = true;
+				}
+			}
+		}
+	}
+	model.end = model.statsTime || model.lastTime;
+	return { structural, host: e.host, task: e.task };
 }
 
 // addTask records a task name once, preserving first seen order.
@@ -2165,7 +2223,12 @@ function renderMatrix(model) {
 	const { tasks, hosts, cells } = model;
 	const table = document.getElementById("matrix");
 	table.innerHTML = "";
-	if (hosts.length === 0 || tasks.length === 0) return;
+	detailState.cellIndex = {};
+	detailState.counts = {};
+	if (hosts.length === 0 || tasks.length === 0) {
+		renderMatrixSummary(hosts.length, tasks.length, detailState.counts);
+		return;
+	}
 
 	const thead = document.createElement("thead");
 	const htr = document.createElement("tr");
@@ -2173,59 +2236,127 @@ function renderMatrix(model) {
 	corner.className = "corner";
 	corner.textContent = "host \\ task";
 	htr.appendChild(corner);
-	const taskThs = [];
-	for (const task of tasks) {
+	tasks.forEach((task, ci) => {
 		const th = document.createElement("th");
 		th.textContent = task;
+		th.dataset.ci = ci;
 		htr.appendChild(th);
-		taskThs.push(th);
-	}
+	});
 	thead.appendChild(htr);
 	table.appendChild(thead);
 
-	const counts = {};
-	const colCells = tasks.map(() => []);
 	const tbody = document.createElement("tbody");
-	for (const host of hosts) {
+	hosts.forEach((host, ri) => {
 		const tr = document.createElement("tr");
 		const rowTh = document.createElement("th");
 		rowTh.textContent = host;
+		rowTh.dataset.ri = ri;
 		tr.appendChild(rowTh);
-		const rowCells = [];
 		tasks.forEach((task, ci) => {
 			const info = cells[host] && cells[host][task];
 			const outcome = info ? info.outcome : "none";
-			counts[outcome] = (counts[outcome] || 0) + 1;
+			detailState.counts[outcome] = (detailState.counts[outcome] || 0) + 1;
 			const cell = document.createElement("td");
 			const div = document.createElement("div");
 			div.className = "cell " + outcome;
 			div.title = host + " / " + task + ": " + outcome;
-			colCells[ci].push(div);
-			rowCells.push(div);
-			// Trace a cell across a wide matrix: light up its row and column, headers included.
-			div.addEventListener("mouseenter", () => {
-				rowTh.classList.add("hi");
-				taskThs[ci].classList.add("hi");
-				rowCells.forEach((c) => c.classList.add("row-hi"));
-				colCells[ci].forEach((c) => c.classList.add("col-hi"));
-			});
-			div.addEventListener("mouseleave", () => {
-				rowTh.classList.remove("hi");
-				taskThs[ci].classList.remove("hi");
-				rowCells.forEach((c) => c.classList.remove("row-hi"));
-				colCells[ci].forEach((c) => c.classList.remove("col-hi"));
-			});
-			if (info) {
-				div.addEventListener("click", () => showDrill(Object.assign({ host, task }, info)));
-			}
+			div.dataset.host = host;
+			div.dataset.task = task;
+			div.dataset.ri = ri;
+			div.dataset.ci = ci;
+			div.dataset.outcome = outcome;
+			if (!detailState.cellIndex[host]) detailState.cellIndex[host] = {};
+			detailState.cellIndex[host][task] = div;
 			cell.appendChild(div);
 			tr.appendChild(cell);
 		});
 		tbody.appendChild(tr);
-	}
+	});
 	table.appendChild(tbody);
-	renderMatrixSummary(hosts.length, tasks.length, counts);
+	wireMatrixDelegation(table);
+	renderMatrixSummary(hosts.length, tasks.length, detailState.counts);
 	document.getElementById("matrix-panel").hidden = false;
+}
+
+// wireMatrixDelegation attaches one set of listeners to the matrix table. Hover lights the
+// cell's row and column by their index, and a click opens the cell's drill. It runs once: the
+// listeners sit on the table, so they survive the body being refilled and never scale with the
+// number of cells.
+function wireMatrixDelegation(table) {
+	if (table.dataset.wired) return;
+	table.dataset.wired = "1";
+	const clear = () => {
+		table.querySelectorAll(".hi, .row-hi, .col-hi").forEach((el) =>
+			el.classList.remove("hi", "row-hi", "col-hi"));
+	};
+	table.addEventListener("mouseover", (e) => {
+		const div = e.target.closest(".cell");
+		if (!div) return;
+		clear();
+		table.querySelectorAll('[data-ri="' + div.dataset.ri + '"]').forEach((el) =>
+			el.classList.add(el.classList.contains("cell") ? "row-hi" : "hi"));
+		table.querySelectorAll('[data-ci="' + div.dataset.ci + '"]').forEach((el) =>
+			el.classList.add(el.classList.contains("cell") ? "col-hi" : "hi"));
+	});
+	table.addEventListener("mouseleave", clear);
+	table.addEventListener("click", (e) => {
+		const div = e.target.closest(".cell");
+		if (!div) return;
+		const model = detailState.model;
+		const info = model && model.cells[div.dataset.host] && model.cells[div.dataset.host][div.dataset.task];
+		if (info) showDrill(Object.assign({ host: div.dataset.host, task: div.dataset.task }, info));
+	});
+}
+
+// updateCell repaints one matrix cell from the model after a live event and adjusts the outcome
+// rollup, leaving the rest of the grid untouched. It returns false when the cell is not present,
+// which means the caller needs a structural rebuild instead.
+function updateCell(host, task) {
+	const div = detailState.cellIndex[host] && detailState.cellIndex[host][task];
+	if (!div) return false;
+	const cells = detailState.model.cells;
+	const info = cells[host] && cells[host][task];
+	const outcome = info ? info.outcome : "none";
+	const prev = div.dataset.outcome;
+	if (prev !== outcome) {
+		detailState.counts[prev] = (detailState.counts[prev] || 1) - 1;
+		detailState.counts[outcome] = (detailState.counts[outcome] || 0) + 1;
+	}
+	div.className = "cell " + outcome;
+	div.dataset.outcome = outcome;
+	div.title = host + " / " + task + ": " + outcome;
+	renderMatrixSummary(detailState.model.hosts.length, detailState.model.tasks.length, detailState.counts);
+	return true;
+}
+
+// updateTimelineBar recolors one task's timeline bar to its current worst outcome after a live
+// event, without rebuilding the timeline.
+function updateTimelineBar(task) {
+	const bar = detailState.tlBars && detailState.tlBars.get(task);
+	if (!bar) return;
+	const m = detailState.model;
+	bar.className = "tl-bar " + worstOutcome(task, m.cells, m.hosts);
+}
+
+// applyLiveEvent folds a streamed event into the live model and repaints only what changed: the
+// whole grid when a host or task first appears, otherwise a single cell and its timeline bar.
+function applyLiveEvent(ev) {
+	if (!detailState.model) {
+		renderDetail();
+		return;
+	}
+	const change = applyEvent(detailState.model, ev);
+	if (change.structural) {
+		renderMatrix(detailState.model);
+		renderTimeline(detailState.model);
+	} else if (change.host && change.task) {
+		if (!updateCell(change.host, change.task)) {
+			renderMatrix(detailState.model);
+			renderTimeline(detailState.model);
+			return;
+		}
+		updateTimelineBar(change.task);
+	}
 }
 
 // renderMatrixSummary shows the matrix size and a per-outcome rollup above the grid.
@@ -2252,6 +2383,7 @@ function renderTimeline(model) {
 	const { tasks, taskStart, cells, hosts, end } = model;
 	const container = document.getElementById("timeline");
 	container.innerHTML = "";
+	detailState.tlBars = new Map();
 	const ordered = tasks.filter(t => taskStart[t] !== undefined).sort((a, b) => taskStart[a] - taskStart[b]);
 	if (ordered.length === 0) return;
 
@@ -2276,6 +2408,7 @@ function renderTimeline(model) {
 		track.className = "tl-track";
 		const bar = document.createElement("div");
 		bar.className = "tl-bar " + outcome;
+		detailState.tlBars.set(task, bar);
 		const leftPct = Math.min(Math.max(((start - t0) / span) * 100, 0), 99);
 		const widthPct = Math.min(Math.max((dur / span) * 100, 1), 100 - leftPct);
 		bar.style.left = leftPct + "%";
