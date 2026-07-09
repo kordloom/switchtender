@@ -322,6 +322,7 @@ table.matrix td { padding: 3px; }
 /* Buttons */
 .actions { margin-top: 8px; }
 .button { display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); font-size: 13px; font-weight: 500; transition: background 0.08s ease; cursor: pointer; font-family: inherit; }
+.load-more { margin: 12px auto 0; }
 .button svg { width: 14px; height: 14px; }
 .button:hover { text-decoration: none; background: var(--surface-3); border-color: var(--muted); }
 .button:disabled { opacity: 0.5; cursor: default; }

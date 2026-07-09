@@ -469,6 +469,41 @@ func (s *store) List(ctx context.Context) ([]*run.Run, error) {
 	return s.queryRuns(ctx, "list runs", q)
 }
 
+// ListPage returns a page of top-level runs newest first, capped at limit and skipping offset.
+func (s *store) ListPage(ctx context.Context, limit, offset int) ([]*run.Run, error) {
+	q := "SELECT " + runColumns +
+		" FROM runs WHERE parent_id IS NULL ORDER BY created_at DESC, id DESC"
+	var args []any
+	if limit > 0 {
+		q += " LIMIT ? OFFSET ?"
+		args = append(args, limit, offset)
+	}
+	return s.queryRuns(ctx, "list runs", q, args...)
+}
+
+// RunStatusCounts tallies top-level runs by status with a single grouped query.
+func (s *store) RunStatusCounts(ctx context.Context) (map[run.Status]int, error) {
+	rows, err := s.db.QueryContext(ctx,
+		"SELECT status, COUNT(*) FROM runs WHERE parent_id IS NULL GROUP BY status")
+	if err != nil {
+		return nil, fmt.Errorf("run status counts: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[run.Status]int{}
+	for rows.Next() {
+		var status string
+		var n int
+		if err := rows.Scan(&status, &n); err != nil {
+			return nil, fmt.Errorf("run status counts: %w", err)
+		}
+		out[run.Status(status)] = n
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("run status counts: %w", err)
+	}
+	return out, nil
+}
+
 // Shards returns the shard runs of a parent ordered by shard index.
 func (s *store) Shards(ctx context.Context, parentID string) ([]*run.Run, error) {
 	const q = "SELECT " + runColumns + " FROM runs WHERE parent_id=? ORDER BY shard_index"

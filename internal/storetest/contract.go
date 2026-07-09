@@ -24,6 +24,7 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Run("get missing", func(t *testing.T) { testGetNotFound(t, newStore()) })
 	t.Run("save updates existing", func(t *testing.T) { testSaveUpdate(t, newStore()) })
 	t.Run("list newest first", func(t *testing.T) { testList(t, newStore()) })
+	t.Run("list page and status counts", func(t *testing.T) { testListPage(t, newStore()) })
 	t.Run("log append and read", func(t *testing.T) { testLog(t, newStore()) })
 	t.Run("events append and read", func(t *testing.T) { testEvents(t, newStore()) })
 	t.Run("events after cursor", func(t *testing.T) { testEventsAfter(t, newStore()) })
@@ -155,6 +156,62 @@ func testList(t *testing.T, store run.Store) {
 	}
 	if diff := cmp.Diff([]string{"c", "b", "a"}, gotIDs); diff != "" {
 		t.Errorf("List() order mismatch (-want +got):\n%s", diff)
+	}
+}
+
+// testListPage verifies paging returns newest first, honors limit and offset, and that status
+// counts tally every top-level run.
+func testListPage(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	seed := []*run.Run{
+		{ID: "a", Status: run.StatusSucceeded, CreatedAt: base},
+		{ID: "b", Status: run.StatusFailed, CreatedAt: base.Add(time.Second)},
+		{ID: "c", Status: run.StatusRunning, CreatedAt: base.Add(2 * time.Second)},
+		{ID: "d", Status: run.StatusSucceeded, CreatedAt: base.Add(3 * time.Second)},
+	}
+	for _, r := range seed {
+		if err := store.Save(ctx, r); err != nil {
+			t.Fatalf("Save() error = %v", err)
+		}
+	}
+
+	ids := func(runs []*run.Run) []string {
+		out := make([]string, len(runs))
+		for i, r := range runs {
+			out[i] = r.ID
+		}
+		return out
+	}
+
+	first, err := store.ListPage(ctx, 2, 0)
+	if err != nil {
+		t.Fatalf("ListPage() error = %v", err)
+	}
+	if diff := cmp.Diff([]string{"d", "c"}, ids(first)); diff != "" {
+		t.Errorf("ListPage(2,0) mismatch (-want +got):\n%s", diff)
+	}
+	next, err := store.ListPage(ctx, 2, 2)
+	if err != nil {
+		t.Fatalf("ListPage() error = %v", err)
+	}
+	if diff := cmp.Diff([]string{"b", "a"}, ids(next)); diff != "" {
+		t.Errorf("ListPage(2,2) mismatch (-want +got):\n%s", diff)
+	}
+	if past, _ := store.ListPage(ctx, 2, 10); len(past) != 0 {
+		t.Errorf("ListPage past end = %v, want empty", ids(past))
+	}
+	if all, _ := store.ListPage(ctx, 0, 0); len(all) != 4 {
+		t.Errorf("ListPage(0,0) len = %d, want 4", len(all))
+	}
+
+	counts, err := store.RunStatusCounts(ctx)
+	if err != nil {
+		t.Fatalf("RunStatusCounts() error = %v", err)
+	}
+	want := map[run.Status]int{run.StatusSucceeded: 2, run.StatusFailed: 1, run.StatusRunning: 1}
+	if diff := cmp.Diff(want, counts, cmpopts.EquateEmpty()); diff != "" {
+		t.Errorf("RunStatusCounts() mismatch (-want +got):\n%s", diff)
 	}
 }
 

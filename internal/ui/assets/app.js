@@ -1309,6 +1309,9 @@ function emptyLine(text) {
 }
 
 // loadRuns populates the run history table.
+// runsPage is how many runs the runs view loads at a time.
+const runsPage = 50;
+
 async function loadRuns() {
 	const tbody = document.getElementById("runs");
 	const table = document.querySelector("table.runs");
@@ -1316,36 +1319,13 @@ async function loadRuns() {
 	showSkeletonRows(tbody, 6, 5);
 	table.hidden = false;
 	try {
-		const data = await getJSON("/runs");
+		const data = await getJSON("/runs?limit=" + runsPage + "&offset=0");
 		const runs = data.runs || [];
 		tbody.innerHTML = "";
 		if (runs.length === 0) { table.hidden = true; showEmpty("No runs yet."); return; }
-		renderSummary(runs);
-		for (const r of runs) {
-			const tr = document.createElement("tr");
-			tr.addEventListener("click", () => { location.href = "/ui/runs/" + r.id; });
-			tr.appendChild(tdBadge(r.status));
-
-			const runCell = td(shortId(r.id), "mono");
-			runCell.title = r.id;
-			if (r.kind === "split" || r.kind === "pipeline") {
-				const tag = document.createElement("span");
-				tag.className = "run-kind " + r.kind;
-				tag.textContent = r.kind;
-				runCell.appendChild(document.createTextNode(" "));
-				runCell.appendChild(tag);
-			}
-			tr.appendChild(runCell);
-
-			const pbCell = td(baseName(r.playbook) || (r.playbook || ""));
-			pbCell.title = r.playbook || "";
-			tr.appendChild(pbCell);
-
-			tr.appendChild(tdTime(r.started_at || r.created_at));
-
-			tr.appendChild(td(fmtDuration(r.started_at, r.ended_at)));
-			tbody.appendChild(tr);
-		}
+		renderSummary(data.summary || {});
+		appendRunRows(tbody, runs);
+		wireRunsMore(tbody, runs.length, data.hasMore);
 	} catch (e) {
 		tbody.innerHTML = "";
 		table.hidden = true;
@@ -1353,24 +1333,72 @@ async function loadRuns() {
 	}
 }
 
-// renderSummary draws the at-a-glance stat cards above the run history.
-function renderSummary(runs) {
-	const counts = { total: runs.length, succeeded: 0, failed: 0, active: 0 };
+// appendRunRows appends one table row per run, so a page can be added without rebuilding the
+// rows already shown.
+function appendRunRows(tbody, runs) {
 	for (const r of runs) {
-		if (r.status === "succeeded") {
-			counts.succeeded++;
-		} else if (r.status === "failed") {
-			counts.failed++;
-		} else if (r.status === "running" || r.status === "pending") {
-			counts.active++;
+		const tr = document.createElement("tr");
+		tr.addEventListener("click", () => { location.href = "/ui/runs/" + r.id; });
+		tr.appendChild(tdBadge(r.status));
+
+		const runCell = td(shortId(r.id), "mono");
+		runCell.title = r.id;
+		if (r.kind === "split" || r.kind === "pipeline") {
+			const tag = document.createElement("span");
+			tag.className = "run-kind " + r.kind;
+			tag.textContent = r.kind;
+			runCell.appendChild(document.createTextNode(" "));
+			runCell.appendChild(tag);
 		}
+		tr.appendChild(runCell);
+
+		const pbCell = td(baseName(r.playbook) || (r.playbook || ""));
+		pbCell.title = r.playbook || "";
+		tr.appendChild(pbCell);
+
+		tr.appendChild(tdTime(r.started_at || r.created_at));
+		tr.appendChild(td(fmtDuration(r.started_at, r.ended_at)));
+		tbody.appendChild(tr);
 	}
+}
+
+// wireRunsMore keeps a Load more control below the runs table. Each click fetches the next page
+// from the current offset and appends it, so the table grows a page at a time rather than
+// rendering every run at once.
+function wireRunsMore(tbody, offset, hasMore) {
+	let btn = document.getElementById("runs-more");
+	if (!btn) {
+		btn = document.createElement("button");
+		btn.id = "runs-more";
+		btn.className = "button load-more";
+		btn.textContent = "Load more";
+		const table = document.querySelector("table.runs");
+		table.parentNode.insertBefore(btn, table.nextSibling);
+	}
+	btn.hidden = !hasMore;
+	btn.onclick = async () => {
+		btn.disabled = true;
+		try {
+			const data = await getJSON("/runs?limit=" + runsPage + "&offset=" + offset);
+			const runs = data.runs || [];
+			appendRunRows(tbody, runs);
+			wireRunsMore(tbody, offset + runs.length, data.hasMore);
+		} catch (e) {
+			setStatus("Failed to load more runs: " + e.message);
+		} finally {
+			btn.disabled = false;
+		}
+	};
+}
+
+// renderSummary draws the at-a-glance stat cards above the run history.
+function renderSummary(summary) {
 	const el = document.getElementById("summary");
 	el.innerHTML = "";
-	el.appendChild(statCard(counts.total, "Total runs", ""));
-	el.appendChild(statCard(counts.succeeded, "Succeeded", "ok"));
-	el.appendChild(statCard(counts.failed, "Failed", "failed"));
-	el.appendChild(statCard(counts.active, "Active", "running"));
+	el.appendChild(statCard(summary.total || 0, "Total runs", ""));
+	el.appendChild(statCard(summary.succeeded || 0, "Succeeded", "ok"));
+	el.appendChild(statCard(summary.failed || 0, "Failed", "failed"));
+	el.appendChild(statCard(summary.active || 0, "Active", "running"));
 	el.hidden = false;
 }
 
@@ -1693,6 +1721,22 @@ function lastSeq(events) {
 	return max;
 }
 
+// loadAllEvents fetches a run's full event history in bounded pages, following the nextAfter
+// cursor, so one request never carries an unbounded log. A split run pages each shard this way.
+async function loadAllEvents(runId) {
+	const batch = 5000;
+	let after = 0;
+	const events = [];
+	for (;;) {
+		const data = await getJSON("/runs/" + runId + "/events?after=" + after + "&limit=" + batch);
+		const page = data.events || [];
+		for (const e of page) events.push(e);
+		if (page.length < batch) break;
+		after = data.nextAfter;
+	}
+	return events;
+}
+
 // loadLogin wires both sign in forms: account login mints a session token, and the raw token
 // form verifies a pasted token against the API.
 function loadLogin() {
@@ -1936,8 +1980,8 @@ function renderSteps(steps) {
 
 // loadSingle renders a normal run and streams it live while it is active.
 async function loadSingle(run) {
-	const ev = await getJSON("/runs/" + run.id + "/events");
-	detailState = { runId: run.id, run, events: ev.events || [] };
+	const events = await loadAllEvents(run.id);
+	detailState = { runId: run.id, run, events };
 	detailState.lastSeq = lastSeq(detailState.events);
 	renderDetail();
 	setStatus("");
@@ -1954,7 +1998,7 @@ async function loadParent(parentId) {
 	const shardData = await getJSON("/runs/" + parentId + "/shards");
 	const shards = shardData.shards || [];
 	const perShard = await Promise.all(shards.map((s) =>
-		getJSON("/runs/" + s.id + "/events").then((r) => r.events || []).catch(() => [])));
+		loadAllEvents(s.id).catch(() => [])));
 
 	detailState = { runId: parentId, run, events: [].concat.apply([], perShard) };
 	renderDetail();

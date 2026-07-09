@@ -18,6 +18,12 @@ type Store interface {
 	Get(ctx context.Context, id string) (*Run, error)
 	// List returns top-level runs, excluding shard runs, ordered by creation time, newest first.
 	List(ctx context.Context) ([]*Run, error)
+	// ListPage returns top-level runs newest first, capped at limit and skipping offset, so the
+	// runs view loads a page at a time. A limit of zero or less returns all of them.
+	ListPage(ctx context.Context, limit, offset int) ([]*Run, error)
+	// RunStatusCounts returns the number of top-level runs in each status. The runs view uses it
+	// for the summary cards without loading every run.
+	RunStatusCounts(ctx context.Context) (map[Status]int, error)
 	// Shards returns the shard runs of a parent ordered by shard index.
 	Shards(ctx context.Context, parentID string) ([]*Run, error)
 	// Steps returns the pipeline step runs of a parent ordered by step index.
@@ -145,6 +151,36 @@ func (m *memStore) List(_ context.Context) ([]*Run, error) {
 		}
 		return out[i].CreatedAt.After(out[j].CreatedAt)
 	})
+	return out, nil
+}
+
+// ListPage returns a page of top-level runs newest first, capped at limit and skipping offset.
+func (m *memStore) ListPage(ctx context.Context, limit, offset int) ([]*Run, error) {
+	all, err := m.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if offset >= len(all) {
+		return []*Run{}, nil
+	}
+	all = all[offset:]
+	if limit > 0 && limit < len(all) {
+		all = all[:limit]
+	}
+	return all, nil
+}
+
+// RunStatusCounts tallies top-level runs by status.
+func (m *memStore) RunStatusCounts(_ context.Context) (map[Status]int, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := map[Status]int{}
+	for _, r := range m.runs {
+		if r.ParentID != nil {
+			continue
+		}
+		out[r.Status]++
+	}
 	return out, nil
 }
 

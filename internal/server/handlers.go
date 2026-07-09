@@ -63,6 +63,39 @@ type listRunsResponse struct {
 	Runs []*run.Run `json:"runs"`
 	// Count is the number of runs returned.
 	Count int `json:"count"`
+	// Summary is the run totals across every page, for the summary cards.
+	Summary runSummary `json:"summary"`
+	// HasMore reports whether another page follows this one.
+	HasMore bool `json:"hasMore"`
+}
+
+// runSummary is the per-status rollup of all top-level runs, shown as cards above the list.
+type runSummary struct {
+	// Total is the number of top-level runs.
+	Total int `json:"total"`
+	// Succeeded is how many finished successfully.
+	Succeeded int `json:"succeeded"`
+	// Failed is how many failed.
+	Failed int `json:"failed"`
+	// Active is how many are running or pending.
+	Active int `json:"active"`
+}
+
+// summarize folds status counts into the summary the runs view shows.
+func summarize(counts map[run.Status]int) runSummary {
+	s := runSummary{}
+	for status, n := range counts {
+		s.Total += n
+		switch status {
+		case run.StatusSucceeded:
+			s.Succeeded += n
+		case run.StatusFailed:
+			s.Failed += n
+		case run.StatusRunning, run.StatusPending:
+			s.Active += n
+		}
+	}
+	return s
 }
 
 // eventsResponse wraps a run's structured events.
@@ -411,13 +444,26 @@ func listRunsHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
 		panic("server: listRunsHandler: Store required")
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
-		runs, err := store.List(r.Context())
+		limit := queryInt(r, "limit")
+		offset := queryInt(r, "offset")
+		runs, err := store.ListPage(r.Context(), limit, offset)
 		if err != nil {
 			log.Error("server: list runs: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not list runs")
 			return
 		}
-		respondJSON(w, log, http.StatusOK, listRunsResponse{Runs: runs, Count: len(runs)}, wantsPretty(r))
+		counts, err := store.RunStatusCounts(r.Context())
+		if err != nil {
+			log.Error("server: run status counts: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not list runs")
+			return
+		}
+		respondJSON(w, log, http.StatusOK, listRunsResponse{
+			Runs:    runs,
+			Count:   len(runs),
+			Summary: summarize(counts),
+			HasMore: limit > 0 && len(runs) == limit,
+		}, wantsPretty(r))
 	}
 }
 
