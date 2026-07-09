@@ -71,6 +71,9 @@ type eventsResponse struct {
 	Events []event.Event `json:"events"`
 	// Count is the number of events returned.
 	Count int `json:"count"`
+	// NextAfter is the sequence cursor to pass back as ?after= to page the events that
+	// follow this batch. It is the last event's Seq, or the requested after when empty.
+	NextAfter int64 `json:"nextAfter"`
 }
 
 // shardsResponse wraps a parent run's shard runs.
@@ -512,7 +515,9 @@ func runEventsHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
 		panic("server: runEventsHandler: Store required")
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
-		events, err := store.Events(r.Context(), r.PathValue("id"))
+		after := queryInt64(r, "after")
+		limit := queryInt(r, "limit")
+		events, err := store.EventsAfter(r.Context(), r.PathValue("id"), after, limit)
 		if err != nil {
 			if errors.Is(err, run.ErrNotFound) {
 				respondError(w, log, http.StatusNotFound, "run not found")
@@ -522,14 +527,44 @@ func runEventsHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
 			respondError(w, log, http.StatusInternalServerError, "could not get run events")
 			return
 		}
+		next := after
+		if n := len(events); n > 0 {
+			next = events[n-1].Seq
+		}
 		respondJSON(w, log, http.StatusOK,
-			eventsResponse{Events: events, Count: len(events)}, wantsPretty(r))
+			eventsResponse{Events: events, Count: len(events), NextAfter: next}, wantsPretty(r))
 	}
 }
 
 // streamPollInterval is how often the stream handler drains new events from the store when no
 // in-process signal arrives, which is how runs executing on other processes stream live.
 const streamPollInterval = time.Second
+
+// streamBatch caps how many events one drain reads from the store at a time, so a burst of
+// output on a large run is emitted in bounded chunks rather than one unbounded read.
+const streamBatch = 1000
+
+// queryInt returns the named query parameter as a non-negative int, or zero when it is
+// absent or not a positive number.
+func queryInt(r *http.Request, name string) int {
+	if v := r.URL.Query().Get(name); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return 0
+}
+
+// queryInt64 returns the named query parameter as a non-negative int64, or zero when it is
+// absent or not a positive number.
+func queryInt64(r *http.Request, name string) int64 {
+	if v := r.URL.Query().Get(name); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+			return n
+		}
+	}
+	return 0
+}
 
 // runStreamHandler streams a run's live events and log over Server Sent Events. The store is the
 // source of truth: new rows beyond what the client has seen are emitted on a poll tick, and hub
@@ -566,24 +601,37 @@ func runStreamHandler(streamer Streamer, store run.Store, log *zap.Logger) http.
 		w.WriteHeader(http.StatusOK)
 		flusher.Flush()
 
-		// The browser already fetched history before subscribing; stream only what lands after.
-		emittedEvents := 0
-		emittedLog := 0
-		if evs, err := store.Events(r.Context(), id); err == nil {
-			emittedEvents = len(evs)
+		// The browser passes the seq of the last event it already has as ?after=, so the
+		// stream resumes from there and never replays history. Without it, the stream starts
+		// from the current end. Each drain is an indexed range scan from the cursor, not a
+		// full re-read of the event log.
+		var lastSeq int64
+		if _, ok := r.URL.Query()["after"]; ok {
+			lastSeq = queryInt64(r, "after")
+		} else if seq, err := store.LastEventSeq(r.Context(), id); err == nil {
+			lastSeq = seq
 		}
+		emittedLog := 0
 		if body, err := store.Log(r.Context(), id); err == nil {
 			emittedLog = len(body)
 		}
 
 		drain := func() bool {
-			if evs, err := store.Events(r.Context(), id); err == nil {
-				for ; emittedEvents < len(evs); emittedEvents++ {
-					data, err := json.Marshal(evs[emittedEvents])
+			for {
+				evs, err := store.EventsAfter(r.Context(), id, lastSeq, streamBatch)
+				if err != nil || len(evs) == 0 {
+					break
+				}
+				for _, e := range evs {
+					lastSeq = e.Seq
+					data, err := json.Marshal(e)
 					if err != nil {
 						continue
 					}
 					writeSSE(w, "event", data)
+				}
+				if len(evs) < streamBatch {
+					break
 				}
 			}
 			if body, err := store.Log(r.Context(), id); err == nil && len(body) > emittedLog {

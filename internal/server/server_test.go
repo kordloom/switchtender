@@ -456,6 +456,83 @@ func TestRunStreamTerminalEndsImmediately(t *testing.T) {
 	}
 }
 
+// TestRunEventsPaging checks that the events endpoint honors after and limit and reports the
+// cursor to page with.
+func TestRunEventsPaging(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := run.NewMemStore()
+	if err := store.Save(ctx, &run.Run{ID: "r", Status: run.StatusSucceeded, CreatedAt: time.Now()}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	at := time.Date(2026, 7, 6, 0, 0, 0, 0, time.UTC)
+	for i := 0; i < 5; i++ {
+		if err := store.AppendEvents(ctx, "r",
+			[]event.Event{{Type: event.TypeTaskStart, Time: at, Task: fmt.Sprintf("t%d", i)}}); err != nil {
+			t.Fatalf("AppendEvents() error = %v", err)
+		}
+	}
+	handler := New(store, &fakeSubmitter{}, zap.NewNop()).Handler()
+
+	get := func(query string) eventsResponse {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/runs/r/events"+query, nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", rec.Code)
+		}
+		var got eventsResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return got
+	}
+
+	if all := get(""); all.Count != 5 || all.NextAfter != 5 {
+		t.Errorf("all = count %d nextAfter %d, want 5 and 5", all.Count, all.NextAfter)
+	}
+	first := get("?limit=2")
+	if first.Count != 2 || first.NextAfter != 2 || first.Events[0].Task != "t0" {
+		t.Errorf("first page = count %d nextAfter %d first %q, want 2, 2, t0",
+			first.Count, first.NextAfter, first.Events[0].Task)
+	}
+	next := get("?after=2&limit=2")
+	if next.Count != 2 || next.Events[0].Task != "t2" {
+		t.Errorf("second page = count %d first %q, want 2 starting t2", next.Count, next.Events[0].Task)
+	}
+	if tail := get("?after=5"); tail.Count != 0 || tail.NextAfter != 5 {
+		t.Errorf("tail = count %d nextAfter %d, want 0 and 5", tail.Count, tail.NextAfter)
+	}
+}
+
+// TestRunStreamResumesAfterCursor checks that a stream started with ?after= sends only the
+// events past the cursor, never replaying earlier history.
+func TestRunStreamResumesAfterCursor(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := run.NewMemStore()
+	if err := store.Save(ctx, &run.Run{ID: "r", Status: run.StatusSucceeded, CreatedAt: time.Now()}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	at := time.Date(2026, 7, 6, 0, 0, 0, 0, time.UTC)
+	for i := 0; i < 3; i++ {
+		if err := store.AppendEvents(ctx, "r",
+			[]event.Event{{Type: event.TypeTaskStart, Time: at, Task: fmt.Sprintf("t%d", i)}}); err != nil {
+			t.Fatalf("AppendEvents() error = %v", err)
+		}
+	}
+	handler := New(store, &fakeSubmitter{}, zap.NewNop()).Handler()
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/runs/r/stream?after=2", nil))
+	body := rec.Body.String()
+	if strings.Contains(body, `"t0"`) || strings.Contains(body, `"t1"`) {
+		t.Errorf("stream replayed history before the cursor:\n%s", body)
+	}
+	if !strings.Contains(body, `"t2"`) {
+		t.Errorf("stream did not send the event after the cursor:\n%s", body)
+	}
+}
+
 func TestRunStreamDrainsStore(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

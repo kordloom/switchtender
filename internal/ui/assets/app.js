@@ -1678,7 +1678,19 @@ async function postAction(path, payload, method) {
 // streamURL appends the stored token to a stream path, since EventSource cannot set headers.
 function streamURL(path) {
 	const token = apiToken();
-	return token ? path + "?access_token=" + encodeURIComponent(token) : path;
+	if (!token) return path;
+	const sep = path.includes("?") ? "&" : "?";
+	return path + sep + "access_token=" + encodeURIComponent(token);
+}
+
+// lastSeq returns the highest store sequence among events, or zero when none carry one. It is
+// the cursor a live stream resumes from, so the browser never re-receives history it has.
+function lastSeq(events) {
+	let max = 0;
+	for (const e of events) {
+		if (e.seq && e.seq > max) max = e.seq;
+	}
+	return max;
 }
 
 // loadLogin wires both sign in forms: account login mints a session token, and the raw token
@@ -1926,10 +1938,11 @@ function renderSteps(steps) {
 async function loadSingle(run) {
 	const ev = await getJSON("/runs/" + run.id + "/events");
 	detailState = { runId: run.id, run, events: ev.events || [] };
+	detailState.lastSeq = lastSeq(detailState.events);
 	renderDetail();
 	setStatus("");
 	if (!isTerminal(run.status)) {
-		openStream(run.id);
+		openStream(run.id, detailState.lastSeq);
 	}
 }
 
@@ -2023,14 +2036,20 @@ function renderDetail() {
 }
 
 // openStream subscribes to the run's live output and applies events, logs, and the end signal.
-function openStream(runId) {
+// It resumes after afterSeq so history is never re-sent, and skips any event at or before the
+// cursor in case a reconnect replays one.
+function openStream(runId, afterSeq) {
 	const indicator = document.getElementById("live-indicator");
 	if (indicator) indicator.hidden = false;
 
-	const source = new EventSource(streamURL("/runs/" + runId + "/stream"));
+	const path = "/runs/" + runId + "/stream" + (afterSeq ? "?after=" + afterSeq : "");
+	const source = new EventSource(streamURL(path));
 	source.addEventListener("event", (e) => {
 		try {
-			detailState.events.push(JSON.parse(e.data));
+			const ev = JSON.parse(e.data);
+			if (ev.seq && ev.seq <= (detailState.lastSeq || 0)) return;
+			detailState.events.push(ev);
+			if (ev.seq) detailState.lastSeq = ev.seq;
 			renderDetail();
 		} catch (_) { /* ignore a malformed event */ }
 	});

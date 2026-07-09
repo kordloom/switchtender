@@ -61,6 +61,15 @@ type Store interface {
 	AppendEvents(ctx context.Context, id string, events []event.Event) error
 	// Events returns a copy of the run's structured events, or ErrNotFound.
 	Events(ctx context.Context, id string) ([]event.Event, error)
+	// EventsAfter returns the run's events whose store sequence is greater than afterSeq, in
+	// order, capped at limit. A limit of zero or less returns every matching event. Each event
+	// carries its Seq, so a caller pages or streams by passing the last Seq it saw back as
+	// afterSeq. Returns ErrNotFound if the run is absent.
+	EventsAfter(ctx context.Context, id string, afterSeq int64, limit int) ([]event.Event, error)
+	// LastEventSeq returns the store sequence of the run's most recent event, or zero when the
+	// run has no events. A live stream starts from it to send only what lands next without
+	// reading the existing log. Returns ErrNotFound if the run is absent.
+	LastEventSeq(ctx context.Context, id string) (int64, error)
 	// PurgeEventsBefore drops the events and logs of terminal runs created before cutoff, keeping
 	// the run records and their summaries. It returns how many runs were trimmed.
 	PurgeEventsBefore(ctx context.Context, cutoff time.Time) (int, error)
@@ -541,6 +550,39 @@ func (m *memStore) Events(_ context.Context, id string) ([]event.Event, error) {
 	out := make([]event.Event, len(m.events[id]))
 	copy(out, m.events[id])
 	return out, nil
+}
+
+// EventsAfter returns the run's events past afterSeq, capped at limit. The sequence is the
+// one-based position, so it is monotonic within a run and usable as an opaque paging cursor.
+func (m *memStore) EventsAfter(_ context.Context, id string, afterSeq int64, limit int) ([]event.Event, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if _, ok := m.runs[id]; !ok {
+		return nil, ErrNotFound
+	}
+	var out []event.Event
+	for i, e := range m.events[id] {
+		seq := int64(i + 1)
+		if seq <= afterSeq {
+			continue
+		}
+		e.Seq = seq
+		out = append(out, e)
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
+
+// LastEventSeq returns the one-based position of the run's last event, or zero when it has none.
+func (m *memStore) LastEventSeq(_ context.Context, id string) (int64, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if _, ok := m.runs[id]; !ok {
+		return 0, ErrNotFound
+	}
+	return int64(len(m.events[id])), nil
 }
 
 // PurgeEventsBefore drops the events and logs of terminal runs created before cutoff, keeping the

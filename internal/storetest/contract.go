@@ -26,6 +26,7 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Run("list newest first", func(t *testing.T) { testList(t, newStore()) })
 	t.Run("log append and read", func(t *testing.T) { testLog(t, newStore()) })
 	t.Run("events append and read", func(t *testing.T) { testEvents(t, newStore()) })
+	t.Run("events after cursor", func(t *testing.T) { testEventsAfter(t, newStore()) })
 	t.Run("shards excluded from list", func(t *testing.T) { testShards(t, newStore()) })
 	t.Run("pipeline steps ordered", func(t *testing.T) { testSteps(t, newStore()) })
 	t.Run("non-terminal runs", func(t *testing.T) { testNonTerminal(t, newStore()) })
@@ -223,6 +224,80 @@ func testEvents(t *testing.T, store run.Store) {
 	}
 	if again[0].Play != "demo" {
 		t.Error("mutating the returned events changed stored state")
+	}
+}
+
+// testEventsAfter verifies the seq cursor: events come back after the cursor, in order, with
+// a positive strictly increasing Seq, honoring the limit, and paging by the last Seq walks
+// the whole log. It does not assume specific Seq values, since those differ across stores.
+func testEventsAfter(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	if err := store.Save(ctx, &run.Run{ID: "x", CreatedAt: time.Now()}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	at := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	const total = 5
+	for i := 0; i < total; i++ {
+		if err := store.AppendEvents(ctx, "x",
+			[]event.Event{{Type: event.TypeTaskStart, Time: at, Task: fmt.Sprintf("t%d", i)}}); err != nil {
+			t.Fatalf("AppendEvents() error = %v", err)
+		}
+	}
+
+	// Missing run is ErrNotFound.
+	if _, err := store.EventsAfter(ctx, "missing", 0, 0); !errors.Is(err, run.ErrNotFound) {
+		t.Errorf("EventsAfter(missing) = %v, want ErrNotFound", err)
+	}
+
+	// From the start returns all, in order, with a positive strictly increasing Seq.
+	all, err := store.EventsAfter(ctx, "x", 0, 0)
+	if err != nil {
+		t.Fatalf("EventsAfter() error = %v", err)
+	}
+	if len(all) != total {
+		t.Fatalf("EventsAfter(0,0) len = %d, want %d", len(all), total)
+	}
+	var prev int64
+	for i, e := range all {
+		if e.Seq <= prev {
+			t.Errorf("event %d Seq = %d, want > %d", i, e.Seq, prev)
+		}
+		if e.Task != fmt.Sprintf("t%d", i) {
+			t.Errorf("event %d Task = %q, want t%d", i, e.Task, i)
+		}
+		prev = e.Seq
+	}
+
+	// The limit caps the batch.
+	if got, _ := store.EventsAfter(ctx, "x", 0, 2); len(got) != 2 {
+		t.Errorf("EventsAfter(0,2) len = %d, want 2", len(got))
+	}
+
+	// The cursor skips everything at or before it.
+	tail, err := store.EventsAfter(ctx, "x", all[1].Seq, 0)
+	if err != nil {
+		t.Fatalf("EventsAfter(cursor) error = %v", err)
+	}
+	if len(tail) != total-2 || tail[0].Task != "t2" {
+		t.Errorf("EventsAfter(after t1) = %d events, first %q, want 3 starting t2", len(tail), tail[0].Task)
+	}
+
+	// Paging by the last Seq walks the whole log exactly once.
+	var paged []event.Event
+	cursor := int64(0)
+	for {
+		batch, err := store.EventsAfter(ctx, "x", cursor, 2)
+		if err != nil {
+			t.Fatalf("paging EventsAfter() error = %v", err)
+		}
+		if len(batch) == 0 {
+			break
+		}
+		paged = append(paged, batch...)
+		cursor = batch[len(batch)-1].Seq
+	}
+	if diff := cmp.Diff(all, paged, cmpopts.EquateEmpty()); diff != "" {
+		t.Errorf("paged walk mismatch (-want +got):\n%s", diff)
 	}
 }
 

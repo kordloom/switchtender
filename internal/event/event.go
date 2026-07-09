@@ -56,6 +56,9 @@ type Event struct {
 	// Outputs holds values a playbook published with set_stats, set only on stats events. A
 	// pipeline feeds them to dependent steps as extra vars.
 	Outputs map[string]any `json:"outputs,omitempty"`
+	// Seq is the store sequence assigned when the event is read, used as a stream and paging
+	// cursor. It is zero on an event that has not come from a store, so it is never persisted.
+	Seq int64 `json:"seq,omitempty"`
 }
 
 // HostStats holds the recap totals for a single host.

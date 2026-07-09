@@ -906,6 +906,66 @@ func (s *store) Events(ctx context.Context, id string) ([]event.Event, error) {
 	return out, nil
 }
 
+// EventsAfter returns the run's events with seq greater than afterSeq, ordered, capped at
+// limit. A limit of zero or less returns every matching event. Each event carries its Seq.
+func (s *store) EventsAfter(ctx context.Context, id string, afterSeq int64, limit int) ([]event.Event, error) {
+	ok, err := s.exists(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, run.ErrNotFound
+	}
+	query := "SELECT seq, data FROM run_events WHERE run_id=? AND seq > ? ORDER BY seq"
+	args := []any{id, afterSeq}
+	if limit > 0 {
+		query += " LIMIT ?"
+		args = append(args, limit)
+	}
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("read events: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []event.Event
+	for rows.Next() {
+		var seq int64
+		var data string
+		if err := rows.Scan(&seq, &data); err != nil {
+			return nil, fmt.Errorf("read events: %w", err)
+		}
+		var e event.Event
+		if err := json.Unmarshal([]byte(data), &e); err != nil {
+			return nil, fmt.Errorf("read events: %w", err)
+		}
+		e.Seq = seq
+		out = append(out, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read events: %w", err)
+	}
+	return out, nil
+}
+
+// LastEventSeq returns the seq of the run's most recent event, or zero when it has none.
+func (s *store) LastEventSeq(ctx context.Context, id string) (int64, error) {
+	ok, err := s.exists(ctx, id)
+	if err != nil {
+		return 0, err
+	}
+	if !ok {
+		return 0, run.ErrNotFound
+	}
+	var seq int64
+	err = s.db.QueryRowContext(ctx,
+		"SELECT COALESCE(MAX(seq), 0) FROM run_events WHERE run_id=?", id).Scan(&seq)
+	if err != nil {
+		return 0, fmt.Errorf("read events: %w", err)
+	}
+	return seq, nil
+}
+
 // exists reports whether a run with id is present.
 func (s *store) exists(ctx context.Context, id string) (bool, error) {
 	var one int
