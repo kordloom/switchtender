@@ -12,7 +12,7 @@ import (
 
 // docOrder is the order documentation pages appear in the sidebar. Files not listed follow, sorted.
 var docOrder = []string{
-	"README", "quickstart", "switching-from-awx", "concepts", "configuration", "features", "api",
+	"README", "quickstart", "faq", "switching-from-awx", "concepts", "configuration", "features", "api",
 	"migration", "comparison",
 }
 
