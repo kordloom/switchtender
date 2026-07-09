@@ -5,6 +5,7 @@ package trigger
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -15,6 +16,13 @@ import (
 
 // tokenPrefix marks trigger webhook tokens so leaked strings are recognizable.
 const tokenPrefix = "whk_"
+
+// secretPrefix marks trigger signing secrets so leaked strings are recognizable.
+const secretPrefix = "whs_"
+
+// signaturePrefix is the algorithm label GitHub and GitLab prepend to the hex HMAC digest in the
+// X-Hub-Signature-256 header.
+const signaturePrefix = "sha256="
 
 // ErrNotFound is returned when a trigger does not exist in the store.
 var ErrNotFound = errors.New("trigger not found")
@@ -29,6 +37,12 @@ type Trigger struct {
 	TemplateID string `json:"template_id"`
 	// TokenHash is the hex encoded SHA-256 of the webhook token; the token itself never persists.
 	TokenHash string `json:"-"`
+	// SigningSecret is the AES-GCM sealed HMAC secret used to verify X-Hub-Signature-256. It is
+	// separate from the URL token so a leaked webhook URL does not also leak the signing key, and
+	// never serializes to JSON. Empty when no encryption key was configured at creation.
+	SigningSecret string `json:"-"`
+	// RequireSignature rejects an inbound webhook whose HMAC signature is missing or wrong.
+	RequireSignature bool `json:"require_signature"`
 	// LastFiredAt is when the trigger last launched a run.
 	LastFiredAt *time.Time `json:"last_fired_at,omitempty"`
 	// CreatedAt is when the trigger was created.
@@ -74,4 +88,33 @@ func New(name, templateID string) (string, *Trigger, error) {
 func HashToken(plain string) string {
 	sum := sha256.Sum256([]byte(strings.TrimSpace(plain)))
 	return hex.EncodeToString(sum[:])
+}
+
+// NewSigningSecret returns a fresh webhook signing secret. The plaintext is shown once, sealed at
+// rest with credential.Sealer, and set as the secret on the git host so its HMAC signatures verify.
+// Rotation mints a new one.
+func NewSigningSecret() (string, error) {
+	var b [24]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	return secretPrefix + hex.EncodeToString(b[:]), nil
+}
+
+// SignBody returns the X-Hub-Signature-256 value for body under secret: the string sha256=<hex> the
+// git host sends and the hook recomputes to authenticate the payload.
+func SignBody(secret string, body []byte) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(body)
+	return signaturePrefix + hex.EncodeToString(mac.Sum(nil))
+}
+
+// VerifySignature reports whether header is a valid X-Hub-Signature-256 for body under secret. The
+// compare is constant time; an empty secret or header, or a digest of the wrong length, never
+// matches.
+func VerifySignature(secret string, body []byte, header string) bool {
+	if secret == "" || header == "" {
+		return false
+	}
+	return hmac.Equal([]byte(SignBody(secret, body)), []byte(header))
 }

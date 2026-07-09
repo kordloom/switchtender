@@ -51,6 +51,12 @@ result into a stored inventory, with cloud authentication supplied by a credenti
 A webhook trigger is a URL that launches a template on an inbound git push. The project syncs
 fresh first, so the run deploys the commit that was just pushed.
 
+When the server has an encryption key, creating a trigger also mints a signing secret, shown once,
+separate from the URL token so a leaked URL cannot forge signed pushes. Set that secret as the
+webhook secret on the git host and turn on enforcement, and every inbound push must carry a valid
+`X-Hub-Signature-256` HMAC over its body or it is rejected. Rotate the secret at any time; a bad or
+missing signature never launches a run.
+
 ## Credentials
 
 A credential is a secret sealed with AES-256-GCM, decrypted only at execution into a temporary file

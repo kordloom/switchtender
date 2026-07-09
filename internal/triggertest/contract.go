@@ -17,6 +17,26 @@ func Contract(t *testing.T, newStore func() trigger.Store) {
 	t.Run("lifecycle", func(t *testing.T) { testLifecycle(t, newStore()) })
 	t.Run("find by token hash", func(t *testing.T) { testFindByHash(t, newStore()) })
 	t.Run("list ordered", func(t *testing.T) { testList(t, newStore()) })
+	t.Run("signing secret", func(t *testing.T) { testSigning(t, newStore()) })
+}
+
+// testSigning verifies the sealed signing secret and enforcement flag round trip.
+func testSigning(t *testing.T, store trigger.Store) {
+	ctx := context.Background()
+	tg := &trigger.Trigger{
+		ID: "trg_sig", Name: "signed", TemplateID: "tpl_1", TokenHash: "th",
+		SigningSecret: "sealed-secret", RequireSignature: true, CreatedAt: time.Now(),
+	}
+	if err := store.Save(ctx, tg); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	got, err := store.Get(ctx, "trg_sig")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.SigningSecret != "sealed-secret" || !got.RequireSignature {
+		t.Errorf("Get() = %+v, want sealed secret and require signature set", got)
+	}
 }
 
 // testLifecycle verifies a trigger round trips, updates, and deletes.

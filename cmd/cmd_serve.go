@@ -372,7 +372,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			server.WithInventories(bundle.Inventories()),
 			server.WithAudit(bundle.Audits()),
 			server.WithInventorySources(bundle.InventorySources(), disp),
-			server.WithTriggers(bundle.Triggers()),
+			server.WithTriggers(bundle.Triggers(), sealer),
 			server.WithTeams(bundle.Teams()),
 			server.WithGrants(bundle.Grants(), serveStrictGrants),
 			server.WithReadOnly(serveReadOnly),

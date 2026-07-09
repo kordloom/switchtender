@@ -169,12 +169,14 @@ CREATE TABLE IF NOT EXISTS inventory_sources (
 	created_at    TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS triggers (
-	id            TEXT PRIMARY KEY,
-	name          TEXT NOT NULL DEFAULT '',
-	template_id   TEXT NOT NULL,
-	token_hash    TEXT NOT NULL,
-	last_fired_at TEXT,
-	created_at    TEXT NOT NULL
+	id                TEXT PRIMARY KEY,
+	name              TEXT NOT NULL DEFAULT '',
+	template_id       TEXT NOT NULL,
+	token_hash        TEXT NOT NULL,
+	signing_secret    TEXT NOT NULL DEFAULT '',
+	require_signature INTEGER NOT NULL DEFAULT 0,
+	last_fired_at     TEXT,
+	created_at        TEXT NOT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_triggers_hash ON triggers(token_hash);
 CREATE TABLE IF NOT EXISTS audit_entries (
@@ -234,6 +236,8 @@ ALTER TABLE projects ADD COLUMN IF NOT EXISTS install_deps INTEGER NOT NULL DEFA
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS image TEXT NOT NULL DEFAULT '';
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS pull_credential_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE templates ADD COLUMN IF NOT EXISTS inventory_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE triggers ADD COLUMN IF NOT EXISTS signing_secret TEXT NOT NULL DEFAULT '';
+ALTER TABLE triggers ADD COLUMN IF NOT EXISTS require_signature INTEGER NOT NULL DEFAULT 0;
 `
 
 // store is a run.Store backed by a PostgreSQL database.

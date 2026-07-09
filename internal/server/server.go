@@ -92,9 +92,14 @@ func WithInventories(store inventory.Store) Option {
 	return func(srv *Server) { srv.inventories = store }
 }
 
-// WithTriggers enables webhook triggers that launch templates from inbound git pushes.
-func WithTriggers(store trigger.Store) Option {
-	return func(srv *Server) { srv.triggers = store }
+// WithTriggers enables webhook triggers that launch templates from inbound git pushes. The sealer
+// seals per-trigger HMAC signing secrets and verifies inbound signatures; pass the same sealer used
+// for credentials.
+func WithTriggers(store trigger.Store, sealer *credential.Sealer) Option {
+	return func(srv *Server) {
+		srv.triggers = store
+		srv.sealer = sealer
+	}
 }
 
 // WithTeams enables the team endpoints backed by the given store.
@@ -296,10 +301,12 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /inventory-sources", listSourcesHandler(s.invSources, s.log))
 	mux.Handle("DELETE /inventory-sources/{id}", deleteSourceHandler(s.invSources, s.log))
 	mux.Handle("POST /inventory-sources/{id}/refresh", refreshSourceHandler(s.refresher, s.log))
-	mux.Handle("POST /triggers", createTriggerHandler(s.triggers, s.templates, s.log))
+	mux.Handle("POST /triggers", createTriggerHandler(s.triggers, s.templates, s.sealer, s.log))
+	mux.Handle("PUT /triggers/{id}", updateTriggerHandler(s.triggers, s.log))
+	mux.Handle("POST /triggers/{id}/rotate-secret", rotateTriggerSecretHandler(s.triggers, s.sealer, s.log))
 	mux.Handle("GET /triggers", listTriggersHandler(s.triggers, s.log))
 	mux.Handle("DELETE /triggers/{id}", deleteTriggerHandler(s.triggers, s.log))
-	mux.Handle("POST /hooks/{token}", hookHandler(s.triggers, s.templates, s.submitter, s.log))
+	mux.Handle("POST /hooks/{token}", hookHandler(s.triggers, s.templates, s.submitter, s.sealer, s.log))
 	mux.Handle("POST /templates", createTemplateHandler(s.templates, s.log))
 	mux.Handle("PUT /templates/{id}", updateTemplateHandler(s.templates, s.log))
 	mux.Handle("GET /templates", listTemplatesHandler(s.templates, s.log))

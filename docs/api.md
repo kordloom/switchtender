@@ -36,10 +36,12 @@ Every endpoint the server exposes. The web UI lives at `/ui/` and the root redir
 | GET    | `/templates`            | List templates.                                         |
 | POST   | `/templates/{id}/launch`| Launch a template, answering its survey if it has one.  |
 | DELETE | `/templates/{id}`       | Delete a template.                                      |
-| POST   | `/triggers`             | Create a webhook trigger for a template.                |
+| POST   | `/triggers`             | Create a webhook trigger; returns a signing secret once.|
+| PUT    | `/triggers/{id}`        | Rename a trigger or toggle signature enforcement.       |
+| POST   | `/triggers/{id}/rotate-secret` | Rotate the signing secret, shown once.           |
 | GET    | `/triggers`             | List webhook triggers.                                  |
 | DELETE | `/triggers/{id}`        | Delete a trigger, revoking its webhook.                 |
-| POST   | `/hooks/{token}`        | Fire a trigger from a git push, no auth header needed.  |
+| POST   | `/hooks/{token}`        | Fire a trigger from a git push; a required HMAC signature is checked first.|
 | POST   | `/credentials`          | Store a credential (ssh_key, vault_password, env, become_password, registry), encrypted at rest.|
 | GET    | `/credentials`          | List credentials, secrets never included.               |
 | DELETE | `/credentials/{id}`     | Delete a credential.                                    |
