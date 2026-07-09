@@ -40,6 +40,7 @@ func (m *memStore) Update(_ context.Context, c *Credential) error {
 	existing.Name = c.Name
 	existing.Kind = c.Kind
 	existing.Secret = c.Secret
+	existing.Source = c.Source
 	return nil
 }
 

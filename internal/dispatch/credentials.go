@@ -1,10 +1,13 @@
 package dispatch
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
+	"strings"
 
 	"github.com/dcadolph/yardmaster/internal/credential"
 	"github.com/dcadolph/yardmaster/internal/roundhouse"
@@ -66,6 +69,12 @@ func (d *Dispatcher) materializeCredentials(r *run.Run, spec *roundhouse.Spec) (
 		if err != nil {
 			return cleanup, fmt.Errorf("decrypt credential %s: %w", id, err)
 		}
+		if c.Source == credential.SourceCommand {
+			plain, err = resolveCommandSecret(context.Background(), plain)
+			if err != nil {
+				return cleanup, fmt.Errorf("resolve credential %s: %w", id, err)
+			}
+		}
 		f, err := os.CreateTemp("", "yardmaster-cred-*")
 		if err != nil {
 			return cleanup, fmt.Errorf("materialize credential %s: %w", id, err)
@@ -112,4 +121,23 @@ func (d *Dispatcher) materializeCredentials(r *run.Run, spec *roundhouse.Spec) (
 		}
 	}
 	return cleanup, nil
+}
+
+// resolveCommandSecret runs a command-source credential's command and returns its stdout as the
+// secret, so the real secret is fetched from an external store such as Vault or a cloud CLI at run
+// time and never stored in Yardmaster. A trailing newline is trimmed, since command line tools add
+// one, while interior newlines are kept so multi-line secrets survive. Stderr feeds the error only.
+func resolveCommandSecret(ctx context.Context, command string) (string, error) {
+	cmd := exec.CommandContext(ctx, "sh", "-c", command)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		if msg == "" {
+			msg = err.Error()
+		}
+		return "", fmt.Errorf("%w: %s", ErrSecretResolve, msg)
+	}
+	return strings.TrimRight(stdout.String(), "\r\n"), nil
 }

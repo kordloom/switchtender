@@ -204,7 +204,8 @@ CREATE TABLE IF NOT EXISTS credentials (
 	name       TEXT NOT NULL DEFAULT '',
 	kind       TEXT NOT NULL,
 	secret     TEXT NOT NULL,
-	created_at TEXT NOT NULL
+	created_at TEXT NOT NULL,
+	source     TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS teams (
 	id         TEXT PRIMARY KEY,
@@ -260,6 +261,7 @@ var alterations = []string{
 	"ALTER TABLE templates ADD COLUMN tool TEXT NOT NULL DEFAULT ''",
 	"ALTER TABLE templates ADD COLUMN command TEXT NOT NULL DEFAULT ''",
 	"ALTER TABLE templates ADD COLUMN dry_run INTEGER NOT NULL DEFAULT 0",
+	"ALTER TABLE credentials ADD COLUMN source TEXT NOT NULL DEFAULT ''",
 }
 
 // store is a run.Store backed by a SQLite database.

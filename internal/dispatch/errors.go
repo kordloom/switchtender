@@ -27,4 +27,7 @@ var (
 	ErrUnknownDependency = errors.New("unknown dependency")
 	// ErrDependencyCycle is returned when pipeline dependencies form a cycle.
 	ErrDependencyCycle = errors.New("dependency cycle")
+	// ErrSecretResolve is returned when a command-source credential's command fails to produce a
+	// secret at run time.
+	ErrSecretResolve = errors.New("secret resolve failed")
 )

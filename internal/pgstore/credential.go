@@ -10,7 +10,7 @@ import (
 )
 
 // credentialColumns is the shared select list for credential reads.
-const credentialColumns = `id, name, kind, secret, created_at`
+const credentialColumns = `id, name, kind, secret, created_at, source`
 
 // credentialStore is a credential.Store backed by the shared SQLite database.
 type credentialStore struct {
@@ -21,13 +21,13 @@ type credentialStore struct {
 // Save inserts or replaces the credential.
 func (s *credentialStore) Save(ctx context.Context, c *credential.Credential) error {
 	const q = `
-INSERT INTO credentials (id, name, kind, secret, created_at)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO credentials (id, name, kind, secret, created_at, source)
+VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT(id) DO UPDATE SET
 	name=excluded.name, kind=excluded.kind, secret=excluded.secret,
-	created_at=excluded.created_at`
+	created_at=excluded.created_at, source=excluded.source`
 	_, err := s.db.ExecContext(ctx, q,
-		c.ID, c.Name, string(c.Kind), c.Secret, formatTime(c.CreatedAt))
+		c.ID, c.Name, string(c.Kind), c.Secret, formatTime(c.CreatedAt), c.Source)
 	if err != nil {
 		return fmt.Errorf("save credential: %w", err)
 	}
@@ -38,8 +38,8 @@ ON CONFLICT(id) DO UPDATE SET
 // credential.ErrNotFound.
 func (s *credentialStore) Update(ctx context.Context, c *credential.Credential) error {
 	res, err := s.db.ExecContext(ctx,
-		"UPDATE credentials SET name=$1, kind=$2, secret=$3 WHERE id=$4",
-		c.Name, string(c.Kind), c.Secret, c.ID)
+		"UPDATE credentials SET name=$1, kind=$2, secret=$3, source=$4 WHERE id=$5",
+		c.Name, string(c.Kind), c.Secret, c.Source, c.ID)
 	if err != nil {
 		return fmt.Errorf("update credential: %w", err)
 	}
@@ -112,7 +112,7 @@ func scanCredential(sc scanner) (*credential.Credential, error) {
 		kind    string
 		created string
 	)
-	if err := sc.Scan(&c.ID, &c.Name, &kind, &c.Secret, &created); err != nil {
+	if err := sc.Scan(&c.ID, &c.Name, &kind, &c.Secret, &created, &c.Source); err != nil {
 		return nil, err
 	}
 	c.Kind = credential.Kind(kind)

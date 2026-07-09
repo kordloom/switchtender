@@ -51,6 +51,12 @@ responses. Kinds include SSH keys, vault passwords, become passwords, container 
 environment bundles, which is where API tokens and other KEY=VALUE secrets go. Set
 `YARDMASTER_ENCRYPTION_KEY` and `YARDMASTER_ENCRYPTION_SALT` to enable them.
 
+A credential can also be a command source, so the value lives in an external store instead of in
+Yardmaster. Yardmaster seals a command, for example `vault kv get -field=password secret/prod` or an
+`aws secretsmanager get-secret-value` call, and runs it at execution time; the command's output is
+the secret and is never stored. This works with any secret manager reachable from a command: Vault,
+AWS, GCP, 1Password, or your own script.
+
 ## Are webhook triggers safe to expose?
 
 Yes. A trigger can require a verified HMAC signature, keyed by a per-trigger secret sealed at rest and

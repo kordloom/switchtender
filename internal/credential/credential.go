@@ -50,6 +50,32 @@ func ValidKind(k Kind) bool {
 	}
 }
 
+const (
+	// SourceLocal means the sealed Secret is the secret value itself. It is the default.
+	SourceLocal = "local"
+	// SourceCommand means the sealed Secret is a command whose stdout is the secret, resolved at run
+	// time so the real secret lives in an external store, not in Yardmaster.
+	SourceCommand = "command"
+)
+
+// NormalizeSource maps an empty source to the local default and otherwise returns source unchanged.
+func NormalizeSource(source string) string {
+	if source == "" {
+		return SourceLocal
+	}
+	return source
+}
+
+// ValidSource reports whether s names a supported credential source. Empty is valid and means local.
+func ValidSource(s string) bool {
+	switch NormalizeSource(s) {
+	case SourceLocal, SourceCommand:
+		return true
+	default:
+		return false
+	}
+}
+
 // RegistryLogin splits registry credential material into its username and password. The first line
 // is the username; everything after it is the password, so a password may contain any character.
 func RegistryLogin(secret string) (username, password string) {
@@ -82,7 +108,12 @@ type Credential struct {
 	Name string `json:"name"`
 	// Kind classifies the secret.
 	Kind Kind `json:"kind"`
-	// Secret is the encrypted material at rest and never appears in API responses.
+	// Source is where the secret value comes from: empty or local means Secret holds the sealed value
+	// itself; command means Secret holds a command whose stdout is the secret, fetched at run time
+	// from an external store such as Vault or a cloud CLI.
+	Source string `json:"source,omitempty"`
+	// Secret is the encrypted material at rest and never appears in API responses. For a command
+	// source it is the sealed command, not the secret.
 	Secret string `json:"-"`
 	// CreatedAt is when the credential was created.
 	CreatedAt time.Time `json:"created_at"`

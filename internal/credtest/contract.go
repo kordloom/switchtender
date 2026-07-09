@@ -25,13 +25,15 @@ func testUpdate(t *testing.T, store credential.Store) {
 	ctx := context.Background()
 	created := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
 	if err := store.Save(ctx, &credential.Credential{
-		ID: "cred_1", Name: "old", Kind: credential.KindSSHKey, Secret: "sealed-old", CreatedAt: created,
+		ID: "cred_1", Name: "old", Kind: credential.KindSSHKey, Secret: "sealed-old",
+		Source: credential.SourceLocal, CreatedAt: created,
 	}); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
 
 	if err := store.Update(ctx, &credential.Credential{
 		ID: "cred_1", Name: "new", Kind: credential.KindVaultPassword, Secret: "sealed-new",
+		Source: credential.SourceCommand,
 	}); err != nil {
 		t.Fatalf("Update() error = %v", err)
 	}
@@ -41,6 +43,9 @@ func testUpdate(t *testing.T, store credential.Store) {
 	}
 	if got.Name != "new" || got.Kind != credential.KindVaultPassword || got.Secret != "sealed-new" {
 		t.Errorf("Get() = %+v, want the updated credential", got)
+	}
+	if got.Source != credential.SourceCommand {
+		t.Errorf("Source = %q, want %q", got.Source, credential.SourceCommand)
 	}
 	if !got.CreatedAt.Equal(created) {
 		t.Errorf("CreatedAt = %v, want preserved %v", got.CreatedAt, created)
@@ -57,7 +62,7 @@ func testLifecycle(t *testing.T, store credential.Store) {
 	created := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
 	c := &credential.Credential{
 		ID: "cred_1", Name: "fleet-key", Kind: credential.KindSSHKey,
-		Secret: "sealed-bytes", CreatedAt: created,
+		Secret: "sealed-bytes", Source: credential.SourceCommand, CreatedAt: created,
 	}
 	if err := store.Save(ctx, c); err != nil {
 		t.Fatalf("Save() error = %v", err)
@@ -69,6 +74,9 @@ func testLifecycle(t *testing.T, store credential.Store) {
 	}
 	if got.Name != "fleet-key" || got.Kind != credential.KindSSHKey || got.Secret != "sealed-bytes" {
 		t.Errorf("Get() = %+v, want the saved credential with its sealed secret", got)
+	}
+	if got.Source != credential.SourceCommand {
+		t.Errorf("Source = %q, want %q", got.Source, credential.SourceCommand)
 	}
 	if !got.CreatedAt.Equal(created) {
 		t.Errorf("CreatedAt = %v, want %v", got.CreatedAt, created)

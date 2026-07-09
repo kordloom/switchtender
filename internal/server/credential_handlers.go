@@ -18,7 +18,10 @@ type createCredentialRequest struct {
 	Name string `json:"name"`
 	// Kind is ssh_key or vault_password. Required.
 	Kind credential.Kind `json:"kind"`
-	// Secret is the material itself. Required, never echoed back.
+	// Source is local (default) for a value stored here, or command for a command whose stdout is the
+	// secret, fetched from an external store at run time.
+	Source string `json:"source,omitempty"`
+	// Secret is the material itself, or the command for a command source. Required, never echoed back.
 	Secret string `json:"secret"`
 }
 
@@ -56,6 +59,10 @@ func createCredentialHandler(store credential.Store, sealer *credential.Sealer, 
 				"kind must be ssh_key, vault_password, env, become_password, or registry")
 			return
 		}
+		if !credential.ValidSource(req.Source) {
+			respondError(w, log, http.StatusBadRequest, "source must be local or command")
+			return
+		}
 
 		sealed, err := sealer.Seal(req.Secret)
 		req.Secret = ""
@@ -66,7 +73,7 @@ func createCredentialHandler(store credential.Store, sealer *credential.Sealer, 
 		}
 		c := &credential.Credential{
 			ID: credential.NewID(), Name: req.Name, Kind: req.Kind,
-			Secret: sealed, CreatedAt: time.Now(),
+			Source: credential.NormalizeSource(req.Source), Secret: sealed, CreatedAt: time.Now(),
 		}
 		if err := store.Save(r.Context(), c); err != nil {
 			log.Error("server: save credential: " + err.Error())
@@ -84,6 +91,9 @@ type updateCredentialRequest struct {
 	Name string `json:"name"`
 	// Kind is applied only when a new secret is sent; blank keeps the current kind. Optional.
 	Kind credential.Kind `json:"kind,omitempty"`
+	// Source is applied only when a new secret is sent: local for a stored value, command for a
+	// command. Blank keeps the current source. Optional.
+	Source string `json:"source,omitempty"`
 	// Secret, when non-empty, replaces the stored material; blank keeps it. Never echoed back.
 	Secret string `json:"secret,omitempty"`
 }
@@ -135,6 +145,14 @@ func updateCredentialHandler(store credential.Store, sealer *credential.Sealer, 
 					"kind must be ssh_key, vault_password, env, become_password, or registry")
 				return
 			}
+			source := c.Source
+			if req.Source != "" {
+				source = req.Source
+			}
+			if !credential.ValidSource(source) {
+				respondError(w, log, http.StatusBadRequest, "source must be local or command")
+				return
+			}
 			sealed, err := sealer.Seal(secret)
 			if err != nil {
 				log.Error("server: seal credential: " + err.Error())
@@ -142,6 +160,7 @@ func updateCredentialHandler(store credential.Store, sealer *credential.Sealer, 
 				return
 			}
 			c.Kind = kind
+			c.Source = credential.NormalizeSource(source)
 			c.Secret = sealed
 		}
 		if err := store.Update(r.Context(), c); err != nil {

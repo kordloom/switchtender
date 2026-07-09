@@ -572,6 +572,7 @@ function openCredentialEdit(c) {
 	form.dataset.editId = c.id;
 	document.getElementById("cred-name").value = c.name;
 	document.getElementById("cred-kind").value = c.kind;
+	document.getElementById("cred-source").value = c.source || "local";
 	const sec = document.getElementById("cred-secret");
 	sec.value = "";
 	sec.required = false;
@@ -587,9 +588,15 @@ function openCredentialEdit(c) {
 function wireCredentialForm() {
 	const form = document.getElementById("cred-form");
 	const secPlaceholder = document.getElementById("cred-secret").placeholder;
+	const source = document.getElementById("cred-source");
+	source.addEventListener("change", () => {
+		document.getElementById("cred-secret").placeholder =
+			source.value === "command" ? "vault kv get -field=password secret/prod-fleet" : secPlaceholder;
+	});
 	const resetToCreate = () => {
 		delete form.dataset.editId;
 		document.getElementById("cred-name").value = "";
+		document.getElementById("cred-source").value = "local";
 		const sec = document.getElementById("cred-secret");
 		sec.value = "";
 		sec.required = true;
@@ -607,6 +614,7 @@ function wireCredentialForm() {
 		const payload = {
 			name: document.getElementById("cred-name").value.trim(),
 			kind: document.getElementById("cred-kind").value,
+			source: document.getElementById("cred-source").value,
 		};
 		const secret = document.getElementById("cred-secret").value;
 		if (secret) payload.secret = secret;
