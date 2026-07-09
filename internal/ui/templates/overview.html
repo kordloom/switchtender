@@ -27,22 +27,18 @@
 		<div class="summary" id="ov-metrics" hidden></div>
 		<div id="status" class="muted">Loading overview.</div>
 
-		<div class="overview-cols">
-			<section class="panel">
-				<div class="panel-head">
-					<h2>Recent runs</h2>
-					<a class="panel-link" href="/ui/runs">View all</a>
-				</div>
-				<div id="recent" class="ov-list"></div>
-			</section>
-			<section class="panel">
-				<div class="panel-head">
-					<h2>Fleet health</h2>
-					<a class="panel-link" href="/ui/fleet">View all</a>
-				</div>
-				<div id="fleet-snap" class="ov-list"></div>
-			</section>
-		</div>
+		<section class="panel panel-runs">
+			<div class="panel-head">
+				<h2>Recent runs</h2>
+				<a class="panel-link" href="/ui/runs">View all runs</a>
+			</div>
+			<div id="recent" class="ov-list"></div>
+		</section>
+
+		<a class="migrate-callout" href="/ui/docs">
+			<strong>Coming from AWX?</strong>
+			<span>Import your projects, inventories, and job templates. Open the migration guide.</span>
+		</a>
 
 		<div class="jump-head">
 			<h2 class="jump-title">Jump to</h2>

@@ -54,8 +54,33 @@ const NAV_ICONS = {
 	docs: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>',
 };
 
+// mountTopbar adds docs and repository links to the top bar on every page, so the guides and the
+// source are one click away from anywhere in the product.
+function mountTopbar() {
+	const bar = document.querySelector(".topbar");
+	if (!bar || bar.querySelector(".topbar-links")) return;
+	const nav = document.createElement("nav");
+	nav.className = "topbar-links";
+	const docs = document.createElement("a");
+	docs.href = "/ui/docs";
+	docs.className = "topbar-link";
+	docs.textContent = "Docs";
+	nav.appendChild(docs);
+	const gh = document.createElement("a");
+	gh.href = "https://github.com/dcadolph/yardmaster";
+	gh.className = "topbar-link topbar-icon";
+	gh.target = "_blank";
+	gh.rel = "noopener";
+	gh.title = "View on GitHub";
+	gh.setAttribute("aria-label", "View on GitHub");
+	gh.innerHTML = '<svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.02-1.49-2.01.44-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 012-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>';
+	nav.appendChild(gh);
+	bar.appendChild(nav);
+}
+
 document.addEventListener("DOMContentLoaded", () => {
 	consumeSSOFragment();
+	mountTopbar();
 	const close = document.getElementById("drill-close");
 	if (close) {
 		close.addEventListener("click", () => { document.getElementById("drill").hidden = true; });
@@ -1228,8 +1253,7 @@ async function loadOverview() {
 	const runs = runsRes.runs || [];
 	const hosts = fleetRes.hosts || [];
 	renderOverviewMetrics(runs, hosts);
-	renderRecentRuns(runs.slice(0, 6));
-	renderFleetSnapshot(hosts.slice(0, 6));
+	renderRecentRuns(runs.slice(0, 10));
 	setStatus("");
 }
 
@@ -1276,28 +1300,6 @@ function renderRecentRuns(runs) {
 			meta.classList.add("reltime");
 		}
 		row.appendChild(meta);
-		el.appendChild(row);
-	}
-}
-
-// renderFleetSnapshot lists the top hosts by recent activity, each a link to its history.
-function renderFleetSnapshot(hosts) {
-	const el = document.getElementById("fleet-snap");
-	el.innerHTML = "";
-	if (!hosts.length) { el.appendChild(emptyLine("No host history yet.")); return; }
-	for (const h of hosts) {
-		const row = document.createElement("a");
-		row.className = "ov-row";
-		row.href = "/ui/hosts/" + encodeURIComponent(h.host);
-		const name = document.createElement("span");
-		name.className = "ov-row-name mono";
-		name.textContent = h.host;
-		row.appendChild(name);
-		const chip = document.createElement("span");
-		chip.className = h.flaky ? "chip flaky" : "chip none";
-		chip.textContent = h.flaky ? "flaky" : "steady";
-		row.appendChild(chip);
-		row.appendChild(outcomeChip(h.last_outcome));
 		el.appendChild(row);
 	}
 }
@@ -1384,18 +1386,25 @@ function emptyLine(text) {
 	return p;
 }
 
-// loadRuns populates the run history table.
-// runsPage is how many runs the runs view loads at a time.
-const runsPage = 50;
+// runsPageSize reads the runs-per-page control: a positive count, or 0 for no limit. Defaults to 20.
+function runsPageSize() {
+	const el = document.getElementById("runs-pagesize");
+	if (!el) return 20;
+	const n = parseInt(el.value, 10);
+	return (Number.isNaN(n) || n < 0) ? 20 : n;
+}
 
+// loadRuns populates the run history table.
 async function loadRuns() {
 	const tbody = document.getElementById("runs");
 	const table = document.querySelector("table.runs");
+	const sizeEl = document.getElementById("runs-pagesize");
+	if (sizeEl) sizeEl.onchange = () => loadRuns();
 	setStatus("");
 	showSkeletonRows(tbody, 6, 5);
 	table.hidden = false;
 	try {
-		const data = await getJSON("/runs?limit=" + runsPage + "&offset=0");
+		const data = await getJSON("/runs?limit=" + runsPageSize() + "&offset=0");
 		const runs = data.runs || [];
 		tbody.innerHTML = "";
 		if (runs.length === 0) { table.hidden = true; showEmpty("No runs yet."); return; }
@@ -1486,7 +1495,7 @@ function wireRunsMore(tbody, offset, hasMore) {
 	btn.onclick = async () => {
 		btn.disabled = true;
 		try {
-			const data = await getJSON("/runs?limit=" + runsPage + "&offset=" + offset);
+			const data = await getJSON("/runs?limit=" + runsPageSize() + "&offset=" + offset);
 			const runs = data.runs || [];
 			appendRunRows(tbody, runs);
 			wireRunsMore(tbody, offset + runs.length, data.hasMore);
