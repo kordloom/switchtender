@@ -55,6 +55,7 @@ const NAV_ICONS = {
 };
 
 document.addEventListener("DOMContentLoaded", () => {
+	consumeSSOFragment();
 	const close = document.getElementById("drill-close");
 	if (close) {
 		close.addEventListener("click", () => { document.getElementById("drill").hidden = true; });
@@ -237,6 +238,25 @@ function svgIcon(inner) {
 // apiToken returns the stored API token, empty when the server runs open.
 function apiToken() {
 	return localStorage.getItem("ym_token") || "";
+}
+
+// consumeSSOFragment stores the session token handed back in the URL fragment after single
+// sign-on, then strips it from the address bar so it is not left in history or copied by accident.
+function consumeSSOFragment() {
+	if (!location.hash || location.hash.indexOf("access_token=") === -1) return;
+	const params = new URLSearchParams(location.hash.slice(1));
+	const token = params.get("access_token");
+	if (!token) return;
+	localStorage.setItem("ym_token", token);
+	if (params.get("role")) localStorage.setItem("ym_role", params.get("role"));
+	if (params.get("user")) localStorage.setItem("ym_user", params.get("user"));
+	history.replaceState(null, "", location.pathname + location.search);
+}
+
+// ssoError returns a single sign-on error passed back in the URL fragment, or empty when none.
+function ssoError() {
+	if (!location.hash || location.hash.indexOf("error=") === -1) return "";
+	return new URLSearchParams(location.hash.slice(1)).get("error") || "";
 }
 
 // authHeaders builds the Authorization header when a token is stored.
@@ -1740,6 +1760,11 @@ async function loadAllEvents(runId) {
 // loadLogin wires both sign in forms: account login mints a session token, and the raw token
 // form verifies a pasted token against the API.
 function loadLogin() {
+	const ssoErr = ssoError();
+	if (ssoErr) {
+		setStatus(ssoErr);
+		history.replaceState(null, "", location.pathname + location.search);
+	}
 	document.getElementById("account-form").addEventListener("submit", async (e) => {
 		e.preventDefault();
 		try {

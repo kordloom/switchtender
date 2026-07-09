@@ -39,22 +39,25 @@ type UI struct {
 	// matrixCap is the largest host matrix, in cells, the detail page draws before showing a
 	// notice instead. Zero or less means no limit.
 	matrixCap int
+	// oidcEnabled shows the single sign-on button on the sign-in page when set.
+	oidcEnabled bool
 }
 
 // New parses the embedded templates and returns a UI. It panics if the embedded templates fail to
 // parse, which is a build time programming error. docs, when non-nil, is the documentation tree
 // served under /ui/docs; readOnly hides the launch panel and run action buttons for a demo.
-func New(log *zap.Logger, docs fs.FS, readOnly bool, matrixCap int) *UI {
+func New(log *zap.Logger, docs fs.FS, readOnly bool, matrixCap int, oidcEnabled bool) *UI {
 	if log == nil {
 		log = zap.NewNop()
 	}
 	return &UI{
-		tmpl:      template.Must(template.ParseFS(templateFS, "templates/*.html")),
-		log:       log,
-		docs:      docs,
-		md:        goldmark.New(goldmark.WithExtensions(extension.GFM)),
-		readOnly:  readOnly,
-		matrixCap: matrixCap,
+		tmpl:        template.Must(template.ParseFS(templateFS, "templates/*.html")),
+		log:         log,
+		docs:        docs,
+		md:          goldmark.New(goldmark.WithExtensions(extension.GFM)),
+		readOnly:    readOnly,
+		matrixCap:   matrixCap,
+		oidcEnabled: oidcEnabled,
 	}
 }
 
@@ -157,7 +160,7 @@ func (u *UI) sources(w http.ResponseWriter, _ *http.Request) {
 
 // login renders the token sign in page.
 func (u *UI) login(w http.ResponseWriter, _ *http.Request) {
-	u.render(w, "login.html", nil)
+	u.render(w, "login.html", map[string]any{"OIDCEnabled": u.oidcEnabled})
 }
 
 // schedules renders the schedules page.

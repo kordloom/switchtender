@@ -78,6 +78,15 @@ var serveReadOnly bool
 // serveMatrixCap holds the value of the --matrix-cap flag.
 var serveMatrixCap int
 
+// serveOIDCIssuer, serveOIDCClientID, serveOIDCRedirectURL, and serveOIDCDefaultRole hold the
+// OpenID Connect single sign-on flags. The client secret comes from YARDMASTER_OIDC_CLIENT_SECRET.
+var (
+	serveOIDCIssuer      string
+	serveOIDCClientID    string
+	serveOIDCRedirectURL string
+	serveOIDCDefaultRole string
+)
+
 // retainRuns holds the value of the --retain-runs flag, a duration like 90d.
 var retainRuns string
 
@@ -162,6 +171,13 @@ func init() {
 		"Reject every mutating request, for a safely exposable instance.")
 	serveCmd.Flags().IntVar(&serveMatrixCap, "matrix-cap", server.DefaultMatrixCap,
 		"Largest host matrix, in cells, the UI draws before showing a notice. 0 means no limit.")
+	serveCmd.Flags().StringVar(&serveOIDCIssuer, "oidc-issuer", "",
+		"OpenID Connect issuer URL to enable single sign-on. Empty leaves SSO off.")
+	serveCmd.Flags().StringVar(&serveOIDCClientID, "oidc-client-id", "", "OIDC client id.")
+	serveCmd.Flags().StringVar(&serveOIDCRedirectURL, "oidc-redirect-url", "",
+		"OIDC redirect URL, for example https://host/auth/oidc/callback.")
+	serveCmd.Flags().StringVar(&serveOIDCDefaultRole, "oidc-default-role", "viewer",
+		"Role granted to an account created on first SSO sign-in: admin, operator, or viewer.")
 	serveCmd.Flags().StringVar(&retainRuns, "retain-runs", "",
 		"Delete terminal runs older than this, for example 90d. Empty keeps them forever.")
 	serveCmd.Flags().StringVar(&retainEvents, "retain-events", "",
@@ -334,6 +350,16 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	sweeper.Start()
 	defer sweeper.Close()
 
+	var oidcAuth *server.OIDCAuth
+	if serveOIDCIssuer != "" {
+		oidcAuth, err = server.NewOIDCAuth(cmd.Context(), serveOIDCIssuer, serveOIDCClientID,
+			os.Getenv("YARDMASTER_OIDC_CLIENT_SECRET"), serveOIDCRedirectURL,
+			user.Role(serveOIDCDefaultRole), bundle.Users(), bundle.Tokens(), log)
+		if err != nil {
+			return err
+		}
+	}
+
 	httpServer := &http.Server{
 		Addr: serveAddr,
 		Handler: server.New(store, disp, log, server.WithStreamer(hub),
@@ -351,6 +377,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			server.WithGrants(bundle.Grants(), serveStrictGrants),
 			server.WithReadOnly(serveReadOnly),
 			server.WithMatrixCap(serveMatrixCap),
+			server.WithOIDC(oidcAuth),
 			server.WithDocs(docsFS)).Handler(),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}

@@ -189,6 +189,10 @@ func (g *authGate) protects(r *http.Request) bool {
 	if r.Method == http.MethodPost && r.URL.Path == "/auth/login" {
 		return false
 	}
+	// The single sign-on handshake runs before the user has a token.
+	if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/auth/oidc/") {
+		return false
+	}
 	// Webhook triggers carry their own secret token in the path, so they bypass the token gate.
 	if r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/hooks/") {
 		return false

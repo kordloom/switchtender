@@ -132,6 +132,12 @@ func WithMatrixCap(cap int) Option {
 	return func(srv *Server) { srv.matrixCap = cap }
 }
 
+// WithOIDC enables single sign-on through the given OpenID Connect provider. When set, the sign-in
+// page offers an SSO button and the /auth/oidc routes are served.
+func WithOIDC(o *OIDCAuth) Option {
+	return func(srv *Server) { srv.oidc = o }
+}
+
 // WithInventorySources enables the dynamic inventory source endpoints.
 func WithInventorySources(store invsource.Store, refresher SourceRefresher) Option {
 	return func(srv *Server) {
@@ -210,6 +216,8 @@ type Server struct {
 	readOnly bool
 	// matrixCap is the largest host matrix, in cells, the UI draws. Zero or less means no limit.
 	matrixCap int
+	// oidc enables single sign-on when configured, nil when SSO is off.
+	oidc *OIDCAuth
 }
 
 // New returns a Server. It panics if store or submitter is nil; a nil logger becomes a no-op.
@@ -227,7 +235,7 @@ func New(store run.Store, submitter Submitter, log *zap.Logger, opts ...Option) 
 	for _, opt := range opts {
 		opt(srv)
 	}
-	srv.web = ui.New(srv.log, srv.docs, srv.readOnly, srv.matrixCap)
+	srv.web = ui.New(srv.log, srv.docs, srv.readOnly, srv.matrixCap, srv.oidc != nil)
 	return srv
 }
 
@@ -263,6 +271,10 @@ func (s *Server) Handler() http.Handler {
 	})
 	mux.Handle("POST /auth/check", authCheckHandler())
 	mux.Handle("POST /auth/login", loginHandler(s.users, s.tokens, s.log))
+	if s.oidc != nil {
+		mux.HandleFunc("GET /auth/oidc/login", s.oidc.login)
+		mux.HandleFunc("GET /auth/oidc/callback", s.oidc.callback)
+	}
 	mux.Handle("POST /users", createUserHandler(s.users, s.log))
 	mux.Handle("PUT /users/{id}", updateUserHandler(s.users, s.log))
 	mux.Handle("GET /users", listUsersHandler(s.users, s.log))
