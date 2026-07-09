@@ -133,6 +133,55 @@ func TestDispatcherStoresEvents(t *testing.T) {
 	}
 }
 
+func TestDispatcherBashRun(t *testing.T) {
+	t.Parallel()
+	store := run.NewMemStore()
+	var (
+		mu      sync.Mutex
+		gotSpec roundhouse.Spec
+	)
+	runner := roundhouse.RunnerFunc(
+		func(_ context.Context, spec roundhouse.Spec, out io.Writer) (roundhouse.Result, error) {
+			mu.Lock()
+			gotSpec = spec
+			mu.Unlock()
+			_, _ = io.WriteString(out, "bash ran")
+			return roundhouse.Result{ExitCode: 0}, nil
+		},
+	)
+	d := New(store, runner, nil)
+	defer d.Close()
+
+	created, err := d.Submit(context.Background(), "", "",
+		run.WithTool(run.ToolBash), run.WithCommand("echo hi"), run.WithDryRun(true))
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+
+	got := waitTerminal(t, store, created.ID)
+	if got.Status != run.StatusSucceeded {
+		t.Errorf("Status = %q, want succeeded", got.Status)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if gotSpec.Tool != run.ToolBash || gotSpec.Command != "echo hi" || !gotSpec.DryRun {
+		t.Errorf("spec = %+v, want tool=bash command='echo hi' dryRun=true", gotSpec)
+	}
+}
+
+func TestDispatcherRejectsBashWithoutCommand(t *testing.T) {
+	t.Parallel()
+	d := New(run.NewMemStore(), roundhouse.RunnerFunc(
+		func(context.Context, roundhouse.Spec, io.Writer) (roundhouse.Result, error) {
+			return roundhouse.Result{ExitCode: 0}, nil
+		}), nil)
+	defer d.Close()
+
+	if _, err := d.Submit(context.Background(), "", "", run.WithTool(run.ToolBash)); !errors.Is(err, ErrNoCommand) {
+		t.Errorf("Submit() error = %v, want ErrNoCommand", err)
+	}
+}
+
 func TestDispatcherSubmitNoPlaybook(t *testing.T) {
 	t.Parallel()
 	store := run.NewMemStore()

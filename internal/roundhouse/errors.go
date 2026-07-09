@@ -5,6 +5,10 @@ import "errors"
 var (
 	// ErrNoPlaybook is returned when a Spec has no playbook path.
 	ErrNoPlaybook = errors.New("no playbook")
+	// ErrNoCommand is returned when a bash, terraform, or python Spec has no command.
+	ErrNoCommand = errors.New("no command")
+	// ErrUnknownTool is returned when a Spec names an execution tool the runner does not support.
+	ErrUnknownTool = errors.New("unknown execution tool")
 	// ErrNoInventory is returned when host enumeration is requested without an inventory.
 	ErrNoInventory = errors.New("no inventory")
 	// ErrLaunch is returned when the executor could not start or supervise the process.

@@ -41,7 +41,8 @@ func testUpdate(t *testing.T, store template.Store) {
 		CredentialIDs: []string{"cred_2", "cred_3"},
 		ExtraVars:     map[string]any{"env": "stg"},
 		Survey:        []template.SurveyField{{Var: "tier", Label: "Tier", Type: template.FieldText}},
-		CreatedAt:     created,
+		Tool:          "python", Command: "print('hi')", DryRun: true,
+		CreatedAt: created,
 	}
 	if err := store.Update(ctx, want); err != nil {
 		t.Fatalf("Update() error = %v", err)
@@ -68,7 +69,8 @@ func testLifecycle(t *testing.T, store template.Store) {
 		CredentialIDs: []string{"cred_1", "cred_2"},
 		ExtraVars:     map[string]any{"env": "prod", "batch": float64(5)},
 		Survey:        []template.SurveyField{{Var: "region", Label: "Region", Type: template.FieldChoice, Required: true, Choices: []string{"us", "eu"}}},
-		CreatedAt:     time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC),
+		Tool:          "bash", Command: "echo hi", DryRun: true,
+		CreatedAt: time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC),
 	}
 	if err := store.Save(ctx, want); err != nil {
 		t.Fatalf("Save() error = %v", err)

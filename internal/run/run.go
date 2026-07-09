@@ -34,6 +34,35 @@ const (
 	KindPipeline = "pipeline"
 )
 
+const (
+	// ToolAnsible runs an Ansible playbook against an inventory. It is the default when Tool is empty.
+	ToolAnsible = "ansible"
+	// ToolBash runs a shell script with bash. The script text is carried in Command.
+	ToolBash = "bash"
+	// ToolTerraform runs Terraform in a working directory. The directory is carried in Command.
+	ToolTerraform = "terraform"
+	// ToolPython runs a Python script. The script text is carried in Command.
+	ToolPython = "python"
+)
+
+// NormalizeTool maps an empty tool to the Ansible default and otherwise returns tool unchanged.
+func NormalizeTool(tool string) string {
+	if tool == "" {
+		return ToolAnsible
+	}
+	return tool
+}
+
+// ValidTool reports whether tool names a supported execution tool. Empty is valid and means Ansible.
+func ValidTool(tool string) bool {
+	switch NormalizeTool(tool) {
+	case ToolAnsible, ToolBash, ToolTerraform, ToolPython:
+		return true
+	default:
+		return false
+	}
+}
+
 // Terminal reports whether the status is a final state.
 func (s Status) Terminal() bool {
 	switch s {
@@ -48,10 +77,18 @@ func (s Status) Terminal() bool {
 type Run struct {
 	// ID is the unique run identifier.
 	ID string `json:"id"`
-	// Playbook is the path to the Ansible playbook to execute.
+	// Playbook is the path to the Ansible playbook to execute. Used by the Ansible tool.
 	Playbook string `json:"playbook"`
 	// Inventory is the path to the Ansible inventory to target.
 	Inventory string `json:"inventory"`
+	// Tool selects the execution engine: ansible, bash, terraform, or python. Empty means ansible.
+	Tool string `json:"tool,omitempty"`
+	// Command carries the tool's primary input for non-Ansible tools: the script for bash and python,
+	// the working directory for terraform. Ignored by the Ansible tool.
+	Command string `json:"command,omitempty"`
+	// DryRun runs the tool in its no-change mode: ansible --check, terraform plan, a syntax check for
+	// bash and python.
+	DryRun bool `json:"dry_run,omitempty"`
 	// Status is the current lifecycle state.
 	Status Status `json:"status"`
 	// ExitCode is the process exit code, set once the run reaches a terminal state.
@@ -184,6 +221,22 @@ func WithExtraVars(vars map[string]any) SubmitOption {
 		}
 		r.ExtraVars = maps.Clone(vars)
 	}
+}
+
+// WithTool selects the execution tool for the run. An empty tool leaves the Ansible default.
+func WithTool(tool string) SubmitOption {
+	return func(r *Run) { r.Tool = tool }
+}
+
+// WithCommand sets the tool's primary input: the script for bash and python, the working directory
+// for terraform.
+func WithCommand(command string) SubmitOption {
+	return func(r *Run) { r.Command = command }
+}
+
+// WithDryRun runs the tool in its no-change mode.
+func WithDryRun(dryRun bool) SubmitOption {
+	return func(r *Run) { r.DryRun = dryRun }
 }
 
 // ApplyOptions applies opts to r.

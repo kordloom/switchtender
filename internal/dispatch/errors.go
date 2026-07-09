@@ -3,8 +3,12 @@ package dispatch
 import "errors"
 
 var (
-	// ErrNoPlaybook is returned when a run is submitted without a playbook path.
+	// ErrNoPlaybook is returned when an Ansible run is submitted without a playbook path.
 	ErrNoPlaybook = errors.New("no playbook")
+	// ErrNoCommand is returned when a bash, terraform, or python run is submitted without a command.
+	ErrNoCommand = errors.New("no command")
+	// ErrUnknownTool is returned when a run names an execution tool the dispatcher does not support.
+	ErrUnknownTool = errors.New("unknown execution tool")
 	// ErrNoHostLister is returned when a split is requested but the runner cannot list hosts.
 	ErrNoHostLister = errors.New("host listing unavailable")
 	// ErrNoSteps is returned when a pipeline is submitted with no steps.

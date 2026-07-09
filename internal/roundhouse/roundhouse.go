@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+
+	"github.com/dcadolph/yardmaster/internal/run"
 )
 
 // ContainerLimits caps the resources and network a containerized run may use, so a foot-gun or
@@ -59,6 +61,13 @@ type Spec struct {
 	Playbook string
 	// Inventory is the path to the Ansible inventory. When empty, no -i flag is passed.
 	Inventory string
+	// Tool selects the execution engine: ansible, bash, terraform, or python. Empty means ansible.
+	Tool string
+	// Command carries the tool's primary input for non-Ansible tools: the script for bash and python,
+	// the working directory for terraform.
+	Command string
+	// DryRun runs the tool in its no-change mode: ansible --check, a syntax check for bash.
+	DryRun bool
 	// ExtraVars are passed to ansible-playbook as one JSON --extra-vars argument so values keep
 	// their types.
 	ExtraVars map[string]any
@@ -156,14 +165,15 @@ func WithBaseEnv(env []string) Option {
 	return func(a *ansibleRunner) { a.baseEnv = env }
 }
 
-// NewAnsibleRunner returns a Runner that shells out to ansible-playbook.
-// By default it resolves ansible-playbook from PATH and inherits the process environment.
+// NewAnsibleRunner returns a Runner that executes each Spec by its Tool: ansible-playbook for
+// Ansible and bash for bash. By default it resolves the tool binaries from PATH and inherits the
+// process environment. Container execution is off, so an image-bound Spec fails clearly.
 func NewAnsibleRunner(opts ...Option) Runner {
-	return newAnsibleRunner(opts...)
+	return newToolRouter(false, DefaultContainerLimits(), opts...)
 }
 
 // newAnsibleRunner builds the concrete host runner so callers that need its HostLister and
-// InventoryDumper methods, such as the selective runner, can hold the concrete type.
+// InventoryDumper methods, such as the tool router, can hold the concrete type.
 func newAnsibleRunner(opts ...Option) *ansibleRunner {
 	a := &ansibleRunner{
 		binary:  "ansible-playbook",
@@ -175,40 +185,55 @@ func newAnsibleRunner(opts ...Option) *ansibleRunner {
 	return a
 }
 
-// selectRunner routes each Spec to the host runner or a container runner by its Image field. It
-// embeds the host runner so its HostLister and InventoryDumper methods are promoted, which the
-// dispatcher relies on for split runs and dynamic inventory.
-type selectRunner struct {
-	// ansibleRunner is the host runner, used when a Spec has no image and for host listing.
+// toolRouter routes each Spec to the runner for its Tool. Ansible runs on the host, or inside a
+// container when the Spec names an image and container execution is allowed; bash runs on the host.
+// It embeds the host Ansible runner so its HostLister and InventoryDumper methods are promoted,
+// which the dispatcher relies on for split runs and dynamic inventory.
+type toolRouter struct {
+	// ansibleRunner is the host Ansible runner and the source of host listing and inventory dumping.
 	*ansibleRunner
-	// container runs a Spec inside its image.
+	// bash runs bash Specs on the host.
+	bash *bashRunner
+	// container runs an image-bound Ansible Spec inside its image.
 	container *containerRunner
 	// allowContainer gates container execution; when false an image-bound Spec fails clearly.
 	allowContainer bool
 }
 
-// NewSelectiveRunner returns a Runner that executes on the host by default and inside a container
-// when a Spec names an image. Container execution is refused unless allowContainer is set, and every
+// NewSelectiveRunner returns a Runner that executes each Spec by its Tool: Ansible on the host or,
+// when a Spec names an image and allowContainer is set, inside that image; bash on the host. Every
 // container run is bounded by limits.
 func NewSelectiveRunner(allowContainer bool, limits ContainerLimits, opts ...Option) Runner {
+	return newToolRouter(allowContainer, limits, opts...)
+}
+
+// newToolRouter builds the tool router shared by the Ansible and selective constructors.
+func newToolRouter(allowContainer bool, limits ContainerLimits, opts ...Option) *toolRouter {
 	host := newAnsibleRunner(opts...)
-	return &selectRunner{
+	return &toolRouter{
 		ansibleRunner:  host,
+		bash:           newBashRunner(host.baseEnv),
 		container:      newContainerRunner(host.baseEnv, &host.plugin, limits),
 		allowContainer: allowContainer,
 	}
 }
 
-// Run executes on the host when the Spec has no image, otherwise inside the image when container
-// execution is allowed.
-func (s *selectRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Result, error) {
-	if spec.Image == "" {
-		return s.ansibleRunner.Run(ctx, spec, out)
+// Run dispatches spec to the runner for its Tool, defaulting an empty Tool to Ansible.
+func (t *toolRouter) Run(ctx context.Context, spec Spec, out io.Writer) (Result, error) {
+	switch run.NormalizeTool(spec.Tool) {
+	case run.ToolBash:
+		return t.bash.Run(ctx, spec, out)
+	case run.ToolAnsible:
+		if spec.Image == "" {
+			return t.ansibleRunner.Run(ctx, spec, out)
+		}
+		if !t.allowContainer {
+			return Result{ExitCode: -1}, ErrContainerDisabled
+		}
+		return t.container.Run(ctx, spec, out)
+	default:
+		return Result{ExitCode: -1}, fmt.Errorf("%w: %s", ErrUnknownTool, spec.Tool)
 	}
-	if !s.allowContainer {
-		return Result{ExitCode: -1}, ErrContainerDisabled
-	}
-	return s.container.Run(ctx, spec, out)
 }
 
 // pluginName is the callback plugin name, matching the embedded file and its CALLBACK_NAME.
@@ -235,22 +260,27 @@ func (a *ansibleRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Resu
 		return Result{ExitCode: -1}, fmt.Errorf("%w: %w", ErrLaunch, err)
 	}
 	cmd := exec.CommandContext(ctx, a.binary, pargs...)
-	cmd.Stdout = out
-	cmd.Stderr = out
 	cmd.Dir = spec.Dir
 	cmd.Env = env
+	return runProcess(ctx, cmd, out)
+}
 
-	err = cmd.Run()
+// runProcess supervises cmd, streaming its combined stdout and stderr to out, and maps the outcome
+// to a Result. A clean exit is code zero; a non-zero exit returns that code with a nil error; a
+// canceled context is reported as cancellation; any other failure wraps ErrLaunch. It is shared by
+// every tool runner so they supervise child processes identically.
+func runProcess(ctx context.Context, cmd *exec.Cmd, out io.Writer) (Result, error) {
+	cmd.Stdout = out
+	cmd.Stderr = out
+	err := cmd.Run()
 	if err == nil {
 		return Result{ExitCode: 0}, nil
 	}
-
 	// A canceled context kills the process, which surfaces as an ExitError. Report the context error
-	// so the caller treats it as cancellation rather than a playbook failure.
+	// so the caller treats it as cancellation rather than a tool failure.
 	if ctx.Err() != nil {
 		return Result{ExitCode: -1}, ctx.Err()
 	}
-
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
 		return Result{ExitCode: exitErr.ExitCode()}, nil
@@ -279,6 +309,9 @@ func playbookArgs(spec Spec) ([]string, error) {
 	}
 	if spec.Limit != "" {
 		args = append(args, "--limit", spec.Limit)
+	}
+	if spec.DryRun {
+		args = append(args, "--check")
 	}
 	if len(spec.ExtraVars) > 0 {
 		data, err := json.Marshal(spec.ExtraVars)

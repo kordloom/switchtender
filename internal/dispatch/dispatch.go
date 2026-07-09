@@ -337,13 +337,45 @@ func (d *Dispatcher) validateRun(ctx context.Context, r *run.Run) error {
 	return d.validateProject(ctx, r.ProjectID)
 }
 
-// Submit accepts a run for playbook against inventory and returns the created run in pending state.
+// requireToolInput checks that a run carries the input its tool needs: a playbook for Ansible, a
+// command for bash, terraform, and python. It also rejects a run naming an unsupported tool.
+func requireToolInput(r *run.Run) error {
+	if !run.ValidTool(r.Tool) {
+		return ErrUnknownTool
+	}
+	if run.NormalizeTool(r.Tool) == run.ToolAnsible {
+		if r.Playbook == "" {
+			return ErrNoPlaybook
+		}
+		return nil
+	}
+	if r.Command == "" {
+		return ErrNoCommand
+	}
+	return nil
+}
+
+// requireStepInput checks that a pipeline step carries the input its tool needs, mirroring
+// requireToolInput for a step.
+func requireStepInput(s run.PipelineStep) error {
+	if !run.ValidTool(s.Tool) {
+		return ErrUnknownTool
+	}
+	if run.NormalizeTool(s.Tool) == run.ToolAnsible {
+		if s.Playbook == "" {
+			return ErrNoPlaybook
+		}
+		return nil
+	}
+	if s.Command == "" {
+		return ErrNoCommand
+	}
+	return nil
+}
+
+// Submit accepts a run for a tool against inventory and returns the created run in pending state.
 // Execution proceeds asynchronously; callers observe progress through the store.
 func (d *Dispatcher) Submit(ctx context.Context, playbook, inventory string, opts ...run.SubmitOption) (*run.Run, error) {
-	if playbook == "" {
-		return nil, ErrNoPlaybook
-	}
-
 	r := &run.Run{
 		ID:        run.NewID(),
 		Playbook:  playbook,
@@ -352,6 +384,9 @@ func (d *Dispatcher) Submit(ctx context.Context, playbook, inventory string, opt
 		CreatedAt: time.Now(),
 	}
 	run.ApplyOptions(r, opts)
+	if err := requireToolInput(r); err != nil {
+		return nil, err
+	}
 	if err := d.validateRun(ctx, r); err != nil {
 		return nil, err
 	}
@@ -368,6 +403,12 @@ func (d *Dispatcher) Submit(ctx context.Context, playbook, inventory string, opt
 // similar amount of work; hosts without history balance by count. When shards is below two or the
 // inventory has fewer than two hosts, it falls back to a single run.
 func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string, shards int, opts ...run.SubmitOption) (*run.Run, error) {
+	// Sharding fans a playbook across inventory hosts, which only Ansible does; other tools run once.
+	probe := &run.Run{}
+	run.ApplyOptions(probe, opts)
+	if run.NormalizeTool(probe.Tool) != run.ToolAnsible {
+		return d.Submit(ctx, playbook, inventory, opts...)
+	}
 	if playbook == "" {
 		return nil, ErrNoPlaybook
 	}
@@ -380,8 +421,6 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 
 	// A stored inventory must exist as a file before its hosts can be enumerated for sharding.
 	listPath := inventory
-	probe := &run.Run{}
-	run.ApplyOptions(probe, opts)
 	if probe.InventoryID != "" {
 		path, cleanup, err := d.inventoryFile(probe.InventoryID)
 		if err != nil {
@@ -424,6 +463,7 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 		idx, shardCount := i, count
 		child := &run.Run{
 			ID: run.NewID(), Playbook: playbook, Inventory: inventory,
+			Tool: parent.Tool, DryRun: parent.DryRun,
 			Status: run.StatusPending, CreatedAt: time.Now(),
 			ParentID: &parentID, ShardIndex: &idx, ShardCount: &shardCount,
 			Limit: strings.Join(group, ","), CredentialIDs: parent.CredentialIDs,
@@ -473,6 +513,7 @@ func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string) (*r
 	count := len(failed)
 	retry := &run.Run{
 		ID: run.NewID(), Playbook: parent.Playbook, Inventory: parent.Inventory,
+		Tool: parent.Tool, DryRun: parent.DryRun,
 		Kind: run.KindSplit, Status: run.StatusPending, CreatedAt: time.Now(),
 		ShardCount: &count, RetryOf: &parent.ID,
 	}
@@ -486,6 +527,7 @@ func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string) (*r
 		idx, shardCount := i, count
 		child := &run.Run{
 			ID: run.NewID(), Playbook: retry.Playbook, Inventory: retry.Inventory,
+			Tool: retry.Tool, DryRun: retry.DryRun,
 			Status: run.StatusPending, CreatedAt: time.Now(),
 			ParentID: &retryID, ShardIndex: &idx, ShardCount: &shardCount,
 			Limit: shard.Limit, CredentialIDs: shard.CredentialIDs,
@@ -638,8 +680,8 @@ func (d *Dispatcher) SubmitPipeline(ctx context.Context, name, inventory string,
 		return nil, ErrNoSteps
 	}
 	for _, s := range steps {
-		if s.Playbook == "" {
-			return nil, ErrNoPlaybook
+		if err := requireStepInput(s); err != nil {
+			return nil, err
 		}
 	}
 	if hasDependencies(steps) {
@@ -762,6 +804,7 @@ func (d *Dispatcher) runStepAttempts(ctx context.Context, parent *run.Run, step 
 		i := idx
 		child := &run.Run{
 			ID: run.NewID(), Playbook: step.Playbook, Inventory: inventory,
+			Tool: step.Tool, Command: step.Command, DryRun: step.DryRun,
 			Status: run.StatusPending, CreatedAt: time.Now(),
 			ParentID: &parent.ID, StepIndex: &i, StepName: step.Name, Attempt: attempt,
 			ExtraVars: vars, CredentialIDs: parent.CredentialIDs, ProjectID: parent.ProjectID,
@@ -909,8 +952,8 @@ func (d *Dispatcher) execute(ctx context.Context, r *run.Run) run.Status {
 
 	sink := &logSink{store: d.store, id: r.ID, log: d.log, publisher: d.publisher}
 	spec := roundhouse.Spec{
-		Playbook: r.Playbook, Inventory: r.Inventory, EventsPath: eventsPath, Limit: r.Limit,
-		ExtraVars: r.ExtraVars,
+		Playbook: r.Playbook, Inventory: r.Inventory, Tool: r.Tool, Command: r.Command,
+		DryRun: r.DryRun, EventsPath: eventsPath, Limit: r.Limit, ExtraVars: r.ExtraVars,
 	}
 	invCleanup, err := d.materializeInventory(r, &spec)
 	if err != nil {

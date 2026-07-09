@@ -26,6 +26,13 @@ type createTemplateRequest struct {
 	Inventory string `json:"inventory,omitempty"`
 	// InventoryID names a stored inventory, taking precedence over the path. Optional.
 	InventoryID string `json:"inventory_id,omitempty"`
+	// Tool selects the execution engine: ansible (default), bash, terraform, or python.
+	Tool string `json:"tool,omitempty"`
+	// Command is the tool's input for non-Ansible tools: the script for bash and python, the working
+	// directory for terraform.
+	Command string `json:"command,omitempty"`
+	// DryRun runs the tool in its no-change mode when the template launches.
+	DryRun bool `json:"dry_run,omitempty"`
 	// Shards, when two or more, splits launches across that many slices.
 	Shards int `json:"shards,omitempty"`
 	// Queue restricts launches to workers serving the queue.
@@ -46,6 +53,27 @@ type listTemplatesResponse struct {
 	Count int `json:"count"`
 }
 
+// templateToolError returns a client message when a template request lacks the input its tool
+// needs, or empty when the request is valid. Ansible needs a playbook; other tools need a command.
+func templateToolError(req createTemplateRequest) string {
+	if req.Name == "" {
+		return "name is required"
+	}
+	if !run.ValidTool(req.Tool) {
+		return "tool must be ansible, bash, terraform, or python"
+	}
+	if run.NormalizeTool(req.Tool) == run.ToolAnsible {
+		if req.Playbook == "" {
+			return "playbook is required"
+		}
+		return ""
+	}
+	if req.Command == "" {
+		return "command is required for the " + req.Tool + " tool"
+	}
+	return ""
+}
+
 // createTemplateHandler stores a new template.
 func createTemplateHandler(store template.Store, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -58,13 +86,14 @@ func createTemplateHandler(store template.Store, log *zap.Logger) http.HandlerFu
 			respondError(w, log, http.StatusBadRequest, "invalid request body")
 			return
 		}
-		if req.Name == "" || req.Playbook == "" {
-			respondError(w, log, http.StatusBadRequest, "name and playbook are required")
+		if msg := templateToolError(req); msg != "" {
+			respondError(w, log, http.StatusBadRequest, msg)
 			return
 		}
 		t := &template.Template{
 			ID: template.NewID(), Name: req.Name, ProjectID: req.ProjectID,
 			Playbook: req.Playbook, Inventory: req.Inventory, InventoryID: req.InventoryID,
+			Tool: req.Tool, Command: req.Command, DryRun: req.DryRun,
 			Shards:        req.Shards,
 			CredentialIDs: req.CredentialIDs, ExtraVars: req.ExtraVars, Survey: req.Survey,
 			Queue: req.Queue, CreatedAt: time.Now(),
@@ -90,14 +119,15 @@ func updateTemplateHandler(store template.Store, log *zap.Logger) http.HandlerFu
 			respondError(w, log, http.StatusBadRequest, "invalid request body")
 			return
 		}
-		if req.Name == "" || req.Playbook == "" {
-			respondError(w, log, http.StatusBadRequest, "name and playbook are required")
+		if msg := templateToolError(req); msg != "" {
+			respondError(w, log, http.StatusBadRequest, msg)
 			return
 		}
 		id := r.PathValue("id")
 		t := &template.Template{
 			ID: id, Name: req.Name, ProjectID: req.ProjectID,
 			Playbook: req.Playbook, Inventory: req.Inventory, InventoryID: req.InventoryID,
+			Tool: req.Tool, Command: req.Command, DryRun: req.DryRun,
 			Shards:        req.Shards,
 			CredentialIDs: req.CredentialIDs, ExtraVars: req.ExtraVars, Survey: req.Survey,
 			Queue: req.Queue,
@@ -211,6 +241,7 @@ func launchTemplateHandler(store template.Store, submitter Submitter, authz *aut
 		opts := []run.SubmitOption{
 			run.WithCredentialIDs(t.CredentialIDs),
 			run.WithExtraVars(vars),
+			run.WithTool(t.Tool), run.WithCommand(t.Command), run.WithDryRun(t.DryRun),
 		}
 		if t.ProjectID != "" {
 			opts = append(opts, run.WithProject(t.ProjectID))

@@ -58,6 +58,7 @@ func sampleRun(id string) *run.Run {
 		RetryOf:   &retryOf,
 		ExtraVars: map[string]any{"version": "1.2.3"},
 		Outputs:   map[string]any{"built": true, "count": float64(2)},
+		Tool:      "bash", Command: "echo hi", DryRun: true,
 	}
 }
 

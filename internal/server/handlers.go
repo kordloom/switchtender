@@ -25,10 +25,17 @@ const defaultFleetWindow = 10
 
 // createRunRequest is the JSON body accepted by POST /runs.
 type createRunRequest struct {
-	// Playbook is the path to the playbook to execute. Required.
+	// Playbook is the path to the playbook to execute. Required for the Ansible tool.
 	Playbook string `json:"playbook"`
 	// Inventory is the path to the inventory to target. Optional.
 	Inventory string `json:"inventory"`
+	// Tool selects the execution engine: ansible (default), bash, terraform, or python.
+	Tool string `json:"tool,omitempty"`
+	// Command is the tool's input for non-Ansible tools: the script for bash and python, the working
+	// directory for terraform. Required for those tools, ignored for Ansible.
+	Command string `json:"command,omitempty"`
+	// DryRun runs the tool in its no-change mode: ansible --check, a syntax check for bash.
+	DryRun bool `json:"dry_run,omitempty"`
 	// Shards, when two or more, splits the run across that many inventory slices.
 	Shards int `json:"shards,omitempty"`
 	// CredentialIDs names stored credentials to materialize for the run.
@@ -270,8 +277,18 @@ func createRunHandler(submitter Submitter, authz *authorizer, log *zap.Logger) h
 			respondError(w, log, http.StatusBadRequest, "invalid request body")
 			return
 		}
-		if req.Playbook == "" {
-			respondError(w, log, http.StatusBadRequest, "playbook is required")
+		if !run.ValidTool(req.Tool) {
+			respondError(w, log, http.StatusBadRequest,
+				"tool must be ansible, bash, terraform, or python")
+			return
+		}
+		if run.NormalizeTool(req.Tool) == run.ToolAnsible {
+			if req.Playbook == "" {
+				respondError(w, log, http.StatusBadRequest, "playbook is required")
+				return
+			}
+		} else if req.Command == "" {
+			respondError(w, log, http.StatusBadRequest, "command is required for the "+req.Tool+" tool")
 			return
 		}
 
@@ -282,7 +299,10 @@ func createRunHandler(submitter Submitter, authz *authorizer, log *zap.Logger) h
 
 		var created *run.Run
 		var err error
-		opts := []run.SubmitOption{run.WithCredentialIDs(req.CredentialIDs)}
+		opts := []run.SubmitOption{
+			run.WithCredentialIDs(req.CredentialIDs),
+			run.WithTool(req.Tool), run.WithCommand(req.Command), run.WithDryRun(req.DryRun),
+		}
 		if req.ProjectID != "" {
 			opts = append(opts, run.WithProject(req.ProjectID))
 		}
@@ -300,7 +320,9 @@ func createRunHandler(submitter Submitter, authz *authorizer, log *zap.Logger) h
 		}
 		switch {
 		case errors.Is(err, credential.ErrNotFound), errors.Is(err, credential.ErrNoKey),
-			errors.Is(err, project.ErrNotFound), errors.Is(err, inventory.ErrNotFound):
+			errors.Is(err, project.ErrNotFound), errors.Is(err, inventory.ErrNotFound),
+			errors.Is(err, dispatch.ErrNoPlaybook), errors.Is(err, dispatch.ErrNoCommand),
+			errors.Is(err, dispatch.ErrUnknownTool):
 			respondError(w, log, http.StatusBadRequest, err.Error())
 			return
 		case err != nil:
@@ -332,8 +354,17 @@ func createPipelineHandler(submitter Submitter, authz *authorizer, log *zap.Logg
 			return
 		}
 		for _, step := range req.Steps {
-			if step.Playbook == "" {
-				respondError(w, log, http.StatusBadRequest, "each step requires a playbook")
+			if !run.ValidTool(step.Tool) {
+				respondError(w, log, http.StatusBadRequest,
+					"each step tool must be ansible, bash, terraform, or python")
+				return
+			}
+			if run.NormalizeTool(step.Tool) == run.ToolAnsible && step.Playbook == "" {
+				respondError(w, log, http.StatusBadRequest, "each ansible step requires a playbook")
+				return
+			}
+			if run.NormalizeTool(step.Tool) != run.ToolAnsible && step.Command == "" {
+				respondError(w, log, http.StatusBadRequest, "each non-ansible step requires a command")
 				return
 			}
 		}
@@ -358,7 +389,9 @@ func createPipelineHandler(submitter Submitter, authz *authorizer, log *zap.Logg
 			respondError(w, log, http.StatusBadRequest, err.Error())
 			return
 		case errors.Is(err, dispatch.ErrUnnamedStep), errors.Is(err, dispatch.ErrDuplicateStep),
-			errors.Is(err, dispatch.ErrUnknownDependency), errors.Is(err, dispatch.ErrDependencyCycle):
+			errors.Is(err, dispatch.ErrUnknownDependency), errors.Is(err, dispatch.ErrDependencyCycle),
+			errors.Is(err, dispatch.ErrNoPlaybook), errors.Is(err, dispatch.ErrNoCommand),
+			errors.Is(err, dispatch.ErrUnknownTool):
 			respondError(w, log, http.StatusBadRequest, err.Error())
 			return
 		case err != nil:

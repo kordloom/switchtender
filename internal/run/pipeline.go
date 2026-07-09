@@ -4,10 +4,18 @@ package run
 type PipelineStep struct {
 	// Name identifies the step. Required when any step in the pipeline declares dependencies.
 	Name string `json:"name"`
-	// Playbook is the playbook the step runs.
+	// Playbook is the playbook the step runs under the Ansible tool.
 	Playbook string `json:"playbook"`
 	// Inventory overrides the pipeline inventory for this step when set.
 	Inventory string `json:"inventory,omitempty"`
+	// Tool selects the step's execution engine: ansible, bash, terraform, or python. Empty means
+	// ansible, so a pipeline can mix tools, for example a terraform step then an ansible step.
+	Tool string `json:"tool,omitempty"`
+	// Command carries the tool's primary input for non-Ansible steps: the script for bash and python,
+	// the working directory for terraform.
+	Command string `json:"command,omitempty"`
+	// DryRun runs the step's tool in its no-change mode.
+	DryRun bool `json:"dry_run,omitempty"`
 	// ContinueOnFailure lets steps after or downstream of this one proceed even if it fails.
 	ContinueOnFailure bool `json:"continue_on_failure,omitempty"`
 	// Retries is how many extra attempts the step gets after a failure before it counts as

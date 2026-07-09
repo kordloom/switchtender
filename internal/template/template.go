@@ -58,13 +58,20 @@ type Template struct {
 	Name string `json:"name"`
 	// ProjectID sources the playbook from a git project. Empty for local paths.
 	ProjectID string `json:"project_id,omitempty"`
-	// Playbook is the playbook path, relative to the project when one is set.
+	// Playbook is the playbook path, relative to the project when one is set. Used by the Ansible tool.
 	Playbook string `json:"playbook"`
 	// Inventory is the inventory path, relative to the project when one is set.
 	Inventory string `json:"inventory,omitempty"`
 	// InventoryID names a stored inventory to materialize for the run, taking precedence over the
 	// Inventory path when set.
 	InventoryID string `json:"inventory_id,omitempty"`
+	// Tool selects the execution engine: ansible, bash, terraform, or python. Empty means ansible.
+	Tool string `json:"tool,omitempty"`
+	// Command carries the tool's primary input for non-Ansible tools: the script for bash and python,
+	// the working directory for terraform.
+	Command string `json:"command,omitempty"`
+	// DryRun runs the tool in its no-change mode when the template launches.
+	DryRun bool `json:"dry_run,omitempty"`
 	// Shards, when two or more, splits the run across that many inventory slices.
 	Shards int `json:"shards,omitempty"`
 	// Queue restricts launches to workers serving this queue.
