@@ -1475,12 +1475,20 @@ function deleteCell(path, label, tr) {
 }
 
 // openInventoryEdit fills the inventory dialog with an existing record and switches it to edit mode
-// so the next save issues a PUT rather than a create.
+// so the next save issues a PUT rather than a create. The source config is never returned, so its
+// fields start blank and a blank keeps the stored config.
 function openInventoryEdit(inv) {
 	const form = document.getElementById("inventory-form");
 	form.dataset.editId = inv.id;
 	document.getElementById("inv-name").value = inv.name;
 	document.getElementById("inv-content").value = inv.content || "";
+	for (const id of ["inv-command", "inv-vault-addr", "inv-vault-path", "inv-vault-field",
+		"inv-vault-token", "inv-gsm-project", "inv-gsm-secret", "inv-gsm-version", "inv-gsm-token"]) {
+		document.getElementById(id).value = "";
+	}
+	const sourceSel = document.getElementById("inv-content-source");
+	sourceSel.value = inv.content_source || "local";
+	sourceSel.dispatchEvent(new Event("change"));
 	const ids = inv.credential_ids || [];
 	for (const o of document.getElementById("inv-credentials").options) o.selected = ids.includes(o.value);
 	document.getElementById("inv-status").textContent = "";
@@ -1488,17 +1496,83 @@ function openInventoryEdit(inv) {
 	document.getElementById("inventory-modal").hidden = false;
 }
 
+// applyInventorySource fills an inventory payload from the selected content source. A local source
+// sends the pasted content; a command, Vault, or Google Secret Manager source assembles the config
+// the API seals, so the operator never hand writes JSON. It throws with a message when a required
+// field is missing. On edit the config is never returned, so leaving a source's fields blank keeps
+// the stored config.
+function applyInventorySource(payload, src, editId) {
+	const val = (id) => document.getElementById(id).value.trim();
+	if (src === "local") {
+		const content = document.getElementById("inv-content").value;
+		if (!content) throw new Error("Paste the inventory content, or pick another source.");
+		payload.content = content;
+		return;
+	}
+	if (src === "command") {
+		const cmd = val("inv-command");
+		if (cmd) payload.content_config = cmd;
+		else if (!editId) throw new Error("Enter the command that prints the inventory.");
+		return;
+	}
+	if (src === "vault") {
+		const addr = val("inv-vault-addr"), path = val("inv-vault-path"), field = val("inv-vault-field");
+		const token = val("inv-vault-token");
+		if (addr || path || field || token) {
+			if (!(addr && path && field)) throw new Error("Vault needs an address, path, and field.");
+			const cfg = { addr, path, field };
+			if (token) cfg.token = token;
+			payload.content_config = JSON.stringify(cfg);
+		} else if (!editId) {
+			throw new Error("Fill in the Vault address, path, and field.");
+		}
+		return;
+	}
+	if (src === "gsm") {
+		const project = val("inv-gsm-project"), secret = val("inv-gsm-secret");
+		const version = val("inv-gsm-version"), token = val("inv-gsm-token");
+		if (project || secret || version || token) {
+			if (!(project && secret)) throw new Error("Google Secret Manager needs a project and secret.");
+			const cfg = { project, secret };
+			if (version) cfg.version = version;
+			if (token) cfg.token = token;
+			payload.content_config = JSON.stringify(cfg);
+		} else if (!editId) {
+			throw new Error("Fill in the Google Secret Manager project and secret.");
+		}
+	}
+}
+
 // wireInventoryForm hooks the inventory dialog up to POST /inventories for a new record and PUT
-// /inventories/{id} when editing. The New button resets the dialog to add mode.
+// /inventories/{id} when editing. The content source select swaps the stored-content box for the
+// fields of a command, Vault, or Google Secret Manager source. The New button resets the dialog to
+// add mode.
 function wireInventoryForm() {
 	const form = document.getElementById("inventory-form");
 	const creds = document.getElementById("inv-credentials");
+	const sourceSel = document.getElementById("inv-content-source");
+	const hint = document.getElementById("inv-source-hint");
+	const sourceFields = ["inv-content", "inv-command", "inv-vault-addr", "inv-vault-path",
+		"inv-vault-field", "inv-vault-token", "inv-gsm-project", "inv-gsm-secret", "inv-gsm-version",
+		"inv-gsm-token"];
 	fillSelect(creds, "/credentials", "credentials", (c) => c.name + " (" + c.kind + ")");
+
+	const syncSource = () => {
+		const src = sourceSel.value;
+		for (const g of form.querySelectorAll("[data-source-group]")) {
+			g.hidden = g.id !== "inv-source-" + src;
+		}
+		hint.hidden = !(form.dataset.editId && src !== "local");
+	};
+	sourceSel.addEventListener("change", syncSource);
+
 	const resetToCreate = () => {
 		delete form.dataset.editId;
 		document.getElementById("inv-name").value = "";
-		document.getElementById("inv-content").value = "";
+		for (const id of sourceFields) document.getElementById(id).value = "";
 		for (const o of creds.options) o.selected = false;
+		sourceSel.value = "local";
+		syncSource();
 		document.getElementById("inv-status").textContent = "";
 		setModalTitle("inventory", "Add an inventory");
 	};
@@ -1511,8 +1585,14 @@ function wireInventoryForm() {
 		const editId = form.dataset.editId;
 		const payload = {
 			name: document.getElementById("inv-name").value.trim(),
-			content: document.getElementById("inv-content").value,
+			content_source: sourceSel.value,
 		};
+		try {
+			applyInventorySource(payload, sourceSel.value, editId);
+		} catch (err) {
+			status.textContent = err.message;
+			return;
+		}
 		const picked = Array.from(creds.selectedOptions).map((o) => o.value);
 		if (picked.length) payload.credential_ids = picked;
 		try {

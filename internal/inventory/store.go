@@ -41,6 +41,8 @@ func (m *memStore) Update(_ context.Context, i *Inventory) error {
 	existing.Name = i.Name
 	existing.Content = i.Content
 	existing.CredentialIDs = append([]string(nil), i.CredentialIDs...)
+	existing.ContentSource = i.ContentSource
+	existing.ContentConfig = i.ContentConfig
 	return nil
 }
 

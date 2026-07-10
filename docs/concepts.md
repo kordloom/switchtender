@@ -46,6 +46,10 @@ A stored inventory is inventory content referenced by id and materialized on whi
 runs the play. A dynamic inventory source runs an inventory plugin or script and refreshes the
 result into a stored inventory, with cloud authentication supplied by a credential.
 
+A stored inventory can also draw its content from an external store, a command, Vault, or Google
+Secret Manager, resolved at launch, so the host list lives outside Yardmaster and is fetched fresh
+for each run.
+
 ## Triggers
 
 A webhook trigger is a URL that launches a template on an inbound git push. The project syncs

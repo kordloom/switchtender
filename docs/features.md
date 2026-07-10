@@ -27,6 +27,7 @@ What Yardmaster does today.
 | Observability| A Prometheus metrics endpoint, webhook notifications when runs finish, and an audit trail of every mutation.|
 | Inventories  | Stored inventories referenced by id, materialized on whichever executor runs the play.|
 | Dynamic sources | Inventory plugins and scripts refreshed into stored inventories, with cloud auth from an env credential.|
+| Sourced inventories | An inventory's content can come from a command, Vault, or Google Secret Manager, resolved at launch, so the host list need not live in Yardmaster.|
 | Credentials  | SSH keys, vault passwords, env bundles for cloud SDKs, API tokens and JWTs, become passwords, and registry logins, all encrypted at rest.|
 | High availability | Two servers on one database share the schedule without double-firing; tokens can carry a lifetime.|
 | Git triggers | A webhook URL launches a template on push; the project syncs fresh, so it deploys the commit just pushed.|

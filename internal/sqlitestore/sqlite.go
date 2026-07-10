@@ -198,6 +198,8 @@ CREATE TABLE IF NOT EXISTS inventories (
 	name           TEXT NOT NULL DEFAULT '',
 	content        TEXT NOT NULL,
 	credential_ids TEXT NOT NULL DEFAULT '',
+	content_source TEXT NOT NULL DEFAULT '',
+	content_config TEXT NOT NULL DEFAULT '',
 	created_at     TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS credentials (
@@ -264,6 +266,8 @@ var alterations = []string{
 	"ALTER TABLE templates ADD COLUMN dry_run INTEGER NOT NULL DEFAULT 0",
 	"ALTER TABLE credentials ADD COLUMN source TEXT NOT NULL DEFAULT ''",
 	"ALTER TABLE inventories ADD COLUMN credential_ids TEXT NOT NULL DEFAULT ''",
+	"ALTER TABLE inventories ADD COLUMN content_source TEXT NOT NULL DEFAULT ''",
+	"ALTER TABLE inventories ADD COLUMN content_config TEXT NOT NULL DEFAULT ''",
 }
 
 // store is a run.Store backed by a SQLite database.

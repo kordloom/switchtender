@@ -62,3 +62,33 @@ Attach a credential to a stored inventory and every run that targets that invent
 a fleet can carry its own secret variables in one place. Open Inventories, edit the inventory, and
 pick the credentials under Credentials. An `env` credential becomes that inventory's secret
 variables; a `token` credential its bearer token. You need use access on a credential to attach it.
+
+## Source an inventory's hosts
+
+The host list itself can live in an external store, the same way a secret does. When you add or edit
+an inventory, pick a content source:
+
+- `Stored`: paste the inventory text. This is the default.
+- `Command`: a command Yardmaster runs at launch, whose standard output is the inventory.
+- `Vault`: a Vault address, path, and field, read over HTTP at launch.
+- `Google Secret Manager`: a project, secret, and version, read at launch.
+
+The form takes the address, path, and field for Vault, or the project and secret for Google Secret
+Manager, and assembles and seals the source configuration for you, so the host list stays in your
+existing store and is fetched fresh for every run. A command source keeps a generated inventory
+current without a dedicated dynamic source plugin:
+
+    ./bin/hosts --env prod
+
+Content sources need encryption, so set `YARDMASTER_ENCRYPTION_KEY` and a stable
+`YARDMASTER_ENCRYPTION_SALT` first. The sealed configuration is never returned by the API; when you
+edit an inventory, leave the source fields blank to keep the stored one.
+
+### From the API
+
+    curl -s -X POST localhost:8080/inventories \
+      -H 'content-type: application/json' \
+      -d '{"name":"prod-fleet","content_source":"command","content_config":"./bin/hosts --env prod"}'
+
+For a Vault or Google Secret Manager source, send the same JSON configuration the matching credential
+source uses as `content_config`.

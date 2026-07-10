@@ -61,17 +61,9 @@ func (d *Dispatcher) materializeCredentials(r *run.Run, spec *roundhouse.Spec) (
 		}
 	}
 	for _, id := range ids {
-		c, err := d.credentials.Get(context.Background(), id)
+		c, plain, err := d.openCredential(context.Background(), id)
 		if err != nil {
-			return cleanup, fmt.Errorf("credential %s: %w", id, err)
-		}
-		plain, err := d.sealer.Open(c.Secret)
-		if err != nil {
-			return cleanup, fmt.Errorf("decrypt credential %s: %w", id, err)
-		}
-		plain, err = secretsource.Resolve(context.Background(), c.Source, plain)
-		if err != nil {
-			return cleanup, fmt.Errorf("resolve credential %s: %w", id, err)
+			return cleanup, err
 		}
 		f, err := os.CreateTemp("", "yardmaster-cred-*")
 		if err != nil {
@@ -124,6 +116,28 @@ func (d *Dispatcher) materializeCredentials(r *run.Run, spec *roundhouse.Spec) (
 		}
 	}
 	return cleanup, nil
+}
+
+// openCredential fetches a credential, decrypts its sealed secret, and resolves it through its
+// source, returning the credential and its plain value. It is the shared path run materialization
+// uses before applying the credential's kind.
+func (d *Dispatcher) openCredential(ctx context.Context, id string) (*credential.Credential, string, error) {
+	if d.credentials == nil || d.sealer == nil {
+		return nil, "", credential.ErrNoKey
+	}
+	c, err := d.credentials.Get(ctx, id)
+	if err != nil {
+		return nil, "", fmt.Errorf("credential %s: %w", id, err)
+	}
+	plain, err := d.sealer.Open(c.Secret)
+	if err != nil {
+		return nil, "", fmt.Errorf("decrypt credential %s: %w", id, err)
+	}
+	value, err := secretsource.Resolve(ctx, c.Source, plain)
+	if err != nil {
+		return nil, "", fmt.Errorf("resolve credential %s: %w", id, err)
+	}
+	return c, value, nil
 }
 
 // effectiveCredentialIDs returns the run's own credentials plus any attached to the stored inventory

@@ -26,6 +26,15 @@ type Inventory struct {
 	// so an inventory can carry its own secret variables, for example an env credential of cloud
 	// keys the plugin needs.
 	CredentialIDs []string `json:"credential_ids,omitempty"`
+	// ContentSource selects where the content comes from at run time: local (the stored Content),
+	// command, vault, or gsm. Empty means local. When it is not local, ContentConfig is resolved at
+	// launch and used as the content, so the host list can live in Vault, Google Secret Manager, or
+	// behind a command rather than in Yardmaster.
+	ContentSource string `json:"content_source,omitempty"`
+	// ContentConfig is the source config for a non-local ContentSource, sealed at rest and never
+	// returned by the API. It is the command for command, or the JSON address, path, and field for
+	// vault, or project, secret, and version for gsm.
+	ContentConfig string `json:"-"`
 	// CreatedAt is when the inventory was created.
 	CreatedAt time.Time `json:"created_at"`
 }

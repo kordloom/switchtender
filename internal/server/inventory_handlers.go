@@ -8,6 +8,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/dcadolph/yardmaster/internal/credential"
 	"github.com/dcadolph/yardmaster/internal/grant"
 	"github.com/dcadolph/yardmaster/internal/inventory"
 )
@@ -16,11 +17,48 @@ import (
 type createInventoryRequest struct {
 	// Name labels the inventory. Required.
 	Name string `json:"name"`
-	// Content is the inventory text, INI or YAML. Required.
+	// Content is the inventory text, INI or YAML. Required when the content source is local.
 	Content string `json:"content"`
 	// CredentialIDs names stored credentials materialized for every run that targets this inventory,
 	// so the inventory can carry its own secret variables.
 	CredentialIDs []string `json:"credential_ids,omitempty"`
+	// ContentSource selects where the content comes from: local, command, vault, or gsm. Empty means
+	// local, the stored content.
+	ContentSource string `json:"content_source,omitempty"`
+	// ContentConfig is the source config for a non-local content source: the command, or the JSON
+	// address, path, and field for vault, or project, secret, and version for gsm. It is sealed at
+	// rest. On update, a blank value keeps the stored config.
+	ContentConfig string `json:"content_config,omitempty"`
+}
+
+// inventorySource validates a request's content source and returns the normalized source and the
+// sealed config to store, or a message and status to return. existing is the current sealed config,
+// kept when a non-local update omits a new one.
+func inventorySource(req createInventoryRequest, existing string, sealer *credential.Sealer) (source, sealed, msg string, status int) {
+	source = credential.NormalizeSource(req.ContentSource)
+	if !credential.ValidSource(source) {
+		return "", "", "content source must be local, command, vault, or gsm", http.StatusBadRequest
+	}
+	if source == credential.SourceLocal {
+		if req.Content == "" {
+			return "", "", "content is required for a stored inventory", http.StatusBadRequest
+		}
+		return credential.SourceLocal, "", "", 0
+	}
+	if req.ContentConfig == "" {
+		if existing == "" {
+			return "", "", "content config is required for a " + source + " source", http.StatusBadRequest
+		}
+		return source, existing, "", 0
+	}
+	if sealer == nil || !sealer.Enabled() {
+		return "", "", "content sources need encryption: set YARDMASTER_ENCRYPTION_KEY and YARDMASTER_ENCRYPTION_SALT", http.StatusConflict
+	}
+	s, err := sealer.Seal(req.ContentConfig)
+	if err != nil {
+		return "", "", "could not seal content source", http.StatusInternalServerError
+	}
+	return source, s, "", 0
 }
 
 // listInventoriesResponse wraps the inventory list.
@@ -32,7 +70,7 @@ type listInventoriesResponse struct {
 }
 
 // createInventoryHandler stores a new inventory.
-func createInventoryHandler(store inventory.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
+func createInventoryHandler(store inventory.Store, authz *authorizer, sealer *credential.Sealer, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil {
 			respondError(w, log, http.StatusNotFound, "inventories not enabled")
@@ -43,8 +81,13 @@ func createInventoryHandler(store inventory.Store, authz *authorizer, log *zap.L
 			respondError(w, log, http.StatusBadRequest, "invalid request body")
 			return
 		}
-		if req.Name == "" || req.Content == "" {
-			respondError(w, log, http.StatusBadRequest, "name and content are required")
+		if req.Name == "" {
+			respondError(w, log, http.StatusBadRequest, "name is required")
+			return
+		}
+		source, sealed, msg, status := inventorySource(req, "", sealer)
+		if msg != "" {
+			respondError(w, log, status, msg)
 			return
 		}
 		if denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse, req.CredentialIDs...)) {
@@ -53,6 +96,9 @@ func createInventoryHandler(store inventory.Store, authz *authorizer, log *zap.L
 		i := &inventory.Inventory{
 			ID: inventory.NewID(), Name: req.Name, Content: req.Content,
 			CredentialIDs: req.CredentialIDs, CreatedAt: time.Now(),
+		}
+		if source != credential.SourceLocal {
+			i.ContentSource, i.ContentConfig = source, sealed
 		}
 		if err := store.Save(r.Context(), i); err != nil {
 			log.Error("server: save inventory: " + err.Error())
@@ -65,7 +111,7 @@ func createInventoryHandler(store inventory.Store, authz *authorizer, log *zap.L
 
 // updateInventoryHandler changes an existing inventory's name and content, keeping its id and
 // creation time.
-func updateInventoryHandler(store inventory.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
+func updateInventoryHandler(store inventory.Store, authz *authorizer, sealer *credential.Sealer, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil {
 			respondError(w, log, http.StatusNotFound, "inventories not enabled")
@@ -76,17 +122,36 @@ func updateInventoryHandler(store inventory.Store, authz *authorizer, log *zap.L
 			respondError(w, log, http.StatusBadRequest, "invalid request body")
 			return
 		}
-		if req.Name == "" || req.Content == "" {
-			respondError(w, log, http.StatusBadRequest, "name and content are required")
+		if req.Name == "" {
+			respondError(w, log, http.StatusBadRequest, "name is required")
+			return
+		}
+		id := r.PathValue("id")
+		existing, err := store.Get(r.Context(), id)
+		if errors.Is(err, inventory.ErrNotFound) {
+			respondError(w, log, http.StatusNotFound, "inventory not found")
+			return
+		}
+		if err != nil {
+			log.Error("server: read inventory: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not read inventory")
+			return
+		}
+		source, sealed, msg, status := inventorySource(req, existing.ContentConfig, sealer)
+		if msg != "" {
+			respondError(w, log, status, msg)
 			return
 		}
 		if denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse, req.CredentialIDs...)) {
 			return
 		}
-		id := r.PathValue("id")
-		err := store.Update(r.Context(), &inventory.Inventory{
+		inv := &inventory.Inventory{
 			ID: id, Name: req.Name, Content: req.Content, CredentialIDs: req.CredentialIDs,
-		})
+		}
+		if source != credential.SourceLocal {
+			inv.ContentSource, inv.ContentConfig = source, sealed
+		}
+		err = store.Update(r.Context(), inv)
 		if errors.Is(err, inventory.ErrNotFound) {
 			respondError(w, log, http.StatusNotFound, "inventory not found")
 			return

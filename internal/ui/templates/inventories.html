@@ -34,10 +34,55 @@
 				<label class="field-label">Name
 					<input id="inv-name" class="input" placeholder="production fleet" required>
 				</label>
-				<label class="field-label">Content
-					<textarea id="inv-content" class="input mono" rows="8"
-						placeholder="[web]&#10;web01 ansible_host=10.0.0.5" required></textarea>
+				<label class="field-label">Content source
+					<select id="inv-content-source" class="input">
+						<option value="local">Stored (paste the inventory)</option>
+						<option value="command">Command (fetch at run time)</option>
+						<option value="vault">Vault (fetch at run time)</option>
+						<option value="gsm">Google Secret Manager (fetch at run time)</option>
+					</select>
 				</label>
+				<div id="inv-source-local" class="stack" data-source-group>
+					<label class="field-label">Content
+						<textarea id="inv-content" class="input mono" rows="8"
+							placeholder="[web]&#10;web01 ansible_host=10.0.0.5"></textarea>
+					</label>
+				</div>
+				<div id="inv-source-command" class="stack" data-source-group hidden>
+					<label class="field-label">Command
+						<input id="inv-command" class="input mono" placeholder="vault kv get -field=inventory secret/prod-fleet">
+						<span class="field-hint">Runs at launch; its standard output is the inventory.</span>
+					</label>
+				</div>
+				<div id="inv-source-vault" class="stack" data-source-group hidden>
+					<label class="field-label">Vault address
+						<input id="inv-vault-addr" class="input" placeholder="https://vault:8200">
+					</label>
+					<label class="field-label">Path
+						<input id="inv-vault-path" class="input" placeholder="secret/data/fleet">
+					</label>
+					<label class="field-label">Field
+						<input id="inv-vault-field" class="input" placeholder="inventory">
+					</label>
+					<label class="field-label">Token
+						<input id="inv-vault-token" class="input" placeholder="optional, else VAULT_TOKEN">
+					</label>
+				</div>
+				<div id="inv-source-gsm" class="stack" data-source-group hidden>
+					<label class="field-label">Project
+						<input id="inv-gsm-project" class="input" placeholder="my-project">
+					</label>
+					<label class="field-label">Secret
+						<input id="inv-gsm-secret" class="input" placeholder="fleet-inventory">
+					</label>
+					<label class="field-label">Version
+						<input id="inv-gsm-version" class="input" placeholder="latest">
+					</label>
+					<label class="field-label">Access token
+						<input id="inv-gsm-token" class="input" placeholder="optional, else GCP metadata server">
+					</label>
+				</div>
+				<span id="inv-source-hint" class="field-hint" hidden>Editing keeps the stored source configuration unless you fill these in.</span>
 				<label class="field-label">Credentials
 					<select id="inv-credentials" class="input" multiple size="3"></select>
 					<span class="field-hint">Secret variables every run against this inventory receives.</span>

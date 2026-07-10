@@ -8,6 +8,7 @@ import (
 	"github.com/dcadolph/yardmaster/internal/inventory"
 	"github.com/dcadolph/yardmaster/internal/roundhouse"
 	"github.com/dcadolph/yardmaster/internal/run"
+	"github.com/dcadolph/yardmaster/internal/secretsource"
 )
 
 // WithInventories lets runs target stored inventories by id.
@@ -53,11 +54,15 @@ func (d *Dispatcher) inventoryFile(id string) (string, func(), error) {
 	if err != nil {
 		return "", func() {}, fmt.Errorf("inventory %s: %w", id, err)
 	}
+	content, err := d.inventoryContent(inv)
+	if err != nil {
+		return "", func() {}, err
+	}
 	f, err := os.CreateTemp("", "yardmaster-inventory-*")
 	if err != nil {
 		return "", func() {}, fmt.Errorf("materialize inventory %s: %w", id, err)
 	}
-	if _, err := f.WriteString(inv.Content); err != nil {
+	if _, err := f.WriteString(content); err != nil {
 		_ = f.Close()
 		_ = os.Remove(f.Name())
 		return "", func() {}, fmt.Errorf("materialize inventory %s: %w", id, err)
@@ -67,4 +72,26 @@ func (d *Dispatcher) inventoryFile(id string) (string, func(), error) {
 		return "", func() {}, fmt.Errorf("materialize inventory %s: %w", id, err)
 	}
 	return f.Name(), func() { _ = os.Remove(f.Name()) }, nil
+}
+
+// inventoryContent returns the inventory's content, resolving it from its content source when that
+// source is not local. A non-local source's config is sealed, so it is decrypted and then resolved
+// through the shared secretsource engine, letting the host list live in Vault, Google Secret Manager,
+// or behind a command rather than in Yardmaster.
+func (d *Dispatcher) inventoryContent(inv *inventory.Inventory) (string, error) {
+	if secretsource.NormalizeKind(inv.ContentSource) == secretsource.KindLocal {
+		return inv.Content, nil
+	}
+	if d.sealer == nil {
+		return "", fmt.Errorf("inventory %s content source needs an encryption key", inv.ID)
+	}
+	config, err := d.sealer.Open(inv.ContentConfig)
+	if err != nil {
+		return "", fmt.Errorf("inventory %s decrypt content source: %w", inv.ID, err)
+	}
+	content, err := secretsource.Resolve(context.Background(), inv.ContentSource, config)
+	if err != nil {
+		return "", fmt.Errorf("inventory %s resolve content: %w", inv.ID, err)
+	}
+	return content, nil
 }
