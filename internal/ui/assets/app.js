@@ -819,9 +819,12 @@ function wireCredentialForm() {
 	const form = document.getElementById("cred-form");
 	const secPlaceholder = document.getElementById("cred-secret").placeholder;
 	const source = document.getElementById("cred-source");
+	const sourcePlaceholders = {
+		command: "vault kv get -field=password secret/prod-fleet",
+		vault: '{"addr":"https://vault:8200","path":"secret/data/ci","field":"token"}',
+	};
 	source.addEventListener("change", () => {
-		document.getElementById("cred-secret").placeholder =
-			source.value === "command" ? "vault kv get -field=password secret/prod-fleet" : secPlaceholder;
+		document.getElementById("cred-secret").placeholder = sourcePlaceholders[source.value] || secPlaceholder;
 	});
 	const resetToCreate = () => {
 		delete form.dataset.editId;

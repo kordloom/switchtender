@@ -34,6 +34,13 @@ existing store, fetched fresh each run:
 Any CLI works the same way, so a credential can pull from Vault, AWS Secrets Manager, GCP Secret
 Manager, or 1Password with no extra integration.
 
+For Vault there is also a native source that needs no `vault` CLI on the runner: set the source to
+Vault and give it the address, path, and field as JSON. Yardmaster reads the secret over Vault's HTTP
+API at launch, handling both KV v2 and KV v1. The token comes from the config or the `VAULT_TOKEN`
+environment:
+
+    {"addr":"https://vault:8200","path":"secret/data/ci","field":"token"}
+
 ## From the API
 
     curl -s -X POST localhost:8080/credentials \

@@ -70,8 +70,14 @@ func (d *Dispatcher) materializeCredentials(r *run.Run, spec *roundhouse.Spec) (
 		if err != nil {
 			return cleanup, fmt.Errorf("decrypt credential %s: %w", id, err)
 		}
-		if c.Source == credential.SourceCommand {
+		switch c.Source {
+		case credential.SourceCommand:
 			plain, err = resolveCommandSecret(context.Background(), plain)
+			if err != nil {
+				return cleanup, fmt.Errorf("resolve credential %s: %w", id, err)
+			}
+		case credential.SourceVault:
+			plain, err = resolveVaultSecret(context.Background(), plain)
 			if err != nil {
 				return cleanup, fmt.Errorf("resolve credential %s: %w", id, err)
 			}

@@ -62,6 +62,9 @@ const (
 	// SourceCommand means the sealed Secret is a command whose stdout is the secret, resolved at run
 	// time so the real secret lives in an external store, not in Yardmaster.
 	SourceCommand = "command"
+	// SourceVault means the sealed Secret is a JSON config naming a Vault address, path, and field,
+	// read over HTTP at run time, so the real secret lives in Vault and no vault CLI is needed.
+	SourceVault = "vault"
 )
 
 // NormalizeSource maps an empty source to the local default and otherwise returns source unchanged.
@@ -75,7 +78,7 @@ func NormalizeSource(source string) string {
 // ValidSource reports whether s names a supported credential source. Empty is valid and means local.
 func ValidSource(s string) bool {
 	switch NormalizeSource(s) {
-	case SourceLocal, SourceCommand:
+	case SourceLocal, SourceCommand, SourceVault:
 		return true
 	default:
 		return false

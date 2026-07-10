@@ -70,7 +70,7 @@ func createCredentialHandler(store credential.Store, sealer *credential.Sealer, 
 			return
 		}
 		if !credential.ValidSource(req.Source) {
-			respondError(w, log, http.StatusBadRequest, "source must be local or command")
+			respondError(w, log, http.StatusBadRequest, "source must be local, command, or vault")
 			return
 		}
 
@@ -160,7 +160,7 @@ func updateCredentialHandler(store credential.Store, sealer *credential.Sealer, 
 				source = req.Source
 			}
 			if !credential.ValidSource(source) {
-				respondError(w, log, http.StatusBadRequest, "source must be local or command")
+				respondError(w, log, http.StatusBadRequest, "source must be local, command, or vault")
 				return
 			}
 			sealed, err := sealer.Seal(secret)
