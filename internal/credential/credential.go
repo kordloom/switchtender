@@ -10,6 +10,8 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	"github.com/dcadolph/yardmaster/internal/secretsource"
 )
 
 // Kind classifies what a credential holds and how the runner materializes it.
@@ -57,37 +59,21 @@ func ValidKind(k Kind) bool {
 }
 
 const (
-	// SourceLocal means the sealed Secret is the secret value itself. It is the default.
-	SourceLocal = "local"
-	// SourceCommand means the sealed Secret is a command whose stdout is the secret, resolved at run
-	// time so the real secret lives in an external store, not in Yardmaster.
-	SourceCommand = "command"
-	// SourceVault means the sealed Secret is a JSON config naming a Vault address, path, and field,
-	// read over HTTP at run time, so the real secret lives in Vault and no vault CLI is needed.
-	SourceVault = "vault"
-	// SourceGSM means the sealed Secret is a JSON config naming a Google Secret Manager project,
-	// secret, and version, read over HTTP at run time using the runner's GCP identity, so the real
-	// secret lives in Secret Manager and no gcloud CLI is needed.
-	SourceGSM = "gsm"
+	// SourceLocal means the sealed Secret is the value itself. It is the default.
+	SourceLocal = secretsource.KindLocal
+	// SourceCommand means the sealed Secret is a command whose stdout is the secret.
+	SourceCommand = secretsource.KindCommand
+	// SourceVault means the sealed Secret is a Vault config read over HTTP at run time.
+	SourceVault = secretsource.KindVault
+	// SourceGSM means the sealed Secret is a Google Secret Manager config read over HTTP at run time.
+	SourceGSM = secretsource.KindGSM
 )
 
 // NormalizeSource maps an empty source to the local default and otherwise returns source unchanged.
-func NormalizeSource(source string) string {
-	if source == "" {
-		return SourceLocal
-	}
-	return source
-}
+func NormalizeSource(source string) string { return secretsource.NormalizeKind(source) }
 
 // ValidSource reports whether s names a supported credential source. Empty is valid and means local.
-func ValidSource(s string) bool {
-	switch NormalizeSource(s) {
-	case SourceLocal, SourceCommand, SourceVault, SourceGSM:
-		return true
-	default:
-		return false
-	}
-}
+func ValidSource(s string) bool { return secretsource.ValidKind(s) }
 
 // RegistryLogin splits registry credential material into its username and password. The first line
 // is the username; everything after it is the password, so a password may contain any character.

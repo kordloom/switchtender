@@ -1,4 +1,4 @@
-package dispatch
+package secretsource
 
 import (
 	"context"
@@ -10,8 +10,11 @@ import (
 	"strings"
 )
 
-// vaultConfig is the JSON a vault-source credential stores: where to read a secret and, optionally,
-// the token to read it with.
+// httpMaxBody caps a resolver's HTTP response so a misbehaving endpoint cannot exhaust memory.
+const httpMaxBody = 1 << 20
+
+// vaultConfig is the JSON a vault source stores: where to read a secret and, optionally, the token
+// to read it with.
 type vaultConfig struct {
 	// Addr is the Vault address, for example https://vault.example.com:8200.
 	Addr string `json:"addr"`
@@ -23,49 +26,45 @@ type vaultConfig struct {
 	Token string `json:"token,omitempty"`
 }
 
-// vaultMaxBody caps a Vault read response so a misbehaving endpoint cannot exhaust memory.
-const vaultMaxBody = 1 << 20
-
-// resolveVaultSecret reads a single field from a Vault KV secret over HTTP and returns its value, so
-// a credential resolves from Vault at run time with no vault CLI on the runner. It reads the JSON
-// config the credential stored, authenticates with the config token or VAULT_TOKEN, and extracts the
-// field from a KV v2 response, where the secret nests under data.data, or a KV v1 response, where it
-// sits under data.
-func resolveVaultSecret(ctx context.Context, config string) (string, error) {
+// resolveVault reads a single field from a Vault KV secret over HTTP and returns its value, so a
+// source resolves from Vault at run time with no vault CLI on the runner. It reads the JSON config,
+// authenticates with the config token or VAULT_TOKEN, and extracts the field from a KV v2 response,
+// where the secret nests under data.data, or a KV v1 response, where it sits under data.
+func resolveVault(ctx context.Context, config string) (string, error) {
 	var cfg vaultConfig
 	if err := json.Unmarshal([]byte(config), &cfg); err != nil {
-		return "", fmt.Errorf("%w: vault config is not valid JSON", ErrSecretResolve)
+		return "", fmt.Errorf("%w: vault config is not valid JSON", ErrResolve)
 	}
 	if cfg.Addr == "" || cfg.Path == "" || cfg.Field == "" {
-		return "", fmt.Errorf("%w: vault config needs addr, path, and field", ErrSecretResolve)
+		return "", fmt.Errorf("%w: vault config needs addr, path, and field", ErrResolve)
 	}
 	token := cfg.Token
 	if token == "" {
 		token = os.Getenv("VAULT_TOKEN")
 	}
 	if token == "" {
-		return "", fmt.Errorf("%w: vault needs a token in the config or VAULT_TOKEN", ErrSecretResolve)
+		return "", fmt.Errorf("%w: vault needs a token in the config or VAULT_TOKEN", ErrResolve)
 	}
 
 	url := strings.TrimRight(cfg.Addr, "/") + "/v1/" + strings.TrimLeft(cfg.Path, "/")
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return "", fmt.Errorf("%w: %v", ErrSecretResolve, err)
+		return "", fmt.Errorf("%w: %v", ErrResolve, err)
 	}
 	req.Header.Set("X-Vault-Token", token)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("%w: vault request failed", ErrSecretResolve)
+		return "", fmt.Errorf("%w: vault request failed", ErrResolve)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, vaultMaxBody))
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, httpMaxBody))
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("%w: vault returned %s", ErrSecretResolve, resp.Status)
+		return "", fmt.Errorf("%w: vault returned %s", ErrResolve, resp.Status)
 	}
 
 	value, err := vaultField(body, cfg.Field)
 	if err != nil {
-		return "", fmt.Errorf("%w: %v", ErrSecretResolve, err)
+		return "", fmt.Errorf("%w: %v", ErrResolve, err)
 	}
 	return value, nil
 }

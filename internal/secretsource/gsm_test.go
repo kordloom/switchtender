@@ -1,4 +1,4 @@
-package dispatch
+package secretsource
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-func TestResolveGSMSecret(t *testing.T) {
+func TestResolveGSM(t *testing.T) {
 	secretSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer access-tok" {
 			w.WriteHeader(http.StatusForbidden)
@@ -44,23 +44,23 @@ func TestResolveGSMSecret(t *testing.T) {
 	}
 
 	// Test 0: A config token reads the secret and decodes its base64 payload.
-	if got, err := resolveGSMSecret(context.Background(), cfg("proj", "ci", "access-tok")); err != nil || got != "gsm-secret-value" {
+	if got, err := resolveGSM(context.Background(), cfg("proj", "ci", "access-tok")); err != nil || got != "gsm-secret-value" {
 		t.Errorf("with token = %q, %v; want gsm-secret-value", got, err)
 	}
 	// Test 1: With no config token, the metadata server supplies one.
-	if got, err := resolveGSMSecret(context.Background(), cfg("proj", "ci", "")); err != nil || got != "gsm-secret-value" {
+	if got, err := resolveGSM(context.Background(), cfg("proj", "ci", "")); err != nil || got != "gsm-secret-value" {
 		t.Errorf("metadata token = %q, %v; want gsm-secret-value", got, err)
 	}
 	// Test 2: A missing project is an error.
-	if _, err := resolveGSMSecret(context.Background(), cfg("", "ci", "access-tok")); !errors.Is(err, ErrSecretResolve) {
-		t.Errorf("missing project error = %v, want ErrSecretResolve", err)
+	if _, err := resolveGSM(context.Background(), cfg("", "ci", "access-tok")); !errors.Is(err, ErrResolve) {
+		t.Errorf("missing project error = %v, want ErrResolve", err)
 	}
 	// Test 3: A bad token gets a non-200 and errors.
-	if _, err := resolveGSMSecret(context.Background(), cfg("proj", "ci", "wrong")); !errors.Is(err, ErrSecretResolve) {
-		t.Errorf("bad token error = %v, want ErrSecretResolve", err)
+	if _, err := resolveGSM(context.Background(), cfg("proj", "ci", "wrong")); !errors.Is(err, ErrResolve) {
+		t.Errorf("bad token error = %v, want ErrResolve", err)
 	}
 	// Test 4: Invalid config JSON errors.
-	if _, err := resolveGSMSecret(context.Background(), "{bad"); !errors.Is(err, ErrSecretResolve) {
-		t.Errorf("bad config error = %v, want ErrSecretResolve", err)
+	if _, err := resolveGSM(context.Background(), "{bad"); !errors.Is(err, ErrResolve) {
+		t.Errorf("bad config error = %v, want ErrResolve", err)
 	}
 }
