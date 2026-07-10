@@ -39,7 +39,7 @@ func TestResolveCommand(t *testing.T) {
 
 func TestValidKind(t *testing.T) {
 	t.Parallel()
-	for _, k := range []string{"", KindLocal, KindCommand, KindVault, KindGSM} {
+	for _, k := range []string{"", KindLocal, KindCommand, KindVault, KindGSM, KindVaultDynamic} {
 		if !ValidKind(k) {
 			t.Errorf("ValidKind(%q) = false, want true", k)
 		}

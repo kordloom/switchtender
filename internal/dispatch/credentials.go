@@ -6,12 +6,19 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
+
+	"go.uber.org/zap"
 
 	"github.com/dcadolph/yardmaster/internal/credential"
 	"github.com/dcadolph/yardmaster/internal/roundhouse"
 	"github.com/dcadolph/yardmaster/internal/run"
 	"github.com/dcadolph/yardmaster/internal/secretsource"
 )
+
+// revokeTimeout bounds a single ephemeral secret revocation so a slow or unreachable secrets engine
+// cannot hold up a finished run. A lease that is not revoked in time expires on its own TTL.
+const revokeTimeout = 15 * time.Second
 
 // WithCredentials lets runs materialize stored credentials at execution time.
 func WithCredentials(store credential.Store, sealer *credential.Sealer) Option {
@@ -57,15 +64,27 @@ func (d *Dispatcher) materializeCredentials(r *run.Run, spec *roundhouse.Spec) (
 
 	var paths []string
 	var secrets []string
+	var leases []*secretsource.Lease
 	cleanup = func() {
 		for _, p := range paths {
 			_ = os.Remove(p)
 		}
+		for _, lease := range leases {
+			revokeCtx, cancel := context.WithTimeout(context.Background(), revokeTimeout)
+			if err := lease.Revoke(revokeCtx); err != nil {
+				d.log.Warn("dispatch: revoke ephemeral secret failed: "+err.Error(),
+					zap.String("engine", lease.Kind()))
+			}
+			cancel()
+		}
 	}
 	for _, id := range ids {
-		c, plain, err := d.openCredential(context.Background(), id)
+		c, plain, lease, err := d.openCredential(context.Background(), id)
 		if err != nil {
 			return cleanup, secrets, err
+		}
+		if lease != nil {
+			leases = append(leases, lease)
 		}
 		secrets = append(secrets, plain)
 		if c.Kind == credential.KindEnv {
@@ -130,25 +149,26 @@ func (d *Dispatcher) materializeCredentials(r *run.Run, spec *roundhouse.Spec) (
 }
 
 // openCredential fetches a credential, decrypts its sealed secret, and resolves it through its
-// source, returning the credential and its plain value. It is the shared path run materialization
-// uses before applying the credential's kind.
-func (d *Dispatcher) openCredential(ctx context.Context, id string) (*credential.Credential, string, error) {
+// source, returning the credential, its plain value, and, for a dynamic source, a lease that revokes
+// the minted secret after the run. It is the shared path run materialization uses before applying the
+// credential's kind.
+func (d *Dispatcher) openCredential(ctx context.Context, id string) (*credential.Credential, string, *secretsource.Lease, error) {
 	if d.credentials == nil || d.sealer == nil {
-		return nil, "", credential.ErrNoKey
+		return nil, "", nil, credential.ErrNoKey
 	}
 	c, err := d.credentials.Get(ctx, id)
 	if err != nil {
-		return nil, "", fmt.Errorf("credential %s: %w", id, err)
+		return nil, "", nil, fmt.Errorf("credential %s: %w", id, err)
 	}
 	plain, err := d.sealer.Open(c.Secret)
 	if err != nil {
-		return nil, "", fmt.Errorf("decrypt credential %s: %w", id, err)
+		return nil, "", nil, fmt.Errorf("decrypt credential %s: %w", id, err)
 	}
-	value, err := secretsource.Resolve(ctx, c.Source, plain)
+	value, lease, err := secretsource.ResolveLeased(ctx, c.Source, plain)
 	if err != nil {
-		return nil, "", fmt.Errorf("resolve credential %s: %w", id, err)
+		return nil, "", nil, fmt.Errorf("resolve credential %s: %w", id, err)
 	}
-	return c, value, nil
+	return c, value, lease, nil
 }
 
 // effectiveCredentialIDs returns the run's own credentials plus any attached to the stored inventory

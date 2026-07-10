@@ -906,6 +906,7 @@ function wireCredentialForm() {
 	const sourcePlaceholders = {
 		command: "vault kv get -field=password secret/prod-fleet",
 		vault: '{"addr":"https://vault:8200","path":"secret/data/ci","field":"token"}',
+		vault_dynamic: '{"addr":"https://vault:8200","path":"database/creds/app","field":"password"}',
 		gsm: '{"project":"my-project","secret":"ci-token","version":"latest"}',
 	};
 	source.addEventListener("change", () => {

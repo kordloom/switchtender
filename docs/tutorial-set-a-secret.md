@@ -48,6 +48,20 @@ account through the metadata server, so no key is stored; off GCP, put an access
 
     {"project":"my-project","secret":"ci-token","version":"latest"}
 
+## Mint a short-lived secret per run
+
+For the strongest secret hygiene, Yardmaster can mint a fresh credential for each run and revoke it
+when the run ends, so a leaked value is useless minutes later. Set the source to Vault dynamic and
+give it a dynamic secrets path, such as a database or cloud role, as JSON:
+
+    {"addr":"https://vault:8200","path":"database/creds/app","field":"password"}
+
+At launch Yardmaster reads that path, which mints a new credential, injects the chosen field into the
+run, and records the Vault lease. When the run reaches a terminal state the lease is revoked, so the
+credential lives only as long as the run. If the process dies before it can revoke, the credential
+still expires on the lease's own TTL, so nothing is left behind for long. The minted value is masked
+in the run's output like any other secret.
+
 ## From the API
 
     curl -s -X POST localhost:8080/credentials \

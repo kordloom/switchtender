@@ -2,13 +2,38 @@ package dispatch
 
 import (
 	"context"
+	"sync"
 	"testing"
+
+	"go.uber.org/zap"
 
 	"github.com/dcadolph/yardmaster/internal/credential"
 	"github.com/dcadolph/yardmaster/internal/inventory"
 	"github.com/dcadolph/yardmaster/internal/roundhouse"
 	"github.com/dcadolph/yardmaster/internal/run"
+	"github.com/dcadolph/yardmaster/internal/secretsource"
 )
+
+// dynLease tracks whether the fake dynamic engine's lease was revoked, so the revoke-after-run test
+// can assert the run cleanup ended the minted secret.
+var dynLease struct {
+	mu      sync.Mutex
+	revoked bool
+}
+
+// init registers a fake dynamic secrets engine once before any test runs, so the minters map is not
+// written while parallel tests read it. Its mint returns a value derived from the config and a lease
+// whose revoke records that it fired.
+func init() {
+	secretsource.RegisterDynamic("test_dynamic", func(_ context.Context, config string) (string, *secretsource.Lease, error) {
+		return "minted-" + config, secretsource.NewLease("test_dynamic", func(context.Context) error {
+			dynLease.mu.Lock()
+			dynLease.revoked = true
+			dynLease.mu.Unlock()
+			return nil
+		}), nil
+	})
+}
 
 func TestMaterializeCommandCredential(t *testing.T) {
 	t.Parallel()
@@ -116,4 +141,67 @@ func TestMaterializeInventoryScopedCredential(t *testing.T) {
 	if !found {
 		t.Errorf("spec.Env = %v, want REGION=us-east-1 from the inventory-scoped credential", spec.Env)
 	}
+}
+
+func TestMaterializeDynamicCredentialRevokes(t *testing.T) {
+	t.Parallel()
+	dynLease.mu.Lock()
+	dynLease.revoked = false
+	dynLease.mu.Unlock()
+
+	sealer := credential.NewSealer("pass", "salt")
+	sealed, err := sealer.Seal("app")
+	if err != nil {
+		t.Fatalf("Seal() error = %v", err)
+	}
+	store := credential.NewMemStore()
+	if err := store.Save(context.Background(), &credential.Credential{
+		ID: "cred_dyn", Name: "dynamic-db", Kind: credential.KindToken,
+		Source: "test_dynamic", Secret: sealed,
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	d := &Dispatcher{credentials: store, sealer: sealer, log: zap.NewNop()}
+	spec := &roundhouse.Spec{}
+	cleanup, secrets, err := d.materializeCredentials(
+		&run.Run{ID: "run_dyn", CredentialIDs: []string{"cred_dyn"}}, spec)
+	if err != nil {
+		cleanup()
+		t.Fatalf("materializeCredentials() error = %v", err)
+	}
+
+	// The minted value reaches the run as its token and is tracked for masking.
+	wantEnv := credential.TokenEnvVar + "=minted-app"
+	if !containsString(spec.Env, wantEnv) {
+		t.Errorf("spec.Env = %v, want %q from the minted secret", spec.Env, wantEnv)
+	}
+	if !containsString(secrets, "minted-app") {
+		t.Errorf("secrets = %v, want the minted value tracked for masking", secrets)
+	}
+
+	// The lease is live until the run cleanup revokes it.
+	dynLease.mu.Lock()
+	before := dynLease.revoked
+	dynLease.mu.Unlock()
+	if before {
+		t.Error("lease revoked before cleanup, want revoke only after the run")
+	}
+	cleanup()
+	dynLease.mu.Lock()
+	after := dynLease.revoked
+	dynLease.mu.Unlock()
+	if !after {
+		t.Error("lease not revoked after cleanup, want the run to end the minted secret")
+	}
+}
+
+// containsString reports whether s is in list.
+func containsString(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }

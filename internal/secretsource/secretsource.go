@@ -19,6 +19,9 @@ const (
 	KindVault = "vault"
 	// KindGSM means the config is a JSON Google Secret Manager project, secret, and version.
 	KindGSM = "gsm"
+	// KindVaultDynamic means the config names a Vault dynamic secrets path that mints a short-lived
+	// credential on each read, returned with a lease that revokes it after the run.
+	KindVaultDynamic = "vault_dynamic"
 )
 
 // ErrResolve is returned when a source cannot produce its value.
@@ -36,7 +39,7 @@ var resolvers = map[string]ResolverFunc{
 }
 
 // Register adds a resolver for a source kind so a new secrets engine plugs in. It panics on a
-// duplicate kind, which is a programming error.
+// duplicate or reserved kind, which is a programming error.
 func Register(kind string, fn ResolverFunc) {
 	if kind == "" || kind == KindLocal {
 		panic("secretsource: cannot register the local kind")
@@ -44,7 +47,67 @@ func Register(kind string, fn ResolverFunc) {
 	if _, exists := resolvers[kind]; exists {
 		panic("secretsource: duplicate resolver for " + kind)
 	}
+	if _, exists := minters[kind]; exists {
+		panic("secretsource: kind already registered as dynamic: " + kind)
+	}
 	resolvers[kind] = fn
+}
+
+// Lease is a handle to a minted short-lived secret. Revoking it tells the engine to end the secret
+// early. A secret that is never revoked expires on the engine's own TTL, so a lost lease is not an
+// orphan, only a secret that lives out its lifetime.
+type Lease struct {
+	// kind names the engine that minted the secret, for logging and audit.
+	kind string
+	// revoke ends the secret early, nil for a source that mints nothing revocable.
+	revoke func(ctx context.Context) error
+}
+
+// NewLease builds a lease for a minted secret, naming the engine and capturing how to revoke it.
+func NewLease(kind string, revoke func(ctx context.Context) error) *Lease {
+	return &Lease{kind: kind, revoke: revoke}
+}
+
+// Kind returns the engine that minted the lease, or an empty string for a nil lease.
+func (l *Lease) Kind() string {
+	if l == nil {
+		return ""
+	}
+	return l.kind
+}
+
+// Revoke ends the minted secret early. A nil lease, or a lease with no revoke func, is a no-op, so a
+// caller can revoke unconditionally.
+func (l *Lease) Revoke(ctx context.Context) error {
+	if l == nil || l.revoke == nil {
+		return nil
+	}
+	return l.revoke(ctx)
+}
+
+// MintFunc mints a short-lived value from a dynamic engine's config, returning the value and a lease
+// that revokes it.
+type MintFunc func(ctx context.Context, config string) (string, *Lease, error)
+
+// minters maps a dynamic source kind to its mint function. RegisterDynamic adds engines such as AWS
+// STS without touching the core.
+var minters = map[string]MintFunc{
+	KindVaultDynamic: mintVaultDynamic,
+}
+
+// RegisterDynamic adds a mint function for a dynamic source kind, so a new short-lived secrets engine
+// plugs in. It panics on a duplicate or reserved kind, which is a programming error.
+func RegisterDynamic(kind string, fn MintFunc) {
+	if kind == "" || kind == KindLocal {
+		panic("secretsource: cannot register the local kind")
+	}
+	if _, exists := minters[kind]; exists {
+		panic("secretsource: duplicate dynamic engine for " + kind)
+	}
+	if _, exists := resolvers[kind]; exists {
+		panic("secretsource: kind already registered as a resolver: " + kind)
+	}
+	minters[kind] = fn
 }
 
 // NormalizeKind maps an empty kind to the local default and otherwise returns kind unchanged.
@@ -55,26 +118,42 @@ func NormalizeKind(kind string) string {
 	return kind
 }
 
-// ValidKind reports whether kind names a supported source: local or a registered engine.
+// ValidKind reports whether kind names a supported source: local, a registered resolver, or a
+// registered dynamic engine.
 func ValidKind(kind string) bool {
 	k := NormalizeKind(kind)
 	if k == KindLocal {
 		return true
 	}
-	_, ok := resolvers[k]
+	if _, ok := resolvers[k]; ok {
+		return true
+	}
+	_, ok := minters[k]
 	return ok
 }
 
-// Resolve returns the value a source of the given kind names, fetching it at call time. A local
-// source returns its config unchanged; a registered engine resolves the config to its value.
-func Resolve(ctx context.Context, kind, config string) (string, error) {
+// ResolveLeased returns the value a source names and, for a dynamic engine, a lease that revokes the
+// minted secret. A local source returns its config with no lease. A registered resolver returns its
+// value with no lease. A dynamic engine mints a short-lived value and returns a lease for it.
+func ResolveLeased(ctx context.Context, kind, config string) (string, *Lease, error) {
 	k := NormalizeKind(kind)
 	if k == KindLocal {
-		return config, nil
+		return config, nil, nil
+	}
+	if mint, ok := minters[k]; ok {
+		return mint(ctx, config)
 	}
 	fn, ok := resolvers[k]
 	if !ok {
-		return "", fmt.Errorf("%w: unknown source %q", ErrResolve, kind)
+		return "", nil, fmt.Errorf("%w: unknown source %q", ErrResolve, kind)
 	}
-	return fn(ctx, config)
+	value, err := fn(ctx, config)
+	return value, nil, err
+}
+
+// Resolve returns the value a source names, fetching it at call time and discarding any lease. It
+// suits callers, such as inventory content, that read a value but do not revoke it.
+func Resolve(ctx context.Context, kind, config string) (string, error) {
+	value, _, err := ResolveLeased(ctx, kind, config)
+	return value, err
 }

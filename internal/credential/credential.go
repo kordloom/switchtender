@@ -67,6 +67,9 @@ const (
 	SourceVault = secretsource.KindVault
 	// SourceGSM means the sealed Secret is a Google Secret Manager config read over HTTP at run time.
 	SourceGSM = secretsource.KindGSM
+	// SourceVaultDynamic means the sealed Secret is a Vault dynamic secrets config. A short-lived
+	// credential is minted for each run and revoked when the run ends.
+	SourceVaultDynamic = secretsource.KindVaultDynamic
 )
 
 // NormalizeSource maps an empty source to the local default and otherwise returns source unchanged.
