@@ -29,7 +29,13 @@ const (
 	// KindRegistry is a container registry username and password, the username on the first line
 	// and the password on the rest, used to pull execution environment images.
 	KindRegistry Kind = "registry"
+	// KindToken is a single API token or JWT, exposed to a run as the TokenEnvVar environment
+	// variable so any tool can send it as a bearer token without a KEY=VALUE wrapper.
+	KindToken Kind = "token"
 )
+
+// TokenEnvVar is the environment variable a token credential is exposed under at run time.
+const TokenEnvVar = "YARDMASTER_TOKEN"
 
 var (
 	// ErrNotFound is returned when a credential does not exist in the store.
@@ -43,7 +49,7 @@ var (
 // ValidKind reports whether k names a supported credential kind.
 func ValidKind(k Kind) bool {
 	switch k {
-	case KindSSHKey, KindVaultPassword, KindEnv, KindBecomePassword, KindRegistry:
+	case KindSSHKey, KindVaultPassword, KindEnv, KindBecomePassword, KindRegistry, KindToken:
 		return true
 	default:
 		return false

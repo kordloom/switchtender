@@ -95,6 +95,7 @@ Open Credentials and add what your runs need. Kinds:
 - `ssh_key`: an SSH private key, used to reach hosts and to clone private git projects.
 - `vault_password`: an Ansible Vault password.
 - `env`: `KEY=VALUE` lines injected into the run, how cloud SDK credentials reach plugins.
+- `token`: a single API token or JWT, exposed to the run as the `YARDMASTER_TOKEN` environment variable.
 - `become_password`: a privilege escalation password, delivered without touching the command line.
 - `registry`: a container registry login, for pulling a pinned execution image.
 

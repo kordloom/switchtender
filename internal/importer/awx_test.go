@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
+	"github.com/dcadolph/yardmaster/internal/credential"
 	"github.com/dcadolph/yardmaster/internal/importer"
 	"github.com/dcadolph/yardmaster/internal/invsource"
 	"github.com/dcadolph/yardmaster/internal/template"
@@ -50,14 +51,25 @@ func TestFromAWX(t *testing.T) {
 		}
 	}
 
-	// Three credential shells, each without a secret, each flagged for re-entry.
-	if len(plan.Credentials) != 3 {
-		t.Fatalf("credentials = %d, want 3", len(plan.Credentials))
+	// Four credential shells, each without a secret, each flagged for re-entry. The GitHub token type
+	// maps to the token kind.
+	if len(plan.Credentials) != 4 {
+		t.Fatalf("credentials = %d, want 4", len(plan.Credentials))
 	}
+	tokenSeen := false
 	for _, c := range plan.Credentials {
 		if c.Secret != "" {
 			t.Errorf("credential %q carried a secret, want a shell", c.Name)
 		}
+		if c.Name == "gh-token" {
+			tokenSeen = true
+			if c.Kind != credential.KindToken {
+				t.Errorf("gh-token kind = %q, want %q", c.Kind, credential.KindToken)
+			}
+		}
+	}
+	if !tokenSeen {
+		t.Error("expected the gh-token credential in the plan")
 	}
 
 	// Two dynamic sources import: a file source keeps its path, a cloud plugin keeps its plugin name

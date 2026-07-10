@@ -21,7 +21,8 @@
   "credentials": [
     {"name": "prod-ssh", "credential_type": "Machine"},
     {"name": "vault-pw", "credential_type": "Vault"},
-    {"name": "aws-keys", "credential_type": "Amazon Web Services"}
+    {"name": "aws-keys", "credential_type": "Amazon Web Services"},
+    {"name": "gh-token", "credential_type": "GitHub Personal Access Token"}
   ],
   "inventory_sources": [
     {"name": "Cloud hosts", "source": "scm", "source_path": "inventories/prod.aws_ec2.yml", "source_project": "Web", "credential": "aws-keys", "inventory": "Production"}

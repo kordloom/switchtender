@@ -42,7 +42,7 @@ Every endpoint the server exposes. The web UI lives at `/ui/` and the root redir
 | GET    | `/triggers`             | List webhook triggers.                                  |
 | DELETE | `/triggers/{id}`        | Delete a trigger, revoking its webhook.                 |
 | POST   | `/hooks/{token}`        | Fire a trigger from a git push; a required HMAC signature is checked first.|
-| POST   | `/credentials`          | Store a credential (ssh_key, vault_password, env, become_password, registry), encrypted at rest.|
+| POST   | `/credentials`          | Store a credential (ssh_key, vault_password, env, token, become_password, registry), encrypted at rest.|
 | GET    | `/credentials`          | List credentials, secrets never included.               |
 | DELETE | `/credentials/{id}`     | Delete a credential.                                    |
 | POST   | `/auth/login`           | Sign in with username and password, returns a token.    |

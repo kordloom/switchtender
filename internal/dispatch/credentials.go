@@ -102,6 +102,11 @@ func (d *Dispatcher) materializeCredentials(r *run.Run, spec *roundhouse.Spec) (
 			paths = paths[:len(paths)-1]
 			_ = os.Remove(f.Name())
 			spec.Env = append(spec.Env, credential.EnvLines(plain)...)
+		case credential.KindToken:
+			// A token is exposed as one environment variable; the temp file is not needed.
+			paths = paths[:len(paths)-1]
+			_ = os.Remove(f.Name())
+			spec.Env = append(spec.Env, credential.TokenEnvVar+"="+strings.TrimRight(plain, "\r\n"))
 		case credential.KindBecomePassword:
 			// The password reaches the play as a var through a file so it never lands on argv.
 			vars, err := json.Marshal(map[string]string{"ansible_become_password": plain})

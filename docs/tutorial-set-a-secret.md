@@ -18,6 +18,7 @@ wiped afterward.
    - `ssh_key`: an SSH private key, to reach hosts and clone private git projects.
    - `vault_password`: an Ansible Vault password.
    - `env`: `KEY=VALUE` lines injected into the run, how cloud SDK tokens reach a tool.
+   - `token`: a single API token or JWT, exposed to the run as the `YARDMASTER_TOKEN` environment variable.
    - `become_password`: a privilege escalation password, kept off the command line.
    - `registry`: a container registry login, to pull a pinned execution image.
 3. Paste the secret and save. Attach it to a project, a template, or a run.

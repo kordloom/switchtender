@@ -132,16 +132,19 @@ func mapSurveyType(awxType string) (template.FieldType, bool) {
 // mapCredentialKind converts an AWX credential type name to a Yardmaster credential kind, reporting
 // whether the mapping is exact. Unknown types fall back to the env kind.
 func mapCredentialKind(awxType string) (credential.Kind, bool) {
-	switch strings.ToLower(awxType) {
+	lower := strings.ToLower(awxType)
+	switch lower {
 	case "machine", "source control", "scm":
 		return credential.KindSSHKey, true
 	case "vault":
 		return credential.KindVaultPassword, true
 	case "registry", "container registry":
 		return credential.KindRegistry, true
-	default:
-		return credential.KindEnv, false
 	}
+	if strings.Contains(lower, "token") || strings.Contains(lower, "bearer") {
+		return credential.KindToken, true
+	}
+	return credential.KindEnv, false
 }
 
 // choicesFrom normalizes a survey field's choices, which AWX encodes as either a list or a newline

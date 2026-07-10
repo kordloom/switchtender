@@ -99,8 +99,9 @@ func TestValidKind(t *testing.T) {
 		{In: credential.KindEnv, Want: true},            // Test 2: Environment.
 		{In: credential.KindBecomePassword, Want: true}, // Test 3: Become password.
 		{In: credential.KindRegistry, Want: true},       // Test 4: Registry login.
-		{In: credential.Kind("nonsense"), Want: false},  // Test 5: Unknown kind.
-		{In: credential.Kind(""), Want: false},          // Test 6: Empty kind.
+		{In: credential.KindToken, Want: true},          // Test 5: API token or JWT.
+		{In: credential.Kind("nonsense"), Want: false},  // Test 6: Unknown kind.
+		{In: credential.Kind(""), Want: false},          // Test 7: Empty kind.
 	}
 	for i, test := range tests {
 		if got := credential.ValidKind(test.In); got != test.Want {

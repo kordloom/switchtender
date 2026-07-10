@@ -66,7 +66,7 @@ func createCredentialHandler(store credential.Store, sealer *credential.Sealer, 
 		}
 		if !credential.ValidKind(req.Kind) {
 			respondError(w, log, http.StatusBadRequest,
-				"kind must be ssh_key, vault_password, env, become_password, or registry")
+				"kind must be ssh_key, vault_password, env, token, become_password, or registry")
 			return
 		}
 		if !credential.ValidSource(req.Source) {
@@ -152,7 +152,7 @@ func updateCredentialHandler(store credential.Store, sealer *credential.Sealer, 
 			}
 			if !credential.ValidKind(kind) {
 				respondError(w, log, http.StatusBadRequest,
-					"kind must be ssh_key, vault_password, env, become_password, or registry")
+					"kind must be ssh_key, vault_password, env, token, become_password, or registry")
 				return
 			}
 			source := c.Source

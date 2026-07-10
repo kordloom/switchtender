@@ -54,3 +54,37 @@ func TestMaterializeCommandCredential(t *testing.T) {
 		t.Errorf("spec.Env = %v, want API_TOKEN=secret123 resolved from the command", spec.Env)
 	}
 }
+
+func TestMaterializeTokenCredential(t *testing.T) {
+	t.Parallel()
+	sealer := credential.NewSealer("pass", "salt")
+	sealed, err := sealer.Seal("eyJhbGciOiJIUzI1NiJ9.token\n")
+	if err != nil {
+		t.Fatalf("Seal() error = %v", err)
+	}
+	store := credential.NewMemStore()
+	if err := store.Save(context.Background(), &credential.Credential{
+		ID: "cred_tok", Name: "api", Kind: credential.KindToken, Secret: sealed,
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	d := &Dispatcher{credentials: store, sealer: sealer}
+	spec := &roundhouse.Spec{}
+	cleanup, err := d.materializeCredentials(&run.Run{ID: "run_tok", CredentialIDs: []string{"cred_tok"}}, spec)
+	defer cleanup()
+	if err != nil {
+		t.Fatalf("materializeCredentials() error = %v", err)
+	}
+
+	want := credential.TokenEnvVar + "=eyJhbGciOiJIUzI1NiJ9.token"
+	found := false
+	for _, e := range spec.Env {
+		if e == want {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("spec.Env = %v, want %q with the trailing newline trimmed", spec.Env, want)
+	}
+}
