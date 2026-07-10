@@ -61,10 +61,10 @@ type Spec struct {
 	Playbook string
 	// Inventory is the path to the Ansible inventory. When empty, no -i flag is passed.
 	Inventory string
-	// Tool selects the execution engine: ansible, bash, terraform, or python. Empty means ansible.
+	// Tool selects the execution engine: ansible, bash, terraform, python, or go. Empty means ansible.
 	Tool string
 	// Command carries the tool's primary input for non-Ansible tools: the script for bash and python,
-	// the working directory for terraform.
+	// the source for go, the working directory for terraform.
 	Command string
 	// DryRun runs the tool in its no-change mode: ansible --check, a syntax check for bash.
 	DryRun bool
@@ -198,6 +198,8 @@ type toolRouter struct {
 	terraform *terraformRunner
 	// python runs python Specs on the host.
 	python *pythonRunner
+	// golang runs go Specs on the host.
+	golang *goRunner
 	// container runs an image-bound Ansible Spec inside its image.
 	container *containerRunner
 	// allowContainer gates container execution; when false an image-bound Spec fails clearly.
@@ -219,6 +221,7 @@ func newToolRouter(allowContainer bool, limits ContainerLimits, opts ...Option) 
 		bash:           newBashRunner(host.baseEnv),
 		terraform:      newTerraformRunner(host.baseEnv),
 		python:         newPythonRunner(host.baseEnv),
+		golang:         newGoRunner(host.baseEnv),
 		container:      newContainerRunner(host.baseEnv, &host.plugin, limits),
 		allowContainer: allowContainer,
 	}
@@ -233,6 +236,8 @@ func (t *toolRouter) Run(ctx context.Context, spec Spec, out io.Writer) (Result,
 		return t.terraform.Run(ctx, spec, out)
 	case run.ToolPython:
 		return t.python.Run(ctx, spec, out)
+	case run.ToolGo:
+		return t.golang.Run(ctx, spec, out)
 	case run.ToolAnsible:
 		if spec.Image == "" {
 			return t.ansibleRunner.Run(ctx, spec, out)

@@ -47,6 +47,8 @@ const (
 	ToolTerraform = "terraform"
 	// ToolPython runs a Python script. The script text is carried in Command.
 	ToolPython = "python"
+	// ToolGo runs a Go program. The source text is carried in Command.
+	ToolGo = "go"
 )
 
 // NormalizeTool maps an empty tool to the Ansible default and otherwise returns tool unchanged.
@@ -60,7 +62,7 @@ func NormalizeTool(tool string) string {
 // ValidTool reports whether tool names a supported execution tool. Empty is valid and means Ansible.
 func ValidTool(tool string) bool {
 	switch NormalizeTool(tool) {
-	case ToolAnsible, ToolBash, ToolTerraform, ToolPython:
+	case ToolAnsible, ToolBash, ToolTerraform, ToolPython, ToolGo:
 		return true
 	default:
 		return false

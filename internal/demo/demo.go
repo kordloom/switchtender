@@ -1,5 +1,5 @@
 // Package demo seeds a Yardmaster store with lifelike sample data by running real jobs through the
-// engine: Ansible playbooks plus Bash, Python, and Terraform. A public read-only instance then shows
+// engine: Ansible playbooks plus Bash, Python, Terraform, and Go. A public read-only instance then shows
 // genuine host matrices, split runs, mixed-tool pipelines, and cross-run fleet memory rather than
 // fabricated records.
 package demo
@@ -53,7 +53,7 @@ type Deps struct {
 
 // Seed populates the stores with sample configuration and a set of runs that exercise the matrix,
 // splits, mixed-tool pipelines, and cross-run fleet memory. It runs real jobs locally, so it needs
-// ansible on the PATH and uses bash, python3, and terraform when they are present. A tool whose
+// ansible on the PATH and uses bash, python3, terraform, and go when they are present. A tool whose
 // binary is missing is logged and skipped rather than left as a broken failure. It returns when
 // every seeded run has finished.
 func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
@@ -111,9 +111,9 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 	return nil
 }
 
-// seedMultiTool runs one Bash, Python, and Terraform job plus a mixed-tool pipeline, so the demo
-// shows the engine driving every tool rather than Ansible alone. Bash always runs; Python and
-// Terraform run only when their binary is present, so a missing tool is skipped rather than left as
+// seedMultiTool runs one Bash, Python, Terraform, and Go job plus a mixed-tool pipeline, so the demo
+// shows the engine driving every tool rather than Ansible alone. Bash always runs. Python, Terraform,
+// and Go run only when their binary is present, so a missing tool is skipped rather than left as
 // an exec-not-found failure. The mixed pipeline provisions with whichever infra tool is available,
 // then configures with Ansible and verifies with Bash, so it is always a real multi-tool graph that
 // finishes cleanly on whatever host serves the demo.
@@ -145,6 +145,17 @@ func seedMultiTool(ctx context.Context, d Deps, tfDir, playbook, inv string, log
 		waitTerminal(ctx, d.Runs, tf.ID)
 	} else {
 		log.Info("demo: terraform not on PATH, skipping the terraform run; install terraform to include it")
+	}
+
+	if have("go") {
+		gorun, err := d.Submitter.Submit(ctx, "", "",
+			run.WithTool(run.ToolGo), run.WithCommand(scriptFleetGo))
+		if err != nil {
+			return fmt.Errorf("seed go run: %w", err)
+		}
+		waitTerminal(ctx, d.Runs, gorun.ID)
+	} else {
+		log.Info("demo: go not on PATH, skipping the go run")
 	}
 
 	steps := []run.PipelineStep{
@@ -238,8 +249,8 @@ func materialize() (string, error) {
 }
 
 // seedConfig stores browsable sample projects, inventories, credentials, and templates. The templates
-// cover every tool the engine drives, so the Templates list shows Ansible, Bash, Terraform, and
-// Python presets even on a host that lacks a given tool's binary. It is best effort: a store error is
+// cover every tool the engine drives, so the Templates list shows Ansible, Bash, Terraform, Python,
+// and Go presets even on a host that lacks a given tool's binary. It is best effort: a store error is
 // logged and skipped so the runs still seed.
 func seedConfig(ctx context.Context, d Deps, log *zap.Logger) {
 	now := time.Now()
@@ -284,6 +295,7 @@ func seedConfig(ctx context.Context, d Deps, log *zap.Logger) {
 		{ID: template.NewID(), Name: "Rotate logs", ProjectID: projects[0].ID, Tool: run.ToolBash, Command: scriptLogRotate, CreatedAt: ago(36)},
 		{ID: template.NewID(), Name: "Provision network", ProjectID: projects[1].ID, Tool: run.ToolTerraform, Command: "infra/network", DryRun: true, CreatedAt: ago(30)},
 		{ID: template.NewID(), Name: "Reconcile inventory", ProjectID: projects[0].ID, Tool: run.ToolPython, Command: scriptReconcile, CreatedAt: ago(18)},
+		{ID: template.NewID(), Name: "Fleet capacity report", ProjectID: projects[0].ID, Tool: run.ToolGo, Command: scriptFleetGo, CreatedAt: ago(12)},
 	}
 	for _, t := range templates {
 		if err := d.Templates.Save(ctx, t); err != nil {
@@ -325,6 +337,39 @@ print("Inventory reconciliation")
 print(json.dumps(report, indent=2))
 if missing:
     print(f"Drift detected: {', '.join(missing)} not reporting")
+`
+
+// scriptFleetGo is the Go job for the standalone go run and the Fleet capacity report template. It
+// summarizes host capacity as JSON and exits zero, using only the standard library so it runs offline.
+const scriptFleetGo = `package main
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+type host struct {
+	Name string ` + "`json:\"name\"`" + `
+	CPU  int    ` + "`json:\"cpu_pct\"`" + `
+	Mem  int    ` + "`json:\"mem_pct\"`" + `
+}
+
+func main() {
+	hosts := []host{{"web01", 34, 51}, {"web02", 41, 48}, {"db01", 72, 80}}
+	fmt.Println("Fleet capacity report")
+	hot := 0
+	for _, h := range hosts {
+		status := "ok"
+		if h.CPU > 70 || h.Mem > 75 {
+			status = "hot"
+			hot++
+		}
+		fmt.Printf("  %-6s cpu %3d%%  mem %3d%%  %s\n", h.Name, h.CPU, h.Mem, status)
+	}
+	summary, _ := json.Marshal(map[string]int{"hosts": len(hosts), "hot": hot})
+	fmt.Println(string(summary))
+	fmt.Printf("%d host(s) above threshold\n", hot)
+}
 `
 
 // scriptProvisionPy is the mixed pipeline's provisioning step when Terraform is absent but Python is

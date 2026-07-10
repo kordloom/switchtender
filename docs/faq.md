@@ -5,7 +5,7 @@ the [quickstart](quickstart.md), or [switching from AWX](switching-from-awx.md) 
 
 ## What can Yardmaster run?
 
-Ansible playbooks, Bash scripts, Terraform, and Python. A run, a saved template, or a single step of
+Ansible playbooks, Bash scripts, Terraform, Python, and Go. A run, a saved template, or a single step of
 a pipeline picks its tool. A pipeline can mix them: Terraform to build infrastructure, Ansible to
 configure it, Bash to smoke-test it, as one dependency graph. Bash shells out to anything on the
 host, so kubectl, the cloud CLIs, and your own scripts all work.

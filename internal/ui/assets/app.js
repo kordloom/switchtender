@@ -787,8 +787,8 @@ function editButton(onClick) {
 }
 
 // wireLaunchForm hooks the launch panel up to POST /runs and fills the credential picker. The tool
-// selector swaps the Ansible fields for a single command box, so bash, terraform, and python launch
-// from the same panel.
+// selector swaps the Ansible fields for a single command box, so bash, terraform, python, and go
+// launch from the same panel.
 function wireLaunchForm() {
 	const form = document.getElementById("launch-form");
 	if (!form) return;
@@ -812,6 +812,7 @@ function wireLaunchForm() {
 		commandField.hidden = ansible;
 		if (tool === "terraform") commandInput.placeholder = "working directory, e.g. infra";
 		else if (tool === "python") commandInput.placeholder = "print('hello from python')";
+		else if (tool === "go") commandInput.placeholder = "package main\n\nfunc main() { println(\"hi\") }";
 		else commandInput.placeholder = "echo hello";
 	};
 	toolSel.addEventListener("change", syncTool);
@@ -1295,7 +1296,7 @@ function migrateGroup(label, names) {
 }
 
 // syncTemplateTool shows the Ansible fields or the command box in the template dialog to match the
-// selected tool, so a bash, terraform, or python template hides playbook, inventory, and shards.
+// selected tool, so a bash, terraform, python, or go template hides playbook, inventory, and shards.
 function syncTemplateTool() {
 	const tool = document.getElementById("tpl-tool").value;
 	const ansible = tool === "ansible" || tool === "";

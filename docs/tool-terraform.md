@@ -37,4 +37,5 @@ A directory `infra/network` holding:
 Launch a Terraform run with the command set to `infra/network` and a survey field `region`. A dry run
 shows the plan; a real run applies it.
 
-See also [Bash runs](tool-bash.md), [Python runs](tool-python.md), and the [tutorials](tutorials.md).
+See also [Bash runs](tool-bash.md), [Python runs](tool-python.md), [Go runs](tool-go.md), and the
+[tutorials](tutorials.md).

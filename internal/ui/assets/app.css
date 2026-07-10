@@ -247,7 +247,8 @@ table.runs td button + button { margin-left: 8px; }
 .tool-badge.bash { background: rgba(63, 185, 80, 0.18); color: #1a7f37; }
 .tool-badge.terraform { background: rgba(124, 58, 237, 0.18); color: #6e40c9; }
 .tool-badge.python { background: rgba(47, 129, 247, 0.16); color: var(--accent); }
-@media (prefers-color-scheme: dark) { .tool-badge.bash { color: #56d364; } .tool-badge.terraform { color: #d2a8ff; } }
+.tool-badge.go { background: rgba(0, 173, 216, 0.18); color: #007d9c; }
+@media (prefers-color-scheme: dark) { .tool-badge.bash { color: #56d364; } .tool-badge.terraform { color: #d2a8ff; } .tool-badge.go { color: #22c7e6; } }
 .check-label { flex-direction: row; align-items: center; gap: 8px; font-weight: 600; }
 
 /* Run header */

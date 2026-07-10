@@ -36,5 +36,5 @@ parses the script and reports syntax errors without executing it.
     echo "Draining $region"
     kubectl --context "$region" drain node-1 --ignore-daemonsets
 
-See also [Terraform runs](tool-terraform.md), [Python runs](tool-python.md), and the
-[tutorials](tutorials.md).
+See also [Terraform runs](tool-terraform.md), [Python runs](tool-python.md),
+[Go runs](tool-go.md), and the [tutorials](tutorials.md).

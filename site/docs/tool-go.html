@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Go runs · Yardmaster docs</title>
+	<link rel="icon" type="image/png" href="/assets/favicon.png">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="/docs.css?v=1">
+</head>
+<body>
+	<header class="dnav">
+		<a class="brand" href="/"><img src="/assets/logo-train-tracks-dark.png" alt="Yardmaster" class="brand-train"><span class="brand-word">Yardmaster</span></a>
+		<span class="dnav-tag">Docs</span>
+		<nav class="dnav-links">
+			<a href="/">Home</a>
+			<a href="/#compare">Compare</a>
+			<a href="https://github.com/dcadolph/yardmaster">GitHub</a>
+		</nav>
+	</header>
+	<div class="dshell">
+		<aside class="dside">
+			<nav>
+				<a href="/docs/index.html">Overview</a><a href="/docs/quickstart.html">Quickstart</a><a href="/docs/faq.html">FAQ</a><a href="/docs/switching-from-awx.html">Switching from AWX</a><a href="/docs/migration.html">Migration</a><a href="/docs/tutorials.html">Tutorials</a><a href="/docs/tutorial-run-a-job.html">Run a job</a><a href="/docs/tutorial-save-a-template.html">Save a template</a><a href="/docs/tutorial-schedule-a-job.html">Schedule a job</a><a href="/docs/tutorial-set-a-secret.html">Set a secret</a><a href="/docs/tutorial-migrate.html">Migrate your setup</a><a href="/docs/tool-bash.html">Bash runs</a><a href="/docs/tool-terraform.html">Terraform runs</a><a href="/docs/tool-python.html">Python runs</a><a href="/docs/concepts.html">Concepts</a><a href="/docs/configuration.html">Configuration</a><a href="/docs/features.html">Features</a><a href="/docs/api.html">HTTP API</a><a href="/docs/comparison.html">Yardmaster compared to AWX and Semaphore</a><a href="/docs/tool-go.html" class="active">Go runs</a>
+			</nav>
+		</aside>
+		<main class="dcontent prose">
+			<h1 id="go-runs">Go runs</h1>
+<p>A Go run compiles and runs a program with <code>go run</code>. The source is the run's command, a full
+<code>package main</code> program with a <code>func main</code>. It suits a task that wants Go's type safety or an existing
+Go snippet: calling an API, reshaping data, or a quick check that a shell script would strain to
+express.</p>
+<h2 id="what-runs">What runs</h2>
+<p>The source is written to a temporary <code>main.go</code> and run with <code>go run</code>, so a whole program builds and
+runs in one step. The working directory is the project checkout when the run sources a project. A dry
+run runs <code>go vet</code>, which compiles and statically checks the source without executing it. The dry run
+reports whether it found problems, so a clean check does not leave an empty log.</p>
+<p>Two things to know. A program that imports only the standard library runs with no setup. Third-party
+imports need a module, the same constraint <code>go run</code> places on a single file. And <code>go run</code> reports its
+own exit code, one on any program failure, not the value passed to <code>os.Exit</code>, so a failing run shows
+exit one with <code>exit status N</code> in the log.</p>
+<h2 id="how-values-reach-the-program">How values reach the program</h2>
+<ul>
+<li>
+<p>Extra vars, including survey answers and template vars, arrive as <code>YARDMASTER_VARS</code>, a JSON object:</p>
+<pre><code>  var vars map[string]any
+  _ = json.Unmarshal([]byte(os.Getenv(&quot;YARDMASTER_VARS&quot;)), &amp;vars)
+  region, _ := vars[&quot;region&quot;].(string)
+</code></pre>
+</li>
+<li>
+<p>An <code>env</code> credential's <code>KEY=VALUE</code> lines are set in the environment, read with <code>os.Getenv</code>.</p>
+</li>
+<li>
+<p>A <code>token</code> credential is set as <code>YARDMASTER_TOKEN</code>, ready to send as a bearer token.</p>
+</li>
+<li>
+<p>Credentials attached to the run's inventory arrive the same way.</p>
+</li>
+</ul>
+<h2 id="example">Example</h2>
+<pre><code>package main
+
+import (
+    &quot;encoding/json&quot;
+    &quot;net/http&quot;
+    &quot;os&quot;
+)
+
+func main() {
+    var vars map[string]any
+    _ = json.Unmarshal([]byte(os.Getenv(&quot;YARDMASTER_VARS&quot;)), &amp;vars)
+    service, _ := vars[&quot;service&quot;].(string)
+    req, _ := http.NewRequest(http.MethodPost, &quot;https://api.example.com/deploy/&quot;+service, nil)
+    req.Header.Set(&quot;Authorization&quot;, &quot;Bearer &quot;+os.Getenv(&quot;YARDMASTER_TOKEN&quot;))
+    resp, err := http.DefaultClient.Do(req)
+    if err != nil {
+        os.Exit(1)
+    }
+    os.Stdout.WriteString(resp.Status)
+}
+</code></pre>
+<p>See also <a href="/docs/tool-bash.html">Bash runs</a>, <a href="/docs/tool-terraform.html">Terraform runs</a>,
+<a href="/docs/tool-python.html">Python runs</a>, and the <a href="/docs/tutorials.html">tutorials</a>.</p>
+
+		</main>
+	</div>
+	<script>document.addEventListener("click",e=>{const a=e.target.closest(".dside a");if(a)document.querySelector(".dside")?.classList.remove("open")});</script>
+</body>
+</html>

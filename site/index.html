@@ -4,9 +4,9 @@
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>Yardmaster · the Ansible platform on steroids</title>
-	<meta name="description" content="Playbook execution and fleet orchestration in one Go binary. No Kubernetes. Ansible, Terraform, Bash, and Python. Live host-by-task matrix, tamper-evident audit, enforced approval policies.">
+	<meta name="description" content="Playbook execution and fleet orchestration in one Go binary. No Kubernetes. Ansible, Terraform, Bash, Python, and Go. Live host-by-task matrix, tamper-evident audit, enforced approval policies.">
 	<meta property="og:title" content="Yardmaster · the Ansible platform on steroids">
-	<meta property="og:description" content="One binary. No Kubernetes. Run Ansible, Terraform, Bash, and Python, and prove exactly what ran and who approved it.">
+	<meta property="og:description" content="One binary. No Kubernetes. Run Ansible, Terraform, Bash, Python, and Go, and prove exactly what ran and who approved it.">
 	<meta property="og:type" content="website">
 	<meta property="og:url" content="https://yardmaster.dev">
 	<meta property="og:image" content="https://yardmaster.dev/assets/screenshot-fleet.png">
@@ -48,8 +48,8 @@
 				<span class="eyebrow">Playbook execution &amp; fleet orchestration</span>
 				<h1>The Ansible platform,<br><span class="grad">on steroids.</span></h1>
 				<p class="lede">
-					One Go binary. No Kubernetes, no Postgres, no Redis. Run Ansible, Terraform, Bash, and
-					Python. Read every run as a live host-by-task matrix, split big jobs across balanced
+					One Go binary. No Kubernetes, no Postgres, no Redis. Run Ansible, Terraform, Bash,
+					Python, and Go. Read every run as a live host-by-task matrix, split big jobs across balanced
 					shards, and <strong>prove exactly what ran and who approved it.</strong>
 				</p>
 				<div class="hero-cta">
@@ -92,7 +92,7 @@
 				<article class="card reveal">
 					<div class="ic ic-tools"></div>
 					<h3>Multi-tool engine</h3>
-					<p>Ansible, Terraform, Bash, and Python, each with a dry run. One engine, one UI, one audit trail. Not four tools bolted together.</p>
+					<p>Ansible, Terraform, Bash, Python, and Go, each with a dry run. One engine, one UI, one audit trail. Not five tools bolted together.</p>
 				</article>
 				<article class="card reveal">
 					<div class="ic ic-shards"></div>
@@ -162,7 +162,7 @@
 		<section class="section wrap" id="compare">
 			<div class="section-head reveal">
 				<h2>The honest side-by-side</h2>
-				<p>Where Yardmaster pulls ahead. The full head-to-head, including where it's behind, is in the <a href="https://github.com/dcadolph/yardmaster/blob/main/docs/comparison.md">comparison doc</a>.</p>
+				<p>Where Yardmaster pulls ahead, and the two places it trails today. The full head-to-head is in the <a href="https://github.com/dcadolph/yardmaster/blob/main/docs/comparison.md">comparison doc</a>.</p>
 			</div>
 			<div class="table-wrap reveal">
 				<table class="compare">
@@ -172,13 +172,15 @@
 					<tbody>
 						<tr><td>Deploy without Kubernetes</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td><td><i class="y"></i></td></tr>
 						<tr><td>Live host-by-task matrix</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td><td><i class="n"></i></td></tr>
-						<tr><td>Ansible · Terraform · Bash · Python</td><td class="us"><i class="y"></i></td><td><span class="muted">Ansible only</span></td><td><span class="muted">no Python</span></td></tr>
+						<tr><td>Ansible · Terraform · Bash · Python · Go</td><td class="us"><i class="y"></i></td><td><span class="muted">Ansible only</span></td><td><span class="muted">no Python or Go</span></td></tr>
 						<tr><td>Duration-balanced job splitting</td><td class="us"><i class="y"></i></td><td><span class="muted">round-robin</span></td><td><i class="n"></i></td></tr>
 						<tr><td>Fleet memory: flaky hosts, trends</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td><td><i class="n"></i></td></tr>
 						<tr><td>Tamper-evident, signed audit</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td><td><i class="n"></i></td></tr>
 						<tr><td>Secret values auto-masked in logs</td><td class="us"><i class="y"></i></td><td><span class="muted">opt-in</span></td><td><i class="n"></i></td></tr>
 						<tr><td>Enforced approval policies</td><td class="us"><i class="y"></i></td><td><span class="muted">basic</span></td><td><i class="n"></i></td></tr>
 						<tr><td>One-command migration in</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td><td><i class="n"></i></td></tr>
+						<tr><td>LDAP directory sign-in</td><td class="us"><span class="muted">OIDC + tokens</span></td><td><i class="y"></i></td><td><i class="y"></i></td></tr>
+						<tr><td>Drag-and-drop workflow editor</td><td class="us"><span class="muted">API + UI</span></td><td><i class="y"></i></td><td><i class="n"></i></td></tr>
 					</tbody>
 				</table>
 			</div>

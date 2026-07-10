@@ -38,5 +38,5 @@ runs `python3 -m py_compile`, which checks syntax without executing the script.
         headers={"Authorization": f"Bearer {token}"}, method="POST")
     print(urllib.request.urlopen(req).status)
 
-See also [Bash runs](tool-bash.md), [Terraform runs](tool-terraform.md), and the
-[tutorials](tutorials.md).
+See also [Bash runs](tool-bash.md), [Terraform runs](tool-terraform.md),
+[Go runs](tool-go.md), and the [tutorials](tutorials.md).

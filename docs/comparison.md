@@ -29,7 +29,7 @@ on them.
 
 | Capability | Notes |
 |------------|-------|
-| Multiple runtimes | Yardmaster runs Ansible, Bash, Terraform, and Python, each with a dry run. AWX is Ansible-only. Semaphore also runs Ansible, plus Terraform, OpenTofu, and shell, but not Python. |
+| Multiple runtimes | Yardmaster runs Ansible, Bash, Terraform, Python, and Go, each with a dry run. AWX is Ansible-only. Semaphore also runs Ansible, plus Terraform, OpenTofu, and shell, but not Python or Go. |
 | Container execution environments | Yardmaster runs a playbook inside a pinned image, opt-in behind a flag. AWX makes this a core feature. Semaphore favors native runtimes instead. |
 | Access control | Yardmaster has global roles plus per-object grants and teams. AWX has mature organization RBAC. Semaphore gates RBAC behind its Enterprise tier. |
 | Credentials | All three store secrets encrypted. Yardmaster decrypts only at execution into a temporary file and wipes it after. |
@@ -42,8 +42,8 @@ on them.
 
 | Capability | Status |
 |------------|--------|
-| LDAP | Not yet. Single sign-on is OpenID Connect, not LDAP. AWX has LDAP. Semaphore gates SSO behind Enterprise. |
-| Visual workflow editor | Yardmaster defines pipelines through the API and shows them in the UI; AWX has a drag-and-drop editor. |
+| LDAP | Not yet. Single sign-on is OpenID Connect, not LDAP. AWX and Semaphore both have LDAP. |
+| Visual workflow editor | Yardmaster defines pipelines through the API and shows them in the UI. AWX has a drag-and-drop editor, and Semaphore has one on its roadmap. |
 | Notification breadth | Webhook and email today, against a wider set of integrations in AWX. |
 | Maturity | AWX and Semaphore have years of production use and large communities. Yardmaster is young. |
 
