@@ -28,6 +28,18 @@ func (m *memStore) Save(_ context.Context, p *Policy) error {
 	return nil
 }
 
+// Get returns the policy with the given id, or ErrNotFound when it does not exist.
+func (m *memStore) Get(_ context.Context, id string) (*Policy, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	p, ok := m.policies[id]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	cp := *p
+	return &cp, nil
+}
+
 // List returns every policy, oldest first.
 func (m *memStore) List(_ context.Context) ([]*Policy, error) {
 	m.mu.RLock()

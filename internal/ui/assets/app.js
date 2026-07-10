@@ -25,6 +25,7 @@ const NAV_GROUPS = [
 		{ key: "credentials", href: "/ui/credentials", label: "Credentials", desc: "Secrets and keys", admin: true },
 		{ key: "users", href: "/ui/users", label: "Users", desc: "Accounts and roles", admin: true },
 		{ key: "audit", href: "/ui/audit", label: "Audit", desc: "Tamper-evident change log", admin: true },
+		{ key: "policies", href: "/ui/policies", label: "Policies", desc: "Approval rules", admin: true },
 	] },
 	{ label: "Help", items: [
 		{ key: "docs", href: "/ui/docs", label: "Docs", desc: "Guides and reference" },
@@ -36,7 +37,8 @@ const PAGE_NAV = {
 	overview: "overview", runs: "runs", detail: "runs", fleet: "fleet", host: "fleet",
 	tasks: "tasks", workers: "workers", projects: "projects", inventories: "inventories",
 	sources: "sources", jobtemplates: "templates", schedules: "schedules",
-	migrate: "migrate", credentials: "credentials", users: "users", audit: "audit", docs: "docs",
+	migrate: "migrate", credentials: "credentials", users: "users", audit: "audit",
+	policies: "policies", docs: "docs",
 };
 
 // NAV_ICONS holds the inline SVG body for each nav key, stroked in the current color.
@@ -54,6 +56,7 @@ const NAV_ICONS = {
 	migrate: '<path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>',
 	credentials: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
 	users: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
+	policies: '<path d="M12 3l7 3v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/><polyline points="9 12 11 14 15 10"/>',
 	docs: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>',
 };
 
@@ -98,7 +101,7 @@ function mountTopbar() {
 // LIST_PAGES get the client-side row filter. The runs page is excluded because it searches on the
 // server, across every run rather than only the loaded page.
 const LIST_PAGES = ["jobtemplates", "credentials", "projects", "inventories",
-	"sources", "schedules", "users", "workers", "fleet", "tasks", "host"];
+	"sources", "schedules", "users", "workers", "fleet", "tasks", "host", "policies"];
 
 // mountListFilter adds a search box above the main list table and filters its rows by text as you
 // type, so every list is searchable. It reads the rows live, so it works no matter when they load.
@@ -374,6 +377,10 @@ document.addEventListener("DOMContentLoaded", () => {
 	} else if (page === "audit") {
 		wireAudit();
 		loadAudit();
+	} else if (page === "policies") {
+		wireModal("policy");
+		wirePolicyForm();
+		loadPolicies();
 	} else if (page === "projects") {
 		wireModal("project");
 		wireProjectForm();
@@ -2391,6 +2398,170 @@ function scheduleTarget(s) {
 		return "split x" + s.shards + "  " + (s.playbook || "");
 	}
 	return s.playbook || "";
+}
+
+// fillInventorySelect loads stored inventories into a select and returns an id to name map, so the
+// policy table can show an inventory name instead of an id. It is best effort: a load failure just
+// leaves the picker with its Any option.
+async function fillInventorySelect(select) {
+	const byID = {};
+	try {
+		const data = await getJSON("/inventories");
+		for (const inv of data.inventories || []) {
+			byID[inv.id] = inv.name;
+			if (select) {
+				const opt = document.createElement("option");
+				opt.value = inv.id;
+				opt.textContent = inv.name;
+				select.appendChild(opt);
+			}
+		}
+	} catch (_) { /* inventories disabled or unauthorized; picker keeps only Any */ }
+	return byID;
+}
+
+// anyCell returns a table cell showing a muted "any", used where a policy criterion is empty and so
+// matches every value.
+function anyCell() {
+	const cell = document.createElement("td");
+	const span = document.createElement("span");
+	span.className = "muted";
+	span.textContent = "any";
+	cell.appendChild(span);
+	return cell;
+}
+
+// openPolicyEdit fills the policy dialog with an existing rule and switches it to edit mode, so a
+// saved policy is changed in place rather than deleted and recreated.
+function openPolicyEdit(p) {
+	const form = document.getElementById("policy-form");
+	form.dataset.editId = p.id;
+	document.getElementById("policy-name").value = p.name;
+	document.getElementById("policy-tool").value = p.tool || "";
+	document.getElementById("policy-command").value = p.command_contains || "";
+	document.getElementById("policy-inventory").value = p.inventory_id || "";
+	document.getElementById("policy-exclude-dry").checked = !!p.exclude_dry_run;
+	document.getElementById("policy-status").textContent = "";
+	setModalTitle("policy", "Edit policy");
+	document.getElementById("policy-modal").hidden = false;
+}
+
+// wirePolicyForm hooks the policy dialog up to POST /policies for a new rule and PUT /policies/{id}
+// when editing. The New button resets the dialog to add mode.
+function wirePolicyForm() {
+	const form = document.getElementById("policy-form");
+	fillInventorySelect(document.getElementById("policy-inventory"));
+	const resetToCreate = () => {
+		delete form.dataset.editId;
+		document.getElementById("policy-name").value = "";
+		document.getElementById("policy-tool").value = "";
+		document.getElementById("policy-command").value = "";
+		document.getElementById("policy-inventory").value = "";
+		document.getElementById("policy-exclude-dry").checked = false;
+		document.getElementById("policy-status").textContent = "";
+		setModalTitle("policy", "Add a policy");
+	};
+	const openBtn = document.getElementById("policy-open");
+	if (openBtn) openBtn.addEventListener("click", resetToCreate);
+
+	form.addEventListener("submit", async (e) => {
+		e.preventDefault();
+		const status = document.getElementById("policy-status");
+		const editId = form.dataset.editId;
+		const payload = {
+			name: document.getElementById("policy-name").value.trim(),
+			tool: document.getElementById("policy-tool").value,
+			command_contains: document.getElementById("policy-command").value.trim(),
+			inventory_id: document.getElementById("policy-inventory").value,
+			exclude_dry_run: document.getElementById("policy-exclude-dry").checked,
+		};
+		try {
+			if (editId) {
+				await postAction("/policies/" + editId, payload, "PUT");
+			} else {
+				await postAction("/policies", payload);
+			}
+			resetToCreate();
+			status.textContent = "Saved.";
+			closeModal("policy");
+			document.getElementById("policies").innerHTML = "";
+			loadPolicies();
+		} catch (err) {
+			status.textContent = "Save failed: " + err.message;
+		}
+	});
+}
+
+// loadPolicies populates the policy table with edit and delete actions. Each empty criterion shows
+// as "any", so a reader sees exactly how wide a rule is.
+async function loadPolicies() {
+	try {
+		const invByID = await fillInventorySelect(null);
+		const data = await getJSON("/policies");
+		const policies = data.policies || [];
+		if (policies.length === 0) {
+			showEmpty("No policies yet. Add one to require approval for the runs it matches.");
+			return;
+		}
+		const tbody = document.getElementById("policies");
+		for (const p of policies) {
+			const tr = document.createElement("tr");
+			tr.appendChild(td(p.name));
+			const toolCell = document.createElement("td");
+			if (p.tool) {
+				const badge = document.createElement("span");
+				badge.className = "tool-badge " + p.tool;
+				badge.textContent = p.tool;
+				toolCell.appendChild(badge);
+			} else {
+				const span = document.createElement("span");
+				span.className = "muted";
+				span.textContent = "any";
+				toolCell.appendChild(span);
+			}
+			tr.appendChild(toolCell);
+			tr.appendChild(p.command_contains ? td(p.command_contains, "mono") : anyCell());
+			tr.appendChild(p.inventory_id ? td(invByID[p.inventory_id] || p.inventory_id) : anyCell());
+			const dry = document.createElement("td");
+			if (p.exclude_dry_run) {
+				const chip = document.createElement("span");
+				chip.className = "chip ok";
+				chip.textContent = "yes";
+				dry.appendChild(chip);
+			} else {
+				const span = document.createElement("span");
+				span.className = "muted";
+				span.textContent = "no";
+				dry.appendChild(span);
+			}
+			tr.appendChild(dry);
+			tr.appendChild(tdTime(p.created_at));
+			const actions = document.createElement("td");
+			const del = document.createElement("button");
+			del.className = "button danger";
+			del.textContent = "Delete";
+			del.addEventListener("click", async (e) => {
+				e.preventDefault();
+				if (!window.confirm("Delete policy " + p.name + "?")) return;
+				try {
+					const res = await fetch("/policies/" + p.id, { method: "DELETE", headers: authHeaders() });
+					if (!res.ok) throw new Error("HTTP " + res.status);
+					tr.remove();
+				} catch (err) {
+					setStatus("Delete failed: " + err.message);
+				}
+			});
+			actions.appendChild(editButton(() => openPolicyEdit(p)));
+			actions.appendChild(document.createTextNode(" "));
+			actions.appendChild(del);
+			tr.appendChild(actions);
+			tbody.appendChild(tr);
+		}
+		setStatus("");
+		document.querySelector("table.runs").hidden = false;
+	} catch (e) {
+		setStatus("Failed to load policies: " + e.message);
+	}
 }
 
 // sparkline builds a row of outcome ticks, oldest on the left, newest on the right.

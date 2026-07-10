@@ -64,6 +64,8 @@ func Requires(policies []*Policy, r *run.Run) bool {
 type Store interface {
 	// Save stores a policy, inserting or replacing by id.
 	Save(ctx context.Context, p *Policy) error
+	// Get returns the policy with the given id, or ErrNotFound when it does not exist.
+	Get(ctx context.Context, id string) (*Policy, error)
 	// List returns every policy, oldest first.
 	List(ctx context.Context) ([]*Policy, error)
 	// Delete removes a policy by id, returning ErrNotFound when it does not exist.

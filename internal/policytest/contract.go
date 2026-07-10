@@ -15,6 +15,31 @@ import (
 func Contract(t *testing.T, newStore func() policy.Store) {
 	t.Helper()
 	t.Run("save list delete", func(t *testing.T) { testSaveListDelete(t, newStore()) })
+	t.Run("get", func(t *testing.T) { testGet(t, newStore()) })
+}
+
+// testGet verifies a saved policy round-trips through Get and a missing id reports ErrNotFound.
+func testGet(t *testing.T, store policy.Store) {
+	ctx := context.Background()
+	p := &policy.Policy{
+		ID: policy.NewID(), Name: "prod-destroy", Tool: "terraform", CommandContains: "destroy",
+		InventoryID: "inv_prod", ExcludeDryRun: true,
+		CreatedAt: time.Date(2026, 7, 10, 0, 0, 0, 0, time.UTC),
+	}
+	if err := store.Save(ctx, p); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	got, err := store.Get(ctx, p.ID)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.Name != "prod-destroy" || got.Tool != "terraform" || got.CommandContains != "destroy" ||
+		got.InventoryID != "inv_prod" || !got.ExcludeDryRun {
+		t.Errorf("Get() = %+v, want the saved policy", got)
+	}
+	if _, err := store.Get(ctx, "pol_missing"); !errors.Is(err, policy.ErrNotFound) {
+		t.Errorf("Get(missing) = %v, want ErrNotFound", err)
+	}
 }
 
 // testSaveListDelete verifies policies round-trip, list oldest first, and delete reports a missing id.

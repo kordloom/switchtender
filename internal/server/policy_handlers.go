@@ -51,8 +51,7 @@ func createPolicyHandler(store policy.Store, log *zap.Logger) http.HandlerFunc {
 			return
 		}
 		if req.Tool != "" && !run.ValidTool(req.Tool) {
-			respondError(w, log, http.StatusBadRequest,
-				"tool must be ansible, bash, terraform, or python")
+			respondError(w, log, http.StatusBadRequest, "tool is not a supported execution tool")
 			return
 		}
 		p := &policy.Policy{
@@ -66,6 +65,51 @@ func createPolicyHandler(store policy.Store, log *zap.Logger) http.HandlerFunc {
 			return
 		}
 		respondJSON(w, log, http.StatusCreated, p, wantsPretty(r))
+	}
+}
+
+// updatePolicyHandler replaces an existing approval policy, keeping its original creation time.
+func updatePolicyHandler(store policy.Store, log *zap.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if store == nil {
+			respondError(w, log, http.StatusNotFound, "policies not enabled")
+			return
+		}
+		var req createPolicyRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			respondError(w, log, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		if req.Name == "" {
+			respondError(w, log, http.StatusBadRequest, "name is required")
+			return
+		}
+		if req.Tool != "" && !run.ValidTool(req.Tool) {
+			respondError(w, log, http.StatusBadRequest, "tool is not a supported execution tool")
+			return
+		}
+		id := r.PathValue("id")
+		existing, err := store.Get(r.Context(), id)
+		if errors.Is(err, policy.ErrNotFound) {
+			respondError(w, log, http.StatusNotFound, "policy not found")
+			return
+		}
+		if err != nil {
+			log.Error("server: read policy: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not read policy")
+			return
+		}
+		p := &policy.Policy{
+			ID: id, Name: req.Name, Tool: req.Tool,
+			CommandContains: req.CommandContains, InventoryID: req.InventoryID,
+			ExcludeDryRun: req.ExcludeDryRun, CreatedAt: existing.CreatedAt,
+		}
+		if err := store.Save(r.Context(), p); err != nil {
+			log.Error("server: update policy: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not store policy")
+			return
+		}
+		respondJSON(w, log, http.StatusOK, p, wantsPretty(r))
 	}
 }
 

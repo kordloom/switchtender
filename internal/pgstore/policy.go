@@ -3,6 +3,7 @@ package pgstore
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/dcadolph/yardmaster/internal/policy"
@@ -54,6 +55,19 @@ func (s *policyStore) List(ctx context.Context) ([]*policy.Policy, error) {
 		return nil, fmt.Errorf("list policies: %w", err)
 	}
 	return out, nil
+}
+
+// Get returns the policy with the given id, or policy.ErrNotFound when it does not exist.
+func (s *policyStore) Get(ctx context.Context, id string) (*policy.Policy, error) {
+	const q = "SELECT " + policyColumns + " FROM policies WHERE id=$1"
+	p, err := scanPolicy(s.db.QueryRowContext(ctx, q, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, policy.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get policy: %w", err)
+	}
+	return p, nil
 }
 
 // Delete removes a policy by id, returning policy.ErrNotFound when it does not exist.
