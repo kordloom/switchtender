@@ -19,5 +19,8 @@ a task you already know to how it works here, in a few steps. New to Yardmaster?
 | [Set a secret](tutorial-set-a-secret.md) | Create a credential | Seal a secret, or resolve it from Vault at run time.|
 | [Migrate your setup](tutorial-migrate.md) | Export, then rebuild by hand | Import the whole export at once.|
 
+Going beyond Ansible? The per-tool guides cover what each engine does and how values reach it:
+[Bash](tool-bash.md), [Terraform](tool-terraform.md), and [Python](tool-python.md).
+
 For the bigger picture, read [switching from AWX](switching-from-awx.md) and the
 [concepts](concepts.md) page.
