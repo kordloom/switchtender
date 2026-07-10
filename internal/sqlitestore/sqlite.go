@@ -489,15 +489,39 @@ func (s *store) List(ctx context.Context) ([]*run.Run, error) {
 }
 
 // ListPage returns a page of top-level runs newest first, capped at limit and skipping offset.
-func (s *store) ListPage(ctx context.Context, limit, offset int) ([]*run.Run, error) {
-	q := "SELECT " + runColumns +
-		" FROM runs WHERE parent_id IS NULL ORDER BY created_at DESC, id DESC"
-	var args []any
+func (s *store) ListPage(ctx context.Context, query string, limit, offset int) ([]*run.Run, error) {
+	q := "SELECT " + runColumns + " FROM runs WHERE parent_id IS NULL"
+	clause, args := runSearchClause(query)
+	if clause != "" {
+		q += " AND " + clause
+	}
+	q += " ORDER BY created_at DESC, id DESC"
 	if limit > 0 {
 		q += " LIMIT ? OFFSET ?"
 		args = append(args, limit, offset)
 	}
 	return s.queryRuns(ctx, "list runs", q, args...)
+}
+
+// runSearchColumns are the run columns the runs-view search matches. They mirror the fields the run
+// package's matchesQuery searches in the in-memory store.
+var runSearchColumns = []string{"id", "playbook", "command", "tool", "status", "step_name", "inventory"}
+
+// runSearchClause builds a case-insensitive LIKE clause over runSearchColumns and the args to bind,
+// or empty when the search term is blank.
+func runSearchClause(query string) (string, []any) {
+	term := strings.ToLower(strings.TrimSpace(query))
+	if term == "" {
+		return "", nil
+	}
+	like := "%" + term + "%"
+	parts := make([]string, len(runSearchColumns))
+	args := make([]any, len(runSearchColumns))
+	for i, col := range runSearchColumns {
+		parts[i] = "lower(" + col + ") LIKE ?"
+		args[i] = like
+	}
+	return "(" + strings.Join(parts, " OR ") + ")", args
 }
 
 // RunStatusCounts tallies top-level runs by status with a single grouped query.

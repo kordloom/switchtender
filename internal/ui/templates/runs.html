@@ -27,6 +27,9 @@
 		<div class="summary" id="summary" hidden></div>
 		<div id="status" class="muted">Loading runs.</div>
 		<div class="runs-toolbar">
+			<div class="list-filter">
+				<input id="runs-search" class="input list-filter-input" type="search" placeholder="Search all runs…" aria-label="Search runs">
+			</div>
 			<label class="pagesize-label">Show
 				<input id="runs-pagesize" class="input pagesize-input" type="number" min="0" list="runs-pagesizes" value="20" aria-label="Runs per page">
 				<datalist id="runs-pagesizes"><option value="20"></option><option value="50"></option><option value="100"></option></datalist>

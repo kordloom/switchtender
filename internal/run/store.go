@@ -3,6 +3,7 @@ package run
 import (
 	"context"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,8 +20,9 @@ type Store interface {
 	// List returns top-level runs, excluding shard runs, ordered by creation time, newest first.
 	List(ctx context.Context) ([]*Run, error)
 	// ListPage returns top-level runs newest first, capped at limit and skipping offset, so the
-	// runs view loads a page at a time. A limit of zero or less returns all of them.
-	ListPage(ctx context.Context, limit, offset int) ([]*Run, error)
+	// runs view loads a page at a time. A limit of zero or less returns all of them. A non-empty
+	// query filters to runs matching it, case-insensitively, across the fields the runs view shows.
+	ListPage(ctx context.Context, query string, limit, offset int) ([]*Run, error)
 	// RunStatusCounts returns the number of top-level runs in each status. The runs view uses it
 	// for the summary cards without loading every run.
 	RunStatusCounts(ctx context.Context) (map[Status]int, error)
@@ -154,11 +156,21 @@ func (m *memStore) List(_ context.Context) ([]*Run, error) {
 	return out, nil
 }
 
-// ListPage returns a page of top-level runs newest first, capped at limit and skipping offset.
-func (m *memStore) ListPage(ctx context.Context, limit, offset int) ([]*Run, error) {
+// ListPage returns a page of top-level runs newest first, capped at limit and skipping offset,
+// optionally filtered by a case-insensitive search term.
+func (m *memStore) ListPage(ctx context.Context, query string, limit, offset int) ([]*Run, error) {
 	all, err := m.List(ctx)
 	if err != nil {
 		return nil, err
+	}
+	if term := strings.ToLower(strings.TrimSpace(query)); term != "" {
+		matched := make([]*Run, 0, len(all))
+		for _, r := range all {
+			if matchesQuery(r, term) {
+				matched = append(matched, r)
+			}
+		}
+		all = matched
 	}
 	if offset >= len(all) {
 		return []*Run{}, nil
@@ -168,6 +180,17 @@ func (m *memStore) ListPage(ctx context.Context, limit, offset int) ([]*Run, err
 		all = all[:limit]
 	}
 	return all, nil
+}
+
+// matchesQuery reports whether the run matches a lowercased search term across the fields the runs
+// view shows: id, playbook, command, tool, status, step name, and inventory.
+func matchesQuery(r *Run, term string) bool {
+	for _, field := range []string{r.ID, r.Playbook, r.Command, r.Tool, string(r.Status), r.StepName, r.Inventory} {
+		if strings.Contains(strings.ToLower(field), term) {
+			return true
+		}
+	}
+	return false
 }
 
 // RunStatusCounts tallies top-level runs by status.

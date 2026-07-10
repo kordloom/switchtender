@@ -166,10 +166,10 @@ func testListPage(t *testing.T, store run.Store) {
 	ctx := context.Background()
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	seed := []*run.Run{
-		{ID: "a", Status: run.StatusSucceeded, CreatedAt: base},
-		{ID: "b", Status: run.StatusFailed, CreatedAt: base.Add(time.Second)},
-		{ID: "c", Status: run.StatusRunning, CreatedAt: base.Add(2 * time.Second)},
-		{ID: "d", Status: run.StatusSucceeded, CreatedAt: base.Add(3 * time.Second)},
+		{ID: "a", Status: run.StatusSucceeded, Playbook: "deploy.yml", CreatedAt: base},
+		{ID: "b", Status: run.StatusFailed, Tool: run.ToolBash, Command: "echo hi", CreatedAt: base.Add(time.Second)},
+		{ID: "c", Status: run.StatusRunning, Playbook: "migrate.yml", CreatedAt: base.Add(2 * time.Second)},
+		{ID: "d", Status: run.StatusSucceeded, Playbook: "deploy.yml", CreatedAt: base.Add(3 * time.Second)},
 	}
 	for _, r := range seed {
 		if err := store.Save(ctx, r); err != nil {
@@ -185,25 +185,43 @@ func testListPage(t *testing.T, store run.Store) {
 		return out
 	}
 
-	first, err := store.ListPage(ctx, 2, 0)
+	first, err := store.ListPage(ctx, "", 2, 0)
 	if err != nil {
 		t.Fatalf("ListPage() error = %v", err)
 	}
 	if diff := cmp.Diff([]string{"d", "c"}, ids(first)); diff != "" {
 		t.Errorf("ListPage(2,0) mismatch (-want +got):\n%s", diff)
 	}
-	next, err := store.ListPage(ctx, 2, 2)
+	next, err := store.ListPage(ctx, "", 2, 2)
 	if err != nil {
 		t.Fatalf("ListPage() error = %v", err)
 	}
 	if diff := cmp.Diff([]string{"b", "a"}, ids(next)); diff != "" {
 		t.Errorf("ListPage(2,2) mismatch (-want +got):\n%s", diff)
 	}
-	if past, _ := store.ListPage(ctx, 2, 10); len(past) != 0 {
+	if past, _ := store.ListPage(ctx, "", 2, 10); len(past) != 0 {
 		t.Errorf("ListPage past end = %v, want empty", ids(past))
 	}
-	if all, _ := store.ListPage(ctx, 0, 0); len(all) != 4 {
+	if all, _ := store.ListPage(ctx, "", 0, 0); len(all) != 4 {
 		t.Errorf("ListPage(0,0) len = %d, want 4", len(all))
+	}
+
+	// A non-empty query filters case-insensitively across the runs-view fields, newest first, and
+	// composes with paging.
+	if hit, _ := store.ListPage(ctx, "deploy", 0, 0); cmp.Diff([]string{"d", "a"}, ids(hit)) != "" {
+		t.Errorf("ListPage search deploy = %v, want [d a]", ids(hit))
+	}
+	if hit, _ := store.ListPage(ctx, "BASH", 0, 0); len(hit) != 1 || hit[0].ID != "b" {
+		t.Errorf("ListPage search BASH = %v, want [b]", ids(hit))
+	}
+	if hit, _ := store.ListPage(ctx, "failed", 0, 0); len(hit) != 1 || hit[0].ID != "b" {
+		t.Errorf("ListPage search failed = %v, want [b]", ids(hit))
+	}
+	if hit, _ := store.ListPage(ctx, "nomatch", 0, 0); len(hit) != 0 {
+		t.Errorf("ListPage search nomatch = %v, want empty", ids(hit))
+	}
+	if hit, _ := store.ListPage(ctx, "deploy", 1, 0); len(hit) != 1 || hit[0].ID != "d" {
+		t.Errorf("ListPage search with page = %v, want [d]", ids(hit))
 	}
 
 	counts, err := store.RunStatusCounts(ctx)

@@ -479,7 +479,8 @@ func listRunsHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		limit := queryInt(r, "limit")
 		offset := queryInt(r, "offset")
-		runs, err := store.ListPage(r.Context(), limit, offset)
+		query := r.URL.Query().Get("q")
+		runs, err := store.ListPage(r.Context(), query, limit, offset)
 		if err != nil {
 			log.Error("server: list runs: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not list runs")

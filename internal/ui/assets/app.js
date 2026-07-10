@@ -94,7 +94,9 @@ function mountTopbar() {
 }
 
 // LIST_PAGES are the pages whose main table is a searchable list.
-const LIST_PAGES = ["runs", "jobtemplates", "credentials", "projects", "inventories",
+// LIST_PAGES get the client-side row filter. The runs page is excluded because it searches on the
+// server, across every run rather than only the loaded page.
+const LIST_PAGES = ["jobtemplates", "credentials", "projects", "inventories",
 	"sources", "schedules", "users", "workers", "fleet", "tasks", "host"];
 
 // mountListFilter adds a search box above the main list table and filters its rows by text as you
@@ -350,6 +352,7 @@ document.addEventListener("DOMContentLoaded", () => {
 	} else if (page === "runs") {
 		wireModal("launch");
 		if (!isReadOnly()) wireLaunchForm();
+		wireRunsSearch();
 		loadRuns();
 	} else if (page === "detail") {
 		loadDetail(document.body.dataset.runId);
@@ -1847,6 +1850,24 @@ function runsPageSize() {
 	return (Number.isNaN(n) || n < 0) ? 20 : n;
 }
 
+// runsQuery reads the runs search box, empty when there is none.
+function runsQuery() {
+	const el = document.getElementById("runs-search");
+	return el ? el.value.trim() : "";
+}
+
+// wireRunsSearch reloads the runs table from the server as the search box changes, debounced so a
+// burst of keystrokes issues one request. The server searches every run, not just the loaded page.
+function wireRunsSearch() {
+	const el = document.getElementById("runs-search");
+	if (!el) return;
+	let timer;
+	el.addEventListener("input", () => {
+		clearTimeout(timer);
+		timer = setTimeout(loadRuns, 250);
+	});
+}
+
 // loadRuns populates the run history table.
 async function loadRuns() {
 	const tbody = document.getElementById("runs");
@@ -1857,10 +1878,14 @@ async function loadRuns() {
 	showSkeletonRows(tbody, 6, 5);
 	table.hidden = false;
 	try {
-		const data = await getJSON("/runs?limit=" + runsPageSize() + "&offset=0");
+		const data = await getJSON("/runs?limit=" + runsPageSize() + "&offset=0&q=" + encodeURIComponent(runsQuery()));
 		const runs = data.runs || [];
 		tbody.innerHTML = "";
-		if (runs.length === 0) { table.hidden = true; showEmpty("No runs yet."); return; }
+		if (runs.length === 0) {
+			table.hidden = true;
+			showEmpty(runsQuery() ? "No runs match your search." : "No runs yet.");
+			return;
+		}
 		renderSummary(data.summary || {});
 		appendRunRows(tbody, runs);
 		wireRunsMore(tbody, runs.length, data.hasMore);
@@ -1948,7 +1973,7 @@ function wireRunsMore(tbody, offset, hasMore) {
 	btn.onclick = async () => {
 		btn.disabled = true;
 		try {
-			const data = await getJSON("/runs?limit=" + runsPageSize() + "&offset=" + offset);
+			const data = await getJSON("/runs?limit=" + runsPageSize() + "&offset=" + offset + "&q=" + encodeURIComponent(runsQuery()));
 			const runs = data.runs || [];
 			appendRunRows(tbody, runs);
 			wireRunsMore(tbody, offset + runs.length, data.hasMore);
