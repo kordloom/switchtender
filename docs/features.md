@@ -24,7 +24,7 @@ What Yardmaster does today.
 | Projects     | Playbooks sourced from git with clone-or-fetch sync; every run records the exact commit it executed.|
 | Templates    | Saved launch presets bundling project, playbook, credentials, shards, and extra vars; one click or one POST launches.|
 | Auth         | User accounts with admin, operator, and viewer roles enforced per route; bearer tokens hashed at rest; the API locks down the moment the first token exists.|
-| Approvals    | Mark a run to require sign-off; it is held and never executes until an admin approves or rejects it, and both the request and the decision land in the tamper-evident audit trail.|
+| Approvals    | Mark a run to require sign-off, or require it automatically by policy on tool, command, or target; a held run never executes until an admin approves or rejects it, and the request and decision land in the tamper-evident audit trail.|
 | Observability| A Prometheus metrics endpoint, webhook notifications when runs finish, and an audit trail of every mutation.|
 | Tamper-evident audit | Every mutation is linked into a SHA-256 hash chain; `GET /audit/verify` flags the first altered or deleted entry, and a signed export verified with `yardmaster audit verify` proves the whole chain offline.|
 | Inventories  | Stored inventories referenced by id, materialized on whichever executor runs the play.|

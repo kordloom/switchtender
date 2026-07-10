@@ -1,0 +1,59 @@
+// Package policytest provides a shared behavior contract for policy.Store implementations so the
+// in-memory, SQLite, and PostgreSQL backends cannot drift apart.
+package policytest
+
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+
+	"github.com/dcadolph/yardmaster/internal/policy"
+)
+
+// Contract runs the policy.Store contract against a fresh store from newStore.
+func Contract(t *testing.T, newStore func() policy.Store) {
+	t.Helper()
+	t.Run("save list delete", func(t *testing.T) { testSaveListDelete(t, newStore()) })
+}
+
+// testSaveListDelete verifies policies round-trip, list oldest first, and delete reports a missing id.
+func testSaveListDelete(t *testing.T, store policy.Store) {
+	ctx := context.Background()
+	base := time.Date(2026, 7, 10, 0, 0, 0, 0, time.UTC)
+	for i, name := range []string{"prod-destroy", "all-terraform"} {
+		if err := store.Save(ctx, &policy.Policy{
+			ID: policy.NewID(), Name: name, Tool: "terraform", CommandContains: "destroy",
+			InventoryID: "inv_prod", ExcludeDryRun: true,
+			CreatedAt: base.Add(time.Duration(i) * time.Minute),
+		}); err != nil {
+			t.Fatalf("Save() error = %v", err)
+		}
+	}
+
+	all, err := store.List(ctx)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(all) != 2 || all[0].Name != "prod-destroy" {
+		t.Fatalf("List() = %+v, want two policies oldest first", all)
+	}
+	if all[0].Tool != "terraform" || all[0].CommandContains != "destroy" ||
+		all[0].InventoryID != "inv_prod" || !all[0].ExcludeDryRun {
+		t.Errorf("policy fields did not round-trip: %+v", all[0])
+	}
+
+	if err := store.Delete(ctx, all[0].ID); err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+	rest, err := store.List(ctx)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(rest) != 1 || rest[0].Name != "all-terraform" {
+		t.Errorf("after delete = %+v, want one policy", rest)
+	}
+	if err := store.Delete(ctx, "pol_missing"); !errors.Is(err, policy.ErrNotFound) {
+		t.Errorf("Delete(missing) = %v, want ErrNotFound", err)
+	}
+}

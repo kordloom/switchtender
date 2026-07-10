@@ -15,6 +15,8 @@ import (
 	"github.com/dcadolph/yardmaster/internal/inventorytest"
 	"github.com/dcadolph/yardmaster/internal/invsource"
 	"github.com/dcadolph/yardmaster/internal/invsourcetest"
+	"github.com/dcadolph/yardmaster/internal/policy"
+	"github.com/dcadolph/yardmaster/internal/policytest"
 	"github.com/dcadolph/yardmaster/internal/project"
 	"github.com/dcadolph/yardmaster/internal/projecttest"
 	"github.com/dcadolph/yardmaster/internal/team"
@@ -217,6 +219,18 @@ func TestInventoryStoreContract(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = db.Close() })
 		return db.Inventories()
+	})
+}
+
+func TestPolicyStoreContract(t *testing.T) {
+	t.Parallel()
+	policytest.Contract(t, func() policy.Store {
+		db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "yardmaster.db"))
+		if err != nil {
+			t.Fatalf("Open() error = %v", err)
+		}
+		t.Cleanup(func() { _ = db.Close() })
+		return db.Policies()
 	})
 }
 

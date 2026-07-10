@@ -14,6 +14,8 @@ import (
 	"github.com/dcadolph/yardmaster/internal/inventorytest"
 	"github.com/dcadolph/yardmaster/internal/invsource"
 	"github.com/dcadolph/yardmaster/internal/invsourcetest"
+	"github.com/dcadolph/yardmaster/internal/policy"
+	"github.com/dcadolph/yardmaster/internal/policytest"
 	"github.com/dcadolph/yardmaster/internal/project"
 	"github.com/dcadolph/yardmaster/internal/projecttest"
 	"github.com/dcadolph/yardmaster/internal/team"
@@ -197,6 +199,33 @@ func truncateInventories(t *testing.T, dsn string) {
 	defer func() { _ = db.Close() }()
 	if _, err := db.Exec("TRUNCATE inventories"); err != nil {
 		t.Fatalf("truncate inventories: %v", err)
+	}
+}
+
+func TestPolicyStoreContract(t *testing.T) {
+	dsn := testDSN(t)
+	db, err := pgstore.Open(dsn)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	policytest.Contract(t, func() policy.Store {
+		truncatePolicies(t, dsn)
+		return db.Policies()
+	})
+}
+
+// truncatePolicies clears the policies table between contract subtests.
+func truncatePolicies(t *testing.T, dsn string) {
+	t.Helper()
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatalf("open postgres: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	if _, err := db.Exec("TRUNCATE policies"); err != nil {
+		t.Fatalf("truncate policies: %v", err)
 	}
 }
 

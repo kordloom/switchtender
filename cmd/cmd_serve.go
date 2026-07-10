@@ -28,6 +28,7 @@ import (
 	"github.com/dcadolph/yardmaster/internal/live"
 	"github.com/dcadolph/yardmaster/internal/logutil"
 	"github.com/dcadolph/yardmaster/internal/pgstore"
+	"github.com/dcadolph/yardmaster/internal/policy"
 	"github.com/dcadolph/yardmaster/internal/project"
 	"github.com/dcadolph/yardmaster/internal/retention"
 	"github.com/dcadolph/yardmaster/internal/roundhouse"
@@ -247,6 +248,8 @@ type storeBundle interface {
 	Users() user.Store
 	// Inventories returns the stored inventory store.
 	Inventories() inventory.Store
+	// Policies returns the approval policy store.
+	Policies() policy.Store
 	// Audits returns the audit trail store.
 	Audits() audit.Store
 	// InventorySources returns the dynamic inventory source store.
@@ -347,7 +350,8 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		dispatch.WithWebhooks(notifyWebhooks),
 		dispatch.WithEmail(emailer, onFailureOnly),
 		dispatch.WithInventories(bundle.Inventories()),
-		dispatch.WithInventorySources(bundle.InventorySources()))
+		dispatch.WithInventorySources(bundle.InventorySources()),
+		dispatch.WithPolicies(bundle.Policies()))
 	defer disp.Close()
 
 	scheduler := schedule.NewScheduler(schedules, disp, log,
@@ -389,6 +393,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			server.WithTemplates(bundle.Templates()),
 			server.WithUsers(bundle.Users()),
 			server.WithInventories(bundle.Inventories()),
+			server.WithPolicies(bundle.Policies()),
 			server.WithAudit(bundle.Audits()),
 			server.WithAuditSigner(auditSigner),
 			server.WithInventorySources(bundle.InventorySources(), disp),

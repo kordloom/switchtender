@@ -16,6 +16,7 @@ import (
 	"github.com/dcadolph/yardmaster/internal/inventory"
 	"github.com/dcadolph/yardmaster/internal/invsource"
 	"github.com/dcadolph/yardmaster/internal/live"
+	"github.com/dcadolph/yardmaster/internal/policy"
 	"github.com/dcadolph/yardmaster/internal/project"
 	"github.com/dcadolph/yardmaster/internal/run"
 	"github.com/dcadolph/yardmaster/internal/schedule"
@@ -107,6 +108,11 @@ func WithAuditSigner(signer *audit.Signer) Option {
 // WithInventories enables the inventory endpoints backed by the given store.
 func WithInventories(store inventory.Store) Option {
 	return func(srv *Server) { srv.inventories = store }
+}
+
+// WithPolicies enables the approval policy endpoints backed by the given store.
+func WithPolicies(store policy.Store) Option {
+	return func(srv *Server) { srv.policies = store }
 }
 
 // WithTriggers enables webhook triggers that launch templates from inbound git pushes. The sealer
@@ -220,6 +226,8 @@ type Server struct {
 	users user.Store
 	// inventories backs the inventory endpoints when configured.
 	inventories inventory.Store
+	// policies backs the approval policy endpoints when configured.
+	policies policy.Store
 	// audits backs the audit trail when configured.
 	audits audit.Store
 	// auditSigner signs audit exports when configured, nil when export signing is off.
@@ -321,6 +329,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("PUT /inventories/{id}", updateInventoryHandler(s.inventories, authz, s.sealer, s.log))
 	mux.Handle("GET /inventories", listInventoriesHandler(s.inventories, s.log))
 	mux.Handle("DELETE /inventories/{id}", deleteInventoryHandler(s.inventories, s.log))
+	mux.Handle("POST /policies", createPolicyHandler(s.policies, s.log))
+	mux.Handle("GET /policies", listPoliciesHandler(s.policies, s.log))
+	mux.Handle("DELETE /policies/{id}", deletePolicyHandler(s.policies, s.log))
 	mux.Handle("POST /inventory-sources", createSourceHandler(s.invSources, s.inventories, authz, s.log))
 	mux.Handle("PUT /inventory-sources/{id}", updateSourceHandler(s.invSources, authz, s.log))
 	mux.Handle("GET /inventory-sources", listSourcesHandler(s.invSources, s.log))

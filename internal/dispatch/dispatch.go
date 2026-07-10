@@ -21,6 +21,7 @@ import (
 	"github.com/dcadolph/yardmaster/internal/event"
 	"github.com/dcadolph/yardmaster/internal/inventory"
 	"github.com/dcadolph/yardmaster/internal/invsource"
+	"github.com/dcadolph/yardmaster/internal/policy"
 	"github.com/dcadolph/yardmaster/internal/project"
 	"github.com/dcadolph/yardmaster/internal/roundhouse"
 	"github.com/dcadolph/yardmaster/internal/run"
@@ -120,6 +121,8 @@ type Dispatcher struct {
 	invSources invsource.Store
 	// dumper renders inventory sources to JSON.
 	dumper roundhouse.InventoryDumper
+	// policies gate submitted runs by holding matches for approval, nil when enforcement is off.
+	policies policy.Store
 }
 
 // Option configures a Dispatcher.
@@ -155,6 +158,8 @@ type config struct {
 	inventories inventory.Store
 	// invSources resolves dynamic inventory sources, nil when the feature is off.
 	invSources invsource.Store
+	// policies gate submitted runs by holding matches for approval, nil when enforcement is off.
+	policies policy.Store
 }
 
 // WithWorkers sets the worker pool size. Values below one fall back to DefaultWorkers.
@@ -241,6 +246,7 @@ func New(store run.Store, runner roundhouse.Runner, log *zap.Logger, opts ...Opt
 		emailOnFailureOnly: cfg.emailOnFailureOnly,
 		inventories:        cfg.inventories,
 		invSources:         cfg.invSources,
+		policies:           cfg.policies,
 	}
 	d.wg.Add(2)
 	go d.claimLoop()
@@ -389,6 +395,9 @@ func (d *Dispatcher) Submit(ctx context.Context, playbook, inventory string, opt
 	}
 	if err := d.validateRun(ctx, r); err != nil {
 		return nil, err
+	}
+	if r.Status != run.StatusPendingApproval && d.requiresApproval(ctx, r) {
+		r.Status = run.StatusPendingApproval
 	}
 	if err := d.store.Save(ctx, r); err != nil {
 		return nil, err

@@ -96,3 +96,8 @@ never picks up, until an admin approves it, which releases it to run, or rejects
 An operator can request the run, but only an admin can release it, so duties are separated. Both the
 request and the decision are recorded in the audit trail, making who asked for a change and who signed
 off provable.
+
+Approval can also be required by policy rather than by choice. A policy matches runs by tool, command
+text, or target inventory, and any matching run is held automatically at submission, so the gate
+cannot be skipped by omitting the flag. Policies are enforced in the dispatcher, so a scheduled or
+triggered run is gated the same as one launched by hand.

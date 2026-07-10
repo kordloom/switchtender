@@ -21,6 +21,7 @@ import (
 	"github.com/dcadolph/yardmaster/internal/grant"
 	"github.com/dcadolph/yardmaster/internal/inventory"
 	"github.com/dcadolph/yardmaster/internal/invsource"
+	"github.com/dcadolph/yardmaster/internal/policy"
 	"github.com/dcadolph/yardmaster/internal/project"
 	"github.com/dcadolph/yardmaster/internal/run"
 	"github.com/dcadolph/yardmaster/internal/schedule"
@@ -197,6 +198,15 @@ CREATE TABLE IF NOT EXISTS audit_entries (
 );
 CREATE INDEX IF NOT EXISTS idx_audit_at ON audit_entries(at DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_seq ON audit_entries(seq DESC);
+CREATE TABLE IF NOT EXISTS policies (
+	id               TEXT PRIMARY KEY,
+	name             TEXT NOT NULL DEFAULT '',
+	tool             TEXT NOT NULL DEFAULT '',
+	command_contains TEXT NOT NULL DEFAULT '',
+	inventory_id     TEXT NOT NULL DEFAULT '',
+	exclude_dry_run  INTEGER NOT NULL DEFAULT 0,
+	created_at       TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS inventories (
 	id             TEXT PRIMARY KEY,
 	name           TEXT NOT NULL DEFAULT '',
@@ -308,6 +318,8 @@ type DB struct {
 	teams *teamStore
 	// grants is the per-object access grant store.
 	grants *grantStore
+	// policies is the approval policy store.
+	policies *policyStore
 }
 
 // Open connects to the PostgreSQL database at dsn, applies the schema, and returns the bundled
@@ -346,7 +358,8 @@ func Open(dsn string) (*DB, error) {
 		invSources:  &invSourceStore{db: db},
 		triggers:    &triggerStore{db: db},
 		teams:       &teamStore{db: db},
-		grants:      &grantStore{db: db}}, nil
+		grants:      &grantStore{db: db},
+		policies:    &policyStore{db: db}}, nil
 }
 
 // Runs returns the run store.
@@ -387,6 +400,11 @@ func (d *DB) Users() user.Store {
 // Inventories returns the stored inventory store.
 func (d *DB) Inventories() inventory.Store {
 	return d.inventories
+}
+
+// Policies returns the approval policy store.
+func (d *DB) Policies() policy.Store {
+	return d.policies
 }
 
 // Audits returns the audit trail store.

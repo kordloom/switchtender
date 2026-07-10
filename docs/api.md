@@ -69,6 +69,9 @@ Every endpoint the server exposes. The web UI lives at `/ui/` and the root redir
 | POST   | `/inventories`          | Store an inventory; runs reference it by id anywhere.   |
 | GET    | `/inventories`          | List stored inventories.                                |
 | DELETE | `/inventories/{id}`     | Delete a stored inventory.                              |
+| POST   | `/policies`             | Create an approval policy that gates matching runs.     |
+| GET    | `/policies`             | List approval policies.                                 |
+| DELETE | `/policies/{id}`        | Delete an approval policy.                              |
 | GET    | `/audit`                | The mutation trail, admin only.                         |
 | GET    | `/audit/verify`         | Verify the audit hash chain is intact.                  |
 | GET    | `/audit/export`         | Signed, self-verifying snapshot of the audit chain.     |
