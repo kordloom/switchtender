@@ -822,6 +822,7 @@ function wireCredentialForm() {
 	const sourcePlaceholders = {
 		command: "vault kv get -field=password secret/prod-fleet",
 		vault: '{"addr":"https://vault:8200","path":"secret/data/ci","field":"token"}',
+		gsm: '{"project":"my-project","secret":"ci-token","version":"latest"}',
 	};
 	source.addEventListener("change", () => {
 		document.getElementById("cred-secret").placeholder = sourcePlaceholders[source.value] || secPlaceholder;

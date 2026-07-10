@@ -41,6 +41,12 @@ environment:
 
     {"addr":"https://vault:8200","path":"secret/data/ci","field":"token"}
 
+Google Secret Manager has a native source too: set the source to Google Secret Manager and give it
+the project, secret, and version as JSON. When Yardmaster runs on GCP it reads as its attached service
+account through the metadata server, so no key is stored; off GCP, put an access token in the config.
+
+    {"project":"my-project","secret":"ci-token","version":"latest"}
+
 ## From the API
 
     curl -s -X POST localhost:8080/credentials \

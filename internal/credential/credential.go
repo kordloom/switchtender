@@ -65,6 +65,10 @@ const (
 	// SourceVault means the sealed Secret is a JSON config naming a Vault address, path, and field,
 	// read over HTTP at run time, so the real secret lives in Vault and no vault CLI is needed.
 	SourceVault = "vault"
+	// SourceGSM means the sealed Secret is a JSON config naming a Google Secret Manager project,
+	// secret, and version, read over HTTP at run time using the runner's GCP identity, so the real
+	// secret lives in Secret Manager and no gcloud CLI is needed.
+	SourceGSM = "gsm"
 )
 
 // NormalizeSource maps an empty source to the local default and otherwise returns source unchanged.
@@ -78,7 +82,7 @@ func NormalizeSource(source string) string {
 // ValidSource reports whether s names a supported credential source. Empty is valid and means local.
 func ValidSource(s string) bool {
 	switch NormalizeSource(s) {
-	case SourceLocal, SourceCommand, SourceVault:
+	case SourceLocal, SourceCommand, SourceVault, SourceGSM:
 		return true
 	default:
 		return false

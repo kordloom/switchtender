@@ -81,6 +81,11 @@ func (d *Dispatcher) materializeCredentials(r *run.Run, spec *roundhouse.Spec) (
 			if err != nil {
 				return cleanup, fmt.Errorf("resolve credential %s: %w", id, err)
 			}
+		case credential.SourceGSM:
+			plain, err = resolveGSMSecret(context.Background(), plain)
+			if err != nil {
+				return cleanup, fmt.Errorf("resolve credential %s: %w", id, err)
+			}
 		}
 		f, err := os.CreateTemp("", "yardmaster-cred-*")
 		if err != nil {
