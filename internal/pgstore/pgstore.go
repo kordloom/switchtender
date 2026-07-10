@@ -186,13 +186,17 @@ CREATE TABLE IF NOT EXISTS triggers (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_triggers_hash ON triggers(token_hash);
 CREATE TABLE IF NOT EXISTS audit_entries (
-	id     TEXT PRIMARY KEY,
-	at     TEXT NOT NULL,
-	actor  TEXT NOT NULL DEFAULT '',
-	method TEXT NOT NULL,
-	path   TEXT NOT NULL
+	id        TEXT PRIMARY KEY,
+	at        TEXT NOT NULL,
+	actor     TEXT NOT NULL DEFAULT '',
+	method    TEXT NOT NULL,
+	path      TEXT NOT NULL,
+	seq       BIGINT NOT NULL DEFAULT 0,
+	prev_hash TEXT NOT NULL DEFAULT '',
+	hash      TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_audit_at ON audit_entries(at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_seq ON audit_entries(seq DESC);
 CREATE TABLE IF NOT EXISTS inventories (
 	id             TEXT PRIMARY KEY,
 	name           TEXT NOT NULL DEFAULT '',
@@ -258,6 +262,9 @@ ALTER TABLE credentials ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT ''
 ALTER TABLE inventories ADD COLUMN IF NOT EXISTS credential_ids TEXT NOT NULL DEFAULT '';
 ALTER TABLE inventories ADD COLUMN IF NOT EXISTS content_source TEXT NOT NULL DEFAULT '';
 ALTER TABLE inventories ADD COLUMN IF NOT EXISTS content_config TEXT NOT NULL DEFAULT '';
+ALTER TABLE audit_entries ADD COLUMN IF NOT EXISTS seq BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE audit_entries ADD COLUMN IF NOT EXISTS prev_hash TEXT NOT NULL DEFAULT '';
+ALTER TABLE audit_entries ADD COLUMN IF NOT EXISTS hash TEXT NOT NULL DEFAULT '';
 `
 
 // store is a run.Store backed by a PostgreSQL database.

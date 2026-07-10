@@ -68,5 +68,6 @@ Every endpoint the server exposes. The web UI lives at `/ui/` and the root redir
 | GET    | `/inventories`          | List stored inventories.                                |
 | DELETE | `/inventories/{id}`     | Delete a stored inventory.                              |
 | GET    | `/audit`                | The mutation trail, admin only.                         |
+| GET    | `/audit/verify`         | Verify the audit hash chain is intact.                  |
 | GET    | `/metrics`              | Prometheus gauges for runs and fleet health.            |
 | GET    | `/healthz`              | Liveness.                                               |

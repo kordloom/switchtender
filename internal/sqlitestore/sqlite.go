@@ -186,13 +186,17 @@ CREATE TABLE IF NOT EXISTS triggers (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_triggers_hash ON triggers(token_hash);
 CREATE TABLE IF NOT EXISTS audit_entries (
-	id     TEXT PRIMARY KEY,
-	at     TEXT NOT NULL,
-	actor  TEXT NOT NULL DEFAULT '',
-	method TEXT NOT NULL,
-	path   TEXT NOT NULL
+	id        TEXT PRIMARY KEY,
+	at        TEXT NOT NULL,
+	actor     TEXT NOT NULL DEFAULT '',
+	method    TEXT NOT NULL,
+	path      TEXT NOT NULL,
+	seq       INTEGER NOT NULL DEFAULT 0,
+	prev_hash TEXT NOT NULL DEFAULT '',
+	hash      TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_audit_at ON audit_entries(at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_seq ON audit_entries(seq DESC);
 CREATE TABLE IF NOT EXISTS inventories (
 	id             TEXT PRIMARY KEY,
 	name           TEXT NOT NULL DEFAULT '',
@@ -268,6 +272,9 @@ var alterations = []string{
 	"ALTER TABLE inventories ADD COLUMN credential_ids TEXT NOT NULL DEFAULT ''",
 	"ALTER TABLE inventories ADD COLUMN content_source TEXT NOT NULL DEFAULT ''",
 	"ALTER TABLE inventories ADD COLUMN content_config TEXT NOT NULL DEFAULT ''",
+	"ALTER TABLE audit_entries ADD COLUMN seq INTEGER NOT NULL DEFAULT 0",
+	"ALTER TABLE audit_entries ADD COLUMN prev_hash TEXT NOT NULL DEFAULT ''",
+	"ALTER TABLE audit_entries ADD COLUMN hash TEXT NOT NULL DEFAULT ''",
 }
 
 // store is a run.Store backed by a SQLite database.

@@ -140,7 +140,7 @@ func (g *authGate) roleFor(ctx context.Context, tok *auth.Token) (user.Role, err
 // launching and stopping work is for operators, and managing configuration is for admins.
 func requiredRole(r *http.Request) user.Role {
 	// The audit trail is management data even to read.
-	if r.URL.Path == "/audit" {
+	if r.URL.Path == "/audit" || strings.HasPrefix(r.URL.Path, "/audit/") {
 		return user.RoleAdmin
 	}
 	if r.Method == http.MethodGet || r.Method == http.MethodHead {

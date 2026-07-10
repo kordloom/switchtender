@@ -25,6 +25,7 @@ What Yardmaster does today.
 | Templates    | Saved launch presets bundling project, playbook, credentials, shards, and extra vars; one click or one POST launches.|
 | Auth         | User accounts with admin, operator, and viewer roles enforced per route; bearer tokens hashed at rest; the API locks down the moment the first token exists.|
 | Observability| A Prometheus metrics endpoint, webhook notifications when runs finish, and an audit trail of every mutation.|
+| Tamper-evident audit | Every mutation is linked into a SHA-256 hash chain; `GET /audit/verify` recomputes it and flags the first altered or deleted entry, so the trail can be proven intact.|
 | Inventories  | Stored inventories referenced by id, materialized on whichever executor runs the play.|
 | Dynamic sources | Inventory plugins and scripts refreshed into stored inventories, with cloud auth from an env credential.|
 | Sourced inventories | An inventory's content can come from a command, Vault, or Google Secret Manager, resolved at launch, so the host list need not live in Yardmaster.|

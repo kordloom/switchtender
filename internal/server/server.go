@@ -256,6 +256,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /tasks", taskTrendsHandler(s.store, s.log))
 	mux.Handle("GET /workers", workersHandler(s.store, s.log))
 	mux.Handle("GET /audit", auditHandler(s.audits, s.log))
+	mux.Handle("GET /audit/verify", auditVerifyHandler(s.audits, s.log))
 	mux.Handle("POST /runs", createRunHandler(s.submitter, authz, s.log))
 	mux.Handle("POST /pipelines", createPipelineHandler(s.submitter, authz, s.log))
 	mux.Handle("POST /runs/{id}/cancel", cancelRunHandler(s.store, s.canceler, s.log))
