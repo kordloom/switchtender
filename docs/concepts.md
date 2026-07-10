@@ -80,3 +80,11 @@ A worker is any process running the executor against the shared store. Every pro
 included, competes for pending runs through the store. A run can target a named queue, and only
 workers serving that queue run it, which places work across a mixed fleet. A lease keeps a run
 attributable, and a janitor requeues work whose holder went away.
+
+## Provable audit
+
+Every authenticated mutation is recorded in the audit trail, and each entry is linked into a SHA-256
+hash chain: it carries the previous entry's hash and its own hash over its content. Altering,
+reordering, or deleting an entry breaks the chain, which `GET /audit/verify` detects. A signed export
+from `GET /audit/export` seals the chain with an ed25519 signature, so `yardmaster audit verify`
+proves the trail is intact and unaltered offline, without trusting the server that produced it.

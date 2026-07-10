@@ -288,6 +288,21 @@ func newSealerFromEnv(log *zap.Logger) *credential.Sealer {
 	return sealer
 }
 
+// newAuditSignerFromEnv builds an audit export Signer from YARDMASTER_AUDIT_KEY, a hex-encoded
+// ed25519 seed. When it is unset, export signing is off; when it is malformed the server refuses to
+// start so a bad key is caught, not silently ignored. The public key is logged so an operator can
+// record it for offline verification.
+func newAuditSignerFromEnv(log *zap.Logger) (*audit.Signer, error) {
+	signer, err := audit.NewSigner(os.Getenv("YARDMASTER_AUDIT_KEY"))
+	if err != nil {
+		return nil, err
+	}
+	if signer != nil {
+		log.Info("audit export signing enabled", zap.String("public_key", signer.PublicKeyHex()))
+	}
+	return signer, nil
+}
+
 // projectCacheDir returns where project checkouts live: the user cache directory when available,
 // the system temp directory otherwise.
 func projectCacheDir() string {
@@ -314,6 +329,10 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	store, schedules := bundle.Runs(), bundle.Schedules()
 
 	sealer := newSealerFromEnv(log)
+	auditSigner, err := newAuditSignerFromEnv(log)
+	if err != nil {
+		return err
+	}
 
 	hub := live.NewHub()
 	runner := roundhouse.NewSelectiveRunner(serveAllowContainerEE, containerLimitsFromFlags())
@@ -371,6 +390,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			server.WithUsers(bundle.Users()),
 			server.WithInventories(bundle.Inventories()),
 			server.WithAudit(bundle.Audits()),
+			server.WithAuditSigner(auditSigner),
 			server.WithInventorySources(bundle.InventorySources(), disp),
 			server.WithTriggers(bundle.Triggers(), sealer),
 			server.WithTeams(bundle.Teams()),

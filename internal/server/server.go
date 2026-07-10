@@ -88,6 +88,11 @@ func WithAudit(store audit.Store) Option {
 	return func(srv *Server) { srv.audits = store }
 }
 
+// WithAuditSigner signs audit exports with the given signer so they can be verified offline.
+func WithAuditSigner(signer *audit.Signer) Option {
+	return func(srv *Server) { srv.auditSigner = signer }
+}
+
 // WithInventories enables the inventory endpoints backed by the given store.
 func WithInventories(store inventory.Store) Option {
 	return func(srv *Server) { srv.inventories = store }
@@ -204,6 +209,8 @@ type Server struct {
 	inventories inventory.Store
 	// audits backs the audit trail when configured.
 	audits audit.Store
+	// auditSigner signs audit exports when configured, nil when export signing is off.
+	auditSigner *audit.Signer
 	// invSources backs the dynamic inventory source endpoints when configured.
 	invSources invsource.Store
 	// refresher refreshes inventory sources when configured.
@@ -257,6 +264,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /workers", workersHandler(s.store, s.log))
 	mux.Handle("GET /audit", auditHandler(s.audits, s.log))
 	mux.Handle("GET /audit/verify", auditVerifyHandler(s.audits, s.log))
+	mux.Handle("GET /audit/export", auditExportHandler(s.audits, s.auditSigner, s.log))
 	mux.Handle("POST /runs", createRunHandler(s.submitter, authz, s.log))
 	mux.Handle("POST /pipelines", createPipelineHandler(s.submitter, authz, s.log))
 	mux.Handle("POST /runs/{id}/cancel", cancelRunHandler(s.store, s.canceler, s.log))

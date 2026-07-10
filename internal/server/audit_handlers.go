@@ -3,6 +3,7 @@ package server
 import (
 	"net/http"
 	"strconv"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -68,5 +69,23 @@ func auditVerifyHandler(store audit.Store, log *zap.Logger) http.HandlerFunc {
 		ok, brokeAt := audit.Verify(entries)
 		respondJSON(w, log, http.StatusOK,
 			auditVerifyResponse{OK: ok, Count: len(entries), BrokeAt: brokeAt}, wantsPretty(r))
+	}
+}
+
+// auditExportHandler returns a portable, self-verifying snapshot of the audit chain, signed when an
+// audit signer is configured, so the trail can be verified offline.
+func auditExportHandler(store audit.Store, signer *audit.Signer, log *zap.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if store == nil {
+			respondError(w, log, http.StatusNotFound, "audit trail not enabled")
+			return
+		}
+		entries, err := store.Chain(r.Context())
+		if err != nil {
+			log.Error("server: chain audit entries: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not read the audit trail")
+			return
+		}
+		respondJSON(w, log, http.StatusOK, audit.BuildExport(entries, signer, time.Now()), wantsPretty(r))
 	}
 }

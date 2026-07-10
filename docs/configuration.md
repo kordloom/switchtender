@@ -16,6 +16,7 @@ variable.
 |----------|---------|---------|
 | `YARDMASTER_ENCRYPTION_KEY` | serve, worker | Passphrase that seals stored credentials with AES-256-GCM. Credentials are disabled when unset. |
 | `YARDMASTER_ENCRYPTION_SALT` | serve, worker | Per-deployment salt for argon2id key derivation. Must be set alongside the key and stay stable across restarts, or stored credentials cannot be decrypted. Credentials are disabled when unset. |
+| `YARDMASTER_AUDIT_KEY` | serve | Hex-encoded ed25519 seed that signs audit exports so the trail can be verified offline. Signing is off when unset; a malformed value stops startup. Generate one with `yardmaster audit keygen`. |
 | `YARDMASTER_PASSWORD` | user new | Initial account password, read instead of prompting so it never lands on the command line. |
 | `YARDMASTER_SMTP_PASSWORD` | serve | Password for SMTP authentication when `--smtp-username` is set. |
 
