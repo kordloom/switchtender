@@ -43,18 +43,20 @@ func (d *Dispatcher) validateCredentials(ctx context.Context, ids []string) erro
 }
 
 // materializeCredentials decrypts the run's credentials into files only the executing process can
-// read and maps them onto the spec. The returned cleanup removes every file.
-func (d *Dispatcher) materializeCredentials(r *run.Run, spec *roundhouse.Spec) (func(), error) {
+// read and maps them onto the spec. It also returns every resolved plaintext secret so the caller
+// can redact those values from the run's output. The returned cleanup removes every file.
+func (d *Dispatcher) materializeCredentials(r *run.Run, spec *roundhouse.Spec) (func(), []string, error) {
 	cleanup := func() {}
 	ids := d.effectiveCredentialIDs(r)
 	if len(ids) == 0 {
-		return cleanup, nil
+		return cleanup, nil, nil
 	}
 	if d.credentials == nil || d.sealer == nil {
-		return cleanup, credential.ErrNoKey
+		return cleanup, nil, credential.ErrNoKey
 	}
 
 	var paths []string
+	var secrets []string
 	cleanup = func() {
 		for _, p := range paths {
 			_ = os.Remove(p)
@@ -63,23 +65,32 @@ func (d *Dispatcher) materializeCredentials(r *run.Run, spec *roundhouse.Spec) (
 	for _, id := range ids {
 		c, plain, err := d.openCredential(context.Background(), id)
 		if err != nil {
-			return cleanup, err
+			return cleanup, secrets, err
+		}
+		secrets = append(secrets, plain)
+		if c.Kind == credential.KindEnv {
+			// The secret is each value, not the KEY=VALUE bundle, so mask the values a tool may echo.
+			for _, line := range credential.EnvLines(plain) {
+				if _, val, ok := strings.Cut(line, "="); ok {
+					secrets = append(secrets, val)
+				}
+			}
 		}
 		f, err := os.CreateTemp("", "yardmaster-cred-*")
 		if err != nil {
-			return cleanup, fmt.Errorf("materialize credential %s: %w", id, err)
+			return cleanup, secrets, fmt.Errorf("materialize credential %s: %w", id, err)
 		}
 		paths = append(paths, f.Name())
 		if err := f.Chmod(0o600); err != nil {
 			_ = f.Close()
-			return cleanup, fmt.Errorf("materialize credential %s: %w", id, err)
+			return cleanup, secrets, fmt.Errorf("materialize credential %s: %w", id, err)
 		}
 		if _, err := f.WriteString(plain); err != nil {
 			_ = f.Close()
-			return cleanup, fmt.Errorf("materialize credential %s: %w", id, err)
+			return cleanup, secrets, fmt.Errorf("materialize credential %s: %w", id, err)
 		}
 		if err := f.Close(); err != nil {
-			return cleanup, fmt.Errorf("materialize credential %s: %w", id, err)
+			return cleanup, secrets, fmt.Errorf("materialize credential %s: %w", id, err)
 		}
 
 		switch c.Kind {
@@ -101,10 +112,10 @@ func (d *Dispatcher) materializeCredentials(r *run.Run, spec *roundhouse.Spec) (
 			// The password reaches the play as a var through a file so it never lands on argv.
 			vars, err := json.Marshal(map[string]string{"ansible_become_password": plain})
 			if err != nil {
-				return cleanup, fmt.Errorf("encode become credential %s: %w", id, err)
+				return cleanup, secrets, fmt.Errorf("encode become credential %s: %w", id, err)
 			}
 			if err := os.WriteFile(f.Name(), vars, 0o600); err != nil {
-				return cleanup, fmt.Errorf("materialize credential %s: %w", id, err)
+				return cleanup, secrets, fmt.Errorf("materialize credential %s: %w", id, err)
 			}
 			spec.ExtraVarsFiles = append(spec.ExtraVarsFiles, f.Name())
 		case credential.KindRegistry:
@@ -112,10 +123,10 @@ func (d *Dispatcher) materializeCredentials(r *run.Run, spec *roundhouse.Spec) (
 			paths = paths[:len(paths)-1]
 			_ = os.Remove(f.Name())
 		default:
-			return cleanup, fmt.Errorf("%w: %s", credential.ErrBadKind, c.Kind)
+			return cleanup, secrets, fmt.Errorf("%w: %s", credential.ErrBadKind, c.Kind)
 		}
 	}
-	return cleanup, nil
+	return cleanup, secrets, nil
 }
 
 // openCredential fetches a credential, decrypts its sealed secret, and resolves it through its

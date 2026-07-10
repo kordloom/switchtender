@@ -9,7 +9,8 @@
 
 Secrets live in credentials, the same as AWX. Each is sealed at rest and never returned by the API.
 A run gets a credential's value only while it executes, in a temporary file or environment that is
-wiped afterward.
+wiped afterward. If a tool prints a credential's value, Yardmaster redacts it from the run's log,
+live stream, and events, so the output shows `***` instead of the secret.
 
 ## Store a credential
 

@@ -29,6 +29,7 @@ What Yardmaster does today.
 | Dynamic sources | Inventory plugins and scripts refreshed into stored inventories, with cloud auth from an env credential.|
 | Sourced inventories | An inventory's content can come from a command, Vault, or Google Secret Manager, resolved at launch, so the host list need not live in Yardmaster.|
 | Credentials  | SSH keys, vault passwords, env bundles for cloud SDKs, API tokens and JWTs, become passwords, and registry logins, all encrypted at rest.|
+| Secret masking | Credential values are redacted from run logs, live streams, and events, so a tool that echoes a secret shows `***` instead of the value.|
 | High availability | Two servers on one database share the schedule without double-firing; tokens can carry a lifetime.|
 | Git triggers | A webhook URL launches a template on push; the project syncs fresh, so it deploys the commit just pushed.|
 | Surveys      | Templates declare typed launch prompts, validated and injected as extra vars.|

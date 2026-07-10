@@ -945,12 +945,13 @@ func (d *Dispatcher) execute(ctx context.Context, r *run.Run) run.Status {
 	}
 	stop := make(chan struct{})
 	tailed := make(chan struct{})
+	mask := &masker{}
 	go func() {
 		defer close(tailed)
-		d.tailEvents(r.ID, parent, eventsPath, stop)
+		d.tailEvents(r.ID, parent, eventsPath, stop, mask)
 	}()
 
-	sink := &logSink{store: d.store, id: r.ID, log: d.log, publisher: d.publisher}
+	sink := &logSink{store: d.store, id: r.ID, log: d.log, publisher: d.publisher, mask: mask}
 	spec := roundhouse.Spec{
 		Playbook: r.Playbook, Inventory: r.Inventory, Tool: r.Tool, Command: r.Command,
 		DryRun: r.DryRun, EventsPath: eventsPath, Limit: r.Limit, ExtraVars: r.ExtraVars,
@@ -973,7 +974,7 @@ func (d *Dispatcher) execute(ctx context.Context, r *run.Run) run.Status {
 		return run.StatusFailed
 	}
 
-	credCleanup, err := d.materializeCredentials(r, &spec)
+	credCleanup, secrets, err := d.materializeCredentials(r, &spec)
 	if err != nil {
 		credCleanup()
 		close(stop)
@@ -983,6 +984,7 @@ func (d *Dispatcher) execute(ctx context.Context, r *run.Run) run.Status {
 		return run.StatusFailed
 	}
 	defer credCleanup()
+	mask.set(secrets)
 
 	res, err := d.runner.Run(ctx, spec, sink)
 
@@ -1152,7 +1154,7 @@ func (d *Dispatcher) eventsFile(id string) (string, func()) {
 // tailEvents follows the run's event sidecar file, parsing, storing, and publishing each complete
 // line as it appears, until stop is closed and a final drain has run. Events from a child run are
 // also published under its parent so a split or pipeline page streams live.
-func (d *Dispatcher) tailEvents(id, parent, path string, stop <-chan struct{}) {
+func (d *Dispatcher) tailEvents(id, parent, path string, stop <-chan struct{}, mask *masker) {
 	if path == "" {
 		<-stop
 		return
@@ -1173,7 +1175,7 @@ func (d *Dispatcher) tailEvents(id, parent, path string, stop <-chan struct{}) {
 			if len(chunk) > 0 {
 				partial = append(partial, chunk...)
 				if partial[len(partial)-1] == '\n' {
-					d.handleEventLine(id, parent, partial)
+					d.handleEventLine(id, parent, partial, mask)
 					partial = partial[:0]
 				}
 			}
@@ -1196,9 +1198,9 @@ func (d *Dispatcher) tailEvents(id, parent, path string, stop <-chan struct{}) {
 	}
 }
 
-// handleEventLine parses a single event line, stores it, and publishes it, echoing child events to
-// the parent topic when the run belongs to a split or pipeline.
-func (d *Dispatcher) handleEventLine(id, parent string, raw []byte) {
+// handleEventLine parses a single event line, redacts known secrets from it, stores it, and
+// publishes it, echoing child events to the parent topic when the run belongs to a split or pipeline.
+func (d *Dispatcher) handleEventLine(id, parent string, raw []byte, mask *masker) {
 	line := bytes.TrimSpace(raw)
 	if len(line) == 0 {
 		return
@@ -1210,6 +1212,9 @@ func (d *Dispatcher) handleEventLine(id, parent string, raw []byte) {
 	}
 	if len(events) == 0 {
 		return
+	}
+	for i := range events {
+		mask.redactEvent(&events[i])
 	}
 	if err := withRetries(func() error {
 		return d.store.AppendEvents(context.Background(), id, events)

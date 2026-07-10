@@ -27,7 +27,7 @@ func TestMaterializeCommandCredential(t *testing.T) {
 
 	d := &Dispatcher{credentials: store, sealer: sealer}
 	spec := &roundhouse.Spec{}
-	cleanup, err := d.materializeCredentials(&run.Run{ID: "run_1", CredentialIDs: []string{"cred_1"}}, spec)
+	cleanup, _, err := d.materializeCredentials(&run.Run{ID: "run_1", CredentialIDs: []string{"cred_1"}}, spec)
 	defer cleanup()
 	if err != nil {
 		t.Fatalf("materializeCredentials() error = %v", err)
@@ -60,7 +60,7 @@ func TestMaterializeTokenCredential(t *testing.T) {
 
 	d := &Dispatcher{credentials: store, sealer: sealer}
 	spec := &roundhouse.Spec{}
-	cleanup, err := d.materializeCredentials(&run.Run{ID: "run_tok", CredentialIDs: []string{"cred_tok"}}, spec)
+	cleanup, _, err := d.materializeCredentials(&run.Run{ID: "run_tok", CredentialIDs: []string{"cred_tok"}}, spec)
 	defer cleanup()
 	if err != nil {
 		t.Fatalf("materializeCredentials() error = %v", err)
@@ -101,7 +101,7 @@ func TestMaterializeInventoryScopedCredential(t *testing.T) {
 	d := &Dispatcher{credentials: creds, sealer: sealer, inventories: invs}
 	spec := &roundhouse.Spec{}
 	// The run itself carries no credentials; the inventory it targets does.
-	cleanup, err := d.materializeCredentials(&run.Run{ID: "run_1", InventoryID: "inv_1"}, spec)
+	cleanup, _, err := d.materializeCredentials(&run.Run{ID: "run_1", InventoryID: "inv_1"}, spec)
 	defer cleanup()
 	if err != nil {
 		t.Fatalf("materializeCredentials() error = %v", err)
