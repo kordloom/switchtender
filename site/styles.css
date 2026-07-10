@@ -123,6 +123,10 @@ h1 {
 .hero-cta.center { justify-content: center; }
 .hero-note { margin-top: 22px; font-size: 13.5px; color: var(--muted); }
 
+.namebar { text-align: center; padding: 14px 24px 4px; }
+.namebar p { max-width: 720px; margin: 0 auto; color: var(--muted); font-size: 15.5px; }
+.namebar b { color: var(--text); font-weight: 600; }
+
 .hero-shot { position: relative; }
 .glow {
 	position: absolute; inset: -12% -8%; z-index: 0;

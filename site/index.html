@@ -3,10 +3,10 @@
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
-	<title>Yardmaster — the Ansible platform, on steroids</title>
+	<title>Yardmaster · the Ansible platform on steroids</title>
 	<meta name="description" content="Playbook execution and fleet orchestration in one Go binary. No Kubernetes. Ansible, Terraform, Bash, and Python. Live host-by-task matrix, tamper-evident audit, enforced approval policies.">
-	<meta property="og:title" content="Yardmaster — the Ansible platform, on steroids">
-	<meta property="og:description" content="One binary. No Kubernetes. Run Ansible, Terraform, Bash, and Python — and prove exactly what ran and who approved it.">
+	<meta property="og:title" content="Yardmaster · the Ansible platform on steroids">
+	<meta property="og:description" content="One binary. No Kubernetes. Run Ansible, Terraform, Bash, and Python, and prove exactly what ran and who approved it.">
 	<meta property="og:type" content="website">
 	<meta property="og:url" content="https://yardmaster.dev">
 	<meta property="og:image" content="https://yardmaster.dev/assets/screenshot-fleet.png">
@@ -67,6 +67,10 @@
 			</div>
 		</section>
 
+		<section class="namebar wrap reveal">
+			<p><b>Why "Yardmaster"?</b> A yardmaster runs a rail yard: which engine takes which track, what couples into the next train out, what waits on a siding. The same job, for your fleet.</p>
+		</section>
+
 		<section class="strip wrap reveal">
 			<div><b>1</b><span>binary to deploy</span></div>
 			<div><b>0</b><span>Kubernetes required</span></div>
@@ -88,7 +92,7 @@
 				<article class="card reveal">
 					<div class="ic ic-tools"></div>
 					<h3>Multi-tool engine</h3>
-					<p>Ansible, Terraform, Bash, and Python — each with a dry run. One engine, one UI, one audit trail. Not four tools bolted together.</p>
+					<p>Ansible, Terraform, Bash, and Python, each with a dry run. One engine, one UI, one audit trail. Not four tools bolted together.</p>
 				</article>
 				<article class="card reveal">
 					<div class="ic ic-shards"></div>
@@ -113,7 +117,7 @@
 				<article class="card reveal">
 					<div class="ic ic-gate"></div>
 					<h3>Enforced approvals</h3>
-					<p>Hold risky runs for sign-off by policy — by tool, command, or target. Operators request, admins release. No skipping the gate.</p>
+					<p>Hold risky runs for sign-off, gated by policy on tool, command, or target. Operators request, admins release. No skipping the gate.</p>
 				</article>
 				<article class="card reveal">
 					<div class="ic ic-migrate"></div>
@@ -138,9 +142,9 @@
 			<div class="gov-copy reveal">
 				<span class="eyebrow">The moat</span>
 				<h2>Governance neither AWX<br>nor Semaphore has</h2>
-				<p>Multi-tool execution is table stakes now. What sets Yardmaster apart sits <em>above</em> execution — the control plane that makes automation provable and governed.</p>
+				<p>Multi-tool execution is table stakes now. What sets Yardmaster apart sits <em>above</em> execution, on the control plane that makes automation provable and governed.</p>
 				<ul class="gov-list">
-					<li><b>Tamper-evident, signed audit.</b> Alter one entry and the chain breaks. Prove the trail is intact — offline.</li>
+					<li><b>Tamper-evident, signed audit.</b> Alter one entry and the chain breaks. Prove the trail is intact, offline.</li>
 					<li><b>Change control by policy.</b> A prod <code>terraform destroy</code> holds for an admin's sign-off, automatically.</li>
 					<li><b>Secrets masked, sourced, sealed.</b> They never land in a log and never live in Yardmaster if you don't want them to.</li>
 				</ul>
@@ -150,7 +154,7 @@
 					<div class="link"><span class="dot ok"></span> run · approved <em>#7f3a…</em></div>
 					<div class="link"><span class="dot ok"></span> credential · updated <em>#a91c…</em></div>
 					<div class="link"><span class="dot ok"></span> inventory · created <em>#5e02…</em></div>
-					<div class="verify"><span class="dot ok"></span> Chain verified — 3 entries</div>
+					<div class="verify"><span class="dot ok"></span> Chain verified: 3 entries</div>
 				</div>
 			</div>
 		</section>
@@ -168,11 +172,11 @@
 					<tbody>
 						<tr><td>Deploy without Kubernetes</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td><td><i class="y"></i></td></tr>
 						<tr><td>Live host-by-task matrix</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td><td><i class="n"></i></td></tr>
-						<tr><td>Ansible · Terraform · Bash · Python</td><td class="us"><i class="y"></i></td><td><span class="muted">Ansible only</span></td><td><span class="muted">Terraform + shell</span></td></tr>
+						<tr><td>Ansible · Terraform · Bash · Python</td><td class="us"><i class="y"></i></td><td><span class="muted">Ansible only</span></td><td><span class="muted">no Python</span></td></tr>
 						<tr><td>Duration-balanced job splitting</td><td class="us"><i class="y"></i></td><td><span class="muted">round-robin</span></td><td><i class="n"></i></td></tr>
 						<tr><td>Fleet memory: flaky hosts, trends</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td><td><i class="n"></i></td></tr>
 						<tr><td>Tamper-evident, signed audit</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td><td><i class="n"></i></td></tr>
-						<tr><td>Secrets masked in run logs</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td><td><i class="n"></i></td></tr>
+						<tr><td>Secret values auto-masked in logs</td><td class="us"><i class="y"></i></td><td><span class="muted">opt-in</span></td><td><i class="n"></i></td></tr>
 						<tr><td>Enforced approval policies</td><td class="us"><i class="y"></i></td><td><span class="muted">basic</span></td><td><i class="n"></i></td></tr>
 						<tr><td>One-command migration in</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td><td><i class="n"></i></td></tr>
 					</tbody>
@@ -190,7 +194,7 @@
 				<pre><code><span class="c"># install (or grab a release binary)</span>
 go install github.com/dcadolph/yardmaster@latest
 
-<span class="c"># serve — SQLite by default, PostgreSQL optional</span>
+<span class="c"># serve: SQLite by default, PostgreSQL optional</span>
 yardmaster serve --addr :8080 --db yard.db
 
 <span class="c"># open the UI</span>
@@ -200,7 +204,7 @@ open http://localhost:8080/ui/</code></pre>
 
 		<section class="cta wrap reveal">
 			<h2>Put AWX and Semaphore to bed.</h2>
-			<p>Structured runs, balanced splits, a fleet that remembers, and a control plane that proves itself — from one binary.</p>
+			<p>Structured runs, balanced splits, a fleet that remembers, and a control plane that proves itself, from one binary.</p>
 			<div class="hero-cta center">
 				<a class="btn big" href="/get-started.html">Get started</a>
 				<a class="ghost big" href="/docs/">Read the docs</a>

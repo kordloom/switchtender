@@ -3,7 +3,7 @@
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
-	<title>Get started — Yardmaster</title>
+	<title>Get started · Yardmaster</title>
 	<meta name="description" content="Get Yardmaster running in about a minute: one binary, one SQLite file, no Kubernetes. Install, serve, open the UI, launch your first run.">
 	<link rel="icon" type="image/png" href="/assets/favicon.png">
 	<link rel="preconnect" href="https://fonts.googleapis.com">
@@ -46,7 +46,7 @@
 					<div class="gs-num">1</div>
 					<div class="gs-body">
 						<h3>Install</h3>
-						<p>Install with Go, or grab a prebuilt binary from the <a href="https://github.com/dcadolph/yardmaster/releases">releases page</a>. To run Ansible you also need <code>ansible-playbook</code> on the box; Bash and Python work out of the box.</p>
+						<p>Install with Go, or grab a prebuilt binary from the <a href="https://github.com/dcadolph/yardmaster/releases">releases page</a>. To run Ansible you also need <code>ansible-playbook</code> on the box. Bash and Python work out of the box.</p>
 						<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>go install github.com/dcadolph/yardmaster@latest</code></pre></div>
 					</div>
 				</li>
@@ -54,7 +54,7 @@
 					<div class="gs-num">2</div>
 					<div class="gs-body">
 						<h3>Serve</h3>
-						<p>Start the server. SQLite is the default; point <code>--db</code> at a Postgres DSN when you want more than one instance. Set the encryption pair if you plan to store credentials.</p>
+						<p>Start the server. SQLite is the default. Point <code>--db</code> at a Postgres DSN when you want more than one instance. Set the encryption pair if you plan to store credentials.</p>
 						<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code><span class="c"># optional, only needed for stored secrets</span>
 export YARDMASTER_ENCRYPTION_KEY=change-me
 export YARDMASTER_ENCRYPTION_SALT=change-me-too
@@ -74,7 +74,7 @@ yardmaster serve --addr :8080 --db yard.db</code></pre></div>
 					<div class="gs-num">4</div>
 					<div class="gs-body">
 						<h3>Launch your first run</h3>
-						<p>Click <strong>Launch run</strong> in the UI, or fire one over the API. No Ansible required for this one — it is a plain Bash run you can watch stream live.</p>
+						<p>Click <strong>Launch run</strong> in the UI, or fire one over the API. No Ansible required for this one. It is a plain Bash run you can watch stream live.</p>
 						<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>curl -s -X POST localhost:8080/runs \
   -H 'content-type: application/json' \
   -d '{"tool":"bash","command":"echo hello from yardmaster"}'</code></pre></div>
@@ -84,7 +84,7 @@ yardmaster serve --addr :8080 --db yard.db</code></pre></div>
 					<div class="gs-num">5</div>
 					<div class="gs-body">
 						<h3>Lock it down</h3>
-						<p>Mint an admin token. The moment the first token exists, the API requires auth — so create one before you expose the server, then send it as a bearer token.</p>
+						<p>Mint an admin token. The moment the first token exists, the API requires auth, so create one before you expose the server, then send it as a bearer token.</p>
 						<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>yardmaster token new --name admin --db yard.db</code></pre></div>
 					</div>
 				</li>
@@ -109,7 +109,7 @@ yardmaster serve --addr :8080 --db yard.db</code></pre></div>
 
 		<section class="cta wrap reveal">
 			<h2>Put AWX and Semaphore to bed.</h2>
-			<p>Structured runs, balanced splits, a fleet that remembers, and a control plane that proves itself — from one binary.</p>
+			<p>Structured runs, balanced splits, a fleet that remembers, and a control plane that proves itself, from one binary.</p>
 			<div class="hero-cta center">
 				<a class="btn big" href="https://github.com/dcadolph/yardmaster">★ Star on GitHub</a>
 				<a class="ghost big" href="/docs/">Read the docs</a>

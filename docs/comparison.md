@@ -29,10 +29,10 @@ on them.
 
 | Capability | Notes |
 |------------|-------|
-| Multiple runtimes | Yardmaster runs Ansible, Bash, Terraform, and Python, each with a dry run. AWX is Ansible-only; Semaphore runs Terraform, OpenTofu, and shell. |
-| Container execution environments | Yardmaster runs a playbook inside a pinned image, opt-in behind a flag. AWX makes this a core feature; Semaphore favors native runtimes instead. |
-| Access control | Yardmaster has global roles plus per-object grants and teams. AWX has mature organization RBAC; Semaphore gates RBAC behind its Enterprise tier. |
-| Credentials | All three store secrets encrypted; Yardmaster decrypts only at execution into a temporary file and wipes it after. |
+| Multiple runtimes | Yardmaster runs Ansible, Bash, Terraform, and Python, each with a dry run. AWX is Ansible-only. Semaphore also runs Ansible, plus Terraform, OpenTofu, and shell, but not Python. |
+| Container execution environments | Yardmaster runs a playbook inside a pinned image, opt-in behind a flag. AWX makes this a core feature. Semaphore favors native runtimes instead. |
+| Access control | Yardmaster has global roles plus per-object grants and teams. AWX has mature organization RBAC. Semaphore gates RBAC behind its Enterprise tier. |
+| Credentials | All three store secrets encrypted. Yardmaster decrypts only at execution into a temporary file and wipes it after. |
 | Scheduling | All three schedule runs; Yardmaster uses cron with highly available claiming so two servers do not double-fire. |
 | Surveys and prompts | All three collect typed values at launch. |
 | Inbound webhooks | All three launch on a git push. |
@@ -42,7 +42,7 @@ on them.
 
 | Capability | Status |
 |------------|--------|
-| LDAP | Not yet. Single sign-on is OpenID Connect; LDAP is not. AWX has LDAP; Semaphore gates SSO behind Enterprise. |
+| LDAP | Not yet. Single sign-on is OpenID Connect, not LDAP. AWX has LDAP. Semaphore gates SSO behind Enterprise. |
 | Visual workflow editor | Yardmaster defines pipelines through the API and shows them in the UI; AWX has a drag-and-drop editor. |
 | Notification breadth | Webhook and email today, against a wider set of integrations in AWX. |
 | Maturity | AWX and Semaphore have years of production use and large communities. Yardmaster is young. |
