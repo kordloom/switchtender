@@ -27,4 +27,6 @@ var (
 	ErrUnknownDependency = errors.New("unknown dependency")
 	// ErrDependencyCycle is returned when pipeline dependencies form a cycle.
 	ErrDependencyCycle = errors.New("dependency cycle")
+	// ErrNotPendingApproval is returned when approve or reject targets a run not awaiting approval.
+	ErrNotPendingApproval = errors.New("run is not awaiting approval")
 )

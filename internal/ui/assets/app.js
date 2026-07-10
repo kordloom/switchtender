@@ -844,6 +844,7 @@ function wireLaunchForm() {
 			.map((o) => o.value);
 		if (picked.length) payload.credential_ids = picked;
 		if (document.getElementById("launch-dry-run").checked) payload.dry_run = true;
+		if (document.getElementById("launch-require-approval").checked) payload.require_approval = true;
 		status.textContent = "Launching.";
 		try {
 			const created = await postAction("/runs", payload);
@@ -2196,7 +2197,7 @@ function tdBadge(status) {
 function badge(status) {
 	const span = document.createElement("span");
 	span.className = "badge " + status;
-	span.textContent = status;
+	span.textContent = status.replace(/_/g, " ");
 	return span;
 }
 
@@ -2659,6 +2660,34 @@ function wireActions(runId) {
 			retry.disabled = false;
 		}
 	});
+	const approve = document.getElementById("approve-run");
+	if (approve) {
+		approve.addEventListener("click", async () => {
+			approve.disabled = true;
+			try {
+				await postAction("/runs/" + runId + "/approve");
+				location.reload();
+			} catch (e) {
+				setStatus("Approve failed: " + e.message);
+				approve.disabled = false;
+			}
+		});
+	}
+	const reject = document.getElementById("reject-run");
+	if (reject) {
+		reject.addEventListener("click", async () => {
+			const reason = window.prompt("Reason for rejecting (optional):");
+			if (reason === null) return;
+			reject.disabled = true;
+			try {
+				await postAction("/runs/" + runId + "/reject", { reason });
+				location.reload();
+			} catch (e) {
+				setStatus("Reject failed: " + e.message);
+				reject.disabled = false;
+			}
+		});
+	}
 }
 
 // updateActions shows cancel while the run is active and retry on a finished split that did not
@@ -2667,12 +2696,19 @@ function updateActions(run) {
 	const cancel = document.getElementById("cancel-run");
 	const retry = document.getElementById("retry-run");
 	if (!cancel || !retry) return;
+	const approve = document.getElementById("approve-run");
+	const reject = document.getElementById("reject-run");
 	if (isReadOnly()) {
 		cancel.hidden = true;
 		retry.hidden = true;
+		if (approve) approve.hidden = true;
+		if (reject) reject.hidden = true;
 		return;
 	}
-	cancel.hidden = isTerminal(run.status);
+	const held = run.status === "pending_approval";
+	cancel.hidden = isTerminal(run.status) || held;
+	if (approve) approve.hidden = !held;
+	if (reject) reject.hidden = !held;
 	const splitParent = (run.kind === "split" || run.shard_count) && !run.parent_id;
 	retry.hidden = !(splitParent && isTerminal(run.status) && run.status !== "succeeded");
 }

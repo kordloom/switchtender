@@ -382,7 +382,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	httpServer := &http.Server{
 		Addr: serveAddr,
 		Handler: server.New(store, disp, log, server.WithStreamer(hub),
-			server.WithCanceler(disp), server.WithRetrier(disp),
+			server.WithCanceler(disp), server.WithRetrier(disp), server.WithApprover(disp),
 			server.WithSchedules(schedules), server.WithTokens(bundle.Tokens()),
 			server.WithCredentials(bundle.Credentials(), sealer),
 			server.WithProjects(bundle.Projects()),

@@ -16,6 +16,8 @@ Every endpoint the server exposes. The web UI lives at `/ui/` and the root redir
 | GET    | `/runs/{id}`            | One run.                                                |
 | POST   | `/runs/{id}/cancel`     | Cancel a pending or running run.                        |
 | POST   | `/runs/{id}/retry`      | New split from only the failed shards of a finished one.|
+| POST   | `/runs/{id}/approve`    | Release a run held for approval so it runs.             |
+| POST   | `/runs/{id}/reject`     | Deny a run held for approval.                           |
 | GET    | `/runs/{id}/shards`     | Shard runs of a split.                                  |
 | GET    | `/runs/{id}/steps`      | Step runs of a pipeline.                                |
 | GET    | `/runs/{id}/logs`       | Captured output as plain text.                          |

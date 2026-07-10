@@ -228,6 +228,8 @@ table.runs td button + button { margin-left: 8px; }
 .badge.pending { background: var(--skipped); }
 .badge.canceled { background: var(--canceled); }
 .badge.interrupted { background: var(--changed); }
+.badge.pending_approval { background: var(--changed); }
+.badge.rejected { background: var(--canceled); }
 
 @media (prefers-color-scheme: dark) {
 	.badge.running, .badge.interrupted { color: #0d1117; }

@@ -25,6 +25,10 @@ const (
 	StatusCanceled Status = "canceled"
 	// StatusInterrupted means the run was abandoned when the server stopped and cannot resume.
 	StatusInterrupted Status = "interrupted"
+	// StatusPendingApproval means the run is held and cannot be claimed until an approver releases it.
+	StatusPendingApproval Status = "pending_approval"
+	// StatusRejected means an approver denied the run, so it never executed.
+	StatusRejected Status = "rejected"
 )
 
 const (
@@ -66,7 +70,7 @@ func ValidTool(tool string) bool {
 // Terminal reports whether the status is a final state.
 func (s Status) Terminal() bool {
 	switch s {
-	case StatusSucceeded, StatusFailed, StatusCanceled, StatusInterrupted:
+	case StatusSucceeded, StatusFailed, StatusCanceled, StatusInterrupted, StatusRejected:
 		return true
 	default:
 		return false
@@ -237,6 +241,17 @@ func WithCommand(command string) SubmitOption {
 // WithDryRun runs the tool in its no-change mode.
 func WithDryRun(dryRun bool) SubmitOption {
 	return func(r *Run) { r.DryRun = dryRun }
+}
+
+// WithRequireApproval holds the run for approval before it can be claimed, when require is true. The
+// run starts at StatusPendingApproval, which the claim loop never selects, until an approver releases
+// it to pending or rejects it.
+func WithRequireApproval(require bool) SubmitOption {
+	return func(r *Run) {
+		if require {
+			r.Status = StatusPendingApproval
+		}
+	}
 }
 
 // ApplyOptions applies opts to r.

@@ -49,6 +49,12 @@ type Retrier interface {
 	RetryFailedShards(ctx context.Context, parentID string) (*run.Run, error)
 }
 
+// Approver releases or denies a run held for approval. The dispatcher satisfies it.
+type Approver interface {
+	Approve(ctx context.Context, id string) (*run.Run, error)
+	Reject(ctx context.Context, id, reason string) (*run.Run, error)
+}
+
 // Option configures a Server.
 type Option func(*Server)
 
@@ -65,6 +71,11 @@ func WithCanceler(c Canceler) Option {
 // WithRetrier enables the failed shard retry endpoint backed by r.
 func WithRetrier(r Retrier) Option {
 	return func(srv *Server) { srv.retrier = r }
+}
+
+// WithApprover enables the run approval endpoints backed by a.
+func WithApprover(a Approver) Option {
+	return func(srv *Server) { srv.approver = a }
 }
 
 // WithSchedules enables the schedule endpoints backed by the given store.
@@ -191,6 +202,8 @@ type Server struct {
 	canceler Canceler
 	// retrier backs the failed shard retry endpoint when configured.
 	retrier Retrier
+	// approver backs the run approval endpoints when configured.
+	approver Approver
 	// schedules backs the schedule endpoints when configured.
 	schedules schedule.Store
 	// tokens backs API authentication when configured.
@@ -269,6 +282,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /pipelines", createPipelineHandler(s.submitter, authz, s.log))
 	mux.Handle("POST /runs/{id}/cancel", cancelRunHandler(s.store, s.canceler, s.log))
 	mux.Handle("POST /runs/{id}/retry", retryRunHandler(s.retrier, s.log))
+	mux.Handle("POST /runs/{id}/approve", approveRunHandler(s.approver, s.log))
+	mux.Handle("POST /runs/{id}/reject", rejectRunHandler(s.approver, s.log))
 	mux.Handle("GET /runs", listRunsHandler(s.store, s.log))
 	mux.Handle("GET /runs/{id}", getRunHandler(s.store, s.log))
 	mux.Handle("GET /runs/{id}/shards", runShardsHandler(s.store, s.log))

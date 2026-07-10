@@ -88,3 +88,11 @@ hash chain: it carries the previous entry's hash and its own hash over its conte
 reordering, or deleting an entry breaks the chain, which `GET /audit/verify` detects. A signed export
 from `GET /audit/export` seals the chain with an ed25519 signature, so `yardmaster audit verify`
 proves the trail is intact and unaltered offline, without trusting the server that produced it.
+
+## Approvals
+
+A run can be marked to require approval. It is held in a pending-approval state that the claim loop
+never picks up, until an admin approves it, which releases it to run, or rejects it, which ends it.
+An operator can request the run, but only an admin can release it, so duties are separated. Both the
+request and the decision are recorded in the audit trail, making who asked for a change and who signed
+off provable.

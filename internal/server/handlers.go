@@ -46,6 +46,9 @@ type createRunRequest struct {
 	InventoryID string `json:"inventory_id,omitempty"`
 	// Queue restricts execution to workers serving the queue.
 	Queue string `json:"queue,omitempty"`
+	// RequireApproval holds the run for approval before it executes. Honored for a single run, not
+	// a shard split.
+	RequireApproval bool `json:"require_approval,omitempty"`
 }
 
 // createPipelineRequest is the JSON body accepted by POST /pipelines.
@@ -316,6 +319,9 @@ func createRunHandler(submitter Submitter, authz *authorizer, log *zap.Logger) h
 			created, err = submitter.SubmitSplit(r.Context(), req.Playbook, req.Inventory,
 				req.Shards, opts...)
 		} else {
+			if req.RequireApproval {
+				opts = append(opts, run.WithRequireApproval(true))
+			}
 			created, err = submitter.Submit(r.Context(), req.Playbook, req.Inventory, opts...)
 		}
 		switch {
@@ -468,6 +474,58 @@ func retryRunHandler(retrier Retrier, log *zap.Logger) http.HandlerFunc {
 		}
 		w.Header().Set("Location", "/runs/"+created.ID)
 		respondJSON(w, log, http.StatusAccepted, created, wantsPretty(r))
+	}
+}
+
+// approveRunHandler releases a run held for approval so it can execute.
+func approveRunHandler(approver Approver, log *zap.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if approver == nil {
+			respondError(w, log, http.StatusNotFound, "approvals not enabled")
+			return
+		}
+		created, err := approver.Approve(r.Context(), r.PathValue("id"))
+		switch {
+		case errors.Is(err, run.ErrNotFound):
+			respondError(w, log, http.StatusNotFound, "run not found")
+			return
+		case errors.Is(err, dispatch.ErrNotPendingApproval):
+			respondError(w, log, http.StatusConflict, "run is not awaiting approval")
+			return
+		case err != nil:
+			log.Error("server: approve run: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not approve run")
+			return
+		}
+		respondJSON(w, log, http.StatusOK, created, wantsPretty(r))
+	}
+}
+
+// rejectRunHandler denies a run held for approval, recording an optional reason as its error.
+func rejectRunHandler(approver Approver, log *zap.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if approver == nil {
+			respondError(w, log, http.StatusNotFound, "approvals not enabled")
+			return
+		}
+		var req struct {
+			Reason string `json:"reason"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		created, err := approver.Reject(r.Context(), r.PathValue("id"), req.Reason)
+		switch {
+		case errors.Is(err, run.ErrNotFound):
+			respondError(w, log, http.StatusNotFound, "run not found")
+			return
+		case errors.Is(err, dispatch.ErrNotPendingApproval):
+			respondError(w, log, http.StatusConflict, "run is not awaiting approval")
+			return
+		case err != nil:
+			log.Error("server: reject run: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not reject run")
+			return
+		}
+		respondJSON(w, log, http.StatusOK, created, wantsPretty(r))
 	}
 }
 
