@@ -2709,7 +2709,16 @@ function renderHeader(run) {
 	el.innerHTML = "";
 	el.appendChild(field("Status", null, badge(run.status)));
 	el.appendChild(field("Run", shortId(run.id), null, run.id));
-	el.appendChild(field("Playbook", baseName(run.playbook) || (run.playbook || ""), null, run.playbook || ""));
+	if (!run.tool || run.tool === "ansible") {
+		el.appendChild(field("Playbook", baseName(run.playbook) || (run.playbook || ""), null, run.playbook || ""));
+	} else {
+		el.appendChild(field("Tool", null, toolBadgeEl(run)));
+		el.appendChild(field(run.tool === "terraform" ? "Directory" : "Command",
+			toolLabel(run), null, run.command || ""));
+	}
+	if (run.dry_run) {
+		el.appendChild(field("Mode", "dry run"));
+	}
 	if (run.inventory) {
 		el.appendChild(field("Inventory", baseName(run.inventory), null, run.inventory));
 	}
