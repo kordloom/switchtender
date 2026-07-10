@@ -42,3 +42,10 @@ Manager, or 1Password with no extra integration.
 
 For a pasted value, omit `source` and put the value in `secret`. Imported credentials arrive without
 secrets, since exports never contain them; this is the one-time step to fill them in.
+
+## Scope a secret to an inventory
+
+Attach a credential to a stored inventory and every run that targets that inventory receives it, so
+a fleet can carry its own secret variables in one place. Open Inventories, edit the inventory, and
+pick the credentials under Credentials. An `env` credential becomes that inventory's secret
+variables; a `token` credential its bearer token. You need use access on a credential to attach it.

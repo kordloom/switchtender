@@ -1477,6 +1477,8 @@ function openInventoryEdit(inv) {
 	form.dataset.editId = inv.id;
 	document.getElementById("inv-name").value = inv.name;
 	document.getElementById("inv-content").value = inv.content || "";
+	const ids = inv.credential_ids || [];
+	for (const o of document.getElementById("inv-credentials").options) o.selected = ids.includes(o.value);
 	document.getElementById("inv-status").textContent = "";
 	setModalTitle("inventory", "Edit inventory");
 	document.getElementById("inventory-modal").hidden = false;
@@ -1486,10 +1488,13 @@ function openInventoryEdit(inv) {
 // /inventories/{id} when editing. The New button resets the dialog to add mode.
 function wireInventoryForm() {
 	const form = document.getElementById("inventory-form");
+	const creds = document.getElementById("inv-credentials");
+	fillSelect(creds, "/credentials", "credentials", (c) => c.name + " (" + c.kind + ")");
 	const resetToCreate = () => {
 		delete form.dataset.editId;
 		document.getElementById("inv-name").value = "";
 		document.getElementById("inv-content").value = "";
+		for (const o of creds.options) o.selected = false;
 		document.getElementById("inv-status").textContent = "";
 		setModalTitle("inventory", "Add an inventory");
 	};
@@ -1504,6 +1509,8 @@ function wireInventoryForm() {
 			name: document.getElementById("inv-name").value.trim(),
 			content: document.getElementById("inv-content").value,
 		};
+		const picked = Array.from(creds.selectedOptions).map((o) => o.value);
+		if (picked.length) payload.credential_ids = picked;
 		try {
 			if (editId) {
 				await postAction("/inventories/" + editId, payload, "PUT");

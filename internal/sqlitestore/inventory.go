@@ -10,7 +10,7 @@ import (
 )
 
 // inventoryColumns is the shared select list for inventory reads.
-const inventoryColumns = `id, name, content, created_at`
+const inventoryColumns = `id, name, content, credential_ids, created_at`
 
 // inventoryStore is an inventory.Store backed by the shared SQLite database.
 type inventoryStore struct {
@@ -21,11 +21,13 @@ type inventoryStore struct {
 // Save inserts or replaces the inventory.
 func (s *inventoryStore) Save(ctx context.Context, i *inventory.Inventory) error {
 	const q = `
-INSERT INTO inventories (id, name, content, created_at)
-VALUES (?, ?, ?, ?)
+INSERT INTO inventories (id, name, content, credential_ids, created_at)
+VALUES (?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
-	name=excluded.name, content=excluded.content, created_at=excluded.created_at`
-	_, err := s.db.ExecContext(ctx, q, i.ID, i.Name, i.Content, formatTime(i.CreatedAt))
+	name=excluded.name, content=excluded.content, credential_ids=excluded.credential_ids,
+	created_at=excluded.created_at`
+	_, err := s.db.ExecContext(ctx, q,
+		i.ID, i.Name, i.Content, joinIDs(i.CredentialIDs), formatTime(i.CreatedAt))
 	if err != nil {
 		return fmt.Errorf("save inventory: %w", err)
 	}
@@ -35,7 +37,8 @@ ON CONFLICT(id) DO UPDATE SET
 // Update changes an existing inventory's name and content, or returns inventory.ErrNotFound.
 func (s *inventoryStore) Update(ctx context.Context, i *inventory.Inventory) error {
 	res, err := s.db.ExecContext(ctx,
-		"UPDATE inventories SET name=?, content=? WHERE id=?", i.Name, i.Content, i.ID)
+		"UPDATE inventories SET name=?, content=?, credential_ids=? WHERE id=?",
+		i.Name, i.Content, joinIDs(i.CredentialIDs), i.ID)
 	if err != nil {
 		return fmt.Errorf("update inventory: %w", err)
 	}
@@ -105,11 +108,13 @@ func (s *inventoryStore) Delete(ctx context.Context, id string) error {
 func scanInventory(sc scanner) (*inventory.Inventory, error) {
 	var (
 		i       inventory.Inventory
+		creds   string
 		created string
 	)
-	if err := sc.Scan(&i.ID, &i.Name, &i.Content, &created); err != nil {
+	if err := sc.Scan(&i.ID, &i.Name, &i.Content, &creds, &created); err != nil {
 		return nil, err
 	}
+	i.CredentialIDs = splitIDs(creds)
 	at, err := parseTime(created)
 	if err != nil {
 		return nil, err

@@ -5,6 +5,7 @@ package inventorytest
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -30,7 +31,9 @@ func testUpdate(t *testing.T, store inventory.Store) {
 		t.Fatalf("Save() error = %v", err)
 	}
 
-	if err := store.Update(ctx, &inventory.Inventory{ID: "inv_1", Name: "new", Content: "b"}); err != nil {
+	if err := store.Update(ctx, &inventory.Inventory{
+		ID: "inv_1", Name: "new", Content: "b", CredentialIDs: []string{"cred_x"},
+	}); err != nil {
 		t.Fatalf("Update() error = %v", err)
 	}
 	got, err := store.Get(ctx, "inv_1")
@@ -39,6 +42,9 @@ func testUpdate(t *testing.T, store inventory.Store) {
 	}
 	if got.Name != "new" || got.Content != "b" {
 		t.Errorf("Get() = %+v, want updated name and content", got)
+	}
+	if !slices.Equal(got.CredentialIDs, []string{"cred_x"}) {
+		t.Errorf("CredentialIDs after update = %v, want [cred_x]", got.CredentialIDs)
 	}
 	if !got.CreatedAt.Equal(created) {
 		t.Errorf("CreatedAt = %v, want preserved %v", got.CreatedAt, created)
@@ -54,7 +60,8 @@ func testLifecycle(t *testing.T, store inventory.Store) {
 	ctx := context.Background()
 	created := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
 	i := &inventory.Inventory{
-		ID: "inv_1", Name: "fleet", Content: "[web]\nweb01\n", CreatedAt: created,
+		ID: "inv_1", Name: "fleet", Content: "[web]\nweb01\n",
+		CredentialIDs: []string{"cred_a", "cred_b"}, CreatedAt: created,
 	}
 	if err := store.Save(ctx, i); err != nil {
 		t.Fatalf("Save() error = %v", err)
@@ -66,6 +73,9 @@ func testLifecycle(t *testing.T, store inventory.Store) {
 	}
 	if got.Name != "fleet" || got.Content != "[web]\nweb01\n" || !got.CreatedAt.Equal(created) {
 		t.Errorf("Get() = %+v, want the saved inventory", got)
+	}
+	if !slices.Equal(got.CredentialIDs, []string{"cred_a", "cred_b"}) {
+		t.Errorf("CredentialIDs = %v, want [cred_a cred_b]", got.CredentialIDs)
 	}
 
 	if _, err := store.Get(ctx, "ghost"); !errors.Is(err, inventory.ErrNotFound) {

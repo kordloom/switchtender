@@ -47,7 +47,8 @@ func (d *Dispatcher) validateCredentials(ctx context.Context, ids []string) erro
 // read and maps them onto the spec. The returned cleanup removes every file.
 func (d *Dispatcher) materializeCredentials(r *run.Run, spec *roundhouse.Spec) (func(), error) {
 	cleanup := func() {}
-	if len(r.CredentialIDs) == 0 {
+	ids := d.effectiveCredentialIDs(r)
+	if len(ids) == 0 {
 		return cleanup, nil
 	}
 	if d.credentials == nil || d.sealer == nil {
@@ -60,7 +61,7 @@ func (d *Dispatcher) materializeCredentials(r *run.Run, spec *roundhouse.Spec) (
 			_ = os.Remove(p)
 		}
 	}
-	for _, id := range r.CredentialIDs {
+	for _, id := range ids {
 		c, err := d.credentials.Get(context.Background(), id)
 		if err != nil {
 			return cleanup, fmt.Errorf("credential %s: %w", id, err)
@@ -126,6 +127,28 @@ func (d *Dispatcher) materializeCredentials(r *run.Run, spec *roundhouse.Spec) (
 		}
 	}
 	return cleanup, nil
+}
+
+// effectiveCredentialIDs returns the run's own credentials plus any attached to the stored inventory
+// it targets, deduplicated and in order, so an inventory can carry secret variables that every run
+// against it receives.
+func (d *Dispatcher) effectiveCredentialIDs(r *run.Run) []string {
+	ids := append([]string(nil), r.CredentialIDs...)
+	if r.InventoryID != "" && d.inventories != nil {
+		if inv, err := d.inventories.Get(context.Background(), r.InventoryID); err == nil {
+			ids = append(ids, inv.CredentialIDs...)
+		}
+	}
+	seen := make(map[string]bool, len(ids))
+	out := ids[:0]
+	for _, id := range ids {
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, id)
+	}
+	return out
 }
 
 // resolveCommandSecret runs a command-source credential's command and returns its stdout as the

@@ -22,6 +22,10 @@ type Inventory struct {
 	Name string `json:"name"`
 	// Content is the inventory text.
 	Content string `json:"content"`
+	// CredentialIDs names stored credentials materialized for every run that targets this inventory,
+	// so an inventory can carry its own secret variables, for example an env credential of cloud
+	// keys the plugin needs.
+	CredentialIDs []string `json:"credential_ids,omitempty"`
 	// CreatedAt is when the inventory was created.
 	CreatedAt time.Time `json:"created_at"`
 }

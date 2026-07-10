@@ -8,6 +8,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/dcadolph/yardmaster/internal/grant"
 	"github.com/dcadolph/yardmaster/internal/inventory"
 )
 
@@ -17,6 +18,9 @@ type createInventoryRequest struct {
 	Name string `json:"name"`
 	// Content is the inventory text, INI or YAML. Required.
 	Content string `json:"content"`
+	// CredentialIDs names stored credentials materialized for every run that targets this inventory,
+	// so the inventory can carry its own secret variables.
+	CredentialIDs []string `json:"credential_ids,omitempty"`
 }
 
 // listInventoriesResponse wraps the inventory list.
@@ -28,7 +32,7 @@ type listInventoriesResponse struct {
 }
 
 // createInventoryHandler stores a new inventory.
-func createInventoryHandler(store inventory.Store, log *zap.Logger) http.HandlerFunc {
+func createInventoryHandler(store inventory.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil {
 			respondError(w, log, http.StatusNotFound, "inventories not enabled")
@@ -43,8 +47,12 @@ func createInventoryHandler(store inventory.Store, log *zap.Logger) http.Handler
 			respondError(w, log, http.StatusBadRequest, "name and content are required")
 			return
 		}
+		if denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse, req.CredentialIDs...)) {
+			return
+		}
 		i := &inventory.Inventory{
-			ID: inventory.NewID(), Name: req.Name, Content: req.Content, CreatedAt: time.Now(),
+			ID: inventory.NewID(), Name: req.Name, Content: req.Content,
+			CredentialIDs: req.CredentialIDs, CreatedAt: time.Now(),
 		}
 		if err := store.Save(r.Context(), i); err != nil {
 			log.Error("server: save inventory: " + err.Error())
@@ -57,7 +65,7 @@ func createInventoryHandler(store inventory.Store, log *zap.Logger) http.Handler
 
 // updateInventoryHandler changes an existing inventory's name and content, keeping its id and
 // creation time.
-func updateInventoryHandler(store inventory.Store, log *zap.Logger) http.HandlerFunc {
+func updateInventoryHandler(store inventory.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil {
 			respondError(w, log, http.StatusNotFound, "inventories not enabled")
@@ -72,8 +80,13 @@ func updateInventoryHandler(store inventory.Store, log *zap.Logger) http.Handler
 			respondError(w, log, http.StatusBadRequest, "name and content are required")
 			return
 		}
+		if denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse, req.CredentialIDs...)) {
+			return
+		}
 		id := r.PathValue("id")
-		err := store.Update(r.Context(), &inventory.Inventory{ID: id, Name: req.Name, Content: req.Content})
+		err := store.Update(r.Context(), &inventory.Inventory{
+			ID: id, Name: req.Name, Content: req.Content, CredentialIDs: req.CredentialIDs,
+		})
 		if errors.Is(err, inventory.ErrNotFound) {
 			respondError(w, log, http.StatusNotFound, "inventory not found")
 			return

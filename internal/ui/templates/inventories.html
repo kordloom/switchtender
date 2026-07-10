@@ -38,6 +38,10 @@
 					<textarea id="inv-content" class="input mono" rows="8"
 						placeholder="[web]&#10;web01 ansible_host=10.0.0.5" required></textarea>
 				</label>
+				<label class="field-label">Credentials
+					<select id="inv-credentials" class="input" multiple size="3"></select>
+					<span class="field-hint">Secret variables every run against this inventory receives.</span>
+				</label>
 				<div class="launch-actions">
 					<button type="submit" class="button primary">Save</button>
 					<span id="inv-status" class="muted"></span>

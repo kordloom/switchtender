@@ -194,10 +194,11 @@ CREATE TABLE IF NOT EXISTS audit_entries (
 );
 CREATE INDEX IF NOT EXISTS idx_audit_at ON audit_entries(at DESC);
 CREATE TABLE IF NOT EXISTS inventories (
-	id         TEXT PRIMARY KEY,
-	name       TEXT NOT NULL DEFAULT '',
-	content    TEXT NOT NULL,
-	created_at TEXT NOT NULL
+	id             TEXT PRIMARY KEY,
+	name           TEXT NOT NULL DEFAULT '',
+	content        TEXT NOT NULL,
+	credential_ids TEXT NOT NULL DEFAULT '',
+	created_at     TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS credentials (
 	id         TEXT PRIMARY KEY,
@@ -252,6 +253,7 @@ ALTER TABLE templates ADD COLUMN IF NOT EXISTS tool TEXT NOT NULL DEFAULT '';
 ALTER TABLE templates ADD COLUMN IF NOT EXISTS command TEXT NOT NULL DEFAULT '';
 ALTER TABLE templates ADD COLUMN IF NOT EXISTS dry_run INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE credentials ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT '';
+ALTER TABLE inventories ADD COLUMN IF NOT EXISTS credential_ids TEXT NOT NULL DEFAULT '';
 `
 
 // store is a run.Store backed by a PostgreSQL database.

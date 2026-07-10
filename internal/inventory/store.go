@@ -24,6 +24,7 @@ func (m *memStore) Save(_ context.Context, i *Inventory) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	cp := *i
+	cp.CredentialIDs = append([]string(nil), i.CredentialIDs...)
 	m.inventories[i.ID] = &cp
 	return nil
 }
@@ -39,6 +40,7 @@ func (m *memStore) Update(_ context.Context, i *Inventory) error {
 	}
 	existing.Name = i.Name
 	existing.Content = i.Content
+	existing.CredentialIDs = append([]string(nil), i.CredentialIDs...)
 	return nil
 }
 
@@ -51,6 +53,7 @@ func (m *memStore) Get(_ context.Context, id string) (*Inventory, error) {
 		return nil, ErrNotFound
 	}
 	cp := *i
+	cp.CredentialIDs = append([]string(nil), i.CredentialIDs...)
 	return &cp, nil
 }
 
@@ -61,6 +64,7 @@ func (m *memStore) List(_ context.Context) ([]*Inventory, error) {
 	out := make([]*Inventory, 0, len(m.inventories))
 	for _, i := range m.inventories {
 		cp := *i
+		cp.CredentialIDs = append([]string(nil), i.CredentialIDs...)
 		out = append(out, &cp)
 	}
 	sort.Slice(out, func(i, j int) bool {
