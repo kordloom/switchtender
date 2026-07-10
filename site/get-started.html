@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Get started — Yardmaster</title>
+	<meta name="description" content="Get Yardmaster running in about a minute: one binary, one SQLite file, no Kubernetes. Install, serve, open the UI, launch your first run.">
+	<link rel="icon" type="image/png" href="/assets/favicon.png">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="/styles.css?v=5">
+</head>
+<body>
+	<div class="bg-mesh" aria-hidden="true"></div>
+	<div class="bg-grid" aria-hidden="true"></div>
+
+	<header class="nav" id="nav">
+		<div class="wrap nav-inner">
+			<a class="brand" href="/" aria-label="Yardmaster"><img src="/assets/logo-train-tracks-dark.png" alt="Yardmaster" class="brand-train"><span class="brand-word">Yardmaster</span></a>
+			<nav class="nav-links">
+				<a href="/#features">Features</a>
+				<a href="/#compare">Compare</a>
+				<a href="/docs/">Docs</a>
+			</nav>
+			<div class="nav-cta">
+				<a class="ghost" href="https://github.com/dcadolph/yardmaster">GitHub</a>
+				<a class="btn" href="#steps">Install</a>
+			</div>
+			<button class="nav-toggle" id="nav-toggle" aria-label="Menu">
+				<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="7" x2="21" y2="7"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="17" x2="21" y2="17"/></svg>
+			</button>
+		</div>
+	</header>
+
+	<main>
+		<section class="wrap gs-hero reveal">
+			<span class="eyebrow">Get started</span>
+			<h1>Running in <span class="grad">about a minute.</span></h1>
+			<p class="lede">One binary, one SQLite file. No Kubernetes, no Postgres, no Redis to stand up first. Here is the whole path from nothing to a live run.</p>
+		</section>
+
+		<section class="gs-steps wrap" id="steps">
+			<ol>
+				<li class="gs-step reveal">
+					<div class="gs-num">1</div>
+					<div class="gs-body">
+						<h3>Install</h3>
+						<p>Install with Go, or grab a prebuilt binary from the <a href="https://github.com/dcadolph/yardmaster/releases">releases page</a>. To run Ansible you also need <code>ansible-playbook</code> on the box; Bash and Python work out of the box.</p>
+						<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>go install github.com/dcadolph/yardmaster@latest</code></pre></div>
+					</div>
+				</li>
+				<li class="gs-step reveal">
+					<div class="gs-num">2</div>
+					<div class="gs-body">
+						<h3>Serve</h3>
+						<p>Start the server. SQLite is the default; point <code>--db</code> at a Postgres DSN when you want more than one instance. Set the encryption pair if you plan to store credentials.</p>
+						<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code><span class="c"># optional, only needed for stored secrets</span>
+export YARDMASTER_ENCRYPTION_KEY=change-me
+export YARDMASTER_ENCRYPTION_SALT=change-me-too
+
+yardmaster serve --addr :8080 --db yard.db</code></pre></div>
+					</div>
+				</li>
+				<li class="gs-step reveal">
+					<div class="gs-num">3</div>
+					<div class="gs-body">
+						<h3>Open the UI</h3>
+						<p>The whole interface lives at <code>/ui/</code>. This is where you launch runs and read them as a live host-by-task matrix.</p>
+						<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>open http://localhost:8080/ui/</code></pre></div>
+					</div>
+				</li>
+				<li class="gs-step reveal">
+					<div class="gs-num">4</div>
+					<div class="gs-body">
+						<h3>Launch your first run</h3>
+						<p>Click <strong>Launch run</strong> in the UI, or fire one over the API. No Ansible required for this one — it is a plain Bash run you can watch stream live.</p>
+						<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>curl -s -X POST localhost:8080/runs \
+  -H 'content-type: application/json' \
+  -d '{"tool":"bash","command":"echo hello from yardmaster"}'</code></pre></div>
+					</div>
+				</li>
+				<li class="gs-step reveal">
+					<div class="gs-num">5</div>
+					<div class="gs-body">
+						<h3>Lock it down</h3>
+						<p>Mint an admin token. The moment the first token exists, the API requires auth — so create one before you expose the server, then send it as a bearer token.</p>
+						<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>yardmaster token new --name admin --db yard.db</code></pre></div>
+					</div>
+				</li>
+			</ol>
+			<div class="gs-callout reveal">
+				<p><strong>Coming from AWX or Semaphore?</strong> Import your projects, inventories, templates, and schedules in one command.</p>
+				<a class="btn" href="/docs/switching-from-awx.html">Migration guide</a>
+			</div>
+		</section>
+
+		<section class="gs-next wrap reveal">
+			<h2>Where to next</h2>
+			<div class="gs-cards">
+				<a class="gs-link" href="/docs/concepts.html"><b>Concepts</b><span>Runs, inventories, pipelines, and the control plane.</span></a>
+				<a class="gs-link" href="/docs/tutorial-run-a-job.html"><b>Run a job</b><span>A guided first playbook, end to end.</span></a>
+				<a class="gs-link" href="/docs/tool-python.html"><b>Multi-tool</b><span>Ansible, Terraform, Bash, and Python in one engine.</span></a>
+				<a class="gs-link" href="/docs/tutorial-set-a-secret.html"><b>Secrets</b><span>Seal, source, and mask credentials.</span></a>
+				<a class="gs-link" href="/docs/comparison.html"><b>vs AWX &amp; Semaphore</b><span>The honest head-to-head.</span></a>
+				<a class="gs-link" href="/docs/api.html"><b>HTTP API</b><span>Every endpoint the server exposes.</span></a>
+			</div>
+		</section>
+
+		<section class="cta wrap reveal">
+			<h2>Put AWX and Semaphore to bed.</h2>
+			<p>Structured runs, balanced splits, a fleet that remembers, and a control plane that proves itself — from one binary.</p>
+			<div class="hero-cta center">
+				<a class="btn big" href="https://github.com/dcadolph/yardmaster">★ Star on GitHub</a>
+				<a class="ghost big" href="/docs/">Read the docs</a>
+			</div>
+		</section>
+	</main>
+
+	<footer class="footer">
+		<div class="wrap footer-inner">
+			<img src="/assets/logo-letters-dark.png" alt="Yardmaster" class="foot-logo">
+			<nav>
+				<a href="https://github.com/dcadolph/yardmaster">GitHub</a>
+				<a href="/docs/">Docs</a>
+				<a href="/docs/comparison.html">Compare</a>
+				<a href="https://github.com/dcadolph/yardmaster/blob/main/LICENSE">License</a>
+			</nav>
+			<span class="foot-note">Open source · BSL 1.1 · self-host free</span>
+		</div>
+	</footer>
+
+	<script src="/app.js?v=5"></script>
+</body>
+</html>

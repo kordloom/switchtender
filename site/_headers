@@ -1,8 +1,8 @@
-/index.html
+/*.html
   Cache-Control: public, max-age=0, must-revalidate
 
-/styles.css
+/*.css
   Cache-Control: public, max-age=0, must-revalidate
 
-/app.js
+/*.js
   Cache-Control: public, max-age=0, must-revalidate

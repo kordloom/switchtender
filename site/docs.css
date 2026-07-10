@@ -26,7 +26,10 @@ code, pre { font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, 
 	height: 60px; padding: 0 24px; background: rgba(8, 11, 16, 0.8); backdrop-filter: blur(14px);
 	border-bottom: 1px solid var(--border);
 }
+.brand { display: inline-flex; align-items: center; gap: 10px; }
 .brand-logo { height: 20px; display: block; }
+.brand-train { height: 30px; width: auto; display: block; }
+.brand-word { font-family: "Space Grotesk", sans-serif; font-weight: 700; font-size: 17px; letter-spacing: -0.01em; color: var(--text); }
 .dnav-tag {
 	font-size: 12px; font-weight: 600; color: var(--accent); text-transform: uppercase;
 	letter-spacing: 0.05em; padding: 3px 9px; border: 1px solid rgba(52, 211, 153, 0.3);

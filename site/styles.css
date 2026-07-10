@@ -67,7 +67,10 @@ code, pre { font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, 
 	border-bottom-color: var(--border);
 }
 .nav-inner { display: flex; align-items: center; gap: 24px; height: 68px; }
+.brand { display: inline-flex; align-items: center; gap: 10px; }
 .brand-logo { height: 22px; display: block; }
+.brand-train { height: 32px; width: auto; display: block; }
+.brand-word { font-family: "Space Grotesk", sans-serif; font-weight: 700; font-size: 18px; letter-spacing: -0.01em; color: var(--text); }
 .nav-links { display: flex; gap: 28px; margin-left: 12px; flex: 1; }
 .nav-links a { color: var(--muted); font-size: 14.5px; font-weight: 500; transition: color 0.15s; }
 .nav-links a:hover { color: var(--text); }
@@ -273,6 +276,31 @@ h1 {
 .footer nav a { color: var(--muted); font-size: 14px; transition: color 0.15s; }
 .footer nav a:hover { color: var(--text); }
 .foot-note { color: #63707d; font-size: 13px; }
+
+/* Get started page */
+.gs-hero { padding: 84px 24px 36px; text-align: center; }
+.gs-hero .eyebrow { margin-bottom: 20px; }
+.gs-hero h1 { font-family: "Space Grotesk", sans-serif; font-weight: 700; letter-spacing: -0.02em; font-size: clamp(38px, 6vw, 58px); line-height: 1.05; }
+.gs-hero .lede { margin: 20px auto 0; }
+.gs-steps { max-width: 780px; padding: 16px 24px 32px; }
+.gs-steps ol { list-style: none; display: grid; gap: 18px; }
+.gs-step { display: grid; grid-template-columns: 44px 1fr; gap: 20px; align-items: start; padding: 24px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.gs-num { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; font-family: "Space Grotesk", sans-serif; font-weight: 700; font-size: 19px; color: #05261a; background: linear-gradient(135deg, var(--accent), #6ee7b7); }
+.gs-body h3 { font-family: "Space Grotesk", sans-serif; font-size: 19px; font-weight: 600; margin-bottom: 6px; }
+.gs-body > p { color: var(--muted); font-size: 15px; margin-bottom: 14px; }
+.gs-body code { color: var(--accent); background: rgba(52, 211, 153, 0.1); padding: 1px 6px; border-radius: 5px; font-size: 13px; }
+.gs-body .code { margin: 0; }
+.gs-body .code pre { margin: 0; }
+.gs-callout { max-width: 780px; margin: 8px auto 0; padding: 18px 22px; border-radius: var(--radius); border: 1px solid rgba(52, 211, 153, 0.3); background: rgba(52, 211, 153, 0.07); display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.gs-callout p { margin: 0; color: var(--text); font-size: 15px; }
+.gs-next { max-width: 900px; padding: 44px 24px 20px; }
+.gs-next h2 { font-family: "Space Grotesk", sans-serif; font-size: 26px; font-weight: 600; text-align: center; }
+.gs-cards { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; margin-top: 22px; }
+.gs-link { padding: 18px 20px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); transition: border-color 0.15s, background 0.15s, transform 0.15s var(--ease); }
+.gs-link:hover { border-color: var(--border-2); background: var(--surface-2); transform: translateY(-2px); text-decoration: none; }
+.gs-link b { display: block; color: var(--text); font-weight: 600; margin-bottom: 4px; }
+.gs-link span { color: var(--muted); font-size: 14px; }
+@media (max-width: 600px) { .gs-cards { grid-template-columns: 1fr; } .gs-step { grid-template-columns: 1fr; gap: 12px; } }
 
 /* Reveal on scroll */
 .reveal { opacity: 0; transform: translateY(22px); transition: opacity 0.7s var(--ease), transform 0.7s var(--ease); }

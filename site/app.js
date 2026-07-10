@@ -21,18 +21,18 @@ const io = new IntersectionObserver((entries) => {
 }, { threshold: 0.12, rootMargin: "0px 0px -8% 0px" });
 for (const el of document.querySelectorAll(".reveal")) io.observe(el);
 
-// Copy the install snippet.
-const copy = document.getElementById("copy");
-if (copy) {
-	copy.addEventListener("click", async () => {
-		const code = document.querySelector(".code code").innerText;
+// Copy any code block: each .copy button copies the code in its own .code container.
+for (const btn of document.querySelectorAll(".copy")) {
+	btn.addEventListener("click", async () => {
+		const block = btn.closest(".code");
+		const code = block ? block.querySelector("code").innerText : "";
 		try {
 			await navigator.clipboard.writeText(code);
-			copy.textContent = "Copied ✓";
-			copy.classList.add("done");
-			setTimeout(() => { copy.textContent = "Copy"; copy.classList.remove("done"); }, 1800);
+			btn.textContent = "Copied ✓";
+			btn.classList.add("done");
+			setTimeout(() => { btn.textContent = "Copy"; btn.classList.remove("done"); }, 1800);
 		} catch {
-			copy.textContent = "Copy failed";
+			btn.textContent = "Copy failed";
 		}
 	});
 }
