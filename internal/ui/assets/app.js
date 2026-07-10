@@ -1085,6 +1085,7 @@ function renderMigratePlan(data) {
 	const groups = [
 		["Projects", data.projects],
 		["Inventories", data.inventories],
+		["Sources", data.sources],
 		["Credentials", data.credentials],
 		["Templates", data.templates],
 		["Schedules", data.schedules],

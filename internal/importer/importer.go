@@ -13,6 +13,7 @@ import (
 
 	"github.com/dcadolph/yardmaster/internal/credential"
 	"github.com/dcadolph/yardmaster/internal/inventory"
+	"github.com/dcadolph/yardmaster/internal/invsource"
 	"github.com/dcadolph/yardmaster/internal/project"
 	"github.com/dcadolph/yardmaster/internal/schedule"
 	"github.com/dcadolph/yardmaster/internal/template"
@@ -23,8 +24,11 @@ import (
 type Plan struct {
 	// Projects are the git projects to create.
 	Projects []*project.Project
-	// Inventories are the stored inventories to create.
+	// Inventories are the stored inventories to create, including the backing inventory each dynamic
+	// source maintains.
 	Inventories []*inventory.Inventory
+	// Sources are the dynamic inventory sources to create; each maintains one backing inventory.
+	Sources []*invsource.Source
 	// Templates are the job templates to create.
 	Templates []*template.Template
 	// Schedules are the schedules to create.

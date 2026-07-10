@@ -9,6 +9,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 
 	"github.com/dcadolph/yardmaster/internal/importer"
+	"github.com/dcadolph/yardmaster/internal/invsource"
 	"github.com/dcadolph/yardmaster/internal/template"
 )
 
@@ -37,9 +38,10 @@ func TestFromAWX(t *testing.T) {
 		t.Error("imported project should default to installing dependencies")
 	}
 
-	// The inventory becomes a stored inventory whose INI names every host and group.
-	if len(plan.Inventories) != 1 {
-		t.Fatalf("inventories = %d, want 1", len(plan.Inventories))
+	// The inventory becomes a stored inventory whose INI names every host and group. Two more
+	// inventories back the two dynamic sources.
+	if len(plan.Inventories) != 3 {
+		t.Fatalf("inventories = %d, want 3 (one static, two dynamic backings)", len(plan.Inventories))
 	}
 	ini := plan.Inventories[0].Content
 	for _, want := range []string{"web1.acme.internal ansible_user=deploy", "[web]", "web2.acme.internal", "[db]", "db1.acme.internal"} {
@@ -56,6 +58,43 @@ func TestFromAWX(t *testing.T) {
 		if c.Secret != "" {
 			t.Errorf("credential %q carried a secret, want a shell", c.Name)
 		}
+	}
+
+	// Two dynamic sources import: a file source keeps its path, a cloud plugin keeps its plugin name
+	// and is flagged. Each gets a backing inventory and wires its project and credential by id.
+	if len(plan.Sources) != 2 {
+		t.Fatalf("sources = %d, want 2", len(plan.Sources))
+	}
+	byName := map[string]*invsource.Source{}
+	for _, s := range plan.Sources {
+		byName[s.Name] = s
+	}
+	awsCred := plan.Credentials[2].ID // aws-keys is the third credential.
+	cloud := byName["Cloud hosts"]
+	if cloud == nil || cloud.Source != "inventories/prod.aws_ec2.yml" {
+		t.Fatalf("cloud source = %+v, want the source path kept", cloud)
+	}
+	if cloud.ProjectID != plan.Projects[0].ID {
+		t.Errorf("cloud source project id = %q, want %q", cloud.ProjectID, plan.Projects[0].ID)
+	}
+	if cloud.CredentialID != awsCred {
+		t.Errorf("cloud source credential id = %q, want %q", cloud.CredentialID, awsCred)
+	}
+	if !backingInventoryExists(plan, cloud.InventoryID, "Cloud hosts (dynamic)") {
+		t.Errorf("cloud source backing inventory %q not found", cloud.InventoryID)
+	}
+	legacy := byName["Legacy EC2"]
+	if legacy == nil || legacy.Source != "ec2" {
+		t.Fatalf("legacy source = %+v, want the plugin name kept", legacy)
+	}
+	if legacy.CredentialID != awsCred {
+		t.Errorf("legacy source credential id = %q, want %q", legacy.CredentialID, awsCred)
+	}
+	if legacy.ProjectID != "" {
+		t.Errorf("legacy source project id = %q, want empty", legacy.ProjectID)
+	}
+	if !backingInventoryExists(plan, legacy.InventoryID, "Legacy EC2 (dynamic)") {
+		t.Errorf("legacy source backing inventory %q not found", legacy.InventoryID)
 	}
 
 	// One template, wired to the project, inventory, and credentials by id.
@@ -104,7 +143,19 @@ func TestFromAWX(t *testing.T) {
 		t.Errorf("schedule template id = %q, want %q", sch.TemplateID, tpl.ID)
 	}
 
-	assertWarns(t, plan.Warnings, "Manual", "needs its secret re-entered", "cannot express")
+	assertWarns(t, plan.Warnings, "Manual", "needs its secret re-entered", "cannot express",
+		"point it at a plugin config file")
+}
+
+// backingInventoryExists reports whether the plan holds a backing inventory with the given id and
+// name and the empty JSON content a fresh dynamic inventory starts with.
+func backingInventoryExists(plan *importer.Plan, id, name string) bool {
+	for _, inv := range plan.Inventories {
+		if inv.ID == id && inv.Name == name && inv.Content == "{}" {
+			return true
+		}
+	}
+	return false
 }
 
 // assertWarns fails the test unless every needle appears in some warning.

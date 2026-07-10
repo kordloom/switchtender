@@ -7,6 +7,7 @@ import (
 
 	"github.com/dcadolph/yardmaster/internal/credential"
 	"github.com/dcadolph/yardmaster/internal/inventory"
+	"github.com/dcadolph/yardmaster/internal/invsource"
 	"github.com/dcadolph/yardmaster/internal/project"
 	"github.com/dcadolph/yardmaster/internal/schedule"
 	"github.com/dcadolph/yardmaster/internal/template"
@@ -24,6 +25,9 @@ type awxExport struct {
 	JobTemplates []awxJobTemplate `json:"job_templates"`
 	// Credentials are the credentials, with secrets omitted by AWX.
 	Credentials []awxCredential `json:"credentials"`
+	// InventorySources are dynamic inventory sources exported at the top level. Some exports nest them
+	// under each inventory's related block instead.
+	InventorySources []awxInventorySource `json:"inventory_sources"`
 }
 
 // awxProject is an AWX project.
@@ -46,6 +50,31 @@ type awxInventory struct {
 	Hosts []awxHost `json:"hosts"`
 	// Groups are the named host groups.
 	Groups []awxGroup `json:"groups"`
+	// Related carries dynamic inventory sources when the export nests them under the inventory.
+	Related *awxInventoryRelated `json:"related"`
+}
+
+// awxInventoryRelated holds an inventory's nested related assets.
+type awxInventoryRelated struct {
+	// InventorySources are the inventory's dynamic sources.
+	InventorySources []awxInventorySource `json:"inventory_sources"`
+}
+
+// awxInventorySource is an AWX dynamic inventory source: a file in a project or a cloud plugin that
+// generates hosts at refresh time.
+type awxInventorySource struct {
+	// Name labels the source.
+	Name string `json:"name"`
+	// Source is the AWX source type: scm for a file in a project, or a cloud plugin such as ec2.
+	Source string `json:"source"`
+	// SourcePath is the inventory file or plugin config path within the project, for scm sources.
+	SourcePath string `json:"source_path"`
+	// SourceProject references the project holding the config, for scm sources.
+	SourceProject awxRef `json:"source_project"`
+	// Credential references the credential that authenticates the plugin.
+	Credential awxRef `json:"credential"`
+	// Inventory references the inventory this source feeds, kept only for context.
+	Inventory awxRef `json:"inventory"`
 }
 
 // awxHost is an inventory host with optional variables.
@@ -184,6 +213,7 @@ func FromAWX(data []byte, now time.Time) (*Plan, error) {
 	}
 
 	inventoryIDs := map[string]string{}
+	var nestedSources []awxInventorySource
 	for _, inv := range append(export.Inventory, export.Inventories...) {
 		obj := &inventory.Inventory{
 			ID: inventory.NewID(), Name: inv.Name,
@@ -192,6 +222,9 @@ func FromAWX(data []byte, now time.Time) (*Plan, error) {
 		}
 		plan.Inventories = append(plan.Inventories, obj)
 		inventoryIDs[inv.Name] = obj.ID
+		if inv.Related != nil {
+			nestedSources = append(nestedSources, inv.Related.InventorySources...)
+		}
 	}
 
 	credentialIDs := map[string]string{}
@@ -207,10 +240,60 @@ func FromAWX(data []byte, now time.Time) (*Plan, error) {
 		plan.warn("credential %q needs its secret re-entered; exports omit secrets by design", c.Name)
 	}
 
+	for _, s := range export.InventorySources {
+		plan.addSource(s, now, projectIDs, credentialIDs)
+	}
+	for _, s := range nestedSources {
+		plan.addSource(s, now, projectIDs, credentialIDs)
+	}
+
 	for _, jt := range export.JobTemplates {
 		plan.addTemplate(jt, now, projectIDs, inventoryIDs, credentialIDs)
 	}
 	return plan, nil
+}
+
+// addSource maps one AWX inventory source into a dynamic source and the backing inventory it
+// maintains, wiring the project and credential references by id. A file source keeps its path; a
+// cloud plugin source has no file, so it imports with the plugin name and a warning that a config
+// must be set before it can refresh.
+func (p *Plan) addSource(s awxInventorySource, now time.Time, projectIDs, credentialIDs map[string]string) {
+	if s.Name == "" {
+		p.warn("inventory source skipped: it has no name")
+		return
+	}
+	src := &invsource.Source{ID: invsource.NewID(), Name: s.Name, CreatedAt: now}
+	switch {
+	case s.SourcePath != "":
+		src.Source = s.SourcePath
+	case s.Source != "":
+		src.Source = s.Source
+		p.warn("inventory source %q imports the %q plugin as its source; point it at a plugin config file before refreshing",
+			s.Name, s.Source)
+	default:
+		p.warn("inventory source %q skipped: it has no source path or plugin type", s.Name)
+		return
+	}
+	if name := string(s.SourceProject); name != "" {
+		if id, ok := projectIDs[name]; ok {
+			src.ProjectID = id
+		} else {
+			p.warn("inventory source %q references unknown project %q", s.Name, name)
+		}
+	}
+	if name := string(s.Credential); name != "" {
+		if id, ok := credentialIDs[name]; ok {
+			src.CredentialID = id
+		} else {
+			p.warn("inventory source %q references unknown credential %q", s.Name, name)
+		}
+	}
+	inv := &inventory.Inventory{
+		ID: inventory.NewID(), Name: s.Name + " (dynamic)", Content: "{}", CreatedAt: now,
+	}
+	src.InventoryID = inv.ID
+	p.Inventories = append(p.Inventories, inv)
+	p.Sources = append(p.Sources, src)
 }
 
 // addTemplate maps one job template and its schedules into the plan, wiring project, inventory, and

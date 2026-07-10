@@ -17,8 +17,11 @@ const maxImportBody = 25 << 20
 type importResponse struct {
 	// Projects names the git projects the import creates.
 	Projects []string `json:"projects"`
-	// Inventories names the stored inventories the import creates.
+	// Inventories names the stored inventories the import creates, including each dynamic source's
+	// backing inventory.
 	Inventories []string `json:"inventories"`
+	// Sources names the dynamic inventory sources the import creates.
+	Sources []string `json:"sources"`
 	// Credentials names the credential shells the import creates; their secrets must be set after.
 	Credentials []string `json:"credentials"`
 	// Templates names the job templates the import creates.
@@ -68,6 +71,9 @@ func importHandler(stores importStoresFunc, log *zap.Logger) http.HandlerFunc {
 		}
 		for _, inv := range plan.Inventories {
 			resp.Inventories = append(resp.Inventories, inv.Name)
+		}
+		for _, s := range plan.Sources {
+			resp.Sources = append(resp.Sources, s.Name)
 		}
 		for _, c := range plan.Credentials {
 			resp.Credentials = append(resp.Credentials, c.Name)

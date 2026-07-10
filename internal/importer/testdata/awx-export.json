@@ -10,13 +10,21 @@
       "groups": [
         {"name": "web", "hosts": [{"name": "web1.acme.internal"}, {"name": "web2.acme.internal"}]},
         {"name": "db", "hosts": [{"name": "db1.acme.internal"}]}
-      ]
+      ],
+      "related": {
+        "inventory_sources": [
+          {"name": "Legacy EC2", "source": "ec2", "credential": "aws-keys", "inventory": "Production"}
+        ]
+      }
     }
   ],
   "credentials": [
     {"name": "prod-ssh", "credential_type": "Machine"},
     {"name": "vault-pw", "credential_type": "Vault"},
     {"name": "aws-keys", "credential_type": "Amazon Web Services"}
+  ],
+  "inventory_sources": [
+    {"name": "Cloud hosts", "source": "scm", "source_path": "inventories/prod.aws_ec2.yml", "source_project": "Web", "credential": "aws-keys", "inventory": "Production"}
   ],
   "job_templates": [
     {

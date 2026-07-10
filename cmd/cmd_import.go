@@ -92,6 +92,10 @@ func reportPlan(plan *importer.Plan) {
 	for _, inv := range plan.Inventories {
 		fmt.Printf("    - %s\n", inv.Name)
 	}
+	fmt.Printf("  Sources:     %d\n", len(plan.Sources))
+	for _, s := range plan.Sources {
+		fmt.Printf("    - %s (%s)\n", s.Name, s.Source)
+	}
 	fmt.Printf("  Credentials: %d (secrets must be re-entered)\n", len(plan.Credentials))
 	for _, c := range plan.Credentials {
 		fmt.Printf("    - %s (%s)\n", c.Name, c.Kind)
@@ -123,6 +127,7 @@ func applyPlan(ctx context.Context, plan *importer.Plan) (int, error) {
 
 	return plan.Apply(ctx, importer.ApplyStores{
 		Projects: bundle.Projects(), Inventories: bundle.Inventories(),
+		Sources:     bundle.InventorySources(),
 		Credentials: bundle.Credentials(), Templates: bundle.Templates(),
 		Schedules: bundle.Schedules(),
 	})

@@ -328,8 +328,8 @@ func (s *Server) Handler() http.Handler {
 			return importer.ApplyStores{}, false
 		}
 		return importer.ApplyStores{
-			Projects: s.projects, Inventories: s.inventories, Credentials: s.credentials,
-			Templates: s.templates, Schedules: s.schedules,
+			Projects: s.projects, Inventories: s.inventories, Sources: s.invSources,
+			Credentials: s.credentials, Templates: s.templates, Schedules: s.schedules,
 		}, true
 	}, s.log))
 	var handler http.Handler = mux
