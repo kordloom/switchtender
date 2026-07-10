@@ -80,6 +80,7 @@ func (u *UI) Handler() http.Handler {
 	mux.HandleFunc("GET /ui/inventories", u.inventories)
 	mux.HandleFunc("GET /ui/sources", u.sources)
 	mux.HandleFunc("GET /ui/credentials", u.credentials)
+	mux.HandleFunc("GET /ui/audit", u.audit)
 	mux.HandleFunc("GET /ui/projects", u.projects)
 	mux.HandleFunc("GET /ui/templates", u.jobTemplates)
 	mux.HandleFunc("GET /ui/schedules", u.schedules)
@@ -127,6 +128,11 @@ func (u *UI) tasks(w http.ResponseWriter, _ *http.Request) {
 // credentials renders the credential management page.
 func (u *UI) credentials(w http.ResponseWriter, _ *http.Request) {
 	u.render(w, "credentials.html", map[string]any{"ReadOnly": u.readOnly})
+}
+
+// audit renders the audit trail page with chain verification and signed export.
+func (u *UI) audit(w http.ResponseWriter, _ *http.Request) {
+	u.render(w, "audit.html", map[string]any{"ReadOnly": u.readOnly})
 }
 
 // projects renders the git project management page.

@@ -164,6 +164,7 @@ h2 { font-size: 14px; font-weight: 600; margin: 0; }
 .page-head-text h1 { margin: 0 0 3px; }
 .page-head-text p { margin: 0; }
 .page-head .button { flex: none; }
+.head-actions { display: flex; align-items: center; gap: 10px; flex: none; flex-wrap: wrap; }
 
 /* Summary metrics shown as one unified strip divided into segments. */
 .summary { display: flex; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; margin: 0 0 20px; }

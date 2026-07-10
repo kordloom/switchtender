@@ -24,6 +24,7 @@ const NAV_GROUPS = [
 	{ label: "Access", items: [
 		{ key: "credentials", href: "/ui/credentials", label: "Credentials", desc: "Secrets and keys", admin: true },
 		{ key: "users", href: "/ui/users", label: "Users", desc: "Accounts and roles", admin: true },
+		{ key: "audit", href: "/ui/audit", label: "Audit", desc: "Tamper-evident change log", admin: true },
 	] },
 	{ label: "Help", items: [
 		{ key: "docs", href: "/ui/docs", label: "Docs", desc: "Guides and reference" },
@@ -35,7 +36,7 @@ const PAGE_NAV = {
 	overview: "overview", runs: "runs", detail: "runs", fleet: "fleet", host: "fleet",
 	tasks: "tasks", workers: "workers", projects: "projects", inventories: "inventories",
 	sources: "sources", jobtemplates: "templates", schedules: "schedules",
-	migrate: "migrate", credentials: "credentials", users: "users", docs: "docs",
+	migrate: "migrate", credentials: "credentials", users: "users", audit: "audit", docs: "docs",
 };
 
 // NAV_ICONS holds the inline SVG body for each nav key, stroked in the current color.
@@ -370,6 +371,9 @@ document.addEventListener("DOMContentLoaded", () => {
 		wireModal("cred");
 		wireCredentialForm();
 		loadCredentials();
+	} else if (page === "audit") {
+		wireAudit();
+		loadAudit();
 	} else if (page === "projects") {
 		wireModal("project");
 		wireProjectForm();
@@ -650,6 +654,77 @@ function shortId(id) {
 // isReadOnly reports whether the server serves a read-only demo, which hides mutating controls.
 function isReadOnly() {
 	return document.body.dataset.readonly === "true";
+}
+
+// loadAudit fills the audit table with the trail, newest first, showing each entry's chain hash.
+async function loadAudit() {
+	try {
+		const data = await getJSON("/audit?limit=500");
+		const entries = data.entries || [];
+		if (entries.length === 0) {
+			showEmpty("No audit entries yet. Mutations are recorded here.");
+			return;
+		}
+		const tbody = document.getElementById("audit");
+		for (const e of entries) {
+			const tr = document.createElement("tr");
+			tr.appendChild(td(String(e.seq)));
+			tr.appendChild(tdTime(e.at));
+			tr.appendChild(td(e.actor || "-"));
+			tr.appendChild(td(e.method, "mono"));
+			tr.appendChild(td(e.path, "mono"));
+			tr.appendChild(td((e.hash || "").slice(0, 12), "mono"));
+			tbody.appendChild(tr);
+		}
+		setStatus("");
+		document.querySelector("table.runs").hidden = false;
+	} catch (e) {
+		setStatus("Failed to load the audit trail: " + e.message);
+	}
+}
+
+// wireAudit hooks the verify and export buttons. Verify recomputes the chain and shows a badge;
+// export downloads the signed snapshot for offline verification.
+function wireAudit() {
+	const badge = document.getElementById("audit-badge");
+	const verify = document.getElementById("audit-verify");
+	if (verify) {
+		verify.addEventListener("click", async () => {
+			badge.hidden = false;
+			badge.className = "chip none";
+			badge.textContent = "Verifying...";
+			try {
+				const r = await getJSON("/audit/verify");
+				if (r.ok) {
+					badge.className = "chip ok";
+					badge.textContent = "Chain verified: " + r.count + " entries";
+				} else {
+					badge.className = "chip failed";
+					badge.textContent = "Tampered at entry " + r.broke_at;
+				}
+			} catch (err) {
+				badge.className = "chip failed";
+				badge.textContent = "Verify failed: " + err.message;
+			}
+		});
+	}
+	const exp = document.getElementById("audit-export");
+	if (exp) {
+		exp.addEventListener("click", async () => {
+			try {
+				const data = await getJSON("/audit/export");
+				const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+				const url = URL.createObjectURL(blob);
+				const a = document.createElement("a");
+				a.href = url;
+				a.download = "audit-export.json";
+				a.click();
+				URL.revokeObjectURL(url);
+			} catch (err) {
+				setStatus("Export failed: " + err.message);
+			}
+		});
+	}
 }
 
 // tdTime builds a table cell showing a relative age with the full timestamp on hover. It carries
