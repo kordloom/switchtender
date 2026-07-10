@@ -13,8 +13,9 @@ pieces. If a term is unfamiliar, the [concepts](concepts.md) page defines it.
 
 ## What is different, in one paragraph
 
-Yardmaster runs the same playbooks against the same inventories, but there is no Kubernetes, no
-Redis, and no separate task engine to operate. One binary is the API, the executor, the scheduler,
+Yardmaster runs the same playbooks against the same inventories, and drives Bash, Terraform, and
+Python besides, but there is no Kubernetes, no Redis, and no separate task engine to operate. One
+binary is the API, the executor, the scheduler,
 and the UI. State is one database: a SQLite file to start, or PostgreSQL when you want more than one
 instance. You still have projects, inventories, templates, surveys, schedules, and credentials; they
 just live behind a smaller, faster surface.
@@ -135,8 +136,7 @@ Add a schedule in Schedules with a cron expression to fire a template on a caden
 
 ## What is not one to one yet
 
-- No SSO or LDAP yet; sign-in is accounts and tokens.
-- Ansible is the only runtime today; other runtimes are on the roadmap.
+- Single sign-on is OpenID Connect; there is no LDAP yet. Accounts and API tokens also sign in.
 - The visual workflow editor is a pipeline defined through the API and shown in the UI, not a
   drag-and-drop canvas.
 
