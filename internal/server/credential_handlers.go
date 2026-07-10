@@ -28,9 +28,19 @@ type createCredentialRequest struct {
 // listCredentialsResponse wraps the credential list, secrets excluded by the model's json tags.
 type listCredentialsResponse struct {
 	// Credentials is the ordered list.
-	Credentials []*credential.Credential `json:"credentials"`
+	Credentials []credentialView `json:"credentials"`
 	// Count is the number returned.
 	Count int `json:"count"`
+}
+
+// credentialView is a credential in a list response, adding whether it still needs a secret so the
+// UI can flag imported shells and offer to fill them. The embedded credential's sealed secret stays
+// hidden by its json tag.
+type credentialView struct {
+	*credential.Credential
+	// NeedsSecret reports that the credential has no sealed secret yet, as imported credential shells
+	// do until their secret is set.
+	NeedsSecret bool `json:"needs_secret"`
 }
 
 // createCredentialHandler seals and stores a new credential.
@@ -185,8 +195,12 @@ func listCredentialsHandler(store credential.Store, log *zap.Logger) http.Handle
 			respondError(w, log, http.StatusInternalServerError, "could not list credentials")
 			return
 		}
+		views := make([]credentialView, 0, len(list))
+		for _, c := range list {
+			views = append(views, credentialView{Credential: c, NeedsSecret: c.Secret == ""})
+		}
 		respondJSON(w, log, http.StatusOK,
-			listCredentialsResponse{Credentials: list, Count: len(list)}, wantsPretty(r))
+			listCredentialsResponse{Credentials: views, Count: len(views)}, wantsPretty(r))
 	}
 }
 

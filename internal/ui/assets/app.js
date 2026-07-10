@@ -871,6 +871,7 @@ async function loadCredentials() {
 			showEmpty("No credentials yet.");
 			return;
 		}
+		renderNeedsSecret(creds);
 		const tbody = document.getElementById("credentials");
 		for (const c of creds) {
 			const tr = document.createElement("tr");
@@ -905,6 +906,97 @@ async function loadCredentials() {
 	} catch (e) {
 		setStatus("Failed to load credentials: " + e.message);
 	}
+}
+
+// renderNeedsSecret fills the panel listing credentials that still have no secret and lets an admin
+// set each one in place, so a freshly imported set is finished on a single screen instead of opening
+// each credential. In the read-only demo the inputs are disabled.
+function renderNeedsSecret(creds) {
+	const panel = document.getElementById("cred-needs");
+	if (!panel) return;
+	panel.innerHTML = "";
+	const pending = creds.filter((c) => c.needs_secret);
+	if (pending.length === 0) {
+		panel.hidden = true;
+		return;
+	}
+	const readOnly = isReadOnly();
+
+	const head = document.createElement("div");
+	head.className = "cred-needs-head";
+	const title = document.createElement("strong");
+	const setTitle = (n) => {
+		title.textContent = n + (n === 1 ? " credential needs a secret" : " credentials need a secret");
+	};
+	setTitle(pending.length);
+	const sub = document.createElement("span");
+	sub.className = "cred-needs-sub";
+	sub.textContent = "Set a secret on each to make it usable. Imported credentials arrive this way.";
+	head.appendChild(title);
+	head.appendChild(sub);
+	panel.appendChild(head);
+
+	const list = document.createElement("div");
+	list.className = "cred-needs-list";
+	let remaining = pending.length;
+	for (const c of pending) {
+		const row = document.createElement("div");
+		row.className = "cred-needs-row";
+		const meta = document.createElement("div");
+		meta.className = "cred-needs-meta";
+		const name = document.createElement("span");
+		name.className = "cred-needs-name";
+		name.textContent = c.name;
+		const kind = document.createElement("span");
+		kind.className = "cred-needs-kind";
+		kind.textContent = c.kind;
+		meta.appendChild(name);
+		meta.appendChild(kind);
+
+		const input = document.createElement("textarea");
+		input.className = "input mono cred-needs-input";
+		input.rows = 2;
+		input.placeholder = "Paste the secret";
+		input.disabled = readOnly;
+		const save = document.createElement("button");
+		save.className = "button primary";
+		save.textContent = "Save";
+		save.disabled = readOnly;
+		const status = document.createElement("span");
+		status.className = "cred-needs-status muted";
+		if (readOnly) status.textContent = "Disabled in the demo";
+
+		save.addEventListener("click", async () => {
+			const secret = input.value;
+			if (!secret.trim()) {
+				status.textContent = "Enter a secret first.";
+				return;
+			}
+			save.disabled = true;
+			status.textContent = "Saving…";
+			try {
+				await postAction("/credentials/" + c.id, { name: c.name, secret }, "PUT");
+				row.remove();
+				remaining -= 1;
+				if (remaining === 0) {
+					panel.hidden = true;
+				} else {
+					setTitle(remaining);
+				}
+			} catch (err) {
+				save.disabled = false;
+				status.textContent = "Save failed: " + err.message;
+			}
+		});
+
+		row.appendChild(meta);
+		row.appendChild(input);
+		row.appendChild(save);
+		row.appendChild(status);
+		list.appendChild(row);
+	}
+	panel.appendChild(list);
+	panel.hidden = false;
 }
 
 // fillSelect loads options into a select from a list endpoint.

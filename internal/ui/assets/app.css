@@ -400,3 +400,18 @@ button.topbar-link { background: none; border: none; padding: 0; font: inherit; 
 .tour-btns { display: flex; gap: 8px; }
 .tour-btns .button { padding: 5px 12px; }
 @media (prefers-reduced-motion: reduce) { .tour-hole { transition: none; } }
+
+/* Credentials that still need a secret: a panel to fill imported shells in one place, so a migrated
+   set is finished on one screen. The amber edge marks it as an action to take. */
+.cred-needs { background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--changed); border-radius: var(--radius); padding: 14px 18px; margin-bottom: 18px; }
+.cred-needs-head { display: flex; flex-direction: column; gap: 2px; margin-bottom: 12px; }
+.cred-needs-head strong { font-size: 14px; }
+.cred-needs-sub { font-size: 13px; color: var(--muted); }
+.cred-needs-list { display: flex; flex-direction: column; gap: 10px; }
+.cred-needs-row { display: grid; grid-template-columns: 160px 1fr auto; gap: 10px; align-items: start; }
+.cred-needs-meta { display: flex; flex-direction: column; gap: 4px; padding-top: 6px; min-width: 0; }
+.cred-needs-name { font-size: 13px; font-weight: 600; word-break: break-word; }
+.cred-needs-kind { align-self: flex-start; padding: 1px 7px; border-radius: 999px; font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; background: var(--surface-3); color: var(--muted); }
+.cred-needs-input { width: 100%; resize: vertical; }
+.cred-needs-status { grid-column: 2 / -1; font-size: 12px; }
+@media (max-width: 680px) { .cred-needs-row { grid-template-columns: 1fr; } .cred-needs-status { grid-column: 1; } }
