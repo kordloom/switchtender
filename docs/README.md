@@ -7,8 +7,9 @@
 
 # Documentation
 
-Yardmaster runs Ansible playbooks across a fleet and treats every run as structured data. One
-binary: `serve` is the API, the executor, the scheduler, and the web UI; `worker` adds capacity.
+Yardmaster runs Ansible, Bash, Terraform, and Python across a fleet and treats every run as
+structured data. One binary: `serve` is the API, the executor, the scheduler, and the web UI;
+`worker` adds capacity.
 State lives in one database, SQLite by default or PostgreSQL by DSN. These pages also render inside
 the app at `/ui/docs`.
 
@@ -16,6 +17,7 @@ the app at `/ui/docs`.
 |-------|------|
 | [Quickstart](quickstart.md) | Zero to a first run in a few minutes.|
 | [Switching from AWX](switching-from-awx.md) | Import what you have, or set up from scratch.|
+| [Tutorials](tutorials.md) | Task-focused walk-throughs for AWX and Semaphore users.|
 | [Concepts](concepts.md) | Runs, splits, pipelines, projects, templates, and the rest.|
 | [Configuration](configuration.md) | Every command, flag, and environment variable.|
 | [Features](features.md) | The full capability list.|

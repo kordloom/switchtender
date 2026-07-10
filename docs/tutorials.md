@@ -1,0 +1,23 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="../assets/logo-letters-dark.png">
+    <img src="../assets/logo-letters.png" alt="Yardmaster" width="140">
+  </picture>
+</p>
+
+# Tutorials
+
+Short, task-focused walk-throughs for the things you did every day in AWX or Semaphore. Each one maps
+a task you already know to how it works here, in a few steps. New to Yardmaster? Start with the
+[quickstart](quickstart.md), then come back.
+
+| Task | In AWX or Semaphore | In Yardmaster |
+|------|---------------------|---------------|
+| [Run a job](tutorial-run-a-job.md) | Launch a job template | Launch a run, with any tool.|
+| [Save a template](tutorial-save-a-template.md) | Create a job template | Save a launch preset.|
+| [Schedule a job](tutorial-schedule-a-job.md) | Add a schedule | Fire a template on a cron.|
+| [Set a secret](tutorial-set-a-secret.md) | Create a credential | Seal a secret, or resolve it from Vault at run time.|
+| [Migrate your setup](tutorial-migrate.md) | Export, then rebuild by hand | Import the whole export at once.|
+
+For the bigger picture, read [switching from AWX](switching-from-awx.md) and the
+[concepts](concepts.md) page.

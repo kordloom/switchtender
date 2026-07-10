@@ -12,8 +12,10 @@ import (
 
 // docOrder is the order documentation pages appear in the sidebar. Files not listed follow, sorted.
 var docOrder = []string{
-	"README", "quickstart", "faq", "switching-from-awx", "concepts", "configuration", "features", "api",
-	"migration", "comparison",
+	"README", "quickstart", "faq", "switching-from-awx",
+	"tutorials", "tutorial-run-a-job", "tutorial-save-a-template", "tutorial-schedule-a-job",
+	"tutorial-set-a-secret", "tutorial-migrate",
+	"concepts", "configuration", "features", "api", "migration", "comparison",
 }
 
 // mdLinkPattern matches links between documentation pages, which are relative markdown file names on
