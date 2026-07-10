@@ -63,6 +63,19 @@ function mountTopbar() {
 	if (!bar || bar.querySelector(".topbar-links")) return;
 	const nav = document.createElement("nav");
 	nav.className = "topbar-links";
+	const tour = document.createElement("button");
+	tour.type = "button";
+	tour.className = "topbar-link tour-start";
+	tour.textContent = "Tour";
+	tour.addEventListener("click", () => {
+		if (document.body.dataset.page === "overview") {
+			startTour();
+		} else {
+			sessionStorage.setItem("ym_tour_replay", "1");
+			window.location.assign("/ui/");
+		}
+	});
+	nav.appendChild(tour);
 	const docs = document.createElement("a");
 	docs.href = "/ui/docs";
 	docs.className = "topbar-link";
@@ -112,6 +125,215 @@ function mountListFilter() {
 		}
 		count.textContent = q ? shown + " shown" : "";
 	});
+}
+
+// TOUR_STEPS drives the guided tour. Each step spotlights one element on the overview and explains a
+// capability; a step with no selector shows a centered card. The tour is the first-visit welcome and
+// replays from the Tour link in the top bar.
+const TOUR_STEPS = [
+	{
+		title: "Welcome to Yardmaster",
+		body: "One binary runs Ansible, Bash, Terraform, and Python, with no Kubernetes. Here is the sixty-second tour.",
+	},
+	{
+		sel: ".page-head .button.primary",
+		title: "Launch any tool",
+		body: "Start a run with Ansible, Bash, Terraform, or Python, each with a dry run, and mix them in a single pipeline.",
+	},
+	{
+		sel: ".panel-runs",
+		title: "Watch every run",
+		body: "Runs stream live here, with a host matrix, sharded splits, and multi-step pipelines all in one place.",
+	},
+	{
+		sel: ".migrate-callout",
+		title: "Bring your work with you",
+		body: "Moving off AWX or Semaphore? Import projects, inventories, templates, and schedules in a few clicks.",
+	},
+	{
+		sel: ".tile-search",
+		title: "Find anything fast",
+		body: "This search filters instantly, and every list in Yardmaster is searchable the same way.",
+	},
+	{
+		sel: ".nav-toggle",
+		title: "The rest of the yard",
+		body: "Job templates, credentials with external secrets, schedules, and fleet analytics all live in this menu.",
+	},
+	{
+		title: "You are set",
+		body: "Explore the demo freely; nothing here can be broken. Replay this tour anytime from Tour in the top bar.",
+	},
+];
+
+// tourState holds the running tour's overlay elements and current step, or null when no tour is open.
+let tourState = null;
+
+// mountTour starts the tour automatically on a first visit to the overview, recording a flag so it
+// shows once, and honors a replay requested from another page by the Tour link.
+function mountTour() {
+	if (document.body.dataset.page !== "overview") return;
+	if (sessionStorage.getItem("ym_tour_replay")) {
+		sessionStorage.removeItem("ym_tour_replay");
+		window.setTimeout(startTour, 300);
+		return;
+	}
+	if (localStorage.getItem("ym_tour_done")) return;
+	window.setTimeout(startTour, 400);
+}
+
+// startTour builds the spotlight overlay and shows the first step. Calling it while a tour runs
+// restarts it from the top.
+function startTour() {
+	endTour(false);
+	const blocker = document.createElement("div");
+	blocker.className = "tour-blocker";
+	const hole = document.createElement("div");
+	hole.className = "tour-hole";
+	const pop = document.createElement("div");
+	pop.className = "tour-pop";
+	pop.setAttribute("role", "dialog");
+	pop.setAttribute("aria-modal", "true");
+	pop.setAttribute("aria-labelledby", "tour-title");
+	pop.innerHTML =
+		'<div class="tour-pop-body"><h3 class="tour-title" id="tour-title"></h3>' +
+		'<p class="tour-text"></p></div>' +
+		'<div class="tour-foot"><span class="tour-count muted"></span>' +
+		'<div class="tour-btns">' +
+		'<button type="button" class="button tour-skip">Skip</button>' +
+		'<button type="button" class="button tour-back">Back</button>' +
+		'<button type="button" class="button primary tour-next">Next</button>' +
+		"</div></div>";
+	document.body.appendChild(blocker);
+	document.body.appendChild(hole);
+	document.body.appendChild(pop);
+
+	tourState = { step: 0, blocker, hole, pop };
+	pop.querySelector(".tour-skip").addEventListener("click", () => endTour(true));
+	pop.querySelector(".tour-back").addEventListener("click", () => moveTour(-1));
+	pop.querySelector(".tour-next").addEventListener("click", () => moveTour(1));
+	document.addEventListener("keydown", tourKey);
+	window.addEventListener("resize", tourReflow);
+	window.addEventListener("scroll", tourReflow, true);
+	showTourStep();
+}
+
+// moveTour advances or rewinds the tour, ending it when Next is pressed on the last step.
+function moveTour(delta) {
+	if (!tourState) return;
+	const next = tourState.step + delta;
+	if (next >= TOUR_STEPS.length) {
+		endTour(true);
+		return;
+	}
+	if (next < 0) return;
+	tourState.step = next;
+	showTourStep();
+}
+
+// showTourStep fills the popover for the current step, scrolls its target into view, positions the
+// spotlight, and focuses Next so the keyboard drives the tour.
+function showTourStep() {
+	if (!tourState) return;
+	const step = TOUR_STEPS[tourState.step];
+	const { pop } = tourState;
+	pop.querySelector(".tour-title").textContent = step.title;
+	pop.querySelector(".tour-text").textContent = step.body;
+	pop.querySelector(".tour-count").textContent = (tourState.step + 1) + " / " + TOUR_STEPS.length;
+	pop.querySelector(".tour-back").hidden = tourState.step === 0;
+	const isLast = tourState.step === TOUR_STEPS.length - 1;
+	pop.querySelector(".tour-next").textContent = isLast ? "Explore" : "Next";
+	pop.querySelector(".tour-skip").hidden = isLast;
+
+	const el = step.sel ? document.querySelector(step.sel) : null;
+	if (el) el.scrollIntoView({ block: "center", inline: "nearest" });
+	renderTourPosition();
+	pop.querySelector(".tour-next").focus();
+}
+
+// renderTourPosition places the spotlight and popover for the current step without scrolling, so it
+// is safe to call on scroll and resize.
+function renderTourPosition() {
+	if (!tourState) return;
+	const step = TOUR_STEPS[tourState.step];
+	const el = step.sel ? document.querySelector(step.sel) : null;
+	if (el) {
+		placeTourAt(el.getBoundingClientRect());
+	} else {
+		placeTourCentered();
+	}
+}
+
+// placeTourAt cuts the spotlight hole to a target rect and floats the popover below it, or above when
+// there is more room there, clamped to the viewport.
+function placeTourAt(rect) {
+	const { hole, pop } = tourState;
+	const pad = 6;
+	hole.style.width = (rect.width + pad * 2) + "px";
+	hole.style.height = (rect.height + pad * 2) + "px";
+	hole.style.top = (rect.top - pad) + "px";
+	hole.style.left = (rect.left - pad) + "px";
+
+	const gap = 12;
+	const pw = Math.min(340, window.innerWidth - 24);
+	pop.style.width = pw + "px";
+	const ph = pop.offsetHeight;
+	let top = rect.bottom + gap;
+	if (top + ph > window.innerHeight - 12 && rect.top - gap - ph > 12) {
+		top = rect.top - gap - ph;
+	}
+	top = Math.max(12, Math.min(top, window.innerHeight - ph - 12));
+	let left = rect.left + rect.width / 2 - pw / 2;
+	left = Math.max(12, Math.min(left, window.innerWidth - pw - 12));
+	pop.style.top = top + "px";
+	pop.style.left = left + "px";
+}
+
+// placeTourCentered collapses the hole to a full dim and centers the popover for a step with no
+// target.
+function placeTourCentered() {
+	const { hole, pop } = tourState;
+	hole.style.width = "0px";
+	hole.style.height = "0px";
+	hole.style.top = "50%";
+	hole.style.left = "50%";
+	const pw = Math.min(360, window.innerWidth - 24);
+	pop.style.width = pw + "px";
+	pop.style.top = Math.max(12, window.innerHeight / 2 - pop.offsetHeight / 2) + "px";
+	pop.style.left = (window.innerWidth / 2 - pw / 2) + "px";
+}
+
+// tourReflow repositions the current step when the window scrolls or resizes.
+function tourReflow() {
+	renderTourPosition();
+}
+
+// tourKey drives the tour from the keyboard: Escape ends it, arrows and Enter move between steps.
+function tourKey(e) {
+	if (!tourState) return;
+	if (e.key === "Escape") {
+		endTour(true);
+	} else if (e.key === "ArrowRight" || e.key === "Enter") {
+		e.preventDefault();
+		moveTour(1);
+	} else if (e.key === "ArrowLeft") {
+		e.preventDefault();
+		moveTour(-1);
+	}
+}
+
+// endTour tears down the overlay and its listeners. When completed is true it records that the tour
+// has been seen so it does not auto-start again.
+function endTour(completed) {
+	if (completed) localStorage.setItem("ym_tour_done", "1");
+	if (!tourState) return;
+	document.removeEventListener("keydown", tourKey);
+	window.removeEventListener("resize", tourReflow);
+	window.removeEventListener("scroll", tourReflow, true);
+	tourState.blocker.remove();
+	tourState.hole.remove();
+	tourState.pop.remove();
+	tourState = null;
 }
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -173,6 +395,7 @@ document.addEventListener("DOMContentLoaded", () => {
 	buildNav();
 	if (isReadOnly()) applyReadOnly();
 	setInterval(refreshRelTimes, 20000);
+	mountTour();
 });
 
 // showSkeletonRows fills a table body with shimmering placeholders while its data loads.

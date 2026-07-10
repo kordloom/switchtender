@@ -386,3 +386,17 @@ table.matrix td { padding: 3px; }
 
 /* Fleet */
 .fail-count { color: var(--failed); font-weight: 600; }
+
+/* Guided tour: a spotlight walks the overview on first visit and replays from the Tour link. The
+   hole's large translucent box-shadow dims the whole viewport while leaving its rect clear. */
+button.topbar-link { background: none; border: none; padding: 0; font: inherit; cursor: pointer; }
+.tour-blocker { position: fixed; inset: 0; z-index: 90; }
+.tour-hole { position: fixed; top: 0; left: 0; z-index: 91; border-radius: 8px; pointer-events: none; box-shadow: 0 0 0 9999px rgba(1, 4, 9, 0.6); transition: top 0.2s ease, left 0.2s ease, width 0.2s ease, height 0.2s ease; }
+.tour-pop { position: fixed; z-index: 92; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28); padding: 16px 18px; }
+.tour-title { margin: 0 0 6px; font-size: 15px; font-weight: 600; }
+.tour-text { margin: 0; font-size: 13.5px; line-height: 1.5; color: var(--muted); }
+.tour-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 15px; }
+.tour-count { font-size: 12px; }
+.tour-btns { display: flex; gap: 8px; }
+.tour-btns .button { padding: 5px 12px; }
+@media (prefers-reduced-motion: reduce) { .tour-hole { transition: none; } }
