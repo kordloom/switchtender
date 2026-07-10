@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Terraform runs — Yardmaster docs</title>
+	<link rel="icon" type="image/png" href="/assets/favicon.png">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="/docs.css?v=1">
+</head>
+<body>
+	<header class="dnav">
+		<a class="brand" href="/"><img src="/assets/logo-letters-dark.png" alt="Yardmaster" class="brand-logo"></a>
+		<span class="dnav-tag">Docs</span>
+		<nav class="dnav-links">
+			<a href="/">Home</a>
+			<a href="/#compare">Compare</a>
+			<a href="https://github.com/dcadolph/yardmaster">GitHub</a>
+		</nav>
+	</header>
+	<div class="dshell">
+		<aside class="dside">
+			<nav>
+				<a href="/docs/index.html">Overview</a><a href="/docs/quickstart.html">Quickstart</a><a href="/docs/faq.html">FAQ</a><a href="/docs/switching-from-awx.html">Switching from AWX</a><a href="/docs/migration.html">Migration</a><a href="/docs/tutorials.html">Tutorials</a><a href="/docs/tutorial-run-a-job.html">Run a job</a><a href="/docs/tutorial-save-a-template.html">Save a template</a><a href="/docs/tutorial-schedule-a-job.html">Schedule a job</a><a href="/docs/tutorial-set-a-secret.html">Set a secret</a><a href="/docs/tutorial-migrate.html">Migrate your setup</a><a href="/docs/tool-bash.html">Bash runs</a><a href="/docs/tool-terraform.html" class="active">Terraform runs</a><a href="/docs/tool-python.html">Python runs</a><a href="/docs/concepts.html">Concepts</a><a href="/docs/configuration.html">Configuration</a><a href="/docs/features.html">Features</a><a href="/docs/api.html">HTTP API</a><a href="/docs/comparison.html">Yardmaster compared to AWX and Semaphore</a>
+			</nav>
+		</aside>
+		<main class="dcontent prose">
+			<h1 id="terraform-runs">Terraform runs</h1>
+<p>A Terraform run provisions infrastructure from a working directory of <code>.tf</code> files. The run's command
+names that directory, relative to the project checkout.</p>
+<h2 id="what-runs">What runs</h2>
+<p><code>terraform init</code> runs first; if it fails the run stops there with init's result. Then <code>terraform apply -auto-approve</code> applies the configuration. A dry run runs <code>terraform plan</code> instead, so it
+previews the change without touching infrastructure. All three run with <code>-input=false -no-color</code>, so
+a run never blocks on a prompt.</p>
+<h2 id="how-values-reach-the-configuration">How values reach the configuration</h2>
+<ul>
+<li>Extra vars, including survey answers and template vars, arrive as <code>TF_VAR_</code> environment entries, so
+a variable named <code>region</code> becomes <code>TF_VAR_region</code>. Scalars pass through as strings; lists and maps
+pass as JSON, which Terraform accepts.</li>
+<li>Credentials arrive in the environment, so an <code>env</code> credential of cloud keys or a <code>token</code> credential
+as <code>YARDMASTER_TOKEN</code> authenticates the provider. A command-source credential resolves fresh each
+run.</li>
+<li>The command directory cannot escape the project with <code>..</code>, so a run stays inside its checkout.</li>
+</ul>
+<h2 id="example">Example</h2>
+<p>A directory <code>infra/network</code> holding:</p>
+<pre><code>variable &quot;region&quot; { type = string }
+output &quot;vpc&quot; { value = &quot;vpc-${var.region}&quot; }
+</code></pre>
+<p>Launch a Terraform run with the command set to <code>infra/network</code> and a survey field <code>region</code>. A dry run
+shows the plan; a real run applies it.</p>
+<p>See also <a href="/docs/tool-bash.html">Bash runs</a>, <a href="/docs/tool-python.html">Python runs</a>, and the <a href="/docs/tutorials.html">tutorials</a>.</p>
+
+		</main>
+	</div>
+	<script>document.addEventListener("click",e=>{const a=e.target.closest(".dside a");if(a)document.querySelector(".dside")?.classList.remove("open")});</script>
+</body>
+</html>

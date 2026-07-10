@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Save a template — Yardmaster docs</title>
+	<link rel="icon" type="image/png" href="/assets/favicon.png">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="/docs.css?v=1">
+</head>
+<body>
+	<header class="dnav">
+		<a class="brand" href="/"><img src="/assets/logo-letters-dark.png" alt="Yardmaster" class="brand-logo"></a>
+		<span class="dnav-tag">Docs</span>
+		<nav class="dnav-links">
+			<a href="/">Home</a>
+			<a href="/#compare">Compare</a>
+			<a href="https://github.com/dcadolph/yardmaster">GitHub</a>
+		</nav>
+	</header>
+	<div class="dshell">
+		<aside class="dside">
+			<nav>
+				<a href="/docs/index.html">Overview</a><a href="/docs/quickstart.html">Quickstart</a><a href="/docs/faq.html">FAQ</a><a href="/docs/switching-from-awx.html">Switching from AWX</a><a href="/docs/migration.html">Migration</a><a href="/docs/tutorials.html">Tutorials</a><a href="/docs/tutorial-run-a-job.html">Run a job</a><a href="/docs/tutorial-save-a-template.html" class="active">Save a template</a><a href="/docs/tutorial-schedule-a-job.html">Schedule a job</a><a href="/docs/tutorial-set-a-secret.html">Set a secret</a><a href="/docs/tutorial-migrate.html">Migrate your setup</a><a href="/docs/tool-bash.html">Bash runs</a><a href="/docs/tool-terraform.html">Terraform runs</a><a href="/docs/tool-python.html">Python runs</a><a href="/docs/concepts.html">Concepts</a><a href="/docs/configuration.html">Configuration</a><a href="/docs/features.html">Features</a><a href="/docs/api.html">HTTP API</a><a href="/docs/comparison.html">Yardmaster compared to AWX and Semaphore</a>
+			</nav>
+		</aside>
+		<main class="dcontent prose">
+			<h1 id="save-a-template">Save a template</h1>
+<p>A template is Yardmaster's job template: a saved preset that launches a run in one action instead of
+a hand-built request. It bundles the tool, the project and playbook or command, an inventory, a shard
+count, credentials, and extra vars.</p>
+<h2 id="create-one">Create one</h2>
+<ol>
+<li>Open Templates and add a template.</li>
+<li>Give it a name, then set the same fields you would fill in at launch: the tool, the playbook or
+command, an inventory, and any credentials.</li>
+<li>Optional: set a shard count to split every launch, or a queue to pin launches to specific workers.</li>
+<li>Save. The template now launches from its row, or from the API.</li>
+</ol>
+<h2 id="add-a-survey">Add a survey</h2>
+<p>A survey is the same idea as AWX's: typed questions asked at launch, whose answers become extra vars.
+Add fields of type text, integer, boolean, or choice, and mark the ones that are required. Ansible
+receives them as extra vars; Bash and Python receive them as environment values; Terraform receives
+them as <code>TF_VAR_</code> variables.</p>
+<h2 id="launch-it">Launch it</h2>
+<p>From the UI, select the template and confirm the survey if it has one. From the API:</p>
+<pre><code>curl -s -X POST localhost:8080/templates/{id}/launch \
+  -H 'content-type: application/json' \
+  -d '{&quot;environment&quot;:&quot;staging&quot;}'
+</code></pre>
+<p>The body is the survey answers themselves, one key per field. Send an empty body when the template
+has no required survey fields.</p>
+<p>Next: run it on a cadence with <a href="/docs/tutorial-schedule-a-job.html">schedule a job</a>.</p>
+
+		</main>
+	</div>
+	<script>document.addEventListener("click",e=>{const a=e.target.closest(".dside a");if(a)document.querySelector(".dside")?.classList.remove("open")});</script>
+</body>
+</html>

@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Python runs — Yardmaster docs</title>
+	<link rel="icon" type="image/png" href="/assets/favicon.png">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="/docs.css?v=1">
+</head>
+<body>
+	<header class="dnav">
+		<a class="brand" href="/"><img src="/assets/logo-letters-dark.png" alt="Yardmaster" class="brand-logo"></a>
+		<span class="dnav-tag">Docs</span>
+		<nav class="dnav-links">
+			<a href="/">Home</a>
+			<a href="/#compare">Compare</a>
+			<a href="https://github.com/dcadolph/yardmaster">GitHub</a>
+		</nav>
+	</header>
+	<div class="dshell">
+		<aside class="dside">
+			<nav>
+				<a href="/docs/index.html">Overview</a><a href="/docs/quickstart.html">Quickstart</a><a href="/docs/faq.html">FAQ</a><a href="/docs/switching-from-awx.html">Switching from AWX</a><a href="/docs/migration.html">Migration</a><a href="/docs/tutorials.html">Tutorials</a><a href="/docs/tutorial-run-a-job.html">Run a job</a><a href="/docs/tutorial-save-a-template.html">Save a template</a><a href="/docs/tutorial-schedule-a-job.html">Schedule a job</a><a href="/docs/tutorial-set-a-secret.html">Set a secret</a><a href="/docs/tutorial-migrate.html">Migrate your setup</a><a href="/docs/tool-bash.html">Bash runs</a><a href="/docs/tool-terraform.html">Terraform runs</a><a href="/docs/tool-python.html" class="active">Python runs</a><a href="/docs/concepts.html">Concepts</a><a href="/docs/configuration.html">Configuration</a><a href="/docs/features.html">Features</a><a href="/docs/api.html">HTTP API</a><a href="/docs/comparison.html">Yardmaster compared to AWX and Semaphore</a>
+			</nav>
+		</aside>
+		<main class="dcontent prose">
+			<h1 id="python-runs">Python runs</h1>
+<p>A Python run executes a script with <code>python3</code>. The script is the run's command. It suits a task that
+is more comfortable in Python than a shell: calling an API, reconciling state, or shaping data.</p>
+<h2 id="what-runs">What runs</h2>
+<p>The script is written to a temporary file and run with <code>python3</code>, so multi-line scripts work
+unchanged. The working directory is the project checkout when the run sources a project. A dry run
+runs <code>python3 -m py_compile</code>, which checks syntax without executing the script.</p>
+<h2 id="how-values-reach-the-script">How values reach the script</h2>
+<ul>
+<li>
+<p>Extra vars, including survey answers and template vars, arrive as <code>YARDMASTER_VARS</code>, a JSON object:</p>
+<pre><code>  import json, os
+  vars = json.loads(os.environ.get(&quot;YARDMASTER_VARS&quot;, &quot;{}&quot;))
+  region = vars.get(&quot;region&quot;, &quot;us-east-1&quot;)
+</code></pre>
+</li>
+<li>
+<p>An <code>env</code> credential's <code>KEY=VALUE</code> lines are set in the environment, read with <code>os.environ</code>.</p>
+</li>
+<li>
+<p>A <code>token</code> credential is set as <code>YARDMASTER_TOKEN</code>, ready to send as a bearer token.</p>
+</li>
+<li>
+<p>Credentials attached to the run's inventory arrive the same way.</p>
+</li>
+</ul>
+<h2 id="example">Example</h2>
+<pre><code>import json, os, urllib.request
+vars = json.loads(os.environ.get(&quot;YARDMASTER_VARS&quot;, &quot;{}&quot;))
+token = os.environ[&quot;YARDMASTER_TOKEN&quot;]
+req = urllib.request.Request(
+    f&quot;https://api.example.com/deploy/{vars['service']}&quot;,
+    headers={&quot;Authorization&quot;: f&quot;Bearer {token}&quot;}, method=&quot;POST&quot;)
+print(urllib.request.urlopen(req).status)
+</code></pre>
+<p>See also <a href="/docs/tool-bash.html">Bash runs</a>, <a href="/docs/tool-terraform.html">Terraform runs</a>, and the
+<a href="/docs/tutorials.html">tutorials</a>.</p>
+
+		</main>
+	</div>
+	<script>document.addEventListener("click",e=>{const a=e.target.closest(".dside a");if(a)document.querySelector(".dside")?.classList.remove("open")});</script>
+</body>
+</html>

@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Yardmaster compared to AWX and Semaphore — Yardmaster docs</title>
+	<link rel="icon" type="image/png" href="/assets/favicon.png">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="/docs.css?v=1">
+</head>
+<body>
+	<header class="dnav">
+		<a class="brand" href="/"><img src="/assets/logo-letters-dark.png" alt="Yardmaster" class="brand-logo"></a>
+		<span class="dnav-tag">Docs</span>
+		<nav class="dnav-links">
+			<a href="/">Home</a>
+			<a href="/#compare">Compare</a>
+			<a href="https://github.com/dcadolph/yardmaster">GitHub</a>
+		</nav>
+	</header>
+	<div class="dshell">
+		<aside class="dside">
+			<nav>
+				<a href="/docs/index.html">Overview</a><a href="/docs/quickstart.html">Quickstart</a><a href="/docs/faq.html">FAQ</a><a href="/docs/switching-from-awx.html">Switching from AWX</a><a href="/docs/migration.html">Migration</a><a href="/docs/tutorials.html">Tutorials</a><a href="/docs/tutorial-run-a-job.html">Run a job</a><a href="/docs/tutorial-save-a-template.html">Save a template</a><a href="/docs/tutorial-schedule-a-job.html">Schedule a job</a><a href="/docs/tutorial-set-a-secret.html">Set a secret</a><a href="/docs/tutorial-migrate.html">Migrate your setup</a><a href="/docs/tool-bash.html">Bash runs</a><a href="/docs/tool-terraform.html">Terraform runs</a><a href="/docs/tool-python.html">Python runs</a><a href="/docs/concepts.html">Concepts</a><a href="/docs/configuration.html">Configuration</a><a href="/docs/features.html">Features</a><a href="/docs/api.html">HTTP API</a><a href="/docs/comparison.html" class="active">Yardmaster compared to AWX and Semaphore</a>
+			</nav>
+		</aside>
+		<main class="dcontent prose">
+			<h1 id="yardmaster-compared-to-awx-and-semaphore">Yardmaster compared to AWX and Semaphore</h1>
+<p>This page is an honest side-by-side. It states where Yardmaster is ahead, where it is even, and
+where it is behind, because credibility comes from being straight about all three. Details of AWX
+and Semaphore were current as of mid-2026; verify them against their latest releases before relying
+on them.</p>
+<h2 id="where-yardmaster-is-ahead">Where Yardmaster is ahead</h2>
+<table>
+<thead>
+<tr>
+<th>Capability</th>
+<th>Yardmaster</th>
+<th>AWX</th>
+<th>Semaphore</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Deployment</td>
+<td>One binary, SQLite by default and PostgreSQL optional.</td>
+<td>Kubernetes plus PostgreSQL, Redis, and Receptor.</td>
+<td>One binary.</td>
+</tr>
+<tr>
+<td>Run view</td>
+<td>A structured host-by-task matrix with per-task drill-down, painted live over Server-Sent Events.</td>
+<td>A text log stream.</td>
+<td>A text log stream.</td>
+</tr>
+<tr>
+<td>Job splitting</td>
+<td>Shards balanced by each host's measured past duration, with only the failed shards retried.</td>
+<td>Job slicing, round-robin.</td>
+<td>Not available.</td>
+</tr>
+<tr>
+<td>Pipelines</td>
+<td>A dependency graph with parallel branches, per-step retries, and typed set_stats outputs passed to dependents.</td>
+<td>Visual workflows.</td>
+<td>Limited task chaining.</td>
+</tr>
+<tr>
+<td>Fleet memory</td>
+<td>Flaky-host detection, outcome sparklines, per-host history, and task duration trends across runs.</td>
+<td>Not available.</td>
+<td>Not available.</td>
+</tr>
+<tr>
+<td>Distributed workers</td>
+<td>Store leasing, where the same single binary adds capacity, held together by leases and a janitor.</td>
+<td>A Receptor mesh.</td>
+<td>Runners, in a paid tier.</td>
+</tr>
+<tr>
+<td>Per-run provenance</td>
+<td>Every run records the exact commit it executed.</td>
+<td>Partial.</td>
+<td>Partial.</td>
+</tr>
+<tr>
+<td>Migration in</td>
+<td>One command imports an AWX or Semaphore export.</td>
+<td>Not applicable.</td>
+<td>Not applicable.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="where-they-are-even">Where they are even</h2>
+<table>
+<thead>
+<tr>
+<th>Capability</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Multiple runtimes</td>
+<td>Yardmaster runs Ansible, Bash, Terraform, and Python, each with a dry run. AWX is Ansible-only; Semaphore runs Terraform, OpenTofu, and shell.</td>
+</tr>
+<tr>
+<td>Container execution environments</td>
+<td>Yardmaster runs a playbook inside a pinned image, opt-in behind a flag. AWX makes this a core feature; Semaphore favors native runtimes instead.</td>
+</tr>
+<tr>
+<td>Access control</td>
+<td>Yardmaster has global roles plus per-object grants and teams. AWX has mature organization RBAC; Semaphore gates RBAC behind its Enterprise tier.</td>
+</tr>
+<tr>
+<td>Credentials</td>
+<td>All three store secrets encrypted; Yardmaster decrypts only at execution into a temporary file and wipes it after.</td>
+</tr>
+<tr>
+<td>Scheduling</td>
+<td>All three schedule runs; Yardmaster uses cron with highly available claiming so two servers do not double-fire.</td>
+</tr>
+<tr>
+<td>Surveys and prompts</td>
+<td>All three collect typed values at launch.</td>
+</tr>
+<tr>
+<td>Inbound webhooks</td>
+<td>All three launch on a git push.</td>
+</tr>
+<tr>
+<td>Metrics and audit</td>
+<td>Yardmaster exposes Prometheus metrics and an audit trail of every mutation.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="where-yardmaster-is-behind">Where Yardmaster is behind</h2>
+<table>
+<thead>
+<tr>
+<th>Capability</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>LDAP</td>
+<td>Not yet. Single sign-on is OpenID Connect; LDAP is not. AWX has LDAP; Semaphore gates SSO behind Enterprise.</td>
+</tr>
+<tr>
+<td>Visual workflow editor</td>
+<td>Yardmaster defines pipelines through the API and shows them in the UI; AWX has a drag-and-drop editor.</td>
+</tr>
+<tr>
+<td>Notification breadth</td>
+<td>Webhook and email today, against a wider set of integrations in AWX.</td>
+</tr>
+<tr>
+<td>Maturity</td>
+<td>AWX and Semaphore have years of production use and large communities. Yardmaster is young.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="the-short-version">The short version</h2>
+<p>Yardmaster wins on the axes that make AWX painful and Semaphore ordinary: no heavy control plane to
+deploy, runs you can read as structure instead of scrollback, job splitting that actually balances,
+a memory of how every host behaves over time, and a one-command path off either incumbent. It is
+behind on runtime breadth and the enterprise identity features, and it is younger. The gap that
+remains is being closed on purpose.</p>
+
+		</main>
+	</div>
+	<script>document.addEventListener("click",e=>{const a=e.target.closest(".dside a");if(a)document.querySelector(".dside")?.classList.remove("open")});</script>
+</body>
+</html>

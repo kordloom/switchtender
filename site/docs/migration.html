@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Migration — Yardmaster docs</title>
+	<link rel="icon" type="image/png" href="/assets/favicon.png">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="/docs.css?v=1">
+</head>
+<body>
+	<header class="dnav">
+		<a class="brand" href="/"><img src="/assets/logo-letters-dark.png" alt="Yardmaster" class="brand-logo"></a>
+		<span class="dnav-tag">Docs</span>
+		<nav class="dnav-links">
+			<a href="/">Home</a>
+			<a href="/#compare">Compare</a>
+			<a href="https://github.com/dcadolph/yardmaster">GitHub</a>
+		</nav>
+	</header>
+	<div class="dshell">
+		<aside class="dside">
+			<nav>
+				<a href="/docs/index.html">Overview</a><a href="/docs/quickstart.html">Quickstart</a><a href="/docs/faq.html">FAQ</a><a href="/docs/switching-from-awx.html">Switching from AWX</a><a href="/docs/migration.html" class="active">Migration</a><a href="/docs/tutorials.html">Tutorials</a><a href="/docs/tutorial-run-a-job.html">Run a job</a><a href="/docs/tutorial-save-a-template.html">Save a template</a><a href="/docs/tutorial-schedule-a-job.html">Schedule a job</a><a href="/docs/tutorial-set-a-secret.html">Set a secret</a><a href="/docs/tutorial-migrate.html">Migrate your setup</a><a href="/docs/tool-bash.html">Bash runs</a><a href="/docs/tool-terraform.html">Terraform runs</a><a href="/docs/tool-python.html">Python runs</a><a href="/docs/concepts.html">Concepts</a><a href="/docs/configuration.html">Configuration</a><a href="/docs/features.html">Features</a><a href="/docs/api.html">HTTP API</a><a href="/docs/comparison.html">Yardmaster compared to AWX and Semaphore</a>
+			</nav>
+		</aside>
+		<main class="dcontent prose">
+			<h1 id="migration">Migration</h1>
+<p>Yardmaster imports an AWX or Semaphore export and creates the equivalent objects, so moving over is
+one command rather than a rebuild.</p>
+<h2 id="get-an-export">Get an export</h2>
+<ul>
+<li>AWX: <code>awx export</code> produces a JSON document of organizations, projects, inventories, job
+templates, credentials without secrets, schedules, and surveys.</li>
+<li>Semaphore: export the project's repositories, inventories, keys, templates, and schedules as
+JSON.</li>
+</ul>
+<h2 id="preview-then-apply">Preview, then apply</h2>
+<p>Run the import without <code>--apply</code> first to see exactly what it would create, along with every
+warning:</p>
+<pre><code>yardmaster import awx awx-export.json --db yardmaster.db
+</code></pre>
+<p>The report lists the projects, inventories, credentials, templates, and schedules that will be
+created, and calls out anything that could not be mapped cleanly. Apply it when the report looks
+right:</p>
+<pre><code>yardmaster import awx awx-export.json --db yardmaster.db --apply
+</code></pre>
+<p>Semaphore works the same way with <code>import semaphore</code>.</p>
+<h2 id="what-maps-to-what">What maps to what</h2>
+<table>
+<thead>
+<tr>
+<th>Source</th>
+<th>Becomes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>AWX git project</td>
+<td>Project.</td>
+</tr>
+<tr>
+<td>AWX inventory</td>
+<td>Stored inventory, rendered as INI from its hosts and groups.</td>
+</tr>
+<tr>
+<td>AWX job template</td>
+<td>Template, with job slicing becoming shard count.</td>
+</tr>
+<tr>
+<td>AWX survey</td>
+<td>Template survey, field for field, with the field types translated.</td>
+</tr>
+<tr>
+<td>AWX schedule</td>
+<td>Schedule, with the recurrence rule converted to cron.</td>
+</tr>
+<tr>
+<td>AWX credential</td>
+<td>Credential shell with its kind mapped, secret omitted.</td>
+</tr>
+<tr>
+<td>Semaphore repository</td>
+<td>Project.</td>
+</tr>
+<tr>
+<td>Semaphore static inventory</td>
+<td>Stored inventory.</td>
+</tr>
+<tr>
+<td>Semaphore template</td>
+<td>Template, with survey variables mapped.</td>
+</tr>
+<tr>
+<td>Semaphore key</td>
+<td>Credential shell.</td>
+</tr>
+<tr>
+<td>Semaphore schedule</td>
+<td>Schedule.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="re-enter-secrets">Re-enter secrets</h2>
+<p>Exports never contain secrets by design, so credentials import as named shells with their kind set
+but no material. The report lists which secrets to re-enter. Everything else, projects,
+inventories, templates, and schedules, is in place and ready to run once the secrets are restored.</p>
+<h2 id="limits-to-expect">Limits to expect</h2>
+<ul>
+<li>A schedule whose cadence a cron expression cannot represent, such as every third day, is reported
+and skipped rather than converted to a wrong cadence.</li>
+<li>Non-git projects are skipped, since there is no repository to source playbooks from.</li>
+<li>A credential type without an exact match maps to the environment kind and is flagged for review.</li>
+</ul>
+
+		</main>
+	</div>
+	<script>document.addEventListener("click",e=>{const a=e.target.closest(".dside a");if(a)document.querySelector(".dside")?.classList.remove("open")});</script>
+</body>
+</html>

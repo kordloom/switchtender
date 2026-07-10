@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Features — Yardmaster docs</title>
+	<link rel="icon" type="image/png" href="/assets/favicon.png">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="/docs.css?v=1">
+</head>
+<body>
+	<header class="dnav">
+		<a class="brand" href="/"><img src="/assets/logo-letters-dark.png" alt="Yardmaster" class="brand-logo"></a>
+		<span class="dnav-tag">Docs</span>
+		<nav class="dnav-links">
+			<a href="/">Home</a>
+			<a href="/#compare">Compare</a>
+			<a href="https://github.com/dcadolph/yardmaster">GitHub</a>
+		</nav>
+	</header>
+	<div class="dshell">
+		<aside class="dside">
+			<nav>
+				<a href="/docs/index.html">Overview</a><a href="/docs/quickstart.html">Quickstart</a><a href="/docs/faq.html">FAQ</a><a href="/docs/switching-from-awx.html">Switching from AWX</a><a href="/docs/migration.html">Migration</a><a href="/docs/tutorials.html">Tutorials</a><a href="/docs/tutorial-run-a-job.html">Run a job</a><a href="/docs/tutorial-save-a-template.html">Save a template</a><a href="/docs/tutorial-schedule-a-job.html">Schedule a job</a><a href="/docs/tutorial-set-a-secret.html">Set a secret</a><a href="/docs/tutorial-migrate.html">Migrate your setup</a><a href="/docs/tool-bash.html">Bash runs</a><a href="/docs/tool-terraform.html">Terraform runs</a><a href="/docs/tool-python.html">Python runs</a><a href="/docs/concepts.html">Concepts</a><a href="/docs/configuration.html">Configuration</a><a href="/docs/features.html" class="active">Features</a><a href="/docs/api.html">HTTP API</a><a href="/docs/comparison.html">Yardmaster compared to AWX and Semaphore</a>
+			</nav>
+		</aside>
+		<main class="dcontent prose">
+			<h1 id="features">Features</h1>
+<p>What Yardmaster does today.</p>
+<table>
+<thead>
+<tr>
+<th>Capability</th>
+<th>What you get</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Runs</td>
+<td>Submit over HTTP, real ansible-playbook underneath, human log plus a structured event stream, per-task drill-down with stdout, stderr, rc, and diff.</td>
+</tr>
+<tr>
+<td>Live view</td>
+<td>Server-Sent Events paint the host matrix and log as the run executes.</td>
+</tr>
+<tr>
+<td>Splits</td>
+<td>Shard an inventory across parallel slices, merged back into one matrix; hosts packed by measured duration from past runs.</td>
+</tr>
+<tr>
+<td>Shard retry</td>
+<td>Retry a finished split and only its failed shards run again, lineage recorded.</td>
+</tr>
+<tr>
+<td>Pipelines</td>
+<td>Ordered steps or a dependency graph with parallel branches; failures skip exactly their dependents, per-step retry budgets, set_stats outputs flow to dependent steps as extra vars.</td>
+</tr>
+<tr>
+<td>Workers</td>
+<td>Point <code>yardmaster worker</code> at the same database and it competes for queued runs; leases, heartbeats, and a janitor make dead workers safe.</td>
+</tr>
+<tr>
+<td>Scheduling</td>
+<td>Cron schedules fire runs, splits, or pipelines with full history per fire.</td>
+</tr>
+<tr>
+<td>Fleet memory</td>
+<td>Failure rankings, flaky-host detection, outcome sparklines, per-host history, task duration trends, all from persisted structured events.</td>
+</tr>
+<tr>
+<td>Recovery</td>
+<td>Cancellation across processes recorded as canceled, orphaned runs interrupted by lease expiry, terminal saves retried.</td>
+</tr>
+<tr>
+<td>Storage</td>
+<td>SQLite by default; the same flag takes a PostgreSQL DSN for multi-instance.</td>
+</tr>
+<tr>
+<td>Projects</td>
+<td>Playbooks sourced from git with clone-or-fetch sync; every run records the exact commit it executed.</td>
+</tr>
+<tr>
+<td>Templates</td>
+<td>Saved launch presets bundling project, playbook, credentials, shards, and extra vars; one click or one POST launches.</td>
+</tr>
+<tr>
+<td>Auth</td>
+<td>User accounts with admin, operator, and viewer roles enforced per route; bearer tokens hashed at rest; the API locks down the moment the first token exists.</td>
+</tr>
+<tr>
+<td>Approvals</td>
+<td>Mark a run to require sign-off, or require it automatically by policy on tool, command, or target; a held run never executes until an admin approves or rejects it, and the request and decision land in the tamper-evident audit trail.</td>
+</tr>
+<tr>
+<td>Observability</td>
+<td>A Prometheus metrics endpoint, webhook notifications when runs finish, and an audit trail of every mutation.</td>
+</tr>
+<tr>
+<td>Tamper-evident audit</td>
+<td>Every mutation is linked into a SHA-256 hash chain; <code>GET /audit/verify</code> flags the first altered or deleted entry, and a signed export verified with <code>yardmaster audit verify</code> proves the whole chain offline.</td>
+</tr>
+<tr>
+<td>Inventories</td>
+<td>Stored inventories referenced by id, materialized on whichever executor runs the play.</td>
+</tr>
+<tr>
+<td>Dynamic sources</td>
+<td>Inventory plugins and scripts refreshed into stored inventories, with cloud auth from an env credential.</td>
+</tr>
+<tr>
+<td>Sourced inventories</td>
+<td>An inventory's content can come from a command, Vault, or Google Secret Manager, resolved at launch, so the host list need not live in Yardmaster.</td>
+</tr>
+<tr>
+<td>Credentials</td>
+<td>SSH keys, vault passwords, env bundles for cloud SDKs, API tokens and JWTs, become passwords, and registry logins, all encrypted at rest.</td>
+</tr>
+<tr>
+<td>Secret masking</td>
+<td>Credential values are redacted from run logs, live streams, and events, so a tool that echoes a secret shows <code>***</code> instead of the value.</td>
+</tr>
+<tr>
+<td>High availability</td>
+<td>Two servers on one database share the schedule without double-firing; tokens can carry a lifetime.</td>
+</tr>
+<tr>
+<td>Git triggers</td>
+<td>A webhook URL launches a template on push; the project syncs fresh, so it deploys the commit just pushed.</td>
+</tr>
+<tr>
+<td>Surveys</td>
+<td>Templates declare typed launch prompts, validated and injected as extra vars.</td>
+</tr>
+<tr>
+<td>Worker queues</td>
+<td>Target a run at a named queue; a worker serving that queue runs it and default workers leave it alone.</td>
+</tr>
+<tr>
+<td>Dependency sync</td>
+<td>A project's requirements.yml roles and collections install on each sync, so playbooks that need them just run.</td>
+</tr>
+<tr>
+<td>Execution environments</td>
+<td>A project can pin a container image; its runs execute inside it with their own ansible and system dependencies.</td>
+</tr>
+<tr>
+<td>Teams and grants</td>
+<td>Group users into teams and grant use or manage on a specific project, template, inventory, or credential; grants layer on the global role and default open.</td>
+</tr>
+<tr>
+<td>Retention</td>
+<td>A sweeper drops old run events and deletes terminal runs past a configurable age, keeping the summaries the cross-run views need.</td>
+</tr>
+<tr>
+<td>Email</td>
+<td>An SMTP notification on every finished run or on failures only, alongside the finish webhooks.</td>
+</tr>
+<tr>
+<td>Migration</td>
+<td><code>yardmaster import awx</code> and <code>import semaphore</code> read an export and create the equivalent projects, inventories, templates, surveys, schedules, and credential shells, with a dry-run report first.</td>
+</tr>
+</tbody>
+</table>
+
+		</main>
+	</div>
+	<script>document.addEventListener("click",e=>{const a=e.target.closest(".dside a");if(a)document.querySelector(".dside")?.classList.remove("open")});</script>
+</body>
+</html>

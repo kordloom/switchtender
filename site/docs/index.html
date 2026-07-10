@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Overview — Yardmaster docs</title>
+	<link rel="icon" type="image/png" href="/assets/favicon.png">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="/docs.css?v=1">
+</head>
+<body>
+	<header class="dnav">
+		<a class="brand" href="/"><img src="/assets/logo-letters-dark.png" alt="Yardmaster" class="brand-logo"></a>
+		<span class="dnav-tag">Docs</span>
+		<nav class="dnav-links">
+			<a href="/">Home</a>
+			<a href="/#compare">Compare</a>
+			<a href="https://github.com/dcadolph/yardmaster">GitHub</a>
+		</nav>
+	</header>
+	<div class="dshell">
+		<aside class="dside">
+			<nav>
+				<a href="/docs/index.html" class="active">Overview</a><a href="/docs/quickstart.html">Quickstart</a><a href="/docs/faq.html">FAQ</a><a href="/docs/switching-from-awx.html">Switching from AWX</a><a href="/docs/migration.html">Migration</a><a href="/docs/tutorials.html">Tutorials</a><a href="/docs/tutorial-run-a-job.html">Run a job</a><a href="/docs/tutorial-save-a-template.html">Save a template</a><a href="/docs/tutorial-schedule-a-job.html">Schedule a job</a><a href="/docs/tutorial-set-a-secret.html">Set a secret</a><a href="/docs/tutorial-migrate.html">Migrate your setup</a><a href="/docs/tool-bash.html">Bash runs</a><a href="/docs/tool-terraform.html">Terraform runs</a><a href="/docs/tool-python.html">Python runs</a><a href="/docs/concepts.html">Concepts</a><a href="/docs/configuration.html">Configuration</a><a href="/docs/features.html">Features</a><a href="/docs/api.html">HTTP API</a><a href="/docs/comparison.html">Yardmaster compared to AWX and Semaphore</a>
+			</nav>
+		</aside>
+		<main class="dcontent prose">
+			<h1 id="documentation">Documentation</h1>
+<p>Yardmaster runs Ansible, Bash, Terraform, and Python across a fleet and treats every run as
+structured data. One binary: <code>serve</code> is the API, the executor, the scheduler, and the web UI;
+<code>worker</code> adds capacity.
+State lives in one database, SQLite by default or PostgreSQL by DSN. These pages also render inside
+the app at <code>/ui/docs</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Guide</th>
+<th>What</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="/docs/quickstart.html">Quickstart</a></td>
+<td>Zero to a first run in a few minutes.</td>
+</tr>
+<tr>
+<td><a href="/docs/switching-from-awx.html">Switching from AWX</a></td>
+<td>Import what you have, or set up from scratch.</td>
+</tr>
+<tr>
+<td><a href="/docs/tutorials.html">Tutorials</a></td>
+<td>Task-focused walk-throughs for AWX and Semaphore users.</td>
+</tr>
+<tr>
+<td><a href="/docs/concepts.html">Concepts</a></td>
+<td>Runs, splits, pipelines, projects, templates, and the rest.</td>
+</tr>
+<tr>
+<td><a href="/docs/configuration.html">Configuration</a></td>
+<td>Every command, flag, and environment variable.</td>
+</tr>
+<tr>
+<td><a href="/docs/features.html">Features</a></td>
+<td>The full capability list.</td>
+</tr>
+<tr>
+<td><a href="/docs/api.html">HTTP API</a></td>
+<td>Every endpoint the server exposes.</td>
+</tr>
+<tr>
+<td><a href="/docs/migration.html">Migration</a></td>
+<td>Moving off AWX or Semaphore in detail.</td>
+</tr>
+<tr>
+<td><a href="/docs/comparison.html">Comparison</a></td>
+<td>How Yardmaster compares to AWX and Semaphore.</td>
+</tr>
+</tbody>
+</table>
+<p>For deployment, the repository root holds a <code>docker-compose.yml</code> for a server, a database, and a
+worker, and <a href="../deploy/helm">deploy/helm</a> holds a Helm chart.</p>
+
+		</main>
+	</div>
+	<script>document.addEventListener("click",e=>{const a=e.target.closest(".dside a");if(a)document.querySelector(".dside")?.classList.remove("open")});</script>
+</body>
+</html>

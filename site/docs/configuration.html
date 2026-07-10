@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Configuration — Yardmaster docs</title>
+	<link rel="icon" type="image/png" href="/assets/favicon.png">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="/docs.css?v=1">
+</head>
+<body>
+	<header class="dnav">
+		<a class="brand" href="/"><img src="/assets/logo-letters-dark.png" alt="Yardmaster" class="brand-logo"></a>
+		<span class="dnav-tag">Docs</span>
+		<nav class="dnav-links">
+			<a href="/">Home</a>
+			<a href="/#compare">Compare</a>
+			<a href="https://github.com/dcadolph/yardmaster">GitHub</a>
+		</nav>
+	</header>
+	<div class="dshell">
+		<aside class="dside">
+			<nav>
+				<a href="/docs/index.html">Overview</a><a href="/docs/quickstart.html">Quickstart</a><a href="/docs/faq.html">FAQ</a><a href="/docs/switching-from-awx.html">Switching from AWX</a><a href="/docs/migration.html">Migration</a><a href="/docs/tutorials.html">Tutorials</a><a href="/docs/tutorial-run-a-job.html">Run a job</a><a href="/docs/tutorial-save-a-template.html">Save a template</a><a href="/docs/tutorial-schedule-a-job.html">Schedule a job</a><a href="/docs/tutorial-set-a-secret.html">Set a secret</a><a href="/docs/tutorial-migrate.html">Migrate your setup</a><a href="/docs/tool-bash.html">Bash runs</a><a href="/docs/tool-terraform.html">Terraform runs</a><a href="/docs/tool-python.html">Python runs</a><a href="/docs/concepts.html">Concepts</a><a href="/docs/configuration.html" class="active">Configuration</a><a href="/docs/features.html">Features</a><a href="/docs/api.html">HTTP API</a><a href="/docs/comparison.html">Yardmaster compared to AWX and Semaphore</a>
+			</nav>
+		</aside>
+		<main class="dcontent prose">
+			<h1 id="configuration">Configuration</h1>
+<p>Yardmaster is one binary with subcommands. This page lists every command, flag, and environment
+variable.</p>
+<h2 id="environment-variables">Environment variables</h2>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Used by</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>YARDMASTER_ENCRYPTION_KEY</code></td>
+<td>serve, worker</td>
+<td>Passphrase that seals stored credentials with AES-256-GCM. Credentials are disabled when unset.</td>
+</tr>
+<tr>
+<td><code>YARDMASTER_ENCRYPTION_SALT</code></td>
+<td>serve, worker</td>
+<td>Per-deployment salt for argon2id key derivation. Must be set alongside the key and stay stable across restarts, or stored credentials cannot be decrypted. Credentials are disabled when unset.</td>
+</tr>
+<tr>
+<td><code>YARDMASTER_AUDIT_KEY</code></td>
+<td>serve</td>
+<td>Hex-encoded ed25519 seed that signs audit exports so the trail can be verified offline. Signing is off when unset; a malformed value stops startup. Generate one with <code>yardmaster audit keygen</code>.</td>
+</tr>
+<tr>
+<td><code>YARDMASTER_PASSWORD</code></td>
+<td>user new</td>
+<td>Initial account password, read instead of prompting so it never lands on the command line.</td>
+</tr>
+<tr>
+<td><code>YARDMASTER_SMTP_PASSWORD</code></td>
+<td>serve</td>
+<td>Password for SMTP authentication when <code>--smtp-username</code> is set.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="serve">serve</h2>
+<p>Runs the HTTP API, the in-process executor, the scheduler, the retention sweeper, and the web UI.</p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Default</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--addr</code></td>
+<td><code>:8080</code></td>
+<td>Address the server listens on.</td>
+</tr>
+<tr>
+<td><code>--db</code></td>
+<td><code>yardmaster.db</code></td>
+<td>SQLite file path, or a <code>postgres://</code> DSN for the PostgreSQL backend.</td>
+</tr>
+<tr>
+<td><code>--schedule-interval</code></td>
+<td><code>15s</code></td>
+<td>How often the scheduler checks for due schedules.</td>
+</tr>
+<tr>
+<td><code>--notify-webhook</code></td>
+<td>none</td>
+<td>URL that receives a JSON notification when a run finishes. Repeatable.</td>
+</tr>
+<tr>
+<td><code>--allow-container-ee</code></td>
+<td><code>false</code></td>
+<td>Allow runs whose project pins a container image to execute inside it. Needs Docker on the executor.</td>
+</tr>
+<tr>
+<td><code>--strict-grants</code></td>
+<td><code>false</code></td>
+<td>Deny non-admins access to an object that has no grants, instead of deferring to the global role.</td>
+</tr>
+<tr>
+<td><code>--retain-runs</code></td>
+<td>none</td>
+<td>Delete terminal runs older than this, for example <code>90d</code>. Empty keeps them forever.</td>
+</tr>
+<tr>
+<td><code>--retain-events</code></td>
+<td>none</td>
+<td>Drop run events and logs older than this, for example <code>30d</code>. Empty keeps them forever.</td>
+</tr>
+<tr>
+<td><code>--retention-interval</code></td>
+<td><code>1h</code></td>
+<td>How often the retention sweeper runs.</td>
+</tr>
+<tr>
+<td><code>--smtp-addr</code></td>
+<td>none</td>
+<td>SMTP server host:port for run notification emails. Empty disables email.</td>
+</tr>
+<tr>
+<td><code>--smtp-from</code></td>
+<td>none</td>
+<td>Sender address for notification emails.</td>
+</tr>
+<tr>
+<td><code>--smtp-to</code></td>
+<td>none</td>
+<td>Recipient address for notification emails. Repeatable.</td>
+</tr>
+<tr>
+<td><code>--smtp-username</code></td>
+<td>none</td>
+<td>SMTP username. The password comes from <code>YARDMASTER_SMTP_PASSWORD</code>.</td>
+</tr>
+<tr>
+<td><code>--notify-on</code></td>
+<td><code>failure</code></td>
+<td>When to email: <code>failure</code> for failed runs only, or <code>finish</code> for every terminal run.</td>
+</tr>
+</tbody>
+</table>
+<p>Retention windows accept a whole number of days with a <code>d</code> suffix, such as <code>30d</code>, or Go duration
+syntax such as <code>720h</code>.</p>
+<h2 id="worker">worker</h2>
+<p>Leases pending runs from the shared store and executes them. Point it and a server at the same
+database and they compete for work.</p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Default</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--db</code></td>
+<td><code>yardmaster.db</code></td>
+<td>SQLite file path, or a <code>postgres://</code> DSN.</td>
+</tr>
+<tr>
+<td><code>--name</code></td>
+<td>host and pid</td>
+<td>Worker name stamped on the runs it executes.</td>
+</tr>
+<tr>
+<td><code>--queue</code></td>
+<td>none</td>
+<td>Queue this worker serves. Repeatable. Without any, it serves the default pool.</td>
+</tr>
+<tr>
+<td><code>--allow-container-ee</code></td>
+<td><code>false</code></td>
+<td>Allow container execution environments on this worker. Needs Docker.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="token">token</h2>
+<p>Manages API tokens. Creating the first token turns on authentication.</p>
+<ul>
+<li><code>token new --name &lt;label&gt; [--ttl &lt;duration&gt;]</code> mints a token, printed once. A zero TTL never
+expires.</li>
+<li><code>token list</code> lists tokens without their secrets.</li>
+<li><code>token revoke &lt;id&gt;</code> deletes a token.</li>
+</ul>
+<p>All token subcommands take <code>--db</code> and the global <code>--pretty</code> flag for indented JSON.</p>
+<h2 id="user">user</h2>
+<p>Manages accounts with roles: admin, operator, and viewer.</p>
+<ul>
+<li><code>user new &lt;username&gt; --role &lt;role&gt;</code> creates an account. The password comes from
+<code>YARDMASTER_PASSWORD</code> or a prompt, never an argument.</li>
+<li><code>user list</code> lists accounts.</li>
+<li><code>user delete &lt;id&gt;</code> deletes an account; its tokens stop working.</li>
+</ul>
+<p>All user subcommands take <code>--db</code>.</p>
+<h2 id="import">import</h2>
+<p>Migrates from AWX or Semaphore. See <a href="/docs/migration.html">Migration</a>.</p>
+<ul>
+<li><code>import awx &lt;export.json&gt; [--apply]</code>.</li>
+<li><code>import semaphore &lt;export.json&gt; [--apply]</code>.</li>
+</ul>
+<p>Both take <code>--db</code> for the target database. Without <code>--apply</code> the command only reports what it would
+create.</p>
+<h2 id="demo">demo</h2>
+<p>Seeds a fresh database with sample data and real runs, then serves it read-only, so a public
+instance is safe to expose. It needs ansible on the PATH to run the sample playbooks.</p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Default</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--addr</code></td>
+<td><code>:8080</code></td>
+<td>Address the demo listens on.</td>
+</tr>
+<tr>
+<td><code>--db</code></td>
+<td>temporary file</td>
+<td>Database to seed and serve. Empty uses a fresh temporary SQLite file.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="global-flags">Global flags</h2>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--pretty</code></td>
+<td>Indent JSON output instead of the compact default.</td>
+</tr>
+</tbody>
+</table>
+
+		</main>
+	</div>
+	<script>document.addEventListener("click",e=>{const a=e.target.closest(".dside a");if(a)document.querySelector(".dside")?.classList.remove("open")});</script>
+</body>
+</html>

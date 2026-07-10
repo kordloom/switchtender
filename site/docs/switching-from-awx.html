@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Switching from AWX — Yardmaster docs</title>
+	<link rel="icon" type="image/png" href="/assets/favicon.png">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="/docs.css?v=1">
+</head>
+<body>
+	<header class="dnav">
+		<a class="brand" href="/"><img src="/assets/logo-letters-dark.png" alt="Yardmaster" class="brand-logo"></a>
+		<span class="dnav-tag">Docs</span>
+		<nav class="dnav-links">
+			<a href="/">Home</a>
+			<a href="/#compare">Compare</a>
+			<a href="https://github.com/dcadolph/yardmaster">GitHub</a>
+		</nav>
+	</header>
+	<div class="dshell">
+		<aside class="dside">
+			<nav>
+				<a href="/docs/index.html">Overview</a><a href="/docs/quickstart.html">Quickstart</a><a href="/docs/faq.html">FAQ</a><a href="/docs/switching-from-awx.html" class="active">Switching from AWX</a><a href="/docs/migration.html">Migration</a><a href="/docs/tutorials.html">Tutorials</a><a href="/docs/tutorial-run-a-job.html">Run a job</a><a href="/docs/tutorial-save-a-template.html">Save a template</a><a href="/docs/tutorial-schedule-a-job.html">Schedule a job</a><a href="/docs/tutorial-set-a-secret.html">Set a secret</a><a href="/docs/tutorial-migrate.html">Migrate your setup</a><a href="/docs/tool-bash.html">Bash runs</a><a href="/docs/tool-terraform.html">Terraform runs</a><a href="/docs/tool-python.html">Python runs</a><a href="/docs/concepts.html">Concepts</a><a href="/docs/configuration.html">Configuration</a><a href="/docs/features.html">Features</a><a href="/docs/api.html">HTTP API</a><a href="/docs/comparison.html">Yardmaster compared to AWX and Semaphore</a>
+			</nav>
+		</aside>
+		<main class="dcontent prose">
+			<h1 id="switching-from-awx">Switching from AWX</h1>
+<p>This guide assumes you know AWX and have never run Yardmaster. It gets you from an AWX setup to a
+working Yardmaster run two ways: import what you already have, or build it from scratch to learn the
+pieces. If a term is unfamiliar, the <a href="/docs/concepts.html">concepts</a> page defines it.</p>
+<h2 id="what-is-different-in-one-paragraph">What is different, in one paragraph</h2>
+<p>Yardmaster runs the same playbooks against the same inventories, and drives Bash, Terraform, and
+Python besides, but there is no Kubernetes, no Redis, and no separate task engine to operate. One
+binary is the API, the executor, the scheduler,
+and the UI. State is one database: a SQLite file to start, or PostgreSQL when you want more than one
+instance. You still have projects, inventories, templates, surveys, schedules, and credentials; they
+just live behind a smaller, faster surface.</p>
+<h2 id="the-mental-model">The mental model</h2>
+<table>
+<thead>
+<tr>
+<th>In AWX</th>
+<th>In Yardmaster</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Organization</td>
+<td>No direct equivalent; scope access with teams and grants instead.</td>
+</tr>
+<tr>
+<td>Project (git)</td>
+<td>Project.</td>
+</tr>
+<tr>
+<td>Inventory</td>
+<td>Stored inventory, or a dynamic inventory source that refreshes into one.</td>
+</tr>
+<tr>
+<td>Job template</td>
+<td>Template.</td>
+</tr>
+<tr>
+<td>Survey</td>
+<td>Template survey, the same typed questions.</td>
+</tr>
+<tr>
+<td>Schedule</td>
+<td>Schedule, cron instead of a recurrence rule.</td>
+</tr>
+<tr>
+<td>Credential</td>
+<td>Credential, secret sealed at rest.</td>
+</tr>
+<tr>
+<td>Job</td>
+<td>Run.</td>
+</tr>
+<tr>
+<td>Job slicing</td>
+<td>Split, balanced by measured host duration.</td>
+</tr>
+<tr>
+<td>Workflow</td>
+<td>Pipeline, ordered steps or a dependency graph.</td>
+</tr>
+<tr>
+<td>Instance group</td>
+<td>Worker queue.</td>
+</tr>
+<tr>
+<td>Execution environment</td>
+<td>A container image pinned on a project.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="path-a-import-your-awx">Path A: import your AWX</h2>
+<p>The fast path. It reads an AWX export and creates the equivalent Yardmaster objects.</p>
+<ol>
+<li>
+<p>Export from AWX. <code>awx export</code> produces a JSON document of your projects, inventories, job
+templates, credentials without secrets, schedules, and surveys.</p>
+</li>
+<li>
+<p>Preview the import. Nothing is written yet; you get a report of exactly what would be created and
+every warning.</p>
+<pre><code> yardmaster import awx awx-export.json --db yardmaster.db
+</code></pre>
+</li>
+<li>
+<p>Apply it.</p>
+<pre><code> yardmaster import awx awx-export.json --db yardmaster.db --apply
+</code></pre>
+</li>
+<li>
+<p>Re-enter secrets. Exports never contain secrets, so credentials arrive as named shells. The
+report lists which ones to fill in. Open the UI, go to Credentials, and set each secret. Until
+then, everything else is already in place.</p>
+</li>
+<li>
+<p>Launch a template and watch it run.</p>
+</li>
+</ol>
+<p>The full mapping and its limits are in the <a href="/docs/migration.html">migration guide</a>.</p>
+<h2 id="path-b-set-it-up-from-scratch">Path B: set it up from scratch</h2>
+<p>Do this once to understand the pieces, even if you imported. It mirrors the order you would build a
+job template in AWX.</p>
+<h3 id="1-start-the-server">1. Start the server</h3>
+<pre><code>YARDMASTER_ENCRYPTION_KEY=change-me YARDMASTER_ENCRYPTION_SALT=change-me-too \
+  ./yardmaster serve --addr :8080 --db yardmaster.db
+</code></pre>
+<p>The key and salt seal credentials at rest; keep the salt stable across restarts. Open
+http://localhost:8080 for the UI. The API is open until you create the first account or token, so
+you can set up before locking it down.</p>
+<h3 id="2-create-your-first-account">2. Create your first account</h3>
+<pre><code>YARDMASTER_PASSWORD=secret ./yardmaster user new admin-you --role admin --db yardmaster.db
+</code></pre>
+<p>Sign in through the UI with that username and password. Roles are admin, operator, and viewer: admins
+manage configuration, operators launch and cancel runs, viewers read.</p>
+<h3 id="3-add-a-project">3. Add a project</h3>
+<p>A project is a git repository your playbooks live in. In the UI, open Projects and add one with its
+repository URL and branch. For a private repository, first add an SSH key credential (next step) and
+select it on the project. Every run records the exact commit it executed.</p>
+<h3 id="4-add-credentials">4. Add credentials</h3>
+<p>Open Credentials and add what your runs need. Kinds:</p>
+<ul>
+<li><code>ssh_key</code>: an SSH private key, used to reach hosts and to clone private git projects.</li>
+<li><code>vault_password</code>: an Ansible Vault password.</li>
+<li><code>env</code>: <code>KEY=VALUE</code> lines injected into the run, how cloud SDK credentials reach plugins.</li>
+<li><code>token</code>: a single API token or JWT, exposed to the run as the <code>YARDMASTER_TOKEN</code> environment variable.</li>
+<li><code>become_password</code>: a privilege escalation password, delivered without touching the command line.</li>
+<li><code>registry</code>: a container registry login, for pulling a pinned execution image.</li>
+</ul>
+<p>Secrets are encrypted at rest and never returned by the API.</p>
+<h3 id="5-add-an-inventory">5. Add an inventory</h3>
+<p>Open Inventories and paste an inventory, or point a dynamic source at an inventory plugin or script
+that refreshes into one. An inventory is referenced by id, so any run or template can target it.</p>
+<h3 id="6-create-a-template">6. Create a template</h3>
+<p>A template is the equivalent of an AWX job template: a saved preset of a project, a playbook path, an
+inventory, a shard count, credentials, and extra vars. Add one in Templates. Give it a survey if you
+want typed prompts at launch. Launch it with one click.</p>
+<h3 id="7-watch-the-run">7. Watch the run</h3>
+<p>The run detail page paints a host-by-task matrix live as the run executes, with per-task drill-down
+into stdout, stderr, return code, and diff. This is the part AWX does not do; a run is structure, not
+a text scroll.</p>
+<h3 id="8-add-capacity-and-schedules">8. Add capacity and schedules</h3>
+<p>Point a worker at the same database to add an executor, and give it a queue name to target specific
+work:</p>
+<pre><code>./yardmaster worker --db yardmaster.db --name worker-1
+</code></pre>
+<p>Add a schedule in Schedules with a cron expression to fire a template on a cadence.</p>
+<h2 id="where-things-live-differently">Where things live differently</h2>
+<ul>
+<li>There is no separate &quot;launch&quot; wizard the size of AWX's. A template launch is one request; a survey
+renders as a small form.</li>
+<li>Access is a global role plus optional per-object grants, rather than AWX's organization tree. Grant
+a user or a team <code>use</code> or <code>manage</code> on a specific project, template, inventory, or credential.</li>
+<li>Notifications are finish webhooks and email today, not the full AWX set.</li>
+</ul>
+<h2 id="what-is-not-one-to-one-yet">What is not one to one yet</h2>
+<ul>
+<li>Single sign-on is OpenID Connect; there is no LDAP yet. Accounts and API tokens also sign in.</li>
+<li>The visual workflow editor is a pipeline defined through the API and shown in the UI, not a
+drag-and-drop canvas.</li>
+</ul>
+<p>If something you rely on is missing, open an issue. The gap with AWX is being closed on purpose.</p>
+
+		</main>
+	</div>
+	<script>document.addEventListener("click",e=>{const a=e.target.closest(".dside a");if(a)document.querySelector(".dside")?.classList.remove("open")});</script>
+</body>
+</html>

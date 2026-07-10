@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Run a job — Yardmaster docs</title>
+	<link rel="icon" type="image/png" href="/assets/favicon.png">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="/docs.css?v=1">
+</head>
+<body>
+	<header class="dnav">
+		<a class="brand" href="/"><img src="/assets/logo-letters-dark.png" alt="Yardmaster" class="brand-logo"></a>
+		<span class="dnav-tag">Docs</span>
+		<nav class="dnav-links">
+			<a href="/">Home</a>
+			<a href="/#compare">Compare</a>
+			<a href="https://github.com/dcadolph/yardmaster">GitHub</a>
+		</nav>
+	</header>
+	<div class="dshell">
+		<aside class="dside">
+			<nav>
+				<a href="/docs/index.html">Overview</a><a href="/docs/quickstart.html">Quickstart</a><a href="/docs/faq.html">FAQ</a><a href="/docs/switching-from-awx.html">Switching from AWX</a><a href="/docs/migration.html">Migration</a><a href="/docs/tutorials.html">Tutorials</a><a href="/docs/tutorial-run-a-job.html" class="active">Run a job</a><a href="/docs/tutorial-save-a-template.html">Save a template</a><a href="/docs/tutorial-schedule-a-job.html">Schedule a job</a><a href="/docs/tutorial-set-a-secret.html">Set a secret</a><a href="/docs/tutorial-migrate.html">Migrate your setup</a><a href="/docs/tool-bash.html">Bash runs</a><a href="/docs/tool-terraform.html">Terraform runs</a><a href="/docs/tool-python.html">Python runs</a><a href="/docs/concepts.html">Concepts</a><a href="/docs/configuration.html">Configuration</a><a href="/docs/features.html">Features</a><a href="/docs/api.html">HTTP API</a><a href="/docs/comparison.html">Yardmaster compared to AWX and Semaphore</a>
+			</nav>
+		</aside>
+		<main class="dcontent prose">
+			<h1 id="run-a-job">Run a job</h1>
+<p>In AWX you launch a job template and watch a text log. Here you launch a run and watch a live
+host-by-task matrix, and the run can drive any tool, not only Ansible.</p>
+<h2 id="launch-from-the-ui">Launch from the UI</h2>
+<ol>
+<li>Open Runs and select Launch run.</li>
+<li>Pick the tool. For Ansible, choose a playbook and an inventory. For Bash, Terraform, or Python,
+enter the script, or the working directory for Terraform.</li>
+<li>Optional: turn on Dry run to preview without making changes. Ansible runs <code>--check</code>, Terraform
+runs <code>plan</code>, and Bash and Python run a syntax check.</li>
+<li>Select Launch. The run detail page paints each host and task as it happens, with drill-down into
+stdout, stderr, return code, and diff.</li>
+</ol>
+<h2 id="split-it-across-hosts">Split it across hosts</h2>
+<p>Set a shard count of two or more and Yardmaster splits the run across your inventory, balanced by
+each host's measured duration from recent runs, then rolls the shards up into one matrix. This is
+AWX job slicing, sized by real cost rather than a flat count.</p>
+<h2 id="do-it-from-the-api">Do it from the API</h2>
+<pre><code>curl -s -X POST localhost:8080/runs \
+  -H 'content-type: application/json' \
+  -d '{&quot;tool&quot;:&quot;bash&quot;,&quot;command&quot;:&quot;echo hello from yardmaster&quot;}'
+</code></pre>
+<p>For an Ansible run, send <code>playbook</code> and <code>inventory</code> instead of <code>command</code>, and add <code>&quot;shards&quot;: 3</code> to
+split it. See the <a href="/docs/api.html">HTTP API</a> for every field.</p>
+<p>Next: save this launch as a preset in <a href="/docs/tutorial-save-a-template.html">save a template</a>.</p>
+
+		</main>
+	</div>
+	<script>document.addEventListener("click",e=>{const a=e.target.closest(".dside a");if(a)document.querySelector(".dside")?.classList.remove("open")});</script>
+</body>
+</html>

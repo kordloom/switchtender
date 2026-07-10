@@ -38,3 +38,10 @@ Thumbs.db
 
 # Local config
 .claude/
+
+# Wrangler (Cloudflare Pages CLI) local cache
+.wrangler/
+
+# Built binaries
+/yardmaster
+/sitegen

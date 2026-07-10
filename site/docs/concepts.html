@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Concepts — Yardmaster docs</title>
+	<link rel="icon" type="image/png" href="/assets/favicon.png">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="/docs.css?v=1">
+</head>
+<body>
+	<header class="dnav">
+		<a class="brand" href="/"><img src="/assets/logo-letters-dark.png" alt="Yardmaster" class="brand-logo"></a>
+		<span class="dnav-tag">Docs</span>
+		<nav class="dnav-links">
+			<a href="/">Home</a>
+			<a href="/#compare">Compare</a>
+			<a href="https://github.com/dcadolph/yardmaster">GitHub</a>
+		</nav>
+	</header>
+	<div class="dshell">
+		<aside class="dside">
+			<nav>
+				<a href="/docs/index.html">Overview</a><a href="/docs/quickstart.html">Quickstart</a><a href="/docs/faq.html">FAQ</a><a href="/docs/switching-from-awx.html">Switching from AWX</a><a href="/docs/migration.html">Migration</a><a href="/docs/tutorials.html">Tutorials</a><a href="/docs/tutorial-run-a-job.html">Run a job</a><a href="/docs/tutorial-save-a-template.html">Save a template</a><a href="/docs/tutorial-schedule-a-job.html">Schedule a job</a><a href="/docs/tutorial-set-a-secret.html">Set a secret</a><a href="/docs/tutorial-migrate.html">Migrate your setup</a><a href="/docs/tool-bash.html">Bash runs</a><a href="/docs/tool-terraform.html">Terraform runs</a><a href="/docs/tool-python.html">Python runs</a><a href="/docs/concepts.html" class="active">Concepts</a><a href="/docs/configuration.html">Configuration</a><a href="/docs/features.html">Features</a><a href="/docs/api.html">HTTP API</a><a href="/docs/comparison.html">Yardmaster compared to AWX and Semaphore</a>
+			</nav>
+		</aside>
+		<main class="dcontent prose">
+			<h1 id="concepts">Concepts</h1>
+<h2 id="runs">Runs</h2>
+<p>A run is one execution of a playbook against an inventory. Yardmaster shells out to
+<code>ansible-playbook</code> and captures both a human log and a structured event stream through an embedded
+callback plugin, so a run is queryable data, not just scrollback. Every run records its status,
+timing, exit code, the extra vars going in, and the <code>set_stats</code> outputs coming out.</p>
+<h2 id="splits">Splits</h2>
+<p>A split shards one inventory across parallel slices that run the same playbook, each limited to its
+hosts, with the parent rolling up the result into one merged host matrix. Hosts are packed into
+shards by their measured average duration in recent runs, so each shard carries a similar amount of
+work. A finished split can retry only its failed shards.</p>
+<h2 id="pipelines">Pipelines</h2>
+<p>A pipeline runs playbook steps in order, or as a dependency graph when steps declare what they
+depend on. Each step is itself a run, so it gets the full matrix, events, and history. A step can
+retry on failure, and values a step publishes with <code>set_stats</code> flow to the steps that depend on it.</p>
+<h2 id="projects">Projects</h2>
+<p>A project sources playbooks from a git repository. Every run records the exact commit it executed,
+so history answers what version ran, not just what file name. A project can install its
+<code>requirements.yml</code> roles and collections on each sync, and can pin a container image its runs
+execute inside.</p>
+<h2 id="templates">Templates</h2>
+<p>A template is a saved launch preset bundling a project, playbook, inventory, shard count,
+credentials, and extra vars. One click in the UI or one POST launches it. A template can also
+declare a survey.</p>
+<h2 id="inventories-and-sources">Inventories and sources</h2>
+<p>A stored inventory is inventory content referenced by id and materialized on whichever executor
+runs the play. A dynamic inventory source runs an inventory plugin or script and refreshes the
+result into a stored inventory, with cloud authentication supplied by a credential.</p>
+<p>A stored inventory can also draw its content from an external store, a command, Vault, or Google
+Secret Manager, resolved at launch, so the host list lives outside Yardmaster and is fetched fresh
+for each run.</p>
+<h2 id="triggers">Triggers</h2>
+<p>A webhook trigger is a URL that launches a template on an inbound git push. The project syncs
+fresh first, so the run deploys the commit that was just pushed.</p>
+<p>When the server has an encryption key, creating a trigger also mints a signing secret, shown once,
+separate from the URL token so a leaked URL cannot forge signed pushes. Set that secret as the
+webhook secret on the git host and turn on enforcement, and every inbound push must carry a valid
+<code>X-Hub-Signature-256</code> HMAC over its body or it is rejected. Rotate the secret at any time; a bad or
+missing signature never launches a run.</p>
+<h2 id="credentials">Credentials</h2>
+<p>A credential is a secret sealed with AES-256-GCM, decrypted only at execution into a temporary file
+and wiped afterward. Kinds are SSH keys, vault passwords, environment bundles for cloud SDKs,
+become passwords, and container registry logins. Secrets never appear in API responses.</p>
+<h2 id="teams-and-grants">Teams and grants</h2>
+<p>The global roles, admin, operator, and viewer, decide the broad strokes. On top of them, a grant
+gives a user or a team the right to use or manage a specific project, template, inventory, or
+credential. Grants are additive: an object with no grants defers to the global role, so nothing
+changes on upgrade until grants are added.</p>
+<h2 id="queues-and-workers">Queues and workers</h2>
+<p>A worker is any process running the executor against the shared store. Every process, the server
+included, competes for pending runs through the store. A run can target a named queue, and only
+workers serving that queue run it, which places work across a mixed fleet. A lease keeps a run
+attributable, and a janitor requeues work whose holder went away.</p>
+<h2 id="provable-audit">Provable audit</h2>
+<p>Every authenticated mutation is recorded in the audit trail, and each entry is linked into a SHA-256
+hash chain: it carries the previous entry's hash and its own hash over its content. Altering,
+reordering, or deleting an entry breaks the chain, which <code>GET /audit/verify</code> detects. A signed export
+from <code>GET /audit/export</code> seals the chain with an ed25519 signature, so <code>yardmaster audit verify</code>
+proves the trail is intact and unaltered offline, without trusting the server that produced it.</p>
+<h2 id="approvals">Approvals</h2>
+<p>A run can be marked to require approval. It is held in a pending-approval state that the claim loop
+never picks up, until an admin approves it, which releases it to run, or rejects it, which ends it.
+An operator can request the run, but only an admin can release it, so duties are separated. Both the
+request and the decision are recorded in the audit trail, making who asked for a change and who signed
+off provable.</p>
+<p>Approval can also be required by policy rather than by choice. A policy matches runs by tool, command
+text, or target inventory, and any matching run is held automatically at submission, so the gate
+cannot be skipped by omitting the flag. Policies are enforced in the dispatcher, so a scheduled or
+triggered run is gated the same as one launched by hand.</p>
+
+		</main>
+	</div>
+	<script>document.addEventListener("click",e=>{const a=e.target.closest(".dside a");if(a)document.querySelector(".dside")?.classList.remove("open")});</script>
+</body>
+</html>

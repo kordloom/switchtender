@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Quickstart — Yardmaster docs</title>
+	<link rel="icon" type="image/png" href="/assets/favicon.png">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="/docs.css?v=1">
+</head>
+<body>
+	<header class="dnav">
+		<a class="brand" href="/"><img src="/assets/logo-letters-dark.png" alt="Yardmaster" class="brand-logo"></a>
+		<span class="dnav-tag">Docs</span>
+		<nav class="dnav-links">
+			<a href="/">Home</a>
+			<a href="/#compare">Compare</a>
+			<a href="https://github.com/dcadolph/yardmaster">GitHub</a>
+		</nav>
+	</header>
+	<div class="dshell">
+		<aside class="dside">
+			<nav>
+				<a href="/docs/index.html">Overview</a><a href="/docs/quickstart.html" class="active">Quickstart</a><a href="/docs/faq.html">FAQ</a><a href="/docs/switching-from-awx.html">Switching from AWX</a><a href="/docs/migration.html">Migration</a><a href="/docs/tutorials.html">Tutorials</a><a href="/docs/tutorial-run-a-job.html">Run a job</a><a href="/docs/tutorial-save-a-template.html">Save a template</a><a href="/docs/tutorial-schedule-a-job.html">Schedule a job</a><a href="/docs/tutorial-set-a-secret.html">Set a secret</a><a href="/docs/tutorial-migrate.html">Migrate your setup</a><a href="/docs/tool-bash.html">Bash runs</a><a href="/docs/tool-terraform.html">Terraform runs</a><a href="/docs/tool-python.html">Python runs</a><a href="/docs/concepts.html">Concepts</a><a href="/docs/configuration.html">Configuration</a><a href="/docs/features.html">Features</a><a href="/docs/api.html">HTTP API</a><a href="/docs/comparison.html">Yardmaster compared to AWX and Semaphore</a>
+			</nav>
+		</aside>
+		<main class="dcontent prose">
+			<h1 id="quickstart">Quickstart</h1>
+<h2 id="requirements">Requirements</h2>
+<p>Ansible on the PATH: <code>ansible-playbook</code> and <code>ansible-inventory</code>. Nothing else for the default
+SQLite setup. Go 1.26 to build from source, or use the container image.</p>
+<h2 id="run-the-server">Run the server</h2>
+<pre><code>go build -o yardmaster .
+YARDMASTER_ENCRYPTION_KEY=change-me YARDMASTER_ENCRYPTION_SALT=change-me-too \
+  ./yardmaster serve --addr :8080 --db yardmaster.db
+</code></pre>
+<p>The key and salt together seal stored credentials at rest with argon2id and AES-256-GCM. Without
+both the server still runs, but credential features stay off. Keep the salt stable across restarts
+or existing credentials cannot be decrypted.</p>
+<p>Open http://localhost:8080 for the web UI, or use the API directly.</p>
+<h2 id="submit-a-run">Submit a run</h2>
+<pre><code>curl -X POST localhost:8080/runs \
+  -d '{&quot;playbook&quot;: &quot;site.yml&quot;, &quot;inventory&quot;: &quot;hosts.ini&quot;}'
+</code></pre>
+<p>The response carries a run id. Fetch its status, its structured events, or its log:</p>
+<pre><code>curl localhost:8080/runs/&lt;id&gt;
+curl localhost:8080/runs/&lt;id&gt;/events
+curl localhost:8080/runs/&lt;id&gt;/logs
+</code></pre>
+<p>Add <code>&quot;shards&quot;: 4</code> to the body to split the run across four slices of the inventory, balanced by
+each host's measured duration in recent runs.</p>
+<h2 id="add-a-worker">Add a worker</h2>
+<p>Point a worker at the same database and it competes for queued runs:</p>
+<pre><code>YARDMASTER_ENCRYPTION_KEY=change-me YARDMASTER_ENCRYPTION_SALT=change-me-too \
+  ./yardmaster worker --db yardmaster.db --name laptop
+</code></pre>
+<p>For more than one machine, use a PostgreSQL DSN as the <code>--db</code> value on every process.</p>
+<h2 id="lock-down-the-api">Lock down the API</h2>
+<p>Creating the first token turns on authentication; until then the API is open so a fresh install
+works immediately.</p>
+<pre><code>./yardmaster token new --db yardmaster.db --name ci
+</code></pre>
+<p>Create user accounts with roles for sign-in:</p>
+<pre><code>YARDMASTER_PASSWORD=secret ./yardmaster user new operator-jane --role operator --db yardmaster.db
+</code></pre>
+<h2 id="run-with-docker">Run with Docker</h2>
+<pre><code>export YARDMASTER_ENCRYPTION_KEY=change-me
+export YARDMASTER_ENCRYPTION_SALT=change-me-too
+docker compose up --build
+</code></pre>
+<p>This starts a server, a PostgreSQL database, and a worker. The server listens on port 8080; set
+<code>YARDMASTER_PORT</code> to change the host port.</p>
+<h2 id="try-the-demo">Try the demo</h2>
+<p>To look around without setting anything up, run the seeded demo. It fills a fresh database with
+sample projects, templates, inventories, and real runs, including a flaky host, a split, and a
+pipeline, then serves it read-only so it is safe to expose:</p>
+<pre><code>./yardmaster demo --addr :8080
+</code></pre>
+<p>Or with Docker: <code>docker compose --profile demo up --build</code>.</p>
+
+		</main>
+	</div>
+	<script>document.addEventListener("click",e=>{const a=e.target.closest(".dside a");if(a)document.querySelector(".dside")?.classList.remove("open")});</script>
+</body>
+</html>

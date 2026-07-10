@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Schedule a job — Yardmaster docs</title>
+	<link rel="icon" type="image/png" href="/assets/favicon.png">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="/docs.css?v=1">
+</head>
+<body>
+	<header class="dnav">
+		<a class="brand" href="/"><img src="/assets/logo-letters-dark.png" alt="Yardmaster" class="brand-logo"></a>
+		<span class="dnav-tag">Docs</span>
+		<nav class="dnav-links">
+			<a href="/">Home</a>
+			<a href="/#compare">Compare</a>
+			<a href="https://github.com/dcadolph/yardmaster">GitHub</a>
+		</nav>
+	</header>
+	<div class="dshell">
+		<aside class="dside">
+			<nav>
+				<a href="/docs/index.html">Overview</a><a href="/docs/quickstart.html">Quickstart</a><a href="/docs/faq.html">FAQ</a><a href="/docs/switching-from-awx.html">Switching from AWX</a><a href="/docs/migration.html">Migration</a><a href="/docs/tutorials.html">Tutorials</a><a href="/docs/tutorial-run-a-job.html">Run a job</a><a href="/docs/tutorial-save-a-template.html">Save a template</a><a href="/docs/tutorial-schedule-a-job.html" class="active">Schedule a job</a><a href="/docs/tutorial-set-a-secret.html">Set a secret</a><a href="/docs/tutorial-migrate.html">Migrate your setup</a><a href="/docs/tool-bash.html">Bash runs</a><a href="/docs/tool-terraform.html">Terraform runs</a><a href="/docs/tool-python.html">Python runs</a><a href="/docs/concepts.html">Concepts</a><a href="/docs/configuration.html">Configuration</a><a href="/docs/features.html">Features</a><a href="/docs/api.html">HTTP API</a><a href="/docs/comparison.html">Yardmaster compared to AWX and Semaphore</a>
+			</nav>
+		</aside>
+		<main class="dcontent prose">
+			<h1 id="schedule-a-job">Schedule a job</h1>
+<p>AWX schedules use a recurrence rule. Yardmaster uses a cron expression, and a schedule can fire a
+stored template, a single run, a split, or a whole pipeline.</p>
+<h2 id="schedule-a-template">Schedule a template</h2>
+<ol>
+<li>Save the work first as a <a href="/docs/tutorial-save-a-template.html">template</a>, so the schedule stays a one-line
+reference instead of a copy of every field.</li>
+<li>Open Schedules and add a schedule.</li>
+<li>Give it a cron expression for the cadence, for example <code>0 2 * * *</code> for 02:00 every day, and point
+it at the template.</li>
+<li>Save. It fires on the schedule and each firing shows up in Runs like any other.</li>
+</ol>
+<h2 id="from-the-api">From the API</h2>
+<pre><code>curl -s -X POST localhost:8080/schedules \
+  -H 'content-type: application/json' \
+  -d '{&quot;cron&quot;:&quot;0 2 * * *&quot;,&quot;template_id&quot;:&quot;tpl_abc123&quot;}'
+</code></pre>
+<p>To schedule without a template, send <code>playbook</code> and <code>inventory</code> inline, add <code>shards</code> for a split, or
+<code>steps</code> for a pipeline. A worker or the server must be running for a schedule to fire; add capacity
+with <code>yardmaster worker</code>.</p>
+<p>Next: give the job its secrets with <a href="/docs/tutorial-set-a-secret.html">set a secret</a>.</p>
+
+		</main>
+	</div>
+	<script>document.addEventListener("click",e=>{const a=e.target.closest(".dside a");if(a)document.querySelector(".dside")?.classList.remove("open")});</script>
+</body>
+</html>

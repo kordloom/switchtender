@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>HTTP API — Yardmaster docs</title>
+	<link rel="icon" type="image/png" href="/assets/favicon.png">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="/docs.css?v=1">
+</head>
+<body>
+	<header class="dnav">
+		<a class="brand" href="/"><img src="/assets/logo-letters-dark.png" alt="Yardmaster" class="brand-logo"></a>
+		<span class="dnav-tag">Docs</span>
+		<nav class="dnav-links">
+			<a href="/">Home</a>
+			<a href="/#compare">Compare</a>
+			<a href="https://github.com/dcadolph/yardmaster">GitHub</a>
+		</nav>
+	</header>
+	<div class="dshell">
+		<aside class="dside">
+			<nav>
+				<a href="/docs/index.html">Overview</a><a href="/docs/quickstart.html">Quickstart</a><a href="/docs/faq.html">FAQ</a><a href="/docs/switching-from-awx.html">Switching from AWX</a><a href="/docs/migration.html">Migration</a><a href="/docs/tutorials.html">Tutorials</a><a href="/docs/tutorial-run-a-job.html">Run a job</a><a href="/docs/tutorial-save-a-template.html">Save a template</a><a href="/docs/tutorial-schedule-a-job.html">Schedule a job</a><a href="/docs/tutorial-set-a-secret.html">Set a secret</a><a href="/docs/tutorial-migrate.html">Migrate your setup</a><a href="/docs/tool-bash.html">Bash runs</a><a href="/docs/tool-terraform.html">Terraform runs</a><a href="/docs/tool-python.html">Python runs</a><a href="/docs/concepts.html">Concepts</a><a href="/docs/configuration.html">Configuration</a><a href="/docs/features.html">Features</a><a href="/docs/api.html" class="active">HTTP API</a><a href="/docs/comparison.html">Yardmaster compared to AWX and Semaphore</a>
+			</nav>
+		</aside>
+		<main class="dcontent prose">
+			<h1 id="http-api">HTTP API</h1>
+<p>Every endpoint the server exposes. The web UI lives at <code>/ui/</code> and the root redirects to it.</p>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>What</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>POST</td>
+<td><code>/runs</code></td>
+<td>Submit a run; <code>shards</code> of two or more splits it.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/runs</code></td>
+<td>Run history, newest first.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/runs/{id}</code></td>
+<td>One run.</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/runs/{id}/cancel</code></td>
+<td>Cancel a pending or running run.</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/runs/{id}/retry</code></td>
+<td>New split from only the failed shards of a finished one.</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/runs/{id}/approve</code></td>
+<td>Release a run held for approval so it runs.</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/runs/{id}/reject</code></td>
+<td>Deny a run held for approval.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/runs/{id}/shards</code></td>
+<td>Shard runs of a split.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/runs/{id}/steps</code></td>
+<td>Step runs of a pipeline.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/runs/{id}/logs</code></td>
+<td>Captured output as plain text.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/runs/{id}/events</code></td>
+<td>Structured events as JSON.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/runs/{id}/stream</code></td>
+<td>Live events and log over Server-Sent Events.</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/pipelines</code></td>
+<td>Submit ordered playbook steps as one pipeline.</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/schedules</code></td>
+<td>Cron schedule for a run, split, pipeline, or template.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/schedules</code></td>
+<td>List schedules.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/schedules/{id}</code></td>
+<td>One schedule.</td>
+</tr>
+<tr>
+<td>DELETE</td>
+<td><code>/schedules/{id}</code></td>
+<td>Delete a schedule.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/fleet</code></td>
+<td>Hosts ranked by failures over recent runs, flaky flags.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/hosts/{host}/runs</code></td>
+<td>One host's recent per-run outcomes.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/tasks</code></td>
+<td>Per-task duration trends over recent runs.</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/projects</code></td>
+<td>Register a git project; runs record their commit.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/projects</code></td>
+<td>List projects.</td>
+</tr>
+<tr>
+<td>DELETE</td>
+<td><code>/projects/{id}</code></td>
+<td>Delete a project.</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/templates</code></td>
+<td>Save a launch preset.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/templates</code></td>
+<td>List templates.</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/templates/{id}/launch</code></td>
+<td>Launch a template, answering its survey if it has one.</td>
+</tr>
+<tr>
+<td>DELETE</td>
+<td><code>/templates/{id}</code></td>
+<td>Delete a template.</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/triggers</code></td>
+<td>Create a webhook trigger; returns a signing secret once.</td>
+</tr>
+<tr>
+<td>PUT</td>
+<td><code>/triggers/{id}</code></td>
+<td>Rename a trigger or toggle signature enforcement.</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/triggers/{id}/rotate-secret</code></td>
+<td>Rotate the signing secret, shown once.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/triggers</code></td>
+<td>List webhook triggers.</td>
+</tr>
+<tr>
+<td>DELETE</td>
+<td><code>/triggers/{id}</code></td>
+<td>Delete a trigger, revoking its webhook.</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/hooks/{token}</code></td>
+<td>Fire a trigger from a git push; a required HMAC signature is checked first.</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/credentials</code></td>
+<td>Store a credential (ssh_key, vault_password, env, token, become_password, registry), encrypted at rest.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/credentials</code></td>
+<td>List credentials, secrets never included.</td>
+</tr>
+<tr>
+<td>DELETE</td>
+<td><code>/credentials/{id}</code></td>
+<td>Delete a credential.</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/auth/login</code></td>
+<td>Sign in with username and password, returns a token.</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/auth/check</code></td>
+<td>Verify an API token.</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/users</code></td>
+<td>Create an account with a role.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/users</code></td>
+<td>List accounts.</td>
+</tr>
+<tr>
+<td>DELETE</td>
+<td><code>/users/{id}</code></td>
+<td>Delete an account; its tokens stop working.</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/teams</code></td>
+<td>Create a team of users.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/teams</code></td>
+<td>List teams.</td>
+</tr>
+<tr>
+<td>DELETE</td>
+<td><code>/teams/{id}</code></td>
+<td>Delete a team and its memberships.</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/teams/{id}/members</code></td>
+<td>Add a user to a team.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/teams/{id}/members</code></td>
+<td>List a team's members.</td>
+</tr>
+<tr>
+<td>DELETE</td>
+<td><code>/teams/{id}/members/{userID}</code></td>
+<td>Remove a user from a team.</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/grants</code></td>
+<td>Grant a user or team use or manage on an object.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/grants</code></td>
+<td>List access grants.</td>
+</tr>
+<tr>
+<td>DELETE</td>
+<td><code>/grants/{id}</code></td>
+<td>Delete an access grant.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/workers</code></td>
+<td>The executor fleet with lease freshness.</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/inventory-sources</code></td>
+<td>Register a dynamic inventory source.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/inventory-sources</code></td>
+<td>List inventory sources.</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/inventory-sources/{id}/refresh</code></td>
+<td>Refresh a source into its inventory now.</td>
+</tr>
+<tr>
+<td>DELETE</td>
+<td><code>/inventory-sources/{id}</code></td>
+<td>Delete an inventory source.</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/inventories</code></td>
+<td>Store an inventory; runs reference it by id anywhere.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/inventories</code></td>
+<td>List stored inventories.</td>
+</tr>
+<tr>
+<td>DELETE</td>
+<td><code>/inventories/{id}</code></td>
+<td>Delete a stored inventory.</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/policies</code></td>
+<td>Create an approval policy that gates matching runs.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/policies</code></td>
+<td>List approval policies.</td>
+</tr>
+<tr>
+<td>DELETE</td>
+<td><code>/policies/{id}</code></td>
+<td>Delete an approval policy.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/audit</code></td>
+<td>The mutation trail, admin only.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/audit/verify</code></td>
+<td>Verify the audit hash chain is intact.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/audit/export</code></td>
+<td>Signed, self-verifying snapshot of the audit chain.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/metrics</code></td>
+<td>Prometheus gauges for runs and fleet health.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/healthz</code></td>
+<td>Liveness.</td>
+</tr>
+</tbody>
+</table>
+
+		</main>
+	</div>
+	<script>document.addEventListener("click",e=>{const a=e.target.closest(".dside a");if(a)document.querySelector(".dside")?.classList.remove("open")});</script>
+</body>
+</html>
