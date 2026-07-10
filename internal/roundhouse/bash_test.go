@@ -75,3 +75,16 @@ func TestToolRouterRoutes(t *testing.T) {
 		t.Errorf("unknown tool error = %v, want ErrUnknownTool", err)
 	}
 }
+
+func TestBashReceivesExtraVars(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	res, err := newBashRunner(nil).Run(context.Background(),
+		Spec{Command: `echo "$YARDMASTER_VARS"`, ExtraVars: map[string]any{"region": "us-east-1"}}, &buf)
+	if err != nil || res.ExitCode != 0 {
+		t.Fatalf("bash run: exit=%d err=%v", res.ExitCode, err)
+	}
+	if !strings.Contains(buf.String(), `"region":"us-east-1"`) {
+		t.Errorf("output %q, want the extra vars in YARDMASTER_VARS", buf.String())
+	}
+}

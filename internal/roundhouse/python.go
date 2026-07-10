@@ -2,7 +2,6 @@ package roundhouse
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -52,18 +51,6 @@ func (p *pythonRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Resul
 	}
 	cmd := exec.CommandContext(ctx, p.binary, args...)
 	cmd.Dir = spec.Dir
-	cmd.Env = pythonEnv(p.baseEnv, spec)
+	cmd.Env = varsEnv(p.baseEnv, spec)
 	return runProcess(ctx, cmd, out)
-}
-
-// pythonEnv layers the spec's credential env and a JSON YARDMASTER_VARS of the extra vars over the
-// base environment, so a script reads survey answers and template vars from one place.
-func pythonEnv(baseEnv []string, spec Spec) []string {
-	env := append(append([]string{}, baseEnv...), spec.Env...)
-	if len(spec.ExtraVars) > 0 {
-		if b, err := json.Marshal(spec.ExtraVars); err == nil {
-			env = append(env, "YARDMASTER_VARS="+string(b))
-		}
-	}
-	return env
 }

@@ -22,9 +22,9 @@ func newBashRunner(baseEnv []string) *bashRunner {
 }
 
 // Run executes the script in spec.Command with bash, streaming combined output to out. A dry run
-// passes -n so bash parses the script and reports syntax errors without executing it. The Spec's
-// Env, carrying materialized credentials such as API tokens, is layered over the base environment,
-// and spec.Dir sets the working directory so a project's files are in reach.
+// passes -n so bash parses the script and reports syntax errors without executing it. Materialized
+// credentials arrive in the environment, extra vars as a JSON YARDMASTER_VARS, and spec.Dir sets the
+// working directory so a project's files are in reach.
 func (b *bashRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Result, error) {
 	if spec.Command == "" {
 		return Result{ExitCode: -1}, ErrNoCommand
@@ -36,6 +36,6 @@ func (b *bashRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Result,
 	args = append(args, "-c", spec.Command)
 	cmd := exec.CommandContext(ctx, b.binary, args...)
 	cmd.Dir = spec.Dir
-	cmd.Env = append(append([]string{}, b.baseEnv...), spec.Env...)
+	cmd.Env = varsEnv(b.baseEnv, spec)
 	return runProcess(ctx, cmd, out)
 }

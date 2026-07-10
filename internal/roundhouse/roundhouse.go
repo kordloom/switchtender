@@ -298,6 +298,19 @@ func runProcess(ctx context.Context, cmd *exec.Cmd, out io.Writer) (Result, erro
 	return Result{ExitCode: -1}, fmt.Errorf("%w: %w", ErrLaunch, err)
 }
 
+// varsEnv layers a Spec's credential env and, when it has extra vars, a JSON YARDMASTER_VARS of them
+// over the base environment, so bash and python runs read survey answers and template vars from one
+// place, the same way.
+func varsEnv(baseEnv []string, spec Spec) []string {
+	env := append(append([]string{}, baseEnv...), spec.Env...)
+	if len(spec.ExtraVars) > 0 {
+		if b, err := json.Marshal(spec.ExtraVars); err == nil {
+			env = append(env, "YARDMASTER_VARS="+string(b))
+		}
+	}
+	return env
+}
+
 // callbackEnv returns the environment entries that enable the structured event callback and point
 // it at the events sidecar file.
 func callbackEnv(pluginDir, eventsPath string) []string {

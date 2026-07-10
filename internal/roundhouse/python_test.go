@@ -74,9 +74,9 @@ func TestToolRouterPython(t *testing.T) {
 	}
 }
 
-func TestPythonEnv(t *testing.T) {
+func TestVarsEnv(t *testing.T) {
 	t.Parallel()
-	env := pythonEnv([]string{"BASE=1"}, Spec{
+	env := varsEnv([]string{"BASE=1"}, Spec{
 		Env:       []string{"SECRET=x"},
 		ExtraVars: map[string]any{"region": "us-east-1"},
 	})
