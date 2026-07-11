@@ -347,6 +347,7 @@ function endTour(completed) {
 document.addEventListener("DOMContentLoaded", () => {
 	consumeSSOFragment();
 	mountTopbar();
+	mountLiveRegions();
 	if (LIST_PAGES.includes(document.body.dataset.page)) mountListFilter();
 	const close = document.getElementById("drill-close");
 	if (close) {
@@ -592,6 +593,16 @@ async function getJSON(url) {
 	return res.json();
 }
 
+// mountLiveRegions marks every status line as a polite live region so assistive tech announces the
+// async success and failure text written into it, including sign-in errors and empty states.
+function mountLiveRegions() {
+	const regions = document.querySelectorAll('[id="status"], [id$="-status"]');
+	for (const el of regions) {
+		el.setAttribute("role", "status");
+		el.setAttribute("aria-live", "polite");
+	}
+}
+
 // setStatus shows or clears the status line.
 function setStatus(msg) {
 	const el = document.getElementById("status");
@@ -611,6 +622,18 @@ function showEmpty(msg) {
 		'<path d="M3 7l1.6 12.2A2 2 0 0 0 6.6 21h10.8a2 2 0 0 0 2-1.8L21 7"/>' +
 		'<path d="M3 7h18M8.5 7V5.5a2 2 0 0 1 2-2h3a2 2 0 0 1 2 2V7"/></svg><p></p>';
 	el.querySelector("p").textContent = msg;
+}
+
+// removeRow deletes a table row and restores the empty-state when the last row is gone, so a list
+// cleared down to nothing shows its empty message instead of a bare header.
+function removeRow(tr, emptyMsg) {
+	const body = tr.parentNode;
+	tr.remove();
+	if (body && body.rows && body.rows.length === 0) {
+		const table = body.closest("table");
+		if (table) table.hidden = true;
+		showEmpty(emptyMsg || "Nothing here yet.");
+	}
 }
 
 // fmtDuration renders the span between two ISO times.
@@ -786,6 +809,22 @@ function wireModal(name) {
 	if (closeBtn) closeBtn.addEventListener("click", close);
 	modal.addEventListener("click", (e) => { if (e.target === modal) close(); });
 	document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !modal.hidden) close(); });
+	modal.addEventListener("keydown", (e) => {
+		if (e.key !== "Tab" || modal.hidden) return;
+		const focusable = modal.querySelectorAll(
+			"a[href], button:not([disabled]), input:not([disabled]), " +
+			"select:not([disabled]), textarea:not([disabled])");
+		if (focusable.length === 0) return;
+		const first = focusable[0];
+		const last = focusable[focusable.length - 1];
+		if (e.shiftKey && document.activeElement === first) {
+			e.preventDefault();
+			last.focus();
+		} else if (!e.shiftKey && document.activeElement === last) {
+			e.preventDefault();
+			first.focus();
+		}
+	});
 }
 
 // closeModal hides a create dialog by name, used after a successful save.
@@ -1003,7 +1042,7 @@ async function loadCredentials() {
 						method: "DELETE", headers: authHeaders(),
 					});
 					if (!res.ok) throw new Error("HTTP " + res.status);
-					tr.remove();
+					removeRow(tr, "No credentials yet.");
 				} catch (err) {
 					setStatus("Delete failed: " + err.message);
 				}
@@ -1211,7 +1250,7 @@ async function loadProjects() {
 			tr.appendChild(td(p.repo_url, "mono"));
 			tr.appendChild(td(p.branch || "default", "mono"));
 			tr.appendChild(tdTime(p.created_at));
-			const actions = deleteCell("/projects/" + p.id, "project " + p.name, tr);
+			const actions = deleteCell("/projects/" + p.id, "project " + p.name, tr, "No projects yet.");
 			actions.insertBefore(editButton(() => openProjectEdit(p)), actions.firstChild);
 			tr.appendChild(actions);
 			inspectable(tr, p.name, [
@@ -1486,7 +1525,7 @@ async function loadTemplates() {
 			actions.appendChild(document.createTextNode(" "));
 			actions.appendChild(editButton(() => openTemplateEdit(t)));
 			actions.appendChild(document.createTextNode(" "));
-			const delBtn = deleteCell("/templates/" + t.id, "template " + t.name, tr);
+			const delBtn = deleteCell("/templates/" + t.id, "template " + t.name, tr, "No templates yet.");
 			actions.appendChild(delBtn.firstChild);
 			tr.appendChild(actions);
 			tbody.appendChild(tr);
@@ -1559,7 +1598,7 @@ function openSurvey(t) {
 }
 
 // deleteCell builds a table cell holding a delete button for a resource.
-function deleteCell(path, label, tr) {
+function deleteCell(path, label, tr, emptyMsg) {
 	const cell = document.createElement("td");
 	const del = document.createElement("button");
 	del.className = "button danger";
@@ -1571,7 +1610,7 @@ function deleteCell(path, label, tr) {
 		try {
 			const res = await fetch(path, { method: "DELETE", headers: authHeaders() });
 			if (!res.ok) throw new Error("HTTP " + res.status);
-			tr.remove();
+			removeRow(tr, emptyMsg);
 		} catch (err) {
 			setStatus("Delete failed: " + err.message);
 		}
@@ -1732,7 +1771,7 @@ async function loadInventories() {
 			const tr = document.createElement("tr");
 			tr.appendChild(td(i.name));
 			tr.appendChild(tdTime(i.created_at));
-			const actions = deleteCell("/inventories/" + i.id, "inventory " + i.name, tr);
+			const actions = deleteCell("/inventories/" + i.id, "inventory " + i.name, tr, "No inventories yet.");
 			actions.insertBefore(editButton(() => openInventoryEdit(i)), actions.firstChild);
 			tr.appendChild(actions);
 			inspectable(tr, i.name, [
@@ -1851,7 +1890,8 @@ async function loadSources() {
 			actions.appendChild(document.createTextNode(" "));
 			actions.appendChild(editButton(() => openSourceEdit(src)));
 			actions.appendChild(document.createTextNode(" "));
-			const del = deleteCell("/inventory-sources/" + src.id, "source " + src.name, tr);
+			const del = deleteCell("/inventory-sources/" + src.id, "source " + src.name, tr,
+				"No inventory sources yet.");
 			actions.appendChild(del.firstChild);
 			tr.appendChild(actions);
 			tbody.appendChild(tr);
@@ -2469,7 +2509,7 @@ async function loadSchedules() {
 				try {
 					const res = await fetch("/schedules/" + s.id, { method: "DELETE", headers: authHeaders() });
 					if (!res.ok) throw new Error("HTTP " + res.status);
-					tr.remove();
+					removeRow(tr, "No schedules yet. Add one to fire a template on a cadence.");
 				} catch (err) {
 					setStatus("Delete failed: " + err.message);
 				}
@@ -2723,7 +2763,7 @@ async function loadPolicies() {
 				try {
 					const res = await fetch("/policies/" + p.id, { method: "DELETE", headers: authHeaders() });
 					if (!res.ok) throw new Error("HTTP " + res.status);
-					tr.remove();
+					removeRow(tr, "No policies yet. Add one to require approval for the runs it matches.");
 				} catch (err) {
 					setStatus("Delete failed: " + err.message);
 				}
@@ -2974,7 +3014,7 @@ async function loadUsers() {
 			tr.appendChild(td(u.username));
 			tr.appendChild(td(u.role, "mono"));
 			tr.appendChild(tdTime(u.created_at));
-			const actions = deleteCell("/users/" + u.id, "user " + u.username, tr);
+			const actions = deleteCell("/users/" + u.id, "user " + u.username, tr, "No users yet.");
 			actions.insertBefore(editButton(() => openUserEdit(u)), actions.firstChild);
 			tr.appendChild(actions);
 			tbody.appendChild(tr);
