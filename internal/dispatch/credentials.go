@@ -52,9 +52,9 @@ func (d *Dispatcher) validateCredentials(ctx context.Context, ids []string) erro
 // materializeCredentials decrypts the run's credentials into files only the executing process can
 // read and maps them onto the spec. It also returns every resolved plaintext secret so the caller
 // can redact those values from the run's output. The returned cleanup removes every file.
-func (d *Dispatcher) materializeCredentials(r *run.Run, spec *roundhouse.Spec) (func(), []string, error) {
+func (d *Dispatcher) materializeCredentials(ctx context.Context, r *run.Run, spec *roundhouse.Spec) (func(), []string, error) {
 	cleanup := func() {}
-	ids := d.effectiveCredentialIDs(r)
+	ids := d.effectiveCredentialIDs(ctx, r)
 	if len(ids) == 0 {
 		return cleanup, nil, nil
 	}
@@ -79,7 +79,7 @@ func (d *Dispatcher) materializeCredentials(r *run.Run, spec *roundhouse.Spec) (
 		}
 	}
 	for _, id := range ids {
-		c, plain, lease, err := d.openCredential(context.Background(), id)
+		c, plain, lease, err := d.openCredential(ctx, id)
 		if err != nil {
 			return cleanup, secrets, err
 		}
@@ -174,10 +174,10 @@ func (d *Dispatcher) openCredential(ctx context.Context, id string) (*credential
 // effectiveCredentialIDs returns the run's own credentials plus any attached to the stored inventory
 // it targets, deduplicated and in order, so an inventory can carry secret variables that every run
 // against it receives.
-func (d *Dispatcher) effectiveCredentialIDs(r *run.Run) []string {
+func (d *Dispatcher) effectiveCredentialIDs(ctx context.Context, r *run.Run) []string {
 	ids := append([]string(nil), r.CredentialIDs...)
 	if r.InventoryID != "" && d.inventories != nil {
-		if inv, err := d.inventories.Get(context.Background(), r.InventoryID); err == nil {
+		if inv, err := d.inventories.Get(ctx, r.InventoryID); err == nil {
 			ids = append(ids, inv.CredentialIDs...)
 		}
 	}

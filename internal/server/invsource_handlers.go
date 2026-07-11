@@ -181,9 +181,10 @@ func refreshSourceHandler(refresher SourceRefresher, log *zap.Logger) http.Handl
 			return
 		}
 		if err != nil {
-			// A refresh failure is recorded on the source; report it without a 500 so the caller
-			// sees the plugin error.
-			respondError(w, log, http.StatusBadGateway, err.Error())
+			// The refresh failure detail is recorded on the source as its LastError, which an admin
+			// reads back from the source, so the response stays generic and leaks no plugin internals.
+			log.Error("server: refresh source: " + err.Error())
+			respondError(w, log, http.StatusBadGateway, "inventory refresh failed")
 			return
 		}
 		respondJSON(w, log, http.StatusOK, src, wantsPretty(r))

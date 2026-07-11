@@ -9,7 +9,11 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/dcadolph/yardmaster/internal/credential"
+	"github.com/dcadolph/yardmaster/internal/dispatch"
 	"github.com/dcadolph/yardmaster/internal/grant"
+	"github.com/dcadolph/yardmaster/internal/inventory"
+	"github.com/dcadolph/yardmaster/internal/project"
 	"github.com/dcadolph/yardmaster/internal/run"
 	"github.com/dcadolph/yardmaster/internal/template"
 )
@@ -258,9 +262,16 @@ func launchTemplateHandler(store template.Store, submitter Submitter, authz *aut
 		} else {
 			created, err = submitter.Submit(r.Context(), t.Playbook, t.Inventory, opts...)
 		}
-		if err != nil {
-			log.Error("server: launch template: " + err.Error())
+		switch {
+		case errors.Is(err, credential.ErrNotFound), errors.Is(err, credential.ErrNoKey),
+			errors.Is(err, project.ErrNotFound), errors.Is(err, inventory.ErrNotFound),
+			errors.Is(err, dispatch.ErrNoPlaybook), errors.Is(err, dispatch.ErrNoCommand),
+			errors.Is(err, dispatch.ErrUnknownTool):
 			respondError(w, log, http.StatusBadRequest, err.Error())
+			return
+		case err != nil:
+			log.Error("server: launch template: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not launch template")
 			return
 		}
 		w.Header().Set("Location", "/runs/"+created.ID)

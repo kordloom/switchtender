@@ -431,7 +431,7 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 	// A stored inventory must exist as a file before its hosts can be enumerated for sharding.
 	listPath := inventory
 	if probe.InventoryID != "" {
-		path, cleanup, err := d.inventoryFile(probe.InventoryID)
+		path, cleanup, _, err := d.inventoryFile(ctx, probe.InventoryID)
 		if err != nil {
 			return nil, err
 		}
@@ -965,7 +965,7 @@ func (d *Dispatcher) execute(ctx context.Context, r *run.Run) run.Status {
 		Playbook: r.Playbook, Inventory: r.Inventory, Tool: r.Tool, Command: r.Command,
 		DryRun: r.DryRun, EventsPath: eventsPath, Limit: r.Limit, ExtraVars: r.ExtraVars,
 	}
-	invCleanup, err := d.materializeInventory(r, &spec)
+	invCleanup, invSecrets, err := d.materializeInventory(ctx, r, &spec)
 	if err != nil {
 		close(stop)
 		<-tailed
@@ -983,7 +983,7 @@ func (d *Dispatcher) execute(ctx context.Context, r *run.Run) run.Status {
 		return run.StatusFailed
 	}
 
-	credCleanup, secrets, err := d.materializeCredentials(r, &spec)
+	credCleanup, secrets, err := d.materializeCredentials(ctx, r, &spec)
 	if err != nil {
 		credCleanup()
 		close(stop)
@@ -993,7 +993,7 @@ func (d *Dispatcher) execute(ctx context.Context, r *run.Run) run.Status {
 		return run.StatusFailed
 	}
 	defer credCleanup()
-	mask.set(secrets)
+	mask.set(append(secrets, invSecrets...))
 
 	res, err := d.runner.Run(ctx, spec, sink)
 

@@ -63,9 +63,9 @@ func resolveGSM(ctx context.Context, config string) (string, error) {
 		return "", fmt.Errorf("%w: %v", ErrResolve, err)
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := safeClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("%w: gsm request failed", ErrResolve)
+		return "", fmt.Errorf("%w: gsm request failed: %s", ErrResolve, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, httpMaxBody))
@@ -98,9 +98,9 @@ func gsmMetadataToken(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("%w: %v", ErrResolve, err)
 	}
 	req.Header.Set("Metadata-Flavor", "Google")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := safeClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("%w: gsm needs a token in the config or a GCP metadata server", ErrResolve)
+		return "", fmt.Errorf("%w: gsm needs a token in the config or a GCP metadata server: %s", ErrResolve, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, httpMaxBody))

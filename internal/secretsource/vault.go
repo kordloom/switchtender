@@ -47,14 +47,17 @@ func resolveVault(ctx context.Context, config string) (string, error) {
 	}
 
 	url := strings.TrimRight(cfg.Addr, "/") + "/v1/" + strings.TrimLeft(cfg.Path, "/")
+	if err := checkResolveURL(url); err != nil {
+		return "", err
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return "", fmt.Errorf("%w: %v", ErrResolve, err)
 	}
 	req.Header.Set("X-Vault-Token", token)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := safeClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("%w: vault request failed", ErrResolve)
+		return "", fmt.Errorf("%w: vault request failed: %s", ErrResolve, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, httpMaxBody))

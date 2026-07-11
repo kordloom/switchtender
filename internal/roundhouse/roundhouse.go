@@ -287,6 +287,7 @@ func (a *ansibleRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Resu
 func runProcess(ctx context.Context, cmd *exec.Cmd, out io.Writer) (Result, error) {
 	cmd.Stdout = out
 	cmd.Stderr = out
+	configureProcessGroup(cmd)
 	err := cmd.Run()
 	if err == nil {
 		return Result{ExitCode: 0}, nil

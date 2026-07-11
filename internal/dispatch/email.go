@@ -2,6 +2,7 @@ package dispatch
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"net"
 	"net/smtp"
@@ -108,6 +109,14 @@ func (e *SMTPEmailer) Send(ctx context.Context, subject, body string) error {
 	}
 	defer func() { _ = client.Close() }()
 
+	// Upgrade to TLS before authenticating so credentials and mail are never sent in the clear. Go's
+	// smtp.PlainAuth also refuses to send on an unencrypted connection to any non-localhost relay, so
+	// without this a real relay is unreachable.
+	if ok, _ := client.Extension("STARTTLS"); ok {
+		if err := client.StartTLS(&tls.Config{ServerName: host}); err != nil {
+			return fmt.Errorf("smtp starttls: %w", err)
+		}
+	}
 	if e.auth != nil {
 		if ok, _ := client.Extension("AUTH"); ok {
 			if err := client.Auth(e.auth); err != nil {

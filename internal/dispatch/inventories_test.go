@@ -63,7 +63,7 @@ func TestInventoryContent(t *testing.T) {
 				d.sealer = nil
 			}
 
-			got, err := d.inventoryContent(inv)
+			got, err := d.inventoryContent(context.Background(), inv)
 			if test.WantErr {
 				if err == nil {
 					t.Fatal("inventoryContent() error = nil, want error")
@@ -98,7 +98,7 @@ func TestInventoryFileCommandSource(t *testing.T) {
 	}
 
 	d := &Dispatcher{inventories: store, sealer: sealer}
-	path, cleanup, err := d.inventoryFile("inv_1")
+	path, cleanup, _, err := d.inventoryFile(context.Background(), "inv_1")
 	defer cleanup()
 	if err != nil {
 		t.Fatalf("inventoryFile() error = %v", err)
@@ -163,5 +163,23 @@ func TestRunResolvesInventoryContentSource(t *testing.T) {
 	defer mu.Unlock()
 	if diff := cmp.Diff("[web]\nhostX", gotInventory); diff != "" {
 		t.Errorf("inventory the runner received (-want +got):\n%s", diff)
+	}
+}
+
+func TestInventorySecrets(t *testing.T) {
+	t.Parallel()
+	content := "[db]\ndb01 ansible_password=hunter2 ansible_user=deploy\n" +
+		"[web:vars]\napi_token: tok-abc123\nplain_var=notsecret\n"
+	got := inventorySecrets(content)
+	want := map[string]bool{"hunter2": true, "tok-abc123": true}
+	for _, v := range got {
+		if !want[v] {
+			t.Errorf("inventorySecrets returned unexpected value %q", v)
+			continue
+		}
+		delete(want, v)
+	}
+	if len(want) != 0 {
+		t.Errorf("inventorySecrets missing %v, got %v", want, got)
 	}
 }

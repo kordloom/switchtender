@@ -46,14 +46,17 @@ func mintVaultDynamic(ctx context.Context, config string) (string, *Lease, error
 
 	addr := strings.TrimRight(cfg.Addr, "/")
 	url := addr + "/v1/" + strings.TrimLeft(cfg.Path, "/")
+	if err := checkResolveURL(url); err != nil {
+		return "", nil, err
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return "", nil, fmt.Errorf("%w: %v", ErrResolve, err)
 	}
 	req.Header.Set("X-Vault-Token", token)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := safeClient.Do(req)
 	if err != nil {
-		return "", nil, fmt.Errorf("%w: vault request failed", ErrResolve)
+		return "", nil, fmt.Errorf("%w: vault request failed: %s", ErrResolve, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, httpMaxBody))
@@ -103,9 +106,9 @@ func revokeVaultLease(addr, token, leaseID string) func(ctx context.Context) err
 		}
 		req.Header.Set("X-Vault-Token", token)
 		req.Header.Set("Content-Type", "application/json")
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := safeClient.Do(req)
 		if err != nil {
-			return fmt.Errorf("%w: vault revoke request failed", ErrResolve)
+			return fmt.Errorf("%w: vault revoke request failed: %s", ErrResolve, err)
 		}
 		defer func() { _ = resp.Body.Close() }()
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, httpMaxBody))
