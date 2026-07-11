@@ -41,4 +41,5 @@ What Yardmaster does today.
 | Teams and grants | Group users into teams and grant use or manage on a specific project, template, inventory, or credential. Grants layer on the global role and default open.|
 | Retention | A sweeper drops old run events and deletes terminal runs past a configurable age, keeping the summaries the cross-run views need.|
 | Email | An SMTP notification on every finished run or on failures only, alongside the finish webhooks.|
+| Slack | A formatted message posts to a Slack incoming webhook when a run finishes, with the run label, status, and elapsed time.|
 | Migration | `yardmaster import awx` and `import semaphore` read an export and create the equivalent projects, inventories, templates, surveys, schedules, and credential shells, with a dry-run report first.|

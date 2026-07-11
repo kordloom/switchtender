@@ -44,6 +44,7 @@ Runs the HTTP API, the in-process executor, the scheduler, the retention sweeper
 | `--jwt-role-map` | none | Map a token group to a role as `group=role`. Repeatable. |
 | `--schedule-interval` | `15s` | How often the scheduler checks for due schedules. |
 | `--notify-webhook` | none | URL that receives a JSON notification when a run finishes. Repeatable. |
+| `--notify-slack` | none | Slack incoming webhook URL that receives a message when a run finishes. Repeatable. |
 | `--allow-container-ee` | `false` | Allow runs whose project pins a container image to execute inside it. Needs Docker on the executor. |
 | `--strict-grants` | `false` | Deny non-admins access to an object that has no grants, instead of deferring to the global role. |
 | `--retain-runs` | none | Delete terminal runs older than this, for example `90d`. Empty keeps them forever. |

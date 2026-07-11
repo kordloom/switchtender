@@ -74,6 +74,9 @@ var scheduleInterval time.Duration
 // notifyWebhooks holds the values of the repeatable --notify-webhook flag.
 var notifyWebhooks []string
 
+// notifySlack holds the values of the repeatable --notify-slack flag.
+var notifySlack []string
+
 // serveAllowContainerEE holds the value of the --allow-container-ee flag.
 var serveAllowContainerEE bool
 
@@ -216,6 +219,8 @@ func init() {
 		"How often the scheduler checks for due schedules.")
 	serveCmd.Flags().StringArrayVar(&notifyWebhooks, "notify-webhook", nil,
 		"URL that receives a JSON notification when a run finishes. Repeatable.")
+	serveCmd.Flags().StringArrayVar(&notifySlack, "notify-slack", nil,
+		"Slack incoming webhook URL that receives a message when a run finishes. Repeatable.")
 	serveCmd.Flags().BoolVar(&serveAllowContainerEE, "allow-container-ee", false,
 		"Allow runs whose project pins a container image to execute inside that image. Needs Docker.")
 	registerContainerFlags(serveCmd)
@@ -427,6 +432,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		dispatch.WithCredentials(bundle.Credentials(), sealer),
 		dispatch.WithProjects(bundle.Projects(), syncer),
 		dispatch.WithWebhooks(notifyWebhooks),
+		dispatch.WithSlack(notifySlack),
 		dispatch.WithEmail(emailer, onFailureOnly),
 		dispatch.WithInventories(bundle.Inventories()),
 		dispatch.WithInventorySources(bundle.InventorySources()),
