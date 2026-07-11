@@ -52,6 +52,9 @@ type Store interface {
 	SaveHostSummary(ctx context.Context, runID string, summaries []HostSummary) error
 	// FleetHealth ranks hosts by failures over their most recent window runs, worst first.
 	FleetHealth(ctx context.Context, window int) ([]HostHealth, error)
+	// DriftStatus reports each host's most recent drift check, the latest dry run to touch it, worst
+	// drift first. A host with no dry run in its history is omitted, having no drift signal.
+	DriftStatus(ctx context.Context) ([]HostDrift, error)
 	// HostCosts returns each host's average recorded duration in seconds over its most recent
 	// window runs, for balancing splits by past cost.
 	HostCosts(ctx context.Context, window int) (map[string]float64, error)
@@ -452,6 +455,40 @@ func (m *memStore) FleetHealth(_ context.Context, window int) ([]HostHealth, err
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Failures != out[j].Failures {
 			return out[i].Failures > out[j].Failures
+		}
+		return out[i].Host < out[j].Host
+	})
+	return out, nil
+}
+
+// DriftStatus reports each host's most recent drift check, the latest dry run to touch it, worst
+// drift first. A host with no dry run in its history is omitted, having no drift signal.
+func (m *memStore) DriftStatus(_ context.Context) ([]HostDrift, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	latest := make(map[string]HostSummary)
+	for runID, summaries := range m.summaries {
+		r, ok := m.runs[runID]
+		if !ok || !r.DryRun {
+			continue
+		}
+		for _, hs := range summaries {
+			if cur, seen := latest[hs.Host]; !seen || hs.RanAt.After(cur.RanAt) {
+				latest[hs.Host] = hs
+			}
+		}
+	}
+
+	out := make([]HostDrift, 0, len(latest))
+	for host, hs := range latest {
+		out = append(out, HostDrift{
+			Host: host, DriftedTasks: hs.Changed, RunID: hs.RunID, CheckedAt: hs.RanAt,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].DriftedTasks != out[j].DriftedTasks {
+			return out[i].DriftedTasks > out[j].DriftedTasks
 		}
 		return out[i].Host < out[j].Host
 	})

@@ -188,6 +188,31 @@ func fleetHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
 	}
 }
 
+// driftResponse wraps the fleet drift status.
+type driftResponse struct {
+	// Hosts is each host's latest drift check, worst drift first.
+	Hosts []run.HostDrift `json:"hosts"`
+	// Count is the number of hosts returned.
+	Count int `json:"count"`
+}
+
+// driftHandler reports each host's most recent drift check, from the latest dry run to touch it.
+func driftHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
+	if store == nil {
+		panic("server: driftHandler: Store required")
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		hosts, err := store.DriftStatus(r.Context())
+		if err != nil {
+			log.Error("server: drift status: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not compute drift status")
+			return
+		}
+		respondJSON(w, log, http.StatusOK,
+			driftResponse{Hosts: hosts, Count: len(hosts)}, wantsPretty(r))
+	}
+}
+
 // hostHistoryHandler returns one host's recent per run outcomes, newest first.
 func hostHistoryHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
 	if store == nil {

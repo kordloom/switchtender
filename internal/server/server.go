@@ -280,6 +280,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /healthz", healthHandler())
 	mux.Handle("GET /metrics", metricsHandler(s.store, s.log))
 	mux.Handle("GET /fleet", fleetHandler(s.store, s.log))
+	mux.Handle("GET /drift", driftHandler(s.store, s.log))
 	mux.Handle("GET /hosts/{host}/runs", hostHistoryHandler(s.store, s.log))
 	mux.Handle("GET /tasks", taskTrendsHandler(s.store, s.log))
 	mux.Handle("GET /workers", workersHandler(s.store, s.log))

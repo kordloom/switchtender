@@ -32,6 +32,7 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Run("pipeline steps ordered", func(t *testing.T) { testSteps(t, newStore()) })
 	t.Run("non-terminal runs", func(t *testing.T) { testNonTerminal(t, newStore()) })
 	t.Run("fleet health ranking", func(t *testing.T) { testFleetHealth(t, newStore()) })
+	t.Run("drift status", func(t *testing.T) { testDriftStatus(t, newStore()) })
 	t.Run("host costs", func(t *testing.T) { testHostCosts(t, newStore()) })
 	t.Run("flaky detection", func(t *testing.T) { testFlaky(t, newStore()) })
 	t.Run("host history", func(t *testing.T) { testHostHistory(t, newStore()) })
@@ -560,6 +561,54 @@ func testFleetHealth(t *testing.T, store run.Store) {
 		if h.Host == "db01" && h.Failures != 0 {
 			t.Errorf("db01 window 1 failures = %d, want 0 since most recent run was ok", h.Failures)
 		}
+	}
+}
+
+// testDriftStatus verifies drift comes only from dry-run checks and reports the latest check per host,
+// so a real run's changes and a stale check do not distort the current drift.
+func testDriftStatus(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	base := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	saveRun := func(id string, at time.Time, dry bool, changed map[string]int) {
+		if err := store.Save(ctx, &run.Run{
+			ID: id, Playbook: "site.yml", Status: run.StatusSucceeded, CreatedAt: at, DryRun: dry,
+		}); err != nil {
+			t.Fatalf("Save() error = %v", err)
+		}
+		var sums []run.HostSummary
+		for host, c := range changed {
+			sums = append(sums, run.HostSummary{Host: host, Changed: c, Worst: "changed", RanAt: at})
+		}
+		if err := store.SaveHostSummary(ctx, id, sums); err != nil {
+			t.Fatalf("SaveHostSummary() error = %v", err)
+		}
+	}
+	// An older check finds drift on web01. A real run then changes it. The newest check finds it near
+	// clean. db01 has one check that found it in sync.
+	saveRun("chk1", base, true, map[string]int{"web01": 3, "db01": 0})
+	saveRun("apply1", base.Add(time.Hour), false, map[string]int{"web01": 5})
+	saveRun("chk2", base.Add(2*time.Hour), true, map[string]int{"web01": 1})
+
+	drift, err := store.DriftStatus(ctx)
+	if err != nil {
+		t.Fatalf("DriftStatus() error = %v", err)
+	}
+	byHost := make(map[string]run.HostDrift, len(drift))
+	for _, d := range drift {
+		byHost[d.Host] = d
+	}
+	// web01's current drift is its latest check, chk2 with one drifted task, not the real run's five
+	// or the older check's three.
+	if w := byHost["web01"]; w.DriftedTasks != 1 || w.RunID != "chk2" {
+		t.Errorf("web01 drift = %+v, want 1 drifted task from chk2", w)
+	}
+	// db01's only check found it in sync.
+	if d := byHost["db01"]; d.DriftedTasks != 0 || d.RunID != "chk1" {
+		t.Errorf("db01 drift = %+v, want 0 drifted tasks from chk1", d)
+	}
+	// The most drifted host ranks first.
+	if len(drift) < 1 || drift[0].Host != "web01" {
+		t.Errorf("drift order = %+v, want web01 first", drift)
 	}
 }
 

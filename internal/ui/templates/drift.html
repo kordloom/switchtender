@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Drift - Yardmaster</title>
+	<link rel="icon" type="image/png" href="/ui/assets/favicon.png">
+	<link rel="stylesheet" href="/ui/assets/app.css">
+</head>
+<body data-page="drift"{{if .ReadOnly}} data-readonly="true"{{end}}>
+	<header class="topbar">
+		<div class="brand"><a href="/ui/"><picture><source media="(prefers-color-scheme: dark)" srcset="/ui/assets/logo-train-tracks-dark.png"><img class="brand-logo" src="/ui/assets/logo-train-tracks.png" alt="Yardmaster"></picture>Yardmaster</a></div>
+	</header>
+
+	<main class="content">
+		<a class="back" href="/ui/">Back to runs</a>
+		<h1>Drift</h1>
+		<p class="muted">How far each host has diverged from the desired state. A drift check is a dry run, where a change it would make is a divergence from the playbook. Run a dry run to refresh a host's drift.</p>
+		<div id="status" class="muted">Loading drift status.</div>
+		<table class="runs" hidden>
+			<thead>
+				<tr>
+					<th>Host</th>
+					<th>State</th>
+					<th>Drifted tasks</th>
+					<th>Last checked</th>
+					<th>Run</th>
+				</tr>
+			</thead>
+			<tbody id="drift"></tbody>
+		</table>
+	</main>
+
+	<script src="/ui/assets/app.js"></script>
+</body>
+</html>

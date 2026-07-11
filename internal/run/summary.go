@@ -55,6 +55,20 @@ type HostHealth struct {
 	Recent []string `json:"recent,omitempty"`
 }
 
+// HostDrift is a host's most recent drift check. A drift check is a dry run: in check mode a changed
+// result means a task would change, so the host has diverged from the desired state the playbook
+// asserts. It lets the fleet see divergence before the next real run.
+type HostDrift struct {
+	// Host is the target host.
+	Host string `json:"host"`
+	// DriftedTasks is how many tasks the latest check would change. Zero means the host is in sync.
+	DriftedTasks int `json:"drifted_tasks"`
+	// RunID is the check run that observed the drift.
+	RunID string `json:"run_id"`
+	// CheckedAt is when that check run ran.
+	CheckedAt time.Time `json:"checked_at"`
+}
+
 // TaskSummary is a single run's wall clock cost for one task, persisted at finalize so task trends
 // can be answered without reparsing events.
 type TaskSummary struct {

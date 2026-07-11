@@ -24,6 +24,7 @@ on them.
 | Distributed workers | Store leasing, where the same single binary adds capacity, held together by leases and a janitor. | A Receptor mesh. | Runners, in a paid tier. |
 | Per-run provenance | Every run records the exact commit it executed. | Partial. | Partial. |
 | Migration in | One command imports an AWX or Semaphore export. | Not applicable. | Not applicable. |
+| Drift detection | A dry run reports which hosts have diverged from the desired state, shown per host before the next real run. | No. | No. |
 
 ## Where they are even
 

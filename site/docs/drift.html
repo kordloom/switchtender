@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Drift detection · Yardmaster docs</title>
+	<link rel="icon" type="image/png" href="/assets/favicon.png">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="/docs.css?v=1">
+</head>
+<body>
+	<header class="dnav">
+		<a class="brand" href="/"><img src="/assets/logo-train-tracks-dark.png" alt="Yardmaster" class="brand-train"><span class="brand-word">Yardmaster</span></a>
+		<span class="dnav-tag">Docs</span>
+		<nav class="dnav-links">
+			<a href="/">Home</a>
+			<a href="/#compare">Compare</a>
+			<a href="https://github.com/dcadolph/yardmaster">GitHub</a>
+		</nav>
+	</header>
+	<div class="dshell">
+		<aside class="dside">
+			<nav>
+				<a href="/docs/index.html">Overview</a><a href="/docs/quickstart.html">Quickstart</a><a href="/docs/faq.html">FAQ</a><a href="/docs/switching-from-awx.html">Switching from AWX</a><a href="/docs/migration.html">Migration</a><a href="/docs/tutorials.html">Tutorials</a><a href="/docs/tutorial-run-a-job.html">Run a job</a><a href="/docs/tutorial-save-a-template.html">Save a template</a><a href="/docs/tutorial-schedule-a-job.html">Schedule a job</a><a href="/docs/tutorial-set-a-secret.html">Set a secret</a><a href="/docs/tutorial-migrate.html">Migrate your setup</a><a href="/docs/tool-bash.html">Bash runs</a><a href="/docs/tool-terraform.html">Terraform runs</a><a href="/docs/tool-python.html">Python runs</a><a href="/docs/concepts.html">Concepts</a><a href="/docs/configuration.html">Configuration</a><a href="/docs/features.html">Features</a><a href="/docs/api.html">HTTP API</a><a href="/docs/comparison.html">Yardmaster compared to AWX and Semaphore</a><a href="/docs/drift.html" class="active">Drift detection</a><a href="/docs/tool-go.html">Go runs</a>
+			</nav>
+		</aside>
+		<main class="dcontent prose">
+			<h1 id="drift-detection">Drift detection</h1>
+<p>Drift is when a host no longer matches the state a playbook asserts. Yardmaster detects it from a dry
+run and shows it per host on the Drift page, so divergence surfaces before the next real run.</p>
+<h2 id="how-it-works">How it works</h2>
+<p>A dry run executes in check mode, which reports what a task would change without changing it. A task
+that would change means the host has diverged from the desired state. Yardmaster records each host's
+changed count from its checks, and the Drift page shows each host's most recent check: how many tasks
+would change now, when it was checked, and the run that observed it. A host whose latest check would
+change nothing is in sync.</p>
+<p>Because drift comes from the same structured events as every run, it needs no separate agent and no
+extra setup. Schedule a dry run of a playbook on a cadence and the Drift page stays current.</p>
+<h2 id="what-counts">What counts</h2>
+<p>Drift is defined for tools that assert a desired state and support a no-change check: Ansible with
+<code>--check</code> and Terraform with a plan. Bash, Python, and Go have no desired state, so they do not report
+drift.</p>
+<h2 id="from-the-api">From the API</h2>
+<pre><code>curl -s localhost:8080/drift
+</code></pre>
+<p>Each host carries its drifted task count, the check run id, and when it was checked, worst drift first.</p>
+<p>See also the <a href="/docs/faq.html">FAQ</a> and the <a href="/docs/tutorials.html">tutorials</a>.</p>
+
+		</main>
+	</div>
+	<script>document.addEventListener("click",e=>{const a=e.target.closest(".dside a");if(a)document.querySelector(".dside")?.classList.remove("open")});</script>
+</body>
+</html>

@@ -10,6 +10,7 @@ const NAV_GROUPS = [
 		{ key: "overview", href: "/ui/", label: "Overview", desc: "At a glance" },
 		{ key: "runs", href: "/ui/runs", label: "Runs", desc: "Every playbook execution" },
 		{ key: "fleet", href: "/ui/fleet", label: "Fleet health", desc: "Flaky host detection" },
+		{ key: "drift", href: "/ui/drift", label: "Drift", desc: "Divergence from desired state" },
 		{ key: "tasks", href: "/ui/tasks", label: "Task trends", desc: "Duration trends per task" },
 		{ key: "workers", href: "/ui/workers", label: "Workers", desc: "Executor fleet status" },
 	] },
@@ -35,7 +36,7 @@ const NAV_GROUPS = [
 // PAGE_NAV maps a page identifier to the nav key it should highlight.
 const PAGE_NAV = {
 	overview: "overview", runs: "runs", detail: "runs", fleet: "fleet", host: "fleet",
-	tasks: "tasks", workers: "workers", projects: "projects", inventories: "inventories",
+	tasks: "tasks", workers: "workers", drift: "drift", projects: "projects", inventories: "inventories",
 	sources: "sources", jobtemplates: "templates", schedules: "schedules",
 	migrate: "migrate", credentials: "credentials", users: "users", audit: "audit",
 	policies: "policies", docs: "docs",
@@ -46,6 +47,7 @@ const NAV_ICONS = {
 	overview: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/>',
 	runs: '<circle cx="12" cy="12" r="9"/><polygon points="10 8 16 12 10 16"/>',
 	fleet: '<path d="M3 12h4l2 6 4-12 2 6h6"/>',
+	drift: '<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>',
 	tasks: '<path d="M3 17l6-6 4 4 8-8"/><path d="M17 7h4v4"/>',
 	workers: '<rect x="3" y="4" width="18" height="7" rx="1"/><rect x="3" y="13" width="18" height="7" rx="1"/><line x1="7" y1="7.5" x2="7.01" y2="7.5"/><line x1="7" y1="16.5" x2="7.01" y2="16.5"/>',
 	projects: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
@@ -101,7 +103,7 @@ function mountTopbar() {
 // LIST_PAGES get the client-side row filter. The runs page is excluded because it searches on the
 // server, across every run rather than only the loaded page.
 const LIST_PAGES = ["jobtemplates", "credentials", "projects", "inventories",
-	"sources", "schedules", "users", "workers", "fleet", "tasks", "host", "policies"];
+	"sources", "schedules", "users", "workers", "fleet", "tasks", "host", "policies", "drift"];
 
 // mountListFilter adds a search box above the main list table and filters its rows by text as you
 // type, so every list is searchable. It reads the rows live, so it works no matter when they load.
@@ -362,6 +364,8 @@ document.addEventListener("DOMContentLoaded", () => {
 		loadDetail(document.body.dataset.runId);
 	} else if (page === "fleet") {
 		loadFleet();
+	} else if (page === "drift") {
+		loadDrift();
 	} else if (page === "host") {
 		loadHost(document.body.dataset.host);
 	} else if (page === "tasks") {
@@ -2255,6 +2259,48 @@ async function loadFleet() {
 		document.querySelector("table.runs").hidden = false;
 	} catch (e) {
 		setStatus("Failed to load fleet health: " + e.message);
+	}
+}
+
+// loadDrift populates the drift table, hosts most drifted first, each showing its latest check.
+async function loadDrift() {
+	try {
+		const data = await getJSON("/drift");
+		const hosts = data.hosts || [];
+		if (hosts.length === 0) {
+			showEmpty("No drift checks yet. Run a dry run to detect drift from the desired state.");
+			return;
+		}
+		const tbody = document.getElementById("drift");
+		for (const h of hosts) {
+			const tr = document.createElement("tr");
+			const hostCell = document.createElement("td");
+			hostCell.className = "mono";
+			const hostLink = document.createElement("a");
+			hostLink.href = "/ui/hosts/" + encodeURIComponent(h.host);
+			hostLink.textContent = h.host;
+			hostCell.appendChild(hostLink);
+			tr.appendChild(hostCell);
+			const state = document.createElement("td");
+			const chip = document.createElement("span");
+			chip.className = "chip " + (h.drifted_tasks > 0 ? "changed" : "ok");
+			chip.textContent = h.drifted_tasks > 0 ? "drifted" : "in sync";
+			state.appendChild(chip);
+			tr.appendChild(state);
+			tr.appendChild(td(String(h.drifted_tasks)));
+			tr.appendChild(tdTime(h.checked_at));
+			const runCell = document.createElement("td");
+			const runLink = document.createElement("a");
+			runLink.href = "/ui/runs/" + h.run_id;
+			runLink.textContent = "view";
+			runCell.appendChild(runLink);
+			tr.appendChild(runCell);
+			tbody.appendChild(tr);
+		}
+		setStatus("");
+		document.querySelector("table.runs").hidden = false;
+	} catch (e) {
+		setStatus("Failed to load drift status: " + e.message);
 	}
 }
 

@@ -714,6 +714,46 @@ SELECT host, AVG(duration_seconds) FROM ranked WHERE rn <= $1 GROUP BY host`
 	return out, nil
 }
 
+// DriftStatus reports each host's most recent drift check, the latest dry run to touch it, worst
+// drift first. It joins host summaries to their run so only dry runs count, where a changed result
+// means a task would change, so the host has diverged from the desired state.
+func (s *store) DriftStatus(ctx context.Context) ([]run.HostDrift, error) {
+	const q = `
+WITH checks AS (
+	SELECT hs.host, hs.changed, hs.run_id, hs.ran_at,
+		ROW_NUMBER() OVER (PARTITION BY hs.host ORDER BY hs.ran_at DESC) AS rn
+	FROM run_host_summary hs
+	JOIN runs r ON r.id = hs.run_id
+	WHERE r.dry_run = 1
+)
+SELECT host, changed, run_id, ran_at FROM checks WHERE rn = 1 ORDER BY changed DESC, host`
+
+	rows, err := s.db.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("drift status: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []run.HostDrift
+	for rows.Next() {
+		var (
+			d     run.HostDrift
+			ranAt string
+		)
+		if err := rows.Scan(&d.Host, &d.DriftedTasks, &d.RunID, &ranAt); err != nil {
+			return nil, fmt.Errorf("drift status: %w", err)
+		}
+		if d.CheckedAt, err = parseTime(ranAt); err != nil {
+			return nil, fmt.Errorf("drift status: %w", err)
+		}
+		out = append(out, d)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("drift status: %w", err)
+	}
+	return out, nil
+}
+
 // HostHistory returns a host's most recent per run summaries, newest first, with run ids.
 func (s *store) HostHistory(ctx context.Context, host string, limit int) ([]run.HostSummary, error) {
 	if limit < 1 {
