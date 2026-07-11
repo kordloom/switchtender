@@ -7,8 +7,8 @@
 
 # Run a job
 
-In AWX you launch a job template and watch a text log. Here you launch a run and watch a live
-host-by-task matrix, and the run can drive any tool, not only Ansible.
+You launch a run and watch a live host-by-task matrix, not a text log, and the run can drive any
+tool, not only Ansible.
 
 ## Launch from the UI
 
@@ -23,8 +23,8 @@ host-by-task matrix, and the run can drive any tool, not only Ansible.
 ## Split it across hosts
 
 Set a shard count of two or more and Yardmaster splits the run across your inventory, balanced by
-each host's measured duration from recent runs, then rolls the shards up into one matrix. This is
-AWX job slicing, sized by real cost rather than a flat count.
+each host's measured duration from recent runs, then rolls the shards up into one matrix. Each shard
+carries a real share of the work, sized by measured cost rather than a flat count.
 
 ## Do it from the API
 

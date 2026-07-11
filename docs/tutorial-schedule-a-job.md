@@ -7,8 +7,8 @@
 
 # Schedule a job
 
-AWX schedules use a recurrence rule. Yardmaster uses a cron expression, and a schedule can fire a
-stored template, a single run, a split, or a whole pipeline.
+A schedule uses a cron expression, and it can fire a stored template, a single run, a split, or a
+whole pipeline.
 
 ## Schedule a template
 

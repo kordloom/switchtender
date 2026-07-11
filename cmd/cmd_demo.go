@@ -76,6 +76,7 @@ func runDemo(cmd *cobra.Command, _ []string) error {
 		Submitter: disp, Runs: store, Projects: bundle.Projects(),
 		Inventories: bundle.Inventories(), Templates: bundle.Templates(),
 		Credentials: bundle.Credentials(),
+		Policies:    bundle.Policies(), Users: bundle.Users(),
 	}
 	if err := demo.Seed(cmd.Context(), seedDeps, log); err != nil {
 		return fmt.Errorf("seed demo: %w", err)
@@ -95,6 +96,9 @@ func runDemo(cmd *cobra.Command, _ []string) error {
 			server.WithTeams(bundle.Teams()),
 			server.WithGrants(bundle.Grants(), false),
 			server.WithAudit(bundle.Audits()),
+			server.WithPolicies(bundle.Policies()),
+			server.WithUsers(bundle.Users()),
+			server.WithApprover(disp),
 			server.WithDocs(docsFS),
 			server.WithReadOnly(true)).Handler(),
 		ReadHeaderTimeout: readHeaderTimeout,

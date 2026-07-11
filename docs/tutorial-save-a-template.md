@@ -7,9 +7,9 @@
 
 # Save a template
 
-A template is Yardmaster's job template: a saved preset that launches a run in one action instead of
-a hand-built request. It bundles the tool, the project and playbook or command, an inventory, a shard
-count, credentials, and extra vars.
+A template is a saved preset that launches a run in one action instead of a hand-built request. It
+bundles the tool, the project and playbook or command, an inventory, a shard count, credentials, and
+extra vars.
 
 ## Create one
 
@@ -21,9 +21,9 @@ count, credentials, and extra vars.
 
 ## Add a survey
 
-A survey is the same idea as AWX's: typed questions asked at launch, whose answers become extra vars.
-Add fields of type text, integer, boolean, or choice, and mark the ones that are required. Ansible
-receives them as extra vars. Bash and Python receive them as environment values. Terraform receives
+A survey is a set of typed questions asked at launch, whose answers become extra vars. Add fields of
+type text, integer, boolean, or choice, and mark the ones that are required. Ansible receives them as
+extra vars. Bash and Python receive them as environment values. Terraform receives
 them as `TF_VAR_` variables.
 
 ## Launch it

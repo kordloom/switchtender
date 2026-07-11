@@ -28,8 +28,8 @@
 		</aside>
 		<main class="dcontent prose">
 			<h1 id="run-a-job">Run a job</h1>
-<p>In AWX you launch a job template and watch a text log. Here you launch a run and watch a live
-host-by-task matrix, and the run can drive any tool, not only Ansible.</p>
+<p>You launch a run and watch a live host-by-task matrix, not a text log, and the run can drive any
+tool, not only Ansible.</p>
 <h2 id="launch-from-the-ui">Launch from the UI</h2>
 <ol>
 <li>Open Runs and select Launch run.</li>
@@ -42,8 +42,8 @@ stdout, stderr, return code, and diff.</li>
 </ol>
 <h2 id="split-it-across-hosts">Split it across hosts</h2>
 <p>Set a shard count of two or more and Yardmaster splits the run across your inventory, balanced by
-each host's measured duration from recent runs, then rolls the shards up into one matrix. This is
-AWX job slicing, sized by real cost rather than a flat count.</p>
+each host's measured duration from recent runs, then rolls the shards up into one matrix. Each shard
+carries a real share of the work, sized by measured cost rather than a flat count.</p>
 <h2 id="do-it-from-the-api">Do it from the API</h2>
 <pre><code>curl -s -X POST localhost:8080/runs \
   -H 'content-type: application/json' \

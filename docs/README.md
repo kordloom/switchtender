@@ -17,7 +17,7 @@ the app at `/ui/docs`.
 |-------|------|
 | [Quickstart](quickstart.md) | Zero to a first run in a few minutes.|
 | [Switching from AWX](switching-from-awx.md) | Import what you have, or set up from scratch.|
-| [Tutorials](tutorials.md) | Task-focused walk-throughs for AWX and Semaphore users.|
+| [Tutorials](tutorials.md) | Task-focused walk-throughs for everyday work.|
 | [Concepts](concepts.md) | Runs, splits, pipelines, projects, templates, and the rest.|
 | [Configuration](configuration.md) | Every command, flag, and environment variable.|
 | [Features](features.md) | The full capability list.|

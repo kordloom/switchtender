@@ -18,9 +18,11 @@ import (
 
 	"github.com/dcadolph/yardmaster/internal/credential"
 	"github.com/dcadolph/yardmaster/internal/inventory"
+	"github.com/dcadolph/yardmaster/internal/policy"
 	"github.com/dcadolph/yardmaster/internal/project"
 	"github.com/dcadolph/yardmaster/internal/run"
 	"github.com/dcadolph/yardmaster/internal/template"
+	"github.com/dcadolph/yardmaster/internal/user"
 )
 
 // assets holds the playbook, inventory, and Terraform configuration the seeder runs.
@@ -49,6 +51,9 @@ type Deps struct {
 	Inventories inventory.Store
 	Templates   template.Store
 	Credentials credential.Store
+	// Policies and Users hold sample governance rules and accounts, so those pages show real data.
+	Policies policy.Store
+	Users    user.Store
 }
 
 // Seed populates the stores with sample configuration and a set of runs that exercise the matrix,
@@ -102,6 +107,14 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 		return fmt.Errorf("seed run: %w", err)
 	}
 	waitTerminal(ctx, d.Runs, last.ID)
+
+	// A dry run of a check playbook surfaces configuration drift per host on the Drift page.
+	driftPlay := filepath.Join(dir, "drift.yml")
+	if driftRun, err := d.Submitter.Submit(ctx, driftPlay, inv, run.WithDryRun(true)); err == nil {
+		waitTerminal(ctx, d.Runs, driftRun.ID)
+	} else {
+		log.Warn("demo: seed drift check: " + err.Error())
+	}
 
 	if err := seedMultiTool(ctx, d, tfDir, playbook, inv, log); err != nil {
 		return err
@@ -300,6 +313,39 @@ func seedConfig(ctx context.Context, d Deps, log *zap.Logger) {
 	for _, t := range templates {
 		if err := d.Templates.Save(ctx, t); err != nil {
 			log.Warn("demo: seed template: " + err.Error())
+		}
+	}
+
+	if d.Policies != nil {
+		policies := []*policy.Policy{
+			{ID: policy.NewID(), Name: "prod terraform destroy", Tool: run.ToolTerraform, CommandContains: "destroy", ExcludeDryRun: true, CreatedAt: ago(40)},
+			{ID: policy.NewID(), Name: "any production run", InventoryID: inventories[0].ID, CreatedAt: ago(22)},
+		}
+		for _, p := range policies {
+			if err := d.Policies.Save(ctx, p); err != nil {
+				log.Warn("demo: seed policy: " + err.Error())
+			}
+		}
+	}
+
+	if d.Users != nil {
+		accounts := []struct {
+			Name string
+			Role user.Role
+		}{
+			{"admin", user.RoleAdmin},
+			{"deploy-bot", user.RoleOperator},
+			{"auditor", user.RoleViewer},
+		}
+		for _, a := range accounts {
+			u, err := user.New(a.Name, "demo-password", a.Role)
+			if err != nil {
+				log.Warn("demo: build user: " + err.Error())
+				continue
+			}
+			if err := d.Users.Save(ctx, u); err != nil {
+				log.Warn("demo: seed user: " + err.Error())
+			}
 		}
 	}
 }

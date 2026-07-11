@@ -7,17 +7,16 @@
 
 # Tutorials
 
-Short, task-focused walk-throughs for the things you did every day in AWX or Semaphore. Each one maps
-a task you already know to how it works here, in a few steps. New to Yardmaster? Start with the
-[quickstart](quickstart.md), then come back.
+Short, task-focused walk-throughs for the everyday work of running a fleet. Each one takes a few
+steps. New to Yardmaster? Start with the [quickstart](quickstart.md), then come back.
 
-| Task | In AWX or Semaphore | In Yardmaster |
-|------|---------------------|---------------|
-| [Run a job](tutorial-run-a-job.md) | Launch a job template | Launch a run, with any tool.|
-| [Save a template](tutorial-save-a-template.md) | Create a job template | Save a launch preset.|
-| [Schedule a job](tutorial-schedule-a-job.md) | Add a schedule | Fire a template on a cron.|
-| [Set a secret](tutorial-set-a-secret.md) | Create a credential | Seal a secret, or resolve it from Vault at run time.|
-| [Migrate your setup](tutorial-migrate.md) | Export, then rebuild by hand | Import the whole export at once.|
+| Task | What it does |
+|------|--------------|
+| [Run a job](tutorial-run-a-job.md) | Launch a run, with any tool.|
+| [Save a template](tutorial-save-a-template.md) | Save a launch preset.|
+| [Schedule a job](tutorial-schedule-a-job.md) | Fire a template on a cron.|
+| [Set a secret](tutorial-set-a-secret.md) | Seal a secret, or resolve it from Vault at run time.|
+| [Migrate your setup](tutorial-migrate.md) | Import a whole export at once.|
 
 Going beyond Ansible? The per-tool guides cover what each engine does and how values reach it:
 [Bash](tool-bash.md), [Terraform](tool-terraform.md), [Python](tool-python.md), and [Go](tool-go.md).

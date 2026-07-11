@@ -7,7 +7,7 @@
 
 # Set a secret
 
-Secrets live in credentials, the same as AWX. Each is sealed at rest and never returned by the API.
+Secrets live in credentials. Each is sealed at rest and never returned by the API.
 A run gets a credential's value only while it executes, in a temporary file or environment that is
 wiped afterward. If a tool prints a credential's value, Yardmaster redacts it from the run's log,
 live stream, and events, so the output shows `***` instead of the secret.
@@ -16,12 +16,16 @@ live stream, and events, so the output shows `***` instead of the secret.
 
 1. Open Credentials and add one.
 2. Pick the kind:
-   - `ssh_key`: an SSH private key, to reach hosts and clone private git projects.
-   - `vault_password`: an Ansible Vault password.
-   - `env`: `KEY=VALUE` lines injected into the run, how cloud SDK tokens reach a tool.
-   - `token`: a single API token or JWT, exposed to the run as the `YARDMASTER_TOKEN` environment variable.
-   - `become_password`: a privilege escalation password, kept off the command line.
-   - `registry`: a container registry login, to pull a pinned execution image.
+
+   | Kind | What it is |
+   |------|------------|
+   | `ssh_key` | an SSH private key, to reach hosts and clone private git projects. |
+   | `vault_password` | an Ansible Vault password. |
+   | `env` | `KEY=VALUE` lines injected into the run, how cloud SDK tokens reach a tool. |
+   | `token` | a single API token or JWT, exposed to the run as the `YARDMASTER_TOKEN` environment variable. |
+   | `become_password` | a privilege escalation password, kept off the command line. |
+   | `registry` | a container registry login, to pull a pinned execution image. |
+
 3. Paste the secret and save. Attach it to a project, a template, or a run.
 
 ## Resolve it from an external store

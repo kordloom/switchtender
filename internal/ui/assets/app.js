@@ -141,7 +141,7 @@ function mountListFilter() {
 const TOUR_STEPS = [
 	{
 		title: "Welcome to Yardmaster",
-		body: "One binary runs Ansible, Bash, Terraform, and Python, with no Kubernetes. Here is the sixty-second tour.",
+		body: "One binary runs Ansible, Terraform, Bash, Python, and Go, with no Kubernetes. Here is the sixty-second tour.",
 	},
 	{
 		sel: ".page-head .button.primary",
@@ -156,7 +156,7 @@ const TOUR_STEPS = [
 	{
 		sel: ".migrate-callout",
 		title: "Bring your work with you",
-		body: "Moving off AWX or Semaphore? Import projects, inventories, templates, and schedules in a few clicks.",
+		body: "Migrating from another tool? Import projects, inventories, templates, and schedules in a few clicks.",
 	},
 	{
 		sel: ".tile-search",
@@ -440,7 +440,7 @@ function applyReadOnly() {
 	if (main && !main.querySelector(".ro-banner")) {
 		const banner = document.createElement("div");
 		banner.className = "ro-banner";
-		banner.textContent = "Read-only demo. Browse the data freely; changes are disabled.";
+		banner.textContent = "Read-only demo. Browse the data freely. Changes are disabled.";
 		main.insertBefore(banner, main.firstChild);
 	}
 	for (const form of document.querySelectorAll("form")) {
