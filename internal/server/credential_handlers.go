@@ -205,13 +205,26 @@ func listCredentialsHandler(store credential.Store, log *zap.Logger) http.Handle
 }
 
 // deleteCredentialHandler removes a credential.
-func deleteCredentialHandler(store credential.Store, log *zap.Logger) http.HandlerFunc {
+func deleteCredentialHandler(store credential.Store, refs *refChecker, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil {
 			respondError(w, log, http.StatusNotFound, "credentials not enabled")
 			return
 		}
-		err := store.Delete(r.Context(), r.PathValue("id"))
+		id := r.PathValue("id")
+		if refs != nil {
+			used, err := refs.credentialRefs(r.Context(), id)
+			if err != nil {
+				log.Error("server: credential references: " + err.Error())
+				respondError(w, log, http.StatusInternalServerError, "could not check credential references")
+				return
+			}
+			if !used.empty() {
+				respondInUse(w, log, "credential in use", used, wantsPretty(r))
+				return
+			}
+		}
+		err := store.Delete(r.Context(), id)
 		if errors.Is(err, credential.ErrNotFound) {
 			respondError(w, log, http.StatusNotFound, "credential not found")
 			return

@@ -168,7 +168,7 @@
 <tr>
 <td>DELETE</td>
 <td><code>/projects/{id}</code></td>
-<td>Delete a project.</td>
+<td>Delete a project. 409 while a template or source uses it.</td>
 </tr>
 <tr>
 <td>POST</td>
@@ -243,7 +243,7 @@
 <tr>
 <td>DELETE</td>
 <td><code>/credentials/{id}</code></td>
-<td>Delete a credential.</td>
+<td>Delete a credential. 409 while an object still uses it.</td>
 </tr>
 <tr>
 <td>POST</td>

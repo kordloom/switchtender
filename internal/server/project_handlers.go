@@ -139,13 +139,26 @@ func listProjectsHandler(store project.Store, log *zap.Logger) http.HandlerFunc 
 }
 
 // deleteProjectHandler removes a project.
-func deleteProjectHandler(store project.Store, log *zap.Logger) http.HandlerFunc {
+func deleteProjectHandler(store project.Store, refs *refChecker, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil {
 			respondError(w, log, http.StatusNotFound, "projects not enabled")
 			return
 		}
-		err := store.Delete(r.Context(), r.PathValue("id"))
+		id := r.PathValue("id")
+		if refs != nil {
+			used, err := refs.projectRefs(r.Context(), id)
+			if err != nil {
+				log.Error("server: project references: " + err.Error())
+				respondError(w, log, http.StatusInternalServerError, "could not check project references")
+				return
+			}
+			if !used.empty() {
+				respondInUse(w, log, "project in use", used, wantsPretty(r))
+				return
+			}
+		}
+		err := store.Delete(r.Context(), id)
 		if errors.Is(err, project.ErrNotFound) {
 			respondError(w, log, http.StatusNotFound, "project not found")
 			return

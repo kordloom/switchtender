@@ -36,7 +36,7 @@ Every endpoint the server exposes. The web UI lives at `/ui/` and the root redir
 | POST   | `/projects`             | Register a git project. Runs record their commit.       |
 | GET    | `/projects`             | List projects.                                          |
 | PUT    | `/projects/{id}`        | Update a project.                                       |
-| DELETE | `/projects/{id}`        | Delete a project.                                       |
+| DELETE | `/projects/{id}`        | Delete a project. 409 while a template or source uses it.|
 | POST   | `/templates`            | Save a launch preset.                                   |
 | GET    | `/templates`            | List templates.                                         |
 | POST   | `/templates/{id}/launch`| Launch a template, answering its survey if it has one.  |
@@ -51,7 +51,7 @@ Every endpoint the server exposes. The web UI lives at `/ui/` and the root redir
 | POST   | `/credentials`          | Store a credential (ssh_key, vault_password, env, token, become_password, registry), encrypted at rest.|
 | GET    | `/credentials`          | List credentials, secrets never included.               |
 | PUT    | `/credentials/{id}`     | Update a credential.                                    |
-| DELETE | `/credentials/{id}`     | Delete a credential.                                    |
+| DELETE | `/credentials/{id}`     | Delete a credential. 409 while an object still uses it. |
 | POST   | `/auth/login`           | Sign in with username and password, returns a token.    |
 | POST   | `/auth/check`           | Verify an API token.                                    |
 | GET    | `/auth/oidc/login`      | Start the OpenID Connect sign-in handshake.             |

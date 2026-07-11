@@ -339,11 +339,16 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /credentials", createCredentialHandler(s.credentials, s.sealer, s.log))
 	mux.Handle("PUT /credentials/{id}", updateCredentialHandler(s.credentials, s.sealer, s.log))
 	mux.Handle("GET /credentials", listCredentialsHandler(s.credentials, s.log))
-	mux.Handle("DELETE /credentials/{id}", deleteCredentialHandler(s.credentials, s.log))
+	// refs lets a credential or project delete refuse to orphan an object that still uses it.
+	refs := &refChecker{
+		templates: s.templates, inventories: s.inventories,
+		projects: s.projects, invSources: s.invSources,
+	}
+	mux.Handle("DELETE /credentials/{id}", deleteCredentialHandler(s.credentials, refs, s.log))
 	mux.Handle("POST /projects", createProjectHandler(s.projects, s.log))
 	mux.Handle("PUT /projects/{id}", updateProjectHandler(s.projects, s.log))
 	mux.Handle("GET /projects", listProjectsHandler(s.projects, s.log))
-	mux.Handle("DELETE /projects/{id}", deleteProjectHandler(s.projects, s.log))
+	mux.Handle("DELETE /projects/{id}", deleteProjectHandler(s.projects, refs, s.log))
 	mux.Handle("POST /inventories", createInventoryHandler(s.inventories, authz, s.sealer, s.log))
 	mux.Handle("PUT /inventories/{id}", updateInventoryHandler(s.inventories, authz, s.sealer, s.log))
 	mux.Handle("GET /inventories", listInventoriesHandler(s.inventories, s.log))
