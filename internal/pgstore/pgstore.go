@@ -197,7 +197,7 @@ CREATE TABLE IF NOT EXISTS audit_entries (
 	hash      TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_audit_at ON audit_entries(at DESC);
-CREATE INDEX IF NOT EXISTS idx_audit_seq ON audit_entries(seq DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_seq ON audit_entries(seq);
 CREATE TABLE IF NOT EXISTS policies (
 	id               TEXT PRIMARY KEY,
 	name             TEXT NOT NULL DEFAULT '',

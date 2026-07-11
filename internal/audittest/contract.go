@@ -4,6 +4,7 @@ package audittest
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -15,6 +16,55 @@ func Contract(t *testing.T, newStore func() audit.Store) {
 	t.Helper()
 	t.Run("append and list", func(t *testing.T) { testAppendList(t, newStore()) })
 	t.Run("chain verifies", func(t *testing.T) { testChain(t, newStore()) })
+	t.Run("concurrent appends do not fork", func(t *testing.T) { testConcurrentAppend(t, newStore()) })
+}
+
+// testConcurrentAppend fires many appends at once and checks the chain stays a single intact line:
+// contiguous unique sequences and a passing Verify. A store that reads its head and inserts without
+// serializing forks here, showing up as a duplicate sequence or a broken chain.
+func testConcurrentAppend(t *testing.T, store audit.Store) {
+	ctx := context.Background()
+	const n = 50
+	var wg sync.WaitGroup
+	errs := make(chan error, n)
+	for i := range n {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			if err := store.Append(ctx, &audit.Entry{
+				ID: audit.NewID(), At: time.Unix(int64(i), 0).UTC(),
+				Actor: "root", Method: "POST", Path: "/runs",
+			}); err != nil {
+				errs <- err
+			}
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatalf("concurrent Append() error = %v", err)
+	}
+
+	chain, err := store.Chain(ctx)
+	if err != nil {
+		t.Fatalf("Chain() error = %v", err)
+	}
+	if len(chain) != n {
+		t.Fatalf("Chain() len = %d, want %d", len(chain), n)
+	}
+	seen := make(map[int64]bool, n)
+	for i, e := range chain {
+		if e.Seq != int64(i+1) {
+			t.Errorf("entry %d seq = %d, want %d", i, e.Seq, i+1)
+		}
+		if seen[e.Seq] {
+			t.Errorf("duplicate seq %d: the chain forked", e.Seq)
+		}
+		seen[e.Seq] = true
+	}
+	if ok, at := audit.Verify(chain); !ok {
+		t.Errorf("Verify() reported a break at %d after concurrent appends", at)
+	}
 }
 
 // testChain verifies that appended entries form an intact hash chain with contiguous sequences that
