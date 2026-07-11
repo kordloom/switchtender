@@ -371,6 +371,8 @@ document.addEventListener("DOMContentLoaded", () => {
 	} else if (page === "tasks") {
 		loadTasks();
 	} else if (page === "schedules") {
+		wireModal("schedule");
+		wireScheduleForm();
 		loadSchedules();
 	} else if (page === "login") {
 		loadLogin();
@@ -673,7 +675,7 @@ async function loadAudit() {
 		const data = await getJSON("/audit?limit=500");
 		const entries = data.entries || [];
 		if (entries.length === 0) {
-			showEmpty("No audit entries yet. Mutations are recorded here.");
+			showEmpty("No audit entries yet. Every change is recorded here.");
 			return;
 		}
 		const tbody = document.getElementById("audit");
@@ -1923,8 +1925,8 @@ function renderRecentRuns(runs) {
 		row.appendChild(badge(r.status));
 		const name = document.createElement("span");
 		name.className = "ov-row-name";
-		name.textContent = baseName(r.playbook) || r.id;
-		name.title = r.playbook || r.id;
+		name.textContent = toolLabel(r);
+		name.title = r.playbook || r.command || r.id;
 		row.appendChild(name);
 		const started = r.started_at || r.created_at;
 		const meta = document.createElement("span");
@@ -2099,6 +2101,7 @@ function toolBadgeEl(r) {
 function appendRunRows(tbody, runs) {
 	for (const r of runs) {
 		const tr = document.createElement("tr");
+		tr.className = "row-nav";
 		tr.addEventListener("click", () => { location.href = "/ui/runs/" + r.id; });
 		tr.appendChild(tdBadge(r.status));
 
@@ -2397,10 +2400,11 @@ function fmtSeconds(s) {
 // loadSchedules populates the schedules table.
 async function loadSchedules() {
 	try {
+		const tplByID = await fillTemplateSelect(null);
 		const data = await getJSON("/schedules");
 		const schedules = data.schedules || [];
 		if (schedules.length === 0) {
-			showEmpty("No schedules yet. Create one with POST /schedules.");
+			showEmpty("No schedules yet. Add one to fire a template on a cadence.");
 			return;
 		}
 		const tbody = document.getElementById("schedules");
@@ -2408,7 +2412,7 @@ async function loadSchedules() {
 			const tr = document.createElement("tr");
 			tr.appendChild(td(s.name || "(unnamed)"));
 			tr.appendChild(td(s.cron, "mono"));
-			tr.appendChild(td(scheduleTarget(s)));
+			tr.appendChild(td(s.template_id ? (tplByID[s.template_id] || "template") : scheduleTarget(s)));
 
 			const enabled = document.createElement("td");
 			const chip = document.createElement("span");
@@ -2427,6 +2431,26 @@ async function loadSchedules() {
 				last.appendChild(link);
 			}
 			tr.appendChild(last);
+
+			const actions = document.createElement("td");
+			const del = document.createElement("button");
+			del.className = "button danger";
+			del.textContent = "Delete";
+			del.addEventListener("click", async (e) => {
+				e.preventDefault();
+				if (!window.confirm("Delete schedule " + (s.name || s.id) + "?")) return;
+				try {
+					const res = await fetch("/schedules/" + s.id, { method: "DELETE", headers: authHeaders() });
+					if (!res.ok) throw new Error("HTTP " + res.status);
+					tr.remove();
+				} catch (err) {
+					setStatus("Delete failed: " + err.message);
+				}
+			});
+			actions.appendChild(editButton(() => openScheduleEdit(s)));
+			actions.appendChild(document.createTextNode(" "));
+			actions.appendChild(del);
+			tr.appendChild(actions);
 			tbody.appendChild(tr);
 		}
 		setStatus("");
@@ -2434,6 +2458,85 @@ async function loadSchedules() {
 	} catch (e) {
 		setStatus("Failed to load schedules: " + e.message);
 	}
+}
+
+// fillTemplateSelect loads stored templates into a select and returns an id to name map, so a schedule
+// can pick a template and the table can show its name. Best effort: a load failure leaves the picker
+// with its placeholder.
+async function fillTemplateSelect(select) {
+	const byID = {};
+	try {
+		const data = await getJSON("/templates");
+		for (const t of data.templates || []) {
+			byID[t.id] = t.name;
+			if (select) {
+				const opt = document.createElement("option");
+				opt.value = t.id;
+				opt.textContent = t.name;
+				select.appendChild(opt);
+			}
+		}
+	} catch (_) { /* templates disabled or unauthorized; picker keeps its placeholder */ }
+	return byID;
+}
+
+// openScheduleEdit fills the schedule dialog with an existing record and switches it to edit mode.
+function openScheduleEdit(s) {
+	const form = document.getElementById("schedule-form");
+	form.dataset.editId = s.id;
+	document.getElementById("schedule-name").value = s.name || "";
+	document.getElementById("schedule-cron").value = s.cron || "";
+	document.getElementById("schedule-template").value = s.template_id || "";
+	document.getElementById("schedule-status").textContent = "";
+	setModalTitle("schedule", "Edit schedule");
+	document.getElementById("schedule-modal").hidden = false;
+}
+
+// wireScheduleForm hooks the schedule dialog up to POST /schedules for a new schedule and PUT
+// /schedules/{id} when editing. The New button resets the dialog to add mode.
+function wireScheduleForm() {
+	const form = document.getElementById("schedule-form");
+	fillTemplateSelect(document.getElementById("schedule-template"));
+	const resetToCreate = () => {
+		delete form.dataset.editId;
+		document.getElementById("schedule-name").value = "";
+		document.getElementById("schedule-cron").value = "";
+		document.getElementById("schedule-template").value = "";
+		document.getElementById("schedule-status").textContent = "";
+		setModalTitle("schedule", "Add a schedule");
+	};
+	const openBtn = document.getElementById("schedule-open");
+	if (openBtn) openBtn.addEventListener("click", resetToCreate);
+
+	form.addEventListener("submit", async (e) => {
+		e.preventDefault();
+		const status = document.getElementById("schedule-status");
+		const editId = form.dataset.editId;
+		const templateID = document.getElementById("schedule-template").value;
+		if (!templateID) {
+			status.textContent = "Pick a template.";
+			return;
+		}
+		const payload = {
+			name: document.getElementById("schedule-name").value.trim(),
+			cron: document.getElementById("schedule-cron").value.trim(),
+			template_id: templateID,
+		};
+		try {
+			if (editId) {
+				await postAction("/schedules/" + editId, payload, "PUT");
+			} else {
+				await postAction("/schedules", payload);
+			}
+			resetToCreate();
+			status.textContent = "Saved.";
+			closeModal("schedule");
+			document.getElementById("schedules").innerHTML = "";
+			loadSchedules();
+		} catch (err) {
+			status.textContent = "Save failed: " + err.message;
+		}
+	});
 }
 
 // scheduleTarget describes what a schedule fires.
@@ -2987,7 +3090,11 @@ function renderSteps(steps) {
 		row.appendChild(badge(s.status));
 		const label = document.createElement("span");
 		label.className = "shard-label";
-		let text = idx + ". " + (s.step_name || "step") + "  ·  " + (s.playbook || "");
+		let text = idx + ". " + (s.step_name || "step");
+		const detail = toolLabel(s);
+		if (detail) {
+			text += "  ·  " + detail;
+		}
 		if (s.attempt) {
 			text += "  ·  retry " + s.attempt;
 		}

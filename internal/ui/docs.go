@@ -16,7 +16,7 @@ var docOrder = []string{
 	"tutorials", "tutorial-run-a-job", "tutorial-save-a-template", "tutorial-schedule-a-job",
 	"tutorial-set-a-secret", "tutorial-migrate",
 	"tool-bash", "tool-terraform", "tool-python", "tool-go",
-	"concepts", "configuration", "features", "drift", "api", "migration", "comparison",
+	"concepts", "configuration", "features", "secrets", "drift", "api", "migration", "comparison",
 }
 
 // mdLinkPattern matches links between documentation pages, which are relative markdown file names on

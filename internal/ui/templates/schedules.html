@@ -13,9 +13,41 @@
 	</header>
 
 	<main class="content">
-		<a class="back" href="/ui/">Back to runs</a>
-		<h1>Schedules</h1>
-		<p class="muted">Recurring runs fired on a cron cadence.</p>
+		<div class="page-head">
+			<div class="page-head-text">
+				<h1>Schedules</h1>
+				<p class="muted">Fire a saved template on a cron cadence.</p>
+			</div>
+			<button id="schedule-open" class="button primary">
+				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+				New schedule
+			</button>
+		</div>
+
+		<div id="schedule-modal" class="modal" hidden>
+			<div class="modal-card">
+				<div class="modal-head">
+					<h2>Add a schedule</h2>
+					<button type="button" class="modal-close" id="schedule-close" aria-label="Close">&times;</button>
+				</div>
+			<form id="schedule-form" class="stack">
+				<label class="field-label">Name
+					<input id="schedule-name" class="input" placeholder="nightly deploy" required>
+				</label>
+				<label class="field-label">Cron
+					<input id="schedule-cron" class="input mono" placeholder="0 2 * * *" required>
+				</label>
+				<label class="field-label">Template
+					<select id="schedule-template" class="input"><option value="">Select a template</option></select>
+				</label>
+				<div class="launch-actions">
+					<button type="submit" class="button primary">Save</button>
+					<span id="schedule-status" class="muted"></span>
+				</div>
+			</form>
+			</div>
+		</div>
+
 		<div id="status" class="muted">Loading schedules.</div>
 		<table class="runs" hidden>
 			<thead>
@@ -26,6 +58,7 @@
 					<th>Enabled</th>
 					<th>Next run</th>
 					<th>Last run</th>
+					<th></th>
 				</tr>
 			</thead>
 			<tbody id="schedules"></tbody>

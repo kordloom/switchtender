@@ -216,9 +216,11 @@ table.runs { width: 100%; border-collapse: separate; border-spacing: 0; backgrou
 table.runs th, table.runs td { text-align: left; padding: 10px 16px; border-bottom: 1px solid var(--border-muted); }
 table.runs thead th { background: var(--surface-2); font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; }
 table.runs tbody tr:last-child td { border-bottom: none; }
-table.runs tbody tr { cursor: pointer; transition: background 0.08s ease; }
-table.runs tbody tr:hover { background: var(--surface-2); }
+table.runs tbody tr { transition: background 0.08s ease; }
+table.runs tbody tr.row-nav, table.runs tbody tr.row-inspect { cursor: pointer; }
+table.runs tbody tr.row-nav:hover, table.runs tbody tr.row-inspect:hover { background: var(--surface-2); }
 table.runs td button + button { margin-left: 8px; }
+table.runs td.mono { max-width: 380px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Status badges */
 .badge { display: inline-flex; align-items: center; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 500; color: #fff; line-height: 1.5; white-space: nowrap; }

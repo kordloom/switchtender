@@ -303,6 +303,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /schedules", createScheduleHandler(s.schedules, s.log))
 	mux.Handle("GET /schedules", listSchedulesHandler(s.schedules, s.log))
 	mux.Handle("GET /schedules/{id}", getScheduleHandler(s.schedules, s.log))
+	mux.Handle("PUT /schedules/{id}", updateScheduleHandler(s.schedules, s.log))
 	mux.Handle("DELETE /schedules/{id}", deleteScheduleHandler(s.schedules, s.log))
 	mux.Handle("/ui/", s.web.Handler())
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {

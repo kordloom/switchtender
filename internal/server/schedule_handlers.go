@@ -85,6 +85,62 @@ func createScheduleHandler(store schedule.Store, log *zap.Logger) http.HandlerFu
 	}
 }
 
+// updateScheduleHandler replaces a schedule, keeping its enabled state, creation time, and last-run
+// record, and recomputes the next fire from the new cron.
+func updateScheduleHandler(store schedule.Store, log *zap.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if store == nil {
+			respondError(w, log, http.StatusNotFound, "scheduling not enabled")
+			return
+		}
+		var req createScheduleRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			respondError(w, log, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		id := r.PathValue("id")
+		existing, err := store.Get(r.Context(), id)
+		if errors.Is(err, schedule.ErrNotFound) {
+			respondError(w, log, http.StatusNotFound, "schedule not found")
+			return
+		}
+		if err != nil {
+			log.Error("server: read schedule: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not read schedule")
+			return
+		}
+		sc := &schedule.Schedule{
+			ID: id, Name: req.Name, Cron: req.Cron, Playbook: req.Playbook,
+			Inventory: req.Inventory, Shards: req.Shards, Steps: req.Steps,
+			TemplateID: req.TemplateID, Enabled: existing.Enabled, CreatedAt: existing.CreatedAt,
+			LastRunAt: existing.LastRunAt, LastRunID: existing.LastRunID,
+		}
+		if err := sc.Validate(); err != nil {
+			msg := "invalid schedule"
+			switch {
+			case errors.Is(err, schedule.ErrBadCron):
+				msg = "invalid cron expression"
+			case errors.Is(err, schedule.ErrNoTarget):
+				msg = "a playbook, steps, or a template_id is required"
+			}
+			respondError(w, log, http.StatusBadRequest, msg)
+			return
+		}
+		next, err := schedule.NextFire(sc.Cron, time.Now())
+		if err != nil {
+			respondError(w, log, http.StatusBadRequest, "invalid cron expression")
+			return
+		}
+		sc.NextRunAt = &next
+		if err := store.Save(r.Context(), sc); err != nil {
+			log.Error("server: update schedule: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not save schedule")
+			return
+		}
+		respondJSON(w, log, http.StatusOK, sc, wantsPretty(r))
+	}
+}
+
 // listSchedulesHandler returns all schedules.
 func listSchedulesHandler(store schedule.Store, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
