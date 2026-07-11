@@ -27,16 +27,20 @@ Every endpoint the server exposes. The web UI lives at `/ui/` and the root redir
 | POST   | `/schedules`            | Cron schedule for a run, split, pipeline, or template.  |
 | GET    | `/schedules`            | List schedules.                                         |
 | GET    | `/schedules/{id}`       | One schedule.                                           |
+| PUT    | `/schedules/{id}`       | Update a schedule.                                      |
 | DELETE | `/schedules/{id}`       | Delete a schedule.                                      |
 | GET    | `/fleet`                | Hosts ranked by failures over recent runs, flaky flags. |
 | GET    | `/hosts/{host}/runs`    | One host's recent per-run outcomes.                     |
 | GET    | `/tasks`                | Per-task duration trends over recent runs.              |
+| GET    | `/drift`                | Resources drifting from desired state, from dry runs.   |
 | POST   | `/projects`             | Register a git project. Runs record their commit.       |
 | GET    | `/projects`             | List projects.                                          |
+| PUT    | `/projects/{id}`        | Update a project.                                       |
 | DELETE | `/projects/{id}`        | Delete a project.                                       |
 | POST   | `/templates`            | Save a launch preset.                                   |
 | GET    | `/templates`            | List templates.                                         |
 | POST   | `/templates/{id}/launch`| Launch a template, answering its survey if it has one.  |
+| PUT    | `/templates/{id}`       | Update a template.                                      |
 | DELETE | `/templates/{id}`       | Delete a template.                                      |
 | POST   | `/triggers`             | Create a webhook trigger, returns a signing secret once.|
 | PUT    | `/triggers/{id}`        | Rename a trigger or toggle signature enforcement.       |
@@ -46,11 +50,15 @@ Every endpoint the server exposes. The web UI lives at `/ui/` and the root redir
 | POST   | `/hooks/{token}`        | Fire a trigger from a git push. A required HMAC signature is checked first.|
 | POST   | `/credentials`          | Store a credential (ssh_key, vault_password, env, token, become_password, registry), encrypted at rest.|
 | GET    | `/credentials`          | List credentials, secrets never included.               |
+| PUT    | `/credentials/{id}`     | Update a credential.                                    |
 | DELETE | `/credentials/{id}`     | Delete a credential.                                    |
 | POST   | `/auth/login`           | Sign in with username and password, returns a token.    |
 | POST   | `/auth/check`           | Verify an API token.                                    |
+| GET    | `/auth/oidc/login`      | Start the OpenID Connect sign-in handshake.             |
+| GET    | `/auth/oidc/callback`   | Complete the OIDC handshake and issue a token.          |
 | POST   | `/users`                | Create an account with a role.                          |
 | GET    | `/users`                | List accounts.                                          |
+| PUT    | `/users/{id}`           | Update an account's role or password.                   |
 | DELETE | `/users/{id}`           | Delete an account. Its tokens stop working.             |
 | POST   | `/teams`                | Create a team of users.                                 |
 | GET    | `/teams`                | List teams.                                             |
@@ -65,13 +73,17 @@ Every endpoint the server exposes. The web UI lives at `/ui/` and the root redir
 | POST   | `/inventory-sources`    | Register a dynamic inventory source.                    |
 | GET    | `/inventory-sources`    | List inventory sources.                                 |
 | POST   | `/inventory-sources/{id}/refresh` | Refresh a source into its inventory now.      |
+| PUT    | `/inventory-sources/{id}` | Update an inventory source.                           |
 | DELETE | `/inventory-sources/{id}` | Delete an inventory source.                           |
 | POST   | `/inventories`          | Store an inventory. Runs reference it by id anywhere.   |
 | GET    | `/inventories`          | List stored inventories.                                |
+| PUT    | `/inventories/{id}`     | Update a stored inventory.                              |
 | DELETE | `/inventories/{id}`     | Delete a stored inventory.                              |
 | POST   | `/policies`             | Create an approval policy that gates matching runs.     |
 | GET    | `/policies`             | List approval policies.                                 |
+| PUT    | `/policies/{id}`        | Update an approval policy.                              |
 | DELETE | `/policies/{id}`        | Delete an approval policy.                              |
+| POST   | `/import/{format}`      | Import an AWX or Semaphore export. Format is awx or semaphore.|
 | GET    | `/audit`                | The mutation trail, admin only.                         |
 | GET    | `/audit/verify`         | Verify the audit hash chain is intact.                  |
 | GET    | `/audit/export`         | Signed, self-verifying snapshot of the audit chain.     |

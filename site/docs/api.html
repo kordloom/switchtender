@@ -119,6 +119,11 @@
 <td>One schedule.</td>
 </tr>
 <tr>
+<td>PUT</td>
+<td><code>/schedules/{id}</code></td>
+<td>Update a schedule.</td>
+</tr>
+<tr>
 <td>DELETE</td>
 <td><code>/schedules/{id}</code></td>
 <td>Delete a schedule.</td>
@@ -139,6 +144,11 @@
 <td>Per-task duration trends over recent runs.</td>
 </tr>
 <tr>
+<td>GET</td>
+<td><code>/drift</code></td>
+<td>Resources drifting from desired state, from dry runs.</td>
+</tr>
+<tr>
 <td>POST</td>
 <td><code>/projects</code></td>
 <td>Register a git project. Runs record their commit.</td>
@@ -147,6 +157,11 @@
 <td>GET</td>
 <td><code>/projects</code></td>
 <td>List projects.</td>
+</tr>
+<tr>
+<td>PUT</td>
+<td><code>/projects/{id}</code></td>
+<td>Update a project.</td>
 </tr>
 <tr>
 <td>DELETE</td>
@@ -167,6 +182,11 @@
 <td>POST</td>
 <td><code>/templates/{id}/launch</code></td>
 <td>Launch a template, answering its survey if it has one.</td>
+</tr>
+<tr>
+<td>PUT</td>
+<td><code>/templates/{id}</code></td>
+<td>Update a template.</td>
 </tr>
 <tr>
 <td>DELETE</td>
@@ -214,6 +234,11 @@
 <td>List credentials, secrets never included.</td>
 </tr>
 <tr>
+<td>PUT</td>
+<td><code>/credentials/{id}</code></td>
+<td>Update a credential.</td>
+</tr>
+<tr>
 <td>DELETE</td>
 <td><code>/credentials/{id}</code></td>
 <td>Delete a credential.</td>
@@ -229,6 +254,16 @@
 <td>Verify an API token.</td>
 </tr>
 <tr>
+<td>GET</td>
+<td><code>/auth/oidc/login</code></td>
+<td>Start the OpenID Connect sign-in handshake.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/auth/oidc/callback</code></td>
+<td>Complete the OIDC handshake and issue a token.</td>
+</tr>
+<tr>
 <td>POST</td>
 <td><code>/users</code></td>
 <td>Create an account with a role.</td>
@@ -237,6 +272,11 @@
 <td>GET</td>
 <td><code>/users</code></td>
 <td>List accounts.</td>
+</tr>
+<tr>
+<td>PUT</td>
+<td><code>/users/{id}</code></td>
+<td>Update an account's role or password.</td>
 </tr>
 <tr>
 <td>DELETE</td>
@@ -309,6 +349,11 @@
 <td>Refresh a source into its inventory now.</td>
 </tr>
 <tr>
+<td>PUT</td>
+<td><code>/inventory-sources/{id}</code></td>
+<td>Update an inventory source.</td>
+</tr>
+<tr>
 <td>DELETE</td>
 <td><code>/inventory-sources/{id}</code></td>
 <td>Delete an inventory source.</td>
@@ -322,6 +367,11 @@
 <td>GET</td>
 <td><code>/inventories</code></td>
 <td>List stored inventories.</td>
+</tr>
+<tr>
+<td>PUT</td>
+<td><code>/inventories/{id}</code></td>
+<td>Update a stored inventory.</td>
 </tr>
 <tr>
 <td>DELETE</td>
@@ -339,9 +389,19 @@
 <td>List approval policies.</td>
 </tr>
 <tr>
+<td>PUT</td>
+<td><code>/policies/{id}</code></td>
+<td>Update an approval policy.</td>
+</tr>
+<tr>
 <td>DELETE</td>
 <td><code>/policies/{id}</code></td>
 <td>Delete an approval policy.</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/import/{format}</code></td>
+<td>Import an AWX or Semaphore export. Format is awx or semaphore.</td>
 </tr>
 <tr>
 <td>GET</td>

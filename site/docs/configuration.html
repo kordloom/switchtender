@@ -65,8 +65,69 @@ variable.</p>
 <td>serve</td>
 <td>Password for SMTP authentication when <code>--smtp-username</code> is set.</td>
 </tr>
+<tr>
+<td><code>YARDMASTER_OIDC_CLIENT_SECRET</code></td>
+<td>serve</td>
+<td>OpenID Connect client secret, paired with <code>--oidc-client-id</code>. Read from the environment so it stays off the command line.</td>
+</tr>
+<tr>
+<td><code>YARDMASTER_LDAP_PASSWORD</code></td>
+<td>serve</td>
+<td>Password for the <code>--ldap-bind-dn</code> service account.</td>
+</tr>
+<tr>
+<td><code>YARDMASTER_ADMIN_PASSWORD</code></td>
+<td>init</td>
+<td>Password for the first admin account. When unset, init generates one and prints it once.</td>
+</tr>
 </tbody>
 </table>
+<h2 id="init">init</h2>
+<p>Bootstraps a new deployment: it creates the database and the first admin account, writes an
+environment file, and optionally a systemd unit. Run it once, then start <code>serve</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Default</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--db</code></td>
+<td><code>yardmaster.db</code></td>
+<td>SQLite database path.</td>
+</tr>
+<tr>
+<td><code>--config</code></td>
+<td><code>yardmaster.env</code></td>
+<td>Environment file to write.</td>
+</tr>
+<tr>
+<td><code>--addr</code></td>
+<td><code>:8080</code></td>
+<td>Address the server listens on.</td>
+</tr>
+<tr>
+<td><code>--admin</code></td>
+<td><code>admin</code></td>
+<td>Username for the first admin account.</td>
+</tr>
+<tr>
+<td><code>--systemd</code></td>
+<td>none</td>
+<td>Path to write a systemd unit to, empty to skip.</td>
+</tr>
+<tr>
+<td><code>--force</code></td>
+<td><code>false</code></td>
+<td>Overwrite an existing config file.</td>
+</tr>
+</tbody>
+</table>
+<p>The admin password comes from <code>YARDMASTER_ADMIN_PASSWORD</code>, or is generated and printed once when
+that variable is unset.</p>
 <h2 id="serve">serve</h2>
 <p>Runs the HTTP API, the in-process executor, the scheduler, the retention sweeper, and the web UI.</p>
 <table>
@@ -97,6 +158,26 @@ variable.</p>
 <td><code>--tls-key</code></td>
 <td>none</td>
 <td>TLS private key file. Requires <code>--tls-cert</code>.</td>
+</tr>
+<tr>
+<td><code>--oidc-issuer</code></td>
+<td>none</td>
+<td>OpenID Connect issuer URL to enable single sign-on. Empty leaves SSO off.</td>
+</tr>
+<tr>
+<td><code>--oidc-client-id</code></td>
+<td>none</td>
+<td>OIDC client id.</td>
+</tr>
+<tr>
+<td><code>--oidc-redirect-url</code></td>
+<td>none</td>
+<td>OIDC redirect URL, for example <code>https://host/auth/oidc/callback</code>.</td>
+</tr>
+<tr>
+<td><code>--oidc-default-role</code></td>
+<td><code>viewer</code></td>
+<td>Role granted to an account created on first SSO sign-in: admin, operator, or viewer.</td>
 </tr>
 <tr>
 <td><code>--ldap-url</code></td>
@@ -159,6 +240,11 @@ variable.</p>
 <td>Map a token group to a role as <code>group=role</code>. Repeatable.</td>
 </tr>
 <tr>
+<td><code>--jwt-default-role</code></td>
+<td><code>viewer</code></td>
+<td>Role granted to an account created on first JWT sign-in.</td>
+</tr>
+<tr>
 <td><code>--schedule-interval</code></td>
 <td><code>15s</code></td>
 <td>How often the scheduler checks for due schedules.</td>
@@ -179,9 +265,39 @@ variable.</p>
 <td>Allow runs whose project pins a container image to execute inside it. Needs Docker on the executor.</td>
 </tr>
 <tr>
+<td><code>--container-memory</code></td>
+<td><code>2g</code></td>
+<td>Memory cap for containerized runs, as docker <code>--memory</code>. Empty removes the cap.</td>
+</tr>
+<tr>
+<td><code>--container-cpus</code></td>
+<td><code>2</code></td>
+<td>CPU cap for containerized runs, as docker <code>--cpus</code>. Empty removes the cap.</td>
+</tr>
+<tr>
+<td><code>--container-pids-limit</code></td>
+<td><code>2048</code></td>
+<td>Process cap for containerized runs, as docker <code>--pids-limit</code>. Zero removes the cap.</td>
+</tr>
+<tr>
+<td><code>--container-network</code></td>
+<td><code>bridge</code></td>
+<td>Network mode for containerized runs, as docker <code>--network</code>, for example bridge or none.</td>
+</tr>
+<tr>
 <td><code>--strict-grants</code></td>
 <td><code>false</code></td>
 <td>Deny non-admins access to an object that has no grants, instead of deferring to the global role.</td>
+</tr>
+<tr>
+<td><code>--read-only</code></td>
+<td><code>false</code></td>
+<td>Reject every mutating request, for a safely exposable instance.</td>
+</tr>
+<tr>
+<td><code>--matrix-cap</code></td>
+<td><code>50000</code></td>
+<td>Largest host matrix, in cells, the UI draws before showing a notice. 0 means no limit.</td>
 </tr>
 <tr>
 <td><code>--retain-runs</code></td>
@@ -258,6 +374,26 @@ database and they compete for work.</p>
 <td><code>--allow-container-ee</code></td>
 <td><code>false</code></td>
 <td>Allow container execution environments on this worker. Needs Docker.</td>
+</tr>
+<tr>
+<td><code>--container-memory</code></td>
+<td><code>2g</code></td>
+<td>Memory cap for containerized runs, as docker <code>--memory</code>. Empty removes the cap.</td>
+</tr>
+<tr>
+<td><code>--container-cpus</code></td>
+<td><code>2</code></td>
+<td>CPU cap for containerized runs, as docker <code>--cpus</code>. Empty removes the cap.</td>
+</tr>
+<tr>
+<td><code>--container-pids-limit</code></td>
+<td><code>2048</code></td>
+<td>Process cap for containerized runs, as docker <code>--pids-limit</code>. Zero removes the cap.</td>
+</tr>
+<tr>
+<td><code>--container-network</code></td>
+<td><code>bridge</code></td>
+<td>Network mode for containerized runs, as docker <code>--network</code>.</td>
 </tr>
 </tbody>
 </table>

@@ -19,6 +19,26 @@ variable.
 | `YARDMASTER_AUDIT_KEY` | serve | Hex-encoded ed25519 seed that signs audit exports so the trail can be verified offline. Signing is off when unset. A malformed value stops startup. Generate one with `yardmaster audit keygen`. |
 | `YARDMASTER_PASSWORD` | user new | Initial account password, read instead of prompting so it never lands on the command line. |
 | `YARDMASTER_SMTP_PASSWORD` | serve | Password for SMTP authentication when `--smtp-username` is set. |
+| `YARDMASTER_OIDC_CLIENT_SECRET` | serve | OpenID Connect client secret, paired with `--oidc-client-id`. Read from the environment so it stays off the command line. |
+| `YARDMASTER_LDAP_PASSWORD` | serve | Password for the `--ldap-bind-dn` service account. |
+| `YARDMASTER_ADMIN_PASSWORD` | init | Password for the first admin account. When unset, init generates one and prints it once. |
+
+## init
+
+Bootstraps a new deployment: it creates the database and the first admin account, writes an
+environment file, and optionally a systemd unit. Run it once, then start `serve`.
+
+| Flag | Default | Purpose |
+|------|---------|---------|
+| `--db` | `yardmaster.db` | SQLite database path. |
+| `--config` | `yardmaster.env` | Environment file to write. |
+| `--addr` | `:8080` | Address the server listens on. |
+| `--admin` | `admin` | Username for the first admin account. |
+| `--systemd` | none | Path to write a systemd unit to, empty to skip. |
+| `--force` | `false` | Overwrite an existing config file. |
+
+The admin password comes from `YARDMASTER_ADMIN_PASSWORD`, or is generated and printed once when
+that variable is unset.
 
 ## serve
 
@@ -30,6 +50,10 @@ Runs the HTTP API, the in-process executor, the scheduler, the retention sweeper
 | `--db` | `yardmaster.db` | SQLite file path, or a `postgres://` DSN for the PostgreSQL backend. |
 | `--tls-cert` | none | TLS certificate file, to serve HTTPS directly with no reverse proxy. Requires `--tls-key`. |
 | `--tls-key` | none | TLS private key file. Requires `--tls-cert`. |
+| `--oidc-issuer` | none | OpenID Connect issuer URL to enable single sign-on. Empty leaves SSO off. |
+| `--oidc-client-id` | none | OIDC client id. |
+| `--oidc-redirect-url` | none | OIDC redirect URL, for example `https://host/auth/oidc/callback`. |
+| `--oidc-default-role` | `viewer` | Role granted to an account created on first SSO sign-in: admin, operator, or viewer. |
 | `--ldap-url` | none | LDAP directory URL to enable directory sign-in, for example `ldaps://ldap.example.com:636`. |
 | `--ldap-bind-dn` | none | Service account DN used to search for a user, empty for an anonymous search. |
 | `--ldap-base-dn` | none | Search base for finding a user. |
@@ -42,11 +66,18 @@ Runs the HTTP API, the in-process executor, the scheduler, the retention sweeper
 | `--jwt-username-claim` | `sub` | Claim naming the account. |
 | `--jwt-groups-claim` | none | Claim holding the user's groups, used with `--jwt-role-map`. |
 | `--jwt-role-map` | none | Map a token group to a role as `group=role`. Repeatable. |
+| `--jwt-default-role` | `viewer` | Role granted to an account created on first JWT sign-in. |
 | `--schedule-interval` | `15s` | How often the scheduler checks for due schedules. |
 | `--notify-webhook` | none | URL that receives a JSON notification when a run finishes. Repeatable. |
 | `--notify-slack` | none | Slack incoming webhook URL that receives a message when a run finishes. Repeatable. |
 | `--allow-container-ee` | `false` | Allow runs whose project pins a container image to execute inside it. Needs Docker on the executor. |
+| `--container-memory` | `2g` | Memory cap for containerized runs, as docker `--memory`. Empty removes the cap. |
+| `--container-cpus` | `2` | CPU cap for containerized runs, as docker `--cpus`. Empty removes the cap. |
+| `--container-pids-limit` | `2048` | Process cap for containerized runs, as docker `--pids-limit`. Zero removes the cap. |
+| `--container-network` | `bridge` | Network mode for containerized runs, as docker `--network`, for example bridge or none. |
 | `--strict-grants` | `false` | Deny non-admins access to an object that has no grants, instead of deferring to the global role. |
+| `--read-only` | `false` | Reject every mutating request, for a safely exposable instance. |
+| `--matrix-cap` | `50000` | Largest host matrix, in cells, the UI draws before showing a notice. 0 means no limit. |
 | `--retain-runs` | none | Delete terminal runs older than this, for example `90d`. Empty keeps them forever. |
 | `--retain-events` | none | Drop run events and logs older than this, for example `30d`. Empty keeps them forever. |
 | `--retention-interval` | `1h` | How often the retention sweeper runs. |
@@ -70,6 +101,10 @@ database and they compete for work.
 | `--name` | host and pid | Worker name stamped on the runs it executes. |
 | `--queue` | none | Queue this worker serves. Repeatable. Without any, it serves the default pool. |
 | `--allow-container-ee` | `false` | Allow container execution environments on this worker. Needs Docker. |
+| `--container-memory` | `2g` | Memory cap for containerized runs, as docker `--memory`. Empty removes the cap. |
+| `--container-cpus` | `2` | CPU cap for containerized runs, as docker `--cpus`. Empty removes the cap. |
+| `--container-pids-limit` | `2048` | Process cap for containerized runs, as docker `--pids-limit`. Zero removes the cap. |
+| `--container-network` | `bridge` | Network mode for containerized runs, as docker `--network`. |
 
 ## token
 
