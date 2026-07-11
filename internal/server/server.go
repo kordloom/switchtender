@@ -172,6 +172,13 @@ func WithLDAP(l *LDAPAuth) Option {
 	return func(srv *Server) { srv.ldap = l }
 }
 
+// WithJWT enables bearer JWT authentication. When set, a request whose bearer token is a JWT is
+// validated against the issuer's keys instead of the token store, so a service can present a JWT
+// minted elsewhere.
+func WithJWT(j *JWTAuth) Option {
+	return func(srv *Server) { srv.jwt = j }
+}
+
 // WithInventorySources enables the dynamic inventory source endpoints.
 func WithInventorySources(store invsource.Store, refresher SourceRefresher) Option {
 	return func(srv *Server) {
@@ -260,6 +267,8 @@ type Server struct {
 	oidc *OIDCAuth
 	// ldap enables directory sign-in when configured, nil when LDAP is off.
 	ldap *LDAPAuth
+	// jwt validates a bearer JWT when configured, nil when JWT sign-in is off.
+	jwt *JWTAuth
 }
 
 // New returns a Server. It panics if store or submitter is nil; a nil logger becomes a no-op.
@@ -380,7 +389,7 @@ func (s *Server) Handler() http.Handler {
 	}, s.log))
 	var handler http.Handler = mux
 	if s.tokens != nil {
-		gate := &authGate{tokens: s.tokens, users: s.users, audits: s.audits, log: s.log}
+		gate := &authGate{tokens: s.tokens, users: s.users, jwt: s.jwt, audits: s.audits, log: s.log}
 		handler = gate.wrap(mux)
 	}
 	if s.readOnly {

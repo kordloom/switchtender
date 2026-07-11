@@ -106,6 +106,18 @@ var (
 	serveLDAPRoleMap     []string
 )
 
+// serveJWT* hold the bearer JWT sign-in flags, so a service can present a JWT minted elsewhere, such
+// as by jwtmint, instead of a Yardmaster token.
+var (
+	serveJWTJWKSURL       string
+	serveJWTIssuer        string
+	serveJWTAudience      string
+	serveJWTUsernameClaim string
+	serveJWTGroupsClaim   string
+	serveJWTDefaultRole   string
+	serveJWTRoleMap       []string
+)
+
 // retainRuns holds the value of the --retain-runs flag, a duration like 90d.
 var retainRuns string
 
@@ -233,6 +245,19 @@ func init() {
 	serveCmd.Flags().StringArrayVar(&serveLDAPRoleMap, "ldap-role-map", nil,
 		"Map a directory group to a role as groupDN=role, for example cn=admins,dc=x=admin. "+
 			"A matched group sets the user's role on every sign-in. Repeatable.")
+	serveCmd.Flags().StringVar(&serveJWTJWKSURL, "jwt-jwks-url", "",
+		"JWKS URL to enable bearer JWT sign-in, for example https://jwtmint.example.com/jwks.")
+	serveCmd.Flags().StringVar(&serveJWTIssuer, "jwt-issuer", "", "Expected token issuer, the iss claim.")
+	serveCmd.Flags().StringVar(&serveJWTAudience, "jwt-audience", "",
+		"Expected token audience, empty to skip the audience check.")
+	serveCmd.Flags().StringVar(&serveJWTUsernameClaim, "jwt-username-claim", "sub",
+		"Claim naming the account, for example sub or email.")
+	serveCmd.Flags().StringVar(&serveJWTGroupsClaim, "jwt-groups-claim", "",
+		"Claim holding the user's groups, used with --jwt-role-map.")
+	serveCmd.Flags().StringVar(&serveJWTDefaultRole, "jwt-default-role", "viewer",
+		"Role granted to an account created on first JWT sign-in.")
+	serveCmd.Flags().StringArrayVar(&serveJWTRoleMap, "jwt-role-map", nil,
+		"Map a token group to a role as group=role. A matched group sets the role on every request. Repeatable.")
 	serveCmd.Flags().StringVar(&retainRuns, "retain-runs", "",
 		"Delete terminal runs older than this, for example 90d. Empty keeps them forever.")
 	serveCmd.Flags().StringVar(&retainEvents, "retain-events", "",
@@ -447,6 +472,16 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
+	var jwtAuth *server.JWTAuth
+	if serveJWTJWKSURL != "" {
+		jwtAuth, err = server.NewJWTAuth(cmd.Context(), serveJWTJWKSURL, serveJWTIssuer,
+			serveJWTAudience, serveJWTUsernameClaim, serveJWTGroupsClaim,
+			user.Role(serveJWTDefaultRole), parseRoleMap(serveJWTRoleMap), bundle.Users(), log)
+		if err != nil {
+			return err
+		}
+	}
+
 	httpServer := &http.Server{
 		Addr: serveAddr,
 		Handler: server.New(store, disp, log, server.WithStreamer(hub),
@@ -468,6 +503,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			server.WithMatrixCap(serveMatrixCap),
 			server.WithOIDC(oidcAuth),
 			server.WithLDAP(ldapAuth),
+			server.WithJWT(jwtAuth),
 			server.WithDocs(docsFS)).Handler(),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}

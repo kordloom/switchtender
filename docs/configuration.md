@@ -36,6 +36,12 @@ Runs the HTTP API, the in-process executor, the scheduler, the retention sweeper
 | `--ldap-user-filter` | `(uid=%s)` | Search filter with one `%s` for the username. |
 | `--ldap-default-role` | `viewer` | Role for an account created on first directory sign-in. |
 | `--ldap-role-map` | none | Map a directory group to a role as `groupDN=role`. A matched group sets the role on every sign-in. Repeatable. |
+| `--jwt-jwks-url` | none | JWKS URL to enable bearer JWT sign-in, so a service can present a JWT minted elsewhere. |
+| `--jwt-issuer` | none | Expected token issuer, the `iss` claim. |
+| `--jwt-audience` | none | Expected token audience, empty to skip the audience check. |
+| `--jwt-username-claim` | `sub` | Claim naming the account. |
+| `--jwt-groups-claim` | none | Claim holding the user's groups, used with `--jwt-role-map`. |
+| `--jwt-role-map` | none | Map a token group to a role as `group=role`. Repeatable. |
 | `--schedule-interval` | `15s` | How often the scheduler checks for due schedules. |
 | `--notify-webhook` | none | URL that receives a JSON notification when a run finishes. Repeatable. |
 | `--allow-container-ee` | `false` | Allow runs whose project pins a container image to execute inside it. Needs Docker on the executor. |

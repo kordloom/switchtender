@@ -25,6 +25,8 @@ type authGate struct {
 	tokens auth.Store
 	// users resolves token owners to roles, nil when accounts are not configured.
 	users user.Store
+	// jwt validates a bearer JWT when configured, nil when JWT sign-in is off.
+	jwt *JWTAuth
 	// audits records authenticated mutations, nil when the trail is off.
 	audits audit.Store
 	// log records authentication activity, never token material.
@@ -53,6 +55,21 @@ func (g *authGate) wrap(next http.Handler) http.Handler {
 		}
 		if plain == "" {
 			unauthorized(w)
+			return
+		}
+		if g.jwt != nil && looksLikeJWT(plain) {
+			u, err := g.jwt.Authenticate(r.Context(), plain)
+			if err != nil {
+				unauthorized(w)
+				return
+			}
+			if !roleAllows(u.Role, requiredRole(r)) {
+				forbidden(w)
+				return
+			}
+			ctx := context.WithValue(r.Context(), actorKey{},
+				Actor{UserID: u.ID, Role: u.Role, Name: u.Username})
+			next.ServeHTTP(w, r.WithContext(ctx))
 			return
 		}
 		tok, err := g.tokens.FindByHash(r.Context(), auth.HashToken(plain))
@@ -166,6 +183,13 @@ func requiredRole(r *http.Request) user.Role {
 func roleAllows(have, need user.Role) bool {
 	rank := map[user.Role]int{user.RoleViewer: 1, user.RoleOperator: 2, user.RoleAdmin: 3}
 	return rank[have] >= rank[need]
+}
+
+// looksLikeJWT reports whether a bearer credential is a JWT rather than a Yardmaster token, so the
+// gate routes it to JWT validation. A JWT is three base64 segments joined by two dots, which a
+// Yardmaster token never carries.
+func looksLikeJWT(s string) bool {
+	return strings.Count(s, ".") == 2
 }
 
 // forbidden writes a 403 with a JSON error body.

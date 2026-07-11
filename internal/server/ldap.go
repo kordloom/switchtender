@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/go-ldap/ldap/v3"
 	"go.uber.org/zap"
@@ -59,17 +58,6 @@ func NewLDAPAuth(url, bindDN, bindPassword, baseDN, userFilter string,
 	}, nil
 }
 
-// roleFor returns the role for the first of a user's groups found in the role map, or the default
-// role, so a directory group drives the account's role automatically.
-func (l *LDAPAuth) roleFor(groups []string) user.Role {
-	for _, g := range groups {
-		if role, ok := l.roleMap[strings.ToLower(g)]; ok {
-			return role
-		}
-	}
-	return l.defaultRole
-}
-
 // Authenticate searches the directory for the username, binds as that user with the given password to
 // prove it, and provisions a local account. An empty password is refused, since an empty bind password
 // is an unauthenticated bind that a directory can accept.
@@ -106,34 +94,6 @@ func (l *LDAPAuth) Authenticate(ctx context.Context, username, password string) 
 	if err := conn.Bind(entry.DN, password); err != nil {
 		return nil, ErrLDAPAuth
 	}
-	return l.provision(ctx, username, l.roleFor(entry.GetAttributeValues("memberOf")))
-}
-
-// provision finds the local account for username or creates it with role. When group-to-role mapping
-// is configured, the directory drives the role, so an existing account's role is updated to match on
-// every sign-in.
-func (l *LDAPAuth) provision(ctx context.Context, username string, role user.Role) (*user.User, error) {
-	u, err := l.users.FindByUsername(ctx, username)
-	if err == nil {
-		if len(l.roleMap) > 0 && u.Role != role {
-			u.Role = role
-			if err := l.users.Update(ctx, u); err != nil {
-				return nil, err
-			}
-			l.log.Info("ldap: set " + username + " to " + string(role) + " from its groups")
-		}
-		return u, nil
-	}
-	if !errors.Is(err, user.ErrNotFound) {
-		return nil, err
-	}
-	u, err = user.New(username, randToken(), role)
-	if err != nil {
-		return nil, err
-	}
-	if err := l.users.Save(ctx, u); err != nil {
-		return nil, err
-	}
-	l.log.Info("ldap: provisioned account " + username + " as " + string(role))
-	return u, nil
+	role := roleForGroups(entry.GetAttributeValues("memberOf"), l.roleMap, l.defaultRole)
+	return provisionFromDirectory(ctx, l.users, l.log, username, role, len(l.roleMap) > 0, "ldap")
 }

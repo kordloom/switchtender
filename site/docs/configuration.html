@@ -129,6 +129,36 @@ variable.</p>
 <td>Map a directory group to a role as <code>groupDN=role</code>. A matched group sets the role on every sign-in. Repeatable.</td>
 </tr>
 <tr>
+<td><code>--jwt-jwks-url</code></td>
+<td>none</td>
+<td>JWKS URL to enable bearer JWT sign-in, so a service can present a JWT minted elsewhere.</td>
+</tr>
+<tr>
+<td><code>--jwt-issuer</code></td>
+<td>none</td>
+<td>Expected token issuer, the <code>iss</code> claim.</td>
+</tr>
+<tr>
+<td><code>--jwt-audience</code></td>
+<td>none</td>
+<td>Expected token audience, empty to skip the audience check.</td>
+</tr>
+<tr>
+<td><code>--jwt-username-claim</code></td>
+<td><code>sub</code></td>
+<td>Claim naming the account.</td>
+</tr>
+<tr>
+<td><code>--jwt-groups-claim</code></td>
+<td>none</td>
+<td>Claim holding the user's groups, used with <code>--jwt-role-map</code>.</td>
+</tr>
+<tr>
+<td><code>--jwt-role-map</code></td>
+<td>none</td>
+<td>Map a token group to a role as <code>group=role</code>. Repeatable.</td>
+</tr>
+<tr>
 <td><code>--schedule-interval</code></td>
 <td><code>15s</code></td>
 <td>How often the scheduler checks for due schedules.</td>
