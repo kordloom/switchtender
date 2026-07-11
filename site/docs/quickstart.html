@@ -72,6 +72,23 @@ docker compose up --build
 </code></pre>
 <p>This starts a server, a PostgreSQL database, and a worker. The server listens on port 8080. Set
 <code>YARDMASTER_PORT</code> to change the host port.</p>
+<h2 id="set-up-a-production-server">Set up a production server</h2>
+<p>For a real install, <code>init</code> generates the encryption key and salt, creates the first admin account, and
+writes a config file in one step. It can also write a systemd unit:</p>
+<pre><code>./yardmaster init --db yardmaster.db --config yardmaster.env --systemd yardmaster.service
+</code></pre>
+<p>It prints the admin password once, so save it. Move the unit into place and start it:</p>
+<pre><code>sudo cp yardmaster.service /etc/systemd/system/yardmaster.service
+sudo systemctl enable --now yardmaster
+</code></pre>
+<p>Serve HTTPS directly, with no reverse proxy in front, by pointing the server at a certificate and key:</p>
+<pre><code>./yardmaster serve --db yardmaster.db --tls-cert tls.crt --tls-key tls.key
+</code></pre>
+<h2 id="run-on-kubernetes">Run on Kubernetes</h2>
+<p>Yardmaster needs no operator. A Helm chart installs the server and a worker as ordinary pods sharing a
+database:</p>
+<pre><code>helm install yardmaster ./deploy/helm/yardmaster
+</code></pre>
 <h2 id="try-the-demo">Try the demo</h2>
 <p>To look around without setting anything up, run the seeded demo. It fills a fresh database with
 sample projects, templates, inventories, and real runs, including a flaky host, a split, and a

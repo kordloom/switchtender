@@ -89,6 +89,16 @@ variable.</p>
 <td>SQLite file path, or a <code>postgres://</code> DSN for the PostgreSQL backend.</td>
 </tr>
 <tr>
+<td><code>--tls-cert</code></td>
+<td>none</td>
+<td>TLS certificate file, to serve HTTPS directly with no reverse proxy. Requires <code>--tls-key</code>.</td>
+</tr>
+<tr>
+<td><code>--tls-key</code></td>
+<td>none</td>
+<td>TLS private key file. Requires <code>--tls-cert</code>.</td>
+</tr>
+<tr>
 <td><code>--schedule-interval</code></td>
 <td><code>15s</code></td>
 <td>How often the scheduler checks for due schedules.</td>

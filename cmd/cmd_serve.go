@@ -61,6 +61,13 @@ var serveAddr string
 // serveDB holds the value of the --db flag.
 var serveDB string
 
+// serveTLSCert and serveTLSKey hold the TLS certificate and key file paths. When both are set the
+// server speaks HTTPS, so it needs no reverse proxy in front of it.
+var (
+	serveTLSCert string
+	serveTLSKey  string
+)
+
 // scheduleInterval holds the value of the --schedule-interval flag.
 var scheduleInterval time.Duration
 
@@ -159,6 +166,10 @@ func init() {
 	serveCmd.Flags().StringVar(&serveAddr, "addr", defaultServeAddr, "Address the server listens on.")
 	serveCmd.Flags().StringVar(&serveDB, "db", defaultDBPath,
 		"SQLite file path, or a postgres:// DSN for the PostgreSQL backend.")
+	serveCmd.Flags().StringVar(&serveTLSCert, "tls-cert", "",
+		"TLS certificate file, to serve HTTPS directly. Requires --tls-key.")
+	serveCmd.Flags().StringVar(&serveTLSKey, "tls-key", "",
+		"TLS private key file, to serve HTTPS directly. Requires --tls-cert.")
 	serveCmd.Flags().DurationVar(&scheduleInterval, "schedule-interval", defaultScheduleInterval,
 		"How often the scheduler checks for due schedules.")
 	serveCmd.Flags().StringArrayVar(&notifyWebhooks, "notify-webhook", nil,
@@ -410,10 +421,24 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	if (serveTLSCert == "") != (serveTLSKey == "") {
+		return fmt.Errorf("both --tls-cert and --tls-key are required to serve HTTPS")
+	}
+	tls := serveTLSCert != "" && serveTLSKey != ""
+
 	errCh := make(chan error, 1)
 	go func() {
-		log.Info("yardmaster serving", zap.String("addr", serveAddr))
-		serveErr := httpServer.ListenAndServe()
+		scheme := "http"
+		if tls {
+			scheme = "https"
+		}
+		log.Info("yardmaster serving", zap.String("addr", serveAddr), zap.String("scheme", scheme))
+		var serveErr error
+		if tls {
+			serveErr = httpServer.ListenAndServeTLS(serveTLSCert, serveTLSKey)
+		} else {
+			serveErr = httpServer.ListenAndServe()
+		}
 		if errors.Is(serveErr, http.ErrServerClosed) {
 			serveErr = nil
 		}

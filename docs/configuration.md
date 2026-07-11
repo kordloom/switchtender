@@ -28,6 +28,8 @@ Runs the HTTP API, the in-process executor, the scheduler, the retention sweeper
 |------|---------|---------|
 | `--addr` | `:8080` | Address the server listens on. |
 | `--db` | `yardmaster.db` | SQLite file path, or a `postgres://` DSN for the PostgreSQL backend. |
+| `--tls-cert` | none | TLS certificate file, to serve HTTPS directly with no reverse proxy. Requires `--tls-key`. |
+| `--tls-key` | none | TLS private key file. Requires `--tls-cert`. |
 | `--schedule-interval` | `15s` | How often the scheduler checks for due schedules. |
 | `--notify-webhook` | none | URL that receives a JSON notification when a run finishes. Repeatable. |
 | `--allow-container-ee` | `false` | Allow runs whose project pins a container image to execute inside it. Needs Docker on the executor. |

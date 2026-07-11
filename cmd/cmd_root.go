@@ -14,6 +14,7 @@ var rootCmd = &cobra.Command{
 // init registers the Yardmaster subcommands on the root command.
 func init() {
 	rootCmd.AddCommand(serveCmd)
+	rootCmd.AddCommand(initCmd)
 	rootCmd.AddCommand(workerCmd)
 	rootCmd.AddCommand(tokenCmd)
 	rootCmd.AddCommand(versionCmd)

@@ -67,6 +67,29 @@ Create user accounts with roles for sign-in:
 This starts a server, a PostgreSQL database, and a worker. The server listens on port 8080. Set
 `YARDMASTER_PORT` to change the host port.
 
+## Set up a production server
+
+For a real install, `init` generates the encryption key and salt, creates the first admin account, and
+writes a config file in one step. It can also write a systemd unit:
+
+    ./yardmaster init --db yardmaster.db --config yardmaster.env --systemd yardmaster.service
+
+It prints the admin password once, so save it. Move the unit into place and start it:
+
+    sudo cp yardmaster.service /etc/systemd/system/yardmaster.service
+    sudo systemctl enable --now yardmaster
+
+Serve HTTPS directly, with no reverse proxy in front, by pointing the server at a certificate and key:
+
+    ./yardmaster serve --db yardmaster.db --tls-cert tls.crt --tls-key tls.key
+
+## Run on Kubernetes
+
+Yardmaster needs no operator. A Helm chart installs the server and a worker as ordinary pods sharing a
+database:
+
+    helm install yardmaster ./deploy/helm/yardmaster
+
 ## Try the demo
 
 To look around without setting anything up, run the seeded demo. It fills a fresh database with
