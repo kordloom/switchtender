@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Workflow - Yardmaster</title>
+	<link rel="icon" type="image/png" href="/ui/assets/favicon.png">
+	<link rel="stylesheet" href="/ui/assets/app.css">
+</head>
+<body data-page="workflows"{{if .ReadOnly}} data-readonly="true"{{end}}>
+	<header class="topbar">
+		<div class="brand"><a href="/ui/"><picture><source media="(prefers-color-scheme: dark)" srcset="/ui/assets/logo-train-tracks-dark.png"><img class="brand-logo" src="/ui/assets/logo-train-tracks.png" alt="Yardmaster"></picture>Yardmaster</a></div>
+	</header>
+
+	<main class="content">
+		<div class="page-head">
+			<div class="page-head-text">
+				<h1>Workflow</h1>
+				<p class="muted">Wire steps into a graph, then run it. A step starts once every step feeding into it succeeds.</p>
+			</div>
+			<div class="wf-toolbar">
+				<input id="wf-name" class="input" placeholder="Workflow name" aria-label="Workflow name">
+				<input id="wf-inventory" class="input" placeholder="Inventory (optional)" aria-label="Inventory">
+				<button id="wf-add" class="button">
+					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+					Add step
+				</button>
+				<button id="wf-run" class="button primary">Run workflow</button>
+			</div>
+		</div>
+
+		<div id="wf-step-modal" class="modal" hidden>
+			<div class="modal-card">
+				<div class="modal-head">
+					<h2>Step</h2>
+					<button type="button" class="modal-close" id="wf-step-close" aria-label="Close">&times;</button>
+				</div>
+				<form id="wf-step-form" class="stack">
+					<label class="field-label">Name
+						<input id="wf-step-name" class="input" placeholder="build" required>
+					</label>
+					<label class="field-label">Tool
+						<select id="wf-step-tool" class="input">
+							<option value="ansible">Ansible</option>
+							<option value="bash">Bash</option>
+							<option value="terraform">Terraform</option>
+							<option value="python">Python</option>
+							<option value="go">Go</option>
+						</select>
+					</label>
+					<label class="field-label" id="wf-step-playbook-field">Playbook
+						<input id="wf-step-playbook" class="input mono" placeholder="site.yml">
+					</label>
+					<label class="field-label" id="wf-step-command-field" hidden>Command
+						<textarea id="wf-step-command" class="input mono" rows="4" placeholder="the script, or a terraform directory"></textarea>
+					</label>
+					<label class="field-label">Inventory override
+						<input id="wf-step-inventory" class="input mono" placeholder="leave blank to use the workflow inventory">
+					</label>
+					<div class="wf-step-row">
+						<label class="check-label"><input type="checkbox" id="wf-step-dryrun"> Dry run</label>
+						<label class="check-label"><input type="checkbox" id="wf-step-continue"> Continue on failure</label>
+						<label class="field-label wf-step-retries">Retries
+							<input id="wf-step-retries" class="input" type="number" min="0" value="0">
+						</label>
+					</div>
+					<div class="launch-actions">
+						<button type="submit" class="button primary">Save step</button>
+						<button type="button" class="button danger" id="wf-step-delete" hidden>Delete</button>
+						<span id="wf-step-status" class="muted"></span>
+					</div>
+				</form>
+			</div>
+		</div>
+
+		<div id="status" class="muted"></div>
+		<div id="wf-canvas" class="wf-canvas">
+			<svg class="wf-edges" aria-hidden="true"></svg>
+			<div class="wf-nodes"></div>
+			<p class="wf-hint muted">Add a step to begin. Drag steps to arrange them, and drag from a step's right edge to another step to make it wait.</p>
+		</div>
+	</main>
+
+	<script src="/ui/assets/app.js"></script>
+</body>
+</html>

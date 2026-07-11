@@ -51,6 +51,10 @@ func TestUIRoutes(t *testing.T) {
 			Name: "schedules", Path: "/ui/schedules", WantStatus: http.StatusOK,
 			WantContains: `data-page="schedules"`,
 		},
+		{ // Test 6b: Workflow editor page renders.
+			Name: "workflows", Path: "/ui/workflows", WantStatus: http.StatusOK,
+			WantContains: `data-page="workflows"`,
+		},
 		{ // Test 7: Migrate page renders.
 			Name: "migrate", Path: "/ui/migrate", WantStatus: http.StatusOK,
 			WantContains: `data-page="migrate"`,

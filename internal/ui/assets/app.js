@@ -19,6 +19,7 @@ const NAV_GROUPS = [
 		{ key: "inventories", href: "/ui/inventories", label: "Inventories", desc: "Stored host inventories", admin: true },
 		{ key: "sources", href: "/ui/sources", label: "Sources", desc: "Dynamic inventory sync", admin: true },
 		{ key: "templates", href: "/ui/templates", label: "Templates", desc: "Saved launch presets" },
+		{ key: "workflows", href: "/ui/workflows", label: "Workflow", desc: "Visual pipeline builder" },
 		{ key: "schedules", href: "/ui/schedules", label: "Schedules", desc: "Cron-driven runs" },
 		{ key: "migrate", href: "/ui/migrate", label: "Migrate", desc: "Import from AWX or Semaphore", admin: true },
 	] },
@@ -37,7 +38,7 @@ const NAV_GROUPS = [
 const PAGE_NAV = {
 	overview: "overview", runs: "runs", detail: "runs", fleet: "fleet", host: "fleet",
 	tasks: "tasks", workers: "workers", drift: "drift", projects: "projects", inventories: "inventories",
-	sources: "sources", jobtemplates: "templates", schedules: "schedules",
+	sources: "sources", jobtemplates: "templates", schedules: "schedules", workflows: "workflows",
 	migrate: "migrate", credentials: "credentials", users: "users", audit: "audit",
 	policies: "policies", docs: "docs",
 };
@@ -55,6 +56,7 @@ const NAV_ICONS = {
 	sources: '<path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>',
 	templates: '<polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/>',
 	schedules: '<circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/>',
+	workflows: '<circle cx="5" cy="6" r="2.4"/><circle cx="19" cy="6" r="2.4"/><circle cx="12" cy="18" r="2.4"/><path d="M6.7 7.6 10.6 16M17.3 7.6 13.4 16"/>',
 	migrate: '<path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>',
 	credentials: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
 	users: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
@@ -344,6 +346,312 @@ function endTour(completed) {
 	tourState = null;
 }
 
+// WF_CARD_W is the fixed node width used to anchor edge endpoints; WF_HANDLE_Y is the handle's
+// vertical offset from a node's top, so edges leave and enter at the same height.
+const WF_CARD_W = 190;
+const WF_HANDLE_Y = 26;
+
+// wfState holds the workflow graph and interaction state while the editor is open.
+let wfState = null;
+
+// mountWorkflow initializes the visual workflow editor: the node graph, the canvas drag and link
+// interactions, and the toolbar that adds steps and runs the graph as a pipeline.
+function mountWorkflow() {
+	const canvas = document.getElementById("wf-canvas");
+	if (!canvas) return;
+	wfState = {
+		nodes: [], edges: [], seq: 0, editing: null, canvas,
+		nodesLayer: canvas.querySelector(".wf-nodes"),
+		edgesLayer: canvas.querySelector(".wf-edges"),
+		hint: canvas.querySelector(".wf-hint"),
+		drag: null, link: null,
+	};
+	document.getElementById("wf-add").addEventListener("click", () => openStepModal(null));
+	document.getElementById("wf-run").addEventListener("click", runWorkflow);
+	document.getElementById("wf-step-tool").addEventListener("change", syncStepFields);
+	document.getElementById("wf-step-form").addEventListener("submit", saveStep);
+	document.getElementById("wf-step-delete").addEventListener("click", deleteStepFromModal);
+	const modal = document.getElementById("wf-step-modal");
+	const card = modal.querySelector(".modal-card");
+	card.setAttribute("role", "dialog");
+	card.setAttribute("aria-modal", "true");
+	document.getElementById("wf-step-close").addEventListener("click", closeStepModal);
+	modal.addEventListener("click", (e) => { if (e.target === modal) closeStepModal(); });
+	document.addEventListener("keydown", (e) => {
+		if (e.key === "Escape" && !modal.hidden) closeStepModal();
+	});
+	canvas.addEventListener("pointermove", wfPointerMove);
+	canvas.addEventListener("pointerup", wfPointerUp);
+	window.addEventListener("resize", renderEdges);
+}
+
+// wfPoint converts a pointer event to canvas-local coordinates, accounting for scroll and offset.
+function wfPoint(e) {
+	const r = wfState.canvas.getBoundingClientRect();
+	return { x: e.clientX - r.left + wfState.canvas.scrollLeft, y: e.clientY - r.top + wfState.canvas.scrollTop };
+}
+
+// syncStepFields shows the playbook field for Ansible and the command field for the other tools.
+function syncStepFields() {
+	const ansible = document.getElementById("wf-step-tool").value === "ansible";
+	document.getElementById("wf-step-playbook-field").hidden = !ansible;
+	document.getElementById("wf-step-command-field").hidden = ansible;
+}
+
+// openStepModal opens the step editor for a new step, or for the given node to edit it in place.
+function openStepModal(node) {
+	wfState.editing = node ? node.id : null;
+	document.getElementById("wf-step-status").textContent = "";
+	document.getElementById("wf-step-name").value = node ? node.name : "";
+	document.getElementById("wf-step-tool").value = node ? node.tool : "ansible";
+	document.getElementById("wf-step-playbook").value = node ? node.playbook : "";
+	document.getElementById("wf-step-command").value = node ? node.command : "";
+	document.getElementById("wf-step-inventory").value = node ? node.inventory : "";
+	document.getElementById("wf-step-dryrun").checked = node ? node.dryRun : false;
+	document.getElementById("wf-step-continue").checked = node ? node.continueOnFailure : false;
+	document.getElementById("wf-step-retries").value = node ? node.retries : 0;
+	document.getElementById("wf-step-delete").hidden = !node;
+	syncStepFields();
+	document.getElementById("wf-step-modal").hidden = false;
+	document.getElementById("wf-step-name").focus();
+}
+
+// closeStepModal hides the step editor.
+function closeStepModal() {
+	document.getElementById("wf-step-modal").hidden = true;
+	wfState.editing = null;
+}
+
+// saveStep validates the step form and creates or updates the node, keeping step names unique so
+// dependencies stay unambiguous.
+function saveStep(e) {
+	e.preventDefault();
+	const name = document.getElementById("wf-step-name").value.trim();
+	const tool = document.getElementById("wf-step-tool").value;
+	const status = document.getElementById("wf-step-status");
+	if (!name) { status.textContent = "Name is required."; return; }
+	const clash = wfState.nodes.some((n) => n.name === name && n.id !== wfState.editing);
+	if (clash) { status.textContent = "A step named " + name + " already exists."; return; }
+	const fields = {
+		name, tool,
+		playbook: document.getElementById("wf-step-playbook").value.trim(),
+		command: document.getElementById("wf-step-command").value.trim(),
+		inventory: document.getElementById("wf-step-inventory").value.trim(),
+		dryRun: document.getElementById("wf-step-dryrun").checked,
+		continueOnFailure: document.getElementById("wf-step-continue").checked,
+		retries: Math.max(0, parseInt(document.getElementById("wf-step-retries").value, 10) || 0),
+	};
+	if (wfState.editing) {
+		const node = wfState.nodes.find((n) => n.id === wfState.editing);
+		Object.assign(node, fields);
+	} else {
+		const n = wfState.nodes.length;
+		wfState.nodes.push(Object.assign({ id: "n" + (wfState.seq++), x: 40 + (n % 4) * 210, y: 40 + Math.floor(n / 4) * 130 }, fields));
+	}
+	closeStepModal();
+	renderWorkflow();
+}
+
+// deleteStepFromModal removes the node currently open in the editor along with its edges.
+function deleteStepFromModal() {
+	if (wfState.editing) removeNode(wfState.editing);
+	closeStepModal();
+}
+
+// removeNode deletes a node and every edge touching it.
+function removeNode(id) {
+	wfState.nodes = wfState.nodes.filter((n) => n.id !== id);
+	wfState.edges = wfState.edges.filter((e) => e.from !== id && e.to !== id);
+	renderWorkflow();
+}
+
+// renderWorkflow redraws the nodes and the edges and toggles the empty hint.
+function renderWorkflow() {
+	renderNodes();
+	renderEdges();
+	if (wfState.hint) wfState.hint.hidden = wfState.nodes.length > 0;
+}
+
+// renderNodes reconciles the node cards with the model, positioning each and wiring its handles.
+function renderNodes() {
+	const layer = wfState.nodesLayer;
+	layer.textContent = "";
+	for (const node of wfState.nodes) {
+		const el = document.createElement("div");
+		el.className = "wf-node";
+		el.style.left = node.x + "px";
+		el.style.top = node.y + "px";
+		el.dataset.id = node.id;
+		const target = node.tool === "ansible" ? node.playbook : node.command;
+		el.innerHTML =
+			'<div class="wf-node-head"><span class="wf-node-name"></span>' +
+			'<button type="button" class="wf-node-del" aria-label="Delete step">&times;</button></div>' +
+			'<div class="wf-node-meta"><span class="wf-tool"></span><span class="wf-node-target mono"></span></div>' +
+			'<span class="wf-handle wf-in" aria-hidden="true"></span>' +
+			'<span class="wf-handle wf-out" aria-hidden="true"></span>';
+		el.querySelector(".wf-node-name").textContent = node.name;
+		el.querySelector(".wf-tool").textContent = node.tool;
+		el.querySelector(".wf-node-target").textContent = target || "";
+		el.querySelector(".wf-node-del").addEventListener("click", (ev) => { ev.stopPropagation(); removeNode(node.id); });
+		el.querySelector(".wf-out").addEventListener("pointerdown", (ev) => startLink(ev, node.id));
+		el.addEventListener("pointerdown", (ev) => startDrag(ev, node.id));
+		layer.appendChild(el);
+	}
+}
+
+// renderEdges draws every dependency edge, plus the in-progress link while one is being dragged.
+function renderEdges() {
+	const svg = wfState.edgesLayer;
+	svg.setAttribute("width", wfState.canvas.scrollWidth);
+	svg.setAttribute("height", wfState.canvas.scrollHeight);
+	let paths = "";
+	for (const e of wfState.edges) {
+		const a = wfState.nodes.find((n) => n.id === e.from);
+		const b = wfState.nodes.find((n) => n.id === e.to);
+		if (a && b) paths += edgePath(a.x + WF_CARD_W, a.y + WF_HANDLE_Y, b.x, b.y + WF_HANDLE_Y, "wf-edge");
+	}
+	if (wfState.link && wfState.link.cursor) {
+		const a = wfState.nodes.find((n) => n.id === wfState.link.from);
+		if (a) paths += edgePath(a.x + WF_CARD_W, a.y + WF_HANDLE_Y, wfState.link.cursor.x, wfState.link.cursor.y, "wf-edge wf-edge-live");
+	}
+	svg.innerHTML = paths;
+}
+
+// edgePath returns an SVG cubic path between two points, curving horizontally so edges read as flow.
+function edgePath(x1, y1, x2, y2, cls) {
+	const dx = Math.max(40, Math.abs(x2 - x1) / 2);
+	return '<path class="' + cls + '" d="M' + x1 + ' ' + y1 + ' C' + (x1 + dx) + ' ' + y1 + ' ' +
+		(x2 - dx) + ' ' + y2 + ' ' + x2 + ' ' + y2 + '"/>';
+}
+
+// startDrag begins moving a node, unless the press landed on a handle or the delete control.
+function startDrag(e, id) {
+	if (e.target.closest(".wf-handle") || e.target.closest(".wf-node-del")) return;
+	const node = wfState.nodes.find((n) => n.id === id);
+	const p = wfPoint(e);
+	wfState.drag = { id, dx: p.x - node.x, dy: p.y - node.y, moved: false };
+	wfState.canvas.setPointerCapture(e.pointerId);
+}
+
+// startLink begins drawing a dependency edge out of a node's output handle.
+function startLink(e, id) {
+	e.stopPropagation();
+	wfState.link = { from: id, cursor: wfPoint(e) };
+	wfState.canvas.setPointerCapture(e.pointerId);
+}
+
+// wfPointerMove updates an in-progress node drag or link as the pointer moves.
+function wfPointerMove(e) {
+	if (wfState.drag) {
+		const node = wfState.nodes.find((n) => n.id === wfState.drag.id);
+		const p = wfPoint(e);
+		node.x = Math.max(0, p.x - wfState.drag.dx);
+		node.y = Math.max(0, p.y - wfState.drag.dy);
+		wfState.drag.moved = true;
+		renderNodes();
+		renderEdges();
+	} else if (wfState.link) {
+		wfState.link.cursor = wfPoint(e);
+		renderEdges();
+	}
+}
+
+// wfPointerUp finishes a drag, or completes a link when it lands on another node.
+function wfPointerUp(e) {
+	if (wfState.link) {
+		// Pointer capture retargets the event to the canvas, so find the drop node by geometry.
+		const el = document.elementFromPoint(e.clientX, e.clientY);
+		const over = el ? el.closest(".wf-node") : null;
+		if (over) linkTo(over.dataset.id);
+		wfState.link = null;
+		renderEdges();
+	}
+	if (wfState.drag) {
+		if (!wfState.drag.moved) openStepModal(wfState.nodes.find((n) => n.id === wfState.drag.id));
+		wfState.drag = null;
+	}
+}
+
+// linkTo adds a dependency edge from the link's source to the target, rejecting self-links,
+// duplicates, and edges that would create a cycle.
+function linkTo(toId) {
+	const fromId = wfState.link.from;
+	if (fromId === toId) return;
+	if (wfState.edges.some((e) => e.from === fromId && e.to === toId)) return;
+	if (reaches(toId, fromId)) {
+		wfSetStatus("That link would create a cycle.", "err");
+		return;
+	}
+	wfState.edges.push({ from: fromId, to: toId });
+	wfSetStatus("", "");
+}
+
+// reaches reports whether following edges from start eventually arrives at goal, used to block
+// cycles before they are added.
+function reaches(start, goal) {
+	const seen = new Set();
+	const stack = [start];
+	while (stack.length) {
+		const cur = stack.pop();
+		if (cur === goal) return true;
+		if (seen.has(cur)) continue;
+		seen.add(cur);
+		for (const e of wfState.edges) {
+			if (e.from === cur) stack.push(e.to);
+		}
+	}
+	return false;
+}
+
+// wfSetStatus writes the editor status line, red for an error.
+function wfSetStatus(msg, kind) {
+	const el = document.getElementById("status");
+	if (!el) return;
+	el.className = kind === "err" ? "error-text" : "muted";
+	el.textContent = msg;
+	el.hidden = !msg;
+}
+
+// runWorkflow serializes the graph into pipeline steps and submits it, then opens the new run.
+async function runWorkflow() {
+	if (wfState.nodes.length === 0) { wfSetStatus("Add at least one step.", "err"); return; }
+	const steps = wfState.nodes.map((n) => {
+		const step = { name: n.name, tool: n.tool };
+		if (n.tool === "ansible") step.playbook = n.playbook;
+		else step.command = n.command;
+		if (n.inventory) step.inventory = n.inventory;
+		if (n.dryRun) step.dry_run = true;
+		if (n.continueOnFailure) step.continue_on_failure = true;
+		if (n.retries > 0) step.retries = n.retries;
+		const deps = wfState.edges.filter((e) => e.to === n.id)
+			.map((e) => wfState.nodes.find((x) => x.id === e.from).name);
+		if (deps.length) step.depends_on = deps;
+		return step;
+	});
+	const body = {
+		name: document.getElementById("wf-name").value.trim() || "workflow",
+		inventory: document.getElementById("wf-inventory").value.trim(),
+		steps,
+	};
+	wfSetStatus("Starting workflow.", "");
+	try {
+		const res = await fetch("/pipelines", {
+			method: "POST",
+			headers: Object.assign({ "Content-Type": "application/json" }, authHeaders()),
+			body: JSON.stringify(body),
+		});
+		if (res.status === 401) { window.location.assign("/ui/login"); return; }
+		if (!res.ok) {
+			const detail = await res.json().catch(() => ({}));
+			throw new Error(detail.error || "HTTP " + res.status);
+		}
+		const run = await res.json();
+		window.location.assign("/ui/runs/" + run.id);
+	} catch (err) {
+		wfSetStatus("Could not start workflow: " + err.message, "err");
+	}
+}
+
 document.addEventListener("DOMContentLoaded", () => {
 	consumeSSOFragment();
 	mountTopbar();
@@ -375,6 +683,8 @@ document.addEventListener("DOMContentLoaded", () => {
 		wireModal("schedule");
 		wireScheduleForm();
 		loadSchedules();
+	} else if (page === "workflows") {
+		mountWorkflow();
 	} else if (page === "login") {
 		loadLogin();
 	} else if (page === "credentials") {

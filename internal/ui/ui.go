@@ -86,6 +86,7 @@ func (u *UI) Handler() http.Handler {
 	mux.HandleFunc("GET /ui/projects", u.projects)
 	mux.HandleFunc("GET /ui/templates", u.jobTemplates)
 	mux.HandleFunc("GET /ui/schedules", u.schedules)
+	mux.HandleFunc("GET /ui/workflows", u.workflows)
 	mux.HandleFunc("GET /ui/migrate", u.migrate)
 	if u.docs != nil {
 		mux.HandleFunc("GET /ui/docs", u.docsPage)
@@ -190,6 +191,12 @@ func (u *UI) login(w http.ResponseWriter, _ *http.Request) {
 // schedules renders the schedules page.
 func (u *UI) schedules(w http.ResponseWriter, _ *http.Request) {
 	u.render(w, "schedules.html", map[string]any{"ReadOnly": u.readOnly})
+}
+
+// workflows renders the visual workflow editor, where steps are wired into a graph and run as a
+// pipeline.
+func (u *UI) workflows(w http.ResponseWriter, _ *http.Request) {
+	u.render(w, "workflows.html", map[string]any{"ReadOnly": u.readOnly})
 }
 
 // render executes the named template with data.
