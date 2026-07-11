@@ -171,6 +171,9 @@ func requiredRole(r *http.Request) user.Role {
 		return user.RoleViewer
 	case p == "/runs", p == "/pipelines":
 		return user.RoleOperator
+	case strings.HasPrefix(p, "/runs/") && strings.HasSuffix(p, "/explain"):
+		// Explaining a run is an advisory read, so a viewer may ask.
+		return user.RoleViewer
 	case strings.HasPrefix(p, "/runs/") &&
 		(strings.HasSuffix(p, "/cancel") || strings.HasSuffix(p, "/retry")):
 		return user.RoleOperator

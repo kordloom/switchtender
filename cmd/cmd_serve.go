@@ -18,6 +18,7 @@ import (
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 
+	"github.com/dcadolph/yardmaster/internal/ai"
 	"github.com/dcadolph/yardmaster/internal/audit"
 	"github.com/dcadolph/yardmaster/internal/auth"
 	"github.com/dcadolph/yardmaster/internal/credential"
@@ -119,6 +120,9 @@ var (
 	serveJWTGroupsClaim   string
 	serveJWTDefaultRole   string
 	serveJWTRoleMap       []string
+	serveAIProvider       string
+	serveAIModel          string
+	serveAIURL            string
 )
 
 // retainRuns holds the value of the --retain-runs flag, a duration like 90d.
@@ -261,6 +265,12 @@ func init() {
 		"Claim holding the user's groups, used with --jwt-role-map.")
 	serveCmd.Flags().StringVar(&serveJWTDefaultRole, "jwt-default-role", "viewer",
 		"Role granted to an account created on first JWT sign-in.")
+	serveCmd.Flags().StringVar(&serveAIProvider, "ai-provider", "",
+		"Enable advisory AI features with a provider: ollama or anthropic. Empty leaves AI off.")
+	serveCmd.Flags().StringVar(&serveAIModel, "ai-model", "",
+		"Model name for the AI provider. Empty uses the provider's default.")
+	serveCmd.Flags().StringVar(&serveAIURL, "ai-url", "",
+		"Base URL for the AI provider, for a self-hosted Ollama or a proxy. Empty uses the default.")
 	serveCmd.Flags().StringArrayVar(&serveJWTRoleMap, "jwt-role-map", nil,
 		"Map a token group to a role as group=role. A matched group sets the role on every request. Repeatable.")
 	serveCmd.Flags().StringVar(&retainRuns, "retain-runs", "",
@@ -488,6 +498,11 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
+	aiProvider, err := ai.New(serveAIProvider, serveAIModel, serveAIURL, os.Getenv("YARDMASTER_AI_KEY"))
+	if err != nil {
+		return err
+	}
+
 	httpServer := &http.Server{
 		Addr: serveAddr,
 		Handler: server.New(store, disp, log, server.WithStreamer(hub),
@@ -510,6 +525,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			server.WithOIDC(oidcAuth),
 			server.WithLDAP(ldapAuth),
 			server.WithJWT(jwtAuth),
+			server.WithAI(aiProvider),
 			server.WithDocs(docsFS)).Handler(),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}

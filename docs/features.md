@@ -42,4 +42,5 @@ What Yardmaster does today.
 | Retention | A sweeper drops old run events and deletes terminal runs past a configurable age, keeping the summaries the cross-run views need.|
 | Email | An SMTP notification on every finished run or on failures only, alongside the finish webhooks.|
 | Slack | A formatted message posts to a Slack incoming webhook when a run finishes, with the run label, status, and elapsed time.|
+| AI triage | An optional AI provider, local Ollama or a cloud API, explains a failed run on demand from its masked log. Advisory only: it never runs anything, so every action still goes through the same policy and audit gates.|
 | Migration | `yardmaster import awx` and `import semaphore` read an export and create the equivalent projects, inventories, templates, surveys, schedules, and credential shells, with a dry-run report first.|

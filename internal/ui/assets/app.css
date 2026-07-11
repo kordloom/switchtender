@@ -450,3 +450,10 @@ button.topbar-link { background: none; border: none; padding: 0; font: inherit; 
 .wf-step-row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
 .wf-step-retries { flex-direction: row; align-items: center; gap: 8px; }
 .wf-step-retries .input { width: 72px; }
+
+/* AI triage panel on the run detail page: an advisory explanation of a failed run, on demand. */
+.explain-panel { margin-top: 16px; background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: var(--radius); padding: 14px 16px; }
+.explain-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.explain-title { font-size: 13px; font-weight: 600; }
+.explain-note { font-size: 12px; }
+.explain-body { font-size: 13.5px; line-height: 1.55; white-space: pre-wrap; color: var(--text); }

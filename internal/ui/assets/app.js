@@ -3388,6 +3388,28 @@ function wireActions(runId) {
 			}
 		});
 	}
+	const explain = document.getElementById("explain-run");
+	if (explain) {
+		explain.addEventListener("click", async () => {
+			const panel = document.getElementById("explain-panel");
+			const bodyEl = document.getElementById("explain-body");
+			if (panel) panel.hidden = false;
+			if (bodyEl) bodyEl.textContent = "Reading the run…";
+			explain.disabled = true;
+			try {
+				const res = await postAction("/runs/" + runId + "/explain");
+				if (bodyEl) bodyEl.textContent = res.explanation || "No explanation was returned.";
+			} catch (e) {
+				if (bodyEl) {
+					bodyEl.textContent = e.message === "ai is not enabled"
+						? "AI triage is not enabled on this server."
+						: "Could not explain the run: " + e.message;
+				}
+			} finally {
+				explain.disabled = false;
+			}
+		});
+	}
 }
 
 // updateActions shows cancel while the run is active and retry on a finished split that did not
@@ -3398,11 +3420,13 @@ function updateActions(run) {
 	if (!cancel || !retry) return;
 	const approve = document.getElementById("approve-run");
 	const reject = document.getElementById("reject-run");
+	const explain = document.getElementById("explain-run");
 	if (isReadOnly()) {
 		cancel.hidden = true;
 		retry.hidden = true;
 		if (approve) approve.hidden = true;
 		if (reject) reject.hidden = true;
+		if (explain) explain.hidden = true;
 		return;
 	}
 	const held = run.status === "pending_approval";
@@ -3411,6 +3435,7 @@ function updateActions(run) {
 	if (reject) reject.hidden = !held;
 	const splitParent = (run.kind === "split" || run.shard_count) && !run.parent_id;
 	retry.hidden = !(splitParent && isTerminal(run.status) && run.status !== "succeeded");
+	if (explain) explain.hidden = !(run.status === "failed" || run.status === "interrupted");
 }
 
 // loadPipeline renders a pipeline run as an ordered list of step runs, refreshed live over the

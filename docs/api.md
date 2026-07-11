@@ -23,6 +23,7 @@ Every endpoint the server exposes. The web UI lives at `/ui/` and the root redir
 | GET    | `/runs/{id}/logs`       | Captured output as plain text.                          |
 | GET    | `/runs/{id}/events`     | Structured events as JSON.                              |
 | GET    | `/runs/{id}/stream`     | Live events and log over Server-Sent Events.            |
+| POST   | `/runs/{id}/explain`    | Advisory AI explanation of a run, when a provider is configured. |
 | POST   | `/pipelines`            | Submit ordered playbook steps as one pipeline.          |
 | POST   | `/schedules`            | Cron schedule for a run, split, pipeline, or template.  |
 | GET    | `/schedules`            | List schedules.                                         |

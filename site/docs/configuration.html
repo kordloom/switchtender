@@ -68,6 +68,11 @@ variable.</p>
 <td>Password for SMTP authentication when <code>--smtp-username</code> is set.</td>
 </tr>
 <tr>
+<td><code>YARDMASTER_AI_KEY</code></td>
+<td>serve</td>
+<td>API key for a cloud AI provider such as Anthropic. A local Ollama needs none.</td>
+</tr>
+<tr>
 <td><code>YARDMASTER_OIDC_CLIENT_SECRET</code></td>
 <td>serve</td>
 <td>OpenID Connect client secret, paired with <code>--oidc-client-id</code>. Read from the environment so it stays off the command line.</td>
@@ -245,6 +250,21 @@ that variable is unset.</p>
 <td><code>--jwt-default-role</code></td>
 <td><code>viewer</code></td>
 <td>Role granted to an account created on first JWT sign-in.</td>
+</tr>
+<tr>
+<td><code>--ai-provider</code></td>
+<td>none</td>
+<td>Enable advisory AI features with a provider: <code>ollama</code> or <code>anthropic</code>. Empty leaves AI off.</td>
+</tr>
+<tr>
+<td><code>--ai-model</code></td>
+<td>provider default</td>
+<td>Model name for the AI provider.</td>
+</tr>
+<tr>
+<td><code>--ai-url</code></td>
+<td>provider default</td>
+<td>Base URL for the AI provider, for a self-hosted Ollama or a proxy.</td>
 </tr>
 <tr>
 <td><code>--schedule-interval</code></td>

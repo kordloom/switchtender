@@ -19,6 +19,7 @@ variable.
 | `YARDMASTER_AUDIT_KEY` | serve | Hex-encoded ed25519 seed that signs audit exports so the trail can be verified offline. Signing is off when unset. A malformed value stops startup. Generate one with `yardmaster audit keygen`. |
 | `YARDMASTER_PASSWORD` | user new | Initial account password, read instead of prompting so it never lands on the command line. |
 | `YARDMASTER_SMTP_PASSWORD` | serve | Password for SMTP authentication when `--smtp-username` is set. |
+| `YARDMASTER_AI_KEY` | serve | API key for a cloud AI provider such as Anthropic. A local Ollama needs none. |
 | `YARDMASTER_OIDC_CLIENT_SECRET` | serve | OpenID Connect client secret, paired with `--oidc-client-id`. Read from the environment so it stays off the command line. |
 | `YARDMASTER_LDAP_PASSWORD` | serve | Password for the `--ldap-bind-dn` service account. |
 | `YARDMASTER_ADMIN_PASSWORD` | init | Password for the first admin account. When unset, init generates one and prints it once. |
@@ -67,6 +68,9 @@ Runs the HTTP API, the in-process executor, the scheduler, the retention sweeper
 | `--jwt-groups-claim` | none | Claim holding the user's groups, used with `--jwt-role-map`. |
 | `--jwt-role-map` | none | Map a token group to a role as `group=role`. Repeatable. |
 | `--jwt-default-role` | `viewer` | Role granted to an account created on first JWT sign-in. |
+| `--ai-provider` | none | Enable advisory AI features with a provider: `ollama` or `anthropic`. Empty leaves AI off. |
+| `--ai-model` | provider default | Model name for the AI provider. |
+| `--ai-url` | provider default | Base URL for the AI provider, for a self-hosted Ollama or a proxy. |
 | `--schedule-interval` | `15s` | How often the scheduler checks for due schedules. |
 | `--notify-webhook` | none | URL that receives a JSON notification when a run finishes. Repeatable. |
 | `--notify-slack` | none | Slack incoming webhook URL that receives a message when a run finishes. Repeatable. |

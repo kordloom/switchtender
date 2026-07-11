@@ -164,6 +164,10 @@
 <td>A formatted message posts to a Slack incoming webhook when a run finishes, with the run label, status, and elapsed time.</td>
 </tr>
 <tr>
+<td>AI triage</td>
+<td>An optional AI provider, local Ollama or a cloud API, explains a failed run on demand from its masked log. Advisory only: it never runs anything, so every action still goes through the same policy and audit gates.</td>
+</tr>
+<tr>
 <td>Migration</td>
 <td><code>yardmaster import awx</code> and <code>import semaphore</code> read an export and create the equivalent projects, inventories, templates, surveys, schedules, and credential shells, with a dry-run report first.</td>
 </tr>

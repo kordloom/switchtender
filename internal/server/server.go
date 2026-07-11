@@ -8,6 +8,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/dcadolph/yardmaster/internal/ai"
 	"github.com/dcadolph/yardmaster/internal/audit"
 	"github.com/dcadolph/yardmaster/internal/auth"
 	"github.com/dcadolph/yardmaster/internal/credential"
@@ -197,6 +198,12 @@ func WithProjects(store project.Store) Option {
 	return func(srv *Server) { srv.projects = store }
 }
 
+// WithAI enables the advisory AI endpoints backed by the given provider. A nil provider leaves them
+// disabled, so AI is off unless an operator configures it.
+func WithAI(provider ai.Provider) Option {
+	return func(srv *Server) { srv.ai = provider }
+}
+
 // WithCredentials enables the credential endpoints backed by the given store and sealer.
 func WithCredentials(store credential.Store, sealer *credential.Sealer) Option {
 	return func(srv *Server) {
@@ -209,6 +216,8 @@ func WithCredentials(store credential.Store, sealer *credential.Sealer) Option {
 type Server struct {
 	// store reads runs and their logs for the query endpoints.
 	store run.Store
+	// ai provides advisory completions such as explaining a run, nil when AI is off.
+	ai ai.Provider
 	// submitter accepts new runs.
 	submitter Submitter
 	// log records request handling activity.
@@ -316,6 +325,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /runs/{id}/steps", runStepsHandler(s.store, s.log))
 	mux.Handle("GET /runs/{id}/logs", runLogsHandler(s.store, s.log))
 	mux.Handle("GET /runs/{id}/events", runEventsHandler(s.store, s.log))
+	mux.Handle("POST /runs/{id}/explain", explainRunHandler(s.store, s.ai, s.log))
 	mux.Handle("GET /runs/{id}/stream", runStreamHandler(s.streamer, s.store, s.log))
 	mux.Handle("POST /schedules", createScheduleHandler(s.schedules, s.log))
 	mux.Handle("GET /schedules", listSchedulesHandler(s.schedules, s.log))
