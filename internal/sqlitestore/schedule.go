@@ -71,7 +71,7 @@ func (s *scheduleStore) List(ctx context.Context) ([]*schedule.Schedule, error) 
 	}
 	defer func() { _ = rows.Close() }()
 
-	var out []*schedule.Schedule
+	out := []*schedule.Schedule{}
 	for rows.Next() {
 		sc, err := scanSchedule(rows)
 		if err != nil {

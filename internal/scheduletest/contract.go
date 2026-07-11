@@ -23,6 +23,15 @@ func Contract(t *testing.T, newStore func() schedule.Store) {
 	t.Run("list ordered", func(t *testing.T) { testList(t, newStore()) })
 	t.Run("delete", func(t *testing.T) { testDelete(t, newStore()) })
 	t.Run("claim due", func(t *testing.T) { testClaimDue(t, newStore()) })
+	t.Run("empty list is non-nil", func(t *testing.T) {
+		got, err := newStore().List(context.Background())
+		if err != nil {
+			t.Fatalf("List() error = %v", err)
+		}
+		if got == nil {
+			t.Error("List() on an empty store = nil, want a non-nil empty slice")
+		}
+	})
 }
 
 // testSaveGet verifies a schedule round trips including steps and returns independent copies.

@@ -17,6 +17,15 @@ func Contract(t *testing.T, newStore func() audit.Store) {
 	t.Run("append and list", func(t *testing.T) { testAppendList(t, newStore()) })
 	t.Run("chain verifies", func(t *testing.T) { testChain(t, newStore()) })
 	t.Run("concurrent appends do not fork", func(t *testing.T) { testConcurrentAppend(t, newStore()) })
+	t.Run("empty list is non-nil", func(t *testing.T) {
+		got, err := newStore().List(context.Background(), 10)
+		if err != nil {
+			t.Fatalf("List() error = %v", err)
+		}
+		if got == nil {
+			t.Error("List() on an empty store = nil, want a non-nil empty slice")
+		}
+	})
 }
 
 // testConcurrentAppend fires many appends at once and checks the chain stays a single intact line:

@@ -98,7 +98,7 @@ ORDER BY seq ASC, id ASC`
 // scanAudit reads audit rows into entries, closing rows.
 func scanAudit(rows *sql.Rows) ([]*audit.Entry, error) {
 	defer func() { _ = rows.Close() }()
-	var out []*audit.Entry
+	out := []*audit.Entry{}
 	for rows.Next() {
 		var (
 			e  audit.Entry

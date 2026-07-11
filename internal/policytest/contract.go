@@ -16,6 +16,15 @@ func Contract(t *testing.T, newStore func() policy.Store) {
 	t.Helper()
 	t.Run("save list delete", func(t *testing.T) { testSaveListDelete(t, newStore()) })
 	t.Run("get", func(t *testing.T) { testGet(t, newStore()) })
+	t.Run("empty list is non-nil", func(t *testing.T) {
+		got, err := newStore().List(context.Background())
+		if err != nil {
+			t.Fatalf("List() error = %v", err)
+		}
+		if got == nil {
+			t.Error("List() on an empty store = nil, want a non-nil empty slice")
+		}
+	})
 }
 
 // testGet verifies a saved policy round-trips through Get and a missing id reports ErrNotFound.

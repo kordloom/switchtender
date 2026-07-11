@@ -1366,7 +1366,13 @@ func (s *store) Heartbeat(ctx context.Context, id, owner string) error {
 // ReclaimStale requeues stale claimed pending runs and interrupts stale running runs.
 func (s *store) ReclaimStale(ctx context.Context, cutoff time.Time) (int, error) {
 	cut := formatTime(cutoff)
-	res, err := s.db.ExecContext(ctx, `
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("reclaim stale: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	res, err := tx.ExecContext(ctx, `
 UPDATE runs SET claimed_by='', claimed_at=NULL
 WHERE status='pending' AND claimed_by!='' AND claimed_at < ?`, cut)
 	if err != nil {
@@ -1376,7 +1382,7 @@ WHERE status='pending' AND claimed_by!='' AND claimed_at < ?`, cut)
 	if err != nil {
 		return 0, fmt.Errorf("reclaim stale: %w", err)
 	}
-	res, err = s.db.ExecContext(ctx, `
+	res, err = tx.ExecContext(ctx, `
 UPDATE runs SET status='interrupted', ended_at=?, error='interrupted: executor lease expired'
 WHERE status='running' AND claimed_by!='' AND claimed_at < ?`, formatTime(time.Now()), cut)
 	if err != nil {
@@ -1384,6 +1390,9 @@ WHERE status='running' AND claimed_by!='' AND claimed_at < ?`, formatTime(time.N
 	}
 	interrupted, err := res.RowsAffected()
 	if err != nil {
+		return 0, fmt.Errorf("reclaim stale: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
 		return 0, fmt.Errorf("reclaim stale: %w", err)
 	}
 	return int(requeued + interrupted), nil

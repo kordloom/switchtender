@@ -43,7 +43,7 @@ func (s *policyStore) List(ctx context.Context) ([]*policy.Policy, error) {
 		return nil, fmt.Errorf("list policies: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
-	var out []*policy.Policy
+	out := []*policy.Policy{}
 	for rows.Next() {
 		p, err := scanPolicy(rows)
 		if err != nil {
