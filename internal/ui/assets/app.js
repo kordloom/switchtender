@@ -765,8 +765,23 @@ function wireModal(name) {
 	const openBtn = document.getElementById(name + "-open");
 	const modal = document.getElementById(name + "-modal");
 	if (!openBtn || !modal) return;
-	const close = () => { modal.hidden = true; };
-	openBtn.addEventListener("click", () => { modal.hidden = false; });
+	const card = modal.querySelector(".modal-card");
+	if (card) {
+		card.setAttribute("role", "dialog");
+		card.setAttribute("aria-modal", "true");
+	}
+	let opener = null;
+	const close = () => {
+		modal.hidden = true;
+		if (opener && opener.focus) opener.focus();
+	};
+	openBtn.addEventListener("click", () => {
+		opener = document.activeElement;
+		modal.hidden = false;
+		const first = modal.querySelector("input, select, textarea") ||
+			modal.querySelector("button:not(.modal-close)");
+		if (first) first.focus();
+	});
 	const closeBtn = document.getElementById(name + "-close");
 	if (closeBtn) closeBtn.addEventListener("click", close);
 	modal.addEventListener("click", (e) => { if (e.target === modal) close(); });
@@ -2050,17 +2065,23 @@ function wireRunsSearch() {
 	});
 }
 
+// runsLoadGen counts run-table loads so a slow response from an earlier search or page size cannot
+// overwrite the table after a newer load has already rendered.
+let runsLoadGen = 0;
+
 // loadRuns populates the run history table.
 async function loadRuns() {
 	const tbody = document.getElementById("runs");
 	const table = document.querySelector("table.runs");
 	const sizeEl = document.getElementById("runs-pagesize");
 	if (sizeEl) sizeEl.onchange = () => loadRuns();
+	const gen = ++runsLoadGen;
 	setStatus("");
 	showSkeletonRows(tbody, 6, 5);
 	table.hidden = false;
 	try {
 		const data = await getJSON("/runs?limit=" + runsPageSize() + "&offset=0&q=" + encodeURIComponent(runsQuery()));
+		if (gen !== runsLoadGen) return;
 		const runs = data.runs || [];
 		tbody.innerHTML = "";
 		if (runs.length === 0) {
@@ -2102,7 +2123,13 @@ function appendRunRows(tbody, runs) {
 	for (const r of runs) {
 		const tr = document.createElement("tr");
 		tr.className = "row-nav";
-		tr.addEventListener("click", () => { location.href = "/ui/runs/" + r.id; });
+		tr.tabIndex = 0;
+		tr.setAttribute("role", "link");
+		const openRun = () => { location.href = "/ui/runs/" + r.id; };
+		tr.addEventListener("click", openRun);
+		tr.addEventListener("keydown", (e) => {
+			if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openRun(); }
+		});
 		tr.appendChild(tdBadge(r.status));
 
 		const runCell = td(shortId(r.id), "mono");
@@ -2748,7 +2775,8 @@ let detailState = null;
 
 // loadDetail loads one run and dispatches to the split or single render path.
 async function loadDetail(runId) {
-	document.getElementById("full-log").href = "/runs/" + runId + "/logs";
+	const fullLog = document.getElementById("full-log");
+	if (fullLog) fullLog.href = "/runs/" + runId + "/logs";
 	wireActions(runId);
 	try {
 		const run = await getJSON("/runs/" + runId);
@@ -2961,7 +2989,7 @@ async function loadUsers() {
 // wireActions hooks up the cancel and retry buttons for the run being viewed.
 function wireActions(runId) {
 	const cancel = document.getElementById("cancel-run");
-	cancel.addEventListener("click", async () => {
+	if (cancel) cancel.addEventListener("click", async () => {
 		if (!window.confirm("Cancel this run?")) return;
 		cancel.disabled = true;
 		try {
@@ -2972,7 +3000,7 @@ function wireActions(runId) {
 		}
 	});
 	const retry = document.getElementById("retry-run");
-	retry.addEventListener("click", async () => {
+	if (retry) retry.addEventListener("click", async () => {
 		retry.disabled = true;
 		try {
 			const created = await postAction("/runs/" + runId + "/retry");
@@ -3761,5 +3789,11 @@ function inspectDrawer(title, fields) {
 // inspectable marks a table row as clickable and opens the inspect drawer for it on click.
 function inspectable(tr, title, fields) {
 	tr.classList.add("row-inspect");
-	tr.addEventListener("click", () => inspectDrawer(title, fields));
+	tr.tabIndex = 0;
+	tr.setAttribute("role", "button");
+	const open = () => inspectDrawer(title, fields);
+	tr.addEventListener("click", open);
+	tr.addEventListener("keydown", (e) => {
+		if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); }
+	});
 }

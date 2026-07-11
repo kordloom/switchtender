@@ -44,13 +44,21 @@ func (d *Dispatcher) notifyWebhooks(r *run.Run) {
 	if len(d.webhooks) == 0 {
 		return
 	}
-	body, err := json.Marshal(notification{Event: "run.finished", Run: r})
+	// Redact the run's extra vars from the payload. Survey answers and template vars can carry
+	// secrets, and a webhook is an external endpoint that must not receive them.
+	redacted := *r
+	redacted.ExtraVars = nil
+	body, err := json.Marshal(notification{Event: "run.finished", Run: &redacted})
 	if err != nil {
 		d.log.Error("dispatch: encode notification: "+err.Error(), zap.String("run_id", r.ID))
 		return
 	}
 	for _, url := range d.webhooks {
-		go d.deliver(url, r.ID, body)
+		d.notifyWG.Add(1)
+		go func(u string) {
+			defer d.notifyWG.Done()
+			d.deliver(u, r.ID, body)
+		}(url)
 	}
 }
 

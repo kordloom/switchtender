@@ -43,7 +43,9 @@ func (d *Dispatcher) notifyEmail(r *run.Run) {
 	}
 	subject := fmt.Sprintf("Yardmaster run %s %s", r.ID, r.Status)
 	body := emailBody(r)
+	d.notifyWG.Add(1)
 	go func() {
+		defer d.notifyWG.Done()
 		ctx, cancel := context.WithTimeout(context.Background(), emailTimeout)
 		defer cancel()
 		if err := d.emailer.Send(ctx, subject, body); err != nil {

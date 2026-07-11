@@ -62,7 +62,7 @@ func (s *Syncer) Sync(p *Project, sshKey string) (dir, sha string, galaxyEnv []s
 	l.Lock()
 	defer l.Unlock()
 
-	auth, err := authFor(p.RepoURL, sshKey)
+	auth, err := authFor(sshKey)
 	if err != nil {
 		return "", "", nil, err
 	}
@@ -282,7 +282,7 @@ func checkRepoHost(host string) error {
 }
 
 // authFor builds the transport auth for a remote: an SSH key when provided, nothing otherwise.
-func authFor(repoURL, sshKey string) (transport.AuthMethod, error) {
+func authFor(sshKey string) (transport.AuthMethod, error) {
 	if sshKey == "" {
 		return nil, nil
 	}
@@ -290,7 +290,6 @@ func authFor(repoURL, sshKey string) (transport.AuthMethod, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse project ssh key: %w", err)
 	}
-	_ = repoURL
 	return keys, nil
 }
 

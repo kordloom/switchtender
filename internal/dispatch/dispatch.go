@@ -83,6 +83,9 @@ type Dispatcher struct {
 	sem chan struct{}
 	// wg tracks in-flight workers so Close can wait for them.
 	wg sync.WaitGroup
+	// notifyWG tracks in-flight webhook and email deliveries so Close waits for them to finish
+	// instead of cutting them off mid-send.
+	notifyWG sync.WaitGroup
 	// ctx is canceled by Close to stop in-flight and pending runs.
 	ctx context.Context
 	// cancel cancels ctx.
@@ -918,6 +921,7 @@ func hostWeights(hosts []string, costs map[string]float64) map[string]float64 {
 func (d *Dispatcher) Close() {
 	d.cancel()
 	d.wg.Wait()
+	d.notifyWG.Wait()
 }
 
 // executeLeased runs a claimed run on the worker slot the claim loop already holds.

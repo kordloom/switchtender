@@ -11,7 +11,6 @@ import (
 	"github.com/dcadolph/yardmaster/internal/credential"
 	"github.com/dcadolph/yardmaster/internal/invsource"
 	"github.com/dcadolph/yardmaster/internal/project"
-	"github.com/dcadolph/yardmaster/internal/run"
 )
 
 // WithInventorySources lets the dispatcher refresh dynamic inventory sources into stored
@@ -128,5 +127,3 @@ func validateBareSource(source string) error {
 	}
 	return nil
 }
-
-var _ = run.WithInventory
