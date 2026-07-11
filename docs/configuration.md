@@ -30,6 +30,12 @@ Runs the HTTP API, the in-process executor, the scheduler, the retention sweeper
 | `--db` | `yardmaster.db` | SQLite file path, or a `postgres://` DSN for the PostgreSQL backend. |
 | `--tls-cert` | none | TLS certificate file, to serve HTTPS directly with no reverse proxy. Requires `--tls-key`. |
 | `--tls-key` | none | TLS private key file. Requires `--tls-cert`. |
+| `--ldap-url` | none | LDAP directory URL to enable directory sign-in, for example `ldaps://ldap.example.com:636`. |
+| `--ldap-bind-dn` | none | Service account DN used to search for a user, empty for an anonymous search. |
+| `--ldap-base-dn` | none | Search base for finding a user. |
+| `--ldap-user-filter` | `(uid=%s)` | Search filter with one `%s` for the username. |
+| `--ldap-default-role` | `viewer` | Role for an account created on first directory sign-in. |
+| `--ldap-role-map` | none | Map a directory group to a role as `groupDN=role`. A matched group sets the role on every sign-in. Repeatable. |
 | `--schedule-interval` | `15s` | How often the scheduler checks for due schedules. |
 | `--notify-webhook` | none | URL that receives a JSON notification when a run finishes. Repeatable. |
 | `--allow-container-ee` | `false` | Allow runs whose project pins a container image to execute inside it. Needs Docker on the executor. |

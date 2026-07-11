@@ -166,6 +166,12 @@ func WithOIDC(o *OIDCAuth) Option {
 	return func(srv *Server) { srv.oidc = o }
 }
 
+// WithLDAP enables sign-in against an LDAP directory. When set, the login handler tries a local
+// account first and then the directory, so directory and local accounts both work.
+func WithLDAP(l *LDAPAuth) Option {
+	return func(srv *Server) { srv.ldap = l }
+}
+
 // WithInventorySources enables the dynamic inventory source endpoints.
 func WithInventorySources(store invsource.Store, refresher SourceRefresher) Option {
 	return func(srv *Server) {
@@ -252,6 +258,8 @@ type Server struct {
 	matrixCap int
 	// oidc enables single sign-on when configured, nil when SSO is off.
 	oidc *OIDCAuth
+	// ldap enables directory sign-in when configured, nil when LDAP is off.
+	ldap *LDAPAuth
 }
 
 // New returns a Server. It panics if store or submitter is nil; a nil logger becomes a no-op.
@@ -310,7 +318,7 @@ func (s *Server) Handler() http.Handler {
 		http.Redirect(w, r, "/ui/", http.StatusFound)
 	})
 	mux.Handle("POST /auth/check", authCheckHandler())
-	mux.Handle("POST /auth/login", loginHandler(s.users, s.tokens, s.log))
+	mux.Handle("POST /auth/login", loginHandler(s.users, s.tokens, s.ldap, s.log))
 	if s.oidc != nil {
 		mux.HandleFunc("GET /auth/oidc/login", s.oidc.login)
 		mux.HandleFunc("GET /auth/oidc/callback", s.oidc.callback)

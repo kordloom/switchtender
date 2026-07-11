@@ -95,6 +95,17 @@ var (
 	serveOIDCDefaultRole string
 )
 
+// serveLDAP* hold the LDAP directory sign-in flags. The service bind password comes from
+// YARDMASTER_LDAP_PASSWORD.
+var (
+	serveLDAPURL         string
+	serveLDAPBindDN      string
+	serveLDAPBaseDN      string
+	serveLDAPUserFilter  string
+	serveLDAPDefaultRole string
+	serveLDAPRoleMap     []string
+)
+
 // retainRuns holds the value of the --retain-runs flag, a duration like 90d.
 var retainRuns string
 
@@ -154,6 +165,25 @@ func containerLimitsFromFlags() roundhouse.ContainerLimits {
 	}
 }
 
+// parseRoleMap turns repeated groupDN=role entries into a lowercased group to role map, so a directory
+// group can drive a user's role. It splits on the last equals sign, since a group DN itself contains
+// equals signs, and drops an entry with an unknown role.
+func parseRoleMap(entries []string) map[string]user.Role {
+	m := make(map[string]user.Role, len(entries))
+	for _, e := range entries {
+		i := strings.LastIndex(e, "=")
+		if i < 0 {
+			continue
+		}
+		group := strings.ToLower(strings.TrimSpace(e[:i]))
+		role := user.Role(strings.TrimSpace(e[i+1:]))
+		if group != "" && user.ValidRole(role) {
+			m[group] = role
+		}
+	}
+	return m
+}
+
 // serveCmd runs the Yardmaster HTTP server (the dispatcher).
 var serveCmd = &cobra.Command{
 	Use:   "serve",
@@ -190,6 +220,19 @@ func init() {
 		"OIDC redirect URL, for example https://host/auth/oidc/callback.")
 	serveCmd.Flags().StringVar(&serveOIDCDefaultRole, "oidc-default-role", "viewer",
 		"Role granted to an account created on first SSO sign-in: admin, operator, or viewer.")
+	serveCmd.Flags().StringVar(&serveLDAPURL, "ldap-url", "",
+		"LDAP directory URL to enable directory sign-in, for example ldaps://ldap.example.com:636.")
+	serveCmd.Flags().StringVar(&serveLDAPBindDN, "ldap-bind-dn", "",
+		"Service account DN used to search for a user, empty for an anonymous search.")
+	serveCmd.Flags().StringVar(&serveLDAPBaseDN, "ldap-base-dn", "",
+		"Search base for finding a user, for example ou=people,dc=example,dc=com.")
+	serveCmd.Flags().StringVar(&serveLDAPUserFilter, "ldap-user-filter", "(uid=%s)",
+		"Search filter with one %s for the username.")
+	serveCmd.Flags().StringVar(&serveLDAPDefaultRole, "ldap-default-role", "viewer",
+		"Role granted to an account created on first directory sign-in: admin, operator, or viewer.")
+	serveCmd.Flags().StringArrayVar(&serveLDAPRoleMap, "ldap-role-map", nil,
+		"Map a directory group to a role as groupDN=role, for example cn=admins,dc=x=admin. "+
+			"A matched group sets the user's role on every sign-in. Repeatable.")
 	serveCmd.Flags().StringVar(&retainRuns, "retain-runs", "",
 		"Delete terminal runs older than this, for example 90d. Empty keeps them forever.")
 	serveCmd.Flags().StringVar(&retainEvents, "retain-events", "",
@@ -394,6 +437,16 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
+	var ldapAuth *server.LDAPAuth
+	if serveLDAPURL != "" {
+		ldapAuth, err = server.NewLDAPAuth(serveLDAPURL, serveLDAPBindDN,
+			os.Getenv("YARDMASTER_LDAP_PASSWORD"), serveLDAPBaseDN, serveLDAPUserFilter,
+			user.Role(serveLDAPDefaultRole), parseRoleMap(serveLDAPRoleMap), bundle.Users(), log)
+		if err != nil {
+			return err
+		}
+	}
+
 	httpServer := &http.Server{
 		Addr: serveAddr,
 		Handler: server.New(store, disp, log, server.WithStreamer(hub),
@@ -414,6 +467,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			server.WithReadOnly(serveReadOnly),
 			server.WithMatrixCap(serveMatrixCap),
 			server.WithOIDC(oidcAuth),
+			server.WithLDAP(ldapAuth),
 			server.WithDocs(docsFS)).Handler(),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}

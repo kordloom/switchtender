@@ -53,7 +53,7 @@ type listUsersResponse struct {
 }
 
 // loginHandler authenticates a username and password and mints a session token owned by the user.
-func loginHandler(users user.Store, tokens auth.Store, log *zap.Logger) http.HandlerFunc {
+func loginHandler(users user.Store, tokens auth.Store, ldap *LDAPAuth, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if users == nil || tokens == nil {
 			respondError(w, log, http.StatusNotFound, "accounts not enabled")
@@ -65,6 +65,9 @@ func loginHandler(users user.Store, tokens auth.Store, log *zap.Logger) http.Han
 			return
 		}
 		u, err := user.Authenticate(r.Context(), users, req.Username, req.Password)
+		if err != nil && ldap != nil {
+			u, err = ldap.Authenticate(r.Context(), req.Username, req.Password)
+		}
 		req.Password = ""
 		if err != nil {
 			respondError(w, log, http.StatusUnauthorized, "bad credentials")

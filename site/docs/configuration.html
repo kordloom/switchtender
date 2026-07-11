@@ -99,6 +99,36 @@ variable.</p>
 <td>TLS private key file. Requires <code>--tls-cert</code>.</td>
 </tr>
 <tr>
+<td><code>--ldap-url</code></td>
+<td>none</td>
+<td>LDAP directory URL to enable directory sign-in, for example <code>ldaps://ldap.example.com:636</code>.</td>
+</tr>
+<tr>
+<td><code>--ldap-bind-dn</code></td>
+<td>none</td>
+<td>Service account DN used to search for a user, empty for an anonymous search.</td>
+</tr>
+<tr>
+<td><code>--ldap-base-dn</code></td>
+<td>none</td>
+<td>Search base for finding a user.</td>
+</tr>
+<tr>
+<td><code>--ldap-user-filter</code></td>
+<td><code>(uid=%s)</code></td>
+<td>Search filter with one <code>%s</code> for the username.</td>
+</tr>
+<tr>
+<td><code>--ldap-default-role</code></td>
+<td><code>viewer</code></td>
+<td>Role for an account created on first directory sign-in.</td>
+</tr>
+<tr>
+<td><code>--ldap-role-map</code></td>
+<td>none</td>
+<td>Map a directory group to a role as <code>groupDN=role</code>. A matched group sets the role on every sign-in. Repeatable.</td>
+</tr>
+<tr>
 <td><code>--schedule-interval</code></td>
 <td><code>15s</code></td>
 <td>How often the scheduler checks for due schedules.</td>

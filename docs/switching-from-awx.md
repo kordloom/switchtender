@@ -137,7 +137,6 @@ Add a schedule in Schedules with a cron expression to fire a template on a caden
 
 ## What is not one to one yet
 
-- Single sign-on is OpenID Connect. There is no LDAP yet. Accounts and API tokens also sign in.
 - The visual workflow editor is a pipeline defined through the API and shown in the UI, not a
   drag-and-drop canvas.
 

@@ -38,12 +38,12 @@ on them.
 | Surveys and prompts | All three collect typed values at launch. |
 | Inbound webhooks | All three launch on a git push. |
 | Metrics and audit | Yardmaster exposes Prometheus metrics and an audit trail of every mutation. |
+| Directory sign-in | Yardmaster, AWX, and Semaphore all sign in with LDAP and OpenID Connect. |
 
 ## Where Yardmaster is behind
 
 | Capability | Status |
 |------------|--------|
-| LDAP | Not yet. Single sign-on is OpenID Connect, not LDAP. AWX and Semaphore both have LDAP. |
 | Visual workflow editor | Yardmaster defines pipelines through the API and shows them in the UI. AWX has a drag-and-drop editor, and Semaphore has one on its roadmap. |
 | Notification breadth | Webhook and email today, against a wider set of integrations in AWX. |
 | Maturity | AWX and Semaphore have years of production use and large communities. Yardmaster is young. |
