@@ -32,10 +32,10 @@
 the equivalent projects, inventories, templates, surveys, schedules, and credentials in one pass.</p>
 <h2 id="from-the-ui">From the UI</h2>
 <ol>
-<li>Export from your current tool. <code>awx export</code> produces a JSON document; Semaphore exports its
+<li>Export from your current tool. <code>awx export</code> produces a JSON document. Semaphore exports its
 project the same way.</li>
 <li>Open Migrate from the top of the overview, or go to <code>/ui/migrate</code>.</li>
-<li>Paste the export and select Preview. Nothing is written yet; you get a report of exactly what
+<li>Paste the export and select Preview. Nothing is written yet. You get a report of exactly what
 would be created, with every warning.</li>
 <li>Select Import to apply it.</li>
 </ol>
@@ -43,7 +43,7 @@ would be created, with every warning.</li>
 <pre><code>yardmaster import awx awx-export.json --db yardmaster.db            # preview
 yardmaster import awx awx-export.json --db yardmaster.db --apply    # write
 </code></pre>
-<p>Use <code>import semaphore</code> for a Semaphore export. Preview first, always; <code>--apply</code> is the only step that
+<p>Use <code>import semaphore</code> for a Semaphore export. Preview first, always. <code>--apply</code> is the only step that
 writes.</p>
 <h2 id="finish-by-setting-secrets">Finish by setting secrets</h2>
 <p>Exports never contain secret values, so credentials arrive as named shells. The report lists which

@@ -49,7 +49,7 @@ For more than one machine, use a PostgreSQL DSN as the `--db` value on every pro
 
 ## Lock down the API
 
-Creating the first token turns on authentication; until then the API is open so a fresh install
+Creating the first token turns on authentication. Until then the API is open so a fresh install
 works immediately.
 
     ./yardmaster token new --db yardmaster.db --name ci
@@ -64,7 +64,7 @@ Create user accounts with roles for sign-in:
     export YARDMASTER_ENCRYPTION_SALT=change-me-too
     docker compose up --build
 
-This starts a server, a PostgreSQL database, and a worker. The server listens on port 8080; set
+This starts a server, a PostgreSQL database, and a worker. The server listens on port 8080. Set
 `YARDMASTER_PORT` to change the host port.
 
 ## Try the demo

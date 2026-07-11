@@ -12,10 +12,10 @@ the equivalent projects, inventories, templates, surveys, schedules, and credent
 
 ## From the UI
 
-1. Export from your current tool. `awx export` produces a JSON document; Semaphore exports its
+1. Export from your current tool. `awx export` produces a JSON document. Semaphore exports its
    project the same way.
 2. Open Migrate from the top of the overview, or go to `/ui/migrate`.
-3. Paste the export and select Preview. Nothing is written yet; you get a report of exactly what
+3. Paste the export and select Preview. Nothing is written yet. You get a report of exactly what
    would be created, with every warning.
 4. Select Import to apply it.
 
@@ -24,7 +24,7 @@ the equivalent projects, inventories, templates, surveys, schedules, and credent
     yardmaster import awx awx-export.json --db yardmaster.db            # preview
     yardmaster import awx awx-export.json --db yardmaster.db --apply    # write
 
-Use `import semaphore` for a Semaphore export. Preview first, always; `--apply` is the only step that
+Use `import semaphore` for a Semaphore export. Preview first, always. `--apply` is the only step that
 writes.
 
 ## Finish by setting secrets

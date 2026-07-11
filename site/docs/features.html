@@ -47,7 +47,7 @@
 </tr>
 <tr>
 <td>Splits</td>
-<td>Shard an inventory across parallel slices, merged back into one matrix; hosts packed by measured duration from past runs.</td>
+<td>Shard an inventory across parallel slices, merged back into one matrix. Hosts packed by measured duration from past runs.</td>
 </tr>
 <tr>
 <td>Shard retry</td>
@@ -55,11 +55,11 @@
 </tr>
 <tr>
 <td>Pipelines</td>
-<td>Ordered steps or a dependency graph with parallel branches; failures skip exactly their dependents, per-step retry budgets, set_stats outputs flow to dependent steps as extra vars.</td>
+<td>Ordered steps or a dependency graph with parallel branches. Failures skip exactly their dependents, per-step retry budgets, set_stats outputs flow to dependent steps as extra vars.</td>
 </tr>
 <tr>
 <td>Workers</td>
-<td>Point <code>yardmaster worker</code> at the same database and it competes for queued runs; leases, heartbeats, and a janitor make dead workers safe.</td>
+<td>Point <code>yardmaster worker</code> at the same database and it competes for queued runs. Leases, heartbeats, and a janitor make dead workers safe.</td>
 </tr>
 <tr>
 <td>Scheduling</td>
@@ -75,23 +75,23 @@
 </tr>
 <tr>
 <td>Storage</td>
-<td>SQLite by default; the same flag takes a PostgreSQL DSN for multi-instance.</td>
+<td>SQLite by default. The same flag takes a PostgreSQL DSN for multi-instance.</td>
 </tr>
 <tr>
 <td>Projects</td>
-<td>Playbooks sourced from git with clone-or-fetch sync; every run records the exact commit it executed.</td>
+<td>Playbooks sourced from git with clone-or-fetch sync. Every run records the exact commit it executed.</td>
 </tr>
 <tr>
 <td>Templates</td>
-<td>Saved launch presets bundling project, playbook, credentials, shards, and extra vars; one click or one POST launches.</td>
+<td>Saved launch presets bundling project, playbook, credentials, shards, and extra vars. One click or one POST launches.</td>
 </tr>
 <tr>
 <td>Auth</td>
-<td>User accounts with admin, operator, and viewer roles enforced per route; bearer tokens hashed at rest; the API locks down the moment the first token exists.</td>
+<td>User accounts with admin, operator, and viewer roles enforced per route. Bearer tokens hashed at rest. The API locks down the moment the first token exists.</td>
 </tr>
 <tr>
 <td>Approvals</td>
-<td>Mark a run to require sign-off, or require it automatically by policy on tool, command, or target; a held run never executes until an admin approves or rejects it, and the request and decision land in the tamper-evident audit trail.</td>
+<td>Mark a run to require sign-off, or require it automatically by policy on tool, command, or target. A held run never executes until an admin approves or rejects it, and the request and decision land in the tamper-evident audit trail.</td>
 </tr>
 <tr>
 <td>Observability</td>
@@ -99,7 +99,7 @@
 </tr>
 <tr>
 <td>Tamper-evident audit</td>
-<td>Every mutation is linked into a SHA-256 hash chain; <code>GET /audit/verify</code> flags the first altered or deleted entry, and a signed export verified with <code>yardmaster audit verify</code> proves the whole chain offline.</td>
+<td>Every mutation is linked into a SHA-256 hash chain. <code>GET /audit/verify</code> flags the first altered or deleted entry, and a signed export verified with <code>yardmaster audit verify</code> proves the whole chain offline.</td>
 </tr>
 <tr>
 <td>Inventories</td>
@@ -123,11 +123,11 @@
 </tr>
 <tr>
 <td>High availability</td>
-<td>Two servers on one database share the schedule without double-firing; tokens can carry a lifetime.</td>
+<td>Two servers on one database share the schedule without double-firing. Tokens can carry a lifetime.</td>
 </tr>
 <tr>
 <td>Git triggers</td>
-<td>A webhook URL launches a template on push; the project syncs fresh, so it deploys the commit just pushed.</td>
+<td>A webhook URL launches a template on push. The project syncs fresh, so it deploys the commit just pushed.</td>
 </tr>
 <tr>
 <td>Surveys</td>
@@ -135,7 +135,7 @@
 </tr>
 <tr>
 <td>Worker queues</td>
-<td>Target a run at a named queue; a worker serving that queue runs it and default workers leave it alone.</td>
+<td>Target a run at a named queue. A worker serving that queue runs it and default workers leave it alone.</td>
 </tr>
 <tr>
 <td>Dependency sync</td>
@@ -143,11 +143,11 @@
 </tr>
 <tr>
 <td>Execution environments</td>
-<td>A project can pin a container image; its runs execute inside it with their own ansible and system dependencies.</td>
+<td>A project can pin a container image. Its runs execute inside it with their own ansible and system dependencies.</td>
 </tr>
 <tr>
 <td>Teams and grants</td>
-<td>Group users into teams and grant use or manage on a specific project, template, inventory, or credential; grants layer on the global role and default open.</td>
+<td>Group users into teams and grant use or manage on a specific project, template, inventory, or credential. Grants layer on the global role and default open.</td>
 </tr>
 <tr>
 <td>Retention</td>

@@ -36,7 +36,7 @@ pieces. If a term is unfamiliar, the <a href="/docs/concepts.html">concepts</a> 
 Python besides, but there is no Kubernetes, no Redis, and no separate task engine to operate. One
 binary is the API, the executor, the scheduler,
 and the UI. State is one database: a SQLite file to start, or PostgreSQL when you want more than one
-instance. You still have projects, inventories, templates, surveys, schedules, and credentials; they
+instance. You still have projects, inventories, templates, surveys, schedules, and credentials. They
 just live behind a smaller, faster surface.</p>
 <h2 id="the-mental-model">The mental model</h2>
 <table>
@@ -49,7 +49,7 @@ just live behind a smaller, faster surface.</p>
 <tbody>
 <tr>
 <td>Organization</td>
-<td>No direct equivalent; scope access with teams and grants instead.</td>
+<td>No direct equivalent. Scope access with teams and grants instead.</td>
 </tr>
 <tr>
 <td>Project (git)</td>
@@ -105,7 +105,7 @@ just live behind a smaller, faster surface.</p>
 templates, credentials without secrets, schedules, and surveys.</p>
 </li>
 <li>
-<p>Preview the import. Nothing is written yet; you get a report of exactly what would be created and
+<p>Preview the import. Nothing is written yet. You get a report of exactly what would be created and
 every warning.</p>
 <pre><code> yardmaster import awx awx-export.json --db yardmaster.db
 </code></pre>
@@ -132,7 +132,7 @@ job template in AWX.</p>
 <pre><code>YARDMASTER_ENCRYPTION_KEY=change-me YARDMASTER_ENCRYPTION_SALT=change-me-too \
   ./yardmaster serve --addr :8080 --db yardmaster.db
 </code></pre>
-<p>The key and salt seal credentials at rest; keep the salt stable across restarts. Open
+<p>The key and salt seal credentials at rest. Keep the salt stable across restarts. Open
 http://localhost:8080 for the UI. The API is open until you create the first account or token, so
 you can set up before locking it down.</p>
 <h3 id="2-create-your-first-account">2. Create your first account</h3>
@@ -164,7 +164,7 @@ inventory, a shard count, credentials, and extra vars. Add one in Templates. Giv
 want typed prompts at launch. Launch it with one click.</p>
 <h3 id="7-watch-the-run">7. Watch the run</h3>
 <p>The run detail page paints a host-by-task matrix live as the run executes, with per-task drill-down
-into stdout, stderr, return code, and diff. This is the part AWX does not do; a run is structure, not
+into stdout, stderr, return code, and diff. This is the part AWX does not do. A run is structure, not
 a text scroll.</p>
 <h3 id="8-add-capacity-and-schedules">8. Add capacity and schedules</h3>
 <p>Point a worker at the same database to add an executor, and give it a queue name to target specific
@@ -174,7 +174,7 @@ work:</p>
 <p>Add a schedule in Schedules with a cron expression to fire a template on a cadence.</p>
 <h2 id="where-things-live-differently">Where things live differently</h2>
 <ul>
-<li>There is no separate &quot;launch&quot; wizard the size of AWX's. A template launch is one request; a survey
+<li>There is no separate &quot;launch&quot; wizard the size of AWX's. A template launch is one request, a survey
 renders as a small form.</li>
 <li>Access is a global role plus optional per-object grants, rather than AWX's organization tree. Grant
 a user or a team <code>use</code> or <code>manage</code> on a specific project, template, inventory, or credential.</li>

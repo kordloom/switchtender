@@ -11,7 +11,7 @@ Every endpoint the server exposes. The web UI lives at `/ui/` and the root redir
 
 | Method | Path                    | What                                                    |
 |--------|-------------------------|---------------------------------------------------------|
-| POST   | `/runs`                 | Submit a run; `shards` of two or more splits it.        |
+| POST   | `/runs`                 | Submit a run. `shards` of two or more splits it.        |
 | GET    | `/runs`                 | Run history, newest first.                              |
 | GET    | `/runs/{id}`            | One run.                                                |
 | POST   | `/runs/{id}/cancel`     | Cancel a pending or running run.                        |
@@ -31,19 +31,19 @@ Every endpoint the server exposes. The web UI lives at `/ui/` and the root redir
 | GET    | `/fleet`                | Hosts ranked by failures over recent runs, flaky flags. |
 | GET    | `/hosts/{host}/runs`    | One host's recent per-run outcomes.                     |
 | GET    | `/tasks`                | Per-task duration trends over recent runs.              |
-| POST   | `/projects`             | Register a git project; runs record their commit.       |
+| POST   | `/projects`             | Register a git project. Runs record their commit.       |
 | GET    | `/projects`             | List projects.                                          |
 | DELETE | `/projects/{id}`        | Delete a project.                                       |
 | POST   | `/templates`            | Save a launch preset.                                   |
 | GET    | `/templates`            | List templates.                                         |
 | POST   | `/templates/{id}/launch`| Launch a template, answering its survey if it has one.  |
 | DELETE | `/templates/{id}`       | Delete a template.                                      |
-| POST   | `/triggers`             | Create a webhook trigger; returns a signing secret once.|
+| POST   | `/triggers`             | Create a webhook trigger, returns a signing secret once.|
 | PUT    | `/triggers/{id}`        | Rename a trigger or toggle signature enforcement.       |
 | POST   | `/triggers/{id}/rotate-secret` | Rotate the signing secret, shown once.           |
 | GET    | `/triggers`             | List webhook triggers.                                  |
 | DELETE | `/triggers/{id}`        | Delete a trigger, revoking its webhook.                 |
-| POST   | `/hooks/{token}`        | Fire a trigger from a git push; a required HMAC signature is checked first.|
+| POST   | `/hooks/{token}`        | Fire a trigger from a git push. A required HMAC signature is checked first.|
 | POST   | `/credentials`          | Store a credential (ssh_key, vault_password, env, token, become_password, registry), encrypted at rest.|
 | GET    | `/credentials`          | List credentials, secrets never included.               |
 | DELETE | `/credentials/{id}`     | Delete a credential.                                    |
@@ -51,7 +51,7 @@ Every endpoint the server exposes. The web UI lives at `/ui/` and the root redir
 | POST   | `/auth/check`           | Verify an API token.                                    |
 | POST   | `/users`                | Create an account with a role.                          |
 | GET    | `/users`                | List accounts.                                          |
-| DELETE | `/users/{id}`           | Delete an account; its tokens stop working.             |
+| DELETE | `/users/{id}`           | Delete an account. Its tokens stop working.             |
 | POST   | `/teams`                | Create a team of users.                                 |
 | GET    | `/teams`                | List teams.                                             |
 | DELETE | `/teams/{id}`           | Delete a team and its memberships.                      |
@@ -66,7 +66,7 @@ Every endpoint the server exposes. The web UI lives at `/ui/` and the root redir
 | GET    | `/inventory-sources`    | List inventory sources.                                 |
 | POST   | `/inventory-sources/{id}/refresh` | Refresh a source into its inventory now.      |
 | DELETE | `/inventory-sources/{id}` | Delete an inventory source.                           |
-| POST   | `/inventories`          | Store an inventory; runs reference it by id anywhere.   |
+| POST   | `/inventories`          | Store an inventory. Runs reference it by id anywhere.   |
 | GET    | `/inventories`          | List stored inventories.                                |
 | DELETE | `/inventories/{id}`     | Delete a stored inventory.                              |
 | POST   | `/policies`             | Create an approval policy that gates matching runs.     |

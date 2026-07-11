@@ -53,7 +53,7 @@ variable.</p>
 <tr>
 <td><code>YARDMASTER_AUDIT_KEY</code></td>
 <td>serve</td>
-<td>Hex-encoded ed25519 seed that signs audit exports so the trail can be verified offline. Signing is off when unset; a malformed value stops startup. Generate one with <code>yardmaster audit keygen</code>.</td>
+<td>Hex-encoded ed25519 seed that signs audit exports so the trail can be verified offline. Signing is off when unset. A malformed value stops startup. Generate one with <code>yardmaster audit keygen</code>.</td>
 </tr>
 <tr>
 <td><code>YARDMASTER_PASSWORD</code></td>
@@ -201,7 +201,7 @@ expires.</li>
 <li><code>user new &lt;username&gt; --role &lt;role&gt;</code> creates an account. The password comes from
 <code>YARDMASTER_PASSWORD</code> or a prompt, never an argument.</li>
 <li><code>user list</code> lists accounts.</li>
-<li><code>user delete &lt;id&gt;</code> deletes an account; its tokens stop working.</li>
+<li><code>user delete &lt;id&gt;</code> deletes an account. Its tokens stop working.</li>
 </ul>
 <p>All user subcommands take <code>--db</code>.</p>
 <h2 id="import">import</h2>

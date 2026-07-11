@@ -26,7 +26,7 @@ stored template, a single run, a split, or a whole pipeline.
       -d '{"cron":"0 2 * * *","template_id":"tpl_abc123"}'
 
 To schedule without a template, send `playbook` and `inventory` inline, add `shards` for a split, or
-`steps` for a pipeline. A worker or the server must be running for a schedule to fire; add capacity
+`steps` for a pipeline. A worker or the server must be running for a schedule to fire. Add capacity
 with `yardmaster worker`.
 
 Next: give the job its secrets with [set a secret](tutorial-set-a-secret.md).

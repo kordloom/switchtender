@@ -58,7 +58,7 @@ each host's measured duration in recent runs.</p>
 </code></pre>
 <p>For more than one machine, use a PostgreSQL DSN as the <code>--db</code> value on every process.</p>
 <h2 id="lock-down-the-api">Lock down the API</h2>
-<p>Creating the first token turns on authentication; until then the API is open so a fresh install
+<p>Creating the first token turns on authentication. Until then the API is open so a fresh install
 works immediately.</p>
 <pre><code>./yardmaster token new --db yardmaster.db --name ci
 </code></pre>
@@ -70,7 +70,7 @@ works immediately.</p>
 export YARDMASTER_ENCRYPTION_SALT=change-me-too
 docker compose up --build
 </code></pre>
-<p>This starts a server, a PostgreSQL database, and a worker. The server listens on port 8080; set
+<p>This starts a server, a PostgreSQL database, and a worker. The server listens on port 8080. Set
 <code>YARDMASTER_PORT</code> to change the host port.</p>
 <h2 id="try-the-demo">Try the demo</h2>
 <p>To look around without setting anything up, run the seeded demo. It fills a fresh database with

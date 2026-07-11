@@ -17,14 +17,14 @@ Yardmaster runs the same playbooks against the same inventories, and drives Bash
 Python besides, but there is no Kubernetes, no Redis, and no separate task engine to operate. One
 binary is the API, the executor, the scheduler,
 and the UI. State is one database: a SQLite file to start, or PostgreSQL when you want more than one
-instance. You still have projects, inventories, templates, surveys, schedules, and credentials; they
+instance. You still have projects, inventories, templates, surveys, schedules, and credentials. They
 just live behind a smaller, faster surface.
 
 ## The mental model
 
 | In AWX | In Yardmaster |
 |--------|---------------|
-| Organization | No direct equivalent; scope access with teams and grants instead.|
+| Organization | No direct equivalent. Scope access with teams and grants instead.|
 | Project (git) | Project.|
 | Inventory | Stored inventory, or a dynamic inventory source that refreshes into one.|
 | Job template | Template.|
@@ -44,7 +44,7 @@ The fast path. It reads an AWX export and creates the equivalent Yardmaster obje
 1. Export from AWX. `awx export` produces a JSON document of your projects, inventories, job
    templates, credentials without secrets, schedules, and surveys.
 
-2. Preview the import. Nothing is written yet; you get a report of exactly what would be created and
+2. Preview the import. Nothing is written yet. You get a report of exactly what would be created and
    every warning.
 
         yardmaster import awx awx-export.json --db yardmaster.db
@@ -71,7 +71,7 @@ job template in AWX.
     YARDMASTER_ENCRYPTION_KEY=change-me YARDMASTER_ENCRYPTION_SALT=change-me-too \
       ./yardmaster serve --addr :8080 --db yardmaster.db
 
-The key and salt seal credentials at rest; keep the salt stable across restarts. Open
+The key and salt seal credentials at rest. Keep the salt stable across restarts. Open
 http://localhost:8080 for the UI. The API is open until you create the first account or token, so
 you can set up before locking it down.
 
@@ -115,7 +115,7 @@ want typed prompts at launch. Launch it with one click.
 ### 7. Watch the run
 
 The run detail page paints a host-by-task matrix live as the run executes, with per-task drill-down
-into stdout, stderr, return code, and diff. This is the part AWX does not do; a run is structure, not
+into stdout, stderr, return code, and diff. This is the part AWX does not do. A run is structure, not
 a text scroll.
 
 ### 8. Add capacity and schedules
@@ -129,7 +129,7 @@ Add a schedule in Schedules with a cron expression to fire a template on a caden
 
 ## Where things live differently
 
-- There is no separate "launch" wizard the size of AWX's. A template launch is one request; a survey
+- There is no separate "launch" wizard the size of AWX's. A template launch is one request, a survey
   renders as a small form.
 - Access is a global role plus optional per-object grants, rather than AWX's organization tree. Grant
   a user or a team `use` or `manage` on a specific project, template, inventory, or credential.

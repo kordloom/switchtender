@@ -64,7 +64,7 @@ fresh first, so the run deploys the commit that was just pushed.</p>
 <p>When the server has an encryption key, creating a trigger also mints a signing secret, shown once,
 separate from the URL token so a leaked URL cannot forge signed pushes. Set that secret as the
 webhook secret on the git host and turn on enforcement, and every inbound push must carry a valid
-<code>X-Hub-Signature-256</code> HMAC over its body or it is rejected. Rotate the secret at any time; a bad or
+<code>X-Hub-Signature-256</code> HMAC over its body or it is rejected. Rotate the secret at any time. A bad or
 missing signature never launches a run.</p>
 <h2 id="credentials">Credentials</h2>
 <p>A credential is a secret sealed with AES-256-GCM, decrypted only at execution into a temporary file

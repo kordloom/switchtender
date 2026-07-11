@@ -34,7 +34,7 @@ credentials. See [switching from AWX](switching-from-awx.md) for the full mappin
 
 Two things to know. AWX omits secret values on export for security, so credentials import without
 their secrets and you set those once after importing. And AWX dynamic inventory sources are not
-mapped yet; static inventories import fully. A Semaphore importer exists too, with
+mapped yet. Static inventories import fully. A Semaphore importer exists too, with
 `yardmaster import semaphore export.json`.
 
 ## How do I rerun the same job on a set of hosts without re-entering everything?
@@ -53,7 +53,7 @@ environment bundles, which is where API tokens and other KEY=VALUE secrets go. S
 
 A credential can also be a command source, so the value lives in an external store instead of in
 Yardmaster. Yardmaster seals a command, for example `vault kv get -field=password secret/prod` or an
-`aws secretsmanager get-secret-value` call, and runs it at execution time; the command's output is
+`aws secretsmanager get-secret-value` call, and runs it at execution time. The command's output is
 the secret and is never stored. This works with any secret manager reachable from a command: Vault,
 AWS, GCP, 1Password, or your own script.
 

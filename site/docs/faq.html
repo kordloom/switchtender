@@ -52,7 +52,7 @@ yardmaster import awx export.json --apply    # import
 credentials. See <a href="/docs/switching-from-awx.html">switching from AWX</a> for the full mapping.</p>
 <p>Two things to know. AWX omits secret values on export for security, so credentials import without
 their secrets and you set those once after importing. And AWX dynamic inventory sources are not
-mapped yet; static inventories import fully. A Semaphore importer exists too, with
+mapped yet. Static inventories import fully. A Semaphore importer exists too, with
 <code>yardmaster import semaphore export.json</code>.</p>
 <h2 id="how-do-i-rerun-the-same-job-on-a-set-of-hosts-without-re-entering-everything">How do I rerun the same job on a set of hosts without re-entering everything?</h2>
 <p>Save it as a template. A template bundles the tool, the command or playbook, the inventory, the
@@ -66,7 +66,7 @@ environment bundles, which is where API tokens and other KEY=VALUE secrets go. S
 <code>YARDMASTER_ENCRYPTION_KEY</code> and <code>YARDMASTER_ENCRYPTION_SALT</code> to enable them.</p>
 <p>A credential can also be a command source, so the value lives in an external store instead of in
 Yardmaster. Yardmaster seals a command, for example <code>vault kv get -field=password secret/prod</code> or an
-<code>aws secretsmanager get-secret-value</code> call, and runs it at execution time; the command's output is
+<code>aws secretsmanager get-secret-value</code> call, and runs it at execution time. The command's output is
 the secret and is never stored. This works with any secret manager reachable from a command: Vault,
 AWS, GCP, 1Password, or your own script.</p>
 <h2 id="are-webhook-triggers-safe-to-expose">Are webhook triggers safe to expose?</h2>

@@ -23,7 +23,7 @@ count, credentials, and extra vars.
 
 A survey is the same idea as AWX's: typed questions asked at launch, whose answers become extra vars.
 Add fields of type text, integer, boolean, or choice, and mark the ones that are required. Ansible
-receives them as extra vars; Bash and Python receive them as environment values; Terraform receives
+receives them as extra vars. Bash and Python receive them as environment values. Terraform receives
 them as `TF_VAR_` variables.
 
 ## Launch it

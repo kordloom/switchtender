@@ -95,7 +95,7 @@ then apply:
     ./yardmaster import awx awx-export.json           # dry-run report
     ./yardmaster import awx awx-export.json --apply    # create the objects
 
-Credentials come across as shells; re-enter their secrets, since exports omit them by design. The
+Credentials come across as shells. Re-enter their secrets, since exports omit them by design. The
 [switching-from-AWX guide](docs/switching-from-awx.md) walks the whole move.
 
 To see it without any setup, run the seeded read-only demo. It fills a fresh database with sample
@@ -132,7 +132,7 @@ with a bounded worker pool, the cron scheduler, and the embedded UI.
   event to a sidecar file. The dispatcher tails the sidecar as the run executes, storing and
   publishing events without touching the human-readable log.
 - Every run executes under its own cancel context. Canceling a split parent stops all of its
-  shards; canceling a pipeline stops the current step and halts the sequence.
+  shards. Canceling a pipeline stops the current step and halts the sequence.
 
 ## The name
 
@@ -150,12 +150,12 @@ the API, the UI, and everything you operate speak plain Ansible. No glossary req
 
 ## Status
 
-Source-available under the Business Source License 1.1. Ten releases shipped; the execution engine
-and the one-command AWX and Semaphore migration are complete. The API may still change before 1.0.
+Source-available under the Business Source License 1.1. The execution engine and the one-command AWX
+and Semaphore migration are complete. The API may still change before 1.0.
 
 ## License
 
-Business Source License 1.1. You can read the source, run it, and use it in production; you may not
+Business Source License 1.1. You can read the source, run it, and use it in production. You may not
 offer it to others as a hosted or managed service that competes with the maintainers. Each version
 converts to Apache-2.0 four years after its release. See `LICENSE` for the exact terms, and open an
 issue for commercial licensing.

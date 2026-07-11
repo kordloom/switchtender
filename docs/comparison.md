@@ -9,7 +9,7 @@
 
 This page is an honest side-by-side. It states where Yardmaster is ahead, where it is even, and
 where it is behind, because credibility comes from being straight about all three. Details of AWX
-and Semaphore were current as of mid-2026; verify them against their latest releases before relying
+and Semaphore were current as of mid-2026. Verify them against their latest releases before relying
 on them.
 
 ## Where Yardmaster is ahead
@@ -34,7 +34,7 @@ on them.
 | Container execution environments | Yardmaster runs a playbook inside a pinned image, opt-in behind a flag. AWX makes this a core feature. Semaphore favors native runtimes instead. |
 | Access control | Yardmaster has global roles plus per-object grants and teams. AWX has mature organization RBAC. Semaphore gates RBAC behind its Enterprise tier. |
 | Credentials | All three store secrets encrypted. Yardmaster decrypts only at execution into a temporary file and wipes it after. |
-| Scheduling | All three schedule runs; Yardmaster uses cron with highly available claiming so two servers do not double-fire. |
+| Scheduling | All three schedule runs. Yardmaster uses cron with highly available claiming so two servers do not double-fire. |
 | Surveys and prompts | All three collect typed values at launch. |
 | Inbound webhooks | All three launch on a git push. |
 | Metrics and audit | Yardmaster exposes Prometheus metrics and an audit trail of every mutation. |

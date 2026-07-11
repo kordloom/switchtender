@@ -44,7 +44,7 @@ environment:
 
 Google Secret Manager has a native source too: set the source to Google Secret Manager and give it
 the project, secret, and version as JSON. When Yardmaster runs on GCP it reads as its attached service
-account through the metadata server, so no key is stored; off GCP, put an access token in the config.
+account through the metadata server, so no key is stored. Off GCP, put an access token in the config.
 
     {"project":"my-project","secret":"ci-token","version":"latest"}
 
@@ -69,14 +69,14 @@ in the run's output like any other secret.
       -d '{"name":"ci-token","kind":"env","source":"command","secret":"vault kv get -field=token secret/ci"}'
 
 For a pasted value, omit `source` and put the value in `secret`. Imported credentials arrive without
-secrets, since exports never contain them; this is the one-time step to fill them in.
+secrets, since exports never contain them. This is the one-time step to fill them in.
 
 ## Scope a secret to an inventory
 
 Attach a credential to a stored inventory and every run that targets that inventory receives it, so
 a fleet can carry its own secret variables in one place. Open Inventories, edit the inventory, and
 pick the credentials under Credentials. An `env` credential becomes that inventory's secret
-variables; a `token` credential its bearer token. You need use access on a credential to attach it.
+variables. A `token` credential its bearer token. You need use access on a credential to attach it.
 
 ## Source an inventory's hosts
 
@@ -96,7 +96,7 @@ current without a dedicated dynamic source plugin:
     ./bin/hosts --env prod
 
 Content sources need encryption, so set `YARDMASTER_ENCRYPTION_KEY` and a stable
-`YARDMASTER_ENCRYPTION_SALT` first. The sealed configuration is never returned by the API; when you
+`YARDMASTER_ENCRYPTION_SALT` first. The sealed configuration is never returned by the API. When you
 edit an inventory, leave the source fields blank to keep the stored one.
 
 ### From the API
