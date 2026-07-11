@@ -21,6 +21,7 @@ import (
 	"github.com/dcadolph/yardmaster/internal/live"
 	"github.com/dcadolph/yardmaster/internal/run"
 	"github.com/dcadolph/yardmaster/internal/schedule"
+	"github.com/dcadolph/yardmaster/internal/template"
 	"github.com/dcadolph/yardmaster/internal/user"
 )
 
@@ -1152,20 +1153,37 @@ func TestMutationsAuthorizeReferencedObjects(t *testing.T) {
 		return plain, u.ID
 	}
 	ownerTok, ownerID := mint("owner", user.RoleOperator)
-	otherTok, _ := mint("other", user.RoleOperator)
+	otherTok, otherID := mint("other", user.RoleOperator)
 	adminTok, _ := mint("boss", user.RoleAdmin)
 
-	// The owner holds use on the secret credential and project; the open credential has no grant.
-	for _, object := range []string{"cred_secret", "proj_secret"} {
+	// A template both operators may use, but which references the secret credential only the owner
+	// was granted. Launching it must still be gated on the credential, not just on the template.
+	templates := template.NewMemStore()
+	if err := templates.Save(ctx, &template.Template{
+		ID: "tpl_secret", Name: "secret", Playbook: "p.yml",
+		CredentialIDs: []string{"cred_secret"},
+	}); err != nil {
+		t.Fatalf("templates.Save() error = %v", err)
+	}
+
+	// The owner holds use on the secret credential, project, and template; the open credential has no
+	// grant. Both operators may use the template, so the launch check turns on the credential grant.
+	for _, object := range []string{"cred_secret", "proj_secret", "tpl_secret"} {
 		if err := grants.Save(ctx, &grant.Grant{
 			ID: grant.NewID(), Subject: ownerID, Object: object, Access: grant.AccessUse,
 		}); err != nil {
 			t.Fatalf("grants.Save() error = %v", err)
 		}
 	}
+	if err := grants.Save(ctx, &grant.Grant{
+		ID: grant.NewID(), Subject: otherID, Object: "tpl_secret", Access: grant.AccessUse,
+	}); err != nil {
+		t.Fatalf("grants.Save() error = %v", err)
+	}
 
 	handler := New(run.NewMemStore(), &fakeSubmitter{run: &run.Run{ID: "run_x"}}, zap.NewNop(),
-		WithTokens(tokens), WithUsers(users), WithGrants(grants, false)).Handler()
+		WithTokens(tokens), WithUsers(users), WithGrants(grants, false),
+		WithTemplates(templates)).Handler()
 
 	do := func(method, path, bearer, body string) int {
 		req := httptest.NewRequest(method, path, strings.NewReader(body))
@@ -1196,6 +1214,10 @@ func TestMutationsAuthorizeReferencedObjects(t *testing.T) {
 		{"run ungranted credential defers to role", http.MethodPost, "/runs", otherTok, runOpen, http.StatusAccepted},       // Test 3.
 		{"pipeline other denied secret project", http.MethodPost, "/pipelines", otherTok, pipeSecret, http.StatusForbidden}, // Test 4.
 		{"pipeline owner uses granted project", http.MethodPost, "/pipelines", ownerTok, pipeSecret, http.StatusAccepted},   // Test 5.
+		{"launch other denied templated credential", http.MethodPost, "/templates/tpl_secret/launch", otherTok, "",
+			http.StatusForbidden}, // Test 6.
+		{"launch owner uses granted credential", http.MethodPost, "/templates/tpl_secret/launch", ownerTok, "",
+			http.StatusAccepted}, // Test 7.
 	}
 	for i, test := range tests {
 		if got := do(test.Method, test.Path, test.Token, test.Body); got != test.Want {

@@ -226,6 +226,13 @@ func launchTemplateHandler(store template.Store, submitter Submitter, authz *aut
 			return
 		}
 
+		// Use on the template is not enough. Authorize every object the run will touch, so a launch
+		// cannot borrow a project, inventory, or credentials the actor was never granted.
+		objects := append([]string{t.ProjectID, t.InventoryID}, t.CredentialIDs...)
+		if denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse, objects...)) {
+			return
+		}
+
 		vars := map[string]any{}
 		maps.Copy(vars, t.ExtraVars)
 		if len(t.Survey) > 0 {

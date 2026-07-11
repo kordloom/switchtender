@@ -67,6 +67,7 @@ func (g *authGate) wrap(next http.Handler) http.Handler {
 				forbidden(w)
 				return
 			}
+			g.record(u.Username, r)
 			ctx := context.WithValue(r.Context(), actorKey{},
 				Actor{UserID: u.ID, Role: u.Role, Name: u.Username})
 			next.ServeHTTP(w, r.WithContext(ctx))
@@ -93,7 +94,7 @@ func (g *authGate) wrap(next http.Handler) http.Handler {
 			return
 		}
 		g.touch(tok)
-		g.record(tok, r)
+		g.record(tok.Name, r)
 		ctx := context.WithValue(r.Context(), actorKey{},
 			Actor{UserID: tok.UserID, Role: role, Name: tok.Name})
 		next.ServeHTTP(w, r.WithContext(ctx))
@@ -121,13 +122,14 @@ func actorFrom(ctx context.Context) (Actor, bool) {
 	return a, ok
 }
 
-// record appends an audit entry for an authenticated mutation without blocking the request.
-func (g *authGate) record(tok *auth.Token, r *http.Request) {
+// record appends an audit entry for an authenticated mutation without blocking the request. It
+// takes the actor name directly so token and JWT callers are both recorded on the same trail.
+func (g *authGate) record(actor string, r *http.Request) {
 	if g.audits == nil || r.Method == http.MethodGet || r.Method == http.MethodHead {
 		return
 	}
 	entry := &audit.Entry{
-		ID: audit.NewID(), At: time.Now(), Actor: tok.Name,
+		ID: audit.NewID(), At: time.Now(), Actor: actor,
 		Method: r.Method, Path: r.URL.Path,
 	}
 	go func() {
