@@ -71,19 +71,17 @@ function mountTopbar() {
 	if (!bar || bar.querySelector(".topbar-links")) return;
 	const nav = document.createElement("nav");
 	nav.className = "topbar-links";
+	const tourWrap = document.createElement("div");
+	tourWrap.className = "tour-launch";
 	const tour = document.createElement("button");
 	tour.type = "button";
 	tour.className = "topbar-link tour-start";
 	tour.textContent = "Tour";
-	tour.addEventListener("click", () => {
-		if (document.body.dataset.page === "overview") {
-			startTour();
-		} else {
-			sessionStorage.setItem("ym_tour_replay", "1");
-			window.location.assign("/ui/");
-		}
-	});
-	nav.appendChild(tour);
+	tour.setAttribute("aria-haspopup", "true");
+	tour.setAttribute("aria-expanded", "false");
+	tour.addEventListener("click", (e) => { e.stopPropagation(); toggleTourMenu(tour, tourWrap); });
+	tourWrap.appendChild(tour);
+	nav.appendChild(tourWrap);
 	const docs = document.createElement("a");
 	docs.href = "/ui/docs";
 	docs.className = "topbar-link";
@@ -137,64 +135,137 @@ function mountListFilter() {
 	});
 }
 
-// TOUR_STEPS drives the guided tour. Each step spotlights one element on the overview and explains a
-// capability; a step with no selector shows a centered card. The tour is the first-visit welcome and
-// replays from the Tour link in the top bar.
-const TOUR_STEPS = [
+// TOURS is the guided-tour registry. Each tour runs on one page and walks a sequence of steps; a
+// step with a selector spotlights that element, and a step without one shows a centered card. The
+// launcher in the top bar lists them, and the welcome tour also runs on a first visit.
+const TOURS = [
 	{
-		title: "Welcome to Yardmaster",
-		body: "One binary runs Ansible, Terraform, Bash, Python, and Go, with no Kubernetes. Here is the sixty-second tour.",
+		id: "welcome", title: "Sixty-second tour", desc: "The whole product at a glance",
+		page: "overview", path: "/ui/",
+		steps: [
+			{ title: "Welcome to Yardmaster", body: "One binary runs Ansible, Terraform, Bash, Python, and Go, with no Kubernetes. Here is the sixty-second tour." },
+			{ sel: ".page-head .button.primary", title: "Launch any tool", body: "Start a run with Ansible, Bash, Terraform, or Python, each with a dry run, and mix them in a single pipeline." },
+			{ sel: ".panel-runs", title: "Watch every run", body: "Runs stream live here, with a host matrix, sharded splits, and multi-step pipelines all in one place." },
+			{ sel: ".migrate-callout", title: "Bring your work with you", body: "Migrating from another tool? Import projects, inventories, templates, and schedules in a few clicks." },
+			{ sel: ".tile-search", title: "Find anything fast", body: "This search filters instantly, and every list in Yardmaster is searchable the same way." },
+			{ sel: ".nav-toggle", title: "The rest of the yard", body: "Job templates, credentials with external secrets, schedules, and fleet analytics all live in this menu." },
+			{ title: "You are set", body: "Explore the demo freely; nothing here can be broken. Replay this tour anytime from Tour in the top bar." },
+		],
 	},
 	{
-		sel: ".page-head .button.primary",
-		title: "Launch any tool",
-		body: "Start a run with Ansible, Bash, Terraform, or Python, each with a dry run, and mix them in a single pipeline.",
+		id: "pitch", title: "Why teams switch", desc: "The case against AWX and Semaphore",
+		page: "overview", path: "/ui/",
+		steps: [
+			{ title: "The case for Yardmaster", body: "Ansible, Terraform, Bash, Python, and Go from one binary, with no Kubernetes to stand up first. Here is what sets it apart." },
+			{ sel: ".panel-runs", title: "Runs you can read", body: "Every run is a live host-by-task matrix, not a wall of scrollback. See a failure the moment it happens, on the host it happened to." },
+			{ sel: ".nav-toggle", title: "A whole control plane", body: "Approvals gated by policy, secrets sourced live and masked from logs, fleet memory across runs, and AI triage, all in this menu." },
+			{ sel: ".migrate-callout", title: "Prove what ran", body: "Every change links into a tamper-evident hash chain you can verify offline. Neither AWX nor Semaphore proves itself like this." },
+			{ title: "That is the moat", body: "Multi-tool execution is table stakes now. Governance that proves itself is not. That is why teams leave AWX." },
+		],
 	},
 	{
-		sel: ".panel-runs",
-		title: "Watch every run",
-		body: "Runs stream live here, with a host matrix, sharded splits, and multi-step pipelines all in one place.",
-	},
-	{
-		sel: ".migrate-callout",
-		title: "Bring your work with you",
-		body: "Migrating from another tool? Import projects, inventories, templates, and schedules in a few clicks.",
-	},
-	{
-		sel: ".tile-search",
-		title: "Find anything fast",
-		body: "This search filters instantly, and every list in Yardmaster is searchable the same way.",
-	},
-	{
-		sel: ".nav-toggle",
-		title: "The rest of the yard",
-		body: "Job templates, credentials with external secrets, schedules, and fleet analytics all live in this menu.",
-	},
-	{
-		title: "You are set",
-		body: "Explore the demo freely; nothing here can be broken. Replay this tour anytime from Tour in the top bar.",
+		id: "migrate", title: "Coming from AWX", desc: "Move your automation over",
+		page: "migrate", path: "/ui/migrate",
+		steps: [
+			{ title: "Leave AWX or Semaphore behind", body: "Import your projects, inventories, templates, surveys, and schedules in a single pass." },
+			{ title: "Preview before you commit", body: "Every import runs as a dry run first, showing exactly what it will create. Apply it when it looks right." },
+			{ title: "No lock-in", body: "You can export and leave anytime, too. Yardmaster earns the switch; it does not trap you." },
+		],
 	},
 ];
+
+// tourByID returns the tour with the given id, or null when none matches.
+function tourByID(id) {
+	return TOURS.find((t) => t.id === id) || null;
+}
+
+// toggleTourMenu opens or closes the guided-tour launcher, a small menu of the available tours
+// anchored under the Tour link in the top bar.
+function toggleTourMenu(button, wrap) {
+	if (wrap.querySelector(".tour-menu")) {
+		closeTourMenu();
+		return;
+	}
+	const menu = document.createElement("div");
+	menu.className = "tour-menu";
+	menu.setAttribute("role", "menu");
+	for (const t of TOURS) {
+		const item = document.createElement("button");
+		item.type = "button";
+		item.className = "tour-menu-item";
+		item.setAttribute("role", "menuitem");
+		item.innerHTML = '<span class="tour-menu-title"></span><span class="tour-menu-desc muted"></span>';
+		item.querySelector(".tour-menu-title").textContent = t.title;
+		item.querySelector(".tour-menu-desc").textContent = t.desc;
+		item.addEventListener("click", () => launchTour(t.id));
+		menu.appendChild(item);
+	}
+	wrap.appendChild(menu);
+	button.setAttribute("aria-expanded", "true");
+	window.setTimeout(() => {
+		document.addEventListener("click", tourMenuOutside);
+		document.addEventListener("keydown", tourMenuKey);
+	}, 0);
+}
+
+// closeTourMenu removes the launcher menu and its listeners.
+function closeTourMenu() {
+	const menu = document.querySelector(".tour-menu");
+	if (menu) menu.remove();
+	const btn = document.querySelector(".tour-start");
+	if (btn) btn.setAttribute("aria-expanded", "false");
+	document.removeEventListener("click", tourMenuOutside);
+	document.removeEventListener("keydown", tourMenuKey);
+}
+
+// tourMenuOutside closes the launcher when a click lands outside it.
+function tourMenuOutside(e) {
+	if (!e.target.closest(".tour-launch")) closeTourMenu();
+}
+
+// tourMenuKey closes the launcher on Escape.
+function tourMenuKey(e) {
+	if (e.key === "Escape") closeTourMenu();
+}
+
+// launchTour runs a tour by id, navigating to its page first when the tour lives elsewhere and
+// resuming it there through a session handoff.
+function launchTour(id) {
+	closeTourMenu();
+	const tour = tourByID(id);
+	if (!tour) return;
+	if (tour.page === document.body.dataset.page) {
+		startTour(id);
+	} else {
+		sessionStorage.setItem("ym_tour_start", id);
+		window.location.assign(tour.path);
+	}
+}
 
 // tourState holds the running tour's overlay elements and current step, or null when no tour is open.
 let tourState = null;
 
-// mountTour starts the tour automatically on a first visit to the overview, recording a flag so it
-// shows once, and honors a replay requested from another page by the Tour link.
+// mountTour starts a tour requested from the launcher on another page, and shows the welcome tour
+// once on a first visit to the overview.
 function mountTour() {
-	if (document.body.dataset.page !== "overview") return;
-	if (sessionStorage.getItem("ym_tour_replay")) {
-		sessionStorage.removeItem("ym_tour_replay");
-		window.setTimeout(startTour, 300);
-		return;
+	const pending = sessionStorage.getItem("ym_tour_start");
+	if (pending) {
+		sessionStorage.removeItem("ym_tour_start");
+		const tour = tourByID(pending);
+		if (tour && tour.page === document.body.dataset.page) {
+			window.setTimeout(() => startTour(pending), 300);
+			return;
+		}
 	}
+	if (document.body.dataset.page !== "overview") return;
 	if (localStorage.getItem("ym_tour_done")) return;
-	window.setTimeout(startTour, 400);
+	window.setTimeout(() => startTour("welcome"), 400);
 }
 
-// startTour builds the spotlight overlay and shows the first step. Calling it while a tour runs
-// restarts it from the top.
-function startTour() {
+// startTour builds the spotlight overlay for the named tour and shows its first step. Calling it
+// while a tour runs restarts from the top.
+function startTour(tourId) {
+	const tour = tourByID(tourId) || TOURS[0];
 	endTour(false);
 	const blocker = document.createElement("div");
 	blocker.className = "tour-blocker";
@@ -218,7 +289,7 @@ function startTour() {
 	document.body.appendChild(hole);
 	document.body.appendChild(pop);
 
-	tourState = { step: 0, blocker, hole, pop };
+	tourState = { step: 0, steps: tour.steps, blocker, hole, pop };
 	pop.querySelector(".tour-skip").addEventListener("click", () => endTour(true));
 	pop.querySelector(".tour-back").addEventListener("click", () => moveTour(-1));
 	pop.querySelector(".tour-next").addEventListener("click", () => moveTour(1));
@@ -232,7 +303,7 @@ function startTour() {
 function moveTour(delta) {
 	if (!tourState) return;
 	const next = tourState.step + delta;
-	if (next >= TOUR_STEPS.length) {
+	if (next >= tourState.steps.length) {
 		endTour(true);
 		return;
 	}
@@ -245,13 +316,13 @@ function moveTour(delta) {
 // spotlight, and focuses Next so the keyboard drives the tour.
 function showTourStep() {
 	if (!tourState) return;
-	const step = TOUR_STEPS[tourState.step];
+	const step = tourState.steps[tourState.step];
 	const { pop } = tourState;
 	pop.querySelector(".tour-title").textContent = step.title;
 	pop.querySelector(".tour-text").textContent = step.body;
-	pop.querySelector(".tour-count").textContent = (tourState.step + 1) + " / " + TOUR_STEPS.length;
+	pop.querySelector(".tour-count").textContent = (tourState.step + 1) + " / " + tourState.steps.length;
 	pop.querySelector(".tour-back").hidden = tourState.step === 0;
-	const isLast = tourState.step === TOUR_STEPS.length - 1;
+	const isLast = tourState.step === tourState.steps.length - 1;
 	pop.querySelector(".tour-next").textContent = isLast ? "Explore" : "Next";
 	pop.querySelector(".tour-skip").hidden = isLast;
 
@@ -265,7 +336,7 @@ function showTourStep() {
 // is safe to call on scroll and resize.
 function renderTourPosition() {
 	if (!tourState) return;
-	const step = TOUR_STEPS[tourState.step];
+	const step = tourState.steps[tourState.step];
 	const el = step.sel ? document.querySelector(step.sel) : null;
 	if (el) {
 		placeTourAt(el.getBoundingClientRect());

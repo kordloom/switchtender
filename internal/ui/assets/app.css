@@ -406,6 +406,14 @@ button.topbar-link { background: none; border: none; padding: 0; font: inherit; 
 .tour-count { font-size: 12px; }
 .tour-btns { display: flex; gap: 8px; }
 .tour-btns .button { padding: 5px 12px; }
+
+/* Guided-tour launcher: a small menu under the Tour link listing the available tours. */
+.tour-launch { position: relative; display: inline-flex; }
+.tour-menu { position: absolute; top: calc(100% + 8px); right: 0; z-index: 63; min-width: 240px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 8px 28px rgba(0, 0, 0, 0.22); padding: 6px; display: flex; flex-direction: column; gap: 2px; }
+.tour-menu-item { display: flex; flex-direction: column; gap: 2px; text-align: left; padding: 8px 10px; background: none; border: none; border-radius: var(--radius); cursor: pointer; color: var(--text); }
+.tour-menu-item:hover { background: var(--surface-2); }
+.tour-menu-title { font-size: 13.5px; font-weight: 600; }
+.tour-menu-desc { font-size: 12px; }
 @media (prefers-reduced-motion: reduce) { .tour-hole { transition: none; } }
 
 /* Credentials that still need a secret: a panel to fill imported shells in one place, so a migrated
