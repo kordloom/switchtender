@@ -24,7 +24,7 @@ func TestProposeRun(t *testing.T) {
 	// Test 0: With no provider, the endpoint is disabled.
 	off := New(store, &fakeSubmitter{}, zap.NewNop()).Handler()
 	rec := httptest.NewRecorder()
-	off.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/ai/propose-run",
+	off.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/ai/propose-run",
 		strings.NewReader(`{"intent":"restart nginx"}`)))
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("propose with no provider status = %d, want 404", rec.Code)
@@ -40,7 +40,7 @@ func TestProposeRun(t *testing.T) {
 
 	// Test 1: An empty intent is refused.
 	rec = httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/ai/propose-run",
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/ai/propose-run",
 		strings.NewReader(`{"intent":"  "}`)))
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("empty intent status = %d, want 400", rec.Code)
@@ -48,7 +48,7 @@ func TestProposeRun(t *testing.T) {
 
 	// Test 2: A valid reply builds a held proposal stamped with the intent.
 	rec = httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/ai/propose-run",
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/ai/propose-run",
 		strings.NewReader(`{"intent":"restart nginx on the web hosts"}`)))
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("propose status = %d, want 202: %s", rec.Code, rec.Body.String())
@@ -80,7 +80,7 @@ func TestProposeRun(t *testing.T) {
 	})
 	badHandler := New(store, &fakeSubmitter{}, zap.NewNop(), WithAI(junk)).Handler()
 	rec = httptest.NewRecorder()
-	badHandler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/ai/propose-run",
+	badHandler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/ai/propose-run",
 		strings.NewReader(`{"intent":"do a thing"}`)))
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Errorf("unusable reply status = %d, want 422", rec.Code)
@@ -92,7 +92,7 @@ func TestProposeRun(t *testing.T) {
 	})
 	broken := New(store, &fakeSubmitter{}, zap.NewNop(), WithAI(boom)).Handler()
 	rec = httptest.NewRecorder()
-	broken.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/ai/propose-run",
+	broken.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/ai/propose-run",
 		strings.NewReader(`{"intent":"anything"}`)))
 	if rec.Code != http.StatusBadGateway {
 		t.Errorf("provider failure status = %d, want 502", rec.Code)
@@ -160,7 +160,7 @@ func TestExplainIntentProposal(t *testing.T) {
 	})
 	handler := New(store, &fakeSubmitter{}, zap.NewNop(), WithAI(provider)).Handler()
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/runs/run_i/explain", nil))
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/runs/run_i/explain", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("explain intent proposal status = %d, want 200: %s", rec.Code, rec.Body.String())
 	}

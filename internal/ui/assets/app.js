@@ -1,5 +1,9 @@
 "use strict";
 
+// API is the versioned base path every server call is made under. Infrastructure routes such as
+// the UI shell and the sign-on redirect are served unversioned and are not reached through this.
+const API = "/v1";
+
 // OUTCOME_RANK orders outcomes from least to most severe for rollups.
 const OUTCOME_RANK = { skipped: 0, ok: 1, changed: 2, unreachable: 3, failed: 4 };
 
@@ -826,7 +830,7 @@ async function draftStep() {
 	btn.disabled = true;
 	status.textContent = "Drafting.";
 	try {
-		const res = await fetch("/ai/draft", {
+		const res = await fetch(API + "/ai/draft", {
 			method: "POST",
 			headers: Object.assign({ "Content-Type": "application/json" }, authHeaders()),
 			body: JSON.stringify({ tool, prompt }),
@@ -1360,7 +1364,7 @@ async function runWorkflow() {
 	runBtn.disabled = true;
 	wfSetStatus("Starting workflow.", "");
 	try {
-		const res = await fetch("/pipelines", {
+		const res = await fetch(API + "/pipelines", {
 			method: "POST",
 			headers: Object.assign({ "Content-Type": "application/json" }, authHeaders()),
 			body: JSON.stringify(body),
@@ -1629,7 +1633,7 @@ function requireLogin() {
 
 // getJSON fetches and decodes a JSON endpoint, redirecting to sign in on a 401.
 async function getJSON(url) {
-	const res = await fetch(url, { headers: authHeaders() });
+	const res = await fetch(API + url, { headers: authHeaders() });
 	if (res.status === 401) {
 		requireLogin();
 		throw new Error("authentication required");
@@ -2085,7 +2089,7 @@ async function loadCredentials() {
 				e.preventDefault();
 				if (!window.confirm("Delete credential " + c.name + "?")) return;
 				try {
-					const res = await fetch("/credentials/" + c.id, {
+					const res = await fetch(API + "/credentials/" + c.id, {
 						method: "DELETE", headers: authHeaders(),
 					});
 					if (!res.ok) throw new Error("HTTP " + res.status);
@@ -2343,7 +2347,7 @@ async function runMigrate(apply) {
 	document.getElementById("migrate-plan").innerHTML = "";
 	status.textContent = apply ? "Importing." : "Building preview.";
 	try {
-		const path = "/import/" + format + (apply ? "?apply=true" : "");
+		const path = API + "/import/" + format + (apply ? "?apply=true" : "");
 		const res = await fetch(path, { method: "POST", headers: authHeaders(), body });
 		if (res.status === 401) {
 			requireLogin();
@@ -2657,7 +2661,7 @@ function deleteCell(path, label, tr, emptyMsg) {
 		e.stopPropagation();
 		if (!window.confirm("Delete " + label + "?")) return;
 		try {
-			const res = await fetch(path, { method: "DELETE", headers: authHeaders() });
+			const res = await fetch(API + path, { method: "DELETE", headers: authHeaders() });
 			if (!res.ok) throw new Error("HTTP " + res.status);
 			removeRow(tr, emptyMsg);
 		} catch (err) {
@@ -3021,7 +3025,7 @@ async function askFleet() {
 	status.textContent = "Thinking.";
 	status.hidden = false;
 	try {
-		const res = await fetch("/ai/ask", {
+		const res = await fetch(API + "/ai/ask", {
 			method: "POST",
 			headers: Object.assign({ "Content-Type": "application/json" }, authHeaders()),
 			body: JSON.stringify({ question }),
@@ -3087,7 +3091,7 @@ async function proposeRun() {
 	status.textContent = "Proposing.";
 	status.hidden = false;
 	try {
-		const res = await fetch("/ai/propose-run", {
+		const res = await fetch(API + "/ai/propose-run", {
 			method: "POST",
 			headers: Object.assign({ "Content-Type": "application/json" }, authHeaders()),
 			body: JSON.stringify({ intent }),
@@ -3566,7 +3570,7 @@ async function proposeReconcile(host, btn) {
 	btn.disabled = true;
 	setStatus("Proposing a reconcile for " + host + ".");
 	try {
-		const res = await fetch("/drift/reconcile", {
+		const res = await fetch(API + "/drift/reconcile", {
 			method: "POST",
 			headers: Object.assign({ "Content-Type": "application/json" }, authHeaders()),
 			body: JSON.stringify({ host }),
@@ -3718,7 +3722,7 @@ async function loadSchedules() {
 				e.preventDefault();
 				if (!window.confirm("Delete schedule " + (s.name || s.id) + "?")) return;
 				try {
-					const res = await fetch("/schedules/" + s.id, { method: "DELETE", headers: authHeaders() });
+					const res = await fetch(API + "/schedules/" + s.id, { method: "DELETE", headers: authHeaders() });
 					if (!res.ok) throw new Error("HTTP " + res.status);
 					removeRow(tr, "No schedules yet. Add one to fire a template on a cadence.");
 				} catch (err) {
@@ -3972,7 +3976,7 @@ async function loadPolicies() {
 				e.preventDefault();
 				if (!window.confirm("Delete policy " + p.name + "?")) return;
 				try {
-					const res = await fetch("/policies/" + p.id, { method: "DELETE", headers: authHeaders() });
+					const res = await fetch(API + "/policies/" + p.id, { method: "DELETE", headers: authHeaders() });
 					if (!res.ok) throw new Error("HTTP " + res.status);
 					removeRow(tr, "No policies yet. Add one to require approval for the runs it matches.");
 				} catch (err) {
@@ -4050,7 +4054,7 @@ async function postAction(path, payload, method) {
 		opts.headers["Content-Type"] = "application/json";
 		opts.body = JSON.stringify(payload);
 	}
-	const res = await fetch(path, opts);
+	const res = await fetch(API + path, opts);
 	if (res.status === 401) {
 		requireLogin();
 		throw new Error("authentication required");
@@ -4070,7 +4074,7 @@ function streamURL(path) {
 	const token = apiToken();
 	if (!token) return path;
 	const sep = path.includes("?") ? "&" : "?";
-	return path + sep + "access_token=" + encodeURIComponent(token);
+	return API + path + sep + "access_token=" + encodeURIComponent(token);
 }
 
 // lastSeq returns the highest store sequence among events, or zero when none carry one. It is
@@ -4110,7 +4114,7 @@ function loadLogin() {
 	document.getElementById("account-form").addEventListener("submit", async (e) => {
 		e.preventDefault();
 		try {
-			const res = await fetch("/auth/login", {
+			const res = await fetch(API + "/auth/login", {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
@@ -4135,7 +4139,7 @@ function loadLogin() {
 		e.preventDefault();
 		const token = document.getElementById("token-input").value.trim();
 		if (!token) return;
-		const res = await fetch("/auth/check", {
+		const res = await fetch(API + "/auth/check", {
 			method: "POST", headers: { "Authorization": "Bearer " + token },
 		});
 		if (res.status === 204) {

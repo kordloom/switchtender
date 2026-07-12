@@ -25,7 +25,7 @@ func TestDraftStep(t *testing.T) {
 	// Test 0: With no provider, the endpoint is disabled.
 	off := New(store, &fakeSubmitter{}, zap.NewNop()).Handler()
 	rec := httptest.NewRecorder()
-	off.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/ai/draft",
+	off.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/ai/draft",
 		strings.NewReader(`{"tool":"bash","prompt":"drain the node"}`)))
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("draft with no provider status = %d, want 404", rec.Code)
@@ -40,7 +40,7 @@ func TestDraftStep(t *testing.T) {
 
 	// Test 1: A tool outside the script set is refused.
 	rec = httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/ai/draft",
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/ai/draft",
 		strings.NewReader(`{"tool":"ansible","prompt":"x"}`)))
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("ansible draft status = %d, want 400", rec.Code)
@@ -48,7 +48,7 @@ func TestDraftStep(t *testing.T) {
 
 	// Test 2: An empty description is refused.
 	rec = httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/ai/draft",
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/ai/draft",
 		strings.NewReader(`{"tool":"bash","prompt":"  "}`)))
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("empty prompt status = %d, want 400", rec.Code)
@@ -57,7 +57,7 @@ func TestDraftStep(t *testing.T) {
 	// Test 3: A valid request reaches the provider with the tool and task, and the fenced reply
 	// comes back stripped.
 	rec = httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/ai/draft",
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/ai/draft",
 		strings.NewReader(`{"tool":"bash","prompt":"drain the node"}`)))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("draft status = %d, want 200", rec.Code)
@@ -81,7 +81,7 @@ func TestDraftStep(t *testing.T) {
 	})
 	broken := New(store, &fakeSubmitter{}, zap.NewNop(), WithAI(boom)).Handler()
 	rec = httptest.NewRecorder()
-	broken.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/ai/draft",
+	broken.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/ai/draft",
 		strings.NewReader(`{"tool":"python","prompt":"parse a csv"}`)))
 	if rec.Code != http.StatusBadGateway {
 		t.Errorf("provider failure status = %d, want 502", rec.Code)

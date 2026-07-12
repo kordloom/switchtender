@@ -48,7 +48,7 @@ func TestReconcileDrift(t *testing.T) {
 	handler := New(store, fake, zap.NewNop()).Handler()
 	post := func(body string) *httptest.ResponseRecorder {
 		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/drift/reconcile",
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/drift/reconcile",
 			strings.NewReader(body)))
 		return rec
 	}
@@ -136,7 +136,7 @@ func TestExplainProposal(t *testing.T) {
 	})
 	handler := New(store, &fakeSubmitter{}, zap.NewNop(), WithAI(provider)).Handler()
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/runs/run_prop/explain", nil))
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/runs/run_prop/explain", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("explain proposal status = %d, want 200: %s", rec.Code, rec.Body.String())
 	}

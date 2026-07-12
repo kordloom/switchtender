@@ -94,7 +94,7 @@ func TestCreateTriggerSigningSecret(t *testing.T) {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
 			handler, _ := newTriggerServer(t, &fakeSubmitter{}, test.Sealer)
-			req := httptest.NewRequest(http.MethodPost, "/triggers", strings.NewReader(test.Body))
+			req := httptest.NewRequest(http.MethodPost, "/v1/triggers", strings.NewReader(test.Body))
 			rec := httptest.NewRecorder()
 
 			handler.ServeHTTP(rec, req)
@@ -191,7 +191,7 @@ func TestRotateTriggerSecret(t *testing.T) {
 		t.Fatalf("find trigger: %v", err)
 	}
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/triggers/"+tg.ID+"/rotate-secret", nil))
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/triggers/"+tg.ID+"/rotate-secret", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("rotate status = %d, want 200 (body %s)", rec.Code, rec.Body.String())
 	}
@@ -234,7 +234,7 @@ func TestRotateTriggerSecretWithoutEncryption(t *testing.T) {
 		t.Fatalf("save trigger: %v", err)
 	}
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/triggers/"+tg.ID+"/rotate-secret", nil))
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/triggers/"+tg.ID+"/rotate-secret", nil))
 	if rec.Code != http.StatusConflict {
 		t.Errorf("status = %d, want 409 (body %s)", rec.Code, rec.Body.String())
 	}
@@ -252,7 +252,7 @@ func TestUpdateTriggerRequireSignature(t *testing.T) {
 		t.Fatalf("find trigger: %v", err)
 	}
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPut, "/triggers/"+tgA.ID,
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPut, "/v1/triggers/"+tgA.ID,
 		strings.NewReader(`{"name":"renamed","require_signature":true}`)))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("update status = %d, want 200 (body %s)", rec.Code, rec.Body.String())
@@ -274,7 +274,7 @@ func TestUpdateTriggerRequireSignature(t *testing.T) {
 		t.Fatalf("save trigger: %v", err)
 	}
 	rec = httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPut, "/triggers/"+tgB.ID,
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPut, "/v1/triggers/"+tgB.ID,
 		strings.NewReader(`{"name":"n","require_signature":true}`)))
 	if rec.Code != http.StatusConflict {
 		t.Errorf("status = %d, want 409 (body %s)", rec.Code, rec.Body.String())

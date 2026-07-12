@@ -4,10 +4,10 @@
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>HTTP API · Yardmaster docs</title>
-	<meta name="description" content="Every endpoint the server exposes. The web UI lives at /ui/ and the root redirects to it.">
+	<meta name="description" content="Every endpoint the server exposes. The API is served under the /v1 base path.">
 	<link rel="canonical" href="https://yardmaster.dev/docs/api.html">
 	<meta property="og:title" content="HTTP API · Yardmaster docs">
-	<meta property="og:description" content="Every endpoint the server exposes. The web UI lives at /ui/ and the root redirects to it.">
+	<meta property="og:description" content="Every endpoint the server exposes. The API is served under the /v1 base path.">
 	<meta property="og:type" content="article">
 	<meta property="og:url" content="https://yardmaster.dev/docs/api.html">
 	<link rel="icon" href="/favicon.ico" sizes="any">
@@ -36,7 +36,9 @@
 		</aside>
 		<main class="dcontent prose">
 			<h1 id="http-api">HTTP API</h1>
-<p>Every endpoint the server exposes. The web UI lives at <code>/ui/</code> and the root redirects to it.</p>
+<p>Every endpoint the server exposes. The API is served under the <code>/v1</code> base path. The web UI at
+<code>/ui/</code>, along with <code>/healthz</code>, <code>/metrics</code>, the OpenID Connect sign-in routes, and the webhook
+<code>/hooks</code> path, is unversioned. The root redirects to the UI.</p>
 <table>
 <thead>
 <tr>
@@ -48,207 +50,207 @@
 <tbody>
 <tr>
 <td>POST</td>
-<td><code>/runs</code></td>
+<td><code>/v1/runs</code></td>
 <td>Submit a run. <code>shards</code> of two or more splits it.</td>
 </tr>
 <tr>
 <td>GET</td>
-<td><code>/runs</code></td>
+<td><code>/v1/runs</code></td>
 <td>Run history, newest first.</td>
 </tr>
 <tr>
 <td>GET</td>
-<td><code>/runs/{id}</code></td>
+<td><code>/v1/runs/{id}</code></td>
 <td>One run.</td>
 </tr>
 <tr>
 <td>POST</td>
-<td><code>/runs/{id}/cancel</code></td>
+<td><code>/v1/runs/{id}/cancel</code></td>
 <td>Cancel a pending or running run.</td>
 </tr>
 <tr>
 <td>POST</td>
-<td><code>/runs/{id}/retry</code></td>
+<td><code>/v1/runs/{id}/retry</code></td>
 <td>New split from only the failed shards of a finished one.</td>
 </tr>
 <tr>
 <td>POST</td>
-<td><code>/runs/{id}/approve</code></td>
+<td><code>/v1/runs/{id}/approve</code></td>
 <td>Release a run held for approval so it runs.</td>
 </tr>
 <tr>
 <td>POST</td>
-<td><code>/runs/{id}/reject</code></td>
+<td><code>/v1/runs/{id}/reject</code></td>
 <td>Deny a run held for approval.</td>
 </tr>
 <tr>
 <td>GET</td>
-<td><code>/runs/{id}/shards</code></td>
+<td><code>/v1/runs/{id}/shards</code></td>
 <td>Shard runs of a split.</td>
 </tr>
 <tr>
 <td>GET</td>
-<td><code>/runs/{id}/steps</code></td>
+<td><code>/v1/runs/{id}/steps</code></td>
 <td>Step runs of a pipeline.</td>
 </tr>
 <tr>
 <td>GET</td>
-<td><code>/runs/{id}/logs</code></td>
+<td><code>/v1/runs/{id}/logs</code></td>
 <td>Captured output as plain text.</td>
 </tr>
 <tr>
 <td>GET</td>
-<td><code>/runs/{id}/events</code></td>
+<td><code>/v1/runs/{id}/events</code></td>
 <td>Structured events as JSON.</td>
 </tr>
 <tr>
 <td>GET</td>
-<td><code>/runs/{id}/stream</code></td>
+<td><code>/v1/runs/{id}/stream</code></td>
 <td>Live events and log over Server-Sent Events.</td>
 </tr>
 <tr>
 <td>POST</td>
-<td><code>/runs/{id}/explain</code></td>
+<td><code>/v1/runs/{id}/explain</code></td>
 <td>Advisory AI explanation of a run, when a provider is configured.</td>
 </tr>
 <tr>
 <td>POST</td>
-<td><code>/ai/draft</code></td>
+<td><code>/v1/ai/draft</code></td>
 <td>Advisory AI draft of a bash, python, or go step script from a description. Operator role.</td>
 </tr>
 <tr>
 <td>POST</td>
-<td><code>/ai/ask</code></td>
+<td><code>/v1/ai/ask</code></td>
 <td>Advisory AI answer to a fleet question, from run, health, and drift metadata. Rate limited.</td>
 </tr>
 <tr>
 <td>POST</td>
-<td><code>/ai/propose-run</code></td>
+<td><code>/v1/ai/propose-run</code></td>
 <td>Turn a plain-language request into a run proposal, validated and held for approval. Operator role.</td>
 </tr>
 <tr>
 <td>POST</td>
-<td><code>/drift/reconcile</code></td>
+<td><code>/v1/drift/reconcile</code></td>
 <td>Build a reconcile proposal for a drifted host, held for approval. Operator role.</td>
 </tr>
 <tr>
 <td>POST</td>
-<td><code>/pipelines</code></td>
+<td><code>/v1/pipelines</code></td>
 <td>Submit ordered playbook steps as one pipeline.</td>
 </tr>
 <tr>
 <td>POST</td>
-<td><code>/schedules</code></td>
+<td><code>/v1/schedules</code></td>
 <td>Cron schedule for a run, split, pipeline, or template.</td>
 </tr>
 <tr>
 <td>GET</td>
-<td><code>/schedules</code></td>
+<td><code>/v1/schedules</code></td>
 <td>List schedules.</td>
 </tr>
 <tr>
 <td>GET</td>
-<td><code>/schedules/{id}</code></td>
+<td><code>/v1/schedules/{id}</code></td>
 <td>One schedule.</td>
 </tr>
 <tr>
 <td>PUT</td>
-<td><code>/schedules/{id}</code></td>
+<td><code>/v1/schedules/{id}</code></td>
 <td>Update a schedule.</td>
 </tr>
 <tr>
 <td>DELETE</td>
-<td><code>/schedules/{id}</code></td>
+<td><code>/v1/schedules/{id}</code></td>
 <td>Delete a schedule.</td>
 </tr>
 <tr>
 <td>GET</td>
-<td><code>/fleet</code></td>
+<td><code>/v1/fleet</code></td>
 <td>Hosts ranked by failures over recent runs, flaky flags.</td>
 </tr>
 <tr>
 <td>GET</td>
-<td><code>/hosts/{host}/runs</code></td>
+<td><code>/v1/hosts/{host}/runs</code></td>
 <td>One host's recent per-run outcomes.</td>
 </tr>
 <tr>
 <td>GET</td>
-<td><code>/tasks</code></td>
+<td><code>/v1/tasks</code></td>
 <td>Per-task duration trends over recent runs.</td>
 </tr>
 <tr>
 <td>GET</td>
-<td><code>/drift</code></td>
+<td><code>/v1/drift</code></td>
 <td>Resources drifting from desired state, from dry runs.</td>
 </tr>
 <tr>
 <td>POST</td>
-<td><code>/projects</code></td>
+<td><code>/v1/projects</code></td>
 <td>Register a git project. Runs record their commit.</td>
 </tr>
 <tr>
 <td>GET</td>
-<td><code>/projects</code></td>
+<td><code>/v1/projects</code></td>
 <td>List projects.</td>
 </tr>
 <tr>
 <td>PUT</td>
-<td><code>/projects/{id}</code></td>
+<td><code>/v1/projects/{id}</code></td>
 <td>Update a project.</td>
 </tr>
 <tr>
 <td>DELETE</td>
-<td><code>/projects/{id}</code></td>
+<td><code>/v1/projects/{id}</code></td>
 <td>Delete a project. 409 while a template or source uses it.</td>
 </tr>
 <tr>
 <td>POST</td>
-<td><code>/templates</code></td>
+<td><code>/v1/templates</code></td>
 <td>Save a launch preset.</td>
 </tr>
 <tr>
 <td>GET</td>
-<td><code>/templates</code></td>
+<td><code>/v1/templates</code></td>
 <td>List templates.</td>
 </tr>
 <tr>
 <td>POST</td>
-<td><code>/templates/{id}/launch</code></td>
+<td><code>/v1/templates/{id}/launch</code></td>
 <td>Launch a template, answering its survey if it has one.</td>
 </tr>
 <tr>
 <td>PUT</td>
-<td><code>/templates/{id}</code></td>
+<td><code>/v1/templates/{id}</code></td>
 <td>Update a template.</td>
 </tr>
 <tr>
 <td>DELETE</td>
-<td><code>/templates/{id}</code></td>
+<td><code>/v1/templates/{id}</code></td>
 <td>Delete a template.</td>
 </tr>
 <tr>
 <td>POST</td>
-<td><code>/triggers</code></td>
+<td><code>/v1/triggers</code></td>
 <td>Create a webhook trigger, returns a signing secret once.</td>
 </tr>
 <tr>
 <td>PUT</td>
-<td><code>/triggers/{id}</code></td>
+<td><code>/v1/triggers/{id}</code></td>
 <td>Rename a trigger or toggle signature enforcement.</td>
 </tr>
 <tr>
 <td>POST</td>
-<td><code>/triggers/{id}/rotate-secret</code></td>
+<td><code>/v1/triggers/{id}/rotate-secret</code></td>
 <td>Rotate the signing secret, shown once.</td>
 </tr>
 <tr>
 <td>GET</td>
-<td><code>/triggers</code></td>
+<td><code>/v1/triggers</code></td>
 <td>List webhook triggers.</td>
 </tr>
 <tr>
 <td>DELETE</td>
-<td><code>/triggers/{id}</code></td>
+<td><code>/v1/triggers/{id}</code></td>
 <td>Delete a trigger, revoking its webhook.</td>
 </tr>
 <tr>
@@ -258,32 +260,32 @@
 </tr>
 <tr>
 <td>POST</td>
-<td><code>/credentials</code></td>
+<td><code>/v1/credentials</code></td>
 <td>Store a credential (ssh_key, vault_password, env, token, become_password, registry), encrypted at rest.</td>
 </tr>
 <tr>
 <td>GET</td>
-<td><code>/credentials</code></td>
+<td><code>/v1/credentials</code></td>
 <td>List credentials, secrets never included.</td>
 </tr>
 <tr>
 <td>PUT</td>
-<td><code>/credentials/{id}</code></td>
+<td><code>/v1/credentials/{id}</code></td>
 <td>Update a credential.</td>
 </tr>
 <tr>
 <td>DELETE</td>
-<td><code>/credentials/{id}</code></td>
+<td><code>/v1/credentials/{id}</code></td>
 <td>Delete a credential. 409 while an object still uses it.</td>
 </tr>
 <tr>
 <td>POST</td>
-<td><code>/auth/login</code></td>
+<td><code>/v1/auth/login</code></td>
 <td>Sign in with username and password, returns a token.</td>
 </tr>
 <tr>
 <td>POST</td>
-<td><code>/auth/check</code></td>
+<td><code>/v1/auth/check</code></td>
 <td>Verify an API token.</td>
 </tr>
 <tr>
@@ -298,157 +300,157 @@
 </tr>
 <tr>
 <td>POST</td>
-<td><code>/users</code></td>
+<td><code>/v1/users</code></td>
 <td>Create an account with a role.</td>
 </tr>
 <tr>
 <td>GET</td>
-<td><code>/users</code></td>
+<td><code>/v1/users</code></td>
 <td>List accounts.</td>
 </tr>
 <tr>
 <td>PUT</td>
-<td><code>/users/{id}</code></td>
+<td><code>/v1/users/{id}</code></td>
 <td>Update an account's role or password.</td>
 </tr>
 <tr>
 <td>DELETE</td>
-<td><code>/users/{id}</code></td>
+<td><code>/v1/users/{id}</code></td>
 <td>Delete an account. Its tokens stop working.</td>
 </tr>
 <tr>
 <td>POST</td>
-<td><code>/teams</code></td>
+<td><code>/v1/teams</code></td>
 <td>Create a team of users.</td>
 </tr>
 <tr>
 <td>GET</td>
-<td><code>/teams</code></td>
+<td><code>/v1/teams</code></td>
 <td>List teams.</td>
 </tr>
 <tr>
 <td>DELETE</td>
-<td><code>/teams/{id}</code></td>
+<td><code>/v1/teams/{id}</code></td>
 <td>Delete a team and its memberships.</td>
 </tr>
 <tr>
 <td>POST</td>
-<td><code>/teams/{id}/members</code></td>
+<td><code>/v1/teams/{id}/members</code></td>
 <td>Add a user to a team.</td>
 </tr>
 <tr>
 <td>GET</td>
-<td><code>/teams/{id}/members</code></td>
+<td><code>/v1/teams/{id}/members</code></td>
 <td>List a team's members.</td>
 </tr>
 <tr>
 <td>DELETE</td>
-<td><code>/teams/{id}/members/{userID}</code></td>
+<td><code>/v1/teams/{id}/members/{userID}</code></td>
 <td>Remove a user from a team.</td>
 </tr>
 <tr>
 <td>POST</td>
-<td><code>/grants</code></td>
+<td><code>/v1/grants</code></td>
 <td>Grant a user or team use or manage on an object.</td>
 </tr>
 <tr>
 <td>GET</td>
-<td><code>/grants</code></td>
+<td><code>/v1/grants</code></td>
 <td>List access grants.</td>
 </tr>
 <tr>
 <td>DELETE</td>
-<td><code>/grants/{id}</code></td>
+<td><code>/v1/grants/{id}</code></td>
 <td>Delete an access grant.</td>
 </tr>
 <tr>
 <td>GET</td>
-<td><code>/workers</code></td>
+<td><code>/v1/workers</code></td>
 <td>The executor fleet with lease freshness.</td>
 </tr>
 <tr>
 <td>POST</td>
-<td><code>/inventory-sources</code></td>
+<td><code>/v1/inventory-sources</code></td>
 <td>Register a dynamic inventory source.</td>
 </tr>
 <tr>
 <td>GET</td>
-<td><code>/inventory-sources</code></td>
+<td><code>/v1/inventory-sources</code></td>
 <td>List inventory sources.</td>
 </tr>
 <tr>
 <td>POST</td>
-<td><code>/inventory-sources/{id}/refresh</code></td>
+<td><code>/v1/inventory-sources/{id}/refresh</code></td>
 <td>Refresh a source into its inventory now.</td>
 </tr>
 <tr>
 <td>PUT</td>
-<td><code>/inventory-sources/{id}</code></td>
+<td><code>/v1/inventory-sources/{id}</code></td>
 <td>Update an inventory source.</td>
 </tr>
 <tr>
 <td>DELETE</td>
-<td><code>/inventory-sources/{id}</code></td>
+<td><code>/v1/inventory-sources/{id}</code></td>
 <td>Delete an inventory source.</td>
 </tr>
 <tr>
 <td>POST</td>
-<td><code>/inventories</code></td>
+<td><code>/v1/inventories</code></td>
 <td>Store an inventory. Runs reference it by id anywhere.</td>
 </tr>
 <tr>
 <td>GET</td>
-<td><code>/inventories</code></td>
+<td><code>/v1/inventories</code></td>
 <td>List stored inventories.</td>
 </tr>
 <tr>
 <td>PUT</td>
-<td><code>/inventories/{id}</code></td>
+<td><code>/v1/inventories/{id}</code></td>
 <td>Update a stored inventory.</td>
 </tr>
 <tr>
 <td>DELETE</td>
-<td><code>/inventories/{id}</code></td>
+<td><code>/v1/inventories/{id}</code></td>
 <td>Delete a stored inventory.</td>
 </tr>
 <tr>
 <td>POST</td>
-<td><code>/policies</code></td>
+<td><code>/v1/policies</code></td>
 <td>Create an approval policy that gates matching runs.</td>
 </tr>
 <tr>
 <td>GET</td>
-<td><code>/policies</code></td>
+<td><code>/v1/policies</code></td>
 <td>List approval policies.</td>
 </tr>
 <tr>
 <td>PUT</td>
-<td><code>/policies/{id}</code></td>
+<td><code>/v1/policies/{id}</code></td>
 <td>Update an approval policy.</td>
 </tr>
 <tr>
 <td>DELETE</td>
-<td><code>/policies/{id}</code></td>
+<td><code>/v1/policies/{id}</code></td>
 <td>Delete an approval policy.</td>
 </tr>
 <tr>
 <td>POST</td>
-<td><code>/import/{format}</code></td>
+<td><code>/v1/import/{format}</code></td>
 <td>Import an AWX or Semaphore export. Format is awx or semaphore.</td>
 </tr>
 <tr>
 <td>GET</td>
-<td><code>/audit</code></td>
+<td><code>/v1/audit</code></td>
 <td>The mutation trail, admin only.</td>
 </tr>
 <tr>
 <td>GET</td>
-<td><code>/audit/verify</code></td>
+<td><code>/v1/audit/verify</code></td>
 <td>Verify the audit hash chain is intact.</td>
 </tr>
 <tr>
 <td>GET</td>
-<td><code>/audit/export</code></td>
+<td><code>/v1/audit/export</code></td>
 <td>Signed, self-verifying snapshot of the audit chain.</td>
 </tr>
 <tr>

@@ -80,7 +80,7 @@ func createScheduleHandler(store schedule.Store, log *zap.Logger) http.HandlerFu
 			respondError(w, log, http.StatusInternalServerError, "could not save schedule")
 			return
 		}
-		w.Header().Set("Location", "/schedules/"+sc.ID)
+		w.Header().Set("Location", "/v1/schedules/"+sc.ID)
 		respondJSON(w, log, http.StatusCreated, sc, wantsPretty(r))
 	}
 }

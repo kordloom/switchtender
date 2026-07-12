@@ -157,7 +157,7 @@ func TestCreateRun(t *testing.T) {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
 			handler := New(run.NewMemStore(), test.Submitter, zap.NewNop()).Handler()
-			req := httptest.NewRequest(http.MethodPost, "/runs", strings.NewReader(test.Body))
+			req := httptest.NewRequest(http.MethodPost, "/v1/runs", strings.NewReader(test.Body))
 			rec := httptest.NewRecorder()
 
 			handler.ServeHTTP(rec, req)
@@ -176,7 +176,7 @@ func TestCreateRunForwardsArgsAndLocation(t *testing.T) {
 	t.Parallel()
 	sub := &fakeSubmitter{run: &run.Run{ID: "run_42", Status: run.StatusPending}}
 	handler := New(run.NewMemStore(), sub, zap.NewNop()).Handler()
-	req := httptest.NewRequest(http.MethodPost, "/runs",
+	req := httptest.NewRequest(http.MethodPost, "/v1/runs",
 		strings.NewReader(`{"playbook":"site.yml","inventory":"hosts"}`))
 	rec := httptest.NewRecorder()
 
@@ -185,7 +185,7 @@ func TestCreateRunForwardsArgsAndLocation(t *testing.T) {
 	if sub.gotPlaybook != "site.yml" || sub.gotInventory != "hosts" {
 		t.Errorf("forwarded playbook=%q inventory=%q", sub.gotPlaybook, sub.gotInventory)
 	}
-	if loc := rec.Header().Get("Location"); loc != "/runs/run_42" {
+	if loc := rec.Header().Get("Location"); loc != "/v1/runs/run_42" {
 		t.Errorf("Location = %q, want /runs/run_42", loc)
 	}
 }
@@ -194,7 +194,7 @@ func TestCreateRunSplitRoutesToSubmitSplit(t *testing.T) {
 	t.Parallel()
 	sub := &fakeSubmitter{run: &run.Run{ID: "run_p", Status: run.StatusPending}}
 	handler := New(run.NewMemStore(), sub, zap.NewNop()).Handler()
-	req := httptest.NewRequest(http.MethodPost, "/runs",
+	req := httptest.NewRequest(http.MethodPost, "/v1/runs",
 		strings.NewReader(`{"playbook":"site.yml","inventory":"hosts","shards":3}`))
 	rec := httptest.NewRecorder()
 
@@ -226,7 +226,7 @@ func TestRunShards(t *testing.T) {
 	handler := New(store, &fakeSubmitter{}, zap.NewNop()).Handler()
 
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/runs/"+parentID+"/shards", nil))
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/runs/"+parentID+"/shards", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
@@ -236,7 +236,7 @@ func TestRunShards(t *testing.T) {
 	}
 
 	rec = httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/runs/missing/shards", nil))
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/runs/missing/shards", nil))
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("unknown parent status = %d, want 404", rec.Code)
 	}
@@ -272,7 +272,7 @@ func TestCreatePipeline(t *testing.T) {
 			handler := New(run.NewMemStore(), sub, zap.NewNop()).Handler()
 			rec := httptest.NewRecorder()
 			handler.ServeHTTP(rec,
-				httptest.NewRequest(http.MethodPost, "/pipelines", strings.NewReader(test.Body)))
+				httptest.NewRequest(http.MethodPost, "/v1/pipelines", strings.NewReader(test.Body)))
 			if rec.Code != test.WantStatus {
 				t.Fatalf("status = %d, want %d", rec.Code, test.WantStatus)
 			}
@@ -302,7 +302,7 @@ func TestRunSteps(t *testing.T) {
 	handler := New(store, &fakeSubmitter{}, zap.NewNop()).Handler()
 
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/runs/"+parentID+"/steps", nil))
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/runs/"+parentID+"/steps", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
@@ -311,7 +311,7 @@ func TestRunSteps(t *testing.T) {
 	}
 
 	rec = httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/runs/missing/steps", nil))
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/runs/missing/steps", nil))
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", rec.Code)
 	}
@@ -331,8 +331,8 @@ func TestGetRun(t *testing.T) {
 		Path       string
 		WantStatus int
 	}{
-		{Name: "found", Path: "/runs/run_1", WantStatus: http.StatusOK},        // Test 0.
-		{Name: "missing", Path: "/runs/nope", WantStatus: http.StatusNotFound}, // Test 1.
+		{Name: "found", Path: "/v1/runs/run_1", WantStatus: http.StatusOK},        // Test 0.
+		{Name: "missing", Path: "/v1/runs/nope", WantStatus: http.StatusNotFound}, // Test 1.
 	}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
@@ -356,7 +356,7 @@ func TestListRuns(t *testing.T) {
 	}
 	handler := New(store, &fakeSubmitter{}, zap.NewNop()).Handler()
 
-	req := httptest.NewRequest(http.MethodGet, "/runs", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/runs", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -386,8 +386,8 @@ func TestRunLogs(t *testing.T) {
 		WantStatus int
 		WantBody   string
 	}{
-		{Name: "found", Path: "/runs/run_1/logs", WantStatus: http.StatusOK, WantBody: "PLAY RECAP"}, // Test 0.
-		{Name: "missing", Path: "/runs/nope/logs", WantStatus: http.StatusNotFound},                  // Test 1.
+		{Name: "found", Path: "/v1/runs/run_1/logs", WantStatus: http.StatusOK, WantBody: "PLAY RECAP"}, // Test 0.
+		{Name: "missing", Path: "/v1/runs/nope/logs", WantStatus: http.StatusNotFound},                  // Test 1.
 	}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
@@ -454,7 +454,7 @@ func TestRunStreamTerminalEndsImmediately(t *testing.T) {
 	handler := New(store, &fakeSubmitter{}, zap.NewNop(), WithStreamer(streamer)).Handler()
 
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/runs/run_done/stream", nil))
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/runs/run_done/stream", nil))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
@@ -484,7 +484,7 @@ func TestRunEventsPaging(t *testing.T) {
 
 	get := func(query string) eventsResponse {
 		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/runs/r/events"+query, nil))
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/runs/r/events"+query, nil))
 		if rec.Code != http.StatusOK {
 			t.Fatalf("status = %d, want 200", rec.Code)
 		}
@@ -531,7 +531,7 @@ func TestRunStreamResumesAfterCursor(t *testing.T) {
 	handler := New(store, &fakeSubmitter{}, zap.NewNop()).Handler()
 
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/runs/r/stream?after=2", nil))
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/runs/r/stream?after=2", nil))
 	body := rec.Body.String()
 	if strings.Contains(body, `"t0"`) || strings.Contains(body, `"t1"`) {
 		t.Errorf("stream replayed history before the cursor:\n%s", body)
@@ -555,7 +555,7 @@ func TestRunStreamDrainsStore(t *testing.T) {
 
 	srv := httptest.NewServer(handler)
 	defer srv.Close()
-	res, err := http.Get(srv.URL + "/runs/run_live/stream")
+	res, err := http.Get(srv.URL + "/v1/runs/run_live/stream")
 	if err != nil {
 		t.Fatalf("GET stream: %v", err)
 	}
@@ -625,13 +625,13 @@ func TestRunStreamWithoutHub(t *testing.T) {
 	// No streamer configured: the store poll alone serves the stream.
 	handler := New(store, &fakeSubmitter{}, zap.NewNop()).Handler()
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/runs/run_done/stream", nil))
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/runs/run_done/stream", nil))
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "event: end") {
 		t.Errorf("no-hub stream = %d %q, want 200 with end", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/runs/ghost/stream", nil))
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/runs/ghost/stream", nil))
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("unknown run = %d, want 404", rec.Code)
 	}
@@ -650,7 +650,7 @@ func TestFleet(t *testing.T) {
 	handler := New(store, &fakeSubmitter{}, zap.NewNop()).Handler()
 
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/fleet?window=5", nil))
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/fleet?window=5", nil))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
@@ -666,7 +666,7 @@ func TestCreatePipelineBadGraph(t *testing.T) {
 	sub := &fakeSubmitter{err: fmt.Errorf("%w: %q", dispatch.ErrUnknownDependency, "ghost")}
 	handler := New(run.NewMemStore(), sub, zap.NewNop()).Handler()
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/pipelines", strings.NewReader(
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/pipelines", strings.NewReader(
 		`{"steps":[{"name":"a","playbook":"a.yml","depends_on":["ghost"]}]}`)))
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", rec.Code)
@@ -688,7 +688,7 @@ func TestHostHistory(t *testing.T) {
 	handler := New(store, &fakeSubmitter{}, zap.NewNop()).Handler()
 
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/hosts/db01/runs", nil))
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/hosts/db01/runs", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
@@ -698,7 +698,7 @@ func TestHostHistory(t *testing.T) {
 	}
 
 	rec = httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/hosts/ghost/runs", nil))
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/hosts/ghost/runs", nil))
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"count":0`) {
 		t.Errorf("unknown host = %d %q, want 200 with empty history", rec.Code, rec.Body.String())
 	}
@@ -716,7 +716,7 @@ func TestTaskTrends(t *testing.T) {
 	handler := New(store, &fakeSubmitter{}, zap.NewNop()).Handler()
 
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/tasks?window=5", nil))
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/tasks?window=5", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
@@ -742,23 +742,23 @@ func TestCancelRun(t *testing.T) {
 	}{
 		{ // Test 0: A running run is canceled.
 			Name: "running", Store: seed(run.StatusRunning), Canceler: &fakeCanceler{ok: true},
-			Path: "/runs/run_1/cancel", WantStatus: http.StatusAccepted,
+			Path: "/v1/runs/run_1/cancel", WantStatus: http.StatusAccepted,
 		},
 		{ // Test 1: A finished run conflicts.
 			Name: "terminal", Store: seed(run.StatusSucceeded), Canceler: &fakeCanceler{ok: true},
-			Path: "/runs/run_1/cancel", WantStatus: http.StatusConflict,
+			Path: "/v1/runs/run_1/cancel", WantStatus: http.StatusConflict,
 		},
 		{ // Test 2: An unknown run is not found.
 			Name: "unknown", Store: run.NewMemStore(), Canceler: &fakeCanceler{ok: true},
-			Path: "/runs/none/cancel", WantStatus: http.StatusNotFound,
+			Path: "/v1/runs/none/cancel", WantStatus: http.StatusNotFound,
 		},
 		{ // Test 3: A run another process holds still accepts, the store carries the request.
 			Name: "held elsewhere", Store: seed(run.StatusRunning), Canceler: &fakeCanceler{ok: false},
-			Path: "/runs/run_1/cancel", WantStatus: http.StatusAccepted,
+			Path: "/v1/runs/run_1/cancel", WantStatus: http.StatusAccepted,
 		},
 		{ // Test 4: No local canceler still accepts through the store.
 			Name: "store only", Store: seed(run.StatusRunning), Canceler: nil,
-			Path: "/runs/run_1/cancel", WantStatus: http.StatusAccepted,
+			Path: "/v1/runs/run_1/cancel", WantStatus: http.StatusAccepted,
 		},
 	}
 	for testNum, test := range tests {
@@ -828,7 +828,7 @@ func TestRetryRun(t *testing.T) {
 			handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(), opts...).Handler()
 			rec := httptest.NewRecorder()
 			handler.ServeHTTP(rec,
-				httptest.NewRequest(http.MethodPost, "/runs/run_1/retry", nil))
+				httptest.NewRequest(http.MethodPost, "/v1/runs/run_1/retry", nil))
 			if rec.Code != test.WantStatus {
 				t.Errorf("status = %d, want %d", rec.Code, test.WantStatus)
 			}
@@ -845,7 +845,7 @@ func TestSchedules(t *testing.T) {
 		WithSchedules(schedule.NewMemStore())).Handler()
 
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/schedules",
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/schedules",
 		strings.NewReader(`{"name":"nightly","cron":"0 2 * * *","playbook":"site.yml"}`)))
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("create status = %d, want 201", rec.Code)
@@ -859,25 +859,25 @@ func TestSchedules(t *testing.T) {
 	}
 
 	rec = httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/schedules", nil))
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/schedules", nil))
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "nightly") {
 		t.Errorf("list = %d %q", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/schedules/"+created.ID, nil))
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/schedules/"+created.ID, nil))
 	if rec.Code != http.StatusOK {
 		t.Errorf("get status = %d, want 200", rec.Code)
 	}
 
 	rec = httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/schedules/"+created.ID, nil))
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/v1/schedules/"+created.ID, nil))
 	if rec.Code != http.StatusOK {
 		t.Errorf("delete status = %d, want 200", rec.Code)
 	}
 
 	rec = httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/schedules/"+created.ID, nil))
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/schedules/"+created.ID, nil))
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("get after delete = %d, want 404", rec.Code)
 	}
@@ -901,7 +901,7 @@ func TestScheduleValidation(t *testing.T) {
 				WithSchedules(schedule.NewMemStore())).Handler()
 			rec := httptest.NewRecorder()
 			handler.ServeHTTP(rec,
-				httptest.NewRequest(http.MethodPost, "/schedules", strings.NewReader(test.Body)))
+				httptest.NewRequest(http.MethodPost, "/v1/schedules", strings.NewReader(test.Body)))
 			if rec.Code != test.Want {
 				t.Errorf("status = %d, want %d", rec.Code, test.Want)
 			}
@@ -913,7 +913,7 @@ func TestSchedulesDisabled(t *testing.T) {
 	t.Parallel()
 	handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop()).Handler()
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/schedules", nil))
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/schedules", nil))
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404 when scheduling is disabled", rec.Code)
 	}
@@ -959,7 +959,7 @@ func TestAuthGate(t *testing.T) {
 	}
 
 	// Open mode: no tokens exist, everything passes.
-	if code := get("/runs", ""); code != http.StatusOK {
+	if code := get("/v1/runs", ""); code != http.StatusOK {
 		t.Fatalf("open mode /runs = %d, want 200", code)
 	}
 
@@ -973,13 +973,13 @@ func TestAuthGate(t *testing.T) {
 	// The enforcement cache holds the open answer briefly; a fresh handler sees the token now.
 	handler = New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(), WithTokens(tokens)).Handler()
 
-	if code := get("/runs", ""); code != http.StatusUnauthorized {
+	if code := get("/v1/runs", ""); code != http.StatusUnauthorized {
 		t.Errorf("no token = %d, want 401", code)
 	}
-	if code := get("/runs", "ymt_wrong"); code != http.StatusUnauthorized {
+	if code := get("/v1/runs", "ymt_wrong"); code != http.StatusUnauthorized {
 		t.Errorf("wrong token = %d, want 401", code)
 	}
-	if code := get("/runs", plain); code != http.StatusOK {
+	if code := get("/v1/runs", plain); code != http.StatusOK {
 		t.Errorf("good token = %d, want 200", code)
 	}
 	if code := get("/healthz", ""); code != http.StatusOK {
@@ -990,11 +990,11 @@ func TestAuthGate(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/auth/check", nil))
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/auth/check", nil))
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("auth check without token = %d, want 401", rec.Code)
 	}
-	req := httptest.NewRequest(http.MethodPost, "/auth/check", nil)
+	req := httptest.NewRequest(http.MethodPost, "/v1/auth/check", nil)
 	req.Header.Set("Authorization", "Bearer "+plain)
 	rec = httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
@@ -1073,12 +1073,12 @@ func TestAuthGateRoles(t *testing.T) {
 		Token  string
 		Want   int
 	}{
-		{http.MethodGet, "/runs", viewer, http.StatusOK},               // Test 0: Viewer reads.
-		{http.MethodPost, "/runs", viewer, http.StatusForbidden},       // Test 1: Viewer cannot launch.
-		{http.MethodPost, "/runs", operator, http.StatusAccepted},      // Test 2: Operator launches.
-		{http.MethodPost, "/projects", operator, http.StatusForbidden}, // Test 3: Operator cannot manage.
-		{http.MethodPost, "/projects", admin, http.StatusNotFound},     // Test 4: Admin passes the gate; feature off here.
-		{http.MethodGet, "/fleet", operator, http.StatusOK},            // Test 5: Operator reads.
+		{http.MethodGet, "/v1/runs", viewer, http.StatusOK},               // Test 0: Viewer reads.
+		{http.MethodPost, "/v1/runs", viewer, http.StatusForbidden},       // Test 1: Viewer cannot launch.
+		{http.MethodPost, "/v1/runs", operator, http.StatusAccepted},      // Test 2: Operator launches.
+		{http.MethodPost, "/v1/projects", operator, http.StatusForbidden}, // Test 3: Operator cannot manage.
+		{http.MethodPost, "/v1/projects", admin, http.StatusNotFound},     // Test 4: Admin passes the gate; feature off here.
+		{http.MethodGet, "/v1/fleet", operator, http.StatusOK},            // Test 5: Operator reads.
 	}
 	for i, test := range tests {
 		if got := do(test.Method, test.Path, test.Token); got != test.Want {
@@ -1102,7 +1102,7 @@ func TestAuthGateExpiredToken(t *testing.T) {
 	}
 
 	handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(), WithTokens(tokens)).Handler()
-	req := httptest.NewRequest(http.MethodGet, "/runs", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/runs", nil)
 	req.Header.Set("Authorization", "Bearer "+plain)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
@@ -1118,7 +1118,7 @@ func TestReadOnlyRejectsMutations(t *testing.T) {
 
 	// A read passes through.
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/runs", nil))
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/runs", nil))
 	if rec.Code != http.StatusOK {
 		t.Errorf("GET /runs status = %d, want 200", rec.Code)
 	}
@@ -1126,7 +1126,7 @@ func TestReadOnlyRejectsMutations(t *testing.T) {
 	// Every mutating method is refused with 403.
 	for _, method := range []string{http.MethodPost, http.MethodDelete, http.MethodPut, http.MethodPatch} {
 		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, httptest.NewRequest(method, "/runs", nil))
+		handler.ServeHTTP(rec, httptest.NewRequest(method, "/v1/runs", nil))
 		if rec.Code != http.StatusForbidden {
 			t.Errorf("%s /runs status = %d, want 403", method, rec.Code)
 		}
@@ -1215,15 +1215,15 @@ func TestMutationsAuthorizeReferencedObjects(t *testing.T) {
 		Body   string
 		Want   int
 	}{
-		{"run other denied secret credential", http.MethodPost, "/runs", otherTok, runSecret, http.StatusForbidden},         // Test 0.
-		{"run owner uses granted credential", http.MethodPost, "/runs", ownerTok, runSecret, http.StatusAccepted},           // Test 1.
-		{"run admin bypasses grants", http.MethodPost, "/runs", adminTok, runSecret, http.StatusAccepted},                   // Test 2.
-		{"run ungranted credential defers to role", http.MethodPost, "/runs", otherTok, runOpen, http.StatusAccepted},       // Test 3.
-		{"pipeline other denied secret project", http.MethodPost, "/pipelines", otherTok, pipeSecret, http.StatusForbidden}, // Test 4.
-		{"pipeline owner uses granted project", http.MethodPost, "/pipelines", ownerTok, pipeSecret, http.StatusAccepted},   // Test 5.
-		{"launch other denied templated credential", http.MethodPost, "/templates/tpl_secret/launch", otherTok, "",
+		{"run other denied secret credential", http.MethodPost, "/v1/runs", otherTok, runSecret, http.StatusForbidden},         // Test 0.
+		{"run owner uses granted credential", http.MethodPost, "/v1/runs", ownerTok, runSecret, http.StatusAccepted},           // Test 1.
+		{"run admin bypasses grants", http.MethodPost, "/v1/runs", adminTok, runSecret, http.StatusAccepted},                   // Test 2.
+		{"run ungranted credential defers to role", http.MethodPost, "/v1/runs", otherTok, runOpen, http.StatusAccepted},       // Test 3.
+		{"pipeline other denied secret project", http.MethodPost, "/v1/pipelines", otherTok, pipeSecret, http.StatusForbidden}, // Test 4.
+		{"pipeline owner uses granted project", http.MethodPost, "/v1/pipelines", ownerTok, pipeSecret, http.StatusAccepted},   // Test 5.
+		{"launch other denied templated credential", http.MethodPost, "/v1/templates/tpl_secret/launch", otherTok, "",
 			http.StatusForbidden}, // Test 6.
-		{"launch owner uses granted credential", http.MethodPost, "/templates/tpl_secret/launch", ownerTok, "",
+		{"launch owner uses granted credential", http.MethodPost, "/v1/templates/tpl_secret/launch", ownerTok, "",
 			http.StatusAccepted}, // Test 7.
 	}
 	for i, test := range tests {

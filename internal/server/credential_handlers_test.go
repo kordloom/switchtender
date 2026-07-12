@@ -29,7 +29,7 @@ func TestListCredentialsNeedsSecret(t *testing.T) {
 
 	handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(),
 		WithCredentials(store, credential.NewSealer("pass", "salt"))).Handler()
-	req := httptest.NewRequest(http.MethodGet, "/credentials", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/credentials", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {

@@ -46,7 +46,7 @@ func TestCreateRunToolValidation(t *testing.T) {
 			t.Parallel()
 			sub := &fakeSubmitter{run: &run.Run{ID: "run_1", Status: run.StatusPending}}
 			handler := New(run.NewMemStore(), sub, zap.NewNop()).Handler()
-			req := httptest.NewRequest(http.MethodPost, "/runs", strings.NewReader(test.Body))
+			req := httptest.NewRequest(http.MethodPost, "/v1/runs", strings.NewReader(test.Body))
 			rec := httptest.NewRecorder()
 
 			handler.ServeHTTP(rec, req)

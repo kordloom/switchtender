@@ -158,14 +158,15 @@ func (g *authGate) roleFor(ctx context.Context, tok *auth.Token) (user.Role, err
 // requiredRole maps a request to the minimum role that may perform it. Reads are for viewers,
 // launching and stopping work is for operators, and managing configuration is for admins.
 func requiredRole(r *http.Request) user.Role {
+	// Path checks compare against the unversioned path, so the /v1 API prefix does not repeat.
+	p := strings.TrimPrefix(r.URL.Path, "/v1")
 	// The audit trail is management data even to read.
-	if r.URL.Path == "/audit" || strings.HasPrefix(r.URL.Path, "/audit/") {
+	if p == "/audit" || strings.HasPrefix(p, "/audit/") {
 		return user.RoleAdmin
 	}
 	if r.Method == http.MethodGet || r.Method == http.MethodHead {
 		return user.RoleViewer
 	}
-	p := r.URL.Path
 	switch {
 	case p == "/auth/check":
 		return user.RoleViewer
@@ -220,23 +221,25 @@ func forbidden(w http.ResponseWriter) {
 // protects reports whether the request needs authentication. Liveness and the UI shell stay
 // public; every page's data calls are still guarded.
 func (g *authGate) protects(r *http.Request) bool {
-	if r.Method == http.MethodGet && r.URL.Path == "/healthz" {
+	// Compare against the unversioned path so the /v1 API prefix does not repeat, while the bare
+	// infrastructure paths (healthz, the UI, OIDC, hooks) still match unchanged.
+	p := strings.TrimPrefix(r.URL.Path, "/v1")
+	if r.Method == http.MethodGet && p == "/healthz" {
 		return false
 	}
-	if r.Method == http.MethodGet &&
-		(r.URL.Path == "/" || strings.HasPrefix(r.URL.Path, "/ui/")) {
+	if r.Method == http.MethodGet && (p == "/" || strings.HasPrefix(p, "/ui/")) {
 		return false
 	}
 	// Sign in must be reachable while the API is enforced.
-	if r.Method == http.MethodPost && r.URL.Path == "/auth/login" {
+	if r.Method == http.MethodPost && p == "/auth/login" {
 		return false
 	}
 	// The single sign-on handshake runs before the user has a token.
-	if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/auth/oidc/") {
+	if r.Method == http.MethodGet && strings.HasPrefix(p, "/auth/oidc/") {
 		return false
 	}
 	// Webhook triggers carry their own secret token in the path, so they bypass the token gate.
-	if r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/hooks/") {
+	if r.Method == http.MethodPost && strings.HasPrefix(p, "/hooks/") {
 		return false
 	}
 	return true
@@ -277,8 +280,9 @@ func (g *authGate) touch(tok *auth.Token) {
 
 // isStream reports whether the request targets the live stream endpoint.
 func isStream(r *http.Request) bool {
-	return r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/stream") &&
-		strings.HasPrefix(r.URL.Path, "/runs/")
+	p := strings.TrimPrefix(r.URL.Path, "/v1")
+	return r.Method == http.MethodGet && strings.HasSuffix(p, "/stream") &&
+		strings.HasPrefix(p, "/runs/")
 }
 
 // unauthorized writes a 401 with a JSON error body.

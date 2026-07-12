@@ -459,7 +459,7 @@ func createRunHandler(submitter Submitter, authz *authorizer, log *zap.Logger) h
 			return
 		}
 
-		w.Header().Set("Location", "/runs/"+created.ID)
+		w.Header().Set("Location", "/v1/runs/"+created.ID)
 		respondJSON(w, log, http.StatusAccepted, created, wantsPretty(r))
 	}
 }
@@ -527,7 +527,7 @@ func createPipelineHandler(submitter Submitter, authz *authorizer, log *zap.Logg
 			respondError(w, log, http.StatusInternalServerError, "could not submit pipeline")
 			return
 		}
-		w.Header().Set("Location", "/runs/"+created.ID)
+		w.Header().Set("Location", "/v1/runs/"+created.ID)
 		respondJSON(w, log, http.StatusAccepted, created, wantsPretty(r))
 	}
 }
@@ -594,7 +594,7 @@ func retryRunHandler(retrier Retrier, log *zap.Logger) http.HandlerFunc {
 			respondError(w, log, http.StatusInternalServerError, "could not retry run")
 			return
 		}
-		w.Header().Set("Location", "/runs/"+created.ID)
+		w.Header().Set("Location", "/v1/runs/"+created.ID)
 		respondJSON(w, log, http.StatusAccepted, created, wantsPretty(r))
 	}
 }

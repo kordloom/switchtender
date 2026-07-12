@@ -38,7 +38,7 @@ func TestDeleteCredentialInUse(t *testing.T) {
 
 	del := func(id string) *httptest.ResponseRecorder {
 		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/credentials/"+id, nil))
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/v1/credentials/"+id, nil))
 		return rec
 	}
 
@@ -86,7 +86,7 @@ func TestDeleteProjectInUse(t *testing.T) {
 
 	del := func(id string) int {
 		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/projects/"+id, nil))
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/v1/projects/"+id, nil))
 		return rec.Code
 	}
 

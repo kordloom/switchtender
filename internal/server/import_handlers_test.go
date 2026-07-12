@@ -20,16 +20,16 @@ func TestImportHandler(t *testing.T) {
 		WantStatus int
 	}{
 		{ // Test 0: An empty AWX export previews as an empty plan.
-			Target: "/import/awx", Body: "{}", WantStatus: http.StatusOK,
+			Target: "/v1/import/awx", Body: "{}", WantStatus: http.StatusOK,
 		},
 		{ // Test 1: An unknown format is rejected.
-			Target: "/import/cobol", Body: "{}", WantStatus: http.StatusBadRequest,
+			Target: "/v1/import/cobol", Body: "{}", WantStatus: http.StatusBadRequest,
 		},
 		{ // Test 2: Applying with no stores enabled is a conflict, not a crash.
-			Target: "/import/awx?apply=true", Body: "{}", WantStatus: http.StatusConflict,
+			Target: "/v1/import/awx?apply=true", Body: "{}", WantStatus: http.StatusConflict,
 		},
 		{ // Test 3: Malformed export is rejected.
-			Target: "/import/awx", Body: "{not json", WantStatus: http.StatusBadRequest,
+			Target: "/v1/import/awx", Body: "{not json", WantStatus: http.StatusBadRequest,
 		},
 	}
 	for testNum, test := range tests {

@@ -132,7 +132,7 @@ func TestJWTMutationRecordsAudit(t *testing.T) {
 	handler := New(run.NewMemStore(), &fakeSubmitter{run: &run.Run{ID: "run_j"}}, zap.NewNop(),
 		WithTokens(tokens), WithJWT(jwtAuth), WithAudit(audits)).Handler()
 
-	req := httptest.NewRequest(http.MethodPost, "/runs", strings.NewReader(`{"playbook":"p.yml"}`))
+	req := httptest.NewRequest(http.MethodPost, "/v1/runs", strings.NewReader(`{"playbook":"p.yml"}`))
 	req.Header.Set("Authorization", "Bearer "+raw)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
@@ -151,7 +151,7 @@ func TestJWTMutationRecordsAudit(t *testing.T) {
 	if len(entries) != 1 {
 		t.Fatalf("audit entries = %d, want 1 (JWT mutation was not recorded)", len(entries))
 	}
-	if got := entries[0]; got.Actor != "svc" || got.Method != http.MethodPost || got.Path != "/runs" {
+	if got := entries[0]; got.Actor != "svc" || got.Method != http.MethodPost || got.Path != "/v1/runs" {
 		t.Errorf("entry = {actor:%q method:%q path:%q}, want {svc POST /runs}",
 			got.Actor, got.Method, got.Path)
 	}

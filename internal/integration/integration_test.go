@@ -214,7 +214,7 @@ func waitShardsTerminal(t *testing.T, base, parentID string, want int) []run.Run
 		var shards struct {
 			Shards []run.Run `json:"shards"`
 		}
-		getJSON(t, base+"/runs/"+parentID+"/shards", &shards)
+		getJSON(t, base+"/v1/runs/"+parentID+"/shards", &shards)
 		settled := len(shards.Shards) == want
 		for _, s := range shards.Shards {
 			if !s.Status.Terminal() {
@@ -237,7 +237,7 @@ func waitTerminal(t *testing.T, base, id string) *run.Run {
 	deadline := time.Now().Add(3 * time.Minute)
 	for {
 		var r run.Run
-		getJSON(t, base+"/runs/"+id, &r)
+		getJSON(t, base+"/v1/runs/"+id, &r)
 		if r.Status.Terminal() {
 			return &r
 		}
@@ -280,7 +280,7 @@ func TestRealSSHFleet(t *testing.T) {
 
 	// A plain run reaches all three hosts over real SSH.
 	var created run.Run
-	postJSON(t, base+"/runs",
+	postJSON(t, base+"/v1/runs",
 		fmt.Sprintf(`{"playbook":%q,"inventory":%q}`, playbook, inventory), &created)
 	single := waitTerminal(t, base, created.ID)
 	if single.Status != run.StatusSucceeded {
@@ -293,7 +293,7 @@ func TestRealSSHFleet(t *testing.T) {
 			Host string `json:"host"`
 		} `json:"events"`
 	}
-	getJSON(t, base+"/runs/"+created.ID+"/events", &events)
+	getJSON(t, base+"/v1/runs/"+created.ID+"/events", &events)
 	touched := map[string]bool{}
 	for _, e := range events.Events {
 		if e.Type == "runner_ok" {
@@ -308,7 +308,7 @@ func TestRealSSHFleet(t *testing.T) {
 
 	// A split shards the same fleet and merges back to one succeeded parent.
 	var parent run.Run
-	postJSON(t, base+"/runs",
+	postJSON(t, base+"/v1/runs",
 		fmt.Sprintf(`{"playbook":%q,"inventory":%q,"shards":2}`, playbook, inventory), &parent)
 	split := waitTerminal(t, base, parent.ID)
 	if split.Status != run.StatusSucceeded {
@@ -333,7 +333,7 @@ func TestRealSSHFleet(t *testing.T) {
 		var fleet struct {
 			Hosts []run.HostHealth `json:"hosts"`
 		}
-		getJSON(t, base+"/fleet?window=5", &fleet)
+		getJSON(t, base+"/v1/fleet?window=5", &fleet)
 		settled := len(fleet.Hosts) == len(hosts)
 		for _, h := range fleet.Hosts {
 			if h.Failures != 0 {
@@ -384,7 +384,7 @@ func TestRealSSHFailureIsolation(t *testing.T) {
 	}
 
 	var parent run.Run
-	postJSON(t, base+"/runs",
+	postJSON(t, base+"/v1/runs",
 		fmt.Sprintf(`{"playbook":%q,"inventory":%q,"shards":3}`, playbook, inventory), &parent)
 	split := waitTerminal(t, base, parent.ID)
 	if split.Status != run.StatusFailed {
@@ -419,7 +419,7 @@ func TestRealSSHFailureIsolation(t *testing.T) {
 		t.Logf("pre-retry shard %s limit=%s status=%s error=%q", s.ID, s.Limit, s.Status, s.Error)
 	}
 	var retry run.Run
-	postJSON(t, base+"/runs/"+parent.ID+"/retry", "", &retry)
+	postJSON(t, base+"/v1/runs/"+parent.ID+"/retry", "", &retry)
 	if retry.RetryOf == nil || *retry.RetryOf != parent.ID {
 		t.Fatalf("retry parent missing retry_of link: %+v", retry)
 	}

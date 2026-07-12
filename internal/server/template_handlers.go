@@ -281,7 +281,7 @@ func launchTemplateHandler(store template.Store, submitter Submitter, authz *aut
 			respondError(w, log, http.StatusInternalServerError, "could not launch template")
 			return
 		}
-		w.Header().Set("Location", "/runs/"+created.ID)
+		w.Header().Set("Location", "/v1/runs/"+created.ID)
 		respondJSON(w, log, http.StatusAccepted, created, wantsPretty(r))
 	}
 }

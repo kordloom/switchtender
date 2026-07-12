@@ -39,7 +39,7 @@ func TestExplainRun(t *testing.T) {
 	// Test 0: With a provider, a run is explained.
 	handler := New(store, &fakeSubmitter{}, zap.NewNop(), WithAI(provider)).Handler()
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/runs/run_x/explain", nil))
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/runs/run_x/explain", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("explain status = %d, want 200", rec.Code)
 	}
@@ -59,7 +59,7 @@ func TestExplainRun(t *testing.T) {
 	// Test 1: With no provider, the endpoint is disabled.
 	off := New(store, &fakeSubmitter{}, zap.NewNop()).Handler()
 	rec = httptest.NewRecorder()
-	off.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/runs/run_x/explain", nil))
+	off.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/runs/run_x/explain", nil))
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("explain with no provider status = %d, want 404", rec.Code)
 	}
@@ -84,14 +84,14 @@ func TestExplainRunGates(t *testing.T) {
 
 	// Test 0: A run that is still executing is refused with 409.
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/runs/run_going/explain", nil))
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/runs/run_going/explain", nil))
 	if rec.Code != http.StatusConflict {
 		t.Errorf("non-terminal explain status = %d, want 409", rec.Code)
 	}
 
 	// Test 1: A provider failure maps to a generic 502 without provider internals.
 	rec = httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/runs/run_done/explain", nil))
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/runs/run_done/explain", nil))
 	if rec.Code != http.StatusBadGateway {
 		t.Errorf("provider failure status = %d, want 502", rec.Code)
 	}
@@ -101,7 +101,7 @@ func TestExplainRunGates(t *testing.T) {
 
 	// Test 2: An unknown run is a 404.
 	rec = httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/runs/run_missing/explain", nil))
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/runs/run_missing/explain", nil))
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("unknown run explain status = %d, want 404", rec.Code)
 	}
@@ -121,7 +121,7 @@ func TestExplainRunRefused(t *testing.T) {
 	})
 	handler := New(store, &fakeSubmitter{}, zap.NewNop(), WithAI(provider)).Handler()
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/runs/run_r/explain", nil))
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/runs/run_r/explain", nil))
 	if rec.Code != http.StatusBadGateway {
 		t.Fatalf("refused explain status = %d, want 502", rec.Code)
 	}
@@ -148,7 +148,7 @@ func TestExplainRunCached(t *testing.T) {
 
 	for i := 0; i < 2; i++ {
 		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/runs/run_c/explain", nil))
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/runs/run_c/explain", nil))
 		if rec.Code != http.StatusOK {
 			t.Fatalf("explain %d status = %d, want 200", i, rec.Code)
 		}
@@ -179,7 +179,7 @@ func TestExplainRunFreshAfterApproval(t *testing.T) {
 	handler := New(store, &fakeSubmitter{}, zap.NewNop(), WithAI(provider)).Handler()
 
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/runs/run_p/explain", nil))
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/runs/run_p/explain", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("proposal explain status = %d, want 200", rec.Code)
 	}
@@ -193,7 +193,7 @@ func TestExplainRunFreshAfterApproval(t *testing.T) {
 		t.Fatalf("Save() error = %v", err)
 	}
 	rec = httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/runs/run_p/explain", nil))
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/runs/run_p/explain", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("post-approval explain status = %d, want 200", rec.Code)
 	}
@@ -309,7 +309,7 @@ func TestExplainRunIncludesEvents(t *testing.T) {
 	})
 	handler := New(store, &fakeSubmitter{}, zap.NewNop(), WithAI(provider)).Handler()
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/runs/run_ev/explain", nil))
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/runs/run_ev/explain", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("explain status = %d, want 200", rec.Code)
 	}
