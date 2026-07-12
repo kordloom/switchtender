@@ -3185,12 +3185,46 @@ async function loadDrift() {
 			runLink.textContent = "view";
 			runCell.appendChild(runLink);
 			tr.appendChild(runCell);
+			const actions = document.createElement("td");
+			if (h.drifted_tasks > 0 && !isReadOnly()) {
+				const btn = document.createElement("button");
+				btn.type = "button";
+				btn.className = "button";
+				btn.textContent = "Propose reconcile";
+				btn.addEventListener("click", () => proposeReconcile(h.host, btn));
+				actions.appendChild(btn);
+			}
+			tr.appendChild(actions);
 			tbody.appendChild(tr);
 		}
 		setStatus("");
 		document.querySelector("table.runs").hidden = false;
 	} catch (e) {
 		setStatus("Failed to load drift status: " + e.message);
+	}
+}
+
+// proposeReconcile asks the server to build a reconcile proposal for a drifted host, then opens
+// the held run so an approver can review it. The proposal never executes without that approval.
+async function proposeReconcile(host, btn) {
+	btn.disabled = true;
+	setStatus("Proposing a reconcile for " + host + ".");
+	try {
+		const res = await fetch("/drift/reconcile", {
+			method: "POST",
+			headers: Object.assign({ "Content-Type": "application/json" }, authHeaders()),
+			body: JSON.stringify({ host }),
+		});
+		if (res.status === 401) {
+			requireLogin();
+			return;
+		}
+		const data = await res.json().catch(() => ({}));
+		if (!res.ok) throw new Error(data.error || "HTTP " + res.status);
+		window.location.assign("/ui/runs/" + data.id);
+	} catch (err) {
+		setStatus("Could not propose a reconcile: " + err.message);
+		btn.disabled = false;
 	}
 }
 
@@ -3945,7 +3979,10 @@ function updateActions(run) {
 	if (reject) reject.hidden = !held;
 	const splitParent = (run.kind === "split" || run.shard_count) && !run.parent_id;
 	retry.hidden = !(splitParent && isTerminal(run.status) && run.status !== "succeeded");
-	if (explain) explain.hidden = !(run.status === "failed" || run.status === "interrupted");
+	if (explain) {
+		const heldProposal = held && run.proposed_from;
+		explain.hidden = !(run.status === "failed" || run.status === "interrupted" || heldProposal);
+	}
 }
 
 // loadPipeline renders a pipeline run as an ordered list of step runs, refreshed live over the
@@ -4184,6 +4221,16 @@ function renderHeader(run) {
 	}
 	if (run.dry_run) {
 		el.appendChild(field("Mode", "dry run"));
+	}
+	if (run.proposed_from) {
+		const link = document.createElement("a");
+		link.href = "/ui/runs/" + run.proposed_from;
+		link.textContent = shortId(run.proposed_from);
+		link.title = run.proposed_from;
+		el.appendChild(field("Proposed from drift check", null, link));
+		if (run.limit) {
+			el.appendChild(field("Limited to", run.limit));
+		}
 	}
 	if (run.inventory) {
 		el.appendChild(field("Inventory", baseName(run.inventory), null, run.inventory));

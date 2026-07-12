@@ -83,12 +83,19 @@ type fakeSubmitter struct {
 	gotShards int
 	// gotSteps is the step count from the most recent SubmitPipeline call.
 	gotSteps int
+	// gotRun is a probe run with the most recent Submit call's options applied, so a test can
+	// assert what the handler asked for.
+	gotRun *run.Run
 }
 
-// Submit records the arguments and returns the configured run or error.
-func (f *fakeSubmitter) Submit(_ context.Context, playbook, inventory string, _ ...run.SubmitOption) (*run.Run, error) {
+// Submit records the arguments, applies the options to a probe run for assertions, and returns
+// the configured run or error.
+func (f *fakeSubmitter) Submit(_ context.Context, playbook, inventory string, opts ...run.SubmitOption) (*run.Run, error) {
 	f.gotPlaybook = playbook
 	f.gotInventory = inventory
+	probe := &run.Run{Playbook: playbook, Inventory: inventory}
+	run.ApplyOptions(probe, opts)
+	f.gotRun = probe
 	if f.err != nil {
 		return nil, f.err
 	}

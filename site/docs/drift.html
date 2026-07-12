@@ -48,6 +48,19 @@ drift.</p>
 <pre><code>curl -s localhost:8080/drift
 </code></pre>
 <p>Each host carries its drifted task count, the check run id, and when it was checked, worst drift first.</p>
+<h2 id="reconcile-a-drifted-host">Reconcile a drifted host</h2>
+<p>A drifted row on the Drift page carries a Propose reconcile button. It builds the fix for you: the
+same playbook, inventory, and credentials as the check that observed the drift, limited to that host
+and run for real instead of in check mode. The construction is deterministic. No model builds it.</p>
+<p>The proposal never starts on its own. It is created held for approval, so an approver reviews it and
+releases or rejects it, and the audit trail records that a machine proposed it and who decided. When
+an AI provider is configured, the Explain button on the held proposal summarizes what drifted and
+what approving will change, from the check run's masked events.</p>
+<p>The same action is one request, for an operator token:</p>
+<pre><code>curl -s -X POST localhost:8080/drift/reconcile -d '{&quot;host&quot;: &quot;web01&quot;}'
+</code></pre>
+<p>Reconcile is defined for Ansible drift, where limiting the playbook to the drifted host applies
+exactly the divergent tasks.</p>
 <p>See also the <a href="/docs/faq.html">FAQ</a> and the <a href="/docs/tutorials.html">tutorials</a>.</p>
 
 		</main>

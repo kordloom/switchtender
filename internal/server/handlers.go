@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -210,6 +211,102 @@ func driftHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
 		}
 		respondJSON(w, log, http.StatusOK,
 			driftResponse{Hosts: hosts, Count: len(hosts)}, wantsPretty(r))
+	}
+}
+
+// reconcileRequest is the body of POST /drift/reconcile.
+type reconcileRequest struct {
+	// Host is the drifted host to build a reconcile proposal for.
+	Host string `json:"host"`
+}
+
+// reconcileDriftHandler builds a reconcile proposal for a drifted host: the same playbook,
+// inventory, and credentials as the check run that observed the drift, limited to that host and
+// run for real instead of in check mode. The proposal is deterministic, no model constructs it,
+// and it is born held for approval, so a person releases it or it never executes. The actor must
+// hold use on every object the run will touch, exactly as a template launch requires.
+func reconcileDriftHandler(store run.Store, submitter Submitter, authz *authorizer, log *zap.Logger) http.HandlerFunc {
+	if store == nil || submitter == nil {
+		panic("server: reconcileDriftHandler: Store and Submitter required")
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req reconcileRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			respondError(w, log, http.StatusBadRequest, "invalid json body")
+			return
+		}
+		host := strings.TrimSpace(req.Host)
+		if host == "" {
+			respondError(w, log, http.StatusBadRequest, "a host is required")
+			return
+		}
+		drift, err := store.DriftStatus(r.Context())
+		if err != nil {
+			log.Error("server: reconcile drift status: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not compute drift status")
+			return
+		}
+		var entry *run.HostDrift
+		for i := range drift {
+			if drift[i].Host == host {
+				entry = &drift[i]
+				break
+			}
+		}
+		if entry == nil {
+			respondError(w, log, http.StatusNotFound, "no drift check recorded for that host")
+			return
+		}
+		if entry.DriftedTasks == 0 {
+			respondError(w, log, http.StatusConflict, "host is in sync")
+			return
+		}
+		check, err := store.Get(r.Context(), entry.RunID)
+		if err != nil {
+			log.Error("server: reconcile check run: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not read the check run")
+			return
+		}
+		if run.NormalizeTool(check.Tool) != run.ToolAnsible {
+			respondError(w, log, http.StatusBadRequest, "reconcile is defined for ansible drift checks")
+			return
+		}
+
+		// Authorize every object the proposal will touch, so a reconcile cannot borrow a project,
+		// inventory, or credentials the actor was never granted.
+		objects := append([]string{check.ProjectID, check.InventoryID}, check.CredentialIDs...)
+		if denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse, objects...)) {
+			return
+		}
+
+		opts := []run.SubmitOption{
+			run.WithTool(check.Tool),
+			run.WithLimit(host),
+			run.WithRequireApproval(true),
+			run.WithProposedFrom(check.ID),
+		}
+		if check.ProjectID != "" {
+			opts = append(opts, run.WithProject(check.ProjectID))
+		}
+		if check.InventoryID != "" {
+			opts = append(opts, run.WithInventory(check.InventoryID))
+		}
+		if len(check.CredentialIDs) > 0 {
+			opts = append(opts, run.WithCredentialIDs(check.CredentialIDs))
+		}
+		if len(check.ExtraVars) > 0 {
+			opts = append(opts, run.WithExtraVars(check.ExtraVars))
+		}
+		if check.Queue != "" {
+			opts = append(opts, run.WithQueue(check.Queue))
+		}
+		proposal, err := submitter.Submit(r.Context(), check.Playbook, check.Inventory, opts...)
+		if err != nil {
+			log.Error("server: reconcile submit: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not create the proposal")
+			return
+		}
+		respondJSON(w, log, http.StatusAccepted, proposal, wantsPretty(r))
 	}
 }
 

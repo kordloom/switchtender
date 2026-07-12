@@ -177,6 +177,9 @@ func requiredRole(r *http.Request) user.Role {
 	case p == "/ai/draft":
 		// A draft feeds execution configuration, so it takes the same role as launching work.
 		return user.RoleOperator
+	case p == "/drift/reconcile":
+		// Proposing a reconcile is operator work. Releasing the held proposal stays admin work.
+		return user.RoleOperator
 	case strings.HasPrefix(p, "/runs/") &&
 		(strings.HasSuffix(p, "/cancel") || strings.HasSuffix(p, "/retry")):
 		return user.RoleOperator

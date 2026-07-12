@@ -146,6 +146,10 @@ type Run struct {
 	InventoryID string `json:"inventory_id,omitempty"`
 	// Queue restricts execution to workers serving this queue. Empty runs on the default pool.
 	Queue string `json:"queue,omitempty"`
+	// ProposedFrom names the drift check run this reconcile proposal was built from. A run carrying
+	// it was machine proposed and is born held for approval, so a person releases it or it never
+	// executes.
+	ProposedFrom string `json:"proposed_from,omitempty"`
 }
 
 // Clone returns a deep copy so callers cannot mutate stored state through shared pointers.
@@ -253,6 +257,22 @@ func WithRequireApproval(require bool) SubmitOption {
 		if require {
 			r.Status = StatusPendingApproval
 		}
+	}
+}
+
+// WithLimit restricts the run to a host pattern, so a reconcile can target exactly the hosts that
+// drifted.
+func WithLimit(pattern string) SubmitOption {
+	return func(r *Run) {
+		r.Limit = pattern
+	}
+}
+
+// WithProposedFrom marks the run as a machine-built reconcile proposal and records the drift check
+// run it was derived from.
+func WithProposedFrom(checkRunID string) SubmitOption {
+	return func(r *Run) {
+		r.ProposedFrom = checkRunID
 	}
 }
 

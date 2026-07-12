@@ -25,6 +25,13 @@ const explainSystemPrompt = "You are a site reliability engineer helping triage 
 	"Be specific and concise. Rely only on the details provided and do not invent hosts, files, or " +
 	"errors that are not present."
 
+// proposalSystemPrompt frames the model as a reviewer of a held reconcile proposal.
+const proposalSystemPrompt = "You are a site reliability engineer reviewing a proposed reconcile " +
+	"run before it is approved. Given the drift a check run observed and what the proposal will " +
+	"execute, summarize in two to four sentences what drifted and what approving will change, and " +
+	"point out anything risky. Rely only on the details provided and do not invent hosts, files, " +
+	"or tasks that are not present."
+
 // explainLogTail is how many trailing bytes of the run log to include: enough for context without
 // overwhelming the model or the request.
 const explainLogTail = 6000
@@ -140,14 +147,28 @@ func explainRunHandler(store run.Store, provider ai.Provider, log *zap.Logger) h
 			respondError(w, log, http.StatusInternalServerError, "could not read run")
 			return
 		}
-		if !rn.Status.Terminal() {
+		proposal := rn.ProposedFrom != "" && rn.Status == run.StatusPendingApproval
+		if !rn.Status.Terminal() && !proposal {
 			respondError(w, log, http.StatusConflict, "run is not finished")
 			return
 		}
-		body, _ := store.Log(r.Context(), id) // best effort: a run may have produced no log
-		events := explainEvents(r.Context(), store, id)
+		system := explainSystemPrompt
+		var prompt string
+		if proposal {
+			source, err := store.Get(r.Context(), rn.ProposedFrom)
+			if err != nil {
+				log.Error("server: explain proposal source: " + err.Error())
+				respondError(w, log, http.StatusInternalServerError, "could not read the check run")
+				return
+			}
+			system = proposalSystemPrompt
+			prompt = buildProposalPrompt(rn, source, explainEvents(r.Context(), store, rn.ProposedFrom))
+		} else {
+			body, _ := store.Log(r.Context(), id) // best effort: a run may have produced no log
+			prompt = buildExplainPrompt(rn, body, explainEvents(r.Context(), store, id))
+		}
 		answer, err := group.do(id, func() (string, error) {
-			return provider.Complete(r.Context(), explainSystemPrompt, buildExplainPrompt(rn, body, events))
+			return provider.Complete(r.Context(), system, prompt)
 		})
 		if err != nil {
 			log.Error("server: explain run: " + err.Error())
@@ -197,6 +218,57 @@ func buildExplainPrompt(rn *run.Run, logBytes []byte, events []event.Event) stri
 	if len(tail) > 0 {
 		b.WriteString("\n\nLog tail:\n")
 		b.Write(tail)
+	}
+	return b.String()
+}
+
+// buildProposalPrompt assembles the review prompt for a held reconcile proposal: what the proposal
+// will execute and the drift the source check run observed on the target host. Events are already
+// masked at ingest with the same masker as the log.
+func buildProposalPrompt(rn, source *run.Run, events []event.Event) string {
+	var b strings.Builder
+	b.WriteString("Proposal: run playbook ")
+	b.WriteString(source.Playbook)
+	b.WriteString(" for real, limited to host ")
+	b.WriteString(rn.Limit)
+	b.WriteString(".\nObserved by check run ")
+	b.WriteString(source.ID)
+	b.WriteString(" with status ")
+	b.WriteString(string(source.Status))
+	b.WriteString(".")
+	if section := driftedTaskSection(events, rn.Limit); section != "" {
+		b.WriteString("\n\nDrifted tasks, which the check would change:\n")
+		b.WriteString(section)
+	}
+	return b.String()
+}
+
+// driftedTaskSection renders the tasks the check run would change on the host, one line each,
+// within the event byte budget.
+func driftedTaskSection(events []event.Event, host string) string {
+	var b strings.Builder
+	shown, total := 0, 0
+	for _, e := range events {
+		if !e.Changed || (host != "" && e.Host != host) {
+			continue
+		}
+		total++
+		if shown >= explainMaxEvents {
+			continue
+		}
+		line := "- " + e.Play + " / " + e.Task
+		if msg := strings.TrimSpace(e.Message); msg != "" {
+			line += ": " + clip(msg, 300)
+		}
+		if b.Len()+len(line) > explainEventBudget {
+			continue
+		}
+		b.WriteString(line)
+		b.WriteString("\n")
+		shown++
+	}
+	if total > shown && shown > 0 {
+		fmt.Fprintf(&b, "- and %d more drifted tasks\n", total-shown)
 	}
 	return b.String()
 }
