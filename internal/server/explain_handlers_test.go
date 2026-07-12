@@ -15,6 +15,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/dcadolph/yardmaster/internal/ai"
+	"github.com/dcadolph/yardmaster/internal/event"
 	"github.com/dcadolph/yardmaster/internal/run"
 )
 
@@ -142,7 +143,7 @@ func TestBuildExplainPrompt(t *testing.T) {
 
 	// Test 0: A command longer than the cap is truncated and marked.
 	longCmd := strings.Repeat("x", explainCommandCap+500)
-	prompt := buildExplainPrompt(&run.Run{Tool: "bash", Command: longCmd, Status: run.StatusFailed}, nil)
+	prompt := buildExplainPrompt(&run.Run{Tool: "bash", Command: longCmd, Status: run.StatusFailed}, nil, nil)
 	if strings.Contains(prompt, longCmd) {
 		t.Error("prompt contains the full command, want it capped")
 	}
@@ -151,19 +152,102 @@ func TestBuildExplainPrompt(t *testing.T) {
 	}
 
 	// Test 1: A short command is included whole with no truncation note.
-	prompt = buildExplainPrompt(&run.Run{Tool: "bash", Command: "deploy.sh", Status: run.StatusFailed}, nil)
+	prompt = buildExplainPrompt(&run.Run{Tool: "bash", Command: "deploy.sh", Status: run.StatusFailed}, nil, nil)
 	if !strings.Contains(prompt, "deploy.sh") || strings.Contains(prompt, "[truncated]") {
 		t.Errorf("short command mishandled: %q", prompt)
 	}
 
 	// Test 2: A log tail cut mid-rune stays valid UTF-8.
 	log := append(bytes.Repeat([]byte("é"), explainLogTail), []byte("tail end")...)
-	prompt = buildExplainPrompt(&run.Run{Tool: "bash", Status: run.StatusFailed}, log)
+	prompt = buildExplainPrompt(&run.Run{Tool: "bash", Status: run.StatusFailed}, log, nil)
 	if !utf8.ValidString(prompt) {
 		t.Error("prompt is not valid UTF-8 after tail truncation")
 	}
 	if !strings.Contains(prompt, "tail end") {
 		t.Error("prompt missing the log tail content")
+	}
+}
+
+// TestBuildExplainPromptEvents covers the event context sections: failed tasks with rc and stderr,
+// the cap preferring the most recent failures, the stats recap worst hosts first, and no sections
+// when there are no events.
+func TestBuildExplainPromptEvents(t *testing.T) {
+	t.Parallel()
+	rc := 2
+
+	// Test 0: A failing task renders play, task, host, rc, message, and stderr.
+	events := []event.Event{{
+		Type: event.TypeRunnerFailed, Play: "site", Task: "apt update", Host: "web-1",
+		RC: &rc, Message: "lock file held", Stderr: "E: could not get lock",
+	}}
+	prompt := buildExplainPrompt(&run.Run{Tool: "ansible", Status: run.StatusFailed}, nil, events)
+	for _, want := range []string{"Failed tasks:", "site / apt update on web-1", "(rc=2)", "lock file held", "stderr: E: could not get lock"} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("prompt missing %q:\n%s", want, prompt)
+		}
+	}
+
+	// Test 1: More failures than the cap keeps only the most recent ones.
+	var many []event.Event
+	for i := 0; i < explainMaxEvents+5; i++ {
+		many = append(many, event.Event{
+			Type: event.TypeRunnerFailed, Play: "p", Task: fmt.Sprintf("task-%d", i), Host: "h",
+		})
+	}
+	prompt = buildExplainPrompt(&run.Run{Tool: "ansible", Status: run.StatusFailed}, nil, many)
+	if strings.Contains(prompt, "task-0 ") || !strings.Contains(prompt, fmt.Sprintf("task-%d", explainMaxEvents+4)) {
+		t.Errorf("failed task cap kept the wrong events:\n%s", prompt)
+	}
+
+	// Test 2: The stats recap lists the worst host first.
+	stats := []event.Event{{
+		Type: event.TypeStats,
+		Stats: map[string]event.HostStats{
+			"healthy": {OK: 8},
+			"broken":  {OK: 2, Failures: 6},
+		},
+	}}
+	prompt = buildExplainPrompt(&run.Run{Tool: "ansible", Status: run.StatusFailed}, nil, stats)
+	broken, healthy := strings.Index(prompt, "- broken:"), strings.Index(prompt, "- healthy:")
+	if broken < 0 || healthy < 0 || broken > healthy {
+		t.Errorf("stats recap order wrong (broken=%d healthy=%d):\n%s", broken, healthy, prompt)
+	}
+
+	// Test 3: No events produce no event sections.
+	prompt = buildExplainPrompt(&run.Run{Tool: "bash", Status: run.StatusFailed}, nil, nil)
+	if strings.Contains(prompt, "Failed tasks:") || strings.Contains(prompt, "Host stats:") {
+		t.Errorf("empty events grew sections:\n%s", prompt)
+	}
+}
+
+// TestExplainRunIncludesEvents drives the handler end to end: a stored run with failing events
+// produces a prompt that carries the failed task line.
+func TestExplainRunIncludesEvents(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := run.NewMemStore()
+	if err := store.Save(ctx, &run.Run{ID: "run_ev", Tool: "ansible", Status: run.StatusFailed}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	if err := store.AppendEvents(ctx, "run_ev", []event.Event{{
+		Type: event.TypeRunnerFailed, Play: "site", Task: "restart nginx", Host: "web-2", Message: "unit not found",
+	}}); err != nil {
+		t.Fatalf("AppendEvents() error = %v", err)
+	}
+
+	var sawTask bool
+	provider := ai.ProviderFunc(func(_ context.Context, _, user string) (string, error) {
+		sawTask = strings.Contains(user, "restart nginx on web-2")
+		return "advice", nil
+	})
+	handler := New(store, &fakeSubmitter{}, zap.NewNop(), WithAI(provider)).Handler()
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/runs/run_ev/explain", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("explain status = %d, want 200", rec.Code)
+	}
+	if !sawTask {
+		t.Error("prompt did not include the failed task event")
 	}
 }
 

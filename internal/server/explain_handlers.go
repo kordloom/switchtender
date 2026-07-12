@@ -1,8 +1,11 @@
 package server
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -11,14 +14,16 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/dcadolph/yardmaster/internal/ai"
+	"github.com/dcadolph/yardmaster/internal/event"
 	"github.com/dcadolph/yardmaster/internal/run"
 )
 
 // explainSystemPrompt frames the model as a triage assistant that only summarizes the input.
 const explainSystemPrompt = "You are a site reliability engineer helping triage an automation run. " +
-	"Given the run's tool, status, error, and log tail, explain the most likely cause of the outcome " +
-	"in two to four sentences and suggest one concrete next step. Be specific and concise. Rely only " +
-	"on the details provided and do not invent hosts, files, or errors that are not present."
+	"Given the run's tool, status, error, failed tasks, per host stats, and log tail, explain the " +
+	"most likely cause of the outcome in two to four sentences and suggest one concrete next step. " +
+	"Be specific and concise. Rely only on the details provided and do not invent hosts, files, or " +
+	"errors that are not present."
 
 // explainLogTail is how many trailing bytes of the run log to include: enough for context without
 // overwhelming the model or the request.
@@ -27,6 +32,20 @@ const explainLogTail = 6000
 // explainCommandCap is how many leading bytes of a step's script or command to include. A script
 // body can be arbitrarily large, and its opening lines carry the interpreter and the intent.
 const explainCommandCap = 2000
+
+// explainEventWindow is how many trailing events to scan for failures and stats. Failures and the
+// final recap cluster at the end of a run, and a fixed window bounds the read for huge runs.
+const explainEventWindow = 500
+
+// explainMaxEvents is how many failing task events to include, preferring the most recent.
+const explainMaxEvents = 10
+
+// explainEventBudget caps the failed-task section in bytes so a wide failure cannot bloat the
+// prompt.
+const explainEventBudget = 4000
+
+// explainStatsHosts is how many hosts the stats recap lists, worst first.
+const explainStatsHosts = 20
 
 // explainCacheTTL is how long a computed explanation is reused. A terminal run's answer is stable,
 // so the TTL is a memory bound, not a freshness requirement.
@@ -126,8 +145,9 @@ func explainRunHandler(store run.Store, provider ai.Provider, log *zap.Logger) h
 			return
 		}
 		body, _ := store.Log(r.Context(), id) // best effort: a run may have produced no log
+		events := explainEvents(r.Context(), store, id)
 		answer, err := group.do(id, func() (string, error) {
-			return provider.Complete(r.Context(), explainSystemPrompt, buildExplainPrompt(rn, body))
+			return provider.Complete(r.Context(), explainSystemPrompt, buildExplainPrompt(rn, body, events))
 		})
 		if err != nil {
 			log.Error("server: explain run: " + err.Error())
@@ -139,8 +159,9 @@ func explainRunHandler(store run.Store, provider ai.Provider, log *zap.Logger) h
 	}
 }
 
-// buildExplainPrompt assembles a compact triage prompt from a run and the tail of its log.
-func buildExplainPrompt(rn *run.Run, logBytes []byte) string {
+// buildExplainPrompt assembles a compact triage prompt from a run, its structured events, and the
+// tail of its log. Events are already masked at ingest with the same masker as the log.
+func buildExplainPrompt(rn *run.Run, logBytes []byte, events []event.Event) string {
 	var b strings.Builder
 	b.WriteString("Tool: ")
 	b.WriteString(run.NormalizeTool(rn.Tool))
@@ -158,6 +179,14 @@ func buildExplainPrompt(rn *run.Run, logBytes []byte) string {
 		b.WriteString("\nError: ")
 		b.WriteString(rn.Error)
 	}
+	if section := failedTaskSection(events); section != "" {
+		b.WriteString("\n\nFailed tasks:\n")
+		b.WriteString(section)
+	}
+	if recap := statsSection(events); recap != "" {
+		b.WriteString("\nHost stats:\n")
+		b.WriteString(recap)
+	}
 	tail := logBytes
 	if len(tail) > explainLogTail {
 		tail = tail[len(tail)-explainLogTail:]
@@ -170,6 +199,109 @@ func buildExplainPrompt(rn *run.Run, logBytes []byte) string {
 		b.Write(tail)
 	}
 	return b.String()
+}
+
+// explainEvents returns the trailing window of a run's events. It is best effort and returns nil
+// on any error, since events are optional context for the prompt.
+func explainEvents(ctx context.Context, store run.Store, id string) []event.Event {
+	last, err := store.LastEventSeq(ctx, id)
+	if err != nil || last <= 0 {
+		return nil
+	}
+	after := last - explainEventWindow
+	if after < 0 {
+		after = 0
+	}
+	events, err := store.EventsAfter(ctx, id, after, explainEventWindow)
+	if err != nil {
+		return nil
+	}
+	return events
+}
+
+// failedTaskSection renders the most recent failing task events, one entry each, within a byte
+// budget. It keeps a short message and stderr excerpt per event and skips bulky stdout, diff, and
+// published outputs entirely.
+func failedTaskSection(events []event.Event) string {
+	var failed []event.Event
+	for _, e := range events {
+		if e.Type == event.TypeRunnerFailed || e.Type == event.TypeRunnerUnreachable {
+			failed = append(failed, e)
+		}
+	}
+	if len(failed) > explainMaxEvents {
+		failed = failed[len(failed)-explainMaxEvents:]
+	}
+	var b strings.Builder
+	for _, e := range failed {
+		line := "- " + e.Play + " / " + e.Task + " on " + e.Host
+		if e.RC != nil {
+			line += fmt.Sprintf(" (rc=%d)", *e.RC)
+		}
+		if msg := strings.TrimSpace(e.Message); msg != "" {
+			line += ": " + clip(msg, 300)
+		}
+		if errOut := strings.TrimSpace(e.Stderr); errOut != "" {
+			line += "\n  stderr: " + clip(errOut, 300)
+		}
+		if b.Len()+len(line) > explainEventBudget {
+			break
+		}
+		b.WriteString(line)
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+// statsSection renders the per host recap from the final stats event, worst hosts first. The recap
+// is integer counts only, so it carries no output content.
+func statsSection(events []event.Event) string {
+	for i := len(events) - 1; i >= 0; i-- {
+		e := events[i]
+		if e.Type != event.TypeStats || len(e.Stats) == 0 {
+			continue
+		}
+		hosts := make([]string, 0, len(e.Stats))
+		for h := range e.Stats {
+			hosts = append(hosts, h)
+		}
+		sort.Slice(hosts, func(a, b int) bool {
+			sa, sb := e.Stats[hosts[a]], e.Stats[hosts[b]]
+			ba, bb := sa.Failures+sa.Unreachable, sb.Failures+sb.Unreachable
+			if ba != bb {
+				return ba > bb
+			}
+			return hosts[a] < hosts[b]
+		})
+		shown := hosts
+		if len(shown) > explainStatsHosts {
+			shown = shown[:explainStatsHosts]
+		}
+		var b strings.Builder
+		for _, h := range shown {
+			s := e.Stats[h]
+			fmt.Fprintf(&b, "- %s: ok=%d changed=%d failed=%d unreachable=%d skipped=%d\n",
+				h, s.OK, s.Changed, s.Failures, s.Unreachable, s.Skipped)
+		}
+		if len(hosts) > len(shown) {
+			fmt.Fprintf(&b, "- and %d more hosts\n", len(hosts)-len(shown))
+		}
+		return b.String()
+	}
+	return ""
+}
+
+// clip returns up to limit leading bytes of s without splitting a multibyte rune, appending an
+// ellipsis when the value was cut.
+func clip(s string, limit int) string {
+	if len(s) <= limit {
+		return s
+	}
+	cut := limit
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "..."
 }
 
 // headBytes returns up to limit leading bytes of s without splitting a multibyte rune, appending a
