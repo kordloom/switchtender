@@ -162,8 +162,10 @@ the API, the UI, and everything you operate speak plain Ansible. No glossary req
 
 ## Status
 
-Source-available under the Business Source License 1.1. The execution engine and the one-command AWX
-and Semaphore migration are complete. The API may still change before 1.0.
+Version 1.0. Source-available under the Business Source License 1.1. The execution engine, the
+control plane, and the one-command AWX and Semaphore migration are complete. The HTTP API is served
+under a stable `/v1` base path and follows semantic versioning, so no breaking change lands within
+the 1.x line.
 
 ## License
 
