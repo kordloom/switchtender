@@ -41,7 +41,7 @@ just live behind a smaller, faster surface.
 
 The fast path. It reads an AWX export and creates the equivalent Yardmaster objects.
 
-1. Export from AWX. `awx export` produces a JSON document of your projects, inventories, job
+1. Export from AWX with its own CLI: `awx export` produces a JSON document of your projects, inventories, job
    templates, credentials without secrets, schedules, and surveys.
 
 2. Preview the import. Nothing is written yet. You get a report of exactly what would be created and

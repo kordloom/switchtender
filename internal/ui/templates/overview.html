@@ -35,6 +35,19 @@
 			<div id="recent" class="ov-list"></div>
 		</section>
 
+		<section class="panel ask-panel" id="ask-panel">
+			<div class="panel-head">
+				<h2>Ask about your fleet</h2>
+				<span class="muted ask-note">Advisory. Answers come from run, health, and drift data only.</span>
+			</div>
+			<div class="ask-row">
+				<input id="ask-input" class="input" placeholder="Which hosts are failing, and why might web01 be flaky?" aria-label="Ask a question about the fleet">
+				<button id="ask-go" class="button" type="button">Ask</button>
+			</div>
+			<div id="ask-status" class="muted" hidden></div>
+			<p id="ask-answer" class="ask-answer" hidden></p>
+		</section>
+
 		<a class="migrate-callout" href="/ui/migrate">
 			<strong>Migrating in?</strong>
 			<span>Import your projects, inventories, templates, and schedules in a few clicks.</span>

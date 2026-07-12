@@ -46,6 +46,7 @@ What Yardmaster does today.
 | AI triage | An optional AI provider, local Ollama or a cloud API, explains a failed run on demand from its masked log and failed task events. Advisory only: it never runs anything, so every action still goes through the same policy and audit gates.|
 | AI drafting | Describe a bash, python, or go step in the workflow editor and the provider drafts the script into the command field for you to review, edit, and save. The draft never executes on its own.|
 | Drift reconcile | One click on a drifted host builds the fix: the check run's playbook limited to that host, run for real, born held for approval. A machine proposes, a person releases, and the audit trail records both.|
+| Fleet questions | Ask the overview a plain-language question and the provider answers from a bounded snapshot of run counts, recent runs, host health, and drift. Metadata only, rate limited, and it can start nothing.|
 | Guided tours | A tour launcher in the top bar walks the product, the pitch, and the migration path step by step in the live UI, fully keyboard accessible.|
 | Desktop mode | `yardmaster desktop` serves on a stable loopback port, keeps its data in a private per-user directory, and opens the UI. Packaging recipes cover a macOS app bundle and a Windows installer.|
 | Migration | `yardmaster import awx` and `import semaphore` read an export and create the equivalent projects, inventories, templates, surveys, schedules, and credential shells, with a dry-run report first.|

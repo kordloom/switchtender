@@ -180,6 +180,9 @@ func requiredRole(r *http.Request) user.Role {
 	case p == "/drift/reconcile":
 		// Proposing a reconcile is operator work. Releasing the held proposal stays admin work.
 		return user.RoleOperator
+	case p == "/ai/ask":
+		// Asking about the fleet is an advisory read over data a viewer can already see.
+		return user.RoleViewer
 	case strings.HasPrefix(p, "/runs/") &&
 		(strings.HasSuffix(p, "/cancel") || strings.HasSuffix(p, "/retry")):
 		return user.RoleOperator

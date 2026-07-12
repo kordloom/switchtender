@@ -328,6 +328,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /runs/{id}/events", runEventsHandler(s.store, s.log))
 	mux.Handle("POST /runs/{id}/explain", explainRunHandler(s.store, s.ai, s.log))
 	mux.Handle("POST /ai/draft", draftStepHandler(s.ai, s.log))
+	mux.Handle("POST /ai/ask", askFleetHandler(s.store, s.ai, s.log))
 	mux.Handle("GET /runs/{id}/stream", runStreamHandler(s.streamer, s.store, s.log))
 	mux.Handle("POST /schedules", createScheduleHandler(s.schedules, s.log))
 	mux.Handle("GET /schedules", listSchedulesHandler(s.schedules, s.log))

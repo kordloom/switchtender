@@ -1169,6 +1169,7 @@ document.addEventListener("DOMContentLoaded", () => {
 	const page = document.body.dataset.page;
 	if (page === "overview") {
 		loadOverview();
+		wireAsk();
 	} else if (page === "runs") {
 		wireModal("launch");
 		if (!isReadOnly()) wireLaunchForm();
@@ -2751,6 +2752,69 @@ async function loadWorkers() {
 		document.querySelector("table.runs").hidden = false;
 	} catch (e) {
 		setStatus("Failed to load workers: " + e.message);
+	}
+}
+
+// wireAsk hooks the fleet question box up to the ask endpoint. Advisory only: the answer comes
+// from run, health, and drift metadata the viewer can already see, and asking changes nothing.
+function wireAsk() {
+	const go = document.getElementById("ask-go");
+	const input = document.getElementById("ask-input");
+	if (!go || !input) return;
+	if (isReadOnly()) {
+		go.disabled = true;
+		input.disabled = true;
+		return;
+	}
+	go.addEventListener("click", askFleet);
+	input.addEventListener("keydown", (e) => {
+		if (e.key === "Enter") {
+			e.preventDefault();
+			askFleet();
+		}
+	});
+}
+
+// askFleet posts the question and renders the answer, keeping the button disabled while one
+// question is in flight.
+async function askFleet() {
+	const input = document.getElementById("ask-input");
+	const go = document.getElementById("ask-go");
+	const status = document.getElementById("ask-status");
+	const answer = document.getElementById("ask-answer");
+	const question = input.value.trim();
+	if (!question) {
+		status.textContent = "Type a question first.";
+		status.hidden = false;
+		return;
+	}
+	go.disabled = true;
+	answer.hidden = true;
+	status.textContent = "Thinking.";
+	status.hidden = false;
+	try {
+		const res = await fetch("/ai/ask", {
+			method: "POST",
+			headers: Object.assign({ "Content-Type": "application/json" }, authHeaders()),
+			body: JSON.stringify({ question }),
+		});
+		if (res.status === 401) {
+			requireLogin();
+			return;
+		}
+		if (res.status === 404) {
+			status.textContent = "AI is not enabled on this server.";
+			return;
+		}
+		const data = await res.json().catch(() => ({}));
+		if (!res.ok) throw new Error(data.error || "HTTP " + res.status);
+		answer.textContent = data.answer || "";
+		answer.hidden = false;
+		status.hidden = true;
+	} catch (err) {
+		status.textContent = "Could not answer: " + err.message;
+	} finally {
+		go.disabled = false;
 	}
 }
 

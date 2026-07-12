@@ -478,6 +478,12 @@ button.topbar-link { background: none; border: none; padding: 0; font: inherit; 
 	.content { padding: 16px; }
 }
 
+/* Fleet question box on the overview: an advisory answer over run, health, and drift metadata. */
+.ask-row { display: flex; gap: 8px; }
+.ask-row .input { flex: 1; }
+.ask-note { font-size: 12px; }
+.ask-answer { margin: 10px 0 0; font-size: 13.5px; line-height: 1.55; white-space: pre-wrap; }
+
 /* AI triage panel on the run detail page: an advisory explanation of a failed run, on demand. */
 .explain-panel { margin-top: 16px; background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: var(--radius); padding: 14px 16px; }
 .explain-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }

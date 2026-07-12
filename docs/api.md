@@ -25,6 +25,7 @@ Every endpoint the server exposes. The web UI lives at `/ui/` and the root redir
 | GET    | `/runs/{id}/stream`     | Live events and log over Server-Sent Events.            |
 | POST   | `/runs/{id}/explain`    | Advisory AI explanation of a run, when a provider is configured. |
 | POST   | `/ai/draft`             | Advisory AI draft of a bash, python, or go step script from a description. Operator role. |
+| POST   | `/ai/ask`               | Advisory AI answer to a fleet question, from run, health, and drift metadata. Rate limited. |
 | POST   | `/drift/reconcile`      | Build a reconcile proposal for a drifted host, held for approval. Operator role. |
 | POST   | `/pipelines`            | Submit ordered playbook steps as one pipeline.          |
 | POST   | `/schedules`            | Cron schedule for a run, split, pipeline, or template.  |
