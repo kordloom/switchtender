@@ -619,8 +619,10 @@ const WF_MIN_SCALE = 0.2;
 const WF_MAX_SCALE = 2.5;
 const WF_NODE_H = 62;
 
-// clampScale keeps a scale inside the allowed zoom range.
+// clampScale keeps a scale inside the allowed zoom range, and falls back to full size for a value
+// that is not a finite number so a corrupt draft cannot write a broken transform.
 function clampScale(k) {
+	if (!Number.isFinite(k)) return 1;
 	return Math.max(WF_MIN_SCALE, Math.min(WF_MAX_SCALE, k));
 }
 
@@ -735,7 +737,7 @@ function wfRestore() {
 	document.getElementById("wf-name").value = draft.name || "";
 	document.getElementById("wf-inventory").value = draft.inventory || "";
 	const v = draft.view;
-	if (v && typeof v.scale === "number" && typeof v.panX === "number" && typeof v.panY === "number") {
+	if (v && Number.isFinite(v.scale) && Number.isFinite(v.panX) && Number.isFinite(v.panY)) {
 		wfState.scale = clampScale(v.scale);
 		wfState.panX = v.panX;
 		wfState.panY = v.panY;
@@ -3103,6 +3105,7 @@ async function proposeRun() {
 		window.location.assign("/ui/runs/" + data.id);
 	} catch (err) {
 		status.textContent = "Could not propose a run: " + err.message;
+	} finally {
 		go.disabled = false;
 	}
 }
@@ -3539,7 +3542,7 @@ async function loadDrift() {
 			runCell.appendChild(runLink);
 			tr.appendChild(runCell);
 			const actions = document.createElement("td");
-			if (h.drifted_tasks > 0 && !isReadOnly()) {
+			if (h.drifted_tasks > 0 && !isReadOnly() && canOperate()) {
 				const btn = document.createElement("button");
 				btn.type = "button";
 				btn.className = "button";
@@ -3577,6 +3580,7 @@ async function proposeReconcile(host, btn) {
 		window.location.assign("/ui/runs/" + data.id);
 	} catch (err) {
 		setStatus("Could not propose a reconcile: " + err.message);
+	} finally {
 		btn.disabled = false;
 	}
 }
