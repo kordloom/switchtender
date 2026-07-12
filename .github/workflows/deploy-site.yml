@@ -8,6 +8,9 @@ on:
       - ".github/workflows/deploy-site.yml"
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: deploy-site
   cancel-in-progress: true
@@ -24,4 +27,4 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: 37ed841c5c85edd1e669f0a22b9fb282
-        run: npx wrangler@4 pages deploy site --project-name yardmaster --branch main
+        run: npx wrangler@4.110.0 pages deploy site --project-name yardmaster --branch main

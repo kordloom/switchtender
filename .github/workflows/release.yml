@@ -96,7 +96,8 @@ jobs:
             dist/Yardmaster.app/Contents/MacOS/launch > desktop.log 2>&1 &
           PID=$!
           sleep 3
-          PORT=$(cat "$FAKEHOME/Library/Application Support/Yardmaster/port")
+          PORT=$(cat "$FAKEHOME/Library/Application Support/Yardmaster/port" 2>/dev/null) \
+            || { echo "no port file written; the app did not start"; cat desktop.log; exit 1; }
           CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:$PORT/healthz")
           kill $PID || true
           echo "healthz: $CODE"
