@@ -2778,7 +2778,7 @@ function renderOverviewMetrics(runs, hosts) {
 		if (r.status === "succeeded") succeeded++;
 		else if (r.status === "failed") failed++;
 	}
-	const rate = runs.length ? Math.round((succeeded / runs.length) * 100) + "%" : "—";
+	const rate = runs.length ? Math.round((succeeded / runs.length) * 100) + "%" : "-";
 	const el = document.getElementById("ov-metrics");
 	el.innerHTML = "";
 	el.appendChild(statCard(runs.length, "Total runs", ""));
