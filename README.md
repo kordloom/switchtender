@@ -82,11 +82,15 @@ host, remembered across every run:
 
 ## Quick start
 
+Grab a build for your platform from the [releases page](https://github.com/dcadolph/yardmaster/releases):
+a `Yardmaster.dmg` for macOS, a `windows_amd64.zip` for Windows, or a `tar.gz` of the binary for
+macOS and Linux. Or build from source:
+
     go build -o yardmaster .
     ./yardmaster serve --addr :8080 --db yardmaster.db
 
-Or run it as a local desktop app. One command picks a stable loopback port, keeps its data in a
-per-user directory, and opens the UI in your browser:
+Or run it as a local desktop app. On macOS open `Yardmaster.app`; otherwise one command picks a
+stable loopback port, keeps its data in a per-user directory, and opens the UI in your browser:
 
     ./yardmaster desktop
 

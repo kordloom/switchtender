@@ -11,7 +11,22 @@ Yardmaster runs as a local desktop application with one command. Because the who
 single binary with an embedded web UI, there is nothing to install alongside it: no database server,
 no container, no Kubernetes.
 
+## Download
+
+Every release attaches ready-to-run downloads on the
+[releases page](https://github.com/dcadolph/yardmaster/releases): a `Yardmaster.dmg` for macOS with
+the app inside, a `windows_amd64.zip` holding `yardmaster.exe`, and `tar.gz` archives of the binary
+for macOS and Linux. A `SHA256SUMS` file lists the checksum of each one.
+
+The downloads are not yet signed with a developer certificate, so the operating system warns that
+the developer is unidentified on first launch. On macOS, right-click the app and choose Open, then
+Open again. On Windows, choose More info and then Run anyway. A signed release removes the warning
+and is planned.
+
 ## Run it
+
+From a download, open `Yardmaster.app` on macOS or run `yardmaster.exe desktop` on Windows. From a
+binary or a source build, run:
 
 ```
 yardmaster desktop
@@ -55,11 +70,13 @@ continues. To stop it, quit the terminal it runs in or end the `yardmaster` proc
 macOS app below runs without a Dock icon, so stop it from Activity Monitor or with
 `pkill yardmaster`.
 
-## Package a macOS app
+## Build the app yourself
 
-Wrap the binary in an app bundle so it launches from the Dock or Finder. The bundle's executable is
-a small launcher that runs `yardmaster desktop`. The launcher is named `launch`, not `Yardmaster`,
-so it does not collide with the `yardmaster` binary on a case-insensitive macOS filesystem:
+The release workflow builds the macOS app and the dmg automatically, so most people use the
+[download](#download). To build the bundle by hand, wrap the binary so it launches from the Dock or
+Finder. The bundle's executable is a small launcher that runs `yardmaster desktop`. The launcher is
+named `launch`, not `Yardmaster`, so it does not collide with the `yardmaster` binary on a
+case-insensitive macOS filesystem:
 
 ```sh
 APP=Yardmaster.app

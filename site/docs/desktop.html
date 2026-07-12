@@ -39,7 +39,18 @@
 <p>Yardmaster runs as a local desktop application with one command. Because the whole product is a
 single binary with an embedded web UI, there is nothing to install alongside it: no database server,
 no container, no Kubernetes.</p>
+<h2 id="download">Download</h2>
+<p>Every release attaches ready-to-run downloads on the
+<a href="https://github.com/dcadolph/yardmaster/releases">releases page</a>: a <code>Yardmaster.dmg</code> for macOS with
+the app inside, a <code>windows_amd64.zip</code> holding <code>yardmaster.exe</code>, and <code>tar.gz</code> archives of the binary
+for macOS and Linux. A <code>SHA256SUMS</code> file lists the checksum of each one.</p>
+<p>The downloads are not yet signed with a developer certificate, so the operating system warns that
+the developer is unidentified on first launch. On macOS, right-click the app and choose Open, then
+Open again. On Windows, choose More info and then Run anyway. A signed release removes the warning
+and is planned.</p>
 <h2 id="run-it">Run it</h2>
+<p>From a download, open <code>Yardmaster.app</code> on macOS or run <code>yardmaster.exe desktop</code> on Windows. From a
+binary or a source build, run:</p>
 <pre><code>yardmaster desktop
 </code></pre>
 <p>This serves on a private loopback port, keeps its database in a per-user data directory, and opens
@@ -86,10 +97,12 @@ machine, mint a token right away and sign in with it:</p>
 continues. To stop it, quit the terminal it runs in or end the <code>yardmaster</code> process. The packaged
 macOS app below runs without a Dock icon, so stop it from Activity Monitor or with
 <code>pkill yardmaster</code>.</p>
-<h2 id="package-a-macos-app">Package a macOS app</h2>
-<p>Wrap the binary in an app bundle so it launches from the Dock or Finder. The bundle's executable is
-a small launcher that runs <code>yardmaster desktop</code>. The launcher is named <code>launch</code>, not <code>Yardmaster</code>,
-so it does not collide with the <code>yardmaster</code> binary on a case-insensitive macOS filesystem:</p>
+<h2 id="build-the-app-yourself">Build the app yourself</h2>
+<p>The release workflow builds the macOS app and the dmg automatically, so most people use the
+<a href="#download">download</a>. To build the bundle by hand, wrap the binary so it launches from the Dock or
+Finder. The bundle's executable is a small launcher that runs <code>yardmaster desktop</code>. The launcher is
+named <code>launch</code>, not <code>Yardmaster</code>, so it does not collide with the <code>yardmaster</code> binary on a
+case-insensitive macOS filesystem:</p>
 <pre><code class="language-sh">APP=Yardmaster.app
 mkdir -p &quot;$APP/Contents/MacOS&quot; &quot;$APP/Contents/Resources&quot;
 cp yardmaster &quot;$APP/Contents/MacOS/yardmaster&quot;
