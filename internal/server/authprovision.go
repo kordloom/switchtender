@@ -60,7 +60,11 @@ func provisionFromDirectory(ctx context.Context, users user.Store, log *zap.Logg
 	if !errors.Is(err, user.ErrNotFound) {
 		return nil, err
 	}
-	u, err = user.New(username, randToken(), role)
+	pw, err := randToken()
+	if err != nil {
+		return nil, err
+	}
+	u, err = user.New(username, pw, role)
 	if err != nil {
 		return nil, err
 	}

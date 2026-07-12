@@ -52,7 +52,7 @@ func TestEntryHashDependsOnContent(t *testing.T) {
 }
 
 // TestVerify covers an intact chain and the tamper cases: an edited field, a rewritten hash, a
-// broken link, a deleted entry, and skipped pre-chain entries.
+// broken link, a deleted entry, and a blanked hash.
 func TestVerify(t *testing.T) {
 	t.Parallel()
 
@@ -89,10 +89,10 @@ func TestVerify(t *testing.T) {
 		t.Errorf("deleted entry: ok=%v at=%d, want false at 2", ok, at)
 	}
 
-	// Test 5: Entries recorded before the chain existed carry no hash and are skipped.
-	legacy := &audit.Entry{ID: "aud_legacy", At: time.Unix(0, 0).UTC(), Actor: "root", Method: "POST", Path: "/x"}
-	withLegacy := append([]*audit.Entry{legacy}, buildChain(2)...)
-	if ok, at := audit.Verify(withLegacy); !ok {
-		t.Errorf("legacy skipped: Verify broke at %d, want intact", at)
+	// Test 5: An entry with no hash breaks the chain, so a blanked entry cannot hide from verification.
+	blanked := buildChain(3)
+	blanked[1].Hash = ""
+	if ok, at := audit.Verify(blanked); ok || at != 2 {
+		t.Errorf("blanked hash: ok=%v at=%d, want false at 2", ok, at)
 	}
 }

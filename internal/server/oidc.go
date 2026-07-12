@@ -87,7 +87,19 @@ func NewOIDCAuth(ctx context.Context, issuer, clientID, clientSecret, redirectUR
 // login starts sign-in: it generates state, a nonce, and a PKCE verifier, stashes them in a signed
 // short-lived cookie, and redirects the browser to the provider.
 func (o *OIDCAuth) login(w http.ResponseWriter, r *http.Request) {
-	state, nonce, verifier := randToken(), randToken(), oauth2.GenerateVerifier()
+	state, err := randToken()
+	if err != nil {
+		o.log.Error("oidc: generate state: " + err.Error())
+		http.Error(w, "sign-in unavailable", http.StatusInternalServerError)
+		return
+	}
+	nonce, err := randToken()
+	if err != nil {
+		o.log.Error("oidc: generate nonce: " + err.Error())
+		http.Error(w, "sign-in unavailable", http.StatusInternalServerError)
+		return
+	}
+	verifier := oauth2.GenerateVerifier()
 	o.setHandshake(w, state, nonce, verifier)
 	url := o.oauth.AuthCodeURL(state, oidc.Nonce(nonce), oauth2.S256ChallengeOption(verifier))
 	http.Redirect(w, r, url, http.StatusFound)
@@ -180,7 +192,11 @@ func (o *OIDCAuth) provision(ctx context.Context, username string) (*user.User, 
 	if !errors.Is(err, user.ErrNotFound) {
 		return nil, err
 	}
-	u, err = user.New(username, randToken(), o.defaultRole)
+	pw, err := randToken()
+	if err != nil {
+		return nil, err
+	}
+	u, err = user.New(username, pw, o.defaultRole)
 	if err != nil {
 		return nil, err
 	}
@@ -258,12 +274,14 @@ func (o *OIDCAuth) sign(payload []byte) string {
 }
 
 // randToken returns a URL-safe 256-bit random string for state, nonce, and provisioned passwords.
-func randToken() string {
+// It returns an error rather than an empty string when the system RNG fails, so a caller never
+// proceeds with an empty security value.
+func randToken() (string, error) {
 	var b [32]byte
 	if _, err := rand.Read(b[:]); err != nil {
-		return ""
+		return "", fmt.Errorf("random token: %w", err)
 	}
-	return base64.RawURLEncoding.EncodeToString(b[:])
+	return base64.RawURLEncoding.EncodeToString(b[:]), nil
 }
 
 // firstNonEmpty returns the first non-empty string, or empty when all are empty.

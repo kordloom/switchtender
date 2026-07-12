@@ -33,3 +33,24 @@ func TestCheckResolveURL(t *testing.T) {
 		}
 	}
 }
+
+// TestBlockUnsafeDial confirms the dialer guard refuses a resolved metadata, link-local, or
+// unspecified address, so a hostname that resolves to one of those cannot slip past the name check.
+func TestBlockUnsafeDial(t *testing.T) {
+	t.Parallel()
+	// A resolved public, private, or loopback address connects normally.
+	ok := []string{"93.184.216.34:443", "10.0.0.5:8200", "127.0.0.1:8200"}
+	for _, a := range ok {
+		if err := blockUnsafeDial("tcp", a, nil); err != nil {
+			t.Errorf("blockUnsafeDial(%q) = %v, want nil", a, err)
+		}
+	}
+	// A resolved metadata, link-local, or unspecified address is refused, even when a hostname
+	// resolved to it.
+	bad := []string{"169.254.169.254:80", "0.0.0.0:80", "[fe80::1]:80"}
+	for _, a := range bad {
+		if err := blockUnsafeDial("tcp", a, nil); !errors.Is(err, ErrResolve) {
+			t.Errorf("blockUnsafeDial(%q) = %v, want ErrResolve", a, err)
+		}
+	}
+}

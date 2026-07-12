@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -21,6 +22,37 @@ var blockedResolveHosts = map[string]bool{
 var safeClient = &http.Client{
 	Timeout:       30 * time.Second,
 	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	Transport:     safeTransport(),
+}
+
+// safeTransport clones the default transport and installs a dialer that rejects a connection whose
+// resolved address is link-local or unspecified, so a hostname that resolves to the cloud metadata
+// service cannot slip past the name check.
+func safeTransport() *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.DialContext = (&net.Dialer{
+		Timeout:   30 * time.Second,
+		KeepAlive: 30 * time.Second,
+		Control:   blockUnsafeDial,
+	}).DialContext
+	return t
+}
+
+// blockUnsafeDial rejects a resolved address that is link-local, link-local multicast, or
+// unspecified, which covers the cloud metadata endpoint, so a rebinding hostname cannot reach it.
+func blockUnsafeDial(_, address string, _ syscall.RawConn) error {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrResolve, err)
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return fmt.Errorf("%w: could not parse resolved address %q", ErrResolve, host)
+	}
+	if ip.IsUnspecified() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+		return fmt.Errorf("%w: resolved address %q is not allowed", ErrResolve, host)
+	}
+	return nil
 }
 
 // checkResolveURL rejects a secret source address that is not http or https, has no host, or points at

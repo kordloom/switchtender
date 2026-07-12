@@ -44,8 +44,9 @@ import (
 )
 
 const (
-	// defaultServeAddr is the address the server listens on when --addr is not set.
-	defaultServeAddr = ":8080"
+	// defaultServeAddr is the address the server listens on when --addr is not set. It binds loopback
+	// so a fresh server is not exposed on the network before the operator creates the first token.
+	defaultServeAddr = "127.0.0.1:8080"
 	// defaultDBPath is the SQLite database file used when --db is not set.
 	defaultDBPath = "yardmaster.db"
 	// defaultScheduleInterval is how often the scheduler checks for due schedules.
@@ -217,7 +218,7 @@ var serveCmd = &cobra.Command{
 
 // init registers serve command flags.
 func init() {
-	serveCmd.Flags().StringVar(&serveAddr, "addr", defaultServeAddr, "Address the server listens on.")
+	serveCmd.Flags().StringVar(&serveAddr, "addr", defaultServeAddr, "Address the server listens on. Loopback by default. Set 0.0.0.0 to expose it on the network.")
 	serveCmd.Flags().StringVar(&serveDB, "db", defaultDBPath,
 		"SQLite file path, or a postgres:// DSN for the PostgreSQL backend.")
 	serveCmd.Flags().StringVar(&serveTLSCert, "tls-cert", "",
@@ -429,6 +430,10 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	}
 	defer func() { _ = bundle.Close() }()
 	store, schedules := bundle.Runs(), bundle.Schedules()
+
+	if n, cerr := bundle.Tokens().Count(cmd.Context()); cerr == nil && n == 0 {
+		log.Warn("no API tokens exist. The API is UNAUTHENTICATED until you create one. Run: yardmaster token new")
+	}
 
 	sealer := newSealerFromEnv(log)
 	auditSigner, err := newAuditSignerFromEnv(log)

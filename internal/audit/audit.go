@@ -83,20 +83,18 @@ func Link(prev, e *Entry) {
 
 // Verify walks entries in chain order, oldest first, and reports whether the chain is intact. When
 // it is broken it returns the one-based position of the first entry whose sequence, link, or hash
-// does not check out. Entries recorded before the chain existed, which carry no hash, are skipped.
+// does not check out. An entry with no hash breaks the chain, so a blanked entry cannot hide from
+// verification.
 func Verify(entries []*Entry) (ok bool, brokeAt int) {
 	var prev *Entry
 	for i, e := range entries {
-		if e.Hash == "" {
-			continue
-		}
 		wantSeq := int64(1)
 		wantPrev := ""
 		if prev != nil {
 			wantSeq = prev.Seq + 1
 			wantPrev = prev.Hash
 		}
-		if e.Seq != wantSeq || e.PrevHash != wantPrev || e.Hash != EntryHash(e) {
+		if e.Hash == "" || e.Seq != wantSeq || e.PrevHash != wantPrev || e.Hash != EntryHash(e) {
 			return false, i + 1
 		}
 		prev = e
