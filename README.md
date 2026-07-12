@@ -24,10 +24,10 @@
     alt="License"></a>
 </p>
 
-Playbook execution and fleet orchestration in one binary. Run Ansible against a fleet, watch every
-host and task as a live status matrix instead of a text scroll, split big jobs across parallel
-shards, and read the results back as one merged view. No Kubernetes operator, no Postgres, no
-Redis, no message bus. One process, one SQLite file.
+One Go binary that runs Ansible, Terraform, Bash, Python, and Go across your fleet. Watch every host
+and task as a live status matrix instead of a text scroll, split big jobs across parallel shards,
+and prove exactly what ran and who approved it. No Kubernetes operator, no Postgres, no Redis, no
+message bus. One process, one SQLite file.
 
 ## Contents
 
