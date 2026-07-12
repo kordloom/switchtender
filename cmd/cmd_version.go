@@ -11,6 +11,6 @@ var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print the Yardmaster version.",
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println(Version)
+		fmt.Println(resolveVersion())
 	},
 }
