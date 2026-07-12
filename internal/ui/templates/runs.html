@@ -25,6 +25,19 @@
 		</div>
 
 		<div class="summary" id="summary" hidden></div>
+
+		<section class="panel propose-panel" id="propose-panel" hidden>
+			<div class="panel-head">
+				<h2>Propose a run from a description</h2>
+				<span class="muted propose-note">Advisory. The proposal is held for approval and runs nothing until an admin releases it.</span>
+			</div>
+			<div class="propose-row">
+				<input id="propose-input" class="input" placeholder="Restart nginx on the web hosts, in check mode first" aria-label="Describe a run to propose">
+				<button id="propose-go" class="button" type="button">Propose</button>
+			</div>
+			<div id="propose-status" class="muted" hidden></div>
+		</section>
+
 		<div id="status" class="muted">Loading runs.</div>
 		<div class="runs-toolbar">
 			<div class="list-filter">

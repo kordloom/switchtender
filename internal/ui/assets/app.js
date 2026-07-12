@@ -1173,6 +1173,7 @@ document.addEventListener("DOMContentLoaded", () => {
 	} else if (page === "runs") {
 		wireModal("launch");
 		if (!isReadOnly()) wireLaunchForm();
+		wirePropose();
 		wireRunsSearch();
 		loadRuns();
 	} else if (page === "detail") {
@@ -2818,6 +2819,69 @@ async function askFleet() {
 	}
 }
 
+// canOperate reports whether the signed-in role may launch or propose work. An empty role means
+// the instance has no accounts and is open, so operating is allowed.
+function canOperate() {
+	const role = localStorage.getItem("ym_role");
+	return !role || role === "operator" || role === "admin";
+}
+
+// wirePropose reveals the propose box on the runs page for an operator on a writable instance and
+// hooks it up to the propose endpoint. Advisory only: the proposal is held for approval and runs
+// nothing until an admin releases it.
+function wirePropose() {
+	const panel = document.getElementById("propose-panel");
+	if (!panel || isReadOnly() || !canOperate()) return;
+	panel.hidden = false;
+	const go = document.getElementById("propose-go");
+	const input = document.getElementById("propose-input");
+	go.addEventListener("click", proposeRun);
+	input.addEventListener("keydown", (e) => {
+		if (e.key === "Enter") {
+			e.preventDefault();
+			proposeRun();
+		}
+	});
+}
+
+// proposeRun asks the server to turn a description into a run held for approval, then opens the
+// held proposal so it can be reviewed and released or rejected.
+async function proposeRun() {
+	const input = document.getElementById("propose-input");
+	const go = document.getElementById("propose-go");
+	const status = document.getElementById("propose-status");
+	const intent = input.value.trim();
+	if (!intent) {
+		status.textContent = "Describe the run first.";
+		status.hidden = false;
+		return;
+	}
+	go.disabled = true;
+	status.textContent = "Proposing.";
+	status.hidden = false;
+	try {
+		const res = await fetch("/ai/propose-run", {
+			method: "POST",
+			headers: Object.assign({ "Content-Type": "application/json" }, authHeaders()),
+			body: JSON.stringify({ intent }),
+		});
+		if (res.status === 401) {
+			requireLogin();
+			return;
+		}
+		if (res.status === 404) {
+			status.textContent = "AI is not enabled on this server.";
+			return;
+		}
+		const data = await res.json().catch(() => ({}));
+		if (!res.ok) throw new Error(data.error || "HTTP " + res.status);
+		window.location.assign("/ui/runs/" + data.id);
+	} catch (err) {
+		status.textContent = "Could not propose a run: " + err.message;
+		go.disabled = false;
+	}
+}
+
 // loadOverview draws the home dashboard: headline metrics, recent runs, a fleet snapshot, and the
 // jump tiles that navigate to every section.
 async function loadOverview() {
@@ -4044,7 +4108,7 @@ function updateActions(run) {
 	const splitParent = (run.kind === "split" || run.shard_count) && !run.parent_id;
 	retry.hidden = !(splitParent && isTerminal(run.status) && run.status !== "succeeded");
 	if (explain) {
-		const heldProposal = held && run.proposed_from;
+		const heldProposal = held && (run.proposed_from || run.intent);
 		explain.hidden = !(run.status === "failed" || run.status === "interrupted" || heldProposal);
 	}
 }
@@ -4292,6 +4356,12 @@ function renderHeader(run) {
 		link.textContent = shortId(run.proposed_from);
 		link.title = run.proposed_from;
 		el.appendChild(field("Proposed from drift check", null, link));
+		if (run.limit) {
+			el.appendChild(field("Limited to", run.limit));
+		}
+	}
+	if (run.intent) {
+		el.appendChild(field("Proposed from request", run.intent));
 		if (run.limit) {
 			el.appendChild(field("Limited to", run.limit));
 		}

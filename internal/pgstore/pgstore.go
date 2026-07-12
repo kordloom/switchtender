@@ -65,7 +65,8 @@ CREATE TABLE IF NOT EXISTS runs (
 	tool          TEXT NOT NULL DEFAULT '',
 	command       TEXT NOT NULL DEFAULT '',
 	dry_run       INTEGER NOT NULL DEFAULT 0,
-	proposed_from TEXT NOT NULL DEFAULT ''
+	proposed_from TEXT NOT NULL DEFAULT '',
+	intent        TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_runs_created_at ON runs(created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_parent ON runs(parent_id, shard_index);
@@ -267,6 +268,7 @@ ALTER TABLE runs ADD COLUMN IF NOT EXISTS tool TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS command TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS dry_run INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS proposed_from TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS intent TEXT NOT NULL DEFAULT '';
 ALTER TABLE templates ADD COLUMN IF NOT EXISTS tool TEXT NOT NULL DEFAULT '';
 ALTER TABLE templates ADD COLUMN IF NOT EXISTS command TEXT NOT NULL DEFAULT '';
 ALTER TABLE templates ADD COLUMN IF NOT EXISTS dry_run INTEGER NOT NULL DEFAULT 0;
@@ -444,7 +446,7 @@ const runColumns = `id, playbook, inventory, status, exit_code, error, created_a
 	ended_at, parent_id, shard_index, shard_count, limit_pattern, kind, step_name, step_index,
 	retry_of, attempt, extra_vars, outputs, claimed_by, claimed_at, cancel_requested,
 	credential_ids, project_id, commit_sha, inventory_id, queue, tool, command, dry_run,
-	proposed_from`
+	proposed_from, intent`
 
 // Save inserts or replaces the run identified by r.ID.
 func (s *store) Save(ctx context.Context, r *run.Run) error {
@@ -453,9 +455,9 @@ INSERT INTO runs
 	(id, playbook, inventory, status, exit_code, error, created_at, started_at, ended_at,
 	 parent_id, shard_index, shard_count, limit_pattern, kind, step_name, step_index, retry_of,
 	 attempt, extra_vars, outputs, claimed_by, claimed_at, cancel_requested, credential_ids,
-	 project_id, commit_sha, inventory_id, queue, tool, command, dry_run, proposed_from)
+	 project_id, commit_sha, inventory_id, queue, tool, command, dry_run, proposed_from, intent)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
-	$21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32)
+	$21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33)
 ON CONFLICT(id) DO UPDATE SET
 	playbook=excluded.playbook, inventory=excluded.inventory, status=excluded.status,
 	exit_code=excluded.exit_code, error=excluded.error, created_at=excluded.created_at,
@@ -468,7 +470,8 @@ ON CONFLICT(id) DO UPDATE SET
 	cancel_requested=excluded.cancel_requested, credential_ids=excluded.credential_ids,
 	project_id=excluded.project_id, commit_sha=excluded.commit_sha,
 	inventory_id=excluded.inventory_id, queue=excluded.queue, tool=excluded.tool,
-	command=excluded.command, dry_run=excluded.dry_run, proposed_from=excluded.proposed_from`
+	command=excluded.command, dry_run=excluded.dry_run, proposed_from=excluded.proposed_from,
+	intent=excluded.intent`
 	_, err := s.db.ExecContext(ctx, q,
 		r.ID, r.Playbook, r.Inventory, string(r.Status), nullInt(r.ExitCode), r.Error,
 		formatTime(r.CreatedAt), nullTime(r.StartedAt), nullTime(r.EndedAt),
@@ -476,7 +479,7 @@ ON CONFLICT(id) DO UPDATE SET
 		r.Kind, r.StepName, nullInt(r.StepIndex), nullString(r.RetryOf), r.Attempt,
 		jsonMap(r.ExtraVars), jsonMap(r.Outputs), r.ClaimedBy, nullTime(r.ClaimedAt),
 		boolToInt(r.CancelRequested), joinIDs(r.CredentialIDs), r.ProjectID, r.CommitSHA,
-		r.InventoryID, r.Queue, r.Tool, r.Command, boolToInt(r.DryRun), r.ProposedFrom,
+		r.InventoryID, r.Queue, r.Tool, r.Command, boolToInt(r.DryRun), r.ProposedFrom, r.Intent,
 	)
 	if err != nil {
 		return fmt.Errorf("save run: %w", err)
@@ -1144,7 +1147,7 @@ func scanRun(s scanner) (*run.Run, error) {
 		&created, &started, &ended, &parent, &shardIdx, &shardCnt, &r.Limit,
 		&r.Kind, &r.StepName, &stepIdx, &retryOf, &r.Attempt, &extra, &outputs,
 		&r.ClaimedBy, &claimed, &cancelI, &credIDs, &r.ProjectID, &r.CommitSHA,
-		&r.InventoryID, &r.Queue, &r.Tool, &r.Command, &dryRun, &r.ProposedFrom); err != nil {
+		&r.InventoryID, &r.Queue, &r.Tool, &r.Command, &dryRun, &r.ProposedFrom, &r.Intent); err != nil {
 		return nil, err
 	}
 	r.CancelRequested = cancelI != 0

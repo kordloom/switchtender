@@ -26,6 +26,7 @@ Every endpoint the server exposes. The web UI lives at `/ui/` and the root redir
 | POST   | `/runs/{id}/explain`    | Advisory AI explanation of a run, when a provider is configured. |
 | POST   | `/ai/draft`             | Advisory AI draft of a bash, python, or go step script from a description. Operator role. |
 | POST   | `/ai/ask`               | Advisory AI answer to a fleet question, from run, health, and drift metadata. Rate limited. |
+| POST   | `/ai/propose-run`       | Turn a plain-language request into a run proposal, validated and held for approval. Operator role. |
 | POST   | `/drift/reconcile`      | Build a reconcile proposal for a drifted host, held for approval. Operator role. |
 | POST   | `/pipelines`            | Submit ordered playbook steps as one pipeline.          |
 | POST   | `/schedules`            | Cron schedule for a run, split, pipeline, or template.  |

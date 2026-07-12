@@ -183,6 +183,10 @@ func requiredRole(r *http.Request) user.Role {
 	case p == "/ai/ask":
 		// Asking about the fleet is an advisory read over data a viewer can already see.
 		return user.RoleViewer
+	case p == "/ai/propose-run":
+		// Proposing a run is operator work, the same role that launches one. The proposal is held
+		// for approval, so releasing it stays admin work.
+		return user.RoleOperator
 	case strings.HasPrefix(p, "/runs/") &&
 		(strings.HasSuffix(p, "/cancel") || strings.HasSuffix(p, "/retry")):
 		return user.RoleOperator

@@ -45,6 +45,14 @@ const proposalSystemPrompt = "You are a site reliability engineer reviewing a pr
 	"point out anything risky. Rely only on the details provided and do not invent hosts, files, " +
 	"or tasks that are not present."
 
+// intentProposalSystemPrompt frames the model as a reviewer of a run proposed from a plain-language
+// request, checking the generated run against what was asked.
+const intentProposalSystemPrompt = "You are a site reliability engineer reviewing a run that was " +
+	"proposed from a plain-language request, before it is approved. Given the request and the exact " +
+	"run that was generated, say in two to four sentences what the run will do, whether it matches " +
+	"the request, and call out anything risky or destructive an approver should weigh. Rely only on " +
+	"the details provided."
+
 // explainLogTail is how many trailing bytes of the run log to include: enough for context without
 // overwhelming the model or the request.
 const explainLogTail = 6000
@@ -160,14 +168,16 @@ func explainRunHandler(store run.Store, provider ai.Provider, log *zap.Logger) h
 			respondError(w, log, http.StatusInternalServerError, "could not read run")
 			return
 		}
-		proposal := rn.ProposedFrom != "" && rn.Status == run.StatusPendingApproval
-		if !rn.Status.Terminal() && !proposal {
+		reconcileProposal := rn.ProposedFrom != "" && rn.Status == run.StatusPendingApproval
+		intentProposal := rn.Intent != "" && rn.Status == run.StatusPendingApproval
+		if !rn.Status.Terminal() && !reconcileProposal && !intentProposal {
 			respondError(w, log, http.StatusConflict, "run is not finished")
 			return
 		}
 		system := explainSystemPrompt
 		var prompt string
-		if proposal {
+		switch {
+		case reconcileProposal:
 			source, err := store.Get(r.Context(), rn.ProposedFrom)
 			if err != nil {
 				log.Error("server: explain proposal source: " + err.Error())
@@ -176,7 +186,10 @@ func explainRunHandler(store run.Store, provider ai.Provider, log *zap.Logger) h
 			}
 			system = proposalSystemPrompt
 			prompt = buildProposalPrompt(rn, source, explainEvents(r.Context(), store, rn.ProposedFrom))
-		} else {
+		case intentProposal:
+			system = intentProposalSystemPrompt
+			prompt = buildIntentProposalPrompt(rn)
+		default:
 			body, _ := store.Log(r.Context(), id) // best effort: a run may have produced no log
 			prompt = buildExplainPrompt(rn, body, explainEvents(r.Context(), store, id))
 		}
@@ -251,6 +264,34 @@ func buildProposalPrompt(rn, source *run.Run, events []event.Event) string {
 	if section := driftedTaskSection(events, rn.Limit); section != "" {
 		b.WriteString("\n\nDrifted tasks, which the check would change:\n")
 		b.WriteString(section)
+	}
+	return b.String()
+}
+
+// buildIntentProposalPrompt assembles the review prompt for a run proposed from a plain-language
+// request: the request itself and the exact run that was generated from it.
+func buildIntentProposalPrompt(rn *run.Run) string {
+	var b strings.Builder
+	b.WriteString("Request: ")
+	b.WriteString(rn.Intent)
+	b.WriteString("\n\nGenerated run:\nTool: ")
+	b.WriteString(run.NormalizeTool(rn.Tool))
+	if rn.Playbook != "" {
+		b.WriteString("\nPlaybook: ")
+		b.WriteString(rn.Playbook)
+	}
+	if rn.Command != "" {
+		b.WriteString("\nCommand: ")
+		b.WriteString(headBytes(rn.Command, explainCommandCap))
+	}
+	if rn.Limit != "" {
+		b.WriteString("\nLimited to hosts: ")
+		b.WriteString(rn.Limit)
+	}
+	if rn.DryRun {
+		b.WriteString("\nMode: check mode, no changes")
+	} else {
+		b.WriteString("\nMode: real, applies changes")
 	}
 	return b.String()
 }

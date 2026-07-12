@@ -150,6 +150,10 @@ type Run struct {
 	// it was machine proposed and is born held for approval, so a person releases it or it never
 	// executes.
 	ProposedFrom string `json:"proposed_from,omitempty"`
+	// Intent is the plain-language request an AI turned into this proposed run. A run carrying it
+	// was proposed from a description and is born held for approval, so an approver can judge the
+	// generated run against what was asked before anything executes.
+	Intent string `json:"intent,omitempty"`
 }
 
 // Clone returns a deep copy so callers cannot mutate stored state through shared pointers.
@@ -273,6 +277,14 @@ func WithLimit(pattern string) SubmitOption {
 func WithProposedFrom(checkRunID string) SubmitOption {
 	return func(r *Run) {
 		r.ProposedFrom = checkRunID
+	}
+}
+
+// WithIntent records the plain-language request an AI turned into this proposed run, so an approver
+// can judge the generated run against what was asked.
+func WithIntent(intent string) SubmitOption {
+	return func(r *Run) {
+		r.Intent = intent
 	}
 }
 

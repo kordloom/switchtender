@@ -484,6 +484,11 @@ button.topbar-link { background: none; border: none; padding: 0; font: inherit; 
 .ask-note { font-size: 12px; }
 .ask-answer { margin: 10px 0 0; font-size: 13.5px; line-height: 1.55; white-space: pre-wrap; }
 
+/* Propose box on the runs page: turn a description into a run held for approval. */
+.propose-row { display: flex; gap: 8px; }
+.propose-row .input { flex: 1; }
+.propose-note { font-size: 12px; }
+
 /* AI triage panel on the run detail page: an advisory explanation of a failed run, on demand. */
 .explain-panel { margin-top: 16px; background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: var(--radius); padding: 14px 16px; }
 .explain-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
