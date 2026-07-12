@@ -25,7 +25,7 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/index.html">Overview</a><a href="/docs/quickstart.html">Quickstart</a><a href="/docs/faq.html">FAQ</a><a href="/docs/switching-from-awx.html">Switching from AWX</a><a href="/docs/migration.html">Migration</a><a href="/docs/tutorials.html">Tutorials</a><a href="/docs/tutorial-run-a-job.html">Run a job</a><a href="/docs/tutorial-save-a-template.html">Save a template</a><a href="/docs/tutorial-schedule-a-job.html">Schedule a job</a><a href="/docs/tutorial-set-a-secret.html">Set a secret</a><a href="/docs/tutorial-migrate.html">Migrate your setup</a><a href="/docs/tool-bash.html">Bash runs</a><a href="/docs/tool-terraform.html">Terraform runs</a><a href="/docs/tool-python.html">Python runs</a><a href="/docs/concepts.html">Concepts</a><a href="/docs/configuration.html">Configuration</a><a href="/docs/desktop.html" class="active">Desktop</a><a href="/docs/features.html">Features</a><a href="/docs/api.html">HTTP API</a><a href="/docs/comparison.html">Yardmaster compared to AWX and Semaphore</a><a href="/docs/drift.html">Drift detection</a><a href="/docs/secrets.html">Secrets</a><a href="/docs/tool-go.html">Go runs</a>
+				<a href="/docs/index.html">Overview</a><a href="/docs/quickstart.html">Quickstart</a><a href="/docs/faq.html">FAQ</a><a href="/docs/switching-from-awx.html">Switching from AWX</a><a href="/docs/migration.html">Migration</a><a href="/docs/tutorials.html">Tutorials</a><a href="/docs/tutorial-run-a-job.html">Run a job</a><a href="/docs/tutorial-save-a-template.html">Save a template</a><a href="/docs/tutorial-schedule-a-job.html">Schedule a job</a><a href="/docs/tutorial-set-a-secret.html">Set a secret</a><a href="/docs/tutorial-migrate.html">Migrate your setup</a><a href="/docs/tool-bash.html">Bash runs</a><a href="/docs/tool-terraform.html">Terraform runs</a><a href="/docs/tool-python.html">Python runs</a><a href="/docs/tool-go.html">Go runs</a><a href="/docs/concepts.html">Concepts</a><a href="/docs/configuration.html">Configuration</a><a href="/docs/desktop.html" class="active">Desktop</a><a href="/docs/features.html">Features</a><a href="/docs/secrets.html">Secrets</a><a href="/docs/drift.html">Drift detection</a><a href="/docs/api.html">HTTP API</a><a href="/docs/comparison.html">Yardmaster compared to AWX and Semaphore</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
@@ -61,13 +61,29 @@ platform convention:</p>
 </tr>
 </tbody>
 </table>
-<p>Set <code>YARDMASTER_DESKTOP_NO_BROWSER</code> to skip opening a browser, for a headless or remote machine.
-The encryption pair still enables stored credentials the same way it does for <code>serve</code>.</p>
+<p>The chosen port persists in the data directory and is reused on the next launch, so your sign-in
+and tour state survive a restart. Launching a second copy while one is running opens the existing
+instance instead of starting another server.</p>
+<p>Set <code>YARDMASTER_DESKTOP_NO_BROWSER</code> to any value to skip opening a browser, for a headless or
+remote machine. The encryption pair still enables stored credentials the same way it does for
+<code>serve</code>.</p>
+<h2 id="access-and-tokens">Access and tokens</h2>
+<p>A fresh desktop instance starts with no tokens, and until the first token exists the API answers
+without authentication. The server listens only on the loopback interface, so nothing off your
+machine can reach it, but on a shared computer any local account can. If other people use the
+machine, mint a token right away and sign in with it:</p>
+<pre><code>yardmaster token new --db &quot;&lt;data directory&gt;/yardmaster.db&quot; --name me
+</code></pre>
+<p>Once one token exists, every request must authenticate.</p>
+<h2 id="stop-it">Stop it</h2>
+<p>The desktop app is the server. Closing the browser tab leaves it running so scheduled work
+continues. To stop it, quit the terminal it runs in or end the <code>yardmaster</code> process. The packaged
+macOS app below runs without a Dock icon, so stop it from Activity Monitor or with
+<code>pkill yardmaster</code>.</p>
 <h2 id="package-a-macos-app">Package a macOS app</h2>
 <p>Wrap the binary in an app bundle so it launches from the Dock or Finder. The bundle's executable is
-a small launcher that runs <code>yardmaster desktop</code>:</p>
-<p>The launcher is named <code>launch</code>, not <code>Yardmaster</code>, so it does not collide with the <code>yardmaster</code>
-binary on a case-insensitive macOS filesystem:</p>
+a small launcher that runs <code>yardmaster desktop</code>. The launcher is named <code>launch</code>, not <code>Yardmaster</code>,
+so it does not collide with the <code>yardmaster</code> binary on a case-insensitive macOS filesystem:</p>
 <pre><code class="language-sh">APP=Yardmaster.app
 mkdir -p &quot;$APP/Contents/MacOS&quot; &quot;$APP/Contents/Resources&quot;
 cp yardmaster &quot;$APP/Contents/MacOS/yardmaster&quot;

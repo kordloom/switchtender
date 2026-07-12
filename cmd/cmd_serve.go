@@ -62,6 +62,11 @@ var serveAddr string
 // serveDB holds the value of the --db flag.
 var serveDB string
 
+// serveListener, when set, is the already-bound listener the server uses instead of binding
+// serveAddr itself. The desktop command sets it so the port it chose cannot be taken by another
+// process before the server starts.
+var serveListener net.Listener
+
 // serveTLSCert and serveTLSKey hold the TLS certificate and key file paths. When both are set the
 // server speaks HTTPS, so it needs no reverse proxy in front of it.
 var (
@@ -546,9 +551,14 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		}
 		log.Info("yardmaster serving", zap.String("addr", serveAddr), zap.String("scheme", scheme))
 		var serveErr error
-		if tls {
+		switch {
+		case serveListener != nil && tls:
+			serveErr = httpServer.ServeTLS(serveListener, serveTLSCert, serveTLSKey)
+		case serveListener != nil:
+			serveErr = httpServer.Serve(serveListener)
+		case tls:
 			serveErr = httpServer.ListenAndServeTLS(serveTLSCert, serveTLSKey)
-		} else {
+		default:
 			serveErr = httpServer.ListenAndServe()
 		}
 		if errors.Is(serveErr, http.ErrServerClosed) {

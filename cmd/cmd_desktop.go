@@ -3,11 +3,13 @@ package cmd
 import (
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -27,7 +29,10 @@ var desktopCmd = &cobra.Command{
 	SilenceErrors: true,
 }
 
-// runDesktop configures a local single-user serve and opens the UI, then blocks on the server.
+// runDesktop configures a local single-user serve and opens the UI, then blocks on the server. The
+// loopback port persists in the data directory and is reused across launches, so browser storage
+// keyed by origin, such as the sign-in token and the tour state, survives a restart. A second
+// launch finds the live instance on that port and opens its UI instead of starting another server.
 func runDesktop(cmd *cobra.Command, _ []string) error {
 	dir, err := desktopDataDir()
 	if err != nil {
@@ -35,11 +40,20 @@ func runDesktop(cmd *cobra.Command, _ []string) error {
 	}
 	serveDB = filepath.Join(dir, "yardmaster.db")
 
-	port, err := freeLoopbackPort()
-	if err != nil {
-		return fmt.Errorf("find a free port: %w", err)
+	if port, ok := savedDesktopPort(dir); ok && desktopAlive(port) {
+		url := "http://127.0.0.1:" + strconv.Itoa(port) + "/ui/"
+		fmt.Fprintln(os.Stderr, "Yardmaster is already running at "+url)
+		go openWhenReady("127.0.0.1:"+strconv.Itoa(port), url)
+		time.Sleep(2 * time.Second)
+		return nil
 	}
-	serveAddr = "127.0.0.1:" + strconv.Itoa(port)
+
+	l, err := desktopListener(dir)
+	if err != nil {
+		return fmt.Errorf("bind a loopback port: %w", err)
+	}
+	serveListener = l
+	serveAddr = l.Addr().String()
 
 	url := "http://" + serveAddr + "/ui/"
 	fmt.Fprintln(os.Stderr, "Yardmaster is starting at "+url)
@@ -48,33 +62,75 @@ func runDesktop(cmd *cobra.Command, _ []string) error {
 }
 
 // desktopDataDir returns the per-user directory where the desktop app keeps its database, creating
-// it when missing. It follows the platform convention through os.UserConfigDir.
+// it when missing. The directory is private to the user, since the database holds hashed tokens,
+// sealed credentials, and the audit chain.
 func desktopDataDir() (string, error) {
 	base, err := os.UserConfigDir()
 	if err != nil {
 		return "", fmt.Errorf("locate a data directory: %w", err)
 	}
 	dir := filepath.Join(base, "Yardmaster")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("create data directory: %w", err)
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return "", fmt.Errorf("restrict data directory: %w", err)
 	}
 	return dir, nil
 }
 
-// freeLoopbackPort asks the OS for an unused loopback port by listening on port zero and reading
-// back the assigned port. The listener is closed immediately, so the server can claim it.
-func freeLoopbackPort() (int, error) {
+// desktopListener binds the saved loopback port when it is still free, or a fresh OS-assigned one,
+// and records the choice. The listener stays open and is handed to the server, so no other process
+// can take the port between choosing it and serving on it.
+func desktopListener(dir string) (net.Listener, error) {
+	if port, ok := savedDesktopPort(dir); ok {
+		if l, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(port)); err == nil {
+			return l, nil
+		}
+	}
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	defer func() { _ = l.Close() }()
-	return l.Addr().(*net.TCPAddr).Port, nil
+	saveDesktopPort(dir, l.Addr().(*net.TCPAddr).Port)
+	return l, nil
+}
+
+// savedDesktopPort reads the port recorded by a previous launch, reporting false when there is none
+// or the file does not hold a valid port.
+func savedDesktopPort(dir string) (int, bool) {
+	raw, err := os.ReadFile(filepath.Join(dir, "port"))
+	if err != nil {
+		return 0, false
+	}
+	port, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	if err != nil || port <= 0 || port > 65535 {
+		return 0, false
+	}
+	return port, true
+}
+
+// saveDesktopPort records the chosen port for the next launch. A write failure is ignored, since
+// the only cost is a new port next time.
+func saveDesktopPort(dir string, port int) {
+	_ = os.WriteFile(filepath.Join(dir, "port"), []byte(strconv.Itoa(port)), 0o600)
+}
+
+// desktopAlive reports whether a Yardmaster instance is answering on the loopback port.
+func desktopAlive(port int) bool {
+	client := &http.Client{Timeout: 500 * time.Millisecond}
+	resp, err := client.Get("http://127.0.0.1:" + strconv.Itoa(port) + "/healthz")
+	if err != nil {
+		return false
+	}
+	defer func() { _ = resp.Body.Close() }()
+	return resp.StatusCode == http.StatusOK
 }
 
 // openWhenReady waits for the server to accept connections, then opens the UI in the default
-// browser. Setting YARDMASTER_DESKTOP_NO_BROWSER skips the open, for a headless or remote run. It
-// gives up quietly after a few seconds so a headless environment does not hang.
+// browser. Setting YARDMASTER_DESKTOP_NO_BROWSER to any value skips the open, for a headless or
+// remote run. It stops trying after roughly ten seconds, and when the browser cannot be opened it
+// prints the URL so the user can open it by hand.
 func openWhenReady(addr, url string) {
 	if os.Getenv("YARDMASTER_DESKTOP_NO_BROWSER") != "" {
 		return
@@ -83,21 +139,30 @@ func openWhenReady(addr, url string) {
 		conn, err := net.DialTimeout("tcp", addr, 200*time.Millisecond)
 		if err == nil {
 			_ = conn.Close()
-			_ = openBrowser(url)
+			if err := openBrowser(url); err != nil {
+				fmt.Fprintln(os.Stderr, "Open "+url+" in your browser.")
+			}
 			return
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
 }
 
-// openBrowser opens url in the platform's default browser.
+// openBrowser opens url in the platform's default browser and reaps the launcher process in the
+// background so it does not linger as a zombie.
 func openBrowser(url string) error {
+	var c *exec.Cmd
 	switch runtime.GOOS {
 	case "darwin":
-		return exec.Command("open", url).Start()
+		c = exec.Command("open", url)
 	case "windows":
-		return exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
+		c = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
 	default:
-		return exec.Command("xdg-open", url).Start()
+		c = exec.Command("xdg-open", url)
 	}
+	if err := c.Start(); err != nil {
+		return err
+	}
+	go func() { _ = c.Wait() }()
+	return nil
 }
