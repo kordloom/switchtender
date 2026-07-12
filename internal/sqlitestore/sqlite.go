@@ -31,7 +31,8 @@ import (
 	"github.com/dcadolph/yardmaster/internal/user"
 )
 
-// schema is the table layout created on open. It is idempotent so open doubles as migration.
+// schema is the full table layout created on open. It uses IF NOT EXISTS, so opening an existing
+// database is safe.
 const schema = `
 CREATE TABLE IF NOT EXISTS runs (
 	id            TEXT PRIMARY KEY,
@@ -247,50 +248,6 @@ CREATE TABLE IF NOT EXISTS grants (
 CREATE INDEX IF NOT EXISTS idx_grants_object ON grants(object);
 `
 
-// alterations add columns to tables created before the column existed. New databases already have
-// them from the schema, so a duplicate column error is expected and ignored.
-var alterations = []string{
-	"ALTER TABLE runs ADD COLUMN retry_of TEXT",
-	"ALTER TABLE runs ADD COLUMN attempt INTEGER NOT NULL DEFAULT 0",
-	"ALTER TABLE runs ADD COLUMN extra_vars TEXT NOT NULL DEFAULT ''",
-	"ALTER TABLE runs ADD COLUMN outputs TEXT NOT NULL DEFAULT ''",
-	"ALTER TABLE runs ADD COLUMN claimed_by TEXT NOT NULL DEFAULT ''",
-	"ALTER TABLE runs ADD COLUMN claimed_at TEXT",
-	"ALTER TABLE runs ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0",
-	"ALTER TABLE runs ADD COLUMN credential_ids TEXT NOT NULL DEFAULT ''",
-	"ALTER TABLE runs ADD COLUMN project_id TEXT NOT NULL DEFAULT ''",
-	"ALTER TABLE runs ADD COLUMN commit_sha TEXT NOT NULL DEFAULT ''",
-	"ALTER TABLE tokens ADD COLUMN user_id TEXT NOT NULL DEFAULT ''",
-	"ALTER TABLE runs ADD COLUMN inventory_id TEXT NOT NULL DEFAULT ''",
-	"ALTER TABLE schedules ADD COLUMN template_id TEXT NOT NULL DEFAULT ''",
-	"ALTER TABLE tokens ADD COLUMN expires_at TEXT",
-	"ALTER TABLE templates ADD COLUMN survey TEXT NOT NULL DEFAULT ''",
-	"ALTER TABLE runs ADD COLUMN queue TEXT NOT NULL DEFAULT ''",
-	"ALTER TABLE templates ADD COLUMN queue TEXT NOT NULL DEFAULT ''",
-	"ALTER TABLE run_host_summary ADD COLUMN duration_seconds REAL NOT NULL DEFAULT 0",
-	"ALTER TABLE projects ADD COLUMN install_deps INTEGER NOT NULL DEFAULT 1",
-	"ALTER TABLE projects ADD COLUMN image TEXT NOT NULL DEFAULT ''",
-	"ALTER TABLE projects ADD COLUMN pull_credential_id TEXT NOT NULL DEFAULT ''",
-	"ALTER TABLE templates ADD COLUMN inventory_id TEXT NOT NULL DEFAULT ''",
-	"ALTER TABLE triggers ADD COLUMN signing_secret TEXT NOT NULL DEFAULT ''",
-	"ALTER TABLE triggers ADD COLUMN require_signature INTEGER NOT NULL DEFAULT 0",
-	"ALTER TABLE runs ADD COLUMN tool TEXT NOT NULL DEFAULT ''",
-	"ALTER TABLE runs ADD COLUMN command TEXT NOT NULL DEFAULT ''",
-	"ALTER TABLE runs ADD COLUMN dry_run INTEGER NOT NULL DEFAULT 0",
-	"ALTER TABLE runs ADD COLUMN proposed_from TEXT NOT NULL DEFAULT ''",
-	"ALTER TABLE runs ADD COLUMN intent TEXT NOT NULL DEFAULT ''",
-	"ALTER TABLE templates ADD COLUMN tool TEXT NOT NULL DEFAULT ''",
-	"ALTER TABLE templates ADD COLUMN command TEXT NOT NULL DEFAULT ''",
-	"ALTER TABLE templates ADD COLUMN dry_run INTEGER NOT NULL DEFAULT 0",
-	"ALTER TABLE credentials ADD COLUMN source TEXT NOT NULL DEFAULT ''",
-	"ALTER TABLE inventories ADD COLUMN credential_ids TEXT NOT NULL DEFAULT ''",
-	"ALTER TABLE inventories ADD COLUMN content_source TEXT NOT NULL DEFAULT ''",
-	"ALTER TABLE inventories ADD COLUMN content_config TEXT NOT NULL DEFAULT ''",
-	"ALTER TABLE audit_entries ADD COLUMN seq INTEGER NOT NULL DEFAULT 0",
-	"ALTER TABLE audit_entries ADD COLUMN prev_hash TEXT NOT NULL DEFAULT ''",
-	"ALTER TABLE audit_entries ADD COLUMN hash TEXT NOT NULL DEFAULT ''",
-}
-
 // store is a run.Store backed by a SQLite database.
 type store struct {
 	// db is the open database handle.
@@ -362,14 +319,7 @@ func Open(path string) (*DB, error) {
 	}
 	if _, err := db.Exec(schema); err != nil {
 		_ = db.Close()
-		return nil, fmt.Errorf("migrate schema: %w", err)
-	}
-	for _, alter := range alterations {
-		if _, err := db.Exec(alter); err != nil &&
-			!strings.Contains(err.Error(), "duplicate column name") {
-			_ = db.Close()
-			return nil, fmt.Errorf("migrate schema: %w", err)
-		}
+		return nil, fmt.Errorf("apply schema: %w", err)
 	}
 	return &DB{db: db, runs: &store{db: db}, schedules: &scheduleStore{db: db}, tokens: &tokenStore{db: db},
 		credentials: &credentialStore{db: db},

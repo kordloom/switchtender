@@ -1,7 +1,7 @@
 // Package grant records per-object access grants so a large organization can scope who may use or
 // manage a specific project, template, inventory, or credential beyond the coarse global role. A
 // grant ties a subject, a user or a team, to an object with an access level. Grants are additive:
-// when an object has no grants the global role decides, so existing installs are unaffected.
+// when an object has no grants the global role decides.
 package grant
 
 import (

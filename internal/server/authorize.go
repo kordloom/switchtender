@@ -17,8 +17,8 @@ import (
 var errForbiddenGrant = errors.New("forbidden: no grant for this object")
 
 // authorizer decides object-level access on top of the coarse global role. It is additive: an
-// object with no grants defers to the role, so existing installs behave as before, unless strict
-// grants are on, which flips unlisted objects to deny for non-admins.
+// object with no grants defers to the role, unless strict grants are on, which flips an object with
+// no grants to deny for non-admins.
 type authorizer struct {
 	// grants stores per-object access grants; nil disables object-level checks entirely.
 	grants grant.Store
