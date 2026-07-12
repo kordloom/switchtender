@@ -60,7 +60,9 @@ func (f ProviderFunc) Complete(ctx context.Context, system, user string) (string
 }
 
 // New builds a Provider from a provider name and its settings. An empty name returns a nil Provider
-// and no error, so AI stays off by default. An unrecognized name returns ErrUnknownProvider.
+// and no error, so AI stays off by default. An unrecognized name returns ErrUnknownProvider. The
+// openai provider speaks the OpenAI-compatible chat completions API, so any compatible server works
+// through the URL setting.
 func New(name, model, url, apiKey string) (Provider, error) {
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "":
@@ -69,6 +71,8 @@ func New(name, model, url, apiKey string) (Provider, error) {
 		return newOllama(url, model), nil
 	case "anthropic":
 		return newAnthropic(apiKey, model, url)
+	case "openai":
+		return newOpenAI(apiKey, model, url)
 	default:
 		return nil, fmt.Errorf("%w: %s", ErrUnknownProvider, name)
 	}

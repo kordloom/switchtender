@@ -70,7 +70,7 @@ variable.</p>
 <tr>
 <td><code>YARDMASTER_AI_KEY</code></td>
 <td>serve</td>
-<td>API key for a cloud AI provider such as Anthropic. A local Ollama needs none.</td>
+<td>API key for a cloud AI provider such as Anthropic or an OpenAI-compatible endpoint. A local Ollama needs none.</td>
 </tr>
 <tr>
 <td><code>YARDMASTER_OIDC_CLIENT_SECRET</code></td>
@@ -259,17 +259,17 @@ that variable is unset.</p>
 <tr>
 <td><code>--ai-provider</code></td>
 <td>none</td>
-<td>Enable advisory AI features with a provider: <code>ollama</code> or <code>anthropic</code>. Empty leaves AI off.</td>
+<td>Enable advisory AI features with a provider: <code>ollama</code>, <code>anthropic</code>, or <code>openai</code>. Empty leaves AI off.</td>
 </tr>
 <tr>
 <td><code>--ai-model</code></td>
 <td>provider default</td>
-<td>Model name for the AI provider.</td>
+<td>Model name for the AI provider. Required for <code>openai</code>, which has no universal default.</td>
 </tr>
 <tr>
 <td><code>--ai-url</code></td>
 <td>provider default</td>
-<td>Base URL for the AI provider, for a self-hosted Ollama or a proxy.</td>
+<td>Base URL for the AI provider, for a self-hosted Ollama, an OpenAI-compatible server, or a proxy.</td>
 </tr>
 <tr>
 <td><code>--schedule-interval</code></td>

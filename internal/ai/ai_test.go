@@ -16,20 +16,24 @@ func TestNew(t *testing.T) {
 	tests := []struct {
 		Name     string
 		Provider string
+		Model    string
 		Key      string
 		WantNil  bool
 		Want     error
 	}{
-		{Name: "empty is off", Provider: "", WantNil: true},                           // Test 0.
-		{Name: "unknown provider", Provider: "gpt5000", Want: ErrUnknownProvider},     // Test 1.
-		{Name: "ollama needs no key", Provider: "ollama"},                             // Test 2.
-		{Name: "anthropic needs a key", Provider: "anthropic", Want: ErrKey}, // Test 3.
-		{Name: "anthropic with a key", Provider: "anthropic", Key: "sk-test"},         // Test 4.
+		{Name: "empty is off", Provider: "", WantNil: true},                                 // Test 0.
+		{Name: "unknown provider", Provider: "gpt5000", Want: ErrUnknownProvider},           // Test 1.
+		{Name: "ollama needs no key", Provider: "ollama"},                                   // Test 2.
+		{Name: "anthropic needs a key", Provider: "anthropic", Want: ErrKey},                // Test 3.
+		{Name: "anthropic with a key", Provider: "anthropic", Key: "sk-test"},               // Test 4.
+		{Name: "openai needs a key", Provider: "openai", Model: "m", Want: ErrKey},          // Test 5.
+		{Name: "openai needs a model", Provider: "openai", Key: "sk-test", Want: ErrModel},  // Test 6.
+		{Name: "openai with key and model", Provider: "openai", Key: "sk-test", Model: "m"}, // Test 7.
 	}
 	for testNum, test := range tests {
 		t.Run(test.Name, func(t *testing.T) {
 			t.Parallel()
-			p, err := New(test.Provider, "", "", test.Key)
+			p, err := New(test.Provider, test.Model, "", test.Key)
 			if test.Want != nil {
 				if !errors.Is(err, test.Want) {
 					t.Fatalf("test %d: err = %v, want %v", testNum, err, test.Want)
@@ -215,6 +219,90 @@ func TestOllamaErrorPaths(t *testing.T) {
 			defer srv.Close()
 			_, err := newOllama(srv.URL, "m").Complete(context.Background(), "sys", "user")
 			if !errors.Is(err, test.Want) {
+				t.Fatalf("test %d: err = %v, want %v", testNum, err, test.Want)
+			}
+		})
+	}
+}
+
+// TestOpenAIComplete asserts the Bearer header, the request body shape, and the reply extraction.
+func TestOpenAIComplete(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer sk-test" {
+			t.Errorf("Authorization = %q, want the bearer key", r.Header.Get("Authorization"))
+		}
+		var req struct {
+			Model    string `json:"model"`
+			Messages []struct{ Role, Content string } `json:"messages"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		if req.Model != "test-model" || len(req.Messages) != 2 || req.Messages[0].Role != "system" {
+			t.Errorf("request body = %+v, want the model and system then user messages", req)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{"message": map[string]string{"content": "raise the ulimit"}}},
+		})
+	}))
+	defer srv.Close()
+
+	p, err := newOpenAI("sk-test", "test-model", srv.URL)
+	if err != nil {
+		t.Fatalf("newOpenAI() error = %v", err)
+	}
+	got, err := p.Complete(context.Background(), "sys", "why did it fail")
+	if err != nil {
+		t.Fatalf("Complete() error = %v", err)
+	}
+	if got != "raise the ulimit" {
+		t.Errorf("Complete() = %q, want the model reply", got)
+	}
+}
+
+// TestOpenAIErrorPaths covers a non-200 reply, malformed JSON, an empty choices list, and a
+// redirect that must not be followed so the bearer key cannot be replayed to another host.
+func TestOpenAIErrorPaths(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Name    string
+		Handler http.HandlerFunc
+		Want    error
+	}{{ // Test 0: A non-200 reply is a status error.
+		Name: "status with body",
+		Handler: func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"error":{"message":"bad key"}}`))
+		},
+		Want: ErrStatus,
+	}, { // Test 1: A malformed reply is a decode error.
+		Name: "malformed json",
+		Handler: func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`{"choices": [`))
+		},
+		Want: ErrDecode,
+	}, { // Test 2: An empty choices list is a decode error, not a panic.
+		Name: "no choices",
+		Handler: func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`{"choices": []}`))
+		},
+		Want: ErrDecode,
+	}, { // Test 3: A redirect is returned as a status error, never followed.
+		Name: "redirect not followed",
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, "https://example.invalid/steal", http.StatusFound)
+		},
+		Want: ErrStatus,
+	}}
+	for testNum, test := range tests {
+		t.Run(test.Name, func(t *testing.T) {
+			t.Parallel()
+			srv := httptest.NewServer(test.Handler)
+			defer srv.Close()
+			p, err := newOpenAI("sk-test", "m", srv.URL)
+			if err != nil {
+				t.Fatalf("test %d: newOpenAI() error = %v", testNum, err)
+			}
+			if _, err = p.Complete(context.Background(), "sys", "user"); !errors.Is(err, test.Want) {
 				t.Fatalf("test %d: err = %v, want %v", testNum, err, test.Want)
 			}
 		})

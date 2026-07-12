@@ -9,6 +9,8 @@ var (
 	ErrUnknownProvider = errors.New("unknown ai provider")
 	// ErrKey is returned when a provider that needs an API key is selected without one.
 	ErrKey = errors.New("ai provider needs an api key")
+	// ErrModel is returned when a provider that needs an explicit model is selected without one.
+	ErrModel = errors.New("ai provider needs a model")
 	// ErrStatus is returned when a provider replies with a non-success HTTP status.
 	ErrStatus = errors.New("ai provider status")
 	// ErrDecode is returned when a provider reply cannot be decoded.

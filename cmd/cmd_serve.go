@@ -271,7 +271,7 @@ func init() {
 	serveCmd.Flags().StringVar(&serveJWTDefaultRole, "jwt-default-role", "viewer",
 		"Role granted to an account created on first JWT sign-in.")
 	serveCmd.Flags().StringVar(&serveAIProvider, "ai-provider", "",
-		"Enable advisory AI features with a provider: ollama or anthropic. Empty leaves AI off.")
+		"Enable advisory AI features with a provider: ollama, anthropic, or openai. Empty leaves AI off.")
 	serveCmd.Flags().StringVar(&serveAIModel, "ai-model", "",
 		"Model name for the AI provider. Empty uses the provider's default.")
 	serveCmd.Flags().StringVar(&serveAIURL, "ai-url", "",
