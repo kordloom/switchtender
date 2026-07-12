@@ -71,17 +71,19 @@ function mountTopbar() {
 	if (!bar || bar.querySelector(".topbar-links")) return;
 	const nav = document.createElement("nav");
 	nav.className = "topbar-links";
-	const tourWrap = document.createElement("div");
-	tourWrap.className = "tour-launch";
-	const tour = document.createElement("button");
-	tour.type = "button";
-	tour.className = "topbar-link tour-start";
-	tour.textContent = "Tour";
-	tour.setAttribute("aria-haspopup", "true");
-	tour.setAttribute("aria-expanded", "false");
-	tour.addEventListener("click", (e) => { e.stopPropagation(); toggleTourMenu(tour, tourWrap); });
-	tourWrap.appendChild(tour);
-	nav.appendChild(tourWrap);
+	if (document.body.dataset.page !== "login") {
+		const tourWrap = document.createElement("div");
+		tourWrap.className = "tour-launch";
+		const tour = document.createElement("button");
+		tour.type = "button";
+		tour.className = "topbar-link tour-start";
+		tour.textContent = "Tour";
+		tour.setAttribute("aria-haspopup", "true");
+		tour.setAttribute("aria-expanded", "false");
+		tour.addEventListener("click", (e) => { e.stopPropagation(); toggleTourMenu(tour, tourWrap); });
+		tourWrap.appendChild(tour);
+		nav.appendChild(tourWrap);
+	}
 	const docs = document.createElement("a");
 	docs.href = "/ui/docs";
 	docs.className = "topbar-link";
@@ -149,7 +151,7 @@ const TOURS = [
 			{ sel: ".migrate-callout", title: "Bring your work with you", body: "Migrating from another tool? Import projects, inventories, templates, and schedules in a few clicks." },
 			{ sel: ".tile-search", title: "Find anything fast", body: "This search filters instantly, and every list in Yardmaster is searchable the same way." },
 			{ sel: ".nav-toggle", title: "The rest of the yard", body: "Job templates, credentials with external secrets, schedules, and fleet analytics all live in this menu." },
-			{ title: "You are set", body: "Explore the demo freely; nothing here can be broken. Replay this tour anytime from Tour in the top bar." },
+			{ title: "You are set", body: "Explore the demo freely. Nothing here can be broken. Replay this tour anytime from Tour in the top bar." },
 		],
 	},
 	{
@@ -169,7 +171,7 @@ const TOURS = [
 		steps: [
 			{ title: "Leave AWX or Semaphore behind", body: "Import your projects, inventories, templates, surveys, and schedules in a single pass." },
 			{ title: "Preview before you commit", body: "Every import runs as a dry run first, showing exactly what it will create. Apply it when it looks right." },
-			{ title: "No lock-in", body: "You can export and leave anytime, too. Yardmaster earns the switch; it does not trap you." },
+			{ title: "No lock-in", body: "You can export and leave anytime, too. Yardmaster earns the switch. It does not trap you." },
 		],
 	},
 ];
@@ -202,42 +204,61 @@ function toggleTourMenu(button, wrap) {
 	}
 	wrap.appendChild(menu);
 	button.setAttribute("aria-expanded", "true");
+	const first = menu.querySelector(".tour-menu-item");
+	if (first) first.focus();
 	window.setTimeout(() => {
 		document.addEventListener("click", tourMenuOutside);
 		document.addEventListener("keydown", tourMenuKey);
 	}, 0);
 }
 
-// closeTourMenu removes the launcher menu and its listeners.
-function closeTourMenu() {
+// closeTourMenu removes the launcher menu and its listeners, returning focus to the Tour button
+// when the close came from the keyboard.
+function closeTourMenu(restoreFocus) {
 	const menu = document.querySelector(".tour-menu");
 	if (menu) menu.remove();
 	const btn = document.querySelector(".tour-start");
-	if (btn) btn.setAttribute("aria-expanded", "false");
+	if (btn) {
+		btn.setAttribute("aria-expanded", "false");
+		if (restoreFocus) btn.focus();
+	}
 	document.removeEventListener("click", tourMenuOutside);
 	document.removeEventListener("keydown", tourMenuKey);
 }
 
 // tourMenuOutside closes the launcher when a click lands outside it.
 function tourMenuOutside(e) {
-	if (!e.target.closest(".tour-launch")) closeTourMenu();
+	if (!e.target.closest(".tour-launch")) closeTourMenu(false);
 }
 
-// tourMenuKey closes the launcher on Escape.
+// tourMenuKey drives the launcher from the keyboard: arrows rove through the tours and Escape
+// closes, handing focus back to the Tour button.
 function tourMenuKey(e) {
-	if (e.key === "Escape") closeTourMenu();
+	if (e.key === "Escape") {
+		closeTourMenu(true);
+		return;
+	}
+	if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+	const items = Array.from(document.querySelectorAll(".tour-menu-item"));
+	if (items.length === 0) return;
+	e.preventDefault();
+	const idx = items.indexOf(document.activeElement);
+	const next = e.key === "ArrowDown"
+		? items[(idx + 1 + items.length) % items.length]
+		: items[(idx - 1 + items.length) % items.length];
+	next.focus();
 }
 
 // launchTour runs a tour by id, navigating to its page first when the tour lives elsewhere and
-// resuming it there through a session handoff.
+// resuming it there through a timestamped session handoff.
 function launchTour(id) {
-	closeTourMenu();
+	closeTourMenu(false);
 	const tour = tourByID(id);
 	if (!tour) return;
 	if (tour.page === document.body.dataset.page) {
 		startTour(id);
 	} else {
-		sessionStorage.setItem("ym_tour_start", id);
+		sessionStorage.setItem("ym_tour_start", JSON.stringify({ id, at: Date.now() }));
 		window.location.assign(tour.path);
 	}
 }
@@ -246,11 +267,11 @@ function launchTour(id) {
 let tourState = null;
 
 // mountTour starts a tour requested from the launcher on another page, and shows the welcome tour
-// once on a first visit to the overview.
+// once on a first visit to the overview. The welcome timer yields to a tour that is already
+// running and to a sign-in redirect in flight.
 function mountTour() {
-	const pending = sessionStorage.getItem("ym_tour_start");
+	const pending = readPendingTour();
 	if (pending) {
-		sessionStorage.removeItem("ym_tour_start");
 		const tour = tourByID(pending);
 		if (tour && tour.page === document.body.dataset.page) {
 			window.setTimeout(() => startTour(pending), 300);
@@ -259,7 +280,22 @@ function mountTour() {
 	}
 	if (document.body.dataset.page !== "overview") return;
 	if (localStorage.getItem("ym_tour_done")) return;
-	window.setTimeout(() => startTour("welcome"), 400);
+	window.setTimeout(() => {
+		if (!tourState && !window.ymRedirecting) startTour("welcome");
+	}, 400);
+}
+
+// readPendingTour consumes the cross-page tour handoff, ignoring an entry older than a minute so a
+// failed navigation cannot surprise-start a tour on a later organic visit.
+function readPendingTour() {
+	const raw = sessionStorage.getItem("ym_tour_start");
+	if (!raw) return null;
+	sessionStorage.removeItem("ym_tour_start");
+	try {
+		const p = JSON.parse(raw);
+		if (p && p.id && Date.now() - p.at < 60000) return p.id;
+	} catch { /* stale or malformed handoff */ }
+	return null;
 }
 
 // startTour builds the spotlight overlay for the named tour and shows its first step. Calling it
@@ -293,6 +329,20 @@ function startTour(tourId) {
 	pop.querySelector(".tour-skip").addEventListener("click", () => endTour(true));
 	pop.querySelector(".tour-back").addEventListener("click", () => moveTour(-1));
 	pop.querySelector(".tour-next").addEventListener("click", () => moveTour(1));
+	pop.addEventListener("keydown", (e) => {
+		if (e.key !== "Tab") return;
+		const focusable = pop.querySelectorAll("button:not([hidden])");
+		if (focusable.length === 0) return;
+		const first = focusable[0];
+		const last = focusable[focusable.length - 1];
+		if (e.shiftKey && document.activeElement === first) {
+			e.preventDefault();
+			last.focus();
+		} else if (!e.shiftKey && document.activeElement === last) {
+			e.preventDefault();
+			first.focus();
+		}
+	});
 	document.addEventListener("keydown", tourKey);
 	window.addEventListener("resize", tourReflow);
 	window.addEventListener("scroll", tourReflow, true);
@@ -389,12 +439,17 @@ function tourReflow() {
 	renderTourPosition();
 }
 
-// tourKey drives the tour from the keyboard: Escape ends it, arrows and Enter move between steps.
+// tourKey drives the tour from the keyboard: Escape ends it and arrows move between steps. Enter
+// advances only when focus is not on a tour button, so a focused Back or Skip activates normally.
 function tourKey(e) {
 	if (!tourState) return;
 	if (e.key === "Escape") {
 		endTour(true);
-	} else if (e.key === "ArrowRight" || e.key === "Enter") {
+	} else if (e.key === "Enter") {
+		if (e.target.closest && e.target.closest(".tour-btns")) return;
+		e.preventDefault();
+		moveTour(1);
+	} else if (e.key === "ArrowRight") {
 		e.preventDefault();
 		moveTour(1);
 	} else if (e.key === "ArrowLeft") {
@@ -403,8 +458,9 @@ function tourKey(e) {
 	}
 }
 
-// endTour tears down the overlay and its listeners. When completed is true it records that the tour
-// has been seen so it does not auto-start again.
+// endTour tears down the overlay and its listeners, handing focus back to the Tour button so a
+// keyboard user is not dropped at the top of the page. When completed is true it records that the
+// tour has been seen so it does not auto-start again.
 function endTour(completed) {
 	if (completed) localStorage.setItem("ym_tour_done", "1");
 	if (!tourState) return;
@@ -415,6 +471,8 @@ function endTour(completed) {
 	tourState.hole.remove();
 	tourState.pop.remove();
 	tourState = null;
+	const btn = document.querySelector(".tour-start");
+	if (btn) btn.focus();
 }
 
 // WF_CARD_W is the fixed node width used to anchor edge endpoints; WF_HANDLE_Y is the handle's
@@ -1281,9 +1339,11 @@ function authHeaders() {
 	return token ? { "Authorization": "Bearer " + token } : {};
 }
 
-// requireLogin sends the browser to the sign in page, remembering where it was.
+// requireLogin sends the browser to the sign in page, remembering where it was. The redirect flag
+// stops timers such as the welcome tour from firing into the navigation.
 function requireLogin() {
 	if (document.body.dataset.page === "login") return;
+	window.ymRedirecting = true;
 	sessionStorage.setItem("ym_return", location.pathname);
 	location.href = "/ui/login";
 }
@@ -2012,7 +2072,9 @@ async function runMigrate(apply) {
 		}
 		const data = await res.json().catch(() => ({}));
 		if (!res.ok) throw new Error(data.error || ("HTTP " + res.status));
-		status.textContent = "";
+		status.textContent = apply
+			? "Imported " + (data.created || 0) + " objects."
+			: "Preview ready.";
 		renderMigratePlan(data);
 	} catch (err) {
 		status.textContent = (apply ? "Import failed: " : "Preview failed: ") + err.message;

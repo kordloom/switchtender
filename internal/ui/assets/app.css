@@ -468,6 +468,9 @@ button.topbar-link { background: none; border: none; padding: 0; font: inherit; 
 	.wf-in { left: -12px; }
 	.wf-out { right: -12px; }
 	.wf-node-del { font-size: 22px; padding: 4px 8px; }
+	.tour-start { min-height: 44px; }
+	.tour-btns .button { min-height: 40px; padding: 8px 14px; }
+	.tour-menu-item { min-height: 44px; justify-content: center; }
 }
 @media (max-width: 680px) {
 	.content { padding: 16px; }
