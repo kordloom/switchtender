@@ -158,6 +158,50 @@ func TestExplainRunCached(t *testing.T) {
 	}
 }
 
+// TestExplainRunFreshAfterApproval proves the answer cache is keyed by run status, so the review of
+// a held proposal is not reused as the failure triage after the run is approved and finishes.
+func TestExplainRunFreshAfterApproval(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := run.NewMemStore()
+	// A run proposed from a request, held for approval, is explained as a proposal review.
+	if err := store.Save(ctx, &run.Run{
+		ID: "run_p", Tool: "bash", Command: "systemctl restart nginx",
+		Intent: "restart nginx", Status: run.StatusPendingApproval,
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	calls := 0
+	provider := ai.ProviderFunc(func(_ context.Context, _, _ string) (string, error) {
+		calls++
+		return fmt.Sprintf("answer %d", calls), nil
+	})
+	handler := New(store, &fakeSubmitter{}, zap.NewNop(), WithAI(provider)).Handler()
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/runs/run_p/explain", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("proposal explain status = %d, want 200", rec.Code)
+	}
+
+	// The proposal is approved and finishes; explaining again must triage the outcome, not reuse the
+	// cached proposal review under the same run ID.
+	if err := store.Save(ctx, &run.Run{
+		ID: "run_p", Tool: "bash", Command: "systemctl restart nginx",
+		Intent: "restart nginx", Status: run.StatusFailed, Error: "exit status 1",
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/runs/run_p/explain", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("post-approval explain status = %d, want 200", rec.Code)
+	}
+	if calls != 2 {
+		t.Errorf("provider calls = %d, want 2 (a fresh triage after the status changed)", calls)
+	}
+}
+
 // TestBuildExplainPrompt covers the prompt size guards: a long command is capped with a truncation
 // note, and a log tail cut inside a multibyte rune drops the partial rune so the prompt stays valid
 // UTF-8.

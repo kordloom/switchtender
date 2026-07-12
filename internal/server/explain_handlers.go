@@ -91,20 +91,22 @@ type explainCall struct {
 	expires time.Time
 }
 
-// explainGroup deduplicates concurrent explain calls per run and caches successful answers, so
-// repeated clicks or a scripted loop cannot multiply provider spend at viewer privilege.
+// explainGroup deduplicates concurrent explain calls and caches successful answers keyed by run and
+// status, so repeated clicks or a scripted loop cannot multiply provider spend at viewer privilege.
 type explainGroup struct {
 	// mu guards calls.
 	mu sync.Mutex
-	// calls maps run ID to its latest call.
+	// calls maps a cache key, the run ID and its status, to its latest call.
 	calls map[string]*explainCall
 }
 
-// do returns the cached or deduplicated explanation for id, invoking f at most once per expiry
-// window across concurrent callers. Failures are not cached, so a provider hiccup can be retried.
-func (g *explainGroup) do(id string, f func() (string, error)) (string, error) {
+// do returns the cached or deduplicated explanation for key, invoking f at most once per expiry
+// window across concurrent callers. The key includes the run's status, so an answer computed while
+// a run was held for approval is not reused after it is approved and finishes. Failures are not
+// cached, so a provider hiccup can be retried.
+func (g *explainGroup) do(key string, f func() (string, error)) (string, error) {
 	g.mu.Lock()
-	if c, ok := g.calls[id]; ok {
+	if c, ok := g.calls[key]; ok {
 		select {
 		case <-c.done:
 			if c.err == nil && time.Now().Before(c.expires) {
@@ -118,7 +120,7 @@ func (g *explainGroup) do(id string, f func() (string, error)) (string, error) {
 		}
 	}
 	c := &explainCall{done: make(chan struct{})}
-	g.calls[id] = c
+	g.calls[key] = c
 	g.prune()
 	g.mu.Unlock()
 
@@ -144,9 +146,9 @@ func (g *explainGroup) prune() {
 
 // explainRunHandler asks the configured AI provider to explain a run from its status, error, and log
 // tail. It is advisory and read-only: it never changes the run or starts anything, and the log it
-// sends is already masked of secrets when the run is recorded. Only terminal runs are explainable,
-// since a partial log produces confident but stale triage, and answers are cached per run so
-// repeated requests do not multiply provider spend.
+// sends is already masked of secrets when the run is recorded. Only terminal runs and held
+// proposals are explainable, since a partial log produces confident but stale triage, and answers
+// are cached per run and status so repeated requests do not multiply provider spend.
 func explainRunHandler(store run.Store, provider ai.Provider, log *zap.Logger) http.HandlerFunc {
 	if store == nil {
 		panic("server: explainRunHandler: Store required")
@@ -193,7 +195,7 @@ func explainRunHandler(store run.Store, provider ai.Provider, log *zap.Logger) h
 			body, _ := store.Log(r.Context(), id) // best effort: a run may have produced no log
 			prompt = buildExplainPrompt(rn, body, explainEvents(r.Context(), store, id))
 		}
-		answer, err := group.do(id, func() (string, error) {
+		answer, err := group.do(id+"|"+string(rn.Status), func() (string, error) {
 			return provider.Complete(r.Context(), system, prompt)
 		})
 		if err != nil {
