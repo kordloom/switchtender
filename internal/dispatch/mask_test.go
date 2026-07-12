@@ -2,6 +2,7 @@ package dispatch
 
 import (
 	"context"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -55,7 +56,7 @@ func TestMaskerRedact(t *testing.T) {
 }
 
 // TestMaskerRedactEvent confirms an event's free-text fields and string set_stats outputs are masked
-// while numeric outputs are untouched.
+// at every nesting depth while non-string outputs are untouched.
 func TestMaskerRedactEvent(t *testing.T) {
 	t.Parallel()
 	m := &masker{}
@@ -65,13 +66,23 @@ func TestMaskerRedactEvent(t *testing.T) {
 		Stdout:  "printed topsecret",
 		Stderr:  "warn topsecret",
 		Diff:    "-topsecret",
-		Outputs: map[string]any{"leaked": "topsecret", "count": 5},
+		Outputs: map[string]any{
+			"leaked": "topsecret",
+			"count":  5,
+			"data":   map[string]any{"db_password": "topsecret", "port": 22},
+			"list":   []any{"topsecret", 7, map[string]any{"inner": "topsecret"}},
+		},
 	}
 	m.redactEvent(&e)
 
 	want := event.Event{
 		Message: "***", Stdout: "printed ***", Stderr: "warn ***", Diff: "-***",
-		Outputs: map[string]any{"leaked": "***", "count": 5},
+		Outputs: map[string]any{
+			"leaked": "***",
+			"count":  5,
+			"data":   map[string]any{"db_password": "***", "port": 22},
+			"list":   []any{"***", 7, map[string]any{"inner": "***"}},
+		},
 	}
 	if diff := cmp.Diff(want, e); diff != "" {
 		t.Errorf("redactEvent mismatch (-want +got):\n%s", diff)
@@ -125,5 +136,49 @@ func TestRunMasksSecretInLog(t *testing.T) {
 	}
 	if !strings.Contains(logStr, maskToken) {
 		t.Errorf("expected mask token in log, got %q", logStr)
+	}
+}
+
+// TestRunMasksSecretInError drives a failing run: the runner's error embeds a credential's secret
+// value, and the stored run error has the value redacted rather than leaked.
+func TestRunMasksSecretInError(t *testing.T) {
+	t.Parallel()
+	sealer := credential.NewSealer("pass", "salt")
+	sealed, err := sealer.Seal("API_TOKEN=supersecretvalue")
+	if err != nil {
+		t.Fatalf("Seal() error = %v", err)
+	}
+	creds := credential.NewMemStore()
+	if err := creds.Save(context.Background(), &credential.Credential{
+		ID: "cred_1", Name: "tok", Kind: credential.KindEnv,
+		Source: credential.SourceLocal, Secret: sealed,
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	runner := roundhouse.RunnerFunc(
+		func(_ context.Context, _ roundhouse.Spec, _ io.Writer) (roundhouse.Result, error) {
+			return roundhouse.Result{}, errors.New("curl -H 'Authorization: supersecretvalue': exit 1")
+		},
+	)
+
+	store := run.NewMemStore()
+	d := New(store, runner, nil, WithCredentials(creds, sealer))
+	defer d.Close()
+
+	created, err := d.Submit(context.Background(), "play.yml", "inv",
+		run.WithCredentialIDs([]string{"cred_1"}))
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+
+	got := waitTerminal(t, store, created.ID)
+	if got.Status != run.StatusFailed {
+		t.Fatalf("run status = %q, want failed", got.Status)
+	}
+	if strings.Contains(got.Error, "supersecretvalue") {
+		t.Errorf("secret leaked into run error: %q", got.Error)
+	}
+	if !strings.Contains(got.Error, maskToken) {
+		t.Errorf("expected mask token in run error, got %q", got.Error)
 	}
 }

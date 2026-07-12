@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"unicode/utf8"
 
 	"go.uber.org/zap"
 
@@ -20,6 +21,10 @@ const explainSystemPrompt = "You are a site reliability engineer helping triage 
 // explainLogTail is how many trailing bytes of the run log to include: enough for context without
 // overwhelming the model or the request.
 const explainLogTail = 6000
+
+// explainCommandCap is how many leading bytes of a step's script or command to include. A script
+// body can be arbitrarily large, and its opening lines carry the interpreter and the intent.
+const explainCommandCap = 2000
 
 // explainRunHandler asks the configured AI provider to explain a run from its status, error, and log
 // tail. It is advisory and read-only: it never changes the run or starts anything, and the log it
@@ -69,7 +74,7 @@ func buildExplainPrompt(rn *run.Run, logBytes []byte) string {
 	}
 	if rn.Command != "" {
 		b.WriteString("\nCommand: ")
-		b.WriteString(rn.Command)
+		b.WriteString(headBytes(rn.Command, explainCommandCap))
 	}
 	if rn.Error != "" {
 		b.WriteString("\nError: ")
@@ -78,10 +83,26 @@ func buildExplainPrompt(rn *run.Run, logBytes []byte) string {
 	tail := logBytes
 	if len(tail) > explainLogTail {
 		tail = tail[len(tail)-explainLogTail:]
+		for len(tail) > 0 && !utf8.RuneStart(tail[0]) {
+			tail = tail[1:]
+		}
 	}
 	if len(tail) > 0 {
 		b.WriteString("\n\nLog tail:\n")
 		b.Write(tail)
 	}
 	return b.String()
+}
+
+// headBytes returns up to limit leading bytes of s without splitting a multibyte rune, appending a
+// truncation note when the value was cut.
+func headBytes(s string, limit int) string {
+	if len(s) <= limit {
+		return s
+	}
+	cut := limit
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "\n[truncated]"
 }

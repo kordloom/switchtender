@@ -978,16 +978,17 @@ func (d *Dispatcher) execute(ctx context.Context, r *run.Run) run.Status {
 	if err != nil {
 		close(stop)
 		<-tailed
-		d.finalize(r, run.StatusFailed, nil, err.Error())
+		d.finalize(r, run.StatusFailed, nil, mask.redactString(err.Error()))
 		d.publisher.CloseRun(r.ID)
 		return run.StatusFailed
 	}
 	defer invCleanup()
+	mask.set(invSecrets)
 
 	if err := d.resolveProject(r, &spec); err != nil {
 		close(stop)
 		<-tailed
-		d.finalize(r, run.StatusFailed, nil, err.Error())
+		d.finalize(r, run.StatusFailed, nil, mask.redactString(err.Error()))
 		d.publisher.CloseRun(r.ID)
 		return run.StatusFailed
 	}
@@ -997,7 +998,7 @@ func (d *Dispatcher) execute(ctx context.Context, r *run.Run) run.Status {
 		credCleanup()
 		close(stop)
 		<-tailed
-		d.finalize(r, run.StatusFailed, nil, err.Error())
+		d.finalize(r, run.StatusFailed, nil, mask.redactString(err.Error()))
 		d.publisher.CloseRun(r.ID)
 		return run.StatusFailed
 	}
@@ -1009,7 +1010,7 @@ func (d *Dispatcher) execute(ctx context.Context, r *run.Run) run.Status {
 	close(stop)
 	<-tailed
 
-	status := d.outcome(ctx, r, res, err)
+	status := d.outcome(ctx, r, res, err, mask)
 	d.summarize(r)
 	d.publisher.CloseRun(r.ID)
 	return status
@@ -1077,14 +1078,17 @@ func (d *Dispatcher) summarize(r *run.Run) {
 	}
 }
 
-// outcome finalizes r from the run result and returns the terminal status.
-func (d *Dispatcher) outcome(ctx context.Context, r *run.Run, res roundhouse.Result, err error) run.Status {
+// outcome finalizes r from the run result and returns the terminal status. Failure text passes
+// through the run's masker so a runner error cannot leak a resolved secret into the stored run.
+func (d *Dispatcher) outcome(
+	ctx context.Context, r *run.Run, res roundhouse.Result, err error, mask *masker,
+) run.Status {
 	switch {
 	case err != nil && ctx.Err() != nil:
 		d.finalize(r, run.StatusCanceled, nil, "")
 		return run.StatusCanceled
 	case err != nil:
-		d.finalize(r, run.StatusFailed, nil, err.Error())
+		d.finalize(r, run.StatusFailed, nil, mask.redactString(err.Error()))
 		return run.StatusFailed
 	case res.ExitCode == 0:
 		d.finalize(r, run.StatusSucceeded, &res.ExitCode, "")

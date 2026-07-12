@@ -74,7 +74,7 @@ func (s *Syncer) Sync(p *Project, sshKey string) (dir, sha string, galaxyEnv []s
 			URL: p.RepoURL, Auth: auth, ReferenceName: branchRef(p.Branch), SingleBranch: true,
 		})
 		if err != nil {
-			return "", "", nil, fmt.Errorf("clone %s: %w", p.RepoURL, err)
+			return "", "", nil, fmt.Errorf("clone %s: %w", redactRepoURL(p.RepoURL), err)
 		}
 	} else {
 		if err := fetchAndReset(repo, p, auth); err != nil {
@@ -179,7 +179,7 @@ func runGalaxy(checkout string, args ...string) (string, error) {
 func fetchAndReset(repo *git.Repository, p *Project, auth transport.AuthMethod) error {
 	err := repo.Fetch(&git.FetchOptions{Auth: auth, Force: true})
 	if err != nil && err != git.NoErrAlreadyUpToDate {
-		return fmt.Errorf("fetch %s: %w", p.RepoURL, err)
+		return fmt.Errorf("fetch %s: %w", redactRepoURL(p.RepoURL), err)
 	}
 
 	branch := p.Branch
@@ -228,6 +228,9 @@ func ValidateRepoURL(raw string) error {
 	if strings.TrimSpace(raw) == "" {
 		return fmt.Errorf("%w: empty url", ErrBadRepoURL)
 	}
+	if err := checkRepoUserinfo(raw); err != nil {
+		return err
+	}
 	host, scheme, err := repoURLParts(raw)
 	if err != nil {
 		return err
@@ -239,6 +242,39 @@ func ValidateRepoURL(raw string) error {
 		return nil
 	}
 	return checkRepoHost(host)
+}
+
+// checkRepoUserinfo rejects a scheme-prefixed repository URL that embeds credentials. A token or
+// password in the URL surfaces in clone and fetch errors and in stored project rows, so credentials
+// belong in a stored credential instead. An ssh username alone passes, since it names the login and
+// carries no secret.
+func checkRepoUserinfo(raw string) error {
+	if !strings.Contains(raw, "://") {
+		return nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.User == nil {
+		return nil
+	}
+	if _, hasPassword := u.User.Password(); hasPassword || u.Scheme != "ssh" {
+		return fmt.Errorf("%w: credentials embedded in url", ErrBadRepoURL)
+	}
+	return nil
+}
+
+// redactRepoURL returns the URL with any embedded userinfo removed so error text never carries a
+// token or password from the URL. A URL that does not parse is replaced entirely, since its shape
+// is unknown. The scp-like shorthand has no password slot and passes through unchanged.
+func redactRepoURL(raw string) string {
+	if !strings.Contains(raw, "://") {
+		return raw
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "<invalid url>"
+	}
+	u.User = nil
+	return u.String()
 }
 
 // repoURLParts extracts the host and transport scheme from a repository URL, handling both the

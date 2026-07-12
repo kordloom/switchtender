@@ -130,6 +130,9 @@ func TestValidateRepoURL(t *testing.T) {
 		{In: "https://localhost/x", Want: project.ErrBadRepoURL},                      // Test 11: Loopback name.
 		{In: "https://127.0.0.1/x", Want: project.ErrBadRepoURL},                      // Test 12: Loopback address.
 		{In: "git@169.254.169.254:x", Want: project.ErrBadRepoURL},                    // Test 13: scp-like to metadata.
+		{In: "https://oauth2:tok3n@github.com/org/repo.git", Want: project.ErrBadRepoURL}, // Test 14: Password in url.
+		{In: "https://ghp_token@github.com/org/repo.git", Want: project.ErrBadRepoURL},    // Test 15: Token as https username.
+		{In: "ssh://git:pass@github.com/org/repo.git", Want: project.ErrBadRepoURL},       // Test 16: Password on ssh.
 	}
 	for i, test := range tests {
 		if err := project.ValidateRepoURL(test.In); !errors.Is(err, test.Want) {

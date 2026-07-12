@@ -89,7 +89,7 @@ func (m *masker) redactString(s string) string {
 }
 
 // redactEvent masks the free-text fields of an event in place, covering a task's captured output,
-// message, diff, and any string values a play published with set_stats.
+// message, diff, and any string values a play published with set_stats, however deeply nested.
 func (m *masker) redactEvent(e *event.Event) {
 	m.mu.RLock()
 	empty := len(m.secrets) == 0
@@ -102,8 +102,27 @@ func (m *masker) redactEvent(e *event.Event) {
 	e.Stderr = m.redactString(e.Stderr)
 	e.Diff = m.redactString(e.Diff)
 	for k, v := range e.Outputs {
-		if sv, ok := v.(string); ok {
-			e.Outputs[k] = m.redactString(sv)
+		e.Outputs[k] = m.redactValue(v)
+	}
+}
+
+// redactValue returns v with every string it contains redacted, walking nested maps and slices so a
+// secret published under a nested set_stats key is still masked.
+func (m *masker) redactValue(v any) any {
+	switch t := v.(type) {
+	case string:
+		return m.redactString(t)
+	case map[string]any:
+		for k, val := range t {
+			t[k] = m.redactValue(val)
 		}
+		return t
+	case []any:
+		for i, val := range t {
+			t[i] = m.redactValue(val)
+		}
+		return t
+	default:
+		return v
 	}
 }
