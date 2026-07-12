@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 )
@@ -14,16 +14,13 @@ import (
 const defaultAnthropicURL = "https://api.anthropic.com"
 
 // defaultAnthropicModel is used when no model is configured.
-const defaultAnthropicModel = "claude-3-5-sonnet-latest"
+const defaultAnthropicModel = "claude-opus-4-8"
 
 // anthropicVersion is the required API version header value.
 const anthropicVersion = "2023-06-01"
 
 // anthropicMaxTokens caps the completion length, enough for a triage summary.
 const anthropicMaxTokens = 1024
-
-// errAnthropicKey is returned when the Anthropic provider is selected without an API key.
-var errAnthropicKey = errors.New("anthropic needs an api key")
 
 // anthropic calls the Anthropic Messages API. Run data leaves the box, so it is masked before it is
 // sent, and a local provider is preferred when privacy matters.
@@ -41,7 +38,7 @@ type anthropic struct {
 // newAnthropic builds an Anthropic provider. It requires an API key and defaults the model and URL.
 func newAnthropic(apiKey, model, url string) (*anthropic, error) {
 	if apiKey == "" {
-		return nil, errAnthropicKey
+		return nil, fmt.Errorf("%w: anthropic", ErrKey)
 	}
 	if model == "" {
 		model = defaultAnthropicModel
@@ -53,11 +50,12 @@ func newAnthropic(apiKey, model, url string) (*anthropic, error) {
 		apiKey: apiKey,
 		model:  model,
 		url:    strings.TrimRight(url, "/"),
-		client: &http.Client{Timeout: aiTimeout},
+		client: newClient(),
 	}, nil
 }
 
-// Complete sends the prompt to the Messages API and returns the concatenated text reply.
+// Complete sends the prompt to the Messages API and returns the concatenated text reply. A reply
+// cut off at the token cap is marked so the reader knows it is incomplete.
 func (a *anthropic) Complete(ctx context.Context, system, user string) (string, error) {
 	body, err := json.Marshal(map[string]any{
 		"model":      a.model,
@@ -81,19 +79,26 @@ func (a *anthropic) Complete(ctx context.Context, system, user string) (string, 
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("anthropic status %d", resp.StatusCode)
+		return "", statusError("anthropic", resp)
 	}
 	var out struct {
 		Content []struct {
+			Type string `json:"type"`
 			Text string `json:"text"`
 		} `json:"content"`
+		StopReason string `json:"stop_reason"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return "", fmt.Errorf("anthropic decode: %w", err)
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxResponseBytes)).Decode(&out); err != nil {
+		return "", fmt.Errorf("%w: anthropic: %s", ErrDecode, err)
 	}
 	var b strings.Builder
 	for _, c := range out.Content {
-		b.WriteString(c.Text)
+		if c.Type == "text" {
+			b.WriteString(c.Text)
+		}
+	}
+	if out.StopReason == "max_tokens" {
+		b.WriteString("\n[reply truncated at the token limit]")
 	}
 	return b.String(), nil
 }

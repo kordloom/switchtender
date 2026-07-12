@@ -5,13 +5,44 @@ package ai
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"strings"
+	"time"
 )
 
-// ErrUnknownProvider is returned when a configured provider name is not recognized.
-var ErrUnknownProvider = errors.New("unknown ai provider")
+// aiTimeout bounds one completion request, since a local model can be slow.
+const aiTimeout = 120 * time.Second
+
+// maxResponseBytes caps how much of a provider reply is decoded, so a broken or hostile endpoint
+// cannot exhaust memory on the control plane.
+const maxResponseBytes = 1 << 20
+
+// errorBodyCap is how much of a provider error body to keep for the server log.
+const errorBodyCap = 2048
+
+// newClient returns the HTTP client the providers share: a hard timeout, and no redirect
+// following, so a misconfigured or hostile endpoint cannot replay credentials elsewhere.
+func newClient() *http.Client {
+	return &http.Client{
+		Timeout: aiTimeout,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+}
+
+// statusError builds the error for a non-success provider reply, keeping a short excerpt of the
+// body so a bad model name or quota problem is diagnosable from the server log.
+func statusError(provider string, resp *http.Response) error {
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, errorBodyCap))
+	detail := strings.TrimSpace(string(body))
+	if detail == "" {
+		return fmt.Errorf("%w: %s: %d", ErrStatus, provider, resp.StatusCode)
+	}
+	return fmt.Errorf("%w: %s: %d: %s", ErrStatus, provider, resp.StatusCode, detail)
+}
 
 // Provider turns a prompt into a completion. One method keeps providers swappable: a local Ollama
 // model, a cloud API, or a fake in tests.

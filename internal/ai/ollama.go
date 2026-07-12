@@ -5,9 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
-	"time"
 )
 
 // defaultOllamaURL is the local Ollama endpoint used when none is configured.
@@ -15,9 +15,6 @@ const defaultOllamaURL = "http://localhost:11434"
 
 // defaultOllamaModel is the model run when none is configured.
 const defaultOllamaModel = "llama3.1"
-
-// aiTimeout bounds one completion request, since a local model can be slow.
-const aiTimeout = 120 * time.Second
 
 // ollama calls a local Ollama server, so a model runs on the operator's own hardware and no run
 // data leaves the box.
@@ -41,7 +38,7 @@ func newOllama(url, model string) *ollama {
 	return &ollama{
 		url:    strings.TrimRight(url, "/"),
 		model:  model,
-		client: &http.Client{Timeout: aiTimeout},
+		client: newClient(),
 	}
 }
 
@@ -69,15 +66,15 @@ func (o *ollama) Complete(ctx context.Context, system, user string) (string, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("ollama status %d", resp.StatusCode)
+		return "", statusError("ollama", resp)
 	}
 	var out struct {
 		Message struct {
 			Content string `json:"content"`
 		} `json:"message"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return "", fmt.Errorf("ollama decode: %w", err)
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxResponseBytes)).Decode(&out); err != nil {
+		return "", fmt.Errorf("%w: ollama: %s", ErrDecode, err)
 	}
 	return out.Message.Content, nil
 }

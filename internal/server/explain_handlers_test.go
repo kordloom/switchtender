@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -60,6 +61,76 @@ func TestExplainRun(t *testing.T) {
 	off.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/runs/run_x/explain", nil))
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("explain with no provider status = %d, want 404", rec.Code)
+	}
+}
+
+// TestExplainRunGates covers the non-terminal 409, the provider failure 502 with no detail leak,
+// and the unknown run 404.
+func TestExplainRunGates(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := run.NewMemStore()
+	if err := store.Save(ctx, &run.Run{ID: "run_going", Tool: "bash", Status: run.StatusRunning}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	if err := store.Save(ctx, &run.Run{ID: "run_done", Tool: "bash", Status: run.StatusFailed}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	boom := ai.ProviderFunc(func(_ context.Context, _, _ string) (string, error) {
+		return "", errors.New("provider exploded with secret detail")
+	})
+	handler := New(store, &fakeSubmitter{}, zap.NewNop(), WithAI(boom)).Handler()
+
+	// Test 0: A run that is still executing is refused with 409.
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/runs/run_going/explain", nil))
+	if rec.Code != http.StatusConflict {
+		t.Errorf("non-terminal explain status = %d, want 409", rec.Code)
+	}
+
+	// Test 1: A provider failure maps to a generic 502 without provider internals.
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/runs/run_done/explain", nil))
+	if rec.Code != http.StatusBadGateway {
+		t.Errorf("provider failure status = %d, want 502", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), "secret detail") {
+		t.Errorf("provider internals leaked to the client: %s", rec.Body.String())
+	}
+
+	// Test 2: An unknown run is a 404.
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/runs/run_missing/explain", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("unknown run explain status = %d, want 404", rec.Code)
+	}
+}
+
+// TestExplainRunCached proves a second explain for the same run reuses the answer instead of
+// calling the provider again.
+func TestExplainRunCached(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := run.NewMemStore()
+	if err := store.Save(ctx, &run.Run{ID: "run_c", Tool: "bash", Status: run.StatusFailed}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	calls := 0
+	provider := ai.ProviderFunc(func(_ context.Context, _, _ string) (string, error) {
+		calls++
+		return "cached advice", nil
+	})
+	handler := New(store, &fakeSubmitter{}, zap.NewNop(), WithAI(provider)).Handler()
+
+	for i := 0; i < 2; i++ {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/runs/run_c/explain", nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("explain %d status = %d, want 200", i, rec.Code)
+		}
+	}
+	if calls != 1 {
+		t.Errorf("provider calls = %d, want 1 (second request served from cache)", calls)
 	}
 }
 
