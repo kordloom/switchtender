@@ -22,6 +22,10 @@ const maxResponseBytes = 1 << 20
 // errorBodyCap is how much of a provider error body to keep for the server log.
 const errorBodyCap = 2048
 
+// truncationNote marks a reply a provider cut off at its token cap, so the reader knows the answer
+// is incomplete instead of treating a mid-sentence stop as the whole reply.
+const truncationNote = "\n[reply truncated at the token limit]"
+
 // newClient returns the HTTP client the providers share: a hard timeout, and no redirect
 // following, so a misconfigured or hostile endpoint cannot replay credentials elsewhere.
 func newClient() *http.Client {

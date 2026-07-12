@@ -79,6 +79,7 @@ func (o *openai) Complete(ctx context.Context, system, user string) (string, err
 			Message struct {
 				Content string `json:"content"`
 			} `json:"message"`
+			FinishReason string `json:"finish_reason"`
 		} `json:"choices"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, maxResponseBytes)).Decode(&out); err != nil {
@@ -87,5 +88,15 @@ func (o *openai) Complete(ctx context.Context, system, user string) (string, err
 	if len(out.Choices) == 0 {
 		return "", fmt.Errorf("%w: openai: no choices in reply", ErrDecode)
 	}
-	return out.Choices[0].Message.Content, nil
+	// A reply cut off at the token cap is marked so the reader knows it is incomplete, matching the
+	// Anthropic provider. A non-truncated empty reply is surfaced rather than returned blank, so a
+	// caller never renders a successful-looking empty answer.
+	content := out.Choices[0].Message.Content
+	if out.Choices[0].FinishReason == "length" {
+		return content + truncationNote, nil
+	}
+	if strings.TrimSpace(content) == "" {
+		return "", fmt.Errorf("%w: openai: empty reply (finish_reason %q)", ErrDecode, out.Choices[0].FinishReason)
+	}
+	return content, nil
 }

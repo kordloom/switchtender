@@ -140,8 +140,13 @@ func (a *anthropic) Complete(ctx context.Context, system, user string) (string, 
 			b.WriteString(c.Text)
 		}
 	}
+	// A non-refusal reply with no text is surfaced rather than returned blank, so a caller never
+	// renders a successful-looking empty answer. A token-cap cutoff is marked instead.
+	if b.Len() == 0 && out.StopReason != "max_tokens" {
+		return "", fmt.Errorf("%w: anthropic: empty reply (stop_reason %q)", ErrDecode, out.StopReason)
+	}
 	if out.StopReason == "max_tokens" {
-		b.WriteString("\n[reply truncated at the token limit]")
+		b.WriteString(truncationNote)
 	}
 	return b.String(), nil
 }

@@ -247,6 +247,27 @@ func TestAnthropicTruncationNote(t *testing.T) {
 	}
 }
 
+// TestAnthropicEmptyReply confirms a non-refusal reply with no text block is surfaced as a decode
+// error rather than returned as a blank, successful-looking answer.
+func TestAnthropicEmptyReply(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"content":     []map[string]string{},
+			"stop_reason": "end_turn",
+		})
+	}))
+	defer srv.Close()
+
+	p, err := newAnthropic("sk-test", "", srv.URL)
+	if err != nil {
+		t.Fatalf("newAnthropic() error = %v", err)
+	}
+	if _, err := p.Complete(context.Background(), "sys", "why"); !errors.Is(err, ErrDecode) {
+		t.Fatalf("Complete() error = %v, want ErrDecode", err)
+	}
+}
+
 // TestAnthropicErrorPaths covers a non-200 reply keeping the body excerpt, malformed JSON, and a
 // redirect that must not be followed so the API key cannot be replayed to another host.
 func TestAnthropicErrorPaths(t *testing.T) {
@@ -364,6 +385,32 @@ func TestOpenAIComplete(t *testing.T) {
 	}
 }
 
+// TestOpenAITruncationNote confirms a reply cut off at the token cap is marked as incomplete.
+func TestOpenAITruncationNote(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{
+				"message":       map[string]string{"content": "partial advice"},
+				"finish_reason": "length",
+			}},
+		})
+	}))
+	defer srv.Close()
+
+	p, err := newOpenAI("sk-test", "test-model", srv.URL)
+	if err != nil {
+		t.Fatalf("newOpenAI() error = %v", err)
+	}
+	got, err := p.Complete(context.Background(), "sys", "why")
+	if err != nil {
+		t.Fatalf("Complete() error = %v", err)
+	}
+	if !strings.Contains(got, "partial advice") || !strings.Contains(got, "[reply truncated") {
+		t.Errorf("Complete() = %q, want the reply with a truncation note", got)
+	}
+}
+
 // TestOpenAIErrorPaths covers a non-200 reply, malformed JSON, an empty choices list, and a
 // redirect that must not be followed so the bearer key cannot be replayed to another host.
 func TestOpenAIErrorPaths(t *testing.T) {
@@ -397,6 +444,12 @@ func TestOpenAIErrorPaths(t *testing.T) {
 			http.Redirect(w, r, "https://example.invalid/steal", http.StatusFound)
 		},
 		Want: ErrStatus,
+	}, { // Test 4: A choice with empty content and no truncation is a decode error, not a blank reply.
+		Name: "empty content",
+		Handler: func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`{"choices": [{"message": {"content": ""}, "finish_reason": "stop"}]}`))
+		},
+		Want: ErrDecode,
 	}}
 	for testNum, test := range tests {
 		t.Run(test.Name, func(t *testing.T) {
