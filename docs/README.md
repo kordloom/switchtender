@@ -19,6 +19,7 @@ the app at `/ui/docs`.
 | [Switching from AWX](switching-from-awx.md) | Import what you have, or set up from scratch.|
 | [Tutorials](tutorials.md) | Task-focused walk-throughs for everyday work.|
 | [Concepts](concepts.md) | Runs, splits, pipelines, projects, templates, and the rest.|
+| [Reliability](reliability.md) | How runs execute: workers, splits, failure, recovery, durability.|
 | [Configuration](configuration.md) | Every command, flag, and environment variable.|
 | [Desktop](desktop.md) | Run Yardmaster as a local desktop app.|
 | [Features](features.md) | The full capability list.|

@@ -79,7 +79,8 @@ changes on upgrade until grants are added.
 A worker is any process running the executor against the shared store. Every process, the server
 included, competes for pending runs through the store. A run can target a named queue, and only
 workers serving that queue run it, which places work across a mixed fleet. A lease keeps a run
-attributable, and a janitor requeues work whose holder went away.
+attributable, and a janitor requeues work whose holder went away. The [reliability](reliability.md)
+page details how work is claimed, bounded, recovered, and kept consistent across workers.
 
 ## Provable audit
 

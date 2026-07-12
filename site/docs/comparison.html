@@ -31,7 +31,7 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/index.html">Overview</a><a href="/docs/quickstart.html">Quickstart</a><a href="/docs/faq.html">FAQ</a><a href="/docs/switching-from-awx.html">Switching from AWX</a><a href="/docs/migration.html">Migration</a><a href="/docs/tutorials.html">Tutorials</a><a href="/docs/tutorial-run-a-job.html">Run a job</a><a href="/docs/tutorial-save-a-template.html">Save a template</a><a href="/docs/tutorial-schedule-a-job.html">Schedule a job</a><a href="/docs/tutorial-set-a-secret.html">Set a secret</a><a href="/docs/tutorial-migrate.html">Migrate your setup</a><a href="/docs/tool-bash.html">Bash runs</a><a href="/docs/tool-terraform.html">Terraform runs</a><a href="/docs/tool-python.html">Python runs</a><a href="/docs/tool-go.html">Go runs</a><a href="/docs/concepts.html">Concepts</a><a href="/docs/configuration.html">Configuration</a><a href="/docs/desktop.html">Desktop</a><a href="/docs/features.html">Features</a><a href="/docs/secrets.html">Secrets</a><a href="/docs/drift.html">Drift detection</a><a href="/docs/api.html">HTTP API</a><a href="/docs/comparison.html" class="active">Yardmaster compared to AWX and Semaphore</a>
+				<a href="/docs/index.html">Overview</a><a href="/docs/quickstart.html">Quickstart</a><a href="/docs/faq.html">FAQ</a><a href="/docs/switching-from-awx.html">Switching from AWX</a><a href="/docs/migration.html">Migration</a><a href="/docs/tutorials.html">Tutorials</a><a href="/docs/tutorial-run-a-job.html">Run a job</a><a href="/docs/tutorial-save-a-template.html">Save a template</a><a href="/docs/tutorial-schedule-a-job.html">Schedule a job</a><a href="/docs/tutorial-set-a-secret.html">Set a secret</a><a href="/docs/tutorial-migrate.html">Migrate your setup</a><a href="/docs/tool-bash.html">Bash runs</a><a href="/docs/tool-terraform.html">Terraform runs</a><a href="/docs/tool-python.html">Python runs</a><a href="/docs/tool-go.html">Go runs</a><a href="/docs/concepts.html">Concepts</a><a href="/docs/reliability.html">Reliability</a><a href="/docs/configuration.html">Configuration</a><a href="/docs/desktop.html">Desktop</a><a href="/docs/features.html">Features</a><a href="/docs/secrets.html">Secrets</a><a href="/docs/drift.html">Drift detection</a><a href="/docs/api.html">HTTP API</a><a href="/docs/comparison.html" class="active">Yardmaster compared to AWX and Semaphore</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
@@ -89,7 +89,7 @@ on them.</p>
 </tr>
 <tr>
 <td>Distributed workers</td>
-<td>Store leasing, where the same single binary adds capacity, held together by leases and a janitor.</td>
+<td>Store leasing, where the same single binary adds capacity, held together by leases and a janitor that requeues a crashed worker's runs.</td>
 <td>A Receptor mesh.</td>
 <td>Runners, in a paid tier.</td>
 </tr>
@@ -98,6 +98,12 @@ on them.</p>
 <td>Every run records the exact commit it executed.</td>
 <td>Partial.</td>
 <td>Partial.</td>
+</tr>
+<tr>
+<td>Provable audit</td>
+<td>A tamper-evident SHA-256 hash chain, verified offline, with an optional ed25519-signed export.</td>
+<td>An activity stream.</td>
+<td>An activity log.</td>
 </tr>
 <tr>
 <td>Migration in</td>
@@ -157,8 +163,8 @@ on them.</p>
 <td>All three launch on a git push.</td>
 </tr>
 <tr>
-<td>Metrics and audit</td>
-<td>Yardmaster exposes Prometheus metrics and an audit trail of every mutation.</td>
+<td>Metrics</td>
+<td>Yardmaster exposes Prometheus metrics for scraping.</td>
 </tr>
 <tr>
 <td>Directory sign-in</td>
@@ -191,6 +197,9 @@ deploy, runs you can read as structure instead of scrollback, job splitting that
 a memory of how every host behaves over time, a visual workflow editor on a provable DAG engine,
 and a one-command path off either incumbent. It is younger, and its integration catalog is smaller.
 Both gaps are being closed on purpose.</p>
+<p>The <a href="/docs/reliability.html">reliability</a> page details how runs execute under load: bounded workers, splits
+balanced by measured duration, coordinated pipeline failure, crash recovery through leases, and a
+store that stays consistent while a fleet writes to it.</p>
 
 		</main>
 	</div>

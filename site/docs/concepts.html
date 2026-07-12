@@ -31,7 +31,7 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/index.html">Overview</a><a href="/docs/quickstart.html">Quickstart</a><a href="/docs/faq.html">FAQ</a><a href="/docs/switching-from-awx.html">Switching from AWX</a><a href="/docs/migration.html">Migration</a><a href="/docs/tutorials.html">Tutorials</a><a href="/docs/tutorial-run-a-job.html">Run a job</a><a href="/docs/tutorial-save-a-template.html">Save a template</a><a href="/docs/tutorial-schedule-a-job.html">Schedule a job</a><a href="/docs/tutorial-set-a-secret.html">Set a secret</a><a href="/docs/tutorial-migrate.html">Migrate your setup</a><a href="/docs/tool-bash.html">Bash runs</a><a href="/docs/tool-terraform.html">Terraform runs</a><a href="/docs/tool-python.html">Python runs</a><a href="/docs/tool-go.html">Go runs</a><a href="/docs/concepts.html" class="active">Concepts</a><a href="/docs/configuration.html">Configuration</a><a href="/docs/desktop.html">Desktop</a><a href="/docs/features.html">Features</a><a href="/docs/secrets.html">Secrets</a><a href="/docs/drift.html">Drift detection</a><a href="/docs/api.html">HTTP API</a><a href="/docs/comparison.html">Yardmaster compared to AWX and Semaphore</a>
+				<a href="/docs/index.html">Overview</a><a href="/docs/quickstart.html">Quickstart</a><a href="/docs/faq.html">FAQ</a><a href="/docs/switching-from-awx.html">Switching from AWX</a><a href="/docs/migration.html">Migration</a><a href="/docs/tutorials.html">Tutorials</a><a href="/docs/tutorial-run-a-job.html">Run a job</a><a href="/docs/tutorial-save-a-template.html">Save a template</a><a href="/docs/tutorial-schedule-a-job.html">Schedule a job</a><a href="/docs/tutorial-set-a-secret.html">Set a secret</a><a href="/docs/tutorial-migrate.html">Migrate your setup</a><a href="/docs/tool-bash.html">Bash runs</a><a href="/docs/tool-terraform.html">Terraform runs</a><a href="/docs/tool-python.html">Python runs</a><a href="/docs/tool-go.html">Go runs</a><a href="/docs/concepts.html" class="active">Concepts</a><a href="/docs/reliability.html">Reliability</a><a href="/docs/configuration.html">Configuration</a><a href="/docs/desktop.html">Desktop</a><a href="/docs/features.html">Features</a><a href="/docs/secrets.html">Secrets</a><a href="/docs/drift.html">Drift detection</a><a href="/docs/api.html">HTTP API</a><a href="/docs/comparison.html">Yardmaster compared to AWX and Semaphore</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
@@ -87,7 +87,8 @@ changes on upgrade until grants are added.</p>
 <p>A worker is any process running the executor against the shared store. Every process, the server
 included, competes for pending runs through the store. A run can target a named queue, and only
 workers serving that queue run it, which places work across a mixed fleet. A lease keeps a run
-attributable, and a janitor requeues work whose holder went away.</p>
+attributable, and a janitor requeues work whose holder went away. The <a href="/docs/reliability.html">reliability</a>
+page details how work is claimed, bounded, recovered, and kept consistent across workers.</p>
 <h2 id="provable-audit">Provable audit</h2>
 <p>Every authenticated mutation is recorded in the audit trail, and each entry is linked into a SHA-256
 hash chain: it carries the previous entry's hash and its own hash over its content. Altering,
