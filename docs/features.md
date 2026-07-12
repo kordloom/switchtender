@@ -44,6 +44,7 @@ What Yardmaster does today.
 | Email | An SMTP notification on every finished run or on failures only, alongside the finish webhooks.|
 | Slack | A formatted message posts to a Slack incoming webhook when a run finishes, with the run label, status, and elapsed time.|
 | AI triage | An optional AI provider, local Ollama or a cloud API, explains a failed run on demand from its masked log and failed task events. Advisory only: it never runs anything, so every action still goes through the same policy and audit gates.|
+| AI drafting | Describe a bash, python, or go step in the workflow editor and the provider drafts the script into the command field for you to review, edit, and save. The draft never executes on its own.|
 | Guided tours | A tour launcher in the top bar walks the product, the pitch, and the migration path step by step in the live UI, fully keyboard accessible.|
 | Desktop mode | `yardmaster desktop` serves on a stable loopback port, keeps its data in a private per-user directory, and opens the UI. Packaging recipes cover a macOS app bundle and a Windows installer.|
 | Migration | `yardmaster import awx` and `import semaphore` read an export and create the equivalent projects, inventories, templates, surveys, schedules, and credential shells, with a dry-run report first.|

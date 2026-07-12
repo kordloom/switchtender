@@ -510,6 +510,13 @@ function mountWorkflow() {
 	document.getElementById("wf-step-tool").addEventListener("change", syncStepFields);
 	document.getElementById("wf-step-form").addEventListener("submit", saveStep);
 	document.getElementById("wf-step-delete").addEventListener("click", deleteStepFromModal);
+	document.getElementById("wf-step-draft-go").addEventListener("click", draftStep);
+	document.getElementById("wf-step-draft").addEventListener("keydown", (e) => {
+		if (e.key === "Enter") {
+			e.preventDefault();
+			draftStep();
+		}
+	});
 	document.getElementById("wf-name").addEventListener("input", wfSave);
 	document.getElementById("wf-inventory").addEventListener("input", wfSave);
 	const modal = document.getElementById("wf-step-modal");
@@ -661,10 +668,53 @@ function wfPoint(e) {
 }
 
 // syncStepFields shows the playbook field for Ansible and the command field for the other tools.
+// The AI draft row appears only for the inline script tools, where a draft can fill the command.
 function syncStepFields() {
-	const ansible = document.getElementById("wf-step-tool").value === "ansible";
+	const tool = document.getElementById("wf-step-tool").value;
+	const ansible = tool === "ansible";
 	document.getElementById("wf-step-playbook-field").hidden = !ansible;
 	document.getElementById("wf-step-command-field").hidden = ansible;
+	const drafts = tool === "bash" || tool === "python" || tool === "go";
+	document.getElementById("wf-step-draft-field").hidden = !drafts;
+}
+
+// draftStep asks the AI endpoint for a script matching the description and fills the command field
+// with the draft for the user to review and edit. Advisory only: nothing runs until the step is
+// saved and the workflow is submitted, through the same gates as any other run.
+async function draftStep() {
+	const status = document.getElementById("wf-step-status");
+	const prompt = document.getElementById("wf-step-draft").value.trim();
+	const tool = document.getElementById("wf-step-tool").value;
+	if (!prompt) {
+		status.textContent = "Describe the step first.";
+		return;
+	}
+	const btn = document.getElementById("wf-step-draft-go");
+	btn.disabled = true;
+	status.textContent = "Drafting.";
+	try {
+		const res = await fetch("/ai/draft", {
+			method: "POST",
+			headers: Object.assign({ "Content-Type": "application/json" }, authHeaders()),
+			body: JSON.stringify({ tool, prompt }),
+		});
+		if (res.status === 401) {
+			requireLogin();
+			return;
+		}
+		if (res.status === 404) {
+			status.textContent = "AI is not enabled on this server.";
+			return;
+		}
+		const data = await res.json().catch(() => ({}));
+		if (!res.ok) throw new Error(data.error || "HTTP " + res.status);
+		document.getElementById("wf-step-command").value = data.draft || "";
+		status.textContent = "Draft ready. Review it before saving.";
+	} catch (err) {
+		status.textContent = "Draft failed: " + err.message;
+	} finally {
+		btn.disabled = false;
+	}
 }
 
 // openStepModal opens the step editor for a new step, or for the given node to edit it in place.

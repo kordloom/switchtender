@@ -460,6 +460,8 @@ button.topbar-link { background: none; border: none; padding: 0; font: inherit; 
 .wf-out { right: -7px; cursor: crosshair; }
 .wf-out:hover { background: var(--accent); }
 .wf-hint { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); max-width: 300px; text-align: center; font-size: 13px; }
+.wf-draft-row { display: flex; gap: 8px; }
+.wf-draft-row .input { flex: 1; }
 .wf-step-row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
 .wf-step-retries { flex-direction: row; align-items: center; gap: 8px; }
 .wf-step-retries .input { width: 72px; }

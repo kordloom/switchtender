@@ -54,6 +54,10 @@
 					<label class="field-label" id="wf-step-command-field" hidden>Command
 						<textarea id="wf-step-command" class="input mono" rows="4" placeholder="the script, or a terraform directory"></textarea>
 					</label>
+					<div class="wf-draft-row" id="wf-step-draft-field" hidden>
+						<input id="wf-step-draft" class="input" placeholder="Describe the step and AI drafts the script" aria-label="Describe the step for an AI draft">
+						<button type="button" class="button" id="wf-step-draft-go">Draft</button>
+					</div>
 					<label class="field-label">Inventory override
 						<input id="wf-step-inventory" class="input mono" placeholder="leave blank to use the workflow inventory">
 					</label>
