@@ -496,11 +496,11 @@ func TestRunEventsPaging(t *testing.T) {
 	}
 
 	if all := get(""); all.Count != 5 || all.NextAfter != 5 {
-		t.Errorf("all = count %d nextAfter %d, want 5 and 5", all.Count, all.NextAfter)
+		t.Errorf("all = count %d next_after %d, want 5 and 5", all.Count, all.NextAfter)
 	}
 	first := get("?limit=2")
 	if first.Count != 2 || first.NextAfter != 2 || first.Events[0].Task != "t0" {
-		t.Errorf("first page = count %d nextAfter %d first %q, want 2, 2, t0",
+		t.Errorf("first page = count %d next_after %d first %q, want 2, 2, t0",
 			first.Count, first.NextAfter, first.Events[0].Task)
 	}
 	next := get("?after=2&limit=2")
@@ -508,7 +508,7 @@ func TestRunEventsPaging(t *testing.T) {
 		t.Errorf("second page = count %d first %q, want 2 starting t2", next.Count, next.Events[0].Task)
 	}
 	if tail := get("?after=5"); tail.Count != 0 || tail.NextAfter != 5 {
-		t.Errorf("tail = count %d nextAfter %d, want 0 and 5", tail.Count, tail.NextAfter)
+		t.Errorf("tail = count %d next_after %d, want 0 and 5", tail.Count, tail.NextAfter)
 	}
 }
 

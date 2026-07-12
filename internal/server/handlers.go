@@ -77,7 +77,7 @@ type listRunsResponse struct {
 	// Summary is the run totals across every page, for the summary cards.
 	Summary runSummary `json:"summary"`
 	// HasMore reports whether another page follows this one.
-	HasMore bool `json:"hasMore"`
+	HasMore bool `json:"has_more"`
 }
 
 // runSummary is the per-status rollup of all top-level runs, shown as cards above the list.
@@ -117,7 +117,7 @@ type eventsResponse struct {
 	Count int `json:"count"`
 	// NextAfter is the sequence cursor to pass back as ?after= to page the events that
 	// follow this batch. It is the last event's Seq, or the requested after when empty.
-	NextAfter int64 `json:"nextAfter"`
+	NextAfter int64 `json:"next_after"`
 }
 
 // shardsResponse wraps a parent run's shard runs.

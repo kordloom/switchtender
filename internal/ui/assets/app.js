@@ -3311,7 +3311,7 @@ async function loadRuns() {
 		}
 		renderSummary(data.summary || {});
 		appendRunRows(tbody, runs);
-		wireRunsMore(tbody, runs.length, data.hasMore);
+		wireRunsMore(tbody, runs.length, data.has_more);
 	} catch (e) {
 		tbody.innerHTML = "";
 		table.hidden = true;
@@ -3406,7 +3406,7 @@ function wireRunsMore(tbody, offset, hasMore) {
 			const data = await getJSON("/runs?limit=" + runsPageSize() + "&offset=" + offset + "&q=" + encodeURIComponent(runsQuery()));
 			const runs = data.runs || [];
 			appendRunRows(tbody, runs);
-			wireRunsMore(tbody, offset + runs.length, data.hasMore);
+			wireRunsMore(tbody, offset + runs.length, data.has_more);
 		} catch (e) {
 			setStatus("Failed to load more runs: " + e.message);
 		} finally {
@@ -4098,7 +4098,7 @@ async function loadAllEvents(runId) {
 		const page = data.events || [];
 		for (const e of page) events.push(e);
 		if (page.length < batch) break;
-		after = data.nextAfter;
+		after = data.next_after;
 	}
 	return events;
 }

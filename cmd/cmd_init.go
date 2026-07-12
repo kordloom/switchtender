@@ -41,7 +41,7 @@ var initCmd = &cobra.Command{
 
 // init binds the init command's flags.
 func init() {
-	initCmd.Flags().StringVar(&initDB, "db", "yardmaster.db", "SQLite database path.")
+	initCmd.Flags().StringVar(&initDB, "db", defaultDBPath, "SQLite database path.")
 	initCmd.Flags().StringVar(&initConfig, "config", "yardmaster.env", "Environment file to write.")
 	initCmd.Flags().StringVar(&initAddr, "addr", ":8080", "Address the server listens on.")
 	initCmd.Flags().StringVar(&initAdmin, "admin", "admin", "Username for the first admin account.")

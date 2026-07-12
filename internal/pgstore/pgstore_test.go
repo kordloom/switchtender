@@ -40,7 +40,7 @@ import (
 
 // dsnEnv names the environment variable that provides the test database. Without it the contract
 // is skipped, so the default suite needs no PostgreSQL; CI provides one as a service container.
-const dsnEnv = "YARDMASTER_POSTGRES_DSN"
+const dsnEnv = "YARDMASTER_TEST_POSTGRES_DSN"
 
 // testDSN returns the test database DSN or skips the test.
 func testDSN(t *testing.T) string {

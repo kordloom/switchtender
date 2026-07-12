@@ -171,6 +171,6 @@ func removeTeamMemberHandler(store team.Store, log *zap.Logger) http.HandlerFunc
 			return
 		}
 		respondJSON(w, log, http.StatusOK,
-			map[string]string{"team_id": id, "removed": userID}, wantsPretty(r))
+			map[string]string{"team_id": id, "user_id": userID}, wantsPretty(r))
 	}
 }

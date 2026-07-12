@@ -187,7 +187,8 @@ func deleteScheduleHandler(store schedule.Store, log *zap.Logger) http.HandlerFu
 			respondError(w, log, http.StatusNotFound, "scheduling not enabled")
 			return
 		}
-		err := store.Delete(r.Context(), r.PathValue("id"))
+		id := r.PathValue("id")
+		err := store.Delete(r.Context(), id)
 		if errors.Is(err, schedule.ErrNotFound) {
 			respondError(w, log, http.StatusNotFound, "schedule not found")
 			return
@@ -197,6 +198,6 @@ func deleteScheduleHandler(store schedule.Store, log *zap.Logger) http.HandlerFu
 			respondError(w, log, http.StatusInternalServerError, "could not delete schedule")
 			return
 		}
-		respondJSON(w, log, http.StatusOK, map[string]string{"status": "deleted"}, wantsPretty(r))
+		respondJSON(w, log, http.StatusOK, map[string]string{"deleted": id}, wantsPretty(r))
 	}
 }
