@@ -16,7 +16,7 @@ What Yardmaster does today.
 | Splits       | Shard an inventory across parallel slices, merged back into one matrix. Hosts packed by measured duration from past runs.|
 | Shard retry  | Retry a finished split and only its failed shards run again, lineage recorded.  |
 | Pipelines    | Ordered steps or a dependency graph with parallel branches. Failures skip exactly their dependents, per-step retry budgets, set_stats outputs flow to dependent steps as extra vars.|
-| Workflow editor | A drag-and-drop canvas at Workflows builds the dependency graph in the browser: draft persistence, undo and redo, full keyboard editing, and cycle refusal, submitted as a pipeline.|
+| Workflow editor | A drag-and-drop canvas at Workflows builds the dependency graph in the browser: draft persistence, undo and redo, full keyboard editing, cycle refusal, and a pan, zoom, and fit-to-view viewport that stays smooth on a large graph, submitted as a pipeline.|
 | Workers      | Point `yardmaster worker` at the same database and it competes for queued runs. Leases, heartbeats, and a janitor make dead workers safe.|
 | Scheduling   | Cron schedules fire runs, splits, or pipelines with full history per fire.      |
 | Fleet memory | Failure rankings, flaky-host detection, outcome sparklines, per-host history, task duration trends, all from persisted structured events.|

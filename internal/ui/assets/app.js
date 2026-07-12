@@ -498,12 +498,14 @@ function mountWorkflow() {
 	if (!canvas) return;
 	wfState = {
 		nodes: [], edges: [], seq: 0, editing: null, canvas,
+		world: canvas.querySelector(".wf-world"),
 		nodesLayer: canvas.querySelector(".wf-nodes"),
 		edgesLayer: canvas.querySelector(".wf-edges"),
 		hint: canvas.querySelector(".wf-hint"),
 		drag: null, link: null, linkFrom: null, selectedEdge: null,
 		past: [], future: [], lastSnapKey: null, lastSnapAt: 0,
 		opener: null, submitting: false,
+		scale: 1, panX: 40, panY: 40, pan: null, pointers: new Map(), pinch: null,
 	};
 	document.getElementById("wf-add").addEventListener("click", () => openStepModal(null));
 	document.getElementById("wf-run").addEventListener("click", runWorkflow);
@@ -560,15 +562,30 @@ function mountWorkflow() {
 		} else if ((e.key === "Delete" || e.key === "Backspace") && wfState.selectedEdge) {
 			e.preventDefault();
 			removeEdge(wfState.selectedEdge);
+		} else if (e.key === "+" || e.key === "=") {
+			e.preventDefault();
+			zoomBy(1.2);
+		} else if (e.key === "-" || e.key === "_") {
+			e.preventDefault();
+			zoomBy(1 / 1.2);
+		} else if (e.key === "0") {
+			e.preventDefault();
+			resetView();
+		} else if (e.key.toLowerCase() === "f") {
+			e.preventDefault();
+			fitView();
 		}
 	});
+	canvas.addEventListener("pointerdown", wfPointerDown);
 	canvas.addEventListener("pointermove", wfPointerMove);
 	canvas.addEventListener("pointerup", wfPointerUp);
 	canvas.addEventListener("pointercancel", wfCancelPointer);
 	canvas.addEventListener("lostpointercapture", wfCancelPointer);
-	canvas.addEventListener("pointerdown", (e) => {
-		if (e.target === canvas || e.target.classList.contains("wf-nodes")) deselectEdge();
-	});
+	canvas.addEventListener("wheel", wfWheel, { passive: false });
+	document.getElementById("wf-zoom-in").addEventListener("click", () => zoomBy(1.2));
+	document.getElementById("wf-zoom-out").addEventListener("click", () => zoomBy(1 / 1.2));
+	document.getElementById("wf-zoom-fit").addEventListener("click", fitView);
+	document.getElementById("wf-zoom-level").addEventListener("click", fitView);
 	wfState.edgesLayer.addEventListener("click", (e) => {
 		const hit = e.target.closest(".wf-edge-hit");
 		if (hit) selectEdge(hit.dataset.from, hit.dataset.to);
@@ -585,8 +602,98 @@ function mountWorkflow() {
 		}
 	});
 	window.addEventListener("resize", renderEdges);
-	wfRestore();
+	const hadViewport = wfRestore();
 	renderWorkflow();
+	if (hadViewport) {
+		applyViewport();
+	} else if (wfState.nodes.length > 0) {
+		fitView();
+	} else {
+		applyViewport();
+	}
+}
+
+// WF_MIN_SCALE and WF_MAX_SCALE bound the zoom so the graph never shrinks past legibility or
+// grows past usefulness. WF_NODE_H is the node card height used for the fit bounding box.
+const WF_MIN_SCALE = 0.2;
+const WF_MAX_SCALE = 2.5;
+const WF_NODE_H = 62;
+
+// clampScale keeps a scale inside the allowed zoom range.
+function clampScale(k) {
+	return Math.max(WF_MIN_SCALE, Math.min(WF_MAX_SCALE, k));
+}
+
+// applyViewport writes the current pan and scale to the world transform and the backing grid, and
+// updates the zoom readout. It touches only styles, so pan and zoom stay on the compositor and
+// never re-lay-out the graph.
+function applyViewport() {
+	const { world, canvas, panX, panY, scale } = wfState;
+	world.style.transform = "translate(" + panX + "px, " + panY + "px) scale(" + scale + ")";
+	canvas.style.backgroundSize = 22 * scale + "px " + 22 * scale + "px";
+	canvas.style.backgroundPosition = panX + "px " + panY + "px";
+	const label = document.getElementById("wf-zoom-level");
+	if (label) label.textContent = Math.round(scale * 100) + "%";
+}
+
+// zoomAt scales toward a target scale while keeping the world point under the given screen point
+// fixed, so zooming homes in on whatever the cursor is over.
+function zoomAt(clientX, clientY, target) {
+	const k = clampScale(target);
+	const rect = wfState.canvas.getBoundingClientRect();
+	const sx = clientX - rect.left;
+	const sy = clientY - rect.top;
+	const wx = (sx - wfState.panX) / wfState.scale;
+	const wy = (sy - wfState.panY) / wfState.scale;
+	wfState.scale = k;
+	wfState.panX = sx - wx * k;
+	wfState.panY = sy - wy * k;
+	applyViewport();
+	saveViewSoon();
+}
+
+// zoomBy zooms by a factor around the center of the canvas, used by the buttons and keys.
+function zoomBy(factor) {
+	const rect = wfState.canvas.getBoundingClientRect();
+	zoomAt(rect.left + rect.width / 2, rect.top + rect.height / 2, wfState.scale * factor);
+}
+
+// resetView returns to full size with the graph's top-left tucked into the corner.
+function resetView() {
+	wfState.scale = 1;
+	wfState.panX = 40;
+	wfState.panY = 40;
+	applyViewport();
+	wfSave();
+}
+
+// fitView frames the whole graph in the canvas with a margin, scaling down for a large graph and
+// never past full size, and centers it. With no nodes it resets.
+function fitView() {
+	if (wfState.nodes.length === 0) {
+		resetView();
+		return;
+	}
+	let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+	for (const n of wfState.nodes) {
+		minX = Math.min(minX, n.x);
+		minY = Math.min(minY, n.y);
+		maxX = Math.max(maxX, n.x + WF_CARD_W);
+		maxY = Math.max(maxY, n.y + WF_NODE_H);
+	}
+	const rect = wfState.canvas.getBoundingClientRect();
+	const pad = 48;
+	const w = maxX - minX;
+	const h = maxY - minY;
+	const k = clampScale(Math.min(
+		(rect.width - pad * 2) / Math.max(w, 1),
+		(rect.height - pad * 2) / Math.max(h, 1),
+		1));
+	wfState.scale = k;
+	wfState.panX = (rect.width - w * k) / 2 - minX * k;
+	wfState.panY = (rect.height - h * k) / 2 - minY * k;
+	applyViewport();
+	wfSave();
 }
 
 // wfSave persists the graph and the toolbar fields as the working draft. Storage failures are
@@ -597,24 +704,44 @@ function wfSave() {
 			nodes: wfState.nodes, edges: wfState.edges, seq: wfState.seq,
 			name: document.getElementById("wf-name").value,
 			inventory: document.getElementById("wf-inventory").value,
+			view: { scale: wfState.scale, panX: wfState.panX, panY: wfState.panY },
 		}));
 	} catch { /* storage full or blocked */ }
 }
 
-// wfRestore loads the saved draft into the editor state, ignoring anything malformed.
+// wfViewSaveTimer debounces persisting the viewport, so a burst of wheel or pan events writes the
+// draft once when it settles rather than on every frame.
+let wfViewSaveTimer = null;
+
+// saveViewSoon schedules a draft save after the pan or zoom settles.
+function saveViewSoon() {
+	clearTimeout(wfViewSaveTimer);
+	wfViewSaveTimer = setTimeout(wfSave, 250);
+}
+
+// wfRestore loads the saved draft into the editor state, ignoring anything malformed. It reports
+// whether a saved viewport was restored, so the mount can fit the graph on a first visit instead.
 function wfRestore() {
 	let draft = null;
 	try {
 		draft = JSON.parse(localStorage.getItem(wfDraftKey) || "null");
 	} catch {
-		return;
+		return false;
 	}
-	if (!draft || !Array.isArray(draft.nodes) || !Array.isArray(draft.edges)) return;
+	if (!draft || !Array.isArray(draft.nodes) || !Array.isArray(draft.edges)) return false;
 	wfState.nodes = draft.nodes;
 	wfState.edges = draft.edges;
 	wfState.seq = typeof draft.seq === "number" ? draft.seq : draft.nodes.length;
 	document.getElementById("wf-name").value = draft.name || "";
 	document.getElementById("wf-inventory").value = draft.inventory || "";
+	const v = draft.view;
+	if (v && typeof v.scale === "number" && typeof v.panX === "number" && typeof v.panY === "number") {
+		wfState.scale = clampScale(v.scale);
+		wfState.panX = v.panX;
+		wfState.panY = v.panY;
+		return true;
+	}
+	return false;
 }
 
 // wfSnapshot pushes the current graph onto the undo stack before a mutation. A coalesce key merges
@@ -661,10 +788,14 @@ function applyGraph(g) {
 	wfSave();
 }
 
-// wfPoint converts a pointer event to canvas-local coordinates, accounting for scroll and offset.
+// wfPoint converts a pointer event to world coordinates, undoing the current pan and zoom so a
+// node dropped under the cursor lands where the cursor is, at any zoom.
 function wfPoint(e) {
 	const r = wfState.canvas.getBoundingClientRect();
-	return { x: e.clientX - r.left + wfState.canvas.scrollLeft, y: e.clientY - r.top + wfState.canvas.scrollTop };
+	return {
+		x: (e.clientX - r.left - wfState.panX) / wfState.scale,
+		y: (e.clientY - r.top - wfState.panY) / wfState.scale,
+	};
 }
 
 // syncStepFields shows the playbook field for Ansible and the command field for the other tools.
@@ -784,13 +915,14 @@ function saveStep(e) {
 	wfSave();
 }
 
-// spawnPosition picks a free grid slot for a new node inside the visible canvas, skipping spots
-// already occupied so new steps never stack on existing ones.
+// spawnPosition picks a free grid slot for a new node inside the visible part of the canvas at the
+// current pan and zoom, skipping occupied spots so new steps never stack on existing ones.
 function spawnPosition() {
-	const c = wfState.canvas;
-	const cols = Math.max(1, Math.floor((c.clientWidth - 40) / 210));
-	const baseX = c.scrollLeft + 40;
-	const baseY = c.scrollTop + 40;
+	const rect = wfState.canvas.getBoundingClientRect();
+	const viewW = rect.width / wfState.scale;
+	const baseX = -wfState.panX / wfState.scale + 40;
+	const baseY = -wfState.panY / wfState.scale + 40;
+	const cols = Math.max(1, Math.floor((viewW - 40) / 210));
 	for (let i = 0; i < 1000; i++) {
 		const x = baseX + (i % cols) * 210;
 		const y = baseY + Math.floor(i / cols) * 130;
@@ -908,8 +1040,15 @@ function positionNode(id) {
 // plus the in-progress link while one is being dragged.
 function renderEdges() {
 	const svg = wfState.edgesLayer;
-	svg.setAttribute("width", wfState.canvas.scrollWidth);
-	svg.setAttribute("height", wfState.canvas.scrollHeight);
+	// The SVG lives in world space inside the transformed layer, so it is sized to the content
+	// extent. Anything drawn past it still shows because the layer allows overflow.
+	let extentX = 1, extentY = 1;
+	for (const n of wfState.nodes) {
+		extentX = Math.max(extentX, n.x + WF_CARD_W + 80);
+		extentY = Math.max(extentY, n.y + WF_NODE_H + 80);
+	}
+	svg.setAttribute("width", extentX);
+	svg.setAttribute("height", extentY);
 	let paths = "";
 	for (const e of wfState.edges) {
 		const a = wfState.nodes.find((n) => n.id === e.from);
@@ -996,10 +1135,80 @@ function startLink(e, id) {
 	wfState.canvas.setPointerCapture(e.pointerId);
 }
 
-// wfPointerMove updates an in-progress node drag or link as the pointer moves. A drag starts only
-// past a small threshold, so a shaky tap still opens the editor, and only the dragged card is
-// repositioned so large graphs stay smooth.
+// wfPointerDown starts a canvas pan on empty space or a two-finger pinch, and clears any edge
+// selection. A press on a node or a handle is left to that element's own drag and link handlers.
+function wfPointerDown(e) {
+	wfState.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+	if (wfState.pointers.size === 2 && !wfState.drag && !wfState.link) {
+		startPinch();
+		wfState.pan = null;
+		return;
+	}
+	const onControl = e.target.closest(".wf-node") || e.target.closest(".wf-edge-hit") ||
+		e.target.closest(".wf-zoom");
+	if (onControl || wfState.drag || wfState.link || e.button !== 0) return;
+	deselectEdge();
+	wfState.pan = { x: e.clientX, y: e.clientY, px: wfState.panX, py: wfState.panY };
+	wfState.canvas.classList.add("wf-panning");
+	wfState.canvas.setPointerCapture(e.pointerId);
+}
+
+// startPinch records the two-finger baseline so a pinch scales from where the fingers began.
+function startPinch() {
+	const pts = [...wfState.pointers.values()];
+	wfState.pinch = {
+		dist: ptDist(pts[0], pts[1]),
+		cx: (pts[0].x + pts[1].x) / 2, cy: (pts[0].y + pts[1].y) / 2,
+		scale: wfState.scale, panX: wfState.panX, panY: wfState.panY,
+	};
+}
+
+// ptDist is the distance between two pointer positions.
+function ptDist(a, b) {
+	return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+// wfWheel pans on a plain scroll and zooms toward the cursor when a modifier or a trackpad pinch is
+// held, so a mouse wheel and a trackpad both feel right.
+function wfWheel(e) {
+	e.preventDefault();
+	if (e.ctrlKey || e.metaKey) {
+		zoomAt(e.clientX, e.clientY, wfState.scale * Math.exp(-e.deltaY * 0.0015));
+		return;
+	}
+	wfState.panX -= e.deltaX;
+	wfState.panY -= e.deltaY;
+	applyViewport();
+	saveViewSoon();
+}
+
+// wfPointerMove updates a pinch, a pan, an in-progress node drag, or a link as the pointer moves. A
+// drag starts only past a small threshold, so a shaky tap still opens the editor, and only the
+// dragged card is repositioned so large graphs stay smooth.
 function wfPointerMove(e) {
+	if (wfState.pointers.has(e.pointerId)) {
+		wfState.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+	}
+	if (wfState.pinch && wfState.pointers.size >= 2) {
+		const pts = [...wfState.pointers.values()];
+		const rect = wfState.canvas.getBoundingClientRect();
+		const k = clampScale(wfState.pinch.scale * (ptDist(pts[0], pts[1]) / wfState.pinch.dist));
+		const wx = (wfState.pinch.cx - rect.left - wfState.pinch.panX) / wfState.pinch.scale;
+		const wy = (wfState.pinch.cy - rect.top - wfState.pinch.panY) / wfState.pinch.scale;
+		wfState.scale = k;
+		wfState.panX = (pts[0].x + pts[1].x) / 2 - rect.left - wx * k;
+		wfState.panY = (pts[0].y + pts[1].y) / 2 - rect.top - wy * k;
+		applyViewport();
+		saveViewSoon();
+		return;
+	}
+	if (wfState.pan) {
+		wfState.panX = wfState.pan.px + (e.clientX - wfState.pan.x);
+		wfState.panY = wfState.pan.py + (e.clientY - wfState.pan.y);
+		applyViewport();
+		saveViewSoon();
+		return;
+	}
 	if (wfState.drag) {
 		const p = wfPoint(e);
 		if (!wfState.drag.moved &&
@@ -1018,8 +1227,18 @@ function wfPointerMove(e) {
 	}
 }
 
-// wfPointerUp finishes a drag, or completes a link when it lands on another node.
+// wfPointerUp ends a pan or pinch, finishes a drag, or completes a link when it lands on a node.
 function wfPointerUp(e) {
+	wfState.pointers.delete(e.pointerId);
+	if (wfState.pinch && wfState.pointers.size < 2) {
+		wfState.pinch = null;
+		wfSave();
+	}
+	if (wfState.pan) {
+		wfState.pan = null;
+		wfState.canvas.classList.remove("wf-panning");
+		wfSave();
+	}
 	if (wfState.link) {
 		// Pointer capture retargets the event to the canvas, so find the drop node by geometry.
 		const el = document.elementFromPoint(e.clientX, e.clientY);
@@ -1040,9 +1259,15 @@ function wfPointerUp(e) {
 	}
 }
 
-// wfCancelPointer clears a drag or link whose gesture was canceled, for example by an edge swipe
-// on a touch screen, so no node stays glued to the pointer.
-function wfCancelPointer() {
+// wfCancelPointer clears a pan, pinch, drag, or link whose gesture was canceled, for example by an
+// edge swipe on a touch screen, so nothing stays glued to the pointer.
+function wfCancelPointer(e) {
+	wfState.pointers.delete(e.pointerId);
+	if (wfState.pinch && wfState.pointers.size < 2) wfState.pinch = null;
+	if (wfState.pan) {
+		wfState.pan = null;
+		wfState.canvas.classList.remove("wf-panning");
+	}
 	if (wfState.drag) {
 		if (wfState.drag.moved) {
 			wfPushHistory(wfState.drag.before);

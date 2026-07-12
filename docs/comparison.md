@@ -20,7 +20,7 @@ on them.
 | Run view | A structured host-by-task matrix with per-task drill-down, painted live over Server-Sent Events. | A text log stream. | A text log stream. |
 | Job splitting | Shards balanced by each host's measured past duration, with only the failed shards retried. | Job slicing, round-robin. | Not available. |
 | Pipelines | A dependency graph with parallel branches, per-step retries, and typed set_stats outputs passed to dependents. | Visual workflows. | Limited task chaining. |
-| Visual workflow editor | A drag-and-drop canvas at Workflows builds the dependency graph in the browser: draft persistence, undo, keyboard editing, and cycle refusal, on the same DAG engine the API uses. | A drag-and-drop editor. | On the roadmap. |
+| Visual workflow editor | A drag-and-drop canvas at Workflows builds the dependency graph in the browser: draft persistence, undo, keyboard editing, cycle refusal, and a pan, zoom, and fit-to-view viewport, on the same DAG engine the API uses. | A drag-and-drop editor. | On the roadmap. |
 | Fleet memory | Flaky-host detection, outcome sparklines, per-host history, and task duration trends across runs. | Not available. | Not available. |
 | Distributed workers | Store leasing, where the same single binary adds capacity, held together by leases and a janitor. | A Receptor mesh. | Runners, in a paid tier. |
 | Per-run provenance | Every run records the exact commit it executed. | Partial. | Partial. |

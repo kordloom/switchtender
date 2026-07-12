@@ -79,9 +79,19 @@
 
 		<div id="status" class="muted"></div>
 		<div id="wf-canvas" class="wf-canvas">
-			<svg class="wf-edges" aria-hidden="true"></svg>
-			<div class="wf-nodes"></div>
-			<p class="wf-hint muted">Add a step to begin. Drag steps to arrange them, and drag from a step's right edge onto another step to make it wait. Click a link to select it, then press Delete to remove it. Ctrl+Z undoes.</p>
+			<div class="wf-world">
+				<svg class="wf-edges" aria-hidden="true"></svg>
+				<div class="wf-nodes"></div>
+			</div>
+			<p class="wf-hint muted">Add a step to begin. Drag steps to arrange them, and drag from a step's right edge onto another step to make it wait. Scroll to pan, pinch or Ctrl and scroll to zoom, and use the controls to fit the whole graph. Click a link to select it, then press Delete to remove it.</p>
+			<div class="wf-zoom" role="group" aria-label="Canvas zoom">
+				<button type="button" id="wf-zoom-out" class="wf-zoom-btn" aria-label="Zoom out" title="Zoom out">&minus;</button>
+				<button type="button" id="wf-zoom-level" class="wf-zoom-level" aria-label="Reset zoom to fit" title="Fit the graph">100%</button>
+				<button type="button" id="wf-zoom-in" class="wf-zoom-btn" aria-label="Zoom in" title="Zoom in">+</button>
+				<button type="button" id="wf-zoom-fit" class="wf-zoom-btn wf-zoom-fit" aria-label="Fit the whole graph" title="Fit the whole graph">
+					<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V5a1 1 0 0 1 1-1h4M20 9V5a1 1 0 0 0-1-1h-4M4 15v4a1 1 0 0 0 1 1h4M20 15v4a1 1 0 0 1-1 1h-4"/></svg>
+				</button>
+			</div>
 		</div>
 	</main>
 
