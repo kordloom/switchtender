@@ -825,7 +825,11 @@ func TestRetryRun(t *testing.T) {
 			if test.Retrier != nil {
 				opts = append(opts, WithRetrier(test.Retrier))
 			}
-			handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(), opts...).Handler()
+			store := run.NewMemStore()
+			if err := store.Save(context.Background(), &run.Run{ID: "run_1", Tool: "ansible", Status: run.StatusFailed}); err != nil {
+				t.Fatalf("Save() error = %v", err)
+			}
+			handler := New(store, &fakeSubmitter{}, zap.NewNop(), opts...).Handler()
 			rec := httptest.NewRecorder()
 			handler.ServeHTTP(rec,
 				httptest.NewRequest(http.MethodPost, "/v1/runs/run_1/retry", nil))
@@ -1230,5 +1234,59 @@ func TestMutationsAuthorizeReferencedObjects(t *testing.T) {
 		if got := do(test.Method, test.Path, test.Token, test.Body); got != test.Want {
 			t.Errorf("test %d (%s): status = %d, want %d", i, test.Name, got, test.Want)
 		}
+	}
+}
+
+// TestRunAccessScopedByGrant proves that under strict grants a viewer without a grant on a run's
+// referenced objects cannot read it, and a matching grant restores access.
+func TestRunAccessScopedByGrant(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	users := user.NewMemStore()
+	tokens := auth.NewMemStore()
+	grants := grant.NewMemStore()
+	runs := run.NewMemStore()
+
+	viewer, err := user.New("viewer", "pw", user.RoleViewer)
+	if err != nil {
+		t.Fatalf("user.New() error = %v", err)
+	}
+	if err := users.Save(ctx, viewer); err != nil {
+		t.Fatalf("users.Save() error = %v", err)
+	}
+	plain, tok, err := auth.New("t-viewer")
+	if err != nil {
+		t.Fatalf("auth.New() error = %v", err)
+	}
+	tok.UserID = viewer.ID
+	if err := tokens.Save(ctx, tok); err != nil {
+		t.Fatalf("tokens.Save() error = %v", err)
+	}
+	if err := runs.Save(ctx, &run.Run{ID: "run_scoped", Tool: "ansible", Status: run.StatusFailed, ProjectID: "proj_secret"}); err != nil {
+		t.Fatalf("runs.Save() error = %v", err)
+	}
+
+	handler := New(runs, &fakeSubmitter{}, zap.NewNop(),
+		WithTokens(tokens), WithUsers(users), WithGrants(grants, true)).Handler()
+	get := func() int {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/v1/runs/run_scoped", nil)
+		req.Header.Set("Authorization", "Bearer "+plain)
+		handler.ServeHTTP(rec, req)
+		return rec.Code
+	}
+
+	// Without a grant on the run's project, the viewer is denied under strict grants.
+	if code := get(); code != http.StatusForbidden {
+		t.Errorf("ungranted read = %d, want 403", code)
+	}
+	// A grant on the project restores read access.
+	if err := grants.Save(ctx, &grant.Grant{
+		ID: grant.NewID(), Subject: viewer.ID, Object: "proj_secret", Access: grant.AccessUse,
+	}); err != nil {
+		t.Fatalf("grants.Save() error = %v", err)
+	}
+	if code := get(); code != http.StatusOK {
+		t.Errorf("granted read = %d, want 200", code)
 	}
 }

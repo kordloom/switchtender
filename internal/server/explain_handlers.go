@@ -149,7 +149,7 @@ func (g *explainGroup) prune() {
 // sends is already masked of secrets when the run is recorded. Only terminal runs and held
 // proposals are explainable, since a partial log produces confident but stale triage, and answers
 // are cached per run and status so repeated requests do not multiply provider spend.
-func explainRunHandler(store run.Store, provider ai.Provider, log *zap.Logger) http.HandlerFunc {
+func explainRunHandler(store run.Store, provider ai.Provider, authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	if store == nil {
 		panic("server: explainRunHandler: Store required")
 	}
@@ -168,6 +168,9 @@ func explainRunHandler(store run.Store, provider ai.Provider, log *zap.Logger) h
 		if err != nil {
 			log.Error("server: explain run get: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not read run")
+			return
+		}
+		if authorizeRunAccess(w, r, authz, log, rn) {
 			return
 		}
 		reconcileProposal := rn.ProposedFrom != "" && rn.Status == run.StatusPendingApproval

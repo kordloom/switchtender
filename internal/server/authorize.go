@@ -8,6 +8,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/dcadolph/yardmaster/internal/grant"
+	"github.com/dcadolph/yardmaster/internal/run"
 	"github.com/dcadolph/yardmaster/internal/team"
 	"github.com/dcadolph/yardmaster/internal/user"
 )
@@ -116,4 +117,19 @@ func denyOnAuthzError(w http.ResponseWriter, log *zap.Logger, err error) bool {
 	log.Error("server: authorize: " + err.Error())
 	respondError(w, log, http.StatusInternalServerError, "could not authorize request")
 	return true
+}
+
+// authorizeRunAccess confirms the request actor may use the project, inventory, and credentials a
+// run references, so a read or a run operation stays scoped to the objects the actor is granted when
+// strict grants are on. It writes the denial and returns true when access is refused.
+func authorizeRunAccess(w http.ResponseWriter, r *http.Request, authz *authorizer, log *zap.Logger, rn *run.Run) bool {
+	objs := make([]string, 0, 2+len(rn.CredentialIDs))
+	if rn.ProjectID != "" {
+		objs = append(objs, rn.ProjectID)
+	}
+	if rn.InventoryID != "" {
+		objs = append(objs, rn.InventoryID)
+	}
+	objs = append(objs, rn.CredentialIDs...)
+	return denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse, objs...))
 }

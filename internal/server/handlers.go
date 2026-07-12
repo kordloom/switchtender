@@ -535,7 +535,7 @@ func createPipelineHandler(submitter Submitter, authz *authorizer, log *zap.Logg
 // cancelRunHandler stops a pending or executing run. The cancel request persists in the store so
 // the process holding the run honors it even when that is not this one; a local cancel is also
 // attempted for an immediate stop.
-func cancelRunHandler(store run.Store, canceler Canceler, log *zap.Logger) http.HandlerFunc {
+func cancelRunHandler(store run.Store, canceler Canceler, authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	if store == nil {
 		panic("server: cancelRunHandler: Store required")
 	}
@@ -549,6 +549,9 @@ func cancelRunHandler(store run.Store, canceler Canceler, log *zap.Logger) http.
 		if err != nil {
 			log.Error("server: cancel run: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not cancel run")
+			return
+		}
+		if authorizeRunAccess(w, r, authz, log, existing) {
 			return
 		}
 		if existing.Status.Terminal() {
@@ -569,13 +572,30 @@ func cancelRunHandler(store run.Store, canceler Canceler, log *zap.Logger) http.
 }
 
 // retryRunHandler starts a new split run from the failed shards of a finished one.
-func retryRunHandler(retrier Retrier, log *zap.Logger) http.HandlerFunc {
+func retryRunHandler(store run.Store, retrier Retrier, authz *authorizer, log *zap.Logger) http.HandlerFunc {
+	if store == nil {
+		panic("server: retryRunHandler: Store required")
+	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		if retrier == nil {
 			respondError(w, log, http.StatusNotFound, "retry not enabled")
 			return
 		}
-		created, err := retrier.RetryFailedShards(r.Context(), r.PathValue("id"))
+		id := r.PathValue("id")
+		rn, err := store.Get(r.Context(), id)
+		if errors.Is(err, run.ErrNotFound) {
+			respondError(w, log, http.StatusNotFound, "run not found")
+			return
+		}
+		if err != nil {
+			log.Error("server: retry run: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not retry run")
+			return
+		}
+		if authorizeRunAccess(w, r, authz, log, rn) {
+			return
+		}
+		created, err := retrier.RetryFailedShards(r.Context(), id)
 		switch {
 		case errors.Is(err, run.ErrNotFound):
 			respondError(w, log, http.StatusNotFound, "run not found")
@@ -682,7 +702,7 @@ func listRunsHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
 }
 
 // getRunHandler returns a single run by id.
-func getRunHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
+func getRunHandler(store run.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	if store == nil {
 		panic("server: getRunHandler: Store required")
 	}
@@ -697,19 +717,31 @@ func getRunHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
 			respondError(w, log, http.StatusInternalServerError, "could not get run")
 			return
 		}
+		if authorizeRunAccess(w, r, authz, log, got) {
+			return
+		}
 		respondJSON(w, log, http.StatusOK, got, wantsPretty(r))
 	}
 }
 
 // runShardsHandler returns the shard runs of a parent run.
-func runShardsHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
+func runShardsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	if store == nil {
 		panic("server: runShardsHandler: Store required")
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
-		if _, err := store.Get(r.Context(), id); errors.Is(err, run.ErrNotFound) {
+		rn, err := store.Get(r.Context(), id)
+		if errors.Is(err, run.ErrNotFound) {
 			respondError(w, log, http.StatusNotFound, "run not found")
+			return
+		}
+		if err != nil {
+			log.Error("server: list shards: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not list shards")
+			return
+		}
+		if authorizeRunAccess(w, r, authz, log, rn) {
 			return
 		}
 		shards, err := store.Shards(r.Context(), id)
@@ -724,14 +756,23 @@ func runShardsHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
 }
 
 // runStepsHandler returns the step runs of a pipeline run.
-func runStepsHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
+func runStepsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	if store == nil {
 		panic("server: runStepsHandler: Store required")
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
-		if _, err := store.Get(r.Context(), id); errors.Is(err, run.ErrNotFound) {
+		rn, err := store.Get(r.Context(), id)
+		if errors.Is(err, run.ErrNotFound) {
 			respondError(w, log, http.StatusNotFound, "run not found")
+			return
+		}
+		if err != nil {
+			log.Error("server: list steps: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not list steps")
+			return
+		}
+		if authorizeRunAccess(w, r, authz, log, rn) {
 			return
 		}
 		steps, err := store.Steps(r.Context(), id)
@@ -746,12 +787,26 @@ func runStepsHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
 }
 
 // runLogsHandler returns a run's captured output as plain text.
-func runLogsHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
+func runLogsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	if store == nil {
 		panic("server: runLogsHandler: Store required")
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
-		body, err := store.Log(r.Context(), r.PathValue("id"))
+		id := r.PathValue("id")
+		rn, gerr := store.Get(r.Context(), id)
+		if errors.Is(gerr, run.ErrNotFound) {
+			respondError(w, log, http.StatusNotFound, "run not found")
+			return
+		}
+		if gerr != nil {
+			log.Error("server: get run log: " + gerr.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not get run log")
+			return
+		}
+		if authorizeRunAccess(w, r, authz, log, rn) {
+			return
+		}
+		body, err := store.Log(r.Context(), id)
 		if err != nil {
 			if errors.Is(err, run.ErrNotFound) {
 				respondError(w, log, http.StatusNotFound, "run not found")
@@ -770,14 +825,28 @@ func runLogsHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
 }
 
 // runEventsHandler returns a run's structured events as JSON.
-func runEventsHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
+func runEventsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	if store == nil {
 		panic("server: runEventsHandler: Store required")
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		rn, gerr := store.Get(r.Context(), id)
+		if errors.Is(gerr, run.ErrNotFound) {
+			respondError(w, log, http.StatusNotFound, "run not found")
+			return
+		}
+		if gerr != nil {
+			log.Error("server: get run events: " + gerr.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not get run events")
+			return
+		}
+		if authorizeRunAccess(w, r, authz, log, rn) {
+			return
+		}
 		after := queryInt64(r, "after")
 		limit := queryInt(r, "limit")
-		events, err := store.EventsAfter(r.Context(), r.PathValue("id"), after, limit)
+		events, err := store.EventsAfter(r.Context(), id, after, limit)
 		if err != nil {
 			if errors.Is(err, run.ErrNotFound) {
 				respondError(w, log, http.StatusNotFound, "run not found")
@@ -830,7 +899,7 @@ func queryInt64(r *http.Request, name string) int64 {
 // source of truth: new rows beyond what the client has seen are emitted on a poll tick, and hub
 // messages from a local executor only wake the drain early. Runs executing on any process in the
 // fleet therefore stream the same way, and the stream ends when the stored run turns terminal.
-func runStreamHandler(streamer Streamer, store run.Store, log *zap.Logger) http.HandlerFunc {
+func runStreamHandler(streamer Streamer, store run.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	if store == nil {
 		panic("server: runStreamHandler: Store required")
 	}
@@ -842,8 +911,17 @@ func runStreamHandler(streamer Streamer, store run.Store, log *zap.Logger) http.
 		}
 
 		id := r.PathValue("id")
-		if _, err := store.Get(r.Context(), id); errors.Is(err, run.ErrNotFound) {
+		rn, gerr := store.Get(r.Context(), id)
+		if errors.Is(gerr, run.ErrNotFound) {
 			respondError(w, log, http.StatusNotFound, "run not found")
+			return
+		}
+		if gerr != nil {
+			log.Error("server: stream run: " + gerr.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not read run")
+			return
+		}
+		if authorizeRunAccess(w, r, authz, log, rn) {
 			return
 		}
 
