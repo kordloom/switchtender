@@ -25,7 +25,7 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/index.html">Overview</a><a href="/docs/quickstart.html">Quickstart</a><a href="/docs/faq.html">FAQ</a><a href="/docs/switching-from-awx.html">Switching from AWX</a><a href="/docs/migration.html">Migration</a><a href="/docs/tutorials.html">Tutorials</a><a href="/docs/tutorial-run-a-job.html">Run a job</a><a href="/docs/tutorial-save-a-template.html">Save a template</a><a href="/docs/tutorial-schedule-a-job.html">Schedule a job</a><a href="/docs/tutorial-set-a-secret.html">Set a secret</a><a href="/docs/tutorial-migrate.html">Migrate your setup</a><a href="/docs/tool-bash.html">Bash runs</a><a href="/docs/tool-terraform.html">Terraform runs</a><a href="/docs/tool-python.html">Python runs</a><a href="/docs/concepts.html">Concepts</a><a href="/docs/configuration.html" class="active">Configuration</a><a href="/docs/features.html">Features</a><a href="/docs/api.html">HTTP API</a><a href="/docs/comparison.html">Yardmaster compared to AWX and Semaphore</a><a href="/docs/drift.html">Drift detection</a><a href="/docs/secrets.html">Secrets</a><a href="/docs/tool-go.html">Go runs</a>
+				<a href="/docs/index.html">Overview</a><a href="/docs/quickstart.html">Quickstart</a><a href="/docs/faq.html">FAQ</a><a href="/docs/switching-from-awx.html">Switching from AWX</a><a href="/docs/migration.html">Migration</a><a href="/docs/tutorials.html">Tutorials</a><a href="/docs/tutorial-run-a-job.html">Run a job</a><a href="/docs/tutorial-save-a-template.html">Save a template</a><a href="/docs/tutorial-schedule-a-job.html">Schedule a job</a><a href="/docs/tutorial-set-a-secret.html">Set a secret</a><a href="/docs/tutorial-migrate.html">Migrate your setup</a><a href="/docs/tool-bash.html">Bash runs</a><a href="/docs/tool-terraform.html">Terraform runs</a><a href="/docs/tool-python.html">Python runs</a><a href="/docs/concepts.html">Concepts</a><a href="/docs/configuration.html" class="active">Configuration</a><a href="/docs/desktop.html">Desktop</a><a href="/docs/features.html">Features</a><a href="/docs/api.html">HTTP API</a><a href="/docs/comparison.html">Yardmaster compared to AWX and Semaphore</a><a href="/docs/drift.html">Drift detection</a><a href="/docs/secrets.html">Secrets</a><a href="/docs/tool-go.html">Go runs</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
@@ -365,6 +365,11 @@ that variable is unset.</p>
 </table>
 <p>Retention windows accept a whole number of days with a <code>d</code> suffix, such as <code>30d</code>, or Go duration
 syntax such as <code>720h</code>.</p>
+<h2 id="desktop">desktop</h2>
+<p>Runs Yardmaster as a local desktop application: it serves on a private loopback port, stores its
+data in a per-user directory, and opens the web UI in the default browser. It takes no flags. Set
+<code>YARDMASTER_DESKTOP_NO_BROWSER</code> to skip opening a browser. See <a href="/docs/desktop.html">Desktop</a> for packaging a
+macOS app or a Windows installer.</p>
 <h2 id="worker">worker</h2>
 <p>Leases pending runs from the shared store and executes them. Point it and a server at the same
 database and they compete for work.</p>

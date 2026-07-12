@@ -94,6 +94,13 @@ Runs the HTTP API, the in-process executor, the scheduler, the retention sweeper
 Retention windows accept a whole number of days with a `d` suffix, such as `30d`, or Go duration
 syntax such as `720h`.
 
+## desktop
+
+Runs Yardmaster as a local desktop application: it serves on a private loopback port, stores its
+data in a per-user directory, and opens the web UI in the default browser. It takes no flags. Set
+`YARDMASTER_DESKTOP_NO_BROWSER` to skip opening a browser. See [Desktop](desktop.md) for packaging a
+macOS app or a Windows installer.
+
 ## worker
 
 Leases pending runs from the shared store and executes them. Point it and a server at the same
