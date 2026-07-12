@@ -107,6 +107,29 @@ func TestExplainRunGates(t *testing.T) {
 	}
 }
 
+// TestExplainRunRefused proves a provider safety decline maps to a distinct message telling the
+// user the model declined, not that the provider is unreachable.
+func TestExplainRunRefused(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := run.NewMemStore()
+	if err := store.Save(ctx, &run.Run{ID: "run_r", Tool: "bash", Status: run.StatusFailed}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	provider := ai.ProviderFunc(func(_ context.Context, _, _ string) (string, error) {
+		return "", ai.ErrRefused
+	})
+	handler := New(store, &fakeSubmitter{}, zap.NewNop(), WithAI(provider)).Handler()
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/runs/run_r/explain", nil))
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("refused explain status = %d, want 502", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "declined") {
+		t.Errorf("body = %q, want it to say the model declined", rec.Body.String())
+	}
+}
+
 // TestExplainRunCached proves a second explain for the same run reuses the answer instead of
 // calling the provider again.
 func TestExplainRunCached(t *testing.T) {

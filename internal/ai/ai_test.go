@@ -118,6 +118,111 @@ func TestAnthropicComplete(t *testing.T) {
 	}
 }
 
+// TestAnthropicRefusal confirms a safety decline, a 200 with a refusal stop reason, becomes
+// ErrRefused carrying the category, not a silent empty reply.
+func TestAnthropicRefusal(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"content":      []map[string]string{},
+			"stop_reason":  "refusal",
+			"stop_details": map[string]string{"category": "cyber"},
+		})
+	}))
+	defer srv.Close()
+
+	p, err := newAnthropic("sk-test", "", srv.URL)
+	if err != nil {
+		t.Fatalf("newAnthropic() error = %v", err)
+	}
+	_, err = p.Complete(context.Background(), "sys", "restart nginx on the web hosts")
+	if !errors.Is(err, ErrRefused) {
+		t.Fatalf("Complete() error = %v, want ErrRefused", err)
+	}
+	if !strings.Contains(err.Error(), "cyber") {
+		t.Errorf("error = %v, want it to carry the refusal category", err)
+	}
+}
+
+// TestAnthropicFallbackOptIn covers the server-side fallback opt-in: a Fable model sends the beta
+// header and a fallback in the body, and the default Opus model does neither.
+func TestAnthropicFallbackOptIn(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Name         string
+		Model        string
+		WantFallback bool
+	}{ // Test 0 through 2.
+		{Name: "fable opts in", Model: "claude-fable-5", WantFallback: true},
+		{Name: "mythos opts in", Model: "claude-mythos-5", WantFallback: true},
+		{Name: "opus does not", Model: "claude-opus-4-8", WantFallback: false},
+	}
+	for testNum, test := range tests {
+		t.Run(test.Name, func(t *testing.T) {
+			t.Parallel()
+			var gotBeta string
+			var body struct {
+				Fallbacks []struct {
+					Model string `json:"model"`
+				} `json:"fallbacks"`
+			}
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotBeta = r.Header.Get("anthropic-beta")
+				_ = json.NewDecoder(r.Body).Decode(&body)
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"content":     []map[string]string{{"type": "text", "text": "ok"}},
+					"stop_reason": "end_turn",
+				})
+			}))
+			defer srv.Close()
+
+			p, err := newAnthropic("sk-test", test.Model, srv.URL)
+			if err != nil {
+				t.Fatalf("test %d: newAnthropic() error = %v", testNum, err)
+			}
+			if _, err := p.Complete(context.Background(), "sys", "user"); err != nil {
+				t.Fatalf("test %d: Complete() error = %v", testNum, err)
+			}
+			hasFallback := len(body.Fallbacks) == 1 && body.Fallbacks[0].Model == "claude-opus-4-8"
+			if hasFallback != test.WantFallback {
+				t.Errorf("test %d: fallback in body = %v, want %v", testNum, hasFallback, test.WantFallback)
+			}
+			hasBeta := strings.Contains(gotBeta, "server-side-fallback")
+			if hasBeta != test.WantFallback {
+				t.Errorf("test %d: beta header = %q, want fallback %v", testNum, gotBeta, test.WantFallback)
+			}
+		})
+	}
+}
+
+// TestAnthropicFallbackRescue proves a fallback reply, a fallback marker block followed by text,
+// returns the fallback model's text rather than an error.
+func TestAnthropicFallbackRescue(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"content": []map[string]any{
+				{"type": "fallback", "from": map[string]string{"model": "claude-fable-5"}},
+				{"type": "text", "text": "restart nginx with systemctl"},
+			},
+			"stop_reason": "end_turn",
+		})
+	}))
+	defer srv.Close()
+
+	p, err := newAnthropic("sk-test", "claude-fable-5", srv.URL)
+	if err != nil {
+		t.Fatalf("newAnthropic() error = %v", err)
+	}
+	got, err := p.Complete(context.Background(), "sys", "user")
+	if err != nil {
+		t.Fatalf("Complete() error = %v", err)
+	}
+	if got != "restart nginx with systemctl" {
+		t.Errorf("Complete() = %q, want the fallback model's text with the marker skipped", got)
+	}
+}
+
 // TestAnthropicTruncationNote confirms a reply cut off at the token cap is marked as incomplete.
 func TestAnthropicTruncationNote(t *testing.T) {
 	t.Parallel()

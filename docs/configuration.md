@@ -95,6 +95,19 @@ Runs the HTTP API, the in-process executor, the scheduler, the retention sweeper
 Retention windows accept a whole number of days with a `d` suffix, such as `30d`, or Go duration
 syntax such as `720h`.
 
+### AI providers
+
+The advisory AI features run against one provider, chosen with `--ai-provider`: `ollama` for a local
+model, or `anthropic` and `openai` for a cloud model with `YARDMASTER_AI_KEY`. The provider is off
+until set, and no feature ever executes anything the provider suggests.
+
+Cloud models see automation content: commands, playbook names, failed-run logs, and host drift.
+Because that content is security-adjacent, a model with strict safety classifiers can decline a
+benign request as a false positive. When the Anthropic model is a Fable or Mythos model, Yardmaster
+opts into server-side fallbacks, so a declined request is retried on `claude-opus-4-8` in the same
+call and the feature keeps working. A Fable model also requires that the account keep 30-day data
+retention, or the API rejects every request.
+
 ## desktop
 
 Runs Yardmaster as a local desktop application: it serves on a private loopback port, stores its

@@ -15,4 +15,9 @@ var (
 	ErrStatus = errors.New("ai provider status")
 	// ErrDecode is returned when a provider reply cannot be decoded.
 	ErrDecode = errors.New("ai provider decode")
+	// ErrRefused is returned when a provider's safety layer declines the request. It is distinct
+	// from an outage, so a caller can tell the user the model declined rather than that it is
+	// unreachable. Automation content can trip a false positive, so a cloud provider is configured
+	// to retry a decline on a fallback model before this surfaces.
+	ErrRefused = errors.New("ai provider declined the request")
 )

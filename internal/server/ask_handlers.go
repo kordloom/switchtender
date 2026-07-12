@@ -102,8 +102,7 @@ func askFleetHandler(store run.Store, provider ai.Provider, log *zap.Logger) htt
 		answer, err := provider.Complete(r.Context(), askSystemPrompt,
 			snapshot+"\n\nQuestion: "+question)
 		if err != nil {
-			log.Error("server: ask fleet: " + err.Error())
-			respondError(w, log, http.StatusBadGateway, "the ai provider did not respond")
+			respondAIError(w, log, "ask fleet", err)
 			return
 		}
 		respondJSON(w, log, http.StatusOK,

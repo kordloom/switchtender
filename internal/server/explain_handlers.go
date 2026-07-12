@@ -18,6 +18,19 @@ import (
 	"github.com/dcadolph/yardmaster/internal/run"
 )
 
+// respondAIError maps a provider failure to an HTTP response, telling the user the model declined
+// when a safety layer refused rather than that the provider is unreachable, and logs the detail
+// server-side. A cloud model configured with a fallback retries a decline before it reaches here,
+// so this covers the case where even the fallback declined.
+func respondAIError(w http.ResponseWriter, log *zap.Logger, context string, err error) {
+	log.Error("server: " + context + ": " + err.Error())
+	if errors.Is(err, ai.ErrRefused) {
+		respondError(w, log, http.StatusBadGateway, "the model declined this request")
+		return
+	}
+	respondError(w, log, http.StatusBadGateway, "the ai provider did not respond")
+}
+
 // explainSystemPrompt frames the model as a triage assistant that only summarizes the input.
 const explainSystemPrompt = "You are a site reliability engineer helping triage an automation run. " +
 	"Given the run's tool, status, error, failed tasks, per host stats, and log tail, explain the " +
@@ -171,8 +184,7 @@ func explainRunHandler(store run.Store, provider ai.Provider, log *zap.Logger) h
 			return provider.Complete(r.Context(), system, prompt)
 		})
 		if err != nil {
-			log.Error("server: explain run: " + err.Error())
-			respondError(w, log, http.StatusBadGateway, "the ai provider did not respond")
+			respondAIError(w, log, "explain run", err)
 			return
 		}
 		respondJSON(w, log, http.StatusOK,

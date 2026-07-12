@@ -63,8 +63,7 @@ func draftStepHandler(provider ai.Provider, log *zap.Logger) http.HandlerFunc {
 		prompt = clip(prompt, draftPromptCap)
 		answer, err := provider.Complete(r.Context(), draftSystemPrompt, "Tool: "+tool+"\nTask: "+prompt)
 		if err != nil {
-			log.Error("server: draft step: " + err.Error())
-			respondError(w, log, http.StatusBadGateway, "the ai provider did not respond")
+			respondAIError(w, log, "draft step", err)
 			return
 		}
 		respondJSON(w, log, http.StatusOK,
