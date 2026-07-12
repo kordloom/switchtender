@@ -13,11 +13,14 @@ func (d *Dispatcher) Approve(ctx context.Context, id string) (*run.Run, error) {
 	if err != nil {
 		return nil, err
 	}
-	if r.Status != run.StatusPendingApproval {
+	ok, err := d.store.TransitionStatus(ctx, id, run.StatusPendingApproval, run.StatusPending)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
 		return nil, ErrNotPendingApproval
 	}
 	r.Status = run.StatusPending
-	d.save(r)
 	return r, nil
 }
 
@@ -28,7 +31,11 @@ func (d *Dispatcher) Reject(ctx context.Context, id, reason string) (*run.Run, e
 	if err != nil {
 		return nil, err
 	}
-	if r.Status != run.StatusPendingApproval {
+	ok, err := d.store.TransitionStatus(ctx, id, run.StatusPendingApproval, run.StatusRejected)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
 		return nil, ErrNotPendingApproval
 	}
 	if reason == "" {

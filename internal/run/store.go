@@ -46,6 +46,10 @@ type Store interface {
 	ReclaimStale(ctx context.Context, cutoff time.Time) (int, error)
 	// RequestCancel marks the run so whichever process holds it stops it, or ErrNotFound.
 	RequestCancel(ctx context.Context, id string) error
+	// TransitionStatus atomically moves the run from the from status to the to status and reports
+	// whether it changed a row. It changes nothing and returns false when the run is missing or is
+	// not in the from status, so two callers racing to approve or reject the same run cannot both win.
+	TransitionStatus(ctx context.Context, id string, from, to Status) (bool, error)
 	// Workers lists executors by the leases they hold, most recently seen first.
 	Workers(ctx context.Context) ([]WorkerInfo, error)
 	// SaveHostSummary replaces the stored per host summaries for a run.
@@ -354,6 +358,18 @@ func (m *memStore) RequestCancel(_ context.Context, id string) error {
 	}
 	r.CancelRequested = true
 	return nil
+}
+
+// TransitionStatus atomically moves the run from one status to another, reporting whether it changed.
+func (m *memStore) TransitionStatus(_ context.Context, id string, from, to Status) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r, ok := m.runs[id]
+	if !ok || r.Status != from {
+		return false, nil
+	}
+	r.Status = to
+	return true, nil
 }
 
 // Workers lists executors by the leases they hold, most recently seen first.

@@ -1403,3 +1403,17 @@ func (s *store) RequestCancel(ctx context.Context, id string) error {
 	}
 	return nil
 }
+
+// TransitionStatus atomically moves the run from one status to another, reporting whether it changed.
+func (s *store) TransitionStatus(ctx context.Context, id string, from, to run.Status) (bool, error) {
+	res, err := s.db.ExecContext(ctx,
+		"UPDATE runs SET status=$1 WHERE id=$2 AND status=$3", string(to), id, string(from))
+	if err != nil {
+		return false, fmt.Errorf("transition status: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("transition status: %w", err)
+	}
+	return n > 0, nil
+}

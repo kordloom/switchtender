@@ -41,6 +41,7 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Run("claim respects queue", func(t *testing.T) { testClaimQueue(t, newStore()) })
 	t.Run("heartbeat and reclaim", func(t *testing.T) { testLeaseLifecycle(t, newStore()) })
 	t.Run("cancel request", func(t *testing.T) { testRequestCancel(t, newStore()) })
+	t.Run("transition status", func(t *testing.T) { testTransitionStatus(t, newStore()) })
 	t.Run("workers", func(t *testing.T) { testWorkers(t, newStore()) })
 	t.Run("retention purge", func(t *testing.T) { testPurge(t, newStore()) })
 }
@@ -65,6 +66,42 @@ func sampleRun(id string) *run.Run {
 }
 
 // testSaveGet verifies a run round trips and that returned values are independent copies.
+// testTransitionStatus checks the atomic status move: it changes a row only from the expected
+// status, and a second attempt from a status the run has already left changes nothing, so two
+// racing approvers cannot both win.
+func testTransitionStatus(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	r := sampleRun("run_t")
+	r.Status = run.StatusPendingApproval
+	if err := store.Save(ctx, r); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	ok, err := store.TransitionStatus(ctx, "run_t", run.StatusPendingApproval, run.StatusPending)
+	if err != nil {
+		t.Fatalf("TransitionStatus() error = %v", err)
+	}
+	if !ok {
+		t.Fatal("first transition changed nothing, want it to move the run")
+	}
+	got, err := store.Get(ctx, "run_t")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.Status != run.StatusPending {
+		t.Errorf("status = %q, want pending", got.Status)
+	}
+	ok, err = store.TransitionStatus(ctx, "run_t", run.StatusPendingApproval, run.StatusPending)
+	if err != nil {
+		t.Fatalf("TransitionStatus() error = %v", err)
+	}
+	if ok {
+		t.Error("second transition changed a row, want a no-op")
+	}
+	if ok, err := store.TransitionStatus(ctx, "run_missing", run.StatusPending, run.StatusRejected); err != nil || ok {
+		t.Errorf("missing run transition = (%v, %v), want (false, nil)", ok, err)
+	}
+}
+
 func testSaveGet(t *testing.T, store run.Store) {
 	ctx := context.Background()
 	want := sampleRun("run_1")
