@@ -178,14 +178,16 @@ work:</p>
 <ul>
 <li>There is no separate &quot;launch&quot; wizard the size of AWX's. A template launch is one request, a survey
 renders as a small form.</li>
+<li>Workflows are built on the canvas at Workflows: add steps, drag them into place, wire dependencies
+by dragging from a step's edge onto another, and run the graph as a pipeline.</li>
 <li>Access is a global role plus optional per-object grants, rather than AWX's organization tree. Grant
 a user or a team <code>use</code> or <code>manage</code> on a specific project, template, inventory, or credential.</li>
-<li>Notifications are finish webhooks and email today, not the full AWX set.</li>
+<li>Notifications are finish webhooks, email, and Slack today, not the full AWX set.</li>
 </ul>
 <h2 id="what-is-not-one-to-one-yet">What is not one to one yet</h2>
 <ul>
-<li>The visual workflow editor is a pipeline defined through the API and shown in the UI, not a
-drag-and-drop canvas.</li>
+<li>The notification integration catalog is smaller than AWX's.</li>
+<li>Execution environments are a single pinned container image behind a flag, not a managed catalog.</li>
 </ul>
 <p>If something you rely on is missing, open an issue. The gap with AWX is being closed on purpose.</p>
 

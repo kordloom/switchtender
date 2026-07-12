@@ -23,6 +23,7 @@ variable.
 | `YARDMASTER_OIDC_CLIENT_SECRET` | serve | OpenID Connect client secret, paired with `--oidc-client-id`. Read from the environment so it stays off the command line. |
 | `YARDMASTER_LDAP_PASSWORD` | serve | Password for the `--ldap-bind-dn` service account. |
 | `YARDMASTER_ADMIN_PASSWORD` | init | Password for the first admin account. When unset, init generates one and prints it once. |
+| `YARDMASTER_DESKTOP_NO_BROWSER` | desktop | Set to any value to skip opening the browser, for a headless or remote run. |
 
 ## init
 

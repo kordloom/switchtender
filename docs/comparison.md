@@ -20,6 +20,7 @@ on them.
 | Run view | A structured host-by-task matrix with per-task drill-down, painted live over Server-Sent Events. | A text log stream. | A text log stream. |
 | Job splitting | Shards balanced by each host's measured past duration, with only the failed shards retried. | Job slicing, round-robin. | Not available. |
 | Pipelines | A dependency graph with parallel branches, per-step retries, and typed set_stats outputs passed to dependents. | Visual workflows. | Limited task chaining. |
+| Visual workflow editor | A drag-and-drop canvas at Workflows builds the dependency graph in the browser: draft persistence, undo, keyboard editing, and cycle refusal, on the same DAG engine the API uses. | A drag-and-drop editor. | On the roadmap. |
 | Fleet memory | Flaky-host detection, outcome sparklines, per-host history, and task duration trends across runs. | Not available. | Not available. |
 | Distributed workers | Store leasing, where the same single binary adds capacity, held together by leases and a janitor. | A Receptor mesh. | Runners, in a paid tier. |
 | Per-run provenance | Every run records the exact commit it executed. | Partial. | Partial. |
@@ -45,14 +46,13 @@ on them.
 
 | Capability | Status |
 |------------|--------|
-| Visual workflow editor | Yardmaster defines pipelines through the API and shows them in the UI. AWX has a drag-and-drop editor, and Semaphore has one on its roadmap. |
-| Notification breadth | Webhook and email today, against a wider set of integrations in AWX. |
+| Notification breadth | Webhook, email, and Slack today, against a wider set of integrations in AWX. |
 | Maturity | AWX and Semaphore have years of production use and large communities. Yardmaster is young. |
 
 ## The short version
 
 Yardmaster wins on the axes that make AWX painful and Semaphore ordinary: no heavy control plane to
 deploy, runs you can read as structure instead of scrollback, job splitting that actually balances,
-a memory of how every host behaves over time, and a one-command path off either incumbent. It is
-behind on runtime breadth and the enterprise identity features, and it is younger. The gap that
-remains is being closed on purpose.
+a memory of how every host behaves over time, a visual workflow editor on a provable DAG engine,
+and a one-command path off either incumbent. It is younger, and its integration catalog is smaller.
+Both gaps are being closed on purpose.

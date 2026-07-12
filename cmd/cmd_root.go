@@ -7,8 +7,9 @@ import (
 // rootCmd is the Yardmaster top-level CLI command.
 var rootCmd = &cobra.Command{
 	Use:   "yardmaster",
-	Short: "Playbook execution and fleet orchestration platform.",
-	Long:  "Yardmaster orchestrates playbook execution across a fleet of hosts. Alternative to AWX and Semaphore.",
+	Short: "Automation execution and fleet orchestration platform.",
+	Long: "Yardmaster runs and governs automation across a fleet of hosts: Ansible, Terraform, " +
+		"Bash, Python, and Go from one binary, with a provable audit trail over every change.",
 }
 
 // init registers the Yardmaster subcommands on the root command.

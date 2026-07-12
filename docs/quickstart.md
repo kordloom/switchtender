@@ -24,6 +24,10 @@ or existing credentials cannot be decrypted.
 
 Open http://localhost:8080 for the web UI, or use the API directly.
 
+On your own machine, `./yardmaster desktop` does all of this in one command: it picks a stable
+loopback port, keeps its data in a per-user directory, and opens the UI. The
+[desktop guide](desktop.md) covers it, including packaging.
+
 ## Submit a run
 
     curl -X POST localhost:8080/runs \

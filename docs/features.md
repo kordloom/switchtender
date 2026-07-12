@@ -16,6 +16,7 @@ What Yardmaster does today.
 | Splits       | Shard an inventory across parallel slices, merged back into one matrix. Hosts packed by measured duration from past runs.|
 | Shard retry  | Retry a finished split and only its failed shards run again, lineage recorded.  |
 | Pipelines    | Ordered steps or a dependency graph with parallel branches. Failures skip exactly their dependents, per-step retry budgets, set_stats outputs flow to dependent steps as extra vars.|
+| Workflow editor | A drag-and-drop canvas at Workflows builds the dependency graph in the browser: draft persistence, undo and redo, full keyboard editing, and cycle refusal, submitted as a pipeline.|
 | Workers      | Point `yardmaster worker` at the same database and it competes for queued runs. Leases, heartbeats, and a janitor make dead workers safe.|
 | Scheduling   | Cron schedules fire runs, splits, or pipelines with full history per fire.      |
 | Fleet memory | Failure rankings, flaky-host detection, outcome sparklines, per-host history, task duration trends, all from persisted structured events.|
@@ -42,5 +43,7 @@ What Yardmaster does today.
 | Retention | A sweeper drops old run events and deletes terminal runs past a configurable age, keeping the summaries the cross-run views need.|
 | Email | An SMTP notification on every finished run or on failures only, alongside the finish webhooks.|
 | Slack | A formatted message posts to a Slack incoming webhook when a run finishes, with the run label, status, and elapsed time.|
-| AI triage | An optional AI provider, local Ollama or a cloud API, explains a failed run on demand from its masked log. Advisory only: it never runs anything, so every action still goes through the same policy and audit gates.|
+| AI triage | An optional AI provider, local Ollama or a cloud API, explains a failed run on demand from its masked log and failed task events. Advisory only: it never runs anything, so every action still goes through the same policy and audit gates.|
+| Guided tours | A tour launcher in the top bar walks the product, the pitch, and the migration path step by step in the live UI, fully keyboard accessible.|
+| Desktop mode | `yardmaster desktop` serves on a stable loopback port, keeps its data in a private per-user directory, and opens the UI. Packaging recipes cover a macOS app bundle and a Windows installer.|
 | Migration | `yardmaster import awx` and `import semaphore` read an export and create the equivalent projects, inventories, templates, surveys, schedules, and credential shells, with a dry-run report first.|

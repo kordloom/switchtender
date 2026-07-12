@@ -60,6 +60,10 @@
 <td>Ordered steps or a dependency graph with parallel branches. Failures skip exactly their dependents, per-step retry budgets, set_stats outputs flow to dependent steps as extra vars.</td>
 </tr>
 <tr>
+<td>Workflow editor</td>
+<td>A drag-and-drop canvas at Workflows builds the dependency graph in the browser: draft persistence, undo and redo, full keyboard editing, and cycle refusal, submitted as a pipeline.</td>
+</tr>
+<tr>
 <td>Workers</td>
 <td>Point <code>yardmaster worker</code> at the same database and it competes for queued runs. Leases, heartbeats, and a janitor make dead workers safe.</td>
 </tr>
@@ -165,7 +169,15 @@
 </tr>
 <tr>
 <td>AI triage</td>
-<td>An optional AI provider, local Ollama or a cloud API, explains a failed run on demand from its masked log. Advisory only: it never runs anything, so every action still goes through the same policy and audit gates.</td>
+<td>An optional AI provider, local Ollama or a cloud API, explains a failed run on demand from its masked log and failed task events. Advisory only: it never runs anything, so every action still goes through the same policy and audit gates.</td>
+</tr>
+<tr>
+<td>Guided tours</td>
+<td>A tour launcher in the top bar walks the product, the pitch, and the migration path step by step in the live UI, fully keyboard accessible.</td>
+</tr>
+<tr>
+<td>Desktop mode</td>
+<td><code>yardmaster desktop</code> serves on a stable loopback port, keeps its data in a private per-user directory, and opens the UI. Packaging recipes cover a macOS app bundle and a Windows installer.</td>
 </tr>
 <tr>
 <td>Migration</td>

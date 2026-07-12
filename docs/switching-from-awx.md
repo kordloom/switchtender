@@ -131,13 +131,15 @@ Add a schedule in Schedules with a cron expression to fire a template on a caden
 
 - There is no separate "launch" wizard the size of AWX's. A template launch is one request, a survey
   renders as a small form.
+- Workflows are built on the canvas at Workflows: add steps, drag them into place, wire dependencies
+  by dragging from a step's edge onto another, and run the graph as a pipeline.
 - Access is a global role plus optional per-object grants, rather than AWX's organization tree. Grant
   a user or a team `use` or `manage` on a specific project, template, inventory, or credential.
-- Notifications are finish webhooks and email today, not the full AWX set.
+- Notifications are finish webhooks, email, and Slack today, not the full AWX set.
 
 ## What is not one to one yet
 
-- The visual workflow editor is a pipeline defined through the API and shown in the UI, not a
-  drag-and-drop canvas.
+- The notification integration catalog is smaller than AWX's.
+- Execution environments are a single pinned container image behind a flag, not a managed catalog.
 
 If something you rely on is missing, open an issue. The gap with AWX is being closed on purpose.

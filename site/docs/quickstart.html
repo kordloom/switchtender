@@ -42,6 +42,9 @@ YARDMASTER_ENCRYPTION_KEY=change-me YARDMASTER_ENCRYPTION_SALT=change-me-too \
 both the server still runs, but credential features stay off. Keep the salt stable across restarts
 or existing credentials cannot be decrypted.</p>
 <p>Open http://localhost:8080 for the web UI, or use the API directly.</p>
+<p>On your own machine, <code>./yardmaster desktop</code> does all of this in one command: it picks a stable
+loopback port, keeps its data in a per-user directory, and opens the UI. The
+<a href="/docs/desktop.html">desktop guide</a> covers it, including packaging.</p>
 <h2 id="submit-a-run">Submit a run</h2>
 <pre><code>curl -X POST localhost:8080/runs \
   -d '{&quot;playbook&quot;: &quot;site.yml&quot;, &quot;inventory&quot;: &quot;hosts.ini&quot;}'

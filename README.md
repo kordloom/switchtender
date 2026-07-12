@@ -52,7 +52,7 @@ can read, split, and remember.
 | Every&nbsp;run                       | A live host-by-task matrix you read like a dashboard, with per-task drill-down.   | A text log you scroll.                          | A text log you scroll.   |
 | Big&nbsp;jobs                        | Sharded across hosts, balanced by their measured duration, only failed shards retried. | Sliced round-robin, with no balancing.     | No splitting at all.     |
 | Memory&nbsp;across&nbsp;runs         | Flaky hosts flagged, durations trended, every host's history kept.               | Forgotten the moment a run ends.                | Forgotten the moment a run ends. |
-| Pipelines                            | A dependency graph that passes typed outputs from one step to the next.          | A visual workflow builder.                      | Basic chaining.          |
+| Pipelines                            | A dependency graph with a drag-and-drop editor, passing typed outputs from one step to the next. | A visual workflow builder.       | Basic chaining.          |
 | Leaving&nbsp;your&nbsp;old&nbsp;tool | One command imports your AWX or Semaphore projects, inventories, templates, surveys, and schedules. | Not applicable.                     | Not applicable.          |
 
 The full head-to-head, including where Yardmaster is behind, is in the
@@ -81,6 +81,11 @@ host, remembered across every run:
 
     go build -o yardmaster .
     ./yardmaster serve --addr :8080 --db yardmaster.db
+
+Or run it as a local desktop app. One command picks a stable loopback port, keeps its data in a
+per-user directory, and opens the UI in your browser:
+
+    ./yardmaster desktop
 
 Open http://localhost:8080 and submit a run:
 
@@ -113,6 +118,7 @@ The docs live in [docs/](docs/) and also render inside the app at `/ui/docs`.
 | [Switching from AWX](docs/switching-from-awx.md) | Import what you have, or set up from scratch |
 | [Concepts](docs/concepts.md) | Runs, splits, pipelines, projects, templates, and the rest |
 | [Configuration](docs/configuration.md) | Every command, flag, and environment variable |
+| [Desktop](docs/desktop.md) | Run Yardmaster as a local desktop app |
 | [Features](docs/features.md) | The full capability list |
 | [HTTP API](docs/api.md) | Every endpoint the server exposes |
 | [Migration](docs/migration.md) | Moving off AWX or Semaphore in detail |
@@ -143,10 +149,9 @@ the API, the UI, and everything you operate speak plain Ansible. No glossary req
 
 ## Roadmap
 
-- Pluggable runtimes beyond Ansible, starting with Terraform or OpenTofu.
-- SSO and LDAP for enterprise sign-in.
-- A seeded public demo and a hosted option.
-- Broader notification channels and expanded onboarding docs.
+- A hosted option.
+- Signed desktop packages for macOS and Windows.
+- Broader notification channels beyond webhook, email, and Slack.
 
 ## Status
 

@@ -8,7 +8,7 @@
 # Documentation
 
 Yardmaster runs Ansible, Bash, Terraform, Python, and Go across a fleet and treats every run as
-structured data. One binary: `serve` is the API, the executor, the scheduler, and the web UI;
+structured data. One binary: `serve` is the API, the executor, the scheduler, and the web UI.
 `worker` adds capacity.
 State lives in one database, SQLite by default or PostgreSQL by DSN. These pages also render inside
 the app at `/ui/docs`.
@@ -20,6 +20,7 @@ the app at `/ui/docs`.
 | [Tutorials](tutorials.md) | Task-focused walk-throughs for everyday work.|
 | [Concepts](concepts.md) | Runs, splits, pipelines, projects, templates, and the rest.|
 | [Configuration](configuration.md) | Every command, flag, and environment variable.|
+| [Desktop](desktop.md) | Run Yardmaster as a local desktop app.|
 | [Features](features.md) | The full capability list.|
 | [HTTP API](api.md) | Every endpoint the server exposes.|
 | [Migration](migration.md) | Moving off AWX or Semaphore in detail.|
