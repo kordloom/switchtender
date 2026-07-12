@@ -24,7 +24,7 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     env:
-      YARDMASTER_POSTGRES_DSN: postgres://yard:yard@localhost:5432/yard?sslmode=disable
+      YARDMASTER_TEST_POSTGRES_DSN: postgres://yard:yard@localhost:5432/yard?sslmode=disable
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
