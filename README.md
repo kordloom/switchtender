@@ -8,6 +8,9 @@
 <h1 align="center">Yardmaster</h1>
 
 <p align="center">
+  <a href="https://yardmaster.dev"><img
+    src="https://img.shields.io/badge/website-yardmaster.dev-0969da"
+    alt="Website"></a>
   <a href="https://github.com/dcadolph/yardmaster/actions/workflows/ci.yml"><img
     src="https://github.com/dcadolph/yardmaster/actions/workflows/ci.yml/badge.svg?branch=main"
     alt="CI status"></a>

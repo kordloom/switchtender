@@ -47,6 +47,9 @@ var logoBlock = regexp.MustCompile(`(?s)<p align="center">.*?</p>`)
 // mdLink matches links between documentation pages, which are markdown file names on disk.
 var mdLink = regexp.MustCompile(`href="([a-zA-Z0-9._/-]+?)\.md(#[^"]*)?"`)
 
+// mdInline strips inline markdown links and emphasis for plain-text descriptions.
+var mdInline = regexp.MustCompile(`\[([^\]]*)\]\([^)]*\)|\*\*([^*]*)\*\*`)
+
 // page is one rendered documentation page.
 type page struct {
 	// Slug is the file name without its extension.
@@ -55,6 +58,8 @@ type page struct {
 	Title string
 	// Href is the page URL.
 	Href string
+	// Description is the first prose paragraph, clipped for the meta description.
+	Description string
 	// Content is the rendered HTML body.
 	Content template.HTML
 }
@@ -106,6 +111,7 @@ func run() error {
 		var buf bytes.Buffer
 		if err := tmpl.Execute(&buf, map[string]any{
 			"Title": p.Title, "Content": p.Content, "Pages": sidebarFor(slug, slugs),
+			"Description": p.Description, "Canonical": canonicalFor(slug),
 		}); err != nil {
 			return err
 		}
@@ -113,8 +119,80 @@ func run() error {
 			return err
 		}
 	}
-	fmt.Printf("sitegen: wrote %d pages to %s\n", len(slugs), outDir)
+	if err := writeSitemap(slugs); err != nil {
+		return err
+	}
+	fmt.Printf("sitegen: wrote %d pages and the sitemap to %s\n", len(slugs), outDir)
 	return nil
+}
+
+// canonicalFor returns the canonical URL for a docs slug, the directory URL for the index.
+func canonicalFor(slug string) string {
+	if slug == "README" {
+		return "https://yardmaster.dev/docs/"
+	}
+	return "https://yardmaster.dev/docs/" + slug + ".html"
+}
+
+// writeSitemap emits site/sitemap.xml covering the landing pages and every docs page, so crawlers
+// discover the whole site from one file.
+func writeSitemap(slugs []string) error {
+	var b strings.Builder
+	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>` + "\n")
+	b.WriteString(`<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">` + "\n")
+	urls := []string{"https://yardmaster.dev/", "https://yardmaster.dev/get-started.html"}
+	for _, slug := range slugs {
+		urls = append(urls, canonicalFor(slug))
+	}
+	for _, u := range urls {
+		b.WriteString("  <url><loc>" + u + "</loc></url>\n")
+	}
+	b.WriteString("</urlset>\n")
+	return os.WriteFile(filepath.Join("site", "sitemap.xml"), []byte(b.String()), 0o644)
+}
+
+// description returns the page's first prose paragraph as plain text, clipped for a meta
+// description. Headings, badges, tables, and code fences are skipped, and a paragraph wrapped
+// across source lines is joined before clipping.
+func description(src []byte) string {
+	inFence := false
+	var para []string
+	flush := func() string {
+		text := mdInline.ReplaceAllString(strings.Join(para, " "), "$1$2")
+		text = strings.ReplaceAll(text, "`", "")
+		if len(text) <= 200 {
+			return text
+		}
+		// Prefer ending on a full sentence. Fall back to a word boundary.
+		if dot := strings.LastIndex(text[:200], ". "); dot >= 60 {
+			return text[:dot+1]
+		}
+		cut := 200
+		for cut > 0 && text[cut] != ' ' {
+			cut--
+		}
+		return strings.TrimRight(text[:cut], " ,")
+	}
+	for _, line := range strings.Split(string(src), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "```") {
+			inFence = !inFence
+			continue
+		}
+		skip := inFence || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "|") ||
+			strings.HasPrefix(line, "<") || strings.HasPrefix(line, "-")
+		if line == "" || skip {
+			if len(para) > 0 {
+				return flush()
+			}
+			continue
+		}
+		para = append(para, line)
+	}
+	if len(para) > 0 {
+		return flush()
+	}
+	return "Yardmaster documentation."
 }
 
 // orderedSlugs returns the present slugs in sidebar order, extras appended sorted.
@@ -152,7 +230,10 @@ func render(md goldmark.Markdown, slug string) (page, error) {
 		parts := mdLink.FindStringSubmatch(m)
 		return fmt.Sprintf("href=%q", "/docs/"+outFile(filepath.Base(parts[1]))+parts[2])
 	})
-	return page{Slug: slug, Title: title(slug, src), Content: template.HTML(html)}, nil //nolint:gosec // trusted docs
+	return page{
+		Slug: slug, Title: title(slug, src), Description: description(src),
+		Content: template.HTML(html), //nolint:gosec // trusted docs
+	}, nil
 }
 
 // sidebarFor builds the navigation for the page being rendered.
@@ -193,6 +274,12 @@ const layout = `<!DOCTYPE html>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>{{.Title}} · Yardmaster docs</title>
+	<meta name="description" content="{{.Description}}">
+	<link rel="canonical" href="{{.Canonical}}">
+	<meta property="og:title" content="{{.Title}} · Yardmaster docs">
+	<meta property="og:description" content="{{.Description}}">
+	<meta property="og:type" content="article">
+	<meta property="og:url" content="{{.Canonical}}">
 	<link rel="icon" href="/favicon.ico" sizes="any">
 	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
 	<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
