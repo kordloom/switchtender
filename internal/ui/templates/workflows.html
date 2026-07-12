@@ -16,7 +16,7 @@
 		<div class="page-head">
 			<div class="page-head-text">
 				<h1>Workflow</h1>
-				<p class="muted">Wire steps into a graph, then run it. A step starts once every step feeding into it succeeds.</p>
+				<p class="muted">Wire steps into a graph, then run it. A linked step starts once every step feeding into it succeeds. Unlinked steps run one at a time in the order they were added.</p>
 			</div>
 			<div class="wf-toolbar">
 				<input id="wf-name" class="input" placeholder="Workflow name" aria-label="Workflow name">
@@ -77,7 +77,7 @@
 		<div id="wf-canvas" class="wf-canvas">
 			<svg class="wf-edges" aria-hidden="true"></svg>
 			<div class="wf-nodes"></div>
-			<p class="wf-hint muted">Add a step to begin. Drag steps to arrange them, and drag from a step's right edge to another step to make it wait.</p>
+			<p class="wf-hint muted">Add a step to begin. Drag steps to arrange them, and drag from a step's right edge onto another step to make it wait. Click a link to select it, then press Delete to remove it. Ctrl+Z undoes.</p>
 		</div>
 	</main>
 

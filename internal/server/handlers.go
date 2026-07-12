@@ -387,7 +387,7 @@ func createPipelineHandler(submitter Submitter, authz *authorizer, log *zap.Logg
 		for _, step := range req.Steps {
 			if !run.ValidTool(step.Tool) {
 				respondError(w, log, http.StatusBadRequest,
-					"each step tool must be ansible, bash, terraform, or python")
+					"each step tool must be ansible, bash, terraform, python, or go")
 				return
 			}
 			if run.NormalizeTool(step.Tool) == run.ToolAnsible && step.Playbook == "" {

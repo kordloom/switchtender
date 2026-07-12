@@ -425,8 +425,16 @@ const WF_HANDLE_Y = 26;
 // wfState holds the workflow graph and interaction state while the editor is open.
 let wfState = null;
 
+// wfDraftKey is the localStorage key holding the unsent workflow graph, so a refresh, a stray
+// navigation, or a sign-in round trip does not lose the work.
+const wfDraftKey = "ym_wf_draft";
+
+// wfHistoryCap bounds the undo stack.
+const wfHistoryCap = 50;
+
 // mountWorkflow initializes the visual workflow editor: the node graph, the canvas drag and link
-// interactions, and the toolbar that adds steps and runs the graph as a pipeline.
+// interactions, the keyboard bindings, and the toolbar that adds steps and runs the graph as a
+// pipeline. Any saved draft is restored before first paint.
 function mountWorkflow() {
 	const canvas = document.getElementById("wf-canvas");
 	if (!canvas) return;
@@ -435,25 +443,157 @@ function mountWorkflow() {
 		nodesLayer: canvas.querySelector(".wf-nodes"),
 		edgesLayer: canvas.querySelector(".wf-edges"),
 		hint: canvas.querySelector(".wf-hint"),
-		drag: null, link: null,
+		drag: null, link: null, linkFrom: null, selectedEdge: null,
+		past: [], future: [], lastSnapKey: null, lastSnapAt: 0,
+		opener: null, submitting: false,
 	};
 	document.getElementById("wf-add").addEventListener("click", () => openStepModal(null));
 	document.getElementById("wf-run").addEventListener("click", runWorkflow);
 	document.getElementById("wf-step-tool").addEventListener("change", syncStepFields);
 	document.getElementById("wf-step-form").addEventListener("submit", saveStep);
 	document.getElementById("wf-step-delete").addEventListener("click", deleteStepFromModal);
+	document.getElementById("wf-name").addEventListener("input", wfSave);
+	document.getElementById("wf-inventory").addEventListener("input", wfSave);
 	const modal = document.getElementById("wf-step-modal");
 	const card = modal.querySelector(".modal-card");
 	card.setAttribute("role", "dialog");
 	card.setAttribute("aria-modal", "true");
 	document.getElementById("wf-step-close").addEventListener("click", closeStepModal);
 	modal.addEventListener("click", (e) => { if (e.target === modal) closeStepModal(); });
+	modal.addEventListener("keydown", (e) => {
+		if (e.key !== "Tab" || modal.hidden) return;
+		const focusable = modal.querySelectorAll(
+			"button:not([disabled]):not([hidden]), input:not([disabled]), " +
+			"select:not([disabled]), textarea:not([disabled])");
+		if (focusable.length === 0) return;
+		const first = focusable[0];
+		const last = focusable[focusable.length - 1];
+		if (e.shiftKey && document.activeElement === first) {
+			e.preventDefault();
+			last.focus();
+		} else if (!e.shiftKey && document.activeElement === last) {
+			e.preventDefault();
+			first.focus();
+		}
+	});
 	document.addEventListener("keydown", (e) => {
-		if (e.key === "Escape" && !modal.hidden) closeStepModal();
+		if (e.key === "Escape" && !modal.hidden) { closeStepModal(); return; }
+		if (e.key === "Escape" && wfState.linkFrom) {
+			wfState.linkFrom = null;
+			wfSetStatus("", "");
+			return;
+		}
+		const tag = e.target.tagName;
+		if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || !modal.hidden) return;
+		const mod = e.metaKey || e.ctrlKey;
+		if (mod && !e.shiftKey && e.key.toLowerCase() === "z") {
+			e.preventDefault();
+			wfUndo();
+		} else if ((mod && e.shiftKey && e.key.toLowerCase() === "z") || (mod && e.key.toLowerCase() === "y")) {
+			e.preventDefault();
+			wfRedo();
+		} else if ((e.key === "Delete" || e.key === "Backspace") && wfState.selectedEdge) {
+			e.preventDefault();
+			removeEdge(wfState.selectedEdge);
+		}
 	});
 	canvas.addEventListener("pointermove", wfPointerMove);
 	canvas.addEventListener("pointerup", wfPointerUp);
+	canvas.addEventListener("pointercancel", wfCancelPointer);
+	canvas.addEventListener("lostpointercapture", wfCancelPointer);
+	canvas.addEventListener("pointerdown", (e) => {
+		if (e.target === canvas || e.target.classList.contains("wf-nodes")) deselectEdge();
+	});
+	wfState.edgesLayer.addEventListener("click", (e) => {
+		const hit = e.target.closest(".wf-edge-hit");
+		if (hit) selectEdge(hit.dataset.from, hit.dataset.to);
+	});
+	wfState.edgesLayer.addEventListener("focusin", (e) => {
+		const hit = e.target.closest(".wf-edge-hit");
+		if (hit) selectEdge(hit.dataset.from, hit.dataset.to);
+	});
+	wfState.edgesLayer.addEventListener("keydown", (e) => {
+		const hit = e.target.closest(".wf-edge-hit");
+		if (hit && (e.key === "Delete" || e.key === "Backspace" || e.key === "Enter")) {
+			e.preventDefault();
+			removeEdge({ from: hit.dataset.from, to: hit.dataset.to });
+		}
+	});
 	window.addEventListener("resize", renderEdges);
+	wfRestore();
+	renderWorkflow();
+}
+
+// wfSave persists the graph and the toolbar fields as the working draft. Storage failures are
+// ignored, since the editor still works without drafts.
+function wfSave() {
+	try {
+		localStorage.setItem(wfDraftKey, JSON.stringify({
+			nodes: wfState.nodes, edges: wfState.edges, seq: wfState.seq,
+			name: document.getElementById("wf-name").value,
+			inventory: document.getElementById("wf-inventory").value,
+		}));
+	} catch { /* storage full or blocked */ }
+}
+
+// wfRestore loads the saved draft into the editor state, ignoring anything malformed.
+function wfRestore() {
+	let draft = null;
+	try {
+		draft = JSON.parse(localStorage.getItem(wfDraftKey) || "null");
+	} catch {
+		return;
+	}
+	if (!draft || !Array.isArray(draft.nodes) || !Array.isArray(draft.edges)) return;
+	wfState.nodes = draft.nodes;
+	wfState.edges = draft.edges;
+	wfState.seq = typeof draft.seq === "number" ? draft.seq : draft.nodes.length;
+	document.getElementById("wf-name").value = draft.name || "";
+	document.getElementById("wf-inventory").value = draft.inventory || "";
+}
+
+// wfSnapshot pushes the current graph onto the undo stack before a mutation. A coalesce key merges
+// rapid repeats, so a burst of arrow-key nudges undoes as one step.
+function wfSnapshot(key) {
+	const now = Date.now();
+	if (key && wfState.lastSnapKey === key && now - wfState.lastSnapAt < 1000) {
+		wfState.lastSnapAt = now;
+		return;
+	}
+	wfState.lastSnapKey = key || null;
+	wfState.lastSnapAt = now;
+	wfPushHistory(JSON.stringify({ nodes: wfState.nodes, edges: wfState.edges }));
+}
+
+// wfPushHistory records a serialized graph as an undo point and clears the redo stack.
+function wfPushHistory(snapshot) {
+	wfState.past.push(snapshot);
+	if (wfState.past.length > wfHistoryCap) wfState.past.shift();
+	wfState.future = [];
+}
+
+// wfUndo restores the previous graph state.
+function wfUndo() {
+	if (wfState.past.length === 0) return;
+	wfState.future.push(JSON.stringify({ nodes: wfState.nodes, edges: wfState.edges }));
+	applyGraph(JSON.parse(wfState.past.pop()));
+}
+
+// wfRedo reapplies an undone graph state.
+function wfRedo() {
+	if (wfState.future.length === 0) return;
+	wfState.past.push(JSON.stringify({ nodes: wfState.nodes, edges: wfState.edges }));
+	applyGraph(JSON.parse(wfState.future.pop()));
+}
+
+// applyGraph replaces the graph, redraws, and persists the draft, used by undo and redo.
+function applyGraph(g) {
+	wfState.nodes = g.nodes;
+	wfState.edges = g.edges;
+	wfState.selectedEdge = null;
+	wfState.lastSnapKey = null;
+	renderWorkflow();
+	wfSave();
 }
 
 // wfPoint converts a pointer event to canvas-local coordinates, accounting for scroll and offset.
@@ -471,6 +611,7 @@ function syncStepFields() {
 
 // openStepModal opens the step editor for a new step, or for the given node to edit it in place.
 function openStepModal(node) {
+	wfState.opener = document.activeElement;
 	wfState.editing = node ? node.id : null;
 	document.getElementById("wf-step-status").textContent = "";
 	document.getElementById("wf-step-name").value = node ? node.name : "";
@@ -487,14 +628,17 @@ function openStepModal(node) {
 	document.getElementById("wf-step-name").focus();
 }
 
-// closeStepModal hides the step editor.
+// closeStepModal hides the step editor and returns focus to whatever opened it.
 function closeStepModal() {
 	document.getElementById("wf-step-modal").hidden = true;
 	wfState.editing = null;
+	if (wfState.opener && wfState.opener.focus) wfState.opener.focus();
+	wfState.opener = null;
 }
 
 // saveStep validates the step form and creates or updates the node, keeping step names unique so
-// dependencies stay unambiguous.
+// dependencies stay unambiguous and requiring the tool's input so a broken step is caught here
+// instead of at run time.
 function saveStep(e) {
 	e.preventDefault();
 	const name = document.getElementById("wf-step-name").value.trim();
@@ -512,15 +656,41 @@ function saveStep(e) {
 		continueOnFailure: document.getElementById("wf-step-continue").checked,
 		retries: Math.max(0, parseInt(document.getElementById("wf-step-retries").value, 10) || 0),
 	};
+	if (tool === "ansible" && !fields.playbook) {
+		status.textContent = "An Ansible step needs a playbook.";
+		return;
+	}
+	if (tool !== "ansible" && !fields.command) {
+		status.textContent = "A " + tool + " step needs a command.";
+		return;
+	}
+	wfSnapshot();
 	if (wfState.editing) {
 		const node = wfState.nodes.find((n) => n.id === wfState.editing);
 		Object.assign(node, fields);
 	} else {
-		const n = wfState.nodes.length;
-		wfState.nodes.push(Object.assign({ id: "n" + (wfState.seq++), x: 40 + (n % 4) * 210, y: 40 + Math.floor(n / 4) * 130 }, fields));
+		wfState.nodes.push(Object.assign({ id: "n" + (wfState.seq++) }, spawnPosition(), fields));
 	}
 	closeStepModal();
 	renderWorkflow();
+	wfSave();
+}
+
+// spawnPosition picks a free grid slot for a new node inside the visible canvas, skipping spots
+// already occupied so new steps never stack on existing ones.
+function spawnPosition() {
+	const c = wfState.canvas;
+	const cols = Math.max(1, Math.floor((c.clientWidth - 40) / 210));
+	const baseX = c.scrollLeft + 40;
+	const baseY = c.scrollTop + 40;
+	for (let i = 0; i < 1000; i++) {
+		const x = baseX + (i % cols) * 210;
+		const y = baseY + Math.floor(i / cols) * 130;
+		if (!wfState.nodes.some((n) => Math.abs(n.x - x) < 30 && Math.abs(n.y - y) < 30)) {
+			return { x, y };
+		}
+	}
+	return { x: baseX, y: baseY };
 }
 
 // deleteStepFromModal removes the node currently open in the editor along with its edges.
@@ -529,11 +699,14 @@ function deleteStepFromModal() {
 	closeStepModal();
 }
 
-// removeNode deletes a node and every edge touching it.
+// removeNode deletes a node and every edge touching it. Undo can bring it back.
 function removeNode(id) {
+	wfSnapshot();
 	wfState.nodes = wfState.nodes.filter((n) => n.id !== id);
 	wfState.edges = wfState.edges.filter((e) => e.from !== id && e.to !== id);
+	if (wfState.linkFrom === id) wfState.linkFrom = null;
 	renderWorkflow();
+	wfSave();
 }
 
 // renderWorkflow redraws the nodes and the edges and toggles the empty hint.
@@ -544,6 +717,7 @@ function renderWorkflow() {
 }
 
 // renderNodes reconciles the node cards with the model, positioning each and wiring its handles.
+// Cards are focusable: Enter edits, arrows move, L starts a link, and Delete removes.
 function renderNodes() {
 	const layer = wfState.nodesLayer;
 	layer.textContent = "";
@@ -553,6 +727,10 @@ function renderNodes() {
 		el.style.left = node.x + "px";
 		el.style.top = node.y + "px";
 		el.dataset.id = node.id;
+		el.tabIndex = 0;
+		el.setAttribute("role", "group");
+		el.setAttribute("aria-label", node.name + ", " + node.tool +
+			" step. Enter edits, arrow keys move, L starts a link, Delete removes.");
 		const target = node.tool === "ansible" ? node.playbook : node.command;
 		el.innerHTML =
 			'<div class="wf-node-head"><span class="wf-node-name"></span>' +
@@ -566,11 +744,60 @@ function renderNodes() {
 		el.querySelector(".wf-node-del").addEventListener("click", (ev) => { ev.stopPropagation(); removeNode(node.id); });
 		el.querySelector(".wf-out").addEventListener("pointerdown", (ev) => startLink(ev, node.id));
 		el.addEventListener("pointerdown", (ev) => startDrag(ev, node.id));
+		el.addEventListener("keydown", (ev) => nodeKey(ev, node.id));
 		layer.appendChild(el);
 	}
 }
 
-// renderEdges draws every dependency edge, plus the in-progress link while one is being dragged.
+// nodeKey handles keyboard interaction on a focused node: edit, move, link, and delete. Completing
+// a pending link happens on Enter over the target node.
+function nodeKey(e, id) {
+	const node = wfState.nodes.find((n) => n.id === id);
+	if (!node || e.target.closest(".wf-node-del")) return;
+	if (e.key === "Enter" || e.key === " ") {
+		e.preventDefault();
+		if (wfState.linkFrom && wfState.linkFrom !== id) {
+			linkTo(wfState.linkFrom, id);
+			wfState.linkFrom = null;
+			renderEdges();
+		} else {
+			openStepModal(node);
+		}
+	} else if (e.key === "Delete" || e.key === "Backspace") {
+		e.preventDefault();
+		removeNode(id);
+	} else if (e.key.toLowerCase() === "l") {
+		e.preventDefault();
+		wfState.linkFrom = id;
+		wfSetStatus("Linking from " + node.name +
+			". Focus another step and press Enter to add the dependency. Escape cancels.", "");
+	} else if (e.key.startsWith("Arrow")) {
+		e.preventDefault();
+		wfSnapshot("move-" + id);
+		const d = e.shiftKey ? 1 : 10;
+		if (e.key === "ArrowLeft") node.x = Math.max(0, node.x - d);
+		if (e.key === "ArrowRight") node.x += d;
+		if (e.key === "ArrowUp") node.y = Math.max(0, node.y - d);
+		if (e.key === "ArrowDown") node.y += d;
+		positionNode(id);
+		renderEdges();
+		wfSave();
+	}
+}
+
+// positionNode moves a node's card in place without rebuilding the layer, so focus and listeners
+// survive a drag or a keyboard move.
+function positionNode(id) {
+	const node = wfState.nodes.find((n) => n.id === id);
+	const el = wfState.nodesLayer.querySelector('[data-id="' + id + '"]');
+	if (node && el) {
+		el.style.left = node.x + "px";
+		el.style.top = node.y + "px";
+	}
+}
+
+// renderEdges draws every dependency edge with an invisible wide hit path over it for selection,
+// plus the in-progress link while one is being dragged.
 function renderEdges() {
 	const svg = wfState.edgesLayer;
 	svg.setAttribute("width", wfState.canvas.scrollWidth);
@@ -579,47 +806,103 @@ function renderEdges() {
 	for (const e of wfState.edges) {
 		const a = wfState.nodes.find((n) => n.id === e.from);
 		const b = wfState.nodes.find((n) => n.id === e.to);
-		if (a && b) paths += edgePath(a.x + WF_CARD_W, a.y + WF_HANDLE_Y, b.x, b.y + WF_HANDLE_Y, "wf-edge");
+		if (!(a && b)) continue;
+		const sel = wfState.selectedEdge &&
+			wfState.selectedEdge.from === e.from && wfState.selectedEdge.to === e.to;
+		const d = edgeD(a.x + WF_CARD_W, a.y + WF_HANDLE_Y, b.x, b.y + WF_HANDLE_Y);
+		paths += '<path class="wf-edge' + (sel ? " wf-edge-selected" : "") + '" d="' + d + '"/>';
+		paths += '<path class="wf-edge-hit" d="' + d + '" tabindex="0" role="button" ' +
+			'data-from="' + e.from + '" data-to="' + e.to + '" ' +
+			'aria-label="Dependency link. Press Delete to remove it."/>';
 	}
 	if (wfState.link && wfState.link.cursor) {
 		const a = wfState.nodes.find((n) => n.id === wfState.link.from);
-		if (a) paths += edgePath(a.x + WF_CARD_W, a.y + WF_HANDLE_Y, wfState.link.cursor.x, wfState.link.cursor.y, "wf-edge wf-edge-live");
+		if (a) {
+			paths += '<path class="wf-edge wf-edge-live" d="' +
+				edgeD(a.x + WF_CARD_W, a.y + WF_HANDLE_Y, wfState.link.cursor.x, wfState.link.cursor.y) + '"/>';
+		}
 	}
 	svg.innerHTML = paths;
 }
 
-// edgePath returns an SVG cubic path between two points, curving horizontally so edges read as flow.
-function edgePath(x1, y1, x2, y2, cls) {
+// edgeD returns the SVG cubic path data between two points, curving horizontally so edges read as
+// flow.
+function edgeD(x1, y1, x2, y2) {
 	const dx = Math.max(40, Math.abs(x2 - x1) / 2);
-	return '<path class="' + cls + '" d="M' + x1 + ' ' + y1 + ' C' + (x1 + dx) + ' ' + y1 + ' ' +
-		(x2 - dx) + ' ' + y2 + ' ' + x2 + ' ' + y2 + '"/>';
+	return "M" + x1 + " " + y1 + " C" + (x1 + dx) + " " + y1 + " " +
+		(x2 - dx) + " " + y2 + " " + x2 + " " + y2;
 }
 
-// startDrag begins moving a node, unless the press landed on a handle or the delete control.
+// selectEdge marks a dependency edge as selected so Delete can remove it. The class flips in place
+// rather than re-rendering, so keyboard focus on the hit path survives.
+function selectEdge(from, to) {
+	wfState.selectedEdge = { from, to };
+	for (const p of wfState.edgesLayer.querySelectorAll(".wf-edge-selected")) {
+		p.classList.remove("wf-edge-selected");
+	}
+	const hit = wfState.edgesLayer.querySelector(
+		'.wf-edge-hit[data-from="' + from + '"][data-to="' + to + '"]');
+	if (hit && hit.previousElementSibling) hit.previousElementSibling.classList.add("wf-edge-selected");
+	wfSetStatus("Dependency selected. Press Delete to remove it.", "");
+}
+
+// deselectEdge clears the edge selection and its status line.
+function deselectEdge() {
+	if (!wfState.selectedEdge) return;
+	wfState.selectedEdge = null;
+	for (const p of wfState.edgesLayer.querySelectorAll(".wf-edge-selected")) {
+		p.classList.remove("wf-edge-selected");
+	}
+	wfSetStatus("", "");
+}
+
+// removeEdge deletes a dependency edge. Undo can bring it back.
+function removeEdge(sel) {
+	wfSnapshot();
+	wfState.edges = wfState.edges.filter((e) => !(e.from === sel.from && e.to === sel.to));
+	wfState.selectedEdge = null;
+	renderEdges();
+	wfSetStatus("Dependency removed.", "");
+	wfSave();
+}
+
+// startDrag begins moving a node with the primary button, unless the press landed on a handle or
+// the delete control. The pre-drag graph is captured so a completed move becomes one undo step.
 function startDrag(e, id) {
+	if (e.button !== 0 || !e.isPrimary) return;
 	if (e.target.closest(".wf-handle") || e.target.closest(".wf-node-del")) return;
 	const node = wfState.nodes.find((n) => n.id === id);
 	const p = wfPoint(e);
-	wfState.drag = { id, dx: p.x - node.x, dy: p.y - node.y, moved: false };
+	wfState.drag = {
+		id, dx: p.x - node.x, dy: p.y - node.y, sx: p.x, sy: p.y, moved: false,
+		before: JSON.stringify({ nodes: wfState.nodes, edges: wfState.edges }),
+	};
 	wfState.canvas.setPointerCapture(e.pointerId);
 }
 
 // startLink begins drawing a dependency edge out of a node's output handle.
 function startLink(e, id) {
+	if (e.button !== 0 || !e.isPrimary) return;
 	e.stopPropagation();
 	wfState.link = { from: id, cursor: wfPoint(e) };
 	wfState.canvas.setPointerCapture(e.pointerId);
 }
 
-// wfPointerMove updates an in-progress node drag or link as the pointer moves.
+// wfPointerMove updates an in-progress node drag or link as the pointer moves. A drag starts only
+// past a small threshold, so a shaky tap still opens the editor, and only the dragged card is
+// repositioned so large graphs stay smooth.
 function wfPointerMove(e) {
 	if (wfState.drag) {
-		const node = wfState.nodes.find((n) => n.id === wfState.drag.id);
 		const p = wfPoint(e);
+		if (!wfState.drag.moved &&
+			Math.abs(p.x - wfState.drag.sx) < 4 && Math.abs(p.y - wfState.drag.sy) < 4) {
+			return;
+		}
+		wfState.drag.moved = true;
+		const node = wfState.nodes.find((n) => n.id === wfState.drag.id);
 		node.x = Math.max(0, p.x - wfState.drag.dx);
 		node.y = Math.max(0, p.y - wfState.drag.dy);
-		wfState.drag.moved = true;
-		renderNodes();
+		positionNode(node.id);
 		renderEdges();
 	} else if (wfState.link) {
 		wfState.link.cursor = wfPoint(e);
@@ -633,28 +916,54 @@ function wfPointerUp(e) {
 		// Pointer capture retargets the event to the canvas, so find the drop node by geometry.
 		const el = document.elementFromPoint(e.clientX, e.clientY);
 		const over = el ? el.closest(".wf-node") : null;
-		if (over) linkTo(over.dataset.id);
+		const fromId = wfState.link.from;
 		wfState.link = null;
+		if (over) linkTo(fromId, over.dataset.id);
 		renderEdges();
 	}
 	if (wfState.drag) {
-		if (!wfState.drag.moved) openStepModal(wfState.nodes.find((n) => n.id === wfState.drag.id));
+		if (wfState.drag.moved) {
+			wfPushHistory(wfState.drag.before);
+			wfSave();
+		} else {
+			openStepModal(wfState.nodes.find((n) => n.id === wfState.drag.id));
+		}
 		wfState.drag = null;
 	}
 }
 
-// linkTo adds a dependency edge from the link's source to the target, rejecting self-links,
-// duplicates, and edges that would create a cycle.
-function linkTo(toId) {
-	const fromId = wfState.link.from;
+// wfCancelPointer clears a drag or link whose gesture was canceled, for example by an edge swipe
+// on a touch screen, so no node stays glued to the pointer.
+function wfCancelPointer() {
+	if (wfState.drag) {
+		if (wfState.drag.moved) {
+			wfPushHistory(wfState.drag.before);
+			wfSave();
+		}
+		wfState.drag = null;
+	}
+	if (wfState.link) {
+		wfState.link = null;
+		renderEdges();
+	}
+}
+
+// linkTo adds a dependency edge from one node to another, rejecting self-links, duplicates, and
+// edges that would create a cycle. The status line announces the new dependency.
+function linkTo(fromId, toId) {
 	if (fromId === toId) return;
 	if (wfState.edges.some((e) => e.from === fromId && e.to === toId)) return;
 	if (reaches(toId, fromId)) {
 		wfSetStatus("That link would create a cycle.", "err");
 		return;
 	}
+	const from = wfState.nodes.find((n) => n.id === fromId);
+	const to = wfState.nodes.find((n) => n.id === toId);
+	if (!from || !to) return;
+	wfSnapshot();
 	wfState.edges.push({ from: fromId, to: toId });
-	wfSetStatus("", "");
+	wfSetStatus(to.name + " now waits for " + from.name + ".", "");
+	wfSave();
 }
 
 // reaches reports whether following edges from start eventually arrives at goal, used to block
@@ -683,8 +992,11 @@ function wfSetStatus(msg, kind) {
 	el.hidden = !msg;
 }
 
-// runWorkflow serializes the graph into pipeline steps and submits it, then opens the new run.
+// runWorkflow serializes the graph into pipeline steps and submits it, then opens the new run. An
+// in-flight guard stops a double click from starting the workflow twice, and a 401 saves the draft
+// and routes through sign-in so the graph survives the round trip.
 async function runWorkflow() {
+	if (wfState.submitting) return;
 	if (wfState.nodes.length === 0) { wfSetStatus("Add at least one step.", "err"); return; }
 	const steps = wfState.nodes.map((n) => {
 		const step = { name: n.name, tool: n.tool };
@@ -695,7 +1007,11 @@ async function runWorkflow() {
 		if (n.continueOnFailure) step.continue_on_failure = true;
 		if (n.retries > 0) step.retries = n.retries;
 		const deps = wfState.edges.filter((e) => e.to === n.id)
-			.map((e) => wfState.nodes.find((x) => x.id === e.from).name);
+			.map((e) => {
+				const src = wfState.nodes.find((x) => x.id === e.from);
+				return src ? src.name : null;
+			})
+			.filter(Boolean);
 		if (deps.length) step.depends_on = deps;
 		return step;
 	});
@@ -704,6 +1020,9 @@ async function runWorkflow() {
 		inventory: document.getElementById("wf-inventory").value.trim(),
 		steps,
 	};
+	const runBtn = document.getElementById("wf-run");
+	wfState.submitting = true;
+	runBtn.disabled = true;
 	wfSetStatus("Starting workflow.", "");
 	try {
 		const res = await fetch("/pipelines", {
@@ -711,15 +1030,22 @@ async function runWorkflow() {
 			headers: Object.assign({ "Content-Type": "application/json" }, authHeaders()),
 			body: JSON.stringify(body),
 		});
-		if (res.status === 401) { window.location.assign("/ui/login"); return; }
+		if (res.status === 401) {
+			wfSave();
+			requireLogin();
+			return;
+		}
 		if (!res.ok) {
 			const detail = await res.json().catch(() => ({}));
 			throw new Error(detail.error || "HTTP " + res.status);
 		}
 		const run = await res.json();
+		try { localStorage.removeItem(wfDraftKey); } catch { /* draft already gone */ }
 		window.location.assign("/ui/runs/" + run.id);
 	} catch (err) {
 		wfSetStatus("Could not start workflow: " + err.message, "err");
+		wfState.submitting = false;
+		runBtn.disabled = false;
 	}
 }
 
@@ -837,6 +1163,7 @@ function applyReadOnly() {
 			actions.appendChild(note);
 		}
 	}
+	for (const btn of document.querySelectorAll(".wf-toolbar button")) btn.disabled = true;
 }
 
 // buildNav injects the menu toggle and the slide-in drawer on every page but sign in, highlighting

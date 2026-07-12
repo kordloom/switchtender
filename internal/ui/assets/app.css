@@ -440,15 +440,20 @@ button.topbar-link { background: none; border: none; padding: 0; font: inherit; 
 .wf-edges { position: absolute; top: 0; left: 0; pointer-events: none; overflow: visible; }
 .wf-edge { fill: none; stroke: var(--accent); stroke-width: 2; }
 .wf-edge-live { stroke-dasharray: 5 4; opacity: 0.8; }
-.wf-nodes { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+.wf-edge-selected { stroke: var(--failed); stroke-width: 3; }
+.wf-edge-hit { fill: none; stroke: transparent; stroke-width: 14; pointer-events: stroke; cursor: pointer; }
+.wf-edge-hit:focus { outline: none; }
+.wf-nodes { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+.wf-node { pointer-events: auto; }
 .wf-node { position: absolute; width: 190px; box-sizing: border-box; padding: 9px 11px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.14); cursor: grab; touch-action: none; user-select: none; }
 .wf-node:active { cursor: grabbing; }
+.wf-node:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .wf-node-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
 .wf-node-name { font-weight: 600; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wf-node-del { border: none; background: none; color: var(--muted); font-size: 17px; line-height: 1; cursor: pointer; padding: 0 2px; }
 .wf-node-del:hover { color: var(--failed); }
 .wf-node-meta { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
-.wf-tool { flex: none; padding: 1px 7px; border-radius: 999px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; background: var(--accent-soft); color: var(--accent); }
+.wf-tool { flex: none; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; background: var(--accent-soft); color: var(--text); }
 .wf-node-target { font-size: 11.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wf-handle { position: absolute; top: 26px; width: 12px; height: 12px; border-radius: 50%; background: var(--surface); border: 2px solid var(--accent); transform: translateY(-50%); }
 .wf-in { left: -7px; }
@@ -458,6 +463,15 @@ button.topbar-link { background: none; border: none; padding: 0; font: inherit; 
 .wf-step-row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
 .wf-step-retries { flex-direction: row; align-items: center; gap: 8px; }
 .wf-step-retries .input { width: 72px; }
+@media (pointer: coarse) {
+	.wf-handle { width: 22px; height: 22px; }
+	.wf-in { left: -12px; }
+	.wf-out { right: -12px; }
+	.wf-node-del { font-size: 22px; padding: 4px 8px; }
+}
+@media (max-width: 680px) {
+	.content { padding: 16px; }
+}
 
 /* AI triage panel on the run detail page: an advisory explanation of a failed run, on demand. */
 .explain-panel { margin-top: 16px; background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: var(--radius); padding: 14px 16px; }
