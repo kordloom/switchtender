@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/dcadolph/yardmaster/internal/dispatch"
+	"github.com/dcadolph/yardmaster/internal/extplugin"
 	"github.com/dcadolph/yardmaster/internal/logutil"
 	"github.com/dcadolph/yardmaster/internal/project"
 	"github.com/dcadolph/yardmaster/internal/roundhouse"
@@ -25,6 +26,9 @@ var workerQueues []string
 
 // workerAllowContainerEE holds the value of the worker --allow-container-ee flag.
 var workerAllowContainerEE bool
+
+// workerPluginsDir holds the value of the worker --plugins-dir flag.
+var workerPluginsDir string
 
 // workerCmd runs a Yardmaster worker: a process that leases pending runs from the shared store,
 // executes them, and streams results back. Point it and a server at the same database, a
@@ -45,6 +49,8 @@ func init() {
 		"Queue this worker serves. Repeatable. Without any, it serves the default pool.")
 	workerCmd.Flags().BoolVar(&workerAllowContainerEE, "allow-container-ee", false,
 		"Allow runs whose project pins a container image to execute inside that image. Needs Docker.")
+	workerCmd.Flags().StringVar(&workerPluginsDir, "plugins-dir", "",
+		"Directory of extension plugin binaries to load at startup. Empty loads none. Also YARDMASTER_PLUGINS_DIR.")
 	registerContainerFlags(workerCmd)
 }
 
@@ -64,6 +70,12 @@ func runWorker(cmd *cobra.Command, _ []string) error {
 	store := bundle.Runs()
 
 	sealer := newSealerFromEnv(log)
+	closePlugins, err := extplugin.Load(pluginsDir(workerPluginsDir), log)
+	if err != nil {
+		return fmt.Errorf("load plugins: %w", err)
+	}
+	defer closePlugins()
+
 	syncer, err := project.NewSyncer(projectCacheDir())
 	if err != nil {
 		return fmt.Errorf("project cache: %w", err)

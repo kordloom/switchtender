@@ -1,0 +1,150 @@
+// The wire protocol between Yardmaster and an out-of-process extension. One plugin binary serves
+// one Extension service; Describe names what it provides and the remaining calls carry each seam.
+// Field numbers are frozen once released, so grow messages by adding fields, never by reusing.
+syntax = "proto3";
+
+package yardmaster.extension.v1;
+
+option go_package = "github.com/dcadolph/yardmaster/internal/extproto";
+
+// Extension is the single service a plugin binary serves. A plugin implements only the calls for
+// the seams it declares in Describe; the rest return an unimplemented error.
+service Extension {
+  // Describe names everything the plugin provides, so the host can register each seam.
+  rpc Describe(DescribeRequest) returns (DescribeResponse);
+  // RunTool executes one run of a declared tool, streaming output and ending with the result.
+  rpc RunTool(RunToolRequest) returns (stream RunToolReply);
+  // Notify delivers a terminal run to a declared notification channel.
+  rpc Notify(NotifyRequest) returns (NotifyResponse);
+  // Complete returns a declared AI provider's reply to a system instruction and a user prompt.
+  rpc Complete(CompleteRequest) returns (CompleteResponse);
+  // ResolveSecret fetches a value from a declared static secret source.
+  rpc ResolveSecret(ResolveSecretRequest) returns (ResolveSecretResponse);
+  // MintSecret mints a short-lived value from a declared dynamic secret source.
+  rpc MintSecret(MintSecretRequest) returns (MintSecretResponse);
+  // RevokeLease ends a minted secret early by the lease id MintSecret returned.
+  rpc RevokeLease(RevokeLeaseRequest) returns (RevokeLeaseResponse);
+}
+
+// DescribeRequest asks the plugin what it provides.
+message DescribeRequest {}
+
+// DescribeResponse lists the names the plugin registers, per seam. Every name must be unique
+// against the host's built-ins and every other loaded plugin.
+message DescribeResponse {
+  // tools are execution tool names served by RunTool.
+  repeated string tools = 1;
+  // notifiers are notification channel names served by Notify.
+  repeated string notifiers = 2;
+  // ai_providers are model backend names served by Complete.
+  repeated string ai_providers = 3;
+  // secret_sources are static secret engine kinds served by ResolveSecret.
+  repeated string secret_sources = 4;
+  // dynamic_secret_sources are dynamic secret engine kinds served by MintSecret.
+  repeated string dynamic_secret_sources = 5;
+}
+
+// RunToolRequest carries the run a tool executes.
+message RunToolRequest {
+  // tool is the declared tool name the run selected.
+  string tool = 1;
+  // command is the tool's primary input, the same field bash and python read their script from.
+  string command = 2;
+  // dry_run asks for the tool's no-change mode.
+  bool dry_run = 3;
+  // extra_vars_json is the run's extra vars as one JSON object, empty when the run has none.
+  bytes extra_vars_json = 4;
+  // env holds additional KEY=VALUE environment entries for the run.
+  repeated string env = 5;
+  // dir is the working directory for the run, empty for the host's default.
+  string dir = 6;
+}
+
+// RunToolReply is one message in the run's reply stream: output while the tool runs, then the
+// result as the final message.
+message RunToolReply {
+  oneof reply {
+    // output is a chunk of the run's combined output.
+    bytes output = 1;
+    // result ends the stream with the run's exit code.
+    ToolResult result = 2;
+  }
+}
+
+// ToolResult is the outcome of a completed tool run.
+message ToolResult {
+  // exit_code is the run's exit code. Zero means success.
+  int32 exit_code = 1;
+}
+
+// NotifyRequest carries a terminal run to a notification channel.
+message NotifyRequest {
+  // channel is the declared notifier name the delivery targets.
+  string channel = 1;
+  // run_json is the terminal run in its v1 API JSON shape, extra vars already redacted.
+  bytes run_json = 2;
+}
+
+// NotifyResponse acknowledges a delivery.
+message NotifyResponse {}
+
+// CompleteRequest carries one completion call to an AI provider.
+message CompleteRequest {
+  // provider is the declared AI provider name.
+  string provider = 1;
+  // model is the configured model name.
+  string model = 2;
+  // url is the configured endpoint URL, empty for the provider's default.
+  string url = 3;
+  // api_key is the configured API key, empty when the backend needs none.
+  string api_key = 4;
+  // system is the system instruction.
+  string system = 5;
+  // user is the user prompt.
+  string user = 6;
+}
+
+// CompleteResponse carries the provider's reply.
+message CompleteResponse {
+  // text is the model's completion.
+  string text = 1;
+}
+
+// ResolveSecretRequest asks a static secret source for a value.
+message ResolveSecretRequest {
+  // kind is the declared secret source kind.
+  string kind = 1;
+  // config is the source's config string, whose meaning the plugin defines.
+  string config = 2;
+}
+
+// ResolveSecretResponse carries the resolved value.
+message ResolveSecretResponse {
+  // value is the secret value.
+  string value = 1;
+}
+
+// MintSecretRequest asks a dynamic secret source to mint a short-lived value.
+message MintSecretRequest {
+  // kind is the declared dynamic secret source kind.
+  string kind = 1;
+  // config is the source's config string, whose meaning the plugin defines.
+  string config = 2;
+}
+
+// MintSecretResponse carries the minted value and its lease.
+message MintSecretResponse {
+  // value is the minted secret value.
+  string value = 1;
+  // lease_id names the lease for RevokeLease, empty when the secret only expires on its own TTL.
+  string lease_id = 2;
+}
+
+// RevokeLeaseRequest ends a minted secret early.
+message RevokeLeaseRequest {
+  // lease_id is the lease to revoke, as returned by MintSecret.
+  string lease_id = 1;
+}
+
+// RevokeLeaseResponse acknowledges a revocation.
+message RevokeLeaseResponse {}

@@ -23,6 +23,7 @@ import (
 	"github.com/dcadolph/yardmaster/internal/auth"
 	"github.com/dcadolph/yardmaster/internal/credential"
 	"github.com/dcadolph/yardmaster/internal/dispatch"
+	"github.com/dcadolph/yardmaster/internal/extplugin"
 	"github.com/dcadolph/yardmaster/internal/grant"
 	"github.com/dcadolph/yardmaster/internal/inventory"
 	"github.com/dcadolph/yardmaster/internal/invsource"
@@ -95,6 +96,9 @@ var serveReadOnly bool
 
 // serveMatrixCap holds the value of the --matrix-cap flag.
 var serveMatrixCap int
+
+// servePluginsDir holds the value of the --plugins-dir flag.
+var servePluginsDir string
 
 // serveOIDCIssuer, serveOIDCClientID, serveOIDCRedirectURL, and serveOIDCDefaultRole hold the
 // OpenID Connect single sign-on flags. The client secret comes from YARDMASTER_OIDC_CLIENT_SECRET.
@@ -203,6 +207,15 @@ func containerLimitsFromFlags() roundhouse.ContainerLimits {
 	}
 }
 
+// pluginsDir returns the plugins directory to load: the flag when set, else the
+// YARDMASTER_PLUGINS_DIR environment variable. Empty means no plugins.
+func pluginsDir(flagValue string) string {
+	if flagValue != "" {
+		return flagValue
+	}
+	return os.Getenv("YARDMASTER_PLUGINS_DIR")
+}
+
 // parseRoleMap turns repeated groupDN=role entries into a lowercased group to role map, so a directory
 // group can drive a user's role. It splits on the last equals sign, since a group DN itself contains
 // equals signs, and drops an entry with an unknown role.
@@ -253,6 +266,8 @@ func init() {
 		"Reject every mutating request, for a safely exposable instance.")
 	serveCmd.Flags().IntVar(&serveMatrixCap, "matrix-cap", server.DefaultMatrixCap,
 		"Largest host matrix, in cells, the UI draws before showing a notice. 0 means no limit.")
+	serveCmd.Flags().StringVar(&servePluginsDir, "plugins-dir", "",
+		"Directory of extension plugin binaries to load at startup. Empty loads none. Also YARDMASTER_PLUGINS_DIR.")
 	serveCmd.Flags().StringVar(&serveOIDCIssuer, "oidc-issuer", "",
 		"OpenID Connect issuer URL to enable single sign-on. Empty leaves SSO off.")
 	serveCmd.Flags().StringVar(&serveOIDCClientID, "oidc-client-id", "", "OIDC client id.")
@@ -470,6 +485,12 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
+
+	closePlugins, err := extplugin.Load(pluginsDir(servePluginsDir), log)
+	if err != nil {
+		return fmt.Errorf("load plugins: %w", err)
+	}
+	defer closePlugins()
 
 	hub := live.NewHub()
 	runner := roundhouse.NewSelectiveRunner(serveAllowContainerEE, containerLimitsFromFlags())
