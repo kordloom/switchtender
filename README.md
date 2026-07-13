@@ -24,10 +24,10 @@
     alt="License"></a>
 </p>
 
-One Go binary that runs Ansible, Terraform, Bash, Python, and Go across your fleet. Watch every host
-and task as a live status matrix instead of a text scroll, split big jobs across parallel shards,
-and prove exactly what ran and who approved it. No Kubernetes operator, no Postgres, no Redis, no
-message bus. One process, one SQLite file.
+Run everything. Watch every host. Prove every change. One Go binary runs Ansible, Terraform, Bash,
+Python, and Go across your fleet, paints every run live as a host-by-task matrix instead of a text
+scroll, splits big jobs across parallel shards, and proves exactly what ran and who approved it.
+No Kubernetes operator, no Postgres, no Redis, no message bus. One process, one SQLite file.
 
 ## Contents
 

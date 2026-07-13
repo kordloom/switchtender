@@ -111,7 +111,7 @@ code, pre { font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, 
 }
 h1 {
 	font-family: "Space Grotesk", sans-serif; font-weight: 700;
-	font-size: clamp(40px, 6vw, 66px); line-height: 1.03; letter-spacing: -0.02em;
+	font-size: clamp(34px, 4.4vw, 54px); line-height: 1.06; letter-spacing: -0.02em;
 }
 .grad {
 	background: linear-gradient(110deg, #eafff6 0%, var(--accent) 45%, var(--accent-2) 100%);
