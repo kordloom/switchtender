@@ -146,7 +146,10 @@ func writeSitemap(slugs []string) error {
 	var b strings.Builder
 	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>` + "\n")
 	b.WriteString(`<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">` + "\n")
-	urls := []string{"https://yardmaster.dev/", "https://yardmaster.dev/get-started"}
+	urls := []string{
+		"https://yardmaster.dev/", "https://yardmaster.dev/get-started",
+		"https://yardmaster.dev/awx-alternative", "https://yardmaster.dev/semaphore-alternative",
+	}
 	for _, slug := range slugs {
 		urls = append(urls, canonicalFor(slug))
 	}

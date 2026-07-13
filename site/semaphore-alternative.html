@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Semaphore UI alternative with governance built in · Yardmaster</title>
+	<meta name="description" content="Yardmaster is an open source alternative to Ansible Semaphore: the same one-binary simplicity, plus a live host-by-task matrix, five tools including Python and Go, RBAC with per-object grants, tamper-evident audit, and a one-command Semaphore import.">
+	<link rel="canonical" href="https://yardmaster.dev/semaphore-alternative">
+	<meta property="og:title" content="Semaphore UI alternative with governance built in · Yardmaster">
+	<meta property="og:description" content="Semaphore's simplicity with a control plane on top: live run matrix, five tools, enforced approvals, provable audit, and a one-command import of your Semaphore backup.">
+	<meta property="og:type" content="website">
+	<meta property="og:url" content="https://yardmaster.dev/semaphore-alternative">
+	<meta property="og:image" content="https://yardmaster.dev/assets/screenshot-fleet.png?v=3">
+	<meta name="twitter:card" content="summary_large_image">
+	<link rel="icon" href="/favicon.ico" sizes="any">
+	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
+	<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="/styles.css?v=7">
+</head>
+<body>
+	<div class="bg-mesh" aria-hidden="true"></div>
+	<div class="bg-grid" aria-hidden="true"></div>
+
+	<header class="nav" id="nav">
+		<div class="wrap nav-inner">
+			<a class="brand" href="/" aria-label="Yardmaster"><img src="/assets/logo-train-tracks-dark.png" alt="Yardmaster" class="brand-train"><span class="brand-word">Yardmaster</span></a>
+			<nav class="nav-links">
+				<a href="/#features">Features</a>
+				<a href="/#compare">Compare</a>
+				<a href="/docs/">Docs</a>
+			</nav>
+			<div class="nav-cta">
+				<a class="ghost" href="https://github.com/dcadolph/yardmaster">GitHub</a>
+				<a class="btn" href="/get-started">Get started</a>
+			</div>
+			<button class="nav-toggle" id="nav-toggle" aria-label="Menu">
+				<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="7" x2="21" y2="7"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="17" x2="21" y2="17"/></svg>
+			</button>
+		</div>
+	</header>
+
+	<main>
+		<section class="wrap gs-hero reveal">
+			<span class="eyebrow">Ansible Semaphore alternative</span>
+			<h1>Semaphore's simplicity.<br><span class="grad">A control plane on top.</span></h1>
+			<p class="lede">Semaphore proved a one-binary Ansible UI is the right shape. Yardmaster keeps that shape and adds what teams outgrow it for: a live host-by-task matrix instead of scrollback, Python and Go alongside Ansible, Terraform, and Bash, RBAC and teams in the open source core, enforced approvals, and an audit trail you can prove offline. Your Semaphore backup imports in one command.</p>
+			<div class="hero-cta">
+				<a class="btn big" href="/get-started">Get started</a>
+				<a class="ghost big" href="/docs/migration">Read the migration guide</a>
+			</div>
+		</section>
+
+		<section class="section wrap">
+			<div class="section-head reveal">
+				<h2>Where Semaphore stops</h2>
+				<p>Semaphore is a fine task runner. These are the walls teams hit as the fleet grows.</p>
+			</div>
+			<div class="cards">
+				<article class="card reveal">
+					<h3>Runs are scrollback</h3>
+					<p>A Semaphore run is a text stream. Yardmaster paints every host and task live as a matrix, with the failed host highlighted, per-task timing, and drill-down. Six hundred hosts stay readable.</p>
+				</article>
+				<article class="card reveal">
+					<h3>Governance is a paid tier or missing</h3>
+					<p>Semaphore gates RBAC behind its enterprise tier and has no approval gates or provable audit. Yardmaster ships roles, teams, per-object grants, policy-enforced approvals, and a tamper-evident hash-chained audit trail in the open source core.</p>
+				</article>
+				<article class="card reveal">
+					<h3>The fleet has no memory</h3>
+					<p>Semaphore forgets a run the moment it ends. Yardmaster tracks every host across runs: flaky hosts flagged, durations trended, drift detected from a dry run, and big jobs split across shards balanced by measured host cost.</p>
+				</article>
+			</div>
+		</section>
+
+		<section class="section wrap">
+			<div class="section-head reveal">
+				<h2>Feature for feature</h2>
+				<p>The full three-way table including AWX is on the <a href="/docs/comparison">comparison page</a>.</p>
+			</div>
+			<div class="table-wrap reveal">
+				<table class="compare">
+					<thead>
+						<tr><th>Capability</th><th class="us">Yardmaster</th><th>Semaphore</th></tr>
+					</thead>
+					<tbody>
+						<tr><td>Deploy without Kubernetes</td><td class="us"><i class="y"></i></td><td><i class="y"></i></td></tr>
+						<tr><td>Live host-by-task matrix</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
+						<tr><td>Tools</td><td class="us">Ansible, Terraform, Bash, Python, Go</td><td><span class="muted">No Python or Go</span></td></tr>
+						<tr><td>RBAC and teams in open source</td><td class="us"><i class="y"></i></td><td><span class="muted">Enterprise tier</span></td></tr>
+						<tr><td>Per-object grants</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
+						<tr><td>Enforced approval policies</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
+						<tr><td>Tamper-evident, signed audit</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
+						<tr><td>Duration-balanced job splitting</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
+						<tr><td>Fleet memory: flaky hosts, trends</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
+						<tr><td>Drift detection from a dry run</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
+						<tr><td>Drag-and-drop workflow editor</td><td class="us"><i class="y"></i></td><td><span class="muted">On the roadmap</span></td></tr>
+						<tr><td>Distributed workers in open source</td><td class="us"><i class="y"></i></td><td><span class="muted">Paid tier</span></td></tr>
+						<tr><td>Active-active HA on PostgreSQL</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
+						<tr><td>Advisory AI triage and fleet answers</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
+						<tr><td>Import from the other side</td><td class="us">One command</td><td><i class="n"></i></td></tr>
+					</tbody>
+				</table>
+			</div>
+		</section>
+
+		<section class="section wrap">
+			<div class="section-head reveal">
+				<h2>Where Semaphore is still ahead</h2>
+				<p>Honesty first: Semaphore has years of production use, a large installed base, packaged distributions everywhere, and OpenTofu support Yardmaster does not have today. It is a solid tool, and if a minimal task runner is all you need, it may stay the right one. Yardmaster is for the day your fleet needs visibility and governance too.</p>
+			</div>
+		</section>
+
+		<section class="section wrap">
+			<div class="section-head reveal">
+				<h2>Move in one command</h2>
+				<p>Export a Semaphore backup, import it into Yardmaster. Projects, inventories, templates, and schedules come across, with a dry run first so you see the plan before anything is written.</p>
+			</div>
+			<div class="gs-steps">
+				<ol>
+					<li class="gs-step reveal">
+						<div class="gs-num">1</div>
+						<div class="gs-body">
+							<h3>Preview the import</h3>
+							<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>yardmaster import semaphore backup.json --db yardmaster.db</code></pre></div>
+						</div>
+					</li>
+					<li class="gs-step reveal">
+						<div class="gs-num">2</div>
+						<div class="gs-body">
+							<h3>Apply it</h3>
+							<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>yardmaster import semaphore backup.json --db yardmaster.db --apply</code></pre></div>
+						</div>
+					</li>
+				</ol>
+			</div>
+			<p class="reveal" style="margin-top: 18px;">The <a href="/docs/migration">migration reference</a> maps every Semaphore concept to its Yardmaster equivalent.</p>
+		</section>
+
+		<section class="cta wrap reveal">
+			<h2>Same one binary. More railway.</h2>
+			<div class="hero-cta">
+				<a class="btn big" href="/get-started">Get started</a>
+				<a class="ghost big" href="https://github.com/dcadolph/yardmaster">View on GitHub</a>
+			</div>
+		</section>
+	</main>
+
+	<footer class="footer">
+		<div class="wrap footer-inner">
+			<img src="/assets/logo-letters-dark.png" alt="Yardmaster" class="foot-logo">
+			<nav>
+				<a href="https://github.com/dcadolph/yardmaster">GitHub</a>
+				<a href="/docs/">Docs</a>
+				<a href="/docs/comparison">Compare</a>
+				<a href="/awx-alternative">vs AWX</a>
+				<a href="https://github.com/dcadolph/yardmaster/blob/main/LICENSE">License</a>
+			</nav>
+			<span class="foot-note">Open source · BSL 1.1 · self-host free</span>
+		</div>
+	</footer>
+	<script src="/app.js?v=5"></script>
+</body>
+</html>

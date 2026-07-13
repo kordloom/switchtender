@@ -2,6 +2,8 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url><loc>https://yardmaster.dev/</loc></url>
   <url><loc>https://yardmaster.dev/get-started</loc></url>
+  <url><loc>https://yardmaster.dev/awx-alternative</loc></url>
+  <url><loc>https://yardmaster.dev/semaphore-alternative</loc></url>
   <url><loc>https://yardmaster.dev/docs/</loc></url>
   <url><loc>https://yardmaster.dev/docs/quickstart</loc></url>
   <url><loc>https://yardmaster.dev/docs/faq</loc></url>
