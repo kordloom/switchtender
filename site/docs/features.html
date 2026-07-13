@@ -198,6 +198,14 @@
 <td>Describe a run on the runs page and the provider turns it into a validated run the server builds. It is born held for approval, stamped with your exact words, and runs nothing until an admin reviews the generated command and releases it. The audit trail records the request and the decision.</td>
 </tr>
 <tr>
+<td>Go SDK</td>
+<td>One public package registers new execution tools, AI providers, secret engines, and notification channels, compiled into the binary. A registered tool validates, executes, masks, and audits like a built-in. See <a href="/docs/sdk">Extend in Go</a>.</td>
+</tr>
+<tr>
+<td>Drop-in plugins</td>
+<td>The same extension builds as its own binary and loads from <code>--plugins-dir</code> on a stock release, no recompile. Plugins speak gRPC over a local socket with mutual TLS, supervised by the server, on the server and on workers.</td>
+</tr>
+<tr>
 <td>Guided tours</td>
 <td>A tour launcher in the top bar walks the product, the pitch, and the migration path step by step in the live UI, fully keyboard accessible.</td>
 </tr>
