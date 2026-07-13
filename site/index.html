@@ -32,7 +32,7 @@
 	<link rel="preconnect" href="https://fonts.googleapis.com">
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-	<link rel="stylesheet" href="/styles.css?v=10">
+	<link rel="stylesheet" href="/styles.css?v=11">
 </head>
 <body>
 	<div class="bg-mesh" aria-hidden="true"></div>
@@ -99,9 +99,9 @@
 		<section class="section wrap" id="features">
 			<div class="section-head reveal">
 				<h2>Everything AWX bolts on, built in.</h2>
-				<p>Runs you read like a dashboard. Jobs that balance themselves. A fleet that remembers. A control plane that proves it. Advisory AI you can plug in, on your own model or key. One binary.</p>
+				<p>Runs you read like a dashboard. Jobs that balance themselves. A fleet that remembers. A control plane that proves it. Optional AI you can plug in, on your own model or key. One binary.</p>
 			</div>
-			<div class="cards">
+			<div class="cards cards-wide">
 				<article class="card reveal">
 					<div class="ic ic-matrix"></div>
 					<h3>Live host-by-task matrix</h3>
@@ -123,6 +123,11 @@
 					<p>Flaky hosts flagged, durations trended, every host's history kept across runs. AWX and Semaphore forget the moment a run ends.</p>
 				</article>
 				<article class="card reveal">
+					<div class="ic ic-editor"></div>
+					<h3>Visual workflow editor</h3>
+					<p>Drag Terraform, Ansible, Python, and Bash steps into one graph. Fan out, fan in, retry any step, run the whole pipeline. No YAML by hand.</p>
+				</article>
+				<article class="card reveal">
 					<div class="ic ic-audit"></div>
 					<h3>Provable audit</h3>
 					<p>Every change is linked into a tamper-evident SHA-256 hash chain. Export a signed copy and verify it offline, without trusting the server.</p>
@@ -136,6 +141,11 @@
 					<div class="ic ic-gate"></div>
 					<h3>Enforced approvals</h3>
 					<p>Hold risky runs for sign-off, gated by policy on tool, command, or target. Operators request, admins release. No skipping the gate.</p>
+				</article>
+				<article class="card reveal">
+					<div class="ic ic-ai"></div>
+					<h3>Optional advisory AI</h3>
+					<p>Off by default. Switch it on to triage a failure, answer a fleet question, or draft a run from a sentence. It proposes, never executes. Local Ollama or your own key.</p>
 				</article>
 				<article class="card reveal">
 					<div class="ic ic-migrate"></div>
@@ -190,8 +200,9 @@
 
 		<section class="section wrap" id="ai">
 			<div class="section-head reveal">
-				<h2>AI proposes. The control plane governs.</h2>
-				<p>The AI proposes: a diagnosis for the failed run, an answer about your fleet, a drafted run from one plain-English sentence. The control plane governs: every draft waits at the same approval gate you do. Advisory only, off by default, never in the execution path. Run it locally with Ollama or bring a cloud key. Secrets are masked before a model sees a byte.</p>
+				<span class="eyebrow">Optional layer · off by default</span>
+				<h2>None of this needs AI.<br>Add it for an edge.</h2>
+				<p>Everything above runs with no model anywhere near it: the live matrix, the balanced splits, the governance, the audit chain. Advisory AI is a layer you add, never a dependency. Switch it on and it proposes a diagnosis for a failed run, answers a plain-English question about your fleet, or drafts a run from a single sentence. That is all it does. AI proposes, the control plane governs: every draft waits at the same approval gate you do, off by default, never in the execution path. Run it locally with Ollama or bring your own cloud key, and secrets are masked before a model sees a byte.</p>
 			</div>
 			<div class="duo">
 				<figure class="window reveal">

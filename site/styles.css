@@ -176,6 +176,7 @@ h1 {
 
 /* Feature cards */
 .cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+.cards-wide { grid-template-columns: repeat(5, 1fr); }
 .card {
 	grid-column: span 1; padding: 26px 22px; border-radius: var(--radius);
 	background: var(--surface); border: 1px solid var(--border);
@@ -198,6 +199,8 @@ h1 {
 .ic-secret { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' fill='none' stroke='%2334d399' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='8' cy='15' r='4'/%3E%3Cpath d='M11 12l9-9M17 3l3 3M15 5l2 2'/%3E%3C/svg%3E"); }
 .ic-gate { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' fill='none' stroke='%2334d399' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3l7 3v5c0 4-3 7-7 9-4-2-7-5-7-9V6z'/%3E%3Cline x1='12' y1='9' x2='12' y2='13'/%3E%3Ccircle cx='12' cy='16' r='.6' fill='%2334d399'/%3E%3C/svg%3E"); }
 .ic-migrate { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' fill='none' stroke='%2334d399' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 12h12'/%3E%3Cpolyline points='12 8 16 12 12 16'/%3E%3Cpath d='M16 4h3a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-3'/%3E%3C/svg%3E"); }
+.ic-editor { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' fill='none' stroke='%2334d399' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='5' cy='6' r='2.5'/%3E%3Ccircle cx='5' cy='18' r='2.5'/%3E%3Ccircle cx='19' cy='12' r='2.5'/%3E%3Cpath d='M7.5 6.9 16.5 11M7.5 17.1 16.5 13'/%3E%3C/svg%3E"); }
+.ic-ai { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' fill='none' stroke='%2334d399' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 4l1.6 4.4 4.4 1.6-4.4 1.6L12 16l-1.6-4.4L6 10l4.4-1.6z'/%3E%3Cpath d='M18.5 15.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z'/%3E%3C/svg%3E"); }
 
 /* Governance */
 .governance { display: grid; grid-template-columns: 1fr 1fr; gap: 56px; align-items: center; }
@@ -321,6 +324,9 @@ h1 {
 	.window { transform: none; }
 	.governance { grid-template-columns: 1fr; }
 	.cards { grid-template-columns: repeat(2, 1fr); }
+}
+@media (min-width: 901px) and (max-width: 1120px) {
+	.cards-wide { grid-template-columns: repeat(3, 1fr); }
 }
 @media (max-width: 560px) {
 	.strip { grid-template-columns: repeat(2, 1fr); gap: 26px; }
