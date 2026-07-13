@@ -176,7 +176,6 @@ h1 {
 
 /* Feature cards */
 .cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
-.cards-wide { grid-template-columns: repeat(5, 1fr); }
 .card {
 	grid-column: span 1; padding: 26px 22px; border-radius: var(--radius);
 	background: var(--surface); border: 1px solid var(--border);
@@ -201,6 +200,8 @@ h1 {
 .ic-migrate { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' fill='none' stroke='%2334d399' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 12h12'/%3E%3Cpolyline points='12 8 16 12 12 16'/%3E%3Cpath d='M16 4h3a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-3'/%3E%3C/svg%3E"); }
 .ic-editor { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' fill='none' stroke='%2334d399' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='5' cy='6' r='2.5'/%3E%3Ccircle cx='5' cy='18' r='2.5'/%3E%3Ccircle cx='19' cy='12' r='2.5'/%3E%3Cpath d='M7.5 6.9 16.5 11M7.5 17.1 16.5 13'/%3E%3C/svg%3E"); }
 .ic-ai { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' fill='none' stroke='%2334d399' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 4l1.6 4.4 4.4 1.6-4.4 1.6L12 16l-1.6-4.4L6 10l4.4-1.6z'/%3E%3Cpath d='M18.5 15.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z'/%3E%3C/svg%3E"); }
+.ic-drift { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' fill='none' stroke='%2334d399' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 8h13'/%3E%3Cpolyline points='14 5 17 8 14 11'/%3E%3Cpath d='M20 16H7'/%3E%3Cpolyline points='10 13 7 16 10 19'/%3E%3C/svg%3E"); }
+.ic-roles { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' fill='none' stroke='%2334d399' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='9' cy='8' r='3'/%3E%3Cpath d='M4 19c0-2.8 2.2-5 5-5s5 2.2 5 5'/%3E%3Cpath d='M16 6.2a3 3 0 0 1 0 5.6'/%3E%3Cpath d='M15.5 14.2c2.2.5 3.5 2.4 3.5 4.8'/%3E%3C/svg%3E"); }
 
 /* Governance */
 .governance { display: grid; grid-template-columns: 1fr 1fr; gap: 56px; align-items: center; }
@@ -324,9 +325,6 @@ h1 {
 	.window { transform: none; }
 	.governance { grid-template-columns: 1fr; }
 	.cards { grid-template-columns: repeat(2, 1fr); }
-}
-@media (min-width: 901px) and (max-width: 1120px) {
-	.cards-wide { grid-template-columns: repeat(3, 1fr); }
 }
 @media (max-width: 560px) {
 	.strip { grid-template-columns: repeat(2, 1fr); gap: 26px; }
