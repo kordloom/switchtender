@@ -47,6 +47,7 @@
 				<a href="#features">Features</a>
 				<a href="#governance">Governance</a>
 				<a href="#ai">AI</a>
+				<a href="#sdk">SDK</a>
 				<a href="#compare">Compare</a>
 				<a href="/docs/">Docs</a>
 			</nav>
@@ -223,6 +224,26 @@
 					<div class="window-bar"><span></span><span></span><span></span><em>yardmaster · ask your fleet</em></div>
 					<img src="/assets/screenshot-ask.png?v=5" alt="The overview page answering a plain-language question about which hosts are failing and where to start" loading="lazy">
 				</figure>
+			</div>
+		</section>
+
+		<section class="section wrap" id="sdk">
+			<div class="section-head reveal">
+				<span class="eyebrow">Extensibility · new in 1.7</span>
+				<h2>Extend it in Go</h2>
+				<p>Extend Yardmaster in Go through a stable SDK: add tools, AI providers, secret backends, and notification channels. One import, one registration call per seam, at startup. A registered tool submits, validates, and audits like a built-in, and a registered channel gets every terminal run with secret-carrying vars already redacted. Compile your extension into the binary and the control plane treats it as its own.</p>
+			</div>
+			<div class="code reveal">
+				<button class="copy" aria-label="Copy">Copy</button>
+				<pre><code><span class="c">// your extension, compiled into the yardmaster binary</span>
+import "github.com/dcadolph/yardmaster/sdk"
+
+func init() {
+	sdk.RegisterTool("packer", sdk.ToolRunnerFunc(runPacker))
+	sdk.RegisterNotifier("pagerduty", sdk.NotifierFunc(page))
+	sdk.RegisterSecretSource("aws_sm", resolveSecret)
+	sdk.RegisterAIProvider("bedrock", newBedrock)
+}</code></pre>
 			</div>
 		</section>
 
