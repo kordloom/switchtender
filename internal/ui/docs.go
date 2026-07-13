@@ -15,9 +15,10 @@ var docOrder = []string{
 	"README", "quickstart", "faq", "switching-from-awx",
 	"tutorials", "tutorial-run-a-job", "tutorial-save-a-template", "tutorial-schedule-a-job",
 	"tutorial-set-a-secret", "tutorial-migrate",
-	"tool-bash", "tool-terraform", "tool-python", "tool-go",
-	"concepts", "configuration", "desktop", "features", "secrets", "drift", "api", "migration",
-	"comparison",
+	"tool-bash", "tool-terraform", "tool-opentofu", "tool-python", "tool-powershell", "tool-go",
+	"sdk",
+	"concepts", "reliability", "configuration", "desktop", "features", "secrets", "drift", "api",
+	"migration", "comparison",
 }
 
 // mdLinkPattern matches links between documentation pages, which are relative markdown file names on

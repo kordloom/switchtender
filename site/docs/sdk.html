@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Extend Yardmaster in Go · Yardmaster docs</title>
+	<meta name="description" content="Yardmaster's SDK: register execution tools, AI providers, secret engines, and notification channels from one Go package, and compile a binary that is Yardmaster plus your extension.">
+	<link rel="canonical" href="https://yardmaster.dev/docs/sdk">
+	<meta property="og:title" content="Extend Yardmaster in Go · Yardmaster docs">
+	<meta property="og:description" content="Yardmaster's SDK: register execution tools, AI providers, secret engines, and notification channels from one Go package, and compile a binary that is Yardmaster plus your extension.">
+	<meta property="og:type" content="article">
+	<meta property="og:url" content="https://yardmaster.dev/docs/sdk">
+	<link rel="icon" href="/favicon.ico" sizes="any">
+	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
+	<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="/docs.css?v=1">
+</head>
+<body>
+	<header class="dnav">
+		<a class="brand" href="/"><img src="/assets/logo-train-tracks-dark.png" alt="Yardmaster" class="brand-train"><span class="brand-word">Yardmaster</span></a>
+		<span class="dnav-tag">Docs</span>
+		<nav class="dnav-links">
+			<a href="/">Home</a>
+			<a href="/#compare">Compare</a>
+			<a href="https://github.com/dcadolph/yardmaster">GitHub</a>
+		</nav>
+	</header>
+	<div class="dshell">
+		<aside class="dside">
+			<nav>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/sdk" class="active">Extend Yardmaster in Go</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">Yardmaster compared to AWX and Semaphore</a>
+			</nav>
+		</aside>
+		<main class="dcontent prose">
+			<h1 id="extend-yardmaster-in-go">Extend Yardmaster in Go</h1>
+<p>Yardmaster's seams are public. Import one package, <code>github.com/dcadolph/yardmaster/sdk</code>, register
+what you built, and compile a binary that is Yardmaster plus your extension. A registered tool
+submits, validates, executes, and audits like a built-in. The SDK covers four kinds of extension:</p>
+<ul>
+<li><strong>Execution tools.</strong> <code>RegisterTool</code> adds a tool beside ansible, bash, terraform, opentofu,
+python, powershell, and go. Your runner receives the run's command and streams output that lands
+in the run log, masked and audited like any other run.</li>
+<li><strong>AI providers.</strong> <code>RegisterAIProvider</code> adds a model backend beside ollama, anthropic, and openai.
+Advisory only: a provider produces text a human reads, never an action, so it stays out of the
+execution path.</li>
+<li><strong>Notification channels.</strong> <code>RegisterNotifier</code> delivers every terminal top-level run to your
+channel, beside the built-in webhook, Slack, and email delivery. Extra vars are redacted before
+delivery, so survey answers and template vars that can carry secrets never leave the server.</li>
+<li><strong>Secret engines.</strong> <code>RegisterSecretSource</code> adds a static engine such as AWS Secrets Manager or
+1Password. <code>RegisterDynamicSecretSource</code> adds a dynamic engine that mints a short-lived
+credential on each read and returns a lease Yardmaster revokes when the run ends.</li>
+</ul>
+<h2 id="the-rules">The rules</h2>
+<p>Register from an <code>init</code> function or from <code>main</code> before the server starts. Registries are read
+while serving and never written after, so registration is a startup step, not a runtime one. An
+empty, duplicate, or reserved name panics at boot, where the mistake is cheap, instead of failing
+on first use.</p>
+<p>An extension compiles into the binary. There is no plugin directory to drop a file into; the trade
+is a single static binary with no version skew between the server and its extensions.</p>
+<h2 id="a-complete-extension">A complete extension</h2>
+<p>Two files make a Yardmaster with a custom <code>hello</code> tool.</p>
+<p><code>go.mod</code>:</p>
+<pre><code>module example.com/yardmaster-hello
+
+go 1.26.4
+
+require github.com/dcadolph/yardmaster v1.7.0
+</code></pre>
+<p><code>main.go</code>:</p>
+<pre><code>// Package main builds a Yardmaster server with a custom tool compiled in through the SDK.
+package main
+
+import (
+    &quot;context&quot;
+    &quot;fmt&quot;
+    &quot;io&quot;
+
+    &quot;github.com/dcadolph/yardmaster/cmd&quot;
+    &quot;github.com/dcadolph/yardmaster/sdk&quot;
+)
+
+// init registers the tool before the server starts.
+func init() {
+    sdk.RegisterTool(&quot;hello&quot;, sdk.ToolRunnerFunc(
+        func(_ context.Context, spec sdk.ToolSpec, out io.Writer) (sdk.ToolResult, error) {
+            fmt.Fprintf(out, &quot;hello from an external plugin: %s\n&quot;, spec.Command)
+            return sdk.ToolResult{ExitCode: 0}, nil
+        }))
+}
+
+// main runs the stock Yardmaster CLI with the extension compiled in.
+func main() {
+    cmd.Execute(nil)
+}
+</code></pre>
+<p>Build it, run it, and submit a run that names the new tool:</p>
+<pre><code>go mod tidy &amp;&amp; go build -o yardmaster-hello .
+./yardmaster-hello serve --addr :8080 --db yard.db
+
+curl -s -X POST localhost:8080/v1/runs \
+  -H 'Content-Type: application/json' \
+  -d '{&quot;tool&quot;:&quot;hello&quot;,&quot;command&quot;:&quot;world&quot;}'
+</code></pre>
+<p>The run is accepted, executed, and audited like any built-in tool, and its log holds the runner's
+output:</p>
+<pre><code>curl -s localhost:8080/v1/runs/&lt;id&gt;/logs
+hello from an external plugin: world
+</code></pre>
+<p>The binary keeps every stock command: <code>serve</code>, <code>worker</code>, <code>desktop</code>, <code>demo</code>, <code>import</code>, <code>token</code>,
+<code>user</code>, and <code>audit</code>. Passing <code>nil</code> to <code>cmd.Execute</code> skips the embedded documentation pages in the
+UI; embed your own file tree there to serve them.</p>
+<h2 id="the-seams-in-detail">The seams in detail</h2>
+<h3 id="execution-tools">Execution tools</h3>
+<p>A <code>ToolRunner</code> receives the run as a <code>ToolSpec</code> and a writer for its output. <code>Command</code> carries the
+tool's input, the same field the bash and python tools read their script from. <code>DryRun</code> asks for
+the tool's no-change mode. <code>ExtraVars</code>, <code>Env</code>, and <code>Dir</code> carry the run's variables, environment,
+and working directory. Return the process exit code in <code>ToolResult</code>; return an error only when the
+tool could not be launched or supervised.</p>
+<h3 id="notification-channels">Notification channels</h3>
+<p>A <code>Notifier</code> receives each top-level run once it reaches a terminal state: succeeded, failed,
+canceled, interrupted, or rejected. Delivery happens off the executor path with a bounded timeout,
+and a failed delivery is logged and dropped, so a slow channel cannot stall runs.</p>
+<h3 id="ai-providers">AI providers</h3>
+<p>An <code>AIProviderFactory</code> builds a provider from three settings: the model name, the endpoint URL,
+and an API key. Validate what you require and fail at startup, not on first use. The provider's
+one method turns a system instruction and a user prompt into text.</p>
+<h3 id="secret-engines">Secret engines</h3>
+<p>A <code>SecretResolver</code> fetches a value from a source's config at run time. A <code>SecretMinter</code> does the
+same for a dynamic engine and also returns a lease built with <code>NewSecretLease</code>, naming the engine
+and capturing how to revoke the minted credential; pass a nil revoke func when the secret only
+expires on the engine's own TTL.</p>
+<p>See also the <a href="/docs/secrets">secrets guide</a>, <a href="/docs/tool-bash">Bash runs</a> for how a tool's command and
+variables behave, and the <a href="/docs/api">HTTP API</a> for submitting runs to your new tool.</p>
+
+		</main>
+	</div>
+	<script>document.addEventListener("click",e=>{const a=e.target.closest(".dside a");if(a)document.querySelector(".dside")?.classList.remove("open")});</script>
+</body>
+</html>

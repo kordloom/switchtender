@@ -127,6 +127,7 @@ The docs live in [docs/](docs/) and also render inside the app at `/ui/docs`.
 | [Configuration](docs/configuration.md) | Every command, flag, and environment variable |
 | [Desktop](docs/desktop.md) | Run Yardmaster as a local desktop app |
 | [Features](docs/features.md) | The full capability list |
+| [Extend in Go](docs/sdk.md) | The SDK: add tools, AI providers, secret engines, and notifiers |
 | [HTTP API](docs/api.md) | Every endpoint the server exposes |
 | [Migration](docs/migration.md) | Moving off AWX or Semaphore in detail |
 | [Comparison](docs/comparison.md) | How Yardmaster compares to AWX and Semaphore |
