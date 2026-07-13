@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -50,6 +51,54 @@ func TestNew(t *testing.T) {
 	}
 }
 
+// TestRegister adds a provider through the registry and confirms New builds it, then that an empty
+// or duplicate name panics. It does not call t.Parallel: it writes the package registry, so it runs
+// in the sequential phase before the parallel tests that read the registry resume.
+func TestRegister(t *testing.T) {
+	fake := ProviderFunc(func(context.Context, string, string) (string, error) { return "ok", nil })
+	Register("faketest", func(_, _, _ string) (Provider, error) { return fake, nil })
+
+	p, err := New("faketest", "", "", "")
+	if err != nil {
+		t.Fatalf("New(faketest) error = %v", err)
+	}
+	if p == nil {
+		t.Fatal("New(faketest) = nil, want the registered provider")
+	}
+
+	tests := []struct {
+		Name string
+		Reg  string
+	}{ // Test 0: Empty name is a programming error.
+		{Name: "empty name", Reg: ""},
+		// Test 1: A name that is already taken is a programming error.
+		{Name: "duplicate name", Reg: "ollama"},
+	}
+	for testNum, test := range tests {
+		t.Run(test.Name, func(t *testing.T) {
+			defer func() {
+				if recover() == nil {
+					t.Errorf("test %d: Register(%q) did not panic", testNum, test.Reg)
+				}
+			}()
+			Register(test.Reg, func(_, _, _ string) (Provider, error) { return nil, nil })
+		})
+	}
+}
+
+// TestNames lists the registered providers, sorted, including the built-ins.
+func TestNames(t *testing.T) {
+	got := Names()
+	for _, want := range []string{"anthropic", "ollama", "openai"} {
+		if !slices.Contains(got, want) {
+			t.Errorf("Names() = %v, missing %q", got, want)
+		}
+	}
+	if !slices.IsSorted(got) {
+		t.Errorf("Names() = %v, want sorted", got)
+	}
+}
+
 func TestOllamaComplete(t *testing.T) {
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -83,9 +132,9 @@ func TestAnthropicComplete(t *testing.T) {
 			t.Error("missing anthropic-version header")
 		}
 		var req struct {
-			Model     string `json:"model"`
-			MaxTokens int    `json:"max_tokens"`
-			System    string `json:"system"`
+			Model     string                           `json:"model"`
+			MaxTokens int                              `json:"max_tokens"`
+			System    string                           `json:"system"`
 			Messages  []struct{ Role, Content string } `json:"messages"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&req)
@@ -359,7 +408,7 @@ func TestOpenAIComplete(t *testing.T) {
 			t.Errorf("Authorization = %q, want the bearer key", r.Header.Get("Authorization"))
 		}
 		var req struct {
-			Model    string `json:"model"`
+			Model    string                           `json:"model"`
 			Messages []struct{ Role, Content string } `json:"messages"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&req)

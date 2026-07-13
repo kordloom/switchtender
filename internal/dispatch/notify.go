@@ -38,6 +38,31 @@ func (d *Dispatcher) notify(r *run.Run) {
 	d.notifyWebhooks(r)
 	d.notifySlack(r)
 	d.notifyEmail(r)
+	d.notifyExtra(r)
+}
+
+// notifyExtra fans a terminal top-level run out to every registered Notifier, off the executor
+// path. The run is redacted of extra vars first, since a registered channel is external and must
+// not receive survey answers or template vars that can carry secrets. Each delivery is bounded and
+// its failure logged and dropped, like the built-in channels.
+func (d *Dispatcher) notifyExtra(r *run.Run) {
+	if len(notifiers) == 0 {
+		return
+	}
+	redacted := *r
+	redacted.ExtraVars = nil
+	for name, n := range notifiers {
+		d.notifyWG.Add(1)
+		go func(name string, n Notifier) {
+			defer d.notifyWG.Done()
+			ctx, cancel := context.WithTimeout(context.Background(), webhookTimeout)
+			defer cancel()
+			if err := n.Notify(ctx, &redacted); err != nil {
+				d.log.Warn("dispatch: notifier: "+err.Error(),
+					zap.String("run_id", r.ID), zap.String("notifier", name))
+			}
+		}(name, n)
+	}
 }
 
 // notifyWebhooks posts a terminal top-level run to every configured webhook.

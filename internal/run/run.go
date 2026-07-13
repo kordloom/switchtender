@@ -64,14 +64,39 @@ func NormalizeTool(tool string) string {
 	return tool
 }
 
-// ValidTool reports whether tool names a supported execution tool. Empty is valid and means Ansible.
-func ValidTool(tool string) bool {
+// builtinTool reports whether tool is one of the compiled-in execution tools.
+func builtinTool(tool string) bool {
 	switch NormalizeTool(tool) {
 	case ToolAnsible, ToolBash, ToolTerraform, ToolOpenTofu, ToolPython, ToolPowerShell, ToolGo:
 		return true
 	default:
 		return false
 	}
+}
+
+// extraTools holds tool names added by an extension so ValidTool accepts them alongside the
+// built-ins. Registration happens at startup, before runs are accepted, so reads during serving
+// need no lock, matching how secretsource registers a new engine. A registered tool takes its
+// input from Command, like every non-Ansible built-in.
+var extraTools = map[string]bool{}
+
+// RegisterTool records an execution tool name added by an extension so ValidTool accepts it. Pair it
+// with a runner in the execution layer. It panics on an empty, duplicate, or built-in name, which is
+// a programming error caught at startup.
+func RegisterTool(name string) {
+	if name == "" {
+		panic("run: cannot register an empty tool name")
+	}
+	if builtinTool(name) || extraTools[NormalizeTool(name)] {
+		panic("run: duplicate tool " + name)
+	}
+	extraTools[NormalizeTool(name)] = true
+}
+
+// ValidTool reports whether tool names a supported execution tool, built-in or registered. Empty is
+// valid and means Ansible.
+func ValidTool(tool string) bool {
+	return builtinTool(tool) || extraTools[NormalizeTool(tool)]
 }
 
 // Terminal reports whether the status is a final state.

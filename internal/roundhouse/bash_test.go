@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"testing"
 
@@ -73,6 +74,46 @@ func TestToolRouterRoutes(t *testing.T) {
 	if _, err := runner.Run(context.Background(),
 		Spec{Tool: "make-believe", Command: "x"}, &buf); !errors.Is(err, ErrUnknownTool) {
 		t.Errorf("unknown tool error = %v, want ErrUnknownTool", err)
+	}
+}
+
+// TestRegisterRunner registers an extension tool and confirms the router dispatches to it, then that
+// bad registrations panic. It does not call t.Parallel: it writes the package runner registry, so it
+// runs in the sequential phase before the parallel tests that read the registry resume.
+func TestRegisterRunner(t *testing.T) {
+	RegisterRunner("plugintest", RunnerFunc(func(_ context.Context, spec Spec, out io.Writer) (Result, error) {
+		_, _ = fmt.Fprintf(out, "ran %s", spec.Command)
+		return Result{ExitCode: 0}, nil
+	}))
+
+	var buf bytes.Buffer
+	res, err := NewAnsibleRunner().Run(context.Background(), Spec{Tool: "plugintest", Command: "deploy"}, &buf)
+	if err != nil || res.ExitCode != 0 || !strings.Contains(buf.String(), "ran deploy") {
+		t.Fatalf("plugin route: exit=%d err=%v out=%q", res.ExitCode, err, buf.String())
+	}
+
+	tests := []struct {
+		Name   string
+		Tool   string
+		Runner Runner
+	}{ // Test 0: Empty name is a programming error.
+		{Name: "empty name", Tool: "", Runner: RunnerFunc(nil)},
+		// Test 1: A nil runner is a programming error.
+		{Name: "nil runner", Tool: "other", Runner: nil},
+		// Test 2: Overriding a built-in is a programming error.
+		{Name: "built-in override", Tool: run.ToolBash, Runner: RunnerFunc(nil)},
+		// Test 3: A duplicate registration is a programming error.
+		{Name: "duplicate", Tool: "plugintest", Runner: RunnerFunc(nil)},
+	}
+	for testNum, test := range tests {
+		t.Run(test.Name, func(t *testing.T) {
+			defer func() {
+				if recover() == nil {
+					t.Errorf("test %d: RegisterRunner(%q) did not panic", testNum, test.Tool)
+				}
+			}()
+			RegisterRunner(test.Tool, test.Runner)
+		})
 	}
 }
 

@@ -82,3 +82,34 @@ func TestNewID(t *testing.T) {
 		t.Errorf("len(NewID()) = %d, want %d", len(a), want)
 	}
 }
+
+// TestRegisterTool registers an extension tool name and confirms ValidTool accepts it, then that a
+// bad name panics. It does not call t.Parallel: it writes the package tool registry, so it runs in
+// the sequential phase before the parallel tests that read it resume.
+func TestRegisterTool(t *testing.T) {
+	RegisterTool("plugintool")
+	if !ValidTool("plugintool") {
+		t.Error("ValidTool(plugintool) = false after RegisterTool, want true")
+	}
+
+	tests := []struct {
+		Name string
+		Tool string
+	}{ // Test 0: Empty name is a programming error.
+		{Name: "empty name", Tool: ""},
+		// Test 1: A built-in name is a programming error.
+		{Name: "built-in", Tool: ToolBash},
+		// Test 2: A duplicate is a programming error.
+		{Name: "duplicate", Tool: "plugintool"},
+	}
+	for testNum, test := range tests {
+		t.Run(test.Name, func(t *testing.T) {
+			defer func() {
+				if recover() == nil {
+					t.Errorf("test %d: RegisterTool(%q) did not panic", testNum, test.Tool)
+				}
+			}()
+			RegisterTool(test.Tool)
+		})
+	}
+}

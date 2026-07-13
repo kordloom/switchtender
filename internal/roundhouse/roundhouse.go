@@ -233,7 +233,33 @@ func newToolRouter(allowContainer bool, limits ContainerLimits, opts ...Option) 
 	}
 }
 
-// Run dispatches spec to the runner for its Tool, defaulting an empty Tool to Ansible.
+// extraRunners holds runners added by an extension, keyed by tool name. RegisterRunner adds a tool
+// without editing the router, and Run dispatches to it when a Spec names it. Registration happens at
+// startup, before runs execute, so reads need no lock, matching secretsource.
+var extraRunners = map[string]Runner{}
+
+// RegisterRunner records the Runner for a tool added by an extension. Pair it with run.RegisterTool
+// so the tool passes validation. It panics on an empty or duplicate name, a nil runner, or an
+// attempt to override a built-in, which is a programming error caught at startup.
+func RegisterRunner(tool string, r Runner) {
+	if tool == "" {
+		panic("roundhouse: cannot register an empty tool name")
+	}
+	if r == nil {
+		panic("roundhouse: nil runner for " + tool)
+	}
+	switch run.NormalizeTool(tool) {
+	case run.ToolAnsible, run.ToolBash, run.ToolTerraform, run.ToolOpenTofu, run.ToolPython, run.ToolPowerShell, run.ToolGo:
+		panic("roundhouse: cannot override the built-in tool " + tool)
+	}
+	if _, exists := extraRunners[run.NormalizeTool(tool)]; exists {
+		panic("roundhouse: duplicate runner for " + tool)
+	}
+	extraRunners[run.NormalizeTool(tool)] = r
+}
+
+// Run dispatches spec to the runner for its Tool, defaulting an empty Tool to Ansible. A Tool that
+// matches no built-in falls through to a runner added with RegisterRunner.
 func (t *toolRouter) Run(ctx context.Context, spec Spec, out io.Writer) (Result, error) {
 	switch run.NormalizeTool(spec.Tool) {
 	case run.ToolBash:
@@ -257,6 +283,9 @@ func (t *toolRouter) Run(ctx context.Context, spec Spec, out io.Writer) (Result,
 		}
 		return t.container.Run(ctx, spec, out)
 	default:
+		if r, ok := extraRunners[run.NormalizeTool(spec.Tool)]; ok {
+			return r.Run(ctx, spec, out)
+		}
 		return Result{ExitCode: -1}, fmt.Errorf("%w: %s", ErrUnknownTool, spec.Tool)
 	}
 }

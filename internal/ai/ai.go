@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 )
@@ -63,21 +64,54 @@ func (f ProviderFunc) Complete(ctx context.Context, system, user string) (string
 	return f(ctx, system, user)
 }
 
+// Factory builds a Provider from its settings: the model, the endpoint URL, and an API key. A
+// factory validates its own required settings, so a missing key or model is an error at startup,
+// not at first use. Register adds one so a new model backend plugs in without touching New.
+type Factory func(model, url, apiKey string) (Provider, error)
+
+// providers maps a provider name to its factory. Register adds a backend such as a local or hosted
+// API without editing the core, mirroring how secretsource registers a new engine.
+var providers = map[string]Factory{
+	"ollama":    func(model, url, _ string) (Provider, error) { return newOllama(url, model), nil },
+	"anthropic": func(model, url, apiKey string) (Provider, error) { return newAnthropic(apiKey, model, url) },
+	"openai":    func(model, url, apiKey string) (Provider, error) { return newOpenAI(apiKey, model, url) },
+}
+
+// Register adds a factory under a provider name so a new model backend plugs in. It panics on an
+// empty or duplicate name, which is a programming error caught at startup.
+func Register(name string, fn Factory) {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "" {
+		panic("ai: cannot register an empty provider name")
+	}
+	if _, exists := providers[name]; exists {
+		panic("ai: duplicate provider " + name)
+	}
+	providers[name] = fn
+}
+
+// Names returns the registered provider names, sorted, for help text and validation.
+func Names() []string {
+	names := make([]string, 0, len(providers))
+	for name := range providers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
 // New builds a Provider from a provider name and its settings. An empty name returns a nil Provider
 // and no error, so AI stays off by default. An unrecognized name returns ErrUnknownProvider. The
 // openai provider speaks the OpenAI-compatible chat completions API, so any compatible server works
 // through the URL setting.
 func New(name, model, url, apiKey string) (Provider, error) {
-	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "":
+	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "" {
 		return nil, nil
-	case "ollama":
-		return newOllama(url, model), nil
-	case "anthropic":
-		return newAnthropic(apiKey, model, url)
-	case "openai":
-		return newOpenAI(apiKey, model, url)
-	default:
+	}
+	factory, ok := providers[name]
+	if !ok {
 		return nil, fmt.Errorf("%w: %s", ErrUnknownProvider, name)
 	}
+	return factory(model, url, apiKey)
 }
