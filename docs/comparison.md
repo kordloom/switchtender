@@ -35,7 +35,7 @@ on them.
 | Capability | Notes |
 |------------|-------|
 | Multiple runtimes | Yardmaster runs Ansible, Bash, Terraform, Python, and Go, each with a dry run. AWX is Ansible-only. Semaphore also runs Ansible, plus Terraform, OpenTofu, and shell, but not Python or Go. |
-| Container execution environments | Yardmaster runs a playbook inside a pinned image, opt-in behind a flag. AWX makes this a core feature. Semaphore favors native runtimes instead. |
+| Container execution environments | Yardmaster pins an image on a template, a run, or a project, most specific wins, with private-registry pulls, opt-in behind a flag. AWX attaches execution environments to job templates. Semaphore favors native runtimes instead. |
 | Access control | Yardmaster has global roles plus per-object grants and teams. AWX has mature organization RBAC. Semaphore gates RBAC behind its Enterprise tier. |
 | Credentials | All three store secrets encrypted. Yardmaster decrypts only at execution into a temporary file and wipes it after. |
 | Scheduling | All three schedule runs. Yardmaster uses cron with highly available claiming so two servers do not double-fire. |

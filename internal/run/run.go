@@ -146,6 +146,11 @@ type Run struct {
 	InventoryID string `json:"inventory_id,omitempty"`
 	// Queue restricts execution to workers serving this queue. Empty runs on the default pool.
 	Queue string `json:"queue,omitempty"`
+	// Image names a container image the run executes inside, its execution environment. It outranks
+	// the project's image. Only Ansible runs in a container; other tools reject it at submit.
+	Image string `json:"image,omitempty"`
+	// PullCredentialID names a registry credential for pulling a private Image. Empty for public.
+	PullCredentialID string `json:"pull_credential_id,omitempty"`
 	// ProposedFrom names the drift check run this reconcile proposal was built from. A run carrying
 	// it was machine proposed and is born held for approval, so a person releases it or it never
 	// executes.
@@ -225,6 +230,15 @@ func WithInventory(id string) SubmitOption {
 // WithQueue restricts the run to workers serving the named queue.
 func WithQueue(queue string) SubmitOption {
 	return func(r *Run) { r.Queue = queue }
+}
+
+// WithImage runs the playbook inside the named container image, pulled with the optional registry
+// credential. It outranks the project's image.
+func WithImage(image, pullCredentialID string) SubmitOption {
+	return func(r *Run) {
+		r.Image = image
+		r.PullCredentialID = pullCredentialID
+	}
 }
 
 // WithExtraVars injects variables into the run.

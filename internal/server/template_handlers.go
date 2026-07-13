@@ -41,6 +41,10 @@ type createTemplateRequest struct {
 	Shards int `json:"shards,omitempty"`
 	// Queue restricts launches to workers serving the queue.
 	Queue string `json:"queue,omitempty"`
+	// Image names a container image every launch executes inside. Ansible only.
+	Image string `json:"image,omitempty"`
+	// PullCredentialID names a registry credential for pulling a private Image.
+	PullCredentialID string `json:"pull_credential_id,omitempty"`
 	// CredentialIDs names stored credentials for launches.
 	CredentialIDs []string `json:"credential_ids,omitempty"`
 	// ExtraVars are injected into every launch.
@@ -72,6 +76,9 @@ func templateToolError(req createTemplateRequest) string {
 		}
 		return ""
 	}
+	if req.Image != "" {
+		return "an execution image is only supported for the ansible tool"
+	}
 	if req.Command == "" {
 		return "command is required for the " + req.Tool + " tool"
 	}
@@ -100,7 +107,8 @@ func createTemplateHandler(store template.Store, log *zap.Logger) http.HandlerFu
 			Tool: req.Tool, Command: req.Command, DryRun: req.DryRun,
 			Shards:        req.Shards,
 			CredentialIDs: req.CredentialIDs, ExtraVars: req.ExtraVars, Survey: req.Survey,
-			Queue: req.Queue, CreatedAt: time.Now(),
+			Queue: req.Queue, Image: req.Image, PullCredentialID: req.PullCredentialID,
+			CreatedAt: time.Now(),
 		}
 		if err := store.Save(r.Context(), t); err != nil {
 			log.Error("server: save template: " + err.Error())
@@ -134,7 +142,7 @@ func updateTemplateHandler(store template.Store, log *zap.Logger) http.HandlerFu
 			Tool: req.Tool, Command: req.Command, DryRun: req.DryRun,
 			Shards:        req.Shards,
 			CredentialIDs: req.CredentialIDs, ExtraVars: req.ExtraVars, Survey: req.Survey,
-			Queue: req.Queue,
+			Queue: req.Queue, Image: req.Image, PullCredentialID: req.PullCredentialID,
 		}
 		err := store.Update(r.Context(), t)
 		if errors.Is(err, template.ErrNotFound) {
@@ -228,7 +236,7 @@ func launchTemplateHandler(store template.Store, submitter Submitter, authz *aut
 
 		// Use on the template is not enough. Authorize every object the run will touch, so a launch
 		// cannot borrow a project, inventory, or credentials the actor was never granted.
-		objects := append([]string{t.ProjectID, t.InventoryID}, t.CredentialIDs...)
+		objects := append([]string{t.ProjectID, t.InventoryID, t.PullCredentialID}, t.CredentialIDs...)
 		if denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse, objects...)) {
 			return
 		}
@@ -262,6 +270,9 @@ func launchTemplateHandler(store template.Store, submitter Submitter, authz *aut
 		}
 		if t.Queue != "" {
 			opts = append(opts, run.WithQueue(t.Queue))
+		}
+		if t.Image != "" {
+			opts = append(opts, run.WithImage(t.Image, t.PullCredentialID))
 		}
 		var created *run.Run
 		if t.Shards >= 2 {

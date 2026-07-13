@@ -66,7 +66,9 @@ CREATE TABLE IF NOT EXISTS runs (
 	command       TEXT NOT NULL DEFAULT '',
 	dry_run       INTEGER NOT NULL DEFAULT 0,
 	proposed_from TEXT NOT NULL DEFAULT '',
-	intent        TEXT NOT NULL DEFAULT ''
+	intent        TEXT NOT NULL DEFAULT '',
+	image         TEXT NOT NULL DEFAULT '',
+	pull_credential_id TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_runs_created_at ON runs(created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_parent ON runs(parent_id, shard_index);
@@ -164,7 +166,9 @@ CREATE TABLE IF NOT EXISTS templates (
 	created_at     TEXT NOT NULL,
 	tool           TEXT NOT NULL DEFAULT '',
 	command        TEXT NOT NULL DEFAULT '',
-	dry_run        INTEGER NOT NULL DEFAULT 0
+	dry_run        INTEGER NOT NULL DEFAULT 0,
+	image          TEXT NOT NULL DEFAULT '',
+	pull_credential_id TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS inventory_sources (
 	id            TEXT PRIMARY KEY,
@@ -413,7 +417,7 @@ const runColumns = `id, playbook, inventory, status, exit_code, error, created_a
 	ended_at, parent_id, shard_index, shard_count, limit_pattern, kind, step_name, step_index,
 	retry_of, attempt, extra_vars, outputs, claimed_by, claimed_at, cancel_requested,
 	credential_ids, project_id, commit_sha, inventory_id, queue, tool, command, dry_run,
-	proposed_from, intent`
+	proposed_from, intent, image, pull_credential_id`
 
 // Save inserts or replaces the run identified by r.ID.
 func (s *store) Save(ctx context.Context, r *run.Run) error {
@@ -422,9 +426,10 @@ INSERT INTO runs
 	(id, playbook, inventory, status, exit_code, error, created_at, started_at, ended_at,
 	 parent_id, shard_index, shard_count, limit_pattern, kind, step_name, step_index, retry_of,
 	 attempt, extra_vars, outputs, claimed_by, claimed_at, cancel_requested, credential_ids,
-	 project_id, commit_sha, inventory_id, queue, tool, command, dry_run, proposed_from, intent)
+	 project_id, commit_sha, inventory_id, queue, tool, command, dry_run, proposed_from, intent,
+	 image, pull_credential_id)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
-	$21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33)
+	$21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35)
 ON CONFLICT(id) DO UPDATE SET
 	playbook=excluded.playbook, inventory=excluded.inventory, status=excluded.status,
 	exit_code=excluded.exit_code, error=excluded.error, created_at=excluded.created_at,
@@ -438,7 +443,7 @@ ON CONFLICT(id) DO UPDATE SET
 	project_id=excluded.project_id, commit_sha=excluded.commit_sha,
 	inventory_id=excluded.inventory_id, queue=excluded.queue, tool=excluded.tool,
 	command=excluded.command, dry_run=excluded.dry_run, proposed_from=excluded.proposed_from,
-	intent=excluded.intent`
+	intent=excluded.intent, image=excluded.image, pull_credential_id=excluded.pull_credential_id`
 	_, err := s.db.ExecContext(ctx, q,
 		r.ID, r.Playbook, r.Inventory, string(r.Status), nullInt(r.ExitCode), r.Error,
 		formatTime(r.CreatedAt), nullTime(r.StartedAt), nullTime(r.EndedAt),
@@ -447,6 +452,7 @@ ON CONFLICT(id) DO UPDATE SET
 		jsonMap(r.ExtraVars), jsonMap(r.Outputs), r.ClaimedBy, nullTime(r.ClaimedAt),
 		boolToInt(r.CancelRequested), joinIDs(r.CredentialIDs), r.ProjectID, r.CommitSHA,
 		r.InventoryID, r.Queue, r.Tool, r.Command, boolToInt(r.DryRun), r.ProposedFrom, r.Intent,
+		r.Image, r.PullCredentialID,
 	)
 	if err != nil {
 		return fmt.Errorf("save run: %w", err)
@@ -1114,7 +1120,8 @@ func scanRun(s scanner) (*run.Run, error) {
 		&created, &started, &ended, &parent, &shardIdx, &shardCnt, &r.Limit,
 		&r.Kind, &r.StepName, &stepIdx, &retryOf, &r.Attempt, &extra, &outputs,
 		&r.ClaimedBy, &claimed, &cancelI, &credIDs, &r.ProjectID, &r.CommitSHA,
-		&r.InventoryID, &r.Queue, &r.Tool, &r.Command, &dryRun, &r.ProposedFrom, &r.Intent); err != nil {
+		&r.InventoryID, &r.Queue, &r.Tool, &r.Command, &dryRun, &r.ProposedFrom, &r.Intent,
+		&r.Image, &r.PullCredentialID); err != nil {
 		return nil, err
 	}
 	r.CancelRequested = cancelI != 0

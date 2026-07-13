@@ -47,6 +47,10 @@ type createRunRequest struct {
 	InventoryID string `json:"inventory_id,omitempty"`
 	// Queue restricts execution to workers serving the queue.
 	Queue string `json:"queue,omitempty"`
+	// Image names a container image the run executes inside, its execution environment. Ansible only.
+	Image string `json:"image,omitempty"`
+	// PullCredentialID names a registry credential for pulling a private Image.
+	PullCredentialID string `json:"pull_credential_id,omitempty"`
 	// RequireApproval holds the run for approval before it executes. Honored for a single run, not
 	// a shard split.
 	RequireApproval bool `json:"require_approval,omitempty"`
@@ -417,7 +421,7 @@ func createRunHandler(submitter Submitter, authz *authorizer, log *zap.Logger) h
 			return
 		}
 
-		objects := append([]string{req.ProjectID, req.InventoryID}, req.CredentialIDs...)
+		objects := append([]string{req.ProjectID, req.InventoryID, req.PullCredentialID}, req.CredentialIDs...)
 		if denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse, objects...)) {
 			return
 		}
@@ -437,6 +441,9 @@ func createRunHandler(submitter Submitter, authz *authorizer, log *zap.Logger) h
 		if req.Queue != "" {
 			opts = append(opts, run.WithQueue(req.Queue))
 		}
+		if req.Image != "" {
+			opts = append(opts, run.WithImage(req.Image, req.PullCredentialID))
+		}
 		if req.Shards >= 2 {
 			created, err = submitter.SubmitSplit(r.Context(), req.Playbook, req.Inventory,
 				req.Shards, opts...)
@@ -450,7 +457,7 @@ func createRunHandler(submitter Submitter, authz *authorizer, log *zap.Logger) h
 		case errors.Is(err, credential.ErrNotFound), errors.Is(err, credential.ErrNoKey),
 			errors.Is(err, project.ErrNotFound), errors.Is(err, inventory.ErrNotFound),
 			errors.Is(err, dispatch.ErrNoPlaybook), errors.Is(err, dispatch.ErrNoCommand),
-			errors.Is(err, dispatch.ErrUnknownTool):
+			errors.Is(err, dispatch.ErrUnknownTool), errors.Is(err, dispatch.ErrImageTool):
 			respondError(w, log, http.StatusBadRequest, err.Error())
 			return
 		case err != nil:

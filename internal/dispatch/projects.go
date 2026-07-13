@@ -81,27 +81,28 @@ func (d *Dispatcher) resolveProject(r *run.Run, spec *roundhouse.Spec) error {
 	spec.Dir = dir
 	r.CommitSHA = sha
 
-	if p.Image != "" {
+	// The run's own image, from the request or its template, outranks the project's.
+	if p.Image != "" && spec.Image == "" {
 		spec.Image = p.Image
-		if err := d.resolvePullCredential(p, spec); err != nil {
+		if err := d.resolvePullCredential(p.PullCredentialID, spec); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// resolvePullCredential decrypts the project's registry credential, when set, onto the spec so the
+// resolvePullCredential decrypts the named registry credential, when set, onto the spec so the
 // container runner can pull a private execution environment image.
-func (d *Dispatcher) resolvePullCredential(p *project.Project, spec *roundhouse.Spec) error {
-	if p.PullCredentialID == "" {
+func (d *Dispatcher) resolvePullCredential(id string, spec *roundhouse.Spec) error {
+	if id == "" {
 		return nil
 	}
 	if d.credentials == nil || d.sealer == nil {
 		return credential.ErrNoKey
 	}
-	c, err := d.credentials.Get(context.Background(), p.PullCredentialID)
+	c, err := d.credentials.Get(context.Background(), id)
 	if err != nil {
-		return fmt.Errorf("pull credential %s: %w", p.PullCredentialID, err)
+		return fmt.Errorf("pull credential %s: %w", id, err)
 	}
 	plain, err := d.sealer.Open(c.Secret)
 	if err != nil {

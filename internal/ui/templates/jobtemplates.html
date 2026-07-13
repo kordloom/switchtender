@@ -61,6 +61,13 @@
 				<label class="field-label">Queue
 					<input id="tpl-queue" class="input mono" placeholder="default">
 				</label>
+				<label class="field-label" id="tpl-field-image">Execution image
+					<input id="tpl-image" class="input mono" placeholder="optional, for example ghcr.io/acme/ee:9">
+					<span class="field-hint">Launches run inside this container image. Ansible only.</span>
+				</label>
+				<label class="field-label" id="tpl-field-pull-credential">Pull credential
+					<select id="tpl-pull-credential" class="input"><option value="">None (public image)</option></select>
+				</label>
 				<label class="field-label">Credentials
 					<select id="tpl-credentials" class="input" multiple size="3"></select>
 				</label>

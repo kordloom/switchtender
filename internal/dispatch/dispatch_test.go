@@ -17,6 +17,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
+	"github.com/dcadolph/yardmaster/internal/credential"
 	"github.com/dcadolph/yardmaster/internal/event"
 	"github.com/dcadolph/yardmaster/internal/roundhouse"
 	"github.com/dcadolph/yardmaster/internal/run"
@@ -919,5 +920,54 @@ func TestDispatcherSkipsEmailOnSuccessWhenFailureOnly(t *testing.T) {
 	case subject := <-emailer.sent:
 		t.Errorf("unexpected email for a succeeded run: %q", subject)
 	case <-time.After(500 * time.Millisecond):
+	}
+}
+
+// TestRunImageReachesSpec verifies a run's execution image and its decrypted registry login land
+// on the Spec the runner receives, and a bash run pinning an image is rejected at submit.
+func TestRunImageReachesSpec(t *testing.T) {
+	t.Parallel()
+	sealer := credential.NewSealer("pass", "salt")
+	sealed, err := sealer.Seal("bot\nhunter2")
+	if err != nil {
+		t.Fatalf("Seal() error = %v", err)
+	}
+	creds := credential.NewMemStore()
+	if err := creds.Save(context.Background(), &credential.Credential{
+		ID: "cred_pull", Kind: credential.KindRegistry, Secret: sealed,
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	got := make(chan roundhouse.Spec, 1)
+	runner := roundhouse.RunnerFunc(
+		func(_ context.Context, spec roundhouse.Spec, _ io.Writer) (roundhouse.Result, error) {
+			got <- spec
+			return roundhouse.Result{ExitCode: 0}, nil
+		},
+	)
+	store := run.NewMemStore()
+	d := New(store, runner, nil, WithCredentials(creds, sealer))
+	defer d.Close()
+
+	created, err := d.Submit(context.Background(), "play.yml", "inv.ini",
+		run.WithImage("ghcr.io/acme/ee:9", "cred_pull"))
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+	waitTerminal(t, store, created.ID)
+	spec := <-got
+	if spec.Image != "ghcr.io/acme/ee:9" {
+		t.Errorf("spec.Image = %q, want ghcr.io/acme/ee:9", spec.Image)
+	}
+	if spec.RegistryUsername != "bot" || spec.RegistryPassword != "hunter2" {
+		t.Errorf("registry login = %q/%q, want bot/hunter2", spec.RegistryUsername, spec.RegistryPassword)
+	}
+
+	// Test 1: A non-Ansible tool cannot pin an image.
+	_, err = d.Submit(context.Background(), "", "",
+		run.WithTool("bash"), run.WithCommand("echo hi"), run.WithImage("ghcr.io/acme/ee:9", ""))
+	if !errors.Is(err, ErrImageTool) {
+		t.Errorf("Submit(bash+image) error = %v, want ErrImageTool", err)
 	}
 }

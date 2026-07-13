@@ -2417,11 +2417,14 @@ function migrateGroup(label, names) {
 }
 
 // syncTemplateTool shows the Ansible fields or the command box in the template dialog to match the
-// selected tool, so a bash, terraform, python, or go template hides playbook, inventory, and shards.
+// selected tool, so a bash, terraform, python, or go template hides playbook, inventory, shards,
+// and the execution image.
 function syncTemplateTool() {
 	const tool = document.getElementById("tpl-tool").value;
 	const ansible = tool === "ansible" || tool === "";
-	for (const id of ["tpl-field-playbook", "tpl-field-inventory", "tpl-field-shards"]) {
+	const ansibleFields = ["tpl-field-playbook", "tpl-field-inventory", "tpl-field-shards",
+		"tpl-field-image", "tpl-field-pull-credential"];
+	for (const id of ansibleFields) {
 		const el = document.getElementById(id);
 		if (el) el.hidden = !ansible;
 	}
@@ -2442,6 +2445,8 @@ function openTemplateEdit(t) {
 	document.getElementById("tpl-inventory").value = t.inventory || "";
 	document.getElementById("tpl-shards").value = t.shards ? String(t.shards) : "";
 	document.getElementById("tpl-queue").value = t.queue || "";
+	document.getElementById("tpl-image").value = t.image || "";
+	document.getElementById("tpl-pull-credential").value = t.pull_credential_id || "";
 	const chosen = new Set(t.credential_ids || []);
 	for (const opt of document.getElementById("tpl-credentials").options) {
 		opt.selected = chosen.has(opt.value);
@@ -2463,6 +2468,8 @@ function openTemplateEdit(t) {
 function wireTemplateForm() {
 	fillSelect(document.getElementById("tpl-project"), "/projects", "projects", (p) => p.name);
 	fillSelect(document.getElementById("tpl-credentials"), "/credentials", "credentials",
+		(c) => c.name + " (" + c.kind + ")");
+	fillSelect(document.getElementById("tpl-pull-credential"), "/credentials", "credentials",
 		(c) => c.name + " (" + c.kind + ")");
 	const form = document.getElementById("template-form");
 	document.getElementById("tpl-tool").addEventListener("change", syncTemplateTool);
@@ -2495,6 +2502,12 @@ function wireTemplateForm() {
 			payload.inventory = document.getElementById("tpl-inventory").value.trim();
 			const shards = parseInt(document.getElementById("tpl-shards").value, 10);
 			if (shards >= 2) payload.shards = shards;
+			const image = document.getElementById("tpl-image").value.trim();
+			if (image) {
+				payload.image = image;
+				const pull = document.getElementById("tpl-pull-credential").value;
+				if (pull) payload.pull_credential_id = pull;
+			}
 		}
 		if (document.getElementById("tpl-dry-run").checked) payload.dry_run = true;
 		const tqueue = document.getElementById("tpl-queue").value.trim();

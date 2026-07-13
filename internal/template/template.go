@@ -76,6 +76,11 @@ type Template struct {
 	Shards int `json:"shards,omitempty"`
 	// Queue restricts launches to workers serving this queue.
 	Queue string `json:"queue,omitempty"`
+	// Image names a container image every launch executes inside, its execution environment. It
+	// outranks the project's image. Only the Ansible tool runs in a container.
+	Image string `json:"image,omitempty"`
+	// PullCredentialID names a registry credential for pulling a private Image. Empty for public.
+	PullCredentialID string `json:"pull_credential_id,omitempty"`
 	// CredentialIDs names stored credentials materialized for the run.
 	CredentialIDs []string `json:"credential_ids,omitempty"`
 	// ExtraVars are injected into the run as extra vars, under any survey answers.

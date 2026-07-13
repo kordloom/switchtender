@@ -379,6 +379,9 @@ func requireToolInput(r *run.Run) error {
 		}
 		return nil
 	}
+	if r.Image != "" {
+		return ErrImageTool
+	}
 	if r.Command == "" {
 		return ErrNoCommand
 	}
@@ -992,6 +995,16 @@ func (d *Dispatcher) execute(ctx context.Context, r *run.Run) run.Status {
 	spec := roundhouse.Spec{
 		Playbook: r.Playbook, Inventory: r.Inventory, Tool: r.Tool, Command: r.Command,
 		DryRun: r.DryRun, EventsPath: eventsPath, Limit: r.Limit, ExtraVars: r.ExtraVars,
+		Image: r.Image,
+	}
+	if r.Image != "" {
+		if err := d.resolvePullCredential(r.PullCredentialID, &spec); err != nil {
+			close(stop)
+			<-tailed
+			d.finalize(r, run.StatusFailed, nil, mask.redactString(err.Error()))
+			d.publisher.CloseRun(r.ID)
+			return run.StatusFailed
+		}
 	}
 	invCleanup, invSecrets, err := d.materializeInventory(ctx, r, &spec)
 	if err != nil {
