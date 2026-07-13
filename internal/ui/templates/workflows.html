@@ -48,6 +48,7 @@
 							<option value="python">Python</option>
 							<option value="powershell">PowerShell</option>
 							<option value="go">Go</option>
+							{{range .ExtraTools}}<option value="{{.}}">{{.}}</option>{{end}}
 						</select>
 					</label>
 					<label class="field-label" id="wf-step-playbook-field">Playbook

@@ -2,6 +2,7 @@ package run
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -90,6 +91,13 @@ func TestRegisterTool(t *testing.T) {
 	RegisterTool("plugintool")
 	if !ValidTool("plugintool") {
 		t.Error("ValidTool(plugintool) = false after RegisterTool, want true")
+	}
+	names := ExtraToolNames()
+	if !slices.Contains(names, "plugintool") {
+		t.Errorf("ExtraToolNames() = %v, want it to include plugintool", names)
+	}
+	if !slices.IsSorted(names) {
+		t.Errorf("ExtraToolNames() = %v, want it sorted", names)
 	}
 
 	tests := []struct {

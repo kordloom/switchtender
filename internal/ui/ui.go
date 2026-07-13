@@ -12,6 +12,8 @@ import (
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"
 	"go.uber.org/zap"
+
+	"github.com/dcadolph/yardmaster/internal/run"
 )
 
 // templateFS holds the page templates.
@@ -106,7 +108,7 @@ func (u *UI) index(w http.ResponseWriter, _ *http.Request) {
 
 // runs renders the run history page.
 func (u *UI) runs(w http.ResponseWriter, _ *http.Request) {
-	u.render(w, "runs.html", map[string]any{"ReadOnly": u.readOnly})
+	u.render(w, "runs.html", map[string]any{"ReadOnly": u.readOnly, "ExtraTools": run.ExtraToolNames()})
 }
 
 // detail renders the run detail page for a single run.
@@ -148,7 +150,7 @@ func (u *UI) audit(w http.ResponseWriter, _ *http.Request) {
 
 // policies renders the approval policy management page.
 func (u *UI) policies(w http.ResponseWriter, _ *http.Request) {
-	u.render(w, "policies.html", map[string]any{"ReadOnly": u.readOnly})
+	u.render(w, "policies.html", map[string]any{"ReadOnly": u.readOnly, "ExtraTools": run.ExtraToolNames()})
 }
 
 // projects renders the git project management page.
@@ -163,7 +165,7 @@ func (u *UI) migrate(w http.ResponseWriter, _ *http.Request) {
 
 // jobTemplates renders the job template management page.
 func (u *UI) jobTemplates(w http.ResponseWriter, _ *http.Request) {
-	u.render(w, "jobtemplates.html", map[string]any{"ReadOnly": u.readOnly})
+	u.render(w, "jobtemplates.html", map[string]any{"ReadOnly": u.readOnly, "ExtraTools": run.ExtraToolNames()})
 }
 
 // users renders the account management page.
@@ -199,7 +201,7 @@ func (u *UI) schedules(w http.ResponseWriter, _ *http.Request) {
 // workflows renders the visual workflow editor, where steps are wired into a graph and run as a
 // pipeline.
 func (u *UI) workflows(w http.ResponseWriter, _ *http.Request) {
-	u.render(w, "workflows.html", map[string]any{"ReadOnly": u.readOnly})
+	u.render(w, "workflows.html", map[string]any{"ReadOnly": u.readOnly, "ExtraTools": run.ExtraToolNames()})
 }
 
 // render executes the named template with data.

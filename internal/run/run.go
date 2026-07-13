@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"maps"
+	"sort"
 	"time"
 )
 
@@ -97,6 +98,17 @@ func RegisterTool(name string) {
 // valid and means Ansible.
 func ValidTool(tool string) bool {
 	return builtinTool(tool) || extraTools[NormalizeTool(tool)]
+}
+
+// ExtraToolNames returns the registered extension tool names, sorted, so the UI can offer them
+// beside the built-ins. Registration is startup-only, so reads while serving need no lock.
+func ExtraToolNames() []string {
+	names := make([]string, 0, len(extraTools))
+	for name := range extraTools {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // Terminal reports whether the status is a final state.
