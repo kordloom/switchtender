@@ -12,6 +12,7 @@ What Yardmaster does today.
 | Capability   | What you get                                                                    |
 |--------------|---------------------------------------------------------------------------------|
 | Runs         | Submit over HTTP, real ansible-playbook underneath, human log plus a structured event stream, per-task drill-down with stdout, stderr, rc, and diff.|
+| Multi-tool   | Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go through one engine, one UI, and one audit trail, each with a dry-run mode.|
 | Live view    | Server-Sent Events paint the host matrix and log as the run executes.           |
 | Splits       | Shard an inventory across parallel slices, merged back into one matrix. Hosts packed by measured duration from past runs.|
 | Shard retry  | Retry a finished split and only its failed shards run again, lineage recorded.  |
@@ -44,7 +45,7 @@ What Yardmaster does today.
 | Email | An SMTP notification on every finished run or on failures only, alongside the finish webhooks.|
 | Slack | A formatted message posts to a Slack incoming webhook when a run finishes, with the run label, status, and elapsed time.|
 | AI triage | An optional AI provider, local Ollama or a cloud API, explains a failed run on demand from its masked log and failed task events. Advisory only: it never runs anything, so every action still goes through the same policy and audit gates.|
-| AI drafting | Describe a bash, python, or go step in the workflow editor and the provider drafts the script into the command field for you to review, edit, and save. The draft never executes on its own.|
+| AI drafting | Describe a bash, python, powershell, or go step in the workflow editor and the provider drafts the script into the command field for you to review, edit, and save. The draft never executes on its own.|
 | Drift reconcile | One click on a drifted host builds the fix: the check run's playbook limited to that host, run for real, born held for approval. A machine proposes, a person releases, and the audit trail records both.|
 | Fleet questions | Ask the overview a plain-language question and the provider answers from a bounded snapshot of run counts, recent runs, host health, and drift. Metadata only, rate limited, and it can start nothing.|
 | Run proposals | Describe a run on the runs page and the provider turns it into a validated run the server builds. It is born held for approval, stamped with your exact words, and runs nothing until an admin reviews the generated command and releases it. The audit trail records the request and the decision.|
