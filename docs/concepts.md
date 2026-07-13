@@ -82,6 +82,11 @@ workers serving that queue run it, which places work across a mixed fleet. A lea
 attributable, and a janitor requeues work whose holder went away. The [reliability](reliability.md)
 page details how work is claimed, bounded, recovered, and kept consistent across workers.
 
+Queues pin at three levels, so they work like AWX instance groups: a run names its own queue, a
+template pins every launch, or an inventory pins every run that targets it. The most specific wins:
+run, then template, then inventory. Pin a DMZ inventory to workers inside the DMZ and every run
+against it lands there, no matter how it was launched.
+
 ## Provable audit
 
 Every authenticated mutation is recorded in the audit trail, and each entry is linked into a SHA-256

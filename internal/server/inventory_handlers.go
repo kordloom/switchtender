@@ -29,6 +29,9 @@ type createInventoryRequest struct {
 	// address, path, and field for vault, or project, secret, and version for gsm. It is sealed at
 	// rest. On update, a blank value keeps the stored config.
 	ContentConfig string `json:"content_config,omitempty"`
+	// Queue pins every run that targets this inventory to workers serving the queue, unless the run
+	// or its template names its own. Empty uses the default pool.
+	Queue string `json:"queue,omitempty"`
 }
 
 // inventorySource validates a request's content source and returns the normalized source and the
@@ -95,7 +98,7 @@ func createInventoryHandler(store inventory.Store, authz *authorizer, sealer *cr
 		}
 		i := &inventory.Inventory{
 			ID: inventory.NewID(), Name: req.Name, Content: req.Content,
-			CredentialIDs: req.CredentialIDs, CreatedAt: time.Now(),
+			CredentialIDs: req.CredentialIDs, Queue: req.Queue, CreatedAt: time.Now(),
 		}
 		if source != credential.SourceLocal {
 			i.ContentSource, i.ContentConfig = source, sealed
@@ -147,6 +150,7 @@ func updateInventoryHandler(store inventory.Store, authz *authorizer, sealer *cr
 		}
 		inv := &inventory.Inventory{
 			ID: id, Name: req.Name, Content: req.Content, CredentialIDs: req.CredentialIDs,
+			Queue: req.Queue,
 		}
 		if source != credential.SourceLocal {
 			inv.ContentSource, inv.ContentConfig = source, sealed

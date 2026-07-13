@@ -36,7 +36,7 @@ What Yardmaster does today.
 | High availability | Two servers on one database share the schedule without double-firing. Tokens can carry a lifetime.|
 | Git triggers | A webhook URL launches a template on push. The project syncs fresh, so it deploys the commit just pushed.|
 | Surveys      | Templates declare typed launch prompts, validated and injected as extra vars.|
-| Worker queues | Target a run at a named queue. A worker serving that queue runs it and default workers leave it alone.|
+| Worker queues | Target a run at a named queue. A worker serving that queue runs it and default workers leave it alone. Pin a queue on a run, a template, or an inventory, most specific wins, so queues work like AWX instance groups.|
 | Dependency sync | A project's requirements.yml roles and collections install on each sync, so playbooks that need them just run.|
 | Execution environments | A project can pin a container image. Its runs execute inside it with their own ansible and system dependencies.|
 | Teams and grants | Group users into teams and grant use or manage on a specific project, template, inventory, or credential. Grants layer on the global role and default open.|

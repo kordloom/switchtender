@@ -2680,6 +2680,7 @@ function openInventoryEdit(inv) {
 	form.dataset.editId = inv.id;
 	document.getElementById("inv-name").value = inv.name;
 	document.getElementById("inv-content").value = inv.content || "";
+	document.getElementById("inv-queue").value = inv.queue || "";
 	for (const id of ["inv-command", "inv-vault-addr", "inv-vault-path", "inv-vault-field",
 		"inv-vault-token", "inv-gsm-project", "inv-gsm-secret", "inv-gsm-version", "inv-gsm-token"]) {
 		document.getElementById(id).value = "";
@@ -2767,6 +2768,7 @@ function wireInventoryForm() {
 	const resetToCreate = () => {
 		delete form.dataset.editId;
 		document.getElementById("inv-name").value = "";
+		document.getElementById("inv-queue").value = "";
 		for (const id of sourceFields) document.getElementById(id).value = "";
 		for (const o of creds.options) o.selected = false;
 		sourceSel.value = "local";
@@ -2793,6 +2795,8 @@ function wireInventoryForm() {
 		}
 		const picked = Array.from(creds.selectedOptions).map((o) => o.value);
 		if (picked.length) payload.credential_ids = picked;
+		const invQueue = document.getElementById("inv-queue").value.trim();
+		if (invQueue) payload.queue = invQueue;
 		try {
 			if (editId) {
 				await postAction("/inventories/" + editId, payload, "PUT");

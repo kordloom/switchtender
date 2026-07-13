@@ -216,6 +216,7 @@ CREATE TABLE IF NOT EXISTS inventories (
 	credential_ids TEXT NOT NULL DEFAULT '',
 	content_source TEXT NOT NULL DEFAULT '',
 	content_config TEXT NOT NULL DEFAULT '',
+	queue          TEXT NOT NULL DEFAULT '',
 	created_at     TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS credentials (

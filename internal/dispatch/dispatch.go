@@ -351,6 +351,22 @@ func (d *Dispatcher) validateRun(ctx context.Context, r *run.Run) error {
 	return d.validateProject(ctx, r.ProjectID)
 }
 
+// resolveQueue fills a run's queue from its stored inventory when neither the request nor its
+// template pinned one, so an inventory can pin all of its work to a worker group. The precedence
+// is run, then template (already applied as the run's queue by launch), then inventory. A lookup
+// failure leaves the queue empty rather than failing the submit, since validateRun has already
+// confirmed the inventory exists.
+func (d *Dispatcher) resolveQueue(ctx context.Context, r *run.Run) {
+	if r.Queue != "" || r.InventoryID == "" || d.inventories == nil {
+		return
+	}
+	inv, err := d.inventories.Get(ctx, r.InventoryID)
+	if err != nil {
+		return
+	}
+	r.Queue = inv.Queue
+}
+
 // requireToolInput checks that a run carries the input its tool needs: a playbook for Ansible, a
 // command for bash, terraform, and python. It also rejects a run naming an unsupported tool.
 func requireToolInput(r *run.Run) error {
@@ -404,6 +420,7 @@ func (d *Dispatcher) Submit(ctx context.Context, playbook, inventory string, opt
 	if err := d.validateRun(ctx, r); err != nil {
 		return nil, err
 	}
+	d.resolveQueue(ctx, r)
 	if r.Status != run.StatusPendingApproval && d.requiresApproval(ctx, r) {
 		r.Status = run.StatusPendingApproval
 	}
@@ -470,6 +487,7 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 	if err := d.validateRun(ctx, parent); err != nil {
 		return nil, err
 	}
+	d.resolveQueue(ctx, parent)
 	if err := d.store.Save(ctx, parent); err != nil {
 		return nil, err
 	}
@@ -715,6 +733,7 @@ func (d *Dispatcher) SubmitPipeline(ctx context.Context, name, inventory string,
 	if err := d.validateRun(ctx, parent); err != nil {
 		return nil, err
 	}
+	d.resolveQueue(ctx, parent)
 	if err := d.store.Save(ctx, parent); err != nil {
 		return nil, err
 	}

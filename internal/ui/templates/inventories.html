@@ -87,6 +87,10 @@
 					<select id="inv-credentials" class="input" multiple size="3"></select>
 					<span class="field-hint">Secret variables every run against this inventory receives.</span>
 				</label>
+				<label class="field-label">Queue
+					<input id="inv-queue" class="input" placeholder="optional, for example dmz-workers">
+					<span class="field-hint">Pins runs against this inventory to workers serving the queue. A run or template queue overrides it.</span>
+				</label>
 				<div class="launch-actions">
 					<button type="submit" class="button primary">Save</button>
 					<span id="inv-status" class="muted"></span>

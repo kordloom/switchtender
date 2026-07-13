@@ -35,6 +35,9 @@ type Inventory struct {
 	// returned by the API. It is the command for command, or the JSON address, path, and field for
 	// vault, or project, secret, and version for gsm.
 	ContentConfig string `json:"-"`
+	// Queue pins every run that targets this inventory to workers serving the queue, unless the
+	// run or its template names a queue of its own. Empty uses the default pool.
+	Queue string `json:"queue,omitempty"`
 	// CreatedAt is when the inventory was created.
 	CreatedAt time.Time `json:"created_at"`
 }

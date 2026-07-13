@@ -183,3 +183,58 @@ func TestInventorySecrets(t *testing.T) {
 		t.Errorf("inventorySecrets missing %v, got %v", want, got)
 	}
 }
+
+// TestInventoryQueuePinning covers the queue fallback at submit: a run inherits its stored
+// inventory's queue unless the request already pinned one, and a run with no stored inventory or
+// an unpinned inventory keeps the default pool.
+func TestInventoryQueuePinning(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Name           string
+		RunQueue       string
+		InventoryID    string
+		InventoryQueue string
+		WantQueue      string
+	}{{ // Test 0: The inventory queue pins the run when the request has none.
+		Name: "inherit", InventoryID: "inv_1", InventoryQueue: "dmz", WantQueue: "dmz",
+	}, { // Test 1: An explicit run queue outranks the inventory queue.
+		Name: "run wins", RunQueue: "gpu", InventoryID: "inv_1", InventoryQueue: "dmz", WantQueue: "gpu",
+	}, { // Test 2: An unpinned inventory leaves the run on the default pool.
+		Name: "unpinned inventory", InventoryID: "inv_1", WantQueue: "",
+	}, { // Test 3: No stored inventory leaves the run on the default pool.
+		Name: "no inventory", WantQueue: "",
+	}}
+	for _, test := range tests {
+		t.Run(test.Name, func(t *testing.T) {
+			t.Parallel()
+			invStore := inventory.NewMemStore()
+			if err := invStore.Save(context.Background(), &inventory.Inventory{
+				ID: "inv_1", Name: "fleet", Content: "[web]\nhost1", Queue: test.InventoryQueue,
+			}); err != nil {
+				t.Fatalf("Save() error = %v", err)
+			}
+			runner := roundhouse.RunnerFunc(
+				func(_ context.Context, _ roundhouse.Spec, _ io.Writer) (roundhouse.Result, error) {
+					return roundhouse.Result{ExitCode: 0}, nil
+				},
+			)
+			d := New(run.NewMemStore(), runner, nil, WithInventories(invStore))
+			defer d.Close()
+
+			var opts []run.SubmitOption
+			if test.RunQueue != "" {
+				opts = append(opts, run.WithQueue(test.RunQueue))
+			}
+			if test.InventoryID != "" {
+				opts = append(opts, run.WithInventory(test.InventoryID))
+			}
+			created, err := d.Submit(context.Background(), "play.yml", "", opts...)
+			if err != nil {
+				t.Fatalf("Submit() error = %v", err)
+			}
+			if created.Queue != test.WantQueue {
+				t.Errorf("Queue = %q, want %q", created.Queue, test.WantQueue)
+			}
+		})
+	}
+}
