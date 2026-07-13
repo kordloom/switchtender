@@ -126,12 +126,18 @@ func run() error {
 	return nil
 }
 
-// canonicalFor returns the canonical URL for a docs slug, the directory URL for the index.
+// canonicalFor returns the canonical URL for a docs slug, the directory URL for the index. Pages
+// serves extensionless clean URLs and redirects .html paths to them, so canonicals stay clean.
 func canonicalFor(slug string) string {
+	return "https://yardmaster.dev" + hrefFor(slug)
+}
+
+// hrefFor returns the site-relative clean URL for a docs slug, the directory URL for the index.
+func hrefFor(slug string) string {
 	if slug == "README" {
-		return "https://yardmaster.dev/docs/"
+		return "/docs/"
 	}
-	return "https://yardmaster.dev/docs/" + slug + ".html"
+	return "/docs/" + slug
 }
 
 // writeSitemap emits site/sitemap.xml covering the landing pages and every docs page, so crawlers
@@ -140,7 +146,7 @@ func writeSitemap(slugs []string) error {
 	var b strings.Builder
 	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>` + "\n")
 	b.WriteString(`<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">` + "\n")
-	urls := []string{"https://yardmaster.dev/", "https://yardmaster.dev/get-started.html"}
+	urls := []string{"https://yardmaster.dev/", "https://yardmaster.dev/get-started"}
 	for _, slug := range slugs {
 		urls = append(urls, canonicalFor(slug))
 	}
@@ -228,7 +234,7 @@ func render(md goldmark.Markdown, slug string) (page, error) {
 	}
 	html := mdLink.ReplaceAllStringFunc(body.String(), func(m string) string {
 		parts := mdLink.FindStringSubmatch(m)
-		return fmt.Sprintf("href=%q", "/docs/"+outFile(filepath.Base(parts[1]))+parts[2])
+		return fmt.Sprintf("href=%q", hrefFor(filepath.Base(parts[1]))+parts[2])
 	})
 	return page{
 		Slug: slug, Title: title(slug, src), Description: description(src),
@@ -241,7 +247,7 @@ func sidebarFor(active string, slugs []string) []sidebar {
 	out := make([]sidebar, 0, len(slugs))
 	for _, s := range slugs {
 		src, _ := os.ReadFile(filepath.Join(docsDir, s+".md"))
-		out = append(out, sidebar{Title: title(s, src), Href: "/docs/" + outFile(s), Active: s == active})
+		out = append(out, sidebar{Title: title(s, src), Href: hrefFor(s), Active: s == active})
 	}
 	return out
 }

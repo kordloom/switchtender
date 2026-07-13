@@ -32,7 +32,7 @@
 	<link rel="preconnect" href="https://fonts.googleapis.com">
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-	<link rel="stylesheet" href="/styles.css?v=5">
+	<link rel="stylesheet" href="/styles.css?v=6">
 </head>
 <body>
 	<div class="bg-mesh" aria-hidden="true"></div>
@@ -46,12 +46,13 @@
 			<nav class="nav-links">
 				<a href="#features">Features</a>
 				<a href="#governance">Governance</a>
+				<a href="#ai">AI</a>
 				<a href="#compare">Compare</a>
 				<a href="/docs/">Docs</a>
 			</nav>
 			<div class="nav-cta">
 				<a class="ghost" href="https://github.com/dcadolph/yardmaster">GitHub</a>
-				<a class="btn" href="/get-started.html">Get started</a>
+				<a class="btn" href="/get-started">Get started</a>
 			</div>
 			<button class="nav-toggle" id="nav-toggle" aria-label="Menu">
 				<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="7" x2="21" y2="7"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="17" x2="21" y2="17"/></svg>
@@ -70,7 +71,7 @@
 					shards, and <strong>prove exactly what ran and who approved it.</strong>
 				</p>
 				<div class="hero-cta">
-					<a class="btn big" href="/get-started.html">Get started</a>
+					<a class="btn big" href="/get-started">Get started</a>
 					<a class="ghost big" href="https://github.com/dcadolph/yardmaster">★ Star on GitHub</a>
 				</div>
 				<p class="hero-note">Open source · BSL 1.1 · migrate from AWX or Semaphore in one command</p>
@@ -91,7 +92,7 @@
 		<section class="strip wrap reveal">
 			<div><b>1</b><span>binary to deploy</span></div>
 			<div><b>0</b><span>Kubernetes required</span></div>
-			<div><b>4</b><span>tools, one engine</span></div>
+			<div><b>5</b><span>tools, one engine</span></div>
 			<div><b>∞</b><span>tamper-evident audit</span></div>
 		</section>
 
@@ -151,7 +152,18 @@
 			</div>
 			<figure class="window demo-frame reveal">
 				<div class="window-bar"><span></span><span></span><span></span><em>yardmaster · run</em></div>
-				<img src="/assets/demo-run.gif?v=1" alt="A Yardmaster run streaming live as a host-by-task matrix" loading="lazy">
+				<img src="/assets/demo-run.gif?v=2" alt="A Yardmaster run streaming live as a host-by-task matrix" loading="lazy">
+			</figure>
+		</section>
+
+		<section class="section wrap" id="editor">
+			<div class="section-head reveal">
+				<h2>Design pipelines by dragging, not by YAML</h2>
+				<p>Wire Terraform, Ansible, Python, and Bash steps into a graph. Fan out, fan in, and run the whole thing as one pipeline with per-step retries. AWX's signature feature, without the Kubernetes bill.</p>
+			</div>
+			<figure class="window demo-frame reveal">
+				<div class="window-bar"><span></span><span></span><span></span><em>yardmaster · workflow editor</em></div>
+				<img src="/assets/screenshot-editor.png" alt="The drag-and-drop workflow editor showing a six-step blue-green deploy graph across Terraform, Ansible, Python, and Bash" loading="lazy">
 			</figure>
 		</section>
 
@@ -176,10 +188,27 @@
 			</div>
 		</section>
 
+		<section class="section wrap" id="ai">
+			<div class="section-head reveal">
+				<h2>AI proposes. The control plane governs.</h2>
+				<p>Failure triage, fleet questions in plain language, and plain-language run requests drafted for you, held at the same approval gate as any human. Advisory only, off by default, never in the execution path. Run it local with Ollama or bring a cloud key, and secrets are masked before a model sees a byte.</p>
+			</div>
+			<div class="duo">
+				<figure class="window reveal">
+					<div class="window-bar"><span></span><span></span><span></span><em>yardmaster · AI triage</em></div>
+					<img src="/assets/screenshot-triage.png" alt="A failed run with the AI triage panel isolating db01's apply step as the root cause and suggesting next steps" loading="lazy">
+				</figure>
+				<figure class="window reveal">
+					<div class="window-bar"><span></span><span></span><span></span><em>yardmaster · ask your fleet</em></div>
+					<img src="/assets/screenshot-ask.png" alt="The overview page answering a plain-language question about which hosts are failing and where to start" loading="lazy">
+				</figure>
+			</div>
+		</section>
+
 		<section class="section wrap" id="compare">
 			<div class="section-head reveal">
 				<h2>The honest side-by-side</h2>
-				<p>Where Yardmaster pulls ahead, and the one place it trails today. The full head-to-head is in the <a href="https://github.com/dcadolph/yardmaster/blob/main/docs/comparison.md">comparison doc</a>, and <a href="/docs/reliability.html">how runs execute under load</a> covers the engine underneath.</p>
+				<p>Where Yardmaster pulls ahead, and the one place it trails today. The full head-to-head is in the <a href="/docs/comparison">comparison doc</a>, and <a href="/docs/reliability">how runs execute under load</a> covers the engine underneath.</p>
 			</div>
 			<div class="table-wrap reveal">
 				<table class="compare">
@@ -198,6 +227,7 @@
 						<tr><td>One-command migration in</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td><td><i class="n"></i></td></tr>
 						<tr><td>Drift detection from a dry run</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td><td><i class="n"></i></td></tr>
 						<tr><td>Drag-and-drop workflow editor</td><td class="us"><i class="y"></i></td><td><i class="y"></i></td><td><i class="n"></i></td></tr>
+						<tr><td>Advisory AI: triage, fleet answers, drafted runs</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td><td><i class="n"></i></td></tr>
 					</tbody>
 				</table>
 			</div>
@@ -225,7 +255,7 @@ open http://localhost:8080/ui/</code></pre>
 			<h2>Put AWX and Semaphore to bed.</h2>
 			<p>Structured runs, balanced splits, a fleet that remembers, and a control plane that proves itself, from one binary.</p>
 			<div class="hero-cta center">
-				<a class="btn big" href="/get-started.html">Get started</a>
+				<a class="btn big" href="/get-started">Get started</a>
 				<a class="ghost big" href="/docs/">Read the docs</a>
 			</div>
 		</section>
@@ -237,7 +267,7 @@ open http://localhost:8080/ui/</code></pre>
 			<nav>
 				<a href="https://github.com/dcadolph/yardmaster">GitHub</a>
 				<a href="/docs/">Docs</a>
-				<a href="https://github.com/dcadolph/yardmaster/blob/main/docs/comparison.md">Compare</a>
+				<a href="/docs/comparison">Compare</a>
 				<a href="https://github.com/dcadolph/yardmaster/blob/main/LICENSE">License</a>
 			</nav>
 			<span class="foot-note">Open source · BSL 1.1 · self-host free</span>

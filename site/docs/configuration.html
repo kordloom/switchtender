@@ -5,11 +5,11 @@
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>Configuration · Yardmaster docs</title>
 	<meta name="description" content="Yardmaster is one binary with subcommands. This page lists every command, flag, and environment variable.">
-	<link rel="canonical" href="https://yardmaster.dev/docs/configuration.html">
+	<link rel="canonical" href="https://yardmaster.dev/docs/configuration">
 	<meta property="og:title" content="Configuration · Yardmaster docs">
 	<meta property="og:description" content="Yardmaster is one binary with subcommands. This page lists every command, flag, and environment variable.">
 	<meta property="og:type" content="article">
-	<meta property="og:url" content="https://yardmaster.dev/docs/configuration.html">
+	<meta property="og:url" content="https://yardmaster.dev/docs/configuration">
 	<link rel="icon" href="/favicon.ico" sizes="any">
 	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
 	<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
@@ -31,7 +31,7 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/index.html">Overview</a><a href="/docs/quickstart.html">Quickstart</a><a href="/docs/faq.html">FAQ</a><a href="/docs/switching-from-awx.html">Switching from AWX</a><a href="/docs/migration.html">Migration</a><a href="/docs/tutorials.html">Tutorials</a><a href="/docs/tutorial-run-a-job.html">Run a job</a><a href="/docs/tutorial-save-a-template.html">Save a template</a><a href="/docs/tutorial-schedule-a-job.html">Schedule a job</a><a href="/docs/tutorial-set-a-secret.html">Set a secret</a><a href="/docs/tutorial-migrate.html">Migrate your setup</a><a href="/docs/tool-bash.html">Bash runs</a><a href="/docs/tool-terraform.html">Terraform runs</a><a href="/docs/tool-python.html">Python runs</a><a href="/docs/tool-go.html">Go runs</a><a href="/docs/concepts.html">Concepts</a><a href="/docs/reliability.html">Reliability</a><a href="/docs/configuration.html" class="active">Configuration</a><a href="/docs/desktop.html">Desktop</a><a href="/docs/features.html">Features</a><a href="/docs/secrets.html">Secrets</a><a href="/docs/drift.html">Drift detection</a><a href="/docs/api.html">HTTP API</a><a href="/docs/comparison.html">Yardmaster compared to AWX and Semaphore</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration" class="active">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">Yardmaster compared to AWX and Semaphore</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
@@ -389,7 +389,7 @@ retention, or the API rejects every request.</p>
 <h2 id="desktop">desktop</h2>
 <p>Runs Yardmaster as a local desktop application: it serves on a private loopback port, stores its
 data in a per-user directory, and opens the web UI in the default browser. It takes no flags. Set
-<code>YARDMASTER_DESKTOP_NO_BROWSER</code> to skip opening a browser. See <a href="/docs/desktop.html">Desktop</a> for packaging a
+<code>YARDMASTER_DESKTOP_NO_BROWSER</code> to skip opening a browser. See <a href="/docs/desktop">Desktop</a> for packaging a
 macOS app or a Windows installer.</p>
 <h2 id="worker">worker</h2>
 <p>Leases pending runs from the shared store and executes them. Point it and a server at the same
@@ -464,7 +464,7 @@ expires.</li>
 </ul>
 <p>All user subcommands take <code>--db</code>.</p>
 <h2 id="import">import</h2>
-<p>Migrates from AWX or Semaphore. See <a href="/docs/migration.html">Migration</a>.</p>
+<p>Migrates from AWX or Semaphore. See <a href="/docs/migration">Migration</a>.</p>
 <ul>
 <li><code>import awx &lt;export.json&gt; [--apply]</code>.</li>
 <li><code>import semaphore &lt;export.json&gt; [--apply]</code>.</li>

@@ -5,11 +5,11 @@
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>Migrate your setup · Yardmaster docs</title>
 	<meta name="description" content="You do not rebuild your automation by hand. Yardmaster reads an AWX or Semaphore export and creates the equivalent projects, inventories, templates, surveys, schedules, and credentials in one pass.">
-	<link rel="canonical" href="https://yardmaster.dev/docs/tutorial-migrate.html">
+	<link rel="canonical" href="https://yardmaster.dev/docs/tutorial-migrate">
 	<meta property="og:title" content="Migrate your setup · Yardmaster docs">
 	<meta property="og:description" content="You do not rebuild your automation by hand. Yardmaster reads an AWX or Semaphore export and creates the equivalent projects, inventories, templates, surveys, schedules, and credentials in one pass.">
 	<meta property="og:type" content="article">
-	<meta property="og:url" content="https://yardmaster.dev/docs/tutorial-migrate.html">
+	<meta property="og:url" content="https://yardmaster.dev/docs/tutorial-migrate">
 	<link rel="icon" href="/favicon.ico" sizes="any">
 	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
 	<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
@@ -31,7 +31,7 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/index.html">Overview</a><a href="/docs/quickstart.html">Quickstart</a><a href="/docs/faq.html">FAQ</a><a href="/docs/switching-from-awx.html">Switching from AWX</a><a href="/docs/migration.html">Migration</a><a href="/docs/tutorials.html">Tutorials</a><a href="/docs/tutorial-run-a-job.html">Run a job</a><a href="/docs/tutorial-save-a-template.html">Save a template</a><a href="/docs/tutorial-schedule-a-job.html">Schedule a job</a><a href="/docs/tutorial-set-a-secret.html">Set a secret</a><a href="/docs/tutorial-migrate.html" class="active">Migrate your setup</a><a href="/docs/tool-bash.html">Bash runs</a><a href="/docs/tool-terraform.html">Terraform runs</a><a href="/docs/tool-python.html">Python runs</a><a href="/docs/tool-go.html">Go runs</a><a href="/docs/concepts.html">Concepts</a><a href="/docs/reliability.html">Reliability</a><a href="/docs/configuration.html">Configuration</a><a href="/docs/desktop.html">Desktop</a><a href="/docs/features.html">Features</a><a href="/docs/secrets.html">Secrets</a><a href="/docs/drift.html">Drift detection</a><a href="/docs/api.html">HTTP API</a><a href="/docs/comparison.html">Yardmaster compared to AWX and Semaphore</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate" class="active">Migrate your setup</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">Yardmaster compared to AWX and Semaphore</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
@@ -55,9 +55,9 @@ yardmaster import awx awx-export.json --db yardmaster.db --apply    # write
 writes.</p>
 <h2 id="finish-by-setting-secrets">Finish by setting secrets</h2>
 <p>Exports never contain secret values, so credentials arrive as named shells. The report lists which
-ones need a secret. Fill them in once with <a href="/docs/tutorial-set-a-secret.html">set a secret</a>, and everything
+ones need a secret. Fill them in once with <a href="/docs/tutorial-set-a-secret">set a secret</a>, and everything
 else is already in place.</p>
-<p>The full field-by-field mapping and its current limits are in the <a href="/docs/migration.html">migration guide</a>.</p>
+<p>The full field-by-field mapping and its current limits are in the <a href="/docs/migration">migration guide</a>.</p>
 
 		</main>
 	</div>

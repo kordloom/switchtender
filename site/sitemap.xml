@@ -1,29 +1,29 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url><loc>https://yardmaster.dev/</loc></url>
-  <url><loc>https://yardmaster.dev/get-started.html</loc></url>
+  <url><loc>https://yardmaster.dev/get-started</loc></url>
   <url><loc>https://yardmaster.dev/docs/</loc></url>
-  <url><loc>https://yardmaster.dev/docs/quickstart.html</loc></url>
-  <url><loc>https://yardmaster.dev/docs/faq.html</loc></url>
-  <url><loc>https://yardmaster.dev/docs/switching-from-awx.html</loc></url>
-  <url><loc>https://yardmaster.dev/docs/migration.html</loc></url>
-  <url><loc>https://yardmaster.dev/docs/tutorials.html</loc></url>
-  <url><loc>https://yardmaster.dev/docs/tutorial-run-a-job.html</loc></url>
-  <url><loc>https://yardmaster.dev/docs/tutorial-save-a-template.html</loc></url>
-  <url><loc>https://yardmaster.dev/docs/tutorial-schedule-a-job.html</loc></url>
-  <url><loc>https://yardmaster.dev/docs/tutorial-set-a-secret.html</loc></url>
-  <url><loc>https://yardmaster.dev/docs/tutorial-migrate.html</loc></url>
-  <url><loc>https://yardmaster.dev/docs/tool-bash.html</loc></url>
-  <url><loc>https://yardmaster.dev/docs/tool-terraform.html</loc></url>
-  <url><loc>https://yardmaster.dev/docs/tool-python.html</loc></url>
-  <url><loc>https://yardmaster.dev/docs/tool-go.html</loc></url>
-  <url><loc>https://yardmaster.dev/docs/concepts.html</loc></url>
-  <url><loc>https://yardmaster.dev/docs/reliability.html</loc></url>
-  <url><loc>https://yardmaster.dev/docs/configuration.html</loc></url>
-  <url><loc>https://yardmaster.dev/docs/desktop.html</loc></url>
-  <url><loc>https://yardmaster.dev/docs/features.html</loc></url>
-  <url><loc>https://yardmaster.dev/docs/secrets.html</loc></url>
-  <url><loc>https://yardmaster.dev/docs/drift.html</loc></url>
-  <url><loc>https://yardmaster.dev/docs/api.html</loc></url>
-  <url><loc>https://yardmaster.dev/docs/comparison.html</loc></url>
+  <url><loc>https://yardmaster.dev/docs/quickstart</loc></url>
+  <url><loc>https://yardmaster.dev/docs/faq</loc></url>
+  <url><loc>https://yardmaster.dev/docs/switching-from-awx</loc></url>
+  <url><loc>https://yardmaster.dev/docs/migration</loc></url>
+  <url><loc>https://yardmaster.dev/docs/tutorials</loc></url>
+  <url><loc>https://yardmaster.dev/docs/tutorial-run-a-job</loc></url>
+  <url><loc>https://yardmaster.dev/docs/tutorial-save-a-template</loc></url>
+  <url><loc>https://yardmaster.dev/docs/tutorial-schedule-a-job</loc></url>
+  <url><loc>https://yardmaster.dev/docs/tutorial-set-a-secret</loc></url>
+  <url><loc>https://yardmaster.dev/docs/tutorial-migrate</loc></url>
+  <url><loc>https://yardmaster.dev/docs/tool-bash</loc></url>
+  <url><loc>https://yardmaster.dev/docs/tool-terraform</loc></url>
+  <url><loc>https://yardmaster.dev/docs/tool-python</loc></url>
+  <url><loc>https://yardmaster.dev/docs/tool-go</loc></url>
+  <url><loc>https://yardmaster.dev/docs/concepts</loc></url>
+  <url><loc>https://yardmaster.dev/docs/reliability</loc></url>
+  <url><loc>https://yardmaster.dev/docs/configuration</loc></url>
+  <url><loc>https://yardmaster.dev/docs/desktop</loc></url>
+  <url><loc>https://yardmaster.dev/docs/features</loc></url>
+  <url><loc>https://yardmaster.dev/docs/secrets</loc></url>
+  <url><loc>https://yardmaster.dev/docs/drift</loc></url>
+  <url><loc>https://yardmaster.dev/docs/api</loc></url>
+  <url><loc>https://yardmaster.dev/docs/comparison</loc></url>
 </urlset>

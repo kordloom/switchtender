@@ -5,11 +5,11 @@
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>Concepts · Yardmaster docs</title>
 	<meta name="description" content="A run is one execution of a playbook against an inventory. Yardmaster shells out to ansible-playbook and captures both a human log and a structured event stream through an embedded callback plugin, so">
-	<link rel="canonical" href="https://yardmaster.dev/docs/concepts.html">
+	<link rel="canonical" href="https://yardmaster.dev/docs/concepts">
 	<meta property="og:title" content="Concepts · Yardmaster docs">
 	<meta property="og:description" content="A run is one execution of a playbook against an inventory. Yardmaster shells out to ansible-playbook and captures both a human log and a structured event stream through an embedded callback plugin, so">
 	<meta property="og:type" content="article">
-	<meta property="og:url" content="https://yardmaster.dev/docs/concepts.html">
+	<meta property="og:url" content="https://yardmaster.dev/docs/concepts">
 	<link rel="icon" href="/favicon.ico" sizes="any">
 	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
 	<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
@@ -31,7 +31,7 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/index.html">Overview</a><a href="/docs/quickstart.html">Quickstart</a><a href="/docs/faq.html">FAQ</a><a href="/docs/switching-from-awx.html">Switching from AWX</a><a href="/docs/migration.html">Migration</a><a href="/docs/tutorials.html">Tutorials</a><a href="/docs/tutorial-run-a-job.html">Run a job</a><a href="/docs/tutorial-save-a-template.html">Save a template</a><a href="/docs/tutorial-schedule-a-job.html">Schedule a job</a><a href="/docs/tutorial-set-a-secret.html">Set a secret</a><a href="/docs/tutorial-migrate.html">Migrate your setup</a><a href="/docs/tool-bash.html">Bash runs</a><a href="/docs/tool-terraform.html">Terraform runs</a><a href="/docs/tool-python.html">Python runs</a><a href="/docs/tool-go.html">Go runs</a><a href="/docs/concepts.html" class="active">Concepts</a><a href="/docs/reliability.html">Reliability</a><a href="/docs/configuration.html">Configuration</a><a href="/docs/desktop.html">Desktop</a><a href="/docs/features.html">Features</a><a href="/docs/secrets.html">Secrets</a><a href="/docs/drift.html">Drift detection</a><a href="/docs/api.html">HTTP API</a><a href="/docs/comparison.html">Yardmaster compared to AWX and Semaphore</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts" class="active">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">Yardmaster compared to AWX and Semaphore</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
@@ -87,7 +87,7 @@ changes on upgrade until grants are added.</p>
 <p>A worker is any process running the executor against the shared store. Every process, the server
 included, competes for pending runs through the store. A run can target a named queue, and only
 workers serving that queue run it, which places work across a mixed fleet. A lease keeps a run
-attributable, and a janitor requeues work whose holder went away. The <a href="/docs/reliability.html">reliability</a>
+attributable, and a janitor requeues work whose holder went away. The <a href="/docs/reliability">reliability</a>
 page details how work is claimed, bounded, recovered, and kept consistent across workers.</p>
 <h2 id="provable-audit">Provable audit</h2>
 <p>Every authenticated mutation is recorded in the audit trail, and each entry is linked into a SHA-256
