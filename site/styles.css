@@ -342,3 +342,19 @@ h1 {
 .lg-ok { color: #3fb950; font-weight: 600; }
 .lg-changed { color: #d29922; font-weight: 600; }
 .lg-failed { color: #f85149; font-weight: 600; }
+
+/* UTLX easter egg: a tank car crosses the yard when summoned. */
+.utlx { position: fixed; left: 0; right: 0; bottom: 0; height: 112px; z-index: 200; pointer-events: none; overflow: hidden; }
+.utlx-rail { position: absolute; left: 0; right: 0; bottom: 18px; height: 2px; background: rgba(230, 237, 243, 0.16); }
+.utlx-car { position: absolute; bottom: 20px; left: 100%; width: 210px; animation: utlx-cross 9s linear forwards; will-change: transform; }
+.utlx-car svg { display: block; width: 100%; height: auto; }
+.utlx-wheel { transform-origin: center; transform-box: fill-box; animation: utlx-roll 0.9s linear infinite; }
+.utlx-note { position: absolute; left: 50%; transform: translateX(-50%); bottom: 78px; font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 12.5px; letter-spacing: 1.5px; color: rgba(230, 237, 243, 0.62); white-space: nowrap; opacity: 0; animation: utlx-note 9s linear forwards; }
+.utlx-note b { color: var(--accent); font-weight: 600; }
+@keyframes utlx-cross { to { transform: translateX(calc(-100vw - 220px)); } }
+@keyframes utlx-roll { to { transform: rotate(-360deg); } }
+@keyframes utlx-note { 0%, 22% { opacity: 0; } 34%, 78% { opacity: 1; } 90%, 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+	.utlx-car { left: 50%; margin-left: -105px; }
+	.utlx-note { opacity: 1; }
+}
