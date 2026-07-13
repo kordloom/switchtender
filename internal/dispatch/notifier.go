@@ -28,7 +28,9 @@ func (f NotifierFunc) Notify(ctx context.Context, r *run.Run) error {
 var notifiers = map[string]Notifier{}
 
 // RegisterNotifier adds a notification channel under name. It panics on an empty or duplicate name
-// or a nil notifier, which is a programming error caught at startup.
+// or a nil notifier, which is a programming error caught at startup. The names discord, ntfy, and
+// teams are claimed by the official yardmaster-plugins binary, so a future built-in must not take
+// them.
 func RegisterNotifier(name string, n Notifier) {
 	if name == "" {
 		panic("dispatch: cannot register an empty notifier name")

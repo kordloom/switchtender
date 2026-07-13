@@ -142,6 +142,11 @@ at startup with a clear message. Compiling in and plugging in register the same 
 same at run time. Pick per extension: compile in for one static artifact, plug in for extending a
 release binary you did not build.
 
+For a working example, the official
+[yardmaster-plugins](https://github.com/dcadolph/yardmaster-plugins) repo ships
+`yardmaster-notify`, one plugin binary that delivers runs to Discord, ntfy, and Microsoft Teams.
+It doubles as the template for writing your own.
+
 ## The seams in detail
 
 ### Execution tools

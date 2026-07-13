@@ -156,6 +156,10 @@ not take the server down. A name that collides with a built-in or another plugin
 at startup with a clear message. Compiling in and plugging in register the same way and behave the
 same at run time. Pick per extension: compile in for one static artifact, plug in for extending a
 release binary you did not build.</p>
+<p>For a working example, the official
+<a href="https://github.com/dcadolph/yardmaster-plugins">yardmaster-plugins</a> repo ships
+<code>yardmaster-notify</code>, one plugin binary that delivers runs to Discord, ntfy, and Microsoft Teams.
+It doubles as the template for writing your own.</p>
 <h2 id="the-seams-in-detail">The seams in detail</h2>
 <h3 id="execution-tools">Execution tools</h3>
 <p>A <code>ToolRunner</code> receives the run as a <code>ToolSpec</code> and a writer for its output. <code>Command</code> carries the
