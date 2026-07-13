@@ -228,6 +228,46 @@ that variable is unset.</p>
 <td>Map a directory group to a role as <code>groupDN=role</code>. A matched group sets the role on every sign-in. Repeatable.</td>
 </tr>
 <tr>
+<td><code>--saml-idp-metadata-url</code></td>
+<td>none</td>
+<td>SAML IdP metadata URL to enable SAML sign-in. Empty leaves SAML off.</td>
+</tr>
+<tr>
+<td><code>--saml-base-url</code></td>
+<td>none</td>
+<td>Public base URL of this server, used to build the SAML entity id and ACS endpoint.</td>
+</tr>
+<tr>
+<td><code>--saml-cert</code></td>
+<td>none</td>
+<td>Path to the service provider certificate, PEM.</td>
+</tr>
+<tr>
+<td><code>--saml-key</code></td>
+<td>none</td>
+<td>Path to the service provider RSA private key, PEM.</td>
+</tr>
+<tr>
+<td><code>--saml-username-attr</code></td>
+<td>NameID</td>
+<td>Assertion attribute used as the username. Empty uses the subject NameID.</td>
+</tr>
+<tr>
+<td><code>--saml-groups-attr</code></td>
+<td><code>groups</code></td>
+<td>Assertion attribute holding the user's groups, used with <code>--saml-role-map</code>.</td>
+</tr>
+<tr>
+<td><code>--saml-default-role</code></td>
+<td><code>viewer</code></td>
+<td>Role granted to an account created on first SAML sign-in.</td>
+</tr>
+<tr>
+<td><code>--saml-role-map</code></td>
+<td>none</td>
+<td>Map an asserted group to a role as <code>group=role</code>. A matched group sets the role on every sign-in. Repeatable.</td>
+</tr>
+<tr>
 <td><code>--jwt-jwks-url</code></td>
 <td>none</td>
 <td>JWKS URL to enable bearer JWT sign-in, so a service can present a JWT minted elsewhere.</td>

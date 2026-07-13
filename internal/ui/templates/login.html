@@ -16,6 +16,11 @@
 		<h1>Sign in</h1>
 		{{if .OIDCEnabled}}
 		<a class="button primary sso" href="/auth/oidc/login">Sign in with SSO</a>
+		{{end}}
+		{{if .SAMLEnabled}}
+		<a class="button primary sso" href="/auth/saml/login">Sign in with SAML</a>
+		{{end}}
+		{{if or .OIDCEnabled .SAMLEnabled}}
 		<div class="sso-divider muted">or</div>
 		{{end}}
 		<form id="account-form" class="stack">

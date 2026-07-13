@@ -63,6 +63,9 @@ Every endpoint the server exposes. The API is served under the `/v1` base path. 
 | POST   | `/v1/auth/check`           | Verify an API token.                                    |
 | GET    | `/auth/oidc/login`      | Start the OpenID Connect sign-in handshake.             |
 | GET    | `/auth/oidc/callback`   | Complete the OIDC handshake and issue a token.          |
+| GET    | `/auth/saml/login`      | Start the SAML sign-in handshake.                       |
+| POST   | `/auth/saml/acs`        | Consume the IdP assertion and issue a token.            |
+| GET    | `/auth/saml/metadata`   | Service provider metadata for IdP registration.         |
 | POST   | `/v1/users`                | Create an account with a role.                          |
 | GET    | `/v1/users`                | List accounts.                                          |
 | PUT    | `/v1/users/{id}`           | Update an account's role or password.                   |

@@ -156,7 +156,7 @@ func (o *OIDCAuth) callback(w http.ResponseWriter, r *http.Request) {
 		o.fail(w, r, "could not sign in")
 		return
 	}
-	plain, err := o.mintSession(r.Context(), u)
+	plain, err := mintSessionToken(r.Context(), o.tokens, u)
 	if err != nil {
 		o.log.Error("oidc: mint session: " + err.Error())
 		o.fail(w, r, "could not sign in")
@@ -164,21 +164,6 @@ func (o *OIDCAuth) callback(w http.ResponseWriter, r *http.Request) {
 	}
 	frag := url.Values{"access_token": {plain}, "role": {string(u.Role)}, "user": {u.Username}}
 	http.Redirect(w, r, "/ui/#"+frag.Encode(), http.StatusFound)
-}
-
-// mintSession creates and stores a session token owned by u and returns its plaintext once.
-func (o *OIDCAuth) mintSession(ctx context.Context, u *user.User) (string, error) {
-	plain, tok, err := auth.New("sso " + u.Username)
-	if err != nil {
-		return "", err
-	}
-	tok.UserID = u.ID
-	expires := time.Now().Add(sessionTokenTTL)
-	tok.ExpiresAt = &expires
-	if err := o.tokens.Save(ctx, tok); err != nil {
-		return "", err
-	}
-	return plain, nil
 }
 
 // provision returns the account for username or creates one with the default role on first

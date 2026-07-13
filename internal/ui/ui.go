@@ -41,12 +41,14 @@ type UI struct {
 	matrixCap int
 	// oidcEnabled shows the single sign-on button on the sign-in page when set.
 	oidcEnabled bool
+	// samlEnabled shows the SAML sign-in button on the sign-in page when set.
+	samlEnabled bool
 }
 
 // New parses the embedded templates and returns a UI. It panics if the embedded templates fail to
 // parse, which is a build time programming error. docs, when non-nil, is the documentation tree
 // served under /ui/docs; readOnly hides the launch panel and run action buttons for a demo.
-func New(log *zap.Logger, docs fs.FS, readOnly bool, matrixCap int, oidcEnabled bool) *UI {
+func New(log *zap.Logger, docs fs.FS, readOnly bool, matrixCap int, oidcEnabled, samlEnabled bool) *UI {
 	if log == nil {
 		log = zap.NewNop()
 	}
@@ -58,6 +60,7 @@ func New(log *zap.Logger, docs fs.FS, readOnly bool, matrixCap int, oidcEnabled 
 		readOnly:    readOnly,
 		matrixCap:   matrixCap,
 		oidcEnabled: oidcEnabled,
+		samlEnabled: samlEnabled,
 	}
 }
 
@@ -185,7 +188,7 @@ func (u *UI) sources(w http.ResponseWriter, _ *http.Request) {
 
 // login renders the token sign in page.
 func (u *UI) login(w http.ResponseWriter, _ *http.Request) {
-	u.render(w, "login.html", map[string]any{"OIDCEnabled": u.oidcEnabled})
+	u.render(w, "login.html", map[string]any{"OIDCEnabled": u.oidcEnabled, "SAMLEnabled": u.samlEnabled})
 }
 
 // schedules renders the schedules page.

@@ -238,6 +238,12 @@ func (g *authGate) protects(r *http.Request) bool {
 	if r.Method == http.MethodGet && strings.HasPrefix(p, "/auth/oidc/") {
 		return false
 	}
+	// The SAML handshake also runs before the user has a token: the login redirect, the metadata an
+	// IdP administrator reads, and the assertion the identity provider posts back to the ACS.
+	if strings.HasPrefix(p, "/auth/saml/") &&
+		(r.Method == http.MethodGet || (r.Method == http.MethodPost && p == "/auth/saml/acs")) {
+		return false
+	}
 	// Webhook triggers carry their own secret token in the path, so they bypass the token gate.
 	if r.Method == http.MethodPost && strings.HasPrefix(p, "/hooks/") {
 		return false

@@ -62,6 +62,14 @@ Runs the HTTP API, the in-process executor, the scheduler, the retention sweeper
 | `--ldap-user-filter` | `(uid=%s)` | Search filter with one `%s` for the username. |
 | `--ldap-default-role` | `viewer` | Role for an account created on first directory sign-in. |
 | `--ldap-role-map` | none | Map a directory group to a role as `groupDN=role`. A matched group sets the role on every sign-in. Repeatable. |
+| `--saml-idp-metadata-url` | none | SAML IdP metadata URL to enable SAML sign-in. Empty leaves SAML off. |
+| `--saml-base-url` | none | Public base URL of this server, used to build the SAML entity id and ACS endpoint. |
+| `--saml-cert` | none | Path to the service provider certificate, PEM. |
+| `--saml-key` | none | Path to the service provider RSA private key, PEM. |
+| `--saml-username-attr` | NameID | Assertion attribute used as the username. Empty uses the subject NameID. |
+| `--saml-groups-attr` | `groups` | Assertion attribute holding the user's groups, used with `--saml-role-map`. |
+| `--saml-default-role` | `viewer` | Role granted to an account created on first SAML sign-in. |
+| `--saml-role-map` | none | Map an asserted group to a role as `group=role`. A matched group sets the role on every sign-in. Repeatable. |
 | `--jwt-jwks-url` | none | JWKS URL to enable bearer JWT sign-in, so a service can present a JWT minted elsewhere. |
 | `--jwt-issuer` | none | Expected token issuer, the `iss` claim. |
 | `--jwt-audience` | none | Expected token audience, empty to skip the audience check. |

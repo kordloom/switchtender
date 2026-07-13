@@ -4,11 +4,30 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 
+	"github.com/dcadolph/yardmaster/internal/auth"
 	"github.com/dcadolph/yardmaster/internal/user"
 )
+
+// mintSessionToken creates and stores a session token owned by u and returns its plaintext once.
+// Every single sign-on flow mints through here, so an SSO session looks exactly like one from the
+// password login.
+func mintSessionToken(ctx context.Context, tokens auth.Store, u *user.User) (string, error) {
+	plain, tok, err := auth.New("sso " + u.Username)
+	if err != nil {
+		return "", err
+	}
+	tok.UserID = u.ID
+	expires := time.Now().Add(sessionTokenTTL)
+	tok.ExpiresAt = &expires
+	if err := tokens.Save(ctx, tok); err != nil {
+		return "", err
+	}
+	return plain, nil
+}
 
 // roleForGroups returns the role for the first group found in roleMap, or defaultRole, so a directory
 // or token group drives an account's role. Group names are matched case-insensitively.

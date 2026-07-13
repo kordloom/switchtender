@@ -173,6 +173,12 @@ func WithLDAP(l *LDAPAuth) Option {
 	return func(srv *Server) { srv.ldap = l }
 }
 
+// WithSAML enables single sign-on through a SAML identity provider. When set, the sign-in page
+// offers a SAML button and the /auth/saml routes are served.
+func WithSAML(a *SAMLAuth) Option {
+	return func(srv *Server) { srv.saml = a }
+}
+
 // WithJWT enables bearer JWT authentication. When set, a request whose bearer token is a JWT is
 // validated against the issuer's keys instead of the token store, so a service can present a JWT
 // minted elsewhere.
@@ -274,6 +280,8 @@ type Server struct {
 	matrixCap int
 	// oidc enables single sign-on when configured, nil when SSO is off.
 	oidc *OIDCAuth
+	// saml enables SAML single sign-on when configured, nil when SAML is off.
+	saml *SAMLAuth
 	// ldap enables directory sign-in when configured, nil when LDAP is off.
 	ldap *LDAPAuth
 	// jwt validates a bearer JWT when configured, nil when JWT sign-in is off.
@@ -295,7 +303,7 @@ func New(store run.Store, submitter Submitter, log *zap.Logger, opts ...Option) 
 	for _, opt := range opts {
 		opt(srv)
 	}
-	srv.web = ui.New(srv.log, srv.docs, srv.readOnly, srv.matrixCap, srv.oidc != nil)
+	srv.web = ui.New(srv.log, srv.docs, srv.readOnly, srv.matrixCap, srv.oidc != nil, srv.saml != nil)
 	return srv
 }
 
@@ -345,6 +353,11 @@ func (s *Server) Handler() http.Handler {
 	if s.oidc != nil {
 		mux.HandleFunc("GET /auth/oidc/login", s.oidc.login)
 		mux.HandleFunc("GET /auth/oidc/callback", s.oidc.callback)
+	}
+	if s.saml != nil {
+		mux.HandleFunc("GET /auth/saml/login", s.saml.login)
+		mux.HandleFunc("POST /auth/saml/acs", s.saml.acs)
+		mux.HandleFunc("GET /auth/saml/metadata", s.saml.metadata)
 	}
 	mux.Handle("POST /v1/users", createUserHandler(s.users, s.log))
 	mux.Handle("PUT /v1/users/{id}", updateUserHandler(s.users, s.log))

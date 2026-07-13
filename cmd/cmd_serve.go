@@ -116,6 +116,19 @@ var (
 	serveLDAPRoleMap     []string
 )
 
+// serveSAML* hold the SAML single sign-on flags. Yardmaster is the service provider and the
+// certificate and key files are its PEM keypair.
+var (
+	serveSAMLIDPMetadataURL string
+	serveSAMLBaseURL        string
+	serveSAMLCert           string
+	serveSAMLKey            string
+	serveSAMLUsernameAttr   string
+	serveSAMLGroupsAttr     string
+	serveSAMLDefaultRole    string
+	serveSAMLRoleMap        []string
+)
+
 // serveJWT* hold the bearer JWT sign-in flags, so a service can present a JWT minted elsewhere, such
 // as by jwtmint, instead of a Yardmaster token.
 var (
@@ -259,6 +272,23 @@ func init() {
 		"Role granted to an account created on first directory sign-in: admin, operator, or viewer.")
 	serveCmd.Flags().StringArrayVar(&serveLDAPRoleMap, "ldap-role-map", nil,
 		"Map a directory group to a role as groupDN=role, for example cn=admins,dc=x=admin. "+
+			"A matched group sets the user's role on every sign-in. Repeatable.")
+	serveCmd.Flags().StringVar(&serveSAMLIDPMetadataURL, "saml-idp-metadata-url", "",
+		"SAML IdP metadata URL to enable SAML sign-in. Empty leaves SAML off.")
+	serveCmd.Flags().StringVar(&serveSAMLBaseURL, "saml-base-url", "",
+		"Public base URL of this server, used to build the SAML entity id and ACS endpoint.")
+	serveCmd.Flags().StringVar(&serveSAMLCert, "saml-cert", "",
+		"Path to the service provider certificate, PEM.")
+	serveCmd.Flags().StringVar(&serveSAMLKey, "saml-key", "",
+		"Path to the service provider RSA private key, PEM.")
+	serveCmd.Flags().StringVar(&serveSAMLUsernameAttr, "saml-username-attr", "",
+		"Assertion attribute used as the username. Empty uses the subject NameID.")
+	serveCmd.Flags().StringVar(&serveSAMLGroupsAttr, "saml-groups-attr", "groups",
+		"Assertion attribute holding the user's groups, used with --saml-role-map.")
+	serveCmd.Flags().StringVar(&serveSAMLDefaultRole, "saml-default-role", "viewer",
+		"Role granted to an account created on first SAML sign-in: admin, operator, or viewer.")
+	serveCmd.Flags().StringArrayVar(&serveSAMLRoleMap, "saml-role-map", nil,
+		"Map an asserted group to a role as group=role, for example platform-admins=admin. "+
 			"A matched group sets the user's role on every sign-in. Repeatable.")
 	serveCmd.Flags().StringVar(&serveJWTJWKSURL, "jwt-jwks-url", "",
 		"JWKS URL to enable bearer JWT sign-in, for example https://jwtmint.example.com/jwks.")
@@ -498,6 +528,17 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
+	var samlAuth *server.SAMLAuth
+	if serveSAMLIDPMetadataURL != "" {
+		samlAuth, err = server.NewSAMLAuth(cmd.Context(), serveSAMLIDPMetadataURL, serveSAMLBaseURL,
+			serveSAMLCert, serveSAMLKey, serveSAMLUsernameAttr, serveSAMLGroupsAttr,
+			user.Role(serveSAMLDefaultRole), parseRoleMap(serveSAMLRoleMap),
+			bundle.Users(), bundle.Tokens(), log)
+		if err != nil {
+			return err
+		}
+	}
+
 	var jwtAuth *server.JWTAuth
 	if serveJWTJWKSURL != "" {
 		jwtAuth, err = server.NewJWTAuth(cmd.Context(), serveJWTJWKSURL, serveJWTIssuer,
@@ -533,6 +574,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			server.WithReadOnly(serveReadOnly),
 			server.WithMatrixCap(serveMatrixCap),
 			server.WithOIDC(oidcAuth),
+			server.WithSAML(samlAuth),
 			server.WithLDAP(ldapAuth),
 			server.WithJWT(jwtAuth),
 			server.WithAI(aiProvider),
