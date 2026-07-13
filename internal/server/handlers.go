@@ -408,7 +408,7 @@ func createRunHandler(submitter Submitter, authz *authorizer, log *zap.Logger) h
 		}
 		if !run.ValidTool(req.Tool) {
 			respondError(w, log, http.StatusBadRequest,
-				"tool must be ansible, bash, terraform, or python")
+				"tool must be ansible, bash, terraform, opentofu, python, powershell, or go")
 			return
 		}
 		if run.NormalizeTool(req.Tool) == run.ToolAnsible {
@@ -491,7 +491,7 @@ func createPipelineHandler(submitter Submitter, authz *authorizer, log *zap.Logg
 		for _, step := range req.Steps {
 			if !run.ValidTool(step.Tool) {
 				respondError(w, log, http.StatusBadRequest,
-					"each step tool must be ansible, bash, terraform, python, or go")
+					"each step tool must be ansible, bash, terraform, opentofu, python, powershell, or go")
 				return
 			}
 			if run.NormalizeTool(step.Tool) == run.ToolAnsible && step.Playbook == "" {

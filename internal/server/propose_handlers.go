@@ -17,7 +17,7 @@ import (
 // rather than cautious, but to leave destructive choices to the reviewer.
 const proposeRunSystemPrompt = "You turn a plain-language request into one Yardmaster run. Reply " +
 	"with only a JSON object and nothing else, no prose and no markdown fence. The object has these " +
-	"fields: tool (one of bash, python, go, ansible), command (the script for bash, python, or go), " +
+	"fields: tool (one of bash, python, powershell, go, opentofu, terraform, ansible), command (the script for bash, python, powershell, or go; the working directory for terraform and opentofu), " +
 	"playbook (the playbook path for ansible), limit (an optional host pattern), dry_run (true to " +
 	"run in no-change mode), and summary (a one-line description of what the run does). Set command " +
 	"for bash, python, and go; set playbook for ansible; leave the other empty. Keep the command " +

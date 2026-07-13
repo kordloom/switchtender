@@ -68,7 +68,7 @@ func templateToolError(req createTemplateRequest) string {
 		return "name is required"
 	}
 	if !run.ValidTool(req.Tool) {
-		return "tool must be ansible, bash, terraform, or python"
+		return "tool must be ansible, bash, terraform, opentofu, python, powershell, or go"
 	}
 	if run.NormalizeTool(req.Tool) == run.ToolAnsible {
 		if req.Playbook == "" {

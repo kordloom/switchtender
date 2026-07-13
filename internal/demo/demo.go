@@ -262,7 +262,7 @@ func materialize() (string, error) {
 }
 
 // seedConfig stores browsable sample projects, inventories, credentials, and templates. The templates
-// cover every tool the engine drives, so the Templates list shows Ansible, Bash, Terraform, Python,
+// cover the main tools the engine drives, so the Templates list shows Ansible, Bash, Terraform, Python,
 // and Go presets even on a host that lacks a given tool's binary. It is best effort: a store error is
 // logged and skipped so the runs still seed.
 func seedConfig(ctx context.Context, d Deps, log *zap.Logger) {

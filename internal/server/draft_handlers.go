@@ -25,11 +25,11 @@ const draftBodyCap = 1 << 16
 
 // draftTools are the tools whose step input is an inline script a draft can fill. Ansible steps
 // reference a playbook path and terraform steps reference a directory, so neither takes a draft.
-var draftTools = map[string]bool{"bash": true, "python": true, "go": true}
+var draftTools = map[string]bool{"bash": true, "python": true, "powershell": true, "go": true}
 
 // draftRequest is the body of POST /ai/draft.
 type draftRequest struct {
-	// Tool is the step tool the script targets: bash, python, or go.
+	// Tool is the step tool the script targets: bash, python, powershell, or go.
 	Tool string `json:"tool"`
 	// Prompt describes what the step should do.
 	Prompt string `json:"prompt"`
@@ -52,7 +52,7 @@ func draftStepHandler(provider ai.Provider, log *zap.Logger) http.HandlerFunc {
 		}
 		tool := strings.ToLower(strings.TrimSpace(req.Tool))
 		if !draftTools[tool] {
-			respondError(w, log, http.StatusBadRequest, "tool must be bash, python, or go")
+			respondError(w, log, http.StatusBadRequest, "tool must be bash, python, powershell, or go")
 			return
 		}
 		prompt := strings.TrimSpace(req.Prompt)

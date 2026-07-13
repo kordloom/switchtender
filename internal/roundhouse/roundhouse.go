@@ -61,7 +61,7 @@ type Spec struct {
 	Playbook string
 	// Inventory is the path to the Ansible inventory. When empty, no -i flag is passed.
 	Inventory string
-	// Tool selects the execution engine: ansible, bash, terraform, python, or go. Empty means ansible.
+	// Tool selects the execution engine: ansible, bash, terraform, opentofu, python, powershell, or go. Empty means ansible.
 	Tool string
 	// Command carries the tool's primary input for non-Ansible tools: the script for bash and python,
 	// the source for go, the working directory for terraform.
@@ -196,8 +196,12 @@ type toolRouter struct {
 	bash *bashRunner
 	// terraform runs terraform Specs on the host.
 	terraform *terraformRunner
+	// opentofu runs opentofu Specs on the host with the tofu binary.
+	opentofu *terraformRunner
 	// python runs python Specs on the host.
 	python *pythonRunner
+	// powershell runs powershell Specs on the host with pwsh.
+	powershell *pwshRunner
 	// golang runs go Specs on the host.
 	golang *goRunner
 	// container runs an image-bound Ansible Spec inside its image.
@@ -220,7 +224,9 @@ func newToolRouter(allowContainer bool, limits ContainerLimits, opts ...Option) 
 		ansibleRunner:  host,
 		bash:           newBashRunner(host.baseEnv),
 		terraform:      newTerraformRunner(host.baseEnv),
+		opentofu:       &terraformRunner{binary: "tofu", baseEnv: host.baseEnv},
 		python:         newPythonRunner(host.baseEnv),
+		powershell:     newPwshRunner(host.baseEnv),
 		golang:         newGoRunner(host.baseEnv),
 		container:      newContainerRunner(host.baseEnv, &host.plugin, limits),
 		allowContainer: allowContainer,
@@ -234,8 +240,12 @@ func (t *toolRouter) Run(ctx context.Context, spec Spec, out io.Writer) (Result,
 		return t.bash.Run(ctx, spec, out)
 	case run.ToolTerraform:
 		return t.terraform.Run(ctx, spec, out)
+	case run.ToolOpenTofu:
+		return t.opentofu.Run(ctx, spec, out)
 	case run.ToolPython:
 		return t.python.Run(ctx, spec, out)
+	case run.ToolPowerShell:
+		return t.powershell.Run(ctx, spec, out)
 	case run.ToolGo:
 		return t.golang.Run(ctx, spec, out)
 	case run.ToolAnsible:

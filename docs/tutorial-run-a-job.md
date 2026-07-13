@@ -13,7 +13,7 @@ tool, not only Ansible.
 ## Launch from the UI
 
 1. Open Runs and select Launch run.
-2. Pick the tool. For Ansible, choose a playbook and an inventory. For Bash, Terraform, Python, or Go,
+2. Pick the tool. For Ansible, choose a playbook and an inventory. For Bash, Terraform, OpenTofu, Python, PowerShell, or Go,
    enter the script, or the working directory for Terraform.
 3. Optional: turn on Dry run to preview without making changes. Ansible runs `--check`, Terraform
    runs `plan`, and Bash and Python run a syntax check.

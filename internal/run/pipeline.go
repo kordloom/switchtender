@@ -8,7 +8,7 @@ type PipelineStep struct {
 	Playbook string `json:"playbook"`
 	// Inventory overrides the pipeline inventory for this step when set.
 	Inventory string `json:"inventory,omitempty"`
-	// Tool selects the step's execution engine: ansible, bash, terraform, or python. Empty means
+	// Tool selects the step's execution engine: ansible, bash, terraform, opentofu, python, powershell, or go. Empty means
 	// ansible, so a pipeline can mix tools, for example a terraform step then an ansible step.
 	Tool string `json:"tool,omitempty"`
 	// Command carries the tool's primary input for non-Ansible steps: the script for bash and python,

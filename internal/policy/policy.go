@@ -20,7 +20,7 @@ type Policy struct {
 	ID string `json:"id"`
 	// Name labels the policy for humans, for example "prod terraform destroy".
 	Name string `json:"name"`
-	// Tool matches a run's execution tool: ansible, bash, terraform, or python. Empty matches any.
+	// Tool matches a run's execution tool: ansible, bash, terraform, opentofu, python, powershell, or go. Empty matches any.
 	Tool string `json:"tool,omitempty"`
 	// CommandContains matches when a run's command contains this text. Empty matches any.
 	CommandContains string `json:"command_contains,omitempty"`

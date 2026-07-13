@@ -340,3 +340,8 @@ h1 {
 .duo { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; align-items: start; }
 .duo .window { transform: none; }
 @media (max-width: 900px) { .duo { grid-template-columns: 1fr; } }
+
+/* Inline color-legend words under the demo heading. */
+.lg-ok { color: #3fb950; font-weight: 600; }
+.lg-changed { color: #d29922; font-weight: 600; }
+.lg-failed { color: #f85149; font-weight: 600; }

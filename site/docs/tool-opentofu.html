@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>OpenTofu runs · Yardmaster docs</title>
+	<meta name="description" content="An OpenTofu run provisions infrastructure from a working directory of .tf files with the tofu binary.">
+	<link rel="canonical" href="https://yardmaster.dev/docs/tool-opentofu">
+	<meta property="og:title" content="OpenTofu runs · Yardmaster docs">
+	<meta property="og:description" content="An OpenTofu run provisions infrastructure from a working directory of .tf files with the tofu binary.">
+	<meta property="og:type" content="article">
+	<meta property="og:url" content="https://yardmaster.dev/docs/tool-opentofu">
+	<link rel="icon" href="/favicon.ico" sizes="any">
+	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
+	<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="/docs.css?v=1">
+</head>
+<body>
+	<header class="dnav">
+		<a class="brand" href="/"><img src="/assets/logo-train-tracks-dark.png" alt="Yardmaster" class="brand-train"><span class="brand-word">Yardmaster</span></a>
+		<span class="dnav-tag">Docs</span>
+		<nav class="dnav-links">
+			<a href="/">Home</a>
+			<a href="/#compare">Compare</a>
+			<a href="https://github.com/dcadolph/yardmaster">GitHub</a>
+		</nav>
+	</header>
+	<div class="dshell">
+		<aside class="dside">
+			<nav>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu" class="active">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">Yardmaster compared to AWX and Semaphore</a>
+			</nav>
+		</aside>
+		<main class="dcontent prose">
+			<h1 id="opentofu-runs">OpenTofu runs</h1>
+<p>An OpenTofu run provisions infrastructure from a working directory of <code>.tf</code> files with the <code>tofu</code>
+binary. It behaves exactly like a <a href="/docs/tool-terraform">Terraform run</a>: the run's command names the
+directory, relative to the project checkout. Pick the tool that matches the binary your
+configurations are written for; the two are configuration-compatible for most modules.</p>
+<h2 id="what-runs">What runs</h2>
+<p><code>tofu init</code> runs first. If it fails the run stops there with init's result. Then <code>tofu apply -auto-approve</code> applies the configuration. A dry run runs <code>tofu plan</code> instead, so it previews the
+change without touching infrastructure. All three run with <code>-input=false -no-color</code>, so a run never
+blocks on a prompt.</p>
+<h2 id="how-values-reach-the-configuration">How values reach the configuration</h2>
+<ul>
+<li>Extra vars, including survey answers and template vars, arrive as <code>TF_VAR_</code> environment entries,
+which OpenTofu reads the same way Terraform does. Scalars pass through as strings, lists and maps
+pass as JSON.</li>
+<li>Credentials arrive in the environment, so an <code>env</code> credential of cloud keys or a <code>token</code>
+credential as <code>YARDMASTER_TOKEN</code> authenticates the provider. A command-source credential resolves
+fresh each run.</li>
+<li>The command directory cannot escape the project with <code>..</code>, so a run stays inside its checkout.</li>
+</ul>
+<h2 id="requirements">Requirements</h2>
+<p>The <code>tofu</code> binary must be on the PATH of the process executing runs, the server or a worker. Nothing
+else is configured; selecting the OpenTofu tool routes the run to it.</p>
+<h2 id="example">Example</h2>
+<p>A directory <code>infra/network</code> holding:</p>
+<pre><code>variable &quot;region&quot; { type = string }
+output &quot;vpc&quot; { value = &quot;vpc-${var.region}&quot; }
+</code></pre>
+<p>Launch an OpenTofu run with the command set to <code>infra/network</code> and a survey field <code>region</code>. A dry
+run shows the plan. A real run applies it.</p>
+<p>See also <a href="/docs/tool-terraform">Terraform runs</a>, <a href="/docs/tool-bash">Bash runs</a>, and the
+<a href="/docs/features">features overview</a>.</p>
+
+		</main>
+	</div>
+	<script>document.addEventListener("click",e=>{const a=e.target.closest(".dside a");if(a)document.querySelector(".dside")?.classList.remove("open")});</script>
+</body>
+</html>

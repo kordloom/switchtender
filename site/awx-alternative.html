@@ -4,10 +4,10 @@
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>AWX alternative without Kubernetes · Yardmaster</title>
-	<meta name="description" content="Yardmaster is an open source AWX alternative that runs from one Go binary with no Kubernetes, no Postgres, and no Redis. Live host-by-task matrix, five tools, provable audit, and a one-command AWX import.">
+	<meta name="description" content="Yardmaster is an open source AWX alternative that runs from one Go binary with no Kubernetes, no Postgres, and no Redis. Live host-by-task matrix, seven tools, provable audit, and a one-command AWX import.">
 	<link rel="canonical" href="https://yardmaster.dev/awx-alternative">
 	<meta property="og:title" content="AWX alternative without Kubernetes · Yardmaster">
-	<meta property="og:description" content="Everything AWX does from one binary, plus the things it never did: a live host-by-task matrix, five tools, tamper-evident audit, and a one-command import of your AWX export.">
+	<meta property="og:description" content="Everything AWX does from one binary, plus the things it never did: a live host-by-task matrix, seven tools, tamper-evident audit, and a one-command import of your AWX export.">
 	<meta property="og:type" content="website">
 	<meta property="og:url" content="https://yardmaster.dev/awx-alternative">
 	<meta property="og:image" content="https://yardmaster.dev/assets/screenshot-fleet.png?v=5">
@@ -18,7 +18,7 @@
 	<link rel="preconnect" href="https://fonts.googleapis.com">
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-	<link rel="stylesheet" href="/styles.css?v=7">
+	<link rel="stylesheet" href="/styles.css?v=8">
 </head>
 <body>
 	<div class="bg-mesh" aria-hidden="true"></div>
@@ -65,7 +65,7 @@
 				</article>
 				<article class="card reveal">
 					<h3>Ansible-only</h3>
-					<p>Real fleets also run Terraform, scripts, and one-off tooling. AWX runs Ansible. Yardmaster runs Ansible, Terraform, Bash, Python, and Go through one engine, one UI, and one audit trail, each with a dry-run mode.</p>
+					<p>Real fleets also run Terraform, scripts, and one-off tooling. AWX runs Ansible. Yardmaster runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go through one engine, one UI, and one audit trail, each with a dry-run mode.</p>
 				</article>
 				<article class="card reveal">
 					<h3>Scrollback runs</h3>
@@ -87,7 +87,7 @@
 					<tbody>
 						<tr><td>Deploy</td><td class="us">One binary, SQLite or Postgres</td><td><span class="muted">Kubernetes + operator + Postgres + Redis</span></td></tr>
 						<tr><td>Live host-by-task matrix</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
-						<tr><td>Tools</td><td class="us">Ansible, Terraform, Bash, Python, Go</td><td><span class="muted">Ansible only</span></td></tr>
+						<tr><td>Tools</td><td class="us">Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, Go</td><td><span class="muted">Ansible only</span></td></tr>
 						<tr><td>Job templates, surveys, schedules</td><td class="us"><i class="y"></i></td><td><i class="y"></i></td></tr>
 						<tr><td>Drag-and-drop workflow editor</td><td class="us"><i class="y"></i></td><td><i class="y"></i></td></tr>
 						<tr><td>RBAC, teams, per-object grants</td><td class="us"><i class="y"></i></td><td><i class="y"></i></td></tr>

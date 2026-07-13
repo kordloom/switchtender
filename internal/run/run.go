@@ -45,8 +45,13 @@ const (
 	ToolBash = "bash"
 	// ToolTerraform runs Terraform in a working directory. The directory is carried in Command.
 	ToolTerraform = "terraform"
+	// ToolOpenTofu runs OpenTofu in a working directory, exactly like the Terraform tool but with
+	// the tofu binary. The directory is carried in Command.
+	ToolOpenTofu = "opentofu"
 	// ToolPython runs a Python script. The script text is carried in Command.
 	ToolPython = "python"
+	// ToolPowerShell runs a PowerShell script with pwsh. The script text is carried in Command.
+	ToolPowerShell = "powershell"
 	// ToolGo runs a Go program. The source text is carried in Command.
 	ToolGo = "go"
 )
@@ -62,7 +67,7 @@ func NormalizeTool(tool string) string {
 // ValidTool reports whether tool names a supported execution tool. Empty is valid and means Ansible.
 func ValidTool(tool string) bool {
 	switch NormalizeTool(tool) {
-	case ToolAnsible, ToolBash, ToolTerraform, ToolPython, ToolGo:
+	case ToolAnsible, ToolBash, ToolTerraform, ToolOpenTofu, ToolPython, ToolPowerShell, ToolGo:
 		return true
 	default:
 		return false
@@ -87,7 +92,7 @@ type Run struct {
 	Playbook string `json:"playbook"`
 	// Inventory is the path to the Ansible inventory to target.
 	Inventory string `json:"inventory"`
-	// Tool selects the execution engine: ansible, bash, terraform, or python. Empty means ansible.
+	// Tool selects the execution engine: ansible, bash, terraform, opentofu, python, powershell, or go. Empty means ansible.
 	Tool string `json:"tool,omitempty"`
 	// Command carries the tool's primary input for non-Ansible tools: the script for bash and python,
 	// the working directory for terraform. Ignored by the Ansible tool.

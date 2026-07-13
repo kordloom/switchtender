@@ -4,7 +4,7 @@
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>Yardmaster · run everything, watch every host, prove every change</title>
-	<meta name="description" content="Run everything, watch every host, prove every change. Ansible, Terraform, Bash, Python, and Go in one Go binary with a live host-by-task matrix, tamper-evident audit, and enforced approvals. A self-hostable alternative to AWX and Semaphore.">
+	<meta name="description" content="Run everything, watch every host, prove every change. Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go in one Go binary with a live host-by-task matrix, tamper-evident audit, and enforced approvals. A self-hostable alternative to AWX and Semaphore.">
 	<meta property="og:title" content="Yardmaster · run everything, watch every host, prove every change">
 	<meta property="og:description" content="Run everything. Watch every host. Prove every change. Your whole automation stack in one Go binary, with a live host-by-task matrix and a provable audit trail.">
 	<meta property="og:type" content="website">
@@ -20,7 +20,7 @@
 		"url": "https://yardmaster.dev/",
 		"applicationCategory": "DeveloperApplication",
 		"operatingSystem": "Linux, macOS, Windows",
-		"description": "Run everything, watch every host, prove every change. Ansible, Terraform, Bash, Python, and Go in one Go binary with a live host-by-task matrix, a tamper-evident audit trail, and enforced approval policies.",
+		"description": "Run everything, watch every host, prove every change. Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go in one Go binary with a live host-by-task matrix, a tamper-evident audit trail, and enforced approval policies.",
 		"license": "https://mariadb.com/bsl11/",
 		"offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
 		"sameAs": ["https://github.com/dcadolph/yardmaster"]
@@ -32,7 +32,7 @@
 	<link rel="preconnect" href="https://fonts.googleapis.com">
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-	<link rel="stylesheet" href="/styles.css?v=7">
+	<link rel="stylesheet" href="/styles.css?v=8">
 </head>
 <body>
 	<div class="bg-mesh" aria-hidden="true"></div>
@@ -63,7 +63,7 @@
 	<main id="top">
 		<section class="hero wrap">
 			<div class="hero-copy reveal">
-				<span class="eyebrow">Ansible · Terraform · Bash · Python · Go</span>
+				<span class="eyebrow">Ansible · Terraform · OpenTofu · Bash · PowerShell · Python · Go</span>
 				<h1>Run everything.<br>Watch every host.<br><span class="grad">Prove every change.</span></h1>
 				<p class="lede">
 					Your whole automation stack in one Go binary. Every run painted live, host by task.
@@ -92,7 +92,7 @@
 		<section class="strip wrap reveal">
 			<div><b>1</b><span>binary to deploy</span></div>
 			<div><b>0</b><span>Kubernetes required</span></div>
-			<div><b>5</b><span>tools, one engine</span></div>
+			<div><b>7</b><span>tools, one engine</span></div>
 			<div><b>∞</b><span>tamper-evident audit</span></div>
 		</section>
 
@@ -110,7 +110,7 @@
 				<article class="card reveal">
 					<div class="ic ic-tools"></div>
 					<h3>Multi-tool engine</h3>
-					<p>Ansible, Terraform, Bash, Python, and Go, each with a dry run. One engine, one UI, one audit trail. Not five tools bolted together.</p>
+					<p>Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go, each with a dry run. One engine, one UI, one audit trail. Not seven tools bolted together.</p>
 				</article>
 				<article class="card reveal">
 					<div class="ic ic-shards"></div>
@@ -148,11 +148,11 @@
 		<section class="section demo wrap" id="demo">
 			<div class="section-head reveal">
 				<h2>See it in action</h2>
-				<p>A run painted live as a host-by-task matrix, not a wall of scrollback.</p>
+				<p>A run painted live as a host-by-task matrix, not a wall of scrollback. The colors speak Ansible: <span class="lg-ok">green</span> means ok, <span class="lg-changed">amber</span> means the task changed the host, <span class="lg-failed">red</span> means failed, grey means skipped.</p>
 			</div>
 			<figure class="window demo-frame reveal">
 				<div class="window-bar"><span></span><span></span><span></span><em>yardmaster · run</em></div>
-				<img src="/assets/demo-run.gif?v=5" alt="A Yardmaster run streaming live as a host-by-task matrix" loading="lazy">
+				<img src="/assets/demo-run.gif?v=6" alt="A Yardmaster run streaming live as a host-by-task matrix" loading="lazy">
 			</figure>
 		</section>
 
@@ -218,7 +218,7 @@
 					<tbody>
 						<tr><td>Deploy without Kubernetes</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td><td><i class="y"></i></td></tr>
 						<tr><td>Live host-by-task matrix</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td><td><i class="n"></i></td></tr>
-						<tr><td>Ansible · Terraform · Bash · Python · Go</td><td class="us"><i class="y"></i></td><td><span class="muted">Ansible only</span></td><td><span class="muted">no Python or Go</span></td></tr>
+						<tr><td>Ansible · Terraform · OpenTofu · Bash · PowerShell · Python · Go</td><td class="us"><i class="y"></i></td><td><span class="muted">Ansible only</span></td><td><span class="muted">no Python, PowerShell, or Go</span></td></tr>
 						<tr><td>Duration-balanced job splitting</td><td class="us"><i class="y"></i></td><td><span class="muted">round-robin</span></td><td><i class="n"></i></td></tr>
 						<tr><td>Fleet memory: flaky hosts, trends</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td><td><i class="n"></i></td></tr>
 						<tr><td>Tamper-evident, signed audit</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td><td><i class="n"></i></td></tr>

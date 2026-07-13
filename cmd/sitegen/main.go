@@ -30,7 +30,7 @@ var order = []string{
 	"README", "quickstart", "faq", "switching-from-awx", "migration",
 	"tutorials", "tutorial-run-a-job", "tutorial-save-a-template", "tutorial-schedule-a-job",
 	"tutorial-set-a-secret", "tutorial-migrate",
-	"tool-bash", "tool-terraform", "tool-python", "tool-go",
+	"tool-bash", "tool-terraform", "tool-opentofu", "tool-python", "tool-powershell", "tool-go",
 	"concepts", "reliability", "configuration", "desktop", "features", "secrets", "drift", "api", "comparison",
 }
 

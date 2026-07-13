@@ -87,3 +87,21 @@ func TestVarsEnv(t *testing.T) {
 		t.Errorf("env = %v, want YARDMASTER_VARS with the extra vars", env)
 	}
 }
+
+// TestToolRouterNewTools proves the router carries opentofu on the tofu binary and dispatches
+// powershell to the pwsh runner. Routing is proven without either binary installed: opentofu by
+// inspecting the router's runner, powershell by the ErrNoCommand short circuit.
+func TestToolRouterNewTools(t *testing.T) {
+	t.Parallel()
+	router := newToolRouter(false, DefaultContainerLimits())
+	if router.opentofu.binary != "tofu" {
+		t.Errorf("opentofu binary = %q, want tofu", router.opentofu.binary)
+	}
+	if router.powershell.binary != "pwsh" {
+		t.Errorf("powershell binary = %q, want pwsh", router.powershell.binary)
+	}
+	if _, err := router.Run(context.Background(),
+		Spec{Tool: run.ToolPowerShell, Command: ""}, io.Discard); !errors.Is(err, ErrNoCommand) {
+		t.Errorf("powershell route error = %v, want ErrNoCommand", err)
+	}
+}

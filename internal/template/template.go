@@ -65,7 +65,7 @@ type Template struct {
 	// InventoryID names a stored inventory to materialize for the run, taking precedence over the
 	// Inventory path when set.
 	InventoryID string `json:"inventory_id,omitempty"`
-	// Tool selects the execution engine: ansible, bash, terraform, or python. Empty means ansible.
+	// Tool selects the execution engine: ansible, bash, terraform, opentofu, python, powershell, or go. Empty means ansible.
 	Tool string `json:"tool,omitempty"`
 	// Command carries the tool's primary input for non-Ansible tools: the script for bash and python,
 	// the working directory for terraform.

@@ -1928,7 +1928,7 @@ function wireLaunchForm() {
 			if (el) el.hidden = !ansible;
 		}
 		commandField.hidden = ansible;
-		if (tool === "terraform") commandInput.placeholder = "working directory, e.g. infra";
+		if (tool === "terraform" || tool === "opentofu") commandInput.placeholder = "working directory, e.g. infra";
 		else if (tool === "python") commandInput.placeholder = "print('hello from python')";
 		else if (tool === "go") commandInput.placeholder = "package main\n\nfunc main() { println(\"hi\") }";
 		else commandInput.placeholder = "echo hello";
@@ -4594,7 +4594,7 @@ function renderHeader(run) {
 		el.appendChild(field("Playbook", baseName(run.playbook) || (run.playbook || ""), null, run.playbook || ""));
 	} else {
 		el.appendChild(field("Tool", null, toolBadgeEl(run)));
-		el.appendChild(field(run.tool === "terraform" ? "Directory" : "Command",
+		el.appendChild(field(run.tool === "terraform" || run.tool === "opentofu" ? "Directory" : "Command",
 			toolLabel(run), null, run.command || ""));
 	}
 	if (run.dry_run) {
