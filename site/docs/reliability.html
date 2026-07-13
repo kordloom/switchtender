@@ -57,6 +57,31 @@ the network, the lease goes stale, and a janitor sweeps it after thirty seconds.
 pending is returned to the queue for another worker. Work that was mid-flight is marked interrupted
 so it is not silently lost. An interrupted run does not resume from a checkpoint. It is a clean
 failure a person or a schedule can run again, not a partial state left holding a lease forever.</p>
+<h2 id="high-availability">High availability</h2>
+<p>On PostgreSQL the control plane runs active-active. Start two or more <code>serve</code> processes against the
+same database, put any load balancer in front, and every replica serves the full API and UI while
+all of them execute work. There is no leader to elect and no coordinator to stand up, because every
+cross-process decision already happens in the store:</p>
+<ul>
+<li>A pending run is claimed with <code>FOR UPDATE SKIP LOCKED</code>, so two replicas never take the same run.</li>
+<li>A due schedule is claimed with a compare-and-set on its next fire time, so two schedulers ticking
+the same cron entry fire it exactly once.</li>
+<li>Approve and reject are compare-and-set state transitions, so two admins on two replicas cannot
+release the same held run twice.</li>
+<li>The audit chain appends under a transaction-level advisory lock with a unique sequence index
+behind it, so the chain stays linear across replicas.</li>
+<li>Live run pages poll the shared store, so a browser on one replica watches a run executing on
+another, painted as it happens.</li>
+<li>Sessions and tokens live in the store, so a sign-in on one replica works on all of them.</li>
+</ul>
+<p>When a replica dies, its leases go stale and any survivor's janitor requeues the work, which the
+integration suite proves with two replicas on one PostgreSQL: shared claiming with no double-claim,
+a single fire for a schedule two replicas race for, and a dead replica's run finished by the
+survivor. Kill a replica mid-run and the run fails clean and requeues, it does not vanish.</p>
+<p>To run it: point every replica at the same PostgreSQL with <code>--db</code>, share the same
+<code>YARDMASTER_CRED_KEY</code> and <code>YARDMASTER_CRED_SALT</code> so sealed credentials decrypt everywhere, and
+health-check <code>/healthz</code> at the balancer. SQLite has no server to share, so it stays a single-node
+deployment by design; PostgreSQL is the HA backend.</p>
 <h2 id="splits-balance-real-work">Splits balance real work</h2>
 <p>A split shards one inventory across parallel slices of the same playbook, each limited to its hosts,
 with the parent rolling the slices into one host matrix. Hosts are packed by their measured average
@@ -99,9 +124,8 @@ a pipeline stops the running steps and skips the rest.</p>
 per-task summaries, are each written inside one transaction, so a reader never sees half a set. When
 a run reaches a terminal state, the final save is retried a few times so a brief database contention
 does not lose the outcome.</p>
-<p>Schema migrations are idempotent on both stores, guarded by <code>IF NOT EXISTS</code> on PostgreSQL and by
-skipping an already-applied column on SQLite. Starting a newer binary against an existing database
-is safe to repeat.</p>
+<p>The schema is applied idempotently on both stores, guarded by <code>IF NOT EXISTS</code>, so starting a newer
+binary against an existing database is safe to repeat.</p>
 <p>The audit trail is a SHA-256 hash chain. Every recorded mutation carries the previous entry's hash
 and its own hash over its content, so altering, reordering, or dropping an entry breaks the chain,
 which <code>GET /audit/verify</code> detects. The chain is tamper-evident with no key configured. When a signing
@@ -114,8 +138,8 @@ under concurrent writers.</p>
 claim, so two servers running the same cron entry never double-fire.</p>
 <p>Submitting a run is not idempotent. Each call creates a new run with a fresh identifier, and there is
 no request-deduplication key, so a client that retries a submit it already sent creates a second run.
-An approval checks the run's state before it acts, but the check is a guard rather than a
-compare-and-set. Treat a submit as create-once on the client side.</p>
+An approval is a compare-and-set state transition, so two concurrent approvals release a held run
+exactly once and the loser gets a clear conflict. Treat a submit as create-once on the client side.</p>
 <p>Stored events are ordered and written once per batch. A batch replayed after a transient error
 appends rather than deduplicates, so a consumer keys on the event sequence number.</p>
 <p>Notifications by webhook, email, and Slack are best effort. Each is attempted at least once with one

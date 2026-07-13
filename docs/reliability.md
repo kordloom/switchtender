@@ -35,6 +35,34 @@ pending is returned to the queue for another worker. Work that was mid-flight is
 so it is not silently lost. An interrupted run does not resume from a checkpoint. It is a clean
 failure a person or a schedule can run again, not a partial state left holding a lease forever.
 
+## High availability
+
+On PostgreSQL the control plane runs active-active. Start two or more `serve` processes against the
+same database, put any load balancer in front, and every replica serves the full API and UI while
+all of them execute work. There is no leader to elect and no coordinator to stand up, because every
+cross-process decision already happens in the store:
+
+- A pending run is claimed with `FOR UPDATE SKIP LOCKED`, so two replicas never take the same run.
+- A due schedule is claimed with a compare-and-set on its next fire time, so two schedulers ticking
+  the same cron entry fire it exactly once.
+- Approve and reject are compare-and-set state transitions, so two admins on two replicas cannot
+  release the same held run twice.
+- The audit chain appends under a transaction-level advisory lock with a unique sequence index
+  behind it, so the chain stays linear across replicas.
+- Live run pages poll the shared store, so a browser on one replica watches a run executing on
+  another, painted as it happens.
+- Sessions and tokens live in the store, so a sign-in on one replica works on all of them.
+
+When a replica dies, its leases go stale and any survivor's janitor requeues the work, which the
+integration suite proves with two replicas on one PostgreSQL: shared claiming with no double-claim,
+a single fire for a schedule two replicas race for, and a dead replica's run finished by the
+survivor. Kill a replica mid-run and the run fails clean and requeues, it does not vanish.
+
+To run it: point every replica at the same PostgreSQL with `--db`, share the same
+`YARDMASTER_CRED_KEY` and `YARDMASTER_CRED_SALT` so sealed credentials decrypt everywhere, and
+health-check `/healthz` at the balancer. SQLite has no server to share, so it stays a single-node
+deployment by design; PostgreSQL is the HA backend.
+
 ## Splits balance real work
 
 A split shards one inventory across parallel slices of the same playbook, each limited to its hosts,
@@ -90,9 +118,8 @@ per-task summaries, are each written inside one transaction, so a reader never s
 a run reaches a terminal state, the final save is retried a few times so a brief database contention
 does not lose the outcome.
 
-Schema migrations are idempotent on both stores, guarded by `IF NOT EXISTS` on PostgreSQL and by
-skipping an already-applied column on SQLite. Starting a newer binary against an existing database
-is safe to repeat.
+The schema is applied idempotently on both stores, guarded by `IF NOT EXISTS`, so starting a newer
+binary against an existing database is safe to repeat.
 
 The audit trail is a SHA-256 hash chain. Every recorded mutation carries the previous entry's hash
 and its own hash over its content, so altering, reordering, or dropping an entry breaks the chain,
@@ -110,8 +137,8 @@ claim, so two servers running the same cron entry never double-fire.
 
 Submitting a run is not idempotent. Each call creates a new run with a fresh identifier, and there is
 no request-deduplication key, so a client that retries a submit it already sent creates a second run.
-An approval checks the run's state before it acts, but the check is a guard rather than a
-compare-and-set. Treat a submit as create-once on the client side.
+An approval is a compare-and-set state transition, so two concurrent approvals release a held run
+exactly once and the loser gets a clear conflict. Treat a submit as create-once on the client side.
 
 Stored events are ordered and written once per batch. A batch replayed after a transient error
 appends rather than deduplicates, so a consumer keys on the event sequence number.

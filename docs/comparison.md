@@ -24,6 +24,7 @@ on them.
 | Fleet memory | Flaky-host detection, outcome sparklines, per-host history, and task duration trends across runs. | Not available. | Not available. |
 | Distributed workers | Store leasing, where the same single binary adds capacity, held together by leases and a janitor that requeues a crashed worker's runs. | A Receptor mesh. | Runners, in a paid tier. |
 | Instance groups | A queue pins work at the run, template, or inventory level, most specific wins, so jobs land on the right worker group. | Instance groups. | Not available. |
+| High availability | Active-active replicas on PostgreSQL behind any load balancer: store-claimed work, compare-and-set schedules and approvals, automatic failover through stale-lease reclaim, proven by a two-replica integration suite. | Via Kubernetes replicas. | Not documented. |
 | Per-run provenance | Every run records the exact commit it executed. | Partial. | Partial. |
 | Provable audit | A tamper-evident SHA-256 hash chain, verified offline, with an optional ed25519-signed export. | An activity stream. | An activity log. |
 | Migration in | One command imports an AWX or Semaphore export. | Not applicable. | Not applicable. |
