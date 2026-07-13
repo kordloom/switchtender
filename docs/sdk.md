@@ -31,7 +31,7 @@ while serving and never written after, so registration is a startup step, not a 
 empty, duplicate, or reserved name panics at boot, where the mistake is cheap, instead of failing
 on first use.
 
-An extension compiles into the binary. There is no plugin directory to drop a file into; the trade
+An extension compiles into the binary. There is no plugin directory to drop a file into. The trade
 is a single static binary with no version skew between the server and its extensions.
 
 ## A complete extension
@@ -91,7 +91,7 @@ output:
 
 The binary keeps every stock command: `serve`, `worker`, `desktop`, `demo`, `import`, `token`,
 `user`, and `audit`. Passing `nil` to `cmd.Execute` skips the embedded documentation pages in the
-UI; embed your own file tree there to serve them.
+UI. Embed your own file tree there to serve them.
 
 ## The seams in detail
 
@@ -100,7 +100,7 @@ UI; embed your own file tree there to serve them.
 A `ToolRunner` receives the run as a `ToolSpec` and a writer for its output. `Command` carries the
 tool's input, the same field the bash and python tools read their script from. `DryRun` asks for
 the tool's no-change mode. `ExtraVars`, `Env`, and `Dir` carry the run's variables, environment,
-and working directory. Return the process exit code in `ToolResult`; return an error only when the
+and working directory. Return the process exit code in `ToolResult`. Return an error only when the
 tool could not be launched or supervised.
 
 ### Notification channels
@@ -119,7 +119,7 @@ one method turns a system instruction and a user prompt into text.
 
 A `SecretResolver` fetches a value from a source's config at run time. A `SecretMinter` does the
 same for a dynamic engine and also returns a lease built with `NewSecretLease`, naming the engine
-and capturing how to revoke the minted credential; pass a nil revoke func when the secret only
+and capturing how to revoke the minted credential. Pass a nil revoke func when the secret only
 expires on the engine's own TTL.
 
 See also the [secrets guide](secrets.md), [Bash runs](tool-bash.md) for how a tool's command and

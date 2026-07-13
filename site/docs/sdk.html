@@ -58,7 +58,7 @@ credential on each read and returns a lease Yardmaster revokes when the run ends
 while serving and never written after, so registration is a startup step, not a runtime one. An
 empty, duplicate, or reserved name panics at boot, where the mistake is cheap, instead of failing
 on first use.</p>
-<p>An extension compiles into the binary. There is no plugin directory to drop a file into; the trade
+<p>An extension compiles into the binary. There is no plugin directory to drop a file into. The trade
 is a single static binary with no version skew between the server and its extensions.</p>
 <h2 id="a-complete-extension">A complete extension</h2>
 <p>Two files make a Yardmaster with a custom <code>hello</code> tool.</p>
@@ -111,13 +111,13 @@ hello from an external plugin: world
 </code></pre>
 <p>The binary keeps every stock command: <code>serve</code>, <code>worker</code>, <code>desktop</code>, <code>demo</code>, <code>import</code>, <code>token</code>,
 <code>user</code>, and <code>audit</code>. Passing <code>nil</code> to <code>cmd.Execute</code> skips the embedded documentation pages in the
-UI; embed your own file tree there to serve them.</p>
+UI. Embed your own file tree there to serve them.</p>
 <h2 id="the-seams-in-detail">The seams in detail</h2>
 <h3 id="execution-tools">Execution tools</h3>
 <p>A <code>ToolRunner</code> receives the run as a <code>ToolSpec</code> and a writer for its output. <code>Command</code> carries the
 tool's input, the same field the bash and python tools read their script from. <code>DryRun</code> asks for
 the tool's no-change mode. <code>ExtraVars</code>, <code>Env</code>, and <code>Dir</code> carry the run's variables, environment,
-and working directory. Return the process exit code in <code>ToolResult</code>; return an error only when the
+and working directory. Return the process exit code in <code>ToolResult</code>. Return an error only when the
 tool could not be launched or supervised.</p>
 <h3 id="notification-channels">Notification channels</h3>
 <p>A <code>Notifier</code> receives each top-level run once it reaches a terminal state: succeeded, failed,
@@ -130,7 +130,7 @@ one method turns a system instruction and a user prompt into text.</p>
 <h3 id="secret-engines">Secret engines</h3>
 <p>A <code>SecretResolver</code> fetches a value from a source's config at run time. A <code>SecretMinter</code> does the
 same for a dynamic engine and also returns a lease built with <code>NewSecretLease</code>, naming the engine
-and capturing how to revoke the minted credential; pass a nil revoke func when the secret only
+and capturing how to revoke the minted credential. Pass a nil revoke func when the secret only
 expires on the engine's own TTL.</p>
 <p>See also the <a href="/docs/secrets">secrets guide</a>, <a href="/docs/tool-bash">Bash runs</a> for how a tool's command and
 variables behave, and the <a href="/docs/api">HTTP API</a> for submitting runs to your new tool.</p>
