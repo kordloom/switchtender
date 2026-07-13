@@ -4,10 +4,10 @@
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>Extend Yardmaster in Go · Yardmaster docs</title>
-	<meta name="description" content="Yardmaster's SDK: register execution tools, AI providers, secret engines, and notification channels from one Go package, and compile a binary that is Yardmaster plus your extension.">
+	<meta name="description" content="Yardmaster's SDK: register execution tools, AI providers, secret engines, and notification channels from one Go package. Compile it in or ship it as a drop-in plugin binary.">
 	<link rel="canonical" href="https://yardmaster.dev/docs/sdk">
 	<meta property="og:title" content="Extend Yardmaster in Go · Yardmaster docs">
-	<meta property="og:description" content="Yardmaster's SDK: register execution tools, AI providers, secret engines, and notification channels from one Go package, and compile a binary that is Yardmaster plus your extension.">
+	<meta property="og:description" content="Yardmaster's SDK: register execution tools, AI providers, secret engines, and notification channels from one Go package. Compile it in or ship it as a drop-in plugin binary.">
 	<meta property="og:type" content="article">
 	<meta property="og:url" content="https://yardmaster.dev/docs/sdk">
 	<link rel="icon" href="/favicon.ico" sizes="any">
@@ -37,8 +37,9 @@
 		<main class="dcontent prose">
 			<h1 id="extend-yardmaster-in-go">Extend Yardmaster in Go</h1>
 <p>Yardmaster's seams are public. Import one package, <code>github.com/dcadolph/yardmaster/sdk</code>, register
-what you built, and compile a binary that is Yardmaster plus your extension. A registered tool
-submits, validates, executes, and audits like a built-in. The SDK covers four kinds of extension:</p>
+what you built, and run it either way: compiled into the server binary, or dropped next to a stock
+release binary as a plugin the server loads at startup. A registered tool submits, validates,
+executes, and audits like a built-in. The SDK covers four kinds of extension:</p>
 <ul>
 <li><strong>Execution tools.</strong> <code>RegisterTool</code> adds a tool beside ansible, bash, terraform, opentofu,
 python, powershell, and go. Your runner receives the run's command and streams output that lands
@@ -58,8 +59,9 @@ credential on each read and returns a lease Yardmaster revokes when the run ends
 while serving and never written after, so registration is a startup step, not a runtime one. An
 empty, duplicate, or reserved name panics at boot, where the mistake is cheap, instead of failing
 on first use.</p>
-<p>An extension compiles into the binary. There is no plugin directory to drop a file into. The trade
-is a single static binary with no version skew between the server and its extensions.</p>
+<p>An extension loads one of two ways. Compile it into the binary for a single static build with no
+version skew. Or ship it as a plugin binary in the server's <code>--plugins-dir</code> for a stock release
+binary that loads extensions at startup. Same seams, same registration, same behavior at run time.</p>
 <h2 id="a-complete-extension">A complete extension</h2>
 <p>Two files make a Yardmaster with a custom <code>hello</code> tool.</p>
 <p><code>go.mod</code>:</p>
@@ -112,6 +114,48 @@ hello from an external plugin: world
 <p>The binary keeps every stock command: <code>serve</code>, <code>worker</code>, <code>desktop</code>, <code>demo</code>, <code>import</code>, <code>token</code>,
 <code>user</code>, and <code>audit</code>. Passing <code>nil</code> to <code>cmd.Execute</code> skips the embedded documentation pages in the
 UI. Embed your own file tree there to serve them.</p>
+<h2 id="ship-it-as-a-plugin-binary">Ship it as a plugin binary</h2>
+<p>The same extension runs as its own process, loaded by a stock Yardmaster release binary. Swap the
+main for <code>plugin.Serve</code> and build:</p>
+<pre><code>// Command helloplugin serves the hello tool as a Yardmaster plugin.
+package main
+
+import (
+    &quot;context&quot;
+    &quot;fmt&quot;
+    &quot;io&quot;
+
+    &quot;github.com/dcadolph/yardmaster/sdk&quot;
+    &quot;github.com/dcadolph/yardmaster/sdk/plugin&quot;
+)
+
+// main serves the extension as a plugin process.
+func main() {
+    plugin.Serve(&amp;plugin.Extension{
+        Tools: map[string]sdk.ToolRunner{
+            &quot;hello&quot;: sdk.ToolRunnerFunc(
+                func(_ context.Context, spec sdk.ToolSpec, out io.Writer) (sdk.ToolResult, error) {
+                    fmt.Fprintf(out, &quot;hello from a plugin process: %s\n&quot;, spec.Command)
+                    return sdk.ToolResult{ExitCode: 0}, nil
+                }),
+        },
+    })
+}
+</code></pre>
+<p>Drop the binary in a directory and point the server at it:</p>
+<pre><code>go build -o plugins/hello-plugin .
+yardmaster serve --plugins-dir ./plugins
+</code></pre>
+<p>At startup the server launches each executable in the directory, asks what it provides, and
+registers every seam it declares. One plugin serves any mix of tools, notifiers, AI providers, and
+secret engines from a single <code>Extension</code>. The process speaks gRPC over a local socket with mutual
+TLS, supervised by the server: it starts with the server and exits with it. The worker command
+takes the same flag, so a plugged-in tool runs wherever runs execute.</p>
+<p>A plugin that fails to launch or describe itself is logged and skipped, so one broken binary does
+not take the server down. A name that collides with a built-in or another plugin stops the server
+at startup with a clear message. Compiling in and plugging in register the same way and behave the
+same at run time. Pick per extension: compile in for one static artifact, plug in for extending a
+release binary you did not build.</p>
 <h2 id="the-seams-in-detail">The seams in detail</h2>
 <h3 id="execution-tools">Execution tools</h3>
 <p>A <code>ToolRunner</code> receives the run as a <code>ToolSpec</code> and a writer for its output. <code>Command</code> carries the

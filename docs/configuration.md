@@ -91,6 +91,7 @@ Runs the HTTP API, the in-process executor, the scheduler, the retention sweeper
 | `--strict-grants` | `false` | Deny non-admins access to an object that has no grants, instead of deferring to the global role. |
 | `--read-only` | `false` | Reject every mutating request, for a safely exposable instance. |
 | `--matrix-cap` | `50000` | Largest host matrix, in cells, the UI draws before showing a notice. 0 means no limit. |
+| `--plugins-dir` | none | Directory of extension plugin binaries loaded at startup. Also `YARDMASTER_PLUGINS_DIR`. See [Extend in Go](sdk.md). |
 | `--retain-runs` | none | Delete terminal runs older than this, for example `90d`. Empty keeps them forever. |
 | `--retain-events` | none | Drop run events and logs older than this, for example `30d`. Empty keeps them forever. |
 | `--retention-interval` | `1h` | How often the retention sweeper runs. |
@@ -134,6 +135,7 @@ database and they compete for work.
 | `--name` | host and pid | Worker name stamped on the runs it executes. |
 | `--queue` | none | Queue this worker serves. Repeatable. Without any, it serves the default pool. |
 | `--allow-container-ee` | `false` | Allow container execution environments on this worker. Needs Docker. |
+| `--plugins-dir` | none | Directory of extension plugin binaries loaded at startup. Also `YARDMASTER_PLUGINS_DIR`. |
 | `--container-memory` | `2g` | Memory cap for containerized runs, as docker `--memory`. Empty removes the cap. |
 | `--container-cpus` | `2` | CPU cap for containerized runs, as docker `--cpus`. Empty removes the cap. |
 | `--container-pids-limit` | `2048` | Process cap for containerized runs, as docker `--pids-limit`. Zero removes the cap. |

@@ -100,7 +100,7 @@
 		<section class="section wrap" id="features">
 			<div class="section-head reveal">
 				<h2>Baked in, not bolted on.</h2>
-				<p>Runs you read like a dashboard. Jobs that balance themselves. A fleet that remembers. A control plane that proves it. Optional AI you can plug in, on your own model or key. Open everywhere it counts: your secret backend, your integrations, an API to build on. One binary.</p>
+				<p>Every feature below ships in the binary you already deployed. No assembly required, no operator to install, no enterprise tier holding the good parts hostage. If it is on this page, it is in the box.</p>
 			</div>
 			<div class="cards">
 				<article class="card reveal">
@@ -229,20 +229,20 @@
 
 		<section class="section wrap" id="sdk">
 			<div class="section-head reveal">
-				<span class="eyebrow">Extensibility · new in 1.7</span>
+				<span class="eyebrow">Extensibility · SDK + drop-in plugins</span>
 				<h2>Extend it in Go</h2>
-				<p>Extend Yardmaster in Go through a stable SDK: add tools, AI providers, secret backends, and notification channels. One import, one registration call per seam, at startup. A registered tool submits, validates, and audits like a built-in, and a registered channel gets every terminal run with secret-carrying vars already redacted. Compile your extension into the binary and the control plane treats it as its own. The <a href="/docs/sdk">SDK guide</a> walks a complete extension, from module to running server.</p>
+				<p>Extend Yardmaster in Go through a stable SDK: add tools, AI providers, secret backends, and notification channels. Compile your extension in, or build it once and drop the binary into <code>--plugins-dir</code>: a stock release loads it at startup over gRPC with mutual TLS and treats it as its own. A plugged-in tool submits, validates, and audits like a built-in, and a plugged-in channel gets every terminal run with secret-carrying vars already redacted. The <a href="/docs/sdk">SDK guide</a> walks both paths, from module to running server.</p>
 			</div>
 			<div class="code reveal">
 				<button class="copy" aria-label="Copy">Copy</button>
-				<pre><code><span class="c">// your extension, compiled into the yardmaster binary</span>
-import "github.com/dcadolph/yardmaster/sdk"
+				<pre><code><span class="c">// build once, drop into --plugins-dir, no recompile of yardmaster</span>
+import "github.com/dcadolph/yardmaster/sdk/plugin"
 
-func init() {
-	sdk.RegisterTool("packer", sdk.ToolRunnerFunc(runPacker))
-	sdk.RegisterNotifier("pagerduty", sdk.NotifierFunc(page))
-	sdk.RegisterSecretSource("aws_sm", resolveSecret)
-	sdk.RegisterAIProvider("bedrock", newBedrock)
+func main() {
+	plugin.Serve(&amp;plugin.Extension{
+		Tools:     map[string]sdk.ToolRunner{"packer": sdk.ToolRunnerFunc(runPacker)},
+		Notifiers: map[string]sdk.Notifier{"pagerduty": sdk.NotifierFunc(page)},
+	})
 }</code></pre>
 			</div>
 		</section>
@@ -270,6 +270,7 @@ func init() {
 						<tr><td>Drift detection from a dry run</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td><td><i class="n"></i></td></tr>
 						<tr><td>Drag-and-drop workflow editor</td><td class="us"><i class="y"></i></td><td><i class="y"></i></td><td><i class="n"></i></td></tr>
 						<tr><td>Advisory AI: triage, fleet answers, drafted runs</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td><td><i class="n"></i></td></tr>
+						<tr><td>Drop-in Go plugins: tools, secrets, AI, notifiers</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td><td><i class="n"></i></td></tr>
 						<tr><td>Instance groups: pin work to worker pools</td><td class="us"><i class="y"></i></td><td><i class="y"></i></td><td><i class="n"></i></td></tr>
 						<tr><td>Active-active HA on PostgreSQL</td><td class="us"><i class="y"></i></td><td><span class="muted">via Kubernetes</span></td><td><i class="n"></i></td></tr>
 					</tbody>

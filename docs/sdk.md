@@ -8,8 +8,9 @@
 # Extend Yardmaster in Go
 
 Yardmaster's seams are public. Import one package, `github.com/dcadolph/yardmaster/sdk`, register
-what you built, and compile a binary that is Yardmaster plus your extension. A registered tool
-submits, validates, executes, and audits like a built-in. The SDK covers four kinds of extension:
+what you built, and run it either way: compiled into the server binary, or dropped next to a stock
+release binary as a plugin the server loads at startup. A registered tool submits, validates,
+executes, and audits like a built-in. The SDK covers four kinds of extension:
 
 - **Execution tools.** `RegisterTool` adds a tool beside ansible, bash, terraform, opentofu,
   python, powershell, and go. Your runner receives the run's command and streams output that lands
@@ -31,8 +32,9 @@ while serving and never written after, so registration is a startup step, not a 
 empty, duplicate, or reserved name panics at boot, where the mistake is cheap, instead of failing
 on first use.
 
-An extension compiles into the binary. There is no plugin directory to drop a file into. The trade
-is a single static binary with no version skew between the server and its extensions.
+An extension loads one of two ways. Compile it into the binary for a single static build with no
+version skew. Or ship it as a plugin binary in the server's `--plugins-dir` for a stock release
+binary that loads extensions at startup. Same seams, same registration, same behavior at run time.
 
 ## A complete extension
 
@@ -92,6 +94,53 @@ output:
 The binary keeps every stock command: `serve`, `worker`, `desktop`, `demo`, `import`, `token`,
 `user`, and `audit`. Passing `nil` to `cmd.Execute` skips the embedded documentation pages in the
 UI. Embed your own file tree there to serve them.
+
+## Ship it as a plugin binary
+
+The same extension runs as its own process, loaded by a stock Yardmaster release binary. Swap the
+main for `plugin.Serve` and build:
+
+    // Command helloplugin serves the hello tool as a Yardmaster plugin.
+    package main
+
+    import (
+        "context"
+        "fmt"
+        "io"
+
+        "github.com/dcadolph/yardmaster/sdk"
+        "github.com/dcadolph/yardmaster/sdk/plugin"
+    )
+
+    // main serves the extension as a plugin process.
+    func main() {
+        plugin.Serve(&plugin.Extension{
+            Tools: map[string]sdk.ToolRunner{
+                "hello": sdk.ToolRunnerFunc(
+                    func(_ context.Context, spec sdk.ToolSpec, out io.Writer) (sdk.ToolResult, error) {
+                        fmt.Fprintf(out, "hello from a plugin process: %s\n", spec.Command)
+                        return sdk.ToolResult{ExitCode: 0}, nil
+                    }),
+            },
+        })
+    }
+
+Drop the binary in a directory and point the server at it:
+
+    go build -o plugins/hello-plugin .
+    yardmaster serve --plugins-dir ./plugins
+
+At startup the server launches each executable in the directory, asks what it provides, and
+registers every seam it declares. One plugin serves any mix of tools, notifiers, AI providers, and
+secret engines from a single `Extension`. The process speaks gRPC over a local socket with mutual
+TLS, supervised by the server: it starts with the server and exits with it. The worker command
+takes the same flag, so a plugged-in tool runs wherever runs execute.
+
+A plugin that fails to launch or describe itself is logged and skipped, so one broken binary does
+not take the server down. A name that collides with a built-in or another plugin stops the server
+at startup with a clear message. Compiling in and plugging in register the same way and behave the
+same at run time. Pick per extension: compile in for one static artifact, plug in for extending a
+release binary you did not build.
 
 ## The seams in detail
 

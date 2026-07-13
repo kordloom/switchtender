@@ -373,6 +373,11 @@ that variable is unset.</p>
 <td>Largest host matrix, in cells, the UI draws before showing a notice. 0 means no limit.</td>
 </tr>
 <tr>
+<td><code>--plugins-dir</code></td>
+<td>none</td>
+<td>Directory of extension plugin binaries loaded at startup. Also <code>YARDMASTER_PLUGINS_DIR</code>. See <a href="/docs/sdk">Extend in Go</a>.</td>
+</tr>
+<tr>
 <td><code>--retain-runs</code></td>
 <td>none</td>
 <td>Delete terminal runs older than this, for example <code>90d</code>. Empty keeps them forever.</td>
@@ -462,6 +467,11 @@ database and they compete for work.</p>
 <td><code>--allow-container-ee</code></td>
 <td><code>false</code></td>
 <td>Allow container execution environments on this worker. Needs Docker.</td>
+</tr>
+<tr>
+<td><code>--plugins-dir</code></td>
+<td>none</td>
+<td>Directory of extension plugin binaries loaded at startup. Also <code>YARDMASTER_PLUGINS_DIR</code>.</td>
 </tr>
 <tr>
 <td><code>--container-memory</code></td>
