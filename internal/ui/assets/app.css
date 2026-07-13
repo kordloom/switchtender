@@ -14,7 +14,7 @@
 	--failed: #cf222e;
 	--unreachable: #bc4c00;
 	--skipped: #6e7781;
-	--running: #0f766e;
+	--running: #0969da;
 	--canceled: #57606a;
 	--none: #eaeef2;
 	--shadow: 0 1px 0 rgba(31, 35, 40, 0.04), 0 1px 3px rgba(31, 35, 40, 0.06);
@@ -38,7 +38,7 @@
 		--failed: #f85149;
 		--unreachable: #db6d28;
 		--skipped: #6e7681;
-		--running: #2dd4bf;
+		--running: #2f81f7;
 		--canceled: #768390;
 		--none: #21262d;
 		--shadow: 0 0 transparent;
@@ -234,7 +234,7 @@ table.runs td.mono { max-width: 380px; overflow: hidden; text-overflow: ellipsis
 .badge.rejected { background: var(--canceled); }
 
 @media (prefers-color-scheme: dark) {
-	.badge.running, .badge.interrupted { color: #0d1117; }
+	.badge.interrupted { color: #0d1117; }
 }
 
 /* Run kind tag */

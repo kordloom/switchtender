@@ -6,6 +6,7 @@
   tasks:
     - name: Fetch configuration
       command: "sleep {{ work | default(1) }}"
+      changed_when: false
     - name: Apply configuration
       command: /bin/false
       when: inventory_hostname == (fail_host | default(''))
