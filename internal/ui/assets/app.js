@@ -159,14 +159,17 @@ const TOURS = [
 		],
 	},
 	{
-		id: "pitch", title: "Why teams switch", desc: "The case against AWX and Semaphore",
-		page: "overview", path: "/ui/",
+		id: "pitch", title: "Why teams switch", desc: "The sixty-second pitch, hands free",
+		page: "overview", path: "/ui/", auto: true,
 		steps: [
-			{ title: "The case for Yardmaster", body: "Ansible, Terraform, Bash, Python, and Go from one binary, with no Kubernetes to stand up first. Here is what sets it apart." },
-			{ sel: ".panel-runs", title: "Runs you can read", body: "Every run is a live host-by-task matrix, not a wall of scrollback. See a failure the moment it happens, on the host it happened to." },
-			{ sel: ".nav-toggle", title: "A whole control plane", body: "Approvals gated by policy, secrets sourced live and masked from logs, fleet memory across runs, and AI triage, all in this menu." },
-			{ sel: ".migrate-callout", title: "Prove what ran", body: "Every change links into a tamper-evident hash chain you can verify offline. Neither AWX nor Semaphore proves itself like this." },
-			{ title: "That is the moat", body: "Multi-tool execution is table stakes now. Governance that proves itself is not. That is why teams leave AWX." },
+			{ title: "Run everything. Watch every host. Prove every change.", body: "Your whole automation stack in one binary, with no Kubernetes to stand up first. Sit back, this tour drives itself.", hold: 6000 },
+			{ sel: ".panel-runs", title: "Watch every host", body: "Every run is a live host-by-task matrix, not a wall of scrollback. A failure shows the moment it happens, on the host it happened to.", hold: 7000 },
+			{ sel: "#ask-panel", title: "Ask the fleet anything", body: "Advisory AI answers from run, health, and drift data. It proposes and never executes. Run it on local Ollama or your own cloud key.", hold: 7000 },
+			{ page: "workflows", path: "/ui/workflows", sel: "#wf-canvas", title: "Drag a pipeline together", body: "Wire Terraform, Ansible, Python, and Bash into one graph with per-step retries. AWX's signature feature, without the Kubernetes bill.", hold: 7500 },
+			{ page: "policies", path: "/ui/policies", sel: "#policy-open", title: "The gate nobody skips", body: "Policy holds a prod terraform destroy for an admin's sign-off, automatically. Approvals are enforced, not suggested.", hold: 7000 },
+			{ page: "audit", path: "/ui/audit", sel: "#audit-verify", title: "Prove every change", body: "Every change links into a tamper-evident hash chain. One click verifies it here, and a signed export verifies offline.", hold: 7000 },
+			{ page: "overview", path: "/ui/", sel: ".migrate-callout", title: "Switching is one command", body: "Projects, inventories, templates, surveys, and schedules import from AWX or Semaphore in a single pass.", hold: 6500 },
+			{ title: "That is the moat", body: "Running many tools is table stakes. A control plane that proves itself is not. Press Explore and try anything, nothing here can break.", hold: 8000 },
 		],
 	},
 	{
@@ -183,6 +186,13 @@ const TOURS = [
 // tourByID returns the tour with the given id, or null when none matches.
 function tourByID(id) {
 	return TOURS.find((t) => t.id === id) || null;
+}
+
+// tourStepPage returns the page a step runs on, falling back to the tour's home page for steps
+// that do not hop.
+function tourStepPage(tour, idx) {
+	const step = tour.steps[idx];
+	return (step && step.page) || tour.page;
 }
 
 // toggleTourMenu opens or closes the guided-tour launcher, a small menu of the available tours
@@ -260,9 +270,9 @@ function launchTour(id) {
 	const tour = tourByID(id);
 	if (!tour) return;
 	if (tour.page === document.body.dataset.page) {
-		startTour(id);
+		startTour(id, { auto: !!tour.auto });
 	} else {
-		sessionStorage.setItem("ym_tour_start", JSON.stringify({ id, at: Date.now() }));
+		sessionStorage.setItem("ym_tour_start", JSON.stringify({ id, auto: !!tour.auto, at: Date.now() }));
 		window.location.assign(tour.path);
 	}
 }
@@ -276,9 +286,9 @@ let tourState = null;
 function mountTour() {
 	const pending = readPendingTour();
 	if (pending) {
-		const tour = tourByID(pending);
-		if (tour && tour.page === document.body.dataset.page) {
-			window.setTimeout(() => startTour(pending), 300);
+		const tour = tourByID(pending.id);
+		if (tour && tourStepPage(tour, pending.step) === document.body.dataset.page) {
+			window.setTimeout(() => startTour(pending.id, pending), 300);
 			return;
 		}
 	}
@@ -297,14 +307,17 @@ function readPendingTour() {
 	sessionStorage.removeItem("ym_tour_start");
 	try {
 		const p = JSON.parse(raw);
-		if (p && p.id && Date.now() - p.at < 60000) return p.id;
+		if (p && p.id && Date.now() - p.at < 60000) {
+			return { id: p.id, step: p.step || 0, auto: !!p.auto };
+		}
 	} catch { /* stale or malformed handoff */ }
 	return null;
 }
 
-// startTour builds the spotlight overlay for the named tour and shows its first step. Calling it
-// while a tour runs restarts from the top.
-function startTour(tourId) {
+// startTour builds the spotlight overlay for the named tour and shows a step, the first by default
+// or a later one when resuming after a page hop. Calling it while a tour runs restarts it. When
+// opts.auto is set the tour drives itself, advancing on a per-step timer until paused.
+function startTour(tourId, opts) {
 	const tour = tourByID(tourId) || TOURS[0];
 	endTour(false);
 	const blocker = document.createElement("div");
@@ -321,15 +334,21 @@ function startTour(tourId) {
 		'<p class="tour-text"></p></div>' +
 		'<div class="tour-foot"><span class="tour-count muted"></span>' +
 		'<div class="tour-btns">' +
+		'<button type="button" class="button tour-play" aria-pressed="false" hidden>Pause</button>' +
 		'<button type="button" class="button tour-skip">Skip</button>' +
 		'<button type="button" class="button tour-back">Back</button>' +
 		'<button type="button" class="button primary tour-next">Next</button>' +
-		"</div></div>";
+		"</div></div>" +
+		'<div class="tour-bar" aria-hidden="true"></div>';
 	document.body.appendChild(blocker);
 	document.body.appendChild(hole);
 	document.body.appendChild(pop);
 
-	tourState = { step: 0, steps: tour.steps, blocker, hole, pop };
+	tourState = {
+		tour, step: (opts && opts.step) || 0, steps: tour.steps, blocker, hole, pop,
+		auto: !!(opts && opts.auto), timer: 0,
+	};
+	pop.querySelector(".tour-play").addEventListener("click", () => setTourAuto(!tourState.auto));
 	pop.querySelector(".tour-skip").addEventListener("click", () => endTour(true));
 	pop.querySelector(".tour-back").addEventListener("click", () => moveTour(-1));
 	pop.querySelector(".tour-next").addEventListener("click", () => moveTour(1));
@@ -353,23 +372,53 @@ function startTour(tourId) {
 	showTourStep();
 }
 
-// moveTour advances or rewinds the tour, ending it when Next is pressed on the last step.
-function moveTour(delta) {
+// moveTour advances or rewinds the tour, ending it past the last step. A step that lives on
+// another page hands the tour off through sessionStorage and navigates there. Manual movement
+// pauses a self-driving tour; movement from the step timer keeps it rolling.
+function moveTour(delta, fromAuto) {
 	if (!tourState) return;
+	clearTourTimer();
+	if (!fromAuto) tourState.auto = false;
 	const next = tourState.step + delta;
 	if (next >= tourState.steps.length) {
 		endTour(true);
 		return;
 	}
 	if (next < 0) return;
+	const page = tourStepPage(tourState.tour, next);
+	if (page !== document.body.dataset.page) {
+		const step = tourState.steps[next];
+		sessionStorage.setItem("ym_tour_start", JSON.stringify({
+			id: tourState.tour.id, step: next, auto: tourState.auto, at: Date.now(),
+		}));
+		window.location.assign(step.path || tourState.tour.path);
+		return;
+	}
 	tourState.step = next;
 	showTourStep();
 }
 
+// setTourAuto starts or stops the tour's self-advance and re-renders the step so the timer,
+// progress bar, and Play control match.
+function setTourAuto(on) {
+	if (!tourState) return;
+	tourState.auto = on;
+	showTourStep();
+}
+
+// clearTourTimer cancels a pending self-advance.
+function clearTourTimer() {
+	if (!tourState || !tourState.timer) return;
+	window.clearTimeout(tourState.timer);
+	tourState.timer = 0;
+}
+
 // showTourStep fills the popover for the current step, scrolls its target into view, positions the
-// spotlight, and focuses Next so the keyboard drives the tour.
+// spotlight, and focuses the control that drives the tour: Play while self-advancing, Next
+// otherwise. On a self-driving tour it also arms the step timer and runs the progress bar.
 function showTourStep() {
 	if (!tourState) return;
+	clearTourTimer();
 	const step = tourState.steps[tourState.step];
 	const { pop } = tourState;
 	pop.querySelector(".tour-title").textContent = step.title;
@@ -380,10 +429,25 @@ function showTourStep() {
 	pop.querySelector(".tour-next").textContent = isLast ? "Explore" : "Next";
 	pop.querySelector(".tour-skip").hidden = isLast;
 
+	const play = pop.querySelector(".tour-play");
+	play.hidden = !tourState.tour.auto;
+	play.textContent = tourState.auto ? "Pause" : "Play";
+	play.setAttribute("aria-pressed", tourState.auto ? "true" : "false");
+	const bar = pop.querySelector(".tour-bar");
+	bar.style.transition = "none";
+	bar.style.width = "0";
+	if (tourState.auto) {
+		const hold = step.hold || 6500;
+		void bar.offsetWidth;
+		bar.style.transition = "width " + hold + "ms linear";
+		bar.style.width = "100%";
+		tourState.timer = window.setTimeout(() => moveTour(1, true), hold);
+	}
+
 	const el = step.sel ? document.querySelector(step.sel) : null;
 	if (el) el.scrollIntoView({ block: "center", inline: "nearest" });
 	renderTourPosition();
-	pop.querySelector(".tour-next").focus();
+	(tourState.auto ? play : pop.querySelector(".tour-next")).focus();
 }
 
 // renderTourPosition places the spotlight and popover for the current step without scrolling, so it
@@ -468,6 +532,7 @@ function tourKey(e) {
 function endTour(completed) {
 	if (completed) localStorage.setItem("ym_tour_done", "1");
 	if (!tourState) return;
+	clearTourTimer();
 	document.removeEventListener("keydown", tourKey);
 	window.removeEventListener("resize", tourReflow);
 	window.removeEventListener("scroll", tourReflow, true);
