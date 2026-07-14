@@ -5,10 +5,11 @@ the [quickstart](quickstart.md), or [switching from AWX](switching-from-awx.md) 
 
 ## What can Yardmaster run?
 
-Ansible playbooks, Bash scripts, Terraform, Python, and Go. A run, a saved template, or a single step of
-a pipeline picks its tool. A pipeline can mix them: Terraform to build infrastructure, Ansible to
-configure it, Bash to smoke-test it, as one dependency graph. Bash shells out to anything on the
-host, so kubectl, the cloud CLIs, and your own scripts all work.
+Ansible playbooks, Bash scripts, Terraform, OpenTofu, Python, PowerShell, and Go, plus any tool
+you add through the [Go SDK](sdk.md). A run, a saved template, or a single step of a pipeline
+picks its tool. A pipeline can mix them: Terraform to build infrastructure, Ansible to configure
+it, Bash to smoke-test it, as one dependency graph. Bash shells out to anything on the host, so
+kubectl, the cloud CLIs, and your own scripts all work.
 
 ## Do I need Kubernetes?
 
@@ -66,7 +67,30 @@ rotate at any time.
 
 ## Does it support single sign-on?
 
-Yes, OpenID Connect, with just-in-time account provisioning and a configurable default role.
+Yes: OpenID Connect, SAML, and LDAP directory sign-in, with just-in-time account provisioning
+and a configurable default role.
+
+## Does Yardmaster send my data to an AI model?
+
+Only if you turn AI on, and only to the provider you chose. With local Ollama nothing leaves
+your machines. With a cloud provider, prompts carry automation content such as commands,
+playbook names, masked failed-run logs, and drift summaries. Credential values are masked before
+any prompt is built, and fleet questions send metadata only. AI is off by default. See the
+[AI guide](ai.md) for exactly what each feature sends.
+
+## Can the AI change my infrastructure?
+
+No. A provider only produces text a human reads or a proposal a human releases. Anything AI
+drafts that could become a run is born held at the same approval gate an operator faces, an
+admin reviews the generated command before it moves, and the request and decision both land in
+the audit trail.
+
+## Can I extend Yardmaster?
+
+Yes, in Go, two ways: compile an extension into the binary, or drop a plugin binary into
+`--plugins-dir` on a stock release. Both register execution tools, AI providers, secret engines,
+and notification channels. See [Extend in Go](sdk.md) and the official
+[yardmaster-plugins](https://github.com/dcadolph/yardmaster-plugins) repo for a working example.
 
 ## What about scale?
 

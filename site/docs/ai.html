@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Advisory AI · Yardmaster docs</title>
+	<meta name="description" content="Yardmaster's advisory AI: five features, the governance guarantees, local and cloud providers, and exactly what a model sees. Off by default, never in the execution path.">
+	<link rel="canonical" href="https://yardmaster.dev/docs/ai">
+	<meta property="og:title" content="Advisory AI · Yardmaster docs">
+	<meta property="og:description" content="Yardmaster's advisory AI: five features, the governance guarantees, local and cloud providers, and exactly what a model sees. Off by default, never in the execution path.">
+	<meta property="og:type" content="article">
+	<meta property="og:url" content="https://yardmaster.dev/docs/ai">
+	<link rel="icon" href="/favicon.ico" sizes="any">
+	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
+	<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="/docs.css?v=1">
+</head>
+<body>
+	<header class="dnav">
+		<a class="brand" href="/"><img src="/assets/logo-train-tracks-dark.png" alt="Yardmaster" class="brand-train"><span class="brand-word">Yardmaster</span></a>
+		<span class="dnav-tag">Docs</span>
+		<nav class="dnav-links">
+			<a href="/">Home</a>
+			<a href="/#compare">Compare</a>
+			<a href="https://github.com/dcadolph/yardmaster">GitHub</a>
+		</nav>
+	</header>
+	<div class="dshell">
+		<aside class="dside">
+			<nav>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/sdk">Extend Yardmaster in Go</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/ai" class="active">Advisory AI</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">Yardmaster compared to AWX and Semaphore</a>
+			</nav>
+		</aside>
+		<main class="dcontent prose">
+			<h1 id="advisory-ai">Advisory AI</h1>
+<p>Yardmaster runs a complete control plane with no model anywhere near it. AI is an optional layer
+you switch on for an edge, never a dependency: it is off until you set <code>--ai-provider</code>, and
+nothing in the product waits on it.</p>
+<h2 id="the-guarantees">The guarantees</h2>
+<p>The rule is one sentence: AI proposes, the control plane governs.</p>
+<ul>
+<li>A provider only ever produces text a human reads or a proposal a human releases. It executes
+nothing and sits in no execution path.</li>
+<li>Anything AI drafts that could become a run is born held at the same approval gate an operator
+faces. An admin reviews the exact generated command before anything moves.</li>
+<li>Credential values are masked out of logs and events before any feature builds a prompt, so a
+model never sees a secret.</li>
+<li>Requests and decisions land in the tamper-evident audit trail, including the plain-language
+request a proposal was built from.</li>
+</ul>
+<h2 id="the-five-features">The five features</h2>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Where</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Run triage</td>
+<td>A failed run's page, <code>POST /v1/runs/{id}/explain</code></td>
+<td>Explains the failure from the run's masked log and failed task events, on demand.</td>
+</tr>
+<tr>
+<td>Step drafting</td>
+<td>The workflow editor, <code>POST /v1/ai/draft</code></td>
+<td>Drafts a bash, python, powershell, or go step script from a description, for you to review, edit, and save. It never executes on its own.</td>
+</tr>
+<tr>
+<td>Fleet questions</td>
+<td>The overview page, <code>POST /v1/ai/ask</code></td>
+<td>Answers a plain-language question from a bounded snapshot of run counts, recent runs, host health, and drift. Metadata only, rate limited.</td>
+</tr>
+<tr>
+<td>Run proposals</td>
+<td>The runs page, <code>POST /v1/ai/propose-run</code></td>
+<td>Turns a plain-language request into a validated run the server builds, born held for approval and stamped with your exact words.</td>
+</tr>
+<tr>
+<td>Drift reconcile</td>
+<td>The drift page</td>
+<td>One click on a drifted host builds the fix run, limited to that host, born held for approval.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="providers">Providers</h2>
+<table>
+<thead>
+<tr>
+<th>Provider</th>
+<th>Runs where</th>
+<th>Setup</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ollama</code></td>
+<td>Your hardware</td>
+<td><code>--ai-provider ollama --ai-model llama3.1</code>, optional <code>--ai-url</code> for a remote Ollama.</td>
+</tr>
+<tr>
+<td><code>anthropic</code></td>
+<td>Anthropic's API</td>
+<td><code>--ai-provider anthropic --ai-model claude-sonnet-5</code> plus <code>YARDMASTER_AI_KEY</code>.</td>
+</tr>
+<tr>
+<td><code>openai</code></td>
+<td>Any OpenAI-compatible endpoint</td>
+<td><code>--ai-provider openai --ai-model &lt;model&gt; --ai-url &lt;server&gt;</code> plus <code>YARDMASTER_AI_KEY</code>. Covers OpenAI itself, vLLM, LM Studio, and OpenRouter.</td>
+</tr>
+</tbody>
+</table>
+<p>A new backend plugs in without touching the core: register a provider through the
+<a href="/docs/sdk">Go SDK</a>, compiled in or as a drop-in plugin binary.</p>
+<p>When the Anthropic model is a Fable or Mythos model, Yardmaster opts into server-side fallbacks,
+so a request declined by a safety classifier retries on <code>claude-opus-4-8</code> in the same call and
+the feature keeps working. A Fable model also requires 30-day data retention on the account.</p>
+<h2 id="what-a-model-sees">What a model sees</h2>
+<p>With <code>ollama</code>, nothing leaves your machines. With a cloud provider, prompts carry automation
+content: commands, playbook names, masked failed-run logs, drift summaries, and the questions
+you type. Credential values never appear, because masking runs before any prompt is built, and
+fleet questions send metadata only, never file contents or inventories. If that boundary is too
+wide for your environment, run Ollama locally or leave AI off. Every other page of this
+documentation works the same either way.</p>
+<p>See <a href="/docs/configuration">configuration</a> for every flag, the <a href="/docs/api">HTTP API</a> for the endpoints,
+and <a href="/docs/features">features</a> for the full capability list.</p>
+
+		</main>
+	</div>
+	<script>document.addEventListener("click",e=>{const a=e.target.closest(".dside a");if(a)document.querySelector(".dside")?.classList.remove("open")});</script>
+</body>
+</html>

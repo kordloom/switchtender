@@ -31,7 +31,7 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq" class="active">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/sdk">Extend Yardmaster in Go</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">Yardmaster compared to AWX and Semaphore</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq" class="active">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/sdk">Extend Yardmaster in Go</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/ai">Advisory AI</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">Yardmaster compared to AWX and Semaphore</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
@@ -39,10 +39,11 @@
 <p>Short answers to the questions teams ask when evaluating or adopting Yardmaster. New here? Start with
 the <a href="/docs/quickstart">quickstart</a>, or <a href="/docs/switching-from-awx">switching from AWX</a> if you are migrating.</p>
 <h2 id="what-can-yardmaster-run">What can Yardmaster run?</h2>
-<p>Ansible playbooks, Bash scripts, Terraform, Python, and Go. A run, a saved template, or a single step of
-a pipeline picks its tool. A pipeline can mix them: Terraform to build infrastructure, Ansible to
-configure it, Bash to smoke-test it, as one dependency graph. Bash shells out to anything on the
-host, so kubectl, the cloud CLIs, and your own scripts all work.</p>
+<p>Ansible playbooks, Bash scripts, Terraform, OpenTofu, Python, PowerShell, and Go, plus any tool
+you add through the <a href="/docs/sdk">Go SDK</a>. A run, a saved template, or a single step of a pipeline
+picks its tool. A pipeline can mix them: Terraform to build infrastructure, Ansible to configure
+it, Bash to smoke-test it, as one dependency graph. Bash shells out to anything on the host, so
+kubectl, the cloud CLIs, and your own scripts all work.</p>
 <h2 id="do-i-need-kubernetes">Do I need Kubernetes?</h2>
 <p>No. Yardmaster is one binary that is the API, the executor, the scheduler, and the UI. State is one
 database: a SQLite file to start, or PostgreSQL when you want more than one instance. No Redis, no
@@ -83,7 +84,24 @@ separate from the URL, so a leaked webhook URL cannot forge a push. Set the same
 host, turn enforcement on, and an unsigned or wrong request is rejected before anything runs. Secrets
 rotate at any time.</p>
 <h2 id="does-it-support-single-sign-on">Does it support single sign-on?</h2>
-<p>Yes, OpenID Connect, with just-in-time account provisioning and a configurable default role.</p>
+<p>Yes: OpenID Connect, SAML, and LDAP directory sign-in, with just-in-time account provisioning
+and a configurable default role.</p>
+<h2 id="does-yardmaster-send-my-data-to-an-ai-model">Does Yardmaster send my data to an AI model?</h2>
+<p>Only if you turn AI on, and only to the provider you chose. With local Ollama nothing leaves
+your machines. With a cloud provider, prompts carry automation content such as commands,
+playbook names, masked failed-run logs, and drift summaries. Credential values are masked before
+any prompt is built, and fleet questions send metadata only. AI is off by default. See the
+<a href="/docs/ai">AI guide</a> for exactly what each feature sends.</p>
+<h2 id="can-the-ai-change-my-infrastructure">Can the AI change my infrastructure?</h2>
+<p>No. A provider only produces text a human reads or a proposal a human releases. Anything AI
+drafts that could become a run is born held at the same approval gate an operator faces, an
+admin reviews the generated command before it moves, and the request and decision both land in
+the audit trail.</p>
+<h2 id="can-i-extend-yardmaster">Can I extend Yardmaster?</h2>
+<p>Yes, in Go, two ways: compile an extension into the binary, or drop a plugin binary into
+<code>--plugins-dir</code> on a stock release. Both register execution tools, AI providers, secret engines,
+and notification channels. See <a href="/docs/sdk">Extend in Go</a> and the official
+<a href="https://github.com/dcadolph/yardmaster-plugins">yardmaster-plugins</a> repo for a working example.</p>
 <h2 id="what-about-scale">What about scale?</h2>
 <p>Runs stream and page by a sequence cursor, the runs list and event history paginate, and a large host
 matrix renders one cell at a time. Split a run across workers by measured host duration, and run more
