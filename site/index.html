@@ -230,8 +230,8 @@
 		<section class="section wrap" id="sdk">
 			<div class="section-head reveal">
 				<span class="eyebrow">Extensibility · SDK + drop-in plugins</span>
-				<h2>Extend it in Go</h2>
-				<p>Extend Yardmaster in Go through a stable SDK: add tools, AI providers, secret backends, and notification channels. Compile your extension in, or build it once and drop the binary into <code>--plugins-dir</code>: a stock release loads it at startup over gRPC with mutual TLS and treats it as its own. A plugged-in tool submits, validates, and audits like a built-in, and a plugged-in channel gets every terminal run with secret-carrying vars already redacted. The <a href="/docs/sdk">SDK guide</a> walks both paths, from module to running server, and the official <a href="https://github.com/dcadolph/yardmaster-plugins">yardmaster-plugins</a> repo ships a real one: Discord, ntfy, and Teams notifications from a single drop-in binary.</p>
+				<h2>Seven tools in the box.<br>Add more in Go.</h2>
+				<p>Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go all run out of the box, no plugins required. When you need an eighth tool, a custom secret backend, a new AI provider, or your own notification channel, you write it in Go against a stable SDK. Compile it into the binary, or build it once and drop it into <code>--plugins-dir</code>, where a stock release loads it at startup over gRPC with mutual TLS and treats it as its own. A plugged-in tool submits, validates, and audits like a built-in. A plugged-in channel gets every terminal run with secret-carrying vars already redacted. The <a href="/docs/sdk">SDK guide</a> walks both paths, and the official <a href="https://github.com/dcadolph/yardmaster-plugins">yardmaster-plugins</a> repo ships a real one: Discord, ntfy, and Teams from a single drop-in binary.</p>
 			</div>
 			<div class="code reveal">
 				<button class="copy" aria-label="Copy">Copy</button>
