@@ -12,12 +12,12 @@ import (
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/yardmaster/internal/demo"
-	"github.com/dcadolph/yardmaster/internal/dispatch"
-	"github.com/dcadolph/yardmaster/internal/live"
-	"github.com/dcadolph/yardmaster/internal/logutil"
-	"github.com/dcadolph/yardmaster/internal/roundhouse"
-	"github.com/dcadolph/yardmaster/internal/server"
+	"github.com/dcadolph/railwarden/internal/demo"
+	"github.com/dcadolph/railwarden/internal/dispatch"
+	"github.com/dcadolph/railwarden/internal/live"
+	"github.com/dcadolph/railwarden/internal/logutil"
+	"github.com/dcadolph/railwarden/internal/roundhouse"
+	"github.com/dcadolph/railwarden/internal/server"
 )
 
 // demoAddr holds the value of the demo --addr flag.
@@ -26,7 +26,7 @@ var demoAddr string
 // demoDB holds the value of the demo --db flag.
 var demoDB string
 
-// demoCmd runs a seeded, read-only Yardmaster instance for evaluation. It fills a fresh database
+// demoCmd runs a seeded, read-only Railwarden instance for evaluation. It fills a fresh database
 // with sample projects, templates, inventories, and real runs, then serves it with every mutating
 // request rejected, so it is safe to expose publicly.
 var demoCmd = &cobra.Command{
@@ -52,7 +52,7 @@ func runDemo(cmd *cobra.Command, _ []string) error {
 
 	db := demoDB
 	if db == "" {
-		f, err := os.CreateTemp("", "yardmaster-demo-*.db")
+		f, err := os.CreateTemp("", "railwarden-demo-*.db")
 		if err != nil {
 			return fmt.Errorf("demo database: %w", err)
 		}
@@ -109,7 +109,7 @@ func runDemo(cmd *cobra.Command, _ []string) error {
 
 	errCh := make(chan error, 1)
 	go func() {
-		log.Info("yardmaster demo serving (read-only)", zap.String("addr", demoAddr))
+		log.Info("railwarden demo serving (read-only)", zap.String("addr", demoAddr))
 		serveErr := httpServer.ListenAndServe()
 		if errors.Is(serveErr, http.ErrServerClosed) {
 			serveErr = nil

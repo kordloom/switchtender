@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dcadolph/yardmaster/internal/run"
+	"github.com/dcadolph/railwarden/internal/run"
 )
 
 func TestPythonRunner(t *testing.T) {
@@ -83,8 +83,8 @@ func TestVarsEnv(t *testing.T) {
 	if !slices.Contains(env, "BASE=1") || !slices.Contains(env, "SECRET=x") {
 		t.Errorf("env = %v, want base and credential entries", env)
 	}
-	if !slices.Contains(env, `YARDMASTER_VARS={"region":"us-east-1"}`) {
-		t.Errorf("env = %v, want YARDMASTER_VARS with the extra vars", env)
+	if !slices.Contains(env, `RAILWARDEN_VARS={"region":"us-east-1"}`) {
+		t.Errorf("env = %v, want RAILWARDEN_VARS with the extra vars", env)
 	}
 }
 

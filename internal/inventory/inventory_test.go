@@ -3,8 +3,8 @@ package inventory_test
 import (
 	"testing"
 
-	"github.com/dcadolph/yardmaster/internal/inventory"
-	"github.com/dcadolph/yardmaster/internal/inventorytest"
+	"github.com/dcadolph/railwarden/internal/inventory"
+	"github.com/dcadolph/railwarden/internal/inventorytest"
 )
 
 func TestMemStoreContract(t *testing.T) {

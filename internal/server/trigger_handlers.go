@@ -9,10 +9,10 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/yardmaster/internal/credential"
-	"github.com/dcadolph/yardmaster/internal/run"
-	"github.com/dcadolph/yardmaster/internal/template"
-	"github.com/dcadolph/yardmaster/internal/trigger"
+	"github.com/dcadolph/railwarden/internal/credential"
+	"github.com/dcadolph/railwarden/internal/run"
+	"github.com/dcadolph/railwarden/internal/template"
+	"github.com/dcadolph/railwarden/internal/trigger"
 )
 
 // maxHookBody caps the inbound webhook body buffered to verify its HMAC signature. GitHub caps
@@ -70,7 +70,7 @@ func createTriggerHandler(triggers trigger.Store, templates template.Store, seal
 		}
 		if req.RequireSignature && (sealer == nil || !sealer.Enabled()) {
 			respondError(w, log, http.StatusConflict,
-				"require_signature needs an encryption key: set YARDMASTER_ENCRYPTION_KEY and YARDMASTER_ENCRYPTION_SALT on the server")
+				"require_signature needs an encryption key: set RAILWARDEN_ENCRYPTION_KEY and RAILWARDEN_ENCRYPTION_SALT on the server")
 			return
 		}
 		if _, err := templates.Get(r.Context(), req.TemplateID); errors.Is(err, template.ErrNotFound) {
@@ -189,7 +189,7 @@ func rotateTriggerSecretHandler(triggers trigger.Store, sealer *credential.Seale
 		}
 		if sealer == nil || !sealer.Enabled() {
 			respondError(w, log, http.StatusConflict,
-				"signing secrets need an encryption key: set YARDMASTER_ENCRYPTION_KEY and YARDMASTER_ENCRYPTION_SALT on the server")
+				"signing secrets need an encryption key: set RAILWARDEN_ENCRYPTION_KEY and RAILWARDEN_ENCRYPTION_SALT on the server")
 			return
 		}
 		tg, err := triggers.Get(r.Context(), r.PathValue("id"))

@@ -1,4 +1,4 @@
-// Package plugin turns an extension into a standalone binary Yardmaster loads at startup, no
+// Package plugin turns an extension into a standalone binary Railwarden loads at startup, no
 // recompile of the server. A plugin author fills an Extension with the same interfaces the
 // in-process SDK registers, then calls Serve from main. The server launches the binary from its
 // plugins directory, asks what it provides, and registers every seam, so a plugged-in tool,
@@ -22,16 +22,16 @@ import (
 	goplugin "github.com/hashicorp/go-plugin"
 	"google.golang.org/grpc"
 
-	"github.com/dcadolph/yardmaster/internal/extproto"
-	"github.com/dcadolph/yardmaster/sdk"
+	"github.com/dcadolph/railwarden/internal/extproto"
+	"github.com/dcadolph/railwarden/sdk"
 )
 
-// Handshake pairs a plugin binary with a Yardmaster that speaks its protocol. The cookie is not a
-// security measure, only a guard against launching a binary that is not a Yardmaster extension.
+// Handshake pairs a plugin binary with a Railwarden that speaks its protocol. The cookie is not a
+// security measure, only a guard against launching a binary that is not a Railwarden extension.
 var Handshake = goplugin.HandshakeConfig{
 	ProtocolVersion:  1,
-	MagicCookieKey:   "YARDMASTER_EXTENSION",
-	MagicCookieValue: "yardmaster-extension-v1",
+	MagicCookieKey:   "RAILWARDEN_EXTENSION",
+	MagicCookieValue: "railwarden-extension-v1",
 }
 
 // Key names the one plugin every extension binary serves in the go-plugin set.

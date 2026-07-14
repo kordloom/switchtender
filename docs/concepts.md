@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="../assets/logo-letters-dark.png">
-    <img src="../assets/logo-letters.png" alt="Yardmaster" width="140">
+    <img src="../assets/logo-letters.png" alt="Railwarden" width="140">
   </picture>
 </p>
 
@@ -9,7 +9,7 @@
 
 ## Runs
 
-A run is one execution of a playbook against an inventory. Yardmaster shells out to
+A run is one execution of a playbook against an inventory. Railwarden shells out to
 `ansible-playbook` and captures both a human log and a structured event stream through an embedded
 callback plugin, so a run is queryable data, not just scrollback. Every run records its status,
 timing, exit code, the extra vars going in, and the `set_stats` outputs coming out.
@@ -47,7 +47,7 @@ runs the play. A dynamic inventory source runs an inventory plugin or script and
 result into a stored inventory, with cloud authentication supplied by a credential.
 
 A stored inventory can also draw its content from an external store, a command, Vault, or Google
-Secret Manager, resolved at launch, so the host list lives outside Yardmaster and is fetched fresh
+Secret Manager, resolved at launch, so the host list lives outside Railwarden and is fetched fresh
 for each run.
 
 ## Triggers
@@ -92,7 +92,7 @@ against it lands there, no matter how it was launched.
 Every authenticated mutation is recorded in the audit trail, and each entry is linked into a SHA-256
 hash chain: it carries the previous entry's hash and its own hash over its content. Altering,
 reordering, or deleting an entry breaks the chain, which `GET /audit/verify` detects. A signed export
-from `GET /audit/export` seals the chain with an ed25519 signature, so `yardmaster audit verify`
+from `GET /audit/export` seals the chain with an ed25519 signature, so `railwarden audit verify`
 proves the trail is intact and unaltered offline, without trusting the server that produced it.
 
 ## Approvals

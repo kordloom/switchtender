@@ -15,10 +15,10 @@ import (
 	"github.com/go-jose/go-jose/v4/jwt"
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/yardmaster/internal/audit"
-	"github.com/dcadolph/yardmaster/internal/auth"
-	"github.com/dcadolph/yardmaster/internal/run"
-	"github.com/dcadolph/yardmaster/internal/user"
+	"github.com/dcadolph/railwarden/internal/audit"
+	"github.com/dcadolph/railwarden/internal/auth"
+	"github.com/dcadolph/railwarden/internal/run"
+	"github.com/dcadolph/railwarden/internal/user"
 )
 
 func TestJWTAuthenticate(t *testing.T) {
@@ -35,7 +35,7 @@ func TestJWTAuthenticate(t *testing.T) {
 	defer srv.Close()
 
 	const issuer = "https://issuer.test"
-	const audience = "yardmaster"
+	const audience = "railwarden"
 	sign := func(claims jwt.Claims, extra map[string]any) string {
 		sig, err := jose.NewSigner(jose.SigningKey{Algorithm: jose.RS256, Key: key},
 			(&jose.SignerOptions{}).WithType("JWT").WithHeader("kid", "k1"))
@@ -104,7 +104,7 @@ func TestJWTMutationRecordsAudit(t *testing.T) {
 		t.Fatalf("signer: %v", err)
 	}
 	raw, err := jwt.Signed(sig).Claims(jwt.Claims{
-		Issuer: issuer, Subject: "svc", Audience: jwt.Audience{"yardmaster"},
+		Issuer: issuer, Subject: "svc", Audience: jwt.Audience{"railwarden"},
 		Expiry: jwt.NewNumericDate(time.Now().Add(time.Hour)),
 	}).Claims(map[string]any{"groups": []string{"admins"}}).Serialize()
 	if err != nil {
@@ -112,7 +112,7 @@ func TestJWTMutationRecordsAudit(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	jwtAuth, err := NewJWTAuth(ctx, srv.URL, issuer, "yardmaster", "sub", "groups",
+	jwtAuth, err := NewJWTAuth(ctx, srv.URL, issuer, "railwarden", "sub", "groups",
 		user.RoleViewer, map[string]user.Role{"admins": user.RoleAdmin}, user.NewMemStore(), zap.NewNop())
 	if err != nil {
 		t.Fatalf("NewJWTAuth: %v", err)

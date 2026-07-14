@@ -12,8 +12,8 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/yardmaster/internal/ai"
-	"github.com/dcadolph/yardmaster/internal/run"
+	"github.com/dcadolph/railwarden/internal/ai"
+	"github.com/dcadolph/railwarden/internal/run"
 )
 
 // TestDraftStep covers the draft endpoint: disabled 404, tool and prompt validation, the happy

@@ -1,6 +1,6 @@
-// Package sdk is the stable surface a Yardmaster extension builds against. It re-exports the
+// Package sdk is the stable surface a Railwarden extension builds against. It re-exports the
 // extension interfaces and their registration entry points, so an extension imports this one
-// package and never reaches into Yardmaster's internals.
+// package and never reaches into Railwarden's internals.
 //
 // Register from an init function or from main before the server starts. The registries are read
 // while serving and never written after, so registration is a startup step, not a runtime one. A
@@ -21,11 +21,11 @@ package sdk
 import (
 	"context"
 
-	"github.com/dcadolph/yardmaster/internal/ai"
-	"github.com/dcadolph/yardmaster/internal/dispatch"
-	"github.com/dcadolph/yardmaster/internal/roundhouse"
-	"github.com/dcadolph/yardmaster/internal/run"
-	"github.com/dcadolph/yardmaster/internal/secretsource"
+	"github.com/dcadolph/railwarden/internal/ai"
+	"github.com/dcadolph/railwarden/internal/dispatch"
+	"github.com/dcadolph/railwarden/internal/roundhouse"
+	"github.com/dcadolph/railwarden/internal/run"
+	"github.com/dcadolph/railwarden/internal/secretsource"
 )
 
 // AIProvider turns a prompt into a completion for an advisory feature. It never sits in the

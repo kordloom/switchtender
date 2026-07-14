@@ -19,8 +19,8 @@ import (
 	"github.com/crewjam/saml"
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/yardmaster/internal/auth"
-	"github.com/dcadolph/yardmaster/internal/user"
+	"github.com/dcadolph/railwarden/internal/auth"
+	"github.com/dcadolph/railwarden/internal/user"
 )
 
 // testIDPMetadata is a minimal identity provider metadata document with a redirect SSO binding.
@@ -41,7 +41,7 @@ func writeTestKeypair(t *testing.T) (certFile, keyFile string) {
 	}
 	tmpl := x509.Certificate{
 		SerialNumber: big.NewInt(1),
-		Subject:      pkix.Name{CommonName: "yardmaster-test"},
+		Subject:      pkix.Name{CommonName: "railwarden-test"},
 		NotBefore:    time.Now().Add(-time.Hour),
 		NotAfter:     time.Now().Add(time.Hour),
 	}

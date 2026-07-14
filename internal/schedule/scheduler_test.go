@@ -8,8 +8,8 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/yardmaster/internal/run"
-	"github.com/dcadolph/yardmaster/internal/template"
+	"github.com/dcadolph/railwarden/internal/run"
+	"github.com/dcadolph/railwarden/internal/template"
 )
 
 // fakeSubmitter records how it was fired for scheduler tests.

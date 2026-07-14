@@ -8,8 +8,8 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/yardmaster/internal/auth"
-	"github.com/dcadolph/yardmaster/internal/user"
+	"github.com/dcadolph/railwarden/internal/auth"
+	"github.com/dcadolph/railwarden/internal/user"
 )
 
 // mintSessionToken creates and stores a session token owned by u and returns its plaintext once.

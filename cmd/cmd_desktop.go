@@ -15,15 +15,15 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// desktopCmd runs Yardmaster as a local desktop application: it serves on a loopback port, stores
+// desktopCmd runs Railwarden as a local desktop application: it serves on a loopback port, stores
 // its data in a per-user directory, and opens the web UI in the default browser. It is the engine a
 // packaged .app or .exe launches, so a double-click gives a running server and an open UI.
 var desktopCmd = &cobra.Command{
 	Use:   "desktop",
-	Short: "Run Yardmaster locally and open its UI in the browser.",
-	Long: "Run Yardmaster as a local desktop app. It serves on a private loopback port, keeps its " +
+	Short: "Run Railwarden locally and open its UI in the browser.",
+	Long: "Run Railwarden as a local desktop app. It serves on a private loopback port, keeps its " +
 		"database in a per-user data directory, and opens the web UI in your default browser. No " +
-		"flags to set: it is the one-command way to run Yardmaster on your own machine.",
+		"flags to set: it is the one-command way to run Railwarden on your own machine.",
 	RunE:          runDesktop,
 	SilenceUsage:  true,
 	SilenceErrors: true,
@@ -38,11 +38,11 @@ func runDesktop(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	serveDB = filepath.Join(dir, "yardmaster.db")
+	serveDB = filepath.Join(dir, "railwarden.db")
 
 	if port, ok := savedDesktopPort(dir); ok && desktopAlive(port) {
 		url := "http://127.0.0.1:" + strconv.Itoa(port) + "/ui/"
-		fmt.Fprintln(os.Stderr, "Yardmaster is already running at "+url)
+		fmt.Fprintln(os.Stderr, "Railwarden is already running at "+url)
 		go openWhenReady("127.0.0.1:"+strconv.Itoa(port), url)
 		time.Sleep(2 * time.Second)
 		return nil
@@ -56,7 +56,7 @@ func runDesktop(cmd *cobra.Command, _ []string) error {
 	serveAddr = l.Addr().String()
 
 	url := "http://" + serveAddr + "/ui/"
-	fmt.Fprintln(os.Stderr, "Yardmaster is starting at "+url)
+	fmt.Fprintln(os.Stderr, "Railwarden is starting at "+url)
 	go openWhenReady(serveAddr, url)
 	return runServe(cmd, nil)
 }
@@ -69,7 +69,7 @@ func desktopDataDir() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("locate a data directory: %w", err)
 	}
-	dir := filepath.Join(base, "Yardmaster")
+	dir := filepath.Join(base, "Railwarden")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("create data directory: %w", err)
 	}
@@ -116,7 +116,7 @@ func saveDesktopPort(dir string, port int) {
 	_ = os.WriteFile(filepath.Join(dir, "port"), []byte(strconv.Itoa(port)), 0o600)
 }
 
-// desktopAlive reports whether a Yardmaster instance is answering on the loopback port.
+// desktopAlive reports whether a Railwarden instance is answering on the loopback port.
 func desktopAlive(port int) bool {
 	client := &http.Client{Timeout: 500 * time.Millisecond}
 	resp, err := client.Get("http://127.0.0.1:" + strconv.Itoa(port) + "/healthz")
@@ -128,11 +128,11 @@ func desktopAlive(port int) bool {
 }
 
 // openWhenReady waits for the server to accept connections, then opens the UI in the default
-// browser. Setting YARDMASTER_DESKTOP_NO_BROWSER to any value skips the open, for a headless or
+// browser. Setting RAILWARDEN_DESKTOP_NO_BROWSER to any value skips the open, for a headless or
 // remote run. It stops trying after roughly ten seconds, and when the browser cannot be opened it
 // prints the URL so the user can open it by hand.
 func openWhenReady(addr, url string) {
-	if os.Getenv("YARDMASTER_DESKTOP_NO_BROWSER") != "" {
+	if os.Getenv("RAILWARDEN_DESKTOP_NO_BROWSER") != "" {
 		return
 	}
 	for range 100 {

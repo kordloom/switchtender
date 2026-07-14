@@ -1,4 +1,4 @@
-// The wire protocol between Yardmaster and an out-of-process extension. One plugin binary serves
+// The wire protocol between Railwarden and an out-of-process extension. One plugin binary serves
 // one Extension service; Describe names what it provides and the remaining calls carry each seam.
 // Field numbers are frozen once released, so grow messages by adding fields, never by reusing.
 
@@ -895,7 +895,7 @@ var File_extension_proto protoreflect.FileDescriptor
 
 const file_extension_proto_rawDesc = "" +
 	"\n" +
-	"\x0fextension.proto\x12\x17yardmaster.extension.v1\"\x11\n" +
+	"\x0fextension.proto\x12\x17railwarden.extension.v1\"\x11\n" +
 	"\x0fDescribeRequest\"\xc6\x01\n" +
 	"\x10DescribeResponse\x12\x14\n" +
 	"\x05tools\x18\x01 \x03(\tR\x05tools\x12\x1c\n" +
@@ -912,7 +912,7 @@ const file_extension_proto_rawDesc = "" +
 	"\x03dir\x18\x06 \x01(\tR\x03dir\"p\n" +
 	"\fRunToolReply\x12\x18\n" +
 	"\x06output\x18\x01 \x01(\fH\x00R\x06output\x12=\n" +
-	"\x06result\x18\x02 \x01(\v2#.yardmaster.extension.v1.ToolResultH\x00R\x06resultB\a\n" +
+	"\x06result\x18\x02 \x01(\v2#.railwarden.extension.v1.ToolResultH\x00R\x06resultB\a\n" +
 	"\x05reply\")\n" +
 	"\n" +
 	"ToolResult\x12\x1b\n" +
@@ -945,14 +945,14 @@ const file_extension_proto_rawDesc = "" +
 	"\blease_id\x18\x01 \x01(\tR\aleaseId\"\x15\n" +
 	"\x13RevokeLeaseResponse2\xc6\x05\n" +
 	"\tExtension\x12_\n" +
-	"\bDescribe\x12(.yardmaster.extension.v1.DescribeRequest\x1a).yardmaster.extension.v1.DescribeResponse\x12[\n" +
-	"\aRunTool\x12'.yardmaster.extension.v1.RunToolRequest\x1a%.yardmaster.extension.v1.RunToolReply0\x01\x12Y\n" +
-	"\x06Notify\x12&.yardmaster.extension.v1.NotifyRequest\x1a'.yardmaster.extension.v1.NotifyResponse\x12_\n" +
-	"\bComplete\x12(.yardmaster.extension.v1.CompleteRequest\x1a).yardmaster.extension.v1.CompleteResponse\x12n\n" +
-	"\rResolveSecret\x12-.yardmaster.extension.v1.ResolveSecretRequest\x1a..yardmaster.extension.v1.ResolveSecretResponse\x12e\n" +
+	"\bDescribe\x12(.railwarden.extension.v1.DescribeRequest\x1a).railwarden.extension.v1.DescribeResponse\x12[\n" +
+	"\aRunTool\x12'.railwarden.extension.v1.RunToolRequest\x1a%.railwarden.extension.v1.RunToolReply0\x01\x12Y\n" +
+	"\x06Notify\x12&.railwarden.extension.v1.NotifyRequest\x1a'.railwarden.extension.v1.NotifyResponse\x12_\n" +
+	"\bComplete\x12(.railwarden.extension.v1.CompleteRequest\x1a).railwarden.extension.v1.CompleteResponse\x12n\n" +
+	"\rResolveSecret\x12-.railwarden.extension.v1.ResolveSecretRequest\x1a..railwarden.extension.v1.ResolveSecretResponse\x12e\n" +
 	"\n" +
-	"MintSecret\x12*.yardmaster.extension.v1.MintSecretRequest\x1a+.yardmaster.extension.v1.MintSecretResponse\x12h\n" +
-	"\vRevokeLease\x12+.yardmaster.extension.v1.RevokeLeaseRequest\x1a,.yardmaster.extension.v1.RevokeLeaseResponseB2Z0github.com/dcadolph/yardmaster/internal/extprotob\x06proto3"
+	"MintSecret\x12*.railwarden.extension.v1.MintSecretRequest\x1a+.railwarden.extension.v1.MintSecretResponse\x12h\n" +
+	"\vRevokeLease\x12+.railwarden.extension.v1.RevokeLeaseRequest\x1a,.railwarden.extension.v1.RevokeLeaseResponseB2Z0github.com/dcadolph/railwarden/internal/extprotob\x06proto3"
 
 var (
 	file_extension_proto_rawDescOnce sync.Once
@@ -968,38 +968,38 @@ func file_extension_proto_rawDescGZIP() []byte {
 
 var file_extension_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_extension_proto_goTypes = []any{
-	(*DescribeRequest)(nil),       // 0: yardmaster.extension.v1.DescribeRequest
-	(*DescribeResponse)(nil),      // 1: yardmaster.extension.v1.DescribeResponse
-	(*RunToolRequest)(nil),        // 2: yardmaster.extension.v1.RunToolRequest
-	(*RunToolReply)(nil),          // 3: yardmaster.extension.v1.RunToolReply
-	(*ToolResult)(nil),            // 4: yardmaster.extension.v1.ToolResult
-	(*NotifyRequest)(nil),         // 5: yardmaster.extension.v1.NotifyRequest
-	(*NotifyResponse)(nil),        // 6: yardmaster.extension.v1.NotifyResponse
-	(*CompleteRequest)(nil),       // 7: yardmaster.extension.v1.CompleteRequest
-	(*CompleteResponse)(nil),      // 8: yardmaster.extension.v1.CompleteResponse
-	(*ResolveSecretRequest)(nil),  // 9: yardmaster.extension.v1.ResolveSecretRequest
-	(*ResolveSecretResponse)(nil), // 10: yardmaster.extension.v1.ResolveSecretResponse
-	(*MintSecretRequest)(nil),     // 11: yardmaster.extension.v1.MintSecretRequest
-	(*MintSecretResponse)(nil),    // 12: yardmaster.extension.v1.MintSecretResponse
-	(*RevokeLeaseRequest)(nil),    // 13: yardmaster.extension.v1.RevokeLeaseRequest
-	(*RevokeLeaseResponse)(nil),   // 14: yardmaster.extension.v1.RevokeLeaseResponse
+	(*DescribeRequest)(nil),       // 0: railwarden.extension.v1.DescribeRequest
+	(*DescribeResponse)(nil),      // 1: railwarden.extension.v1.DescribeResponse
+	(*RunToolRequest)(nil),        // 2: railwarden.extension.v1.RunToolRequest
+	(*RunToolReply)(nil),          // 3: railwarden.extension.v1.RunToolReply
+	(*ToolResult)(nil),            // 4: railwarden.extension.v1.ToolResult
+	(*NotifyRequest)(nil),         // 5: railwarden.extension.v1.NotifyRequest
+	(*NotifyResponse)(nil),        // 6: railwarden.extension.v1.NotifyResponse
+	(*CompleteRequest)(nil),       // 7: railwarden.extension.v1.CompleteRequest
+	(*CompleteResponse)(nil),      // 8: railwarden.extension.v1.CompleteResponse
+	(*ResolveSecretRequest)(nil),  // 9: railwarden.extension.v1.ResolveSecretRequest
+	(*ResolveSecretResponse)(nil), // 10: railwarden.extension.v1.ResolveSecretResponse
+	(*MintSecretRequest)(nil),     // 11: railwarden.extension.v1.MintSecretRequest
+	(*MintSecretResponse)(nil),    // 12: railwarden.extension.v1.MintSecretResponse
+	(*RevokeLeaseRequest)(nil),    // 13: railwarden.extension.v1.RevokeLeaseRequest
+	(*RevokeLeaseResponse)(nil),   // 14: railwarden.extension.v1.RevokeLeaseResponse
 }
 var file_extension_proto_depIdxs = []int32{
-	4,  // 0: yardmaster.extension.v1.RunToolReply.result:type_name -> yardmaster.extension.v1.ToolResult
-	0,  // 1: yardmaster.extension.v1.Extension.Describe:input_type -> yardmaster.extension.v1.DescribeRequest
-	2,  // 2: yardmaster.extension.v1.Extension.RunTool:input_type -> yardmaster.extension.v1.RunToolRequest
-	5,  // 3: yardmaster.extension.v1.Extension.Notify:input_type -> yardmaster.extension.v1.NotifyRequest
-	7,  // 4: yardmaster.extension.v1.Extension.Complete:input_type -> yardmaster.extension.v1.CompleteRequest
-	9,  // 5: yardmaster.extension.v1.Extension.ResolveSecret:input_type -> yardmaster.extension.v1.ResolveSecretRequest
-	11, // 6: yardmaster.extension.v1.Extension.MintSecret:input_type -> yardmaster.extension.v1.MintSecretRequest
-	13, // 7: yardmaster.extension.v1.Extension.RevokeLease:input_type -> yardmaster.extension.v1.RevokeLeaseRequest
-	1,  // 8: yardmaster.extension.v1.Extension.Describe:output_type -> yardmaster.extension.v1.DescribeResponse
-	3,  // 9: yardmaster.extension.v1.Extension.RunTool:output_type -> yardmaster.extension.v1.RunToolReply
-	6,  // 10: yardmaster.extension.v1.Extension.Notify:output_type -> yardmaster.extension.v1.NotifyResponse
-	8,  // 11: yardmaster.extension.v1.Extension.Complete:output_type -> yardmaster.extension.v1.CompleteResponse
-	10, // 12: yardmaster.extension.v1.Extension.ResolveSecret:output_type -> yardmaster.extension.v1.ResolveSecretResponse
-	12, // 13: yardmaster.extension.v1.Extension.MintSecret:output_type -> yardmaster.extension.v1.MintSecretResponse
-	14, // 14: yardmaster.extension.v1.Extension.RevokeLease:output_type -> yardmaster.extension.v1.RevokeLeaseResponse
+	4,  // 0: railwarden.extension.v1.RunToolReply.result:type_name -> railwarden.extension.v1.ToolResult
+	0,  // 1: railwarden.extension.v1.Extension.Describe:input_type -> railwarden.extension.v1.DescribeRequest
+	2,  // 2: railwarden.extension.v1.Extension.RunTool:input_type -> railwarden.extension.v1.RunToolRequest
+	5,  // 3: railwarden.extension.v1.Extension.Notify:input_type -> railwarden.extension.v1.NotifyRequest
+	7,  // 4: railwarden.extension.v1.Extension.Complete:input_type -> railwarden.extension.v1.CompleteRequest
+	9,  // 5: railwarden.extension.v1.Extension.ResolveSecret:input_type -> railwarden.extension.v1.ResolveSecretRequest
+	11, // 6: railwarden.extension.v1.Extension.MintSecret:input_type -> railwarden.extension.v1.MintSecretRequest
+	13, // 7: railwarden.extension.v1.Extension.RevokeLease:input_type -> railwarden.extension.v1.RevokeLeaseRequest
+	1,  // 8: railwarden.extension.v1.Extension.Describe:output_type -> railwarden.extension.v1.DescribeResponse
+	3,  // 9: railwarden.extension.v1.Extension.RunTool:output_type -> railwarden.extension.v1.RunToolReply
+	6,  // 10: railwarden.extension.v1.Extension.Notify:output_type -> railwarden.extension.v1.NotifyResponse
+	8,  // 11: railwarden.extension.v1.Extension.Complete:output_type -> railwarden.extension.v1.CompleteResponse
+	10, // 12: railwarden.extension.v1.Extension.ResolveSecret:output_type -> railwarden.extension.v1.ResolveSecretResponse
+	12, // 13: railwarden.extension.v1.Extension.MintSecret:output_type -> railwarden.extension.v1.MintSecretResponse
+	14, // 14: railwarden.extension.v1.Extension.RevokeLease:output_type -> railwarden.extension.v1.RevokeLeaseResponse
 	8,  // [8:15] is the sub-list for method output_type
 	1,  // [1:8] is the sub-list for method input_type
 	1,  // [1:1] is the sub-list for extension type_name

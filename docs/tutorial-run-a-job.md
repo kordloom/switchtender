@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="../assets/logo-letters-dark.png">
-    <img src="../assets/logo-letters.png" alt="Yardmaster" width="140">
+    <img src="../assets/logo-letters.png" alt="Railwarden" width="140">
   </picture>
 </p>
 
@@ -22,7 +22,7 @@ tool, not only Ansible.
 
 ## Split it across hosts
 
-Set a shard count of two or more and Yardmaster splits the run across your inventory, balanced by
+Set a shard count of two or more and Railwarden splits the run across your inventory, balanced by
 each host's measured duration from recent runs, then rolls the shards up into one matrix. Each shard
 carries a real share of the work, sized by measured cost rather than a flat count.
 
@@ -30,7 +30,7 @@ carries a real share of the work, sized by measured cost rather than a flat coun
 
     curl -s -X POST localhost:8080/runs \
       -H 'content-type: application/json' \
-      -d '{"tool":"bash","command":"echo hello from yardmaster"}'
+      -d '{"tool":"bash","command":"echo hello from railwarden"}'
 
 For an Ansible run, send `playbook` and `inventory` instead of `command`, and add `"shards": 3` to
 split it. See the [HTTP API](api.md) for every field.

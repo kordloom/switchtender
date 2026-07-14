@@ -8,7 +8,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/yardmaster/internal/ai"
+	"github.com/dcadolph/railwarden/internal/ai"
 )
 
 // draftSystemPrompt frames the model as a script author whose output a human reviews and edits.

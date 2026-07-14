@@ -1,19 +1,19 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="../assets/logo-letters-dark.png">
-    <img src="../assets/logo-letters.png" alt="Yardmaster" width="140">
+    <img src="../assets/logo-letters.png" alt="Railwarden" width="140">
   </picture>
 </p>
 
 # Switching from AWX
 
-This guide assumes you know AWX and have never run Yardmaster. It gets you from an AWX setup to a
-working Yardmaster run two ways: import what you already have, or build it from scratch to learn the
+This guide assumes you know AWX and have never run Railwarden. It gets you from an AWX setup to a
+working Railwarden run two ways: import what you already have, or build it from scratch to learn the
 pieces. If a term is unfamiliar, the [concepts](concepts.md) page defines it.
 
 ## What is different, in one paragraph
 
-Yardmaster runs the same playbooks against the same inventories, and drives Bash, Terraform, and
+Railwarden runs the same playbooks against the same inventories, and drives Bash, Terraform, and
 Python besides, but there is no Kubernetes, no Redis, and no separate task engine to operate. One
 binary is the API, the executor, the scheduler,
 and the UI. State is one database: a SQLite file to start, or PostgreSQL when you want more than one
@@ -22,7 +22,7 @@ just live behind a smaller, faster surface.
 
 ## The mental model
 
-| In AWX | In Yardmaster |
+| In AWX | In Railwarden |
 |--------|---------------|
 | Organization | No direct equivalent. Scope access with teams and grants instead.|
 | Project (git) | Project.|
@@ -39,7 +39,7 @@ just live behind a smaller, faster surface.
 
 ## Path A: import your AWX
 
-The fast path. It reads an AWX export and creates the equivalent Yardmaster objects.
+The fast path. It reads an AWX export and creates the equivalent Railwarden objects.
 
 1. Export from AWX with its own CLI: `awx export` produces a JSON document of your projects, inventories, job
    templates, credentials without secrets, schedules, and surveys.
@@ -47,11 +47,11 @@ The fast path. It reads an AWX export and creates the equivalent Yardmaster obje
 2. Preview the import. Nothing is written yet. You get a report of exactly what would be created and
    every warning.
 
-        yardmaster import awx awx-export.json --db yardmaster.db
+        railwarden import awx awx-export.json --db railwarden.db
 
 3. Apply it.
 
-        yardmaster import awx awx-export.json --db yardmaster.db --apply
+        railwarden import awx awx-export.json --db railwarden.db --apply
 
 4. Re-enter secrets. Exports never contain secrets, so credentials arrive as named shells. The
    report lists which ones to fill in. Open the UI, go to Credentials, and set each secret. Until
@@ -68,8 +68,8 @@ job template in AWX.
 
 ### 1. Start the server
 
-    YARDMASTER_ENCRYPTION_KEY=change-me YARDMASTER_ENCRYPTION_SALT=change-me-too \
-      ./yardmaster serve --addr :8080 --db yardmaster.db
+    RAILWARDEN_ENCRYPTION_KEY=change-me RAILWARDEN_ENCRYPTION_SALT=change-me-too \
+      ./railwarden serve --addr :8080 --db railwarden.db
 
 The key and salt seal credentials at rest. Keep the salt stable across restarts. Open
 http://localhost:8080 for the UI. The API is open until you create the first account or token, so
@@ -77,7 +77,7 @@ you can set up before locking it down.
 
 ### 2. Create your first account
 
-    YARDMASTER_PASSWORD=secret ./yardmaster user new admin-you --role admin --db yardmaster.db
+    RAILWARDEN_PASSWORD=secret ./railwarden user new admin-you --role admin --db railwarden.db
 
 Sign in through the UI with that username and password. Roles are admin, operator, and viewer: admins
 manage configuration, operators launch and cancel runs, viewers read.
@@ -95,7 +95,7 @@ Open Credentials and add what your runs need. Kinds:
 - `ssh_key`: an SSH private key, used to reach hosts and to clone private git projects.
 - `vault_password`: an Ansible Vault password.
 - `env`: `KEY=VALUE` lines injected into the run, how cloud SDK credentials reach plugins.
-- `token`: a single API token or JWT, exposed to the run as the `YARDMASTER_TOKEN` environment variable.
+- `token`: a single API token or JWT, exposed to the run as the `RAILWARDEN_TOKEN` environment variable.
 - `become_password`: a privilege escalation password, delivered without touching the command line.
 - `registry`: a container registry login, for pulling a pinned execution image.
 
@@ -123,7 +123,7 @@ a text scroll.
 Point a worker at the same database to add an executor, and give it a queue name to target specific
 work:
 
-    ./yardmaster worker --db yardmaster.db --name worker-1
+    ./railwarden worker --db railwarden.db --name worker-1
 
 Add a schedule in Schedules with a cron expression to fire a template on a cadence.
 

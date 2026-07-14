@@ -10,7 +10,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/yardmaster/internal/run"
+	"github.com/dcadolph/railwarden/internal/run"
 )
 
 // DefaultInterval is how often the sweeper runs when none is configured.

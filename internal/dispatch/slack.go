@@ -7,7 +7,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/yardmaster/internal/run"
+	"github.com/dcadolph/railwarden/internal/run"
 )
 
 // WithSlack posts a formatted message to each Slack incoming webhook URL when a top-level run
@@ -55,7 +55,7 @@ func slackMessage(r *run.Run) string {
 	if label == "" {
 		label = r.ID
 	}
-	msg := fmt.Sprintf("%s Yardmaster run *%s* %s", icon, label, r.Status)
+	msg := fmt.Sprintf("%s Railwarden run *%s* %s", icon, label, r.Status)
 	if d := runElapsed(r); d != "" {
 		msg += " in " + d
 	}

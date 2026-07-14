@@ -16,11 +16,11 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/yardmaster/internal/dispatch"
-	"github.com/dcadolph/yardmaster/internal/roundhouse"
-	"github.com/dcadolph/yardmaster/internal/run"
-	"github.com/dcadolph/yardmaster/internal/server"
-	"github.com/dcadolph/yardmaster/sdk"
+	"github.com/dcadolph/railwarden/internal/dispatch"
+	"github.com/dcadolph/railwarden/internal/roundhouse"
+	"github.com/dcadolph/railwarden/internal/run"
+	"github.com/dcadolph/railwarden/internal/server"
+	"github.com/dcadolph/railwarden/sdk"
 )
 
 // runView is the slice of the run JSON the test reads back from the API.

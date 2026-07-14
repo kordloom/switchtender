@@ -12,8 +12,8 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 
-	"github.com/dcadolph/yardmaster/internal/event"
-	"github.com/dcadolph/yardmaster/internal/run"
+	"github.com/dcadolph/railwarden/internal/event"
+	"github.com/dcadolph/railwarden/internal/run"
 )
 
 // Contract runs the full run.Store contract against a fresh store from newStore. Each subtest gets

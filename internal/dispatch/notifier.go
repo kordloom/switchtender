@@ -3,7 +3,7 @@ package dispatch
 import (
 	"context"
 
-	"github.com/dcadolph/yardmaster/internal/run"
+	"github.com/dcadolph/railwarden/internal/run"
 )
 
 // Notifier delivers a terminal top-level run to an external channel. Register one with
@@ -29,7 +29,7 @@ var notifiers = map[string]Notifier{}
 
 // RegisterNotifier adds a notification channel under name. It panics on an empty or duplicate name
 // or a nil notifier, which is a programming error caught at startup. The names discord, ntfy, and
-// teams are claimed by the official yardmaster-plugins binary, so a future built-in must not take
+// teams are claimed by the official railwarden-plugins binary, so a future built-in must not take
 // them.
 func RegisterNotifier(name string, n Notifier) {
 	if name == "" {

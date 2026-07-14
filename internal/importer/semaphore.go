@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/dcadolph/yardmaster/internal/credential"
-	"github.com/dcadolph/yardmaster/internal/inventory"
-	"github.com/dcadolph/yardmaster/internal/project"
-	"github.com/dcadolph/yardmaster/internal/schedule"
-	"github.com/dcadolph/yardmaster/internal/template"
+	"github.com/dcadolph/railwarden/internal/credential"
+	"github.com/dcadolph/railwarden/internal/inventory"
+	"github.com/dcadolph/railwarden/internal/project"
+	"github.com/dcadolph/railwarden/internal/schedule"
+	"github.com/dcadolph/railwarden/internal/template"
 )
 
 // semaphoreExport is a Semaphore export: a list of projects, each carrying its own repositories,
@@ -23,7 +23,7 @@ type semaphoreExport struct {
 type semaphoreProject struct {
 	// Name is the project name.
 	Name string `json:"name"`
-	// Repositories are the git repositories, each mapping to a Yardmaster project.
+	// Repositories are the git repositories, each mapping to a Railwarden project.
 	Repositories []semaphoreRepo `json:"repositories"`
 	// Inventories are the project inventories.
 	Inventories []semaphoreInventory `json:"inventories"`
@@ -101,7 +101,7 @@ type semaphoreSchedule struct {
 	Template string `json:"template"`
 }
 
-// FromSemaphore maps a Semaphore export into a Plan of Yardmaster objects with cross-references
+// FromSemaphore maps a Semaphore export into a Plan of Railwarden objects with cross-references
 // wired by generated id. Like the AWX mapping it records warnings rather than failing on an asset
 // it cannot map cleanly.
 func FromSemaphore(data []byte, now time.Time) (*Plan, error) {
@@ -230,7 +230,7 @@ func mapSemaphoreKey(keyType string) (credential.Kind, bool) {
 	}
 }
 
-// mapSemaphoreVarType converts a Semaphore survey variable type to a Yardmaster field type.
+// mapSemaphoreVarType converts a Semaphore survey variable type to a Railwarden field type.
 func mapSemaphoreVarType(varType string) template.FieldType {
 	switch varType {
 	case "int":

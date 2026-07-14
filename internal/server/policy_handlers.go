@@ -8,8 +8,8 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/yardmaster/internal/policy"
-	"github.com/dcadolph/yardmaster/internal/run"
+	"github.com/dcadolph/railwarden/internal/policy"
+	"github.com/dcadolph/railwarden/internal/run"
 )
 
 // createPolicyRequest is the JSON body accepted by POST /policies.

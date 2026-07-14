@@ -8,7 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dcadolph/yardmaster/internal/importer"
+	"github.com/dcadolph/railwarden/internal/importer"
 )
 
 // importDB holds the value of the import --db flag.
@@ -17,19 +17,19 @@ var importDB string
 // importApply holds the value of the import --apply flag.
 var importApply bool
 
-// mapFunc maps an export document into a plan of Yardmaster objects.
+// mapFunc maps an export document into a plan of Railwarden objects.
 type mapFunc func(data []byte, now time.Time) (*importer.Plan, error)
 
 // importCmd groups the migration importers.
 var importCmd = &cobra.Command{
 	Use:   "import",
-	Short: "Import AWX or Semaphore exports into Yardmaster.",
+	Short: "Import AWX or Semaphore exports into Railwarden.",
 }
 
 // importAWXCmd imports an awx export document.
 var importAWXCmd = &cobra.Command{
 	Use:   "awx <export.json>",
-	Short: "Import an awx export into Yardmaster.",
+	Short: "Import an awx export into Railwarden.",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runImport(cmd, args[0], importer.FromAWX)
@@ -39,7 +39,7 @@ var importAWXCmd = &cobra.Command{
 // importSemaphoreCmd imports a Semaphore export document.
 var importSemaphoreCmd = &cobra.Command{
 	Use:   "semaphore <export.json>",
-	Short: "Import a Semaphore export into Yardmaster.",
+	Short: "Import a Semaphore export into Railwarden.",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runImport(cmd, args[0], importer.FromSemaphore)

@@ -11,9 +11,9 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/yardmaster/internal/ai"
-	"github.com/dcadolph/yardmaster/internal/event"
-	"github.com/dcadolph/yardmaster/internal/run"
+	"github.com/dcadolph/railwarden/internal/ai"
+	"github.com/dcadolph/railwarden/internal/event"
+	"github.com/dcadolph/railwarden/internal/run"
 )
 
 // seedDrift stores a check run and a host summary so DriftStatus reports the host.

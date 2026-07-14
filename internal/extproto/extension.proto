@@ -1,11 +1,11 @@
-// The wire protocol between Yardmaster and an out-of-process extension. One plugin binary serves
+// The wire protocol between Railwarden and an out-of-process extension. One plugin binary serves
 // one Extension service; Describe names what it provides and the remaining calls carry each seam.
 // Field numbers are frozen once released, so grow messages by adding fields, never by reusing.
 syntax = "proto3";
 
-package yardmaster.extension.v1;
+package railwarden.extension.v1;
 
-option go_package = "github.com/dcadolph/yardmaster/internal/extproto";
+option go_package = "github.com/dcadolph/railwarden/internal/extproto";
 
 // Extension is the single service a plugin binary serves. A plugin implements only the calls for
 // the seams it declares in Describe; the rest return an unimplemented error.

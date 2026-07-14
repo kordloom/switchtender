@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dcadolph/yardmaster/internal/project"
-	"github.com/dcadolph/yardmaster/internal/projecttest"
+	"github.com/dcadolph/railwarden/internal/project"
+	"github.com/dcadolph/railwarden/internal/projecttest"
 )
 
 func TestMemStoreContract(t *testing.T) {

@@ -8,7 +8,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/yardmaster/internal/grant"
+	"github.com/dcadolph/railwarden/internal/grant"
 )
 
 // createGrantRequest is the JSON body accepted by POST /grants.

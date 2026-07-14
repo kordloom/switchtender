@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dcadolph/yardmaster/internal/trigger"
-	"github.com/dcadolph/yardmaster/internal/triggertest"
+	"github.com/dcadolph/railwarden/internal/trigger"
+	"github.com/dcadolph/railwarden/internal/triggertest"
 )
 
 func TestMemStoreContract(t *testing.T) {

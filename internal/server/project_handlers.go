@@ -8,7 +8,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/yardmaster/internal/project"
+	"github.com/dcadolph/railwarden/internal/project"
 )
 
 // createProjectRequest is the JSON body accepted by POST /projects.

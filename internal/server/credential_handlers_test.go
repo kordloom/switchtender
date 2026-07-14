@@ -9,8 +9,8 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/yardmaster/internal/credential"
-	"github.com/dcadolph/yardmaster/internal/run"
+	"github.com/dcadolph/railwarden/internal/credential"
+	"github.com/dcadolph/railwarden/internal/run"
 )
 
 // TestListCredentialsNeedsSecret verifies the list flags a credential shell that has no sealed

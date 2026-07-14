@@ -1,6 +1,6 @@
-# Yardmaster Contributor License Agreement
+# Railwarden Contributor License Agreement
 
-Thank you for contributing to Yardmaster (the "Project"), maintained by Douglas Carl Adolph (the
+Thank you for contributing to Railwarden (the "Project"), maintained by Douglas Carl Adolph (the
 "Maintainer"). This Contributor License Agreement ("Agreement") records the rights You grant the
 Maintainer in Your contributions. It exists so the Project can stay source-available under the
 Business Source License and also be offered under commercial and hosted licenses, which is how the
@@ -73,4 +73,4 @@ You accept this Agreement by signing through the Maintainer's automated CLA chec
 Your first pull request, and by signing off each commit under the Developer Certificate of Origin as
 described in `CONTRIBUTING.md`.
 
-Questions: licensing@yardmaster.dev
+Questions: licensing@railwarden.dev

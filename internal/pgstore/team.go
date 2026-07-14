@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/dcadolph/yardmaster/internal/team"
+	"github.com/dcadolph/railwarden/internal/team"
 )
 
 // teamStore is a team.Store backed by the shared PostgreSQL database.

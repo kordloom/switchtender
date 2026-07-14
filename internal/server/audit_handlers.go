@@ -7,7 +7,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/yardmaster/internal/audit"
+	"github.com/dcadolph/railwarden/internal/audit"
 )
 
 // auditResponse wraps the audit trail.

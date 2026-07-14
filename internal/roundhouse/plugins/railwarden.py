@@ -1,8 +1,8 @@
-# Yardmaster Ansible callback plugin.
+# Railwarden Ansible callback plugin.
 #
-# Emits one JSON object per event to the file named by YARDMASTER_EVENTS_PATH while leaving the
+# Emits one JSON object per event to the file named by RAILWARDEN_EVENTS_PATH while leaving the
 # default stdout callback untouched, so a run keeps its readable log and gains a structured stream.
-# Enabled by setting ANSIBLE_CALLBACKS_ENABLED=yardmaster and pointing ANSIBLE_CALLBACK_PLUGINS at
+# Enabled by setting ANSIBLE_CALLBACKS_ENABLED=railwarden and pointing ANSIBLE_CALLBACK_PLUGINS at
 # the directory holding this file. The Go event parser in internal/event reads what this writes.
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ class CallbackModule(CallbackBase):
 
     CALLBACK_VERSION = 2.0
     CALLBACK_TYPE = "notification"
-    CALLBACK_NAME = "yardmaster"
+    CALLBACK_NAME = "railwarden"
     CALLBACK_NEEDS_ENABLED = True
 
     # MAX_FIELD caps each captured result field so a single event stays small.
@@ -30,7 +30,7 @@ class CallbackModule(CallbackBase):
         self._play = ""
         self._task = ""
         self._handle = None
-        path = os.environ.get("YARDMASTER_EVENTS_PATH")
+        path = os.environ.get("RAILWARDEN_EVENTS_PATH")
         if path:
             self._handle = open(path, "a", encoding="utf-8")
 

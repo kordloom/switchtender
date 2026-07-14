@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"sync"
 
-	"github.com/dcadolph/yardmaster/internal/event"
+	"github.com/dcadolph/railwarden/internal/event"
 )
 
 // Message is one item delivered to a subscriber. Data is JSON ready for an SSE data field.

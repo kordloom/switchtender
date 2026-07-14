@@ -1,5 +1,5 @@
 // Package roundhouse executes engines (playbooks) as subprocesses.
-// The roundhouse is where engines are run; in Yardmaster terms it is the execution environment.
+// The roundhouse is where engines are run; in Railwarden terms it is the execution environment.
 package roundhouse
 
 import (
@@ -14,7 +14,7 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/dcadolph/yardmaster/internal/run"
+	"github.com/dcadolph/railwarden/internal/run"
 )
 
 // ContainerLimits caps the resources and network a containerized run may use, so a foot-gun or
@@ -128,7 +128,7 @@ type pluginCache struct {
 // ensure materializes the embedded callback plugin to a temp directory once and returns it.
 func (p *pluginCache) ensure() (string, error) {
 	p.once.Do(func() {
-		dir, err := os.MkdirTemp("", "yardmaster-plugin-")
+		dir, err := os.MkdirTemp("", "railwarden-plugin-")
 		if err != nil {
 			p.err = err
 			return
@@ -291,7 +291,7 @@ func (t *toolRouter) Run(ctx context.Context, spec Spec, out io.Writer) (Result,
 }
 
 // pluginName is the callback plugin name, matching the embedded file and its CALLBACK_NAME.
-const pluginName = "yardmaster"
+const pluginName = "railwarden"
 
 // Run executes the playbook described by spec and streams combined stdout and stderr to out.
 // When spec.EventsPath is set, the structured event callback is enabled and writes to that file.
@@ -343,14 +343,14 @@ func runProcess(ctx context.Context, cmd *exec.Cmd, out io.Writer) (Result, erro
 	return Result{ExitCode: -1}, fmt.Errorf("%w: %w", ErrLaunch, err)
 }
 
-// varsEnv layers a Spec's credential env and, when it has extra vars, a JSON YARDMASTER_VARS of them
+// varsEnv layers a Spec's credential env and, when it has extra vars, a JSON RAILWARDEN_VARS of them
 // over the base environment, so bash and python runs read survey answers and template vars from one
 // place, the same way.
 func varsEnv(baseEnv []string, spec Spec) []string {
 	env := append(append([]string{}, baseEnv...), spec.Env...)
 	if len(spec.ExtraVars) > 0 {
 		if b, err := json.Marshal(spec.ExtraVars); err == nil {
-			env = append(env, "YARDMASTER_VARS="+string(b))
+			env = append(env, "RAILWARDEN_VARS="+string(b))
 		}
 	}
 	return env
@@ -362,7 +362,7 @@ func callbackEnv(pluginDir, eventsPath string) []string {
 	return []string{
 		"ANSIBLE_CALLBACK_PLUGINS=" + pluginDir,
 		"ANSIBLE_CALLBACKS_ENABLED=" + pluginName,
-		"YARDMASTER_EVENTS_PATH=" + eventsPath,
+		"RAILWARDEN_EVENTS_PATH=" + eventsPath,
 	}
 }
 

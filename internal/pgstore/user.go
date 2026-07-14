@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/dcadolph/yardmaster/internal/user"
+	"github.com/dcadolph/railwarden/internal/user"
 )
 
 // userColumns is the shared select list for user reads.

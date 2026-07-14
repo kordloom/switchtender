@@ -1,4 +1,4 @@
-# Demo Terraform configuration for Yardmaster. It declares only variables, locals, and outputs, so
+# Demo Terraform configuration for Railwarden. It declares only variables, locals, and outputs, so
 # terraform init needs no provider downloads and terraform plan runs offline with nothing to apply.
 # That keeps the seeded Terraform job fast and self-contained on any host that has the terraform
 # binary.

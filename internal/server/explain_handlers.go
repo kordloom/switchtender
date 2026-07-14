@@ -13,9 +13,9 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/yardmaster/internal/ai"
-	"github.com/dcadolph/yardmaster/internal/event"
-	"github.com/dcadolph/yardmaster/internal/run"
+	"github.com/dcadolph/railwarden/internal/ai"
+	"github.com/dcadolph/railwarden/internal/event"
+	"github.com/dcadolph/railwarden/internal/run"
 )
 
 // respondAIError maps a provider failure to an HTTP response, telling the user the model declined

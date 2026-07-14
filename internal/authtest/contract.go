@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dcadolph/yardmaster/internal/auth"
+	"github.com/dcadolph/railwarden/internal/auth"
 )
 
 // Contract runs the auth.Store contract against a fresh store from newStore.

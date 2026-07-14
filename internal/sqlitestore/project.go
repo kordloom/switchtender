@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/dcadolph/yardmaster/internal/project"
+	"github.com/dcadolph/railwarden/internal/project"
 )
 
 // projectColumns is the shared select list for project reads.

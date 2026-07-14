@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="../assets/logo-letters-dark.png">
-    <img src="../assets/logo-letters.png" alt="Yardmaster" width="140">
+    <img src="../assets/logo-letters.png" alt="Railwarden" width="140">
   </picture>
 </p>
 
@@ -25,7 +25,7 @@ blocks on a prompt.
   which OpenTofu reads the same way Terraform does. Scalars pass through as strings, lists and maps
   pass as JSON.
 - Credentials arrive in the environment, so an `env` credential of cloud keys or a `token`
-  credential as `YARDMASTER_TOKEN` authenticates the provider. A command-source credential resolves
+  credential as `RAILWARDEN_TOKEN` authenticates the provider. A command-source credential resolves
   fresh each run.
 - The command directory cannot escape the project with `..`, so a run stays inside its checkout.
 

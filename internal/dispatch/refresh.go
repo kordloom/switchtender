@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dcadolph/yardmaster/internal/credential"
-	"github.com/dcadolph/yardmaster/internal/invsource"
-	"github.com/dcadolph/yardmaster/internal/project"
+	"github.com/dcadolph/railwarden/internal/credential"
+	"github.com/dcadolph/railwarden/internal/invsource"
+	"github.com/dcadolph/railwarden/internal/project"
 )
 
 // WithInventorySources lets the dispatcher refresh dynamic inventory sources into stored

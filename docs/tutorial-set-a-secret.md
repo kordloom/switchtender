@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="../assets/logo-letters-dark.png">
-    <img src="../assets/logo-letters.png" alt="Yardmaster" width="140">
+    <img src="../assets/logo-letters.png" alt="Railwarden" width="140">
   </picture>
 </p>
 
@@ -9,7 +9,7 @@
 
 Secrets live in credentials. Each is sealed at rest and never returned by the API.
 A run gets a credential's value only while it executes, in a temporary file or environment that is
-wiped afterward. If a tool prints a credential's value, Yardmaster redacts it from the run's log,
+wiped afterward. If a tool prints a credential's value, Railwarden redacts it from the run's log,
 live stream, and events, so the output shows `***` instead of the secret.
 
 ## Store a credential
@@ -22,7 +22,7 @@ live stream, and events, so the output shows `***` instead of the secret.
    | `ssh_key` | an SSH private key, to reach hosts and clone private git projects. |
    | `vault_password` | an Ansible Vault password. |
    | `env` | `KEY=VALUE` lines injected into the run, how cloud SDK tokens reach a tool. |
-   | `token` | a single API token or JWT, exposed to the run as the `YARDMASTER_TOKEN` environment variable. |
+   | `token` | a single API token or JWT, exposed to the run as the `RAILWARDEN_TOKEN` environment variable. |
    | `become_password` | a privilege escalation password, kept off the command line. |
    | `registry` | a container registry login, to pull a pinned execution image. |
 
@@ -30,7 +30,7 @@ live stream, and events, so the output shows `***` instead of the secret.
 
 ## Resolve it from an external store
 
-You do not have to paste the secret at all. Set the credential's source to a command, and Yardmaster
+You do not have to paste the secret at all. Set the credential's source to a command, and Railwarden
 runs that command at launch and uses its standard output as the secret. That keeps the value in your
 existing store, fetched fresh each run:
 
@@ -40,27 +40,27 @@ Any CLI works the same way, so a credential can pull from Vault, AWS Secrets Man
 Manager, or 1Password with no extra integration.
 
 For Vault there is also a native source that needs no `vault` CLI on the runner: set the source to
-Vault and give it the address, path, and field as JSON. Yardmaster reads the secret over Vault's HTTP
+Vault and give it the address, path, and field as JSON. Railwarden reads the secret over Vault's HTTP
 API at launch, handling both KV v2 and KV v1. The token comes from the config or the `VAULT_TOKEN`
 environment:
 
     {"addr":"https://vault:8200","path":"secret/data/ci","field":"token"}
 
 Google Secret Manager has a native source too: set the source to Google Secret Manager and give it
-the project, secret, and version as JSON. When Yardmaster runs on GCP it reads as its attached service
+the project, secret, and version as JSON. When Railwarden runs on GCP it reads as its attached service
 account through the metadata server, so no key is stored. Off GCP, put an access token in the config.
 
     {"project":"my-project","secret":"ci-token","version":"latest"}
 
 ## Mint a short-lived secret per run
 
-For the strongest secret hygiene, Yardmaster can mint a fresh credential for each run and revoke it
+For the strongest secret hygiene, Railwarden can mint a fresh credential for each run and revoke it
 when the run ends, so a leaked value is useless minutes later. Set the source to Vault dynamic and
 give it a dynamic secrets path, such as a database or cloud role, as JSON:
 
     {"addr":"https://vault:8200","path":"database/creds/app","field":"password"}
 
-At launch Yardmaster reads that path, which mints a new credential, injects the chosen field into the
+At launch Railwarden reads that path, which mints a new credential, injects the chosen field into the
 run, and records the Vault lease. When the run reaches a terminal state the lease is revoked, so the
 credential lives only as long as the run. If the process dies before it can revoke, the credential
 still expires on the lease's own TTL, so nothing is left behind for long. The minted value is masked
@@ -88,7 +88,7 @@ The host list itself can live in an external store, the same way a secret does. 
 an inventory, pick a content source:
 
 - `Stored`: paste the inventory text. This is the default.
-- `Command`: a command Yardmaster runs at launch, whose standard output is the inventory.
+- `Command`: a command Railwarden runs at launch, whose standard output is the inventory.
 - `Vault`: a Vault address, path, and field, read over HTTP at launch.
 - `Google Secret Manager`: a project, secret, and version, read at launch.
 
@@ -99,8 +99,8 @@ current without a dedicated dynamic source plugin:
 
     ./bin/hosts --env prod
 
-Content sources need encryption, so set `YARDMASTER_ENCRYPTION_KEY` and a stable
-`YARDMASTER_ENCRYPTION_SALT` first. The sealed configuration is never returned by the API. When you
+Content sources need encryption, so set `RAILWARDEN_ENCRYPTION_KEY` and a stable
+`RAILWARDEN_ENCRYPTION_SALT` first. The sealed configuration is never returned by the API. When you
 edit an inventory, leave the source fields blank to keep the stored one.
 
 ### From the API

@@ -7,7 +7,7 @@ import (
 	"github.com/coreos/go-oidc/v3/oidc"
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/yardmaster/internal/user"
+	"github.com/dcadolph/railwarden/internal/user"
 )
 
 // ErrJWTAuth is returned when a bearer JWT is refused, so the auth gate reports unauthorized without
@@ -16,7 +16,7 @@ var ErrJWTAuth = errors.New("jwt authentication failed")
 
 // JWTAuth authenticates a request that carries a signed JWT as its bearer token, validating it against
 // an issuer's published keys and mapping its claims to a local account. It lets a service present a
-// JWT minted elsewhere, such as by jwtmint, instead of a Yardmaster token.
+// JWT minted elsewhere, such as by jwtmint, instead of a Railwarden token.
 type JWTAuth struct {
 	// verifier checks a token's signature against the issuer's keys and its issuer, audience, and
 	// expiry.

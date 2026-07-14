@@ -9,8 +9,8 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/yardmaster/internal/auth"
-	"github.com/dcadolph/yardmaster/internal/user"
+	"github.com/dcadolph/railwarden/internal/auth"
+	"github.com/dcadolph/railwarden/internal/user"
 )
 
 // sessionTokenTTL is how long a browser session token stays valid.

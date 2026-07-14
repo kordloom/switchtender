@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/dcadolph/yardmaster/internal/audit"
+	"github.com/dcadolph/railwarden/internal/audit"
 )
 
 // auditLockKey is the advisory-lock key that serializes audit appends. It is held for the life of

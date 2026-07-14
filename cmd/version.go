@@ -2,7 +2,7 @@ package cmd
 
 import "runtime/debug"
 
-// Version is the Yardmaster build version, overridden via ldflags on a release build.
+// Version is the Railwarden build version, overridden via ldflags on a release build.
 var Version = "0.0.0-dev"
 
 // resolveVersion returns the ldflags version when a release build set one, otherwise the module

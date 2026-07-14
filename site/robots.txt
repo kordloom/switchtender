@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://yardmaster.dev/sitemap.xml
+Sitemap: https://railwarden.dev/sitemap.xml

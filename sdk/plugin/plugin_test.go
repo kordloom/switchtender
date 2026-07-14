@@ -6,7 +6,7 @@ import (
 	"io"
 	"testing"
 
-	"github.com/dcadolph/yardmaster/sdk"
+	"github.com/dcadolph/railwarden/sdk"
 )
 
 // TestExtensionValidate confirms an extension that cannot serve panics at plugin startup: nil,

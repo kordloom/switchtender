@@ -1,4 +1,4 @@
-// Package logutil provides shared logger plumbing for Yardmaster. All logs go to stderr in JSON.
+// Package logutil provides shared logger plumbing for Railwarden. All logs go to stderr in JSON.
 package logutil
 
 import (
@@ -10,7 +10,7 @@ import (
 // loggerCtxKey is the unexported context key used to attach a *zap.Logger to a context.
 type loggerCtxKey struct{}
 
-// New returns a Yardmaster zap.Logger configured for production: JSON encoding to stderr.
+// New returns a Railwarden zap.Logger configured for production: JSON encoding to stderr.
 func New() (*zap.Logger, error) {
 	cfg := zap.NewProductionConfig()
 	cfg.OutputPaths = []string{"stderr"}

@@ -6,10 +6,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// versionCmd prints the Yardmaster version to stdout.
+// versionCmd prints the Railwarden version to stdout.
 var versionCmd = &cobra.Command{
 	Use:   "version",
-	Short: "Print the Yardmaster version.",
+	Short: "Print the Railwarden version.",
 	Run: func(cmd *cobra.Command, args []string) {
 		fmt.Println(resolveVersion())
 	},

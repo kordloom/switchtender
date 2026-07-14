@@ -12,7 +12,7 @@ import (
 
 	"github.com/robfig/cron/v3"
 
-	"github.com/dcadolph/yardmaster/internal/run"
+	"github.com/dcadolph/railwarden/internal/run"
 )
 
 // NewID returns a random schedule identifier prefixed with "sch_".

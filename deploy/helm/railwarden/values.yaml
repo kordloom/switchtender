@@ -1,8 +1,8 @@
-# Default values for the Yardmaster chart.
+# Default values for the Railwarden chart.
 
 image:
-  # repository is the Yardmaster image, built from the repository Dockerfile.
-  repository: yardmaster
+  # repository is the Railwarden image, built from the repository Dockerfile.
+  repository: railwarden
   # tag defaults to the chart appVersion when empty.
   tag: ""
   pullPolicy: IfNotPresent
@@ -29,7 +29,7 @@ database:
 
 # encryptionKey and encryptionSalt seal credentials at rest with argon2id and AES-256-GCM. Both are
 # required; set them with --set encryptionKey=... --set encryptionSalt=... or point existingSecret
-# at a Secret that holds YARDMASTER_ENCRYPTION_KEY and YARDMASTER_ENCRYPTION_SALT keys. The salt
+# at a Secret that holds RAILWARDEN_ENCRYPTION_KEY and RAILWARDEN_ENCRYPTION_SALT keys. The salt
 # must stay stable across restarts or existing credentials cannot be decrypted.
 encryptionKey: ""
 encryptionSalt: ""

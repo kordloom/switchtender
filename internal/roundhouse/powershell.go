@@ -10,7 +10,7 @@ import (
 
 // pwshRunner runs a PowerShell script as a child process. The script text comes from the Spec's
 // Command, written to a temporary file and run with pwsh, so multi-line scripts and a dry-run
-// parse check both work. Extra vars reach the script as YARDMASTER_VARS, a JSON object, and
+// parse check both work. Extra vars reach the script as RAILWARDEN_VARS, a JSON object, and
 // credentials arrive in Env; the working directory is the project checkout so the script can read
 // project files.
 type pwshRunner struct {
@@ -32,7 +32,7 @@ func (p *pwshRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Result,
 	if spec.Command == "" {
 		return Result{ExitCode: -1}, ErrNoCommand
 	}
-	f, err := os.CreateTemp("", "yardmaster-ps-*.ps1")
+	f, err := os.CreateTemp("", "railwarden-ps-*.ps1")
 	if err != nil {
 		return Result{ExitCode: -1}, fmt.Errorf("%w: %w", ErrLaunch, err)
 	}

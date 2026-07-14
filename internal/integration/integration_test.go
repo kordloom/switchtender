@@ -1,6 +1,6 @@
 //go:build integration
 
-// Package integration_test runs Yardmaster end to end against real hosts: SSH servers in Docker
+// Package integration_test runs Railwarden end to end against real hosts: SSH servers in Docker
 // containers, targeted by real ansible-playbook over the SSH transport production uses. The suite
 // is gated behind the integration build tag so the default go test stays fast, and it skips
 // itself when docker or ansible are unavailable.
@@ -25,16 +25,16 @@ import (
 
 	"go.uber.org/zap/zaptest"
 
-	"github.com/dcadolph/yardmaster/internal/dispatch"
-	"github.com/dcadolph/yardmaster/internal/live"
-	"github.com/dcadolph/yardmaster/internal/roundhouse"
-	"github.com/dcadolph/yardmaster/internal/run"
-	"github.com/dcadolph/yardmaster/internal/server"
-	"github.com/dcadolph/yardmaster/internal/sqlitestore"
+	"github.com/dcadolph/railwarden/internal/dispatch"
+	"github.com/dcadolph/railwarden/internal/live"
+	"github.com/dcadolph/railwarden/internal/roundhouse"
+	"github.com/dcadolph/railwarden/internal/run"
+	"github.com/dcadolph/railwarden/internal/server"
+	"github.com/dcadolph/railwarden/internal/sqlitestore"
 )
 
 // image is the tag for the throwaway SSH host image built once per machine.
-const image = "yardmaster-it-sshhost:1"
+const image = "railwarden-it-sshhost:1"
 
 // dockerfile builds a minimal SSH server with Python for Ansible modules. The public key arrives
 // through the SSH_PUBKEY environment variable at run time.
@@ -99,7 +99,7 @@ func startHosts(t *testing.T, n int, pubkey string) []sshHost {
 	hosts := make([]sshHost, 0, n)
 	for i := 0; i < n; i++ {
 		name := fmt.Sprintf("node%02d", i+1)
-		container := fmt.Sprintf("yardmaster-it-%s-%d", name, time.Now().UnixNano())
+		container := fmt.Sprintf("railwarden-it-%s-%d", name, time.Now().UnixNano())
 		out, err := exec.Command("docker", "run", "-d", "--rm",
 			"--name", container, "-e", "SSH_PUBKEY="+pubkey, "-p", "127.0.0.1:0:22", image).CombinedOutput()
 		if err != nil {
@@ -269,11 +269,11 @@ func TestRealSSHFleet(t *testing.T) {
 
     - name: Write a marker
       ansible.builtin.copy:
-        content: "yardmaster was here\n"
-        dest: /tmp/yardmaster-marker
+        content: "railwarden was here\n"
+        dest: /tmp/railwarden-marker
 
     - name: Read the marker back
-      ansible.builtin.command: cat /tmp/yardmaster-marker
+      ansible.builtin.command: cat /tmp/railwarden-marker
       changed_when: false
 `)
 	base := startServer(t)
@@ -372,14 +372,14 @@ func TestRealSSHFailureIsolation(t *testing.T) {
         timeout: 60
 
     - name: Fail while the break marker exists
-      ansible.builtin.command: test ! -f /tmp/yardmaster-break
+      ansible.builtin.command: test ! -f /tmp/railwarden-break
       changed_when: false
 `)
 	base := startServer(t)
 
 	// Plant the failure on the first host only.
 	if out, err := exec.Command("docker", "exec", hosts[0].Container,
-		"touch", "/tmp/yardmaster-break").CombinedOutput(); err != nil {
+		"touch", "/tmp/railwarden-break").CombinedOutput(); err != nil {
 		t.Fatalf("plant break marker: %v\n%s", err, out)
 	}
 
@@ -411,7 +411,7 @@ func TestRealSSHFailureIsolation(t *testing.T) {
 
 	// Clear the fault and retry: only the broken shard re-runs, and recovers.
 	if out, err := exec.Command("docker", "exec", hosts[0].Container,
-		"rm", "/tmp/yardmaster-break").CombinedOutput(); err != nil {
+		"rm", "/tmp/railwarden-break").CombinedOutput(); err != nil {
 		t.Fatalf("clear break marker: %v\n%s", err, out)
 	}
 	preRetry := waitShardsTerminal(t, base, parent.ID, 3)

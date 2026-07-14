@@ -8,7 +8,7 @@ import (
 	"github.com/go-ldap/ldap/v3"
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/yardmaster/internal/user"
+	"github.com/dcadolph/railwarden/internal/user"
 )
 
 // ErrLDAPAuth is returned when an LDAP sign-in is refused, so the login handler reports bad

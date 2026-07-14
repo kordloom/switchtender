@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="../assets/logo-letters-dark.png">
-    <img src="../assets/logo-letters.png" alt="Yardmaster" width="140">
+    <img src="../assets/logo-letters.png" alt="Railwarden" width="140">
   </picture>
 </p>
 
@@ -20,14 +20,14 @@ so syntax is checked and nothing executes.
 
 ## How values reach the script
 
-- Extra vars, including survey answers and template vars, arrive as `YARDMASTER_VARS`, a JSON
+- Extra vars, including survey answers and template vars, arrive as `RAILWARDEN_VARS`, a JSON
   object:
 
-        $vars = $env:YARDMASTER_VARS | ConvertFrom-Json
+        $vars = $env:RAILWARDEN_VARS | ConvertFrom-Json
         $region = if ($vars.region) { $vars.region } else { "us-east-1" }
 
 - Credentials arrive in the environment. An `env` credential lands its `KEY=VALUE` lines directly,
-  and a `token` credential arrives as `YARDMASTER_TOKEN`.
+  and a `token` credential arrives as `RAILWARDEN_TOKEN`.
 - Anything the script prints that matches a materialized secret is masked to `***` in the stored and
   streamed log, the same masking every tool gets.
 
@@ -39,7 +39,7 @@ ships with PowerShell 7 installations. Nothing else is configured.
 
 ## Example
 
-    $vars = $env:YARDMASTER_VARS | ConvertFrom-Json
+    $vars = $env:RAILWARDEN_VARS | ConvertFrom-Json
     Write-Output "deploying to $($vars.region)"
     exit 0
 

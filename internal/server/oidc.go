@@ -18,8 +18,8 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/oauth2"
 
-	"github.com/dcadolph/yardmaster/internal/auth"
-	"github.com/dcadolph/yardmaster/internal/user"
+	"github.com/dcadolph/railwarden/internal/auth"
+	"github.com/dcadolph/railwarden/internal/user"
 )
 
 // oidcStateTTL bounds how long a sign-in may take from the redirect to the callback.
@@ -65,7 +65,7 @@ func NewOIDCAuth(ctx context.Context, issuer, clientID, clientSecret, redirectUR
 	if err != nil {
 		return nil, fmt.Errorf("oidc: discover %q: %w", issuer, err)
 	}
-	key := sha256.Sum256([]byte("yardmaster-oidc\x00" + clientSecret))
+	key := sha256.Sum256([]byte("railwarden-oidc\x00" + clientSecret))
 	return &OIDCAuth{
 		oauth: &oauth2.Config{
 			ClientID:     clientID,

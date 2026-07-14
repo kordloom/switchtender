@@ -8,7 +8,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 
-	"github.com/dcadolph/yardmaster/internal/event"
+	"github.com/dcadolph/railwarden/internal/event"
 )
 
 func TestHostSummariesFromStats(t *testing.T) {

@@ -1,4 +1,4 @@
-// Package server exposes the Yardmaster HTTP API over the run store and dispatcher.
+// Package server exposes the Railwarden HTTP API over the run store and dispatcher.
 package server
 
 import (
@@ -8,24 +8,24 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/yardmaster/internal/ai"
-	"github.com/dcadolph/yardmaster/internal/audit"
-	"github.com/dcadolph/yardmaster/internal/auth"
-	"github.com/dcadolph/yardmaster/internal/credential"
-	"github.com/dcadolph/yardmaster/internal/grant"
-	"github.com/dcadolph/yardmaster/internal/importer"
-	"github.com/dcadolph/yardmaster/internal/inventory"
-	"github.com/dcadolph/yardmaster/internal/invsource"
-	"github.com/dcadolph/yardmaster/internal/live"
-	"github.com/dcadolph/yardmaster/internal/policy"
-	"github.com/dcadolph/yardmaster/internal/project"
-	"github.com/dcadolph/yardmaster/internal/run"
-	"github.com/dcadolph/yardmaster/internal/schedule"
-	"github.com/dcadolph/yardmaster/internal/team"
-	"github.com/dcadolph/yardmaster/internal/template"
-	"github.com/dcadolph/yardmaster/internal/trigger"
-	"github.com/dcadolph/yardmaster/internal/ui"
-	"github.com/dcadolph/yardmaster/internal/user"
+	"github.com/dcadolph/railwarden/internal/ai"
+	"github.com/dcadolph/railwarden/internal/audit"
+	"github.com/dcadolph/railwarden/internal/auth"
+	"github.com/dcadolph/railwarden/internal/credential"
+	"github.com/dcadolph/railwarden/internal/grant"
+	"github.com/dcadolph/railwarden/internal/importer"
+	"github.com/dcadolph/railwarden/internal/inventory"
+	"github.com/dcadolph/railwarden/internal/invsource"
+	"github.com/dcadolph/railwarden/internal/live"
+	"github.com/dcadolph/railwarden/internal/policy"
+	"github.com/dcadolph/railwarden/internal/project"
+	"github.com/dcadolph/railwarden/internal/run"
+	"github.com/dcadolph/railwarden/internal/schedule"
+	"github.com/dcadolph/railwarden/internal/team"
+	"github.com/dcadolph/railwarden/internal/template"
+	"github.com/dcadolph/railwarden/internal/trigger"
+	"github.com/dcadolph/railwarden/internal/ui"
+	"github.com/dcadolph/railwarden/internal/user"
 )
 
 // Submitter accepts a run request and returns the created run. The dispatcher satisfies it.
@@ -307,7 +307,7 @@ func New(store run.Store, submitter Submitter, log *zap.Logger, opts ...Option) 
 	return srv
 }
 
-// Handler returns the HTTP handler serving the Yardmaster API and web interface.
+// Handler returns the HTTP handler serving the Railwarden API and web interface.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	authz := &authorizer{grants: s.grants, teams: s.teams, strict: s.strictGrants}

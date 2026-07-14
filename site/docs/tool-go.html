@@ -3,13 +3,13 @@
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
-	<title>Go runs · Yardmaster docs</title>
+	<title>Go runs · Railwarden docs</title>
 	<meta name="description" content="A Go run compiles and runs a program with go run. The source is the run&#39;s command, a full package main program with a func main.">
-	<link rel="canonical" href="https://yardmaster.dev/docs/tool-go">
-	<meta property="og:title" content="Go runs · Yardmaster docs">
+	<link rel="canonical" href="https://railwarden.dev/docs/tool-go">
+	<meta property="og:title" content="Go runs · Railwarden docs">
 	<meta property="og:description" content="A Go run compiles and runs a program with go run. The source is the run&#39;s command, a full package main program with a func main.">
 	<meta property="og:type" content="article">
-	<meta property="og:url" content="https://yardmaster.dev/docs/tool-go">
+	<meta property="og:url" content="https://railwarden.dev/docs/tool-go">
 	<link rel="icon" href="/favicon.ico" sizes="any">
 	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
 	<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
@@ -20,18 +20,18 @@
 </head>
 <body>
 	<header class="dnav">
-		<a class="brand" href="/"><img src="/assets/logo-train-tracks-dark.png" alt="Yardmaster" class="brand-train"><span class="brand-word">Yardmaster</span></a>
+		<a class="brand" href="/"><img src="/assets/logo-train-tracks-dark.png" alt="Railwarden" class="brand-train"><span class="brand-word">Railwarden</span></a>
 		<span class="dnav-tag">Docs</span>
 		<nav class="dnav-links">
 			<a href="/">Home</a>
 			<a href="/#compare">Compare</a>
-			<a href="https://github.com/dcadolph/yardmaster">GitHub</a>
+			<a href="https://github.com/dcadolph/railwarden">GitHub</a>
 		</nav>
 	</header>
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go" class="active">Go runs</a><a href="/docs/sdk">Extend Yardmaster in Go</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/ai">Advisory AI</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">Yardmaster compared to AWX and Semaphore</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go" class="active">Go runs</a><a href="/docs/sdk">Extend Railwarden in Go</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/ai">Advisory AI</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">Railwarden compared to AWX and Semaphore</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
@@ -52,9 +52,9 @@ exit one with <code>exit status N</code> in the log.</p>
 <h2 id="how-values-reach-the-program">How values reach the program</h2>
 <ul>
 <li>
-<p>Extra vars, including survey answers and template vars, arrive as <code>YARDMASTER_VARS</code>, a JSON object:</p>
+<p>Extra vars, including survey answers and template vars, arrive as <code>RAILWARDEN_VARS</code>, a JSON object:</p>
 <pre><code>  var vars map[string]any
-  _ = json.Unmarshal([]byte(os.Getenv(&quot;YARDMASTER_VARS&quot;)), &amp;vars)
+  _ = json.Unmarshal([]byte(os.Getenv(&quot;RAILWARDEN_VARS&quot;)), &amp;vars)
   region, _ := vars[&quot;region&quot;].(string)
 </code></pre>
 </li>
@@ -62,7 +62,7 @@ exit one with <code>exit status N</code> in the log.</p>
 <p>An <code>env</code> credential's <code>KEY=VALUE</code> lines are set in the environment, read with <code>os.Getenv</code>.</p>
 </li>
 <li>
-<p>A <code>token</code> credential is set as <code>YARDMASTER_TOKEN</code>, ready to send as a bearer token.</p>
+<p>A <code>token</code> credential is set as <code>RAILWARDEN_TOKEN</code>, ready to send as a bearer token.</p>
 </li>
 <li>
 <p>Credentials attached to the run's inventory arrive the same way.</p>
@@ -79,10 +79,10 @@ import (
 
 func main() {
     var vars map[string]any
-    _ = json.Unmarshal([]byte(os.Getenv(&quot;YARDMASTER_VARS&quot;)), &amp;vars)
+    _ = json.Unmarshal([]byte(os.Getenv(&quot;RAILWARDEN_VARS&quot;)), &amp;vars)
     service, _ := vars[&quot;service&quot;].(string)
     req, _ := http.NewRequest(http.MethodPost, &quot;https://api.example.com/deploy/&quot;+service, nil)
-    req.Header.Set(&quot;Authorization&quot;, &quot;Bearer &quot;+os.Getenv(&quot;YARDMASTER_TOKEN&quot;))
+    req.Header.Set(&quot;Authorization&quot;, &quot;Bearer &quot;+os.Getenv(&quot;RAILWARDEN_TOKEN&quot;))
     resp, err := http.DefaultClient.Do(req)
     if err != nil {
         os.Exit(1)

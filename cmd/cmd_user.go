@@ -10,7 +10,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"github.com/dcadolph/yardmaster/internal/user"
+	"github.com/dcadolph/railwarden/internal/user"
 )
 
 // userDB holds the value of the user --db flag.
@@ -25,11 +25,11 @@ var userCmd = &cobra.Command{
 	Short: "Manage accounts. Sign in through the UI or POST /auth/login.",
 }
 
-// userNewCmd creates an account. The password comes from YARDMASTER_PASSWORD or an interactive
+// userNewCmd creates an account. The password comes from RAILWARDEN_PASSWORD or an interactive
 // prompt, never from arguments, so it stays out of shell history and process listings.
 var userNewCmd = &cobra.Command{
 	Use:   "new <username>",
-	Short: "Create an account. Password from YARDMASTER_PASSWORD or a prompt.",
+	Short: "Create an account. Password from RAILWARDEN_PASSWORD or a prompt.",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runUserNew,
 }
@@ -61,11 +61,11 @@ func init() {
 
 // readPassword takes the password from the environment or prompts on the terminal.
 func readPassword() (string, error) {
-	if pw := os.Getenv("YARDMASTER_PASSWORD"); pw != "" {
+	if pw := os.Getenv("RAILWARDEN_PASSWORD"); pw != "" {
 		return pw, nil
 	}
 	if !term.IsTerminal(int(syscall.Stdin)) {
-		return "", errors.New("no terminal: set YARDMASTER_PASSWORD")
+		return "", errors.New("no terminal: set RAILWARDEN_PASSWORD")
 	}
 	fmt.Fprint(os.Stderr, "Password: ")
 	raw, err := term.ReadPassword(int(syscall.Stdin))

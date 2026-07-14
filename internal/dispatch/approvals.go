@@ -3,7 +3,7 @@ package dispatch
 import (
 	"context"
 
-	"github.com/dcadolph/yardmaster/internal/run"
+	"github.com/dcadolph/railwarden/internal/run"
 )
 
 // Approve releases a run held for approval so the claim loop can pick it up. It fails when the run is

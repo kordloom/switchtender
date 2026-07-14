@@ -1,19 +1,19 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="../assets/logo-letters-dark.png">
-    <img src="../assets/logo-letters.png" alt="Yardmaster" width="140">
+    <img src="../assets/logo-letters.png" alt="Railwarden" width="140">
   </picture>
 </p>
 
 # Drift detection
 
-Drift is when a host no longer matches the state a playbook asserts. Yardmaster detects it from a dry
+Drift is when a host no longer matches the state a playbook asserts. Railwarden detects it from a dry
 run and shows it per host on the Drift page, so divergence surfaces before the next real run.
 
 ## How it works
 
 A dry run executes in check mode, which reports what a task would change without changing it. A task
-that would change means the host has diverged from the desired state. Yardmaster records each host's
+that would change means the host has diverged from the desired state. Railwarden records each host's
 changed count from its checks, and the Drift page shows each host's most recent check: how many tasks
 would change now, when it was checked, and the run that observed it. A host whose latest check would
 change nothing is in sync.

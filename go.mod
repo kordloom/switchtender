@@ -1,4 +1,4 @@
-module github.com/dcadolph/yardmaster
+module github.com/dcadolph/railwarden
 
 go 1.26.4
 

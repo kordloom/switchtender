@@ -3,8 +3,8 @@ package run_test
 import (
 	"testing"
 
-	"github.com/dcadolph/yardmaster/internal/run"
-	"github.com/dcadolph/yardmaster/internal/storetest"
+	"github.com/dcadolph/railwarden/internal/run"
+	"github.com/dcadolph/railwarden/internal/storetest"
 )
 
 func TestMemStoreContract(t *testing.T) {

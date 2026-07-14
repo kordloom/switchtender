@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/dcadolph/yardmaster/internal/credential"
+	"github.com/dcadolph/railwarden/internal/credential"
 )
 
 // credentialColumns is the shared select list for credential reads.

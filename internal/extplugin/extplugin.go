@@ -19,9 +19,9 @@ import (
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zapio"
 
-	"github.com/dcadolph/yardmaster/internal/extproto"
-	"github.com/dcadolph/yardmaster/sdk"
-	"github.com/dcadolph/yardmaster/sdk/plugin"
+	"github.com/dcadolph/railwarden/internal/extproto"
+	"github.com/dcadolph/railwarden/sdk"
+	"github.com/dcadolph/railwarden/sdk/plugin"
 )
 
 // describeTimeout bounds the first call to a freshly launched plugin.

@@ -8,9 +8,9 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/yardmaster/internal/credential"
-	"github.com/dcadolph/yardmaster/internal/grant"
-	"github.com/dcadolph/yardmaster/internal/inventory"
+	"github.com/dcadolph/railwarden/internal/credential"
+	"github.com/dcadolph/railwarden/internal/grant"
+	"github.com/dcadolph/railwarden/internal/inventory"
 )
 
 // createInventoryRequest is the JSON body accepted by POST /inventories.
@@ -55,7 +55,7 @@ func inventorySource(req createInventoryRequest, existing string, sealer *creden
 		return source, existing, "", 0
 	}
 	if sealer == nil || !sealer.Enabled() {
-		return "", "", "content sources need encryption: set YARDMASTER_ENCRYPTION_KEY and YARDMASTER_ENCRYPTION_SALT", http.StatusConflict
+		return "", "", "content sources need encryption: set RAILWARDEN_ENCRYPTION_KEY and RAILWARDEN_ENCRYPTION_SALT", http.StatusConflict
 	}
 	s, err := sealer.Seal(req.ContentConfig)
 	if err != nil {

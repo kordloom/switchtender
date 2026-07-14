@@ -1,7 +1,7 @@
-// Package cmd holds the Yardmaster CLI commands.
+// Package cmd holds the Railwarden CLI commands.
 package cmd
 
-// Process exit codes returned by the Yardmaster CLI.
+// Process exit codes returned by the Railwarden CLI.
 const (
 	// CodeOK indicates a successful run.
 	CodeOK = 0

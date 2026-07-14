@@ -14,15 +14,15 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/yardmaster/internal/auth"
-	"github.com/dcadolph/yardmaster/internal/dispatch"
-	"github.com/dcadolph/yardmaster/internal/event"
-	"github.com/dcadolph/yardmaster/internal/grant"
-	"github.com/dcadolph/yardmaster/internal/live"
-	"github.com/dcadolph/yardmaster/internal/run"
-	"github.com/dcadolph/yardmaster/internal/schedule"
-	"github.com/dcadolph/yardmaster/internal/template"
-	"github.com/dcadolph/yardmaster/internal/user"
+	"github.com/dcadolph/railwarden/internal/auth"
+	"github.com/dcadolph/railwarden/internal/dispatch"
+	"github.com/dcadolph/railwarden/internal/event"
+	"github.com/dcadolph/railwarden/internal/grant"
+	"github.com/dcadolph/railwarden/internal/live"
+	"github.com/dcadolph/railwarden/internal/run"
+	"github.com/dcadolph/railwarden/internal/schedule"
+	"github.com/dcadolph/railwarden/internal/template"
+	"github.com/dcadolph/railwarden/internal/user"
 )
 
 // fakeStreamer returns a fixed channel for any run.
@@ -1025,9 +1025,9 @@ func TestMetrics(t *testing.T) {
 	}
 	body := rec.Body.String()
 	for _, want := range []string{
-		`yardmaster_runs_total{status="succeeded"} 2`,
-		`yardmaster_runs_total{status="failed"} 1`,
-		"# TYPE yardmaster_runs_total gauge",
+		`railwarden_runs_total{status="succeeded"} 2`,
+		`railwarden_runs_total{status="failed"} 1`,
+		"# TYPE railwarden_runs_total gauge",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("metrics missing %q", want)

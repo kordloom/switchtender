@@ -17,14 +17,14 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/yardmaster/internal/credential"
-	"github.com/dcadolph/yardmaster/internal/event"
-	"github.com/dcadolph/yardmaster/internal/inventory"
-	"github.com/dcadolph/yardmaster/internal/invsource"
-	"github.com/dcadolph/yardmaster/internal/policy"
-	"github.com/dcadolph/yardmaster/internal/project"
-	"github.com/dcadolph/yardmaster/internal/roundhouse"
-	"github.com/dcadolph/yardmaster/internal/run"
+	"github.com/dcadolph/railwarden/internal/credential"
+	"github.com/dcadolph/railwarden/internal/event"
+	"github.com/dcadolph/railwarden/internal/inventory"
+	"github.com/dcadolph/railwarden/internal/invsource"
+	"github.com/dcadolph/railwarden/internal/policy"
+	"github.com/dcadolph/railwarden/internal/project"
+	"github.com/dcadolph/railwarden/internal/roundhouse"
+	"github.com/dcadolph/railwarden/internal/run"
 )
 
 // DefaultWorkers is the number of concurrent runs when none is configured.
@@ -266,7 +266,7 @@ func New(store run.Store, runner roundhouse.Runner, log *zap.Logger, opts ...Opt
 func defaultOwner() string {
 	host, err := os.Hostname()
 	if err != nil || host == "" {
-		host = "yardmaster"
+		host = "railwarden"
 	}
 	return fmt.Sprintf("%s-%d", host, os.Getpid())
 }
@@ -1195,7 +1195,7 @@ func withRetries(f func() error) error {
 // eventsFile creates a temp file for the run's structured events and returns its path and a
 // cleanup func. On failure it logs and returns an empty path, which disables event capture.
 func (d *Dispatcher) eventsFile(id string) (string, func()) {
-	f, err := os.CreateTemp("", "yardmaster-events-*.ndjson")
+	f, err := os.CreateTemp("", "railwarden-events-*.ndjson")
 	if err != nil {
 		d.log.Error("dispatch: create events file: "+err.Error(), zap.String("run_id", id))
 		return "", func() {}

@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="../assets/logo-letters-dark.png">
-    <img src="../assets/logo-letters.png" alt="Yardmaster" width="140">
+    <img src="../assets/logo-letters.png" alt="Railwarden" width="140">
   </picture>
 </p>
 
@@ -19,20 +19,20 @@ parses the script and reports syntax errors without executing it.
 
 ## How values reach the script
 
-- Extra vars, including survey answers and template vars, arrive as `YARDMASTER_VARS`, a JSON object.
+- Extra vars, including survey answers and template vars, arrive as `RAILWARDEN_VARS`, a JSON object.
   Read a value with `jq`:
 
-        region=$(printf '%s' "$YARDMASTER_VARS" | jq -r .region)
+        region=$(printf '%s' "$RAILWARDEN_VARS" | jq -r .region)
 
 - An `env` credential's `KEY=VALUE` lines are set in the environment directly.
-- A `token` credential is set as `YARDMASTER_TOKEN`.
+- A `token` credential is set as `RAILWARDEN_TOKEN`.
 - Credentials attached to the run's [inventory](tutorial-set-a-secret.md) arrive the same way, so a
   fleet's secret variables reach the script without naming them on the run.
 
 ## Example
 
     set -euo pipefail
-    region=$(printf '%s' "$YARDMASTER_VARS" | jq -r '.region // "us-east-1"')
+    region=$(printf '%s' "$RAILWARDEN_VARS" | jq -r '.region // "us-east-1"')
     echo "Draining $region"
     kubectl --context "$region" drain node-1 --ignore-daemonsets
 

@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dcadolph/yardmaster/internal/event"
-	"github.com/dcadolph/yardmaster/internal/retention"
-	"github.com/dcadolph/yardmaster/internal/run"
+	"github.com/dcadolph/railwarden/internal/event"
+	"github.com/dcadolph/railwarden/internal/retention"
+	"github.com/dcadolph/railwarden/internal/run"
 )
 
 // TestSweepTrimsThenDeletes verifies a sweep trims events at the shorter window and deletes runs at

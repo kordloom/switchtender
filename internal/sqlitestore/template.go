@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/dcadolph/yardmaster/internal/template"
+	"github.com/dcadolph/railwarden/internal/template"
 )
 
 // templateColumns is the shared select list for template reads.

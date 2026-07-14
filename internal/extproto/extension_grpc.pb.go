@@ -1,4 +1,4 @@
-// The wire protocol between Yardmaster and an out-of-process extension. One plugin binary serves
+// The wire protocol between Railwarden and an out-of-process extension. One plugin binary serves
 // one Extension service; Describe names what it provides and the remaining calls carry each seam.
 // Field numbers are frozen once released, so grow messages by adding fields, never by reusing.
 
@@ -23,13 +23,13 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Extension_Describe_FullMethodName      = "/yardmaster.extension.v1.Extension/Describe"
-	Extension_RunTool_FullMethodName       = "/yardmaster.extension.v1.Extension/RunTool"
-	Extension_Notify_FullMethodName        = "/yardmaster.extension.v1.Extension/Notify"
-	Extension_Complete_FullMethodName      = "/yardmaster.extension.v1.Extension/Complete"
-	Extension_ResolveSecret_FullMethodName = "/yardmaster.extension.v1.Extension/ResolveSecret"
-	Extension_MintSecret_FullMethodName    = "/yardmaster.extension.v1.Extension/MintSecret"
-	Extension_RevokeLease_FullMethodName   = "/yardmaster.extension.v1.Extension/RevokeLease"
+	Extension_Describe_FullMethodName      = "/railwarden.extension.v1.Extension/Describe"
+	Extension_RunTool_FullMethodName       = "/railwarden.extension.v1.Extension/RunTool"
+	Extension_Notify_FullMethodName        = "/railwarden.extension.v1.Extension/Notify"
+	Extension_Complete_FullMethodName      = "/railwarden.extension.v1.Extension/Complete"
+	Extension_ResolveSecret_FullMethodName = "/railwarden.extension.v1.Extension/ResolveSecret"
+	Extension_MintSecret_FullMethodName    = "/railwarden.extension.v1.Extension/MintSecret"
+	Extension_RevokeLease_FullMethodName   = "/railwarden.extension.v1.Extension/RevokeLease"
 )
 
 // ExtensionClient is the client API for Extension service.
@@ -338,7 +338,7 @@ func _Extension_RevokeLease_Handler(srv interface{}, ctx context.Context, dec fu
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var Extension_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "yardmaster.extension.v1.Extension",
+	ServiceName: "railwarden.extension.v1.Extension",
 	HandlerType: (*ExtensionServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{

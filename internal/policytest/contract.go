@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dcadolph/yardmaster/internal/policy"
+	"github.com/dcadolph/railwarden/internal/policy"
 )
 
 // Contract runs the policy.Store contract against a fresh store from newStore.

@@ -10,10 +10,10 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/yardmaster/internal/credential"
-	"github.com/dcadolph/yardmaster/internal/roundhouse"
-	"github.com/dcadolph/yardmaster/internal/run"
-	"github.com/dcadolph/yardmaster/internal/secretsource"
+	"github.com/dcadolph/railwarden/internal/credential"
+	"github.com/dcadolph/railwarden/internal/roundhouse"
+	"github.com/dcadolph/railwarden/internal/run"
+	"github.com/dcadolph/railwarden/internal/secretsource"
 )
 
 // revokeTimeout bounds a single ephemeral secret revocation so a slow or unreachable secrets engine
@@ -95,7 +95,7 @@ func (d *Dispatcher) materializeCredentials(ctx context.Context, r *run.Run, spe
 				}
 			}
 		}
-		f, err := os.CreateTemp("", "yardmaster-cred-*")
+		f, err := os.CreateTemp("", "railwarden-cred-*")
 		if err != nil {
 			return cleanup, secrets, fmt.Errorf("materialize credential %s: %w", id, err)
 		}

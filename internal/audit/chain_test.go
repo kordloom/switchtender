@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dcadolph/yardmaster/internal/audit"
+	"github.com/dcadolph/railwarden/internal/audit"
 )
 
 // buildChain returns a valid chain of n entries linked with audit.Link.

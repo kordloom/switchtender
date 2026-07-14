@@ -7,7 +7,7 @@ import (
 	"sync"
 	"unicode/utf8"
 
-	"github.com/dcadolph/yardmaster/internal/event"
+	"github.com/dcadolph/railwarden/internal/event"
 )
 
 // maskToken replaces a redacted secret value in run output.

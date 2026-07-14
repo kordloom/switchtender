@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dcadolph/yardmaster/internal/project"
+	"github.com/dcadolph/railwarden/internal/project"
 )
 
 // Contract runs the project.Store contract against a fresh store from newStore.

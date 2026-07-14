@@ -1,5 +1,5 @@
 // Package sqlitestore implements run.Store on top of SQLite using the pure Go modernc driver, so
-// Yardmaster keeps its single binary promise with no cgo. It is the default backend. A Postgres
+// Railwarden keeps its single binary promise with no cgo. It is the default backend. A Postgres
 // backend can satisfy the same run.Store interface later for multi instance deployments.
 package sqlitestore
 
@@ -14,21 +14,21 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"github.com/dcadolph/yardmaster/internal/audit"
-	"github.com/dcadolph/yardmaster/internal/auth"
-	"github.com/dcadolph/yardmaster/internal/credential"
-	"github.com/dcadolph/yardmaster/internal/event"
-	"github.com/dcadolph/yardmaster/internal/grant"
-	"github.com/dcadolph/yardmaster/internal/inventory"
-	"github.com/dcadolph/yardmaster/internal/invsource"
-	"github.com/dcadolph/yardmaster/internal/policy"
-	"github.com/dcadolph/yardmaster/internal/project"
-	"github.com/dcadolph/yardmaster/internal/run"
-	"github.com/dcadolph/yardmaster/internal/schedule"
-	"github.com/dcadolph/yardmaster/internal/team"
-	"github.com/dcadolph/yardmaster/internal/template"
-	"github.com/dcadolph/yardmaster/internal/trigger"
-	"github.com/dcadolph/yardmaster/internal/user"
+	"github.com/dcadolph/railwarden/internal/audit"
+	"github.com/dcadolph/railwarden/internal/auth"
+	"github.com/dcadolph/railwarden/internal/credential"
+	"github.com/dcadolph/railwarden/internal/event"
+	"github.com/dcadolph/railwarden/internal/grant"
+	"github.com/dcadolph/railwarden/internal/inventory"
+	"github.com/dcadolph/railwarden/internal/invsource"
+	"github.com/dcadolph/railwarden/internal/policy"
+	"github.com/dcadolph/railwarden/internal/project"
+	"github.com/dcadolph/railwarden/internal/run"
+	"github.com/dcadolph/railwarden/internal/schedule"
+	"github.com/dcadolph/railwarden/internal/team"
+	"github.com/dcadolph/railwarden/internal/template"
+	"github.com/dcadolph/railwarden/internal/trigger"
+	"github.com/dcadolph/railwarden/internal/user"
 )
 
 // schema is the full table layout created on open. It uses IF NOT EXISTS, so opening an existing

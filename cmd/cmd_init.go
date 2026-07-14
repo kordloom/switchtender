@@ -9,7 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dcadolph/yardmaster/internal/user"
+	"github.com/dcadolph/railwarden/internal/user"
 )
 
 // init flag values.
@@ -28,7 +28,7 @@ var (
 	initForce bool
 )
 
-// initCmd sets up a fresh Yardmaster server: an encryption key and salt, a first admin account, and a
+// initCmd sets up a fresh Railwarden server: an encryption key and salt, a first admin account, and a
 // config file, so a new install is one command away from serving.
 var initCmd = &cobra.Command{
 	Use:   "init",
@@ -42,7 +42,7 @@ var initCmd = &cobra.Command{
 // init binds the init command's flags.
 func init() {
 	initCmd.Flags().StringVar(&initDB, "db", defaultDBPath, "SQLite database path.")
-	initCmd.Flags().StringVar(&initConfig, "config", "yardmaster.env", "Environment file to write.")
+	initCmd.Flags().StringVar(&initConfig, "config", "railwarden.env", "Environment file to write.")
 	initCmd.Flags().StringVar(&initAddr, "addr", ":8080", "Address the server listens on.")
 	initCmd.Flags().StringVar(&initAdmin, "admin", "admin", "Username for the first admin account.")
 	initCmd.Flags().StringVar(&initSystemd, "systemd", "", "Path to write a systemd unit to, empty to skip.")
@@ -63,7 +63,7 @@ func runInit(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("generate salt: %w", err)
 	}
-	password := os.Getenv("YARDMASTER_ADMIN_PASSWORD")
+	password := os.Getenv("RAILWARDEN_ADMIN_PASSWORD")
 	generated := password == ""
 	if generated {
 		if password, err = randomHex(12); err != nil {
@@ -84,7 +84,7 @@ func runInit(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("save admin: %w", err)
 	}
 
-	env := "YARDMASTER_ENCRYPTION_KEY=" + key + "\nYARDMASTER_ENCRYPTION_SALT=" + salt + "\n"
+	env := "RAILWARDEN_ENCRYPTION_KEY=" + key + "\nRAILWARDEN_ENCRYPTION_SALT=" + salt + "\n"
 	if err := os.WriteFile(initConfig, []byte(env), 0o600); err != nil {
 		return fmt.Errorf("write config: %w", err)
 	}
@@ -116,14 +116,14 @@ func randomHex(n int) (string, error) {
 // given database and address.
 func systemdUnit(db, addr, configPath string) string {
 	return fmt.Sprintf(`[Unit]
-Description=Yardmaster
+Description=Railwarden
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
 EnvironmentFile=%s
-ExecStart=/usr/local/bin/yardmaster serve --db %s --addr %s
+ExecStart=/usr/local/bin/railwarden serve --db %s --addr %s
 Restart=on-failure
 NoNewPrivileges=true
 
@@ -135,7 +135,7 @@ WantedBy=multi-user.target
 // printInitSummary writes the setup result and the next steps to stderr, keeping stdout clean. The
 // admin password is shown once, since it is not stored in the clear.
 func printInitSummary(generated bool, password string) {
-	fmt.Fprintln(os.Stderr, "Yardmaster is set up.")
+	fmt.Fprintln(os.Stderr, "Railwarden is set up.")
 	fmt.Fprintln(os.Stderr, "  admin account: "+initAdmin)
 	if generated {
 		fmt.Fprintln(os.Stderr, "  admin password: "+password+"  (shown once, save it now)")
@@ -145,11 +145,11 @@ func printInitSummary(generated bool, password string) {
 	if initSystemd != "" {
 		fmt.Fprintln(os.Stderr, "  systemd unit:  "+initSystemd)
 		fmt.Fprintln(os.Stderr, "\nStart with systemd:")
-		fmt.Fprintln(os.Stderr, "  sudo cp "+initSystemd+" /etc/systemd/system/yardmaster.service")
-		fmt.Fprintln(os.Stderr, "  sudo systemctl enable --now yardmaster")
+		fmt.Fprintln(os.Stderr, "  sudo cp "+initSystemd+" /etc/systemd/system/railwarden.service")
+		fmt.Fprintln(os.Stderr, "  sudo systemctl enable --now railwarden")
 		return
 	}
 	fmt.Fprintln(os.Stderr, "\nStart the server:")
 	fmt.Fprintln(os.Stderr, "  set -a; . ./"+initConfig+"; set +a")
-	fmt.Fprintln(os.Stderr, "  yardmaster serve --db "+initDB+" --addr "+initAddr)
+	fmt.Fprintln(os.Stderr, "  railwarden serve --db "+initDB+" --addr "+initAddr)
 }

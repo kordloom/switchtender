@@ -21,8 +21,8 @@ import (
 	"github.com/crewjam/saml/samlsp"
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/yardmaster/internal/auth"
-	"github.com/dcadolph/yardmaster/internal/user"
+	"github.com/dcadolph/railwarden/internal/auth"
+	"github.com/dcadolph/railwarden/internal/user"
 )
 
 // samlStateTTL bounds how long a sign-in may take from the redirect to the assertion post.
@@ -32,7 +32,7 @@ const samlStateTTL = 10 * time.Minute
 // so the assertion's InResponseTo is checked against the request this browser actually started.
 const samlCookie = "ym_saml"
 
-// SAMLAuth signs users in through a SAML identity provider. Yardmaster is the service provider: it
+// SAMLAuth signs users in through a SAML identity provider. Railwarden is the service provider: it
 // redirects the browser to the IdP with an authentication request and consumes the signed assertion
 // at the ACS endpoint. It provisions a local account on first sign-in and mints the same session
 // token the password login does, so a SAML user is treated like any other.
@@ -99,7 +99,7 @@ func NewSAMLAuth(ctx context.Context, idpMetadataURL, baseURL, certFile, keyFile
 		return nil, fmt.Errorf("saml: base url: %w", err)
 	}
 	metadataURL, _ := url.Parse(base + "/auth/saml/metadata")
-	sigKey := sha256.Sum256(append([]byte("yardmaster-saml\x00"), x509.MarshalPKCS1PrivateKey(key)...))
+	sigKey := sha256.Sum256(append([]byte("railwarden-saml\x00"), x509.MarshalPKCS1PrivateKey(key)...))
 	return &SAMLAuth{
 		sp: saml.ServiceProvider{
 			EntityID:    base + "/auth/saml/metadata",
@@ -183,7 +183,7 @@ func (s *SAMLAuth) acs(w http.ResponseWriter, r *http.Request) {
 }
 
 // metadata serves the service provider metadata XML an IdP administrator uses to register
-// Yardmaster: the entity id, the ACS endpoint, and the signing certificate.
+// Railwarden: the entity id, the ACS endpoint, and the signing certificate.
 func (s *SAMLAuth) metadata(w http.ResponseWriter, _ *http.Request) {
 	out, err := xml.MarshalIndent(s.sp.Metadata(), "", "  ")
 	if err != nil {

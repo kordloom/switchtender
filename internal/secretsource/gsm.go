@@ -26,14 +26,14 @@ type gsmConfig struct {
 	// Version is the version to read; empty means latest.
 	Version string `json:"version,omitempty"`
 	// Token is an OAuth2 access token. When empty, one is fetched from the GCP metadata server, so a
-	// Yardmaster running on GCP reads as its attached service account.
+	// Railwarden running on GCP reads as its attached service account.
 	Token string `json:"token,omitempty"`
 }
 
 // resolveGSM reads a secret version from Google Secret Manager over HTTP and returns its value, so a
 // source resolves from Secret Manager at run time with no gcloud CLI on the runner. It reads the JSON
 // config, authenticates with the config token or a token from the GCP metadata server, and decodes
-// the base64 payload. Without a config token it needs Yardmaster to run on GCP, since the metadata
+// the base64 payload. Without a config token it needs Railwarden to run on GCP, since the metadata
 // server is the token source.
 func resolveGSM(ctx context.Context, config string) (string, error) {
 	var cfg gsmConfig
@@ -88,7 +88,7 @@ func resolveGSM(ctx context.Context, config string) (string, error) {
 	return string(decoded), nil
 }
 
-// gsmMetadataToken fetches an OAuth2 access token from the GCP metadata server, so a Yardmaster on
+// gsmMetadataToken fetches an OAuth2 access token from the GCP metadata server, so a Railwarden on
 // GCP reads Secret Manager as its attached service account with no stored credentials.
 func gsmMetadataToken(ctx context.Context) (string, error) {
 	url := strings.TrimRight(gsmMetadataEndpoint, "/") +

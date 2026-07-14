@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/dcadolph/yardmaster/internal/policy"
+	"github.com/dcadolph/railwarden/internal/policy"
 )
 
 // policyStore is a policy.Store backed by the shared SQLite database.

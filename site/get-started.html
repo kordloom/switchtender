@@ -3,9 +3,9 @@
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
-	<title>Get started · Yardmaster</title>
-	<meta name="description" content="Get Yardmaster running in about a minute: one binary, one SQLite file, no Kubernetes. Install, serve, open the UI, launch your first run.">
-	<link rel="canonical" href="https://yardmaster.dev/get-started">
+	<title>Get started · Railwarden</title>
+	<meta name="description" content="Get Railwarden running in about a minute: one binary, one SQLite file, no Kubernetes. Install, serve, open the UI, launch your first run.">
+	<link rel="canonical" href="https://railwarden.dev/get-started">
 	<link rel="icon" href="/favicon.ico" sizes="any">
 	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
 	<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
@@ -20,14 +20,14 @@
 
 	<header class="nav" id="nav">
 		<div class="wrap nav-inner">
-			<a class="brand" href="/" aria-label="Yardmaster"><img src="/assets/logo-train-tracks-dark.png" alt="Yardmaster" class="brand-train"><span class="brand-word">Yardmaster</span></a>
+			<a class="brand" href="/" aria-label="Railwarden"><img src="/assets/logo-train-tracks-dark.png" alt="Railwarden" class="brand-train"><span class="brand-word">Railwarden</span></a>
 			<nav class="nav-links">
 				<a href="/#features">Features</a>
 				<a href="/#compare">Compare</a>
 				<a href="/docs/">Docs</a>
 			</nav>
 			<div class="nav-cta">
-				<a class="ghost" href="https://github.com/dcadolph/yardmaster">GitHub</a>
+				<a class="ghost" href="https://github.com/dcadolph/railwarden">GitHub</a>
 				<a class="btn" href="#steps">Install</a>
 			</div>
 			<button class="nav-toggle" id="nav-toggle" aria-label="Menu">
@@ -49,8 +49,8 @@
 					<div class="gs-num">1</div>
 					<div class="gs-body">
 						<h3>Install</h3>
-						<p>Install with Go, or grab a prebuilt binary from the <a href="https://github.com/dcadolph/yardmaster/releases">releases page</a>. To run Ansible you also need <code>ansible-playbook</code> on the box. Bash and Python work out of the box, and Go runs need the Go toolchain installed.</p>
-						<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>go install github.com/dcadolph/yardmaster@latest</code></pre></div>
+						<p>Install with Go, or grab a prebuilt binary from the <a href="https://github.com/dcadolph/railwarden/releases">releases page</a>. To run Ansible you also need <code>ansible-playbook</code> on the box. Bash and Python work out of the box, and Go runs need the Go toolchain installed.</p>
+						<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>go install github.com/dcadolph/railwarden@latest</code></pre></div>
 					</div>
 				</li>
 				<li class="gs-step reveal">
@@ -59,10 +59,10 @@
 						<h3>Serve</h3>
 						<p>Start the server. SQLite is the default. Point <code>--db</code> at a Postgres DSN when you want more than one instance. Set the encryption pair if you plan to store credentials.</p>
 						<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code><span class="c"># optional, only needed for stored secrets</span>
-export YARDMASTER_ENCRYPTION_KEY=change-me
-export YARDMASTER_ENCRYPTION_SALT=change-me-too
+export RAILWARDEN_ENCRYPTION_KEY=change-me
+export RAILWARDEN_ENCRYPTION_SALT=change-me-too
 
-yardmaster serve --addr :8080 --db yard.db</code></pre></div>
+railwarden serve --addr :8080 --db yard.db</code></pre></div>
 					</div>
 				</li>
 				<li class="gs-step reveal">
@@ -80,7 +80,7 @@ yardmaster serve --addr :8080 --db yard.db</code></pre></div>
 						<p>Click <strong>Launch run</strong> in the UI, or fire one over the API. No Ansible required for this one. It is a plain Bash run you can watch stream live.</p>
 						<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>curl -s -X POST localhost:8080/runs \
   -H 'content-type: application/json' \
-  -d '{"tool":"bash","command":"echo hello from yardmaster"}'</code></pre></div>
+  -d '{"tool":"bash","command":"echo hello from railwarden"}'</code></pre></div>
 					</div>
 				</li>
 				<li class="gs-step reveal">
@@ -88,7 +88,7 @@ yardmaster serve --addr :8080 --db yard.db</code></pre></div>
 					<div class="gs-body">
 						<h3>Lock it down</h3>
 						<p>Mint an admin token. The moment the first token exists, the API requires auth, so create one before you expose the server, then send it as a bearer token.</p>
-						<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>yardmaster token new --name admin --db yard.db</code></pre></div>
+						<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>railwarden token new --name admin --db yard.db</code></pre></div>
 					</div>
 				</li>
 			</ol>
@@ -114,7 +114,7 @@ yardmaster serve --addr :8080 --db yard.db</code></pre></div>
 			<h2>Put AWX and Semaphore to bed.</h2>
 			<p>Structured runs, balanced splits, a fleet that remembers, and a control plane that proves itself, from one binary.</p>
 			<div class="hero-cta center">
-				<a class="btn big" href="https://github.com/dcadolph/yardmaster">★ Star on GitHub</a>
+				<a class="btn big" href="https://github.com/dcadolph/railwarden">★ Star on GitHub</a>
 				<a class="ghost big" href="/docs/">Read the docs</a>
 			</div>
 		</section>
@@ -122,12 +122,12 @@ yardmaster serve --addr :8080 --db yard.db</code></pre></div>
 
 	<footer class="footer">
 		<div class="wrap footer-inner">
-			<img src="/assets/logo-letters-dark.png" alt="Yardmaster" class="foot-logo">
+			<img src="/assets/logo-letters-dark.png" alt="Railwarden" class="foot-logo">
 			<nav>
-				<a href="https://github.com/dcadolph/yardmaster">GitHub</a>
+				<a href="https://github.com/dcadolph/railwarden">GitHub</a>
 				<a href="/docs/">Docs</a>
 				<a href="/docs/comparison">Compare</a>
-				<a href="https://github.com/dcadolph/yardmaster/blob/main/LICENSE">License</a>
+				<a href="https://github.com/dcadolph/railwarden/blob/main/LICENSE">License</a>
 			</nav>
 			<span class="foot-note">Open source · BSL 1.1 · self-host free</span>
 		</div>

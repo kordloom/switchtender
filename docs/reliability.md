@@ -1,13 +1,13 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="../assets/logo-letters-dark.png">
-    <img src="../assets/logo-letters.png" alt="Yardmaster" width="140">
+    <img src="../assets/logo-letters.png" alt="Railwarden" width="140">
   </picture>
 </p>
 
 # Reliability
 
-Yardmaster treats a run as durable, attributable work. It runs many at once under a fixed bound,
+Railwarden treats a run as durable, attributable work. It runs many at once under a fixed bound,
 coordinates failure instead of ignoring it, recovers when a worker dies, and keeps its store
 consistent while several workers write to it at the same time. This page states exactly how, and it
 is straight about the edges, because a claim you can check is worth more than one you cannot.
@@ -59,7 +59,7 @@ a single fire for a schedule two replicas race for, and a dead replica's run fin
 survivor. Kill a replica mid-run and the run fails clean and requeues, it does not vanish.
 
 To run it: point every replica at the same PostgreSQL with `--db`, share the same
-`YARDMASTER_CRED_KEY` and `YARDMASTER_CRED_SALT` so sealed credentials decrypt everywhere, and
+`RAILWARDEN_CRED_KEY` and `RAILWARDEN_CRED_SALT` so sealed credentials decrypt everywhere, and
 health-check `/healthz` at the balancer. SQLite has no server to share, so it stays a single-node
 deployment by design; PostgreSQL is the HA backend.
 
@@ -124,7 +124,7 @@ binary against an existing database is safe to repeat.
 The audit trail is a SHA-256 hash chain. Every recorded mutation carries the previous entry's hash
 and its own hash over its content, so altering, reordering, or dropping an entry breaks the chain,
 which `GET /audit/verify` detects. The chain is tamper-evident with no key configured. When a signing
-key is set, `GET /audit/export` seals the chain head with an ed25519 signature, and `yardmaster audit
+key is set, `GET /audit/export` seals the chain head with an ed25519 signature, and `railwarden audit
 verify` confirms the trail offline, without trusting the server that produced it. The append is
 serialized by an in-process lock on SQLite and a transaction-level advisory lock on PostgreSQL, with
 a unique index on the sequence number as a cross-process backstop, so the chain stays linear even
@@ -151,7 +151,7 @@ source of truth.
 
 ## Next to AWX and Semaphore
 
-Yardmaster coordinates a fleet with database leasing, so the same one binary adds capacity without a
+Railwarden coordinates a fleet with database leasing, so the same one binary adds capacity without a
 separate mesh to stand up. It splits by measured duration rather than round-robin, so a run finishes
 on the slowest shard and not the unluckiest one. It retries only the shards that failed. It reads a
 run as a host-by-task matrix instead of a log stream. And it proves its own audit trail offline. The

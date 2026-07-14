@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dcadolph/yardmaster/internal/trigger"
+	"github.com/dcadolph/railwarden/internal/trigger"
 )
 
 // Contract runs the trigger.Store contract against a fresh store from newStore.

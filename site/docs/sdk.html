@@ -3,13 +3,13 @@
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
-	<title>Extend Yardmaster in Go · Yardmaster docs</title>
-	<meta name="description" content="Yardmaster's SDK: register execution tools, AI providers, secret engines, and notification channels from one Go package. Compile it in or ship it as a drop-in plugin binary.">
-	<link rel="canonical" href="https://yardmaster.dev/docs/sdk">
-	<meta property="og:title" content="Extend Yardmaster in Go · Yardmaster docs">
-	<meta property="og:description" content="Yardmaster's SDK: register execution tools, AI providers, secret engines, and notification channels from one Go package. Compile it in or ship it as a drop-in plugin binary.">
+	<title>Extend Railwarden in Go · Railwarden docs</title>
+	<meta name="description" content="Railwarden's SDK: register execution tools, AI providers, secret engines, and notification channels from one Go package. Compile it in or ship it as a drop-in plugin binary.">
+	<link rel="canonical" href="https://railwarden.dev/docs/sdk">
+	<meta property="og:title" content="Extend Railwarden in Go · Railwarden docs">
+	<meta property="og:description" content="Railwarden's SDK: register execution tools, AI providers, secret engines, and notification channels from one Go package. Compile it in or ship it as a drop-in plugin binary.">
 	<meta property="og:type" content="article">
-	<meta property="og:url" content="https://yardmaster.dev/docs/sdk">
+	<meta property="og:url" content="https://railwarden.dev/docs/sdk">
 	<link rel="icon" href="/favicon.ico" sizes="any">
 	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
 	<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
@@ -20,23 +20,23 @@
 </head>
 <body>
 	<header class="dnav">
-		<a class="brand" href="/"><img src="/assets/logo-train-tracks-dark.png" alt="Yardmaster" class="brand-train"><span class="brand-word">Yardmaster</span></a>
+		<a class="brand" href="/"><img src="/assets/logo-train-tracks-dark.png" alt="Railwarden" class="brand-train"><span class="brand-word">Railwarden</span></a>
 		<span class="dnav-tag">Docs</span>
 		<nav class="dnav-links">
 			<a href="/">Home</a>
 			<a href="/#compare">Compare</a>
-			<a href="https://github.com/dcadolph/yardmaster">GitHub</a>
+			<a href="https://github.com/dcadolph/railwarden">GitHub</a>
 		</nav>
 	</header>
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/sdk" class="active">Extend Yardmaster in Go</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/ai">Advisory AI</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">Yardmaster compared to AWX and Semaphore</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/sdk" class="active">Extend Railwarden in Go</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/ai">Advisory AI</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">Railwarden compared to AWX and Semaphore</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
-			<h1 id="extend-yardmaster-in-go">Extend Yardmaster in Go</h1>
-<p>Yardmaster's seams are public. Import one package, <code>github.com/dcadolph/yardmaster/sdk</code>, register
+			<h1 id="extend-railwarden-in-go">Extend Railwarden in Go</h1>
+<p>Railwarden's seams are public. Import one package, <code>github.com/dcadolph/railwarden/sdk</code>, register
 what you built, and run it either way: compiled into the server binary, or dropped next to a stock
 release binary as a plugin the server loads at startup. A registered tool submits, validates,
 executes, and audits like a built-in. The SDK covers four kinds of extension:</p>
@@ -52,7 +52,7 @@ channel, beside the built-in webhook, Slack, and email delivery. Extra vars are 
 delivery, so survey answers and template vars that can carry secrets never leave the server.</li>
 <li><strong>Secret engines.</strong> <code>RegisterSecretSource</code> adds a static engine such as AWS Secrets Manager or
 1Password. <code>RegisterDynamicSecretSource</code> adds a dynamic engine that mints a short-lived
-credential on each read and returns a lease Yardmaster revokes when the run ends.</li>
+credential on each read and returns a lease Railwarden revokes when the run ends.</li>
 </ul>
 <h2 id="the-rules">The rules</h2>
 <p>Register from an <code>init</code> function or from <code>main</code> before the server starts. Registries are read
@@ -63,16 +63,16 @@ on first use.</p>
 version skew. Or ship it as a plugin binary in the server's <code>--plugins-dir</code> for a stock release
 binary that loads extensions at startup. Same seams, same registration, same behavior at run time.</p>
 <h2 id="a-complete-extension">A complete extension</h2>
-<p>Two files make a Yardmaster with a custom <code>hello</code> tool.</p>
+<p>Two files make a Railwarden with a custom <code>hello</code> tool.</p>
 <p><code>go.mod</code>:</p>
-<pre><code>module example.com/yardmaster-hello
+<pre><code>module example.com/railwarden-hello
 
 go 1.26.4
 
-require github.com/dcadolph/yardmaster v1.7.0
+require github.com/dcadolph/railwarden v1.7.0
 </code></pre>
 <p><code>main.go</code>:</p>
-<pre><code>// Package main builds a Yardmaster server with a custom tool compiled in through the SDK.
+<pre><code>// Package main builds a Railwarden server with a custom tool compiled in through the SDK.
 package main
 
 import (
@@ -80,8 +80,8 @@ import (
     &quot;fmt&quot;
     &quot;io&quot;
 
-    &quot;github.com/dcadolph/yardmaster/cmd&quot;
-    &quot;github.com/dcadolph/yardmaster/sdk&quot;
+    &quot;github.com/dcadolph/railwarden/cmd&quot;
+    &quot;github.com/dcadolph/railwarden/sdk&quot;
 )
 
 // init registers the tool before the server starts.
@@ -93,14 +93,14 @@ func init() {
         }))
 }
 
-// main runs the stock Yardmaster CLI with the extension compiled in.
+// main runs the stock Railwarden CLI with the extension compiled in.
 func main() {
     cmd.Execute(nil)
 }
 </code></pre>
 <p>Build it, run it, and submit a run that names the new tool:</p>
-<pre><code>go mod tidy &amp;&amp; go build -o yardmaster-hello .
-./yardmaster-hello serve --addr :8080 --db yard.db
+<pre><code>go mod tidy &amp;&amp; go build -o railwarden-hello .
+./railwarden-hello serve --addr :8080 --db yard.db
 
 curl -s -X POST localhost:8080/v1/runs \
   -H 'Content-Type: application/json' \
@@ -115,9 +115,9 @@ hello from an external plugin: world
 <code>user</code>, and <code>audit</code>. Passing <code>nil</code> to <code>cmd.Execute</code> skips the embedded documentation pages in the
 UI. Embed your own file tree there to serve them.</p>
 <h2 id="ship-it-as-a-plugin-binary">Ship it as a plugin binary</h2>
-<p>The same extension runs as its own process, loaded by a stock Yardmaster release binary. Swap the
+<p>The same extension runs as its own process, loaded by a stock Railwarden release binary. Swap the
 main for <code>plugin.Serve</code> and build:</p>
-<pre><code>// Command helloplugin serves the hello tool as a Yardmaster plugin.
+<pre><code>// Command helloplugin serves the hello tool as a Railwarden plugin.
 package main
 
 import (
@@ -125,8 +125,8 @@ import (
     &quot;fmt&quot;
     &quot;io&quot;
 
-    &quot;github.com/dcadolph/yardmaster/sdk&quot;
-    &quot;github.com/dcadolph/yardmaster/sdk/plugin&quot;
+    &quot;github.com/dcadolph/railwarden/sdk&quot;
+    &quot;github.com/dcadolph/railwarden/sdk/plugin&quot;
 )
 
 // main serves the extension as a plugin process.
@@ -144,7 +144,7 @@ func main() {
 </code></pre>
 <p>Drop the binary in a directory and point the server at it:</p>
 <pre><code>go build -o plugins/hello-plugin .
-yardmaster serve --plugins-dir ./plugins
+railwarden serve --plugins-dir ./plugins
 </code></pre>
 <p>At startup the server launches each executable in the directory, asks what it provides, and
 registers every seam it declares. One plugin serves any mix of tools, notifiers, AI providers, and
@@ -157,8 +157,8 @@ at startup with a clear message. Compiling in and plugging in register the same 
 same at run time. Pick per extension: compile in for one static artifact, plug in for extending a
 release binary you did not build.</p>
 <p>For a working example, the official
-<a href="https://github.com/dcadolph/yardmaster-plugins">yardmaster-plugins</a> repo ships
-<code>yardmaster-notify</code>, one plugin binary that delivers runs to Discord, ntfy, and Microsoft Teams.
+<a href="https://github.com/dcadolph/railwarden-plugins">railwarden-plugins</a> repo ships
+<code>railwarden-notify</code>, one plugin binary that delivers runs to Discord, ntfy, and Microsoft Teams.
 It doubles as the template for writing your own.</p>
 <h2 id="the-seams-in-detail">The seams in detail</h2>
 <h3 id="execution-tools">Execution tools</h3>

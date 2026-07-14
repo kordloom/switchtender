@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dcadolph/yardmaster/internal/event"
+	"github.com/dcadolph/railwarden/internal/event"
 )
 
 // Store persists runs, their captured log output, and their structured events.

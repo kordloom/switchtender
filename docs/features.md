@@ -1,13 +1,13 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="../assets/logo-letters-dark.png">
-    <img src="../assets/logo-letters.png" alt="Yardmaster" width="140">
+    <img src="../assets/logo-letters.png" alt="Railwarden" width="140">
   </picture>
 </p>
 
 # Features
 
-What Yardmaster does today.
+What Railwarden does today.
 
 | Capability   | What you get                                                                    |
 |--------------|---------------------------------------------------------------------------------|
@@ -18,7 +18,7 @@ What Yardmaster does today.
 | Shard retry  | Retry a finished split and only its failed shards run again, lineage recorded.  |
 | Pipelines    | Ordered steps or a dependency graph with parallel branches. Failures skip exactly their dependents, per-step retry budgets, set_stats outputs flow to dependent steps as extra vars.|
 | Workflow editor | A drag-and-drop canvas at Workflows builds the dependency graph in the browser: draft persistence, undo and redo, full keyboard editing, cycle refusal, and a pan, zoom, and fit-to-view viewport that stays smooth on a large graph, submitted as a pipeline.|
-| Workers      | Point `yardmaster worker` at the same database and it competes for queued runs. Leases, heartbeats, and a janitor make dead workers safe.|
+| Workers      | Point `railwarden worker` at the same database and it competes for queued runs. Leases, heartbeats, and a janitor make dead workers safe.|
 | Scheduling   | Cron schedules fire runs, splits, or pipelines with full history per fire.      |
 | Fleet memory | Failure rankings, flaky-host detection, outcome sparklines, per-host history, task duration trends, all from persisted structured events.|
 | Recovery     | Cancellation across processes recorded as canceled, orphaned runs interrupted by lease expiry, terminal saves retried.|
@@ -28,10 +28,10 @@ What Yardmaster does today.
 | Auth         | User accounts with admin, operator, and viewer roles enforced per route. Bearer tokens hashed at rest. The API locks down the moment the first token exists.|
 | Approvals    | Mark a run to require sign-off, or require it automatically by policy on tool, command, or target. A held run never executes until an admin approves or rejects it, and the request and decision land in the tamper-evident audit trail.|
 | Observability| A Prometheus metrics endpoint, webhook notifications when runs finish, and an audit trail of every mutation.|
-| Tamper-evident audit | Every mutation is linked into a SHA-256 hash chain. `GET /audit/verify` flags the first altered or deleted entry, and a signed export verified with `yardmaster audit verify` proves the whole chain offline.|
+| Tamper-evident audit | Every mutation is linked into a SHA-256 hash chain. `GET /audit/verify` flags the first altered or deleted entry, and a signed export verified with `railwarden audit verify` proves the whole chain offline.|
 | Inventories  | Stored inventories referenced by id, materialized on whichever executor runs the play.|
 | Dynamic sources | Inventory plugins and scripts refreshed into stored inventories, with cloud auth from an env credential.|
-| Sourced inventories | An inventory's content can come from a command, Vault, or Google Secret Manager, resolved at launch, so the host list need not live in Yardmaster.|
+| Sourced inventories | An inventory's content can come from a command, Vault, or Google Secret Manager, resolved at launch, so the host list need not live in Railwarden.|
 | Credentials  | SSH keys, vault passwords, env bundles for cloud SDKs, API tokens and JWTs, become passwords, and registry logins, all encrypted at rest.|
 | Secret masking | Credential values are redacted from run logs, live streams, and events, so a tool that echoes a secret shows `***` instead of the value.|
 | High availability | Two servers on one database share the schedule without double-firing. Tokens can carry a lifetime.|
@@ -52,5 +52,5 @@ What Yardmaster does today.
 | Go SDK | One public package registers new execution tools, AI providers, secret engines, and notification channels, compiled into the binary. A registered tool validates, executes, masks, and audits like a built-in. See [Extend in Go](sdk.md).|
 | Drop-in plugins | The same extension builds as its own binary and loads from `--plugins-dir` on a stock release, no recompile. Plugins speak gRPC over a local socket with mutual TLS, supervised by the server, on the server and on workers.|
 | Guided tours | A tour launcher in the top bar walks the product, the pitch, and the migration path step by step in the live UI, fully keyboard accessible.|
-| Desktop mode | `yardmaster desktop` serves on a stable loopback port, keeps its data in a private per-user directory, and opens the UI. Packaging recipes cover a macOS app bundle and a Windows installer.|
-| Migration | `yardmaster import awx` and `import semaphore` read an export and create the equivalent projects, inventories, templates, surveys, schedules, and credential shells, with a dry-run report first.|
+| Desktop mode | `railwarden desktop` serves on a stable loopback port, keeps its data in a private per-user directory, and opens the UI. Packaging recipes cover a macOS app bundle and a Windows installer.|
+| Migration | `railwarden import awx` and `import semaphore` read an export and create the equivalent projects, inventories, templates, surveys, schedules, and credential shells, with a dry-run report first.|

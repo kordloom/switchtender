@@ -6,10 +6,10 @@ import (
 	"os"
 	"regexp"
 
-	"github.com/dcadolph/yardmaster/internal/inventory"
-	"github.com/dcadolph/yardmaster/internal/roundhouse"
-	"github.com/dcadolph/yardmaster/internal/run"
-	"github.com/dcadolph/yardmaster/internal/secretsource"
+	"github.com/dcadolph/railwarden/internal/inventory"
+	"github.com/dcadolph/railwarden/internal/roundhouse"
+	"github.com/dcadolph/railwarden/internal/run"
+	"github.com/dcadolph/railwarden/internal/secretsource"
 )
 
 // WithInventories lets runs target stored inventories by id.
@@ -61,7 +61,7 @@ func (d *Dispatcher) inventoryFile(ctx context.Context, id string) (string, func
 	if err != nil {
 		return "", func() {}, nil, err
 	}
-	f, err := os.CreateTemp("", "yardmaster-inventory-*")
+	f, err := os.CreateTemp("", "railwarden-inventory-*")
 	if err != nil {
 		return "", func() {}, nil, fmt.Errorf("materialize inventory %s: %w", id, err)
 	}
@@ -80,7 +80,7 @@ func (d *Dispatcher) inventoryFile(ctx context.Context, id string) (string, func
 // inventoryContent returns the inventory's content, resolving it from its content source when that
 // source is not local. A non-local source's config is sealed, so it is decrypted and then resolved
 // through the shared secretsource engine, letting the host list live in Vault, Google Secret Manager,
-// or behind a command rather than in Yardmaster.
+// or behind a command rather than in Railwarden.
 func (d *Dispatcher) inventoryContent(ctx context.Context, inv *inventory.Inventory) (string, error) {
 	if secretsource.NormalizeKind(inv.ContentSource) == secretsource.KindLocal {
 		return inv.Content, nil

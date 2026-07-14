@@ -1,4 +1,4 @@
-// Package ai connects Yardmaster to a language model for advisory features such as explaining a
+// Package ai connects Railwarden to a language model for advisory features such as explaining a
 // failed run. It never sits in the execution path: a provider only ever produces text a human
 // reads, so runs stay deterministic and the audit trail stays exact.
 package ai

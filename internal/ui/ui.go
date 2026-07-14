@@ -1,4 +1,4 @@
-// Package ui serves the Yardmaster web interface. It renders shell pages from embedded templates
+// Package ui serves the Railwarden web interface. It renders shell pages from embedded templates
 // and ships embedded static assets. The pages call the JSON API to draw the run history, the host
 // status matrix, and the task timeline in the browser.
 package ui
@@ -13,7 +13,7 @@ import (
 	"github.com/yuin/goldmark/extension"
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/yardmaster/internal/run"
+	"github.com/dcadolph/railwarden/internal/run"
 )
 
 // templateFS holds the page templates.

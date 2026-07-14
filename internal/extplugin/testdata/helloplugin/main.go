@@ -10,8 +10,8 @@ import (
 	"io"
 	"os"
 
-	"github.com/dcadolph/yardmaster/sdk"
-	"github.com/dcadolph/yardmaster/sdk/plugin"
+	"github.com/dcadolph/railwarden/sdk"
+	"github.com/dcadolph/railwarden/sdk/plugin"
 )
 
 // main serves the test extension.

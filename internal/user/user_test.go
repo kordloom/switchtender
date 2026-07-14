@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/dcadolph/yardmaster/internal/user"
-	"github.com/dcadolph/yardmaster/internal/usertest"
+	"github.com/dcadolph/railwarden/internal/user"
+	"github.com/dcadolph/railwarden/internal/usertest"
 )
 
 func TestMemStoreContract(t *testing.T) {

@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/dcadolph/yardmaster/internal/trigger"
+	"github.com/dcadolph/railwarden/internal/trigger"
 )
 
 // triggerColumns is the shared select list for trigger reads.

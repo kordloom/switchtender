@@ -1,13 +1,13 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="../assets/logo-letters-dark.png">
-    <img src="../assets/logo-letters.png" alt="Yardmaster" width="140">
+    <img src="../assets/logo-letters.png" alt="Railwarden" width="140">
   </picture>
 </p>
 
 # Migration
 
-Yardmaster imports an AWX or Semaphore export and creates the equivalent objects, so moving over is
+Railwarden imports an AWX or Semaphore export and creates the equivalent objects, so moving over is
 one command rather than a rebuild.
 
 ## Get an export
@@ -22,13 +22,13 @@ one command rather than a rebuild.
 Run the import without `--apply` first to see exactly what it would create, along with every
 warning:
 
-    yardmaster import awx awx-export.json --db yardmaster.db
+    railwarden import awx awx-export.json --db railwarden.db
 
 The report lists the projects, inventories, credentials, templates, and schedules that will be
 created, and calls out anything that could not be mapped cleanly. Apply it when the report looks
 right:
 
-    yardmaster import awx awx-export.json --db yardmaster.db --apply
+    railwarden import awx awx-export.json --db railwarden.db --apply
 
 Semaphore works the same way with `import semaphore`.
 

@@ -25,7 +25,7 @@ func TestParseFixture(t *testing.T) {
 		t.Fatalf("Parse() error = %v", err)
 	}
 
-	play := "Yardmaster smoke test"
+	play := "Railwarden smoke test"
 	want := []Event{
 		{Type: TypePlayStart, Time: time.Unix(1719000000, 0).UTC(), Play: play},
 		{Type: TypeTaskStart, Time: time.Unix(1719000000, 5e8).UTC(), Play: play, Task: "Say hello"},

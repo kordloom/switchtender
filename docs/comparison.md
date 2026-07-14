@@ -1,20 +1,20 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="../assets/logo-letters-dark.png">
-    <img src="../assets/logo-letters.png" alt="Yardmaster" width="140">
+    <img src="../assets/logo-letters.png" alt="Railwarden" width="140">
   </picture>
 </p>
 
-# Yardmaster compared to AWX and Semaphore
+# Railwarden compared to AWX and Semaphore
 
-This page is an honest side-by-side. It states where Yardmaster is ahead, where it is even, and
+This page is an honest side-by-side. It states where Railwarden is ahead, where it is even, and
 where it is behind, because credibility comes from being straight about all three. Details of AWX
 and Semaphore were current as of mid-2026. Verify them against their latest releases before relying
 on them.
 
-## Where Yardmaster is ahead
+## Where Railwarden is ahead
 
-| Capability | Yardmaster | AWX | Semaphore |
+| Capability | Railwarden | AWX | Semaphore |
 |------------|------------|-----|-----------|
 | Deployment | One binary, SQLite by default and PostgreSQL optional. | Kubernetes plus PostgreSQL, Redis, and Receptor. | One binary. |
 | Run view | A structured host-by-task matrix with per-task drill-down, painted live over Server-Sent Events. | A text log stream. | A text log stream. |
@@ -35,26 +35,26 @@ on them.
 
 | Capability | Notes |
 |------------|-------|
-| Multiple runtimes | Yardmaster runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go, each with a dry run. AWX is Ansible-only. Semaphore runs Ansible, Terraform, OpenTofu, and shell, but not Python, PowerShell, or Go. |
-| Container execution environments | Yardmaster pins an image on a template, a run, or a project, most specific wins, with private-registry pulls, opt-in behind a flag. AWX attaches execution environments to job templates. Semaphore favors native runtimes instead. |
-| Access control | Yardmaster has global roles plus per-object grants and teams. AWX has mature organization RBAC. Semaphore gates RBAC behind its Enterprise tier. |
-| Credentials | All three store secrets encrypted. Yardmaster decrypts only at execution into a temporary file and wipes it after. |
-| Scheduling | All three schedule runs. Yardmaster uses cron with highly available claiming so two servers do not double-fire. |
+| Multiple runtimes | Railwarden runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go, each with a dry run. AWX is Ansible-only. Semaphore runs Ansible, Terraform, OpenTofu, and shell, but not Python, PowerShell, or Go. |
+| Container execution environments | Railwarden pins an image on a template, a run, or a project, most specific wins, with private-registry pulls, opt-in behind a flag. AWX attaches execution environments to job templates. Semaphore favors native runtimes instead. |
+| Access control | Railwarden has global roles plus per-object grants and teams. AWX has mature organization RBAC. Semaphore gates RBAC behind its Enterprise tier. |
+| Credentials | All three store secrets encrypted. Railwarden decrypts only at execution into a temporary file and wipes it after. |
+| Scheduling | All three schedule runs. Railwarden uses cron with highly available claiming so two servers do not double-fire. |
 | Surveys and prompts | All three collect typed values at launch. |
 | Inbound webhooks | All three launch on a git push. |
-| Metrics | Yardmaster exposes Prometheus metrics for scraping. |
-| Directory sign-in | Yardmaster, AWX, and Semaphore all sign in with LDAP and OpenID Connect. |
+| Metrics | Railwarden exposes Prometheus metrics for scraping. |
+| Directory sign-in | Railwarden, AWX, and Semaphore all sign in with LDAP and OpenID Connect. |
 
-## Where Yardmaster is behind
+## Where Railwarden is behind
 
 | Capability | Status |
 |------------|--------|
 | Notification breadth | Webhook, email, and Slack today, against a wider set of integrations in AWX. |
-| Maturity | AWX and Semaphore have years of production use and large communities. Yardmaster is young. |
+| Maturity | AWX and Semaphore have years of production use and large communities. Railwarden is young. |
 
 ## The short version
 
-Yardmaster wins on the axes that make AWX painful and Semaphore ordinary: no heavy control plane to
+Railwarden wins on the axes that make AWX painful and Semaphore ordinary: no heavy control plane to
 deploy, runs you can read as structure instead of scrollback, job splitting that actually balances,
 a memory of how every host behaves over time, a visual workflow editor on a provable DAG engine,
 and a one-command path off either incumbent. It is younger, and its integration catalog is smaller.
