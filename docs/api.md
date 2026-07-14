@@ -26,7 +26,7 @@ Every endpoint the server exposes. The API is served under the `/v1` base path. 
 | GET    | `/v1/runs/{id}/events`     | Structured events as JSON.                              |
 | GET    | `/v1/runs/{id}/stream`     | Live events and log over Server-Sent Events.            |
 | POST   | `/v1/runs/{id}/explain`    | Advisory AI explanation of a run, when a provider is configured. |
-| POST   | `/v1/ai/draft`             | Advisory AI draft of a bash, python, or go step script from a description. Operator role. |
+| POST   | `/v1/ai/draft`             | Advisory AI draft of a bash, python, powershell, or go step script from a description. Operator role. |
 | POST   | `/v1/ai/ask`               | Advisory AI answer to a fleet question, from run, health, and drift metadata. Rate limited. |
 | POST   | `/v1/ai/propose-run`       | Turn a plain-language request into a run proposal, validated and held for approval. Operator role. |
 | POST   | `/v1/drift/reconcile`      | Build a reconcile proposal for a drifted host, held for approval. Operator role. |

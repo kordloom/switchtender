@@ -23,6 +23,7 @@ the app at `/ui/docs`.
 | [Configuration](configuration.md) | Every command, flag, and environment variable.|
 | [Desktop](desktop.md) | Run Yardmaster as a local desktop app.|
 | [Features](features.md) | The full capability list.|
+| [Advisory AI](ai.md) | The five AI features, the guarantees, providers, and what a model sees.|
 | [Extend in Go](sdk.md) | The SDK: add tools, AI providers, secret engines, and notifiers.|
 | [HTTP API](api.md) | Every endpoint the server exposes.|
 | [Migration](migration.md) | Moving off AWX or Semaphore in detail.|
