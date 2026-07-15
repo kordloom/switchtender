@@ -116,20 +116,20 @@ func TestValidateRepoURL(t *testing.T) {
 		In   string
 		Want error
 	}{
-		{In: "https://github.com/org/repo.git", Want: nil},                            // Test 0: HTTPS.
-		{In: "ssh://git@github.com/org/repo.git", Want: nil},                          // Test 1: SSH scheme.
-		{In: "git@github.com:org/repo.git", Want: nil},                                // Test 2: scp-like SSH shorthand.
-		{In: "/srv/git/repo.git", Want: nil},                                          // Test 3: Local path.
-		{In: "file:///srv/git/repo.git", Want: nil},                                   // Test 4: File scheme.
-		{In: "https://192.168.10.5/git/repo.git", Want: nil},                          // Test 5: Private host is a valid self-hosted git.
-		{In: "", Want: project.ErrBadRepoURL},                                         // Test 6: Empty.
-		{In: "http://github.com/org/repo.git", Want: project.ErrBadRepoURL},           // Test 7: Cleartext http refused.
-		{In: "git://github.com/org/repo.git", Want: project.ErrBadRepoURL},            // Test 8: git protocol refused.
-		{In: "https://169.254.169.254/latest/meta-data", Want: project.ErrBadRepoURL}, // Test 9: Cloud metadata IP.
-		{In: "https://metadata.google.internal/x", Want: project.ErrBadRepoURL},       // Test 10: Metadata hostname.
-		{In: "https://localhost/x", Want: project.ErrBadRepoURL},                      // Test 11: Loopback name.
-		{In: "https://127.0.0.1/x", Want: project.ErrBadRepoURL},                      // Test 12: Loopback address.
-		{In: "git@169.254.169.254:x", Want: project.ErrBadRepoURL},                    // Test 13: scp-like to metadata.
+		{In: "https://github.com/org/repo.git", Want: nil},                                // Test 0: HTTPS.
+		{In: "ssh://git@github.com/org/repo.git", Want: nil},                              // Test 1: SSH scheme.
+		{In: "git@github.com:org/repo.git", Want: nil},                                    // Test 2: scp-like SSH shorthand.
+		{In: "/srv/git/repo.git", Want: nil},                                              // Test 3: Local path.
+		{In: "file:///srv/git/repo.git", Want: nil},                                       // Test 4: File scheme.
+		{In: "https://192.168.10.5/git/repo.git", Want: nil},                              // Test 5: Private host is a valid self-hosted git.
+		{In: "", Want: project.ErrBadRepoURL},                                             // Test 6: Empty.
+		{In: "http://github.com/org/repo.git", Want: project.ErrBadRepoURL},               // Test 7: Cleartext http refused.
+		{In: "git://github.com/org/repo.git", Want: project.ErrBadRepoURL},                // Test 8: git protocol refused.
+		{In: "https://169.254.169.254/latest/meta-data", Want: project.ErrBadRepoURL},     // Test 9: Cloud metadata IP.
+		{In: "https://metadata.google.internal/x", Want: project.ErrBadRepoURL},           // Test 10: Metadata hostname.
+		{In: "https://localhost/x", Want: project.ErrBadRepoURL},                          // Test 11: Loopback name.
+		{In: "https://127.0.0.1/x", Want: project.ErrBadRepoURL},                          // Test 12: Loopback address.
+		{In: "git@169.254.169.254:x", Want: project.ErrBadRepoURL},                        // Test 13: scp-like to metadata.
 		{In: "https://oauth2:tok3n@github.com/org/repo.git", Want: project.ErrBadRepoURL}, // Test 14: Password in url.
 		{In: "https://ghp_token@github.com/org/repo.git", Want: project.ErrBadRepoURL},    // Test 15: Token as https username.
 		{In: "ssh://git:pass@github.com/org/repo.git", Want: project.ErrBadRepoURL},       // Test 16: Password on ssh.

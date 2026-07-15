@@ -192,7 +192,7 @@ func TestSAMLAttributeHandling(t *testing.T) {
 				Name: "urn:oid:2.5.4.42", FriendlyName: "displayName",
 				Values: []saml.AttributeValue{{Value: "Carol"}},
 			}, {
-				Name: "groups",
+				Name:   "groups",
 				Values: []saml.AttributeValue{{Value: "platform-Admins"}, {Value: "dev"}},
 			}},
 		}},

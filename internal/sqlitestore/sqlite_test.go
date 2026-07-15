@@ -51,7 +51,6 @@ func TestStoreContract(t *testing.T) {
 	})
 }
 
-
 func TestScheduleStoreContract(t *testing.T) {
 	t.Parallel()
 	scheduletest.Contract(t, func() schedule.Store {
