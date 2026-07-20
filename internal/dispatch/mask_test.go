@@ -9,10 +9,10 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
-	"github.com/dcadolph/railwarden/internal/credential"
-	"github.com/dcadolph/railwarden/internal/event"
-	"github.com/dcadolph/railwarden/internal/roundhouse"
-	"github.com/dcadolph/railwarden/internal/run"
+	"github.com/dcadolph/switchtender/internal/credential"
+	"github.com/dcadolph/switchtender/internal/event"
+	"github.com/dcadolph/switchtender/internal/roundhouse"
+	"github.com/dcadolph/switchtender/internal/run"
 )
 
 // TestMaskerRedact covers redacting secret values from a chunk: passthrough with no secrets, simple

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dcadolph/railwarden/internal/inventory"
+	"github.com/dcadolph/switchtender/internal/inventory"
 )
 
 // Contract runs the inventory.Store contract against a fresh store from newStore.

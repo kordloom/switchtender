@@ -1,4 +1,4 @@
-// Package run holds the Railwarden run domain model and its persistence interface.
+// Package run holds the SwitchTender run domain model and its persistence interface.
 // A run records one execution of an engine (playbook) against a manifest (inventory).
 package run
 

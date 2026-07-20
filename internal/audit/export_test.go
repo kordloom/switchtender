@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dcadolph/railwarden/internal/audit"
+	"github.com/dcadolph/switchtender/internal/audit"
 )
 
 // signAt is a fixed time so signed exports are deterministic under test.

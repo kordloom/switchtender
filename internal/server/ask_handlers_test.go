@@ -11,8 +11,8 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/railwarden/internal/ai"
-	"github.com/dcadolph/railwarden/internal/run"
+	"github.com/dcadolph/switchtender/internal/ai"
+	"github.com/dcadolph/switchtender/internal/run"
 )
 
 // TestAskFleet covers the fleet question endpoint: disabled 404, empty question 400, the happy

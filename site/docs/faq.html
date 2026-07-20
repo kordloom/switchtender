@@ -3,13 +3,13 @@
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
-	<title>FAQ · Railwarden docs</title>
-	<meta name="description" content="Short answers to the questions teams ask when evaluating or adopting Railwarden. New here? Start with the quickstart, or switching from AWX if you are migrating.">
-	<link rel="canonical" href="https://railwarden.dev/docs/faq">
-	<meta property="og:title" content="FAQ · Railwarden docs">
-	<meta property="og:description" content="Short answers to the questions teams ask when evaluating or adopting Railwarden. New here? Start with the quickstart, or switching from AWX if you are migrating.">
+	<title>FAQ · SwitchTender docs</title>
+	<meta name="description" content="Short answers to the questions teams ask when evaluating or adopting SwitchTender. New here? Start with the quickstart, or switching from AWX if you are migrating.">
+	<link rel="canonical" href="https://switchtender.com/docs/faq">
+	<meta property="og:title" content="FAQ · SwitchTender docs">
+	<meta property="og:description" content="Short answers to the questions teams ask when evaluating or adopting SwitchTender. New here? Start with the quickstart, or switching from AWX if you are migrating.">
 	<meta property="og:type" content="article">
-	<meta property="og:url" content="https://railwarden.dev/docs/faq">
+	<meta property="og:url" content="https://switchtender.com/docs/faq">
 	<link rel="icon" href="/favicon.ico" sizes="any">
 	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
 	<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
@@ -20,32 +20,32 @@
 </head>
 <body>
 	<header class="dnav">
-		<a class="brand" href="/"><img src="/assets/logo-train-tracks-dark.png" alt="Railwarden" class="brand-train"><span class="brand-word">Railwarden</span></a>
+		<a class="brand" href="/"><img src="/assets/logo-train-tracks-dark.png" alt="SwitchTender" class="brand-train"><span class="brand-word">SwitchTender</span></a>
 		<span class="dnav-tag">Docs</span>
 		<nav class="dnav-links">
 			<a href="/">Home</a>
 			<a href="/#compare">Compare</a>
-			<a href="https://github.com/dcadolph/railwarden">GitHub</a>
+			<a href="https://github.com/dcadolph/switchtender">GitHub</a>
 		</nav>
 	</header>
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq" class="active">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/sdk">Extend Railwarden in Go</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/ai">Advisory AI</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">Railwarden compared to AWX and Semaphore</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq" class="active">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to AWX and Semaphore</a><a href="/docs/ai">Advisory AI</a><a href="/docs/sdk">Extend SwitchTender in Go</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
 			<h1 id="faq">FAQ</h1>
-<p>Short answers to the questions teams ask when evaluating or adopting Railwarden. New here? Start with
+<p>Short answers to the questions teams ask when evaluating or adopting SwitchTender. New here? Start with
 the <a href="/docs/quickstart">quickstart</a>, or <a href="/docs/switching-from-awx">switching from AWX</a> if you are migrating.</p>
-<h2 id="what-can-railwarden-run">What can Railwarden run?</h2>
+<h2 id="what-can-switchtender-run">What can SwitchTender run?</h2>
 <p>Ansible playbooks, Bash scripts, Terraform, OpenTofu, Python, PowerShell, and Go, plus any tool
 you add through the <a href="/docs/sdk">Go SDK</a>. A run, a saved template, or a single step of a pipeline
 picks its tool. A pipeline can mix them: Terraform to build infrastructure, Ansible to configure
 it, Bash to smoke-test it, as one dependency graph. Bash shells out to anything on the host, so
 kubectl, the cloud CLIs, and your own scripts all work.</p>
 <h2 id="do-i-need-kubernetes">Do I need Kubernetes?</h2>
-<p>No. Railwarden is one binary that is the API, the executor, the scheduler, and the UI. State is one
+<p>No. SwitchTender is one binary that is the API, the executor, the scheduler, and the UI. State is one
 database: a SQLite file to start, or PostgreSQL when you want more than one instance. No Redis, no
 operator, no separate task engine.</p>
 <h2 id="what-is-a-dry-run">What is a dry run?</h2>
@@ -54,15 +54,15 @@ Bash and Python are syntax checked without executing. A dry run set on a sharded
 every shard, so a preview is always a preview.</p>
 <h2 id="how-do-i-migrate-from-awx">How do I migrate from AWX?</h2>
 <p>From the command line:</p>
-<pre><code>railwarden import awx export.json           # preview the plan, changes nothing
-railwarden import awx export.json --apply    # import
+<pre><code>switchtender import awx export.json           # preview the plan, changes nothing
+switchtender import awx export.json --apply    # import
 </code></pre>
 <p>It maps projects, inventories, job templates with their surveys and schedules and job slicing, and
 credentials. See <a href="/docs/switching-from-awx">switching from AWX</a> for the full mapping.</p>
 <p>Two things to know. AWX omits secret values on export for security, so credentials import without
 their secrets and you set those once after importing. And AWX dynamic inventory sources are not
 mapped yet. Static inventories import fully. A Semaphore importer exists too, with
-<code>railwarden import semaphore export.json</code>.</p>
+<code>switchtender import semaphore export.json</code>.</p>
 <h2 id="how-do-i-rerun-the-same-job-on-a-set-of-hosts-without-re-entering-everything">How do I rerun the same job on a set of hosts without re-entering everything?</h2>
 <p>Save it as a template. A template bundles the tool, the command or playbook, the inventory, the
 credentials, and the variables, so a rerun is one click or one API call. Stored inventories let you
@@ -72,9 +72,9 @@ name a host set once and reuse it across templates.</p>
 decrypt only at execution, into a temporary file wiped when the run finishes, and never appear in API
 responses. Kinds include SSH keys, vault passwords, become passwords, container registry logins, and
 environment bundles, which is where API tokens and other KEY=VALUE secrets go. Set
-<code>RAILWARDEN_ENCRYPTION_KEY</code> and <code>RAILWARDEN_ENCRYPTION_SALT</code> to enable them.</p>
+<code>SWITCHTENDER_ENCRYPTION_KEY</code> and <code>SWITCHTENDER_ENCRYPTION_SALT</code> to enable them.</p>
 <p>A credential can also be a command source, so the value lives in an external store instead of in
-Railwarden. Railwarden seals a command, for example <code>vault kv get -field=password secret/prod</code> or an
+SwitchTender. SwitchTender seals a command, for example <code>vault kv get -field=password secret/prod</code> or an
 <code>aws secretsmanager get-secret-value</code> call, and runs it at execution time. The command's output is
 the secret and is never stored. This works with any secret manager reachable from a command: Vault,
 AWS, GCP, 1Password, or your own script.</p>
@@ -86,7 +86,7 @@ rotate at any time.</p>
 <h2 id="does-it-support-single-sign-on">Does it support single sign-on?</h2>
 <p>Yes: OpenID Connect, SAML, and LDAP directory sign-in, with just-in-time account provisioning
 and a configurable default role.</p>
-<h2 id="does-railwarden-send-my-data-to-an-ai-model">Does Railwarden send my data to an AI model?</h2>
+<h2 id="does-switchtender-send-my-data-to-an-ai-model">Does SwitchTender send my data to an AI model?</h2>
 <p>Only if you turn AI on, and only to the provider you chose. With local Ollama nothing leaves
 your machines. With a cloud provider, prompts carry automation content such as commands,
 playbook names, masked failed-run logs, and drift summaries. Credential values are masked before
@@ -97,11 +97,11 @@ any prompt is built, and fleet questions send metadata only. AI is off by defaul
 drafts that could become a run is born held at the same approval gate an operator faces, an
 admin reviews the generated command before it moves, and the request and decision both land in
 the audit trail.</p>
-<h2 id="can-i-extend-railwarden">Can I extend Railwarden?</h2>
+<h2 id="can-i-extend-switchtender">Can I extend SwitchTender?</h2>
 <p>Yes, in Go, two ways: compile an extension into the binary, or drop a plugin binary into
 <code>--plugins-dir</code> on a stock release. Both register execution tools, AI providers, secret engines,
 and notification channels. See <a href="/docs/sdk">Extend in Go</a> and the official
-<a href="https://github.com/dcadolph/railwarden-plugins">railwarden-plugins</a> repo for a working example.</p>
+<a href="https://github.com/dcadolph/switchtender-plugins">switchtender-plugins</a> repo for a working example.</p>
 <h2 id="what-about-scale">What about scale?</h2>
 <p>Runs stream and page by a sequence cursor, the runs list and event history paginate, and a large host
 matrix renders one cell at a time. Split a run across workers by measured host duration, and run more

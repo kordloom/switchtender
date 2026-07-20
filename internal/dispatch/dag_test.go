@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dcadolph/railwarden/internal/roundhouse"
-	"github.com/dcadolph/railwarden/internal/run"
+	"github.com/dcadolph/switchtender/internal/roundhouse"
+	"github.com/dcadolph/switchtender/internal/run"
 )
 
 func TestValidateDAG(t *testing.T) {

@@ -8,10 +8,10 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
-	"github.com/dcadolph/railwarden/internal/credential"
-	"github.com/dcadolph/railwarden/internal/importer"
-	"github.com/dcadolph/railwarden/internal/invsource"
-	"github.com/dcadolph/railwarden/internal/template"
+	"github.com/dcadolph/switchtender/internal/credential"
+	"github.com/dcadolph/switchtender/internal/importer"
+	"github.com/dcadolph/switchtender/internal/invsource"
+	"github.com/dcadolph/switchtender/internal/template"
 )
 
 // fixedTime is a deterministic timestamp for import mapping tests.

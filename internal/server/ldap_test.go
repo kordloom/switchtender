@@ -3,7 +3,7 @@ package server
 import (
 	"testing"
 
-	"github.com/dcadolph/railwarden/internal/user"
+	"github.com/dcadolph/switchtender/internal/user"
 )
 
 func TestRoleForGroups(t *testing.T) {

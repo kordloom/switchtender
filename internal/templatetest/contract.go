@@ -11,7 +11,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 
-	"github.com/dcadolph/railwarden/internal/template"
+	"github.com/dcadolph/switchtender/internal/template"
 )
 
 // Contract runs the template.Store contract against a fresh store from newStore.

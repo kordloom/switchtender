@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/dcadolph/railwarden/internal/auth"
+	"github.com/dcadolph/switchtender/internal/auth"
 )
 
 // tokenColumns is the shared select list for token reads.

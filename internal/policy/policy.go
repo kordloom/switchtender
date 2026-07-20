@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dcadolph/railwarden/internal/run"
+	"github.com/dcadolph/switchtender/internal/run"
 )
 
 // Policy is a rule that requires approval for the runs it matches. Each criterion is optional; an

@@ -12,11 +12,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dcadolph/railwarden/internal/ai"
-	"github.com/dcadolph/railwarden/internal/roundhouse"
-	"github.com/dcadolph/railwarden/internal/run"
-	"github.com/dcadolph/railwarden/internal/secretsource"
-	"github.com/dcadolph/railwarden/sdk"
+	"github.com/dcadolph/switchtender/internal/ai"
+	"github.com/dcadolph/switchtender/internal/roundhouse"
+	"github.com/dcadolph/switchtender/internal/run"
+	"github.com/dcadolph/switchtender/internal/secretsource"
+	"github.com/dcadolph/switchtender/sdk"
 )
 
 // TestRegisterAIProvider registers a model backend through the SDK and confirms the core builds a

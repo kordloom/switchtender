@@ -1,13 +1,13 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="../assets/logo-letters-dark.png">
-    <img src="../assets/logo-letters.png" alt="Railwarden" width="140">
+    <source media="(prefers-color-scheme: dark)" srcset="../assets/logo-train-dark.png">
+    <img src="../assets/logo-train.png" alt="SwitchTender" width="140">
   </picture>
 </p>
 
-# Extend Railwarden in Go
+# Extend SwitchTender in Go
 
-Railwarden's seams are public. Import one package, `github.com/dcadolph/railwarden/sdk`, register
+SwitchTender's seams are public. Import one package, `github.com/dcadolph/switchtender/sdk`, register
 what you built, and run it either way: compiled into the server binary, or dropped next to a stock
 release binary as a plugin the server loads at startup. A registered tool submits, validates,
 executes, and audits like a built-in. The SDK covers four kinds of extension:
@@ -23,7 +23,7 @@ executes, and audits like a built-in. The SDK covers four kinds of extension:
   delivery, so survey answers and template vars that can carry secrets never leave the server.
 - **Secret engines.** `RegisterSecretSource` adds a static engine such as AWS Secrets Manager or
   1Password. `RegisterDynamicSecretSource` adds a dynamic engine that mints a short-lived
-  credential on each read and returns a lease Railwarden revokes when the run ends.
+  credential on each read and returns a lease SwitchTender revokes when the run ends.
 
 ## The rules
 
@@ -38,19 +38,19 @@ binary that loads extensions at startup. Same seams, same registration, same beh
 
 ## A complete extension
 
-Two files make a Railwarden with a custom `hello` tool.
+Two files make a SwitchTender with a custom `hello` tool.
 
 `go.mod`:
 
-    module example.com/railwarden-hello
+    module example.com/switchtender-hello
 
     go 1.26.4
 
-    require github.com/dcadolph/railwarden v1.7.0
+    require github.com/dcadolph/switchtender v1.7.0
 
 `main.go`:
 
-    // Package main builds a Railwarden server with a custom tool compiled in through the SDK.
+    // Package main builds a SwitchTender server with a custom tool compiled in through the SDK.
     package main
 
     import (
@@ -58,8 +58,8 @@ Two files make a Railwarden with a custom `hello` tool.
         "fmt"
         "io"
 
-        "github.com/dcadolph/railwarden/cmd"
-        "github.com/dcadolph/railwarden/sdk"
+        "github.com/dcadolph/switchtender/cmd"
+        "github.com/dcadolph/switchtender/sdk"
     )
 
     // init registers the tool before the server starts.
@@ -71,15 +71,15 @@ Two files make a Railwarden with a custom `hello` tool.
             }))
     }
 
-    // main runs the stock Railwarden CLI with the extension compiled in.
+    // main runs the stock SwitchTender CLI with the extension compiled in.
     func main() {
         cmd.Execute(nil)
     }
 
 Build it, run it, and submit a run that names the new tool:
 
-    go mod tidy && go build -o railwarden-hello .
-    ./railwarden-hello serve --addr :8080 --db yard.db
+    go mod tidy && go build -o switchtender-hello .
+    ./switchtender-hello serve --addr :8080 --db switchtender.db
 
     curl -s -X POST localhost:8080/v1/runs \
       -H 'Content-Type: application/json' \
@@ -97,10 +97,10 @@ UI. Embed your own file tree there to serve them.
 
 ## Ship it as a plugin binary
 
-The same extension runs as its own process, loaded by a stock Railwarden release binary. Swap the
+The same extension runs as its own process, loaded by a stock SwitchTender release binary. Swap the
 main for `plugin.Serve` and build:
 
-    // Command helloplugin serves the hello tool as a Railwarden plugin.
+    // Command helloplugin serves the hello tool as a SwitchTender plugin.
     package main
 
     import (
@@ -108,8 +108,8 @@ main for `plugin.Serve` and build:
         "fmt"
         "io"
 
-        "github.com/dcadolph/railwarden/sdk"
-        "github.com/dcadolph/railwarden/sdk/plugin"
+        "github.com/dcadolph/switchtender/sdk"
+        "github.com/dcadolph/switchtender/sdk/plugin"
     )
 
     // main serves the extension as a plugin process.
@@ -128,7 +128,7 @@ main for `plugin.Serve` and build:
 Drop the binary in a directory and point the server at it:
 
     go build -o plugins/hello-plugin .
-    railwarden serve --plugins-dir ./plugins
+    switchtender serve --plugins-dir ./plugins
 
 At startup the server launches each executable in the directory, asks what it provides, and
 registers every seam it declares. One plugin serves any mix of tools, notifiers, AI providers, and
@@ -143,8 +143,8 @@ same at run time. Pick per extension: compile in for one static artifact, plug i
 release binary you did not build.
 
 For a working example, the official
-[railwarden-plugins](https://github.com/dcadolph/railwarden-plugins) repo ships
-`railwarden-notify`, one plugin binary that delivers runs to Discord, ntfy, and Microsoft Teams.
+[switchtender-plugins](https://github.com/dcadolph/switchtender-plugins) repo ships
+`switchtender-notify`, one plugin binary that delivers runs to Discord, ntfy, and Microsoft Teams.
 It doubles as the template for writing your own.
 
 ## The seams in detail

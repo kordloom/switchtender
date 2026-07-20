@@ -43,5 +43,5 @@ Thumbs.db
 .wrangler/
 
 # Built binaries
-/railwarden
+/switchtender
 /sitegen

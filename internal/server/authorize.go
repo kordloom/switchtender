@@ -7,10 +7,10 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/railwarden/internal/grant"
-	"github.com/dcadolph/railwarden/internal/run"
-	"github.com/dcadolph/railwarden/internal/team"
-	"github.com/dcadolph/railwarden/internal/user"
+	"github.com/dcadolph/switchtender/internal/grant"
+	"github.com/dcadolph/switchtender/internal/run"
+	"github.com/dcadolph/switchtender/internal/team"
+	"github.com/dcadolph/switchtender/internal/user"
 )
 
 // errForbiddenGrant is returned by authorize when the actor lacks a grant the object requires.

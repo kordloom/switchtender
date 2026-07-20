@@ -1,4 +1,4 @@
-// Package jsonutil centralizes JSON marshaling so all Railwarden output uses consistent formatting.
+// Package jsonutil centralizes JSON marshaling so all SwitchTender output uses consistent formatting.
 package jsonutil
 
 import (

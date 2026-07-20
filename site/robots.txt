@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://railwarden.dev/sitemap.xml
+Sitemap: https://switchtender.com/sitemap.xml

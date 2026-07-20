@@ -1,39 +1,39 @@
-# A full Railwarden deployment: the server, a PostgreSQL database, and one worker sharing it.
-# Set RAILWARDEN_ENCRYPTION_KEY and RAILWARDEN_ENCRYPTION_SALT in the environment before running,
+# A full SwitchTender deployment: the server, a PostgreSQL database, and one worker sharing it.
+# Set SWITCHTENDER_ENCRYPTION_KEY and SWITCHTENDER_ENCRYPTION_SALT in the environment before running,
 # then: docker compose up --build.
 services:
   postgres:
     image: postgres:16
     environment:
-      POSTGRES_USER: yard
-      POSTGRES_PASSWORD: yard
-      POSTGRES_DB: yard
+      POSTGRES_USER: switchtender
+      POSTGRES_PASSWORD: switchtender
+      POSTGRES_DB: switchtender
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD", "pg_isready", "-U", "yard"]
+      test: ["CMD", "pg_isready", "-U", "switchtender"]
       interval: 5s
       timeout: 5s
       retries: 10
 
   server:
     build: .
-    command: ["serve", "--addr", ":8080", "--db", "postgres://yard:yard@postgres:5432/yard?sslmode=disable"]
+    command: ["serve", "--addr", ":8080", "--db", "postgres://switchtender:switchtender@postgres:5432/switchtender?sslmode=disable"]
     environment:
-      RAILWARDEN_ENCRYPTION_KEY: ${RAILWARDEN_ENCRYPTION_KEY:?set RAILWARDEN_ENCRYPTION_KEY}
-      RAILWARDEN_ENCRYPTION_SALT: ${RAILWARDEN_ENCRYPTION_SALT:?set RAILWARDEN_ENCRYPTION_SALT}
+      SWITCHTENDER_ENCRYPTION_KEY: ${SWITCHTENDER_ENCRYPTION_KEY:?set SWITCHTENDER_ENCRYPTION_KEY}
+      SWITCHTENDER_ENCRYPTION_SALT: ${SWITCHTENDER_ENCRYPTION_SALT:?set SWITCHTENDER_ENCRYPTION_SALT}
     ports:
-      - "${RAILWARDEN_PORT:-8080}:8080"
+      - "${SWITCHTENDER_PORT:-8080}:8080"
     depends_on:
       postgres:
         condition: service_healthy
 
   worker:
     build: .
-    command: ["worker", "--db", "postgres://yard:yard@postgres:5432/yard?sslmode=disable", "--name", "worker-1"]
+    command: ["worker", "--db", "postgres://switchtender:switchtender@postgres:5432/switchtender?sslmode=disable", "--name", "worker-1"]
     environment:
-      RAILWARDEN_ENCRYPTION_KEY: ${RAILWARDEN_ENCRYPTION_KEY:?set RAILWARDEN_ENCRYPTION_KEY}
-      RAILWARDEN_ENCRYPTION_SALT: ${RAILWARDEN_ENCRYPTION_SALT:?set RAILWARDEN_ENCRYPTION_SALT}
+      SWITCHTENDER_ENCRYPTION_KEY: ${SWITCHTENDER_ENCRYPTION_KEY:?set SWITCHTENDER_ENCRYPTION_KEY}
+      SWITCHTENDER_ENCRYPTION_SALT: ${SWITCHTENDER_ENCRYPTION_SALT:?set SWITCHTENDER_ENCRYPTION_SALT}
     depends_on:
       postgres:
         condition: service_healthy
@@ -44,7 +44,7 @@ services:
     profiles: ["demo"]
     command: ["demo", "--addr", ":8080"]
     ports:
-      - "${RAILWARDEN_PORT:-8080}:8080"
+      - "${SWITCHTENDER_PORT:-8080}:8080"
 
 volumes:
   pgdata:

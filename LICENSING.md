@@ -1,12 +1,12 @@
 # Licensing
 
-Railwarden is source-available under the [Business Source License 1.1](LICENSE). This page explains
+SwitchTender is source-available under the [Business Source License 1.1](LICENSE). This page explains
 what that means in practice: what you can do for free, the single thing you cannot, and how to
 arrange a commercial license.
 
 ## What self-hosting grants you
 
-Run the binary anywhere, in production, at any scale, for free. Every feature Railwarden ships is in
+Run the binary anywhere, in production, at any scale, for free. Every feature SwitchTender ships is in
 that binary. There is no separate paid build and nothing is unlocked with a license key:
 
 - All execution engines: Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go.
@@ -23,25 +23,25 @@ at no cost.
 
 ## The one reserved right
 
-You may not offer Railwarden to third parties as a hosted or managed service that provides its
-primary functionality. In plain terms: you cannot take Railwarden, put it behind a login, and sell
-it to other people as "Railwarden in the cloud." That right is reserved for the maintainer.
+You may not offer SwitchTender to third parties as a hosted or managed service that provides its
+primary functionality. In plain terms: you cannot take SwitchTender, put it behind a login, and sell
+it to other people as "SwitchTender in the cloud." That right is reserved for the maintainer.
 
 This restriction reaches service providers and resellers. It does not reach you if you run
-Railwarden for your own organization, build it into an internal platform your own teams use, or
+SwitchTender for your own organization, build it into an internal platform your own teams use, or
 modify it for internal purposes.
 
 ## When you need a commercial license
 
 Reach out for a commercial license if you want to:
 
-- Offer Railwarden, or a service whose primary functionality is Railwarden's, to third parties.
-- Embed Railwarden in a product you distribute or sell.
+- Offer SwitchTender, or a service whose primary functionality is SwitchTender's, to third parties.
+- Embed SwitchTender in a product you distribute or sell.
 - Lift the hosted-service restriction for any other reason.
 
 ## Support and hosted plans
 
-Commercial support with response-time guarantees, and a hosted Railwarden option for teams that
+Commercial support with response-time guarantees, and a hosted SwitchTender option for teams that
 would rather not self-host, are offered separately from the license. These are paid services, not a
 requirement to use the software. If either would help your team, get in touch.
 
@@ -54,6 +54,6 @@ it.
 
 ## Getting in touch
 
-Email licensing@railwarden.dev to start a conversation about a commercial license, support, or
-hosting. You can also open an issue at https://github.com/dcadolph/railwarden, though email keeps
+Email licensing@switchtender.com to start a conversation about a commercial license, support, or
+hosting. You can also open an issue at https://github.com/dcadolph/switchtender, though email keeps
 your inquiry private.

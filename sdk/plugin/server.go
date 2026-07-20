@@ -12,8 +12,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/dcadolph/railwarden/internal/extproto"
-	"github.com/dcadolph/railwarden/sdk"
+	"github.com/dcadolph/switchtender/internal/extproto"
+	"github.com/dcadolph/switchtender/sdk"
 )
 
 // server serves one Extension over the wire protocol inside the plugin process.

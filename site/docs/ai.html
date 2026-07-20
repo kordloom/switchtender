@@ -3,13 +3,13 @@
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
-	<title>Advisory AI · Railwarden docs</title>
-	<meta name="description" content="Railwarden's advisory AI: five features, the governance guarantees, local and cloud providers, and exactly what a model sees. Off by default, never in the execution path.">
-	<link rel="canonical" href="https://railwarden.dev/docs/ai">
-	<meta property="og:title" content="Advisory AI · Railwarden docs">
-	<meta property="og:description" content="Railwarden's advisory AI: five features, the governance guarantees, local and cloud providers, and exactly what a model sees. Off by default, never in the execution path.">
+	<title>Advisory AI · SwitchTender docs</title>
+	<meta name="description" content="SwitchTender runs a complete control plane with no model anywhere near it.">
+	<link rel="canonical" href="https://switchtender.com/docs/ai">
+	<meta property="og:title" content="Advisory AI · SwitchTender docs">
+	<meta property="og:description" content="SwitchTender runs a complete control plane with no model anywhere near it.">
 	<meta property="og:type" content="article">
-	<meta property="og:url" content="https://railwarden.dev/docs/ai">
+	<meta property="og:url" content="https://switchtender.com/docs/ai">
 	<link rel="icon" href="/favicon.ico" sizes="any">
 	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
 	<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
@@ -20,23 +20,23 @@
 </head>
 <body>
 	<header class="dnav">
-		<a class="brand" href="/"><img src="/assets/logo-train-tracks-dark.png" alt="Railwarden" class="brand-train"><span class="brand-word">Railwarden</span></a>
+		<a class="brand" href="/"><img src="/assets/logo-train-tracks-dark.png" alt="SwitchTender" class="brand-train"><span class="brand-word">SwitchTender</span></a>
 		<span class="dnav-tag">Docs</span>
 		<nav class="dnav-links">
 			<a href="/">Home</a>
 			<a href="/#compare">Compare</a>
-			<a href="https://github.com/dcadolph/railwarden">GitHub</a>
+			<a href="https://github.com/dcadolph/switchtender">GitHub</a>
 		</nav>
 	</header>
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/sdk">Extend Railwarden in Go</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/ai" class="active">Advisory AI</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">Railwarden compared to AWX and Semaphore</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to AWX and Semaphore</a><a href="/docs/ai" class="active">Advisory AI</a><a href="/docs/sdk">Extend SwitchTender in Go</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
 			<h1 id="advisory-ai">Advisory AI</h1>
-<p>Railwarden runs a complete control plane with no model anywhere near it. AI is an optional layer
+<p>SwitchTender runs a complete control plane with no model anywhere near it. AI is an optional layer
 you switch on for an edge, never a dependency: it is off until you set <code>--ai-provider</code>, and
 nothing in the product waits on it.</p>
 <h2 id="the-guarantees">The guarantees</h2>
@@ -106,18 +106,18 @@ request a proposal was built from.</li>
 <tr>
 <td><code>anthropic</code></td>
 <td>Anthropic's API</td>
-<td><code>--ai-provider anthropic --ai-model claude-sonnet-5</code> plus <code>RAILWARDEN_AI_KEY</code>.</td>
+<td><code>--ai-provider anthropic --ai-model claude-sonnet-5</code> plus <code>SWITCHTENDER_AI_KEY</code>.</td>
 </tr>
 <tr>
 <td><code>openai</code></td>
 <td>Any OpenAI-compatible endpoint</td>
-<td><code>--ai-provider openai --ai-model &lt;model&gt; --ai-url &lt;server&gt;</code> plus <code>RAILWARDEN_AI_KEY</code>. Covers OpenAI itself, vLLM, LM Studio, and OpenRouter.</td>
+<td><code>--ai-provider openai --ai-model &lt;model&gt; --ai-url &lt;server&gt;</code> plus <code>SWITCHTENDER_AI_KEY</code>. Covers OpenAI itself, vLLM, LM Studio, and OpenRouter.</td>
 </tr>
 </tbody>
 </table>
 <p>A new backend plugs in without touching the core: register a provider through the
 <a href="/docs/sdk">Go SDK</a>, compiled in or as a drop-in plugin binary.</p>
-<p>When the Anthropic model is a Fable or Mythos model, Railwarden opts into server-side fallbacks,
+<p>When the Anthropic model is a Fable or Mythos model, SwitchTender opts into server-side fallbacks,
 so a request declined by a safety classifier retries on <code>claude-opus-4-8</code> in the same call and
 the feature keeps working. A Fable model also requires 30-day data retention on the account.</p>
 <h2 id="what-a-model-sees">What a model sees</h2>

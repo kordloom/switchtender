@@ -10,8 +10,8 @@ import (
 	"io"
 	"os"
 
-	"github.com/dcadolph/railwarden/sdk"
-	"github.com/dcadolph/railwarden/sdk/plugin"
+	"github.com/dcadolph/switchtender/sdk"
+	"github.com/dcadolph/switchtender/sdk/plugin"
 )
 
 // main serves the test extension.

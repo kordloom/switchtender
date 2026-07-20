@@ -1,4 +1,4 @@
-module github.com/dcadolph/railwarden
+module github.com/dcadolph/switchtender
 
 go 1.26.4
 

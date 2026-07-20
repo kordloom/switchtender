@@ -2,25 +2,25 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "railwarden.fullname" . }}-worker
+  name: {{ include "switchtender.fullname" . }}-worker
   labels:
-    {{- include "railwarden.labels" . | nindent 4 }}
+    {{- include "switchtender.labels" . | nindent 4 }}
     app.kubernetes.io/component: worker
 spec:
   replicas: {{ .Values.worker.replicas }}
   selector:
     matchLabels:
-      {{- include "railwarden.selectorLabels" . | nindent 6 }}
+      {{- include "switchtender.selectorLabels" . | nindent 6 }}
       app.kubernetes.io/component: worker
   template:
     metadata:
       labels:
-        {{- include "railwarden.selectorLabels" . | nindent 8 }}
+        {{- include "switchtender.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: worker
     spec:
       containers:
         - name: worker
-          image: {{ include "railwarden.image" . | quote }}
+          image: {{ include "switchtender.image" . | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args:
             - worker
@@ -36,16 +36,16 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
-            - name: RAILWARDEN_ENCRYPTION_KEY
+            - name: SWITCHTENDER_ENCRYPTION_KEY
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "railwarden.secretName" . }}
-                  key: RAILWARDEN_ENCRYPTION_KEY
-            - name: RAILWARDEN_ENCRYPTION_SALT
+                  name: {{ include "switchtender.secretName" . }}
+                  key: SWITCHTENDER_ENCRYPTION_KEY
+            - name: SWITCHTENDER_ENCRYPTION_SALT
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "railwarden.secretName" . }}
-                  key: RAILWARDEN_ENCRYPTION_SALT
+                  name: {{ include "switchtender.secretName" . }}
+                  key: SWITCHTENDER_ENCRYPTION_SALT
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
 {{- end }}

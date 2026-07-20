@@ -1,7 +1,7 @@
-// Package cmd holds the Railwarden CLI commands.
+// Package cmd holds the SwitchTender CLI commands.
 package cmd
 
-// Process exit codes returned by the Railwarden CLI.
+// Process exit codes returned by the SwitchTender CLI.
 const (
 	// CodeOK indicates a successful run.
 	CodeOK = 0

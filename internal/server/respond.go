@@ -5,7 +5,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/railwarden/internal/jsonutil"
+	"github.com/dcadolph/switchtender/internal/jsonutil"
 )
 
 // errorResponse is the JSON body returned for error responses.

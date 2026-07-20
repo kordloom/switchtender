@@ -1,6 +1,6 @@
 # Third-Party Notices
 
-Railwarden is distributed under the Business Source License 1.1. It incorporates the third-party Go
+SwitchTender is distributed under the Business Source License 1.1. It incorporates the third-party Go
 modules listed below, each under its own open-source license. No dependency is licensed under the
 GPL, LGPL, or AGPL. Full license texts are available in each module's source repository.
 

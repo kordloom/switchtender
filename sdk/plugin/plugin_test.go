@@ -6,7 +6,7 @@ import (
 	"io"
 	"testing"
 
-	"github.com/dcadolph/railwarden/sdk"
+	"github.com/dcadolph/switchtender/sdk"
 )
 
 // TestExtensionValidate confirms an extension that cannot serve panics at plugin startup: nil,

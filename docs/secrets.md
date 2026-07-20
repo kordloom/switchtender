@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="../assets/logo-letters-dark.png">
-    <img src="../assets/logo-letters.png" alt="Railwarden" width="140">
+    <source media="(prefers-color-scheme: dark)" srcset="../assets/logo-train-dark.png">
+    <img src="../assets/logo-train.png" alt="SwitchTender" width="140">
   </picture>
 </p>
 
@@ -9,7 +9,7 @@
 
 Secrets live in credentials. Each is sealed at rest with AES-256-GCM, is never returned by the API,
 and reaches a run only while it executes, in a temporary file or environment that is wiped afterward.
-If a tool prints a secret, Railwarden redacts it from the run's log, live stream, and events, so the
+If a tool prints a secret, SwitchTender redacts it from the run's log, live stream, and events, so the
 output shows `***` instead of the value.
 
 ## Kinds
@@ -21,7 +21,7 @@ A credential's kind decides how its value reaches a run.
 | `ssh_key` | An SSH private key, to reach hosts and clone private git projects. |
 | `vault_password` | An Ansible Vault password. |
 | `env` | `KEY=VALUE` lines injected into the environment, how cloud SDK tokens reach a tool. |
-| `token` | A single API token or JWT, exposed to the run as `RAILWARDEN_TOKEN`. |
+| `token` | A single API token or JWT, exposed to the run as `SWITCHTENDER_TOKEN`. |
 | `become_password` | A privilege escalation password, kept off the command line. |
 | `registry` | A container registry login, to pull a pinned execution image. |
 
@@ -32,7 +32,7 @@ A credential's source decides where its value comes from at run time.
 | Source | Where the value comes from |
 |--------|----------------------------|
 | Stored | The sealed value you pasted. This is the default. |
-| Command | A command Railwarden runs at launch, whose standard output is the secret. Works with any CLI, so Vault, AWS, GCP, or 1Password all resolve with no extra integration. |
+| Command | A command SwitchTender runs at launch, whose standard output is the secret. Works with any CLI, so Vault, AWS, GCP, or 1Password all resolve with no extra integration. |
 | Vault | A Vault address, path, and field, read over Vault's HTTP API at launch. Handles KV v2 and KV v1. |
 | Vault dynamic | A Vault dynamic secrets path. A fresh, short-lived credential is minted for each run and revoked when the run ends. |
 | Google Secret Manager | A project, secret, and version, read at launch. On GCP it reads as the attached service account with no stored key. |
@@ -50,7 +50,7 @@ inventory reaches every run that targets it, so a fleet carries its own secret v
 
 ## Encryption
 
-Sealing needs a key. Set `RAILWARDEN_ENCRYPTION_KEY` and a stable `RAILWARDEN_ENCRYPTION_SALT` before
-storing an externally sourced credential or inventory. The sealed value never leaves Railwarden.
+Sealing needs a key. Set `SWITCHTENDER_ENCRYPTION_KEY` and a stable `SWITCHTENDER_ENCRYPTION_SALT` before
+storing an externally sourced credential or inventory. The sealed value never leaves SwitchTender.
 
 See [Set a secret](tutorial-set-a-secret.md) for the step-by-step, including the API calls.

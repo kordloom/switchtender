@@ -94,7 +94,7 @@ function mountTopbar() {
 	docs.textContent = "Docs";
 	nav.appendChild(docs);
 	const gh = document.createElement("a");
-	gh.href = "https://github.com/dcadolph/railwarden";
+	gh.href = "https://github.com/dcadolph/switchtender";
 	gh.className = "topbar-link topbar-icon";
 	gh.target = "_blank";
 	gh.rel = "noopener";
@@ -149,11 +149,11 @@ const TOURS = [
 		id: "welcome", title: "Sixty-second tour", desc: "The whole product at a glance",
 		page: "overview", path: "/ui/",
 		steps: [
-			{ title: "Welcome to Railwarden", body: "One binary runs Ansible, Terraform, Bash, Python, and Go, with no Kubernetes. Here is the sixty-second tour." },
+			{ title: "Welcome to SwitchTender", body: "One binary runs Ansible, Terraform, Bash, Python, and Go, with no Kubernetes. Here is the sixty-second tour." },
 			{ sel: ".page-head .button.primary", title: "Launch any tool", body: "Start a run with Ansible, Bash, Terraform, or Python, each with a dry run, and mix them in a single pipeline." },
 			{ sel: ".panel-runs", title: "Watch every run", body: "Runs stream live here, with a host matrix, sharded splits, and multi-step pipelines all in one place." },
 			{ sel: ".migrate-callout", title: "Bring your work with you", body: "Migrating from another tool? Import projects, inventories, templates, and schedules in a few clicks." },
-			{ sel: ".tile-search", title: "Find anything fast", body: "This search filters instantly, and every list in Railwarden is searchable the same way." },
+			{ sel: ".tile-search", title: "Find anything fast", body: "This search filters instantly, and every list in SwitchTender is searchable the same way." },
 			{ sel: ".nav-toggle", title: "The rest of the yard", body: "Job templates, credentials with external secrets, schedules, and fleet analytics all live in this menu." },
 			{ title: "You are set", body: "Explore the demo freely. Nothing here can be broken. Replay this tour anytime from Tour in the top bar." },
 		],
@@ -178,7 +178,7 @@ const TOURS = [
 		steps: [
 			{ title: "Leave AWX or Semaphore behind", body: "Import your projects, inventories, templates, surveys, and schedules in a single pass." },
 			{ title: "Preview before you commit", body: "Every import runs as a dry run first, showing exactly what it will create. Apply it when it looks right." },
-			{ title: "No lock-in", body: "You can export and leave anytime, too. Railwarden earns the switch. It does not trap you." },
+			{ title: "No lock-in", body: "You can export and leave anytime, too. SwitchTender earns the switch. It does not trap you." },
 		],
 	},
 ];

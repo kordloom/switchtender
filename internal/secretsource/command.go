@@ -9,7 +9,7 @@ import (
 )
 
 // resolveCommand runs a command and returns its stdout as the value, so the real secret is fetched
-// from an external store such as Vault or a cloud CLI at run time and never stored in Railwarden. A
+// from an external store such as Vault or a cloud CLI at run time and never stored in SwitchTender. A
 // trailing newline is trimmed, since command line tools add one, while interior newlines are kept so
 // multi-line secrets survive. Stderr feeds the error only.
 func resolveCommand(ctx context.Context, command string) (string, error) {

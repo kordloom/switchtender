@@ -3,13 +3,13 @@
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
-	<title>Reliability · Railwarden docs</title>
-	<meta name="description" content="Railwarden treats a run as durable, attributable work. It runs many at once under a fixed bound, coordinates failure instead of ignoring it, recovers when a worker dies, and keeps its store consistent">
-	<link rel="canonical" href="https://railwarden.dev/docs/reliability">
-	<meta property="og:title" content="Reliability · Railwarden docs">
-	<meta property="og:description" content="Railwarden treats a run as durable, attributable work. It runs many at once under a fixed bound, coordinates failure instead of ignoring it, recovers when a worker dies, and keeps its store consistent">
+	<title>Reliability · SwitchTender docs</title>
+	<meta name="description" content="SwitchTender treats a run as durable, attributable work. It runs many at once under a fixed bound, coordinates failure instead of ignoring it, recovers when a worker dies, and keeps its store">
+	<link rel="canonical" href="https://switchtender.com/docs/reliability">
+	<meta property="og:title" content="Reliability · SwitchTender docs">
+	<meta property="og:description" content="SwitchTender treats a run as durable, attributable work. It runs many at once under a fixed bound, coordinates failure instead of ignoring it, recovers when a worker dies, and keeps its store">
 	<meta property="og:type" content="article">
-	<meta property="og:url" content="https://railwarden.dev/docs/reliability">
+	<meta property="og:url" content="https://switchtender.com/docs/reliability">
 	<link rel="icon" href="/favicon.ico" sizes="any">
 	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
 	<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
@@ -20,23 +20,23 @@
 </head>
 <body>
 	<header class="dnav">
-		<a class="brand" href="/"><img src="/assets/logo-train-tracks-dark.png" alt="Railwarden" class="brand-train"><span class="brand-word">Railwarden</span></a>
+		<a class="brand" href="/"><img src="/assets/logo-train-tracks-dark.png" alt="SwitchTender" class="brand-train"><span class="brand-word">SwitchTender</span></a>
 		<span class="dnav-tag">Docs</span>
 		<nav class="dnav-links">
 			<a href="/">Home</a>
 			<a href="/#compare">Compare</a>
-			<a href="https://github.com/dcadolph/railwarden">GitHub</a>
+			<a href="https://github.com/dcadolph/switchtender">GitHub</a>
 		</nav>
 	</header>
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/sdk">Extend Railwarden in Go</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability" class="active">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/ai">Advisory AI</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">Railwarden compared to AWX and Semaphore</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability" class="active">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to AWX and Semaphore</a><a href="/docs/ai">Advisory AI</a><a href="/docs/sdk">Extend SwitchTender in Go</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
 			<h1 id="reliability">Reliability</h1>
-<p>Railwarden treats a run as durable, attributable work. It runs many at once under a fixed bound,
+<p>SwitchTender treats a run as durable, attributable work. It runs many at once under a fixed bound,
 coordinates failure instead of ignoring it, recovers when a worker dies, and keeps its store
 consistent while several workers write to it at the same time. This page states exactly how, and it
 is straight about the edges, because a claim you can check is worth more than one you cannot.</p>
@@ -79,7 +79,7 @@ integration suite proves with two replicas on one PostgreSQL: shared claiming wi
 a single fire for a schedule two replicas race for, and a dead replica's run finished by the
 survivor. Kill a replica mid-run and the run fails clean and requeues, it does not vanish.</p>
 <p>To run it: point every replica at the same PostgreSQL with <code>--db</code>, share the same
-<code>RAILWARDEN_CRED_KEY</code> and <code>RAILWARDEN_CRED_SALT</code> so sealed credentials decrypt everywhere, and
+<code>SWITCHTENDER_CRED_KEY</code> and <code>SWITCHTENDER_CRED_SALT</code> so sealed credentials decrypt everywhere, and
 health-check <code>/healthz</code> at the balancer. SQLite has no server to share, so it stays a single-node
 deployment by design; PostgreSQL is the HA backend.</p>
 <h2 id="splits-balance-real-work">Splits balance real work</h2>
@@ -129,7 +129,7 @@ binary against an existing database is safe to repeat.</p>
 <p>The audit trail is a SHA-256 hash chain. Every recorded mutation carries the previous entry's hash
 and its own hash over its content, so altering, reordering, or dropping an entry breaks the chain,
 which <code>GET /audit/verify</code> detects. The chain is tamper-evident with no key configured. When a signing
-key is set, <code>GET /audit/export</code> seals the chain head with an ed25519 signature, and <code>railwarden audit verify</code> confirms the trail offline, without trusting the server that produced it. The append is
+key is set, <code>GET /audit/export</code> seals the chain head with an ed25519 signature, and <code>switchtender audit verify</code> confirms the trail offline, without trusting the server that produced it. The append is
 serialized by an in-process lock on SQLite and a transaction-level advisory lock on PostgreSQL, with
 a unique index on the sequence number as a cross-process backstop, so the chain stays linear even
 under concurrent writers.</p>
@@ -148,7 +148,7 @@ template values never leave the system. Notifications do not block a run from fi
 waits for the deliveries already in flight. Treat a notification as a signal, and the store as the
 source of truth.</p>
 <h2 id="next-to-awx-and-semaphore">Next to AWX and Semaphore</h2>
-<p>Railwarden coordinates a fleet with database leasing, so the same one binary adds capacity without a
+<p>SwitchTender coordinates a fleet with database leasing, so the same one binary adds capacity without a
 separate mesh to stand up. It splits by measured duration rather than round-robin, so a run finishes
 on the slowest shard and not the unluckiest one. It retries only the shards that failed. It reads a
 run as a host-by-task matrix instead of a log stream. And it proves its own audit trail offline. The

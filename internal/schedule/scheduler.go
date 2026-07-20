@@ -7,8 +7,8 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/railwarden/internal/run"
-	"github.com/dcadolph/railwarden/internal/template"
+	"github.com/dcadolph/switchtender/internal/run"
+	"github.com/dcadolph/switchtender/internal/template"
 )
 
 // DefaultInterval is how often the scheduler checks for due schedules when none is configured.

@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="../assets/logo-letters-dark.png">
-    <img src="../assets/logo-letters.png" alt="Railwarden" width="140">
+    <source media="(prefers-color-scheme: dark)" srcset="../assets/logo-train-dark.png">
+    <img src="../assets/logo-train.png" alt="SwitchTender" width="140">
   </picture>
 </p>
 
@@ -26,14 +26,14 @@ exit one with `exit status N` in the log.
 
 ## How values reach the program
 
-- Extra vars, including survey answers and template vars, arrive as `RAILWARDEN_VARS`, a JSON object:
+- Extra vars, including survey answers and template vars, arrive as `SWITCHTENDER_VARS`, a JSON object:
 
         var vars map[string]any
-        _ = json.Unmarshal([]byte(os.Getenv("RAILWARDEN_VARS")), &vars)
+        _ = json.Unmarshal([]byte(os.Getenv("SWITCHTENDER_VARS")), &vars)
         region, _ := vars["region"].(string)
 
 - An `env` credential's `KEY=VALUE` lines are set in the environment, read with `os.Getenv`.
-- A `token` credential is set as `RAILWARDEN_TOKEN`, ready to send as a bearer token.
+- A `token` credential is set as `SWITCHTENDER_TOKEN`, ready to send as a bearer token.
 - Credentials attached to the run's inventory arrive the same way.
 
 ## Example
@@ -48,10 +48,10 @@ exit one with `exit status N` in the log.
 
     func main() {
         var vars map[string]any
-        _ = json.Unmarshal([]byte(os.Getenv("RAILWARDEN_VARS")), &vars)
+        _ = json.Unmarshal([]byte(os.Getenv("SWITCHTENDER_VARS")), &vars)
         service, _ := vars["service"].(string)
         req, _ := http.NewRequest(http.MethodPost, "https://api.example.com/deploy/"+service, nil)
-        req.Header.Set("Authorization", "Bearer "+os.Getenv("RAILWARDEN_TOKEN"))
+        req.Header.Set("Authorization", "Bearer "+os.Getenv("SWITCHTENDER_TOKEN"))
         resp, err := http.DefaultClient.Do(req)
         if err != nil {
             os.Exit(1)

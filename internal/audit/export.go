@@ -62,7 +62,7 @@ type Export struct {
 // exportMessage is the canonical bytes an export signs and verifies: the algorithm tag, entry count,
 // head hash, and signing time, so a signature pins this exact chain length and head at this moment.
 func exportMessage(count int, headHash, signedAt string) []byte {
-	return []byte("railwarden-audit\n" + strconv.Itoa(count) + "\n" + headHash + "\n" + signedAt)
+	return []byte("switchtender-audit\n" + strconv.Itoa(count) + "\n" + headHash + "\n" + signedAt)
 }
 
 // BuildExport packages entries into an Export, signing the head with signer when it is not nil. The

@@ -3,8 +3,8 @@ package grant_test
 import (
 	"testing"
 
-	"github.com/dcadolph/railwarden/internal/grant"
-	"github.com/dcadolph/railwarden/internal/granttest"
+	"github.com/dcadolph/switchtender/internal/grant"
+	"github.com/dcadolph/switchtender/internal/granttest"
 )
 
 func TestMemStoreContract(t *testing.T) {

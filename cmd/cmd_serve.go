@@ -18,30 +18,30 @@ import (
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/railwarden/internal/ai"
-	"github.com/dcadolph/railwarden/internal/audit"
-	"github.com/dcadolph/railwarden/internal/auth"
-	"github.com/dcadolph/railwarden/internal/credential"
-	"github.com/dcadolph/railwarden/internal/dispatch"
-	"github.com/dcadolph/railwarden/internal/extplugin"
-	"github.com/dcadolph/railwarden/internal/grant"
-	"github.com/dcadolph/railwarden/internal/inventory"
-	"github.com/dcadolph/railwarden/internal/invsource"
-	"github.com/dcadolph/railwarden/internal/live"
-	"github.com/dcadolph/railwarden/internal/logutil"
-	"github.com/dcadolph/railwarden/internal/pgstore"
-	"github.com/dcadolph/railwarden/internal/policy"
-	"github.com/dcadolph/railwarden/internal/project"
-	"github.com/dcadolph/railwarden/internal/retention"
-	"github.com/dcadolph/railwarden/internal/roundhouse"
-	"github.com/dcadolph/railwarden/internal/run"
-	"github.com/dcadolph/railwarden/internal/schedule"
-	"github.com/dcadolph/railwarden/internal/server"
-	"github.com/dcadolph/railwarden/internal/sqlitestore"
-	"github.com/dcadolph/railwarden/internal/team"
-	"github.com/dcadolph/railwarden/internal/template"
-	"github.com/dcadolph/railwarden/internal/trigger"
-	"github.com/dcadolph/railwarden/internal/user"
+	"github.com/dcadolph/switchtender/internal/ai"
+	"github.com/dcadolph/switchtender/internal/audit"
+	"github.com/dcadolph/switchtender/internal/auth"
+	"github.com/dcadolph/switchtender/internal/credential"
+	"github.com/dcadolph/switchtender/internal/dispatch"
+	"github.com/dcadolph/switchtender/internal/extplugin"
+	"github.com/dcadolph/switchtender/internal/grant"
+	"github.com/dcadolph/switchtender/internal/inventory"
+	"github.com/dcadolph/switchtender/internal/invsource"
+	"github.com/dcadolph/switchtender/internal/live"
+	"github.com/dcadolph/switchtender/internal/logutil"
+	"github.com/dcadolph/switchtender/internal/pgstore"
+	"github.com/dcadolph/switchtender/internal/policy"
+	"github.com/dcadolph/switchtender/internal/project"
+	"github.com/dcadolph/switchtender/internal/retention"
+	"github.com/dcadolph/switchtender/internal/roundhouse"
+	"github.com/dcadolph/switchtender/internal/run"
+	"github.com/dcadolph/switchtender/internal/schedule"
+	"github.com/dcadolph/switchtender/internal/server"
+	"github.com/dcadolph/switchtender/internal/sqlitestore"
+	"github.com/dcadolph/switchtender/internal/team"
+	"github.com/dcadolph/switchtender/internal/template"
+	"github.com/dcadolph/switchtender/internal/trigger"
+	"github.com/dcadolph/switchtender/internal/user"
 )
 
 const (
@@ -49,7 +49,7 @@ const (
 	// so a fresh server is not exposed on the network before the operator creates the first token.
 	defaultServeAddr = "127.0.0.1:8080"
 	// defaultDBPath is the SQLite database file used when --db is not set.
-	defaultDBPath = "railwarden.db"
+	defaultDBPath = "switchtender.db"
 	// defaultScheduleInterval is how often the scheduler checks for due schedules.
 	defaultScheduleInterval = 15 * time.Second
 	// shutdownTimeout bounds how long graceful HTTP shutdown waits for in-flight requests.
@@ -101,7 +101,7 @@ var serveMatrixCap int
 var servePluginsDir string
 
 // serveOIDCIssuer, serveOIDCClientID, serveOIDCRedirectURL, and serveOIDCDefaultRole hold the
-// OpenID Connect single sign-on flags. The client secret comes from RAILWARDEN_OIDC_CLIENT_SECRET.
+// OpenID Connect single sign-on flags. The client secret comes from SWITCHTENDER_OIDC_CLIENT_SECRET.
 var (
 	serveOIDCIssuer      string
 	serveOIDCClientID    string
@@ -110,7 +110,7 @@ var (
 )
 
 // serveLDAP* hold the LDAP directory sign-in flags. The service bind password comes from
-// RAILWARDEN_LDAP_PASSWORD.
+// SWITCHTENDER_LDAP_PASSWORD.
 var (
 	serveLDAPURL         string
 	serveLDAPBindDN      string
@@ -120,7 +120,7 @@ var (
 	serveLDAPRoleMap     []string
 )
 
-// serveSAML* hold the SAML single sign-on flags. Railwarden is the service provider and the
+// serveSAML* hold the SAML single sign-on flags. SwitchTender is the service provider and the
 // certificate and key files are its PEM keypair.
 var (
 	serveSAMLIDPMetadataURL string
@@ -134,7 +134,7 @@ var (
 )
 
 // serveJWT* hold the bearer JWT sign-in flags, so a service can present a JWT minted elsewhere, such
-// as by jwtmint, instead of a Railwarden token.
+// as by jwtmint, instead of a SwitchTender token.
 var (
 	serveJWTJWKSURL       string
 	serveJWTIssuer        string
@@ -167,7 +167,7 @@ var smtpFrom string
 var smtpTo []string
 
 // smtpUsername holds the value of the --smtp-username flag; the password comes from the
-// RAILWARDEN_SMTP_PASSWORD environment variable.
+// SWITCHTENDER_SMTP_PASSWORD environment variable.
 var smtpUsername string
 
 // notifyOn holds the value of the --notify-on flag: failure or finish.
@@ -208,12 +208,12 @@ func containerLimitsFromFlags() roundhouse.ContainerLimits {
 }
 
 // pluginsDir returns the plugins directory to load: the flag when set, else the
-// RAILWARDEN_PLUGINS_DIR environment variable. Empty means no plugins.
+// SWITCHTENDER_PLUGINS_DIR environment variable. Empty means no plugins.
 func pluginsDir(flagValue string) string {
 	if flagValue != "" {
 		return flagValue
 	}
-	return os.Getenv("RAILWARDEN_PLUGINS_DIR")
+	return os.Getenv("SWITCHTENDER_PLUGINS_DIR")
 }
 
 // parseRoleMap turns repeated groupDN=role entries into a lowercased group to role map, so a directory
@@ -235,10 +235,10 @@ func parseRoleMap(entries []string) map[string]user.Role {
 	return m
 }
 
-// serveCmd runs the Railwarden HTTP server (the dispatcher).
+// serveCmd runs the SwitchTender HTTP server (the dispatcher).
 var serveCmd = &cobra.Command{
 	Use:   "serve",
-	Short: "Run the Railwarden server.",
+	Short: "Run the SwitchTender server.",
 	RunE:  runServe,
 }
 
@@ -267,7 +267,7 @@ func init() {
 	serveCmd.Flags().IntVar(&serveMatrixCap, "matrix-cap", server.DefaultMatrixCap,
 		"Largest host matrix, in cells, the UI draws before showing a notice. 0 means no limit.")
 	serveCmd.Flags().StringVar(&servePluginsDir, "plugins-dir", "",
-		"Directory of extension plugin binaries to load at startup. Empty loads none. Also RAILWARDEN_PLUGINS_DIR.")
+		"Directory of extension plugin binaries to load at startup. Empty loads none. Also SWITCHTENDER_PLUGINS_DIR.")
 	serveCmd.Flags().StringVar(&serveOIDCIssuer, "oidc-issuer", "",
 		"OpenID Connect issuer URL to enable single sign-on. Empty leaves SSO off.")
 	serveCmd.Flags().StringVar(&serveOIDCClientID, "oidc-client-id", "", "OIDC client id.")
@@ -336,7 +336,7 @@ func init() {
 	serveCmd.Flags().StringArrayVar(&smtpTo, "smtp-to", nil,
 		"Recipient address for notification emails. Repeatable.")
 	serveCmd.Flags().StringVar(&smtpUsername, "smtp-username", "",
-		"SMTP username. The password comes from RAILWARDEN_SMTP_PASSWORD.")
+		"SMTP username. The password comes from SWITCHTENDER_SMTP_PASSWORD.")
 	serveCmd.Flags().StringVar(&notifyOn, "notify-on", "failure",
 		"When to email: failure for failed runs only, or finish for every terminal run.")
 }
@@ -350,7 +350,7 @@ func buildEmailer() (dispatch.Emailer, bool) {
 	var auth smtp.Auth
 	if smtpUsername != "" {
 		host, _, _ := net.SplitHostPort(smtpAddr)
-		auth = smtp.PlainAuth("", smtpUsername, os.Getenv("RAILWARDEN_SMTP_PASSWORD"), host)
+		auth = smtp.PlainAuth("", smtpUsername, os.Getenv("SWITCHTENDER_SMTP_PASSWORD"), host)
 	}
 	return dispatch.NewSMTPEmailer(smtpAddr, smtpFrom, smtpTo, auth), notifyOn != "finish"
 }
@@ -419,29 +419,29 @@ func openBundle(db string) (storeBundle, error) {
 }
 
 // newSealerFromEnv builds a credential Sealer from the encryption environment. Credentials need
-// both RAILWARDEN_ENCRYPTION_KEY and a stable RAILWARDEN_ENCRYPTION_SALT; when either is missing
+// both SWITCHTENDER_ENCRYPTION_KEY and a stable SWITCHTENDER_ENCRYPTION_SALT; when either is missing
 // the Sealer is disabled and the reason is logged so the operator knows which value to set.
 func newSealerFromEnv(log *zap.Logger) *credential.Sealer {
-	key := os.Getenv("RAILWARDEN_ENCRYPTION_KEY")
-	salt := os.Getenv("RAILWARDEN_ENCRYPTION_SALT")
+	key := os.Getenv("SWITCHTENDER_ENCRYPTION_KEY")
+	salt := os.Getenv("SWITCHTENDER_ENCRYPTION_SALT")
 	sealer := credential.NewSealer(key, salt)
 	if sealer.Enabled() {
 		return sealer
 	}
 	if key == "" {
-		log.Warn("credentials disabled: set RAILWARDEN_ENCRYPTION_KEY to enable them")
+		log.Warn("credentials disabled: set SWITCHTENDER_ENCRYPTION_KEY to enable them")
 	} else {
-		log.Warn("credentials disabled: set a stable RAILWARDEN_ENCRYPTION_SALT alongside the key")
+		log.Warn("credentials disabled: set a stable SWITCHTENDER_ENCRYPTION_SALT alongside the key")
 	}
 	return sealer
 }
 
-// newAuditSignerFromEnv builds an audit export Signer from RAILWARDEN_AUDIT_KEY, a hex-encoded
+// newAuditSignerFromEnv builds an audit export Signer from SWITCHTENDER_AUDIT_KEY, a hex-encoded
 // ed25519 seed. When it is unset, export signing is off; when it is malformed the server refuses to
 // start so a bad key is caught, not silently ignored. The public key is logged so an operator can
 // record it for offline verification.
 func newAuditSignerFromEnv(log *zap.Logger) (*audit.Signer, error) {
-	signer, err := audit.NewSigner(os.Getenv("RAILWARDEN_AUDIT_KEY"))
+	signer, err := audit.NewSigner(os.Getenv("SWITCHTENDER_AUDIT_KEY"))
 	if err != nil {
 		return nil, err
 	}
@@ -458,7 +458,7 @@ func projectCacheDir() string {
 	if err != nil {
 		base = os.TempDir()
 	}
-	return filepath.Join(base, "railwarden", "projects")
+	return filepath.Join(base, "switchtender", "projects")
 }
 
 // runServe builds the server dependencies and serves until interrupted.
@@ -477,7 +477,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	store, schedules := bundle.Runs(), bundle.Schedules()
 
 	if n, cerr := bundle.Tokens().Count(cmd.Context()); cerr == nil && n == 0 {
-		log.Warn("no API tokens exist. The API is UNAUTHENTICATED until you create one. Run: railwarden token new")
+		log.Warn("no API tokens exist. The API is UNAUTHENTICATED until you create one. Run: switchtender token new")
 	}
 
 	sealer := newSealerFromEnv(log)
@@ -532,7 +532,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	var oidcAuth *server.OIDCAuth
 	if serveOIDCIssuer != "" {
 		oidcAuth, err = server.NewOIDCAuth(cmd.Context(), serveOIDCIssuer, serveOIDCClientID,
-			os.Getenv("RAILWARDEN_OIDC_CLIENT_SECRET"), serveOIDCRedirectURL,
+			os.Getenv("SWITCHTENDER_OIDC_CLIENT_SECRET"), serveOIDCRedirectURL,
 			user.Role(serveOIDCDefaultRole), bundle.Users(), bundle.Tokens(), log)
 		if err != nil {
 			return err
@@ -542,7 +542,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	var ldapAuth *server.LDAPAuth
 	if serveLDAPURL != "" {
 		ldapAuth, err = server.NewLDAPAuth(serveLDAPURL, serveLDAPBindDN,
-			os.Getenv("RAILWARDEN_LDAP_PASSWORD"), serveLDAPBaseDN, serveLDAPUserFilter,
+			os.Getenv("SWITCHTENDER_LDAP_PASSWORD"), serveLDAPBaseDN, serveLDAPUserFilter,
 			user.Role(serveLDAPDefaultRole), parseRoleMap(serveLDAPRoleMap), bundle.Users(), log)
 		if err != nil {
 			return err
@@ -570,7 +570,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
-	aiProvider, err := ai.New(serveAIProvider, serveAIModel, serveAIURL, os.Getenv("RAILWARDEN_AI_KEY"))
+	aiProvider, err := ai.New(serveAIProvider, serveAIModel, serveAIURL, os.Getenv("SWITCHTENDER_AI_KEY"))
 	if err != nil {
 		return err
 	}
@@ -617,7 +617,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		if tls {
 			scheme = "https"
 		}
-		log.Info("railwarden serving", zap.String("addr", serveAddr), zap.String("scheme", scheme))
+		log.Info("switchtender serving", zap.String("addr", serveAddr), zap.String("scheme", scheme))
 		var serveErr error
 		switch {
 		case serveListener != nil && tls:

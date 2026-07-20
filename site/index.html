@@ -3,27 +3,27 @@
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
-	<title>Railwarden · run everything, watch every host, prove every change</title>
+	<title>SwitchTender · run everything, watch every host, prove every change</title>
 	<meta name="description" content="Run everything, watch every host, prove every change. Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go in one Go binary with a live host-by-task matrix, tamper-evident audit, and enforced approvals. A self-hostable alternative to AWX and Semaphore.">
-	<meta property="og:title" content="Railwarden · run everything, watch every host, prove every change">
+	<meta property="og:title" content="SwitchTender · run everything, watch every host, prove every change">
 	<meta property="og:description" content="Run everything. Watch every host. Prove every change. Your whole automation stack in one Go binary, with a live host-by-task matrix and a provable audit trail.">
 	<meta property="og:type" content="website">
-	<meta property="og:url" content="https://railwarden.dev">
-	<meta property="og:image" content="https://railwarden.dev/assets/screenshot-fleet.png?v=6">
+	<meta property="og:url" content="https://switchtender.com">
+	<meta property="og:image" content="https://switchtender.com/assets/screenshot-fleet.png?v=6">
 	<meta name="twitter:card" content="summary_large_image">
-	<link rel="canonical" href="https://railwarden.dev/">
+	<link rel="canonical" href="https://switchtender.com/">
 	<script type="application/ld+json">
 	{
 		"@context": "https://schema.org",
 		"@type": "SoftwareApplication",
-		"name": "Railwarden",
-		"url": "https://railwarden.dev/",
+		"name": "SwitchTender",
+		"url": "https://switchtender.com/",
 		"applicationCategory": "DeveloperApplication",
 		"operatingSystem": "Linux, macOS, Windows",
 		"description": "Run everything, watch every host, prove every change. Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go in one Go binary with a live host-by-task matrix, a tamper-evident audit trail, and enforced approval policies.",
 		"license": "https://mariadb.com/bsl11/",
 		"offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
-		"sameAs": ["https://github.com/dcadolph/railwarden"]
+		"sameAs": ["https://github.com/dcadolph/switchtender"]
 	}
 	</script>
 	<link rel="icon" href="/favicon.ico" sizes="any">
@@ -40,8 +40,8 @@
 
 	<header class="nav" id="nav">
 		<div class="wrap nav-inner">
-			<a class="brand" href="#top" aria-label="Railwarden">
-				<img src="/assets/logo-train-tracks-dark.png" alt="Railwarden" class="brand-train"><span class="brand-word">Railwarden</span>
+			<a class="brand" href="#top" aria-label="SwitchTender">
+				<img src="/assets/logo-train-tracks-dark.png" alt="SwitchTender" class="brand-train"><span class="brand-word">SwitchTender</span>
 			</a>
 			<nav class="nav-links">
 				<a href="#features">Features</a>
@@ -52,7 +52,7 @@
 				<a href="/docs/">Docs</a>
 			</nav>
 			<div class="nav-cta">
-				<a class="ghost" href="https://github.com/dcadolph/railwarden">GitHub</a>
+				<a class="ghost" href="https://github.com/dcadolph/switchtender">GitHub</a>
 				<a class="btn" href="/get-started">Get started</a>
 			</div>
 			<button class="nav-toggle" id="nav-toggle" aria-label="Menu">
@@ -73,21 +73,21 @@
 				</p>
 				<div class="hero-cta">
 					<a class="btn big" href="/get-started">Get started</a>
-					<a class="ghost big" href="https://github.com/dcadolph/railwarden">★ Star on GitHub</a>
+					<a class="ghost big" href="https://github.com/dcadolph/switchtender">★ Star on GitHub</a>
 				</div>
 				<p class="hero-note">Open source · BSL 1.1 · Go SDK with drop-in plugins · migrate from AWX or Semaphore in one command</p>
 			</div>
 			<div class="hero-shot reveal">
 				<div class="glow" aria-hidden="true"></div>
 				<figure class="window">
-					<div class="window-bar"><span></span><span></span><span></span><em>railwarden · fleet</em></div>
-					<img src="/assets/screenshot-fleet.png?v=6" alt="A Railwarden run painted live as a host-by-task matrix, one cell per host and task, with the failed host highlighted" loading="lazy">
+					<div class="window-bar"><span></span><span></span><span></span><em>switchtender · fleet</em></div>
+					<img src="/assets/screenshot-fleet.png?v=6" alt="A SwitchTender run painted live as a host-by-task matrix, one cell per host and task, with the failed host highlighted" loading="lazy">
 				</figure>
 			</div>
 		</section>
 
 		<section class="namebar wrap reveal">
-			<p><b>Why "Railwarden"?</b> A railwarden runs a rail yard: which engine takes which track, what couples into the next train out, what waits on a siding. The same job, for your fleet.</p>
+			<p><b>Why "SwitchTender"?</b> A switchtender runs a rail yard: which engine takes which track, what couples into the next train out, what waits on a siding. The same job, for your fleet.</p>
 		</section>
 
 		<section class="strip wrap reveal">
@@ -151,7 +151,7 @@
 				<article class="card reveal">
 					<div class="ic ic-roles"></div>
 					<h3>Roles and teams</h3>
-					<p>Global roles, per-object grants, and teams in the open source core. Semaphore paywalls its RBAC. Railwarden does not.</p>
+					<p>Global roles, per-object grants, and teams in the open source core. Semaphore paywalls its RBAC. SwitchTender does not.</p>
 				</article>
 				<article class="card reveal">
 					<div class="ic ic-ai"></div>
@@ -172,8 +172,8 @@
 				<p>A run painted live as a host-by-task matrix, not a wall of scrollback. The colors speak Ansible: <span class="lg-ok">green</span> means ok, <span class="lg-changed">amber</span> means the task changed the host, <span class="lg-failed">red</span> means failed, grey means skipped.</p>
 			</div>
 			<figure class="window demo-frame reveal">
-				<div class="window-bar"><span></span><span></span><span></span><em>railwarden · run</em></div>
-				<video src="/assets/demo-run.mp4?v=2" poster="/assets/demo-run-poster.png?v=1" autoplay muted loop playsinline preload="auto" aria-label="A Railwarden run streaming live as a host-by-task matrix"></video>
+				<div class="window-bar"><span></span><span></span><span></span><em>switchtender · run</em></div>
+				<video src="/assets/demo-run.mp4?v=2" poster="/assets/demo-run-poster.png?v=1" autoplay muted loop playsinline preload="auto" aria-label="A SwitchTender run streaming live as a host-by-task matrix"></video>
 			</figure>
 		</section>
 
@@ -183,7 +183,7 @@
 				<p>Wire Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go steps into a graph, plus any tool you plug in. Fan out, fan in, and run the whole thing as one pipeline with per-step retries. AWX's signature feature, without the Kubernetes bill.</p>
 			</div>
 			<figure class="window demo-frame reveal">
-				<div class="window-bar"><span></span><span></span><span></span><em>railwarden · workflow editor</em></div>
+				<div class="window-bar"><span></span><span></span><span></span><em>switchtender · workflow editor</em></div>
 				<video src="/assets/editor-drag.mp4?v=1" poster="/assets/editor-drag-poster.png?v=1" autoplay muted loop playsinline preload="auto" aria-label="Dragging a step into a six-step deploy graph, wiring its dependency, and running the pipeline until every step goes green"></video>
 			</figure>
 		</section>
@@ -192,11 +192,11 @@
 			<div class="gov-copy reveal">
 				<span class="eyebrow">The moat</span>
 				<h2>Governance neither AWX<br>nor Semaphore has</h2>
-				<p>Multi-tool execution is table stakes now. What sets Railwarden apart sits <em>above</em> execution, on the control plane that makes automation provable and governed.</p>
+				<p>Multi-tool execution is table stakes now. What sets SwitchTender apart sits <em>above</em> execution, on the control plane that makes automation provable and governed.</p>
 				<ul class="gov-list">
 					<li><b>Tamper-evident, signed audit.</b> Alter one entry and the chain breaks. Prove the trail is intact, offline.</li>
 					<li><b>Change control by policy.</b> A prod <code>terraform destroy</code> holds for an admin's sign-off, automatically.</li>
-					<li><b>Secrets masked, sourced, sealed.</b> They never land in a log and never live in Railwarden if you don't want them to.</li>
+					<li><b>Secrets masked, sourced, sealed.</b> They never land in a log and never live in SwitchTender if you don't want them to.</li>
 				</ul>
 			</div>
 			<div class="gov-visual reveal" aria-hidden="true">
@@ -217,11 +217,11 @@
 			</div>
 			<div class="duo">
 				<figure class="window reveal">
-					<div class="window-bar"><span></span><span></span><span></span><em>railwarden · AI triage</em></div>
+					<div class="window-bar"><span></span><span></span><span></span><em>switchtender · AI triage</em></div>
 					<img src="/assets/screenshot-triage.png?v=6" alt="A failed run with the AI triage panel isolating db01's apply step as the root cause and suggesting next steps" loading="lazy">
 				</figure>
 				<figure class="window reveal">
-					<div class="window-bar"><span></span><span></span><span></span><em>railwarden · ask your fleet</em></div>
+					<div class="window-bar"><span></span><span></span><span></span><em>switchtender · ask your fleet</em></div>
 					<img src="/assets/screenshot-ask.png?v=6" alt="The overview page answering a plain-language question about which hosts are failing and where to start" loading="lazy">
 				</figure>
 			</div>
@@ -231,12 +231,12 @@
 			<div class="section-head reveal">
 				<span class="eyebrow">Extensibility · SDK + drop-in plugins</span>
 				<h2>Seven tools in the box.<br>Add more in Go.</h2>
-				<p>Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go all run out of the box, no plugins required. When you need an eighth tool, a custom secret backend, a new AI provider, or your own notification channel, you write it in Go against a stable SDK. Compile it into the binary, or build it once and drop it into <code>--plugins-dir</code>, where a stock release loads it at startup over gRPC with mutual TLS and treats it as its own. A plugged-in tool submits, validates, and audits like a built-in. A plugged-in channel gets every terminal run with secret-carrying vars already redacted. The <a href="/docs/sdk">SDK guide</a> walks both paths, and the official <a href="https://github.com/dcadolph/railwarden-plugins">railwarden-plugins</a> repo ships a real one: Discord, ntfy, and Teams from a single drop-in binary.</p>
+				<p>Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go all run out of the box, no plugins required. When you need an eighth tool, a custom secret backend, a new AI provider, or your own notification channel, you write it in Go against a stable SDK. Compile it into the binary, or build it once and drop it into <code>--plugins-dir</code>, where a stock release loads it at startup over gRPC with mutual TLS and treats it as its own. A plugged-in tool submits, validates, and audits like a built-in. A plugged-in channel gets every terminal run with secret-carrying vars already redacted. The <a href="/docs/sdk">SDK guide</a> walks both paths, and the official <a href="https://github.com/dcadolph/switchtender-plugins">switchtender-plugins</a> repo ships a real one: Discord, ntfy, and Teams from a single drop-in binary.</p>
 			</div>
 			<div class="code reveal">
 				<button class="copy" aria-label="Copy">Copy</button>
-				<pre><code><span class="c">// build once, drop into --plugins-dir, no recompile of railwarden</span>
-import "github.com/dcadolph/railwarden/sdk/plugin"
+				<pre><code><span class="c">// build once, drop into --plugins-dir, no recompile of switchtender</span>
+import "github.com/dcadolph/switchtender/sdk/plugin"
 
 func main() {
 	plugin.Serve(&amp;plugin.Extension{
@@ -250,12 +250,12 @@ func main() {
 		<section class="section wrap" id="compare">
 			<div class="section-head reveal">
 				<h2>The honest side-by-side</h2>
-				<p>Where Railwarden pulls ahead, with the places it is still young stated plainly in the <a href="/docs/comparison">comparison doc</a>. The deep dives are <a href="/awx-alternative">Railwarden as an AWX alternative</a> and <a href="/semaphore-alternative">as a Semaphore alternative</a>, and <a href="/docs/reliability">how runs execute under load</a> covers the engine underneath.</p>
+				<p>Where SwitchTender pulls ahead, with the places it is still young stated plainly in the <a href="/docs/comparison">comparison doc</a>. The deep dives are <a href="/awx-alternative">SwitchTender as an AWX alternative</a> and <a href="/semaphore-alternative">as a Semaphore alternative</a>, and <a href="/docs/reliability">how runs execute under load</a> covers the engine underneath.</p>
 			</div>
 			<div class="table-wrap reveal">
 				<table class="compare">
 					<thead>
-						<tr><th>Capability</th><th class="us">Railwarden</th><th>AWX</th><th>Semaphore</th></tr>
+						<tr><th>Capability</th><th class="us">SwitchTender</th><th>AWX</th><th>Semaphore</th></tr>
 					</thead>
 					<tbody>
 						<tr><td>Deploy without Kubernetes</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td><td><i class="y"></i></td></tr>
@@ -286,10 +286,10 @@ func main() {
 			<div class="code reveal">
 				<button class="copy" id="copy" aria-label="Copy">Copy</button>
 				<pre><code><span class="c"># install (or grab a release binary)</span>
-go install github.com/dcadolph/railwarden@latest
+go install github.com/dcadolph/switchtender@latest
 
 <span class="c"># serve: SQLite by default, PostgreSQL optional</span>
-railwarden serve --addr :8080 --db yard.db
+switchtender serve --addr :8080 --db switchtender.db
 
 <span class="c"># open the UI</span>
 open http://localhost:8080/ui/</code></pre>
@@ -308,14 +308,14 @@ open http://localhost:8080/ui/</code></pre>
 
 	<footer class="footer">
 		<div class="wrap footer-inner">
-			<img src="/assets/logo-letters-dark.png" alt="Railwarden" class="foot-logo">
+			<img src="/assets/logo-train-tracks-dark.png" alt="SwitchTender" class="foot-logo">
 			<nav>
-				<a href="https://github.com/dcadolph/railwarden">GitHub</a>
+				<a href="https://github.com/dcadolph/switchtender">GitHub</a>
 				<a href="/docs/">Docs</a>
 				<a href="/docs/comparison">Compare</a>
 				<a href="/awx-alternative">vs AWX</a>
 				<a href="/semaphore-alternative">vs Semaphore</a>
-				<a href="https://github.com/dcadolph/railwarden/blob/main/LICENSE">License</a>
+				<a href="https://github.com/dcadolph/switchtender/blob/main/LICENSE">License</a>
 			</nav>
 			<span class="foot-note">Open source · BSL 1.1 · self-host free</span>
 		</div>

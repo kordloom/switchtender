@@ -9,9 +9,9 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/railwarden/internal/grant"
-	"github.com/dcadolph/railwarden/internal/inventory"
-	"github.com/dcadolph/railwarden/internal/invsource"
+	"github.com/dcadolph/switchtender/internal/grant"
+	"github.com/dcadolph/switchtender/internal/inventory"
+	"github.com/dcadolph/switchtender/internal/invsource"
 )
 
 // SourceRefresher renders an inventory source into its backing inventory. The dispatcher

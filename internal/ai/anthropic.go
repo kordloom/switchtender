@@ -26,7 +26,7 @@ const anthropicMaxTokens = 1024
 // by the fallback model in the same call.
 const fallbackBeta = "server-side-fallback-2026-06-01"
 
-// fallbackModel answers when a request to a classifier-heavy model is declined. Railwarden sends
+// fallbackModel answers when a request to a classifier-heavy model is declined. SwitchTender sends
 // infrastructure and automation content, which a safety classifier can misread as a false
 // positive, so a decline is retried here before the caller ever sees it.
 const fallbackModel = "claude-opus-4-8"

@@ -12,7 +12,7 @@ import (
 // unexported so no importer can mutate it.
 var docsFS fs.FS
 
-// Execute runs the Railwarden root command with the embedded documentation and exits the process
+// Execute runs the SwitchTender root command with the embedded documentation and exits the process
 // with the appropriate code.
 func Execute(docs fs.FS) {
 	docsFS = docs

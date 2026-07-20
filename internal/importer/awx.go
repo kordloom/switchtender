@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/dcadolph/railwarden/internal/credential"
-	"github.com/dcadolph/railwarden/internal/inventory"
-	"github.com/dcadolph/railwarden/internal/invsource"
-	"github.com/dcadolph/railwarden/internal/project"
-	"github.com/dcadolph/railwarden/internal/schedule"
-	"github.com/dcadolph/railwarden/internal/template"
+	"github.com/dcadolph/switchtender/internal/credential"
+	"github.com/dcadolph/switchtender/internal/inventory"
+	"github.com/dcadolph/switchtender/internal/invsource"
+	"github.com/dcadolph/switchtender/internal/project"
+	"github.com/dcadolph/switchtender/internal/schedule"
+	"github.com/dcadolph/switchtender/internal/template"
 )
 
 // awxExport is the top level of an awx export document, keyed by asset type.
@@ -188,7 +188,7 @@ func (r *awxRef) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// FromAWX maps an awx export document into a Plan of Railwarden objects with cross-references wired
+// FromAWX maps an awx export document into a Plan of SwitchTender objects with cross-references wired
 // by generated id. It never fails on a single unmappable asset: it records a warning and continues,
 // so a partial export still migrates what it can.
 func FromAWX(data []byte, now time.Time) (*Plan, error) {
@@ -339,7 +339,7 @@ func (p *Plan) addTemplate(jt awxJobTemplate, now time.Time,
 }
 
 // mapSurvey converts a job template's survey, whether top level or nested under related, into
-// Railwarden survey fields, warning on any inexact type mapping.
+// SwitchTender survey fields, warning on any inexact type mapping.
 func (p *Plan) mapSurvey(jt awxJobTemplate) []template.SurveyField {
 	survey := jt.SurveySpec
 	if survey == nil && jt.Related != nil {

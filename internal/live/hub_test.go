@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dcadolph/railwarden/internal/event"
+	"github.com/dcadolph/switchtender/internal/event"
 )
 
 // drain collects messages until end or a timeout.

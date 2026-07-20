@@ -1,6 +1,6 @@
-// Package sdk is the stable surface a Railwarden extension builds against. It re-exports the
+// Package sdk is the stable surface a SwitchTender extension builds against. It re-exports the
 // extension interfaces and their registration entry points, so an extension imports this one
-// package and never reaches into Railwarden's internals.
+// package and never reaches into SwitchTender's internals.
 //
 // Register from an init function or from main before the server starts. The registries are read
 // while serving and never written after, so registration is a startup step, not a runtime one. A
@@ -21,11 +21,11 @@ package sdk
 import (
 	"context"
 
-	"github.com/dcadolph/railwarden/internal/ai"
-	"github.com/dcadolph/railwarden/internal/dispatch"
-	"github.com/dcadolph/railwarden/internal/roundhouse"
-	"github.com/dcadolph/railwarden/internal/run"
-	"github.com/dcadolph/railwarden/internal/secretsource"
+	"github.com/dcadolph/switchtender/internal/ai"
+	"github.com/dcadolph/switchtender/internal/dispatch"
+	"github.com/dcadolph/switchtender/internal/roundhouse"
+	"github.com/dcadolph/switchtender/internal/run"
+	"github.com/dcadolph/switchtender/internal/secretsource"
 )
 
 // AIProvider turns a prompt into a completion for an advisory feature. It never sits in the

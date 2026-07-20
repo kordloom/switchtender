@@ -1,9 +1,9 @@
 # FAQ
 
-Short answers to the questions teams ask when evaluating or adopting Railwarden. New here? Start with
+Short answers to the questions teams ask when evaluating or adopting SwitchTender. New here? Start with
 the [quickstart](quickstart.md), or [switching from AWX](switching-from-awx.md) if you are migrating.
 
-## What can Railwarden run?
+## What can SwitchTender run?
 
 Ansible playbooks, Bash scripts, Terraform, OpenTofu, Python, PowerShell, and Go, plus any tool
 you add through the [Go SDK](sdk.md). A run, a saved template, or a single step of a pipeline
@@ -13,7 +13,7 @@ kubectl, the cloud CLIs, and your own scripts all work.
 
 ## Do I need Kubernetes?
 
-No. Railwarden is one binary that is the API, the executor, the scheduler, and the UI. State is one
+No. SwitchTender is one binary that is the API, the executor, the scheduler, and the UI. State is one
 database: a SQLite file to start, or PostgreSQL when you want more than one instance. No Redis, no
 operator, no separate task engine.
 
@@ -27,8 +27,8 @@ every shard, so a preview is always a preview.
 
 From the command line:
 
-    railwarden import awx export.json           # preview the plan, changes nothing
-    railwarden import awx export.json --apply    # import
+    switchtender import awx export.json           # preview the plan, changes nothing
+    switchtender import awx export.json --apply    # import
 
 It maps projects, inventories, job templates with their surveys and schedules and job slicing, and
 credentials. See [switching from AWX](switching-from-awx.md) for the full mapping.
@@ -36,7 +36,7 @@ credentials. See [switching from AWX](switching-from-awx.md) for the full mappin
 Two things to know. AWX omits secret values on export for security, so credentials import without
 their secrets and you set those once after importing. And AWX dynamic inventory sources are not
 mapped yet. Static inventories import fully. A Semaphore importer exists too, with
-`railwarden import semaphore export.json`.
+`switchtender import semaphore export.json`.
 
 ## How do I rerun the same job on a set of hosts without re-entering everything?
 
@@ -50,10 +50,10 @@ Sealed with AES-256-GCM, the key derived from an operator passphrase through arg
 decrypt only at execution, into a temporary file wiped when the run finishes, and never appear in API
 responses. Kinds include SSH keys, vault passwords, become passwords, container registry logins, and
 environment bundles, which is where API tokens and other KEY=VALUE secrets go. Set
-`RAILWARDEN_ENCRYPTION_KEY` and `RAILWARDEN_ENCRYPTION_SALT` to enable them.
+`SWITCHTENDER_ENCRYPTION_KEY` and `SWITCHTENDER_ENCRYPTION_SALT` to enable them.
 
 A credential can also be a command source, so the value lives in an external store instead of in
-Railwarden. Railwarden seals a command, for example `vault kv get -field=password secret/prod` or an
+SwitchTender. SwitchTender seals a command, for example `vault kv get -field=password secret/prod` or an
 `aws secretsmanager get-secret-value` call, and runs it at execution time. The command's output is
 the secret and is never stored. This works with any secret manager reachable from a command: Vault,
 AWS, GCP, 1Password, or your own script.
@@ -70,7 +70,7 @@ rotate at any time.
 Yes: OpenID Connect, SAML, and LDAP directory sign-in, with just-in-time account provisioning
 and a configurable default role.
 
-## Does Railwarden send my data to an AI model?
+## Does SwitchTender send my data to an AI model?
 
 Only if you turn AI on, and only to the provider you chose. With local Ollama nothing leaves
 your machines. With a cloud provider, prompts carry automation content such as commands,
@@ -85,12 +85,12 @@ drafts that could become a run is born held at the same approval gate an operato
 admin reviews the generated command before it moves, and the request and decision both land in
 the audit trail.
 
-## Can I extend Railwarden?
+## Can I extend SwitchTender?
 
 Yes, in Go, two ways: compile an extension into the binary, or drop a plugin binary into
 `--plugins-dir` on a stock release. Both register execution tools, AI providers, secret engines,
 and notification channels. See [Extend in Go](sdk.md) and the official
-[railwarden-plugins](https://github.com/dcadolph/railwarden-plugins) repo for a working example.
+[switchtender-plugins](https://github.com/dcadolph/switchtender-plugins) repo for a working example.
 
 ## What about scale?
 

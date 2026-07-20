@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="../assets/logo-letters-dark.png">
-    <img src="../assets/logo-letters.png" alt="Railwarden" width="140">
+    <source media="(prefers-color-scheme: dark)" srcset="../assets/logo-train-dark.png">
+    <img src="../assets/logo-train.png" alt="SwitchTender" width="140">
   </picture>
 </p>
 
@@ -27,6 +27,6 @@ whole pipeline.
 
 To schedule without a template, send `playbook` and `inventory` inline, add `shards` for a split, or
 `steps` for a pipeline. A worker or the server must be running for a schedule to fire. Add capacity
-with `railwarden worker`.
+with `switchtender worker`.
 
 Next: give the job its secrets with [set a secret](tutorial-set-a-secret.md).

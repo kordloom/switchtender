@@ -1,25 +1,25 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "railwarden.fullname" . }}-server
+  name: {{ include "switchtender.fullname" . }}-server
   labels:
-    {{- include "railwarden.labels" . | nindent 4 }}
+    {{- include "switchtender.labels" . | nindent 4 }}
     app.kubernetes.io/component: server
 spec:
   replicas: {{ .Values.server.replicas }}
   selector:
     matchLabels:
-      {{- include "railwarden.selectorLabels" . | nindent 6 }}
+      {{- include "switchtender.selectorLabels" . | nindent 6 }}
       app.kubernetes.io/component: server
   template:
     metadata:
       labels:
-        {{- include "railwarden.selectorLabels" . | nindent 8 }}
+        {{- include "switchtender.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: server
     spec:
       containers:
         - name: server
-          image: {{ include "railwarden.image" . | quote }}
+          image: {{ include "switchtender.image" . | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args:
             - serve
@@ -31,16 +31,16 @@ spec:
             - {{ . | quote }}
             {{- end }}
           env:
-            - name: RAILWARDEN_ENCRYPTION_KEY
+            - name: SWITCHTENDER_ENCRYPTION_KEY
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "railwarden.secretName" . }}
-                  key: RAILWARDEN_ENCRYPTION_KEY
-            - name: RAILWARDEN_ENCRYPTION_SALT
+                  name: {{ include "switchtender.secretName" . }}
+                  key: SWITCHTENDER_ENCRYPTION_KEY
+            - name: SWITCHTENDER_ENCRYPTION_SALT
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "railwarden.secretName" . }}
-                  key: RAILWARDEN_ENCRYPTION_SALT
+                  name: {{ include "switchtender.secretName" . }}
+                  key: SWITCHTENDER_ENCRYPTION_SALT
           ports:
             - name: http
               containerPort: 8080
@@ -62,9 +62,9 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "railwarden.fullname" . }}
+  name: {{ include "switchtender.fullname" . }}
   labels:
-    {{- include "railwarden.labels" . | nindent 4 }}
+    {{- include "switchtender.labels" . | nindent 4 }}
 spec:
   type: {{ .Values.service.type }}
   ports:
@@ -73,5 +73,5 @@ spec:
       protocol: TCP
       name: http
   selector:
-    {{- include "railwarden.selectorLabels" . | nindent 4 }}
+    {{- include "switchtender.selectorLabels" . | nindent 4 }}
     app.kubernetes.io/component: server

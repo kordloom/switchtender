@@ -3,13 +3,13 @@
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
-	<title>Configuration · Railwarden docs</title>
-	<meta name="description" content="Railwarden is one binary with subcommands. This page lists every command, flag, and environment variable.">
-	<link rel="canonical" href="https://railwarden.dev/docs/configuration">
-	<meta property="og:title" content="Configuration · Railwarden docs">
-	<meta property="og:description" content="Railwarden is one binary with subcommands. This page lists every command, flag, and environment variable.">
+	<title>Configuration · SwitchTender docs</title>
+	<meta name="description" content="SwitchTender is one binary with subcommands. This page lists every command, flag, and environment variable.">
+	<link rel="canonical" href="https://switchtender.com/docs/configuration">
+	<meta property="og:title" content="Configuration · SwitchTender docs">
+	<meta property="og:description" content="SwitchTender is one binary with subcommands. This page lists every command, flag, and environment variable.">
 	<meta property="og:type" content="article">
-	<meta property="og:url" content="https://railwarden.dev/docs/configuration">
+	<meta property="og:url" content="https://switchtender.com/docs/configuration">
 	<link rel="icon" href="/favicon.ico" sizes="any">
 	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
 	<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
@@ -20,23 +20,23 @@
 </head>
 <body>
 	<header class="dnav">
-		<a class="brand" href="/"><img src="/assets/logo-train-tracks-dark.png" alt="Railwarden" class="brand-train"><span class="brand-word">Railwarden</span></a>
+		<a class="brand" href="/"><img src="/assets/logo-train-tracks-dark.png" alt="SwitchTender" class="brand-train"><span class="brand-word">SwitchTender</span></a>
 		<span class="dnav-tag">Docs</span>
 		<nav class="dnav-links">
 			<a href="/">Home</a>
 			<a href="/#compare">Compare</a>
-			<a href="https://github.com/dcadolph/railwarden">GitHub</a>
+			<a href="https://github.com/dcadolph/switchtender">GitHub</a>
 		</nav>
 	</header>
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/sdk">Extend Railwarden in Go</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration" class="active">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/ai">Advisory AI</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">Railwarden compared to AWX and Semaphore</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration" class="active">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to AWX and Semaphore</a><a href="/docs/ai">Advisory AI</a><a href="/docs/sdk">Extend SwitchTender in Go</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
 			<h1 id="configuration">Configuration</h1>
-<p>Railwarden is one binary with subcommands. This page lists every command, flag, and environment
+<p>SwitchTender is one binary with subcommands. This page lists every command, flag, and environment
 variable.</p>
 <h2 id="environment-variables">Environment variables</h2>
 <table>
@@ -49,52 +49,52 @@ variable.</p>
 </thead>
 <tbody>
 <tr>
-<td><code>RAILWARDEN_ENCRYPTION_KEY</code></td>
+<td><code>SWITCHTENDER_ENCRYPTION_KEY</code></td>
 <td>serve, worker</td>
 <td>Passphrase that seals stored credentials with AES-256-GCM. Credentials are disabled when unset.</td>
 </tr>
 <tr>
-<td><code>RAILWARDEN_ENCRYPTION_SALT</code></td>
+<td><code>SWITCHTENDER_ENCRYPTION_SALT</code></td>
 <td>serve, worker</td>
 <td>Per-deployment salt for argon2id key derivation. Must be set alongside the key and stay stable across restarts, or stored credentials cannot be decrypted. Credentials are disabled when unset.</td>
 </tr>
 <tr>
-<td><code>RAILWARDEN_AUDIT_KEY</code></td>
+<td><code>SWITCHTENDER_AUDIT_KEY</code></td>
 <td>serve</td>
-<td>Hex-encoded ed25519 seed that signs audit exports so the trail can be verified offline. Signing is off when unset. A malformed value stops startup. Generate one with <code>railwarden audit keygen</code>.</td>
+<td>Hex-encoded ed25519 seed that signs audit exports so the trail can be verified offline. Signing is off when unset. A malformed value stops startup. Generate one with <code>switchtender audit keygen</code>.</td>
 </tr>
 <tr>
-<td><code>RAILWARDEN_PASSWORD</code></td>
+<td><code>SWITCHTENDER_PASSWORD</code></td>
 <td>user new</td>
 <td>Initial account password, read instead of prompting so it never lands on the command line.</td>
 </tr>
 <tr>
-<td><code>RAILWARDEN_SMTP_PASSWORD</code></td>
+<td><code>SWITCHTENDER_SMTP_PASSWORD</code></td>
 <td>serve</td>
 <td>Password for SMTP authentication when <code>--smtp-username</code> is set.</td>
 </tr>
 <tr>
-<td><code>RAILWARDEN_AI_KEY</code></td>
+<td><code>SWITCHTENDER_AI_KEY</code></td>
 <td>serve</td>
 <td>API key for a cloud AI provider such as Anthropic or an OpenAI-compatible endpoint. A local Ollama needs none.</td>
 </tr>
 <tr>
-<td><code>RAILWARDEN_OIDC_CLIENT_SECRET</code></td>
+<td><code>SWITCHTENDER_OIDC_CLIENT_SECRET</code></td>
 <td>serve</td>
 <td>OpenID Connect client secret, paired with <code>--oidc-client-id</code>. Read from the environment so it stays off the command line.</td>
 </tr>
 <tr>
-<td><code>RAILWARDEN_LDAP_PASSWORD</code></td>
+<td><code>SWITCHTENDER_LDAP_PASSWORD</code></td>
 <td>serve</td>
 <td>Password for the <code>--ldap-bind-dn</code> service account.</td>
 </tr>
 <tr>
-<td><code>RAILWARDEN_ADMIN_PASSWORD</code></td>
+<td><code>SWITCHTENDER_ADMIN_PASSWORD</code></td>
 <td>init</td>
 <td>Password for the first admin account. When unset, init generates one and prints it once.</td>
 </tr>
 <tr>
-<td><code>RAILWARDEN_DESKTOP_NO_BROWSER</code></td>
+<td><code>SWITCHTENDER_DESKTOP_NO_BROWSER</code></td>
 <td>desktop</td>
 <td>Set to any value to skip opening the browser, for a headless or remote run.</td>
 </tr>
@@ -114,12 +114,12 @@ environment file, and optionally a systemd unit. Run it once, then start <code>s
 <tbody>
 <tr>
 <td><code>--db</code></td>
-<td><code>railwarden.db</code></td>
+<td><code>switchtender.db</code></td>
 <td>SQLite database path.</td>
 </tr>
 <tr>
 <td><code>--config</code></td>
-<td><code>railwarden.env</code></td>
+<td><code>switchtender.env</code></td>
 <td>Environment file to write.</td>
 </tr>
 <tr>
@@ -144,7 +144,7 @@ environment file, and optionally a systemd unit. Run it once, then start <code>s
 </tr>
 </tbody>
 </table>
-<p>The admin password comes from <code>RAILWARDEN_ADMIN_PASSWORD</code>, or is generated and printed once when
+<p>The admin password comes from <code>SWITCHTENDER_ADMIN_PASSWORD</code>, or is generated and printed once when
 that variable is unset.</p>
 <h2 id="serve">serve</h2>
 <p>Runs the HTTP API, the in-process executor, the scheduler, the retention sweeper, and the web UI.</p>
@@ -164,7 +164,7 @@ that variable is unset.</p>
 </tr>
 <tr>
 <td><code>--db</code></td>
-<td><code>railwarden.db</code></td>
+<td><code>switchtender.db</code></td>
 <td>SQLite file path, or a <code>postgres://</code> DSN for the PostgreSQL backend.</td>
 </tr>
 <tr>
@@ -375,7 +375,7 @@ that variable is unset.</p>
 <tr>
 <td><code>--plugins-dir</code></td>
 <td>none</td>
-<td>Directory of extension plugin binaries loaded at startup. Also <code>RAILWARDEN_PLUGINS_DIR</code>. See <a href="/docs/sdk">Extend in Go</a>.</td>
+<td>Directory of extension plugin binaries loaded at startup. Also <code>SWITCHTENDER_PLUGINS_DIR</code>. See <a href="/docs/sdk">Extend in Go</a>.</td>
 </tr>
 <tr>
 <td><code>--retain-runs</code></td>
@@ -410,7 +410,7 @@ that variable is unset.</p>
 <tr>
 <td><code>--smtp-username</code></td>
 <td>none</td>
-<td>SMTP username. The password comes from <code>RAILWARDEN_SMTP_PASSWORD</code>.</td>
+<td>SMTP username. The password comes from <code>SWITCHTENDER_SMTP_PASSWORD</code>.</td>
 </tr>
 <tr>
 <td><code>--notify-on</code></td>
@@ -423,18 +423,18 @@ that variable is unset.</p>
 syntax such as <code>720h</code>.</p>
 <h3 id="ai-providers">AI providers</h3>
 <p>The advisory AI features run against one provider, chosen with <code>--ai-provider</code>: <code>ollama</code> for a local
-model, or <code>anthropic</code> and <code>openai</code> for a cloud model with <code>RAILWARDEN_AI_KEY</code>. The provider is off
+model, or <code>anthropic</code> and <code>openai</code> for a cloud model with <code>SWITCHTENDER_AI_KEY</code>. The provider is off
 until set, and no feature ever executes anything the provider suggests.</p>
 <p>Cloud models see automation content: commands, playbook names, failed-run logs, and host drift.
 Because that content is security-adjacent, a model with strict safety classifiers can decline a
-benign request as a false positive. When the Anthropic model is a Fable or Mythos model, Railwarden
+benign request as a false positive. When the Anthropic model is a Fable or Mythos model, SwitchTender
 opts into server-side fallbacks, so a declined request is retried on <code>claude-opus-4-8</code> in the same
 call and the feature keeps working. A Fable model also requires that the account keep 30-day data
 retention, or the API rejects every request.</p>
 <h2 id="desktop">desktop</h2>
-<p>Runs Railwarden as a local desktop application: it serves on a private loopback port, stores its
+<p>Runs SwitchTender as a local desktop application: it serves on a private loopback port, stores its
 data in a per-user directory, and opens the web UI in the default browser. It takes no flags. Set
-<code>RAILWARDEN_DESKTOP_NO_BROWSER</code> to skip opening a browser. See <a href="/docs/desktop">Desktop</a> for packaging a
+<code>SWITCHTENDER_DESKTOP_NO_BROWSER</code> to skip opening a browser. See <a href="/docs/desktop">Desktop</a> for packaging a
 macOS app or a Windows installer.</p>
 <h2 id="worker">worker</h2>
 <p>Leases pending runs from the shared store and executes them. Point it and a server at the same
@@ -450,7 +450,7 @@ database and they compete for work.</p>
 <tbody>
 <tr>
 <td><code>--db</code></td>
-<td><code>railwarden.db</code></td>
+<td><code>switchtender.db</code></td>
 <td>SQLite file path, or a <code>postgres://</code> DSN.</td>
 </tr>
 <tr>
@@ -471,7 +471,7 @@ database and they compete for work.</p>
 <tr>
 <td><code>--plugins-dir</code></td>
 <td>none</td>
-<td>Directory of extension plugin binaries loaded at startup. Also <code>RAILWARDEN_PLUGINS_DIR</code>.</td>
+<td>Directory of extension plugin binaries loaded at startup. Also <code>SWITCHTENDER_PLUGINS_DIR</code>.</td>
 </tr>
 <tr>
 <td><code>--container-memory</code></td>
@@ -508,7 +508,7 @@ expires.</li>
 <p>Manages accounts with roles: admin, operator, and viewer.</p>
 <ul>
 <li><code>user new &lt;username&gt; --role &lt;role&gt;</code> creates an account. The password comes from
-<code>RAILWARDEN_PASSWORD</code> or a prompt, never an argument.</li>
+<code>SWITCHTENDER_PASSWORD</code> or a prompt, never an argument.</li>
 <li><code>user list</code> lists accounts.</li>
 <li><code>user delete &lt;id&gt;</code> deletes an account. Its tokens stop working.</li>
 </ul>

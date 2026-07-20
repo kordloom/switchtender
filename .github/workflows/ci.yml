@@ -13,18 +13,18 @@ jobs:
       postgres:
         image: postgres:16
         env:
-          POSTGRES_USER: yard
-          POSTGRES_PASSWORD: yard
-          POSTGRES_DB: yard
+          POSTGRES_USER: switchtender
+          POSTGRES_PASSWORD: switchtender
+          POSTGRES_DB: switchtender
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U yard"
+          --health-cmd "pg_isready -U switchtender"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
     env:
-      RAILWARDEN_TEST_POSTGRES_DSN: postgres://yard:yard@localhost:5432/yard?sslmode=disable
+      SWITCHTENDER_TEST_POSTGRES_DSN: postgres://switchtender:switchtender@localhost:5432/switchtender?sslmode=disable
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5

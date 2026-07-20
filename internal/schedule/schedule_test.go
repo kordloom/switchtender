@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dcadolph/railwarden/internal/schedule"
-	"github.com/dcadolph/railwarden/internal/scheduletest"
+	"github.com/dcadolph/switchtender/internal/schedule"
+	"github.com/dcadolph/switchtender/internal/scheduletest"
 )
 
 func TestMemStoreContract(t *testing.T) {

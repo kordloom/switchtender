@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="../assets/logo-letters-dark.png">
-    <img src="../assets/logo-letters.png" alt="Railwarden" width="140">
+    <source media="(prefers-color-scheme: dark)" srcset="../assets/logo-train-dark.png">
+    <img src="../assets/logo-train.png" alt="SwitchTender" width="140">
   </picture>
 </p>
 
@@ -23,7 +23,7 @@ a run never blocks on a prompt.
   a variable named `region` becomes `TF_VAR_region`. Scalars pass through as strings, lists and maps
   pass as JSON, which Terraform accepts.
 - Credentials arrive in the environment, so an `env` credential of cloud keys or a `token` credential
-  as `RAILWARDEN_TOKEN` authenticates the provider. A command-source credential resolves fresh each
+  as `SWITCHTENDER_TOKEN` authenticates the provider. A command-source credential resolves fresh each
   run.
 - The command directory cannot escape the project with `..`, so a run stays inside its checkout.
 

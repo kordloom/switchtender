@@ -10,7 +10,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/railwarden/internal/ui"
+	"github.com/dcadolph/switchtender/internal/ui"
 )
 
 func TestUIRoutes(t *testing.T) {

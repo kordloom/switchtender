@@ -1,4 +1,4 @@
-// Package demo seeds a Railwarden store with lifelike sample data by running real jobs through the
+// Package demo seeds a SwitchTender store with lifelike sample data by running real jobs through the
 // engine: Ansible playbooks plus Bash, Python, Terraform, and Go. A public read-only instance then shows
 // genuine host matrices, split runs, mixed-tool pipelines, and cross-run fleet memory rather than
 // fabricated records.
@@ -16,13 +16,13 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/railwarden/internal/credential"
-	"github.com/dcadolph/railwarden/internal/inventory"
-	"github.com/dcadolph/railwarden/internal/policy"
-	"github.com/dcadolph/railwarden/internal/project"
-	"github.com/dcadolph/railwarden/internal/run"
-	"github.com/dcadolph/railwarden/internal/template"
-	"github.com/dcadolph/railwarden/internal/user"
+	"github.com/dcadolph/switchtender/internal/credential"
+	"github.com/dcadolph/switchtender/internal/inventory"
+	"github.com/dcadolph/switchtender/internal/policy"
+	"github.com/dcadolph/switchtender/internal/project"
+	"github.com/dcadolph/switchtender/internal/run"
+	"github.com/dcadolph/switchtender/internal/template"
+	"github.com/dcadolph/switchtender/internal/user"
 )
 
 // assets holds the playbook, inventory, and Terraform configuration the seeder runs.
@@ -233,7 +233,7 @@ func waitTerminal(ctx context.Context, store run.Store, id string) {
 // materialize writes the embedded assets to a temp directory, recreating their tree, and returns its
 // path. The tree carries the Ansible playbook and inventory plus the Terraform working directory.
 func materialize() (string, error) {
-	dir, err := os.MkdirTemp("", "railwarden-demo-")
+	dir, err := os.MkdirTemp("", "switchtender-demo-")
 	if err != nil {
 		return "", err
 	}

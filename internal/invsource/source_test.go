@@ -3,8 +3,8 @@ package invsource_test
 import (
 	"testing"
 
-	"github.com/dcadolph/railwarden/internal/invsource"
-	"github.com/dcadolph/railwarden/internal/invsourcetest"
+	"github.com/dcadolph/switchtender/internal/invsource"
+	"github.com/dcadolph/switchtender/internal/invsourcetest"
 )
 
 func TestMemStoreContract(t *testing.T) {

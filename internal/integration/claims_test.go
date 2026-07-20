@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dcadolph/railwarden/internal/run"
+	"github.com/dcadolph/switchtender/internal/run"
 )
 
 // waitStatus polls a run until it reaches the wanted status, failing if it turns terminal first or
@@ -62,7 +62,7 @@ func TestRealSSHPipelineDAGSkip(t *testing.T) {
     - name: Touch a marker
       ansible.builtin.copy:
         content: "should not exist\n"
-        dest: /tmp/railwarden-after
+        dest: /tmp/switchtender-after
 `)
 	base := startServer(t)
 
@@ -148,7 +148,7 @@ func TestRealSSHDrift(t *testing.T) {
     - name: Ensure a marker that is not there yet
       ansible.builtin.copy:
         content: "drift\n"
-        dest: /tmp/railwarden-drift-marker
+        dest: /tmp/switchtender-drift-marker
 `)
 	base := startServer(t)
 

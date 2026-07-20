@@ -10,11 +10,11 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/railwarden/internal/dispatch"
-	"github.com/dcadolph/railwarden/internal/pgstore"
-	"github.com/dcadolph/railwarden/internal/roundhouse"
-	"github.com/dcadolph/railwarden/internal/run"
-	"github.com/dcadolph/railwarden/internal/schedule"
+	"github.com/dcadolph/switchtender/internal/dispatch"
+	"github.com/dcadolph/switchtender/internal/pgstore"
+	"github.com/dcadolph/switchtender/internal/roundhouse"
+	"github.com/dcadolph/switchtender/internal/run"
+	"github.com/dcadolph/switchtender/internal/schedule"
 )
 
 // openReplica opens an independent connection to the shared test database, standing in for one

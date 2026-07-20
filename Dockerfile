@@ -4,11 +4,11 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -trimpath -o /railwarden .
+RUN CGO_ENABLED=0 go build -trimpath -o /switchtender .
 
 FROM alpine:3.20
 RUN apk add --no-cache ansible-core openssh-client ca-certificates
-COPY --from=build /railwarden /usr/local/bin/railwarden
+COPY --from=build /switchtender /usr/local/bin/switchtender
 EXPOSE 8080
-ENTRYPOINT ["railwarden"]
+ENTRYPOINT ["switchtender"]
 CMD ["serve", "--addr", ":8080"]

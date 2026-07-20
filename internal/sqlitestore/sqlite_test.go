@@ -2,47 +2,47 @@ package sqlitestore_test
 
 import (
 	"context"
-	"github.com/dcadolph/railwarden/internal/audit"
-	"github.com/dcadolph/railwarden/internal/audittest"
-	"github.com/dcadolph/railwarden/internal/auth"
-	"github.com/dcadolph/railwarden/internal/authtest"
-	"github.com/dcadolph/railwarden/internal/credential"
-	"github.com/dcadolph/railwarden/internal/credtest"
-	"github.com/dcadolph/railwarden/internal/grant"
-	"github.com/dcadolph/railwarden/internal/granttest"
-	"github.com/dcadolph/railwarden/internal/inventory"
-	"github.com/dcadolph/railwarden/internal/inventorytest"
-	"github.com/dcadolph/railwarden/internal/invsource"
-	"github.com/dcadolph/railwarden/internal/invsourcetest"
-	"github.com/dcadolph/railwarden/internal/policy"
-	"github.com/dcadolph/railwarden/internal/policytest"
-	"github.com/dcadolph/railwarden/internal/project"
-	"github.com/dcadolph/railwarden/internal/projecttest"
-	"github.com/dcadolph/railwarden/internal/team"
-	"github.com/dcadolph/railwarden/internal/teamtest"
-	"github.com/dcadolph/railwarden/internal/template"
-	"github.com/dcadolph/railwarden/internal/templatetest"
-	"github.com/dcadolph/railwarden/internal/trigger"
-	"github.com/dcadolph/railwarden/internal/triggertest"
-	"github.com/dcadolph/railwarden/internal/user"
-	"github.com/dcadolph/railwarden/internal/usertest"
+	"github.com/dcadolph/switchtender/internal/audit"
+	"github.com/dcadolph/switchtender/internal/audittest"
+	"github.com/dcadolph/switchtender/internal/auth"
+	"github.com/dcadolph/switchtender/internal/authtest"
+	"github.com/dcadolph/switchtender/internal/credential"
+	"github.com/dcadolph/switchtender/internal/credtest"
+	"github.com/dcadolph/switchtender/internal/grant"
+	"github.com/dcadolph/switchtender/internal/granttest"
+	"github.com/dcadolph/switchtender/internal/inventory"
+	"github.com/dcadolph/switchtender/internal/inventorytest"
+	"github.com/dcadolph/switchtender/internal/invsource"
+	"github.com/dcadolph/switchtender/internal/invsourcetest"
+	"github.com/dcadolph/switchtender/internal/policy"
+	"github.com/dcadolph/switchtender/internal/policytest"
+	"github.com/dcadolph/switchtender/internal/project"
+	"github.com/dcadolph/switchtender/internal/projecttest"
+	"github.com/dcadolph/switchtender/internal/team"
+	"github.com/dcadolph/switchtender/internal/teamtest"
+	"github.com/dcadolph/switchtender/internal/template"
+	"github.com/dcadolph/switchtender/internal/templatetest"
+	"github.com/dcadolph/switchtender/internal/trigger"
+	"github.com/dcadolph/switchtender/internal/triggertest"
+	"github.com/dcadolph/switchtender/internal/user"
+	"github.com/dcadolph/switchtender/internal/usertest"
 	"path/filepath"
 	"testing"
 	"time"
 
 	_ "modernc.org/sqlite"
 
-	"github.com/dcadolph/railwarden/internal/run"
-	"github.com/dcadolph/railwarden/internal/schedule"
-	"github.com/dcadolph/railwarden/internal/scheduletest"
-	"github.com/dcadolph/railwarden/internal/sqlitestore"
-	"github.com/dcadolph/railwarden/internal/storetest"
+	"github.com/dcadolph/switchtender/internal/run"
+	"github.com/dcadolph/switchtender/internal/schedule"
+	"github.com/dcadolph/switchtender/internal/scheduletest"
+	"github.com/dcadolph/switchtender/internal/sqlitestore"
+	"github.com/dcadolph/switchtender/internal/storetest"
 )
 
 func TestStoreContract(t *testing.T) {
 	t.Parallel()
 	storetest.Contract(t, func() run.Store {
-		db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "railwarden.db"))
+		db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "switchtender.db"))
 		if err != nil {
 			t.Fatalf("Open() error = %v", err)
 		}
@@ -54,7 +54,7 @@ func TestStoreContract(t *testing.T) {
 func TestScheduleStoreContract(t *testing.T) {
 	t.Parallel()
 	scheduletest.Contract(t, func() schedule.Store {
-		db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "railwarden.db"))
+		db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "switchtender.db"))
 		if err != nil {
 			t.Fatalf("Open() error = %v", err)
 		}
@@ -66,7 +66,7 @@ func TestScheduleStoreContract(t *testing.T) {
 func TestTokenStoreContract(t *testing.T) {
 	t.Parallel()
 	authtest.Contract(t, func() auth.Store {
-		db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "railwarden.db"))
+		db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "switchtender.db"))
 		if err != nil {
 			t.Fatalf("Open() error = %v", err)
 		}
@@ -78,7 +78,7 @@ func TestTokenStoreContract(t *testing.T) {
 func TestCredentialStoreContract(t *testing.T) {
 	t.Parallel()
 	credtest.Contract(t, func() credential.Store {
-		db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "railwarden.db"))
+		db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "switchtender.db"))
 		if err != nil {
 			t.Fatalf("Open() error = %v", err)
 		}
@@ -90,7 +90,7 @@ func TestCredentialStoreContract(t *testing.T) {
 func TestProjectStoreContract(t *testing.T) {
 	t.Parallel()
 	projecttest.Contract(t, func() project.Store {
-		db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "railwarden.db"))
+		db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "switchtender.db"))
 		if err != nil {
 			t.Fatalf("Open() error = %v", err)
 		}
@@ -102,7 +102,7 @@ func TestProjectStoreContract(t *testing.T) {
 func TestTemplateStoreContract(t *testing.T) {
 	t.Parallel()
 	templatetest.Contract(t, func() template.Store {
-		db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "railwarden.db"))
+		db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "switchtender.db"))
 		if err != nil {
 			t.Fatalf("Open() error = %v", err)
 		}
@@ -114,7 +114,7 @@ func TestTemplateStoreContract(t *testing.T) {
 func TestUserStoreContract(t *testing.T) {
 	t.Parallel()
 	usertest.Contract(t, func() user.Store {
-		db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "railwarden.db"))
+		db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "switchtender.db"))
 		if err != nil {
 			t.Fatalf("Open() error = %v", err)
 		}
@@ -126,7 +126,7 @@ func TestUserStoreContract(t *testing.T) {
 func TestInventoryStoreContract(t *testing.T) {
 	t.Parallel()
 	inventorytest.Contract(t, func() inventory.Store {
-		db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "railwarden.db"))
+		db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "switchtender.db"))
 		if err != nil {
 			t.Fatalf("Open() error = %v", err)
 		}
@@ -138,7 +138,7 @@ func TestInventoryStoreContract(t *testing.T) {
 func TestPolicyStoreContract(t *testing.T) {
 	t.Parallel()
 	policytest.Contract(t, func() policy.Store {
-		db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "railwarden.db"))
+		db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "switchtender.db"))
 		if err != nil {
 			t.Fatalf("Open() error = %v", err)
 		}
@@ -150,7 +150,7 @@ func TestPolicyStoreContract(t *testing.T) {
 func TestAuditStoreContract(t *testing.T) {
 	t.Parallel()
 	audittest.Contract(t, func() audit.Store {
-		db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "railwarden.db"))
+		db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "switchtender.db"))
 		if err != nil {
 			t.Fatalf("Open() error = %v", err)
 		}
@@ -162,7 +162,7 @@ func TestAuditStoreContract(t *testing.T) {
 func TestInvSourceStoreContract(t *testing.T) {
 	t.Parallel()
 	invsourcetest.Contract(t, func() invsource.Store {
-		db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "railwarden.db"))
+		db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "switchtender.db"))
 		if err != nil {
 			t.Fatalf("Open() error = %v", err)
 		}
@@ -174,7 +174,7 @@ func TestInvSourceStoreContract(t *testing.T) {
 func TestTriggerStoreContract(t *testing.T) {
 	t.Parallel()
 	triggertest.Contract(t, func() trigger.Store {
-		db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "railwarden.db"))
+		db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "switchtender.db"))
 		if err != nil {
 			t.Fatalf("Open() error = %v", err)
 		}
@@ -186,7 +186,7 @@ func TestTriggerStoreContract(t *testing.T) {
 func TestTeamStoreContract(t *testing.T) {
 	t.Parallel()
 	teamtest.Contract(t, func() team.Store {
-		db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "railwarden.db"))
+		db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "switchtender.db"))
 		if err != nil {
 			t.Fatalf("Open() error = %v", err)
 		}
@@ -198,7 +198,7 @@ func TestTeamStoreContract(t *testing.T) {
 func TestTeamForeignKeyEnforced(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "railwarden.db"))
+	db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "switchtender.db"))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -228,7 +228,7 @@ func TestTeamForeignKeyEnforced(t *testing.T) {
 func TestGrantStoreContract(t *testing.T) {
 	t.Parallel()
 	granttest.Contract(t, func() grant.Store {
-		db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "railwarden.db"))
+		db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "switchtender.db"))
 		if err != nil {
 			t.Fatalf("Open() error = %v", err)
 		}

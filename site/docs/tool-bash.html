@@ -3,13 +3,13 @@
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
-	<title>Bash runs · Railwarden docs</title>
+	<title>Bash runs · SwitchTender docs</title>
 	<meta name="description" content="A Bash run executes a shell script with bash -c. The script is the run&#39;s command, so it can drive any tool on the host: kubectl, aws, terraform, make, and so on.">
-	<link rel="canonical" href="https://railwarden.dev/docs/tool-bash">
-	<meta property="og:title" content="Bash runs · Railwarden docs">
+	<link rel="canonical" href="https://switchtender.com/docs/tool-bash">
+	<meta property="og:title" content="Bash runs · SwitchTender docs">
 	<meta property="og:description" content="A Bash run executes a shell script with bash -c. The script is the run&#39;s command, so it can drive any tool on the host: kubectl, aws, terraform, make, and so on.">
 	<meta property="og:type" content="article">
-	<meta property="og:url" content="https://railwarden.dev/docs/tool-bash">
+	<meta property="og:url" content="https://switchtender.com/docs/tool-bash">
 	<link rel="icon" href="/favicon.ico" sizes="any">
 	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
 	<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
@@ -20,18 +20,18 @@
 </head>
 <body>
 	<header class="dnav">
-		<a class="brand" href="/"><img src="/assets/logo-train-tracks-dark.png" alt="Railwarden" class="brand-train"><span class="brand-word">Railwarden</span></a>
+		<a class="brand" href="/"><img src="/assets/logo-train-tracks-dark.png" alt="SwitchTender" class="brand-train"><span class="brand-word">SwitchTender</span></a>
 		<span class="dnav-tag">Docs</span>
 		<nav class="dnav-links">
 			<a href="/">Home</a>
 			<a href="/#compare">Compare</a>
-			<a href="https://github.com/dcadolph/railwarden">GitHub</a>
+			<a href="https://github.com/dcadolph/switchtender">GitHub</a>
 		</nav>
 	</header>
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-bash" class="active">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/sdk">Extend Railwarden in Go</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/ai">Advisory AI</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">Railwarden compared to AWX and Semaphore</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-bash" class="active">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to AWX and Semaphore</a><a href="/docs/ai">Advisory AI</a><a href="/docs/sdk">Extend SwitchTender in Go</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
@@ -46,16 +46,16 @@ parses the script and reports syntax errors without executing it.</p>
 <h2 id="how-values-reach-the-script">How values reach the script</h2>
 <ul>
 <li>
-<p>Extra vars, including survey answers and template vars, arrive as <code>RAILWARDEN_VARS</code>, a JSON object.
+<p>Extra vars, including survey answers and template vars, arrive as <code>SWITCHTENDER_VARS</code>, a JSON object.
 Read a value with <code>jq</code>:</p>
-<pre><code>  region=$(printf '%s' &quot;$RAILWARDEN_VARS&quot; | jq -r .region)
+<pre><code>  region=$(printf '%s' &quot;$SWITCHTENDER_VARS&quot; | jq -r .region)
 </code></pre>
 </li>
 <li>
 <p>An <code>env</code> credential's <code>KEY=VALUE</code> lines are set in the environment directly.</p>
 </li>
 <li>
-<p>A <code>token</code> credential is set as <code>RAILWARDEN_TOKEN</code>.</p>
+<p>A <code>token</code> credential is set as <code>SWITCHTENDER_TOKEN</code>.</p>
 </li>
 <li>
 <p>Credentials attached to the run's <a href="/docs/tutorial-set-a-secret">inventory</a> arrive the same way, so a
@@ -64,7 +64,7 @@ fleet's secret variables reach the script without naming them on the run.</p>
 </ul>
 <h2 id="example">Example</h2>
 <pre><code>set -euo pipefail
-region=$(printf '%s' &quot;$RAILWARDEN_VARS&quot; | jq -r '.region // &quot;us-east-1&quot;')
+region=$(printf '%s' &quot;$SWITCHTENDER_VARS&quot; | jq -r '.region // &quot;us-east-1&quot;')
 echo &quot;Draining $region&quot;
 kubectl --context &quot;$region&quot; drain node-1 --ignore-daemonsets
 </code></pre>

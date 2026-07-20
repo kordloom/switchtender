@@ -1,5 +1,5 @@
 apiVersion: v2
-name: railwarden
+name: switchtender
 description: Playbook execution and fleet orchestration, an alternative to AWX and Semaphore.
 type: application
 version: 0.1.0

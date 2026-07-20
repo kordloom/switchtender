@@ -8,11 +8,11 @@ import (
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/railwarden/internal/dispatch"
-	"github.com/dcadolph/railwarden/internal/extplugin"
-	"github.com/dcadolph/railwarden/internal/logutil"
-	"github.com/dcadolph/railwarden/internal/project"
-	"github.com/dcadolph/railwarden/internal/roundhouse"
+	"github.com/dcadolph/switchtender/internal/dispatch"
+	"github.com/dcadolph/switchtender/internal/extplugin"
+	"github.com/dcadolph/switchtender/internal/logutil"
+	"github.com/dcadolph/switchtender/internal/project"
+	"github.com/dcadolph/switchtender/internal/roundhouse"
 )
 
 // workerDB holds the value of the worker --db flag.
@@ -30,12 +30,12 @@ var workerAllowContainerEE bool
 // workerPluginsDir holds the value of the worker --plugins-dir flag.
 var workerPluginsDir string
 
-// workerCmd runs a Railwarden worker: a process that leases pending runs from the shared store,
+// workerCmd runs a SwitchTender worker: a process that leases pending runs from the shared store,
 // executes them, and streams results back. Point it and a server at the same database, a
 // PostgreSQL DSN for separate machines, and they compete for work.
 var workerCmd = &cobra.Command{
 	Use:   "worker",
-	Short: "Run a Railwarden worker that executes runs from the shared store.",
+	Short: "Run a SwitchTender worker that executes runs from the shared store.",
 	RunE:  runWorker,
 }
 
@@ -50,7 +50,7 @@ func init() {
 	workerCmd.Flags().BoolVar(&workerAllowContainerEE, "allow-container-ee", false,
 		"Allow runs whose project pins a container image to execute inside that image. Needs Docker.")
 	workerCmd.Flags().StringVar(&workerPluginsDir, "plugins-dir", "",
-		"Directory of extension plugin binaries to load at startup. Empty loads none. Also RAILWARDEN_PLUGINS_DIR.")
+		"Directory of extension plugin binaries to load at startup. Empty loads none. Also SWITCHTENDER_PLUGINS_DIR.")
 	registerContainerFlags(workerCmd)
 }
 
@@ -95,7 +95,7 @@ func runWorker(cmd *cobra.Command, _ []string) error {
 	disp := dispatch.New(store, roundhouse.NewSelectiveRunner(workerAllowContainerEE, containerLimitsFromFlags()), log, opts...)
 	defer disp.Close()
 
-	log.Info("railwarden worker started",
+	log.Info("switchtender worker started",
 		zap.String("owner", disp.Owner()), zap.String("db", redactDSN(workerDB)))
 
 	ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)

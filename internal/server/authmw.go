@@ -9,9 +9,9 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/railwarden/internal/audit"
-	"github.com/dcadolph/railwarden/internal/auth"
-	"github.com/dcadolph/railwarden/internal/user"
+	"github.com/dcadolph/switchtender/internal/audit"
+	"github.com/dcadolph/switchtender/internal/auth"
+	"github.com/dcadolph/switchtender/internal/user"
 )
 
 // enforcementCacheTTL bounds how often the middleware re-checks whether any tokens exist.
@@ -204,9 +204,9 @@ func roleAllows(have, need user.Role) bool {
 	return rank[have] >= rank[need]
 }
 
-// looksLikeJWT reports whether a bearer credential is a JWT rather than a Railwarden token, so the
+// looksLikeJWT reports whether a bearer credential is a JWT rather than a SwitchTender token, so the
 // gate routes it to JWT validation. A JWT is three base64 segments joined by two dots, which a
-// Railwarden token never carries.
+// SwitchTender token never carries.
 func looksLikeJWT(s string) bool {
 	return strings.Count(s, ".") == 2
 }

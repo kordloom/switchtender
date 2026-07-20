@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/dcadolph/railwarden/internal/grant"
+	"github.com/dcadolph/switchtender/internal/grant"
 )
 
 // grantColumns is the shared select list for grant reads.

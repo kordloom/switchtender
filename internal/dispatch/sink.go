@@ -5,7 +5,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/railwarden/internal/run"
+	"github.com/dcadolph/switchtender/internal/run"
 )
 
 // logSink is an io.Writer that appends process output to a run's stored log and publishes it live.

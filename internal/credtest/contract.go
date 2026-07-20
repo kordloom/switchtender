@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dcadolph/railwarden/internal/credential"
+	"github.com/dcadolph/switchtender/internal/credential"
 )
 
 // Contract runs the credential.Store contract against a fresh store from newStore.

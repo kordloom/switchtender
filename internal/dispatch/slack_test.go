@@ -13,8 +13,8 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
-	"github.com/dcadolph/railwarden/internal/roundhouse"
-	"github.com/dcadolph/railwarden/internal/run"
+	"github.com/dcadolph/switchtender/internal/roundhouse"
+	"github.com/dcadolph/switchtender/internal/run"
 )
 
 func TestSlackMessage(t *testing.T) {
@@ -28,19 +28,19 @@ func TestSlackMessage(t *testing.T) {
 		In: &run.Run{
 			Playbook: "deploy.yml", Status: run.StatusSucceeded, StartedAt: &start, EndedAt: &end,
 		},
-		Want: ":white_check_mark: Railwarden run *deploy.yml* succeeded in 1m30s",
+		Want: ":white_check_mark: SwitchTender run *deploy.yml* succeeded in 1m30s",
 	}, { // Test 1: A failed run uses the cross icon and appends the error.
 		In: &run.Run{
 			Playbook: "deploy.yml", Status: run.StatusFailed, Error: "exit status 2",
 			StartedAt: &start, EndedAt: &end,
 		},
-		Want: ":x: Railwarden run *deploy.yml* failed in 1m30s\n> exit status 2",
+		Want: ":x: SwitchTender run *deploy.yml* failed in 1m30s\n> exit status 2",
 	}, { // Test 2: A run without timing omits the elapsed clause.
 		In:   &run.Run{Command: "terraform apply", Tool: "terraform", Status: run.StatusSucceeded},
-		Want: ":white_check_mark: Railwarden run *terraform apply* succeeded",
+		Want: ":white_check_mark: SwitchTender run *terraform apply* succeeded",
 	}, { // Test 3: A run with no label falls back to the id.
 		In:   &run.Run{ID: "r-1", Status: run.StatusSucceeded},
-		Want: ":white_check_mark: Railwarden run *r-1* succeeded",
+		Want: ":white_check_mark: SwitchTender run *r-1* succeeded",
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {

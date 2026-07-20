@@ -3,13 +3,13 @@
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
-	<title>Switching from AWX · Railwarden docs</title>
-	<meta name="description" content="This guide assumes you know AWX and have never run Railwarden.">
-	<link rel="canonical" href="https://railwarden.dev/docs/switching-from-awx">
-	<meta property="og:title" content="Switching from AWX · Railwarden docs">
-	<meta property="og:description" content="This guide assumes you know AWX and have never run Railwarden.">
+	<title>Switching from AWX · SwitchTender docs</title>
+	<meta name="description" content="This guide assumes you know AWX and have never run SwitchTender.">
+	<link rel="canonical" href="https://switchtender.com/docs/switching-from-awx">
+	<meta property="og:title" content="Switching from AWX · SwitchTender docs">
+	<meta property="og:description" content="This guide assumes you know AWX and have never run SwitchTender.">
 	<meta property="og:type" content="article">
-	<meta property="og:url" content="https://railwarden.dev/docs/switching-from-awx">
+	<meta property="og:url" content="https://switchtender.com/docs/switching-from-awx">
 	<link rel="icon" href="/favicon.ico" sizes="any">
 	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
 	<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
@@ -20,27 +20,27 @@
 </head>
 <body>
 	<header class="dnav">
-		<a class="brand" href="/"><img src="/assets/logo-train-tracks-dark.png" alt="Railwarden" class="brand-train"><span class="brand-word">Railwarden</span></a>
+		<a class="brand" href="/"><img src="/assets/logo-train-tracks-dark.png" alt="SwitchTender" class="brand-train"><span class="brand-word">SwitchTender</span></a>
 		<span class="dnav-tag">Docs</span>
 		<nav class="dnav-links">
 			<a href="/">Home</a>
 			<a href="/#compare">Compare</a>
-			<a href="https://github.com/dcadolph/railwarden">GitHub</a>
+			<a href="https://github.com/dcadolph/switchtender">GitHub</a>
 		</nav>
 	</header>
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx" class="active">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/sdk">Extend Railwarden in Go</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/ai">Advisory AI</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">Railwarden compared to AWX and Semaphore</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx" class="active">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to AWX and Semaphore</a><a href="/docs/ai">Advisory AI</a><a href="/docs/sdk">Extend SwitchTender in Go</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
 			<h1 id="switching-from-awx">Switching from AWX</h1>
-<p>This guide assumes you know AWX and have never run Railwarden. It gets you from an AWX setup to a
-working Railwarden run two ways: import what you already have, or build it from scratch to learn the
+<p>This guide assumes you know AWX and have never run SwitchTender. It gets you from an AWX setup to a
+working SwitchTender run two ways: import what you already have, or build it from scratch to learn the
 pieces. If a term is unfamiliar, the <a href="/docs/concepts">concepts</a> page defines it.</p>
 <h2 id="what-is-different-in-one-paragraph">What is different, in one paragraph</h2>
-<p>Railwarden runs the same playbooks against the same inventories, and drives Bash, Terraform, and
+<p>SwitchTender runs the same playbooks against the same inventories, and drives Bash, Terraform, and
 Python besides, but there is no Kubernetes, no Redis, and no separate task engine to operate. One
 binary is the API, the executor, the scheduler,
 and the UI. State is one database: a SQLite file to start, or PostgreSQL when you want more than one
@@ -51,7 +51,7 @@ just live behind a smaller, faster surface.</p>
 <thead>
 <tr>
 <th>In AWX</th>
-<th>In Railwarden</th>
+<th>In SwitchTender</th>
 </tr>
 </thead>
 <tbody>
@@ -106,7 +106,7 @@ just live behind a smaller, faster surface.</p>
 </tbody>
 </table>
 <h2 id="path-a-import-your-awx">Path A: import your AWX</h2>
-<p>The fast path. It reads an AWX export and creates the equivalent Railwarden objects.</p>
+<p>The fast path. It reads an AWX export and creates the equivalent SwitchTender objects.</p>
 <ol>
 <li>
 <p>Export from AWX with its own CLI: <code>awx export</code> produces a JSON document of your projects, inventories, job
@@ -115,12 +115,12 @@ templates, credentials without secrets, schedules, and surveys.</p>
 <li>
 <p>Preview the import. Nothing is written yet. You get a report of exactly what would be created and
 every warning.</p>
-<pre><code> railwarden import awx awx-export.json --db railwarden.db
+<pre><code> switchtender import awx awx-export.json --db switchtender.db
 </code></pre>
 </li>
 <li>
 <p>Apply it.</p>
-<pre><code> railwarden import awx awx-export.json --db railwarden.db --apply
+<pre><code> switchtender import awx awx-export.json --db switchtender.db --apply
 </code></pre>
 </li>
 <li>
@@ -137,14 +137,14 @@ then, everything else is already in place.</p>
 <p>Do this once to understand the pieces, even if you imported. It mirrors the order you would build a
 job template in AWX.</p>
 <h3 id="1-start-the-server">1. Start the server</h3>
-<pre><code>RAILWARDEN_ENCRYPTION_KEY=change-me RAILWARDEN_ENCRYPTION_SALT=change-me-too \
-  ./railwarden serve --addr :8080 --db railwarden.db
+<pre><code>SWITCHTENDER_ENCRYPTION_KEY=change-me SWITCHTENDER_ENCRYPTION_SALT=change-me-too \
+  ./switchtender serve --addr :8080 --db switchtender.db
 </code></pre>
 <p>The key and salt seal credentials at rest. Keep the salt stable across restarts. Open
 http://localhost:8080 for the UI. The API is open until you create the first account or token, so
 you can set up before locking it down.</p>
 <h3 id="2-create-your-first-account">2. Create your first account</h3>
-<pre><code>RAILWARDEN_PASSWORD=secret ./railwarden user new admin-you --role admin --db railwarden.db
+<pre><code>SWITCHTENDER_PASSWORD=secret ./switchtender user new admin-you --role admin --db switchtender.db
 </code></pre>
 <p>Sign in through the UI with that username and password. Roles are admin, operator, and viewer: admins
 manage configuration, operators launch and cancel runs, viewers read.</p>
@@ -158,7 +158,7 @@ select it on the project. Every run records the exact commit it executed.</p>
 <li><code>ssh_key</code>: an SSH private key, used to reach hosts and to clone private git projects.</li>
 <li><code>vault_password</code>: an Ansible Vault password.</li>
 <li><code>env</code>: <code>KEY=VALUE</code> lines injected into the run, how cloud SDK credentials reach plugins.</li>
-<li><code>token</code>: a single API token or JWT, exposed to the run as the <code>RAILWARDEN_TOKEN</code> environment variable.</li>
+<li><code>token</code>: a single API token or JWT, exposed to the run as the <code>SWITCHTENDER_TOKEN</code> environment variable.</li>
 <li><code>become_password</code>: a privilege escalation password, delivered without touching the command line.</li>
 <li><code>registry</code>: a container registry login, for pulling a pinned execution image.</li>
 </ul>
@@ -177,7 +177,7 @@ a text scroll.</p>
 <h3 id="8-add-capacity-and-schedules">8. Add capacity and schedules</h3>
 <p>Point a worker at the same database to add an executor, and give it a queue name to target specific
 work:</p>
-<pre><code>./railwarden worker --db railwarden.db --name worker-1
+<pre><code>./switchtender worker --db switchtender.db --name worker-1
 </code></pre>
 <p>Add a schedule in Schedules with a cron expression to fire a template on a cadence.</p>
 <h2 id="where-things-live-differently">Where things live differently</h2>

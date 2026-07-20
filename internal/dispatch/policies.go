@@ -3,8 +3,8 @@ package dispatch
 import (
 	"context"
 
-	"github.com/dcadolph/railwarden/internal/policy"
-	"github.com/dcadolph/railwarden/internal/run"
+	"github.com/dcadolph/switchtender/internal/policy"
+	"github.com/dcadolph/switchtender/internal/run"
 )
 
 // WithPolicies enforces approval policies on submitted runs: a run matching any stored policy is

@@ -3,13 +3,13 @@
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
-	<title>Migration · Railwarden docs</title>
-	<meta name="description" content="Railwarden imports an AWX or Semaphore export and creates the equivalent objects, so moving over is one command rather than a rebuild.">
-	<link rel="canonical" href="https://railwarden.dev/docs/migration">
-	<meta property="og:title" content="Migration · Railwarden docs">
-	<meta property="og:description" content="Railwarden imports an AWX or Semaphore export and creates the equivalent objects, so moving over is one command rather than a rebuild.">
+	<title>Migration · SwitchTender docs</title>
+	<meta name="description" content="SwitchTender imports an AWX or Semaphore export and creates the equivalent objects, so moving over is one command rather than a rebuild.">
+	<link rel="canonical" href="https://switchtender.com/docs/migration">
+	<meta property="og:title" content="Migration · SwitchTender docs">
+	<meta property="og:description" content="SwitchTender imports an AWX or Semaphore export and creates the equivalent objects, so moving over is one command rather than a rebuild.">
 	<meta property="og:type" content="article">
-	<meta property="og:url" content="https://railwarden.dev/docs/migration">
+	<meta property="og:url" content="https://switchtender.com/docs/migration">
 	<link rel="icon" href="/favicon.ico" sizes="any">
 	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
 	<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
@@ -20,23 +20,23 @@
 </head>
 <body>
 	<header class="dnav">
-		<a class="brand" href="/"><img src="/assets/logo-train-tracks-dark.png" alt="Railwarden" class="brand-train"><span class="brand-word">Railwarden</span></a>
+		<a class="brand" href="/"><img src="/assets/logo-train-tracks-dark.png" alt="SwitchTender" class="brand-train"><span class="brand-word">SwitchTender</span></a>
 		<span class="dnav-tag">Docs</span>
 		<nav class="dnav-links">
 			<a href="/">Home</a>
 			<a href="/#compare">Compare</a>
-			<a href="https://github.com/dcadolph/railwarden">GitHub</a>
+			<a href="https://github.com/dcadolph/switchtender">GitHub</a>
 		</nav>
 	</header>
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration" class="active">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/sdk">Extend Railwarden in Go</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/ai">Advisory AI</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">Railwarden compared to AWX and Semaphore</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration" class="active">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to AWX and Semaphore</a><a href="/docs/ai">Advisory AI</a><a href="/docs/sdk">Extend SwitchTender in Go</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
 			<h1 id="migration">Migration</h1>
-<p>Railwarden imports an AWX or Semaphore export and creates the equivalent objects, so moving over is
+<p>SwitchTender imports an AWX or Semaphore export and creates the equivalent objects, so moving over is
 one command rather than a rebuild.</p>
 <h2 id="get-an-export">Get an export</h2>
 <ul>
@@ -48,12 +48,12 @@ JSON.</li>
 <h2 id="preview-then-apply">Preview, then apply</h2>
 <p>Run the import without <code>--apply</code> first to see exactly what it would create, along with every
 warning:</p>
-<pre><code>railwarden import awx awx-export.json --db railwarden.db
+<pre><code>switchtender import awx awx-export.json --db switchtender.db
 </code></pre>
 <p>The report lists the projects, inventories, credentials, templates, and schedules that will be
 created, and calls out anything that could not be mapped cleanly. Apply it when the report looks
 right:</p>
-<pre><code>railwarden import awx awx-export.json --db railwarden.db --apply
+<pre><code>switchtender import awx awx-export.json --db switchtender.db --apply
 </code></pre>
 <p>Semaphore works the same way with <code>import semaphore</code>.</p>
 <h2 id="what-maps-to-what">What maps to what</h2>

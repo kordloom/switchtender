@@ -8,7 +8,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/railwarden/internal/credential"
+	"github.com/dcadolph/switchtender/internal/credential"
 )
 
 // createCredentialRequest is the JSON body accepted by POST /credentials. The secret arrives in
@@ -52,7 +52,7 @@ func createCredentialHandler(store credential.Store, sealer *credential.Sealer, 
 		}
 		if !sealer.Enabled() {
 			respondError(w, log, http.StatusConflict,
-				"credentials disabled: set RAILWARDEN_ENCRYPTION_KEY and RAILWARDEN_ENCRYPTION_SALT on the server")
+				"credentials disabled: set SWITCHTENDER_ENCRYPTION_KEY and SWITCHTENDER_ENCRYPTION_SALT on the server")
 			return
 		}
 		var req createCredentialRequest
@@ -143,7 +143,7 @@ func updateCredentialHandler(store credential.Store, sealer *credential.Sealer, 
 		if secret != "" {
 			if !sealer.Enabled() {
 				respondError(w, log, http.StatusConflict,
-					"credentials disabled: set RAILWARDEN_ENCRYPTION_KEY and RAILWARDEN_ENCRYPTION_SALT on the server")
+					"credentials disabled: set SWITCHTENDER_ENCRYPTION_KEY and SWITCHTENDER_ENCRYPTION_SALT on the server")
 				return
 			}
 			kind := c.Kind

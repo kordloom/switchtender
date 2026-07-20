@@ -3,13 +3,13 @@
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
-	<title>Concepts · Railwarden docs</title>
-	<meta name="description" content="A run is one execution of a playbook against an inventory. Railwarden shells out to ansible-playbook and captures both a human log and a structured event stream through an embedded callback plugin, so">
-	<link rel="canonical" href="https://railwarden.dev/docs/concepts">
-	<meta property="og:title" content="Concepts · Railwarden docs">
-	<meta property="og:description" content="A run is one execution of a playbook against an inventory. Railwarden shells out to ansible-playbook and captures both a human log and a structured event stream through an embedded callback plugin, so">
+	<title>Concepts · SwitchTender docs</title>
+	<meta name="description" content="A run is one execution of a playbook against an inventory. SwitchTender shells out to ansible-playbook and captures both a human log and a structured event stream through an embedded callback plugin">
+	<link rel="canonical" href="https://switchtender.com/docs/concepts">
+	<meta property="og:title" content="Concepts · SwitchTender docs">
+	<meta property="og:description" content="A run is one execution of a playbook against an inventory. SwitchTender shells out to ansible-playbook and captures both a human log and a structured event stream through an embedded callback plugin">
 	<meta property="og:type" content="article">
-	<meta property="og:url" content="https://railwarden.dev/docs/concepts">
+	<meta property="og:url" content="https://switchtender.com/docs/concepts">
 	<link rel="icon" href="/favicon.ico" sizes="any">
 	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
 	<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
@@ -20,24 +20,24 @@
 </head>
 <body>
 	<header class="dnav">
-		<a class="brand" href="/"><img src="/assets/logo-train-tracks-dark.png" alt="Railwarden" class="brand-train"><span class="brand-word">Railwarden</span></a>
+		<a class="brand" href="/"><img src="/assets/logo-train-tracks-dark.png" alt="SwitchTender" class="brand-train"><span class="brand-word">SwitchTender</span></a>
 		<span class="dnav-tag">Docs</span>
 		<nav class="dnav-links">
 			<a href="/">Home</a>
 			<a href="/#compare">Compare</a>
-			<a href="https://github.com/dcadolph/railwarden">GitHub</a>
+			<a href="https://github.com/dcadolph/switchtender">GitHub</a>
 		</nav>
 	</header>
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/sdk">Extend Railwarden in Go</a><a href="/docs/concepts" class="active">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/ai">Advisory AI</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">Railwarden compared to AWX and Semaphore</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts" class="active">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to AWX and Semaphore</a><a href="/docs/ai">Advisory AI</a><a href="/docs/sdk">Extend SwitchTender in Go</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
 			<h1 id="concepts">Concepts</h1>
 <h2 id="runs">Runs</h2>
-<p>A run is one execution of a playbook against an inventory. Railwarden shells out to
+<p>A run is one execution of a playbook against an inventory. SwitchTender shells out to
 <code>ansible-playbook</code> and captures both a human log and a structured event stream through an embedded
 callback plugin, so a run is queryable data, not just scrollback. Every run records its status,
 timing, exit code, the extra vars going in, and the <code>set_stats</code> outputs coming out.</p>
@@ -64,7 +64,7 @@ declare a survey.</p>
 runs the play. A dynamic inventory source runs an inventory plugin or script and refreshes the
 result into a stored inventory, with cloud authentication supplied by a credential.</p>
 <p>A stored inventory can also draw its content from an external store, a command, Vault, or Google
-Secret Manager, resolved at launch, so the host list lives outside Railwarden and is fetched fresh
+Secret Manager, resolved at launch, so the host list lives outside SwitchTender and is fetched fresh
 for each run.</p>
 <h2 id="triggers">Triggers</h2>
 <p>A webhook trigger is a URL that launches a template on an inbound git push. The project syncs
@@ -97,7 +97,7 @@ against it lands there, no matter how it was launched.</p>
 <p>Every authenticated mutation is recorded in the audit trail, and each entry is linked into a SHA-256
 hash chain: it carries the previous entry's hash and its own hash over its content. Altering,
 reordering, or deleting an entry breaks the chain, which <code>GET /audit/verify</code> detects. A signed export
-from <code>GET /audit/export</code> seals the chain with an ed25519 signature, so <code>railwarden audit verify</code>
+from <code>GET /audit/export</code> seals the chain with an ed25519 signature, so <code>switchtender audit verify</code>
 proves the trail is intact and unaltered offline, without trusting the server that produced it.</p>
 <h2 id="approvals">Approvals</h2>
 <p>A run can be marked to require approval. It is held in a pending-approval state that the claim loop

@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-// tokenPrefix marks Railwarden API tokens so leaked strings are recognizable in scanners.
+// tokenPrefix marks SwitchTender API tokens so leaked strings are recognizable in scanners.
 const tokenPrefix = "ymt_"
 
 // ErrNotFound is returned when a token does not exist in the store.

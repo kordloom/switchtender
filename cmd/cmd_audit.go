@@ -9,7 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dcadolph/railwarden/internal/audit"
+	"github.com/dcadolph/switchtender/internal/audit"
 )
 
 // auditCmd groups audit trail tools.
@@ -34,7 +34,7 @@ var auditVerifyCmd = &cobra.Command{
 // auditKeygenCmd mints an ed25519 signing key for audit exports.
 var auditKeygenCmd = &cobra.Command{
 	Use:   "keygen",
-	Short: "Generate an ed25519 audit signing key. Set the seed as RAILWARDEN_AUDIT_KEY.",
+	Short: "Generate an ed25519 audit signing key. Set the seed as SWITCHTENDER_AUDIT_KEY.",
 	RunE:  runAuditKeygen,
 }
 

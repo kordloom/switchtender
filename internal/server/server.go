@@ -1,4 +1,4 @@
-// Package server exposes the Railwarden HTTP API over the run store and dispatcher.
+// Package server exposes the SwitchTender HTTP API over the run store and dispatcher.
 package server
 
 import (
@@ -8,24 +8,24 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/railwarden/internal/ai"
-	"github.com/dcadolph/railwarden/internal/audit"
-	"github.com/dcadolph/railwarden/internal/auth"
-	"github.com/dcadolph/railwarden/internal/credential"
-	"github.com/dcadolph/railwarden/internal/grant"
-	"github.com/dcadolph/railwarden/internal/importer"
-	"github.com/dcadolph/railwarden/internal/inventory"
-	"github.com/dcadolph/railwarden/internal/invsource"
-	"github.com/dcadolph/railwarden/internal/live"
-	"github.com/dcadolph/railwarden/internal/policy"
-	"github.com/dcadolph/railwarden/internal/project"
-	"github.com/dcadolph/railwarden/internal/run"
-	"github.com/dcadolph/railwarden/internal/schedule"
-	"github.com/dcadolph/railwarden/internal/team"
-	"github.com/dcadolph/railwarden/internal/template"
-	"github.com/dcadolph/railwarden/internal/trigger"
-	"github.com/dcadolph/railwarden/internal/ui"
-	"github.com/dcadolph/railwarden/internal/user"
+	"github.com/dcadolph/switchtender/internal/ai"
+	"github.com/dcadolph/switchtender/internal/audit"
+	"github.com/dcadolph/switchtender/internal/auth"
+	"github.com/dcadolph/switchtender/internal/credential"
+	"github.com/dcadolph/switchtender/internal/grant"
+	"github.com/dcadolph/switchtender/internal/importer"
+	"github.com/dcadolph/switchtender/internal/inventory"
+	"github.com/dcadolph/switchtender/internal/invsource"
+	"github.com/dcadolph/switchtender/internal/live"
+	"github.com/dcadolph/switchtender/internal/policy"
+	"github.com/dcadolph/switchtender/internal/project"
+	"github.com/dcadolph/switchtender/internal/run"
+	"github.com/dcadolph/switchtender/internal/schedule"
+	"github.com/dcadolph/switchtender/internal/team"
+	"github.com/dcadolph/switchtender/internal/template"
+	"github.com/dcadolph/switchtender/internal/trigger"
+	"github.com/dcadolph/switchtender/internal/ui"
+	"github.com/dcadolph/switchtender/internal/user"
 )
 
 // Submitter accepts a run request and returns the created run. The dispatcher satisfies it.
@@ -307,7 +307,7 @@ func New(store run.Store, submitter Submitter, log *zap.Logger, opts ...Option) 
 	return srv
 }
 
-// Handler returns the HTTP handler serving the Railwarden API and web interface.
+// Handler returns the HTTP handler serving the SwitchTender API and web interface.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	authz := &authorizer{grants: s.grants, teams: s.teams, strict: s.strictGrants}

@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dcadolph/railwarden/internal/policy"
-	"github.com/dcadolph/railwarden/internal/roundhouse"
-	"github.com/dcadolph/railwarden/internal/run"
+	"github.com/dcadolph/switchtender/internal/policy"
+	"github.com/dcadolph/switchtender/internal/roundhouse"
+	"github.com/dcadolph/switchtender/internal/run"
 )
 
 // TestPolicyHoldsMatchingRun confirms a run matching a stored policy is held for approval at submit

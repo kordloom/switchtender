@@ -2,7 +2,7 @@
 
 ## Reporting a vulnerability
 
-Report suspected vulnerabilities privately to security@railwarden.dev. Do not open a public issue
+Report suspected vulnerabilities privately to security@switchtender.com. Do not open a public issue
 for a security problem.
 
 Include as much as you can:

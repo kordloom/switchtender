@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dcadolph/railwarden/internal/secretsource"
+	"github.com/dcadolph/switchtender/internal/secretsource"
 )
 
 // Kind classifies what a credential holds and how the runner materializes it.
@@ -37,7 +37,7 @@ const (
 )
 
 // TokenEnvVar is the environment variable a token credential is exposed under at run time.
-const TokenEnvVar = "RAILWARDEN_TOKEN"
+const TokenEnvVar = "SWITCHTENDER_TOKEN"
 
 var (
 	// ErrNotFound is returned when a credential does not exist in the store.
@@ -45,7 +45,7 @@ var (
 	// ErrBadKind is returned when a credential kind is not recognized.
 	ErrBadKind = errors.New("unknown credential kind")
 	// ErrNoKey is returned when encryption is attempted without an encryption key configured.
-	ErrNoKey = errors.New("no encryption key: set RAILWARDEN_ENCRYPTION_KEY")
+	ErrNoKey = errors.New("no encryption key: set SWITCHTENDER_ENCRYPTION_KEY")
 )
 
 // ValidKind reports whether k names a supported credential kind.

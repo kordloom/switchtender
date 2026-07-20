@@ -23,7 +23,7 @@ func newBashRunner(baseEnv []string) *bashRunner {
 
 // Run executes the script in spec.Command with bash, streaming combined output to out. A dry run
 // passes -n so bash parses the script and reports syntax errors without executing it. Materialized
-// credentials arrive in the environment, extra vars as a JSON RAILWARDEN_VARS, and spec.Dir sets the
+// credentials arrive in the environment, extra vars as a JSON SWITCHTENDER_VARS, and spec.Dir sets the
 // working directory so a project's files are in reach.
 func (b *bashRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Result, error) {
 	if spec.Command == "" {

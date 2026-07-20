@@ -3,9 +3,9 @@ package policy_test
 import (
 	"testing"
 
-	"github.com/dcadolph/railwarden/internal/policy"
-	"github.com/dcadolph/railwarden/internal/policytest"
-	"github.com/dcadolph/railwarden/internal/run"
+	"github.com/dcadolph/switchtender/internal/policy"
+	"github.com/dcadolph/switchtender/internal/policytest"
+	"github.com/dcadolph/switchtender/internal/run"
 )
 
 // TestMemStoreContract runs the store contract against the in-memory policy store.

@@ -4,15 +4,15 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// rootCmd is the Railwarden top-level CLI command.
+// rootCmd is the SwitchTender top-level CLI command.
 var rootCmd = &cobra.Command{
-	Use:   "railwarden",
+	Use:   "switchtender",
 	Short: "Automation execution and fleet orchestration platform.",
-	Long: "Railwarden runs and governs automation across a fleet of hosts: Ansible, Terraform, " +
+	Long: "SwitchTender runs and governs automation across a fleet of hosts: Ansible, Terraform, " +
 		"Bash, Python, and Go from one binary, with a provable audit trail over every change.",
 }
 
-// init registers the Railwarden subcommands on the root command.
+// init registers the SwitchTender subcommands on the root command.
 func init() {
 	rootCmd.AddCommand(serveCmd)
 	rootCmd.AddCommand(initCmd)

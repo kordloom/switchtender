@@ -19,8 +19,8 @@ import (
 	"github.com/crewjam/saml"
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/railwarden/internal/auth"
-	"github.com/dcadolph/railwarden/internal/user"
+	"github.com/dcadolph/switchtender/internal/auth"
+	"github.com/dcadolph/switchtender/internal/user"
 )
 
 // testIDPMetadata is a minimal identity provider metadata document with a redirect SSO binding.
@@ -41,7 +41,7 @@ func writeTestKeypair(t *testing.T) (certFile, keyFile string) {
 	}
 	tmpl := x509.Certificate{
 		SerialNumber: big.NewInt(1),
-		Subject:      pkix.Name{CommonName: "railwarden-test"},
+		Subject:      pkix.Name{CommonName: "switchtender-test"},
 		NotBefore:    time.Now().Add(-time.Hour),
 		NotAfter:     time.Now().Add(time.Hour),
 	}
@@ -71,7 +71,7 @@ func newTestSAML(t *testing.T, roleMap map[string]user.Role) *SAMLAuth {
 	}))
 	t.Cleanup(idp.Close)
 	certFile, keyFile := writeTestKeypair(t)
-	s, err := NewSAMLAuth(context.Background(), idp.URL, "https://yard.example.com",
+	s, err := NewSAMLAuth(context.Background(), idp.URL, "https://switchtender.example.com",
 		certFile, keyFile, "", "groups", user.RoleViewer, roleMap,
 		user.NewMemStore(), auth.NewMemStore(), zap.NewNop())
 	if err != nil {
@@ -124,10 +124,10 @@ func TestSAMLMetadata(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("metadata status = %d, want 200", rec.Code)
 	}
-	if !strings.Contains(body, "https://yard.example.com/auth/saml/metadata") {
+	if !strings.Contains(body, "https://switchtender.example.com/auth/saml/metadata") {
 		t.Errorf("metadata missing entity id: %s", body)
 	}
-	if !strings.Contains(body, "https://yard.example.com/auth/saml/acs") {
+	if !strings.Contains(body, "https://switchtender.example.com/auth/saml/acs") {
 		t.Errorf("metadata missing ACS endpoint: %s", body)
 	}
 }

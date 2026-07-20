@@ -8,7 +8,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/railwarden/internal/team"
+	"github.com/dcadolph/switchtender/internal/team"
 )
 
 // createTeamRequest is the JSON body accepted by POST /teams.

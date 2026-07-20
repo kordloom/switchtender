@@ -8,14 +8,14 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/railwarden/internal/ai"
-	"github.com/dcadolph/railwarden/internal/run"
+	"github.com/dcadolph/switchtender/internal/ai"
+	"github.com/dcadolph/switchtender/internal/run"
 )
 
 // proposeRunSystemPrompt instructs the model to translate a request into one structured run and
 // nothing else. The generated run never executes on its own, so the model is told to be direct
 // rather than cautious, but to leave destructive choices to the reviewer.
-const proposeRunSystemPrompt = "You turn a plain-language request into one Railwarden run. Reply " +
+const proposeRunSystemPrompt = "You turn a plain-language request into one SwitchTender run. Reply " +
 	"with only a JSON object and nothing else, no prose and no markdown fence. The object has these " +
 	"fields: tool (one of bash, python, powershell, go, opentofu, terraform, ansible), command (the script for bash, python, powershell, or go; the working directory for terraform and opentofu), " +
 	"playbook (the playbook path for ansible), limit (an optional host pattern), dry_run (true to " +

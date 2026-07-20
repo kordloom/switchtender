@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/dcadolph/railwarden/internal/inventory"
+	"github.com/dcadolph/switchtender/internal/inventory"
 )
 
 // inventoryColumns is the shared select list for inventory reads.

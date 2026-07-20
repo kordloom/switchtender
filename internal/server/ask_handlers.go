@@ -12,12 +12,12 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/railwarden/internal/ai"
-	"github.com/dcadolph/railwarden/internal/run"
+	"github.com/dcadolph/switchtender/internal/ai"
+	"github.com/dcadolph/switchtender/internal/run"
 )
 
 // askSystemPrompt frames the model as a fleet analyst bound to the snapshot it is given.
-const askSystemPrompt = "You answer questions about a Railwarden automation fleet. Answer only " +
+const askSystemPrompt = "You answer questions about a SwitchTender automation fleet. Answer only " +
 	"from the snapshot provided: run status counts, recent runs, host health, and drift. When the " +
 	"snapshot does not hold the answer, say so plainly. Reply in two to five sentences, specific, " +
 	"and do not invent hosts, runs, or numbers."

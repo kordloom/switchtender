@@ -1,13 +1,13 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="../assets/logo-letters-dark.png">
-    <img src="../assets/logo-letters.png" alt="Railwarden" width="140">
+    <source media="(prefers-color-scheme: dark)" srcset="../assets/logo-train-dark.png">
+    <img src="../assets/logo-train.png" alt="SwitchTender" width="140">
   </picture>
 </p>
 
 # Advisory AI
 
-Railwarden runs a complete control plane with no model anywhere near it. AI is an optional layer
+SwitchTender runs a complete control plane with no model anywhere near it. AI is an optional layer
 you switch on for an edge, never a dependency: it is off until you set `--ai-provider`, and
 nothing in the product waits on it.
 
@@ -39,13 +39,13 @@ The rule is one sentence: AI proposes, the control plane governs.
 | Provider | Runs where | Setup |
 |----------|-----------|-------|
 | `ollama` | Your hardware | `--ai-provider ollama --ai-model llama3.1`, optional `--ai-url` for a remote Ollama. |
-| `anthropic` | Anthropic's API | `--ai-provider anthropic --ai-model claude-sonnet-5` plus `RAILWARDEN_AI_KEY`. |
-| `openai` | Any OpenAI-compatible endpoint | `--ai-provider openai --ai-model <model> --ai-url <server>` plus `RAILWARDEN_AI_KEY`. Covers OpenAI itself, vLLM, LM Studio, and OpenRouter. |
+| `anthropic` | Anthropic's API | `--ai-provider anthropic --ai-model claude-sonnet-5` plus `SWITCHTENDER_AI_KEY`. |
+| `openai` | Any OpenAI-compatible endpoint | `--ai-provider openai --ai-model <model> --ai-url <server>` plus `SWITCHTENDER_AI_KEY`. Covers OpenAI itself, vLLM, LM Studio, and OpenRouter. |
 
 A new backend plugs in without touching the core: register a provider through the
 [Go SDK](sdk.md), compiled in or as a drop-in plugin binary.
 
-When the Anthropic model is a Fable or Mythos model, Railwarden opts into server-side fallbacks,
+When the Anthropic model is a Fable or Mythos model, SwitchTender opts into server-side fallbacks,
 so a request declined by a safety classifier retries on `claude-opus-4-8` in the same call and
 the feature keeps working. A Fable model also requires 30-day data retention on the account.
 

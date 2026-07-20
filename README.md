@@ -1,23 +1,23 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/logo-train-tracks-dark.png">
-    <img src="assets/logo-train-tracks.png" alt="Railwarden" width="240">
+    <img src="assets/logo-train-tracks.png" alt="SwitchTender" width="240">
   </picture>
 </p>
 
-<h1 align="center">Railwarden</h1>
+<h1 align="center">SwitchTender</h1>
 
 <p align="center">
-  <a href="https://railwarden.dev"><img
-    src="https://img.shields.io/badge/website-railwarden.dev-0969da"
+  <a href="https://switchtender.com"><img
+    src="https://img.shields.io/badge/website-switchtender.com-0969da"
     alt="Website"></a>
-  <a href="https://github.com/dcadolph/railwarden/actions/workflows/ci.yml"><img
-    src="https://github.com/dcadolph/railwarden/actions/workflows/ci.yml/badge.svg?branch=main"
+  <a href="https://github.com/dcadolph/switchtender/actions/workflows/ci.yml"><img
+    src="https://github.com/dcadolph/switchtender/actions/workflows/ci.yml/badge.svg?branch=main"
     alt="CI status"></a>
-  <a href="https://github.com/dcadolph/railwarden/releases"><img
-    src="https://img.shields.io/github/v/release/dcadolph/railwarden"
+  <a href="https://github.com/dcadolph/switchtender/releases"><img
+    src="https://img.shields.io/github/v/release/dcadolph/switchtender"
     alt="Latest release"></a>
-  <img src="https://img.shields.io/github/go-mod/go-version/dcadolph/railwarden"
+  <img src="https://img.shields.io/github/go-mod/go-version/dcadolph/switchtender"
     alt="Go version">
   <a href="LICENSE"><img
     src="https://img.shields.io/badge/license-BSL%201.1-blue"
@@ -46,10 +46,10 @@ No Kubernetes operator, no Postgres, no Redis, no message bus. One process, one 
 
 AWX makes you stand up Kubernetes, Postgres, Redis, and Receptor before it runs a single playbook,
 and it has not shipped a release in over a year. Semaphore is lighter, but a run is still a text
-log. Railwarden runs the same playbooks from one binary and treats every run as structured data you
+log. SwitchTender runs the same playbooks from one binary and treats every run as structured data you
 can read, split, and remember.
 
-|                                      | Railwarden                                                                        | AWX                                             | Semaphore                |
+|                                      | SwitchTender                                                                        | AWX                                             | Semaphore                |
 |--------------------------------------|-----------------------------------------------------------------------------------|-------------------------------------------------|--------------------------|
 | Deploy                               | One binary and one SQLite file, running in seconds.                               | A Kubernetes operator, Postgres, Redis, and Receptor first. | One binary.              |
 | Every&nbsp;run                       | A live host-by-task matrix you read like a dashboard, with per-task drill-down.   | A text log you scroll.                          | A text log you scroll.   |
@@ -58,7 +58,7 @@ can read, split, and remember.
 | Pipelines                            | A dependency graph with a drag-and-drop editor, passing typed outputs from one step to the next. | A visual workflow builder.       | Basic chaining.          |
 | Leaving&nbsp;your&nbsp;old&nbsp;tool | One command imports your AWX or Semaphore projects, inventories, templates, surveys, and schedules. | Not applicable.                     | Not applicable.          |
 
-The full head-to-head, including where Railwarden is behind, is in the
+The full head-to-head, including where SwitchTender is behind, is in the
 [comparison](docs/comparison.md).
 
 ## See it
@@ -82,17 +82,17 @@ host, remembered across every run:
 
 ## Quick start
 
-Grab a build for your platform from the [releases page](https://github.com/dcadolph/railwarden/releases):
-a `Railwarden.dmg` for macOS, a `windows_amd64.zip` for Windows, or a `tar.gz` of the binary for
+Grab a build for your platform from the [releases page](https://github.com/dcadolph/switchtender/releases):
+a `SwitchTender.dmg` for macOS, a `windows_amd64.zip` for Windows, or a `tar.gz` of the binary for
 macOS and Linux. Or build from source:
 
-    go build -o railwarden .
-    ./railwarden serve --addr :8080 --db railwarden.db
+    go build -o switchtender .
+    ./switchtender serve --addr :8080 --db switchtender.db
 
-Or run it as a local desktop app. On macOS open `Railwarden.app`; otherwise one command picks a
+Or run it as a local desktop app. On macOS open `SwitchTender.app`; otherwise one command picks a
 stable loopback port, keeps its data in a per-user directory, and opens the UI in your browser:
 
-    ./railwarden desktop
+    ./switchtender desktop
 
 Open http://localhost:8080 and submit a run:
 
@@ -104,8 +104,8 @@ Add `"shards": 4` to split it across four slices of the inventory.
 Migrating from AWX or Semaphore is one command. Point it at an export to see what it would create,
 then apply:
 
-    ./railwarden import awx awx-export.json           # dry-run report
-    ./railwarden import awx awx-export.json --apply    # create the objects
+    ./switchtender import awx awx-export.json           # dry-run report
+    ./switchtender import awx awx-export.json --apply    # create the objects
 
 Credentials come across as shells. Re-enter their secrets, since exports omit them by design. The
 [switching-from-AWX guide](docs/switching-from-awx.md) walks the whole move.
@@ -113,7 +113,7 @@ Credentials come across as shells. Re-enter their secrets, since exports omit th
 To see it without any setup, run the seeded read-only demo. It fills a fresh database with sample
 projects, templates, and real runs, then serves it with every change blocked:
 
-    ./railwarden demo --addr :8080         # or: docker compose --profile demo up --build
+    ./switchtender demo --addr :8080         # or: docker compose --profile demo up --build
 
 ## Documentation
 
@@ -125,12 +125,12 @@ The docs live in [docs/](docs/) and also render inside the app at `/ui/docs`.
 | [Switching from AWX](docs/switching-from-awx.md) | Import what you have, or set up from scratch |
 | [Concepts](docs/concepts.md) | Runs, splits, pipelines, projects, templates, and the rest |
 | [Configuration](docs/configuration.md) | Every command, flag, and environment variable |
-| [Desktop](docs/desktop.md) | Run Railwarden as a local desktop app |
+| [Desktop](docs/desktop.md) | Run SwitchTender as a local desktop app |
 | [Features](docs/features.md) | The full capability list |
 | [Extend in Go](docs/sdk.md) | The SDK: add tools, AI providers, secret engines, and notifiers |
 | [HTTP API](docs/api.md) | Every endpoint the server exposes |
 | [Migration](docs/migration.md) | Moving off AWX or Semaphore in detail |
-| [Comparison](docs/comparison.md) | How Railwarden compares to AWX and Semaphore |
+| [Comparison](docs/comparison.md) | How SwitchTender compares to AWX and Semaphore |
 
 Deploy with the `docker-compose.yml` at the root, which brings up a server, a database, and a
 worker, or the Helm chart under [deploy/helm](deploy/helm).
@@ -150,7 +150,7 @@ with a bounded worker pool, the cron scheduler, and the embedded UI.
 
 ## The name
 
-A railwarden keeps the line: watching every train, holding the lantern, making sure each one runs on
+A switchtender keeps the line: watching every train, holding the lantern, making sure each one runs on
 time, on the right track, and clear of the next. Good name for the job this tool does, since it
 watches every host, proves every change, and stands guard over the whole fleet. A few internal
 packages still carry rail-yard codenames, the roundhouse runs the playbooks and the dispatcher
@@ -175,7 +175,7 @@ the 1.x line.
 Business Source License 1.1. Read the source, run it, and use it in production. The self-hosted
 binary ships every enterprise feature at no cost: single sign-on, role-based access control, the
 tamper-evident audit chain, approval gates, and active-active HA. The one reserved right is offering
-Railwarden to others as a hosted or managed service that competes with the maintainer. Each version
+SwitchTender to others as a hosted or managed service that competes with the maintainer. Each version
 converts to Apache-2.0 four years after its release.
 
 See `LICENSE` for the exact terms and [`LICENSING.md`](LICENSING.md) for what self-hosting grants,

@@ -1,11 +1,11 @@
-// Package main is the Railwarden entry point.
+// Package main is the SwitchTender entry point.
 package main
 
 import (
 	"embed"
 	"io/fs"
 
-	"github.com/dcadolph/railwarden/cmd"
+	"github.com/dcadolph/switchtender/cmd"
 )
 
 // docsDir holds the documentation the server renders inside the web UI, embedded so the single
@@ -14,7 +14,7 @@ import (
 //go:embed docs
 var docsDir embed.FS
 
-// main runs the Railwarden CLI, handing it the embedded documentation to serve in the UI.
+// main runs the SwitchTender CLI, handing it the embedded documentation to serve in the UI.
 func main() {
 	docs, err := fs.Sub(docsDir, "docs")
 	if err != nil {

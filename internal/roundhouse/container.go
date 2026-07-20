@@ -153,7 +153,7 @@ func (c *containerRunner) writeEnvFile(spec Spec) (string, func(), error) {
 		lines = append(lines, callbackEnv(dir, spec.EventsPath)...)
 	}
 
-	f, err := os.CreateTemp("", "railwarden-env-*")
+	f, err := os.CreateTemp("", "switchtender-env-*")
 	if err != nil {
 		return "", func() {}, err
 	}

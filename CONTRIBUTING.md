@@ -1,11 +1,11 @@
-# Contributing to Railwarden
+# Contributing to SwitchTender
 
 Contributions are welcome. Two things are required before a pull request can merge: a signed
 Contributor License Agreement, and a Developer Certificate of Origin sign-off on each commit.
 
 ## Contributor License Agreement
 
-Railwarden is source-available under the Business Source License 1.1 and is offered under commercial
+SwitchTender is source-available under the Business Source License 1.1 and is offered under commercial
 and hosted licenses as well. To keep both possible, every contributor signs the
 [Contributor License Agreement](CLA.md) once. It grants the Maintainer the right to include your
 contribution in every edition of the Project, including commercially licensed ones. You keep the
@@ -29,4 +29,4 @@ Project's license. Add a trailer to your commit message with your legal name and
 - Build and run the tests before you push.
 - Match the surrounding code style.
 
-Questions about licensing or a larger contribution: licensing@railwarden.dev
+Questions about licensing or a larger contribution: licensing@switchtender.com

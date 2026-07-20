@@ -11,7 +11,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/railwarden/internal/run"
+	"github.com/dcadolph/switchtender/internal/run"
 )
 
 // emailTimeout bounds one email delivery attempt.
@@ -41,7 +41,7 @@ func (d *Dispatcher) notifyEmail(r *run.Run) {
 	if d.emailOnFailureOnly && r.Status != run.StatusFailed {
 		return
 	}
-	subject := fmt.Sprintf("Railwarden run %s %s", r.ID, r.Status)
+	subject := fmt.Sprintf("SwitchTender run %s %s", r.ID, r.Status)
 	body := emailBody(r)
 	d.notifyWG.Add(1)
 	go func() {

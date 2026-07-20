@@ -1,4 +1,4 @@
-// Package importer maps an AWX or Semaphore export into equivalent Railwarden objects so a team can
+// Package importer maps an AWX or Semaphore export into equivalent SwitchTender objects so a team can
 // migrate in one command instead of a quarter. The mapping is pure: it reads export JSON and
 // returns typed projects, inventories, templates, schedules, and credential shells plus warnings,
 // with cross-references already wired by generated id. The command layer persists the result.
@@ -11,12 +11,12 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/dcadolph/railwarden/internal/credential"
-	"github.com/dcadolph/railwarden/internal/inventory"
-	"github.com/dcadolph/railwarden/internal/invsource"
-	"github.com/dcadolph/railwarden/internal/project"
-	"github.com/dcadolph/railwarden/internal/schedule"
-	"github.com/dcadolph/railwarden/internal/template"
+	"github.com/dcadolph/switchtender/internal/credential"
+	"github.com/dcadolph/switchtender/internal/inventory"
+	"github.com/dcadolph/switchtender/internal/invsource"
+	"github.com/dcadolph/switchtender/internal/project"
+	"github.com/dcadolph/switchtender/internal/schedule"
+	"github.com/dcadolph/switchtender/internal/template"
 )
 
 // Plan is the set of objects an import will create, cross-referenced by generated id, along with
@@ -112,7 +112,7 @@ type importGroup struct {
 	Hosts []importHost
 }
 
-// mapSurveyType converts an AWX survey field type to a Railwarden field type, reporting whether the
+// mapSurveyType converts an AWX survey field type to a SwitchTender field type, reporting whether the
 // mapping is exact. Unknown types fall back to text.
 func mapSurveyType(awxType string) (template.FieldType, bool) {
 	switch awxType {
@@ -129,7 +129,7 @@ func mapSurveyType(awxType string) (template.FieldType, bool) {
 	}
 }
 
-// mapCredentialKind converts an AWX credential type name to a Railwarden credential kind, reporting
+// mapCredentialKind converts an AWX credential type name to a SwitchTender credential kind, reporting
 // whether the mapping is exact. Unknown types fall back to the env kind.
 func mapCredentialKind(awxType string) (credential.Kind, bool) {
 	lower := strings.ToLower(awxType)

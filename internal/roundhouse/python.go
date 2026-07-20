@@ -11,7 +11,7 @@ import (
 // pythonRunner runs a Python script as a child process. The script text comes from the Spec's
 // Command, written to a temporary file and run with python3, so multi-line scripts and a dry-run
 // syntax check both work. A dry run runs py_compile, which checks syntax without executing the
-// script. Extra vars reach the script as RAILWARDEN_VARS, a JSON object, and credentials arrive in
+// script. Extra vars reach the script as SWITCHTENDER_VARS, a JSON object, and credentials arrive in
 // Env; the working directory is the project checkout so the script can read project files.
 type pythonRunner struct {
 	// binary is the python executable name or path.
@@ -31,7 +31,7 @@ func (p *pythonRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Resul
 	if spec.Command == "" {
 		return Result{ExitCode: -1}, ErrNoCommand
 	}
-	f, err := os.CreateTemp("", "railwarden-py-*.py")
+	f, err := os.CreateTemp("", "switchtender-py-*.py")
 	if err != nil {
 		return Result{ExitCode: -1}, fmt.Errorf("%w: %w", ErrLaunch, err)
 	}

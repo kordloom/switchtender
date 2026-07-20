@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dcadolph/railwarden/internal/roundhouse"
-	"github.com/dcadolph/railwarden/internal/run"
+	"github.com/dcadolph/switchtender/internal/roundhouse"
+	"github.com/dcadolph/switchtender/internal/run"
 )
 
 // TestRunApprovalGate confirms a run submitted with approval required is held, not executed, until

@@ -4,7 +4,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/dcadolph/railwarden/internal/event"
+	"github.com/dcadolph/switchtender/internal/event"
 )
 
 // HostSummary is a single run's outcome for one host, derived from the run recap. It is persisted so

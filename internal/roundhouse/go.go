@@ -11,7 +11,7 @@ import (
 // goRunner runs a Go program as a child process. The source text comes from the Spec's Command,
 // written to a temporary main.go and run with go run, so a full program builds and runs in one step.
 // A dry run runs go vet, which compiles and statically checks the source without executing it. Extra
-// vars reach the program as RAILWARDEN_VARS, a JSON object, and credentials arrive in Env; the
+// vars reach the program as SWITCHTENDER_VARS, a JSON object, and credentials arrive in Env; the
 // working directory is the project checkout so the program can read project files.
 type goRunner struct {
 	// binary is the go executable name or path.
@@ -32,7 +32,7 @@ func (g *goRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Result, e
 	if spec.Command == "" {
 		return Result{ExitCode: -1}, ErrNoCommand
 	}
-	f, err := os.CreateTemp("", "railwarden-go-*.go")
+	f, err := os.CreateTemp("", "switchtender-go-*.go")
 	if err != nil {
 		return Result{ExitCode: -1}, fmt.Errorf("%w: %w", ErrLaunch, err)
 	}

@@ -1,5 +1,5 @@
 // Command sitegen renders the repository's docs/*.md files into a themed, static documentation
-// section under site/docs/, for the railwarden.dev marketing site. It reuses goldmark, the same
+// section under site/docs/, for the switchtender.com marketing site. It reuses goldmark, the same
 // markdown renderer the app serves docs with. Run from the repo root: go run ./cmd/sitegen
 package main
 
@@ -129,7 +129,7 @@ func run() error {
 // canonicalFor returns the canonical URL for a docs slug, the directory URL for the index. Pages
 // serves extensionless clean URLs and redirects .html paths to them, so canonicals stay clean.
 func canonicalFor(slug string) string {
-	return "https://railwarden.dev" + hrefFor(slug)
+	return "https://switchtender.com" + hrefFor(slug)
 }
 
 // hrefFor returns the site-relative clean URL for a docs slug, the directory URL for the index.
@@ -147,8 +147,8 @@ func writeSitemap(slugs []string) error {
 	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>` + "\n")
 	b.WriteString(`<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">` + "\n")
 	urls := []string{
-		"https://railwarden.dev/", "https://railwarden.dev/get-started",
-		"https://railwarden.dev/awx-alternative", "https://railwarden.dev/semaphore-alternative",
+		"https://switchtender.com/", "https://switchtender.com/get-started",
+		"https://switchtender.com/awx-alternative", "https://switchtender.com/semaphore-alternative",
 	}
 	for _, slug := range slugs {
 		urls = append(urls, canonicalFor(slug))
@@ -201,7 +201,7 @@ func description(src []byte) string {
 	if len(para) > 0 {
 		return flush()
 	}
-	return "Railwarden documentation."
+	return "SwitchTender documentation."
 }
 
 // orderedSlugs returns the present slugs in sidebar order, extras appended sorted.
@@ -282,10 +282,10 @@ const layout = `<!DOCTYPE html>
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
-	<title>{{.Title}} · Railwarden docs</title>
+	<title>{{.Title}} · SwitchTender docs</title>
 	<meta name="description" content="{{.Description}}">
 	<link rel="canonical" href="{{.Canonical}}">
-	<meta property="og:title" content="{{.Title}} · Railwarden docs">
+	<meta property="og:title" content="{{.Title}} · SwitchTender docs">
 	<meta property="og:description" content="{{.Description}}">
 	<meta property="og:type" content="article">
 	<meta property="og:url" content="{{.Canonical}}">
@@ -299,12 +299,12 @@ const layout = `<!DOCTYPE html>
 </head>
 <body>
 	<header class="dnav">
-		<a class="brand" href="/"><img src="/assets/logo-train-tracks-dark.png" alt="Railwarden" class="brand-train"><span class="brand-word">Railwarden</span></a>
+		<a class="brand" href="/"><img src="/assets/logo-train-tracks-dark.png" alt="SwitchTender" class="brand-train"><span class="brand-word">SwitchTender</span></a>
 		<span class="dnav-tag">Docs</span>
 		<nav class="dnav-links">
 			<a href="/">Home</a>
 			<a href="/#compare">Compare</a>
-			<a href="https://github.com/dcadolph/railwarden">GitHub</a>
+			<a href="https://github.com/dcadolph/switchtender">GitHub</a>
 		</nav>
 	</header>
 	<div class="dshell">

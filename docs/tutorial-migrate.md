@@ -1,13 +1,13 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="../assets/logo-letters-dark.png">
-    <img src="../assets/logo-letters.png" alt="Railwarden" width="140">
+    <source media="(prefers-color-scheme: dark)" srcset="../assets/logo-train-dark.png">
+    <img src="../assets/logo-train.png" alt="SwitchTender" width="140">
   </picture>
 </p>
 
 # Migrate your setup
 
-You do not rebuild your automation by hand. Railwarden reads an AWX or Semaphore export and creates
+You do not rebuild your automation by hand. SwitchTender reads an AWX or Semaphore export and creates
 the equivalent projects, inventories, templates, surveys, schedules, and credentials in one pass.
 
 ## From the UI
@@ -21,8 +21,8 @@ the equivalent projects, inventories, templates, surveys, schedules, and credent
 
 ## From the CLI
 
-    railwarden import awx awx-export.json --db railwarden.db            # preview
-    railwarden import awx awx-export.json --db railwarden.db --apply    # write
+    switchtender import awx awx-export.json --db switchtender.db            # preview
+    switchtender import awx awx-export.json --db switchtender.db --apply    # write
 
 Use `import semaphore` for a Semaphore export. Preview first, always. `--apply` is the only step that
 writes.

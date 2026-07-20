@@ -1,5 +1,5 @@
 // Package sqlitestore implements run.Store on top of SQLite using the pure Go modernc driver, so
-// Railwarden keeps its single binary promise with no cgo. It is the default backend. A Postgres
+// SwitchTender keeps its single binary promise with no cgo. It is the default backend. A Postgres
 // backend can satisfy the same run.Store interface later for multi instance deployments.
 package sqlitestore
 
@@ -14,21 +14,21 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"github.com/dcadolph/railwarden/internal/audit"
-	"github.com/dcadolph/railwarden/internal/auth"
-	"github.com/dcadolph/railwarden/internal/credential"
-	"github.com/dcadolph/railwarden/internal/event"
-	"github.com/dcadolph/railwarden/internal/grant"
-	"github.com/dcadolph/railwarden/internal/inventory"
-	"github.com/dcadolph/railwarden/internal/invsource"
-	"github.com/dcadolph/railwarden/internal/policy"
-	"github.com/dcadolph/railwarden/internal/project"
-	"github.com/dcadolph/railwarden/internal/run"
-	"github.com/dcadolph/railwarden/internal/schedule"
-	"github.com/dcadolph/railwarden/internal/team"
-	"github.com/dcadolph/railwarden/internal/template"
-	"github.com/dcadolph/railwarden/internal/trigger"
-	"github.com/dcadolph/railwarden/internal/user"
+	"github.com/dcadolph/switchtender/internal/audit"
+	"github.com/dcadolph/switchtender/internal/auth"
+	"github.com/dcadolph/switchtender/internal/credential"
+	"github.com/dcadolph/switchtender/internal/event"
+	"github.com/dcadolph/switchtender/internal/grant"
+	"github.com/dcadolph/switchtender/internal/inventory"
+	"github.com/dcadolph/switchtender/internal/invsource"
+	"github.com/dcadolph/switchtender/internal/policy"
+	"github.com/dcadolph/switchtender/internal/project"
+	"github.com/dcadolph/switchtender/internal/run"
+	"github.com/dcadolph/switchtender/internal/schedule"
+	"github.com/dcadolph/switchtender/internal/team"
+	"github.com/dcadolph/switchtender/internal/template"
+	"github.com/dcadolph/switchtender/internal/trigger"
+	"github.com/dcadolph/switchtender/internal/user"
 )
 
 // schema is the full table layout created on open. It uses IF NOT EXISTS, so opening an existing

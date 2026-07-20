@@ -28,7 +28,7 @@ func TestAnsibleRunnerRun(t *testing.T) {
 			Name: "playbook failed", Binary: "false", Spec: Spec{Playbook: "ignored"}, WantExit: 1,
 		},
 		{ // Test 2: Binary cannot be launched.
-			Name: "missing binary", Binary: "railwarden-no-such-binary",
+			Name: "missing binary", Binary: "switchtender-no-such-binary",
 			Spec: Spec{Playbook: "ignored"}, WantExit: -1, Want: ErrLaunch,
 		},
 		{ // Test 3: Spec without a playbook is rejected before launch.

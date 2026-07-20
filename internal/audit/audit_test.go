@@ -3,8 +3,8 @@ package audit_test
 import (
 	"testing"
 
-	"github.com/dcadolph/railwarden/internal/audit"
-	"github.com/dcadolph/railwarden/internal/audittest"
+	"github.com/dcadolph/switchtender/internal/audit"
+	"github.com/dcadolph/switchtender/internal/audittest"
 )
 
 func TestMemStoreContract(t *testing.T) {

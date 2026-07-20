@@ -1,4 +1,4 @@
-// Package plugin turns an extension into a standalone binary Railwarden loads at startup, no
+// Package plugin turns an extension into a standalone binary SwitchTender loads at startup, no
 // recompile of the server. A plugin author fills an Extension with the same interfaces the
 // in-process SDK registers, then calls Serve from main. The server launches the binary from its
 // plugins directory, asks what it provides, and registers every seam, so a plugged-in tool,
@@ -22,16 +22,16 @@ import (
 	goplugin "github.com/hashicorp/go-plugin"
 	"google.golang.org/grpc"
 
-	"github.com/dcadolph/railwarden/internal/extproto"
-	"github.com/dcadolph/railwarden/sdk"
+	"github.com/dcadolph/switchtender/internal/extproto"
+	"github.com/dcadolph/switchtender/sdk"
 )
 
-// Handshake pairs a plugin binary with a Railwarden that speaks its protocol. The cookie is not a
-// security measure, only a guard against launching a binary that is not a Railwarden extension.
+// Handshake pairs a plugin binary with a SwitchTender that speaks its protocol. The cookie is not a
+// security measure, only a guard against launching a binary that is not a SwitchTender extension.
 var Handshake = goplugin.HandshakeConfig{
 	ProtocolVersion:  1,
-	MagicCookieKey:   "RAILWARDEN_EXTENSION",
-	MagicCookieValue: "railwarden-extension-v1",
+	MagicCookieKey:   "SWITCHTENDER_EXTENSION",
+	MagicCookieValue: "switchtender-extension-v1",
 }
 
 // Key names the one plugin every extension binary serves in the go-plugin set.

@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/dcadolph/railwarden/internal/team"
+	"github.com/dcadolph/switchtender/internal/team"
 )
 
 // teamStore is a team.Store backed by the shared SQLite database.
