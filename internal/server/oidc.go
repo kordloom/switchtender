@@ -26,7 +26,7 @@ import (
 const oidcStateTTL = 10 * time.Minute
 
 // oidcCookie names the short-lived signed cookie that carries the sign-in handshake.
-const oidcCookie = "ym_oidc"
+const oidcCookie = "st_oidc"
 
 // OIDCAuth signs users in through an OpenID Connect provider with the authorization code flow and
 // PKCE. It provisions a local account on first sign-in and mints the same session token the

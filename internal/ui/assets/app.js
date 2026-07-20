@@ -272,7 +272,7 @@ function launchTour(id) {
 	if (tour.page === document.body.dataset.page) {
 		startTour(id, { auto: !!tour.auto });
 	} else {
-		sessionStorage.setItem("ym_tour_start", JSON.stringify({ id, auto: !!tour.auto, at: Date.now() }));
+		sessionStorage.setItem("st_tour_start", JSON.stringify({ id, auto: !!tour.auto, at: Date.now() }));
 		window.location.assign(tour.path);
 	}
 }
@@ -293,7 +293,7 @@ function mountTour() {
 		}
 	}
 	if (document.body.dataset.page !== "overview") return;
-	if (localStorage.getItem("ym_tour_done")) return;
+	if (localStorage.getItem("st_tour_done")) return;
 	window.setTimeout(() => {
 		if (!tourState && !window.ymRedirecting) startTour("welcome");
 	}, 400);
@@ -302,9 +302,9 @@ function mountTour() {
 // readPendingTour consumes the cross-page tour handoff, ignoring an entry older than a minute so a
 // failed navigation cannot surprise-start a tour on a later organic visit.
 function readPendingTour() {
-	const raw = sessionStorage.getItem("ym_tour_start");
+	const raw = sessionStorage.getItem("st_tour_start");
 	if (!raw) return null;
-	sessionStorage.removeItem("ym_tour_start");
+	sessionStorage.removeItem("st_tour_start");
 	try {
 		const p = JSON.parse(raw);
 		if (p && p.id && Date.now() - p.at < 60000) {
@@ -388,7 +388,7 @@ function moveTour(delta, fromAuto) {
 	const page = tourStepPage(tourState.tour, next);
 	if (page !== document.body.dataset.page) {
 		const step = tourState.steps[next];
-		sessionStorage.setItem("ym_tour_start", JSON.stringify({
+		sessionStorage.setItem("st_tour_start", JSON.stringify({
 			id: tourState.tour.id, step: next, auto: tourState.auto, at: Date.now(),
 		}));
 		window.location.assign(step.path || tourState.tour.path);
@@ -530,7 +530,7 @@ function tourKey(e) {
 // keyboard user is not dropped at the top of the page. When completed is true it records that the
 // tour has been seen so it does not auto-start again.
 function endTour(completed) {
-	if (completed) localStorage.setItem("ym_tour_done", "1");
+	if (completed) localStorage.setItem("st_tour_done", "1");
 	if (!tourState) return;
 	clearTourTimer();
 	document.removeEventListener("keydown", tourKey);
@@ -554,7 +554,7 @@ let wfState = null;
 
 // wfDraftKey is the localStorage key holding the unsent workflow graph, so a refresh, a stray
 // navigation, or a sign-in round trip does not lose the work.
-const wfDraftKey = "ym_wf_draft";
+const wfDraftKey = "st_wf_draft";
 
 // wfHistoryCap bounds the undo stack.
 const wfHistoryCap = 50;
@@ -1579,7 +1579,7 @@ function buildNav() {
 	const topbar = document.querySelector(".topbar");
 	if (!topbar) return;
 
-	const role = localStorage.getItem("ym_role");
+	const role = localStorage.getItem("st_role");
 	const showAdmin = !role || role === "admin";
 	const activeKey = PAGE_NAV[document.body.dataset.page] || "";
 
@@ -1659,7 +1659,7 @@ function svgIcon(inner) {
 
 // apiToken returns the stored API token, empty when the server runs open.
 function apiToken() {
-	return localStorage.getItem("ym_token") || "";
+	return localStorage.getItem("st_token") || "";
 }
 
 // consumeSSOFragment stores the session token handed back in the URL fragment after single
@@ -1669,9 +1669,9 @@ function consumeSSOFragment() {
 	const params = new URLSearchParams(location.hash.slice(1));
 	const token = params.get("access_token");
 	if (!token) return;
-	localStorage.setItem("ym_token", token);
-	if (params.get("role")) localStorage.setItem("ym_role", params.get("role"));
-	if (params.get("user")) localStorage.setItem("ym_user", params.get("user"));
+	localStorage.setItem("st_token", token);
+	if (params.get("role")) localStorage.setItem("st_role", params.get("role"));
+	if (params.get("user")) localStorage.setItem("st_user", params.get("user"));
 	history.replaceState(null, "", location.pathname + location.search);
 }
 
@@ -1692,7 +1692,7 @@ function authHeaders() {
 function requireLogin() {
 	if (document.body.dataset.page === "login") return;
 	window.ymRedirecting = true;
-	sessionStorage.setItem("ym_return", location.pathname);
+	sessionStorage.setItem("st_return", location.pathname);
 	location.href = "/ui/login";
 }
 
@@ -3135,7 +3135,7 @@ async function askFleet() {
 // canOperate reports whether the signed-in role may launch or propose work. An empty role means
 // the instance has no accounts and is open, so operating is allowed.
 function canOperate() {
-	const role = localStorage.getItem("ym_role");
+	const role = localStorage.getItem("st_role");
 	return !role || role === "operator" || role === "admin";
 }
 
@@ -3264,7 +3264,7 @@ function renderRecentRuns(runs) {
 function renderJumpTiles() {
 	const el = document.getElementById("tiles");
 	if (!el) return;
-	const role = localStorage.getItem("ym_role");
+	const role = localStorage.getItem("st_role");
 	const showAdmin = !role || role === "admin";
 	const items = [];
 	for (const group of NAV_GROUPS) {
@@ -4209,10 +4209,10 @@ function loadLogin() {
 				return;
 			}
 			const session = await res.json();
-			localStorage.setItem("ym_token", session.token);
-			localStorage.setItem("ym_role", session.role);
-			localStorage.setItem("ym_user", session.username);
-			location.href = sessionStorage.getItem("ym_return") || "/ui/";
+			localStorage.setItem("st_token", session.token);
+			localStorage.setItem("st_role", session.role);
+			localStorage.setItem("st_user", session.username);
+			location.href = sessionStorage.getItem("st_return") || "/ui/";
 		} catch (err) {
 			setStatus("Sign in failed: " + err.message);
 		}
@@ -4225,10 +4225,10 @@ function loadLogin() {
 			method: "POST", headers: { "Authorization": "Bearer " + token },
 		});
 		if (res.status === 204) {
-			localStorage.setItem("ym_token", token);
-			localStorage.removeItem("ym_role");
-			localStorage.removeItem("ym_user");
-			location.href = sessionStorage.getItem("ym_return") || "/ui/";
+			localStorage.setItem("st_token", token);
+			localStorage.removeItem("st_role");
+			localStorage.removeItem("st_user");
+			location.href = sessionStorage.getItem("st_return") || "/ui/";
 			return;
 		}
 		setStatus("That token was not accepted.");

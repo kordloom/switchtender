@@ -30,7 +30,7 @@ const samlStateTTL = 10 * time.Minute
 
 // samlCookie names the short-lived signed cookie that carries the request id across the redirect,
 // so the assertion's InResponseTo is checked against the request this browser actually started.
-const samlCookie = "ym_saml"
+const samlCookie = "st_saml"
 
 // SAMLAuth signs users in through a SAML identity provider. SwitchTender is the service provider: it
 // redirects the browser to the IdP with an authentication request and consumes the signed assertion
