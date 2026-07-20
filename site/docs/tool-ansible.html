@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Ansible runs · SwitchTender docs</title>
+	<meta name="description" content="An Ansible run executes ansible-playbook against an inventory. It is the default tool: a run that names no tool is an Ansible run.">
+	<link rel="canonical" href="https://switchtender.com/docs/tool-ansible">
+	<meta property="og:title" content="Ansible runs · SwitchTender docs">
+	<meta property="og:description" content="An Ansible run executes ansible-playbook against an inventory. It is the default tool: a run that names no tool is an Ansible run.">
+	<meta property="og:type" content="article">
+	<meta property="og:url" content="https://switchtender.com/docs/tool-ansible">
+	<link rel="icon" href="/favicon.ico" sizes="any">
+	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
+	<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="/docs.css?v=1">
+</head>
+<body>
+	<header class="dnav">
+		<a class="brand" href="/"><img src="/assets/logo-train-tracks-dark.png" alt="SwitchTender" class="brand-train"><span class="brand-word">SwitchTender</span></a>
+		<span class="dnav-tag">Docs</span>
+		<nav class="dnav-links">
+			<a href="/">Home</a>
+			<a href="/#compare">Compare</a>
+			<a href="https://github.com/dcadolph/switchtender">GitHub</a>
+		</nav>
+	</header>
+	<div class="dshell">
+		<aside class="dside">
+			<nav>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible" class="active">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to AWX and Semaphore</a><a href="/docs/ai">Advisory AI</a><a href="/docs/sdk">Extend SwitchTender in Go</a>
+			</nav>
+		</aside>
+		<main class="dcontent prose">
+			<h1 id="ansible-runs">Ansible runs</h1>
+<p>An Ansible run executes <code>ansible-playbook</code> against an inventory. It is the default tool: a run
+that names no tool is an Ansible run. It is also the most instrumented one, because the embedded
+callback plugin reports every task on every host as a structured event, and those events paint the
+live host-by-task matrix, feed fleet memory, and drive drift detection.</p>
+<h2 id="what-runs">What runs</h2>
+<p>The playbook path is the run's target, resolved inside the project checkout when the run sources a
+project, so relative paths and roles behave the way they do in the repository. A project's
+<code>requirements.yml</code> roles and collections install on sync before the play starts. A dry run passes
+<code>--check</code>, which reports what would change without changing it; drift detection is built from
+exactly those check runs.</p>
+<p>Ansible runs are the ones that split. A split run shards the inventory across parallel slices,
+packs hosts onto shards by their measured durations from past runs, and merges every slice back
+into one matrix. Failed shards retry alone.</p>
+<h2 id="how-values-reach-the-play">How values reach the play</h2>
+<ul>
+<li>Extra vars, including survey answers and template vars, arrive as Ansible extra vars, so
+<code>{{ region }}</code> in a play reads a survey answer named <code>region</code>.</li>
+<li>An <code>ssh_key</code> credential is decrypted to a private temp file for the connection and wiped when
+the run ends.</li>
+<li>A <code>vault_password</code> credential unlocks <code>ansible-vault</code> content for the duration of the run.</li>
+<li>A <code>become_password</code> credential supplies privilege escalation.</li>
+<li>An <code>env</code> credential's <code>KEY=VALUE</code> lines are set in the process environment.</li>
+<li>Credentials attached to the run's inventory arrive the same way, so a fleet's secrets reach the
+play without naming them on the run.</li>
+</ul>
+<h2 id="example">Example</h2>
+<pre><code>- name: Site deploy
+  hosts: all
+  tasks:
+    - name: Apply configuration
+      ansible.builtin.template:
+        src: app.conf.j2
+        dest: &quot;/etc/app/{{ region }}.conf&quot;
+</code></pre>
+<p>Launched from a template with a <code>region</code> survey answer, every host paints its own cell in the
+matrix as the task lands.</p>
+<p>See also <a href="/docs/tool-bash">Bash runs</a>, <a href="/docs/tool-terraform">Terraform runs</a>,
+<a href="/docs/drift">drift detection</a>, and the <a href="/docs/tutorials">tutorials</a>.</p>
+
+		</main>
+	</div>
+	<script>document.addEventListener("click",e=>{const a=e.target.closest(".dside a");if(a)document.querySelector(".dside")?.classList.remove("open")});</script>
+</body>
+</html>
