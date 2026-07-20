@@ -1,6 +1,6 @@
 # SwitchTender Contributor License Agreement
 
-Thank you for contributing to SwitchTender (the "Project"), maintained by Douglas Carl Adolph (the
+Thank you for contributing to SwitchTender (the "Project"), maintained by KordLoom LLC (the
 "Maintainer"). This Contributor License Agreement ("Agreement") records the rights You grant the
 Maintainer in Your contributions. It exists so the Project can stay source-available under the
 Business Source License and also be offered under commercial and hosted licenses, which is how the
