@@ -59,7 +59,7 @@ a single fire for a schedule two replicas race for, and a dead replica's run fin
 survivor. Kill a replica mid-run and the run fails clean and requeues, it does not vanish.
 
 To run it: point every replica at the same PostgreSQL with `--db`, share the same
-`SWITCHTENDER_CRED_KEY` and `SWITCHTENDER_CRED_SALT` so sealed credentials decrypt everywhere, and
+`SWITCHTENDER_ENCRYPTION_KEY` and `SWITCHTENDER_ENCRYPTION_SALT` so sealed credentials decrypt everywhere, and
 health-check `/healthz` at the balancer. SQLite has no server to share, so it stays a single-node
 deployment by design; PostgreSQL is the HA backend.
 
