@@ -50,7 +50,7 @@ on them.
 | Capability | Status |
 |------------|--------|
 | Notification breadth | Webhook, email, and Slack today, against a wider set of integrations in AWX. |
-| Maturity | AWX and Semaphore have years of production use and large communities. SwitchTender is young. |
+| Maturity | AWX and Semaphore have years of production use and large communities. SwitchTender is young. AWX's years now cut both ways: its last release was July 2024, and its next one removes LDAP, SAML, and OIDC from core. |
 
 ## The short version
 

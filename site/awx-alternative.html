@@ -10,7 +10,7 @@
 	<meta property="og:description" content="Everything AWX does from one binary, plus the things it never did: a live host-by-task matrix, seven tools, tamper-evident audit, and a one-command import of your AWX export.">
 	<meta property="og:type" content="website">
 	<meta property="og:url" content="https://switchtender.com/awx-alternative">
-	<meta property="og:image" content="https://switchtender.com/assets/screenshot-fleet.png?v=6">
+	<meta property="og:image" content="https://switchtender.com/assets/screenshot-fleet.png?v=7">
 	<meta name="twitter:card" content="summary_large_image">
 	<link rel="icon" href="/favicon.ico" sizes="any">
 	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
@@ -46,7 +46,7 @@
 		<section class="wrap gs-hero reveal">
 			<span class="eyebrow">AWX alternative</span>
 			<h1>Everything AWX does.<br><span class="grad">Without the Kubernetes bill.</span></h1>
-			<p class="lede">AWX needs a Kubernetes cluster, an operator, Postgres, Redis, and Receptor before it runs a single playbook. SwitchTender is one Go binary. Download it, run it, and you have job templates, schedules, RBAC, surveys, SSO, workflows, and approvals, plus a live host-by-task matrix AWX never had. Your AWX export imports in one command.</p>
+			<p class="lede">AWX needs a Kubernetes cluster, an operator, Postgres, Redis, and Receptor before it runs a single playbook, and it has not shipped a release since July 2024. SwitchTender is one Go binary. Download it, run it, and you have job templates, schedules, RBAC, surveys, SSO, workflows, and approvals, plus a live host-by-task matrix AWX never had. Your AWX export imports in one command.</p>
 			<div class="hero-cta">
 				<a class="btn big" href="/get-started">Get started</a>
 				<a class="ghost big" href="/docs/switching-from-awx">Read the migration guide</a>
@@ -56,7 +56,7 @@
 		<section class="section wrap">
 			<div class="section-head reveal">
 				<h2>Why teams look for an AWX alternative</h2>
-				<p>Three complaints come up every time. SwitchTender was built around them.</p>
+				<p>Three complaints come up every time, and 2024 added a fourth: whether AWX ships at all. SwitchTender was built around them.</p>
 			</div>
 			<div class="cards">
 				<article class="card reveal">
@@ -76,6 +76,39 @@
 
 		<section class="section wrap">
 			<div class="section-head reveal">
+				<h2>The state of AWX, in dated facts</h2>
+				<p>None of this is spin. Every line links to its source, and AWX still works where it already runs. The question is what you stand up next.</p>
+			</div>
+			<div class="cards">
+				<article class="card reveal">
+					<h3>Frozen since July 2024</h3>
+					<p>AWX 24.6.1, released July 2, 2024, is still the latest release. Red Hat <a href="https://forum.ansible.com/t/streamlining-awx-releases/6894">paused releases</a> for a refactor that has shipped no release and no date since.</p>
+				</article>
+				<article class="card reveal">
+					<h3>Fresh installs break</h3>
+					<p>The last released operator depends on a <a href="https://github.com/ansible/awx-operator/issues/2107">retired container image</a>, so a new install fails to pull until you patch it by hand.</p>
+				</article>
+				<article class="card reveal">
+					<h3>Security fixes stopped</h3>
+					<p>The 24.6.1 images are two years of CVEs old, and teams report them <a href="https://forum.ansible.com/t/any-news-on-awx-development/45639">failing security audits</a> with no patched release to move to.</p>
+				</article>
+				<article class="card reveal">
+					<h3>SSO is leaving the free tier</h3>
+					<p>On AWX's development branch, LDAP, SAML, and OIDC are <a href="https://forum.ansible.com/t/transitioning-authentication-and-authorization-rbac-to-the-new-awx-architecture/8602">removed from core</a>. The replacement lives in the paid platform. SwitchTender ships all three in the binary.</p>
+				</article>
+				<article class="card reveal">
+					<h3>In Red Hat's words</h3>
+					<p>"Our goal isn't to offer an exact replica of our commercial product for free," <a href="https://forum.ansible.com/t/awx-modernization-moving-forward/45134">from the AWX modernization update</a>. The direction is a subscription.</p>
+				</article>
+				<article class="card reveal">
+					<h3>Even the collection was pulled</h3>
+					<p>The awx.awx collection was <a href="https://docs.ansible.com/projects/ansible/latest/porting_guides/porting_guide_14.html">removed from the Ansible 14 community package</a> mid-refactor.</p>
+				</article>
+			</div>
+		</section>
+
+		<section class="section wrap">
+			<div class="section-head reveal">
 				<h2>Feature for feature</h2>
 				<p>The enterprise checklist, side by side. The full three-way table including Semaphore is on the <a href="/docs/comparison">comparison page</a>.</p>
 			</div>
@@ -86,12 +119,13 @@
 					</thead>
 					<tbody>
 						<tr><td>Deploy</td><td class="us">One binary, SQLite or Postgres</td><td><span class="muted">Kubernetes + operator + Postgres + Redis</span></td></tr>
+						<tr><td>Release cadence</td><td class="us">Actively released</td><td><span class="muted">Frozen since July 2024</span></td></tr>
 						<tr><td>Live host-by-task matrix</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
 						<tr><td>Tools</td><td class="us">Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, Go</td><td><span class="muted">Ansible only</span></td></tr>
 						<tr><td>Job templates, surveys, schedules</td><td class="us"><i class="y"></i></td><td><i class="y"></i></td></tr>
 						<tr><td>Drag-and-drop workflow editor</td><td class="us"><i class="y"></i></td><td><i class="y"></i></td></tr>
 						<tr><td>RBAC, teams, per-object grants</td><td class="us"><i class="y"></i></td><td><i class="y"></i></td></tr>
-						<tr><td>LDAP, SAML, OIDC sign-in</td><td class="us"><i class="y"></i></td><td><i class="y"></i></td></tr>
+						<tr><td>LDAP, SAML, OIDC sign-in</td><td class="us"><i class="y"></i></td><td><span class="muted">Today, yes. Removed on the development branch</span></td></tr>
 						<tr><td>Execution environments</td><td class="us"><i class="y"></i></td><td><i class="y"></i></td></tr>
 						<tr><td>Instance groups</td><td class="us"><i class="y"></i></td><td><i class="y"></i></td></tr>
 						<tr><td>High availability</td><td class="us">Active-active on Postgres</td><td><span class="muted">Via Kubernetes</span></td></tr>
@@ -111,6 +145,13 @@
 			<div class="section-head reveal">
 				<h2>Where AWX is still ahead</h2>
 				<p>An honest page beats a loud one. AWX has years in production at large organizations, a deep ecosystem of credential types and inventory plugins, and a large community. SwitchTender is new: every claim on this page is backed by a test you can run, and what it does not have yet is that decade of production miles. It earns them the same way AWX did, one fleet at a time, starting with teams who want the capability without the platform. And the ecosystem gap closes differently here: any team can add a tool, a secret engine, an AI provider, or a channel as a drop-in Go plugin binary, no fork and no rebuild of the server.</p>
+			</div>
+		</section>
+
+		<section class="section wrap">
+			<div class="section-head reveal">
+				<h2>The other exits, honestly</h2>
+				<p>Ascender is a support-backed fork of the same frozen codebase, with the same Kubernetes-shaped footprint. Oracle Linux Automation Manager repackages AWX 24.6.1 for Oracle Linux hosts. Semaphore is genuinely light, but a run is a text log, RBAC sits in its paid tier, and there are no workflows; the <a href="/semaphore-alternative">full comparison is here</a>. Moving to CI pipelines works until you need RBAC, schedules, approvals, and an audit trail, at which point you have rebuilt a worse control plane. SwitchTender is the exit that keeps AWX's capabilities without inheriting its architecture.</p>
 			</div>
 		</section>
 
