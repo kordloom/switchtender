@@ -45,7 +45,7 @@ No Kubernetes operator, no Postgres, no Redis, no message bus. One process, one 
 ## Why
 
 AWX makes you stand up Kubernetes, Postgres, Redis, and Receptor before it runs a single playbook,
-and it has not shipped a release in over a year. Semaphore is lighter, but a run is still a text
+and it has not shipped a release since July 2024. Semaphore is lighter, but a run is still a text
 log. SwitchTender runs the same playbooks from one binary and treats every run as structured data you
 can read, split, and remember.
 
@@ -180,3 +180,7 @@ converts to Apache-2.0 four years after its release.
 
 See `LICENSE` for the exact terms and [`LICENSING.md`](LICENSING.md) for what self-hosting grants,
 how a commercial license works, and how to ask about support or a hosted plan.
+
+<p align="center">
+  <img src="assets/switchtender-figure.png" alt="A switchtender throwing the switch. See you down the line." width="190">
+</p>
