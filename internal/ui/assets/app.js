@@ -4154,7 +4154,7 @@ async function postAction(path, payload, method) {
 // streamURL appends the stored token to a stream path, since EventSource cannot set headers.
 function streamURL(path) {
 	const token = apiToken();
-	if (!token) return path;
+	if (!token) return API + path;
 	const sep = path.includes("?") ? "&" : "?";
 	return API + path + sep + "access_token=" + encodeURIComponent(token);
 }
