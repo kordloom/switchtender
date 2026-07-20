@@ -30,6 +30,9 @@ var workerAllowContainerEE bool
 // workerPluginsDir holds the value of the worker --plugins-dir flag.
 var workerPluginsDir string
 
+// workerWorkers holds the value of the worker --workers flag.
+var workerWorkers int
+
 // workerCmd runs a SwitchTender worker: a process that leases pending runs from the shared store,
 // executes them, and streams results back. Point it and a server at the same database, a
 // PostgreSQL DSN for separate machines, and they compete for work.
@@ -49,6 +52,8 @@ func init() {
 		"Queue this worker serves. Repeatable. Without any, it serves the default pool.")
 	workerCmd.Flags().BoolVar(&workerAllowContainerEE, "allow-container-ee", false,
 		"Allow runs whose project pins a container image to execute inside that image. Needs Docker.")
+	workerCmd.Flags().IntVar(&workerWorkers, "workers", dispatch.DefaultWorkers,
+		"Concurrent runs this process executes at once.")
 	workerCmd.Flags().StringVar(&workerPluginsDir, "plugins-dir", "",
 		"Directory of extension plugin binaries to load at startup. Empty loads none. Also SWITCHTENDER_PLUGINS_DIR.")
 	registerContainerFlags(workerCmd)
@@ -81,6 +86,7 @@ func runWorker(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("project cache: %w", err)
 	}
 	opts := []dispatch.Option{
+		dispatch.WithWorkers(workerWorkers),
 		dispatch.WithCredentials(bundle.Credentials(), sealer),
 		dispatch.WithProjects(bundle.Projects(), syncer),
 		dispatch.WithInventories(bundle.Inventories()),

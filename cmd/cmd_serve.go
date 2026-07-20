@@ -88,6 +88,9 @@ var notifySlack []string
 // serveAllowContainerEE holds the value of the --allow-container-ee flag.
 var serveAllowContainerEE bool
 
+// serveWorkers holds the value of the serve --workers flag.
+var serveWorkers int
+
 // serveStrictGrants holds the value of the --strict-grants flag.
 var serveStrictGrants bool
 
@@ -264,6 +267,8 @@ func init() {
 		"Deny non-admins access to an object that has no grants, instead of deferring to the role.")
 	serveCmd.Flags().BoolVar(&serveReadOnly, "read-only", false,
 		"Reject every mutating request, for a safely exposable instance.")
+	serveCmd.Flags().IntVar(&serveWorkers, "workers", dispatch.DefaultWorkers,
+		"Concurrent runs this process executes at once.")
 	serveCmd.Flags().IntVar(&serveMatrixCap, "matrix-cap", server.DefaultMatrixCap,
 		"Largest host matrix, in cells, the UI draws before showing a notice. 0 means no limit.")
 	serveCmd.Flags().StringVar(&servePluginsDir, "plugins-dir", "",
@@ -500,6 +505,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	}
 	emailer, onFailureOnly := buildEmailer()
 	disp := dispatch.New(store, runner, log, dispatch.WithPublisher(hub),
+		dispatch.WithWorkers(serveWorkers),
 		dispatch.WithCredentials(bundle.Credentials(), sealer),
 		dispatch.WithProjects(bundle.Projects(), syncer),
 		dispatch.WithWebhooks(notifyWebhooks),
