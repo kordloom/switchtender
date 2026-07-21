@@ -175,8 +175,9 @@ func updateInventoryHandler(store inventory.Store, authz *authorizer, sealer *cr
 	}
 }
 
-// listInventoriesHandler returns all inventories.
-func listInventoriesHandler(store inventory.Store, log *zap.Logger) http.HandlerFunc {
+// listInventoriesHandler returns the inventories the actor may read. Under strict grants a non-admin
+// sees only inventories a grant lets them read; otherwise the global role governs and all are returned.
+func listInventoriesHandler(store inventory.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil {
 			respondError(w, log, http.StatusNotFound, "inventories not enabled")
@@ -188,8 +189,14 @@ func listInventoriesHandler(store inventory.Store, log *zap.Logger) http.Handler
 			respondError(w, log, http.StatusInternalServerError, "could not list inventories")
 			return
 		}
+		visible, err := filterReadable(r.Context(), authz, list, func(i *inventory.Inventory) string { return i.ID })
+		if err != nil {
+			log.Error("server: list inventories: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not list inventories")
+			return
+		}
 		respondJSON(w, log, http.StatusOK,
-			listInventoriesResponse{Inventories: list, Count: len(list)}, wantsPretty(r))
+			listInventoriesResponse{Inventories: visible, Count: len(visible)}, wantsPretty(r))
 	}
 }
 

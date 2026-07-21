@@ -164,8 +164,9 @@ func updateTemplateHandler(store template.Store, log *zap.Logger) http.HandlerFu
 	}
 }
 
-// listTemplatesHandler returns all templates.
-func listTemplatesHandler(store template.Store, log *zap.Logger) http.HandlerFunc {
+// listTemplatesHandler returns the templates the actor may read. Under strict grants a non-admin sees
+// only templates a grant lets them read; otherwise the global role governs and all are returned.
+func listTemplatesHandler(store template.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil {
 			respondError(w, log, http.StatusNotFound, "templates not enabled")
@@ -177,8 +178,14 @@ func listTemplatesHandler(store template.Store, log *zap.Logger) http.HandlerFun
 			respondError(w, log, http.StatusInternalServerError, "could not list templates")
 			return
 		}
+		visible, err := filterReadable(r.Context(), authz, list, func(t *template.Template) string { return t.ID })
+		if err != nil {
+			log.Error("server: list templates: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not list templates")
+			return
+		}
 		respondJSON(w, log, http.StatusOK,
-			listTemplatesResponse{Templates: list, Count: len(list)}, wantsPretty(r))
+			listTemplatesResponse{Templates: visible, Count: len(visible)}, wantsPretty(r))
 	}
 }
 

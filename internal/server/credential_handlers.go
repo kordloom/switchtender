@@ -183,7 +183,7 @@ func updateCredentialHandler(store credential.Store, sealer *credential.Sealer, 
 }
 
 // listCredentialsHandler returns all credentials without secret material.
-func listCredentialsHandler(store credential.Store, log *zap.Logger) http.HandlerFunc {
+func listCredentialsHandler(store credential.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil {
 			respondError(w, log, http.StatusNotFound, "credentials not enabled")
@@ -195,8 +195,14 @@ func listCredentialsHandler(store credential.Store, log *zap.Logger) http.Handle
 			respondError(w, log, http.StatusInternalServerError, "could not list credentials")
 			return
 		}
-		views := make([]credentialView, 0, len(list))
-		for _, c := range list {
+		visible, err := filterReadable(r.Context(), authz, list, func(c *credential.Credential) string { return c.ID })
+		if err != nil {
+			log.Error("server: list credentials: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not list credentials")
+			return
+		}
+		views := make([]credentialView, 0, len(visible))
+		for _, c := range visible {
 			views = append(views, credentialView{Credential: c, NeedsSecret: c.Secret == ""})
 		}
 		respondJSON(w, log, http.StatusOK,

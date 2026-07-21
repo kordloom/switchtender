@@ -115,6 +115,65 @@ func (a *authorizer) manages(ctx context.Context, actor Actor, object string) (b
 	return false, nil
 }
 
+// readableObjects returns the set of object ids the actor may read through a grant, so a list can be
+// filtered to what the actor is allowed to see. Any grant satisfies read, since use and manage rank
+// above it.
+func (a *authorizer) readableObjects(ctx context.Context, actor Actor) (map[string]bool, error) {
+	grants, err := a.grants.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	subjects, err := a.subjectsFor(ctx, actor)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]bool)
+	for _, g := range grants {
+		if subjects[g.Subject] && grant.Satisfies(g.Access, grant.AccessRead) {
+			out[g.Object] = true
+		}
+	}
+	return out, nil
+}
+
+// readFilter returns a predicate reporting whether the request actor may see an object id in a list.
+// It keeps everything unless strict grants are on, since without strict mode reads defer to the global
+// role and every role reads everything. Under strict grants a non-admin sees only objects a grant lets
+// them read, while an admin still sees all. A nil authorizer or grant store keeps everything. The error
+// surfaces a grant-store failure so the caller can fail closed.
+func (a *authorizer) readFilter(ctx context.Context) (func(id string) bool, error) {
+	keepAll := func(string) bool { return true }
+	if a == nil || a.grants == nil || !a.strict {
+		return keepAll, nil
+	}
+	actor, ok := actorFrom(ctx)
+	if !ok || actor.Role == user.RoleAdmin {
+		return keepAll, nil
+	}
+	readable, err := a.readableObjects(ctx, actor)
+	if err != nil {
+		return nil, err
+	}
+	return func(id string) bool { return readable[id] }, nil
+}
+
+// filterReadable returns the items the request actor may see, dropping any object a strict-grants
+// deployment has not granted the actor read on. id extracts an item's object id. It errors only when
+// the grant store fails, so a list handler fails closed rather than leaking everything.
+func filterReadable[T any](ctx context.Context, authz *authorizer, items []T, id func(T) string) ([]T, error) {
+	keep, err := authz.readFilter(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]T, 0, len(items))
+	for _, it := range items {
+		if keep(id(it)) {
+			out = append(out, it)
+		}
+	}
+	return out, nil
+}
+
 // authorizeAll requires want access on every non-empty object, returning the first denial. Handlers
 // that reference several grantable objects at once, such as a run naming a project, an inventory,
 // and credentials, use it to authorize each before acting.

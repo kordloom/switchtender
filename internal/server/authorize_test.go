@@ -2,16 +2,31 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
+	"go.uber.org/zap"
+
 	"github.com/dcadolph/switchtender/internal/grant"
+	"github.com/dcadolph/switchtender/internal/project"
 	"github.com/dcadolph/switchtender/internal/team"
 	"github.com/dcadolph/switchtender/internal/user"
 )
+
+// fakeProjects is a project.Store that answers List from a fixed slice, leaving the rest unused.
+type fakeProjects struct {
+	project.Store
+	list []*project.Project
+}
+
+// List returns the fixed project slice.
+func (f *fakeProjects) List(context.Context) ([]*project.Project, error) { return f.list, nil }
 
 // fakeGrants is a grant.Store that answers ForObject from a map, leaving the other methods unused.
 type fakeGrants struct {
@@ -26,6 +41,23 @@ func (f *fakeGrants) ForObject(_ context.Context, object string) ([]*grant.Grant
 		return nil, f.err
 	}
 	return f.byObject[object], nil
+}
+
+// List returns every configured grant across all objects, or the configured error. It stamps each
+// grant's Object from its map key, since the real store persists the object on every grant row.
+func (f *fakeGrants) List(_ context.Context) ([]*grant.Grant, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	var out []*grant.Grant
+	for obj, gs := range f.byObject {
+		for _, g := range gs {
+			cp := *g
+			cp.Object = obj
+			out = append(out, &cp)
+		}
+	}
+	return out, nil
 }
 
 // fakeTeams is a team.Store that answers TeamsForUser from a map, leaving the other methods unused.
@@ -148,6 +180,123 @@ func TestAuthorizerManages(t *testing.T) {
 	bad := &authorizer{grants: &fakeGrants{err: errBoom}}
 	if _, err := bad.manages(context.Background(), Actor{UserID: "user_1", Role: user.RoleViewer}, "proj_1"); !errors.Is(err, errBoom) {
 		t.Errorf("store-error manages() err = %v, want boom", err)
+	}
+}
+
+// TestReadFilter checks read-grant list filtering: without strict grants the role governs and all is
+// visible, and under strict grants a non-admin sees only objects a grant lets them read, where use and
+// manage confer read too, while an admin sees all. A grant-store error fails closed.
+func TestReadFilter(t *testing.T) {
+	t.Parallel()
+	authz := &authorizer{
+		strict: true,
+		grants: &fakeGrants{byObject: map[string][]*grant.Grant{
+			"proj_1": {{Subject: "user_1", Access: grant.AccessRead}},
+			"proj_2": {{Subject: "user_2", Access: grant.AccessUse}},
+			"proj_3": {{Subject: "team_x", Access: grant.AccessManage}},
+		}},
+		teams: &fakeTeams{byUser: map[string][]string{"user_3": {"team_x"}}},
+	}
+	all := []string{"proj_1", "proj_2", "proj_3"}
+	withActor := func(a Actor) context.Context {
+		return context.WithValue(context.Background(), actorKey{}, a)
+	}
+	kept := func(t *testing.T, ctx context.Context) []string {
+		t.Helper()
+		keep, err := authz.readFilter(ctx)
+		if err != nil {
+			t.Fatalf("readFilter() error = %v", err)
+		}
+		var out []string
+		for _, id := range all {
+			if keep(id) {
+				out = append(out, id)
+			}
+		}
+		return out
+	}
+
+	tests := []struct {
+		Name  string
+		Actor Actor
+		Want  []string
+	}{
+		{"read grant sees only its object", Actor{UserID: "user_1", Role: user.RoleViewer}, []string{"proj_1"}},
+		{"use grant confers read", Actor{UserID: "user_2", Role: user.RoleOperator}, []string{"proj_2"}},
+		{"team manage grant confers read to a member", Actor{UserID: "user_3", Role: user.RoleViewer}, []string{"proj_3"}},
+		{"no grant sees nothing", Actor{UserID: "user_9", Role: user.RoleViewer}, nil},
+		{"admin sees all", Actor{UserID: "user_9", Role: user.RoleAdmin}, all},
+	}
+	for _, test := range tests {
+		t.Run(test.Name, func(t *testing.T) {
+			t.Parallel()
+			if diff := cmp.Diff(test.Want, kept(t, withActor(test.Actor)), cmpopts.EquateEmpty()); diff != "" {
+				t.Errorf("kept mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+
+	// Without strict grants the role governs, so everything is visible regardless of grants.
+	nonStrict := &authorizer{grants: authz.grants, teams: authz.teams}
+	keep, err := nonStrict.readFilter(withActor(Actor{UserID: "user_9", Role: user.RoleViewer}))
+	if err != nil {
+		t.Fatalf("readFilter() non-strict error = %v", err)
+	}
+	for _, id := range all {
+		if !keep(id) {
+			t.Errorf("non-strict dropped %s, want all kept", id)
+		}
+	}
+
+	// A grant-store error surfaces so a list handler fails closed rather than leaking everything.
+	bad := &authorizer{strict: true, grants: &fakeGrants{err: errors.New("boom")}}
+	if _, err := bad.readFilter(withActor(Actor{UserID: "user_1", Role: user.RoleViewer})); err == nil {
+		t.Error("readFilter with a failing store returned no error, want one")
+	}
+}
+
+// TestListProjectsAppliesReadGrants proves the wiring: the list handler filters its results through the
+// read grant, so under strict grants a non-admin viewer sees only granted projects and an admin sees all.
+func TestListProjectsAppliesReadGrants(t *testing.T) {
+	t.Parallel()
+	store := &fakeProjects{list: []*project.Project{
+		{ID: "proj_1", Name: "one"}, {ID: "proj_2", Name: "two"}, {ID: "proj_3", Name: "three"},
+	}}
+	authz := &authorizer{strict: true, grants: &fakeGrants{byObject: map[string][]*grant.Grant{
+		"proj_2": {{Subject: "user_1", Access: grant.AccessRead}},
+	}}}
+	handler := listProjectsHandler(store, authz, zap.NewNop())
+
+	ids := func(actor Actor) []string {
+		req := httptest.NewRequest(http.MethodGet, "/v1/projects", nil).
+			WithContext(context.WithValue(context.Background(), actorKey{}, actor))
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+		}
+		var resp struct {
+			Projects []*project.Project `json:"projects"`
+			Count    int                `json:"count"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		out := make([]string, len(resp.Projects))
+		for i, p := range resp.Projects {
+			out[i] = p.ID
+		}
+		if resp.Count != len(out) {
+			t.Errorf("count = %d, want %d", resp.Count, len(out))
+		}
+		return out
+	}
+
+	if got := ids(Actor{UserID: "user_1", Role: user.RoleViewer}); cmp.Diff([]string{"proj_2"}, got) != "" {
+		t.Errorf("viewer with a read grant saw %v, want [proj_2]", got)
+	}
+	if got := ids(Actor{UserID: "user_9", Role: user.RoleAdmin}); cmp.Diff([]string{"proj_1", "proj_2", "proj_3"}, got) != "" {
+		t.Errorf("admin saw %v, want all three", got)
 	}
 }
 

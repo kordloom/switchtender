@@ -120,8 +120,9 @@ func updateProjectHandler(store project.Store, log *zap.Logger) http.HandlerFunc
 	}
 }
 
-// listProjectsHandler returns all projects.
-func listProjectsHandler(store project.Store, log *zap.Logger) http.HandlerFunc {
+// listProjectsHandler returns the projects the actor may read. Under strict grants a non-admin sees
+// only projects a grant lets them read; otherwise the global role governs and all are returned.
+func listProjectsHandler(store project.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil {
 			respondError(w, log, http.StatusNotFound, "projects not enabled")
@@ -133,8 +134,14 @@ func listProjectsHandler(store project.Store, log *zap.Logger) http.HandlerFunc 
 			respondError(w, log, http.StatusInternalServerError, "could not list projects")
 			return
 		}
+		visible, err := filterReadable(r.Context(), authz, list, func(p *project.Project) string { return p.ID })
+		if err != nil {
+			log.Error("server: list projects: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not list projects")
+			return
+		}
 		respondJSON(w, log, http.StatusOK,
-			listProjectsResponse{Projects: list, Count: len(list)}, wantsPretty(r))
+			listProjectsResponse{Projects: visible, Count: len(visible)}, wantsPretty(r))
 	}
 }
 

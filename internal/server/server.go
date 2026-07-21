@@ -365,7 +365,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("DELETE /v1/users/{id}", deleteUserHandler(s.users, s.log))
 	mux.Handle("POST /v1/credentials", createCredentialHandler(s.credentials, s.sealer, s.log))
 	mux.Handle("PUT /v1/credentials/{id}", updateCredentialHandler(s.credentials, s.sealer, s.log))
-	mux.Handle("GET /v1/credentials", listCredentialsHandler(s.credentials, s.log))
+	mux.Handle("GET /v1/credentials", listCredentialsHandler(s.credentials, authz, s.log))
 	// refs lets a credential or project delete refuse to orphan an object that still uses it.
 	refs := &refChecker{
 		templates: s.templates, inventories: s.inventories,
@@ -374,11 +374,11 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("DELETE /v1/credentials/{id}", deleteCredentialHandler(s.credentials, refs, s.log))
 	mux.Handle("POST /v1/projects", createProjectHandler(s.projects, s.log))
 	mux.Handle("PUT /v1/projects/{id}", updateProjectHandler(s.projects, s.log))
-	mux.Handle("GET /v1/projects", listProjectsHandler(s.projects, s.log))
+	mux.Handle("GET /v1/projects", listProjectsHandler(s.projects, authz, s.log))
 	mux.Handle("DELETE /v1/projects/{id}", deleteProjectHandler(s.projects, refs, s.log))
 	mux.Handle("POST /v1/inventories", createInventoryHandler(s.inventories, authz, s.sealer, s.log))
 	mux.Handle("PUT /v1/inventories/{id}", updateInventoryHandler(s.inventories, authz, s.sealer, s.log))
-	mux.Handle("GET /v1/inventories", listInventoriesHandler(s.inventories, s.log))
+	mux.Handle("GET /v1/inventories", listInventoriesHandler(s.inventories, authz, s.log))
 	mux.Handle("DELETE /v1/inventories/{id}", deleteInventoryHandler(s.inventories, s.log))
 	mux.Handle("POST /v1/policies", createPolicyHandler(s.policies, s.log))
 	mux.Handle("GET /v1/policies", listPoliciesHandler(s.policies, s.log))
@@ -397,7 +397,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /hooks/{token}", hookHandler(s.triggers, s.templates, s.submitter, s.sealer, s.log))
 	mux.Handle("POST /v1/templates", createTemplateHandler(s.templates, s.log))
 	mux.Handle("PUT /v1/templates/{id}", updateTemplateHandler(s.templates, s.log))
-	mux.Handle("GET /v1/templates", listTemplatesHandler(s.templates, s.log))
+	mux.Handle("GET /v1/templates", listTemplatesHandler(s.templates, authz, s.log))
 	mux.Handle("DELETE /v1/templates/{id}", deleteTemplateHandler(s.templates, s.log))
 	mux.Handle("POST /v1/templates/{id}/launch", launchTemplateHandler(s.templates, s.submitter, authz, s.log))
 	mux.Handle("POST /v1/teams", createTeamHandler(s.teams, s.log))

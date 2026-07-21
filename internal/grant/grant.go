@@ -20,9 +20,13 @@ var ErrNotFound = errors.New("grant not found")
 type Access string
 
 const (
-	// AccessUse lets a subject use an object, for example launch a template or run a project.
+	// AccessRead lets a subject see an object in a listing without using or changing it. It is the
+	// lowest level, so a use or manage grant confers it too.
+	AccessRead Access = "read"
+	// AccessUse lets a subject use an object, for example launch a template or run a project, and
+	// implies read.
 	AccessUse Access = "use"
-	// AccessManage lets a subject change an object and implies use.
+	// AccessManage lets a subject change an object and implies use and read.
 	AccessManage Access = "manage"
 )
 
@@ -62,16 +66,28 @@ type Store interface {
 
 // ValidAccess reports whether a names a supported access level.
 func ValidAccess(a Access) bool {
-	return a == AccessUse || a == AccessManage
+	return a == AccessRead || a == AccessUse || a == AccessManage
 }
 
-// Satisfies reports whether a subject holding have may perform an action needing want. Manage
-// implies use.
-func Satisfies(have, want Access) bool {
-	if have == AccessManage {
-		return true
+// rank orders the access levels so a higher level confers the lower ones: manage over use over read.
+// An unrecognized level ranks zero, so it confers nothing.
+func rank(a Access) int {
+	switch a {
+	case AccessManage:
+		return 3
+	case AccessUse:
+		return 2
+	case AccessRead:
+		return 1
+	default:
+		return 0
 	}
-	return have == want
+}
+
+// Satisfies reports whether a subject holding have may perform an action needing want. The levels are
+// ranked, so manage satisfies use and read, and use satisfies read.
+func Satisfies(have, want Access) bool {
+	return rank(have) >= rank(want)
 }
 
 // ValidSubject reports whether s names a user or a team.

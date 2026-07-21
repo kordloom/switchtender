@@ -76,7 +76,7 @@ Every endpoint the server exposes. The API is served under the `/v1` base path. 
 | POST   | `/v1/teams/{id}/members`   | Add a user to a team.                                   |
 | GET    | `/v1/teams/{id}/members`   | List a team's members.                                  |
 | DELETE | `/v1/teams/{id}/members/{userID}` | Remove a user from a team.                       |
-| POST   | `/v1/grants`               | Grant a user or team use or manage on an object.        |
+| POST   | `/v1/grants`               | Grant a user or team read, use, or manage on an object. |
 | GET    | `/v1/grants`               | List access grants.                                     |
 | DELETE | `/v1/grants/{id}`          | Delete an access grant.                                 |
 | GET    | `/v1/workers`              | The executor fleet with lease freshness.                |
