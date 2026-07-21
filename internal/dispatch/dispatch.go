@@ -118,6 +118,8 @@ type Dispatcher struct {
 	slackWebhooks []string
 	// discordWebhooks receive a Discord-formatted terminal run notification.
 	discordWebhooks []string
+	// teamsWebhooks receive a Microsoft Teams Adaptive Card terminal run notification.
+	teamsWebhooks []string
 	// emailer sends terminal run notifications by email, nil when email is off.
 	emailer Emailer
 	// emailOnFailureOnly limits email notifications to failed runs.
@@ -161,6 +163,8 @@ type config struct {
 	slackWebhooks []string
 	// discordWebhooks receive a Discord-formatted terminal run notification.
 	discordWebhooks []string
+	// teamsWebhooks receive a Microsoft Teams Adaptive Card terminal run notification.
+	teamsWebhooks []string
 	// emailer sends terminal run notifications by email, nil when email is off.
 	emailer Emailer
 	// emailOnFailureOnly limits email notifications to failed runs.
@@ -255,6 +259,7 @@ func New(store run.Store, runner roundhouse.Runner, log *zap.Logger, opts ...Opt
 		webhooks:           cfg.webhooks,
 		slackWebhooks:      cfg.slackWebhooks,
 		discordWebhooks:    cfg.discordWebhooks,
+		teamsWebhooks:      cfg.teamsWebhooks,
 		emailer:            cfg.emailer,
 		emailOnFailureOnly: cfg.emailOnFailureOnly,
 		inventories:        cfg.inventories,

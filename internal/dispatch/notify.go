@@ -38,6 +38,7 @@ func (d *Dispatcher) notify(r *run.Run) {
 	d.notifyWebhooks(r)
 	d.notifySlack(r)
 	d.notifyDiscord(r)
+	d.notifyTeams(r)
 	d.notifyEmail(r)
 	d.notifyExtra(r)
 }
