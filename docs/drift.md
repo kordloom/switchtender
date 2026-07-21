@@ -23,9 +23,11 @@ extra setup. Schedule a dry run of a playbook on a cadence and the Drift page st
 
 ## What counts
 
-Drift is defined for tools that assert a desired state and support a no-change check: Ansible with
-`--check` and Terraform with a plan. Bash, Python, and Go have no desired state, so they do not report
-drift.
+Drift here is a per-host signal, so it comes from Ansible check-mode runs. Ansible's `--check` reports
+host by host which tasks would change, and that per-host recap is what the Drift page reads. The other
+tools do not feed it: Terraform and OpenTofu plan over resources rather than hosts, so a plan has no
+per-host recap, and Bash, Python, PowerShell, and Go have no desired-state check at all. Resource-level
+drift for Terraform and OpenTofu would be a separate signal, not this per-host one.
 
 ## From the API
 
