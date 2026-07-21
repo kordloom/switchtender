@@ -22,7 +22,7 @@ func seedDrift(t *testing.T, store run.Store, runID, tool, host string, changed 
 	ctx := context.Background()
 	at := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
 	if err := store.Save(ctx, &run.Run{
-		ID: runID, Playbook: "site.yml", Inventory: "hosts.ini", Tool: tool, DryRun: true,
+		ID: runID, Playbook: "site.yml", Inventory: "hosts.ini", Tool: tool, Command: host, DryRun: true,
 		Status: run.StatusSucceeded, CreatedAt: at,
 		ProjectID: "proj1", InventoryID: "inv1", CredentialIDs: []string{"cred1"}, Queue: "dmz",
 	}); err != nil {
@@ -34,15 +34,16 @@ func seedDrift(t *testing.T, store run.Store, runID, tool, host string, changed 
 	}
 }
 
-// TestReconcileDrift covers the proposal builder: the happy path clones the check run held for
-// approval and limited to the host, an in-sync host is refused, an unknown host is not found, a
-// non-ansible check is refused, and an empty host is invalid.
+// TestReconcileDrift covers the proposal builder: an Ansible check clones held and limited to the
+// host, a Terraform check applies its working directory, an in-sync target is refused, an unknown
+// target is not found, a tool with no reconcile is refused, and an empty target is invalid.
 func TestReconcileDrift(t *testing.T) {
 	t.Parallel()
 	store := run.NewMemStore()
 	seedDrift(t, store, "chk_web", "", "web01", 3)
 	seedDrift(t, store, "chk_db", "", "db01", 0)
 	seedDrift(t, store, "chk_bash", "bash", "job01", 2)
+	seedDrift(t, store, "chk_tf", run.ToolTerraform, "infra/network", 5)
 
 	fake := &fakeSubmitter{run: &run.Run{ID: "run_prop", Status: run.StatusPendingApproval}}
 	handler := New(store, fake, zap.NewNop()).Handler()
@@ -97,14 +98,36 @@ func TestReconcileDrift(t *testing.T) {
 		t.Errorf("unknown host status = %d, want 404", rec.Code)
 	}
 
-	// Test 3: A non-ansible check is refused with 400.
+	// Test 3: A tool with no reconcile, such as bash, is refused with 400.
 	if rec := post(`{"host":"job01"}`); rec.Code != http.StatusBadRequest {
-		t.Errorf("non-ansible reconcile status = %d, want 400", rec.Code)
+		t.Errorf("bash reconcile status = %d, want 400", rec.Code)
 	}
 
 	// Test 4: An empty host is invalid.
 	if rec := post(`{"host":"  "}`); rec.Code != http.StatusBadRequest {
 		t.Errorf("empty host status = %d, want 400", rec.Code)
+	}
+
+	// Test 5: A Terraform drift check applies its working directory, held for approval, with no host
+	// limit, run for real rather than as a plan.
+	rec = post(`{"host":"infra/network"}`)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("terraform reconcile status = %d, want 202: %s", rec.Code, rec.Body.String())
+	}
+	tf := fake.gotRun
+	if run.NormalizeTool(tf.Tool) != run.ToolTerraform || tf.Command != "infra/network" {
+		t.Errorf("terraform proposal tool/command = %q/%q, want terraform applying infra/network",
+			tf.Tool, tf.Command)
+	}
+	if tf.Limit != "" {
+		t.Errorf("terraform proposal limit = %q, want none", tf.Limit)
+	}
+	if tf.DryRun {
+		t.Error("terraform proposal is a dry run, want a real apply")
+	}
+	if tf.Status != run.StatusPendingApproval || tf.ProposedFrom != "chk_tf" {
+		t.Errorf("terraform proposal = status %q from %q, want pending_approval from chk_tf",
+			tf.Status, tf.ProposedFrom)
 	}
 }
 

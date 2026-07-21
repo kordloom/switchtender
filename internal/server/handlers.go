@@ -228,11 +228,12 @@ type reconcileRequest struct {
 	Host string `json:"host"`
 }
 
-// reconcileDriftHandler builds a reconcile proposal for a drifted host: the same playbook,
-// inventory, and credentials as the check run that observed the drift, limited to that host and
-// run for real instead of in check mode. The proposal is deterministic, no model constructs it,
-// and it is born held for approval, so a person releases it or it never executes. The actor must
-// hold use on every object the run will touch, exactly as a template launch requires.
+// reconcileDriftHandler builds a reconcile proposal for a drifted target from the check run that
+// observed the drift, run for real instead of in check mode: an Ansible check reruns its playbook
+// limited to the drifted host, and a Terraform or OpenTofu check applies its working directory. The
+// proposal is deterministic, no model constructs it, and it is born held for approval, so a person
+// releases it or it never executes. The actor must hold use on every object the run will touch,
+// exactly as a template launch requires.
 func reconcileDriftHandler(store run.Store, submitter Submitter, authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	if store == nil || submitter == nil {
 		panic("server: reconcileDriftHandler: Store and Submitter required")
@@ -275,8 +276,10 @@ func reconcileDriftHandler(store run.Store, submitter Submitter, authz *authoriz
 			respondError(w, log, http.StatusInternalServerError, "could not read the check run")
 			return
 		}
-		if run.NormalizeTool(check.Tool) != run.ToolAnsible {
-			respondError(w, log, http.StatusBadRequest, "reconcile is defined for ansible drift checks")
+		tool := run.NormalizeTool(check.Tool)
+		if tool != run.ToolAnsible && tool != run.ToolTerraform && tool != run.ToolOpenTofu {
+			respondError(w, log, http.StatusBadRequest,
+				"reconcile is defined for ansible, terraform, and opentofu drift checks")
 			return
 		}
 
@@ -289,9 +292,16 @@ func reconcileDriftHandler(store run.Store, submitter Submitter, authz *authoriz
 
 		opts := []run.SubmitOption{
 			run.WithTool(check.Tool),
-			run.WithLimit(host),
 			run.WithRequireApproval(true),
 			run.WithProposedFrom(check.ID),
+		}
+		if tool == run.ToolAnsible {
+			// The Ansible fix reruns the playbook limited to the drifted host, applying exactly the
+			// divergent tasks.
+			opts = append(opts, run.WithLimit(host))
+		} else {
+			// The Terraform or OpenTofu fix applies the drifted working directory for real.
+			opts = append(opts, run.WithCommand(check.Command))
 		}
 		if check.ProjectID != "" {
 			opts = append(opts, run.WithProject(check.ProjectID))

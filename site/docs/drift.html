@@ -60,10 +60,11 @@ not report drift.</p>
 </code></pre>
 <p>Each target carries its changed count, the check run id, and when it was checked, worst drift first. A
 target is an Ansible host or a Terraform working directory.</p>
-<h2 id="reconcile-a-drifted-host">Reconcile a drifted host</h2>
-<p>A drifted row on the Drift page carries a Propose reconcile button. It builds the fix for you: the
-same playbook, inventory, and credentials as the check that observed the drift, limited to that host
-and run for real instead of in check mode. The construction is deterministic. No model builds it.</p>
+<h2 id="reconcile-a-drifted-target">Reconcile a drifted target</h2>
+<p>A drifted row on the Drift page carries a Propose reconcile button. It builds the fix for you from the
+check that observed the drift, run for real instead of as a check: an Ansible check reruns its playbook
+limited to the drifted host, applying exactly the divergent tasks, and a Terraform or OpenTofu check
+applies its working directory. The construction is deterministic. No model builds it.</p>
 <p>The proposal never starts on its own. It is created held for approval, so an approver reviews it and
 releases or rejects it, and the audit trail records that a machine proposed it and who decided. When
 an AI provider is configured, the Explain button on the held proposal summarizes what drifted and
@@ -71,8 +72,7 @@ what approving will change, from the check run's masked events.</p>
 <p>The same action is one request, for an operator token:</p>
 <pre><code>curl -s -X POST localhost:8080/drift/reconcile -d '{&quot;host&quot;: &quot;web01&quot;}'
 </code></pre>
-<p>Reconcile is defined for Ansible drift, where limiting the playbook to the drifted host applies
-exactly the divergent tasks.</p>
+<p>The <code>host</code> field names the drifted target, an Ansible host or a Terraform working directory.</p>
 <p>See also the <a href="/docs/faq">FAQ</a> and the <a href="/docs/tutorials">tutorials</a>.</p>
 
 		</main>
