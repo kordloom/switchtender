@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"time"
 )
@@ -102,7 +103,7 @@ func resolveAWS(ctx context.Context, config string) (string, error) {
 	}
 	req.Header.Set("Content-Type", awsContentType)
 	req.Header.Set("X-Amz-Target", awsTarget)
-	signAWSRequest(req, body, creds, region, time.Now())
+	signAWSV4(req, body, creds, region, awsService, time.Now(), "x-amz-target")
 
 	resp, err := safeClient.Do(req)
 	if err != nil {
@@ -165,38 +166,47 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-// signAWSRequest sets the X-Amz-Date, optional X-Amz-Security-Token, and Authorization headers on
-// req using AWS Signature Version 4 over the request body. It signs the minimal header set Secrets
-// Manager requires, so the canonical request is deterministic regardless of transport headers.
-func signAWSRequest(req *http.Request, body []byte, creds awsCredentials, region string, now time.Time) {
+// signAWSV4 sets the X-Amz-Date, optional X-Amz-Security-Token, and Authorization headers on req using
+// AWS Signature Version 4 over the request body for the given service. It always signs content-type,
+// host, and x-amz-date, adds x-amz-security-token when the credentials carry one, and signs any extra
+// headers, such as x-amz-target for the JSON protocols, that the caller already set on req. The header
+// names are sorted so the canonical request is deterministic, letting the JSON and query protocols
+// share one signer.
+func signAWSV4(req *http.Request, body []byte, creds awsCredentials, region, service string, now time.Time, extraSigned ...string) {
 	amzDate := now.UTC().Format("20060102T150405Z")
 	dateStamp := now.UTC().Format("20060102")
 
 	req.Header.Set("X-Amz-Date", amzDate)
+	names := []string{"content-type", "host", "x-amz-date"}
 	if creds.SessionToken != "" {
 		req.Header.Set("X-Amz-Security-Token", creds.SessionToken)
+		names = append(names, "x-amz-security-token")
 	}
+	names = append(names, extraSigned...)
+	sort.Strings(names)
 
 	var canonical strings.Builder
-	canonical.WriteString("content-type:" + req.Header.Get("Content-Type") + "\n")
-	canonical.WriteString("host:" + req.URL.Host + "\n")
-	canonical.WriteString("x-amz-date:" + amzDate + "\n")
-	signed := "content-type;host;x-amz-date"
-	if creds.SessionToken != "" {
-		canonical.WriteString("x-amz-security-token:" + creds.SessionToken + "\n")
-		signed += ";x-amz-security-token"
+	for _, n := range names {
+		value := req.Header.Get(n)
+		if n == "host" {
+			value = req.URL.Host
+		}
+		canonical.WriteString(n + ":" + value + "\n")
 	}
-	canonical.WriteString("x-amz-target:" + req.Header.Get("X-Amz-Target") + "\n")
-	signed += ";x-amz-target"
+	signed := strings.Join(names, ";")
 
+	uri := req.URL.EscapedPath()
+	if uri == "" {
+		uri = "/"
+	}
 	canonicalRequest := strings.Join([]string{
-		http.MethodPost, "/", "", canonical.String(), signed, sha256Hex(body),
+		req.Method, uri, req.URL.RawQuery, canonical.String(), signed, sha256Hex(body),
 	}, "\n")
-	scope := dateStamp + "/" + region + "/" + awsService + "/aws4_request"
+	scope := dateStamp + "/" + region + "/" + service + "/aws4_request"
 	stringToSign := strings.Join([]string{
 		"AWS4-HMAC-SHA256", amzDate, scope, sha256Hex([]byte(canonicalRequest)),
 	}, "\n")
-	signature := hex.EncodeToString(hmacSHA256(awsSigningKey(creds.SecretAccessKey, dateStamp, region, awsService), stringToSign))
+	signature := hex.EncodeToString(hmacSHA256(awsSigningKey(creds.SecretAccessKey, dateStamp, region, service), stringToSign))
 
 	req.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential="+creds.AccessKeyID+"/"+scope+
 		", SignedHeaders="+signed+", Signature="+signature)

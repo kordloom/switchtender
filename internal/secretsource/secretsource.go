@@ -38,6 +38,9 @@ const (
 	// KindVaultDynamic means the config names a Vault dynamic secrets path that mints a short-lived
 	// credential on each read, returned with a lease that revokes it after the run.
 	KindVaultDynamic = "vault_dynamic"
+	// KindAWSSTS means the config names an IAM role to assume through AWS STS, minting short-lived
+	// role credentials for each run as an env block, next to Vault dynamic on the ephemeral-secret story.
+	KindAWSSTS = "aws_sts"
 )
 
 // ErrResolve is returned when a source cannot produce its value.
@@ -114,6 +117,7 @@ type MintFunc func(ctx context.Context, config string) (string, *Lease, error)
 // STS without touching the core.
 var minters = map[string]MintFunc{
 	KindVaultDynamic: mintVaultDynamic,
+	KindAWSSTS:       mintAWSSTS,
 }
 
 // RegisterDynamic adds a mint function for a dynamic source kind, so a new short-lived secrets engine

@@ -95,6 +95,16 @@ credential lives only as long as the run. If the process dies before it can revo
 still expires on the lease's own TTL, so nothing is left behind for long. The minted value is masked
 in the run's output like any other secret.
 
+AWS STS mints short-lived role credentials the same way. Set the source to AWS STS and give it an IAM
+`role_arn` to assume, with an optional `region`, `duration_seconds`, and `external_id`. Use it with an
+env credential, since it injects `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_SESSION_TOKEN`.
+
+    {"role_arn":"arn:aws:iam::123456789012:role/deploy","region":"us-east-1","duration_seconds":3600}
+
+The base credentials that sign the assume-role call come from the config or the standard AWS
+environment. STS credentials cannot be revoked early, so they expire on their own lifetime rather than
+on a lease.
+
 ## From the API
 
     curl -s -X POST localhost:8080/credentials \
