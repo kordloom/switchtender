@@ -63,6 +63,12 @@ or a bearer `token`.
 
     {"vault":"prod-kv","secret":"db-password"}
 
+CyberArk Conjur has a native source too: give the Conjur URL, account, and variable as JSON.
+SwitchTender exchanges the `login` and `api_key` for a short-lived access token, then reads the
+variable. Supply a pre-issued `token` instead to skip the exchange.
+
+    {"url":"https://conjur.example.com","account":"prod","login":"host/app","api_key":"...","variable":"db/password"}
+
 ## Mint a short-lived secret per run
 
 For the strongest secret hygiene, SwitchTender can mint a fresh credential for each run and revoke it

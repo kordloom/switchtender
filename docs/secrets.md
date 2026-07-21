@@ -38,6 +38,7 @@ A credential's source decides where its value comes from at run time.
 | Google Secret Manager | A project, secret, and version, read at launch. On GCP it reads as the attached service account with no stored key. |
 | AWS Secrets Manager | A secret id, region, and AWS credentials, read over a Signature Version 4 signed request at launch. Credentials fall back to the standard AWS environment, so an instance role needs no stored key. |
 | Azure Key Vault | A vault name and secret, read over the Key Vault REST API at launch. Authenticates with a bearer token, a service principal, or, on Azure, the attached managed identity with no stored key. |
+| CyberArk Conjur | A Conjur URL, account, and variable, read over the Conjur REST API at launch. Authenticates with an access token or by exchanging an API key, so no long-lived credential is stored once a token is issued. |
 
 ## Ephemeral secrets
 
