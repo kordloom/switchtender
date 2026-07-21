@@ -1,7 +1,7 @@
 // Package secretsource resolves a value from an external source at run time, so any resource, not
 // just a credential, can be sourced from a secrets engine. A source is a kind and a config: local
-// means the config is the value itself; command, vault, and gsm fetch the value from an external
-// store. New engines register a resolver for their kind, so the set is pluggable.
+// means the config is the value itself; command, vault, gsm, and aws fetch the value from an
+// external store. New engines register a resolver for their kind, so the set is pluggable.
 package secretsource
 
 import (
@@ -19,6 +19,9 @@ const (
 	KindVault = "vault"
 	// KindGSM means the config is a JSON Google Secret Manager project, secret, and version.
 	KindGSM = "gsm"
+	// KindAWS means the config is a JSON AWS Secrets Manager secret id, region, and credentials, read
+	// with a Signature Version 4 signed request.
+	KindAWS = "aws"
 	// KindVaultDynamic means the config names a Vault dynamic secrets path that mints a short-lived
 	// credential on each read, returned with a lease that revokes it after the run.
 	KindVaultDynamic = "vault_dynamic"
@@ -36,6 +39,7 @@ var resolvers = map[string]ResolverFunc{
 	KindCommand: resolveCommand,
 	KindVault:   resolveVault,
 	KindGSM:     resolveGSM,
+	KindAWS:     resolveAWS,
 }
 
 // Register adds a resolver for a source kind so a new secrets engine plugs in. It panics on a

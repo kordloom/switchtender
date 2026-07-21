@@ -36,6 +36,7 @@ A credential's source decides where its value comes from at run time.
 | Vault | A Vault address, path, and field, read over Vault's HTTP API at launch. Handles KV v2 and KV v1. |
 | Vault dynamic | A Vault dynamic secrets path. A fresh, short-lived credential is minted for each run and revoked when the run ends. |
 | Google Secret Manager | A project, secret, and version, read at launch. On GCP it reads as the attached service account with no stored key. |
+| AWS Secrets Manager | A secret id, region, and AWS credentials, read over a Signature Version 4 signed request at launch. Credentials fall back to the standard AWS environment, so an instance role needs no stored key. |
 
 ## Ephemeral secrets
 

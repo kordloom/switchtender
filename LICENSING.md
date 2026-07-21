@@ -15,7 +15,7 @@ that binary. There is no separate paid build and nothing is unlocked with a lice
 - The tamper-evident, hash-chained audit trail with signed, offline-verifiable export.
 - Approval gates on high-risk runs.
 - Active-active high availability on PostgreSQL.
-- External secrets through Vault, AWS Secrets Manager, and cloud KMS.
+- External secrets through HashiCorp Vault (static and dynamic), AWS Secrets Manager, and Google Secret Manager, plus any store through a command.
 - Notifications over email, Slack, and webhook, plus retention policies.
 
 Internal production use by a company, on its own hosts, for its own infrastructure, is fully covered
