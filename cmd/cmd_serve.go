@@ -106,6 +106,12 @@ var notifyNtfyToken string
 // notifyPagerDuty holds the values of the repeatable --notify-pagerduty flag.
 var notifyPagerDuty []string
 
+// notifyGrafana holds the values of the repeatable --notify-grafana flag.
+var notifyGrafana []string
+
+// notifyGrafanaToken holds the value of the --notify-grafana-token flag.
+var notifyGrafanaToken string
+
 // serveAllowContainerEE holds the value of the --allow-container-ee flag.
 var serveAllowContainerEE bool
 
@@ -295,6 +301,10 @@ func init() {
 		"Optional bearer token for a protected ntfy topic, applied to every --notify-ntfy URL.")
 	serveCmd.Flags().StringArrayVar(&notifyPagerDuty, "notify-pagerduty", nil,
 		"PagerDuty Events API routing key that triggers an incident when a run fails. Repeatable.")
+	serveCmd.Flags().StringArrayVar(&notifyGrafana, "notify-grafana", nil,
+		"Grafana base URL that receives an annotation when a run finishes. Repeatable.")
+	serveCmd.Flags().StringVar(&notifyGrafanaToken, "notify-grafana-token", "",
+		"Bearer token for the Grafana annotations API, applied to every --notify-grafana URL.")
 	serveCmd.Flags().BoolVar(&serveAllowContainerEE, "allow-container-ee", false,
 		"Allow runs whose project pins a container image to execute inside that image. Needs Docker.")
 	registerContainerFlags(serveCmd)
@@ -551,6 +561,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		dispatch.WithTeams(notifyTeams),
 		dispatch.WithNtfy(notifyNtfy, notifyNtfyToken),
 		dispatch.WithPagerDuty(notifyPagerDuty),
+		dispatch.WithGrafana(notifyGrafana, notifyGrafanaToken),
 		dispatch.WithEmail(emailer, onFailureOnly),
 		dispatch.WithInventories(bundle.Inventories()),
 		dispatch.WithInventorySources(bundle.InventorySources()),

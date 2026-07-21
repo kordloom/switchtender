@@ -368,6 +368,16 @@ that variable is unset.</p>
 <td>PagerDuty Events API routing key that triggers an incident when a run fails. Repeatable.</td>
 </tr>
 <tr>
+<td><code>--notify-grafana</code></td>
+<td>none</td>
+<td>Grafana base URL that receives an annotation when a run finishes. Repeatable.</td>
+</tr>
+<tr>
+<td><code>--notify-grafana-token</code></td>
+<td>none</td>
+<td>Bearer token for the Grafana annotations API, applied to every <code>--notify-grafana</code> URL.</td>
+</tr>
+<tr>
 <td><code>--allow-container-ee</code></td>
 <td><code>false</code></td>
 <td>Allow runs whose project pins a container image to execute inside it. Needs Docker on the executor.</td>

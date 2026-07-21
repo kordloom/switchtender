@@ -43,6 +43,7 @@ func (d *Dispatcher) notify(r *run.Run) {
 	d.notifyTeams(r)
 	d.notifyNtfy(r)
 	d.notifyPagerDuty(r)
+	d.notifyGrafana(r)
 	d.notifyEmail(r)
 	d.notifyExtra(r)
 }

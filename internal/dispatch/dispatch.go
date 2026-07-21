@@ -130,6 +130,10 @@ type Dispatcher struct {
 	ntfyToken string
 	// pagerdutyKeys are PagerDuty Events API routing keys that receive an incident when a run fails.
 	pagerdutyKeys []string
+	// grafanaURLs are Grafana base URLs that receive an annotation when a run finishes.
+	grafanaURLs []string
+	// grafanaToken is the bearer token for the Grafana annotations API.
+	grafanaToken string
 	// emailer sends terminal run notifications by email, nil when email is off.
 	emailer Emailer
 	// emailOnFailureOnly limits email notifications to failed runs.
@@ -185,6 +189,10 @@ type config struct {
 	ntfyToken string
 	// pagerdutyKeys are PagerDuty Events API routing keys that receive an incident when a run fails.
 	pagerdutyKeys []string
+	// grafanaURLs are Grafana base URLs that receive an annotation when a run finishes.
+	grafanaURLs []string
+	// grafanaToken is the bearer token for the Grafana annotations API.
+	grafanaToken string
 	// emailer sends terminal run notifications by email, nil when email is off.
 	emailer Emailer
 	// emailOnFailureOnly limits email notifications to failed runs.
@@ -285,6 +293,8 @@ func New(store run.Store, runner roundhouse.Runner, log *zap.Logger, opts ...Opt
 		ntfyURLs:           cfg.ntfyURLs,
 		ntfyToken:          cfg.ntfyToken,
 		pagerdutyKeys:      cfg.pagerdutyKeys,
+		grafanaURLs:        cfg.grafanaURLs,
+		grafanaToken:       cfg.grafanaToken,
 		emailer:            cfg.emailer,
 		emailOnFailureOnly: cfg.emailOnFailureOnly,
 		inventories:        cfg.inventories,

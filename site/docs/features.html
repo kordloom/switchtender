@@ -198,6 +198,10 @@
 <td>A failed or interrupted run triggers a PagerDuty incident through the Events API, deduplicated per run, so an on-call responder is paged. A succeeded run pages no one.</td>
 </tr>
 <tr>
+<td>Grafana</td>
+<td>A finished run posts an annotation to the Grafana annotations API, tagged with switchtender and the run status, so runs show as markers on dashboards.</td>
+</tr>
+<tr>
 <td>AI triage</td>
 <td>An optional AI provider, local Ollama or a cloud API, explains a failed run on demand from its masked log and failed task events. Advisory only: it never runs anything, so every action still goes through the same policy and audit gates.</td>
 </tr>
