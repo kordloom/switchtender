@@ -2085,6 +2085,7 @@ function wireCredentialForm() {
 		vault_dynamic: '{"addr":"https://vault:8200","path":"database/creds/app","field":"password"}',
 		gsm: '{"project":"my-project","secret":"ci-token","version":"latest"}',
 		aws: '{"secret_id":"prod/db-password","region":"us-east-1"}',
+		azure: '{"vault":"prod-kv","secret":"db-password"}',
 	};
 	source.addEventListener("change", () => {
 		document.getElementById("cred-secret").placeholder = sourcePlaceholders[source.value] || secPlaceholder;

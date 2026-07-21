@@ -52,6 +52,17 @@ account through the metadata server, so no key is stored. Off GCP, put an access
 
     {"project":"my-project","secret":"ci-token","version":"latest"}
 
+AWS Secrets Manager and Azure Key Vault work the same way. For AWS, give the secret id and region as
+JSON; credentials fall back to the standard AWS environment, so an instance role needs no stored key.
+
+    {"secret_id":"prod/db-password","region":"us-east-1"}
+
+For Azure, give the vault name and secret as JSON. On Azure it reads as the attached managed identity
+with no stored key. Off Azure, add a service principal's `tenant_id`, `client_id`, and `client_secret`,
+or a bearer `token`.
+
+    {"vault":"prod-kv","secret":"db-password"}
+
 ## Mint a short-lived secret per run
 
 For the strongest secret hygiene, SwitchTender can mint a fresh credential for each run and revoke it
