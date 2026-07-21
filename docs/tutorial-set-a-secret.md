@@ -75,6 +75,12 @@ and the safe and object that locate the account, or a raw `query`. The applicati
 
     {"url":"https://ccp.example.com","app_id":"switchtender","safe":"Prod","object":"db-prod","client_cert":"-----BEGIN CERTIFICATE-----\n...","client_key":"-----BEGIN EC PRIVATE KEY-----\n..."}
 
+For 1Password, run a Connect server and give its URL, an API `token`, and the `vault` and `item` to
+read, each a name or an id. The `field` defaults to the item's password; set it to pull a different
+labeled field, such as a `credential` or an API key.
+
+    {"url":"https://connect.example.com","token":"...","vault":"Prod","item":"Database","field":"password"}
+
 ## Mint a short-lived secret per run
 
 For the strongest secret hygiene, SwitchTender can mint a fresh credential for each run and revoke it

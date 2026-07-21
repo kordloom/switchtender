@@ -1,7 +1,8 @@
 // Package secretsource resolves a value from an external source at run time, so any resource, not
 // just a credential, can be sourced from a secrets engine. A source is a kind and a config: local
-// means the config is the value itself; command, vault, gsm, aws, azure, and conjur fetch the value
-// from an external store. New engines register a resolver for their kind, so the set is pluggable.
+// means the config is the value itself; command, vault, gsm, aws, azure, conjur, ccp, and onepassword
+// fetch the value from an external store. New engines register a resolver for their kind, so the set
+// is pluggable.
 package secretsource
 
 import (
@@ -31,6 +32,9 @@ const (
 	// KindCCP means the config is a JSON CyberArk Central Credential Provider URL, app id, and account
 	// locator, read over the AIMWebService REST API with a client certificate or an allowed-machine rule.
 	KindCCP = "ccp"
+	// KindOnePassword means the config is a JSON 1Password Connect URL, token, vault, item, and field,
+	// read over the Connect REST API at launch with no op CLI on the runner.
+	KindOnePassword = "onepassword"
 	// KindVaultDynamic means the config names a Vault dynamic secrets path that mints a short-lived
 	// credential on each read, returned with a lease that revokes it after the run.
 	KindVaultDynamic = "vault_dynamic"
@@ -45,13 +49,14 @@ type ResolverFunc func(ctx context.Context, config string) (string, error)
 // resolvers maps a source kind to its resolver. Register adds engines such as AWS Secrets Manager or
 // 1Password without touching the core.
 var resolvers = map[string]ResolverFunc{
-	KindCommand: resolveCommand,
-	KindVault:   resolveVault,
-	KindGSM:     resolveGSM,
-	KindAWS:     resolveAWS,
-	KindAzure:   resolveAzure,
-	KindConjur:  resolveConjur,
-	KindCCP:     resolveCCP,
+	KindCommand:     resolveCommand,
+	KindVault:       resolveVault,
+	KindGSM:         resolveGSM,
+	KindAWS:         resolveAWS,
+	KindAzure:       resolveAzure,
+	KindConjur:      resolveConjur,
+	KindCCP:         resolveCCP,
+	KindOnePassword: resolveOnePassword,
 }
 
 // Register adds a resolver for a source kind so a new secrets engine plugs in. It panics on a

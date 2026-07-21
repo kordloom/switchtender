@@ -40,6 +40,7 @@ A credential's source decides where its value comes from at run time.
 | Azure Key Vault | A vault name and secret, read over the Key Vault REST API at launch. Authenticates with a bearer token, a service principal, or, on Azure, the attached managed identity with no stored key. |
 | CyberArk Conjur | A Conjur URL, account, and variable, read over the Conjur REST API at launch. Authenticates with an access token or by exchanging an API key, so no long-lived credential is stored once a token is issued. |
 | CyberArk CCP | A Central Credential Provider URL, app id, and account locator, read over the AIMWebService REST API at launch. Authenticates the application with a client certificate or a CCP allowed-machine rule, so no long-lived credential is stored. |
+| 1Password | A 1Password Connect URL, token, vault, item, and field, read over the Connect REST API at launch. The vault and item may be names or ids, and the field defaults to the item's password. |
 
 ## Ephemeral secrets
 
