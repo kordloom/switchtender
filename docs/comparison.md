@@ -28,7 +28,7 @@ on them.
 | Per-run provenance | Every run records the exact commit it executed. | Partial. | Partial. |
 | Provable audit | A tamper-evident SHA-256 hash chain, verified offline, with an optional ed25519-signed export. | An activity stream. | An activity log. |
 | Migration in | One command imports an AWX or Semaphore export. | Not applicable. | Not applicable. |
-| Drift detection | A dry run reports which hosts have diverged from the desired state, shown per host before the next real run. | No. | No. |
+| Drift detection | A dry run reports what has diverged from the desired state, across Ansible hosts and Terraform working directories, with a one-click approval-gated reconcile to fix it. | No. | No. |
 | Directory-driven roles | A directory or token group sets a user's role on every sign-in, over LDAP, SAML, OIDC, or a bearer JWT. | Organization mapping, complex. | No. Every user is assigned a role by hand. |
 
 ## Where they are even
