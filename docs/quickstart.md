@@ -30,14 +30,14 @@ loopback port, keeps its data in a per-user directory, and opens the UI. The
 
 ## Submit a run
 
-    curl -X POST localhost:8080/runs \
+    curl -X POST localhost:8080/v1/runs \
       -d '{"playbook": "site.yml", "inventory": "hosts.ini"}'
 
 The response carries a run id. Fetch its status, its structured events, or its log:
 
-    curl localhost:8080/runs/<id>
-    curl localhost:8080/runs/<id>/events
-    curl localhost:8080/runs/<id>/logs
+    curl localhost:8080/v1/runs/<id>
+    curl localhost:8080/v1/runs/<id>/events
+    curl localhost:8080/v1/runs/<id>/logs
 
 Add `"shards": 4` to the body to split the run across four slices of the inventory, balanced by
 each host's measured duration in recent runs.

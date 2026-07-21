@@ -34,6 +34,7 @@ func testUpdate(t *testing.T, store invsource.Store) {
 
 	if err := store.Update(ctx, &invsource.Source{
 		ID: "src_1", Name: "new", Source: "new.yml", CredentialID: "cred_2", ProjectID: "proj_2",
+		UpdateOnLaunch: true, SyncIntervalSeconds: 600,
 	}); err != nil {
 		t.Fatalf("Update() error = %v", err)
 	}
@@ -42,7 +43,7 @@ func testUpdate(t *testing.T, store invsource.Store) {
 		t.Fatalf("Get() error = %v", err)
 	}
 	if got.Name != "new" || got.Source != "new.yml" || got.CredentialID != "cred_2" ||
-		got.ProjectID != "proj_2" {
+		got.ProjectID != "proj_2" || !got.UpdateOnLaunch || got.SyncIntervalSeconds != 600 {
 		t.Errorf("Get() = %+v, want the updated source", got)
 	}
 	if got.InventoryID != "inv_3" || got.SyncedAt == nil || !got.SyncedAt.Equal(synced) ||
@@ -63,6 +64,7 @@ func testLifecycle(t *testing.T, store invsource.Store) {
 	s := &invsource.Source{
 		ID: "src_1", Name: "aws", Source: "aws_ec2.yml", CredentialID: "cred_9",
 		ProjectID: "proj_2", InventoryID: "inv_3", SyncedAt: &synced,
+		UpdateOnLaunch: true, SyncIntervalSeconds: 300,
 		LastError: "", CreatedAt: created,
 	}
 	if err := store.Save(ctx, s); err != nil {
@@ -74,7 +76,8 @@ func testLifecycle(t *testing.T, store invsource.Store) {
 		t.Fatalf("Get() error = %v", err)
 	}
 	if got.Name != "aws" || got.Source != "aws_ec2.yml" || got.InventoryID != "inv_3" ||
-		got.SyncedAt == nil || !got.SyncedAt.Equal(synced) {
+		got.SyncedAt == nil || !got.SyncedAt.Equal(synced) ||
+		!got.UpdateOnLaunch || got.SyncIntervalSeconds != 300 {
 		t.Errorf("Get() = %+v, want the saved source", got)
 	}
 

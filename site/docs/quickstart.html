@@ -52,13 +52,13 @@ or existing credentials cannot be decrypted.</p>
 loopback port, keeps its data in a per-user directory, and opens the UI. The
 <a href="/docs/desktop">desktop guide</a> covers it, including packaging.</p>
 <h2 id="submit-a-run">Submit a run</h2>
-<pre><code>curl -X POST localhost:8080/runs \
+<pre><code>curl -X POST localhost:8080/v1/runs \
   -d '{&quot;playbook&quot;: &quot;site.yml&quot;, &quot;inventory&quot;: &quot;hosts.ini&quot;}'
 </code></pre>
 <p>The response carries a run id. Fetch its status, its structured events, or its log:</p>
-<pre><code>curl localhost:8080/runs/&lt;id&gt;
-curl localhost:8080/runs/&lt;id&gt;/events
-curl localhost:8080/runs/&lt;id&gt;/logs
+<pre><code>curl localhost:8080/v1/runs/&lt;id&gt;
+curl localhost:8080/v1/runs/&lt;id&gt;/events
+curl localhost:8080/v1/runs/&lt;id&gt;/logs
 </code></pre>
 <p>Add <code>&quot;shards&quot;: 4</code> to the body to split the run across four slices of the inventory, balanced by
 each host's measured duration in recent runs.</p>

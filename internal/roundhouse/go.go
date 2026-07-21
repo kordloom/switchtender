@@ -2,9 +2,7 @@ package roundhouse
 
 import (
 	"context"
-	"fmt"
 	"io"
-	"os"
 	"os/exec"
 )
 
@@ -32,28 +30,17 @@ func (g *goRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Result, e
 	if spec.Command == "" {
 		return Result{ExitCode: -1}, ErrNoCommand
 	}
-	f, err := os.CreateTemp("", "switchtender-go-*.go")
+	path, cleanup, err := writeScriptFile("switchtender-go-*.go", spec.Command)
 	if err != nil {
-		return Result{ExitCode: -1}, fmt.Errorf("%w: %w", ErrLaunch, err)
+		return Result{ExitCode: -1}, err
 	}
-	path := f.Name()
-	defer func() { _ = os.Remove(path) }()
-	if _, err := f.WriteString(spec.Command); err != nil {
-		_ = f.Close()
-		return Result{ExitCode: -1}, fmt.Errorf("%w: %w", ErrLaunch, err)
-	}
-	if err := f.Close(); err != nil {
-		return Result{ExitCode: -1}, fmt.Errorf("%w: %w", ErrLaunch, err)
-	}
-
-	args := []string{"run", path}
+	defer cleanup()
 	if spec.DryRun {
-		args = []string{"vet", path}
 		// go vet is silent when it finds nothing, so announce the check up front. That keeps the
 		// dry-run log informative rather than empty when the source is clean.
 		_, _ = io.WriteString(out, "dry run: go vet checks the source without executing it\n")
 	}
-	cmd := exec.CommandContext(ctx, g.binary, args...)
+	cmd := exec.CommandContext(ctx, g.binary, goArgs(path, spec.DryRun)...)
 	cmd.Dir = spec.Dir
 	cmd.Env = varsEnv(g.baseEnv, spec)
 	res, err := runProcess(ctx, cmd, out)
@@ -61,4 +48,13 @@ func (g *goRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Result, e
 		_, _ = io.WriteString(out, "go vet: no problems found\n")
 	}
 	return res, err
+}
+
+// goArgs builds the go argument list for a program at path, shared by the host runner and the
+// container plan. A dry run runs go vet so the source compiles and is checked without executing.
+func goArgs(path string, dryRun bool) []string {
+	if dryRun {
+		return []string{"vet", path}
+	}
+	return []string{"run", path}
 }

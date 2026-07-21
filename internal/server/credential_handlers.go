@@ -23,6 +23,8 @@ type createCredentialRequest struct {
 	Source string `json:"source,omitempty"`
 	// Secret is the material itself, or the command for a command source. Required, never echoed back.
 	Secret string `json:"secret"`
+	// OrgID names the owning organization. Empty leaves the credential unowned and global. Optional.
+	OrgID string `json:"org_id,omitempty"`
 }
 
 // listCredentialsResponse wraps the credential list, secrets excluded by the model's json tags.
@@ -83,7 +85,8 @@ func createCredentialHandler(store credential.Store, sealer *credential.Sealer, 
 		}
 		c := &credential.Credential{
 			ID: credential.NewID(), Name: req.Name, Kind: req.Kind,
-			Source: credential.NormalizeSource(req.Source), Secret: sealed, CreatedAt: time.Now(),
+			Source: credential.NormalizeSource(req.Source), Secret: sealed, OrgID: req.OrgID,
+			CreatedAt: time.Now(),
 		}
 		if err := store.Save(r.Context(), c); err != nil {
 			log.Error("server: save credential: " + err.Error())
@@ -106,6 +109,9 @@ type updateCredentialRequest struct {
 	Source string `json:"source,omitempty"`
 	// Secret, when non-empty, replaces the stored material; blank keeps it. Never echoed back.
 	Secret string `json:"secret,omitempty"`
+	// OrgID names the owning organization, replacing the stored owner. Empty leaves the credential
+	// unowned and global. Optional.
+	OrgID string `json:"org_id,omitempty"`
 }
 
 // updateCredentialHandler renames a credential and, only when a new secret is supplied, reseals it
@@ -140,6 +146,7 @@ func updateCredentialHandler(store credential.Store, sealer *credential.Sealer, 
 		}
 
 		c.Name = req.Name
+		c.OrgID = req.OrgID
 		if secret != "" {
 			if !sealer.Enabled() {
 				respondError(w, log, http.StatusConflict,
@@ -195,7 +202,9 @@ func listCredentialsHandler(store credential.Store, authz *authorizer, log *zap.
 			respondError(w, log, http.StatusInternalServerError, "could not list credentials")
 			return
 		}
-		visible, err := filterReadable(r.Context(), authz, list, func(c *credential.Credential) string { return c.ID })
+		visible, err := filterReadable(r.Context(), authz, list,
+			func(c *credential.Credential) string { return c.ID },
+			func(c *credential.Credential) string { return c.OrgID })
 		if err != nil {
 			log.Error("server: list credentials: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not list credentials")

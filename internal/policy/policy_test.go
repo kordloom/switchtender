@@ -1,6 +1,7 @@
 package policy_test
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/dcadolph/switchtender/internal/policy"
@@ -64,17 +65,106 @@ func TestPolicyMatches(t *testing.T) {
 	}
 }
 
-// TestRequires confirms any matching policy in a set requires approval.
+// TestRequires confirms any matching blanket policy in a set requires approval, while a plan-content
+// policy is left to the execution gate and never blanket-holds at submission.
 func TestRequires(t *testing.T) {
 	t.Parallel()
 	policies := []*policy.Policy{
-		{Tool: "terraform", CommandContains: "destroy"},
-		{InventoryID: "inv_prod"},
+		{Tool: "terraform", CommandContains: "destroy", MaxDestroy: policy.DisabledMaxDestroy},
+		{InventoryID: "inv_prod", MaxDestroy: policy.DisabledMaxDestroy},
 	}
 	if !policy.Requires(policies, &run.Run{InventoryID: "inv_prod"}) {
 		t.Error("a run targeting inv_prod should require approval")
 	}
 	if policy.Requires(policies, &run.Run{Tool: "bash", Command: "echo hi"}) {
 		t.Error("an unrelated run should not require approval")
+	}
+	// A plan-content policy is enforced at execution, not blanket-held at submission.
+	planContent := []*policy.Policy{{Tool: "terraform", MaxDestroy: 2}}
+	if policy.Requires(planContent, &run.Run{Tool: "terraform", Command: "infra"}) {
+		t.Error("a plan-content policy should not blanket-hold at submission")
+	}
+}
+
+// TestPlanGated covers the plan gate scope check: a plan-content policy (MaxDestroy >= 0) matching a
+// run gates it, a blanket policy (MaxDestroy < 0) does not, and a plan-content policy that does not
+// match does not gate.
+func TestPlanGated(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Name     string
+		Policies []*policy.Policy
+		Run      run.Run
+		Want     bool
+	}{{ // Test 0: A matching plan-content policy gates the run.
+		Name:     "matching plan-content gates",
+		Policies: []*policy.Policy{{Tool: "terraform", MaxDestroy: 0}},
+		Run:      run.Run{Tool: "terraform", Command: "infra"}, Want: true,
+	}, { // Test 1: A blanket policy never gates on plan content.
+		Name:     "blanket does not gate",
+		Policies: []*policy.Policy{{Tool: "terraform", MaxDestroy: policy.DisabledMaxDestroy}},
+		Run:      run.Run{Tool: "terraform", Command: "infra"}, Want: false,
+	}, { // Test 2: A plan-content policy that does not match does not gate.
+		Name:     "non-matching plan-content",
+		Policies: []*policy.Policy{{Tool: "opentofu", MaxDestroy: 3}},
+		Run:      run.Run{Tool: "terraform", Command: "infra"}, Want: false,
+	}, { // Test 3: No policies, no gate.
+		Name: "no policies", Policies: nil, Run: run.Run{Tool: "terraform"}, Want: false,
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			r := test.Run
+			if got := policy.PlanGated(test.Policies, &r); got != test.Want {
+				t.Errorf("PlanGated() = %v, want %v", got, test.Want)
+			}
+		})
+	}
+}
+
+// TestPlanExceeds covers the plan-content threshold: a matching enabled policy is violated only when
+// destroys is over its threshold, a run at the threshold is allowed, a disabled policy never fires,
+// and a non-matching policy is ignored.
+func TestPlanExceeds(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Name     string
+		Policies []*policy.Policy
+		Run      run.Run
+		Destroys int
+		Want     bool
+	}{{ // Test 0: Over the threshold is a violation.
+		Name:     "over threshold",
+		Policies: []*policy.Policy{{Tool: "terraform", MaxDestroy: 2}},
+		Run:      run.Run{Tool: "terraform"}, Destroys: 3, Want: true,
+	}, { // Test 1: At the threshold is allowed.
+		Name:     "at threshold",
+		Policies: []*policy.Policy{{Tool: "terraform", MaxDestroy: 2}},
+		Run:      run.Run{Tool: "terraform"}, Destroys: 2, Want: false,
+	}, { // Test 2: Under the threshold is allowed.
+		Name:     "under threshold",
+		Policies: []*policy.Policy{{Tool: "terraform", MaxDestroy: 2}},
+		Run:      run.Run{Tool: "terraform"}, Destroys: 1, Want: false,
+	}, { // Test 3: A threshold of zero holds on any destroy.
+		Name:     "zero holds any destroy",
+		Policies: []*policy.Policy{{Tool: "terraform", MaxDestroy: 0}},
+		Run:      run.Run{Tool: "terraform"}, Destroys: 1, Want: true,
+	}, { // Test 4: A disabled policy never fires, even on a large plan.
+		Name:     "disabled never fires",
+		Policies: []*policy.Policy{{Tool: "terraform", MaxDestroy: policy.DisabledMaxDestroy}},
+		Run:      run.Run{Tool: "terraform"}, Destroys: 99, Want: false,
+	}, { // Test 5: A non-matching policy is ignored.
+		Name:     "non-matching ignored",
+		Policies: []*policy.Policy{{Tool: "opentofu", MaxDestroy: 0}},
+		Run:      run.Run{Tool: "terraform"}, Destroys: 5, Want: false,
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			r := test.Run
+			if got := policy.PlanExceeds(test.Policies, &r, test.Destroys); got != test.Want {
+				t.Errorf("PlanExceeds() = %v, want %v", got, test.Want)
+			}
+		})
 	}
 }

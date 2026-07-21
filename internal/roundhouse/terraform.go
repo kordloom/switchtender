@@ -40,20 +40,14 @@ func (t *terraformRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Re
 	env := append(append([]string{}, t.baseEnv...), spec.Env...)
 	env = append(env, terraformVars(spec.ExtraVars)...)
 
-	initCmd := exec.CommandContext(ctx, t.binary, "init", "-input=false", "-no-color")
+	initCmd := exec.CommandContext(ctx, t.binary, terraformInitArgs()...)
 	initCmd.Dir = dir
 	initCmd.Env = env
 	if res, err := runProcess(ctx, initCmd, out); err != nil || res.ExitCode != 0 {
 		return res, err
 	}
 
-	args := []string{"apply", "-auto-approve", "-input=false", "-no-color"}
-	if spec.DryRun {
-		// -detailed-exitcode makes plan return 2 when there are pending changes, so a dry run can
-		// tell a clean state from a drifted one instead of always exiting 0.
-		args = []string{"plan", "-input=false", "-no-color", "-detailed-exitcode"}
-	}
-	cmd := exec.CommandContext(ctx, t.binary, args...)
+	cmd := exec.CommandContext(ctx, t.binary, terraformActionArgs(spec.DryRun)...)
 	cmd.Dir = dir
 	cmd.Env = env
 	res, err := runProcess(ctx, cmd, out)
@@ -63,6 +57,23 @@ func (t *terraformRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Re
 		return Result{ExitCode: 0, Drift: true}, nil
 	}
 	return res, err
+}
+
+// terraformInitArgs is the terraform init argument list, shared by the host runner and the container
+// plan.
+func terraformInitArgs() []string {
+	return []string{"init", "-input=false", "-no-color"}
+}
+
+// terraformActionArgs is the terraform apply argument list, or a plan with a detailed exit code for a
+// dry run, shared by the host runner and the container plan. The detailed exit code makes plan return
+// 2 on pending changes, so a dry run tells a clean state from a drifted one instead of always
+// exiting 0.
+func terraformActionArgs(dryRun bool) []string {
+	if dryRun {
+		return []string{"plan", "-input=false", "-no-color", "-detailed-exitcode"}
+	}
+	return []string{"apply", "-auto-approve", "-input=false", "-no-color"}
 }
 
 // terraformVars renders extra vars as TF_VAR_ environment entries so survey answers and template

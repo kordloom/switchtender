@@ -8,6 +8,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/dcadolph/switchtender/internal/grant"
+	"github.com/dcadolph/switchtender/internal/org"
 	"github.com/dcadolph/switchtender/internal/run"
 	"github.com/dcadolph/switchtender/internal/team"
 	"github.com/dcadolph/switchtender/internal/user"
@@ -16,22 +17,50 @@ import (
 // errForbiddenGrant is returned by authorize when the actor lacks a grant the object requires.
 var errForbiddenGrant = errors.New("forbidden: no grant for this object")
 
+// OrgResolver resolves the owning organization of a grantable object by its id, so the authorizer can
+// extend access to that organization's members. A resolver reads the object's stored org id from
+// whichever store owns the object kind.
+type OrgResolver interface {
+	// OrgOf returns the owning organization id of the object with the given id, and whether the object
+	// was found. An empty org id with ok true means the object exists but is unowned; ok false means
+	// the object could not be resolved and the caller treats it as unowned.
+	OrgOf(ctx context.Context, objectID string) (orgID string, ok bool)
+}
+
+// OrgResolverFunc adapts a function to an OrgResolver.
+type OrgResolverFunc func(ctx context.Context, objectID string) (string, bool)
+
+// OrgOf calls f.
+func (f OrgResolverFunc) OrgOf(ctx context.Context, objectID string) (string, bool) {
+	return f(ctx, objectID)
+}
+
 // authorizer decides object-level access on top of the coarse global role. It is additive: an
 // object with no grants defers to the role, unless strict grants are on, which flips an object with
-// no grants to deny for non-admins.
+// no grants to deny for non-admins. Owning-organization membership adds access on top of grants and,
+// under strict grants, isolates an org-owned object to its members and anyone explicitly granted.
 type authorizer struct {
 	// grants stores per-object access grants; nil disables object-level checks entirely.
 	grants grant.Store
 	// teams resolves an actor's team memberships so team grants apply to their members.
 	teams team.Store
+	// orgs resolves an actor's organization memberships so org grants apply to their members.
+	orgs org.Store
+	// orgOwners resolves a grantable object's owning organization so its members gain access to it.
+	// Nil disables org-ownership access, leaving only grants and the role in force.
+	orgOwners OrgResolver
 	// strict makes an object with no grants deny non-admins instead of deferring to the role.
 	strict bool
 }
 
 // authorize reports whether the request's actor may exercise want access on object. Admins and
-// command-line tokens bypass. An object with no grants defers to the global role, unless strict
-// grants are enabled. Otherwise a grant to the actor or one of their teams that satisfies want is
-// required. It returns errForbiddenGrant when access is denied.
+// command-line tokens bypass. The ordered checks are: an explicit grant to the actor, one of their
+// teams, or one of their organizations comes first; then membership in the object's owning
+// organization, which an org admin exercises as manage and a plain member as use. Both are additive:
+// they only ever grant. When neither grants access, an object carrying grants denies an unmatched
+// actor, and an ungranted object defers to the role unless strict grants deny it. Under strict grants
+// an org-owned object is denied to a non-member, which is the tenant isolation. It returns
+// errForbiddenGrant when access is denied.
 func (a *authorizer) authorize(ctx context.Context, object string, want grant.Access) error {
 	if a == nil || a.grants == nil {
 		return nil
@@ -48,23 +77,68 @@ func (a *authorizer) authorize(ctx context.Context, object string, want grant.Ac
 	if err != nil {
 		return err
 	}
-	if len(grants) == 0 {
-		if a.strict {
-			return errForbiddenGrant
+	if len(grants) > 0 {
+		subjects, err := a.subjectsFor(ctx, actor)
+		if err != nil {
+			return err
 		}
-		return nil
+		for _, g := range grants {
+			if subjects[g.Subject] && grant.Satisfies(g.Access, want) {
+				return nil
+			}
+		}
 	}
 
-	subjects, err := a.subjectsFor(ctx, actor)
+	// Owning-organization membership adds access on top of grants: a member gains their org role's
+	// access, which never denies what a grant or the role already allows.
+	have, member, err := a.orgAccess(ctx, actor, object)
 	if err != nil {
 		return err
 	}
-	for _, g := range grants {
-		if subjects[g.Subject] && grant.Satisfies(g.Access, want) {
-			return nil
-		}
+	if member && grant.Satisfies(have, want) {
+		return nil
 	}
-	return errForbiddenGrant
+
+	// Nothing granted access. An object carrying grants is access-controlled, so an unmatched actor is
+	// denied. An ungranted object defers to the role, unless strict grants deny it: under strict grants
+	// an org-owned object seen here belongs to an org the actor is not a member of, so isolation denies
+	// it, and an unowned object is denied for want of a grant, the unchanged strict behavior.
+	if len(grants) > 0 {
+		return errForbiddenGrant
+	}
+	if a.strict {
+		return errForbiddenGrant
+	}
+	return nil
+}
+
+// orgAccess reports the access level object's owning organization confers on actor, and whether the
+// actor is a member of that organization. An org admin manages the org's objects; a plain member may
+// use them. It returns ok false when org ownership is not wired, the object has no owning org, the
+// owner cannot be resolved, or the actor is not a member, so it only ever adds access and never takes
+// it away.
+func (a *authorizer) orgAccess(ctx context.Context, actor Actor, object string) (grant.Access, bool, error) {
+	if a.orgOwners == nil || a.orgs == nil || actor.UserID == "" {
+		return "", false, nil
+	}
+	orgID, ok := a.orgOwners.OrgOf(ctx, object)
+	if !ok || orgID == "" {
+		return "", false, nil
+	}
+	memberships, err := a.orgs.OrgsForUser(ctx, actor.UserID)
+	if err != nil {
+		return "", false, err
+	}
+	for _, m := range memberships {
+		if m.OrgID != orgID {
+			continue
+		}
+		if m.Role == org.RoleAdmin {
+			return grant.AccessManage, true, nil
+		}
+		return grant.AccessUse, true, nil
+	}
+	return "", false, nil
 }
 
 // subjectsFor returns the set of grant subject ids that represent the actor: their own user id and
@@ -75,23 +149,32 @@ func (a *authorizer) subjectsFor(ctx context.Context, actor Actor) (map[string]b
 		return subjects, nil
 	}
 	subjects[actor.UserID] = true
-	if a.teams == nil {
-		return subjects, nil
+	if a.teams != nil {
+		teamIDs, err := a.teams.TeamsForUser(ctx, actor.UserID)
+		if err != nil {
+			return nil, err
+		}
+		for _, tid := range teamIDs {
+			subjects[tid] = true
+		}
 	}
-	teamIDs, err := a.teams.TeamsForUser(ctx, actor.UserID)
-	if err != nil {
-		return nil, err
-	}
-	for _, tid := range teamIDs {
-		subjects[tid] = true
+	if a.orgs != nil {
+		memberships, err := a.orgs.OrgsForUser(ctx, actor.UserID)
+		if err != nil {
+			return nil, err
+		}
+		for _, m := range memberships {
+			subjects[m.OrgID] = true
+		}
 	}
 	return subjects, nil
 }
 
 // manages reports whether actor holds management authority over object through an explicit manage
-// grant, or is an admin. Unlike authorize it never defers to the global role for an ungranted
-// object, since management delegation requires an explicit grant, so the caller falls back to the
-// role gate when this returns false. A nil authorizer or grant store confers no management.
+// grant, admin of the object's owning organization, or the global admin role. Unlike authorize it
+// never defers to the global role for an ungranted object, since management delegation requires an
+// explicit grant or org ownership, so the caller falls back to the role gate when this returns false.
+// A nil authorizer or grant store confers no management.
 func (a *authorizer) manages(ctx context.Context, actor Actor, object string) (bool, error) {
 	if a == nil || a.grants == nil {
 		return false, nil
@@ -112,18 +195,24 @@ func (a *authorizer) manages(ctx context.Context, actor Actor, object string) (b
 			return true, nil
 		}
 	}
+	// An admin of the object's owning organization manages it, the same delegation an explicit manage
+	// grant confers. This only adds management, since the caller falls back to the role gate on false.
+	have, member, err := a.orgAccess(ctx, actor, object)
+	if err != nil {
+		return false, err
+	}
+	if member && grant.Satisfies(have, grant.AccessManage) {
+		return true, nil
+	}
 	return false, nil
 }
 
-// readableObjects returns the set of object ids the actor may read through a grant, so a list can be
-// filtered to what the actor is allowed to see. Any grant satisfies read, since use and manage rank
-// above it.
-func (a *authorizer) readableObjects(ctx context.Context, actor Actor) (map[string]bool, error) {
+// readableObjectsFor returns the set of object ids the given subjects may read through a grant, so a
+// list can be filtered to what the actor is allowed to see. Any grant satisfies read, since use and
+// manage rank above it. The caller passes the actor's subjects so the org membership they carry is
+// computed once and reused for the org-ownership check.
+func (a *authorizer) readableObjectsFor(ctx context.Context, subjects map[string]bool) (map[string]bool, error) {
 	grants, err := a.grants.List(ctx)
-	if err != nil {
-		return nil, err
-	}
-	subjects, err := a.subjectsFor(ctx, actor)
 	if err != nil {
 		return nil, err
 	}
@@ -136,13 +225,15 @@ func (a *authorizer) readableObjects(ctx context.Context, actor Actor) (map[stri
 	return out, nil
 }
 
-// readFilter returns a predicate reporting whether the request actor may see an object id in a list.
-// It keeps everything unless strict grants are on, since without strict mode reads defer to the global
-// role and every role reads everything. Under strict grants a non-admin sees only objects a grant lets
-// them read, while an admin still sees all. A nil authorizer or grant store keeps everything. The error
-// surfaces a grant-store failure so the caller can fail closed.
-func (a *authorizer) readFilter(ctx context.Context) (func(id string) bool, error) {
-	keepAll := func(string) bool { return true }
+// readFilter returns a predicate reporting whether the request actor may see an object, given its id
+// and owning organization, in a list. It keeps everything unless strict grants are on, since without
+// strict mode reads defer to the global role and every role reads everything, and org ownership only
+// ever adds access. Under strict grants a non-admin sees an object only when a grant lets them read it
+// or they are a member of its owning organization, so another org's objects are excluded; an admin
+// still sees all. A nil authorizer or grant store keeps everything. The error surfaces a grant-store
+// failure so the caller can fail closed.
+func (a *authorizer) readFilter(ctx context.Context) (func(id, orgID string) bool, error) {
+	keepAll := func(_, _ string) bool { return true }
 	if a == nil || a.grants == nil || !a.strict {
 		return keepAll, nil
 	}
@@ -150,24 +241,34 @@ func (a *authorizer) readFilter(ctx context.Context) (func(id string) bool, erro
 	if !ok || actor.Role == user.RoleAdmin {
 		return keepAll, nil
 	}
-	readable, err := a.readableObjects(ctx, actor)
+	subjects, err := a.subjectsFor(ctx, actor)
 	if err != nil {
 		return nil, err
 	}
-	return func(id string) bool { return readable[id] }, nil
+	readable, err := a.readableObjectsFor(ctx, subjects)
+	if err != nil {
+		return nil, err
+	}
+	// The subjects set carries every organization the actor belongs to, so subjects[orgID] reports
+	// membership in the object's owning org. A read (or higher) grant makes an object visible; so does
+	// membership in the org that owns it.
+	return func(id, orgID string) bool {
+		return readable[id] || (orgID != "" && subjects[orgID])
+	}, nil
 }
 
 // filterReadable returns the items the request actor may see, dropping any object a strict-grants
-// deployment has not granted the actor read on. id extracts an item's object id. It errors only when
-// the grant store fails, so a list handler fails closed rather than leaking everything.
-func filterReadable[T any](ctx context.Context, authz *authorizer, items []T, id func(T) string) ([]T, error) {
+// deployment has neither granted the actor read on nor placed in an organization the actor belongs to.
+// id extracts an item's object id and orgOf its owning organization id. It errors only when the grant
+// store fails, so a list handler fails closed rather than leaking everything.
+func filterReadable[T any](ctx context.Context, authz *authorizer, items []T, id, orgOf func(T) string) ([]T, error) {
 	keep, err := authz.readFilter(ctx)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]T, 0, len(items))
 	for _, it := range items {
-		if keep(id(it)) {
+		if keep(id(it), orgOf(it)) {
 			out = append(out, it)
 		}
 	}

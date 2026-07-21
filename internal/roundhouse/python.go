@@ -2,9 +2,7 @@ package roundhouse
 
 import (
 	"context"
-	"fmt"
 	"io"
-	"os"
 	"os/exec"
 )
 
@@ -31,26 +29,22 @@ func (p *pythonRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Resul
 	if spec.Command == "" {
 		return Result{ExitCode: -1}, ErrNoCommand
 	}
-	f, err := os.CreateTemp("", "switchtender-py-*.py")
+	path, cleanup, err := writeScriptFile("switchtender-py-*.py", spec.Command)
 	if err != nil {
-		return Result{ExitCode: -1}, fmt.Errorf("%w: %w", ErrLaunch, err)
+		return Result{ExitCode: -1}, err
 	}
-	path := f.Name()
-	defer func() { _ = os.Remove(path) }()
-	if _, err := f.WriteString(spec.Command); err != nil {
-		_ = f.Close()
-		return Result{ExitCode: -1}, fmt.Errorf("%w: %w", ErrLaunch, err)
-	}
-	if err := f.Close(); err != nil {
-		return Result{ExitCode: -1}, fmt.Errorf("%w: %w", ErrLaunch, err)
-	}
-
-	args := []string{path}
-	if spec.DryRun {
-		args = []string{"-m", "py_compile", path}
-	}
-	cmd := exec.CommandContext(ctx, p.binary, args...)
+	defer cleanup()
+	cmd := exec.CommandContext(ctx, p.binary, pythonArgs(path, spec.DryRun)...)
 	cmd.Dir = spec.Dir
 	cmd.Env = varsEnv(p.baseEnv, spec)
 	return runProcess(ctx, cmd, out)
+}
+
+// pythonArgs builds the python argument list for a script at path, shared by the host runner and the
+// container plan. A dry run runs py_compile so syntax is checked without executing the script.
+func pythonArgs(path string, dryRun bool) []string {
+	if dryRun {
+		return []string{"-m", "py_compile", path}
+	}
+	return []string{path}
 }

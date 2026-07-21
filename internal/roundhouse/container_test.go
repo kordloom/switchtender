@@ -29,9 +29,9 @@ func TestRegistryHost(t *testing.T) {
 	}
 }
 
-func TestDockerArgs(t *testing.T) {
+func TestRunArgs(t *testing.T) {
 	t.Parallel()
-	c := newContainerRunner(nil, &pluginCache{},
+	c := newContainerRunner("docker", "missing", false, nil, &pluginCache{},
 		ContainerLimits{Memory: "1g", CPUs: "2", PidsLimit: 512, Network: "bridge"})
 	spec := Spec{
 		Playbook:  "/checkout/site.yml",
@@ -40,9 +40,14 @@ func TestDockerArgs(t *testing.T) {
 		Image:     "quay.io/ansible/creator-ee:latest",
 		Limit:     "web01",
 	}
-	args, err := c.dockerArgs(spec, "ym-test", "/tmp/env")
+	plan, cleanup, err := buildContainerPlan(spec)
 	if err != nil {
-		t.Fatalf("dockerArgs() error = %v", err)
+		t.Fatalf("buildContainerPlan() error = %v", err)
+	}
+	defer cleanup()
+	args, err := c.runArgs(spec, plan, "ym-test", "/tmp/env")
+	if err != nil {
+		t.Fatalf("runArgs() error = %v", err)
 	}
 	joined := strings.Join(args, " ")
 
@@ -59,7 +64,7 @@ func TestDockerArgs(t *testing.T) {
 		"-i /checkout/hosts.ini --limit web01 /checkout/site.yml",
 	} {
 		if !strings.Contains(joined, want) {
-			t.Errorf("dockerArgs() = %q, missing %q", joined, want)
+			t.Errorf("runArgs() = %q, missing %q", joined, want)
 		}
 	}
 	// The image must precede the ansible-playbook command, not appear as a mount.
@@ -68,9 +73,9 @@ func TestDockerArgs(t *testing.T) {
 	}
 }
 
-func TestDockerArgsRefusesSensitiveMounts(t *testing.T) {
+func TestRunArgsRefusesSensitiveMounts(t *testing.T) {
 	t.Parallel()
-	c := newContainerRunner(nil, &pluginCache{}, DefaultContainerLimits())
+	c := newContainerRunner("docker", "missing", false, nil, &pluginCache{}, DefaultContainerLimits())
 	tests := []struct {
 		Name string
 		Spec Spec
@@ -80,8 +85,15 @@ func TestDockerArgsRefusesSensitiveMounts(t *testing.T) {
 		{"docker socket", Spec{Playbook: "/checkout/s.yml", Inventory: "/var/run/docker.sock", Image: "alpine"}}, // Test 2.
 	}
 	for i, test := range tests {
-		if _, err := c.dockerArgs(test.Spec, "ym-test", "/tmp/env"); !errors.Is(err, ErrForbiddenMount) {
-			t.Errorf("test %d (%s): dockerArgs() error = %v, want ErrForbiddenMount", i, test.Name, err)
+		plan, cleanup, err := buildContainerPlan(test.Spec)
+		if err != nil {
+			cleanup()
+			t.Fatalf("test %d (%s): buildContainerPlan() error = %v", i, test.Name, err)
+		}
+		_, err = c.runArgs(test.Spec, plan, "ym-test", "/tmp/env")
+		cleanup()
+		if !errors.Is(err, ErrForbiddenMount) {
+			t.Errorf("test %d (%s): runArgs() error = %v, want ErrForbiddenMount", i, test.Name, err)
 		}
 	}
 }
@@ -110,7 +122,7 @@ func TestValidateImage(t *testing.T) {
 
 func TestContainerRunRejectsBadImage(t *testing.T) {
 	t.Parallel()
-	c := newContainerRunner(nil, &pluginCache{}, DefaultContainerLimits())
+	c := newContainerRunner("docker", "missing", false, nil, &pluginCache{}, DefaultContainerLimits())
 	res, err := c.Run(context.Background(), Spec{Playbook: "p.yml", Image: "-badflag"}, io.Discard)
 	if !errors.Is(err, ErrBadImage) {
 		t.Errorf("Run() error = %v, want ErrBadImage", err)
@@ -122,10 +134,86 @@ func TestContainerRunRejectsBadImage(t *testing.T) {
 
 func TestSelectRunnerRefusesContainerWhenDisabled(t *testing.T) {
 	t.Parallel()
-	r := NewSelectiveRunner(false, DefaultContainerLimits())
+	r := NewSelectiveRunner(false, "docker", "missing", false, DefaultContainerLimits())
 	res, err := r.Run(context.Background(), Spec{Playbook: "p.yml", Image: "alpine"}, io.Discard)
 	if !errors.Is(err, ErrContainerDisabled) {
 		t.Errorf("Run() error = %v, want ErrContainerDisabled", err)
+	}
+	if res.ExitCode != -1 {
+		t.Errorf("ExitCode = %d, want -1", res.ExitCode)
+	}
+}
+
+func TestRunArgsPullPolicy(t *testing.T) {
+	t.Parallel()
+	for _, policy := range []string{"always", "missing", "never"} {
+		c := newContainerRunner("docker", policy, false, nil, &pluginCache{}, DefaultContainerLimits())
+		spec := Spec{Playbook: "/checkout/site.yml", Dir: "/checkout", Image: "quay.io/ansible/creator-ee:latest"}
+		plan, cleanup, err := buildContainerPlan(spec)
+		if err != nil {
+			t.Fatalf("policy %q: buildContainerPlan() error = %v", policy, err)
+		}
+		args, err := c.runArgs(spec, plan, "ym-test", "/tmp/env")
+		cleanup()
+		if err != nil {
+			t.Fatalf("policy %q: runArgs() error = %v", policy, err)
+		}
+		joined := strings.Join(args, " ")
+		if want := "--pull " + policy; !strings.Contains(joined, want) {
+			t.Errorf("policy %q: runArgs() = %q, missing %q", policy, joined, want)
+		}
+		// The pull policy sits right after the container name, before the resource caps.
+		if idx := slices.Index(args, "--pull"); idx == -1 || args[idx-1] != "ym-test" || args[idx+1] != policy {
+			t.Errorf("policy %q: --pull not positioned after the name: %v", policy, args)
+		}
+	}
+}
+
+func TestIsDigestPinned(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		In   string
+		Want bool
+	}{
+		{In: "quay.io/x/y@sha256:abc123", Want: true},       // Test 0: Digest reference.
+		{In: "quay.io/x/y:latest", Want: false},             // Test 1: Tag-only reference.
+		{In: "alpine", Want: false},                         // Test 2: Bare image.
+		{In: "ghcr.io/org/img@sha256:deadbeef", Want: true}, // Test 3: Registry digest.
+	}
+	for i, test := range tests {
+		if got := isDigestPinned(test.In); got != test.Want {
+			t.Errorf("test %d: isDigestPinned(%q) = %v, want %v", i, test.In, got, test.Want)
+		}
+	}
+}
+
+func TestValidateRunImage(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		In            string
+		Want          error
+		RequireDigest bool
+	}{
+		{In: "quay.io/x/y:latest", RequireDigest: false, Want: nil},             // Test 0: Tag-only, pinning off.
+		{In: "quay.io/x/y@sha256:abc123", RequireDigest: false, Want: nil},      // Test 1: Digest, pinning off.
+		{In: "quay.io/x/y:latest", RequireDigest: true, Want: ErrUnpinnedImage}, // Test 2: Tag-only, pinning on.
+		{In: "quay.io/x/y@sha256:abc123", RequireDigest: true, Want: nil},       // Test 3: Digest, pinning on.
+	}
+	for i, test := range tests {
+		c := newContainerRunner("docker", "missing", test.RequireDigest, nil, &pluginCache{},
+			DefaultContainerLimits())
+		if err := c.validateRunImage(test.In); !errors.Is(err, test.Want) {
+			t.Errorf("test %d: validateRunImage(%q) error = %v, want %v", i, test.In, err, test.Want)
+		}
+	}
+}
+
+func TestContainerRunRejectsUnpinnedImage(t *testing.T) {
+	t.Parallel()
+	c := newContainerRunner("docker", "missing", true, nil, &pluginCache{}, DefaultContainerLimits())
+	res, err := c.Run(context.Background(), Spec{Playbook: "p.yml", Image: "quay.io/x/y:latest"}, io.Discard)
+	if !errors.Is(err, ErrUnpinnedImage) {
+		t.Errorf("Run() error = %v, want ErrUnpinnedImage", err)
 	}
 	if res.ExitCode != -1 {
 		t.Errorf("ExitCode = %d, want -1", res.ExitCode)

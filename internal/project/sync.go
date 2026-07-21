@@ -22,18 +22,39 @@ import (
 type Syncer struct {
 	// cacheDir is the directory holding one checkout per project.
 	cacheDir string
+	// galaxyServer is a private Ansible Galaxy or Automation Hub URL for collection installs, empty to
+	// use the default public Galaxy.
+	galaxyServer string
+	// galaxyToken authenticates to galaxyServer, empty for an unauthenticated server.
+	galaxyToken string
 	// mu guards locks.
 	mu sync.Mutex
 	// locks holds one mutex per project id.
 	locks map[string]*sync.Mutex
 }
 
+// SyncerOption configures a Syncer.
+type SyncerOption func(*Syncer)
+
+// WithGalaxy points collection installs at a private Ansible Galaxy or Automation Hub server and its
+// token, so a project's collections resolve from an internal hub instead of the public Galaxy.
+func WithGalaxy(server, token string) SyncerOption {
+	return func(s *Syncer) {
+		s.galaxyServer = server
+		s.galaxyToken = token
+	}
+}
+
 // NewSyncer returns a Syncer that caches checkouts under dir, creating it if needed.
-func NewSyncer(dir string) (*Syncer, error) {
+func NewSyncer(dir string, opts ...SyncerOption) (*Syncer, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("create project cache: %w", err)
 	}
-	return &Syncer{cacheDir: dir, locks: make(map[string]*sync.Mutex)}, nil
+	s := &Syncer{cacheDir: dir, locks: make(map[string]*sync.Mutex)}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s, nil
 }
 
 // lock returns the mutex for a project id, creating it on first use.
@@ -89,7 +110,7 @@ func (s *Syncer) Sync(p *Project, sshKey string) (dir, sha string, galaxyEnv []s
 	sha = head.Hash().String()
 
 	if p.InstallDeps {
-		galaxyEnv, err = installGalaxy(dir)
+		galaxyEnv, err = s.installGalaxy(dir)
 		if err != nil {
 			return "", "", nil, err
 		}
@@ -108,7 +129,7 @@ var requirementFiles = []string{
 // project-scoped path and returns the environment entries that expose them to a run. A missing
 // requirements file is a no-op; a galaxy failure is a real dependency problem and is returned so
 // the run fails with the galaxy output.
-func installGalaxy(checkout string) ([]string, error) {
+func (s *Syncer) installGalaxy(checkout string) ([]string, error) {
 	galaxyDir := filepath.Join(checkout, ".galaxy")
 	rolesPath := filepath.Join(galaxyDir, "roles")
 	collectionsPath := filepath.Join(galaxyDir, "collections")
@@ -118,13 +139,13 @@ func installGalaxy(checkout string) ([]string, error) {
 		path := filepath.Join(checkout, name)
 		roles, collections := requirementKinds(path)
 		if roles {
-			if out, err := runGalaxy(checkout, "role", "install", "-r", path, "-p", rolesPath); err != nil {
+			if out, err := s.runGalaxy(checkout, "role", "install", "-r", path, "-p", rolesPath); err != nil {
 				return nil, fmt.Errorf("ansible-galaxy role install %s: %w: %s", name, err, out)
 			}
 			wantRoles = true
 		}
 		if collections {
-			out, err := runGalaxy(checkout, "collection", "install", "-r", path, "-p", collectionsPath)
+			out, err := s.runGalaxy(checkout, "collection", "install", "-r", path, "-p", collectionsPath)
 			if err != nil {
 				return nil, fmt.Errorf("ansible-galaxy collection install %s: %w: %s", name, err, out)
 			}
@@ -166,12 +187,30 @@ func requirementKinds(path string) (roles, collections bool) {
 	}
 }
 
-// runGalaxy runs an ansible-galaxy subcommand in the checkout and returns its combined output.
-func runGalaxy(checkout string, args ...string) (string, error) {
+// runGalaxy runs an ansible-galaxy subcommand in the checkout and returns its combined output,
+// pointing collection installs at a configured private galaxy server through the environment.
+func (s *Syncer) runGalaxy(checkout string, args ...string) (string, error) {
 	cmd := exec.Command("ansible-galaxy", args...)
 	cmd.Dir = checkout
+	cmd.Env = append(os.Environ(), s.galaxyEnv()...)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
+}
+
+// galaxyEnv returns the ANSIBLE_GALAXY_SERVER_ variables that point collection installs at a
+// configured private galaxy server or Automation Hub, or nil when none is set.
+func (s *Syncer) galaxyEnv() []string {
+	if s.galaxyServer == "" {
+		return nil
+	}
+	env := []string{
+		"ANSIBLE_GALAXY_SERVER_LIST=switchtender",
+		"ANSIBLE_GALAXY_SERVER_SWITCHTENDER_URL=" + s.galaxyServer,
+	}
+	if s.galaxyToken != "" {
+		env = append(env, "ANSIBLE_GALAXY_SERVER_SWITCHTENDER_TOKEN="+s.galaxyToken)
+	}
+	return env
 }
 
 // fetchAndReset updates an existing checkout to the remote branch tip, discarding local drift so

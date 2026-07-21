@@ -33,7 +33,7 @@ func testUpdate(t *testing.T, store inventory.Store) {
 
 	if err := store.Update(ctx, &inventory.Inventory{
 		ID: "inv_1", Name: "new", Content: "b", CredentialIDs: []string{"cred_x"},
-		ContentSource: "command", ContentConfig: "sealed-cmd", Queue: "night-shift",
+		ContentSource: "command", ContentConfig: "sealed-cmd", Queue: "night-shift", OrgID: "org_new",
 	}); err != nil {
 		t.Fatalf("Update() error = %v", err)
 	}
@@ -43,6 +43,9 @@ func testUpdate(t *testing.T, store inventory.Store) {
 	}
 	if got.Name != "new" || got.Content != "b" {
 		t.Errorf("Get() = %+v, want updated name and content", got)
+	}
+	if got.OrgID != "org_new" {
+		t.Errorf("OrgID after update = %q, want org_new", got.OrgID)
 	}
 	if !slices.Equal(got.CredentialIDs, []string{"cred_x"}) {
 		t.Errorf("CredentialIDs after update = %v, want [cred_x]", got.CredentialIDs)
@@ -69,7 +72,8 @@ func testLifecycle(t *testing.T, store inventory.Store) {
 	i := &inventory.Inventory{
 		ID: "inv_1", Name: "fleet", Content: "[web]\nweb01\n",
 		CredentialIDs: []string{"cred_a", "cred_b"},
-		ContentSource: "vault", ContentConfig: "sealed-config-blob", Queue: "dmz", CreatedAt: created,
+		ContentSource: "vault", ContentConfig: "sealed-config-blob", Queue: "dmz",
+		OrgID: "org_owner", CreatedAt: created,
 	}
 	if err := store.Save(ctx, i); err != nil {
 		t.Fatalf("Save() error = %v", err)
@@ -81,6 +85,9 @@ func testLifecycle(t *testing.T, store inventory.Store) {
 	}
 	if got.Name != "fleet" || got.Content != "[web]\nweb01\n" || !got.CreatedAt.Equal(created) {
 		t.Errorf("Get() = %+v, want the saved inventory", got)
+	}
+	if got.OrgID != "org_owner" {
+		t.Errorf("OrgID = %q, want org_owner", got.OrgID)
 	}
 	if !slices.Equal(got.CredentialIDs, []string{"cred_a", "cred_b"}) {
 		t.Errorf("CredentialIDs = %v, want [cred_a cred_b]", got.CredentialIDs)

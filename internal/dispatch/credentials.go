@@ -137,15 +137,120 @@ func (d *Dispatcher) materializeCredentials(ctx context.Context, r *run.Run, spe
 				return cleanup, secrets, fmt.Errorf("materialize credential %s: %w", id, err)
 			}
 			spec.ExtraVarsFiles = append(spec.ExtraVarsFiles, f.Name())
+		case credential.KindSSHPassword:
+			// Machine password auth reaches the play as connection vars through a file, off argv.
+			fm := credential.Fields(plain)
+			user, pass := fm["user"], fm["password"]
+			if user == "" || pass == "" {
+				return cleanup, secrets, fmt.Errorf("%w: ssh_password needs user and password",
+					credential.ErrBadField)
+			}
+			secrets = append(secrets, pass)
+			if err := writeAnsibleVarsFile(f.Name(), map[string]string{
+				"ansible_user":     user,
+				"ansible_password": pass,
+			}); err != nil {
+				return cleanup, secrets, fmt.Errorf("materialize credential %s: %w", id, err)
+			}
+			spec.ExtraVarsFiles = append(spec.ExtraVarsFiles, f.Name())
+		case credential.KindBecome:
+			// Privilege escalation vars reach the play through a file so the password stays off argv.
+			fm := credential.Fields(plain)
+			pass := fm["password"]
+			if pass == "" {
+				return cleanup, secrets, fmt.Errorf("%w: become needs password", credential.ErrBadField)
+			}
+			secrets = append(secrets, pass)
+			become := map[string]string{"ansible_become_password": pass}
+			if method := fm["method"]; method != "" {
+				become["ansible_become_method"] = method
+			}
+			if user := fm["user"]; user != "" {
+				become["ansible_become_user"] = user
+			}
+			if err := writeAnsibleVarsFile(f.Name(), become); err != nil {
+				return cleanup, secrets, fmt.Errorf("materialize credential %s: %w", id, err)
+			}
+			spec.ExtraVarsFiles = append(spec.ExtraVarsFiles, f.Name())
+		case credential.KindNetwork:
+			// Network device vars reach the play through a file so the password stays off argv.
+			fm := credential.Fields(plain)
+			user, pass := fm["user"], fm["password"]
+			if user == "" || pass == "" {
+				return cleanup, secrets, fmt.Errorf("%w: network needs user and password",
+					credential.ErrBadField)
+			}
+			secrets = append(secrets, pass)
+			connection := fm["connection"]
+			if connection == "" {
+				connection = "network_cli"
+			}
+			netVars := map[string]string{
+				"ansible_user":       user,
+				"ansible_password":   pass,
+				"ansible_connection": connection,
+			}
+			if netOS := fm["network_os"]; netOS != "" {
+				netVars["ansible_network_os"] = netOS
+			}
+			if err := writeAnsibleVarsFile(f.Name(), netVars); err != nil {
+				return cleanup, secrets, fmt.Errorf("materialize credential %s: %w", id, err)
+			}
+			spec.ExtraVarsFiles = append(spec.ExtraVarsFiles, f.Name())
 		case credential.KindRegistry:
 			// Registry logins are consumed by the container runner for image pulls, not the play.
 			paths = paths[:len(paths)-1]
 			_ = os.Remove(f.Name())
 		default:
-			return cleanup, secrets, fmt.Errorf("%w: %s", credential.ErrBadKind, c.Kind)
+			// Typed and custom kinds contribute environment variables and files through a registered
+			// injector. The raw temp file written above holds the unparsed material, so drop it.
+			paths = paths[:len(paths)-1]
+			_ = os.Remove(f.Name())
+			inj, err := credential.Inject(c.Kind, plain)
+			if err != nil {
+				return cleanup, secrets, err
+			}
+			for _, line := range inj.Env {
+				spec.Env = append(spec.Env, line)
+				if _, val, ok := strings.Cut(line, "="); ok {
+					secrets = append(secrets, val)
+				}
+			}
+			for _, file := range inj.Files {
+				ff, err := os.CreateTemp("", "switchtender-cred-*")
+				if err != nil {
+					return cleanup, secrets, fmt.Errorf("materialize credential %s: %w", id, err)
+				}
+				paths = append(paths, ff.Name())
+				if err := ff.Chmod(0o600); err != nil {
+					_ = ff.Close()
+					return cleanup, secrets, fmt.Errorf("materialize credential %s: %w", id, err)
+				}
+				if _, err := ff.WriteString(file.Content); err != nil {
+					_ = ff.Close()
+					return cleanup, secrets, fmt.Errorf("materialize credential %s: %w", id, err)
+				}
+				if err := ff.Close(); err != nil {
+					return cleanup, secrets, fmt.Errorf("materialize credential %s: %w", id, err)
+				}
+				secrets = append(secrets, file.Content)
+				for _, ev := range file.EnvVars {
+					spec.Env = append(spec.Env, ev+"="+ff.Name())
+				}
+			}
 		}
 	}
 	return cleanup, secrets, nil
+}
+
+// writeAnsibleVarsFile encodes vars as JSON into the private file at path, so a connection or become
+// credential passes its Ansible variables through an extra-vars file and keeps them off argv.
+func writeAnsibleVarsFile(path string, vars map[string]string) error {
+	data, err := json.Marshal(vars)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o600)
 }
 
 // openCredential fetches a credential, decrypts its sealed secret, and resolves it through its

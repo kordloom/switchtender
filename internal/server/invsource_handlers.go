@@ -30,6 +30,11 @@ type createSourceRequest struct {
 	CredentialID string `json:"credential_id,omitempty"`
 	// ProjectID sources the config from a git project. Optional.
 	ProjectID string `json:"project_id,omitempty"`
+	// UpdateOnLaunch refreshes the source before a run targeting its inventory. Optional.
+	UpdateOnLaunch bool `json:"update_on_launch,omitempty"`
+	// SyncIntervalSeconds sets the background sync cadence and the update-on-launch staleness window.
+	// Zero disables scheduled sync. Optional.
+	SyncIntervalSeconds int `json:"sync_interval_seconds,omitempty"`
 }
 
 // listSourcesResponse wraps the source list.
@@ -73,6 +78,7 @@ func createSourceHandler(sources invsource.Store, inventories inventory.Store, a
 		src := &invsource.Source{
 			ID: invsource.NewID(), Name: req.Name, Source: req.Source,
 			CredentialID: req.CredentialID, ProjectID: req.ProjectID,
+			UpdateOnLaunch: req.UpdateOnLaunch, SyncIntervalSeconds: req.SyncIntervalSeconds,
 			InventoryID: inv.ID, CreatedAt: time.Now(),
 		}
 		if err := sources.Save(r.Context(), src); err != nil {
@@ -109,6 +115,7 @@ func updateSourceHandler(sources invsource.Store, authz *authorizer, log *zap.Lo
 		err := sources.Update(r.Context(), &invsource.Source{
 			ID: id, Name: req.Name, Source: req.Source,
 			CredentialID: req.CredentialID, ProjectID: req.ProjectID,
+			UpdateOnLaunch: req.UpdateOnLaunch, SyncIntervalSeconds: req.SyncIntervalSeconds,
 		})
 		if errors.Is(err, invsource.ErrNotFound) {
 			respondError(w, log, http.StatusNotFound, "source not found")

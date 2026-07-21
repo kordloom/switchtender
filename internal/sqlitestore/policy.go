@@ -16,19 +16,20 @@ type policyStore struct {
 }
 
 // policyColumns lists the policy columns in a stable order for reads and writes.
-const policyColumns = `id, name, tool, command_contains, inventory_id, exclude_dry_run, created_at`
+const policyColumns = `id, name, tool, command_contains, inventory_id, exclude_dry_run, max_destroy, created_at`
 
 // Save stores a policy, inserting or replacing by id.
 func (s *policyStore) Save(ctx context.Context, p *policy.Policy) error {
 	const q = `
-INSERT INTO policies (id, name, tool, command_contains, inventory_id, exclude_dry_run, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?)
+INSERT INTO policies (id, name, tool, command_contains, inventory_id, exclude_dry_run, max_destroy, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
 	name=excluded.name, tool=excluded.tool, command_contains=excluded.command_contains,
-	inventory_id=excluded.inventory_id, exclude_dry_run=excluded.exclude_dry_run`
+	inventory_id=excluded.inventory_id, exclude_dry_run=excluded.exclude_dry_run,
+	max_destroy=excluded.max_destroy`
 	_, err := s.db.ExecContext(ctx, q,
 		p.ID, p.Name, p.Tool, p.CommandContains, p.InventoryID,
-		boolToInt(p.ExcludeDryRun), formatTime(p.CreatedAt))
+		boolToInt(p.ExcludeDryRun), p.MaxDestroy, formatTime(p.CreatedAt))
 	if err != nil {
 		return fmt.Errorf("save policy: %w", err)
 	}
@@ -93,7 +94,8 @@ func scanPolicy(sc scanner) (*policy.Policy, error) {
 		dry     int
 		created string
 	)
-	if err := sc.Scan(&p.ID, &p.Name, &p.Tool, &p.CommandContains, &p.InventoryID, &dry, &created); err != nil {
+	if err := sc.Scan(&p.ID, &p.Name, &p.Tool, &p.CommandContains, &p.InventoryID, &dry,
+		&p.MaxDestroy, &created); err != nil {
 		return nil, err
 	}
 	p.ExcludeDryRun = dry != 0

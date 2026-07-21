@@ -11,7 +11,7 @@ import (
 
 // invSourceColumns is the shared select list for inventory source reads.
 const invSourceColumns = `id, name, source, credential_id, project_id, inventory_id,
-	synced_at, last_error, created_at`
+	synced_at, last_error, update_on_launch, sync_interval_seconds, created_at`
 
 // invSourceStore is an invsource.Store backed by the shared SQLite database.
 type invSourceStore struct {
@@ -23,15 +23,19 @@ type invSourceStore struct {
 func (s *invSourceStore) Save(ctx context.Context, src *invsource.Source) error {
 	const q = `
 INSERT INTO inventory_sources
-	(id, name, source, credential_id, project_id, inventory_id, synced_at, last_error, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	(id, name, source, credential_id, project_id, inventory_id, synced_at, last_error,
+	 update_on_launch, sync_interval_seconds, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
 	name=excluded.name, source=excluded.source, credential_id=excluded.credential_id,
 	project_id=excluded.project_id, inventory_id=excluded.inventory_id,
-	synced_at=excluded.synced_at, last_error=excluded.last_error, created_at=excluded.created_at`
+	synced_at=excluded.synced_at, last_error=excluded.last_error,
+	update_on_launch=excluded.update_on_launch, sync_interval_seconds=excluded.sync_interval_seconds,
+	created_at=excluded.created_at`
 	_, err := s.db.ExecContext(ctx, q,
 		src.ID, src.Name, src.Source, src.CredentialID, src.ProjectID, src.InventoryID,
-		nullTime(src.SyncedAt), src.LastError, formatTime(src.CreatedAt))
+		nullTime(src.SyncedAt), src.LastError,
+		boolToInt(src.UpdateOnLaunch), src.SyncIntervalSeconds, formatTime(src.CreatedAt))
 	if err != nil {
 		return fmt.Errorf("save inventory source: %w", err)
 	}
@@ -42,8 +46,10 @@ ON CONFLICT(id) DO UPDATE SET
 // state intact, or returns invsource.ErrNotFound.
 func (s *invSourceStore) Update(ctx context.Context, src *invsource.Source) error {
 	res, err := s.db.ExecContext(ctx,
-		"UPDATE inventory_sources SET name=?, source=?, credential_id=?, project_id=? WHERE id=?",
-		src.Name, src.Source, src.CredentialID, src.ProjectID, src.ID)
+		"UPDATE inventory_sources SET name=?, source=?, credential_id=?, project_id=?, "+
+			"update_on_launch=?, sync_interval_seconds=? WHERE id=?",
+		src.Name, src.Source, src.CredentialID, src.ProjectID,
+		boolToInt(src.UpdateOnLaunch), src.SyncIntervalSeconds, src.ID)
 	if err != nil {
 		return fmt.Errorf("update inventory source: %w", err)
 	}
@@ -112,14 +118,16 @@ func (s *invSourceStore) Delete(ctx context.Context, id string) error {
 // scanInvSource reads one source row from a scanner.
 func scanInvSource(sc scanner) (*invsource.Source, error) {
 	var (
-		src     invsource.Source
-		synced  sql.NullString
-		created string
+		src      invsource.Source
+		synced   sql.NullString
+		onLaunch int
+		created  string
 	)
 	if err := sc.Scan(&src.ID, &src.Name, &src.Source, &src.CredentialID, &src.ProjectID,
-		&src.InventoryID, &synced, &src.LastError, &created); err != nil {
+		&src.InventoryID, &synced, &src.LastError, &onLaunch, &src.SyncIntervalSeconds, &created); err != nil {
 		return nil, err
 	}
+	src.UpdateOnLaunch = onLaunch != 0
 	var err error
 	if src.SyncedAt, err = parseNullTime(synced); err != nil {
 		return nil, err

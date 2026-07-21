@@ -87,6 +87,10 @@ type Template struct {
 	ExtraVars map[string]any `json:"extra_vars,omitempty"`
 	// Survey prompts the launcher for typed values that become extra vars.
 	Survey []SurveyField `json:"survey,omitempty"`
+	// OrgID is the owning organization. Empty means unowned, a global object that follows the role.
+	// When set, members of the organization gain access to the template and, under strict grants, it
+	// is hidden from non-members who lack an explicit grant.
+	OrgID string `json:"org_id,omitempty"`
 	// CreatedAt is when the template was created.
 	CreatedAt time.Time `json:"created_at"`
 }

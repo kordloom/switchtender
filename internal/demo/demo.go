@@ -317,10 +317,12 @@ func seedConfig(ctx context.Context, d Deps, log *zap.Logger) {
 	}
 
 	if d.Policies != nil {
-		policies := []*policy.Policy{
-			{ID: policy.NewID(), Name: "prod terraform destroy", Tool: run.ToolTerraform, CommandContains: "destroy", ExcludeDryRun: true, CreatedAt: ago(40)},
-			{ID: policy.NewID(), Name: "any production run", InventoryID: inventories[0].ID, CreatedAt: ago(22)},
-		}
+		tfDestroy := policy.NewPolicy("prod terraform destroy")
+		tfDestroy.Tool, tfDestroy.CommandContains, tfDestroy.ExcludeDryRun, tfDestroy.CreatedAt =
+			run.ToolTerraform, "destroy", true, ago(40)
+		anyProd := policy.NewPolicy("any production run")
+		anyProd.InventoryID, anyProd.CreatedAt = inventories[0].ID, ago(22)
+		policies := []*policy.Policy{tfDestroy, anyProd}
 		for _, p := range policies {
 			if err := d.Policies.Save(ctx, p); err != nil {
 				log.Warn("demo: seed policy: " + err.Error())

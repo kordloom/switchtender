@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
 )
 
@@ -32,27 +31,24 @@ func (p *pwshRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Result,
 	if spec.Command == "" {
 		return Result{ExitCode: -1}, ErrNoCommand
 	}
-	f, err := os.CreateTemp("", "switchtender-ps-*.ps1")
+	path, cleanup, err := writeScriptFile("switchtender-ps-*.ps1", spec.Command)
 	if err != nil {
-		return Result{ExitCode: -1}, fmt.Errorf("%w: %w", ErrLaunch, err)
+		return Result{ExitCode: -1}, err
 	}
-	path := f.Name()
-	defer func() { _ = os.Remove(path) }()
-	if _, err := f.WriteString(spec.Command); err != nil {
-		_ = f.Close()
-		return Result{ExitCode: -1}, fmt.Errorf("%w: %w", ErrLaunch, err)
-	}
-	if err := f.Close(); err != nil {
-		return Result{ExitCode: -1}, fmt.Errorf("%w: %w", ErrLaunch, err)
-	}
-
-	args := []string{"-NoProfile", "-NonInteractive", "-File", path}
-	if spec.DryRun {
-		parse := fmt.Sprintf("[void][scriptblock]::Create((Get-Content -Raw '%s'))", path)
-		args = []string{"-NoProfile", "-NonInteractive", "-Command", parse}
-	}
-	cmd := exec.CommandContext(ctx, p.binary, args...)
+	defer cleanup()
+	cmd := exec.CommandContext(ctx, p.binary, pwshArgs(path, spec.DryRun)...)
 	cmd.Dir = spec.Dir
 	cmd.Env = varsEnv(p.baseEnv, spec)
 	return runProcess(ctx, cmd, out)
+}
+
+// pwshArgs builds the pwsh argument list for a script at path, shared by the host runner and the
+// container plan. A dry run parses the script into a script block without invoking it, so syntax is
+// checked without executing anything.
+func pwshArgs(path string, dryRun bool) []string {
+	if dryRun {
+		parse := fmt.Sprintf("[void][scriptblock]::Create((Get-Content -Raw '%s'))", path)
+		return []string{"-NoProfile", "-NonInteractive", "-Command", parse}
+	}
+	return []string{"-NoProfile", "-NonInteractive", "-File", path}
 }

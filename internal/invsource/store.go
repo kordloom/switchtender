@@ -50,6 +50,8 @@ func (m *memStore) Update(_ context.Context, s *Source) error {
 	existing.Source = s.Source
 	existing.CredentialID = s.CredentialID
 	existing.ProjectID = s.ProjectID
+	existing.UpdateOnLaunch = s.UpdateOnLaunch
+	existing.SyncIntervalSeconds = s.SyncIntervalSeconds
 	return nil
 }
 

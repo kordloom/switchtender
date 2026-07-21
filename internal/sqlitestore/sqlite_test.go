@@ -16,6 +16,8 @@ import (
 	"github.com/dcadolph/switchtender/internal/inventorytest"
 	"github.com/dcadolph/switchtender/internal/invsource"
 	"github.com/dcadolph/switchtender/internal/invsourcetest"
+	"github.com/dcadolph/switchtender/internal/org"
+	"github.com/dcadolph/switchtender/internal/orgtest"
 	"github.com/dcadolph/switchtender/internal/policy"
 	"github.com/dcadolph/switchtender/internal/policytest"
 	"github.com/dcadolph/switchtender/internal/project"
@@ -254,6 +256,18 @@ func TestTeamStoreContract(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = db.Close() })
 		return db.Teams()
+	})
+}
+
+func TestOrgStoreContract(t *testing.T) {
+	t.Parallel()
+	orgtest.Contract(t, func() org.Store {
+		db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "switchtender.db"))
+		if err != nil {
+			t.Fatalf("Open() error = %v", err)
+		}
+		t.Cleanup(func() { _ = db.Close() })
+		return db.Orgs()
 	})
 }
 

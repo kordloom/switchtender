@@ -148,7 +148,8 @@ func writeSitemap(slugs []string) error {
 	b.WriteString(`<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">` + "\n")
 	urls := []string{
 		"https://switchtender.com/", "https://switchtender.com/get-started",
-		"https://switchtender.com/awx-alternative", "https://switchtender.com/semaphore-alternative",
+		"https://switchtender.com/awx-alternative", "https://switchtender.com/ascender-alternative",
+		"https://switchtender.com/semaphore-alternative", "https://switchtender.com/aap-alternative",
 	}
 	for _, slug := range slugs {
 		urls = append(urls, canonicalFor(slug))

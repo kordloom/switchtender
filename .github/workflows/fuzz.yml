@@ -1,0 +1,29 @@
+name: fuzz
+
+on:
+  schedule:
+    - cron: "13 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { pkg: ./internal/importer, fn: FuzzFromAWX }
+          - { pkg: ./internal/importer, fn: FuzzFromSemaphore }
+          - { pkg: ./internal/importer, fn: FuzzRRULEToCron }
+          - { pkg: ./internal/event, fn: FuzzParse }
+          - { pkg: ./internal/server, fn: FuzzParseProposedRun }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Fuzz ${{ matrix.fn }}
+        run: go test ${{ matrix.pkg }} -run '^$' -fuzz '^${{ matrix.fn }}$' -fuzztime 3m

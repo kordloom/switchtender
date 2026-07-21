@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"os"
 	"sort"
@@ -148,10 +149,15 @@ type Dispatcher struct {
 	inventories inventory.Store
 	// invSources resolves dynamic inventory sources, nil when the feature is off.
 	invSources invsource.Store
+	// syncSources runs the background scheduled-sync loop for dynamic inventory sources.
+	syncSources bool
 	// dumper renders inventory sources to JSON.
 	dumper roundhouse.InventoryDumper
 	// policies gate submitted runs by holding matches for approval, nil when enforcement is off.
 	policies policy.Store
+	// defaultImage is the fallback execution image used when a run, its template, and its project pin
+	// none. Empty leaves an unpinned run on the host.
+	defaultImage string
 }
 
 // Option configures a Dispatcher.
@@ -213,8 +219,16 @@ type config struct {
 	inventories inventory.Store
 	// invSources resolves dynamic inventory sources, nil when the feature is off.
 	invSources invsource.Store
+	// syncSources enables the background scheduled-sync loop for dynamic inventory sources.
+	syncSources bool
 	// policies gate submitted runs by holding matches for approval, nil when enforcement is off.
 	policies policy.Store
+	// defaultImage is the fallback execution image used when a run, its template, and its project pin
+	// none. Empty leaves an unpinned run on the host.
+	defaultImage string
+	// noJanitor disables the stale-lease janitor. A relay worker sets it because the store it runs
+	// against cannot reclaim leases; that stays the control node's job.
+	noJanitor bool
 }
 
 // WithWorkers sets the worker pool size. Values below one fall back to DefaultWorkers.
@@ -241,6 +255,12 @@ func WithClaimInterval(d time.Duration) Option {
 // targeted at them; the default when unset is the empty default pool.
 func WithQueues(queues []string) Option {
 	return func(c *config) { c.queues = queues }
+}
+
+// WithNoJanitor disables the stale-lease janitor. A relay worker runs against a store that cannot
+// reclaim leases, so it turns the sweep off and leaves stale-lease recovery to the control node.
+func WithNoJanitor() Option {
+	return func(c *config) { c.noJanitor = true }
 }
 
 // New returns a Dispatcher. It panics if store or runner is nil; a nil logger becomes a no-op.
@@ -315,11 +335,20 @@ func New(store run.Store, runner roundhouse.Runner, log *zap.Logger, opts ...Opt
 		emailOnFailureOnly: cfg.emailOnFailureOnly,
 		inventories:        cfg.inventories,
 		invSources:         cfg.invSources,
+		syncSources:        cfg.syncSources,
 		policies:           cfg.policies,
+		defaultImage:       cfg.defaultImage,
 	}
-	d.wg.Add(2)
+	d.wg.Add(1)
 	go d.claimLoop()
-	go d.janitor()
+	if !cfg.noJanitor {
+		d.wg.Add(1)
+		go d.janitor()
+	}
+	if d.syncSources && d.invSources != nil {
+		d.wg.Add(1)
+		go d.sourceSyncLoop()
+	}
 	return d
 }
 
@@ -439,9 +468,6 @@ func requireToolInput(r *run.Run) error {
 			return ErrNoPlaybook
 		}
 		return nil
-	}
-	if r.Image != "" {
-		return ErrImageTool
 	}
 	if r.Command == "" {
 		return ErrNoCommand
@@ -1088,10 +1114,40 @@ func (d *Dispatcher) executeLeased(base context.Context, r *run.Run) run.Status 
 	return d.execute(runCtx, r)
 }
 
-// execute runs the playbook, streaming output to the store, and returns the terminal status. The
-// run carries this process's lease while it executes: a watcher renews it and honors cancel
-// requests written to the store by any process.
+// execute runs r and returns its terminal status. A terraform or opentofu apply that a plan-content
+// policy scopes is planned first and its apply proposed for approval; every other run executes in a
+// single phase, unchanged. The run carries this process's lease while it executes: a watcher renews
+// it and honors cancel requests written to the store by any process.
 func (d *Dispatcher) execute(ctx context.Context, r *run.Run) run.Status {
+	if policies := d.planGatePolicies(ctx, r); policies != nil {
+		return d.executePlanGate(ctx, r, policies)
+	}
+	return d.executeRun(ctx, r)
+}
+
+// executeRun runs r's spec once, streaming output to the store, and finalizes it from the runner
+// outcome. It is the single-phase path taken by every run a plan-content policy does not gate.
+func (d *Dispatcher) executeRun(ctx context.Context, r *run.Run) run.Status {
+	return d.streamSpec(ctx, r, r.DryRun, nil,
+		func(res roundhouse.Result, runErr error, mask *masker) run.Status {
+			status := d.outcome(ctx, r, res, runErr, mask)
+			d.summarize(r)
+			if res.Drift {
+				d.recordPlanDrift(r)
+			}
+			return status
+		})
+}
+
+// streamSpec runs one execution of r's spec, streaming combined output and structured events to the
+// store, then calls finish with the runner outcome to finalize r while the run's temp files and lease
+// watcher are still live. dryRun forces the tool's no-change mode regardless of r.DryRun, which the
+// plan gate uses to plan before applying, and tee, when non-nil, also receives the combined output so
+// the gate can inspect the plan. A setup failure finalizes r as failed, redacting the detail, and
+// returns without calling finish. It always closes the run's output stream before returning, and
+// returns finish's status on success or StatusFailed on a setup failure.
+func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, tee io.Writer,
+	finish func(res roundhouse.Result, runErr error, mask *masker) run.Status) run.Status {
 	started := time.Now()
 	r.Status = run.StatusRunning
 	r.StartedAt = &started
@@ -1118,62 +1174,57 @@ func (d *Dispatcher) execute(ctx context.Context, r *run.Run) run.Status {
 		d.tailEvents(r.ID, parent, eventsPath, stop, mask)
 	}()
 
-	sink := &logSink{store: d.store, id: r.ID, log: d.log, publisher: d.publisher, mask: mask}
-	spec := roundhouse.Spec{
-		Playbook: r.Playbook, Inventory: r.Inventory, Tool: r.Tool, Command: r.Command,
-		DryRun: r.DryRun, EventsPath: eventsPath, Limit: r.Limit, ExtraVars: r.ExtraVars,
-		Image: r.Image,
-	}
-	if r.Image != "" {
-		if err := d.resolvePullCredential(r.PullCredentialID, &spec); err != nil {
-			close(stop)
-			<-tailed
-			d.finalize(r, run.StatusFailed, nil, mask.redactString(err.Error()))
-			d.publisher.CloseRun(r.ID)
-			return run.StatusFailed
-		}
-	}
-	invCleanup, invSecrets, err := d.materializeInventory(ctx, r, &spec)
-	if err != nil {
+	// fail finalizes r as failed and closes its output stream when a setup step cannot complete, so a
+	// run that never reached the runner still records why and stops the tailer.
+	fail := func(err error) run.Status {
 		close(stop)
 		<-tailed
 		d.finalize(r, run.StatusFailed, nil, mask.redactString(err.Error()))
 		d.publisher.CloseRun(r.ID)
 		return run.StatusFailed
+	}
+
+	var sink io.Writer = &logSink{store: d.store, id: r.ID, log: d.log, publisher: d.publisher, mask: mask}
+	if tee != nil {
+		sink = io.MultiWriter(sink, tee)
+	}
+	spec := roundhouse.Spec{
+		Playbook: r.Playbook, Inventory: r.Inventory, Tool: r.Tool, Command: r.Command,
+		DryRun: dryRun, EventsPath: eventsPath, Limit: r.Limit, ExtraVars: r.ExtraVars,
+		Image: r.Image,
+	}
+	if r.Image != "" {
+		if err := d.resolvePullCredential(r.PullCredentialID, &spec); err != nil {
+			return fail(err)
+		}
+	}
+	d.refreshOnLaunch(ctx, r)
+	invCleanup, invSecrets, err := d.materializeInventory(ctx, r, &spec)
+	if err != nil {
+		return fail(err)
 	}
 	defer invCleanup()
 	mask.set(invSecrets)
 
 	if err := d.resolveProject(r, &spec); err != nil {
-		close(stop)
-		<-tailed
-		d.finalize(r, run.StatusFailed, nil, mask.redactString(err.Error()))
-		d.publisher.CloseRun(r.ID)
-		return run.StatusFailed
+		return fail(err)
 	}
+	d.applyDefaultImage(&spec)
 
 	credCleanup, secrets, err := d.materializeCredentials(ctx, r, &spec)
 	if err != nil {
 		credCleanup()
-		close(stop)
-		<-tailed
-		d.finalize(r, run.StatusFailed, nil, mask.redactString(err.Error()))
-		d.publisher.CloseRun(r.ID)
-		return run.StatusFailed
+		return fail(err)
 	}
 	defer credCleanup()
 	mask.set(append(secrets, invSecrets...))
 
-	res, err := d.runner.Run(ctx, spec, sink)
+	res, runErr := d.runner.Run(ctx, spec, sink)
 
 	close(stop)
 	<-tailed
 
-	status := d.outcome(ctx, r, res, err, mask)
-	d.summarize(r)
-	if res.Drift {
-		d.recordPlanDrift(r)
-	}
+	status := finish(res, runErr, mask)
 	d.publisher.CloseRun(r.ID)
 	return status
 }

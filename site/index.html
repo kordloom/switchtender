@@ -32,7 +32,7 @@
 	<link rel="preconnect" href="https://fonts.googleapis.com">
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-	<link rel="stylesheet" href="/styles.css?v=12">
+	<link rel="stylesheet" href="/styles.css?v=13">
 </head>
 <body>
 	<div class="bg-mesh" aria-hidden="true"></div>
@@ -111,7 +111,7 @@
 				<article class="card reveal">
 					<div class="ic ic-tools"></div>
 					<h3>Multi-tool engine</h3>
-					<p>Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go, each with a dry run. One engine, one UI, one audit trail. Need an eighth? Write it in Go and plug it in, no fork, no rebuild of the server.</p>
+					<p>Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go, each with a dry run. One engine, one UI, one audit trail. Every tool runs on the host or inside a pinned container image, on Docker or Podman. Need an eighth? Write it in Go and plug it in, no fork, no rebuild of the server.</p>
 				</article>
 				<article class="card reveal">
 					<div class="ic ic-shards"></div>
@@ -131,7 +131,7 @@
 				<article class="card reveal">
 					<div class="ic ic-drift"></div>
 					<h3>Drift detection</h3>
-					<p>A dry run shows exactly what changed since the last apply, host by host, before you touch a thing. Reconcile on your terms.</p>
+					<p>A dry run shows exactly what has drifted, across Ansible hosts and Terraform directories, before you touch a thing. One click builds the fix, held for approval. AWX and Semaphore do neither.</p>
 				</article>
 				<article class="card reveal">
 					<div class="ic ic-audit"></div>
@@ -141,7 +141,7 @@
 				<article class="card reveal">
 					<div class="ic ic-secret"></div>
 					<h3>Secrets that can't escape</h3>
-					<p>Sealed at rest, sourced live from Vault, AWS Secrets Manager, Google Secret Manager, Azure Key Vault, or CyberArk Conjur, and masked out of run logs. A tool that prints a secret shows <code>***</code>.</p>
+					<p>Sealed at rest, sourced live from Vault, AWS Secrets Manager and STS, Google Secret Manager, Azure Key Vault, CyberArk Conjur and CCP, or 1Password, and masked out of run logs. A tool that prints a secret shows <code>***</code>. Cloud credentials are typed: AWS, Azure, GCP, and VMware inject as the exact variables each tool expects, and a new credential type is a Go plugin, not a fork.</p>
 				</article>
 				<article class="card reveal">
 					<div class="ic ic-gate"></div>
@@ -150,8 +150,8 @@
 				</article>
 				<article class="card reveal">
 					<div class="ic ic-roles"></div>
-					<h3>Roles and teams</h3>
-					<p>Global roles, per-object grants, and teams in the open source core. Semaphore paywalls its RBAC. SwitchTender does not.</p>
+					<h3>Roles, teams, and orgs</h3>
+					<p>Global roles, per-object grants, teams, and organizations in the open source core. Grant a project or a credential to a whole org and every member inherits it. Semaphore paywalls its RBAC. SwitchTender does not.</p>
 				</article>
 				<article class="card reveal">
 					<div class="ic ic-ai"></div>
@@ -159,9 +159,14 @@
 					<p>Off by default. Switch it on to triage a failure, answer a fleet question, or draft a run from a sentence. It proposes, never executes. Bring your own model: local Ollama, Claude, or any OpenAI-compatible API.</p>
 				</article>
 				<article class="card reveal">
+					<div class="ic ic-bell"></div>
+					<h3>Notifications everywhere</h3>
+					<p>A finished run reaches Slack, Teams, Discord, Mattermost, Rocket.Chat, ntfy, email, or a webhook. A failure pages PagerDuty or texts through Twilio, and every run annotates Grafana. Eleven channels built in, past the AWX list.</p>
+				</article>
+				<article class="card reveal">
 					<div class="ic ic-migrate"></div>
-					<h3>One-command migration</h3>
-					<p>Bring your AWX or Semaphore projects, inventories, templates, surveys, and schedules across in a single command, and export them just as easily the day you want to leave. No lock-in, coming or going.</p>
+					<h3>Drop-in replacement</h3>
+					<p>Bring your AWX or Semaphore projects, inventories, hosts, templates, surveys, and schedules across in one command, and export them just as easily the day you want to leave. No lock-in, coming or going.</p>
 				</article>
 			</div>
 		</section>
@@ -250,7 +255,7 @@ func main() {
 		<section class="section wrap" id="compare">
 			<div class="section-head reveal">
 				<h2>The honest side-by-side</h2>
-				<p>Where SwitchTender pulls ahead, with the places it is still young stated plainly in the <a href="/docs/comparison">comparison doc</a>. The deep dives are <a href="/awx-alternative">SwitchTender as an AWX alternative</a> and <a href="/semaphore-alternative">as a Semaphore alternative</a>, and <a href="/docs/reliability">how runs execute under load</a> covers the engine underneath.</p>
+				<p>Where SwitchTender pulls ahead, with the places it is still young stated plainly in the <a href="/docs/comparison">comparison doc</a>. The deep dives are <a href="/awx-alternative">SwitchTender as an AWX alternative</a>, <a href="/ascender-alternative">as an Ascender alternative</a>, <a href="/aap-alternative">as an Ansible Automation Platform alternative</a>, and <a href="/semaphore-alternative">as a Semaphore alternative</a>, and <a href="/docs/reliability">how runs execute under load</a> covers the engine underneath.</p>
 			</div>
 			<div class="table-wrap reveal">
 				<table class="compare">
@@ -271,11 +276,33 @@ func main() {
 						<tr><td>Drag-and-drop workflow editor</td><td class="us"><i class="y"></i></td><td><i class="y"></i></td><td><i class="n"></i></td></tr>
 						<tr><td>Advisory AI: triage, fleet answers, drafted runs</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td><td><i class="n"></i></td></tr>
 						<tr><td>Drop-in Go plugins: tools, secrets, AI, notifiers</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td><td><i class="n"></i></td></tr>
+						<tr><td>Container execution for every tool</td><td class="us"><i class="y"></i></td><td><span class="muted">Ansible only</span></td><td><i class="n"></i></td></tr>
+						<tr><td>Typed cloud credentials, pluggable types</td><td class="us"><i class="y"></i></td><td><span class="muted">typed, not pluggable</span></td><td><i class="n"></i></td></tr>
+						<tr><td>Organizations, teams, per-object grants</td><td class="us"><i class="y"></i></td><td><i class="y"></i></td><td><span class="muted">paid tier</span></td></tr>
 						<tr><td>Instance groups: pin work to worker pools</td><td class="us"><i class="y"></i></td><td><i class="y"></i></td><td><i class="n"></i></td></tr>
 						<tr><td>Active-active HA on PostgreSQL</td><td class="us"><i class="y"></i></td><td><span class="muted">via Kubernetes</span></td><td><i class="n"></i></td></tr>
 					</tbody>
 				</table>
 			</div>
+		</section>
+
+		<section class="section wrap" id="migrate">
+			<div class="section-head reveal">
+				<h2>Already running AWX? Drop it in and bring the whole thing.</h2>
+				<p>This is a replacement, not a rebuild. Export from AWX or Semaphore, preview exactly what will land, then apply. Projects, inventories with their hosts and groups, dynamic inventory sources, job templates, surveys, schedules, and credential shells all come across in one pass. A malformed asset is warned and skipped, never fatal, so even a partial export migrates everything it can.</p>
+			</div>
+			<div class="code reveal">
+				<button class="copy" aria-label="Copy">Copy</button>
+				<pre><code><span class="c"># 1. preview: read the AWX export, print the plan, write nothing</span>
+switchtender import awx awx-export.json --db switchtender.db
+
+<span class="c"># 2. apply: create every project, inventory, template, survey, and schedule</span>
+switchtender import awx awx-export.json --db switchtender.db --apply
+
+<span class="c"># on Semaphore instead? swap one word:</span>
+switchtender import semaphore export.json --db switchtender.db --apply</code></pre>
+			</div>
+			<p class="reveal" style="margin-top: 20px; text-align: center;">AWX omits secret material from its own exports, so credentials arrive as named shells: re-enter each secret once and every template that references it works. The <a href="/docs/switching-from-awx">switching guide</a> maps every AWX concept to its SwitchTender equal, and the <a href="/awx-alternative">AWX alternative page</a> makes the full case.</p>
 		</section>
 
 		<section class="section start wrap" id="start">

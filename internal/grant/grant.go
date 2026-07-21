@@ -1,6 +1,6 @@
 // Package grant records per-object access grants so a large organization can scope who may use or
 // manage a specific project, template, inventory, or credential beyond the coarse global role. A
-// grant ties a subject, a user or a team, to an object with an access level. Grants are additive:
+// grant ties a subject, a user, a team, or an organization, to an object with an access level. Grants are additive:
 // when an object has no grants the global role decides.
 package grant
 
@@ -31,7 +31,7 @@ const (
 )
 
 // subjectPrefixes are the id prefixes a grant subject may carry.
-var subjectPrefixes = []string{"user_", "team_"}
+var subjectPrefixes = []string{"user_", "team_", "org_"}
 
 // objectPrefixes are the id prefixes a grant object may carry.
 var objectPrefixes = []string{"proj_", "tpl_", "inv_", "cred_"}
@@ -40,7 +40,7 @@ var objectPrefixes = []string{"proj_", "tpl_", "inv_", "cred_"}
 type Grant struct {
 	// ID is the unique grant identifier.
 	ID string `json:"id"`
-	// Subject is the granted identity: a user id (user_...) or a team id (team_...).
+	// Subject is the granted identity: a user id (user_...), a team id (team_...), or an org id (org_...).
 	Subject string `json:"subject"`
 	// Object is the target: a project, template, inventory, or credential id.
 	Object string `json:"object"`

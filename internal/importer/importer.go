@@ -136,12 +136,23 @@ func mapCredentialKind(awxType string) (credential.Kind, bool) {
 	switch lower {
 	case "machine", "source control", "scm":
 		return credential.KindSSHKey, true
+	case "network":
+		return credential.KindNetwork, true
 	case "vault":
 		return credential.KindVaultPassword, true
 	case "registry", "container registry":
 		return credential.KindRegistry, true
 	}
-	if strings.Contains(lower, "token") || strings.Contains(lower, "bearer") {
+	switch {
+	case strings.Contains(lower, "amazon"), strings.Contains(lower, "aws"):
+		return credential.KindAWS, true
+	case strings.Contains(lower, "azure"):
+		return credential.KindAzure, true
+	case strings.Contains(lower, "google"), strings.Contains(lower, "gce"), strings.Contains(lower, "gcp"):
+		return credential.KindGCP, true
+	case strings.Contains(lower, "vmware"), strings.Contains(lower, "vcenter"):
+		return credential.KindVMware, true
+	case strings.Contains(lower, "token"), strings.Contains(lower, "bearer"):
 		return credential.KindToken, true
 	}
 	return credential.KindEnv, false

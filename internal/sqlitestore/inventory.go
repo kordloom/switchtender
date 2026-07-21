@@ -10,7 +10,7 @@ import (
 )
 
 // inventoryColumns is the shared select list for inventory reads.
-const inventoryColumns = `id, name, content, credential_ids, content_source, content_config, queue, created_at`
+const inventoryColumns = `id, name, content, credential_ids, content_source, content_config, queue, org_id, created_at`
 
 // inventoryStore is an inventory.Store backed by the shared SQLite database.
 type inventoryStore struct {
@@ -21,15 +21,15 @@ type inventoryStore struct {
 // Save inserts or replaces the inventory.
 func (s *inventoryStore) Save(ctx context.Context, i *inventory.Inventory) error {
 	const q = `
-INSERT INTO inventories (id, name, content, credential_ids, content_source, content_config, queue, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO inventories (id, name, content, credential_ids, content_source, content_config, queue, org_id, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
 	name=excluded.name, content=excluded.content, credential_ids=excluded.credential_ids,
 	content_source=excluded.content_source, content_config=excluded.content_config,
-	queue=excluded.queue, created_at=excluded.created_at`
+	queue=excluded.queue, org_id=excluded.org_id, created_at=excluded.created_at`
 	_, err := s.db.ExecContext(ctx, q,
 		i.ID, i.Name, i.Content, joinIDs(i.CredentialIDs), i.ContentSource, i.ContentConfig, i.Queue,
-		formatTime(i.CreatedAt))
+		i.OrgID, formatTime(i.CreatedAt))
 	if err != nil {
 		return fmt.Errorf("save inventory: %w", err)
 	}
@@ -39,8 +39,8 @@ ON CONFLICT(id) DO UPDATE SET
 // Update changes an existing inventory's name and content, or returns inventory.ErrNotFound.
 func (s *inventoryStore) Update(ctx context.Context, i *inventory.Inventory) error {
 	res, err := s.db.ExecContext(ctx,
-		"UPDATE inventories SET name=?, content=?, credential_ids=?, content_source=?, content_config=?, queue=? WHERE id=?",
-		i.Name, i.Content, joinIDs(i.CredentialIDs), i.ContentSource, i.ContentConfig, i.Queue, i.ID)
+		"UPDATE inventories SET name=?, content=?, credential_ids=?, content_source=?, content_config=?, queue=?, org_id=? WHERE id=?",
+		i.Name, i.Content, joinIDs(i.CredentialIDs), i.ContentSource, i.ContentConfig, i.Queue, i.OrgID, i.ID)
 	if err != nil {
 		return fmt.Errorf("update inventory: %w", err)
 	}
@@ -113,7 +113,7 @@ func scanInventory(sc scanner) (*inventory.Inventory, error) {
 		creds   string
 		created string
 	)
-	if err := sc.Scan(&i.ID, &i.Name, &i.Content, &creds, &i.ContentSource, &i.ContentConfig, &i.Queue, &created); err != nil {
+	if err := sc.Scan(&i.ID, &i.Name, &i.Content, &creds, &i.ContentSource, &i.ContentConfig, &i.Queue, &i.OrgID, &created); err != nil {
 		return nil, err
 	}
 	i.CredentialIDs = splitIDs(creds)

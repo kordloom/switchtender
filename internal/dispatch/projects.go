@@ -18,6 +18,12 @@ func WithProjects(store project.Store, syncer *project.Syncer) Option {
 	}
 }
 
+// WithDefaultImage sets the fallback execution image applied when a run, its template, and its
+// project pin none. Empty leaves an unpinned run on the host.
+func WithDefaultImage(image string) Option {
+	return func(c *config) { c.defaultImage = image }
+}
+
 // validateProject confirms a referenced project exists before a run is accepted.
 func (d *Dispatcher) validateProject(ctx context.Context, id string) error {
 	if id == "" {
@@ -89,6 +95,15 @@ func (d *Dispatcher) resolveProject(r *run.Run, spec *roundhouse.Spec) error {
 		}
 	}
 	return nil
+}
+
+// applyDefaultImage falls back to the server-wide default execution image when a run, its template,
+// and its project pin none, so one default environment can apply without pinning an image on every
+// project. It never overrides an image already resolved.
+func (d *Dispatcher) applyDefaultImage(spec *roundhouse.Spec) {
+	if spec.Image == "" {
+		spec.Image = d.defaultImage
+	}
 }
 
 // resolvePullCredential decrypts the named registry credential, when set, onto the spec so the

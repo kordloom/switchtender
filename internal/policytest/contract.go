@@ -32,7 +32,7 @@ func testGet(t *testing.T, store policy.Store) {
 	ctx := context.Background()
 	p := &policy.Policy{
 		ID: policy.NewID(), Name: "prod-destroy", Tool: "terraform", CommandContains: "destroy",
-		InventoryID: "inv_prod", ExcludeDryRun: true,
+		InventoryID: "inv_prod", ExcludeDryRun: true, MaxDestroy: 3,
 		CreatedAt: time.Date(2026, 7, 10, 0, 0, 0, 0, time.UTC),
 	}
 	if err := store.Save(ctx, p); err != nil {
@@ -43,7 +43,7 @@ func testGet(t *testing.T, store policy.Store) {
 		t.Fatalf("Get() error = %v", err)
 	}
 	if got.Name != "prod-destroy" || got.Tool != "terraform" || got.CommandContains != "destroy" ||
-		got.InventoryID != "inv_prod" || !got.ExcludeDryRun {
+		got.InventoryID != "inv_prod" || !got.ExcludeDryRun || got.MaxDestroy != 3 {
 		t.Errorf("Get() = %+v, want the saved policy", got)
 	}
 	if _, err := store.Get(ctx, "pol_missing"); !errors.Is(err, policy.ErrNotFound) {
@@ -58,7 +58,7 @@ func testSaveListDelete(t *testing.T, store policy.Store) {
 	for i, name := range []string{"prod-destroy", "all-terraform"} {
 		if err := store.Save(ctx, &policy.Policy{
 			ID: policy.NewID(), Name: name, Tool: "terraform", CommandContains: "destroy",
-			InventoryID: "inv_prod", ExcludeDryRun: true,
+			InventoryID: "inv_prod", ExcludeDryRun: true, MaxDestroy: 5,
 			CreatedAt: base.Add(time.Duration(i) * time.Minute),
 		}); err != nil {
 			t.Fatalf("Save() error = %v", err)
@@ -73,7 +73,7 @@ func testSaveListDelete(t *testing.T, store policy.Store) {
 		t.Fatalf("List() = %+v, want two policies oldest first", all)
 	}
 	if all[0].Tool != "terraform" || all[0].CommandContains != "destroy" ||
-		all[0].InventoryID != "inv_prod" || !all[0].ExcludeDryRun {
+		all[0].InventoryID != "inv_prod" || !all[0].ExcludeDryRun || all[0].MaxDestroy != 5 {
 		t.Errorf("policy fields did not round-trip: %+v", all[0])
 	}
 

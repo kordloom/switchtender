@@ -53,7 +53,7 @@ stdout, stderr, return code, and diff.</li>
 each host's measured duration from recent runs, then rolls the shards up into one matrix. Each shard
 carries a real share of the work, sized by measured cost rather than a flat count.</p>
 <h2 id="do-it-from-the-api">Do it from the API</h2>
-<pre><code>curl -s -X POST localhost:8080/runs \
+<pre><code>curl -s -X POST localhost:8080/v1/runs \
   -H 'content-type: application/json' \
   -d '{&quot;tool&quot;:&quot;bash&quot;,&quot;command&quot;:&quot;echo hello from switchtender&quot;}'
 </code></pre>

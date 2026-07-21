@@ -34,8 +34,9 @@ It maps projects, inventories, job templates with their surveys and schedules an
 credentials. See [switching from AWX](switching-from-awx.md) for the full mapping.
 
 Two things to know. AWX omits secret values on export for security, so credentials import without
-their secrets and you set those once after importing. And AWX dynamic inventory sources are not
-mapped yet. Static inventories import fully. A Semaphore importer exists too, with
+their secrets and you set those once after importing. Dynamic inventory sources import too, as
+sources that run their plugin and refresh the hosts into a stored inventory on a schedule or before a
+run; static inventories import fully. A Semaphore importer exists too, with
 `switchtender import semaphore export.json`.
 
 ## How do I rerun the same job on a set of hosts without re-entering everything?

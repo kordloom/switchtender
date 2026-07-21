@@ -21,6 +21,7 @@ import (
 	"github.com/dcadolph/switchtender/internal/grant"
 	"github.com/dcadolph/switchtender/internal/inventory"
 	"github.com/dcadolph/switchtender/internal/invsource"
+	"github.com/dcadolph/switchtender/internal/org"
 	"github.com/dcadolph/switchtender/internal/policy"
 	"github.com/dcadolph/switchtender/internal/project"
 	"github.com/dcadolph/switchtender/internal/run"
@@ -151,6 +152,7 @@ CREATE TABLE IF NOT EXISTS projects (
 	install_deps  INTEGER NOT NULL DEFAULT 1,
 	image         TEXT NOT NULL DEFAULT '',
 	pull_credential_id TEXT NOT NULL DEFAULT '',
+	org_id        TEXT NOT NULL DEFAULT '',
 	created_at    TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS templates (
@@ -170,7 +172,8 @@ CREATE TABLE IF NOT EXISTS templates (
 	command        TEXT NOT NULL DEFAULT '',
 	dry_run        INTEGER NOT NULL DEFAULT 0,
 	image          TEXT NOT NULL DEFAULT '',
-	pull_credential_id TEXT NOT NULL DEFAULT ''
+	pull_credential_id TEXT NOT NULL DEFAULT '',
+	org_id         TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS inventory_sources (
 	id            TEXT PRIMARY KEY,
@@ -181,6 +184,8 @@ CREATE TABLE IF NOT EXISTS inventory_sources (
 	inventory_id  TEXT NOT NULL DEFAULT '',
 	synced_at     TEXT,
 	last_error    TEXT NOT NULL DEFAULT '',
+	update_on_launch INTEGER NOT NULL DEFAULT 0,
+	sync_interval_seconds INTEGER NOT NULL DEFAULT 0,
 	created_at    TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS triggers (
@@ -213,6 +218,7 @@ CREATE TABLE IF NOT EXISTS policies (
 	command_contains TEXT NOT NULL DEFAULT '',
 	inventory_id     TEXT NOT NULL DEFAULT '',
 	exclude_dry_run  INTEGER NOT NULL DEFAULT 0,
+	max_destroy      INTEGER NOT NULL DEFAULT -1,
 	created_at       TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS inventories (
@@ -223,6 +229,7 @@ CREATE TABLE IF NOT EXISTS inventories (
 	content_source TEXT NOT NULL DEFAULT '',
 	content_config TEXT NOT NULL DEFAULT '',
 	queue          TEXT NOT NULL DEFAULT '',
+	org_id         TEXT NOT NULL DEFAULT '',
 	created_at     TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS credentials (
@@ -231,7 +238,8 @@ CREATE TABLE IF NOT EXISTS credentials (
 	kind       TEXT NOT NULL,
 	secret     TEXT NOT NULL,
 	created_at TEXT NOT NULL,
-	source     TEXT NOT NULL DEFAULT ''
+	source     TEXT NOT NULL DEFAULT '',
+	org_id     TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS teams (
 	id         TEXT PRIMARY KEY,
@@ -244,6 +252,18 @@ CREATE TABLE IF NOT EXISTS team_members (
 	PRIMARY KEY (team_id, user_id)
 );
 CREATE INDEX IF NOT EXISTS idx_team_members_user ON team_members(user_id);
+CREATE TABLE IF NOT EXISTS orgs (
+	id         TEXT PRIMARY KEY,
+	name       TEXT NOT NULL DEFAULT '',
+	created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS org_members (
+	org_id  TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+	user_id TEXT NOT NULL,
+	role    TEXT NOT NULL DEFAULT 'member',
+	PRIMARY KEY (org_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_org_members_user ON org_members(user_id);
 CREATE TABLE IF NOT EXISTS grants (
 	id         TEXT PRIMARY KEY,
 	subject    TEXT NOT NULL,
@@ -293,6 +313,8 @@ type DB struct {
 	triggers *triggerStore
 	// teams is the team store.
 	teams *teamStore
+	// orgs is the organization store.
+	orgs *orgStore
 	// grants is the per-object access grant store.
 	grants *grantStore
 	// policies is the approval policy store.
@@ -331,6 +353,30 @@ func Open(path string) (*DB, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	if err := migrateSources(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if err := migratePolicies(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if err := migrateProjects(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if err := migrateTemplates(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if err := migrateInventories(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if err := migrateCredentials(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	return &DB{db: db, runs: &store{db: db}, schedules: &scheduleStore{db: db}, tokens: &tokenStore{db: db},
 		credentials: &credentialStore{db: db},
 		projects:    &projectStore{db: db},
@@ -341,6 +387,7 @@ func Open(path string) (*DB, error) {
 		invSources:  &invSourceStore{db: db},
 		triggers:    &triggerStore{db: db},
 		teams:       &teamStore{db: db},
+		orgs:        &orgStore{db: db},
 		grants:      &grantStore{db: db},
 		policies:    &policyStore{db: db}}, nil
 }
@@ -359,6 +406,82 @@ func migrateRuns(db *sql.DB) error {
 		"CREATE UNIQUE INDEX IF NOT EXISTS idx_runs_idempotency_key " +
 			"ON runs(idempotency_key) WHERE idempotency_key <> ''"); err != nil {
 		return fmt.Errorf("index idempotency_key: %w", err)
+	}
+	return nil
+}
+
+// migrateSources adds the dynamic inventory source config columns to a database created before them.
+// Adding a column that already exists is the ordinary case for a current database and is treated as
+// success.
+func migrateSources(db *sql.DB) error {
+	for _, stmt := range []string{
+		"ALTER TABLE inventory_sources ADD COLUMN update_on_launch INTEGER NOT NULL DEFAULT 0",
+		"ALTER TABLE inventory_sources ADD COLUMN sync_interval_seconds INTEGER NOT NULL DEFAULT 0",
+	} {
+		if _, err := db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+			return fmt.Errorf("migrate inventory_sources: %w", err)
+		}
+	}
+	return nil
+}
+
+// migratePolicies adds the plan-content threshold column to a policies table created before it. The
+// default of -1 disables the plan-content check, so existing policies keep their blanket behavior
+// rather than starting to hold on any destroy. Adding a column that already exists is the ordinary
+// case for a current database and is treated as success.
+func migratePolicies(db *sql.DB) error {
+	if _, err := db.Exec(
+		"ALTER TABLE policies ADD COLUMN max_destroy INTEGER NOT NULL DEFAULT -1"); err != nil &&
+		!strings.Contains(err.Error(), "duplicate column name") {
+		return fmt.Errorf("migrate policies: %w", err)
+	}
+	return nil
+}
+
+// migrateProjects adds the owning-organization column to a projects table created before object
+// tenancy. Empty is the unowned default, so a project made before this column stays global. Adding a
+// column that already exists is the ordinary case for a current database and is treated as success.
+func migrateProjects(db *sql.DB) error {
+	if _, err := db.Exec(
+		"ALTER TABLE projects ADD COLUMN org_id TEXT NOT NULL DEFAULT ''"); err != nil &&
+		!strings.Contains(err.Error(), "duplicate column name") {
+		return fmt.Errorf("migrate projects: %w", err)
+	}
+	return nil
+}
+
+// migrateTemplates adds the owning-organization column to a templates table created before object
+// tenancy. Empty is the unowned default, so a template made before this column stays global. Adding a
+// column that already exists is the ordinary case for a current database and is treated as success.
+func migrateTemplates(db *sql.DB) error {
+	if _, err := db.Exec(
+		"ALTER TABLE templates ADD COLUMN org_id TEXT NOT NULL DEFAULT ''"); err != nil &&
+		!strings.Contains(err.Error(), "duplicate column name") {
+		return fmt.Errorf("migrate templates: %w", err)
+	}
+	return nil
+}
+
+// migrateInventories adds the owning-organization column to an inventories table created before object
+// tenancy. Empty is the unowned default, so an inventory made before this column stays global. Adding
+// a column that already exists is the ordinary case for a current database and is treated as success.
+func migrateInventories(db *sql.DB) error {
+	if _, err := db.Exec(
+		"ALTER TABLE inventories ADD COLUMN org_id TEXT NOT NULL DEFAULT ''"); err != nil &&
+		!strings.Contains(err.Error(), "duplicate column name") {
+		return fmt.Errorf("migrate inventories: %w", err)
+	}
+	return nil
+}
+
+// migrateCredentials adds the owning-organization column to a credentials table created before object
+// tenancy. Empty is the unowned default, so a credential made before this column stays global. Adding
+// a column that already exists is the ordinary case for a current database and is treated as success.
+func migrateCredentials(db *sql.DB) error {
+	if _, err := db.Exec(
+		"ALTER TABLE credentials ADD COLUMN org_id TEXT NOT NULL DEFAULT ''"); err != nil &&
+		!strings.Contains(err.Error(), "duplicate column name") {
+		return fmt.Errorf("migrate credentials: %w", err)
 	}
 	return nil
 }
@@ -440,6 +563,11 @@ func (d *DB) Triggers() trigger.Store {
 // Teams returns the team store.
 func (d *DB) Teams() team.Store {
 	return d.teams
+}
+
+// Orgs returns the organization store.
+func (d *DB) Orgs() org.Store {
+	return d.orgs
 }
 
 // Grants returns the per-object access grant store.

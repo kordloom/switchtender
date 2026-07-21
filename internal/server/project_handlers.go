@@ -28,6 +28,8 @@ type createProjectRequest struct {
 	Image string `json:"image,omitempty"`
 	// PullCredentialID names a registry credential for pulling a private Image. Optional.
 	PullCredentialID string `json:"pull_credential_id,omitempty"`
+	// OrgID names the owning organization. Empty leaves the project unowned and global. Optional.
+	OrgID string `json:"org_id,omitempty"`
 }
 
 // listProjectsResponse wraps the project list.
@@ -62,7 +64,8 @@ func createProjectHandler(store project.Store, log *zap.Logger) http.HandlerFunc
 			ID: project.NewID(), Name: req.Name, RepoURL: req.RepoURL,
 			Branch: req.Branch, CredentialID: req.CredentialID,
 			InstallDeps: req.InstallDeps == nil || *req.InstallDeps,
-			Image:       req.Image, PullCredentialID: req.PullCredentialID, CreatedAt: time.Now(),
+			Image:       req.Image, PullCredentialID: req.PullCredentialID, OrgID: req.OrgID,
+			CreatedAt: time.Now(),
 		}
 		if err := store.Save(r.Context(), p); err != nil {
 			log.Error("server: save project: " + err.Error())
@@ -98,7 +101,7 @@ func updateProjectHandler(store project.Store, log *zap.Logger) http.HandlerFunc
 			ID: id, Name: req.Name, RepoURL: req.RepoURL,
 			Branch: req.Branch, CredentialID: req.CredentialID,
 			InstallDeps: req.InstallDeps == nil || *req.InstallDeps,
-			Image:       req.Image, PullCredentialID: req.PullCredentialID,
+			Image:       req.Image, PullCredentialID: req.PullCredentialID, OrgID: req.OrgID,
 		}
 		err := store.Update(r.Context(), p)
 		if errors.Is(err, project.ErrNotFound) {
@@ -134,7 +137,9 @@ func listProjectsHandler(store project.Store, authz *authorizer, log *zap.Logger
 			respondError(w, log, http.StatusInternalServerError, "could not list projects")
 			return
 		}
-		visible, err := filterReadable(r.Context(), authz, list, func(p *project.Project) string { return p.ID })
+		visible, err := filterReadable(r.Context(), authz, list,
+			func(p *project.Project) string { return p.ID },
+			func(p *project.Project) string { return p.OrgID })
 		if err != nil {
 			log.Error("server: list projects: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not list projects")

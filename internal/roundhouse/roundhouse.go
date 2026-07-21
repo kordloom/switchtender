@@ -173,7 +173,7 @@ func WithBaseEnv(env []string) Option {
 // Ansible and bash for bash. By default it resolves the tool binaries from PATH and inherits the
 // process environment. Container execution is off, so an image-bound Spec fails clearly.
 func NewAnsibleRunner(opts ...Option) Runner {
-	return newToolRouter(false, DefaultContainerLimits(), opts...)
+	return newToolRouter(false, "docker", "missing", false, DefaultContainerLimits(), opts...)
 }
 
 // newAnsibleRunner builds the concrete host runner so callers that need its HostLister and
@@ -215,14 +215,17 @@ type toolRouter struct {
 }
 
 // NewSelectiveRunner returns a Runner that executes each Spec by its Tool: Ansible on the host or,
-// when a Spec names an image and allowContainer is set, inside that image; bash on the host. Every
-// container run is bounded by limits.
-func NewSelectiveRunner(allowContainer bool, limits ContainerLimits, opts ...Option) Runner {
-	return newToolRouter(allowContainer, limits, opts...)
+// when a Spec names an image and allowContainer is set, inside that image; bash on the host. The
+// pull policy sets the image --pull behavior, requireDigest rejects an image not pinned to a digest,
+// and every container run is bounded by limits.
+func NewSelectiveRunner(allowContainer bool, runtime, pullPolicy string, requireDigest bool,
+	limits ContainerLimits, opts ...Option) Runner {
+	return newToolRouter(allowContainer, runtime, pullPolicy, requireDigest, limits, opts...)
 }
 
 // newToolRouter builds the tool router shared by the Ansible and selective constructors.
-func newToolRouter(allowContainer bool, limits ContainerLimits, opts ...Option) *toolRouter {
+func newToolRouter(allowContainer bool, runtime, pullPolicy string, requireDigest bool,
+	limits ContainerLimits, opts ...Option) *toolRouter {
 	host := newAnsibleRunner(opts...)
 	return &toolRouter{
 		ansibleRunner:  host,
@@ -232,7 +235,7 @@ func newToolRouter(allowContainer bool, limits ContainerLimits, opts ...Option) 
 		python:         newPythonRunner(host.baseEnv),
 		powershell:     newPwshRunner(host.baseEnv),
 		golang:         newGoRunner(host.baseEnv),
-		container:      newContainerRunner(host.baseEnv, &host.plugin, limits),
+		container:      newContainerRunner(runtime, pullPolicy, requireDigest, host.baseEnv, &host.plugin, limits),
 		allowContainer: allowContainer,
 	}
 }
@@ -262,10 +265,19 @@ func RegisterRunner(tool string, r Runner) {
 	extraRunners[run.NormalizeTool(tool)] = r
 }
 
-// Run dispatches spec to the runner for its Tool, defaulting an empty Tool to Ansible. A Tool that
-// matches no built-in falls through to a runner added with RegisterRunner.
+// Run dispatches spec to the runner for its Tool, defaulting an empty Tool to Ansible. Any built-in
+// tool that pins an image runs inside that image when container execution is allowed, otherwise it
+// runs on the host. A Tool that matches no built-in falls through to a runner added with
+// RegisterRunner.
 func (t *toolRouter) Run(ctx context.Context, spec Spec, out io.Writer) (Result, error) {
-	switch run.NormalizeTool(spec.Tool) {
+	tool := run.NormalizeTool(spec.Tool)
+	if spec.Image != "" && isBuiltinTool(tool) {
+		if !t.allowContainer {
+			return Result{ExitCode: -1}, ErrContainerDisabled
+		}
+		return t.container.Run(ctx, spec, out)
+	}
+	switch tool {
 	case run.ToolBash:
 		return t.bash.Run(ctx, spec, out)
 	case run.ToolTerraform:
@@ -279,15 +291,9 @@ func (t *toolRouter) Run(ctx context.Context, spec Spec, out io.Writer) (Result,
 	case run.ToolGo:
 		return t.golang.Run(ctx, spec, out)
 	case run.ToolAnsible:
-		if spec.Image == "" {
-			return t.ansibleRunner.Run(ctx, spec, out)
-		}
-		if !t.allowContainer {
-			return Result{ExitCode: -1}, ErrContainerDisabled
-		}
-		return t.container.Run(ctx, spec, out)
+		return t.ansibleRunner.Run(ctx, spec, out)
 	default:
-		if r, ok := extraRunners[run.NormalizeTool(spec.Tool)]; ok {
+		if r, ok := extraRunners[tool]; ok {
 			return r.Run(ctx, spec, out)
 		}
 		return Result{ExitCode: -1}, fmt.Errorf("%w: %s", ErrUnknownTool, spec.Tool)
@@ -347,17 +353,45 @@ func runProcess(ctx context.Context, cmd *exec.Cmd, out io.Writer) (Result, erro
 	return Result{ExitCode: -1}, fmt.Errorf("%w: %w", ErrLaunch, err)
 }
 
+// writeScriptFile writes content to a private temp file matching pattern and returns its path and a
+// cleanup that removes it. The Python, Go, and PowerShell runners share it so a run's inline source
+// reaches a host process and a container mount the same way.
+func writeScriptFile(pattern, content string) (string, func(), error) {
+	f, err := os.CreateTemp("", pattern)
+	if err != nil {
+		return "", func() {}, fmt.Errorf("%w: %w", ErrLaunch, err)
+	}
+	path := f.Name()
+	cleanup := func() { _ = os.Remove(path) }
+	if _, err := f.WriteString(content); err != nil {
+		_ = f.Close()
+		return "", cleanup, fmt.Errorf("%w: %w", ErrLaunch, err)
+	}
+	if err := f.Close(); err != nil {
+		return "", cleanup, fmt.Errorf("%w: %w", ErrLaunch, err)
+	}
+	return path, cleanup, nil
+}
+
 // varsEnv layers a Spec's credential env and, when it has extra vars, a JSON SWITCHTENDER_VARS of them
 // over the base environment, so bash and python runs read survey answers and template vars from one
 // place, the same way.
 func varsEnv(baseEnv []string, spec Spec) []string {
 	env := append(append([]string{}, baseEnv...), spec.Env...)
-	if len(spec.ExtraVars) > 0 {
-		if b, err := json.Marshal(spec.ExtraVars); err == nil {
-			env = append(env, "SWITCHTENDER_VARS="+string(b))
-		}
+	return append(env, varsExtra(spec)...)
+}
+
+// varsExtra returns the SWITCHTENDER_VARS entry carrying a Spec's extra vars as JSON, or nil when there
+// are none, shared by the host script runners and the container plan.
+func varsExtra(spec Spec) []string {
+	if len(spec.ExtraVars) == 0 {
+		return nil
 	}
-	return env
+	b, err := json.Marshal(spec.ExtraVars)
+	if err != nil {
+		return nil
+	}
+	return []string{"SWITCHTENDER_VARS=" + string(b)}
 }
 
 // callbackEnv returns the environment entries that enable the structured event callback and point

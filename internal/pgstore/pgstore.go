@@ -22,6 +22,7 @@ import (
 	"github.com/dcadolph/switchtender/internal/grant"
 	"github.com/dcadolph/switchtender/internal/inventory"
 	"github.com/dcadolph/switchtender/internal/invsource"
+	"github.com/dcadolph/switchtender/internal/org"
 	"github.com/dcadolph/switchtender/internal/policy"
 	"github.com/dcadolph/switchtender/internal/project"
 	"github.com/dcadolph/switchtender/internal/run"
@@ -156,8 +157,10 @@ CREATE TABLE IF NOT EXISTS projects (
 	install_deps  INTEGER NOT NULL DEFAULT 1,
 	image         TEXT NOT NULL DEFAULT '',
 	pull_credential_id TEXT NOT NULL DEFAULT '',
+	org_id        TEXT NOT NULL DEFAULT '',
 	created_at    TEXT NOT NULL
 );
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS org_id TEXT NOT NULL DEFAULT '';
 CREATE TABLE IF NOT EXISTS templates (
 	id             TEXT PRIMARY KEY,
 	name           TEXT NOT NULL DEFAULT '',
@@ -175,8 +178,10 @@ CREATE TABLE IF NOT EXISTS templates (
 	command        TEXT NOT NULL DEFAULT '',
 	dry_run        INTEGER NOT NULL DEFAULT 0,
 	image          TEXT NOT NULL DEFAULT '',
-	pull_credential_id TEXT NOT NULL DEFAULT ''
+	pull_credential_id TEXT NOT NULL DEFAULT '',
+	org_id         TEXT NOT NULL DEFAULT ''
 );
+ALTER TABLE templates ADD COLUMN IF NOT EXISTS org_id TEXT NOT NULL DEFAULT '';
 CREATE TABLE IF NOT EXISTS inventory_sources (
 	id            TEXT PRIMARY KEY,
 	name          TEXT NOT NULL DEFAULT '',
@@ -186,8 +191,12 @@ CREATE TABLE IF NOT EXISTS inventory_sources (
 	inventory_id  TEXT NOT NULL DEFAULT '',
 	synced_at     TEXT,
 	last_error    TEXT NOT NULL DEFAULT '',
+	update_on_launch INTEGER NOT NULL DEFAULT 0,
+	sync_interval_seconds INTEGER NOT NULL DEFAULT 0,
 	created_at    TEXT NOT NULL
 );
+ALTER TABLE inventory_sources ADD COLUMN IF NOT EXISTS update_on_launch INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE inventory_sources ADD COLUMN IF NOT EXISTS sync_interval_seconds INTEGER NOT NULL DEFAULT 0;
 CREATE TABLE IF NOT EXISTS triggers (
 	id                TEXT PRIMARY KEY,
 	name              TEXT NOT NULL DEFAULT '',
@@ -218,8 +227,10 @@ CREATE TABLE IF NOT EXISTS policies (
 	command_contains TEXT NOT NULL DEFAULT '',
 	inventory_id     TEXT NOT NULL DEFAULT '',
 	exclude_dry_run  INTEGER NOT NULL DEFAULT 0,
+	max_destroy      INTEGER NOT NULL DEFAULT -1,
 	created_at       TEXT NOT NULL
 );
+ALTER TABLE policies ADD COLUMN IF NOT EXISTS max_destroy INTEGER NOT NULL DEFAULT -1;
 CREATE TABLE IF NOT EXISTS inventories (
 	id             TEXT PRIMARY KEY,
 	name           TEXT NOT NULL DEFAULT '',
@@ -228,16 +239,20 @@ CREATE TABLE IF NOT EXISTS inventories (
 	content_source TEXT NOT NULL DEFAULT '',
 	content_config TEXT NOT NULL DEFAULT '',
 	queue          TEXT NOT NULL DEFAULT '',
+	org_id         TEXT NOT NULL DEFAULT '',
 	created_at     TEXT NOT NULL
 );
+ALTER TABLE inventories ADD COLUMN IF NOT EXISTS org_id TEXT NOT NULL DEFAULT '';
 CREATE TABLE IF NOT EXISTS credentials (
 	id         TEXT PRIMARY KEY,
 	name       TEXT NOT NULL DEFAULT '',
 	kind       TEXT NOT NULL,
 	secret     TEXT NOT NULL,
 	created_at TEXT NOT NULL,
-	source     TEXT NOT NULL DEFAULT ''
+	source     TEXT NOT NULL DEFAULT '',
+	org_id     TEXT NOT NULL DEFAULT ''
 );
+ALTER TABLE credentials ADD COLUMN IF NOT EXISTS org_id TEXT NOT NULL DEFAULT '';
 CREATE TABLE IF NOT EXISTS teams (
 	id         TEXT PRIMARY KEY,
 	name       TEXT NOT NULL DEFAULT '',
@@ -249,6 +264,18 @@ CREATE TABLE IF NOT EXISTS team_members (
 	PRIMARY KEY (team_id, user_id)
 );
 CREATE INDEX IF NOT EXISTS idx_team_members_user ON team_members(user_id);
+CREATE TABLE IF NOT EXISTS orgs (
+	id         TEXT PRIMARY KEY,
+	name       TEXT NOT NULL DEFAULT '',
+	created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS org_members (
+	org_id  TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+	user_id TEXT NOT NULL,
+	role    TEXT NOT NULL DEFAULT 'member',
+	PRIMARY KEY (org_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_org_members_user ON org_members(user_id);
 CREATE TABLE IF NOT EXISTS grants (
 	id         TEXT PRIMARY KEY,
 	subject    TEXT NOT NULL,
@@ -298,6 +325,8 @@ type DB struct {
 	triggers *triggerStore
 	// teams is the team store.
 	teams *teamStore
+	// orgs is the organization store.
+	orgs *orgStore
 	// grants is the per-object access grant store.
 	grants *grantStore
 	// policies is the approval policy store.
@@ -340,6 +369,7 @@ func Open(dsn string) (*DB, error) {
 		invSources:  &invSourceStore{db: db},
 		triggers:    &triggerStore{db: db},
 		teams:       &teamStore{db: db},
+		orgs:        &orgStore{db: db},
 		grants:      &grantStore{db: db},
 		policies:    &policyStore{db: db}}, nil
 }
@@ -419,6 +449,11 @@ func (d *DB) Triggers() trigger.Store {
 // Teams returns the team store.
 func (d *DB) Teams() team.Store {
 	return d.teams
+}
+
+// Orgs returns the organization store.
+func (d *DB) Orgs() org.Store {
+	return d.orgs
 }
 
 // Grants returns the per-object access grant store.

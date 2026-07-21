@@ -59,3 +59,13 @@ jobs:
         run: pipx install ansible-core
       - name: Run the real SSH fleet suite
         run: go test -tags integration -v -timeout 10m ./internal/integration/...
+
+  vuln:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...

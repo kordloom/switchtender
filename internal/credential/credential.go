@@ -34,6 +34,32 @@ const (
 	// KindToken is a single API token or JWT, exposed to a run as the TokenEnvVar environment
 	// variable so any tool can send it as a bearer token without a KEY=VALUE wrapper.
 	KindToken Kind = "token"
+	// KindAWS is an Amazon Web Services access key. Its fields (access_key, secret_key, optional
+	// session_token and region) inject as the standard AWS_ environment variables that Ansible, the
+	// aws_ec2 inventory plugin, and Terraform all read.
+	KindAWS Kind = "aws"
+	// KindAzure is an Azure service principal. Its fields (client_id, secret, subscription_id,
+	// tenant_id) inject as both the ARM_ variables Terraform reads and the AZURE_ variables the
+	// Ansible azure collection reads.
+	KindAzure Kind = "azure"
+	// KindGCP is a Google Cloud service account JSON, written to a private file and bound to the
+	// GOOGLE_APPLICATION_CREDENTIALS and GCP_SERVICE_ACCOUNT_FILE environment variables.
+	KindGCP Kind = "gcp"
+	// KindVMware is a VMware vCenter login. Its fields (host, user, password, optional
+	// validate_certs) inject as the VMWARE_ environment variables the community.vmware modules read.
+	KindVMware Kind = "vmware"
+	// KindSSHPassword is machine password authentication. Its fields (user, password) inject as the
+	// ansible_user and ansible_password connection variables through a file, so the password stays
+	// off the command line.
+	KindSSHPassword Kind = "ssh_password"
+	// KindBecome is privilege escalation richer than KindBecomePassword. Its fields (optional method,
+	// optional user, required password) inject the non-empty subset of the ansible_become_method,
+	// ansible_become_user, and ansible_become_password variables through a file.
+	KindBecome Kind = "become"
+	// KindNetwork is a network device login. Its fields (user, password, optional network_os,
+	// optional connection defaulting to network_cli) inject the ansible_user, ansible_password,
+	// ansible_network_os, and ansible_connection variables through a file.
+	KindNetwork Kind = "network"
 )
 
 // TokenEnvVar is the environment variable a token credential is exposed under at run time.
@@ -44,17 +70,22 @@ var (
 	ErrNotFound = errors.New("credential not found")
 	// ErrBadKind is returned when a credential kind is not recognized.
 	ErrBadKind = errors.New("unknown credential kind")
+	// ErrBadField is returned when a typed credential is missing a required field.
+	ErrBadField = errors.New("credential missing required field")
 	// ErrNoKey is returned when encryption is attempted without an encryption key configured.
 	ErrNoKey = errors.New("no encryption key: set SWITCHTENDER_ENCRYPTION_KEY")
 )
 
-// ValidKind reports whether k names a supported credential kind.
+// ValidKind reports whether k names a supported credential kind. The fixed kinds materialized by the
+// runner are listed here; typed and custom kinds are valid when they have a registered injector, so a
+// host that registers its own credential type does not need to touch this function.
 func ValidKind(k Kind) bool {
 	switch k {
-	case KindSSHKey, KindVaultPassword, KindEnv, KindBecomePassword, KindRegistry, KindToken:
+	case KindSSHKey, KindVaultPassword, KindEnv, KindBecomePassword, KindRegistry, KindToken,
+		KindSSHPassword, KindBecome, KindNetwork:
 		return true
 	default:
-		return false
+		return Injectable(k)
 	}
 }
 
@@ -120,6 +151,10 @@ type Credential struct {
 	// Secret is the encrypted material at rest and never appears in API responses. For a command
 	// source it is the sealed command, not the secret.
 	Secret string `json:"-"`
+	// OrgID is the owning organization. Empty means unowned, a global object that follows the role.
+	// When set, members of the organization gain access to the credential and, under strict grants, it
+	// is hidden from non-members who lack an explicit grant.
+	OrgID string `json:"org_id,omitempty"`
 	// CreatedAt is when the credential was created.
 	CreatedAt time.Time `json:"created_at"`
 }

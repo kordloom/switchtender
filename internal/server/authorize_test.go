@@ -209,7 +209,7 @@ func TestReadFilter(t *testing.T) {
 		}
 		var out []string
 		for _, id := range all {
-			if keep(id) {
+			if keep(id, "") {
 				out = append(out, id)
 			}
 		}
@@ -243,7 +243,7 @@ func TestReadFilter(t *testing.T) {
 		t.Fatalf("readFilter() non-strict error = %v", err)
 	}
 	for _, id := range all {
-		if !keep(id) {
+		if !keep(id, "") {
 			t.Errorf("non-strict dropped %s, want all kept", id)
 		}
 	}

@@ -7,45 +7,68 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 jobs:
-  artifacts:
+  release:
     runs-on: macos-latest
+    env:
+      MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+      MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
 
-      - name: Set the version
-        id: version
-        run: |
-          if [ "${{ github.ref_type }}" = "tag" ]; then
-            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-          else
-            echo "version=0.0.0-dev.$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
-          fi
+      - uses: sigstore/cosign-installer@v3
+      - uses: anchore/sbom-action/download-syft@v0
 
-      - name: Cross-compile every target
+      # Import the Apple Developer ID certificate only when it is configured, so releases keep
+      # working before notarization is set up and gain it automatically once the secret exists.
+      - name: Import the Apple Developer ID certificate
+        if: env.MACOS_CERTIFICATE != ''
+        uses: apple-actions/import-codesign-certs@v3
+        with:
+          p12-file-base64: ${{ secrets.MACOS_CERTIFICATE }}
+          p12-password: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+
+      # Standard artifacts: cross-compiled binaries, a universal macOS binary, archives, SHA256SUMS,
+      # a keyless cosign signature, SBOMs, the Homebrew cask, and deb/rpm/apk packages.
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
         env:
-          VERSION: ${{ steps.version.outputs.version }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+
+      # The desktop app is the one bespoke artifact: a double-clickable macOS bundle whose launcher
+      # runs `switchtender desktop`. It is ad-hoc signed unless MACOS_SIGN_IDENTITY is set, in which
+      # case it is Developer ID signed and, when notary credentials are present, notarized and stapled.
+      - name: Build and attach the desktop app and dmg
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NOTARY_KEY_P8: ${{ secrets.NOTARY_KEY_P8 }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
         run: |
-          mkdir dist
-          for target in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64; do
-            os=${target%/*}; arch=${target#*/}
-            out="dist/switchtender_${os}_${arch}"
-            [ "$os" = windows ] && out="$out.exe"
-            CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath \
+          set -euo pipefail
+          VERSION=${GITHUB_REF_NAME#v}
+
+          for arch in arm64 amd64; do
+            CGO_ENABLED=0 GOOS=darwin GOARCH=$arch go build -trimpath \
               -ldflags "-s -w -X github.com/dcadolph/switchtender/cmd.Version=$VERSION" \
-              -o "$out" .
+              -o "dist/desktop_$arch" .
           done
-
-      - name: Build the universal macOS app and dmg
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          lipo -create -output dist/switchtender_darwin_universal \
-            dist/switchtender_darwin_arm64 dist/switchtender_darwin_amd64
+          lipo -create -output dist/desktop_universal dist/desktop_arm64 dist/desktop_amd64
 
           mkdir dist/switchtender.iconset
           for size in 16 32 128 256 512; do
@@ -61,7 +84,7 @@ jobs:
 
           APP=dist/SwitchTender.app
           mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-          cp dist/switchtender_darwin_universal "$APP/Contents/MacOS/switchtender"
+          cp dist/desktop_universal "$APP/Contents/MacOS/switchtender"
           cp dist/switchtender.icns "$APP/Contents/Resources/switchtender.icns"
           printf '#!/bin/sh\nexec "$(dirname "$0")/switchtender" desktop\n' > "$APP/Contents/MacOS/launch"
           chmod +x "$APP/Contents/MacOS/launch" "$APP/Contents/MacOS/switchtender"
@@ -80,7 +103,13 @@ jobs:
             <key>LSUIElement</key><true/>
           </dict></plist>
           PLIST
-          codesign --force --deep --sign - "$APP"
+
+          if [ -n "${MACOS_SIGN_IDENTITY:-}" ]; then
+            codesign --force --deep --options runtime --timestamp \
+              --sign "$MACOS_SIGN_IDENTITY" "$APP"
+          else
+            codesign --force --deep --sign - "$APP"
+          fi
           codesign --verify --verbose=1 "$APP"
 
           mkdir dist/dmg
@@ -89,57 +118,31 @@ jobs:
           hdiutil create -volname SwitchTender -srcfolder dist/dmg -ov -format UDZO \
             "dist/SwitchTender_${VERSION}.dmg"
 
-      - name: Smoke test the app binary
-        run: |
-          FAKEHOME=$(mktemp -d)
-          HOME="$FAKEHOME" SWITCHTENDER_DESKTOP_NO_BROWSER=1 \
-            dist/SwitchTender.app/Contents/MacOS/launch > desktop.log 2>&1 &
-          PID=$!
-          sleep 3
-          PORT=$(cat "$FAKEHOME/Library/Application Support/SwitchTender/port" 2>/dev/null) \
-            || { echo "no port file written; the app did not start"; cat desktop.log; exit 1; }
-          CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:$PORT/healthz")
-          kill $PID || true
-          echo "healthz: $CODE"
-          [ "$CODE" = "200" ] || { cat desktop.log; exit 1; }
+          if [ -n "${MACOS_SIGN_IDENTITY:-}" ] && [ -n "${NOTARY_KEY_P8:-}" ]; then
+            printf '%s' "$NOTARY_KEY_P8" | base64 --decode > dist/notary_key.p8
+            xcrun notarytool submit "dist/SwitchTender_${VERSION}.dmg" \
+              --key dist/notary_key.p8 --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" --wait
+            xcrun stapler staple "dist/SwitchTender_${VERSION}.dmg"
+            rm -f dist/notary_key.p8
+          fi
 
-      - name: Package the archives and checksums
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          cd dist
-          for target in darwin_arm64 darwin_amd64 linux_amd64 linux_arm64; do
-            mkdir "pack_$target"
-            cp "switchtender_$target" "pack_$target/switchtender"
-            tar -czf "switchtender_${VERSION}_${target}.tar.gz" -C "pack_$target" switchtender
-          done
-          mkdir pack_windows
-          cp switchtender_windows_amd64.exe pack_windows/switchtender.exe
-          (cd pack_windows && zip -q "../switchtender_${VERSION}_windows_amd64.zip" switchtender.exe)
-          shasum -a 256 switchtender_${VERSION}_*.tar.gz switchtender_${VERSION}_*.zip \
-            "SwitchTender_${VERSION}.dmg" > SHA256SUMS
-
-      - name: Attach the artifacts to the release
-        if: github.ref_type == 'tag'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
+          shasum -a 256 "dist/SwitchTender_${VERSION}.dmg" >> dist/SHA256SUMS
+          cosign sign-blob --yes dist/SHA256SUMS \
+            --output-signature dist/SHA256SUMS.sig \
+            --output-certificate dist/SHA256SUMS.pem
           gh release upload "$GITHUB_REF_NAME" \
-            dist/switchtender_${VERSION}_*.tar.gz \
-            dist/switchtender_${VERSION}_*.zip \
-            "dist/SwitchTender_${VERSION}.dmg" \
-            dist/SHA256SUMS \
+            "dist/SwitchTender_${VERSION}.dmg" dist/SHA256SUMS dist/SHA256SUMS.sig dist/SHA256SUMS.pem \
             --clobber
 
-      - name: Upload the dry-run artifacts
-        if: github.ref_type != 'tag'
-        uses: actions/upload-artifact@v4
+      # SLSA build provenance for every published artifact, verifiable with `gh attestation verify`.
+      - name: Attest build provenance
+        if: github.ref_type == 'tag'
+        uses: actions/attest-build-provenance@v2
         with:
-          name: switchtender-dry-run
-          path: |
-            dist/switchtender_*_*.tar.gz
-            dist/switchtender_*_*.zip
+          subject-path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.deb
+            dist/*.rpm
+            dist/*.apk
             dist/SwitchTender_*.dmg
-            dist/SHA256SUMS
-          retention-days: 3

@@ -38,6 +38,10 @@ type Inventory struct {
 	// Queue pins every run that targets this inventory to workers serving the queue, unless the
 	// run or its template names a queue of its own. Empty uses the default pool.
 	Queue string `json:"queue,omitempty"`
+	// OrgID is the owning organization. Empty means unowned, a global object that follows the role.
+	// When set, members of the organization gain access to the inventory and, under strict grants, it
+	// is hidden from non-members who lack an explicit grant.
+	OrgID string `json:"org_id,omitempty"`
 	// CreatedAt is when the inventory was created.
 	CreatedAt time.Time `json:"created_at"`
 }

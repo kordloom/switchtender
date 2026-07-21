@@ -84,7 +84,8 @@ host, remembered across every run:
 
 Grab a build for your platform from the [releases page](https://github.com/dcadolph/switchtender/releases):
 a `SwitchTender.dmg` for macOS, a `windows_amd64.zip` for Windows, or a `tar.gz` of the binary for
-macOS and Linux. Or build from source:
+macOS and Linux. Each release ships a cosign-signed `SHA256SUMS`; see [verifying a
+release](SECURITY.md#verifying-a-release). Or build from source:
 
     go build -o switchtender .
     ./switchtender serve --addr :8080 --db switchtender.db

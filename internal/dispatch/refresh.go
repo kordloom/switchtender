@@ -8,10 +8,20 @@ import (
 	"strings"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/dcadolph/switchtender/internal/credential"
 	"github.com/dcadolph/switchtender/internal/invsource"
 	"github.com/dcadolph/switchtender/internal/project"
+	"github.com/dcadolph/switchtender/internal/run"
 )
+
+// WithSourceSync enables a background loop that refreshes dynamic inventory sources on their
+// configured interval. Enable it on the server so one process drives scheduled syncs; workers rely on
+// update-on-launch instead.
+func WithSourceSync() Option {
+	return func(c *config) { c.syncSources = true }
+}
 
 // WithInventorySources lets the dispatcher refresh dynamic inventory sources into stored
 // inventories.
@@ -126,4 +136,96 @@ func validateBareSource(source string) error {
 		return fmt.Errorf("%w: %q is executable", invsource.ErrInvalidSource, source)
 	}
 	return nil
+}
+
+// sourceSyncInterval is how often the sync loop checks which sources are due, bounding how late a
+// scheduled refresh can run past its interval.
+const sourceSyncInterval = 30 * time.Second
+
+// sourceSyncLoop refreshes dynamic inventory sources on their configured intervals until the
+// dispatcher closes.
+func (d *Dispatcher) sourceSyncLoop() {
+	defer d.wg.Done()
+	ticker := time.NewTicker(sourceSyncInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-d.ctx.Done():
+			return
+		case <-ticker.C:
+			d.syncDueSources(d.ctx)
+		}
+	}
+}
+
+// syncDueSources refreshes every source whose scheduled interval has elapsed since its last sync.
+func (d *Dispatcher) syncDueSources(ctx context.Context) {
+	srcs, err := d.invSources.List(ctx)
+	if err != nil {
+		if ctx.Err() == nil {
+			d.log.Error("dispatch: list sources for sync: " + err.Error())
+		}
+		return
+	}
+	now := time.Now()
+	for _, src := range srcs {
+		if !sourceDue(src, now) {
+			continue
+		}
+		if _, err := d.RefreshSource(ctx, src.ID); err != nil && ctx.Err() == nil {
+			d.log.Warn("dispatch: scheduled source refresh failed: "+err.Error(),
+				zap.String("source", src.ID))
+		}
+	}
+}
+
+// sourceDue reports whether a source with a positive sync interval is due for a scheduled refresh:
+// never synced, or last synced longer ago than its interval.
+func sourceDue(src *invsource.Source, now time.Time) bool {
+	if src.SyncIntervalSeconds <= 0 {
+		return false
+	}
+	if src.SyncedAt == nil {
+		return true
+	}
+	return now.Sub(*src.SyncedAt) >= time.Duration(src.SyncIntervalSeconds)*time.Second
+}
+
+// refreshOnLaunch refreshes the dynamic inventory source backing a run's inventory when the source
+// opts into update-on-launch and its data is stale, so the run sees current hosts. It is best effort:
+// a refresh failure is logged and the run proceeds with the last good inventory.
+func (d *Dispatcher) refreshOnLaunch(ctx context.Context, r *run.Run) {
+	if d.invSources == nil || r.InventoryID == "" {
+		return
+	}
+	srcs, err := d.invSources.List(ctx)
+	if err != nil {
+		if ctx.Err() == nil {
+			d.log.Warn("dispatch: list sources for launch refresh: " + err.Error())
+		}
+		return
+	}
+	now := time.Now()
+	for _, src := range srcs {
+		if src.InventoryID != r.InventoryID || !src.UpdateOnLaunch {
+			continue
+		}
+		if !launchStale(src, now) {
+			return
+		}
+		if _, err := d.RefreshSource(ctx, src.ID); err != nil && ctx.Err() == nil {
+			d.log.Warn("dispatch: update-on-launch refresh failed: "+err.Error(),
+				zap.String("source", src.ID))
+		}
+		return
+	}
+}
+
+// launchStale reports whether an update-on-launch source is stale enough to refresh before a run: a
+// zero interval always refreshes, otherwise it refreshes once its interval has elapsed.
+func launchStale(src *invsource.Source, now time.Time) bool {
+	if src.SyncIntervalSeconds <= 0 || src.SyncedAt == nil {
+		return true
+	}
+	return now.Sub(*src.SyncedAt) >= time.Duration(src.SyncIntervalSeconds)*time.Second
 }

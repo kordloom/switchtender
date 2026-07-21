@@ -473,7 +473,8 @@ func TestContainerExecutionEnvironment(t *testing.T) {
 		t.Fatalf("create events file: %v", err)
 	}
 
-	runner := roundhouse.NewSelectiveRunner(true, roundhouse.DefaultContainerLimits())
+	runner := roundhouse.NewSelectiveRunner(true, "docker", "missing", false,
+		roundhouse.DefaultContainerLimits())
 	var buf strings.Builder
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()

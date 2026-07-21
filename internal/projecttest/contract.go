@@ -34,7 +34,7 @@ func testUpdate(t *testing.T, store project.Store) {
 	if err := store.Update(ctx, &project.Project{
 		ID: "proj_1", Name: "new", RepoURL: "https://example.com/new.git",
 		Branch: "dev", CredentialID: "cred_1", InstallDeps: false,
-		Image: "img:1", PullCredentialID: "cred_2",
+		Image: "img:1", PullCredentialID: "cred_2", OrgID: "org_new",
 	}); err != nil {
 		t.Fatalf("Update() error = %v", err)
 	}
@@ -44,7 +44,7 @@ func testUpdate(t *testing.T, store project.Store) {
 	}
 	if got.Name != "new" || got.RepoURL != "https://example.com/new.git" || got.Branch != "dev" ||
 		got.CredentialID != "cred_1" || got.InstallDeps || got.Image != "img:1" ||
-		got.PullCredentialID != "cred_2" {
+		got.PullCredentialID != "cred_2" || got.OrgID != "org_new" {
 		t.Errorf("Get() = %+v, want the updated project", got)
 	}
 	if !got.CreatedAt.Equal(created) {
@@ -63,7 +63,8 @@ func testLifecycle(t *testing.T, store project.Store) {
 	p := &project.Project{
 		ID: "proj_1", Name: "site", RepoURL: "ssh://git@example.com/site.git",
 		Branch: "main", CredentialID: "cred_9", InstallDeps: true,
-		Image: "quay.io/ansible/creator-ee:v0.1", PullCredentialID: "cred_reg", CreatedAt: created,
+		Image: "quay.io/ansible/creator-ee:v0.1", PullCredentialID: "cred_reg",
+		OrgID: "org_owner", CreatedAt: created,
 	}
 	if err := store.Save(ctx, p); err != nil {
 		t.Fatalf("Save() error = %v", err)
@@ -75,7 +76,7 @@ func testLifecycle(t *testing.T, store project.Store) {
 	}
 	if got.Name != "site" || got.RepoURL != p.RepoURL || got.Branch != "main" ||
 		got.CredentialID != "cred_9" || !got.InstallDeps || got.Image != p.Image ||
-		got.PullCredentialID != "cred_reg" || !got.CreatedAt.Equal(created) {
+		got.PullCredentialID != "cred_reg" || got.OrgID != "org_owner" || !got.CreatedAt.Equal(created) {
 		t.Errorf("Get() = %+v, want the saved project", got)
 	}
 

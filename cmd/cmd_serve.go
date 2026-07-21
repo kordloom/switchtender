@@ -29,6 +29,7 @@ import (
 	"github.com/dcadolph/switchtender/internal/invsource"
 	"github.com/dcadolph/switchtender/internal/live"
 	"github.com/dcadolph/switchtender/internal/logutil"
+	"github.com/dcadolph/switchtender/internal/org"
 	"github.com/dcadolph/switchtender/internal/pgstore"
 	"github.com/dcadolph/switchtender/internal/policy"
 	"github.com/dcadolph/switchtender/internal/project"
@@ -121,6 +122,13 @@ var notifyTwilioTo []string
 // serveAllowContainerEE holds the value of the --allow-container-ee flag.
 var serveAllowContainerEE bool
 
+// serveDefaultImage holds the value of the --default-image flag, the fallback execution image used
+// when a run, its template, and its project pin none.
+var serveDefaultImage string
+
+// serveRequireImageDigest holds the value of the --require-image-digest flag.
+var serveRequireImageDigest bool
+
 // serveWorkers holds the value of the serve --workers flag.
 var serveWorkers int
 
@@ -129,6 +137,10 @@ var serveStrictGrants bool
 
 // serveReadOnly holds the value of the --read-only flag.
 var serveReadOnly bool
+
+// serveWorkerToken holds the value of the --worker-token flag. The mesh relay worker endpoints turn
+// on when it or SWITCHTENDER_WORKER_TOKEN is set.
+var serveWorkerToken string
 
 // serveMatrixCap holds the value of the --matrix-cap flag.
 var serveMatrixCap int
@@ -219,6 +231,10 @@ var (
 	containerPidsLimit int
 	// containerNetwork holds the --container-network flag, the docker --network mode.
 	containerNetwork string
+	// containerRuntime holds the --container-runtime flag, the container CLI (docker or podman).
+	containerRuntime string
+	// containerPullPolicy holds the --container-pull-policy flag, the docker --pull policy.
+	containerPullPolicy string
 )
 
 // registerContainerFlags adds the container resource and network flags to cmd, defaulting to the
@@ -233,6 +249,10 @@ func registerContainerFlags(cmd *cobra.Command) {
 		"Process cap for containerized runs, as docker --pids-limit. Zero removes the cap.")
 	cmd.Flags().StringVar(&containerNetwork, "container-network", d.Network,
 		"Network mode for containerized runs, as docker --network, for example bridge or none.")
+	cmd.Flags().StringVar(&containerRuntime, "container-runtime", "docker",
+		"Container CLI for containerized runs: docker or podman.")
+	cmd.Flags().StringVar(&containerPullPolicy, "container-pull-policy", "missing",
+		"Image pull policy for containerized runs, as docker --pull: always, missing, or never.")
 }
 
 // containerLimitsFromFlags builds the ContainerLimits from the shared container flag values.
@@ -243,6 +263,46 @@ func containerLimitsFromFlags() roundhouse.ContainerLimits {
 	}
 }
 
+// containerRuntimeFromFlags returns the container CLI selected by the flag, coercing any value other
+// than podman to docker so the runner never gets an unexpected binary.
+func containerRuntimeFromFlags() string {
+	if containerRuntime == "podman" {
+		return "podman"
+	}
+	return "docker"
+}
+
+// containerPullPolicyFromFlags returns the image pull policy selected by the flag, coercing any
+// value other than always or never to missing so the runner never gets an unexpected policy.
+func containerPullPolicyFromFlags() string {
+	switch containerPullPolicy {
+	case "always", "never":
+		return containerPullPolicy
+	default:
+		return "missing"
+	}
+}
+
+// galaxyServer holds the --galaxy-server flag: a private Ansible Galaxy or Automation Hub URL.
+var galaxyServer string
+
+// registerGalaxyFlag adds the --galaxy-server flag, shared by serve and worker. The token comes from
+// the SWITCHTENDER_GALAXY_TOKEN environment variable so it never appears on the command line.
+func registerGalaxyFlag(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&galaxyServer, "galaxy-server", os.Getenv("SWITCHTENDER_GALAXY_SERVER"),
+		"Private Ansible Galaxy or Automation Hub URL for project collection installs. "+
+			"Token from SWITCHTENDER_GALAXY_TOKEN.")
+}
+
+// galaxySyncerOpts returns the project.Syncer options for a configured galaxy server and its token, or
+// nil when no server is set.
+func galaxySyncerOpts() []project.SyncerOption {
+	if galaxyServer == "" {
+		return nil
+	}
+	return []project.SyncerOption{project.WithGalaxy(galaxyServer, os.Getenv("SWITCHTENDER_GALAXY_TOKEN"))}
+}
+
 // pluginsDir returns the plugins directory to load: the flag when set, else the
 // SWITCHTENDER_PLUGINS_DIR environment variable. Empty means no plugins.
 func pluginsDir(flagValue string) string {
@@ -250,6 +310,16 @@ func pluginsDir(flagValue string) string {
 		return flagValue
 	}
 	return os.Getenv("SWITCHTENDER_PLUGINS_DIR")
+}
+
+// workerToken returns the mesh relay worker token: the flag when set, else SWITCHTENDER_WORKER_TOKEN.
+// It resolves the environment lazily rather than as the flag default so the secret never appears in
+// help output. Empty leaves the relay endpoints off.
+func workerToken() string {
+	if serveWorkerToken != "" {
+		return serveWorkerToken
+	}
+	return os.Getenv("SWITCHTENDER_WORKER_TOKEN")
 }
 
 // parseRoleMap turns repeated groupDN=role entries into a lowercased group to role map, so a directory
@@ -321,11 +391,20 @@ func init() {
 		"Phone number that receives an SMS when a run fails. Repeatable.")
 	serveCmd.Flags().BoolVar(&serveAllowContainerEE, "allow-container-ee", false,
 		"Allow runs whose project pins a container image to execute inside that image. Needs Docker.")
+	serveCmd.Flags().StringVar(&serveDefaultImage, "default-image", "",
+		"Fallback execution image for runs that pin none at the run, template, or project level. "+
+			"Empty leaves an unpinned run on the host.")
+	serveCmd.Flags().BoolVar(&serveRequireImageDigest, "require-image-digest", false,
+		"Reject a container run whose image is not pinned to an @sha256: digest.")
 	registerContainerFlags(serveCmd)
+	registerGalaxyFlag(serveCmd)
 	serveCmd.Flags().BoolVar(&serveStrictGrants, "strict-grants", false,
 		"Deny non-admins access to an object that has no grants, instead of deferring to the role.")
 	serveCmd.Flags().BoolVar(&serveReadOnly, "read-only", false,
 		"Reject every mutating request, for a safely exposable instance.")
+	serveCmd.Flags().StringVar(&serveWorkerToken, "worker-token", "",
+		"Bearer token that authenticates mesh relay workers and enables the relay endpoints. "+
+			"Also SWITCHTENDER_WORKER_TOKEN. Keep it secret.")
 	serveCmd.Flags().IntVar(&serveWorkers, "workers", dispatch.DefaultWorkers,
 		"Concurrent runs this process executes at once.")
 	serveCmd.Flags().IntVar(&serveMatrixCap, "matrix-cap", server.DefaultMatrixCap,
@@ -467,6 +546,8 @@ type storeBundle interface {
 	Triggers() trigger.Store
 	// Teams returns the team store.
 	Teams() team.Store
+	// Orgs returns the organization store.
+	Orgs() org.Store
 	// Grants returns the per-object access grant store.
 	Grants() grant.Store
 	// Close closes the underlying database.
@@ -557,8 +638,9 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	defer closePlugins()
 
 	hub := live.NewHub()
-	runner := roundhouse.NewSelectiveRunner(serveAllowContainerEE, containerLimitsFromFlags())
-	syncer, err := project.NewSyncer(projectCacheDir())
+	runner := roundhouse.NewSelectiveRunner(serveAllowContainerEE, containerRuntimeFromFlags(),
+		containerPullPolicyFromFlags(), serveRequireImageDigest, containerLimitsFromFlags())
+	syncer, err := project.NewSyncer(projectCacheDir(), galaxySyncerOpts()...)
 	if err != nil {
 		return fmt.Errorf("project cache: %w", err)
 	}
@@ -567,6 +649,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		dispatch.WithWorkers(serveWorkers),
 		dispatch.WithCredentials(bundle.Credentials(), sealer),
 		dispatch.WithProjects(bundle.Projects(), syncer),
+		dispatch.WithDefaultImage(serveDefaultImage),
 		dispatch.WithWebhooks(notifyWebhooks),
 		dispatch.WithSlack(notifySlack),
 		dispatch.WithMattermost(notifyMattermost),
@@ -580,6 +663,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		dispatch.WithEmail(emailer, onFailureOnly),
 		dispatch.WithInventories(bundle.Inventories()),
 		dispatch.WithInventorySources(bundle.InventorySources()),
+		dispatch.WithSourceSync(),
 		dispatch.WithPolicies(bundle.Policies()))
 	defer disp.Close()
 
@@ -648,6 +732,10 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
+	if workerToken() != "" {
+		log.Info("mesh relay worker endpoints enabled")
+	}
+
 	httpServer := &http.Server{
 		Addr: serveAddr,
 		Handler: server.New(store, disp, log, server.WithStreamer(hub),
@@ -664,8 +752,10 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			server.WithInventorySources(bundle.InventorySources(), disp),
 			server.WithTriggers(bundle.Triggers(), sealer),
 			server.WithTeams(bundle.Teams()),
+			server.WithOrgs(bundle.Orgs()),
 			server.WithGrants(bundle.Grants(), serveStrictGrants),
 			server.WithReadOnly(serveReadOnly),
+			server.WithRelay(store, workerToken()),
 			server.WithMatrixCap(serveMatrixCap),
 			server.WithOIDC(oidcAuth),
 			server.WithSAML(samlAuth),

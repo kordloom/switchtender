@@ -30,7 +30,7 @@ them as `TF_VAR_` variables.
 
 From the UI, select the template and confirm the survey if it has one. From the API:
 
-    curl -s -X POST localhost:8080/templates/{id}/launch \
+    curl -s -X POST localhost:8080/v1/templates/{id}/launch \
       -H 'content-type: application/json' \
       -d '{"environment":"staging"}'
 

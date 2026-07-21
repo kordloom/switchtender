@@ -3,8 +3,10 @@ package server
 
 import (
 	"context"
+	"errors"
 	"io/fs"
 	"net/http"
+	"strings"
 
 	"go.uber.org/zap"
 
@@ -17,8 +19,10 @@ import (
 	"github.com/dcadolph/switchtender/internal/inventory"
 	"github.com/dcadolph/switchtender/internal/invsource"
 	"github.com/dcadolph/switchtender/internal/live"
+	"github.com/dcadolph/switchtender/internal/org"
 	"github.com/dcadolph/switchtender/internal/policy"
 	"github.com/dcadolph/switchtender/internal/project"
+	"github.com/dcadolph/switchtender/internal/relay"
 	"github.com/dcadolph/switchtender/internal/run"
 	"github.com/dcadolph/switchtender/internal/schedule"
 	"github.com/dcadolph/switchtender/internal/team"
@@ -131,6 +135,11 @@ func WithTeams(store team.Store) Option {
 	return func(srv *Server) { srv.teams = store }
 }
 
+// WithOrgs enables the organization endpoints backed by the given store.
+func WithOrgs(store org.Store) Option {
+	return func(srv *Server) { srv.orgs = store }
+}
+
 // WithGrants enables per-object access grants. When strict is set, an object with no grants denies
 // non-admins; otherwise the global role decides for ungranted objects.
 func WithGrants(store grant.Store, strict bool) Option {
@@ -149,6 +158,17 @@ func WithDocs(docs fs.FS) Option {
 // its visitors.
 func WithReadOnly(readOnly bool) Option {
 	return func(srv *Server) { srv.readOnly = readOnly }
+}
+
+// WithRelay mounts the phase-1 mesh relay worker endpoints, backed by the given run store and
+// guarded by the worker token. A relay worker in an isolated segment dials them over one outbound
+// connection to lease and execute runs without a path to the database. An empty token leaves the
+// endpoints off, so the mesh is opt-in.
+func WithRelay(store run.Store, workerToken string) Option {
+	return func(srv *Server) {
+		srv.relayStore = store
+		srv.workerToken = workerToken
+	}
 }
 
 // DefaultMatrixCap is the host matrix cell limit used when none is configured. It is generous
@@ -268,6 +288,8 @@ type Server struct {
 	triggers trigger.Store
 	// teams backs the team endpoints when configured.
 	teams team.Store
+	// orgs backs the organization endpoints when configured.
+	orgs org.Store
 	// grants backs per-object access grants when configured.
 	grants grant.Store
 	// strictGrants makes an object with no grants deny non-admins.
@@ -286,6 +308,11 @@ type Server struct {
 	ldap *LDAPAuth
 	// jwt validates a bearer JWT when configured, nil when JWT sign-in is off.
 	jwt *JWTAuth
+	// relayStore backs the mesh relay worker endpoints when a worker token is set, nil when the
+	// relay is off.
+	relayStore run.Store
+	// workerToken guards the mesh relay worker endpoints, empty when the relay is off.
+	workerToken string
 }
 
 // New returns a Server. It panics if store or submitter is nil; a nil logger becomes a no-op.
@@ -310,7 +337,10 @@ func New(store run.Store, submitter Submitter, log *zap.Logger, opts ...Option) 
 // Handler returns the HTTP handler serving the SwitchTender API and web interface.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	authz := &authorizer{grants: s.grants, teams: s.teams, strict: s.strictGrants}
+	authz := &authorizer{
+		grants: s.grants, teams: s.teams, orgs: s.orgs,
+		orgOwners: s.orgResolver(), strict: s.strictGrants,
+	}
 	mux.Handle("GET /healthz", healthHandler())
 	mux.Handle("GET /metrics", metricsHandler(s.store, s.log))
 	mux.Handle("GET /v1/fleet", fleetHandler(s.store, s.log))
@@ -406,6 +436,12 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /v1/teams/{id}/members", listTeamMembersHandler(s.teams, s.log))
 	mux.Handle("POST /v1/teams/{id}/members", addTeamMemberHandler(s.teams, s.log))
 	mux.Handle("DELETE /v1/teams/{id}/members/{userID}", removeTeamMemberHandler(s.teams, s.log))
+	mux.Handle("POST /v1/orgs", createOrgHandler(s.orgs, s.log))
+	mux.Handle("GET /v1/orgs", listOrgsHandler(s.orgs, s.log))
+	mux.Handle("DELETE /v1/orgs/{id}", deleteOrgHandler(s.orgs, s.log))
+	mux.Handle("GET /v1/orgs/{id}/members", listOrgMembersHandler(s.orgs, s.log))
+	mux.Handle("POST /v1/orgs/{id}/members", addOrgMemberHandler(s.orgs, s.log))
+	mux.Handle("DELETE /v1/orgs/{id}/members/{userID}", removeOrgMemberHandler(s.orgs, s.log))
 	mux.Handle("POST /v1/grants", createGrantHandler(s.grants, s.log))
 	mux.Handle("GET /v1/grants", listGrantsHandler(s.grants, s.log))
 	mux.Handle("DELETE /v1/grants/{id}", deleteGrantHandler(s.grants, s.log))
@@ -427,7 +463,98 @@ func (s *Server) Handler() http.Handler {
 	if s.readOnly {
 		handler = readOnlyGate(handler)
 	}
+	if s.relayStore != nil && s.workerToken != "" {
+		handler = relayGate(relay.NewHandler(s.relayStore, s.workerToken, s.log), handler)
+	}
 	return handler
+}
+
+// orgResolver returns an OrgResolver that reads a grantable object's owning organization from the
+// store that owns its kind, so the authorizer can extend access to that organization's members. A
+// missing object, an unconfigured store, or a store error resolves to not-found, so org ownership
+// only ever adds access.
+func (s *Server) orgResolver() OrgResolver {
+	return OrgResolverFunc(func(ctx context.Context, objectID string) (string, bool) {
+		orgID, found, err := s.resolveObjectOrg(ctx, objectID)
+		if err != nil {
+			s.log.Error("server: resolve object org: " + err.Error())
+			return "", false
+		}
+		return orgID, found
+	})
+}
+
+// resolveObjectOrg looks up the owning organization of a grantable object, dispatching on its id
+// prefix to the store that owns the kind. found is false when the id is not a grantable object, its
+// store is not configured, or no such object exists. A nil error with found true carries the owner,
+// which is empty for an unowned object.
+func (s *Server) resolveObjectOrg(ctx context.Context, objectID string) (orgID string, found bool, err error) {
+	switch {
+	case strings.HasPrefix(objectID, "proj_"):
+		if s.projects == nil {
+			return "", false, nil
+		}
+		p, err := s.projects.Get(ctx, objectID)
+		if errors.Is(err, project.ErrNotFound) {
+			return "", false, nil
+		}
+		if err != nil {
+			return "", false, err
+		}
+		return p.OrgID, true, nil
+	case strings.HasPrefix(objectID, "tpl_"):
+		if s.templates == nil {
+			return "", false, nil
+		}
+		t, err := s.templates.Get(ctx, objectID)
+		if errors.Is(err, template.ErrNotFound) {
+			return "", false, nil
+		}
+		if err != nil {
+			return "", false, err
+		}
+		return t.OrgID, true, nil
+	case strings.HasPrefix(objectID, "inv_"):
+		if s.inventories == nil {
+			return "", false, nil
+		}
+		i, err := s.inventories.Get(ctx, objectID)
+		if errors.Is(err, inventory.ErrNotFound) {
+			return "", false, nil
+		}
+		if err != nil {
+			return "", false, err
+		}
+		return i.OrgID, true, nil
+	case strings.HasPrefix(objectID, "cred_"):
+		if s.credentials == nil {
+			return "", false, nil
+		}
+		c, err := s.credentials.Get(ctx, objectID)
+		if errors.Is(err, credential.ErrNotFound) {
+			return "", false, nil
+		}
+		if err != nil {
+			return "", false, err
+		}
+		return c.OrgID, true, nil
+	default:
+		return "", false, nil
+	}
+}
+
+// relayGate routes the mesh relay worker endpoints to their own handler, which authenticates with
+// the worker token, and passes everything else to next. It sits outside the API token gate and the
+// read-only gate so a worker presenting its worker token is never checked against the API tokens,
+// mirroring how webhook triggers carry their own secret in the path.
+func relayGate(relayHandler, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/relay/") {
+			relayHandler.ServeHTTP(w, r)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // readOnlyGate rejects every request that would change state, so a demo cannot be mutated. Reads

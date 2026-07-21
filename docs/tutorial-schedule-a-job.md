@@ -21,7 +21,7 @@ whole pipeline.
 
 ## From the API
 
-    curl -s -X POST localhost:8080/schedules \
+    curl -s -X POST localhost:8080/v1/schedules \
       -H 'content-type: application/json' \
       -d '{"cron":"0 2 * * *","template_id":"tpl_abc123"}'
 

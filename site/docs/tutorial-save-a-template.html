@@ -54,7 +54,7 @@ extra vars. Bash and Python receive them as environment values. Terraform receiv
 them as <code>TF_VAR_</code> variables.</p>
 <h2 id="launch-it">Launch it</h2>
 <p>From the UI, select the template and confirm the survey if it has one. From the API:</p>
-<pre><code>curl -s -X POST localhost:8080/templates/{id}/launch \
+<pre><code>curl -s -X POST localhost:8080/v1/templates/{id}/launch \
   -H 'content-type: application/json' \
   -d '{&quot;environment&quot;:&quot;staging&quot;}'
 </code></pre>

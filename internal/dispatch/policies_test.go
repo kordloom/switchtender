@@ -19,6 +19,7 @@ func TestPolicyHoldsMatchingRun(t *testing.T) {
 	policies := policy.NewMemStore()
 	if err := policies.Save(context.Background(), &policy.Policy{
 		ID: policy.NewID(), Name: "tf-destroy", Tool: "terraform", CommandContains: "destroy",
+		MaxDestroy: policy.DisabledMaxDestroy,
 	}); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
@@ -60,5 +61,177 @@ func TestPolicyHoldsMatchingRun(t *testing.T) {
 	final := waitTerminal(t, store, free.ID)
 	if final.Status != run.StatusSucceeded {
 		t.Errorf("non-matching run status = %q, want succeeded", final.Status)
+	}
+}
+
+// planRunner returns a runner that emits destroyLine for a plan (dry run) and a plain apply line for a
+// real run, so a plan-content gate test controls the destroy count its plan reports.
+func planRunner(destroyLine string) roundhouse.Runner {
+	return roundhouse.RunnerFunc(
+		func(_ context.Context, spec roundhouse.Spec, out io.Writer) (roundhouse.Result, error) {
+			if spec.DryRun {
+				_, _ = io.WriteString(out, destroyLine+"\n")
+				return roundhouse.Result{ExitCode: 0, Drift: true}, nil
+			}
+			_, _ = io.WriteString(out, "Apply complete!\n")
+			return roundhouse.Result{ExitCode: 0}, nil
+		})
+}
+
+// waitProposal polls the store until a run proposed from parentID appears, or the deadline passes.
+func waitProposal(t *testing.T, store run.Store, parentID string) *run.Run {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		runs, err := store.List(context.Background())
+		if err == nil {
+			for _, r := range runs {
+				if r.ProposedFrom == parentID {
+					return r
+				}
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no apply proposed from %s", parentID)
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}
+
+// countProposals returns how many stored runs were proposed from another run.
+func countProposals(t *testing.T, store run.Store) int {
+	t.Helper()
+	runs, err := store.List(context.Background())
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	n := 0
+	for _, r := range runs {
+		if r.ProposedFrom != "" {
+			n++
+		}
+	}
+	return n
+}
+
+// TestPlanGateHeldWhenPlanDestroysTooMuch confirms a terraform apply matching a plan-content policy
+// runs a plan first and, when the plan destroys more than the threshold, proposes an apply held for
+// approval while the plan run itself succeeds.
+func TestPlanGateHeldWhenPlanDestroysTooMuch(t *testing.T) {
+	t.Parallel()
+	store := run.NewMemStore()
+	policies := policy.NewMemStore()
+	if err := policies.Save(context.Background(), &policy.Policy{
+		ID: policy.NewID(), Name: "tf-destroy-guard", Tool: run.ToolTerraform, MaxDestroy: 1,
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	d := New(store, planRunner("Plan: 0 to add, 0 to change, 3 to destroy"), nil, WithPolicies(policies))
+	defer d.Close()
+
+	created, err := d.Submit(context.Background(), "", "",
+		run.WithTool(run.ToolTerraform), run.WithCommand("infra/prod"))
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+	if created.Status == run.StatusPendingApproval {
+		t.Fatal("a plan-content policy must not blanket-hold the apply at submit")
+	}
+
+	// The plan run itself succeeds: it ran a plan and proposed an apply rather than applying.
+	plan := waitTerminal(t, store, created.ID)
+	if plan.Status != run.StatusSucceeded {
+		t.Fatalf("plan run status = %q, want succeeded", plan.Status)
+	}
+
+	proposal := waitProposal(t, store, created.ID)
+	if proposal.Status != run.StatusPendingApproval {
+		t.Errorf("proposed apply status = %q, want pending_approval (held)", proposal.Status)
+	}
+	if proposal.DryRun {
+		t.Error("proposed apply should be a real apply, not a dry run")
+	}
+	if proposal.Command != "infra/prod" || run.NormalizeTool(proposal.Tool) != run.ToolTerraform {
+		t.Errorf("proposal = %+v, want a terraform apply of infra/prod", proposal)
+	}
+	if n := countProposals(t, store); n != 1 {
+		t.Errorf("proposal count = %d, want exactly 1", n)
+	}
+}
+
+// TestPlanGateQueuesApplyWithinThreshold confirms a terraform apply whose plan destroys at or under
+// the threshold proposes an apply that runs to completion without approval, and that the proposed
+// apply does not itself re-gate into another plan.
+func TestPlanGateQueuesApplyWithinThreshold(t *testing.T) {
+	t.Parallel()
+	store := run.NewMemStore()
+	policies := policy.NewMemStore()
+	if err := policies.Save(context.Background(), &policy.Policy{
+		ID: policy.NewID(), Name: "tf-destroy-guard", Tool: run.ToolTerraform, MaxDestroy: 5,
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	d := New(store, planRunner("Plan: 1 to add, 0 to change, 2 to destroy"), nil, WithPolicies(policies))
+	defer d.Close()
+
+	created, err := d.Submit(context.Background(), "", "",
+		run.WithTool(run.ToolTerraform), run.WithCommand("infra/dev"))
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+	if plan := waitTerminal(t, store, created.ID); plan.Status != run.StatusSucceeded {
+		t.Fatalf("plan run status = %q, want succeeded", plan.Status)
+	}
+
+	proposal := waitProposal(t, store, created.ID)
+	applied := waitTerminal(t, store, proposal.ID)
+	if applied.Status != run.StatusSucceeded {
+		t.Errorf("proposed apply status = %q, want succeeded (applied)", applied.Status)
+	}
+	if applied.ProposedFrom != created.ID || applied.DryRun {
+		t.Errorf("proposal = %+v, want a real apply proposed from %s", applied, created.ID)
+	}
+	// The proposed apply carries ProposedFrom, so it must not re-gate: exactly one proposal exists.
+	if n := countProposals(t, store); n != 1 {
+		t.Errorf("proposal count = %d, want exactly 1 (no re-gate loop)", n)
+	}
+}
+
+// TestPlanGateLeavesUngatedRuns confirms the plan gate ignores a dry run and a non-terraform run even
+// under a matching plan-content policy: both run in a single phase and propose nothing.
+func TestPlanGateLeavesUngatedRuns(t *testing.T) {
+	t.Parallel()
+	store := run.NewMemStore()
+	policies := policy.NewMemStore()
+	if err := policies.Save(context.Background(), &policy.Policy{
+		ID: policy.NewID(), Name: "tf-destroy-guard", Tool: run.ToolTerraform, MaxDestroy: 0,
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	d := New(store, planRunner("Plan: 0 to add, 0 to change, 9 to destroy"), nil, WithPolicies(policies))
+	defer d.Close()
+
+	// A dry run is a preview and is never plan-gated.
+	dry, err := d.Submit(context.Background(), "", "",
+		run.WithTool(run.ToolTerraform), run.WithCommand("infra"), run.WithDryRun(true))
+	if err != nil {
+		t.Fatalf("Submit() dry run error = %v", err)
+	}
+	if done := waitTerminal(t, store, dry.ID); done.Status != run.StatusSucceeded {
+		t.Errorf("dry run status = %q, want succeeded", done.Status)
+	}
+
+	// A non-terraform run is out of the plan gate's scope entirely.
+	bash, err := d.Submit(context.Background(), "", "",
+		run.WithTool(run.ToolBash), run.WithCommand("echo hi"))
+	if err != nil {
+		t.Fatalf("Submit() bash error = %v", err)
+	}
+	if done := waitTerminal(t, store, bash.ID); done.Status != run.StatusSucceeded {
+		t.Errorf("bash run status = %q, want succeeded", done.Status)
+	}
+
+	if n := countProposals(t, store); n != 0 {
+		t.Errorf("ungated runs proposed %d applies, want 0", n)
 	}
 }

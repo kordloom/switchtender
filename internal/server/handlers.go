@@ -474,7 +474,7 @@ func createRunHandler(submitter Submitter, authz *authorizer, log *zap.Logger) h
 		case errors.Is(err, credential.ErrNotFound), errors.Is(err, credential.ErrNoKey),
 			errors.Is(err, project.ErrNotFound), errors.Is(err, inventory.ErrNotFound),
 			errors.Is(err, dispatch.ErrNoPlaybook), errors.Is(err, dispatch.ErrNoCommand),
-			errors.Is(err, dispatch.ErrUnknownTool), errors.Is(err, dispatch.ErrImageTool):
+			errors.Is(err, dispatch.ErrUnknownTool):
 			respondError(w, log, http.StatusBadRequest, err.Error())
 			return
 		case err != nil:

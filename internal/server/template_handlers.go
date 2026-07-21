@@ -51,6 +51,8 @@ type createTemplateRequest struct {
 	ExtraVars map[string]any `json:"extra_vars,omitempty"`
 	// Survey prompts the launcher for typed values that become extra vars.
 	Survey []template.SurveyField `json:"survey,omitempty"`
+	// OrgID names the owning organization. Empty leaves the template unowned and global. Optional.
+	OrgID string `json:"org_id,omitempty"`
 }
 
 // listTemplatesResponse wraps the template list.
@@ -108,6 +110,7 @@ func createTemplateHandler(store template.Store, log *zap.Logger) http.HandlerFu
 			Shards:        req.Shards,
 			CredentialIDs: req.CredentialIDs, ExtraVars: req.ExtraVars, Survey: req.Survey,
 			Queue: req.Queue, Image: req.Image, PullCredentialID: req.PullCredentialID,
+			OrgID:     req.OrgID,
 			CreatedAt: time.Now(),
 		}
 		if err := store.Save(r.Context(), t); err != nil {
@@ -143,6 +146,7 @@ func updateTemplateHandler(store template.Store, log *zap.Logger) http.HandlerFu
 			Shards:        req.Shards,
 			CredentialIDs: req.CredentialIDs, ExtraVars: req.ExtraVars, Survey: req.Survey,
 			Queue: req.Queue, Image: req.Image, PullCredentialID: req.PullCredentialID,
+			OrgID: req.OrgID,
 		}
 		err := store.Update(r.Context(), t)
 		if errors.Is(err, template.ErrNotFound) {
@@ -178,7 +182,9 @@ func listTemplatesHandler(store template.Store, authz *authorizer, log *zap.Logg
 			respondError(w, log, http.StatusInternalServerError, "could not list templates")
 			return
 		}
-		visible, err := filterReadable(r.Context(), authz, list, func(t *template.Template) string { return t.ID })
+		visible, err := filterReadable(r.Context(), authz, list,
+			func(t *template.Template) string { return t.ID },
+			func(t *template.Template) string { return t.OrgID })
 		if err != nil {
 			log.Error("server: list templates: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not list templates")

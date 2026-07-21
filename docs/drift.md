@@ -34,7 +34,7 @@ not report drift.
 
 ## From the API
 
-    curl -s localhost:8080/drift
+    curl -s localhost:8080/v1/drift
 
 Each target carries its changed count, the check run id, and when it was checked, worst drift first. A
 target is an Ansible host or a Terraform working directory.
@@ -53,7 +53,7 @@ what approving will change, from the check run's masked events.
 
 The same action is one request, for an operator token:
 
-    curl -s -X POST localhost:8080/drift/reconcile -d '{"host": "web01"}'
+    curl -s -X POST localhost:8080/v1/drift/reconcile -d '{"host": "web01"}'
 
 The `host` field names the drifted target, an Ansible host or a Terraform working directory.
 

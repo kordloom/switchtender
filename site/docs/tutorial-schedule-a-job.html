@@ -48,7 +48,7 @@ it at the template.</li>
 <li>Save. It fires on the schedule and each firing shows up in Runs like any other.</li>
 </ol>
 <h2 id="from-the-api">From the API</h2>
-<pre><code>curl -s -X POST localhost:8080/schedules \
+<pre><code>curl -s -X POST localhost:8080/v1/schedules \
   -H 'content-type: application/json' \
   -d '{&quot;cron&quot;:&quot;0 2 * * *&quot;,&quot;template_id&quot;:&quot;tpl_abc123&quot;}'
 </code></pre>

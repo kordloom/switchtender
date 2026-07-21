@@ -32,6 +32,8 @@ type createInventoryRequest struct {
 	// Queue pins every run that targets this inventory to workers serving the queue, unless the run
 	// or its template names its own. Empty uses the default pool.
 	Queue string `json:"queue,omitempty"`
+	// OrgID names the owning organization. Empty leaves the inventory unowned and global. Optional.
+	OrgID string `json:"org_id,omitempty"`
 }
 
 // inventorySource validates a request's content source and returns the normalized source and the
@@ -98,7 +100,7 @@ func createInventoryHandler(store inventory.Store, authz *authorizer, sealer *cr
 		}
 		i := &inventory.Inventory{
 			ID: inventory.NewID(), Name: req.Name, Content: req.Content,
-			CredentialIDs: req.CredentialIDs, Queue: req.Queue, CreatedAt: time.Now(),
+			CredentialIDs: req.CredentialIDs, Queue: req.Queue, OrgID: req.OrgID, CreatedAt: time.Now(),
 		}
 		if source != credential.SourceLocal {
 			i.ContentSource, i.ContentConfig = source, sealed
@@ -150,7 +152,7 @@ func updateInventoryHandler(store inventory.Store, authz *authorizer, sealer *cr
 		}
 		inv := &inventory.Inventory{
 			ID: id, Name: req.Name, Content: req.Content, CredentialIDs: req.CredentialIDs,
-			Queue: req.Queue,
+			Queue: req.Queue, OrgID: req.OrgID,
 		}
 		if source != credential.SourceLocal {
 			inv.ContentSource, inv.ContentConfig = source, sealed
@@ -189,7 +191,9 @@ func listInventoriesHandler(store inventory.Store, authz *authorizer, log *zap.L
 			respondError(w, log, http.StatusInternalServerError, "could not list inventories")
 			return
 		}
-		visible, err := filterReadable(r.Context(), authz, list, func(i *inventory.Inventory) string { return i.ID })
+		visible, err := filterReadable(r.Context(), authz, list,
+			func(i *inventory.Inventory) string { return i.ID },
+			func(i *inventory.Inventory) string { return i.OrgID })
 		if err != nil {
 			log.Error("server: list inventories: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not list inventories")

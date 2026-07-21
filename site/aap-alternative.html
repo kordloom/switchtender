@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Ansible Automation Platform alternative · SwitchTender</title>
+	<meta name="description" content="SwitchTender is an open source alternative to Red Hat Ansible Automation Platform (AAP) that runs from one Go binary with no OpenShift, no per-node subscription, and no platform to stand up. Seven tools, a live host-by-task matrix, provable audit, and a one-command import.">
+	<link rel="canonical" href="https://switchtender.com/aap-alternative">
+	<meta property="og:title" content="Ansible Automation Platform alternative · SwitchTender">
+	<meta property="og:description" content="AAP is Red Hat's full enterprise Ansible platform, priced per managed node and deployed on OpenShift or RHEL. SwitchTender keeps the capabilities and drops the subscription and the platform: one open binary, seven tools, and a one-command import.">
+	<meta property="og:type" content="website">
+	<meta property="og:url" content="https://switchtender.com/aap-alternative">
+	<meta property="og:image" content="https://switchtender.com/assets/screenshot-fleet.png?v=7">
+	<meta name="twitter:card" content="summary_large_image">
+	<link rel="icon" href="/favicon.ico" sizes="any">
+	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
+	<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="/styles.css?v=13">
+</head>
+<body>
+	<div class="bg-mesh" aria-hidden="true"></div>
+	<div class="bg-grid" aria-hidden="true"></div>
+
+	<header class="nav" id="nav">
+		<div class="wrap nav-inner">
+			<a class="brand" href="/" aria-label="SwitchTender"><img src="/assets/logo-train-tracks-dark.png" alt="SwitchTender" class="brand-train"><span class="brand-word">SwitchTender</span></a>
+			<nav class="nav-links">
+				<a href="/#features">Features</a>
+				<a href="/#compare">Compare</a>
+				<a href="/docs/">Docs</a>
+			</nav>
+			<div class="nav-cta">
+				<a class="ghost" href="https://github.com/dcadolph/switchtender">GitHub</a>
+				<a class="btn" href="/get-started">Get started</a>
+			</div>
+			<button class="nav-toggle" id="nav-toggle" aria-label="Menu">
+				<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="7" x2="21" y2="7"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="17" x2="21" y2="17"/></svg>
+			</button>
+		</div>
+	</header>
+
+	<main>
+		<section class="wrap gs-hero reveal">
+			<span class="eyebrow">Ansible Automation Platform alternative</span>
+			<h1>Everything AAP governs.<br><span class="grad">Without the subscription.</span></h1>
+			<p class="lede">Red Hat Ansible Automation Platform is the full enterprise Ansible stack: Automation Controller, private Automation Hub, Automation Mesh, Event-Driven Ansible, and a support contract. It is also priced per managed node and stands up on OpenShift or RHEL with Postgres before the first playbook runs, and Ansible is the only tool it runs. SwitchTender is one Go binary. Download it, run it, and you have job templates, schedules, RBAC, surveys, SSO, workflows, and approvals, plus a live host-by-task matrix and seven tools instead of one. Your Controller export imports in one command.</p>
+			<div class="hero-cta">
+				<a class="btn big" href="/get-started">Get started</a>
+				<a class="ghost big" href="/docs/switching-from-awx">Read the migration guide</a>
+			</div>
+		</section>
+
+		<section class="section wrap">
+			<div class="section-head reveal">
+				<h2>Why teams weigh a lighter option</h2>
+				<p>AAP is the enterprise standard, and it prices and deploys like one. Three things send teams looking for a lighter path.</p>
+			</div>
+			<div class="cards">
+				<article class="card reveal">
+					<h3>The per-node bill</h3>
+					<p>AAP is a subscription that meters by managed node, so the cost climbs with the fleet you automate. SwitchTender is open source under BSL 1.1 and self-hosts free, with no per-node meter and no seat count to reconcile at renewal.</p>
+				</article>
+				<article class="card reveal">
+					<h3>The platform to stand up</h3>
+					<p>A supported AAP install means OpenShift or a RHEL fleet, Postgres, and the platform's own operators, then keeping all of it patched. SwitchTender is one process and one file. Upgrading is replacing a binary.</p>
+				</article>
+				<article class="card reveal">
+					<h3>Ansible only</h3>
+					<p>AAP automates Ansible. Real fleets also run Terraform, scripts, and one-off tooling. SwitchTender runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go through one engine, one UI, and one audit trail, each with a dry-run mode.</p>
+				</article>
+			</div>
+		</section>
+
+		<section class="section wrap">
+			<div class="section-head reveal">
+				<h2>What AAP gets right</h2>
+				<p>An honest page beats a loud one. AAP is the mature, certified, fully supported enterprise Ansible platform. Red Hat backs it with an SLA and a phone number, ships certified content and Event-Driven Ansible, and has a decade of production deployment behind it. If what you are buying is Red Hat's support, certified content, and a name your auditors already trust, AAP delivers it and SwitchTender does not pretend to be a support contract. This page is about the other axis: whether you want that capability without the subscription and the platform.</p>
+			</div>
+		</section>
+
+		<section class="section wrap">
+			<div class="section-head reveal">
+				<h2>Feature for feature</h2>
+				<p>The enterprise checklist, side by side. The full three-way table including AWX and Semaphore is on the <a href="/docs/comparison">comparison page</a>.</p>
+			</div>
+			<div class="table-wrap reveal">
+				<table class="compare">
+					<thead>
+						<tr><th>Capability</th><th class="us">SwitchTender</th><th>Ansible Automation Platform</th></tr>
+					</thead>
+					<tbody>
+						<tr><td>Deploy</td><td class="us">One binary, SQLite or Postgres</td><td><span class="muted">OpenShift or RHEL + Postgres</span></td></tr>
+						<tr><td>Model</td><td class="us">Open source, self-host free</td><td><span class="muted">Per managed-node subscription</span></td></tr>
+						<tr><td>Commercial support and SLA</td><td class="us"><span class="muted">Community and SDK</span></td><td><i class="y"></i></td></tr>
+						<tr><td>Tools</td><td class="us">Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, Go</td><td><span class="muted">Ansible only</span></td></tr>
+						<tr><td>Live host-by-task matrix</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
+						<tr><td>Job templates, surveys, schedules, workflows</td><td class="us"><i class="y"></i></td><td><i class="y"></i></td></tr>
+						<tr><td>RBAC, teams, organizations</td><td class="us"><i class="y"></i></td><td><i class="y"></i></td></tr>
+						<tr><td>LDAP, SAML, OIDC sign-in</td><td class="us"><i class="y"></i></td><td><i class="y"></i></td></tr>
+						<tr><td>Private collections hub</td><td class="us">Galaxy or Automation Hub, token</td><td><i class="y"></i></td></tr>
+						<tr><td>Execution environments</td><td class="us">All seven tools, Docker or Podman</td><td><span class="muted">Ansible only, Podman</span></td></tr>
+						<tr><td>Reach isolated networks</td><td class="us">Outbound worker relay</td><td><span class="muted">Automation Mesh, multi-hop</span></td></tr>
+						<tr><td>Event-Driven Ansible</td><td class="us"><i class="n"></i></td><td><i class="y"></i></td></tr>
+						<tr><td>High availability</td><td class="us">Active-active on Postgres</td><td><span class="muted">Via the platform</span></td></tr>
+						<tr><td>Duration-balanced job splitting</td><td class="us"><i class="y"></i></td><td><span class="muted">Round-robin slicing</span></td></tr>
+						<tr><td>Fleet memory: flaky hosts, trends</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
+						<tr><td>Tamper-evident, signed audit</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
+						<tr><td>Drift detection and reconcile, Ansible and Terraform</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
+						<tr><td>Advisory AI triage and fleet answers</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
+						<tr><td>Drop-in Go plugins: tools, secrets, AI, notifiers</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
+						<tr><td>Import from the other side</td><td class="us">One command</td><td><i class="n"></i></td></tr>
+					</tbody>
+				</table>
+			</div>
+		</section>
+
+		<section class="section wrap">
+			<div class="section-head reveal">
+				<h2>Where AAP is still ahead</h2>
+				<p>AAP is a decade of enterprise Ansible with Red Hat behind it: a support desk with an SLA, certified content you can point an auditor at, Event-Driven Ansible, a multi-hop Automation Mesh built for reaching deep into segmented networks at scale, and analytics through Insights. SwitchTender is new. Every claim on this page is backed by a test you can run, and what it does not have yet is that support desk, that certified-content ecosystem, or that decade of production miles. It closes the gap differently: any team can add a tool, a secret engine, an AI provider, or a notification channel as a drop-in Go plugin binary, no fork and no rebuild of the server. Pick AAP when the deciding factor is Red Hat support and certified content. Pick SwitchTender when it is the product, the footprint, and the bill.</p>
+			</div>
+		</section>
+
+		<section class="section wrap">
+			<div class="section-head reveal">
+				<h2>Move in one command</h2>
+				<p>Automation Controller is AWX's data model, so its export imports into SwitchTender the same way AWX's does. Projects, inventories, templates, surveys, and schedules come across, with a dry run first so you see the plan before anything is written.</p>
+			</div>
+			<div class="gs-steps">
+				<ol>
+					<li class="gs-step reveal">
+						<div class="gs-num">1</div>
+						<div class="gs-body">
+							<h3>Preview the import</h3>
+							<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>switchtender import awx controller-export.json --db switchtender.db</code></pre></div>
+						</div>
+					</li>
+					<li class="gs-step reveal">
+						<div class="gs-num">2</div>
+						<div class="gs-body">
+							<h3>Apply it</h3>
+							<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>switchtender import awx controller-export.json --db switchtender.db --apply</code></pre></div>
+						</div>
+					</li>
+				</ol>
+			</div>
+			<p class="reveal" style="margin-top: 18px;">The <a href="/docs/switching-from-awx">switching guide</a> maps every Controller concept to its SwitchTender equivalent, and the <a href="/docs/migration">migration reference</a> covers the details. Weighing the community edition instead? The <a href="/awx-alternative">AWX alternative page</a> and the <a href="/ascender-alternative">Ascender alternative page</a> make those cases.</p>
+		</section>
+
+		<section class="cta wrap reveal">
+			<h2>Keep the capabilities. Drop the subscription.</h2>
+			<div class="hero-cta">
+				<a class="btn big" href="/get-started">Get started</a>
+				<a class="ghost big" href="https://github.com/dcadolph/switchtender">View on GitHub</a>
+			</div>
+		</section>
+	</main>
+
+	<footer class="footer">
+		<div class="wrap footer-inner">
+			<img src="/assets/logo-train-tracks-dark.png" alt="SwitchTender" class="foot-logo">
+			<nav>
+				<a href="https://github.com/dcadolph/switchtender">GitHub</a>
+				<a href="/docs/">Docs</a>
+				<a href="/docs/comparison">Compare</a>
+				<a href="/awx-alternative">vs AWX</a>
+				<a href="/ascender-alternative">vs Ascender</a>
+				<a href="/semaphore-alternative">vs Semaphore</a>
+				<a href="https://github.com/dcadolph/switchtender/blob/main/LICENSE">License</a>
+			</nav>
+			<span class="foot-note">Open source · BSL 1.1 · self-host free</span>
+		</div>
+	</footer>
+	<script src="/app.js?v=6"></script>
+</body>
+</html>

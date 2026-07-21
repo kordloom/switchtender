@@ -24,6 +24,20 @@ type createPolicyRequest struct {
 	InventoryID string `json:"inventory_id,omitempty"`
 	// ExcludeDryRun leaves dry-run runs unmatched.
 	ExcludeDryRun bool `json:"exclude_dry_run,omitempty"`
+	// MaxDestroy holds a matched terraform or opentofu run for approval when its plan would destroy
+	// more than this many resources. A pointer so a missing field disables the plan-content check
+	// rather than holding on any destroy, and a negative value disables it explicitly.
+	MaxDestroy *int `json:"max_destroy,omitempty"`
+}
+
+// resolveMaxDestroy returns the request's max_destroy, defaulting a missing value to the disabled
+// sentinel so a policy created without the field leaves the plan-content check off rather than
+// holding on any destroy.
+func resolveMaxDestroy(v *int) int {
+	if v == nil {
+		return policy.DisabledMaxDestroy
+	}
+	return *v
 }
 
 // listPoliciesResponse wraps the policy list.
@@ -57,7 +71,8 @@ func createPolicyHandler(store policy.Store, log *zap.Logger) http.HandlerFunc {
 		p := &policy.Policy{
 			ID: policy.NewID(), Name: req.Name, Tool: req.Tool,
 			CommandContains: req.CommandContains, InventoryID: req.InventoryID,
-			ExcludeDryRun: req.ExcludeDryRun, CreatedAt: time.Now(),
+			ExcludeDryRun: req.ExcludeDryRun, MaxDestroy: resolveMaxDestroy(req.MaxDestroy),
+			CreatedAt: time.Now(),
 		}
 		if err := store.Save(r.Context(), p); err != nil {
 			log.Error("server: save policy: " + err.Error())
@@ -102,7 +117,8 @@ func updatePolicyHandler(store policy.Store, log *zap.Logger) http.HandlerFunc {
 		p := &policy.Policy{
 			ID: id, Name: req.Name, Tool: req.Tool,
 			CommandContains: req.CommandContains, InventoryID: req.InventoryID,
-			ExcludeDryRun: req.ExcludeDryRun, CreatedAt: existing.CreatedAt,
+			ExcludeDryRun: req.ExcludeDryRun, MaxDestroy: resolveMaxDestroy(req.MaxDestroy),
+			CreatedAt: existing.CreatedAt,
 		}
 		if err := store.Save(r.Context(), p); err != nil {
 			log.Error("server: update policy: " + err.Error())

@@ -41,6 +41,7 @@ func (m *memStore) Update(_ context.Context, c *Credential) error {
 	existing.Kind = c.Kind
 	existing.Secret = c.Secret
 	existing.Source = c.Source
+	existing.OrgID = c.OrgID
 	return nil
 }
 

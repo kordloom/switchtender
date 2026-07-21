@@ -22,6 +22,9 @@ var (
 	// ErrBadImage is returned when a container image reference is malformed or unsafe to pass to the
 	// container CLI.
 	ErrBadImage = errors.New("bad image reference")
+	// ErrUnpinnedImage is returned when digest pinning is required but the image reference names a
+	// mutable tag instead of an immutable @sha256: digest.
+	ErrUnpinnedImage = errors.New("image reference not pinned to a digest")
 	// ErrForbiddenMount is returned when a run would bind mount a sensitive host path, such as the
 	// filesystem root, a system directory, or the docker socket, into a container.
 	ErrForbiddenMount = errors.New("forbidden mount path")

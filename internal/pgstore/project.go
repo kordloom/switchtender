@@ -10,7 +10,7 @@ import (
 )
 
 // projectColumns is the shared select list for project reads.
-const projectColumns = `id, name, repo_url, branch, credential_id, install_deps, image, pull_credential_id, created_at`
+const projectColumns = `id, name, repo_url, branch, credential_id, install_deps, image, pull_credential_id, org_id, created_at`
 
 // projectStore is a project.Store backed by the shared SQLite database.
 type projectStore struct {
@@ -22,16 +22,16 @@ type projectStore struct {
 func (s *projectStore) Save(ctx context.Context, p *project.Project) error {
 	const q = `
 INSERT INTO projects
-	(id, name, repo_url, branch, credential_id, install_deps, image, pull_credential_id, created_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	(id, name, repo_url, branch, credential_id, install_deps, image, pull_credential_id, org_id, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 ON CONFLICT(id) DO UPDATE SET
 	name=excluded.name, repo_url=excluded.repo_url, branch=excluded.branch,
 	credential_id=excluded.credential_id, install_deps=excluded.install_deps,
 	image=excluded.image, pull_credential_id=excluded.pull_credential_id,
-	created_at=excluded.created_at`
+	org_id=excluded.org_id, created_at=excluded.created_at`
 	_, err := s.db.ExecContext(ctx, q,
 		p.ID, p.Name, p.RepoURL, p.Branch, p.CredentialID,
-		boolToInt(p.InstallDeps), p.Image, p.PullCredentialID, formatTime(p.CreatedAt))
+		boolToInt(p.InstallDeps), p.Image, p.PullCredentialID, p.OrgID, formatTime(p.CreatedAt))
 	if err != nil {
 		return fmt.Errorf("save project: %w", err)
 	}
@@ -41,11 +41,11 @@ ON CONFLICT(id) DO UPDATE SET
 // Update changes an existing project's mutable fields, or returns project.ErrNotFound.
 func (s *projectStore) Update(ctx context.Context, p *project.Project) error {
 	const q = `UPDATE projects SET
-	name=$1, repo_url=$2, branch=$3, credential_id=$4, install_deps=$5, image=$6, pull_credential_id=$7
-	WHERE id=$8`
+	name=$1, repo_url=$2, branch=$3, credential_id=$4, install_deps=$5, image=$6, pull_credential_id=$7, org_id=$8
+	WHERE id=$9`
 	res, err := s.db.ExecContext(ctx, q,
 		p.Name, p.RepoURL, p.Branch, p.CredentialID,
-		boolToInt(p.InstallDeps), p.Image, p.PullCredentialID, p.ID)
+		boolToInt(p.InstallDeps), p.Image, p.PullCredentialID, p.OrgID, p.ID)
 	if err != nil {
 		return fmt.Errorf("update project: %w", err)
 	}
@@ -119,7 +119,7 @@ func scanProject(sc scanner) (*project.Project, error) {
 		created     string
 	)
 	if err := sc.Scan(&p.ID, &p.Name, &p.RepoURL, &p.Branch, &p.CredentialID,
-		&installDeps, &p.Image, &p.PullCredentialID, &created); err != nil {
+		&installDeps, &p.Image, &p.PullCredentialID, &p.OrgID, &created); err != nil {
 		return nil, err
 	}
 	p.InstallDeps = installDeps != 0

@@ -44,6 +44,7 @@ func (m *memStore) Update(_ context.Context, i *Inventory) error {
 	existing.ContentSource = i.ContentSource
 	existing.ContentConfig = i.ContentConfig
 	existing.Queue = i.Queue
+	existing.OrgID = i.OrgID
 	return nil
 }
 

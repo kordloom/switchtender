@@ -29,7 +29,4 @@ var (
 	ErrDependencyCycle = errors.New("dependency cycle")
 	// ErrNotPendingApproval is returned when approve or reject targets a run not awaiting approval.
 	ErrNotPendingApproval = errors.New("run is not awaiting approval")
-	// ErrImageTool is returned when a run pins an execution image for a tool that does not run in a
-	// container. Only Ansible does.
-	ErrImageTool = errors.New("execution image is only supported for the ansible tool")
 )

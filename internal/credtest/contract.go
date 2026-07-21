@@ -33,7 +33,7 @@ func testUpdate(t *testing.T, store credential.Store) {
 
 	if err := store.Update(ctx, &credential.Credential{
 		ID: "cred_1", Name: "new", Kind: credential.KindVaultPassword, Secret: "sealed-new",
-		Source: credential.SourceCommand,
+		Source: credential.SourceCommand, OrgID: "org_new",
 	}); err != nil {
 		t.Fatalf("Update() error = %v", err)
 	}
@@ -43,6 +43,9 @@ func testUpdate(t *testing.T, store credential.Store) {
 	}
 	if got.Name != "new" || got.Kind != credential.KindVaultPassword || got.Secret != "sealed-new" {
 		t.Errorf("Get() = %+v, want the updated credential", got)
+	}
+	if got.OrgID != "org_new" {
+		t.Errorf("OrgID after update = %q, want org_new", got.OrgID)
 	}
 	if got.Source != credential.SourceCommand {
 		t.Errorf("Source = %q, want %q", got.Source, credential.SourceCommand)
@@ -62,7 +65,7 @@ func testLifecycle(t *testing.T, store credential.Store) {
 	created := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
 	c := &credential.Credential{
 		ID: "cred_1", Name: "fleet-key", Kind: credential.KindSSHKey,
-		Secret: "sealed-bytes", Source: credential.SourceCommand, CreatedAt: created,
+		Secret: "sealed-bytes", Source: credential.SourceCommand, OrgID: "org_owner", CreatedAt: created,
 	}
 	if err := store.Save(ctx, c); err != nil {
 		t.Fatalf("Save() error = %v", err)
@@ -74,6 +77,9 @@ func testLifecycle(t *testing.T, store credential.Store) {
 	}
 	if got.Name != "fleet-key" || got.Kind != credential.KindSSHKey || got.Secret != "sealed-bytes" {
 		t.Errorf("Get() = %+v, want the saved credential with its sealed secret", got)
+	}
+	if got.OrgID != "org_owner" {
+		t.Errorf("OrgID = %q, want org_owner", got.OrgID)
 	}
 	if got.Source != credential.SourceCommand {
 		t.Errorf("Source = %q, want %q", got.Source, credential.SourceCommand)

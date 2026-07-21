@@ -1101,10 +1101,55 @@ func TestRunImageReachesSpec(t *testing.T) {
 		t.Errorf("registry login = %q/%q, want bot/hunter2", spec.RegistryUsername, spec.RegistryPassword)
 	}
 
-	// Test 1: A non-Ansible tool cannot pin an image.
-	_, err = d.Submit(context.Background(), "", "",
+	// Test 1: A non-Ansible tool can pin an image now that every tool runs inside one, and the image
+	// and command reach the Spec.
+	created, err = d.Submit(context.Background(), "", "",
 		run.WithTool("bash"), run.WithCommand("echo hi"), run.WithImage("ghcr.io/acme/ee:9", ""))
-	if !errors.Is(err, ErrImageTool) {
-		t.Errorf("Submit(bash+image) error = %v, want ErrImageTool", err)
+	if err != nil {
+		t.Fatalf("Submit(bash+image) error = %v, want nil", err)
+	}
+	waitTerminal(t, store, created.ID)
+	spec = <-got
+	if run.NormalizeTool(spec.Tool) != run.ToolBash || spec.Image != "ghcr.io/acme/ee:9" ||
+		spec.Command != "echo hi" {
+		t.Errorf("bash+image spec = tool %q image %q command %q, want bash ghcr.io/acme/ee:9 echo hi",
+			spec.Tool, spec.Image, spec.Command)
+	}
+}
+
+// TestDefaultImageFallback verifies a run that pins no image at the run, template, or project level
+// falls back to the configured default image, and that a run pinning its own image is not overridden.
+func TestDefaultImageFallback(t *testing.T) {
+	t.Parallel()
+	got := make(chan roundhouse.Spec, 1)
+	runner := roundhouse.RunnerFunc(
+		func(_ context.Context, spec roundhouse.Spec, _ io.Writer) (roundhouse.Result, error) {
+			got <- spec
+			return roundhouse.Result{ExitCode: 0}, nil
+		},
+	)
+	store := run.NewMemStore()
+	d := New(store, runner, nil, WithDefaultImage("ghcr.io/acme/default:1"))
+	defer d.Close()
+
+	// Test 0: A run pinning no image falls back to the configured default.
+	created, err := d.Submit(context.Background(), "play.yml", "inv")
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+	waitTerminal(t, store, created.ID)
+	if spec := <-got; spec.Image != "ghcr.io/acme/default:1" {
+		t.Errorf("spec.Image = %q, want ghcr.io/acme/default:1", spec.Image)
+	}
+
+	// Test 1: A run pinning its own image is not overridden by the default.
+	created, err = d.Submit(context.Background(), "play.yml", "inv",
+		run.WithImage("ghcr.io/acme/pinned:2", ""))
+	if err != nil {
+		t.Fatalf("Submit(pinned) error = %v", err)
+	}
+	waitTerminal(t, store, created.ID)
+	if spec := <-got; spec.Image != "ghcr.io/acme/pinned:2" {
+		t.Errorf("spec.Image = %q, want ghcr.io/acme/pinned:2", spec.Image)
 	}
 }

@@ -14,11 +14,15 @@ import (
 	"strings"
 )
 
-// containerRunner executes ansible-playbook inside a container image so each project can pin its
-// own ansible, Python, and system dependencies independent of the host.
+// containerRunner executes a tool inside a container image so each project can pin its own tool
+// binaries, Python, and system dependencies independent of the host.
 type containerRunner struct {
-	// docker is the container CLI, docker by default.
-	docker string
+	// runtime is the container CLI, docker or podman.
+	runtime string
+	// pullPolicy is the container --pull policy: always, missing, or never.
+	pullPolicy string
+	// requireDigest rejects an image reference that is not pinned to an @sha256: digest.
+	requireDigest bool
 	// baseEnv is the environment the host CLI inherits when pulling images and logging in.
 	baseEnv []string
 	// plugin materializes the callback plugin on first use, shared into the container read-only.
@@ -27,22 +31,40 @@ type containerRunner struct {
 	limits ContainerLimits
 }
 
-// newContainerRunner builds a container runner sharing the host runner's plugin cache and base
-// environment, bounded by limits.
-func newContainerRunner(baseEnv []string, plugin *pluginCache, limits ContainerLimits) *containerRunner {
-	return &containerRunner{docker: "docker", baseEnv: baseEnv, plugin: plugin, limits: limits}
+// newContainerRunner builds a container runner for the given container CLI (docker or podman),
+// sharing the host runner's plugin cache and base environment, bounded by limits. The pull policy
+// sets the image --pull behavior and requireDigest rejects an image not pinned to a digest. An empty
+// runtime defaults to docker and an empty pull policy defaults to missing.
+func newContainerRunner(runtime, pullPolicy string, requireDigest bool, baseEnv []string,
+	plugin *pluginCache, limits ContainerLimits) *containerRunner {
+	if runtime == "" {
+		runtime = "docker"
+	}
+	if pullPolicy == "" {
+		pullPolicy = "missing"
+	}
+	return &containerRunner{
+		runtime:       runtime,
+		pullPolicy:    pullPolicy,
+		requireDigest: requireDigest,
+		baseEnv:       baseEnv,
+		plugin:        plugin,
+		limits:        limits,
+	}
 }
 
-// Run executes the playbook inside spec.Image, mounting the checkout, inventory, credential files,
-// and the events sidecar so the run behaves like a host run while staying isolated. A canceled
+// Run executes spec's tool inside spec.Image, mounting the paths the tool references and, for
+// Ansible, the events sidecar, so the run behaves like a host run while staying isolated. A canceled
 // context kills the container by name so a stopped run does not leak a container.
 func (c *containerRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Result, error) {
-	if spec.Playbook == "" {
-		return Result{ExitCode: -1}, ErrNoPlaybook
-	}
-	if err := validateImage(spec.Image); err != nil {
+	if err := c.validateRunImage(spec.Image); err != nil {
 		return Result{ExitCode: -1}, err
 	}
+	plan, cleanup, err := buildContainerPlan(spec)
+	if err != nil {
+		return Result{ExitCode: -1}, err
+	}
+	defer cleanup()
 
 	if spec.RegistryUsername != "" {
 		if err := c.login(ctx, spec, out); err != nil {
@@ -50,30 +72,30 @@ func (c *containerRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Re
 		}
 	}
 
-	envFile, cleanupEnv, err := c.writeEnvFile(spec)
+	envFile, cleanupEnv, err := c.writeEnvFile(spec, plan.extraEnv)
 	if err != nil {
 		return Result{ExitCode: -1}, fmt.Errorf("%w: %w", ErrLaunch, err)
 	}
 	defer cleanupEnv()
 
 	name := containerName()
-	args, err := c.dockerArgs(spec, name, envFile)
+	args, err := c.runArgs(spec, plan, name, envFile)
 	if err != nil {
 		return Result{ExitCode: -1}, fmt.Errorf("%w: %w", ErrLaunch, err)
 	}
 
-	cmd := exec.CommandContext(ctx, c.docker, args...)
+	cmd := exec.CommandContext(ctx, c.runtime, args...)
 	cmd.Stdout = out
 	cmd.Stderr = out
 	cmd.Env = c.baseEnv
 
-	// A canceled run must stop the container itself: killing the docker client leaves the container
-	// running under the daemon, so kill it by name.
+	// A canceled run must stop the container itself: killing the client leaves the container running
+	// under the daemon, so kill it by name.
 	killed := make(chan struct{})
 	go func() {
 		select {
 		case <-ctx.Done():
-			kill := exec.Command(c.docker, "kill", name)
+			kill := exec.Command(c.runtime, "kill", name)
 			_ = kill.Run()
 		case <-killed:
 		}
@@ -89,18 +111,25 @@ func (c *containerRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Re
 	}
 	var exitErr *exec.ExitError
 	if errors.As(runErr, &exitErr) {
-		return Result{ExitCode: exitErr.ExitCode()}, nil
+		code := exitErr.ExitCode()
+		// A Terraform or OpenTofu dry run uses plan -detailed-exitcode: exit 2 is a clean plan with
+		// pending changes, which is drift, not a failure.
+		if spec.DryRun && code == 2 && isTerraformTool(spec.Tool) {
+			return Result{ExitCode: 0, Drift: true}, nil
+		}
+		return Result{ExitCode: code}, nil
 	}
 	return Result{ExitCode: -1}, fmt.Errorf("%w: %w", ErrLaunch, runErr)
 }
 
-// dockerArgs builds the docker run argument list: mounts for every host path the run references,
-// an env file for variables and secrets, the image, and the ansible-playbook command.
-func (c *containerRunner) dockerArgs(spec Spec, name, envFile string) ([]string, error) {
-	args := []string{"run", "--rm", "--name", name}
+// runArgs builds the container run argument list from the plan: resource caps, the working
+// directory, an env file for variables and secrets, a bind mount for every host path the plan
+// references plus the events sidecar for Ansible, the image, and the tool command to run inside it.
+func (c *containerRunner) runArgs(spec Spec, plan containerPlan, name, envFile string) ([]string, error) {
+	args := []string{"run", "--rm", "--name", name, "--pull", c.pullPolicy}
 	args = append(args, c.limits.args()...)
-	if spec.Dir != "" {
-		args = append(args, "-w", spec.Dir)
+	if plan.workdir != "" {
+		args = append(args, "-w", plan.workdir)
 	}
 	args = append(args, "--env-file", envFile)
 
@@ -111,13 +140,8 @@ func (c *containerRunner) dockerArgs(spec Spec, name, envFile string) ([]string,
 			addErr = mounts.add(path, ro)
 		}
 	}
-	addMount(spec.Dir, true)
-	addMount(filepath.Dir(spec.Playbook), true)
-	addMount(spec.Inventory, true)
-	addMount(spec.PrivateKeyPath, true)
-	addMount(spec.VaultPasswordFile, true)
-	for _, f := range spec.ExtraVarsFiles {
-		addMount(f, true)
+	for _, m := range plan.mounts {
+		addMount(m.path, !m.writable)
 	}
 	if spec.EventsPath != "" {
 		dir, err := c.plugin.ensure()
@@ -133,18 +157,16 @@ func (c *containerRunner) dockerArgs(spec Spec, name, envFile string) ([]string,
 	}
 	args = append(args, mounts.args()...)
 
-	pargs, err := playbookArgs(spec)
-	if err != nil {
-		return nil, err
-	}
-	args = append(args, spec.Image, "ansible-playbook")
-	return append(args, pargs...), nil
+	args = append(args, spec.Image)
+	return append(args, plan.argv...), nil
 }
 
-// writeEnvFile writes the run's environment, plus the callback variables, to a temp file passed as
-// --env-file so secret values never appear on the command line. It returns the path and a cleanup.
-func (c *containerRunner) writeEnvFile(spec Spec) (string, func(), error) {
+// writeEnvFile writes the run's environment, the tool's extra environment, and, for Ansible, the
+// callback variables to a temp file passed as --env-file so secret values never appear on the
+// command line. It returns the path and a cleanup.
+func (c *containerRunner) writeEnvFile(spec Spec, extraEnv []string) (string, func(), error) {
 	lines := append([]string{}, spec.Env...)
+	lines = append(lines, extraEnv...)
 	if spec.EventsPath != "" {
 		dir, err := c.plugin.ensure()
 		if err != nil {
@@ -183,7 +205,7 @@ func (c *containerRunner) login(ctx context.Context, spec Spec, out io.Writer) e
 		args = append(args, host)
 	}
 	args = append(args, "-u", spec.RegistryUsername, "--password-stdin")
-	cmd := exec.CommandContext(ctx, c.docker, args...)
+	cmd := exec.CommandContext(ctx, c.runtime, args...)
 	cmd.Stdin = strings.NewReader(spec.RegistryPassword)
 	cmd.Stdout = out
 	cmd.Stderr = out
@@ -264,6 +286,25 @@ func validateImage(image string) error {
 		return fmt.Errorf("%w: %q", ErrBadImage, image)
 	}
 	return nil
+}
+
+// validateRunImage confirms image is a well-formed reference and, when the runner requires digest
+// pinning, that it names an immutable @sha256: digest rather than a mutable tag. It returns
+// ErrUnpinnedImage when pinning is required and the reference is tag-only or unpinned.
+func (c *containerRunner) validateRunImage(image string) error {
+	if err := validateImage(image); err != nil {
+		return err
+	}
+	if c.requireDigest && !isDigestPinned(image) {
+		return fmt.Errorf("%w: %q", ErrUnpinnedImage, image)
+	}
+	return nil
+}
+
+// isDigestPinned reports whether image is pinned to an immutable content digest, meaning it carries
+// an @sha256: segment, rather than a mutable tag.
+func isDigestPinned(image string) bool {
+	return strings.Contains(image, "@sha256:")
 }
 
 // args returns the accumulated docker -v arguments.

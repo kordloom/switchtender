@@ -93,7 +93,7 @@ func TestVarsEnv(t *testing.T) {
 // inspecting the router's runner, powershell by the ErrNoCommand short circuit.
 func TestToolRouterNewTools(t *testing.T) {
 	t.Parallel()
-	router := newToolRouter(false, DefaultContainerLimits())
+	router := newToolRouter(false, "docker", "missing", false, DefaultContainerLimits())
 	if router.opentofu.binary != "tofu" {
 		t.Errorf("opentofu binary = %q, want tofu", router.opentofu.binary)
 	}

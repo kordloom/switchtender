@@ -14,6 +14,8 @@ import (
 	"github.com/dcadolph/switchtender/internal/inventorytest"
 	"github.com/dcadolph/switchtender/internal/invsource"
 	"github.com/dcadolph/switchtender/internal/invsourcetest"
+	"github.com/dcadolph/switchtender/internal/org"
+	"github.com/dcadolph/switchtender/internal/orgtest"
 	"github.com/dcadolph/switchtender/internal/policy"
 	"github.com/dcadolph/switchtender/internal/policytest"
 	"github.com/dcadolph/switchtender/internal/project"
@@ -388,6 +390,33 @@ func truncateTeams(t *testing.T, dsn string) {
 	defer func() { _ = db.Close() }()
 	if _, err := db.Exec("TRUNCATE teams, team_members"); err != nil {
 		t.Fatalf("truncate teams: %v", err)
+	}
+}
+
+func TestOrgStoreContract(t *testing.T) {
+	dsn := testDSN(t)
+	db, err := pgstore.Open(dsn)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	orgtest.Contract(t, func() org.Store {
+		truncateOrgs(t, dsn)
+		return db.Orgs()
+	})
+}
+
+// truncateOrgs clears the organization tables between contract subtests.
+func truncateOrgs(t *testing.T, dsn string) {
+	t.Helper()
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatalf("open postgres: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	if _, err := db.Exec("TRUNCATE orgs, org_members"); err != nil {
+		t.Fatalf("truncate orgs: %v", err)
 	}
 }
 

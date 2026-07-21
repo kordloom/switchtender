@@ -38,6 +38,13 @@ type Source struct {
 	SyncedAt *time.Time `json:"synced_at,omitempty"`
 	// LastError holds the most recent refresh failure, empty on success.
 	LastError string `json:"last_error,omitempty"`
+	// UpdateOnLaunch refreshes the source before a run targeting its backing inventory, so a launch
+	// sees current hosts rather than the last synced snapshot.
+	UpdateOnLaunch bool `json:"update_on_launch,omitempty"`
+	// SyncIntervalSeconds is how often a background sync refreshes the source, and the staleness
+	// window an update-on-launch refresh honors. Zero disables scheduled sync and refreshes on every
+	// launch.
+	SyncIntervalSeconds int `json:"sync_interval_seconds,omitempty"`
 	// CreatedAt is when the source was created.
 	CreatedAt time.Time `json:"created_at"`
 }

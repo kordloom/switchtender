@@ -15,6 +15,11 @@ import (
 // command to a long playbook so both ends of the fleet's runtime show up.
 var durationBuckets = []float64{1, 5, 10, 30, 60, 300, 600, 1800, 3600}
 
+// queueBuckets are the upper bounds, in seconds, of the queue-wait histogram. They are tighter than the
+// run-duration bounds since a healthy pool drains its backlog in seconds, not the minutes a run itself
+// takes, so a rising queue wait is the early signal that the pool is undersized.
+var queueBuckets = []float64{0.5, 1, 2, 5, 10, 30, 60, 300, 1800}
+
 // metricsHandler serves run, fleet, queue, worker, and run-duration series in the Prometheus text
 // exposition format, computed from the store at scrape time so no counter state lives in the process.
 // The gauges reflect the store's current contents, and the duration histogram is derived from the
@@ -49,6 +54,7 @@ func metricsHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
 		writeFleetHealth(&b, store, r)
 		writeWorkers(&b, store, r)
 		writeRunDurations(&b, runs)
+		writeQueueWait(&b, runs)
 
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 		_, _ = w.Write([]byte(b.String()))
@@ -155,4 +161,37 @@ func writeRunDurations(b *strings.Builder, runs []*run.Run) {
 	fmt.Fprintf(b, "switchtender_run_duration_seconds_bucket{le=\"+Inf\"} %d\n", total)
 	fmt.Fprintf(b, "switchtender_run_duration_seconds_sum %g\n", sum)
 	fmt.Fprintf(b, "switchtender_run_duration_seconds_count %d\n", total)
+}
+
+// writeQueueWait emits a histogram of how long runs waited between submission and start, over the runs
+// that carry a start time, so scrape sees whether the pool keeps up with the backlog. A run held for
+// approval includes that wait, which is honest: it is time the submitter waited before work began.
+func writeQueueWait(b *strings.Builder, runs []*run.Run) {
+	counts := make([]int, len(queueBuckets))
+	total := 0
+	sum := 0.0
+	for _, rn := range runs {
+		if rn.StartedAt == nil {
+			continue
+		}
+		d := rn.StartedAt.Sub(rn.CreatedAt).Seconds()
+		if d < 0 {
+			continue
+		}
+		total++
+		sum += d
+		for i, le := range queueBuckets {
+			if d <= le {
+				counts[i]++
+			}
+		}
+	}
+	b.WriteString("# HELP switchtender_run_queue_seconds Time a run waited from submission to start.\n")
+	b.WriteString("# TYPE switchtender_run_queue_seconds histogram\n")
+	for i, le := range queueBuckets {
+		fmt.Fprintf(b, "switchtender_run_queue_seconds_bucket{le=\"%g\"} %d\n", le, counts[i])
+	}
+	fmt.Fprintf(b, "switchtender_run_queue_seconds_bucket{le=\"+Inf\"} %d\n", total)
+	fmt.Fprintf(b, "switchtender_run_queue_seconds_sum %g\n", sum)
+	fmt.Fprintf(b, "switchtender_run_queue_seconds_count %d\n", total)
 }

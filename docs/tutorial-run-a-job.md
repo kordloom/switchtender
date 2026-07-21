@@ -28,7 +28,7 @@ carries a real share of the work, sized by measured cost rather than a flat coun
 
 ## Do it from the API
 
-    curl -s -X POST localhost:8080/runs \
+    curl -s -X POST localhost:8080/v1/runs \
       -H 'content-type: application/json' \
       -d '{"tool":"bash","command":"echo hello from switchtender"}'
 

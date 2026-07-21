@@ -41,6 +41,10 @@ type Project struct {
 	Image string `json:"image,omitempty"`
 	// PullCredentialID names a registry credential for pulling a private Image. Empty for public.
 	PullCredentialID string `json:"pull_credential_id,omitempty"`
+	// OrgID is the owning organization. Empty means unowned, a global object that follows the role.
+	// When set, members of the organization gain access to the project and, under strict grants, it
+	// is hidden from non-members who lack an explicit grant.
+	OrgID string `json:"org_id,omitempty"`
 	// CreatedAt is when the project was created.
 	CreatedAt time.Time `json:"created_at"`
 }

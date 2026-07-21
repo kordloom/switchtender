@@ -22,3 +22,30 @@ Security fixes land on the latest 1.x release. Older versions are not patched.
 
 The server, the CLI, the SDK, and the official container image and Helm chart are in scope. Report
 issues in third-party dependencies upstream, though a heads-up here is welcome.
+
+## Verifying a release
+
+Every release ships a `SHA256SUMS` file signed with [cosign](https://docs.sigstore.dev) using
+keyless signing tied to this repository's GitHub Actions identity. There is no long-lived key to
+steal, and the signature is recorded in the public Rekor transparency log.
+
+Verify the signature over the checksums, then the archive against them:
+
+    cosign verify-blob SHA256SUMS \
+      --signature SHA256SUMS.sig \
+      --certificate SHA256SUMS.pem \
+      --certificate-identity-regexp '^https://github.com/dcadolph/switchtender/.github/workflows/release.yml@.*' \
+      --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+    shasum -a 256 -c SHA256SUMS --ignore-missing
+
+## Security posture
+
+- Secrets are encrypted at rest with AES-GCM under an Argon2id-derived key, decrypt only inside the
+  executing process, never serialize into API responses, and are masked out of run logs.
+- Every run's changes are linked into a tamper-evident SHA-256 hash chain that verifies offline
+  without trusting the server.
+- Container execution environments run under memory, CPU, process, and network caps, refuse to mount
+  sensitive host paths or the container socket, and are off by default.
+- Every change is scanned with govulncheck and CodeQL, the fuzz corpus runs on a schedule, and
+  dependency updates are tracked by Dependabot. Each release ships an SPDX software bill of materials.

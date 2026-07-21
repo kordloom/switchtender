@@ -56,7 +56,7 @@ run that finds changes is recorded as drift keyed on its working directory rathe
 plan's changed-resource count. Bash, Python, PowerShell, and Go have no desired-state check, so they do
 not report drift.</p>
 <h2 id="from-the-api">From the API</h2>
-<pre><code>curl -s localhost:8080/drift
+<pre><code>curl -s localhost:8080/v1/drift
 </code></pre>
 <p>Each target carries its changed count, the check run id, and when it was checked, worst drift first. A
 target is an Ansible host or a Terraform working directory.</p>
@@ -70,7 +70,7 @@ releases or rejects it, and the audit trail records that a machine proposed it a
 an AI provider is configured, the Explain button on the held proposal summarizes what drifted and
 what approving will change, from the check run's masked events.</p>
 <p>The same action is one request, for an operator token:</p>
-<pre><code>curl -s -X POST localhost:8080/drift/reconcile -d '{&quot;host&quot;: &quot;web01&quot;}'
+<pre><code>curl -s -X POST localhost:8080/v1/drift/reconcile -d '{&quot;host&quot;: &quot;web01&quot;}'
 </code></pre>
 <p>The <code>host</code> field names the drifted target, an Ansible host or a Terraform working directory.</p>
 <p>See also the <a href="/docs/faq">FAQ</a> and the <a href="/docs/tutorials">tutorials</a>.</p>

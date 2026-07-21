@@ -18,7 +18,7 @@
 	<link rel="preconnect" href="https://fonts.googleapis.com">
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-	<link rel="stylesheet" href="/styles.css?v=12">
+	<link rel="stylesheet" href="/styles.css?v=13">
 </head>
 <body>
 	<div class="bg-mesh" aria-hidden="true"></div>
@@ -126,13 +126,14 @@
 						<tr><td>Drag-and-drop workflow editor</td><td class="us"><i class="y"></i></td><td><i class="y"></i></td></tr>
 						<tr><td>RBAC, teams, per-object grants</td><td class="us"><i class="y"></i></td><td><i class="y"></i></td></tr>
 						<tr><td>LDAP, SAML, OIDC sign-in</td><td class="us"><i class="y"></i></td><td><span class="muted">Today, yes. Removed on the development branch</span></td></tr>
-						<tr><td>Execution environments</td><td class="us"><i class="y"></i></td><td><i class="y"></i></td></tr>
+						<tr><td>Execution environments</td><td class="us">All seven tools, Docker or Podman</td><td><span class="muted">Ansible only, Podman</span></td></tr>
 						<tr><td>Instance groups</td><td class="us"><i class="y"></i></td><td><i class="y"></i></td></tr>
 						<tr><td>High availability</td><td class="us">Active-active on Postgres</td><td><span class="muted">Via Kubernetes</span></td></tr>
 						<tr><td>Duration-balanced job splitting</td><td class="us"><i class="y"></i></td><td><span class="muted">Round-robin slicing</span></td></tr>
 						<tr><td>Fleet memory: flaky hosts, trends</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
 						<tr><td>Tamper-evident, signed audit</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
-						<tr><td>Drift detection from a dry run</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
+						<tr><td>Drift detection and reconcile, Ansible and Terraform</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
+						<tr><td>Notification channels</td><td class="us">Eleven built in</td><td><span class="muted">About ten</span></td></tr>
 						<tr><td>Advisory AI triage and fleet answers</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
 						<tr><td>Drop-in Go plugins: tools, secrets, AI, notifiers</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
 						<tr><td>Import from the other side</td><td class="us">One command</td><td><i class="n"></i></td></tr>
@@ -151,7 +152,7 @@
 		<section class="section wrap">
 			<div class="section-head reveal">
 				<h2>The other exits, honestly</h2>
-				<p>Ascender is a support-backed fork of the same frozen codebase, with the same Kubernetes-shaped footprint. Oracle Linux Automation Manager repackages AWX 24.6.1 for Oracle Linux hosts. Semaphore is genuinely light, but a run is a text log, RBAC sits in its paid tier, and there are no workflows; the <a href="/semaphore-alternative">full comparison is here</a>. Moving to CI pipelines works until you need RBAC, schedules, approvals, and an audit trail, at which point you have rebuilt a worse control plane. SwitchTender is the exit that keeps AWX's capabilities without inheriting its architecture.</p>
+				<p><a href="/ascender-alternative">Ascender</a> is a support-backed fork of the same frozen codebase, with the same Kubernetes-shaped footprint. Oracle Linux Automation Manager repackages AWX 24.6.1 for Oracle Linux hosts. Semaphore is genuinely light, but a run is a text log, RBAC sits in its paid tier, and there are no workflows; the <a href="/semaphore-alternative">full comparison is here</a>. Moving to CI pipelines works until you need RBAC, schedules, approvals, and an audit trail, at which point you have rebuilt a worse control plane. SwitchTender is the exit that keeps AWX's capabilities without inheriting its architecture.</p>
 			</div>
 		</section>
 
@@ -197,6 +198,8 @@
 				<a href="https://github.com/dcadolph/switchtender">GitHub</a>
 				<a href="/docs/">Docs</a>
 				<a href="/docs/comparison">Compare</a>
+				<a href="/ascender-alternative">vs Ascender</a>
+				<a href="/aap-alternative">vs AAP</a>
 				<a href="/semaphore-alternative">vs Semaphore</a>
 				<a href="https://github.com/dcadolph/switchtender/blob/main/LICENSE">License</a>
 			</nav>
