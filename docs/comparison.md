@@ -30,6 +30,7 @@ on them.
 | Migration in | One command imports an AWX or Semaphore export. | Not applicable. | Not applicable. |
 | Drift detection | A dry run reports what has diverged from the desired state, across Ansible hosts and Terraform working directories, with a one-click approval-gated reconcile to fix it. | No. | No. |
 | Directory-driven roles | A directory or token group sets a user's role on every sign-in, over LDAP, SAML, OIDC, or a bearer JWT. | Organization mapping, complex. | No. Every user is assigned a role by hand. |
+| Notification channels | Eleven built in: webhook, email, Slack, Mattermost, Rocket.Chat, Discord, Teams, ntfy, PagerDuty, Grafana, and Twilio. | A similar set plus IRC, without Discord or ntfy. | Fewer, some in a paid tier. |
 
 ## Where they are even
 
@@ -49,7 +50,6 @@ on them.
 
 | Capability | Status |
 |------------|--------|
-| Notification breadth | Webhook, email, and Slack today, against a wider set of integrations in AWX. |
 | Maturity | AWX and Semaphore have years of production use and large communities. SwitchTender is young. AWX's years now cut both ways: its last release was July 2024, and its next one removes LDAP, SAML, and OIDC from core. |
 
 ## The short version
