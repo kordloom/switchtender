@@ -31,6 +31,9 @@ type authGate struct {
 	audits audit.Store
 	// log records authentication activity, never token material.
 	log *zap.Logger
+	// authz enforces object grants so a manage grant can delegate editing a specific object beyond
+	// the global role. Nil leaves only the global role gate in force.
+	authz *authorizer
 	// mu guards enforced and checkedAt.
 	mu sync.Mutex
 	// enforced caches whether any token exists.
@@ -63,13 +66,12 @@ func (g *authGate) wrap(next http.Handler) http.Handler {
 				unauthorized(w)
 				return
 			}
-			if !roleAllows(u.Role, requiredRole(r)) {
-				forbidden(w)
+			actor := Actor{UserID: u.ID, Role: u.Role, Name: u.Username}
+			if !g.decide(w, r, actor) {
 				return
 			}
 			g.record(u.Username, r)
-			ctx := context.WithValue(r.Context(), actorKey{},
-				Actor{UserID: u.ID, Role: u.Role, Name: u.Username})
+			ctx := context.WithValue(r.Context(), actorKey{}, actor)
 			next.ServeHTTP(w, r.WithContext(ctx))
 			return
 		}
@@ -89,14 +91,13 @@ func (g *authGate) wrap(next http.Handler) http.Handler {
 			unauthorized(w)
 			return
 		}
-		if !roleAllows(role, requiredRole(r)) {
-			forbidden(w)
+		actor := Actor{UserID: tok.UserID, Role: role, Name: tok.Name}
+		if !g.decide(w, r, actor) {
 			return
 		}
 		g.touch(tok)
 		g.record(tok.Name, r)
-		ctx := context.WithValue(r.Context(), actorKey{},
-			Actor{UserID: tok.UserID, Role: role, Name: tok.Name})
+		ctx := context.WithValue(r.Context(), actorKey{}, actor)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -202,6 +203,58 @@ func requiredRole(r *http.Request) user.Role {
 func roleAllows(have, need user.Role) bool {
 	rank := map[user.Role]int{user.RoleViewer: 1, user.RoleOperator: 2, user.RoleAdmin: 3}
 	return rank[have] >= rank[need]
+}
+
+// decide applies the authorization decision for actor on r, writing the denial or error response and
+// reporting whether the caller should proceed.
+func (g *authGate) decide(w http.ResponseWriter, r *http.Request, actor Actor) bool {
+	allow, err := g.allowed(r.Context(), actor, r)
+	if err != nil {
+		g.log.Error("server: authorize: " + err.Error())
+		respondError(w, g.log, http.StatusInternalServerError, "could not authorize request")
+		return false
+	}
+	if !allow {
+		forbidden(w)
+		return false
+	}
+	return true
+}
+
+// allowed reports whether actor may perform r. The global role gate decides first. When the role is
+// insufficient and r edits or deletes a single grantable object, an explicit manage grant on that
+// object authorizes it, so managing a specific object can be delegated without the global admin role.
+// The manage path is additive: it only ever allows a request the role gate would otherwise deny.
+func (g *authGate) allowed(ctx context.Context, actor Actor, r *http.Request) (bool, error) {
+	if roleAllows(actor.Role, requiredRole(r)) {
+		return true, nil
+	}
+	object := delegatedObject(r)
+	if object == "" {
+		return false, nil
+	}
+	return g.authz.manages(ctx, actor, object)
+}
+
+// delegatedObjectKinds are the resource paths whose edit and delete a manage grant can delegate.
+// They match the grant package's grantable object kinds.
+var delegatedObjectKinds = map[string]bool{
+	"projects": true, "templates": true, "inventories": true, "credentials": true,
+}
+
+// delegatedObject returns the object id an edit or delete targets when the request is a manage-
+// delegable mutation, or empty otherwise. It matches only an exact PUT or DELETE on a single
+// grantable object, so creates, sub-resources, and non-grantable paths never qualify.
+func delegatedObject(r *http.Request) string {
+	if r.Method != http.MethodPut && r.Method != http.MethodDelete {
+		return ""
+	}
+	p := strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1"), "/")
+	parts := strings.Split(p, "/")
+	if len(parts) != 2 || !delegatedObjectKinds[parts[0]] {
+		return ""
+	}
+	return parts[1]
 }
 
 // looksLikeJWT reports whether a bearer credential is a JWT rather than a SwitchTender token, so the

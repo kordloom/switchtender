@@ -88,6 +88,33 @@ func (a *authorizer) subjectsFor(ctx context.Context, actor Actor) (map[string]b
 	return subjects, nil
 }
 
+// manages reports whether actor holds management authority over object through an explicit manage
+// grant, or is an admin. Unlike authorize it never defers to the global role for an ungranted
+// object, since management delegation requires an explicit grant, so the caller falls back to the
+// role gate when this returns false. A nil authorizer or grant store confers no management.
+func (a *authorizer) manages(ctx context.Context, actor Actor, object string) (bool, error) {
+	if a == nil || a.grants == nil {
+		return false, nil
+	}
+	if actor.Role == user.RoleAdmin {
+		return true, nil
+	}
+	grants, err := a.grants.ForObject(ctx, object)
+	if err != nil {
+		return false, err
+	}
+	subjects, err := a.subjectsFor(ctx, actor)
+	if err != nil {
+		return false, err
+	}
+	for _, g := range grants {
+		if subjects[g.Subject] && grant.Satisfies(g.Access, grant.AccessManage) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // authorizeAll requires want access on every non-empty object, returning the first denial. Handlers
 // that reference several grantable objects at once, such as a run naming a project, an inventory,
 // and credentials, use it to authorize each before acting.

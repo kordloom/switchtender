@@ -421,7 +421,7 @@ func (s *Server) Handler() http.Handler {
 	}, s.log))
 	var handler http.Handler = mux
 	if s.tokens != nil {
-		gate := &authGate{tokens: s.tokens, users: s.users, jwt: s.jwt, audits: s.audits, log: s.log}
+		gate := &authGate{tokens: s.tokens, users: s.users, jwt: s.jwt, audits: s.audits, log: s.log, authz: authz}
 		handler = gate.wrap(mux)
 	}
 	if s.readOnly {

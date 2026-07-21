@@ -70,9 +70,11 @@ become passwords, and container registry logins. Secrets never appear in API res
 ## Teams and grants
 
 The global roles, admin, operator, and viewer, decide the broad strokes. On top of them, a grant
-gives a user or a team the right to use or manage a specific project, template, inventory, or
-credential. Grants are additive: an object with no grants defers to the global role, so nothing
-changes on upgrade until grants are added.
+gives a user or a team access to a specific project, template, inventory, or credential. A use grant
+lets them launch or reference the object, such as running a template or attaching a credential. A
+manage grant lets them edit and delete that object, so management of one project or credential can be
+delegated to a team without handing out the global admin role. Grants are additive: an object with no
+grants defers to the global role, so nothing changes on upgrade until grants are added.
 
 ## Queues and workers
 
