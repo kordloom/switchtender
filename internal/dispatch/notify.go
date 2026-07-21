@@ -40,6 +40,7 @@ func (d *Dispatcher) notify(r *run.Run) {
 	d.notifyDiscord(r)
 	d.notifyTeams(r)
 	d.notifyNtfy(r)
+	d.notifyPagerDuty(r)
 	d.notifyEmail(r)
 	d.notifyExtra(r)
 }

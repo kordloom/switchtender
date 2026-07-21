@@ -190,6 +190,10 @@
 <td>A notification publishes to an ntfy topic when a run finishes, at raised priority for a failure, with optional token auth for a protected topic.</td>
 </tr>
 <tr>
+<td>PagerDuty</td>
+<td>A failed or interrupted run triggers a PagerDuty incident through the Events API, deduplicated per run, so an on-call responder is paged. A succeeded run pages no one.</td>
+</tr>
+<tr>
 <td>AI triage</td>
 <td>An optional AI provider, local Ollama or a cloud API, explains a failed run on demand from its masked log and failed task events. Advisory only: it never runs anything, so every action still goes through the same policy and audit gates.</td>
 </tr>

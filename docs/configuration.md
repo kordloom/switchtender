@@ -87,6 +87,7 @@ Runs the HTTP API, the in-process executor, the scheduler, the retention sweeper
 | `--notify-teams` | none | Microsoft Teams incoming webhook URL that receives an Adaptive Card when a run finishes. Repeatable. |
 | `--notify-ntfy` | none | ntfy topic URL that receives a notification when a run finishes, such as https://ntfy.sh/my-topic. Repeatable. |
 | `--notify-ntfy-token` | none | Optional bearer token for a protected ntfy topic, applied to every `--notify-ntfy` URL. |
+| `--notify-pagerduty` | none | PagerDuty Events API routing key that triggers an incident when a run fails. Repeatable. |
 | `--allow-container-ee` | `false` | Allow runs whose project pins a container image to execute inside it. Needs Docker on the executor. |
 | `--container-memory` | `2g` | Memory cap for containerized runs, as docker `--memory`. Empty removes the cap. |
 | `--container-cpus` | `2` | CPU cap for containerized runs, as docker `--cpus`. Empty removes the cap. |

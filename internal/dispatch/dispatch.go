@@ -124,6 +124,8 @@ type Dispatcher struct {
 	ntfyURLs []string
 	// ntfyToken is an optional bearer token for a protected ntfy topic.
 	ntfyToken string
+	// pagerdutyKeys are PagerDuty Events API routing keys that receive an incident when a run fails.
+	pagerdutyKeys []string
 	// emailer sends terminal run notifications by email, nil when email is off.
 	emailer Emailer
 	// emailOnFailureOnly limits email notifications to failed runs.
@@ -173,6 +175,8 @@ type config struct {
 	ntfyURLs []string
 	// ntfyToken is an optional bearer token for a protected ntfy topic.
 	ntfyToken string
+	// pagerdutyKeys are PagerDuty Events API routing keys that receive an incident when a run fails.
+	pagerdutyKeys []string
 	// emailer sends terminal run notifications by email, nil when email is off.
 	emailer Emailer
 	// emailOnFailureOnly limits email notifications to failed runs.
@@ -270,6 +274,7 @@ func New(store run.Store, runner roundhouse.Runner, log *zap.Logger, opts ...Opt
 		teamsWebhooks:      cfg.teamsWebhooks,
 		ntfyURLs:           cfg.ntfyURLs,
 		ntfyToken:          cfg.ntfyToken,
+		pagerdutyKeys:      cfg.pagerdutyKeys,
 		emailer:            cfg.emailer,
 		emailOnFailureOnly: cfg.emailOnFailureOnly,
 		inventories:        cfg.inventories,
