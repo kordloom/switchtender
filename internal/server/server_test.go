@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -19,6 +20,7 @@ import (
 	"github.com/dcadolph/switchtender/internal/event"
 	"github.com/dcadolph/switchtender/internal/grant"
 	"github.com/dcadolph/switchtender/internal/live"
+	"github.com/dcadolph/switchtender/internal/roundhouse"
 	"github.com/dcadolph/switchtender/internal/run"
 	"github.com/dcadolph/switchtender/internal/schedule"
 	"github.com/dcadolph/switchtender/internal/template"
@@ -113,11 +115,15 @@ func (f *fakeSubmitter) SubmitSplit(_ context.Context, playbook, inventory strin
 	return f.run, nil
 }
 
-// SubmitPipeline records the step count and returns the configured run or error.
-func (f *fakeSubmitter) SubmitPipeline(_ context.Context, name, inventory string, steps []run.PipelineStep, _ ...run.SubmitOption) (*run.Run, error) {
+// SubmitPipeline records the step count, applies the options to a probe run for assertions, and
+// returns the configured run or error.
+func (f *fakeSubmitter) SubmitPipeline(_ context.Context, name, inventory string, steps []run.PipelineStep, opts ...run.SubmitOption) (*run.Run, error) {
 	f.gotPlaybook = name
 	f.gotInventory = inventory
 	f.gotSteps = len(steps)
+	probe := &run.Run{Playbook: name, Inventory: inventory}
+	run.ApplyOptions(probe, opts)
+	f.gotRun = probe
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -205,6 +211,108 @@ func TestCreateRunSplitRoutesToSubmitSplit(t *testing.T) {
 	}
 	if sub.gotShards != 3 {
 		t.Errorf("SubmitSplit shards = %d, want 3", sub.gotShards)
+	}
+}
+
+// TestCreateRunForwardsIdempotencyKey verifies the handler turns the Idempotency-Key header into a
+// submit option, trimming whitespace and treating a blank header as no key.
+func TestCreateRunForwardsIdempotencyKey(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Name    string
+		Header  string
+		SetIt   bool
+		WantKey string
+	}{
+		{Name: "with key", Header: "idem-abc", SetIt: true, WantKey: "idem-abc"},
+		{Name: "no header", SetIt: false, WantKey: ""},
+		{Name: "whitespace only", Header: "   ", SetIt: true, WantKey: ""},
+		{Name: "trimmed", Header: "  idem-xyz  ", SetIt: true, WantKey: "idem-xyz"},
+	}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			sub := &fakeSubmitter{run: &run.Run{ID: "run_1", Status: run.StatusPending}}
+			handler := New(run.NewMemStore(), sub, zap.NewNop()).Handler()
+			req := httptest.NewRequest(http.MethodPost, "/v1/runs",
+				strings.NewReader(`{"playbook":"site.yml"}`))
+			if test.SetIt {
+				req.Header.Set("Idempotency-Key", test.Header)
+			}
+			rec := httptest.NewRecorder()
+
+			handler.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusAccepted {
+				t.Fatalf("status = %d, want 202: %s", rec.Code, rec.Body.String())
+			}
+			if sub.gotRun == nil {
+				t.Fatal("submitter received no run")
+			}
+			if sub.gotRun.IdempotencyKey != test.WantKey {
+				t.Errorf("idempotency key = %q, want %q", sub.gotRun.IdempotencyKey, test.WantKey)
+			}
+		})
+	}
+}
+
+// TestCreatePipelineForwardsIdempotencyKey verifies the pipeline handler forwards the header too.
+func TestCreatePipelineForwardsIdempotencyKey(t *testing.T) {
+	t.Parallel()
+	sub := &fakeSubmitter{run: &run.Run{ID: "run_p", Status: run.StatusPending}}
+	handler := New(run.NewMemStore(), sub, zap.NewNop()).Handler()
+	req := httptest.NewRequest(http.MethodPost, "/v1/pipelines",
+		strings.NewReader(`{"name":"deploy","steps":[{"name":"s1","playbook":"p.yml"}]}`))
+	req.Header.Set("Idempotency-Key", "idem-pipe")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202: %s", rec.Code, rec.Body.String())
+	}
+	if sub.gotRun == nil || sub.gotRun.IdempotencyKey != "idem-pipe" {
+		t.Errorf("pipeline idempotency key = %+v, want idem-pipe", sub.gotRun)
+	}
+}
+
+// TestCreateRunIdempotentReplay drives the whole path with a real dispatcher: a repeated POST
+// carrying the same header returns the same run id, and a different key is a new run.
+func TestCreateRunIdempotentReplay(t *testing.T) {
+	t.Parallel()
+	store := run.NewMemStore()
+	runner := roundhouse.RunnerFunc(
+		func(context.Context, roundhouse.Spec, io.Writer) (roundhouse.Result, error) {
+			return roundhouse.Result{ExitCode: 0}, nil
+		},
+	)
+	d := dispatch.New(store, runner, zap.NewNop())
+	defer d.Close()
+	handler := New(store, d, zap.NewNop()).Handler()
+
+	post := func(key string) string {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, "/v1/runs",
+			strings.NewReader(`{"playbook":"site.yml","inventory":"inv"}`))
+		req.Header.Set("Idempotency-Key", key)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusAccepted {
+			t.Fatalf("status = %d, want 202: %s", rec.Code, rec.Body.String())
+		}
+		var got run.Run
+		if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		return got.ID
+	}
+
+	first := post("idem-xyz")
+	if second := post("idem-xyz"); second != first {
+		t.Errorf("replayed POST id = %q, want %q", second, first)
+	}
+	if third := post("idem-other"); third == first {
+		t.Error("a different key returned the original run")
 	}
 }
 

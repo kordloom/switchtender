@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"io"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -101,6 +102,68 @@ func TestHAReplicasShareTheQueue(t *testing.T) {
 	}
 	if owners["replica-a"] == 0 || owners["replica-b"] == 0 {
 		t.Errorf("claim distribution = %v, want both replicas participating", owners)
+	}
+}
+
+// TestHAIdempotentSubmitNeverDoubleFires proves the store-backed dedup holds across replicas: many
+// submits split over two active replicas, all carrying one idempotency key, create a single run.
+// This is the case a client retry after a dropped response causes, landing on a different node than
+// the original, which an in-memory guard on one node could not catch.
+func TestHAIdempotentSubmitNeverDoubleFires(t *testing.T) {
+	dsn := testDSN(t)
+	// Opening applies the schema, so a fresh database has tables before the truncate.
+	openReplica(t, dsn)
+	truncateAll(t, dsn)
+
+	runner := roundhouse.RunnerFunc(
+		func(context.Context, roundhouse.Spec, io.Writer) (roundhouse.Result, error) {
+			return roundhouse.Result{ExitCode: 0}, nil
+		},
+	)
+	a := dispatch.New(openReplica(t, dsn).Runs(), runner, zap.NewNop(),
+		dispatch.WithOwner("replica-a"), dispatch.WithClaimInterval(20*time.Millisecond))
+	defer a.Close()
+	b := dispatch.New(openReplica(t, dsn).Runs(), runner, zap.NewNop(),
+		dispatch.WithOwner("replica-b"), dispatch.WithClaimInterval(20*time.Millisecond))
+	defer b.Close()
+
+	const key = "idem-ha"
+	const total = 10
+	replicas := []*dispatch.Dispatcher{a, b}
+	ids := make([]string, total)
+	errs := make([]error, total)
+	var wg sync.WaitGroup
+	wg.Add(total)
+	for i := range total {
+		go func(i int) {
+			defer wg.Done()
+			r, err := replicas[i%2].Submit(context.Background(), "play.yml", "inv.ini",
+				run.WithIdempotencyKey(key))
+			errs[i] = err
+			if r != nil {
+				ids[i] = r.ID
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("Submit[%d] error = %v", i, err)
+		}
+	}
+	for i := 1; i < total; i++ {
+		if ids[i] != ids[0] {
+			t.Errorf("submit %d id = %q, want %q, every replica must resolve the key to one run", i, ids[i], ids[0])
+		}
+	}
+	store := openReplica(t, dsn).Runs()
+	runs, err := store.List(context.Background())
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(runs) != 1 {
+		t.Errorf("List() len = %d, want exactly 1 run despite %d submits across two replicas", len(runs), total)
 	}
 }
 

@@ -13,10 +13,15 @@ import (
 // Store persists runs, their captured log output, and their structured events.
 // Implementations must be safe for concurrent use.
 type Store interface {
-	// Save inserts or replaces the run identified by r.ID.
+	// Save inserts or replaces the run identified by r.ID. When r carries a non-empty
+	// IdempotencyKey that a different run already holds, it makes no change and returns
+	// ErrDuplicateKey, the race backstop that lets one of two concurrent submissions win the key.
 	Save(ctx context.Context, r *Run) error
 	// Get returns the run with the given id, or ErrNotFound.
 	Get(ctx context.Context, id string) (*Run, error)
+	// ByIdempotencyKey returns the run that holds key, or ErrNotFound when no run does. An empty key
+	// is never found, so a keyless submission is never deduped.
+	ByIdempotencyKey(ctx context.Context, key string) (*Run, error)
 	// List returns top-level runs, excluding shard runs, ordered by creation time, newest first.
 	List(ctx context.Context) ([]*Run, error)
 	// ListPage returns top-level runs newest first, capped at limit and skipping offset, so the
@@ -100,6 +105,9 @@ type memStore struct {
 	mu sync.RWMutex
 	// runs maps run id to the stored run.
 	runs map[string]*Run
+	// byKey maps a non-empty idempotency key to the id of the run that holds it, mirroring the
+	// partial unique index the SQL backends use to dedupe submissions.
+	byKey map[string]string
 	// logs maps run id to accumulated output bytes.
 	logs map[string][]byte
 	// events maps run id to accumulated structured events.
@@ -114,6 +122,7 @@ type memStore struct {
 func NewMemStore() Store {
 	return &memStore{
 		runs:      make(map[string]*Run),
+		byKey:     make(map[string]string),
 		logs:      make(map[string][]byte),
 		events:    make(map[string][]event.Event),
 		summaries: make(map[string][]HostSummary),
@@ -121,13 +130,22 @@ func NewMemStore() Store {
 	}
 }
 
-// Save inserts or replaces the run identified by r.ID.
+// Save inserts or replaces the run identified by r.ID. A non-empty idempotency key already held by a
+// different run is rejected with ErrDuplicateKey so a concurrent retry cannot create a second run.
 func (m *memStore) Save(_ context.Context, r *Run) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if r.IdempotencyKey != "" {
+		if owner, ok := m.byKey[r.IdempotencyKey]; ok && owner != r.ID {
+			return ErrDuplicateKey
+		}
+	}
 	m.runs[r.ID] = r.Clone()
 	if _, ok := m.logs[r.ID]; !ok {
 		m.logs[r.ID] = nil
+	}
+	if r.IdempotencyKey != "" {
+		m.byKey[r.IdempotencyKey] = r.ID
 	}
 	return nil
 }
@@ -136,6 +154,24 @@ func (m *memStore) Save(_ context.Context, r *Run) error {
 func (m *memStore) Get(_ context.Context, id string) (*Run, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	r, ok := m.runs[id]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	return r.Clone(), nil
+}
+
+// ByIdempotencyKey returns the run that holds key, or ErrNotFound. An empty key is never found.
+func (m *memStore) ByIdempotencyKey(_ context.Context, key string) (*Run, error) {
+	if key == "" {
+		return nil, ErrNotFound
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	id, ok := m.byKey[key]
+	if !ok {
+		return nil, ErrNotFound
+	}
 	r, ok := m.runs[id]
 	if !ok {
 		return nil, ErrNotFound
@@ -726,6 +762,9 @@ func (m *memStore) PurgeRunsBefore(_ context.Context, cutoff time.Time) (int, er
 	for id, r := range m.runs {
 		if !r.Status.Terminal() || !r.CreatedAt.Before(cutoff) {
 			continue
+		}
+		if r.IdempotencyKey != "" && m.byKey[r.IdempotencyKey] == id {
+			delete(m.byKey, r.IdempotencyKey)
 		}
 		delete(m.runs, id)
 		delete(m.events, id)

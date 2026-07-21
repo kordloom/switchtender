@@ -104,6 +104,143 @@ func TestDispatcherExecute(t *testing.T) {
 	}
 }
 
+// okRunner reports success without doing anything, for tests that exercise submission rather than
+// execution output.
+func okRunner() roundhouse.Runner {
+	return roundhouse.RunnerFunc(
+		func(context.Context, roundhouse.Spec, io.Writer) (roundhouse.Result, error) {
+			return roundhouse.Result{ExitCode: 0}, nil
+		},
+	)
+}
+
+// TestSubmitIdempotency verifies a keyed submit dedupes: the same key returns the original run, a
+// different key is a new run, and a keyless submit never dedupes.
+func TestSubmitIdempotency(t *testing.T) {
+	t.Parallel()
+	store := run.NewMemStore()
+	d := New(store, okRunner(), nil)
+	defer d.Close()
+	ctx := context.Background()
+
+	first, err := d.Submit(ctx, "play.yml", "inv", run.WithIdempotencyKey("idem_1"))
+	if err != nil {
+		t.Fatalf("Submit(first) error = %v", err)
+	}
+	second, err := d.Submit(ctx, "play.yml", "inv", run.WithIdempotencyKey("idem_1"))
+	if err != nil {
+		t.Fatalf("Submit(second) error = %v", err)
+	}
+	if second.ID != first.ID {
+		t.Errorf("second submit id = %q, want %q, a retry must return the original run", second.ID, first.ID)
+	}
+
+	other, err := d.Submit(ctx, "play.yml", "inv", run.WithIdempotencyKey("idem_2"))
+	if err != nil {
+		t.Fatalf("Submit(other) error = %v", err)
+	}
+	if other.ID == first.ID {
+		t.Error("a different key returned the original run")
+	}
+
+	a, err := d.Submit(ctx, "play.yml", "inv")
+	if err != nil {
+		t.Fatalf("Submit(a) error = %v", err)
+	}
+	b, err := d.Submit(ctx, "play.yml", "inv")
+	if err != nil {
+		t.Fatalf("Submit(b) error = %v", err)
+	}
+	if a.ID == b.ID {
+		t.Error("keyless submits deduped, want two independent runs")
+	}
+
+	// first and second are one run; other, a, and b are three more, for four distinct runs.
+	runs, err := store.List(ctx)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(runs) != 4 {
+		t.Errorf("List() len = %d, want 4 distinct runs", len(runs))
+	}
+}
+
+// TestSubmitIdempotencyConcurrent verifies the unique-index backstop: many submits racing on one
+// key all resolve to a single run, none creating a duplicate.
+func TestSubmitIdempotencyConcurrent(t *testing.T) {
+	t.Parallel()
+	store := run.NewMemStore()
+	d := New(store, okRunner(), nil)
+	defer d.Close()
+
+	const n = 8
+	const key = "idem_race"
+	ids := make([]string, n)
+	errs := make([]error, n)
+	var wg sync.WaitGroup
+	wg.Add(n)
+	for i := range n {
+		go func(i int) {
+			defer wg.Done()
+			r, err := d.Submit(context.Background(), "play.yml", "inv", run.WithIdempotencyKey(key))
+			errs[i] = err
+			if r != nil {
+				ids[i] = r.ID
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("Submit[%d] error = %v", i, err)
+		}
+	}
+	for i := 1; i < n; i++ {
+		if ids[i] != ids[0] {
+			t.Errorf("submit %d id = %q, want %q, all racers must share one run", i, ids[i], ids[0])
+		}
+	}
+	runs, err := store.List(context.Background())
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(runs) != 1 {
+		t.Errorf("List() len = %d, want exactly 1 run despite %d concurrent submits", len(runs), n)
+	}
+}
+
+// TestSubmitPipelineIdempotency verifies a retried pipeline returns the original parent instead of
+// launching its steps a second time.
+func TestSubmitPipelineIdempotency(t *testing.T) {
+	t.Parallel()
+	store := run.NewMemStore()
+	d := New(store, okRunner(), nil)
+	defer d.Close()
+	ctx := context.Background()
+	steps := []run.PipelineStep{{Name: "s1", Playbook: "step.yml"}}
+
+	first, err := d.SubmitPipeline(ctx, "deploy", "inv", steps, run.WithIdempotencyKey("idem_pipe"))
+	if err != nil {
+		t.Fatalf("SubmitPipeline(first) error = %v", err)
+	}
+	second, err := d.SubmitPipeline(ctx, "deploy", "inv", steps, run.WithIdempotencyKey("idem_pipe"))
+	if err != nil {
+		t.Fatalf("SubmitPipeline(second) error = %v", err)
+	}
+	if second.ID != first.ID {
+		t.Errorf("second pipeline id = %q, want %q", second.ID, first.ID)
+	}
+	// Only the one parent is top-level; a second pipeline would add another.
+	runs, err := store.List(ctx)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(runs) != 1 {
+		t.Errorf("List() len = %d, want 1 pipeline parent", len(runs))
+	}
+}
+
 func TestDispatcherStoresEvents(t *testing.T) {
 	t.Parallel()
 	store := run.NewMemStore()

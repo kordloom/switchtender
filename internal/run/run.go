@@ -201,6 +201,11 @@ type Run struct {
 	// was proposed from a description and is born held for approval, so an approver can judge the
 	// generated run against what was asked before anything executes.
 	Intent string `json:"intent,omitempty"`
+	// IdempotencyKey dedupes a submission. A retried submit carrying the same key returns the
+	// original run instead of creating a second, so a dropped response or a client retry cannot
+	// double-fire a run. Empty means no dedup. It is set from the Idempotency-Key request header and
+	// is a server-side control field, not part of the run's public representation.
+	IdempotencyKey string `json:"-"`
 }
 
 // Clone returns a deep copy so callers cannot mutate stored state through shared pointers.
@@ -341,6 +346,14 @@ func WithProposedFrom(checkRunID string) SubmitOption {
 func WithIntent(intent string) SubmitOption {
 	return func(r *Run) {
 		r.Intent = intent
+	}
+}
+
+// WithIdempotencyKey dedupes the submission under key so a retried submit returns the original run
+// rather than firing a second. An empty key is a no-op and never dedupes.
+func WithIdempotencyKey(key string) SubmitOption {
+	return func(r *Run) {
+		r.IdempotencyKey = key
 	}
 }
 

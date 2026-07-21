@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/dcadolph/switchtender/internal/audit"
@@ -68,10 +69,16 @@ CREATE TABLE IF NOT EXISTS runs (
 	proposed_from TEXT NOT NULL DEFAULT '',
 	intent        TEXT NOT NULL DEFAULT '',
 	image         TEXT NOT NULL DEFAULT '',
-	pull_credential_id TEXT NOT NULL DEFAULT ''
+	pull_credential_id TEXT NOT NULL DEFAULT '',
+	idempotency_key TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_runs_created_at ON runs(created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_parent ON runs(parent_id, shard_index);
+-- CREATE TABLE IF NOT EXISTS is a no-op on a database created before this column, so the column is
+-- also added on the fly and only then indexed, keeping the run submission dedup working after an
+-- upgrade. Both statements are idempotent, so a fresh database and an existing one converge.
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS idempotency_key TEXT NOT NULL DEFAULT '';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_runs_idempotency_key ON runs(idempotency_key) WHERE idempotency_key <> '';
 CREATE TABLE IF NOT EXISTS run_logs (
 	seq    BIGSERIAL PRIMARY KEY,
 	run_id TEXT NOT NULL,
@@ -337,6 +344,18 @@ func Open(dsn string) (*DB, error) {
 		policies:    &policyStore{db: db}}, nil
 }
 
+// pgUniqueViolation is the PostgreSQL SQLSTATE code for a unique constraint or index violation.
+const pgUniqueViolation = "23505"
+
+// isKeyConflict reports whether a keyed insert failed because another run already holds the
+// idempotency key. A runs insert carrying a key can only trip the idempotency-key unique index, its
+// primary-key conflict being absorbed by ON CONFLICT(id), so a unique violation on one is that race
+// and maps to run.ErrDuplicateKey.
+func isKeyConflict(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation
+}
+
 // Runs returns the run store.
 func (d *DB) Runs() run.Store {
 	return d.runs
@@ -417,7 +436,7 @@ const runColumns = `id, playbook, inventory, status, exit_code, error, created_a
 	ended_at, parent_id, shard_index, shard_count, limit_pattern, kind, step_name, step_index,
 	retry_of, attempt, extra_vars, outputs, claimed_by, claimed_at, cancel_requested,
 	credential_ids, project_id, commit_sha, inventory_id, queue, tool, command, dry_run,
-	proposed_from, intent, image, pull_credential_id`
+	proposed_from, intent, image, pull_credential_id, idempotency_key`
 
 // Save inserts or replaces the run identified by r.ID.
 func (s *store) Save(ctx context.Context, r *run.Run) error {
@@ -427,9 +446,9 @@ INSERT INTO runs
 	 parent_id, shard_index, shard_count, limit_pattern, kind, step_name, step_index, retry_of,
 	 attempt, extra_vars, outputs, claimed_by, claimed_at, cancel_requested, credential_ids,
 	 project_id, commit_sha, inventory_id, queue, tool, command, dry_run, proposed_from, intent,
-	 image, pull_credential_id)
+	 image, pull_credential_id, idempotency_key)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
-	$21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35)
+	$21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36)
 ON CONFLICT(id) DO UPDATE SET
 	playbook=excluded.playbook, inventory=excluded.inventory, status=excluded.status,
 	exit_code=excluded.exit_code, error=excluded.error, created_at=excluded.created_at,
@@ -443,7 +462,8 @@ ON CONFLICT(id) DO UPDATE SET
 	project_id=excluded.project_id, commit_sha=excluded.commit_sha,
 	inventory_id=excluded.inventory_id, queue=excluded.queue, tool=excluded.tool,
 	command=excluded.command, dry_run=excluded.dry_run, proposed_from=excluded.proposed_from,
-	intent=excluded.intent, image=excluded.image, pull_credential_id=excluded.pull_credential_id`
+	intent=excluded.intent, image=excluded.image, pull_credential_id=excluded.pull_credential_id,
+	idempotency_key=excluded.idempotency_key`
 	_, err := s.db.ExecContext(ctx, q,
 		r.ID, r.Playbook, r.Inventory, string(r.Status), nullInt(r.ExitCode), r.Error,
 		formatTime(r.CreatedAt), nullTime(r.StartedAt), nullTime(r.EndedAt),
@@ -452,9 +472,12 @@ ON CONFLICT(id) DO UPDATE SET
 		jsonMap(r.ExtraVars), jsonMap(r.Outputs), r.ClaimedBy, nullTime(r.ClaimedAt),
 		boolToInt(r.CancelRequested), joinIDs(r.CredentialIDs), r.ProjectID, r.CommitSHA,
 		r.InventoryID, r.Queue, r.Tool, r.Command, boolToInt(r.DryRun), r.ProposedFrom, r.Intent,
-		r.Image, r.PullCredentialID,
+		r.Image, r.PullCredentialID, r.IdempotencyKey,
 	)
 	if err != nil {
+		if r.IdempotencyKey != "" && isKeyConflict(err) {
+			return run.ErrDuplicateKey
+		}
 		return fmt.Errorf("save run: %w", err)
 	}
 	return nil
@@ -469,6 +492,22 @@ func (s *store) Get(ctx context.Context, id string) (*run.Run, error) {
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get run: %w", err)
+	}
+	return r, nil
+}
+
+// ByIdempotencyKey returns the run that holds key, or run.ErrNotFound. An empty key is never found.
+func (s *store) ByIdempotencyKey(ctx context.Context, key string) (*run.Run, error) {
+	if key == "" {
+		return nil, run.ErrNotFound
+	}
+	const q = "SELECT " + runColumns + " FROM runs WHERE idempotency_key=$1 LIMIT 1"
+	r, err := scanRun(s.db.QueryRowContext(ctx, q, key))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, run.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("by idempotency key: %w", err)
 	}
 	return r, nil
 }
@@ -1121,7 +1160,7 @@ func scanRun(s scanner) (*run.Run, error) {
 		&r.Kind, &r.StepName, &stepIdx, &retryOf, &r.Attempt, &extra, &outputs,
 		&r.ClaimedBy, &claimed, &cancelI, &credIDs, &r.ProjectID, &r.CommitSHA,
 		&r.InventoryID, &r.Queue, &r.Tool, &r.Command, &dryRun, &r.ProposedFrom, &r.Intent,
-		&r.Image, &r.PullCredentialID); err != nil {
+		&r.Image, &r.PullCredentialID, &r.IdempotencyKey); err != nil {
 		return nil, err
 	}
 	r.CancelRequested = cancelI != 0

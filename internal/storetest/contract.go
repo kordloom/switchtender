@@ -22,6 +22,7 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Helper()
 	t.Run("save and get", func(t *testing.T) { testSaveGet(t, newStore()) })
 	t.Run("get missing", func(t *testing.T) { testGetNotFound(t, newStore()) })
+	t.Run("idempotency key dedup", func(t *testing.T) { testByIdempotencyKey(t, newStore()) })
 	t.Run("save updates existing", func(t *testing.T) { testSaveUpdate(t, newStore()) })
 	t.Run("list newest first", func(t *testing.T) { testList(t, newStore()) })
 	t.Run("list page and status counts", func(t *testing.T) { testListPage(t, newStore()) })
@@ -62,6 +63,7 @@ func sampleRun(id string) *run.Run {
 		Outputs:   map[string]any{"built": true, "count": float64(2)},
 		Tool:      "bash", Command: "echo hi", DryRun: true,
 		ProposedFrom: "run_check", Intent: "echo hello on the box",
+		IdempotencyKey: "idem_sample",
 	}
 }
 
@@ -145,6 +147,68 @@ func testGetNotFound(t *testing.T, store run.Store) {
 	batch := []event.Event{{Type: event.TypePlayStart}}
 	if err := store.AppendEvents(ctx, "missing", batch); !errors.Is(err, run.ErrNotFound) {
 		t.Errorf("AppendEvents() = %v, want ErrNotFound", err)
+	}
+}
+
+// testByIdempotencyKey verifies submission dedup at the store: a saved key looks up its run, an
+// unused or empty key reports ErrNotFound, re-saving the same run under its key is an ordinary
+// update, and a different run claiming a used key is rejected with ErrDuplicateKey without landing,
+// the partial unique index that backstops a concurrent retry. An empty key never dedupes.
+func testByIdempotencyKey(t *testing.T, store run.Store) {
+	ctx := context.Background()
+
+	// An unused key and the empty key are never found.
+	if _, err := store.ByIdempotencyKey(ctx, "idem_unused"); !errors.Is(err, run.ErrNotFound) {
+		t.Errorf("ByIdempotencyKey(unused) = %v, want ErrNotFound", err)
+	}
+	if _, err := store.ByIdempotencyKey(ctx, ""); !errors.Is(err, run.ErrNotFound) {
+		t.Errorf("ByIdempotencyKey(empty) = %v, want ErrNotFound", err)
+	}
+
+	// A saved run is found by its key.
+	first := &run.Run{
+		ID: "run_a", Playbook: "p", Status: run.StatusPending,
+		CreatedAt: time.Now(), IdempotencyKey: "idem_1",
+	}
+	if err := store.Save(ctx, first); err != nil {
+		t.Fatalf("Save(first) error = %v", err)
+	}
+	got, err := store.ByIdempotencyKey(ctx, "idem_1")
+	if err != nil {
+		t.Fatalf("ByIdempotencyKey() error = %v", err)
+	}
+	if got.ID != "run_a" {
+		t.Errorf("ByIdempotencyKey() id = %q, want run_a", got.ID)
+	}
+
+	// Re-saving the same run under the same key is an ordinary update, not a conflict.
+	first.Status = run.StatusRunning
+	if err := store.Save(ctx, first); err != nil {
+		t.Errorf("re-Save(first) error = %v, want nil", err)
+	}
+
+	// A different run claiming the used key is rejected, the backstop for a concurrent retry.
+	second := &run.Run{
+		ID: "run_b", Playbook: "p", Status: run.StatusPending,
+		CreatedAt: time.Now(), IdempotencyKey: "idem_1",
+	}
+	if err := store.Save(ctx, second); !errors.Is(err, run.ErrDuplicateKey) {
+		t.Errorf("Save(second) = %v, want ErrDuplicateKey", err)
+	}
+	// The loser never landed: the key still resolves to the original winner, and run_b is absent.
+	if got, err := store.ByIdempotencyKey(ctx, "idem_1"); err != nil || got.ID != "run_a" {
+		t.Errorf("ByIdempotencyKey() after conflict = (%v, %v), want run_a", got, err)
+	}
+	if _, err := store.Get(ctx, "run_b"); !errors.Is(err, run.ErrNotFound) {
+		t.Errorf("Get(run_b) = %v, want ErrNotFound, the losing run must not persist", err)
+	}
+
+	// An empty key never dedupes: keyless runs coexist freely.
+	for _, id := range []string{"run_c", "run_d"} {
+		keyless := &run.Run{ID: id, Playbook: "p", Status: run.StatusPending, CreatedAt: time.Now()}
+		if err := store.Save(ctx, keyless); err != nil {
+			t.Errorf("Save(%s) keyless error = %v, want nil", id, err)
+		}
 	}
 }
 

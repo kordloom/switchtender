@@ -24,6 +24,10 @@ import (
 // defaultFleetWindow is the number of recent runs per host considered when no window is given.
 const defaultFleetWindow = 10
 
+// idempotencyKeyHeader carries a client-chosen key that dedupes a retried submission, so a dropped
+// response or a client retry on POST /runs and POST /pipelines cannot double-fire a run.
+const idempotencyKeyHeader = "Idempotency-Key"
+
 // createRunRequest is the JSON body accepted by POST /runs.
 type createRunRequest struct {
 	// Playbook is the path to the playbook to execute. Required for the Ansible tool.
@@ -432,6 +436,9 @@ func createRunHandler(submitter Submitter, authz *authorizer, log *zap.Logger) h
 			run.WithCredentialIDs(req.CredentialIDs),
 			run.WithTool(req.Tool), run.WithCommand(req.Command), run.WithDryRun(req.DryRun),
 		}
+		if key := strings.TrimSpace(r.Header.Get(idempotencyKeyHeader)); key != "" {
+			opts = append(opts, run.WithIdempotencyKey(key))
+		}
 		if req.ProjectID != "" {
 			opts = append(opts, run.WithProject(req.ProjectID))
 		}
@@ -510,6 +517,9 @@ func createPipelineHandler(submitter Submitter, authz *authorizer, log *zap.Logg
 		}
 
 		popts := []run.SubmitOption{run.WithCredentialIDs(req.CredentialIDs)}
+		if key := strings.TrimSpace(r.Header.Get(idempotencyKeyHeader)); key != "" {
+			popts = append(popts, run.WithIdempotencyKey(key))
+		}
 		if req.ProjectID != "" {
 			popts = append(popts, run.WithProject(req.ProjectID))
 		}

@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	_ "modernc.org/sqlite"
+	sqlite "modernc.org/sqlite"
 
 	"github.com/dcadolph/switchtender/internal/audit"
 	"github.com/dcadolph/switchtender/internal/auth"
@@ -69,7 +69,8 @@ CREATE TABLE IF NOT EXISTS runs (
 	proposed_from TEXT NOT NULL DEFAULT '',
 	intent        TEXT NOT NULL DEFAULT '',
 	image         TEXT NOT NULL DEFAULT '',
-	pull_credential_id TEXT NOT NULL DEFAULT ''
+	pull_credential_id TEXT NOT NULL DEFAULT '',
+	idempotency_key TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_runs_created_at ON runs(created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_parent ON runs(parent_id, shard_index);
@@ -326,6 +327,10 @@ func Open(path string) (*DB, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
+	if err := migrateRuns(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	return &DB{db: db, runs: &store{db: db}, schedules: &scheduleStore{db: db}, tokens: &tokenStore{db: db},
 		credentials: &credentialStore{db: db},
 		projects:    &projectStore{db: db},
@@ -338,6 +343,38 @@ func Open(path string) (*DB, error) {
 		teams:       &teamStore{db: db},
 		grants:      &grantStore{db: db},
 		policies:    &policyStore{db: db}}, nil
+}
+
+// migrateRuns brings an existing runs table up to the current shape. CREATE TABLE IF NOT EXISTS is a
+// no-op on a database that predates a column, so the idempotency key is added here and only then
+// indexed, keeping databases created before this column usable. Adding a column that already exists
+// is the ordinary case for a current database and is treated as success.
+func migrateRuns(db *sql.DB) error {
+	if _, err := db.Exec(
+		"ALTER TABLE runs ADD COLUMN idempotency_key TEXT NOT NULL DEFAULT ''"); err != nil &&
+		!strings.Contains(err.Error(), "duplicate column name") {
+		return fmt.Errorf("add idempotency_key column: %w", err)
+	}
+	if _, err := db.Exec(
+		"CREATE UNIQUE INDEX IF NOT EXISTS idx_runs_idempotency_key " +
+			"ON runs(idempotency_key) WHERE idempotency_key <> ''"); err != nil {
+		return fmt.Errorf("index idempotency_key: %w", err)
+	}
+	return nil
+}
+
+// sqliteConstraint is the primary SQLite result code shared by every constraint violation. The
+// extended unique code carries it in its low byte, so masking to it matches a unique violation
+// regardless of whether the driver reports the primary or extended code.
+const sqliteConstraint = 19
+
+// isKeyConflict reports whether a keyed insert failed because another run already holds the
+// idempotency key. A runs insert carrying a key can only trip the idempotency-key unique index, its
+// primary-key conflict being absorbed by ON CONFLICT(id), so any constraint violation on one is that
+// race and maps to run.ErrDuplicateKey.
+func isKeyConflict(err error) bool {
+	var serr *sqlite.Error
+	return errors.As(err, &serr) && serr.Code()&0xFF == sqliteConstraint
 }
 
 // Runs returns the run store.
@@ -420,7 +457,7 @@ const runColumns = `id, playbook, inventory, status, exit_code, error, created_a
 	ended_at, parent_id, shard_index, shard_count, limit_pattern, kind, step_name, step_index,
 	retry_of, attempt, extra_vars, outputs, claimed_by, claimed_at, cancel_requested,
 	credential_ids, project_id, commit_sha, inventory_id, queue, tool, command, dry_run,
-	proposed_from, intent, image, pull_credential_id`
+	proposed_from, intent, image, pull_credential_id, idempotency_key`
 
 // Save inserts or replaces the run identified by r.ID.
 func (s *store) Save(ctx context.Context, r *run.Run) error {
@@ -430,8 +467,8 @@ INSERT INTO runs
 	 parent_id, shard_index, shard_count, limit_pattern, kind, step_name, step_index, retry_of,
 	 attempt, extra_vars, outputs, claimed_by, claimed_at, cancel_requested, credential_ids,
 	 project_id, commit_sha, inventory_id, queue, tool, command, dry_run, proposed_from, intent,
-	 image, pull_credential_id)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	 image, pull_credential_id, idempotency_key)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
 	playbook=excluded.playbook, inventory=excluded.inventory, status=excluded.status,
 	exit_code=excluded.exit_code, error=excluded.error, created_at=excluded.created_at,
@@ -445,7 +482,8 @@ ON CONFLICT(id) DO UPDATE SET
 	project_id=excluded.project_id, commit_sha=excluded.commit_sha,
 	inventory_id=excluded.inventory_id, queue=excluded.queue, tool=excluded.tool,
 	command=excluded.command, dry_run=excluded.dry_run, proposed_from=excluded.proposed_from,
-	intent=excluded.intent, image=excluded.image, pull_credential_id=excluded.pull_credential_id`
+	intent=excluded.intent, image=excluded.image, pull_credential_id=excluded.pull_credential_id,
+	idempotency_key=excluded.idempotency_key`
 	_, err := s.db.ExecContext(ctx, q,
 		r.ID, r.Playbook, r.Inventory, string(r.Status), nullInt(r.ExitCode), r.Error,
 		formatTime(r.CreatedAt), nullTime(r.StartedAt), nullTime(r.EndedAt),
@@ -454,9 +492,12 @@ ON CONFLICT(id) DO UPDATE SET
 		jsonMap(r.ExtraVars), jsonMap(r.Outputs), r.ClaimedBy, nullTime(r.ClaimedAt),
 		boolToInt(r.CancelRequested), joinIDs(r.CredentialIDs), r.ProjectID, r.CommitSHA,
 		r.InventoryID, r.Queue, r.Tool, r.Command, boolToInt(r.DryRun), r.ProposedFrom, r.Intent,
-		r.Image, r.PullCredentialID,
+		r.Image, r.PullCredentialID, r.IdempotencyKey,
 	)
 	if err != nil {
+		if r.IdempotencyKey != "" && isKeyConflict(err) {
+			return run.ErrDuplicateKey
+		}
 		return fmt.Errorf("save run: %w", err)
 	}
 	return nil
@@ -471,6 +512,22 @@ func (s *store) Get(ctx context.Context, id string) (*run.Run, error) {
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get run: %w", err)
+	}
+	return r, nil
+}
+
+// ByIdempotencyKey returns the run that holds key, or run.ErrNotFound. An empty key is never found.
+func (s *store) ByIdempotencyKey(ctx context.Context, key string) (*run.Run, error) {
+	if key == "" {
+		return nil, run.ErrNotFound
+	}
+	const q = "SELECT " + runColumns + " FROM runs WHERE idempotency_key=? LIMIT 1"
+	r, err := scanRun(s.db.QueryRowContext(ctx, q, key))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, run.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("by idempotency key: %w", err)
 	}
 	return r, nil
 }
@@ -1118,7 +1175,7 @@ func scanRun(s scanner) (*run.Run, error) {
 		&r.Kind, &r.StepName, &stepIdx, &retryOf, &r.Attempt, &extra, &outputs,
 		&r.ClaimedBy, &claimed, &cancelI, &credIDs, &r.ProjectID, &r.CommitSHA,
 		&r.InventoryID, &r.Queue, &r.Tool, &r.Command, &dryRun, &r.ProposedFrom, &r.Intent,
-		&r.Image, &r.PullCredentialID); err != nil {
+		&r.Image, &r.PullCredentialID, &r.IdempotencyKey); err != nil {
 		return nil, err
 	}
 	r.CancelRequested = cancelI != 0

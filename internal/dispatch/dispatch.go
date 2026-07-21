@@ -406,8 +406,46 @@ func requireStepInput(s run.PipelineStep) error {
 	return nil
 }
 
+// idempotentLookup returns the run already recorded under key, or nil when the key is empty or
+// unused. A retried submission carrying a key a prior submission already used resolves to that
+// original run, so the retry never fires a second run.
+func (d *Dispatcher) idempotentLookup(ctx context.Context, key string) (*run.Run, error) {
+	if key == "" {
+		return nil, nil
+	}
+	existing, err := d.store.ByIdempotencyKey(ctx, key)
+	if errors.Is(err, run.ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return existing, nil
+}
+
+// idempotentSave persists a newly built run and settles the concurrent-retry race the pre-check
+// cannot. When another submission claimed the same key between the lookup and this save, the store's
+// unique index rejects r with run.ErrDuplicateKey; the winning run is fetched and returned with dup
+// true so the caller returns it and skips any follow-on work such as spawning children. Without a
+// key it is an ordinary save.
+func (d *Dispatcher) idempotentSave(ctx context.Context, r *run.Run) (result *run.Run, dup bool, err error) {
+	saveErr := d.store.Save(ctx, r)
+	if errors.Is(saveErr, run.ErrDuplicateKey) {
+		winner, ferr := d.store.ByIdempotencyKey(ctx, r.IdempotencyKey)
+		if ferr != nil {
+			return nil, false, ferr
+		}
+		return winner, true, nil
+	}
+	if saveErr != nil {
+		return nil, false, saveErr
+	}
+	return r, false, nil
+}
+
 // Submit accepts a run for a tool against inventory and returns the created run in pending state.
-// Execution proceeds asynchronously; callers observe progress through the store.
+// Execution proceeds asynchronously; callers observe progress through the store. A submission
+// carrying an idempotency key that a prior submit already used returns that original run untouched.
 func (d *Dispatcher) Submit(ctx context.Context, playbook, inventory string, opts ...run.SubmitOption) (*run.Run, error) {
 	r := &run.Run{
 		ID:        run.NewID(),
@@ -420,6 +458,11 @@ func (d *Dispatcher) Submit(ctx context.Context, playbook, inventory string, opt
 	if err := requireToolInput(r); err != nil {
 		return nil, err
 	}
+	if existing, err := d.idempotentLookup(ctx, r.IdempotencyKey); err != nil {
+		return nil, err
+	} else if existing != nil {
+		return existing, nil
+	}
 	if err := d.validateRun(ctx, r); err != nil {
 		return nil, err
 	}
@@ -427,11 +470,12 @@ func (d *Dispatcher) Submit(ctx context.Context, playbook, inventory string, opt
 	if r.Status != run.StatusPendingApproval && d.requiresApproval(ctx, r) {
 		r.Status = run.StatusPendingApproval
 	}
-	if err := d.store.Save(ctx, r); err != nil {
+	created, _, err := d.idempotentSave(ctx, r)
+	if err != nil {
 		return nil, err
 	}
 	// Execution happens through the claim loop, here or in any worker sharing the store.
-	return r, nil
+	return created, nil
 }
 
 // SubmitSplit shards a run across the inventory and returns the parent run in pending state. Each
@@ -443,6 +487,12 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 	// Sharding fans a playbook across inventory hosts, which only Ansible does; other tools run once.
 	probe := &run.Run{}
 	run.ApplyOptions(probe, opts)
+	// A retried split returns the original parent without re-listing hosts or resharding.
+	if existing, err := d.idempotentLookup(ctx, probe.IdempotencyKey); err != nil {
+		return nil, err
+	} else if existing != nil {
+		return existing, nil
+	}
 	if run.NormalizeTool(probe.Tool) != run.ToolAnsible {
 		return d.Submit(ctx, playbook, inventory, opts...)
 	}
@@ -491,8 +541,13 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 		return nil, err
 	}
 	d.resolveQueue(ctx, parent)
-	if err := d.store.Save(ctx, parent); err != nil {
+	created, dup, err := d.idempotentSave(ctx, parent)
+	if err != nil {
 		return nil, err
+	}
+	if dup {
+		// A concurrent submission won the key; return its parent and create no children here.
+		return created, nil
 	}
 
 	parentID := parent.ID
@@ -733,12 +788,23 @@ func (d *Dispatcher) SubmitPipeline(ctx context.Context, name, inventory string,
 		Status: run.StatusPending, CreatedAt: time.Now(),
 	}
 	run.ApplyOptions(parent, opts)
+	// A retried pipeline returns the original parent instead of running its steps a second time.
+	if existing, err := d.idempotentLookup(ctx, parent.IdempotencyKey); err != nil {
+		return nil, err
+	} else if existing != nil {
+		return existing, nil
+	}
 	if err := d.validateRun(ctx, parent); err != nil {
 		return nil, err
 	}
 	d.resolveQueue(ctx, parent)
-	if err := d.store.Save(ctx, parent); err != nil {
+	created, dup, err := d.idempotentSave(ctx, parent)
+	if err != nil {
 		return nil, err
+	}
+	if dup {
+		// A concurrent submission won the key; return its parent and start no steps here.
+		return created, nil
 	}
 
 	d.wg.Add(1)

@@ -2,6 +2,8 @@ package sqlitestore_test
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"github.com/dcadolph/switchtender/internal/audit"
 	"github.com/dcadolph/switchtender/internal/audittest"
 	"github.com/dcadolph/switchtender/internal/auth"
@@ -49,6 +51,66 @@ func TestStoreContract(t *testing.T) {
 		t.Cleanup(func() { _ = db.Close() })
 		return db.Runs()
 	})
+}
+
+// TestStoreMigratesIdempotencyKey proves the on-open migration recovers a database created before
+// the idempotency key existed. CREATE TABLE IF NOT EXISTS is a no-op on such a database, so the
+// column and its unique index must be added on open or submission dedup silently would not work.
+func TestStoreMigratesIdempotencyKey(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "switchtender.db")
+
+	// Open once to build the current schema, then strip the column and index to mimic an older
+	// database, the exact state an upgrade must heal.
+	db, err := sqlitestore.Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open raw db: %v", err)
+	}
+	for _, stmt := range []string{
+		"DROP INDEX IF EXISTS idx_runs_idempotency_key",
+		"ALTER TABLE runs DROP COLUMN idempotency_key",
+	} {
+		if _, err := raw.Exec(stmt); err != nil {
+			t.Fatalf("simulate old schema %q: %v", stmt, err)
+		}
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatalf("close raw db: %v", err)
+	}
+
+	// Reopening runs the migration, which must re-add the column and its unique index so dedup works.
+	migrated, err := sqlitestore.Open(path)
+	if err != nil {
+		t.Fatalf("reopen after downgrade error = %v", err)
+	}
+	t.Cleanup(func() { _ = migrated.Close() })
+	store := migrated.Runs()
+
+	first := &run.Run{
+		ID: "run_1", Playbook: "p", Status: run.StatusPending,
+		CreatedAt: time.Now(), IdempotencyKey: "idem",
+	}
+	if err := store.Save(ctx, first); err != nil {
+		t.Fatalf("Save() after migration error = %v", err)
+	}
+	if got, err := store.ByIdempotencyKey(ctx, "idem"); err != nil || got.ID != "run_1" {
+		t.Fatalf("ByIdempotencyKey() after migration = (%v, %v), want run_1", got, err)
+	}
+	second := &run.Run{
+		ID: "run_2", Playbook: "p", Status: run.StatusPending,
+		CreatedAt: time.Now(), IdempotencyKey: "idem",
+	}
+	if err := store.Save(ctx, second); !errors.Is(err, run.ErrDuplicateKey) {
+		t.Errorf("Save(second) after migration = %v, want ErrDuplicateKey, the unique index must be rebuilt", err)
+	}
 }
 
 func TestScheduleStoreContract(t *testing.T) {
