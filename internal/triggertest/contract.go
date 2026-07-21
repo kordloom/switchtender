@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dcadolph/switchtender/internal/trigger"
+	"github.com/kordloom/switchtender/internal/trigger"
 )
 
 // Contract runs the trigger.Store contract against a fresh store from newStore.

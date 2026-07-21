@@ -21,11 +21,11 @@ package sdk
 import (
 	"context"
 
-	"github.com/dcadolph/switchtender/internal/ai"
-	"github.com/dcadolph/switchtender/internal/dispatch"
-	"github.com/dcadolph/switchtender/internal/roundhouse"
-	"github.com/dcadolph/switchtender/internal/run"
-	"github.com/dcadolph/switchtender/internal/secretsource"
+	"github.com/kordloom/switchtender/internal/ai"
+	"github.com/kordloom/switchtender/internal/dispatch"
+	"github.com/kordloom/switchtender/internal/roundhouse"
+	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/secretsource"
 )
 
 // AIProvider turns a prompt into a completion for an advisory feature. It never sits in the

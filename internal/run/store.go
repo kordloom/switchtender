@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dcadolph/switchtender/internal/event"
+	"github.com/kordloom/switchtender/internal/event"
 )
 
 // Store persists runs, their captured log output, and their structured events.

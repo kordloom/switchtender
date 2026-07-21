@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/dcadolph/switchtender/internal/org"
+	"github.com/kordloom/switchtender/internal/org"
 )
 
 // orgStore is an org.Store backed by the shared PostgreSQL database.

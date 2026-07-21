@@ -11,8 +11,8 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 
-	"github.com/dcadolph/switchtender/internal/run"
-	"github.com/dcadolph/switchtender/internal/schedule"
+	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/schedule"
 )
 
 // Contract runs the full schedule.Store contract against a fresh store from newStore.

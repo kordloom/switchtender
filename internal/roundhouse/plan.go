@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/dcadolph/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/run"
 )
 
 // containerPlan describes how to run a Spec inside a container image independent of the host: the

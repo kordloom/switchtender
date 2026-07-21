@@ -20,7 +20,7 @@ builds:
     flags:
       - -trimpath
     ldflags:
-      - -s -w -X github.com/dcadolph/switchtender/cmd.Version={{ .Version }}
+      - -s -w -X github.com/kordloom/switchtender/cmd.Version={{ .Version }}
     mod_timestamp: "{{ .CommitTimestamp }}"
     goos:
       - darwin
@@ -73,13 +73,13 @@ sboms:
   - id: archives
     artifacts: archive
 
-# Homebrew cask, pushed to dcadolph/homebrew-tap. It skips the push until the tap token secret
+# Homebrew cask, pushed to kordloom/homebrew-tap. It skips the push until the tap token secret
 # exists, so a release never fails just because the tap is not set up yet.
 homebrew_casks:
   - name: switchtender
     skip_upload: '{{ if isEnvSet "HOMEBREW_TAP_GITHUB_TOKEN" }}false{{ else }}true{{ end }}'
     repository:
-      owner: dcadolph
+      owner: kordloom
       name: homebrew-tap
       token: '{{ envOrDefault "HOMEBREW_TAP_GITHUB_TOKEN" "" }}'
     homepage: "https://switchtender.com"
@@ -110,7 +110,7 @@ changelog:
 
 release:
   github:
-    owner: dcadolph
+    owner: kordloom
     name: switchtender
   prerelease: auto
   # The desktop .dmg is built and attached by the release workflow after this runs.

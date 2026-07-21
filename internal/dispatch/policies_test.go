@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dcadolph/switchtender/internal/policy"
-	"github.com/dcadolph/switchtender/internal/roundhouse"
-	"github.com/dcadolph/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/policy"
+	"github.com/kordloom/switchtender/internal/roundhouse"
+	"github.com/kordloom/switchtender/internal/run"
 )
 
 // TestPolicyHoldsMatchingRun confirms a run matching a stored policy is held for approval at submit

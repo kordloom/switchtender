@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/dcadolph/switchtender/internal/policy"
-	"github.com/dcadolph/switchtender/internal/policytest"
-	"github.com/dcadolph/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/policy"
+	"github.com/kordloom/switchtender/internal/policytest"
+	"github.com/kordloom/switchtender/internal/run"
 )
 
 // TestMemStoreContract runs the store contract against the in-memory policy store.

@@ -7,7 +7,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/switchtender/internal/importer"
+	"github.com/kordloom/switchtender/internal/importer"
 )
 
 // maxImportBody caps an uploaded export document, generous enough for a large AWX export.

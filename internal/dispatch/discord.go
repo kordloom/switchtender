@@ -6,7 +6,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/run"
 )
 
 // WithDiscord posts a formatted message to each Discord incoming webhook URL when a top-level run

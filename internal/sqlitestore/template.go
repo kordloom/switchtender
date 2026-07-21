@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/dcadolph/switchtender/internal/template"
+	"github.com/kordloom/switchtender/internal/template"
 )
 
 // templateColumns is the shared select list for template reads.

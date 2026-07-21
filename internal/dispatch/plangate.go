@@ -8,9 +8,9 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/switchtender/internal/policy"
-	"github.com/dcadolph/switchtender/internal/roundhouse"
-	"github.com/dcadolph/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/policy"
+	"github.com/kordloom/switchtender/internal/roundhouse"
+	"github.com/kordloom/switchtender/internal/run"
 )
 
 // parsePlanDestroys returns the destroy count from a plan's summary line, or zero when no summary is

@@ -13,9 +13,9 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/switchtender/internal/ai"
-	"github.com/dcadolph/switchtender/internal/event"
-	"github.com/dcadolph/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/ai"
+	"github.com/kordloom/switchtender/internal/event"
+	"github.com/kordloom/switchtender/internal/run"
 )
 
 // respondAIError maps a provider failure to an HTTP response, telling the user the model declined

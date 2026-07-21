@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/dcadolph/switchtender/internal/schedule"
+	"github.com/kordloom/switchtender/internal/schedule"
 )
 
 // scheduleColumns is the shared select list for schedule reads.

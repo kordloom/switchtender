@@ -91,7 +91,7 @@ the audit trail.
 Yes, in Go, two ways: compile an extension into the binary, or drop a plugin binary into
 `--plugins-dir` on a stock release. Both register execution tools, AI providers, secret engines,
 and notification channels. See [Extend in Go](sdk.md) and the official
-[switchtender-plugins](https://github.com/dcadolph/switchtender-plugins) repo for a working example.
+[switchtender-plugins](https://github.com/kordloom/switchtender-plugins) repo for a working example.
 
 ## What about scale?
 

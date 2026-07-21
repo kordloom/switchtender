@@ -5,7 +5,7 @@ import (
 	"embed"
 	"io/fs"
 
-	"github.com/dcadolph/switchtender/cmd"
+	"github.com/kordloom/switchtender/cmd"
 )
 
 // docsDir holds the documentation the server renders inside the web UI, embedded so the single

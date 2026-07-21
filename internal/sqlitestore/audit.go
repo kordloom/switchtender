@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/dcadolph/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/audit"
 )
 
 // rowQuerier runs a single-row query. Both *sql.DB and *sql.Tx satisfy it, so the chain head can be

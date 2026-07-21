@@ -10,8 +10,8 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/switchtender/internal/ai"
-	"github.com/dcadolph/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/ai"
+	"github.com/kordloom/switchtender/internal/run"
 )
 
 // TestProposeRun covers the propose endpoint: disabled 404, empty intent 400, a valid proposal

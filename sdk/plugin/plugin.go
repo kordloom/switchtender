@@ -22,8 +22,8 @@ import (
 	goplugin "github.com/hashicorp/go-plugin"
 	"google.golang.org/grpc"
 
-	"github.com/dcadolph/switchtender/internal/extproto"
-	"github.com/dcadolph/switchtender/sdk"
+	"github.com/kordloom/switchtender/internal/extproto"
+	"github.com/kordloom/switchtender/sdk"
 )
 
 // Handshake pairs a plugin binary with a SwitchTender that speaks its protocol. The cookie is not a

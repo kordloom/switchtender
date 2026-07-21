@@ -12,8 +12,8 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 
-	"github.com/dcadolph/switchtender/internal/event"
-	"github.com/dcadolph/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/event"
+	"github.com/kordloom/switchtender/internal/run"
 )
 
 // Contract runs the full run.Store contract against a fresh store from newStore. Each subtest gets

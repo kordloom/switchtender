@@ -18,8 +18,8 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/oauth2"
 
-	"github.com/dcadolph/switchtender/internal/auth"
-	"github.com/dcadolph/switchtender/internal/user"
+	"github.com/kordloom/switchtender/internal/auth"
+	"github.com/kordloom/switchtender/internal/user"
 )
 
 // oidcStateTTL bounds how long a sign-in may take from the redirect to the callback.

@@ -10,7 +10,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
-	"github.com/dcadolph/switchtender/internal/org"
+	"github.com/kordloom/switchtender/internal/org"
 )
 
 // Contract runs the org.Store contract against a fresh store from newStore.

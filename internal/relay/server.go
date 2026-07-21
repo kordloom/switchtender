@@ -9,9 +9,9 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/switchtender/internal/auth"
-	"github.com/dcadolph/switchtender/internal/event"
-	"github.com/dcadolph/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/auth"
+	"github.com/kordloom/switchtender/internal/event"
+	"github.com/kordloom/switchtender/internal/run"
 )
 
 // claimRequest is the body of a relay claim: the owner leasing work and the queues it serves.

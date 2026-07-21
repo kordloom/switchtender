@@ -19,8 +19,8 @@ import (
 	"github.com/crewjam/saml"
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/switchtender/internal/auth"
-	"github.com/dcadolph/switchtender/internal/user"
+	"github.com/kordloom/switchtender/internal/auth"
+	"github.com/kordloom/switchtender/internal/user"
 )
 
 // testIDPMetadata is a minimal identity provider metadata document with a redirect SSO binding.

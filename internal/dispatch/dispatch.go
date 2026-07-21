@@ -18,14 +18,14 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/switchtender/internal/credential"
-	"github.com/dcadolph/switchtender/internal/event"
-	"github.com/dcadolph/switchtender/internal/inventory"
-	"github.com/dcadolph/switchtender/internal/invsource"
-	"github.com/dcadolph/switchtender/internal/policy"
-	"github.com/dcadolph/switchtender/internal/project"
-	"github.com/dcadolph/switchtender/internal/roundhouse"
-	"github.com/dcadolph/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/credential"
+	"github.com/kordloom/switchtender/internal/event"
+	"github.com/kordloom/switchtender/internal/inventory"
+	"github.com/kordloom/switchtender/internal/invsource"
+	"github.com/kordloom/switchtender/internal/policy"
+	"github.com/kordloom/switchtender/internal/project"
+	"github.com/kordloom/switchtender/internal/roundhouse"
+	"github.com/kordloom/switchtender/internal/run"
 )
 
 // DefaultWorkers is the number of concurrent runs when none is configured.

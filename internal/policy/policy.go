@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dcadolph/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/run"
 )
 
 // DisabledMaxDestroy is the MaxDestroy value that turns a policy's plan-content check off. It is the

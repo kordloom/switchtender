@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dcadolph/switchtender/internal/event"
-	"github.com/dcadolph/switchtender/internal/retention"
-	"github.com/dcadolph/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/event"
+	"github.com/kordloom/switchtender/internal/retention"
+	"github.com/kordloom/switchtender/internal/run"
 )
 
 // TestSweepTrimsThenDeletes verifies a sweep trims events at the shorter window and deletes runs at

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dcadolph/switchtender/internal/secretsource"
+	"github.com/kordloom/switchtender/internal/secretsource"
 )
 
 // Kind classifies what a credential holds and how the runner materializes it.

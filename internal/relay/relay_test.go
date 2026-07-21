@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dcadolph/switchtender/internal/event"
-	"github.com/dcadolph/switchtender/internal/relay"
-	"github.com/dcadolph/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/event"
+	"github.com/kordloom/switchtender/internal/relay"
+	"github.com/kordloom/switchtender/internal/run"
 )
 
 // TestClientExecutionPath proves a run flows through the relay Client and its loopback transport into

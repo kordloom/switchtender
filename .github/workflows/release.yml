@@ -65,7 +65,7 @@ jobs:
 
           for arch in arm64 amd64; do
             CGO_ENABLED=0 GOOS=darwin GOARCH=$arch go build -trimpath \
-              -ldflags "-s -w -X github.com/dcadolph/switchtender/cmd.Version=$VERSION" \
+              -ldflags "-s -w -X github.com/kordloom/switchtender/cmd.Version=$VERSION" \
               -o "dist/desktop_$arch" .
           done
           lipo -create -output dist/desktop_universal dist/desktop_arm64 dist/desktop_amd64

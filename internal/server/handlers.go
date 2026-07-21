@@ -11,14 +11,14 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/switchtender/internal/credential"
-	"github.com/dcadolph/switchtender/internal/dispatch"
-	"github.com/dcadolph/switchtender/internal/event"
-	"github.com/dcadolph/switchtender/internal/grant"
-	"github.com/dcadolph/switchtender/internal/inventory"
-	"github.com/dcadolph/switchtender/internal/live"
-	"github.com/dcadolph/switchtender/internal/project"
-	"github.com/dcadolph/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/credential"
+	"github.com/kordloom/switchtender/internal/dispatch"
+	"github.com/kordloom/switchtender/internal/event"
+	"github.com/kordloom/switchtender/internal/grant"
+	"github.com/kordloom/switchtender/internal/inventory"
+	"github.com/kordloom/switchtender/internal/live"
+	"github.com/kordloom/switchtender/internal/project"
+	"github.com/kordloom/switchtender/internal/run"
 )
 
 // defaultFleetWindow is the number of recent runs per host considered when no window is given.

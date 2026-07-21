@@ -1,7 +1,7 @@
 package dispatch
 
 import (
-	"github.com/dcadolph/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/run"
 )
 
 // WithNtfy publishes a terminal run to each ntfy topic URL, such as https://ntfy.sh/my-topic or a

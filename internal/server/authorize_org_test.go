@@ -5,9 +5,9 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/dcadolph/switchtender/internal/grant"
-	"github.com/dcadolph/switchtender/internal/org"
-	"github.com/dcadolph/switchtender/internal/user"
+	"github.com/kordloom/switchtender/internal/grant"
+	"github.com/kordloom/switchtender/internal/org"
+	"github.com/kordloom/switchtender/internal/user"
 )
 
 // TestAuthorizeOrgGrant proves a grant to an organization reaches its members: a member of an org

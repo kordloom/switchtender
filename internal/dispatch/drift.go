@@ -7,7 +7,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/run"
 )
 
 // planSummary matches a Terraform or OpenTofu plan's change summary line, so a drift check can report

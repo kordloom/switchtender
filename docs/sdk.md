@@ -7,7 +7,7 @@
 
 # Extend SwitchTender in Go
 
-SwitchTender's seams are public. Import one package, `github.com/dcadolph/switchtender/sdk`, register
+SwitchTender's seams are public. Import one package, `github.com/kordloom/switchtender/sdk`, register
 what you built, and run it either way: compiled into the server binary, or dropped next to a stock
 release binary as a plugin the server loads at startup. A registered tool submits, validates,
 executes, and audits like a built-in. The SDK covers four kinds of extension:
@@ -46,7 +46,7 @@ Two files make a SwitchTender with a custom `hello` tool.
 
     go 1.26.4
 
-    require github.com/dcadolph/switchtender v1.7.0
+    require github.com/kordloom/switchtender v1.7.0
 
 `main.go`:
 
@@ -58,8 +58,8 @@ Two files make a SwitchTender with a custom `hello` tool.
         "fmt"
         "io"
 
-        "github.com/dcadolph/switchtender/cmd"
-        "github.com/dcadolph/switchtender/sdk"
+        "github.com/kordloom/switchtender/cmd"
+        "github.com/kordloom/switchtender/sdk"
     )
 
     // init registers the tool before the server starts.
@@ -108,8 +108,8 @@ main for `plugin.Serve` and build:
         "fmt"
         "io"
 
-        "github.com/dcadolph/switchtender/sdk"
-        "github.com/dcadolph/switchtender/sdk/plugin"
+        "github.com/kordloom/switchtender/sdk"
+        "github.com/kordloom/switchtender/sdk/plugin"
     )
 
     // main serves the extension as a plugin process.
@@ -145,7 +145,7 @@ release binary you did not build.
 Discord, ntfy, and Microsoft Teams are built-in notification channels, configured with the
 `--notify-discord`, `--notify-ntfy`, and `--notify-teams` flags, so they need no plugin. For a
 working example of the SDK itself, the
-[switchtender-plugins](https://github.com/dcadolph/switchtender-plugins) repo builds those same
+[switchtender-plugins](https://github.com/kordloom/switchtender-plugins) repo builds those same
 channels as a drop-in binary, doubling as the template for writing your own extension.
 
 ## The seams in detail

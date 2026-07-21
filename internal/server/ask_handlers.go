@@ -12,8 +12,8 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/switchtender/internal/ai"
-	"github.com/dcadolph/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/ai"
+	"github.com/kordloom/switchtender/internal/run"
 )
 
 // askSystemPrompt frames the model as a fleet analyst bound to the snapshot it is given.

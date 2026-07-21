@@ -21,8 +21,8 @@ import (
 	"github.com/crewjam/saml/samlsp"
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/switchtender/internal/auth"
-	"github.com/dcadolph/switchtender/internal/user"
+	"github.com/kordloom/switchtender/internal/auth"
+	"github.com/kordloom/switchtender/internal/user"
 )
 
 // samlStateTTL bounds how long a sign-in may take from the redirect to the assertion post.

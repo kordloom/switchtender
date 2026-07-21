@@ -34,7 +34,7 @@ Verify the signature over the checksums, then the archive against them:
     cosign verify-blob SHA256SUMS \
       --signature SHA256SUMS.sig \
       --certificate SHA256SUMS.pem \
-      --certificate-identity-regexp '^https://github.com/dcadolph/switchtender/.github/workflows/release.yml@.*' \
+      --certificate-identity-regexp '^https://github.com/kordloom/switchtender/.github/workflows/release.yml@.*' \
       --certificate-oidc-issuer https://token.actions.githubusercontent.com
 
     shasum -a 256 -c SHA256SUMS --ignore-missing

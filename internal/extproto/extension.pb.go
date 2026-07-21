@@ -952,7 +952,7 @@ const file_extension_proto_rawDesc = "" +
 	"\rResolveSecret\x12/.switchtender.extension.v1.ResolveSecretRequest\x1a0.switchtender.extension.v1.ResolveSecretResponse\x12i\n" +
 	"\n" +
 	"MintSecret\x12,.switchtender.extension.v1.MintSecretRequest\x1a-.switchtender.extension.v1.MintSecretResponse\x12l\n" +
-	"\vRevokeLease\x12-.switchtender.extension.v1.RevokeLeaseRequest\x1a..switchtender.extension.v1.RevokeLeaseResponseB4Z2github.com/dcadolph/switchtender/internal/extprotob\x06proto3"
+	"\vRevokeLease\x12-.switchtender.extension.v1.RevokeLeaseRequest\x1a..switchtender.extension.v1.RevokeLeaseResponseB4Z2github.com/kordloom/switchtender/internal/extprotob\x06proto3"
 
 var (
 	file_extension_proto_rawDescOnce sync.Once

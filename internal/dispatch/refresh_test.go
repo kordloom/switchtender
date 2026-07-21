@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/dcadolph/switchtender/internal/invsource"
+	"github.com/kordloom/switchtender/internal/invsource"
 )
 
 func TestValidateBareSource(t *testing.T) {

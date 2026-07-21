@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dcadolph/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/run"
 )
 
 func TestPythonRunner(t *testing.T) {

@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/dcadolph/switchtender/internal/trigger"
+	"github.com/kordloom/switchtender/internal/trigger"
 )
 
 // triggerColumns is the shared select list for trigger reads.

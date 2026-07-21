@@ -19,9 +19,9 @@ import (
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zapio"
 
-	"github.com/dcadolph/switchtender/internal/extproto"
-	"github.com/dcadolph/switchtender/sdk"
-	"github.com/dcadolph/switchtender/sdk/plugin"
+	"github.com/kordloom/switchtender/internal/extproto"
+	"github.com/kordloom/switchtender/sdk"
+	"github.com/kordloom/switchtender/sdk/plugin"
 )
 
 // describeTimeout bounds the first call to a freshly launched plugin.

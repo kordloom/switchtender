@@ -13,10 +13,10 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/switchtender/internal/grant"
-	"github.com/dcadolph/switchtender/internal/project"
-	"github.com/dcadolph/switchtender/internal/team"
-	"github.com/dcadolph/switchtender/internal/user"
+	"github.com/kordloom/switchtender/internal/grant"
+	"github.com/kordloom/switchtender/internal/project"
+	"github.com/kordloom/switchtender/internal/team"
+	"github.com/kordloom/switchtender/internal/user"
 )
 
 // fakeProjects is a project.Store that answers List from a fixed slice, leaving the rest unused.

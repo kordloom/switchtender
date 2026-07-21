@@ -5,7 +5,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/run"
 )
 
 // pagerDutyEndpoint is the PagerDuty Events API v2 enqueue URL. It is a package variable so a test can

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"maps"
 
-	"github.com/dcadolph/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/run"
 )
 
 // stepState tracks where a pipeline step is in the graph walk.

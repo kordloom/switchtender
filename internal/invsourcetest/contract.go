@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dcadolph/switchtender/internal/invsource"
+	"github.com/kordloom/switchtender/internal/invsource"
 )
 
 // Contract runs the invsource.Store contract against a fresh store from newStore.

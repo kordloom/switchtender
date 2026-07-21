@@ -11,13 +11,13 @@
   <a href="https://switchtender.com"><img
     src="https://img.shields.io/badge/website-switchtender.com-0969da"
     alt="Website"></a>
-  <a href="https://github.com/dcadolph/switchtender/actions/workflows/ci.yml"><img
-    src="https://github.com/dcadolph/switchtender/actions/workflows/ci.yml/badge.svg?branch=main"
+  <a href="https://github.com/kordloom/switchtender/actions/workflows/ci.yml"><img
+    src="https://github.com/kordloom/switchtender/actions/workflows/ci.yml/badge.svg?branch=main"
     alt="CI status"></a>
-  <a href="https://github.com/dcadolph/switchtender/releases"><img
-    src="https://img.shields.io/github/v/release/dcadolph/switchtender"
+  <a href="https://github.com/kordloom/switchtender/releases"><img
+    src="https://img.shields.io/github/v/release/kordloom/switchtender"
     alt="Latest release"></a>
-  <img src="https://img.shields.io/github/go-mod/go-version/dcadolph/switchtender"
+  <img src="https://img.shields.io/github/go-mod/go-version/kordloom/switchtender"
     alt="Go version">
   <a href="LICENSE"><img
     src="https://img.shields.io/badge/license-BSL%201.1-blue"
@@ -82,7 +82,7 @@ host, remembered across every run:
 
 ## Quick start
 
-Grab a build for your platform from the [releases page](https://github.com/dcadolph/switchtender/releases):
+Grab a build for your platform from the [releases page](https://github.com/kordloom/switchtender/releases):
 a `SwitchTender.dmg` for macOS, a `windows_amd64.zip` for Windows, or a `tar.gz` of the binary for
 macOS and Linux. Each release ships a cosign-signed `SHA256SUMS`; see [verifying a
 release](SECURITY.md#verifying-a-release). Or build from source:

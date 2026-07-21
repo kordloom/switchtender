@@ -1,7 +1,7 @@
 package dispatch
 
 import (
-	"github.com/dcadolph/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/run"
 )
 
 // WithMattermost posts a message to each Mattermost incoming webhook URL when a top-level run reaches

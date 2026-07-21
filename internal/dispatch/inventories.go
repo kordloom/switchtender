@@ -6,10 +6,10 @@ import (
 	"os"
 	"regexp"
 
-	"github.com/dcadolph/switchtender/internal/inventory"
-	"github.com/dcadolph/switchtender/internal/roundhouse"
-	"github.com/dcadolph/switchtender/internal/run"
-	"github.com/dcadolph/switchtender/internal/secretsource"
+	"github.com/kordloom/switchtender/internal/inventory"
+	"github.com/kordloom/switchtender/internal/roundhouse"
+	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/secretsource"
 )
 
 // WithInventories lets runs target stored inventories by id.

@@ -7,7 +7,7 @@ import (
 	"sync"
 	"unicode/utf8"
 
-	"github.com/dcadolph/switchtender/internal/event"
+	"github.com/kordloom/switchtender/internal/event"
 )
 
 // maskToken replaces a redacted secret value in run output.

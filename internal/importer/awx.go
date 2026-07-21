@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/dcadolph/switchtender/internal/credential"
-	"github.com/dcadolph/switchtender/internal/inventory"
-	"github.com/dcadolph/switchtender/internal/invsource"
-	"github.com/dcadolph/switchtender/internal/project"
-	"github.com/dcadolph/switchtender/internal/schedule"
-	"github.com/dcadolph/switchtender/internal/template"
+	"github.com/kordloom/switchtender/internal/credential"
+	"github.com/kordloom/switchtender/internal/inventory"
+	"github.com/kordloom/switchtender/internal/invsource"
+	"github.com/kordloom/switchtender/internal/project"
+	"github.com/kordloom/switchtender/internal/schedule"
+	"github.com/kordloom/switchtender/internal/template"
 )
 
 // awxExport is the top level of an awx export document, keyed by asset type.

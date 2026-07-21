@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dcadolph/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/audit"
 )
 
 // buildChain returns a valid chain of n entries linked with audit.Link.

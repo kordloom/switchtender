@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/dcadolph/switchtender/internal/event"
-	"github.com/dcadolph/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/event"
+	"github.com/kordloom/switchtender/internal/run"
 )
 
 // Client is a run.Store a relay worker runs against. It forwards the execution-path methods to the

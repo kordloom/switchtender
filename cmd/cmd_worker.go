@@ -12,13 +12,13 @@ import (
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/switchtender/internal/dispatch"
-	"github.com/dcadolph/switchtender/internal/extplugin"
-	"github.com/dcadolph/switchtender/internal/logutil"
-	"github.com/dcadolph/switchtender/internal/project"
-	"github.com/dcadolph/switchtender/internal/relay"
-	"github.com/dcadolph/switchtender/internal/roundhouse"
-	"github.com/dcadolph/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/dispatch"
+	"github.com/kordloom/switchtender/internal/extplugin"
+	"github.com/kordloom/switchtender/internal/logutil"
+	"github.com/kordloom/switchtender/internal/project"
+	"github.com/kordloom/switchtender/internal/relay"
+	"github.com/kordloom/switchtender/internal/roundhouse"
+	"github.com/kordloom/switchtender/internal/run"
 )
 
 // relayClientTimeout bounds each HTTP call a relay worker makes to the control node. The execution

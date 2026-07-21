@@ -8,8 +8,8 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/switchtender/internal/run"
-	"github.com/dcadolph/switchtender/internal/template"
+	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/template"
 )
 
 // fakeSubmitter records how it was fired for scheduler tests.

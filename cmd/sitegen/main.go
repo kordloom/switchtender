@@ -305,7 +305,7 @@ const layout = `<!DOCTYPE html>
 		<nav class="dnav-links">
 			<a href="/">Home</a>
 			<a href="/#compare">Compare</a>
-			<a href="https://github.com/dcadolph/switchtender">GitHub</a>
+			<a href="https://github.com/kordloom/switchtender">GitHub</a>
 		</nav>
 	</header>
 	<div class="dshell">

@@ -8,7 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dcadolph/switchtender/internal/importer"
+	"github.com/kordloom/switchtender/internal/importer"
 )
 
 // importDB holds the value of the import --db flag.

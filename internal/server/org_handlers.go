@@ -8,7 +8,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/switchtender/internal/org"
+	"github.com/kordloom/switchtender/internal/org"
 )
 
 // createOrgRequest is the JSON body accepted by POST /orgs.

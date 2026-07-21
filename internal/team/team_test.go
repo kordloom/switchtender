@@ -3,8 +3,8 @@ package team_test
 import (
 	"testing"
 
-	"github.com/dcadolph/switchtender/internal/team"
-	"github.com/dcadolph/switchtender/internal/teamtest"
+	"github.com/kordloom/switchtender/internal/team"
+	"github.com/kordloom/switchtender/internal/teamtest"
 )
 
 func TestMemStoreContract(t *testing.T) {

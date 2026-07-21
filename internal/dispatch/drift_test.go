@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dcadolph/switchtender/internal/roundhouse"
-	"github.com/dcadolph/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/roundhouse"
+	"github.com/kordloom/switchtender/internal/run"
 )
 
 func TestParsePlanChanges(t *testing.T) {

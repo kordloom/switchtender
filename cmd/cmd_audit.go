@@ -9,7 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dcadolph/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/audit"
 )
 
 // auditCmd groups audit trail tools.

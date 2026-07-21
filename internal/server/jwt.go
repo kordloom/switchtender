@@ -7,7 +7,7 @@ import (
 	"github.com/coreos/go-oidc/v3/oidc"
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/switchtender/internal/user"
+	"github.com/kordloom/switchtender/internal/user"
 )
 
 // ErrJWTAuth is returned when a bearer JWT is refused, so the auth gate reports unauthorized without

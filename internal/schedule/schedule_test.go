@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dcadolph/switchtender/internal/schedule"
-	"github.com/dcadolph/switchtender/internal/scheduletest"
+	"github.com/kordloom/switchtender/internal/schedule"
+	"github.com/kordloom/switchtender/internal/scheduletest"
 )
 
 func TestMemStoreContract(t *testing.T) {

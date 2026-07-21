@@ -4,8 +4,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/dcadolph/switchtender/internal/template"
-	"github.com/dcadolph/switchtender/internal/templatetest"
+	"github.com/kordloom/switchtender/internal/template"
+	"github.com/kordloom/switchtender/internal/templatetest"
 )
 
 func TestMemStoreContract(t *testing.T) {

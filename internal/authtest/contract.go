@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dcadolph/switchtender/internal/auth"
+	"github.com/kordloom/switchtender/internal/auth"
 )
 
 // Contract runs the auth.Store contract against a fresh store from newStore.

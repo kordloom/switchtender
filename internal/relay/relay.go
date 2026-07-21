@@ -16,8 +16,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/dcadolph/switchtender/internal/event"
-	"github.com/dcadolph/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/event"
+	"github.com/kordloom/switchtender/internal/run"
 )
 
 // ErrUnsupported is returned by a relay Client for the run.Store methods a worker never calls: the

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/dcadolph/switchtender/internal/credential"
+	"github.com/kordloom/switchtender/internal/credential"
 )
 
 // TestMapCredentialKind covers the AWX credential-type to SwitchTender-kind mapping, including the

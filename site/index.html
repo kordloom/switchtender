@@ -23,7 +23,7 @@
 		"description": "Run everything, watch every host, prove every change. Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go in one Go binary with a live host-by-task matrix, a tamper-evident audit trail, and enforced approval policies.",
 		"license": "https://mariadb.com/bsl11/",
 		"offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
-		"sameAs": ["https://github.com/dcadolph/switchtender"]
+		"sameAs": ["https://github.com/kordloom/switchtender"]
 	}
 	</script>
 	<link rel="icon" href="/favicon.ico" sizes="any">
@@ -52,7 +52,7 @@
 				<a href="/docs/">Docs</a>
 			</nav>
 			<div class="nav-cta">
-				<a class="ghost" href="https://github.com/dcadolph/switchtender">GitHub</a>
+				<a class="ghost" href="https://github.com/kordloom/switchtender">GitHub</a>
 				<a class="btn" href="/get-started">Get started</a>
 			</div>
 			<button class="nav-toggle" id="nav-toggle" aria-label="Menu">
@@ -73,7 +73,7 @@
 				</p>
 				<div class="hero-cta">
 					<a class="btn big" href="/get-started">Get started</a>
-					<a class="ghost big" href="https://github.com/dcadolph/switchtender">★ Star on GitHub</a>
+					<a class="ghost big" href="https://github.com/kordloom/switchtender">★ Star on GitHub</a>
 				</div>
 				<p class="hero-note">Open source · BSL 1.1 · Go SDK with drop-in plugins · migrate from AWX or Semaphore in one command</p>
 			</div>
@@ -236,12 +236,12 @@
 			<div class="section-head reveal">
 				<span class="eyebrow">Extensibility · SDK + drop-in plugins</span>
 				<h2>Seven tools in the box.<br>Add more in Go.</h2>
-				<p>Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go all run out of the box, no plugins required. When you need an eighth tool, a custom secret backend, a new AI provider, or your own notification channel, you write it in Go against a stable SDK. Compile it into the binary, or build it once and drop it into <code>--plugins-dir</code>, where a stock release loads it at startup over gRPC with mutual TLS and treats it as its own. A plugged-in tool submits, validates, and audits like a built-in. A plugged-in channel gets every terminal run with secret-carrying vars already redacted. The <a href="/docs/sdk">SDK guide</a> walks both paths, and the official <a href="https://github.com/dcadolph/switchtender-plugins">switchtender-plugins</a> repo ships a real one: Discord, ntfy, and Teams from a single drop-in binary.</p>
+				<p>Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go all run out of the box, no plugins required. When you need an eighth tool, a custom secret backend, a new AI provider, or your own notification channel, you write it in Go against a stable SDK. Compile it into the binary, or build it once and drop it into <code>--plugins-dir</code>, where a stock release loads it at startup over gRPC with mutual TLS and treats it as its own. A plugged-in tool submits, validates, and audits like a built-in. A plugged-in channel gets every terminal run with secret-carrying vars already redacted. The <a href="/docs/sdk">SDK guide</a> walks both paths, and the official <a href="https://github.com/kordloom/switchtender-plugins">switchtender-plugins</a> repo ships a real one: Discord, ntfy, and Teams from a single drop-in binary.</p>
 			</div>
 			<div class="code reveal">
 				<button class="copy" aria-label="Copy">Copy</button>
 				<pre><code><span class="c">// build once, drop into --plugins-dir, no recompile of switchtender</span>
-import "github.com/dcadolph/switchtender/sdk/plugin"
+import "github.com/kordloom/switchtender/sdk/plugin"
 
 func main() {
 	plugin.Serve(&amp;plugin.Extension{
@@ -313,7 +313,7 @@ switchtender import semaphore export.json --db switchtender.db --apply</code></p
 			<div class="code reveal">
 				<button class="copy" id="copy" aria-label="Copy">Copy</button>
 				<pre><code><span class="c"># install (or grab a release binary)</span>
-go install github.com/dcadolph/switchtender@latest
+go install github.com/kordloom/switchtender@latest
 
 <span class="c"># serve: SQLite by default, PostgreSQL optional</span>
 switchtender serve --addr :8080 --db switchtender.db
@@ -337,12 +337,12 @@ open http://localhost:8080/ui/</code></pre>
 		<div class="wrap footer-inner">
 			<img src="/assets/logo-train-tracks-dark.png" alt="SwitchTender" class="foot-logo">
 			<nav>
-				<a href="https://github.com/dcadolph/switchtender">GitHub</a>
+				<a href="https://github.com/kordloom/switchtender">GitHub</a>
 				<a href="/docs/">Docs</a>
 				<a href="/docs/comparison">Compare</a>
 				<a href="/awx-alternative">vs AWX</a>
 				<a href="/semaphore-alternative">vs Semaphore</a>
-				<a href="https://github.com/dcadolph/switchtender/blob/main/LICENSE">License</a>
+				<a href="https://github.com/kordloom/switchtender/blob/main/LICENSE">License</a>
 			</nav>
 			<span class="foot-note">Open source · BSL 1.1 · self-host free</span>
 		</div>

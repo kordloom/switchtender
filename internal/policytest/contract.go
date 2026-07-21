@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dcadolph/switchtender/internal/policy"
+	"github.com/kordloom/switchtender/internal/policy"
 )
 
 // Contract runs the policy.Store contract against a fresh store from newStore.

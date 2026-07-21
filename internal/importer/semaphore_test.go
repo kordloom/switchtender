@@ -6,8 +6,8 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
-	"github.com/dcadolph/switchtender/internal/importer"
-	"github.com/dcadolph/switchtender/internal/template"
+	"github.com/kordloom/switchtender/internal/importer"
+	"github.com/kordloom/switchtender/internal/template"
 )
 
 func TestFromSemaphore(t *testing.T) {

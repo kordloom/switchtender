@@ -5,7 +5,7 @@ syntax = "proto3";
 
 package switchtender.extension.v1;
 
-option go_package = "github.com/dcadolph/switchtender/internal/extproto";
+option go_package = "github.com/kordloom/switchtender/internal/extproto";
 
 // Extension is the single service a plugin binary serves. A plugin implements only the calls for
 // the seams it declares in Describe; the rest return an unimplemented error.

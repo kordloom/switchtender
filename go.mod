@@ -1,4 +1,4 @@
-module github.com/dcadolph/switchtender
+module github.com/kordloom/switchtender
 
 go 1.26.5
 

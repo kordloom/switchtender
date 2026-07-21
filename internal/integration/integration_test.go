@@ -25,12 +25,12 @@ import (
 
 	"go.uber.org/zap/zaptest"
 
-	"github.com/dcadolph/switchtender/internal/dispatch"
-	"github.com/dcadolph/switchtender/internal/live"
-	"github.com/dcadolph/switchtender/internal/roundhouse"
-	"github.com/dcadolph/switchtender/internal/run"
-	"github.com/dcadolph/switchtender/internal/server"
-	"github.com/dcadolph/switchtender/internal/sqlitestore"
+	"github.com/kordloom/switchtender/internal/dispatch"
+	"github.com/kordloom/switchtender/internal/live"
+	"github.com/kordloom/switchtender/internal/roundhouse"
+	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/server"
+	"github.com/kordloom/switchtender/internal/sqlitestore"
 )
 
 // image is the tag for the throwaway SSH host image built once per machine.

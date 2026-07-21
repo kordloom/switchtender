@@ -14,7 +14,7 @@ no container, no Kubernetes.
 ## Download
 
 Every release attaches ready-to-run downloads on the
-[releases page](https://github.com/dcadolph/switchtender/releases): a `SwitchTender.dmg` for macOS with
+[releases page](https://github.com/kordloom/switchtender/releases): a `SwitchTender.dmg` for macOS with
 the app inside, a `windows_amd64.zip` holding `switchtender.exe`, and `tar.gz` archives of the binary
 for macOS and Linux. A `SHA256SUMS` file lists the checksum of each one.
 

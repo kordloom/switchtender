@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/dcadolph/switchtender/internal/policy"
+	"github.com/kordloom/switchtender/internal/policy"
 )
 
 // policyStore is a policy.Store backed by the shared PostgreSQL database.

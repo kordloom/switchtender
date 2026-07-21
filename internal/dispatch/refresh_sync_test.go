@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dcadolph/switchtender/internal/invsource"
+	"github.com/kordloom/switchtender/internal/invsource"
 )
 
 // TestSourceDue covers the scheduled-sync staleness decision: no interval never syncs, a never-synced

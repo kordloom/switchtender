@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dcadolph/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/run"
 )
 
 func TestBashRunner(t *testing.T) {

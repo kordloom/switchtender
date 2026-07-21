@@ -12,10 +12,10 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/switchtender/internal/credential"
-	"github.com/dcadolph/switchtender/internal/run"
-	"github.com/dcadolph/switchtender/internal/template"
-	"github.com/dcadolph/switchtender/internal/trigger"
+	"github.com/kordloom/switchtender/internal/credential"
+	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/template"
+	"github.com/kordloom/switchtender/internal/trigger"
 )
 
 // testSealer returns an enabled Sealer for trigger signing tests.

@@ -13,7 +13,7 @@ import (
 	"github.com/yuin/goldmark/extension"
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/run"
 )
 
 // templateFS holds the page templates.

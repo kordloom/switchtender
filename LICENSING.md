@@ -55,5 +55,5 @@ it.
 ## Getting in touch
 
 Email licensing@switchtender.com to start a conversation about a commercial license, support, or
-hosting. You can also open an issue at https://github.com/dcadolph/switchtender, though email keeps
+hosting. You can also open an issue at https://github.com/kordloom/switchtender, though email keeps
 your inquiry private.

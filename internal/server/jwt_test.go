@@ -15,10 +15,10 @@ import (
 	"github.com/go-jose/go-jose/v4/jwt"
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/switchtender/internal/audit"
-	"github.com/dcadolph/switchtender/internal/auth"
-	"github.com/dcadolph/switchtender/internal/run"
-	"github.com/dcadolph/switchtender/internal/user"
+	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/auth"
+	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/user"
 )
 
 func TestJWTAuthenticate(t *testing.T) {

@@ -94,7 +94,7 @@ function mountTopbar() {
 	docs.textContent = "Docs";
 	nav.appendChild(docs);
 	const gh = document.createElement("a");
-	gh.href = "https://github.com/dcadolph/switchtender";
+	gh.href = "https://github.com/kordloom/switchtender";
 	gh.className = "topbar-link topbar-icon";
 	gh.target = "_blank";
 	gh.rel = "noopener";

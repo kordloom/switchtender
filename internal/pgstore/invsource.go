@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/dcadolph/switchtender/internal/invsource"
+	"github.com/kordloom/switchtender/internal/invsource"
 )
 
 // invSourceColumns is the shared select list for inventory source reads.

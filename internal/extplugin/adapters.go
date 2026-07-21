@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/dcadolph/switchtender/internal/extproto"
-	"github.com/dcadolph/switchtender/sdk"
+	"github.com/kordloom/switchtender/internal/extproto"
+	"github.com/kordloom/switchtender/sdk"
 )
 
 // toolRunner proxies one registered tool to its plugin process, streaming output back into the

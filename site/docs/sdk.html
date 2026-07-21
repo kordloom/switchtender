@@ -4,10 +4,10 @@
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>Extend SwitchTender in Go · SwitchTender docs</title>
-	<meta name="description" content="SwitchTender&#39;s seams are public. Import one package, github.com/dcadolph/switchtender/sdk, register what you built, and run it either way: compiled into the server binary, or dropped next to a stock">
+	<meta name="description" content="SwitchTender&#39;s seams are public. Import one package, github.com/kordloom/switchtender/sdk, register what you built, and run it either way: compiled into the server binary, or dropped next to a stock">
 	<link rel="canonical" href="https://switchtender.com/docs/sdk">
 	<meta property="og:title" content="Extend SwitchTender in Go · SwitchTender docs">
-	<meta property="og:description" content="SwitchTender&#39;s seams are public. Import one package, github.com/dcadolph/switchtender/sdk, register what you built, and run it either way: compiled into the server binary, or dropped next to a stock">
+	<meta property="og:description" content="SwitchTender&#39;s seams are public. Import one package, github.com/kordloom/switchtender/sdk, register what you built, and run it either way: compiled into the server binary, or dropped next to a stock">
 	<meta property="og:type" content="article">
 	<meta property="og:url" content="https://switchtender.com/docs/sdk">
 	<link rel="icon" href="/favicon.ico" sizes="any">
@@ -25,7 +25,7 @@
 		<nav class="dnav-links">
 			<a href="/">Home</a>
 			<a href="/#compare">Compare</a>
-			<a href="https://github.com/dcadolph/switchtender">GitHub</a>
+			<a href="https://github.com/kordloom/switchtender">GitHub</a>
 		</nav>
 	</header>
 	<div class="dshell">
@@ -36,7 +36,7 @@
 		</aside>
 		<main class="dcontent prose">
 			<h1 id="extend-switchtender-in-go">Extend SwitchTender in Go</h1>
-<p>SwitchTender's seams are public. Import one package, <code>github.com/dcadolph/switchtender/sdk</code>, register
+<p>SwitchTender's seams are public. Import one package, <code>github.com/kordloom/switchtender/sdk</code>, register
 what you built, and run it either way: compiled into the server binary, or dropped next to a stock
 release binary as a plugin the server loads at startup. A registered tool submits, validates,
 executes, and audits like a built-in. The SDK covers four kinds of extension:</p>
@@ -69,7 +69,7 @@ binary that loads extensions at startup. Same seams, same registration, same beh
 
 go 1.26.4
 
-require github.com/dcadolph/switchtender v1.7.0
+require github.com/kordloom/switchtender v1.7.0
 </code></pre>
 <p><code>main.go</code>:</p>
 <pre><code>// Package main builds a SwitchTender server with a custom tool compiled in through the SDK.
@@ -80,8 +80,8 @@ import (
     &quot;fmt&quot;
     &quot;io&quot;
 
-    &quot;github.com/dcadolph/switchtender/cmd&quot;
-    &quot;github.com/dcadolph/switchtender/sdk&quot;
+    &quot;github.com/kordloom/switchtender/cmd&quot;
+    &quot;github.com/kordloom/switchtender/sdk&quot;
 )
 
 // init registers the tool before the server starts.
@@ -125,8 +125,8 @@ import (
     &quot;fmt&quot;
     &quot;io&quot;
 
-    &quot;github.com/dcadolph/switchtender/sdk&quot;
-    &quot;github.com/dcadolph/switchtender/sdk/plugin&quot;
+    &quot;github.com/kordloom/switchtender/sdk&quot;
+    &quot;github.com/kordloom/switchtender/sdk/plugin&quot;
 )
 
 // main serves the extension as a plugin process.
@@ -159,7 +159,7 @@ release binary you did not build.</p>
 <p>Discord, ntfy, and Microsoft Teams are built-in notification channels, configured with the
 <code>--notify-discord</code>, <code>--notify-ntfy</code>, and <code>--notify-teams</code> flags, so they need no plugin. For a
 working example of the SDK itself, the
-<a href="https://github.com/dcadolph/switchtender-plugins">switchtender-plugins</a> repo builds those same
+<a href="https://github.com/kordloom/switchtender-plugins">switchtender-plugins</a> repo builds those same
 channels as a drop-in binary, doubling as the template for writing your own extension.</p>
 <h2 id="the-seams-in-detail">The seams in detail</h2>
 <h3 id="execution-tools">Execution tools</h3>

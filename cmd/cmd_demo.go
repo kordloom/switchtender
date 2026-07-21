@@ -12,12 +12,12 @@ import (
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/switchtender/internal/demo"
-	"github.com/dcadolph/switchtender/internal/dispatch"
-	"github.com/dcadolph/switchtender/internal/live"
-	"github.com/dcadolph/switchtender/internal/logutil"
-	"github.com/dcadolph/switchtender/internal/roundhouse"
-	"github.com/dcadolph/switchtender/internal/server"
+	"github.com/kordloom/switchtender/internal/demo"
+	"github.com/kordloom/switchtender/internal/dispatch"
+	"github.com/kordloom/switchtender/internal/live"
+	"github.com/kordloom/switchtender/internal/logutil"
+	"github.com/kordloom/switchtender/internal/roundhouse"
+	"github.com/kordloom/switchtender/internal/server"
 )
 
 // demoAddr holds the value of the demo --addr flag.

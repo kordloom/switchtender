@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dcadolph/switchtender/internal/project"
+	"github.com/kordloom/switchtender/internal/project"
 )
 
 // Contract runs the project.Store contract against a fresh store from newStore.

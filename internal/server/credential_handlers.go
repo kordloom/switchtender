@@ -8,7 +8,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/dcadolph/switchtender/internal/credential"
+	"github.com/kordloom/switchtender/internal/credential"
 )
 
 // createCredentialRequest is the JSON body accepted by POST /credentials. The secret arrives in

@@ -12,11 +12,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dcadolph/switchtender/internal/ai"
-	"github.com/dcadolph/switchtender/internal/roundhouse"
-	"github.com/dcadolph/switchtender/internal/run"
-	"github.com/dcadolph/switchtender/internal/secretsource"
-	"github.com/dcadolph/switchtender/sdk"
+	"github.com/kordloom/switchtender/internal/ai"
+	"github.com/kordloom/switchtender/internal/roundhouse"
+	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/secretsource"
+	"github.com/kordloom/switchtender/sdk"
 )
 
 // TestRegisterAIProvider registers a model backend through the SDK and confirms the core builds a

@@ -3,7 +3,7 @@ package dispatch
 import (
 	"context"
 
-	"github.com/dcadolph/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/run"
 )
 
 // Notifier delivers a terminal top-level run to an external channel. Register one with

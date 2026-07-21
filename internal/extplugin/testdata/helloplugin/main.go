@@ -10,8 +10,8 @@ import (
 	"io"
 	"os"
 
-	"github.com/dcadolph/switchtender/sdk"
-	"github.com/dcadolph/switchtender/sdk/plugin"
+	"github.com/kordloom/switchtender/sdk"
+	"github.com/kordloom/switchtender/sdk/plugin"
 )
 
 // main serves the test extension.

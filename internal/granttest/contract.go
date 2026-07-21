@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dcadolph/switchtender/internal/grant"
+	"github.com/kordloom/switchtender/internal/grant"
 )
 
 // Contract runs the grant.Store contract against a fresh store from newStore.
