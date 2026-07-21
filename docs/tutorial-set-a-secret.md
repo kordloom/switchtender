@@ -69,6 +69,12 @@ variable. Supply a pre-issued `token` instead to skip the exchange.
 
     {"url":"https://conjur.example.com","account":"prod","login":"host/app","api_key":"...","variable":"db/password"}
 
+CyberArk's Central Credential Provider is the other native CyberArk source: give the CCP URL, app id,
+and the safe and object that locate the account, or a raw `query`. The application authenticates with a
+`client_cert` and `client_key` for mutual TLS, or through a CCP allowed-machine rule when neither is set.
+
+    {"url":"https://ccp.example.com","app_id":"switchtender","safe":"Prod","object":"db-prod","client_cert":"-----BEGIN CERTIFICATE-----\n...","client_key":"-----BEGIN EC PRIVATE KEY-----\n..."}
+
 ## Mint a short-lived secret per run
 
 For the strongest secret hygiene, SwitchTender can mint a fresh credential for each run and revoke it

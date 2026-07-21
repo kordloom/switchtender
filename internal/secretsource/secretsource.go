@@ -28,6 +28,9 @@ const (
 	// KindConjur means the config is a JSON CyberArk Conjur URL, account, variable, and authentication,
 	// read over HTTP with an access token from the config or an API-key exchange.
 	KindConjur = "conjur"
+	// KindCCP means the config is a JSON CyberArk Central Credential Provider URL, app id, and account
+	// locator, read over the AIMWebService REST API with a client certificate or an allowed-machine rule.
+	KindCCP = "ccp"
 	// KindVaultDynamic means the config names a Vault dynamic secrets path that mints a short-lived
 	// credential on each read, returned with a lease that revokes it after the run.
 	KindVaultDynamic = "vault_dynamic"
@@ -48,6 +51,7 @@ var resolvers = map[string]ResolverFunc{
 	KindAWS:     resolveAWS,
 	KindAzure:   resolveAzure,
 	KindConjur:  resolveConjur,
+	KindCCP:     resolveCCP,
 }
 
 // Register adds a resolver for a source kind so a new secrets engine plugs in. It panics on a

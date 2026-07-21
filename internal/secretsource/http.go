@@ -1,6 +1,8 @@
 package secretsource
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"net"
 	"net/http"
@@ -34,6 +36,27 @@ var safeClient = &http.Client{
 var metadataClient = &http.Client{
 	Timeout:       30 * time.Second,
 	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+}
+
+// safeClientWithTLS returns an HTTP client that keeps the SSRF dial guard and redirect refusal of the
+// shared safe client but adds a client certificate for mutual TLS and a custom root CA for verifying
+// the server, as CyberArk CCP and other mutually-authenticated secret services need. A nil cert or
+// nil pool leaves that half of the TLS config at its default.
+func safeClientWithTLS(cert *tls.Certificate, roots *x509.CertPool) *http.Client {
+	tr := safeTransport()
+	tlsCfg := &tls.Config{MinVersion: tls.VersionTLS12}
+	if cert != nil {
+		tlsCfg.Certificates = []tls.Certificate{*cert}
+	}
+	if roots != nil {
+		tlsCfg.RootCAs = roots
+	}
+	tr.TLSClientConfig = tlsCfg
+	return &http.Client{
+		Timeout:       30 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+		Transport:     tr,
+	}
 }
 
 // safeTransport clones the default transport and installs a dialer that rejects a connection whose

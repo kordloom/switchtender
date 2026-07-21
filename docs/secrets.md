@@ -39,6 +39,7 @@ A credential's source decides where its value comes from at run time.
 | AWS Secrets Manager | A secret id, region, and AWS credentials, read over a Signature Version 4 signed request at launch. Credentials fall back to the standard AWS environment, so an instance role needs no stored key. |
 | Azure Key Vault | A vault name and secret, read over the Key Vault REST API at launch. Authenticates with a bearer token, a service principal, or, on Azure, the attached managed identity with no stored key. |
 | CyberArk Conjur | A Conjur URL, account, and variable, read over the Conjur REST API at launch. Authenticates with an access token or by exchanging an API key, so no long-lived credential is stored once a token is issued. |
+| CyberArk CCP | A Central Credential Provider URL, app id, and account locator, read over the AIMWebService REST API at launch. Authenticates the application with a client certificate or a CCP allowed-machine rule, so no long-lived credential is stored. |
 
 ## Ephemeral secrets
 
