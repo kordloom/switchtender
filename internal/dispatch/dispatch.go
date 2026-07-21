@@ -1130,6 +1130,9 @@ func (d *Dispatcher) execute(ctx context.Context, r *run.Run) run.Status {
 
 	status := d.outcome(ctx, r, res, err, mask)
 	d.summarize(r)
+	if res.Drift {
+		d.recordPlanDrift(r)
+	}
 	d.publisher.CloseRun(r.ID)
 	return status
 }

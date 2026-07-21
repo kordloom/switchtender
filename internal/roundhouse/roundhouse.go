@@ -98,6 +98,10 @@ type Spec struct {
 type Result struct {
 	// ExitCode is the process exit code. Zero means success.
 	ExitCode int
+	// Drift reports that a dry run found pending changes, so the target has drifted from its desired
+	// state. It is set by a tool with a no-change check that distinguishes a clean plan from a
+	// changed one, such as a Terraform plan with a detailed exit code.
+	Drift bool
 }
 
 // Runner executes a Spec, streaming combined output to out, and reports the Result.

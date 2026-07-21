@@ -7,33 +7,37 @@
 
 # Drift detection
 
-Drift is when a host no longer matches the state a playbook asserts. SwitchTender detects it from a dry
-run and shows it per host on the Drift page, so divergence surfaces before the next real run.
+Drift is when your infrastructure no longer matches the state your automation asserts. SwitchTender
+detects it from a dry run and shows it on the Drift page, so divergence surfaces before the next real
+run.
 
 ## How it works
 
-A dry run executes in check mode, which reports what a task would change without changing it. A task
-that would change means the host has diverged from the desired state. SwitchTender records each host's
-changed count from its checks, and the Drift page shows each host's most recent check: how many tasks
-would change now, when it was checked, and the run that observed it. A host whose latest check would
-change nothing is in sync.
+A dry run reports what would change without changing anything. For Ansible that is check mode, which
+reports task by task, per host, what would change. For Terraform and OpenTofu it is a plan, which
+reports the resources that would change in a working directory. Either way, a dry run that would
+change something means the target has diverged from the desired state. The Drift page shows each
+target's most recent check: how much would change now, when it was checked, and the run that observed
+it. A target whose latest check would change nothing is in sync.
 
-Because drift comes from the same structured events as every run, it needs no separate agent and no
-extra setup. Schedule a dry run of a playbook on a cadence and the Drift page stays current.
+Because drift comes straight from the run, it needs no separate agent and no extra setup. Schedule a
+dry run on a cadence and the Drift page stays current.
 
 ## What counts
 
-Drift here is a per-host signal, so it comes from Ansible check-mode runs. Ansible's `--check` reports
-host by host which tasks would change, and that per-host recap is what the Drift page reads. The other
-tools do not feed it: Terraform and OpenTofu plan over resources rather than hosts, so a plan has no
-per-host recap, and Bash, Python, PowerShell, and Go have no desired-state check at all. Resource-level
-drift for Terraform and OpenTofu would be a separate signal, not this per-host one.
+Drift comes from a dry run that has a no-change check. Ansible's `--check` reports, host by host, which
+tasks would change, and each host's changed count feeds the Drift page. Terraform and OpenTofu run
+`plan` with a detailed exit code, which distinguishes a clean plan from one with pending changes; a dry
+run that finds changes is recorded as drift keyed on its working directory rather than a host, with the
+plan's changed-resource count. Bash, Python, PowerShell, and Go have no desired-state check, so they do
+not report drift.
 
 ## From the API
 
     curl -s localhost:8080/drift
 
-Each host carries its drifted task count, the check run id, and when it was checked, worst drift first.
+Each target carries its changed count, the check run id, and when it was checked, worst drift first. A
+target is an Ansible host or a Terraform working directory.
 
 ## Reconcile a drifted host
 

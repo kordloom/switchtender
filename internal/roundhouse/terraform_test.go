@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -33,13 +35,46 @@ func TestTerraformRunnerArgs(t *testing.T) {
 		Spec{Tool: run.ToolTerraform, Command: ".", DryRun: true}, &buf); err != nil {
 		t.Fatalf("plan: err=%v", err)
 	}
-	if got := buf.String(); !strings.Contains(got, "plan") || strings.Contains(got, "apply") {
-		t.Errorf("dry-run output = %q, want plan and no apply", got)
+	if got := buf.String(); !strings.Contains(got, "plan") ||
+		!strings.Contains(got, "-detailed-exitcode") || strings.Contains(got, "apply") {
+		t.Errorf("dry-run output = %q, want plan with -detailed-exitcode and no apply", got)
 	}
 
 	if _, err := r.Run(context.Background(),
 		Spec{Tool: run.ToolTerraform, Command: ""}, io.Discard); !errors.Is(err, ErrNoCommand) {
 		t.Errorf("empty command error = %v, want ErrNoCommand", err)
+	}
+}
+
+// TestTerraformRunnerDrift verifies a dry run whose plan reports pending changes is reported as a
+// successful check with the drift flag set, not as a failure, from the plan's detailed exit code.
+func TestTerraformRunnerDrift(t *testing.T) {
+	t.Parallel()
+	// A stub standing in for terraform: init succeeds, and plan exits 2, the detailed-exit-code
+	// signal for pending changes.
+	stub := filepath.Join(t.TempDir(), "tf")
+	if err := os.WriteFile(stub, []byte("#!/bin/sh\ncase \"$1\" in\nplan) exit 2 ;;\n*) exit 0 ;;\nesac\n"), 0o700); err != nil {
+		t.Fatalf("write stub: %v", err)
+	}
+	drifted := &terraformRunner{binary: stub}
+	res, err := drifted.Run(context.Background(),
+		Spec{Tool: run.ToolTerraform, Command: ".", DryRun: true}, io.Discard)
+	if err != nil {
+		t.Fatalf("plan drift: err=%v", err)
+	}
+	if res.ExitCode != 0 || !res.Drift {
+		t.Errorf("plan drift result = %+v, want exit 0 with Drift true", res)
+	}
+
+	// A clean plan exits 0 and reports no drift.
+	clean := filepath.Join(t.TempDir(), "tf")
+	if err := os.WriteFile(clean, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatalf("write clean stub: %v", err)
+	}
+	res, err = (&terraformRunner{binary: clean}).Run(context.Background(),
+		Spec{Tool: run.ToolTerraform, Command: ".", DryRun: true}, io.Discard)
+	if err != nil || res.ExitCode != 0 || res.Drift {
+		t.Errorf("clean plan result = %+v err=%v, want exit 0 and no drift", res, err)
 	}
 }
 

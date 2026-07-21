@@ -49,12 +49,20 @@ func (t *terraformRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Re
 
 	args := []string{"apply", "-auto-approve", "-input=false", "-no-color"}
 	if spec.DryRun {
-		args = []string{"plan", "-input=false", "-no-color"}
+		// -detailed-exitcode makes plan return 2 when there are pending changes, so a dry run can
+		// tell a clean state from a drifted one instead of always exiting 0.
+		args = []string{"plan", "-input=false", "-no-color", "-detailed-exitcode"}
 	}
 	cmd := exec.CommandContext(ctx, t.binary, args...)
 	cmd.Dir = dir
 	cmd.Env = env
-	return runProcess(ctx, cmd, out)
+	res, err := runProcess(ctx, cmd, out)
+	if spec.DryRun && err == nil && res.ExitCode == 2 {
+		// Exit 2 is a successful plan with pending changes, which is drift, not a failure. Report it
+		// as success with the drift flag so the run is not marked failed.
+		return Result{ExitCode: 0, Drift: true}, nil
+	}
+	return res, err
 }
 
 // terraformVars renders extra vars as TF_VAR_ environment entries so survey answers and template
