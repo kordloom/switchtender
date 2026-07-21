@@ -2763,7 +2763,10 @@ function openInventoryEdit(inv) {
 	document.getElementById("inv-content").value = inv.content || "";
 	document.getElementById("inv-queue").value = inv.queue || "";
 	for (const id of ["inv-command", "inv-vault-addr", "inv-vault-path", "inv-vault-field",
-		"inv-vault-token", "inv-gsm-project", "inv-gsm-secret", "inv-gsm-version", "inv-gsm-token"]) {
+		"inv-vault-token", "inv-gsm-project", "inv-gsm-secret", "inv-gsm-version", "inv-gsm-token",
+		"inv-aws-secret-id", "inv-aws-region", "inv-aws-access-key", "inv-aws-secret-key",
+		"inv-azure-vault", "inv-azure-secret", "inv-azure-tenant", "inv-azure-client",
+		"inv-azure-client-secret"]) {
 		document.getElementById(id).value = "";
 	}
 	const sourceSel = document.getElementById("inv-content-source");
@@ -2777,10 +2780,10 @@ function openInventoryEdit(inv) {
 }
 
 // applyInventorySource fills an inventory payload from the selected content source. A local source
-// sends the pasted content; a command, Vault, or Google Secret Manager source assembles the config
-// the API seals, so the operator never hand writes JSON. It throws with a message when a required
-// field is missing. On edit the config is never returned, so leaving a source's fields blank keeps
-// the stored config.
+// sends the pasted content; a command, Vault, Google Secret Manager, AWS Secrets Manager, or Azure
+// Key Vault source assembles the config the API seals, so the operator never hand writes JSON. It
+// throws with a message when a required field is missing. On edit the config is never returned, so
+// leaving a source's fields blank keeps the stored config.
 function applyInventorySource(payload, src, editId) {
 	const val = (id) => document.getElementById(id).value.trim();
 	if (src === "local") {
@@ -2819,6 +2822,37 @@ function applyInventorySource(payload, src, editId) {
 			payload.content_config = JSON.stringify(cfg);
 		} else if (!editId) {
 			throw new Error("Fill in the Google Secret Manager project and secret.");
+		}
+		return;
+	}
+	if (src === "aws") {
+		const secretId = val("inv-aws-secret-id"), region = val("inv-aws-region");
+		const accessKey = val("inv-aws-access-key"), secretKey = val("inv-aws-secret-key");
+		if (secretId || region || accessKey || secretKey) {
+			if (!secretId) throw new Error("AWS Secrets Manager needs a secret id.");
+			const cfg = { secret_id: secretId };
+			if (region) cfg.region = region;
+			if (accessKey) cfg.access_key_id = accessKey;
+			if (secretKey) cfg.secret_access_key = secretKey;
+			payload.content_config = JSON.stringify(cfg);
+		} else if (!editId) {
+			throw new Error("Fill in the AWS Secrets Manager secret id.");
+		}
+		return;
+	}
+	if (src === "azure") {
+		const vault = val("inv-azure-vault"), secret = val("inv-azure-secret");
+		const tenant = val("inv-azure-tenant"), client = val("inv-azure-client");
+		const clientSecret = val("inv-azure-client-secret");
+		if (vault || secret || tenant || client || clientSecret) {
+			if (!(vault && secret)) throw new Error("Azure Key Vault needs a vault and secret.");
+			const cfg = { vault, secret };
+			if (tenant) cfg.tenant_id = tenant;
+			if (client) cfg.client_id = client;
+			if (clientSecret) cfg.client_secret = clientSecret;
+			payload.content_config = JSON.stringify(cfg);
+		} else if (!editId) {
+			throw new Error("Fill in the Azure Key Vault vault and secret.");
 		}
 	}
 }

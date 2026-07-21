@@ -40,6 +40,8 @@
 						<option value="command">Command (fetch at run time)</option>
 						<option value="vault">Vault (fetch at run time)</option>
 						<option value="gsm">Google Secret Manager (fetch at run time)</option>
+						<option value="aws">AWS Secrets Manager (fetch at run time)</option>
+						<option value="azure">Azure Key Vault (fetch at run time)</option>
 					</select>
 				</label>
 				<div id="inv-source-local" class="stack" data-source-group>
@@ -80,6 +82,37 @@
 					</label>
 					<label class="field-label">Access token
 						<input id="inv-gsm-token" class="input" placeholder="optional, else GCP metadata server">
+					</label>
+				</div>
+				<div id="inv-source-aws" class="stack" data-source-group hidden>
+					<label class="field-label">Secret id
+						<input id="inv-aws-secret-id" class="input" placeholder="prod/fleet-inventory">
+					</label>
+					<label class="field-label">Region
+						<input id="inv-aws-region" class="input" placeholder="optional, else AWS_REGION">
+					</label>
+					<label class="field-label">Access key id
+						<input id="inv-aws-access-key" class="input" placeholder="optional, else AWS environment">
+					</label>
+					<label class="field-label">Secret access key
+						<input id="inv-aws-secret-key" class="input" placeholder="optional, else AWS environment">
+					</label>
+				</div>
+				<div id="inv-source-azure" class="stack" data-source-group hidden>
+					<label class="field-label">Vault
+						<input id="inv-azure-vault" class="input" placeholder="prod-kv">
+					</label>
+					<label class="field-label">Secret
+						<input id="inv-azure-secret" class="input" placeholder="fleet-inventory">
+					</label>
+					<label class="field-label">Tenant id
+						<input id="inv-azure-tenant" class="input" placeholder="optional, else managed identity">
+					</label>
+					<label class="field-label">Client id
+						<input id="inv-azure-client" class="input" placeholder="optional service principal">
+					</label>
+					<label class="field-label">Client secret
+						<input id="inv-azure-client-secret" class="input" placeholder="optional service principal">
 					</label>
 				</div>
 				<span id="inv-source-hint" class="field-hint" hidden>Editing keeps the stored source configuration unless you fill these in.</span>

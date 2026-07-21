@@ -22,8 +22,8 @@ type createInventoryRequest struct {
 	// CredentialIDs names stored credentials materialized for every run that targets this inventory,
 	// so the inventory can carry its own secret variables.
 	CredentialIDs []string `json:"credential_ids,omitempty"`
-	// ContentSource selects where the content comes from: local, command, vault, or gsm. Empty means
-	// local, the stored content.
+	// ContentSource selects where the content comes from: local, or any registered secret source such
+	// as command, vault, gsm, aws, or azure. Empty means local, the stored content.
 	ContentSource string `json:"content_source,omitempty"`
 	// ContentConfig is the source config for a non-local content source: the command, or the JSON
 	// address, path, and field for vault, or project, secret, and version for gsm. It is sealed at
