@@ -24,15 +24,22 @@ type slackPayload struct {
 
 // notifySlack posts a terminal top-level run to every configured Slack webhook.
 func (d *Dispatcher) notifySlack(r *run.Run) {
-	if len(d.slackWebhooks) == 0 {
+	d.deliverSlackFormat(d.slackWebhooks, "slack", r)
+}
+
+// deliverSlackFormat posts the Slack-compatible {"text": ...} payload to each url. Slack, Mattermost,
+// and Rocket.Chat all accept an incoming webhook in that shape, so they share this delivery. label
+// names the channel for a log message on an encoding failure.
+func (d *Dispatcher) deliverSlackFormat(urls []string, label string, r *run.Run) {
+	if len(urls) == 0 {
 		return
 	}
 	body, err := json.Marshal(slackPayload{Text: slackMessage(r)})
 	if err != nil {
-		d.log.Error("dispatch: encode slack notification: "+err.Error(), zap.String("run_id", r.ID))
+		d.log.Error("dispatch: encode "+label+" notification: "+err.Error(), zap.String("run_id", r.ID))
 		return
 	}
-	for _, url := range d.slackWebhooks {
+	for _, url := range urls {
 		d.notifyWG.Add(1)
 		go func(u string) {
 			defer d.notifyWG.Done()

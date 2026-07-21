@@ -44,6 +44,7 @@ What SwitchTender does today.
 | Retention | A sweeper drops old run events and deletes terminal runs past a configurable age, keeping the summaries the cross-run views need.|
 | Email | An SMTP notification on every finished run or on failures only, alongside the finish webhooks.|
 | Slack | A formatted message posts to a Slack incoming webhook when a run finishes, with the run label, status, and elapsed time.|
+| Mattermost and Rocket.Chat | The same message posts to a Mattermost or Rocket.Chat incoming webhook, which both accept the Slack-compatible payload.|
 | Discord | A formatted message posts to a Discord incoming webhook when a run finishes, the same summary as Slack in Discord markdown.|
 | Microsoft Teams | An Adaptive Card posts to a Teams incoming webhook when a run finishes, colored by outcome with the status, elapsed time, and any error.|
 | ntfy | A notification publishes to an ntfy topic when a run finishes, at raised priority for a failure, with optional token auth for a protected topic.|

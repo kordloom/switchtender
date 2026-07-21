@@ -116,6 +116,10 @@ type Dispatcher struct {
 	webhooks []string
 	// slackWebhooks receive a Slack-formatted terminal run notification.
 	slackWebhooks []string
+	// mattermostWebhooks receive the Slack-compatible payload at a Mattermost incoming webhook.
+	mattermostWebhooks []string
+	// rocketChatWebhooks receive the Slack-compatible payload at a Rocket.Chat incoming webhook.
+	rocketChatWebhooks []string
 	// discordWebhooks receive a Discord-formatted terminal run notification.
 	discordWebhooks []string
 	// teamsWebhooks receive a Microsoft Teams Adaptive Card terminal run notification.
@@ -167,6 +171,10 @@ type config struct {
 	webhooks []string
 	// slackWebhooks receive a Slack-formatted terminal run notification.
 	slackWebhooks []string
+	// mattermostWebhooks receive the Slack-compatible payload at a Mattermost incoming webhook.
+	mattermostWebhooks []string
+	// rocketChatWebhooks receive the Slack-compatible payload at a Rocket.Chat incoming webhook.
+	rocketChatWebhooks []string
 	// discordWebhooks receive a Discord-formatted terminal run notification.
 	discordWebhooks []string
 	// teamsWebhooks receive a Microsoft Teams Adaptive Card terminal run notification.
@@ -270,6 +278,8 @@ func New(store run.Store, runner roundhouse.Runner, log *zap.Logger, opts ...Opt
 		syncer:             cfg.syncer,
 		webhooks:           cfg.webhooks,
 		slackWebhooks:      cfg.slackWebhooks,
+		mattermostWebhooks: cfg.mattermostWebhooks,
+		rocketChatWebhooks: cfg.rocketChatWebhooks,
 		discordWebhooks:    cfg.discordWebhooks,
 		teamsWebhooks:      cfg.teamsWebhooks,
 		ntfyURLs:           cfg.ntfyURLs,

@@ -83,6 +83,8 @@ Runs the HTTP API, the in-process executor, the scheduler, the retention sweeper
 | `--schedule-interval` | `15s` | How often the scheduler checks for due schedules. |
 | `--notify-webhook` | none | URL that receives a JSON notification when a run finishes. Repeatable. |
 | `--notify-slack` | none | Slack incoming webhook URL that receives a message when a run finishes. Repeatable. |
+| `--notify-mattermost` | none | Mattermost incoming webhook URL that receives a message when a run finishes. Repeatable. |
+| `--notify-rocketchat` | none | Rocket.Chat incoming webhook URL that receives a message when a run finishes. Repeatable. |
 | `--notify-discord` | none | Discord incoming webhook URL that receives a message when a run finishes. Repeatable. |
 | `--notify-teams` | none | Microsoft Teams incoming webhook URL that receives an Adaptive Card when a run finishes. Repeatable. |
 | `--notify-ntfy` | none | ntfy topic URL that receives a notification when a run finishes, such as https://ntfy.sh/my-topic. Repeatable. |

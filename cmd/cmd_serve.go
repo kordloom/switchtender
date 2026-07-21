@@ -85,6 +85,12 @@ var notifyWebhooks []string
 // notifySlack holds the values of the repeatable --notify-slack flag.
 var notifySlack []string
 
+// notifyMattermost holds the values of the repeatable --notify-mattermost flag.
+var notifyMattermost []string
+
+// notifyRocketChat holds the values of the repeatable --notify-rocketchat flag.
+var notifyRocketChat []string
+
 // notifyDiscord holds the values of the repeatable --notify-discord flag.
 var notifyDiscord []string
 
@@ -275,6 +281,10 @@ func init() {
 		"URL that receives a JSON notification when a run finishes. Repeatable.")
 	serveCmd.Flags().StringArrayVar(&notifySlack, "notify-slack", nil,
 		"Slack incoming webhook URL that receives a message when a run finishes. Repeatable.")
+	serveCmd.Flags().StringArrayVar(&notifyMattermost, "notify-mattermost", nil,
+		"Mattermost incoming webhook URL that receives a message when a run finishes. Repeatable.")
+	serveCmd.Flags().StringArrayVar(&notifyRocketChat, "notify-rocketchat", nil,
+		"Rocket.Chat incoming webhook URL that receives a message when a run finishes. Repeatable.")
 	serveCmd.Flags().StringArrayVar(&notifyDiscord, "notify-discord", nil,
 		"Discord incoming webhook URL that receives a message when a run finishes. Repeatable.")
 	serveCmd.Flags().StringArrayVar(&notifyTeams, "notify-teams", nil,
@@ -535,6 +545,8 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		dispatch.WithProjects(bundle.Projects(), syncer),
 		dispatch.WithWebhooks(notifyWebhooks),
 		dispatch.WithSlack(notifySlack),
+		dispatch.WithMattermost(notifyMattermost),
+		dispatch.WithRocketChat(notifyRocketChat),
 		dispatch.WithDiscord(notifyDiscord),
 		dispatch.WithTeams(notifyTeams),
 		dispatch.WithNtfy(notifyNtfy, notifyNtfyToken),
