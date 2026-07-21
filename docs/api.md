@@ -97,5 +97,5 @@ Every endpoint the server exposes. The API is served under the `/v1` base path. 
 | GET    | `/v1/audit`                | The mutation trail, admin only.                         |
 | GET    | `/v1/audit/verify`         | Verify the audit hash chain is intact.                  |
 | GET    | `/v1/audit/export`         | Signed, self-verifying snapshot of the audit chain.     |
-| GET    | `/metrics`              | Prometheus gauges for runs and fleet health.            |
+| GET    | `/metrics`              | Prometheus series: run, fleet, queue-depth, and worker gauges, plus a run-duration histogram. |
 | GET    | `/healthz`              | Liveness.                                               |
