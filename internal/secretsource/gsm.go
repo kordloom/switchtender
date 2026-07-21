@@ -98,7 +98,7 @@ func gsmMetadataToken(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("%w: %v", ErrResolve, err)
 	}
 	req.Header.Set("Metadata-Flavor", "Google")
-	resp, err := safeClient.Do(req)
+	resp, err := metadataClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("%w: gsm needs a token in the config or a GCP metadata server: %s", ErrResolve, err)
 	}

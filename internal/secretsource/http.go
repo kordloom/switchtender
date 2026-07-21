@@ -25,6 +25,17 @@ var safeClient = &http.Client{
 	Transport:     safeTransport(),
 }
 
+// metadataClient fetches a workload-identity token from a cloud metadata service, such as the GCP
+// metadata server or the Azure Instance Metadata Service. Those endpoints live on a link-local
+// address that safeClient refuses, since for a config-controlled resolve that address is a
+// server-side request forgery target that can hand back instance credentials. A workload-identity
+// fetch is the opposite: the endpoint is a fixed address SwitchTender hardcodes, never one config
+// chooses, so reaching it is the intent. Use this client only with those hardcoded endpoints.
+var metadataClient = &http.Client{
+	Timeout:       30 * time.Second,
+	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+}
+
 // safeTransport clones the default transport and installs a dialer that rejects a connection whose
 // resolved address is link-local or unspecified, so a hostname that resolves to the cloud metadata
 // service cannot slip past the name check.
