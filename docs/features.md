@@ -44,6 +44,7 @@ What SwitchTender does today.
 | Retention | A sweeper drops old run events and deletes terminal runs past a configurable age, keeping the summaries the cross-run views need.|
 | Email | An SMTP notification on every finished run or on failures only, alongside the finish webhooks.|
 | Slack | A formatted message posts to a Slack incoming webhook when a run finishes, with the run label, status, and elapsed time.|
+| Discord | A formatted message posts to a Discord incoming webhook when a run finishes, the same summary as Slack in Discord markdown.|
 | AI triage | An optional AI provider, local Ollama or a cloud API, explains a failed run on demand from its masked log and failed task events. Advisory only: it never runs anything, so every action still goes through the same policy and audit gates.|
 | AI drafting | Describe a bash, python, powershell, or go step in the workflow editor and the provider drafts the script into the command field for you to review, edit, and save. The draft never executes on its own.|
 | Drift reconcile | One click on a drifted host builds the fix: the check run's playbook limited to that host, run for real, born held for approval. A machine proposes, a person releases, and the audit trail records both.|

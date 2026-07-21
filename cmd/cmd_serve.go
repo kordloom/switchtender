@@ -85,6 +85,9 @@ var notifyWebhooks []string
 // notifySlack holds the values of the repeatable --notify-slack flag.
 var notifySlack []string
 
+// notifyDiscord holds the values of the repeatable --notify-discord flag.
+var notifyDiscord []string
+
 // serveAllowContainerEE holds the value of the --allow-container-ee flag.
 var serveAllowContainerEE bool
 
@@ -260,6 +263,8 @@ func init() {
 		"URL that receives a JSON notification when a run finishes. Repeatable.")
 	serveCmd.Flags().StringArrayVar(&notifySlack, "notify-slack", nil,
 		"Slack incoming webhook URL that receives a message when a run finishes. Repeatable.")
+	serveCmd.Flags().StringArrayVar(&notifyDiscord, "notify-discord", nil,
+		"Discord incoming webhook URL that receives a message when a run finishes. Repeatable.")
 	serveCmd.Flags().BoolVar(&serveAllowContainerEE, "allow-container-ee", false,
 		"Allow runs whose project pins a container image to execute inside that image. Needs Docker.")
 	registerContainerFlags(serveCmd)
@@ -510,6 +515,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		dispatch.WithProjects(bundle.Projects(), syncer),
 		dispatch.WithWebhooks(notifyWebhooks),
 		dispatch.WithSlack(notifySlack),
+		dispatch.WithDiscord(notifyDiscord),
 		dispatch.WithEmail(emailer, onFailureOnly),
 		dispatch.WithInventories(bundle.Inventories()),
 		dispatch.WithInventorySources(bundle.InventorySources()),

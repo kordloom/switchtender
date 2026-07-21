@@ -116,6 +116,8 @@ type Dispatcher struct {
 	webhooks []string
 	// slackWebhooks receive a Slack-formatted terminal run notification.
 	slackWebhooks []string
+	// discordWebhooks receive a Discord-formatted terminal run notification.
+	discordWebhooks []string
 	// emailer sends terminal run notifications by email, nil when email is off.
 	emailer Emailer
 	// emailOnFailureOnly limits email notifications to failed runs.
@@ -157,6 +159,8 @@ type config struct {
 	webhooks []string
 	// slackWebhooks receive a Slack-formatted terminal run notification.
 	slackWebhooks []string
+	// discordWebhooks receive a Discord-formatted terminal run notification.
+	discordWebhooks []string
 	// emailer sends terminal run notifications by email, nil when email is off.
 	emailer Emailer
 	// emailOnFailureOnly limits email notifications to failed runs.
@@ -250,6 +254,7 @@ func New(store run.Store, runner roundhouse.Runner, log *zap.Logger, opts ...Opt
 		syncer:             cfg.syncer,
 		webhooks:           cfg.webhooks,
 		slackWebhooks:      cfg.slackWebhooks,
+		discordWebhooks:    cfg.discordWebhooks,
 		emailer:            cfg.emailer,
 		emailOnFailureOnly: cfg.emailOnFailureOnly,
 		inventories:        cfg.inventories,

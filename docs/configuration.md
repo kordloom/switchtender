@@ -83,6 +83,7 @@ Runs the HTTP API, the in-process executor, the scheduler, the retention sweeper
 | `--schedule-interval` | `15s` | How often the scheduler checks for due schedules. |
 | `--notify-webhook` | none | URL that receives a JSON notification when a run finishes. Repeatable. |
 | `--notify-slack` | none | Slack incoming webhook URL that receives a message when a run finishes. Repeatable. |
+| `--notify-discord` | none | Discord incoming webhook URL that receives a message when a run finishes. Repeatable. |
 | `--allow-container-ee` | `false` | Allow runs whose project pins a container image to execute inside it. Needs Docker on the executor. |
 | `--container-memory` | `2g` | Memory cap for containerized runs, as docker `--memory`. Empty removes the cap. |
 | `--container-cpus` | `2` | CPU cap for containerized runs, as docker `--cpus`. Empty removes the cap. |

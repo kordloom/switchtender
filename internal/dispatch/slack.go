@@ -48,14 +48,7 @@ func slackMessage(r *run.Run) string {
 	if r.Status != run.StatusSucceeded {
 		icon = ":x:"
 	}
-	label := r.Playbook
-	if label == "" {
-		label = r.Command
-	}
-	if label == "" {
-		label = r.ID
-	}
-	msg := fmt.Sprintf("%s SwitchTender run *%s* %s", icon, label, r.Status)
+	msg := fmt.Sprintf("%s SwitchTender run *%s* %s", icon, runLabel(r), r.Status)
 	if d := runElapsed(r); d != "" {
 		msg += " in " + d
 	}
@@ -63,6 +56,18 @@ func slackMessage(r *run.Run) string {
 		msg += "\n> " + truncateError(r.Error)
 	}
 	return msg
+}
+
+// runLabel returns a human label for a run in a notification: its playbook, else its command, else
+// its id, so a channel message always names the run by whatever identifies it best.
+func runLabel(r *run.Run) string {
+	if r.Playbook != "" {
+		return r.Playbook
+	}
+	if r.Command != "" {
+		return r.Command
+	}
+	return r.ID
 }
 
 // runElapsed returns the run's wall-clock duration rounded to the second, or an empty string when
