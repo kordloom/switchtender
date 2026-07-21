@@ -142,10 +142,11 @@ at startup with a clear message. Compiling in and plugging in register the same 
 same at run time. Pick per extension: compile in for one static artifact, plug in for extending a
 release binary you did not build.
 
-For a working example, the official
-[switchtender-plugins](https://github.com/dcadolph/switchtender-plugins) repo ships
-`switchtender-notify`, one plugin binary that delivers runs to Discord, ntfy, and Microsoft Teams.
-It doubles as the template for writing your own.
+Discord, ntfy, and Microsoft Teams are built-in notification channels, configured with the
+`--notify-discord`, `--notify-ntfy`, and `--notify-teams` flags, so they need no plugin. For a
+working example of the SDK itself, the
+[switchtender-plugins](https://github.com/dcadolph/switchtender-plugins) repo builds those same
+channels as a drop-in binary, doubling as the template for writing your own extension.
 
 ## The seams in detail
 

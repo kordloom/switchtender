@@ -91,6 +91,12 @@ var notifyDiscord []string
 // notifyTeams holds the values of the repeatable --notify-teams flag.
 var notifyTeams []string
 
+// notifyNtfy holds the values of the repeatable --notify-ntfy flag.
+var notifyNtfy []string
+
+// notifyNtfyToken holds the value of the --notify-ntfy-token flag.
+var notifyNtfyToken string
+
 // serveAllowContainerEE holds the value of the --allow-container-ee flag.
 var serveAllowContainerEE bool
 
@@ -270,6 +276,10 @@ func init() {
 		"Discord incoming webhook URL that receives a message when a run finishes. Repeatable.")
 	serveCmd.Flags().StringArrayVar(&notifyTeams, "notify-teams", nil,
 		"Microsoft Teams incoming webhook URL that receives an Adaptive Card when a run finishes. Repeatable.")
+	serveCmd.Flags().StringArrayVar(&notifyNtfy, "notify-ntfy", nil,
+		"ntfy topic URL that receives a notification when a run finishes, such as https://ntfy.sh/my-topic. Repeatable.")
+	serveCmd.Flags().StringVar(&notifyNtfyToken, "notify-ntfy-token", "",
+		"Optional bearer token for a protected ntfy topic, applied to every --notify-ntfy URL.")
 	serveCmd.Flags().BoolVar(&serveAllowContainerEE, "allow-container-ee", false,
 		"Allow runs whose project pins a container image to execute inside that image. Needs Docker.")
 	registerContainerFlags(serveCmd)
@@ -522,6 +532,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		dispatch.WithSlack(notifySlack),
 		dispatch.WithDiscord(notifyDiscord),
 		dispatch.WithTeams(notifyTeams),
+		dispatch.WithNtfy(notifyNtfy, notifyNtfyToken),
 		dispatch.WithEmail(emailer, onFailureOnly),
 		dispatch.WithInventories(bundle.Inventories()),
 		dispatch.WithInventorySources(bundle.InventorySources()),

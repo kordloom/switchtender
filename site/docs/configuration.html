@@ -343,6 +343,16 @@ that variable is unset.</p>
 <td>Microsoft Teams incoming webhook URL that receives an Adaptive Card when a run finishes. Repeatable.</td>
 </tr>
 <tr>
+<td><code>--notify-ntfy</code></td>
+<td>none</td>
+<td>ntfy topic URL that receives a notification when a run finishes, such as <a href="https://ntfy.sh/my-topic">https://ntfy.sh/my-topic</a>. Repeatable.</td>
+</tr>
+<tr>
+<td><code>--notify-ntfy-token</code></td>
+<td>none</td>
+<td>Optional bearer token for a protected ntfy topic, applied to every <code>--notify-ntfy</code> URL.</td>
+</tr>
+<tr>
 <td><code>--allow-container-ee</code></td>
 <td><code>false</code></td>
 <td>Allow runs whose project pins a container image to execute inside it. Needs Docker on the executor.</td>

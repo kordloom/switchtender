@@ -39,6 +39,7 @@ func (d *Dispatcher) notify(r *run.Run) {
 	d.notifySlack(r)
 	d.notifyDiscord(r)
 	d.notifyTeams(r)
+	d.notifyNtfy(r)
 	d.notifyEmail(r)
 	d.notifyExtra(r)
 }
@@ -90,8 +91,15 @@ func (d *Dispatcher) notifyWebhooks(r *run.Run) {
 	}
 }
 
-// deliver posts one notification, retrying transient failures once.
+// deliver posts one JSON notification, retrying transient failures once.
 func (d *Dispatcher) deliver(url, runID string, body []byte) {
+	d.deliverWithHeaders(url, runID, body, map[string]string{"Content-Type": "application/json"})
+}
+
+// deliverWithHeaders posts one notification with the given request headers, retrying transient
+// failures once. The JSON channels use deliver; a channel like ntfy that sends a text body and
+// custom headers uses this directly.
+func (d *Dispatcher) deliverWithHeaders(url, runID string, body []byte, headers map[string]string) {
 	client := &http.Client{Timeout: webhookTimeout}
 	var lastErr error
 	for attempt := 0; attempt < 2; attempt++ {
@@ -101,7 +109,9 @@ func (d *Dispatcher) deliver(url, runID string, body []byte) {
 			lastErr = err
 			break
 		}
-		req.Header.Set("Content-Type", "application/json")
+		for k, v := range headers {
+			req.Header.Set(k, v)
+		}
 		res, err := client.Do(req)
 		if err == nil {
 			_ = res.Body.Close()

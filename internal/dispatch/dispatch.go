@@ -120,6 +120,10 @@ type Dispatcher struct {
 	discordWebhooks []string
 	// teamsWebhooks receive a Microsoft Teams Adaptive Card terminal run notification.
 	teamsWebhooks []string
+	// ntfyURLs receive a terminal run notification published to an ntfy topic.
+	ntfyURLs []string
+	// ntfyToken is an optional bearer token for a protected ntfy topic.
+	ntfyToken string
 	// emailer sends terminal run notifications by email, nil when email is off.
 	emailer Emailer
 	// emailOnFailureOnly limits email notifications to failed runs.
@@ -165,6 +169,10 @@ type config struct {
 	discordWebhooks []string
 	// teamsWebhooks receive a Microsoft Teams Adaptive Card terminal run notification.
 	teamsWebhooks []string
+	// ntfyURLs receive a terminal run notification published to an ntfy topic.
+	ntfyURLs []string
+	// ntfyToken is an optional bearer token for a protected ntfy topic.
+	ntfyToken string
 	// emailer sends terminal run notifications by email, nil when email is off.
 	emailer Emailer
 	// emailOnFailureOnly limits email notifications to failed runs.
@@ -260,6 +268,8 @@ func New(store run.Store, runner roundhouse.Runner, log *zap.Logger, opts ...Opt
 		slackWebhooks:      cfg.slackWebhooks,
 		discordWebhooks:    cfg.discordWebhooks,
 		teamsWebhooks:      cfg.teamsWebhooks,
+		ntfyURLs:           cfg.ntfyURLs,
+		ntfyToken:          cfg.ntfyToken,
 		emailer:            cfg.emailer,
 		emailOnFailureOnly: cfg.emailOnFailureOnly,
 		inventories:        cfg.inventories,

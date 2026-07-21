@@ -46,6 +46,7 @@ What SwitchTender does today.
 | Slack | A formatted message posts to a Slack incoming webhook when a run finishes, with the run label, status, and elapsed time.|
 | Discord | A formatted message posts to a Discord incoming webhook when a run finishes, the same summary as Slack in Discord markdown.|
 | Microsoft Teams | An Adaptive Card posts to a Teams incoming webhook when a run finishes, colored by outcome with the status, elapsed time, and any error.|
+| ntfy | A notification publishes to an ntfy topic when a run finishes, at raised priority for a failure, with optional token auth for a protected topic.|
 | AI triage | An optional AI provider, local Ollama or a cloud API, explains a failed run on demand from its masked log and failed task events. Advisory only: it never runs anything, so every action still goes through the same policy and audit gates.|
 | AI drafting | Describe a bash, python, powershell, or go step in the workflow editor and the provider drafts the script into the command field for you to review, edit, and save. The draft never executes on its own.|
 | Drift reconcile | One click on a drifted host builds the fix: the check run's playbook limited to that host, run for real, born held for approval. A machine proposes, a person releases, and the audit trail records both.|
