@@ -97,7 +97,7 @@ stable loopback port, keeps its data in a per-user directory, and opens the UI i
 
 Open http://localhost:8080 and submit a run:
 
-    curl -X POST localhost:8080/runs \
+    curl -X POST localhost:8080/v1/runs \
       -d '{"playbook": "site.yml", "inventory": "hosts.ini"}'
 
 Add `"shards": 4` to split it across four slices of the inventory.
