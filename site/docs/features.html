@@ -202,6 +202,10 @@
 <td>A finished run posts an annotation to the Grafana annotations API, tagged with switchtender and the run status, so runs show as markers on dashboards.</td>
 </tr>
 <tr>
+<td>Twilio SMS</td>
+<td>A failed or interrupted run texts each configured phone number through the Twilio API. A succeeded run texts no one.</td>
+</tr>
+<tr>
 <td>AI triage</td>
 <td>An optional AI provider, local Ollama or a cloud API, explains a failed run on demand from its masked log and failed task events. Advisory only: it never runs anything, so every action still goes through the same policy and audit gates.</td>
 </tr>

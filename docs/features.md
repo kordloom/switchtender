@@ -50,6 +50,7 @@ What SwitchTender does today.
 | ntfy | A notification publishes to an ntfy topic when a run finishes, at raised priority for a failure, with optional token auth for a protected topic.|
 | PagerDuty | A failed or interrupted run triggers a PagerDuty incident through the Events API, deduplicated per run, so an on-call responder is paged. A succeeded run pages no one.|
 | Grafana | A finished run posts an annotation to the Grafana annotations API, tagged with switchtender and the run status, so runs show as markers on dashboards.|
+| Twilio SMS | A failed or interrupted run texts each configured phone number through the Twilio API. A succeeded run texts no one.|
 | AI triage | An optional AI provider, local Ollama or a cloud API, explains a failed run on demand from its masked log and failed task events. Advisory only: it never runs anything, so every action still goes through the same policy and audit gates.|
 | AI drafting | Describe a bash, python, powershell, or go step in the workflow editor and the provider drafts the script into the command field for you to review, edit, and save. The draft never executes on its own.|
 | Drift reconcile | One click on a drifted target builds the fix, run for real and born held for approval: an Ansible host reruns its playbook limited to that host, a Terraform directory applies. A machine proposes, a person releases, and the audit trail records both.|

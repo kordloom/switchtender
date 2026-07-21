@@ -378,6 +378,26 @@ that variable is unset.</p>
 <td>Bearer token for the Grafana annotations API, applied to every <code>--notify-grafana</code> URL.</td>
 </tr>
 <tr>
+<td><code>--notify-twilio-sid</code></td>
+<td>none</td>
+<td>Twilio Account SID for SMS notifications on a failed run.</td>
+</tr>
+<tr>
+<td><code>--notify-twilio-token</code></td>
+<td>none</td>
+<td>Twilio Auth Token, paired with <code>--notify-twilio-sid</code>.</td>
+</tr>
+<tr>
+<td><code>--notify-twilio-from</code></td>
+<td>none</td>
+<td>Twilio sender phone number that texts run failures.</td>
+</tr>
+<tr>
+<td><code>--notify-twilio-to</code></td>
+<td>none</td>
+<td>Phone number that receives an SMS when a run fails. Repeatable.</td>
+</tr>
+<tr>
 <td><code>--allow-container-ee</code></td>
 <td><code>false</code></td>
 <td>Allow runs whose project pins a container image to execute inside it. Needs Docker on the executor.</td>

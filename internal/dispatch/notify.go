@@ -44,6 +44,7 @@ func (d *Dispatcher) notify(r *run.Run) {
 	d.notifyNtfy(r)
 	d.notifyPagerDuty(r)
 	d.notifyGrafana(r)
+	d.notifyTwilio(r)
 	d.notifyEmail(r)
 	d.notifyExtra(r)
 }

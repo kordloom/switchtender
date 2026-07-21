@@ -112,6 +112,12 @@ var notifyGrafana []string
 // notifyGrafanaToken holds the value of the --notify-grafana-token flag.
 var notifyGrafanaToken string
 
+// notifyTwilioSID, notifyTwilioToken, and notifyTwilioFrom hold the Twilio account and sender flags.
+var notifyTwilioSID, notifyTwilioToken, notifyTwilioFrom string
+
+// notifyTwilioTo holds the values of the repeatable --notify-twilio-to flag.
+var notifyTwilioTo []string
+
 // serveAllowContainerEE holds the value of the --allow-container-ee flag.
 var serveAllowContainerEE bool
 
@@ -305,6 +311,14 @@ func init() {
 		"Grafana base URL that receives an annotation when a run finishes. Repeatable.")
 	serveCmd.Flags().StringVar(&notifyGrafanaToken, "notify-grafana-token", "",
 		"Bearer token for the Grafana annotations API, applied to every --notify-grafana URL.")
+	serveCmd.Flags().StringVar(&notifyTwilioSID, "notify-twilio-sid", "",
+		"Twilio Account SID for SMS notifications on a failed run.")
+	serveCmd.Flags().StringVar(&notifyTwilioToken, "notify-twilio-token", "",
+		"Twilio Auth Token, paired with --notify-twilio-sid.")
+	serveCmd.Flags().StringVar(&notifyTwilioFrom, "notify-twilio-from", "",
+		"Twilio sender phone number that texts run failures.")
+	serveCmd.Flags().StringArrayVar(&notifyTwilioTo, "notify-twilio-to", nil,
+		"Phone number that receives an SMS when a run fails. Repeatable.")
 	serveCmd.Flags().BoolVar(&serveAllowContainerEE, "allow-container-ee", false,
 		"Allow runs whose project pins a container image to execute inside that image. Needs Docker.")
 	registerContainerFlags(serveCmd)
@@ -562,6 +576,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		dispatch.WithNtfy(notifyNtfy, notifyNtfyToken),
 		dispatch.WithPagerDuty(notifyPagerDuty),
 		dispatch.WithGrafana(notifyGrafana, notifyGrafanaToken),
+		dispatch.WithTwilio(notifyTwilioSID, notifyTwilioToken, notifyTwilioFrom, notifyTwilioTo),
 		dispatch.WithEmail(emailer, onFailureOnly),
 		dispatch.WithInventories(bundle.Inventories()),
 		dispatch.WithInventorySources(bundle.InventorySources()),

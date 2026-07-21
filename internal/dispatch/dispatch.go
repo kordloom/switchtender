@@ -134,6 +134,12 @@ type Dispatcher struct {
 	grafanaURLs []string
 	// grafanaToken is the bearer token for the Grafana annotations API.
 	grafanaToken string
+	// twilioSID and twilioToken authenticate the Twilio SMS API; twilioFrom is the sender number and
+	// twilioTo the recipients that receive an SMS when a run fails.
+	twilioSID   string
+	twilioToken string
+	twilioFrom  string
+	twilioTo    []string
 	// emailer sends terminal run notifications by email, nil when email is off.
 	emailer Emailer
 	// emailOnFailureOnly limits email notifications to failed runs.
@@ -193,6 +199,12 @@ type config struct {
 	grafanaURLs []string
 	// grafanaToken is the bearer token for the Grafana annotations API.
 	grafanaToken string
+	// twilioSID and twilioToken authenticate the Twilio SMS API; twilioFrom is the sender number and
+	// twilioTo the recipients that receive an SMS when a run fails.
+	twilioSID   string
+	twilioToken string
+	twilioFrom  string
+	twilioTo    []string
 	// emailer sends terminal run notifications by email, nil when email is off.
 	emailer Emailer
 	// emailOnFailureOnly limits email notifications to failed runs.
@@ -295,6 +307,10 @@ func New(store run.Store, runner roundhouse.Runner, log *zap.Logger, opts ...Opt
 		pagerdutyKeys:      cfg.pagerdutyKeys,
 		grafanaURLs:        cfg.grafanaURLs,
 		grafanaToken:       cfg.grafanaToken,
+		twilioSID:          cfg.twilioSID,
+		twilioToken:        cfg.twilioToken,
+		twilioFrom:         cfg.twilioFrom,
+		twilioTo:           cfg.twilioTo,
 		emailer:            cfg.emailer,
 		emailOnFailureOnly: cfg.emailOnFailureOnly,
 		inventories:        cfg.inventories,

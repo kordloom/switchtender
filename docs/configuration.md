@@ -92,6 +92,10 @@ Runs the HTTP API, the in-process executor, the scheduler, the retention sweeper
 | `--notify-pagerduty` | none | PagerDuty Events API routing key that triggers an incident when a run fails. Repeatable. |
 | `--notify-grafana` | none | Grafana base URL that receives an annotation when a run finishes. Repeatable. |
 | `--notify-grafana-token` | none | Bearer token for the Grafana annotations API, applied to every `--notify-grafana` URL. |
+| `--notify-twilio-sid` | none | Twilio Account SID for SMS notifications on a failed run. |
+| `--notify-twilio-token` | none | Twilio Auth Token, paired with `--notify-twilio-sid`. |
+| `--notify-twilio-from` | none | Twilio sender phone number that texts run failures. |
+| `--notify-twilio-to` | none | Phone number that receives an SMS when a run fails. Repeatable. |
 | `--allow-container-ee` | `false` | Allow runs whose project pins a container image to execute inside it. Needs Docker on the executor. |
 | `--container-memory` | `2g` | Memory cap for containerized runs, as docker `--memory`. Empty removes the cap. |
 | `--container-cpus` | `2` | CPU cap for containerized runs, as docker `--cpus`. Empty removes the cap. |
