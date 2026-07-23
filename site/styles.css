@@ -176,6 +176,10 @@ h1 {
 
 /* Feature cards */
 .cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+.cards-3 { display: flex; flex-wrap: wrap; justify-content: center; gap: 18px; }
+.cards-3 .card { flex: 0 1 calc(33.333% - 12px); }
+@media (max-width: 860px) { .cards-3 .card { flex-basis: calc(50% - 9px); } }
+@media (max-width: 560px) { .cards-3 .card { flex-basis: 100%; } }
 .card {
 	grid-column: span 1; padding: 26px 22px; border-radius: var(--radius);
 	background: var(--surface); border: 1px solid var(--border);
@@ -273,6 +277,8 @@ h1 {
 
 /* CTA */
 .cta { text-align: center; padding: 100px 24px; }
+.cta .hero-cta { justify-content: center; }
+.cta h2 + .hero-cta { margin-top: 34px; }
 .cta p { margin: 18px auto 30px; max-width: 560px; color: var(--muted); font-size: 18px; }
 
 /* Footer */
@@ -285,11 +291,14 @@ h1 {
 .foot-note { color: #63707d; font-size: 13px; }
 
 /* Get started page */
-.gs-hero { padding: 84px 24px 36px; text-align: center; }
-.gs-hero .eyebrow { margin-bottom: 20px; }
+.gs-hero { padding: 100px 24px 64px; text-align: center; }
+.gs-hero .eyebrow { margin-bottom: 22px; }
 .gs-hero h1 { font-family: "Space Grotesk", sans-serif; font-weight: 700; letter-spacing: -0.02em; font-size: clamp(38px, 6vw, 58px); line-height: 1.05; }
-.gs-hero .lede { margin: 20px auto 0; }
-.gs-steps { max-width: 780px; padding: 16px 24px 32px; }
+.gs-hero .lede { margin: 30px auto 38px; max-width: 660px; line-height: 1.7; }
+.gs-hero .hero-cta { justify-content: center; }
+.gs-steps { max-width: 780px; margin: 0 auto; padding: 16px 24px 32px; }
+.gs-note { max-width: 720px; margin: 24px auto 0; text-align: center; color: var(--muted); font-size: 15.5px; }
+.gs-note a { color: var(--accent); }
 .gs-steps ol { list-style: none; display: grid; gap: 18px; }
 .gs-step { display: grid; grid-template-columns: 44px 1fr; gap: 20px; align-items: start; padding: 24px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
 .gs-num { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; font-family: "Space Grotesk", sans-serif; font-weight: 700; font-size: 19px; color: #05261a; background: linear-gradient(135deg, var(--accent), #6ee7b7); }
