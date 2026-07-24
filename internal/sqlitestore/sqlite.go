@@ -1532,7 +1532,8 @@ WHERE status='pending' AND claimed_by!='' AND claimed_at < ?`, cut)
 		return 0, fmt.Errorf("reclaim stale: %w", err)
 	}
 	res, err = tx.ExecContext(ctx, `
-UPDATE runs SET status='interrupted', ended_at=?, error='interrupted: executor lease expired'
+UPDATE runs SET status='interrupted', claimed_by='', claimed_at=NULL,
+ended_at=?, error='interrupted: executor lease expired'
 WHERE status='running' AND claimed_by!='' AND claimed_at < ?`, formatTime(time.Now()), cut)
 	if err != nil {
 		return 0, fmt.Errorf("reclaim stale: %w", err)

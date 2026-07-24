@@ -145,6 +145,9 @@ var serveWorkerToken string
 // serveMatrixCap holds the value of the --matrix-cap flag.
 var serveMatrixCap int
 
+// serveMaxShards holds the value of the --max-shards flag.
+var serveMaxShards int
+
 // servePluginsDir holds the value of the --plugins-dir flag.
 var servePluginsDir string
 
@@ -409,6 +412,8 @@ func init() {
 		"Concurrent runs this process executes at once.")
 	serveCmd.Flags().IntVar(&serveMatrixCap, "matrix-cap", server.DefaultMatrixCap,
 		"Largest host matrix, in cells, the UI draws before showing a notice. 0 means no limit.")
+	serveCmd.Flags().IntVar(&serveMaxShards, "max-shards", dispatch.DefaultMaxShards,
+		"Most groups a split fans out into. A split is always bounded by the host count.")
 	serveCmd.Flags().StringVar(&servePluginsDir, "plugins-dir", "",
 		"Directory of extension plugin binaries to load at startup. Empty loads none. Also SWITCHTENDER_PLUGINS_DIR.")
 	serveCmd.Flags().StringVar(&serveOIDCIssuer, "oidc-issuer", "",
@@ -647,6 +652,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	emailer, onFailureOnly := buildEmailer()
 	disp := dispatch.New(store, runner, log, dispatch.WithPublisher(hub),
 		dispatch.WithWorkers(serveWorkers),
+		dispatch.WithMaxShards(serveMaxShards),
 		dispatch.WithCredentials(bundle.Credentials(), sealer),
 		dispatch.WithProjects(bundle.Projects(), syncer),
 		dispatch.WithDefaultImage(serveDefaultImage),

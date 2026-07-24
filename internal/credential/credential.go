@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"slices"
 	"strings"
 	"time"
 
@@ -76,17 +77,53 @@ var (
 	ErrNoKey = errors.New("no encryption key: set SWITCHTENDER_ENCRYPTION_KEY")
 )
 
-// ValidKind reports whether k names a supported credential kind. The fixed kinds materialized by the
-// runner are listed here; typed and custom kinds are valid when they have a registered injector, so a
-// host that registers its own credential type does not need to touch this function.
+// builtinKinds are the credential kinds SwitchTender ships with, in a stable display order. ValidKind
+// also accepts any kind with a registered injector, so a host or plugin can add its own type without
+// editing this list.
+var builtinKinds = []Kind{
+	KindSSHKey, KindSSHPassword, KindVaultPassword, KindBecomePassword, KindBecome, KindNetwork,
+	KindEnv, KindToken, KindRegistry, KindAWS, KindAzure, KindGCP, KindVMware,
+}
+
+// ValidKind reports whether k names a supported credential kind: a built-in, or a typed or custom
+// kind with a registered injector, so a host that registers its own credential type does not need to
+// touch this function.
 func ValidKind(k Kind) bool {
-	switch k {
-	case KindSSHKey, KindVaultPassword, KindEnv, KindBecomePassword, KindRegistry, KindToken,
-		KindSSHPassword, KindBecome, KindNetwork:
-		return true
-	default:
-		return Injectable(k)
+	return slices.Contains(builtinKinds, k) || Injectable(k)
+}
+
+// Kinds returns the built-in credential kinds in display order. Custom registered kinds are also
+// valid via ValidKind but are not enumerated here.
+func Kinds() []Kind {
+	return slices.Clone(builtinKinds)
+}
+
+// KindList joins the built-in kinds into a comma-separated string for a user-facing error hint.
+func KindList() string {
+	out := make([]string, len(builtinKinds))
+	for i, k := range builtinKinds {
+		out[i] = string(k)
 	}
+	return strings.Join(out, ", ")
+}
+
+// SourceList joins the supported credential sources into a comma-separated string for a user-facing
+// error hint.
+func SourceList() string {
+	return strings.Join(secretsource.Kinds(), ", ")
+}
+
+// ansibleOnlyKinds are credential kinds materialized through Ansible-specific flags or extra-vars
+// files: a private key, a vault password file, and connection or become variables. They have no
+// effect under any other tool, so attaching one to a bash, terraform, python, or similar run is a
+// mistake worth rejecting at submit rather than silently ignoring at execution.
+var ansibleOnlyKinds = []Kind{
+	KindSSHKey, KindVaultPassword, KindBecomePassword, KindSSHPassword, KindBecome, KindNetwork,
+}
+
+// AnsibleOnly reports whether kind only takes effect under the Ansible tool.
+func AnsibleOnly(k Kind) bool {
+	return slices.Contains(ansibleOnlyKinds, k)
 }
 
 const (

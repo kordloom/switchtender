@@ -9,6 +9,10 @@ var (
 	ErrNoCommand = errors.New("no command")
 	// ErrUnknownTool is returned when a run names an execution tool the dispatcher does not support.
 	ErrUnknownTool = errors.New("unknown execution tool")
+	// ErrToolCredential is returned when a run attaches a credential whose kind only takes effect
+	// under Ansible to a non-Ansible tool, so the mismatch fails at submit instead of the credential
+	// being silently ignored at execution.
+	ErrToolCredential = errors.New("credential kind does not apply to this tool")
 	// ErrNoHostLister is returned when a split is requested but the runner cannot list hosts.
 	ErrNoHostLister = errors.New("host listing unavailable")
 	// ErrNoSteps is returned when a pipeline is submitted with no steps.

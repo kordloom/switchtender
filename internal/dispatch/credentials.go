@@ -30,13 +30,14 @@ func WithCredentials(store credential.Store, sealer *credential.Sealer) Option {
 
 // validateCredentials confirms every referenced credential exists and is decryptable before a run
 // is accepted, so a bad reference fails at submit time instead of execution time.
-func (d *Dispatcher) validateCredentials(ctx context.Context, ids []string) error {
+func (d *Dispatcher) validateCredentials(ctx context.Context, tool string, ids []string) error {
 	if len(ids) == 0 {
 		return nil
 	}
 	if d.credentials == nil || d.sealer == nil || !d.sealer.Enabled() {
 		return credential.ErrNoKey
 	}
+	ansible := run.NormalizeTool(tool) == run.ToolAnsible
 	for _, id := range ids {
 		c, err := d.credentials.Get(ctx, id)
 		if err != nil {
@@ -44,6 +45,10 @@ func (d *Dispatcher) validateCredentials(ctx context.Context, ids []string) erro
 		}
 		if _, err := d.sealer.Open(c.Secret); err != nil {
 			return fmt.Errorf("decrypt credential %s: %w", id, err)
+		}
+		if !ansible && credential.AnsibleOnly(c.Kind) {
+			return fmt.Errorf("%w: credential %s of kind %s applies only to the ansible tool, not %s",
+				ErrToolCredential, id, c.Kind, run.NormalizeTool(tool))
 		}
 	}
 	return nil
