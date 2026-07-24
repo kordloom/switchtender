@@ -135,8 +135,12 @@ jobs:
             --clobber
 
       # SLSA build provenance for every published artifact, verifiable with `gh attestation verify`.
+      # GitHub only persists attestations for public or paid repositories, so this step is allowed to
+      # fail without failing the release. It starts recording provenance automatically once the
+      # repository is public.
       - name: Attest build provenance
         if: github.ref_type == 'tag'
+        continue-on-error: true
         uses: actions/attest-build-provenance@v2
         with:
           subject-path: |
