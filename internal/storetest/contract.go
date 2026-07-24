@@ -1005,6 +1005,14 @@ func testLeaseLifecycle(t *testing.T, store run.Store) {
 	if gone.Status != run.StatusInterrupted || gone.EndedAt == nil {
 		t.Errorf("stale running run = %+v, want interrupted with an end time", gone)
 	}
+	// The interrupt also releases the lease so the reclaimed worker's heartbeat stops matching and
+	// the run cannot be resurrected through its stale owner.
+	if gone.ClaimedBy != "" || gone.ClaimedAt != nil {
+		t.Errorf("interrupted run still leased = %+v, want claimed_by and claimed_at cleared", gone)
+	}
+	if err := store.Heartbeat(ctx, gone.ID, "worker-b"); !errors.Is(err, run.ErrNotFound) {
+		t.Errorf("Heartbeat() on interrupted run = %v, want ErrNotFound", err)
+	}
 }
 
 // testRequestCancel verifies the cancel flag round trips and unknown runs report ErrNotFound.

@@ -517,6 +517,31 @@ func TestDispatcherSubmitSplit(t *testing.T) {
 	}
 }
 
+// TestDispatcherSplitClampsToMaxShards verifies the max-shards ceiling caps a split's fan-out even
+// when the caller asks for more shards than the ceiling, so one submission cannot spawn an unbounded
+// number of child runs.
+func TestDispatcherSplitClampsToMaxShards(t *testing.T) {
+	t.Parallel()
+	store := run.NewMemStore()
+	d := New(store, &fakeRunnerLister{hosts: []string{"a", "b", "c", "d"}}, nil, WithMaxShards(2))
+	defer d.Close()
+
+	parent, err := d.SubmitSplit(context.Background(), "play.yml", "inv", 4)
+	if err != nil {
+		t.Fatalf("SubmitSplit() error = %v", err)
+	}
+	if parent.ShardCount == nil || *parent.ShardCount != 2 {
+		t.Fatalf("parent ShardCount = %v, want 2 (clamped from 4)", parent.ShardCount)
+	}
+	shards, err := store.Shards(context.Background(), parent.ID)
+	if err != nil {
+		t.Fatalf("Shards() error = %v", err)
+	}
+	if len(shards) != 2 {
+		t.Fatalf("shards = %d, want 2 (clamped)", len(shards))
+	}
+}
+
 func TestDispatcherSplitFallsBackAndErrors(t *testing.T) {
 	t.Parallel()
 
