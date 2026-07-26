@@ -73,7 +73,7 @@ func (u *UI) Handler() http.Handler {
 		panic("ui: assets subtree: " + err.Error())
 	}
 	mux := http.NewServeMux()
-	mux.Handle("GET /ui/assets/", http.StripPrefix("/ui/assets/", http.FileServer(http.FS(assets))))
+	mux.Handle("GET /ui/assets/", http.StripPrefix("/ui/assets/", newAssetHandler(assets)))
 	mux.HandleFunc("GET /ui/runs/{id}", u.detail)
 	mux.HandleFunc("GET /ui/runs", u.runs)
 	mux.HandleFunc("GET /ui/fleet", u.fleet)

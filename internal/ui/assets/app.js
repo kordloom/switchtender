@@ -3238,15 +3238,19 @@ async function proposeRun() {
 async function loadOverview() {
 	renderJumpTiles();
 	wireTileFilter();
-	const [runsRes, fleetRes] = await Promise.all([
-		getJSON("/runs").catch(() => ({ runs: [] })),
-		getJSON("/fleet").catch(() => ({ hosts: [] })),
-	]);
-	const runs = runsRes.runs || [];
-	const hosts = fleetRes.hosts || [];
-	renderOverviewMetrics(runs, hosts);
-	renderRecentRuns(runs.slice(0, 10));
-	setStatus("");
+	try {
+		const [runsRes, fleetRes] = await Promise.all([
+			getJSON("/runs"),
+			getJSON("/fleet"),
+		]);
+		const runs = runsRes.runs || [];
+		const hosts = fleetRes.hosts || [];
+		renderOverviewMetrics(runs, hosts);
+		renderRecentRuns(runs.slice(0, 10));
+		setStatus("");
+	} catch (e) {
+		setStatus("Failed to load the overview: " + e.message);
+	}
 }
 
 // renderOverviewMetrics fills the headline metric strip from the run and fleet data.
@@ -4150,7 +4154,7 @@ let detailState = null;
 // loadDetail loads one run and dispatches to the split or single render path.
 async function loadDetail(runId) {
 	const fullLog = document.getElementById("full-log");
-	if (fullLog) fullLog.href = "/runs/" + runId + "/logs";
+	if (fullLog) fullLog.href = streamURL("/runs/" + runId + "/logs");
 	wireActions(runId);
 	try {
 		const run = await getJSON("/runs/" + runId);
@@ -4481,7 +4485,11 @@ async function loadPipeline(pipelineId) {
 // openPipelineStream refreshes the header and step list as step events arrive, coalescing bursts
 // into one refresh, and settles on the final state at the end signal.
 function openPipelineStream(pipelineId) {
+	const indicator = document.getElementById("live-indicator");
 	const source = new EventSource(streamURL("/runs/" + pipelineId + "/stream"));
+	// The browser retries the stream on its own, so an error only flips the indicator.
+	source.onopen = () => { if (indicator) indicator.textContent = "live"; };
+	source.onerror = () => { if (indicator) indicator.textContent = "reconnecting"; };
 	let pending = null;
 	const refresh = async () => {
 		pending = null;
@@ -4570,7 +4578,11 @@ async function loadParent(parentId) {
 // openParentStream applies shard events to the merged matrix as they arrive. A stats event means a
 // shard finished, so the shard list refreshes, and the end signal settles the final state.
 function openParentStream(parentId) {
+	const indicator = document.getElementById("live-indicator");
 	const source = new EventSource(streamURL("/runs/" + parentId + "/stream"));
+	// The browser retries the stream on its own, so an error only flips the indicator.
+	source.onopen = () => { if (indicator) indicator.textContent = "live"; };
+	source.onerror = () => { if (indicator) indicator.textContent = "reconnecting"; };
 	const refreshShards = async () => {
 		try {
 			const shardData = await getJSON("/runs/" + parentId + "/shards");
@@ -4645,6 +4657,9 @@ function openStream(runId, afterSeq) {
 
 	const path = "/runs/" + runId + "/stream" + (afterSeq ? "?after=" + afterSeq : "");
 	const source = new EventSource(streamURL(path));
+	// The browser retries the stream on its own, so an error only flips the indicator.
+	source.onopen = () => { if (indicator) indicator.textContent = "live"; };
+	source.onerror = () => { if (indicator) indicator.textContent = "reconnecting"; };
 	source.addEventListener("event", (e) => {
 		try {
 			const ev = JSON.parse(e.data);
@@ -4671,11 +4686,13 @@ function openStream(runId, afterSeq) {
 // without bound. The tail is what matters live; the full log is available on the run itself.
 const logCap = 262144;
 
-// appendLog adds a chunk to the live log pane and keeps it scrolled to the end. It appends a
-// text node rather than rebuilding the whole string, which keeps a long stream from getting
-// quadratic, and trims the pane back to the cap when it grows past it.
+// appendLog adds a chunk to the live log pane, following the tail only when the view was already
+// near the bottom, so a reader scrolled up is not yanked back down. It appends a text node
+// rather than rebuilding the whole string, which keeps a long stream from getting quadratic, and
+// trims the pane back to the cap when it grows past it.
 function appendLog(chunk) {
 	const pre = document.getElementById("log");
+	const nearBottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 40;
 	pre.appendChild(document.createTextNode(chunk));
 	detailState.logLen = (detailState.logLen || 0) + chunk.length;
 	if (detailState.logLen > logCap * 2) {
@@ -4683,7 +4700,7 @@ function appendLog(chunk) {
 		detailState.logLen = pre.textContent.length;
 	}
 	document.getElementById("log-panel").hidden = false;
-	pre.scrollTop = pre.scrollHeight;
+	if (nearBottom) pre.scrollTop = pre.scrollHeight;
 }
 
 // renderHeader fills the run header fields.
