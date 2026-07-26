@@ -93,11 +93,23 @@ select it on the project. Every run records the exact commit it executed.
 Open Credentials and add what your runs need. Kinds:
 
 - `ssh_key`: an SSH private key, used to reach hosts and to clone private git projects.
+- `ssh_password`: a machine login, injected as the `ansible_user` and `ansible_password` variables
+  through a file, so the password stays off the command line.
 - `vault_password`: an Ansible Vault password.
+- `become_password`: a privilege escalation password, delivered without touching the command line.
+- `become`: privilege escalation with an optional method and user, injected as the
+  `ansible_become_*` variables through a file.
+- `network`: a network device login, injected as the `ansible_user`, `ansible_password`,
+  `ansible_network_os`, and `ansible_connection` variables.
 - `env`: `KEY=VALUE` lines injected into the run, how cloud SDK credentials reach plugins.
 - `token`: a single API token or JWT, exposed to the run as the `SWITCHTENDER_TOKEN` environment variable.
-- `become_password`: a privilege escalation password, delivered without touching the command line.
 - `registry`: a container registry login, for pulling a pinned execution image.
+- `aws`: an AWS access key, injected as the standard `AWS_*` environment variables.
+- `azure`: an Azure service principal, injected as the `ARM_*` variables Terraform reads and the
+  `AZURE_*` variables the Ansible azure collection reads.
+- `gcp`: a Google Cloud service account JSON, bound to `GOOGLE_APPLICATION_CREDENTIALS`.
+- `vmware`: a vCenter login, injected as the `VMWARE_*` environment variables the
+  community.vmware modules read.
 
 Secrets are encrypted at rest and never returned by the API.
 
@@ -135,11 +147,14 @@ Add a schedule in Schedules with a cron expression to fire a template on a caden
   by dragging from a step's edge onto another, and run the graph as a pipeline.
 - Access is a global role plus optional per-object grants, rather than AWX's organization tree. Grant
   a user or a team `use` or `manage` on a specific project, template, inventory, or credential.
-- Notifications are finish webhooks, email, and Slack today, not the full AWX set.
+- Notifications are configured on the server with `--notify-*` flags and cover eleven channels:
+  webhook, Slack, Mattermost, Rocket.Chat, Discord, Microsoft Teams, ntfy, PagerDuty, Grafana,
+  Twilio SMS, and email.
 
 ## What is not one to one yet
 
-- The notification integration catalog is smaller than AWX's.
+- Notification routing is server-wide. AWX attaches notification templates to a single job
+  template; SwitchTender delivers every finished run to every configured channel.
 - Execution environments are a single pinned container image behind a flag, not a managed catalog.
 
 If something you rely on is missing, open an issue. The gap with AWX is being closed on purpose.

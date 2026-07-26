@@ -115,7 +115,7 @@
 </tr>
 <tr>
 <td>Tamper-evident audit</td>
-<td>Every mutation is linked into a SHA-256 hash chain. <code>GET /audit/verify</code> flags the first altered or deleted entry, and a signed export verified with <code>switchtender audit verify</code> proves the whole chain offline.</td>
+<td>Every mutation is linked into a SHA-256 hash chain. <code>GET /v1/audit/verify</code> flags the first altered or deleted entry, and a signed export verified with <code>switchtender audit verify</code> proves the whole chain offline.</td>
 </tr>
 <tr>
 <td>Inventories</td>
@@ -131,7 +131,7 @@
 </tr>
 <tr>
 <td>Credentials</td>
-<td>SSH keys, vault passwords, env bundles for cloud SDKs, API tokens and JWTs, become passwords, and registry logins, all encrypted at rest.</td>
+<td>Thirteen kinds: SSH keys and SSH passwords, vault passwords, become passwords and full become settings, network device logins, env bundles for cloud SDKs, API tokens and JWTs, registry logins, and typed AWS, Azure, GCP, and VMware cloud credentials, all encrypted at rest.</td>
 </tr>
 <tr>
 <td>Secret masking</td>

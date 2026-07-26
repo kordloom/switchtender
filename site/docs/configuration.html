@@ -89,6 +89,26 @@ variable.</p>
 <td>Password for the <code>--ldap-bind-dn</code> service account.</td>
 </tr>
 <tr>
+<td><code>SWITCHTENDER_WORKER_TOKEN</code></td>
+<td>serve, worker</td>
+<td>Mesh relay bearer token. The server reads it when <code>--worker-token</code> is unset, and a relay worker started with <code>--server</code> presents it on every call.</td>
+</tr>
+<tr>
+<td><code>SWITCHTENDER_GALAXY_SERVER</code></td>
+<td>serve, worker</td>
+<td>Default for <code>--galaxy-server</code>, a private Ansible Galaxy or Automation Hub URL.</td>
+</tr>
+<tr>
+<td><code>SWITCHTENDER_GALAXY_TOKEN</code></td>
+<td>serve, worker</td>
+<td>Token for the <code>--galaxy-server</code> URL, read from the environment so it never lands on the command line.</td>
+</tr>
+<tr>
+<td><code>SWITCHTENDER_PLUGINS_DIR</code></td>
+<td>serve, worker</td>
+<td>Directory of extension plugin binaries, read when <code>--plugins-dir</code> is unset.</td>
+</tr>
+<tr>
 <td><code>SWITCHTENDER_ADMIN_PASSWORD</code></td>
 <td>init</td>
 <td>Password for the first admin account. When unset, init generates one and prints it once.</td>
@@ -323,6 +343,16 @@ that variable is unset.</p>
 <td>How often the scheduler checks for due schedules.</td>
 </tr>
 <tr>
+<td><code>--workers</code></td>
+<td><code>4</code></td>
+<td>Concurrent runs this process executes at once.</td>
+</tr>
+<tr>
+<td><code>--max-shards</code></td>
+<td><code>512</code></td>
+<td>Most groups a split fans out into. A split is always bounded by the host count.</td>
+</tr>
+<tr>
 <td><code>--notify-webhook</code></td>
 <td>none</td>
 <td>URL that receives a JSON notification when a run finishes. Repeatable.</td>
@@ -403,6 +433,16 @@ that variable is unset.</p>
 <td>Allow runs whose project pins a container image to execute inside it. Needs Docker on the executor.</td>
 </tr>
 <tr>
+<td><code>--default-image</code></td>
+<td>none</td>
+<td>Fallback execution image for runs that pin none at the run, template, or project level. Empty leaves an unpinned run on the host.</td>
+</tr>
+<tr>
+<td><code>--require-image-digest</code></td>
+<td><code>false</code></td>
+<td>Reject a container run whose image is not pinned to an <code>@sha256:</code> digest.</td>
+</tr>
+<tr>
 <td><code>--container-memory</code></td>
 <td><code>2g</code></td>
 <td>Memory cap for containerized runs, as docker <code>--memory</code>. Empty removes the cap.</td>
@@ -423,6 +463,21 @@ that variable is unset.</p>
 <td>Network mode for containerized runs, as docker <code>--network</code>, for example bridge or none.</td>
 </tr>
 <tr>
+<td><code>--container-runtime</code></td>
+<td><code>docker</code></td>
+<td>Container CLI for containerized runs: docker or podman.</td>
+</tr>
+<tr>
+<td><code>--container-pull-policy</code></td>
+<td><code>missing</code></td>
+<td>Image pull policy for containerized runs, as docker <code>--pull</code>: always, missing, or never.</td>
+</tr>
+<tr>
+<td><code>--galaxy-server</code></td>
+<td>none</td>
+<td>Private Ansible Galaxy or Automation Hub URL for project collection installs. Token from <code>SWITCHTENDER_GALAXY_TOKEN</code>.</td>
+</tr>
+<tr>
 <td><code>--strict-grants</code></td>
 <td><code>false</code></td>
 <td>Deny non-admins access to an object that has no grants, instead of deferring to the global role.</td>
@@ -441,6 +496,11 @@ that variable is unset.</p>
 <td><code>--plugins-dir</code></td>
 <td>none</td>
 <td>Directory of extension plugin binaries loaded at startup. Also <code>SWITCHTENDER_PLUGINS_DIR</code>. See <a href="/docs/sdk">Extend in Go</a>.</td>
+</tr>
+<tr>
+<td><code>--worker-token</code></td>
+<td>none</td>
+<td>Bearer token that authenticates mesh relay workers and enables the relay endpoints. Also <code>SWITCHTENDER_WORKER_TOKEN</code>. Keep it secret.</td>
 </tr>
 <tr>
 <td><code>--retain-runs</code></td>
@@ -503,7 +563,8 @@ data in a per-user directory, and opens the web UI in the default browser. It ta
 macOS app or a Windows installer.</p>
 <h2 id="worker">worker</h2>
 <p>Leases pending runs from the shared store and executes them. Point it and a server at the same
-database and they compete for work.</p>
+database and they compete for work. Or start it with <code>--server</code> and it leases runs from the control
+node over the mesh relay, with no database access of its own.</p>
 <table>
 <thead>
 <tr>
@@ -516,7 +577,12 @@ database and they compete for work.</p>
 <tr>
 <td><code>--db</code></td>
 <td><code>switchtender.db</code></td>
-<td>SQLite file path, or a <code>postgres://</code> DSN.</td>
+<td>SQLite file path, or a <code>postgres://</code> DSN. Ignored with <code>--server</code>.</td>
+</tr>
+<tr>
+<td><code>--server</code></td>
+<td>none</td>
+<td>Control node base URL to lease runs from over the mesh relay, for example <code>https://switchtender.example.com</code>. When set, the worker needs no database and dials one outbound connection. Token from <code>SWITCHTENDER_WORKER_TOKEN</code>.</td>
 </tr>
 <tr>
 <td><code>--name</code></td>
@@ -529,9 +595,24 @@ database and they compete for work.</p>
 <td>Queue this worker serves. Repeatable. Without any, it serves the default pool.</td>
 </tr>
 <tr>
+<td><code>--workers</code></td>
+<td><code>4</code></td>
+<td>Concurrent runs this process executes at once.</td>
+</tr>
+<tr>
 <td><code>--allow-container-ee</code></td>
 <td><code>false</code></td>
 <td>Allow container execution environments on this worker. Needs Docker.</td>
+</tr>
+<tr>
+<td><code>--default-image</code></td>
+<td>none</td>
+<td>Fallback execution image for runs that pin none at the run, template, or project level.</td>
+</tr>
+<tr>
+<td><code>--require-image-digest</code></td>
+<td><code>false</code></td>
+<td>Reject a container run whose image is not pinned to an <code>@sha256:</code> digest.</td>
 </tr>
 <tr>
 <td><code>--plugins-dir</code></td>
@@ -557,6 +638,21 @@ database and they compete for work.</p>
 <td><code>--container-network</code></td>
 <td><code>bridge</code></td>
 <td>Network mode for containerized runs, as docker <code>--network</code>.</td>
+</tr>
+<tr>
+<td><code>--container-runtime</code></td>
+<td><code>docker</code></td>
+<td>Container CLI for containerized runs: docker or podman.</td>
+</tr>
+<tr>
+<td><code>--container-pull-policy</code></td>
+<td><code>missing</code></td>
+<td>Image pull policy for containerized runs, as docker <code>--pull</code>: always, missing, or never.</td>
+</tr>
+<tr>
+<td><code>--galaxy-server</code></td>
+<td>none</td>
+<td>Private Ansible Galaxy or Automation Hub URL for project collection installs. Token from <code>SWITCHTENDER_GALAXY_TOKEN</code>.</td>
 </tr>
 </tbody>
 </table>
@@ -586,6 +682,14 @@ expires.</li>
 </ul>
 <p>Both take <code>--db</code> for the target database. Without <code>--apply</code> the command only reports what it would
 create.</p>
+<h2 id="audit">audit</h2>
+<p>Audit trail tools for the signed export.</p>
+<ul>
+<li><code>audit keygen</code> generates an ed25519 signing key. Set the printed seed as <code>SWITCHTENDER_AUDIT_KEY</code>.</li>
+<li><code>audit verify &lt;export.json&gt;</code> verifies an export offline: it recomputes the hash chain and checks
+the signature. <code>--pubkey</code> pins the expected signer public key in hex, and verification fails when
+the export's key differs.</li>
+</ul>
 <h2 id="demo">demo</h2>
 <p>Seeds a fresh database with sample data and real runs, then serves it read-only, so a public
 instance is safe to expose. It needs ansible on the PATH to run the sample playbooks.</p>
@@ -610,6 +714,8 @@ instance is safe to expose. It needs ansible on the PATH to run the sample playb
 </tr>
 </tbody>
 </table>
+<h2 id="version">version</h2>
+<p>Prints the SwitchTender version.</p>
 <h2 id="global-flags">Global flags</h2>
 <table>
 <thead>

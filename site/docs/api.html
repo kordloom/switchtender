@@ -37,8 +37,8 @@
 		<main class="dcontent prose">
 			<h1 id="http-api">HTTP API</h1>
 <p>Every endpoint the server exposes. The API is served under the <code>/v1</code> base path. The web UI at
-<code>/ui/</code>, along with <code>/healthz</code>, <code>/metrics</code>, the OpenID Connect sign-in routes, and the webhook
-<code>/hooks</code> path, is unversioned. The root redirects to the UI.</p>
+<code>/ui/</code>, along with <code>/healthz</code>, <code>/metrics</code>, the OpenID Connect and SAML sign-in routes, the webhook
+<code>/hooks</code> path, and the <code>/relay</code> worker path, is unversioned. The root redirects to the UI.</p>
 <table>
 <thead>
 <tr>
@@ -261,7 +261,7 @@
 <tr>
 <td>POST</td>
 <td><code>/v1/credentials</code></td>
-<td>Store a credential (ssh_key, vault_password, env, token, become_password, registry), encrypted at rest.</td>
+<td>Store a credential, encrypted at rest. Thirteen kinds: ssh_key, ssh_password, vault_password, become_password, become, network, env, token, registry, aws, azure, gcp, vmware.</td>
 </tr>
 <tr>
 <td>GET</td>
@@ -362,6 +362,36 @@
 <td>DELETE</td>
 <td><code>/v1/teams/{id}/members/{userID}</code></td>
 <td>Remove a user from a team.</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/v1/orgs</code></td>
+<td>Create an organization.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/v1/orgs</code></td>
+<td>List organizations.</td>
+</tr>
+<tr>
+<td>DELETE</td>
+<td><code>/v1/orgs/{id}</code></td>
+<td>Delete an organization and its memberships.</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/v1/orgs/{id}/members</code></td>
+<td>Add a user to an organization with an organization role.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/v1/orgs/{id}/members</code></td>
+<td>List an organization's members and their roles.</td>
+</tr>
+<tr>
+<td>DELETE</td>
+<td><code>/v1/orgs/{id}/members/{userID}</code></td>
+<td>Remove a user from an organization.</td>
 </tr>
 <tr>
 <td>POST</td>
@@ -477,6 +507,61 @@
 <td>GET</td>
 <td><code>/healthz</code></td>
 <td>Liveness.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="relay-endpoints">Relay endpoints</h2>
+<p>With <code>--worker-token</code> set, the server also serves the mesh relay under <code>/relay</code>: the execution
+path an outbound worker started with <code>--server</code> uses instead of a database connection. Every call
+presents the worker bearer token.</p>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>What</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>POST</td>
+<td><code>/relay/v1/claim</code></td>
+<td>Lease the oldest pending run for the caller.</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/relay/v1/heartbeat</code></td>
+<td>Renew the lease on a run.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/relay/v1/runs/{id}</code></td>
+<td>Fetch one run.</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/relay/v1/runs/{id}/save</code></td>
+<td>Save the run's state.</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/relay/v1/runs/{id}/log</code></td>
+<td>Append captured output.</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/relay/v1/runs/{id}/events</code></td>
+<td>Append structured events.</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/relay/v1/runs/{id}/host-summary</code></td>
+<td>Save the run's per-host summaries.</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/relay/v1/runs/{id}/task-summary</code></td>
+<td>Save the run's per-task summaries.</td>
 </tr>
 </tbody>
 </table>

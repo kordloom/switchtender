@@ -71,8 +71,9 @@ name a host set once and reuse it across templates.</p>
 <h2 id="how-are-secrets-stored">How are secrets stored?</h2>
 <p>Sealed with AES-256-GCM, the key derived from an operator passphrase through argon2id. Secrets
 decrypt only at execution, into a temporary file wiped when the run finishes, and never appear in API
-responses. Kinds include SSH keys, vault passwords, become passwords, container registry logins, and
-environment bundles, which is where API tokens and other KEY=VALUE secrets go. Set
+responses. Thirteen kinds cover SSH keys and SSH passwords, vault passwords, become passwords and
+full become settings, network device logins, environment bundles, API tokens, container registry
+logins, and typed AWS, Azure, GCP, and VMware credentials. Set
 <code>SWITCHTENDER_ENCRYPTION_KEY</code> and <code>SWITCHTENDER_ENCRYPTION_SALT</code> to enable them.</p>
 <p>A credential can also be a command source, so the value lives in an external store instead of in
 SwitchTender. SwitchTender seals a command, for example <code>vault kv get -field=password secret/prod</code> or an

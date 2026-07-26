@@ -76,8 +76,10 @@ webhook secret on the git host and turn on enforcement, and every inbound push m
 missing signature never launches a run.</p>
 <h2 id="credentials">Credentials</h2>
 <p>A credential is a secret sealed with AES-256-GCM, decrypted only at execution into a temporary file
-and wiped afterward. Kinds are SSH keys, vault passwords, environment bundles for cloud SDKs,
-become passwords, and container registry logins. Secrets never appear in API responses.</p>
+and wiped afterward. Thirteen kinds cover SSH keys and SSH passwords, vault passwords, become
+passwords and full become settings, network device logins, environment bundles for cloud SDKs, API
+tokens, container registry logins, and typed AWS, Azure, GCP, and VMware cloud credentials. The
+<a href="/docs/secrets">secrets guide</a> describes each. Secrets never appear in API responses.</p>
 <h2 id="teams-and-grants">Teams and grants</h2>
 <p>The global roles, admin, operator, and viewer, decide the broad strokes. On top of them, a grant
 gives a user or a team access to a specific project, template, inventory, or credential. A read grant
@@ -102,9 +104,10 @@ against it lands there, no matter how it was launched.</p>
 <h2 id="provable-audit">Provable audit</h2>
 <p>Every authenticated mutation is recorded in the audit trail, and each entry is linked into a SHA-256
 hash chain: it carries the previous entry's hash and its own hash over its content. Altering,
-reordering, or deleting an entry breaks the chain, which <code>GET /audit/verify</code> detects. A signed export
-from <code>GET /audit/export</code> seals the chain with an ed25519 signature, so <code>switchtender audit verify</code>
-proves the trail is intact and unaltered offline, without trusting the server that produced it.</p>
+reordering, or deleting an entry breaks the chain, which <code>GET /v1/audit/verify</code> detects. A signed
+export from <code>GET /v1/audit/export</code> seals the chain with an ed25519 signature, so
+<code>switchtender audit verify</code> proves the trail is intact and unaltered offline, without trusting the
+server that produced it.</p>
 <h2 id="approvals">Approvals</h2>
 <p>A run can be marked to require approval. It is held in a pending-approval state that the claim loop
 never picks up, until an admin approves it, which releases it to run, or rejects it, which ends it.

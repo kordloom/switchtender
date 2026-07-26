@@ -15,8 +15,11 @@ that binary. There is no separate paid build and nothing is unlocked with a lice
 - The tamper-evident, hash-chained audit trail with signed, offline-verifiable export.
 - Approval gates on high-risk runs.
 - Active-active high availability on PostgreSQL.
-- External secrets through HashiCorp Vault (static and dynamic), AWS Secrets Manager, Google Secret Manager, Azure Key Vault, and CyberArk Conjur, plus any store through a command.
-- Notifications over email, Slack, and webhook, plus retention policies.
+- External secrets through nine managers: HashiCorp Vault (static and dynamic), AWS Secrets
+  Manager, AWS STS, Google Secret Manager, Azure Key Vault, CyberArk Conjur, CyberArk CCP, and
+  1Password Connect, plus any store through a command.
+- Notifications over eleven channels: webhook, Slack, Mattermost, Rocket.Chat, Discord, Microsoft
+  Teams, ntfy, PagerDuty, Grafana, Twilio SMS, and email, plus retention policies.
 
 Internal production use by a company, on its own hosts, for its own infrastructure, is fully covered
 at no cost.

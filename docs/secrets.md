@@ -19,11 +19,18 @@ A credential's kind decides how its value reaches a run.
 | Kind | What it is |
 |------|------------|
 | `ssh_key` | An SSH private key, to reach hosts and clone private git projects. |
+| `ssh_password` | A machine login, injected as `ansible_user` and `ansible_password` through a file, so the password stays off the command line. |
 | `vault_password` | An Ansible Vault password. |
+| `become_password` | A privilege escalation password, kept off the command line. |
+| `become` | Privilege escalation with an optional method and user, injected as the `ansible_become_*` variables through a file. |
+| `network` | A network device login, injected as the `ansible_user`, `ansible_password`, `ansible_network_os`, and `ansible_connection` variables. |
 | `env` | `KEY=VALUE` lines injected into the environment, how cloud SDK tokens reach a tool. |
 | `token` | A single API token or JWT, exposed to the run as `SWITCHTENDER_TOKEN`. |
-| `become_password` | A privilege escalation password, kept off the command line. |
 | `registry` | A container registry login, to pull a pinned execution image. |
+| `aws` | An AWS access key, injected as the standard `AWS_*` environment variables. |
+| `azure` | An Azure service principal, injected as the `ARM_*` variables Terraform reads and the `AZURE_*` variables the Ansible azure collection reads. |
+| `gcp` | A Google Cloud service account JSON, written to a private file bound to `GOOGLE_APPLICATION_CREDENTIALS`. |
+| `vmware` | A vCenter login, injected as the `VMWARE_*` environment variables the community.vmware modules read. |
 
 ## Sources
 

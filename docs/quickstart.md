@@ -10,7 +10,8 @@
 ## Requirements
 
 Ansible on the PATH: `ansible-playbook` and `ansible-inventory`. Nothing else for the default
-SQLite setup. Go 1.26 to build from source, or use the container image.
+SQLite setup. Go 1.26 to build from source, or Docker Compose, where `docker compose up --build`
+builds the image from this repository.
 
 ## Run the server
 

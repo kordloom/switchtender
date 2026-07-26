@@ -20,7 +20,7 @@ Security fixes land on the latest 1.x release. Older versions are not patched.
 
 ## Scope
 
-The server, the CLI, the SDK, and the official container image and Helm chart are in scope. Report
+The server, the CLI, the SDK, the Docker Compose build, and the Helm chart are in scope. Report
 issues in third-party dependencies upstream, though a heads-up here is welcome.
 
 ## Verifying a release
@@ -47,5 +47,5 @@ Verify the signature over the checksums, then the archive against them:
   without trusting the server.
 - Container execution environments run under memory, CPU, process, and network caps, refuse to mount
   sensitive host paths or the container socket, and are off by default.
-- Every change is scanned with govulncheck and CodeQL, the fuzz corpus runs on a schedule, and
-  dependency updates are tracked by Dependabot. Each release ships an SPDX software bill of materials.
+- govulncheck runs in CI on every change, the fuzz corpus runs on a weekly schedule, and each
+  release ships an SPDX software bill of materials.

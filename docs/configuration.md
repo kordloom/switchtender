@@ -22,6 +22,10 @@ variable.
 | `SWITCHTENDER_AI_KEY` | serve | API key for a cloud AI provider such as Anthropic or an OpenAI-compatible endpoint. A local Ollama needs none. |
 | `SWITCHTENDER_OIDC_CLIENT_SECRET` | serve | OpenID Connect client secret, paired with `--oidc-client-id`. Read from the environment so it stays off the command line. |
 | `SWITCHTENDER_LDAP_PASSWORD` | serve | Password for the `--ldap-bind-dn` service account. |
+| `SWITCHTENDER_WORKER_TOKEN` | serve, worker | Mesh relay bearer token. The server reads it when `--worker-token` is unset, and a relay worker started with `--server` presents it on every call. |
+| `SWITCHTENDER_GALAXY_SERVER` | serve, worker | Default for `--galaxy-server`, a private Ansible Galaxy or Automation Hub URL. |
+| `SWITCHTENDER_GALAXY_TOKEN` | serve, worker | Token for the `--galaxy-server` URL, read from the environment so it never lands on the command line. |
+| `SWITCHTENDER_PLUGINS_DIR` | serve, worker | Directory of extension plugin binaries, read when `--plugins-dir` is unset. |
 | `SWITCHTENDER_ADMIN_PASSWORD` | init | Password for the first admin account. When unset, init generates one and prints it once. |
 | `SWITCHTENDER_DESKTOP_NO_BROWSER` | desktop | Set to any value to skip opening the browser, for a headless or remote run. |
 
@@ -81,6 +85,8 @@ Runs the HTTP API, the in-process executor, the scheduler, the retention sweeper
 | `--ai-model` | provider default | Model name for the AI provider. Required for `openai`, which has no universal default. |
 | `--ai-url` | provider default | Base URL for the AI provider, for a self-hosted Ollama, an OpenAI-compatible server, or a proxy. |
 | `--schedule-interval` | `15s` | How often the scheduler checks for due schedules. |
+| `--workers` | `4` | Concurrent runs this process executes at once. |
+| `--max-shards` | `512` | Most groups a split fans out into. A split is always bounded by the host count. |
 | `--notify-webhook` | none | URL that receives a JSON notification when a run finishes. Repeatable. |
 | `--notify-slack` | none | Slack incoming webhook URL that receives a message when a run finishes. Repeatable. |
 | `--notify-mattermost` | none | Mattermost incoming webhook URL that receives a message when a run finishes. Repeatable. |
@@ -97,14 +103,20 @@ Runs the HTTP API, the in-process executor, the scheduler, the retention sweeper
 | `--notify-twilio-from` | none | Twilio sender phone number that texts run failures. |
 | `--notify-twilio-to` | none | Phone number that receives an SMS when a run fails. Repeatable. |
 | `--allow-container-ee` | `false` | Allow runs whose project pins a container image to execute inside it. Needs Docker on the executor. |
+| `--default-image` | none | Fallback execution image for runs that pin none at the run, template, or project level. Empty leaves an unpinned run on the host. |
+| `--require-image-digest` | `false` | Reject a container run whose image is not pinned to an `@sha256:` digest. |
 | `--container-memory` | `2g` | Memory cap for containerized runs, as docker `--memory`. Empty removes the cap. |
 | `--container-cpus` | `2` | CPU cap for containerized runs, as docker `--cpus`. Empty removes the cap. |
 | `--container-pids-limit` | `2048` | Process cap for containerized runs, as docker `--pids-limit`. Zero removes the cap. |
 | `--container-network` | `bridge` | Network mode for containerized runs, as docker `--network`, for example bridge or none. |
+| `--container-runtime` | `docker` | Container CLI for containerized runs: docker or podman. |
+| `--container-pull-policy` | `missing` | Image pull policy for containerized runs, as docker `--pull`: always, missing, or never. |
+| `--galaxy-server` | none | Private Ansible Galaxy or Automation Hub URL for project collection installs. Token from `SWITCHTENDER_GALAXY_TOKEN`. |
 | `--strict-grants` | `false` | Deny non-admins access to an object that has no grants, instead of deferring to the global role. |
 | `--read-only` | `false` | Reject every mutating request, for a safely exposable instance. |
 | `--matrix-cap` | `50000` | Largest host matrix, in cells, the UI draws before showing a notice. 0 means no limit. |
 | `--plugins-dir` | none | Directory of extension plugin binaries loaded at startup. Also `SWITCHTENDER_PLUGINS_DIR`. See [Extend in Go](sdk.md). |
+| `--worker-token` | none | Bearer token that authenticates mesh relay workers and enables the relay endpoints. Also `SWITCHTENDER_WORKER_TOKEN`. Keep it secret. |
 | `--retain-runs` | none | Delete terminal runs older than this, for example `90d`. Empty keeps them forever. |
 | `--retain-events` | none | Drop run events and logs older than this, for example `30d`. Empty keeps them forever. |
 | `--retention-interval` | `1h` | How often the retention sweeper runs. |
@@ -140,19 +152,27 @@ macOS app or a Windows installer.
 ## worker
 
 Leases pending runs from the shared store and executes them. Point it and a server at the same
-database and they compete for work.
+database and they compete for work. Or start it with `--server` and it leases runs from the control
+node over the mesh relay, with no database access of its own.
 
 | Flag | Default | Purpose |
 |------|---------|---------|
-| `--db` | `switchtender.db` | SQLite file path, or a `postgres://` DSN. |
+| `--db` | `switchtender.db` | SQLite file path, or a `postgres://` DSN. Ignored with `--server`. |
+| `--server` | none | Control node base URL to lease runs from over the mesh relay, for example `https://switchtender.example.com`. When set, the worker needs no database and dials one outbound connection. Token from `SWITCHTENDER_WORKER_TOKEN`. |
 | `--name` | host and pid | Worker name stamped on the runs it executes. |
 | `--queue` | none | Queue this worker serves. Repeatable. Without any, it serves the default pool. |
+| `--workers` | `4` | Concurrent runs this process executes at once. |
 | `--allow-container-ee` | `false` | Allow container execution environments on this worker. Needs Docker. |
+| `--default-image` | none | Fallback execution image for runs that pin none at the run, template, or project level. |
+| `--require-image-digest` | `false` | Reject a container run whose image is not pinned to an `@sha256:` digest. |
 | `--plugins-dir` | none | Directory of extension plugin binaries loaded at startup. Also `SWITCHTENDER_PLUGINS_DIR`. |
 | `--container-memory` | `2g` | Memory cap for containerized runs, as docker `--memory`. Empty removes the cap. |
 | `--container-cpus` | `2` | CPU cap for containerized runs, as docker `--cpus`. Empty removes the cap. |
 | `--container-pids-limit` | `2048` | Process cap for containerized runs, as docker `--pids-limit`. Zero removes the cap. |
 | `--container-network` | `bridge` | Network mode for containerized runs, as docker `--network`. |
+| `--container-runtime` | `docker` | Container CLI for containerized runs: docker or podman. |
+| `--container-pull-policy` | `missing` | Image pull policy for containerized runs, as docker `--pull`: always, missing, or never. |
+| `--galaxy-server` | none | Private Ansible Galaxy or Automation Hub URL for project collection installs. Token from `SWITCHTENDER_GALAXY_TOKEN`. |
 
 ## token
 
@@ -186,6 +206,15 @@ Migrates from AWX or Semaphore. See [Migration](migration.md).
 Both take `--db` for the target database. Without `--apply` the command only reports what it would
 create.
 
+## audit
+
+Audit trail tools for the signed export.
+
+- `audit keygen` generates an ed25519 signing key. Set the printed seed as `SWITCHTENDER_AUDIT_KEY`.
+- `audit verify <export.json>` verifies an export offline: it recomputes the hash chain and checks
+  the signature. `--pubkey` pins the expected signer public key in hex, and verification fails when
+  the export's key differs.
+
 ## demo
 
 Seeds a fresh database with sample data and real runs, then serves it read-only, so a public
@@ -195,6 +224,10 @@ instance is safe to expose. It needs ansible on the PATH to run the sample playb
 |------|---------|---------|
 | `--addr` | `:8080` | Address the demo listens on. |
 | `--db` | temporary file | Database to seed and serve. Empty uses a fresh temporary SQLite file. |
+
+## version
+
+Prints the SwitchTender version.
 
 ## Global flags
 
