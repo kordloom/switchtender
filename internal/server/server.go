@@ -466,7 +466,7 @@ func (s *Server) Handler() http.Handler {
 	if s.relayStore != nil && s.workerToken != "" {
 		handler = relayGate(relay.NewHandler(s.relayStore, s.workerToken, s.log), handler)
 	}
-	return handler
+	return securityHeaders(bodyLimit(handler))
 }
 
 // orgResolver returns an OrgResolver that reads a grantable object's owning organization from the

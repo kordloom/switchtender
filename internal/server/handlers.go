@@ -585,6 +585,18 @@ func cancelRunHandler(store run.Store, canceler Canceler, authz *authorizer, log
 			respondError(w, log, http.StatusConflict, "run already finished")
 			return
 		}
+		// A run no executor holds yet is terminalized directly: no process would ever act on the
+		// cooperative flag, so without this the run stayed claimable and could still launch.
+		if existing.ClaimedBy == "" &&
+			(existing.Status == run.StatusPending || existing.Status == run.StatusPendingApproval) {
+			if done, err := store.CancelPending(r.Context(), id); err == nil && done {
+				respondJSON(w, log, http.StatusAccepted,
+					map[string]string{"status": "canceled"}, wantsPretty(r))
+				return
+			}
+			// Lost the race to a claim or the store cannot do it; fall through to the
+			// cooperative path.
+		}
 		if err := store.RequestCancel(r.Context(), id); err != nil {
 			log.Error("server: cancel run: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not cancel run")
@@ -698,13 +710,24 @@ func rejectRunHandler(approver Approver, log *zap.Logger) http.HandlerFunc {
 	}
 }
 
-// listRunsHandler returns all runs newest first.
+// defaultRunsPage is the page size when a runs listing names none, and maxRunsPage is the largest
+// page a caller can request, so one request can never materialize the whole run history.
+const (
+	defaultRunsPage = 200
+	maxRunsPage     = 1000
+)
+
+// listRunsHandler returns a page of runs newest first, bounded even when no limit is given.
 func listRunsHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
 	if store == nil {
 		panic("server: listRunsHandler: Store required")
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		limit := queryInt(r, "limit")
+		if limit <= 0 {
+			limit = defaultRunsPage
+		}
+		limit = min(limit, maxRunsPage)
 		offset := queryInt(r, "offset")
 		query := r.URL.Query().Get("q")
 		runs, err := store.ListPage(r.Context(), query, limit, offset)
@@ -723,7 +746,7 @@ func listRunsHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
 			Runs:    runs,
 			Count:   len(runs),
 			Summary: summarize(counts),
-			HasMore: limit > 0 && len(runs) == limit,
+			HasMore: len(runs) == limit,
 		}, wantsPretty(r))
 	}
 }
@@ -833,25 +856,39 @@ func runLogsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.Ha
 		if authorizeRunAccess(w, r, authz, log, rn) {
 			return
 		}
-		body, err := store.Log(r.Context(), id)
-		if err != nil {
-			if errors.Is(err, run.ErrNotFound) {
-				respondError(w, log, http.StatusNotFound, "run not found")
-				return
-			}
-			log.Error("server: get run log: " + err.Error())
-			respondError(w, log, http.StatusInternalServerError, "could not get run log")
-			return
-		}
+		// The log streams to the client in chunk pages, so a multi-gigabyte log download never
+		// materializes in the control plane's memory.
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
-		if _, err := w.Write(body); err != nil {
-			log.Error("server: write run log: " + err.Error())
+		var after int64
+		for {
+			chunks, err := store.LogAfter(r.Context(), id, after, streamBatch)
+			if err != nil {
+				log.Error("server: get run log: " + err.Error())
+				return
+			}
+			for _, c := range chunks {
+				after = c.Seq
+				if _, err := w.Write(c.Data); err != nil {
+					log.Error("server: write run log: " + err.Error())
+					return
+				}
+			}
+			if len(chunks) < streamBatch {
+				return
+			}
 		}
 	}
 }
 
-// runEventsHandler returns a run's structured events as JSON.
+// defaultEventsPage is the page size when an events read names none, and maxEventsPage is the
+// largest page a caller can request; the response's next_after cursor pages through the rest.
+const (
+	defaultEventsPage = 5000
+	maxEventsPage     = 20000
+)
+
+// runEventsHandler returns a page of a run's structured events as JSON with a next_after cursor.
 func runEventsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	if store == nil {
 		panic("server: runEventsHandler: Store required")
@@ -873,6 +910,10 @@ func runEventsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.
 		}
 		after := queryInt64(r, "after")
 		limit := queryInt(r, "limit")
+		if limit <= 0 {
+			limit = defaultEventsPage
+		}
+		limit = min(limit, maxEventsPage)
 		events, err := store.EventsAfter(r.Context(), id, after, limit)
 		if err != nil {
 			if errors.Is(err, run.ErrNotFound) {
@@ -968,17 +1009,22 @@ func runStreamHandler(streamer Streamer, store run.Store, authz *authorizer, log
 
 		// The browser passes the seq of the last event it already has as ?after=, so the
 		// stream resumes from there and never replays history. Without it, the stream starts
-		// from the current end. Each drain is an indexed range scan from the cursor, not a
-		// full re-read of the event log.
+		// from the current end. On an automatic reconnect the browser sends Last-Event-ID
+		// carrying both cursors, so a dropped connection resumes events and log bytes without
+		// a gap. Each drain is an indexed range scan from its cursor, never a re-read of what
+		// was already sent.
 		var lastSeq int64
 		if _, ok := r.URL.Query()["after"]; ok {
 			lastSeq = queryInt64(r, "after")
 		} else if seq, err := store.LastEventSeq(r.Context(), id); err == nil {
 			lastSeq = seq
 		}
-		emittedLog := 0
-		if body, err := store.Log(r.Context(), id); err == nil {
-			emittedLog = len(body)
+		var logSeq int64
+		if seq, err := store.LastLogSeq(r.Context(), id); err == nil {
+			logSeq = seq
+		}
+		if ev, lg, ok := parseStreamCursor(r.Header.Get("Last-Event-ID")); ok {
+			lastSeq, logSeq = ev, lg
 		}
 
 		drain := func() bool {
@@ -993,16 +1039,27 @@ func runStreamHandler(streamer Streamer, store run.Store, authz *authorizer, log
 					if err != nil {
 						continue
 					}
-					writeSSE(w, "event", data)
+					writeSSE(w, "event", streamCursor(lastSeq, logSeq), data)
 				}
 				if len(evs) < streamBatch {
 					break
 				}
 			}
-			if body, err := store.Log(r.Context(), id); err == nil && len(body) > emittedLog {
-				if chunk, err := json.Marshal(string(body[emittedLog:])); err == nil {
-					writeSSE(w, "log", chunk)
-					emittedLog = len(body)
+			for {
+				chunks, err := store.LogAfter(r.Context(), id, logSeq, streamBatch)
+				if err != nil || len(chunks) == 0 {
+					break
+				}
+				var buf []byte
+				for _, c := range chunks {
+					logSeq = c.Seq
+					buf = append(buf, c.Data...)
+				}
+				if data, err := json.Marshal(string(buf)); err == nil {
+					writeSSE(w, "log", streamCursor(lastSeq, logSeq), data)
+				}
+				if len(chunks) < streamBatch {
+					break
 				}
 			}
 			flusher.Flush()
@@ -1014,7 +1071,7 @@ func runStreamHandler(streamer Streamer, store run.Store, authz *authorizer, log
 		defer ticker.Stop()
 		for {
 			if drain() {
-				writeSSE(w, "end", nil)
+				writeSSE(w, "end", streamCursor(lastSeq, logSeq), nil)
 				flusher.Flush()
 				return
 			}
@@ -1028,11 +1085,35 @@ func runStreamHandler(streamer Streamer, store run.Store, authz *authorizer, log
 	}
 }
 
-// writeSSE writes one Server Sent Event with the given event name and JSON data. A write failure
-// means the client went away; the stream loop ends on the closed request context.
-func writeSSE(w http.ResponseWriter, name string, data []byte) {
+// streamCursor encodes the event and log positions as one SSE id, the value a browser echoes back
+// as Last-Event-ID when it reconnects.
+func streamCursor(eventSeq, logSeq int64) string {
+	return strconv.FormatInt(eventSeq, 10) + ":" + strconv.FormatInt(logSeq, 10)
+}
+
+// parseStreamCursor decodes a Last-Event-ID header written by streamCursor. ok is false for an
+// absent or malformed value, leaving the caller's defaults in place.
+func parseStreamCursor(v string) (eventSeq, logSeq int64, ok bool) {
+	evPart, lgPart, found := strings.Cut(v, ":")
+	if !found {
+		return 0, 0, false
+	}
+	ev, err := strconv.ParseInt(evPart, 10, 64)
+	if err != nil || ev < 0 {
+		return 0, 0, false
+	}
+	lg, err := strconv.ParseInt(lgPart, 10, 64)
+	if err != nil || lg < 0 {
+		return 0, 0, false
+	}
+	return ev, lg, true
+}
+
+// writeSSE writes one Server Sent Event with the given event name, resume id, and JSON data. A
+// write failure means the client went away; the stream loop ends on the closed request context.
+func writeSSE(w http.ResponseWriter, name, id string, data []byte) {
 	if len(data) == 0 {
 		data = []byte("null")
 	}
-	_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", name, data)
+	_, _ = fmt.Fprintf(w, "event: %s\nid: %s\ndata: %s\n\n", name, id, data)
 }

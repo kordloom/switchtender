@@ -61,7 +61,8 @@ func importHandler(stores importStoresFunc, log *zap.Logger) http.HandlerFunc {
 		}
 		plan, err := mapper(body, time.Now())
 		if err != nil {
-			respondError(w, log, http.StatusBadRequest, "could not read export: "+err.Error())
+			log.Error("server: map import export: " + err.Error())
+			respondError(w, log, http.StatusBadRequest, "could not read the export, check the format")
 			return
 		}
 

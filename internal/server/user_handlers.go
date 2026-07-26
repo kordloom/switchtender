@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -52,8 +54,66 @@ type listUsersResponse struct {
 	Count int `json:"count"`
 }
 
+// loginWindowLength and loginWindowMax bound sign-in attempts per client and username to a fixed
+// window, the brake on credential stuffing against the unauthenticated login endpoint.
+const (
+	loginWindowLength = time.Minute
+	loginWindowMax    = 10
+)
+
+// loginLimiter is a fixed-window sign-in counter keyed by client address and username.
+type loginLimiter struct {
+	// mu guards windows.
+	mu sync.Mutex
+	// windows tracks the open window per key.
+	windows map[string]*loginWindow
+}
+
+// loginWindow is one key's open window.
+type loginWindow struct {
+	// start is when the window opened.
+	start time.Time
+	// count is how many attempts landed in the window.
+	count int
+}
+
+// allow consumes one attempt for the key, reporting false when the window is spent. Expired
+// windows are pruned once the map grows past a bound, so an address sweep cannot grow it forever.
+func (l *loginLimiter) allow(key string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	now := time.Now()
+	if len(l.windows) > 4096 {
+		for k, w := range l.windows {
+			if now.Sub(w.start) > loginWindowLength {
+				delete(l.windows, k)
+			}
+		}
+	}
+	w, ok := l.windows[key]
+	if !ok || now.Sub(w.start) > loginWindowLength {
+		l.windows[key] = &loginWindow{start: now, count: 1}
+		return true
+	}
+	w.count++
+	return w.count <= loginWindowMax
+}
+
+// clientAddr returns the request's client host without the port, the stable half of the limiter
+// key. The remote address is used as seen; forwarding headers are spoofable and are not trusted.
+func clientAddr(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
+}
+
 // loginHandler authenticates a username and password and mints a session token owned by the user.
+// Attempts are rate limited per client and username so stolen password lists cannot be replayed
+// at full speed.
 func loginHandler(users user.Store, tokens auth.Store, ldap *LDAPAuth, log *zap.Logger) http.HandlerFunc {
+	limiter := &loginLimiter{windows: make(map[string]*loginWindow)}
 	return func(w http.ResponseWriter, r *http.Request) {
 		if users == nil || tokens == nil {
 			respondError(w, log, http.StatusNotFound, "accounts not enabled")
@@ -62,6 +122,10 @@ func loginHandler(users user.Store, tokens auth.Store, ldap *LDAPAuth, log *zap.
 		var req loginRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			respondError(w, log, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		if !limiter.allow(clientAddr(r) + "\x00" + req.Username) {
+			respondError(w, log, http.StatusTooManyRequests, "too many sign-in attempts, wait a minute")
 			return
 		}
 		u, err := user.Authenticate(r.Context(), users, req.Username, req.Password)

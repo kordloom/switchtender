@@ -20,24 +20,30 @@ var durationBuckets = []float64{1, 5, 10, 30, 60, 300, 600, 1800, 3600}
 // takes, so a rising queue wait is the early signal that the pool is undersized.
 var queueBuckets = []float64{0.5, 1, 2, 5, 10, 30, 60, 300, 1800}
 
+// metricsHistogramWindow caps how many recent runs feed the duration and queue-wait histograms,
+// so a scrape reads a bounded page instead of the whole run history.
+const metricsHistogramWindow = 10000
+
 // metricsHandler serves run, fleet, queue, worker, and run-duration series in the Prometheus text
-// exposition format, computed from the store at scrape time so no counter state lives in the process.
-// The gauges reflect the store's current contents, and the duration histogram is derived from the
-// terminal runs still retained, so a retention purge lowers its counts.
+// exposition format, computed from the store at scrape time so no counter state lives in the
+// process. The status gauges come from a grouped count, and the histograms are derived from the
+// most recent metricsHistogramWindow runs, so a scrape stays cheap however large history grows.
 func metricsHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
 	if store == nil {
 		panic("server: metricsHandler: Store required")
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
-		runs, err := store.List(r.Context())
+		byStatus, err := store.RunStatusCounts(r.Context())
 		if err != nil {
 			log.Error("server: metrics: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not compute metrics")
 			return
 		}
-		byStatus := map[run.Status]int{}
-		for _, rn := range runs {
-			byStatus[rn.Status]++
+		runs, err := store.ListPage(r.Context(), "", metricsHistogramWindow, 0)
+		if err != nil {
+			log.Error("server: metrics: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not compute metrics")
+			return
 		}
 
 		var b strings.Builder
