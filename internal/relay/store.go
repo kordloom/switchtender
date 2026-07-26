@@ -134,6 +134,19 @@ func (c *Client) TaskTrends(context.Context, int) ([]run.TaskTrend, error) {
 // Log is a control-node query and is not served to workers.
 func (c *Client) Log(context.Context, string) ([]byte, error) { return nil, ErrUnsupported }
 
+// LogAfter is a control-node query and is not served to workers.
+func (c *Client) LogAfter(context.Context, string, int64, int) ([]run.LogChunk, error) {
+	return nil, ErrUnsupported
+}
+
+// LastLogSeq is a control-node query and is not served to workers.
+func (c *Client) LastLogSeq(context.Context, string) (int64, error) { return 0, ErrUnsupported }
+
+// CancelPending is a control-node mutation and is not served to workers.
+func (c *Client) CancelPending(context.Context, string) (bool, error) {
+	return false, ErrUnsupported
+}
+
 // Events is a control-node query and is not served to workers.
 func (c *Client) Events(context.Context, string) ([]event.Event, error) { return nil, ErrUnsupported }
 

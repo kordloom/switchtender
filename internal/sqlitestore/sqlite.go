@@ -377,6 +377,10 @@ func Open(path string) (*DB, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	if err := ensureRunIndexes(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	return &DB{db: db, runs: &store{db: db}, schedules: &scheduleStore{db: db}, tokens: &tokenStore{db: db},
 		credentials: &credentialStore{db: db},
 		projects:    &projectStore{db: db},
@@ -406,6 +410,25 @@ func migrateRuns(db *sql.DB) error {
 		"CREATE UNIQUE INDEX IF NOT EXISTS idx_runs_idempotency_key " +
 			"ON runs(idempotency_key) WHERE idempotency_key <> ''"); err != nil {
 		return fmt.Errorf("index idempotency_key: %w", err)
+	}
+	return nil
+}
+
+// ensureRunIndexes creates the hot-path run indexes after the column migrations so the columns
+// they cover exist even on a database created before those columns were added. The claim index
+// keeps the executor poll from walking the whole table oldest-first, the status index keeps the
+// summary counts off the fat run rows, and the lease index bounds the janitor sweep and the
+// worker listing as history grows.
+func ensureRunIndexes(db *sql.DB) error {
+	for _, stmt := range []string{
+		`CREATE INDEX IF NOT EXISTS idx_runs_pending_claim ON runs(queue, created_at, id)
+			WHERE status='pending' AND claimed_by='' AND kind=''`,
+		"CREATE INDEX IF NOT EXISTS idx_runs_status_parent ON runs(status, parent_id)",
+		"CREATE INDEX IF NOT EXISTS idx_runs_leased ON runs(claimed_at) WHERE claimed_by<>''",
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			return fmt.Errorf("create run index: %w", err)
+		}
 	}
 	return nil
 }
@@ -587,7 +610,8 @@ const runColumns = `id, playbook, inventory, status, exit_code, error, created_a
 	credential_ids, project_id, commit_sha, inventory_id, queue, tool, command, dry_run,
 	proposed_from, intent, image, pull_credential_id, idempotency_key`
 
-// Save inserts or replaces the run identified by r.ID.
+// Save inserts or replaces the run identified by r.ID. The cancel flag merges with MAX so a
+// replace from a stale snapshot cannot erase a cancel another process just requested.
 func (s *store) Save(ctx context.Context, r *run.Run) error {
 	const q = `
 INSERT INTO runs
@@ -606,7 +630,8 @@ ON CONFLICT(id) DO UPDATE SET
 	kind=excluded.kind, step_name=excluded.step_name, step_index=excluded.step_index,
 	retry_of=excluded.retry_of, attempt=excluded.attempt, extra_vars=excluded.extra_vars,
 	outputs=excluded.outputs, claimed_by=excluded.claimed_by, claimed_at=excluded.claimed_at,
-	cancel_requested=excluded.cancel_requested, credential_ids=excluded.credential_ids,
+	cancel_requested=MAX(runs.cancel_requested, excluded.cancel_requested),
+	credential_ids=excluded.credential_ids,
 	project_id=excluded.project_id, commit_sha=excluded.commit_sha,
 	inventory_id=excluded.inventory_id, queue=excluded.queue, tool=excluded.tool,
 	command=excluded.command, dry_run=excluded.dry_run, proposed_from=excluded.proposed_from,
@@ -1031,18 +1056,19 @@ SELECT host, AVG(duration_seconds) FROM ranked WHERE rn <= ? GROUP BY host`
 	return out, nil
 }
 
-// Workers lists executors by the leases they hold, most recently seen first.
+// Workers lists executors by the leases they hold within run.WorkerWindow, most recently seen
+// first, so the listing stays bounded as history grows.
 func (s *store) Workers(ctx context.Context) ([]run.WorkerInfo, error) {
 	const q = `
 SELECT claimed_by,
 	SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) AS active,
 	MAX(claimed_at) AS last_seen
 FROM runs
-WHERE claimed_by != '' AND claimed_at IS NOT NULL
+WHERE claimed_by != '' AND claimed_at IS NOT NULL AND claimed_at >= ?
 GROUP BY claimed_by
 ORDER BY last_seen DESC, claimed_by`
 
-	rows, err := s.db.QueryContext(ctx, q)
+	rows, err := s.db.QueryContext(ctx, q, formatTime(time.Now().Add(-run.WorkerWindow)))
 	if err != nil {
 		return nil, fmt.Errorf("list workers: %w", err)
 	}
@@ -1090,17 +1116,22 @@ func (s *store) queryRuns(ctx context.Context, label, query string, args ...any)
 	return out, nil
 }
 
-// AppendLog appends raw output bytes to the run's log. Returns run.ErrNotFound if absent.
+// AppendLog appends raw output bytes to the run's log. Returns run.ErrNotFound if absent. The
+// insert-select folds the missing-run check into the write so the per-chunk output path costs one
+// statement instead of two.
 func (s *store) AppendLog(ctx context.Context, id string, p []byte) error {
-	ok, err := s.exists(ctx, id)
+	res, err := s.db.ExecContext(ctx,
+		"INSERT INTO run_logs (run_id, chunk) SELECT ?, ? WHERE EXISTS (SELECT 1 FROM runs WHERE id=?)",
+		id, p, id)
 	if err != nil {
-		return err
-	}
-	if !ok {
-		return run.ErrNotFound
-	}
-	if _, err := s.db.ExecContext(ctx, "INSERT INTO run_logs (run_id, chunk) VALUES (?, ?)", id, p); err != nil {
 		return fmt.Errorf("append log: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("append log: %w", err)
+	}
+	if n == 0 {
+		return run.ErrNotFound
 	}
 	return nil
 }
@@ -1134,14 +1165,69 @@ func (s *store) Log(ctx context.Context, id string) ([]byte, error) {
 	return buf, nil
 }
 
-// AppendEvents appends structured events to the run. Returns run.ErrNotFound if absent.
-func (s *store) AppendEvents(ctx context.Context, id string, events []event.Event) error {
+// LogAfter returns the run's log chunks past afterSeq in order, capped at limit chunks.
+func (s *store) LogAfter(ctx context.Context, id string, afterSeq int64, limit int) ([]run.LogChunk, error) {
 	ok, err := s.exists(ctx, id)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if !ok {
-		return run.ErrNotFound
+		return nil, run.ErrNotFound
+	}
+	query := "SELECT seq, chunk FROM run_logs WHERE run_id=? AND seq > ? ORDER BY seq"
+	args := []any{id, afterSeq}
+	if limit > 0 {
+		query += " LIMIT ?"
+		args = append(args, limit)
+	}
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("read log: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []run.LogChunk
+	for rows.Next() {
+		var c run.LogChunk
+		if err := rows.Scan(&c.Seq, &c.Data); err != nil {
+			return nil, fmt.Errorf("read log: %w", err)
+		}
+		out = append(out, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read log: %w", err)
+	}
+	return out, nil
+}
+
+// LastLogSeq returns the seq of the run's most recent log chunk, or zero when it has none.
+func (s *store) LastLogSeq(ctx context.Context, id string) (int64, error) {
+	ok, err := s.exists(ctx, id)
+	if err != nil {
+		return 0, err
+	}
+	if !ok {
+		return 0, run.ErrNotFound
+	}
+	var seq int64
+	err = s.db.QueryRowContext(ctx,
+		"SELECT COALESCE(MAX(seq), 0) FROM run_logs WHERE run_id=?", id).Scan(&seq)
+	if err != nil {
+		return 0, fmt.Errorf("read log: %w", err)
+	}
+	return seq, nil
+}
+
+// AppendEvents appends structured events to the run. Returns run.ErrNotFound if absent. Events
+// are marshaled before the transaction opens so the write lock is held only for the inserts.
+func (s *store) AppendEvents(ctx context.Context, id string, events []event.Event) error {
+	rows := make([]string, len(events))
+	for i, e := range events {
+		data, err := json.Marshal(e)
+		if err != nil {
+			return fmt.Errorf("append events: %w", err)
+		}
+		rows[i] = string(data)
 	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -1150,18 +1236,23 @@ func (s *store) AppendEvents(ctx context.Context, id string, events []event.Even
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	var one int
+	err = tx.QueryRowContext(ctx, "SELECT 1 FROM runs WHERE id=?", id).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return run.ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("append events: %w", err)
+	}
+
 	stmt, err := tx.PrepareContext(ctx, "INSERT INTO run_events (run_id, data) VALUES (?, ?)")
 	if err != nil {
 		return fmt.Errorf("append events: %w", err)
 	}
 	defer func() { _ = stmt.Close() }()
 
-	for _, e := range events {
-		data, err := json.Marshal(e)
-		if err != nil {
-			return fmt.Errorf("append events: %w", err)
-		}
-		if _, err := stmt.ExecContext(ctx, id, string(data)); err != nil {
+	for _, data := range rows {
+		if _, err := stmt.ExecContext(ctx, id, data); err != nil {
 			return fmt.Errorf("append events: %w", err)
 		}
 	}
@@ -1452,14 +1543,16 @@ func parseNullTime(s sql.NullString) (*time.Time, error) {
 	return &t, nil
 }
 
-// Claim leases the oldest unclaimed pending top-level plain run to owner and returns it.
+// Claim leases the oldest unclaimed pending top-level plain run to owner and returns it. A run
+// whose cancel was requested while it waited is skipped; the cancel handler terminalizes it.
 func (s *store) Claim(ctx context.Context, owner string, queues []string) (*run.Run, error) {
 	placeholders, args := queuePlaceholders(queues, "?")
 	q := `
 UPDATE runs SET claimed_by=?, claimed_at=?
 WHERE id = (
 	SELECT id FROM runs
-	WHERE status='pending' AND claimed_by='' AND kind='' AND queue IN (` + placeholders + `)
+	WHERE status='pending' AND claimed_by='' AND kind='' AND cancel_requested=0
+		AND queue IN (` + placeholders + `)
 	ORDER BY created_at, id LIMIT 1
 )
 RETURNING ` + runColumns
@@ -1562,6 +1655,22 @@ func (s *store) RequestCancel(ctx context.Context, id string) error {
 		return run.ErrNotFound
 	}
 	return nil
+}
+
+// CancelPending atomically cancels a run still waiting unclaimed in pending or pending_approval.
+func (s *store) CancelPending(ctx context.Context, id string) (bool, error) {
+	res, err := s.db.ExecContext(ctx, `
+UPDATE runs SET status='canceled', ended_at=?
+WHERE id=? AND claimed_by='' AND status IN ('pending', 'pending_approval')`,
+		formatTime(time.Now()), id)
+	if err != nil {
+		return false, fmt.Errorf("cancel pending: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("cancel pending: %w", err)
+	}
+	return n > 0, nil
 }
 
 // TransitionStatus atomically moves the run from one status to another, reporting whether it changed.

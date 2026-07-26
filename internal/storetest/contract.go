@@ -27,6 +27,7 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Run("list newest first", func(t *testing.T) { testList(t, newStore()) })
 	t.Run("list page and status counts", func(t *testing.T) { testListPage(t, newStore()) })
 	t.Run("log append and read", func(t *testing.T) { testLog(t, newStore()) })
+	t.Run("log after cursor", func(t *testing.T) { testLogAfter(t, newStore()) })
 	t.Run("events append and read", func(t *testing.T) { testEvents(t, newStore()) })
 	t.Run("events after cursor", func(t *testing.T) { testEventsAfter(t, newStore()) })
 	t.Run("shards excluded from list", func(t *testing.T) { testShards(t, newStore()) })
@@ -42,6 +43,9 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Run("claim respects queue", func(t *testing.T) { testClaimQueue(t, newStore()) })
 	t.Run("heartbeat and reclaim", func(t *testing.T) { testLeaseLifecycle(t, newStore()) })
 	t.Run("cancel request", func(t *testing.T) { testRequestCancel(t, newStore()) })
+	t.Run("cancel pending", func(t *testing.T) { testCancelPending(t, newStore()) })
+	t.Run("save keeps cancel sticky", func(t *testing.T) { testSaveKeepsCancel(t, newStore()) })
+	t.Run("claim skips cancel requested", func(t *testing.T) { testClaimSkipsCancel(t, newStore()) })
 	t.Run("transition status", func(t *testing.T) { testTransitionStatus(t, newStore()) })
 	t.Run("workers", func(t *testing.T) { testWorkers(t, newStore()) })
 	t.Run("retention purge", func(t *testing.T) { testPurge(t, newStore()) })
@@ -1038,16 +1042,19 @@ func testRequestCancel(t *testing.T, store run.Store) {
 	}
 }
 
-// testWorkers verifies executors are listed from their leases with active counts and freshness.
+// testWorkers verifies executors are listed from their leases with active counts and freshness,
+// and that a lease older than run.WorkerWindow is excluded.
 func testWorkers(t *testing.T, store run.Store) {
 	ctx := context.Background()
-	base := time.Date(2026, 7, 6, 0, 0, 0, 0, time.UTC)
+	base := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
 	older, newer := base, base.Add(time.Minute)
+	stale := base.Add(-run.WorkerWindow)
 	for _, r := range []*run.Run{
 		{ID: "r1", Playbook: "p", Status: run.StatusRunning, CreatedAt: base, ClaimedBy: "goat-1", ClaimedAt: &newer},
 		{ID: "r2", Playbook: "p", Status: run.StatusSucceeded, CreatedAt: base, ClaimedBy: "goat-1", ClaimedAt: &older},
 		{ID: "r3", Playbook: "p", Status: run.StatusRunning, CreatedAt: base, ClaimedBy: "serve-1", ClaimedAt: &older},
 		{ID: "r4", Playbook: "p", Status: run.StatusPending, CreatedAt: base},
+		{ID: "r5", Playbook: "p", Status: run.StatusSucceeded, CreatedAt: stale, ClaimedBy: "ghost-1", ClaimedAt: &stale},
 	} {
 		if err := store.Save(ctx, r); err != nil {
 			t.Fatalf("Save() error = %v", err)
@@ -1066,6 +1073,176 @@ func testWorkers(t *testing.T, store run.Store) {
 	}
 	if workers[1].Owner != "serve-1" || workers[1].Active != 1 {
 		t.Errorf("second worker = %+v, want serve-1 active 1", workers[1])
+	}
+}
+
+// testLogAfter verifies the log cursor: a read from zero returns the whole log, a cursor taken at
+// any read boundary resumes with exactly the bytes appended after it, and a cursor at the end
+// returns nothing. Chunk boundaries are a store detail, so only concatenations are asserted.
+func testLogAfter(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	if err := store.Save(ctx, sampleRun("run_lc")); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	if err := store.AppendLog(ctx, "run_lc", []byte("one")); err != nil {
+		t.Fatalf("AppendLog() error = %v", err)
+	}
+
+	first, err := store.LogAfter(ctx, "run_lc", 0, 0)
+	if err != nil {
+		t.Fatalf("LogAfter() error = %v", err)
+	}
+	if got := concatChunks(first); got != "one" {
+		t.Errorf("LogAfter(0) = %q, want %q", got, "one")
+	}
+	cursor := first[len(first)-1].Seq
+	if last, err := store.LastLogSeq(ctx, "run_lc"); err != nil || last != cursor {
+		t.Errorf("LastLogSeq() = (%d, %v), want (%d, nil)", last, err, cursor)
+	}
+
+	if err := store.AppendLog(ctx, "run_lc", []byte("two")); err != nil {
+		t.Fatalf("AppendLog() error = %v", err)
+	}
+	rest, err := store.LogAfter(ctx, "run_lc", cursor, 0)
+	if err != nil {
+		t.Fatalf("LogAfter(cursor) error = %v", err)
+	}
+	if got := concatChunks(rest); got != "two" {
+		t.Errorf("LogAfter(cursor) = %q, want %q", got, "two")
+	}
+
+	end, err := store.LastLogSeq(ctx, "run_lc")
+	if err != nil {
+		t.Fatalf("LastLogSeq() error = %v", err)
+	}
+	if tail, err := store.LogAfter(ctx, "run_lc", end, 0); err != nil || len(tail) != 0 {
+		t.Errorf("LogAfter(end) = (%d chunks, %v), want none", len(tail), err)
+	}
+
+	if _, err := store.LogAfter(ctx, "ghost", 0, 0); !errors.Is(err, run.ErrNotFound) {
+		t.Errorf("LogAfter(ghost) error = %v, want ErrNotFound", err)
+	}
+	if _, err := store.LastLogSeq(ctx, "ghost"); !errors.Is(err, run.ErrNotFound) {
+		t.Errorf("LastLogSeq(ghost) error = %v, want ErrNotFound", err)
+	}
+}
+
+// concatChunks joins chunk bytes in order for comparing log contents.
+func concatChunks(chunks []run.LogChunk) string {
+	var out []byte
+	for _, c := range chunks {
+		out = append(out, c.Data...)
+	}
+	return string(out)
+}
+
+// testCancelPending verifies the unclaimed-run cancel: it terminalizes a waiting pending or
+// pending_approval run, refuses a claimed, executing, terminal, or missing run, and stamps the
+// end time.
+func testCancelPending(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	base := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	claimed := base.Add(time.Minute)
+	for _, r := range []*run.Run{
+		{ID: "run_wait", Playbook: "p", Status: run.StatusPending, CreatedAt: base},
+		{ID: "run_held", Playbook: "p", Status: run.StatusPendingApproval, CreatedAt: base},
+		{ID: "run_taken", Playbook: "p", Status: run.StatusPending, CreatedAt: base, ClaimedBy: "w1", ClaimedAt: &claimed},
+		{ID: "run_live", Playbook: "p", Status: run.StatusRunning, CreatedAt: base, ClaimedBy: "w1", ClaimedAt: &claimed},
+	} {
+		if err := store.Save(ctx, r); err != nil {
+			t.Fatalf("Save() error = %v", err)
+		}
+	}
+
+	ok, err := store.CancelPending(ctx, "run_wait")
+	if err != nil || !ok {
+		t.Fatalf("CancelPending(run_wait) = (%v, %v), want (true, nil)", ok, err)
+	}
+	got, err := store.Get(ctx, "run_wait")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.Status != run.StatusCanceled || got.EndedAt == nil {
+		t.Errorf("canceled run = %q ended %v, want canceled with an end time", got.Status, got.EndedAt)
+	}
+	if ok, err := store.CancelPending(ctx, "run_wait"); err != nil || ok {
+		t.Errorf("second CancelPending = (%v, %v), want (false, nil)", ok, err)
+	}
+
+	if ok, err := store.CancelPending(ctx, "run_held"); err != nil || !ok {
+		t.Errorf("CancelPending(run_held) = (%v, %v), want (true, nil)", ok, err)
+	}
+	if ok, err := store.CancelPending(ctx, "run_taken"); err != nil || ok {
+		t.Errorf("CancelPending(run_taken) = (%v, %v), want (false, nil)", ok, err)
+	}
+	if r, _ := store.Get(ctx, "run_taken"); r.Status != run.StatusPending {
+		t.Errorf("claimed run status = %q, want pending untouched", r.Status)
+	}
+	if ok, err := store.CancelPending(ctx, "run_live"); err != nil || ok {
+		t.Errorf("CancelPending(run_live) = (%v, %v), want (false, nil)", ok, err)
+	}
+	if ok, err := store.CancelPending(ctx, "ghost"); err != nil || ok {
+		t.Errorf("CancelPending(ghost) = (%v, %v), want (false, nil)", ok, err)
+	}
+}
+
+// testSaveKeepsCancel verifies the sticky cancel flag: replacing a run from a snapshot taken
+// before the cancel was requested must not erase the stored flag.
+func testSaveKeepsCancel(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	r := &run.Run{ID: "run_sc", Playbook: "p", Status: run.StatusPending,
+		CreatedAt: time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)}
+	if err := store.Save(ctx, r); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	if err := store.RequestCancel(ctx, "run_sc"); err != nil {
+		t.Fatalf("RequestCancel() error = %v", err)
+	}
+
+	stale := r.Clone()
+	stale.Status = run.StatusRunning
+	stale.CancelRequested = false
+	if err := store.Save(ctx, stale); err != nil {
+		t.Fatalf("Save(stale) error = %v", err)
+	}
+
+	got, err := store.Get(ctx, "run_sc")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if !got.CancelRequested {
+		t.Error("cancel flag erased by a stale save, want it kept")
+	}
+	if got.Status != run.StatusRunning {
+		t.Errorf("status = %q, want running from the save", got.Status)
+	}
+}
+
+// testClaimSkipsCancel verifies a pending run whose cancel was requested is never claimed.
+func testClaimSkipsCancel(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	base := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	for _, r := range []*run.Run{
+		{ID: "run_stop", Playbook: "p", Status: run.StatusPending, CreatedAt: base},
+		{ID: "run_go", Playbook: "p", Status: run.StatusPending, CreatedAt: base.Add(time.Minute)},
+	} {
+		if err := store.Save(ctx, r); err != nil {
+			t.Fatalf("Save() error = %v", err)
+		}
+	}
+	if err := store.RequestCancel(ctx, "run_stop"); err != nil {
+		t.Fatalf("RequestCancel() error = %v", err)
+	}
+
+	got, err := store.Claim(ctx, "worker-a", []string{""})
+	if err != nil {
+		t.Fatalf("Claim() error = %v", err)
+	}
+	if got.ID != "run_go" {
+		t.Errorf("claimed %s, want run_go; the cancel-requested run must be skipped", got.ID)
+	}
+	if _, err := store.Claim(ctx, "worker-b", []string{""}); !errors.Is(err, run.ErrNonePending) {
+		t.Errorf("second Claim() error = %v, want ErrNonePending", err)
 	}
 }
 

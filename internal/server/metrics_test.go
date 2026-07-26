@@ -19,7 +19,8 @@ func TestMetricsHandler(t *testing.T) {
 	t.Parallel()
 	store := run.NewMemStore()
 	ctx := context.Background()
-	base := time.Date(2026, 7, 21, 0, 0, 0, 0, time.UTC)
+	// The lease stamp must fall inside run.WorkerWindow for the worker gauges to count it.
+	base := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
 	started := base
 	ended := base.Add(45 * time.Second)
 
