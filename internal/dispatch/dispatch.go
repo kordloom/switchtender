@@ -4,7 +4,6 @@ package dispatch
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -802,22 +801,24 @@ const childPollInterval = 500 * time.Millisecond
 func (d *Dispatcher) waitChildren(ctx context.Context, ids []string) []run.Status {
 	statuses := make([]run.Status, len(ids))
 	canceled := false
+	parent := ""
 	for {
+		byID := d.childStatuses(ctx, ids, &parent)
 		done := 0
 		for i, id := range ids {
 			if statuses[i].Terminal() {
 				done++
 				continue
 			}
-			r, err := d.store.Get(ctx, id)
-			if err != nil {
+			status, ok := byID[id]
+			if !ok {
 				continue
 			}
 			if ctx.Err() != nil && !canceled {
 				continue
 			}
-			if r.Status.Terminal() {
-				statuses[i] = r.Status
+			if status.Terminal() {
+				statuses[i] = status
 				done++
 			}
 		}
@@ -845,6 +846,42 @@ func (d *Dispatcher) waitChildren(ctx context.Context, ids []string) []run.Statu
 			return statuses
 		}
 	}
+}
+
+// childStatuses reads the current status of the tracked children. A single child is a point read;
+// a wider set resolves the shared parent once, then reads all children in one parent-scoped query
+// per tick, so a 512-shard split does not issue hundreds of point reads every poll interval. When
+// the parent-scoped read fails it falls back to point reads for that tick.
+func (d *Dispatcher) childStatuses(ctx context.Context, ids []string, parent *string) map[string]run.Status {
+	out := make(map[string]run.Status, len(ids))
+	pointReads := func() {
+		for _, id := range ids {
+			if r, err := d.store.Get(ctx, id); err == nil {
+				out[id] = r.Status
+			}
+		}
+	}
+	if len(ids) == 1 {
+		pointReads()
+		return out
+	}
+	if *parent == "" {
+		r, err := d.store.Get(ctx, ids[0])
+		if err != nil || r.ParentID == nil {
+			pointReads()
+			return out
+		}
+		*parent = *r.ParentID
+	}
+	children, err := d.store.Shards(ctx, *parent)
+	if err != nil {
+		pointReads()
+		return out
+	}
+	for _, c := range children {
+		out[c.ID] = c.Status
+	}
+	return out
 }
 
 // cancelChildren asks every non-terminal child to stop: claimed children through their executor's
@@ -1032,7 +1069,10 @@ func (d *Dispatcher) runStepAttempts(ctx context.Context, parent *run.Run, step 
 }
 
 // stepOutputs reads a finished step's published outputs from its events and records them on the
-// run. It is best effort; a read failure just means no outputs flow downstream.
+// run. It is best effort; a read failure just means no outputs flow downstream. The outputs are
+// recorded on a fresh read of the run, never on the coordinator's pre-claim snapshot, because
+// saving that stale snapshot would flip the finished step back to pending and a claim loop would
+// execute it a second time.
 func (d *Dispatcher) stepOutputs(child *run.Run) map[string]any {
 	events, err := d.store.Events(context.Background(), child.ID)
 	if err != nil {
@@ -1043,8 +1083,13 @@ func (d *Dispatcher) stepOutputs(child *run.Run) map[string]any {
 	if len(outputs) == 0 {
 		return nil
 	}
-	child.Outputs = outputs
-	d.save(child)
+	fresh, err := d.store.Get(context.Background(), child.ID)
+	if err != nil {
+		d.log.Error("dispatch: read run for outputs: "+err.Error(), zap.String("run_id", child.ID))
+		return outputs
+	}
+	fresh.Outputs = outputs
+	d.save(fresh)
 	return outputs
 }
 
@@ -1202,6 +1247,16 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 		d.finalize(r, run.StatusFailed, nil, mask.redactString(err.Error()))
 		d.publisher.CloseRun(r.ID)
 		return run.StatusFailed
+	}
+
+	// A cancel requested between the claim and the running save is honored here, before any tool
+	// starts. The store keeps the cancel flag sticky across saves, so this read observes it.
+	if cur, err := d.store.Get(ctx, r.ID); err == nil && cur.CancelRequested {
+		close(stop)
+		<-tailed
+		d.finalize(r, run.StatusCanceled, nil, "")
+		d.publisher.CloseRun(r.ID)
+		return run.StatusCanceled
 	}
 
 	var sink io.Writer = &logSink{store: d.store, id: r.ID, log: d.log, publisher: d.publisher, mask: mask}
@@ -1385,15 +1440,24 @@ func (d *Dispatcher) finalize(r *run.Run, status run.Status, exitCode *int, fail
 // intervened. When the store cannot compare and swap, such as the relay client, or the run was not in
 // running, it falls back to reading the current status. It returns the stored status alongside the
 // decision so the caller can reflect reality. A legitimate finalize from a non running state, such as
-// a rejected run, is never fenced because its stored status already equals the target.
+// a rejected run, is never fenced because its stored status already equals the target. When even a
+// retried read cannot establish the stored state, the finalize is fenced: skipping the write risks a
+// janitor interrupt on a healthy run, but writing blind risks resurrecting a run another actor
+// already terminalized, which is the failure the fence exists to stop.
 func (d *Dispatcher) fencedFinalize(id string, status run.Status) (run.Status, bool) {
 	ctx := context.Background()
 	if moved, err := d.store.TransitionStatus(ctx, id, run.StatusRunning, status); err == nil && moved {
 		return status, false
 	}
-	cur, err := d.store.Get(ctx, id)
-	if err != nil {
-		return status, false
+	var cur *run.Run
+	if err := withRetries(func() error {
+		var err error
+		cur, err = d.store.Get(ctx, id)
+		return err
+	}); err != nil {
+		d.log.Warn("dispatch: cannot verify run state, skipping finalize: "+err.Error(),
+			zap.String("run_id", id))
+		return status, true
 	}
 	if cur.Status.Terminal() && cur.Status != status {
 		return cur.Status, true
@@ -1437,9 +1501,12 @@ func (d *Dispatcher) eventsFile(id string) (string, func()) {
 	return path, func() { _ = os.Remove(path) }
 }
 
-// tailEvents follows the run's event sidecar file, parsing, storing, and publishing each complete
-// line as it appears, until stop is closed and a final drain has run. Events from a child run are
-// also published under its parent so a split or pipeline page streams live.
+// tailEvents follows the run's event sidecar file, parsing, storing, and publishing complete lines
+// as they appear, until stop is closed and a final drain has run. Each poll tick flushes every new
+// line as one batch, so a chatty tool costs one store write per tick instead of one per line.
+// Events from a child run are also published under its parent so a split or pipeline page streams
+// live. The final drain keeps a trailing line missing its newline, since a killed tool can be cut
+// off mid-write and what it managed to publish still belongs to the run.
 func (d *Dispatcher) tailEvents(id, parent, path string, stop <-chan struct{}, mask *masker) {
 	if path == "" {
 		<-stop
@@ -1455,20 +1522,26 @@ func (d *Dispatcher) tailEvents(id, parent, path string, stop <-chan struct{}, m
 
 	reader := bufio.NewReader(f)
 	var partial []byte
-	drain := func() {
+	drain := func(final bool) {
+		var lines [][]byte
 		for {
 			chunk, err := reader.ReadBytes('\n')
 			if len(chunk) > 0 {
 				partial = append(partial, chunk...)
 				if partial[len(partial)-1] == '\n' {
-					d.handleEventLine(id, parent, partial, mask)
+					lines = append(lines, append([]byte(nil), partial...))
 					partial = partial[:0]
 				}
 			}
 			if err != nil {
-				return
+				break
 			}
 		}
+		if final && len(partial) > 0 {
+			lines = append(lines, append([]byte(nil), partial...))
+			partial = partial[:0]
+		}
+		d.flushEventLines(id, parent, lines, mask)
 	}
 
 	ticker := time.NewTicker(tailPollInterval)
@@ -1476,25 +1549,29 @@ func (d *Dispatcher) tailEvents(id, parent, path string, stop <-chan struct{}, m
 	for {
 		select {
 		case <-stop:
-			drain()
+			drain(true)
 			return
 		case <-ticker.C:
-			drain()
+			drain(false)
 		}
 	}
 }
 
-// handleEventLine parses a single event line, redacts known secrets from it, stores it, and
-// publishes it, echoing child events to the parent topic when the run belongs to a split or pipeline.
-func (d *Dispatcher) handleEventLine(id, parent string, raw []byte, mask *masker) {
-	line := bytes.TrimSpace(raw)
-	if len(line) == 0 {
-		return
-	}
-	events, err := event.Parse(bytes.NewReader(line))
-	if err != nil {
-		d.log.Error("dispatch: parse event line: "+err.Error(), zap.String("run_id", id))
-		return
+// flushEventLines parses a batch of event lines, redacts known secrets from them, stores them in
+// one write, and publishes them, echoing child events to the parent topic when the run belongs to
+// a split or pipeline. A single damaged line is logged and skipped so the rest of the batch lands.
+func (d *Dispatcher) flushEventLines(id, parent string, lines [][]byte, mask *masker) {
+	var events []event.Event
+	for _, raw := range lines {
+		e, ok, err := event.ParseLine(raw)
+		if err != nil {
+			d.log.Error("dispatch: parse event line: "+err.Error(), zap.String("run_id", id))
+			continue
+		}
+		if !ok {
+			continue
+		}
+		events = append(events, e)
 	}
 	if len(events) == 0 {
 		return

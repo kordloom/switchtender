@@ -79,18 +79,32 @@ func Parse(r io.Reader) ([]Event, error) {
 
 	var events []Event
 	for line := 1; scanner.Scan(); line++ {
-		raw := bytes.TrimSpace(scanner.Bytes())
-		if len(raw) == 0 {
+		e, ok, err := ParseLine(scanner.Bytes())
+		if err != nil {
+			return nil, fmt.Errorf("%w: line %d", err, line)
+		}
+		if !ok {
 			continue
 		}
-		var w wireEvent
-		if err := json.Unmarshal(raw, &w); err != nil {
-			return nil, fmt.Errorf("%w: line %d: %w", ErrParse, line, err)
-		}
-		events = append(events, w.event())
+		events = append(events, e)
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrParse, err)
 	}
 	return events, nil
+}
+
+// ParseLine parses a single newline delimited JSON event line. It reports ok false for a blank
+// line and ErrParse for a malformed one, so a live tailer can skip one damaged line without
+// dropping the rest of its batch, and without the per-line scanner buffer Parse allocates.
+func ParseLine(raw []byte) (Event, bool, error) {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 {
+		return Event{}, false, nil
+	}
+	var w wireEvent
+	if err := json.Unmarshal(raw, &w); err != nil {
+		return Event{}, false, fmt.Errorf("%w: %w", ErrParse, err)
+	}
+	return w.event(), true, nil
 }

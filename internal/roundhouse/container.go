@@ -12,6 +12,14 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
+)
+
+// containerKillAttempts and containerKillInterval bound how persistently a canceled run tries to
+// remove its container, so one that the daemon creates just after the cancel is still caught.
+const (
+	containerKillAttempts = 5
+	containerKillInterval = time.Second
 )
 
 // containerRunner executes a tool inside a container image so each project can pin its own tool
@@ -90,14 +98,25 @@ func (c *containerRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Re
 	cmd.Env = c.baseEnv
 
 	// A canceled run must stop the container itself: killing the client leaves the container running
-	// under the daemon, so kill it by name.
+	// under the daemon, so remove it by name. A cancel during a slow image pull can land before the
+	// daemon has created the container, so retry a few times to catch one that appears just after,
+	// using rm -f so a container in any state, created or running, is both killed and removed.
 	killed := make(chan struct{})
 	go func() {
 		select {
 		case <-ctx.Done():
-			kill := exec.Command(c.runtime, "kill", name)
-			_ = kill.Run()
 		case <-killed:
+			return
+		}
+		for attempt := 0; attempt < containerKillAttempts; attempt++ {
+			if err := exec.Command(c.runtime, "rm", "-f", name).Run(); err == nil {
+				return
+			}
+			select {
+			case <-time.After(containerKillInterval):
+			case <-killed:
+				return
+			}
 		}
 	}()
 	defer close(killed)
