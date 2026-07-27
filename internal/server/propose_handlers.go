@@ -10,6 +10,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/ai"
 	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/util"
 )
 
 // proposeRunSystemPrompt instructs the model to translate a request into one structured run and
@@ -75,7 +76,7 @@ func proposeRunHandler(submitter Submitter, provider ai.Provider, log *zap.Logge
 			respondError(w, log, http.StatusBadRequest, "a description is required")
 			return
 		}
-		intent = clip(intent, proposeIntentCap)
+		intent = util.Clip(intent, proposeIntentCap)
 
 		answer, err := provider.Complete(r.Context(), proposeRunSystemPrompt, "Request: "+intent)
 		if err != nil {

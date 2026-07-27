@@ -8,6 +8,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/util"
 )
 
 // WithSlack posts a formatted message to each Slack incoming webhook URL when a top-level run
@@ -86,11 +87,9 @@ func runElapsed(r *run.Run) string {
 	return r.EndedAt.Sub(*r.StartedAt).Round(time.Second).String()
 }
 
-// truncateError shortens an error message so a Slack notification stays a summary, not a log dump.
+// truncateError shortens an error message so a notification stays a summary, not a log dump. The
+// cut itself is the shared util.Clip.
 func truncateError(s string) string {
 	const limit = 200
-	if len(s) <= limit {
-		return s
-	}
-	return s[:limit] + "..."
+	return util.Clip(s, limit)
 }

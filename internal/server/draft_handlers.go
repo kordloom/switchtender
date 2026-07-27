@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/ai"
+	"github.com/kordloom/switchtender/internal/util"
 )
 
 // draftSystemPrompt frames the model as a script author whose output a human reviews and edits.
@@ -60,7 +61,7 @@ func draftStepHandler(provider ai.Provider, log *zap.Logger) http.HandlerFunc {
 			respondError(w, log, http.StatusBadRequest, "a description is required")
 			return
 		}
-		prompt = clip(prompt, draftPromptCap)
+		prompt = util.Clip(prompt, draftPromptCap)
 		answer, err := provider.Complete(r.Context(), draftSystemPrompt, "Tool: "+tool+"\nTask: "+prompt)
 		if err != nil {
 			respondAIError(w, log, "draft step", err)

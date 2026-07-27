@@ -14,6 +14,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/ai"
 	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/util"
 )
 
 // askSystemPrompt frames the model as a fleet analyst bound to the snapshot it is given.
@@ -93,7 +94,7 @@ func askFleetHandler(store run.Store, provider ai.Provider, log *zap.Logger) htt
 			respondError(w, log, http.StatusBadRequest, "a question is required")
 			return
 		}
-		question = clip(question, askQuestionCap)
+		question = util.Clip(question, askQuestionCap)
 		if !limiter.allow() {
 			respondError(w, log, http.StatusTooManyRequests, "too many questions, wait a minute")
 			return
@@ -135,7 +136,7 @@ func buildFleetSnapshot(ctx context.Context, store run.Store) string {
 		for _, r := range runs {
 			target := r.Playbook
 			if run.NormalizeTool(r.Tool) != run.ToolAnsible {
-				target = clip(strings.SplitN(r.Command, "\n", 2)[0], 60)
+				target = util.Clip(strings.SplitN(r.Command, "\n", 2)[0], 60)
 			}
 			line := fmt.Sprintf("- %s %s %s %s", r.ID, run.NormalizeTool(r.Tool), r.Status, target)
 			if r.DryRun {

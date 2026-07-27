@@ -16,6 +16,7 @@ import (
 	"github.com/kordloom/switchtender/internal/ai"
 	"github.com/kordloom/switchtender/internal/event"
 	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/util"
 )
 
 // respondAIError maps a provider failure to an HTTP response, telling the user the model declined
@@ -316,7 +317,7 @@ func driftedTaskSection(events []event.Event, host string) string {
 		}
 		line := "- " + e.Play + " / " + e.Task
 		if msg := strings.TrimSpace(e.Message); msg != "" {
-			line += ": " + clip(msg, 300)
+			line += ": " + util.Clip(msg, 300)
 		}
 		if b.Len()+len(line) > explainEventBudget {
 			continue
@@ -369,10 +370,10 @@ func failedTaskSection(events []event.Event) string {
 			line += fmt.Sprintf(" (rc=%d)", *e.RC)
 		}
 		if msg := strings.TrimSpace(e.Message); msg != "" {
-			line += ": " + clip(msg, 300)
+			line += ": " + util.Clip(msg, 300)
 		}
 		if errOut := strings.TrimSpace(e.Stderr); errOut != "" {
-			line += "\n  stderr: " + clip(errOut, 300)
+			line += "\n  stderr: " + util.Clip(errOut, 300)
 		}
 		if b.Len()+len(line) > explainEventBudget {
 			break
@@ -419,19 +420,6 @@ func statsSection(events []event.Event) string {
 		return b.String()
 	}
 	return ""
-}
-
-// clip returns up to limit leading bytes of s without splitting a multibyte rune, appending an
-// ellipsis when the value was cut.
-func clip(s string, limit int) string {
-	if len(s) <= limit {
-		return s
-	}
-	cut := limit
-	for cut > 0 && !utf8.RuneStart(s[cut]) {
-		cut--
-	}
-	return s[:cut] + "..."
 }
 
 // headBytes returns up to limit leading bytes of s without splitting a multibyte rune, appending a
