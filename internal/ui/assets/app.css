@@ -113,7 +113,9 @@ h1.mono { font-size: 24px; }
 .topbar-links { margin-left: auto; display: flex; align-items: center; gap: 14px; }
 .topbar-link { color: var(--muted); font-size: 14px; font-weight: 500; display: inline-flex; align-items: center; }
 .topbar-link:hover { color: var(--accent); text-decoration: none; }
-.runs-toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.runs-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
+.toolbar-select { width: auto; padding: 7px 11px; font-size: 13px; }
+th.col-num, td.col-num { width: 1%; color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; }
 .pagesize-label { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
 .pagesize-input { width: 84px; }
 .pagesize-hint { font-size: 12px; }

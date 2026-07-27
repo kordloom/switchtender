@@ -297,43 +297,66 @@ func testListPage(t *testing.T, store run.Store) {
 		return out
 	}
 
-	first, err := store.ListPage(ctx, "", 2, 0)
+	first, err := store.ListPage(ctx, run.ListFilter{}, 2, 0)
 	if err != nil {
 		t.Fatalf("ListPage() error = %v", err)
 	}
 	if diff := cmp.Diff([]string{"d", "c"}, ids(first)); diff != "" {
 		t.Errorf("ListPage(2,0) mismatch (-want +got):\n%s", diff)
 	}
-	next, err := store.ListPage(ctx, "", 2, 2)
+	next, err := store.ListPage(ctx, run.ListFilter{}, 2, 2)
 	if err != nil {
 		t.Fatalf("ListPage() error = %v", err)
 	}
 	if diff := cmp.Diff([]string{"b", "a"}, ids(next)); diff != "" {
 		t.Errorf("ListPage(2,2) mismatch (-want +got):\n%s", diff)
 	}
-	if past, _ := store.ListPage(ctx, "", 2, 10); len(past) != 0 {
+	if past, _ := store.ListPage(ctx, run.ListFilter{}, 2, 10); len(past) != 0 {
 		t.Errorf("ListPage past end = %v, want empty", ids(past))
 	}
-	if all, _ := store.ListPage(ctx, "", 0, 0); len(all) != 4 {
+	if all, _ := store.ListPage(ctx, run.ListFilter{}, 0, 0); len(all) != 4 {
 		t.Errorf("ListPage(0,0) len = %d, want 4", len(all))
 	}
 
 	// A non-empty query filters case-insensitively across the runs-view fields, newest first, and
 	// composes with paging.
-	if hit, _ := store.ListPage(ctx, "deploy", 0, 0); cmp.Diff([]string{"d", "a"}, ids(hit)) != "" {
+	if hit, _ := store.ListPage(ctx, run.ListFilter{Query: "deploy"}, 0, 0); cmp.Diff([]string{"d", "a"}, ids(hit)) != "" {
 		t.Errorf("ListPage search deploy = %v, want [d a]", ids(hit))
 	}
-	if hit, _ := store.ListPage(ctx, "BASH", 0, 0); len(hit) != 1 || hit[0].ID != "b" {
+	if hit, _ := store.ListPage(ctx, run.ListFilter{Query: "BASH"}, 0, 0); len(hit) != 1 || hit[0].ID != "b" {
 		t.Errorf("ListPage search BASH = %v, want [b]", ids(hit))
 	}
-	if hit, _ := store.ListPage(ctx, "failed", 0, 0); len(hit) != 1 || hit[0].ID != "b" {
+	if hit, _ := store.ListPage(ctx, run.ListFilter{Query: "failed"}, 0, 0); len(hit) != 1 || hit[0].ID != "b" {
 		t.Errorf("ListPage search failed = %v, want [b]", ids(hit))
 	}
-	if hit, _ := store.ListPage(ctx, "nomatch", 0, 0); len(hit) != 0 {
+	if hit, _ := store.ListPage(ctx, run.ListFilter{Query: "nomatch"}, 0, 0); len(hit) != 0 {
 		t.Errorf("ListPage search nomatch = %v, want empty", ids(hit))
 	}
-	if hit, _ := store.ListPage(ctx, "deploy", 1, 0); len(hit) != 1 || hit[0].ID != "d" {
+	if hit, _ := store.ListPage(ctx, run.ListFilter{Query: "deploy"}, 1, 0); len(hit) != 1 || hit[0].ID != "d" {
 		t.Errorf("ListPage search with page = %v, want [d]", ids(hit))
+	}
+
+	// The status and tool filters are exact, unlike the fuzzy query, and the ansible tool matches
+	// runs stored with an empty tool, its historical form.
+	if hit, _ := store.ListPage(ctx, run.ListFilter{Status: "failed"}, 0, 0); len(hit) != 1 || hit[0].ID != "b" {
+		t.Errorf("ListPage status failed = %v, want [b]", ids(hit))
+	}
+	if hit, _ := store.ListPage(ctx, run.ListFilter{Status: "succeeded"}, 0, 0); cmp.Diff([]string{"d", "a"}, ids(hit)) != "" {
+		t.Errorf("ListPage status succeeded = %v, want [d a]", ids(hit))
+	}
+	if hit, _ := store.ListPage(ctx, run.ListFilter{Tool: "bash"}, 0, 0); len(hit) != 1 || hit[0].ID != "b" {
+		t.Errorf("ListPage tool bash = %v, want [b]", ids(hit))
+	}
+	if hit, _ := store.ListPage(ctx, run.ListFilter{Tool: "ansible"}, 0, 0); cmp.Diff([]string{"d", "c", "a"}, ids(hit)) != "" {
+		t.Errorf("ListPage tool ansible = %v, want [d c a]", ids(hit))
+	}
+	if hit, _ := store.ListPage(ctx, run.ListFilter{Status: "succeeded", Query: "deploy"}, 0, 0); cmp.Diff([]string{"d", "a"}, ids(hit)) != "" {
+		t.Errorf("ListPage status plus query = %v, want [d a]", ids(hit))
+	}
+
+	// OldestFirst flips the default ordering.
+	if all, _ := store.ListPage(ctx, run.ListFilter{OldestFirst: true}, 0, 0); cmp.Diff([]string{"a", "b", "c", "d"}, ids(all)) != "" {
+		t.Errorf("ListPage oldest first = %v, want [a b c d]", ids(all))
 	}
 
 	counts, err := store.RunStatusCounts(ctx)

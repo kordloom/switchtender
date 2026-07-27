@@ -43,16 +43,42 @@
 			<div class="list-filter">
 				<input id="runs-search" class="input list-filter-input" type="search" placeholder="Search all runs…" aria-label="Search runs">
 			</div>
+			<select id="runs-status" class="input toolbar-select" aria-label="Filter by status">
+				<option value="">All statuses</option>
+				<option value="succeeded">Succeeded</option>
+				<option value="failed">Failed</option>
+				<option value="running">Running</option>
+				<option value="pending">Pending</option>
+				<option value="pending_approval">Pending approval</option>
+				<option value="canceled">Canceled</option>
+				<option value="interrupted">Interrupted</option>
+				<option value="rejected">Rejected</option>
+			</select>
+			<select id="runs-tool" class="input toolbar-select" aria-label="Filter by tool">
+				<option value="">All tools</option>
+				<option value="ansible">Ansible</option>
+				<option value="terraform">Terraform</option>
+				<option value="opentofu">OpenTofu</option>
+				<option value="bash">Bash</option>
+				<option value="powershell">PowerShell</option>
+				<option value="python">Python</option>
+				<option value="go">Go</option>
+			</select>
+			<select id="runs-order" class="input toolbar-select" aria-label="Order runs">
+				<option value="">Newest first</option>
+				<option value="oldest">Oldest first</option>
+			</select>
 			<label class="pagesize-label">Show
 				<input id="runs-pagesize" class="input pagesize-input" type="number" min="0" list="runs-pagesizes" value="20" aria-label="Runs per page">
 				<datalist id="runs-pagesizes"><option value="20"></option><option value="50"></option><option value="100"></option></datalist>
 				per page
 			</label>
-			<span class="muted pagesize-hint">0 = no limit</span>
+			<span class="muted pagesize-hint">0 = all</span>
 		</div>
 		<table class="runs" hidden>
 			<thead>
 				<tr>
+					<th class="col-num">#</th>
 					<th>Status</th>
 					<th>Run</th>
 					<th>Playbook</th>

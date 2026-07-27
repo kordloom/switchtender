@@ -577,21 +577,33 @@ func (s *store) List(ctx context.Context) ([]*run.Run, error) {
 }
 
 // ListPage returns a page of top-level runs newest first, capped at limit and skipping offset.
-func (s *store) ListPage(ctx context.Context, query string, limit, offset int) ([]*run.Run, error) {
+func (s *store) ListPage(ctx context.Context, filter run.ListFilter, limit, offset int) ([]*run.Run, error) {
 	q := "SELECT " + runColumns + " FROM runs WHERE parent_id IS NULL"
-	clause, args := runSearchClause(query)
+	// Placeholders are numbered by position in args, so each optional clause binds the next number.
+	clause, args := runSearchClause(filter.Query)
 	if clause != "" {
 		q += " AND " + clause
 	}
-	q += " ORDER BY created_at DESC, id DESC"
+	if filter.Status != "" {
+		args = append(args, filter.Status)
+		q += fmt.Sprintf(" AND status = $%d", len(args))
+	}
+	if filter.Tool != "" {
+		// An Ansible run may be stored with an empty tool, its historical form, so normalize in the
+		// comparison rather than trusting the column.
+		args = append(args, filter.Tool)
+		q += fmt.Sprintf(" AND COALESCE(NULLIF(tool, ''), 'ansible') = $%d", len(args))
+	}
+	order := "DESC"
+	if filter.OldestFirst {
+		order = "ASC"
+	}
+	q += " ORDER BY created_at " + order + ", id " + order
 	if limit > 0 {
-		// The search term, when present, takes $1, so the page bounds follow it.
-		if len(args) == 0 {
-			q += " LIMIT $1 OFFSET $2"
-		} else {
-			q += " LIMIT $2 OFFSET $3"
-		}
-		args = append(args, limit, offset)
+		args = append(args, limit)
+		q += fmt.Sprintf(" LIMIT $%d", len(args))
+		args = append(args, offset)
+		q += fmt.Sprintf(" OFFSET $%d", len(args))
 	}
 	return s.queryRuns(ctx, "list runs", q, args...)
 }

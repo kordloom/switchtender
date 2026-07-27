@@ -797,13 +797,27 @@ func (s *store) List(ctx context.Context) ([]*run.Run, error) {
 }
 
 // ListPage returns a page of top-level runs newest first, capped at limit and skipping offset.
-func (s *store) ListPage(ctx context.Context, query string, limit, offset int) ([]*run.Run, error) {
+func (s *store) ListPage(ctx context.Context, filter run.ListFilter, limit, offset int) ([]*run.Run, error) {
 	q := "SELECT " + runColumns + " FROM runs WHERE parent_id IS NULL"
-	clause, args := runSearchClause(query)
+	clause, args := runSearchClause(filter.Query)
 	if clause != "" {
 		q += " AND " + clause
 	}
-	q += " ORDER BY created_at DESC, id DESC"
+	if filter.Status != "" {
+		q += " AND status = ?"
+		args = append(args, filter.Status)
+	}
+	if filter.Tool != "" {
+		// An Ansible run may be stored with an empty tool, its historical form, so normalize in the
+		// comparison rather than trusting the column.
+		q += " AND COALESCE(NULLIF(tool, ''), 'ansible') = ?"
+		args = append(args, filter.Tool)
+	}
+	order := "DESC"
+	if filter.OldestFirst {
+		order = "ASC"
+	}
+	q += " ORDER BY created_at " + order + ", id " + order
 	if limit > 0 {
 		q += " LIMIT ? OFFSET ?"
 		args = append(args, limit, offset)

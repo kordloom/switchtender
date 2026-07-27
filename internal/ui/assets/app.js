@@ -1471,6 +1471,7 @@ document.addEventListener("DOMContentLoaded", () => {
 		if (!isReadOnly()) wireLaunchForm();
 		wirePropose();
 		wireRunsSearch();
+		wireRunsFilters();
 		loadRuns();
 	} else if (page === "detail") {
 		loadDetail(document.body.dataset.runId);
@@ -3422,6 +3423,25 @@ function runsQuery() {
 	return el ? el.value.trim() : "";
 }
 
+// runsFilterParams reads the status, tool, and order dropdowns into query parameters, so the server
+// filters the whole run history, not just the loaded page.
+function runsFilterParams() {
+	let params = "";
+	for (const id of ["runs-status", "runs-tool", "runs-order"]) {
+		const el = document.getElementById(id);
+		if (el && el.value) params += "&" + id.replace("runs-", "") + "=" + encodeURIComponent(el.value);
+	}
+	return params;
+}
+
+// wireRunsFilters reloads the table when a filter or order dropdown changes.
+function wireRunsFilters() {
+	for (const id of ["runs-status", "runs-tool", "runs-order"]) {
+		const el = document.getElementById(id);
+		if (el) el.addEventListener("change", loadRuns);
+	}
+}
+
 // wireRunsSearch reloads the runs table from the server as the search box changes, debounced so a
 // burst of keystrokes issues one request. The server searches every run, not just the loaded page.
 function wireRunsSearch() {
@@ -3446,10 +3466,10 @@ async function loadRuns() {
 	if (sizeEl) sizeEl.onchange = () => loadRuns();
 	const gen = ++runsLoadGen;
 	setStatus("");
-	showSkeletonRows(tbody, 6, 5);
+	showSkeletonRows(tbody, 6, 6);
 	table.hidden = false;
 	try {
-		const data = await getJSON("/runs?limit=" + runsPageSize() + "&offset=0&q=" + encodeURIComponent(runsQuery()));
+		const data = await getJSON("/runs?limit=" + runsPageSize() + "&offset=0&q=" + encodeURIComponent(runsQuery()) + runsFilterParams());
 		if (gen !== runsLoadGen) return;
 		const runs = data.runs || [];
 		tbody.innerHTML = "";
@@ -3489,6 +3509,8 @@ function toolBadgeEl(r) {
 // appendRunRows appends one table row per run, so a page can be added without rebuilding the
 // rows already shown.
 function appendRunRows(tbody, runs) {
+	// Continue numbering from the rows already shown, so a loaded next page extends the sequence.
+	let num = tbody.querySelectorAll("tr:not(.skeleton-row)").length;
 	for (const r of runs) {
 		const tr = document.createElement("tr");
 		tr.className = "row-nav";
@@ -3499,6 +3521,8 @@ function appendRunRows(tbody, runs) {
 		tr.addEventListener("keydown", (e) => {
 			if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openRun(); }
 		});
+		num++;
+		tr.appendChild(td(String(num), "col-num"));
 		tr.appendChild(tdBadge(r.status));
 
 		const runCell = td(shortId(r.id), "mono");
