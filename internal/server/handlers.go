@@ -776,6 +776,9 @@ func getRunHandler(store run.Store, authz *authorizer, log *zap.Logger) http.Han
 		if authorizeRunAccess(w, r, authz, log, got) {
 			return
 		}
+		// Grade the run's blast radius so an approver sees the risk without opening the log.
+		risk := run.AssessRisk(got)
+		got.Risk = &risk
 		respondJSON(w, log, http.StatusOK, got, wantsPretty(r))
 	}
 }

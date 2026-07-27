@@ -209,6 +209,9 @@ type Run struct {
 	// Timeout bounds how many seconds the run may execute before it is canceled and finalized failed.
 	// It overrides the dispatcher's default cap. Zero uses the default, which may itself be off.
 	Timeout int `json:"timeout,omitempty"`
+	// Risk grades the run's blast radius for an approver. It is computed on read, never stored, so
+	// it is nil unless a handler filled it in.
+	Risk *Risk `json:"risk,omitempty"`
 }
 
 // Clone returns a deep copy so callers cannot mutate stored state through shared pointers.
