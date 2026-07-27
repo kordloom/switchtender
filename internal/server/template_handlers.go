@@ -41,7 +41,7 @@ type createTemplateRequest struct {
 	Shards int `json:"shards,omitempty"`
 	// Queue restricts launches to workers serving the queue.
 	Queue string `json:"queue,omitempty"`
-	// Image names a container image every launch executes inside. Ansible only.
+	// Image names a container image every launch executes inside. Works for every tool.
 	Image string `json:"image,omitempty"`
 	// PullCredentialID names a registry credential for pulling a private Image.
 	PullCredentialID string `json:"pull_credential_id,omitempty"`
@@ -65,6 +65,7 @@ type listTemplatesResponse struct {
 
 // templateToolError returns a client message when a template request lacks the input its tool
 // needs, or empty when the request is valid. Ansible needs a playbook; other tools need a command.
+// Every tool may pin an execution image, since the container runner builds a plan for all seven.
 func templateToolError(req createTemplateRequest) string {
 	if req.Name == "" {
 		return "name is required"
@@ -77,9 +78,6 @@ func templateToolError(req createTemplateRequest) string {
 			return "playbook is required"
 		}
 		return ""
-	}
-	if req.Image != "" {
-		return "an execution image is only supported for the ansible tool"
 	}
 	if req.Command == "" {
 		return "command is required for the " + req.Tool + " tool"

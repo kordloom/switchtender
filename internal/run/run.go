@@ -189,7 +189,7 @@ type Run struct {
 	// Queue restricts execution to workers serving this queue. Empty runs on the default pool.
 	Queue string `json:"queue,omitempty"`
 	// Image names a container image the run executes inside, its execution environment. It outranks
-	// the project's image. Only Ansible runs in a container; other tools reject it at submit.
+	// the project's image. Every built-in tool runs in a container; the runner builds a per-tool plan.
 	Image string `json:"image,omitempty"`
 	// PullCredentialID names a registry credential for pulling a private Image. Empty for public.
 	PullCredentialID string `json:"pull_credential_id,omitempty"`

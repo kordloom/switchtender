@@ -39,7 +39,7 @@ What SwitchTender does today.
 | Surveys      | Templates declare typed launch prompts, validated and injected as extra vars.|
 | Worker queues | Target a run at a named queue. A worker serving that queue runs it and default workers leave it alone. Pin a queue on a run, a template, or an inventory, most specific wins, so queues work like AWX instance groups.|
 | Dependency sync | A project's requirements.yml roles and collections install on each sync, so playbooks that need them just run.|
-| Execution environments | A template, run, or project pins a container image and its runs execute inside it, with their own ansible and system dependencies. The most specific wins: run, then template, then project. Private registries pull with a stored credential.|
+| Execution environments | A template, run, or project pins a container image and its runs execute inside it, with their own tool and system dependencies, for any of the seven tools. The most specific wins: run, then template, then project. Private registries pull with a stored credential.|
 | Teams and grants | Group users into teams and grant use or manage on a specific project, template, inventory, or credential. A manage grant delegates editing and deleting that object without the global admin role. Grants layer on the global role and default open.|
 | Retention | A sweeper drops old run events and deletes terminal runs past a configurable age, keeping the summaries the cross-run views need.|
 | Email | An SMTP notification on every finished run or on failures only, alongside the finish webhooks.|

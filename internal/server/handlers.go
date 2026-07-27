@@ -51,7 +51,7 @@ type createRunRequest struct {
 	InventoryID string `json:"inventory_id,omitempty"`
 	// Queue restricts execution to workers serving the queue.
 	Queue string `json:"queue,omitempty"`
-	// Image names a container image the run executes inside, its execution environment. Ansible only.
+	// Image names a container image the run executes inside, its execution environment. Any tool.
 	Image string `json:"image,omitempty"`
 	// PullCredentialID names a registry credential for pulling a private Image.
 	PullCredentialID string `json:"pull_credential_id,omitempty"`
