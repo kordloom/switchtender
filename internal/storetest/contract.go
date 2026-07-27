@@ -75,7 +75,6 @@ func sampleRun(id string) *run.Run {
 	}
 }
 
-// testSaveGet verifies a run round trips and that returned values are independent copies.
 // testTransitionStatus checks the atomic status move: it changes a row only from the expected
 // status, and a second attempt from a status the run has already left changes nothing, so two
 // racing approvers cannot both win.
@@ -112,6 +111,7 @@ func testTransitionStatus(t *testing.T, store run.Store) {
 	}
 }
 
+// testSaveGet verifies a run round trips and that returned values are independent copies.
 func testSaveGet(t *testing.T, store run.Store) {
 	ctx := context.Background()
 	want := sampleRun("run_1")

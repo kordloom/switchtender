@@ -36,6 +36,7 @@ type Injector func(secret string) (Injection, error)
 // lock.
 var injectors = map[Kind]Injector{}
 
+// init registers the built-in cloud credential injectors so their kinds resolve at run time.
 func init() {
 	RegisterInjector(KindAWS, awsInject)
 	RegisterInjector(KindAzure, azureInject)
