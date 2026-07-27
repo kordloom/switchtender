@@ -206,6 +206,9 @@ type Run struct {
 	// double-fire a run. Empty means no dedup. It is set from the Idempotency-Key request header and
 	// is a server-side control field, not part of the run's public representation.
 	IdempotencyKey string `json:"-"`
+	// Timeout bounds how many seconds the run may execute before it is canceled and finalized failed.
+	// It overrides the dispatcher's default cap. Zero uses the default, which may itself be off.
+	Timeout int `json:"timeout,omitempty"`
 }
 
 // Clone returns a deep copy so callers cannot mutate stored state through shared pointers.
@@ -354,6 +357,16 @@ func WithIntent(intent string) SubmitOption {
 func WithIdempotencyKey(key string) SubmitOption {
 	return func(r *Run) {
 		r.IdempotencyKey = key
+	}
+}
+
+// WithTimeout caps the run at seconds of execution, overriding the dispatcher default. Zero or less
+// leaves it on the default.
+func WithTimeout(seconds int) SubmitOption {
+	return func(r *Run) {
+		if seconds > 0 {
+			r.Timeout = seconds
+		}
 	}
 }
 

@@ -353,6 +353,11 @@ that variable is unset.</p>
 <td>Most groups a split fans out into. A split is always bounded by the host count.</td>
 </tr>
 <tr>
+<td><code>--run-timeout</code></td>
+<td><code>0</code></td>
+<td>Default cap on how long a run may execute before it is canceled and failed, for example <code>1h</code>. A run may set a shorter timeout. Zero leaves runs uncapped.</td>
+</tr>
+<tr>
 <td><code>--notify-webhook</code></td>
 <td>none</td>
 <td>URL that receives a JSON notification when a run finishes. Repeatable.</td>
@@ -598,6 +603,11 @@ node over the mesh relay, with no database access of its own.</p>
 <td><code>--workers</code></td>
 <td><code>4</code></td>
 <td>Concurrent runs this process executes at once.</td>
+</tr>
+<tr>
+<td><code>--run-timeout</code></td>
+<td><code>0</code></td>
+<td>Default cap on how long a run may execute before it is canceled and failed, for example <code>1h</code>. Zero leaves runs uncapped.</td>
 </tr>
 <tr>
 <td><code>--allow-container-ee</code></td>

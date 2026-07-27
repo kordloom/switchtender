@@ -71,7 +71,8 @@ CREATE TABLE IF NOT EXISTS runs (
 	intent        TEXT NOT NULL DEFAULT '',
 	image         TEXT NOT NULL DEFAULT '',
 	pull_credential_id TEXT NOT NULL DEFAULT '',
-	idempotency_key TEXT NOT NULL DEFAULT ''
+	idempotency_key TEXT NOT NULL DEFAULT '',
+	timeout INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_runs_created_at ON runs(created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_parent ON runs(parent_id, shard_index);
@@ -407,6 +408,11 @@ func migrateRuns(db *sql.DB) error {
 		return fmt.Errorf("add idempotency_key column: %w", err)
 	}
 	if _, err := db.Exec(
+		"ALTER TABLE runs ADD COLUMN timeout INTEGER NOT NULL DEFAULT 0"); err != nil &&
+		!strings.Contains(err.Error(), "duplicate column name") {
+		return fmt.Errorf("add timeout column: %w", err)
+	}
+	if _, err := db.Exec(
 		"CREATE UNIQUE INDEX IF NOT EXISTS idx_runs_idempotency_key " +
 			"ON runs(idempotency_key) WHERE idempotency_key <> ''"); err != nil {
 		return fmt.Errorf("index idempotency_key: %w", err)
@@ -608,7 +614,7 @@ const runColumns = `id, playbook, inventory, status, exit_code, error, created_a
 	ended_at, parent_id, shard_index, shard_count, limit_pattern, kind, step_name, step_index,
 	retry_of, attempt, extra_vars, outputs, claimed_by, claimed_at, cancel_requested,
 	credential_ids, project_id, commit_sha, inventory_id, queue, tool, command, dry_run,
-	proposed_from, intent, image, pull_credential_id, idempotency_key`
+	proposed_from, intent, image, pull_credential_id, idempotency_key, timeout`
 
 // Save inserts or replaces the run identified by r.ID. The cancel flag merges with MAX so a
 // replace from a stale snapshot cannot erase a cancel another process just requested.
@@ -619,8 +625,8 @@ INSERT INTO runs
 	 parent_id, shard_index, shard_count, limit_pattern, kind, step_name, step_index, retry_of,
 	 attempt, extra_vars, outputs, claimed_by, claimed_at, cancel_requested, credential_ids,
 	 project_id, commit_sha, inventory_id, queue, tool, command, dry_run, proposed_from, intent,
-	 image, pull_credential_id, idempotency_key)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	 image, pull_credential_id, idempotency_key, timeout)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
 	playbook=excluded.playbook, inventory=excluded.inventory, status=excluded.status,
 	exit_code=excluded.exit_code, error=excluded.error, created_at=excluded.created_at,
@@ -636,7 +642,7 @@ ON CONFLICT(id) DO UPDATE SET
 	inventory_id=excluded.inventory_id, queue=excluded.queue, tool=excluded.tool,
 	command=excluded.command, dry_run=excluded.dry_run, proposed_from=excluded.proposed_from,
 	intent=excluded.intent, image=excluded.image, pull_credential_id=excluded.pull_credential_id,
-	idempotency_key=excluded.idempotency_key`
+	idempotency_key=excluded.idempotency_key, timeout=excluded.timeout`
 	_, err := s.db.ExecContext(ctx, q,
 		r.ID, r.Playbook, r.Inventory, string(r.Status), nullInt(r.ExitCode), r.Error,
 		formatTime(r.CreatedAt), nullTime(r.StartedAt), nullTime(r.EndedAt),
@@ -645,7 +651,7 @@ ON CONFLICT(id) DO UPDATE SET
 		jsonMap(r.ExtraVars), jsonMap(r.Outputs), r.ClaimedBy, nullTime(r.ClaimedAt),
 		boolToInt(r.CancelRequested), joinIDs(r.CredentialIDs), r.ProjectID, r.CommitSHA,
 		r.InventoryID, r.Queue, r.Tool, r.Command, boolToInt(r.DryRun), r.ProposedFrom, r.Intent,
-		r.Image, r.PullCredentialID, r.IdempotencyKey,
+		r.Image, r.PullCredentialID, r.IdempotencyKey, r.Timeout,
 	)
 	if err != nil {
 		if r.IdempotencyKey != "" && isKeyConflict(err) {
@@ -1394,7 +1400,7 @@ func scanRun(s scanner) (*run.Run, error) {
 		&r.Kind, &r.StepName, &stepIdx, &retryOf, &r.Attempt, &extra, &outputs,
 		&r.ClaimedBy, &claimed, &cancelI, &credIDs, &r.ProjectID, &r.CommitSHA,
 		&r.InventoryID, &r.Queue, &r.Tool, &r.Command, &dryRun, &r.ProposedFrom, &r.Intent,
-		&r.Image, &r.PullCredentialID, &r.IdempotencyKey); err != nil {
+		&r.Image, &r.PullCredentialID, &r.IdempotencyKey, &r.Timeout); err != nil {
 		return nil, err
 	}
 	r.CancelRequested = cancelI != 0

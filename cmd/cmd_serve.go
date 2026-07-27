@@ -140,6 +140,10 @@ var serveRequireImageDigest bool
 // serveWorkers holds the value of the serve --workers flag.
 var serveWorkers int
 
+// serveRunTimeout holds the value of the --run-timeout flag, the default cap on how long a run may
+// execute. Zero disables the cap.
+var serveRunTimeout time.Duration
+
 // serveStrictGrants holds the value of the --strict-grants flag.
 var serveStrictGrants bool
 
@@ -422,6 +426,9 @@ func init() {
 		"Largest host matrix, in cells, the UI draws before showing a notice. 0 means no limit.")
 	serveCmd.Flags().IntVar(&serveMaxShards, "max-shards", dispatch.DefaultMaxShards,
 		"Most groups a split fans out into. A split is always bounded by the host count.")
+	serveCmd.Flags().DurationVar(&serveRunTimeout, "run-timeout", 0,
+		"Default cap on how long a run may execute before it is canceled and failed, for example 1h. "+
+			"A run may set a shorter timeout. Zero leaves runs uncapped.")
 	serveCmd.Flags().StringVar(&servePluginsDir, "plugins-dir", "",
 		"Directory of extension plugin binaries to load at startup. Empty loads none. Also SWITCHTENDER_PLUGINS_DIR.")
 	serveCmd.Flags().StringVar(&serveOIDCIssuer, "oidc-issuer", "",
@@ -690,6 +697,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	disp := dispatch.New(store, runner, log, dispatch.WithPublisher(hub),
 		dispatch.WithWorkers(serveWorkers),
 		dispatch.WithMaxShards(serveMaxShards),
+		dispatch.WithRunTimeout(serveRunTimeout),
 		dispatch.WithCredentials(bundle.Credentials(), sealer),
 		dispatch.WithProjects(bundle.Projects(), syncer),
 		dispatch.WithDefaultImage(serveDefaultImage),

@@ -55,6 +55,10 @@ var workerPluginsDir string
 // workerWorkers holds the value of the worker --workers flag.
 var workerWorkers int
 
+// workerRunTimeout holds the value of the worker --run-timeout flag, the default cap on how long a
+// run may execute. Zero disables the cap.
+var workerRunTimeout time.Duration
+
 // workerCmd runs a SwitchTender worker: a process that leases pending runs from the shared store,
 // executes them, and streams results back. Point it and a server at the same database, a
 // PostgreSQL DSN for separate machines, and they compete for work.
@@ -85,6 +89,9 @@ func init() {
 		"Reject a container run whose image is not pinned to an @sha256: digest.")
 	workerCmd.Flags().IntVar(&workerWorkers, "workers", dispatch.DefaultWorkers,
 		"Concurrent runs this process executes at once.")
+	workerCmd.Flags().DurationVar(&workerRunTimeout, "run-timeout", 0,
+		"Default cap on how long a run may execute before it is canceled and failed, for example 1h. "+
+			"A run may set a shorter timeout. Zero leaves runs uncapped.")
 	workerCmd.Flags().StringVar(&workerPluginsDir, "plugins-dir", "",
 		"Directory of extension plugin binaries to load at startup. Empty loads none. Also SWITCHTENDER_PLUGINS_DIR.")
 	registerContainerFlags(workerCmd)
@@ -141,6 +148,7 @@ func workerStore(log *zap.Logger) (run.Store, []dispatch.Option, func(), error) 
 	opts := []dispatch.Option{
 		dispatch.WithWorkers(workerWorkers),
 		dispatch.WithDefaultImage(workerDefaultImage),
+		dispatch.WithRunTimeout(workerRunTimeout),
 	}
 	if workerServer != "" {
 		token := os.Getenv("SWITCHTENDER_WORKER_TOKEN")

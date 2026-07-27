@@ -58,6 +58,9 @@ type createRunRequest struct {
 	// RequireApproval holds the run for approval before it executes. Honored for a single run, not
 	// a shard split.
 	RequireApproval bool `json:"require_approval,omitempty"`
+	// Timeout caps how many seconds the run may execute before it is canceled and failed. Zero uses
+	// the server default.
+	Timeout int `json:"timeout,omitempty"`
 }
 
 // createPipelineRequest is the JSON body accepted by POST /pipelines.
@@ -460,6 +463,9 @@ func createRunHandler(submitter Submitter, authz *authorizer, log *zap.Logger) h
 		}
 		if req.Image != "" {
 			opts = append(opts, run.WithImage(req.Image, req.PullCredentialID))
+		}
+		if req.Timeout > 0 {
+			opts = append(opts, run.WithTimeout(req.Timeout))
 		}
 		if req.Shards >= 2 {
 			created, err = submitter.SubmitSplit(r.Context(), req.Playbook, req.Inventory,

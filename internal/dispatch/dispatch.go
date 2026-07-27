@@ -159,7 +159,14 @@ type Dispatcher struct {
 	// defaultImage is the fallback execution image used when a run, its template, and its project pin
 	// none. Empty leaves an unpinned run on the host.
 	defaultImage string
+	// runTimeout bounds how long a single run may execute before it is canceled and finalized failed.
+	// Zero disables the cap, so a run may take as long as it needs.
+	runTimeout time.Duration
 }
+
+// errRunTimeout is the cancellation cause when a run is stopped for exceeding runTimeout, so the
+// outcome can record a timeout rather than a user cancel.
+var errRunTimeout = errors.New("run exceeded its timeout")
 
 // Option configures a Dispatcher.
 type Option func(*config)
@@ -229,6 +236,8 @@ type config struct {
 	// defaultImage is the fallback execution image used when a run, its template, and its project pin
 	// none. Empty leaves an unpinned run on the host.
 	defaultImage string
+	// runTimeout bounds how long a single run may execute. Zero disables the cap.
+	runTimeout time.Duration
 	// noJanitor disables the stale-lease janitor. A relay worker sets it because the store it runs
 	// against cannot reclaim leases; that stays the control node's job.
 	noJanitor bool
@@ -237,6 +246,17 @@ type config struct {
 // WithWorkers sets the worker pool size. Values below one fall back to DefaultWorkers.
 func WithWorkers(n int) Option {
 	return func(c *config) { c.workers = n }
+}
+
+// WithRunTimeout caps how long a single run may execute. A run that exceeds it is canceled and
+// finalized failed, so a hung tool cannot hold a worker slot forever. Zero or less disables the cap.
+func WithRunTimeout(d time.Duration) Option {
+	return func(c *config) {
+		if d < 0 {
+			d = 0
+		}
+		c.runTimeout = d
+	}
 }
 
 // WithMaxShards sets the ceiling on how many groups a split fans out into. A value below one restores
@@ -323,6 +343,7 @@ func New(store run.Store, runner roundhouse.Runner, log *zap.Logger, opts ...Opt
 		cancels:            make(map[string]context.CancelFunc),
 		owner:              cfg.owner,
 		claimInterval:      cfg.claimInterval,
+		runTimeout:         cfg.runTimeout,
 		maxShards:          cfg.maxShards,
 		queues:             cfg.queues,
 		credentials:        cfg.credentials,
@@ -1176,6 +1197,19 @@ func (d *Dispatcher) executeLeased(base context.Context, r *run.Run) run.Status 
 	defer d.unregister(r.ID)
 	defer cancel()
 
+	// A run timeout stops a hung tool from holding this worker slot forever. The cause lets the
+	// outcome tell a timeout apart from a user cancel. A per-run timeout overrides the dispatcher
+	// default, and either bound stays off when zero.
+	timeout := d.runTimeout
+	if r.Timeout > 0 {
+		timeout = time.Duration(r.Timeout) * time.Second
+	}
+	if timeout > 0 {
+		var stop context.CancelFunc
+		runCtx, stop = context.WithTimeoutCause(runCtx, timeout, errRunTimeout)
+		defer stop()
+	}
+
 	return d.execute(runCtx, r)
 }
 
@@ -1372,6 +1406,9 @@ func (d *Dispatcher) outcome(
 	ctx context.Context, r *run.Run, res roundhouse.Result, err error, mask *masker,
 ) run.Status {
 	switch {
+	case err != nil && errors.Is(context.Cause(ctx), errRunTimeout):
+		d.finalize(r, run.StatusFailed, nil, "run canceled: exceeded its timeout")
+		return run.StatusFailed
 	case err != nil && ctx.Err() != nil:
 		d.finalize(r, run.StatusCanceled, nil, "")
 		return run.StatusCanceled
