@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Benchmarks · SwitchTender docs</title>
+	<meta name="description" content="Measured numbers for the questions people actually ask: how fast does it start, how much memory does it hold at idle, and how big is the binary.">
+	<link rel="canonical" href="https://switchtender.com/docs/benchmarks">
+	<meta property="og:title" content="Benchmarks · SwitchTender docs">
+	<meta property="og:description" content="Measured numbers for the questions people actually ask: how fast does it start, how much memory does it hold at idle, and how big is the binary.">
+	<meta property="og:type" content="article">
+	<meta property="og:url" content="https://switchtender.com/docs/benchmarks">
+	<link rel="icon" href="/favicon.ico" sizes="any">
+	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
+	<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="/docs.css?v=1">
+</head>
+<body>
+	<header class="dnav">
+		<a class="brand" href="/"><img src="/assets/logo-train-tracks-dark.png" alt="SwitchTender" class="brand-train"><span class="brand-word">SwitchTender</span></a>
+		<span class="dnav-tag">Docs</span>
+		<nav class="dnav-links">
+			<a href="/">Home</a>
+			<a href="/#compare">Compare</a>
+			<a href="https://github.com/kordloom/switchtender">GitHub</a>
+		</nav>
+	</header>
+	<div class="dshell">
+		<aside class="dside">
+			<nav>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to AWX and Semaphore</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks" class="active">Benchmarks</a><a href="/docs/sdk">Extend SwitchTender in Go</a>
+			</nav>
+		</aside>
+		<main class="dcontent prose">
+			<h1 id="benchmarks">Benchmarks</h1>
+<p>Measured numbers for the questions people actually ask: how fast does it start, how much memory does
+it hold at idle, and how big is the binary. Every number below was measured on a release-flag build,
+the method is shown so you can reproduce it on your own hardware, and nothing here is a projection.</p>
+<p>Measured on 2026-07-27 against v1.24.1 on an Apple Silicon laptop, natively and inside a Debian
+container on the same machine. Your hardware will differ; the method will not.</p>
+<h2 id="the-numbers">The numbers</h2>
+<table>
+<thead>
+<tr>
+<th>Measurement</th>
+<th>Apple Silicon, native</th>
+<th>Debian container, same machine</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Cold boot to serving, no encryption key</td>
+<td>~37 ms</td>
+<td>~110 ms</td>
+</tr>
+<tr>
+<td>Cold boot to serving, credential encryption on</td>
+<td>~75 ms</td>
+<td>~140 ms</td>
+</tr>
+<tr>
+<td>Resident memory at idle</td>
+<td>32 to 38 MB</td>
+<td>32 to 38 MB</td>
+</tr>
+<tr>
+<td>Stripped release binary</td>
+<td>29 MB</td>
+<td>29 MB</td>
+</tr>
+</tbody>
+</table>
+<p>Boot times are the median of five trials, first request to a live <code>/healthz</code>. The spread between the
+two boot rows is the credential key derivation: argon2id at 64 MiB memory cost, a deliberate security
+parameter, paid once at startup. The derivation arena is handed back to the operating system as soon
+as the key exists, so it does not stay in resident memory.</p>
+<h2 id="reproduce-it">Reproduce it</h2>
+<p>Build with the release flags:</p>
+<pre><code>CGO_ENABLED=0 go build -trimpath -ldflags &quot;-s -w&quot; -o switchtender .
+ls -l switchtender
+</code></pre>
+<p>Time a cold boot to first served request:</p>
+<pre><code>START=$(date +%s%N)
+./switchtender serve --db bench.db --addr 127.0.0.1:8080 &amp;
+until curl -sf http://127.0.0.1:8080/healthz &gt;/dev/null 2&gt;&amp;1; do :; done
+echo &quot;$(( ($(date +%s%N) - START) / 1000000 ))ms&quot;
+</code></pre>
+<p>Measure idle memory after a few seconds:</p>
+<pre><code>sleep 5
+ps -o rss= -p $(pgrep -f &quot;switchtender serve&quot;) | awk '{printf &quot;%.0f MB\n&quot;, $1/1024}'
+</code></pre>
+<p>Run each a handful of times and take the median. Set <code>SWITCHTENDER_ENCRYPTION_KEY</code> and
+<code>SWITCHTENDER_ENCRYPTION_SALT</code> to measure the with-encryption boot path.</p>
+<p>One platform note: on macOS, <code>ps</code> keeps reclaimable pages in its resident count, so the
+with-encryption idle number can read near 100 MB there even though the memory has been released and
+the OS takes it back under any pressure. On Linux, where servers actually run, the resident count
+drops immediately and idles in the same 32 to 38 MB band as the no-encryption path.</p>
+<h2 id="what-this-buys-you-in-practice">What this buys you in practice</h2>
+<ul>
+<li>Restarts are free. A control plane that boots in well under a second restarts on upgrade or crash
+before a health check notices. There is no cluster to warm and no operator to reconcile.</li>
+<li>It fits next to your workload. At under 40 MB idle, SwitchTender runs on the same small VM as the
+things it automates, a spare Raspberry Pi, or the corner of a laptop.</li>
+<li>One artifact to ship. The 29 MB binary is the whole control plane: server, workers, UI, importers,
+and the CLI. Copy it, run it.</li>
+</ul>
+<h2 id="about-comparisons">About comparisons</h2>
+<p>We publish only numbers we measured ourselves, so there are no AWX or Semaphore columns above. What
+can be said factually: AWX requires a Kubernetes cluster, its operator, PostgreSQL, Redis, and
+Receptor before it runs a playbook, so a boot-time comparison is not even shaped the same, and that
+is the point. The <a href="/docs/comparison">comparison page</a> covers the feature-by-feature picture, including
+where SwitchTender is still young. If you run these benchmarks and get materially different numbers,
+open an issue with your hardware and method and we will look.</p>
+
+		</main>
+	</div>
+	<script>document.addEventListener("click",e=>{const a=e.target.closest(".dside a");if(a)document.querySelector(".dside")?.classList.remove("open")});</script>
+</body>
+</html>

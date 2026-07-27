@@ -17,7 +17,7 @@ var docOrder = []string{
 	"tutorial-set-a-secret", "tutorial-migrate",
 	"tool-bash", "tool-terraform", "tool-opentofu", "tool-python", "tool-powershell", "tool-go",
 	"sdk",
-	"concepts", "reliability", "configuration", "backup", "desktop", "features", "secrets", "drift", "ai",
+	"concepts", "reliability", "benchmarks", "configuration", "backup", "desktop", "features", "secrets", "drift", "ai",
 	"api", "migration", "comparison",
 }
 
