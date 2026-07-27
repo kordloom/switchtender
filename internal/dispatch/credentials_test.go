@@ -2,16 +2,21 @@ package dispatch
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"go.uber.org/zap"
+	"golang.org/x/crypto/ssh"
 
 	"github.com/kordloom/switchtender/internal/credential"
 	"github.com/kordloom/switchtender/internal/inventory"
@@ -393,6 +398,103 @@ func TestMaterializeConnectionCredentialsMissingFields(t *testing.T) {
 			}
 		})
 	}
+}
+
+// encryptedSSHKey generates an ed25519 key sealed under passphrase in the OpenSSH format and returns
+// its PEM text, so a test exercises the real unlock path at run time.
+func encryptedSSHKey(t *testing.T, passphrase string) string {
+	t.Helper()
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	block, err := ssh.MarshalPrivateKeyWithPassphrase(priv, "", []byte(passphrase))
+	if err != nil {
+		t.Fatalf("marshal encrypted key: %v", err)
+	}
+	return string(pem.EncodeToMemory(block))
+}
+
+// materializeSSHKey seals secretPlain as an ssh_key credential and materializes it, returning the
+// resulting spec, the masking secrets, and the materialize error, with cleanup deferred by the caller.
+func materializeSSHKey(t *testing.T, secretPlain string) (*roundhouse.Spec, []string, func(), error) {
+	t.Helper()
+	sealer := credential.NewSealer("pass", "salt")
+	sealed, err := sealer.Seal(secretPlain)
+	if err != nil {
+		t.Fatalf("Seal() error = %v", err)
+	}
+	store := credential.NewMemStore()
+	if err := store.Save(context.Background(), &credential.Credential{
+		ID: "cred_ssh", Name: "deploy-key", Kind: credential.KindSSHKey, Secret: sealed,
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	d := &Dispatcher{credentials: store, sealer: sealer}
+	spec := &roundhouse.Spec{}
+	cleanup, secrets, err := d.materializeCredentials(context.Background(),
+		&run.Run{ID: "run_ssh", CredentialIDs: []string{"cred_ssh"}}, spec)
+	return spec, secrets, cleanup, err
+}
+
+// TestMaterializeSSHKeyPassphrase proves a passphrase protected key is unlocked in process to a key
+// the tool consumes without prompting, that the passphrase never lands in the key file and is tracked
+// for masking, that a wrong passphrase fails materialization, and that a bare key passes through.
+func TestMaterializeSSHKeyPassphrase(t *testing.T) {
+	t.Parallel()
+
+	t.Run("with passphrase", func(t *testing.T) {
+		t.Parallel()
+		encrypted := encryptedSSHKey(t, "unlock-me")
+		spec, secrets, cleanup, err := materializeSSHKey(t, credential.BuildSSHKeySecret(encrypted, "unlock-me"))
+		defer cleanup()
+		if err != nil {
+			t.Fatalf("materializeCredentials() error = %v", err)
+		}
+		if spec.PrivateKeyPath == "" {
+			t.Fatal("spec.PrivateKeyPath is empty, want the materialized key path")
+		}
+		data, err := os.ReadFile(spec.PrivateKeyPath)
+		if err != nil {
+			t.Fatalf("ReadFile() error = %v", err)
+		}
+		if _, err := ssh.ParseRawPrivateKey(data); err != nil {
+			t.Errorf("materialized key does not parse without a passphrase: %v", err)
+		}
+		if strings.Contains(string(data), "unlock-me") {
+			t.Error("materialized key file contains the passphrase, want it kept off disk")
+		}
+		if !containsString(secrets, "unlock-me") {
+			t.Error("secrets does not track the passphrase for masking")
+		}
+	})
+
+	t.Run("wrong passphrase", func(t *testing.T) {
+		t.Parallel()
+		encrypted := encryptedSSHKey(t, "unlock-me")
+		_, _, cleanup, err := materializeSSHKey(t, credential.BuildSSHKeySecret(encrypted, "wrong"))
+		defer cleanup()
+		if !errors.Is(err, credential.ErrUnlock) {
+			t.Fatalf("materializeCredentials() error = %v, want ErrUnlock", err)
+		}
+	})
+
+	t.Run("bare key passthrough", func(t *testing.T) {
+		t.Parallel()
+		raw := "-----BEGIN OPENSSH PRIVATE KEY-----\nunencrypted-body\n-----END OPENSSH PRIVATE KEY-----\n"
+		spec, _, cleanup, err := materializeSSHKey(t, raw)
+		defer cleanup()
+		if err != nil {
+			t.Fatalf("materializeCredentials() error = %v", err)
+		}
+		data, err := os.ReadFile(spec.PrivateKeyPath)
+		if err != nil {
+			t.Fatalf("ReadFile() error = %v", err)
+		}
+		if string(data) != raw {
+			t.Errorf("materialized bare key = %q, want the raw key unchanged", string(data))
+		}
+	})
 }
 
 // containsString reports whether s is in list.

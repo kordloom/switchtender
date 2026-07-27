@@ -11,6 +11,22 @@ import (
 	"github.com/kordloom/switchtender/internal/credential"
 )
 
+// sealableSecret builds the plaintext to seal, folding an ssh_key passphrase into a structured
+// secret. It rejects a passphrase on anything but a locally stored ssh_key, where the passphrase
+// would otherwise be silently ignored at run time.
+func sealableSecret(kind credential.Kind, source, secret, passphrase string) (string, error) {
+	if passphrase == "" {
+		return secret, nil
+	}
+	if kind != credential.KindSSHKey {
+		return "", errors.New("passphrase applies only to an ssh_key credential")
+	}
+	if credential.NormalizeSource(source) != credential.SourceLocal {
+		return "", errors.New("passphrase applies only to a locally stored ssh_key, not an external source")
+	}
+	return credential.BuildSSHKeySecret(secret, passphrase), nil
+}
+
 // createCredentialRequest is the JSON body accepted by POST /credentials. The secret arrives in
 // plaintext over the API and is sealed before it touches the store.
 type createCredentialRequest struct {
@@ -23,6 +39,9 @@ type createCredentialRequest struct {
 	Source string `json:"source,omitempty"`
 	// Secret is the material itself, or the command for a command source. Required, never echoed back.
 	Secret string `json:"secret"`
+	// Passphrase unlocks a passphrase protected ssh_key at run time. It applies only to a locally
+	// stored ssh_key and is sealed alongside the key. Optional, never echoed back.
+	Passphrase string `json:"passphrase,omitempty"`
 	// OrgID names the owning organization. Empty leaves the credential unowned and global. Optional.
 	OrgID string `json:"org_id,omitempty"`
 }
@@ -77,8 +96,14 @@ func createCredentialHandler(store credential.Store, sealer *credential.Sealer, 
 			return
 		}
 
-		sealed, err := sealer.Seal(req.Secret)
+		secretPlain, err := sealableSecret(req.Kind, req.Source, req.Secret, req.Passphrase)
+		if err != nil {
+			respondError(w, log, http.StatusBadRequest, err.Error())
+			return
+		}
+		sealed, err := sealer.Seal(secretPlain)
 		req.Secret = ""
+		req.Passphrase = ""
 		if err != nil {
 			log.Error("server: seal credential: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not store credential")
@@ -110,6 +135,9 @@ type updateCredentialRequest struct {
 	Source string `json:"source,omitempty"`
 	// Secret, when non-empty, replaces the stored material; blank keeps it. Never echoed back.
 	Secret string `json:"secret,omitempty"`
+	// Passphrase unlocks a passphrase protected ssh_key. It applies only when a new secret is sent for
+	// a locally stored ssh_key and is sealed alongside the key. Optional, never echoed back.
+	Passphrase string `json:"passphrase,omitempty"`
 	// OrgID names the owning organization, replacing the stored owner. Empty leaves the credential
 	// unowned and global. Optional.
 	OrgID string `json:"org_id,omitempty"`
@@ -129,9 +157,16 @@ func updateCredentialHandler(store credential.Store, sealer *credential.Sealer, 
 			return
 		}
 		secret := req.Secret
+		passphrase := req.Passphrase
 		req.Secret = ""
+		req.Passphrase = ""
 		if req.Name == "" {
 			respondError(w, log, http.StatusBadRequest, "name is required")
+			return
+		}
+		if passphrase != "" && secret == "" {
+			respondError(w, log, http.StatusBadRequest,
+				"passphrase requires the ssh_key secret to be sent with it")
 			return
 		}
 		id := r.PathValue("id")
@@ -172,7 +207,12 @@ func updateCredentialHandler(store credential.Store, sealer *credential.Sealer, 
 					"source must be one of: "+credential.SourceList())
 				return
 			}
-			sealed, err := sealer.Seal(secret)
+			secretPlain, err := sealableSecret(kind, source, secret, passphrase)
+			if err != nil {
+				respondError(w, log, http.StatusBadRequest, err.Error())
+				return
+			}
+			sealed, err := sealer.Seal(secretPlain)
 			if err != nil {
 				log.Error("server: seal credential: " + err.Error())
 				respondError(w, log, http.StatusInternalServerError, "could not update credential")
