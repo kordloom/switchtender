@@ -163,7 +163,11 @@
 </tr>
 <tr>
 <td>Teams and grants</td>
-<td>Group users into teams and grant use or manage on a specific project, template, inventory, or credential. A manage grant delegates editing and deleting that object without the global admin role. Grants layer on the global role and default open.</td>
+<td>Group users into teams and grant read, use, or manage on a specific project, template, inventory, or credential, each level implying the ones below it. A read grant delegates view of one object without a global viewer role; a manage grant delegates editing and deleting without global admin. Grants layer on the global role and default open, or lock down with strict grants.</td>
+</tr>
+<tr>
+<td>Reach isolated networks</td>
+<td>A worker dials out to the control node over the mesh relay with a token and needs no inbound port, so it runs jobs inside an air-gapped segment, a DMZ, or a customer network the control node cannot reach directly. Point <code>switchtender worker --server</code> at the control node and set the worker token.</td>
 </tr>
 <tr>
 <td>Retention</td>
