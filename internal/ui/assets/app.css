@@ -199,17 +199,16 @@ h2 { font-size: 14px; font-weight: 600; margin: 0; }
 .tile-filter { width: 240px; max-width: 46vw; padding: 7px 11px 7px 31px; font-size: 13px; }
 .tiles-empty { color: var(--muted); font-size: 13px; padding: 10px 2px; }
 /* Navigation tiles: fixed even columns so rows never go ragged, each a card with an icon chip. */
-.tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
-@media (max-width: 1100px) { .tiles { grid-template-columns: repeat(3, 1fr); } }
-@media (max-width: 760px) { .tiles { grid-template-columns: repeat(2, 1fr); } }
-@media (max-width: 480px) { .tiles { grid-template-columns: 1fr; } }
-.tile { display: flex; align-items: center; gap: 12px; padding: 13px 15px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); box-shadow: var(--shadow); transition: border-color 0.1s ease, transform 0.1s ease; }
-.tile:hover { text-decoration: none; border-color: var(--accent); transform: translateY(-1px); }
-.tile-icon { flex: none; width: 34px; height: 34px; border-radius: 8px; background: var(--accent-soft); display: flex; align-items: center; justify-content: center; }
-.tile-icon svg { width: 18px; height: 18px; color: var(--accent); }
-.tile-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-.tile-label { font-size: 13.5px; font-weight: 600; }
-.tile-desc { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Growing flex tiles: every row fills the full width, so an odd count ends on a wide card
+   instead of an orphan in an empty row. */
+.tiles { display: flex; flex-wrap: wrap; gap: 14px; }
+.tile { flex: 1 1 250px; display: flex; align-items: center; gap: 14px; padding: 16px 18px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); box-shadow: var(--shadow); transition: border-color 0.12s ease, background 0.12s ease, transform 0.12s ease; }
+.tile:hover { text-decoration: none; border-color: var(--accent); background: var(--surface-2); transform: translateY(-1px); }
+.tile-icon { flex: none; width: 38px; height: 38px; border-radius: 10px; background: var(--accent-soft); display: flex; align-items: center; justify-content: center; }
+.tile-icon svg { width: 19px; height: 19px; color: var(--accent); }
+.tile-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.tile-label { font-size: 14px; font-weight: 600; line-height: 1.2; }
+.tile-desc { font-size: 12.5px; line-height: 1.35; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Tables */
 table.runs { width: 100%; border-collapse: separate; border-spacing: 0; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); }
