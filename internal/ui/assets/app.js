@@ -3136,6 +3136,11 @@ function wireAsk() {
 	if (isReadOnly()) {
 		go.disabled = true;
 		input.disabled = true;
+		const status = document.getElementById("ask-status");
+		if (status) {
+			status.textContent = "Asking is off in this read-only demo. Self-host with your own AI provider, local Ollama included, and this box answers from your fleet's run, health, and drift data.";
+			status.hidden = false;
+		}
 		return;
 	}
 	go.addEventListener("click", askFleet);
