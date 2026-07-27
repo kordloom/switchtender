@@ -212,6 +212,44 @@ type Run struct {
 	// Risk grades the run's blast radius for an approver. It is computed on read, never stored, so
 	// it is nil unless a handler filled it in.
 	Risk *Risk `json:"risk,omitempty"`
+	// Notifications are per-run notification targets, copied from the launching template, that
+	// receive this run's terminal state in addition to the server-wide channels.
+	Notifications []NotifyTarget `json:"notifications,omitempty"`
+}
+
+// NotifyTarget routes one run's terminal notification to a specific channel, so a template can page
+// its own team instead of only the server-wide channels.
+type NotifyTarget struct {
+	// Kind selects the channel formatter: webhook, slack, mattermost, rocketchat, discord, teams,
+	// or ntfy.
+	Kind string `json:"kind"`
+	// URL is the incoming webhook or topic URL the formatted message posts to.
+	URL string `json:"url"`
+	// OnFailure limits delivery to a failed or interrupted run when set, so a channel can page only
+	// on trouble.
+	OnFailure bool `json:"on_failure,omitempty"`
+}
+
+// Notification kinds a per-run target may name. They mirror the URL-based server channels.
+const (
+	NotifyWebhook    = "webhook"
+	NotifySlack      = "slack"
+	NotifyMattermost = "mattermost"
+	NotifyRocketChat = "rocketchat"
+	NotifyDiscord    = "discord"
+	NotifyTeams      = "teams"
+	NotifyNtfy       = "ntfy"
+)
+
+// ValidNotifyKind reports whether k names a supported per-run notification channel.
+func ValidNotifyKind(k string) bool {
+	switch k {
+	case NotifyWebhook, NotifySlack, NotifyMattermost, NotifyRocketChat, NotifyDiscord,
+		NotifyTeams, NotifyNtfy:
+		return true
+	default:
+		return false
+	}
 }
 
 // Clone returns a deep copy so callers cannot mutate stored state through shared pointers.
@@ -259,6 +297,7 @@ func (r *Run) Clone() *Run {
 		out.ClaimedAt = &t
 	}
 	out.CredentialIDs = append([]string(nil), r.CredentialIDs...)
+	out.Notifications = append([]NotifyTarget(nil), r.Notifications...)
 	return &out
 }
 
@@ -369,6 +408,16 @@ func WithTimeout(seconds int) SubmitOption {
 	return func(r *Run) {
 		if seconds > 0 {
 			r.Timeout = seconds
+		}
+	}
+}
+
+// WithNotifications attaches per-run notification targets, which receive the run's terminal state
+// alongside the server-wide channels. Empty is a no-op.
+func WithNotifications(targets []NotifyTarget) SubmitOption {
+	return func(r *Run) {
+		if len(targets) > 0 {
+			r.Notifications = append([]NotifyTarget(nil), targets...)
 		}
 	}
 }

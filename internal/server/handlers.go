@@ -61,6 +61,9 @@ type createRunRequest struct {
 	// Timeout caps how many seconds the run may execute before it is canceled and failed. Zero uses
 	// the server default.
 	Timeout int `json:"timeout,omitempty"`
+	// Notifications routes this run's terminal state to specific channels beyond the server-wide
+	// ones.
+	Notifications []run.NotifyTarget `json:"notifications,omitempty"`
 }
 
 // createPipelineRequest is the JSON body accepted by POST /pipelines.
@@ -466,6 +469,17 @@ func createRunHandler(submitter Submitter, authz *authorizer, log *zap.Logger) h
 		}
 		if req.Timeout > 0 {
 			opts = append(opts, run.WithTimeout(req.Timeout))
+		}
+		for _, t := range req.Notifications {
+			if !run.ValidNotifyKind(t.Kind) || t.URL == "" {
+				respondError(w, log, http.StatusBadRequest,
+					"each notification needs a url and a kind of webhook, slack, mattermost, "+
+						"rocketchat, discord, teams, or ntfy")
+				return
+			}
+		}
+		if len(req.Notifications) > 0 {
+			opts = append(opts, run.WithNotifications(req.Notifications))
 		}
 		if req.Shards >= 2 {
 			created, err = submitter.SubmitSplit(r.Context(), req.Playbook, req.Inventory,

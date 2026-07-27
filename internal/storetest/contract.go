@@ -68,6 +68,10 @@ func sampleRun(id string) *run.Run {
 		Tool:      "bash", Command: "echo hi", DryRun: true,
 		ProposedFrom: "run_check", Intent: "echo hello on the box",
 		IdempotencyKey: "idem_sample",
+		Timeout:        3600,
+		Notifications: []run.NotifyTarget{
+			{Kind: run.NotifySlack, URL: "https://hooks.example.com/team", OnFailure: true},
+		},
 	}
 }
 
