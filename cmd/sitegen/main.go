@@ -292,6 +292,11 @@ const layout = `<!DOCTYPE html>
 	<meta property="og:description" content="{{.Description}}">
 	<meta property="og:type" content="article">
 	<meta property="og:url" content="{{.Canonical}}">
+	<meta property="og:image" content="https://switchtender.com/assets/screenshot-fleet.png?v=7">
+	<meta name="twitter:card" content="summary_large_image">
+	<meta name="twitter:title" content="{{.Title}} · SwitchTender docs">
+	<meta name="twitter:description" content="{{.Description}}">
+	<meta name="twitter:image" content="https://switchtender.com/assets/screenshot-fleet.png?v=7">
 	<link rel="icon" href="/favicon.ico" sizes="any">
 	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
 	<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
