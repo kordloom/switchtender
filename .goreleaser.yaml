@@ -81,7 +81,10 @@ homebrew_casks:
     repository:
       owner: kordloom
       name: homebrew-tap
-      token: '{{ envOrDefault "HOMEBREW_TAP_GITHUB_TOKEN" "" }}'
+      # The workflow always defines this env var, empty when the secret is unset, in which case
+      # skip_upload already stops the publish. The token field's template context has no helper
+      # functions, so plain .Env is the only portable form.
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     homepage: "https://switchtender.com"
     description: "Run everything, watch every host, prove every change: one binary control plane for Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go."
 
