@@ -82,13 +82,20 @@ host, remembered across every run:
 
 ## Quick start
 
-Grab a build for your platform from the [releases page](https://github.com/kordloom/switchtender/releases):
+One line with a Go toolchain installed:
+
+    go install github.com/kordloom/switchtender@latest
+
+Or grab a build for your platform from the [releases page](https://github.com/kordloom/switchtender/releases):
 a `SwitchTender.dmg` for macOS, a `windows_amd64.zip` for Windows, or a `tar.gz` of the binary for
 macOS and Linux. Each release ships a cosign-signed `SHA256SUMS`; see [verifying a
 release](SECURITY.md#verifying-a-release). Or build from source:
 
     go build -o switchtender .
-    ./switchtender serve --addr :8080 --db switchtender.db
+
+Then serve:
+
+    switchtender serve --addr :8080 --db switchtender.db
 
 Or run it as a local desktop app. On macOS open `SwitchTender.app`; otherwise one command picks a
 stable loopback port, keeps its data in a per-user directory, and opens the UI in your browser:
