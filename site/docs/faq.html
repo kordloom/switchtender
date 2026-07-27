@@ -22,6 +22,118 @@
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 	<link rel="stylesheet" href="/docs.css?v=1">
+<script type="application/ld+json">
+{
+ "@context": "https://schema.org",
+ "@type": "FAQPage",
+ "mainEntity": [
+  {
+   "@type": "Question",
+   "name": "What can SwitchTender run?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "Ansible playbooks, Bash scripts, Terraform, OpenTofu, Python, PowerShell, and Go, plus any tool you add through the Go SDK . A run, a saved template, or a single step of a pipeline picks its tool. A pipeline can mix them: Terraform to build infrastructure, Ansible to configure it, Bash to smoke-test it, as one dependency graph. Bash shells out to anything on the host, so kubectl, the cloud CLIs, and your own scripts all work."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "Do I need Kubernetes?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "No. SwitchTender is one binary that is the API, the executor, the scheduler, and the UI. State is one database: a SQLite file to start, or PostgreSQL when you want more than one instance. No Redis, no operator, no separate task engine."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "What is a dry run?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "A run that makes no changes. Ansible runs in check mode, Terraform runs plan instead of apply, and Bash and Python are syntax checked without executing. A dry run set on a sharded run is carried to every shard, so a preview is always a preview."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "How do I migrate from AWX?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "From the command line: switchtender import awx export.json # preview the plan, changes nothing switchtender import awx export.json --apply # import It maps projects, inventories, job templates with their surveys and schedules and job slicing, and credentials. See switching from AWX for the full mapping. Two things to know. AWX omits secret values on export for security, so credentials import without their secrets and you set those once after importing. Dynamic inventory…"
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "How do I rerun the same job on a set of hosts without re-entering everything?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "Save it as a template. A template bundles the tool, the command or playbook, the inventory, the credentials, and the variables, so a rerun is one click or one API call. Stored inventories let you name a host set once and reuse it across templates."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "How are secrets stored?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "Sealed with AES-256-GCM, the key derived from an operator passphrase through argon2id. Secrets decrypt only at execution, into a temporary file wiped when the run finishes, and never appear in API responses. Thirteen kinds cover SSH keys and SSH passwords, vault passwords, become passwords and full become settings, network device logins, environment bundles, API tokens, container registry logins, and typed AWS, Azure, GCP, and VMware credentials. Set…"
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "Are webhook triggers safe to expose?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "Yes. A trigger can require a verified HMAC signature, keyed by a per-trigger secret sealed at rest and separate from the URL, so a leaked webhook URL cannot forge a push. Set the same secret on the git host, turn enforcement on, and an unsigned or wrong request is rejected before anything runs. Secrets rotate at any time."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "Does it support single sign-on?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "Yes: OpenID Connect, SAML, and LDAP directory sign-in, with just-in-time account provisioning and a configurable default role."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "Does SwitchTender send my data to an AI model?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "Only if you turn AI on, and only to the provider you chose. With local Ollama nothing leaves your machines. With a cloud provider, prompts carry automation content such as commands, playbook names, masked failed-run logs, and drift summaries. Credential values are masked before any prompt is built, and fleet questions send metadata only. AI is off by default. See the AI guide for exactly what each feature sends."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "Can the AI change my infrastructure?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "No. A provider only produces text a human reads or a proposal a human releases. Anything AI drafts that could become a run is born held at the same approval gate an operator faces, an admin reviews the generated command before it moves, and the request and decision both land in the audit trail."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "Can I extend SwitchTender?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "Yes, in Go, two ways: compile an extension into the binary, or drop a plugin binary into --plugins-dir on a stock release. Both register execution tools, AI providers, secret engines, and notification channels. See Extend in Go and the official switchtender-plugins repo for a working example."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "What about scale?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "Runs stream and page by a sequence cursor, the runs list and event history paginate, and a large host matrix renders one cell at a time. Split a run across workers by measured host duration, and run more than one instance against PostgreSQL when a single binary is not enough."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "What is the license?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "Business Source License 1.1: free to self-host and modify, with a restriction on offering it as a competing hosted service, and it converts to Apache 2.0 after four years."
+   }
+  }
+ ]
+}
+</script>
 </head>
 <body>
 	<header class="dnav">
