@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Backup and restore · SwitchTender docs</title>
+	<meta name="description" content="SwitchTender writes a portable, encrypted backup of its control-plane configuration and secrets, and restores it into either the SQLite or the PostgreSQL backend.">
+	<link rel="canonical" href="https://switchtender.com/docs/backup">
+	<meta property="og:title" content="Backup and restore · SwitchTender docs">
+	<meta property="og:description" content="SwitchTender writes a portable, encrypted backup of its control-plane configuration and secrets, and restores it into either the SQLite or the PostgreSQL backend.">
+	<meta property="og:type" content="article">
+	<meta property="og:url" content="https://switchtender.com/docs/backup">
+	<link rel="icon" href="/favicon.ico" sizes="any">
+	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
+	<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="/docs.css?v=1">
+</head>
+<body>
+	<header class="dnav">
+		<a class="brand" href="/"><img src="/assets/logo-train-tracks-dark.png" alt="SwitchTender" class="brand-train"><span class="brand-word">SwitchTender</span></a>
+		<span class="dnav-tag">Docs</span>
+		<nav class="dnav-links">
+			<a href="/">Home</a>
+			<a href="/#compare">Compare</a>
+			<a href="https://github.com/kordloom/switchtender">GitHub</a>
+		</nav>
+	</header>
+	<div class="dshell">
+		<aside class="dside">
+			<nav>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to AWX and Semaphore</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup" class="active">Backup and restore</a><a href="/docs/sdk">Extend SwitchTender in Go</a>
+			</nav>
+		</aside>
+		<main class="dcontent prose">
+			<h1 id="backup-and-restore">Backup and restore</h1>
+<p>SwitchTender writes a portable, encrypted backup of its control-plane configuration and secrets, and
+restores it into either the SQLite or the PostgreSQL backend. The same file moves a deployment to a
+new host or migrates it between backends.</p>
+<h2 id="what-a-backup-contains">What a backup contains</h2>
+<p>A backup holds the configuration and secrets a deployment needs to stand back up:</p>
+<ul>
+<li>Credentials, with their sealed secrets.</li>
+<li>Projects, templates, inventories, and inventory sources.</li>
+<li>Schedules and webhook triggers.</li>
+<li>Users, teams, organizations, and access grants.</li>
+</ul>
+<p>Run history and the audit chain are not included. The audit chain has its own signed, self-verifying
+export through <code>switchtender audit</code>, which keeps its integrity guarantees intact.</p>
+<h2 id="how-it-is-secured">How it is secured</h2>
+<p>The whole backup is sealed with the deployment's encryption key using AES-256-GCM before it is
+written, so the file is both confidential and tamper-evident:</p>
+<ul>
+<li>Nothing is in the clear. Configuration, password hashes, and sealed secrets never appear as
+plaintext in the file.</li>
+<li>A restore into a deployment with a different encryption key, or of an altered file, fails the
+authentication check and imports nothing.</li>
+</ul>
+<p>Because the file is sealed with the encryption key, backup and restore both require
+<code>SWITCHTENDER_ENCRYPTION_KEY</code> and <code>SWITCHTENDER_ENCRYPTION_SALT</code> to be set, and a backup restores only
+where the same key and salt are configured. A written file is created readable only by its owner, and
+it replaces any existing file only after it is written in full.</p>
+<h2 id="back-up">Back up</h2>
+<pre><code>SWITCHTENDER_ENCRYPTION_KEY=... SWITCHTENDER_ENCRYPTION_SALT=... \
+  switchtender backup --db switchtender.db --out backup.stbak
+</code></pre>
+<p>Without <code>--out</code> the backup is written to standard output, so it can be piped or redirected. The object
+counts are written to standard error, so a piped backup stays clean.</p>
+<h2 id="restore">Restore</h2>
+<pre><code>SWITCHTENDER_ENCRYPTION_KEY=... SWITCHTENDER_ENCRYPTION_SALT=... \
+  switchtender restore --db switchtender.db --in backup.stbak
+</code></pre>
+<p>Restore upserts every object by id. It overwrites an object that already exists with the same id and
+never deletes objects that are absent from the file, so restoring into a live deployment merges rather
+than replaces. Without <code>--in</code> the backup is read from standard input. Nothing is applied until the
+whole file has decrypted and decoded, so a corrupt or truncated file cannot leave a half-applied
+restore.</p>
+
+		</main>
+	</div>
+	<script>document.addEventListener("click",e=>{const a=e.target.closest(".dside a");if(a)document.querySelector(".dside")?.classList.remove("open")});</script>
+</body>
+</html>
