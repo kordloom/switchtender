@@ -23,14 +23,14 @@
 
 @media (prefers-color-scheme: dark) {
 	:root {
-		--bg: #0d1117;
-		--surface: #161b22;
-		--surface-2: #21262d;
-		--surface-3: #262c36;
-		--border: #30363d;
-		--border-muted: #21262d;
-		--text: #e6edf3;
-		--muted: #8b949e;
+		--bg: #0a0e14;
+		--surface: #12161d;
+		--surface-2: #1a2029;
+		--surface-3: #232a35;
+		--border: #343d49;
+		--border-muted: #1e242d;
+		--text: #ecf2f9;
+		--muted: #95a1ae;
 		--accent: #2f81f7;
 		--accent-soft: rgba(47, 129, 247, 0.15);
 		--ok: #3fb950;
@@ -510,3 +510,7 @@ button.topbar-link { background: none; border: none; padding: 0; font: inherit; 
 .explain-title { font-size: 13px; font-weight: 600; }
 .explain-note { font-size: 12px; }
 .explain-body { font-size: 13.5px; line-height: 1.55; white-space: pre-wrap; color: var(--text); }
+
+/* Action columns sit flush right so button clusters align under their header. */
+th.col-actions { text-align: right; }
+table.runs td:last-child:has(> button) { text-align: right; white-space: nowrap; }

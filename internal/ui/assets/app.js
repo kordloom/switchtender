@@ -2388,7 +2388,21 @@ async function loadProjects() {
 		for (const p of projects) {
 			const tr = document.createElement("tr");
 			tr.appendChild(td(p.name));
-			tr.appendChild(td(p.repo_url, "mono"));
+			// The repository is a real link when it is https, so a reader can jump straight to the
+			// source; ssh and scp-style remotes stay plain text.
+			const repoCell = td("", "mono");
+			if (/^https?:\/\//.test(p.repo_url || "")) {
+				const a = document.createElement("a");
+				a.href = p.repo_url;
+				a.target = "_blank";
+				a.rel = "noopener";
+				a.textContent = p.repo_url;
+				a.addEventListener("click", (e) => e.stopPropagation());
+				repoCell.appendChild(a);
+			} else {
+				repoCell.textContent = p.repo_url;
+			}
+			tr.appendChild(repoCell);
 			tr.appendChild(td(p.branch || "default", "mono"));
 			tr.appendChild(tdTime(p.created_at));
 			const actions = deleteCell("/projects/" + p.id, "project " + p.name, tr, "No projects yet.");
@@ -2655,7 +2669,17 @@ async function loadTemplates() {
 		for (const t of templates) {
 			const tr = document.createElement("tr");
 			tr.appendChild(td(t.name));
-			tr.appendChild(td(t.playbook, "mono"));
+			// Show what the template runs the way the runs view does: a tool badge for non-Ansible
+			// and the playbook or command, so a bash or terraform template is not a blank cell.
+			const whatCell = td("", "mono");
+			const badge = toolBadgeEl(t);
+			if (badge) {
+				whatCell.appendChild(badge);
+				whatCell.appendChild(document.createTextNode(" "));
+			}
+			whatCell.appendChild(document.createTextNode(toolLabel(t)));
+			whatCell.title = t.playbook || t.command || "";
+			tr.appendChild(whatCell);
 			tr.appendChild(td(String(t.shards || 1)));
 			tr.appendChild(tdTime(t.created_at));
 			const actions = document.createElement("td");
