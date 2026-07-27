@@ -4,7 +4,7 @@ Measured numbers for the questions people actually ask: how fast does it start, 
 it hold at idle, and how big is the binary. Every number below was measured on a release-flag build,
 the method is shown so you can reproduce it on your own hardware, and nothing here is a projection.
 
-Measured on 2026-07-27 against v1.24.1 on an Apple Silicon laptop, natively and inside a Debian
+Measured on 2026-07-27 against v1.24.2 on an Apple Silicon laptop, natively and inside a Debian
 container on the same machine. Your hardware will differ; the method will not.
 
 ## The numbers
