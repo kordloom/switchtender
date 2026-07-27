@@ -15,7 +15,7 @@ const projectColumns = `id, name, repo_url, branch, credential_id, install_deps,
 // projectStore is a project.Store backed by the shared SQLite database.
 type projectStore struct {
 	// db is the open database handle shared with the run store.
-	db *sql.DB
+	db *splitDB
 }
 
 // Save inserts or replaces the project.

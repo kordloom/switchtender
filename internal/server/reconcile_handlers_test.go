@@ -17,20 +17,33 @@ import (
 )
 
 // seedDrift stores a check run and a host summary so DriftStatus reports the host.
-func seedDrift(t *testing.T, store run.Store, runID, tool, host string, changed int) {
+func seedDrift(t *testing.T, store run.Store, runID, tool, host string, changed int, events ...event.Event) {
 	t.Helper()
 	ctx := context.Background()
 	at := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
-	if err := store.Save(ctx, &run.Run{
+	// The summary and events are written while the check is still running, as a real run does, then
+	// it finalizes, since the store fences auxiliary writes to a terminal run.
+	check := &run.Run{
 		ID: runID, Playbook: "site.yml", Inventory: "hosts.ini", Tool: tool, Command: host, DryRun: true,
-		Status: run.StatusSucceeded, CreatedAt: at,
+		Status: run.StatusRunning, CreatedAt: at,
 		ProjectID: "proj1", InventoryID: "inv1", CredentialIDs: []string{"cred1"}, Queue: "dmz",
-	}); err != nil {
+	}
+	if err := store.Save(ctx, check); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
 	sums := []run.HostSummary{{Host: host, Changed: changed, Worst: "changed", RanAt: at}}
 	if err := store.SaveHostSummary(ctx, runID, sums); err != nil {
 		t.Fatalf("SaveHostSummary() error = %v", err)
+	}
+	if len(events) > 0 {
+		if err := store.AppendEvents(ctx, runID, events); err != nil {
+			t.Fatalf("AppendEvents() error = %v", err)
+		}
+	}
+	done := check.Clone()
+	done.Status = run.StatusSucceeded
+	if err := store.Save(ctx, done); err != nil {
+		t.Fatalf("Save() finalize error = %v", err)
 	}
 }
 
@@ -137,14 +150,10 @@ func TestExplainProposal(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	store := run.NewMemStore()
-	seedDrift(t, store, "chk_web", "", "web01", 2)
-	if err := store.AppendEvents(ctx, "chk_web", []event.Event{
-		{Type: event.TypeRunnerOK, Play: "site", Task: "template nginx.conf", Host: "web01", Changed: true, Message: "would rewrite"},
-		{Type: event.TypeRunnerOK, Play: "site", Task: "install nginx", Host: "web02", Changed: true},
-		{Type: event.TypeRunnerOK, Play: "site", Task: "gather facts", Host: "web01", Changed: false},
-	}); err != nil {
-		t.Fatalf("AppendEvents() error = %v", err)
-	}
+	seedDrift(t, store, "chk_web", "", "web01", 2,
+		event.Event{Type: event.TypeRunnerOK, Play: "site", Task: "template nginx.conf", Host: "web01", Changed: true, Message: "would rewrite"},
+		event.Event{Type: event.TypeRunnerOK, Play: "site", Task: "install nginx", Host: "web02", Changed: true},
+		event.Event{Type: event.TypeRunnerOK, Play: "site", Task: "gather facts", Host: "web01", Changed: false})
 	if err := store.Save(ctx, &run.Run{
 		ID: "run_prop", Playbook: "site.yml", Status: run.StatusPendingApproval,
 		ProposedFrom: "chk_web", Limit: "web01",

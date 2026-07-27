@@ -15,7 +15,7 @@ const userColumns = `id, username, password_hash, role, created_at`
 // userStore is a user.Store backed by the shared SQLite database.
 type userStore struct {
 	// db is the open database handle shared with the run store.
-	db *sql.DB
+	db *splitDB
 }
 
 // Save inserts or replaces the user.

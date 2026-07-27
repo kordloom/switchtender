@@ -293,13 +293,18 @@ func TestExplainRunIncludesEvents(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	store := run.NewMemStore()
-	if err := store.Save(ctx, &run.Run{ID: "run_ev", Tool: "ansible", Status: run.StatusFailed}); err != nil {
+	// Events land while the run is still running, then it finalizes, since the store fences event
+	// writes to a terminal run.
+	if err := store.Save(ctx, &run.Run{ID: "run_ev", Tool: "ansible", Status: run.StatusRunning}); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
 	if err := store.AppendEvents(ctx, "run_ev", []event.Event{{
 		Type: event.TypeRunnerFailed, Play: "site", Task: "restart nginx", Host: "web-2", Message: "unit not found",
 	}}); err != nil {
 		t.Fatalf("AppendEvents() error = %v", err)
+	}
+	if err := store.Save(ctx, &run.Run{ID: "run_ev", Tool: "ansible", Status: run.StatusFailed}); err != nil {
+		t.Fatalf("Save() finalize error = %v", err)
 	}
 
 	var sawTask bool

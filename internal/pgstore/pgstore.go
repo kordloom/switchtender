@@ -656,6 +656,22 @@ func (s *store) NonTerminal(ctx context.Context) ([]*run.Run, error) {
 }
 
 // SaveHostSummary replaces the stored per host summaries for a run.
+// summaryFenced reports whether a run's summaries must not be written because the run has reached a
+// terminal state, in which case a reclaimed-but-alive worker must not overwrite the final summary a
+// healthy finalize already stored. A run with no row is not fenced, since cross-run summary views are
+// keyed by run id rather than a stored run.
+func summaryFenced(ctx context.Context, q rowQuerier, runID string) (bool, error) {
+	var status string
+	err := q.QueryRowContext(ctx, "SELECT status FROM runs WHERE id=$1", runID).Scan(&status)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return run.Status(status).Terminal(), nil
+}
+
 func (s *store) SaveHostSummary(ctx context.Context, runID string, summaries []run.HostSummary) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -663,6 +679,11 @@ func (s *store) SaveHostSummary(ctx context.Context, runID string, summaries []r
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	if fenced, err := summaryFenced(ctx, tx, runID); err != nil {
+		return fmt.Errorf("save host summary: %w", err)
+	} else if fenced {
+		return nil
+	}
 	if _, err := tx.ExecContext(ctx, "DELETE FROM run_host_summary WHERE run_id=$1", runID); err != nil {
 		return fmt.Errorf("save host summary: %w", err)
 	}
@@ -873,6 +894,11 @@ func (s *store) SaveTaskSummary(ctx context.Context, runID string, summaries []r
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	if fenced, err := summaryFenced(ctx, tx, runID); err != nil {
+		return fmt.Errorf("save task summary: %w", err)
+	} else if fenced {
+		return nil
+	}
 	if _, err := tx.ExecContext(ctx, "DELETE FROM run_task_summary WHERE run_id=$1", runID); err != nil {
 		return fmt.Errorf("save task summary: %w", err)
 	}
@@ -1004,9 +1030,14 @@ func (s *store) queryRuns(ctx context.Context, label, query string, args ...any)
 // AppendLog appends raw output bytes to the run's log. Returns run.ErrNotFound if absent. The
 // insert-select folds the missing-run check into the write so the per-chunk output path costs one
 // statement instead of two.
+// nonTerminalRun is the SQL predicate for a run that still accepts auxiliary writes. It mirrors
+// run.Status.Terminal, and fences a terminal run so a reclaimed-but-alive worker cannot append logs or
+// events to a run that has already ended.
+const nonTerminalRun = "status NOT IN ('succeeded', 'failed', 'canceled', 'interrupted', 'rejected')"
+
 func (s *store) AppendLog(ctx context.Context, id string, p []byte) error {
 	res, err := s.db.ExecContext(ctx,
-		"INSERT INTO run_logs (run_id, chunk) SELECT $1, $2 WHERE EXISTS (SELECT 1 FROM runs WHERE id=$1)",
+		"INSERT INTO run_logs (run_id, chunk) SELECT $1, $2 WHERE EXISTS (SELECT 1 FROM runs WHERE id=$1 AND "+nonTerminalRun+")",
 		id, p)
 	if err != nil {
 		return fmt.Errorf("append log: %w", err)
@@ -1016,7 +1047,15 @@ func (s *store) AppendLog(ctx context.Context, id string, p []byte) error {
 		return fmt.Errorf("append log: %w", err)
 	}
 	if n == 0 {
-		return run.ErrNotFound
+		// The insert was fenced. A missing run is still an error; a terminal run is a silent no-op, so a
+		// reclaimed-but-alive worker cannot write into a run that has ended.
+		ok, err := s.exists(ctx, id)
+		if err != nil {
+			return fmt.Errorf("append log: %w", err)
+		}
+		if !ok {
+			return run.ErrNotFound
+		}
 	}
 	return nil
 }
@@ -1122,13 +1161,17 @@ func (s *store) AppendEvents(ctx context.Context, id string, events []event.Even
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	var one int
-	err = tx.QueryRowContext(ctx, "SELECT 1 FROM runs WHERE id=$1", id).Scan(&one)
+	var status string
+	err = tx.QueryRowContext(ctx, "SELECT status FROM runs WHERE id=$1", id).Scan(&status)
 	if errors.Is(err, sql.ErrNoRows) {
 		return run.ErrNotFound
 	}
 	if err != nil {
 		return fmt.Errorf("append events: %w", err)
+	}
+	if run.Status(status).Terminal() {
+		// Fence a terminal run so a reclaimed-but-alive worker cannot stream events into it.
+		return nil
 	}
 
 	stmt, err := tx.PrepareContext(ctx, "INSERT INTO run_events (run_id, data) VALUES ($1, $2)")

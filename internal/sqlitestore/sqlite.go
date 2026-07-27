@@ -278,10 +278,57 @@ CREATE TABLE IF NOT EXISTS grants (
 CREATE INDEX IF NOT EXISTS idx_grants_object ON grants(object);
 `
 
+// splitDB routes statements over two pools: every write goes to the single serialized write
+// connection, while reads run on a read-only pool so a long read never blocks a write, which WAL
+// supports. The read pool is opened with query_only set, so a statement misrouted to it fails loudly
+// instead of racing the writer into SQLite's read-to-write upgrade deadlock.
+type splitDB struct {
+	// w is the single write connection.
+	w *sql.DB
+	// r is the read-only pool. It equals w when the path does not support a second handle, such as an
+	// in-memory database.
+	r *sql.DB
+}
+
+// ExecContext runs a write statement on the write connection.
+func (d *splitDB) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	return d.w.ExecContext(ctx, query, args...)
+}
+
+// BeginTx starts a transaction on the write connection.
+func (d *splitDB) BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error) {
+	return d.w.BeginTx(ctx, opts)
+}
+
+// QueryContext runs a read query on the read pool.
+func (d *splitDB) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	return d.r.QueryContext(ctx, query, args...)
+}
+
+// QueryRowContext runs a single-row read query on the read pool.
+func (d *splitDB) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
+	return d.r.QueryRowContext(ctx, query, args...)
+}
+
+// writeQueryRowContext runs a single-row statement on the write connection, for a write that returns
+// its row, such as a claim's UPDATE RETURNING.
+func (d *splitDB) writeQueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
+	return d.w.QueryRowContext(ctx, query, args...)
+}
+
+// Close closes both pools.
+func (d *splitDB) Close() error {
+	err := d.w.Close()
+	if d.r != d.w {
+		err = errors.Join(err, d.r.Close())
+	}
+	return err
+}
+
 // store is a run.Store backed by a SQLite database.
 type store struct {
 	// db is the open database handle.
-	db *sql.DB
+	db *splitDB
 }
 
 // scanner is the read side shared by sql.Row and sql.Rows.
@@ -292,7 +339,7 @@ type scanner interface {
 // DB holds the SQLite backed run and schedule stores sharing one database.
 type DB struct {
 	// db is the open database handle.
-	db *sql.DB
+	db *splitDB
 	// runs is the run store.
 	runs *store
 	// schedules is the schedule store.
@@ -385,19 +432,55 @@ func Open(path string) (*DB, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	return &DB{db: db, runs: &store{db: db}, schedules: &scheduleStore{db: db}, tokens: &tokenStore{db: db},
-		credentials: &credentialStore{db: db},
-		projects:    &projectStore{db: db},
-		templates:   &templateStore{db: db},
-		users:       &userStore{db: db},
-		inventories: &inventoryStore{db: db},
-		audits:      &auditStore{db: db},
-		invSources:  &invSourceStore{db: db},
-		triggers:    &triggerStore{db: db},
-		teams:       &teamStore{db: db},
-		orgs:        &orgStore{db: db},
-		grants:      &grantStore{db: db},
-		policies:    &policyStore{db: db}}, nil
+	reader, err := openReadPool(path)
+	if err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if reader == nil {
+		reader = db
+	}
+	split := &splitDB{w: db, r: reader}
+	return &DB{db: split, runs: &store{db: split}, schedules: &scheduleStore{db: split}, tokens: &tokenStore{db: split},
+		credentials: &credentialStore{db: split},
+		projects:    &projectStore{db: split},
+		templates:   &templateStore{db: split},
+		users:       &userStore{db: split},
+		inventories: &inventoryStore{db: split},
+		audits:      &auditStore{db: split},
+		invSources:  &invSourceStore{db: split},
+		triggers:    &triggerStore{db: split},
+		teams:       &teamStore{db: split},
+		orgs:        &orgStore{db: split},
+		grants:      &grantStore{db: split},
+		policies:    &policyStore{db: split}}, nil
+}
+
+// readPoolConns bounds the read-only pool. WAL readers are cheap, and a handful is enough to keep the
+// UI, API listings, and log streams off the write path without holding many file handles.
+const readPoolConns = 4
+
+// openReadPool opens the read-only connection pool for path, which WAL supports alongside the single
+// writer. Each pooled connection sets query_only through the DSN, so a statement misrouted to the pool
+// fails instead of racing the writer. It returns nil for a path that cannot carry a second handle,
+// such as an in-memory database or a DSN with its own options, and the caller then routes reads to the
+// write connection, preserving the single-connection behavior.
+func openReadPool(path string) (*sql.DB, error) {
+	if strings.Contains(path, ":memory:") || strings.Contains(path, "?") ||
+		strings.HasPrefix(path, "file:") {
+		return nil, nil
+	}
+	dsn := "file:" + path + "?_pragma=query_only(1)&_pragma=busy_timeout(5000)"
+	r, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("open sqlite read pool: %w", err)
+	}
+	r.SetMaxOpenConns(readPoolConns)
+	if err := r.Ping(); err != nil {
+		_ = r.Close()
+		return nil, fmt.Errorf("open sqlite read pool: %w", err)
+	}
+	return r, nil
 }
 
 // migrateRuns brings an existing runs table up to the current shape. CREATE TABLE IF NOT EXISTS is a
@@ -791,6 +874,22 @@ func (s *store) NonTerminal(ctx context.Context) ([]*run.Run, error) {
 }
 
 // SaveHostSummary replaces the stored per host summaries for a run.
+// summaryFenced reports whether a run's summaries must not be written because the run has reached a
+// terminal state, in which case a reclaimed-but-alive worker must not overwrite the final summary a
+// healthy finalize already stored. A run with no row is not fenced, since cross-run summary views are
+// keyed by run id rather than a stored run.
+func summaryFenced(ctx context.Context, q rowQuerier, runID string) (bool, error) {
+	var status string
+	err := q.QueryRowContext(ctx, "SELECT status FROM runs WHERE id=?", runID).Scan(&status)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return run.Status(status).Terminal(), nil
+}
+
 func (s *store) SaveHostSummary(ctx context.Context, runID string, summaries []run.HostSummary) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -798,6 +897,11 @@ func (s *store) SaveHostSummary(ctx context.Context, runID string, summaries []r
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	if fenced, err := summaryFenced(ctx, tx, runID); err != nil {
+		return fmt.Errorf("save host summary: %w", err)
+	} else if fenced {
+		return nil
+	}
 	if _, err := tx.ExecContext(ctx, "DELETE FROM run_host_summary WHERE run_id=?", runID); err != nil {
 		return fmt.Errorf("save host summary: %w", err)
 	}
@@ -971,6 +1075,11 @@ func (s *store) SaveTaskSummary(ctx context.Context, runID string, summaries []r
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	if fenced, err := summaryFenced(ctx, tx, runID); err != nil {
+		return fmt.Errorf("save task summary: %w", err)
+	} else if fenced {
+		return nil
+	}
 	if _, err := tx.ExecContext(ctx, "DELETE FROM run_task_summary WHERE run_id=?", runID); err != nil {
 		return fmt.Errorf("save task summary: %w", err)
 	}
@@ -1139,9 +1248,14 @@ func (s *store) queryRuns(ctx context.Context, label, query string, args ...any)
 // AppendLog appends raw output bytes to the run's log. Returns run.ErrNotFound if absent. The
 // insert-select folds the missing-run check into the write so the per-chunk output path costs one
 // statement instead of two.
+// nonTerminalRun is the SQL predicate for a run that still accepts auxiliary writes. It mirrors
+// run.Status.Terminal, and fences a terminal run so a reclaimed-but-alive worker cannot append logs or
+// events to a run that has already ended.
+const nonTerminalRun = "status NOT IN ('succeeded', 'failed', 'canceled', 'interrupted', 'rejected')"
+
 func (s *store) AppendLog(ctx context.Context, id string, p []byte) error {
 	res, err := s.db.ExecContext(ctx,
-		"INSERT INTO run_logs (run_id, chunk) SELECT ?, ? WHERE EXISTS (SELECT 1 FROM runs WHERE id=?)",
+		"INSERT INTO run_logs (run_id, chunk) SELECT ?, ? WHERE EXISTS (SELECT 1 FROM runs WHERE id=? AND "+nonTerminalRun+")",
 		id, p, id)
 	if err != nil {
 		return fmt.Errorf("append log: %w", err)
@@ -1151,7 +1265,15 @@ func (s *store) AppendLog(ctx context.Context, id string, p []byte) error {
 		return fmt.Errorf("append log: %w", err)
 	}
 	if n == 0 {
-		return run.ErrNotFound
+		// The insert was fenced. A missing run is still an error; a terminal run is a silent no-op, so a
+		// reclaimed-but-alive worker cannot write into a run that has ended.
+		ok, err := s.exists(ctx, id)
+		if err != nil {
+			return fmt.Errorf("append log: %w", err)
+		}
+		if !ok {
+			return run.ErrNotFound
+		}
 	}
 	return nil
 }
@@ -1256,13 +1378,17 @@ func (s *store) AppendEvents(ctx context.Context, id string, events []event.Even
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	var one int
-	err = tx.QueryRowContext(ctx, "SELECT 1 FROM runs WHERE id=?", id).Scan(&one)
+	var status string
+	err = tx.QueryRowContext(ctx, "SELECT status FROM runs WHERE id=?", id).Scan(&status)
 	if errors.Is(err, sql.ErrNoRows) {
 		return run.ErrNotFound
 	}
 	if err != nil {
 		return fmt.Errorf("append events: %w", err)
+	}
+	if run.Status(status).Terminal() {
+		// Fence a terminal run so a reclaimed-but-alive worker cannot stream events into it.
+		return nil
 	}
 
 	stmt, err := tx.PrepareContext(ctx, "INSERT INTO run_events (run_id, data) VALUES (?, ?)")
@@ -1603,7 +1729,8 @@ WHERE id = (
 )
 RETURNING ` + runColumns
 	full := append([]any{owner, formatTime(time.Now())}, args...)
-	r, err := scanRun(s.db.QueryRowContext(ctx, q, full...))
+	// The claim is a write that returns its row, so it must run on the write connection.
+	r, err := scanRun(s.db.writeQueryRowContext(ctx, q, full...))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, run.ErrNonePending
 	}

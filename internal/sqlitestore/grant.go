@@ -15,7 +15,7 @@ const grantColumns = `id, subject, object, access, created_at`
 // grantStore is a grant.Store backed by the shared SQLite database.
 type grantStore struct {
 	// db is the open database handle shared with the run store.
-	db *sql.DB
+	db *splitDB
 }
 
 // Save inserts or replaces the grant.

@@ -16,7 +16,7 @@ const invSourceColumns = `id, name, source, credential_id, project_id, inventory
 // invSourceStore is an invsource.Store backed by the shared SQLite database.
 type invSourceStore struct {
 	// db is the open database handle shared with the run store.
-	db *sql.DB
+	db *splitDB
 }
 
 // Save inserts or replaces the source.

@@ -1229,12 +1229,15 @@ func (d *Dispatcher) execute(ctx context.Context, r *run.Run) run.Status {
 func (d *Dispatcher) executeRun(ctx context.Context, r *run.Run) run.Status {
 	return d.streamSpec(ctx, r, r.DryRun, nil,
 		func(res roundhouse.Result, runErr error, mask *masker) run.Status {
-			status := d.outcome(ctx, r, res, runErr, mask)
+			// Write the summaries and any drift while the run is still non-terminal. The store fences
+			// auxiliary writes to a terminal run, so finalizing first would reject the run's own final
+			// summaries; ordering the writes before finalize lets them land and drops only a
+			// reclaimed-but-alive worker's late writes.
 			d.summarize(r)
 			if res.Drift {
 				d.recordPlanDrift(r)
 			}
-			return status
+			return d.outcome(ctx, r, res, runErr, mask)
 		})
 }
 

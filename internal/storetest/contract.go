@@ -49,6 +49,7 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Run("transition status", func(t *testing.T) { testTransitionStatus(t, newStore()) })
 	t.Run("workers", func(t *testing.T) { testWorkers(t, newStore()) })
 	t.Run("retention purge", func(t *testing.T) { testPurge(t, newStore()) })
+	t.Run("terminal run fences writes", func(t *testing.T) { testTerminalFence(t, newStore()) })
 }
 
 // sampleRun returns a fully populated terminal run with deterministic times.
@@ -680,8 +681,10 @@ func testDriftStatus(t *testing.T, store run.Store) {
 	ctx := context.Background()
 	base := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
 	saveRun := func(id string, at time.Time, dry bool, changed map[string]int) {
+		// The summary is written while the run is still running, as a real run does, then the run
+		// finalizes, since the store fences summary writes to a terminal run.
 		if err := store.Save(ctx, &run.Run{
-			ID: id, Playbook: "site.yml", Status: run.StatusSucceeded, CreatedAt: at, DryRun: dry,
+			ID: id, Playbook: "site.yml", Status: run.StatusRunning, CreatedAt: at, DryRun: dry,
 		}); err != nil {
 			t.Fatalf("Save() error = %v", err)
 		}
@@ -691,6 +694,11 @@ func testDriftStatus(t *testing.T, store run.Store) {
 		}
 		if err := store.SaveHostSummary(ctx, id, sums); err != nil {
 			t.Fatalf("SaveHostSummary() error = %v", err)
+		}
+		if err := store.Save(ctx, &run.Run{
+			ID: id, Playbook: "site.yml", Status: run.StatusSucceeded, CreatedAt: at, DryRun: dry,
+		}); err != nil {
+			t.Fatalf("Save() finalize error = %v", err)
 		}
 	}
 	// An older check finds drift on web01. A real run then changes it. The newest check finds it near
@@ -1085,7 +1093,9 @@ func testWorkers(t *testing.T, store run.Store) {
 // returns nothing. Chunk boundaries are a store detail, so only concatenations are asserted.
 func testLogAfter(t *testing.T, store run.Store) {
 	ctx := context.Background()
-	if err := store.Save(ctx, sampleRun("run_lc")); err != nil {
+	lcRun := sampleRun("run_lc")
+	lcRun.Status = run.StatusRunning
+	if err := store.Save(ctx, lcRun); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
 	if err := store.AppendLog(ctx, "run_lc", []byte("one")); err != nil {
@@ -1302,8 +1312,9 @@ func testPurge(t *testing.T, store run.Store) {
 	recent := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
 	cutoff := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
 
-	// An old terminal run with events, a log, and a summary.
-	if err := store.Save(ctx, &run.Run{ID: "old", Status: run.StatusSucceeded, CreatedAt: old}); err != nil {
+	// An old terminal run with events, a log, and a summary. Its output is recorded while it is still
+	// running, as a real run does, then it finalizes, since the store fences writes to a terminal run.
+	if err := store.Save(ctx, &run.Run{ID: "old", Status: run.StatusRunning, CreatedAt: old}); err != nil {
 		t.Fatalf("Save(old) error = %v", err)
 	}
 	if err := store.AppendEvents(ctx, "old",
@@ -1317,13 +1328,19 @@ func testPurge(t *testing.T, store run.Store) {
 		[]run.HostSummary{{Host: "h1", Worst: "ok", RanAt: old}}); err != nil {
 		t.Fatalf("SaveHostSummary(old) error = %v", err)
 	}
+	if err := store.Save(ctx, &run.Run{ID: "old", Status: run.StatusSucceeded, CreatedAt: old}); err != nil {
+		t.Fatalf("Save(old) finalize error = %v", err)
+	}
 	// A recent terminal run and an old run still running.
-	if err := store.Save(ctx, &run.Run{ID: "recent", Status: run.StatusSucceeded, CreatedAt: recent}); err != nil {
+	if err := store.Save(ctx, &run.Run{ID: "recent", Status: run.StatusRunning, CreatedAt: recent}); err != nil {
 		t.Fatalf("Save(recent) error = %v", err)
 	}
 	if err := store.AppendEvents(ctx, "recent",
 		[]event.Event{{Type: event.TypePlayStart, Time: recent, Play: "p"}}); err != nil {
 		t.Fatalf("AppendEvents(recent) error = %v", err)
+	}
+	if err := store.Save(ctx, &run.Run{ID: "recent", Status: run.StatusSucceeded, CreatedAt: recent}); err != nil {
+		t.Fatalf("Save(recent) finalize error = %v", err)
 	}
 	if err := store.Save(ctx, &run.Run{ID: "running", Status: run.StatusRunning, CreatedAt: old}); err != nil {
 		t.Fatalf("Save(running) error = %v", err)
@@ -1370,5 +1387,59 @@ func testPurge(t *testing.T, store run.Store) {
 	}
 	if len(history) != 1 {
 		t.Errorf("HostHistory() = %v, want the summary kept after run purge", history)
+	}
+}
+
+// testTerminalFence verifies the store fences auxiliary writes to a terminal run: a reclaimed-but-alive
+// worker's late logs, events, and summaries are dropped rather than appended or overwritten, and the
+// run is not resurrected. The writes return no error, so a benign late write does not look like a
+// failure.
+func testTerminalFence(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	created := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
+
+	// The run records its output while running.
+	if err := store.Save(ctx, &run.Run{ID: "fx", Status: run.StatusRunning, CreatedAt: created}); err != nil {
+		t.Fatalf("Save(running) error = %v", err)
+	}
+	if err := store.AppendLog(ctx, "fx", []byte("early")); err != nil {
+		t.Fatalf("AppendLog(early) error = %v", err)
+	}
+	if err := store.AppendEvents(ctx, "fx",
+		[]event.Event{{Type: event.TypePlayStart, Time: created, Play: "p"}}); err != nil {
+		t.Fatalf("AppendEvents(early) error = %v", err)
+	}
+
+	// It finalizes.
+	if err := store.Save(ctx, &run.Run{ID: "fx", Status: run.StatusSucceeded, CreatedAt: created}); err != nil {
+		t.Fatalf("Save(succeeded) error = %v", err)
+	}
+
+	// A reclaimed-but-alive worker's late writes are dropped, not errors.
+	if err := store.AppendLog(ctx, "fx", []byte("late")); err != nil {
+		t.Errorf("AppendLog(late) error = %v, want a silent no-op", err)
+	}
+	if err := store.AppendEvents(ctx, "fx",
+		[]event.Event{{Type: event.TypePlayStart, Time: created, Play: "zombie"}}); err != nil {
+		t.Errorf("AppendEvents(late) error = %v, want a silent no-op", err)
+	}
+	if err := store.SaveHostSummary(ctx, "fx",
+		[]run.HostSummary{{Host: "zombie", Worst: "failures", RanAt: created}}); err != nil {
+		t.Errorf("SaveHostSummary(late) error = %v, want a silent no-op", err)
+	}
+	if err := store.SaveTaskSummary(ctx, "fx",
+		[]run.TaskSummary{{Task: "zombie", Seconds: 9}}); err != nil {
+		t.Errorf("SaveTaskSummary(late) error = %v, want a silent no-op", err)
+	}
+
+	// The late writes landed nowhere and the run keeps its terminal state.
+	if body, err := store.Log(ctx, "fx"); err != nil || string(body) != "early" {
+		t.Errorf("Log = %q (err %v), want %q with the late write dropped", body, err, "early")
+	}
+	if evs, err := store.Events(ctx, "fx"); err != nil || len(evs) != 1 {
+		t.Errorf("Events len = %d (err %v), want only the pre-terminal event", len(evs), err)
+	}
+	if got, err := store.Get(ctx, "fx"); err != nil || got.Status != run.StatusSucceeded {
+		t.Errorf("run status = %v (err %v), want succeeded, not resurrected", got.Status, err)
 	}
 }

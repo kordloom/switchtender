@@ -24,8 +24,9 @@ across a mixed fleet. A GPU job waits for a GPU worker, and a default job runs a
 
 Claiming is exact on PostgreSQL. A worker takes the oldest pending run with `FOR UPDATE SKIP LOCKED`,
 so two workers never claim the same run even when they poll at the same instant. SQLite serializes
-every read and write through a single connection, which is why SQLite fits one process and PostgreSQL
-backs a fleet. Run multiple workers against PostgreSQL.
+every write through a single connection while reads run on a separate read-only pool under WAL, so a
+long listing or log read never blocks a claim or a finalize. That is why SQLite fits one process and
+PostgreSQL backs a fleet. Run multiple workers against PostgreSQL.
 
 ## Recovery when a worker dies
 

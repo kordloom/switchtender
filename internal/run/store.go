@@ -503,6 +503,10 @@ func (m *memStore) Workers(_ context.Context) ([]WorkerInfo, error) {
 func (m *memStore) SaveHostSummary(_ context.Context, runID string, summaries []HostSummary) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if r, ok := m.runs[runID]; ok && r.Status.Terminal() {
+		// Fence a terminal run so a reclaimed-but-alive worker cannot overwrite the final summary.
+		return nil
+	}
 	if len(summaries) == 0 {
 		delete(m.summaries, runID)
 		return nil
@@ -631,6 +635,10 @@ func (m *memStore) HostHistory(_ context.Context, host string, limit int) ([]Hos
 func (m *memStore) SaveTaskSummary(_ context.Context, runID string, summaries []TaskSummary) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if r, ok := m.runs[runID]; ok && r.Status.Terminal() {
+		// Fence a terminal run so a reclaimed-but-alive worker cannot overwrite the final summary.
+		return nil
+	}
 	if len(summaries) == 0 {
 		delete(m.tasks, runID)
 		return nil
@@ -715,8 +723,13 @@ func (m *memStore) HostCosts(_ context.Context, window int) (map[string]float64,
 func (m *memStore) AppendLog(_ context.Context, id string, p []byte) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, ok := m.runs[id]; !ok {
+	r, ok := m.runs[id]
+	if !ok {
 		return ErrNotFound
+	}
+	if r.Status.Terminal() {
+		// Fence a terminal run so a reclaimed-but-alive worker cannot append to a run that has ended.
+		return nil
 	}
 	m.logs[id] = append(m.logs[id], p...)
 	return nil
@@ -768,8 +781,13 @@ func (m *memStore) LastLogSeq(_ context.Context, id string) (int64, error) {
 func (m *memStore) AppendEvents(_ context.Context, id string, events []event.Event) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, ok := m.runs[id]; !ok {
+	r, ok := m.runs[id]
+	if !ok {
 		return ErrNotFound
+	}
+	if r.Status.Terminal() {
+		// Fence a terminal run so a reclaimed-but-alive worker cannot stream events into it.
+		return nil
 	}
 	m.events[id] = append(m.events[id], events...)
 	return nil
