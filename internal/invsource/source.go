@@ -6,10 +6,10 @@ package invsource
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"time"
+
+	"github.com/kordloom/switchtender/internal/idgen"
 )
 
 // ErrNotFound is returned when a source does not exist in the store.
@@ -66,9 +66,5 @@ type Store interface {
 
 // NewID returns a random source identifier prefixed with "src_".
 func NewID() string {
-	var b [6]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		panic("invsource: read random: " + err.Error())
-	}
-	return "src_" + hex.EncodeToString(b[:])
+	return idgen.New("src_", 6)
 }

@@ -5,10 +5,10 @@ package project
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"time"
+
+	"github.com/kordloom/switchtender/internal/idgen"
 )
 
 var (
@@ -66,9 +66,5 @@ type Store interface {
 
 // NewID returns a random project identifier prefixed with "proj_".
 func NewID() string {
-	var b [6]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		panic("project: read random: " + err.Error())
-	}
-	return "proj_" + hex.EncodeToString(b[:])
+	return idgen.New("proj_", 6)
 }

@@ -5,10 +5,10 @@ package team
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"time"
+
+	"github.com/kordloom/switchtender/internal/idgen"
 )
 
 // ErrNotFound is returned when a team does not exist in the store.
@@ -46,9 +46,5 @@ type Store interface {
 
 // NewID returns a random team identifier prefixed with "team_".
 func NewID() string {
-	var b [6]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		panic("team: read random: " + err.Error())
-	}
-	return "team_" + hex.EncodeToString(b[:])
+	return idgen.New("team_", 6)
 }

@@ -6,10 +6,10 @@ package org
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"time"
+
+	"github.com/kordloom/switchtender/internal/idgen"
 )
 
 // ErrNotFound is returned when an organization does not exist in the store.
@@ -77,9 +77,5 @@ type Store interface {
 
 // NewID returns a random organization identifier prefixed with "org_".
 func NewID() string {
-	var b [6]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		panic("org: read random: " + err.Error())
-	}
-	return "org_" + hex.EncodeToString(b[:])
+	return idgen.New("org_", 6)
 }

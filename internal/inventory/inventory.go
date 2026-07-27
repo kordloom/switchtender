@@ -5,10 +5,10 @@ package inventory
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"time"
+
+	"github.com/kordloom/switchtender/internal/idgen"
 )
 
 // ErrNotFound is returned when an inventory does not exist in the store.
@@ -63,9 +63,5 @@ type Store interface {
 
 // NewID returns a random inventory identifier prefixed with "inv_".
 func NewID() string {
-	var b [6]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		panic("inventory: read random: " + err.Error())
-	}
-	return "inv_" + hex.EncodeToString(b[:])
+	return idgen.New("inv_", 6)
 }
