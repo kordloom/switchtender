@@ -5,7 +5,7 @@
   </picture>
 </p>
 
-# Migration
+# Migrate off AWX or Semaphore
 
 SwitchTender imports an AWX or Semaphore export and creates the equivalent objects, so moving over is
 one command rather than a rebuild.
