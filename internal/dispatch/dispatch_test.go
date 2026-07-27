@@ -39,6 +39,23 @@ func waitTerminal(t *testing.T, store run.Store, id string) *run.Run {
 	}
 }
 
+// waitPublished polls until the publisher holds want events under id, or fails at the deadline. The
+// coordinator echoes child events on its own tick, so a terminal parent does not yet mean the last
+// echo has landed; asserting immediately made this a flaky check under runner load.
+func waitPublished(t *testing.T, pub *capturingPublisher, id string, want int) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if pub.eventCount(id) >= want {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("topic %s events = %d, want %d", id, pub.eventCount(id), want)
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}
+
 func TestDispatcherExecute(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -676,19 +693,23 @@ func TestDispatcherEchoesChildEventsToParent(t *testing.T) {
 		t.Fatalf("SubmitSplit() error = %v", err)
 	}
 	waitTerminal(t, store, parent.ID)
+	waitPublished(t, pub, parent.ID, 2)
 
-	if got := pub.eventCount(parent.ID); got != 2 {
-		t.Errorf("parent topic events = %d, want 2, one echoed from each shard", got)
-	}
-	closed := pub.closedIDs()
-	parentClosed := false
-	for _, id := range closed {
-		if id == parent.ID {
-			parentClosed = true
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		parentClosed := false
+		for _, id := range pub.closedIDs() {
+			if id == parent.ID {
+				parentClosed = true
+			}
 		}
-	}
-	if !parentClosed {
-		t.Errorf("parent topic was not closed, closed = %v", closed)
+		if parentClosed {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("parent topic was not closed, closed = %v", pub.closedIDs())
+		}
+		time.Sleep(2 * time.Millisecond)
 	}
 }
 
@@ -707,10 +728,7 @@ func TestDispatcherEchoesStepEventsToPipeline(t *testing.T) {
 		t.Fatalf("SubmitPipeline() error = %v", err)
 	}
 	waitTerminal(t, store, parent.ID)
-
-	if got := pub.eventCount(parent.ID); got != 2 {
-		t.Errorf("pipeline topic events = %d, want 2, one echoed from each step", got)
-	}
+	waitPublished(t, pub, parent.ID, 2)
 }
 
 func TestDispatcherRetryFailedShards(t *testing.T) {
