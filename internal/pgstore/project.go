@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/kordloom/switchtender/internal/project"
+	"github.com/kordloom/switchtender/internal/sqlutil"
 )
 
 // projectColumns is the shared select list for project reads.
@@ -31,7 +32,7 @@ ON CONFLICT(id) DO UPDATE SET
 	org_id=excluded.org_id, created_at=excluded.created_at`
 	_, err := s.db.ExecContext(ctx, q,
 		p.ID, p.Name, p.RepoURL, p.Branch, p.CredentialID,
-		boolToInt(p.InstallDeps), p.Image, p.PullCredentialID, p.OrgID, formatTime(p.CreatedAt))
+		sqlutil.BoolToInt(p.InstallDeps), p.Image, p.PullCredentialID, p.OrgID, sqlutil.FormatTime(p.CreatedAt))
 	if err != nil {
 		return fmt.Errorf("save project: %w", err)
 	}
@@ -45,7 +46,7 @@ func (s *projectStore) Update(ctx context.Context, p *project.Project) error {
 	WHERE id=$9`
 	res, err := s.db.ExecContext(ctx, q,
 		p.Name, p.RepoURL, p.Branch, p.CredentialID,
-		boolToInt(p.InstallDeps), p.Image, p.PullCredentialID, p.OrgID, p.ID)
+		sqlutil.BoolToInt(p.InstallDeps), p.Image, p.PullCredentialID, p.OrgID, p.ID)
 	if err != nil {
 		return fmt.Errorf("update project: %w", err)
 	}
@@ -123,7 +124,7 @@ func scanProject(sc scanner) (*project.Project, error) {
 		return nil, err
 	}
 	p.InstallDeps = installDeps != 0
-	at, err := parseTime(created)
+	at, err := sqlutil.ParseTime(created)
 	if err != nil {
 		return nil, err
 	}

@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/kordloom/switchtender/internal/sqlutil"
 )
 
 // purgeBatch is how many child rows one delete statement removes. Retention deletes loop in
@@ -14,7 +16,7 @@ const purgeBatch = 2000
 // PurgeEventsBefore drops the events and logs of terminal runs created before cutoff, keeping the
 // run records and their summaries. It returns how many runs were trimmed.
 func (s *store) PurgeEventsBefore(ctx context.Context, cutoff time.Time) (int, error) {
-	cut := formatTime(cutoff)
+	cut := sqlutil.FormatTime(cutoff)
 	if err := s.deleteBatched(ctx, "run_events", cut); err != nil {
 		return 0, fmt.Errorf("purge events: %w", err)
 	}
@@ -34,7 +36,7 @@ SELECT COUNT(*) FROM runs WHERE status NOT IN ('pending','running') AND created_
 // PurgeRunsBefore deletes terminal runs created before cutoff along with their events and logs,
 // keeping the per host and per task summaries. It returns how many runs were deleted.
 func (s *store) PurgeRunsBefore(ctx context.Context, cutoff time.Time) (int, error) {
-	cut := formatTime(cutoff)
+	cut := sqlutil.FormatTime(cutoff)
 	if err := s.deleteBatched(ctx, "run_events", cut); err != nil {
 		return 0, fmt.Errorf("purge run events: %w", err)
 	}

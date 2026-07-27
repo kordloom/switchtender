@@ -27,6 +27,7 @@ import (
 	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/schedule"
+	"github.com/kordloom/switchtender/internal/sqlutil"
 	"github.com/kordloom/switchtender/internal/team"
 	"github.com/kordloom/switchtender/internal/template"
 	"github.com/kordloom/switchtender/internal/trigger"
@@ -521,13 +522,13 @@ ON CONFLICT(id) DO UPDATE SET
 	idempotency_key=excluded.idempotency_key, timeout=excluded.timeout,
 	notifications=excluded.notifications`
 	_, err := s.db.ExecContext(ctx, q,
-		r.ID, r.Playbook, r.Inventory, string(r.Status), nullInt(r.ExitCode), r.Error,
-		formatTime(r.CreatedAt), nullTime(r.StartedAt), nullTime(r.EndedAt),
-		nullString(r.ParentID), nullInt(r.ShardIndex), nullInt(r.ShardCount), r.Limit,
-		r.Kind, r.StepName, nullInt(r.StepIndex), nullString(r.RetryOf), r.Attempt,
-		jsonMap(r.ExtraVars), jsonMap(r.Outputs), r.ClaimedBy, nullTime(r.ClaimedAt),
-		boolToInt(r.CancelRequested), joinIDs(r.CredentialIDs), r.ProjectID, r.CommitSHA,
-		r.InventoryID, r.Queue, r.Tool, r.Command, boolToInt(r.DryRun), r.ProposedFrom, r.Intent,
+		r.ID, r.Playbook, r.Inventory, string(r.Status), sqlutil.NullInt(r.ExitCode), r.Error,
+		sqlutil.FormatTime(r.CreatedAt), sqlutil.NullTime(r.StartedAt), sqlutil.NullTime(r.EndedAt),
+		sqlutil.NullString(r.ParentID), sqlutil.NullInt(r.ShardIndex), sqlutil.NullInt(r.ShardCount), r.Limit,
+		r.Kind, r.StepName, sqlutil.NullInt(r.StepIndex), sqlutil.NullString(r.RetryOf), r.Attempt,
+		sqlutil.JSONMap(r.ExtraVars), sqlutil.JSONMap(r.Outputs), r.ClaimedBy, sqlutil.NullTime(r.ClaimedAt),
+		sqlutil.BoolToInt(r.CancelRequested), sqlutil.JoinIDs(r.CredentialIDs), r.ProjectID, r.CommitSHA,
+		r.InventoryID, r.Queue, r.Tool, r.Command, sqlutil.BoolToInt(r.DryRun), r.ProposedFrom, r.Intent,
 		r.Image, r.PullCredentialID, r.IdempotencyKey, r.Timeout, marshalNotifications(r.Notifications),
 	)
 	if err != nil {
@@ -698,7 +699,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`)
 
 	for _, hs := range summaries {
 		if _, err := stmt.ExecContext(ctx, runID, hs.Host, hs.OK, hs.Changed, hs.Failures,
-			hs.Unreachable, hs.Skipped, hs.Worst, hs.DurationSeconds, formatTime(hs.RanAt)); err != nil {
+			hs.Unreachable, hs.Skipped, hs.Worst, hs.DurationSeconds, sqlutil.FormatTime(hs.RanAt)); err != nil {
 			return fmt.Errorf("save host summary: %w", err)
 		}
 	}
@@ -758,7 +759,7 @@ ORDER BY failures DESC, host`
 			return nil, fmt.Errorf("fleet health: %w", err)
 		}
 		h.LastOutcome = lastOut
-		if h.LastRun, err = parseTime(lastRun); err != nil {
+		if h.LastRun, err = sqlutil.ParseTime(lastRun); err != nil {
 			return nil, fmt.Errorf("fleet health: %w", err)
 		}
 		h.Flaky = h.Flips >= 2
@@ -839,7 +840,7 @@ SELECT host, changed, run_id, ran_at FROM checks WHERE rn = 1 ORDER BY changed D
 		if err := rows.Scan(&d.Host, &d.DriftedTasks, &d.RunID, &ranAt); err != nil {
 			return nil, fmt.Errorf("drift status: %w", err)
 		}
-		if d.CheckedAt, err = parseTime(ranAt); err != nil {
+		if d.CheckedAt, err = sqlutil.ParseTime(ranAt); err != nil {
 			return nil, fmt.Errorf("drift status: %w", err)
 		}
 		out = append(out, d)
@@ -875,7 +876,7 @@ FROM run_host_summary WHERE host = $1 ORDER BY ran_at DESC LIMIT $2`
 			&hs.Unreachable, &hs.Skipped, &hs.Worst, &hs.DurationSeconds, &ranAt); err != nil {
 			return nil, fmt.Errorf("host history: %w", err)
 		}
-		if hs.RanAt, err = parseTime(ranAt); err != nil {
+		if hs.RanAt, err = sqlutil.ParseTime(ranAt); err != nil {
 			return nil, fmt.Errorf("host history: %w", err)
 		}
 		out = append(out, hs)
@@ -910,7 +911,7 @@ func (s *store) SaveTaskSummary(ctx context.Context, runID string, summaries []r
 	defer func() { _ = stmt.Close() }()
 
 	for _, ts := range summaries {
-		if _, err := stmt.ExecContext(ctx, runID, ts.Task, ts.Seconds, formatTime(ts.RanAt)); err != nil {
+		if _, err := stmt.ExecContext(ctx, runID, ts.Task, ts.Seconds, sqlutil.FormatTime(ts.RanAt)); err != nil {
 			return fmt.Errorf("save task summary: %w", err)
 		}
 	}
@@ -956,7 +957,7 @@ ORDER BY task`
 		if err := rows.Scan(&t.Task, &t.Runs, &t.AvgSeconds, &t.LastSeconds, &lastRun); err != nil {
 			return nil, fmt.Errorf("task trends: %w", err)
 		}
-		if t.LastRun, err = parseTime(lastRun); err != nil {
+		if t.LastRun, err = sqlutil.ParseTime(lastRun); err != nil {
 			return nil, fmt.Errorf("task trends: %w", err)
 		}
 		out = append(out, t)
@@ -979,7 +980,7 @@ WHERE claimed_by != '' AND claimed_at IS NOT NULL AND claimed_at >= $1
 GROUP BY claimed_by
 ORDER BY last_seen DESC, claimed_by`
 
-	rows, err := s.db.QueryContext(ctx, q, formatTime(time.Now().Add(-run.WorkerWindow)))
+	rows, err := s.db.QueryContext(ctx, q, sqlutil.FormatTime(time.Now().Add(-run.WorkerWindow)))
 	if err != nil {
 		return nil, fmt.Errorf("list workers: %w", err)
 	}
@@ -994,7 +995,7 @@ ORDER BY last_seen DESC, claimed_by`
 		if err := rows.Scan(&w.Owner, &w.Active, &seen); err != nil {
 			return nil, fmt.Errorf("list workers: %w", err)
 		}
-		if w.LastSeen, err = parseTime(seen); err != nil {
+		if w.LastSeen, err = sqlutil.ParseTime(seen); err != nil {
 			return nil, fmt.Errorf("list workers: %w", err)
 		}
 		out = append(out, w)
@@ -1330,21 +1331,21 @@ func scanRun(s scanner) (*run.Run, error) {
 	}
 	r.CancelRequested = cancelI != 0
 	r.DryRun = dryRun != 0
-	r.CredentialIDs = splitIDs(credIDs)
+	r.CredentialIDs = sqlutil.SplitIDs(credIDs)
 	r.Status = run.Status(status)
 	if exit.Valid {
 		v := int(exit.Int64)
 		r.ExitCode = &v
 	}
-	t, err := parseTime(created)
+	t, err := sqlutil.ParseTime(created)
 	if err != nil {
 		return nil, err
 	}
 	r.CreatedAt = t
-	if r.StartedAt, err = parseNullTime(started); err != nil {
+	if r.StartedAt, err = sqlutil.ParseNullTime(started); err != nil {
 		return nil, err
 	}
-	if r.EndedAt, err = parseNullTime(ended); err != nil {
+	if r.EndedAt, err = sqlutil.ParseNullTime(ended); err != nil {
 		return nil, err
 	}
 	if parent.Valid {
@@ -1367,13 +1368,13 @@ func scanRun(s scanner) (*run.Run, error) {
 		id := retryOf.String
 		r.RetryOf = &id
 	}
-	if r.ExtraVars, err = parseMap(extra); err != nil {
+	if r.ExtraVars, err = sqlutil.ParseMap(extra); err != nil {
 		return nil, err
 	}
-	if r.Outputs, err = parseMap(outputs); err != nil {
+	if r.Outputs, err = sqlutil.ParseMap(outputs); err != nil {
 		return nil, err
 	}
-	if r.ClaimedAt, err = parseNullTime(claimed); err != nil {
+	if r.ClaimedAt, err = sqlutil.ParseNullTime(claimed); err != nil {
 		return nil, err
 	}
 	r.Notifications = parseNotifications(notifs)
@@ -1404,102 +1405,11 @@ func parseNotifications(s string) []run.NotifyTarget {
 	return targets
 }
 
-// joinIDs renders an id list for storage, empty string for none.
-func joinIDs(ids []string) string {
-	return strings.Join(ids, ",")
-}
-
-// splitIDs parses a stored id list, nil for an empty string.
-func splitIDs(s string) []string {
-	if s == "" {
-		return nil
-	}
-	return strings.Split(s, ",")
-}
-
-// boolToInt maps a bool to a database integer.
-func boolToInt(b bool) int {
-	if b {
-		return 1
-	}
-	return 0
-}
-
-// jsonMap renders a map as JSON for storage, empty string for an empty map.
-func jsonMap(m map[string]any) string {
-	if len(m) == 0 {
-		return ""
-	}
-	data, err := json.Marshal(m)
-	if err != nil {
-		return ""
-	}
-	return string(data)
-}
-
-// parseMap parses a stored JSON map, nil for an empty string.
-func parseMap(s string) (map[string]any, error) {
-	if s == "" {
-		return nil, nil
-	}
-	var m map[string]any
-	if err := json.Unmarshal([]byte(s), &m); err != nil {
-		return nil, fmt.Errorf("parse stored map: %w", err)
-	}
-	return m, nil
-}
-
-// formatTime renders a time as a sortable UTC string.
-func formatTime(t time.Time) string {
-	return t.UTC().Format(time.RFC3339Nano)
-}
-
-// parseTime parses a stored time string.
-func parseTime(s string) (time.Time, error) {
-	return time.Parse(time.RFC3339Nano, strings.TrimSpace(s))
-}
-
-// nullInt maps an optional int to a database value.
-func nullInt(v *int) any {
-	if v == nil {
-		return nil
-	}
-	return *v
-}
-
-// nullString maps an optional string to a database value.
-func nullString(v *string) any {
-	if v == nil {
-		return nil
-	}
-	return *v
-}
-
-// nullTime maps an optional time to a database value.
-func nullTime(t *time.Time) any {
-	if t == nil {
-		return nil
-	}
-	return formatTime(*t)
-}
-
-// parseNullTime parses an optional stored time.
-func parseNullTime(s sql.NullString) (*time.Time, error) {
-	if !s.Valid || s.String == "" {
-		return nil, nil
-	}
-	t, err := parseTime(s.String)
-	if err != nil {
-		return nil, err
-	}
-	return &t, nil
-}
-
 // Claim leases the oldest unclaimed pending top-level plain run to owner and returns it. The row
 // is locked with SKIP LOCKED so concurrent workers never claim the same run. A run whose cancel
 // was requested while it waited is skipped; the cancel handler terminalizes it.
 func (s *store) Claim(ctx context.Context, owner string, queues []string) (*run.Run, error) {
-	placeholders, args := queuePlaceholders(queues, "$")
+	placeholders, args := sqlutil.QueuePlaceholders(queues, "$")
 	q := `
 UPDATE runs SET claimed_by=$1, claimed_at=$2
 WHERE id = (
@@ -1510,7 +1420,7 @@ WHERE id = (
 	FOR UPDATE SKIP LOCKED
 )
 RETURNING ` + runColumns
-	full := append([]any{owner, formatTime(time.Now())}, args...)
+	full := append([]any{owner, sqlutil.FormatTime(time.Now())}, args...)
 	r, err := scanRun(s.db.QueryRowContext(ctx, q, full...))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, run.ErrNonePending
@@ -1521,30 +1431,11 @@ RETURNING ` + runColumns
 	return r, nil
 }
 
-// queuePlaceholders builds a comma separated placeholder list and the matching queue args,
-// numbered from $3 since owner and claim time take $1 and $2.
-func queuePlaceholders(queues []string, style string) (string, []any) {
-	if len(queues) == 0 {
-		queues = []string{""}
-	}
-	parts := make([]string, len(queues))
-	args := make([]any, len(queues))
-	for i, q := range queues {
-		if style == "?" {
-			parts[i] = "?"
-		} else {
-			parts[i] = fmt.Sprintf("$%d", i+3)
-		}
-		args[i] = q
-	}
-	return strings.Join(parts, ", "), args
-}
-
 // Heartbeat renews owner's lease on a run.
 func (s *store) Heartbeat(ctx context.Context, id, owner string) error {
 	res, err := s.db.ExecContext(ctx,
 		"UPDATE runs SET claimed_at=$1 WHERE id=$2 AND claimed_by=$3",
-		formatTime(time.Now()), id, owner)
+		sqlutil.FormatTime(time.Now()), id, owner)
 	if err != nil {
 		return fmt.Errorf("heartbeat: %w", err)
 	}
@@ -1560,7 +1451,7 @@ func (s *store) Heartbeat(ctx context.Context, id, owner string) error {
 
 // ReclaimStale requeues stale claimed pending runs and interrupts stale running runs.
 func (s *store) ReclaimStale(ctx context.Context, cutoff time.Time) (int, error) {
-	cut := formatTime(cutoff)
+	cut := sqlutil.FormatTime(cutoff)
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, fmt.Errorf("reclaim stale: %w", err)
@@ -1580,7 +1471,7 @@ WHERE status='pending' AND claimed_by!='' AND claimed_at < $1`, cut)
 	res, err = tx.ExecContext(ctx, `
 UPDATE runs SET status='interrupted', claimed_by='', claimed_at=NULL,
 ended_at=$1, error='interrupted: executor lease expired'
-WHERE status='running' AND claimed_by!='' AND claimed_at < $2`, formatTime(time.Now()), cut)
+WHERE status='running' AND claimed_by!='' AND claimed_at < $2`, sqlutil.FormatTime(time.Now()), cut)
 	if err != nil {
 		return 0, fmt.Errorf("reclaim stale: %w", err)
 	}
@@ -1615,7 +1506,7 @@ func (s *store) CancelPending(ctx context.Context, id string) (bool, error) {
 	res, err := s.db.ExecContext(ctx, `
 UPDATE runs SET status='canceled', ended_at=$1
 WHERE id=$2 AND claimed_by='' AND status IN ('pending', 'pending_approval')`,
-		formatTime(time.Now()), id)
+		sqlutil.FormatTime(time.Now()), id)
 	if err != nil {
 		return false, fmt.Errorf("cancel pending: %w", err)
 	}

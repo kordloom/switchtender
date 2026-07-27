@@ -2,6 +2,11 @@ package pgstore_test
 
 import (
 	"database/sql"
+	"os"
+	"testing"
+
+	_ "github.com/jackc/pgx/v5/stdlib"
+
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/audittest"
 	"github.com/kordloom/switchtender/internal/auth"
@@ -16,10 +21,15 @@ import (
 	"github.com/kordloom/switchtender/internal/invsourcetest"
 	"github.com/kordloom/switchtender/internal/org"
 	"github.com/kordloom/switchtender/internal/orgtest"
+	"github.com/kordloom/switchtender/internal/pgstore"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/policytest"
 	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/projecttest"
+	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/schedule"
+	"github.com/kordloom/switchtender/internal/scheduletest"
+	"github.com/kordloom/switchtender/internal/storetest"
 	"github.com/kordloom/switchtender/internal/team"
 	"github.com/kordloom/switchtender/internal/teamtest"
 	"github.com/kordloom/switchtender/internal/template"
@@ -28,16 +38,6 @@ import (
 	"github.com/kordloom/switchtender/internal/triggertest"
 	"github.com/kordloom/switchtender/internal/user"
 	"github.com/kordloom/switchtender/internal/usertest"
-	"os"
-	"testing"
-
-	_ "github.com/jackc/pgx/v5/stdlib"
-
-	"github.com/kordloom/switchtender/internal/pgstore"
-	"github.com/kordloom/switchtender/internal/run"
-	"github.com/kordloom/switchtender/internal/schedule"
-	"github.com/kordloom/switchtender/internal/scheduletest"
-	"github.com/kordloom/switchtender/internal/storetest"
 )
 
 // dsnEnv names the environment variable that provides the test database. Without it the contract

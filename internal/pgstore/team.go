@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/kordloom/switchtender/internal/sqlutil"
 	"github.com/kordloom/switchtender/internal/team"
 )
 
@@ -21,7 +22,7 @@ func (s *teamStore) Save(ctx context.Context, t *team.Team) error {
 INSERT INTO teams (id, name, created_at)
 VALUES ($1, $2, $3)
 ON CONFLICT(id) DO UPDATE SET name=excluded.name, created_at=excluded.created_at`
-	if _, err := s.db.ExecContext(ctx, q, t.ID, t.Name, formatTime(t.CreatedAt)); err != nil {
+	if _, err := s.db.ExecContext(ctx, q, t.ID, t.Name, sqlutil.FormatTime(t.CreatedAt)); err != nil {
 		return fmt.Errorf("save team: %w", err)
 	}
 	return nil
@@ -155,7 +156,7 @@ func scanTeam(sc scanner) (*team.Team, error) {
 	if err := sc.Scan(&t.ID, &t.Name, &created); err != nil {
 		return nil, err
 	}
-	at, err := parseTime(created)
+	at, err := sqlutil.ParseTime(created)
 	if err != nil {
 		return nil, err
 	}

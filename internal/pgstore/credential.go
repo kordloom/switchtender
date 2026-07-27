@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/kordloom/switchtender/internal/credential"
+	"github.com/kordloom/switchtender/internal/sqlutil"
 )
 
 // credentialColumns is the shared select list for credential reads.
@@ -27,7 +28,7 @@ ON CONFLICT(id) DO UPDATE SET
 	name=excluded.name, kind=excluded.kind, secret=excluded.secret,
 	created_at=excluded.created_at, source=excluded.source, org_id=excluded.org_id`
 	_, err := s.db.ExecContext(ctx, q,
-		c.ID, c.Name, string(c.Kind), c.Secret, formatTime(c.CreatedAt), c.Source, c.OrgID)
+		c.ID, c.Name, string(c.Kind), c.Secret, sqlutil.FormatTime(c.CreatedAt), c.Source, c.OrgID)
 	if err != nil {
 		return fmt.Errorf("save credential: %w", err)
 	}
@@ -116,7 +117,7 @@ func scanCredential(sc scanner) (*credential.Credential, error) {
 		return nil, err
 	}
 	c.Kind = credential.Kind(kind)
-	at, err := parseTime(created)
+	at, err := sqlutil.ParseTime(created)
 	if err != nil {
 		return nil, err
 	}

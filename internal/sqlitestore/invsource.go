@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/kordloom/switchtender/internal/invsource"
+	"github.com/kordloom/switchtender/internal/sqlutil"
 )
 
 // invSourceColumns is the shared select list for inventory source reads.
@@ -34,8 +35,8 @@ ON CONFLICT(id) DO UPDATE SET
 	created_at=excluded.created_at`
 	_, err := s.db.ExecContext(ctx, q,
 		src.ID, src.Name, src.Source, src.CredentialID, src.ProjectID, src.InventoryID,
-		nullTime(src.SyncedAt), src.LastError,
-		boolToInt(src.UpdateOnLaunch), src.SyncIntervalSeconds, formatTime(src.CreatedAt))
+		sqlutil.NullTime(src.SyncedAt), src.LastError,
+		sqlutil.BoolToInt(src.UpdateOnLaunch), src.SyncIntervalSeconds, sqlutil.FormatTime(src.CreatedAt))
 	if err != nil {
 		return fmt.Errorf("save inventory source: %w", err)
 	}
@@ -49,7 +50,7 @@ func (s *invSourceStore) Update(ctx context.Context, src *invsource.Source) erro
 		"UPDATE inventory_sources SET name=?, source=?, credential_id=?, project_id=?, "+
 			"update_on_launch=?, sync_interval_seconds=? WHERE id=?",
 		src.Name, src.Source, src.CredentialID, src.ProjectID,
-		boolToInt(src.UpdateOnLaunch), src.SyncIntervalSeconds, src.ID)
+		sqlutil.BoolToInt(src.UpdateOnLaunch), src.SyncIntervalSeconds, src.ID)
 	if err != nil {
 		return fmt.Errorf("update inventory source: %w", err)
 	}
@@ -129,10 +130,10 @@ func scanInvSource(sc scanner) (*invsource.Source, error) {
 	}
 	src.UpdateOnLaunch = onLaunch != 0
 	var err error
-	if src.SyncedAt, err = parseNullTime(synced); err != nil {
+	if src.SyncedAt, err = sqlutil.ParseNullTime(synced); err != nil {
 		return nil, err
 	}
-	if src.CreatedAt, err = parseTime(created); err != nil {
+	if src.CreatedAt, err = sqlutil.ParseTime(created); err != nil {
 		return nil, err
 	}
 	return &src, nil

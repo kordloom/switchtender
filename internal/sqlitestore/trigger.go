@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/kordloom/switchtender/internal/sqlutil"
 	"github.com/kordloom/switchtender/internal/trigger"
 )
 
@@ -28,8 +29,8 @@ ON CONFLICT(id) DO UPDATE SET
 	signing_secret=excluded.signing_secret, require_signature=excluded.require_signature,
 	last_fired_at=excluded.last_fired_at, created_at=excluded.created_at`
 	_, err := s.db.ExecContext(ctx, q,
-		t.ID, t.Name, t.TemplateID, t.TokenHash, t.SigningSecret, boolToInt(t.RequireSignature),
-		nullTime(t.LastFiredAt), formatTime(t.CreatedAt))
+		t.ID, t.Name, t.TemplateID, t.TokenHash, t.SigningSecret, sqlutil.BoolToInt(t.RequireSignature),
+		sqlutil.NullTime(t.LastFiredAt), sqlutil.FormatTime(t.CreatedAt))
 	if err != nil {
 		return fmt.Errorf("save trigger: %w", err)
 	}
@@ -115,10 +116,10 @@ func scanTrigger(sc scanner) (*trigger.Trigger, error) {
 	}
 	t.RequireSignature = require != 0
 	var err error
-	if t.LastFiredAt, err = parseNullTime(fired); err != nil {
+	if t.LastFiredAt, err = sqlutil.ParseNullTime(fired); err != nil {
 		return nil, err
 	}
-	if t.CreatedAt, err = parseTime(created); err != nil {
+	if t.CreatedAt, err = sqlutil.ParseTime(created); err != nil {
 		return nil, err
 	}
 	return &t, nil

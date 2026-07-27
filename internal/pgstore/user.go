@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/kordloom/switchtender/internal/sqlutil"
 	"github.com/kordloom/switchtender/internal/user"
 )
 
@@ -27,7 +28,7 @@ ON CONFLICT(id) DO UPDATE SET
 	username=excluded.username, password_hash=excluded.password_hash,
 	role=excluded.role, created_at=excluded.created_at`
 	_, err := s.db.ExecContext(ctx, q,
-		u.ID, u.Username, u.PasswordHash, string(u.Role), formatTime(u.CreatedAt))
+		u.ID, u.Username, u.PasswordHash, string(u.Role), sqlutil.FormatTime(u.CreatedAt))
 	if err != nil {
 		return fmt.Errorf("save user: %w", err)
 	}
@@ -128,7 +129,7 @@ func scanUser(sc scanner) (*user.User, error) {
 		return nil, err
 	}
 	u.Role = user.Role(role)
-	at, err := parseTime(created)
+	at, err := sqlutil.ParseTime(created)
 	if err != nil {
 		return nil, err
 	}

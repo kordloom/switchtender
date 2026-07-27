@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/kordloom/switchtender/internal/org"
+	"github.com/kordloom/switchtender/internal/sqlutil"
 )
 
 // orgStore is an org.Store backed by the shared SQLite database.
@@ -21,7 +22,7 @@ func (s *orgStore) Save(ctx context.Context, o *org.Org) error {
 INSERT INTO orgs (id, name, created_at)
 VALUES (?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET name=excluded.name, created_at=excluded.created_at`
-	if _, err := s.db.ExecContext(ctx, q, o.ID, o.Name, formatTime(o.CreatedAt)); err != nil {
+	if _, err := s.db.ExecContext(ctx, q, o.ID, o.Name, sqlutil.FormatTime(o.CreatedAt)); err != nil {
 		return fmt.Errorf("save org: %w", err)
 	}
 	return nil
@@ -173,7 +174,7 @@ func scanOrg(sc scanner) (*org.Org, error) {
 	if err := sc.Scan(&o.ID, &o.Name, &created); err != nil {
 		return nil, err
 	}
-	at, err := parseTime(created)
+	at, err := sqlutil.ParseTime(created)
 	if err != nil {
 		return nil, err
 	}

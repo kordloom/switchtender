@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kordloom/switchtender/internal/schedule"
+	"github.com/kordloom/switchtender/internal/sqlutil"
 )
 
 // scheduleColumns is the shared select list for schedule reads.
@@ -40,7 +41,7 @@ ON CONFLICT(id) DO UPDATE SET
 	template_id=excluded.template_id`
 	_, err = s.db.ExecContext(ctx, q,
 		sc.ID, sc.Name, sc.Cron, sc.Playbook, sc.Inventory, sc.Shards, string(steps),
-		boolInt(sc.Enabled), formatTime(sc.CreatedAt), nullTime(sc.NextRunAt), nullTime(sc.LastRunAt),
+		boolInt(sc.Enabled), sqlutil.FormatTime(sc.CreatedAt), sqlutil.NullTime(sc.NextRunAt), sqlutil.NullTime(sc.LastRunAt),
 		sc.LastRunID, sc.TemplateID,
 	)
 	if err != nil {
@@ -122,15 +123,15 @@ func scanSchedule(sc scanner) (*schedule.Schedule, error) {
 			return nil, err
 		}
 	}
-	t, err := parseTime(created)
+	t, err := sqlutil.ParseTime(created)
 	if err != nil {
 		return nil, err
 	}
 	out.CreatedAt = t
-	if out.NextRunAt, err = parseNullTime(nextRun); err != nil {
+	if out.NextRunAt, err = sqlutil.ParseNullTime(nextRun); err != nil {
 		return nil, err
 	}
-	if out.LastRunAt, err = parseNullTime(lastRun); err != nil {
+	if out.LastRunAt, err = sqlutil.ParseNullTime(lastRun); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -148,7 +149,7 @@ func boolInt(b bool) int {
 func (s *scheduleStore) ClaimDue(ctx context.Context, id string, oldNext, newNext time.Time) (bool, error) {
 	res, err := s.db.ExecContext(ctx,
 		"UPDATE schedules SET next_run_at=? WHERE id=? AND next_run_at=?",
-		formatTime(newNext), id, formatTime(oldNext))
+		sqlutil.FormatTime(newNext), id, sqlutil.FormatTime(oldNext))
 	if err != nil {
 		return false, fmt.Errorf("claim due schedule: %w", err)
 	}

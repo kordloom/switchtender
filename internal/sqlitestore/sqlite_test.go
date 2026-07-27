@@ -4,6 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"path/filepath"
+	"testing"
+	"time"
+
+	_ "modernc.org/sqlite"
+
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/audittest"
 	"github.com/kordloom/switchtender/internal/auth"
@@ -22,6 +28,11 @@ import (
 	"github.com/kordloom/switchtender/internal/policytest"
 	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/projecttest"
+	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/schedule"
+	"github.com/kordloom/switchtender/internal/scheduletest"
+	"github.com/kordloom/switchtender/internal/sqlitestore"
+	"github.com/kordloom/switchtender/internal/storetest"
 	"github.com/kordloom/switchtender/internal/team"
 	"github.com/kordloom/switchtender/internal/teamtest"
 	"github.com/kordloom/switchtender/internal/template"
@@ -30,17 +41,6 @@ import (
 	"github.com/kordloom/switchtender/internal/triggertest"
 	"github.com/kordloom/switchtender/internal/user"
 	"github.com/kordloom/switchtender/internal/usertest"
-	"path/filepath"
-	"testing"
-	"time"
-
-	_ "modernc.org/sqlite"
-
-	"github.com/kordloom/switchtender/internal/run"
-	"github.com/kordloom/switchtender/internal/schedule"
-	"github.com/kordloom/switchtender/internal/scheduletest"
-	"github.com/kordloom/switchtender/internal/sqlitestore"
-	"github.com/kordloom/switchtender/internal/storetest"
 )
 
 func TestStoreContract(t *testing.T) {
