@@ -14,6 +14,7 @@ import (
 // not call t.Parallel: it writes the package notifier registry, so it runs in the sequential phase
 // before the parallel tests that read the registry resume.
 func TestRegisterNotifier(t *testing.T) {
+	t.Parallel()
 	RegisterNotifier("regdup", NotifierFunc(func(context.Context, *run.Run) error { return nil }))
 
 	tests := []struct {
@@ -43,6 +44,7 @@ func TestRegisterNotifier(t *testing.T) {
 // its extra vars redacted, since a registered channel is external. Non-parallel for the same
 // registry-write reason as TestRegisterNotifier.
 func TestDispatcherNotifiesRegistered(t *testing.T) {
+	t.Parallel()
 	got := make(chan *run.Run, 8)
 	RegisterNotifier("regdeliver", NotifierFunc(func(_ context.Context, r *run.Run) error {
 		select {

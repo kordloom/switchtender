@@ -17,6 +17,7 @@ import (
 // TestDispatcherNotifiesPagerDuty verifies a failed run triggers a PagerDuty incident with the right
 // routing key, dedup key, and severity, and that a succeeded run pages no one.
 func TestDispatcherNotifiesPagerDuty(t *testing.T) {
+	t.Parallel()
 	received := make(chan pagerDutyEvent, 4)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var e pagerDutyEvent
