@@ -83,8 +83,12 @@ type Template struct {
 	Image string `json:"image,omitempty"`
 	// PullCredentialID names a registry credential for pulling a private Image. Empty for public.
 	PullCredentialID string `json:"pull_credential_id,omitempty"`
-	// CredentialIDs names stored credentials materialized for the run.
+	// CredentialIDs names stored credentials materialized for every launch of the template.
 	CredentialIDs []string `json:"credential_ids,omitempty"`
+	// SelectableCredentialIDs names credentials a launch may choose from, prompt on launch. A launch
+	// applies its chosen subset on top of CredentialIDs, and a choice outside this set is rejected, so
+	// a template offers a constrained menu rather than any credential.
+	SelectableCredentialIDs []string `json:"selectable_credential_ids,omitempty"`
 	// ExtraVars are injected into the run as extra vars, under any survey answers.
 	ExtraVars map[string]any `json:"extra_vars,omitempty"`
 	// Survey prompts the launcher for typed values that become extra vars.

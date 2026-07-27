@@ -46,7 +46,7 @@ Every endpoint the server exposes. The API is served under the `/v1` base path. 
 | DELETE | `/v1/projects/{id}`        | Delete a project. 409 while a template or source uses it.|
 | POST   | `/v1/templates`            | Save a launch preset.                                   |
 | GET    | `/v1/templates`            | List templates.                                         |
-| POST   | `/v1/templates/{id}/launch`| Launch a template, answering its survey if it has one.  |
+| POST   | `/v1/templates/{id}/launch`| Launch a template, answering its survey and choosing selectable credentials if it has them. |
 | PUT    | `/v1/templates/{id}`       | Update a template.                                      |
 | DELETE | `/v1/templates/{id}`       | Delete a template.                                      |
 | POST   | `/v1/triggers`             | Create a webhook trigger, returns a signing secret once.|

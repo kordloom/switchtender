@@ -5,6 +5,7 @@ import (
 	"errors"
 	"maps"
 	"net/http"
+	"slices"
 	"time"
 
 	"go.uber.org/zap"
@@ -47,6 +48,9 @@ type createTemplateRequest struct {
 	PullCredentialID string `json:"pull_credential_id,omitempty"`
 	// CredentialIDs names stored credentials for launches.
 	CredentialIDs []string `json:"credential_ids,omitempty"`
+	// SelectableCredentialIDs names credentials a launch may choose from, applied on top of
+	// CredentialIDs. A launch that picks outside this set is rejected. Optional.
+	SelectableCredentialIDs []string `json:"selectable_credential_ids,omitempty"`
 	// ExtraVars are injected into every launch.
 	ExtraVars map[string]any `json:"extra_vars,omitempty"`
 	// Survey prompts the launcher for typed values that become extra vars.
@@ -115,7 +119,8 @@ func createTemplateHandler(store template.Store, log *zap.Logger) http.HandlerFu
 			Playbook: req.Playbook, Inventory: req.Inventory, InventoryID: req.InventoryID,
 			Tool: req.Tool, Command: req.Command, DryRun: req.DryRun,
 			Shards:        req.Shards,
-			CredentialIDs: req.CredentialIDs, ExtraVars: req.ExtraVars, Survey: req.Survey,
+			CredentialIDs: req.CredentialIDs, SelectableCredentialIDs: req.SelectableCredentialIDs,
+			ExtraVars: req.ExtraVars, Survey: req.Survey,
 			Notifications: req.Notifications,
 			Queue:         req.Queue, Image: req.Image, PullCredentialID: req.PullCredentialID,
 			OrgID:     req.OrgID,
@@ -152,7 +157,8 @@ func updateTemplateHandler(store template.Store, log *zap.Logger) http.HandlerFu
 			Playbook: req.Playbook, Inventory: req.Inventory, InventoryID: req.InventoryID,
 			Tool: req.Tool, Command: req.Command, DryRun: req.DryRun,
 			Shards:        req.Shards,
-			CredentialIDs: req.CredentialIDs, ExtraVars: req.ExtraVars, Survey: req.Survey,
+			CredentialIDs: req.CredentialIDs, SelectableCredentialIDs: req.SelectableCredentialIDs,
+			ExtraVars: req.ExtraVars, Survey: req.Survey,
 			Notifications: req.Notifications,
 			Queue:         req.Queue, Image: req.Image, PullCredentialID: req.PullCredentialID,
 			OrgID: req.OrgID,
@@ -225,6 +231,30 @@ func deleteTemplateHandler(store template.Store, log *zap.Logger) http.HandlerFu
 	}
 }
 
+// launchTemplateRequest is the optional JSON body for a template launch: survey answers and a chosen
+// subset of the template's selectable credentials. Both are optional, so an empty body is valid.
+type launchTemplateRequest struct {
+	// Answers are survey field values, keyed by the field's var name.
+	Answers map[string]any `json:"answers,omitempty"`
+	// CredentialIDs is the chosen subset of the template's selectable credentials.
+	CredentialIDs []string `json:"credential_ids,omitempty"`
+}
+
+// mergeCredentialIDs returns base followed by any extra ids not already present, dropping blanks, so
+// a launch's chosen credentials apply on top of the template's always-on set without duplication.
+func mergeCredentialIDs(base, extra []string) []string {
+	seen := make(map[string]bool, len(base)+len(extra))
+	out := make([]string, 0, len(base)+len(extra))
+	for _, id := range slices.Concat(base, extra) {
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, id)
+	}
+	return out
+}
+
 // launchTemplateHandler submits a run from a saved template in one action.
 func launchTemplateHandler(store template.Store, submitter Submitter, authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	if submitter == nil {
@@ -256,9 +286,32 @@ func launchTemplateHandler(store template.Store, submitter Submitter, authz *aut
 			return
 		}
 
+		// Decode the optional launch body: survey answers and a chosen credential subset. An empty
+		// body is valid and means no answers and no selection.
+		var launchReq launchTemplateRequest
+		if r.Body != nil {
+			_ = json.NewDecoder(r.Body).Decode(&launchReq)
+		}
+
+		// A launch may choose only from the template's selectable set, so it cannot pull an arbitrary
+		// credential. The chosen subset applies on top of the always-on CredentialIDs.
+		selectable := make(map[string]bool, len(t.SelectableCredentialIDs))
+		for _, sid := range t.SelectableCredentialIDs {
+			selectable[sid] = true
+		}
+		for _, cid := range launchReq.CredentialIDs {
+			if !selectable[cid] {
+				respondError(w, log, http.StatusBadRequest,
+					"credential "+cid+" is not selectable for this template")
+				return
+			}
+		}
+		credIDs := mergeCredentialIDs(t.CredentialIDs, launchReq.CredentialIDs)
+
 		// Use on the template is not enough. Authorize every object the run will touch, so a launch
-		// cannot borrow a project, inventory, or credentials the actor was never granted.
-		objects := append([]string{t.ProjectID, t.InventoryID, t.PullCredentialID}, t.CredentialIDs...)
+		// cannot borrow a project, inventory, or credential the actor was never granted, including a
+		// credential chosen at launch.
+		objects := append([]string{t.ProjectID, t.InventoryID, t.PullCredentialID}, credIDs...)
 		if denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse, objects...)) {
 			return
 		}
@@ -266,12 +319,7 @@ func launchTemplateHandler(store template.Store, submitter Submitter, authz *aut
 		vars := map[string]any{}
 		maps.Copy(vars, t.ExtraVars)
 		if len(t.Survey) > 0 {
-			answers := map[string]any{}
-			// Answers are optional in the body; an empty body still validates required-free surveys.
-			if r.Body != nil {
-				_ = json.NewDecoder(r.Body).Decode(&answers)
-			}
-			resolved, err := template.ResolveSurvey(t.Survey, answers)
+			resolved, err := template.ResolveSurvey(t.Survey, launchReq.Answers)
 			if err != nil {
 				respondError(w, log, http.StatusBadRequest, err.Error())
 				return
@@ -280,7 +328,7 @@ func launchTemplateHandler(store template.Store, submitter Submitter, authz *aut
 		}
 
 		opts := []run.SubmitOption{
-			run.WithCredentialIDs(t.CredentialIDs),
+			run.WithCredentialIDs(credIDs),
 			run.WithExtraVars(vars),
 			run.WithTool(t.Tool), run.WithCommand(t.Command), run.WithDryRun(t.DryRun),
 		}

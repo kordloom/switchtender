@@ -2744,7 +2744,7 @@ function openSurvey(t) {
 			else answers[el.dataset.var] = raw;
 		}
 		try {
-			const created = await postAction("/templates/" + t.id + "/launch", answers);
+			const created = await postAction("/templates/" + t.id + "/launch", { answers });
 			location.href = "/ui/runs/" + created.id;
 		} catch (err) {
 			document.getElementById("survey-status").textContent = "Launch failed: " + err.message;

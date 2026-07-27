@@ -56,10 +56,13 @@ them as <code>TF_VAR_</code> variables.</p>
 <p>From the UI, select the template and confirm the survey if it has one. From the API:</p>
 <pre><code>curl -s -X POST localhost:8080/v1/templates/{id}/launch \
   -H 'content-type: application/json' \
-  -d '{&quot;environment&quot;:&quot;staging&quot;}'
+  -d '{&quot;answers&quot;:{&quot;environment&quot;:&quot;staging&quot;},&quot;credential_ids&quot;:[&quot;cred_prod_key&quot;]}'
 </code></pre>
-<p>The body is the survey answers themselves, one key per field. Send an empty body when the template
-has no required survey fields.</p>
+<p>The body carries the survey answers under <code>answers</code>, one key per field, and an optional
+<code>credential_ids</code> list choosing from the template's selectable credentials. Both are optional, so an
+empty body launches a template that has no required survey fields and no selectable credentials. A
+chosen credential must be in the template's selectable set, and it applies on top of the credentials
+the template always uses.</p>
 <p>Next: run it on a cadence with <a href="/docs/tutorial-schedule-a-job">schedule a job</a>.</p>
 
 		</main>
