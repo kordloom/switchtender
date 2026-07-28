@@ -80,7 +80,12 @@
 				<label class="field-label">Survey, JSON array
 					<textarea id="tpl-survey" class="input mono" rows="2" placeholder='[{"var":"env","label":"Environment","type":"choice","required":true,"choices":["prod","stage"]}]'></textarea>
 				</label>
-				<label class="field-label check-label">
+				<div class="field-label notify-block">Notifications
+						<div id="tpl-notify-rows" class="notify-rows"></div>
+						<button type="button" id="tpl-notify-add" class="button">Add notification</button>
+						<span class="field-hint">Each target posts this template's run results to its channel. Failure only limits it to trouble.</span>
+					</div>
+					<label class="field-label check-label">
 					<input type="checkbox" id="tpl-dry-run"> Dry run, no changes
 				</label>
 				<div class="launch-actions">

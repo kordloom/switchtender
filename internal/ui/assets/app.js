@@ -358,8 +358,8 @@ function mountPageDocs() {
 // LIST_PAGES are the pages whose main table is a searchable list.
 // LIST_PAGES get the client-side row filter. The runs page is excluded because it searches on the
 // server, across every run rather than only the loaded page.
-const LIST_PAGES = ["jobtemplates", "credentials", "projects", "inventories",
-	"sources", "schedules", "users", "workers", "fleet", "tasks", "host", "policies", "drift"];
+const LIST_PAGES = ["jobtemplates", "credentials", "projects", "inventories", "sources",
+	"schedules", "users", "workers", "fleet", "tasks", "host", "policies", "drift", "audit"];
 
 // mountListFilter adds a search box above the main list table and filters its rows by text as you
 // type, so every list is searchable. It reads the rows live, so it works no matter when they load.
@@ -379,6 +379,7 @@ function mountListFilter() {
 	wrap.appendChild(input);
 	wrap.appendChild(count);
 	table.parentNode.insertBefore(wrap, table);
+	const preset = new URLSearchParams(location.search).get("q");
 	input.addEventListener("input", () => {
 		const q = input.value.trim().toLowerCase();
 		let shown = 0;
@@ -392,6 +393,13 @@ function mountListFilter() {
 		count.textContent = q ? shown + " shown" : "";
 		table.dispatchEvent(new CustomEvent("rowsfiltered"));
 	});
+	if (preset) {
+		input.value = preset;
+		// Rows may not be loaded yet, so the preset re-applies as they arrive.
+		new MutationObserver(() => input.dispatchEvent(new Event("input")))
+			.observe(tbody, { childList: true });
+		input.dispatchEvent(new Event("input"));
+	}
 }
 
 // TOURS is the guided-tour registry. Each tour runs on one page and walks a sequence of steps; a
@@ -3152,6 +3160,58 @@ function syncTemplateTool() {
 // openTemplateEdit fills the template dialog with an existing record and switches it to edit mode.
 // The dialog does not expose inventory_id, so it is carried through the form dataset to avoid
 // dropping a stored inventory reference on save.
+// notifyRow appends one notification target row to the template dialog.
+function notifyRow(target) {
+	const rows = document.getElementById("tpl-notify-rows");
+	if (!rows) return;
+	const row = document.createElement("div");
+	row.className = "notify-row";
+	const kind = document.createElement("select");
+	kind.className = "input";
+	for (const k of ["webhook", "slack", "mattermost", "rocketchat", "discord", "teams", "ntfy"]) {
+		const opt = document.createElement("option");
+		opt.value = k;
+		opt.textContent = k;
+		kind.appendChild(opt);
+	}
+	kind.value = (target && target.kind) || "slack";
+	const url = document.createElement("input");
+	url.className = "input mono";
+	url.placeholder = "https://hooks.example/...";
+	url.value = (target && target.url) || "";
+	const fail = document.createElement("label");
+	fail.className = "check-label notify-fail";
+	const cb = document.createElement("input");
+	cb.type = "checkbox";
+	cb.checked = !!(target && target.on_failure);
+	fail.appendChild(cb);
+	fail.appendChild(document.createTextNode(" Failure only"));
+	const del = document.createElement("button");
+	del.type = "button";
+	del.className = "modal-close";
+	del.setAttribute("aria-label", "Remove notification");
+	del.textContent = "\u00d7";
+	del.addEventListener("click", () => row.remove());
+	row.appendChild(kind);
+	row.appendChild(url);
+	row.appendChild(fail);
+	row.appendChild(del);
+	rows.appendChild(row);
+}
+
+// collectNotifyTargets reads the dialog's notification rows, skipping rows without a URL.
+function collectNotifyTargets() {
+	const out = [];
+	for (const row of document.querySelectorAll("#tpl-notify-rows .notify-row")) {
+		const url = row.querySelector("input.mono").value.trim();
+		if (!url) continue;
+		const target = { kind: row.querySelector("select").value, url };
+		if (row.querySelector("input[type=checkbox]").checked) target.on_failure = true;
+		out.push(target);
+	}
+	return out;
+}
+
 function openTemplateEdit(t) {
 	const form = document.getElementById("template-form");
 	form.dataset.editId = t.id;
@@ -3174,6 +3234,11 @@ function openTemplateEdit(t) {
 	document.getElementById("tpl-tool").value = t.tool || "ansible";
 	document.getElementById("tpl-command").value = t.command || "";
 	document.getElementById("tpl-dry-run").checked = !!t.dry_run;
+	const notifyRows = document.getElementById("tpl-notify-rows");
+	if (notifyRows) {
+		notifyRows.innerHTML = "";
+		for (const target of t.notifications || []) notifyRow(target);
+	}
 	syncTemplateTool();
 	document.getElementById("tpl-status").textContent = "";
 	setModalTitle("template", "Edit template");
@@ -3183,6 +3248,8 @@ function openTemplateEdit(t) {
 // wireTemplateForm hooks the template dialog up to POST /templates for a new record and PUT
 // /templates/{id} when editing. The New button resets the dialog to add mode.
 function wireTemplateForm() {
+	const notifyAdd = document.getElementById("tpl-notify-add");
+	if (notifyAdd) notifyAdd.addEventListener("click", () => notifyRow());
 	fillSelect(document.getElementById("tpl-project"), "/projects", "projects", (p) => p.name);
 	fillSelect(document.getElementById("tpl-credentials"), "/credentials", "credentials",
 		(c) => c.name + " (" + c.kind + ")");
@@ -3250,6 +3317,7 @@ function wireTemplateForm() {
 				return;
 			}
 		}
+		payload.notifications = collectNotifyTargets();
 		const editId = form.dataset.editId;
 		if (editId && form.dataset.inventoryId) payload.inventory_id = form.dataset.inventoryId;
 		try {
@@ -3632,6 +3700,22 @@ function wireInventoryForm() {
 }
 
 // loadInventories populates the inventory table with delete actions.
+// hostCount estimates how many hosts an ini inventory lists. YAML content returns -1, unknown.
+function hostCount(content) {
+	const text = String(content || "");
+	if (!text.trim()) return 0;
+	if (/^(---|all\s*:)/m.test(text)) return -1;
+	let n = 0;
+	let skip = false;
+	for (const raw of text.split("\n")) {
+		const line = raw.trim();
+		if (!line || line.startsWith("#") || line.startsWith(";")) continue;
+		if (line.startsWith("[")) { skip = /:(vars|children)\]$/.test(line); continue; }
+		if (!skip) n++;
+	}
+	return n;
+}
+
 async function loadInventories() {
 	try {
 		const data = await getJSON("/inventories");
@@ -3644,6 +3728,12 @@ async function loadInventories() {
 		for (const i of inventories) {
 			const tr = document.createElement("tr");
 			tr.appendChild(td(i.name));
+			const count = hostCount(i.content);
+			const hostsCell = td(count < 0 ? "\u2014" : String(count));
+			hostsCell.dataset.tip = count < 0
+				? "YAML inventory: host count not estimated"
+				: "Approximate, counted from the stored content";
+			tr.appendChild(hostsCell);
 			tr.appendChild(tdTime(i.created_at));
 			const actions = deleteCell("/inventories/" + i.id, "inventory " + i.name, tr, "No inventories yet.");
 			actions.insertBefore(editButton(() => openInventoryEdit(i)), actions.firstChild);
@@ -5204,6 +5294,11 @@ async function loadDetail(runId) {
 	if (fullLog) fullLog.href = streamURL("/runs/" + runId + "/logs");
 	const exportEvents = document.getElementById("export-events");
 	if (exportEvents) exportEvents.href = streamURL("/runs/" + runId + "/events?download=1");
+	const auditLink = document.getElementById("audit-link");
+	if (auditLink) {
+		auditLink.href = "/ui/audit?q=" + encodeURIComponent(runId);
+		auditLink.dataset.tip = "Every audited change that mentions this run";
+	}
 	const copyLink = document.getElementById("copy-link");
 	if (copyLink) {
 		copyLink.dataset.tip = "Copy a link to this run";

@@ -882,3 +882,11 @@ body[data-theme="dark"] {
 .activity-seg.other { background: var(--skipped); }
 .activity-seg.empty { height: 3px; background: var(--surface-3); }
 .activity-label { font-size: 10.5px; color: var(--muted); white-space: nowrap; }
+
+/* Notification target rows in the template dialog. */
+.notify-block { grid-column: 1 / -1; }
+.notify-rows { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 8px; }
+.notify-row { display: grid; grid-template-columns: 130px 1fr auto auto; gap: 8px; align-items: center; }
+.notify-row .input { font-weight: 400; text-transform: none; letter-spacing: normal; }
+.notify-fail { flex-direction: row; gap: 6px; white-space: nowrap; }
+#tpl-notify-add { justify-self: start; align-self: start; }
