@@ -868,3 +868,17 @@ body[data-theme="dark"] {
 .copy-btn:hover { background: var(--surface-2); color: var(--text); }
 .copy-btn.copied { color: var(--ok); }
 .copy-btn svg { width: 13px; height: 13px; }
+
+/* Live log filter input inside the panel band. */
+.log-filter { margin-left: auto; width: 220px; padding: 5px 10px; font-size: 12.5px; }
+
+/* Activity chart: one stacked column per day. */
+.activity { display: flex; align-items: flex-end; gap: 6px; padding: 4px 2px 0; }
+.activity-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 0; }
+.activity-bar { display: flex; flex-direction: column-reverse; justify-content: flex-start; width: 100%; max-width: 34px; min-height: 66px; }
+.activity-seg { width: 100%; border-radius: 3px; margin-top: 2px; }
+.activity-seg.succeeded { background: var(--ok); }
+.activity-seg.failed { background: var(--failed); }
+.activity-seg.other { background: var(--skipped); }
+.activity-seg.empty { height: 3px; background: var(--surface-3); }
+.activity-label { font-size: 10.5px; color: var(--muted); white-space: nowrap; }

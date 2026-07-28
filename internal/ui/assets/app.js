@@ -1750,6 +1750,7 @@ document.addEventListener("DOMContentLoaded", () => {
 	} else if (page === "tasks") {
 		loadTasks();
 	} else if (page === "schedules") {
+		wireCronPreview();
 		wireModal("schedule");
 		wireScheduleForm();
 		loadSchedules();
@@ -3987,6 +3988,7 @@ async function loadOverview() {
 		const runs = runsRes.runs || [];
 		const hosts = fleetRes.hosts || [];
 		renderOverviewMetrics(runs, hosts);
+		renderActivity(runs);
 		renderRecentRuns(runs.slice(0, 8));
 		renderFleetSnapshot(hosts);
 		setStatus("");
@@ -4047,6 +4049,71 @@ function renderRecentRuns(runs) {
 		row.appendChild(go);
 		el.appendChild(row);
 	}
+}
+
+// renderActivity draws a stacked daily bar chart of run outcomes over the last two weeks, from
+// the runs the overview already fetched. Bars carry tips; statuses use the reserved colors.
+function renderActivity(runs) {
+	const panel = document.getElementById("activity-panel");
+	const el = document.getElementById("activity");
+	if (!panel || !el || !runs.length) return;
+	const days = [];
+	const byDay = {};
+	const today = new Date();
+	for (let i = 13; i >= 0; i--) {
+		const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() - i);
+		const key = d.toISOString().slice(0, 10);
+		days.push({ key, label: d.toLocaleDateString(undefined, { month: "short", day: "numeric" }) });
+		byDay[key] = { succeeded: 0, failed: 0, other: 0 };
+	}
+	let counted = 0;
+	for (const r of runs) {
+		const at = r.created_at && new Date(r.created_at);
+		if (!at || isNaN(at)) continue;
+		const key = new Date(at.getFullYear(), at.getMonth(), at.getDate()).toISOString().slice(0, 10);
+		if (!byDay[key]) continue;
+		counted++;
+		if (r.status === "succeeded") byDay[key].succeeded++;
+		else if (r.status === "failed") byDay[key].failed++;
+		else byDay[key].other++;
+	}
+	if (!counted) return;
+	const max = Math.max(1, ...days.map((d) => {
+		const c = byDay[d.key];
+		return c.succeeded + c.failed + c.other;
+	}));
+	el.innerHTML = "";
+	for (const day of days) {
+		const c = byDay[day.key];
+		const total = c.succeeded + c.failed + c.other;
+		const col = document.createElement("div");
+		col.className = "activity-col";
+		col.dataset.tip = day.label + ": " + c.succeeded + " succeeded, " + c.failed + " failed" +
+			(c.other ? ", " + c.other + " other" : "");
+		const bar = document.createElement("div");
+		bar.className = "activity-bar";
+		for (const part of [
+			{ n: c.other, cls: "other" },
+			{ n: c.failed, cls: "failed" },
+			{ n: c.succeeded, cls: "succeeded" },
+		]) {
+			if (!part.n) continue;
+			const seg = document.createElement("div");
+			seg.className = "activity-seg " + part.cls;
+			seg.style.height = Math.max(3, Math.round((part.n / max) * 64)) + "px";
+			bar.appendChild(seg);
+		}
+		if (!total) bar.appendChild(Object.assign(document.createElement("div"), { className: "activity-seg empty" }));
+		col.appendChild(bar);
+		const lab = document.createElement("span");
+		lab.className = "activity-label";
+		lab.textContent = day.label.replace(/\D+$/, "").trim() === "" ? day.label : day.label.split(" ")[1];
+		col.appendChild(lab);
+		el.appendChild(col);
+	}
+	const note = document.getElementById("activity-note");
+	if (note) note.textContent = runs.length >= 200 ? "From the latest 200 runs" : "Runs per day, last 14 days";
+	panel.hidden = false;
 }
 
 // renderFleetSnapshot fills the overview side card with the hosts most worth a look: flaky
@@ -4810,6 +4877,34 @@ async function fillTemplateSelect(select) {
 }
 
 // openScheduleEdit fills the schedule dialog with an existing record and switches it to edit mode.
+// wireCronPreview shows the next firings for the cron spec as it is typed, so a schedule is
+// verifiable before saving.
+function wireCronPreview() {
+	const input = document.getElementById("schedule-cron");
+	const out = document.getElementById("cron-preview");
+	if (!input || !out) return;
+	let timer = 0;
+	const update = async () => {
+		const spec = input.value.trim();
+		if (!spec) { out.textContent = ""; return; }
+		try {
+			const data = await getJSON("/schedules/preview?cron=" + encodeURIComponent(spec));
+			const times = (data.next || []).slice(0, 3).map((t) =>
+				new Date(t).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }));
+			out.textContent = times.length ? "Next: " + times.join("  ·  ") : "";
+			out.classList.remove("error-text");
+		} catch {
+			out.textContent = "Invalid cron expression";
+			out.classList.add("error-text");
+		}
+	};
+	input.addEventListener("input", () => {
+		window.clearTimeout(timer);
+		timer = window.setTimeout(update, 350);
+	});
+	update();
+}
+
 function openScheduleEdit(s) {
 	const form = document.getElementById("schedule-form");
 	form.dataset.editId = s.id;
@@ -5138,8 +5233,34 @@ async function loadDetail(runId) {
 		});
 	}
 	wireActions(runId);
+	wireLogFilter();
+	window.setInterval(() => {
+		for (const el of document.querySelectorAll(".value.ticking")) {
+			el.textContent = fmtDuration(el.dataset.started, new Date().toISOString());
+		}
+	}, 1000);
 	try {
 		const run = await getJSON("/runs/" + runId);
+		const rerun = document.getElementById("rerun-run");
+		if (rerun && !run.parent_id && run.kind !== "pipeline") {
+			rerun.hidden = false;
+			rerun.dataset.tip = "Start a fresh run with this exact spec";
+			if (isReadOnly()) {
+				rerun.disabled = true;
+				rerun.dataset.tip = "Disabled in the demo";
+			} else {
+				rerun.addEventListener("click", async () => {
+					rerun.disabled = true;
+					try {
+						const created = await postAction("/runs/" + runId + "/rerun");
+						location.href = "/ui/runs/" + created.id;
+					} catch (err) {
+						setStatus("Rerun failed: " + err.message);
+						rerun.disabled = false;
+					}
+				});
+			}
+		}
 		// A split or pipeline parent has no output of its own; each shard or step carries its log
 		// and events. Hiding the links beats serving blanks.
 		const isParent = !run.parent_id && (run.kind === "pipeline" || run.kind === "split" || run.shard_count);
@@ -5679,6 +5800,12 @@ const logCap = 262144;
 // trims the pane back to the cap when it grows past it.
 function appendLog(chunk) {
 	const pre = document.getElementById("log");
+	detailState.logRaw = ((detailState.logRaw || "") + chunk).slice(-logCap * 2);
+	if (detailState.logFilter) {
+		renderLogView();
+		document.getElementById("log-panel").hidden = false;
+		return;
+	}
 	const nearBottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 40;
 	pre.appendChild(document.createTextNode(chunk));
 	detailState.logLen = (detailState.logLen || 0) + chunk.length;
@@ -5688,6 +5815,34 @@ function appendLog(chunk) {
 	}
 	document.getElementById("log-panel").hidden = false;
 	if (nearBottom) pre.scrollTop = pre.scrollHeight;
+}
+
+// renderLogView draws the log pane from the raw buffer, filtered when a query is set.
+function renderLogView() {
+	const pre = document.getElementById("log");
+	const q = (detailState.logFilter || "").toLowerCase();
+	if (!q) {
+		pre.textContent = detailState.logRaw || "";
+		detailState.logLen = pre.textContent.length;
+		pre.scrollTop = pre.scrollHeight;
+		return;
+	}
+	const lines = (detailState.logRaw || "").split("\n").filter((l) => l.toLowerCase().includes(q));
+	pre.textContent = lines.length ? lines.join("\n") : "No log lines match.";
+}
+
+// wireLogFilter filters the live log pane by substring as you type.
+function wireLogFilter() {
+	const input = document.getElementById("log-filter");
+	if (!input) return;
+	input.addEventListener("input", () => {
+		if (!detailState) return;
+		if (detailState.logRaw === undefined) {
+			detailState.logRaw = document.getElementById("log").textContent;
+		}
+		detailState.logFilter = input.value.trim();
+		renderLogView();
+	});
 }
 
 // renderHeader fills the run header fields.
@@ -5737,7 +5892,15 @@ function renderHeader(run) {
 	if (run.exit_code !== undefined && run.exit_code !== null) {
 		el.appendChild(field("Exit", String(run.exit_code)));
 	}
-	el.appendChild(field("Duration", fmtDuration(run.started_at, run.ended_at)));
+	if (run.status === "running" && run.started_at) {
+		const dur = field("Duration", fmtDuration(run.started_at, new Date().toISOString()));
+		const val = dur.querySelector(".value");
+		val.classList.add("ticking");
+		val.dataset.started = run.started_at;
+		el.appendChild(dur);
+	} else {
+		el.appendChild(field("Duration", fmtDuration(run.started_at, run.ended_at)));
+	}
 	el.hidden = false;
 	updateActions(run);
 }

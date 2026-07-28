@@ -1408,3 +1408,92 @@ func TestRunAccessScopedByGrant(t *testing.T) {
 		t.Errorf("granted read = %d, want 200", code)
 	}
 }
+
+// TestRerunRun verifies a finished run reruns with its spec replayed and the refusals hold.
+func TestRerunRun(t *testing.T) {
+	t.Parallel()
+	shard0 := 0
+	three := 3
+	parent := "run_parent"
+	tests := []struct {
+		Saved            *run.Run
+		WantStatus       int
+		WantBodyContains string
+		WantShards       int
+	}{{ // Test 0: A finished plain run reruns with its spec.
+		Saved: &run.Run{
+			ID: "run_1", Playbook: "site.yml", Inventory: "inv.ini", Status: run.StatusFailed,
+			Tool: "ansible", Limit: "web*", DryRun: true, CredentialIDs: []string{"cred_1"},
+		},
+		WantStatus: http.StatusAccepted, WantBodyContains: "run_new",
+	}, { // Test 1: A split parent reruns as a new split.
+		Saved: &run.Run{
+			ID: "run_1", Playbook: "site.yml", Inventory: "inv.ini", Status: run.StatusFailed,
+			Kind: run.KindSplit, ShardCount: &three,
+		},
+		WantStatus: http.StatusAccepted, WantBodyContains: "run_new", WantShards: 3,
+	}, { // Test 2: A running run refuses.
+		Saved: &run.Run{
+			ID: "run_1", Playbook: "site.yml", Inventory: "inv.ini", Status: run.StatusRunning,
+		},
+		WantStatus: http.StatusConflict, WantBodyContains: "has not finished",
+	}, { // Test 3: A shard child refuses.
+		Saved: &run.Run{
+			ID: "run_1", Playbook: "site.yml", Inventory: "inv.ini", Status: run.StatusFailed,
+			ParentID: &parent, ShardIndex: &shard0,
+		},
+		WantStatus: http.StatusConflict, WantBodyContains: "rerun the parent",
+	}, { // Test 4: A pipeline parent refuses.
+		Saved: &run.Run{
+			ID: "run_1", Playbook: "release", Inventory: "inv.ini", Status: run.StatusFailed,
+			Kind: run.KindPipeline,
+		},
+		WantStatus: http.StatusConflict, WantBodyContains: "from its workflow",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			store := run.NewMemStore()
+			if err := store.Save(context.Background(), test.Saved); err != nil {
+				t.Fatalf("Save() error = %v", err)
+			}
+			sub := &fakeSubmitter{run: &run.Run{ID: "run_new", Status: run.StatusPending}}
+			handler := New(store, sub, zap.NewNop()).Handler()
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec,
+				httptest.NewRequest(http.MethodPost, "/v1/runs/run_1/rerun", nil))
+			if rec.Code != test.WantStatus {
+				t.Fatalf("status = %d, want %d, body %s", rec.Code, test.WantStatus, rec.Body.String())
+			}
+			if !strings.Contains(rec.Body.String(), test.WantBodyContains) {
+				t.Errorf("body %q does not contain %q", rec.Body.String(), test.WantBodyContains)
+			}
+			if test.WantShards != 0 && sub.gotShards != test.WantShards {
+				t.Errorf("shards = %d, want %d", sub.gotShards, test.WantShards)
+			}
+			if test.WantStatus == http.StatusAccepted && test.WantShards == 0 {
+				if sub.gotRun == nil || sub.gotRun.Limit != test.Saved.Limit || sub.gotRun.DryRun != test.Saved.DryRun {
+					t.Errorf("submitted spec = %+v, want limit %q dry %v", sub.gotRun, test.Saved.Limit, test.Saved.DryRun)
+				}
+			}
+		})
+	}
+}
+
+// TestSchedulePreview verifies the cron preview returns firings and rejects bad specs.
+func TestSchedulePreview(t *testing.T) {
+	t.Parallel()
+	handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop()).Handler()
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/schedules/preview?cron=0+2+*+*+*", nil))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "next") {
+		t.Fatalf("preview = %d %s, want 200 with next", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/schedules/preview?cron=nope", nil))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid preview = %d, want 400", rec.Code)
+	}
+}

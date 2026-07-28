@@ -55,6 +55,7 @@
 			<div class="panel-head">
 				<h2>Live log</h2>
 				<span id="live-indicator" class="live-dot" hidden>live</span>
+				<input id="log-filter" class="input log-filter" type="search" placeholder="Filter log lines" aria-label="Filter log lines">
 			</div>
 			<pre class="log" id="log"></pre>
 		</section>
@@ -64,6 +65,7 @@
 			<a id="export-events" class="button" href="#" download>Export events</a>
 			<button id="export-results" class="button" type="button">Export results</button>
 			<button id="copy-link" class="button" type="button">Copy link</button>
+			<button id="rerun-run" class="button" type="button" hidden>Run again</button>
 			<button id="retry-run" class="button" hidden>Retry failed shards</button>
 			<button id="approve-run" class="button primary" hidden>Approve</button>
 			<button id="reject-run" class="button danger" hidden>Reject</button>

@@ -678,6 +678,98 @@ func retryRunHandler(store run.Store, retrier Retrier, authz *authorizer, log *z
 	}
 }
 
+// rerunOptions rebuilds the submit options a stored run was created with, so a rerun replays
+// the full spec: tool, command, credentials, project, stored inventory, queue, image, extra
+// vars, mode, and host limit.
+func rerunOptions(rn *run.Run) []run.SubmitOption {
+	var opts []run.SubmitOption
+	if rn.Tool != "" {
+		opts = append(opts, run.WithTool(rn.Tool))
+	}
+	if rn.Command != "" {
+		opts = append(opts, run.WithCommand(rn.Command))
+	}
+	if len(rn.CredentialIDs) > 0 {
+		opts = append(opts, run.WithCredentialIDs(rn.CredentialIDs))
+	}
+	if rn.ProjectID != "" {
+		opts = append(opts, run.WithProject(rn.ProjectID))
+	}
+	if rn.InventoryID != "" {
+		opts = append(opts, run.WithInventory(rn.InventoryID))
+	}
+	if rn.Queue != "" {
+		opts = append(opts, run.WithQueue(rn.Queue))
+	}
+	if rn.Image != "" {
+		opts = append(opts, run.WithImage(rn.Image, rn.PullCredentialID))
+	}
+	if len(rn.ExtraVars) > 0 {
+		opts = append(opts, run.WithExtraVars(rn.ExtraVars))
+	}
+	if rn.DryRun {
+		opts = append(opts, run.WithDryRun(true))
+	}
+	if rn.Limit != "" {
+		opts = append(opts, run.WithLimit(rn.Limit))
+	}
+	return opts
+}
+
+// rerunRunHandler starts a fresh run with the same spec as a finished one. A split parent reruns
+// as a new split. Pipeline parents and shard or step children are refused, since their spec lives
+// with the workflow or the parent.
+func rerunRunHandler(store run.Store, submitter Submitter, authz *authorizer, log *zap.Logger) http.HandlerFunc {
+	if store == nil {
+		panic("server: rerunRunHandler: Store required")
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		if submitter == nil {
+			respondError(w, log, http.StatusNotFound, "rerun not enabled")
+			return
+		}
+		rn, err := store.Get(r.Context(), r.PathValue("id"))
+		if errors.Is(err, run.ErrNotFound) {
+			respondError(w, log, http.StatusNotFound, "run not found")
+			return
+		}
+		if err != nil {
+			log.Error("server: rerun: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not rerun")
+			return
+		}
+		if authorizeRunAccess(w, r, authz, log, rn) {
+			return
+		}
+		if rn.ParentID != nil {
+			respondError(w, log, http.StatusConflict, "rerun the parent run instead of a shard or step")
+			return
+		}
+		if rn.Kind == run.KindPipeline {
+			respondError(w, log, http.StatusConflict, "rerun the pipeline from its workflow instead")
+			return
+		}
+		if !rn.Status.Terminal() {
+			respondError(w, log, http.StatusConflict, "run has not finished")
+			return
+		}
+		opts := rerunOptions(rn)
+		var created *run.Run
+		if rn.Kind == run.KindSplit && rn.ShardCount != nil && *rn.ShardCount > 1 {
+			created, err = submitter.SubmitSplit(r.Context(), rn.Playbook, rn.Inventory, *rn.ShardCount, opts...)
+		} else {
+			created, err = submitter.Submit(r.Context(), rn.Playbook, rn.Inventory, opts...)
+		}
+		if err != nil {
+			log.Error("server: rerun: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not rerun")
+			return
+		}
+		w.Header().Set("Location", "/v1/runs/"+created.ID)
+		respondJSON(w, log, http.StatusAccepted, created, wantsPretty(r))
+	}
+}
+
 // approveRunHandler releases a run held for approval so it can execute.
 func approveRunHandler(approver Approver, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
