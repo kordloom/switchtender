@@ -802,3 +802,9 @@ body[data-theme="dark"] {
 	--t-dry: #e3b341;
 	--active-bar: #ece8dc;
 }
+
+/* Instant styled tooltips on the theme buttons, shown on hover and keyboard focus. Anchored to
+   the button's left edge so they never clip at the viewport's left side. */
+.theme-btn { position: relative; }
+.theme-btn::after { content: attr(data-tip); position: absolute; bottom: calc(100% + 8px); left: 0; background: var(--surface-3); color: var(--text); font-size: 11.5px; font-weight: 500; padding: 5px 9px; border-radius: 7px; border: 1px solid var(--border); box-shadow: var(--shadow); white-space: nowrap; opacity: 0; pointer-events: none; transform: translateY(2px); transition: opacity 0.12s ease 0.15s, transform 0.12s ease 0.15s; z-index: 80; }
+.theme-btn:hover::after, .theme-btn:focus-visible::after { opacity: 1; transform: none; }

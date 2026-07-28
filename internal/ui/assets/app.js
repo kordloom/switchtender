@@ -1736,9 +1736,9 @@ const GEAR_ICON = '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 
 
 // THEMES lists the selectable appearances: the signature look, then the flat family themes.
 const THEMES = [
-	{ key: "signature", label: "Stitch", desc: "The signature glow", icon: '<path d="M3 16c3.5-4 9-4 12.5-1" stroke-dasharray="3.2 2.6"/><line x1="14" y1="16.5" x2="21" y2="9.5"/>' },
-	{ key: "light", label: "Kord", desc: "Clean white, the kordloom.com style", icon: '<circle cx="12" cy="12" r="4"/><line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/><line x1="4.9" y1="4.9" x2="7" y2="7"/><line x1="17" y1="17" x2="19.1" y2="19.1"/><line x1="4.9" y1="19.1" x2="7" y2="17"/><line x1="17" y1="7" x2="19.1" y2="4.9"/>' },
-	{ key: "dark", label: "Seal", desc: "Warm ink black, the loomseal.com style", icon: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>' },
+	{ key: "signature", label: "Stitch", desc: "The signature glow", tip: "Use Stitch, the signature look", icon: '<path d="M3 16c3.5-4 9-4 12.5-1" stroke-dasharray="3.2 2.6"/><line x1="14" y1="16.5" x2="21" y2="9.5"/>' },
+	{ key: "light", label: "Kord", desc: "Clean white, the kordloom.com style", tip: "Use Kord, the clean white theme", icon: '<circle cx="12" cy="12" r="4"/><line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/><line x1="4.9" y1="4.9" x2="7" y2="7"/><line x1="17" y1="17" x2="19.1" y2="19.1"/><line x1="4.9" y1="19.1" x2="7" y2="17"/><line x1="17" y1="7" x2="19.1" y2="4.9"/>' },
+	{ key: "dark", label: "Seal", desc: "Warm ink black, the loomseal.com style", tip: "Use Seal, the warm ink theme", icon: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>' },
 ];
 
 // currentTheme returns the active theme key, defaulting to the signature look.
@@ -1785,8 +1785,8 @@ function themeGroup() {
 		btn.type = "button";
 		btn.className = "theme-btn";
 		btn.dataset.themeKey = t.key;
-		btn.title = t.label + " theme";
-		btn.setAttribute("aria-label", t.label + " theme");
+		btn.dataset.tip = t.tip;
+		btn.setAttribute("aria-label", t.tip);
 		btn.setAttribute("aria-pressed", "false");
 		btn.innerHTML = svgIcon(t.icon);
 		btn.addEventListener("click", () => setTheme(t.key));
