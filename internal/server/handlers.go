@@ -943,6 +943,25 @@ func runEventsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.
 		if authorizeRunAccess(w, r, authz, log, rn) {
 			return
 		}
+		// download=1 streams every event as a named NDJSON attachment, the export form tooling
+		// consumes line by line; the paged JSON form below serves the UI.
+		if r.URL.Query().Get("download") == "1" {
+			events, err := store.Events(r.Context(), id)
+			if err != nil {
+				log.Error("server: export run events: " + err.Error())
+				respondError(w, log, http.StatusInternalServerError, "could not export run events")
+				return
+			}
+			w.Header().Set("Content-Type", "application/x-ndjson; charset=utf-8")
+			w.Header().Set("Content-Disposition", `attachment; filename="`+id+`-events.ndjson"`)
+			enc := json.NewEncoder(w)
+			for i := range events {
+				if err := enc.Encode(&events[i]); err != nil {
+					return
+				}
+			}
+			return
+		}
 		after := queryInt64(r, "after")
 		limit := queryInt(r, "limit")
 		if limit <= 0 {

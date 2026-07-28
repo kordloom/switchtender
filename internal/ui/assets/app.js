@@ -1457,6 +1457,7 @@ document.addEventListener("DOMContentLoaded", () => {
 	consumeSSOFragment();
 	mountTopbar();
 	mountLiveRegions();
+	explainReadOnly();
 	if (LIST_PAGES.includes(document.body.dataset.page)) mountListFilter();
 	const close = document.getElementById("drill-close");
 	if (close) {
@@ -3167,6 +3168,16 @@ async function loadWorkers() {
 
 // wireAsk hooks the fleet question box up to the ask endpoint. Advisory only: the answer comes
 // from run, health, and drift metadata the viewer can already see, and asking changes nothing.
+// explainReadOnly gives every dimmed table action a tooltip in read-only mode, so a disabled
+// Launch or Delete reads as policy, not breakage.
+function explainReadOnly() {
+	if (!isReadOnly()) return;
+	document.addEventListener("mouseover", (e) => {
+		const b = e.target.closest && e.target.closest("table .button");
+		if (b && !b.title) b.title = "Disabled in this read-only demo. Self-host to use it.";
+	});
+}
+
 function wireAsk() {
 	const go = document.getElementById("ask-go");
 	const input = document.getElementById("ask-input");
@@ -4325,13 +4336,16 @@ let detailState = null;
 async function loadDetail(runId) {
 	const fullLog = document.getElementById("full-log");
 	if (fullLog) fullLog.href = streamURL("/runs/" + runId + "/logs");
+	const exportEvents = document.getElementById("export-events");
+	if (exportEvents) exportEvents.href = streamURL("/runs/" + runId + "/events?download=1");
 	wireActions(runId);
 	try {
 		const run = await getJSON("/runs/" + runId);
-		// A split or pipeline parent has no output of its own; each shard or step carries its log.
-		// Hiding the link beats serving a blank page.
+		// A split or pipeline parent has no output of its own; each shard or step carries its log
+		// and events. Hiding the links beats serving blanks.
 		const isParent = !run.parent_id && (run.kind === "pipeline" || run.kind === "split" || run.shard_count);
 		if (fullLog && isParent) fullLog.hidden = true;
+		if (exportEvents && isParent) exportEvents.hidden = true;
 		if (run.kind === "pipeline" && !run.parent_id) {
 			await loadPipeline(runId);
 		} else if ((run.kind === "split" || run.shard_count) && !run.parent_id) {
