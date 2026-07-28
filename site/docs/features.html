@@ -264,6 +264,23 @@
 </tr>
 </tbody>
 </table>
+<h2 id="operator-toolbelt">Operator toolbelt</h2>
+<ul>
+<li>Rerun any finished run with its exact stored spec, credentials included, from the run page.
+Split parents rerun as a new split. Every rerun is authorized like a fresh launch.</li>
+<li>Launch a template with overrides: host limit, a different stored inventory, selectable
+credential picks, extra vars merged over the template's, and a dry-run toggle. Overrides pass
+the same authorization as the template's own objects.</li>
+<li>The doctor at /ui/doctor verifies every registered reference: templates to inventories,
+projects, and credentials, schedules to templates, and every cron expression, plus credentials
+still waiting for a secret. Each finding links to the page that fixes it.</li>
+<li>Schedules preview their next firings as you type the cron expression.</li>
+<li>Every list exports the filtered rows as CSV or JSON. Runs export events as NDJSON, the full
+log as text, and per-host results as JSON. Credentials are excluded from export on purpose.</li>
+<li>Per-template notification routing is editable in the template dialog: channel, webhook URL,
+and failure-only delivery.</li>
+<li>The overview charts runs per day, and every outcome tick in fleet health links to its run.</li>
+</ul>
 
 		</main>
 	</div>

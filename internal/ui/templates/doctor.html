@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Doctor - SwitchTender</title>
+	<link rel="icon" type="image/png" href="/ui/assets/favicon.png">
+	<link rel="stylesheet" href="/ui/assets/app.css">
+</head>
+<body data-page="doctor"{{if .ReadOnly}} data-readonly="true"{{end}}>
+	<header class="topbar">
+		<div class="brand"><a href="/ui/"><picture><source media="(prefers-color-scheme: dark)" srcset="/ui/assets/logo-train-tracks-dark.png"><img class="brand-logo" src="/ui/assets/logo-train-tracks.png" alt="SwitchTender"></picture>SwitchTender</a></div>
+	</header>
+
+	<main class="content">
+		<div class="page-head">
+			<div class="page-head-text">
+				<h1>Doctor</h1>
+				<p class="muted">Every registered reference, verified: templates to inventories, projects, and credentials, schedules to templates, and every cron expression.</p>
+			</div>
+		</div>
+
+		<div class="summary" id="doctor-summary" hidden></div>
+		<div id="status" class="muted">Running checks.</div>
+
+		<table class="runs" hidden>
+			<thead>
+				<tr>
+					<th>Severity</th>
+					<th>Object</th>
+					<th>Problem</th>
+					<th class="col-actions">Fix</th>
+				</tr>
+			</thead>
+			<tbody id="doctor"></tbody>
+		</table>
+	</main>
+
+	<script src="/ui/assets/app.js"></script>
+</body>
+</html>

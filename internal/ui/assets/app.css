@@ -890,3 +890,7 @@ body[data-theme="dark"] {
 .notify-row .input { font-weight: 400; text-transform: none; letter-spacing: normal; }
 .notify-fail { flex-direction: row; gap: 6px; white-space: nowrap; }
 #tpl-notify-add { justify-self: start; align-self: start; }
+
+/* Drill backdrop and action row: the inspect panel is escapable and actionable. */
+.drill-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.35); z-index: 39; }
+.drill-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border-muted); }

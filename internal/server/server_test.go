@@ -16,10 +16,13 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/auth"
+	"github.com/kordloom/switchtender/internal/credential"
 	"github.com/kordloom/switchtender/internal/dispatch"
 	"github.com/kordloom/switchtender/internal/event"
 	"github.com/kordloom/switchtender/internal/grant"
+	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/live"
+	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/schedule"
@@ -1528,5 +1531,40 @@ func TestLaunchOverrides(t *testing.T) {
 	}
 	if sub.gotRun.ExtraVars["env"] != "stage" {
 		t.Errorf("extra_vars env = %v, want stage (launch overrides template)", sub.gotRun.ExtraVars["env"])
+	}
+}
+
+// TestDoctor verifies broken references, dead schedules, and secretless credentials surface, and
+// a clean control plane reports an all-clear with real counts.
+func TestDoctor(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	tpls := template.NewMemStore()
+	if err := tpls.Save(ctx, &template.Template{
+		ID: "tpl_1", Name: "deploy", Playbook: "site.yml",
+		InventoryID: "inv_gone", CredentialIDs: []string{"cred_gone"},
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	scheds := schedule.NewMemStore()
+	if err := scheds.Save(ctx, &schedule.Schedule{
+		ID: "sch_1", Name: "nightly", Cron: "not a cron", TemplateID: "tpl_gone",
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(),
+		WithTemplates(tpls), WithSchedules(scheds), WithInventories(inventory.NewMemStore()),
+		WithProjects(project.NewMemStore()), WithCredentials(credential.NewMemStore(), nil)).Handler()
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/doctor", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("doctor = %d, body %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, want := range []string{"inv_gone", "cred_gone", "does not parse", "tpl_gone", "\"checked_templates\":1"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("doctor body missing %q in %s", want, body)
+		}
 	}
 }

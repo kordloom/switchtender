@@ -64,3 +64,20 @@ What SwitchTender does today.
 | Guided tours | A tour launcher in the top bar walks the product, the pitch, and the migration path step by step in the live UI, fully keyboard accessible.|
 | Desktop mode | `switchtender desktop` serves on a stable loopback port, keeps its data in a private per-user directory, and opens the UI. Packaging recipes cover a macOS app bundle and a Windows installer.|
 | Migration | `switchtender import awx` and `import semaphore` read an export and create the equivalent projects, inventories, templates, surveys, schedules, and credential shells, with a dry-run report first.|
+
+## Operator toolbelt
+
+- Rerun any finished run with its exact stored spec, credentials included, from the run page.
+  Split parents rerun as a new split. Every rerun is authorized like a fresh launch.
+- Launch a template with overrides: host limit, a different stored inventory, selectable
+  credential picks, extra vars merged over the template's, and a dry-run toggle. Overrides pass
+  the same authorization as the template's own objects.
+- The doctor at /ui/doctor verifies every registered reference: templates to inventories,
+  projects, and credentials, schedules to templates, and every cron expression, plus credentials
+  still waiting for a secret. Each finding links to the page that fixes it.
+- Schedules preview their next firings as you type the cron expression.
+- Every list exports the filtered rows as CSV or JSON. Runs export events as NDJSON, the full
+  log as text, and per-host results as JSON. Credentials are excluded from export on purpose.
+- Per-template notification routing is editable in the template dialog: channel, webhook URL,
+  and failure-only delivery.
+- The overview charts runs per day, and every outcome tick in fleet health links to its run.

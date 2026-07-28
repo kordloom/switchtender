@@ -80,6 +80,7 @@ const NAV_GROUPS = [
 		{ key: "users", href: "/ui/users", label: "Users", desc: "Accounts and roles", admin: true },
 		{ key: "audit", href: "/ui/audit", label: "Audit", desc: "Tamper-evident change log", admin: true },
 		{ key: "policies", href: "/ui/policies", label: "Policies", desc: "Approval rules", admin: true },
+		{ key: "doctor", href: "/ui/doctor", label: "Doctor", desc: "Reference health checks", admin: true },
 	] },
 	{ label: "Help", items: [
 		{ key: "docs", href: "/ui/docs", label: "Docs", desc: "Guides and reference" },
@@ -92,7 +93,7 @@ const PAGE_NAV = {
 	tasks: "tasks", workers: "workers", drift: "drift", projects: "projects", inventories: "inventories",
 	sources: "sources", jobtemplates: "templates", schedules: "schedules", workflows: "workflows",
 	migrate: "migrate", credentials: "credentials", users: "users", audit: "audit",
-	policies: "policies", docs: "docs",
+	policies: "policies", doctor: "doctor", docs: "docs",
 };
 
 // NAV_ICONS holds the inline SVG body for each nav key, stroked in the current color.
@@ -114,6 +115,7 @@ const NAV_ICONS = {
 	users: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
 	audit: '<path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="m9 14 2 2 4-4"/>',
 	policies: '<path d="M12 3l7 3v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/><polyline points="9 12 11 14 15 10"/>',
+	doctor: '<path d="M14.7 6.3a4.8 4.8 0 0 0-6.4 6.4L3 18l3 3 5.3-5.3a4.8 4.8 0 0 0 6.4-6.4l-3.1 3.1-3-3z"/>',
 	docs: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>',
 };
 
@@ -170,7 +172,7 @@ function mountTopbar() {
 // EXPORT_PAGES are the pages whose main table gets CSV and JSON export of the shown rows.
 // Credentials stays out on purpose, so secret-adjacent data never leaves by accident.
 const EXPORT_PAGES = ["runs", "fleet", "drift", "tasks", "workers", "schedules", "jobtemplates",
-	"users", "audit", "host", "projects", "inventories", "sources", "policies"];
+	"users", "audit", "host", "projects", "inventories", "sources", "policies", "doctor"];
 
 // tableRowsData reads the rendered table into headers and rows, skipping the actions column and
 // anything hidden, so an export matches exactly what the user sees after filtering.
@@ -330,6 +332,7 @@ const PAGE_DOCS = {
 	users: { slug: "configuration", label: "Configuration" },
 	audit: { slug: "features", label: "Features" },
 	policies: { slug: "features", label: "Features" },
+	doctor: { slug: "concepts", label: "Concepts" },
 };
 
 // mountPageDocs adds a small guide link to the page header, so every page points at its docs.
@@ -359,7 +362,7 @@ function mountPageDocs() {
 // LIST_PAGES get the client-side row filter. The runs page is excluded because it searches on the
 // server, across every run rather than only the loaded page.
 const LIST_PAGES = ["jobtemplates", "credentials", "projects", "inventories", "sources",
-	"schedules", "users", "workers", "fleet", "tasks", "host", "policies", "drift", "audit"];
+	"schedules", "users", "workers", "fleet", "tasks", "host", "policies", "drift", "audit", "doctor"];
 
 // mountListFilter adds a search box above the main list table and filters its rows by text as you
 // type, so every list is searchable. It reads the rows live, so it works no matter when they load.
@@ -1801,6 +1804,8 @@ document.addEventListener("DOMContentLoaded", () => {
 		loadSources();
 	} else if (page === "migrate") {
 		wireMigrate();
+	} else if (page === "doctor") {
+		loadDoctor();
 	}
 	buildNav();
 	wirePalette();
@@ -2243,6 +2248,8 @@ function wireHinttips() {
 	document.addEventListener("focusin", show);
 	document.addEventListener("focusout", hide);
 	document.addEventListener("scroll", () => { clearTimeout(linkTimer); tip.hidden = true; }, true);
+	document.addEventListener("click", () => { clearTimeout(linkTimer); tip.hidden = true; }, true);
+	document.documentElement.addEventListener("mouseleave", () => { clearTimeout(linkTimer); tip.hidden = true; });
 }
 
 // wirePalette registers the platform search shortcut that toggles the palette, on every page but
@@ -3030,14 +3037,14 @@ async function loadProjects() {
 			actions.insertBefore(editButton(() => openProjectEdit(p)), actions.firstChild);
 			tr.appendChild(actions);
 			inspectable(tr, p.name, [
-				{ label: "Repository", value: p.repo_url },
+				{ label: "Repository", value: p.repo_url, copy: true },
 				{ label: "Branch", value: p.branch || "default" },
 				{ label: "Credential", value: p.credential_id },
 				{ label: "Image", value: p.image },
 				{ label: "Install deps", value: p.install_deps ? "yes" : "no" },
 				{ label: "Pull credential", value: p.pull_credential_id },
 				{ label: "Created", value: fmtTime(p.created_at) },
-				{ label: "ID", value: p.id },
+				{ label: "ID", value: p.id, copy: true },
 			]);
 			tbody.appendChild(tr);
 		}
@@ -3829,10 +3836,22 @@ async function loadInventories() {
 			const actions = deleteCell("/inventories/" + i.id, "inventory " + i.name, tr, "No inventories yet.");
 			actions.insertBefore(editButton(() => openInventoryEdit(i)), actions.firstChild);
 			tr.appendChild(actions);
+			const groups = (String(i.content || "").match(/^\[[^\]]+\]$/gm) || [])
+				.filter((g) => !/:(vars|children)\]$/.test(g)).length;
 			inspectable(tr, i.name, [
+				{ label: "Hosts", value: count < 0 ? "unknown, YAML" : String(count) },
+				{ label: "Groups", value: groups ? String(groups) : "" },
+				{ label: "Size", value: (String(i.content || "").length) + " bytes" },
 				{ label: "Created", value: fmtTime(i.created_at) },
-				{ label: "ID", value: i.id },
+				{ label: "ID", value: i.id, copy: true },
 				{ label: "Content", value: i.content, block: true },
+			], [
+				{ label: "Edit", primary: true, tip: "Edit this inventory", onClick: () => { closeDrill(); openInventoryEdit(i); } },
+				{ label: "Copy content", tip: "Copy the inventory to the clipboard", onClick: async () => {
+					try { await navigator.clipboard.writeText(i.content || ""); } catch { /* denied */ }
+				} },
+				{ label: "Download", tip: "Download the inventory as a file", onClick: () =>
+					downloadBlob(i.name.replace(/\s+/g, "-") + ".ini", "text/plain", i.content || "") },
 			]);
 			tbody.appendChild(tr);
 		}
@@ -4332,6 +4351,60 @@ function renderFleetSnapshot(hosts) {
 		go.innerHTML = svgIcon('<polyline points="9 18 15 12 9 6"/>');
 		row.appendChild(go);
 		el.appendChild(row);
+	}
+}
+
+// loadDoctor runs the reference checks and lists every finding with a fix link.
+async function loadDoctor() {
+	try {
+		const data = await getJSON("/doctor");
+		const findings = data.findings || [];
+		const sum = document.getElementById("doctor-summary");
+		sum.innerHTML = "";
+		sum.appendChild(statCard(String(data.checked_templates), "Templates checked", ""));
+		sum.appendChild(statCard(String(data.checked_schedules), "Schedules checked", ""));
+		sum.appendChild(statCard(String(data.checked_credentials), "Credentials checked", ""));
+		sum.appendChild(statCard(String(findings.length), "Findings", findings.length ? "failed" : "ok"));
+		sum.hidden = false;
+		if (!findings.length) {
+			showEmpty("Everything checks out. Every reference resolves and every schedule can fire.");
+			return;
+		}
+		const tbody = document.getElementById("doctor");
+		for (const f of findings) {
+			const tr = document.createElement("tr");
+			const sev = document.createElement("td");
+			const chip = document.createElement("span");
+			chip.className = "chip " + (f.severity === "broken" ? "failed" : "flaky");
+			chip.textContent = f.severity;
+			sev.appendChild(chip);
+			tr.appendChild(sev);
+			const obj = td("");
+			const name = document.createElement("strong");
+			name.textContent = f.object_name || f.object_id;
+			obj.appendChild(name);
+			obj.appendChild(document.createTextNode(" "));
+			const kind = document.createElement("span");
+			kind.className = "run-kind";
+			kind.textContent = f.object_type;
+			obj.appendChild(kind);
+			obj.title = f.object_id;
+			tr.appendChild(obj);
+			tr.appendChild(td(f.problem));
+			const fix = td("");
+			const link = document.createElement("a");
+			link.className = "button";
+			link.href = f.fix_path;
+			link.textContent = "Open";
+			link.dataset.tip = "Open the page where this is repaired";
+			fix.appendChild(link);
+			tr.appendChild(fix);
+			tbody.appendChild(tr);
+		}
+		setStatus("");
+		document.querySelector("table.runs").hidden = false;
+	} catch (e) {
+		setStatus("Doctor failed: " + e.message);
 	}
 }
 
@@ -6512,8 +6585,8 @@ function drillBlock(label, value) {
 	return f;
 }
 
-// drillField builds a labeled value in the drill panel.
-function drillField(label, value) {
+// drillField builds a labeled value in the drill panel, with an optional inline copy control.
+function drillField(label, value, copy) {
 	const f = document.createElement("div");
 	f.className = "field";
 	const l = document.createElement("div");
@@ -6522,6 +6595,7 @@ function drillField(label, value) {
 	const v = document.createElement("div");
 	v.className = "value";
 	v.textContent = value;
+	if (copy) v.appendChild(copyButton(String(value), "Copy " + label.toLowerCase()));
 	f.appendChild(l);
 	f.appendChild(v);
 	return f;
@@ -6532,6 +6606,12 @@ function drillField(label, value) {
 function ensureDrill() {
 	let drill = document.getElementById("drill");
 	if (!drill) {
+		const backdrop = document.createElement("div");
+		backdrop.id = "drill-backdrop";
+		backdrop.className = "drill-backdrop";
+		backdrop.hidden = true;
+		backdrop.addEventListener("click", closeDrill);
+		document.body.appendChild(backdrop);
 		drill = document.createElement("aside");
 		drill.id = "drill";
 		drill.className = "drill";
@@ -6541,20 +6621,31 @@ function ensureDrill() {
 		close.id = "drill-close";
 		close.setAttribute("aria-label", "Close");
 		close.innerHTML = "&times;";
-		close.addEventListener("click", () => { drill.hidden = true; });
+		close.addEventListener("click", closeDrill);
 		const body = document.createElement("div");
 		body.id = "drill-body";
 		drill.appendChild(close);
 		drill.appendChild(body);
 		document.body.appendChild(drill);
+		document.addEventListener("keydown", (e) => {
+			if (e.key === "Escape" && !drill.hidden) closeDrill();
+		});
 	}
 	return document.getElementById("drill-body");
+}
+
+// closeDrill hides the inspect panel and its backdrop.
+function closeDrill() {
+	const drill = document.getElementById("drill");
+	const backdrop = document.getElementById("drill-backdrop");
+	if (drill) drill.hidden = true;
+	if (backdrop) backdrop.hidden = true;
 }
 
 // inspectDrawer opens the shared panel with a title and a list of fields. A field marked block
 // renders as a monospace block, for multi line values such as inventory content. Empty fields are
 // skipped so the panel stays terse.
-function inspectDrawer(title, fields) {
+function inspectDrawer(title, fields, actions) {
 	const body = ensureDrill();
 	body.innerHTML = "";
 	const h = document.createElement("h3");
@@ -6562,19 +6653,48 @@ function inspectDrawer(title, fields) {
 	body.appendChild(h);
 	for (const f of fields) {
 		if (f.value === undefined || f.value === null || f.value === "") continue;
-		body.appendChild(f.block ? drillBlock(f.label, f.value) : drillField(f.label, f.value));
+		body.appendChild(f.block ? drillBlock(f.label, f.value) : drillField(f.label, f.value, f.copy));
+	}
+	if (actions && actions.length) {
+		const row = document.createElement("div");
+		row.className = "drill-actions";
+		for (const a of actions) {
+			if (a.href) {
+				const link = document.createElement("a");
+				link.className = "button";
+				link.href = a.href;
+				if (a.external) { link.target = "_blank"; link.rel = "noopener"; }
+				link.textContent = a.label;
+				if (a.tip) link.dataset.tip = a.tip;
+				row.appendChild(link);
+				continue;
+			}
+			const btn = document.createElement("button");
+			btn.type = "button";
+			btn.className = "button" + (a.primary ? " primary" : "");
+			btn.textContent = a.label;
+			if (a.tip) btn.dataset.tip = a.tip;
+			btn.addEventListener("click", a.onClick);
+			row.appendChild(btn);
+		}
+		body.appendChild(row);
 	}
 	document.getElementById("drill").hidden = false;
+	document.getElementById("drill-backdrop").hidden = false;
 }
 
 // inspectable marks a table row as clickable and opens the inspect drawer for it on click.
-function inspectable(tr, title, fields) {
+function inspectable(tr, title, fields, actions) {
 	tr.classList.add("row-inspect");
 	tr.tabIndex = 0;
 	tr.setAttribute("role", "button");
-	const open = () => inspectDrawer(title, fields);
+	const open = (e) => {
+		// A click on a row action such as Edit or Delete is not a request to inspect.
+		if (e && e.target && e.target.closest && e.target.closest("button, a")) return;
+		inspectDrawer(title, fields, actions);
+	};
 	tr.addEventListener("click", open);
 	tr.addEventListener("keydown", (e) => {
-		if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); }
+		if ((e.key === "Enter" || e.key === " ") && e.target === tr) { e.preventDefault(); open(); }
 	});
 }
