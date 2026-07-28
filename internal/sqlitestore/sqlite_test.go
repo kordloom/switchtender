@@ -372,8 +372,8 @@ func TestStoreMigratesProvenance(t *testing.T) {
 	if err != nil || len(hits) != 1 {
 		t.Errorf("ListPage(source) = %d runs, err %v, want 1 run", len(hits), err)
 	}
-	labelled, err := store.ListPage(ctx, run.ListFilter{LabelKey: "env", LabelValue: "prod"}, 0, 0)
-	if err != nil || len(labelled) != 1 {
-		t.Errorf("ListPage(label) = %d runs, err %v, want 1 run", len(labelled), err)
+	labeled, err := store.ListPage(ctx, run.ListFilter{LabelKey: "env", LabelValue: "prod"}, 0, 0)
+	if err != nil || len(labeled) != 1 {
+		t.Errorf("ListPage(label) = %d runs, err %v, want 1 run", len(labeled), err)
 	}
 }
