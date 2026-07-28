@@ -1579,6 +1579,7 @@ document.addEventListener("DOMContentLoaded", () => {
 	}
 	buildNav();
 	wirePalette();
+	wireHinttips();
 	if (isReadOnly()) applyReadOnly();
 	setInterval(refreshRelTimes, 20000);
 	mountTour();
@@ -1956,6 +1957,38 @@ function openPalette() {
 // closePalette hides the palette.
 function closePalette() {
 	if (paletteState) paletteState.overlay.hidden = true;
+}
+
+// wireHinttips shows a floating tip above any element carrying data-tip, on hover and keyboard
+// focus. One shared element rides document.body, so no scroll container can clip it, and it is
+// clamped to the viewport.
+function wireHinttips() {
+	const tip = document.createElement("div");
+	tip.className = "hinttip";
+	tip.hidden = true;
+	document.body.appendChild(tip);
+	const show = (e) => {
+		const target = e.target.closest ? e.target.closest("[data-tip]") : null;
+		if (!target) return;
+		tip.textContent = target.dataset.tip;
+		tip.hidden = false;
+		tip.style.left = "0px";
+		tip.style.top = "0px";
+		const r = target.getBoundingClientRect();
+		let x = Math.min(Math.max(8, r.left), window.innerWidth - tip.offsetWidth - 8);
+		let y = r.top - tip.offsetHeight - 8;
+		if (y < 8) y = r.bottom + 8;
+		tip.style.left = x + "px";
+		tip.style.top = y + "px";
+	};
+	const hide = (e) => {
+		if (e.target.closest && e.target.closest("[data-tip]")) tip.hidden = true;
+	};
+	document.addEventListener("mouseover", show);
+	document.addEventListener("mouseout", hide);
+	document.addEventListener("focusin", show);
+	document.addEventListener("focusout", hide);
+	document.addEventListener("scroll", () => { tip.hidden = true; }, true);
 }
 
 // wirePalette registers the platform search shortcut that toggles the palette, on every page but
