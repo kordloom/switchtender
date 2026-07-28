@@ -1,5 +1,13 @@
 "use strict";
 
+// A stored flat theme is stamped before anything renders, so a forced theme never flashes the
+// signature default. The script sits at the end of body, so document.body exists.
+(function () {
+	let theme = null;
+	try { theme = localStorage.getItem("st_theme"); } catch { /* storage may be unavailable */ }
+	if (theme === "light" || theme === "dark") document.body.dataset.theme = theme;
+})();
+
 // API is the versioned base path every server call is made under. Infrastructure routes such as
 // the UI shell and the sign-on redirect are served unversioned and are not reached through this.
 const API = "/v1";
@@ -1657,6 +1665,7 @@ function buildNav() {
 		}
 	};
 	fillGroups(drawer);
+	drawer.appendChild(themeGroup());
 
 	const side = document.createElement("aside");
 	side.className = "side";
@@ -1669,10 +1678,12 @@ function buildNav() {
 	sideNav.setAttribute("aria-label", "Primary navigation");
 	fillGroups(sideNav);
 	side.appendChild(sideNav);
+	side.appendChild(themeGroup());
 
 	document.body.appendChild(backdrop);
 	document.body.appendChild(drawer);
 	document.body.appendChild(side);
+	syncThemeButtons();
 
 	// Pin the drawer directly under the top bar, tracking its height across zoom and resize.
 	const syncHeight = () => document.documentElement.style
@@ -1704,6 +1715,66 @@ function svgIcon(inner) {
 		'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + inner + '</svg>';
 }
 
+// THEMES lists the selectable appearances: the signature look, then the flat family themes.
+const THEMES = [
+	{ key: "signature", label: "Mesh", icon: '<path d="M12 3l1.9 4.6L18.5 9l-4.6 1.9L12 15.5l-1.9-4.6L5.5 9l4.6-1.4z"/><path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9z"/>' },
+	{ key: "light", label: "Light", icon: '<circle cx="12" cy="12" r="4"/><line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/><line x1="4.9" y1="4.9" x2="7" y2="7"/><line x1="17" y1="17" x2="19.1" y2="19.1"/><line x1="4.9" y1="19.1" x2="7" y2="17"/><line x1="17" y1="7" x2="19.1" y2="4.9"/>' },
+	{ key: "dark", label: "Dark", icon: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>' },
+];
+
+// currentTheme returns the active theme key, defaulting to the signature look.
+function currentTheme() {
+	const t = document.body.dataset.theme;
+	return t === "light" || t === "dark" ? t : "signature";
+}
+
+// setTheme applies and persists a theme choice, then refreshes every switcher control.
+function setTheme(key) {
+	if (key === "light" || key === "dark") document.body.dataset.theme = key;
+	else delete document.body.dataset.theme;
+	try {
+		if (key === "light" || key === "dark") localStorage.setItem("st_theme", key);
+		else localStorage.removeItem("st_theme");
+	} catch { /* storage may be unavailable */ }
+	syncThemeButtons();
+}
+
+// syncThemeButtons marks the active theme on every switcher segment.
+function syncThemeButtons() {
+	const active = currentTheme();
+	for (const btn of document.querySelectorAll(".theme-btn")) {
+		const on = btn.dataset.themeKey === active;
+		btn.classList.toggle("active", on);
+		btn.setAttribute("aria-pressed", on ? "true" : "false");
+	}
+}
+
+// themeGroup builds the labeled appearance segment used in the drawer and the sidebar.
+function themeGroup() {
+	const g = document.createElement("div");
+	g.className = "nav-group theme-group";
+	const gl = document.createElement("div");
+	gl.className = "nav-group-label";
+	gl.innerHTML = svgIcon('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.03-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.56-1.03 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34h.01A1.7 1.7 0 0 0 10 4.09V4a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87v.01a1.7 1.7 0 0 0 1.56 1.03H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.56 1.03z"/>');
+	gl.appendChild(document.createTextNode("Appearance"));
+	g.appendChild(gl);
+	const row = document.createElement("div");
+	row.className = "theme-row";
+	for (const t of THEMES) {
+		const btn = document.createElement("button");
+		btn.type = "button";
+		btn.className = "theme-btn";
+		btn.dataset.themeKey = t.key;
+		btn.setAttribute("aria-pressed", "false");
+		btn.innerHTML = svgIcon(t.icon);
+		btn.appendChild(document.createTextNode(t.label));
+		btn.addEventListener("click", () => setTheme(t.key));
+		row.appendChild(btn);
+	}
+	g.appendChild(row);
+	return g;
+}
+
 // paletteState holds the command palette's elements once built, plus the filtered entries and the
 // highlighted index.
 let paletteState = null;
@@ -1726,6 +1797,9 @@ function paletteEntries() {
 		icon: '<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>',
 		href: "https://github.com/kordloom/switchtender", external: true,
 	});
+	for (const t of THEMES) {
+		out.push({ label: "Theme: " + t.label, desc: "Switch the appearance", group: "Theme", icon: t.icon, action: () => setTheme(t.key) });
+	}
 	return out;
 }
 
@@ -1844,7 +1918,8 @@ function openPaletteActive() {
 	const entry = st.shown[st.active];
 	if (!entry) return;
 	closePalette();
-	if (entry.external) window.open(entry.href, "_blank", "noopener");
+	if (entry.action) entry.action();
+	else if (entry.external) window.open(entry.href, "_blank", "noopener");
 	else location.href = entry.href;
 }
 
