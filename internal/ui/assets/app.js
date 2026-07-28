@@ -1,10 +1,24 @@
 "use strict";
 
 // A stored flat theme is stamped before anything renders, so a forced theme never flashes the
-// signature default. The script sits at the end of body, so document.body exists.
+// signature default. A ?theme= query parameter, named by theme, picks and persists one, so a
+// themed link is shareable. The script sits at the end of body, so document.body exists.
 (function () {
 	let theme = null;
 	try { theme = localStorage.getItem("st_theme"); } catch { /* storage may be unavailable */ }
+	const param = new URLSearchParams(location.search).get("theme");
+	if (param) {
+		const byName = { stitch: "signature", kord: "light", seal: "dark" };
+		const key = byName[param.toLowerCase()];
+		if (key === "light" || key === "dark") theme = key;
+		else if (key === "signature") theme = null;
+		if (key) {
+			try {
+				if (theme) localStorage.setItem("st_theme", theme);
+				else localStorage.removeItem("st_theme");
+			} catch { /* storage may be unavailable */ }
+		}
+	}
 	if (theme === "light" || theme === "dark") document.body.dataset.theme = theme;
 	syncBrandLogos();
 })();

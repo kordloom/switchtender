@@ -373,3 +373,9 @@ h1 {
 	.utlx-car { left: 50%; margin-left: -105px; }
 	.utlx-note { opacity: 1; }
 }
+
+/* Theme showcase: three window frames, one per look. */
+.themes-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.theme-shot { display: block; transform: none; transition: transform 0.2s var(--ease), box-shadow 0.2s; }
+.theme-shot:hover { transform: translateY(-4px); box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55), 0 0 44px rgba(52, 211, 153, 0.16); }
+@media (max-width: 900px) { .themes-grid { grid-template-columns: 1fr; } }
