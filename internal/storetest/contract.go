@@ -376,6 +376,36 @@ func testListPage(t *testing.T, store run.Store) {
 	if diff := cmp.Diff(want, counts, cmpopts.EquateEmpty()); diff != "" {
 		t.Errorf("RunStatusCounts() mismatch (-want +got):\n%s", diff)
 	}
+
+	// Provenance and label filters compose with the rest. Summaries attach while the run is
+	// still live, since the terminal fence rejects summary writes after a run finishes.
+	live := &run.Run{
+		ID: "e", Playbook: "tag.yml", Status: run.StatusRunning, CreatedAt: base.Add(4 * time.Second),
+		Source: "schedule", SourceID: "sch_9", Actor: "night-cron",
+		Labels: map[string]string{"env": "prod"},
+	}
+	if err := store.Save(ctx, live); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	if err := store.SaveHostSummary(ctx, "e", []run.HostSummary{{Host: "web09", Worst: "ok", RanAt: base}}); err != nil {
+		t.Fatalf("SaveHostSummary() error = %v", err)
+	}
+	live.Status = run.StatusSucceeded
+	if err := store.Save(ctx, live); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	if hit, _ := store.ListPage(ctx, run.ListFilter{Source: "schedule"}, 0, 0); len(hit) != 1 || hit[0].ID != "e" {
+		t.Errorf("source filter = %v, want [e]", ids(hit))
+	}
+	if hit, _ := store.ListPage(ctx, run.ListFilter{Actor: "night-cron"}, 0, 0); len(hit) != 1 || hit[0].ID != "e" {
+		t.Errorf("actor filter = %v, want [e]", ids(hit))
+	}
+	if hit, _ := store.ListPage(ctx, run.ListFilter{LabelKey: "env", LabelValue: "prod"}, 0, 0); len(hit) != 1 || hit[0].ID != "e" {
+		t.Errorf("label filter = %v, want [e]", ids(hit))
+	}
+	if hit, _ := store.ListPage(ctx, run.ListFilter{Host: "web09"}, 0, 0); len(hit) != 1 || hit[0].ID != "e" {
+		t.Errorf("host filter = %v, want [e]", ids(hit))
+	}
 }
 
 // testLog verifies log append, read, ordering, and copy independence.

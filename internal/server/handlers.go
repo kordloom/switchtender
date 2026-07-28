@@ -683,6 +683,45 @@ func retryRunHandler(store run.Store, retrier Retrier, authz *authorizer, log *z
 	}
 }
 
+// parseFieldedQuery splits a search string into fielded terms and free text. status:, tool:,
+// source:, actor:, and host: fill their filters, label:key=value matches a run label, and
+// everything else stays free text. Explicit query parameters win over fielded terms.
+func parseFieldedQuery(q string, filter *run.ListFilter) {
+	var free []string
+	for _, token := range strings.Fields(q) {
+		key, value, ok := strings.Cut(token, ":")
+		if !ok || value == "" {
+			free = append(free, token)
+			continue
+		}
+		switch strings.ToLower(key) {
+		case "status":
+			if filter.Status == "" {
+				filter.Status = strings.ToLower(value)
+			}
+		case "tool":
+			if filter.Tool == "" {
+				filter.Tool = run.NormalizeTool(value)
+			}
+		case "source":
+			filter.Source = strings.ToLower(value)
+		case "actor":
+			filter.Actor = value
+		case "host":
+			filter.Host = value
+		case "label":
+			if lk, lv, ok := strings.Cut(value, "="); ok && lk != "" {
+				filter.LabelKey, filter.LabelValue = lk, lv
+			} else {
+				free = append(free, token)
+			}
+		default:
+			free = append(free, token)
+		}
+	}
+	filter.Query = strings.Join(free, " ")
+}
+
 // actorName returns the authenticated caller's audit name, empty when the API runs open.
 func actorName(r *http.Request) string {
 	if a, ok := actorFrom(r.Context()); ok {
@@ -871,10 +910,10 @@ func listRunsHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
 		limit = min(limit, maxRunsPage)
 		offset := queryInt(r, "offset")
 		filter := run.ListFilter{
-			Query:       r.URL.Query().Get("q"),
 			Status:      r.URL.Query().Get("status"),
 			OldestFirst: r.URL.Query().Get("order") == "oldest",
 		}
+		parseFieldedQuery(r.URL.Query().Get("q"), &filter)
 		if tool := r.URL.Query().Get("tool"); tool != "" {
 			filter.Tool = run.NormalizeTool(tool)
 		}

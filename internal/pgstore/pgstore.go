@@ -618,6 +618,22 @@ func (s *store) ListPage(ctx context.Context, filter run.ListFilter, limit, offs
 		args = append(args, sqlutil.FormatTime(filter.Before))
 		q += fmt.Sprintf(" AND created_at < $%d", len(args))
 	}
+	if filter.Source != "" {
+		args = append(args, filter.Source)
+		q += fmt.Sprintf(" AND source = $%d", len(args))
+	}
+	if filter.Actor != "" {
+		args = append(args, filter.Actor)
+		q += fmt.Sprintf(" AND actor = $%d", len(args))
+	}
+	if filter.LabelKey != "" {
+		args = append(args, filter.LabelKey, filter.LabelValue)
+		q += fmt.Sprintf(" AND NULLIF(labels, '')::jsonb ->> $%d = $%d", len(args)-1, len(args))
+	}
+	if filter.Host != "" {
+		args = append(args, filter.Host)
+		q += fmt.Sprintf(" AND EXISTS (SELECT 1 FROM run_host_summary hs WHERE hs.run_id = runs.id AND hs.host = $%d)", len(args))
+	}
 	order := "DESC"
 	if filter.OldestFirst {
 		order = "ASC"

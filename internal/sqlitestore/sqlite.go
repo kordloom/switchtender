@@ -838,6 +838,22 @@ func (s *store) ListPage(ctx context.Context, filter run.ListFilter, limit, offs
 		q += " AND created_at < ?"
 		args = append(args, sqlutil.FormatTime(filter.Before))
 	}
+	if filter.Source != "" {
+		q += " AND source = ?"
+		args = append(args, filter.Source)
+	}
+	if filter.Actor != "" {
+		q += " AND actor = ?"
+		args = append(args, filter.Actor)
+	}
+	if filter.LabelKey != "" {
+		q += " AND json_extract(COALESCE(NULLIF(labels, ''), '{}'), '$.' || ?) = ?"
+		args = append(args, filter.LabelKey, filter.LabelValue)
+	}
+	if filter.Host != "" {
+		q += " AND EXISTS (SELECT 1 FROM run_host_summary hs WHERE hs.run_id = runs.id AND hs.host = ?)"
+		args = append(args, filter.Host)
+	}
 	order := "DESC"
 	if filter.OldestFirst {
 		order = "ASC"
