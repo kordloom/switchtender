@@ -16,6 +16,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/credential"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/invsource"
@@ -58,6 +59,9 @@ type Deps struct {
 	// InvSources holds sample dynamic inventory sources, so that page shows the relationship
 	// between a source and the inventory it refreshes.
 	InvSources invsource.Store
+	// Audit records the sample change history, so the tamper-evident chain has something to
+	// verify rather than an empty page.
+	Audit audit.Store
 }
 
 // Seed populates the stores with sample configuration and a set of runs that exercise the matrix,
@@ -346,6 +350,36 @@ func seedConfig(ctx context.Context, d Deps, log *zap.Logger) {
 			}
 			if err := d.InvSources.Save(ctx, src); err != nil {
 				log.Warn("demo: seed inventory source: " + err.Error())
+			}
+		}
+	}
+
+	// A change history, so the audit page shows a real hash chain the Verify button can check.
+	// Each append links to the one before it exactly as a live mutation would.
+	if d.Audit != nil {
+		history := []struct {
+			actor, method, path string
+			hoursAgo            int
+		}{
+			{"avery", "POST", "/v1/projects", 72},
+			{"avery", "POST", "/v1/inventories", 72},
+			{"avery", "POST", "/v1/credentials", 72},
+			{"avery", "POST", "/v1/templates", 72},
+			{"morgan", "PUT", "/v1/templates/tpl_deploy_web", 50},
+			{"avery", "POST", "/v1/inventory-sources", 20},
+			{"release-bot", "POST", "/v1/pipelines", 6},
+			{"morgan", "POST", "/v1/policies", 5},
+			{"nightly-cron", "POST", "/v1/schedules", 4},
+			{"avery", "DELETE", "/v1/templates/tpl_retired", 2},
+		}
+		for _, h := range history {
+			entry := &audit.Entry{
+				ID: audit.NewID(), At: ago(h.hoursAgo),
+				Actor: h.actor, Method: h.method, Path: h.path,
+			}
+			if err := d.Audit.Append(ctx, entry); err != nil {
+				log.Warn("demo: seed audit entry: " + err.Error())
+				break
 			}
 		}
 	}

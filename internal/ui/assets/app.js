@@ -240,13 +240,13 @@ function mountTableExport() {
 		btn.addEventListener("click", fn);
 		host.appendChild(btn);
 	};
-	make("CSV", "Export the filtered rows as CSV", () => {
+	make("CSV", "Click to export the filtered rows as a CSV spreadsheet", () => {
 		const { headers, rows } = tableRowsData(table);
 		const esc = (v) => /[",\n]/.test(v) ? '"' + v.replaceAll('"', '""') + '"' : v;
 		const csv = [headers, ...rows].map((r) => r.map(esc).join(",")).join("\n") + "\n";
 		downloadBlob("switchtender-" + page + "-" + stamp() + ".csv", "text/csv", csv);
 	});
-	make("JSON", "Export the filtered rows as JSON", () => {
+	make("JSON", "Click to export the filtered rows as JSON", () => {
 		const { headers, rows } = tableRowsData(table);
 		const objs = rows.map((r) => Object.fromEntries(headers.map((h, i) => [h, r[i] ?? ""])));
 		downloadBlob("switchtender-" + page + "-" + stamp() + ".json", "application/json",
@@ -2200,6 +2200,41 @@ function closePalette() {
 	if (paletteState) paletteState.overlay.hidden = true;
 }
 
+// ROUTE_WORDS names each interface route for the hover tip, so a link says what it opens rather
+// than printing its path. A trailing id is matched by the pattern, not spelled out.
+const ROUTE_WORDS = [
+	[/^\/ui\/runs\/[^/]+$/, "Click to open this run"],
+	[/^\/ui\/runs$/, "Click to open the runs list"],
+	[/^\/ui\/hosts\/[^/]+$/, "Click to open this host's history"],
+	[/^\/ui\/fleet$/, "Click to open fleet health"],
+	[/^\/ui\/drift$/, "Click to open drift"],
+	[/^\/ui\/tasks$/, "Click to open task trends"],
+	[/^\/ui\/workers$/, "Click to open workers"],
+	[/^\/ui\/projects$/, "Click to open projects"],
+	[/^\/ui\/inventories$/, "Click to open inventories"],
+	[/^\/ui\/sources$/, "Click to open inventory sources"],
+	[/^\/ui\/templates$/, "Click to open templates"],
+	[/^\/ui\/workflows$/, "Click to open the workflow editor"],
+	[/^\/ui\/schedules$/, "Click to open schedules"],
+	[/^\/ui\/migrate$/, "Click to open the migration importer"],
+	[/^\/ui\/credentials$/, "Click to open credentials"],
+	[/^\/ui\/users$/, "Click to open users"],
+	[/^\/ui\/audit$/, "Click to open the audit trail"],
+	[/^\/ui\/policies$/, "Click to open approval policies"],
+	[/^\/ui\/doctor$/, "Click to run the reference health checks"],
+	[/^\/ui\/docs\/[^/]+$/, "Click to open this guide"],
+	[/^\/ui\/docs$/, "Click to open the documentation"],
+	[/^\/ui\/?$/, "Click to open the overview"],
+];
+
+// describeRoute returns the sentence for an interface path, empty when nothing matches.
+function describeRoute(path) {
+	for (const [pattern, words] of ROUTE_WORDS) {
+		if (pattern.test(path)) return words;
+	}
+	return "";
+}
+
 // wireHinttips shows a floating tip above any element carrying data-tip, on hover and keyboard
 // focus. One shared element rides document.body, so no scroll container can clip it, and it is
 // clamped to the viewport.
@@ -2221,14 +2256,16 @@ function wireHinttips() {
 		tip.style.left = x + "px";
 		tip.style.top = y + "px";
 	};
-	// linkDest labels external destinations only. Same-origin links stay quiet: the status bar
-	// already names them, and a tip box over the neighboring row reads as broken UI.
+	// linkDest says what a link does in plain words. A raw path tells a reader nothing they
+	// cannot already see in the status bar, so internal destinations are named by what they are.
 	const linkDest = (a) => {
 		const href = a.getAttribute("href");
 		if (!href || href === "#" || href.startsWith("javascript")) return "";
 		try {
 			const u = new URL(href, location.href);
-			return u.origin === location.origin ? "" : "Opens " + u.hostname;
+			if (u.origin !== location.origin) return "Click to open " + u.hostname;
+			if (a.hasAttribute("download")) return "Click to download this file";
+			return describeRoute(u.pathname);
 		} catch { return ""; }
 	};
 	const show = (e) => {
@@ -3055,6 +3092,12 @@ async function loadProjects() {
 			tr.appendChild(td(p.branch || "default", "mono"));
 			tr.appendChild(tdTime(p.created_at));
 			const actions = deleteCell("/projects/" + p.id, "project " + p.name, tr, "No projects yet.");
+			const browse = document.createElement("button");
+			browse.className = "button";
+			browse.textContent = "Files";
+			browse.dataset.tip = "Click to browse this project's cached checkout";
+			browse.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); openProjectFiles(p); });
+			actions.insertBefore(browse, actions.firstChild);
 			actions.insertBefore(editButton(() => openProjectEdit(p)), actions.firstChild);
 			tr.appendChild(actions);
 			inspectable(tr, p.name, [
@@ -3560,6 +3603,68 @@ function openSurvey(t) {
 			document.getElementById("survey-status").textContent = "Launch failed: " + err.message;
 		}
 	};
+}
+
+// openProjectFiles lists a project's cached checkout and opens any file in the viewer, so a
+// playbook can be found by browsing rather than by knowing its path.
+async function openProjectFiles(project) {
+	let overlay = document.getElementById("tree-modal");
+	if (!overlay) {
+		overlay = document.createElement("div");
+		overlay.id = "tree-modal";
+		overlay.className = "modal";
+		overlay.hidden = true;
+		overlay.innerHTML = '<div class="modal-card wide"><div class="modal-head">' +
+			'<h2 id="tree-title"></h2>' +
+			'<button type="button" class="modal-close" aria-label="Close">\u00d7</button></div>' +
+			'<input id="tree-filter" class="input" type="search" placeholder="Filter files" aria-label="Filter files">' +
+			'<div id="tree-note" class="muted file-note"></div>' +
+			'<div id="tree-list" class="tree-list"></div></div>';
+		document.body.appendChild(overlay);
+		overlay.addEventListener("mousedown", (e) => { if (e.target === overlay) overlay.hidden = true; });
+		overlay.querySelector(".modal-close").addEventListener("click", () => { overlay.hidden = true; });
+		document.addEventListener("keydown", (e) => { if (e.key === "Escape") overlay.hidden = true; });
+	}
+	document.getElementById("tree-title").textContent = project.name;
+	const note = document.getElementById("tree-note");
+	const list = document.getElementById("tree-list");
+	const filter = document.getElementById("tree-filter");
+	filter.value = "";
+	note.textContent = "Loading the checkout.";
+	list.innerHTML = "";
+	overlay.hidden = false;
+	try {
+		const data = await getJSON("/projects/" + encodeURIComponent(project.id) + "/files");
+		const files = data.files || [];
+		note.textContent = files.length
+			? files.length + " files in the cached checkout. Click one to view it."
+			: "The checkout is empty.";
+		for (const f of files) {
+			const row = document.createElement("button");
+			row.type = "button";
+			row.className = "tree-row";
+			row.dataset.path = f.path;
+			row.dataset.tip = "Click to view this file";
+			const name = document.createElement("span");
+			name.className = "mono";
+			name.textContent = f.path;
+			const size = document.createElement("span");
+			size.className = "tree-size";
+			size.textContent = f.size >= 1024 ? Math.round(f.size / 1024) + " KB" : f.size + " B";
+			row.appendChild(name);
+			row.appendChild(size);
+			row.addEventListener("click", () => { overlay.hidden = true; openFileViewer(project.id, f.path); });
+			list.appendChild(row);
+		}
+		filter.oninput = () => {
+			const q = filter.value.trim().toLowerCase();
+			for (const row of list.querySelectorAll(".tree-row")) {
+				row.hidden = q !== "" && !row.dataset.path.toLowerCase().includes(q);
+			}
+		};
+	} catch (err) {
+		note.textContent = "Could not list this project: " + err.message;
+	}
 }
 
 // openFileViewer shows one file from a project's checkout, read only, with a copy control. It is
@@ -5808,17 +5913,23 @@ let detailState = null;
 // loadDetail loads one run and dispatches to the split or single render path.
 async function loadDetail(runId) {
 	const fullLog = document.getElementById("full-log");
-	if (fullLog) fullLog.href = streamURL("/runs/" + runId + "/logs");
+	if (fullLog) {
+		fullLog.href = streamURL("/runs/" + runId + "/logs");
+		fullLog.dataset.tip = "Click to open the full log in a new tab";
+	}
 	const exportEvents = document.getElementById("export-events");
-	if (exportEvents) exportEvents.href = streamURL("/runs/" + runId + "/events?download=1");
+	if (exportEvents) {
+		exportEvents.href = streamURL("/runs/" + runId + "/events?download=1");
+		exportEvents.dataset.tip = "Click to download every event as newline-delimited JSON";
+	}
 	const auditLink = document.getElementById("audit-link");
 	if (auditLink) {
 		auditLink.href = "/ui/audit?q=" + encodeURIComponent(runId);
-		auditLink.dataset.tip = "Every audited change that mentions this run";
+		auditLink.dataset.tip = "Click to see every audited change that mentions this run";
 	}
 	const copyLink = document.getElementById("copy-link");
 	if (copyLink) {
-		copyLink.dataset.tip = "Copy a link to this run";
+		copyLink.dataset.tip = "Click to copy a link to this run";
 		copyLink.addEventListener("click", async () => {
 			try { await navigator.clipboard.writeText(location.href); } catch { return; }
 			copyLink.textContent = "Copied";
@@ -5827,7 +5938,7 @@ async function loadDetail(runId) {
 	}
 	const exportResults = document.getElementById("export-results");
 	if (exportResults) {
-		exportResults.dataset.tip = "Download this run and its per-host results as JSON";
+		exportResults.dataset.tip = "Click to download this run and its per-host results as JSON";
 		exportResults.addEventListener("click", () => {
 			if (!detailState || !detailState.run) return;
 			const results = {};
@@ -5856,7 +5967,7 @@ async function loadDetail(runId) {
 		const rerun = document.getElementById("rerun-run");
 		if (rerun && !run.parent_id && run.kind !== "pipeline") {
 			rerun.hidden = false;
-			rerun.dataset.tip = "Start a fresh run with this exact spec";
+			rerun.dataset.tip = "Click to start a fresh run with this exact spec";
 			if (isReadOnly()) {
 				rerun.disabled = true;
 				rerun.dataset.tip = "Disabled in the demo";
