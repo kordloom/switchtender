@@ -201,6 +201,18 @@ type Run struct {
 	// was proposed from a description and is born held for approval, so an approver can judge the
 	// generated run against what was asked before anything executes.
 	Intent string `json:"intent,omitempty"`
+	// Source names what fired the run: manual, api, template, schedule, rerun, reconcile, or
+	// propose. Empty on runs recorded before provenance stamping.
+	Source string `json:"source,omitempty"`
+	// SourceID is the object behind Source: the template or schedule id, or the origin run for a
+	// rerun.
+	SourceID string `json:"source_id,omitempty"`
+	// Actor is the authenticated user who fired the run, when the server knows one.
+	Actor string `json:"actor,omitempty"`
+	// RerunOf is the finished run whose spec this run replayed.
+	RerunOf string `json:"rerun_of,omitempty"`
+	// Labels are user-supplied key values for slicing runs: env, ticket, team.
+	Labels map[string]string `json:"labels,omitempty"`
 	// IdempotencyKey dedupes a submission. A retried submit carrying the same key returns the
 	// original run instead of creating a second, so a dropped response or a client retry cannot
 	// double-fire a run. Empty means no dedup. It is set from the Idempotency-Key request header and
@@ -298,6 +310,7 @@ func (r *Run) Clone() *Run {
 	}
 	out.CredentialIDs = append([]string(nil), r.CredentialIDs...)
 	out.Notifications = append([]NotifyTarget(nil), r.Notifications...)
+	out.Labels = maps.Clone(r.Labels)
 	return &out
 }
 
@@ -367,6 +380,34 @@ func WithRequireApproval(require bool) SubmitOption {
 		if require {
 			r.Status = StatusPendingApproval
 		}
+	}
+}
+
+// WithSource stamps what fired the run and which object did it, so lineage survives.
+func WithSource(source, sourceID string) SubmitOption {
+	return func(r *Run) {
+		r.Source = source
+		r.SourceID = sourceID
+	}
+}
+
+// WithActor stamps the authenticated user who fired the run.
+func WithActor(actor string) SubmitOption {
+	return func(r *Run) { r.Actor = actor }
+}
+
+// WithRerunOf records the finished run whose spec this run replays.
+func WithRerunOf(id string) SubmitOption {
+	return func(r *Run) { r.RerunOf = id }
+}
+
+// WithLabels attaches user-supplied key values to the run.
+func WithLabels(labels map[string]string) SubmitOption {
+	return func(r *Run) {
+		if len(labels) == 0 {
+			return
+		}
+		r.Labels = maps.Clone(labels)
 	}
 }
 

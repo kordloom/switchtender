@@ -21,6 +21,7 @@ import (
 func Contract(t *testing.T, newStore func() run.Store) {
 	t.Helper()
 	t.Run("save and get", func(t *testing.T) { testSaveGet(t, newStore()) })
+	t.Run("provenance round trip", func(t *testing.T) { testProvenance(t, newStore()) })
 	t.Run("get missing", func(t *testing.T) { testGetNotFound(t, newStore()) })
 	t.Run("idempotency key dedup", func(t *testing.T) { testByIdempotencyKey(t, newStore()) })
 	t.Run("save updates existing", func(t *testing.T) { testSaveUpdate(t, newStore()) })
@@ -1476,5 +1477,31 @@ func testTerminalFence(t *testing.T, store run.Store) {
 	}
 	if got, err := store.Get(ctx, "fx"); err != nil || got.Status != run.StatusSucceeded {
 		t.Errorf("run status = %v (err %v), want succeeded, not resurrected", got.Status, err)
+	}
+}
+
+// testProvenance verifies the provenance and label fields round trip through Save and Get.
+func testProvenance(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	saved := &run.Run{
+		ID: "run_prov", Playbook: "site.yml", Status: run.StatusSucceeded,
+		CreatedAt: time.Date(2026, 7, 28, 12, 0, 0, 0, time.UTC),
+		Source:    "template", SourceID: "tpl_9", Actor: "douglas",
+		RerunOf: "run_prev", Labels: map[string]string{"env": "prod", "ticket": "OPS-1"},
+	}
+	if err := store.Save(ctx, saved); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	got, err := store.Get(ctx, "run_prov")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.Source != "template" || got.SourceID != "tpl_9" || got.Actor != "douglas" ||
+		got.RerunOf != "run_prev" {
+		t.Errorf("provenance = %q %q %q %q, want template tpl_9 douglas run_prev",
+			got.Source, got.SourceID, got.Actor, got.RerunOf)
+	}
+	if diff := cmp.Diff(saved.Labels, got.Labels); diff != "" {
+		t.Errorf("labels mismatch (-want +got):\n%s", diff)
 	}
 }
