@@ -6,7 +6,22 @@
 	let theme = null;
 	try { theme = localStorage.getItem("st_theme"); } catch { /* storage may be unavailable */ }
 	if (theme === "light" || theme === "dark") document.body.dataset.theme = theme;
+	syncBrandLogos();
 })();
+
+// syncBrandLogos points every brand picture at artwork the active theme can show: a forced light
+// theme would lose the light-on-transparent logo, and a forced dark theme the dark one. Rewriting
+// the source's media query forces the right file, or restores following the OS for the default.
+function syncBrandLogos() {
+	const theme = document.body.dataset.theme;
+	for (const pic of document.querySelectorAll(".brand picture, .side-brand picture")) {
+		const source = pic.querySelector("source");
+		if (!source) continue;
+		if (theme === "light") source.media = "not all";
+		else if (theme === "dark") source.media = "all";
+		else source.media = "(prefers-color-scheme: dark)";
+	}
+}
 
 // API is the versioned base path every server call is made under. Infrastructure routes such as
 // the UI shell and the sign-on redirect are served unversioned and are not reached through this.
@@ -1684,6 +1699,7 @@ function buildNav() {
 	document.body.appendChild(drawer);
 	document.body.appendChild(side);
 	syncThemeButtons();
+	syncBrandLogos();
 
 	// Pin the drawer directly under the top bar, tracking its height across zoom and resize.
 	const syncHeight = () => document.documentElement.style
@@ -1715,9 +1731,12 @@ function svgIcon(inner) {
 		'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + inner + '</svg>';
 }
 
+// GEAR_ICON is the settings glyph shown as the appearance row's hint.
+const GEAR_ICON = '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.03-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.56-1.03 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34h.01A1.7 1.7 0 0 0 10 4.09V4a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87v.01a1.7 1.7 0 0 0 1.56 1.03H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.56 1.03z"/>';
+
 // THEMES lists the selectable appearances: the signature look, then the flat family themes.
 const THEMES = [
-	{ key: "signature", label: "Signal", desc: "The signature glow", icon: '<path d="M12 3l1.9 4.6L18.5 9l-4.6 1.9L12 15.5l-1.9-4.6L5.5 9l4.6-1.4z"/><path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9z"/>' },
+	{ key: "signature", label: "Switch", desc: "The signature glow", icon: '<path d="M12 3l1.9 4.6L18.5 9l-4.6 1.9L12 15.5l-1.9-4.6L5.5 9l4.6-1.4z"/><path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9z"/>' },
 	{ key: "light", label: "Kord", desc: "Clean white, the kordloom.com style", icon: '<circle cx="12" cy="12" r="4"/><line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/><line x1="4.9" y1="4.9" x2="7" y2="7"/><line x1="17" y1="17" x2="19.1" y2="19.1"/><line x1="4.9" y1="19.1" x2="7" y2="17"/><line x1="17" y1="7" x2="19.1" y2="4.9"/>' },
 	{ key: "dark", label: "Seal", desc: "Warm ink black, the loomseal.com style", icon: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>' },
 ];
@@ -1737,6 +1756,7 @@ function setTheme(key) {
 		else localStorage.removeItem("st_theme");
 	} catch { /* storage may be unavailable */ }
 	syncThemeButtons();
+	syncBrandLogos();
 }
 
 // syncThemeButtons marks the active theme on every switcher segment.
@@ -1749,25 +1769,26 @@ function syncThemeButtons() {
 	}
 }
 
-// themeGroup builds the labeled appearance segment used in the drawer and the sidebar.
+// themeGroup builds the compact appearance row used at the bottom of the drawer and the
+// sidebar: a muted gear hint and one icon button per theme, named by tooltip.
 function themeGroup() {
 	const g = document.createElement("div");
-	g.className = "nav-group theme-group";
-	const gl = document.createElement("div");
-	gl.className = "nav-group-label";
-	gl.innerHTML = svgIcon('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.03-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.56-1.03 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34h.01A1.7 1.7 0 0 0 10 4.09V4a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87v.01a1.7 1.7 0 0 0 1.56 1.03H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.56 1.03z"/>');
-	gl.appendChild(document.createTextNode("Appearance"));
-	g.appendChild(gl);
+	g.className = "theme-group";
 	const row = document.createElement("div");
 	row.className = "theme-row";
+	const hint = document.createElement("span");
+	hint.className = "theme-hint";
+	hint.innerHTML = svgIcon(GEAR_ICON);
+	row.appendChild(hint);
 	for (const t of THEMES) {
 		const btn = document.createElement("button");
 		btn.type = "button";
 		btn.className = "theme-btn";
 		btn.dataset.themeKey = t.key;
+		btn.title = t.label + " theme";
+		btn.setAttribute("aria-label", t.label + " theme");
 		btn.setAttribute("aria-pressed", "false");
 		btn.innerHTML = svgIcon(t.icon);
-		btn.appendChild(document.createTextNode(t.label));
 		btn.addEventListener("click", () => setTheme(t.key));
 		row.appendChild(btn);
 	}
@@ -3666,52 +3687,51 @@ function renderRecentRuns(runs) {
 	}
 }
 
-// renderJumpTiles draws the navigation tiles for every section but the overview itself, sorted
-// alphabetically, each with an icon chip, a label, and a one-line description.
+// renderJumpTiles draws every section but the overview as three group cards, each a titled list
+// of compact icon rows. Group cards cannot strand an orphan the way a flat tile wall does.
 function renderJumpTiles() {
 	const el = document.getElementById("tiles");
 	if (!el) return;
 	const role = localStorage.getItem("st_role");
 	const showAdmin = !role || role === "admin";
-	const items = [];
-	for (const group of NAV_GROUPS) {
-		for (const it of group.items) {
-			if (it.key === "overview") continue;
-			if (it.admin && !showAdmin) continue;
-			items.push(it);
-		}
-	}
-	items.sort((a, b) => a.label.localeCompare(b.label));
 
 	el.innerHTML = "";
-	for (const it of items) {
-		const tile = document.createElement("a");
-		tile.className = "tile";
-		tile.href = it.href;
-
-		const icon = document.createElement("span");
-		icon.className = "tile-icon";
-		icon.innerHTML = svgIcon(NAV_ICONS[it.key] || "");
-		tile.appendChild(icon);
-
-		const text = document.createElement("span");
-		text.className = "tile-text";
-		const label = document.createElement("span");
-		label.className = "tile-label";
-		label.textContent = it.label;
-		text.appendChild(label);
-		if (it.desc) {
-			const desc = document.createElement("span");
-			desc.className = "tile-desc";
-			desc.textContent = it.desc;
-			text.appendChild(desc);
+	for (const group of NAV_GROUPS) {
+		const items = group.items.filter((it) =>
+			it.key !== "overview" && it.key !== "docs" && (showAdmin || !it.admin));
+		if (!items.length) continue;
+		const card = document.createElement("section");
+		card.className = "jump-group";
+		const head = document.createElement("h3");
+		head.className = "jump-group-title";
+		head.textContent = group.label;
+		card.appendChild(head);
+		for (const it of items) {
+			const row = document.createElement("a");
+			row.className = "jump-row";
+			row.href = it.href;
+			const icon = document.createElement("span");
+			icon.className = "jump-icon";
+			icon.innerHTML = svgIcon(NAV_ICONS[it.key] || "");
+			row.appendChild(icon);
+			const label = document.createElement("span");
+			label.className = "jump-label";
+			label.textContent = it.label;
+			row.appendChild(label);
+			if (it.desc) {
+				const desc = document.createElement("span");
+				desc.className = "jump-desc";
+				desc.textContent = it.desc;
+				row.appendChild(desc);
+			}
+			card.appendChild(row);
 		}
-		tile.appendChild(text);
-		el.appendChild(tile);
+		el.appendChild(card);
 	}
 }
 
-// wireTileFilter filters the jump tiles as the user types and jumps to the first match on Enter.
+// wireTileFilter filters the jump rows as the user types, hides groups that empty out, and jumps
+// to the first match on Enter.
 function wireTileFilter() {
 	const input = document.getElementById("tile-filter");
 	const el = document.getElementById("tiles");
@@ -3725,16 +3745,19 @@ function wireTileFilter() {
 	input.addEventListener("input", () => {
 		const q = input.value.trim().toLowerCase();
 		let shown = 0;
-		for (const tile of el.querySelectorAll(".tile")) {
-			const match = tile.textContent.toLowerCase().includes(q);
-			tile.hidden = !match;
+		for (const row of el.querySelectorAll(".jump-row")) {
+			const match = row.textContent.toLowerCase().includes(q);
+			row.hidden = !match;
 			if (match) shown++;
+		}
+		for (const card of el.querySelectorAll(".jump-group")) {
+			card.hidden = !card.querySelector(".jump-row:not([hidden])");
 		}
 		empty.hidden = shown > 0;
 	});
 	input.addEventListener("keydown", (e) => {
 		if (e.key === "Enter") {
-			const first = el.querySelector(".tile:not([hidden])");
+			const first = el.querySelector(".jump-row:not([hidden])");
 			if (first) first.click();
 		}
 	});

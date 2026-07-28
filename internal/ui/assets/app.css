@@ -317,15 +317,18 @@ h2 { font-size: 14px; font-weight: 600; margin: 0; }
 input.tile-filter { width: 240px; max-width: 46vw; padding: 7px 11px 7px 31px; font-size: 13px; }
 .tiles-empty { color: var(--muted); font-size: 13px; padding: 10px 2px; }
 /* Navigation tiles: fixed even columns so rows never go ragged, each a card with an icon chip. */
-/* An even grid keeps every tile the same width, including a lone card on the last row. */
-.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 14px; }
-.tile { display: flex; align-items: center; gap: 14px; padding: 16px 18px; background-color: var(--surface); background-image: linear-gradient(180deg, var(--card-top), transparent 46%); border: 1px solid var(--border); border-radius: var(--radius-lg); color: var(--text); box-shadow: var(--shadow); transition: border-color 0.15s var(--ease), box-shadow 0.15s ease, transform 0.15s var(--ease); }
-.tile:hover { text-decoration: none; border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); transform: translateY(-2px); box-shadow: var(--shadow), 0 10px 26px -10px var(--accent-soft); }
-.tile-icon { flex: none; width: 38px; height: 38px; border-radius: 11px; background: var(--accent-soft); display: flex; align-items: center; justify-content: center; }
-.tile-icon svg { width: 19px; height: 19px; color: var(--accent); }
-.tile-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.tile-label { font-size: 14px; font-weight: 600; line-height: 1.2; }
-.tile-desc { font-size: 12.5px; line-height: 1.35; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Jump-to: titled group cards of compact rows. A handful of group cards cannot strand an
+   orphan the way a flat tile wall does. */
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 14px; align-items: start; }
+.jump-group { background-color: var(--surface); background-image: linear-gradient(180deg, var(--card-top), transparent 46%); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow); padding: 14px 12px 10px; }
+.jump-group-title { margin: 0 0 8px; padding: 0 8px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+.jump-row { display: flex; align-items: center; gap: 11px; padding: 8px; border-radius: var(--radius); color: var(--text); }
+.jump-row:hover { text-decoration: none; background: var(--surface-2); }
+.jump-row:hover .jump-label { color: var(--accent); }
+.jump-icon { flex: none; width: 30px; height: 30px; border-radius: 9px; background: var(--accent-soft); display: flex; align-items: center; justify-content: center; }
+.jump-icon svg { width: 15px; height: 15px; color: var(--accent); }
+.jump-label { font-size: 13.5px; font-weight: 600; white-space: nowrap; }
+.jump-desc { flex: 1; min-width: 0; font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
 
 /* Tables */
 table.runs { width: 100%; border-collapse: separate; border-spacing: 0; background-color: var(--surface); background-image: linear-gradient(180deg, var(--card-top), transparent 30%); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow); }
@@ -339,7 +342,7 @@ table.runs td button + button { margin-left: 8px; }
 table.runs td.mono { max-width: 380px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Status badges */
-.badge { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 600; letter-spacing: 0.01em; line-height: 1.6; white-space: nowrap; border: 1px solid transparent; }
+.badge { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 2px 9px; min-width: 96px; border-radius: 999px; font-size: 11.5px; font-weight: 600; letter-spacing: 0.01em; line-height: 1.6; white-space: nowrap; border: 1px solid transparent; }
 .badge::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .badge.succeeded { color: var(--ok); background: color-mix(in srgb, var(--ok) 13%, transparent); border-color: color-mix(in srgb, var(--ok) 32%, transparent); }
 .badge.failed { color: var(--failed); background: color-mix(in srgb, var(--failed) 13%, transparent); border-color: color-mix(in srgb, var(--failed) 32%, transparent); }
@@ -705,15 +708,16 @@ body[data-page="login"] .topbar { background: transparent; backdrop-filter: none
 .docs-content hr { border: none; border-top: 1px solid var(--border-muted); margin: 1.6em 0; }
 @media (max-width: 980px) { .docs-layout { grid-template-columns: 1fr; } .docs-nav { position: static; max-height: none; } }
 
-/* Theme switcher: a labeled segment at the bottom of the sidebar and the drawer. */
-.theme-group { margin-top: 8px; }
-.side .theme-group { margin-top: auto; padding-top: 14px; }
-.theme-row { display: flex; gap: 5px; padding: 0 2px; }
-.theme-btn { flex: 1; min-width: 0; display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 7px 4px; background: none; border: 1px solid var(--border-muted); border-radius: var(--radius); color: var(--muted); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease; }
-.theme-btn:hover { border-color: var(--border); color: var(--text); background: var(--surface-2); }
-.theme-btn.active { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); color: var(--accent); }
+/* Theme switcher: a quiet icon row at the bottom of the sidebar and the drawer. */
+.theme-group { margin-top: 10px; }
+.side .theme-group { margin-top: auto; padding-top: 12px; }
+.theme-row { display: flex; align-items: center; gap: 3px; padding: 0 6px; }
+.theme-hint { display: inline-flex; margin-right: 3px; color: var(--muted); opacity: 0.55; }
+.theme-hint svg { width: 13px; height: 13px; }
+.theme-btn { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0; background: none; border: none; border-radius: 7px; color: var(--muted); cursor: pointer; transition: color 0.12s ease, background 0.12s ease; }
+.theme-btn:hover { background: var(--surface-2); color: var(--text); }
+.theme-btn.active { background: var(--accent-soft); color: var(--accent); }
 .theme-btn svg { width: 14px; height: 14px; }
-.nav-group-label svg { width: 12px; height: 12px; vertical-align: -2px; margin-right: 5px; }
 
 /* Flat themes: the family's stark language instead of the signature mesh. Light follows
    kordloom.com's white monochrome; dark follows loomseal.com's warm ink night palette. Both drop
