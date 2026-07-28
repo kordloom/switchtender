@@ -982,7 +982,7 @@ ORDER BY failures DESC, host`
 	var out []run.HostHealth
 	for rows.Next() {
 		var (
-			h       run.HostHealth
+			h          run.HostHealth
 			lastOut    string
 			lastRun    string
 			recent     string
