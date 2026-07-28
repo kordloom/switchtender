@@ -143,6 +143,10 @@ type ListFilter struct {
 	Tool string
 	// OldestFirst flips the newest-first default ordering.
 	OldestFirst bool
+	// After keeps only runs created at or after this time when set.
+	After time.Time
+	// Before keeps only runs created strictly before this time when set.
+	Before time.Time
 }
 
 // memStore is an in-memory Store backed by maps guarded by a read-write mutex.
@@ -267,6 +271,12 @@ func (m *memStore) ListPage(ctx context.Context, filter ListFilter, limit, offse
 			continue
 		}
 		if filter.Tool != "" && NormalizeTool(r.Tool) != filter.Tool {
+			continue
+		}
+		if !filter.After.IsZero() && r.CreatedAt.Before(filter.After) {
+			continue
+		}
+		if !filter.Before.IsZero() && !r.CreatedAt.Before(filter.Before) {
 			continue
 		}
 		matched = append(matched, r)

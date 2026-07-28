@@ -894,3 +894,10 @@ body[data-theme="dark"] {
 /* Drill backdrop and action row: the inspect panel is escapable and actionable. */
 .drill-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.35); z-index: 39; }
 .drill-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border-muted); }
+
+/* The runs page's active date-window chip. */
+.window-chip { display: inline-flex; align-items: center; gap: 8px; padding: 5px 6px 5px 12px; background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border)); border-radius: 999px; color: var(--accent); font-size: 12.5px; font-weight: 600; }
+.window-chip a { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; color: var(--accent); font-size: 13px; }
+.window-chip a:hover { background: var(--accent-soft); text-decoration: none; }
+.activity-col:hover { text-decoration: none; }
+.activity-col:hover .activity-label { color: var(--accent); }

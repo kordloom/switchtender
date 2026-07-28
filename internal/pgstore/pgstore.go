@@ -594,6 +594,15 @@ func (s *store) ListPage(ctx context.Context, filter run.ListFilter, limit, offs
 		args = append(args, filter.Tool)
 		q += fmt.Sprintf(" AND COALESCE(NULLIF(tool, ''), 'ansible') = $%d", len(args))
 	}
+	// Stored times are RFC 3339 UTC strings, so lexicographic comparison is chronological.
+	if !filter.After.IsZero() {
+		args = append(args, sqlutil.FormatTime(filter.After))
+		q += fmt.Sprintf(" AND created_at >= $%d", len(args))
+	}
+	if !filter.Before.IsZero() {
+		args = append(args, sqlutil.FormatTime(filter.Before))
+		q += fmt.Sprintf(" AND created_at < $%d", len(args))
+	}
 	order := "DESC"
 	if filter.OldestFirst {
 		order = "ASC"

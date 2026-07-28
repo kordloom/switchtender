@@ -1807,6 +1807,7 @@ document.addEventListener("DOMContentLoaded", () => {
 	} else if (page === "doctor") {
 		loadDoctor();
 	}
+	if (page === "runs") mountRunsWindowChip();
 	buildNav();
 	wirePalette();
 	wireHinttips();
@@ -4286,10 +4287,14 @@ function renderActivity(runs) {
 	for (const day of days) {
 		const c = byDay[day.key];
 		const total = c.succeeded + c.failed + c.other;
-		const col = document.createElement("div");
+		const col = document.createElement("a");
 		col.className = "activity-col";
+		const dayStart = new Date(day.key + "T00:00:00");
+		const dayEnd = new Date(dayStart.getFullYear(), dayStart.getMonth(), dayStart.getDate() + 1);
+		col.href = "/ui/runs?after=" + encodeURIComponent(dayStart.toISOString()) +
+			"&before=" + encodeURIComponent(dayEnd.toISOString());
 		col.dataset.tip = day.label + ": " + c.succeeded + " succeeded, " + c.failed + " failed" +
-			(c.other ? ", " + c.other + " other" : "");
+			(c.other ? ", " + c.other + " other" : "") + ". Open these runs";
 		const bar = document.createElement("div");
 		bar.className = "activity-bar";
 		for (const part of [
@@ -4506,15 +4511,41 @@ function runsQuery() {
 	return el ? el.value.trim() : "";
 }
 
-// runsFilterParams reads the status, tool, and order dropdowns into query parameters, so the server
-// filters the whole run history, not just the loaded page.
+// runsFilterParams reads the status, tool, and order dropdowns plus any date window from the URL
+// into query parameters, so the server filters the whole run history, not just the loaded page.
 function runsFilterParams() {
 	let params = "";
 	for (const id of ["runs-status", "runs-tool", "runs-order"]) {
 		const el = document.getElementById(id);
 		if (el && el.value) params += "&" + id.replace("runs-", "") + "=" + encodeURIComponent(el.value);
 	}
+	const url = new URLSearchParams(location.search);
+	for (const key of ["after", "before"]) {
+		const v = url.get(key);
+		if (v) params += "&" + key + "=" + encodeURIComponent(v);
+	}
 	return params;
+}
+
+// mountRunsWindowChip shows which day the runs list is scoped to, with one click to clear it.
+function mountRunsWindowChip() {
+	const url = new URLSearchParams(location.search);
+	const after = url.get("after");
+	if (!after) return;
+	const bar = document.querySelector(".runs-toolbar");
+	if (!bar || bar.querySelector(".window-chip")) return;
+	const chip = document.createElement("span");
+	chip.className = "window-chip";
+	const when = new Date(after);
+	chip.appendChild(document.createTextNode(
+		isNaN(when) ? "Filtered window" : when.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })));
+	const clear = document.createElement("a");
+	clear.href = "/ui/runs";
+	clear.textContent = "\u00d7";
+	clear.setAttribute("aria-label", "Clear the date filter");
+	clear.dataset.tip = "Show every run again";
+	chip.appendChild(clear);
+	bar.appendChild(chip);
 }
 
 // wireRunsFilters reloads the table when a filter or order dropdown changes.

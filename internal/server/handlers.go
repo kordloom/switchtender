@@ -861,6 +861,12 @@ func listRunsHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
 		if tool := r.URL.Query().Get("tool"); tool != "" {
 			filter.Tool = run.NormalizeTool(tool)
 		}
+		if after, err := time.Parse(time.RFC3339, r.URL.Query().Get("after")); err == nil {
+			filter.After = after
+		}
+		if before, err := time.Parse(time.RFC3339, r.URL.Query().Get("before")); err == nil {
+			filter.Before = before
+		}
 		runs, err := store.ListPage(r.Context(), filter, limit, offset)
 		if err != nil {
 			log.Error("server: list runs: " + err.Error())
