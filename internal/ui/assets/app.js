@@ -185,9 +185,16 @@ function mountPageDocs() {
 	a.dataset.tip = "Open the " + ref.label + " guide";
 	a.innerHTML = svgIcon(NAV_ICONS.docs);
 	a.appendChild(document.createTextNode(ref.label));
-	const actions = head.querySelector(".head-actions");
-	if (actions) actions.appendChild(a);
-	else head.appendChild(a);
+	let actions = head.querySelector(".head-actions");
+	if (!actions) {
+		actions = document.createElement("div");
+		actions.className = "head-actions";
+		for (const child of Array.from(head.children)) {
+			if (!child.classList.contains("page-head-text")) actions.appendChild(child);
+		}
+		head.appendChild(actions);
+	}
+	actions.appendChild(a);
 }
 
 // LIST_PAGES are the pages whose main table is a searchable list.
@@ -2228,6 +2235,22 @@ function isReadOnly() {
 }
 
 // loadAudit fills the audit table with the trail, newest first, showing each entry's chain hash.
+// auditPathCell renders an audit path with any run reference linked to its run page.
+function auditPathCell(path) {
+	const cell = td("", "mono");
+	for (const part of String(path || "").split(/(run_[a-z0-9]+)/)) {
+		if (/^run_[a-z0-9]+$/.test(part)) {
+			const a = document.createElement("a");
+			a.href = "/ui/runs/" + part;
+			a.textContent = part;
+			cell.appendChild(a);
+		} else if (part) {
+			cell.appendChild(document.createTextNode(part));
+		}
+	}
+	return cell;
+}
+
 async function loadAudit() {
 	try {
 		const data = await getJSON("/audit?limit=500");
@@ -2243,7 +2266,7 @@ async function loadAudit() {
 			tr.appendChild(tdTime(e.at));
 			tr.appendChild(td(e.actor || "-"));
 			tr.appendChild(td(e.method, "mono"));
-			tr.appendChild(td(e.path, "mono"));
+			tr.appendChild(auditPathCell(e.path));
 			tr.appendChild(td((e.hash || "").slice(0, 12), "mono"));
 			tbody.appendChild(tr);
 		}
@@ -3786,7 +3809,8 @@ async function loadOverview() {
 		const runs = runsRes.runs || [];
 		const hosts = fleetRes.hosts || [];
 		renderOverviewMetrics(runs, hosts);
-		renderRecentRuns(runs.slice(0, 10));
+		renderRecentRuns(runs.slice(0, 8));
+		renderFleetSnapshot(hosts);
 		setStatus("");
 	} catch (e) {
 		setStatus("Failed to load the overview: " + e.message);
@@ -3839,6 +3863,44 @@ function renderRecentRuns(runs) {
 			meta.classList.add("reltime");
 		}
 		row.appendChild(meta);
+		const go = document.createElement("span");
+		go.className = "ov-row-go";
+		go.innerHTML = svgIcon('<polyline points="9 18 15 12 9 6"/>');
+		row.appendChild(go);
+		el.appendChild(row);
+	}
+}
+
+// renderFleetSnapshot fills the overview side card with the hosts most worth a look: flaky
+// first, then by failure count.
+function renderFleetSnapshot(hosts) {
+	const el = document.getElementById("ov-fleet");
+	if (!el) return;
+	const head = document.getElementById("ov-fleet-head");
+	el.innerHTML = "";
+	const ranked = hosts.slice().sort((a, b) =>
+		((b.flaky ? 1 : 0) - (a.flaky ? 1 : 0)) || (b.failures - a.failures) || a.host.localeCompare(b.host)).slice(0, 6);
+	if (head) head.hidden = !ranked.length;
+	if (!ranked.length) { el.appendChild(emptyLine("No host history yet.")); return; }
+	for (const h of ranked) {
+		const row = document.createElement("a");
+		row.className = "ov-row";
+		row.href = "/ui/hosts/" + encodeURIComponent(h.host);
+		const name = document.createElement("span");
+		name.className = "ov-row-name mono";
+		name.textContent = h.host;
+		row.appendChild(name);
+		const meta = document.createElement("span");
+		meta.className = "ov-row-meta" + (h.failures ? " fail-count" : "");
+		meta.textContent = h.failures + " / " + h.total + " failed";
+		row.appendChild(meta);
+		const chip = document.createElement("span");
+		chip.className = h.flaky ? "chip flaky" : "chip none";
+		chip.textContent = h.flaky ? "flaky" : "steady";
+		chip.dataset.tip = h.flaky
+			? "Recent outcomes alternate between pass and fail: worth a look"
+			: "Recent outcomes are stable";
+		row.appendChild(chip);
 		const go = document.createElement("span");
 		go.className = "ov-row-go";
 		go.innerHTML = svgIcon('<polyline points="9 18 15 12 9 6"/>');
@@ -4491,7 +4553,17 @@ async function loadSchedules() {
 			const tr = document.createElement("tr");
 			tr.appendChild(td(s.name || "(unnamed)"));
 			tr.appendChild(td(s.cron, "mono"));
-			tr.appendChild(td(s.template_id ? (tplByID[s.template_id] || "template") : scheduleTarget(s)));
+			const target = document.createElement("td");
+			if (s.template_id) {
+				const tpl = document.createElement("a");
+				tpl.href = "/ui/templates";
+				tpl.textContent = tplByID[s.template_id] || "template";
+				tpl.dataset.tip = "Open templates";
+				target.appendChild(tpl);
+			} else {
+				target.textContent = scheduleTarget(s);
+			}
+			tr.appendChild(target);
 
 			const enabled = document.createElement("td");
 			const chip = document.createElement("span");
@@ -5607,7 +5679,11 @@ function renderMatrix(model) {
 	hosts.forEach((host, ri) => {
 		const tr = document.createElement("tr");
 		const rowTh = document.createElement("th");
-		rowTh.textContent = host;
+		const hostLink = document.createElement("a");
+		hostLink.href = "/ui/hosts/" + encodeURIComponent(host);
+		hostLink.textContent = host;
+		hostLink.dataset.tip = "Open this host's history";
+		rowTh.appendChild(hostLink);
 		rowTh.dataset.ri = ri;
 		tr.appendChild(rowTh);
 		tasks.forEach((task, ci) => {
