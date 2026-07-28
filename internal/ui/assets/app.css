@@ -862,3 +862,9 @@ body[data-theme="dark"] {
 	.jump-group { border-left: none; border-top: 1px solid var(--border-muted); padding: 12px 0 0; margin-top: 12px; }
 	.jump-group:first-child { border-top: none; margin-top: 0; padding-top: 0; }
 }
+
+/* Inline clipboard control beside copyable values. */
+.copy-btn { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; margin-left: 6px; padding: 0; background: none; border: none; border-radius: 6px; color: var(--muted); cursor: pointer; vertical-align: middle; }
+.copy-btn:hover { background: var(--surface-2); color: var(--text); }
+.copy-btn.copied { color: var(--ok); }
+.copy-btn svg { width: 13px; height: 13px; }

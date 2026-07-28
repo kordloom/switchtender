@@ -5080,6 +5080,27 @@ function outcomeChip(outcome) {
 }
 
 // detailState holds the current run and its accumulated events for incremental rendering.
+// copyButton returns a small clipboard control that copies text and confirms with a checkmark.
+function copyButton(text, tip) {
+	const btn = document.createElement("button");
+	btn.type = "button";
+	btn.className = "copy-btn";
+	btn.dataset.tip = tip;
+	btn.setAttribute("aria-label", tip);
+	const glyph = '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>';
+	btn.innerHTML = svgIcon(glyph);
+	btn.addEventListener("click", async () => {
+		try { await navigator.clipboard.writeText(text); } catch { return; }
+		btn.innerHTML = svgIcon('<polyline points="20 6 9 17 4 12"/>');
+		btn.classList.add("copied");
+		window.setTimeout(() => {
+			btn.innerHTML = svgIcon(glyph);
+			btn.classList.remove("copied");
+		}, 1200);
+	});
+	return btn;
+}
+
 let detailState = null;
 
 // loadDetail loads one run and dispatches to the split or single render path.
@@ -5088,6 +5109,34 @@ async function loadDetail(runId) {
 	if (fullLog) fullLog.href = streamURL("/runs/" + runId + "/logs");
 	const exportEvents = document.getElementById("export-events");
 	if (exportEvents) exportEvents.href = streamURL("/runs/" + runId + "/events?download=1");
+	const copyLink = document.getElementById("copy-link");
+	if (copyLink) {
+		copyLink.dataset.tip = "Copy a link to this run";
+		copyLink.addEventListener("click", async () => {
+			try { await navigator.clipboard.writeText(location.href); } catch { return; }
+			copyLink.textContent = "Copied";
+			window.setTimeout(() => { copyLink.textContent = "Copy link"; }, 1200);
+		});
+	}
+	const exportResults = document.getElementById("export-results");
+	if (exportResults) {
+		exportResults.dataset.tip = "Download this run and its per-host results as JSON";
+		exportResults.addEventListener("click", () => {
+			if (!detailState || !detailState.run) return;
+			const results = {};
+			for (const e of detailState.events || []) {
+				if (!e.host || !e.task || !e.type || e.type.indexOf("runner_") !== 0) continue;
+				const outcome = e.type === "runner_ok"
+					? (e.changed ? "changed" : "ok")
+					: e.type.slice("runner_".length);
+				if (!results[e.host]) results[e.host] = {};
+				results[e.host][e.task] = { outcome, rc: e.rc ?? undefined };
+			}
+			const payload = { run: detailState.run, results, exported_at: new Date().toISOString() };
+			downloadBlob("switchtender-" + detailState.runId + ".json", "application/json",
+				JSON.stringify(payload, null, 2) + "\n");
+		});
+	}
 	wireActions(runId);
 	try {
 		const run = await getJSON("/runs/" + runId);
@@ -5646,9 +5695,13 @@ function renderHeader(run) {
 	const el = document.getElementById("run-header");
 	el.innerHTML = "";
 	el.appendChild(field("Status", null, badge(run.status)));
-	el.appendChild(field("Run", shortId(run.id), null, run.id));
+	const runField = field("Run", shortId(run.id), null, run.id);
+	runField.querySelector(".value").appendChild(copyButton(run.id, "Copy the full run id"));
+	el.appendChild(runField);
 	if (!run.tool || run.tool === "ansible") {
-		el.appendChild(field("Playbook", baseName(run.playbook) || (run.playbook || ""), null, run.playbook || ""));
+		const pb = field("Playbook", baseName(run.playbook) || (run.playbook || ""), null, run.playbook || "");
+		if (run.playbook) pb.querySelector(".value").appendChild(copyButton(run.playbook, "Copy the playbook path"));
+		el.appendChild(pb);
 	} else {
 		el.appendChild(field("Tool", null, toolBadgeEl(run)));
 		el.appendChild(field(run.tool === "terraform" || run.tool === "opentofu" ? "Directory" : "Command",
@@ -5674,7 +5727,9 @@ function renderHeader(run) {
 		}
 	}
 	if (run.inventory) {
-		el.appendChild(field("Inventory", baseName(run.inventory), null, run.inventory));
+		const inv = field("Inventory", baseName(run.inventory), null, run.inventory);
+		inv.querySelector(".value").appendChild(copyButton(run.inventory, "Copy the inventory path"));
+		el.appendChild(inv);
 	}
 	if (run.shard_count) {
 		el.appendChild(field("Shards", String(run.shard_count)));
