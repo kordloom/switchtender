@@ -131,7 +131,7 @@ func createTemplateHandler(store template.Store, log *zap.Logger) http.HandlerFu
 			respondError(w, log, http.StatusInternalServerError, "could not store template")
 			return
 		}
-		respondJSON(w, log, http.StatusCreated, t, wantsPretty(r))
+		respondJSON(w, log, http.StatusCreated, maskTemplate(t), wantsPretty(r))
 	}
 }
 
@@ -152,6 +152,12 @@ func updateTemplateHandler(store template.Store, log *zap.Logger) http.HandlerFu
 			return
 		}
 		id := r.PathValue("id")
+		// Notification URLs are read back masked, so a row the editor left untouched arrives
+		// redacted. Restore those from the stored template rather than storing the mask.
+		notifications := req.Notifications
+		if existing, err := store.Get(r.Context(), id); err == nil {
+			notifications = restoreMaskedNotifications(req.Notifications, existing.Notifications)
+		}
 		t := &template.Template{
 			ID: id, Name: req.Name, ProjectID: req.ProjectID,
 			Playbook: req.Playbook, Inventory: req.Inventory, InventoryID: req.InventoryID,
@@ -159,7 +165,7 @@ func updateTemplateHandler(store template.Store, log *zap.Logger) http.HandlerFu
 			Shards:        req.Shards,
 			CredentialIDs: req.CredentialIDs, SelectableCredentialIDs: req.SelectableCredentialIDs,
 			ExtraVars: req.ExtraVars, Survey: req.Survey,
-			Notifications: req.Notifications,
+			Notifications: notifications,
 			Queue:         req.Queue, Image: req.Image, PullCredentialID: req.PullCredentialID,
 			OrgID: req.OrgID,
 		}
@@ -179,7 +185,7 @@ func updateTemplateHandler(store template.Store, log *zap.Logger) http.HandlerFu
 			respondError(w, log, http.StatusInternalServerError, "could not read template")
 			return
 		}
-		respondJSON(w, log, http.StatusOK, updated, wantsPretty(r))
+		respondJSON(w, log, http.StatusOK, maskTemplate(updated), wantsPretty(r))
 	}
 }
 
@@ -206,7 +212,7 @@ func listTemplatesHandler(store template.Store, authz *authorizer, log *zap.Logg
 			return
 		}
 		respondJSON(w, log, http.StatusOK,
-			listTemplatesResponse{Templates: visible, Count: len(visible)}, wantsPretty(r))
+			listTemplatesResponse{Templates: maskTemplates(visible), Count: len(visible)}, wantsPretty(r))
 	}
 }
 
