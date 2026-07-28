@@ -2004,6 +2004,24 @@ function applyReadOnly() {
 		banner.textContent = "Read-only demo. Browse the data freely. Changes are disabled.";
 		main.insertBefore(banner, main.firstChild);
 	}
+	// Anything that would change state is disabled wherever it lives: rows, panels, drills, and
+	// page headers alike, each explaining itself rather than silently doing nothing.
+	// The page header's primary action creates something, so it is mutating by definition.
+	for (const btn of document.querySelectorAll(".page-head .button.primary, .wf-toolbar .button.primary")) {
+		btn.dataset.mutates = "true";
+		if (!btn.dataset.tip) {
+			btn.dataset.tip = "Click to " + btn.textContent.trim().toLowerCase();
+		}
+	}
+	// Table rows and drill panels are built after this pass runs, so rather than disabling the
+	// controls that exist right now, swallow the click for anything marked as mutating. The
+	// control stays hoverable, which is what lets it explain why it is unavailable.
+	document.addEventListener("click", (e) => {
+		const target = e.target.closest && e.target.closest("[data-mutates]");
+		if (!target) return;
+		e.preventDefault();
+		e.stopImmediatePropagation();
+	}, true);
 	for (const form of document.querySelectorAll("form")) {
 		for (const btn of form.querySelectorAll("button")) btn.disabled = true;
 		const actions = form.querySelector(".launch-actions") || form;
@@ -2552,6 +2570,15 @@ function wireHinttips() {
 	};
 	const show = (e) => {
 		if (!e.target.closest) return;
+		// In the read-only demo a mutating control still teaches what it would do, then says why
+		// nothing happens when it is pressed.
+		const blocked = isReadOnly() && e.target.closest("[data-mutates]");
+		if (blocked) {
+			clearTimeout(linkTimer);
+			const what = blocked.dataset.tip || "This changes data";
+			place(blocked, what + ". Disabled in this read-only demo");
+			return;
+		}
 		const target = e.target.closest("[data-tip]");
 		if (target) { clearTimeout(linkTimer); place(target, target.dataset.tip); return; }
 		// Plain links reveal their destination after a beat, so casual mouse travel stays quiet.
@@ -2920,9 +2947,11 @@ function setModalTitle(name, text) {
 
 // editButton builds an inline Edit action for a table row. Its click does not bubble, so the row's
 // inspect drawer stays closed.
-function editButton(onClick) {
+function editButton(onClick, what) {
 	const b = document.createElement("button");
 	b.className = "button";
+	b.dataset.mutates = "true";
+	b.dataset.tip = what || "Click to edit this record";
 	b.textContent = "Edit";
 	b.addEventListener("click", (e) => {
 		e.preventDefault();
@@ -3177,6 +3206,8 @@ async function loadCredentials() {
 			const actions = document.createElement("td");
 			const del = document.createElement("button");
 			del.className = "button danger";
+	del.dataset.mutates = "true";
+	del.dataset.tip = "Click to delete this permanently";
 			del.textContent = "Delete";
 			del.addEventListener("click", async (e) => {
 				e.preventDefault();
@@ -3191,7 +3222,7 @@ async function loadCredentials() {
 					setStatus("Delete failed: " + err.message);
 				}
 			});
-			actions.appendChild(editButton(() => openCredentialEdit(c)));
+			actions.appendChild(editButton(() => openCredentialEdit(c), "Click to replace this credential's secret"));
 			actions.appendChild(document.createTextNode(" "));
 			actions.appendChild(del);
 			tr.appendChild(actions);
@@ -3262,6 +3293,8 @@ function renderNeedsSecret(creds) {
 		input.disabled = readOnly;
 		const save = document.createElement("button");
 		save.className = "button primary";
+		save.dataset.mutates = "true";
+		save.dataset.tip = "Click to store this secret, encrypted at rest";
 		save.textContent = "Save";
 		save.disabled = readOnly;
 		const status = document.createElement("span");
@@ -3421,7 +3454,7 @@ async function loadProjects() {
 			browse.dataset.tip = "Click to browse this project's cached checkout";
 			browse.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); openProjectFiles(p); });
 			actions.insertBefore(browse, actions.firstChild);
-			actions.insertBefore(editButton(() => openProjectEdit(p)), actions.firstChild);
+			actions.insertBefore(editButton(() => openProjectEdit(p), "Click to edit this project's repository, branch, and credentials"), actions.firstChild);
 			tr.appendChild(actions);
 			inspectable(tr, p.name, [
 				{ label: "Repository", value: p.repo_url, copy: true },
@@ -3782,6 +3815,8 @@ async function loadTemplates() {
 			const actions = document.createElement("td");
 			const launch = document.createElement("button");
 			launch.className = "button primary";
+			launch.dataset.mutates = "true";
+			launch.dataset.tip = "Click to launch this template with its saved settings";
 			launch.textContent = "Launch";
 			launch.addEventListener("click", async (e) => {
 				e.preventDefault();
@@ -3815,7 +3850,7 @@ async function loadTemplates() {
 			withOpts.addEventListener("click", (e) => { e.preventDefault(); openPromptLaunch(t); });
 			actions.appendChild(withOpts);
 			actions.appendChild(document.createTextNode(" "));
-			actions.appendChild(editButton(() => openTemplateEdit(t)));
+			actions.appendChild(editButton(() => openTemplateEdit(t), "Click to edit this template's playbook, credentials, and settings"));
 			actions.appendChild(document.createTextNode(" "));
 			const delBtn = deleteCell("/templates/" + t.id, "template " + t.name, tr, "No templates yet.");
 			actions.appendChild(delBtn.firstChild);
@@ -4188,6 +4223,8 @@ function deleteCell(path, label, tr, emptyMsg) {
 	const cell = document.createElement("td");
 	const del = document.createElement("button");
 	del.className = "button danger";
+	del.dataset.mutates = "true";
+	del.dataset.tip = "Click to delete this permanently";
 	del.textContent = "Delete";
 	del.addEventListener("click", async (e) => {
 		e.preventDefault();
@@ -4443,7 +4480,7 @@ async function loadInventories() {
 			tr.appendChild(groupsCell);
 			tr.appendChild(tdTime(i.created_at));
 			const actions = deleteCell("/inventories/" + i.id, "inventory " + i.name, tr, "No inventories yet.");
-			actions.insertBefore(editButton(() => openInventoryEdit(i)), actions.firstChild);
+			actions.insertBefore(editButton(() => openInventoryEdit(i), "Click to edit this inventory's hosts and groups"), actions.firstChild);
 			tr.appendChild(actions);
 			inspectable(tr, i.name, [
 				{ label: "Format", value: parsed.format === "yaml" ? "YAML" : "INI" },
@@ -4454,7 +4491,7 @@ async function loadInventories() {
 				{ label: "ID", value: i.id, copy: true },
 				{ label: "Content", value: i.content, block: true },
 			], [
-				{ label: "Edit", primary: true, tip: "Edit this inventory", onClick: () => { closeDrill(); openInventoryEdit(i); } },
+				{ label: "Edit", primary: true, mutates: true, tip: "Click to edit this inventory", onClick: () => { closeDrill(); openInventoryEdit(i); } },
 				{ label: "Copy content", tip: "Copy the inventory to the clipboard", onClick: async () => {
 					try { await navigator.clipboard.writeText(i.content || ""); } catch { /* denied */ }
 				} },
@@ -4582,6 +4619,8 @@ async function loadSources() {
 			const actions = document.createElement("td");
 			const refresh = document.createElement("button");
 			refresh.className = "button primary";
+			refresh.dataset.mutates = "true";
+			refresh.dataset.tip = "Click to re-run this source and refresh its inventory now";
 			refresh.textContent = "Refresh";
 			refresh.addEventListener("click", async (e) => {
 				e.preventDefault();
@@ -4597,7 +4636,7 @@ async function loadSources() {
 			});
 			actions.appendChild(refresh);
 			actions.appendChild(document.createTextNode(" "));
-			actions.appendChild(editButton(() => openSourceEdit(src)));
+			actions.appendChild(editButton(() => openSourceEdit(src), "Click to edit this source's plugin and credentials"));
 			actions.appendChild(document.createTextNode(" "));
 			const del = deleteCell("/inventory-sources/" + src.id, "source " + src.name, tr,
 				"No inventory sources yet.");
@@ -6022,6 +6061,8 @@ async function loadSchedules() {
 			const actions = document.createElement("td");
 			const del = document.createElement("button");
 			del.className = "button danger";
+	del.dataset.mutates = "true";
+	del.dataset.tip = "Click to delete this permanently";
 			del.textContent = "Delete";
 			del.addEventListener("click", async (e) => {
 				e.preventDefault();
@@ -6034,7 +6075,7 @@ async function loadSchedules() {
 					setStatus("Delete failed: " + err.message);
 				}
 			});
-			actions.appendChild(editButton(() => openScheduleEdit(s)));
+			actions.appendChild(editButton(() => openScheduleEdit(s), "Click to edit this schedule's cadence and target"));
 			actions.appendChild(document.createTextNode(" "));
 			actions.appendChild(del);
 			tr.appendChild(actions);
@@ -6330,6 +6371,8 @@ async function loadPolicies() {
 			const actions = document.createElement("td");
 			const del = document.createElement("button");
 			del.className = "button danger";
+	del.dataset.mutates = "true";
+	del.dataset.tip = "Click to delete this permanently";
 			del.textContent = "Delete";
 			del.addEventListener("click", async (e) => {
 				e.preventDefault();
@@ -6730,7 +6773,7 @@ async function loadUsers() {
 			tr.appendChild(act.last ? tdTime(act.last) : td("never"));
 			tr.appendChild(tdTime(u.created_at));
 			const actions = deleteCell("/users/" + u.id, "user " + u.username, tr, "No users yet.");
-			actions.insertBefore(editButton(() => openUserEdit(u)), actions.firstChild);
+			actions.insertBefore(editButton(() => openUserEdit(u), "Click to change this account's role or password"), actions.firstChild);
 			tr.appendChild(actions);
 			tbody.appendChild(tr);
 		}
@@ -7722,6 +7765,7 @@ function inspectDrawer(title, fields, actions) {
 			btn.className = "button" + (a.primary ? " primary" : "");
 			btn.textContent = a.label;
 			if (a.tip) btn.dataset.tip = a.tip;
+			if (a.mutates) btn.dataset.mutates = "true";
 			btn.addEventListener("click", a.onClick);
 			row.appendChild(btn);
 		}

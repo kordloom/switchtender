@@ -114,7 +114,18 @@
 
 /* A read-only demo dims row actions such as Launch, Delete, and Refresh rather than removing them,
    so the pages still convey what the product does. */
-body[data-readonly] table .button { opacity: 0.5; pointer-events: none; }
+/* A control the read-only demo blocks stays visible, so the page still conveys what the product
+   does, but reads as unavailable and stays hoverable so it can explain why. The rule matches on
+   the marker rather than the disabled attribute, since rows are built after the read-only pass. */
+body[data-readonly] [data-mutates], body[data-readonly] .button[disabled] {
+	opacity: 0.45;
+	cursor: not-allowed;
+	filter: saturate(0.35);
+	box-shadow: none;
+}
+body[data-readonly] [data-mutates]:hover { transform: none; background: var(--surface-2); }
+body[data-readonly] .button.primary[data-mutates]:hover { background: var(--primary-bg); }
+body[data-readonly] [data-mutates]::after { display: none; }
 
 /* Read-only demo banner and the inline note that sits beside a disabled form action. */
 .ro-banner { background: var(--surface-2); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: var(--radius); padding: 9px 14px; margin-bottom: 16px; font-size: 13px; color: var(--text); }
