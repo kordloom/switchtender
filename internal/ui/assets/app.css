@@ -731,16 +731,14 @@ body[data-page="login"] .topbar { background: transparent; backdrop-filter: none
 @media (max-width: 980px) { .docs-layout { grid-template-columns: 1fr; } .docs-nav { position: static; max-height: none; } }
 
 /* Theme switcher: a quiet icon row at the bottom of the sidebar and the drawer. */
-.theme-group { margin-top: 10px; }
-.side .theme-group { margin-top: auto; padding-top: 12px; }
-.theme-row { display: flex; align-items: center; gap: 3px; padding: 0 6px; }
-.theme-hint { font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-right: 5px; }
-.theme-btn { display: inline-flex; align-items: center; justify-content: center; gap: 5px; height: 26px; padding: 0 9px; background: none; border: none; border-radius: 7px; color: var(--muted); font: inherit; font-size: 11.5px; font-weight: 600; cursor: pointer; transition: color 0.12s ease, background 0.12s ease; }
-.theme-btn:hover { background: var(--surface-2); color: var(--text); }
-.theme-btn.active { background: var(--accent-soft); color: var(--accent); }
-.theme-btn .theme-name { display: none; }
-.theme-btn.active .theme-name { display: inline; }
-.theme-btn svg { width: 14px; height: 14px; }
+.theme-group { margin-top: 10px; padding: 0 8px; }
+.side .theme-group { margin-top: auto; padding-top: 14px; }
+.theme-hint { display: block; margin-bottom: 6px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+/* A segmented control: three equal cells in one track, the active one lit. */
+.theme-row { display: flex; padding: 3px; gap: 2px; background: var(--surface-2); border: 1px solid var(--border-muted); border-radius: 9px; }
+.theme-btn { flex: 1; min-width: 0; height: 24px; padding: 0 4px; background: none; border: none; border-radius: 6px; color: var(--muted); font: inherit; font-size: 11.5px; font-weight: 600; cursor: pointer; transition: color 0.12s ease, background 0.12s ease; }
+.theme-btn:hover { color: var(--text); }
+.theme-btn.active { background: var(--surface); color: var(--accent); box-shadow: var(--shadow); }
 
 /* Flat themes: the family's stark language instead of the signature mesh. Light follows
    kordloom.com's white monochrome; dark follows loomseal.com's warm ink night palette. Both drop

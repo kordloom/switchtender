@@ -8,7 +8,11 @@
 	try { theme = localStorage.getItem("st_theme"); } catch { /* storage may be unavailable */ }
 	const param = new URLSearchParams(location.search).get("theme");
 	if (param) {
-		const byName = { stitch: "signature", kord: "light", seal: "dark" };
+		const byName = {
+			loom: "signature", linen: "light", ink: "dark",
+			// The first published names still resolve, so links already shared keep working.
+			stitch: "signature", kord: "light", seal: "dark",
+		};
 		const key = byName[param.toLowerCase()];
 		if (key === "light" || key === "dark") theme = key;
 		else if (key === "signature") theme = null;
@@ -1970,9 +1974,9 @@ function svgIcon(inner) {
 
 // THEMES lists the selectable appearances: the signature look, then the flat family themes.
 const THEMES = [
-	{ key: "signature", label: "Stitch", desc: "The signature glow", tip: "Stitch, the default theme", icon: '<path d="M3 16c3.5-4 9-4 12.5-1" stroke-dasharray="3.2 2.6"/><line x1="14" y1="16.5" x2="21" y2="9.5"/>' },
-	{ key: "light", label: "Kord", desc: "Clean white, the kordloom.com style", tip: "Kord, the white theme", icon: '<circle cx="12" cy="12" r="4"/><line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/><line x1="4.9" y1="4.9" x2="7" y2="7"/><line x1="17" y1="17" x2="19.1" y2="19.1"/><line x1="4.9" y1="19.1" x2="7" y2="17"/><line x1="17" y1="7" x2="19.1" y2="4.9"/>' },
-	{ key: "dark", label: "Seal", desc: "Warm ink black, the loomseal.com style", tip: "Seal, the dark theme", icon: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>' },
+	{ key: "signature", label: "Loom", desc: "The signature look, depth and glow", tip: "Loom, the signature theme" },
+	{ key: "light", label: "Linen", desc: "Clean white, the kordloom.com style", tip: "Linen, the white theme" },
+	{ key: "dark", label: "Ink", desc: "Warm black, the loomseal.com style", tip: "Ink, the dark theme" },
 ];
 
 // currentTheme returns the active theme key, defaulting to the signature look.
@@ -2008,12 +2012,12 @@ function syncThemeButtons() {
 function themeGroup() {
 	const g = document.createElement("div");
 	g.className = "theme-group";
-	const row = document.createElement("div");
-	row.className = "theme-row";
 	const hint = document.createElement("span");
 	hint.className = "theme-hint";
 	hint.textContent = "Theme";
-	row.appendChild(hint);
+	g.appendChild(hint);
+	const row = document.createElement("div");
+	row.className = "theme-row";
 	for (const t of THEMES) {
 		const btn = document.createElement("button");
 		btn.type = "button";
@@ -2022,11 +2026,7 @@ function themeGroup() {
 		btn.dataset.tip = t.tip;
 		btn.setAttribute("aria-label", t.tip);
 		btn.setAttribute("aria-pressed", "false");
-		btn.innerHTML = svgIcon(t.icon);
-		const name = document.createElement("span");
-		name.className = "theme-name";
-		name.textContent = t.label;
-		btn.appendChild(name);
+		btn.textContent = t.label;
 		btn.addEventListener("click", () => setTheme(t.key));
 		row.appendChild(btn);
 	}
@@ -2057,7 +2057,11 @@ function paletteEntries() {
 		href: "https://github.com/kordloom/switchtender", external: true,
 	});
 	for (const t of THEMES) {
-		out.push({ label: "Theme: " + t.label, desc: t.desc, group: "Theme", icon: t.icon, action: () => setTheme(t.key) });
+		out.push({
+			label: "Theme: " + t.label, desc: t.desc, group: "Theme",
+			icon: '<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" stroke="none"/>',
+			action: () => setTheme(t.key),
+		});
 	}
 	return out;
 }
