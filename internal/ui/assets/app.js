@@ -10,16 +10,27 @@
 })();
 
 // syncBrandLogos points every brand picture at artwork the active theme can show: a forced light
-// theme would lose the light-on-transparent logo, and a forced dark theme the dark one. Rewriting
-// the source's media query forces the right file, or restores following the OS for the default.
+// theme needs the ink logo and a forced dark theme the light one. A forced theme removes the
+// media-driven source and sets the image directly, since Safari does not reliably re-evaluate a
+// picture whose source attributes change; the default restores the source to follow the OS.
 function syncBrandLogos() {
 	const theme = document.body.dataset.theme;
 	for (const pic of document.querySelectorAll(".brand picture, .side-brand picture")) {
+		const img = pic.querySelector("img");
+		if (!img) continue;
 		const source = pic.querySelector("source");
-		if (!source) continue;
-		if (theme === "light") source.media = "not all";
-		else if (theme === "dark") source.media = "all";
-		else source.media = "(prefers-color-scheme: dark)";
+		// The removed source is kept on the picture so the default theme can restore it.
+		if (source && !pic.stSource) pic.stSource = source;
+		if (theme === "light" || theme === "dark") {
+			if (source) source.remove();
+			const want = theme === "dark"
+				? "/ui/assets/logo-train-tracks-dark.png"
+				: "/ui/assets/logo-train-tracks.png";
+			if (img.getAttribute("src") !== want) img.src = want;
+		} else if (pic.stSource && !source) {
+			pic.insertBefore(pic.stSource, img);
+			img.src = "/ui/assets/logo-train-tracks.png";
+		}
 	}
 }
 
@@ -3688,10 +3699,13 @@ function renderOverviewMetrics(runs, hosts) {
 	el.hidden = false;
 }
 
-// renderRecentRuns lists the latest runs, each a link to its detail page.
+// renderRecentRuns lists the latest runs, each a link to its detail page, under a labeled header
+// row that only shows when there are rows to label.
 function renderRecentRuns(runs) {
 	const el = document.getElementById("recent");
 	el.innerHTML = "";
+	const head = document.getElementById("ov-head");
+	if (head) head.hidden = !runs.length;
 	if (!runs.length) { el.appendChild(emptyLine("No runs yet.")); return; }
 	for (const r of runs) {
 		const row = document.createElement("a");
@@ -3713,6 +3727,10 @@ function renderRecentRuns(runs) {
 			meta.classList.add("reltime");
 		}
 		row.appendChild(meta);
+		const go = document.createElement("span");
+		go.className = "ov-row-go";
+		go.innerHTML = svgIcon('<polyline points="9 18 15 12 9 6"/>');
+		row.appendChild(go);
 		el.appendChild(row);
 	}
 }
