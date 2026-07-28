@@ -3537,6 +3537,7 @@ async function openPromptLaunch(t) {
 	document.getElementById("prompt-status").textContent = "";
 	document.getElementById("prompt-limit").value = "";
 	document.getElementById("prompt-vars").value = "";
+	document.getElementById("prompt-labels").value = "";
 	document.getElementById("prompt-dry-run").checked = !!t.dry_run;
 	surveyFieldsInto(document.getElementById("prompt-survey"), t.survey);
 
@@ -3590,6 +3591,12 @@ async function openPromptLaunch(t) {
 				return;
 			}
 		}
+		const labels = {};
+		for (const line of document.getElementById("prompt-labels").value.split("\n")) {
+			const [key, ...rest] = line.split("=");
+			if (key.trim() && rest.length) labels[key.trim()] = rest.join("=").trim();
+		}
+		if (Object.keys(labels).length) payload.labels = labels;
 		payload.dry_run = document.getElementById("prompt-dry-run").checked;
 		try {
 			const created = await postAction("/templates/" + t.id + "/launch", payload);
@@ -4580,7 +4587,7 @@ async function loadRuns() {
 	if (sizeEl) sizeEl.onchange = () => loadRuns();
 	const gen = ++runsLoadGen;
 	setStatus("");
-	showSkeletonRows(tbody, 6, 7);
+	showSkeletonRows(tbody, 6, 8);
 	table.hidden = false;
 	try {
 		const data = await getJSON("/runs?limit=" + runsPageSize() + "&offset=0&q=" + encodeURIComponent(runsQuery()) + runsFilterParams());
@@ -4623,6 +4630,85 @@ const KIND_TIPS = {
 	powershell: "Runs a PowerShell script",
 	go: "Runs a Go program",
 };
+
+// SOURCE_LABELS names each provenance source in the interface.
+const SOURCE_LABELS = {
+	api: "API", manual: "Manual", template: "Template", schedule: "Schedule",
+	rerun: "Rerun", reconcile: "Drift fix", propose: "Proposed",
+};
+
+// originCellEl renders what fired a run: a chip naming the source, linked to the object behind
+// it when there is one, plus the actor who asked for it.
+function originCellEl(r) {
+	const cell = td("");
+	const source = r.source || (r.proposed_from ? "reconcile" : "");
+	if (!source) {
+		cell.textContent = "\u2014";
+		cell.dataset.tip = "Recorded before run provenance was tracked";
+		return cell;
+	}
+	const label = SOURCE_LABELS[source] || source;
+	let chip;
+	const href = originHref(r);
+	if (href) {
+		chip = document.createElement("a");
+		chip.href = href;
+	} else {
+		chip = document.createElement("span");
+	}
+	chip.className = "origin-chip " + source;
+	chip.textContent = label;
+	chip.dataset.tip = originTip(r);
+	cell.appendChild(chip);
+	if (r.actor) {
+		const who = document.createElement("span");
+		who.className = "origin-actor";
+		who.textContent = r.actor;
+		cell.appendChild(who);
+	}
+	return cell;
+}
+
+// originHref returns where a run's origin chip navigates, empty when the source has no page.
+function originHref(r) {
+	switch (r.source) {
+	case "template":
+		return r.source_id ? "/ui/templates" : "";
+	case "schedule":
+		return r.source_id ? "/ui/schedules" : "";
+	case "rerun":
+		return r.rerun_of ? "/ui/runs/" + r.rerun_of : "";
+	case "reconcile":
+		return r.proposed_from ? "/ui/runs/" + r.proposed_from : "";
+	default:
+		return "";
+	}
+}
+
+// originTip explains a run's origin in a sentence.
+function originTip(r) {
+	switch (r.source) {
+	case "template": return "Launched from a saved template. Open templates";
+	case "schedule": return "Fired by a schedule on its cron cadence. Open schedules";
+	case "rerun": return "Replayed the spec of an earlier run. Open that run";
+	case "reconcile": return "Proposed to fix drift found by a check. Open the check";
+	case "propose": return "Proposed from a description, held for approval";
+	case "api": return "Submitted directly through the API";
+	default: return "How this run was started";
+	}
+}
+
+// labelChipsInto appends a run's labels as small key-value chips that filter the list.
+function labelChipsInto(cell, labels) {
+	for (const key of Object.keys(labels || {}).sort()) {
+		const chip = document.createElement("a");
+		chip.className = "label-chip";
+		chip.href = "/ui/runs?q=" + encodeURIComponent("label:" + key + "=" + labels[key]);
+		chip.textContent = key + "=" + labels[key];
+		chip.dataset.tip = "Show every run labeled " + key + "=" + labels[key];
+		cell.appendChild(chip);
+	}
+}
 
 // typeCellEl fills a table cell with the run's tool chip and any kind tags, so type lives in one
 // labeled, aligned column instead of floating beside names.
@@ -4681,9 +4767,11 @@ function appendRunRows(tbody, runs) {
 		tr.appendChild(runCell);
 
 		tr.appendChild(typeCellEl(r));
+		tr.appendChild(originCellEl(r));
 
 		const pbCell = td(toolLabel(r));
 		pbCell.title = r.playbook || r.command || "";
+		labelChipsInto(pbCell, r.labels);
 		tr.appendChild(pbCell);
 
 		tr.appendChild(tdTime(r.started_at || r.created_at));
@@ -6155,6 +6243,25 @@ function renderHeader(run) {
 	if (run.dry_run) {
 		el.appendChild(field("Mode", "dry run"));
 	}
+	if (run.source) {
+		const origin = originCellEl(run);
+		origin.className = "";
+		el.appendChild(field("Origin", null, origin));
+	}
+	if (run.rerun_of) {
+		const link = document.createElement("a");
+		link.href = "/ui/runs/" + run.rerun_of;
+		link.textContent = shortId(run.rerun_of);
+		link.title = run.rerun_of;
+		link.dataset.tip = "Open the run this replayed";
+		el.appendChild(field("Rerun of", null, link));
+	}
+	if (run.labels && Object.keys(run.labels).length) {
+		const wrap = document.createElement("span");
+		wrap.className = "value label-wrap";
+		labelChipsInto(wrap, run.labels);
+		el.appendChild(field("Labels", null, wrap));
+	}
 	if (run.proposed_from) {
 		const link = document.createElement("a");
 		link.href = "/ui/runs/" + run.proposed_from;
@@ -6178,6 +6285,13 @@ function renderHeader(run) {
 	}
 	if (run.shard_count) {
 		el.appendChild(field("Shards", String(run.shard_count)));
+	}
+	if (run.claimed_by) {
+		const worker = document.createElement("a");
+		worker.href = "/ui/workers";
+		worker.textContent = run.claimed_by;
+		worker.dataset.tip = "The executor that claimed this run. Open workers";
+		el.appendChild(field("Worker", null, worker));
 	}
 	if (run.exit_code !== undefined && run.exit_code !== null) {
 		el.appendChild(field("Exit", String(run.exit_code)));
