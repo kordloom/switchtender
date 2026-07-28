@@ -1964,6 +1964,8 @@ document.addEventListener("DOMContentLoaded", () => {
 	}
 	if (page === "runs") mountRunsWindowChip();
 	buildNav();
+	mountFooter();
+	if (document.body.dataset.page === "docs") mountDocsChrome();
 	wirePalette();
 	wireHinttips();
 	mountPageDocs();
@@ -2114,6 +2116,136 @@ function buildNav() {
 	document.addEventListener("keydown", (e) => {
 		if (e.key === "Escape" && isOpen) { setOpen(false); toggle.focus(); }
 	});
+}
+
+// mountFooter closes every page with a slim bar, so scrolling ends on a deliberate edge rather
+// than on the last row of content.
+function mountFooter() {
+	if (document.body.dataset.page === "login" || document.querySelector(".app-foot")) return;
+	const main = document.querySelector("main.content");
+	if (!main) return;
+	const foot = document.createElement("footer");
+	foot.className = "app-foot";
+	const left = document.createElement("span");
+	left.className = "app-foot-brand";
+	left.textContent = "SwitchTender";
+	const links = document.createElement("nav");
+	links.className = "app-foot-links";
+	const add = (label, href, tip, external) => {
+		const a = document.createElement("a");
+		a.href = href;
+		a.textContent = label;
+		a.dataset.tip = tip;
+		if (external) { a.target = "_blank"; a.rel = "noopener"; }
+		links.appendChild(a);
+	};
+	add("Docs", "/ui/docs", "Click to open the documentation");
+	add("Doctor", "/ui/doctor", "Click to run the reference health checks");
+	add("Source", "https://github.com/kordloom/switchtender", "Click to open the repository", true);
+	add("License", "https://github.com/kordloom/switchtender/blob/main/LICENSE", "Click to read the license", true);
+	const top = document.createElement("button");
+	top.type = "button";
+	top.className = "app-foot-top";
+	top.textContent = "Back to top";
+	top.dataset.tip = "Click to return to the top of this page";
+	top.addEventListener("click", () => window.scrollTo({ top: 0, behavior: "smooth" }));
+	links.appendChild(top);
+	foot.appendChild(left);
+	foot.appendChild(links);
+	main.appendChild(foot);
+}
+
+// mountDocsChrome adds the reading aids a documentation page needs: a filter over the guide list,
+// an on-this-page rail built from the headings, and previous and next links at the end.
+function mountDocsChrome() {
+	const list = document.getElementById("docs-list");
+	const filter = document.getElementById("docs-filter");
+	const empty = document.getElementById("docs-empty");
+	if (filter && list) {
+		filter.addEventListener("input", () => {
+			const q = filter.value.trim().toLowerCase();
+			let shown = 0;
+			for (const li of list.querySelectorAll("li")) {
+				const match = q === "" || li.textContent.toLowerCase().includes(q);
+				li.hidden = !match;
+				if (match) shown++;
+			}
+			if (empty) empty.hidden = shown > 0;
+		});
+		filter.addEventListener("keydown", (e) => {
+			if (e.key !== "Enter") return;
+			const first = list.querySelector("li:not([hidden]) a");
+			if (first) location.href = first.getAttribute("href");
+		});
+	}
+
+	// The on-this-page rail. Headings get ids so each entry can link to its section.
+	const toc = document.getElementById("docs-toc");
+	const article = document.querySelector(".docs-content");
+	if (toc && article) {
+		const heads = Array.from(article.querySelectorAll("h2"));
+		if (heads.length >= 2) {
+			const label = document.createElement("div");
+			label.className = "nav-group-label";
+			label.textContent = "On this page";
+			toc.appendChild(label);
+			const ul = document.createElement("ul");
+			heads.forEach((h, i) => {
+				if (!h.id) {
+					h.id = "section-" + (h.textContent.toLowerCase().replace(/[^a-z0-9]+/g, "-")
+						.replace(/^-|-$/g, "") || i);
+				}
+				const li = document.createElement("li");
+				const a = document.createElement("a");
+				a.href = "#" + h.id;
+				a.textContent = h.textContent;
+				a.dataset.tip = "Click to jump to this section";
+				li.appendChild(a);
+				ul.appendChild(li);
+			});
+			toc.appendChild(ul);
+			// The rail follows the reader: the heading nearest the top of the viewport is current.
+			const marks = Array.from(toc.querySelectorAll("a"));
+			const sync = () => {
+				let active = 0;
+				heads.forEach((h, i) => {
+					if (h.getBoundingClientRect().top <= 120) active = i;
+				});
+				marks.forEach((m, i) => m.classList.toggle("active", i === active));
+			};
+			document.addEventListener("scroll", sync, { passive: true });
+			sync();
+		} else {
+			toc.hidden = true;
+		}
+	}
+
+	// Previous and next, read from the guide list so the order always matches the sidebar.
+	const pager = document.getElementById("docs-pager");
+	if (pager && list) {
+		const links = Array.from(list.querySelectorAll("a"));
+		const at = links.findIndex((a) => a.classList.contains("active"));
+		if (at !== -1) {
+			const add = (link, rel) => {
+				if (!link) return;
+				const a = document.createElement("a");
+				a.className = "docs-pager-link " + rel;
+				a.href = link.getAttribute("href");
+				const kicker = document.createElement("span");
+				kicker.className = "docs-pager-kicker";
+				kicker.textContent = rel === "prev" ? "Previous" : "Next";
+				const title = document.createElement("span");
+				title.className = "docs-pager-title";
+				title.textContent = link.textContent;
+				a.appendChild(kicker);
+				a.appendChild(title);
+				a.dataset.tip = "Click to open " + link.textContent;
+				pager.appendChild(a);
+			};
+			add(links[at - 1], "prev");
+			add(links[at + 1], "next");
+		}
+	}
 }
 
 // svgIcon wraps inner SVG markup in a stroked 24 by 24 icon that inherits the current color.
