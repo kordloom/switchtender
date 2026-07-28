@@ -3848,6 +3848,7 @@ function wireAsk() {
 			teaser.textContent = "Ask questions about your fleet and get advisory answers grounded in run, health, and drift data. Available when you self-host with an AI provider, including local Ollama. ";
 			const link = document.createElement("a");
 			link.href = "/ui/docs/ai";
+			link.className = "link-arrow";
 			link.textContent = "How Advisory AI works";
 			teaser.appendChild(link);
 			block.appendChild(teaser);

@@ -326,8 +326,8 @@ input.tile-filter { width: 240px; max-width: 46vw; padding: 7px 11px 7px 31px; f
 /* Navigation tiles: fixed even columns so rows never go ragged, each a card with an icon chip. */
 /* Jump-to: titled group cards of compact rows. A handful of group cards cannot strand an
    orphan the way a flat tile wall does. */
-.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 14px; align-items: start; }
-.jump-group { background-color: var(--surface); background-image: linear-gradient(180deg, var(--card-top), transparent 46%); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow); padding: 14px 12px 10px; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 14px; align-items: stretch; }
+.jump-group { display: flex; flex-direction: column; background-color: var(--surface); background-image: linear-gradient(180deg, var(--card-top), transparent 46%); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow); padding: 14px 12px 10px; }
 .jump-group-title { margin: 0 0 8px; padding: 0 8px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
 .jump-row { display: flex; align-items: center; gap: 11px; padding: 8px; border-radius: var(--radius); color: var(--text); }
 .jump-row:hover { text-decoration: none; background: var(--surface-2); }
@@ -842,3 +842,6 @@ body[data-theme="dark"] {
 .table-foot { display: flex; align-items: center; gap: 12px; padding: 10px 4px; font-size: 12.5px; color: var(--muted); }
 .table-foot .spacer { flex: 1; }
 .table-foot .button { padding: 5px 12px; font-size: 12.5px; }
+
+/* Arrowed inline links read as links even inside prose. */
+.link-arrow::after { content: " \2192"; }
