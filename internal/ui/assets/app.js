@@ -167,6 +167,85 @@ function mountTopbar() {
 	bar.appendChild(nav);
 }
 
+// EXPORT_PAGES are the pages whose main table gets CSV and JSON export of the shown rows.
+// Credentials stays out on purpose, so secret-adjacent data never leaves by accident.
+const EXPORT_PAGES = ["runs", "fleet", "drift", "tasks", "workers", "schedules", "jobtemplates",
+	"users", "audit", "host", "projects", "inventories", "sources", "policies"];
+
+// tableRowsData reads the rendered table into headers and rows, skipping the actions column and
+// anything hidden, so an export matches exactly what the user sees after filtering.
+function tableRowsData(table) {
+	const ths = Array.from(table.tHead.rows[0].cells);
+	const skip = new Set();
+	const headers = [];
+	ths.forEach((th, i) => {
+		const label = th.textContent.trim();
+		if (th.classList.contains("col-actions") || label === "Actions" || label === "") skip.add(i);
+		else headers.push(label);
+	});
+	const rows = [];
+	for (const tr of table.tBodies[0].rows) {
+		if (tr.hidden || tr.classList.contains("skeleton-row")) continue;
+		const row = [];
+		Array.from(tr.cells).forEach((cell, i) => {
+			if (skip.has(i)) return;
+			row.push(cell.textContent.replace(/\s+/g, " ").trim());
+		});
+		rows.push(row);
+	}
+	return { headers, rows };
+}
+
+// downloadBlob hands the browser a generated file.
+function downloadBlob(name, type, content) {
+	const url = URL.createObjectURL(new Blob([content], { type }));
+	const a = document.createElement("a");
+	a.href = url;
+	a.download = name;
+	document.body.appendChild(a);
+	a.click();
+	a.remove();
+	URL.revokeObjectURL(url);
+}
+
+// mountTableExport adds CSV and JSON export buttons beside the list filter, so any table can
+// leave the app for an audit, a spreadsheet, or a colleague.
+function mountTableExport() {
+	const page = document.body.dataset.page;
+	if (!EXPORT_PAGES.includes(page)) return;
+	const table = document.querySelector("main.content table");
+	if (!table || !table.tHead || !table.tBodies[0]) return;
+	let host = document.querySelector(".list-filter") || document.querySelector(".runs-toolbar");
+	if (!host) {
+		host = document.createElement("div");
+		host.className = "list-filter";
+		table.parentNode.insertBefore(host, table);
+	}
+	const stamp = () => new Date().toISOString().slice(0, 10);
+	const make = (label, tip, fn) => {
+		const btn = document.createElement("button");
+		btn.type = "button";
+		btn.className = "button table-export";
+		btn.innerHTML = svgIcon('<path d="M12 3v12"/><polyline points="7 10 12 15 17 10"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>');
+		btn.appendChild(document.createTextNode(label));
+		btn.dataset.tip = tip;
+		btn.addEventListener("click", fn);
+		host.appendChild(btn);
+	};
+	make("CSV", "Export the shown rows as CSV", () => {
+		const { headers, rows } = tableRowsData(table);
+		const esc = (v) => /[",\n]/.test(v) ? '"' + v.replaceAll('"', '""') + '"' : v;
+		const csv = [headers, ...rows].map((r) => r.map(esc).join(",")).join("\n") + "\n";
+		downloadBlob("switchtender-" + page + "-" + stamp() + ".csv", "text/csv", csv);
+	});
+	make("JSON", "Export the shown rows as JSON", () => {
+		const { headers, rows } = tableRowsData(table);
+		const objs = rows.map((r) => Object.fromEntries(headers.map((h, i) => [h, r[i] ?? ""])));
+		downloadBlob("switchtender-" + page + "-" + stamp() + ".json", "application/json",
+			JSON.stringify(objs, null, 2) + "\n");
+	});
+}
+
 // PAGE_DOCS maps each page to its most relevant guide, linked from the page header.
 const PAGE_DOCS = {
 	overview: { slug: "quickstart", label: "Quickstart" },
@@ -1650,6 +1729,7 @@ document.addEventListener("DOMContentLoaded", () => {
 	wirePalette();
 	wireHinttips();
 	mountPageDocs();
+	mountTableExport();
 	if (isReadOnly()) applyReadOnly();
 	setInterval(refreshRelTimes, 20000);
 	mountTour();

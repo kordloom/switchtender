@@ -833,3 +833,8 @@ body[data-theme="dark"] {
 .view-k { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); padding-top: 1px; }
 .view-v { font-size: 13.5px; font-family: var(--mono); word-break: break-word; }
 .view-code { max-height: 300px; }
+
+/* Compact export buttons beside the list filter. */
+.table-export { padding: 6px 11px; font-size: 12.5px; }
+.table-export svg { width: 13px; height: 13px; }
+.list-filter .table-export:first-of-type { margin-left: auto; }
