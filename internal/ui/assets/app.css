@@ -381,7 +381,8 @@ table.runs td.mono { max-width: 380px; overflow: hidden; text-overflow: ellipsis
 
 /* Panels */
 .panel { background-color: var(--surface); background-image: linear-gradient(180deg, var(--card-top), transparent 46%); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 16px 20px; margin-bottom: 18px; box-shadow: var(--shadow); }
-.panel-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; gap: 16px; flex-wrap: wrap; }
+.panel-head { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; margin: -16px -20px 14px; padding: 12px 20px; border-bottom: 1px solid var(--border-muted); background: color-mix(in srgb, var(--surface-2) 60%, transparent); border-radius: var(--radius-lg) var(--radius-lg) 0 0; }
+.panel-head h2, .jump-title { font-family: var(--display); font-size: 15.5px; font-weight: 700; letter-spacing: -0.01em; }
 .legend { display: flex; gap: 6px; flex-wrap: wrap; }
 .chip { font-size: 11px; font-weight: 500; padding: 2px 8px; border-radius: 999px; color: #fff; line-height: 1.6; }
 .chip.ok { background: var(--ok); }
