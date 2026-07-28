@@ -77,6 +77,7 @@ func runDemo(cmd *cobra.Command, _ []string) error {
 		Inventories: bundle.Inventories(), Templates: bundle.Templates(),
 		Credentials: bundle.Credentials(),
 		Policies:    bundle.Policies(), Users: bundle.Users(),
+		InvSources: bundle.InventorySources(),
 	}
 	if err := demo.Seed(cmd.Context(), seedDeps, log); err != nil {
 		return fmt.Errorf("seed demo: %w", err)

@@ -2348,11 +2348,23 @@ function showEmpty(msg) {
 	if (!el) return;
 	el.hidden = false;
 	el.className = "empty-state";
-	el.innerHTML = '<svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor" ' +
+	el.innerHTML = '<svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" ' +
 		'stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">' +
-		'<path d="M3 7l1.6 12.2A2 2 0 0 0 6.6 21h10.8a2 2 0 0 0 2-1.8L21 7"/>' +
-		'<path d="M3 7h18M8.5 7V5.5a2 2 0 0 1 2-2h3a2 2 0 0 1 2 2V7"/></svg><p></p>';
+		'<path d="M3 14h4l2 3h6l2-3h4"/>' +
+		'<path d="M5.5 5.5h13l2.5 8.5v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4z"/></svg><p></p>';
 	el.querySelector("p").textContent = msg;
+	// Controls that filter, page, or export an empty list are noise, so they hide with it.
+	for (const sel of [".list-filter", ".runs-toolbar", ".table-foot"]) {
+		for (const node of document.querySelectorAll(sel)) node.hidden = true;
+	}
+}
+
+// showListControls reveals the filter, toolbar, and footer that showEmpty hid, for a list that
+// turned out to have rows after all.
+function showListControls() {
+	for (const sel of [".list-filter", ".runs-toolbar"]) {
+		for (const node of document.querySelectorAll(sel)) node.hidden = false;
+	}
 }
 
 // removeRow deletes a table row and restores the empty-state when the last row is gone, so a list
@@ -2461,6 +2473,7 @@ async function loadAudit() {
 		}
 		setStatus("");
 		document.querySelector("table.runs").hidden = false;
+		showListControls();
 	} catch (e) {
 		setStatus("Failed to load the audit trail: " + e.message);
 	}
@@ -2826,6 +2839,7 @@ async function loadCredentials() {
 		}
 		setStatus("");
 		document.querySelector("table.runs").hidden = false;
+		showListControls();
 	} catch (e) {
 		setStatus("Failed to load credentials: " + e.message);
 	}
@@ -3057,6 +3071,7 @@ async function loadProjects() {
 		}
 		setStatus("");
 		document.querySelector("table.runs").hidden = false;
+		showListControls();
 	} catch (e) {
 		setStatus("Failed to load projects: " + e.message);
 	}
@@ -3415,6 +3430,7 @@ async function loadTemplates() {
 		}
 		setStatus("");
 		document.querySelector("table.runs").hidden = false;
+		showListControls();
 	} catch (e) {
 		setStatus("Failed to load templates: " + e.message);
 	}
@@ -3905,20 +3921,30 @@ function wireInventoryForm() {
 }
 
 // loadInventories populates the inventory table with delete actions.
-// hostCount estimates how many hosts an ini inventory lists. YAML content returns -1, unknown.
-function hostCount(content) {
+// parseInventory reads a stored inventory into its format, host names, and group names. An INI
+// inventory is parsed directly; a YAML one is reported as such rather than guessed at, since its
+// shape needs a real parser and a wrong count is worse than an honest dash.
+function parseInventory(content) {
 	const text = String(content || "");
-	if (!text.trim()) return 0;
-	if (/^(---|all\s*:)/m.test(text)) return -1;
-	let n = 0;
+	if (/^\s*(---|all\s*:)/m.test(text)) return { format: "yaml", hosts: [], groups: [] };
+	const hosts = [];
+	const groups = [];
 	let skip = false;
 	for (const raw of text.split("\n")) {
 		const line = raw.trim();
 		if (!line || line.startsWith("#") || line.startsWith(";")) continue;
-		if (line.startsWith("[")) { skip = /:(vars|children)\]$/.test(line); continue; }
-		if (!skip) n++;
+		if (line.startsWith("[")) {
+			const name = line.replace(/^\[|\]$/g, "");
+			// A vars or children section describes a group rather than listing hosts.
+			skip = /:(vars|children)$/.test(name);
+			if (!skip) groups.push(name);
+			continue;
+		}
+		if (skip) continue;
+		const host = line.split(/\s+/)[0];
+		if (host && !hosts.includes(host)) hosts.push(host);
 	}
-	return n;
+	return { format: "ini", hosts, groups };
 }
 
 async function loadInventories() {
@@ -3933,21 +3959,35 @@ async function loadInventories() {
 		for (const i of inventories) {
 			const tr = document.createElement("tr");
 			tr.appendChild(td(i.name));
-			const count = hostCount(i.content);
-			const hostsCell = td(count < 0 ? "\u2014" : String(count));
-			hostsCell.dataset.tip = count < 0
-				? "YAML inventory: host count not estimated"
-				: "Approximate, counted from the stored content";
+			const parsed = parseInventory(i.content);
+			const fmt = td("");
+			const fmtChip = document.createElement("span");
+			fmtChip.className = "tool-badge";
+			fmtChip.textContent = parsed.format;
+			fmtChip.dataset.tip = parsed.format === "yaml"
+				? "YAML inventory, read by Ansible's YAML plugin"
+				: "INI inventory: groups in brackets, one host per line";
+			fmt.appendChild(fmtChip);
+			tr.appendChild(fmt);
+			const count = parsed.hosts.length;
+			const hostsCell = td(parsed.format === "yaml" ? "\u2014" : String(count));
+			hostsCell.dataset.tip = parsed.format === "yaml"
+				? "Host count is not estimated for YAML inventories"
+				: "Counted from the stored content";
 			tr.appendChild(hostsCell);
+			const groupsCell = td(parsed.format === "yaml" ? "\u2014" : String(parsed.groups.length));
+			groupsCell.dataset.tip = parsed.groups.length
+				? "Groups: " + parsed.groups.join(", ")
+				: "No groups declared, so every host is in the implicit all group";
+			tr.appendChild(groupsCell);
 			tr.appendChild(tdTime(i.created_at));
 			const actions = deleteCell("/inventories/" + i.id, "inventory " + i.name, tr, "No inventories yet.");
 			actions.insertBefore(editButton(() => openInventoryEdit(i)), actions.firstChild);
 			tr.appendChild(actions);
-			const groups = (String(i.content || "").match(/^\[[^\]]+\]$/gm) || [])
-				.filter((g) => !/:(vars|children)\]$/.test(g)).length;
 			inspectable(tr, i.name, [
-				{ label: "Hosts", value: count < 0 ? "unknown, YAML" : String(count) },
-				{ label: "Groups", value: groups ? String(groups) : "" },
+				{ label: "Format", value: parsed.format === "yaml" ? "YAML" : "INI" },
+				{ label: "Hosts", value: parsed.format === "yaml" ? "not estimated for YAML" : parsed.hosts.join(", ") },
+				{ label: "Groups", value: parsed.groups.join(", ") },
 				{ label: "Size", value: (String(i.content || "").length) + " bytes" },
 				{ label: "Created", value: fmtTime(i.created_at) },
 				{ label: "ID", value: i.id, copy: true },
@@ -3964,6 +4004,7 @@ async function loadInventories() {
 		}
 		setStatus("");
 		document.querySelector("table.runs").hidden = false;
+		showListControls();
 	} catch (e) {
 		setStatus("Failed to load inventories: " + e.message);
 	}
@@ -4039,10 +4080,36 @@ async function loadSources() {
 			return;
 		}
 		const tbody = document.getElementById("sources");
+		// The inventory each source maintains, so a row names its destination rather than an id.
+		let invByID = new Map();
+		try {
+			const inv = await getJSON("/inventories");
+			invByID = new Map((inv.inventories || []).map((i) => [i.id, i]));
+		} catch { /* names fall back to ids */ }
 		for (const src of sources) {
 			const tr = document.createElement("tr");
 			tr.appendChild(td(src.name));
 			tr.appendChild(td(src.source, "mono"));
+			const target = td("");
+			if (src.inventory_id) {
+				const link = document.createElement("a");
+				link.href = "/ui/inventories";
+				link.textContent = (invByID.get(src.inventory_id) || {}).name || shortId(src.inventory_id);
+				link.dataset.tip = "This source refreshes that stored inventory. Open inventories";
+				target.appendChild(link);
+			} else {
+				target.textContent = "\u2014";
+			}
+			tr.appendChild(target);
+			const cadence = td("");
+			const every = src.sync_interval_seconds
+				? "every " + fmtInterval(src.sync_interval_seconds)
+				: "on every launch";
+			cadence.textContent = src.update_on_launch ? "Before launch, " + every : every;
+			cadence.dataset.tip = src.update_on_launch
+				? "Refreshed before a run targeting this inventory, and on the interval"
+				: "Refreshed on the interval only, not before a launch";
+			tr.appendChild(cadence);
 			tr.appendChild(tdTime(src.synced_at, "never"));
 			const state = document.createElement("td");
 			const chip = document.createElement("span");
@@ -4079,6 +4146,7 @@ async function loadSources() {
 		}
 		setStatus("");
 		document.querySelector("table.runs").hidden = false;
+		showListControls();
 	} catch (e) {
 		setStatus("Failed to load sources: " + e.message);
 	}
@@ -4123,6 +4191,7 @@ async function loadWorkers() {
 		}
 		setStatus("");
 		document.querySelector("table.runs").hidden = false;
+		showListControls();
 	} catch (e) {
 		setStatus("Failed to load workers: " + e.message);
 	}
@@ -4536,6 +4605,7 @@ async function loadDoctor() {
 		}
 		setStatus("");
 		document.querySelector("table.runs").hidden = false;
+		showListControls();
 	} catch (e) {
 		setStatus("Doctor failed: " + e.message);
 	}
@@ -4980,6 +5050,19 @@ function countUp(el, value) {
 	requestAnimationFrame(step);
 }
 
+// fmtInterval renders a sync interval in the largest whole unit that fits.
+function fmtInterval(seconds) {
+	if (seconds % 3600 === 0) {
+		const h = seconds / 3600;
+		return h === 1 ? "hour" : h + " hours";
+	}
+	if (seconds % 60 === 0) {
+		const m = seconds / 60;
+		return m === 1 ? "minute" : m + " minutes";
+	}
+	return seconds + " seconds";
+}
+
 // td builds a table cell.
 function td(text, cls) {
 	const el = document.createElement("td");
@@ -5046,6 +5129,7 @@ async function loadFleet() {
 		}
 		setStatus("");
 		document.querySelector("table.runs").hidden = false;
+		showListControls();
 	} catch (e) {
 		setStatus("Failed to load fleet health: " + e.message);
 	}
@@ -5108,6 +5192,7 @@ async function loadDrift() {
 		}
 		setStatus("");
 		document.querySelector("table.runs").hidden = false;
+		showListControls();
 	} catch (e) {
 		setStatus("Failed to load drift status: " + e.message);
 	}
@@ -5169,6 +5254,7 @@ async function loadHost(host) {
 		}
 		setStatus("");
 		document.querySelector("table.runs").hidden = false;
+		showListControls();
 	} catch (e) {
 		setStatus("Failed to load host history: " + e.message);
 	}
@@ -5202,6 +5288,7 @@ async function loadTasks() {
 		}
 		setStatus("");
 		document.querySelector("table.runs").hidden = false;
+		showListControls();
 	} catch (e) {
 		setStatus("Failed to load task trends: " + e.message);
 	}
@@ -5369,6 +5456,7 @@ async function loadSchedules() {
 		}
 		setStatus("");
 		document.querySelector("table.runs").hidden = false;
+		showListControls();
 	} catch (e) {
 		setStatus("Failed to load schedules: " + e.message);
 	}
@@ -5651,6 +5739,7 @@ async function loadPolicies() {
 		}
 		setStatus("");
 		document.querySelector("table.runs").hidden = false;
+		showListControls();
 	} catch (e) {
 		setStatus("Failed to load policies: " + e.message);
 	}
@@ -5990,6 +6079,7 @@ async function loadUsers() {
 		}
 		setStatus("");
 		document.querySelector("table.runs").hidden = false;
+		showListControls();
 	} catch (e) {
 		setStatus("Failed to load users: " + e.message);
 	}

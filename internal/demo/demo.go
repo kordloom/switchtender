@@ -18,6 +18,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/credential"
 	"github.com/kordloom/switchtender/internal/inventory"
+	"github.com/kordloom/switchtender/internal/invsource"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/run"
@@ -54,6 +55,9 @@ type Deps struct {
 	// Policies and Users hold sample governance rules and accounts, so those pages show real data.
 	Policies policy.Store
 	Users    user.Store
+	// InvSources holds sample dynamic inventory sources, so that page shows the relationship
+	// between a source and the inventory it refreshes.
+	InvSources invsource.Store
 }
 
 // Seed populates the stores with sample configuration and a set of runs that exercise the matrix,
@@ -318,6 +322,31 @@ func seedConfig(ctx context.Context, d Deps, log *zap.Logger) {
 	for _, inv := range inventories {
 		if err := d.Inventories.Save(ctx, inv); err != nil {
 			log.Warn("demo: seed inventory: " + err.Error())
+		}
+	}
+
+	// A dynamic source paired with the inventory it maintains, so the Sources page shows a real
+	// relationship rather than an empty list. The script is never executed by seeding; it stands
+	// as the configuration a refresh would run.
+	if d.InvSources != nil {
+		dynamic := &inventory.Inventory{
+			ID: inventory.NewID(), Name: "cloud-discovered",
+			Content:   "[all]\n# Refreshed from the cloud-hosts source.\n",
+			CreatedAt: ago(20),
+		}
+		if err := d.Inventories.Save(ctx, dynamic); err != nil {
+			log.Warn("demo: seed dynamic inventory: " + err.Error())
+		} else {
+			synced := ago(1)
+			src := &invsource.Source{
+				ID: invsource.NewID(), Name: "cloud-hosts",
+				Source: "inventory/aws_ec2.yml", InventoryID: dynamic.ID,
+				UpdateOnLaunch: true, SyncIntervalSeconds: 3600,
+				SyncedAt: &synced, CreatedAt: ago(20),
+			}
+			if err := d.InvSources.Save(ctx, src); err != nil {
+				log.Warn("demo: seed inventory source: " + err.Error())
+			}
 		}
 	}
 
