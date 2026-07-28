@@ -233,13 +233,16 @@ h1.mono { font-size: 24px; }
 	body:not([data-page="login"]) .side { display: flex; }
 	body:not([data-page="login"]) .topbar .brand, body:not([data-page="login"]) .nav-toggle { display: none; }
 }
-.runs-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
+.runs-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; }
+.runs-toolbar .list-filter { flex: 1 1 260px; min-width: 220px; margin: 0; }
+.runs-toolbar .list-filter-input { max-width: none; width: 100%; }
+.runs-toolbar .table-export:first-of-type { margin-left: auto; }
 .toolbar-select { width: auto; padding: 7px 11px; font-size: 13px; }
 th.col-num, td.col-num { width: 1%; color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; }
 .pagesize-label { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
 .pagesize-input { width: 84px; }
 .pagesize-hint { font-size: 12px; }
-.list-filter { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; }
+.list-filter { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; flex-wrap: wrap; }
 .list-filter-input { max-width: 320px; }
 .list-filter-count { font-size: 12px; }
 #migrate-plan { margin-top: 22px; }
@@ -459,8 +462,9 @@ table.matrix tbody th a { color: inherit; }
 table.matrix tbody th a:hover { color: var(--accent); text-decoration: none; }
 table.matrix tbody th { position: sticky; left: 0; z-index: 2; background: var(--surface-2); padding: 7px 14px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; white-space: nowrap; text-align: left; border-right: 1px solid var(--border-muted); border-bottom: 1px solid var(--border-muted); }
 table.matrix thead th.corner { position: sticky; left: 0; z-index: 4; border-right: 1px solid var(--border-muted); }
-table.matrix td { padding: 3px; }
-.cell { width: 32px; height: 24px; border-radius: 4px; cursor: pointer; transition: transform 0.08s ease, box-shadow 0.08s ease; }
+table.matrix td { padding: 3px; text-align: center; }
+.cell { margin: 0 auto; }
+.cell { width: 30px; height: 24px; border-radius: 4px; cursor: pointer; transition: transform 0.08s ease, box-shadow 0.08s ease; }
 .cell.ok { background: var(--ok); }
 .cell.changed { background: var(--changed); }
 .cell.failed { background: var(--failed); }
@@ -919,3 +923,171 @@ table.runs td:has(> .origin-chip) { white-space: nowrap; }
 .file-note { margin-bottom: 10px; font-size: 12.5px; }
 .file-body { max-height: 60vh; }
 #file-title { font-size: 14px; word-break: break-all; }
+
+/* ============================================================================
+   Presence layer: the motion, depth, and light that make the interface feel
+   alive. Everything here degrades to a static, fully usable page under
+   prefers-reduced-motion, which is honored in one block at the end.
+   ========================================================================= */
+
+/* Headline numbers carry a metallic gradient in the signature theme, so the
+   figures that matter read as the brightest thing on the page. */
+.stat-value {
+	background: linear-gradient(160deg, var(--text) 0%, color-mix(in srgb, var(--text) 82%, var(--accent)) 100%);
+	-webkit-background-clip: text;
+	background-clip: text;
+	-webkit-text-fill-color: transparent;
+	text-shadow: 0 0 22px color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.stat-value.ok, .stat-value.failed, .stat-value.running, .stat-value.changed {
+	-webkit-text-fill-color: currentColor;
+}
+.stat-card { position: relative; overflow: hidden; }
+/* A hairline of colored light along the top edge of a metric that carries state. */
+.stat-card:has(.stat-value.failed)::before,
+.stat-card:has(.stat-value.ok)::before,
+.stat-card:has(.stat-value.running)::before {
+	content: "";
+	position: absolute;
+	inset: 0 0 auto 0;
+	height: 2px;
+}
+.stat-card:has(.stat-value.failed)::before { background: linear-gradient(90deg, transparent, var(--failed), transparent); }
+.stat-card:has(.stat-value.ok)::before { background: linear-gradient(90deg, transparent, var(--ok), transparent); }
+.stat-card:has(.stat-value.running)::before { background: linear-gradient(90deg, transparent, var(--running), transparent); }
+
+/* Panels and the summary strip rise into place, staggered, so a loaded page
+   assembles itself instead of appearing all at once. */
+@keyframes riseIn {
+	from { opacity: 0; transform: translateY(10px); }
+	to { opacity: 1; transform: none; }
+}
+.summary, .panel, .jump-panel, table.runs, .run-header {
+	animation: riseIn 0.42s var(--ease) both;
+}
+.panel:nth-of-type(2) { animation-delay: 0.06s; }
+.panel:nth-of-type(3) { animation-delay: 0.12s; }
+.jump-panel { animation-delay: 0.1s; }
+
+/* Table rows fade up in sequence as a list paints. */
+@keyframes rowIn {
+	from { opacity: 0; transform: translateY(5px); }
+	to { opacity: 1; transform: none; }
+}
+table.runs tbody tr:not(.skeleton-row) { animation: rowIn 0.3s var(--ease) both; }
+table.runs tbody tr:nth-child(1) { animation-delay: 0.01s; }
+table.runs tbody tr:nth-child(2) { animation-delay: 0.03s; }
+table.runs tbody tr:nth-child(3) { animation-delay: 0.05s; }
+table.runs tbody tr:nth-child(4) { animation-delay: 0.07s; }
+table.runs tbody tr:nth-child(5) { animation-delay: 0.09s; }
+table.runs tbody tr:nth-child(6) { animation-delay: 0.11s; }
+table.runs tbody tr:nth-child(7) { animation-delay: 0.13s; }
+table.runs tbody tr:nth-child(8) { animation-delay: 0.15s; }
+.ov-row { animation: rowIn 0.3s var(--ease) both; }
+.ov-row:nth-child(2) { animation-delay: 0.03s; }
+.ov-row:nth-child(3) { animation-delay: 0.06s; }
+.ov-row:nth-child(4) { animation-delay: 0.09s; }
+.ov-row:nth-child(5) { animation-delay: 0.12s; }
+.ov-row:nth-child(6) { animation-delay: 0.15s; }
+.ov-row:nth-child(7) { animation-delay: 0.18s; }
+.ov-row:nth-child(8) { animation-delay: 0.21s; }
+
+/* A running badge breathes, so live work is visible from across the room. */
+@keyframes badgePulse {
+	0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--running) 45%, transparent); }
+	50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--running) 0%, transparent); }
+}
+.badge.running { animation: badgePulse 2s ease-in-out infinite; }
+.badge.running::before { animation: pulse 1.4s infinite; }
+/* Failure carries a faint ember so a red row is felt before it is read. */
+.badge.failed { box-shadow: 0 0 12px -3px color-mix(in srgb, var(--failed) 55%, transparent); }
+
+/* Rows lift on hover with a leading accent edge. */
+table.runs tbody tr.row-nav, table.runs tbody tr.row-inspect { position: relative; }
+table.runs tbody tr.row-nav td:first-child, table.runs tbody tr.row-inspect td:first-child {
+	box-shadow: inset 0 0 0 0 var(--accent);
+	transition: box-shadow 0.16s var(--ease);
+}
+table.runs tbody tr.row-nav:hover td:first-child, table.runs tbody tr.row-inspect:hover td:first-child {
+	box-shadow: inset 2px 0 0 0 var(--accent);
+}
+
+/* The primary action catches a sweep of light on hover. */
+.button.primary { position: relative; overflow: hidden; }
+.button.primary::after {
+	content: "";
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	left: -60%;
+	width: 40%;
+	background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.28), transparent);
+	transform: skewX(-18deg);
+	transition: left 0.55s var(--ease);
+}
+.button.primary:hover::after { left: 130%; }
+
+/* Matrix cells cascade in, and a hovered cell glows in its own status color. */
+@keyframes cellIn {
+	from { opacity: 0; transform: scale(0.72); }
+	to { opacity: 1; transform: none; }
+}
+.cell { animation: cellIn 0.26s var(--ease) both; }
+.cell.ok:hover { box-shadow: 0 0 0 2px var(--surface), 0 0 14px 1px color-mix(in srgb, var(--ok) 70%, transparent); }
+.cell.failed:hover { box-shadow: 0 0 0 2px var(--surface), 0 0 14px 1px color-mix(in srgb, var(--failed) 70%, transparent); }
+.cell.changed:hover { box-shadow: 0 0 0 2px var(--surface), 0 0 14px 1px color-mix(in srgb, var(--changed) 70%, transparent); }
+
+/* Timeline bars sweep out to their measured width on first paint. */
+@keyframes barGrow { from { transform: scaleX(0); } to { transform: none; } }
+.tl-bar { transform-origin: left center; animation: barGrow 0.5s var(--ease) both; }
+
+/* Activity columns grow up from the axis and light up under the pointer. */
+@keyframes segGrow { from { transform: scaleY(0); } to { transform: none; } }
+.activity-seg { transform-origin: bottom center; animation: segGrow 0.45s var(--ease) both; }
+.activity-col:nth-child(2n) .activity-seg { animation-delay: 0.04s; }
+.activity-col:nth-child(3n) .activity-seg { animation-delay: 0.08s; }
+.activity-col .activity-bar { transition: filter 0.15s ease, transform 0.15s var(--ease); }
+.activity-col:hover .activity-bar { filter: brightness(1.15) saturate(1.1); transform: translateY(-2px); }
+.activity-seg.succeeded { box-shadow: 0 0 10px -2px color-mix(in srgb, var(--ok) 60%, transparent); }
+.activity-seg.failed { box-shadow: 0 0 10px -2px color-mix(in srgb, var(--failed) 60%, transparent); }
+
+/* The live indicator reads as a broadcasting signal, not a static dot. */
+.live-dot::before { box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok) 60%, transparent); animation: liveRipple 1.6s ease-out infinite; }
+@keyframes liveRipple {
+	0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok) 55%, transparent); opacity: 1; }
+	70% { box-shadow: 0 0 0 7px color-mix(in srgb, var(--ok) 0%, transparent); opacity: 0.85; }
+	100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok) 0%, transparent); opacity: 1; }
+}
+
+/* Cards and tiles lift into a soft pool of accent light. */
+.jump-row, .tile { transition: background 0.15s ease, transform 0.15s var(--ease); }
+.jump-row:hover { transform: translateX(2px); }
+.jump-icon { transition: transform 0.18s var(--ease), background 0.18s ease; }
+.jump-row:hover .jump-icon { transform: scale(1.08); background: color-mix(in srgb, var(--accent) 22%, transparent); }
+
+/* Sidebar navigation responds to the pointer before it is clicked. */
+.nav-item { transition: background 0.13s ease, color 0.13s ease, padding-left 0.13s var(--ease); }
+.side .nav-item:hover { padding-left: 12px; }
+.side .nav-item svg { transition: transform 0.16s var(--ease); }
+.side .nav-item:hover svg { transform: scale(1.12); }
+
+/* The counted digits of a metric tick over rather than snapping into place. */
+.stat-value.counting { font-variant-numeric: tabular-nums; }
+
+/* Focus rings glow instead of merely outlining. */
+:focus-visible { box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent); }
+
+/* Every motion above is decoration. A reader who asks for stillness gets a
+   complete, static interface with no animation and no transitions. */
+@media (prefers-reduced-motion: reduce) {
+	.summary, .panel, .jump-panel, table.runs, .run-header,
+	table.runs tbody tr, .ov-row, .cell, .tl-bar, .activity-seg,
+	.badge.running, .badge.running::before, .live-dot::before {
+		animation: none !important;
+	}
+	.button.primary::after { transition: none; }
+	.jump-row, .tile, .nav-item, .side .nav-item svg, .activity-col .activity-bar,
+	.jump-icon, table.runs tbody tr td:first-child {
+		transition: none;
+	}
+}

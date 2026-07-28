@@ -217,7 +217,9 @@ function mountTableExport() {
 	if (!EXPORT_PAGES.includes(page)) return;
 	const table = document.querySelector("main.content table");
 	if (!table || !table.tHead || !table.tBodies[0]) return;
-	let host = document.querySelector(".list-filter") || document.querySelector(".runs-toolbar");
+	// On the runs page the toolbar holds the filter and the dropdowns, so the export buttons join
+	// the toolbar itself and land after them rather than beside the search box.
+	let host = document.querySelector(".runs-toolbar") || document.querySelector(".list-filter");
 	if (!host) {
 		host = document.createElement("div");
 		host.className = "list-filter";
@@ -4358,20 +4360,37 @@ function renderActivity(runs) {
 	const panel = document.getElementById("activity-panel");
 	const el = document.getElementById("activity");
 	if (!panel || !el || !runs.length) return;
+	// A fresh install has every run inside an hour, where fourteen day columns would be thirteen
+	// empty ones. Pick the bucket that actually spans the data.
+	const times = runs.map((r) => new Date(r.created_at)).filter((d) => !isNaN(d));
+	if (!times.length) return;
+	const oldest = Math.min(...times.map((d) => d.getTime()));
+	const hourly = Date.now() - oldest < 36 * 3600 * 1000;
 	const days = [];
 	const byDay = {};
-	const today = new Date();
-	for (let i = 13; i >= 0; i--) {
-		const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() - i);
-		const key = d.toISOString().slice(0, 10);
-		days.push({ key, label: d.toLocaleDateString(undefined, { month: "short", day: "numeric" }) });
+	const now = new Date();
+	const buckets = hourly ? 12 : 14;
+	for (let i = buckets - 1; i >= 0; i--) {
+		const d = hourly
+			? new Date(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours() - i)
+			: new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+		const key = hourly ? d.toISOString().slice(0, 13) : d.toISOString().slice(0, 10);
+		days.push({
+			key,
+			label: hourly
+				? d.toLocaleTimeString(undefined, { hour: "numeric" })
+				: d.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+		});
 		byDay[key] = { succeeded: 0, failed: 0, other: 0 };
 	}
 	let counted = 0;
 	for (const r of runs) {
 		const at = r.created_at && new Date(r.created_at);
 		if (!at || isNaN(at)) continue;
-		const key = new Date(at.getFullYear(), at.getMonth(), at.getDate()).toISOString().slice(0, 10);
+		const local = hourly
+			? new Date(at.getFullYear(), at.getMonth(), at.getDate(), at.getHours())
+			: new Date(at.getFullYear(), at.getMonth(), at.getDate());
+		const key = hourly ? local.toISOString().slice(0, 13) : local.toISOString().slice(0, 10);
 		if (!byDay[key]) continue;
 		counted++;
 		if (r.status === "succeeded") byDay[key].succeeded++;
@@ -4389,8 +4408,10 @@ function renderActivity(runs) {
 		const total = c.succeeded + c.failed + c.other;
 		const col = document.createElement("a");
 		col.className = "activity-col";
-		const dayStart = new Date(day.key + "T00:00:00");
-		const dayEnd = new Date(dayStart.getFullYear(), dayStart.getMonth(), dayStart.getDate() + 1);
+		const dayStart = hourly ? new Date(day.key + ":00:00") : new Date(day.key + "T00:00:00");
+		const dayEnd = hourly
+			? new Date(dayStart.getTime() + 3600 * 1000)
+			: new Date(dayStart.getFullYear(), dayStart.getMonth(), dayStart.getDate() + 1);
 		col.href = "/ui/runs?after=" + encodeURIComponent(dayStart.toISOString()) +
 			"&before=" + encodeURIComponent(dayEnd.toISOString());
 		col.dataset.tip = day.label + ": " + c.succeeded + " succeeded, " + c.failed + " failed" +
@@ -4412,12 +4433,15 @@ function renderActivity(runs) {
 		col.appendChild(bar);
 		const lab = document.createElement("span");
 		lab.className = "activity-label";
-		lab.textContent = day.label.replace(/\D+$/, "").trim() === "" ? day.label : day.label.split(" ")[1];
+		lab.textContent = hourly ? day.label : (day.label.split(" ")[1] || day.label);
 		col.appendChild(lab);
 		el.appendChild(col);
 	}
 	const note = document.getElementById("activity-note");
-	if (note) note.textContent = runs.length >= 200 ? "From the latest 200 runs" : "Runs per day, last 14 days";
+	if (note) {
+		note.textContent = hourly ? "Runs per hour, last 12 hours" : "Runs per day, last 14 days";
+		if (runs.length >= 200) note.textContent += ", from the latest 200";
+	}
 	panel.hidden = false;
 }
 
@@ -4919,12 +4943,37 @@ function statCard(value, label, cls) {
 	const v = document.createElement("div");
 	v.className = "stat-value" + (cls ? " " + cls : "");
 	v.textContent = value;
+	countUp(v, value);
 	const l = document.createElement("div");
 	l.className = "stat-label";
 	l.textContent = label;
 	card.appendChild(v);
 	card.appendChild(l);
 	return card;
+}
+
+// countUp animates a metric from zero to its value, preserving any suffix such as a percent
+// sign. A value that is not a plain number, and a reader who asked for reduced motion, get the
+// final text immediately.
+function countUp(el, value) {
+	const text = String(value);
+	const match = text.match(/^(\d[\d,]*)(\D*)$/);
+	if (!match || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+	const target = parseInt(match[1].replace(/,/g, ""), 10);
+	const suffix = match[2] || "";
+	if (!Number.isFinite(target) || target === 0) return;
+	const duration = 620;
+	const start = performance.now();
+	el.classList.add("counting");
+	const step = (now) => {
+		const t = Math.min(1, (now - start) / duration);
+		// Ease out cubic, so the count decelerates into its final figure.
+		const eased = 1 - Math.pow(1 - t, 3);
+		el.textContent = Math.round(target * eased).toLocaleString() + suffix;
+		if (t < 1) requestAnimationFrame(step);
+		else el.textContent = text;
+	};
+	requestAnimationFrame(step);
 }
 
 // td builds a table cell.
