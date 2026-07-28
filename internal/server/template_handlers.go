@@ -248,6 +248,8 @@ type launchTemplateRequest struct {
 	// DryRun overrides the template's mode for this launch when set. Approval policies still
 	// evaluate the submitted run either way.
 	DryRun *bool `json:"dry_run,omitempty"`
+	// Labels are launch-time key values attached to the created run.
+	Labels map[string]string `json:"labels,omitempty"`
 }
 
 // mergeCredentialIDs returns base followed by any extra ids not already present, dropping blanks, so
@@ -350,6 +352,8 @@ func launchTemplateHandler(store template.Store, submitter Submitter, authz *aut
 			run.WithCredentialIDs(credIDs),
 			run.WithExtraVars(vars),
 			run.WithTool(t.Tool), run.WithCommand(t.Command), run.WithDryRun(dryRun),
+			run.WithSource("template", t.ID), run.WithActor(actorName(r)),
+			run.WithLabels(launchReq.Labels),
 		}
 		if launchReq.Limit != nil && *launchReq.Limit != "" {
 			opts = append(opts, run.WithLimit(*launchReq.Limit))

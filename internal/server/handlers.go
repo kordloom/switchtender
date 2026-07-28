@@ -41,6 +41,8 @@ type createRunRequest struct {
 	Command string `json:"command,omitempty"`
 	// DryRun runs the tool in its no-change mode: ansible --check, a syntax check for bash.
 	DryRun bool `json:"dry_run,omitempty"`
+	// Labels are user-supplied key values attached to the run for slicing and audits.
+	Labels map[string]string `json:"labels,omitempty"`
 	// Shards, when two or more, splits the run across that many inventory slices.
 	Shards int `json:"shards,omitempty"`
 	// CredentialIDs names stored credentials to materialize for the run.
@@ -300,6 +302,8 @@ func reconcileDriftHandler(store run.Store, submitter Submitter, authz *authoriz
 			run.WithTool(check.Tool),
 			run.WithRequireApproval(true),
 			run.WithProposedFrom(check.ID),
+			run.WithSource("reconcile", check.ID),
+			run.WithActor(actorName(r)),
 		}
 		if tool == run.ToolAnsible {
 			// The Ansible fix reruns the playbook limited to the drifted host, applying exactly the
@@ -451,6 +455,7 @@ func createRunHandler(submitter Submitter, authz *authorizer, log *zap.Logger) h
 		opts := []run.SubmitOption{
 			run.WithCredentialIDs(req.CredentialIDs),
 			run.WithTool(req.Tool), run.WithCommand(req.Command), run.WithDryRun(req.DryRun),
+			run.WithSource("api", ""), run.WithActor(actorName(r)), run.WithLabels(req.Labels),
 		}
 		if key := strings.TrimSpace(r.Header.Get(idempotencyKeyHeader)); key != "" {
 			opts = append(opts, run.WithIdempotencyKey(key))
@@ -678,6 +683,14 @@ func retryRunHandler(store run.Store, retrier Retrier, authz *authorizer, log *z
 	}
 }
 
+// actorName returns the authenticated caller's audit name, empty when the API runs open.
+func actorName(r *http.Request) string {
+	if a, ok := actorFrom(r.Context()); ok {
+		return a.Name
+	}
+	return ""
+}
+
 // rerunOptions rebuilds the submit options a stored run was created with, so a rerun replays
 // the full spec: tool, command, credentials, project, stored inventory, queue, image, extra
 // vars, mode, and host limit.
@@ -712,6 +725,9 @@ func rerunOptions(rn *run.Run) []run.SubmitOption {
 	}
 	if rn.Limit != "" {
 		opts = append(opts, run.WithLimit(rn.Limit))
+	}
+	if len(rn.Labels) > 0 {
+		opts = append(opts, run.WithLabels(rn.Labels))
 	}
 	return opts
 }
@@ -760,7 +776,8 @@ func rerunRunHandler(store run.Store, submitter Submitter, authz *authorizer, lo
 		if denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse, objects...)) {
 			return
 		}
-		opts := rerunOptions(rn)
+		opts := append(rerunOptions(rn),
+			run.WithSource("rerun", rn.ID), run.WithRerunOf(rn.ID), run.WithActor(actorName(r)))
 		var created *run.Run
 		if rn.Kind == run.KindSplit && rn.ShardCount != nil && *rn.ShardCount > 1 {
 			created, err = submitter.SubmitSplit(r.Context(), rn.Playbook, rn.Inventory, *rn.ShardCount, opts...)
