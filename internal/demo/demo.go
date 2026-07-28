@@ -23,6 +23,7 @@ import (
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/schedule"
 	"github.com/kordloom/switchtender/internal/template"
 	"github.com/kordloom/switchtender/internal/user"
 )
@@ -62,6 +63,8 @@ type Deps struct {
 	// Audit records the sample change history, so the tamper-evident chain has something to
 	// verify rather than an empty page.
 	Audit audit.Store
+	// Schedules holds the sample cron entries, so that page shows real cadences.
+	Schedules schedule.Store
 }
 
 // Seed populates the stores with sample configuration and a set of runs that exercise the matrix,
@@ -416,6 +419,34 @@ func seedConfig(ctx context.Context, d Deps, log *zap.Logger) {
 			run.ToolTerraform, "destroy", true, ago(40)
 		anyProd := policy.NewPolicy("any production run")
 		anyProd.InventoryID, anyProd.CreatedAt = inventories[0].ID, ago(22)
+		// Cron entries against the seeded templates, so the schedules page shows real cadences and
+		// the plain-language reading of each expression.
+		if d.Schedules != nil && len(templates) >= 3 {
+			next := func(h int) *time.Time { t := now.Add(time.Duration(h) * time.Hour); return &t }
+			schedules := []*schedule.Schedule{
+				{
+					ID: schedule.NewID(), Name: "Nightly audit", Cron: "0 2 * * *",
+					TemplateID: templates[2].ID, Enabled: true,
+					NextRunAt: next(9), CreatedAt: ago(70),
+				},
+				{
+					ID: schedule.NewID(), Name: "Weekday deploy window", Cron: "30 9 * * 1-5",
+					TemplateID: templates[0].ID, Enabled: true,
+					NextRunAt: next(17), CreatedAt: ago(46),
+				},
+				{
+					ID: schedule.NewID(), Name: "Hourly drift check", Cron: "0 * * * *",
+					TemplateID: templates[1].ID, Enabled: false,
+					CreatedAt: ago(20),
+				},
+			}
+			for _, sc := range schedules {
+				if err := d.Schedules.Save(ctx, sc); err != nil {
+					log.Warn("demo: seed schedule: " + err.Error())
+				}
+			}
+		}
+
 		policies := []*policy.Policy{tfDestroy, anyProd}
 		for _, p := range policies {
 			if err := d.Policies.Save(ctx, p); err != nil {

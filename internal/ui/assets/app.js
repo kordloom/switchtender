@@ -5286,6 +5286,9 @@ function describeCron(spec) {
 	};
 	if (min === "*" && hour === "*") return "Every minute";
 	if (hour === "*" && /^\*\/\d+$/.test(min)) return "Every " + min.slice(2) + " minutes";
+	if (hour === "*" && /^\d+$/.test(min) && dom === "*" && mon === "*" && dow === "*") {
+		return parseInt(min, 10) === 0 ? "Hourly, on the hour" : "Hourly at :" + String(min).padStart(2, "0");
+	}
 	if (/^\*\/\d+$/.test(hour) && /^\d+$/.test(min)) return "Every " + hour.slice(2) + " hours";
 	if (dom === "*" && mon === "*" && dow === "*" && /^\d+$/.test(hour)) return "Daily at " + at(hour, min);
 	if (dom === "*" && mon === "*" && days[dow] && /^\d+$/.test(hour)) return days[dow] + "s at " + at(hour, min);
@@ -5528,6 +5531,14 @@ async function loadTasks() {
 			tr.appendChild(td(fmtSeconds(t.avg_seconds)));
 			tr.appendChild(td(fmtSeconds(t.last_seconds)));
 			tr.appendChild(tdTime(t.last_run));
+			const taskActions = document.createElement("td");
+			const runsLink = document.createElement("a");
+			runsLink.className = "button";
+			runsLink.href = "/ui/runs?q=" + encodeURIComponent(t.task);
+			runsLink.textContent = "Runs";
+			runsLink.dataset.tip = "Click to search runs mentioning this task";
+			taskActions.appendChild(runsLink);
+			tr.appendChild(taskActions);
 			tbody.appendChild(tr);
 		}
 		setStatus("");
@@ -5921,7 +5932,19 @@ function wirePolicyForm() {
 
 // loadPolicies populates the policy table with edit and delete actions. Each empty criterion shows
 // as "any", so a reader sees exactly how wide a rule is.
+// heldRunCount returns how many runs are waiting for approval right now, so the policies list
+// shows live consequence rather than only configuration.
+async function heldRunCount() {
+	try {
+		const data = await getJSON("/runs?status=pending_approval&limit=200");
+		return (data.runs || []).length;
+	} catch {
+		return 0;
+	}
+}
+
 async function loadPolicies() {
+	const heldCount = await heldRunCount();
 	try {
 		const invByID = await fillInventorySelect(null);
 		const data = await getJSON("/policies");
@@ -5962,6 +5985,19 @@ async function loadPolicies() {
 				dry.appendChild(span);
 			}
 			tr.appendChild(dry);
+			const holding = document.createElement("td");
+			if (heldCount > 0) {
+				const link = document.createElement("a");
+				link.href = "/ui/runs?q=" + encodeURIComponent("status:pending_approval");
+				link.textContent = heldCount === 1 ? "1 run waiting" : heldCount + " runs waiting";
+				link.dataset.tip = "Click to see the runs held for approval";
+				holding.appendChild(link);
+			} else {
+				holding.textContent = "nothing waiting";
+				holding.className = "muted";
+				holding.dataset.tip = "No run is currently held for approval";
+			}
+			tr.appendChild(holding);
 			tr.appendChild(tdTime(p.created_at));
 			const actions = document.createElement("td");
 			const del = document.createElement("button");
