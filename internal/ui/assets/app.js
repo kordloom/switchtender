@@ -2006,7 +2006,10 @@ function themeGroup() {
 		btn.setAttribute("aria-label", t.tip);
 		btn.setAttribute("aria-pressed", "false");
 		btn.innerHTML = svgIcon(t.icon);
-		btn.appendChild(document.createTextNode(t.label));
+		const name = document.createElement("span");
+		name.className = "theme-name";
+		name.textContent = t.label;
+		btn.appendChild(name);
 		btn.addEventListener("click", () => setTheme(t.key));
 		row.appendChild(btn);
 	}
