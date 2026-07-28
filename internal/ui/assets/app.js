@@ -64,6 +64,7 @@ const NAV_ICONS = {
 	migrate: '<path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>',
 	credentials: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
 	users: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
+	audit: '<path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="m9 14 2 2 4-4"/>',
 	policies: '<path d="M12 3l7 3v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/><polyline points="9 12 11 14 15 10"/>',
 	docs: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>',
 };
@@ -73,6 +74,19 @@ const NAV_ICONS = {
 function mountTopbar() {
 	const bar = document.querySelector(".topbar");
 	if (!bar || bar.querySelector(".topbar-links")) return;
+	if (document.body.dataset.page !== "login" && !bar.querySelector(".search-btn")) {
+		const search = document.createElement("button");
+		search.type = "button";
+		search.className = "search-btn";
+		const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+		search.innerHTML = svgIcon('<circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>') +
+			"<span>Search</span>" + '<span class="kbd">' + (mac ? "⌘K" : "Ctrl K") + "</span>";
+		search.setAttribute("aria-label", "Search pages and actions");
+		search.setAttribute("aria-haspopup", "dialog");
+		search.addEventListener("click", openPalette);
+		const brand = bar.querySelector(".brand");
+		if (brand) brand.after(search); else bar.appendChild(search);
+	}
 	const nav = document.createElement("nav");
 	nav.className = "topbar-links";
 	if (document.body.dataset.page !== "login") {
@@ -154,7 +168,7 @@ const TOURS = [
 			{ sel: ".panel-runs", title: "Watch every run", body: "Runs stream live here, with a host matrix, sharded splits, and multi-step pipelines all in one place." },
 			{ sel: ".migrate-callout", title: "Bring your work with you", body: "Migrating from another tool? Import projects, inventories, templates, and schedules in a few clicks." },
 			{ sel: ".tile-search", title: "Find anything fast", body: "This search filters instantly, and every list in SwitchTender is searchable the same way." },
-			{ sel: ".nav-toggle", title: "The rest of the yard", body: "Job templates, credentials with external secrets, schedules, and fleet analytics all live in this menu." },
+			{ sel: ".side|.nav-toggle", title: "The rest of the yard", body: "Job templates, credentials with external secrets, schedules, and fleet analytics all live in the navigation." },
 			{ title: "You are set", body: "Explore the demo freely. Nothing here can be broken. Replay this tour anytime from Tour in the top bar." },
 		],
 	},
@@ -444,7 +458,7 @@ function showTourStep() {
 		tourState.timer = window.setTimeout(() => moveTour(1, true), hold);
 	}
 
-	const el = step.sel ? document.querySelector(step.sel) : null;
+	const el = tourTarget(step);
 	if (el) el.scrollIntoView({ block: "center", inline: "nearest" });
 	renderTourPosition();
 	(tourState.auto ? play : pop.querySelector(".tour-next")).focus();
@@ -455,12 +469,24 @@ function showTourStep() {
 function renderTourPosition() {
 	if (!tourState) return;
 	const step = tourState.steps[tourState.step];
-	const el = step.sel ? document.querySelector(step.sel) : null;
+	const el = tourTarget(step);
 	if (el) {
 		placeTourAt(el.getBoundingClientRect());
 	} else {
 		placeTourCentered();
 	}
+}
+
+// tourTarget resolves a step's selector to the first visible match. A selector can list
+// alternatives separated by a pipe, so one step can point at the docked sidebar on wide viewports
+// and the drawer toggle on narrow ones.
+function tourTarget(step) {
+	if (!step.sel) return null;
+	for (const sel of step.sel.split("|")) {
+		const el = document.querySelector(sel.trim());
+		if (el && el.getClientRects().length) return el;
+	}
+	return null;
 }
 
 // placeTourAt cuts the spotlight hole to a target rect and floats the popover below it, or above when
@@ -1529,6 +1555,7 @@ document.addEventListener("DOMContentLoaded", () => {
 		wireMigrate();
 	}
 	buildNav();
+	wirePalette();
 	if (isReadOnly()) applyReadOnly();
 	setInterval(refreshRelTimes, 20000);
 	mountTour();
@@ -1605,29 +1632,47 @@ function buildNav() {
 	drawer.hidden = true;
 	drawer.setAttribute("aria-label", "Main navigation");
 
-	for (const group of NAV_GROUPS) {
-		const items = group.items.filter((it) => showAdmin || !it.admin);
-		if (!items.length) continue;
-		const g = document.createElement("div");
-		g.className = "nav-group";
-		const gl = document.createElement("div");
-		gl.className = "nav-group-label";
-		gl.textContent = group.label;
-		g.appendChild(gl);
-		for (const it of items) {
-			const a = document.createElement("a");
-			a.className = "nav-item" + (it.key === activeKey ? " active" : "");
-			a.href = it.href;
-			a.innerHTML = svgIcon(NAV_ICONS[it.key] || "");
-			a.appendChild(document.createTextNode(it.label));
-			if (it.key === activeKey) a.setAttribute("aria-current", "page");
-			g.appendChild(a);
+	// fillGroups renders the grouped nav links into a container, shared by the drawer and the
+	// docked sidebar so the two never drift apart.
+	const fillGroups = (root) => {
+		for (const group of NAV_GROUPS) {
+			const items = group.items.filter((it) => showAdmin || !it.admin);
+			if (!items.length) continue;
+			const g = document.createElement("div");
+			g.className = "nav-group";
+			const gl = document.createElement("div");
+			gl.className = "nav-group-label";
+			gl.textContent = group.label;
+			g.appendChild(gl);
+			for (const it of items) {
+				const a = document.createElement("a");
+				a.className = "nav-item" + (it.key === activeKey ? " active" : "");
+				a.href = it.href;
+				a.innerHTML = svgIcon(NAV_ICONS[it.key] || "");
+				a.appendChild(document.createTextNode(it.label));
+				if (it.key === activeKey) a.setAttribute("aria-current", "page");
+				g.appendChild(a);
+			}
+			root.appendChild(g);
 		}
-		drawer.appendChild(g);
-	}
+	};
+	fillGroups(drawer);
+
+	const side = document.createElement("aside");
+	side.className = "side";
+	const sideBrand = document.createElement("a");
+	sideBrand.className = "side-brand";
+	sideBrand.href = "/ui/";
+	sideBrand.innerHTML = '<picture><source media="(prefers-color-scheme: dark)" srcset="/ui/assets/logo-train-tracks-dark.png"><img src="/ui/assets/logo-train-tracks.png" alt=""></picture>SwitchTender';
+	side.appendChild(sideBrand);
+	const sideNav = document.createElement("nav");
+	sideNav.setAttribute("aria-label", "Primary navigation");
+	fillGroups(sideNav);
+	side.appendChild(sideNav);
 
 	document.body.appendChild(backdrop);
 	document.body.appendChild(drawer);
+	document.body.appendChild(side);
 
 	// Pin the drawer directly under the top bar, tracking its height across zoom and resize.
 	const syncHeight = () => document.documentElement.style
@@ -1657,6 +1702,177 @@ function buildNav() {
 function svgIcon(inner) {
 	return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" ' +
 		'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + inner + '</svg>';
+}
+
+// paletteState holds the command palette's elements once built, plus the filtered entries and the
+// highlighted index.
+let paletteState = null;
+
+// paletteEntries returns everything the palette can jump to: each nav destination the current role
+// can see, then a few direct actions.
+function paletteEntries() {
+	const role = localStorage.getItem("st_role");
+	const showAdmin = !role || role === "admin";
+	const out = [];
+	for (const group of NAV_GROUPS) {
+		for (const it of group.items) {
+			if (it.admin && !showAdmin) continue;
+			out.push({ label: it.label, desc: it.desc || "", group: group.label, icon: NAV_ICONS[it.key] || "", href: it.href });
+		}
+	}
+	out.push({ label: "Launch a run", desc: "Open the launch panel on the runs page", group: "Action", icon: NAV_ICONS.runs, href: "/ui/runs" });
+	out.push({
+		label: "View the source", desc: "github.com/kordloom/switchtender", group: "Action",
+		icon: '<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>',
+		href: "https://github.com/kordloom/switchtender", external: true,
+	});
+	return out;
+}
+
+// paletteScore ranks an entry against a query: label prefix beats label substring beats
+// description, and zero filters the entry out.
+function paletteScore(entry, q) {
+	if (!q) return 1;
+	const label = entry.label.toLowerCase();
+	if (label.startsWith(q)) return 4;
+	if (label.includes(q)) return 3;
+	if (entry.desc.toLowerCase().includes(q)) return 2;
+	if (entry.group.toLowerCase().includes(q)) return 1;
+	return 0;
+}
+
+// buildPalette constructs the palette dialog once and wires its input and keyboard handling.
+function buildPalette() {
+	if (paletteState) return paletteState;
+	const overlay = document.createElement("div");
+	overlay.className = "cmdk";
+	overlay.hidden = true;
+	overlay.setAttribute("role", "dialog");
+	overlay.setAttribute("aria-modal", "true");
+	overlay.setAttribute("aria-label", "Command palette");
+	const card = document.createElement("div");
+	card.className = "cmdk-card";
+	const head = document.createElement("div");
+	head.className = "cmdk-head";
+	head.innerHTML = svgIcon('<circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>');
+	const input = document.createElement("input");
+	input.className = "cmdk-input";
+	input.placeholder = "Jump to a page or action…";
+	input.setAttribute("aria-label", "Search pages and actions");
+	head.appendChild(input);
+	const list = document.createElement("div");
+	list.className = "cmdk-list";
+	list.setAttribute("role", "listbox");
+	const foot = document.createElement("div");
+	foot.className = "cmdk-foot";
+	foot.innerHTML = '<span><span class="kbd">↑↓</span> navigate</span>' +
+		'<span><span class="kbd">↵</span> open</span><span><span class="kbd">esc</span> close</span>';
+	card.appendChild(head);
+	card.appendChild(list);
+	card.appendChild(foot);
+	overlay.appendChild(card);
+	document.body.appendChild(overlay);
+	overlay.addEventListener("mousedown", (e) => { if (e.target === overlay) closePalette(); });
+	input.addEventListener("input", () => renderPalette(input.value));
+	input.addEventListener("keydown", (e) => {
+		if (e.key === "ArrowDown") { e.preventDefault(); movePaletteActive(1); }
+		else if (e.key === "ArrowUp") { e.preventDefault(); movePaletteActive(-1); }
+		else if (e.key === "Enter") { e.preventDefault(); openPaletteActive(); }
+		else if (e.key === "Escape") { e.preventDefault(); closePalette(); }
+	});
+	paletteState = { overlay, input, list, active: 0, shown: [] };
+	return paletteState;
+}
+
+// renderPalette filters the entries for a query and redraws the result list.
+function renderPalette(query) {
+	const st = paletteState;
+	const q = (query || "").trim().toLowerCase();
+	st.shown = paletteEntries()
+		.map((entry) => ({ entry, score: paletteScore(entry, q) }))
+		.filter((r) => r.score > 0)
+		.sort((a, b) => b.score - a.score)
+		.map((r) => r.entry);
+	st.active = 0;
+	st.list.innerHTML = "";
+	if (!st.shown.length) {
+		const none = document.createElement("div");
+		none.className = "cmdk-empty";
+		none.textContent = "No matches.";
+		st.list.appendChild(none);
+		return;
+	}
+	st.shown.forEach((entry, i) => {
+		const item = document.createElement("div");
+		item.className = "cmdk-item" + (i === st.active ? " active" : "");
+		item.setAttribute("role", "option");
+		item.setAttribute("aria-selected", i === st.active ? "true" : "false");
+		item.innerHTML = svgIcon(entry.icon) +
+			'<span class="cmdk-item-label"></span><span class="cmdk-item-desc"></span><span class="cmdk-item-group"></span>';
+		item.querySelector(".cmdk-item-label").textContent = entry.label;
+		item.querySelector(".cmdk-item-desc").textContent = entry.desc;
+		item.querySelector(".cmdk-item-group").textContent = entry.group;
+		item.addEventListener("mouseenter", () => setPaletteActive(i));
+		item.addEventListener("click", () => { st.active = i; openPaletteActive(); });
+		st.list.appendChild(item);
+	});
+}
+
+// setPaletteActive moves the highlight to the given index.
+function setPaletteActive(i) {
+	const st = paletteState;
+	st.active = i;
+	st.list.querySelectorAll(".cmdk-item").forEach((el, j) => {
+		el.classList.toggle("active", j === i);
+		el.setAttribute("aria-selected", j === i ? "true" : "false");
+	});
+}
+
+// movePaletteActive steps the highlight up or down, wrapping, and keeps it scrolled into view.
+function movePaletteActive(delta) {
+	const st = paletteState;
+	if (!st.shown.length) return;
+	const next = (st.active + delta + st.shown.length) % st.shown.length;
+	setPaletteActive(next);
+	const el = st.list.querySelectorAll(".cmdk-item")[next];
+	if (el) el.scrollIntoView({ block: "nearest" });
+}
+
+// openPaletteActive navigates to the highlighted entry.
+function openPaletteActive() {
+	const st = paletteState;
+	const entry = st.shown[st.active];
+	if (!entry) return;
+	closePalette();
+	if (entry.external) window.open(entry.href, "_blank", "noopener");
+	else location.href = entry.href;
+}
+
+// openPalette shows the palette with a fresh query and focuses its input.
+function openPalette() {
+	const st = buildPalette();
+	st.overlay.hidden = false;
+	st.input.value = "";
+	renderPalette("");
+	st.input.focus();
+}
+
+// closePalette hides the palette.
+function closePalette() {
+	if (paletteState) paletteState.overlay.hidden = true;
+}
+
+// wirePalette registers the platform search shortcut that toggles the palette, on every page but
+// sign in.
+function wirePalette() {
+	if (document.body.dataset.page === "login") return;
+	document.addEventListener("keydown", (e) => {
+		if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "k") {
+			e.preventDefault();
+			if (paletteState && !paletteState.overlay.hidden) closePalette();
+			else openPalette();
+		}
+	});
 }
 
 // apiToken returns the stored API token, empty when the server runs open.

@@ -48,7 +48,13 @@ func newAssetHandler(assets fs.FS) *assetHandler {
 		}
 		ct := mime.TypeByExtension(path.Ext(p))
 		if ct == "" {
-			ct = "application/octet-stream"
+			// mime consults OS tables at runtime, and minimal images ship without a woff2 entry.
+			switch path.Ext(p) {
+			case ".woff2":
+				ct = "font/woff2"
+			default:
+				ct = "application/octet-stream"
+			}
 		}
 		sum := sha256.Sum256(body)
 		h.assets[p] = asset{
