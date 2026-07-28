@@ -1103,3 +1103,17 @@ th.sortable:hover { color: var(--text); }
 th.sortable::after { content: "\2195"; margin-left: 6px; opacity: 0.3; font-size: 10px; }
 th.sortable[data-dir="asc"]::after { content: "\2191"; opacity: 1; color: var(--accent); }
 th.sortable[data-dir="desc"]::after { content: "\2193"; opacity: 1; color: var(--accent); }
+
+/* Labels sit in their own column so they align down the table instead of trailing text of
+   varying length. Two fit per row; the rest expand in place. */
+td.col-labels { white-space: nowrap; }
+.label-wrap { display: inline-flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+.label-wrap .label-chip { margin-left: 0; }
+.label-more { border: 1px dashed var(--border); cursor: pointer; font-family: var(--mono); }
+.label-more:hover { border-style: solid; }
+/* A run's playbook stays on one line, truncated, so every row keeps the same height. The full
+   value is on the cell's title and in the export. */
+td.col-playbook .clamp { display: block; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+td.col-playbook .clamp .linkish { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+/* Two label chips sit side by side; the column holds them without pushing the row taller. */
+td.col-labels .label-wrap { flex-wrap: nowrap; }

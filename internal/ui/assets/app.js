@@ -3840,7 +3840,12 @@ async function openFileViewer(projectID, path) {
 // playbookCellEl renders a run or template's playbook as a link into the file viewer when the
 // object came from a project, and as plain text otherwise, since only a project has a checkout.
 function playbookCellEl(r, text) {
-	const cell = td("");
+	const cell = td("", "col-playbook");
+	// An auto-layout table ignores max-width on the cell itself, so the constraint lives on an
+	// inner element and the full value stays on the cell's title.
+	const inner = document.createElement("span");
+	inner.className = "clamp";
+	cell.appendChild(inner);
 	const label = text !== undefined ? text : toolLabel(r);
 	const path = r.playbook || "";
 	if (r.project_id && path && (!r.tool || r.tool === "ansible")) {
@@ -3854,11 +3859,11 @@ function playbookCellEl(r, text) {
 			e.stopPropagation();
 			openFileViewer(r.project_id, path);
 		});
-		cell.appendChild(link);
+		inner.appendChild(link);
 	} else {
-		cell.textContent = label;
-		cell.title = path || r.command || "";
+		inner.textContent = label;
 	}
+	cell.title = path || r.command || "";
 	return cell;
 }
 
@@ -4997,7 +5002,7 @@ async function loadRuns() {
 	if (sizeEl) sizeEl.onchange = () => loadRuns();
 	const gen = ++runsLoadGen;
 	setStatus("");
-	showSkeletonRows(tbody, 6, 8);
+	showSkeletonRows(tbody, 6, 9);
 	table.hidden = false;
 	try {
 		const data = await getJSON("/runs?limit=" + runsPageSize() + "&offset=0&q=" + encodeURIComponent(runsQuery()) + runsFilterParams());
@@ -5108,16 +5113,53 @@ function originTip(r) {
 	}
 }
 
-// labelChipsInto appends a run's labels as small key-value chips that filter the list.
+// labelChipsInto appends a run's labels as key-value chips that filter the list.
 function labelChipsInto(cell, labels) {
 	for (const key of Object.keys(labels || {}).sort()) {
-		const chip = document.createElement("a");
-		chip.className = "label-chip";
-		chip.href = "/ui/runs?q=" + encodeURIComponent("label:" + key + "=" + labels[key]);
-		chip.textContent = key + "=" + labels[key];
-		chip.dataset.tip = "Show every run labeled " + key + "=" + labels[key];
-		cell.appendChild(chip);
+		cell.appendChild(labelChip(key, labels[key]));
 	}
+}
+
+// labelChip builds one clickable key=value chip.
+function labelChip(key, value) {
+	const chip = document.createElement("a");
+	chip.className = "label-chip";
+	chip.href = "/ui/runs?q=" + encodeURIComponent("label:" + key + "=" + value);
+	chip.textContent = key + "=" + value;
+	chip.dataset.tip = "Click to show every run labeled " + key + "=" + value;
+	return chip;
+}
+
+// labelCellEl renders a run's labels in their own column, capped at two chips so every row keeps
+// the same height. The rest collapse into a count that expands the row on click.
+function labelCellEl(labels) {
+	const cell = td("", "col-labels");
+	const keys = Object.keys(labels || {}).sort();
+	if (!keys.length) {
+		cell.textContent = "\u2014";
+		return cell;
+	}
+	const wrap = document.createElement("span");
+	wrap.className = "label-wrap";
+	const shown = keys.slice(0, 2);
+	for (const key of shown) wrap.appendChild(labelChip(key, labels[key]));
+	const rest = keys.slice(2);
+	if (rest.length) {
+		const more = document.createElement("button");
+		more.type = "button";
+		more.className = "label-chip label-more";
+		more.textContent = "+" + rest.length;
+		more.dataset.tip = "Click to show " + rest.map((k) => k + "=" + labels[k]).join(", ");
+		more.addEventListener("click", (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			more.remove();
+			for (const key of rest) wrap.appendChild(labelChip(key, labels[key]));
+		});
+		wrap.appendChild(more);
+	}
+	cell.appendChild(wrap);
+	return cell;
 }
 
 // typeCellEl fills a table cell with the run's tool chip and any kind tags, so type lives in one
@@ -5179,9 +5221,8 @@ function appendRunRows(tbody, runs) {
 		tr.appendChild(typeCellEl(r));
 		tr.appendChild(originCellEl(r));
 
-		const pbCell = playbookCellEl(r);
-		labelChipsInto(pbCell, r.labels);
-		tr.appendChild(pbCell);
+		tr.appendChild(playbookCellEl(r));
+		tr.appendChild(labelCellEl(r.labels));
 
 		tr.appendChild(tdTime(r.started_at || r.created_at));
 		tr.appendChild(td(fmtDuration(r.started_at, r.ended_at)));
@@ -5295,6 +5336,54 @@ function describeCron(spec) {
 	if (dow === "*" && mon === "*" && /^\d+$/.test(dom) && /^\d+$/.test(hour)) return "Monthly on day " + dom + " at " + at(hour, min);
 	if (dow === "1-5" && /^\d+$/.test(hour)) return "Weekdays at " + at(hour, min);
 	return "Custom schedule";
+}
+
+// mountHostActions fills the host page's action bar: the things an operator wants to do to one
+// host, rather than leaving the page a dead-end table.
+function mountHostActions(host) {
+	const bar = document.getElementById("host-actions");
+	if (!bar) return;
+	const add = (label, href, tip) => {
+		const a = document.createElement("a");
+		a.className = "button";
+		a.href = href;
+		a.textContent = label;
+		a.dataset.tip = tip;
+		bar.appendChild(a);
+	};
+	add("Runs on this host", "/ui/runs?q=" + encodeURIComponent("host:" + host),
+		"Click to see every run that touched this host");
+	add("Drift", "/ui/drift?q=" + encodeURIComponent(host),
+		"Click to see this host's divergence from the desired state");
+	add("Fleet health", "/ui/fleet?q=" + encodeURIComponent(host),
+		"Click to see this host beside the rest of the fleet");
+	const copy = copyButton(host, "Copy this host name");
+	copy.className = "button";
+	copy.appendChild(document.createTextNode("Copy name"));
+	bar.appendChild(copy);
+}
+
+// renderHostSummary turns the host's run history into headline metrics, so its condition reads
+// before the table does.
+function renderHostSummary(host, runs) {
+	const el = document.getElementById("host-summary");
+	if (!el) return;
+	let failed = 0;
+	let changed = 0;
+	let busy = 0;
+	for (const r of runs) {
+		if (r.outcome === "failed" || r.outcome === "unreachable") failed++;
+		if (r.changed) changed += r.changed;
+		busy += r.duration_seconds || 0;
+	}
+	const rate = runs.length ? Math.round(((runs.length - failed) / runs.length) * 100) + "%" : "-";
+	el.innerHTML = "";
+	el.appendChild(statCard(String(runs.length), "Runs recorded", ""));
+	el.appendChild(statCard(rate, "Success rate", failed ? "" : "ok"));
+	el.appendChild(statCard(String(failed), "Failures", failed ? "failed" : ""));
+	el.appendChild(statCard(String(changed), "Tasks changed", changed ? "changed" : ""));
+	el.appendChild(statCard(fmtSeconds(busy), "Total busy time", ""));
+	el.hidden = false;
 }
 
 // fmtInterval renders a sync interval in the largest whole unit that fits.
@@ -5472,9 +5561,11 @@ async function proposeReconcile(host, btn) {
 
 // loadHost populates one host's run history table, newest first.
 async function loadHost(host) {
+	mountHostActions(host);
 	try {
 		const data = await getJSON("/hosts/" + encodeURIComponent(host) + "/runs");
 		const runs = data.runs || [];
+		renderHostSummary(host, runs);
 		if (runs.length === 0) {
 			showEmpty("No history for this host yet.");
 			return;
