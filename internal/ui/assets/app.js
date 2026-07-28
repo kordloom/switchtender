@@ -1070,7 +1070,11 @@ function mountWorkflow() {
 		}
 	});
 	window.addEventListener("resize", renderEdges);
-	const hadViewport = wfRestore();
+	let hadViewport = wfRestore();
+	if (!wfState.nodes.length) {
+		wfSeedExample();
+		hadViewport = false;
+	}
 	renderWorkflow();
 	if (hadViewport) {
 		applyViewport();
@@ -1187,6 +1191,32 @@ let wfViewSaveTimer = null;
 function saveViewSoon() {
 	clearTimeout(wfViewSaveTimer);
 	wfViewSaveTimer = setTimeout(wfSave, 250);
+}
+
+// wfSeedExample lays out a small but real pipeline: infrastructure fans out to configuration and
+// database migration, both of which a smoke test waits on. It gives a first visit something to
+// drag, zoom, and read instead of an empty canvas, and it is replaced the moment the reader
+// changes anything, since the draft then saves over it.
+function wfSeedExample() {
+	const step = (id, name, tool, x, y, extra) => Object.assign({
+		id, name, tool, x, y,
+		playbook: tool === "ansible" ? "site.yml" : "",
+		command: tool === "ansible" ? "" : "echo running " + name,
+		inventory: "", dryRun: false, continueOnFailure: false, retries: 0,
+	}, extra || {});
+	wfState.nodes = [
+		step(1, "provision", "terraform", 60, 150, { command: "infra/network", dryRun: true }),
+		step(2, "configure", "ansible", 330, 60),
+		step(3, "migrate-db", "ansible", 330, 250, { playbook: "migrate.yml" }),
+		step(4, "smoke-test", "bash", 600, 150, { command: "curl -fsS https://example.internal/healthz", retries: 2 }),
+	];
+	wfState.edges = [
+		{ from: 1, to: 2 }, { from: 1, to: 3 },
+		{ from: 2, to: 4 }, { from: 3, to: 4 },
+	];
+	wfState.seq = 4;
+	const name = document.getElementById("wf-name");
+	if (name && !name.value) name.value = "Release pipeline";
 }
 
 // wfRestore loads the saved draft into the editor state, ignoring anything malformed. It reports
@@ -2032,7 +2062,13 @@ function applyReadOnly() {
 			actions.appendChild(note);
 		}
 	}
-	for (const btn of document.querySelectorAll(".wf-toolbar button")) btn.disabled = true;
+	// Building, dragging, zooming, and exporting a graph never touch the server, so the editor
+	// stays fully usable in the demo. Only running the pipeline is blocked.
+	const wfRun = document.getElementById("wf-run");
+	if (wfRun) {
+		wfRun.dataset.mutates = "true";
+		wfRun.dataset.tip = "Click to run this graph as a pipeline";
+	}
 }
 
 // buildNav injects the menu toggle and the slide-in drawer on every page but sign in, highlighting
