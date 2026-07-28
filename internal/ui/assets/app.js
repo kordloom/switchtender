@@ -3718,6 +3718,8 @@ async function loadDrift() {
 			showEmpty("No drift checks yet. Run a dry run to detect drift from the desired state.");
 			return;
 		}
+		renderDriftSummary(hosts);
+		const maxDrift = Math.max(1, ...hosts.map((h) => h.drifted_tasks));
 		const tbody = document.getElementById("drift");
 		for (const h of hosts) {
 			const tr = document.createElement("tr");
@@ -3734,7 +3736,15 @@ async function loadDrift() {
 			chip.textContent = h.drifted_tasks > 0 ? "drifted" : "in sync";
 			state.appendChild(chip);
 			tr.appendChild(state);
-			tr.appendChild(td(String(h.drifted_tasks)));
+			const driftCell = td(String(h.drifted_tasks));
+			const bar = document.createElement("span");
+			bar.className = "mini-bar" + (h.drifted_tasks > 0 ? "" : " ok");
+			const fill = document.createElement("i");
+			fill.style.width = h.drifted_tasks > 0 ? Math.max(8, (h.drifted_tasks / maxDrift) * 100) + "%" : "100%";
+			bar.appendChild(fill);
+			bar.title = h.drifted_tasks > 0 ? h.drifted_tasks + " drifted" : "in sync";
+			driftCell.appendChild(bar);
+			tr.appendChild(driftCell);
 			tr.appendChild(tdTime(h.checked_at));
 			const runCell = document.createElement("td");
 			const runLink = document.createElement("a");
@@ -3839,6 +3849,9 @@ async function loadTasks() {
 			const trend = document.createElement("td");
 			trend.appendChild(trendChip(t.avg_seconds, t.last_seconds, t.runs));
 			tr.appendChild(trend);
+			const spark = document.createElement("td");
+			spark.appendChild(durationSpark(t.recent));
+			tr.appendChild(spark);
 			tr.appendChild(td(String(t.runs)));
 			tr.appendChild(td(fmtSeconds(t.avg_seconds)));
 			tr.appendChild(td(fmtSeconds(t.last_seconds)));
@@ -3850,6 +3863,76 @@ async function loadTasks() {
 	} catch (e) {
 		setStatus("Failed to load task trends: " + e.message);
 	}
+}
+
+// renderDriftSummary fills the drift page's stat strip: how many hosts drifted, how many are in
+// sync, and when the newest check ran.
+function renderDriftSummary(hosts) {
+	const box = document.getElementById("drift-summary");
+	if (!box) return;
+	const drifted = hosts.filter((h) => h.drifted_tasks > 0).length;
+	const clean = hosts.length - drifted;
+	let newest = "";
+	for (const h of hosts) {
+		if (!newest || h.checked_at > newest) newest = h.checked_at;
+	}
+	box.innerHTML = "";
+	const card = (value, label, cls) => {
+		const c = document.createElement("div");
+		c.className = "stat-card";
+		const v = document.createElement("span");
+		v.className = "stat-value" + (cls ? " " + cls : "");
+		v.textContent = value;
+		const l = document.createElement("span");
+		l.className = "stat-label";
+		l.textContent = label;
+		c.appendChild(v);
+		c.appendChild(l);
+		return c;
+	};
+	box.appendChild(card(String(hosts.length), "hosts checked"));
+	box.appendChild(card(String(drifted), "drifted", drifted > 0 ? "changed" : ""));
+	box.appendChild(card(String(clean), "in sync", "ok"));
+	box.appendChild(card(newest ? relTime(newest) : "never", "last check"));
+	box.hidden = false;
+}
+
+// durationSpark draws a task's recent durations as a small line, oldest to newest, so the shape of
+// a trend is visible at a glance. The numbers stay in the table; the mark carries only shape.
+function durationSpark(values) {
+	if (!values || values.length < 2) {
+		const dash = document.createElement("span");
+		dash.className = "muted";
+		dash.textContent = "\u2013";
+		return dash;
+	}
+	const w = 96, h = 22, pad = 3;
+	const min = Math.min(...values), max = Math.max(...values);
+	const span = (max - min) || 1;
+	const step = (w - pad * 2) / (values.length - 1);
+	const pts = values.map((v, i) => {
+		const x = pad + i * step;
+		const y = h - pad - ((v - min) / span) * (h - pad * 2);
+		return x.toFixed(1) + "," + y.toFixed(1);
+	});
+	const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+	svg.setAttribute("class", "duration-spark");
+	svg.setAttribute("viewBox", "0 0 " + w + " " + h);
+	svg.setAttribute("width", w);
+	svg.setAttribute("height", h);
+	const title = document.createElementNS(svg.namespaceURI, "title");
+	title.textContent = values.map(fmtSeconds).join(" \u2192 ");
+	svg.appendChild(title);
+	const line = document.createElementNS(svg.namespaceURI, "polyline");
+	line.setAttribute("points", pts.join(" "));
+	svg.appendChild(line);
+	const end = pts[pts.length - 1].split(",");
+	const dot = document.createElementNS(svg.namespaceURI, "circle");
+	dot.setAttribute("cx", end[0]);
+	dot.setAttribute("cy", end[1]);
+	dot.setAttribute("r", "2.5");
+	svg.appendChild(dot);
+	return svg;
 }
 
 // trendChip labels how a task's latest duration compares to its own recent average.

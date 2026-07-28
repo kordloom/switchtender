@@ -698,12 +698,15 @@ func (m *memStore) TaskTrends(_ context.Context, window int) ([]TaskTrend, error
 			recent = recent[:window]
 		}
 		total := 0.0
-		for _, ts := range recent {
+		series := make([]float64, len(recent))
+		for i, ts := range recent {
 			total += ts.Seconds
+			// recent is newest first; the series reads oldest first.
+			series[len(recent)-1-i] = ts.Seconds
 		}
 		out = append(out, TaskTrend{
 			Task: task, Runs: len(recent), AvgSeconds: total / float64(len(recent)),
-			LastSeconds: recent[0].Seconds, LastRun: recent[0].RanAt,
+			LastSeconds: recent[0].Seconds, LastRun: recent[0].RanAt, Recent: series,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Task < out[j].Task })
