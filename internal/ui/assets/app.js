@@ -3454,6 +3454,18 @@ function openTemplateView(t) {
 	const code = document.getElementById("view-code");
 	code.hidden = !t.command;
 	if (t.command) code.textContent = t.command;
+	if (t.project_id && t.playbook && (!t.tool || t.tool === "ansible")) {
+		const open = document.createElement("button");
+		open.type = "button";
+		open.className = "button";
+		open.textContent = "View playbook";
+		open.dataset.tip = "Open " + t.playbook + " from the project checkout";
+		open.addEventListener("click", () => { overlay.hidden = true; openFileViewer(t.project_id, t.playbook); });
+		const row = document.createElement("div");
+		row.className = "drill-actions";
+		row.appendChild(open);
+		rows.parentNode.insertBefore(row, code.nextSibling);
+	}
 	overlay.hidden = false;
 }
 
@@ -3526,6 +3538,87 @@ function openSurvey(t) {
 			document.getElementById("survey-status").textContent = "Launch failed: " + err.message;
 		}
 	};
+}
+
+// openFileViewer shows one file from a project's checkout, read only, with a copy control. It is
+// the destination for playbook names throughout the interface.
+async function openFileViewer(projectID, path) {
+	let overlay = document.getElementById("file-modal");
+	if (!overlay) {
+		overlay = document.createElement("div");
+		overlay.id = "file-modal";
+		overlay.className = "modal";
+		overlay.hidden = true;
+		overlay.innerHTML = '<div class="modal-card wide"><div class="modal-head">' +
+			'<h2 id="file-title" class="mono"></h2>' +
+			'<button type="button" class="modal-close" aria-label="Close">\u00d7</button></div>' +
+			'<div id="file-note" class="muted file-note"></div>' +
+			'<pre class="log file-body" id="file-body"></pre>' +
+			'<div class="drill-actions" id="file-actions"></div></div>';
+		document.body.appendChild(overlay);
+		overlay.addEventListener("mousedown", (e) => { if (e.target === overlay) overlay.hidden = true; });
+		overlay.querySelector(".modal-close").addEventListener("click", () => { overlay.hidden = true; });
+		document.addEventListener("keydown", (e) => { if (e.key === "Escape") overlay.hidden = true; });
+	}
+	const title = document.getElementById("file-title");
+	const note = document.getElementById("file-note");
+	const body = document.getElementById("file-body");
+	const actions = document.getElementById("file-actions");
+	title.textContent = path;
+	note.textContent = "Loading.";
+	body.textContent = "";
+	actions.innerHTML = "";
+	overlay.hidden = false;
+	try {
+		const file = await getJSON("/projects/" + encodeURIComponent(projectID) +
+			"/file?path=" + encodeURIComponent(path));
+		const size = file.size >= 1024 ? Math.round(file.size / 1024) + " KB" : file.size + " bytes";
+		if (file.binary) {
+			note.textContent = size + ", binary. Nothing to show.";
+		} else {
+			note.textContent = size + (file.truncated ? ", showing the first 512 KB." : "") +
+				" Read only, from the project's cached checkout.";
+			body.textContent = file.content;
+			actions.appendChild(Object.assign(document.createElement("button"), {
+				type: "button", className: "button", textContent: "Copy",
+				onclick: async () => { try { await navigator.clipboard.writeText(file.content); } catch { /* denied */ } },
+			}));
+			const dl = document.createElement("button");
+			dl.type = "button";
+			dl.className = "button";
+			dl.textContent = "Download";
+			dl.addEventListener("click", () =>
+				downloadBlob(path.split("/").pop(), "text/plain", file.content));
+			actions.appendChild(dl);
+		}
+	} catch (err) {
+		note.textContent = "Could not open this file: " + err.message;
+	}
+}
+
+// playbookCellEl renders a run or template's playbook as a link into the file viewer when the
+// object came from a project, and as plain text otherwise, since only a project has a checkout.
+function playbookCellEl(r, text) {
+	const cell = td("");
+	const label = text !== undefined ? text : toolLabel(r);
+	const path = r.playbook || "";
+	if (r.project_id && path && (!r.tool || r.tool === "ansible")) {
+		const link = document.createElement("button");
+		link.type = "button";
+		link.className = "linkish";
+		link.textContent = label;
+		link.dataset.tip = "View " + path + " from the project checkout";
+		link.addEventListener("click", (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			openFileViewer(r.project_id, path);
+		});
+		cell.appendChild(link);
+	} else {
+		cell.textContent = label;
+		cell.title = path || r.command || "";
+	}
+	return cell;
 }
 
 // openPromptLaunch opens the launch-with-overrides dialog: survey answers when the template has
@@ -4769,8 +4862,7 @@ function appendRunRows(tbody, runs) {
 		tr.appendChild(typeCellEl(r));
 		tr.appendChild(originCellEl(r));
 
-		const pbCell = td(toolLabel(r));
-		pbCell.title = r.playbook || r.command || "";
+		const pbCell = playbookCellEl(r);
 		labelChipsInto(pbCell, r.labels);
 		tr.appendChild(pbCell);
 
@@ -6233,7 +6325,18 @@ function renderHeader(run) {
 	el.appendChild(runField);
 	if (!run.tool || run.tool === "ansible") {
 		const pb = field("Playbook", baseName(run.playbook) || (run.playbook || ""), null, run.playbook || "");
-		if (run.playbook) pb.querySelector(".value").appendChild(copyButton(run.playbook, "Copy the playbook path"));
+		const value = pb.querySelector(".value");
+		if (run.project_id && run.playbook) {
+			value.textContent = "";
+			const link = document.createElement("button");
+			link.type = "button";
+			link.className = "linkish";
+			link.textContent = baseName(run.playbook) || run.playbook;
+			link.dataset.tip = "View " + run.playbook + " from the project checkout";
+			link.addEventListener("click", () => openFileViewer(run.project_id, run.playbook));
+			value.appendChild(link);
+		}
+		if (run.playbook) value.appendChild(copyButton(run.playbook, "Copy the playbook path"));
 		el.appendChild(pb);
 	} else {
 		el.appendChild(field("Tool", null, toolBadgeEl(run)));

@@ -913,3 +913,8 @@ a.origin-chip:hover { text-decoration: none; background: var(--accent-soft); col
 .label-chip { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 6px; background: var(--surface-3); color: var(--muted); font-family: var(--mono); font-size: 11px; }
 .label-chip:hover { text-decoration: none; background: var(--accent-soft); color: var(--accent); }
 .label-wrap .label-chip:first-child { margin-left: 0; }
+
+/* Read-only project file viewer. */
+.file-note { margin-bottom: 10px; font-size: 12.5px; }
+.file-body { max-height: 60vh; }
+#file-title { font-size: 14px; word-break: break-all; }
