@@ -1117,3 +1117,6 @@ td.col-playbook .clamp { display: block; max-width: 300px; overflow: hidden; tex
 td.col-playbook .clamp .linkish { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
 /* Two label chips sit side by side; the column holds them without pushing the row taller. */
 td.col-labels .label-wrap { flex-wrap: nowrap; }
+
+/* The migration plan's export controls sit above the grouped result lists. */
+.migrate-export { margin: 0 0 14px; padding-top: 0; border-top: none; }

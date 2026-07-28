@@ -175,8 +175,11 @@ function mountTopbar() {
 
 // EXPORT_PAGES are the pages whose main table gets CSV and JSON export of the shown rows.
 // Credentials stays out on purpose, so secret-adjacent data never leaves by accident.
+// Credentials are included on purpose: the API never returns a secret value, so an export lists
+// names, kinds, secret state, and what uses them, which is what an access review needs.
 const EXPORT_PAGES = ["runs", "fleet", "drift", "tasks", "workers", "schedules", "jobtemplates",
-	"users", "audit", "host", "projects", "inventories", "sources", "policies", "doctor"];
+	"users", "audit", "host", "projects", "inventories", "sources", "policies", "doctor",
+	"credentials"];
 
 // tableRowsData reads the rendered table into headers and rows, skipping the actions column and
 // anything hidden, so an export matches exactly what the user sees after filtering.
@@ -200,6 +203,46 @@ function tableRowsData(table) {
 		rows.push(row);
 	}
 	return { headers, rows };
+}
+
+// yamlScalar renders one value as YAML, quoting whenever the plain form would be ambiguous:
+// empty strings, leading or trailing space, YAML indicators, and anything that would otherwise
+// parse as a number, boolean, or null.
+function yamlScalar(value) {
+	if (value === null || value === undefined) return "null";
+	if (typeof value === "number" || typeof value === "boolean") return String(value);
+	const text = String(value);
+	const risky = text === "" || text !== text.trim() ||
+		/^[-?:,[\]{}#&*!|>'"%@`]/.test(text) || /:\s|\s#/.test(text) ||
+		/^(true|false|null|yes|no|on|off|~)$/i.test(text) ||
+		/^-?\d+(\.\d+)?$/.test(text) || text.includes("\n");
+	if (!risky) return text;
+	return '"' + text.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n") + '"';
+}
+
+// toYAML renders a list of flat records, or a single map, as a YAML document.
+function toYAML(value, indent) {
+	const pad = indent || "";
+	if (Array.isArray(value)) {
+		if (!value.length) return pad + "[]\n";
+		return value.map((item) => {
+			if (item && typeof item === "object") {
+				const keys = Object.keys(item);
+				if (!keys.length) return pad + "- {}\n";
+				return keys.map((k, i) =>
+					pad + (i === 0 ? "- " : "  ") + k + ": " + yamlScalar(item[k]) + "\n").join("");
+			}
+			return pad + "- " + yamlScalar(item) + "\n";
+		}).join("");
+	}
+	if (value && typeof value === "object") {
+		return Object.keys(value).map((k) => {
+			const v = value[k];
+			if (v && typeof v === "object") return pad + k + ":\n" + toYAML(v, pad + "  ");
+			return pad + k + ": " + yamlScalar(v) + "\n";
+		}).join("");
+	}
+	return pad + yamlScalar(value) + "\n";
 }
 
 // downloadBlob hands the browser a generated file.
@@ -251,6 +294,11 @@ function mountTableExport() {
 		const objs = rows.map((r) => Object.fromEntries(headers.map((h, i) => [h, r[i] ?? ""])));
 		downloadBlob("switchtender-" + page + "-" + stamp() + ".json", "application/json",
 			JSON.stringify(objs, null, 2) + "\n");
+	});
+	make("YAML", "Click to export the filtered rows as YAML", () => {
+		const { headers, rows } = tableRowsData(table);
+		const objs = rows.map((r) => Object.fromEntries(headers.map((h, i) => [h, r[i] ?? ""])));
+		downloadBlob("switchtender-" + page + "-" + stamp() + ".yaml", "text/yaml", toYAML(objs));
 	});
 }
 
@@ -925,6 +973,10 @@ function mountWorkflow() {
 	};
 	document.getElementById("wf-add").addEventListener("click", () => openStepModal(null));
 	document.getElementById("wf-run").addEventListener("click", runWorkflow);
+	const wfJSON = document.getElementById("wf-export-json");
+	if (wfJSON) wfJSON.addEventListener("click", () => exportWorkflow("json"));
+	const wfYAML = document.getElementById("wf-export-yaml");
+	if (wfYAML) wfYAML.addEventListener("click", () => exportWorkflow("yaml"));
 	document.getElementById("wf-step-tool").addEventListener("change", syncStepFields);
 	document.getElementById("wf-step-form").addEventListener("submit", saveStep);
 	document.getElementById("wf-step-delete").addEventListener("click", deleteStepFromModal);
@@ -1746,10 +1798,10 @@ function wfSetStatus(msg, kind) {
 // runWorkflow serializes the graph into pipeline steps and submits it, then opens the new run. An
 // in-flight guard stops a double click from starting the workflow twice, and a 401 saves the draft
 // and routes through sign-in so the graph survives the round trip.
-async function runWorkflow() {
-	if (wfState.submitting) return;
-	if (wfState.nodes.length === 0) { wfSetStatus("Add at least one step.", "err"); return; }
-	const steps = wfState.nodes.map((n) => {
+// workflowSteps renders the canvas graph into the pipeline steps the API accepts, resolving each
+// edge into a dependency by step name.
+function workflowSteps() {
+	return wfState.nodes.map((n) => {
 		const step = { name: n.name, tool: n.tool };
 		if (n.tool === "ansible") step.playbook = n.playbook;
 		else step.command = n.command;
@@ -1766,6 +1818,38 @@ async function runWorkflow() {
 		if (deps.length) step.depends_on = deps;
 		return step;
 	});
+}
+
+// workflowDocument is the whole pipeline as it would be submitted, for running or exporting.
+function workflowDocument() {
+	return {
+		name: document.getElementById("wf-name").value.trim() || "workflow",
+		inventory: document.getElementById("wf-inventory").value.trim(),
+		steps: workflowSteps(),
+	};
+}
+
+// exportWorkflow downloads the graph as a pipeline definition, so a workflow built visually can
+// be committed to a repository or handed to the API.
+function exportWorkflow(format) {
+	if (!wfState || !wfState.nodes.length) {
+		wfSetStatus("Add at least one step before exporting.", "err");
+		return;
+	}
+	const doc = workflowDocument();
+	const name = (doc.name || "workflow").replace(/\s+/g, "-").toLowerCase();
+	if (format === "yaml") {
+		downloadBlob(name + ".yaml", "text/yaml", toYAML(doc));
+	} else {
+		downloadBlob(name + ".json", "application/json", JSON.stringify(doc, null, 2) + "\n");
+	}
+	wfSetStatus("Exported " + doc.steps.length + " steps.", "");
+}
+
+async function runWorkflow() {
+	if (wfState.submitting) return;
+	if (wfState.nodes.length === 0) { wfSetStatus("Add at least one step.", "err"); return; }
+	const steps = workflowSteps();
 	const body = {
 		name: document.getElementById("wf-name").value.trim() || "workflow",
 		inventory: document.getElementById("wf-inventory").value.trim(),
@@ -3274,6 +3358,27 @@ async function runMigrate(apply) {
 function renderMigratePlan(data) {
 	const el = document.getElementById("migrate-plan");
 	el.innerHTML = "";
+	// A migration plan is a record worth keeping: it is what was about to change, or what did.
+	const exportRow = document.createElement("div");
+	exportRow.className = "drill-actions migrate-export";
+	for (const fmt of ["JSON", "YAML"]) {
+		const btn = document.createElement("button");
+		btn.type = "button";
+		btn.className = "button";
+		btn.textContent = fmt;
+		btn.dataset.tip = "Click to download this migration plan as " + fmt;
+		btn.addEventListener("click", () => {
+			const stamp = new Date().toISOString().slice(0, 10);
+			if (fmt === "YAML") {
+				downloadBlob("switchtender-migration-" + stamp + ".yaml", "text/yaml", toYAML(data));
+			} else {
+				downloadBlob("switchtender-migration-" + stamp + ".json", "application/json",
+					JSON.stringify(data, null, 2) + "\n");
+			}
+		});
+		exportRow.appendChild(btn);
+	}
+	el.appendChild(exportRow);
 
 	if (data.applied) {
 		const done = document.createElement("div");
