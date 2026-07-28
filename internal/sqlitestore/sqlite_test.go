@@ -312,3 +312,68 @@ func TestGrantStoreContract(t *testing.T) {
 		return db.Grants()
 	})
 }
+
+// TestStoreMigratesProvenance verifies an upgrade heals a database created before run provenance
+// existed. The columns are added on open, and a run written afterward round trips its source,
+// actor, lineage, and labels rather than failing on a missing column.
+func TestStoreMigratesProvenance(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "switchtender.db")
+
+	db, err := sqlitestore.Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	// Strip the provenance columns to mimic a database from before they existed.
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open raw db: %v", err)
+	}
+	for _, column := range []string{"source", "source_id", "actor", "rerun_of", "labels"} {
+		if _, err := raw.Exec("ALTER TABLE runs DROP COLUMN " + column); err != nil {
+			t.Fatalf("simulate old schema, drop %s: %v", column, err)
+		}
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatalf("close raw db: %v", err)
+	}
+
+	migrated, err := sqlitestore.Open(path)
+	if err != nil {
+		t.Fatalf("reopen after downgrade error = %v", err)
+	}
+	t.Cleanup(func() { _ = migrated.Close() })
+	store := migrated.Runs()
+
+	saved := &run.Run{
+		ID: "run_1", Playbook: "site.yml", Status: run.StatusSucceeded, CreatedAt: time.Now(),
+		Source: "schedule", SourceID: "sch_1", Actor: "deploy-bot", RerunOf: "run_0",
+		Labels: map[string]string{"env": "prod"},
+	}
+	if err := store.Save(ctx, saved); err != nil {
+		t.Fatalf("Save() after migration error = %v", err)
+	}
+	got, err := store.Get(ctx, "run_1")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.Source != "schedule" || got.SourceID != "sch_1" || got.Actor != "deploy-bot" ||
+		got.RerunOf != "run_0" || got.Labels["env"] != "prod" {
+		t.Errorf("provenance after migration = %+v, want the saved values", got)
+	}
+
+	// The filters that read those columns must work against the healed schema.
+	hits, err := store.ListPage(ctx, run.ListFilter{Source: "schedule"}, 0, 0)
+	if err != nil || len(hits) != 1 {
+		t.Errorf("ListPage(source) = %d runs, err %v, want 1 run", len(hits), err)
+	}
+	labelled, err := store.ListPage(ctx, run.ListFilter{LabelKey: "env", LabelValue: "prod"}, 0, 0)
+	if err != nil || len(labelled) != 1 {
+		t.Errorf("ListPage(label) = %d runs, err %v, want 1 run", len(labelled), err)
+	}
+}
