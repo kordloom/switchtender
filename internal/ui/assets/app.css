@@ -712,8 +712,7 @@ body[data-page="login"] .topbar { background: transparent; backdrop-filter: none
 .theme-group { margin-top: 10px; }
 .side .theme-group { margin-top: auto; padding-top: 12px; }
 .theme-row { display: flex; align-items: center; gap: 3px; padding: 0 6px; }
-.theme-hint { display: inline-flex; margin-right: 3px; color: var(--muted); opacity: 0.55; }
-.theme-hint svg { width: 13px; height: 13px; }
+.theme-hint { font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-right: 5px; }
 .theme-btn { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0; background: none; border: none; border-radius: 7px; color: var(--muted); cursor: pointer; transition: color 0.12s ease, background 0.12s ease; }
 .theme-btn:hover { background: var(--surface-2); color: var(--text); }
 .theme-btn.active { background: var(--accent-soft); color: var(--accent); }

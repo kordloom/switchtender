@@ -1732,9 +1732,6 @@ function svgIcon(inner) {
 		'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + inner + '</svg>';
 }
 
-// GEAR_ICON is the settings glyph shown as the appearance row's hint.
-const GEAR_ICON = '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.03-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.56-1.03 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34h.01A1.7 1.7 0 0 0 10 4.09V4a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87v.01a1.7 1.7 0 0 0 1.56 1.03H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.56 1.03z"/>';
-
 // THEMES lists the selectable appearances: the signature look, then the flat family themes.
 const THEMES = [
 	{ key: "signature", label: "Stitch", desc: "The signature glow", tip: "Use Stitch, the signature look", icon: '<path d="M3 16c3.5-4 9-4 12.5-1" stroke-dasharray="3.2 2.6"/><line x1="14" y1="16.5" x2="21" y2="9.5"/>' },
@@ -1779,7 +1776,7 @@ function themeGroup() {
 	row.className = "theme-row";
 	const hint = document.createElement("span");
 	hint.className = "theme-hint";
-	hint.innerHTML = svgIcon(GEAR_ICON);
+	hint.textContent = "Theme";
 	row.appendChild(hint);
 	for (const t of THEMES) {
 		const btn = document.createElement("button");
