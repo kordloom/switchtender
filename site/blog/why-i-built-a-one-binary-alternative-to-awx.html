@@ -57,7 +57,7 @@
 		<section class="wrap reveal" style="max-width:760px">
 			<p>AWX is how most teams run Ansible at scale. To stand it up, you first stand up Kubernetes, Postgres, Redis, and Receptor. Then you keep all of that running. And AWX itself has not shipped a release since July 2024. When a run fails across 600 hosts, you scroll a text log to find the one that broke.</p>
 
-			<p>I wanted something I could run from a single binary, that showed me every host at a glance, and that did not need a cluster to exist first. So I built SwitchTender. Trying it is one command: <code>go install github.com/kordloom/switchtender@latest</code>, and if you have Ansible on the PATH, <code>switchtender demo</code> seeds a read-only instance with real runs to poke at.</p>
+			<p>I wanted something I could run from a single binary, that showed me every host at a glance, and that did not need a cluster to exist first. So I built SwitchTender. You can poke at a <a href="https://demo.switchtender.com">live read-only instance</a> right now, nothing to install. Or run it yourself in one command: <code>go install github.com/kordloom/switchtender@latest</code>, then <code>switchtender demo</code> seeds the same tour locally.</p>
 
 			<h2>What it is</h2>
 			<p>One Go binary. It runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go. It stores everything in a single SQLite file by default, and speaks Postgres when you want more than one instance. No Kubernetes operator, no Redis, no message bus. One process, one file to back up.</p>
@@ -83,7 +83,7 @@ switchtender import awx awx-export.json --apply   # create the objects</code></p
 			<p>AWX has years of production use, a large installed base, and a real ecosystem. SwitchTender is young, and support for now is me. If you need a vendor with an SLA today, it is not that yet. What it offers instead is everything above, from one binary, without standing up a cluster first.</p>
 
 			<h2>Try it</h2>
-			<p>Install: <code>go install github.com/kordloom/switchtender@latest</code>, or grab a signed binary from the <a href="https://github.com/kordloom/switchtender/releases">releases page</a>. A star helps if it is useful. It is source-available under BSL 1.1 and free to self-host. I would like your feedback and your hardest questions: what would you need before you would run this on your fleet?</p>
+			<p>Live demo: <a href="https://demo.switchtender.com">demo.switchtender.com</a>. Install: <code>go install github.com/kordloom/switchtender@latest</code>, or grab a signed binary from the <a href="https://github.com/kordloom/switchtender/releases">releases page</a>. A star helps if it is useful. It is source-available under BSL 1.1 and free to self-host. I would like your feedback and your hardest questions: what would you need before you would run this on your fleet?</p>
 		</section>
 	</main>
 
