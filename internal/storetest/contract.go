@@ -1103,8 +1103,8 @@ func testWorkers(t *testing.T, store run.Store) {
 	if len(workers) != 2 {
 		t.Fatalf("workers = %d, want 2", len(workers))
 	}
-	if workers[0].Owner != "goat-1" || workers[0].Active != 1 || !workers[0].LastSeen.Equal(newer) {
-		t.Errorf("first worker = %+v, want goat-1 active 1 seen %v", workers[0], newer)
+	if workers[0].Owner != "goat-1" || workers[0].Active != 1 || workers[0].Completed != 1 || !workers[0].LastSeen.Equal(newer) {
+		t.Errorf("first worker = %+v, want goat-1 active 1 completed 1 seen %v", workers[0], newer)
 	}
 	if workers[1].Owner != "serve-1" || workers[1].Active != 1 {
 		t.Errorf("second worker = %+v, want serve-1 active 1", workers[1])

@@ -1213,6 +1213,8 @@ func (s *store) Workers(ctx context.Context) ([]run.WorkerInfo, error) {
 	const q = `
 SELECT claimed_by,
 	SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) AS active,
+	SUM(CASE WHEN status = 'succeeded' THEN 1 ELSE 0 END) AS completed,
+	SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed,
 	MAX(claimed_at) AS last_seen
 FROM runs
 WHERE claimed_by != '' AND claimed_at IS NOT NULL AND claimed_at >= ?
@@ -1231,7 +1233,7 @@ ORDER BY last_seen DESC, claimed_by`
 			w    run.WorkerInfo
 			seen string
 		)
-		if err := rows.Scan(&w.Owner, &w.Active, &seen); err != nil {
+		if err := rows.Scan(&w.Owner, &w.Active, &w.Completed, &w.Failed, &seen); err != nil {
 			return nil, fmt.Errorf("list workers: %w", err)
 		}
 		if w.LastSeen, err = sqlutil.ParseTime(seen); err != nil {

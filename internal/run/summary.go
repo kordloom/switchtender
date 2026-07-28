@@ -89,6 +89,10 @@ type WorkerInfo struct {
 	Owner string `json:"owner"`
 	// Active is how many runs the executor holds right now.
 	Active int `json:"active"`
+	// Completed is how many of its runs in the window finished succeeded.
+	Completed int `json:"completed"`
+	// Failed is how many of its runs in the window finished failed.
+	Failed int `json:"failed"`
 	// LastSeen is the freshest lease renewal from this executor.
 	LastSeen time.Time `json:"last_seen"`
 }

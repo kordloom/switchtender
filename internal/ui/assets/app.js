@@ -3135,13 +3135,26 @@ async function loadWorkers() {
 			const tr = document.createElement("tr");
 			tr.appendChild(td(w.owner, "mono"));
 			const health = document.createElement("td");
+			// An executor with no active leases has nothing to renew, so silence means idle, not
+			// broken. Stale is reserved for a held lease whose renewals have stopped.
 			const fresh = Date.now() - new Date(w.last_seen).getTime() < 30000;
 			const chip = document.createElement("span");
-			chip.className = fresh ? "chip ok" : "chip none";
-			chip.textContent = fresh ? "alive" : "stale";
+			if (w.active > 0 && fresh) {
+				chip.className = "chip ok";
+				chip.textContent = "active";
+			} else if (w.active > 0) {
+				chip.className = "chip failed";
+				chip.textContent = "stale";
+				chip.title = "Holds runs but has stopped renewing its lease.";
+			} else {
+				chip.className = "chip none";
+				chip.textContent = "idle";
+			}
 			health.appendChild(chip);
 			tr.appendChild(health);
 			tr.appendChild(td(String(w.active)));
+			tr.appendChild(td(String(w.completed || 0)));
+			tr.appendChild(td(String(w.failed || 0)));
 			tr.appendChild(tdTime(w.last_seen));
 			tbody.appendChild(tr);
 		}

@@ -502,8 +502,13 @@ func (m *memStore) Workers(_ context.Context) ([]WorkerInfo, error) {
 			w = &WorkerInfo{Owner: r.ClaimedBy}
 			byOwner[r.ClaimedBy] = w
 		}
-		if r.Status == StatusRunning {
+		switch r.Status {
+		case StatusRunning:
 			w.Active++
+		case StatusSucceeded:
+			w.Completed++
+		case StatusFailed:
+			w.Failed++
 		}
 		if r.ClaimedAt.After(w.LastSeen) {
 			w.LastSeen = *r.ClaimedAt
