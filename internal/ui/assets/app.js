@@ -185,7 +185,7 @@ function tableRowsData(table) {
 	});
 	const rows = [];
 	for (const tr of table.tBodies[0].rows) {
-		if (tr.hidden || tr.classList.contains("skeleton-row")) continue;
+		if (tr.dataset.fhide === "1" || tr.classList.contains("skeleton-row")) continue;
 		const row = [];
 		Array.from(tr.cells).forEach((cell, i) => {
 			if (skip.has(i)) return;
@@ -232,18 +232,83 @@ function mountTableExport() {
 		btn.addEventListener("click", fn);
 		host.appendChild(btn);
 	};
-	make("CSV", "Export the shown rows as CSV", () => {
+	make("CSV", "Export the filtered rows as CSV", () => {
 		const { headers, rows } = tableRowsData(table);
 		const esc = (v) => /[",\n]/.test(v) ? '"' + v.replaceAll('"', '""') + '"' : v;
 		const csv = [headers, ...rows].map((r) => r.map(esc).join(",")).join("\n") + "\n";
 		downloadBlob("switchtender-" + page + "-" + stamp() + ".csv", "text/csv", csv);
 	});
-	make("JSON", "Export the shown rows as JSON", () => {
+	make("JSON", "Export the filtered rows as JSON", () => {
 		const { headers, rows } = tableRowsData(table);
 		const objs = rows.map((r) => Object.fromEntries(headers.map((h, i) => [h, r[i] ?? ""])));
 		downloadBlob("switchtender-" + page + "-" + stamp() + ".json", "application/json",
 			JSON.stringify(objs, null, 2) + "\n");
 	});
+}
+
+// applyRowVisibility shows a row only when neither the filter nor the pager hides it.
+function applyRowVisibility(row) {
+	row.hidden = row.dataset.fhide === "1" || row.dataset.phide === "1";
+}
+
+// mountTablePager caps how many rows a list shows at once, with a footer for paging: a count, a
+// rows-per-page choice, and Show all. Long fleets and logs stay wieldy, and the filter composes,
+// since it marks rows and the pager only pages the ones that match. The runs page pages on the
+// server and is left alone.
+function mountTablePager() {
+	const page = document.body.dataset.page;
+	if (page === "runs" || !EXPORT_PAGES.includes(page)) return;
+	const table = document.querySelector("main.content table");
+	if (!table || !table.tBodies[0]) return;
+	const tbody = table.tBodies[0];
+	const foot = document.createElement("div");
+	foot.className = "table-foot";
+	foot.hidden = true;
+	table.parentNode.insertBefore(foot, table.nextSibling);
+	const count = document.createElement("span");
+	const spacer = document.createElement("span");
+	spacer.className = "spacer";
+	const label = document.createElement("label");
+	label.className = "pagesize-label";
+	label.textContent = "Rows";
+	const sel = document.createElement("select");
+	sel.className = "input toolbar-select";
+	for (const n of [25, 50, 100, 0]) {
+		const opt = document.createElement("option");
+		opt.value = String(n);
+		opt.textContent = n === 0 ? "All" : String(n);
+		sel.appendChild(opt);
+	}
+	label.appendChild(sel);
+	const all = document.createElement("button");
+	all.type = "button";
+	all.className = "button";
+	all.textContent = "Show all";
+	foot.appendChild(count);
+	foot.appendChild(spacer);
+	foot.appendChild(label);
+	foot.appendChild(all);
+	let size = 25;
+	const apply = () => {
+		let shown = 0;
+		let matched = 0;
+		for (const row of tbody.rows) {
+			if (row.classList.contains("skeleton-row")) continue;
+			if (row.dataset.fhide === "1") { row.dataset.phide = ""; applyRowVisibility(row); continue; }
+			matched++;
+			row.dataset.phide = size && matched > size ? "1" : "";
+			applyRowVisibility(row);
+			if (!row.hidden) shown++;
+		}
+		foot.hidden = matched <= 25 && size >= 25;
+		count.textContent = "Showing " + shown + " of " + matched;
+		all.hidden = shown >= matched;
+	};
+	sel.addEventListener("change", () => { size = parseInt(sel.value, 10) || 0; apply(); });
+	all.addEventListener("click", () => { size = 0; sel.value = "0"; apply(); });
+	table.addEventListener("rowsfiltered", apply);
+	new MutationObserver(apply).observe(tbody, { childList: true });
+	apply();
 }
 
 // PAGE_DOCS maps each page to its most relevant guide, linked from the page header.
@@ -319,10 +384,13 @@ function mountListFilter() {
 		let shown = 0;
 		for (const row of tbody.rows) {
 			const match = q === "" || row.textContent.toLowerCase().includes(q);
-			row.hidden = !match;
+			if (match) row.dataset.fhide = "";
+			else row.dataset.fhide = "1";
+			applyRowVisibility(row);
 			if (match) shown++;
 		}
 		count.textContent = q ? shown + " shown" : "";
+		table.dispatchEvent(new CustomEvent("rowsfiltered"));
 	});
 }
 
@@ -1730,6 +1798,7 @@ document.addEventListener("DOMContentLoaded", () => {
 	wireHinttips();
 	mountPageDocs();
 	mountTableExport();
+	mountTablePager();
 	if (isReadOnly()) applyReadOnly();
 	setInterval(refreshRelTimes, 20000);
 	mountTour();
@@ -3776,7 +3845,7 @@ function wireAsk() {
 			block.appendChild(title);
 			const teaser = document.createElement("p");
 			teaser.className = "ask-teaser muted";
-			teaser.textContent = "Advisory AI answers from your fleet's run, health, and drift data when you self-host with your own provider, local Ollama included. ";
+			teaser.textContent = "Ask questions about your fleet and get advisory answers grounded in run, health, and drift data. Available when you self-host with an AI provider, including local Ollama. ";
 			const link = document.createElement("a");
 			link.href = "/ui/docs/ai";
 			link.textContent = "How Advisory AI works";
