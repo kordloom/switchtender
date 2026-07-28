@@ -42,19 +42,6 @@
 			</section>
 
 			<div class="ov-side">
-				<section class="panel ask-panel" id="ask-panel">
-					<div class="panel-head">
-						<h2>Ask about your fleet</h2>
-					</div>
-					<p class="muted ask-note">Advisory. Answers come from run, health, and drift data only.</p>
-					<div class="ask-row">
-						<input id="ask-input" class="input" placeholder="Why might web01 be flaky?" aria-label="Ask a question about the fleet">
-						<button id="ask-go" class="button" type="button">Ask</button>
-					</div>
-					<div id="ask-status" class="muted" hidden></div>
-					<p id="ask-answer" class="ask-answer" hidden></p>
-				</section>
-
 				<section class="panel">
 					<div class="panel-head">
 						<h2>Fleet snapshot</h2>
@@ -67,6 +54,16 @@
 						<span class="ov-h ov-h-go"></span>
 					</div>
 					<div id="ov-fleet" class="ov-list"></div>
+					<div class="ask-block ask-panel" id="ask-panel">
+						<h3 class="ask-title">Ask about your fleet</h3>
+						<div class="ask-row">
+							<input id="ask-input" class="input" placeholder="Why might web01 be flaky?" aria-label="Ask a question about the fleet">
+							<button id="ask-go" class="button" type="button">Ask</button>
+						</div>
+						<p class="muted ask-note">Advisory. Answers come from run, health, and drift data only.</p>
+						<div id="ask-status" class="muted" hidden></div>
+						<p id="ask-answer" class="ask-answer" hidden></p>
+					</div>
 				</section>
 			</div>
 		</div>

@@ -2128,14 +2128,14 @@ function wireHinttips() {
 		tip.style.left = x + "px";
 		tip.style.top = y + "px";
 	};
-	// linkDest turns a link's destination into a short readable label.
+	// linkDest labels external destinations only. Same-origin links stay quiet: the status bar
+	// already names them, and a tip box over the neighboring row reads as broken UI.
 	const linkDest = (a) => {
 		const href = a.getAttribute("href");
 		if (!href || href === "#" || href.startsWith("javascript")) return "";
 		try {
 			const u = new URL(href, location.href);
-			const path = u.pathname + (u.search || "") + (u.hash || "");
-			return u.origin === location.origin ? "Go to " + path : "Opens " + u.hostname + u.pathname;
+			return u.origin === location.origin ? "" : "Opens " + u.hostname;
 		} catch { return ""; }
 	};
 	const show = (e) => {
