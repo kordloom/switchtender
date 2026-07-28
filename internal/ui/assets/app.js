@@ -4450,7 +4450,7 @@ async function loadFleet() {
 			stability.appendChild(chip);
 			tr.appendChild(stability);
 			const sparkCell = document.createElement("td");
-			sparkCell.appendChild(sparkline(h.recent || []));
+			sparkCell.appendChild(sparkline(h.recent || [], h.recent_runs || []));
 			tr.appendChild(sparkCell);
 			tr.appendChild(td(String(h.total)));
 			const last = document.createElement("td");
@@ -5043,14 +5043,21 @@ async function loadPolicies() {
 	}
 }
 
-// sparkline builds a row of outcome ticks, oldest on the left, newest on the right.
-function sparkline(recent) {
+// sparkline builds a row of outcome ticks, oldest on the left, newest on the right. When run ids
+// ride along, each tick links to its run, so no outcome is a dead end.
+function sparkline(recent, runIDs) {
 	const wrap = document.createElement("span");
 	wrap.className = "spark";
 	for (let i = recent.length - 1; i >= 0; i--) {
-		const tick = document.createElement("span");
+		const id = runIDs && runIDs[i];
+		const tick = document.createElement(id ? "a" : "span");
 		tick.className = "tick " + (recent[i] || "none");
-		tick.title = recent[i];
+		if (id) {
+			tick.href = "/ui/runs/" + id;
+			tick.dataset.tip = (recent[i] || "run") + ": open this run";
+		} else {
+			tick.title = recent[i];
+		}
 		wrap.appendChild(tick);
 	}
 	return wrap;

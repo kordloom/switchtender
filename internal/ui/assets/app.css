@@ -397,7 +397,9 @@ table.runs td.mono { max-width: 380px; overflow: hidden; text-overflow: ellipsis
 .chip.none { background: var(--surface-3); color: var(--muted); }
 .chip.flaky { background: var(--changed); }
 .spark { display: inline-flex; gap: 2px; align-items: center; }
-.tick { width: 6px; height: 16px; border-radius: 3px; background: var(--surface-3); }
+.tick { display: inline-block; width: 7px; height: 17px; border-radius: 3px; background: var(--surface-3); }
+a.tick { cursor: pointer; transition: transform 0.1s ease, box-shadow 0.1s ease; }
+a.tick:hover { transform: scaleY(1.18); box-shadow: 0 0 0 2px var(--surface), 0 0 0 3px var(--accent); }
 .tick.ok { background: var(--ok); }
 .tick.changed { background: var(--changed); }
 .tick.failed { background: var(--failed); }

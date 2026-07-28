@@ -950,11 +950,11 @@ func (s *store) FleetHealth(ctx context.Context, window int) ([]run.HostHealth, 
 	}
 	const q = `
 WITH ranked AS (
-	SELECT host, worst, ran_at,
+	SELECT host, worst, run_id, ran_at,
 		ROW_NUMBER() OVER (PARTITION BY host ORDER BY ran_at DESC) AS rn
 	FROM run_host_summary
 ), recent AS (
-	SELECT host, worst, ran_at, rn,
+	SELECT host, worst, run_id, ran_at, rn,
 		CASE WHEN worst IN ('failed', 'unreachable') THEN 1 ELSE 0 END AS bad,
 		LAG(CASE WHEN worst IN ('failed', 'unreachable') THEN 1 ELSE 0 END)
 			OVER (PARTITION BY host ORDER BY ran_at DESC) AS prev_bad
@@ -967,7 +967,8 @@ SELECT host,
 	MAX(CASE WHEN rn = 1 THEN worst END) AS last_outcome,
 	MAX(ran_at) AS last_run,
 	SUM(CASE WHEN prev_bad IS NOT NULL AND bad != prev_bad THEN 1 ELSE 0 END) AS flips,
-	GROUP_CONCAT(worst, ',' ORDER BY rn) AS recent
+	GROUP_CONCAT(worst, ',' ORDER BY rn) AS recent,
+	GROUP_CONCAT(run_id, ',' ORDER BY rn) AS recent_runs
 FROM recent
 GROUP BY host
 ORDER BY failures DESC, host`
@@ -982,12 +983,13 @@ ORDER BY failures DESC, host`
 	for rows.Next() {
 		var (
 			h       run.HostHealth
-			lastOut string
-			lastRun string
-			recent  string
+			lastOut    string
+			lastRun    string
+			recent     string
+			recentRuns string
 		)
 		if err := rows.Scan(&h.Host, &h.Failures, &h.Total, &lastOut, &lastRun, &h.Flips,
-			&recent); err != nil {
+			&recent, &recentRuns); err != nil {
 			return nil, fmt.Errorf("fleet health: %w", err)
 		}
 		h.LastOutcome = lastOut
@@ -997,6 +999,7 @@ ORDER BY failures DESC, host`
 		h.Flaky = h.Flips >= 2
 		if recent != "" {
 			h.Recent = strings.Split(recent, ",")
+			h.RecentRuns = strings.Split(recentRuns, ",")
 		}
 		out = append(out, h)
 	}
