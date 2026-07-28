@@ -1478,6 +1478,9 @@ func TestRerunRun(t *testing.T) {
 				if sub.gotRun == nil || sub.gotRun.Limit != test.Saved.Limit || sub.gotRun.DryRun != test.Saved.DryRun {
 					t.Errorf("submitted spec = %+v, want limit %q dry %v", sub.gotRun, test.Saved.Limit, test.Saved.DryRun)
 				}
+				if sub.gotRun != nil && (sub.gotRun.Source != "rerun" || sub.gotRun.RerunOf != "run_1") {
+					t.Errorf("provenance = %q %q, want rerun run_1", sub.gotRun.Source, sub.gotRun.RerunOf)
+				}
 			}
 		})
 	}
@@ -1531,6 +1534,9 @@ func TestLaunchOverrides(t *testing.T) {
 	}
 	if sub.gotRun.ExtraVars["env"] != "stage" {
 		t.Errorf("extra_vars env = %v, want stage (launch overrides template)", sub.gotRun.ExtraVars["env"])
+	}
+	if sub.gotRun.Source != "template" || sub.gotRun.SourceID != tpl.ID {
+		t.Errorf("provenance = %q %q, want template %s", sub.gotRun.Source, sub.gotRun.SourceID, tpl.ID)
 	}
 }
 

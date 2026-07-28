@@ -118,3 +118,44 @@ func TestTemplateToolError(t *testing.T) {
 		})
 	}
 }
+
+// TestNotificationURLMasking verifies notification URLs are redacted on read and that echoing a
+// mask back preserves the stored address instead of overwriting it.
+func TestNotificationURLMasking(t *testing.T) {
+	t.Parallel()
+	const secret = "https://hooks.slack.com/services/T000/B111/XXXXsecretXXXX"
+	store := template.NewMemStore()
+	if err := store.Save(context.Background(), &template.Template{
+		ID: "tpl_1", Name: "deploy", Playbook: "site.yml",
+		Notifications: []run.NotifyTarget{{Kind: "slack", URL: secret}},
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(),
+		WithTemplates(store)).Handler()
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/templates", nil))
+	if strings.Contains(rec.Body.String(), "XXXXsecretXXXX") {
+		t.Fatalf("list leaked the webhook secret: %s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "hooks.slack.com") {
+		t.Errorf("list dropped the channel host entirely: %s", rec.Body.String())
+	}
+
+	// Saving the masked value back must not clobber the stored URL.
+	masked := maskNotifyURL(secret)
+	body := `{"name":"deploy","playbook":"site.yml","notifications":[{"kind":"slack","url":"` + masked + `"}]}`
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPut, "/v1/templates/tpl_1", strings.NewReader(body)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("update = %d, body %s", rec.Code, rec.Body.String())
+	}
+	after, err := store.Get(context.Background(), "tpl_1")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if len(after.Notifications) != 1 || after.Notifications[0].URL != secret {
+		t.Errorf("stored notifications = %+v, want the original secret preserved", after.Notifications)
+	}
+}

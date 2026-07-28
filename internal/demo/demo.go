@@ -74,8 +74,15 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 
 	// Plain runs where db01 flaps between failing and passing, so fleet memory marks it flaky.
 	failByRun := []string{"", "db01", "", "db01", ""}
-	for _, failHost := range failByRun {
-		r, err := d.Submitter.Submit(ctx, playbook, inv, failVars(failHost)...)
+	for i, failHost := range failByRun {
+		// Alternate origins so the runs list shows the full provenance vocabulary.
+		source, sourceID, actor := "schedule", "sch_nightly", "nightly-cron"
+		if i%2 == 1 {
+			source, sourceID, actor = "template", "tpl_deploy_web", "avery"
+		}
+		opts := seedOpts(source, sourceID, actor,
+			map[string]string{"env": "prod", "team": "platform"}, failVars(failHost)...)
+		r, err := d.Submitter.Submit(ctx, playbook, inv, opts...)
 		if err != nil {
 			return fmt.Errorf("seed run: %w", err)
 		}
@@ -83,7 +90,9 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 	}
 
 	// A split where one shard fails, showing the merged matrix and failed-shard isolation.
-	split, err := d.Submitter.SubmitSplit(ctx, playbook, inv, 3, failVars("db01")...)
+	split, err := d.Submitter.SubmitSplit(ctx, playbook, inv, 3,
+		seedOpts("template", "tpl_deploy_web", "avery",
+			map[string]string{"env": "prod", "ticket": "OPS-482"}, failVars("db01")...)...)
 	if err != nil {
 		return fmt.Errorf("seed split: %w", err)
 	}
@@ -95,14 +104,17 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 		{Name: "migrate", Playbook: playbook},
 		{Name: "verify", Playbook: playbook},
 	}
-	pipe, err := d.Submitter.SubmitPipeline(ctx, "Release 4.2", inv, steps)
+	pipe, err := d.Submitter.SubmitPipeline(ctx, "Release 4.2", inv, steps,
+		seedOpts("api", "", "release-bot", map[string]string{"env": "prod", "ticket": "REL-42"})...)
 	if err != nil {
 		return fmt.Errorf("seed pipeline: %w", err)
 	}
 	waitTerminal(ctx, d.Runs, pipe.ID)
 
 	// One more failure on a different host for variety.
-	last, err := d.Submitter.Submit(ctx, playbook, inv, failVars("edge01")...)
+	last, err := d.Submitter.Submit(ctx, playbook, inv,
+		seedOpts("rerun", "", "avery",
+			map[string]string{"env": "staging"}, failVars("edge01")...)...)
 	if err != nil {
 		return fmt.Errorf("seed run: %w", err)
 	}
@@ -110,7 +122,9 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 
 	// A dry run of a check playbook surfaces configuration drift per host on the Drift page.
 	driftPlay := filepath.Join(dir, "drift.yml")
-	if driftRun, err := d.Submitter.Submit(ctx, driftPlay, inv, run.WithDryRun(true)); err == nil {
+	driftOpts := seedOpts("schedule", "sch_drift_check", "nightly-cron",
+		map[string]string{"env": "prod"}, run.WithDryRun(true))
+	if driftRun, err := d.Submitter.Submit(ctx, driftPlay, inv, driftOpts...); err == nil {
 		waitTerminal(ctx, d.Runs, driftRun.ID)
 	} else {
 		log.Warn("demo: seed drift check: " + err.Error())
@@ -132,7 +146,8 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 // finishes cleanly on whatever host serves the demo.
 func seedMultiTool(ctx context.Context, d Deps, tfDir, playbook, inv string, log *zap.Logger) error {
 	bash, err := d.Submitter.Submit(ctx, "", "",
-		run.WithTool(run.ToolBash), run.WithCommand(scriptLogRotate))
+		seedOpts("schedule", "sch_log_rotate", "nightly-cron", map[string]string{"env": "prod"},
+			run.WithTool(run.ToolBash), run.WithCommand(scriptLogRotate))...)
 	if err != nil {
 		return fmt.Errorf("seed bash run: %w", err)
 	}
@@ -140,7 +155,8 @@ func seedMultiTool(ctx context.Context, d Deps, tfDir, playbook, inv string, log
 
 	if have("python3") {
 		py, err := d.Submitter.Submit(ctx, "", "",
-			run.WithTool(run.ToolPython), run.WithCommand(scriptReconcile))
+			seedOpts("template", "tpl_reconcile", "avery", map[string]string{"env": "prod"},
+				run.WithTool(run.ToolPython), run.WithCommand(scriptReconcile))...)
 		if err != nil {
 			return fmt.Errorf("seed python run: %w", err)
 		}
@@ -151,7 +167,8 @@ func seedMultiTool(ctx context.Context, d Deps, tfDir, playbook, inv string, log
 
 	if have("terraform") {
 		tf, err := d.Submitter.Submit(ctx, "", "",
-			run.WithTool(run.ToolTerraform), run.WithCommand(tfDir), run.WithDryRun(true))
+			seedOpts("api", "", "terraform-ci", map[string]string{"env": "staging"},
+				run.WithTool(run.ToolTerraform), run.WithCommand(tfDir), run.WithDryRun(true))...)
 		if err != nil {
 			return fmt.Errorf("seed terraform run: %w", err)
 		}
@@ -162,7 +179,8 @@ func seedMultiTool(ctx context.Context, d Deps, tfDir, playbook, inv string, log
 
 	if have("go") {
 		gorun, err := d.Submitter.Submit(ctx, "", "",
-			run.WithTool(run.ToolGo), run.WithCommand(scriptFleetGo))
+			seedOpts("template", "tpl_capacity", "avery", map[string]string{"env": "prod"},
+				run.WithTool(run.ToolGo), run.WithCommand(scriptFleetGo))...)
 		if err != nil {
 			return fmt.Errorf("seed go run: %w", err)
 		}
@@ -176,7 +194,9 @@ func seedMultiTool(ctx context.Context, d Deps, tfDir, playbook, inv string, log
 		{Name: "configure", Tool: run.ToolAnsible, Playbook: playbook},
 		{Name: "smoke-test", Tool: run.ToolBash, Command: scriptSmoke},
 	}
-	pipe, err := d.Submitter.SubmitPipeline(ctx, "Provision and deploy", inv, steps)
+	pipe, err := d.Submitter.SubmitPipeline(ctx, "Provision and deploy", inv, steps,
+		seedOpts("template", "tpl_provision", "avery",
+			map[string]string{"env": "prod", "ticket": "OPS-503"})...)
 	if err != nil {
 		return fmt.Errorf("seed mixed pipeline: %w", err)
 	}
@@ -212,6 +232,17 @@ func failVars(host string) []run.SubmitOption {
 		return nil
 	}
 	return []run.SubmitOption{run.WithExtraVars(map[string]any{"fail_host": host})}
+}
+
+// seedOpts adds the provenance and labels a real deployment records, so the demo shows the origin
+// column, the actor, and label filtering with believable data rather than blanks.
+func seedOpts(source, sourceID, actor string, labels map[string]string, extra ...run.SubmitOption) []run.SubmitOption {
+	opts := []run.SubmitOption{
+		run.WithSource(source, sourceID),
+		run.WithActor(actor),
+		run.WithLabels(labels),
+	}
+	return append(opts, extra...)
 }
 
 // waitTerminal polls until the run reaches a terminal state or a timeout elapses.

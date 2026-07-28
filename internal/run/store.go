@@ -147,6 +147,17 @@ type ListFilter struct {
 	After time.Time
 	// Before keeps only runs created strictly before this time when set.
 	Before time.Time
+	// Source keeps only runs fired by this source when set: api, template, schedule, rerun,
+	// reconcile, or propose.
+	Source string
+	// Actor keeps only runs fired by this authenticated user when set.
+	Actor string
+	// Host keeps only runs that touched this host, resolved through the stored host summaries.
+	Host string
+	// LabelKey with LabelValue keeps only runs carrying that label pair.
+	LabelKey string
+	// LabelValue is the value LabelKey must hold.
+	LabelValue string
 }
 
 // memStore is an in-memory Store backed by maps guarded by a read-write mutex.
@@ -279,6 +290,18 @@ func (m *memStore) ListPage(ctx context.Context, filter ListFilter, limit, offse
 		if !filter.Before.IsZero() && !r.CreatedAt.Before(filter.Before) {
 			continue
 		}
+		if filter.Source != "" && r.Source != filter.Source {
+			continue
+		}
+		if filter.Actor != "" && r.Actor != filter.Actor {
+			continue
+		}
+		if filter.LabelKey != "" && r.Labels[filter.LabelKey] != filter.LabelValue {
+			continue
+		}
+		if filter.Host != "" && !m.runTouchedHost(r.ID, filter.Host) {
+			continue
+		}
 		matched = append(matched, r)
 	}
 	all = matched
@@ -293,6 +316,17 @@ func (m *memStore) ListPage(ctx context.Context, filter ListFilter, limit, offse
 		all = all[:limit]
 	}
 	return all, nil
+}
+
+// runTouchedHost reports whether the run's stored host summaries include the host. The caller
+// holds the read lock through ListPage's List call path.
+func (m *memStore) runTouchedHost(runID, host string) bool {
+	for _, hs := range m.summaries[runID] {
+		if hs.Host == host {
+			return true
+		}
+	}
+	return false
 }
 
 // matchesQuery reports whether the run matches a lowercased search term across the fields the runs

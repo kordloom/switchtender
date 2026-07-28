@@ -41,7 +41,7 @@
 		<div id="status" class="muted">Loading runs.</div>
 		<div class="runs-toolbar">
 			<div class="list-filter">
-				<input id="runs-search" class="input list-filter-input" type="search" placeholder="Search all runs…" aria-label="Search runs">
+				<input id="runs-search" class="input list-filter-input" type="search" placeholder="Search, or status:failed host:web01 label:env=prod" aria-label="Search runs">
 			</div>
 			<select id="runs-status" class="input toolbar-select" aria-label="Filter by status">
 				<option value="">All statuses</option>
@@ -82,6 +82,7 @@
 					<th>Status</th>
 					<th>Run</th>
 					<th>Type</th>
+					<th>Origin</th>
 					<th>Playbook</th>
 					<th>Started</th>
 					<th>Duration</th>

@@ -797,6 +797,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			server.WithSchedules(schedules), server.WithTokens(bundle.Tokens()),
 			server.WithCredentials(bundle.Credentials(), sealer),
 			server.WithProjects(bundle.Projects()),
+			server.WithProjectFiles(syncer),
 			server.WithTemplates(bundle.Templates()),
 			server.WithUsers(bundle.Users()),
 			server.WithInventories(bundle.Inventories()),

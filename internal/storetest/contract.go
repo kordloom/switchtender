@@ -21,6 +21,7 @@ import (
 func Contract(t *testing.T, newStore func() run.Store) {
 	t.Helper()
 	t.Run("save and get", func(t *testing.T) { testSaveGet(t, newStore()) })
+	t.Run("provenance round trip", func(t *testing.T) { testProvenance(t, newStore()) })
 	t.Run("get missing", func(t *testing.T) { testGetNotFound(t, newStore()) })
 	t.Run("idempotency key dedup", func(t *testing.T) { testByIdempotencyKey(t, newStore()) })
 	t.Run("save updates existing", func(t *testing.T) { testSaveUpdate(t, newStore()) })
@@ -374,6 +375,36 @@ func testListPage(t *testing.T, store run.Store) {
 	want := map[run.Status]int{run.StatusSucceeded: 2, run.StatusFailed: 1, run.StatusRunning: 1}
 	if diff := cmp.Diff(want, counts, cmpopts.EquateEmpty()); diff != "" {
 		t.Errorf("RunStatusCounts() mismatch (-want +got):\n%s", diff)
+	}
+
+	// Provenance and label filters compose with the rest. Summaries attach while the run is
+	// still live, since the terminal fence rejects summary writes after a run finishes.
+	live := &run.Run{
+		ID: "e", Playbook: "tag.yml", Status: run.StatusRunning, CreatedAt: base.Add(4 * time.Second),
+		Source: "schedule", SourceID: "sch_9", Actor: "night-cron",
+		Labels: map[string]string{"env": "prod"},
+	}
+	if err := store.Save(ctx, live); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	if err := store.SaveHostSummary(ctx, "e", []run.HostSummary{{Host: "web09", Worst: "ok", RanAt: base}}); err != nil {
+		t.Fatalf("SaveHostSummary() error = %v", err)
+	}
+	live.Status = run.StatusSucceeded
+	if err := store.Save(ctx, live); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	if hit, _ := store.ListPage(ctx, run.ListFilter{Source: "schedule"}, 0, 0); len(hit) != 1 || hit[0].ID != "e" {
+		t.Errorf("source filter = %v, want [e]", ids(hit))
+	}
+	if hit, _ := store.ListPage(ctx, run.ListFilter{Actor: "night-cron"}, 0, 0); len(hit) != 1 || hit[0].ID != "e" {
+		t.Errorf("actor filter = %v, want [e]", ids(hit))
+	}
+	if hit, _ := store.ListPage(ctx, run.ListFilter{LabelKey: "env", LabelValue: "prod"}, 0, 0); len(hit) != 1 || hit[0].ID != "e" {
+		t.Errorf("label filter = %v, want [e]", ids(hit))
+	}
+	if hit, _ := store.ListPage(ctx, run.ListFilter{Host: "web09"}, 0, 0); len(hit) != 1 || hit[0].ID != "e" {
+		t.Errorf("host filter = %v, want [e]", ids(hit))
 	}
 }
 
@@ -1476,5 +1507,31 @@ func testTerminalFence(t *testing.T, store run.Store) {
 	}
 	if got, err := store.Get(ctx, "fx"); err != nil || got.Status != run.StatusSucceeded {
 		t.Errorf("run status = %v (err %v), want succeeded, not resurrected", got.Status, err)
+	}
+}
+
+// testProvenance verifies the provenance and label fields round trip through Save and Get.
+func testProvenance(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	saved := &run.Run{
+		ID: "run_prov", Playbook: "site.yml", Status: run.StatusSucceeded,
+		CreatedAt: time.Date(2026, 7, 28, 12, 0, 0, 0, time.UTC),
+		Source:    "template", SourceID: "tpl_9", Actor: "douglas",
+		RerunOf: "run_prev", Labels: map[string]string{"env": "prod", "ticket": "OPS-1"},
+	}
+	if err := store.Save(ctx, saved); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	got, err := store.Get(ctx, "run_prov")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.Source != "template" || got.SourceID != "tpl_9" || got.Actor != "douglas" ||
+		got.RerunOf != "run_prev" {
+		t.Errorf("provenance = %q %q %q %q, want template tpl_9 douglas run_prev",
+			got.Source, got.SourceID, got.Actor, got.RerunOf)
+	}
+	if diff := cmp.Diff(saved.Labels, got.Labels); diff != "" {
+		t.Errorf("labels mismatch (-want +got):\n%s", diff)
 	}
 }

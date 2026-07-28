@@ -3454,6 +3454,18 @@ function openTemplateView(t) {
 	const code = document.getElementById("view-code");
 	code.hidden = !t.command;
 	if (t.command) code.textContent = t.command;
+	if (t.project_id && t.playbook && (!t.tool || t.tool === "ansible")) {
+		const open = document.createElement("button");
+		open.type = "button";
+		open.className = "button";
+		open.textContent = "View playbook";
+		open.dataset.tip = "Open " + t.playbook + " from the project checkout";
+		open.addEventListener("click", () => { overlay.hidden = true; openFileViewer(t.project_id, t.playbook); });
+		const row = document.createElement("div");
+		row.className = "drill-actions";
+		row.appendChild(open);
+		rows.parentNode.insertBefore(row, code.nextSibling);
+	}
 	overlay.hidden = false;
 }
 
@@ -3528,6 +3540,87 @@ function openSurvey(t) {
 	};
 }
 
+// openFileViewer shows one file from a project's checkout, read only, with a copy control. It is
+// the destination for playbook names throughout the interface.
+async function openFileViewer(projectID, path) {
+	let overlay = document.getElementById("file-modal");
+	if (!overlay) {
+		overlay = document.createElement("div");
+		overlay.id = "file-modal";
+		overlay.className = "modal";
+		overlay.hidden = true;
+		overlay.innerHTML = '<div class="modal-card wide"><div class="modal-head">' +
+			'<h2 id="file-title" class="mono"></h2>' +
+			'<button type="button" class="modal-close" aria-label="Close">\u00d7</button></div>' +
+			'<div id="file-note" class="muted file-note"></div>' +
+			'<pre class="log file-body" id="file-body"></pre>' +
+			'<div class="drill-actions" id="file-actions"></div></div>';
+		document.body.appendChild(overlay);
+		overlay.addEventListener("mousedown", (e) => { if (e.target === overlay) overlay.hidden = true; });
+		overlay.querySelector(".modal-close").addEventListener("click", () => { overlay.hidden = true; });
+		document.addEventListener("keydown", (e) => { if (e.key === "Escape") overlay.hidden = true; });
+	}
+	const title = document.getElementById("file-title");
+	const note = document.getElementById("file-note");
+	const body = document.getElementById("file-body");
+	const actions = document.getElementById("file-actions");
+	title.textContent = path;
+	note.textContent = "Loading.";
+	body.textContent = "";
+	actions.innerHTML = "";
+	overlay.hidden = false;
+	try {
+		const file = await getJSON("/projects/" + encodeURIComponent(projectID) +
+			"/file?path=" + encodeURIComponent(path));
+		const size = file.size >= 1024 ? Math.round(file.size / 1024) + " KB" : file.size + " bytes";
+		if (file.binary) {
+			note.textContent = size + ", binary. Nothing to show.";
+		} else {
+			note.textContent = size + (file.truncated ? ", showing the first 512 KB." : "") +
+				" Read only, from the project's cached checkout.";
+			body.textContent = file.content;
+			actions.appendChild(Object.assign(document.createElement("button"), {
+				type: "button", className: "button", textContent: "Copy",
+				onclick: async () => { try { await navigator.clipboard.writeText(file.content); } catch { /* denied */ } },
+			}));
+			const dl = document.createElement("button");
+			dl.type = "button";
+			dl.className = "button";
+			dl.textContent = "Download";
+			dl.addEventListener("click", () =>
+				downloadBlob(path.split("/").pop(), "text/plain", file.content));
+			actions.appendChild(dl);
+		}
+	} catch (err) {
+		note.textContent = "Could not open this file: " + err.message;
+	}
+}
+
+// playbookCellEl renders a run or template's playbook as a link into the file viewer when the
+// object came from a project, and as plain text otherwise, since only a project has a checkout.
+function playbookCellEl(r, text) {
+	const cell = td("");
+	const label = text !== undefined ? text : toolLabel(r);
+	const path = r.playbook || "";
+	if (r.project_id && path && (!r.tool || r.tool === "ansible")) {
+		const link = document.createElement("button");
+		link.type = "button";
+		link.className = "linkish";
+		link.textContent = label;
+		link.dataset.tip = "View " + path + " from the project checkout";
+		link.addEventListener("click", (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			openFileViewer(r.project_id, path);
+		});
+		cell.appendChild(link);
+	} else {
+		cell.textContent = label;
+		cell.title = path || r.command || "";
+	}
+	return cell;
+}
+
 // openPromptLaunch opens the launch-with-overrides dialog: survey answers when the template has
 // one, then limit, stored inventory, selectable credentials, extra vars, and mode.
 async function openPromptLaunch(t) {
@@ -3537,6 +3630,7 @@ async function openPromptLaunch(t) {
 	document.getElementById("prompt-status").textContent = "";
 	document.getElementById("prompt-limit").value = "";
 	document.getElementById("prompt-vars").value = "";
+	document.getElementById("prompt-labels").value = "";
 	document.getElementById("prompt-dry-run").checked = !!t.dry_run;
 	surveyFieldsInto(document.getElementById("prompt-survey"), t.survey);
 
@@ -3590,6 +3684,12 @@ async function openPromptLaunch(t) {
 				return;
 			}
 		}
+		const labels = {};
+		for (const line of document.getElementById("prompt-labels").value.split("\n")) {
+			const [key, ...rest] = line.split("=");
+			if (key.trim() && rest.length) labels[key.trim()] = rest.join("=").trim();
+		}
+		if (Object.keys(labels).length) payload.labels = labels;
 		payload.dry_run = document.getElementById("prompt-dry-run").checked;
 		try {
 			const created = await postAction("/templates/" + t.id + "/launch", payload);
@@ -4580,7 +4680,7 @@ async function loadRuns() {
 	if (sizeEl) sizeEl.onchange = () => loadRuns();
 	const gen = ++runsLoadGen;
 	setStatus("");
-	showSkeletonRows(tbody, 6, 7);
+	showSkeletonRows(tbody, 6, 8);
 	table.hidden = false;
 	try {
 		const data = await getJSON("/runs?limit=" + runsPageSize() + "&offset=0&q=" + encodeURIComponent(runsQuery()) + runsFilterParams());
@@ -4623,6 +4723,85 @@ const KIND_TIPS = {
 	powershell: "Runs a PowerShell script",
 	go: "Runs a Go program",
 };
+
+// SOURCE_LABELS names each provenance source in the interface.
+const SOURCE_LABELS = {
+	api: "API", manual: "Manual", template: "Template", schedule: "Schedule",
+	rerun: "Rerun", reconcile: "Drift fix", propose: "Proposed",
+};
+
+// originCellEl renders what fired a run: a chip naming the source, linked to the object behind
+// it when there is one, plus the actor who asked for it.
+function originCellEl(r) {
+	const cell = td("");
+	const source = r.source || (r.proposed_from ? "reconcile" : "");
+	if (!source) {
+		cell.textContent = "\u2014";
+		cell.dataset.tip = "Recorded before run provenance was tracked";
+		return cell;
+	}
+	const label = SOURCE_LABELS[source] || source;
+	let chip;
+	const href = originHref(r);
+	if (href) {
+		chip = document.createElement("a");
+		chip.href = href;
+	} else {
+		chip = document.createElement("span");
+	}
+	chip.className = "origin-chip " + source;
+	chip.textContent = label;
+	chip.dataset.tip = originTip(r);
+	cell.appendChild(chip);
+	if (r.actor) {
+		const who = document.createElement("span");
+		who.className = "origin-actor";
+		who.textContent = r.actor;
+		cell.appendChild(who);
+	}
+	return cell;
+}
+
+// originHref returns where a run's origin chip navigates, empty when the source has no page.
+function originHref(r) {
+	switch (r.source) {
+	case "template":
+		return r.source_id ? "/ui/templates" : "";
+	case "schedule":
+		return r.source_id ? "/ui/schedules" : "";
+	case "rerun":
+		return r.rerun_of ? "/ui/runs/" + r.rerun_of : "";
+	case "reconcile":
+		return r.proposed_from ? "/ui/runs/" + r.proposed_from : "";
+	default:
+		return "";
+	}
+}
+
+// originTip explains a run's origin in a sentence.
+function originTip(r) {
+	switch (r.source) {
+	case "template": return "Launched from a saved template. Open templates";
+	case "schedule": return "Fired by a schedule on its cron cadence. Open schedules";
+	case "rerun": return "Replayed the spec of an earlier run. Open that run";
+	case "reconcile": return "Proposed to fix drift found by a check. Open the check";
+	case "propose": return "Proposed from a description, held for approval";
+	case "api": return "Submitted directly through the API";
+	default: return "How this run was started";
+	}
+}
+
+// labelChipsInto appends a run's labels as small key-value chips that filter the list.
+function labelChipsInto(cell, labels) {
+	for (const key of Object.keys(labels || {}).sort()) {
+		const chip = document.createElement("a");
+		chip.className = "label-chip";
+		chip.href = "/ui/runs?q=" + encodeURIComponent("label:" + key + "=" + labels[key]);
+		chip.textContent = key + "=" + labels[key];
+		chip.dataset.tip = "Show every run labeled " + key + "=" + labels[key];
+		cell.appendChild(chip);
+	}
+}
 
 // typeCellEl fills a table cell with the run's tool chip and any kind tags, so type lives in one
 // labeled, aligned column instead of floating beside names.
@@ -4681,9 +4860,10 @@ function appendRunRows(tbody, runs) {
 		tr.appendChild(runCell);
 
 		tr.appendChild(typeCellEl(r));
+		tr.appendChild(originCellEl(r));
 
-		const pbCell = td(toolLabel(r));
-		pbCell.title = r.playbook || r.command || "";
+		const pbCell = playbookCellEl(r);
+		labelChipsInto(pbCell, r.labels);
 		tr.appendChild(pbCell);
 
 		tr.appendChild(tdTime(r.started_at || r.created_at));
@@ -6145,7 +6325,18 @@ function renderHeader(run) {
 	el.appendChild(runField);
 	if (!run.tool || run.tool === "ansible") {
 		const pb = field("Playbook", baseName(run.playbook) || (run.playbook || ""), null, run.playbook || "");
-		if (run.playbook) pb.querySelector(".value").appendChild(copyButton(run.playbook, "Copy the playbook path"));
+		const value = pb.querySelector(".value");
+		if (run.project_id && run.playbook) {
+			value.textContent = "";
+			const link = document.createElement("button");
+			link.type = "button";
+			link.className = "linkish";
+			link.textContent = baseName(run.playbook) || run.playbook;
+			link.dataset.tip = "View " + run.playbook + " from the project checkout";
+			link.addEventListener("click", () => openFileViewer(run.project_id, run.playbook));
+			value.appendChild(link);
+		}
+		if (run.playbook) value.appendChild(copyButton(run.playbook, "Copy the playbook path"));
 		el.appendChild(pb);
 	} else {
 		el.appendChild(field("Tool", null, toolBadgeEl(run)));
@@ -6154,6 +6345,25 @@ function renderHeader(run) {
 	}
 	if (run.dry_run) {
 		el.appendChild(field("Mode", "dry run"));
+	}
+	if (run.source) {
+		const origin = originCellEl(run);
+		origin.className = "";
+		el.appendChild(field("Origin", null, origin));
+	}
+	if (run.rerun_of) {
+		const link = document.createElement("a");
+		link.href = "/ui/runs/" + run.rerun_of;
+		link.textContent = shortId(run.rerun_of);
+		link.title = run.rerun_of;
+		link.dataset.tip = "Open the run this replayed";
+		el.appendChild(field("Rerun of", null, link));
+	}
+	if (run.labels && Object.keys(run.labels).length) {
+		const wrap = document.createElement("span");
+		wrap.className = "value label-wrap";
+		labelChipsInto(wrap, run.labels);
+		el.appendChild(field("Labels", null, wrap));
 	}
 	if (run.proposed_from) {
 		const link = document.createElement("a");
@@ -6178,6 +6388,13 @@ function renderHeader(run) {
 	}
 	if (run.shard_count) {
 		el.appendChild(field("Shards", String(run.shard_count)));
+	}
+	if (run.claimed_by) {
+		const worker = document.createElement("a");
+		worker.href = "/ui/workers";
+		worker.textContent = run.claimed_by;
+		worker.dataset.tip = "The executor that claimed this run. Open workers";
+		el.appendChild(field("Worker", null, worker));
 	}
 	if (run.exit_code !== undefined && run.exit_code !== null) {
 		el.appendChild(field("Exit", String(run.exit_code)));
