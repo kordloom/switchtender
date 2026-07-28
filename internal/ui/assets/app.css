@@ -688,8 +688,8 @@ body[data-page="login"] .topbar { background: transparent; backdrop-filter: none
 
 /* In-app documentation: a sticky page list beside the rendered guide. The styles live here
    because the content security policy blocks inline style blocks. */
-.docs-layout { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 36px; align-items: start; }
-.docs-nav { position: sticky; top: 76px; max-height: calc(100vh - 100px); overflow-y: auto; padding: 14px 12px; background-color: var(--surface); background-image: linear-gradient(180deg, var(--card-top), transparent 46%); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow); }
+.docs-layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 34px; align-items: start; }
+.docs-nav { position: sticky; top: 76px; max-height: calc(100vh - 100px); overflow-y: auto; padding: 2px 14px 12px 0; border-right: 1px solid var(--border-muted); }
 .docs-nav .nav-group-label { margin-bottom: 6px; }
 .docs-nav ul { list-style: none; padding: 0; margin: 0; }
 .docs-nav li { margin: 1px 0; }
@@ -720,7 +720,7 @@ body[data-page="login"] .topbar { background: transparent; backdrop-filter: none
 .side .theme-group { margin-top: auto; padding-top: 12px; }
 .theme-row { display: flex; align-items: center; gap: 3px; padding: 0 6px; }
 .theme-hint { font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-right: 5px; }
-.theme-btn { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0; background: none; border: none; border-radius: 7px; color: var(--muted); cursor: pointer; transition: color 0.12s ease, background 0.12s ease; }
+.theme-btn { display: inline-flex; align-items: center; justify-content: center; gap: 5px; height: 26px; padding: 0 9px; background: none; border: none; border-radius: 7px; color: var(--muted); font: inherit; font-size: 11.5px; font-weight: 600; cursor: pointer; transition: color 0.12s ease, background 0.12s ease; }
 .theme-btn:hover { background: var(--surface-2); color: var(--text); }
 .theme-btn.active { background: var(--accent-soft); color: var(--accent); }
 .theme-btn svg { width: 14px; height: 14px; }
@@ -812,3 +812,19 @@ body[data-theme="dark"] {
 /* The shared floating tip for data-tip elements. It rides document.body with fixed positioning,
    so no scrolling or filtered container can clip it. */
 .hinttip { position: fixed; z-index: 96; background: var(--surface-3); color: var(--text); font-size: 11.5px; font-weight: 500; padding: 5px 9px; border-radius: 7px; border: 1px solid var(--border); box-shadow: var(--shadow); white-space: nowrap; pointer-events: none; }
+
+/* Page-header docs link: every page points at its most relevant guide. */
+.docs-link { display: inline-flex; align-items: center; gap: 6px; padding: 4px 11px; border: 1px solid var(--border-muted); border-radius: 999px; color: var(--muted); font-size: 12.5px; font-weight: 500; }
+.docs-link:hover { text-decoration: none; color: var(--accent); border-color: var(--border); background: var(--surface-2); }
+.docs-link svg { width: 13px; height: 13px; }
+
+/* A button that reads as a link, for in-table view affordances. */
+.linkish { background: none; border: none; padding: 0; font: inherit; color: var(--text); cursor: pointer; text-decoration: underline; text-decoration-style: dotted; text-decoration-color: var(--muted); text-underline-offset: 3px; }
+.linkish:hover { color: var(--accent); text-decoration-color: var(--accent); }
+.linkish.mono { font-family: var(--mono); font-size: 12.5px; }
+
+/* Read-only view dialog rows. */
+.view-rows { display: grid; grid-template-columns: max-content 1fr; gap: 7px 18px; margin-bottom: 14px; }
+.view-k { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); padding-top: 1px; }
+.view-v { font-size: 13.5px; font-family: var(--mono); word-break: break-word; }
+.view-code { max-height: 300px; }

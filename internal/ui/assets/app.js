@@ -153,6 +153,43 @@ function mountTopbar() {
 	bar.appendChild(nav);
 }
 
+// PAGE_DOCS maps each page to its most relevant guide, linked from the page header.
+const PAGE_DOCS = {
+	overview: { slug: "quickstart", label: "Quickstart" },
+	runs: { slug: "tutorial-run-a-job", label: "Run a job" },
+	fleet: { slug: "reliability", label: "Reliability" },
+	drift: { slug: "drift", label: "Drift detection" },
+	tasks: { slug: "concepts", label: "Concepts" },
+	workers: { slug: "reliability", label: "Reliability" },
+	projects: { slug: "concepts", label: "Concepts" },
+	inventories: { slug: "concepts", label: "Concepts" },
+	sources: { slug: "concepts", label: "Concepts" },
+	jobtemplates: { slug: "tutorial-save-a-template", label: "Save a template" },
+	workflows: { slug: "concepts", label: "Concepts" },
+	schedules: { slug: "tutorial-schedule-a-job", label: "Schedule a job" },
+	migrate: { slug: "tutorial-migrate", label: "Migrate your setup" },
+	credentials: { slug: "tutorial-set-a-secret", label: "Set a secret" },
+	users: { slug: "configuration", label: "Configuration" },
+	audit: { slug: "features", label: "Features" },
+	policies: { slug: "features", label: "Features" },
+};
+
+// mountPageDocs adds a small guide link to the page header, so every page points at its docs.
+function mountPageDocs() {
+	const ref = PAGE_DOCS[document.body.dataset.page];
+	const head = document.querySelector(".page-head");
+	if (!ref || !head) return;
+	const a = document.createElement("a");
+	a.className = "docs-link";
+	a.href = "/ui/docs/" + ref.slug;
+	a.dataset.tip = "Open the " + ref.label + " guide";
+	a.innerHTML = svgIcon(NAV_ICONS.docs);
+	a.appendChild(document.createTextNode(ref.label));
+	const actions = head.querySelector(".head-actions");
+	if (actions) actions.appendChild(a);
+	else head.appendChild(a);
+}
+
 // LIST_PAGES are the pages whose main table is a searchable list.
 // LIST_PAGES get the client-side row filter. The runs page is excluded because it searches on the
 // server, across every run rather than only the loaded page.
@@ -1591,6 +1628,7 @@ document.addEventListener("DOMContentLoaded", () => {
 	buildNav();
 	wirePalette();
 	wireHinttips();
+	mountPageDocs();
 	if (isReadOnly()) applyReadOnly();
 	setInterval(refreshRelTimes, 20000);
 	mountTour();
@@ -1745,9 +1783,9 @@ function svgIcon(inner) {
 
 // THEMES lists the selectable appearances: the signature look, then the flat family themes.
 const THEMES = [
-	{ key: "signature", label: "Stitch", desc: "The signature glow", tip: "Use Stitch, the signature look", icon: '<path d="M3 16c3.5-4 9-4 12.5-1" stroke-dasharray="3.2 2.6"/><line x1="14" y1="16.5" x2="21" y2="9.5"/>' },
-	{ key: "light", label: "Kord", desc: "Clean white, the kordloom.com style", tip: "Use Kord, the clean white theme", icon: '<circle cx="12" cy="12" r="4"/><line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/><line x1="4.9" y1="4.9" x2="7" y2="7"/><line x1="17" y1="17" x2="19.1" y2="19.1"/><line x1="4.9" y1="19.1" x2="7" y2="17"/><line x1="17" y1="7" x2="19.1" y2="4.9"/>' },
-	{ key: "dark", label: "Seal", desc: "Warm ink black, the loomseal.com style", tip: "Use Seal, the warm ink theme", icon: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>' },
+	{ key: "signature", label: "Stitch", desc: "The signature glow", tip: "Stitch, the default theme", icon: '<path d="M3 16c3.5-4 9-4 12.5-1" stroke-dasharray="3.2 2.6"/><line x1="14" y1="16.5" x2="21" y2="9.5"/>' },
+	{ key: "light", label: "Kord", desc: "Clean white, the kordloom.com style", tip: "Kord, the white theme", icon: '<circle cx="12" cy="12" r="4"/><line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/><line x1="4.9" y1="4.9" x2="7" y2="7"/><line x1="17" y1="17" x2="19.1" y2="19.1"/><line x1="4.9" y1="19.1" x2="7" y2="17"/><line x1="17" y1="7" x2="19.1" y2="4.9"/>' },
+	{ key: "dark", label: "Seal", desc: "Warm ink black, the loomseal.com style", tip: "Seal, the dark theme", icon: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>' },
 ];
 
 // currentTheme returns the active theme key, defaulting to the signature look.
@@ -1798,6 +1836,7 @@ function themeGroup() {
 		btn.setAttribute("aria-label", t.tip);
 		btn.setAttribute("aria-pressed", "false");
 		btn.innerHTML = svgIcon(t.icon);
+		btn.appendChild(document.createTextNode(t.label));
 		btn.addEventListener("click", () => setTheme(t.key));
 		row.appendChild(btn);
 	}
@@ -1975,28 +2014,53 @@ function wireHinttips() {
 	tip.className = "hinttip";
 	tip.hidden = true;
 	document.body.appendChild(tip);
-	const show = (e) => {
-		const target = e.target.closest ? e.target.closest("[data-tip]") : null;
-		if (!target) return;
-		tip.textContent = target.dataset.tip;
+	let linkTimer = 0;
+	const place = (target, text) => {
+		tip.textContent = text;
 		tip.hidden = false;
 		tip.style.left = "0px";
 		tip.style.top = "0px";
 		const r = target.getBoundingClientRect();
-		let x = Math.min(Math.max(8, r.left), window.innerWidth - tip.offsetWidth - 8);
+		const x = Math.min(Math.max(8, r.left), window.innerWidth - tip.offsetWidth - 8);
 		let y = r.top - tip.offsetHeight - 8;
 		if (y < 8) y = r.bottom + 8;
 		tip.style.left = x + "px";
 		tip.style.top = y + "px";
 	};
+	// linkDest turns a link's destination into a short readable label.
+	const linkDest = (a) => {
+		const href = a.getAttribute("href");
+		if (!href || href === "#" || href.startsWith("javascript")) return "";
+		try {
+			const u = new URL(href, location.href);
+			const path = u.pathname + (u.search || "") + (u.hash || "");
+			return u.origin === location.origin ? "Go to " + path : "Opens " + u.hostname + u.pathname;
+		} catch { return ""; }
+	};
+	const show = (e) => {
+		if (!e.target.closest) return;
+		const target = e.target.closest("[data-tip]");
+		if (target) { clearTimeout(linkTimer); place(target, target.dataset.tip); return; }
+		// Plain links reveal their destination after a beat, so casual mouse travel stays quiet.
+		const a = e.target.closest("a[href]");
+		if (!a || a.closest(".cmdk")) return;
+		const dest = linkDest(a);
+		if (!dest) return;
+		clearTimeout(linkTimer);
+		linkTimer = window.setTimeout(() => place(a, dest), 450);
+	};
 	const hide = (e) => {
-		if (e.target.closest && e.target.closest("[data-tip]")) tip.hidden = true;
+		if (!e.target.closest) return;
+		if (e.target.closest("[data-tip]") || e.target.closest("a[href]")) {
+			clearTimeout(linkTimer);
+			tip.hidden = true;
+		}
 	};
 	document.addEventListener("mouseover", show);
 	document.addEventListener("mouseout", hide);
 	document.addEventListener("focusin", show);
 	document.addEventListener("focusout", hide);
-	document.addEventListener("scroll", () => { tip.hidden = true; }, true);
+	document.addEventListener("scroll", () => { clearTimeout(linkTimer); tip.hidden = true; }, true);
 }
 
 // wirePalette registers the platform search shortcut that toggles the palette, on every page but
@@ -2578,7 +2642,12 @@ function renderNeedsSecret(creds) {
 	setTitle(pending.length);
 	const sub = document.createElement("span");
 	sub.className = "cred-needs-sub";
-	sub.textContent = "Set a secret on each to make it usable. Imported credentials arrive this way.";
+	sub.textContent = "Set a secret on each to make it usable. Imported credentials arrive this way. ";
+	const guide = document.createElement("a");
+	guide.href = "/ui/docs/tutorial-set-a-secret";
+	guide.textContent = "How secrets work";
+	guide.dataset.tip = "Open the Set a secret guide";
+	sub.appendChild(guide);
 	head.appendChild(title);
 	head.appendChild(sub);
 	panel.appendChild(head);
@@ -3023,16 +3092,16 @@ async function loadTemplates() {
 		for (const t of templates) {
 			const tr = document.createElement("tr");
 			tr.appendChild(td(t.name));
-			// Show what the template runs the way the runs view does: a tool badge for non-Ansible
-			// and the playbook or command, so a bash or terraform template is not a blank cell.
+			tr.appendChild(typeCellEl(t));
+			// The playbook cell opens a read-only view of everything the template runs.
 			const whatCell = td("", "mono");
-			const badge = toolBadgeEl(t);
-			if (badge) {
-				whatCell.appendChild(badge);
-				whatCell.appendChild(document.createTextNode(" "));
-			}
-			whatCell.appendChild(document.createTextNode(toolLabel(t)));
-			whatCell.title = t.playbook || t.command || "";
+			const view = document.createElement("button");
+			view.type = "button";
+			view.className = "linkish mono";
+			view.textContent = toolLabel(t);
+			view.dataset.tip = "View what this template runs";
+			view.addEventListener("click", (e) => { e.preventDefault(); openTemplateView(t); });
+			whatCell.appendChild(view);
 			tr.appendChild(whatCell);
 			tr.appendChild(td(String(t.shards || 1)));
 			tr.appendChild(tdTime(t.created_at));
@@ -3069,6 +3138,49 @@ async function loadTemplates() {
 	} catch (e) {
 		setStatus("Failed to load templates: " + e.message);
 	}
+}
+
+// openTemplateView shows everything a template runs in a read-only dialog: its full command or
+// playbook, tool, shards, and the rest, since list cells truncate.
+function openTemplateView(t) {
+	let overlay = document.getElementById("view-modal");
+	if (!overlay) {
+		overlay = document.createElement("div");
+		overlay.id = "view-modal";
+		overlay.className = "modal";
+		overlay.hidden = true;
+		overlay.innerHTML = '<div class="modal-card wide"><div class="modal-head"><h2 id="view-title"></h2>' +
+			'<button type="button" class="modal-close" aria-label="Close">\u00d7</button></div>' +
+			'<div class="view-rows" id="view-rows"></div><pre class="log view-code" id="view-code"></pre></div>';
+		document.body.appendChild(overlay);
+		overlay.addEventListener("mousedown", (e) => { if (e.target === overlay) overlay.hidden = true; });
+		overlay.querySelector(".modal-close").addEventListener("click", () => { overlay.hidden = true; });
+		document.addEventListener("keydown", (e) => { if (e.key === "Escape") overlay.hidden = true; });
+	}
+	document.getElementById("view-title").textContent = t.name;
+	const rows = document.getElementById("view-rows");
+	rows.innerHTML = "";
+	const addRow = (k, v) => {
+		if (!v && v !== 0) return;
+		const key = document.createElement("span");
+		key.className = "view-k";
+		key.textContent = k;
+		const val = document.createElement("span");
+		val.className = "view-v";
+		val.textContent = String(v);
+		rows.appendChild(key);
+		rows.appendChild(val);
+	};
+	addRow("Tool", (t.tool || "ansible"));
+	addRow("Playbook", t.playbook);
+	addRow("Inventory", t.inventory);
+	addRow("Shards", t.shards && t.shards > 1 ? t.shards : "");
+	addRow("Limit", t.limit);
+	addRow("Created", t.created_at ? fmtTime(t.created_at) : "");
+	const code = document.getElementById("view-code");
+	code.hidden = !t.command;
+	if (t.command) code.textContent = t.command;
+	overlay.hidden = false;
 }
 
 // openSurvey renders a template's survey as a form and launches with the collected answers.
@@ -3876,7 +3988,7 @@ async function loadRuns() {
 	if (sizeEl) sizeEl.onchange = () => loadRuns();
 	const gen = ++runsLoadGen;
 	setStatus("");
-	showSkeletonRows(tbody, 6, 6);
+	showSkeletonRows(tbody, 6, 7);
 	table.hidden = false;
 	try {
 		const data = await getJSON("/runs?limit=" + runsPageSize() + "&offset=0&q=" + encodeURIComponent(runsQuery()) + runsFilterParams());
@@ -3904,6 +4016,42 @@ function toolLabel(r) {
 	if (r.playbook) return baseName(r.playbook) || r.playbook;
 	const cmd = (r.command || "").replace(/\s+/g, " ").trim();
 	return cmd.length > 48 ? cmd.slice(0, 47) + "…" : cmd;
+}
+
+// KIND_TIPS explains each run kind and tool chip on hover.
+const KIND_TIPS = {
+	pipeline: "A multi-step pipeline: each step runs after the one before it and can pass outputs on",
+	split: "Split into shards across the inventory, balanced by each host's measured duration",
+	dry: "A dry run: reports what would change without applying anything",
+	ansible: "Runs an Ansible playbook",
+	bash: "Runs a Bash script",
+	terraform: "Runs Terraform",
+	opentofu: "Runs OpenTofu",
+	python: "Runs a Python script",
+	powershell: "Runs a PowerShell script",
+	go: "Runs a Go program",
+};
+
+// typeCellEl fills a table cell with the run's tool chip and any kind tags, so type lives in one
+// labeled, aligned column instead of floating beside names.
+function typeCellEl(r) {
+	const cell = td("");
+	const tool = (r.tool || "ansible").toLowerCase();
+	const chip = document.createElement("span");
+	chip.className = "tool-badge " + tool;
+	chip.textContent = tool;
+	if (KIND_TIPS[tool]) chip.dataset.tip = KIND_TIPS[tool];
+	cell.appendChild(chip);
+	for (const kind of [r.kind === "split" ? "split" : "", r.kind === "pipeline" ? "pipeline" : "", r.dry_run ? "dry" : ""]) {
+		if (!kind) continue;
+		const tag = document.createElement("span");
+		tag.className = "run-kind " + kind;
+		tag.textContent = kind;
+		tag.dataset.tip = KIND_TIPS[kind];
+		cell.appendChild(document.createTextNode(" "));
+		cell.appendChild(tag);
+	}
+	return cell;
 }
 
 // toolBadgeEl returns a small tool badge for a non-Ansible run, or null for Ansible so the common
@@ -3937,30 +4085,13 @@ function appendRunRows(tbody, runs) {
 
 		const runCell = td(shortId(r.id), "mono");
 		runCell.title = r.id;
-		if (r.kind === "split" || r.kind === "pipeline") {
-			const tag = document.createElement("span");
-			tag.className = "run-kind " + r.kind;
-			tag.textContent = r.kind;
-			runCell.appendChild(document.createTextNode(" "));
-			runCell.appendChild(tag);
-		}
+		runCell.dataset.tip = "Open run details";
 		tr.appendChild(runCell);
 
-		const pbCell = td("");
-		const badge = toolBadgeEl(r);
-		if (badge) {
-			pbCell.appendChild(badge);
-			pbCell.appendChild(document.createTextNode(" "));
-		}
-		pbCell.appendChild(document.createTextNode(toolLabel(r)));
+		tr.appendChild(typeCellEl(r));
+
+		const pbCell = td(toolLabel(r));
 		pbCell.title = r.playbook || r.command || "";
-		if (r.dry_run) {
-			const dry = document.createElement("span");
-			dry.className = "run-kind dry";
-			dry.textContent = "dry";
-			pbCell.appendChild(document.createTextNode(" "));
-			pbCell.appendChild(dry);
-		}
 		tr.appendChild(pbCell);
 
 		tr.appendChild(tdTime(r.started_at || r.created_at));
