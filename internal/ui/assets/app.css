@@ -684,14 +684,11 @@ body[data-page="login"] .topbar { background: transparent; backdrop-filter: none
 @media (prefers-reduced-motion: reduce) { .cmdk-card { animation: none; } }
 
 /* Overview columns: recent runs beside the fleet question box, stacked on narrow viewports. */
-.ov-cols { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 16px; align-items: start; margin-bottom: 4px; }
-.ov-side { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
-.ov-side .panel { margin-bottom: 0; }
 .ov-h-go { width: 14px; }
 .ask-note { margin: 8px 0 0; font-size: 12px; }
+.ask-teaser { margin: 0; font-size: 12.5px; line-height: 1.6; }
 .ask-block { margin: 14px -20px 0; padding: 14px 20px 0; border-top: 1px solid var(--border-muted); }
 .ask-title { margin: 0 0 10px; font-size: 13px; font-weight: 600; }
-@media (max-width: 980px) { .ov-cols { grid-template-columns: 1fr; } }
 
 /* In-app documentation: a sticky page list beside the rendered guide. The styles live here
    because the content security policy blocks inline style blocks. */

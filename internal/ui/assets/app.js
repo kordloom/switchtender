@@ -3764,13 +3764,24 @@ function wireAsk() {
 	const go = document.getElementById("ask-go");
 	const input = document.getElementById("ask-input");
 	if (!go || !input) return;
+	// Without a usable provider the input is theater. The read-only demo swaps the whole block
+	// for one teaser line pointing at the guide.
 	if (isReadOnly()) {
-		go.disabled = true;
-		input.disabled = true;
-		const status = document.getElementById("ask-status");
-		if (status) {
-			status.textContent = "Asking is off in this read-only demo. Self-host with your own AI provider, local Ollama included, and this box answers from your fleet's run, health, and drift data.";
-			status.hidden = false;
+		const block = document.getElementById("ask-panel");
+		if (block) {
+			block.innerHTML = "";
+			const title = document.createElement("h3");
+			title.className = "ask-title";
+			title.textContent = "Ask about your fleet";
+			block.appendChild(title);
+			const teaser = document.createElement("p");
+			teaser.className = "ask-teaser muted";
+			teaser.textContent = "Advisory AI answers from your fleet's run, health, and drift data when you self-host with your own provider, local Ollama included. ";
+			const link = document.createElement("a");
+			link.href = "/ui/docs/ai";
+			link.textContent = "How Advisory AI works";
+			teaser.appendChild(link);
+			block.appendChild(teaser);
 		}
 		return;
 	}
