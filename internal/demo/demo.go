@@ -84,9 +84,9 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 	failByRun := []string{"", "db01", "", "db01", ""}
 	for i, failHost := range failByRun {
 		// Alternate origins so the runs list shows the full provenance vocabulary.
-		source, sourceID, actor := "schedule", "sch_nightly", "nightly-cron"
+		source, sourceID, actor := "schedule", "sch_nightly", "deploy-bot"
 		if i%2 == 1 {
-			source, sourceID, actor = "template", "tpl_deploy_web", "avery"
+			source, sourceID, actor = "template", "tpl_deploy_web", "admin"
 		}
 		opts := seedOpts(source, sourceID, actor,
 			map[string]string{"env": "prod", "team": "platform"}, failVars(failHost)...)
@@ -99,7 +99,7 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 
 	// A split where one shard fails, showing the merged matrix and failed-shard isolation.
 	split, err := d.Submitter.SubmitSplit(ctx, playbook, inv, 3,
-		seedOpts("template", "tpl_deploy_web", "avery",
+		seedOpts("template", "tpl_deploy_web", "admin",
 			map[string]string{"env": "prod", "ticket": "OPS-482"}, failVars("db01")...)...)
 	if err != nil {
 		return fmt.Errorf("seed split: %w", err)
@@ -113,7 +113,7 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 		{Name: "verify", Playbook: playbook},
 	}
 	pipe, err := d.Submitter.SubmitPipeline(ctx, "Release 4.2", inv, steps,
-		seedOpts("api", "", "release-bot", map[string]string{"env": "prod", "ticket": "REL-42"})...)
+		seedOpts("api", "", "deploy-bot", map[string]string{"env": "prod", "ticket": "REL-42"})...)
 	if err != nil {
 		return fmt.Errorf("seed pipeline: %w", err)
 	}
@@ -121,7 +121,7 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 
 	// One more failure on a different host for variety.
 	last, err := d.Submitter.Submit(ctx, playbook, inv,
-		seedOpts("rerun", "", "avery",
+		seedOpts("rerun", "", "admin",
 			map[string]string{"env": "staging"}, failVars("edge01")...)...)
 	if err != nil {
 		return fmt.Errorf("seed run: %w", err)
@@ -130,7 +130,7 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 
 	// A dry run of a check playbook surfaces configuration drift per host on the Drift page.
 	driftPlay := filepath.Join(dir, "drift.yml")
-	driftOpts := seedOpts("schedule", "sch_drift_check", "nightly-cron",
+	driftOpts := seedOpts("schedule", "sch_drift_check", "deploy-bot",
 		map[string]string{"env": "prod"}, run.WithDryRun(true))
 	if driftRun, err := d.Submitter.Submit(ctx, driftPlay, inv, driftOpts...); err == nil {
 		waitTerminal(ctx, d.Runs, driftRun.ID)
@@ -154,7 +154,7 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 // finishes cleanly on whatever host serves the demo.
 func seedMultiTool(ctx context.Context, d Deps, tfDir, playbook, inv string, log *zap.Logger) error {
 	bash, err := d.Submitter.Submit(ctx, "", "",
-		seedOpts("schedule", "sch_log_rotate", "nightly-cron", map[string]string{"env": "prod"},
+		seedOpts("schedule", "sch_log_rotate", "deploy-bot", map[string]string{"env": "prod"},
 			run.WithTool(run.ToolBash), run.WithCommand(scriptLogRotate))...)
 	if err != nil {
 		return fmt.Errorf("seed bash run: %w", err)
@@ -163,7 +163,7 @@ func seedMultiTool(ctx context.Context, d Deps, tfDir, playbook, inv string, log
 
 	if have("python3") {
 		py, err := d.Submitter.Submit(ctx, "", "",
-			seedOpts("template", "tpl_reconcile", "avery", map[string]string{"env": "prod"},
+			seedOpts("template", "tpl_reconcile", "admin", map[string]string{"env": "prod"},
 				run.WithTool(run.ToolPython), run.WithCommand(scriptReconcile))...)
 		if err != nil {
 			return fmt.Errorf("seed python run: %w", err)
@@ -175,7 +175,7 @@ func seedMultiTool(ctx context.Context, d Deps, tfDir, playbook, inv string, log
 
 	if have("terraform") {
 		tf, err := d.Submitter.Submit(ctx, "", "",
-			seedOpts("api", "", "terraform-ci", map[string]string{"env": "staging"},
+			seedOpts("api", "", "deploy-bot", map[string]string{"env": "staging"},
 				run.WithTool(run.ToolTerraform), run.WithCommand(tfDir), run.WithDryRun(true))...)
 		if err != nil {
 			return fmt.Errorf("seed terraform run: %w", err)
@@ -187,7 +187,7 @@ func seedMultiTool(ctx context.Context, d Deps, tfDir, playbook, inv string, log
 
 	if have("go") {
 		gorun, err := d.Submitter.Submit(ctx, "", "",
-			seedOpts("template", "tpl_capacity", "avery", map[string]string{"env": "prod"},
+			seedOpts("template", "tpl_capacity", "admin", map[string]string{"env": "prod"},
 				run.WithTool(run.ToolGo), run.WithCommand(scriptFleetGo))...)
 		if err != nil {
 			return fmt.Errorf("seed go run: %w", err)
@@ -203,7 +203,7 @@ func seedMultiTool(ctx context.Context, d Deps, tfDir, playbook, inv string, log
 		{Name: "smoke-test", Tool: run.ToolBash, Command: scriptSmoke},
 	}
 	pipe, err := d.Submitter.SubmitPipeline(ctx, "Provision and deploy", inv, steps,
-		seedOpts("template", "tpl_provision", "avery",
+		seedOpts("template", "tpl_provision", "admin",
 			map[string]string{"env": "prod", "ticket": "OPS-503"})...)
 	if err != nil {
 		return fmt.Errorf("seed mixed pipeline: %w", err)
@@ -361,16 +361,16 @@ func seedConfig(ctx context.Context, d Deps, log *zap.Logger) {
 			actor, method, path string
 			hoursAgo            int
 		}{
-			{"avery", "POST", "/v1/projects", 72},
-			{"avery", "POST", "/v1/inventories", 72},
-			{"avery", "POST", "/v1/credentials", 72},
-			{"avery", "POST", "/v1/templates", 72},
-			{"morgan", "PUT", "/v1/templates/tpl_deploy_web", 50},
-			{"avery", "POST", "/v1/inventory-sources", 20},
-			{"release-bot", "POST", "/v1/pipelines", 6},
-			{"morgan", "POST", "/v1/policies", 5},
-			{"nightly-cron", "POST", "/v1/schedules", 4},
-			{"avery", "DELETE", "/v1/templates/tpl_retired", 2},
+			{"admin", "POST", "/v1/projects", 72},
+			{"admin", "POST", "/v1/inventories", 72},
+			{"admin", "POST", "/v1/credentials", 72},
+			{"admin", "POST", "/v1/templates", 72},
+			{"deploy-bot", "PUT", "/v1/templates/tpl_deploy_web", 50},
+			{"admin", "POST", "/v1/inventory-sources", 20},
+			{"deploy-bot", "POST", "/v1/pipelines", 6},
+			{"deploy-bot", "POST", "/v1/policies", 5},
+			{"deploy-bot", "POST", "/v1/schedules", 4},
+			{"admin", "DELETE", "/v1/templates/tpl_retired", 2},
 		}
 		for _, h := range history {
 			entry := &audit.Entry{

@@ -846,6 +846,10 @@ func (s *store) ListPage(ctx context.Context, filter run.ListFilter, limit, offs
 		q += " AND actor = ?"
 		args = append(args, filter.Actor)
 	}
+	if filter.SourceID != "" {
+		q += " AND source_id = ?"
+		args = append(args, filter.SourceID)
+	}
 	if filter.LabelKey != "" {
 		q += " AND json_extract(COALESCE(NULLIF(labels, ''), '{}'), '$.' || ?) = ?"
 		args = append(args, filter.LabelKey, filter.LabelValue)

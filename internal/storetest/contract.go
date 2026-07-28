@@ -400,6 +400,9 @@ func testListPage(t *testing.T, store run.Store) {
 	if hit, _ := store.ListPage(ctx, run.ListFilter{Actor: "night-cron"}, 0, 0); len(hit) != 1 || hit[0].ID != "e" {
 		t.Errorf("actor filter = %v, want [e]", ids(hit))
 	}
+	if hit, _ := store.ListPage(ctx, run.ListFilter{SourceID: "sch_9"}, 0, 0); len(hit) != 1 || hit[0].ID != "e" {
+		t.Errorf("source id filter = %v, want [e]", ids(hit))
+	}
 	if hit, _ := store.ListPage(ctx, run.ListFilter{LabelKey: "env", LabelValue: "prod"}, 0, 0); len(hit) != 1 || hit[0].ID != "e" {
 		t.Errorf("label filter = %v, want [e]", ids(hit))
 	}

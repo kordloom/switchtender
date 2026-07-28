@@ -1096,3 +1096,10 @@ table.runs tbody tr.row-nav:hover td:first-child, table.runs tbody tr.row-inspec
 .tree-row:hover { background: var(--surface-2); }
 .tree-row:hover .mono { color: var(--accent); }
 .tree-size { flex: none; font-size: 11.5px; color: var(--muted); }
+
+/* Sortable headers show their affordance and the active direction. */
+th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+th.sortable:hover { color: var(--text); }
+th.sortable::after { content: "\2195"; margin-left: 6px; opacity: 0.3; font-size: 10px; }
+th.sortable[data-dir="asc"]::after { content: "\2191"; opacity: 1; color: var(--accent); }
+th.sortable[data-dir="desc"]::after { content: "\2193"; opacity: 1; color: var(--accent); }

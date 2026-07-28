@@ -626,6 +626,10 @@ func (s *store) ListPage(ctx context.Context, filter run.ListFilter, limit, offs
 		args = append(args, filter.Actor)
 		q += fmt.Sprintf(" AND actor = $%d", len(args))
 	}
+	if filter.SourceID != "" {
+		args = append(args, filter.SourceID)
+		q += fmt.Sprintf(" AND source_id = $%d", len(args))
+	}
 	if filter.LabelKey != "" {
 		args = append(args, filter.LabelKey, filter.LabelValue)
 		q += fmt.Sprintf(" AND NULLIF(labels, '')::jsonb ->> $%d = $%d", len(args)-1, len(args))

@@ -254,6 +254,71 @@ function mountTableExport() {
 	});
 }
 
+// SORT_SKIP names headers that hold controls rather than comparable values.
+const SORT_SKIP = new Set(["", "actions", "fix", "recent", "history"]);
+
+// cellSortValue reads a cell for comparison: a timestamp when the cell carries one, a number when
+// the text is numeric, and lowercased text otherwise, so each column sorts the way it reads.
+function cellSortValue(cell) {
+	const timed = cell.querySelector("[data-time]") || (cell.dataset && cell.dataset.time ? cell : null);
+	if (timed) {
+		const t = Date.parse(timed.dataset.time);
+		if (!isNaN(t)) return { n: t };
+	}
+	const text = cell.textContent.trim();
+	// A leading number covers counts, durations, sizes, and ratios such as 1 / 10.
+	const num = text.match(/^-?[\d,]+(\.\d+)?/);
+	if (num && num[0].length >= text.replace(/[^\d.,\-].*$/, "").length && num[0] !== "") {
+		const parsed = parseFloat(num[0].replace(/,/g, ""));
+		if (!isNaN(parsed)) return { n: parsed };
+	}
+	return { s: text.toLowerCase() };
+}
+
+// mountTableSort makes every meaningful column header a sort control. Clicking cycles ascending
+// then descending, and the active column shows its direction.
+function mountTableSort() {
+	const table = document.querySelector("main.content table");
+	if (!table || !table.tHead || !table.tBodies[0]) return;
+	const tbody = table.tBodies[0];
+	Array.from(table.tHead.rows[0].cells).forEach((th, index) => {
+		const label = th.textContent.trim().toLowerCase();
+		if (SORT_SKIP.has(label) || th.classList.contains("col-actions")) return;
+		th.classList.add("sortable");
+		th.tabIndex = 0;
+		th.setAttribute("role", "button");
+		th.dataset.tip = "Click to sort by " + (th.textContent.trim() || "this column");
+		const sort = () => {
+			const desc = th.dataset.dir === "asc";
+			for (const other of table.tHead.rows[0].cells) {
+				if (other !== th) delete other.dataset.dir;
+			}
+			th.dataset.dir = desc ? "desc" : "asc";
+			const rows = Array.from(tbody.rows).filter((r) => !r.classList.contains("skeleton-row"));
+			rows.sort((a, b) => {
+				const av = cellSortValue(a.cells[index]);
+				const bv = cellSortValue(b.cells[index]);
+				let cmp;
+				if (av.n !== undefined && bv.n !== undefined) cmp = av.n - bv.n;
+				else cmp = String(av.s ?? av.n).localeCompare(String(bv.s ?? bv.n));
+				return desc ? -cmp : cmp;
+			});
+			for (const row of rows) tbody.appendChild(row);
+			// Row numbering, where a table has it, follows the new order.
+			let n = 0;
+			for (const row of rows) {
+				const numCell = row.querySelector("td.col-num");
+				if (numCell) numCell.textContent = String(++n);
+			}
+			table.dispatchEvent(new CustomEvent("rowsfiltered"));
+		};
+		th.addEventListener("click", sort);
+		th.addEventListener("keydown", (e) => {
+			if (e.key === "Enter" || e.key === " ") { e.preventDefault(); sort(); }
+		});
+	});
+}
+
 // applyRowVisibility shows a row only when neither the filter nor the pager hides it.
 function applyRowVisibility(row) {
 	row.hidden = row.dataset.fhide === "1" || row.dataset.phide === "1";
@@ -1820,6 +1885,7 @@ document.addEventListener("DOMContentLoaded", () => {
 	mountPageDocs();
 	mountTableExport();
 	mountTablePager();
+	mountTableSort();
 	if (isReadOnly()) applyReadOnly();
 	setInterval(refreshRelTimes, 20000);
 	mountTour();
@@ -2836,7 +2902,26 @@ function wireCredentialForm() {
 }
 
 // loadCredentials populates the credential table with delete actions.
+// credentialUsers maps a credential id to the names of the templates that reference it, so the
+// list can answer what breaks if one is deleted.
+async function credentialUsers() {
+	const map = new Map();
+	try {
+		const data = await getJSON("/templates");
+		for (const t of data.templates || []) {
+			const ids = [].concat(t.credential_ids || [], t.selectable_credential_ids || [],
+				t.pull_credential_id ? [t.pull_credential_id] : []);
+			for (const id of ids) {
+				if (!map.has(id)) map.set(id, []);
+				if (!map.get(id).includes(t.name)) map.get(id).push(t.name);
+			}
+		}
+	} catch { /* the column falls back to a dash */ }
+	return map;
+}
+
 async function loadCredentials() {
+	const templateUsers = await credentialUsers();
 	try {
 		const data = await getJSON("/credentials");
 		const creds = data.credentials || [];
@@ -2850,6 +2935,28 @@ async function loadCredentials() {
 			const tr = document.createElement("tr");
 			tr.appendChild(td(c.name));
 			tr.appendChild(td(c.kind, "mono"));
+			const secret = td("");
+			const secretChip = document.createElement("span");
+			secretChip.className = c.needs_secret ? "chip flaky" : "chip ok";
+			secretChip.textContent = c.needs_secret ? "needs a secret" : "set";
+			secretChip.dataset.tip = c.needs_secret
+				? "No secret stored yet, so any run using this credential fails"
+				: "A secret is stored, encrypted at rest and never shown again";
+			secret.appendChild(secretChip);
+			tr.appendChild(secret);
+			const usedBy = td("");
+			const users = templateUsers.get(c.id) || [];
+			if (users.length) {
+				const link = document.createElement("a");
+				link.href = "/ui/templates";
+				link.textContent = users.length === 1 ? users[0] : users.length + " templates";
+				link.dataset.tip = "Used by: " + users.join(", ") + ". Click to open templates";
+				usedBy.appendChild(link);
+			} else {
+				usedBy.textContent = "\u2014";
+				usedBy.dataset.tip = "No template references this credential";
+			}
+			tr.appendChild(usedBy);
 			tr.appendChild(tdTime(c.created_at));
 			const actions = document.createElement("td");
 			const del = document.createElement("button");
@@ -3455,6 +3562,13 @@ async function loadTemplates() {
 				}
 			});
 			actions.appendChild(launch);
+			actions.appendChild(document.createTextNode(" "));
+			const history = document.createElement("a");
+			history.className = "button";
+			history.href = "/ui/runs?q=" + encodeURIComponent("from:" + t.id);
+			history.textContent = "Runs";
+			history.dataset.tip = "Click to see every run this template produced";
+			actions.appendChild(history);
 			actions.appendChild(document.createTextNode(" "));
 			const withOpts = document.createElement("button");
 			withOpts.className = "button";
@@ -5155,6 +5269,31 @@ function countUp(el, value) {
 	requestAnimationFrame(step);
 }
 
+// describeCron renders the common cron shapes in words. An expression it does not recognize is
+// reported as a custom schedule rather than guessed at.
+function describeCron(spec) {
+	const parts = String(spec || "").trim().split(/\s+/);
+	if (parts.length !== 5) return "Custom schedule";
+	const [min, hour, dom, mon, dow] = parts;
+	const days = { "0": "Sunday", "1": "Monday", "2": "Tuesday", "3": "Wednesday", "4": "Thursday", "5": "Friday", "6": "Saturday", "7": "Sunday" };
+	const at = (h, m) => {
+		const hh = parseInt(h, 10);
+		const mm = String(parseInt(m, 10)).padStart(2, "0");
+		if (isNaN(hh)) return "";
+		const suffix = hh < 12 ? "am" : "pm";
+		const h12 = hh % 12 === 0 ? 12 : hh % 12;
+		return h12 + ":" + mm + suffix;
+	};
+	if (min === "*" && hour === "*") return "Every minute";
+	if (hour === "*" && /^\*\/\d+$/.test(min)) return "Every " + min.slice(2) + " minutes";
+	if (/^\*\/\d+$/.test(hour) && /^\d+$/.test(min)) return "Every " + hour.slice(2) + " hours";
+	if (dom === "*" && mon === "*" && dow === "*" && /^\d+$/.test(hour)) return "Daily at " + at(hour, min);
+	if (dom === "*" && mon === "*" && days[dow] && /^\d+$/.test(hour)) return days[dow] + "s at " + at(hour, min);
+	if (dow === "*" && mon === "*" && /^\d+$/.test(dom) && /^\d+$/.test(hour)) return "Monthly on day " + dom + " at " + at(hour, min);
+	if (dow === "1-5" && /^\d+$/.test(hour)) return "Weekdays at " + at(hour, min);
+	return "Custom schedule";
+}
+
 // fmtInterval renders a sync interval in the largest whole unit that fits.
 function fmtInterval(seconds) {
 	if (seconds % 3600 === 0) {
@@ -5508,6 +5647,9 @@ async function loadSchedules() {
 			const tr = document.createElement("tr");
 			tr.appendChild(td(s.name || "(unnamed)"));
 			tr.appendChild(td(s.cron, "mono"));
+			const cadence = td(describeCron(s.cron));
+			cadence.dataset.tip = "Plain reading of the cron expression " + s.cron;
+			tr.appendChild(cadence);
 			const target = document.createElement("td");
 			if (s.template_id) {
 				const tpl = document.createElement("a");
@@ -6169,7 +6311,26 @@ function wireUserForm() {
 }
 
 // loadUsers populates the user table with delete actions.
+// userActivity counts each account's runs and finds when it last acted, so the users list shows
+// who is actually driving the fleet rather than only who exists.
+async function userActivity() {
+	const map = new Map();
+	try {
+		const data = await getJSON("/runs?limit=500");
+		for (const r of data.runs || []) {
+			if (!r.actor) continue;
+			const at = r.created_at;
+			const cur = map.get(r.actor) || { runs: 0, last: null };
+			cur.runs++;
+			if (!cur.last || (at && at > cur.last)) cur.last = at;
+			map.set(r.actor, cur);
+		}
+	} catch { /* the columns fall back to zero and never */ }
+	return map;
+}
+
 async function loadUsers() {
+	const activity = await userActivity();
 	try {
 		const data = await getJSON("/users");
 		const users = data.users || [];
@@ -6181,7 +6342,28 @@ async function loadUsers() {
 		for (const u of users) {
 			const tr = document.createElement("tr");
 			tr.appendChild(td(u.username));
-			tr.appendChild(td(u.role, "mono"));
+			const role = td("");
+			const roleChip = document.createElement("span");
+			roleChip.className = "run-kind" + (u.role === "admin" ? " split" : "");
+			roleChip.textContent = u.role;
+			roleChip.dataset.tip = u.role === "admin"
+				? "Full access, including credentials, users, and policies"
+				: "Can run and read what they are granted";
+			role.appendChild(roleChip);
+			tr.appendChild(role);
+			const act = activity.get(u.username) || { runs: 0, last: null };
+			const fired = td("");
+			if (act.runs) {
+				const link = document.createElement("a");
+				link.href = "/ui/runs?q=" + encodeURIComponent("actor:" + u.username);
+				link.textContent = String(act.runs);
+				link.dataset.tip = "Click to see every run this account fired";
+				fired.appendChild(link);
+			} else {
+				fired.textContent = "0";
+			}
+			tr.appendChild(fired);
+			tr.appendChild(act.last ? tdTime(act.last) : td("never"));
 			tr.appendChild(tdTime(u.created_at));
 			const actions = deleteCell("/users/" + u.id, "user " + u.username, tr, "No users yet.");
 			actions.insertBefore(editButton(() => openUserEdit(u)), actions.firstChild);
