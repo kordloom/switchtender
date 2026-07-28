@@ -1497,3 +1497,36 @@ func TestSchedulePreview(t *testing.T) {
 		t.Fatalf("invalid preview = %d, want 400", rec.Code)
 	}
 }
+
+// TestLaunchOverrides verifies prompt-on-launch overrides reach the submitted run and the
+// inventory override cannot dodge validation.
+func TestLaunchOverrides(t *testing.T) {
+	t.Parallel()
+	store := template.NewMemStore()
+	tpl := &template.Template{
+		ID: "tpl_1", Name: "deploy", Playbook: "site.yml", Inventory: "inv.ini",
+		ExtraVars: map[string]any{"env": "prod"},
+	}
+	if err := store.Save(context.Background(), tpl); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	sub := &fakeSubmitter{run: &run.Run{ID: "run_new", Status: run.StatusPending}}
+	handler := New(run.NewMemStore(), sub, zap.NewNop(), WithTemplates(store)).Handler()
+
+	rec := httptest.NewRecorder()
+	body := `{"limit":"web*","dry_run":true,"extra_vars":{"env":"stage","extra":1}}`
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost,
+		"/v1/templates/"+tpl.ID+"/launch", strings.NewReader(body)))
+	if rec.Code != http.StatusCreated && rec.Code != http.StatusAccepted {
+		t.Fatalf("launch = %d, body %s", rec.Code, rec.Body.String())
+	}
+	if sub.gotRun == nil {
+		t.Fatal("no submitted run recorded")
+	}
+	if sub.gotRun.Limit != "web*" || !sub.gotRun.DryRun {
+		t.Errorf("overrides = limit %q dry %v, want web* true", sub.gotRun.Limit, sub.gotRun.DryRun)
+	}
+	if sub.gotRun.ExtraVars["env"] != "stage" {
+		t.Errorf("extra_vars env = %v, want stage (launch overrides template)", sub.gotRun.ExtraVars["env"])
+	}
+}

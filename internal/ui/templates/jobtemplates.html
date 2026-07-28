@@ -112,7 +112,38 @@
 		</table>
 	</main>
 
-	<div id="survey-modal" class="modal" hidden>
+	<div id="prompt-modal" class="modal" hidden>
+			<div class="modal-card wide">
+				<div class="modal-head">
+					<h2 id="prompt-title">Launch with overrides</h2>
+					<button type="button" class="modal-close" id="prompt-close" aria-label="Close">&times;</button>
+				</div>
+				<div class="stack">
+					<div id="prompt-survey" class="stack"></div>
+					<label class="field-label">Limit to hosts
+						<input id="prompt-limit" class="input mono" placeholder="all hosts, for example web*">
+					</label>
+					<label class="field-label">Inventory
+						<select id="prompt-inventory" class="input"><option value="">Template default</option></select>
+					</label>
+					<label class="field-label" id="prompt-field-credentials" hidden>Selectable credentials
+						<select id="prompt-credentials" class="input" multiple size="3"></select>
+					</label>
+					<label class="field-label">Extra vars, JSON, merged over the template's
+						<textarea id="prompt-vars" class="input mono" rows="2" placeholder='{"env": "stage"}'></textarea>
+					</label>
+					<label class="field-label check-label">
+						<input type="checkbox" id="prompt-dry-run"> Dry run, no changes
+					</label>
+					<div class="launch-actions">
+						<button type="button" id="prompt-go" class="button primary">Launch</button>
+						<span id="prompt-status" class="muted"></span>
+					</div>
+				</div>
+			</div>
+		</div>
+
+		<div id="survey-modal" class="modal" hidden>
 		<div class="modal-card">
 			<h2 id="survey-title">Launch</h2>
 			<form id="survey-form" class="stack"></form>

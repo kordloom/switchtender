@@ -3384,6 +3384,14 @@ async function loadTemplates() {
 			});
 			actions.appendChild(launch);
 			actions.appendChild(document.createTextNode(" "));
+			const withOpts = document.createElement("button");
+			withOpts.className = "button";
+			withOpts.innerHTML = svgIcon('<line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/>');
+			withOpts.dataset.tip = "Launch with overrides: limit, inventory, credentials, vars";
+			withOpts.setAttribute("aria-label", "Launch with overrides");
+			withOpts.addEventListener("click", (e) => { e.preventDefault(); openPromptLaunch(t); });
+			actions.appendChild(withOpts);
+			actions.appendChild(document.createTextNode(" "));
 			actions.appendChild(editButton(() => openTemplateEdit(t)));
 			actions.appendChild(document.createTextNode(" "));
 			const delBtn = deleteCell("/templates/" + t.id, "template " + t.name, tr, "No templates yet.");
@@ -3442,13 +3450,10 @@ function openTemplateView(t) {
 }
 
 // openSurvey renders a template's survey as a form and launches with the collected answers.
-function openSurvey(t) {
-	const modal = document.getElementById("survey-modal");
-	const form = document.getElementById("survey-form");
-	document.getElementById("survey-title").textContent = "Launch " + t.name;
-	document.getElementById("survey-status").textContent = "";
-	form.innerHTML = "";
-	for (const f of t.survey) {
+// surveyFieldsInto renders a template's survey fields into a container.
+function surveyFieldsInto(container, survey) {
+	container.innerHTML = "";
+	for (const f of survey || []) {
 		const label = document.createElement("label");
 		label.className = "field-label";
 		label.textContent = (f.label || f.var) + (f.required ? " *" : "");
@@ -3478,25 +3483,111 @@ function openSurvey(t) {
 		input.dataset.type = f.type || "text";
 		if (f.default !== undefined && f.default !== null) input.value = f.default;
 		label.appendChild(input);
-		form.appendChild(label);
+		container.appendChild(label);
 	}
+}
+
+// collectSurveyAnswers reads typed answers back out of a survey container.
+function collectSurveyAnswers(container) {
+	const answers = {};
+	for (const el of container.querySelectorAll("[data-var]")) {
+		const raw = el.value;
+		if (raw === "") continue;
+		if (el.dataset.type === "int") answers[el.dataset.var] = parseInt(raw, 10);
+		else if (el.dataset.type === "bool") answers[el.dataset.var] = raw === "true";
+		else answers[el.dataset.var] = raw;
+	}
+	return answers;
+}
+
+function openSurvey(t) {
+	const modal = document.getElementById("survey-modal");
+	const form = document.getElementById("survey-form");
+	document.getElementById("survey-title").textContent = "Launch " + t.name;
+	document.getElementById("survey-status").textContent = "";
+	surveyFieldsInto(form, t.survey);
 	modal.hidden = false;
 
 	document.getElementById("survey-cancel").onclick = () => { modal.hidden = true; };
 	document.getElementById("survey-go").onclick = async () => {
-		const answers = {};
-		for (const el of form.querySelectorAll("[data-var]")) {
-			const raw = el.value;
-			if (raw === "") continue;
-			if (el.dataset.type === "int") answers[el.dataset.var] = parseInt(raw, 10);
-			else if (el.dataset.type === "bool") answers[el.dataset.var] = raw === "true";
-			else answers[el.dataset.var] = raw;
-		}
 		try {
-			const created = await postAction("/templates/" + t.id + "/launch", { answers });
+			const created = await postAction("/templates/" + t.id + "/launch",
+				{ answers: collectSurveyAnswers(form) });
 			location.href = "/ui/runs/" + created.id;
 		} catch (err) {
 			document.getElementById("survey-status").textContent = "Launch failed: " + err.message;
+		}
+	};
+}
+
+// openPromptLaunch opens the launch-with-overrides dialog: survey answers when the template has
+// one, then limit, stored inventory, selectable credentials, extra vars, and mode.
+async function openPromptLaunch(t) {
+	const modal = document.getElementById("prompt-modal");
+	if (!modal) return;
+	document.getElementById("prompt-title").textContent = "Launch " + t.name + " with overrides";
+	document.getElementById("prompt-status").textContent = "";
+	document.getElementById("prompt-limit").value = "";
+	document.getElementById("prompt-vars").value = "";
+	document.getElementById("prompt-dry-run").checked = !!t.dry_run;
+	surveyFieldsInto(document.getElementById("prompt-survey"), t.survey);
+
+	const invSel = document.getElementById("prompt-inventory");
+	invSel.innerHTML = '<option value="">Template default</option>';
+	try {
+		const data = await getJSON("/inventories");
+		for (const inv of data.inventories || []) {
+			const opt = document.createElement("option");
+			opt.value = inv.id;
+			opt.textContent = inv.name;
+			invSel.appendChild(opt);
+		}
+	} catch { /* stored inventories are optional */ }
+
+	const credField = document.getElementById("prompt-field-credentials");
+	const credSel = document.getElementById("prompt-credentials");
+	credSel.innerHTML = "";
+	const selectable = t.selectable_credential_ids || [];
+	credField.hidden = !selectable.length;
+	if (selectable.length) {
+		try {
+			const data = await getJSON("/credentials");
+			const byID = new Map((data.credentials || []).map((c) => [c.id, c]));
+			for (const cid of selectable) {
+				const c = byID.get(cid);
+				const opt = document.createElement("option");
+				opt.value = cid;
+				opt.textContent = c ? c.name + " (" + c.kind + ")" : cid;
+				credSel.appendChild(opt);
+			}
+		} catch { credField.hidden = true; }
+	}
+
+	modal.hidden = false;
+	document.getElementById("prompt-close").onclick = () => { modal.hidden = true; };
+	document.getElementById("prompt-go").onclick = async () => {
+		const status = document.getElementById("prompt-status");
+		const payload = { answers: collectSurveyAnswers(document.getElementById("prompt-survey")) };
+		const limit = document.getElementById("prompt-limit").value.trim();
+		if (limit) payload.limit = limit;
+		if (invSel.value) payload.inventory_id = invSel.value;
+		const picked = Array.from(credSel.selectedOptions).map((o) => o.value);
+		if (picked.length) payload.credential_ids = picked;
+		const varsText = document.getElementById("prompt-vars").value.trim();
+		if (varsText) {
+			try {
+				payload.extra_vars = JSON.parse(varsText);
+			} catch (_) {
+				status.textContent = "Extra vars must be valid JSON.";
+				return;
+			}
+		}
+		payload.dry_run = document.getElementById("prompt-dry-run").checked;
+		try {
+			const created = await postAction("/templates/" + t.id + "/launch", payload);
+			location.href = "/ui/runs/" + created.id;
+		} catch (err) {
+			status.textContent = "Launch failed: " + err.message;
 		}
 	};
 }

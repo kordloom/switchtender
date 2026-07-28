@@ -238,6 +238,16 @@ type launchTemplateRequest struct {
 	Answers map[string]any `json:"answers,omitempty"`
 	// CredentialIDs is the chosen subset of the template's selectable credentials.
 	CredentialIDs []string `json:"credential_ids,omitempty"`
+	// Limit narrows this launch to a host pattern when set.
+	Limit *string `json:"limit,omitempty"`
+	// InventoryID targets a different stored inventory for this launch. The launch is authorized
+	// against it like any other object; file paths cannot be overridden.
+	InventoryID *string `json:"inventory_id,omitempty"`
+	// ExtraVars are launch-time variables, merged over the template's and the survey's.
+	ExtraVars map[string]any `json:"extra_vars,omitempty"`
+	// DryRun overrides the template's mode for this launch when set. Approval policies still
+	// evaluate the submitted run either way.
+	DryRun *bool `json:"dry_run,omitempty"`
 }
 
 // mergeCredentialIDs returns base followed by any extra ids not already present, dropping blanks, so
@@ -307,11 +317,15 @@ func launchTemplateHandler(store template.Store, submitter Submitter, authz *aut
 			}
 		}
 		credIDs := mergeCredentialIDs(t.CredentialIDs, launchReq.CredentialIDs)
+		inventoryID := t.InventoryID
+		if launchReq.InventoryID != nil {
+			inventoryID = *launchReq.InventoryID
+		}
 
 		// Use on the template is not enough. Authorize every object the run will touch, so a launch
 		// cannot borrow a project, inventory, or credential the actor was never granted, including a
 		// credential chosen at launch.
-		objects := append([]string{t.ProjectID, t.InventoryID, t.PullCredentialID}, credIDs...)
+		objects := append([]string{t.ProjectID, inventoryID, t.PullCredentialID}, credIDs...)
 		if denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse, objects...)) {
 			return
 		}
@@ -326,17 +340,25 @@ func launchTemplateHandler(store template.Store, submitter Submitter, authz *aut
 			}
 			maps.Copy(vars, resolved)
 		}
+		maps.Copy(vars, launchReq.ExtraVars)
+		dryRun := t.DryRun
+		if launchReq.DryRun != nil {
+			dryRun = *launchReq.DryRun
+		}
 
 		opts := []run.SubmitOption{
 			run.WithCredentialIDs(credIDs),
 			run.WithExtraVars(vars),
-			run.WithTool(t.Tool), run.WithCommand(t.Command), run.WithDryRun(t.DryRun),
+			run.WithTool(t.Tool), run.WithCommand(t.Command), run.WithDryRun(dryRun),
+		}
+		if launchReq.Limit != nil && *launchReq.Limit != "" {
+			opts = append(opts, run.WithLimit(*launchReq.Limit))
 		}
 		if t.ProjectID != "" {
 			opts = append(opts, run.WithProject(t.ProjectID))
 		}
-		if t.InventoryID != "" {
-			opts = append(opts, run.WithInventory(t.InventoryID))
+		if inventoryID != "" {
+			opts = append(opts, run.WithInventory(inventoryID))
 		}
 		if t.Queue != "" {
 			opts = append(opts, run.WithQueue(t.Queue))

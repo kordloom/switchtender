@@ -753,6 +753,13 @@ func rerunRunHandler(store run.Store, submitter Submitter, authz *authorizer, lo
 			respondError(w, log, http.StatusConflict, "run has not finished")
 			return
 		}
+		// Access to the run is not enough to fire its spec again. Authorize every object the new
+		// run touches, mirroring a template launch, so a rerun cannot borrow a project,
+		// inventory, or credential the actor was never granted.
+		objects := append([]string{rn.ProjectID, rn.InventoryID, rn.PullCredentialID}, rn.CredentialIDs...)
+		if denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse, objects...)) {
+			return
+		}
 		opts := rerunOptions(rn)
 		var created *run.Run
 		if rn.Kind == run.KindSplit && rn.ShardCount != nil && *rn.ShardCount > 1 {
