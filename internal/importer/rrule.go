@@ -20,8 +20,11 @@ func RRULEToCron(rrule string) (string, bool) {
 	if interval == "" {
 		interval = "1"
 	}
-	minute := firstOr(parts["BYMINUTE"], "0")
-	hour := firstOr(parts["BYHOUR"], "0")
+	// AWX usually carries the time of day in DTSTART rather than BYHOUR and BYMINUTE, so fall
+	// back to it. Defaulting straight to midnight would silently move a nightly job.
+	startHour, startMinute := dtstartTime(rrule)
+	minute := firstOr(parts["BYMINUTE"], startMinute)
+	hour := firstOr(parts["BYHOUR"], startHour)
 
 	switch freq {
 	case "MINUTELY":
@@ -52,13 +55,13 @@ func RRULEToCron(rrule string) (string, bool) {
 	}
 }
 
-// parseRRULE extracts the KEY=VALUE pairs from the RRULE line of an iCalendar rule, ignoring the
-// DTSTART line AWX prepends.
+// parseRRULE extracts the KEY=VALUE pairs from an iCalendar rule. AWX writes DTSTART and RRULE on
+// separate lines in some exports and on one space-separated line in others, so both are accepted
+// and the DTSTART part is skipped here.
 func parseRRULE(rrule string) map[string]string {
 	out := map[string]string{}
-	for line := range strings.SplitSeq(rrule, "\n") {
-		line = strings.TrimSpace(line)
-		rule, ok := strings.CutPrefix(line, "RRULE:")
+	for field := range strings.FieldsSeq(strings.ReplaceAll(rrule, "\n", " ")) {
+		rule, ok := strings.CutPrefix(field, "RRULE:")
 		if !ok {
 			continue
 		}
@@ -69,6 +72,62 @@ func parseRRULE(rrule string) map[string]string {
 		}
 	}
 	return out
+}
+
+// dtstartTime reads the hour and minute out of an iCalendar DTSTART, in either the plain or the
+// TZID-qualified form. It returns midnight when there is no usable DTSTART, which matches the
+// iCalendar default. The wall-clock time is used as written, since cron fires in the server's
+// local time and that is the time the operator chose.
+func dtstartTime(rrule string) (hour, minute string) {
+	for field := range strings.FieldsSeq(strings.ReplaceAll(rrule, "\n", " ")) {
+		if !strings.HasPrefix(strings.ToUpper(field), "DTSTART") {
+			continue
+		}
+		// The value follows the last colon: DTSTART:20260101T020000Z or
+		// DTSTART;TZID=America/New_York:20260101T020000.
+		idx := strings.LastIndex(field, ":")
+		if idx < 0 {
+			continue
+		}
+		value := field[idx+1:]
+		t := strings.IndexAny(value, "Tt")
+		if t < 0 || len(value) < t+5 {
+			continue
+		}
+		clock := value[t+1:]
+		if len(clock) < 4 {
+			continue
+		}
+		h, m := clock[0:2], clock[2:4]
+		if !isTwoDigits(h) || !isTwoDigits(m) {
+			continue
+		}
+		return trimZero(h), trimZero(m)
+	}
+	return "0", "0"
+}
+
+// isTwoDigits reports whether s is exactly two ASCII digits.
+func isTwoDigits(s string) bool {
+	if len(s) != 2 {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// trimZero drops a leading zero from a two-digit clock field so the cron field reads 2 rather
+// than 02, keeping a single zero for midnight.
+func trimZero(s string) string {
+	trimmed := strings.TrimLeft(s, "0")
+	if trimmed == "" {
+		return "0"
+	}
+	return trimmed
 }
 
 // everyField returns a cron step field, collapsing an interval of one to a plain wildcard.

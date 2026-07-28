@@ -3515,7 +3515,62 @@ async function loadProjects() {
 // wireMigrate hooks the Preview and Import buttons up to the import endpoint. Preview shows the plan;
 // Import writes it. The buttons are wired even in the read-only demo, where applyReadOnly disables
 // them.
+// SAMPLE_AWX_EXPORT is a small but real AWX export in the shape the importer accepts, so the
+// migration can be tried without having an AWX instance to export from. It covers projects,
+// grouped inventories, credentials, templates with a survey and slicing, and a schedule.
+const SAMPLE_AWX_EXPORT = {
+	projects: [
+		{ name: "web-platform", scm_type: "git", scm_url: "https://github.com/acme/web-platform.git", scm_branch: "main" },
+		{ name: "database-ops", scm_type: "git", scm_url: "https://github.com/acme/database-ops.git", scm_branch: "main" },
+	],
+	inventories: [
+		{
+			name: "production",
+			groups: [
+				{ name: "web", hosts: [{ name: "web01" }, { name: "web02" }, { name: "web03" }] },
+				{ name: "db", hosts: [{ name: "db01" }, { name: "db02" }] },
+			],
+		},
+		{ name: "staging", hosts: [{ name: "stage01" }] },
+	],
+	credentials: [
+		{ name: "prod-ssh", credential_type: "Machine" },
+		{ name: "vault-password", credential_type: "Vault" },
+	],
+	job_templates: [
+		{
+			name: "Deploy web", playbook: "site.yml", project: "web-platform",
+			inventory: "production", job_slice_count: 3, credentials: ["prod-ssh"],
+			survey_spec: {
+				spec: [{ variable: "release", question_name: "Release tag", type: "text", required: true }],
+			},
+		},
+		{
+			name: "Migrate database", playbook: "migrate.yml", project: "database-ops",
+			inventory: "production", credentials: ["prod-ssh", "vault-password"],
+		},
+		{
+			name: "Nightly audit", playbook: "audit.yml", project: "web-platform",
+			inventory: "production",
+			related: {
+				schedules: [{ name: "Every night", rrule: "DTSTART:20260101T020000Z RRULE:FREQ=DAILY;INTERVAL=1" }],
+			},
+		},
+	],
+};
+
 function wireMigrate() {
+	const sample = document.getElementById("migrate-sample");
+	if (sample) {
+		sample.addEventListener("click", () => {
+			document.getElementById("migrate-format").value = "awx";
+			document.getElementById("migrate-export").value =
+				JSON.stringify(SAMPLE_AWX_EXPORT, null, 2);
+			const status = document.getElementById("migrate-status");
+			if (status) status.textContent = "Sample loaded. Preview shows what it would create.";
+		});
+	}
+
 	const preview = document.getElementById("migrate-preview");
 	const apply = document.getElementById("migrate-apply");
 	if (preview) preview.addEventListener("click", () => runMigrate(false));

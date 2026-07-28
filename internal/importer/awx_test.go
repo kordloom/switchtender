@@ -195,6 +195,14 @@ func TestRRULEConversions(t *testing.T) {
 		{In: "RRULE:FREQ=MONTHLY;BYMONTHDAY=1;BYHOUR=0", Want: "0 0 1 * *", OK: true},      // Test 4: Monthly on the first.
 		{In: "RRULE:FREQ=DAILY;INTERVAL=3", Want: "", OK: false},                           // Test 5: Every three days is unmappable.
 		{In: "RRULE:FREQ=YEARLY", Want: "", OK: false},                                     // Test 6: Yearly is unmappable.
+		// AWX writes DTSTART and RRULE on one space-separated line, and carries the time of day in
+		// DTSTART rather than BYHOUR, so a nightly job must not silently become a midnight job.
+		{In: "DTSTART:20260101T020000Z RRULE:FREQ=DAILY;INTERVAL=1", Want: "0 2 * * *", OK: true},                           // Test 7: One-line daily at 2am.
+		{In: "DTSTART:20260101T023000Z\nRRULE:FREQ=DAILY", Want: "30 2 * * *", OK: true},                                    // Test 8: Two-line daily at 2.30am.
+		{In: "DTSTART;TZID=America/New_York:20260101T093000 RRULE:FREQ=WEEKLY;BYDAY=MO,FR", Want: "30 9 * * 1,5", OK: true}, // Test 9: Zoned weekly keeps its wall time.
+		{In: "DTSTART:20260101T000000Z RRULE:FREQ=DAILY", Want: "0 0 * * *", OK: true},                                      // Test 10: Midnight stays midnight.
+		{In: "DTSTART:20260101T020000Z RRULE:FREQ=DAILY;BYHOUR=5", Want: "0 5 * * *", OK: true},                             // Test 11: An explicit BYHOUR outranks DTSTART.
+		{In: "DTSTART:20260101T183000Z RRULE:FREQ=MONTHLY;BYMONTHDAY=15", Want: "30 18 15 * *", OK: true},                   // Test 12: Monthly keeps the DTSTART time.
 	}
 	for i, test := range tests {
 		got, ok := importer.RRULEToCron(test.In)
