@@ -21,7 +21,22 @@ func (d *Dispatcher) Approve(ctx context.Context, id string) (*run.Run, error) {
 		return nil, ErrNotPendingApproval
 	}
 	r.Status = run.StatusPending
+	// No claim loop picks up a pipeline parent, so an approved pipeline starts here or never runs.
+	if r.Kind == run.KindPipeline {
+		d.startPipeline(r)
+	}
 	return r, nil
+}
+
+// startPipeline begins executing an approved pipeline. A parent whose steps were never stored cannot
+// be run, so it fails with a stated reason rather than sitting pending forever with no explanation.
+func (d *Dispatcher) startPipeline(parent *run.Run) {
+	if len(parent.Steps) == 0 {
+		d.finalize(parent, run.StatusFailed, nil, "pipeline has no stored steps to run")
+		return
+	}
+	d.wg.Add(1)
+	go d.runPipeline(parent.Clone(), parent.Steps)
 }
 
 // Reject terminally denies a run held for approval so it never executes. reason is recorded as the

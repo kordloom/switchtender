@@ -161,6 +161,10 @@ type Run struct {
 	Kind string `json:"kind,omitempty"`
 	// RetryOf links a split created by a failed shard retry back to the run it retries.
 	RetryOf *string `json:"retry_of,omitempty"`
+	// Steps is the step graph when this run is a pipeline parent. It is stored so a pipeline held
+	// for approval can be executed after a restart, and so a finished pipeline can still show the
+	// shape it ran, including the dependencies that the child runs alone do not record.
+	Steps []PipelineStep `json:"steps,omitempty"`
 	// StepName is the step name when this run is a pipeline step.
 	StepName string `json:"step_name,omitempty"`
 	// StepIndex is the step order when this run is a pipeline step.
@@ -311,6 +315,13 @@ func (r *Run) Clone() *Run {
 	out.CredentialIDs = append([]string(nil), r.CredentialIDs...)
 	out.Notifications = append([]NotifyTarget(nil), r.Notifications...)
 	out.Labels = maps.Clone(r.Labels)
+	if r.Steps != nil {
+		out.Steps = make([]PipelineStep, len(r.Steps))
+		for i, s := range r.Steps {
+			s.DependsOn = append([]string(nil), s.DependsOn...)
+			out.Steps[i] = s
+		}
+	}
 	return &out
 }
 

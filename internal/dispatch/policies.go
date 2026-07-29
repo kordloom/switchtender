@@ -27,3 +27,30 @@ func (d *Dispatcher) requiresApproval(ctx context.Context, r *run.Run) bool {
 	}
 	return policy.Requires(policies, r)
 }
+
+// pipelineRequiresApproval reports whether a pipeline must be held, which it must when the parent
+// itself matches a blanket policy or when any of its steps does. A pipeline is submitted through a
+// different path than a single run, so without this the same command an operator gated would execute
+// freely by being wrapped in a one-step workflow. The whole pipeline is held rather than the matching
+// step, because the graph walk cannot park a step midway and a partly applied change is worse than
+// one that never started.
+func (d *Dispatcher) pipelineRequiresApproval(ctx context.Context, parent *run.Run,
+	steps []run.PipelineStep) bool {
+	if d.policies == nil {
+		return false
+	}
+	policies, err := d.policies.List(ctx)
+	if err != nil {
+		d.log.Error("dispatch: list policies: " + err.Error())
+		return false
+	}
+	if policy.Requires(policies, parent) {
+		return true
+	}
+	for i, step := range steps {
+		if policy.Requires(policies, stepRun(parent, step, i, 0, nil)) {
+			return true
+		}
+	}
+	return false
+}
