@@ -226,6 +226,18 @@ instance is safe to expose. It needs ansible on the PATH to run the sample playb
 |------|---------|---------|
 | `--addr` | `:8080` | Address the demo listens on. |
 | `--db` | temporary file | Database to seed and serve. Empty uses a fresh temporary SQLite file. |
+| `--seed-only` | off | Seed the database and exit without serving. |
+| `--no-seed` | off | Serve the database as it already stands instead of seeding it. |
+
+Seeding runs real playbooks and takes a couple of minutes, which is a visible gap if a public
+demo reseeds in place. The two flags split that work in half so it can happen off to the side:
+
+    switchtender demo --db next.db --seed-only     # build the next database, serving continues
+    mv next.db demo.db                             # swap it in
+    switchtender demo --db demo.db --no-seed       # serves the prepared data in under a second
+
+A host wired this way reseeds without a visible outage, since the running instance keeps
+answering the whole time the replacement is being built.
 
 ## version
 

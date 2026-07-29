@@ -10,11 +10,11 @@
 	<meta property="og:description" content="SwitchTender is one binary with subcommands. This page lists every command, flag, and environment variable.">
 	<meta property="og:type" content="article">
 	<meta property="og:url" content="https://switchtender.com/docs/configuration">
-	<meta property="og:image" content="https://switchtender.com/assets/screenshot-fleet.png?v=8">
+	<meta property="og:image" content="https://switchtender.com/assets/screenshot-fleet.png?v=7">
 	<meta name="twitter:card" content="summary_large_image">
 	<meta name="twitter:title" content="Configuration · SwitchTender docs">
 	<meta name="twitter:description" content="SwitchTender is one binary with subcommands. This page lists every command, flag, and environment variable.">
-	<meta name="twitter:image" content="https://switchtender.com/assets/screenshot-fleet.png?v=8">
+	<meta name="twitter:image" content="https://switchtender.com/assets/screenshot-fleet.png?v=7">
 	<link rel="icon" href="/favicon.ico" sizes="any">
 	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
 	<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
@@ -727,8 +727,26 @@ instance is safe to expose. It needs ansible on the PATH to run the sample playb
 <td>temporary file</td>
 <td>Database to seed and serve. Empty uses a fresh temporary SQLite file.</td>
 </tr>
+<tr>
+<td><code>--seed-only</code></td>
+<td>off</td>
+<td>Seed the database and exit without serving.</td>
+</tr>
+<tr>
+<td><code>--no-seed</code></td>
+<td>off</td>
+<td>Serve the database as it already stands instead of seeding it.</td>
+</tr>
 </tbody>
 </table>
+<p>Seeding runs real playbooks and takes a couple of minutes, which is a visible gap if a public
+demo reseeds in place. The two flags split that work in half so it can happen off to the side:</p>
+<pre><code>switchtender demo --db next.db --seed-only     # build the next database, serving continues
+mv next.db demo.db                             # swap it in
+switchtender demo --db demo.db --no-seed       # serves the prepared data in under a second
+</code></pre>
+<p>A host wired this way reseeds without a visible outage, since the running instance keeps
+answering the whole time the replacement is being built.</p>
 <h2 id="version">version</h2>
 <p>Prints the SwitchTender version.</p>
 <h2 id="global-flags">Global flags</h2>
