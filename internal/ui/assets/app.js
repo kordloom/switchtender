@@ -5730,6 +5730,71 @@ function mountHostActions(host) {
 	bar.appendChild(copy);
 }
 
+// FACT_LABELS names each stored fact for the interface, in the order they read best.
+const FACT_LABELS = [
+	["fqdn", "Hostname"],
+	["distribution", "Distribution"],
+	["distribution_version", "Version"],
+	["kernel", "Kernel"],
+	["architecture", "Architecture"],
+	["processor_vcpus", "vCPUs"],
+	["memtotal_mb", "Memory"],
+	["ip", "Address"],
+	["service_mgr", "Service manager"],
+	["virtualization_type", "Virtualization"],
+	["python_version", "Python"],
+];
+
+// loadHostFacts fills the system facts panel from the last run that gathered them. A host that
+// has never been gathered says so and explains how to gather, rather than showing a blank card.
+async function loadHostFacts(host) {
+	const panel = document.getElementById("host-facts");
+	const body = document.getElementById("host-facts-body");
+	const note = document.getElementById("host-facts-note");
+	if (!panel || !body) return;
+	try {
+		const data = await getJSON("/hosts/" + encodeURIComponent(host) + "/facts");
+		const facts = data.facts || {};
+		body.innerHTML = "";
+		for (const [key, label] of FACT_LABELS) {
+			if (!facts[key]) continue;
+			const k = document.createElement("span");
+			k.className = "view-k";
+			k.textContent = label;
+			const v = document.createElement("span");
+			v.className = "view-v";
+			v.textContent = key === "memtotal_mb" ? facts[key] + " MB" : facts[key];
+			body.appendChild(k);
+			body.appendChild(v);
+		}
+		if (!body.childElementCount) {
+			body.innerHTML = "";
+			note.textContent = "The last gather returned nothing recognizable.";
+		} else if (note) {
+			note.textContent = data.gathered_at
+				? "Gathered " + relTime(data.gathered_at)
+				: "";
+			if (data.run_id) {
+				note.appendChild(document.createTextNode(" by "));
+				const link = document.createElement("a");
+				link.href = "/ui/runs/" + data.run_id;
+				link.textContent = shortId(data.run_id);
+				link.dataset.tip = "Click to open the run that gathered these facts";
+				note.appendChild(link);
+			}
+		}
+		panel.hidden = false;
+	} catch {
+		// A host with no gather is the ordinary case on a fleet that runs with gather_facts off.
+		body.innerHTML = "";
+		if (note) {
+			note.textContent = "No facts gathered yet. Run a play against this host with " +
+				"gather_facts enabled and they will appear here.";
+		}
+		panel.hidden = false;
+	}
+}
+
 // renderHostSummary turns the host's run history into headline metrics, so its condition reads
 // before the table does.
 function renderHostSummary(host, runs) {
@@ -5929,6 +5994,7 @@ async function proposeReconcile(host, btn) {
 // loadHost populates one host's run history table, newest first.
 async function loadHost(host) {
 	mountHostActions(host);
+	loadHostFacts(host);
 	try {
 		const data = await getJSON("/hosts/" + encodeURIComponent(host) + "/runs");
 		const runs = data.runs || [];

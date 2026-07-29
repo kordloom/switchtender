@@ -36,6 +36,8 @@ type wireEvent struct {
 	Diff string `json:"diff"`
 	// Truncated reports that captured fields were cut.
 	Truncated bool `json:"truncated"`
+	// Facts holds a host's gathered system facts on a facts event.
+	Facts map[string]string `json:"facts"`
 	// Stats holds per host recap totals on stats events.
 	Stats map[string]HostStats `json:"stats"`
 	// Outputs holds set_stats values published by the playbook.
@@ -59,6 +61,7 @@ func (w wireEvent) event() Event {
 		Truncated: w.Truncated,
 		Stats:     w.Stats,
 		Outputs:   w.Outputs,
+		Facts:     w.Facts,
 	}
 }
 

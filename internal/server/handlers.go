@@ -725,6 +725,25 @@ func parseFieldedQuery(q string, filter *run.ListFilter) {
 	filter.Query = strings.Join(free, " ")
 }
 
+// hostFactsHandler returns a host's most recently gathered system facts. A host that has never
+// been through a fact-gathering play reports not found rather than an empty object, so the
+// interface can say so plainly.
+func hostFactsHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		facts, err := store.HostFactsFor(r.Context(), r.PathValue("host"))
+		if errors.Is(err, run.ErrNotFound) {
+			respondError(w, log, http.StatusNotFound, "no facts gathered for this host yet")
+			return
+		}
+		if err != nil {
+			log.Error("server: host facts: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not read host facts")
+			return
+		}
+		respondJSON(w, log, http.StatusOK, facts, wantsPretty(r))
+	}
+}
+
 // actorName returns the authenticated caller's audit name, empty when the API runs open.
 func actorName(r *http.Request) string {
 	if a, ok := actorFrom(r.Context()); ok {

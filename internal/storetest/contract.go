@@ -22,6 +22,7 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Helper()
 	t.Run("save and get", func(t *testing.T) { testSaveGet(t, newStore()) })
 	t.Run("provenance round trip", func(t *testing.T) { testProvenance(t, newStore()) })
+	t.Run("host facts", func(t *testing.T) { testHostFacts(t, newStore()) })
 	t.Run("get missing", func(t *testing.T) { testGetNotFound(t, newStore()) })
 	t.Run("idempotency key dedup", func(t *testing.T) { testByIdempotencyKey(t, newStore()) })
 	t.Run("save updates existing", func(t *testing.T) { testSaveUpdate(t, newStore()) })
@@ -1536,5 +1537,57 @@ func testProvenance(t *testing.T, store run.Store) {
 	}
 	if diff := cmp.Diff(saved.Labels, got.Labels); diff != "" {
 		t.Errorf("labels mismatch (-want +got):\n%s", diff)
+	}
+}
+
+// testHostFacts verifies gathered facts round trip per host, that a later gather replaces an
+// earlier one, and that a host nobody has gathered reports not found rather than an empty record.
+func testHostFacts(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	at := time.Date(2026, 7, 29, 9, 0, 0, 0, time.UTC)
+
+	if _, err := store.HostFactsFor(ctx, "never-gathered"); !errors.Is(err, run.ErrNotFound) {
+		t.Errorf("HostFactsFor(unknown) error = %v, want ErrNotFound", err)
+	}
+
+	first := []run.HostFacts{
+		{Host: "web01", Facts: map[string]string{"distribution": "Debian", "kernel": "6.1.0"}, GatheredAt: at},
+		{Host: "db01", Facts: map[string]string{"distribution": "Ubuntu"}, GatheredAt: at},
+	}
+	if err := store.SaveHostFacts(ctx, "run_1", first); err != nil {
+		t.Fatalf("SaveHostFacts() error = %v", err)
+	}
+	got, err := store.HostFactsFor(ctx, "web01")
+	if err != nil {
+		t.Fatalf("HostFactsFor() error = %v", err)
+	}
+	if got.Facts["distribution"] != "Debian" || got.Facts["kernel"] != "6.1.0" || got.RunID != "run_1" {
+		t.Errorf("facts = %+v, want the Debian gather from run_1", got)
+	}
+
+	// A later gather replaces the earlier one, since the newest is the truth about a host.
+	later := at.Add(time.Hour)
+	if err := store.SaveHostFacts(ctx, "run_2", []run.HostFacts{
+		{Host: "web01", Facts: map[string]string{"distribution": "Debian", "kernel": "6.6.0"}, GatheredAt: later},
+	}); err != nil {
+		t.Fatalf("SaveHostFacts() error = %v", err)
+	}
+	got, err = store.HostFactsFor(ctx, "web01")
+	if err != nil {
+		t.Fatalf("HostFactsFor() error = %v", err)
+	}
+	if got.Facts["kernel"] != "6.6.0" || got.RunID != "run_2" {
+		t.Errorf("facts after regather = %+v, want the run_2 gather", got)
+	}
+
+	// The other host is untouched by that replacement.
+	other, err := store.HostFactsFor(ctx, "db01")
+	if err != nil || other.Facts["distribution"] != "Ubuntu" {
+		t.Errorf("db01 facts = %+v, err %v, want the original Ubuntu gather", other, err)
+	}
+
+	// An empty set is a no-op rather than an error, so a run that gathered nothing is fine.
+	if err := store.SaveHostFacts(ctx, "run_3", nil); err != nil {
+		t.Errorf("SaveHostFacts(nil) error = %v, want nil", err)
 	}
 }

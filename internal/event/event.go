@@ -23,6 +23,8 @@ const (
 	TypeRunnerUnreachable Type = "runner_unreachable"
 	// TypeStats marks the end of run recap totals per host.
 	TypeStats Type = "stats"
+	// TypeFacts carries a host's gathered system facts from a fact-gathering task.
+	TypeFacts Type = "facts"
 )
 
 // Event is one structured moment in a run.
@@ -56,6 +58,8 @@ type Event struct {
 	// Outputs holds values a playbook published with set_stats, set only on stats events. A
 	// pipeline feeds them to dependent steps as extra vars.
 	Outputs map[string]any `json:"outputs,omitempty"`
+	// Facts holds a host's gathered system facts, set on a facts event.
+	Facts map[string]string `json:"facts,omitempty"`
 	// Seq is the store sequence assigned when the event is read, used as a stream and paging
 	// cursor. It is zero on an event that has not come from a store, so it is never persisted.
 	Seq int64 `json:"seq,omitempty"`

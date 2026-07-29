@@ -1394,6 +1394,13 @@ func (d *Dispatcher) summarize(r *run.Run) {
 			d.log.Error("dispatch: save host summary: "+err.Error(), zap.String("run_id", r.ID))
 		}
 	}
+	if facts := run.HostFactsFromEvents(events, r.CreatedAt); len(facts) > 0 {
+		if err := withRetries(func() error {
+			return d.store.SaveHostFacts(context.Background(), r.ID, facts)
+		}); err != nil {
+			d.log.Error("dispatch: save host facts: "+err.Error(), zap.String("run_id", r.ID))
+		}
+	}
 	if tasks := run.TaskSummariesFromEvents(events, r.CreatedAt); len(tasks) > 0 {
 		if err := withRetries(func() error {
 			return d.store.SaveTaskSummary(context.Background(), r.ID, tasks)

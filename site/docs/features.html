@@ -294,6 +294,15 @@ source:schedule, actor:alice, host:web01, and label:env=prod, all resolved by th
 the whole history rather than the loaded page.</li>
 <li>Playbook names open the file itself, read only, from the project's cached checkout.</li>
 </ul>
+<h2 id="host-facts">Host facts</h2>
+<ul>
+<li>A play that gathers facts records what each host is: distribution and version, kernel,
+architecture, vCPUs, memory, address, service manager, virtualization, and Python version.</li>
+<li>The facts appear on the host's page with when they were gathered and a link to the run that
+gathered them. A later gather replaces an earlier one, so the page always shows current truth.</li>
+<li>Nothing is gathered unless a play asks for it, so a fleet that runs with <code>gather_facts: false</code>
+stores nothing and the page says so.</li>
+</ul>
 <h2 id="running-a-public-demo">Running a public demo</h2>
 <ul>
 <li><code>switchtender demo</code> seeds a database with sample projects, templates, inventories, and real
