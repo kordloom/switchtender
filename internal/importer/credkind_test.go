@@ -30,7 +30,7 @@ func TestMapCredentialKind(t *testing.T) {
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.AWXType), func(t *testing.T) {
 			t.Parallel()
-			gotKind, gotExact := mapCredentialKind(test.AWXType)
+			gotKind, gotExact := mapCredentialKind(test.AWXType, nil)
 			if gotKind != test.WantKind || gotExact != test.WantExact {
 				t.Errorf("mapCredentialKind(%q) = %q, %v, want %q, %v",
 					test.AWXType, gotKind, gotExact, test.WantKind, test.WantExact)

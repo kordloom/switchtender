@@ -129,12 +129,53 @@ func mapSurveyType(awxType string) (template.FieldType, bool) {
 	}
 }
 
+// awxPublicInputs lists the AWX credential inputs that are never secret, so their values can be
+// reported back to the operator. AWX replaces secrets with "$encrypted$" on export, but this
+// allowlist decides rather than that marker alone: a custom credential type whose secret field AWX
+// does not mask would otherwise leak into a warning that is displayed and stored.
+var awxPublicInputs = []string{
+	"authorize", "become_method", "become_username", "client", "cloud_environment", "domain",
+	"host", "organization", "project", "region", "resource_group", "subscription", "tenant",
+	"username", "validate_certs",
+}
+
+// publicInputs returns an AWX credential's non-secret inputs as sorted key=value pairs, for telling
+// an operator what the export recorded beyond the secret itself. Values that are empty or still
+// carry AWX's encrypted marker are left out, as is anything not on the allowlist.
+func publicInputs(inputs map[string]any) []string {
+	if len(inputs) == 0 {
+		return nil
+	}
+	var out []string
+	for _, key := range awxPublicInputs {
+		v, ok := inputs[key]
+		if !ok {
+			continue
+		}
+		value := strings.TrimSpace(fmt.Sprint(v))
+		if value == "" || value == "$encrypted$" {
+			continue
+		}
+		out = append(out, key+"="+value)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // mapCredentialKind converts an AWX credential type name to a SwitchTender credential kind, reporting
-// whether the mapping is exact. Unknown types fall back to the env kind.
-func mapCredentialKind(awxType string) (credential.Kind, bool) {
+// whether the mapping is exact. Unknown types fall back to the env kind. The credential's inputs
+// refine the machine type, which covers both key and password login in AWX and so cannot be told
+// apart by its name alone.
+func mapCredentialKind(awxType string, inputs map[string]any) (credential.Kind, bool) {
 	lower := strings.ToLower(awxType)
 	switch lower {
 	case "machine", "source control", "scm":
+		if hasInput(inputs, "ssh_key_data") {
+			return credential.KindSSHKey, true
+		}
+		if hasInput(inputs, "password") {
+			return credential.KindSSHPassword, true
+		}
 		return credential.KindSSHKey, true
 	case "network":
 		return credential.KindNetwork, true
@@ -156,6 +197,16 @@ func mapCredentialKind(awxType string) (credential.Kind, bool) {
 		return credential.KindToken, true
 	}
 	return credential.KindEnv, false
+}
+
+// hasInput reports whether an AWX credential configured the named input. AWX exports a secret as the
+// literal "$encrypted$", so a set secret is present but unreadable, which is all this needs to know.
+func hasInput(inputs map[string]any, key string) bool {
+	v, ok := inputs[key]
+	if !ok {
+		return false
+	}
+	return strings.TrimSpace(fmt.Sprint(v)) != ""
 }
 
 // choicesFrom normalizes a survey field's choices, which AWX encodes as either a list or a newline

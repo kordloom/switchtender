@@ -3,6 +3,7 @@ package importer
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/kordloom/switchtender/internal/credential"
@@ -161,6 +162,10 @@ type awxCredential struct {
 	Name string `json:"name"`
 	// CredentialType is the AWX credential type name.
 	CredentialType string `json:"credential_type"`
+	// Inputs are the credential's configured values. AWX replaces every secret among them with the
+	// literal "$encrypted$", so what survives an export is the non-secret settings: which user to
+	// connect as, how to become root, which region or endpoint to talk to.
+	Inputs map[string]any `json:"inputs,omitempty"`
 }
 
 // awxRef is an AWX natural-key reference that decodes from a name string, a natural-key array whose
@@ -229,7 +234,7 @@ func FromAWX(data []byte, now time.Time) (*Plan, error) {
 
 	credentialIDs := map[string]string{}
 	for _, c := range export.Credentials {
-		kind, exact := mapCredentialKind(c.CredentialType)
+		kind, exact := mapCredentialKind(c.CredentialType, c.Inputs)
 		if !exact {
 			plan.warn("credential %q type %q mapped to %q; verify it is correct",
 				c.Name, c.CredentialType, kind)
@@ -237,7 +242,13 @@ func FromAWX(data []byte, now time.Time) (*Plan, error) {
 		obj := &credential.Credential{ID: credential.NewID(), Name: c.Name, Kind: kind, CreatedAt: now}
 		plan.Credentials = append(plan.Credentials, obj)
 		credentialIDs[c.Name] = obj.ID
-		plan.warn("credential %q needs its secret re-entered; exports omit secrets by design", c.Name)
+		if settings := publicInputs(c.Inputs); len(settings) > 0 {
+			plan.warn("credential %q needs its secret re-entered; exports omit secrets by design. "+
+				"AWX also recorded %s, which the secret should carry",
+				c.Name, strings.Join(settings, ", "))
+		} else {
+			plan.warn("credential %q needs its secret re-entered; exports omit secrets by design", c.Name)
+		}
 	}
 
 	for _, s := range export.InventorySources {

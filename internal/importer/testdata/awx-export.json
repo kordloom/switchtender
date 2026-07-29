@@ -1,31 +1,107 @@
 {
   "projects": [
-    {"name": "Web", "scm_type": "git", "scm_url": "https://github.com/acme/web.git", "scm_branch": "main"},
-    {"name": "Manual", "scm_type": "", "scm_url": ""}
+    {
+      "name": "Web",
+      "scm_type": "git",
+      "scm_url": "https://github.com/acme/web.git",
+      "scm_branch": "main"
+    },
+    {
+      "name": "Manual",
+      "scm_type": "",
+      "scm_url": ""
+    }
   ],
   "inventory": [
     {
       "name": "Production",
-      "hosts": [{"name": "web1.acme.internal", "variables": {"ansible_user": "deploy"}}],
+      "hosts": [
+        {
+          "name": "web1.acme.internal",
+          "variables": {
+            "ansible_user": "deploy"
+          }
+        }
+      ],
       "groups": [
-        {"name": "web", "hosts": [{"name": "web1.acme.internal"}, {"name": "web2.acme.internal"}]},
-        {"name": "db", "hosts": [{"name": "db1.acme.internal"}]}
+        {
+          "name": "web",
+          "hosts": [
+            {
+              "name": "web1.acme.internal"
+            },
+            {
+              "name": "web2.acme.internal"
+            }
+          ]
+        },
+        {
+          "name": "db",
+          "hosts": [
+            {
+              "name": "db1.acme.internal"
+            }
+          ]
+        }
       ],
       "related": {
         "inventory_sources": [
-          {"name": "Legacy EC2", "source": "ec2", "credential": "aws-keys", "inventory": "Production"}
+          {
+            "name": "Legacy EC2",
+            "source": "ec2",
+            "credential": "aws-keys",
+            "inventory": "Production"
+          }
         ]
       }
     }
   ],
   "credentials": [
-    {"name": "prod-ssh", "credential_type": "Machine"},
-    {"name": "vault-pw", "credential_type": "Vault"},
-    {"name": "aws-keys", "credential_type": "Amazon Web Services"},
-    {"name": "gh-token", "credential_type": "GitHub Personal Access Token"}
+    {
+      "name": "prod-ssh",
+      "credential_type": "Machine",
+      "inputs": {
+        "username": "deploy",
+        "become_method": "sudo",
+        "become_username": "root",
+        "ssh_key_data": "$encrypted$",
+        "ssh_key_unlock": "$encrypted$"
+      }
+    },
+    {
+      "name": "vault-pw",
+      "credential_type": "Vault",
+      "inputs": {
+        "vault_password": "$encrypted$",
+        "vault_id": "prod"
+      }
+    },
+    {
+      "name": "aws-keys",
+      "credential_type": "Amazon Web Services",
+      "inputs": {
+        "username": "AKIAEXAMPLE",
+        "password": "$encrypted$",
+        "region": "us-east-1"
+      }
+    },
+    {
+      "name": "gh-token",
+      "credential_type": "GitHub Personal Access Token",
+      "inputs": {
+        "token": "$encrypted$"
+      }
+    }
   ],
   "inventory_sources": [
-    {"name": "Cloud hosts", "source": "scm", "source_path": "inventories/prod.aws_ec2.yml", "source_project": "Web", "credential": "aws-keys", "inventory": "Production"}
+    {
+      "name": "Cloud hosts",
+      "source": "scm",
+      "source_path": "inventories/prod.aws_ec2.yml",
+      "source_project": "Web",
+      "credential": "aws-keys",
+      "inventory": "Production"
+    }
   ],
   "job_templates": [
     {
@@ -35,18 +111,50 @@
       "inventory": "Production",
       "extra_vars": "---\nrelease: stable\nreplicas: 3",
       "job_slice_count": 2,
-      "credentials": ["prod-ssh", "vault-pw"],
+      "credentials": [
+        "prod-ssh",
+        "vault-pw"
+      ],
       "survey_spec": {
         "spec": [
-          {"variable": "version", "question_name": "Release version", "type": "text", "required": true, "default": "1.0.0"},
-          {"variable": "count", "question_name": "How many", "type": "integer", "required": false, "default": 1},
-          {"variable": "region", "question_name": "Region", "type": "multiplechoice", "required": true, "choices": ["us-east", "us-west", "eu"]}
+          {
+            "variable": "version",
+            "question_name": "Release version",
+            "type": "text",
+            "required": true,
+            "default": "1.0.0"
+          },
+          {
+            "variable": "count",
+            "question_name": "How many",
+            "type": "integer",
+            "required": false,
+            "default": 1
+          },
+          {
+            "variable": "region",
+            "question_name": "Region",
+            "type": "multiplechoice",
+            "required": true,
+            "choices": [
+              "us-east",
+              "us-west",
+              "eu"
+            ]
+          }
         ]
       },
       "related": {
         "schedules": [
-          {"name": "Nightly", "rrule": "DTSTART:20260101T090000Z\nRRULE:FREQ=DAILY;INTERVAL=1;BYHOUR=2;BYMINUTE=30", "enabled": true},
-          {"name": "Every 3 days", "rrule": "DTSTART:20260101T090000Z\nRRULE:FREQ=DAILY;INTERVAL=3"}
+          {
+            "name": "Nightly",
+            "rrule": "DTSTART:20260101T090000Z\nRRULE:FREQ=DAILY;INTERVAL=1;BYHOUR=2;BYMINUTE=30",
+            "enabled": true
+          },
+          {
+            "name": "Every 3 days",
+            "rrule": "DTSTART:20260101T090000Z\nRRULE:FREQ=DAILY;INTERVAL=3"
+          }
         ]
       }
     }
