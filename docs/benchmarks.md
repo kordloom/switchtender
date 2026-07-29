@@ -9,39 +9,37 @@ container on the same machine. Your hardware will differ; the method will not.
 
 ## The numbers
 
-| Measurement | Apple Silicon, native | Debian container, same machine |
-|-------------|-----------------------|--------------------------------|
-| Cold boot to serving, no encryption key | ~37 ms | ~110 ms |
-| Cold boot to serving, credential encryption on | ~75 ms | ~140 ms |
-| Resident memory at idle | 32 to 38 MB | 32 to 38 MB |
-| Stripped release binary | 29 MB | 29 MB |
+Measured on 2026-07-29 against v1.30.0. Two very different machines, because the answer depends
+almost entirely on the processor you give it.
 
-Boot times are the median of five trials, first request to a live `/healthz`. The spread between the
-two boot rows is the credential key derivation: argon2id at 64 MiB memory cost, a deliberate security
-parameter, paid once at startup. The derivation arena is handed back to the operating system as soon
-as the key exists, so it does not stay in resident memory.
+| Measurement | Apple Silicon laptop | $6/month cloud VM, 1 vCPU |
+|-------------|----------------------|---------------------------|
+| Cold boot to serving, no encryption key | 43 ms | 189 ms |
+| Cold boot to serving, credential encryption on | 87 ms | 937 ms |
+| Resident memory at idle | 39 MB | 38 MB |
+| Stripped release binary | 30 MB | 31 MB |
+
+Boot times are the median of five trials after a warm-up run, timed from process start to a served
+`/healthz`. Memory is resident size three seconds after serving begins.
+
+The gap between the two boot rows is credential key derivation: argon2id at 64 MiB memory cost, a
+deliberate security parameter, paid once at startup. It is CPU-bound, which is why it costs 44 ms on
+a laptop and closer to a second on one slow shared vCPU. That cost buys a key that is expensive to
+attack offline, and it is paid once per process, not per run. If you do not store credentials in
+SwitchTender, do not set the encryption pair and you do not pay it at all.
+
+Idle memory is flat across both machines because the derivation arena is handed back to the
+operating system as soon as the key exists.
 
 ## Reproduce it
 
-Build with the release flags:
+The repository carries the harness this table came from:
 
-    CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o switchtender .
-    ls -l switchtender
+    go run ./cmd/bench
 
-Time a cold boot to first served request:
-
-    START=$(date +%s%N)
-    ./switchtender serve --db bench.db --addr 127.0.0.1:8080 &
-    until curl -sf http://127.0.0.1:8080/healthz >/dev/null 2>&1; do :; done
-    echo "$(( ($(date +%s%N) - START) / 1000000 ))ms"
-
-Measure idle memory after a few seconds:
-
-    sleep 5
-    ps -o rss= -p $(pgrep -f "switchtender serve") | awk '{printf "%.0f MB\n", $1/1024}'
-
-Run each a handful of times and take the median. Set `SWITCHTENDER_ENCRYPTION_KEY` and
-`SWITCHTENDER_ENCRYPTION_SALT` to measure the with-encryption boot path.
+It builds a release binary, runs the warm-up and five timed trials for both boot paths, and prints
+the same three rows. Run it on your own hardware and you should get your machine's version of the
+table rather than ours.
 
 One platform note: on macOS, `ps` keeps reclaimable pages in its resident count, so the
 with-encryption idle number can read near 100 MB there even though the memory has been released and
