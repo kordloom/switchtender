@@ -1,0 +1,12 @@
+---
+# Gathers facts for the demo fleet so the host pages show what each host is. Every host is the
+# demo machine over a local connection, so the facts are real but describe one box; the fleet
+# shape comes from the inventory rather than from separate hardware.
+- name: Gather fleet facts
+  hosts: all
+  connection: local
+  gather_facts: true
+  tasks:
+    - name: Note the gather
+      debug:
+        msg: "facts gathered for {{ inventory_hostname }}"

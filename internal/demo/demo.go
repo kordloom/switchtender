@@ -131,6 +131,16 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 	}
 	waitTerminal(ctx, d.Runs, last.ID)
 
+	// One fact-gathering play, so every host page shows its distribution, kernel, and the rest
+	// rather than an empty panel.
+	factsPlay := filepath.Join(dir, "facts.yml")
+	factsOpts := seedOpts("schedule", "sch_facts", "deploy-bot", map[string]string{"env": "prod"})
+	if factsRun, err := d.Submitter.Submit(ctx, factsPlay, inv, factsOpts...); err == nil {
+		waitTerminal(ctx, d.Runs, factsRun.ID)
+	} else {
+		log.Warn("demo: seed fact gather: " + err.Error())
+	}
+
 	// A dry run of a check playbook surfaces configuration drift per host on the Drift page.
 	driftPlay := filepath.Join(dir, "drift.yml")
 	driftOpts := seedOpts("schedule", "sch_drift_check", "deploy-bot",
