@@ -9,7 +9,7 @@
 	<meta property="og:description" content="Run everything. Watch every host. Prove every change. Your whole automation stack in one Go binary, with a live host-by-task matrix and a provable audit trail.">
 	<meta property="og:type" content="website">
 	<meta property="og:url" content="https://switchtender.com/">
-	<meta property="og:image" content="https://switchtender.com/assets/screenshot-fleet.png?v=7">
+	<meta property="og:image" content="https://switchtender.com/assets/screenshot-fleet.png?v=8">
 	<meta name="twitter:card" content="summary_large_image">
 	<link rel="canonical" href="https://switchtender.com/">
 	<script type="application/ld+json">
@@ -33,7 +33,7 @@
 	<link rel="preconnect" href="https://fonts.googleapis.com">
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-	<link rel="stylesheet" href="/styles.css?v=18">
+	<link rel="stylesheet" href="/styles.css?v=19">
 </head>
 <body>
 	<div class="bg-mesh" aria-hidden="true"></div>
@@ -81,8 +81,8 @@
 			<div class="hero-shot reveal">
 				<div class="glow" aria-hidden="true"></div>
 				<figure class="window">
-					<div class="window-bar"><span></span><span></span><span></span><em>switchtender · fleet</em></div>
-					<img src="/assets/screenshot-fleet.png?v=7" alt="A SwitchTender run painted live as a host-by-task matrix, one cell per host and task, with the failed host highlighted" loading="lazy">
+					<div class="window-bar"><span></span><span></span><span></span><em>switchtender · fleet health</em></div>
+					<img src="/assets/screenshot-fleet.png?v=8" alt="Fleet health ranking hosts by recent failures, with flaky detection and per-host outcome sparklines" loading="lazy">
 				</figure>
 			</div>
 		</section>
@@ -244,11 +244,11 @@
 			<div class="duo">
 				<figure class="window reveal">
 					<div class="window-bar"><span></span><span></span><span></span><em>switchtender · AI triage</em></div>
-					<img src="/assets/screenshot-triage.png?v=7" alt="A failed run with the AI triage panel isolating db01's apply step as the root cause and suggesting next steps" loading="lazy">
+					<img src="/assets/screenshot-triage.png?v=8" alt="A failed run with the AI triage panel isolating db01's apply step as the root cause and suggesting next steps" loading="lazy">
 				</figure>
 				<figure class="window reveal">
 					<div class="window-bar"><span></span><span></span><span></span><em>switchtender · ask your fleet</em></div>
-					<img src="/assets/screenshot-ask.png?v=7" alt="The overview page answering a plain-language question about which hosts are failing and where to start" loading="lazy">
+					<img src="/assets/screenshot-ask.png?v=8" alt="The overview page answering a plain-language question about which hosts are failing and where to start" loading="lazy">
 				</figure>
 			</div>
 		</section>
@@ -366,7 +366,24 @@ open http://localhost:8080/ui/</code></pre>
 			<p class="hero-note" style="text-align:center">Every theme keeps the same status colors, so a failed host reads the same in all three.</p>
 		</section>
 
-		<section class="cta wrap reveal">
+				<section class="section wrap reveal" id="gallery">
+			<div class="section-head">
+				<h2>Every run, <span class="grad">readable at a glance.</span></h2>
+				<p>Structured data end to end: what fired each run, who asked for it, which hosts it touched, and where it broke.</p>
+			</div>
+			<div class="themes-grid">
+				<a class="window theme-shot" href="https://demo.switchtender.com/ui/runs">
+					<div class="window-bar"><span></span><span></span><span></span><em>runs, with origin and labels</em></div>
+					<img src="/assets/screenshot-runs.png?v=1" alt="The runs list with status, type, origin, playbook, and label columns, all sortable" loading="lazy">
+				</a>
+				<a class="window theme-shot" href="https://demo.switchtender.com/ui/workflows">
+					<div class="window-bar"><span></span><span></span><span></span><em>the workflow editor</em></div>
+					<img src="/assets/screenshot-workflow.png?v=1" alt="A pipeline graph with Terraform fanning out to two Ansible steps and into a Bash smoke test" loading="lazy">
+				</a>
+			</div>
+		</section>
+
+<section class="cta wrap reveal">
 			<h2>Retire the controller you've been babysitting.</h2>
 			<p>Structured runs, balanced splits, a fleet that remembers, and a control plane that proves itself, from one binary.</p>
 			<div class="hero-cta center">
