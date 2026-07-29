@@ -82,6 +82,9 @@ type createPipelineRequest struct {
 	ProjectID string `json:"project_id,omitempty"`
 	// Queue restricts execution to workers serving the queue.
 	Queue string `json:"queue,omitempty"`
+	// RequireApproval holds the pipeline for an approver before any step runs. A stored policy that
+	// matches any step holds it regardless, so this only adds a gate rather than being the only one.
+	RequireApproval bool `json:"require_approval,omitempty"`
 }
 
 // listRunsResponse wraps a run list. The envelope leaves room for pagination fields later.
@@ -560,6 +563,9 @@ func createPipelineHandler(submitter Submitter, authz *authorizer, log *zap.Logg
 		}
 		if req.Queue != "" {
 			popts = append(popts, run.WithQueue(req.Queue))
+		}
+		if req.RequireApproval {
+			popts = append(popts, run.WithRequireApproval(true))
 		}
 		created, err := submitter.SubmitPipeline(r.Context(), req.Name, req.Inventory, req.Steps,
 			popts...)

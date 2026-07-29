@@ -1885,6 +1885,8 @@ async function runWorkflow() {
 		inventory: document.getElementById("wf-inventory").value.trim(),
 		steps,
 	};
+	const approval = document.getElementById("wf-require-approval");
+	if (approval && approval.checked) body.require_approval = true;
 	const runBtn = document.getElementById("wf-run");
 	wfState.submitting = true;
 	runBtn.disabled = true;

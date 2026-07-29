@@ -162,6 +162,30 @@ func TestRejectedPipelineNeverRuns(t *testing.T) {
 	}
 }
 
+// TestPipelineRequireApprovalOptIn confirms a workflow can be held on request even where no policy
+// matches, matching what a single run already allowed.
+func TestPipelineRequireApprovalOptIn(t *testing.T) {
+	t.Parallel()
+	store := run.NewMemStore()
+	executions := 0
+	d := New(store, countingRunner(&executions), nil)
+	defer d.Close()
+
+	steps := []run.PipelineStep{{Name: "deploy", Tool: "bash", Command: "deploy.sh"}}
+	parent, err := d.SubmitPipeline(context.Background(), "release", "hosts.ini", steps,
+		run.WithRequireApproval(true))
+	if err != nil {
+		t.Fatalf("SubmitPipeline() error = %v", err)
+	}
+	if parent.Status != run.StatusPendingApproval {
+		t.Fatalf("pipeline status = %q, want pending_approval", parent.Status)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if executions != 0 {
+		t.Errorf("held pipeline executed %d commands, want 0", executions)
+	}
+}
+
 // TestPipelineWithoutMatchingStepRuns confirms the gate narrows to workflows that actually contain a
 // gated step, so ordinary workflows are unaffected.
 func TestPipelineWithoutMatchingStepRuns(t *testing.T) {

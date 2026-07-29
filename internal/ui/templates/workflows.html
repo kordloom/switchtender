@@ -25,6 +25,9 @@
 					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
 					Add step
 				</button>
+				<label class="field-label check-label" data-tip="Hold this workflow for an approver before any step runs">
+					<input type="checkbox" id="wf-require-approval"> Require approval
+				</label>
 				<button id="wf-run" class="button primary">Run workflow</button>
 				<button id="wf-export-json" class="button" type="button" data-tip="Click to download this graph as a JSON pipeline definition">JSON</button>
 				<button id="wf-export-yaml" class="button" type="button" data-tip="Click to download this graph as a YAML pipeline definition">YAML</button>
