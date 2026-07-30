@@ -80,3 +80,57 @@ if (footLogo) {
 		utlxTapTimer = setTimeout(() => { utlxTaps = 0; }, 1600);
 	});
 }
+
+// Email capture. The address goes to the shared signup service, tagged with this site's hostname so
+// a signup stays attributable across properties.
+(function () {
+	var form = document.getElementById("signup-form");
+	if (!form) return;
+	var email = document.getElementById("signup-email");
+	var company = document.getElementById("nf-company");
+	var button = document.getElementById("signup-submit");
+	var status = document.getElementById("signup-status");
+
+	// say writes the status line. It is a live region, so a screen reader announces the result
+	// without the visitor having to go looking for it.
+	function say(text, kind) {
+		status.textContent = text;
+		status.className = "signup-status" + (kind ? " " + kind : "");
+	}
+
+	// looksLikeEmail is a shape check, not validation. It catches an obvious typo without a round
+	// trip; the server decides what is actually deliverable.
+	function looksLikeEmail(value) {
+		return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+	}
+
+	form.addEventListener("submit", function (e) {
+		e.preventDefault();
+		var address = email.value.trim();
+		if (!looksLikeEmail(address)) {
+			say("That does not look like an email address.", "err");
+			email.focus();
+			return;
+		}
+		button.disabled = true;
+		say("Adding you.");
+
+		fetch("https://signup.kordloom.com/subscribe", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				email: address,
+				source: window.location.hostname,
+				company: company.value
+			})
+		}).then(function (r) {
+			if (!r.ok) throw new Error(String(r.status));
+			// A repeat signup also succeeds, so nobody is told they are already on the list.
+			form.style.display = "none";
+			say("You are on the list. Thank you.", "ok");
+		}).catch(function () {
+			button.disabled = false;
+			say("That did not go through. Email hello@kordloom.com and I will add you.", "err");
+		});
+	});
+})();

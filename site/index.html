@@ -391,6 +391,22 @@ open http://localhost:8080/ui/</code></pre>
 				<a class="ghost big" href="https://demo.switchtender.com">Live demo</a>
 				<a class="ghost big" href="/docs/">Read the docs</a>
 			</div>
+
+			<div class="signup">
+				<p class="signup-lead">Occasional notes on releases and what changed. No noise.</p>
+				<form id="signup-form" class="signup-form" novalidate>
+					<label class="visually-hidden" for="signup-email">Email address</label>
+					<input id="signup-email" class="signup-input" type="email" name="email"
+						placeholder="you@example.com" autocomplete="email" required>
+					<!-- Honeypot. Real people never see it, so anything typed here is a bot. It is
+					     moved off screen rather than hidden with display none, which some bots skip. -->
+					<label class="visually-hidden" for="nf-company">Company</label>
+					<input id="nf-company" class="visually-hidden" type="text" name="company"
+						tabindex="-1" autocomplete="off">
+					<button id="signup-submit" class="btn" type="submit">Keep me posted</button>
+				</form>
+				<p id="signup-status" class="signup-status" role="status" aria-live="polite"></p>
+			</div>
 		</section>
 	</main>
 
