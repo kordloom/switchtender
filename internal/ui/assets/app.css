@@ -847,10 +847,28 @@ body[data-theme="dark"] {
    so no scrolling or filtered container can clip it. */
 .hinttip { position: fixed; z-index: 96; background: var(--surface-3); color: var(--text); font-size: 11.5px; font-weight: 500; padding: 5px 9px; border-radius: 7px; border: 1px solid var(--border); box-shadow: var(--shadow); white-space: nowrap; pointer-events: none; }
 
-/* Page-header docs link: every page points at its most relevant guide. */
-.docs-link { display: inline-flex; align-items: center; gap: 6px; padding: 4px 11px; border: 1px solid var(--border-muted); border-radius: 999px; color: var(--muted); font-size: 12.5px; font-weight: 500; }
-.docs-link:hover { text-decoration: none; color: var(--accent); border-color: var(--border); background: var(--surface-2); }
-.docs-link svg { width: 13px; height: 13px; }
+/* Page-header docs link: every page points at its most relevant guide. It wears the accent tint
+   rather than a button's surface, so at a glance it reads as help and never as another action. */
+.docs-link { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 26%, transparent); border-radius: 999px; color: var(--accent); font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+.docs-link:hover { text-decoration: none; border-color: color-mix(in srgb, var(--accent) 55%, transparent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.docs-link svg { width: 13px; height: 13px; flex: none; }
+/* A header synthesized purely to carry the help chip has no title to balance, so the chip sits at
+   the right on its own hairline. */
+.page-head-bare { justify-content: flex-end; margin-bottom: 16px; padding-bottom: 12px; }
+
+/* Account profile: who an account belongs to and how to reach them. The dialog groups it apart from
+   the credentials, since it is personal data rather than access configuration. */
+.user-profile { grid-column: 1 / -1; padding: 14px 16px; background: var(--surface-2); border: 1px solid var(--border-muted); border-radius: var(--radius); }
+.user-profile-head { display: flex; flex-direction: column; gap: 2px; margin-bottom: 12px; }
+.user-profile-head strong { font-size: 13px; }
+.user-profile-head .muted { font-size: 12px; }
+/* Top-aligned, so a field carrying a hint keeps its input on the same line as its neighbors instead
+   of being lifted by the grid's bottom alignment. */
+.user-profile .launch-grid { gap: 12px; align-items: start; }
+.user-wide { grid-column: 1 / -1; }
+.user-title { display: block; font-size: 11.5px; color: var(--muted); }
+.user-link { display: inline-block; margin-left: 7px; padding: 1px 8px; border-radius: 999px; background: var(--surface-3); color: var(--muted); font-size: 11px; }
+.user-link:hover { text-decoration: none; background: var(--accent-soft); color: var(--accent); }
 
 /* A button that reads as a link, for in-table view affordances. */
 .linkish { background: none; border: none; padding: 0; font: inherit; color: var(--text); cursor: pointer; text-decoration: underline; text-decoration-style: dotted; text-decoration-color: var(--muted); text-underline-offset: 3px; }

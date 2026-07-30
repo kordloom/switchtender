@@ -432,11 +432,15 @@ function mountTablePager() {
 	apply();
 }
 
-// PAGE_DOCS maps each page to its most relevant guide, linked from the page header.
+// PAGE_DOCS maps each page to the guide that explains that page's subject. Every page but sign in
+// has an entry, so the same help chip appears in the same place everywhere and becomes something a
+// reader learns to look for.
 const PAGE_DOCS = {
 	overview: { slug: "quickstart", label: "Quickstart" },
 	runs: { slug: "tutorial-run-a-job", label: "Run a job" },
+	detail: { slug: "tutorial-run-a-job", label: "Run a job" },
 	fleet: { slug: "reliability", label: "Reliability" },
+	host: { slug: "drift", label: "Drift detection" },
 	drift: { slug: "drift", label: "Drift detection" },
 	tasks: { slug: "concepts", label: "Concepts" },
 	workers: { slug: "reliability", label: "Reliability" },
@@ -447,34 +451,77 @@ const PAGE_DOCS = {
 	workflows: { slug: "concepts", label: "Concepts" },
 	schedules: { slug: "tutorial-schedule-a-job", label: "Schedule a job" },
 	migrate: { slug: "tutorial-migrate", label: "Migrate your setup" },
-	credentials: { slug: "tutorial-set-a-secret", label: "Set a secret" },
+	credentials: { slug: "secrets", label: "Secrets" },
 	users: { slug: "configuration", label: "Configuration" },
 	audit: { slug: "features", label: "Features" },
 	policies: { slug: "features", label: "Features" },
 	doctor: { slug: "concepts", label: "Concepts" },
+	docs: { slug: "", label: "All guides" },
 };
 
-// mountPageDocs adds a small guide link to the page header, so every page points at its docs.
-function mountPageDocs() {
-	const ref = PAGE_DOCS[document.body.dataset.page];
-	const head = document.querySelector(".page-head");
-	if (!ref || !head) return;
+// docsChip builds the page's help control: one book mark and the guide's name, in the same tinted
+// pill on every page so it reads as help rather than as another action.
+function docsChip(ref) {
 	const a = document.createElement("a");
 	a.className = "docs-link";
-	a.href = "/ui/docs/" + ref.slug;
-	a.dataset.tip = "Open the " + ref.label + " guide";
+	a.href = "/ui/docs" + (ref.slug ? "/" + ref.slug : "");
+	a.dataset.tip = ref.slug
+		? "Open the " + ref.label + " guide, the documentation for this page"
+		: "Open the guide index";
 	a.innerHTML = svgIcon(NAV_ICONS.docs);
 	a.appendChild(document.createTextNode(ref.label));
-	let actions = head.querySelector(".head-actions");
-	if (!actions) {
-		actions = document.createElement("div");
-		actions.className = "head-actions";
-		for (const child of Array.from(head.children)) {
-			if (!child.classList.contains("page-head-text")) actions.appendChild(child);
+	return a;
+}
+
+// pageHeadActions returns the page header's action row, building the header when the page has none.
+// A page that opens on a bare heading is promoted to the standard header so its help chip sits
+// where every other page's does; a page with no heading at all gets a lone right-aligned row.
+function pageHeadActions(main) {
+	const head = main.querySelector(".page-head");
+	if (head) {
+		let actions = head.querySelector(".head-actions");
+		if (!actions) {
+			actions = document.createElement("div");
+			actions.className = "head-actions";
+			for (const child of Array.from(head.children)) {
+				if (!child.classList.contains("page-head-text")) actions.appendChild(child);
+			}
+			head.appendChild(actions);
 		}
-		head.appendChild(actions);
+		return actions;
 	}
-	actions.appendChild(a);
+	const built = document.createElement("div");
+	built.className = "page-head";
+	const actions = document.createElement("div");
+	actions.className = "head-actions";
+	const h1 = main.querySelector(":scope > h1");
+	if (h1) {
+		const text = document.createElement("div");
+		text.className = "page-head-text";
+		const sub = h1.nextElementSibling;
+		h1.replaceWith(built);
+		text.appendChild(h1);
+		if (sub && sub.tagName === "P" && sub.classList.contains("muted")) text.appendChild(sub);
+		built.appendChild(text);
+	} else {
+		// No heading to promote, so the row stands alone at the top of the content, after the back
+		// link when the page opens on one.
+		built.classList.add("page-head-bare");
+		const back = main.querySelector(":scope > .back");
+		if (back) back.insertAdjacentElement("afterend", built);
+		else main.insertBefore(built, main.firstChild);
+	}
+	built.appendChild(actions);
+	return actions;
+}
+
+// mountPageDocs puts the guide chip on the page, so every screen points at the documentation for
+// the subject it is showing.
+function mountPageDocs() {
+	const ref = PAGE_DOCS[document.body.dataset.page];
+	const main = document.querySelector("main.content");
+	if (!ref || !main) return;
+	pageHeadActions(main).appendChild(docsChip(ref));
 }
 
 // LIST_PAGES are the pages whose main table is a searchable list.
