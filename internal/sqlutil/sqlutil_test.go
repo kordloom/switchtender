@@ -114,3 +114,38 @@ func TestQueuePlaceholders(t *testing.T) {
 		}
 	}
 }
+
+// TestFormatTimeSortsAsText pins the property the stores depend on: timestamps are stored as text and
+// compared as text, so their lexicographic order has to match their chronological order. RFC 3339
+// trims trailing zeros from the fractional second, which made the width vary and the two orders
+// disagree, and a lease then compared as older than a cutoff it was newer than.
+func TestFormatTimeSortsAsText(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2026, 7, 30, 6, 0, 0, 0, time.UTC)
+	offsets := []time.Duration{
+		0, time.Nanosecond, time.Microsecond, 100 * time.Microsecond,
+		time.Millisecond, 500 * time.Millisecond, time.Second, time.Minute,
+	}
+	width := len(sqlutil.FormatTime(base))
+	for _, a := range offsets {
+		for _, b := range offsets {
+			ta, tb := base.Add(a), base.Add(b)
+			sa, sb := sqlutil.FormatTime(ta), sqlutil.FormatTime(tb)
+			if len(sa) != width || len(sb) != width {
+				t.Fatalf("width varies: %q (%d) and %q (%d), want %d", sa, len(sa), sb, len(sb), width)
+			}
+			// Sub-microsecond differences round to the same stored value, so compare what was stored.
+			pa, err := sqlutil.ParseTime(sa)
+			if err != nil {
+				t.Fatalf("ParseTime(%q) error = %v", sa, err)
+			}
+			pb, err := sqlutil.ParseTime(sb)
+			if err != nil {
+				t.Fatalf("ParseTime(%q) error = %v", sb, err)
+			}
+			if want, got := !pa.After(pb), sa <= sb; want != got {
+				t.Errorf("text order disagrees with time order: %q vs %q", sa, sb)
+			}
+		}
+	}
+}

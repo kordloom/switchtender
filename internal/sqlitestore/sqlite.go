@@ -1897,7 +1897,9 @@ func (s *store) Heartbeat(ctx context.Context, id, owner string) error {
 // ReclaimStale requeues stale claimed pending runs and interrupts stale running runs.
 func (s *store) ReclaimStale(ctx context.Context, ttl time.Duration) (int, error) {
 	// A SQLite deployment is one node: the process that stamps a lease is the process that sweeps it,
-	// so the local clock is the authoritative one and there is no skew to reconcile.
+	// so the local clock is the authoritative one and there is no skew to reconcile. The comparison
+	// below is on text, which is sound because stored timestamps are a fixed width, so their
+	// lexicographic order matches their chronological order.
 	cut := sqlutil.FormatTime(time.Now().Add(-ttl))
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {

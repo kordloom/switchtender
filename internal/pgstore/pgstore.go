@@ -1179,9 +1179,11 @@ func (s *store) queryRuns(ctx context.Context, label, query string, args ...any)
 // writes, so a lease stamped in SQL is indistinguishable from one stamped by a store method. Leases
 // have to come from the database clock rather than a worker's: with several nodes writing, a worker
 // whose clock runs behind would otherwise stamp leases the janitor reads as already expired. The
-// fractional second is fixed at six digits, which keeps the value the same width every time and so
-// keeps text ordering in step with chronological ordering.
-const pgNowText = `to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`
+// fractional second is padded to nine digits so it is the same width as a stamp written by the Go
+// side, which keeps text ordering in step with chronological ordering across both writers. The
+// database clock is microsecond precision, so the three padded digits are always zero and the value
+// is not claiming precision it does not have.
+const pgNowText = `(to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US') || '000Z')`
 
 // terminalRun is the SQL predicate for a run that has finished and may be purged. It mirrors
 // run.Status.Terminal(). It is stated as the set of terminal statuses rather than as "not pending or

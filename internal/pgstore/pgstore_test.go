@@ -513,7 +513,7 @@ func TestLeaseUsesDatabaseClock(t *testing.T) {
 		"SELECT claimed_at FROM runs WHERE id=$1", "run_clock").Scan(&stamp); err != nil {
 		t.Fatalf("select claimed_at: %v", err)
 	}
-	if len(stamp) != len("2026-07-30T06:00:00.000000Z") {
+	if len(stamp) != len("2026-07-30T06:00:00.000000000Z") {
 		t.Errorf("claimed_at = %q, want a fixed width UTC stamp", stamp)
 	}
 }
