@@ -767,12 +767,13 @@ func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string) (*r
 		idx, shardCount := i, count
 		child := &run.Run{
 			ID: run.NewID(), Playbook: retry.Playbook, Inventory: retry.Inventory,
-			Tool: retry.Tool, DryRun: retry.DryRun,
 			Status: run.StatusPending, CreatedAt: time.Now(),
 			ParentID: &retryID, ShardIndex: &idx, ShardCount: &shardCount,
-			Limit: shard.Limit, CredentialIDs: shard.CredentialIDs,
-			ProjectID: shard.ProjectID, Queue: shard.Queue,
+			// The host group is the one thing a shard owns; everything about how it executes comes
+			// from the run it is a shard of.
+			Limit: shard.Limit,
 		}
+		inheritExecution(child, retry)
 		if err := d.store.Save(ctx, child); err != nil {
 			return nil, err
 		}

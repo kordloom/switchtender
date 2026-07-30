@@ -1332,3 +1332,68 @@ func TestSplitShardsInheritExecution(t *testing.T) {
 		}
 	}
 }
+
+// TestRetryShardsInheritExecution pins that retrying failed shards re-runs them the way the original
+// ran. The retry parent inherited the settings but the shards under it did not, so a retry executed
+// without the run's extra vars, outside its pinned image, and with no timeout. A retry that behaves
+// differently from the run it retries is worse than no retry, because the difference is invisible.
+func TestRetryShardsInheritExecution(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := run.NewMemStore()
+	d := New(store, &fakeRunnerLister{hosts: []string{"a", "b", "c", "d"}}, nil)
+
+	parent, err := d.SubmitSplit(ctx, "site.yml", "inv", 2,
+		run.WithExtraVars(map[string]any{"env": "prod"}),
+		run.WithImage("ghcr.io/acme/ee:9", "cred_pull"),
+		run.WithTimeout(900),
+		run.WithDryRun(true),
+	)
+	if err != nil {
+		t.Fatalf("SubmitSplit() error = %v", err)
+	}
+	// Fail every shard so there is something to retry, then finish the parent.
+	shards, err := store.Shards(ctx, parent.ID)
+	if err != nil {
+		t.Fatalf("Shards() error = %v", err)
+	}
+	for _, s := range shards {
+		s.Status = run.StatusFailed
+		if err := store.Save(ctx, s); err != nil {
+			t.Fatalf("Save(shard) error = %v", err)
+		}
+	}
+	parent.Status = run.StatusFailed
+	if err := store.Save(ctx, parent); err != nil {
+		t.Fatalf("Save(parent) error = %v", err)
+	}
+
+	retry, err := d.RetryFailedShards(ctx, parent.ID)
+	if err != nil {
+		t.Fatalf("RetryFailedShards() error = %v", err)
+	}
+	children, err := store.Shards(ctx, retry.ID)
+	if err != nil {
+		t.Fatalf("Shards(retry) error = %v", err)
+	}
+	if len(children) == 0 {
+		t.Fatal("the retry created no shards")
+	}
+	for _, c := range children {
+		if c.ExtraVars["env"] != "prod" {
+			t.Errorf("retry shard ExtraVars = %v, want the original env=prod", c.ExtraVars)
+		}
+		if c.Image != "ghcr.io/acme/ee:9" {
+			t.Errorf("retry shard Image = %q, want the original pinned image", c.Image)
+		}
+		if c.Timeout != 900 {
+			t.Errorf("retry shard Timeout = %d, want the original 900", c.Timeout)
+		}
+		if !c.DryRun {
+			t.Error("retry shard lost dry run and would make real changes")
+		}
+		if c.Limit == "" {
+			t.Error("retry shard lost its host group")
+		}
+	}
+}
