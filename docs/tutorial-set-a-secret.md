@@ -8,8 +8,8 @@
 # Set a secret
 
 Secrets live in credentials. Each is sealed at rest and never returned by the API.
-A run gets a credential's value only while it executes, in a temporary file or environment that is
-wiped afterward. If a tool prints a credential's value, SwitchTender redacts it from the run's log,
+A run gets a credential's value only while it executes, in the environment or a temporary file
+created mode 0600 and deleted when the run ends. If a tool prints a credential's value, SwitchTender redacts it from the run's log,
 live stream, and events, so the output shows `***` instead of the secret.
 
 ## Store a credential
