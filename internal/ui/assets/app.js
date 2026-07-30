@@ -2636,6 +2636,9 @@ function wireHinttips() {
 	let linkTimer = 0;
 	const place = (target, text) => {
 		tip.textContent = text;
+		// A tip carrying newlines is a small block of explanation rather than a label, so it wraps on
+		// its own lines instead of running off the edge of the viewport.
+		tip.classList.toggle("hinttip-block", text.includes("\n"));
 		tip.hidden = false;
 		tip.style.left = "0px";
 		tip.style.top = "0px";
@@ -5756,7 +5759,86 @@ function describeCron(spec) {
 	if (dom === "*" && mon === "*" && days[dow] && /^\d+$/.test(hour)) return days[dow] + "s at " + at(hour, min);
 	if (dow === "*" && mon === "*" && /^\d+$/.test(dom) && /^\d+$/.test(hour)) return "Monthly on day " + dom + " at " + at(hour, min);
 	if (dow === "1-5" && /^\d+$/.test(hour)) return "Weekdays at " + at(hour, min);
+	if (dow === "6,0" || dow === "0,6") return "Weekends at " + at(hour, min);
 	return "Custom schedule";
+}
+
+// CRON_MONTHS and CRON_DAYS name the values of the two cron fields that read as words rather than
+// numbers, so a breakdown says December rather than 12.
+const CRON_MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August",
+	"September", "October", "November", "December"];
+const CRON_DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+// CRON_FIELDS describes each position of a five-field expression: what it is called, what a wildcard
+// means there, the unit a step counts in, and the names its values carry when they have any.
+const CRON_FIELDS = [
+	{ label: "Minute", any: "every minute", unit: "minutes", offset: 0 },
+	{ label: "Hour", any: "every hour", unit: "hours", offset: 0 },
+	{ label: "Day of month", any: "every day", unit: "days", offset: 0 },
+	{ label: "Month", any: "every month", unit: "months", offset: 1, names: CRON_MONTHS },
+	{ label: "Day of week", any: "every day", unit: "days", offset: 0, names: CRON_DAYS },
+];
+
+// cronValue names one value inside a cron field, using the field's vocabulary where it has one. A
+// day-of-week 7 is Sunday, the same as 0, which is how cron itself reads it.
+function cronValue(token, field) {
+	const n = parseInt(token, 10);
+	if (isNaN(n)) return token;
+	if (!field.names) return token;
+	const idx = n - field.offset;
+	return field.names[idx % field.names.length] || token;
+}
+
+// describeCronField reads one field of a cron expression in plain words, covering wildcards, steps,
+// ranges, and lists. An expression it cannot read comes back verbatim rather than guessed at.
+function describeCronField(spec, field) {
+	if (spec === "*" || spec === "?") return field.any;
+	const step = spec.match(/^(.+)\/(\d+)$/);
+	if (step) {
+		const every = "every " + step[2] + " " + field.unit;
+		if (step[1] === "*") return every;
+		const range = step[1].match(/^(\d+)-(\d+)$/);
+		if (range) {
+			return every + " from " + cronValue(range[1], field) + " to " + cronValue(range[2], field);
+		}
+		return every + " from " + cronValue(step[1], field);
+	}
+	const range = spec.match(/^(\d+)-(\d+)$/);
+	if (range) return cronValue(range[1], field) + " to " + cronValue(range[2], field);
+	if (spec.includes(",")) {
+		return spec.split(",").map((part) => describeCronField(part.trim(), field)).join(", ");
+	}
+	return cronValue(spec, field);
+}
+
+// cronBreakdown reads a cron expression field by field, so a reader who does not hold the five
+// positions in their head can see which number means what.
+function cronBreakdown(spec) {
+	const parts = String(spec || "").trim().split(/\s+/);
+	if (parts.length !== 5) return "";
+	return parts.map((part, i) =>
+		CRON_FIELDS[i].label + ": " + describeCronField(part, CRON_FIELDS[i])).join("\n");
+}
+
+// cronTip is the hover text for a cron expression: its cadence in one line, then the field-by-field
+// reading, so hovering the syntax anywhere in the product explains it.
+function cronTip(spec) {
+	const breakdown = cronBreakdown(spec);
+	if (!breakdown) return "Five fields: minute, hour, day of month, month, day of week";
+	return describeCron(spec) + "\n" + breakdown;
+}
+
+// wireCronTips explains every cron expression on the page on hover, and keeps explaining the one
+// being typed in a form field as it changes.
+function wireCronTips(root) {
+	for (const el of (root || document).querySelectorAll("[data-cron]")) {
+		el.dataset.tip = cronTip(el.dataset.cron);
+	}
+	for (const input of (root || document).querySelectorAll("input[data-cron-input]")) {
+		const sync = () => { input.dataset.tip = cronTip(input.value.trim()); };
+		input.addEventListener("input", sync);
+		sync();
+	}
 }
 
 // mountHostActions fills the host page's action bar: the things an operator wants to do to one
@@ -6235,9 +6317,13 @@ async function loadSchedules() {
 		for (const s of schedules) {
 			const tr = document.createElement("tr");
 			tr.appendChild(td(s.name || "(unnamed)"));
-			tr.appendChild(td(s.cron, "mono"));
+			// Hovering the expression reads it back in words, field by field, so the syntax explains
+			// itself wherever it appears rather than only in the neighboring column.
+			const cron = td(s.cron, "mono");
+			cron.dataset.cron = s.cron || "";
+			tr.appendChild(cron);
 			const cadence = td(describeCron(s.cron));
-			cadence.dataset.tip = "Plain reading of the cron expression " + s.cron;
+			cadence.dataset.cron = s.cron || "";
 			tr.appendChild(cadence);
 			const target = document.createElement("td");
 			if (s.template_id) {
@@ -6295,6 +6381,7 @@ async function loadSchedules() {
 		setStatus("");
 		document.querySelector("table.runs").hidden = false;
 		showListControls();
+		wireCronTips();
 	} catch (e) {
 		setStatus("Failed to load schedules: " + e.message);
 	}

@@ -846,6 +846,13 @@ body[data-theme="dark"] {
 /* The shared floating tip for data-tip elements. It rides document.body with fixed positioning,
    so no scrolling or filtered container can clip it. */
 .hinttip { position: fixed; z-index: 96; background: var(--surface-3); color: var(--text); font-size: 11.5px; font-weight: 500; padding: 5px 9px; border-radius: 7px; border: 1px solid var(--border); box-shadow: var(--shadow); white-space: nowrap; pointer-events: none; }
+/* A tip with more than one line reads as a small explanation: its first line is the summary and the
+   rest is the detail, so it keeps the line breaks and takes a readable measure. It stays on the
+   already-loaded interface font rather than an embedded one, because max-content is measured once and
+   a webfont swapping in afterwards would reflow wider text inside a width fixed against the fallback
+   metrics. */
+.hinttip-block { white-space: pre-line; width: max-content; max-width: 320px; line-height: 1.55; font-size: 11.5px; }
+.hinttip-block::first-line { font-weight: 700; }
 
 /* Page-header docs link: every page points at its most relevant guide. It wears the accent tint
    rather than a button's surface, so at a glance it reads as help and never as another action. */
