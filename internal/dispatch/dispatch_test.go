@@ -1456,3 +1456,51 @@ func TestClaimBackoffResetsOnWork(t *testing.T) {
 	}
 	t.Logf("gaps: %v", gaps)
 }
+
+// TestRetryFailedShardsDedupes proves clicking retry twice starts one retry rather than two. Both
+// calls resolve to the same run and only one set of shards is created, so the failed hosts are not
+// worked twice over concurrently.
+func TestRetryFailedShardsDedupes(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := run.NewMemStore()
+	runner := &flakyRunnerLister{hosts: []string{"a", "b", "c", "d"}, failHost: "b"}
+	d := New(store, runner, nil)
+	defer d.Close()
+
+	parent, err := d.SubmitSplit(ctx, "play.yml", "inv", 2)
+	if err != nil {
+		t.Fatalf("SubmitSplit() error = %v", err)
+	}
+	if got := waitTerminal(t, store, parent.ID); got.Status != run.StatusFailed {
+		t.Fatalf("parent status = %q, want failed", got.Status)
+	}
+
+	first, err := d.RetryFailedShards(ctx, parent.ID)
+	if err != nil {
+		t.Fatalf("RetryFailedShards() first error = %v", err)
+	}
+	second, err := d.RetryFailedShards(ctx, parent.ID)
+	if err != nil {
+		t.Fatalf("RetryFailedShards() second error = %v", err)
+	}
+	if first.ID != second.ID {
+		t.Errorf("second retry = %s, want the first retry %s", second.ID, first.ID)
+	}
+
+	// Count the retries of this parent directly, so a second run that was created but not returned
+	// is still caught.
+	all, err := store.List(ctx)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	retries := 0
+	for _, r := range all {
+		if r.RetryOf != nil && *r.RetryOf == parent.ID {
+			retries++
+		}
+	}
+	if retries != 1 {
+		t.Errorf("retries of the parent = %d, want 1", retries)
+	}
+}

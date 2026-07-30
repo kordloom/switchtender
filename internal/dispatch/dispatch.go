@@ -54,6 +54,8 @@ const (
 	// interval shifted by it. A dispatcher with nothing to claim backs off toward that ceiling
 	// rather than hammering the store, and drops back to the base interval the moment it claims.
 	idleBackoffShift = 3
+	// dedupeRetryShards names the shard-retry action in the idempotency keys it dedupes under.
+	dedupeRetryShards = "retry-shards"
 )
 
 // Publisher receives live run output for streaming to clients. All methods must be safe for
@@ -743,8 +745,16 @@ func inheritExecution(child, parent *run.Run) {
 
 // RetryFailedShards creates and starts a new split run that re-runs only the failed shards of a
 // finished split parent, keeping each failed shard's host group. Shards that succeeded do not run
-// again. The new parent links back to the run it retries through RetryOf.
+// again. The new parent links back to the run it retries through RetryOf. Retrying the same parent
+// twice inside the dedupe window returns the first retry, so a double click cannot fire two.
 func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string) (*run.Run, error) {
+	existing, key, err := run.ResolveDedupe(ctx, d.store, dedupeRetryShards, parentID, time.Now())
+	if err != nil {
+		return nil, err
+	}
+	if existing != nil {
+		return existing, nil
+	}
 	parent, err := d.store.Get(ctx, parentID)
 	if err != nil {
 		return nil, err
@@ -774,11 +784,16 @@ func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string) (*r
 	retry := &run.Run{
 		ID: run.NewID(), Playbook: parent.Playbook, Inventory: parent.Inventory,
 		Kind: run.KindSplit, Status: run.StatusPending, CreatedAt: time.Now(),
-		ShardCount: &count, RetryOf: &parent.ID,
+		ShardCount: &count, RetryOf: &parent.ID, IdempotencyKey: key,
 	}
 	inheritExecution(retry, parent)
-	if err := d.store.Save(ctx, retry); err != nil {
+	saved, dup, err := d.idempotentSave(ctx, retry)
+	if err != nil {
 		return nil, err
+	}
+	if dup {
+		// A concurrent click won the key; return its retry and create no second set of shards.
+		return saved, nil
 	}
 
 	retryID := retry.ID
