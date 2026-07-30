@@ -7395,14 +7395,16 @@ async function loadDetail(runId) {
 		exportResults.dataset.tip = "Click to download this run and its per-host results as JSON";
 		exportResults.addEventListener("click", () => {
 			if (!detailState || !detailState.run) return;
+			// Read the folded model rather than the raw events: it already carries every host, task,
+			// and outcome, and it is the only copy the page keeps once a run is loaded.
 			const results = {};
-			for (const e of detailState.events || []) {
-				if (!e.host || !e.task || !e.type || e.type.indexOf("runner_") !== 0) continue;
-				const outcome = e.type === "runner_ok"
-					? (e.changed ? "changed" : "ok")
-					: e.type.slice("runner_".length);
-				if (!results[e.host]) results[e.host] = {};
-				results[e.host][e.task] = { outcome, rc: e.rc ?? undefined };
+			const cells = (detailState.model && detailState.model.cells) || {};
+			for (const host of Object.keys(cells)) {
+				for (const task of Object.keys(cells[host])) {
+					const cell = cells[host][task];
+					if (!results[host]) results[host] = {};
+					results[host][task] = { outcome: cell.outcome, rc: cell.rc ?? undefined };
+				}
 			}
 			const payload = { run: detailState.run, results, exported_at: new Date().toISOString() };
 			downloadBlob("switchtender-" + detailState.runId + ".json", "application/json",
@@ -8006,7 +8008,6 @@ function openParentStream(parentId) {
 	source.addEventListener("event", (e) => {
 		try {
 			const ev = JSON.parse(e.data);
-			detailState.events.push(ev);
 			applyLiveEvent(ev);
 			if (ev.type === "stats") {
 				refreshShards();
@@ -8054,10 +8055,16 @@ function isTerminal(status) {
 		status === "canceled" || status === "interrupted";
 }
 
-// renderDetail redraws the header, matrix, and timeline from the current state.
+// renderDetail redraws the header, matrix, and timeline from the current state. The model is folded
+// from the loaded events once and is authoritative from then on, so the raw array is released rather
+// than kept alongside a structure that already holds everything read from it. Live events are applied
+// to the model in place, which is what keeps a long run from growing the tab without bound.
 function renderDetail() {
 	renderHeader(detailState.run);
-	detailState.model = buildModel(detailState.events);
+	if (!detailState.model) {
+		detailState.model = buildModel(detailState.events || []);
+		detailState.events = null;
+	}
 	renderMatrix(detailState.model);
 	renderTimeline(detailState.model);
 }
@@ -8078,7 +8085,6 @@ function openStream(runId, afterSeq) {
 		try {
 			const ev = JSON.parse(e.data);
 			if (ev.seq && ev.seq <= (detailState.lastSeq || 0)) return;
-			detailState.events.push(ev);
 			if (ev.seq) detailState.lastSeq = ev.seq;
 			applyLiveEvent(ev);
 		} catch (_) { /* ignore a malformed event */ }
