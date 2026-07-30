@@ -165,6 +165,11 @@ func requiredRole(r *http.Request) user.Role {
 	if p == "/audit" || strings.HasPrefix(p, "/audit/") {
 		return user.RoleAdmin
 	}
+	// An account carries a profile of personal data, so listing accounts is management data even
+	// to read. Without this a viewer could read every user's name, email, phone, and notes.
+	if p == "/users" || strings.HasPrefix(p, "/users/") {
+		return user.RoleAdmin
+	}
 	if r.Method == http.MethodGet || r.Method == http.MethodHead {
 		return user.RoleViewer
 	}
