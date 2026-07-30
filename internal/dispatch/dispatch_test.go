@@ -1332,3 +1332,127 @@ func TestSplitShardsInheritExecution(t *testing.T) {
 		}
 	}
 }
+
+// pollRecorder wraps a store and records the moment each claim arrives, so a test can measure how
+// the claim loop paces its polls rather than assert about it. hand decides what the nth claim
+// returns; the default is an empty queue.
+type pollRecorder struct {
+	run.Store
+	// mu guards times.
+	mu sync.Mutex
+	// times holds the arrival time of every claim, in order.
+	times []time.Time
+	// hand returns what the nth claim sees, nil for an empty queue.
+	hand func(n int) (*run.Run, error)
+}
+
+// Claim records the call and returns whatever hand decides, defaulting to an empty queue.
+func (p *pollRecorder) Claim(context.Context, string, []string) (*run.Run, error) {
+	p.mu.Lock()
+	p.times = append(p.times, time.Now())
+	n := len(p.times)
+	hand := p.hand
+	p.mu.Unlock()
+	if hand != nil {
+		return hand(n)
+	}
+	return nil, run.ErrNonePending
+}
+
+// gaps returns the interval between consecutive claims, so gaps[i] is the wait the loop took after
+// its i+1th claim came back empty.
+func (p *pollRecorder) gaps() []time.Duration {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := make([]time.Duration, 0, len(p.times))
+	for i := 1; i < len(p.times); i++ {
+		out = append(out, p.times[i].Sub(p.times[i-1]))
+	}
+	return out
+}
+
+// TestClaimIdleBackoff proves an idle claim loop backs off instead of polling at a fixed interval
+// forever. Several dispatchers polling flat out turn an idle system into steady write pressure on a
+// store with one writer, which is exactly the pressure the runs that are executing need.
+func TestClaimIdleBackoff(t *testing.T) {
+	t.Parallel()
+	const base = 50 * time.Millisecond
+	rec := &pollRecorder{Store: run.NewMemStore()}
+	d := New(rec, okRunner(), nil, WithClaimInterval(base), WithNoJanitor())
+	defer d.Close()
+
+	// Long enough for the wait to reach its ceiling several times over.
+	time.Sleep(3 * time.Second)
+	gaps := rec.gaps()
+	if len(gaps) < 6 {
+		t.Fatalf("only %d gaps recorded, too few to judge the pacing", len(gaps))
+	}
+	// By the fourth empty claim the wait is at its ceiling, eight times the base, and the smallest
+	// value jitter can produce there is half of that. A loop that never backs off sits at the base.
+	for i := 3; i < len(gaps); i++ {
+		if gaps[i] < 150*time.Millisecond {
+			t.Errorf("gap %d = %v after %d empty claims, want a backed-off wait", i, gaps[i], i+1)
+		}
+	}
+	t.Logf("gaps: %v", gaps)
+}
+
+// TestClaimJitter proves consecutive idle waits differ, so several dispatchers sharing a store do
+// not stay in step and land their empty claims on the same instant.
+func TestClaimJitter(t *testing.T) {
+	t.Parallel()
+	d := New(run.NewMemStore(), okRunner(), nil,
+		WithClaimInterval(DefaultClaimInterval), WithNoJanitor())
+	defer d.Close()
+
+	seen := make(map[time.Duration]bool)
+	for range 200 {
+		seen[d.idleWait(1)] = true
+	}
+	// A fixed interval yields exactly one value. Jitter spreads a 250ms wait over 125ms of range,
+	// so 200 draws collapsing to a handful of values would mean the jitter is gone.
+	if len(seen) < 50 {
+		t.Errorf("idleWait(1) produced %d distinct waits over 200 draws, want a jittered spread",
+			len(seen))
+	}
+	for wait := range seen {
+		if wait < DefaultClaimInterval/2 || wait >= DefaultClaimInterval*3/2 {
+			t.Errorf("idleWait(1) = %v, want it within half the interval either side", wait)
+		}
+	}
+}
+
+// TestClaimBackoffResetsOnWork proves one successful claim drops the loop straight back to the base
+// interval, so a system that has been idle does not keep a queued run waiting out a long backoff.
+func TestClaimBackoffResetsOnWork(t *testing.T) {
+	t.Parallel()
+	const base = 50 * time.Millisecond
+	ctx := context.Background()
+	store := run.NewMemStore()
+	r := &run.Run{ID: "run_wake", Playbook: "site.yml", Status: run.StatusPending, CreatedAt: time.Now()}
+	if err := store.Save(ctx, r); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	rec := &pollRecorder{Store: store}
+	// The sixth claim finds work, by which point the wait has climbed to its ceiling.
+	rec.hand = func(n int) (*run.Run, error) {
+		if n == 6 {
+			return r.Clone(), nil
+		}
+		return nil, run.ErrNonePending
+	}
+	d := New(rec, okRunner(), nil, WithClaimInterval(base), WithNoJanitor())
+	defer d.Close()
+
+	time.Sleep(2500 * time.Millisecond)
+	gaps := rec.gaps()
+	if len(gaps) < 7 {
+		t.Fatalf("only %d gaps recorded, too few to see the reset", len(gaps))
+	}
+	// gaps[6] is the wait after the first empty claim following the one that found work. A loop
+	// that reset is back at the base interval; one that did not is still at its ceiling.
+	if gaps[6] > 120*time.Millisecond {
+		t.Errorf("gap after a successful claim = %v, want the base interval back", gaps[6])
+	}
+	t.Logf("gaps: %v", gaps)
+}
