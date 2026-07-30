@@ -32,7 +32,7 @@ The rule is one sentence: AI proposes, the control plane governs.
 | Step drafting | The workflow editor, `POST /v1/ai/draft` | Drafts a bash, python, powershell, or go step script from a description, for you to review, edit, and save. It never executes on its own. |
 | Fleet questions | The overview page, `POST /v1/ai/ask` | Answers a plain-language question from a bounded snapshot of run counts, recent runs, host health, and drift. Metadata only, rate limited. |
 | Run proposals | The runs page, `POST /v1/ai/propose-run` | Turns a plain-language request into a validated run the server builds, born held for approval and stamped with your exact words. |
-| Drift reconcile | The drift page | One click on a drifted host builds the fix run, limited to that host, born held for approval. |
+| Drift reconcile | The drift page | One click on a drifted host builds the fix run, limited to that host, born held for approval. The run is constructed deterministically, with no model involved, so this one works with no provider configured. |
 
 ## Providers
 
