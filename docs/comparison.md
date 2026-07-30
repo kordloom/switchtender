@@ -29,7 +29,7 @@ on them.
 | Provable audit | A tamper-evident SHA-256 hash chain, verified offline, with an optional ed25519-signed export. | An activity stream. | An activity log. |
 | Migration in | One command imports an AWX or Semaphore export. | Not applicable. | Not applicable. |
 | Drift detection | A dry run reports what has diverged from the desired state, across Ansible hosts and Terraform working directories, with a one-click approval-gated reconcile to fix it. | No. | No. |
-| Directory-driven roles | A directory or token group sets a user's role on every sign-in, over LDAP, SAML, OIDC, or a bearer JWT. | Organization mapping, complex. | No. Every user is assigned a role by hand. |
+| Directory-driven roles | A directory or token group sets a user's role on every sign-in, over LDAP, SAML, or a bearer JWT. OIDC provisions every account at one configurable default role instead. | Organization mapping, complex. | No. Every user is assigned a role by hand. |
 | Notification channels | Eleven server-wide: webhook, email, Slack, Mattermost, Rocket.Chat, Discord, Teams, ntfy, PagerDuty, Grafana, and Twilio. Seven of those, the ones that need only a URL, also route per template, so a team pages its own channel. PagerDuty, Grafana, Twilio, and email hold server-held account credentials and stay server-wide. | A similar set plus IRC, without Discord or ntfy, attached per job template. | Fewer, some in a paid tier. |
 
 ## Where they are even
