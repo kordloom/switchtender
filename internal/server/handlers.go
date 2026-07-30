@@ -29,6 +29,10 @@ const defaultFleetWindow = 10
 // response or a client retry on POST /runs and POST /pipelines cannot double-fire a run.
 const idempotencyKeyHeader = "Idempotency-Key"
 
+// dedupeRerun names the rerun action in the idempotency keys it dedupes under, so a rerun the
+// caller supplied no key for still cannot fire twice on a double click.
+const dedupeRerun = "rerun"
+
 // createRunRequest is the JSON body accepted by POST /runs.
 type createRunRequest struct {
 	// Playbook is the path to the playbook to execute. Required for the Ansible tool.
@@ -844,8 +848,21 @@ func rerunRunHandler(store run.Store, submitter Submitter, authz *authorizer, lo
 		if denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse, objects...)) {
 			return
 		}
-		opts := append(rerunOptions(rn),
-			run.WithSource("rerun", rn.ID), run.WithRerunOf(rn.ID), run.WithActor(actorName(r)))
+		// Rerunning the same run twice inside the dedupe window is one request, not two, so a
+		// double click returns the run the first click started rather than firing a second.
+		existing, key, err := run.ResolveDedupe(r.Context(), store, dedupeRerun, rn.ID, time.Now())
+		if err != nil {
+			log.Error("server: rerun: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not rerun")
+			return
+		}
+		if existing != nil {
+			w.Header().Set("Location", "/v1/runs/"+existing.ID)
+			respondJSON(w, log, http.StatusAccepted, existing, wantsPretty(r))
+			return
+		}
+		opts := append(rerunOptions(rn), run.WithSource("rerun", rn.ID), run.WithRerunOf(rn.ID),
+			run.WithActor(actorName(r)), run.WithIdempotencyKey(key))
 		var created *run.Run
 		if rn.Kind == run.KindSplit && rn.ShardCount != nil && *rn.ShardCount > 1 {
 			created, err = submitter.SubmitSplit(r.Context(), rn.Playbook, rn.Inventory, *rn.ShardCount, opts...)

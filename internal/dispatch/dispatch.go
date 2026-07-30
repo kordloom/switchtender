@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"math/rand/v2"
 	"os"
 	"sort"
 	"strings"
@@ -49,6 +50,12 @@ const (
 	summaryPageSize = 5000
 	// janitorInterval is how often stale leases are swept.
 	janitorInterval = 10 * time.Second
+	// idleBackoffShift is how many times an idle claim wait may double, so the ceiling is the claim
+	// interval shifted by it. A dispatcher with nothing to claim backs off toward that ceiling
+	// rather than hammering the store, and drops back to the base interval the moment it claims.
+	idleBackoffShift = 3
+	// dedupeRetryShards names the shard-retry action in the idempotency keys it dedupes under.
+	dedupeRetryShards = "retry-shards"
 )
 
 // Publisher receives live run output for streaming to clients. All methods must be safe for
@@ -408,6 +415,7 @@ func (d *Dispatcher) Owner() string {
 // executes its own queue and added workers simply compete for the same leases.
 func (d *Dispatcher) claimLoop() {
 	defer d.wg.Done()
+	idle := 0
 	for {
 		select {
 		case d.sem <- struct{}{}:
@@ -421,13 +429,15 @@ func (d *Dispatcher) claimLoop() {
 			if !errors.Is(err, run.ErrNonePending) && d.ctx.Err() == nil {
 				d.log.Error("dispatch: claim: " + err.Error())
 			}
+			idle++
 			select {
-			case <-time.After(d.claimInterval):
+			case <-time.After(d.idleWait(idle)):
 			case <-d.ctx.Done():
 				return
 			}
 			continue
 		}
+		idle = 0
 
 		d.wg.Add(1)
 		go func() {
@@ -436,6 +446,18 @@ func (d *Dispatcher) claimLoop() {
 			d.executeLeased(d.ctx, r)
 		}()
 	}
+}
+
+// idleWait returns how long to wait before the next claim, given how many consecutive claims came
+// back empty. The wait doubles toward a ceiling so a dispatcher with nothing to do stops competing
+// for the store's single writer with the runs that are actually executing, and it carries jitter so
+// several dispatchers sharing a store spread their polls out instead of arriving together. One
+// claim resets the count, so work is never picked up on a stale backoff.
+func (d *Dispatcher) idleWait(idle int) time.Duration {
+	wait := d.claimInterval << min(max(idle-1, 0), idleBackoffShift)
+	// Half the wait, plus a random share of it: the mean stays at wait and no two idle dispatchers
+	// stay in step.
+	return wait/2 + time.Duration(rand.Int64N(int64(wait)))
 }
 
 // janitor sweeps stale leases so runs owned by dead processes requeue or resolve. It runs once
@@ -723,8 +745,16 @@ func inheritExecution(child, parent *run.Run) {
 
 // RetryFailedShards creates and starts a new split run that re-runs only the failed shards of a
 // finished split parent, keeping each failed shard's host group. Shards that succeeded do not run
-// again. The new parent links back to the run it retries through RetryOf.
+// again. The new parent links back to the run it retries through RetryOf. Retrying the same parent
+// twice inside the dedupe window returns the first retry, so a double click cannot fire two.
 func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string) (*run.Run, error) {
+	existing, key, err := run.ResolveDedupe(ctx, d.store, dedupeRetryShards, parentID, time.Now())
+	if err != nil {
+		return nil, err
+	}
+	if existing != nil {
+		return existing, nil
+	}
 	parent, err := d.store.Get(ctx, parentID)
 	if err != nil {
 		return nil, err
@@ -754,11 +784,16 @@ func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string) (*r
 	retry := &run.Run{
 		ID: run.NewID(), Playbook: parent.Playbook, Inventory: parent.Inventory,
 		Kind: run.KindSplit, Status: run.StatusPending, CreatedAt: time.Now(),
-		ShardCount: &count, RetryOf: &parent.ID,
+		ShardCount: &count, RetryOf: &parent.ID, IdempotencyKey: key,
 	}
 	inheritExecution(retry, parent)
-	if err := d.store.Save(ctx, retry); err != nil {
+	saved, dup, err := d.idempotentSave(ctx, retry)
+	if err != nil {
 		return nil, err
+	}
+	if dup {
+		// A concurrent click won the key; return its retry and create no second set of shards.
+		return saved, nil
 	}
 
 	retryID := retry.ID
@@ -1316,8 +1351,14 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 	defer stopWatch()
 	go d.watch(watchCtx, r.ID)
 
-	eventsPath, cleanup := d.eventsFile(r.ID)
+	eventsPath, cleanup, eventsErr := d.eventsFile(r.ID)
 	defer cleanup()
+	if eventsErr != nil {
+		// Capture is off, so this run will finish with an empty matrix and no events however well
+		// it goes. Record why on the run, rather than leaving a green run that shows nothing.
+		r.Warning = "event capture unavailable, so this run records no events: " + eventsErr.Error()
+		d.save(r)
+	}
 
 	parent := ""
 	if r.ParentID != nil {
@@ -1612,17 +1653,18 @@ func withRetries(f func() error) error {
 	return err
 }
 
-// eventsFile creates a temp file for the run's structured events and returns its path and a
-// cleanup func. On failure it logs and returns an empty path, which disables event capture.
-func (d *Dispatcher) eventsFile(id string) (string, func()) {
+// eventsFile creates a temp file for the run's structured events and returns its path and a cleanup
+// func. On failure it logs and returns an empty path with the error, which disables event capture:
+// the run still executes, but it produces no events, so the caller records why on the run.
+func (d *Dispatcher) eventsFile(id string) (string, func(), error) {
 	f, err := os.CreateTemp("", "switchtender-events-*.ndjson")
 	if err != nil {
 		d.log.Error("dispatch: create events file: "+err.Error(), zap.String("run_id", id))
-		return "", func() {}
+		return "", func() {}, err
 	}
 	path := f.Name()
 	_ = f.Close()
-	return path, func() { _ = os.Remove(path) }
+	return path, func() { _ = os.Remove(path) }, nil
 }
 
 // tailEvents follows the run's event sidecar file, parsing, storing, and publishing complete lines

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1395,5 +1396,204 @@ func TestRetryShardsInheritExecution(t *testing.T) {
 		if c.Limit == "" {
 			t.Error("retry shard lost its host group")
 		}
+	}
+}
+
+// pollRecorder wraps a store and records the moment each claim arrives, so a test can measure how
+// the claim loop paces its polls rather than assert about it. hand decides what the nth claim
+// returns; the default is an empty queue.
+type pollRecorder struct {
+	run.Store
+	// mu guards times.
+	mu sync.Mutex
+	// times holds the arrival time of every claim, in order.
+	times []time.Time
+	// hand returns what the nth claim sees, nil for an empty queue.
+	hand func(n int) (*run.Run, error)
+}
+
+// Claim records the call and returns whatever hand decides, defaulting to an empty queue.
+func (p *pollRecorder) Claim(context.Context, string, []string) (*run.Run, error) {
+	p.mu.Lock()
+	p.times = append(p.times, time.Now())
+	n := len(p.times)
+	hand := p.hand
+	p.mu.Unlock()
+	if hand != nil {
+		return hand(n)
+	}
+	return nil, run.ErrNonePending
+}
+
+// gaps returns the interval between consecutive claims, so gaps[i] is the wait the loop took after
+// its i+1th claim came back empty.
+func (p *pollRecorder) gaps() []time.Duration {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := make([]time.Duration, 0, len(p.times))
+	for i := 1; i < len(p.times); i++ {
+		out = append(out, p.times[i].Sub(p.times[i-1]))
+	}
+	return out
+}
+
+// TestClaimIdleBackoff proves an idle claim loop backs off instead of polling at a fixed interval
+// forever. Several dispatchers polling flat out turn an idle system into steady write pressure on a
+// store with one writer, which is exactly the pressure the runs that are executing need.
+func TestClaimIdleBackoff(t *testing.T) {
+	t.Parallel()
+	const base = 50 * time.Millisecond
+	rec := &pollRecorder{Store: run.NewMemStore()}
+	d := New(rec, okRunner(), nil, WithClaimInterval(base), WithNoJanitor())
+	defer d.Close()
+
+	// Long enough for the wait to reach its ceiling several times over.
+	time.Sleep(3 * time.Second)
+	gaps := rec.gaps()
+	if len(gaps) < 6 {
+		t.Fatalf("only %d gaps recorded, too few to judge the pacing", len(gaps))
+	}
+	// By the fourth empty claim the wait is at its ceiling, eight times the base, and the smallest
+	// value jitter can produce there is half of that. A loop that never backs off sits at the base.
+	for i := 3; i < len(gaps); i++ {
+		if gaps[i] < 150*time.Millisecond {
+			t.Errorf("gap %d = %v after %d empty claims, want a backed-off wait", i, gaps[i], i+1)
+		}
+	}
+	t.Logf("gaps: %v", gaps)
+}
+
+// TestClaimJitter proves consecutive idle waits differ, so several dispatchers sharing a store do
+// not stay in step and land their empty claims on the same instant.
+func TestClaimJitter(t *testing.T) {
+	t.Parallel()
+	d := New(run.NewMemStore(), okRunner(), nil,
+		WithClaimInterval(DefaultClaimInterval), WithNoJanitor())
+	defer d.Close()
+
+	seen := make(map[time.Duration]bool)
+	for range 200 {
+		seen[d.idleWait(1)] = true
+	}
+	// A fixed interval yields exactly one value. Jitter spreads a 250ms wait over 125ms of range,
+	// so 200 draws collapsing to a handful of values would mean the jitter is gone.
+	if len(seen) < 50 {
+		t.Errorf("idleWait(1) produced %d distinct waits over 200 draws, want a jittered spread",
+			len(seen))
+	}
+	for wait := range seen {
+		if wait < DefaultClaimInterval/2 || wait >= DefaultClaimInterval*3/2 {
+			t.Errorf("idleWait(1) = %v, want it within half the interval either side", wait)
+		}
+	}
+}
+
+// TestClaimBackoffResetsOnWork proves one successful claim drops the loop straight back to the base
+// interval, so a system that has been idle does not keep a queued run waiting out a long backoff.
+func TestClaimBackoffResetsOnWork(t *testing.T) {
+	t.Parallel()
+	// The base is wide enough that scheduling noise on a loaded machine stays well inside the gap
+	// between a reset wait, at most 225ms, and a wait still at the ceiling, at least 600ms.
+	const base = 150 * time.Millisecond
+	ctx := context.Background()
+	store := run.NewMemStore()
+	r := &run.Run{ID: "run_wake", Playbook: "site.yml", Status: run.StatusPending, CreatedAt: time.Now()}
+	if err := store.Save(ctx, r); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	rec := &pollRecorder{Store: store}
+	// The fourth claim finds work, by which point the wait has climbed to its ceiling.
+	rec.hand = func(n int) (*run.Run, error) {
+		if n == 4 {
+			return r.Clone(), nil
+		}
+		return nil, run.ErrNonePending
+	}
+	d := New(rec, okRunner(), nil, WithClaimInterval(base), WithNoJanitor())
+	defer d.Close()
+
+	time.Sleep(4 * time.Second)
+	gaps := rec.gaps()
+	if len(gaps) < 5 {
+		t.Fatalf("only %d gaps recorded, too few to see the reset", len(gaps))
+	}
+	// gaps[4] is the wait after the first empty claim following the one that found work. A loop that
+	// reset is back at the base interval; one that did not is still at its ceiling.
+	if gaps[4] > 400*time.Millisecond {
+		t.Errorf("gap after a successful claim = %v, want the base interval back", gaps[4])
+	}
+	t.Logf("gaps: %v", gaps)
+}
+
+// TestRetryFailedShardsDedupes proves clicking retry twice starts one retry rather than two. Both
+// calls resolve to the same run and only one set of shards is created, so the failed hosts are not
+// worked twice over concurrently.
+func TestRetryFailedShardsDedupes(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := run.NewMemStore()
+	runner := &flakyRunnerLister{hosts: []string{"a", "b", "c", "d"}, failHost: "b"}
+	d := New(store, runner, nil)
+	defer d.Close()
+
+	parent, err := d.SubmitSplit(ctx, "play.yml", "inv", 2)
+	if err != nil {
+		t.Fatalf("SubmitSplit() error = %v", err)
+	}
+	if got := waitTerminal(t, store, parent.ID); got.Status != run.StatusFailed {
+		t.Fatalf("parent status = %q, want failed", got.Status)
+	}
+
+	first, err := d.RetryFailedShards(ctx, parent.ID)
+	if err != nil {
+		t.Fatalf("RetryFailedShards() first error = %v", err)
+	}
+	second, err := d.RetryFailedShards(ctx, parent.ID)
+	if err != nil {
+		t.Fatalf("RetryFailedShards() second error = %v", err)
+	}
+	if first.ID != second.ID {
+		t.Errorf("second retry = %s, want the first retry %s", second.ID, first.ID)
+	}
+
+	// Count the retries of this parent directly, so a second run that was created but not returned
+	// is still caught.
+	all, err := store.List(ctx)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	retries := 0
+	for _, r := range all {
+		if r.RetryOf != nil && *r.RetryOf == parent.ID {
+			retries++
+		}
+	}
+	if retries != 1 {
+		t.Errorf("retries of the parent = %d, want 1", retries)
+	}
+}
+
+// TestEventCaptureFailureWarnsOnRun proves a run whose event capture could not be set up says so on
+// the run itself. The run still executes and still finishes on its own merits, but it records no
+// events, and without the warning a green run with an empty matrix looks like one that did nothing.
+func TestEventCaptureFailureWarnsOnRun(t *testing.T) {
+	// t.Setenv rules out t.Parallel, and pointing the temp dir at a path that does not exist is
+	// what makes the event file fail the way a full disk would.
+	t.Setenv("TMPDIR", filepath.Join(t.TempDir(), "not-a-directory"))
+	ctx := context.Background()
+	store := run.NewMemStore()
+	d := New(store, okRunner(), nil, WithNoJanitor())
+	defer d.Close()
+
+	created, err := d.Submit(ctx, "site.yml", "inv.ini")
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+	got := waitTerminal(t, store, created.ID)
+	if got.Status != run.StatusSucceeded {
+		t.Fatalf("status = %q, want succeeded: capture failing must not fail the run", got.Status)
+	}
+	if !strings.Contains(got.Warning, "event capture unavailable") {
+		t.Errorf("warning = %q, want it to explain the empty matrix", got.Warning)
 	}
 }

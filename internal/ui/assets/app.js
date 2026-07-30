@@ -8229,6 +8229,31 @@ function wireLogFilter() {
 	});
 }
 
+// renderWarningCallout shows a degradation the run survived, such as event capture being
+// unavailable. A run that finished green with an empty matrix looks like one that did nothing, so
+// the reason belongs on the page rather than only in the server log.
+function renderWarningCallout(run) {
+	const host = document.getElementById("run-warning");
+	if (!host) return;
+	if (!run.warning) {
+		host.hidden = true;
+		host.textContent = "";
+		return;
+	}
+	host.textContent = "";
+	const head = document.createElement("div");
+	head.className = "risk-callout-head";
+	const label = document.createElement("strong");
+	label.textContent = "Warning";
+	head.appendChild(label);
+	host.appendChild(head);
+	const why = document.createElement("div");
+	why.className = "muted";
+	why.textContent = run.warning;
+	host.appendChild(why);
+	host.hidden = false;
+}
+
 // renderHeader fills the run header fields.
 function renderHeader(run) {
 	const el = document.getElementById("run-header");
@@ -8264,6 +8289,7 @@ function renderHeader(run) {
 		el.appendChild(field("Risk", null, riskBadge(run.risk)));
 	}
 	renderRiskCallout(run);
+	renderWarningCallout(run);
 	if (run.source) {
 		const origin = originCellEl(run);
 		origin.className = "";
