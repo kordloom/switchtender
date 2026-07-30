@@ -1700,6 +1700,7 @@ function renderNodes() {
 	for (const node of wfState.nodes) {
 		const el = document.createElement("div");
 		el.className = "wf-node";
+		el.dataset.tool = node.tool;
 		el.style.left = node.x + "px";
 		el.style.top = node.y + "px";
 		el.dataset.id = node.id;
@@ -5785,6 +5786,7 @@ function typeCellEl(r) {
 	const tool = (r.tool || "ansible").toLowerCase();
 	const chip = document.createElement("span");
 	chip.className = "tool-badge " + tool;
+	chip.dataset.tool = tool;
 	chip.textContent = tool;
 	if (KIND_TIPS[tool]) chip.dataset.tip = KIND_TIPS[tool];
 	cell.appendChild(chip);
@@ -5806,6 +5808,7 @@ function toolBadgeEl(r) {
 	if (!r.tool || r.tool === "ansible") return null;
 	const badge = document.createElement("span");
 	badge.className = "tool-badge " + r.tool;
+	badge.dataset.tool = r.tool;
 	badge.textContent = r.tool;
 	return badge;
 }
@@ -6820,6 +6823,7 @@ async function loadPolicies() {
 			if (p.tool) {
 				const badge = document.createElement("span");
 				badge.className = "tool-badge " + p.tool;
+				badge.dataset.tool = p.tool;
 				badge.textContent = p.tool;
 				toolCell.appendChild(badge);
 			} else {

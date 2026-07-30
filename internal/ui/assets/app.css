@@ -50,11 +50,6 @@
 	--primary-glow: 0 4px 16px rgba(5, 150, 105, 0.25);
 	--primary-glow-hover: 0 7px 22px rgba(5, 150, 105, 0.35);
 	--on-warn: #ffffff;
-	--t-bash: #1a7f37;
-	--t-terraform: #6e40c9;
-	--t-python: #0969da;
-	--t-go: #007d9c;
-	--t-dry: #9a6700;
 	--active-bar: linear-gradient(180deg, var(--accent), var(--ok));
 	--heading: #047857;
 	--display: "Space Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -98,11 +93,6 @@
 		--primary-glow: 0 4px 18px rgba(52, 211, 153, 0.25);
 		--primary-glow-hover: 0 8px 26px rgba(52, 211, 153, 0.38);
 		--on-warn: #0d1117;
-		--t-bash: #56d364;
-		--t-terraform: #d2a8ff;
-		--t-python: #58a6ff;
-		--t-go: #22c7e6;
-		--t-dry: #e3b341;
 		--heading: #34d399;
 	}
 }
@@ -384,17 +374,44 @@ table.runs td.mono { max-width: 380px; overflow: hidden; text-overflow: ellipsis
 .badge.pending_approval { color: var(--changed); background: color-mix(in srgb, var(--changed) 13%, transparent); border-color: color-mix(in srgb, var(--changed) 32%, transparent); }
 .badge.rejected { color: var(--canceled); background: color-mix(in srgb, var(--canceled) 15%, transparent); border-color: color-mix(in srgb, var(--canceled) 34%, transparent); }
 
+/* Tool identity colors. Every tool keeps its own hue under every theme, the flat ones included,
+   because a graph of steps or a column of types is unreadable when everything is the same gray. One
+   palette covers all three themes: the shown shade is mixed toward the theme's own text color, so it
+   darkens on white and lightens on ink without a second set of values to keep in step. Brand hues
+   where a tool has one, and PowerShell takes indigo so it does not read as Python's blue. */
+:root {
+	--tool-ansible: #d9534f;
+	--tool-bash: #3ea34a;
+	--tool-terraform: #7b42bc;
+	--tool-opentofu: #c98a00;
+	--tool-python: #3776ab;
+	--tool-powershell: #5a4fcf;
+	--tool-go: #00acd7;
+	--tool-dry: #b8860b;
+	--tool-other: #6b7a88;
+}
+[data-tool] { --tool: var(--tool-other); }
+[data-tool="ansible"] { --tool: var(--tool-ansible); }
+[data-tool="bash"] { --tool: var(--tool-bash); }
+[data-tool="terraform"] { --tool: var(--tool-terraform); }
+[data-tool="opentofu"] { --tool: var(--tool-opentofu); }
+[data-tool="python"] { --tool: var(--tool-python); }
+[data-tool="powershell"] { --tool: var(--tool-powershell); }
+[data-tool="go"] { --tool: var(--tool-go); }
+/* ink is the readable shade of the tool hue against the current theme's background; wash is its
+   tint, used for chip and card fills. */
+[data-tool] {
+	--tool-ink: color-mix(in srgb, var(--tool) 76%, var(--text));
+	--tool-wash: color-mix(in srgb, var(--tool) 15%, transparent);
+}
+
 /* Run kind tag */
 .run-kind { display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 999px; font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; background: var(--surface-3); color: var(--muted); vertical-align: middle; }
 .run-kind.split { background: var(--accent-soft); color: var(--accent); }
 .run-kind.pipeline { background: color-mix(in srgb, var(--violet) 16%, transparent); color: var(--violet); }
-.run-kind.dry { background: rgba(210, 153, 34, 0.18); color: var(--t-dry); }
-/* Tool badge */
-.tool-badge { display: inline-block; margin-right: 6px; padding: 1px 7px; border-radius: 999px; font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; background: var(--surface-3); color: var(--muted); vertical-align: middle; }
-.tool-badge.bash { background: rgba(63, 185, 80, 0.18); color: var(--t-bash); }
-.tool-badge.terraform { background: rgba(124, 58, 237, 0.18); color: var(--t-terraform); }
-.tool-badge.python { background: rgba(47, 129, 247, 0.16); color: var(--t-python); }
-.tool-badge.go { background: rgba(0, 173, 216, 0.18); color: var(--t-go); }
+.run-kind.dry { background: rgba(210, 153, 34, 0.18); color: var(--tool-dry); }
+/* Tool badge, colored by which tool it names so a type column scans by hue before it is read. */
+.tool-badge { display: inline-block; margin-right: 6px; padding: 1px 7px; border-radius: 999px; font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; background: var(--tool-wash, var(--surface-3)); color: var(--tool-ink, var(--muted)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tool, transparent) 26%, transparent); vertical-align: middle; }
 .check-label { flex-direction: row; align-items: center; gap: 8px; font-weight: 600; }
 
 /* Run header */
@@ -794,11 +811,6 @@ body[data-theme="light"] {
 	--primary-glow: none;
 	--primary-glow-hover: 0 6px 18px rgba(17, 17, 17, 0.22);
 	--on-warn: #ffffff;
-	--t-bash: #1a7f37;
-	--t-terraform: #6e40c9;
-	--t-python: #0969da;
-	--t-go: #007d9c;
-	--t-dry: #9a6700;
 	--active-bar: #111111;
 }
 body[data-theme="dark"] {
@@ -835,11 +847,6 @@ body[data-theme="dark"] {
 	--primary-glow: none;
 	--primary-glow-hover: 0 6px 18px rgba(236, 232, 220, 0.15);
 	--on-warn: #0d1117;
-	--t-bash: #56d364;
-	--t-terraform: #d2a8ff;
-	--t-python: #58a6ff;
-	--t-go: #22c7e6;
-	--t-dry: #e3b341;
 	--active-bar: #ece8dc;
 }
 
