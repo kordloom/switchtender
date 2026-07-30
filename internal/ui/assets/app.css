@@ -605,15 +605,23 @@ button.topbar-link { background: none; border: none; padding: 0; font: inherit; 
 /* Workflow editor: a canvas of draggable step nodes wired into a dependency graph, run as a
    pipeline. Edges are an SVG layer under the nodes; nodes are absolutely positioned cards. */
 .error-text { color: var(--failed); }
-.wf-toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+/* The editor's controls sit on their own row under the heading. Crowded into the header's action slot
+   they squeezed the title's description into a narrow column and pushed the help chip off the edge. */
+.wf-toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 4px; }
 .wf-toolbar .input { width: auto; min-width: 150px; }
+.wf-toolbar .wf-name-input { min-width: 190px; }
+.wf-toolbar-gap { flex: 1 1 auto; }
+.wf-approval { font-size: 12.5px; font-weight: 500; color: var(--muted); white-space: nowrap; cursor: pointer; }
+.wf-approval input { accent-color: var(--accent); }
+.wf-approval:hover { color: var(--text); }
 .wf-canvas { position: relative; margin-top: 14px; min-height: 60vh; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius); background-color: var(--surface); background-image: radial-gradient(var(--border-muted) 1px, transparent 1px); background-size: 22px 22px; background-position: 0 0; touch-action: none; cursor: grab; }
 .wf-canvas.wf-panning { cursor: grabbing; }
 .wf-world { position: absolute; top: 0; left: 0; transform-origin: 0 0; will-change: transform; }
 .wf-edges { position: absolute; top: 0; left: 0; pointer-events: none; overflow: visible; }
-.wf-edge { fill: none; stroke: var(--accent); stroke-width: 2; }
-.wf-edge-live { stroke-dasharray: 5 4; opacity: 0.8; }
-.wf-edge-selected { stroke: var(--failed); stroke-width: 3; }
+/* A link wears the color of the step it leaves, so a fan-out stays traceable to its source. */
+.wf-edge { fill: none; stroke: var(--tool-ink, var(--accent)); stroke-width: 2.2; }
+.wf-edge-live { stroke-dasharray: 5 4; opacity: 0.85; }
+.wf-edge-selected { stroke: var(--failed); stroke-width: 3.4; }
 .wf-edge-hit { fill: none; stroke: transparent; stroke-width: 14; pointer-events: stroke; cursor: pointer; }
 .wf-edge-hit:focus { outline: none; }
 .wf-nodes { position: absolute; top: 0; left: 0; pointer-events: none; }
@@ -629,21 +637,74 @@ button.topbar-link { background: none; border: none; padding: 0; font: inherit; 
 	.wf-zoom-btn { width: 40px; height: 40px; }
 	.wf-zoom-level { height: 40px; }
 }
-.wf-node { position: absolute; width: 190px; box-sizing: border-box; padding: 9px 11px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.14); cursor: grab; touch-action: none; user-select: none; }
+/* A step card is tinted by the tool it runs: a colored spine down its leading edge, a matching badge,
+   and matching link handles. The hue comes from the tool palette rather than from a theme token, so
+   Linen and Ink keep it. */
+.wf-node { position: absolute; width: 190px; box-sizing: border-box; padding: 9px 11px 9px 13px; background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--tool-ink, var(--accent)); border-radius: 10px; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.14); cursor: grab; touch-action: none; user-select: none; }
+.wf-node::before { content: ""; position: absolute; inset: 0; border-radius: 8px 8px 8px 8px; background: var(--tool-wash, transparent); opacity: 0.5; pointer-events: none; }
+.wf-node > * { position: relative; }
+.wf-node:hover { border-color: color-mix(in srgb, var(--tool, var(--accent)) 50%, var(--border)); box-shadow: 0 4px 14px -2px color-mix(in srgb, var(--tool, #000) 35%, transparent); }
 .wf-node:active { cursor: grabbing; }
-.wf-node:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.wf-node:focus-visible { outline: 2px solid var(--tool-ink, var(--accent)); outline-offset: 2px; }
 .wf-node-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
 .wf-node-name { font-weight: 600; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wf-node-del { border: none; background: none; color: var(--muted); font-size: 17px; line-height: 1; cursor: pointer; padding: 0 2px; }
 .wf-node-del:hover { color: var(--failed); }
 .wf-node-meta { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
-.wf-tool { flex: none; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; background: var(--accent-soft); color: var(--text); }
+.wf-tool { flex: none; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; background: color-mix(in srgb, var(--tool, var(--accent)) 22%, transparent); color: var(--tool-ink, var(--text)); }
 .wf-node-target { font-size: 11.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.wf-handle { position: absolute; top: 26px; width: 12px; height: 12px; border-radius: 50%; background: var(--surface); border: 2px solid var(--accent); transform: translateY(-50%); }
+/* What a step does differently, marked on the card so it need not be opened to be understood. */
+.wf-node-flags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.wf-flag { padding: 0 6px; border-radius: 4px; font-family: var(--mono); font-size: 10px; font-weight: 600; letter-spacing: 0.02em; }
+.wf-flag.dry { background: color-mix(in srgb, var(--tool-dry) 20%, transparent); color: color-mix(in srgb, var(--tool-dry) 78%, var(--text)); }
+.wf-flag.warn { background: color-mix(in srgb, var(--failed) 16%, transparent); color: color-mix(in srgb, var(--failed) 80%, var(--text)); }
+.wf-flag.retry { background: var(--surface-3); color: var(--muted); }
+.wf-handle { position: absolute; top: 26px; width: 12px; height: 12px; border-radius: 50%; background: var(--surface); border: 2px solid var(--tool-ink, var(--accent)); transform: translateY(-50%); }
 .wf-in { left: -7px; }
 .wf-out { right: -7px; cursor: crosshair; }
-.wf-out:hover { background: var(--accent); }
-.wf-hint { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); max-width: 300px; text-align: center; font-size: 13px; }
+.wf-out:hover { background: var(--tool-ink, var(--accent)); transform: translateY(-50%) scale(1.25); }
+
+/* The empty canvas offers the two ways in rather than only describing the gestures. */
+.wf-hint { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 340px; max-width: 86%; text-align: center; }
+.wf-hint svg { width: 34px; height: 34px; color: var(--accent); opacity: 0.7; }
+.wf-hint-title { margin: 8px 0 2px; font-family: var(--display); font-size: 15px; font-weight: 700; color: var(--text); }
+.wf-hint-text { margin: 0 0 14px; font-size: 13px; color: var(--muted); line-height: 1.5; }
+.wf-hint-actions { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; }
+
+/* Tool color key, shown only once a graph mixes tools. */
+.wf-legend { position: absolute; left: 12px; bottom: 12px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; max-width: calc(100% - 180px); padding: 6px 11px; background: var(--glass); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border: 1px solid var(--border-muted); border-radius: 999px; }
+.wf-legend-item { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; color: var(--muted); }
+.wf-legend-item i { width: 9px; height: 9px; border-radius: 50%; background: var(--tool-ink, var(--accent)); }
+
+/* How this works: the rules of the editor, open on demand and closed once they are known. */
+.wf-help { margin-top: 14px; background-color: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+.wf-help summary { display: flex; align-items: center; gap: 8px; padding: 10px 14px; font-size: 13px; font-weight: 600; color: var(--text); cursor: pointer; list-style: none; }
+.wf-help summary::-webkit-details-marker { display: none; }
+.wf-help summary svg { width: 15px; height: 15px; color: var(--accent); }
+.wf-help summary::after { content: "\25BE"; margin-left: auto; color: var(--muted); font-size: 10px; transition: transform 0.15s var(--ease); }
+.wf-help[open] summary::after { transform: rotate(180deg); }
+.wf-help summary:hover { color: var(--accent); }
+.wf-help-body { padding: 0 14px 12px; border-top: 1px solid var(--border-muted); }
+.wf-help-list { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 6px 16px; margin: 12px 0 0; }
+.wf-help-list dt { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.wf-help-list dd { margin: 0; font-size: 13px; line-height: 1.5; }
+@media (max-width: 680px) { .wf-help-list { grid-template-columns: 1fr; gap: 2px; } .wf-help-list dd { margin-bottom: 8px; } }
+
+/* Pattern chooser: each row is a shape drawn as dots beside what it is for. */
+.wf-wizard-btn svg { width: 15px; height: 15px; color: var(--accent); }
+.wf-wizard-field { margin: 16px 0 4px; }
+.wf-pattern-list { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
+.wf-pattern { display: flex; align-items: center; gap: 16px; width: 100%; padding: 12px 14px; background: var(--surface-2); border: 1px solid var(--border-muted); border-radius: var(--radius); color: var(--text); font: inherit; text-align: left; cursor: pointer; transition: border-color 0.14s var(--ease), transform 0.14s var(--ease); }
+.wf-pattern:hover { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); transform: translateX(2px); }
+.wf-pattern-shape { flex: none; display: flex; align-items: center; gap: 7px; width: 62px; }
+.wf-pattern-col { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.wf-pattern-col i { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); opacity: 0.55; }
+.wf-pattern:hover .wf-pattern-col i { opacity: 1; }
+.wf-pattern-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.wf-pattern-title { font-size: 13.5px; font-weight: 700; }
+.wf-pattern-summary { font-size: 12.5px; color: var(--text); }
+.wf-pattern-detail { font-size: 12px; color: var(--muted); }
+.wf-wizard-warn { margin: 14px 0 0; padding: 9px 12px; background: color-mix(in srgb, var(--changed) 12%, transparent); border-left: 3px solid var(--changed); border-radius: var(--radius); font-size: 12.5px; }
 .wf-draft-row { display: flex; gap: 8px; }
 .wf-draft-row .input { flex: 1; }
 .wf-step-row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }

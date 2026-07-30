@@ -1306,6 +1306,7 @@ function mountWorkflow() {
 		}
 	});
 	window.addEventListener("resize", renderEdges);
+	mountWizard();
 	let hadViewport = wfRestore();
 	if (!wfState.nodes.length) {
 		wfSeedExample();
@@ -1453,6 +1454,201 @@ function wfSeedExample() {
 	wfState.seq = 4;
 	const name = document.getElementById("wf-name");
 	if (name && !name.value) name.value = "Release pipeline";
+}
+
+// WF_PATTERNS are the shapes a real pipeline usually takes. A blank canvas asks the reader to know
+// both what they want and how this editor expresses it; a pattern answers the second half, laying out
+// named steps and their dependencies for them to rename and point at their own playbooks. Each step
+// is (name, tool or null to take the chosen one, column, row), where null means the pattern has no
+// opinion. Columns and rows are grid slots, turned into coordinates by wfApplyPattern.
+const WF_PATTERNS = [
+	{
+		id: "linear",
+		title: "One after another",
+		summary: "Each step waits for the one before it.",
+		detail: "The safe default. Nothing overlaps, so a failure stops the rest.",
+		diagram: [[1], [1], [1]],
+		steps: [
+			["build", null, 0, 0],
+			["test", null, 1, 0],
+			["deploy", null, 2, 0],
+		],
+		links: [[0, 1], [1, 2]],
+	},
+	{
+		id: "fanout",
+		title: "Fan out, then gate",
+		summary: "One step opens, several run at once, a last step waits for all of them.",
+		detail: "Use it when independent work can overlap but nothing after it should start early.",
+		diagram: [[1], [1, 1, 1], [1]],
+		steps: [
+			["prepare", null, 0, 1],
+			["web", null, 1, 0],
+			["workers", null, 1, 1],
+			["database", null, 1, 2],
+			["verify", null, 2, 1],
+		],
+		links: [[0, 1], [0, 2], [0, 3], [1, 4], [2, 4], [3, 4]],
+	},
+	{
+		id: "provision",
+		title: "Provision, then configure",
+		summary: "Terraform builds the infrastructure, Ansible configures it, a check proves it.",
+		detail: "The two-tool pipeline AWX cannot express without a second system.",
+		diagram: [[1], [1, 1], [1]],
+		steps: [
+			["provision", "terraform", 0, 1],
+			["configure", "ansible", 1, 0],
+			["migrate-db", "ansible", 1, 1],
+			["smoke-test", "bash", 2, 1],
+		],
+		links: [[0, 1], [0, 2], [1, 3], [2, 3]],
+	},
+	{
+		id: "canary",
+		title: "Canary, then the fleet",
+		summary: "Ship to one host, verify it, then roll to the rest.",
+		detail: "Stops a bad change after one host instead of across the fleet.",
+		diagram: [[1], [1], [1], [1]],
+		steps: [
+			["deploy-canary", null, 0, 0],
+			["verify-canary", "bash", 1, 0],
+			["deploy-fleet", null, 2, 0],
+			["verify-fleet", "bash", 3, 0],
+		],
+		links: [[0, 1], [1, 2], [2, 3]],
+	},
+];
+
+// WF_PATTERN_COL and WF_PATTERN_ROW are the grid pitch a pattern lays out on, wide enough that cards
+// never touch and their links read as curves rather than as creases.
+const WF_PATTERN_COL = 270;
+const WF_PATTERN_ROW = 130;
+
+// patternByID returns the pattern with the given id, or null.
+function patternByID(id) {
+	return WF_PATTERNS.find((p) => p.id === id) || null;
+}
+
+// wfApplyPattern replaces the graph with the named pattern, in the chosen tool where the pattern has
+// no opinion of its own. It goes through the undo stack, so a pattern dropped onto work in progress is
+// one Cmd-Z away from being taken back.
+function wfApplyPattern(id, tool) {
+	const pattern = patternByID(id);
+	if (!pattern) return;
+	wfSnapshot();
+	const target = (t) => (t === "ansible" ? "site.yml" : "");
+	wfState.nodes = pattern.steps.map(([name, stepTool, col, row], i) => {
+		const chosen = stepTool || tool;
+		return {
+			id: "n" + (wfState.seq + i),
+			name,
+			tool: chosen,
+			x: 60 + col * WF_PATTERN_COL,
+			y: 60 + row * WF_PATTERN_ROW,
+			playbook: chosen === "ansible" ? target(chosen) : "",
+			command: chosen === "ansible" ? "" : "echo " + name,
+			inventory: "",
+			dryRun: false,
+			continueOnFailure: false,
+			retries: 0,
+		};
+	});
+	wfState.edges = pattern.links.map(([from, to]) => ({
+		from: wfState.nodes[from].id, to: wfState.nodes[to].id,
+	}));
+	wfState.seq += pattern.steps.length;
+	wfState.selectedEdge = null;
+	renderWorkflow();
+	fitView();
+	wfSave();
+	wfSetStatus("Laid out " + pattern.steps.length + " steps. Open each one to point it at your own " +
+		"playbook or script. Undo takes it back.", "");
+}
+
+// patternDiagram draws a pattern's shape as a small grid of dots, so the shape is picked by looking
+// rather than by reading a description of it.
+function patternDiagram(pattern) {
+	const wrap = document.createElement("span");
+	wrap.className = "wf-pattern-shape";
+	wrap.setAttribute("aria-hidden", "true");
+	for (const column of pattern.diagram) {
+		const col = document.createElement("span");
+		col.className = "wf-pattern-col";
+		for (let i = 0; i < column.length; i++) col.appendChild(document.createElement("i"));
+		wrap.appendChild(col);
+	}
+	return wrap;
+}
+
+// mountWizard builds the pattern chooser and wires the controls that open it. Choosing a pattern
+// replaces the graph, so a canvas that already holds work says so before it is overwritten.
+function mountWizard() {
+	const modal = document.getElementById("wf-wizard-modal");
+	const list = document.getElementById("wf-wizard-list");
+	if (!modal || !list) return;
+	const warn = document.getElementById("wf-wizard-warn");
+	const toolPick = document.getElementById("wf-wizard-tool");
+	const card = modal.querySelector(".modal-card");
+	card.setAttribute("role", "dialog");
+	card.setAttribute("aria-modal", "true");
+
+	const close = () => {
+		modal.hidden = true;
+		if (wfState.opener && wfState.opener.focus) wfState.opener.focus();
+		wfState.opener = null;
+	};
+	const open = () => {
+		wfState.opener = document.activeElement;
+		if (warn) {
+			warn.hidden = wfState.nodes.length === 0;
+			warn.textContent = "This canvas already holds " + wfState.nodes.length +
+				(wfState.nodes.length === 1 ? " step" : " steps") +
+				". Choosing a pattern replaces them, and undo brings them back.";
+		}
+		modal.hidden = false;
+		const first = list.querySelector(".wf-pattern");
+		if (first) first.focus();
+	};
+
+	for (const pattern of WF_PATTERNS) {
+		const item = document.createElement("button");
+		item.type = "button";
+		item.className = "wf-pattern";
+		item.appendChild(patternDiagram(pattern));
+		const text = document.createElement("span");
+		text.className = "wf-pattern-text";
+		const title = document.createElement("span");
+		title.className = "wf-pattern-title";
+		title.textContent = pattern.title;
+		const summary = document.createElement("span");
+		summary.className = "wf-pattern-summary";
+		summary.textContent = pattern.summary;
+		const detail = document.createElement("span");
+		detail.className = "wf-pattern-detail";
+		detail.textContent = pattern.detail;
+		text.appendChild(title);
+		text.appendChild(summary);
+		text.appendChild(detail);
+		item.appendChild(text);
+		item.addEventListener("click", () => {
+			wfApplyPattern(pattern.id, toolPick ? toolPick.value : "ansible");
+			close();
+		});
+		list.appendChild(item);
+	}
+
+	document.getElementById("wf-wizard-close").addEventListener("click", close);
+	modal.addEventListener("click", (e) => { if (e.target === modal) close(); });
+	document.addEventListener("keydown", (e) => {
+		if (e.key === "Escape" && !modal.hidden) close();
+	});
+	for (const id of ["wf-wizard-open", "wf-hint-wizard"]) {
+		const btn = document.getElementById(id);
+		if (btn) btn.addEventListener("click", open);
+	}
+	const hintAdd = document.getElementById("wf-hint-add");
+	if (hintAdd) hintAdd.addEventListener("click", () => openStepModal(null));
 }
 
 // wfRestore loads the saved draft into the editor state, ignoring anything malformed. It reports
@@ -1685,15 +1881,19 @@ function removeNode(id) {
 	wfSave();
 }
 
-// renderWorkflow redraws the nodes and the edges and toggles the empty hint.
+// renderWorkflow redraws the nodes and the edges, refreshes the color key, and toggles the empty
+// state.
 function renderWorkflow() {
 	renderNodes();
 	renderEdges();
+	renderLegend();
 	if (wfState.hint) wfState.hint.hidden = wfState.nodes.length > 0;
 }
 
 // renderNodes reconciles the node cards with the model, positioning each and wiring its handles.
-// Cards are focusable: Enter edits, arrows move, L starts a link, and Delete removes.
+// Cards are focusable: Enter edits, arrows move, L starts a link, and Delete removes. Every card
+// carries its tool on a data attribute, which is what tints the card, its badge, and its handles, so
+// a graph reads as a set of distinct steps under the flat themes as much as the signature one.
 function renderNodes() {
 	const layer = wfState.nodesLayer;
 	layer.textContent = "";
@@ -1713,16 +1913,60 @@ function renderNodes() {
 			'<div class="wf-node-head"><span class="wf-node-name"></span>' +
 			'<button type="button" class="wf-node-del" aria-label="Delete step">&times;</button></div>' +
 			'<div class="wf-node-meta"><span class="wf-tool"></span><span class="wf-node-target mono"></span></div>' +
+			'<div class="wf-node-flags"></div>' +
 			'<span class="wf-handle wf-in" aria-hidden="true"></span>' +
-			'<span class="wf-handle wf-out" aria-hidden="true"></span>';
+			'<span class="wf-handle wf-out" data-tip="Drag onto another step to make it wait for this one"></span>';
 		el.querySelector(".wf-node-name").textContent = node.name;
 		el.querySelector(".wf-tool").textContent = node.tool;
 		el.querySelector(".wf-node-target").textContent = target || "";
+		// The settings that change how a step behaves are marked on the card, so a dry run or a step
+		// that swallows its own failure is visible without opening it.
+		const flags = el.querySelector(".wf-node-flags");
+		const flag = (text, cls, tip) => {
+			const span = document.createElement("span");
+			span.className = "wf-flag " + cls;
+			span.textContent = text;
+			span.dataset.tip = tip;
+			flags.appendChild(span);
+		};
+		if (node.dryRun) flag("dry", "dry", "Reports what would change without changing anything");
+		if (node.continueOnFailure) {
+			flag("continues", "warn", "A failure here does not stop the steps after it");
+		}
+		if (node.retries > 0) {
+			flag("retry " + node.retries, "retry",
+				"Retried up to " + node.retries + " more " + (node.retries === 1 ? "time" : "times") +
+				" before it counts as failed");
+		}
+		flags.hidden = !flags.children.length;
 		el.querySelector(".wf-node-del").addEventListener("click", (ev) => { ev.stopPropagation(); removeNode(node.id); });
 		el.querySelector(".wf-out").addEventListener("pointerdown", (ev) => startLink(ev, node.id));
 		el.addEventListener("pointerdown", (ev) => startDrag(ev, node.id));
 		el.addEventListener("keydown", (ev) => nodeKey(ev, node.id));
 		layer.appendChild(el);
+	}
+}
+
+// renderLegend names the tool colors the current graph actually uses, so the hues on the canvas are
+// decoded without a trip to the docs. A single-tool graph needs no key, so it does not get one.
+function renderLegend() {
+	const legend = document.getElementById("wf-legend");
+	if (!legend) return;
+	const tools = [];
+	for (const node of wfState.nodes) {
+		if (!tools.includes(node.tool)) tools.push(node.tool);
+	}
+	legend.textContent = "";
+	legend.hidden = tools.length < 2;
+	if (legend.hidden) return;
+	for (const tool of tools.sort()) {
+		const item = document.createElement("span");
+		item.className = "wf-legend-item";
+		item.dataset.tool = tool;
+		const dot = document.createElement("i");
+		item.appendChild(dot);
+		item.appendChild(document.createTextNode(tool));
+		legend.appendChild(item);
 	}
 }
 
@@ -1794,19 +2038,31 @@ function renderEdges() {
 		const sel = wfState.selectedEdge &&
 			wfState.selectedEdge.from === e.from && wfState.selectedEdge.to === e.to;
 		const d = edgeD(a.x + WF_CARD_W, a.y + WF_HANDLE_Y, b.x, b.y + WF_HANDLE_Y);
-		paths += '<path class="wf-edge' + (sel ? " wf-edge-selected" : "") + '" d="' + d + '"/>';
+		// A link takes the color of the step it leaves, so a fan-out is traceable back to its source
+		// at a glance instead of resolving into one flat tangle.
+		paths += '<path class="wf-edge' + (sel ? " wf-edge-selected" : "") + '" data-tool="' +
+			esc(a.tool) + '" d="' + d + '"/>';
 		paths += '<path class="wf-edge-hit" d="' + d + '" tabindex="0" role="button" ' +
-			'data-from="' + e.from + '" data-to="' + e.to + '" ' +
-			'aria-label="Dependency link. Press Delete to remove it."/>';
+			'data-from="' + esc(e.from) + '" data-to="' + esc(e.to) + '" ' +
+			'aria-label="Dependency link, ' + esc(a.name) + ' into ' + esc(b.name) +
+			'. Press Delete to remove it."/>';
 	}
 	if (wfState.link && wfState.link.cursor) {
 		const a = wfState.nodes.find((n) => n.id === wfState.link.from);
 		if (a) {
-			paths += '<path class="wf-edge wf-edge-live" d="' +
+			paths += '<path class="wf-edge wf-edge-live" data-tool="' + esc(a.tool) + '" d="' +
 				edgeD(a.x + WF_CARD_W, a.y + WF_HANDLE_Y, wfState.link.cursor.x, wfState.link.cursor.y) + '"/>';
 		}
 	}
 	svg.innerHTML = paths;
+}
+
+// esc escapes a value for interpolation into an attribute of markup built as a string, so a step name
+// carrying a quote or an angle bracket cannot break out of the attribute it sits in.
+function esc(value) {
+	return String(value == null ? "" : value)
+		.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
+		.replaceAll('"', "&quot;").replaceAll("'", "&#39;");
 }
 
 // edgeD returns the SVG cubic path data between two points, curving horizontally so edges read as
