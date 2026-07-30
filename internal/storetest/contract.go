@@ -22,6 +22,7 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Helper()
 	t.Run("save and get", func(t *testing.T) { testSaveGet(t, newStore()) })
 	t.Run("provenance round trip", func(t *testing.T) { testProvenance(t, newStore()) })
+	t.Run("warning round trip", func(t *testing.T) { testWarning(t, newStore()) })
 	t.Run("host facts", func(t *testing.T) { testHostFacts(t, newStore()) })
 	t.Run("pipeline steps round trip", func(t *testing.T) { testPipelineSteps(t, newStore()) })
 	t.Run("get missing", func(t *testing.T) { testGetNotFound(t, newStore()) })
@@ -1549,6 +1550,31 @@ func testProvenance(t *testing.T, store run.Store) {
 	}
 	if diff := cmp.Diff(saved.Labels, got.Labels); diff != "" {
 		t.Errorf("labels mismatch (-want +got):\n%s", diff)
+	}
+}
+
+// testWarning verifies a run's warning round trips through Save and Get without touching its status.
+// A run whose event capture failed finishes succeeded but has nothing to show, so the warning is the
+// only thing that explains the empty matrix and it has to survive the store.
+func testWarning(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	saved := &run.Run{
+		ID: "run_warned", Playbook: "site.yml", Status: run.StatusSucceeded,
+		CreatedAt: time.Date(2026, 7, 28, 12, 0, 0, 0, time.UTC),
+		Warning:   "event capture unavailable: no space left on device",
+	}
+	if err := store.Save(ctx, saved); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	got, err := store.Get(ctx, "run_warned")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if diff := cmp.Diff(saved.Warning, got.Warning); diff != "" {
+		t.Errorf("warning mismatch (-want +got):\n%s", diff)
+	}
+	if got.Status != run.StatusSucceeded {
+		t.Errorf("status = %q, want succeeded left alone by the warning", got.Status)
 	}
 }
 

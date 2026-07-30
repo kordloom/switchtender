@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1502,5 +1503,30 @@ func TestRetryFailedShardsDedupes(t *testing.T) {
 	}
 	if retries != 1 {
 		t.Errorf("retries of the parent = %d, want 1", retries)
+	}
+}
+
+// TestEventCaptureFailureWarnsOnRun proves a run whose event capture could not be set up says so on
+// the run itself. The run still executes and still finishes on its own merits, but it records no
+// events, and without the warning a green run with an empty matrix looks like one that did nothing.
+func TestEventCaptureFailureWarnsOnRun(t *testing.T) {
+	// t.Setenv rules out t.Parallel, and pointing the temp dir at a path that does not exist is
+	// what makes the event file fail the way a full disk would.
+	t.Setenv("TMPDIR", filepath.Join(t.TempDir(), "not-a-directory"))
+	ctx := context.Background()
+	store := run.NewMemStore()
+	d := New(store, okRunner(), nil, WithNoJanitor())
+	defer d.Close()
+
+	created, err := d.Submit(ctx, "site.yml", "inv.ini")
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+	got := waitTerminal(t, store, created.ID)
+	if got.Status != run.StatusSucceeded {
+		t.Fatalf("status = %q, want succeeded: capture failing must not fail the run", got.Status)
+	}
+	if !strings.Contains(got.Warning, "event capture unavailable") {
+		t.Errorf("warning = %q, want it to explain the empty matrix", got.Warning)
 	}
 }

@@ -143,6 +143,10 @@ type Run struct {
 	ExitCode *int `json:"exit_code,omitempty"`
 	// Error holds a failure detail when the run could not start.
 	Error string `json:"error,omitempty"`
+	// Warning explains a degradation the run survived, such as event capture being unavailable, so
+	// a run that finished green but has nothing to show says why instead of looking mysteriously
+	// empty. It never changes the run's status.
+	Warning string `json:"warning,omitempty"`
 	// CreatedAt is when the run was accepted.
 	CreatedAt time.Time `json:"created_at"`
 	// StartedAt is when execution began.

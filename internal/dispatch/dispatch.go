@@ -1350,8 +1350,14 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 	defer stopWatch()
 	go d.watch(watchCtx, r.ID)
 
-	eventsPath, cleanup := d.eventsFile(r.ID)
+	eventsPath, cleanup, eventsErr := d.eventsFile(r.ID)
 	defer cleanup()
+	if eventsErr != nil {
+		// Capture is off, so this run will finish with an empty matrix and no events however well
+		// it goes. Record why on the run, rather than leaving a green run that shows nothing.
+		r.Warning = "event capture unavailable, so this run records no events: " + eventsErr.Error()
+		d.save(r)
+	}
 
 	parent := ""
 	if r.ParentID != nil {
@@ -1646,17 +1652,18 @@ func withRetries(f func() error) error {
 	return err
 }
 
-// eventsFile creates a temp file for the run's structured events and returns its path and a
-// cleanup func. On failure it logs and returns an empty path, which disables event capture.
-func (d *Dispatcher) eventsFile(id string) (string, func()) {
+// eventsFile creates a temp file for the run's structured events and returns its path and a cleanup
+// func. On failure it logs and returns an empty path with the error, which disables event capture:
+// the run still executes, but it produces no events, so the caller records why on the run.
+func (d *Dispatcher) eventsFile(id string) (string, func(), error) {
 	f, err := os.CreateTemp("", "switchtender-events-*.ndjson")
 	if err != nil {
 		d.log.Error("dispatch: create events file: "+err.Error(), zap.String("run_id", id))
-		return "", func() {}
+		return "", func() {}, err
 	}
 	path := f.Name()
 	_ = f.Close()
-	return path, func() { _ = os.Remove(path) }
+	return path, func() { _ = os.Remove(path) }, nil
 }
 
 // tailEvents follows the run's event sidecar file, parsing, storing, and publishing complete lines
