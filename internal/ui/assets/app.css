@@ -155,6 +155,11 @@ body {
 	background: var(--bg);
 	color: var(--text);
 	-webkit-font-smoothing: antialiased;
+	/* A column at least as tall as the viewport, so the main content grows into the space a short
+	   page leaves and the closing bar lands on the bottom edge rather than mid-screen. */
+	display: flex;
+	flex-direction: column;
+	min-height: 100vh;
 }
 
 /* The site's signature backdrop: a soft three-hue mesh and a masked grid, fixed behind everything.
@@ -283,8 +288,9 @@ th.col-num, td.col-num { width: 1%; color: var(--muted); font-variant-numeric: t
 .nav-item.active svg { color: var(--accent); }
 body.nav-open { overflow: hidden; }
 
-/* Layout */
-.content { max-width: 1280px; margin: 0 auto; padding: 28px 36px 48px; }
+/* Layout. The main column takes the slack in the body's flex column so the footer is pushed to the
+   bottom of a short page, and it never shrinks below its content on a long one. */
+.content { flex: 1 0 auto; width: 100%; max-width: 1280px; margin: 0 auto; padding: 28px 36px 48px; }
 h1 { font-family: var(--display); font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 4px; color: var(--heading); }
 h2 { font-size: 14px; font-weight: 600; margin: 0; }
 .muted { color: var(--muted); font-size: 13px; }
@@ -1155,8 +1161,11 @@ td.col-labels .label-wrap { flex-wrap: nowrap; }
 .docs-pager-title { font-size: 14px; font-weight: 600; color: var(--text); }
 .docs-pager-link:hover .docs-pager-title { color: var(--accent); }
 
-/* Every page ends on a deliberate edge rather than trailing off. */
-.app-foot { display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap; margin: 56px -36px -48px; padding: 20px 36px; border-top: 1px solid var(--border-muted); background: color-mix(in srgb, var(--surface) 45%, transparent); }
+/* Every page ends on a deliberate edge rather than trailing off. The bar is a sibling of the main
+   column pushed down by the column's growth, so a short page rests it on the bottom of the viewport
+   instead of leaving it stranded mid-screen above empty space. */
+.app-foot { flex: none; padding: 20px 0; border-top: 1px solid var(--border-muted); background: color-mix(in srgb, var(--surface) 45%, transparent); }
+.app-foot-inner { display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap; max-width: 1280px; margin: 0 auto; padding: 0 36px; }
 .app-foot-brand { font-family: var(--display); font-size: 12.5px; font-weight: 700; letter-spacing: -0.01em; color: var(--muted); }
 .app-foot-links { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
 .app-foot-links a, .app-foot-top { color: var(--muted); font-size: 12.5px; font-weight: 500; }
@@ -1168,5 +1177,5 @@ td.col-labels .label-wrap { flex-wrap: nowrap; }
 }
 @media (max-width: 980px) {
 	.docs-layout { grid-template-columns: 1fr; }
-	.app-foot { margin: 40px -16px -16px; padding: 18px 16px; }
+	.app-foot-inner { padding: 0 16px; }
 }

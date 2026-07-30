@@ -2175,13 +2175,17 @@ function buildNav() {
 }
 
 // mountFooter closes every page with a slim bar, so scrolling ends on a deliberate edge rather
-// than on the last row of content.
+// than on the last row of content. It is a sibling of the main column rather than its last child,
+// so a short page such as Migrate rests it on the bottom of the viewport instead of floating it up
+// under the content with dead space beneath.
 function mountFooter() {
 	if (document.body.dataset.page === "login" || document.querySelector(".app-foot")) return;
 	const main = document.querySelector("main.content");
 	if (!main) return;
 	const foot = document.createElement("footer");
 	foot.className = "app-foot";
+	const inner = document.createElement("div");
+	inner.className = "app-foot-inner";
 	const left = document.createElement("span");
 	left.className = "app-foot-brand";
 	left.textContent = "SwitchTender";
@@ -2206,9 +2210,10 @@ function mountFooter() {
 	top.dataset.tip = "Click to return to the top of this page";
 	top.addEventListener("click", () => window.scrollTo({ top: 0, behavior: "smooth" }));
 	links.appendChild(top);
-	foot.appendChild(left);
-	foot.appendChild(links);
-	main.appendChild(foot);
+	inner.appendChild(left);
+	inner.appendChild(links);
+	foot.appendChild(inner);
+	main.insertAdjacentElement("afterend", foot);
 }
 
 // mountDocsChrome adds the reading aids a documentation page needs: a filter over the guide list,
