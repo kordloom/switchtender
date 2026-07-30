@@ -160,6 +160,15 @@ CREATE TABLE IF NOT EXISTS users (
 	role          TEXT NOT NULL,
 	created_at    TEXT NOT NULL
 );
+-- The profile columns are added rather than declared above, so a database created before them is
+-- migrated by the same statement that creates a fresh one. Empty is the default everywhere, so an
+-- account made before this carries no profile and stays valid.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS full_name TEXT NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS title TEXT NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS links TEXT NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS notes TEXT NOT NULL DEFAULT '';
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username);
 CREATE TABLE IF NOT EXISTS tokens (
 	id           TEXT PRIMARY KEY,

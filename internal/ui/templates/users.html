@@ -44,6 +44,34 @@
 						<option value="admin">Admin</option>
 					</select>
 				</label>
+				<div class="user-profile">
+					<div class="user-profile-head">
+						<strong>Profile</strong>
+						<span class="muted">Optional. Personal data, readable by admins only and never written to the logs.</span>
+					</div>
+					<div class="launch-grid">
+						<label class="field-label">Full name
+							<input id="user-fullname" class="input" autocomplete="off" placeholder="Ada Lovelace">
+						</label>
+						<label class="field-label">Email
+							<input id="user-email" class="input" type="email" autocomplete="off" placeholder="ada@example.com">
+						</label>
+						<label class="field-label">Phone
+							<input id="user-phone" class="input" autocomplete="off" placeholder="+1 555 0100">
+						</label>
+						<label class="field-label">Title
+							<input id="user-title" class="input" autocomplete="off" placeholder="Platform Engineer">
+							<span class="field-hint">Descriptive only. The role above decides what the account may do.</span>
+						</label>
+						<label class="field-label user-wide">Links, one per line
+							<textarea id="user-links" class="input mono" rows="2" placeholder="https://wiki.example.com/people/ada&#10;https://oncall.example.com/ada"></textarea>
+							<span class="field-hint">Web addresses only. Up to eight.</span>
+						</label>
+						<label class="field-label user-wide">Notes
+							<textarea id="user-notes" class="input" rows="2" placeholder="Why this account exists, or when to review it."></textarea>
+						</label>
+					</div>
+				</div>
 				<div class="launch-actions">
 					<button type="submit" class="button primary">Save</button>
 					<span id="user-status" class="muted"></span>
@@ -57,7 +85,9 @@
 			<thead>
 				<tr>
 					<th>Username</th>
+					<th>Name</th>
 					<th>Role</th>
+					<th>Contact</th>
 					<th>Runs fired</th>
 					<th>Last seen</th>
 					<th>Created</th>

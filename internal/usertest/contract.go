@@ -17,6 +17,60 @@ func Contract(t *testing.T, newStore func() user.Store) {
 	t.Run("lifecycle", func(t *testing.T) { testLifecycle(t, newStore()) })
 	t.Run("list ordered", func(t *testing.T) { testList(t, newStore()) })
 	t.Run("update", func(t *testing.T) { testUpdate(t, newStore()) })
+	t.Run("profile", func(t *testing.T) { testProfile(t, newStore()) })
+}
+
+// testProfile verifies the profile fields survive a save, an update, and a read on every backend,
+// including a link list holding the separators a joined encoding would lose.
+func testProfile(t *testing.T, store user.Store) {
+	ctx := context.Background()
+	links := []string{"https://wiki.example.com/p?a=1,2&b=3", "https://oncall.example.com/x"}
+	u := &user.User{
+		ID: "user_1", Username: "ada", PasswordHash: "h", Role: user.RoleOperator,
+		FullName: "Ada Lovelace", Email: "ada@example.com", Phone: "+1 555 0100",
+		Title: "Platform Engineer", Links: links, Notes: "review each quarter",
+		CreatedAt: time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC),
+	}
+	if err := store.Save(ctx, u); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	got, err := store.Get(ctx, "user_1")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.FullName != "Ada Lovelace" || got.Email != "ada@example.com" ||
+		got.Phone != "+1 555 0100" || got.Title != "Platform Engineer" ||
+		got.Notes != "review each quarter" {
+		t.Errorf("Get() profile = %+v, want the saved values", got)
+	}
+	if len(got.Links) != 2 || got.Links[0] != links[0] || got.Links[1] != links[1] {
+		t.Errorf("Get() links = %q, want %q", got.Links, links)
+	}
+
+	// A mutation of the returned slice must not reach the store.
+	got.Links[0] = "https://evil.example.com"
+	again, err := store.Get(ctx, "user_1")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if again.Links[0] != links[0] {
+		t.Errorf("Get() link after caller mutation = %q, want %q", again.Links[0], links[0])
+	}
+
+	// An update replaces the profile wholesale, so a cleared field comes back cleared.
+	u.FullName = "Ada L"
+	u.Phone = ""
+	u.Links = nil
+	if err := store.Update(ctx, u); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	updated, err := store.Get(ctx, "user_1")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if updated.FullName != "Ada L" || updated.Phone != "" || len(updated.Links) != 0 {
+		t.Errorf("Get() after update = %+v, want the name changed and phone and links cleared", updated)
+	}
 }
 
 // testUpdate verifies an update changes the username, role, and password hash, preserves the

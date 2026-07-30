@@ -145,7 +145,13 @@ CREATE TABLE IF NOT EXISTS users (
 	username      TEXT NOT NULL,
 	password_hash TEXT NOT NULL,
 	role          TEXT NOT NULL,
-	created_at    TEXT NOT NULL
+	created_at    TEXT NOT NULL,
+	full_name     TEXT NOT NULL DEFAULT '',
+	email         TEXT NOT NULL DEFAULT '',
+	phone         TEXT NOT NULL DEFAULT '',
+	title         TEXT NOT NULL DEFAULT '',
+	links         TEXT NOT NULL DEFAULT '',
+	notes         TEXT NOT NULL DEFAULT ''
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username);
 CREATE TABLE IF NOT EXISTS tokens (
@@ -441,6 +447,10 @@ func Open(path string) (*DB, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	if err := migrateUsers(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	if err := ensureRunIndexes(db); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -615,6 +625,20 @@ func migrateInventories(db *sql.DB) error {
 		"ALTER TABLE inventories ADD COLUMN org_id TEXT NOT NULL DEFAULT ''"); err != nil &&
 		!strings.Contains(err.Error(), "duplicate column name") {
 		return fmt.Errorf("migrate inventories: %w", err)
+	}
+	return nil
+}
+
+// migrateUsers adds the profile columns to a users table created before them. Every one defaults to
+// empty, so an account made before this migration keeps working with no profile at all. Adding a
+// column that already exists is the ordinary case for a current database and is treated as success.
+func migrateUsers(db *sql.DB) error {
+	for _, column := range []string{"full_name", "email", "phone", "title", "links", "notes"} {
+		if _, err := db.Exec(
+			"ALTER TABLE users ADD COLUMN " + column + " TEXT NOT NULL DEFAULT ''"); err != nil &&
+			!strings.Contains(err.Error(), "duplicate column name") {
+			return fmt.Errorf("add %s column: %w", column, err)
+		}
 	}
 	return nil
 }

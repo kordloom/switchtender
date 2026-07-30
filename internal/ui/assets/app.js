@@ -7563,6 +7563,41 @@ function loadLogin() {
 
 // openUserEdit fills the user dialog with an existing account and switches it to edit mode. The
 // password field becomes optional, so a blank leaves the current password unchanged.
+// USER_PROFILE_FIELDS maps each profile input to the account field it edits, so the dialog fills and
+// collects the profile in one place instead of naming every field twice.
+const USER_PROFILE_FIELDS = {
+	"user-fullname": "full_name",
+	"user-email": "email",
+	"user-phone": "phone",
+	"user-title": "title",
+	"user-notes": "notes",
+};
+
+// fillUserProfile writes an account's profile into the dialog, or clears it when given none.
+function fillUserProfile(u) {
+	for (const [id, key] of Object.entries(USER_PROFILE_FIELDS)) {
+		const el = document.getElementById(id);
+		if (el) el.value = (u && u[key]) || "";
+	}
+	const links = document.getElementById("user-links");
+	if (links) links.value = ((u && u.links) || []).join("\n");
+}
+
+// collectUserProfile reads the profile out of the dialog. The whole profile is sent on every save, so
+// clearing a field clears it on the account. The server validates and bounds each value.
+function collectUserProfile() {
+	const payload = {};
+	for (const [id, key] of Object.entries(USER_PROFILE_FIELDS)) {
+		const el = document.getElementById(id);
+		payload[key] = el ? el.value.trim() : "";
+	}
+	const links = document.getElementById("user-links");
+	payload.links = links
+		? links.value.split("\n").map((l) => l.trim()).filter(Boolean)
+		: [];
+	return payload;
+}
+
 function openUserEdit(u) {
 	const form = document.getElementById("user-form");
 	form.dataset.editId = u.id;
@@ -7572,6 +7607,7 @@ function openUserEdit(u) {
 	pw.required = false;
 	pw.placeholder = "Leave blank to keep current";
 	document.getElementById("user-role").value = u.role;
+	fillUserProfile(u);
 	document.getElementById("user-status").textContent = "";
 	setModalTitle("user", "Edit user");
 	document.getElementById("user-modal").hidden = false;
@@ -7589,6 +7625,7 @@ function wireUserForm() {
 		pw.required = true;
 		pw.placeholder = "";
 		document.getElementById("user-role").value = "operator";
+		fillUserProfile(null);
 		document.getElementById("user-status").textContent = "";
 		setModalTitle("user", "Add a user");
 	};
@@ -7599,10 +7636,10 @@ function wireUserForm() {
 		e.preventDefault();
 		const status = document.getElementById("user-status");
 		const editId = form.dataset.editId;
-		const payload = {
+		const payload = Object.assign({
 			username: document.getElementById("user-name").value.trim(),
 			role: document.getElementById("user-role").value,
-		};
+		}, collectUserProfile());
 		const pw = document.getElementById("user-password").value;
 		if (pw) payload.password = pw;
 		try {
@@ -7654,6 +7691,24 @@ async function loadUsers() {
 		for (const u of users) {
 			const tr = document.createElement("tr");
 			tr.appendChild(td(u.username));
+			// Who the account belongs to, with their title under the name. Phone, notes, and links stay
+			// out of the table: it exports to CSV in one click, and a roster of names and addresses is
+			// what an access review needs without also spilling everyone's contact number into a file.
+			const who = td("");
+			if (u.full_name) {
+				const name = document.createElement("span");
+				name.textContent = u.full_name;
+				who.appendChild(name);
+			} else {
+				who.appendChild(document.createTextNode("—"));
+			}
+			if (u.title) {
+				const title = document.createElement("span");
+				title.className = "user-title";
+				title.textContent = u.title;
+				who.appendChild(title);
+			}
+			tr.appendChild(who);
 			const role = td("");
 			const roleChip = document.createElement("span");
 			roleChip.className = "run-kind" + (u.role === "admin" ? " split" : "");
@@ -7663,6 +7718,29 @@ async function loadUsers() {
 				: "Can run and read what they are granted";
 			role.appendChild(roleChip);
 			tr.appendChild(role);
+			const contact = td("");
+			if (u.email) {
+				const mail = document.createElement("a");
+				mail.href = "mailto:" + u.email;
+				mail.textContent = u.email;
+				mail.dataset.tip = "Click to write to this address";
+				contact.appendChild(mail);
+			} else {
+				contact.textContent = "—";
+			}
+			// Links open in a new tab and never carry a referrer. The server accepts only http and
+			// https, so a stored link cannot be a script URL.
+			for (const link of u.links || []) {
+				const chip = document.createElement("a");
+				chip.className = "user-link";
+				chip.href = link;
+				chip.target = "_blank";
+				chip.rel = "noopener noreferrer";
+				chip.textContent = linkHost(link);
+				chip.dataset.tip = "Opens " + link;
+				contact.appendChild(chip);
+			}
+			tr.appendChild(contact);
 			const act = activity.get(u.username) || { runs: 0, last: null };
 			const fired = td("");
 			if (act.runs) {
@@ -7687,6 +7765,16 @@ async function loadUsers() {
 		showListControls();
 	} catch (e) {
 		setStatus("Failed to load users: " + e.message);
+	}
+}
+
+// linkHost labels a profile link by its host, so a column of links reads as the places they lead
+// rather than as a row of full addresses. A value that will not parse is shown as given.
+function linkHost(link) {
+	try {
+		return new URL(link).hostname.replace(/^www\./, "");
+	} catch {
+		return link;
 	}
 }
 
