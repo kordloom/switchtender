@@ -359,33 +359,21 @@ func launchTemplateHandler(store template.Store, submitter Submitter, authz *aut
 			dryRun = *launchReq.DryRun
 		}
 
-		opts := []run.SubmitOption{
+		// The template's own settings first, then this launch's overrides, which win because an
+		// option assigns rather than merges. Sharing the first half is what keeps this path, a
+		// schedule, and a webhook from applying different subsets of the same preset.
+		opts := append(t.LaunchOptions(),
 			run.WithCredentialIDs(credIDs),
 			run.WithExtraVars(vars),
-			run.WithTool(t.Tool), run.WithCommand(t.Command), run.WithDryRun(dryRun),
+			run.WithDryRun(dryRun),
 			run.WithSource("template", t.ID), run.WithActor(actorName(r)),
 			run.WithLabels(launchReq.Labels),
-		}
+		)
 		if launchReq.Limit != nil && *launchReq.Limit != "" {
 			opts = append(opts, run.WithLimit(*launchReq.Limit))
 		}
-		if t.ProjectID != "" {
-			opts = append(opts, run.WithProject(t.ProjectID))
-		}
 		if inventoryID != "" {
 			opts = append(opts, run.WithInventory(inventoryID))
-		}
-		if t.Queue != "" {
-			opts = append(opts, run.WithQueue(t.Queue))
-		}
-		if t.Timeout > 0 {
-			opts = append(opts, run.WithTimeout(t.Timeout))
-		}
-		if t.Image != "" {
-			opts = append(opts, run.WithImage(t.Image, t.PullCredentialID))
-		}
-		if len(t.Notifications) > 0 {
-			opts = append(opts, run.WithNotifications(t.Notifications))
 		}
 		var created *run.Run
 		if t.Shards >= 2 {

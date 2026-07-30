@@ -185,20 +185,7 @@ func (s *Scheduler) fireTemplate(ctx context.Context, sc *Schedule) (*run.Run, e
 	if err != nil {
 		return nil, fmt.Errorf("schedule %s: %w", sc.ID, err)
 	}
-	opts := []run.SubmitOption{
-		run.WithCredentialIDs(t.CredentialIDs),
-		run.WithExtraVars(t.ExtraVars),
-		run.WithSource("schedule", sc.ID),
-	}
-	if t.ProjectID != "" {
-		opts = append(opts, run.WithProject(t.ProjectID))
-	}
-	if t.Queue != "" {
-		opts = append(opts, run.WithQueue(t.Queue))
-	}
-	if t.Timeout > 0 {
-		opts = append(opts, run.WithTimeout(t.Timeout))
-	}
+	opts := append(t.LaunchOptions(), run.WithSource("schedule", sc.ID))
 	if t.Shards >= 2 {
 		return s.submitter.SubmitSplit(ctx, t.Playbook, t.Inventory, t.Shards, opts...)
 	}

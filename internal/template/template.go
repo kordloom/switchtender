@@ -188,3 +188,43 @@ type Store interface {
 func NewID() string {
 	return idgen.New("tpl_", 6)
 }
+
+// LaunchOptions returns the submit options that carry the template's own saved settings onto a run.
+//
+// A template is a saved launch preset, so every path that fires one has to apply the same settings or
+// the preset means something different depending on how it was triggered. They had drifted: the API
+// applied everything, a schedule dropped the tool, command, dry-run flag, inventory, and execution
+// image, and a webhook dropped those plus notifications. A scheduled Bash template therefore fired as
+// an Ansible run with no playbook, and a template saved as dry-run-only made real changes on every
+// scheduled fire.
+//
+// Callers append what only they know: the source and actor that fired it, and any per-launch
+// overrides such as a host limit or a substituted inventory.
+func (t *Template) LaunchOptions() []run.SubmitOption {
+	opts := []run.SubmitOption{
+		run.WithCredentialIDs(t.CredentialIDs),
+		run.WithExtraVars(t.ExtraVars),
+		run.WithTool(t.Tool),
+		run.WithCommand(t.Command),
+		run.WithDryRun(t.DryRun),
+	}
+	if t.ProjectID != "" {
+		opts = append(opts, run.WithProject(t.ProjectID))
+	}
+	if t.InventoryID != "" {
+		opts = append(opts, run.WithInventory(t.InventoryID))
+	}
+	if t.Queue != "" {
+		opts = append(opts, run.WithQueue(t.Queue))
+	}
+	if t.Timeout > 0 {
+		opts = append(opts, run.WithTimeout(t.Timeout))
+	}
+	if t.Image != "" {
+		opts = append(opts, run.WithImage(t.Image, t.PullCredentialID))
+	}
+	if len(t.Notifications) > 0 {
+		opts = append(opts, run.WithNotifications(t.Notifications))
+	}
+	return opts
+}
