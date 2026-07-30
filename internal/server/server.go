@@ -110,6 +110,15 @@ func WithAuditSigner(signer *audit.Signer) Option {
 	return func(srv *Server) { srv.auditSigner = signer }
 }
 
+// WithProducerIdentity publishes the install's signing identity so a relying party can pin the
+// fingerprint that attributes a bundle to this install. Version stamps the trust document.
+func WithProducerIdentity(id *audit.Identity, version string) Option {
+	return func(srv *Server) {
+		srv.producer = id
+		srv.productVersion = version
+	}
+}
+
 // WithInventories enables the inventory endpoints backed by the given store.
 func WithInventories(store inventory.Store) Option {
 	return func(srv *Server) { srv.inventories = store }
@@ -295,6 +304,11 @@ type Server struct {
 	audits audit.Store
 	// auditSigner signs audit exports when configured, nil when export signing is off.
 	auditSigner *audit.Signer
+	// producer is the install's signing identity, published so a verifier can pin it. Nil when the
+	// install has none.
+	producer *audit.Identity
+	// productVersion stamps the trust document.
+	productVersion string
 	// invSources backs the dynamic inventory source endpoints when configured.
 	invSources invsource.Store
 	// refresher refreshes inventory sources when configured.
@@ -371,6 +385,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /v1/audit", auditHandler(s.audits, s.log))
 	mux.Handle("GET /v1/audit/verify", auditVerifyHandler(s.audits, s.log))
 	mux.Handle("GET /v1/audit/export", auditExportHandler(s.audits, s.auditSigner, s.log))
+	// Served unversioned and unauthenticated: a relying party checking a bundle has no account here,
+	// and the document holds only the public half of the signing key.
+	mux.Handle("GET /.well-known/loomseal.json", trustHandler(s.producer, s.productVersion, s.log))
 	mux.Handle("POST /v1/runs", createRunHandler(s.submitter, authz, s.log))
 	mux.Handle("POST /v1/pipelines", createPipelineHandler(s.submitter, authz, s.log))
 	mux.Handle("POST /v1/runs/{id}/cancel", cancelRunHandler(s.store, s.canceler, authz, s.log))

@@ -2,7 +2,6 @@ package audit
 
 import (
 	"crypto/ed25519"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -150,7 +149,7 @@ func BuildBundle(entries []*Entry, id Identity, version string, at time.Time) (*
 			Product:        ProductName,
 			ProductVersion: version,
 			InstallID:      id.InstallID,
-			PublicKey:      base64.StdEncoding.EncodeToString(id.Public()),
+			PublicKey:      id.PublicKeyBase64(),
 			KeyID:          seal.KeyID(id.Public()),
 		},
 		// The claims are about the fleet this install manages, which is the schema's vocabulary for

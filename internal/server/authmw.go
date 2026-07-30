@@ -288,6 +288,11 @@ func (g *authGate) protects(r *http.Request) bool {
 	if r.Method == http.MethodGet && (p == "/" || strings.HasPrefix(p, "/ui/")) {
 		return false
 	}
+	// The trust document is how a third party learns which key signs this install's bundles. They
+	// have no account here, and requiring one would defeat a record meant to be checkable without us.
+	if r.Method == http.MethodGet && p == "/.well-known/loomseal.json" {
+		return false
+	}
 	// Sign in must be reachable while the API is enforced.
 	if r.Method == http.MethodPost && p == "/auth/login" {
 		return false

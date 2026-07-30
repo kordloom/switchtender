@@ -3,6 +3,7 @@ package audit
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -53,6 +54,12 @@ func (i Identity) Private() ed25519.PrivateKey { return i.priv }
 
 // PublicKeyHex returns the hex public key, matching what audit verify --pubkey expects.
 func (i Identity) PublicKeyHex() string { return hex.EncodeToString(i.Public()) }
+
+// PublicKeyBase64 returns the standard base64 public key, the encoding a bundle carries. The hex and
+// base64 forms are the same key and the same trust, in the encoding each envelope calls for.
+func (i Identity) PublicKeyBase64() string {
+	return base64.StdEncoding.EncodeToString(i.Public())
+}
 
 // LoadIdentity reads the producer identity from dir, creating it on first use.
 //
