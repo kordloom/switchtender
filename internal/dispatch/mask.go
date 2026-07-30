@@ -21,19 +21,28 @@ const minMaskLen = 4
 // the run's credentials resolve, and it is safe for concurrent use by the log sink and the event
 // tailer.
 type masker struct {
-	// mu guards secrets.
+	// mu guards secrets, strs, and shortest.
 	mu sync.RWMutex
 	// secrets holds the values to redact, longest first so a longer secret is masked before a
 	// shorter substring of it.
 	secrets [][]byte
+	// strs holds the same values in the same order as strings. Keeping both representations means
+	// masking a string field costs no conversion per secret per call.
+	strs []string
+	// shortest is the byte length of the shortest secret, zero when none are set. Text shorter than
+	// it cannot contain any secret, so it is returned untouched.
+	shortest int
 }
+
+// maskBytes is the mask token as bytes, converted once rather than per replacement.
+var maskBytes = []byte(maskToken)
 
 // set replaces the masker's secret values, expanding a multi-line secret into its lines as well so
 // output that streams a secret one line at a time is still redacted. A value shorter than minMaskLen
 // or blank is dropped so masking cannot swallow unrelated output.
 func (m *masker) set(values []string) {
 	seen := make(map[string]struct{})
-	var out [][]byte
+	var out []string
 	add := func(s string) {
 		s = strings.TrimRight(s, "\r\n")
 		if utf8.RuneCountInString(strings.TrimSpace(s)) < minMaskLen {
@@ -43,7 +52,7 @@ func (m *masker) set(values []string) {
 			return
 		}
 		seen[s] = struct{}{}
-		out = append(out, []byte(s))
+		out = append(out, s)
 	}
 	for _, v := range values {
 		add(v)
@@ -53,8 +62,20 @@ func (m *masker) set(values []string) {
 	}
 	sort.Slice(out, func(i, j int) bool { return len(out[i]) > len(out[j]) })
 
+	secrets := make([][]byte, len(out))
+	for i, s := range out {
+		secrets[i] = []byte(s)
+	}
+	shortest := 0
+	if len(out) > 0 {
+		// out is sorted longest first, so the tail is the shortest.
+		shortest = len(out[len(out)-1])
+	}
+
 	m.mu.Lock()
-	m.secrets = out
+	m.secrets = secrets
+	m.strs = out
+	m.shortest = shortest
 	m.mu.Unlock()
 }
 
@@ -63,13 +84,16 @@ func (m *masker) set(values []string) {
 func (m *masker) redact(p []byte) []byte {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	if len(m.secrets) == 0 {
+	if m.shortest == 0 || len(p) < m.shortest {
 		return p
 	}
 	out := p
 	for _, s := range m.secrets {
+		if len(s) > len(out) {
+			continue
+		}
 		if bytes.Contains(out, s) {
-			out = bytes.ReplaceAll(out, s, []byte(maskToken))
+			out = bytes.ReplaceAll(out, s, maskBytes)
 		}
 	}
 	return out
@@ -157,11 +181,21 @@ func (s *streamMasker) flush() []byte {
 func (m *masker) redactString(s string) string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	if len(m.secrets) == 0 || s == "" {
+	return m.redactStringLocked(s)
+}
+
+// redactStringLocked is redactString for a caller already holding the read lock, so masking a whole
+// event takes the lock once rather than once per field. Text shorter than the shortest secret, and
+// any secret longer than what remains of the text, are skipped without scanning.
+func (m *masker) redactStringLocked(s string) string {
+	if m.shortest == 0 || len(s) < m.shortest {
 		return s
 	}
-	for _, sec := range m.secrets {
-		s = strings.ReplaceAll(s, string(sec), maskToken)
+	for _, sec := range m.strs {
+		if len(sec) > len(s) {
+			continue
+		}
+		s = strings.ReplaceAll(s, sec, maskToken)
 	}
 	return s
 }
@@ -171,39 +205,39 @@ func (m *masker) redactString(s string) string {
 // play, task, and host name fields, since a secret embedded in a task name or a dynamic host name
 // would otherwise reach storage unredacted. Masking is deterministic per value, so a host name that
 // contains a secret substring redacts identically on every event and the host matrix still groups.
+// It takes the read lock once for the whole event rather than once per field.
 func (m *masker) redactEvent(e *event.Event) {
 	m.mu.RLock()
-	empty := len(m.secrets) == 0
-	m.mu.RUnlock()
-	if empty {
+	defer m.mu.RUnlock()
+	if m.shortest == 0 {
 		return
 	}
-	e.Play = m.redactString(e.Play)
-	e.Task = m.redactString(e.Task)
-	e.Host = m.redactString(e.Host)
-	e.Message = m.redactString(e.Message)
-	e.Stdout = m.redactString(e.Stdout)
-	e.Stderr = m.redactString(e.Stderr)
-	e.Diff = m.redactString(e.Diff)
+	e.Play = m.redactStringLocked(e.Play)
+	e.Task = m.redactStringLocked(e.Task)
+	e.Host = m.redactStringLocked(e.Host)
+	e.Message = m.redactStringLocked(e.Message)
+	e.Stdout = m.redactStringLocked(e.Stdout)
+	e.Stderr = m.redactStringLocked(e.Stderr)
+	e.Diff = m.redactStringLocked(e.Diff)
 	for k, v := range e.Outputs {
-		e.Outputs[k] = m.redactValue(v)
+		e.Outputs[k] = m.redactValueLocked(v)
 	}
 }
 
-// redactValue returns v with every string it contains redacted, walking nested maps and slices so a
-// secret published under a nested set_stats key is still masked.
-func (m *masker) redactValue(v any) any {
+// redactValueLocked returns v with every string it contains redacted, walking nested maps and slices
+// so a secret published under a nested set_stats key is still masked. The caller holds the read lock.
+func (m *masker) redactValueLocked(v any) any {
 	switch t := v.(type) {
 	case string:
-		return m.redactString(t)
+		return m.redactStringLocked(t)
 	case map[string]any:
 		for k, val := range t {
-			t[k] = m.redactValue(val)
+			t[k] = m.redactValueLocked(val)
 		}
 		return t
 	case []any:
 		for i, val := range t {
-			t[i] = m.redactValue(val)
+			t[i] = m.redactValueLocked(val)
 		}
 		return t
 	default:

@@ -3,8 +3,10 @@ package dispatch
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -41,6 +43,12 @@ func TestMaskerRedact(t *testing.T) {
 	}, { // Test 5: Several secrets are all redacted.
 		Name: "multiple", Secrets: []string{"aaaa", "bbbb"}, In: "aaaa then bbbb",
 		Want: "*** then ***",
+	}, { // Test 6: A short secret is still masked in text shorter than the longest secret.
+		Name:    "mixed lengths",
+		Secrets: []string{"a-very-long-secret-value-that-dwarfs-the-others", "shortsec"},
+		In:      "x shortsec y", Want: "x *** y",
+	}, { // Test 7: Text shorter than every secret is returned untouched.
+		Name: "shorter than any secret", Secrets: []string{"longsecret"}, In: "hi", Want: "hi",
 	}}
 	for _, test := range tests {
 		t.Run(test.Name, func(t *testing.T) {
@@ -90,6 +98,104 @@ func TestMaskerRedactEvent(t *testing.T) {
 	}
 	if diff := cmp.Diff(want, e); diff != "" {
 		t.Errorf("redactEvent mismatch (-want +got):\n%s", diff)
+	}
+}
+
+// TestMaskerRedactEventMixedLengths checks a short secret is still masked in a short field when a
+// much longer secret is also registered, the case the shortest-secret and per-secret length skips
+// could wrongly bypass.
+func TestMaskerRedactEventMixedLengths(t *testing.T) {
+	t.Parallel()
+	m := &masker{}
+	m.set([]string{"a-very-long-secret-value-that-dwarfs-the-others", "shortsec"})
+	e := event.Event{Host: "shortsec-01", Message: "a-very-long-secret-value-that-dwarfs-the-others"}
+	m.redactEvent(&e)
+	if diff := cmp.Diff(event.Event{Host: "***-01", Message: "***"}, e); diff != "" {
+		t.Errorf("redactEvent mismatch (-want +got):\n%s", diff)
+	}
+}
+
+// TestMaskerConcurrentSetAndRedact drives the masker the way a run does, with the log sink and the
+// event tailer reading while credentials resolve and replace the secret set. It exists to be run
+// under the race detector.
+func TestMaskerConcurrentSetAndRedact(t *testing.T) {
+	t.Parallel()
+	m := &masker{}
+	m.set([]string{"initial-secret-value"})
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range 200 {
+				e := benchEvent()
+				m.redactEvent(&e)
+				_ = m.redactString("value is initial-secret-value here")
+				_ = m.redact([]byte("value is initial-secret-value here"))
+				_ = m.longest()
+				if i%50 == 0 {
+					m.set(benchSecrets(4))
+				}
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+// benchSecrets returns n distinct secret values long enough to be masked, for benchmarking a run
+// whose credentials resolved to many values.
+func benchSecrets(n int) []string {
+	out := make([]string, 0, n)
+	for i := range n {
+		out = append(out, fmt.Sprintf("secret-value-%06d-padding-that-is-longer-than-the-stack-buffer", i))
+	}
+	return out
+}
+
+// benchEvent returns a runner event whose free-text fields and set_stats outputs are all populated,
+// the shape redactEvent walks on every event of a run.
+func benchEvent() event.Event {
+	return event.Event{
+		Type:    event.TypeRunnerOK,
+		Play:    "deploy the application",
+		Task:    "template the service unit file",
+		Host:    "web-07.prod.example.com",
+		Message: "the unit file was rendered and reloaded",
+		Stdout:  strings.Repeat("output line from the module\n", 8),
+		Stderr:  "",
+		Diff:    strings.Repeat("+added configuration line\n", 4),
+		Outputs: map[string]any{
+			"release": "2026.07.29",
+			"nested":  map[string]any{"host": "db-01", "port": 5432},
+		},
+	}
+}
+
+// BenchmarkMaskerRedactEvent measures the per-event cost of masking with a large secret set, the
+// path every event of a run takes.
+func BenchmarkMaskerRedactEvent(b *testing.B) {
+	m := &masker{}
+	m.set(benchSecrets(500))
+	base := benchEvent()
+	b.ReportAllocs()
+	for b.Loop() {
+		e := base
+		e.Outputs = map[string]any{
+			"release": "2026.07.29",
+			"nested":  map[string]any{"host": "db-01", "port": 5432},
+		}
+		m.redactEvent(&e)
+	}
+}
+
+// BenchmarkMaskerRedactString measures masking a single short field, the case a run pays for on
+// every event field that cannot contain a secret.
+func BenchmarkMaskerRedactString(b *testing.B) {
+	m := &masker{}
+	m.set(benchSecrets(500))
+	b.ReportAllocs()
+	for b.Loop() {
+		_ = m.redactString("web-07")
 	}
 }
 
