@@ -7885,6 +7885,52 @@ function updateActions(run) {
 	}
 }
 
+// riskBadge renders a run's graded blast radius. The server computes the grade from the run's tool,
+// command, and how wide it targets; it is advisory, so it reads as information rather than as a
+// verdict the approver has to argue with.
+function riskBadge(risk) {
+	const span = document.createElement("span");
+	span.className = "risk risk-" + (risk.level || "low");
+	span.textContent = risk.level || "low";
+	if (risk.reasons && risk.reasons.length) {
+		span.dataset.tip = risk.reasons.join("\n");
+	}
+	return span;
+}
+
+// renderRiskCallout spells out why a held run is graded as it is, in the place the decision is made.
+// A tooltip is enough for a run that is only being read, but an approver deciding whether to let a
+// change through should not have to hover to find out that it destroys infrastructure. It shows only
+// while the run is held, and disappears once the decision is taken.
+function renderRiskCallout(run) {
+	const host = document.getElementById("risk-callout");
+	if (!host) return;
+	const risk = run.risk;
+	if (!risk || run.status !== "pending_approval") {
+		host.hidden = true;
+		host.textContent = "";
+		return;
+	}
+	host.textContent = "";
+	host.className = "risk-callout risk-" + (risk.level || "low");
+	const head = document.createElement("div");
+	head.className = "risk-callout-head";
+	const label = document.createElement("strong");
+	label.textContent = "Held for approval";
+	head.appendChild(label);
+	head.appendChild(riskBadge(risk));
+	host.appendChild(head);
+	const why = document.createElement("ul");
+	why.className = "risk-reasons";
+	for (const reason of risk.reasons || []) {
+		const li = document.createElement("li");
+		li.textContent = reason;
+		why.appendChild(li);
+	}
+	if (why.children.length) host.appendChild(why);
+	host.hidden = false;
+}
+
 // loadPipeline renders a pipeline run as an ordered list of step runs, refreshed live over the
 // pipeline's event stream while it is active.
 async function loadPipeline(pipelineId) {
@@ -8210,6 +8256,10 @@ function renderHeader(run) {
 	if (run.dry_run) {
 		el.appendChild(field("Mode", "dry run"));
 	}
+	if (run.risk) {
+		el.appendChild(field("Risk", null, riskBadge(run.risk)));
+	}
+	renderRiskCallout(run);
 	if (run.source) {
 		const origin = originCellEl(run);
 		origin.className = "";

@@ -739,6 +739,25 @@ button.topbar-link { background: none; border: none; padding: 0; font: inherit; 
 .propose-row .input { flex: 1; }
 .propose-note { font-size: 12px; }
 
+/* Risk grade: how much blast radius a run carries, shown so an approver weighs a hold instead of
+   rubber-stamping it. Advisory, so it is colored by severity but never styled as a refusal. */
+.risk { display: inline-flex; align-items: center; gap: 6px; padding: 1px 10px; border-radius: 999px; font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; border: 1px solid transparent; }
+.risk::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.risk-low { color: var(--ok); background: color-mix(in srgb, var(--ok) 13%, transparent); border-color: color-mix(in srgb, var(--ok) 32%, transparent); }
+.risk-medium { color: var(--changed); background: color-mix(in srgb, var(--changed) 14%, transparent); border-color: color-mix(in srgb, var(--changed) 34%, transparent); }
+.risk-high { color: var(--failed); background: color-mix(in srgb, var(--failed) 14%, transparent); border-color: color-mix(in srgb, var(--failed) 38%, transparent); }
+
+/* The callout states the grade and its reasons where the approve and reject controls are, so the
+   decision is made with the blast radius in view rather than a hover away. */
+.risk-callout { margin: 0 0 18px; padding: 13px 16px; background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--muted); border-radius: var(--radius); }
+.risk-callout.risk-low { border-left-color: var(--ok); }
+.risk-callout.risk-medium { border-left-color: var(--changed); }
+.risk-callout.risk-high { border-left-color: var(--failed); }
+.risk-callout-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.risk-callout-head strong { font-size: 14px; }
+.risk-reasons { margin: 9px 0 0; padding-left: 20px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.risk-reasons li { margin: 1px 0; }
+
 /* AI triage panel on the run detail page: an advisory explanation of a failed run, on demand. */
 .explain-panel { margin-top: 16px; background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: var(--radius); padding: 14px 16px; }
 .explain-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
