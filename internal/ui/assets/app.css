@@ -888,6 +888,23 @@ body[data-theme="dark"] {
 .view-v { font-size: 13.5px; font-family: var(--mono); word-break: break-word; }
 .view-code { max-height: 300px; }
 
+/* Facet menus beside the list filter: one per categorical column, each a button that opens a panel
+   of the values present in that column with a count against each. Ticking narrows the list. */
+.facet { position: relative; display: inline-flex; }
+.facet-btn { padding: 6px 10px; font-size: 12.5px; gap: 7px; }
+.facet-btn svg { width: 12px; height: 12px; opacity: 0.6; }
+.facet.facet-on .facet-btn { border-color: color-mix(in srgb, var(--accent) 55%, transparent); background: var(--accent-soft); color: var(--accent); }
+.facet-count { display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px; background: var(--accent); color: var(--primary-text); font-size: 10.5px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.facet-panel { position: absolute; top: calc(100% + 6px); left: 0; z-index: 64; min-width: 200px; max-height: 320px; overflow-y: auto; padding: 6px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-lg); }
+.facet-item { display: flex; align-items: center; gap: 9px; padding: 6px 8px; border-radius: 6px; font-size: 13px; cursor: pointer; }
+.facet-item:hover { background: var(--surface-2); }
+.facet-item input { flex: none; margin: 0; accent-color: var(--accent); }
+.facet-item-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.facet-item-count { flex: none; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.facet-clear { display: block; width: 100%; margin-top: 4px; padding: 6px 8px; background: none; border: none; border-top: 1px solid var(--border-muted); color: var(--muted); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.facet-clear:hover { color: var(--accent); }
+@media (pointer: coarse) { .facet-item { min-height: 40px; } }
+
 /* Compact export buttons beside the list filter. */
 .table-export { padding: 6px 11px; font-size: 12.5px; }
 .table-export svg { width: 13px; height: 13px; }

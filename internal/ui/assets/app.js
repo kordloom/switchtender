@@ -367,9 +367,198 @@ function mountTableSort() {
 	});
 }
 
-// applyRowVisibility shows a row only when neither the filter nor the pager hides it.
+// applyRowVisibility shows a row only when none of the text filter, the facets, or the pager hides
+// it, so the three compose instead of fighting over the same flag.
 function applyRowVisibility(row) {
-	row.hidden = row.dataset.fhide === "1" || row.dataset.phide === "1";
+	row.hidden = row.dataset.fhide === "1" || row.dataset.xhide === "1" || row.dataset.phide === "1";
+}
+
+// FACET_COLUMNS names the categorical column of each list that is worth checking off rather than
+// typing at: the tool a template runs, what a credential holds, the role an account carries. The
+// runs page is absent because it filters on the server, across every run rather than the loaded page.
+const FACET_COLUMNS = {
+	jobtemplates: ["Type"],
+	credentials: ["Kind", "Source", "Secret"],
+	users: ["Role"],
+	schedules: ["Enabled"],
+	fleet: ["Last outcome"],
+	drift: ["State"],
+	workers: ["Health"],
+	sources: ["Status"],
+	inventories: ["Format"],
+	policies: ["Tool", "Holding"],
+	audit: ["Method"],
+	doctor: ["Severity"],
+};
+
+// CHIP_SELECTOR matches the small labels a cell shows instead of plain text. A cell built from chips
+// is really a set of values, so each chip is faceted separately and a template tagged both TERRAFORM
+// and DRY is found under either.
+const CHIP_SELECTOR = ".tool-badge, .run-kind, .chip, .badge, .origin-chip, .cred-kind";
+
+// cellFacetValues reads the values a cell contributes to a facet: one per chip when it holds chips,
+// otherwise its text as a single value. A blank cell contributes nothing, so an empty column never
+// grows a meaningless checkbox.
+function cellFacetValues(cell) {
+	if (!cell) return [];
+	const chips = cell.querySelectorAll(CHIP_SELECTOR);
+	if (chips.length) {
+		return Array.from(chips).map((c) => c.textContent.trim()).filter(Boolean);
+	}
+	const text = cell.textContent.trim();
+	return text && text !== "—" ? [text] : [];
+}
+
+// mountFacetFilters adds a checkbox menu per categorical column beside the list filter, so a list is
+// narrowed by ticking the types wanted rather than by typing one of them. Values are discovered from
+// the rendered rows, so a column gains a checkbox the moment a row uses it and the control needs no
+// per-page vocabulary to maintain.
+function mountFacetFilters() {
+	const columns = FACET_COLUMNS[document.body.dataset.page];
+	const wrap = document.querySelector(".list-filter");
+	const table = document.querySelector("main.content table");
+	if (!columns || !wrap || !table || !table.tHead || !table.tBodies[0]) return;
+	const tbody = table.tBodies[0];
+	const headers = Array.from(table.tHead.rows[0].cells).map((th) => th.textContent.trim().toLowerCase());
+	const facets = [];
+	for (const name of columns) {
+		const index = headers.indexOf(name.toLowerCase());
+		if (index !== -1) facets.push(mountFacet(wrap, table, tbody, name, index, () => applyFacets(facets, tbody, table)));
+	}
+	if (!facets.length) return;
+	// Rows arrive after the mount on every page, and a sort reorders them, so the value lists and the
+	// counts are rebuilt whenever the body changes.
+	const refresh = () => {
+		for (const f of facets) f.refresh();
+		applyFacets(facets, tbody, table);
+	};
+	new MutationObserver(refresh).observe(tbody, { childList: true });
+	refresh();
+}
+
+// applyFacets hides any row that fails a facet, leaving the text filter's and the pager's own flags
+// alone, then tells the table its visible set changed.
+function applyFacets(facets, tbody, table) {
+	const active = facets.filter((f) => f.selected.size > 0);
+	for (const row of tbody.rows) {
+		if (row.classList.contains("skeleton-row")) continue;
+		const pass = active.every((f) =>
+			cellFacetValues(row.cells[f.index]).some((v) => f.selected.has(v)));
+		row.dataset.xhide = pass ? "" : "1";
+		applyRowVisibility(row);
+	}
+	table.dispatchEvent(new CustomEvent("rowsfiltered"));
+}
+
+// mountFacet builds one column's checkbox menu: a labeled button that opens a panel of the values
+// present in that column, each with how many rows carry it. It returns the facet's state so the
+// mount can rebuild its values and apply the whole set together.
+function mountFacet(wrap, table, tbody, name, index, onChange) {
+	const facet = { name, index, selected: new Set(), refresh: null };
+	const host = document.createElement("div");
+	host.className = "facet";
+	const button = document.createElement("button");
+	button.type = "button";
+	button.className = "button facet-btn";
+	button.setAttribute("aria-expanded", "false");
+	button.dataset.tip = "Click to filter this list by " + name.toLowerCase();
+	const label = document.createElement("span");
+	label.textContent = name;
+	const count = document.createElement("span");
+	count.className = "facet-count";
+	count.hidden = true;
+	button.appendChild(label);
+	button.appendChild(count);
+	button.insertAdjacentHTML("beforeend",
+		'<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" ' +
+		'stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+		'<polyline points="6 9 12 15 18 9"/></svg>');
+	const panel = document.createElement("div");
+	panel.className = "facet-panel";
+	panel.hidden = true;
+	panel.setAttribute("role", "group");
+	panel.setAttribute("aria-label", name + " filter");
+	host.appendChild(button);
+	host.appendChild(panel);
+	wrap.appendChild(host);
+
+	const syncButton = () => {
+		count.textContent = String(facet.selected.size);
+		count.hidden = facet.selected.size === 0;
+		host.classList.toggle("facet-on", facet.selected.size > 0);
+	};
+	// refresh rebuilds the value list from the rows that are in the table now, keeping any tick whose
+	// value is still present and dropping the control entirely for a column with nothing to choose.
+	facet.refresh = () => {
+		const counts = new Map();
+		for (const row of tbody.rows) {
+			if (row.classList.contains("skeleton-row")) continue;
+			for (const v of cellFacetValues(row.cells[index])) {
+				counts.set(v, (counts.get(v) || 0) + 1);
+			}
+		}
+		for (const v of Array.from(facet.selected)) {
+			if (!counts.has(v)) facet.selected.delete(v);
+		}
+		host.hidden = counts.size < 2;
+		panel.textContent = "";
+		const values = Array.from(counts.keys()).sort((a, b) => a.localeCompare(b));
+		for (const value of values) {
+			const row = document.createElement("label");
+			row.className = "facet-item";
+			const box = document.createElement("input");
+			box.type = "checkbox";
+			box.checked = facet.selected.has(value);
+			box.addEventListener("change", () => {
+				if (box.checked) facet.selected.add(value);
+				else facet.selected.delete(value);
+				syncButton();
+				onChange();
+			});
+			const text = document.createElement("span");
+			text.className = "facet-item-label";
+			text.textContent = value;
+			const n = document.createElement("span");
+			n.className = "facet-item-count";
+			n.textContent = String(counts.get(value));
+			row.appendChild(box);
+			row.appendChild(text);
+			row.appendChild(n);
+			panel.appendChild(row);
+		}
+		const clear = document.createElement("button");
+		clear.type = "button";
+		clear.className = "facet-clear";
+		clear.textContent = "Clear";
+		clear.addEventListener("click", () => {
+			facet.selected.clear();
+			for (const box of panel.querySelectorAll("input")) box.checked = false;
+			syncButton();
+			onChange();
+		});
+		panel.appendChild(clear);
+		syncButton();
+	};
+
+	const setOpen = (open) => {
+		panel.hidden = !open;
+		button.setAttribute("aria-expanded", open ? "true" : "false");
+	};
+	button.addEventListener("click", (e) => {
+		e.stopPropagation();
+		const opening = panel.hidden;
+		for (const other of document.querySelectorAll(".facet-panel")) other.hidden = true;
+		for (const other of document.querySelectorAll(".facet-btn")) {
+			other.setAttribute("aria-expanded", "false");
+		}
+		setOpen(opening);
+	});
+	panel.addEventListener("click", (e) => e.stopPropagation());
+	document.addEventListener("click", () => setOpen(false));
+	host.addEventListener("keydown", (e) => {
+		if (e.key === "Escape" && !panel.hidden) { setOpen(false); button.focus(); }
+	});
+	return facet;
 }
 
 // mountTablePager caps how many rows a list shows at once, with a footer for paging: a count, a
@@ -1968,7 +2157,10 @@ document.addEventListener("DOMContentLoaded", () => {
 	mountTopbar();
 	mountLiveRegions();
 	explainReadOnly();
-	if (LIST_PAGES.includes(document.body.dataset.page)) mountListFilter();
+	if (LIST_PAGES.includes(document.body.dataset.page)) {
+		mountListFilter();
+		mountFacetFilters();
+	}
 	const close = document.getElementById("drill-close");
 	if (close) {
 		close.addEventListener("click", () => { document.getElementById("drill").hidden = true; });
