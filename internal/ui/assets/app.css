@@ -598,6 +598,11 @@ button.topbar-link { background: none; border: none; padding: 0; font: inherit; 
 .cred-needs-meta { display: flex; flex-direction: column; gap: 4px; padding-top: 6px; min-width: 0; }
 .cred-needs-name { font-size: 13px; font-weight: 600; word-break: break-word; }
 .cred-needs-kind { align-self: flex-start; padding: 1px 7px; border-radius: 999px; font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; background: var(--surface-3); color: var(--muted); }
+/* What a credential holds, and where its value comes from. A source other than local means the
+   stored value is a lookup resolved at launch, which is worth marking rather than leaving to be
+   inferred from a name. */
+.cred-kind { display: inline-block; padding: 1px 8px; border-radius: 999px; background: var(--surface-3); color: var(--muted); font-family: var(--mono); font-size: 11px; font-weight: 500; }
+.cred-source.external { background: color-mix(in srgb, var(--violet) 16%, transparent); color: var(--violet); }
 .cred-needs-input { width: 100%; resize: vertical; }
 .cred-needs-status { grid-column: 2 / -1; font-size: 12px; }
 @media (max-width: 680px) { .cred-needs-row { grid-template-columns: 1fr; } .cred-needs-status { grid-column: 1; } }

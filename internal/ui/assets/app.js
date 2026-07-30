@@ -3588,6 +3588,153 @@ async function fillCredentialPicker() {
 	} catch (_) { /* credentials disabled or unauthorized; picker stays empty */ }
 }
 
+// CRED_KINDS describes every credential kind the server can materialize: the shape its secret takes
+// and what a run does with it. A typed kind's secret is KEY=VALUE lines, so the placeholder shows the
+// exact field names its injector reads and the hint names which of them are required. Kinds marked
+// ansibleOnly are delivered through Ansible flags or extra vars and are rejected on any other tool,
+// which is worth saying before the secret is pasted rather than at submit.
+const CRED_KINDS = {
+	ssh_key: {
+		placeholder: "-----BEGIN OPENSSH PRIVATE KEY-----",
+		hint: "The private key itself, passed to the run as --private-key.", ansibleOnly: true,
+	},
+	ssh_password: {
+		placeholder: "user=deploy\npassword=the password",
+		hint: "Fields: user and password, both required. Becomes ansible_user and ansible_password.",
+		ansibleOnly: true,
+	},
+	network: {
+		placeholder: "user=admin\npassword=the password\nnetwork_os=ios\nconnection=network_cli",
+		hint: "Fields: user and password required, network_os and connection optional. Connection " +
+			"defaults to network_cli.",
+		ansibleOnly: true,
+	},
+	vault_password: {
+		placeholder: "the vault password",
+		hint: "Passed to the run as --vault-password-file.", ansibleOnly: true,
+	},
+	become_password: {
+		placeholder: "the privilege escalation password",
+		hint: "Becomes ansible_become_password, delivered through a file so it stays off the command " +
+			"line.",
+		ansibleOnly: true,
+	},
+	become: {
+		placeholder: "password=the password\nmethod=sudo\nuser=root",
+		hint: "Fields: password required, method and user optional.", ansibleOnly: true,
+	},
+	env: {
+		placeholder: "AWS_PROFILE=prod\nTF_VAR_region=us-east-1",
+		hint: "One KEY=VALUE per line, injected into the run's environment. Blank lines and # comments " +
+			"are ignored.",
+	},
+	token: {
+		placeholder: "the token or JWT",
+		hint: "Exposed to the run as the SWITCHTENDER_TOKEN environment variable.",
+	},
+	registry: {
+		placeholder: "username\nthe password or access token",
+		hint: "Username on the first line, password on every line after it. Used to pull execution " +
+			"images.",
+	},
+	aws: {
+		placeholder: "access_key=AKIAEXAMPLE\nsecret_key=the secret\nregion=us-east-1",
+		hint: "Fields: access_key and secret_key required, session_token and region optional. Injects " +
+			"the standard AWS_ variables.",
+	},
+	azure: {
+		placeholder: "client_id=the id\nsecret=the secret\nsubscription_id=the id\ntenant_id=the id",
+		hint: "All four fields are required. Injects both the ARM_ variables Terraform reads and the " +
+			"AZURE_ variables Ansible reads.",
+	},
+	gcp: {
+		placeholder: '{"type": "service_account", "project_id": "…", "private_key": "…"}',
+		hint: "The service account JSON, written to a private file and bound to " +
+			"GOOGLE_APPLICATION_CREDENTIALS.",
+	},
+	vmware: {
+		placeholder: "host=vcenter.example.com\nuser=administrator@vsphere.local\npassword=the password",
+		hint: "Fields: host, user, and password required, validate_certs optional. Injects the VMWARE_ " +
+			"variables.",
+	},
+};
+
+// CRED_SOURCES describes where a secret comes from. A source other than local means the stored value
+// is a lookup rather than the secret, so its placeholder shows the lookup's shape and the kind's own
+// placeholder no longer applies.
+const CRED_SOURCES = {
+	local: { hint: "The value below is the secret, sealed and stored here." },
+	command: {
+		placeholder: "vault kv get -field=password secret/prod-fleet",
+		hint: "The command runs on the executor at launch and its standard output is the secret.",
+	},
+	vault: {
+		placeholder: '{"addr":"https://vault:8200","path":"secret/data/ci","field":"token"}',
+		hint: "Read from HashiCorp Vault over HTTP at launch.",
+	},
+	vault_dynamic: {
+		placeholder: '{"addr":"https://vault:8200","path":"database/creds/app","field":"password"}',
+		hint: "Vault mints a short-lived credential for each run and it is revoked when the run ends.",
+	},
+	gsm: {
+		placeholder: '{"project":"my-project","secret":"ci-token","version":"latest"}',
+		hint: "Read from Google Secret Manager at launch.",
+	},
+	aws: {
+		placeholder: '{"secret_id":"prod/db-password","region":"us-east-1"}',
+		hint: "Read from AWS Secrets Manager at launch with a signed request.",
+	},
+	aws_sts: {
+		placeholder: '{"role_arn":"arn:aws:iam::123456789012:role/deploy","region":"us-east-1"}',
+		hint: "AWS STS mints short-lived role credentials for each run.",
+	},
+	azure: {
+		placeholder: '{"vault":"prod-kv","secret":"db-password"}',
+		hint: "Read from Azure Key Vault at launch.",
+	},
+	conjur: {
+		placeholder: '{"url":"https://conjur.example.com","account":"prod","login":"host/app",' +
+			'"api_key":"…","variable":"db/password"}',
+		hint: "Read from CyberArk Conjur at launch.",
+	},
+	ccp: {
+		placeholder: '{"url":"https://ccp.example.com","app_id":"switchtender","safe":"Prod",' +
+			'"object":"db-password"}',
+		hint: "Read from the CyberArk Central Credential Provider at launch.",
+	},
+	onepassword: {
+		placeholder: '{"url":"https://connect.example.com","token":"…","vault":"Prod",' +
+			'"item":"db","field":"password"}',
+		hint: "Read from 1Password Connect at launch, with no op CLI on the runner.",
+	},
+};
+
+// syncCredFields matches the secret field to the kind and source chosen, so the box always shows the
+// shape of the thing being pasted into it and says what the run will do with it.
+function syncCredFields() {
+	const kind = document.getElementById("cred-kind").value;
+	const source = document.getElementById("cred-source").value || "local";
+	const kindSpec = CRED_KINDS[kind] || {};
+	const sourceSpec = CRED_SOURCES[source] || {};
+	const secret = document.getElementById("cred-secret");
+	// On edit the placeholder explains that a blank keeps what is stored, which outranks either shape.
+	if (!secret.required) {
+		secret.placeholder = "Leave blank to keep the current secret";
+	} else {
+		secret.placeholder = source === "local"
+			? (kindSpec.placeholder || "")
+			: (sourceSpec.placeholder || "");
+	}
+	const hint = document.getElementById("cred-kind-hint");
+	if (hint) {
+		hint.textContent = (kindSpec.hint || "") +
+			(kindSpec.ansibleOnly ? " Takes effect under Ansible only." : "");
+	}
+	const sourceHint = document.getElementById("cred-source-hint");
+	if (sourceHint) sourceHint.textContent = sourceSpec.hint || "";
+	toggleCredPassphrase();
+}
+
 // openCredentialEdit fills the credential dialog with an existing record and switches it to edit
 // mode. The secret field becomes optional, so a blank keeps the stored secret; the list never
 // returns secret material, so the field always starts empty.
@@ -3600,9 +3747,8 @@ function openCredentialEdit(c) {
 	const sec = document.getElementById("cred-secret");
 	sec.value = "";
 	sec.required = false;
-	sec.placeholder = "Leave blank to keep the current secret";
 	document.getElementById("cred-passphrase").value = "";
-	toggleCredPassphrase();
+	syncCredFields();
 	document.getElementById("cred-status").textContent = "";
 	setModalTitle("cred", "Edit credential");
 	document.getElementById("cred-modal").hidden = false;
@@ -3624,22 +3770,8 @@ function toggleCredPassphrase() {
 // required; on edit the secret is only sent when changed.
 function wireCredentialForm() {
 	const form = document.getElementById("cred-form");
-	const secPlaceholder = document.getElementById("cred-secret").placeholder;
-	const source = document.getElementById("cred-source");
-	const sourcePlaceholders = {
-		command: "vault kv get -field=password secret/prod-fleet",
-		vault: '{"addr":"https://vault:8200","path":"secret/data/ci","field":"token"}',
-		vault_dynamic: '{"addr":"https://vault:8200","path":"database/creds/app","field":"password"}',
-		gsm: '{"project":"my-project","secret":"ci-token","version":"latest"}',
-		aws: '{"secret_id":"prod/db-password","region":"us-east-1"}',
-		azure: '{"vault":"prod-kv","secret":"db-password"}',
-		conjur: '{"url":"https://conjur.example.com","account":"prod","login":"host/app","api_key":"...","variable":"db/password"}',
-	};
-	source.addEventListener("change", () => {
-		document.getElementById("cred-secret").placeholder = sourcePlaceholders[source.value] || secPlaceholder;
-		toggleCredPassphrase();
-	});
-	document.getElementById("cred-kind").addEventListener("change", toggleCredPassphrase);
+	document.getElementById("cred-source").addEventListener("change", syncCredFields);
+	document.getElementById("cred-kind").addEventListener("change", syncCredFields);
 	const resetToCreate = () => {
 		delete form.dataset.editId;
 		document.getElementById("cred-name").value = "";
@@ -3647,12 +3779,12 @@ function wireCredentialForm() {
 		const sec = document.getElementById("cred-secret");
 		sec.value = "";
 		sec.required = true;
-		sec.placeholder = secPlaceholder;
 		document.getElementById("cred-passphrase").value = "";
-		toggleCredPassphrase();
+		syncCredFields();
 		document.getElementById("cred-status").textContent = "";
 		setModalTitle("cred", "Add a credential");
 	};
+	syncCredFields();
 	const openBtn = document.getElementById("cred-open");
 	if (openBtn) openBtn.addEventListener("click", resetToCreate);
 
@@ -3721,7 +3853,30 @@ async function loadCredentials() {
 		for (const c of creds) {
 			const tr = document.createElement("tr");
 			tr.appendChild(td(c.name));
-			tr.appendChild(td(c.kind, "mono"));
+			// Kind and source are chips rather than bare text, so the column reads at a glance and the
+			// facet menus can offer them as values to tick.
+			const kind = td("");
+			const kindChip = document.createElement("span");
+			kindChip.className = "cred-kind";
+			kindChip.textContent = c.kind;
+			const kindSpec = CRED_KINDS[c.kind];
+			if (kindSpec) {
+				kindChip.dataset.tip = kindSpec.hint +
+					(kindSpec.ansibleOnly ? " Takes effect under Ansible only." : "");
+			}
+			kind.appendChild(kindChip);
+			tr.appendChild(kind);
+			// Where the secret comes from is set on the form but was never shown here, so a credential
+			// that resolves out of Vault looked identical to one stored locally.
+			const source = td("");
+			const sourceName = c.source || "local";
+			const sourceChip = document.createElement("span");
+			sourceChip.className = "cred-kind cred-source" + (sourceName === "local" ? "" : " external");
+			sourceChip.textContent = sourceName;
+			const sourceSpec = CRED_SOURCES[sourceName];
+			if (sourceSpec) sourceChip.dataset.tip = sourceSpec.hint;
+			source.appendChild(sourceChip);
+			tr.appendChild(source);
 			const secret = td("");
 			const secretChip = document.createElement("span");
 			secretChip.className = c.needs_secret ? "chip flaky" : "chip ok";
