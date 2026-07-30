@@ -1930,10 +1930,42 @@ WHERE status='running' AND claimed_by!='' AND claimed_at < ?`, sqlutil.FormatTim
 	if err != nil {
 		return 0, fmt.Errorf("reclaim stale: %w", err)
 	}
+
+	// Interrupting a split or pipeline parent kills the coordinator that would have rolled its
+	// children up. A child no executor has started is canceled outright, since leaving it pending
+	// means it stays claimable and would run long after its parent gave up.
+	res, err = tx.ExecContext(ctx, `
+UPDATE runs SET status='canceled', claimed_by='', claimed_at=NULL, ended_at=?,
+error=CASE WHEN error='' THEN '`+run.OrphanError()+`' ELSE error END
+WHERE status IN ('pending','pending_approval') AND parent_id IS NOT NULL
+	AND parent_id IN (SELECT id FROM runs WHERE status='interrupted' AND kind IN ('split','pipeline'))`,
+		sqlutil.FormatTime(time.Now()))
+	if err != nil {
+		return 0, fmt.Errorf("reclaim stale: %w", err)
+	}
+	orphaned, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("reclaim stale: %w", err)
+	}
+
+	// A child already executing is asked to stop through the flag its executor watches, rather than
+	// being finalized out from under the process that is still running it.
+	res, err = tx.ExecContext(ctx, `
+UPDATE runs SET cancel_requested=1
+WHERE status='running' AND cancel_requested=0 AND parent_id IS NOT NULL
+	AND parent_id IN (SELECT id FROM runs WHERE status='interrupted' AND kind IN ('split','pipeline'))`)
+	if err != nil {
+		return 0, fmt.Errorf("reclaim stale: %w", err)
+	}
+	stopping, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("reclaim stale: %w", err)
+	}
+
 	if err := tx.Commit(); err != nil {
 		return 0, fmt.Errorf("reclaim stale: %w", err)
 	}
-	return int(requeued + interrupted), nil
+	return int(requeued + interrupted + orphaned + stopping), nil
 }
 
 // RequestCancel marks the run so whichever process holds it stops it.

@@ -46,6 +46,7 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Run("claim leases oldest", func(t *testing.T) { testClaim(t, newStore()) })
 	t.Run("claim respects queue", func(t *testing.T) { testClaimQueue(t, newStore()) })
 	t.Run("heartbeat and reclaim", func(t *testing.T) { testLeaseLifecycle(t, newStore()) })
+	t.Run("reclaim resolves orphaned children", func(t *testing.T) { testReclaimOrphans(t, newStore()) })
 	t.Run("cancel request", func(t *testing.T) { testRequestCancel(t, newStore()) })
 	t.Run("cancel pending", func(t *testing.T) { testCancelPending(t, newStore()) })
 	t.Run("save keeps cancel sticky", func(t *testing.T) { testSaveKeepsCancel(t, newStore()) })
@@ -1100,6 +1101,77 @@ func testLeaseLifecycle(t *testing.T, store run.Store) {
 	}
 	if err := store.Heartbeat(ctx, gone.ID, "worker-b"); !errors.Is(err, run.ErrNotFound) {
 		t.Errorf("Heartbeat() on interrupted run = %v, want ErrNotFound", err)
+	}
+}
+
+// testReclaimOrphans verifies a dead coordinator does not leave its children stranded. When a stale
+// split or pipeline parent is interrupted, nothing is left to roll its children up, so a child no
+// executor started must not stay pending and claimable, and one already executing must be told to
+// stop. Without this a killed coordinator's shards run on with no parent to report them.
+func testReclaimOrphans(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	stale := time.Now().Add(-time.Hour)
+	fresh := time.Now()
+	parentID := "run_orphan_parent"
+	parent := &run.Run{
+		ID: parentID, Playbook: "site.yml", Kind: run.KindSplit, Status: run.StatusRunning,
+		ClaimedBy: "dead-coordinator", ClaimedAt: &stale, CreatedAt: stale,
+	}
+	idx0, idx1, count := 0, 1, 2
+	queued := &run.Run{
+		ID: "run_orphan_queued", Playbook: "site.yml", Status: run.StatusPending,
+		ParentID: &parentID, ShardIndex: &idx0, ShardCount: &count, CreatedAt: stale,
+	}
+	executing := &run.Run{
+		ID: "run_orphan_running", Playbook: "site.yml", Status: run.StatusRunning,
+		ParentID: &parentID, ShardIndex: &idx1, ShardCount: &count, CreatedAt: stale,
+		ClaimedBy: "live-worker", ClaimedAt: &fresh,
+	}
+	for _, r := range []*run.Run{parent, queued, executing} {
+		if err := store.Save(ctx, r); err != nil {
+			t.Fatalf("Save(%s) error = %v", r.ID, err)
+		}
+	}
+
+	// Only the parent's lease is stale, so the executing child is swept as an orphan rather than
+	// as a lease that expired on its own.
+	if _, err := store.ReclaimStale(ctx, 30*time.Minute); err != nil {
+		t.Fatalf("ReclaimStale() error = %v", err)
+	}
+
+	gotParent, err := store.Get(ctx, parentID)
+	if err != nil {
+		t.Fatalf("Get(parent) error = %v", err)
+	}
+	if gotParent.Status != run.StatusInterrupted {
+		t.Fatalf("parent status = %q, want interrupted", gotParent.Status)
+	}
+	gotQueued, err := store.Get(ctx, queued.ID)
+	if err != nil {
+		t.Fatalf("Get(queued) error = %v", err)
+	}
+	if gotQueued.Status != run.StatusCanceled {
+		t.Errorf("queued child status = %q, want canceled, not left claimable", gotQueued.Status)
+	}
+	if gotQueued.EndedAt == nil {
+		t.Error("queued child has no end time, so it never finished")
+	}
+	if gotQueued.Error != run.OrphanError() {
+		t.Errorf("queued child error = %q, want %q", gotQueued.Error, run.OrphanError())
+	}
+	gotRunning, err := store.Get(ctx, executing.ID)
+	if err != nil {
+		t.Fatalf("Get(executing) error = %v", err)
+	}
+	if !gotRunning.CancelRequested {
+		t.Error("executing child was not asked to stop, so it runs on with no parent to report it")
+	}
+
+	// The queued child is no longer work: a claim must not hand it out.
+	if claimed, err := store.Claim(ctx, "worker-x", []string{""}); err == nil {
+		t.Errorf("Claim() returned %s, want nothing claimable after the sweep", claimed.ID)
+	} else if !errors.Is(err, run.ErrNonePending) {
+		t.Errorf("Claim() error = %v, want ErrNonePending", err)
 	}
 }
 
