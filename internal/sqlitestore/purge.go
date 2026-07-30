@@ -25,7 +25,7 @@ func (s *store) PurgeEventsBefore(ctx context.Context, cutoff time.Time) (int, e
 	}
 	var trimmed int
 	err := s.db.QueryRowContext(ctx, `
-SELECT COUNT(*) FROM runs WHERE status NOT IN ('pending','running') AND created_at < ?`, cut).
+SELECT COUNT(*) FROM runs WHERE `+terminalRun+` AND created_at < ?`, cut).
 		Scan(&trimmed)
 	if err != nil {
 		return 0, fmt.Errorf("purge events: %w", err)
@@ -47,7 +47,7 @@ func (s *store) PurgeRunsBefore(ctx context.Context, cutoff time.Time) (int, err
 	for {
 		res, err := s.db.ExecContext(ctx, `
 DELETE FROM runs WHERE id IN (
-	SELECT id FROM runs WHERE status NOT IN ('pending','running') AND created_at < ? LIMIT ?
+	SELECT id FROM runs WHERE `+terminalRun+` AND created_at < ? LIMIT ?
 )`, cut, purgeBatch)
 		if err != nil {
 			return deleted, fmt.Errorf("purge runs: %w", err)
@@ -70,7 +70,7 @@ func (s *store) deleteBatched(ctx context.Context, table, cut string) error {
 	q := fmt.Sprintf(`
 DELETE FROM %s WHERE seq IN (
 	SELECT seq FROM %s WHERE run_id IN (
-		SELECT id FROM runs WHERE status NOT IN ('pending','running') AND created_at < ?
+		SELECT id FROM runs WHERE `+terminalRun+` AND created_at < ?
 	) LIMIT ?
 )`, table, table)
 	for {

@@ -1416,6 +1416,14 @@ func testPurge(t *testing.T, store run.Store) {
 	if err := store.Save(ctx, &run.Run{ID: "running", Status: run.StatusRunning, CreatedAt: old}); err != nil {
 		t.Fatalf("Save(running) error = %v", err)
 	}
+	// An old run waiting for an approver. It is not terminal, so retention must leave it alone: a
+	// hold can outlive any window, and deleting one silently discards work someone still has to
+	// decide on.
+	if err := store.Save(ctx, &run.Run{
+		ID: "held", Status: run.StatusPendingApproval, CreatedAt: old,
+	}); err != nil {
+		t.Fatalf("Save(held) error = %v", err)
+	}
 
 	// Trimming events keeps the run record but drops its events.
 	trimmed, err := store.PurgeEventsBefore(ctx, cutoff)
@@ -1445,6 +1453,9 @@ func testPurge(t *testing.T, store run.Store) {
 	}
 	if _, err := store.Get(ctx, "old"); !errors.Is(err, run.ErrNotFound) {
 		t.Errorf("Get(old) error = %v, want ErrNotFound", err)
+	}
+	if _, err := store.Get(ctx, "held"); err != nil {
+		t.Errorf("run awaiting approval was purged: %v", err)
 	}
 	if _, err := store.Get(ctx, "recent"); err != nil {
 		t.Errorf("recent run deleted: %v", err)

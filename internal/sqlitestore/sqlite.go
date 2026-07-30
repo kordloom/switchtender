@@ -1411,6 +1411,12 @@ func (s *store) queryRuns(ctx context.Context, label, query string, args ...any)
 // AppendLog appends raw output bytes to the run's log. Returns run.ErrNotFound if absent. The
 // insert-select folds the missing-run check into the write so the per-chunk output path costs one
 // statement instead of two.
+// terminalRun is the SQL predicate for a run that has finished and may be purged. It mirrors
+// run.Status.Terminal(). It is stated as the set of terminal statuses rather than as "not pending or
+// running", which silently treated pending_approval as finished and deleted runs that were waiting
+// for an approver.
+const terminalRun = "status IN ('succeeded', 'failed', 'canceled', 'interrupted', 'rejected')"
+
 // nonTerminalRun is the SQL predicate for a run that still accepts auxiliary writes. It mirrors
 // run.Status.Terminal, and fences a terminal run so a reclaimed-but-alive worker cannot append logs or
 // events to a run that has already ended.

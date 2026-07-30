@@ -1183,6 +1183,12 @@ func (s *store) queryRuns(ctx context.Context, label, query string, args ...any)
 // keeps text ordering in step with chronological ordering.
 const pgNowText = `to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`
 
+// terminalRun is the SQL predicate for a run that has finished and may be purged. It mirrors
+// run.Status.Terminal(). It is stated as the set of terminal statuses rather than as "not pending or
+// running", which silently treated pending_approval as finished and deleted runs that were waiting
+// for an approver.
+const terminalRun = "status IN ('succeeded', 'failed', 'canceled', 'interrupted', 'rejected')"
+
 // nonTerminalRun is the SQL predicate for a run that still accepts auxiliary writes. It mirrors
 // run.Status.Terminal, and fences a terminal run so a reclaimed-but-alive worker cannot append logs or
 // events to a run that has already ended.
