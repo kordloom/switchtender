@@ -75,6 +75,84 @@ func (m *masker) redact(p []byte) []byte {
 	return out
 }
 
+// longest returns the length in bytes of the longest secret, or zero when none are set. The stream
+// masker uses it to decide how much of a chunk it must hold back.
+func (m *masker) longest() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if len(m.secrets) == 0 {
+		return 0
+	}
+	// secrets is sorted longest first, so the head is the longest.
+	return len(m.secrets[0])
+}
+
+// streamMasker redacts a byte stream whose chunk boundaries fall wherever the operating system
+// happened to split the pipe. Redacting each chunk on its own misses a secret straddling two of
+// them: neither half contains the whole value, so neither is replaced and the plaintext reaches the
+// stored log and every live viewer.
+//
+// It holds back the last few bytes of each chunk, enough that a secret ending in the next one is
+// reassembled before either half is emitted, and releases them once the stream ends. Output is
+// therefore delayed by at most the length of the longest secret, and never reordered or duplicated.
+// It is used by a single stream and is not safe for concurrent use.
+type streamMasker struct {
+	// mask holds the secret values, shared with the event tailer.
+	mask *masker
+	// tail is the withheld end of the stream so far, still unredacted and not yet emitted.
+	tail []byte
+}
+
+// next redacts what it can of chunk and returns the bytes that are safe to emit now. Whatever it
+// withholds is carried into the following call, so a secret split across the boundary is caught.
+func (s *streamMasker) next(chunk []byte) []byte {
+	if s.mask == nil {
+		return chunk
+	}
+	keep := s.mask.longest() - 1
+	if keep < 0 {
+		keep = 0
+	}
+	buf := chunk
+	if len(s.tail) > 0 {
+		buf = make([]byte, 0, len(s.tail)+len(chunk))
+		buf = append(buf, s.tail...)
+		buf = append(buf, chunk...)
+	}
+	// Redact the whole buffer before deciding what to release, so a secret lying across the release
+	// point is replaced rather than being split between the emitted part and the withheld part.
+	red := s.mask.redact(buf)
+	if keep == 0 {
+		s.tail = nil
+		return red
+	}
+	if len(red) <= keep {
+		// Nothing can be released yet: every byte so far could still begin a secret the next chunk
+		// finishes. A copy is taken because the caller owns chunk and may reuse it.
+		s.tail = append(s.tail[:0], red...)
+		return nil
+	}
+	// What is withheld is the redacted tail. A secret only partly arrived does not match yet, so its
+	// prefix is carried forward intact and matches once the rest lands.
+	cut := len(red) - keep
+	s.tail = append(s.tail[:0], red[cut:]...)
+	return red[:cut]
+}
+
+// flush releases the withheld end of the stream, redacted. It is called once the stream is finished,
+// when nothing further can arrive to complete a secret.
+func (s *streamMasker) flush() []byte {
+	if len(s.tail) == 0 {
+		return nil
+	}
+	out := s.tail
+	s.tail = nil
+	if s.mask == nil {
+		return out
+	}
+	return s.mask.redact(out)
+}
+
 // redactString returns s with every known secret replaced by the mask token.
 func (m *masker) redactString(s string) string {
 	m.mu.RLock()

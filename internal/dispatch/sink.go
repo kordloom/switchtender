@@ -20,6 +20,9 @@ type logSink struct {
 	publisher Publisher
 	// mask redacts known secret values before output is stored or streamed, nil when off.
 	mask *masker
+	// stream carries the redaction state between writes, so a secret split across two chunks is
+	// caught rather than passing through in halves. Nil until the first write.
+	stream *streamMasker
 }
 
 // Write appends p to the run's log and publishes it, redacting any known secret first so a value a
@@ -30,7 +33,31 @@ type logSink struct {
 func (s *logSink) Write(p []byte) (int, error) {
 	out := p
 	if s.mask != nil {
-		out = s.mask.redact(p)
+		if s.stream == nil {
+			s.stream = &streamMasker{mask: s.mask}
+		}
+		out = s.stream.next(p)
+	}
+	s.emit(out)
+	// The whole chunk was consumed even when part of it is being held back for the next write.
+	return len(p), nil
+}
+
+// flush releases whatever the masker withheld from the last write. It is called once the process has
+// finished writing, when no further output can complete a secret that straddles a chunk boundary.
+func (s *logSink) flush() {
+	if s.stream == nil {
+		return
+	}
+	s.emit(s.stream.flush())
+}
+
+// emit stores and publishes a redacted chunk. A store failure is retried briefly, since a busy single
+// writer under load must not silently drop stored output, then logged rather than surfaced, so a
+// persistent logging fault does not tear down the running process.
+func (s *logSink) emit(out []byte) {
+	if len(out) == 0 {
+		return
 	}
 	if err := withRetries(func() error {
 		return s.store.AppendLog(context.Background(), s.id, out)
@@ -38,5 +65,4 @@ func (s *logSink) Write(p []byte) (int, error) {
 		s.log.Error("dispatch: append log: "+err.Error(), zap.String("run_id", s.id))
 	}
 	s.publisher.PublishLog(s.id, out)
-	return len(p), nil
 }

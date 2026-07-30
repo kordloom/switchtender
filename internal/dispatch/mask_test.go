@@ -186,3 +186,87 @@ func TestRunMasksSecretInError(t *testing.T) {
 		t.Errorf("expected mask token in run error, got %q", got.Error)
 	}
 }
+
+// TestStreamMaskerSplitSecret covers the case that made chunk-at-a-time redaction unsafe: a secret
+// arriving across two writes. Neither half contains the whole value, so redacting each chunk on its
+// own let the plaintext through. Every split point of the secret is exercised, plus the case where
+// it arrives one byte at a time.
+func TestStreamMaskerSplitSecret(t *testing.T) {
+	t.Parallel()
+	const secret = "hunter2-swordfish"
+	tests := []struct {
+		Name   string
+		Chunks []string
+	}{{ // Test 0: The whole stream in one write, the case that already worked.
+		Name: "single chunk", Chunks: []string{"before " + secret + " after"},
+	}, { // Test 1: Split inside the secret, the leak this closes.
+		Name: "split mid secret", Chunks: []string{"before hunter2-", "swordfish after"},
+	}, { // Test 2: Split one byte in.
+		Name: "split after first byte", Chunks: []string{"before h", "unter2-swordfish after"},
+	}, { // Test 3: Split one byte from the end.
+		Name: "split before last byte", Chunks: []string{"before hunter2-swordfis", "h after"},
+	}, { // Test 4: Three chunks, both boundaries inside the secret.
+		Name: "three way split", Chunks: []string{"before hunt", "er2-sword", "fish after"},
+	}, { // Test 5: The stream delivered one byte per write.
+		Name: "byte at a time", Chunks: nil,
+	}}
+	for _, test := range tests {
+		t.Run(test.Name, func(t *testing.T) {
+			t.Parallel()
+			chunks := test.Chunks
+			if chunks == nil {
+				for _, b := range []byte("before " + secret + " after") {
+					chunks = append(chunks, string(b))
+				}
+			}
+			m := &masker{}
+			m.set([]string{secret})
+			sm := &streamMasker{mask: m}
+			var got strings.Builder
+			for _, c := range chunks {
+				got.Write(sm.next([]byte(c)))
+			}
+			got.Write(sm.flush())
+
+			if strings.Contains(got.String(), secret) {
+				t.Errorf("secret survived the stream: %q", got.String())
+			}
+			if want := "before " + maskToken + " after"; got.String() != want {
+				t.Errorf("stream = %q, want %q", got.String(), want)
+			}
+		})
+	}
+}
+
+// TestStreamMaskerPreservesStream checks the masker neither drops nor reorders output when nothing
+// needs redacting, since it withholds part of every chunk to do its work.
+func TestStreamMaskerPreservesStream(t *testing.T) {
+	t.Parallel()
+	m := &masker{}
+	m.set([]string{"a-secret-value"})
+	sm := &streamMasker{mask: m}
+	const text = "line one\nline two\nline three\n"
+	var got strings.Builder
+	for i := 0; i < len(text); i += 5 {
+		end := min(i+5, len(text))
+		got.Write(sm.next([]byte(text[i:end])))
+	}
+	got.Write(sm.flush())
+	if diff := cmp.Diff(text, got.String()); diff != "" {
+		t.Errorf("stream mismatch (-want +got):\n%s", diff)
+	}
+}
+
+// TestStreamMaskerNoSecrets checks a stream passes straight through when no secrets are configured,
+// so a run with no credentials pays no buffering cost and its output is not delayed.
+func TestStreamMaskerNoSecrets(t *testing.T) {
+	t.Parallel()
+	sm := &streamMasker{mask: &masker{}}
+	out := sm.next([]byte("plain output"))
+	if string(out) != "plain output" {
+		t.Errorf("next() = %q, want the chunk unchanged", out)
+	}
+	if extra := sm.flush(); len(extra) != 0 {
+		t.Errorf("flush() = %q, want nothing withheld", extra)
+	}
+}

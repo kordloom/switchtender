@@ -1312,7 +1312,8 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 		return run.StatusCanceled
 	}
 
-	var sink io.Writer = &logSink{store: d.store, id: r.ID, log: d.log, publisher: d.publisher, mask: mask}
+	logs := &logSink{store: d.store, id: r.ID, log: d.log, publisher: d.publisher, mask: mask}
+	var sink io.Writer = logs
 	if tee != nil {
 		sink = io.MultiWriter(sink, tee)
 	}
@@ -1348,6 +1349,10 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 	mask.set(append(secrets, invSecrets...))
 
 	res, runErr := d.runner.Run(ctx, spec, sink)
+	// The masker holds back the end of each chunk so a secret split across two of them is caught
+	// before either half is emitted. The process can write no more, so the withheld tail is released
+	// now, while the run is still live: an append to a finalized run is fenced and would be dropped.
+	logs.flush()
 
 	close(stop)
 	<-tailed
