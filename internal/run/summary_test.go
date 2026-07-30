@@ -140,6 +140,8 @@ func TestTaskSummariesFromEvents(t *testing.T) {
 	}
 }
 
+// TestHostDurations covers the per-host timing the summary fold accumulates: the gap between a task
+// starting and each host reporting its result, summed across tasks.
 func TestHostDurations(t *testing.T) {
 	t.Parallel()
 	base := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
@@ -186,9 +188,59 @@ func TestHostDurations(t *testing.T) {
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
-			got := hostDurations(test.In)
-			if diff := cmp.Diff(test.Want, got, cmpopts.EquateEmpty()); diff != "" {
-				t.Errorf("hostDurations() mismatch (-want +got):\n%s", diff)
+			f := NewSummaryFold(time.Time{})
+			f.Add(test.In)
+			if diff := cmp.Diff(test.Want, f.hostSeconds, cmpopts.EquateEmpty()); diff != "" {
+				t.Errorf("host durations mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+// TestSummaryFoldMatchesBatch checks that folding a run's events in pages gives the same answer as
+// folding them all at once, at every page size. Paging is how a long run is summarized without
+// holding its whole event list in memory, so the two paths have to agree, including when a page
+// boundary falls between a task starting and its results arriving.
+func TestSummaryFoldMatchesBatch(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	events := []event.Event{
+		{Type: event.TypeTaskStart, Time: base, Task: "install"},
+		{Type: event.TypeRunnerOK, Time: base.Add(time.Second), Host: "a", Task: "install"},
+		{Type: event.TypeFacts, Time: base.Add(time.Second), Host: "a",
+			Facts: map[string]string{"os": "debian"}},
+		{Type: event.TypeRunnerOK, Time: base.Add(2 * time.Second), Host: "b", Task: "install"},
+		{Type: event.TypeTaskStart, Time: base.Add(3 * time.Second), Task: "configure"},
+		{Type: event.TypeRunnerFailed, Time: base.Add(5 * time.Second), Host: "a", Task: "configure"},
+		{Type: event.TypeRunnerSkipped, Time: base.Add(6 * time.Second), Host: "b", Task: "configure"},
+		{Type: event.TypeFacts, Time: base.Add(6 * time.Second), Host: "b",
+			Facts: map[string]string{"os": "ubuntu"}},
+		{Type: event.TypeStats, Time: base.Add(7 * time.Second),
+			Stats:   map[string]event.HostStats{"a": {OK: 1, Failures: 1}, "b": {OK: 1, Skipped: 1}},
+			Outputs: map[string]any{"version": "1.2.3"}},
+	}
+
+	whole := NewSummaryFold(base)
+	whole.Add(events)
+
+	for size := 1; size <= len(events)+1; size++ {
+		t.Run(fmt.Sprintf("page size %d", size), func(t *testing.T) {
+			t.Parallel()
+			paged := NewSummaryFold(base)
+			for i := 0; i < len(events); i += size {
+				paged.Add(events[i:min(i+size, len(events))])
+			}
+			if diff := cmp.Diff(whole.HostSummaries(), paged.HostSummaries()); diff != "" {
+				t.Errorf("host summaries mismatch (-whole +paged):\n%s", diff)
+			}
+			if diff := cmp.Diff(whole.TaskSummaries(), paged.TaskSummaries()); diff != "" {
+				t.Errorf("task summaries mismatch (-whole +paged):\n%s", diff)
+			}
+			if diff := cmp.Diff(whole.HostFacts(), paged.HostFacts()); diff != "" {
+				t.Errorf("host facts mismatch (-whole +paged):\n%s", diff)
+			}
+			if diff := cmp.Diff(whole.Outputs(), paged.Outputs()); diff != "" {
+				t.Errorf("outputs mismatch (-whole +paged):\n%s", diff)
 			}
 		})
 	}
