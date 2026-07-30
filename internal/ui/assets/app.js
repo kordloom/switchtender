@@ -8069,6 +8069,28 @@ function renderDetail() {
 	renderTimeline(detailState.model);
 }
 
+// GRID_COALESCE_MS is how long a burst of structural events is allowed to gather before the grid is
+// redrawn. Adding a host or a task changes the shape of the matrix, so it cannot be patched in place
+// the way a single cell can; redrawing per event costs hosts times tasks each time, and a run that
+// discovers a hundred hosts in a second would spend the burst rebuilding the same grid. One frame's
+// worth of delay is imperceptible and collapses the burst into a single redraw.
+const GRID_COALESCE_MS = 120;
+
+// gridTimer holds the pending coalesced redraw, or null when none is scheduled.
+let gridTimer = null;
+
+// scheduleGrid redraws the matrix and the timeline once the current burst of structural changes
+// settles. Repeated calls inside the window collapse into one redraw of the model's latest state.
+function scheduleGrid() {
+	if (gridTimer !== null) return;
+	gridTimer = window.setTimeout(() => {
+		gridTimer = null;
+		if (!detailState || !detailState.model) return;
+		renderMatrix(detailState.model);
+		renderTimeline(detailState.model);
+	}, GRID_COALESCE_MS);
+}
+
 // openStream subscribes to the run's live output and applies events, logs, and the end signal.
 // It resumes after afterSeq so history is never re-sent, and skips any event at or before the
 // cursor in case a reconnect replays one.
@@ -8533,12 +8555,12 @@ function applyLiveEvent(ev) {
 	}
 	const change = applyEvent(detailState.model, ev);
 	if (change.structural) {
-		renderMatrix(detailState.model);
-		renderTimeline(detailState.model);
+		// The grid's shape changed, so it is rebuilt rather than patched. The redraw is coalesced
+		// because hosts and tasks arrive in bursts and each rebuild costs hosts times tasks.
+		scheduleGrid();
 	} else if (!detailState.overCap && change.host && change.task) {
 		if (!updateCell(change.host, change.task)) {
-			renderMatrix(detailState.model);
-			renderTimeline(detailState.model);
+			scheduleGrid();
 			return;
 		}
 		updateTimelineBar(change.task);
