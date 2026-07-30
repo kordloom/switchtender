@@ -94,17 +94,20 @@ func TestQueuePlaceholders(t *testing.T) {
 		Name      string
 		Queues    []string
 		Style     string
+		First     int
 		WantList  string
 		WantCount int
 	}{{ // Test 0: No queues still binds the default queue.
 		Name: "default only", Queues: nil, Style: "?", WantList: "?", WantCount: 1,
-	}, { // Test 1: SQLite style repeats question marks.
-		Name: "sqlite", Queues: []string{"", "gpu"}, Style: "?", WantList: "?, ?", WantCount: 2,
-	}, { // Test 2: Postgres style numbers from three.
-		Name: "postgres", Queues: []string{"", "gpu"}, Style: "$", WantList: "$3, $4", WantCount: 2,
+	}, { // Test 1: SQLite style repeats question marks and ignores the offset.
+		Name: "sqlite", Queues: []string{"", "gpu"}, Style: "?", First: 7, WantList: "?, ?", WantCount: 2,
+	}, { // Test 2: Postgres style numbers from the offset the caller gives.
+		Name: "postgres", Queues: []string{"", "gpu"}, Style: "$", First: 2, WantList: "$2, $3", WantCount: 2,
+	}, { // Test 3: A different offset renumbers the whole list.
+		Name: "postgres offset", Queues: []string{"a"}, Style: "$", First: 5, WantList: "$5", WantCount: 1,
 	}}
 	for i, test := range tests {
-		list, args := sqlutil.QueuePlaceholders(test.Queues, test.Style)
+		list, args := sqlutil.QueuePlaceholders(test.Queues, test.Style, test.First)
 		if list != test.WantList || len(args) != test.WantCount {
 			t.Errorf("test %d (%s): QueuePlaceholders() = %q with %d args, want %q with %d",
 				i, test.Name, list, len(args), test.WantList, test.WantCount)

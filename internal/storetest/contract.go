@@ -1048,8 +1048,8 @@ func testLeaseLifecycle(t *testing.T, store run.Store) {
 		t.Errorf("Heartbeat() wrong owner error = %v, want ErrNotFound", err)
 	}
 
-	// A fresh lease survives a sweep with an old cutoff.
-	n, err := store.ReclaimStale(ctx, time.Now().Add(-time.Minute))
+	// A fresh lease survives a sweep that only reclaims leases older than a minute.
+	n, err := store.ReclaimStale(ctx, time.Minute)
 	if err != nil {
 		t.Fatalf("ReclaimStale() error = %v", err)
 	}
@@ -1057,8 +1057,8 @@ func testLeaseLifecycle(t *testing.T, store run.Store) {
 		t.Errorf("ReclaimStale() = %d, want 0 while the lease is fresh", n)
 	}
 
-	// A future cutoff makes the lease stale: the pending run goes back in the queue.
-	n, err = store.ReclaimStale(ctx, time.Now().Add(time.Minute))
+	// A zero age makes every held lease stale: the pending run goes back in the queue.
+	n, err = store.ReclaimStale(ctx, 0)
 	if err != nil {
 		t.Fatalf("ReclaimStale() error = %v", err)
 	}
@@ -1082,7 +1082,7 @@ func testLeaseLifecycle(t *testing.T, store run.Store) {
 	if err := store.Save(ctx, reclaimed); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
-	if n, err = store.ReclaimStale(ctx, time.Now().Add(time.Minute)); err != nil || n != 1 {
+	if n, err = store.ReclaimStale(ctx, 0); err != nil || n != 1 {
 		t.Fatalf("ReclaimStale() = %d, %v, want 1 interrupted", n, err)
 	}
 	gone, err := store.Get(ctx, reclaimed.ID)

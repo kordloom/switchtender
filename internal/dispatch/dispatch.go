@@ -440,7 +440,7 @@ func (d *Dispatcher) claimLoop() {
 func (d *Dispatcher) janitor() {
 	defer d.wg.Done()
 	sweep := func() {
-		n, err := d.store.ReclaimStale(d.ctx, time.Now().Add(-leaseTTL))
+		n, err := d.store.ReclaimStale(d.ctx, leaseTTL)
 		if err != nil {
 			if d.ctx.Err() == nil {
 				d.log.Error("dispatch: reclaim stale: " + err.Error())

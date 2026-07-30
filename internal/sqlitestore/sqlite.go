@@ -1844,7 +1844,7 @@ func parseNotifications(s string) []run.NotifyTarget {
 // Claim leases the oldest unclaimed pending top-level plain run to owner and returns it. A run
 // whose cancel was requested while it waited is skipped; the cancel handler terminalizes it.
 func (s *store) Claim(ctx context.Context, owner string, queues []string) (*run.Run, error) {
-	placeholders, args := sqlutil.QueuePlaceholders(queues, "?")
+	placeholders, args := sqlutil.QueuePlaceholders(queues, "?", 0)
 	q := `
 UPDATE runs SET claimed_by=?, claimed_at=?
 WHERE id = (
@@ -1885,8 +1885,10 @@ func (s *store) Heartbeat(ctx context.Context, id, owner string) error {
 }
 
 // ReclaimStale requeues stale claimed pending runs and interrupts stale running runs.
-func (s *store) ReclaimStale(ctx context.Context, cutoff time.Time) (int, error) {
-	cut := sqlutil.FormatTime(cutoff)
+func (s *store) ReclaimStale(ctx context.Context, ttl time.Duration) (int, error) {
+	// A SQLite deployment is one node: the process that stamps a lease is the process that sweeps it,
+	// so the local clock is the authoritative one and there is no skew to reconcile.
+	cut := sqlutil.FormatTime(time.Now().Add(-ttl))
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, fmt.Errorf("reclaim stale: %w", err)

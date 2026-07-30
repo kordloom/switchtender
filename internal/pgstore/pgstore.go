@@ -1172,6 +1172,14 @@ func (s *store) queryRuns(ctx context.Context, label, query string, args ...any)
 // AppendLog appends raw output bytes to the run's log. Returns run.ErrNotFound if absent. The
 // insert-select folds the missing-run check into the write so the per-chunk output path costs one
 // statement instead of two.
+// pgNowText renders the database server's current time in the same UTC RFC 3339 text the Go side
+// writes, so a lease stamped in SQL is indistinguishable from one stamped by a store method. Leases
+// have to come from the database clock rather than a worker's: with several nodes writing, a worker
+// whose clock runs behind would otherwise stamp leases the janitor reads as already expired. The
+// fractional second is fixed at six digits, which keeps the value the same width every time and so
+// keeps text ordering in step with chronological ordering.
+const pgNowText = `to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`
+
 // nonTerminalRun is the SQL predicate for a run that still accepts auxiliary writes. It mirrors
 // run.Status.Terminal, and fences a terminal run so a reclaimed-but-alive worker cannot append logs or
 // events to a run that has already ended.
@@ -1608,9 +1616,11 @@ func parseNotifications(s string) []run.NotifyTarget {
 // is locked with SKIP LOCKED so concurrent workers never claim the same run. A run whose cancel
 // was requested while it waited is skipped; the cancel handler terminalizes it.
 func (s *store) Claim(ctx context.Context, owner string, queues []string) (*run.Run, error) {
-	placeholders, args := sqlutil.QueuePlaceholders(queues, "$")
+	placeholders, args := sqlutil.QueuePlaceholders(queues, "$", 2)
+	// The lease is stamped from the database clock, not this worker's, so the janitor on another node
+	// ages it against the clock that wrote it.
 	q := `
-UPDATE runs SET claimed_by=$1, claimed_at=$2
+UPDATE runs SET claimed_by=$1, claimed_at=` + pgNowText + `
 WHERE id = (
 	SELECT id FROM runs
 	WHERE status='pending' AND claimed_by='' AND kind='' AND cancel_requested=0
@@ -1619,7 +1629,7 @@ WHERE id = (
 	FOR UPDATE SKIP LOCKED
 )
 RETURNING ` + runColumns
-	full := append([]any{owner, sqlutil.FormatTime(time.Now())}, args...)
+	full := append([]any{owner}, args...)
 	r, err := scanRun(s.db.QueryRowContext(ctx, q, full...))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, run.ErrNonePending
@@ -1649,8 +1659,18 @@ func (s *store) Heartbeat(ctx context.Context, id, owner string) error {
 }
 
 // ReclaimStale requeues stale claimed pending runs and interrupts stale running runs.
-func (s *store) ReclaimStale(ctx context.Context, cutoff time.Time) (int, error) {
-	cut := sqlutil.FormatTime(cutoff)
+//
+// Every clock here is the database server's. A lease is stamped from the database clock by Claim and
+// Heartbeat, so the sweep has to age it against that same clock: deriving the cutoff from the calling
+// node's clock instead would interrupt perfectly healthy runs whenever a worker's clock ran behind
+// the control node's by more than the lease age.
+//
+// The comparison casts the stored text to a timestamp rather than comparing it as text. Timestamps
+// are written in RFC 3339, which trims trailing zeros from the fractional second, so their text
+// widths vary and lexicographic order does not always match chronological order. Comparing as text
+// would let the sweep interrupt a run whose lease is in fact fresh.
+func (s *store) ReclaimStale(ctx context.Context, ttl time.Duration) (int, error) {
+	age := ttl.Seconds()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, fmt.Errorf("reclaim stale: %w", err)
@@ -1659,7 +1679,8 @@ func (s *store) ReclaimStale(ctx context.Context, cutoff time.Time) (int, error)
 
 	res, err := tx.ExecContext(ctx, `
 UPDATE runs SET claimed_by='', claimed_at=NULL
-WHERE status='pending' AND claimed_by!='' AND claimed_at < $1`, cut)
+WHERE status='pending' AND claimed_by!=''
+  AND claimed_at::timestamptz < now() - make_interval(secs => $1)`, age)
 	if err != nil {
 		return 0, fmt.Errorf("reclaim stale: %w", err)
 	}
@@ -1669,8 +1690,9 @@ WHERE status='pending' AND claimed_by!='' AND claimed_at < $1`, cut)
 	}
 	res, err = tx.ExecContext(ctx, `
 UPDATE runs SET status='interrupted', claimed_by='', claimed_at=NULL,
-ended_at=$1, error='interrupted: executor lease expired'
-WHERE status='running' AND claimed_by!='' AND claimed_at < $2`, sqlutil.FormatTime(time.Now()), cut)
+ended_at=`+pgNowText+`, error='interrupted: executor lease expired'
+WHERE status='running' AND claimed_by!=''
+  AND claimed_at::timestamptz < now() - make_interval(secs => $1)`, age)
 	if err != nil {
 		return 0, fmt.Errorf("reclaim stale: %w", err)
 	}

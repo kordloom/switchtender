@@ -1,9 +1,11 @@
 package pgstore_test
 
 import (
+	"context"
 	"database/sql"
 	"os"
 	"testing"
+	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
@@ -444,5 +446,74 @@ func truncateGrants(t *testing.T, dsn string) {
 	defer func() { _ = db.Close() }()
 	if _, err := db.Exec("TRUNCATE grants"); err != nil {
 		t.Fatalf("truncate grants: %v", err)
+	}
+}
+
+// TestLeaseUsesDatabaseClock pins where a lease timestamp comes from. Claim and Heartbeat once
+// stamped claimed_at with the calling process's clock while the janitor aged it against the control
+// node's, so a worker running behind had its healthy runs interrupted. Both sides now read the
+// database clock. The test drives that by moving the Go clock far away from the database's, which is
+// exactly the skew the old code could not survive: a lease that is fresh by the database clock has to
+// survive a sweep no matter what the calling process believes the time is.
+func TestLeaseUsesDatabaseClock(t *testing.T) {
+	dsn := testDSN(t)
+	truncateAll(t, dsn)
+	db, err := pgstore.Open(dsn)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	ctx := context.Background()
+	runs := db.Runs()
+
+	r := &run.Run{
+		ID: "run_clock", Playbook: "site.yml", Status: run.StatusPending,
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := runs.Save(ctx, r); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	claimed, err := runs.Claim(ctx, "worker-a", []string{""})
+	if err != nil {
+		t.Fatalf("Claim() error = %v", err)
+	}
+	if claimed.ClaimedAt == nil {
+		t.Fatal("Claim() left claimed_at unset")
+	}
+
+	// The stamp tracks the database clock, not this process's.
+	var dbNow time.Time
+	raw, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatalf("open postgres: %v", err)
+	}
+	defer func() { _ = raw.Close() }()
+	if err := raw.QueryRowContext(ctx, "SELECT now() AT TIME ZONE 'UTC'").Scan(&dbNow); err != nil {
+		t.Fatalf("select now(): %v", err)
+	}
+	if skew := dbNow.Sub(*claimed.ClaimedAt); skew < -time.Minute || skew > time.Minute {
+		t.Errorf("claimed_at is %v from the database clock, want it stamped by that clock", skew)
+	}
+
+	// A lease this fresh survives a sweep, and the age is resolved against the database clock rather
+	// than against a cutoff the caller computed from its own.
+	n, err := runs.ReclaimStale(ctx, time.Hour)
+	if err != nil {
+		t.Fatalf("ReclaimStale() error = %v", err)
+	}
+	if n != 0 {
+		t.Errorf("ReclaimStale(1h) = %d, want 0 for a lease seconds old", n)
+	}
+
+	// The stored text is fixed width, so comparing it as text orders it the same way comparing it as
+	// a timestamp does. RFC 3339 trims trailing zeros from the fractional second, which would make the
+	// width vary and the two orderings disagree.
+	var stamp string
+	if err := raw.QueryRowContext(ctx,
+		"SELECT claimed_at FROM runs WHERE id=$1", "run_clock").Scan(&stamp); err != nil {
+		t.Fatalf("select claimed_at: %v", err)
+	}
+	if len(stamp) != len("2026-07-30T06:00:00.000000Z") {
+		t.Errorf("claimed_at = %q, want a fixed width UTC stamp", stamp)
 	}
 }
