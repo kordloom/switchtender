@@ -1427,7 +1427,9 @@ func TestClaimJitter(t *testing.T) {
 // interval, so a system that has been idle does not keep a queued run waiting out a long backoff.
 func TestClaimBackoffResetsOnWork(t *testing.T) {
 	t.Parallel()
-	const base = 50 * time.Millisecond
+	// The base is wide enough that scheduling noise on a loaded machine stays well inside the gap
+	// between a reset wait, at most 225ms, and a wait still at the ceiling, at least 600ms.
+	const base = 150 * time.Millisecond
 	ctx := context.Background()
 	store := run.NewMemStore()
 	r := &run.Run{ID: "run_wake", Playbook: "site.yml", Status: run.StatusPending, CreatedAt: time.Now()}
@@ -1435,9 +1437,9 @@ func TestClaimBackoffResetsOnWork(t *testing.T) {
 		t.Fatalf("Save() error = %v", err)
 	}
 	rec := &pollRecorder{Store: store}
-	// The sixth claim finds work, by which point the wait has climbed to its ceiling.
+	// The fourth claim finds work, by which point the wait has climbed to its ceiling.
 	rec.hand = func(n int) (*run.Run, error) {
-		if n == 6 {
+		if n == 4 {
 			return r.Clone(), nil
 		}
 		return nil, run.ErrNonePending
@@ -1445,15 +1447,15 @@ func TestClaimBackoffResetsOnWork(t *testing.T) {
 	d := New(rec, okRunner(), nil, WithClaimInterval(base), WithNoJanitor())
 	defer d.Close()
 
-	time.Sleep(2500 * time.Millisecond)
+	time.Sleep(4 * time.Second)
 	gaps := rec.gaps()
-	if len(gaps) < 7 {
+	if len(gaps) < 5 {
 		t.Fatalf("only %d gaps recorded, too few to see the reset", len(gaps))
 	}
-	// gaps[6] is the wait after the first empty claim following the one that found work. A loop
-	// that reset is back at the base interval; one that did not is still at its ceiling.
-	if gaps[6] > 120*time.Millisecond {
-		t.Errorf("gap after a successful claim = %v, want the base interval back", gaps[6])
+	// gaps[4] is the wait after the first empty claim following the one that found work. A loop that
+	// reset is back at the base interval; one that did not is still at its ceiling.
+	if gaps[4] > 400*time.Millisecond {
+		t.Errorf("gap after a successful claim = %v, want the base interval back", gaps[4])
 	}
 	t.Logf("gaps: %v", gaps)
 }
