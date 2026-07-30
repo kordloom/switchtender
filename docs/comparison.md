@@ -29,8 +29,8 @@ on them.
 | Provable audit | A tamper-evident SHA-256 hash chain, verified offline, with an optional ed25519-signed export. | An activity stream. | An activity log. |
 | Migration in | One command imports an AWX or Semaphore export. | Not applicable. | Not applicable. |
 | Drift detection | A dry run reports what has diverged from the desired state, across Ansible hosts and Terraform working directories, with a one-click approval-gated reconcile to fix it. | No. | No. |
-| Directory-driven roles | A directory or token group sets a user's role on every sign-in, over LDAP, SAML, OIDC, or a bearer JWT. | Organization mapping, complex. | No. Every user is assigned a role by hand. |
-| Notification channels | Eleven built in: webhook, email, Slack, Mattermost, Rocket.Chat, Discord, Teams, ntfy, PagerDuty, Grafana, and Twilio. | A similar set plus IRC, without Discord or ntfy. | Fewer, some in a paid tier. |
+| Directory-driven roles | A directory or token group sets a user's role on every sign-in, over LDAP, SAML, or a bearer JWT. OIDC provisions every account at one configurable default role instead. | Organization mapping, complex. | No. Every user is assigned a role by hand. |
+| Notification channels | Eleven server-wide: webhook, email, Slack, Mattermost, Rocket.Chat, Discord, Teams, ntfy, PagerDuty, Grafana, and Twilio. Seven of those, the ones that need only a URL, also route per template, so a team pages its own channel. PagerDuty, Grafana, Twilio, and email hold server-held account credentials and stay server-wide. | A similar set plus IRC, without Discord or ntfy, attached per job template. | Fewer, some in a paid tier. |
 
 ## Where they are even
 
@@ -39,7 +39,7 @@ on them.
 | Multiple runtimes | SwitchTender runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go, each with a dry run. AWX is Ansible-only. Semaphore runs Ansible, Terraform, OpenTofu, and shell, but not Python, PowerShell, or Go. |
 | Container execution environments | SwitchTender pins an image on a template, a run, or a project, most specific wins, with private-registry pulls, opt-in behind a flag. AWX attaches execution environments to job templates. Semaphore favors native runtimes instead. |
 | Access control | SwitchTender has global roles plus organizations, teams, and per-object read, use, and manage grants, all in the source-available core. AWX has mature organization RBAC. Semaphore gates RBAC behind its Enterprise tier. |
-| Credentials | Sealed with AES-256-GCM under a key derived by Argon2id, decrypted only at execution into a private temporary file that is wiped after. Thirteen credential kinds and eleven sources, nine of them external secret managers: HashiCorp Vault static and dynamic, AWS Secrets Manager and STS, Azure Key Vault, GCP Secret Manager, CyberArk Conjur and CCP, and 1Password. Several credentials of different kinds attach to one run. AWX matches this through credential plugins. Semaphore stores an SSH key or a username and password, with no external secret managers. |
+| Credentials | Sealed with AES-256-GCM under a key derived by Argon2id, decrypted only at execution into the run's environment or a temporary file created mode 0600, kept off the command line either way, and deleted when the run ends. Thirteen credential kinds and eleven sources, nine of them external secret managers: HashiCorp Vault static and dynamic, AWS Secrets Manager and STS, Azure Key Vault, GCP Secret Manager, CyberArk Conjur and CCP, and 1Password. Several credentials of different kinds attach to one run. AWX matches this through credential plugins. Semaphore stores an SSH key or a username and password, with no external secret managers. |
 | Scheduling | All three schedule runs. SwitchTender uses cron with highly available claiming so two servers do not double-fire. |
 | Surveys and prompts | All three collect typed values at launch. |
 | Inbound webhooks | All three launch on a git push. |

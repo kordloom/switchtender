@@ -246,7 +246,9 @@ type NotifyTarget struct {
 	OnFailure bool `json:"on_failure,omitempty"`
 }
 
-// Notification kinds a per-run target may name. They mirror the URL-based server channels.
+// Notification kinds a per-run target may name. These are the server channels a bare URL fully
+// configures. PagerDuty, Grafana, Twilio, and email need server-held account credentials, so they
+// stay server-wide and cannot be named per run.
 const (
 	NotifyWebhook    = "webhook"
 	NotifySlack      = "slack"

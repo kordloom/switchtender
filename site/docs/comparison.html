@@ -136,14 +136,14 @@ on them.</p>
 </tr>
 <tr>
 <td>Directory-driven roles</td>
-<td>A directory or token group sets a user's role on every sign-in, over LDAP, SAML, OIDC, or a bearer JWT.</td>
+<td>A directory or token group sets a user's role on every sign-in, over LDAP, SAML, or a bearer JWT. OIDC provisions every account at one configurable default role instead.</td>
 <td>Organization mapping, complex.</td>
 <td>No. Every user is assigned a role by hand.</td>
 </tr>
 <tr>
 <td>Notification channels</td>
-<td>Eleven built in: webhook, email, Slack, Mattermost, Rocket.Chat, Discord, Teams, ntfy, PagerDuty, Grafana, and Twilio.</td>
-<td>A similar set plus IRC, without Discord or ntfy.</td>
+<td>Eleven server-wide: webhook, email, Slack, Mattermost, Rocket.Chat, Discord, Teams, ntfy, PagerDuty, Grafana, and Twilio. Seven of those, the ones that need only a URL, also route per template, so a team pages its own channel. PagerDuty, Grafana, Twilio, and email hold server-held account credentials and stay server-wide.</td>
+<td>A similar set plus IRC, without Discord or ntfy, attached per job template.</td>
 <td>Fewer, some in a paid tier.</td>
 </tr>
 </tbody>
@@ -171,7 +171,7 @@ on them.</p>
 </tr>
 <tr>
 <td>Credentials</td>
-<td>Sealed with AES-256-GCM under a key derived by Argon2id, decrypted only at execution into a private temporary file that is wiped after. Thirteen credential kinds and eleven sources, nine of them external secret managers: HashiCorp Vault static and dynamic, AWS Secrets Manager and STS, Azure Key Vault, GCP Secret Manager, CyberArk Conjur and CCP, and 1Password. Several credentials of different kinds attach to one run. AWX matches this through credential plugins. Semaphore stores an SSH key or a username and password, with no external secret managers.</td>
+<td>Sealed with AES-256-GCM under a key derived by Argon2id, decrypted only at execution into the run's environment or a temporary file created mode 0600, kept off the command line either way, and deleted when the run ends. Thirteen credential kinds and eleven sources, nine of them external secret managers: HashiCorp Vault static and dynamic, AWS Secrets Manager and STS, Azure Key Vault, GCP Secret Manager, CyberArk Conjur and CCP, and 1Password. Several credentials of different kinds attach to one run. AWX matches this through credential plugins. Semaphore stores an SSH key or a username and password, with no external secret managers.</td>
 </tr>
 <tr>
 <td>Scheduling</td>

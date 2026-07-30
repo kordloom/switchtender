@@ -36,8 +36,8 @@ type result struct {
 	label string
 	// bootMillis holds each trial's boot time.
 	bootMillis []float64
-	// rssMB holds each trial's resident memory three seconds after serving.
-	rssMB []float64
+	// rssMiB holds each trial's resident memory three seconds after serving.
+	rssMiB []float64
 }
 
 func main() {
@@ -93,7 +93,7 @@ func run() error {
 				return fmt.Errorf("%s: %w", p.label, err)
 			}
 			r.bootMillis = append(r.bootMillis, boot)
-			r.rssMB = append(r.rssMB, rss)
+			r.rssMiB = append(r.rssMiB, rss)
 		}
 		results = append(results, r)
 	}
@@ -107,15 +107,15 @@ func run() error {
 			"Cold boot, "+r.label, median(boots), boots[0], boots[len(boots)-1])
 	}
 	for _, r := range results {
-		rss := append([]float64(nil), r.rssMB...)
+		rss := append([]float64(nil), r.rssMiB...)
 		sort.Float64s(rss)
 		if median(rss) == 0 {
 			continue
 		}
-		fmt.Printf("%-42s %7.0f MB  %.0f-%.0f MB\n",
+		fmt.Printf("%-42s %6.0f MiB  %.0f-%.0f MiB\n",
 			"Idle memory, "+r.label, median(rss), rss[0], rss[len(rss)-1])
 	}
-	fmt.Printf("%-42s %7.0f MB\n", "Stripped release binary", float64(info.Size())/(1<<20))
+	fmt.Printf("%-42s %6.1f MiB\n", "Stripped release binary", float64(info.Size())/(1<<20))
 	fmt.Println("\nOn macOS the encryption-on memory figure counts reclaimable pages, so it reads")
 	fmt.Println("high. On Linux, where servers run, both paths idle in the same band.")
 	return nil
@@ -123,7 +123,7 @@ func run() error {
 
 // trial starts the server on a fresh database, times it to a served health check, samples resident
 // memory after it settles, and stops it.
-func trial(bin, dir string, env []string) (bootMillis, rssMB float64, err error) {
+func trial(bin, dir string, env []string) (bootMillis, rssMiB float64, err error) {
 	db := filepath.Join(dir, "bench.db")
 	for _, suffix := range []string{"", "-wal", "-shm"} {
 		_ = os.Remove(db + suffix)
@@ -159,11 +159,11 @@ func trial(bin, dir string, env []string) (bootMillis, rssMB float64, err error)
 
 	// Let allocation settle before sampling, so the figure describes idle rather than startup.
 	time.Sleep(3 * time.Second)
-	return bootMillis, residentMB(cmd.Process.Pid), nil
+	return bootMillis, residentMiB(cmd.Process.Pid), nil
 }
 
-// residentMB reports a process's resident memory in mebibytes, zero when it cannot be read.
-func residentMB(pid int) float64 {
+// residentMiB reports a process's resident memory in mebibytes, zero when it cannot be read.
+func residentMiB(pid int) float64 {
 	out, err := exec.Command("ps", "-o", "rss=", "-p", strconv.Itoa(pid)).Output()
 	if err != nil {
 		return 0

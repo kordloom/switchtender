@@ -80,8 +80,8 @@ webhook secret on the git host and turn on enforcement, and every inbound push m
 <code>X-Hub-Signature-256</code> HMAC over its body or it is rejected. Rotate the secret at any time. A bad or
 missing signature never launches a run.</p>
 <h2 id="credentials">Credentials</h2>
-<p>A credential is a secret sealed with AES-256-GCM, decrypted only at execution into a temporary file
-and wiped afterward. Thirteen kinds cover SSH keys and SSH passwords, vault passwords, become
+<p>A credential is a secret sealed with AES-256-GCM, decrypted only at execution into the run's
+environment or a temporary file created mode 0600 and deleted when the run ends. Thirteen kinds cover SSH keys and SSH passwords, vault passwords, become
 passwords and full become settings, network device logins, environment bundles for cloud SDKs, API
 tokens, container registry logins, and typed AWS, Azure, GCP, and VMware cloud credentials. The
 <a href="/docs/secrets">secrets guide</a> describes each. Secrets never appear in API responses.</p>

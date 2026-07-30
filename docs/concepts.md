@@ -63,8 +63,8 @@ missing signature never launches a run.
 
 ## Credentials
 
-A credential is a secret sealed with AES-256-GCM, decrypted only at execution into a temporary file
-and wiped afterward. Thirteen kinds cover SSH keys and SSH passwords, vault passwords, become
+A credential is a secret sealed with AES-256-GCM, decrypted only at execution into the run's
+environment or a temporary file created mode 0600 and deleted when the run ends. Thirteen kinds cover SSH keys and SSH passwords, vault passwords, become
 passwords and full become settings, network device logins, environment bundles for cloud SDKs, API
 tokens, container registry logins, and typed AWS, Azure, GCP, and VMware cloud credentials. The
 [secrets guide](secrets.md) describes each. Secrets never appear in API responses.

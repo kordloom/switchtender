@@ -1267,6 +1267,11 @@ func TestAuthGateRoles(t *testing.T) {
 		{http.MethodPost, "/v1/projects", operator, http.StatusForbidden}, // Test 3: Operator cannot manage.
 		{http.MethodPost, "/v1/projects", admin, http.StatusNotFound},     // Test 4: Admin passes the gate; feature off here.
 		{http.MethodGet, "/v1/fleet", operator, http.StatusOK},            // Test 5: Operator reads.
+		// A profile is personal data, so listing accounts takes an admin even though it is a read.
+		{http.MethodGet, "/v1/users", viewer, http.StatusForbidden},   // Test 6: Viewer cannot list accounts.
+		{http.MethodGet, "/v1/users", operator, http.StatusForbidden}, // Test 7: Operator cannot either.
+		{http.MethodGet, "/v1/users", admin, http.StatusOK},           // Test 8: Admin lists accounts.
+		{http.MethodGet, "/v1/audit", viewer, http.StatusForbidden},   // Test 9: The audit trail is admin-only to read.
 	}
 	for i, test := range tests {
 		if got := do(test.Method, test.Path, test.Token); got != test.Want {
