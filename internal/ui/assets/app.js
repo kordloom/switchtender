@@ -4423,6 +4423,7 @@ function openTemplateEdit(t) {
 	document.getElementById("tpl-inventory").value = t.inventory || "";
 	document.getElementById("tpl-shards").value = t.shards ? String(t.shards) : "";
 	document.getElementById("tpl-queue").value = t.queue || "";
+	document.getElementById("tpl-timeout").value = t.timeout ? String(t.timeout) : "";
 	document.getElementById("tpl-image").value = t.image || "";
 	document.getElementById("tpl-pull-credential").value = t.pull_credential_id || "";
 	const chosen = new Set(t.credential_ids || []);
@@ -4497,6 +4498,8 @@ function wireTemplateForm() {
 		if (document.getElementById("tpl-dry-run").checked) payload.dry_run = true;
 		const tqueue = document.getElementById("tpl-queue").value.trim();
 		if (tqueue) payload.queue = tqueue;
+		const ttimeout = parseInt(document.getElementById("tpl-timeout").value, 10);
+		if (ttimeout > 0) payload.timeout = ttimeout;
 		const picked = Array.from(document.getElementById("tpl-credentials").selectedOptions)
 			.map((o) => o.value);
 		if (picked.length) payload.credential_ids = picked;
@@ -4653,6 +4656,7 @@ function openTemplateView(t) {
 	addRow("Inventory", t.inventory);
 	addRow("Shards", t.shards && t.shards > 1 ? t.shards : "");
 	addRow("Limit", t.limit);
+	addRow("Timeout", t.timeout ? t.timeout + "s" : "");
 	addRow("Created", t.created_at ? fmtTime(t.created_at) : "");
 	const code = document.getElementById("view-code");
 	code.hidden = !t.command;

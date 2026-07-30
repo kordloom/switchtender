@@ -196,7 +196,8 @@ CREATE TABLE IF NOT EXISTS templates (
 	pull_credential_id TEXT NOT NULL DEFAULT '',
 	org_id         TEXT NOT NULL DEFAULT '',
 	notifications  TEXT NOT NULL DEFAULT '',
-	selectable_credential_ids TEXT NOT NULL DEFAULT ''
+	selectable_credential_ids TEXT NOT NULL DEFAULT '',
+	timeout        INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS inventory_sources (
 	id            TEXT PRIMARY KEY,
@@ -600,14 +601,17 @@ func migrateProjects(db *sql.DB) error {
 	return nil
 }
 
-// migrateTemplates adds the owning-organization column to a templates table created before object
-// tenancy. Empty is the unowned default, so a template made before this column stays global. Adding a
-// column that already exists is the ordinary case for a current database and is treated as success.
+// migrateTemplates adds the columns a templates table created before them lacks: the owning
+// organization, notification targets, the selectable credential set, and the run timeout. Every one
+// defaults to unset, so a template made before a migration keeps its previous behavior, global and
+// on the server default timeout. Adding a column that already exists is the ordinary case for a
+// current database and is treated as success.
 func migrateTemplates(db *sql.DB) error {
 	for _, stmt := range []string{
 		"ALTER TABLE templates ADD COLUMN org_id TEXT NOT NULL DEFAULT ''",
 		"ALTER TABLE templates ADD COLUMN notifications TEXT NOT NULL DEFAULT ''",
 		"ALTER TABLE templates ADD COLUMN selectable_credential_ids TEXT NOT NULL DEFAULT ''",
+		"ALTER TABLE templates ADD COLUMN timeout INTEGER NOT NULL DEFAULT 0",
 	} {
 		if _, err := db.Exec(stmt); err != nil &&
 			!strings.Contains(err.Error(), "duplicate column name") {

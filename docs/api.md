@@ -138,6 +138,27 @@ a rejection names the offending field without echoing it. Each single-line field
 characters, `notes` at 2000, and an account may carry at most eight links. A link must be an `http`
 or `https` address; any other scheme is refused, because the admin page renders links as anchors.
 
+## Template run timeout
+
+A template may cap how long its launches are allowed to execute with `timeout`, a whole number of
+seconds. It is accepted on create and update, and every launch of the template carries it onto the
+run, whether the launch came from the API, a schedule, or a webhook trigger.
+
+```bash
+curl -X POST https://switchtender.example.com/v1/templates \
+  -H "Authorization: Bearer $SWITCHTENDER_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "name": "nightly database backup",
+    "playbook": "plays/backup.yml",
+    "timeout": 5400
+  }'
+```
+
+Zero, or the field omitted, leaves launches on the server default set by `--run-timeout`, so a
+template saved before this field existed is unchanged. A run that exceeds its timeout is canceled
+and finalized as failed. A launch cannot raise the cap; the template's value is what applies.
+
 ## Relay endpoints
 
 With `--worker-token` set, the server also serves the mesh relay under `/relay`: the execution

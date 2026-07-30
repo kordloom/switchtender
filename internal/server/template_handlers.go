@@ -42,6 +42,9 @@ type createTemplateRequest struct {
 	Shards int `json:"shards,omitempty"`
 	// Queue restricts launches to workers serving the queue.
 	Queue string `json:"queue,omitempty"`
+	// Timeout caps how many seconds a launch may execute before it is canceled and failed. Zero
+	// leaves launches on the server default.
+	Timeout int `json:"timeout,omitempty"`
 	// Image names a container image every launch executes inside. Works for every tool.
 	Image string `json:"image,omitempty"`
 	// PullCredentialID names a registry credential for pulling a private Image.
@@ -123,6 +126,7 @@ func createTemplateHandler(store template.Store, log *zap.Logger) http.HandlerFu
 			ExtraVars: req.ExtraVars, Survey: req.Survey,
 			Notifications: req.Notifications,
 			Queue:         req.Queue, Image: req.Image, PullCredentialID: req.PullCredentialID,
+			Timeout:   req.Timeout,
 			OrgID:     req.OrgID,
 			CreatedAt: time.Now(),
 		}
@@ -167,7 +171,8 @@ func updateTemplateHandler(store template.Store, log *zap.Logger) http.HandlerFu
 			ExtraVars: req.ExtraVars, Survey: req.Survey,
 			Notifications: notifications,
 			Queue:         req.Queue, Image: req.Image, PullCredentialID: req.PullCredentialID,
-			OrgID: req.OrgID,
+			Timeout: req.Timeout,
+			OrgID:   req.OrgID,
 		}
 		err := store.Update(r.Context(), t)
 		if errors.Is(err, template.ErrNotFound) {
@@ -372,6 +377,9 @@ func launchTemplateHandler(store template.Store, submitter Submitter, authz *aut
 		}
 		if t.Queue != "" {
 			opts = append(opts, run.WithQueue(t.Queue))
+		}
+		if t.Timeout > 0 {
+			opts = append(opts, run.WithTimeout(t.Timeout))
 		}
 		if t.Image != "" {
 			opts = append(opts, run.WithImage(t.Image, t.PullCredentialID))

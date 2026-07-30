@@ -14,7 +14,7 @@ import (
 // templateColumns is the shared select list for template reads.
 const templateColumns = `id, name, project_id, playbook, inventory, inventory_id, shards,
 	credential_ids, extra_vars, survey, queue, created_at, tool, command, dry_run, image,
-	pull_credential_id, org_id, notifications, selectable_credential_ids`
+	pull_credential_id, org_id, notifications, selectable_credential_ids, timeout`
 
 // templateStore is a template.Store backed by the shared SQLite database.
 type templateStore struct {
@@ -40,8 +40,9 @@ func (s *templateStore) Save(ctx context.Context, t *template.Template) error {
 INSERT INTO templates
 	(id, name, project_id, playbook, inventory, inventory_id, shards, credential_ids, extra_vars,
 	 survey, queue, created_at, tool, command, dry_run, image, pull_credential_id, org_id,
-	 notifications, selectable_credential_ids)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+	 notifications, selectable_credential_ids, timeout)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
+	$21)
 ON CONFLICT(id) DO UPDATE SET
 	name=excluded.name, project_id=excluded.project_id, playbook=excluded.playbook,
 	inventory=excluded.inventory, inventory_id=excluded.inventory_id, shards=excluded.shards,
@@ -50,12 +51,12 @@ ON CONFLICT(id) DO UPDATE SET
 	tool=excluded.tool, command=excluded.command, dry_run=excluded.dry_run,
 	image=excluded.image, pull_credential_id=excluded.pull_credential_id, org_id=excluded.org_id,
 	notifications=excluded.notifications,
-	selectable_credential_ids=excluded.selectable_credential_ids`
+	selectable_credential_ids=excluded.selectable_credential_ids, timeout=excluded.timeout`
 	_, err = s.db.ExecContext(ctx, q,
 		t.ID, t.Name, t.ProjectID, t.Playbook, t.Inventory, t.InventoryID, t.Shards,
 		sqlutil.JoinIDs(t.CredentialIDs), string(vars), string(survey), t.Queue, sqlutil.FormatTime(t.CreatedAt),
 		t.Tool, t.Command, sqlutil.BoolToInt(t.DryRun), t.Image, t.PullCredentialID, t.OrgID, string(notifs),
-		sqlutil.JoinIDs(t.SelectableCredentialIDs))
+		sqlutil.JoinIDs(t.SelectableCredentialIDs), t.Timeout)
 	if err != nil {
 		return fmt.Errorf("save template: %w", err)
 	}
@@ -79,13 +80,14 @@ func (s *templateStore) Update(ctx context.Context, t *template.Template) error 
 	const q = `UPDATE templates SET
 	name=$1, project_id=$2, playbook=$3, inventory=$4, inventory_id=$5, shards=$6,
 	credential_ids=$7, extra_vars=$8, survey=$9, queue=$10, tool=$11, command=$12, dry_run=$13,
-	image=$14, pull_credential_id=$15, org_id=$16, notifications=$17, selectable_credential_ids=$18
-	WHERE id=$19`
+	image=$14, pull_credential_id=$15, org_id=$16, notifications=$17,
+	selectable_credential_ids=$18, timeout=$19
+	WHERE id=$20`
 	res, err := s.db.ExecContext(ctx, q,
 		t.Name, t.ProjectID, t.Playbook, t.Inventory, t.InventoryID, t.Shards,
 		sqlutil.JoinIDs(t.CredentialIDs), string(vars), string(survey), t.Queue, t.Tool, t.Command,
 		sqlutil.BoolToInt(t.DryRun), t.Image, t.PullCredentialID, t.OrgID, string(notifs),
-		sqlutil.JoinIDs(t.SelectableCredentialIDs), t.ID)
+		sqlutil.JoinIDs(t.SelectableCredentialIDs), t.Timeout, t.ID)
 	if err != nil {
 		return fmt.Errorf("update template: %w", err)
 	}
@@ -165,7 +167,7 @@ func scanTemplate(sc scanner) (*template.Template, error) {
 	)
 	if err := sc.Scan(&t.ID, &t.Name, &t.ProjectID, &t.Playbook, &t.Inventory, &t.InventoryID,
 		&t.Shards, &creds, &vars, &survey, &t.Queue, &created, &t.Tool, &t.Command,
-		&dryRun, &t.Image, &t.PullCredentialID, &t.OrgID, &notifs, &selectable); err != nil {
+		&dryRun, &t.Image, &t.PullCredentialID, &t.OrgID, &notifs, &selectable, &t.Timeout); err != nil {
 		return nil, err
 	}
 	t.DryRun = dryRun != 0

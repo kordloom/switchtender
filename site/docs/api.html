@@ -541,6 +541,22 @@ the admin role and is not delegable by a manage grant. The values are never writ
 a rejection names the offending field without echoing it. Each single-line field is capped at 320
 characters, <code>notes</code> at 2000, and an account may carry at most eight links. A link must be an <code>http</code>
 or <code>https</code> address; any other scheme is refused, because the admin page renders links as anchors.</p>
+<h2 id="template-run-timeout">Template run timeout</h2>
+<p>A template may cap how long its launches are allowed to execute with <code>timeout</code>, a whole number of
+seconds. It is accepted on create and update, and every launch of the template carries it onto the
+run, whether the launch came from the API, a schedule, or a webhook trigger.</p>
+<pre><code class="language-bash">curl -X POST https://switchtender.example.com/v1/templates \
+  -H &quot;Authorization: Bearer $SWITCHTENDER_TOKEN&quot; \
+  -H 'Content-Type: application/json' \
+  -d '{
+    &quot;name&quot;: &quot;nightly database backup&quot;,
+    &quot;playbook&quot;: &quot;plays/backup.yml&quot;,
+    &quot;timeout&quot;: 5400
+  }'
+</code></pre>
+<p>Zero, or the field omitted, leaves launches on the server default set by <code>--run-timeout</code>, so a
+template saved before this field existed is unchanged. A run that exceeds its timeout is canceled
+and finalized as failed. A launch cannot raise the cap; the template's value is what applies.</p>
 <h2 id="relay-endpoints">Relay endpoints</h2>
 <p>With <code>--worker-token</code> set, the server also serves the mesh relay under <code>/relay</code>: the execution
 path an outbound worker started with <code>--server</code> uses instead of a database connection. Every call

@@ -116,6 +116,56 @@ func TestStoreMigratesIdempotencyKey(t *testing.T) {
 	}
 }
 
+// TestStoreMigratesTemplateTimeout proves the on-open migration heals a templates table created
+// before a template could cap its own run length. CREATE TABLE IF NOT EXISTS is a no-op on such a
+// database, so without the migration every read and write of a template would fail on the missing
+// column and the whole templates feature would break on upgrade.
+func TestStoreMigratesTemplateTimeout(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "switchtender.db")
+
+	db, err := sqlitestore.Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open raw db: %v", err)
+	}
+	if _, err := raw.Exec("ALTER TABLE templates DROP COLUMN timeout"); err != nil {
+		t.Fatalf("simulate old schema: %v", err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatalf("close raw db: %v", err)
+	}
+
+	migrated, err := sqlitestore.Open(path)
+	if err != nil {
+		t.Fatalf("reopen after downgrade error = %v", err)
+	}
+	t.Cleanup(func() { _ = migrated.Close() })
+	store := migrated.Templates()
+
+	want := &template.Template{
+		ID: "tpl_1", Name: "deploy", Playbook: "site.yml",
+		Timeout: 600, CreatedAt: time.Now(),
+	}
+	if err := store.Save(ctx, want); err != nil {
+		t.Fatalf("Save() after migration error = %v", err)
+	}
+	got, err := store.Get(ctx, "tpl_1")
+	if err != nil {
+		t.Fatalf("Get() after migration error = %v", err)
+	}
+	if got.Timeout != want.Timeout {
+		t.Errorf("Timeout after migration = %d, want %d", got.Timeout, want.Timeout)
+	}
+}
+
 func TestScheduleStoreContract(t *testing.T) {
 	t.Parallel()
 	scheduletest.Contract(t, func() schedule.Store {

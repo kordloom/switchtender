@@ -37,7 +37,7 @@ func testUpdate(t *testing.T, store template.Store) {
 	want := &template.Template{
 		ID: "tpl_1", Name: "new", ProjectID: "proj_2",
 		Playbook: "plays/new.yml", Inventory: "hosts.ini", InventoryID: "inv_2", Shards: 4,
-		Queue: "batch",
+		Queue: "batch", Timeout: 1800,
 		Image: "ghcr.io/acme/ee:9", PullCredentialID: "cred_pull",
 		CredentialIDs:           []string{"cred_2", "cred_3"},
 		SelectableCredentialIDs: []string{"cred_sel"},
@@ -69,7 +69,8 @@ func testLifecycle(t *testing.T, store template.Store) {
 	want := &template.Template{
 		ID: "tpl_1", Name: "deploy", ProjectID: "proj_9",
 		Playbook: "plays/site.yml", Inventory: "inventory.ini", InventoryID: "inv_7", Shards: 3,
-		Image: "ghcr.io/acme/ee:8", PullCredentialID: "cred_pull",
+		Timeout: 900,
+		Image:   "ghcr.io/acme/ee:8", PullCredentialID: "cred_pull",
 		CredentialIDs:           []string{"cred_1", "cred_2"},
 		SelectableCredentialIDs: []string{"cred_3", "cred_4"},
 		ExtraVars:               map[string]any{"env": "prod", "batch": float64(5)},

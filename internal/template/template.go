@@ -77,6 +77,9 @@ type Template struct {
 	Shards int `json:"shards,omitempty"`
 	// Queue restricts launches to workers serving this queue.
 	Queue string `json:"queue,omitempty"`
+	// Timeout caps how many seconds a launch may execute before it is canceled and failed. Zero
+	// leaves the launch on the server default, so a template that sets nothing behaves as before.
+	Timeout int `json:"timeout,omitempty"`
 	// Image names a container image every launch executes inside, its execution environment. It
 	// outranks the project's image. Only the Ansible tool runs in a container.
 	Image string `json:"image,omitempty"`
