@@ -44,71 +44,85 @@
 <p>Measured numbers for the questions people actually ask: how fast does it start, how much memory does
 it hold at idle, and how big is the binary. Every number below was measured on a release-flag build,
 the method is shown so you can reproduce it on your own hardware, and nothing here is a projection.</p>
-<p>Measured on 2026-07-27 against v1.24.2 on an Apple Silicon laptop, natively and inside a Debian
-container on the same machine. Your hardware will differ; the method will not.</p>
-<h2 id="the-numbers">The numbers</h2>
-<p>Measured on 2026-07-29 against v1.30.0. Two very different machines, because the answer depends
-almost entirely on the processor you give it.</p>
+<p>Measured on 2026-07-30 against the development tree after v1.33.0, on a ten-core Apple Silicon
+laptop and inside a Debian container on the same machine. Memory and binary sizes are mebibytes,
+the unit <code>ps</code> and <code>free</code> report. Your hardware will differ; the method will not.</p>
+<h2 id="boot-and-memory">Boot and memory</h2>
 <table>
 <thead>
 <tr>
 <th>Measurement</th>
-<th>Apple Silicon laptop</th>
-<th>$6/month cloud VM, 1 vCPU</th>
+<th>Value</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td>Cold boot to serving, no encryption key</td>
-<td>43 ms</td>
-<td>189 ms</td>
+<td>55 ms</td>
 </tr>
 <tr>
 <td>Cold boot to serving, credential encryption on</td>
-<td>87 ms</td>
-<td>937 ms</td>
+<td>90 ms</td>
 </tr>
 <tr>
-<td>Resident memory at idle</td>
-<td>39 MB</td>
-<td>38 MB</td>
+<td>Resident memory at idle, Linux, no encryption key</td>
+<td>35 MiB</td>
 </tr>
 <tr>
-<td>Stripped release binary</td>
-<td>30 MB</td>
-<td>31 MB</td>
+<td>Resident memory at idle, Linux, credential encryption on</td>
+<td>32 MiB</td>
 </tr>
 </tbody>
 </table>
 <p>Boot times are the median of five trials after a warm-up run, timed from process start to a served
-<code>/healthz</code>. Memory is resident size three seconds after serving begins.</p>
+<code>/healthz</code> on the laptop. Memory is resident size three seconds after serving begins, read from
+<code>/proc</code> inside the container, because Linux is where servers actually run.</p>
 <p>The gap between the two boot rows is credential key derivation: argon2id at 64 MiB memory cost, a
-deliberate security parameter, paid once at startup. It is CPU-bound, which is why it costs 44 ms on
-a laptop and closer to a second on one slow shared vCPU. That cost buys a key that is expensive to
-attack offline, and it is paid once per process, not per run. If you do not store credentials in
-SwitchTender, do not set the encryption pair and you do not pay it at all.</p>
-<p>Idle memory is flat across both machines because the derivation arena is handed back to the
-operating system as soon as the key exists.</p>
+deliberate security parameter, paid once at startup. It is CPU-bound, which is why it costs about
+35 ms on a laptop and substantially more on one slow shared vCPU. That cost buys a key that is
+expensive to attack offline, and it is paid once per process, not per run. If you do not store
+credentials in SwitchTender, do not set the encryption pair and you do not pay it at all.</p>
+<p>Idle memory does not rise with encryption on because the derivation arena is handed back to the
+operating system as soon as the key exists. On macOS the same measurement reads near 99 MiB, because
+<code>ps</code> there keeps reclaimable pages in the resident count even though the memory has been released.
+The Linux figures above are the ones to plan against.</p>
+<h2 id="binary-size">Binary size</h2>
+<p>A stripped release build, <code>go build -trimpath -ldflags &quot;-s -w&quot;</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Platform</th>
+<th>Size</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>linux/arm64</td>
+<td>28.8 MiB</td>
+</tr>
+<tr>
+<td>darwin/arm64</td>
+<td>29.8 MiB</td>
+</tr>
+<tr>
+<td>linux/amd64</td>
+<td>30.7 MiB</td>
+</tr>
+</tbody>
+</table>
+<p>That single file is the whole control plane: server, workers, UI, importers, and the CLI.</p>
 <h2 id="reproduce-it">Reproduce it</h2>
-<p>The repository carries the harness this table came from:</p>
+<p>The repository carries the harness the boot and laptop memory rows came from:</p>
 <pre><code>go run ./cmd/bench
 </code></pre>
 <p>It builds a release binary, runs the warm-up and five timed trials for both boot paths, and prints
-the same three rows. Run it on your own hardware and you should get your machine's version of the
-table rather than ours.</p>
-<p>One platform note: on macOS, <code>ps</code> keeps reclaimable pages in its resident count, so the
-with-encryption idle number can read near 100 MB there even though the memory has been released and
-the OS takes it back under any pressure. On Linux, where servers actually run, the resident count
-drops immediately and idles in the same 32 to 38 MB band as the no-encryption path.</p>
-<h2 id="what-this-buys-you-in-practice">What this buys you in practice</h2>
-<ul>
-<li>Restarts are free. A control plane that boots in well under a second restarts on upgrade or crash
-before a health check notices. There is no cluster to warm and no operator to reconcile.</li>
-<li>It fits next to your workload. At under 40 MB idle, SwitchTender runs on the same small VM as the
-things it automates, a spare Raspberry Pi, or the corner of a laptop.</li>
-<li>One artifact to ship. The 29 MB binary is the whole control plane: server, workers, UI, importers,
-and the CLI. Copy it, run it.</li>
-</ul>
+the boot, memory, and binary size rows. Run it on your own hardware and you should get your machine's
+version of the table rather than ours.</p>
+<h2 id="pending-re-measurement">Pending re-measurement</h2>
+<p>An earlier round measured a $6/month cloud VM with one shared vCPU at 189 ms cold boot without
+encryption and 937 ms with it, showing that argon2id dominates startup on a slow core. Those figures
+came from an earlier release and are not re-derived here, so treat them as indicative of the shape
+rather than as current numbers. This row is due a re-run.</p>
 <h2 id="about-comparisons">About comparisons</h2>
 <p>We publish only numbers we measured ourselves, so there are no AWX or Semaphore columns above. What
 can be said factually: AWX requires a Kubernetes cluster, its operator, PostgreSQL, Redis, and
