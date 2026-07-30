@@ -1,6 +1,7 @@
 package audit_test
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -94,5 +95,46 @@ func TestVerify(t *testing.T) {
 	blanked[1].Hash = ""
 	if ok, at := audit.Verify(blanked); ok || at != 2 {
 		t.Errorf("blanked hash: ok=%v at=%d, want false at 2", ok, at)
+	}
+}
+
+// TestEntryHashMatchesTheSpec pins the exact link digest for entries whose fields contain the
+// characters where Go's encoding/json disagrees with canonical JSON. The values below were computed
+// independently by the LoomSeal reference verifier's own serializer, so they are conformance vectors
+// rather than a recording of whatever this code happens to do.
+//
+// encoding/json escapes <, >, and & for HTML safety and U+2028 and U+2029 for JavaScript safety.
+// None of those escapes belong in canonical JSON, so an audit path containing one used to hash to a
+// value no independent verifier could reproduce. A request path is percent-decoded before it is
+// recorded, and & is legal in a path segment, so this was reachable with no encoding trick at all.
+func TestEntryHashMatchesTheSpec(t *testing.T) {
+	t.Parallel()
+	at := time.Date(2026, 7, 27, 15, 0, 0, 0, time.UTC)
+	tests := []struct {
+		Name string
+		Path string
+		Want string
+	}{{ // Test 0: A plain path, where every serializer already agreed.
+		Name: "plain", Path: "/v1/projects/plain",
+		Want: "651aae892f9e83147a108bdcc46e9184ea3fb27f76bc303a556f7b3c1bd7273a",
+	}, { // Test 1: An ampersand, which encoding/json escapes as &.
+		Name: "ampersand", Path: "/v1/projects/a&b",
+		Want: "aa85832c8f817a00220513e42a69d06862148ba1d4eb5d17efe4410802164d3b",
+	}, { // Test 2: Angle brackets, which encoding/json escapes as < and >.
+		Name: "angle brackets", Path: "/v1/p/<x>",
+		Want: "488c21c89f47f2ce82e3883502d0630c62a61f803de8f54a2890f16c4e892fb0",
+	}, { // Test 3: U+2028, which encoding/json escapes even with HTML escaping disabled.
+		Name: "line separator", Path: "/v1/p/a b",
+		Want: "9cc1e182b8342e31a9cd6027a35470347d33a0a2f7db7830438d3ae9fdd279cf",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
+			t.Parallel()
+			e := &audit.Entry{Seq: 1, At: at, Actor: "admin", Method: "POST", Path: test.Path}
+			if got := audit.EntryHash(e); got != test.Want {
+				t.Errorf("EntryHash() = %s, want %s\nan independent verifier will reject this link",
+					got, test.Want)
+			}
+		})
 	}
 }

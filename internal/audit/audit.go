@@ -8,7 +8,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"strconv"
 	"time"
 
@@ -56,12 +55,12 @@ func NewID() string {
 // hashed in the canonical form the stores persist, so a hash computed at append matches one
 // recomputed after a database round-trip.
 func EntryHash(e *Entry) string {
-	payload, _ := json.Marshal([]string{
+	payload := canonicalStrings([]string{
 		strconv.FormatInt(e.Seq, 10),
 		e.At.UTC().Format(time.RFC3339Nano),
 		e.Actor, e.Method, e.Path, e.PrevHash,
 	})
-	sum := sha256.Sum256(payload)
+	sum := sha256.Sum256([]byte(payload))
 	return hex.EncodeToString(sum[:])
 }
 
