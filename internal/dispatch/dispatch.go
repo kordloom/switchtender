@@ -680,12 +680,14 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 		idx, shardCount := i, count
 		child := &run.Run{
 			ID: run.NewID(), Playbook: playbook, Inventory: inventory,
-			Tool: parent.Tool, DryRun: parent.DryRun,
 			Status: run.StatusPending, CreatedAt: time.Now(),
 			ParentID: &parentID, ShardIndex: &idx, ShardCount: &shardCount,
-			Limit: strings.Join(group, ","), CredentialIDs: parent.CredentialIDs,
-			ProjectID: parent.ProjectID, Queue: parent.Queue,
+			Limit: strings.Join(group, ","),
 		}
+		// A shard is the parent run over a subset of its hosts, so it executes the same way. Copying
+		// a chosen few fields meant a split silently dropped the rest: extra vars vanished, shards
+		// ran outside the execution image the parent pinned, and the run timeout did not apply.
+		inheritExecution(child, parent)
 		if err := d.store.Save(ctx, child); err != nil {
 			return nil, err
 		}
@@ -696,6 +698,27 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 	go d.coordinate(parent.Clone(), children)
 
 	return parent, nil
+}
+
+// inheritExecution copies onto child every field that decides how a run executes, so a shard of a
+// split, or a retry of one, runs exactly the way its parent would have.
+//
+// The fields are listed here rather than at each call site because they were being copied by hand in
+// two places and both had fallen behind the run model: a split lost its extra vars, ran outside the
+// execution image its parent pinned, and ignored the parent's timeout. Anything added to run.Run that
+// changes how a run executes belongs in this function.
+func inheritExecution(child, parent *run.Run) {
+	child.Tool = parent.Tool
+	child.Command = parent.Command
+	child.DryRun = parent.DryRun
+	child.ExtraVars = parent.ExtraVars
+	child.CredentialIDs = parent.CredentialIDs
+	child.ProjectID = parent.ProjectID
+	child.InventoryID = parent.InventoryID
+	child.Queue = parent.Queue
+	child.Timeout = parent.Timeout
+	child.Image = parent.Image
+	child.PullCredentialID = parent.PullCredentialID
 }
 
 // RetryFailedShards creates and starts a new split run that re-runs only the failed shards of a
@@ -730,10 +753,10 @@ func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string) (*r
 	count := len(failed)
 	retry := &run.Run{
 		ID: run.NewID(), Playbook: parent.Playbook, Inventory: parent.Inventory,
-		Tool: parent.Tool, DryRun: parent.DryRun,
 		Kind: run.KindSplit, Status: run.StatusPending, CreatedAt: time.Now(),
 		ShardCount: &count, RetryOf: &parent.ID,
 	}
+	inheritExecution(retry, parent)
 	if err := d.store.Save(ctx, retry); err != nil {
 		return nil, err
 	}

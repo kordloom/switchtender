@@ -1285,3 +1285,50 @@ func TestDispatcherPerRunNotification(t *testing.T) {
 		t.Error("per-run webhook target was not notified")
 	}
 }
+
+// TestSplitShardsInheritExecution pins what a shard carries from its parent. A shard is the parent
+// run over a subset of its hosts, so it has to execute the same way. The fields were copied by hand
+// and had fallen behind the run model: a split lost its extra vars, ran outside the execution image
+// its parent pinned, and ignored the parent's timeout, which silently exempted every sharded run
+// from a template's timeout.
+func TestSplitShardsInheritExecution(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := run.NewMemStore()
+	d := New(store, &fakeRunnerLister{hosts: []string{"web01", "web02", "web03", "web04"}}, nil)
+
+	parent, err := d.SubmitSplit(ctx, "site.yml", "inv", 2,
+		run.WithExtraVars(map[string]any{"env": "prod"}),
+		run.WithImage("ghcr.io/acme/ee:9", "cred_pull"),
+		run.WithTimeout(900),
+		run.WithDryRun(true),
+	)
+	if err != nil {
+		t.Fatalf("SubmitSplit() error = %v", err)
+	}
+
+	children, err := store.Shards(ctx, parent.ID)
+	if err != nil {
+		t.Fatalf("Shards() error = %v", err)
+	}
+	if len(children) == 0 {
+		t.Fatal("no shards were created")
+	}
+	for _, r := range children {
+		if r.ExtraVars["env"] != "prod" {
+			t.Errorf("shard ExtraVars = %v, want the parent's env=prod", r.ExtraVars)
+		}
+		if r.Image != "ghcr.io/acme/ee:9" {
+			t.Errorf("shard Image = %q, want the parent's pinned image", r.Image)
+		}
+		if r.PullCredentialID != "cred_pull" {
+			t.Errorf("shard PullCredentialID = %q, want cred_pull", r.PullCredentialID)
+		}
+		if r.Timeout != 900 {
+			t.Errorf("shard Timeout = %d, want the parent's 900", r.Timeout)
+		}
+		if !r.DryRun {
+			t.Error("shard lost the parent's dry-run flag and would make real changes")
+		}
+	}
+}
