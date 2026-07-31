@@ -1179,9 +1179,6 @@ func (s *store) queryRuns(ctx context.Context, label, query string, args ...any)
 	return out, nil
 }
 
-// AppendLog appends raw output bytes to the run's log. Returns run.ErrNotFound if absent. The
-// insert-select folds the missing-run check into the write so the per-chunk output path costs one
-// statement instead of two.
 // pgNowText renders the database server's current time in the same UTC RFC 3339 text the Go side
 // writes, so a lease stamped in SQL is indistinguishable from one stamped by a store method. Leases
 // have to come from the database clock rather than a worker's: with several nodes writing, a worker
@@ -1202,6 +1199,9 @@ const terminalRun = "status IN ('succeeded', 'failed', 'canceled', 'interrupted'
 // events to a run that has already ended.
 const nonTerminalRun = "status NOT IN ('succeeded', 'failed', 'canceled', 'interrupted', 'rejected')"
 
+// AppendLog appends raw output bytes to the run's log. Returns run.ErrNotFound if absent. The
+// insert-select folds the missing-run check into the write so the per-chunk output path costs one
+// statement instead of two.
 func (s *store) AppendLog(ctx context.Context, id string, p []byte) error {
 	res, err := s.db.ExecContext(ctx,
 		"INSERT INTO run_logs (run_id, chunk) SELECT $1, $2 WHERE EXISTS (SELECT 1 FROM runs WHERE id=$1 AND "+nonTerminalRun+")",

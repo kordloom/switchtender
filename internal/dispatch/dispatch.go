@@ -1134,10 +1134,6 @@ func cloneVars(vars map[string]any) map[string]any {
 	return maps.Clone(vars)
 }
 
-// runStepAttempts executes one pipeline step, re-running it until it succeeds or its retry budget
-// is spent. Every attempt is its own child run with an attempt number, so each try keeps a full
-// matrix, events, and history. The step receives vars as its extra vars, and on success the
-// values it published with set_stats come back for its dependents.
 // stepRun builds the run a pipeline step executes as. The approval gate and the executor both go
 // through this, so a policy is always evaluated against exactly what would run rather than against a
 // separately assembled approximation that could drift from it.
@@ -1175,6 +1171,10 @@ func stepRun(parent *run.Run, step run.PipelineStep, idx, attempt int, vars map[
 	return child
 }
 
+// runStepAttempts executes one pipeline step, re-running it until it succeeds or its retry budget
+// is spent. Every attempt is its own child run with an attempt number, so each try keeps a full
+// matrix, events, and history. The step receives vars as its extra vars, and on success the
+// values it published with set_stats come back for its dependents.
 func (d *Dispatcher) runStepAttempts(ctx context.Context, parent *run.Run, step run.PipelineStep,
 	idx int, vars map[string]any) (run.Status, map[string]any) {
 	status := run.StatusFailed
