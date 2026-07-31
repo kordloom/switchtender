@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/auth"
@@ -783,7 +785,25 @@ func TestRunStreamEndsOnShutdown(t *testing.T) {
 	served := make(chan error, 1)
 	go func() { served <- httpServer.Serve(ln) }()
 
-	res, err := http.Get("http://" + ln.Addr().String() + "/v1/runs/run_live/stream")
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		"http://"+ln.Addr().String()+"/v1/runs/run_live/stream", nil)
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	// Resume from the very start of both cursors, the way a reconnecting browser does.
+	//
+	// The handler flushes its response headers before it reads the position it will stream from,
+	// and by design a stream with no cursor starts at the current end. So an append landing in that
+	// window is not replayed, and the read below waited for bytes that were never going to be sent.
+	// With no deadline on the client that was an indefinite block: this test hung a full suite run
+	// for ten minutes once and passed twenty times in isolation, because the window is narrow and
+	// only a loaded machine widens it. Naming an explicit cursor removes the race rather than
+	// hiding it behind a sleep.
+	req.Header.Set("Last-Event-ID", "0:0")
+	// A bound so a stream that stops sending fails this test in seconds instead of hanging the
+	// suite. It is far above the real runtime, which is milliseconds.
+	client := &http.Client{Timeout: 30 * time.Second}
+	res, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("GET stream: %v", err)
 	}
@@ -1726,5 +1746,137 @@ func TestRerunRunDedupes(t *testing.T) {
 	}
 	if reruns != 1 {
 		t.Errorf("reruns of run_1 = %d, want 1", reruns)
+	}
+}
+
+// TestRerunReplaysEveryExecutionField pins that a rerun carries the whole spec of the run it
+// replays, and fails when a field is added to run.Run without a decision about reruns.
+//
+// The list of fields a rerun replayed was written by hand and drifted from the run model, dropping
+// the timeout and the notification targets: the rerun executed under the dispatcher's default cap
+// instead of the one the run was given, and its terminal state reached the server-wide channels but
+// not the team the original run paged. The diff below is against the saved run itself, so a new
+// field either gets replayed or gets named in the ignore list.
+func TestRerunReplaysEveryExecutionField(t *testing.T) {
+	t.Parallel()
+	saved := &run.Run{
+		ID: "run_1", Playbook: "site.yml", Inventory: "inv.ini", Status: run.StatusFailed,
+		Tool: "ansible", Command: "deploy.sh", DryRun: true, Limit: "web*",
+		CredentialIDs: []string{"cred_1", "cred_2"}, ProjectID: "prj_1", InventoryID: "inv_1",
+		Queue: "prod", Image: "registry.example/exec:1", PullCredentialID: "cred_pull",
+		ExtraVars: map[string]any{"release": "9.2"}, Labels: map[string]string{"env": "prod"},
+		Timeout: 900,
+		Notifications: []run.NotifyTarget{
+			{Kind: "slack", URL: "https://hooks.example/team", OnFailure: true},
+		},
+	}
+	store := run.NewMemStore()
+	if err := store.Save(context.Background(), saved); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	sub := &fakeSubmitter{run: &run.Run{ID: "run_new", Status: run.StatusPending}}
+	handler := New(store, sub, zap.NewNop()).Handler()
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/runs/run_1/rerun", nil))
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d, body %s", rec.Code, http.StatusAccepted, rec.Body.String())
+	}
+	if sub.gotRun == nil {
+		t.Fatal("no run was submitted")
+	}
+	// Everything a rerun is expected to differ on: its own identity and lifecycle, the provenance
+	// that marks it a rerun, the dedupe key, and the shape fields that belong to the original.
+	ignored := cmpopts.IgnoreFields(run.Run{},
+		"ID", "Status", "CreatedAt", "StartedAt", "EndedAt", "ExitCode", "Error", "Warning",
+		"Source", "SourceID", "Actor", "RerunOf", "IdempotencyKey", "ClaimedBy", "ClaimedAt",
+		"CancelRequested", "Outputs", "CommitSHA", "Risk", "ParentID", "ShardIndex", "ShardCount",
+		"Kind", "RetryOf", "Steps", "StepName", "StepIndex", "Attempt", "ProposedFrom", "Intent")
+	if diff := cmp.Diff(saved, sub.gotRun, ignored, cmpopts.EquateEmpty()); diff != "" {
+		t.Errorf("the rerun does not replay the run it reruns (-saved +submitted):\n%s", diff)
+	}
+}
+
+// TestRunObjectsCoversThePullCredential pins that the registry credential pulling a run's execution
+// image is one of the objects a caller has to be granted.
+//
+// It was added to the run model and to the fields a retry inherits without widening the object
+// list, so every path built on runObjects, including reading a run and retrying its failed shards,
+// let an actor use a registry credential they were never granted. The rerun handler named the field
+// by hand and refused, which is how the two paths came to disagree.
+func TestRunObjectsCoversThePullCredential(t *testing.T) {
+	t.Parallel()
+	rn := &run.Run{
+		ID: "run_1", ProjectID: "prj_1", InventoryID: "inv_1",
+		Image: "registry.example/exec:1", PullCredentialID: "cred_pull",
+		CredentialIDs: []string{"cred_1"},
+	}
+	want := []string{"prj_1", "inv_1", "cred_pull", "cred_1"}
+	if diff := cmp.Diff(want, runObjects(rn), cmpopts.SortSlices(func(a, b string) bool { return a < b })); diff != "" {
+		t.Errorf("the objects a run uses (-want +got):\n%s", diff)
+	}
+}
+
+// TestRetryAuthorizesThePullCredential pins that retrying a run's failed shards is refused when the
+// actor is not granted the registry credential the retry would pull its execution image with.
+func TestRetryAuthorizesThePullCredential(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	users := user.NewMemStore()
+	tokens := auth.NewMemStore()
+	grants := grant.NewMemStore()
+	runs := run.NewMemStore()
+
+	operator, err := user.New("operator", "pw", user.RoleOperator)
+	if err != nil {
+		t.Fatalf("user.New() error = %v", err)
+	}
+	if err := users.Save(ctx, operator); err != nil {
+		t.Fatalf("users.Save() error = %v", err)
+	}
+	plain, tok, err := auth.New("t-operator")
+	if err != nil {
+		t.Fatalf("auth.New() error = %v", err)
+	}
+	tok.UserID = operator.ID
+	if err := tokens.Save(ctx, tok); err != nil {
+		t.Fatalf("tokens.Save() error = %v", err)
+	}
+	three := 3
+	if err := runs.Save(ctx, &run.Run{
+		ID: "run_split", Tool: "ansible", Kind: run.KindSplit, ShardCount: &three,
+		Status: run.StatusFailed, ProjectID: "prj_open",
+		Image: "registry.example/exec:1", PullCredentialID: "cred_private",
+	}); err != nil {
+		t.Fatalf("runs.Save() error = %v", err)
+	}
+	// The actor is granted everything the run touches except the registry credential.
+	if err := grants.Save(ctx, &grant.Grant{
+		ID: grant.NewID(), Subject: operator.ID, Object: "prj_open", Access: grant.AccessUse,
+	}); err != nil {
+		t.Fatalf("grants.Save() error = %v", err)
+	}
+
+	handler := New(runs, &fakeSubmitter{}, zap.NewNop(), WithTokens(tokens), WithUsers(users),
+		WithGrants(grants, true),
+		WithRetrier(&fakeRetrier{run: &run.Run{ID: "run_retry", Status: run.StatusPending}})).Handler()
+	retry := func() int {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1/runs/run_split/retry", nil)
+		req.Header.Set("Authorization", "Bearer "+plain)
+		handler.ServeHTTP(rec, req)
+		return rec.Code
+	}
+
+	if code := retry(); code != http.StatusForbidden {
+		t.Errorf("retry without a grant on the registry credential = %d, want 403: the retry "+
+			"inherits PullCredentialID, so it pulls an image the actor may not use", code)
+	}
+	if err := grants.Save(ctx, &grant.Grant{
+		ID: grant.NewID(), Subject: operator.ID, Object: "cred_private", Access: grant.AccessUse,
+	}); err != nil {
+		t.Fatalf("grants.Save() error = %v", err)
+	}
+	if code := retry(); code == http.StatusForbidden {
+		t.Error("retry with a grant on the registry credential is still refused")
 	}
 }

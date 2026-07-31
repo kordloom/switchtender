@@ -87,7 +87,7 @@ if (footLogo) {
 	var form = document.getElementById("signup-form");
 	if (!form) return;
 	var email = document.getElementById("signup-email");
-	var company = document.getElementById("nf-company");
+	var honeypot = document.getElementById("nf-hp");
 	var button = document.getElementById("signup-submit");
 	var status = document.getElementById("signup-status");
 
@@ -121,7 +121,7 @@ if (footLogo) {
 			body: JSON.stringify({
 				email: address,
 				source: window.location.hostname,
-				company: company.value
+				company: honeypot.value
 			})
 		}).then(function (r) {
 			if (!r.ok) throw new Error(String(r.status));

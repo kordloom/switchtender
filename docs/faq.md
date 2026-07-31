@@ -33,7 +33,7 @@ From the command line:
 It maps projects, inventories, job templates with their surveys and schedules and job slicing, and
 credentials. See [switching from AWX](switching-from-awx.md) for the full mapping.
 
-Two things to know. AWX omits secret values on export for security, so credentials import without
+Two things to know. These exports omit secret values for security, so credentials import without
 their secrets and you set those once after importing. Dynamic inventory sources import too, as
 sources that run their plugin and refresh the hosts into a stored inventory on a schedule or before a
 run; static inventories import fully. A Semaphore importer exists too, with

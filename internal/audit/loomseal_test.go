@@ -2,6 +2,7 @@ package audit_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -229,5 +230,74 @@ func TestIdentityEnvKeyDerivesItsOwnInstallID(t *testing.T) {
 	if fromEnv.InstallID == fromFile.InstallID {
 		t.Error("the environment key kept the file's install id, so a bundle would be signed by " +
 			"one key and attributed to another install")
+	}
+}
+
+// TestBuildBundleRefusesAnUnsoundChain pins that a bundle is refused when the entries it would
+// claim do not actually verify.
+//
+// Contiguity was checked arithmetically, by counting sequence numbers up from the first entry.
+// That says nothing about the links: a reordered chain whose prev no longer names the entry before
+// it, an entry whose content was edited after it was hashed, and a genesis claim carrying a
+// previous link all counted up correctly and all built a bundle. Every one of them is rejected by
+// the reference verifier, so the failure landed on the auditor holding the bundle rather than on
+// the install producing it.
+func TestBuildBundleRefusesAnUnsoundChain(t *testing.T) {
+	t.Parallel()
+	id, err := audit.LoadIdentity(t.TempDir())
+	if err != nil {
+		t.Fatalf("LoadIdentity() error = %v", err)
+	}
+	tests := []struct {
+		Name    string
+		Damage  func(entries []*audit.Entry)
+		WantErr bool
+	}{{ // Test 0: An intact chain still builds, so the check is not simply refusing everything.
+		Name: "intact", Damage: func([]*audit.Entry) {}, WantErr: false,
+	}, { // Test 1: A link that no longer names the entry before it.
+		Name: "broken link", WantErr: true,
+		Damage: func(e []*audit.Entry) { e[2].PrevHash = e[0].PrevHash },
+	}, { // Test 2: Content edited after the entry was hashed.
+		Name: "edited content", WantErr: true,
+		Damage: func(e []*audit.Entry) { e[2].Path = "/v1/credentials/rotated" },
+	}, { // Test 3: A genesis claim carrying a previous link, which the reference verifier rejects.
+		Name: "genesis with a prev", WantErr: true,
+		Damage: func(e []*audit.Entry) {
+			e[0].PrevHash = "00"
+			e[0].Hash = audit.EntryHash(e[0])
+		},
+	}, { // Test 4: Two entries swapped, which keeps every sequence number present.
+		Name: "reordered", WantErr: true,
+		Damage: func(e []*audit.Entry) { e[1], e[2] = e[2], e[1] },
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
+			t.Parallel()
+			entries := buildChain(4)
+			test.Damage(entries)
+			_, err := audit.BuildBundle(entries, id, "v1.0.0", time.Now())
+			if test.WantErr && err == nil {
+				t.Error("a bundle was built from a chain that does not verify, so it would be " +
+					"rejected by the auditor it was handed to")
+			}
+			if !test.WantErr && err != nil {
+				t.Errorf("BuildBundle() on an intact chain error = %v", err)
+			}
+		})
+	}
+}
+
+// TestBuildBundleAcceptsAPartialChain pins that bundling part of a chain still works, since the
+// range check must not require the slice to start at genesis. A bundle built with --limit covers
+// the most recent entries, not the whole history.
+func TestBuildBundleAcceptsAPartialChain(t *testing.T) {
+	t.Parallel()
+	id, err := audit.LoadIdentity(t.TempDir())
+	if err != nil {
+		t.Fatalf("LoadIdentity() error = %v", err)
+	}
+	entries := buildChain(6)
+	if _, err := audit.BuildBundle(entries[3:], id, "v1.0.0", time.Now()); err != nil {
+		t.Errorf("BuildBundle() on the tail of a chain error = %v, want a bundle", err)
 	}
 }

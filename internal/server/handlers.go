@@ -768,43 +768,26 @@ func actorName(r *http.Request) string {
 	return ""
 }
 
-// rerunOptions rebuilds the submit options a stored run was created with, so a rerun replays
-// the full spec: tool, command, credentials, project, stored inventory, queue, image, extra
-// vars, mode, and host limit.
+// rerunOptions rebuilds the submit options a stored run was created with, so a rerun replays the
+// full spec: everything in the run's execution options, plus its host limit, labels, and
+// notification targets.
 func rerunOptions(rn *run.Run) []run.SubmitOption {
-	var opts []run.SubmitOption
-	if rn.Tool != "" {
-		opts = append(opts, run.WithTool(rn.Tool))
-	}
-	if rn.Command != "" {
-		opts = append(opts, run.WithCommand(rn.Command))
-	}
-	if len(rn.CredentialIDs) > 0 {
-		opts = append(opts, run.WithCredentialIDs(rn.CredentialIDs))
-	}
-	if rn.ProjectID != "" {
-		opts = append(opts, run.WithProject(rn.ProjectID))
-	}
-	if rn.InventoryID != "" {
-		opts = append(opts, run.WithInventory(rn.InventoryID))
-	}
-	if rn.Queue != "" {
-		opts = append(opts, run.WithQueue(rn.Queue))
-	}
-	if rn.Image != "" {
-		opts = append(opts, run.WithImage(rn.Image, rn.PullCredentialID))
-	}
-	if len(rn.ExtraVars) > 0 {
-		opts = append(opts, run.WithExtraVars(rn.ExtraVars))
-	}
-	if rn.DryRun {
-		opts = append(opts, run.WithDryRun(true))
-	}
+	// A rerun is the same run again, so it starts from the run's own execution spec. Keeping a
+	// separate list here is what lost it the timeout and the notifications: the run would execute
+	// under the dispatcher's default cap instead of its own, and its terminal state would reach the
+	// server-wide channels but not the team the original run paged.
+	opts := rn.ExecutionOptions()
+	// What a rerun adds on top is what belongs to the run rather than to how it executes. A shard
+	// owns its Limit, so ExecutionOptions leaves it out, but a rerun of a plain run replays the
+	// host pattern the operator chose.
 	if rn.Limit != "" {
 		opts = append(opts, run.WithLimit(rn.Limit))
 	}
 	if len(rn.Labels) > 0 {
 		opts = append(opts, run.WithLabels(rn.Labels))
+	}
+	if len(rn.Notifications) > 0 {
+		opts = append(opts, run.WithNotifications(rn.Notifications))
 	}
 	return opts
 }
@@ -849,8 +832,8 @@ func rerunRunHandler(store run.Store, submitter Submitter, authz *authorizer, lo
 		// Access to the run is not enough to fire its spec again. Authorize every object the new
 		// run touches, mirroring a template launch, so a rerun cannot borrow a project,
 		// inventory, or credential the actor was never granted.
-		objects := append([]string{rn.ProjectID, rn.InventoryID, rn.PullCredentialID}, rn.CredentialIDs...)
-		if denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse, objects...)) {
+		if denyOnAuthzError(w, log,
+			authz.authorizeAll(r.Context(), grant.AccessUse, runObjects(rn)...)) {
 			return
 		}
 		// Rerunning the same run twice inside the dedupe window is one request, not two, so a

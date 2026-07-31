@@ -112,6 +112,9 @@ type Dispatcher struct {
 	owner string
 	// claimInterval is how often the claim loop polls when idle.
 	claimInterval time.Duration
+	// wakeCh nudges the idle claim loop to poll now instead of finishing its backoff. It holds one
+	// token, because one pending token already means "there is work, poll again".
+	wakeCh chan struct{}
 	// maxShards caps how many groups a split fans out into.
 	maxShards int
 	// queues names the queues this process serves; empty serves the default pool.
@@ -353,6 +356,7 @@ func New(store run.Store, runner roundhouse.Runner, log *zap.Logger, opts ...Opt
 		cancels:            make(map[string]context.CancelFunc),
 		owner:              cfg.owner,
 		claimInterval:      cfg.claimInterval,
+		wakeCh:             make(chan struct{}, 1),
 		runTimeout:         cfg.runTimeout,
 		maxShards:          cfg.maxShards,
 		queues:             cfg.queues,
@@ -430,9 +434,16 @@ func (d *Dispatcher) claimLoop() {
 				d.log.Error("dispatch: claim: " + err.Error())
 			}
 			idle++
+			timer := time.NewTimer(d.idleWait(idle))
 			select {
-			case <-time.After(d.idleWait(idle)):
+			case <-timer.C:
+			case <-d.wakeCh:
+				// Work arrived. Start over at the base interval, since a controller that just
+				// took a submission is not idle any more.
+				timer.Stop()
+				idle = 0
 			case <-d.ctx.Done():
+				timer.Stop()
 				return
 			}
 			continue
@@ -445,6 +456,25 @@ func (d *Dispatcher) claimLoop() {
 			defer func() { <-d.sem }()
 			d.executeLeased(d.ctx, r)
 		}()
+	}
+}
+
+// wake asks the claim loop to poll immediately rather than wait out its idle backoff.
+//
+// The backoff exists so idle dispatchers stop competing for the store's single writer, but nothing
+// told the loop when work arrived, so its whole wait landed on submit-to-start latency: a run
+// submitted to a quiet controller waited a measured 1.7 seconds on average and 2.75 at worst, from
+// 250ms before the backoff existed. A submitting caller signals here and the loop starts at once,
+// which keeps the backoff's benefit without paying for it on the first run after an idle spell.
+//
+// It never blocks and it is safe to call for a run that turns out not to be claimable. A spurious
+// wake costs one empty claim, after which the loop backs off again; a missed wake costs a user
+// seconds of waiting. Over-signaling is deliberately the cheaper mistake, which is why every submit
+// path calls this rather than only the ones that provably created claimable work.
+func (d *Dispatcher) wake() {
+	select {
+	case d.wakeCh <- struct{}{}:
+	default:
 	}
 }
 
@@ -620,7 +650,9 @@ func (d *Dispatcher) Submit(ctx context.Context, playbook, inventory string, opt
 	if err != nil {
 		return nil, err
 	}
-	// Execution happens through the claim loop, here or in any worker sharing the store.
+	// Execution happens through the claim loop, here or in any worker sharing the store, so the
+	// local loop is nudged rather than left to finish an idle backoff a user would wait out.
+	d.wake()
 	return created, nil
 }
 
@@ -687,6 +719,14 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 		return nil, err
 	}
 	d.resolveQueue(ctx, parent)
+	// A split is submitted through a different path than a single run, so without this the same
+	// command an operator gated ran freely by being sharded: the identical playbook that Submit
+	// held for an approver executed on every host the moment it was split in two. A shard matches
+	// exactly what its parent matches, since it inherits everything but its host group, so the
+	// parent is the only thing worth testing.
+	if parent.Status != run.StatusPendingApproval && d.requiresApproval(ctx, parent) {
+		parent.Status = run.StatusPendingApproval
+	}
 	created, dup, err := d.idempotentSave(ctx, parent)
 	if err != nil {
 		return nil, err
@@ -696,13 +736,20 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 		return created, nil
 	}
 
+	// Shards of a held split are stored held too. Nothing can claim them in that state, and they
+	// have to exist before the approval so the decision covers the shards an approver was shown and
+	// so the split survives a restart while it waits.
+	childStatus := run.StatusPending
+	if parent.Status == run.StatusPendingApproval {
+		childStatus = run.StatusPendingApproval
+	}
 	parentID := parent.ID
 	children := make([]*run.Run, 0, count)
 	for i, group := range groups {
 		idx, shardCount := i, count
 		child := &run.Run{
 			ID: run.NewID(), Playbook: playbook, Inventory: inventory,
-			Status: run.StatusPending, CreatedAt: time.Now(),
+			Status: childStatus, CreatedAt: time.Now(),
 			ParentID: &parentID, ShardIndex: &idx, ShardCount: &shardCount,
 			Limit: strings.Join(group, ","),
 		}
@@ -716,6 +763,12 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 		children = append(children, child)
 	}
 
+	if parent.Status == run.StatusPendingApproval {
+		// Held for an approver. Approve starts the coordinator, since no claim loop takes a parent.
+		return parent, nil
+	}
+
+	d.wake()
 	d.wg.Add(1)
 	go d.coordinate(parent.Clone(), children)
 
@@ -725,22 +778,15 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 // inheritExecution copies onto child every field that decides how a run executes, so a shard of a
 // split, or a retry of one, runs exactly the way its parent would have.
 //
-// The fields are listed here rather than at each call site because they were being copied by hand in
-// two places and both had fallen behind the run model: a split lost its extra vars, ran outside the
-// execution image its parent pinned, and ignored the parent's timeout. Anything added to run.Run that
-// changes how a run executes belongs in this function.
+// The fields come from run.Run.ExecutionOptions rather than a list kept here. They were copied by
+// hand in several places and every list fell behind the run model: a split lost its extra vars, ran
+// outside the execution image its parent pinned, and ignored the parent's timeout, while a rerun
+// lost the timeout and the notifications. Anything added to run.Run that changes how a run executes
+// belongs in ExecutionOptions, where every path derived from a run reads it.
 func inheritExecution(child, parent *run.Run) {
-	child.Tool = parent.Tool
-	child.Command = parent.Command
-	child.DryRun = parent.DryRun
-	child.ExtraVars = parent.ExtraVars
-	child.CredentialIDs = parent.CredentialIDs
-	child.ProjectID = parent.ProjectID
-	child.InventoryID = parent.InventoryID
-	child.Queue = parent.Queue
-	child.Timeout = parent.Timeout
-	child.Image = parent.Image
-	child.PullCredentialID = parent.PullCredentialID
+	for _, opt := range parent.ExecutionOptions() {
+		opt(child)
+	}
 }
 
 // RetryFailedShards creates and starts a new split run that re-runs only the failed shards of a
@@ -815,6 +861,7 @@ func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string) (*r
 		children = append(children, child)
 	}
 
+	d.wake()
 	d.wg.Add(1)
 	go d.coordinate(retry.Clone(), children)
 
@@ -1121,10 +1168,6 @@ func cloneVars(vars map[string]any) map[string]any {
 	return maps.Clone(vars)
 }
 
-// runStepAttempts executes one pipeline step, re-running it until it succeeds or its retry budget
-// is spent. Every attempt is its own child run with an attempt number, so each try keeps a full
-// matrix, events, and history. The step receives vars as its extra vars, and on success the
-// values it published with set_stats come back for its dependents.
 // stepRun builds the run a pipeline step executes as. The approval gate and the executor both go
 // through this, so a policy is always evaluated against exactly what would run rather than against a
 // separately assembled approximation that could drift from it.
@@ -1162,6 +1205,10 @@ func stepRun(parent *run.Run, step run.PipelineStep, idx, attempt int, vars map[
 	return child
 }
 
+// runStepAttempts executes one pipeline step, re-running it until it succeeds or its retry budget
+// is spent. Every attempt is its own child run with an attempt number, so each try keeps a full
+// matrix, events, and history. The step receives vars as its extra vars, and on success the
+// values it published with set_stats come back for its dependents.
 func (d *Dispatcher) runStepAttempts(ctx context.Context, parent *run.Run, step run.PipelineStep,
 	idx int, vars map[string]any) (run.Status, map[string]any) {
 	status := run.StatusFailed
@@ -1174,6 +1221,7 @@ func (d *Dispatcher) runStepAttempts(ctx context.Context, parent *run.Run, step 
 			d.log.Error("dispatch: save pipeline step: "+err.Error(), zap.String("run_id", parent.ID))
 			return run.StatusFailed, nil
 		}
+		d.wake()
 		status = d.waitChildren(ctx, []string{child.ID})[0]
 		if status == run.StatusSucceeded {
 			return status, d.stepOutputs(child)

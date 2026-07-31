@@ -124,11 +124,21 @@ func BuildBundle(entries []*Entry, id Identity, version string, at time.Time) (*
 	if len(entries) == 0 {
 		return nil, fmt.Errorf("%w: no entries to bundle", ErrExport)
 	}
+	// The range is verified before anything is built from it, rather than checked for contiguous
+	// sequence numbers alone.
+	//
+	// Arithmetic contiguity says only that the sequence numbers count up. It accepted a reordered
+	// chain whose links no longer name the entry before them, and a genesis claim carrying a
+	// previous link, both of which the reference verifier rejects. A bundle that builds here and
+	// fails at the auditor is worse than one that never builds, because the claim it makes about
+	// this install has already been handed over by then.
+	if ok, brokeAt := VerifyRange(entries); !ok {
+		return nil, fmt.Errorf("%w: the chain does not verify at entry %d, sequence %d, so a bundle "+
+			"built from it would be rejected by any verifier. Run audit verify to see where",
+			ErrExport, brokeAt, entries[brokeAt-1].Seq)
+	}
 	claims := make([]BundleClaim, 0, len(entries))
-	for i, e := range entries {
-		if e.Seq != entries[0].Seq+int64(i) {
-			return nil, fmt.Errorf("%w: entries are not contiguous at sequence %d", ErrExport, e.Seq)
-		}
+	for _, e := range entries {
 		// An entry recorded before times were truncated carries nanoseconds, and a verifier that
 		// normalizes through microseconds recomputes a different link. Such a bundle verifies here
 		// and fails at the auditor, which is the worst place to find out, so it is refused at build

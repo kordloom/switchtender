@@ -47,6 +47,7 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Run("claim respects queue", func(t *testing.T) { testClaimQueue(t, newStore()) })
 	t.Run("heartbeat and reclaim", func(t *testing.T) { testLeaseLifecycle(t, newStore()) })
 	t.Run("reclaim resolves orphaned children", func(t *testing.T) { testReclaimOrphans(t, newStore()) })
+	t.Run("reclaim settles abandoned parents", func(t *testing.T) { testReclaimAbandonedParents(t, newStore()) })
 	t.Run("cancel request", func(t *testing.T) { testRequestCancel(t, newStore()) })
 	t.Run("cancel pending", func(t *testing.T) { testCancelPending(t, newStore()) })
 	t.Run("save keeps cancel sticky", func(t *testing.T) { testSaveKeepsCancel(t, newStore()) })
@@ -1741,5 +1742,103 @@ func testHostFacts(t *testing.T, store run.Store) {
 	// An empty set is a no-op rather than an error, so a run that gathered nothing is fine.
 	if err := store.SaveHostFacts(ctx, "run_3", nil); err != nil {
 		t.Errorf("SaveHostFacts(nil) error = %v, want nil", err)
+	}
+}
+
+// testReclaimAbandonedParents verifies a split or pipeline parent that no coordinator ever started
+// does not strand its children.
+//
+// A parent is saved before its children, and the coordinator that would run it starts only after
+// every child is written. A child save that fails, or a process that dies in that window, leaves the
+// parent pending with no lease. Nothing claims a run with a kind, so no worker will ever take it,
+// and orphan resolution only fires for an interrupted parent, so the parent sat pending forever
+// while its children stayed claimable and ran with nothing to roll them up.
+//
+// A parent awaiting approval is the case this must not touch. It is resting for as long as a person
+// takes to decide, and Approve starts its coordinator, so sweeping it would cancel every gated split
+// and workflow that outlived one sweep interval.
+func testReclaimAbandonedParents(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	stale := time.Now().Add(-time.Hour)
+	abandonedID, heldID, freshID := "run_abandoned", "run_held", "run_fresh_parent"
+	idx, count := 0, 1
+	child := func(id, parent string, status run.Status) *run.Run {
+		p := parent
+		return &run.Run{
+			ID: id, Playbook: "site.yml", Status: status, ParentID: &p,
+			ShardIndex: &idx, ShardCount: &count, CreatedAt: stale,
+		}
+	}
+	saved := []*run.Run{
+		// A parent whose coordinator never started, old enough to be past any sweep cutoff.
+		{ID: abandonedID, Playbook: "site.yml", Kind: run.KindSplit, Status: run.StatusPending,
+			CreatedAt: stale},
+		child("run_abandoned_shard", abandonedID, run.StatusPending),
+		// A parent held for an approver, equally old. It is waiting on a person, not abandoned.
+		{ID: heldID, Playbook: "site.yml", Kind: run.KindSplit,
+			Status: run.StatusPendingApproval, CreatedAt: stale},
+		child("run_held_shard", heldID, run.StatusPendingApproval),
+		// A parent submitted just now, whose coordinator is about to save it running.
+		{ID: freshID, Playbook: "site.yml", Kind: run.KindPipeline, Status: run.StatusPending,
+			CreatedAt: time.Now()},
+	}
+	for _, r := range saved {
+		if err := store.Save(ctx, r); err != nil {
+			t.Fatalf("Save(%s) error = %v", r.ID, err)
+		}
+	}
+
+	if _, err := store.ReclaimStale(ctx, 30*time.Minute); err != nil {
+		t.Fatalf("ReclaimStale() error = %v", err)
+	}
+
+	gotAbandoned, err := store.Get(ctx, abandonedID)
+	if err != nil {
+		t.Fatalf("Get(abandoned) error = %v", err)
+	}
+	if gotAbandoned.Status != run.StatusInterrupted {
+		t.Errorf("abandoned parent status = %q, want interrupted: nothing claims a run with a "+
+			"kind, so it waits forever while its children stay claimable", gotAbandoned.Status)
+	}
+	if gotAbandoned.EndedAt == nil {
+		t.Error("abandoned parent has no end time, so it never finished")
+	}
+	if gotAbandoned.Error != run.AbandonedParentError() {
+		t.Errorf("abandoned parent error = %q, want %q", gotAbandoned.Error,
+			run.AbandonedParentError())
+	}
+	// Interrupting the parent is only worth doing because it settles the children in the same sweep.
+	gotShard, err := store.Get(ctx, "run_abandoned_shard")
+	if err != nil {
+		t.Fatalf("Get(abandoned shard) error = %v", err)
+	}
+	if gotShard.Status != run.StatusCanceled {
+		t.Errorf("shard of an abandoned parent status = %q, want canceled: a pending shard is "+
+			"claimable and runs with nothing to roll it up", gotShard.Status)
+	}
+
+	gotHeld, err := store.Get(ctx, heldID)
+	if err != nil {
+		t.Fatalf("Get(held) error = %v", err)
+	}
+	if gotHeld.Status != run.StatusPendingApproval {
+		t.Errorf("held parent status = %q, want pending_approval: a run awaiting a person was "+
+			"canceled for taking longer than one sweep interval", gotHeld.Status)
+	}
+	gotHeldShard, err := store.Get(ctx, "run_held_shard")
+	if err != nil {
+		t.Fatalf("Get(held shard) error = %v", err)
+	}
+	if gotHeldShard.Status != run.StatusPendingApproval {
+		t.Errorf("shard of a held parent status = %q, want pending_approval", gotHeldShard.Status)
+	}
+
+	gotFresh, err := store.Get(ctx, freshID)
+	if err != nil {
+		t.Fatalf("Get(fresh) error = %v", err)
+	}
+	if gotFresh.Status != run.StatusPending {
+		t.Errorf("freshly submitted parent status = %q, want pending: its coordinator was still "+
+			"starting", gotFresh.Status)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/kordloom/switchtender/internal/audit"
 )
@@ -162,5 +163,45 @@ func TestLinkTimeIsMicrosecondPrecise(t *testing.T) {
 	}
 	if want := "2026-07-31T02:08:36.952234Z"; e.At.UTC().Format(time.RFC3339Nano) != want {
 		t.Errorf("At = %s, want %s", e.At.UTC().Format(time.RFC3339Nano), want)
+	}
+}
+
+// TestLinkDistinguishesInvalidUTF8Paths pins that two requests differing only in a raw invalid byte
+// get different chain links.
+//
+// Ranging over a string decodes it, so every invalid byte arrives as U+FFFD and the canonical form
+// hashed a path down to a value it shared with any other malformed path. net/http leaves raw bytes
+// in URL.Path and the audit middleware records it verbatim, so this was reachable from a request and
+// left two materially different mutations indistinguishable in the record.
+func TestLinkDistinguishesInvalidUTF8Paths(t *testing.T) {
+	t.Parallel()
+	at := time.Date(2026, 7, 31, 0, 0, 0, 0, time.UTC)
+	tests := []struct {
+		Name string
+		A    string
+		B    string
+	}{{ // Test 0: Two different invalid bytes in the same position.
+		Name: "invalid bytes", A: "/v1/credentials/\xff", B: "/v1/credentials/\xfe",
+	}, { // Test 1: A raw invalid byte against the percent escape a caller could type instead.
+		Name: "raw byte against literal escape", A: "/v1/credentials/\xff", B: "/v1/credentials/%FF",
+	}, { // Test 2: An unpaired surrogate half, which the reference verifier rejects outright.
+		Name: "lone surrogate", A: "/v1/credentials/\xed\xa0\x80", B: "/v1/credentials/\xed\xa0\x81",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
+			t.Parallel()
+			a := &audit.Entry{ID: "aud_a", At: at, Actor: "root", Method: "DELETE", Path: test.A}
+			b := &audit.Entry{ID: "aud_b", At: at, Actor: "root", Method: "DELETE", Path: test.B}
+			audit.Link(nil, a)
+			audit.Link(nil, b)
+			if a.Hash == b.Hash {
+				t.Errorf("%q and %q share chain link %s, so the record cannot tell them apart",
+					test.A, test.B, a.Hash)
+			}
+			if !utf8.ValidString(a.Path) || !utf8.ValidString(b.Path) {
+				t.Errorf("recorded paths %q and %q are not valid UTF-8, so no bundle built from "+
+					"them survives the reference verifier", a.Path, b.Path)
+			}
+		})
 	}
 }

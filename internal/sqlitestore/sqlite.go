@@ -1414,9 +1414,6 @@ func (s *store) queryRuns(ctx context.Context, label, query string, args ...any)
 	return out, nil
 }
 
-// AppendLog appends raw output bytes to the run's log. Returns run.ErrNotFound if absent. The
-// insert-select folds the missing-run check into the write so the per-chunk output path costs one
-// statement instead of two.
 // terminalRun is the SQL predicate for a run that has finished and may be purged. It mirrors
 // run.Status.Terminal(). It is stated as the set of terminal statuses rather than as "not pending or
 // running", which silently treated pending_approval as finished and deleted runs that were waiting
@@ -1428,6 +1425,9 @@ const terminalRun = "status IN ('succeeded', 'failed', 'canceled', 'interrupted'
 // events to a run that has already ended.
 const nonTerminalRun = "status NOT IN ('succeeded', 'failed', 'canceled', 'interrupted', 'rejected')"
 
+// AppendLog appends raw output bytes to the run's log. Returns run.ErrNotFound if absent. The
+// insert-select folds the missing-run check into the write so the per-chunk output path costs one
+// statement instead of two.
 func (s *store) AppendLog(ctx context.Context, id string, p []byte) error {
 	res, err := s.db.ExecContext(ctx,
 		"INSERT INTO run_logs (run_id, chunk) SELECT ?, ? WHERE EXISTS (SELECT 1 FROM runs WHERE id=? AND "+nonTerminalRun+")",
@@ -1935,6 +1935,25 @@ WHERE status='running' AND claimed_by!='' AND claimed_at < ?`, sqlutil.FormatTim
 		return 0, fmt.Errorf("reclaim stale: %w", err)
 	}
 
+	// A parent left pending with no lease has no coordinator and never will: nothing claims a run
+	// with a kind, and a live coordinator saves its parent running as its first act. Interrupting it
+	// here, before orphans are resolved below, settles its children in this same sweep instead of
+	// leaving them claimable under a parent that is never going to finish. Held parents are excluded
+	// by the status test, since one awaiting approval is resting rather than abandoned. See
+	// run.AbandonedParent for the rule this expresses.
+	res, err = tx.ExecContext(ctx, `
+UPDATE runs SET status='interrupted', ended_at=?,
+error=CASE WHEN error='' THEN '`+run.AbandonedParentError()+`' ELSE error END
+WHERE status='pending' AND claimed_by='' AND kind IN ('split','pipeline') AND created_at < ?`,
+		sqlutil.FormatTime(time.Now()), cut)
+	if err != nil {
+		return 0, fmt.Errorf("reclaim stale: %w", err)
+	}
+	abandoned, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("reclaim stale: %w", err)
+	}
+
 	// Interrupting a split or pipeline parent kills the coordinator that would have rolled its
 	// children up. A child no executor has started is canceled outright, since leaving it pending
 	// means it stays claimable and would run long after its parent gave up.
@@ -1969,7 +1988,7 @@ WHERE status='running' AND cancel_requested=0 AND parent_id IS NOT NULL
 	if err := tx.Commit(); err != nil {
 		return 0, fmt.Errorf("reclaim stale: %w", err)
 	}
-	return int(requeued + interrupted + orphaned + stopping), nil
+	return int(requeued + interrupted + abandoned + orphaned + stopping), nil
 }
 
 // RequestCancel marks the run so whichever process holds it stops it.

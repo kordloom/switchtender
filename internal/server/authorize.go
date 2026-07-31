@@ -330,13 +330,22 @@ func readableRuns(ctx context.Context, authz *authorizer, runs []*run.Run) ([]*r
 }
 
 // runObjects lists the grantable objects a run uses.
+//
+// The registry credential that pulls the execution image is one of them. It was added to the run
+// model and to the fields a retry inherits without widening this list, so a retry ran under a
+// registry credential the actor was never granted, while the rerun handler happened to name it by
+// hand and refused. Every path that asks what a run touches reads this list, so the two cannot
+// disagree again.
 func runObjects(rn *run.Run) []string {
-	objs := make([]string, 0, 2+len(rn.CredentialIDs))
+	objs := make([]string, 0, 3+len(rn.CredentialIDs))
 	if rn.ProjectID != "" {
 		objs = append(objs, rn.ProjectID)
 	}
 	if rn.InventoryID != "" {
 		objs = append(objs, rn.InventoryID)
+	}
+	if rn.PullCredentialID != "" {
+		objs = append(objs, rn.PullCredentialID)
 	}
 	return append(objs, rn.CredentialIDs...)
 }

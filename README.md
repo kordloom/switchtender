@@ -44,10 +44,13 @@ No Kubernetes operator, no Postgres, no Redis, no message bus. One process, one 
 
 ## Why
 
-AWX makes you stand up Kubernetes, Postgres, Redis, and Receptor before it runs a single playbook,
-and it has not shipped a release since July 2024. Semaphore is lighter, but a run is still a text
-log. SwitchTender runs the same playbooks from one binary and treats every run as structured data you
-can read, split, and remember.
+Automation controllers ask for a cluster before they run a playbook. A Kubernetes operator,
+Postgres, Redis, and a mesh to reach your hosts, all standing before the first task does. Then a run
+finishes and hands you a text log to scroll, and when it ends the tool forgets everything it saw.
+
+SwitchTender runs those same playbooks from one binary and treats every run as structured data you
+can read, split, and remember. One process, one file to back up, and a live host-by-task matrix
+instead of scrollback.
 
 |                                      | SwitchTender                                                                        | AWX                                             | Semaphore                |
 |--------------------------------------|-----------------------------------------------------------------------------------|-------------------------------------------------|--------------------------|
@@ -121,6 +124,12 @@ then apply:
 
 Credentials come across as shells. Re-enter their secrets, since exports omit them by design. The
 [switching-from-AWX guide](docs/switching-from-awx.md) walks the whole move.
+
+Coming from [AWX](https://switchtender.com/awx-alternative),
+[Ansible Automation Platform](https://switchtender.com/aap-alternative),
+[Semaphore](https://switchtender.com/semaphore-alternative), or
+[Ascender](https://switchtender.com/ascender-alternative). Rundeck has no importer yet, so that move
+is by hand today.
 
 To see it without any setup, run the seeded read-only demo. It fills a fresh database with sample
 projects, templates, and real runs, then serves it with every change blocked:

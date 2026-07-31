@@ -43,8 +43,22 @@ func ClientKey(supplied string) (string, error) {
 
 // ResolveDedupe returns the run that a repeat of action on id already created inside the dedupe
 // window, nil when there is none, together with the key a fresh run must carry. It looks in the
-// window containing now and in the one before it, so two clicks a moment apart always resolve to
-// the same run even when they land either side of a window boundary.
+// bucket containing now and in the one before it, so two clicks a moment apart resolve to the same
+// run even when they land either side of a bucket boundary, then it bounds the match by the run's
+// own creation time so the window is DedupeWindow rather than the one-to-two buckets the lookup
+// spans.
+//
+// An empty key means submit without one. That happens only when the current bucket's key is already
+// taken by a run outside the window, which a forward-running clock cannot produce: bucket numbers
+// rise with wall time, so a stale key is unreachable. It takes a clock that went backwards, and
+// there the choice is between starting a run with no dedupe protection and silently swallowing a
+// run the operator asked for. Losing the protection is the smaller failure.
+//
+// The keys are wall-clock derived and cannot be anything else. They are persisted on the run and
+// have to be recomputable by another control node and by the same node after a restart, and a
+// monotonic reading is meaningful in neither place. So a clock stepped backwards by more than
+// DedupeWindow still lets a request land on a bucket it already visited, and if the same action ran
+// on the same run in that bucket, the repeat collapses onto it. Keep the clock disciplined.
 func ResolveDedupe(ctx context.Context, store Store, action, id string, now time.Time) (*Run, string, error) {
 	key := DedupeKey(action, id, now)
 	for _, k := range []string{key, DedupeKey(action, id, now.Add(-DedupeWindow))} {
@@ -55,7 +69,12 @@ func ResolveDedupe(ctx context.Context, store Store, action, id string, now time
 		if err != nil {
 			return nil, "", err
 		}
-		return existing, key, nil
+		if age := now.Sub(existing.CreatedAt); age < DedupeWindow && age > -DedupeWindow {
+			return existing, key, nil
+		}
+		if k == key {
+			return nil, "", nil
+		}
 	}
 	return nil, key, nil
 }
