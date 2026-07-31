@@ -160,8 +160,11 @@ type awxSchedule struct {
 type awxCredential struct {
 	// Name is the credential name.
 	Name string `json:"name"`
-	// CredentialType is the AWX credential type name.
-	CredentialType string `json:"credential_type"`
+	// CredentialType is the AWX credential type, which arrives as a natural-key reference like every
+	// other cross-object field. It was typed as a plain string, and a real export serializes it as an
+	// object, so encoding/json failed on the whole document and an export from a live AWX imported
+	// nothing at all rather than importing partially.
+	CredentialType awxRef `json:"credential_type"`
 	// Inputs are the credential's configured values. AWX replaces every secret among them with the
 	// literal "$encrypted$", so what survives an export is the non-secret settings: which user to
 	// connect as, how to become root, which region or endpoint to talk to.
@@ -234,10 +237,10 @@ func FromAWX(data []byte, now time.Time) (*Plan, error) {
 
 	credentialIDs := map[string]string{}
 	for _, c := range export.Credentials {
-		kind, exact := mapCredentialKind(c.CredentialType, c.Inputs)
+		kind, exact := mapCredentialKind(string(c.CredentialType), c.Inputs)
 		if !exact {
 			plan.warn("credential %q type %q mapped to %q; verify it is correct",
-				c.Name, c.CredentialType, kind)
+				c.Name, string(c.CredentialType), kind)
 		}
 		obj := &credential.Credential{ID: credential.NewID(), Name: c.Name, Kind: kind, CreatedAt: now}
 		plan.Credentials = append(plan.Credentials, obj)
