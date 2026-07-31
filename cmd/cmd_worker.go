@@ -16,6 +16,7 @@ import (
 	"github.com/kordloom/switchtender/internal/dispatch"
 	"github.com/kordloom/switchtender/internal/extplugin"
 	"github.com/kordloom/switchtender/internal/logutil"
+	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/relay"
 	"github.com/kordloom/switchtender/internal/roundhouse"
@@ -160,7 +161,10 @@ func workerStore(log *zap.Logger) (run.Store, []dispatch.Option, func(), error) 
 		store := relay.NewClient(relay.NewHTTPTransport(workerServer, token, client))
 		// The relay Client cannot reclaim stale leases; that stays the control node's job, so the
 		// janitor would only log ErrUnsupported on every sweep. Turn it off for the relay worker.
-		opts = append(opts, dispatch.WithNoJanitor())
+		// A relay worker cannot read the policies, and the plan-content gate runs where the run
+		// executes. Without this it would apply a gated terraform change with no plan and no
+		// approver whenever it won the claim ahead of the control node.
+		opts = append(opts, dispatch.WithNoJanitor(), dispatch.WithPolicies(policy.Unreachable{}))
 		return store, opts, func() {}, nil
 	}
 
@@ -179,6 +183,9 @@ func workerStore(log *zap.Logger) (run.Store, []dispatch.Option, func(), error) 
 		dispatch.WithProjects(bundle.Projects(), syncer),
 		dispatch.WithInventories(bundle.Inventories()),
 		dispatch.WithInventorySources(bundle.InventorySources()),
+		// The plan-content gate is enforced by whichever process claims the run, so a worker needs
+		// the policies as much as the control node does.
+		dispatch.WithPolicies(bundle.Policies()),
 	)
 	return bundle.Runs(), opts, func() { _ = bundle.Close() }, nil
 }
