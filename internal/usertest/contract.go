@@ -18,6 +18,68 @@ func Contract(t *testing.T, newStore func() user.Store) {
 	t.Run("list ordered", func(t *testing.T) { testList(t, newStore()) })
 	t.Run("update", func(t *testing.T) { testUpdate(t, newStore()) })
 	t.Run("profile", func(t *testing.T) { testProfile(t, newStore()) })
+	t.Run("last admin is guarded in one statement", func(t *testing.T) {
+		testLastAdminGuard(t, newStore())
+	})
+}
+
+// testLastAdminGuard verifies a store refuses the delete or the demotion that would leave an install
+// with no administrator, and that it decides in the same statement that makes the change.
+//
+// Counting the admins first and changing after is two statements, and another request can pass the
+// same count in between: two concurrent deletes of the last two admins both saw a survivor and both
+// went through. An install with no administrator cannot reach any admin-gated route, including the
+// one that creates a user, so the only way back is a shell on the host. Several control nodes share
+// one database, so a lock in one process does not close it; the store has to.
+func testLastAdminGuard(t *testing.T, store user.Store) {
+	ctx := context.Background()
+	admins := []string{"user_a", "user_b"}
+	for _, id := range admins {
+		if err := store.Save(ctx, &user.User{
+			ID: id, Username: id, PasswordHash: "h", Role: user.RoleAdmin,
+			CreatedAt: time.Now(),
+		}); err != nil {
+			t.Fatalf("Save(%s) error = %v", id, err)
+		}
+	}
+
+	// One of two admins goes.
+	if ok, err := store.DeleteUnlessLastAdmin(ctx, "user_a"); err != nil || !ok {
+		t.Fatalf("deleting one of two admins = (%v, %v), want it removed", ok, err)
+	}
+	// The survivor does not.
+	if ok, err := store.DeleteUnlessLastAdmin(ctx, "user_b"); err != nil || ok {
+		t.Errorf("deleting the last admin = (%v, %v), want it refused", ok, err)
+	}
+	if _, err := store.Get(ctx, "user_b"); err != nil {
+		t.Errorf("the last admin is gone: Get() error = %v", err)
+	}
+	// Nor can the survivor be demoted out of the role.
+	demoted := &user.User{
+		ID: "user_b", Username: "user_b", PasswordHash: "h", Role: user.RoleViewer,
+	}
+	if ok, err := store.UpdateUnlessLastAdmin(ctx, demoted); err != nil || ok {
+		t.Errorf("demoting the last admin = (%v, %v), want it refused", ok, err)
+	}
+	if got, err := store.Get(ctx, "user_b"); err != nil {
+		t.Errorf("Get() error = %v", err)
+	} else if got.Role != user.RoleAdmin {
+		t.Errorf("role = %q, want admin: the last administrator was demoted", got.Role)
+	}
+	// A non-admin is not protected by the rule.
+	if err := store.Save(ctx, &user.User{
+		ID: "user_c", Username: "user_c", PasswordHash: "h", Role: user.RoleViewer,
+		CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("Save(user_c) error = %v", err)
+	}
+	if ok, err := store.DeleteUnlessLastAdmin(ctx, "user_c"); err != nil || !ok {
+		t.Errorf("deleting a viewer = (%v, %v), want it removed", ok, err)
+	}
+	// A missing account is reported as missing rather than as a refusal.
+	if _, err := store.DeleteUnlessLastAdmin(ctx, "user_gone"); !errors.Is(err, user.ErrNotFound) {
+		t.Errorf("deleting a missing user error = %v, want ErrNotFound", err)
+	}
 }
 
 // testProfile verifies the profile fields survive a save, an update, and a read on every backend,

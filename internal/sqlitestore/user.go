@@ -133,6 +133,62 @@ func (s *userStore) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
+// DeleteUnlessLastAdmin removes the user unless doing so would leave no administrator.
+//
+// The guard is part of the statement rather than a count taken beforehand. Counting first left a gap
+// another request could pass the same count in: two concurrent deletes of the last two admins both
+// saw a survivor and both went through, leaving an install nobody can administer and no way back in
+// except a shell on the host.
+func (s *userStore) DeleteUnlessLastAdmin(ctx context.Context, id string) (bool, error) {
+	res, err := s.db.ExecContext(ctx,
+		`DELETE FROM users WHERE id=? AND (role<>'admin'
+OR EXISTS (SELECT 1 FROM users others WHERE others.role='admin' AND others.id<>?))`, id, id)
+	if err != nil {
+		return false, fmt.Errorf("delete user: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("delete user: %w", err)
+	}
+	if n > 0 {
+		return true, nil
+	}
+	// Nothing changed for one of two reasons, and they are different answers to the caller.
+	if _, gerr := s.Get(ctx, id); gerr != nil {
+		return false, gerr
+	}
+	return false, nil
+}
+
+// UpdateUnlessLastAdmin applies the update unless it would demote the only administrator. Demoting
+// is the other way to reach zero admins, and it is guarded in the statement for the same reason.
+func (s *userStore) UpdateUnlessLastAdmin(ctx context.Context, u *user.User) (bool, error) {
+	links, err := marshalLinks(u.Links)
+	if err != nil {
+		return false, fmt.Errorf("update user: %w", err)
+	}
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE users SET username=?, password_hash=?, role=?, full_name=?, email=?, phone=?,
+title=?, links=?, notes=? WHERE id=? AND (?='admin' OR role<>'admin'
+OR EXISTS (SELECT 1 FROM users others WHERE others.role='admin' AND others.id<>?))`,
+		u.Username, u.PasswordHash, string(u.Role), u.FullName, u.Email, u.Phone, u.Title, links,
+		u.Notes, u.ID, string(u.Role), u.ID)
+	if err != nil {
+		return false, fmt.Errorf("update user: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("update user: %w", err)
+	}
+	if n > 0 {
+		return true, nil
+	}
+	if _, gerr := s.Get(ctx, u.ID); gerr != nil {
+		return false, gerr
+	}
+	return false, nil
+}
+
 // scanUser reads one user row from a scanner.
 func scanUser(sc scanner) (*user.User, error) {
 	var (

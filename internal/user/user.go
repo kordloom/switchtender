@@ -150,6 +150,19 @@ type Store interface {
 	List(ctx context.Context) ([]*User, error)
 	// Delete removes the user with the given id, or returns ErrNotFound.
 	Delete(ctx context.Context, id string) error
+	// DeleteUnlessLastAdmin removes the user with the given id unless doing so would leave the
+	// install with no administrator, reporting whether it removed them.
+	//
+	// Counting the admins and then deleting is two statements, and between them another request can
+	// pass the same count. Two concurrent deletes of the last two admins both saw a survivor and
+	// both went through, leaving an install with nobody who can reach an admin-gated route and no
+	// way back in except a shell on the host. The count and the delete are one statement here so
+	// only one of them can win.
+	DeleteUnlessLastAdmin(ctx context.Context, id string) (bool, error)
+	// UpdateUnlessLastAdmin applies Update unless it would demote the only administrator, reporting
+	// whether it applied. It exists for the same reason as DeleteUnlessLastAdmin: demoting is the
+	// other way to reach zero admins.
+	UpdateUnlessLastAdmin(ctx context.Context, u *User) (bool, error)
 }
 
 // New builds a user with a freshly hashed password.
