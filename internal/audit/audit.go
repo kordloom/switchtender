@@ -96,20 +96,38 @@ func Link(prev, e *Entry) {
 	e.Hash = EntryHash(e)
 }
 
-// Verify walks entries in chain order, oldest first, and reports whether the chain is intact. When
-// it is broken it returns the one-based position of the first entry whose sequence, link, or hash
-// does not check out. An entry with no hash breaks the chain, so a blanked entry cannot hide from
-// verification.
+// Verify walks entries in chain order, oldest first, and reports whether the whole chain is intact.
+// When it is broken it returns the one-based position of the first entry whose sequence, link, or
+// hash does not check out. An entry with no hash breaks the chain, so a blanked entry cannot hide
+// from verification. It requires the slice to start at genesis; use VerifyRange for part of a chain.
 func Verify(entries []*Entry) (ok bool, brokeAt int) {
+	if len(entries) > 0 && (entries[0].Seq != 1 || entries[0].PrevHash != "") {
+		return false, 1
+	}
+	return VerifyRange(entries)
+}
+
+// VerifyRange walks a contiguous slice of the chain, oldest first, and reports whether it is
+// internally sound: every hash recomputes over the entry's own content, every sequence follows its
+// predecessor, and every link names the entry before it. When it is broken it returns the one-based
+// position of the first entry that does not check out.
+//
+// Unlike Verify it does not require the slice to begin at genesis, so a bundle covering part of a
+// chain can be checked. The first entry is the only one whose predecessor is not present, and it
+// still constrains: sequence one is the one entry in a chain with nothing before it, so it must
+// carry no previous link, and any other first entry must carry one. A bundle that gets this wrong
+// is rejected by an independent verifier, which is the worst place to find out.
+func VerifyRange(entries []*Entry) (ok bool, brokeAt int) {
 	var prev *Entry
 	for i, e := range entries {
-		wantSeq := int64(1)
-		wantPrev := ""
-		if prev != nil {
-			wantSeq = prev.Seq + 1
-			wantPrev = prev.Hash
+		if e.Hash == "" || e.Seq < 1 || e.Hash != EntryHash(e) {
+			return false, i + 1
 		}
-		if e.Hash == "" || e.Seq != wantSeq || e.PrevHash != wantPrev || e.Hash != EntryHash(e) {
+		if prev == nil {
+			if (e.Seq == 1) != (e.PrevHash == "") {
+				return false, i + 1
+			}
+		} else if e.Seq != prev.Seq+1 || e.PrevHash != prev.Hash {
 			return false, i + 1
 		}
 		prev = e
