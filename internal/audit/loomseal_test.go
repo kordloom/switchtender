@@ -140,3 +140,28 @@ func TestBundleRoundTrip(t *testing.T) {
 		t.Errorf("identity file mode = %o, want 600, the signing seed must not be world readable", perm)
 	}
 }
+
+// TestBundleRefusesUnverifiableEntry covers an entry recorded before times were truncated to
+// microseconds. Its link cannot be recomputed by a verifier that carries time at microsecond
+// precision, and the entry cannot be repaired because its own hash commits to the time it holds.
+// Emitting it anyway would produce a bundle that verifies here and fails at the auditor.
+func TestBundleRefusesUnverifiableEntry(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("SWITCHTENDER_AUDIT_KEY", "")
+	id, err := audit.LoadIdentity(dir)
+	if err != nil {
+		t.Fatalf("LoadIdentity() error = %v", err)
+	}
+	// A time carrying nanoseconds, as an older build on Linux would have recorded.
+	e := &audit.Entry{
+		At:     time.Date(2026, 7, 27, 8, 0, 14, 140904281, time.UTC),
+		Actor:  "admin",
+		Method: "POST",
+		Path:   "/v1/templates",
+		Seq:    1,
+	}
+	e.Hash = audit.EntryHash(e)
+	if _, err := audit.BuildBundle([]*audit.Entry{e}, id, "test", time.Now()); err == nil {
+		t.Fatal("BuildBundle accepted an entry no third party can verify")
+	}
+}
