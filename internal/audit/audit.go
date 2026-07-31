@@ -64,9 +64,15 @@ func EntryHash(e *Entry) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// Link fills e's chain fields from prev, the current head of the chain, or a genesis link when prev
-// is nil. A store calls it while holding the append lock so the chain stays linear.
+// Link normalizes e's hashed text, then fills its chain fields from prev, the current head of the
+// chain, or a genesis link when prev is nil. A store calls it once per append while holding the
+// append lock, so the chain stays linear and the entry it persists is the entry that was hashed.
 func Link(prev, e *Entry) {
+	// The text fields are escaped before anything commits to them, so the stored entry is valid
+	// UTF-8 and no two distinct requests can share a chain link. See escapeInvalidUTF8.
+	e.Actor = escapeInvalidUTF8(e.Actor)
+	e.Method = escapeInvalidUTF8(e.Method)
+	e.Path = escapeInvalidUTF8(e.Path)
 	// The recorded time is truncated to microseconds before anything hashes it.
 	//
 	// The chain profile permits nanoseconds, but a link is only useful if an independent verifier
