@@ -1134,14 +1134,32 @@ func stepRun(parent *run.Run, step run.PipelineStep, idx, attempt int, vars map[
 		inventory = parent.Inventory
 	}
 	i := idx
-	return &run.Run{
+	child := &run.Run{
 		ID: run.NewID(), Playbook: step.Playbook, Inventory: inventory,
-		Tool: step.Tool, Command: step.Command, DryRun: step.DryRun,
+		Tool: step.Tool, Command: step.Command,
 		Status: run.StatusPending, CreatedAt: time.Now(),
 		ParentID: &parent.ID, StepIndex: &i, StepName: step.Name, Attempt: attempt,
-		ExtraVars: vars, CredentialIDs: parent.CredentialIDs, ProjectID: parent.ProjectID,
-		Queue: parent.Queue,
+		ExtraVars: vars,
 	}
+	// A step names its own tool, command, playbook, and inventory, so those are not inherited. How
+	// the run is executed still comes from the pipeline: the environment it runs in, the credentials
+	// it may use, the project it reads from, the queue it lands on, and how long it may take.
+	child.CredentialIDs = parent.CredentialIDs
+	child.ProjectID = parent.ProjectID
+	child.InventoryID = parent.InventoryID
+	child.Queue = parent.Queue
+	child.Timeout = parent.Timeout
+	child.Image = parent.Image
+	child.PullCredentialID = parent.PullCredentialID
+	child.Labels = parent.Labels
+	child.Actor = parent.Actor
+	// A dry-run pipeline is dry all the way down. A step cannot opt out of a parent that was
+	// submitted to make no changes: check mode is a promise about the whole run, and a step running
+	// for real underneath it would break that promise silently.
+	child.DryRun = step.DryRun || parent.DryRun
+	// Notifications stay on the parent. The pipeline is the thing that finished, and copying its
+	// targets onto every step would page once per step instead of once per run.
+	return child
 }
 
 func (d *Dispatcher) runStepAttempts(ctx context.Context, parent *run.Run, step run.PipelineStep,
