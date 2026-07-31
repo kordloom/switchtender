@@ -643,8 +643,14 @@ func (d *Dispatcher) Submit(ctx context.Context, playbook, inventory string, opt
 		return nil, err
 	}
 	d.resolveQueue(ctx, r)
-	if r.Status != run.StatusPendingApproval && d.requiresApproval(ctx, r) {
-		r.Status = run.StatusPendingApproval
+	if r.Status != run.StatusPendingApproval {
+		held, perr := d.requiresApproval(ctx, r)
+		if perr != nil {
+			return nil, perr
+		}
+		if held {
+			r.Status = run.StatusPendingApproval
+		}
 	}
 	created, _, err := d.idempotentSave(ctx, r)
 	if err != nil {
@@ -724,8 +730,14 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 	// held for an approver executed on every host the moment it was split in two. A shard matches
 	// exactly what its parent matches, since it inherits everything but its host group, so the
 	// parent is the only thing worth testing.
-	if parent.Status != run.StatusPendingApproval && d.requiresApproval(ctx, parent) {
-		parent.Status = run.StatusPendingApproval
+	if parent.Status != run.StatusPendingApproval {
+		held, perr := d.requiresApproval(ctx, parent)
+		if perr != nil {
+			return nil, perr
+		}
+		if held {
+			parent.Status = run.StatusPendingApproval
+		}
 	}
 	created, dup, err := d.idempotentSave(ctx, parent)
 	if err != nil {
@@ -817,8 +829,11 @@ func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string) (*r
 		return nil, fmt.Errorf("list shards: %w", err)
 	}
 	var failed []*run.Run
+	// Only a shard that actually ran and failed is worth running again. A canceled shard did not
+	// fail, it was stopped, and treating it as failed is what turned a rejection into a retryable
+	// set: rejecting a split cancels its held shards, which then read as failures.
 	for _, s := range shards {
-		if s.Status != run.StatusSucceeded {
+		if s.Status == run.StatusFailed || s.Status == run.StatusInterrupted {
 			failed = append(failed, s)
 		}
 	}
@@ -833,6 +848,17 @@ func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string) (*r
 		ShardCount: &count, RetryOf: &parent.ID, IdempotencyKey: key,
 	}
 	inheritExecution(retry, parent)
+	// A retry is a fourth way to submit a run, and it inherits the parent's entire execution spec,
+	// so it has to face the same gate as the other three. Submit, SubmitSplit, and SubmitPipeline
+	// each consult the policy; this path did not, which made retrying a way to run a spec an
+	// approver would have held.
+	held, perr := d.requiresApproval(ctx, retry)
+	if perr != nil {
+		return nil, perr
+	}
+	if held {
+		retry.Status = run.StatusPendingApproval
+	}
 	saved, dup, err := d.idempotentSave(ctx, retry)
 	if err != nil {
 		return nil, err
@@ -842,13 +868,17 @@ func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string) (*r
 		return saved, nil
 	}
 
+	retryChildStatus := run.StatusPending
+	if retry.Status == run.StatusPendingApproval {
+		retryChildStatus = run.StatusPendingApproval
+	}
 	retryID := retry.ID
 	children := make([]*run.Run, 0, count)
 	for i, shard := range failed {
 		idx, shardCount := i, count
 		child := &run.Run{
 			ID: run.NewID(), Playbook: retry.Playbook, Inventory: retry.Inventory,
-			Status: run.StatusPending, CreatedAt: time.Now(),
+			Status: retryChildStatus, CreatedAt: time.Now(),
 			ParentID: &retryID, ShardIndex: &idx, ShardCount: &shardCount,
 			// The host group is the one thing a shard owns; everything about how it executes comes
 			// from the run it is a shard of.
@@ -861,6 +891,10 @@ func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string) (*r
 		children = append(children, child)
 	}
 
+	if retry.Status == run.StatusPendingApproval {
+		// Held for an approver. Approve starts the coordinator, since no claim loop takes a parent.
+		return retry, nil
+	}
 	d.wake()
 	d.wg.Add(1)
 	go d.coordinate(retry.Clone(), children)
@@ -1069,8 +1103,14 @@ func (d *Dispatcher) SubmitPipeline(ctx context.Context, name, inventory string,
 		return nil, err
 	}
 	d.resolveQueue(ctx, parent)
-	if parent.Status != run.StatusPendingApproval && d.pipelineRequiresApproval(ctx, parent, steps) {
-		parent.Status = run.StatusPendingApproval
+	if parent.Status != run.StatusPendingApproval {
+		held, perr := d.pipelineRequiresApproval(ctx, parent, steps)
+		if perr != nil {
+			return nil, perr
+		}
+		if held {
+			parent.Status = run.StatusPendingApproval
+		}
 	}
 	created, dup, err := d.idempotentSave(ctx, parent)
 	if err != nil {
@@ -1374,7 +1414,14 @@ func (d *Dispatcher) executeLeased(base context.Context, r *run.Run) run.Status 
 // single phase, unchanged. The run carries this process's lease while it executes: a watcher renews
 // it and honors cancel requests written to the store by any process.
 func (d *Dispatcher) execute(ctx context.Context, r *run.Run) run.Status {
-	if policies := d.planGatePolicies(ctx, r); policies != nil {
+	policies, perr := d.planGatePolicies(ctx, r)
+	if perr != nil {
+		// The plan-content gate could not be evaluated, so applying now would apply past a gate
+		// nobody checked. The run fails with the reason instead.
+		d.finalize(r, run.StatusFailed, nil, perr.Error())
+		return run.StatusFailed
+	}
+	if policies != nil {
 		return d.executePlanGate(ctx, r, policies)
 	}
 	return d.executeRun(ctx, r)
