@@ -494,7 +494,17 @@ func TestStepOutputsDoesNotResurrectRun(t *testing.T) {
 		ID: "run_step", Playbook: "a.yml", Status: run.StatusPending,
 		CreatedAt: time.Now(), ParentID: &parentID, StepIndex: &idx, StepName: "a",
 	}
-	if err := store.Save(ctx, stale); err != nil {
+	// The row is stored already leased to worker-1. A step child carries no Kind, so it is
+	// claimable, and this test's own dispatcher runs a claim loop: storing it pending let that loop
+	// claim and execute it before the finalize below, which then failed the assertion with the run
+	// claimed by the local host. The in-memory stale value stays pending, since that stale snapshot
+	// is what stepOutputs is given and what this test is about.
+	leased := time.Now()
+	seed := stale.Clone()
+	seed.Status = run.StatusRunning
+	seed.ClaimedBy = "worker-1"
+	seed.ClaimedAt = &leased
+	if err := store.Save(ctx, seed); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
 
