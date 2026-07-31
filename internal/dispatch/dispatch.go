@@ -1586,7 +1586,21 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 
 	// A cancel requested between the claim and the running save is honored here, before any tool
 	// starts. The store keeps the cancel flag sticky across saves, so this read observes it.
-	if cur, err := d.store.Get(ctx, r.ID); err == nil && cur.CancelRequested {
+	//
+	// A read that fails is not a run with no cancel on it. Treating an error as "carry on" started
+	// the tool on the strength of a question nobody answered, which is the same fail-open shape
+	// every other gate in this file was written to avoid. The read is retried, and a run that still
+	// cannot be checked is refused with the reason rather than executed.
+	cur, cerr := d.storeGetWithRetries(ctx, r.ID)
+	switch {
+	case cerr != nil:
+		close(stop)
+		<-tailed
+		d.finalize(r, run.StatusFailed, nil,
+			"could not check whether this run was canceled before starting it: "+cerr.Error())
+		d.publisher.CloseRun(r.ID)
+		return run.StatusFailed
+	case cur.CancelRequested:
 		close(stop)
 		<-tailed
 		d.finalize(r, run.StatusCanceled, nil, "")
@@ -1844,6 +1858,18 @@ func (d *Dispatcher) save(r *run.Run) {
 
 // withRetries runs a store write, retrying transient failures with a short backoff. Concurrent
 // executors contend on a single writer under SQLite, so one busy moment must not lose state.
+// storeGetWithRetries reads a run, retrying the way every other store call on this path does, so a
+// single busy moment under a contended writer is not mistaken for an answer.
+func (d *Dispatcher) storeGetWithRetries(ctx context.Context, id string) (*run.Run, error) {
+	var out *run.Run
+	err := withRetries(func() error {
+		var gerr error
+		out, gerr = d.store.Get(ctx, id)
+		return gerr
+	})
+	return out, err
+}
+
 func withRetries(f func() error) error {
 	var err error
 	for attempt := 0; attempt < 4; attempt++ {
