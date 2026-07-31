@@ -137,7 +137,8 @@
 				<article class="card reveal">
 					<div class="ic ic-audit"></div>
 					<h3>Provable audit</h3>
-					<p>Every change is linked into a tamper-evident SHA-256 hash chain. Export a signed copy and verify it offline, without trusting the server.</p>
+					<p>Every change is linked into a tamper-evident SHA-256 hash chain. A change that cannot be recorded is refused rather than made quietly, and anchoring the chain against a public timestamp authority means a history that has lost its tail says so. Export a signed copy and verify it offline, without trusting the server.</p>
+					<p class="card-bound">What it does not claim: a chain proves the record was not changed, not that a machine recorded everything it should have. Someone who takes root on your controller can change what gets written from that point on. That is the boundary of every audit system, it costs them the whole controller to reach, and it does not hand them the past.</p>
 				</article>
 				<article class="card reveal">
 					<div class="ic ic-secret"></div>
