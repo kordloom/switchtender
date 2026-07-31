@@ -1,7 +1,7 @@
 # SwitchTender
 
-> SwitchTender is a one-binary alternative to AWX and Semaphore. It runs Ansible, Terraform,
-> OpenTofu, Bash, PowerShell, Python, and Go across a fleet from a single Go binary, paints
+> SwitchTender is a fleet automation control plane that runs from one binary. It runs Ansible,
+> Terraform, OpenTofu, Bash, PowerShell, Python, and Go across a fleet from a single Go binary, paints
 > every run as a live host-by-task matrix, splits big jobs by measured host cost, records a
 > tamper-evident audit trail, and imports AWX projects, inventories, templates, surveys, and
 > schedules in one command. State lives in one SQLite file by default, with Postgres optional.

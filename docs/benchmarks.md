@@ -63,9 +63,9 @@ rather than as current numbers. This row is due a re-run.
 
 ## About comparisons
 
-We publish only numbers we measured ourselves, so there are no AWX or Semaphore columns above. What
-can be said factually: AWX requires a Kubernetes cluster, its operator, PostgreSQL, Redis, and
-Receptor before it runs a playbook, so a boot-time comparison is not even shaped the same, and that
-is the point. The [comparison page](comparison.md) covers the feature-by-feature picture, including
+We publish only numbers we measured ourselves, so there are no competitor columns above. What can be
+said factually is that SwitchTender boots from one binary and one file, while the AWX-lineage
+controllers stand up a Kubernetes cluster, an operator, PostgreSQL, Redis, and a mesh before they run
+a playbook. A boot-time comparison is not even shaped the same, and that is the point. The [comparison page](comparison.md) covers the feature-by-feature picture, including
 where SwitchTender is still young. If you run these benchmarks and get materially different numbers,
 open an issue with your hardware and method and we will look.

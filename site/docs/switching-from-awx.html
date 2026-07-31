@@ -189,7 +189,7 @@ inventory, a shard count, credentials, and extra vars. Add one in Templates. Giv
 want typed prompts at launch. Launch it with one click.</p>
 <h3 id="7-watch-the-run">7. Watch the run</h3>
 <p>The run detail page paints a host-by-task matrix live as the run executes, with per-task drill-down
-into stdout, stderr, return code, and diff. This is the part AWX does not do. A run is structure, not
+into stdout, stderr, return code, and diff. No other controller in the field does this. A run is structure, not
 a text scroll.</p>
 <h3 id="8-add-capacity-and-schedules">8. Add capacity and schedules</h3>
 <p>Point a worker at the same database to add an executor, and give it a queue name to target specific
@@ -199,7 +199,7 @@ work:</p>
 <p>Add a schedule in Schedules with a cron expression to fire a template on a cadence.</p>
 <h2 id="where-things-live-differently">Where things live differently</h2>
 <ul>
-<li>There is no separate &quot;launch&quot; wizard the size of AWX's. A template launch is one request, a survey
+<li>There is no separate &quot;launch&quot; wizard. A template launch is one request, a survey
 renders as a small form.</li>
 <li>Workflows are built on the canvas at Workflows: add steps, drag them into place, wire dependencies
 by dragging from a step's edge onto another, and run the graph as a pipeline.</li>
@@ -218,7 +218,7 @@ and email are configured once on the server and fire for every run, so a single 
 page its own PagerDuty service the way an AWX notification template can.</li>
 <li>Execution environments are a single pinned container image behind a flag, not a managed catalog.</li>
 </ul>
-<p>If something you rely on is missing, open an issue. The gap with AWX is being closed on purpose.</p>
+<p>If something you rely on is missing, open an issue. Import coverage is widened on purpose.</p>
 
 		</main>
 	</div>

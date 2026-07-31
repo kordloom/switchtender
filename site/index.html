@@ -4,7 +4,7 @@
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>SwitchTender · run everything, watch every host, prove every change</title>
-	<meta name="description" content="Run everything, watch every host, prove every change. Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go in one Go binary with a live host-by-task matrix, tamper-evident audit, and enforced approvals. A self-hostable alternative to AWX, Ansible Automation Platform, Semaphore, and Rundeck.">
+	<meta name="description" content="Run everything, watch every host, prove every change. Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go in one Go binary with a live host-by-task matrix, tamper-evident audit, and enforced approvals. Self-hosted, with no cluster to stand up first. Migrate from AWX, Ansible Automation Platform, Semaphore, or Ascender in one command.">
 	<meta property="og:title" content="SwitchTender · run everything, watch every host, prove every change">
 	<meta property="og:description" content="Run everything. Watch every host. Prove every change. Your whole automation stack in one Go binary, with a live host-by-task matrix and a provable audit trail.">
 	<meta property="og:type" content="website">
@@ -76,7 +76,7 @@
 					<a class="btn big" href="https://demo.switchtender.com">Open the live demo</a>
 					<a class="ghost big" href="/get-started">Install</a>
 				</div>
-				<p class="hero-note">Source-available · BSL 1.1 · Go SDK with drop-in plugins · migrate from AWX or Semaphore in one command</p>
+				<p class="hero-note">Source-available · BSL 1.1 · Go SDK with drop-in plugins · one file to back up</p>
 			</div>
 			<div class="hero-shot reveal">
 				<div class="glow" aria-hidden="true"></div>
@@ -152,7 +152,7 @@
 				<article class="card reveal">
 					<div class="ic ic-roles"></div>
 					<h3>Roles, teams, and orgs</h3>
-					<p>Global roles, teams, organizations, and per-object read, use, and manage grants, all in the core. Delegate view of one credential without a global viewer, or a whole org inherits a project at once. Semaphore paywalls its RBAC. SwitchTender does not.</p>
+					<p>Global roles, teams, organizations, and per-object read, use, and manage grants. Delegate view of one credential without a global viewer, or a whole org inherits a project at once. All of it ships in the core, not a paid tier.</p>
 				</article>
 				<article class="card reveal">
 					<div class="ic ic-shards"></div>
@@ -167,7 +167,7 @@
 				<article class="card reveal">
 					<div class="ic ic-bell"></div>
 					<h3>Notifications everywhere</h3>
-					<p>A finished run reaches Slack, Teams, Discord, Mattermost, Rocket.Chat, ntfy, email, or a webhook. A failure pages PagerDuty or texts through Twilio, and every run annotates Grafana. Eleven channels built in server-wide, past the AWX list, and the seven that need only a URL also route per template so a team gets its own.</p>
+					<p>A finished run reaches Slack, Teams, Discord, Mattermost, Rocket.Chat, ntfy, email, or a webhook. A failure pages PagerDuty or texts through Twilio, and every run annotates Grafana. Eleven channels built in server-wide, and the seven that need only a URL also route per template so a team gets its own.</p>
 				</article>
 				<article class="card reveal">
 					<div class="ic ic-doctor"></div>
@@ -206,7 +206,7 @@
 		<section class="section wrap" id="editor">
 			<div class="section-head reveal">
 				<h2>Design pipelines by dragging, not by YAML</h2>
-				<p>Wire Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go steps into a graph, plus any tool you plug in. Fan out, fan in, and run the whole thing as one pipeline with per-step retries. AWX's signature feature, without the Kubernetes bill.</p>
+				<p>Wire Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go steps into a graph, plus any tool you plug in. Fan out, fan in, and run the whole thing as one pipeline with per-step retries. It runs on the same one binary as everything else.</p>
 			</div>
 			<figure class="window demo-frame reveal">
 				<div class="window-bar"><span></span><span></span><span></span><em>switchtender · workflow editor</em></div>
@@ -216,7 +216,7 @@
 
 		<section class="section governance wrap" id="governance">
 			<div class="gov-copy reveal">
-				<span class="eyebrow">The moat</span>
+				<span class="eyebrow">Above execution</span>
 				<h2>Governance the rest<br>of the field skips</h2>
 				<p>Multi-tool execution is table stakes now. What sets SwitchTender apart sits <em>above</em> execution, on the control plane that makes automation provable and governed.</p>
 				<ul class="gov-list">
@@ -309,8 +309,8 @@ func main() {
 
 		<section class="section wrap" id="migrate">
 			<div class="section-head reveal">
-				<h2>Already running AWX? Drop it in and bring the whole thing.</h2>
-				<p>This is a replacement, not a rebuild. Export from AWX or Semaphore, preview exactly what will land, then apply. Projects, inventories with their hosts and groups, dynamic inventory sources, job templates, surveys, schedules, and credential shells all come across in one pass. A malformed asset is warned and skipped, never fatal, so even a partial export migrates everything it can.</p>
+				<h2>Bring the whole thing<br>with you.</h2>
+				<p>A migration is one command, not a rebuild. AWX and Semaphore each have an importer, and Ansible Automation Platform, Tower, and Ascender share the AWX export format, so the same one reads them. Rundeck has no importer yet, so that move is still by hand. Export, preview exactly what will land, then apply. Projects, inventories with their hosts and groups, dynamic inventory sources, job templates, surveys, schedules, and credential shells all come across in one pass. A malformed asset is warned and skipped, never fatal, so even a partial export migrates everything it can.</p>
 			</div>
 			<div class="code reveal">
 				<button class="copy" aria-label="Copy">Copy</button>
@@ -323,7 +323,7 @@ switchtender import awx awx-export.json --db switchtender.db --apply
 <span class="c"># on Semaphore instead? swap one word:</span>
 switchtender import semaphore export.json --db switchtender.db --apply</code></pre>
 			</div>
-			<p class="reveal" style="margin-top: 20px; text-align: center;">AWX omits secret material from its own exports, so credentials arrive as named shells: re-enter each secret once and every template that references it works. The <a href="/docs/switching-from-awx">switching guide</a> maps every AWX concept to its SwitchTender equal, and the <a href="/awx-alternative">AWX alternative page</a> makes the full case.</p>
+			<p class="reveal" style="margin-top: 20px; text-align: center;">Credentials arrive as named shells, since these exports omit secret material by design: re-enter each secret once and every template that references it works. The <a href="/docs/switching-from-awx">switching guide</a> maps every AWX concept to its SwitchTender equal, and the <a href="/awx-alternative">AWX alternative page</a> makes the full case.</p>
 		</section>
 
 		<section class="section start wrap" id="start">
@@ -399,10 +399,15 @@ open http://localhost:8080/ui/</code></pre>
 					<input id="signup-email" class="signup-input" type="email" name="email"
 						placeholder="you@example.com" autocomplete="email" required>
 					<!-- Honeypot. Real people never see it, so anything typed here is a bot. It is
-					     moved off screen rather than hidden with display none, which some bots skip. -->
-					<label class="visually-hidden" for="nf-company">Company</label>
-					<input id="nf-company" class="visually-hidden" type="text" name="company"
-						tabindex="-1" autocomplete="off">
+					     moved off screen rather than hidden with display none, which some bots skip.
+					     It carries no label and a meaningless name because it used to be called
+					     "company" with a visible Company label: a canonical autofill target that a
+					     password manager would fill for a real visitor, whose signup was then thrown
+					     away as a bot. autocomplete="off" is advisory and widely ignored for
+					     organization fields, so the field simply stops looking like one. aria-hidden
+					     keeps it off the accessibility tree, so a screen reader never offers it. -->
+					<input id="nf-hp" class="visually-hidden" type="text" name="nf-hp"
+						tabindex="-1" autocomplete="off" aria-hidden="true">
 					<button id="signup-submit" class="btn" type="submit">Keep me posted</button>
 				</form>
 				<p id="signup-status" class="signup-status" role="status" aria-live="polite"></p>
