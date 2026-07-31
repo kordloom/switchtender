@@ -125,6 +125,11 @@ func applyPlan(ctx context.Context, plan *importer.Plan) (int, error) {
 	}
 	defer func() { _ = bundle.Close() }()
 
+	// One entry for the import as a whole. It creates many objects, and a chain that recorded each
+	// separately would bury the fact that they arrived together from one export.
+	if err := recordCLI(ctx, bundle.Audits(), "/cli/import/apply"); err != nil {
+		return 0, err
+	}
 	return plan.Apply(ctx, importer.ApplyStores{
 		Projects: bundle.Projects(), Inventories: bundle.Inventories(),
 		Sources:     bundle.InventorySources(),

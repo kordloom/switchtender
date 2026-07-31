@@ -21,7 +21,7 @@ func TestTokenLifecycle(t *testing.T) {
 	}
 
 	// The store holds the token by hash, with the name intact and no plaintext.
-	tokens, closeStores, err := openTokens(db)
+	tokens, _, closeStores, err := openTokens(db)
 	if err != nil {
 		t.Fatalf("openTokens() error = %v", err)
 	}
@@ -44,7 +44,7 @@ func TestTokenLifecycle(t *testing.T) {
 		t.Fatalf("runTokenRevoke() error = %v", err)
 	}
 
-	tokens, closeStores, err = openTokens(db)
+	tokens, _, closeStores, err = openTokens(db)
 	if err != nil {
 		t.Fatalf("openTokens() error = %v", err)
 	}
