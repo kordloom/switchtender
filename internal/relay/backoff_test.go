@@ -7,6 +7,7 @@ import (
 	"go.uber.org/zap"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -168,5 +169,71 @@ func TestWorkerCannotInjectOrRewriteARun(t *testing.T) {
 	}
 	if _, err := backing.Get(ctx, "run_injected"); !errors.Is(err, run.ErrNotFound) {
 		t.Error("the injected run reached the store")
+	}
+}
+
+// TestWorkerCannotSetAStatusItHasNoBusinessSetting pins that a worker reports how a run ended and
+// cannot decide whether it starts.
+//
+// Constraining the spec was not enough. The status is what decides execution: a report of "pending"
+// moved a run awaiting an approver into the queue, where the claim loop ran it past the policy, the
+// approver, and the audit gate. A second report rewound a finished run and ran it again. One shared
+// worker token was all either needed.
+func TestWorkerCannotSetAStatusItHasNoBusinessSetting(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	backing := run.NewMemStore()
+	srv := httptest.NewServer(relay.NewHandler(backing, "worker-token", zap.NewNop()))
+	defer srv.Close()
+	client := relay.NewClient(relay.NewHTTPTransport(srv.URL, "worker-token", srv.Client()))
+
+	tests := []struct {
+		Name     string
+		Stored   run.Status
+		Reported run.Status
+	}{
+		{Name: "release a run awaiting an approver", Stored: run.StatusPendingApproval,
+			Reported: run.StatusPending},
+		{Name: "requeue a run so it executes again", Stored: run.StatusRunning,
+			Reported: run.StatusPending},
+		{Name: "reopen a finished run", Stored: run.StatusSucceeded, Reported: run.StatusRunning},
+		{Name: "reopen a rejected run", Stored: run.StatusRejected, Reported: run.StatusRunning},
+	}
+	for i, test := range tests {
+		t.Run(test.Name, func(t *testing.T) {
+			id := "run_status_" + strconv.Itoa(i)
+			stored := &run.Run{
+				ID: id, Playbook: "site.yml", Status: test.Stored, CreatedAt: time.Now(),
+			}
+			if err := backing.Save(ctx, stored); err != nil {
+				t.Fatalf("seed Save() error = %v", err)
+			}
+			report := stored.Clone()
+			report.Status = test.Reported
+			if err := client.Save(ctx, report); err == nil {
+				t.Errorf("a worker moved a %q run to %q", test.Stored, test.Reported)
+			}
+			got, err := backing.Get(ctx, id)
+			if err != nil {
+				t.Fatalf("Get() error = %v", err)
+			}
+			if got.Status != test.Stored {
+				t.Errorf("stored status changed to %q, want it left at %q", got.Status, test.Stored)
+			}
+		})
+	}
+
+	// The legitimate report still works.
+	live := &run.Run{ID: "run_live", Playbook: "site.yml", Status: run.StatusRunning, CreatedAt: time.Now()}
+	if err := backing.Save(ctx, live); err != nil {
+		t.Fatalf("seed Save() error = %v", err)
+	}
+	done := live.Clone()
+	done.Status = run.StatusSucceeded
+	if err := client.Save(ctx, done); err != nil {
+		t.Fatalf("a worker could not report success: %v", err)
+	}
+	if got, _ := backing.Get(ctx, "run_live"); got.Status != run.StatusSucceeded {
+		t.Errorf("status = %q, want succeeded: a worker's real outcome must land", got.Status)
 	}
 }

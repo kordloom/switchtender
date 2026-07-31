@@ -829,11 +829,19 @@ func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string) (*r
 		return nil, fmt.Errorf("list shards: %w", err)
 	}
 	var failed []*run.Run
-	// Only a shard that actually ran and failed is worth running again. A canceled shard did not
-	// fail, it was stopped, and treating it as failed is what turned a rejection into a retryable
-	// set: rejecting a split cancels its held shards, which then read as failures.
+	// A shard is worth running again when it ran and failed, or when it was canceled because its
+	// parent's coordinator died.
+	//
+	// Treating every non-succeeded shard as failed is what turned a rejection into a retryable set,
+	// since rejecting a split cancels the shards held with it. Excluding every canceled shard went
+	// too far the other way: the orphan sweep also cancels shards when a control node dies, and
+	// retrying those is the whole recovery path after a crash. The orphan reason is what separates
+	// the two, and it is already recorded on the shard.
 	for _, s := range shards {
-		if s.Status == run.StatusFailed || s.Status == run.StatusInterrupted {
+		switch {
+		case s.Status == run.StatusFailed, s.Status == run.StatusInterrupted:
+			failed = append(failed, s)
+		case s.Status == run.StatusCanceled && s.Error == run.OrphanError():
 			failed = append(failed, s)
 		}
 	}
@@ -902,6 +910,37 @@ func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string) (*r
 	return retry, nil
 }
 
+// parentMayStart reports whether a parent coordinator should begin, and settles the parent when it
+// should not.
+//
+// The start save is an unconditional upsert, so a parent canceled between its submit and the
+// coordinator's first write came back running and the whole fan-out proceeded. finalize goes through
+// a fence for exactly this reason; the start had none. Both parent kinds share this one, because the
+// split path was fixed first and the pipeline path was not, and a canceled pipeline then ran every
+// step to completion and reported success.
+func (d *Dispatcher) parentMayStart(parent *run.Run, childIDs []string) bool {
+	current, err := d.store.Get(context.Background(), parent.ID)
+	if err != nil {
+		// The stored state is unreadable. Refusing to start on a transient read failure would
+		// strand a healthy run, and the cancel paths still reach it once it is running.
+		return true
+	}
+	if current.Status.Terminal() {
+		d.log.Info("dispatch: parent already finished, not starting its coordination",
+			zap.String("run_id", parent.ID), zap.String("status", string(current.Status)))
+		d.cancelChildren(childIDs)
+		return false
+	}
+	if current.CancelRequested {
+		d.log.Info("dispatch: parent was canceled before it started",
+			zap.String("run_id", parent.ID))
+		d.cancelChildren(childIDs)
+		d.finalize(parent, run.StatusCanceled, nil, "")
+		return false
+	}
+	return true
+}
+
 // idsOf returns the ids of a set of runs.
 func idsOf(runs []*run.Run) []string {
 	out := make([]string, len(runs))
@@ -923,26 +962,8 @@ func (d *Dispatcher) coordinate(parent *run.Run, children []*run.Run) {
 	defer d.unregister(parent.ID)
 	defer cancelParent()
 
-	// A parent that already reached a terminal state is not started.
-	//
-	// This save was unconditional, and it is an upsert, so a parent canceled between submit and
-	// this line came back running and the whole fan-out proceeded. finalize goes through a fence for
-	// exactly this reason; the start had none. Reading the stored status first is the fence: it
-	// costs one point read per parent and closes the window where a cancel is silently undone.
-	if current, err := d.store.Get(context.Background(), parent.ID); err == nil {
-		if current.Status.Terminal() {
-			d.log.Info("dispatch: parent already finished, not starting its coordination",
-				zap.String("run_id", parent.ID), zap.String("status", string(current.Status)))
-			d.cancelChildren(idsOf(children))
-			return
-		}
-		if current.CancelRequested {
-			d.log.Info("dispatch: parent was canceled before it started",
-				zap.String("run_id", parent.ID))
-			d.cancelChildren(idsOf(children))
-			d.finalize(parent, run.StatusCanceled, nil, "")
-			return
-		}
+	if !d.parentMayStart(parent, idsOf(children)) {
+		return
 	}
 
 	started := time.Now()
@@ -1172,6 +1193,11 @@ func (d *Dispatcher) runPipeline(parent *run.Run, steps []run.PipelineStep) {
 	d.register(parent.ID, cancelPipe)
 	defer d.unregister(parent.ID)
 	defer cancelPipe()
+
+	// A pipeline's steps do not exist yet, so there are no children to settle here.
+	if !d.parentMayStart(parent, nil) {
+		return
+	}
 
 	started := time.Now()
 	parent.Status = run.StatusRunning
@@ -1450,6 +1476,8 @@ func (d *Dispatcher) execute(ctx context.Context, r *run.Run) run.Status {
 		// The plan-content gate could not be evaluated, so applying now would apply past a gate
 		// nobody checked. The run fails with the reason instead.
 		d.finalize(r, run.StatusFailed, nil, perr.Error())
+		// Every other terminal path closes the stream, so a UI tailing this run sees it end.
+		d.publisher.CloseRun(r.ID)
 		return run.StatusFailed
 	}
 	if policies != nil {

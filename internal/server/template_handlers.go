@@ -118,7 +118,10 @@ func createTemplateHandler(store template.Store, authz *authorizer, log *zap.Log
 		// template could point it at a project, inventory, or credential they were never granted,
 		// and a schedule or webhook already attached to that template then fires it with no
 		// authorization at all.
-		objects := append([]string{req.ProjectID, req.InventoryID, req.PullCredentialID},
+		// OrgID is included because under strict grants it decides who may read and use the
+		// template, so a caller who could set it freely could re-home a template into an
+		// organization they do not manage.
+		objects := append([]string{req.ProjectID, req.InventoryID, req.PullCredentialID, req.OrgID},
 			req.CredentialIDs...)
 		if denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse, objects...)) {
 			return
@@ -167,7 +170,10 @@ func updateTemplateHandler(store template.Store, authz *authorizer, log *zap.Log
 		// template could point it at a project, inventory, or credential they were never granted,
 		// and a schedule or webhook already attached to that template then fires it with no
 		// authorization at all.
-		objects := append([]string{req.ProjectID, req.InventoryID, req.PullCredentialID},
+		// OrgID is included because under strict grants it decides who may read and use the
+		// template, so a caller who could set it freely could re-home a template into an
+		// organization they do not manage.
+		objects := append([]string{req.ProjectID, req.InventoryID, req.PullCredentialID, req.OrgID},
 			req.CredentialIDs...)
 		if denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse, objects...)) {
 			return
