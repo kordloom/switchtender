@@ -832,8 +832,8 @@ func rerunRunHandler(store run.Store, submitter Submitter, authz *authorizer, lo
 		// Access to the run is not enough to fire its spec again. Authorize every object the new
 		// run touches, mirroring a template launch, so a rerun cannot borrow a project,
 		// inventory, or credential the actor was never granted.
-		objects := append([]string{rn.ProjectID, rn.InventoryID, rn.PullCredentialID}, rn.CredentialIDs...)
-		if denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse, objects...)) {
+		if denyOnAuthzError(w, log,
+			authz.authorizeAll(r.Context(), grant.AccessUse, runObjects(rn)...)) {
 			return
 		}
 		// Rerunning the same run twice inside the dedupe window is one request, not two, so a

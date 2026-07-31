@@ -1777,3 +1777,88 @@ func TestRerunReplaysEveryExecutionField(t *testing.T) {
 		t.Errorf("the rerun does not replay the run it reruns (-saved +submitted):\n%s", diff)
 	}
 }
+
+// TestRunObjectsCoversThePullCredential pins that the registry credential pulling a run's execution
+// image is one of the objects a caller has to be granted.
+//
+// It was added to the run model and to the fields a retry inherits without widening the object
+// list, so every path built on runObjects, including reading a run and retrying its failed shards,
+// let an actor use a registry credential they were never granted. The rerun handler named the field
+// by hand and refused, which is how the two paths came to disagree.
+func TestRunObjectsCoversThePullCredential(t *testing.T) {
+	t.Parallel()
+	rn := &run.Run{
+		ID: "run_1", ProjectID: "prj_1", InventoryID: "inv_1",
+		Image: "registry.example/exec:1", PullCredentialID: "cred_pull",
+		CredentialIDs: []string{"cred_1"},
+	}
+	want := []string{"prj_1", "inv_1", "cred_pull", "cred_1"}
+	if diff := cmp.Diff(want, runObjects(rn), cmpopts.SortSlices(func(a, b string) bool { return a < b })); diff != "" {
+		t.Errorf("the objects a run uses (-want +got):\n%s", diff)
+	}
+}
+
+// TestRetryAuthorizesThePullCredential pins that retrying a run's failed shards is refused when the
+// actor is not granted the registry credential the retry would pull its execution image with.
+func TestRetryAuthorizesThePullCredential(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	users := user.NewMemStore()
+	tokens := auth.NewMemStore()
+	grants := grant.NewMemStore()
+	runs := run.NewMemStore()
+
+	operator, err := user.New("operator", "pw", user.RoleOperator)
+	if err != nil {
+		t.Fatalf("user.New() error = %v", err)
+	}
+	if err := users.Save(ctx, operator); err != nil {
+		t.Fatalf("users.Save() error = %v", err)
+	}
+	plain, tok, err := auth.New("t-operator")
+	if err != nil {
+		t.Fatalf("auth.New() error = %v", err)
+	}
+	tok.UserID = operator.ID
+	if err := tokens.Save(ctx, tok); err != nil {
+		t.Fatalf("tokens.Save() error = %v", err)
+	}
+	three := 3
+	if err := runs.Save(ctx, &run.Run{
+		ID: "run_split", Tool: "ansible", Kind: run.KindSplit, ShardCount: &three,
+		Status: run.StatusFailed, ProjectID: "prj_open",
+		Image: "registry.example/exec:1", PullCredentialID: "cred_private",
+	}); err != nil {
+		t.Fatalf("runs.Save() error = %v", err)
+	}
+	// The actor is granted everything the run touches except the registry credential.
+	if err := grants.Save(ctx, &grant.Grant{
+		ID: grant.NewID(), Subject: operator.ID, Object: "prj_open", Access: grant.AccessUse,
+	}); err != nil {
+		t.Fatalf("grants.Save() error = %v", err)
+	}
+
+	handler := New(runs, &fakeSubmitter{}, zap.NewNop(), WithTokens(tokens), WithUsers(users),
+		WithGrants(grants, true),
+		WithRetrier(&fakeRetrier{run: &run.Run{ID: "run_retry", Status: run.StatusPending}})).Handler()
+	retry := func() int {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1/runs/run_split/retry", nil)
+		req.Header.Set("Authorization", "Bearer "+plain)
+		handler.ServeHTTP(rec, req)
+		return rec.Code
+	}
+
+	if code := retry(); code != http.StatusForbidden {
+		t.Errorf("retry without a grant on the registry credential = %d, want 403: the retry "+
+			"inherits PullCredentialID, so it pulls an image the actor may not use", code)
+	}
+	if err := grants.Save(ctx, &grant.Grant{
+		ID: grant.NewID(), Subject: operator.ID, Object: "cred_private", Access: grant.AccessUse,
+	}); err != nil {
+		t.Fatalf("grants.Save() error = %v", err)
+	}
+	if code := retry(); code == http.StatusForbidden {
+		t.Error("retry with a grant on the registry credential is still refused")
+	}
+}
