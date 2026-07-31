@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/auth"
 	"github.com/kordloom/switchtender/internal/credential"
 	"github.com/kordloom/switchtender/internal/dispatch"
@@ -1878,5 +1880,135 @@ func TestRetryAuthorizesThePullCredential(t *testing.T) {
 	}
 	if code := retry(); code == http.StatusForbidden {
 		t.Error("retry with a grant on the registry credential is still refused")
+	}
+}
+
+// failingAudits is an audit store whose appends always fail, standing in for a full disk or a
+// locked database.
+type failingAudits struct{ err error }
+
+// Append always fails.
+func (f *failingAudits) Append(context.Context, *audit.Entry) error { return f.err }
+
+// List returns nothing.
+func (f *failingAudits) List(context.Context, int) ([]*audit.Entry, error) { return nil, nil }
+
+// Chain returns nothing.
+func (f *failingAudits) Chain(context.Context) ([]*audit.Entry, error) { return nil, nil }
+
+// TestMutationRefusedWhenItCannotBeAudited pins that a change which cannot be written to the audit
+// trail does not happen and is not reported as done.
+//
+// The append used to run in a goroutine whose error was logged and dropped, so a store failure meant
+// the mutation succeeded, returned 200, and left no trace. The chain showed no gap either: a
+// sequence number is assigned at append, so an entry that was never appended leaves no hole for
+// anyone to notice. For a product whose claim is a provable record of what happened, silently not
+// recording is the worst available outcome.
+func TestMutationRefusedWhenItCannotBeAudited(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	users := user.NewMemStore()
+	tokens := auth.NewMemStore()
+	runs := run.NewMemStore()
+
+	admin, err := user.New("admin", "pw", user.RoleAdmin)
+	if err != nil {
+		t.Fatalf("user.New() error = %v", err)
+	}
+	if err := users.Save(ctx, admin); err != nil {
+		t.Fatalf("users.Save() error = %v", err)
+	}
+	plain, tok, err := auth.New("t-admin")
+	if err != nil {
+		t.Fatalf("auth.New() error = %v", err)
+	}
+	tok.UserID = admin.ID
+	if err := tokens.Save(ctx, tok); err != nil {
+		t.Fatalf("tokens.Save() error = %v", err)
+	}
+
+	sub := &fakeSubmitter{run: &run.Run{ID: "run_new", Status: run.StatusPending}}
+	handler := New(runs, sub, zap.NewNop(), WithTokens(tokens), WithUsers(users),
+		WithAudit(&failingAudits{err: errors.New("disk full")})).Handler()
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/runs",
+		strings.NewReader(`{"playbook":"site.yml","inventory":"hosts.ini"}`))
+	req.Header.Set("Authorization", "Bearer "+plain)
+	req.Header.Set("Content-Type", "application/json")
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want 503: a change that cannot be recorded must be refused, not "+
+			"performed silently", rec.Code)
+	}
+	if sub.gotRun != nil {
+		t.Error("the run was submitted even though the audit entry could not be written, so the " +
+			"change happened with no record of it")
+	}
+}
+
+// TestMutationReturnsAnAuditReceipt pins that a recorded mutation hands the caller its chain
+// position, so a receipt holder can later demand that a chain contain it.
+//
+// A chain proves that what it holds was not altered. It cannot prove nothing is missing, because
+// the same process decides both what happens and what gets written down. A receipt is what moves
+// that from the server's word to the holder's evidence.
+func TestMutationReturnsAnAuditReceipt(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	users := user.NewMemStore()
+	tokens := auth.NewMemStore()
+	audits := audit.NewMemStore()
+
+	admin, err := user.New("admin", "pw", user.RoleAdmin)
+	if err != nil {
+		t.Fatalf("user.New() error = %v", err)
+	}
+	if err := users.Save(ctx, admin); err != nil {
+		t.Fatalf("users.Save() error = %v", err)
+	}
+	plain, tok, err := auth.New("t-admin")
+	if err != nil {
+		t.Fatalf("auth.New() error = %v", err)
+	}
+	tok.UserID = admin.ID
+	if err := tokens.Save(ctx, tok); err != nil {
+		t.Fatalf("tokens.Save() error = %v", err)
+	}
+
+	handler := New(run.NewMemStore(), &fakeSubmitter{run: &run.Run{ID: "run_new"}}, zap.NewNop(),
+		WithTokens(tokens), WithUsers(users), WithAudit(audits)).Handler()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/runs",
+		strings.NewReader(`{"playbook":"site.yml","inventory":"hosts.ini"}`))
+	req.Header.Set("Authorization", "Bearer "+plain)
+	req.Header.Set("Content-Type", "application/json")
+	handler.ServeHTTP(rec, req)
+
+	receipt := rec.Header().Get(AuditReceiptHeader)
+	if receipt == "" {
+		t.Fatalf("no %s header on a recorded mutation", AuditReceiptHeader)
+	}
+	// The receipt has to name a link that is actually in the chain, or it proves nothing.
+	chain, err := audits.Chain(ctx)
+	if err != nil {
+		t.Fatalf("Chain() error = %v", err)
+	}
+	if len(chain) != 1 {
+		t.Fatalf("chain holds %d entries, want 1", len(chain))
+	}
+	want := strconv.FormatInt(chain[0].Seq, 10) + ":" + chain[0].Hash
+	if receipt != want {
+		t.Errorf("receipt = %q, want %q: a receipt that does not name a real chain link cannot be "+
+			"redeemed against the chain", receipt, want)
+	}
+	// A read is not a mutation and gets no receipt.
+	readRec := httptest.NewRecorder()
+	readReq := httptest.NewRequest(http.MethodGet, "/v1/runs", nil)
+	readReq.Header.Set("Authorization", "Bearer "+plain)
+	handler.ServeHTTP(readRec, readReq)
+	if got := readRec.Header().Get(AuditReceiptHeader); got != "" {
+		t.Errorf("a read returned receipt %q, want none", got)
 	}
 }
