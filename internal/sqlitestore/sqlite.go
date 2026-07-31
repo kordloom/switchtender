@@ -1954,7 +1954,7 @@ WHERE status='running' AND claimed_by!='' AND claimed_at < ?`, sqlutil.FormatTim
 	res, err = tx.ExecContext(ctx, `
 UPDATE runs SET status='interrupted', ended_at=?,
 error=CASE WHEN error='' THEN '`+run.AbandonedParentError()+`' ELSE error END
-WHERE status='pending' AND claimed_by='' AND kind IN ('split','pipeline') AND created_at < ?`,
+WHERE status IN ('pending','running') AND claimed_by='' AND kind IN ('split','pipeline') AND created_at < ?`,
 		sqlutil.FormatTime(time.Now()), cut)
 	if err != nil {
 		return 0, fmt.Errorf("reclaim stale: %w", err)

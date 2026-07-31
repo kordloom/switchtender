@@ -36,10 +36,11 @@ func AbandonedParentError() string { return abandonedParentError }
 //
 //   - Claim excludes every run with a Kind, so no worker will ever pick a parent up. A parent that
 //     is not being coordinated in some process's memory is not waiting for anything.
-//   - A live coordinator saves its parent running, with a lease, as its first act. So a parent still
-//     pending well past the cutoff has no coordinator: the process that would have started one died
+//   - A live coordinator saves its parent running, with a lease, as its first act. So a parent past
+//     the cutoff with no lease has no coordinator: the process that would have started one died
 //     between saving the parent and starting it, or a child save failed and the submit returned
-//     early leaving the children it had already written behind.
+//     early leaving the children it had already written behind, or an approval released the parent
+//     and then the process handling that approval went away.
 //   - Held is not abandoned. A parent awaiting approval is resting, legitimately, for as long as it
 //     takes a person to decide, and Approve starts its coordinator. Sweeping those would cancel
 //     every gated split and workflow that outlived one sweep interval, which is why the status test
@@ -52,7 +53,16 @@ func AbandonedParent(r *Run, cutoff time.Time) bool {
 	if r.Kind != KindSplit && r.Kind != KindPipeline {
 		return false
 	}
-	return r.Status == StatusPending && r.ClaimedBy == "" && r.CreatedAt.Before(cutoff)
+	// Pending or running, both with no lease. Pending is a parent whose submit died before it could
+	// start one. Running is a parent an approval released: an approved parent goes straight to
+	// running so the sweep cannot catch it in the instant before its coordinator claims it, which
+	// leaves running-and-unclaimed as the state that means the coordinator never arrived. Neither
+	// the lease sweep, which only looks at leased runs, nor an earlier version of this rule, which
+	// only looked at pending ones, covered that, so it was a parent nothing would ever finish.
+	if r.Status != StatusPending && r.Status != StatusRunning {
+		return false
+	}
+	return r.ClaimedBy == "" && r.CreatedAt.Before(cutoff)
 }
 
 // Store persists runs, their captured log output, and their structured events.
