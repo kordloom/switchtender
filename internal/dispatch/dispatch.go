@@ -1589,17 +1589,26 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 	//
 	// A read that fails is not a run with no cancel on it. Treating an error as "carry on" started
 	// the tool on the strength of a question nobody answered, which is the same fail-open shape
-	// every other gate in this file was written to avoid. The read is retried, and a run that still
-	// cannot be checked is refused with the reason rather than executed.
+	// every other gate in this file was written to avoid.
+	//
+	// Refusing is not the same as failing it, though, and failing it was too blunt. This read sits
+	// on the start path of every run on every executor, and a relay worker asking a control node
+	// that is restarting gets a refused connection back in microseconds, so the whole retry budget
+	// burns in well under a second. A rolling upgrade then terminally failed every run that
+	// happened to start during it, and each one had to be found and replayed by hand.
+	//
+	// So the run is left alone instead: no tool starts, and the lease is simply not renewed. The
+	// sweep that already exists for an executor that stopped without finishing takes it back and
+	// marks it interrupted, which is retryable, and that is exactly what happened here.
 	cur, cerr := d.storeGetWithRetries(ctx, r.ID)
 	switch {
 	case cerr != nil:
+		d.log.Error("dispatch: could not check for a cancel before starting: "+cerr.Error(),
+			zap.String("run_id", r.ID))
 		close(stop)
 		<-tailed
-		d.finalize(r, run.StatusFailed, nil,
-			"could not check whether this run was canceled before starting it: "+cerr.Error())
 		d.publisher.CloseRun(r.ID)
-		return run.StatusFailed
+		return run.StatusRunning
 	case cur.CancelRequested:
 		close(stop)
 		<-tailed
