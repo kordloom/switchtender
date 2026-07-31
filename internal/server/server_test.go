@@ -785,7 +785,25 @@ func TestRunStreamEndsOnShutdown(t *testing.T) {
 	served := make(chan error, 1)
 	go func() { served <- httpServer.Serve(ln) }()
 
-	res, err := http.Get("http://" + ln.Addr().String() + "/v1/runs/run_live/stream")
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		"http://"+ln.Addr().String()+"/v1/runs/run_live/stream", nil)
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	// Resume from the very start of both cursors, the way a reconnecting browser does.
+	//
+	// The handler flushes its response headers before it reads the position it will stream from,
+	// and by design a stream with no cursor starts at the current end. So an append landing in that
+	// window is not replayed, and the read below waited for bytes that were never going to be sent.
+	// With no deadline on the client that was an indefinite block: this test hung a full suite run
+	// for ten minutes once and passed twenty times in isolation, because the window is narrow and
+	// only a loaded machine widens it. Naming an explicit cursor removes the race rather than
+	// hiding it behind a sleep.
+	req.Header.Set("Last-Event-ID", "0:0")
+	// A bound so a stream that stops sending fails this test in seconds instead of hanging the
+	// suite. It is far above the real runtime, which is milliseconds.
+	client := &http.Client{Timeout: 30 * time.Second}
+	res, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("GET stream: %v", err)
 	}
