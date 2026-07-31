@@ -170,6 +170,35 @@ func (a *authorizer) subjectsFor(ctx context.Context, actor Actor) (map[string]b
 	return subjects, nil
 }
 
+// denyForeignOrg reports whether the actor may not place a template in orgID, and writes the denial
+// when so. An empty orgID is unowned and always allowed.
+//
+// An organization is not a grantable object: resolveObjectOrg understands project, template,
+// inventory and credential ids and nothing else, so passing an org id to authorizeAll resolves to
+// not-found and, under strict grants, denies. Adding one to that list therefore refused every
+// non-admin template write, which is the delegation the feature exists for. Membership is the right
+// question, and subjectsFor already answers it.
+func (a *authorizer) denyForeignOrg(w http.ResponseWriter, r *http.Request, log *zap.Logger,
+	orgID string) bool {
+	if a == nil || orgID == "" || !a.strict {
+		return false
+	}
+	actor, ok := actorFrom(r.Context())
+	if !ok || actor.Role == user.RoleAdmin {
+		return false
+	}
+	subjects, err := a.subjectsFor(r.Context(), actor)
+	if err != nil {
+		respondError(w, log, http.StatusInternalServerError, "could not check organization access")
+		return true
+	}
+	if subjects[orgID] {
+		return false
+	}
+	respondError(w, log, http.StatusForbidden, "not a member of that organization")
+	return true
+}
+
 // manages reports whether actor holds management authority over object through an explicit manage
 // grant, admin of the object's owning organization, or the global admin role. Unlike authorize it
 // never defers to the global role for an ungranted object, since management delegation requires an

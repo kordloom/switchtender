@@ -140,7 +140,7 @@ func TestAppendLogCoalesces(t *testing.T) {
 	ctx := context.Background()
 	c, backing, posts := countingRelay(t)
 
-	r := &run.Run{ID: "run_chatty", Playbook: "site.yml", Status: run.StatusRunning, CreatedAt: time.Now()}
+	r := &run.Run{ID: "run_chatty", Playbook: "site.yml", Status: run.StatusRunning, CreatedAt: time.Now(), ClaimedBy: "worker-a"}
 	if err := backing.Save(ctx, r); err != nil {
 		t.Fatalf("seed Save() error = %v", err)
 	}
@@ -183,7 +183,7 @@ func TestAppendLogFlushesOnDelay(t *testing.T) {
 	ctx := context.Background()
 	c, backing, posts := countingRelay(t)
 
-	r := &run.Run{ID: "run_quiet", Playbook: "site.yml", Status: run.StatusRunning, CreatedAt: time.Now()}
+	r := &run.Run{ID: "run_quiet", Playbook: "site.yml", Status: run.StatusRunning, CreatedAt: time.Now(), ClaimedBy: "worker-a"}
 	if err := backing.Save(ctx, r); err != nil {
 		t.Fatalf("seed Save() error = %v", err)
 	}
@@ -214,7 +214,7 @@ func TestAppendLogFlushesOnSize(t *testing.T) {
 	ctx := context.Background()
 	c, backing, posts := countingRelay(t)
 
-	r := &run.Run{ID: "run_loud", Playbook: "site.yml", Status: run.StatusRunning, CreatedAt: time.Now()}
+	r := &run.Run{ID: "run_loud", Playbook: "site.yml", Status: run.StatusRunning, CreatedAt: time.Now(), ClaimedBy: "worker-a"}
 	if err := backing.Save(ctx, r); err != nil {
 		t.Fatalf("seed Save() error = %v", err)
 	}
@@ -241,7 +241,7 @@ func TestAppendLogOrderUnderConcurrency(t *testing.T) {
 	ctx := context.Background()
 	c, backing, _ := countingRelay(t)
 
-	r := &run.Run{ID: "run_order", Playbook: "site.yml", Status: run.StatusRunning, CreatedAt: time.Now()}
+	r := &run.Run{ID: "run_order", Playbook: "site.yml", Status: run.StatusRunning, CreatedAt: time.Now(), ClaimedBy: "worker-a"}
 	if err := backing.Save(ctx, r); err != nil {
 		t.Fatalf("seed Save() error = %v", err)
 	}

@@ -1822,6 +1822,25 @@ WHERE id=$2 AND claimed_by='' AND status IN ('pending', 'pending_approval')`,
 	return n > 0, nil
 }
 
+// TransitionStatusAndClaim moves the run between statuses and stamps owner's lease in the same
+// statement, so the run is never visible in the new status without an owner.
+func (s *store) TransitionStatusAndClaim(ctx context.Context, id string, from, to run.Status,
+	owner string) (bool, error) {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE runs SET status=$1, claimed_by=$2, claimed_at=`+pgNowText+`,
+started_at=COALESCE(NULLIF(started_at,''), `+pgNowText+`)
+WHERE id=$3 AND status=$4`,
+		string(to), owner, id, string(from))
+	if err != nil {
+		return false, fmt.Errorf("transition status and claim: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("transition status and claim: %w", err)
+	}
+	return n > 0, nil
+}
+
 // TransitionStatus atomically moves the run from one status to another, reporting whether it changed.
 func (s *store) TransitionStatus(ctx context.Context, id string, from, to run.Status) (bool, error) {
 	res, err := s.db.ExecContext(ctx,

@@ -67,6 +67,13 @@ func (c *Client) SaveTaskSummary(ctx context.Context, runID string, summaries []
 // The remaining run.Store methods are control-node queries and analytics a worker never calls, so a
 // relay Client refuses them rather than pretending to serve them across the wire.
 
+// TransitionStatusAndClaim is a control-node operation. Approving a held run happens where the
+// policy and the approver are, never on a worker.
+func (c *Client) TransitionStatusAndClaim(context.Context, string, run.Status, run.Status,
+	string) (bool, error) {
+	return false, ErrUnsupported
+}
+
 // ByIdempotencyKey is a control-node query and is not served to workers.
 func (c *Client) ByIdempotencyKey(context.Context, string) (*run.Run, error) {
 	return nil, ErrUnsupported

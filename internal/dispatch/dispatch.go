@@ -910,32 +910,45 @@ func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string) (*r
 	return retry, nil
 }
 
-// parentMayStart reports whether a parent coordinator should begin, and settles the parent when it
-// should not.
+// parentMayStart claims the parent for this coordinator and reports whether it may begin.
 //
-// The start save is an unconditional upsert, so a parent canceled between its submit and the
-// coordinator's first write came back running and the whole fan-out proceeded. finalize goes through
-// a fence for exactly this reason; the start had none. Both parent kinds share this one, because the
-// split path was fixed first and the pipeline path was not, and a canceled pipeline then ran every
-// step to completion and reported success.
+// The claim is a compare-and-swap from the status the parent should still be in, which makes the
+// check and the start one operation. Reading the stored state and then writing was two, and the
+// write is an upsert, so a cancel landing between them was silently undone and the whole fan-out
+// executed after the API had already answered "canceled". CancelPending terminalizes an unclaimed
+// parent without setting the cancel flag, so nothing downstream would have caught it either.
+//
+// A swap that changes nothing means the parent is no longer where it was left: canceled, already
+// coordinated, or swept. Either way this coordinator does not own it and settles its children
+// instead of starting them.
 func (d *Dispatcher) parentMayStart(parent *run.Run, childIDs []string) bool {
-	current, err := d.store.Get(context.Background(), parent.ID)
+	ctx := context.Background()
+	ok, err := d.store.TransitionStatusAndClaim(ctx, parent.ID, parent.Status,
+		run.StatusRunning, d.owner)
 	if err != nil {
-		// The stored state is unreadable. Refusing to start on a transient read failure would
-		// strand a healthy run, and the cancel paths still reach it once it is running.
-		return true
-	}
-	if current.Status.Terminal() {
-		d.log.Info("dispatch: parent already finished, not starting its coordination",
-			zap.String("run_id", parent.ID), zap.String("status", string(current.Status)))
-		d.cancelChildren(childIDs)
-		return false
-	}
-	if current.CancelRequested {
-		d.log.Info("dispatch: parent was canceled before it started",
+		// The store is unreachable. Starting on an unknown state risks resurrecting a canceled
+		// run, and the fence exists precisely for that uncertainty.
+		d.log.Error("dispatch: could not claim parent to start it: "+err.Error(),
 			zap.String("run_id", parent.ID))
 		d.cancelChildren(childIDs)
-		d.finalize(parent, run.StatusCanceled, nil, "")
+		d.publisher.CloseRun(parent.ID)
+		return false
+	}
+	if !ok {
+		current, gerr := d.store.Get(ctx, parent.ID)
+		status := "unknown"
+		if gerr == nil {
+			status = string(current.Status)
+		}
+		d.log.Info("dispatch: parent moved on before its coordination started",
+			zap.String("run_id", parent.ID), zap.String("status", status))
+		d.cancelChildren(childIDs)
+		if gerr == nil && !current.Status.Terminal() {
+			d.finalize(parent, run.StatusCanceled, nil, "")
+		}
+		// A UI tailing this parent has to see the stream end, as it does on every other terminal
+		// path.
+		d.publisher.CloseRun(parent.ID)
 		return false
 	}
 	return true

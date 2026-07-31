@@ -57,7 +57,7 @@ func (g *authGate) wrap(next http.Handler) http.Handler {
 			// because the append is fail-closed, an unhealthy audit store then locked every account
 			// out of signing in, including on a fresh install with no token yet. Authentication
 			// attempts belong in the log, which already carries them.
-			if isHook(r) && !g.record(w, "webhook", r) {
+			if !isSignIn(r) && !g.record(w, unauthenticatedActor(r), r) {
 				return
 			}
 			next.ServeHTTP(w, r)
@@ -142,9 +142,35 @@ func actorFrom(ctx context.Context) (Actor, bool) {
 }
 
 // isHook reports whether the request is a webhook trigger, which authenticates by a secret in its
-// path rather than by a token header.
+// path rather than by a token header. It matches with and without the version prefix, because
+// protects strips one and the two must agree about what a hook is.
 func isHook(r *http.Request) bool {
-	return r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/hooks/")
+	p := strings.TrimPrefix(r.URL.Path, "/v1")
+	return r.Method == http.MethodPost && strings.HasPrefix(p, "/hooks/")
+}
+
+// isSignIn reports whether the request is an authentication attempt.
+//
+// These are the only unauthenticated mutations left out of the chain. They are reachable by anyone
+// on the network, so recording each attempt let a stranger append without bound to the structure
+// the integrity story rests on, and the fail-closed append then locked everyone out whenever the
+// audit store was unhealthy. Every other unauthenticated mutation is recorded, including the ones
+// that provision an account, which an earlier narrowing dropped by mistake.
+func isSignIn(r *http.Request) bool {
+	p := strings.TrimPrefix(r.URL.Path, "/v1")
+	return p == "/auth/login" || p == "/auth/logout" || strings.HasPrefix(p, "/auth/oidc/")
+}
+
+// unauthenticatedActor names the kind of caller on a path that carries no token.
+func unauthenticatedActor(r *http.Request) string {
+	switch {
+	case isHook(r):
+		return "webhook"
+	case strings.HasSuffix(strings.TrimPrefix(r.URL.Path, "/v1"), "/auth/saml/acs"):
+		return "saml"
+	default:
+		return "unauthenticated"
+	}
 }
 
 // auditPath returns the request path with anything secret removed, which is what the chain records.
@@ -158,10 +184,8 @@ func auditPath(r *http.Request) string {
 	if !isHook(r) {
 		return r.URL.Path
 	}
-	rest := strings.TrimPrefix(r.URL.Path, "/hooks/")
-	if i := strings.IndexByte(rest, '/'); i >= 0 {
-		return "/hooks/[redacted]" + rest[i:]
-	}
+	// Everything after the prefix is redacted, not just the first segment. An encoded slash inside
+	// a token would otherwise split it and record the tail, and nothing downstream needs the rest.
 	return "/hooks/[redacted]"
 }
 
@@ -197,7 +221,7 @@ func (g *authGate) record(w http.ResponseWriter, actor string, r *http.Request) 
 	}
 	if err := g.audits.Append(r.Context(), entry); err != nil {
 		g.log.Error("server: append audit entry: "+err.Error(),
-			zap.String("method", r.Method), zap.String("path", r.URL.Path))
+			zap.String("method", r.Method), zap.String("path", auditPath(r)))
 		respondError(w, g.log, http.StatusServiceUnavailable,
 			"refused: the change could not be recorded in the audit trail")
 		return false
