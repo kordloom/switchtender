@@ -76,6 +76,9 @@ func createPolicyHandler(store policy.Store, log *zap.Logger) http.HandlerFunc {
 		}
 		if err := store.Save(r.Context(), p); err != nil {
 			log.Error("server: save policy: " + err.Error())
+			if denyReadOnlyPolicies(w, log, err) {
+				return
+			}
 			respondError(w, log, http.StatusInternalServerError, "could not store policy")
 			return
 		}
@@ -122,6 +125,9 @@ func updatePolicyHandler(store policy.Store, log *zap.Logger) http.HandlerFunc {
 		}
 		if err := store.Save(r.Context(), p); err != nil {
 			log.Error("server: update policy: " + err.Error())
+			if denyReadOnlyPolicies(w, log, err) {
+				return
+			}
 			respondError(w, log, http.StatusInternalServerError, "could not store policy")
 			return
 		}
@@ -161,10 +167,28 @@ func deletePolicyHandler(store policy.Store, log *zap.Logger) http.HandlerFunc {
 		}
 		if err != nil {
 			log.Error("server: delete policy: " + err.Error())
+			if denyReadOnlyPolicies(w, log, err) {
+				return
+			}
 			respondError(w, log, http.StatusInternalServerError, "could not delete policy")
 			return
 		}
 		respondJSON(w, log, http.StatusOK,
 			map[string]string{"deleted": r.PathValue("id")}, wantsPretty(r))
 	}
+}
+
+// denyReadOnlyPolicies reports whether err means the policy source refuses changes, and writes the
+// reason when it does.
+//
+// A file-backed policy set is read-only on purpose: the file is the source of truth so a change to
+// what needs approval goes through review. Reporting that as a 500 tells an operator something
+// broke, when what actually happened is the system working as configured, so it is a conflict with
+// an explanation instead.
+func denyReadOnlyPolicies(w http.ResponseWriter, log *zap.Logger, err error) bool {
+	if !errors.Is(err, policy.ErrReadOnly) {
+		return false
+	}
+	respondError(w, log, http.StatusConflict, err.Error())
+	return true
 }

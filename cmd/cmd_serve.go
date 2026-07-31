@@ -72,6 +72,11 @@ var serveAddr string
 // serveDB holds the value of the --db flag.
 var serveDB string
 
+// policyFile names a YAML file holding the approval policies, making the file the source of truth
+// instead of the database. A policy decides which runs a person has to approve, so who may change it
+// is the whole question, and a file answers it with review and a commit history.
+var policyFile string
+
 // serveListener, when set, is the already-bound listener the server uses instead of binding
 // serveAddr itself. The desktop command sets it so the port it chose cannot be taken by another
 // process before the server starts.
@@ -365,6 +370,10 @@ var serveCmd = &cobra.Command{
 // init registers serve command flags.
 func init() {
 	serveCmd.Flags().StringVar(&serveAddr, "addr", defaultServeAddr, "Address the server listens on. Loopback by default. Set 0.0.0.0 to expose it on the network.")
+	serveCmd.Flags().StringVar(&policyFile, "policy-file", "",
+		"YAML file holding the approval policies. When set, the file is the source of truth and the "+
+			"API refuses policy changes, so a change to what needs approval is a reviewed diff. A "+
+			"malformed file stops the server rather than silently gating nothing.")
 	serveCmd.Flags().StringVar(&serveDB, "db", defaultDBPath,
 		"SQLite file path, or a postgres:// DSN for the PostgreSQL backend.")
 	serveCmd.Flags().StringVar(&serveTLSCert, "tls-cert", "",
@@ -709,6 +718,21 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("project cache: %w", err)
 	}
 	emailer, onFailureOnly := buildEmailer()
+	// Policies come from a file when one is configured, so a change to what needs approval is a
+	// reviewed diff rather than an API call. A malformed file stops the server: degrading to no
+	// policies would turn a typo into an install where nothing is gated and nothing says so.
+	policies := bundle.Policies()
+	if policyFile != "" {
+		filePolicies, perr := policy.NewFileStore(policyFile)
+		if perr != nil {
+			return perr
+		}
+		policies = filePolicies
+		count, _ := filePolicies.List(cmd.Context())
+		log.Info("serve: approval policies read from file",
+			zap.String("path", policyFile), zap.Int("policies", len(count)))
+	}
+
 	disp := dispatch.New(store, runner, log, dispatch.WithPublisher(hub),
 		dispatch.WithWorkers(serveWorkers),
 		dispatch.WithMaxShards(serveMaxShards),
@@ -730,7 +754,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		dispatch.WithInventories(bundle.Inventories()),
 		dispatch.WithInventorySources(bundle.InventorySources()),
 		dispatch.WithSourceSync(),
-		dispatch.WithPolicies(bundle.Policies()))
+		dispatch.WithPolicies(policies))
 	defer disp.Close()
 
 	scheduler := schedule.NewScheduler(schedules, disp, log,
@@ -819,7 +843,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			server.WithTemplates(bundle.Templates()),
 			server.WithUsers(bundle.Users()),
 			server.WithInventories(bundle.Inventories()),
-			server.WithPolicies(bundle.Policies()),
+			server.WithPolicies(policies),
 			server.WithAudit(bundle.Audits()),
 			server.WithProducerIdentity(producer, resolveVersion()),
 			server.WithAuditSigner(auditSigner),

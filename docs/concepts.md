@@ -129,6 +129,33 @@ What none of this defends against is an operator running modified code on the ma
 is the boundary of every audit system, it costs an attacker the whole controller to reach, and it
 does not hand them the past: anything already anchored stays fixed and still proves what it proved.
 
+## Policy as code
+
+Approval policies decide which runs a person has to sign off, so who may change them is the whole
+question. Held as rows they are changed by anyone the API lets through, and the change leaves a row
+indistinguishable from the row before it.
+
+Point `--policy-file` at a YAML file and that file becomes the source of truth:
+
+    policies:
+      - name: prod-terraform-destroy
+        tool: terraform
+        command_contains: destroy
+      - name: large-teardown
+        tool: opentofu
+        max_destroy: 5
+
+A change to what needs approval is then a diff. It goes through whatever review the repository
+holding it requires, it is attributable to a commit, and an auditor reads the policy that was in
+force at any moment by checking out that commit. The API refuses policy writes with a 409 naming the
+file, rather than accepting a change that would have no effect. A malformed file stops the server,
+because degrading to no policies turns a typo into an install where nothing is gated and nothing
+says so. Editing the file takes effect without a restart, so merging is what deploys.
+
+Omitting `max_destroy` makes a blanket policy that holds every matching run. Setting it makes a
+plan-content policy that holds only when a Terraform or OpenTofu plan would destroy more than that
+many resources.
+
 ## Approvals
 
 A run can be marked to require approval. It is held in a pending-approval state that the claim loop

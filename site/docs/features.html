@@ -115,6 +115,10 @@
 <td>Mark a run to require sign-off, or require it automatically by policy on tool, command, or target. A held run never executes until an admin approves or rejects it, and the request and decision land in the tamper-evident audit trail.</td>
 </tr>
 <tr>
+<td>Policy as code</td>
+<td>Point <code>--policy-file</code> at a YAML file and it becomes the source of truth for approval policies. A change to what needs approval is then a reviewed diff with a commit behind it, the API refuses policy writes with a 409 that says where to make the change, and a malformed file stops the server rather than silently gating nothing.</td>
+</tr>
+<tr>
 <td>Observability</td>
 <td>A Prometheus metrics endpoint, webhook notifications when runs finish, and an audit trail of every mutation.</td>
 </tr>
