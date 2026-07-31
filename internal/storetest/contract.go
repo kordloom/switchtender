@@ -1925,13 +1925,6 @@ func testReclaimLeavesACoordinatedParentAlone(t *testing.T, store run.Store) {
 	}
 }
 
-// testTransitionStatusAndClaim verifies a run moves status and gains an owner in one step.
-//
-// Two separate writes leave a window either way. Transition first and a parent is running with no
-// lease, which is exactly what the abandoned-parent sweep settles, so a janitor tick landing there
-// cancels a run an approver just released. Lease first and a process that dies before the
-// transition leaves the run held with an owner, which CancelPending refuses to touch, so it can
-// never be canceled either. Neither state exists if the store does both at once.
 // testClaimSkipsChildrenOfSettledParents checks that a shard is not claimable under a parent that is
 // already settled or being canceled.
 func testClaimSkipsChildrenOfSettledParents(t *testing.T, store run.Store) {
@@ -1961,6 +1954,13 @@ func testClaimSkipsChildrenOfSettledParents(t *testing.T, store run.Store) {
 	}
 }
 
+// testTransitionStatusAndClaim verifies a run moves status and gains an owner in one step.
+//
+// Two separate writes leave a window either way. Transition first and a parent is running with no
+// lease, which is exactly what the abandoned-parent sweep settles, so a janitor tick landing there
+// cancels a run an approver just released. Lease first and a process that dies before the
+// transition leaves the run held with an owner, which CancelPending refuses to touch, so it can
+// never be canceled either. Neither state exists if the store does both at once.
 func testTransitionStatusAndClaim(t *testing.T, store run.Store) {
 	ctx := context.Background()
 	held := &run.Run{
