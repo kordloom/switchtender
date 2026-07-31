@@ -249,8 +249,44 @@ func applyWorkerReport(stored, reported *run.Run) {
 	}
 }
 
+// heldForReport reports whether the run named in the request is one a worker may write a record
+// for, answering the caller and returning false when it is not.
+//
+// The holder boundary covers the record, not only the status. A worker token refused a status
+// report on a run awaiting a decision could still append "PLAY RECAP ok=12 failed=0" to that run's
+// captured output, and could append to a run held by a different executor. What an approver reads
+// while deciding is exactly the thing worth forging, so the same question that gates a status
+// report gates the writes that build the record: which runs may be reported on at all.
+func (s *relayServer) heldForReport(w http.ResponseWriter, r *http.Request) bool {
+	stored, err := s.store.Get(r.Context(), r.PathValue("id"))
+	switch {
+	case errors.Is(err, run.ErrNotFound):
+		writeErr(w, http.StatusNotFound, "run not found")
+		return false
+	case err != nil:
+		s.internal(w, "read run", err)
+		return false
+	}
+	if stored.Status.Terminal() {
+		writeErr(w, http.StatusConflict, "run already finished and cannot be added to")
+		return false
+	}
+	if stored.Status == run.StatusPendingApproval || stored.Status == run.StatusRejected {
+		writeErr(w, http.StatusConflict, "run is awaiting a decision and is not a worker's to add to")
+		return false
+	}
+	if stored.ClaimedBy == "" {
+		writeErr(w, http.StatusConflict, "run is not claimed, so there is nothing to report on")
+		return false
+	}
+	return true
+}
+
 // appendLog appends the raw request body to the run's captured output, or 404 when the run is gone.
 func (s *relayServer) appendLog(w http.ResponseWriter, r *http.Request) {
+	if !s.heldForReport(w, r) {
+		return
+	}
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "read log body")
@@ -269,6 +305,9 @@ func (s *relayServer) appendLog(w http.ResponseWriter, r *http.Request) {
 
 // appendEvents appends the structured events in the body to the run, or 404 when the run is gone.
 func (s *relayServer) appendEvents(w http.ResponseWriter, r *http.Request) {
+	if !s.heldForReport(w, r) {
+		return
+	}
 	var events []event.Event
 	if err := json.NewDecoder(r.Body).Decode(&events); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid events body")
@@ -287,6 +326,9 @@ func (s *relayServer) appendEvents(w http.ResponseWriter, r *http.Request) {
 
 // saveHostSummary replaces the run's per-host summaries with those in the body.
 func (s *relayServer) saveHostSummary(w http.ResponseWriter, r *http.Request) {
+	if !s.heldForReport(w, r) {
+		return
+	}
 	var summaries []run.HostSummary
 	if err := json.NewDecoder(r.Body).Decode(&summaries); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid host summary body")
@@ -301,6 +343,9 @@ func (s *relayServer) saveHostSummary(w http.ResponseWriter, r *http.Request) {
 
 // saveTaskSummary replaces the run's per-task summaries with those in the body.
 func (s *relayServer) saveTaskSummary(w http.ResponseWriter, r *http.Request) {
+	if !s.heldForReport(w, r) {
+		return
+	}
 	var summaries []run.TaskSummary
 	if err := json.NewDecoder(r.Body).Decode(&summaries); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid task summary body")
