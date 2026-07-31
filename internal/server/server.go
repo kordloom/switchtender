@@ -362,6 +362,15 @@ func New(store run.Store, submitter Submitter, log *zap.Logger, opts ...Option) 
 	for _, opt := range opts {
 		opt(srv)
 	}
+	// The identity providers record a successful sign-in themselves. Sign-in is exempt from the
+	// fail-closed append that covers every other mutation, so without this an SSO login left no
+	// trace in the chain at all.
+	if srv.saml != nil {
+		srv.saml.WithAudits(srv.audits)
+	}
+	if srv.oidc != nil {
+		srv.oidc.WithAudits(srv.audits)
+	}
 	srv.web = ui.New(srv.log, srv.docs, srv.readOnly, srv.matrixCap, srv.oidc != nil, srv.saml != nil)
 	return srv
 }
@@ -506,7 +515,7 @@ func (s *Server) Handler() http.Handler {
 		handler = readOnlyGate(handler)
 	}
 	if s.relayStore != nil && s.workerToken != "" {
-		handler = relayGate(relay.NewHandler(s.relayStore, s.workerToken, s.log), handler)
+		handler = relayGate(relay.NewHandler(s.relayStore, s.workerToken, s.log, s.policies), handler)
 	}
 	return securityHeaders(bodyLimit(handler))
 }
