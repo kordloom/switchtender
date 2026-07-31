@@ -111,6 +111,41 @@ func (m *masker) longest() int {
 	return len(m.secrets[0])
 }
 
+// wholeSecretCut returns a release point at or after cut that no secret occurrence straddles.
+//
+// Splitting an occurrence would leave half of it in the released bytes, where redaction can no
+// longer see the whole value, and half in the withheld tail. Extending the point to the end of any
+// straddling occurrence keeps every match intact on the side that gets redacted.
+func (m *masker) wholeSecretCut(buf []byte, cut int) int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if len(m.secrets) == 0 {
+		return cut
+	}
+	// A secret can only reach past the point from within the preceding longest-1 bytes, and pushing
+	// the point forward can expose another straddle, so this repeats until it settles.
+	for moved := true; moved; {
+		moved = false
+		for _, sec := range m.secrets {
+			from := max(cut-len(sec)+1, 0)
+			for at := from; at < cut; at++ {
+				if at+len(sec) > len(buf) {
+					break
+				}
+				if bytes.Equal(buf[at:at+len(sec)], sec) && at+len(sec) > cut {
+					cut = at + len(sec)
+					moved = true
+					break
+				}
+			}
+			if moved {
+				break
+			}
+		}
+	}
+	return cut
+}
+
 // streamMasker redacts a byte stream whose chunk boundaries fall wherever the operating system
 // happened to split the pipe. Redacting each chunk on its own misses a secret straddling two of
 // them: neither half contains the whole value, so neither is replaced and the plaintext reaches the
@@ -143,24 +178,23 @@ func (s *streamMasker) next(chunk []byte) []byte {
 		buf = append(buf, s.tail...)
 		buf = append(buf, chunk...)
 	}
-	// Redact the whole buffer before deciding what to release, so a secret lying across the release
-	// point is replaced rather than being split between the emitted part and the withheld part.
-	red := s.mask.redact(buf)
-	if keep == 0 {
-		s.tail = nil
-		return red
-	}
-	if len(red) <= keep {
+	if keep == 0 || len(buf) <= keep {
+		if keep == 0 {
+			s.tail = nil
+			return s.mask.redact(buf)
+		}
 		// Nothing can be released yet: every byte so far could still begin a secret the next chunk
-		// finishes. A copy is taken because the caller owns chunk and may reuse it.
-		s.tail = append(s.tail[:0], red...)
+		// finishes. The bytes are kept as they arrived, not redacted, because redacting them now
+		// could replace a short secret with the mask token and destroy the bytes a longer secret
+		// overlapping it needs once the rest of it lands.
+		s.tail = append(s.tail[:0], buf...)
 		return nil
 	}
-	// What is withheld is the redacted tail. A secret only partly arrived does not match yet, so its
-	// prefix is carried forward intact and matches once the rest lands.
-	cut := len(red) - keep
-	s.tail = append(s.tail[:0], red[cut:]...)
-	return red[:cut]
+	// Release everything except the last keep bytes, then push the release point past any secret
+	// that would otherwise be cut in half by it, so the whole occurrence is redacted together.
+	cut := s.mask.wholeSecretCut(buf, len(buf)-keep)
+	s.tail = append(s.tail[:0], buf[cut:]...)
+	return s.mask.redact(buf[:cut])
 }
 
 // flush releases the withheld end of the stream, redacted. It is called once the stream is finished,
