@@ -43,6 +43,9 @@ type Bundle struct {
 	Chain *BundleChain `json:"chain,omitempty"`
 	// Claims are the audit entries, ascending by sequence and contiguous.
 	Claims []BundleClaim `json:"claims"`
+	// Anchors fix chain links in places this install cannot rewrite alone, so a chain that has
+	// silently lost its tail can be caught. Omitted when there are none, which is level 2.
+	Anchors []BundleAnchor `json:"anchors,omitempty"`
 	// Signatures holds the producer signature. It is emptied and recomputed when the bundle is
 	// signed, so it is written as an empty array here.
 	Signatures []any `json:"signatures"`
@@ -113,6 +116,55 @@ type BundleCoordLink struct {
 	Prev string `json:"prev"`
 	// Link is this claim's link.
 	Link string `json:"link"`
+}
+
+// BundleAnchor is one external anchor record, in the shape the LoomSeal format defines.
+type BundleAnchor struct {
+	// Type is the anchor kind: rfc3161, git, or https.
+	Type string `json:"type"`
+	// Seq is the chain position the anchor fixes.
+	Seq int64 `json:"seq"`
+	// Link is the hash of the entry at Seq.
+	Link string `json:"link"`
+	// At is when the anchor was made, RFC 3339 UTC.
+	At string `json:"at"`
+	// Ref locates the anchor.
+	Ref string `json:"ref"`
+	// Proof is the embedded offline proof, carried only by rfc3161 anchors.
+	Proof string `json:"proof,omitempty"`
+}
+
+// AttachAnchors adds the anchor records covering this bundle's range and drops the rest, then
+// reports how many were kept.
+//
+// A verifier rejects a bundle carrying an anchor that names no link the bundle holds, so attaching
+// an anchor for a sequence outside the exported range turns a good export into a failing one. The
+// rule lives here, beside the format it comes from, rather than at each call site. Anchors must be
+// attached before the bundle is signed, since the signature covers them.
+func (b *Bundle) AttachAnchors(anchors []*Anchor) int {
+	links := make(map[int64]string, len(b.Claims)+1)
+	for _, c := range b.Claims {
+		links[c.Chain.Seq] = c.Chain.Link
+	}
+	if b.Chain != nil {
+		links[b.Chain.Head.Seq] = b.Chain.Head.Link
+	}
+	out := make([]BundleAnchor, 0, len(anchors))
+	for _, a := range anchors {
+		if a == nil || links[a.Seq] != a.Link {
+			continue
+		}
+		out = append(out, BundleAnchor{
+			Type: a.Type, Seq: a.Seq, Link: a.Link,
+			At: a.At.UTC().Format(time.RFC3339), Ref: a.Ref, Proof: a.Proof,
+		})
+	}
+	if len(out) == 0 {
+		b.Anchors = nil
+		return 0
+	}
+	b.Anchors = out
+	return len(out)
 }
 
 // BuildBundle assembles entries into an unsigned bundle. Entries must be the chain in ascending

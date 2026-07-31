@@ -84,6 +84,18 @@ func runAuditBundle(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
+	// Anchors go on before signing, so the signature covers them. Only those naming a link this
+	// bundle actually holds are attached; the rest would make a verifier reject the whole export.
+	if anchors, ok := store.Audits().(audit.AnchorStore); ok {
+		recorded, aerr := anchors.Anchors(cmd.Context(), entries[len(entries)-1].Seq)
+		if aerr != nil {
+			return fmt.Errorf("read anchors: %w", aerr)
+		}
+		if n := doc.AttachAnchors(recorded); n > 0 {
+			fmt.Fprintf(os.Stderr, "Attached %d anchor(s), so a verifier can see this chain has "+
+				"not been shortened.\n", n)
+		}
+	}
 	signed, err := audit.SignBundleDoc(doc, id.Private())
 	if err != nil {
 		return err

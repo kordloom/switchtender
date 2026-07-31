@@ -8,10 +8,37 @@ import (
 
 // memStore is an in-memory audit Store guarded by a mutex.
 type memStore struct {
-	// mu guards entries.
+	// mu guards entries and anchors.
 	mu sync.RWMutex
 	// entries holds every appended entry in chain order.
 	entries []*Entry
+	// anchors holds every recorded anchor.
+	anchors []*Anchor
+}
+
+// SaveAnchor records one anchor.
+func (m *memStore) SaveAnchor(_ context.Context, a *Anchor) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cp := *a
+	m.anchors = append(m.anchors, &cp)
+	return nil
+}
+
+// Anchors returns every anchor at or below seq, oldest first. A seq of zero or less returns all.
+func (m *memStore) Anchors(_ context.Context, seq int64) ([]*Anchor, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]*Anchor, 0, len(m.anchors))
+	for _, a := range m.anchors {
+		if seq > 0 && a.Seq > seq {
+			continue
+		}
+		cp := *a
+		out = append(out, &cp)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Seq < out[j].Seq })
+	return out, nil
 }
 
 // NewMemStore returns an empty in-memory audit Store.
