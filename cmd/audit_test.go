@@ -25,9 +25,6 @@ func TestEveryCLIMutationIsAudited(t *testing.T) {
 	exempt := map[string]string{
 		// The demo seeds a throwaway database and serves it read-only.
 		"cmd_demo.go": "seeds a disposable demo database",
-		// Restore rebuilds a database wholesale from a backup taken elsewhere; its own audit chain
-		// comes back with it, and recording into the database being replaced is meaningless.
-		"cmd_backup.go": "restores a database wholesale",
 	}
 
 	files, err := filepath.Glob("cmd_*.go")
