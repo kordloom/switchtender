@@ -466,7 +466,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /v1/triggers/{id}/rotate-secret", rotateTriggerSecretHandler(s.triggers, s.sealer, s.log))
 	mux.Handle("GET /v1/triggers", listTriggersHandler(s.triggers, s.log))
 	mux.Handle("DELETE /v1/triggers/{id}", deleteTriggerHandler(s.triggers, s.log))
-	mux.Handle("POST /hooks/{token}", hookHandler(s.triggers, s.templates, s.submitter, s.sealer, s.log))
+	mux.Handle("POST /hooks/{token}", hookHandler(s.triggers, s.templates, s.submitter, s.store, s.sealer, s.log))
 	mux.Handle("POST /v1/templates", createTemplateHandler(s.templates, s.log))
 	mux.Handle("PUT /v1/templates/{id}", updateTemplateHandler(s.templates, s.log))
 	mux.Handle("GET /v1/templates", listTemplatesHandler(s.templates, authz, s.log))
