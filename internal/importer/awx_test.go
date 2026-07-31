@@ -1,6 +1,7 @@
 package importer_test
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -210,5 +211,66 @@ func TestRRULEConversions(t *testing.T) {
 			t.Errorf("test %d: RRULEToCron(%q) = (%q,%v), want (%q,%v)",
 				i, test.In, got, ok, test.Want, test.OK)
 		}
+	}
+}
+
+// TestFromAWXReadsNaturalKeyReferences pins that an export serializing its cross-object references
+// as natural-key objects imports, which is how a live AWX actually writes them.
+//
+// Every reference field decodes through awxRef, which accepts a bare name, an array, or an object.
+// The credential type was the one that did not: it was a plain string, so encoding/json failed on
+// the whole document and an export taken from a real install imported nothing at all. The fixture
+// this package tested against wrote the type as a bare name, which is a shape awxRef also accepts,
+// so the gap was invisible until an export from an actual server was tried.
+func TestFromAWXReadsNaturalKeyReferences(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Name string
+		Type string
+	}{{ // Test 0: A natural-key object, which is what a live export writes.
+		Name: "object", Type: `{"name": "Machine", "kind": "ssh", "type": "credential_type"}`,
+	}, { // Test 1: A bare name, the simplified shape.
+		Name: "bare name", Type: `"Machine"`,
+	}, { // Test 2: An array natural key, the third shape awxRef accepts.
+		Name: "array", Type: `["Default", "Machine"]`,
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
+			t.Parallel()
+			doc := `{
+			  "credentials": [{
+			    "name": "prod-ssh",
+			    "credential_type": ` + test.Type + `,
+			    "inputs": {"username": "deploy", "ssh_key_data": "$encrypted$"}
+			  }],
+			  "projects": [{
+			    "name": "infra", "scm_type": "git",
+			    "scm_url": "https://github.com/acme/infra.git", "scm_branch": "main",
+			    "organization": {"name": "Default", "type": "organization"}
+			  }],
+			  "job_templates": [{
+			    "name": "deploy", "playbook": "site.yml",
+			    "project": {"organization": {"name": "Default"}, "name": "infra", "type": "project"},
+			    "credentials": [{"name": "prod-ssh", "type": "credential"}]
+			  }]
+			}`
+			plan, err := importer.FromAWX([]byte(doc), time.Now())
+			if err != nil {
+				t.Fatalf("FromAWX() error = %v, want the export to import", err)
+			}
+			if len(plan.Credentials) != 1 {
+				t.Fatalf("imported %d credentials, want 1", len(plan.Credentials))
+			}
+			// The type is what decides the credential kind, so a reference that decodes to an empty
+			// name would import the credential under the wrong kind rather than failing loudly.
+			if got := plan.Credentials[0].Kind; got != credential.KindSSHKey {
+				t.Errorf("credential kind = %q, want %q: the credential type did not survive the "+
+					"reference decode", got, credential.KindSSHKey)
+			}
+			if len(plan.Projects) != 1 || len(plan.Templates) != 1 {
+				t.Errorf("imported %d projects and %d templates, want 1 and 1",
+					len(plan.Projects), len(plan.Templates))
+			}
+		})
 	}
 }
