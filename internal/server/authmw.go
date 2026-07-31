@@ -156,9 +156,16 @@ func isHook(r *http.Request) bool {
 // the integrity story rests on, and the fail-closed append then locked everyone out whenever the
 // audit store was unhealthy. Every other unauthenticated mutation is recorded, including the ones
 // that provision an account, which an earlier narrowing dropped by mistake.
+//
+// SAML belongs here for the same reason as the rest, and its omission was worse than the others.
+// The OIDC callback is a GET and never reached the chain anyway, so the SAML assertion consumer was
+// the only sign-in that did: an unhealthy audit store answered it 503, which in a SAML deployment
+// is the login itself and locks every user out, and it was reachable without a credential and
+// without a rate limiter, so a stranger could append to the chain without bound.
 func isSignIn(r *http.Request) bool {
 	p := strings.TrimPrefix(r.URL.Path, "/v1")
-	return p == "/auth/login" || p == "/auth/logout" || strings.HasPrefix(p, "/auth/oidc/")
+	return p == "/auth/login" || p == "/auth/logout" ||
+		strings.HasPrefix(p, "/auth/oidc/") || strings.HasPrefix(p, "/auth/saml/")
 }
 
 // unauthenticatedActor names the kind of caller on a path that carries no token.
