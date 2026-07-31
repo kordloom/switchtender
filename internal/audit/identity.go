@@ -73,14 +73,11 @@ func LoadIdentity(dir string) (Identity, error) {
 		if err != nil {
 			return Identity{}, fmt.Errorf("SWITCHTENDER_AUDIT_KEY: %w", err)
 		}
-		// An install id is still needed, and it is not a secret, so it comes from the file when one
-		// exists and is derived from the key otherwise. Deriving keeps the id stable for a given key
-		// without requiring the operator to manage a second value.
-		if stored, err := readIdentityFile(dir); err == nil && stored.InstallID != "" {
-			id.InstallID = stored.InstallID
-		} else {
-			id.InstallID = installIDFromKey(id.Public())
-		}
+		// The install id is derived from the key that signs, never taken from a file written for a
+		// different key. Reading it from the file meant an operator who set this variable over an
+		// existing install emitted bundles signed by one key and attributed to another install, and
+		// the documented relationship between the id and the key silently stopped holding.
+		id.InstallID = installIDFromKey(id.Public())
 		return id, nil
 	}
 
@@ -127,15 +124,38 @@ func createIdentity(dir string) (Identity, error) {
 		return Identity{}, fmt.Errorf("producer identity: encode: %w", err)
 	}
 	path := filepath.Join(dir, IdentityFile)
-	// Written through a temporary file so a crash cannot leave a half-written key, and at 0600 so
-	// the signing seed is readable only by the account running the server.
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, append(raw, '\n'), 0o600); err != nil {
+	// Written through a uniquely named temporary file so a crash cannot leave a half-written key and
+	// so two processes starting at once cannot overwrite each other's, and at 0600 so the signing
+	// seed is readable only by the account running the server.
+	f, err := os.CreateTemp(dir, IdentityFile+".*.tmp")
+	if err != nil {
 		return Identity{}, fmt.Errorf("producer identity: write: %w", err)
 	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
-		return Identity{}, fmt.Errorf("producer identity: install: %w", err)
+	tmp := f.Name()
+	defer func() { _ = os.Remove(tmp) }()
+	if err := f.Chmod(0o600); err != nil {
+		_ = f.Close()
+		return Identity{}, fmt.Errorf("producer identity: protect: %w", err)
+	}
+	if _, err := f.Write(append(raw, '\n')); err != nil {
+		_ = f.Close()
+		return Identity{}, fmt.Errorf("producer identity: write: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return Identity{}, fmt.Errorf("producer identity: write: %w", err)
+	}
+	// Link rather than rename, so the first process to finish wins and the rest adopt its key
+	// instead of each believing its own. An install has one identity; two would mean two producers
+	// claiming to be the same install.
+	if err := os.Link(tmp, path); err != nil {
+		if !errors.Is(err, fs.ErrExist) {
+			return Identity{}, fmt.Errorf("producer identity: install: %w", err)
+		}
+		winner, readErr := readIdentityFile(dir)
+		if readErr != nil {
+			return Identity{}, fmt.Errorf("producer identity: adopt: %w", readErr)
+		}
+		return identityFromSeed(winner.Seed, winner.InstallID)
 	}
 	return id, nil
 }
