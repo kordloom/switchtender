@@ -15,6 +15,7 @@ import (
 	"sync"
 
 	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/util"
 )
 
 // ContainerLimits caps the resources and network a containerized run may use, so a foot-gun or
@@ -175,8 +176,11 @@ func NewAnsibleRunner(opts ...Option) Runner {
 // InventoryDumper methods, such as the tool router, can hold the concrete type.
 func newAnsibleRunner(opts ...Option) *ansibleRunner {
 	a := &ansibleRunner{
-		binary:  "ansible-playbook",
-		baseEnv: os.Environ(),
+		binary: "ansible-playbook",
+		// The run inherits the host's environment but not SwitchTender's own configuration. The
+		// master encryption key, its salt, and every provider secret are read from there, and a run
+		// is exactly what they protect.
+		baseEnv: util.RunEnviron(),
 	}
 	for _, opt := range opts {
 		opt(a)

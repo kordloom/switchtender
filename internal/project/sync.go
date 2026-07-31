@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/kordloom/switchtender/internal/util"
+
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/transport"
@@ -192,7 +194,9 @@ func requirementKinds(path string) (roles, collections bool) {
 func (s *Syncer) runGalaxy(checkout string, args ...string) (string, error) {
 	cmd := exec.Command("ansible-galaxy", args...)
 	cmd.Dir = checkout
-	cmd.Env = append(os.Environ(), s.galaxyEnv()...)
+	// Installing a requirements file runs code the repository chose, so it is handed the host's
+	// environment without SwitchTender's own configuration in it.
+	cmd.Env = append(util.RunEnviron(), s.galaxyEnv()...)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
