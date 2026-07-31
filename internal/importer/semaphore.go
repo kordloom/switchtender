@@ -125,6 +125,12 @@ func (p *Plan) addSemaphoreProject(proj semaphoreProject, now time.Time) {
 			p.warn("repository %q in project %q skipped: no git url", repo.Name, proj.Name)
 			continue
 		}
+		// The same check the API applies when a person creates a project, so an export cannot store
+		// one the API itself would refuse.
+		if err := project.ValidateRepoURL(repo.GitURL); err != nil {
+			p.warn("repository %q in project %q skipped: %v", repo.Name, proj.Name, err)
+			continue
+		}
 		obj := &project.Project{
 			ID: project.NewID(), Name: projectName(proj.Name, repo.Name),
 			RepoURL: repo.GitURL, Branch: repo.GitBranch, InstallDeps: true, CreatedAt: now,
@@ -171,10 +177,12 @@ func (p *Plan) addSemaphoreProject(proj semaphoreProject, now time.Time) {
 				s.Name, proj.Name, s.Template)
 			continue
 		}
-		p.Schedules = append(p.Schedules, &schedule.Schedule{
+		// Semaphore's cron format is taken verbatim, so it is validated like any other before it
+		// becomes a stored row.
+		p.addSchedule(&schedule.Schedule{
 			ID: schedule.NewID(), Name: s.Name, Cron: s.CronFormat, TemplateID: id,
 			Enabled: true, CreatedAt: now,
-		})
+		}, "this Semaphore export", now)
 	}
 }
 

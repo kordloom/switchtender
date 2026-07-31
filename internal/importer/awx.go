@@ -212,6 +212,17 @@ func FromAWX(data []byte, now time.Time) (*Plan, error) {
 			plan.warn("project %q skipped: only git projects import (scm_type=%q)", p.Name, p.ScmType)
 			continue
 		}
+		// The same check the API applies when a person creates a project. Skipping it here let an
+		// export create stored projects the API itself would have refused, which then fail at clone
+		// time with an error about the repository rather than about the import that made them.
+		if err := project.ValidateRepoURL(p.ScmURL); err != nil {
+			plan.warn("project %q skipped: %v", p.Name, err)
+			continue
+		}
+		if _, dup := projectIDs[p.Name]; dup {
+			plan.warn("project %q appears more than once; the later one is what templates naming "+
+				"it will use", p.Name)
+		}
 		obj := &project.Project{
 			ID: project.NewID(), Name: p.Name, RepoURL: p.ScmURL, Branch: p.ScmBranch,
 			InstallDeps: true, CreatedAt: now,
@@ -225,8 +236,12 @@ func FromAWX(data []byte, now time.Time) (*Plan, error) {
 	for _, inv := range append(export.Inventory, export.Inventories...) {
 		obj := &inventory.Inventory{
 			ID: inventory.NewID(), Name: inv.Name,
-			Content:   buildInventoryINI(convertHosts(inv.Hosts), convertGroups(inv.Groups)),
+			Content:   buildInventoryINI(plan, inv.Name, convertHosts(inv.Hosts), convertGroups(inv.Groups)),
 			CreatedAt: now,
+		}
+		if _, dup := inventoryIDs[inv.Name]; dup {
+			plan.warn("inventory %q appears more than once; the later one is what templates naming "+
+				"it will use", inv.Name)
 		}
 		plan.Inventories = append(plan.Inventories, obj)
 		inventoryIDs[inv.Name] = obj.ID
@@ -241,6 +256,10 @@ func FromAWX(data []byte, now time.Time) (*Plan, error) {
 		if !exact {
 			plan.warn("credential %q type %q mapped to %q; verify it is correct",
 				c.Name, string(c.CredentialType), kind)
+		}
+		if _, dup := credentialIDs[c.Name]; dup {
+			plan.warn("credential %q appears more than once; the later one is what templates naming "+
+				"it will use, and the two may not be the same kind", c.Name)
 		}
 		obj := &credential.Credential{ID: credential.NewID(), Name: c.Name, Kind: kind, CreatedAt: now}
 		plan.Credentials = append(plan.Credentials, obj)
@@ -321,7 +340,15 @@ func (p *Plan) addTemplate(jt awxJobTemplate, now time.Time,
 		if id, ok := projectIDs[name]; ok {
 			tpl.ProjectID = id
 		} else {
-			p.warn("template %q references unknown project %q", jt.Name, name)
+			// The template is not created. In AWX every job template is scoped to a project, so its
+			// playbook path is relative to that checkout and is held inside it at run time. A
+			// template with no project has no checkout to be held inside, and dispatch skips the
+			// containment check entirely when there is no project, so importing one converts a path
+			// that was contained into one that is resolved against the server's own directory.
+			p.warn("template %q was not imported: it references project %q, which is not in this "+
+				"export, and a template with no project has no checkout to resolve its playbook "+
+				"against", jt.Name, name)
+			return
 		}
 	}
 	if name := string(jt.Inventory); name != "" {
@@ -391,10 +418,10 @@ func (p *Plan) addSchedules(jt awxJobTemplate, templateID string, now time.Time)
 			continue
 		}
 		enabled := s.Enabled == nil || *s.Enabled
-		p.Schedules = append(p.Schedules, &schedule.Schedule{
+		p.addSchedule(&schedule.Schedule{
 			ID: schedule.NewID(), Name: s.Name, Cron: cron, TemplateID: templateID,
 			Enabled: enabled, CreatedAt: now,
-		})
+		}, "this AWX export", now)
 	}
 }
 
