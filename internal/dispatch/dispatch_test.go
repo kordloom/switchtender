@@ -1353,7 +1353,12 @@ func TestRetryShardsInheritExecution(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SubmitSplit() error = %v", err)
 	}
-	// Fail every shard so there is something to retry, then finish the parent.
+	// Fail every shard so there is something to retry, then let the coordinator finish the parent.
+	//
+	// The parent is not saved failed here. Its coordinator is running concurrently and its first
+	// act is to save the parent running, so a hand-written terminal status races that write and
+	// loses often enough to fail the retry with "run not finished" about one run in eight. Waiting
+	// for the rollup is both race-free and closer to what actually happens.
 	shards, err := store.Shards(ctx, parent.ID)
 	if err != nil {
 		t.Fatalf("Shards() error = %v", err)
@@ -1364,10 +1369,7 @@ func TestRetryShardsInheritExecution(t *testing.T) {
 			t.Fatalf("Save(shard) error = %v", err)
 		}
 	}
-	parent.Status = run.StatusFailed
-	if err := store.Save(ctx, parent); err != nil {
-		t.Fatalf("Save(parent) error = %v", err)
-	}
+	waitForStatus(t, store, parent.ID, run.StatusFailed)
 
 	retry, err := d.RetryFailedShards(ctx, parent.ID)
 	if err != nil {
