@@ -41,7 +41,6 @@ seeded read-only tour.
 
 ## Company
 
-- [Blog: Why I built a one-binary alternative to AWX](https://switchtender.com/blog/why-i-built-a-one-binary-alternative-to-awx)
 - [GitHub](https://github.com/kordloom/switchtender)
 - SwitchTender is a [KordLoom](https://kordloom.com) product, alongside
   [Dormouse](https://dormousehq.com), tamper-evident vendor monitoring for compliance teams.
