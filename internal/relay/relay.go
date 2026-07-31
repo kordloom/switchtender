@@ -17,6 +17,7 @@ import (
 	"errors"
 
 	"github.com/kordloom/switchtender/internal/event"
+	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -35,6 +36,12 @@ type Transport interface {
 	Heartbeat(ctx context.Context, id, owner string) error
 	// Get returns the run with the given id, so a worker reads the claimed run and its cancel flag.
 	Get(ctx context.Context, id string) (*run.Run, error)
+	// Policies returns the approval policies in force on the control node.
+	//
+	// A worker across a relay has no database, and the plan-content gate runs wherever the run
+	// executes. Without this the gate did not exist on a relay worker at all, so which process won
+	// the claim decided whether a destroy threshold was enforced or ignored.
+	Policies(ctx context.Context) ([]*policy.Policy, error)
 	// Save writes the run's status transitions back to the control node.
 	Save(ctx context.Context, r *run.Run) error
 	// AppendLog streams captured output to the control node.
@@ -57,6 +64,13 @@ func Loopback(store run.Store) Transport {
 type loopback struct {
 	// store is the delegate that serves every call locally.
 	store run.Store
+}
+
+// Policies reports that a loopback transport has no policies of its own. It exists so a worker can
+// run against a local store without a relay, where the dispatcher is given the real policy store
+// directly rather than reading one across the wire.
+func (l loopback) Policies(context.Context) ([]*policy.Policy, error) {
+	return nil, ErrUnsupported
 }
 
 // Claim delegates to the backing store.

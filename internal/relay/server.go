@@ -12,6 +12,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/auth"
 	"github.com/kordloom/switchtender/internal/event"
+	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -41,6 +42,10 @@ type errorBody struct {
 // node side of the phase-1 mesh: a worker's httpTransport dials it over one outbound connection to
 // lease and execute runs without a path to the shared database.
 type relayServer struct {
+	// policies is the approval policy store a worker reads across the relay, nil when the install
+	// has none configured. The plan-content gate runs where the run executes, so a worker that
+	// cannot read the policies cannot tell whether the run it claimed needs one.
+	policies policy.Store
 	// store is the shared run store the worker's calls read and write.
 	store run.Store
 	// token is the worker bearer token every call must present.
@@ -53,7 +58,8 @@ type relayServer struct {
 // by the worker bearer token. Mount it on the control node so relay workers have a path to the
 // shared store. It panics on a nil store or an empty token, both wiring errors; a nil logger becomes
 // a no-op.
-func NewHandler(store run.Store, token string, log *zap.Logger) http.Handler {
+func NewHandler(store run.Store, token string, log *zap.Logger,
+	policies policy.Store) http.Handler {
 	if store == nil {
 		panic("relay: Store required")
 	}
@@ -63,8 +69,9 @@ func NewHandler(store run.Store, token string, log *zap.Logger) http.Handler {
 	if log == nil {
 		log = zap.NewNop()
 	}
-	s := &relayServer{store: store, token: token, log: log}
+	s := &relayServer{store: store, token: token, log: log, policies: policies}
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /relay/v1/policies", s.listPolicies)
 	mux.HandleFunc("POST /relay/v1/claim", s.claim)
 	mux.HandleFunc("POST /relay/v1/heartbeat", s.heartbeat)
 	mux.HandleFunc("GET /relay/v1/runs/{id}", s.get)
@@ -267,8 +274,12 @@ func (s *relayServer) heldForReport(w http.ResponseWriter, r *http.Request) bool
 		s.internal(w, "read run", err)
 		return false
 	}
+	// A finished run is not an error, it is a no-op. The store already drops these writes silently,
+	// so answering with a conflict changed nothing about what is recorded and started a retry storm
+	// instead: the transport retries the post, re-posts the whole batch on a timer, and keeps at it
+	// for the abandon window while logging an error nobody can act on.
 	if stored.Status.Terminal() {
-		writeErr(w, http.StatusConflict, "run already finished and cannot be added to")
+		w.WriteHeader(http.StatusNoContent)
 		return false
 	}
 	if stored.Status == run.StatusPendingApproval || stored.Status == run.StatusRejected {
@@ -280,6 +291,28 @@ func (s *relayServer) heldForReport(w http.ResponseWriter, r *http.Request) bool
 		return false
 	}
 	return true
+}
+
+// listPolicies serves the approval policies in force, so a worker across the relay can evaluate the
+// plan-content gate the same way the control node would.
+//
+// An install with no policy store configured answers with an empty list rather than an error. That
+// is the honest answer: there are no policies, so nothing is gated, and it is different from being
+// unable to tell.
+func (s *relayServer) listPolicies(w http.ResponseWriter, r *http.Request) {
+	if s.policies == nil {
+		s.writeJSON(w, []*policy.Policy{})
+		return
+	}
+	all, err := s.policies.List(r.Context())
+	if err != nil {
+		s.internal(w, "list policies", err)
+		return
+	}
+	if all == nil {
+		all = []*policy.Policy{}
+	}
+	s.writeJSON(w, all)
 }
 
 // appendLog appends the raw request body to the run's captured output, or 404 when the run is gone.

@@ -303,6 +303,31 @@ func TestPlanGateFailsClosedWhereItCannotBeChecked(t *testing.T) {
 	}
 }
 
+// TestPlanGateRunsUngatedWorkWhereThePoliciesAreReadable pins the other half of the rule: a process
+// that CAN read the policies runs what none of them gate.
+//
+// Failing closed on an unreadable store is right. Handing a worker a store that refuses every read
+// made every terraform run in the install fail, including the ones no policy would ever have
+// matched, and which outcome a run got still depended on which claim loop won it. Fail closed on not
+// knowing, not on having nothing to enforce.
+func TestPlanGateRunsUngatedWorkWhereThePoliciesAreReadable(t *testing.T) {
+	t.Parallel()
+	store := run.NewMemStore()
+	runner := &countingRunnerLister{hosts: []string{"web01"}}
+	d := New(store, runner, nil, WithPolicies(policy.NewMemStore()))
+	defer d.Close()
+	ctx := context.Background()
+
+	r, err := d.Submit(ctx, "", "inv", run.WithTool("terraform"), run.WithCommand("/infra"))
+	if err != nil {
+		t.Fatalf("Submit() error = %v: an install with no policies refused an ungated apply", err)
+	}
+	waitForStatus(t, store, r.ID, run.StatusSucceeded)
+	if n := runner.executions.Load(); n != 1 {
+		t.Errorf("executions = %d, want 1: an ungated apply did not run", n)
+	}
+}
+
 // TestCancelingAHeldSplitSettlesItsShards pins that canceling a split before it starts leaves no
 // shard behind.
 //

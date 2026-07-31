@@ -16,7 +16,6 @@ import (
 	"github.com/kordloom/switchtender/internal/dispatch"
 	"github.com/kordloom/switchtender/internal/extplugin"
 	"github.com/kordloom/switchtender/internal/logutil"
-	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/relay"
 	"github.com/kordloom/switchtender/internal/roundhouse"
@@ -158,13 +157,17 @@ func workerStore(log *zap.Logger) (run.Store, []dispatch.Option, func(), error) 
 			return nil, nil, nil, errors.New("open store: relay worker needs SWITCHTENDER_WORKER_TOKEN")
 		}
 		client := &http.Client{Timeout: relayClientTimeout}
-		store := relay.NewClient(relay.NewHTTPTransport(workerServer, token, client))
+		transport := relay.NewHTTPTransport(workerServer, token, client)
+		store := relay.NewClient(transport)
 		// The relay Client cannot reclaim stale leases; that stays the control node's job, so the
 		// janitor would only log ErrUnsupported on every sweep. Turn it off for the relay worker.
-		// A relay worker cannot read the policies, and the plan-content gate runs where the run
-		// executes. Without this it would apply a gated terraform change with no plan and no
-		// approver whenever it won the claim ahead of the control node.
-		opts = append(opts, dispatch.WithNoJanitor(), dispatch.WithPolicies(policy.Unreachable{}))
+		//
+		// The plan-content gate runs where the run executes, so a worker reads the approval policies
+		// across the relay rather than from a database it has no route to. Without them it would
+		// apply a gated terraform change with no plan and no approver whenever it won the claim
+		// ahead of the control node.
+		opts = append(opts, dispatch.WithNoJanitor(),
+			dispatch.WithPolicies(relay.NewPolicyClient(transport)))
 		return store, opts, func() {}, nil
 	}
 

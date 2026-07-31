@@ -45,7 +45,7 @@ func TestWorkerTokenCannotWriteTheRecordOfARunItDoesNotHold(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	backing := run.NewMemStore()
-	ts := httptest.NewServer(relay.NewHandler(backing, testWorkerToken, nil))
+	ts := httptest.NewServer(relay.NewHandler(backing, testWorkerToken, nil, nil))
 	t.Cleanup(ts.Close)
 
 	claimed := time.Now()
@@ -68,7 +68,6 @@ func TestWorkerTokenCannotWriteTheRecordOfARunItDoesNotHold(t *testing.T) {
 	}{
 		{"run_held", "an approver is still deciding on it"},
 		{"run_unclaimed", "nobody has claimed it"},
-		{"run_done", "it already finished"},
 		{"run_missing", "it does not exist"},
 	}
 	for _, c := range refusals {
@@ -88,6 +87,18 @@ func TestWorkerTokenCannotWriteTheRecordOfARunItDoesNotHold(t *testing.T) {
 		}
 	}
 
+	// A finished run answers success and records nothing. The store drops the write either way, and
+	// answering with a conflict only makes the transport retry a batch that can never land.
+	if code := postAsWorker(t, ts.URL, "/relay/v1/runs/run_done/log", forged); code >= 400 {
+		t.Errorf("appending to a finished run answered %d, which sends the transport into a "+
+			"retry loop over output the store already drops", code)
+	}
+	if got, err := backing.Log(ctx, "run_done"); err != nil {
+		t.Fatalf("Log(run_done) error = %v", err)
+	} else if bytes.Contains(got, forged) {
+		t.Errorf("a finished run now records %q", got)
+	}
+
 	// The other three writers build the same record and answer the same question.
 	for _, path := range []string{"events", "host-summary", "task-summary"} {
 		if code := postAsWorker(t, ts.URL, "/relay/v1/runs/run_held/"+path, []byte("[]")); code < 400 {
@@ -102,7 +113,7 @@ func TestWorkerReportBoundaryLeavesLegitimateWorkAlone(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	backing := run.NewMemStore()
-	ts := httptest.NewServer(relay.NewHandler(backing, testWorkerToken, nil))
+	ts := httptest.NewServer(relay.NewHandler(backing, testWorkerToken, nil, nil))
 	t.Cleanup(ts.Close)
 
 	claimed := time.Now()

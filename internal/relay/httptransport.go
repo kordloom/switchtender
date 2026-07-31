@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/kordloom/switchtender/internal/event"
+	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -131,6 +132,23 @@ func (t *httpTransport) Heartbeat(ctx context.Context, id, owner string) error {
 	}
 	defer func() { _ = resp.Body.Close() }()
 	return noContentOr404("heartbeat", resp)
+}
+
+// Policies reads the approval policies in force on the control node.
+func (t *httpTransport) Policies(ctx context.Context) ([]*policy.Policy, error) {
+	resp, err := t.do(ctx, http.MethodGet, "/relay/v1/policies", "", nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return nil, statusErr("policies", resp)
+	}
+	var out []*policy.Policy
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, fmt.Errorf("decode policies: %w", err)
+	}
+	return out, nil
 }
 
 // Get returns the run with the given id, mapping 404 to ErrNotFound.
