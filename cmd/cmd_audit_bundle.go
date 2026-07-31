@@ -84,12 +84,26 @@ func runAuditBundle(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	// Anchors go on before signing, so the signature covers them. Only those naming a link this
-	// bundle actually holds are attached; the rest would make a verifier reject the whole export.
+	// Anchors go on before signing, so the signature covers them.
+	//
+	// Every anchor is read, not only those at or below the head. Asking for anchors up to the head
+	// meant a chain shortened below its anchor filtered that anchor out of its own evidence: the
+	// bundle came out clean, signed, and missing exactly the thing that disproved it. The anchors
+	// are what a shortened chain fails, so the chain is held against all of them and a chain that
+	// cannot reach one is refused rather than published.
 	if anchors, ok := store.Audits().(audit.AnchorStore); ok {
-		recorded, aerr := anchors.Anchors(cmd.Context(), entries[len(entries)-1].Seq)
+		recorded, aerr := anchors.Anchors(cmd.Context(), 0)
 		if aerr != nil {
 			return fmt.Errorf("read anchors: %w", aerr)
+		}
+		if reachedAll, results := audit.CheckAnchors(entries, recorded); !reachedAll {
+			for _, res := range results {
+				if !res.Reached {
+					fmt.Fprintln(os.Stderr, "anchor "+res.Anchor.ID+": "+res.Problem)
+				}
+			}
+			return fmt.Errorf("this chain does not satisfy every anchor recorded over it, so it " +
+				"must not be published as one that does")
 		}
 		if n := doc.AttachAnchors(recorded); n > 0 {
 			fmt.Fprintf(os.Stderr, "Attached %d anchor(s), so a verifier can see this chain has "+
