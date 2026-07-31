@@ -54,9 +54,6 @@ type logBatch struct {
 	buf []byte
 	// timer fires the delayed flush of a partial batch, nil when no flush is pending.
 	timer *time.Timer
-	// err is the failure from a flush no caller was waiting on, returned by the next call so a
-	// broken relay still surfaces rather than silently dropping output.
-	err error
 }
 
 // compile-time proof that httpTransport is a Transport.
@@ -134,9 +131,14 @@ func (t *httpTransport) Get(ctx context.Context, id string) (*run.Run, error) {
 // state drops its batch, which is the last point anything could still be buffered for it.
 func (t *httpTransport) Save(ctx context.Context, r *run.Run) error {
 	flushErr := t.flushLog(ctx, r.ID)
-	if r.Status.Terminal() {
+	// A terminal run drops its batch, but only once there is nothing left in it. A failed final
+	// flush puts its bytes back, and deleting the batch then would throw away the end of the run's
+	// output even though the relay might recover a moment later.
+	if r.Status.Terminal() && flushErr == nil {
 		t.mu.Lock()
-		delete(t.batches, r.ID)
+		if b := t.batches[r.ID]; b == nil || len(b.buf) == 0 {
+			delete(t.batches, r.ID)
+		}
 		t.mu.Unlock()
 	}
 	resp, err := t.sendJSON(ctx, http.MethodPost, runPath(r.ID, "/save"), r)
@@ -165,30 +167,27 @@ func (t *httpTransport) AppendLog(ctx context.Context, id string, p []byte) erro
 	}
 	b.buf = append(b.buf, p...)
 	full := len(b.buf) >= logBatchBytes
-	pending := b.err
-	b.err = nil
 	if !full && b.timer == nil {
 		b.timer = time.AfterFunc(logBatchDelay, func() { t.flushLogAsync(id) })
 	}
 	t.mu.Unlock()
 	if full {
-		if err := t.flushLog(ctx, id); err != nil {
-			return err
-		}
+		// A failed flush has already put its bytes back at the front of the batch, so the next flush
+		// carries them. Reporting the failure here would be reported to a caller that wraps this in
+		// a retry, and that retry would append p a second time on top of output that was never lost.
+		_ = t.flushLog(ctx, id)
 	}
-	return pending
+	// The append itself cannot fail once the bytes are buffered. A parked failure from an earlier
+	// timer flush is not this call's to report, and returning it made the caller duplicate output.
+	return nil
 }
 
-// flushLogAsync flushes a run's batch from its delay timer and parks any failure on the batch, since
-// no caller is waiting on this post. The next AppendLog or Save returns it.
+// flushLogAsync flushes a run's batch from its delay timer. No caller is waiting on this post, and a
+// failure has already put its bytes back at the front of the batch, so the next flush carries them.
+// The failure is not surfaced to a later AppendLog: that caller retries, and retrying an append
+// whose bytes are already buffered duplicates them in the stored log.
 func (t *httpTransport) flushLogAsync(id string) {
-	if err := t.flushLog(context.Background(), id); err != nil {
-		t.mu.Lock()
-		if b := t.batches[id]; b != nil {
-			b.err = err
-		}
-		t.mu.Unlock()
-	}
+	_ = t.flushLog(context.Background(), id)
 }
 
 // flushLog posts a run's buffered output, mapping 404 to ErrNotFound. It is a no-op when the run
