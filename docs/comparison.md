@@ -8,9 +8,12 @@
 # SwitchTender compared to AWX and Semaphore
 
 This page is an honest side-by-side. It states where SwitchTender is ahead, where it is even, and
-where it is behind, because credibility comes from being straight about all three. Details of AWX
-and Semaphore were current as of mid-2026. Verify them against their latest releases before relying
-on them.
+where it is behind, because credibility comes from being straight about all three.
+
+Every claim about another product was checked against that vendor's own documentation on
+2026-07-31, for AWX 24.6.1, Ansible Automation Platform 2.7, Semaphore 2.18.29, Ascender 25.4.0,
+and Rundeck 6.0.1. All of these ship, and a comparison decays the day it is written. Check a row
+against the current release before relying on it, and open an issue if one has gone stale.
 
 ## Where SwitchTender is ahead
 

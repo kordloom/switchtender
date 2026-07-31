@@ -427,3 +427,6 @@ h1 {
 	.signup-input { width: 100%; }
 	.signup-form .btn { width: 100%; }
 }
+
+/* Caption under the comparison table: what it was checked against and when. */
+.compare-note{margin-top:14px;font-size:14px;line-height:1.6;opacity:.72;max-width:70ch}
