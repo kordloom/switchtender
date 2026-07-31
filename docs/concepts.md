@@ -104,6 +104,31 @@ export from `GET /v1/audit/export` seals the chain with an ed25519 signature, so
 `switchtender audit verify` proves the trail is intact and unaltered offline, without trusting the
 server that produced it.
 
+A chain proves that what it holds was not altered. On its own it cannot prove that nothing is
+missing, because the same server decides both what happens and what gets written down, and because a
+prefix of a valid chain is itself a valid chain. Three things close that gap.
+
+**A change that cannot be recorded does not happen.** The entry is written before the handler runs,
+so a mutation whose audit write fails is refused with a 503 rather than performed silently. Changes
+made from the command line, including creating an account and minting a token, are recorded the same
+way.
+
+**Anchors fix the chain in time.** `switchtender audit anchor` asks a public RFC 3161 timestamp
+authority to sign the moment it saw the current head. The token is embedded in every bundle built
+afterwards and is checked offline by any verifier, with no network and no trust in this install, so
+a chain that has quietly lost its tail no longer reaches its anchor and says so. Anchor on a
+schedule: an anchor bounds how much history can vanish unnoticed to whatever happened since the last
+one.
+
+**Receipts make an omission detectable by the party it happened to.** Every mutation returns an
+`Audit-Receipt: seq:link` header naming where it was recorded. Keep them. `switchtender audit
+receipt 41:9f2c...` confirms the chain still holds that exact link at that exact position, and a
+server that omitted the entry cannot produce a chain containing the receipt.
+
+What none of this defends against is an operator running modified code on the machine itself. That
+is the boundary of every audit system, it costs an attacker the whole controller to reach, and it
+does not hand them the past: anything already anchored stays fixed and still proves what it proved.
+
 ## Approvals
 
 A run can be marked to require approval. It is held in a pending-approval state that the claim loop
