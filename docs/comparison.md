@@ -161,5 +161,5 @@ Fetched and read on 2026-07-31.
 41. Ascender license: <https://raw.githubusercontent.com/ctrliq/ascender/main/LICENSE>
 42. Rundeck license: <https://github.com/rundeck/rundeck>
 
-This table needs re-verifying on a schedule, quarterly at least. Every product here ships, and a
-claim about a competitor that has gone stale costs more than a missing row.
+Every product here ships, so treat this as a snapshot taken on the date above rather than a standing
+claim. A row that has gone stale is a bug: open an issue and it gets corrected.
