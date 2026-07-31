@@ -936,11 +936,30 @@ func rerunRunHandler(store run.Store, submitter Submitter, authz *authorizer, lo
 }
 
 // approveRunHandler releases a run held for approval so it can execute.
-func approveRunHandler(approver Approver, log *zap.Logger) http.HandlerFunc {
+func approveRunHandler(approver Approver, store run.Store, authz *authorizer,
+	log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if approver == nil {
 			respondError(w, log, http.StatusNotFound, "approvals not enabled")
 			return
+		}
+		// A decision on a run is a decision about the objects it will touch, so the approver has to
+		// be someone who may use them. Every other run mutation checks; these two did not, and they
+		// are the two that release a held run onto real hosts.
+		if store != nil {
+			rn, gerr := store.Get(r.Context(), r.PathValue("id"))
+			if errors.Is(gerr, run.ErrNotFound) {
+				respondError(w, log, http.StatusNotFound, "run not found")
+				return
+			}
+			if gerr != nil {
+				log.Error("server: read run: " + gerr.Error())
+				respondError(w, log, http.StatusInternalServerError, "could not read run")
+				return
+			}
+			if authorizeRunAccess(w, r, authz, log, rn) {
+				return
+			}
 		}
 		created, err := approver.Approve(r.Context(), r.PathValue("id"))
 		switch {
@@ -964,7 +983,8 @@ func approveRunHandler(approver Approver, log *zap.Logger) http.HandlerFunc {
 }
 
 // rejectRunHandler denies a run held for approval, recording an optional reason as its error.
-func rejectRunHandler(approver Approver, log *zap.Logger) http.HandlerFunc {
+func rejectRunHandler(approver Approver, store run.Store, authz *authorizer,
+	log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if approver == nil {
 			respondError(w, log, http.StatusNotFound, "approvals not enabled")
@@ -974,6 +994,24 @@ func rejectRunHandler(approver Approver, log *zap.Logger) http.HandlerFunc {
 			Reason string `json:"reason"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&req)
+		// A decision on a run is a decision about the objects it will touch, so the approver has to
+		// be someone who may use them. Every other run mutation checks; these two did not, and they
+		// are the two that release a held run onto real hosts.
+		if store != nil {
+			rn, gerr := store.Get(r.Context(), r.PathValue("id"))
+			if errors.Is(gerr, run.ErrNotFound) {
+				respondError(w, log, http.StatusNotFound, "run not found")
+				return
+			}
+			if gerr != nil {
+				log.Error("server: read run: " + gerr.Error())
+				respondError(w, log, http.StatusInternalServerError, "could not read run")
+				return
+			}
+			if authorizeRunAccess(w, r, authz, log, rn) {
+				return
+			}
+		}
 		created, err := approver.Reject(r.Context(), r.PathValue("id"), req.Reason)
 		switch {
 		case errors.Is(err, run.ErrNotFound):

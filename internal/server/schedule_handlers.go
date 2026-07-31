@@ -8,6 +8,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/internal/grant"
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/schedule"
 )
@@ -39,7 +40,7 @@ type schedulesResponse struct {
 }
 
 // createScheduleHandler creates a recurring schedule.
-func createScheduleHandler(store schedule.Store, log *zap.Logger) http.HandlerFunc {
+func createScheduleHandler(store schedule.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil {
 			respondError(w, log, http.StatusNotFound, "scheduling not enabled")
@@ -51,6 +52,14 @@ func createScheduleHandler(store schedule.Store, log *zap.Logger) http.HandlerFu
 			return
 		}
 
+		// A schedule fires a template without anybody present, so writing one has to authorize the
+		// template it will fire. Of the four ways to launch, run submission and template launch both
+		// check, and a webhook trigger is covered when the trigger is written. A schedule checked at
+		// no point in the chain, so it was the way to run a template a caller could not launch.
+		if denyOnAuthzError(w, log,
+			authz.authorizeAll(r.Context(), grant.AccessUse, req.TemplateID)) {
+			return
+		}
 		sc := &schedule.Schedule{
 			ID: schedule.NewID(), Name: req.Name, Cron: req.Cron, Playbook: req.Playbook,
 			Inventory: req.Inventory, Shards: req.Shards, Steps: req.Steps,
@@ -87,7 +96,7 @@ func createScheduleHandler(store schedule.Store, log *zap.Logger) http.HandlerFu
 
 // updateScheduleHandler replaces a schedule, keeping its enabled state, creation time, and last-run
 // record, and recomputes the next fire from the new cron.
-func updateScheduleHandler(store schedule.Store, log *zap.Logger) http.HandlerFunc {
+func updateScheduleHandler(store schedule.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil {
 			respondError(w, log, http.StatusNotFound, "scheduling not enabled")
@@ -107,6 +116,14 @@ func updateScheduleHandler(store schedule.Store, log *zap.Logger) http.HandlerFu
 		if err != nil {
 			log.Error("server: read schedule: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not read schedule")
+			return
+		}
+		// A schedule fires a template without anybody present, so writing one has to authorize the
+		// template it will fire. Of the four ways to launch, run submission and template launch both
+		// check, and a webhook trigger is covered when the trigger is written. A schedule checked at
+		// no point in the chain, so it was the way to run a template a caller could not launch.
+		if denyOnAuthzError(w, log,
+			authz.authorizeAll(r.Context(), grant.AccessUse, req.TemplateID)) {
 			return
 		}
 		sc := &schedule.Schedule{
