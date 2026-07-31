@@ -267,6 +267,23 @@ func requiredRole(r *http.Request) user.Role {
 	if p == "/users" || strings.HasPrefix(p, "/users/") {
 		return user.RoleAdmin
 	}
+	// Grants and approval policies decide who may do what, so they are management data even to
+	// read, the same as the audit trail and the account list above. A viewer in any organization
+	// could read the whole access map and every approval gate in the install, which is both a map
+	// of what is worth attacking and a list of which changes nobody is watching.
+	if p == "/grants" || strings.HasPrefix(p, "/grants/") ||
+		p == "/policies" || strings.HasPrefix(p, "/policies/") {
+		return user.RoleAdmin
+	}
+	// Schedules, webhook triggers, and inventory sources are the configuration that makes things
+	// run without a person, and they name the credentials and projects they run with. That is
+	// operator ground rather than something every viewer needs, and listing them was unfiltered:
+	// there is no organization on these objects to filter by, so the role is what bounds them.
+	if p == "/schedules" || strings.HasPrefix(p, "/schedules/") ||
+		p == "/triggers" || strings.HasPrefix(p, "/triggers/") ||
+		p == "/inventory-sources" || strings.HasPrefix(p, "/inventory-sources/") {
+		return user.RoleOperator
+	}
 	if r.Method == http.MethodGet || r.Method == http.MethodHead {
 		return user.RoleViewer
 	}
