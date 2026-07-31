@@ -453,6 +453,10 @@ func Open(path string) (*DB, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	if err := normalizeScheduleTimes(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	if err := ensureRunIndexes(db); err != nil {
 		_ = db.Close()
 		return nil, err

@@ -410,6 +410,10 @@ func Open(dsn string) (*DB, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate schema: %w", migrateErr)
 	}
+	if err := normalizeScheduleTimes(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	return &DB{db: db, runs: &store{db: db}, schedules: &scheduleStore{db: db}, tokens: &tokenStore{db: db},
 		credentials: &credentialStore{db: db},
 		projects:    &projectStore{db: db},
