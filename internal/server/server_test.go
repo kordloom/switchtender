@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/auth"
@@ -1726,5 +1728,52 @@ func TestRerunRunDedupes(t *testing.T) {
 	}
 	if reruns != 1 {
 		t.Errorf("reruns of run_1 = %d, want 1", reruns)
+	}
+}
+
+// TestRerunReplaysEveryExecutionField pins that a rerun carries the whole spec of the run it
+// replays, and fails when a field is added to run.Run without a decision about reruns.
+//
+// The list of fields a rerun replayed was written by hand and drifted from the run model, dropping
+// the timeout and the notification targets: the rerun executed under the dispatcher's default cap
+// instead of the one the run was given, and its terminal state reached the server-wide channels but
+// not the team the original run paged. The diff below is against the saved run itself, so a new
+// field either gets replayed or gets named in the ignore list.
+func TestRerunReplaysEveryExecutionField(t *testing.T) {
+	t.Parallel()
+	saved := &run.Run{
+		ID: "run_1", Playbook: "site.yml", Inventory: "inv.ini", Status: run.StatusFailed,
+		Tool: "ansible", Command: "deploy.sh", DryRun: true, Limit: "web*",
+		CredentialIDs: []string{"cred_1", "cred_2"}, ProjectID: "prj_1", InventoryID: "inv_1",
+		Queue: "prod", Image: "registry.example/exec:1", PullCredentialID: "cred_pull",
+		ExtraVars: map[string]any{"release": "9.2"}, Labels: map[string]string{"env": "prod"},
+		Timeout: 900,
+		Notifications: []run.NotifyTarget{
+			{Kind: "slack", URL: "https://hooks.example/team", OnFailure: true},
+		},
+	}
+	store := run.NewMemStore()
+	if err := store.Save(context.Background(), saved); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	sub := &fakeSubmitter{run: &run.Run{ID: "run_new", Status: run.StatusPending}}
+	handler := New(store, sub, zap.NewNop()).Handler()
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/runs/run_1/rerun", nil))
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d, body %s", rec.Code, http.StatusAccepted, rec.Body.String())
+	}
+	if sub.gotRun == nil {
+		t.Fatal("no run was submitted")
+	}
+	// Everything a rerun is expected to differ on: its own identity and lifecycle, the provenance
+	// that marks it a rerun, the dedupe key, and the shape fields that belong to the original.
+	ignored := cmpopts.IgnoreFields(run.Run{},
+		"ID", "Status", "CreatedAt", "StartedAt", "EndedAt", "ExitCode", "Error", "Warning",
+		"Source", "SourceID", "Actor", "RerunOf", "IdempotencyKey", "ClaimedBy", "ClaimedAt",
+		"CancelRequested", "Outputs", "CommitSHA", "Risk", "ParentID", "ShardIndex", "ShardCount",
+		"Kind", "RetryOf", "Steps", "StepName", "StepIndex", "Attempt", "ProposedFrom", "Intent")
+	if diff := cmp.Diff(saved, sub.gotRun, ignored, cmpopts.EquateEmpty()); diff != "" {
+		t.Errorf("the rerun does not replay the run it reruns (-saved +submitted):\n%s", diff)
 	}
 }

@@ -725,22 +725,15 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 // inheritExecution copies onto child every field that decides how a run executes, so a shard of a
 // split, or a retry of one, runs exactly the way its parent would have.
 //
-// The fields are listed here rather than at each call site because they were being copied by hand in
-// two places and both had fallen behind the run model: a split lost its extra vars, ran outside the
-// execution image its parent pinned, and ignored the parent's timeout. Anything added to run.Run that
-// changes how a run executes belongs in this function.
+// The fields come from run.Run.ExecutionOptions rather than a list kept here. They were copied by
+// hand in several places and every list fell behind the run model: a split lost its extra vars, ran
+// outside the execution image its parent pinned, and ignored the parent's timeout, while a rerun
+// lost the timeout and the notifications. Anything added to run.Run that changes how a run executes
+// belongs in ExecutionOptions, where every path derived from a run reads it.
 func inheritExecution(child, parent *run.Run) {
-	child.Tool = parent.Tool
-	child.Command = parent.Command
-	child.DryRun = parent.DryRun
-	child.ExtraVars = parent.ExtraVars
-	child.CredentialIDs = parent.CredentialIDs
-	child.ProjectID = parent.ProjectID
-	child.InventoryID = parent.InventoryID
-	child.Queue = parent.Queue
-	child.Timeout = parent.Timeout
-	child.Image = parent.Image
-	child.PullCredentialID = parent.PullCredentialID
+	for _, opt := range parent.ExecutionOptions() {
+		opt(child)
+	}
 }
 
 // RetryFailedShards creates and starts a new split run that re-runs only the failed shards of a
