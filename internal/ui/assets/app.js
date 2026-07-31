@@ -7425,7 +7425,11 @@ async function loadDetail(runId) {
 	try {
 		const run = await getJSON("/runs/" + runId);
 		const rerun = document.getElementById("rerun-run");
-		if (rerun && !run.parent_id && run.kind !== "pipeline") {
+		// A rejected run, and one canceled before it ever started, are decisions not to run it. The
+		// API refuses to replay either, so the button is not offered for them.
+		const decided = run.status === "rejected" ||
+			(run.status === "canceled" && !run.started_at);
+		if (rerun && !run.parent_id && run.kind !== "pipeline" && !decided) {
 			rerun.hidden = false;
 			rerun.dataset.tip = "Click to start a fresh run with this exact spec";
 			if (isReadOnly()) {

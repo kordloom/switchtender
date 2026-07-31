@@ -113,10 +113,16 @@ func (f *fakeSubmitter) Submit(_ context.Context, playbook, inventory string, op
 }
 
 // SubmitSplit records the arguments including shard count and returns the configured run or error.
-func (f *fakeSubmitter) SubmitSplit(_ context.Context, playbook, inventory string, shards int, _ ...run.SubmitOption) (*run.Run, error) {
+func (f *fakeSubmitter) SubmitSplit(_ context.Context, playbook, inventory string, shards int, opts ...run.SubmitOption) (*run.Run, error) {
 	f.gotPlaybook = playbook
 	f.gotInventory = inventory
 	f.gotShards = shards
+	// The options are applied to a probe here for the same reason Submit does it. Discarding them
+	// meant a test could not see whether a split was held, and a request asking for both approval
+	// and shards silently got neither.
+	probe := &run.Run{Playbook: playbook, Inventory: inventory}
+	run.ApplyOptions(probe, opts)
+	f.gotRun = probe
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -699,8 +705,14 @@ func TestRunStreamDrainsStore(t *testing.T) {
 	}
 	wake <- live.Message{Type: "event"}
 
+	// The deadline below is checked between reads, and a read on a stream that never delivers
+	// blocks rather than returning, so the check alone cannot end the test. Closing the body when
+	// the deadline passes makes the blocked read fail, which turns a hung test into a reported one.
+	// Left unbounded this ran until the package timeout and took the whole suite down with it.
 	reader := bufio.NewReader(res.Body)
 	deadline := time.Now().Add(5 * time.Second)
+	stopReading := time.AfterFunc(10*time.Second, func() { _ = res.Body.Close() })
+	defer stopReading.Stop()
 	var sawEvent, sawLog bool
 	for !sawEvent || !sawLog {
 		if time.Now().After(deadline) {

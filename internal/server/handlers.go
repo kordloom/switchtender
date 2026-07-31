@@ -499,13 +499,17 @@ func createRunHandler(submitter Submitter, authz *authorizer, log *zap.Logger) h
 		if len(req.Notifications) > 0 {
 			opts = append(opts, run.WithNotifications(req.Notifications))
 		}
+		// The hold applies to a split too. Dropping it here meant asking for approval and asking for
+		// shards in the same request silently got neither: the API answered 202 and the fan-out ran
+		// on every host at once. A split stores its shards held alongside a held parent, so the
+		// option needs nothing more than to be passed along.
+		if req.RequireApproval {
+			opts = append(opts, run.WithRequireApproval(true))
+		}
 		if req.Shards >= 2 {
 			created, err = submitter.SubmitSplit(r.Context(), req.Playbook, req.Inventory,
 				req.Shards, opts...)
 		} else {
-			if req.RequireApproval {
-				opts = append(opts, run.WithRequireApproval(true))
-			}
 			created, err = submitter.Submit(r.Context(), req.Playbook, req.Inventory, opts...)
 		}
 		switch {
@@ -827,6 +831,25 @@ func rerunOptions(rn *run.Run) []run.SubmitOption {
 	return opts
 }
 
+// rerunRefusal reports why a finished run must not be replayed, or an empty string when it may be.
+//
+// The two cases are decisions rather than outcomes. A rejected run was denied by an approver, which
+// the retry path has always refused to replay. A run canceled before it started was withdrawn
+// before anyone let it run. Rerunning either turns a recorded decision into a fresh, ungated run,
+// because the replay carries the execution spec and not the hold that was on it.
+func rerunRefusal(rn *run.Run) string {
+	switch {
+	case rn.Status == run.StatusRejected:
+		return "this run was rejected, so it cannot be run again from here: submit a new run if " +
+			"it should be reconsidered"
+	case rn.Status == run.StatusCanceled && rn.StartedAt == nil:
+		return "this run was canceled before it started, so it cannot be run again from here: " +
+			"submit a new run if it should be reconsidered"
+	default:
+		return ""
+	}
+}
+
 // rerunRunHandler starts a fresh run with the same spec as a finished one. A split parent reruns
 // as a new split. Pipeline parents and shard or step children are refused, since their spec lives
 // with the workflow or the parent.
@@ -862,6 +885,16 @@ func rerunRunHandler(store run.Store, submitter Submitter, authz *authorizer, lo
 		}
 		if !rn.Status.Terminal() {
 			respondError(w, log, http.StatusConflict, "run has not finished")
+			return
+		}
+		// A rerun replays a spec, and it must not replay past a decision that the spec should not
+		// run. A rejected run is one an approver denied. A run canceled before it ever started is
+		// one somebody withdrew. Neither ever executed, and the replay drops the hold that was on
+		// them: the fresh run is gated only by a stored policy, so a hold that came from
+		// require_approval, a drift reconcile, or a generated proposal was silently discarded and
+		// the denied command ran from a one-click button on the denied run's own page.
+		if reason := rerunRefusal(rn); reason != "" {
+			respondError(w, log, http.StatusConflict, reason)
 			return
 		}
 		// Access to the run is not enough to fire its spec again. Authorize every object the new
@@ -917,6 +950,10 @@ func approveRunHandler(approver Approver, log *zap.Logger) http.HandlerFunc {
 		case errors.Is(err, dispatch.ErrNotPendingApproval):
 			respondError(w, log, http.StatusConflict, "run is not awaiting approval")
 			return
+		case errors.Is(err, dispatch.ErrChildNotApprovable):
+			respondError(w, log, http.StatusConflict,
+				"a shard or step is decided through its parent, not on its own")
+			return
 		case err != nil:
 			log.Error("server: approve run: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not approve run")
@@ -944,6 +981,10 @@ func rejectRunHandler(approver Approver, log *zap.Logger) http.HandlerFunc {
 			return
 		case errors.Is(err, dispatch.ErrNotPendingApproval):
 			respondError(w, log, http.StatusConflict, "run is not awaiting approval")
+			return
+		case errors.Is(err, dispatch.ErrChildNotApprovable):
+			respondError(w, log, http.StatusConflict,
+				"a shard or step is decided through its parent, not on its own")
 			return
 		case err != nil:
 			log.Error("server: reject run: " + err.Error())
