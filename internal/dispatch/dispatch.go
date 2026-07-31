@@ -687,6 +687,14 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 		return nil, err
 	}
 	d.resolveQueue(ctx, parent)
+	// A split is submitted through a different path than a single run, so without this the same
+	// command an operator gated ran freely by being sharded: the identical playbook that Submit
+	// held for an approver executed on every host the moment it was split in two. A shard matches
+	// exactly what its parent matches, since it inherits everything but its host group, so the
+	// parent is the only thing worth testing.
+	if parent.Status != run.StatusPendingApproval && d.requiresApproval(ctx, parent) {
+		parent.Status = run.StatusPendingApproval
+	}
 	created, dup, err := d.idempotentSave(ctx, parent)
 	if err != nil {
 		return nil, err
@@ -696,13 +704,20 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 		return created, nil
 	}
 
+	// Shards of a held split are stored held too. Nothing can claim them in that state, and they
+	// have to exist before the approval so the decision covers the shards an approver was shown and
+	// so the split survives a restart while it waits.
+	childStatus := run.StatusPending
+	if parent.Status == run.StatusPendingApproval {
+		childStatus = run.StatusPendingApproval
+	}
 	parentID := parent.ID
 	children := make([]*run.Run, 0, count)
 	for i, group := range groups {
 		idx, shardCount := i, count
 		child := &run.Run{
 			ID: run.NewID(), Playbook: playbook, Inventory: inventory,
-			Status: run.StatusPending, CreatedAt: time.Now(),
+			Status: childStatus, CreatedAt: time.Now(),
 			ParentID: &parentID, ShardIndex: &idx, ShardCount: &shardCount,
 			Limit: strings.Join(group, ","),
 		}
@@ -714,6 +729,11 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 			return nil, err
 		}
 		children = append(children, child)
+	}
+
+	if parent.Status == run.StatusPendingApproval {
+		// Held for an approver. Approve starts the coordinator, since no claim loop takes a parent.
+		return parent, nil
 	}
 
 	d.wg.Add(1)
