@@ -29,6 +29,10 @@ func (d *Dispatcher) Approve(ctx context.Context, id string) (*run.Run, error) {
 		d.startPipeline(r)
 	case run.KindSplit:
 		d.startSplit(ctx, r)
+	default:
+		// A plain run just became claimable, so the claim loop is nudged rather than left to
+		// finish an idle backoff while an approved run waits.
+		d.wake()
 	}
 	return r, nil
 }
@@ -59,6 +63,7 @@ func (d *Dispatcher) startSplit(ctx context.Context, parent *run.Run) {
 			return
 		}
 	}
+	d.wake()
 	d.wg.Add(1)
 	go d.coordinate(parent.Clone(), shards)
 }
