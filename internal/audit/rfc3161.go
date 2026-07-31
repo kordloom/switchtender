@@ -20,7 +20,14 @@ import (
 const timestampLimit = 1 << 20
 
 // sha256OID identifies SHA-256 in the message imprint sent to a timestamp authority.
-var sha256OID = asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 2, 1}
+var (
+	// sha256OID names SHA-256, the digest a timestamp request and its token both use.
+	sha256OID = asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 2, 1}
+	// signedDataOID names CMS SignedData, the structure a timestamp token arrives wrapped in.
+	signedDataOID = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 7, 2}
+	// tstInfoOID names TSTInfo, the payload inside a token that says what was timestamped.
+	tstInfoOID = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 16, 1, 4}
+)
 
 // tsaAlgorithm is the hash algorithm identifier in a timestamp request.
 type tsaAlgorithm struct {
@@ -44,7 +51,10 @@ type tsaRequest struct {
 	Version int
 	// Imprint is the hash being timestamped.
 	Imprint tsaImprint
-	// Nonce ties this reply to this request, so a recorded reply cannot be replayed at us.
+	// Nonce is sent so a conforming authority echoes it, which lets a relying party tie a reply to
+	// a request. What actually binds a reply here is the imprint: the stored token is checked to
+	// commit to the digest that was sent, and a chain head does not repeat, so a token recorded for
+	// one anchor cannot be passed off as another's.
 	Nonce *big.Int `asn1:"optional"`
 	// CertReq asks the authority to include its certificate, which a verifier needs offline.
 	CertReq bool `asn1:"optional,default:false"`
@@ -141,7 +151,105 @@ func Timestamp(ctx context.Context, client *http.Client, tsaURL, link string) (s
 	if len(parsed.Token.FullBytes) == 0 {
 		return "", fmt.Errorf("timestamp: %s granted but returned no token", tsaURL)
 	}
+	// A granted status and a non-empty body were the only things checked, so a token committing to
+	// nothing at all was stored as proof and reported as one.
+	if err := checkTimestampToken(parsed.Token.FullBytes, sum[:]); err != nil {
+		return "", fmt.Errorf("timestamp: %s: %w", tsaURL, err)
+	}
 	return base64.StdEncoding.EncodeToString(parsed.Token.FullBytes), nil
+}
+
+// tsaContentInfo is the CMS wrapper a timestamp token arrives in.
+type tsaContentInfo struct {
+	// ContentType names the wrapped structure, which for a token is SignedData.
+	ContentType asn1.ObjectIdentifier
+	// Content is the SignedData itself.
+	Content asn1.RawValue `asn1:"explicit,optional,tag:0"`
+}
+
+// tsaSignedData is the CMS SignedData a timestamp token carries. Only the parts needed to read what
+// the token commits to are named; the signature is checked by a verifier reading the finished
+// bundle, offline and with no trust in this install.
+type tsaSignedData struct {
+	// Version is the structure version.
+	Version int
+	// DigestAlgorithms lists the digests used, unread here.
+	DigestAlgorithms asn1.RawValue `asn1:"set"`
+	// EncapContentInfo holds the TSTInfo being signed.
+	EncapContentInfo tsaEncapContentInfo
+	// Certificates carries the signer's certificate chain, unread here.
+	Certificates asn1.RawValue `asn1:"optional,tag:0"`
+	// CRLs is unread.
+	CRLs asn1.RawValue `asn1:"optional,tag:1"`
+	// SignerInfos holds the authority's signature, unread here.
+	SignerInfos asn1.RawValue `asn1:"set"`
+}
+
+// tsaEncapContentInfo wraps the signed payload.
+type tsaEncapContentInfo struct {
+	// EContentType names the payload, which for a token is TSTInfo.
+	EContentType asn1.ObjectIdentifier
+	// EContent is the DER-encoded TSTInfo.
+	EContent []byte `asn1:"explicit,optional,tag:0"`
+}
+
+// tsaTSTInfo is the payload a timestamp token signs. It is what says which value was timestamped.
+type tsaTSTInfo struct {
+	// Version is the structure version.
+	Version int
+	// Policy is the authority's timestamping policy.
+	Policy asn1.ObjectIdentifier
+	// MessageImprint is the hash the authority says it timestamped.
+	MessageImprint tsaImprint
+	// SerialNumber identifies the token at the authority.
+	SerialNumber *big.Int
+	// GenTime is when the authority says it signed.
+	GenTime time.Time `asn1:"generalized"`
+	// Rest holds the optional accuracy, ordering, nonce, authority name, and extensions, which are
+	// not read here.
+	Rest asn1.RawValue `asn1:"optional,any"`
+}
+
+// checkTimestampToken confirms a timestamp token commits to the digest that was sent.
+//
+// Without this the reply was checked only for a granted status and a non-empty body, so an authority
+// that was hostile, misconfigured, or simply answering a different question had its answer stored as
+// proof. An operator then saw an anchor with a proof attached and believed the chain was fixed in
+// time somewhere this install cannot rewrite, and found out otherwise at an audit, which is the
+// worst moment to learn it.
+//
+// The signature is deliberately not checked here. Whether the authority is worth trusting is the
+// relying party's call, made offline against the token in the finished bundle, and a check made here
+// would only be this install vouching for itself. What must be true before storing it is narrower:
+// this token is about this link and no other value.
+func checkTimestampToken(token, want []byte) error {
+	var ci tsaContentInfo
+	if _, err := asn1.Unmarshal(token, &ci); err != nil {
+		return fmt.Errorf("decode token: %w", err)
+	}
+	if !ci.ContentType.Equal(signedDataOID) {
+		return fmt.Errorf("token wraps %v, want SignedData", ci.ContentType)
+	}
+	var sd tsaSignedData
+	if _, err := asn1.Unmarshal(ci.Content.Bytes, &sd); err != nil {
+		return fmt.Errorf("decode signed data: %w", err)
+	}
+	if !sd.EncapContentInfo.EContentType.Equal(tstInfoOID) {
+		return fmt.Errorf("token payload is %v, want TSTInfo", sd.EncapContentInfo.EContentType)
+	}
+	var info tsaTSTInfo
+	if _, err := asn1.Unmarshal(sd.EncapContentInfo.EContent, &info); err != nil {
+		return fmt.Errorf("decode TSTInfo: %w", err)
+	}
+	if !info.MessageImprint.Algorithm.Algorithm.Equal(sha256OID) {
+		return fmt.Errorf("token imprint uses %v, want SHA-256",
+			info.MessageImprint.Algorithm.Algorithm)
+	}
+	if !bytes.Equal(info.MessageImprint.Digest, want) {
+		return fmt.Errorf("token attests to a different value than the one sent, so it says " +
+			"nothing about this chain")
+	}
+	return nil
 }
 
 // randomNonce returns a random nonce for a timestamp request.
