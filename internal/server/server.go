@@ -442,8 +442,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("PUT /v1/users/{id}", updateUserHandler(s.users, s.log))
 	mux.Handle("GET /v1/users", listUsersHandler(s.users, s.log))
 	mux.Handle("DELETE /v1/users/{id}", deleteUserHandler(s.users, s.log))
-	mux.Handle("POST /v1/credentials", createCredentialHandler(s.credentials, s.sealer, s.log))
-	mux.Handle("PUT /v1/credentials/{id}", updateCredentialHandler(s.credentials, s.sealer, s.log))
+	mux.Handle("POST /v1/credentials", createCredentialHandler(s.credentials, s.sealer, authz, s.log))
+	mux.Handle("PUT /v1/credentials/{id}", updateCredentialHandler(s.credentials, s.sealer, authz, s.log))
 	mux.Handle("GET /v1/credentials", listCredentialsHandler(s.credentials, authz, s.log))
 	// refs lets a credential or project delete refuse to orphan an object that still uses it.
 	refs := &refChecker{
@@ -451,8 +451,8 @@ func (s *Server) Handler() http.Handler {
 		projects: s.projects, invSources: s.invSources,
 	}
 	mux.Handle("DELETE /v1/credentials/{id}", deleteCredentialHandler(s.credentials, refs, s.log))
-	mux.Handle("POST /v1/projects", createProjectHandler(s.projects, s.log))
-	mux.Handle("PUT /v1/projects/{id}", updateProjectHandler(s.projects, s.log))
+	mux.Handle("POST /v1/projects", createProjectHandler(s.projects, authz, s.log))
+	mux.Handle("PUT /v1/projects/{id}", updateProjectHandler(s.projects, authz, s.log))
 	mux.Handle("GET /v1/projects", listProjectsHandler(s.projects, authz, s.log))
 	mux.Handle("DELETE /v1/projects/{id}", deleteProjectHandler(s.projects, refs, s.log))
 	mux.Handle("GET /v1/projects/{id}/files", projectTreeHandler(s.projects, s.syncer, authz, s.log))

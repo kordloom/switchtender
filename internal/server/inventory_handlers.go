@@ -98,6 +98,11 @@ func createInventoryHandler(store inventory.Store, authz *authorizer, sealer *cr
 		if denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse, req.CredentialIDs...)) {
 			return
 		}
+		// Putting an inventory in an organization gives every member of it use, and taking it out
+		// takes that away. Both directions are checked, the same as a template.
+		if authz.denyForeignOrg(w, r, log, req.OrgID) {
+			return
+		}
 		i := &inventory.Inventory{
 			ID: inventory.NewID(), Name: req.Name, Content: req.Content,
 			CredentialIDs: req.CredentialIDs, Queue: req.Queue, OrgID: req.OrgID, CreatedAt: time.Now(),
@@ -148,6 +153,14 @@ func updateInventoryHandler(store inventory.Store, authz *authorizer, sealer *cr
 			return
 		}
 		if denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse, req.CredentialIDs...)) {
+			return
+		}
+		// Both directions of an organization change are checked: entering one gives every member
+		// use of this inventory, and leaving one takes it away from the members it had.
+		if authz.denyForeignOrg(w, r, log, req.OrgID) {
+			return
+		}
+		if existing.OrgID != req.OrgID && authz.denyForeignOrg(w, r, log, existing.OrgID) {
 			return
 		}
 		inv := &inventory.Inventory{
