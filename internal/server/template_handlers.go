@@ -102,7 +102,7 @@ func templateToolError(req createTemplateRequest) string {
 }
 
 // createTemplateHandler stores a new template.
-func createTemplateHandler(store template.Store, log *zap.Logger) http.HandlerFunc {
+func createTemplateHandler(store template.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil {
 			respondError(w, log, http.StatusNotFound, "templates not enabled")
@@ -113,6 +113,17 @@ func createTemplateHandler(store template.Store, log *zap.Logger) http.HandlerFu
 			respondError(w, log, http.StatusBadRequest, "invalid request body")
 			return
 		}
+		// A template is a saved launch spec, so writing one has to authorize the objects it will
+		// launch with. Checking only at launch is the wrong order: a caller who may manage a
+		// template could point it at a project, inventory, or credential they were never granted,
+		// and a schedule or webhook already attached to that template then fires it with no
+		// authorization at all.
+		objects := append([]string{req.ProjectID, req.InventoryID, req.PullCredentialID},
+			req.CredentialIDs...)
+		if denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse, objects...)) {
+			return
+		}
+
 		if msg := templateToolError(req); msg != "" {
 			respondError(w, log, http.StatusBadRequest, msg)
 			return
@@ -140,7 +151,7 @@ func createTemplateHandler(store template.Store, log *zap.Logger) http.HandlerFu
 }
 
 // updateTemplateHandler changes an existing template's fields, keeping its id and creation time.
-func updateTemplateHandler(store template.Store, log *zap.Logger) http.HandlerFunc {
+func updateTemplateHandler(store template.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil {
 			respondError(w, log, http.StatusNotFound, "templates not enabled")
@@ -151,6 +162,17 @@ func updateTemplateHandler(store template.Store, log *zap.Logger) http.HandlerFu
 			respondError(w, log, http.StatusBadRequest, "invalid request body")
 			return
 		}
+		// A template is a saved launch spec, so writing one has to authorize the objects it will
+		// launch with. Checking only at launch is the wrong order: a caller who may manage a
+		// template could point it at a project, inventory, or credential they were never granted,
+		// and a schedule or webhook already attached to that template then fires it with no
+		// authorization at all.
+		objects := append([]string{req.ProjectID, req.InventoryID, req.PullCredentialID},
+			req.CredentialIDs...)
+		if denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse, objects...)) {
+			return
+		}
+
 		if msg := templateToolError(req); msg != "" {
 			respondError(w, log, http.StatusBadRequest, msg)
 			return

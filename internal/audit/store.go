@@ -37,7 +37,13 @@ func (m *memStore) Anchors(_ context.Context, seq int64) ([]*Anchor, error) {
 		cp := *a
 		out = append(out, &cp)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Seq < out[j].Seq })
+	// Ties break on id, matching both SQL stores, so all three return the same order.
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Seq == out[j].Seq {
+			return out[i].ID < out[j].ID
+		}
+		return out[i].Seq < out[j].Seq
+	})
 	return out, nil
 }
 

