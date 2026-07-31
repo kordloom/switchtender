@@ -59,6 +59,9 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Run("cancel pending", func(t *testing.T) { testCancelPending(t, newStore()) })
 	t.Run("save keeps cancel sticky", func(t *testing.T) { testSaveKeepsCancel(t, newStore()) })
 	t.Run("claim skips cancel requested", func(t *testing.T) { testClaimSkipsCancel(t, newStore()) })
+	t.Run("claim skips children of settled parents", func(t *testing.T) {
+		testClaimSkipsChildrenOfSettledParents(t, newStore())
+	})
 	t.Run("transition status", func(t *testing.T) { testTransitionStatus(t, newStore()) })
 	t.Run("workers", func(t *testing.T) { testWorkers(t, newStore()) })
 	t.Run("retention purge", func(t *testing.T) { testPurge(t, newStore()) })
@@ -1929,6 +1932,35 @@ func testReclaimLeavesACoordinatedParentAlone(t *testing.T, store run.Store) {
 // cancels a run an approver just released. Lease first and a process that dies before the
 // transition leaves the run held with an owner, which CancelPending refuses to touch, so it can
 // never be canceled either. Neither state exists if the store does both at once.
+// testClaimSkipsChildrenOfSettledParents checks that a shard is not claimable under a parent that is
+// already settled or being canceled.
+func testClaimSkipsChildrenOfSettledParents(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	parent := &run.Run{
+		ID: "run_dead_parent", Playbook: "site.yml", Kind: run.KindSplit,
+		Status: run.StatusCanceled, CreatedAt: time.Now().Add(-time.Hour),
+	}
+	if err := store.Save(ctx, parent); err != nil {
+		t.Fatalf("Save() parent error = %v", err)
+	}
+	idx, count := 0, 2
+	child := &run.Run{
+		ID: "run_dead_parent_c0", Playbook: "site.yml", Status: run.StatusPending,
+		CreatedAt: time.Now().Add(-time.Hour), ParentID: &parent.ID,
+		ShardIndex: &idx, ShardCount: &count,
+	}
+	if err := store.Save(ctx, child); err != nil {
+		t.Fatalf("Save() child error = %v", err)
+	}
+	got, err := store.Claim(ctx, "worker-a", []string{""})
+	if err == nil {
+		t.Fatalf("claimed %q, a shard of a canceled split, so it executes on real hosts", got.ID)
+	}
+	if !errors.Is(err, run.ErrNonePending) {
+		t.Fatalf("Claim() error = %v, want ErrNonePending", err)
+	}
+}
+
 func testTransitionStatusAndClaim(t *testing.T, store run.Store) {
 	ctx := context.Background()
 	held := &run.Run{
@@ -1985,5 +2017,31 @@ func testTransitionStatusAndClaim(t *testing.T, store run.Store) {
 	if missing, err := store.TransitionStatusAndClaim(ctx, "run_nope",
 		run.StatusPendingApproval, run.StatusRunning, "x"); err != nil || missing {
 		t.Errorf("transition on a missing run = (%v, %v), want (false, nil)", missing, err)
+	}
+
+	// A requested cancel refuses the claim. Cancel is a flag rather than a status, so a run canceled
+	// after approval and before a coordinator picked it up still reads as holding the status the
+	// caller swaps from. Without this the swap succeeds and the run executes on real hosts.
+	canceled := &run.Run{
+		ID: "run_atomic_canceled", Playbook: "site.yml", Kind: run.KindPipeline,
+		Status: run.StatusPendingApproval, CreatedAt: time.Now().Add(-time.Hour),
+		CancelRequested: true,
+	}
+	if err := store.Save(ctx, canceled); err != nil {
+		t.Fatalf("Save() canceled error = %v", err)
+	}
+	started, err := store.TransitionStatusAndClaim(ctx, canceled.ID,
+		run.StatusPendingApproval, run.StatusRunning, "coordinator-c")
+	if err != nil {
+		t.Fatalf("TransitionStatusAndClaim() canceled error = %v", err)
+	}
+	if started {
+		t.Error("a run whose cancel was already requested was claimed and started")
+	}
+	if after, err := store.Get(ctx, canceled.ID); err != nil {
+		t.Fatalf("Get() canceled error = %v", err)
+	} else if after.Status == run.StatusRunning || after.ClaimedBy != "" {
+		t.Errorf("canceled run is %q claimed by %q, want it left unclaimed",
+			after.Status, after.ClaimedBy)
 	}
 }

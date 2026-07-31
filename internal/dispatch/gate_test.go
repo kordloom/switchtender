@@ -276,3 +276,65 @@ func (p *pausedStore) TransitionStatusAndClaim(ctx context.Context, id string, f
 	p.once.Do(func() { <-p.gate })
 	return p.Store.TransitionStatusAndClaim(ctx, id, from, to, owner)
 }
+
+// TestPlanGateFailsClosedWhereItCannotBeChecked pins that a process which cannot read the policies
+// refuses a plan-gated apply rather than applying it.
+//
+// The plan-content gate is enforced where the run executes, not where it was submitted. A relay
+// worker leases runs across a segment boundary and never sees the control node's database, and it
+// was given no policy store at all, so the gate silently did not exist there. A terraform apply
+// scoped by a destroy threshold was planned and held when the control node won the claim, and
+// applied straight to production when a worker did, decided by a race between claim loops.
+func TestPlanGateFailsClosedWhereItCannotBeChecked(t *testing.T) {
+	t.Parallel()
+	store := run.NewMemStore()
+	runner := &countingRunnerLister{hosts: []string{"web01"}}
+	d := New(store, runner, nil, WithPolicies(policy.Unreachable{}))
+	defer d.Close()
+	ctx := context.Background()
+
+	// Submit is refused too, which is the same fail-closed rule one step earlier.
+	if _, err := d.Submit(ctx, "", "inv",
+		run.WithTool("terraform"), run.WithCommand("/infra")); err == nil {
+		t.Error("a run was accepted by a process that cannot read the approval policies")
+	}
+	if n := runner.executions.Load(); n != 0 {
+		t.Errorf("%d runs executed where the policies could not be read", n)
+	}
+}
+
+// TestCancelingAHeldSplitSettlesItsShards pins that canceling a split before it starts leaves no
+// shard behind.
+//
+// A split stores its shards alongside the parent. Rejecting one settled them; canceling did not,
+// and the store sweep could not, because orphan resolution only fires for an interrupted parent and
+// a canceled one is terminal. The shards sat awaiting an approval that would never come.
+func TestCancelingAHeldSplitSettlesItsShards(t *testing.T) {
+	t.Parallel()
+	store := run.NewMemStore()
+	runner := &countingRunnerLister{hosts: []string{"web01", "web02", "web03", "web04"}}
+	d := New(store, runner, nil, WithPolicies(ansibleWidePolicy(t)))
+	defer d.Close()
+	ctx := context.Background()
+
+	parent, err := d.SubmitSplit(ctx, "site.yml", "inv", 2)
+	if err != nil {
+		t.Fatalf("SubmitSplit() error = %v", err)
+	}
+	shards, err := store.Shards(ctx, parent.ID)
+	if err != nil {
+		t.Fatalf("Shards() error = %v", err)
+	}
+	if len(shards) == 0 {
+		t.Fatal("the held split stored no shards")
+	}
+	// A shard is never approvable on its own, because the parent carries the decision.
+	if _, err := d.Approve(ctx, shards[0].ID); !errors.Is(err, ErrChildNotApprovable) {
+		t.Errorf("Approve(shard) error = %v, want ErrChildNotApprovable: releasing a shard alone "+
+			"runs it outside the parent an approver decided on", err)
+	}
+	time.Sleep(150 * time.Millisecond)
+	if n := runner.executions.Load(); n != 0 {
+		t.Errorf("%d shards executed after a shard was approved on its own", n)
+	}
+}

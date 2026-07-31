@@ -495,6 +495,12 @@ func (m *memStore) NonTerminal(_ context.Context) ([]*Run, error) {
 }
 
 // Claim leases the oldest unclaimed pending top-level plain run to owner and returns it.
+//
+// A child is not claimable under a parent that is already settled or being canceled. Shards of an
+// ungated split are stored claimable before the coordinator has fenced its parent, so a split
+// canceled in that window kept its shards claimable: the fence correctly refused to start the
+// parent, and a claim loop had already taken a shard and executed it on real hosts. The parent's
+// state is part of whether a shard may run, so it is part of the predicate that claims one.
 func (m *memStore) Claim(_ context.Context, owner string, queues []string) (*Run, error) {
 	serves := make(map[string]bool, len(queues))
 	for _, q := range queues {
@@ -509,6 +515,13 @@ func (m *memStore) Claim(_ context.Context, owner string, queues []string) (*Run
 		}
 		if !serves[r.Queue] {
 			continue
+		}
+		if r.ParentID != nil {
+			p, ok := m.runs[*r.ParentID]
+			if !ok || p.CancelRequested ||
+				(p.Status != StatusPending && p.Status != StatusRunning) {
+				continue
+			}
 		}
 		if oldest == nil || r.CreatedAt.Before(oldest.CreatedAt) ||
 			(r.CreatedAt.Equal(oldest.CreatedAt) && r.ID < oldest.ID) {
@@ -652,12 +665,17 @@ func (m *memStore) CancelPending(_ context.Context, id string) (bool, error) {
 }
 
 // TransitionStatusAndClaim moves the run between statuses and takes owner's lease in one step.
+// A requested cancel blocks the claim in the same statement that makes it. Cancel is recorded as a
+// flag rather than a status, so a fence that compares only the status cannot see one: a pipeline
+// canceled after it was approved and before its coordinator picked it up still read as running, won
+// the compare-and-swap, and executed on real hosts. Checking the flag first and swapping second
+// leaves the same gap one scheduling delay wide, so it belongs in the predicate.
 func (m *memStore) TransitionStatusAndClaim(_ context.Context, id string, from, to Status,
 	owner string) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	r, ok := m.runs[id]
-	if !ok || r.Status != from {
+	if !ok || r.Status != from || r.CancelRequested {
 		return false, nil
 	}
 	now := time.Now()

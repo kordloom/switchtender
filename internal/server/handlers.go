@@ -631,6 +631,13 @@ func cancelRunHandler(store run.Store, canceler Canceler, authz *authorizer, log
 		if existing.ClaimedBy == "" &&
 			(existing.Status == run.StatusPending || existing.Status == run.StatusPendingApproval) {
 			if done, err := store.CancelPending(r.Context(), id); err == nil && done {
+				// A split stores its shards alongside the parent, so canceling the parent has to
+				// settle them too. Rejecting a split already did this; canceling did not, and the
+				// store sweep cannot cover it either, because orphan resolution only fires for an
+				// interrupted parent and a canceled one is terminal. The shards sat awaiting an
+				// approval that would never come, and approving one ran it under a canceled
+				// parent with nothing to roll it up.
+				cancelChildrenOf(r.Context(), store, log, existing)
 				respondJSON(w, log, http.StatusAccepted,
 					map[string]string{"status": "canceled"}, wantsPretty(r))
 				return
@@ -766,6 +773,34 @@ func actorName(r *http.Request) string {
 		return a.Name
 	}
 	return ""
+}
+
+// cancelChildrenOf settles the children stored with a parent that was canceled before it started.
+//
+// A child that cannot be settled is logged rather than failing the cancel: the parent is what the
+// caller asked to stop, and it is already stopped.
+func cancelChildrenOf(ctx context.Context, store run.Store, log *zap.Logger, parent *run.Run) {
+	if parent.Kind != run.KindSplit && parent.Kind != run.KindPipeline {
+		return
+	}
+	children, err := store.Shards(ctx, parent.ID)
+	if err != nil {
+		log.Error("server: list shards of a canceled run: " + err.Error())
+		return
+	}
+	for _, c := range children {
+		if c.Status.Terminal() {
+			continue
+		}
+		if done, cerr := store.CancelPending(ctx, c.ID); cerr != nil {
+			log.Error("server: cancel shard " + c.ID + ": " + cerr.Error())
+		} else if !done {
+			// Already claimed by an executor, so it stops cooperatively instead.
+			if rerr := store.RequestCancel(ctx, c.ID); rerr != nil {
+				log.Error("server: request cancel of shard " + c.ID + ": " + rerr.Error())
+			}
+		}
+	}
 }
 
 // rerunOptions rebuilds the submit options a stored run was created with, so a rerun replays the

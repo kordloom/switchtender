@@ -14,6 +14,12 @@ func (d *Dispatcher) Approve(ctx context.Context, id string) (*run.Run, error) {
 	if err != nil {
 		return nil, err
 	}
+	// A child is not approvable on its own. Its parent is what an approver decided on, and a child
+	// released by itself runs under a parent that may be canceled, with no coordinator and nothing
+	// to roll it up.
+	if r.ParentID != nil {
+		return nil, ErrChildNotApprovable
+	}
 	// A parent goes straight to running, never through pending.
 	//
 	// The abandoned-parent sweep interrupts a split or pipeline parent that is pending, unclaimed,
@@ -51,6 +57,16 @@ func (d *Dispatcher) Approve(ctx context.Context, id string) (*run.Run, error) {
 		return nil, ErrNotPendingApproval
 	}
 	r.Status = target
+	if target == run.StatusRunning {
+		// The store stamped the lease and the start time in the same statement, so the answer the
+		// caller gets carries them too rather than describing a run that no longer exists.
+		claimed := time.Now()
+		r.ClaimedBy = d.owner
+		r.ClaimedAt = &claimed
+		if r.StartedAt == nil {
+			r.StartedAt = &claimed
+		}
+	}
 	// No claim loop picks up a parent run of either kind, so an approved one starts here or never
 	// runs at all.
 	switch r.Kind {

@@ -923,14 +923,26 @@ func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string) (*r
 // instead of starting them.
 func (d *Dispatcher) parentMayStart(parent *run.Run, childIDs []string) bool {
 	ctx := context.Background()
-	ok, err := d.store.TransitionStatusAndClaim(ctx, parent.ID, parent.Status,
-		run.StatusRunning, d.owner)
+	// Retried like every other store write in this file. It is the one write that decides whether a
+	// whole fan-out lives, and under SQLite a single writer with a busy timeout means contention is
+	// expected rather than exceptional, so one busy moment must not hard-fail a healthy split.
+	var ok bool
+	err := withRetries(func() error {
+		var terr error
+		ok, terr = d.store.TransitionStatusAndClaim(ctx, parent.ID, parent.Status,
+			run.StatusRunning, d.owner)
+		return terr
+	})
 	if err != nil {
 		// The store is unreachable. Starting on an unknown state risks resurrecting a canceled
 		// run, and the fence exists precisely for that uncertainty.
 		d.log.Error("dispatch: could not claim parent to start it: "+err.Error(),
 			zap.String("run_id", parent.ID))
 		d.cancelChildren(childIDs)
+		// The parent is settled too, not just its children. Leaving it running while its children
+		// are canceled and its stream is closed is a half-state that only the lease sweep would
+		// eventually resolve, and only for a parent that happened to hold a lease.
+		d.finalize(parent, run.StatusFailed, nil, "could not start coordination: "+err.Error())
 		d.publisher.CloseRun(parent.ID)
 		return false
 	}
@@ -1125,7 +1137,12 @@ func (d *Dispatcher) cancelChildren(ids []string) {
 			d.log.Warn("dispatch: request child cancel: "+err.Error(), zap.String("run_id", id))
 		}
 		d.Cancel(id)
-		if r.Status == run.StatusPending && r.ClaimedBy == "" {
+		// A held shard is settled here too. Finalizing only an unclaimed pending child left a shard
+		// in pending_approval carrying a cancel flag that nothing acts on: no executor holds it, so
+		// nothing reads the flag, and orphan resolution covers only an interrupted parent. It sat
+		// in the approval queue forever, and approving it ran it under a parent that is gone.
+		if r.ClaimedBy == "" &&
+			(r.Status == run.StatusPending || r.Status == run.StatusPendingApproval) {
 			d.finalize(r, run.StatusCanceled, nil, "")
 		}
 	}
