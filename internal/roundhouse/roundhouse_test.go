@@ -87,7 +87,7 @@ func TestAnsibleRunnerArgs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("playbookArgs() error = %v", err)
 	}
-	want := []string{"-i", "hosts.ini", "site.yml"}
+	want := []string{"-i", "hosts.ini", "--", "site.yml"}
 	if strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Errorf("args = %v, want %v", got, want)
 	}
@@ -96,7 +96,7 @@ func TestAnsibleRunnerArgs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("playbookArgs() error = %v", err)
 	}
-	wantLimit := []string{"-i", "hosts.ini", "--limit", "web01,web02", "site.yml"}
+	wantLimit := []string{"-i", "hosts.ini", "--limit", "web01,web02", "--", "site.yml"}
 	if strings.Join(gotLimit, " ") != strings.Join(wantLimit, " ") {
 		t.Errorf("args with limit = %v, want %v", gotLimit, wantLimit)
 	}
@@ -108,7 +108,7 @@ func TestArgsExtraVarsJSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("playbookArgs() error = %v", err)
 	}
-	want := []string{"--extra-vars", `{"version":"1.2.3"}`, "p.yml"}
+	want := []string{"--extra-vars", `{"version":"1.2.3"}`, "--", "p.yml"}
 	if diff := cmp.Diff(want, args); diff != "" {
 		t.Errorf("args mismatch (-want +got):\n%s", diff)
 	}

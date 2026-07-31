@@ -24,7 +24,7 @@ func TestBuildContainerPlanAnsible(t *testing.T) {
 	defer cleanup()
 	want := []string{
 		"ansible-playbook", "-i", "/co/hosts.ini", "--limit", "web01",
-		"--private-key", "/co/key", "/co/site.yml",
+		"--private-key", "/co/key", "--", "/co/site.yml",
 	}
 	if diff := cmp.Diff(want, plan.argv); diff != "" {
 		t.Errorf("argv mismatch (-want +got):\n%s", diff)

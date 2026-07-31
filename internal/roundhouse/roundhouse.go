@@ -434,5 +434,8 @@ func playbookArgs(spec Spec) ([]string, error) {
 	if spec.VaultPasswordFile != "" {
 		args = append(args, "--vault-password-file", spec.VaultPasswordFile)
 	}
-	return append(args, spec.Playbook), nil
+	// The playbook is separated from the options it follows. Without this a playbook whose name
+	// begins with a dash was read by ansible-playbook as another option rather than as the file to
+	// run, so a stored template could turn its own name into a flag.
+	return append(args, "--", spec.Playbook), nil
 }
