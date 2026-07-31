@@ -959,16 +959,27 @@ func testClaim(t *testing.T, store run.Store) {
 	ctx := context.Background()
 	base := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
 	parentID := "run_split"
+	unstartedID := "run_unstarted"
 	idx, count := 0, 1
 	for _, r := range []*run.Run{
 		{ID: "run_new", Playbook: "p", Status: run.StatusPending, CreatedAt: base.Add(time.Minute)},
 		{ID: "run_old", Playbook: "p", Status: run.StatusPending, CreatedAt: base},
 		{ID: "run_done", Playbook: "p", Status: run.StatusSucceeded, CreatedAt: base},
-		{ID: parentID, Playbook: "p", Kind: run.KindSplit, Status: run.StatusPending, CreatedAt: base},
+		// The parent is running, which is what says a coordinator took it and means to run it. A
+		// shard under a parent that has not reached that state is not claimable, because shards are
+		// stored before the coordinator fences the parent.
+		{ID: parentID, Playbook: "p", Kind: run.KindSplit, Status: run.StatusRunning, CreatedAt: base},
 		{
 			ID: "run_shard", Playbook: "p", Status: run.StatusPending,
 			CreatedAt: base.Add(30 * time.Minute),
 			ParentID:  &parentID, ShardIndex: &idx, ShardCount: &count,
+		},
+		{ID: "run_unstarted", Playbook: "p", Kind: run.KindSplit, Status: run.StatusPending,
+			CreatedAt: base},
+		{
+			ID: "run_unstarted_c0", Playbook: "p", Status: run.StatusPending,
+			CreatedAt: base.Add(time.Minute), ParentID: &unstartedID,
+			ShardIndex: &idx, ShardCount: &count,
 		},
 	} {
 		if err := store.Save(ctx, r); err != nil {
@@ -997,11 +1008,15 @@ func testClaim(t *testing.T, store run.Store) {
 		t.Fatalf("Claim() error = %v", err)
 	}
 	if third.ID != "run_shard" {
-		t.Errorf("third claim = %s, want run_shard, children are executable", third.ID)
+		t.Errorf("third claim = %s, want run_shard, a child of a running parent is executable",
+			third.ID)
 	}
 
-	if _, err := store.Claim(ctx, "worker-d", []string{""}); !errors.Is(err, run.ErrNonePending) {
-		t.Errorf("fourth claim error = %v, want ErrNonePending", err)
+	// The fourth claim finds nothing: the only run left is a shard whose parent has not started, and
+	// claiming that is what let a split canceled before its coordinator ran execute anyway.
+	if got, err := store.Claim(ctx, "worker-d", []string{""}); !errors.Is(err, run.ErrNonePending) {
+		t.Errorf("fourth claim = (%v, %v), want ErrNonePending: a shard whose parent has not "+
+			"started is claimable, so a split canceled in that window still runs", got, err)
 	}
 }
 

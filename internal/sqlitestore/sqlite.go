@@ -1869,11 +1869,16 @@ func parseNotifications(s string) []run.NotifyTarget {
 
 // Claim leases the oldest unclaimed pending top-level plain run to owner and returns it. A run
 // whose cancel was requested while it waited is skipped; the cancel handler terminalizes it.
-// A child is not claimable under a parent that is already settled or being canceled. Shards of an
-// ungated split are stored claimable before the coordinator has fenced its parent, so a split
-// canceled in that window kept its shards claimable: the fence correctly refused to start the
-// parent, and a claim loop had already taken a shard and executed it on real hosts. The parent's
-// state is part of whether a shard may run, so it is part of the predicate that claims one.
+// A child is claimable only while its parent is running. Shards are stored before the coordinator
+// fences the parent, so for as long as that parent is merely pending its shards are already sitting
+// claimable: a split canceled in that window had the fence correctly refuse to start the parent
+// while a claim loop had already taken shards and executed them on real hosts. Allowing a pending
+// parent narrowed that window rather than closing it, and under load the loop still won.
+//
+// Running is the state that says a coordinator took the parent and means to run it, and every path
+// that creates a claimable child reaches it: a split and a shard retry both transition the parent
+// through the start fence, and pipeline steps are created only after it. A parent whose coordinator
+// dies before the fence leaves its children unclaimable, which the abandoned-parent sweep settles.
 func (s *store) Claim(ctx context.Context, owner string, queues []string) (*run.Run, error) {
 	placeholders, args := sqlutil.QueuePlaceholders(queues, "?", 0)
 	q := `
@@ -1883,7 +1888,7 @@ WHERE id = (
 	WHERE status='pending' AND claimed_by='' AND kind='' AND cancel_requested=0
 		AND queue IN (` + placeholders + `)
 		AND (COALESCE(parent_id,'')='' OR parent_id IN (
-			SELECT id FROM runs WHERE status IN ('pending','running') AND cancel_requested=0))
+			SELECT id FROM runs WHERE status='running' AND cancel_requested=0))
 	ORDER BY created_at, id LIMIT 1
 )
 RETURNING ` + runColumns

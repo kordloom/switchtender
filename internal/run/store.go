@@ -496,11 +496,16 @@ func (m *memStore) NonTerminal(_ context.Context) ([]*Run, error) {
 
 // Claim leases the oldest unclaimed pending top-level plain run to owner and returns it.
 //
-// A child is not claimable under a parent that is already settled or being canceled. Shards of an
-// ungated split are stored claimable before the coordinator has fenced its parent, so a split
-// canceled in that window kept its shards claimable: the fence correctly refused to start the
-// parent, and a claim loop had already taken a shard and executed it on real hosts. The parent's
-// state is part of whether a shard may run, so it is part of the predicate that claims one.
+// A child is claimable only while its parent is running. Shards are stored before the coordinator
+// fences the parent, so for as long as that parent is merely pending its shards are already sitting
+// claimable: a split canceled in that window had the fence correctly refuse to start the parent
+// while a claim loop had already taken shards and executed them on real hosts. Allowing a pending
+// parent narrowed that window rather than closing it, and under load the loop still won.
+//
+// Running is the state that says a coordinator took the parent and means to run it, and every path
+// that creates a claimable child reaches it: a split and a shard retry both transition the parent
+// through the start fence, and pipeline steps are created only after it. A parent whose coordinator
+// dies before the fence leaves its children unclaimable, which the abandoned-parent sweep settles.
 func (m *memStore) Claim(_ context.Context, owner string, queues []string) (*Run, error) {
 	serves := make(map[string]bool, len(queues))
 	for _, q := range queues {
@@ -518,8 +523,7 @@ func (m *memStore) Claim(_ context.Context, owner string, queues []string) (*Run
 		}
 		if r.ParentID != nil {
 			p, ok := m.runs[*r.ParentID]
-			if !ok || p.CancelRequested ||
-				(p.Status != StatusPending && p.Status != StatusRunning) {
+			if !ok || p.CancelRequested || p.Status != StatusRunning {
 				continue
 			}
 		}
