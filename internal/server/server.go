@@ -395,7 +395,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /v1/runs/{id}/rerun", rerunRunHandler(s.store, s.submitter, authz, s.log))
 	mux.Handle("POST /v1/runs/{id}/approve", approveRunHandler(s.approver, s.log))
 	mux.Handle("POST /v1/runs/{id}/reject", rejectRunHandler(s.approver, s.log))
-	mux.Handle("GET /v1/runs", listRunsHandler(s.store, s.log))
+	mux.Handle("GET /v1/runs", listRunsHandler(s.store, authz, s.log))
 	mux.Handle("GET /v1/runs/{id}", getRunHandler(s.store, authz, s.log))
 	mux.Handle("GET /v1/runs/{id}/shards", runShardsHandler(s.store, authz, s.log))
 	mux.Handle("GET /v1/runs/{id}/steps", runStepsHandler(s.store, authz, s.log))
