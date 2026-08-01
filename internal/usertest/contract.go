@@ -5,6 +5,8 @@ package usertest
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -21,10 +23,74 @@ func Contract(t *testing.T, newStore func() user.Store) {
 	t.Run("last admin is guarded in one statement", func(t *testing.T) {
 		testLastAdminGuard(t, newStore())
 	})
+	t.Run("last admin guard holds under concurrency", func(t *testing.T) {
+		testLastAdminGuardUnderConcurrency(t, newStore())
+	})
+}
+
+// testLastAdminGuardUnderConcurrency verifies the guard actually serializes, rather than appearing
+// to because the test ran one call at a time.
+//
+// The sequential check above passes on a store where the guard does nothing under load. Postgres
+// readers do not block writers: two deletes of the last two administrators target different rows,
+// never contend for a row lock, and under read committed each subquery reads its own snapshot and
+// still sees the other administrator. Both then succeed and the install is left with nobody who can
+// reach an admin route, recoverable only from a shell on the host. Measured before the fix, 291 of
+// 300 concurrent pairs ended that way, while SQLite passed throughout because it admits one writer.
+// A guard for a race has to be tested with a race.
+func testLastAdminGuardUnderConcurrency(t *testing.T, store user.Store) {
+	ctx := context.Background()
+	const rounds = 150
+	for round := range rounds {
+		a := fmt.Sprintf("race_admin_a_%d", round)
+		b := fmt.Sprintf("race_admin_b_%d", round)
+		for _, id := range []string{a, b} {
+			if err := store.Save(ctx, &user.User{
+				ID: id, Username: id, PasswordHash: "h", Role: user.RoleAdmin,
+				CreatedAt: time.Now(),
+			}); err != nil {
+				t.Fatalf("Save(%s) error = %v", id, err)
+			}
+		}
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		for _, id := range []string{a, b} {
+			wg.Add(1)
+			go func(id string) {
+				defer wg.Done()
+				<-start
+				if _, err := store.DeleteUnlessLastAdmin(ctx, id); err != nil &&
+					!errors.Is(err, user.ErrNotFound) {
+					t.Errorf("DeleteUnlessLastAdmin(%s) error = %v", id, err)
+				}
+			}(id)
+		}
+		close(start)
+		wg.Wait()
+
+		all, err := store.List(ctx)
+		if err != nil {
+			t.Fatalf("List() error = %v", err)
+		}
+		admins := 0
+		for _, u := range all {
+			if u.Role == user.RoleAdmin {
+				admins++
+			}
+		}
+		if admins == 0 {
+			t.Fatalf("round %d: both deletes won and the install has no administrator left, so "+
+				"no admin route is reachable and the only way back is a shell on the host", round)
+		}
+	}
 }
 
 // testLastAdminGuard verifies a store refuses the delete or the demotion that would leave an install
 // with no administrator, and that it decides in the same statement that makes the change.
+//
+// The ids are namespaced because the SQL backends run every subtest against one database. Reusing
+// the plain ids the other subtests use left rows behind that changed their expected counts and
+// ordering, which showed up as a failure in a test that had nothing to do with this one.
 //
 // Counting the admins first and changing after is two statements, and another request can pass the
 // same count in between: two concurrent deletes of the last two admins both saw a survivor and both
@@ -33,7 +99,7 @@ func Contract(t *testing.T, newStore func() user.Store) {
 // one database, so a lock in one process does not close it; the store has to.
 func testLastAdminGuard(t *testing.T, store user.Store) {
 	ctx := context.Background()
-	admins := []string{"user_a", "user_b"}
+	admins := []string{"guard_admin_a", "guard_admin_b"}
 	for _, id := range admins {
 		if err := store.Save(ctx, &user.User{
 			ID: id, Username: id, PasswordHash: "h", Role: user.RoleAdmin,
@@ -44,40 +110,40 @@ func testLastAdminGuard(t *testing.T, store user.Store) {
 	}
 
 	// One of two admins goes.
-	if ok, err := store.DeleteUnlessLastAdmin(ctx, "user_a"); err != nil || !ok {
+	if ok, err := store.DeleteUnlessLastAdmin(ctx, "guard_admin_a"); err != nil || !ok {
 		t.Fatalf("deleting one of two admins = (%v, %v), want it removed", ok, err)
 	}
 	// The survivor does not.
-	if ok, err := store.DeleteUnlessLastAdmin(ctx, "user_b"); err != nil || ok {
+	if ok, err := store.DeleteUnlessLastAdmin(ctx, "guard_admin_b"); err != nil || ok {
 		t.Errorf("deleting the last admin = (%v, %v), want it refused", ok, err)
 	}
-	if _, err := store.Get(ctx, "user_b"); err != nil {
+	if _, err := store.Get(ctx, "guard_admin_b"); err != nil {
 		t.Errorf("the last admin is gone: Get() error = %v", err)
 	}
 	// Nor can the survivor be demoted out of the role.
 	demoted := &user.User{
-		ID: "user_b", Username: "user_b", PasswordHash: "h", Role: user.RoleViewer,
+		ID: "guard_admin_b", Username: "guard_admin_b", PasswordHash: "h", Role: user.RoleViewer,
 	}
 	if ok, err := store.UpdateUnlessLastAdmin(ctx, demoted); err != nil || ok {
 		t.Errorf("demoting the last admin = (%v, %v), want it refused", ok, err)
 	}
-	if got, err := store.Get(ctx, "user_b"); err != nil {
+	if got, err := store.Get(ctx, "guard_admin_b"); err != nil {
 		t.Errorf("Get() error = %v", err)
 	} else if got.Role != user.RoleAdmin {
 		t.Errorf("role = %q, want admin: the last administrator was demoted", got.Role)
 	}
 	// A non-admin is not protected by the rule.
 	if err := store.Save(ctx, &user.User{
-		ID: "user_c", Username: "user_c", PasswordHash: "h", Role: user.RoleViewer,
+		ID: "guard_viewer_c", Username: "guard_viewer_c", PasswordHash: "h", Role: user.RoleViewer,
 		CreatedAt: time.Now(),
 	}); err != nil {
 		t.Fatalf("Save(user_c) error = %v", err)
 	}
-	if ok, err := store.DeleteUnlessLastAdmin(ctx, "user_c"); err != nil || !ok {
+	if ok, err := store.DeleteUnlessLastAdmin(ctx, "guard_viewer_c"); err != nil || !ok {
 		t.Errorf("deleting a viewer = (%v, %v), want it removed", ok, err)
 	}
 	// A missing account is reported as missing rather than as a refusal.
-	if _, err := store.DeleteUnlessLastAdmin(ctx, "user_gone"); !errors.Is(err, user.ErrNotFound) {
+	if _, err := store.DeleteUnlessLastAdmin(ctx, "guard_missing"); !errors.Is(err, user.ErrNotFound) {
 		t.Errorf("deleting a missing user error = %v, want ErrNotFound", err)
 	}
 }

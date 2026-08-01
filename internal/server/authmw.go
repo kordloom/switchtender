@@ -296,16 +296,19 @@ func requiredRole(r *http.Request) user.Role {
 		p == "/policies" || strings.HasPrefix(p, "/policies/") {
 		return user.RoleAdmin
 	}
-	// Schedules, webhook triggers, and inventory sources are the configuration that makes things
-	// run without a person, and they name the credentials and projects they run with. That is
-	// operator ground rather than something every viewer needs, and listing them was unfiltered:
-	// there is no organization on these objects to filter by, so the role is what bounds them.
-	if p == "/schedules" || strings.HasPrefix(p, "/schedules/") ||
-		p == "/triggers" || strings.HasPrefix(p, "/triggers/") ||
-		p == "/inventory-sources" || strings.HasPrefix(p, "/inventory-sources/") {
-		return user.RoleOperator
-	}
+	// Reading the configuration that makes things run without a person is operator ground rather
+	// than something every viewer needs, and listing it was unfiltered: there is no organization on
+	// these objects to filter by, so the role is what bounds them.
+	//
+	// This raises reads only. Sitting above the GET check it was method-blind, and since the switch
+	// below defaults to admin, it quietly lowered every write on these three families from admin to
+	// operator. Nothing tested it, because the test that came with it asserted GET paths only.
 	if r.Method == http.MethodGet || r.Method == http.MethodHead {
+		if p == "/schedules" || strings.HasPrefix(p, "/schedules/") ||
+			p == "/triggers" || strings.HasPrefix(p, "/triggers/") ||
+			p == "/inventory-sources" || strings.HasPrefix(p, "/inventory-sources/") {
+			return user.RoleOperator
+		}
 		return user.RoleViewer
 	}
 	switch {
@@ -443,7 +446,14 @@ func (g *authGate) protects(r *http.Request) bool {
 		return false
 	}
 	// Webhook triggers carry their own secret token in the path, so they bypass the token gate.
-	if r.Method == http.MethodPost && strings.HasPrefix(p, "/hooks/") {
+	//
+	// The same test decides this as decides whether the token is redacted from the record. They
+	// used to differ: this one compared the raw path and the redaction cleaned it first, so
+	// /hooks/<token>/../../probe read as public here and as not-a-hook there. That combination is
+	// the worst of both: an unauthenticated stranger appended a permanent hash-linked entry for
+	// every probe, and because redaction had already decided it was not a hook, the presented token
+	// went into the chain verbatim and travels in every bundle handed to a third party.
+	if isHook(r) {
 		return false
 	}
 	return true
