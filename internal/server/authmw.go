@@ -296,6 +296,17 @@ func requiredRole(r *http.Request) user.Role {
 		p == "/policies" || strings.HasPrefix(p, "/policies/") {
 		return user.RoleAdmin
 	}
+	// Organizations and teams are the subject side of every grant, so reading them reads half the
+	// access map. Leaving them open to viewers while the grants themselves were admin only closed
+	// one side of the same door: the membership list says who a grant to an organization actually
+	// reaches. The doctor is here for the same reason, since it enumerates every template,
+	// schedule, credential, inventory, and project in the install by id and name whether or not the
+	// caller may use any of them.
+	if p == "/orgs" || strings.HasPrefix(p, "/orgs/") ||
+		p == "/teams" || strings.HasPrefix(p, "/teams/") ||
+		p == "/doctor" {
+		return user.RoleAdmin
+	}
 	// Reading the configuration that makes things run without a person is operator ground rather
 	// than something every viewer needs, and listing it was unfiltered: there is no organization on
 	// these objects to filter by, so the role is what bounds them.

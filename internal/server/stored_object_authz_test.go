@@ -6,6 +6,10 @@ import (
 	"net/http"
 	"testing"
 
+	"time"
+
+	"github.com/kordloom/switchtender/internal/grant"
+	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/user"
 )
 
@@ -82,5 +86,61 @@ func TestHookBypassAndRedactionAgree(t *testing.T) {
 					"without redaction writes its own credential into the chain", p, public, redacted)
 			}
 		})
+	}
+}
+
+// TestDerivedReadsRespectTheRunFilter checks that a view computed from runs shows only runs the
+// caller may read.
+//
+// Fleet health, drift, task trends, host history, host facts, and the worker list are all derived
+// from runs, and each returned the whole install to any viewer. The same caller got a 403 asking for
+// one of those runs by name, so the boundary held on the direct route and leaked on every view built
+// on top of it.
+func TestDerivedReadsRespectTheRunFilter(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := run.NewMemStore()
+	mine := &run.Run{
+		ID: "run_mine", Playbook: "mine.yml", InventoryID: "inv_mine",
+		Status: run.StatusSucceeded, CreatedAt: time.Now(),
+	}
+	theirs := &run.Run{
+		ID: "run_theirs", Playbook: "theirs.yml", InventoryID: "inv_theirs",
+		Status: run.StatusFailed, CreatedAt: time.Now(),
+	}
+	for _, r := range []*run.Run{mine, theirs} {
+		if err := store.Save(ctx, r); err != nil {
+			t.Fatalf("Save(%s) error = %v", r.ID, err)
+		}
+	}
+	authz := &authorizer{
+		strict: true,
+		grants: &fakeGrants{byObject: map[string][]*grant.Grant{
+			"inv_mine": {{Subject: "user_1", Access: grant.AccessUse}},
+		}},
+	}
+	actorCtx := context.WithValue(ctx, actorKey{}, Actor{UserID: "user_1", Role: user.RoleViewer})
+
+	keep, anyReadable, err := derivedReadFilter(actorCtx, authz, store)
+	if err != nil {
+		t.Fatalf("derivedReadFilter() error = %v", err)
+	}
+	if !anyReadable {
+		t.Fatal("the caller can read their own run, so aggregates should not be withheld")
+	}
+	if !keep("run_mine") {
+		t.Error("the caller's own run was filtered out of every derived view")
+	}
+	if keep("run_theirs") {
+		t.Error("a run the caller is refused by name is shown in views derived from it")
+	}
+
+	// A caller granted nothing sees no aggregate at all, since an aggregate with no run id attached
+	// is still a summary of work they may not know about.
+	noneCtx := context.WithValue(ctx, actorKey{}, Actor{UserID: "user_none", Role: user.RoleViewer})
+	if _, any, ferr := derivedReadFilter(noneCtx, authz, store); ferr != nil {
+		t.Fatalf("derivedReadFilter() error = %v", ferr)
+	} else if any {
+		t.Error("a caller granted nothing is shown fleet-wide aggregates")
 	}
 }

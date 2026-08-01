@@ -337,6 +337,51 @@ func denyOnAuthzError(w http.ResponseWriter, log *zap.Logger, err error) bool {
 
 // readableRuns drops any run the caller may not read. A run is readable when every object it uses is,
 // which is the same rule fetching one run applies, so listing and fetching cannot disagree.
+// derivedReadScan bounds how many recent runs are consulted when deciding what a derived view may
+// show. The views themselves are already windowed, so this only has to cover the same ground.
+const derivedReadScan = 2000
+
+// derivedReadFilter returns a predicate deciding whether a row derived from a run may be shown, and
+// whether the caller may see fleet-wide aggregates at all.
+//
+// Fleet health, drift, task trends, host history, host facts, and the worker list are all computed
+// from runs. Every one of them returned the whole install to any viewer, including rows drawn from
+// runs the same caller was refused a 403 on by name. The filter that already governs the run list
+// governs these too; rows carrying a run id are checked against it, and an aggregate that names no
+// run is shown only to a caller who can read something, because otherwise it is a summary of work
+// they are not allowed to know about.
+func derivedReadFilter(ctx context.Context, authz *authorizer,
+	store run.Store) (keep func(runID string) bool, anyReadable bool, err error) {
+	filter, err := authz.readFilter(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	// A keep-all filter means grants are not being enforced for this caller, so nothing changes and
+	// the scan below is skipped entirely.
+	if filter("proj_probe", "") && filter("cred_probe", "") {
+		return func(string) bool { return true }, true, nil
+	}
+	page, err := store.ListPage(ctx, run.ListFilter{}, derivedReadScan, 0)
+	if err != nil {
+		return nil, false, err
+	}
+	// Decided the same way the run list decides it: a run is readable when every object it touches
+	// is. Answering differently here would mean a host page and a run page disagreed about the same
+	// run, which is its own kind of wrong.
+	readable, err := readableRuns(ctx, authz, page)
+	if err != nil {
+		return nil, false, err
+	}
+	allowed := make(map[string]struct{}, len(readable))
+	for _, rn := range readable {
+		allowed[rn.ID] = struct{}{}
+	}
+	return func(id string) bool {
+		_, ok := allowed[id]
+		return ok
+	}, len(allowed) > 0, nil
+}
+
 func readableRuns(ctx context.Context, authz *authorizer, runs []*run.Run) ([]*run.Run, error) {
 	keep, err := authz.readFilter(ctx)
 	if err != nil {
