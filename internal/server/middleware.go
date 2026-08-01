@@ -39,9 +39,14 @@ func securityHeaders(next http.Handler) http.Handler {
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		// base-uri and form-action do not fall back to default-src, so they are stated. Without
+		// base-uri an injected <base> element repoints every relative script and fetch at another
+		// origin while still satisfying script-src 'self'; without form-action a form can post
+		// wherever it likes.
 		h.Set("Content-Security-Policy",
 			"default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; "+
-				"connect-src 'self'; frame-ancestors 'none'")
+				"connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; "+
+				"object-src 'none'")
 		next.ServeHTTP(w, r)
 	})
 }
