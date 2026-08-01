@@ -69,11 +69,17 @@ func runAuditBundle(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("read audit chain: %w", err)
 	}
-	if bundleLimit > 0 && len(entries) > bundleLimit {
-		entries = entries[len(entries)-bundleLimit:]
-	}
 	if len(entries) == 0 {
 		return fmt.Errorf("the audit chain is empty, there is nothing to bundle")
+	}
+	// The whole chain is held against the anchors before any window is applied. Checking the window
+	// instead read a deliberate narrowing as lost history: --limit refused to run at all on an
+	// anchored install, reporting that entries the anchor covers were missing when they were merely
+	// outside the window. The workaround an operator would find is to delete the anchors, which is
+	// the one action that makes real truncation invisible.
+	full := entries
+	if bundleLimit > 0 && len(entries) > bundleLimit {
+		entries = entries[len(entries)-bundleLimit:]
 	}
 
 	id, err := audit.LoadIdentity(keyDir())
@@ -96,7 +102,7 @@ func runAuditBundle(cmd *cobra.Command, _ []string) error {
 		if aerr != nil {
 			return fmt.Errorf("read anchors: %w", aerr)
 		}
-		if reachedAll, results := audit.CheckAnchors(entries, recorded); !reachedAll {
+		if reachedAll, results := audit.CheckAnchors(full, recorded); !reachedAll {
 			for _, res := range results {
 				if !res.Reached {
 					fmt.Fprintln(os.Stderr, "anchor "+res.Anchor.ID+": "+res.Problem)

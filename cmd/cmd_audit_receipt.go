@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 
@@ -65,6 +66,26 @@ func runAuditReceipt(cmd *cobra.Command, args []string) error {
 	if ok, brokeAt := audit.Verify(chain); !ok {
 		return fmt.Errorf("the chain does not verify at entry %d, so no receipt can be redeemed "+
 			"against it; run audit verify to see where", brokeAt)
+	}
+	// The anchors are consulted too. A receipt is what somebody outside this install holds, and the
+	// question they are really asking is whether the record still contains what they were told it
+	// did. Hashes alone cannot answer that: dropping entries off the end leaves a chain that still
+	// verifies, so a redemption could confirm their entry while entries that provably existed were
+	// gone. That is the exact case anchoring exists for.
+	if anchors, ok := store.Audits().(audit.AnchorStore); ok {
+		recorded, aerr := anchors.Anchors(cmd.Context(), 0)
+		if aerr != nil {
+			return fmt.Errorf("read anchors: %w", aerr)
+		}
+		if reached, results := audit.CheckAnchors(chain, recorded); !reached {
+			for _, res := range results {
+				if !res.Reached {
+					fmt.Fprintln(os.Stderr, "anchor "+res.Anchor.ID+": "+res.Problem)
+				}
+			}
+			return fmt.Errorf("this chain no longer satisfies an anchor recorded over it, so a " +
+				"receipt redeemed against it proves nothing about what else is missing")
+		}
 	}
 	for _, e := range chain {
 		if e.Seq != seq {
