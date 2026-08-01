@@ -2410,6 +2410,11 @@ async function runWorkflow() {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+	// Any link that starts a sign-in marks this tab first, so the token that comes back can be
+	// answered to a request this browser made.
+	for (const el of document.querySelectorAll("[data-sso]")) {
+		el.addEventListener("click", beginSSO);
+	}
 	consumeSSOFragment();
 	mountTopbar();
 	mountLiveRegions();
@@ -3165,17 +3170,53 @@ function apiToken() {
 	return localStorage.getItem("st_token") || "";
 }
 
+// SSO_PENDING_KEY holds the marker proving this tab is the one that started a sign-in.
+const SSO_PENDING_KEY = "st_sso_pending";
+
+// beginSSO marks this tab as having started a sign-in, so the token that comes back is answered to
+// a request this browser actually made.
+function beginSSO() {
+	try {
+		sessionStorage.setItem(SSO_PENDING_KEY, "1");
+	} catch (e) {
+		// A browser refusing session storage still signs in; it just cannot prove the round trip.
+	}
+}
+
 // consumeSSOFragment stores the session token handed back in the URL fragment after single
 // sign-on, then strips it from the address bar so it is not left in history or copied by accident.
+//
+// It is accepted only in the tab that started the sign-in. A fragment is something any link can
+// carry, and this used to take one from any page at any time: a link like
+// /ui/credentials#access_token=... silently replaced the reader's session with the sender's, scrubbed
+// the address bar, and kept the admin navigation rendering because the role came from the fragment
+// too. Anything typed afterward, a production secret being the obvious one, was written into the
+// sender's account. The marker is per-tab and same-origin, so a link opened from outside carries
+// nothing that can satisfy it.
 function consumeSSOFragment() {
 	if (!location.hash || location.hash.indexOf("access_token=") === -1) return;
-	const params = new URLSearchParams(location.hash.slice(1));
+	// Read the fragment before stripping it, since replaceState clears it.
+	const raw = location.hash.slice(1);
+	let started = false;
+	try {
+		started = sessionStorage.getItem(SSO_PENDING_KEY) === "1";
+		sessionStorage.removeItem(SSO_PENDING_KEY);
+	} catch (e) {
+		started = false;
+	}
+	// Strip the fragment either way, so a rejected one is not left in the address bar to be
+	// copied, shared, or retried.
+	history.replaceState(null, "", location.pathname + location.search);
+	if (!started) {
+		setStatus("Ignored a sign-in link this browser did not ask for. Sign in from this page.");
+		return;
+	}
+	const params = new URLSearchParams(raw);
 	const token = params.get("access_token");
 	if (!token) return;
 	localStorage.setItem("st_token", token);
 	if (params.get("role")) localStorage.setItem("st_role", params.get("role"));
 	if (params.get("user")) localStorage.setItem("st_user", params.get("user"));
-	history.replaceState(null, "", location.pathname + location.search);
 }
 
 // ssoError returns a single sign-on error passed back in the URL fragment, or empty when none.
