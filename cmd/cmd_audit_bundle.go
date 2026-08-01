@@ -115,6 +115,15 @@ func runAuditBundle(cmd *cobra.Command, _ []string) error {
 			fmt.Fprintf(os.Stderr, "Attached %d anchor(s), so a verifier can see this chain has "+
 				"not been shortened.\n", n)
 		}
+		// How far the newest anchor trails the newest entry is stated plainly, because that gap is
+		// the part of the record the producer key could still rewrite. A bundle assembled long
+		// after its last anchor carries a large one, and so does a chain cut back to an old anchor,
+		// which is the shape that otherwise reads cleaner than the honest bundle it replaced.
+		warnAnchorLag(full, recorded)
+	} else {
+		fmt.Fprintln(os.Stderr, "This chain carries no anchors, so nothing outside this install "+
+			"attests to it and a verifier cannot tell whether it has lost its tail. "+
+			"Run switchtender audit anchor on a schedule.")
 	}
 	signed, err := audit.SignBundleDoc(doc, id.Private())
 	if err != nil {
@@ -135,6 +144,37 @@ func runAuditBundle(cmd *cobra.Command, _ []string) error {
 		"Wrote %s with %d entries.\nPublish this fingerprint so a verifier can pin it:\n  %s\n",
 		bundleOut, len(entries), id.KeyID())
 	return nil
+}
+
+// warnAnchorLag reports how far the newest anchor sits behind the newest entry.
+//
+// An anchor fixes history up to the position it names and no further, so everything after it is
+// what a compromised or dishonest producer could still rewrite. The size of that gap is the honest
+// measure of what an anchored chain is worth, and it is worth saying out loud at the moment the
+// bundle is handed over rather than leaving a relying party to work it out.
+func warnAnchorLag(entries []*audit.Entry, anchors []*audit.Anchor) {
+	if len(entries) == 0 {
+		return
+	}
+	var through int64
+	var anchoredAt time.Time
+	for _, a := range anchors {
+		if a.Seq > through {
+			through, anchoredAt = a.Seq, a.At
+		}
+	}
+	head := entries[len(entries)-1]
+	if through >= head.Seq {
+		return
+	}
+	behind := head.Seq - through
+	msg := fmt.Sprintf("The newest anchor covers entry %d and this chain ends at entry %d, so %d "+
+		"entries are attested by nothing outside this install.", through, head.Seq, behind)
+	if !anchoredAt.IsZero() {
+		msg += fmt.Sprintf(" The last anchor was taken %s ago.",
+			time.Since(anchoredAt).Round(time.Minute))
+	}
+	fmt.Fprintln(os.Stderr, msg)
 }
 
 // keyDir returns where the producer identity lives: the override when given, otherwise beside the

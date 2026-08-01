@@ -12,7 +12,7 @@ require (
 	github.com/hashicorp/go-hclog v1.6.3
 	github.com/hashicorp/go-plugin v1.8.0
 	github.com/jackc/pgx/v5 v5.10.0
-	github.com/kordloom/loomseal v0.3.2-0.20260801230430-eb7432136bee
+	github.com/kordloom/loomseal v0.4.1-0.20260801232139-c199faccaecb
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/spf13/cobra v1.10.2
 	github.com/yuin/goldmark v1.8.2
