@@ -45,7 +45,7 @@ func TestWorkerTokenCannotWriteTheRecordOfARunItDoesNotHold(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	backing := run.NewMemStore()
-	ts := httptest.NewServer(relay.NewHandler(backing, testWorkerToken, nil, nil))
+	ts := httptest.NewServer(relay.NewHandler(backing, relay.SinglePool(testWorkerToken), nil, nil))
 	t.Cleanup(ts.Close)
 
 	claimed := time.Now()
@@ -113,7 +113,7 @@ func TestWorkerReportBoundaryLeavesLegitimateWorkAlone(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	backing := run.NewMemStore()
-	ts := httptest.NewServer(relay.NewHandler(backing, testWorkerToken, nil, nil))
+	ts := httptest.NewServer(relay.NewHandler(backing, relay.SinglePool(testWorkerToken), nil, nil))
 	t.Cleanup(ts.Close)
 
 	claimed := time.Now()

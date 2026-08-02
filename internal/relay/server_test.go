@@ -28,7 +28,7 @@ const testWorkerToken = "worker-secret"
 func newRelay(t *testing.T) (*relay.Client, run.Store) {
 	t.Helper()
 	backing := run.NewMemStore()
-	ts := httptest.NewServer(relay.NewHandler(backing, testWorkerToken, nil, nil))
+	ts := httptest.NewServer(relay.NewHandler(backing, relay.SinglePool(testWorkerToken), nil, nil))
 	t.Cleanup(ts.Close)
 	c := relay.NewClient(relay.NewHTTPTransport(ts.URL, testWorkerToken, ts.Client()))
 	return c, backing
@@ -114,7 +114,7 @@ func countingRelay(t *testing.T) (*relay.Client, run.Store, func() int) {
 	backing := run.NewMemStore()
 	var mu sync.Mutex
 	posts := 0
-	inner := relay.NewHandler(backing, testWorkerToken, nil, nil)
+	inner := relay.NewHandler(backing, relay.SinglePool(testWorkerToken), nil, nil)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/log") {
 			mu.Lock()
@@ -301,7 +301,7 @@ func TestServerUnauthorized(t *testing.T) {
 		{Name: "wrong", Present: "Bearer nope"},
 		{Name: "empty-bearer", Present: "Bearer "},
 	}
-	ts := httptest.NewServer(relay.NewHandler(run.NewMemStore(), testWorkerToken, nil, nil))
+	ts := httptest.NewServer(relay.NewHandler(run.NewMemStore(), relay.SinglePool(testWorkerToken), nil, nil))
 	t.Cleanup(ts.Close)
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
