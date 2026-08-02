@@ -1,12 +1,15 @@
 package relay
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/kordloom/switchtender/internal/audit"
 	"io"
 	"net/http"
 	"strconv"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -51,6 +54,8 @@ type relayServer struct {
 	// pools maps a presented token to the worker pool it belongs to and the queues that pool may
 	// lease from.
 	pools *Pools
+	// audits records the decisions a worker reports, nil when the install keeps no audit trail.
+	audits audit.Store
 	// log records server-side faults, never token material.
 	log *zap.Logger
 }
@@ -59,7 +64,7 @@ type relayServer struct {
 // by the worker pools. Mount it on the control node so relay workers have a path to the shared
 // store. It panics on a nil store or no pools, both wiring errors; a nil logger becomes a no-op.
 func NewHandler(store run.Store, pools *Pools, log *zap.Logger,
-	policies policy.Store) http.Handler {
+	policies policy.Store, audits audit.Store) http.Handler {
 	if store == nil {
 		panic("relay: Store required")
 	}
@@ -69,7 +74,7 @@ func NewHandler(store run.Store, pools *Pools, log *zap.Logger,
 	if log == nil {
 		log = zap.NewNop()
 	}
-	s := &relayServer{store: store, pools: pools, log: log, policies: policies}
+	s := &relayServer{store: store, pools: pools, log: log, policies: policies, audits: audits}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /relay/v1/policies", s.listPolicies)
 	mux.HandleFunc("POST /relay/v1/claim", s.claim)
@@ -99,6 +104,38 @@ func (s *relayServer) authed(next http.Handler) http.Handler {
 	})
 }
 
+// relayMethod names the transport a relay entry came through, so a reader can tell a worker report
+// from an API call without parsing the path.
+const relayMethod = "RELAY"
+
+// record writes one relay decision into the audit chain.
+//
+// The relay serves the mesh from outside the API's own gate, so nothing a worker reported reached
+// the trail at all. For a product whose claim is that every change is provable, a run starting and
+// finishing on a machine the control node cannot reach is exactly the change worth recording.
+//
+// What is recorded is the decision, not the stream. A worker leasing a run and a run reaching a
+// terminal state are events. Captured output, structured events, summaries, and heartbeats are the
+// content and liveness of a run that is already recorded, they arrive several times a second, and
+// writing each one into a hash chain would drown the record it is meant to make readable.
+//
+// The append is deliberately not fail closed here. Refusing a worker's report because the audit
+// store is unhealthy does not un-finish the run; it loses the outcome of work that already happened
+// on real hosts. The API refuses a mutation it cannot record because refusing prevents it. This one
+// cannot be prevented, so it is logged loudly instead.
+func (s *relayServer) record(ctx context.Context, actor, path string) {
+	if s.audits == nil {
+		return
+	}
+	entry := &audit.Entry{
+		ID: audit.NewID(), At: time.Now(), Actor: actor,
+		Method: relayMethod, Path: path,
+	}
+	if err := s.audits.Append(ctx, entry); err != nil {
+		s.log.Error("relay: record worker report: "+err.Error(), zap.String("path", path))
+	}
+}
+
 // claim leases the oldest pending run the owner's queues serve, returning it as JSON, or 204 when
 // nothing is pending.
 func (s *relayServer) claim(w http.ResponseWriter, r *http.Request) {
@@ -125,6 +162,9 @@ func (s *relayServer) claim(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		s.internal(w, "claim", err)
 	default:
+		// A worker took a run onto a machine the control node cannot reach. That is the moment the
+		// work left this side of the boundary, so it is the moment worth recording.
+		s.record(r.Context(), "worker:"+body.Owner, "/relay/claim/"+leased.ID)
 		s.writeJSON(w, leased)
 	}
 }
@@ -196,10 +236,17 @@ func (s *relayServer) save(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusConflict, err.Error())
 		return
 	}
+	wasTerminal := stored.Status.Terminal()
 	applyWorkerReport(stored, &body)
 	if err := s.store.Save(r.Context(), stored); err != nil {
 		s.internal(w, "save", err)
 		return
+	}
+	// Only the transition into a terminal state is recorded. A worker saves repeatedly as a run
+	// progresses, and the outcome is the part somebody asks about later.
+	if !wasTerminal && stored.Status.Terminal() {
+		s.record(r.Context(), "worker:"+stored.ClaimedBy,
+			"/relay/finished/"+stored.ID+"/"+string(stored.Status))
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

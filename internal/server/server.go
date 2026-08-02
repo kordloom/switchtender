@@ -532,7 +532,7 @@ func (s *Server) Handler() http.Handler {
 		if pools == nil {
 			pools = relay.SinglePool(s.workerToken)
 		}
-		handler = relayGate(relay.NewHandler(s.relayStore, pools, s.log, s.policies), handler)
+		handler = relayGate(relay.NewHandler(s.relayStore, pools, s.log, s.policies, s.audits), handler)
 	}
 	return securityHeaders(bodyLimit(handler))
 }
