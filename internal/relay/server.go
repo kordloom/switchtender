@@ -430,6 +430,14 @@ func (s *relayServer) appendLog(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// maxRelayElements bounds how many items one relay call may carry.
+//
+// The body is capped in bytes, which is not a cap on work: "[{},{},{}...]" fits a million empty
+// structs into a megabyte, and each one becomes a marshal and a single-row insert inside one
+// transaction. Measured, a one megabyte body decoded into 349,525 events and 366 MB of heap, and on
+// SQLite held the single writer for that many round trips. A real run reports in batches of tens.
+const maxRelayElements = 5000
+
 // appendEvents appends the structured events in the body to the run, or 404 when the run is gone.
 func (s *relayServer) appendEvents(w http.ResponseWriter, r *http.Request) {
 	if !s.heldForReport(w, r) {
@@ -438,6 +446,11 @@ func (s *relayServer) appendEvents(w http.ResponseWriter, r *http.Request) {
 	var events []event.Event
 	if err := json.NewDecoder(r.Body).Decode(&events); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid events body")
+		return
+	}
+	if len(events) > maxRelayElements {
+		writeErr(w, http.StatusRequestEntityTooLarge,
+			"too many items in one call; report in smaller batches")
 		return
 	}
 	err := s.store.AppendEvents(r.Context(), r.PathValue("id"), events)
@@ -461,6 +474,11 @@ func (s *relayServer) saveHostSummary(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid host summary body")
 		return
 	}
+	if len(summaries) > maxRelayElements {
+		writeErr(w, http.StatusRequestEntityTooLarge,
+			"too many items in one call; report in smaller batches")
+		return
+	}
 	if err := s.store.SaveHostSummary(r.Context(), r.PathValue("id"), summaries); err != nil {
 		s.internal(w, "save host summary", err)
 		return
@@ -476,6 +494,11 @@ func (s *relayServer) saveTaskSummary(w http.ResponseWriter, r *http.Request) {
 	var summaries []run.TaskSummary
 	if err := json.NewDecoder(r.Body).Decode(&summaries); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid task summary body")
+		return
+	}
+	if len(summaries) > maxRelayElements {
+		writeErr(w, http.StatusRequestEntityTooLarge,
+			"too many items in one call; report in smaller batches")
 		return
 	}
 	if err := s.store.SaveTaskSummary(r.Context(), r.PathValue("id"), summaries); err != nil {

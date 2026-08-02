@@ -92,10 +92,22 @@ func (s *Schedule) Validate() error {
 }
 
 // NextFire returns the next time the cron expression fires after the given time.
+//
+// A parseable expression that can never come due is refused here rather than passed on. The cron
+// library gives up after scanning five years and returns the zero time with no error, and the
+// scheduler reads any next-run time that is not after now as due. So "0 0 30 2 *", a February the
+// thirtieth that will never exist, was stored, read as due on every tick, claimed, fired, and
+// rewritten to zero again: one authenticated call produced a run every fifteen seconds forever,
+// with nothing logged and no rate limit in front of it.
 func NextFire(spec string, after time.Time) (time.Time, error) {
 	sched, err := cron.ParseStandard(spec)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("%w: %w", ErrBadCron, err)
 	}
-	return sched.Next(after), nil
+	next := sched.Next(after)
+	if next.IsZero() {
+		return time.Time{}, fmt.Errorf("%w: %q parses but never comes due, so it would be read as "+
+			"due on every tick", ErrBadCron, spec)
+	}
+	return next, nil
 }

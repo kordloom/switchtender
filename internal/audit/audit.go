@@ -106,8 +106,17 @@ func Link(prev, e *Entry) {
 // hash does not check out. An entry with no hash breaks the chain, so a blanked entry cannot hide
 // from verification. It requires the slice to start at genesis; use VerifyRange for part of a chain.
 func Verify(entries []*Entry) (ok bool, brokeAt int) {
-	if len(entries) > 0 && (entries[0].Seq != 1 || entries[0].PrevHash != "") {
-		return false, 1
+	if len(entries) > 0 {
+		// A null entry is a broken chain, not a crash. These slices are decoded from a file handed
+		// over by whoever is being audited, and this is the one command whose entire purpose is
+		// reading one you do not trust. Dereferencing without checking turned a hostile bundle into
+		// a stack trace instead of a verdict.
+		if entries[0] == nil {
+			return false, 1
+		}
+		if entries[0].Seq != 1 || entries[0].PrevHash != "" {
+			return false, 1
+		}
 	}
 	return VerifyRange(entries)
 }
@@ -125,6 +134,11 @@ func Verify(entries []*Entry) (ok bool, brokeAt int) {
 func VerifyRange(entries []*Entry) (ok bool, brokeAt int) {
 	var prev *Entry
 	for i, e := range entries {
+		// A null entry fails here rather than panicking, for the same reason Verify checks the
+		// first one: this walks a document produced by the party the record is about.
+		if e == nil {
+			return false, i + 1
+		}
 		if e.Hash == "" || e.Seq < 1 || e.Hash != EntryHash(e) {
 			return false, i + 1
 		}

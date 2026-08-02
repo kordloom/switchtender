@@ -1,12 +1,15 @@
 package project
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"net"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -330,6 +333,14 @@ func repoURLParts(raw string) (host, scheme string, err error) {
 		}
 		return u.Hostname(), u.Scheme, nil
 	}
+	// A value that begins with a dash is refused before anything is inferred from it. Nothing here
+	// classifies it as a scheme, so "--upload-pack=/bin/sh" read as a local file path and passed.
+	// go-git is the clone driver today so it is inert, but a validator that accepts an option is
+	// contributing nothing, and the day anything shells out to git it becomes execution.
+	if strings.HasPrefix(raw, "-") {
+		return "", "", fmt.Errorf("%w: %q looks like a command option, not a repository",
+			ErrBadRepoURL, raw)
+	}
 	// The scp-like shorthand is [user@]host:path, where the host part carries no slash. Anything
 	// without this colon and without a scheme is a local filesystem path.
 	if i := strings.IndexByte(raw, ':'); i >= 0 && !strings.Contains(raw[:i], "/") {
@@ -342,6 +353,44 @@ func repoURLParts(raw string) (host, scheme string, err error) {
 	return "", "file", nil
 }
 
+// parseLooseIP parses a host as an IP address, accepting the shorthand forms a resolver honors but
+// net.ParseIP does not: a dotted form with fewer than four parts, and a bare 32-bit integer. Both
+// reach 127.0.0.1, so a validator that only understands the canonical spelling blocks the obvious
+// way in and leaves two beside it.
+func parseLooseIP(host string) net.IP {
+	if ip := net.ParseIP(host); ip != nil {
+		return ip
+	}
+	if n, err := strconv.ParseUint(host, 10, 32); err == nil {
+		return net.IPv4(byte(n>>24), byte(n>>16), byte(n>>8), byte(n))
+	}
+	parts := strings.Split(host, ".")
+	if len(parts) < 2 || len(parts) > 4 {
+		return nil
+	}
+	nums := make([]uint64, len(parts))
+	for i, p := range parts {
+		n, err := strconv.ParseUint(p, 10, 32)
+		if err != nil {
+			return nil
+		}
+		nums[i] = n
+	}
+	// The last part carries the remaining octets, which is how 127.1 means 127.0.0.1.
+	var v uint64
+	for i := 0; i < len(nums)-1; i++ {
+		if nums[i] > 255 {
+			return nil
+		}
+		v |= nums[i] << (8 * (3 - uint(i)))
+	}
+	if nums[len(nums)-1] > (uint64(1)<<(8*(4-uint(len(nums)-1))))-1 {
+		return nil
+	}
+	v |= nums[len(nums)-1]
+	return net.IPv4(byte(v>>24), byte(v>>16), byte(v>>8), byte(v))
+}
+
 // checkRepoHost rejects a repository host that is empty, explicitly blocked, or a loopback,
 // unspecified, or link-local address, the last of which covers the cloud metadata endpoint.
 func checkRepoHost(host string) error {
@@ -351,7 +400,10 @@ func checkRepoHost(host string) error {
 	if blockedRepoHosts[strings.ToLower(host)] {
 		return fmt.Errorf("%w: host %q is not allowed", ErrBadRepoURL, host)
 	}
-	if ip := net.ParseIP(host); ip != nil {
+	// Resolved before the address tests, because a host is not always written as an address.
+	// net.ParseIP returns nil for "127.1" and for "2130706433", both of which reach loopback, so
+	// the checks below never ran on them and the shorthand forms passed.
+	if ip := parseLooseIP(host); ip != nil {
 		if ip.IsLoopback() || ip.IsUnspecified() ||
 			ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
 			return fmt.Errorf("%w: address %q is not allowed", ErrBadRepoURL, host)
@@ -381,13 +433,38 @@ func branchRef(branch string) plumbing.ReferenceName {
 }
 
 // WithinRepo joins rel onto root and confirms the result stays inside root, defeating traversal
-// through dot dot segments or absolute paths.
+// through dot dot segments, absolute paths, and symlinks committed to the repository.
+//
+// The lexical check alone was not containment. Git stores a symlink's target verbatim, so a
+// repository could commit "esc -> /" and name a playbook of "esc/etc/shadow": the joined path is
+// inside root by every string test, and the file that opens is not. The path is handed straight to
+// ansible-playbook and to ansible-inventory, so the repository chose what got read. The browse path
+// in this same package already resolved symlinks after joining; this one did not.
+//
+// A path that does not exist yet is allowed through on the lexical result. Resolution can only
+// report what is there, and a caller naming a file the sync has not written is a missing file
+// rather than an escape.
 func WithinRepo(root, rel string) (string, error) {
 	if filepath.IsAbs(rel) {
 		return "", ErrEscapesRepo
 	}
 	joined := filepath.Clean(filepath.Join(root, rel))
 	if joined != root && !strings.HasPrefix(joined, root+string(filepath.Separator)) {
+		return "", ErrEscapesRepo
+	}
+	resolved, err := filepath.EvalSymlinks(joined)
+	if errors.Is(err, fs.ErrNotExist) {
+		return joined, nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("%w: %v", ErrEscapesRepo, err)
+	}
+	// The root is resolved too, so a symlink anywhere above the checkout does not read as an escape.
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		realRoot = root
+	}
+	if resolved != realRoot && !strings.HasPrefix(resolved, realRoot+string(filepath.Separator)) {
 		return "", ErrEscapesRepo
 	}
 	return joined, nil

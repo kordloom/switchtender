@@ -2,6 +2,7 @@ package importer
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -23,13 +24,34 @@ func RRULEToCron(rrule string) (string, bool) {
 	// AWX usually carries the time of day in DTSTART rather than BYHOUR and BYMINUTE, so fall
 	// back to it. Defaulting straight to midnight would silently move a nightly job.
 	startHour, startMinute := dtstartTime(rrule)
-	minute := firstOr(parts["BYMINUTE"], startMinute)
-	hour := firstOr(parts["BYHOUR"], startHour)
+	// The values a rule supplies are held to a plain number before they are written into a cron
+	// field. Pasting them through meant an export decided the cadence: a schedule named "Nightly at
+	// 2am" carrying BYMINUTE=* and BYHOUR=* became "* * * * *", a run every minute, with no warning.
+	// A rule this converter cannot express as a single number is refused so the caller can say so
+	// rather than emit a cadence nobody asked for.
+	minute, ok := numericField(parts["BYMINUTE"], startMinute, 0, 59)
+	if !ok {
+		return "", false
+	}
+	hour, ok := numericField(parts["BYHOUR"], startHour, 0, 23)
+	if !ok {
+		return "", false
+	}
 
 	switch freq {
 	case "MINUTELY":
+		// A step only lands on the cadence asked for when it divides its range evenly. "*/45" fires
+		// at 0 and 45 past every hour, which is a 45 minute gap followed by a 15 minute one, not
+		// every 45 minutes. The doc for this function already promised to refuse what cron cannot
+		// express; that promise covered the daily and weekly arms only.
+		if !dividesEvenly(interval, 60) {
+			return "", false
+		}
 		return everyField(interval) + " * * * *", true
 	case "HOURLY":
+		if !dividesEvenly(interval, 24) {
+			return "", false
+		}
 		return minute + " " + everyField(interval) + " * * *", true
 	case "DAILY":
 		if interval != "1" {
@@ -49,7 +71,11 @@ func RRULEToCron(rrule string) (string, bool) {
 		if interval != "1" || parts["BYMONTHDAY"] == "" {
 			return "", false
 		}
-		return fmt.Sprintf("%s %s %s * *", minute, hour, parts["BYMONTHDAY"]), true
+		day, dayOK := numericField(parts["BYMONTHDAY"], "", 1, 31)
+		if !dayOK {
+			return "", false
+		}
+		return fmt.Sprintf("%s %s %s * *", minute, hour, day), true
 	default:
 		return "", false
 	}
@@ -130,23 +156,40 @@ func trimZero(s string) string {
 	return trimmed
 }
 
+// numericField returns value as a single cron number within low and high, falling back to fallback
+// when value is empty. Anything else, including a list, a range, a star, or a step, is refused: a
+// converter that pastes those through lets the file being imported choose the cadence.
+func numericField(value, fallback string, low, high int) (string, bool) {
+	v := strings.TrimSpace(value)
+	if v == "" {
+		v = fallback
+	}
+	if v == "" {
+		return "", false
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < low || n > high {
+		return "", false
+	}
+	return strconv.Itoa(n), true
+}
+
+// dividesEvenly reports whether a step interval lands on the same offsets every cycle of size span.
+// A step that does not divide its range produces an uneven cadence rather than the one requested.
+func dividesEvenly(interval string, span int) bool {
+	n, err := strconv.Atoi(strings.TrimSpace(interval))
+	if err != nil || n < 1 || n > span {
+		return false
+	}
+	return span%n == 0
+}
+
 // everyField returns a cron step field, collapsing an interval of one to a plain wildcard.
 func everyField(interval string) string {
 	if interval == "1" {
 		return "*"
 	}
 	return "*/" + interval
-}
-
-// firstOr returns the first comma-separated value in s, or fallback when s is empty.
-func firstOr(s, fallback string) string {
-	if s == "" {
-		return fallback
-	}
-	if before, _, ok := strings.Cut(s, ","); ok {
-		return before
-	}
-	return s
 }
 
 // cronDays converts an RRULE BYDAY list into a cron day-of-week list, reporting whether every code

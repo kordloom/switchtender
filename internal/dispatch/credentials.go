@@ -154,7 +154,17 @@ func (d *Dispatcher) materializeCredentials(ctx context.Context, r *run.Run, spe
 			// A token is exposed as one environment variable; the temp file is not needed.
 			paths = paths[:len(paths)-1]
 			_ = os.Remove(f.Name())
-			spec.Env = append(spec.Env, credential.TokenEnvVar+"="+strings.TrimRight(plain, "\r\n"))
+			// One value, one variable. Only trailing newlines were trimmed, and a container run
+			// writes these entries into an env file one per line, so a value with a newline in the
+			// middle became several variables: a token ending in "\nLD_PRELOAD=/proj/evil.so" set
+			// LD_PRELOAD for the run. Values arrive from a secret source's stdout, where an
+			// unintended newline is ordinary.
+			token := strings.TrimRight(plain, "\r\n")
+			if strings.ContainsAny(token, "\n\r") {
+				return cleanup, secrets, fmt.Errorf("materialize credential %s: the token spans "+
+					"more than one line, and a token is one value", id)
+			}
+			spec.Env = append(spec.Env, credential.TokenEnvVar+"="+token)
 		case credential.KindBecomePassword:
 			// The password reaches the play as a var through a file so it never lands on argv.
 			vars, err := json.Marshal(map[string]string{"ansible_become_password": plain})

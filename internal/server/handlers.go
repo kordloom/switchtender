@@ -29,6 +29,10 @@ const defaultFleetWindow = 10
 // response or a client retry on POST /runs and POST /pipelines cannot double-fire a run.
 const idempotencyKeyHeader = "Idempotency-Key"
 
+// maxPipelineSteps bounds one pipeline, because the dispatcher's dependency closure is quadratic in
+// the step count and the request body's byte cap is not a cap on that work.
+const maxPipelineSteps = 500
+
 // dedupeRerun names the rerun action in the idempotency keys it dedupes under, so a rerun the
 // caller supplied no key for still cannot fire twice on a double click.
 const dedupeRerun = "rerun"
@@ -615,6 +619,15 @@ func createPipelineHandler(submitter Submitter, authz *authorizer, log *zap.Logg
 		}
 		if len(req.Steps) == 0 {
 			respondError(w, log, http.StatusBadRequest, "at least one step is required")
+			return
+		}
+		// The dependency closure the dispatcher builds is quadratic in the step count, and only the
+		// zero case was rejected. Fifteen thousand steps fit in a one megabyte body, validated in
+		// five milliseconds so the submission looked fine, and then cost the dispatcher hundreds of
+		// megabytes at execution time. A pipeline is a handful of steps by nature.
+		if len(req.Steps) > maxPipelineSteps {
+			respondError(w, log, http.StatusBadRequest, fmt.Sprintf(
+				"a pipeline may have at most %d steps", maxPipelineSteps))
 			return
 		}
 		for _, step := range req.Steps {
@@ -1562,7 +1575,21 @@ func runStreamHandler(streamer Streamer, store run.Store, authz *authorizer, log
 				return
 			case <-draining:
 				return
-			case <-wake:
+			case _, ok := <-wake:
+				// A closed hub channel means the run ended and the topic is gone. Receiving
+				// without checking made it always ready, so the loop stopped waiting and
+				// re-queried the store as fast as it could: tens of thousands of statements a
+				// second per connected stream. It fired exactly when the store was already
+				// struggling, because that is when a run's stream is closed without the run
+				// reaching a terminal state, so store trouble fed on itself.
+				if !ok {
+					// One last drain, so anything written between the previous read and the close
+					// still reaches the browser, then end the stream the way a terminal run does.
+					drain()
+					writeSSE(w, "end", streamCursor(lastSeq, logSeq), nil)
+					flusher.Flush()
+					return
+				}
 			case <-ticker.C:
 			}
 		}

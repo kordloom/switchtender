@@ -135,7 +135,7 @@ func (s *Syncer) File(projectID, rel string) (*FileContent, error) {
 	if !withinRoot(root, full) {
 		return nil, ErrOutsideCheckout
 	}
-	if parts := strings.Split(filepath.ToSlash(strings.TrimPrefix(clean, string(filepath.Separator))), "/"); len(parts) > 0 && parts[0] == ".git" {
+	if isGitPath(clean) {
 		return nil, ErrOutsideCheckout
 	}
 
@@ -152,6 +152,11 @@ func (s *Syncer) File(projectID, rel string) (*FileContent, error) {
 		return nil, fmt.Errorf("resolve path: %w", err)
 	}
 	if !withinRoot(root, resolved) {
+		return nil, ErrOutsideCheckout
+	}
+	// Checked again on the resolved path: a committed symlink pointing at .git passes the test above
+	// because what it names is inside the checkout.
+	if rel, err := filepath.Rel(root, resolved); err == nil && isGitPath(rel) {
 		return nil, ErrOutsideCheckout
 	}
 	info, err := os.Stat(resolved)
@@ -179,6 +184,23 @@ func (s *Syncer) File(projectID, rel string) (*FileContent, error) {
 	out.Content = string(buf)
 	out.Truncated = info.Size() > int64(n)
 	return out, nil
+}
+
+// isGitPath reports whether a relative path names a git directory at any depth.
+//
+// Checking only the first segment, only in the case it was written, and only before symlinks were
+// resolved left three ways in. A committed symlink "gitdir -> .git" served the config file, because
+// the resolved path is inside the checkout and only the unresolved one was inspected. ".GIT/config"
+// served it on any case-insensitive filesystem, which is the default on macOS and Windows. And a
+// submodule's "sub/.git/config" was never a first segment at all. The file holds credential helper
+// settings and remote URLs, so it is worth all three.
+func isGitPath(rel string) bool {
+	for _, seg := range strings.Split(filepath.ToSlash(strings.TrimPrefix(rel, string(filepath.Separator))), "/") {
+		if strings.EqualFold(seg, ".git") {
+			return true
+		}
+	}
+	return false
 }
 
 // withinRoot reports whether path is root itself or sits under it, comparing whole path elements
