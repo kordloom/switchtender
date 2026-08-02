@@ -67,6 +67,9 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Run("run races serialize", func(t *testing.T) {
 		testRunRacesUnderConcurrency(t, newStore())
 	})
+	t.Run("lease clock is one clock", func(t *testing.T) {
+		testLeaseClockIsOneClock(t, newStore())
+	})
 	t.Run("transition status", func(t *testing.T) { testTransitionStatus(t, newStore()) })
 	t.Run("workers", func(t *testing.T) { testWorkers(t, newStore()) })
 	t.Run("retention purge", func(t *testing.T) { testPurge(t, newStore()) })
@@ -1971,6 +1974,63 @@ func testClaimSkipsChildrenOfSettledParents(t *testing.T, store run.Store) {
 	}
 	if !errors.Is(err, run.ErrNonePending) {
 		t.Fatalf("Claim() error = %v, want ErrNonePending", err)
+	}
+}
+
+// testLeaseClockIsOneClock verifies that whatever stamps a lease and whatever ages it agree about
+// what time it is.
+//
+// Claim, Heartbeat, and ReclaimStale all read a clock. If they do not read the same one, a worker
+// whose clock runs behind renews its lease into the past and the next sweep interrupts a perfectly
+// healthy run. Heartbeating then makes things worse than not heartbeating, because a run that never
+// renews keeps the stamp Claim gave it and survives. This is checked by measuring the stamps rather
+// than by reading the code, because the two happened to differ by only milliseconds on one machine
+// and by a minute on another.
+func testLeaseClockIsOneClock(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	id := "run_lease_clock"
+	if err := store.Save(ctx, &run.Run{
+		ID: id, Playbook: "site.yml", Status: run.StatusPending, CreatedAt: time.Now().Add(-time.Hour),
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	claimed, err := store.Claim(ctx, "worker-a", []string{""})
+	if err != nil {
+		t.Fatalf("Claim() error = %v", err)
+	}
+	if claimed.ClaimedAt == nil {
+		t.Fatal("Claim() stamped no lease time")
+	}
+	atClaim := *claimed.ClaimedAt
+
+	if err := store.Heartbeat(ctx, id, "worker-a"); err != nil {
+		t.Fatalf("Heartbeat() error = %v", err)
+	}
+	got, err := store.Get(ctx, id)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.ClaimedAt == nil {
+		t.Fatal("Heartbeat() left no lease time")
+	}
+	// A renewal must never move the lease backwards. Two clocks in one column is exactly what that
+	// looks like from the outside, whichever way they are skewed.
+	if got.ClaimedAt.Before(atClaim) {
+		t.Errorf("a heartbeat moved the lease from %s back to %s, so whatever stamps it and "+
+			"whatever ages it are reading different clocks, and the sweep will interrupt a healthy "+
+			"run", atClaim.Format(time.RFC3339Nano), got.ClaimedAt.Format(time.RFC3339Nano))
+	}
+	// And a freshly renewed lease is not stale, which is the outcome that actually hurts.
+	if _, err := store.ReclaimStale(ctx, 30*time.Second); err != nil {
+		t.Fatalf("ReclaimStale() error = %v", err)
+	}
+	after, err := store.Get(ctx, id)
+	if err != nil {
+		t.Fatalf("Get() after sweep error = %v", err)
+	}
+	if after.Status != run.StatusPending || after.ClaimedBy != "worker-a" {
+		t.Errorf("a run that just heartbeated is %q held by %q after the sweep, so a live worker "+
+			"was cut off", after.Status, after.ClaimedBy)
 	}
 }
 

@@ -1925,9 +1925,20 @@ func (s *store) Heartbeat(ctx context.Context, id, owner string) error {
 // ReclaimStale requeues stale claimed pending runs and interrupts stale running runs.
 func (s *store) ReclaimStale(ctx context.Context, ttl time.Duration) (int, error) {
 	// A SQLite deployment is one node: the process that stamps a lease is the process that sweeps it,
-	// so the local clock is the authoritative one and there is no skew to reconcile. The comparison
-	// below is on text, which is sound because stored timestamps are a fixed width, so their
-	// lexicographic order matches their chronological order.
+	// so the local clock is the authoritative one and there is no skew to reconcile.
+	//
+	// The comparison is on text, and that is not exactly chronological. Stored times keep RFC 3339's
+	// trimming rather than being padded to a fixed width, so within one second a value with no
+	// fractional part sorts after one that has one: "12:00:00Z" is lexicographically greater than
+	// "12:00:00.5Z" because 'Z' is greater than '.', although it happened first. The disagreement is
+	// bounded by one second and cannot compound, since it only ever involves two values in the same
+	// second, and a lease is measured in tens of seconds.
+	//
+	// It is left as text deliberately. SQLite's julianday resolves to about 86 microseconds, which
+	// is coarser than the times stored here, so routing the comparison through it collapses values
+	// that differ and makes the sweep miss leases entirely. Padding the stored format would fix the
+	// ordering for new rows and break it for every row already written, because a padded value
+	// sorts below an unpadded one from the same instant.
 	cut := sqlutil.FormatTime(time.Now().Add(-ttl))
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {

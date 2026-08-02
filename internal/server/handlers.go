@@ -596,7 +596,7 @@ func createRunHandler(submitter Submitter, authz *authorizer, log *zap.Logger) h
 		}
 
 		w.Header().Set("Location", "/v1/runs/"+created.ID)
-		respondJSON(w, log, http.StatusAccepted, created, wantsPretty(r))
+		respondJSON(w, log, http.StatusAccepted, maskRun(created), wantsPretty(r))
 	}
 }
 
@@ -639,7 +639,17 @@ func createPipelineHandler(submitter Submitter, authz *authorizer, log *zap.Logg
 		}
 
 		popts := []run.SubmitOption{run.WithCredentialIDs(req.CredentialIDs)}
-		if key := strings.TrimSpace(r.Header.Get(idempotencyKeyHeader)); key != "" {
+		// Validated exactly as a run submission is. Taking the header verbatim here let a caller
+		// mint a key in the reserved namespace that derived keys use, plant a run under the key a
+		// webhook or a rerun would later compute, and have that later launch resolve to the planted
+		// run and never execute. The git host is answered 202 and the deployment silently does not
+		// happen, which is the worst shape a failure can take.
+		if supplied := strings.TrimSpace(r.Header.Get(idempotencyKeyHeader)); supplied != "" {
+			key, err := run.ClientKey(supplied)
+			if err != nil {
+				respondError(w, log, http.StatusBadRequest, err.Error())
+				return
+			}
 			popts = append(popts, run.WithIdempotencyKey(key))
 		}
 		if req.ProjectID != "" {
@@ -670,7 +680,7 @@ func createPipelineHandler(submitter Submitter, authz *authorizer, log *zap.Logg
 			return
 		}
 		w.Header().Set("Location", "/v1/runs/"+created.ID)
-		respondJSON(w, log, http.StatusAccepted, created, wantsPretty(r))
+		respondJSON(w, log, http.StatusAccepted, maskRun(created), wantsPretty(r))
 	}
 }
 
@@ -776,7 +786,7 @@ func retryRunHandler(store run.Store, retrier Retrier, authz *authorizer, log *z
 			return
 		}
 		w.Header().Set("Location", "/v1/runs/"+created.ID)
-		respondJSON(w, log, http.StatusAccepted, created, wantsPretty(r))
+		respondJSON(w, log, http.StatusAccepted, maskRun(created), wantsPretty(r))
 	}
 }
 
@@ -996,7 +1006,7 @@ func rerunRunHandler(store run.Store, submitter Submitter, authz *authorizer, lo
 		}
 		if existing != nil {
 			w.Header().Set("Location", "/v1/runs/"+existing.ID)
-			respondJSON(w, log, http.StatusAccepted, existing, wantsPretty(r))
+			respondJSON(w, log, http.StatusAccepted, maskRun(existing), wantsPretty(r))
 			return
 		}
 		opts := append(rerunOptions(rn), run.WithSource("rerun", rn.ID), run.WithRerunOf(rn.ID),
@@ -1013,7 +1023,7 @@ func rerunRunHandler(store run.Store, submitter Submitter, authz *authorizer, lo
 			return
 		}
 		w.Header().Set("Location", "/v1/runs/"+created.ID)
-		respondJSON(w, log, http.StatusAccepted, created, wantsPretty(r))
+		respondJSON(w, log, http.StatusAccepted, maskRun(created), wantsPretty(r))
 	}
 }
 
@@ -1060,7 +1070,7 @@ func approveRunHandler(approver Approver, store run.Store, authz *authorizer,
 			respondError(w, log, http.StatusInternalServerError, "could not approve run")
 			return
 		}
-		respondJSON(w, log, http.StatusOK, created, wantsPretty(r))
+		respondJSON(w, log, http.StatusOK, maskRun(created), wantsPretty(r))
 	}
 }
 
@@ -1111,7 +1121,7 @@ func rejectRunHandler(approver Approver, store run.Store, authz *authorizer,
 			respondError(w, log, http.StatusInternalServerError, "could not reject run")
 			return
 		}
-		respondJSON(w, log, http.StatusOK, created, wantsPretty(r))
+		respondJSON(w, log, http.StatusOK, maskRun(created), wantsPretty(r))
 	}
 }
 
@@ -1177,7 +1187,7 @@ func listRunsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.H
 			return
 		}
 		respondJSON(w, log, http.StatusOK, listRunsResponse{
-			Runs:    runs,
+			Runs:    maskRuns(runs),
 			Count:   len(runs),
 			Summary: summarize(counts),
 			HasMore: len(runs) == limit,
@@ -1207,7 +1217,7 @@ func getRunHandler(store run.Store, authz *authorizer, log *zap.Logger) http.Han
 		// Grade the run's blast radius so an approver sees the risk without opening the log.
 		risk := run.AssessRisk(got)
 		got.Risk = &risk
-		respondJSON(w, log, http.StatusOK, got, wantsPretty(r))
+		respondJSON(w, log, http.StatusOK, maskRun(got), wantsPretty(r))
 	}
 }
 
@@ -1238,7 +1248,7 @@ func runShardsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.
 			return
 		}
 		respondJSON(w, log, http.StatusOK,
-			shardsResponse{Shards: shards, Count: len(shards)}, wantsPretty(r))
+			shardsResponse{Shards: maskRuns(shards), Count: len(shards)}, wantsPretty(r))
 	}
 }
 
@@ -1269,7 +1279,7 @@ func runStepsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.H
 			return
 		}
 		respondJSON(w, log, http.StatusOK,
-			stepsResponse{Steps: steps, Count: len(steps)}, wantsPretty(r))
+			stepsResponse{Steps: maskRuns(steps), Count: len(steps)}, wantsPretty(r))
 	}
 }
 

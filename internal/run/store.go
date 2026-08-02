@@ -394,9 +394,15 @@ func (m *memStore) ListPage(ctx context.Context, filter ListFilter, limit, offse
 	return all, nil
 }
 
-// runTouchedHost reports whether the run's stored host summaries include the host. The caller
-// holds the read lock through ListPage's List call path.
+// runTouchedHost reports whether the run's stored host summaries include the host.
+//
+// It takes the read lock itself. The comment here used to say the caller held it through ListPage's
+// call into List, and that was simply untrue: List takes the lock and releases it before returning,
+// so ListPage held nothing while reading the summaries map. A concurrent SaveHostSummary made that a
+// concurrent map read and write, which is a fatal runtime error rather than a detector warning.
 func (m *memStore) runTouchedHost(runID, host string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	for _, hs := range m.summaries[runID] {
 		if hs.Host == host {
 			return true
