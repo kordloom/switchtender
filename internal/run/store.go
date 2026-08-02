@@ -372,8 +372,13 @@ func (m *memStore) ListPage(ctx context.Context, filter ListFilter, limit, offse
 		if filter.SourceID != "" && r.SourceID != filter.SourceID {
 			continue
 		}
-		if filter.LabelKey != "" && r.Labels[filter.LabelKey] != filter.LabelValue {
-			continue
+		// The key has to be present. Comparing the map lookup directly matched a run carrying no
+		// such label against an empty value, which neither SQL store does.
+		if filter.LabelKey != "" {
+			got, ok := r.Labels[filter.LabelKey]
+			if !ok || got != filter.LabelValue {
+				continue
+			}
 		}
 		if filter.Host != "" && !m.runTouchedHost(r.ID, filter.Host) {
 			continue
@@ -384,12 +389,18 @@ func (m *memStore) ListPage(ctx context.Context, filter ListFilter, limit, offse
 	if filter.OldestFirst {
 		slices.Reverse(all)
 	}
-	if offset >= len(all) {
-		return []*Run{}, nil
-	}
-	all = all[offset:]
-	if limit > 0 && limit < len(all) {
-		all = all[:limit]
+	// Offset applies only alongside a limit, which is what both SQL stores do: their OFFSET clause
+	// is emitted inside the same "if limit > 0" branch as LIMIT. Applying it unconditionally here
+	// made an unlimited page skip rows on this store and return everything on the other two, and
+	// every dispatch test runs against this one.
+	if limit > 0 {
+		if offset >= len(all) {
+			return []*Run{}, nil
+		}
+		all = all[offset:]
+		if limit < len(all) {
+			all = all[:limit]
+		}
 	}
 	return all, nil
 }
@@ -454,6 +465,10 @@ func (m *memStore) Shards(_ context.Context, parentID string) ([]*Run, error) {
 
 // shardIndex returns a run's shard index for ordering, or a large value when unset.
 func shardIndex(r *Run) int {
+	// A child with no shard index sorts last. Indexed shards are the ordered fan-out and an
+	// unindexed child is the exception, so it goes after them. The SQL stores say so explicitly
+	// rather than relying on a default, because SQLite orders nulls first and Postgres orders them
+	// last, and the three implementations disagreed for exactly that reason.
 	if r.ShardIndex == nil {
 		return 1 << 30
 	}

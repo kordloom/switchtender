@@ -903,7 +903,11 @@ func (s *store) ListPage(ctx context.Context, filter run.ListFilter, limit, offs
 		args = append(args, filter.SourceID)
 	}
 	if filter.LabelKey != "" {
-		q += " AND json_extract(COALESCE(NULLIF(labels, ''), '{}'), '$.' || ?) = ?"
+		// The key is looked up literally rather than compiled into a JSON path. A path treats a dot
+		// as a step, so an ordinary key like app.tier or k8s.io/name matched nothing here and
+		// matched correctly on Postgres, and the list came back empty with no error.
+		q += " AND EXISTS (SELECT 1 FROM json_each(COALESCE(NULLIF(labels, ''), '{}'))" +
+			" WHERE json_each.key = ? AND json_each.value = ?)"
 		args = append(args, filter.LabelKey, filter.LabelValue)
 	}
 	if filter.Host != "" {
@@ -968,7 +972,10 @@ func (s *store) RunStatusCounts(ctx context.Context) (map[run.Status]int, error)
 
 // Shards returns the shard runs of a parent ordered by shard index.
 func (s *store) Shards(ctx context.Context, parentID string) ([]*run.Run, error) {
-	const q = "SELECT " + runColumns + " FROM runs WHERE parent_id=? ORDER BY shard_index"
+	// Stated rather than left to the default: SQLite orders nulls first and Postgres orders them
+	// last, so "ORDER BY shard_index" alone made the two backends return different orders.
+	const q = "SELECT " + runColumns +
+		" FROM runs WHERE parent_id=? ORDER BY shard_index IS NULL, shard_index"
 	return s.queryRuns(ctx, "list shards", q, parentID)
 }
 
