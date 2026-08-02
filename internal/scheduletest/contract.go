@@ -5,6 +5,9 @@ package scheduletest
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -23,6 +26,9 @@ func Contract(t *testing.T, newStore func() schedule.Store) {
 	t.Run("list ordered", func(t *testing.T) { testList(t, newStore()) })
 	t.Run("delete", func(t *testing.T) { testDelete(t, newStore()) })
 	t.Run("claim due", func(t *testing.T) { testClaimDue(t, newStore()) })
+	t.Run("claim due holds under concurrency", func(t *testing.T) {
+		testClaimDueUnderConcurrency(t, newStore())
+	})
 	t.Run("empty list is non-nil", func(t *testing.T) {
 		got, err := newStore().List(context.Background())
 		if err != nil {
@@ -113,6 +119,58 @@ func testDelete(t *testing.T, store schedule.Store) {
 	}
 	if _, err := store.Get(ctx, "sch_1"); !errors.Is(err, schedule.ErrNotFound) {
 		t.Errorf("Get() after delete = %v, want ErrNotFound", err)
+	}
+}
+
+// testClaimDueUnderConcurrency verifies the compare-and-swap actually serializes, rather than
+// appearing to because the test ran one call at a time.
+//
+// ClaimDue is what stops a schedule firing twice. Several control nodes run the same scheduler
+// against one database, so at the moment a schedule comes due every one of them tries to advance it,
+// and exactly one must win. A sequential test passes on a store where that is not true.
+//
+// This one is a genuine compare-and-swap because both statements update the same row on the same
+// condition, so they contend for the row and the loser re-evaluates against the updated value. That
+// is worth knowing by measurement rather than by reading, because the same reasoning applied to a
+// predicate over a different row is false, and getting that wrong here fires somebody's production
+// deploy twice.
+func testClaimDueUnderConcurrency(t *testing.T, store schedule.Store) {
+	ctx := context.Background()
+	const racers = 8
+	base := time.Date(2026, 8, 2, 3, 0, 0, 0, time.UTC)
+	for round := range 40 {
+		id := fmt.Sprintf("sch_race_%d", round)
+		next := base.Add(time.Duration(round) * time.Hour)
+		if err := store.Save(ctx, &schedule.Schedule{
+			ID: id, Name: id, Cron: "0 3 * * *", Playbook: "site.yml",
+			Enabled: true, NextRunAt: &next, CreatedAt: base,
+		}); err != nil {
+			t.Fatalf("Save(%s) error = %v", id, err)
+		}
+		var wins atomic.Int64
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		for range racers {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				won, err := store.ClaimDue(ctx, id, next, next.Add(24*time.Hour))
+				if err != nil {
+					t.Errorf("ClaimDue(%s) error = %v", id, err)
+					return
+				}
+				if won {
+					wins.Add(1)
+				}
+			}()
+		}
+		close(start)
+		wg.Wait()
+		if got := wins.Load(); got != 1 {
+			t.Fatalf("round %d: %d of %d schedulers claimed the same due schedule, so the run it "+
+				"fires happens %d times", round, got, racers, got)
+		}
 	}
 }
 
