@@ -406,19 +406,18 @@ func Open(dsn string) (*DB, error) {
 	db.SetConnMaxLifetime(30 * time.Minute)
 	db.SetConnMaxIdleTime(5 * time.Minute)
 	// Several processes, a server and its workers, may open the same database at once, and
-	// concurrent ALTER TABLE statements deadlock. A session advisory lock serializes migration.
-	if _, err := db.Exec("SELECT pg_advisory_lock(7973821001)"); err != nil {
+	// concurrent ALTER TABLE statements deadlock, so migration is serialized by an advisory lock.
+	//
+	// The lock, the migration, and the release are one transaction. Taken as three calls on the pool
+	// they were three connections as far as Postgres is concerned: a session lock belongs to the
+	// backend that took it, so the schema could run on a connection holding nothing and the release
+	// could run on a third, where pg_advisory_unlock returns false rather than an error and the lock
+	// leaks for the life of that connection. Nothing else touches the pool in between today, so one
+	// connection is reused and it works, which is an accident of timing rather than a property. A
+	// transaction-scoped lock releases when the transaction ends, including when it fails.
+	if err := migrate(db); err != nil {
 		_ = db.Close()
-		return nil, fmt.Errorf("migration lock: %w", err)
-	}
-	_, migrateErr := db.Exec(schema)
-	if _, err := db.Exec("SELECT pg_advisory_unlock(7973821001)"); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("migration unlock: %w", err)
-	}
-	if migrateErr != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("migrate schema: %w", migrateErr)
+		return nil, err
 	}
 	if err := normalizeScheduleTimes(db); err != nil {
 		_ = db.Close()
@@ -445,6 +444,28 @@ const pgUniqueViolation = "23505"
 // isKeyConflict reports whether a keyed insert failed because another run already holds the
 // idempotency key. A runs insert carrying a key can only trip the idempotency-key unique index, its
 // primary-key conflict being absorbed by ON CONFLICT(id), so a unique violation on one is that race
+// migrateLockKey serializes schema migration across every process opening this database.
+const migrateLockKey = 7973821001
+
+// migrate applies the schema under a transaction-scoped advisory lock.
+func migrate(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("migration lock: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.Exec("SELECT pg_advisory_xact_lock($1)", migrateLockKey); err != nil {
+		return fmt.Errorf("migration lock: %w", err)
+	}
+	if _, err := tx.Exec(schema); err != nil {
+		return fmt.Errorf("migrate schema: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("migrate schema: %w", err)
+	}
+	return nil
+}
+
 // and maps to run.ErrDuplicateKey.
 func isKeyConflict(err error) bool {
 	var pgErr *pgconn.PgError

@@ -674,18 +674,28 @@ func migrateCredentials(db *sql.DB) error {
 	return nil
 }
 
-// sqliteConstraint is the primary SQLite result code shared by every constraint violation. The
-// extended unique code carries it in its low byte, so masking to it matches a unique violation
-// regardless of whether the driver reports the primary or extended code.
-const sqliteConstraint = 19
+// sqliteConstraintUnique and sqliteConstraintPrimaryKey are the extended result codes for the two
+// constraint classes a duplicate key can trip. Every other constraint class is a different fault and
+// must not be reported as a key collision.
+const (
+	sqliteConstraintUnique     = 2067
+	sqliteConstraintPrimaryKey = 1555
+)
 
 // isKeyConflict reports whether a keyed insert failed because another run already holds the
-// idempotency key. A runs insert carrying a key can only trip the idempotency-key unique index, its
-// primary-key conflict being absorbed by ON CONFLICT(id), so any constraint violation on one is that
-// race and maps to run.ErrDuplicateKey.
+// idempotency key.
+//
+// It matches the unique-constraint code specifically, the way the Postgres side matches 23505.
+// Accepting any constraint class meant a NOT NULL, CHECK, or foreign-key violation on a keyed insert
+// came back as "another run already holds this key", which is a wrong answer that reads as a normal
+// race: the caller is handed somebody else's run instead of an error naming the real problem. The
+// two backends now classify the same failure the same way.
 func isKeyConflict(err error) bool {
 	var serr *sqlite.Error
-	return errors.As(err, &serr) && serr.Code()&0xFF == sqliteConstraint
+	if !errors.As(err, &serr) {
+		return false
+	}
+	return serr.Code() == sqliteConstraintUnique || serr.Code() == sqliteConstraintPrimaryKey
 }
 
 // Runs returns the run store.
