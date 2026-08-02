@@ -76,6 +76,12 @@ func (m *memStore) Delete(_ context.Context, id string) error {
 func (m *memStore) AddMember(_ context.Context, orgID, userID string, role Role) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	// The organization has to exist. Both SQL backends refuse this on a foreign key, so accepting
+	// it here let a membership hang off nothing on the store every dispatch and server test runs
+	// against, and the disagreement only surfaced in production.
+	if _, ok := m.orgs[orgID]; !ok {
+		return ErrNotFound
+	}
 	if m.members[orgID] == nil {
 		m.members[orgID] = make(map[string]Role)
 	}

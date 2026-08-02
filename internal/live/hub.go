@@ -96,6 +96,13 @@ func (h *Hub) CloseRun(id string) {
 		case ch <- Message{Type: "end"}:
 		default:
 		}
+		// Closed here as well as signaled. Dropping the topic without closing left every
+		// subscriber holding a channel that would never be closed and never be written to again:
+		// cancel finds no topic to remove it from and returns without closing it, so a reader
+		// ranging over the channel blocks forever. The stream handler happens to select on the
+		// request context instead, which is why nothing leaked, but a subscriber that trusted the
+		// channel to end would have waited for a message that could not arrive.
+		close(ch)
 	}
 	delete(h.topics, id)
 }
