@@ -121,6 +121,8 @@ type Dispatcher struct {
 	queues []string
 	// credentials resolves stored execution secrets, nil when the feature is off.
 	credentials credential.Store
+	// credentialTypes resolves operator-defined credential types, nil when none are configured.
+	credentialTypes credential.TypeStore
 	// sealer decrypts credential secrets.
 	sealer *credential.Sealer
 	// projects resolves git projects, nil when the feature is off.
@@ -200,6 +202,8 @@ type config struct {
 	queues []string
 	// credentials resolves stored execution secrets, nil when the feature is off.
 	credentials credential.Store
+	// credentialTypes resolves operator-defined credential types, nil when none are configured.
+	credentialTypes credential.TypeStore
 	// sealer decrypts credential secrets.
 	sealer *credential.Sealer
 	// projects resolves git projects, nil when the feature is off.
@@ -361,6 +365,7 @@ func New(store run.Store, runner roundhouse.Runner, log *zap.Logger, opts ...Opt
 		maxShards:          cfg.maxShards,
 		queues:             cfg.queues,
 		credentials:        cfg.credentials,
+		credentialTypes:    cfg.credentialTypes,
 		sealer:             cfg.sealer,
 		projects:           cfg.projects,
 		syncer:             cfg.syncer,

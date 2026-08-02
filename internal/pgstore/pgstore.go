@@ -304,6 +304,15 @@ CREATE TABLE IF NOT EXISTS credentials (
 	org_id     TEXT NOT NULL DEFAULT ''
 );
 ALTER TABLE credentials ADD COLUMN IF NOT EXISTS org_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE credentials ADD COLUMN IF NOT EXISTS type_id TEXT NOT NULL DEFAULT '';
+CREATE TABLE IF NOT EXISTS credential_types (
+	id         TEXT PRIMARY KEY,
+	name       TEXT NOT NULL,
+	fields     TEXT NOT NULL DEFAULT '[]',
+	env        TEXT NOT NULL DEFAULT '{}',
+	extra_vars TEXT NOT NULL DEFAULT '{}',
+	created_at BIGINT NOT NULL DEFAULT 0
+);
 CREATE TABLE IF NOT EXISTS teams (
 	id         TEXT PRIMARY KEY,
 	name       TEXT NOT NULL DEFAULT '',
@@ -364,6 +373,7 @@ type DB struct {
 	tokens *tokenStore
 	// credentials is the execution secret store.
 	credentials *credentialStore
+	credTypes   *credTypeStore
 	// projects is the git project store.
 	projects *projectStore
 	// templates is the job template store.
@@ -425,6 +435,7 @@ func Open(dsn string) (*DB, error) {
 	}
 	return &DB{db: db, runs: &store{db: db}, schedules: &scheduleStore{db: db}, tokens: &tokenStore{db: db},
 		credentials: &credentialStore{db: db},
+		credTypes:   &credTypeStore{db: db},
 		projects:    &projectStore{db: db},
 		templates:   &templateStore{db: db},
 		users:       &userStore{db: db},
@@ -490,6 +501,11 @@ func (d *DB) Tokens() auth.Store {
 // Credentials returns the execution secret store.
 func (d *DB) Credentials() credential.Store {
 	return d.credentials
+}
+
+// CredentialTypes returns the operator-defined credential type store.
+func (d *DB) CredentialTypes() credential.TypeStore {
+	return d.credTypes
 }
 
 // Projects returns the git project store.

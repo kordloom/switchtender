@@ -183,6 +183,7 @@ func workerStore(log *zap.Logger) (run.Store, []dispatch.Option, func(), error) 
 	}
 	opts = append(opts,
 		dispatch.WithCredentials(bundle.Credentials(), sealer),
+		dispatch.WithCredentialTypes(bundle.CredentialTypes()),
 		dispatch.WithProjects(bundle.Projects(), syncer),
 		dispatch.WithInventories(bundle.Inventories()),
 		dispatch.WithInventorySources(bundle.InventorySources()),

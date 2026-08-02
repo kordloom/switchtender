@@ -15,6 +15,13 @@ type Injection struct {
 	// Files holds file material written to a private temp file at run time, each bound to the
 	// environment variables named in the file.
 	Files []InjectionFile
+	// ExtraVars holds Ansible extra variables a custom credential type injects. The built-in cloud
+	// injectors leave it empty.
+	ExtraVars map[string]string
+	// Secrets names the values to mask out of run output. It is set by a custom type, which knows
+	// which of its fields are secret; a built-in injector leaves it nil, and the caller then masks
+	// every environment value it produced, which is the prior behavior.
+	Secrets []string
 }
 
 // InjectionFile is credential material written to a private file at run time. EnvVars names the

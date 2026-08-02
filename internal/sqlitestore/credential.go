@@ -11,7 +11,7 @@ import (
 )
 
 // credentialColumns is the shared select list for credential reads.
-const credentialColumns = `id, name, kind, secret, created_at, source, org_id`
+const credentialColumns = `id, name, kind, secret, created_at, source, org_id, type_id`
 
 // credentialStore is a credential.Store backed by the shared SQLite database.
 type credentialStore struct {
@@ -22,13 +22,15 @@ type credentialStore struct {
 // Save inserts or replaces the credential.
 func (s *credentialStore) Save(ctx context.Context, c *credential.Credential) error {
 	const q = `
-INSERT INTO credentials (id, name, kind, secret, created_at, source, org_id)
-VALUES (?, ?, ?, ?, ?, ?, ?)
+INSERT INTO credentials (id, name, kind, secret, created_at, source, org_id, type_id)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
 	name=excluded.name, kind=excluded.kind, secret=excluded.secret,
-	created_at=excluded.created_at, source=excluded.source, org_id=excluded.org_id`
+	created_at=excluded.created_at, source=excluded.source, org_id=excluded.org_id,
+	type_id=excluded.type_id`
 	_, err := s.db.ExecContext(ctx, q,
-		c.ID, c.Name, string(c.Kind), c.Secret, sqlutil.FormatTime(c.CreatedAt), c.Source, c.OrgID)
+		c.ID, c.Name, string(c.Kind), c.Secret, sqlutil.FormatTime(c.CreatedAt), c.Source, c.OrgID,
+		c.TypeID)
 	if err != nil {
 		return fmt.Errorf("save credential: %w", err)
 	}
@@ -39,8 +41,8 @@ ON CONFLICT(id) DO UPDATE SET
 // credential.ErrNotFound.
 func (s *credentialStore) Update(ctx context.Context, c *credential.Credential) error {
 	res, err := s.db.ExecContext(ctx,
-		"UPDATE credentials SET name=?, kind=?, secret=?, source=?, org_id=? WHERE id=?",
-		c.Name, string(c.Kind), c.Secret, c.Source, c.OrgID, c.ID)
+		"UPDATE credentials SET name=?, kind=?, secret=?, source=?, org_id=?, type_id=? WHERE id=?",
+		c.Name, string(c.Kind), c.Secret, c.Source, c.OrgID, c.TypeID, c.ID)
 	if err != nil {
 		return fmt.Errorf("update credential: %w", err)
 	}
@@ -113,7 +115,7 @@ func scanCredential(sc scanner) (*credential.Credential, error) {
 		kind    string
 		created string
 	)
-	if err := sc.Scan(&c.ID, &c.Name, &kind, &c.Secret, &created, &c.Source, &c.OrgID); err != nil {
+	if err := sc.Scan(&c.ID, &c.Name, &kind, &c.Secret, &created, &c.Source, &c.OrgID, &c.TypeID); err != nil {
 		return nil, err
 	}
 	c.Kind = credential.Kind(kind)
