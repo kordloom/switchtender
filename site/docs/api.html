@@ -557,6 +557,46 @@ run, whether the launch came from the API, a schedule, or a webhook trigger.</p>
 <p>Zero, or the field omitted, leaves launches on the server default set by <code>--run-timeout</code>, so a
 template saved before this field existed is unchanged. A run that exceeds its timeout is canceled
 and finalized as failed. A launch cannot raise the cap; the template's value is what applies.</p>
+<h2 id="per-template-notifications">Per-template notifications</h2>
+<p>A template or a run submission may carry <code>notifications</code>, a list of targets that receive its
+terminal state in addition to the server-wide channels. Each target names a <code>kind</code> and the field
+that kind is addressed by, plus an optional <code>on_failure</code> that limits the target to failed runs.</p>
+<table>
+<thead>
+<tr>
+<th>Kind</th>
+<th>Required fields</th>
+<th>What is sent</th>
+</tr>
+</thead>
+<tbody>
+<tr><td><code>webhook</code></td><td><code>url</code></td><td>The finished run as JSON, extra vars redacted.</td></tr>
+<tr><td><code>slack</code>, <code>mattermost</code>, <code>rocketchat</code></td><td><code>url</code></td><td>A message to the incoming webhook.</td></tr>
+<tr><td><code>discord</code>, <code>teams</code></td><td><code>url</code></td><td>A message or Adaptive Card to the webhook.</td></tr>
+<tr><td><code>ntfy</code></td><td><code>url</code></td><td>A notification to the topic, raised priority on failure.</td></tr>
+<tr><td><code>pagerduty</code></td><td><code>key</code></td><td>An incident trigger on the routing key, failed and interrupted runs only.</td></tr>
+<tr><td><code>grafana</code></td><td><code>url</code>, <code>key</code></td><td>An annotation to that instance's annotations API with that token.</td></tr>
+<tr><td><code>twilio</code></td><td><code>to</code></td><td>An SMS to that recipient through the server-held Twilio account.</td></tr>
+<tr><td><code>email</code></td><td><code>to</code></td><td>Mail to that comma-separated recipient list through the server SMTP transport.</td></tr>
+</tbody>
+</table>
+<pre><code class="language-bash">curl -X POST https://switchtender.example.com/v1/templates \
+  -H &quot;Authorization: Bearer $SWITCHTENDER_TOKEN&quot; \
+  -H 'Content-Type: application/json' \
+  -d '{
+    &quot;name&quot;: &quot;prod deploy&quot;,
+    &quot;playbook&quot;: &quot;plays/deploy.yml&quot;,
+    &quot;notifications&quot;: [
+      {&quot;kind&quot;: &quot;slack&quot;, &quot;url&quot;: &quot;https://hooks.slack.com/services/T0/B1/x&quot;},
+      {&quot;kind&quot;: &quot;pagerduty&quot;, &quot;key&quot;: &quot;R0UTINGKEY&quot;, &quot;on_failure&quot;: true},
+      {&quot;kind&quot;: &quot;email&quot;, &quot;to&quot;: &quot;oncall@example.com, lead@example.com&quot;}
+    ]
+  }'
+</code></pre>
+<p>A malformed target is refused at create or update with the field it lacks, not dropped at
+delivery. A Twilio or email target names only a recipient: the account credentials stay in server
+flags, so a template never carries them. On read, webhook URLs, PagerDuty routing keys, and
+Grafana tokens come back masked; an edit that echoes the mask back keeps the stored value.</p>
 <h2 id="relay-endpoints">Relay endpoints</h2>
 <p>With <code>--worker-token</code> set, the server also serves the mesh relay under <code>/relay</code>: the execution
 path an outbound worker started with <code>--server</code> uses instead of a database connection. Every call
