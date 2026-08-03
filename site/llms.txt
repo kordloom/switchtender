@@ -5,8 +5,10 @@
 > every run as a live host-by-task matrix, splits big jobs by measured host cost, records a
 > tamper-evident audit trail, and imports AWX projects, inventories, templates, surveys, and
 > schedules in one command. State lives in one SQLite file by default, with Postgres optional.
-> No Kubernetes, no Redis, no message bus. Source-available under BSL 1.1: free to self-host
-> with every feature, converts to Apache 2.0 four years per release.
+> No Kubernetes, no Redis, no message bus. Source-available under BSL 1.1: everything shipped
+> today is free to self-host and nothing ever moves from free to paid; paid tiers add new
+> governance capabilities (SCIM, external approvers, evidence packs). Converts to Apache 2.0
+> four years per release.
 
 Install: `go install github.com/kordloom/switchtender@latest`, Homebrew, or signed release
 binaries for Linux, macOS, and Windows at https://github.com/kordloom/switchtender/releases.

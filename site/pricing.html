@@ -4,7 +4,7 @@
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>Pricing · SwitchTender</title>
-	<meta name="description" content="SwitchTender is free to self-host forever, including the provable audit chain and offline verification. Paid tiers add multi-person governance and auditor-ready evidence: SSO and SCIM, policy-gated approvals, Vault, evidence packs, Postgres and HA. Flat per-org pricing, no per-seat bill.">
+	<meta name="description" content="SwitchTender is free to self-host forever, including SSO, RBAC, approvals, Postgres, and the provable audit chain. Paid tiers add new governance capabilities: SCIM, external approvers, evidence packs, air-gapped licensing. Nothing moves from free to paid. Flat per-org pricing, no per-seat bill.">
 	<link rel="canonical" href="https://switchtender.com/pricing">
 	<meta property="og:title" content="Pricing · SwitchTender">
 	<meta property="og:description" content="Free to run, forever. You pay when more than one person is accountable for a change, or when someone outside your team needs the evidence. Flat per-org pricing.">
@@ -71,6 +71,15 @@
 		.tier-inherit { margin: 16px 0 0; font-size: 13px; color: var(--muted); font-style: italic; }
 		.pricing-note { max-width: 760px; margin: 44px auto 0; text-align: center; color: var(--muted); font-size: 15px; }
 		.pricing-note strong { color: var(--text); }
+		.sprint {
+			display: flex; align-items: center; justify-content: space-between; gap: 24px; flex-wrap: wrap;
+			max-width: 860px; margin: 32px auto 0; padding: 22px 26px; border-radius: var(--radius);
+			background: var(--surface); border: 1px solid rgba(34, 211, 238, 0.32);
+		}
+		.sprint > div { flex: 1 1 480px; min-width: 0; }
+		.sprint h3 { font-family: "Space Grotesk", sans-serif; font-size: 17px; margin-bottom: 6px; }
+		.sprint p { color: var(--muted); font-size: 14.5px; }
+		.sprint .btn { white-space: nowrap; }
 		.assurance { display: flex; flex-wrap: wrap; justify-content: center; gap: 16px; margin-top: 40px; }
 		.assurance div {
 			flex: 1 1 300px; max-width: 360px; padding: 20px 22px; border-radius: var(--radius);
@@ -135,12 +144,13 @@
 					<a class="btn" href="/get-started">Get started</a>
 					<ul class="tier-list">
 						<li>Full orchestration: inventory, projects, job templates, schedules, ad hoc runs</li>
-						<li>Single binary with an embedded <b>SQLite</b> store, one file to back up</li>
+						<li>Single binary with an embedded <b>SQLite</b> store; <b>Postgres and HA</b> when you outgrow it</li>
 						<li>All seven tools: Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, Go</li>
-						<li>Local auth with basic roles</li>
-						<li>REST API and outbound webhooks</li>
+						<li><b>SSO login</b> (OIDC and SAML), RBAC, organizations and teams</li>
+						<li>Run approvals and policy gates</li>
+						<li>REST API, webhooks, and per-template notifications</li>
 						<li><b>Secrets masking</b> in run logs</li>
-						<li>Hash-chain generation and local verification, the <code>verify</code> command free forever</li>
+						<li>Hash-chain generation, signed export, and local verification, the <code>verify</code> command free forever</li>
 						<li>Community support via GitHub issues</li>
 					</ul>
 				</article>
@@ -151,16 +161,15 @@
 					<div class="tier-price"><b>$250&ndash;500</b><span class="cadence">/ mo</span></div>
 					<p class="tier-sub">Flat per org. No per-seat bill.</p>
 					<a class="ghost" href="mailto:hello@kordloom.com?subject=SwitchTender%20Team%20tier">Talk to us</a>
-					<span class="tier-badge">Available at launch</span>
+					<span class="tier-badge">Early access</span>
 					<p class="tier-inherit">Everything in Free, plus:</p>
 					<ul class="tier-list">
-						<li><b>SSO and SCIM</b>: OIDC and SAML, with directory-synced users</li>
-						<li>Policy-gated approvals with multiple or required approvers per environment or playbook</li>
-						<li>External approvers who sign off without ever touching the automation UI</li>
-						<li><b>Vault integration</b> with dynamic secrets and lease handling</li>
-						<li>Granular RBAC and multi-team isolation</li>
-						<li>Attestation export as signed <b>LoomSeal</b> bundles</li>
-						<li>Email support with a stated response window</li>
+						<li><b>SCIM</b> provisioning and deprovisioning, so leavers lose access the day they leave</li>
+						<li>External approvers who sign off from a link, without a seat or the automation UI</li>
+						<li>N-of-M and required-approver policies per environment or playbook</li>
+						<li><b>Vault dynamic secrets</b> with lease handling (basic Vault reads will be free)</li>
+						<li><b>Managed execution environments</b>, built and pinned centrally for the whole fleet</li>
+						<li>Private support channel with a stated response window</li>
 					</ul>
 				</article>
 
@@ -170,12 +179,12 @@
 					<div class="tier-price"><b>$1,000&ndash;2,500</b><span class="cadence">/ mo</span></div>
 					<p class="tier-sub">Flat per org. Migration priced separately.</p>
 					<a class="ghost" href="mailto:hello@kordloom.com?subject=SwitchTender%20Governed%20tier">Talk to us</a>
-					<span class="tier-badge">Available at launch</span>
+					<span class="tier-badge">Early access</span>
 					<p class="tier-inherit">Everything in Team, plus:</p>
 					<ul class="tier-list">
 						<li><b>Evidence packs</b> mapped to common change-management controls, generated on a schedule</li>
-						<li>Independent chain verification an auditor can run without you</li>
-						<li><b>Postgres</b> backend and high availability</li>
+						<li>Auditor-facing attestation reports; local verification stays free for everyone</li>
+						<li>Audit chain <b>archival and re-anchoring</b> for long retention windows</li>
 						<li>Air-gapped licensing and offline activation</li>
 						<li>AWX migration assistance, priced separately</li>
 						<li>Priority support with a real SLA</li>
@@ -185,25 +194,38 @@
 			</div>
 
 			<p class="pricing-note">
-				All three tiers are published today. <strong>Team and Governed arrive at launch</strong>, and
-				we would rather talk to the first handful of teams than take a card. If a governed workflow is
-				on your roadmap, <a href="mailto:hello@kordloom.com?subject=SwitchTender%20pricing" style="color: var(--accent);">tell us what you need</a> and we will shape it with you.
+				All three tiers are published today so nobody prices in the dark. <strong>Everything in Free
+				ships now. Team and Governed are being built with founding design partners</strong>, and we
+				would rather shape them with the first handful of teams than take a card. If a governed
+				workflow is on your roadmap, <a href="mailto:hello@kordloom.com?subject=SwitchTender%20pricing" style="color: var(--accent);">tell us what you need</a> and it moves up the build order.
 			</p>
+
+			<div class="sprint reveal">
+				<div>
+					<h3>Migration-to-Production Sprint</h3>
+					<p>A fixed-price engagement, not a subscription: we migrate your AWX or Tower install hands-on, validate your real workflows in production, and bundle the first year of Team. One invoice, and you are live before you ever pay again.</p>
+				</div>
+				<a class="btn" href="mailto:hello@kordloom.com?subject=SwitchTender%20migration%20sprint">Scope it in one call</a>
+			</div>
 		</section>
 
 		<section class="section wrap" style="padding-top: 0;">
 			<div class="section-head reveal">
 				<h2>What stays free, always</h2>
-				<p>Two promises the pricing does not touch, because charging for them would make the product dishonest.</p>
+				<p>Three promises the pricing does not touch, because charging for them would make the product dishonest.</p>
 			</div>
 			<div class="assurance reveal">
 				<div>
-					<h3>The chain is free because it is the point</h3>
-					<p>Generating the tamper-evident hash chain and verifying it locally is free forever. Gating it would make "provable" a sales gimmick. You pay for evidence packs and independent verification, not for the chain existing.</p>
+					<h3>What ships free stays free</h3>
+					<p>Nothing ever moves from free to paid. The paid tiers are built from new capabilities, never carved out of the binary you already run. If we shipped it free, it is yours.</p>
 				</div>
 				<div>
-					<h3>The single-operator product is complete</h3>
-					<p>The controller you run today stays complete: orchestration, the live matrix, all seven tools, the chain, offline verify. The paid tiers add governance for many people and evidence for outside auditors. They do not hold the good parts hostage.</p>
+					<h3>The chain is free because it is the point</h3>
+					<p>Generating the tamper-evident hash chain and verifying it locally is free forever. Gating it would make "provable" a sales gimmick. You pay for evidence packs an auditor accepts, not for the chain existing.</p>
+				</div>
+				<div>
+					<h3>The whole controller is in the free tier</h3>
+					<p>Orchestration, the live matrix, all seven tools, SSO, RBAC, approvals, Postgres, the chain, offline verify. The paid tiers add governance for many people and evidence for outside auditors. They do not hold the good parts hostage.</p>
 				</div>
 			</div>
 		</section>
@@ -215,7 +237,11 @@
 			<div class="faq reveal">
 				<details>
 					<summary>Is it really free, or free-until-you-need-it?</summary>
-					<p>Free to self-host with no seat cap and no expiry. The paid tiers add capabilities the free tier does not have, such as SSO, Vault, and scheduled evidence packs. They do not remove anything from Free or meter what it already does.</p>
+					<p>Free to self-host with no seat cap, no host cap, and no expiry, and that includes SSO, RBAC, approvals, and Postgres. The paid tiers add capabilities that have never shipped, such as SCIM provisioning, external approvers, and scheduled evidence packs. Nothing moves from free to paid, ever.</p>
+				</details>
+				<details>
+					<summary>What is actually built today?</summary>
+					<p>Everything in the Free column ships in the current release. The Team and Governed capabilities are in development with founding design partners, which is why those tiers say early access and talk to us instead of checkout. Early partners pay as what they need lands, and they set the build order.</p>
 				</details>
 				<details>
 					<summary>Why flat per org instead of per seat?</summary>
@@ -223,7 +249,7 @@
 				</details>
 				<details>
 					<summary>What does the license allow?</summary>
-					<p>SwitchTender is source-available under BSL 1.1. You can read the source, self-host it, and run it in production. The license restricts offering it as a competing hosted service. See the <a href="https://github.com/kordloom/switchtender/blob/main/LICENSE" style="color: var(--accent);">LICENSE</a> for the exact terms.</p>
+					<p>SwitchTender is source-available under BSL 1.1. You can read the source, modify it, self-host it, and run it in production for your own organization, free, forever. The only restriction is offering it as a competing hosted service. Each release converts to Apache 2.0 after four years. See the <a href="https://github.com/kordloom/switchtender/blob/main/LICENSE" style="color: var(--accent);">LICENSE</a> for the exact terms.</p>
 				</details>
 				<details>
 					<summary>Can I move from AWX?</summary>
