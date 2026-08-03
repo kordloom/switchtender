@@ -136,7 +136,7 @@ curl -X PUT https://switchtender.example.com/v1/users/user_9f2c \
 The profile is replaced wholesale on update, so send the profile you want to end up with rather than
 only the parts that changed. An omitted field clears.
 
-A profile is personal data and is treated as such. Only an admin may read it: `/v1/users` requires
+A profile is personal data and is treated as such. Only an admin may read it. `/v1/users` requires
 the admin role and is not delegable by a manage grant. The values are never written to the logs, and
 a rejection names the offending field without echoing it. Each single-line field is capped at 320
 characters, `notes` at 2000, and an account may carry at most eight links. A link must be an `http`
@@ -196,7 +196,7 @@ curl -X POST https://switchtender.example.com/v1/templates \
 ```
 
 A malformed target is refused at create or update with the field it lacks, not dropped at
-delivery. A Twilio or email target names only a recipient: the account credentials stay in server
+delivery. A Twilio or email target names only a recipient. The account credentials stay in server
 flags, so a template never carries them. On read, webhook URLs, PagerDuty routing keys, and
 Grafana tokens come back masked; an edit that echoes the mask back keeps the stored value.
 

@@ -7,7 +7,7 @@
 
 # Ansible runs
 
-An Ansible run executes `ansible-playbook` against an inventory. It is the default tool: a run
+An Ansible run executes `ansible-playbook` against an inventory. It is the default tool. A run
 that names no tool is an Ansible run. It is also the most instrumented one, because the embedded
 callback plugin reports every task on every host as a structured event, and those events paint the
 live host-by-task matrix, feed fleet memory, and drive drift detection.

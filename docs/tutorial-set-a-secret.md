@@ -90,7 +90,7 @@ labeled field, such as a `credential` or an API key.
 
 ## Mint a short-lived secret per run
 
-For the strongest secret hygiene, SwitchTender can mint a fresh credential for each run and revoke it
+For strong secret hygiene, SwitchTender can mint a fresh credential for each run and revoke it
 when the run ends, so a leaked value is useless minutes later. Set the source to Vault dynamic and
 give it a dynamic secrets path, such as a database or cloud role, as JSON:
 
@@ -99,7 +99,7 @@ give it a dynamic secrets path, such as a database or cloud role, as JSON:
 At launch SwitchTender reads that path, which mints a new credential, injects the chosen field into the
 run, and records the Vault lease. When the run reaches a terminal state the lease is revoked, so the
 credential lives only as long as the run. If the process dies before it can revoke, the credential
-still expires on the lease's own TTL, so nothing is left behind for long. The minted value is masked
+still expires on the lease's own TTL. The minted value is masked
 in the run's output like any other secret.
 
 AWS STS mints short-lived role credentials the same way. Set the source to AWS STS and give it an IAM

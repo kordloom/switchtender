@@ -9,7 +9,7 @@
 
 Short, task-focused walk-throughs for the everyday work of running a fleet. Each one takes a few
 steps. New to SwitchTender? Start with the [quickstart](quickstart.md), then come back. The fastest
-orientation is inside the app itself: Tour in the top bar launches guided tours of the product,
+orientation is inside the app itself. Tour in the top bar launches guided tours of the product,
 the pitch, and the migration path.
 
 | Task | What it does |

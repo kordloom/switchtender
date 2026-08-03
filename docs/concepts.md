@@ -98,7 +98,7 @@ against it lands there, no matter how it was launched.
 ## Provable audit
 
 Every authenticated mutation is recorded in the audit trail, and each entry is linked into a SHA-256
-hash chain: it carries the previous entry's hash and its own hash over its content. Altering,
+hash chain. It carries the previous entry's hash and its own hash over its content. Altering,
 reordering, or deleting an entry breaks the chain, which `GET /v1/audit/verify` detects. A signed
 export from `GET /v1/audit/export` seals the chain with an ed25519 signature, so
 `switchtender audit verify` proves the trail is intact and unaltered offline, without trusting the
@@ -117,7 +117,7 @@ way.
 authority to sign the moment it saw the current head. The token is embedded in every bundle built
 afterwards and is checked offline by any verifier, with no network and no trust in this install, so
 a chain that has quietly lost its tail no longer reaches its anchor and says so. Anchor on a
-schedule: an anchor bounds how much history can vanish unnoticed to whatever happened since the last
+schedule. An anchor bounds how much history can vanish unnoticed to whatever happened since the last
 one.
 
 **Receipts make an omission detectable by the party it happened to.** Every mutation returns an
@@ -127,7 +127,7 @@ server that omitted the entry cannot produce a chain containing the receipt.
 
 What none of this defends against is an operator running modified code on the machine itself. That
 is the boundary of every audit system, it costs an attacker the whole controller to reach, and it
-does not hand them the past: anything already anchored stays fixed and still proves what it proved.
+does not hand them the past. Anything already anchored stays fixed and still proves what it proved.
 
 None of this changes when the operator is an AI agent. A change an agent makes through the API
 chains identically to one a person makes: recorded before it executes, with the agent's token label

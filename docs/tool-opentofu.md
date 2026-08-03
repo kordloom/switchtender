@@ -8,7 +8,7 @@
 # OpenTofu runs
 
 An OpenTofu run provisions infrastructure from a working directory of `.tf` files with the `tofu`
-binary. It behaves exactly like a [Terraform run](tool-terraform.md): the run's command names the
+binary. It behaves exactly like a [Terraform run](tool-terraform.md). The run's command names the
 directory, relative to the project checkout. Pick the tool that matches the binary your
 configurations are written for; the two are configuration-compatible for most modules.
 

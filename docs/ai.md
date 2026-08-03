@@ -8,8 +8,7 @@
 # Advisory AI
 
 SwitchTender runs a complete control plane with no model anywhere near it. AI is an optional layer
-you switch on for an edge, never a dependency: it is off until you set `--ai-provider`, and
-nothing in the product waits on it.
+you switch on for an edge, never a dependency. It is off until you set `--ai-provider`.
 
 ## The guarantees
 

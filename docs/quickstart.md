@@ -7,7 +7,7 @@
 
 # Quickstart
 
-No install needed to look around: the [live demo](https://demo.switchtender.com) is a seeded, read-only instance of exactly what you get.
+No install needed to look around. The [live demo](https://demo.switchtender.com) is a seeded, read-only instance of exactly what you get.
 
 ## Requirements
 
@@ -27,7 +27,7 @@ or existing credentials cannot be decrypted.
 
 Open http://localhost:8080 for the web UI, or use the API directly.
 
-On your own machine, `./switchtender desktop` does all of this in one command: it picks a stable
+On your own machine, `./switchtender desktop` does all of this in one command. It picks a stable
 loopback port, keeps its data in a per-user directory, and opens the UI. The
 [desktop guide](desktop.md) covers it, including packaging.
 

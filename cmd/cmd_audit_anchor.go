@@ -38,7 +38,7 @@ var auditAnchorCmd = &cobra.Command{
 	Long: `Fix the current audit chain head in a place this install cannot rewrite.
 
 A hash chain proves nothing in it was altered. It cannot prove nothing was removed from the end,
-because a prefix of a valid chain is itself a valid chain: drop the last thousand entries and what
+because a prefix of a valid chain is itself a valid chain. Drop the last thousand entries and what
 remains still verifies. An anchor closes that. Once a link is recorded outside this install, a chain
 that no longer reaches it has visibly lost its tail.
 
