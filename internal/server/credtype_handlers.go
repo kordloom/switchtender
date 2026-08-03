@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -36,6 +37,7 @@ func createCredTypeHandler(store credential.TypeStore, log *zap.Logger) http.Han
 			return
 		}
 		t.ID = credential.NewTypeID()
+		t.CreatedAt = time.Now()
 		if err := t.Validate(); err != nil {
 			respondError(w, log, http.StatusBadRequest, err.Error())
 			return

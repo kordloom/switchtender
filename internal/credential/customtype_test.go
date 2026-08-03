@@ -57,6 +57,10 @@ func TestCredentialTypeValidate(t *testing.T) {
 		Type: CredentialType{Name: "T", Fields: []Field{{Name: "x"}},
 			EnvInjectors: map[string]string{"K": "{{y}}"}},
 	}, {
+		Name: "env template with a newline", Want: false,
+		Type: CredentialType{Name: "T", Fields: []Field{{Name: "x"}},
+			EnvInjectors: map[string]string{"K": "{{x}}\nEVIL=1"}},
+	}, {
 		Name: "extra-var name with a dot", Want: false,
 		Type: CredentialType{Name: "T", Fields: []Field{{Name: "x"}},
 			ExtraVarInjectors: map[string]string{"a.b": "{{x}}"}},
