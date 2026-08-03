@@ -84,12 +84,19 @@ playbook names, masked failed-run logs, and drift summaries. Credential values a
 any prompt is built, and fleet questions send metadata only. AI is off by default. See the
 [AI guide](ai.md) for exactly what each feature sends.
 
-## Can the AI change my infrastructure?
+## Can the built-in advisory AI change my infrastructure?
 
-No. A provider only produces text a human reads or a proposal a human releases. Anything AI
-drafts that could become a run is born held at the same approval gate an operator faces, an
-admin reviews the generated command before it moves, and the request and decision both land in
-the audit trail.
+No. The [advisory AI](ai.md) only produces text a human reads or a proposal a human releases.
+Anything it drafts that could become a run is born held at the same approval gate an operator
+faces, an admin reviews the generated command before it moves, and the request and decision both
+land in the audit trail.
+
+## Can an AI agent operate SwitchTender?
+
+Yes, through the API, holding one credential: a token bound to an operator account. The agent
+submits and manages runs like any operator, every mutation it makes is chained before it executes,
+and a run held for approval waits for a human admin, since an operator token cannot approve.
+[Run an AI agent through the gate](agents.md) covers the setup.
 
 ## Can I extend SwitchTender?
 

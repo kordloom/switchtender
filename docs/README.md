@@ -24,6 +24,7 @@ the app at `/ui/docs`.
 | [Desktop](desktop.md) | Run SwitchTender as a local desktop app.|
 | [Features](features.md) | The full capability list.|
 | [Advisory AI](ai.md) | The five AI features, the guarantees, providers, and what a model sees.|
+| [AI agents](agents.md) | Run an AI agent through the gate: one token, gated, chained, provable.|
 | [Extend in Go](sdk.md) | The SDK: add tools, AI providers, secret engines, and notifiers.|
 | [HTTP API](api.md) | Every endpoint the server exposes.|
 | [Migration](migration.md) | Moving off AWX or Semaphore in detail.|

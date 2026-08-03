@@ -129,6 +129,11 @@ What none of this defends against is an operator running modified code on the ma
 is the boundary of every audit system, it costs an attacker the whole controller to reach, and it
 does not hand them the past: anything already anchored stays fixed and still proves what it proved.
 
+None of this changes when the operator is an AI agent. A change an agent makes through the API
+chains identically to one a person makes: recorded before it executes, with the agent's token label
+as the actor, covered by the same receipts and anchors. [Running an agent](agents.md) covers giving
+an agent that token and nothing else.
+
 ## Policy as code
 
 Approval policies decide which runs a person has to sign off, so who may change them is the whole
@@ -160,9 +165,10 @@ many resources.
 
 A run can be marked to require approval. It is held in a pending-approval state that the claim loop
 never picks up, until an admin approves it, which releases it to run, or rejects it, which ends it.
-An operator can request the run, but only an admin can release it, so duties are separated. Both the
-request and the decision are recorded in the audit trail, making who asked for a change and who signed
-off provable.
+An operator can request the run, but only an admin can release it, so duties are separated. A held
+run submitted by an AI agent is released the same way, only by a human admin, so an operator-bound
+agent never approves its own work. Both the request and the decision are recorded in the audit
+trail, making who asked for a change and who signed off provable.
 
 Approval can also be required by policy rather than by choice. A policy matches runs by tool, command
 text, or target inventory, and any matching run is held automatically at submission, so the gate

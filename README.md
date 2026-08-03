@@ -27,6 +27,8 @@
 Run everything. Watch every host. Prove every change. One Go binary runs Ansible, Terraform, OpenTofu,
 Bash, PowerShell, Python, and Go across your fleet, paints every run live as a host-by-task matrix instead of a text
 scroll, splits big jobs across parallel shards, and proves exactly what ran and who approved it.
+AI agents are operators now too, and their changes are proven the same way, gated and chained under
+the agent's own name.
 No Kubernetes operator, no Postgres, no Redis, no message bus. One process, one SQLite file.
 
 ## Contents
@@ -37,6 +39,7 @@ No Kubernetes operator, no Postgres, no Redis, no message bus. One process, one 
 - [Quick start](#quick-start)
 - [Documentation](#documentation)
 - [Design](#design)
+- [AI agents as operators](#ai-agents-as-operators)
 - [The name](#the-name)
 - [Roadmap](#roadmap)
 - [Status](#status)
@@ -152,6 +155,7 @@ The docs live in [docs/](docs/) and also render inside the app at `/ui/docs`.
 | [Configuration](docs/configuration.md) | Every command, flag, and environment variable |
 | [Desktop](docs/desktop.md) | Run SwitchTender as a local desktop app |
 | [Features](docs/features.md) | The full capability list |
+| [AI agents](docs/agents.md) | Put an AI agent behind the approval gate and prove what it did |
 | [Extend in Go](docs/sdk.md) | The SDK: add tools, AI providers, secret engines, and notifiers |
 | [HTTP API](docs/api.md) | Every endpoint the server exposes |
 | [Migration](docs/migration.md) | Moving off AWX or Semaphore in detail |
@@ -172,6 +176,14 @@ with a bounded worker pool, the cron scheduler, and the embedded UI.
   publishing events without touching the human-readable log.
 - Every run executes under its own cancel context. Canceling a split parent stops all of its
   shards. Canceling a pipeline stops the current step and halts the sequence.
+
+## AI agents as operators
+
+An AI agent that changes infrastructure is an operator, and it gets the operator's deal: one
+credential, an operator-bound SwitchTender token, and no prod credentials of its own. Every change
+it makes is recorded to the hash chain before it executes, anything policy gates waits for a human
+admin, and the signed export proves the record to a third party offline. The full setup is in
+[Run an AI agent through the gate](docs/agents.md).
 
 ## The name
 
