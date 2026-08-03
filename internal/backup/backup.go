@@ -426,7 +426,9 @@ func check(ctx context.Context, s Stores, p *payload) error {
 }
 
 // apply upserts every object in the payload and reports the counts. Identity and access objects are
-// written first so later objects that reference an org resolve against a present owner.
+// written first so later objects that reference an org resolve against a present owner. Each counter
+// is raised as its object is saved, not after the store's loop finishes, so a failure partway through
+// returns the true number written rather than zero for rows already committed.
 func apply(ctx context.Context, s Stores, p *payload) (Summary, error) {
 	var sum Summary
 
@@ -434,15 +436,15 @@ func apply(ctx context.Context, s Stores, p *payload) (Summary, error) {
 		if err := s.Orgs.Save(ctx, o); err != nil {
 			return sum, fmt.Errorf("restore: save org %s: %w", o.ID, err)
 		}
+		sum.Orgs++
 	}
-	sum.Orgs = len(p.Orgs)
 
 	for _, t := range p.Teams {
 		if err := s.Teams.Save(ctx, t); err != nil {
 			return sum, fmt.Errorf("restore: save team %s: %w", t.ID, err)
 		}
+		sum.Teams++
 	}
-	sum.Teams = len(p.Teams)
 
 	for _, u := range p.Users {
 		acct := u.User
@@ -450,22 +452,22 @@ func apply(ctx context.Context, s Stores, p *payload) (Summary, error) {
 		if err := s.Users.Save(ctx, &acct); err != nil {
 			return sum, fmt.Errorf("restore: save user %s: %w", acct.ID, err)
 		}
+		sum.Users++
 	}
-	sum.Users = len(p.Users)
 
 	for _, g := range p.Grants {
 		if err := s.Grants.Save(ctx, g); err != nil {
 			return sum, fmt.Errorf("restore: save grant %s: %w", g.ID, err)
 		}
+		sum.Grants++
 	}
-	sum.Grants = len(p.Grants)
 
 	for _, pr := range p.Projects {
 		if err := s.Projects.Save(ctx, pr); err != nil {
 			return sum, fmt.Errorf("restore: save project %s: %w", pr.ID, err)
 		}
+		sum.Projects++
 	}
-	sum.Projects = len(p.Projects)
 
 	for _, c := range p.Credentials {
 		cred := c.Credential
@@ -473,8 +475,8 @@ func apply(ctx context.Context, s Stores, p *payload) (Summary, error) {
 		if err := s.Credentials.Save(ctx, &cred); err != nil {
 			return sum, fmt.Errorf("restore: save credential %s: %w", cred.ID, err)
 		}
+		sum.Credentials++
 	}
-	sum.Credentials = len(p.Credentials)
 
 	for _, i := range p.Inventories {
 		inv := i.Inventory
@@ -482,29 +484,29 @@ func apply(ctx context.Context, s Stores, p *payload) (Summary, error) {
 		if err := s.Inventories.Save(ctx, &inv); err != nil {
 			return sum, fmt.Errorf("restore: save inventory %s: %w", inv.ID, err)
 		}
+		sum.Inventories++
 	}
-	sum.Inventories = len(p.Inventories)
 
 	for _, src := range p.InventorySources {
 		if err := s.InventorySources.Save(ctx, src); err != nil {
 			return sum, fmt.Errorf("restore: save inventory source %s: %w", src.ID, err)
 		}
+		sum.InventorySources++
 	}
-	sum.InventorySources = len(p.InventorySources)
 
 	for _, t := range p.Templates {
 		if err := s.Templates.Save(ctx, t); err != nil {
 			return sum, fmt.Errorf("restore: save template %s: %w", t.ID, err)
 		}
+		sum.Templates++
 	}
-	sum.Templates = len(p.Templates)
 
 	for _, sc := range p.Schedules {
 		if err := s.Schedules.Save(ctx, sc); err != nil {
 			return sum, fmt.Errorf("restore: save schedule %s: %w", sc.ID, err)
 		}
+		sum.Schedules++
 	}
-	sum.Schedules = len(p.Schedules)
 
 	for _, t := range p.Triggers {
 		trig := t.Trigger
@@ -513,8 +515,8 @@ func apply(ctx context.Context, s Stores, p *payload) (Summary, error) {
 		if err := s.Triggers.Save(ctx, &trig); err != nil {
 			return sum, fmt.Errorf("restore: save trigger %s: %w", trig.ID, err)
 		}
+		sum.Triggers++
 	}
-	sum.Triggers = len(p.Triggers)
 
 	return sum, nil
 }
