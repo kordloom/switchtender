@@ -116,6 +116,8 @@ h1 {
 }
 .lede { font-size: 19px; color: var(--muted); margin: 24px 0 32px; max-width: 560px; }
 .lede strong { color: var(--text); font-weight: 600; }
+.hero-copy .eyebrow { font-size: 12.5px; letter-spacing: 0.035em; text-wrap: balance; }
+@media (min-width: 1150px) { .hero-copy .eyebrow { white-space: nowrap; } }
 .hero-cta { display: flex; gap: 14px; flex-wrap: wrap; }
 .hero-cta.center { justify-content: center; }
 .hero-note { margin-top: 22px; font-size: 13.5px; color: var(--muted); }
