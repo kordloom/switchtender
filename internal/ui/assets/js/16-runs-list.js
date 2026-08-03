@@ -1,0 +1,407 @@
+// runsPageSize reads the runs-per-page control: a positive count, or 0 for no limit. Defaults to 20.
+function runsPageSize() {
+	const el = document.getElementById("runs-pagesize");
+	if (!el) return 20;
+	const n = parseInt(el.value, 10);
+	return (Number.isNaN(n) || n < 0) ? 20 : n;
+}
+
+// runsQuery reads the runs search box, empty when there is none.
+function runsQuery() {
+	const el = document.getElementById("runs-search");
+	return el ? el.value.trim() : "";
+}
+
+// runsFilterParams reads the status, tool, and order dropdowns plus any date window from the URL
+// into query parameters, so the server filters the whole run history, not just the loaded page.
+function runsFilterParams() {
+	let params = "";
+	for (const id of ["runs-status", "runs-tool", "runs-order"]) {
+		const el = document.getElementById(id);
+		if (el && el.value) params += "&" + id.replace("runs-", "") + "=" + encodeURIComponent(el.value);
+	}
+	const url = new URLSearchParams(location.search);
+	for (const key of ["after", "before"]) {
+		const v = url.get(key);
+		if (v) params += "&" + key + "=" + encodeURIComponent(v);
+	}
+	return params;
+}
+
+// mountRunsWindowChip shows which day the runs list is scoped to, with one click to clear it.
+function mountRunsWindowChip() {
+	const url = new URLSearchParams(location.search);
+	const after = url.get("after");
+	if (!after) return;
+	const bar = document.querySelector(".runs-toolbar");
+	if (!bar || bar.querySelector(".window-chip")) return;
+	const chip = document.createElement("span");
+	chip.className = "window-chip";
+	const when = new Date(after);
+	chip.appendChild(document.createTextNode(
+		isNaN(when) ? "Filtered window" : when.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })));
+	const clear = document.createElement("a");
+	clear.href = "/ui/runs";
+	clear.textContent = "\u00d7";
+	clear.setAttribute("aria-label", "Clear the date filter");
+	clear.dataset.tip = "Show every run again";
+	chip.appendChild(clear);
+	bar.appendChild(chip);
+}
+
+// wireRunsFilters reloads the table when a filter or order dropdown changes.
+function wireRunsFilters() {
+	for (const id of ["runs-status", "runs-tool", "runs-order"]) {
+		const el = document.getElementById(id);
+		if (el) el.addEventListener("change", loadRuns);
+	}
+}
+
+// wireRunsSearch reloads the runs table from the server as the search box changes, debounced so a
+// burst of keystrokes issues one request. The server searches every run, not just the loaded page.
+function wireRunsSearch() {
+	const el = document.getElementById("runs-search");
+	if (!el) return;
+	let timer;
+	el.addEventListener("input", () => {
+		clearTimeout(timer);
+		timer = setTimeout(loadRuns, 250);
+	});
+}
+
+// runsLoadGen counts run-table loads so a slow response from an earlier search or page size cannot
+// overwrite the table after a newer load has already rendered.
+let runsLoadGen = 0;
+
+// runsPageURL builds the request for one page of run history: the page size and offset, the search
+// box, and every active filter. Every page comes from this one function, so a later page is drawn
+// from the same filtered result set its offset counts within. Building the Load more request
+// separately dropped the filters from it, which appended unrelated runs to a filtered table and
+// counted the offset against a different set of rows.
+function runsPageURL(offset) {
+	return "/runs?limit=" + runsPageSize() + "&offset=" + offset +
+		"&q=" + encodeURIComponent(runsQuery()) + runsFilterParams();
+}
+
+// loadRuns populates the run history table.
+async function loadRuns() {
+	const tbody = document.getElementById("runs");
+	const table = document.querySelector("table.runs");
+	const sizeEl = document.getElementById("runs-pagesize");
+	if (sizeEl) sizeEl.onchange = () => loadRuns();
+	const gen = ++runsLoadGen;
+	setStatus("");
+	showSkeletonRows(tbody, 6, 9);
+	table.hidden = false;
+	try {
+		const data = await getJSON(runsPageURL(0));
+		if (gen !== runsLoadGen) return;
+		const runs = data.runs || [];
+		tbody.innerHTML = "";
+		if (runs.length === 0) {
+			table.hidden = true;
+			showEmpty(runsQuery() ? "No runs match your search." : "No runs yet.");
+			return;
+		}
+		renderSummary(data.summary || {});
+		appendRunRows(tbody, runs);
+		wireRunsMore(tbody, runs.length, data.has_more);
+	} catch (e) {
+		// A failure from a superseded load says nothing about the table a newer load already drew,
+		// so it is dropped the same way a superseded success is. Clearing here wiped good rows and
+		// showed an error over them whenever an older request lost the race and then failed.
+		if (gen !== runsLoadGen) return;
+		tbody.innerHTML = "";
+		table.hidden = true;
+		setStatus("Failed to load runs: " + e.message);
+	}
+}
+
+// toolLabel returns a short label for what a run executed: its playbook file, or its command for a
+// non-Ansible tool, collapsed and truncated so a long command does not stretch the row.
+function toolLabel(r) {
+	if (r.playbook) return baseName(r.playbook) || r.playbook;
+	const cmd = (r.command || "").replace(/\s+/g, " ").trim();
+	return cmd.length > 48 ? cmd.slice(0, 47) + "…" : cmd;
+}
+
+// KIND_TIPS explains each run kind and tool chip on hover.
+const KIND_TIPS = {
+	pipeline: "A multi-step pipeline. Each step runs after the one before it and can pass outputs on",
+	split: "Split into shards across the inventory, balanced by each host's measured duration",
+	dry: "A dry run. Reports what would change without applying anything",
+	ansible: "Runs an Ansible playbook",
+	bash: "Runs a Bash script",
+	terraform: "Runs Terraform",
+	opentofu: "Runs OpenTofu",
+	python: "Runs a Python script",
+	powershell: "Runs a PowerShell script",
+	go: "Runs a Go program",
+};
+
+// SOURCE_LABELS names each provenance source in the interface.
+const SOURCE_LABELS = {
+	api: "API", manual: "Manual", template: "Template", schedule: "Schedule",
+	rerun: "Rerun", reconcile: "Drift fix", propose: "Proposed",
+};
+
+// originCellEl renders what fired a run: a chip naming the source, linked to the object behind
+// it when there is one, plus the actor who asked for it.
+function originCellEl(r) {
+	const cell = td("");
+	const source = r.source || (r.proposed_from ? "reconcile" : "");
+	if (!source) {
+		cell.textContent = "\u2014";
+		cell.dataset.tip = "Recorded before run provenance was tracked";
+		return cell;
+	}
+	const label = SOURCE_LABELS[source] || source;
+	let chip;
+	const href = originHref(r);
+	if (href) {
+		chip = document.createElement("a");
+		chip.href = href;
+	} else {
+		chip = document.createElement("span");
+	}
+	chip.className = "origin-chip " + source;
+	chip.textContent = label;
+	chip.dataset.tip = originTip(r);
+	cell.appendChild(chip);
+	if (r.actor) {
+		const who = document.createElement("span");
+		who.className = "origin-actor";
+		who.textContent = r.actor;
+		cell.appendChild(who);
+	}
+	return cell;
+}
+
+// originHref returns where a run's origin chip navigates, empty when the source has no page.
+function originHref(r) {
+	switch (r.source) {
+	case "template":
+		return r.source_id ? "/ui/templates" : "";
+	case "schedule":
+		return r.source_id ? "/ui/schedules" : "";
+	case "rerun":
+		return r.rerun_of ? "/ui/runs/" + r.rerun_of : "";
+	case "reconcile":
+		return r.proposed_from ? "/ui/runs/" + r.proposed_from : "";
+	default:
+		return "";
+	}
+}
+
+// originTip explains a run's origin in a sentence.
+function originTip(r) {
+	switch (r.source) {
+	case "template": return "Launched from a saved template. Open templates";
+	case "schedule": return "Fired by a schedule on its cron cadence. Open schedules";
+	case "rerun": return "Replayed the spec of an earlier run. Open that run";
+	case "reconcile": return "Proposed to fix drift found by a check. Open the check";
+	case "propose": return "Proposed from a description, held for approval";
+	case "api": return "Submitted directly through the API";
+	default: return "How this run was started";
+	}
+}
+
+// labelChipsInto appends a run's labels as key-value chips that filter the list.
+function labelChipsInto(cell, labels) {
+	for (const key of Object.keys(labels || {}).sort()) {
+		cell.appendChild(labelChip(key, labels[key]));
+	}
+}
+
+// labelChip builds one clickable key=value chip.
+function labelChip(key, value) {
+	const chip = document.createElement("a");
+	chip.className = "label-chip";
+	chip.href = "/ui/runs?q=" + encodeURIComponent("label:" + key + "=" + value);
+	chip.textContent = key + "=" + value;
+	chip.dataset.tip = "Click to show every run labeled " + key + "=" + value;
+	return chip;
+}
+
+// labelCellEl renders a run's labels in their own column, capped at two chips so every row keeps
+// the same height. The rest collapse into a count that expands the row on click.
+function labelCellEl(labels) {
+	const cell = td("", "col-labels");
+	const keys = Object.keys(labels || {}).sort();
+	if (!keys.length) {
+		cell.textContent = "\u2014";
+		return cell;
+	}
+	const wrap = document.createElement("span");
+	wrap.className = "label-wrap";
+	const shown = keys.slice(0, 2);
+	for (const key of shown) wrap.appendChild(labelChip(key, labels[key]));
+	const rest = keys.slice(2);
+	if (rest.length) {
+		const more = document.createElement("button");
+		more.type = "button";
+		more.className = "label-chip label-more";
+		more.textContent = "+" + rest.length;
+		more.dataset.tip = "Click to show " + rest.map((k) => k + "=" + labels[k]).join(", ");
+		more.addEventListener("click", (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			more.remove();
+			for (const key of rest) wrap.appendChild(labelChip(key, labels[key]));
+		});
+		wrap.appendChild(more);
+	}
+	cell.appendChild(wrap);
+	return cell;
+}
+
+// typeCellEl fills a table cell with the run's tool chip and any kind tags, so type lives in one
+// labeled, aligned column instead of floating beside names.
+function typeCellEl(r) {
+	const cell = td("");
+	const tool = (r.tool || "ansible").toLowerCase();
+	const chip = document.createElement("span");
+	chip.className = "tool-badge " + tool;
+	chip.dataset.tool = tool;
+	chip.textContent = tool;
+	if (KIND_TIPS[tool]) chip.dataset.tip = KIND_TIPS[tool];
+	cell.appendChild(chip);
+	for (const kind of [r.kind === "split" ? "split" : "", r.kind === "pipeline" ? "pipeline" : "", r.dry_run ? "dry" : ""]) {
+		if (!kind) continue;
+		const tag = document.createElement("span");
+		tag.className = "run-kind " + kind;
+		tag.textContent = kind;
+		tag.dataset.tip = KIND_TIPS[kind];
+		cell.appendChild(document.createTextNode(" "));
+		cell.appendChild(tag);
+	}
+	return cell;
+}
+
+// toolBadgeEl returns a small tool badge for a non-Ansible run, or null for Ansible so the common
+// case stays uncluttered.
+function toolBadgeEl(r) {
+	if (!r.tool || r.tool === "ansible") return null;
+	const badge = document.createElement("span");
+	badge.className = "tool-badge " + r.tool;
+	badge.dataset.tool = r.tool;
+	badge.textContent = r.tool;
+	return badge;
+}
+
+// appendRunRows appends one table row per run, so a page can be added without rebuilding the
+// rows already shown.
+function appendRunRows(tbody, runs) {
+	// Continue numbering from the rows already shown, so a loaded next page extends the sequence.
+	let num = tbody.querySelectorAll("tr:not(.skeleton-row)").length;
+	for (const r of runs) {
+		const tr = document.createElement("tr");
+		tr.className = "row-nav";
+		tr.tabIndex = 0;
+		tr.setAttribute("role", "link");
+		const openRun = () => { location.href = "/ui/runs/" + r.id; };
+		tr.addEventListener("click", openRun);
+		tr.addEventListener("keydown", (e) => {
+			if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openRun(); }
+		});
+		num++;
+		tr.appendChild(td(String(num), "col-num"));
+		tr.appendChild(tdBadge(r.status));
+
+		const runCell = td(shortId(r.id), "mono");
+		runCell.title = r.id;
+		runCell.dataset.tip = "Open run details";
+		tr.appendChild(runCell);
+
+		tr.appendChild(typeCellEl(r));
+		tr.appendChild(originCellEl(r));
+
+		tr.appendChild(playbookCellEl(r));
+		tr.appendChild(labelCellEl(r.labels));
+
+		tr.appendChild(tdTime(r.started_at || r.created_at));
+		tr.appendChild(td(fmtDuration(r.started_at, r.ended_at)));
+		tbody.appendChild(tr);
+	}
+}
+
+// wireRunsMore keeps a Load more control below the runs table. Each click fetches the next page
+// from the current offset and appends it, so the table grows a page at a time rather than
+// rendering every run at once.
+function wireRunsMore(tbody, offset, hasMore) {
+	let btn = document.getElementById("runs-more");
+	if (!btn) {
+		btn = document.createElement("button");
+		btn.id = "runs-more";
+		btn.className = "button load-more";
+		btn.textContent = "Load more";
+		const table = document.querySelector("table.runs");
+		table.parentNode.insertBefore(btn, table.nextSibling);
+	}
+	btn.hidden = !hasMore;
+	btn.onclick = async () => {
+		btn.disabled = true;
+		try {
+			const data = await getJSON(runsPageURL(offset));
+			const runs = data.runs || [];
+			appendRunRows(tbody, runs);
+			wireRunsMore(tbody, offset + runs.length, data.has_more);
+		} catch (e) {
+			setStatus("Failed to load more runs: " + e.message);
+		} finally {
+			btn.disabled = false;
+		}
+	};
+}
+
+// renderSummary draws the at-a-glance stat cards above the run history.
+function renderSummary(summary) {
+	const el = document.getElementById("summary");
+	el.innerHTML = "";
+	el.appendChild(statCard(summary.total || 0, "Total runs", ""));
+	el.appendChild(statCard(summary.succeeded || 0, "Succeeded", "ok"));
+	el.appendChild(statCard(summary.failed || 0, "Failed", "failed"));
+	el.appendChild(statCard(summary.active || 0, "Active", "running"));
+	el.hidden = false;
+}
+
+// statCard builds one summary stat card.
+function statCard(value, label, cls) {
+	const card = document.createElement("div");
+	card.className = "stat-card";
+	const v = document.createElement("div");
+	v.className = "stat-value" + (cls ? " " + cls : "");
+	v.textContent = value;
+	countUp(v, value);
+	const l = document.createElement("div");
+	l.className = "stat-label";
+	l.textContent = label;
+	card.appendChild(v);
+	card.appendChild(l);
+	return card;
+}
+
+// countUp animates a metric from zero to its value, preserving any suffix such as a percent
+// sign. A value that is not a plain number, and a reader who asked for reduced motion, get the
+// final text immediately.
+function countUp(el, value) {
+	const text = String(value);
+	const match = text.match(/^(\d[\d,]*)(\D*)$/);
+	if (!match || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+	const target = parseInt(match[1].replace(/,/g, ""), 10);
+	const suffix = match[2] || "";
+	if (!Number.isFinite(target) || target === 0) return;
+	const duration = 620;
+	const start = performance.now();
+	el.classList.add("counting");
+	const step = (now) => {
+		const t = Math.min(1, (now - start) / duration);
+		// Ease out cubic, so the count decelerates into its final figure.
+		const eased = 1 - Math.pow(1 - t, 3);
+		el.textContent = Math.round(target * eased).toLocaleString() + suffix;
+		if (t < 1) requestAnimationFrame(step);
+		else el.textContent = text;
+	};
+	requestAnimationFrame(step);
+}
+
