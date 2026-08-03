@@ -3,16 +3,16 @@
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
-	<title>Concepts · SwitchTender docs</title>
+	<title>Concepts | SwitchTender docs</title>
 	<meta name="description" content="A run is one execution of a playbook against an inventory. SwitchTender shells out to ansible-playbook and captures both a human log and a structured event stream through an embedded callback plugin">
 	<link rel="canonical" href="https://switchtender.com/docs/concepts">
-	<meta property="og:title" content="Concepts · SwitchTender docs">
+	<meta property="og:title" content="Concepts | SwitchTender docs">
 	<meta property="og:description" content="A run is one execution of a playbook against an inventory. SwitchTender shells out to ansible-playbook and captures both a human log and a structured event stream through an embedded callback plugin">
 	<meta property="og:type" content="article">
 	<meta property="og:url" content="https://switchtender.com/docs/concepts">
 	<meta property="og:image" content="https://switchtender.com/assets/screenshot-fleet.png?v=7">
 	<meta name="twitter:card" content="summary_large_image">
-	<meta name="twitter:title" content="Concepts · SwitchTender docs">
+	<meta name="twitter:title" content="Concepts | SwitchTender docs">
 	<meta name="twitter:description" content="A run is one execution of a playbook against an inventory. SwitchTender shells out to ansible-playbook and captures both a human log and a structured event stream through an embedded callback plugin">
 	<meta name="twitter:image" content="https://switchtender.com/assets/screenshot-fleet.png?v=7">
 	<link rel="icon" href="/favicon.ico" sizes="any">
@@ -36,7 +36,7 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migrate off AWX or Semaphore</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts" class="active">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/sdk">Extend SwitchTender in Go</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migrate off AWX or Semaphore</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts" class="active">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/sdk">Extend SwitchTender in Go</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
@@ -132,6 +132,10 @@ server that omitted the entry cannot produce a chain containing the receipt.</p>
 <p>What none of this defends against is an operator running modified code on the machine itself. That
 is the boundary of every audit system, it costs an attacker the whole controller to reach, and it
 does not hand them the past: anything already anchored stays fixed and still proves what it proved.</p>
+<p>None of this changes when the operator is an AI agent. A change an agent makes through the API
+chains identically to one a person makes: recorded before it executes, with the agent's token label
+as the actor, covered by the same receipts and anchors. <a href="/docs/agents">Running an agent</a> covers giving
+an agent that token and nothing else.</p>
 <h2 id="policy-as-code">Policy as code</h2>
 <p>Approval policies decide which runs a person has to sign off, so who may change them is the whole
 question. Held as rows they are changed by anyone the API lets through, and the change leaves a row
@@ -157,9 +161,10 @@ many resources.</p>
 <h2 id="approvals">Approvals</h2>
 <p>A run can be marked to require approval. It is held in a pending-approval state that the claim loop
 never picks up, until an admin approves it, which releases it to run, or rejects it, which ends it.
-An operator can request the run, but only an admin can release it, so duties are separated. Both the
-request and the decision are recorded in the audit trail, making who asked for a change and who signed
-off provable.</p>
+An operator can request the run, but only an admin can release it, so duties are separated. A held
+run submitted by an AI agent is released the same way, only by a human admin, so an operator-bound
+agent never approves its own work. Both the request and the decision are recorded in the audit
+trail, making who asked for a change and who signed off provable.</p>
 <p>Approval can also be required by policy rather than by choice. A policy matches runs by tool, command
 text, or target inventory, and any matching run is held automatically at submission, so the gate
 cannot be skipped by omitting the flag. Policies are enforced in the dispatcher, so a scheduled or

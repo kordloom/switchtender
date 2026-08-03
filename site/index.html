@@ -3,9 +3,9 @@
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
-	<title>SwitchTender · run everything, watch every host, prove every change</title>
+	<title>SwitchTender: run everything, watch every host, prove every change</title>
 	<meta name="description" content="Run everything, watch every host, prove every change. Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go in one Go binary with a live host-by-task matrix, tamper-evident audit, and enforced approvals. Self-hosted, one binary, nothing else to install. Migrate from AWX, Ansible Automation Platform, Semaphore, or Ascender in one command.">
-	<meta property="og:title" content="SwitchTender · run everything, watch every host, prove every change">
+	<meta property="og:title" content="SwitchTender: run everything, watch every host, prove every change">
 	<meta property="og:description" content="Run everything. Watch every host. Prove every change. Your whole automation stack in one Go binary, with a live host-by-task matrix and a provable audit trail.">
 	<meta property="og:type" content="website">
 	<meta property="og:url" content="https://switchtender.com/">
@@ -67,7 +67,7 @@
 	<main id="top">
 		<section class="hero wrap">
 			<div class="hero-copy reveal">
-				<span class="eyebrow">Ansible · Terraform · OpenTofu · Bash · PowerShell · Python · Go</span>
+				<span class="eyebrow">Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, Go</span>
 				<h1>Run everything.<br>Watch every host.<br><span class="grad">Prove every change.</span></h1>
 				<p class="lede">
 					Your whole automation stack in one Go binary. Every run painted live, host by task.
@@ -78,12 +78,12 @@
 					<a class="btn big" href="https://demo.switchtender.com">Open the live demo</a>
 					<a class="ghost big" href="/get-started">Install</a>
 				</div>
-				<p class="hero-note">Source-available · BSL 1.1 · Go SDK with drop-in plugins · one file to back up</p>
+				<p class="hero-note">Source-available. BSL 1.1. Go SDK with drop-in plugins. One file to back up.</p>
 			</div>
 			<div class="hero-shot reveal">
 				<div class="glow" aria-hidden="true"></div>
 				<figure class="window">
-					<div class="window-bar"><span></span><span></span><span></span><em>switchtender · fleet health</em></div>
+					<div class="window-bar"><span></span><span></span><span></span><em>switchtender: fleet health</em></div>
 					<img src="/assets/screenshot-fleet.png?v=8" alt="Fleet health ranking hosts by recent failures, with flaky detection and per-host outcome sparklines" loading="lazy">
 				</figure>
 			</div>
@@ -206,7 +206,7 @@
 				<p>A run painted live as a host-by-task matrix, not a wall of scrollback. The colors speak Ansible: <span class="lg-ok">green</span> means ok, <span class="lg-changed">amber</span> means the task changed the host, <span class="lg-failed">red</span> means failed, gray means skipped.</p>
 			</div>
 			<figure class="window demo-frame reveal">
-				<div class="window-bar"><span></span><span></span><span></span><em>switchtender · run</em></div>
+				<div class="window-bar"><span></span><span></span><span></span><em>switchtender: run</em></div>
 				<video src="/assets/demo-run.mp4?v=4" poster="/assets/demo-run-poster.png?v=3" autoplay muted loop playsinline preload="auto" aria-label="A SwitchTender run streaming live as a host-by-task matrix"></video>
 			</figure>
 		</section>
@@ -217,7 +217,7 @@
 				<p>Wire Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go steps into a graph, plus any tool you plug in. Fan out, fan in, and run the whole thing as one pipeline with per-step retries. It runs in the same binary as everything else.</p>
 			</div>
 			<figure class="window demo-frame reveal">
-				<div class="window-bar"><span></span><span></span><span></span><em>switchtender · workflow editor</em></div>
+				<div class="window-bar"><span></span><span></span><span></span><em>switchtender: workflow editor</em></div>
 				<video src="/assets/editor-drag.mp4?v=3" poster="/assets/editor-drag-poster.png?v=3" autoplay muted loop playsinline preload="auto" aria-label="Dragging a step into a six-step deploy graph, wiring its dependency, and running the pipeline until every step goes green"></video>
 			</figure>
 		</section>
@@ -235,9 +235,9 @@
 			</div>
 			<div class="gov-visual reveal" aria-hidden="true">
 				<div class="chain">
-					<div class="link"><span class="dot ok"></span> run · approved <em>#7f3a…</em></div>
-					<div class="link"><span class="dot ok"></span> credential · updated <em>#a91c…</em></div>
-					<div class="link"><span class="dot ok"></span> inventory · created <em>#5e02…</em></div>
+					<div class="link"><span class="dot ok"></span> run: approved <em>#7f3a…</em></div>
+					<div class="link"><span class="dot ok"></span> credential: updated <em>#a91c…</em></div>
+					<div class="link"><span class="dot ok"></span> inventory: created <em>#5e02…</em></div>
 					<div class="verify"><span class="dot ok"></span> Chain verified: 3 entries</div>
 				</div>
 			</div>
@@ -245,17 +245,17 @@
 
 		<section class="section wrap" id="ai">
 			<div class="section-head reveal">
-				<span class="eyebrow">Optional layer · off by default</span>
+				<span class="eyebrow">Optional layer, off by default</span>
 				<h2>None of this needs AI.<br>Turn it on if you want it.</h2>
 				<p>Everything above runs with no model anywhere near it: the live matrix, the balanced splits, the governance, the audit chain. Advisory AI is an add-on, and nothing else depends on it. Switch it on and it proposes a diagnosis for a failed run, answers a plain-English question about your fleet, or drafts a run from a single sentence. That's all it does. It can't execute anything: every draft waits at the same approval gate you do, and it never sits in the execution path. Bring your own model: Ollama on your hardware, Claude with your Anthropic key, or any OpenAI-compatible endpoint. Secrets are masked before a model sees a byte.</p>
 			</div>
 			<div class="duo">
 				<figure class="window reveal">
-					<div class="window-bar"><span></span><span></span><span></span><em>switchtender · AI triage</em></div>
+					<div class="window-bar"><span></span><span></span><span></span><em>switchtender: AI triage</em></div>
 					<img src="/assets/screenshot-triage.png?v=8" alt="A failed run with the AI triage panel isolating db01's apply step as the root cause and suggesting next steps" loading="lazy">
 				</figure>
 				<figure class="window reveal">
-					<div class="window-bar"><span></span><span></span><span></span><em>switchtender · ask your fleet</em></div>
+					<div class="window-bar"><span></span><span></span><span></span><em>switchtender: ask your fleet</em></div>
 					<img src="/assets/screenshot-ask.png?v=8" alt="The overview page answering a plain-language question about which hosts are failing and where to start" loading="lazy">
 				</figure>
 			</div>
@@ -263,7 +263,7 @@
 
 		<section class="section wrap" id="sdk">
 			<div class="section-head reveal">
-				<span class="eyebrow">Extensibility · SDK + drop-in plugins</span>
+				<span class="eyebrow">Extensibility: SDK + drop-in plugins</span>
 				<h2>Seven tools in the box.<br>Add more in Go.</h2>
 				<p>Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go all run out of the box, no plugins required. When you need an eighth tool, a custom secret backend, a new AI provider, or your own notification channel, you write it in Go against a stable SDK. Compile it into the binary, or build it once and drop it into <code>--plugins-dir</code>, where a stock release loads it at startup over gRPC with mutual TLS and treats it as its own. A plugged-in tool submits, validates, and audits like a built-in. A plugged-in channel gets every terminal run with secret-carrying vars already redacted. The <a href="/docs/sdk">SDK guide</a> walks both paths, and the official <a href="https://github.com/kordloom/switchtender-plugins">switchtender-plugins</a> repo ships a real one: Discord, ntfy, and Teams from a single drop-in binary.</p>
 			</div>
@@ -294,7 +294,7 @@ func main() {
 					<tbody>
 						<tr><td>Deploy without Kubernetes</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td><td><span class="muted">VM installer</span></td><td><i class="y"></i></td><td><i class="y"></i></td></tr>
 						<tr><td>Live host-by-task matrix</td><td class="us"><i class="y"></i></td><td><span class="muted">per-host summary</span></td><td><span class="muted">per-host summary</span></td><td><i class="n"></i></td><td><span class="muted">per-node, per-step</span></td></tr>
-						<tr><td>Ansible · Terraform · OpenTofu · Bash · PowerShell · Python · Go</td><td class="us"><i class="y"></i></td><td><span class="muted">Ansible only</span></td><td><span class="muted">Ansible only</span></td><td><span class="muted">no Python or Go</span></td><td><span class="muted">scripts, no native IaC</span></td></tr>
+						<tr><td>Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, Go</td><td class="us"><i class="y"></i></td><td><span class="muted">Ansible only</span></td><td><span class="muted">Ansible only</span></td><td><span class="muted">no Python or Go</span></td><td><span class="muted">scripts, no native IaC</span></td></tr>
 						<tr><td>Duration-balanced job splitting</td><td class="us"><i class="y"></i></td><td><span class="muted">round-robin</span></td><td><span class="muted">round-robin</span></td><td><i class="n"></i></td><td><i class="n"></i></td></tr>
 						<tr><td>Fleet memory: flaky hosts, trends</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td><td><i class="n"></i></td><td><i class="n"></i></td><td><i class="n"></i></td></tr>
 						<tr><td>Tamper-evident, signed audit</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td><td><span class="muted">activity log</span></td><td><i class="n"></i></td><td><span class="muted">activity log</span></td></tr>
@@ -437,10 +437,11 @@ open http://localhost:8080/ui/</code></pre>
 				<a href="/aap-alternative">vs AAP</a>
 				<a href="/semaphore-alternative">vs Semaphore</a>
 				<a href="/ascender-alternative">vs Ascender</a>
+				<a href="/rundeck-alternative">vs Rundeck</a>
 				<a href="/privacy">Privacy</a>
 				<a href="https://github.com/kordloom/switchtender/blob/main/LICENSE">License</a>
 			</nav>
-			<span class="foot-note">Source-available · BSL 1.1 · self-host free</span>
+			<span class="foot-note">Source-available. BSL 1.1. Self-host free.</span>
 		</div>
 		<div style="text-align:center;margin:20px auto 0;font-size:11px;letter-spacing:1.6px;text-transform:uppercase;opacity:.5">A <a href="https://kordloom.com" style="color:inherit;text-decoration:none">KordLoom</a> product</div>
 	</footer>

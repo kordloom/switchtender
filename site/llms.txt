@@ -31,6 +31,7 @@ seeded read-only tour.
 - [Semaphore alternative](https://switchtender.com/semaphore-alternative)
 - [Ansible Automation Platform alternative](https://switchtender.com/aap-alternative)
 - [Ascender alternative](https://switchtender.com/ascender-alternative)
+- [Rundeck alternative](https://switchtender.com/rundeck-alternative)
 - [Switching from AWX](https://switchtender.com/docs/switching-from-awx): the one-command import
 - [Feature comparison](https://switchtender.com/docs/comparison)
 
@@ -49,5 +50,5 @@ seeded read-only tour.
 ## Company
 
 - [GitHub](https://github.com/kordloom/switchtender)
-- SwitchTender is a [KordLoom](https://kordloom.com) product, alongside
-  [Dormouse](https://dormousehq.com), tamper-evident vendor monitoring for compliance teams.
+- SwitchTender is a [KordLoom](https://kordloom.com) product. Its audit exports use
+  [LoomSeal](https://loomseal.com), an open format for evidence someone else can check.

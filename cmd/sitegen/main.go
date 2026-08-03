@@ -152,10 +152,11 @@ func writeSitemap(slugs []string) error {
 	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>` + "\n")
 	b.WriteString(`<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">` + "\n")
 	urls := []string{
-		"https://switchtender.com/", "https://switchtender.com/get-started",
+		"https://switchtender.com/", "https://switchtender.com/pricing",
+		"https://switchtender.com/get-started", "https://switchtender.com/agents",
 		"https://switchtender.com/awx-alternative", "https://switchtender.com/ascender-alternative",
 		"https://switchtender.com/semaphore-alternative", "https://switchtender.com/aap-alternative",
-		"https://switchtender.com/privacy",
+		"https://switchtender.com/rundeck-alternative", "https://switchtender.com/privacy",
 	}
 	for _, slug := range slugs {
 		urls = append(urls, canonicalFor(slug))
@@ -356,16 +357,16 @@ const layout = `<!DOCTYPE html>
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
-	<title>{{.Title}} · SwitchTender docs</title>
+	<title>{{.Title}} | SwitchTender docs</title>
 	<meta name="description" content="{{.Description}}">
 	<link rel="canonical" href="{{.Canonical}}">
-	<meta property="og:title" content="{{.Title}} · SwitchTender docs">
+	<meta property="og:title" content="{{.Title}} | SwitchTender docs">
 	<meta property="og:description" content="{{.Description}}">
 	<meta property="og:type" content="article">
 	<meta property="og:url" content="{{.Canonical}}">
 	<meta property="og:image" content="https://switchtender.com/assets/screenshot-fleet.png?v=7">
 	<meta name="twitter:card" content="summary_large_image">
-	<meta name="twitter:title" content="{{.Title}} · SwitchTender docs">
+	<meta name="twitter:title" content="{{.Title}} | SwitchTender docs">
 	<meta name="twitter:description" content="{{.Description}}">
 	<meta name="twitter:image" content="https://switchtender.com/assets/screenshot-fleet.png?v=7">
 {{- if .HeadExtra}}
@@ -377,7 +378,7 @@ const layout = `<!DOCTYPE html>
 	<link rel="preconnect" href="https://fonts.googleapis.com">
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-	<link rel="stylesheet" href="/docs.css?v=1">
+	<link rel="stylesheet" href="/docs.css?v=2">
 </head>
 <body>
 	<header class="dnav">

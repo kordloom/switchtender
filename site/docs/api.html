@@ -3,16 +3,16 @@
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
-	<title>HTTP API · SwitchTender docs</title>
+	<title>HTTP API | SwitchTender docs</title>
 	<meta name="description" content="Every endpoint the server exposes. The API is served under the /v1 base path.">
 	<link rel="canonical" href="https://switchtender.com/docs/api">
-	<meta property="og:title" content="HTTP API · SwitchTender docs">
+	<meta property="og:title" content="HTTP API | SwitchTender docs">
 	<meta property="og:description" content="Every endpoint the server exposes. The API is served under the /v1 base path.">
 	<meta property="og:type" content="article">
 	<meta property="og:url" content="https://switchtender.com/docs/api">
 	<meta property="og:image" content="https://switchtender.com/assets/screenshot-fleet.png?v=7">
 	<meta name="twitter:card" content="summary_large_image">
-	<meta name="twitter:title" content="HTTP API · SwitchTender docs">
+	<meta name="twitter:title" content="HTTP API | SwitchTender docs">
 	<meta name="twitter:description" content="Every endpoint the server exposes. The API is served under the /v1 base path.">
 	<meta name="twitter:image" content="https://switchtender.com/assets/screenshot-fleet.png?v=7">
 	<link rel="icon" href="/favicon.ico" sizes="any">
@@ -36,7 +36,7 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migrate off AWX or Semaphore</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/api" class="active">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/sdk">Extend SwitchTender in Go</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migrate off AWX or Semaphore</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/api" class="active">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/sdk">Extend SwitchTender in Go</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
@@ -266,12 +266,32 @@
 <tr>
 <td>POST</td>
 <td><code>/v1/credentials</code></td>
-<td>Store a credential, encrypted at rest. Thirteen kinds: ssh_key, ssh_password, vault_password, become_password, become, network, env, token, registry, aws, azure, gcp, vmware.</td>
+<td>Store a credential, encrypted at rest. Thirteen built-in kinds, or a custom type via <code>type_id</code> and <code>fields</code>.</td>
 </tr>
 <tr>
 <td>GET</td>
 <td><code>/v1/credentials</code></td>
 <td>List credentials, secrets never included.</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/v1/credential-types</code></td>
+<td>Define a custom credential type: fields and how they inject. Admin only.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/v1/credential-types</code></td>
+<td>List custom credential types. Admin only.</td>
+</tr>
+<tr>
+<td>PUT</td>
+<td><code>/v1/credential-types/{id}</code></td>
+<td>Replace a custom credential type. Admin only.</td>
+</tr>
+<tr>
+<td>DELETE</td>
+<td><code>/v1/credential-types/{id}</code></td>
+<td>Delete a custom credential type. Admin only.</td>
 </tr>
 <tr>
 <td>PUT</td>
@@ -570,14 +590,46 @@ that kind is addressed by, plus an optional <code>on_failure</code> that limits 
 </tr>
 </thead>
 <tbody>
-<tr><td><code>webhook</code></td><td><code>url</code></td><td>The finished run as JSON, extra vars redacted.</td></tr>
-<tr><td><code>slack</code>, <code>mattermost</code>, <code>rocketchat</code></td><td><code>url</code></td><td>A message to the incoming webhook.</td></tr>
-<tr><td><code>discord</code>, <code>teams</code></td><td><code>url</code></td><td>A message or Adaptive Card to the webhook.</td></tr>
-<tr><td><code>ntfy</code></td><td><code>url</code></td><td>A notification to the topic, raised priority on failure.</td></tr>
-<tr><td><code>pagerduty</code></td><td><code>key</code></td><td>An incident trigger on the routing key, failed and interrupted runs only.</td></tr>
-<tr><td><code>grafana</code></td><td><code>url</code>, <code>key</code></td><td>An annotation to that instance's annotations API with that token.</td></tr>
-<tr><td><code>twilio</code></td><td><code>to</code></td><td>An SMS to that recipient through the server-held Twilio account.</td></tr>
-<tr><td><code>email</code></td><td><code>to</code></td><td>Mail to that comma-separated recipient list through the server SMTP transport.</td></tr>
+<tr>
+<td><code>webhook</code></td>
+<td><code>url</code></td>
+<td>The finished run as JSON, extra vars redacted.</td>
+</tr>
+<tr>
+<td><code>slack</code>, <code>mattermost</code>, <code>rocketchat</code></td>
+<td><code>url</code></td>
+<td>A message to the incoming webhook.</td>
+</tr>
+<tr>
+<td><code>discord</code>, <code>teams</code></td>
+<td><code>url</code></td>
+<td>A message or Adaptive Card to the webhook.</td>
+</tr>
+<tr>
+<td><code>ntfy</code></td>
+<td><code>url</code></td>
+<td>A notification to the topic, raised priority on failure.</td>
+</tr>
+<tr>
+<td><code>pagerduty</code></td>
+<td><code>key</code></td>
+<td>An incident trigger on the routing key, failed and interrupted runs only.</td>
+</tr>
+<tr>
+<td><code>grafana</code></td>
+<td><code>url</code>, <code>key</code></td>
+<td>An annotation to that instance's annotations API with that token.</td>
+</tr>
+<tr>
+<td><code>twilio</code></td>
+<td><code>to</code></td>
+<td>An SMS to that recipient through the server-held Twilio account.</td>
+</tr>
+<tr>
+<td><code>email</code></td>
+<td><code>to</code></td>
+<td>Mail to that comma-separated recipient list through the server SMTP transport.</td>
+</tr>
 </tbody>
 </table>
 <pre><code class="language-bash">curl -X POST https://switchtender.example.com/v1/templates \
@@ -610,6 +662,11 @@ presents the worker bearer token.</p>
 </tr>
 </thead>
 <tbody>
+<tr>
+<td>GET</td>
+<td><code>/relay/v1/policies</code></td>
+<td>Read the approval policies in force.</td>
+</tr>
 <tr>
 <td>POST</td>
 <td><code>/relay/v1/claim</code></td>

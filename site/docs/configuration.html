@@ -3,16 +3,16 @@
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
-	<title>Configuration · SwitchTender docs</title>
+	<title>Configuration | SwitchTender docs</title>
 	<meta name="description" content="SwitchTender is one binary with subcommands. This page lists every command, flag, and environment variable.">
 	<link rel="canonical" href="https://switchtender.com/docs/configuration">
-	<meta property="og:title" content="Configuration · SwitchTender docs">
+	<meta property="og:title" content="Configuration | SwitchTender docs">
 	<meta property="og:description" content="SwitchTender is one binary with subcommands. This page lists every command, flag, and environment variable.">
 	<meta property="og:type" content="article">
 	<meta property="og:url" content="https://switchtender.com/docs/configuration">
 	<meta property="og:image" content="https://switchtender.com/assets/screenshot-fleet.png?v=7">
 	<meta name="twitter:card" content="summary_large_image">
-	<meta name="twitter:title" content="Configuration · SwitchTender docs">
+	<meta name="twitter:title" content="Configuration | SwitchTender docs">
 	<meta name="twitter:description" content="SwitchTender is one binary with subcommands. This page lists every command, flag, and environment variable.">
 	<meta name="twitter:image" content="https://switchtender.com/assets/screenshot-fleet.png?v=7">
 	<link rel="icon" href="/favicon.ico" sizes="any">
@@ -36,7 +36,7 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migrate off AWX or Semaphore</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration" class="active">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/sdk">Extend SwitchTender in Go</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migrate off AWX or Semaphore</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration" class="active">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/sdk">Extend SwitchTender in Go</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
@@ -510,7 +510,12 @@ that variable is unset.</p>
 <tr>
 <td><code>--worker-token</code></td>
 <td>none</td>
-<td>Bearer token that authenticates mesh relay workers and enables the relay endpoints. Also <code>SWITCHTENDER_WORKER_TOKEN</code>. Keep it secret.</td>
+<td>Bearer token that authenticates mesh relay workers and enables the relay endpoints. Also <code>SWITCHTENDER_WORKER_TOKEN</code>. Keep it secret. On its own, every worker holding it may lease from every queue.</td>
+</tr>
+<tr>
+<td><code>--worker-pools</code></td>
+<td>none</td>
+<td>YAML file binding each worker token to the queues it may lease from, so a queue is a boundary rather than a routing hint.</td>
 </tr>
 <tr>
 <td><code>--retain-runs</code></td>
@@ -674,8 +679,11 @@ node over the mesh relay, with no database access of its own.</p>
 <h2 id="token">token</h2>
 <p>Manages API tokens. Creating the first token turns on authentication.</p>
 <ul>
-<li><code>token new --name &lt;label&gt; [--ttl &lt;duration&gt;]</code> mints a token, printed once. A zero TTL never
-expires.</li>
+<li><code>token new --name &lt;label&gt; [--user &lt;username&gt;] [--ttl &lt;duration&gt;]</code> mints a token, printed once. A
+zero TTL never expires.</li>
+<li><code>--user</code> binds the token to an account, and the token carries that account's role. A token minted
+without <code>--user</code> is unscoped and acts as admin, so bind every token you hand to a person, a
+service, or an AI agent. See <a href="/docs/agents">running an agent</a>.</li>
 <li><code>token list</code> lists tokens without their secrets.</li>
 <li><code>token revoke &lt;id&gt;</code> deletes a token.</li>
 </ul>
@@ -764,6 +772,40 @@ answering the whole time the replacement is being built.</p>
 </tr>
 </tbody>
 </table>
+<h2 id="confining-relay-workers-to-their-queues">Confining relay workers to their queues</h2>
+<p>A relay worker runs in a segment the control node cannot reach, which means the least trusted machine
+in the estate holds a worker token. With a single <code>--worker-token</code>, that machine may name any queue
+it likes and lease from it, so a compromised host in a DMZ can take a production run and execute it
+with production credentials.</p>
+<p><code>--worker-pools</code> binds each token to the queues it may serve. The file stores the SHA-256 of each
+token, never the token itself, the same way a webhook secret is stored:</p>
+<pre><code>workers:
+  - name: dmz
+    token_sha256: 9f2c...           # sha256 of that pool's bearer token
+    queues: [dmz]
+  - name: production
+    token_sha256: 41ab...
+    queues: [prod, canary]
+</code></pre>
+<p>A pool that declares no queues may lease from all of them, which is the single-token shape stated
+out loud. A pool that declares queues is refused anything else, including the default queue when it
+names none, so confinement cannot be escaped by omission.</p>
+<p>Generate a digest with <code>printf %s &quot;$TOKEN&quot; | shasum -a 256</code>. A malformed file stops the server rather
+than falling back to no confinement, because an install that believes it is segmented and is not is
+worse than one that refuses to start.</p>
+<h2 id="what-a-relay-worker-writes-into-the-audit-trail">What a relay worker writes into the audit trail</h2>
+<p>A relay worker runs where the control node cannot see it, so two moments are recorded: the run
+leaving for that machine, and the outcome coming back.</p>
+<pre><code>RELAY  /relay/claim/run_4f21a9      worker:build-dmz-01
+RELAY  /relay/finished/run_4f21a9/succeeded
+</code></pre>
+<p>Captured output, structured events, per-host and per-task summaries, and heartbeats are not recorded.
+They are the content and liveness of a run that is already stored on the run itself, they arrive
+several times a second, and writing each into a hash chain would drown the record it exists to make
+readable.</p>
+<p>This append does not fail closed, unlike every mutation through the API. Refusing a worker's report
+because the audit store is unhealthy does not un-finish the run; it loses the outcome of work that
+already ran on real hosts. A failure to record is logged loudly instead.</p>
 
 		</main>
 	</div>

@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Run an AI agent through the gate | SwitchTender docs</title>
+	<meta name="description" content="AI agents are operators now. They patch hosts, roll configs, and apply Terraform, through whatever credentials they are handed.">
+	<link rel="canonical" href="https://switchtender.com/docs/agents">
+	<meta property="og:title" content="Run an AI agent through the gate | SwitchTender docs">
+	<meta property="og:description" content="AI agents are operators now. They patch hosts, roll configs, and apply Terraform, through whatever credentials they are handed.">
+	<meta property="og:type" content="article">
+	<meta property="og:url" content="https://switchtender.com/docs/agents">
+	<meta property="og:image" content="https://switchtender.com/assets/screenshot-fleet.png?v=7">
+	<meta name="twitter:card" content="summary_large_image">
+	<meta name="twitter:title" content="Run an AI agent through the gate | SwitchTender docs">
+	<meta name="twitter:description" content="AI agents are operators now. They patch hosts, roll configs, and apply Terraform, through whatever credentials they are handed.">
+	<meta name="twitter:image" content="https://switchtender.com/assets/screenshot-fleet.png?v=7">
+	<link rel="icon" href="/favicon.ico" sizes="any">
+	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
+	<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="/docs.css?v=2">
+</head>
+<body>
+	<header class="dnav">
+		<a class="brand" href="/"><img src="/assets/logo-train-tracks-dark.png" alt="SwitchTender" class="brand-train"><span class="brand-word">SwitchTender</span></a>
+		<span class="dnav-tag">Docs</span>
+		<nav class="dnav-links">
+			<a href="/">Home</a>
+			<a href="/#compare">Compare</a>
+			<a href="https://github.com/kordloom/switchtender">GitHub</a>
+		</nav>
+	</header>
+	<div class="dshell">
+		<aside class="dside">
+			<nav>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migrate off AWX or Semaphore</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents" class="active">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/sdk">Extend SwitchTender in Go</a>
+			</nav>
+		</aside>
+		<main class="dcontent prose">
+			<h1 id="run-an-ai-agent-through-the-gate">Run an AI agent through the gate</h1>
+<p>AI agents are operators now. They patch hosts, roll configs, and apply Terraform, through whatever
+credentials they are handed. SwitchTender gives an agent one door: an API that records every change
+to a fail-closed hash chain before the change executes, holds whatever policy says a human must
+approve, and exports proof a third party can verify without trusting you.</p>
+<h2 id="why">Why</h2>
+<p>Two facts make agents different from the operators you already trust.</p>
+<p>Agents act faster than review. A person makes a change, then explains it in the ticket. An agent
+makes fifty changes while a reviewer reads the first diff. After-the-fact review does not scale to
+that pace, so the control has to sit in the path of the change, not behind it.</p>
+<p>Auditors discount logs that cannot prove integrity. &quot;The agent's actions are logged&quot; persuades no
+one when the log is a file anyone with access could edit. What survives scrutiny is a record that
+proves it was not altered, by math a third party can check, not by trust in the server that
+produced it.</p>
+<p>SwitchTender does both. Every API mutation is recorded to the hash chain before it executes, and a
+mutation that cannot be recorded is refused with a 503 rather than performed off the record. GET
+and HEAD are reads and are not chained. The chain hash commits to the actor, the method, the path,
+the time, and the sequence number, so the record of what the agent did is fixed the moment it acts.</p>
+<h2 id="the-one-credential-architecture">The one-credential architecture</h2>
+<p>Give the agent exactly one credential: an operator-bound SwitchTender token. It never holds prod
+credentials. SSH keys, cloud credentials, and vault passwords stay sealed in SwitchTender, decrypt
+only at execution, and are never returned by the API, so the agent cannot read a secret out and go
+around the gate. The gate is its only door.</p>
+<p>The operator role bounds what the door allows. An operator can submit, cancel, and retry runs and
+launch templates. It cannot approve runs, manage configuration, or read the audit page. Approving a
+held run is admin-only, so an operator-bound agent can never approve its own work.</p>
+<h2 id="onboarding-an-agent">Onboarding an agent</h2>
+<ol>
+<li>
+<p>Create an account for the agent with the operator role:</p>
+<pre><code>switchtender user new agent-bot --role operator
+</code></pre>
+</li>
+<li>
+<p>Mint a token bound to that account:</p>
+<pre><code>switchtender token new --user agent-bot --name agent-bot --ttl 720h
+</code></pre>
+<p>The token carries the account's operator role, and its label is the actor on everything the
+agent does. A token minted without <code>--user</code> is unscoped and acts as admin; never hand one to an
+agent. The TTL forces rotation, here monthly.</p>
+<p>Creating the first token turns authentication on for the whole install, so make sure an admin
+account exists before the agent holds the only credential.</p>
+</li>
+<li>
+<p>Decide what a human must approve. An approval policy with no criteria matches every run, so one
+empty policy is a gate-everything switch:</p>
+<pre><code>policies:
+  - name: hold-everything
+</code></pre>
+<p>Or scope policies to the dangerous cases and let routine runs flow:</p>
+<pre><code>policies:
+  - name: prod-terraform-destroy
+    tool: terraform
+    command_contains: destroy
+</code></pre>
+</li>
+<li>
+<p>Pin the policies by starting the server with <code>serve --policy-file policies.yml</code>. The file is the
+source of truth and the API refuses policy writes, so even an admin API caller cannot rewrite
+them. An agent cannot loosen its own gate, and neither can a leaked admin token.</p>
+</li>
+<li>
+<p>Hand the agent its token and the API base URL, and nothing else.</p>
+</li>
+</ol>
+<h2 id="what-the-record-shows">What the record shows</h2>
+<p>The actor on every chain entry the agent produces is its token's label, <code>agent-bot</code> above. The
+chain hash commits to that actor along with the method, path, time, and sequence, so attribution is
+part of what the chain proves, not a field someone could rewrite later.</p>
+<p>Every mutation response carries an <code>Audit-Receipt: seq:hash</code> header. The agent, or the system
+driving it, can retain receipts and later check each one against the chain, so the party an entry
+belongs to can detect an omission.</p>
+<p>Runs record their source, one of api, template, schedule, rerun, reconcile, propose, or trigger,
+along with the actor. <code>actor:agent-bot</code> in run search pulls everything the agent ran, and
+<code>source:api</code> separates direct API submissions from scheduled or triggered work.</p>
+<h2 id="handing-evidence-to-someone-else">Handing evidence to someone else</h2>
+<p><code>switchtender audit bundle</code> exports a signed LoomSeal bundle. A third party verifies it offline
+with the open loomseal verifier, with no trust in the server that produced it. The install
+publishes its signing key at <code>/.well-known/loomseal.json</code>, so a verifier pins the key from a
+channel independent of the bundle it was handed.</p>
+<p>That is the shape an auditor accepts: here is what the agent did, here is the math showing the
+record was not altered, check it yourself.</p>
+<h2 id="the-boundary">The boundary</h2>
+<p>The chain proves the record was not altered. It does not prove that changes made outside
+SwitchTender went through it: an agent holding your cloud credentials can change infrastructure
+directly, and no record here would show it. For agents, credential scoping closes that gap. An
+agent whose only credential is its operator-bound token has no way to act except through the gate,
+so for that agent the record is not just intact, it is the whole story.</p>
+<h2 id="faq">FAQ</h2>
+<p><strong>Is this the built-in advisory AI?</strong> No. The <a href="/docs/ai">advisory AI</a> is the other direction: a model
+that proposes text and never executes, with anything runnable born held for a human. This page is
+about an external agent, yours, that operates SwitchTender through the API the way a person would.
+The advisory AI is a feature you switch on; an agent is a client you let in.</p>
+<p><strong>Can the agent approve its own runs?</strong> No. Approving a held run is admin-only, and the agent's
+token is operator-bound. A held run the agent submits waits for a human admin.</p>
+
+		</main>
+	</div>
+	<script>document.addEventListener("click",e=>{const a=e.target.closest(".dside a");if(a)document.querySelector(".dside")?.classList.remove("open")});</script>
+</body>
+</html>

@@ -3,16 +3,16 @@
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
-	<title>Benchmarks · SwitchTender docs</title>
+	<title>Benchmarks | SwitchTender docs</title>
 	<meta name="description" content="Measured numbers for the questions people actually ask: how fast does it start, how much memory does it hold at idle, and how big is the binary.">
 	<link rel="canonical" href="https://switchtender.com/docs/benchmarks">
-	<meta property="og:title" content="Benchmarks · SwitchTender docs">
+	<meta property="og:title" content="Benchmarks | SwitchTender docs">
 	<meta property="og:description" content="Measured numbers for the questions people actually ask: how fast does it start, how much memory does it hold at idle, and how big is the binary.">
 	<meta property="og:type" content="article">
 	<meta property="og:url" content="https://switchtender.com/docs/benchmarks">
 	<meta property="og:image" content="https://switchtender.com/assets/screenshot-fleet.png?v=7">
 	<meta name="twitter:card" content="summary_large_image">
-	<meta name="twitter:title" content="Benchmarks · SwitchTender docs">
+	<meta name="twitter:title" content="Benchmarks | SwitchTender docs">
 	<meta name="twitter:description" content="Measured numbers for the questions people actually ask: how fast does it start, how much memory does it hold at idle, and how big is the binary.">
 	<meta name="twitter:image" content="https://switchtender.com/assets/screenshot-fleet.png?v=7">
 	<link rel="icon" href="/favicon.ico" sizes="any">
@@ -36,7 +36,7 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migrate off AWX or Semaphore</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks" class="active">Benchmarks</a><a href="/docs/sdk">Extend SwitchTender in Go</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migrate off AWX or Semaphore</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks" class="active">Benchmarks</a><a href="/docs/sdk">Extend SwitchTender in Go</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
@@ -44,9 +44,12 @@
 <p>Measured numbers for the questions people actually ask: how fast does it start, how much memory does
 it hold at idle, and how big is the binary. Every number below was measured on a release-flag build,
 the method is shown so you can reproduce it on your own hardware, and nothing here is a projection.</p>
-<p>Measured on 2026-07-30 against the development tree after v1.33.0, on a ten-core Apple Silicon
-laptop and inside a Debian container on the same machine. Memory and binary sizes are mebibytes,
-the unit <code>ps</code> and <code>free</code> report. Your hardware will differ; the method will not.</p>
+<p>Re-measured on 2026-08-02 at v1.53.0, on a ten-core Apple Silicon laptop and inside an Alpine Linux
+container on the same machine. Memory and binary sizes are mebibytes, the unit <code>ps</code> and <code>/proc</code>
+report. Your hardware will differ; the method will not.</p>
+<p>The point of re-measuring: between v1.33.0 and v1.53.0 the product gained twenty releases, a full
+security-hardening pass, and custom credential types, and its footprint did not move. That is the
+number worth watching over time, not any single reading.</p>
 <h2 id="boot-and-memory">Boot and memory</h2>
 <table>
 <thead>
@@ -58,24 +61,24 @@ the unit <code>ps</code> and <code>free</code> report. Your hardware will differ
 <tbody>
 <tr>
 <td>Cold boot to serving, no encryption key</td>
-<td>55 ms</td>
+<td>42 ms</td>
 </tr>
 <tr>
 <td>Cold boot to serving, credential encryption on</td>
-<td>90 ms</td>
-</tr>
-<tr>
-<td>Resident memory at idle, Linux, no encryption key</td>
-<td>35 MiB</td>
+<td>85 ms</td>
 </tr>
 <tr>
 <td>Resident memory at idle, Linux, credential encryption on</td>
-<td>32 MiB</td>
+<td>33 MiB</td>
+</tr>
+<tr>
+<td>Stripped binary, arm64</td>
+<td>29 MiB</td>
 </tr>
 </tbody>
 </table>
-<p>Boot times are the median of five trials after a warm-up run, timed from process start to a served
-<code>/healthz</code> on the laptop. Memory is resident size three seconds after serving begins, read from
+<p>Boot times are the median of six trials after a warm-up run, timed in process from launch to a served
+<code>/healthz</code>, so no shell or subprocess overhead is counted. Memory is resident size three seconds after serving begins, read from
 <code>/proc</code> inside the container, because Linux is where servers actually run.</p>
 <p>The gap between the two boot rows is credential key derivation: argon2id at 64 MiB memory cost, a
 deliberate security parameter, paid once at startup. It is CPU-bound, which is why it costs about
@@ -112,7 +115,8 @@ The Linux figures above are the ones to plan against.</p>
 </table>
 <p>That single file is the whole control plane: server, workers, UI, importers, and the CLI.</p>
 <h2 id="reproduce-it">Reproduce it</h2>
-<p>The repository carries the harness the boot and laptop memory rows came from:</p>
+<p>The repository carries the harness the boot and memory rows came from, and the 2026-08-02 figures
+above are its output:</p>
 <pre><code>go run ./cmd/bench
 </code></pre>
 <p>It builds a release binary, runs the warm-up and five timed trials for both boot paths, and prints
