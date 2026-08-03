@@ -689,6 +689,31 @@ func isLoopbackAddr(addr string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
+// tokenCountGuard decides whether the server may start given the API token count and reports whether
+// the caller should warn that the API is unauthenticated.
+//
+// A count error is fail-closed: an unreadable token store refuses to start rather than binding, since
+// the only alternative is to guess there are no tokens and expose the network on that guess. The
+// former code skipped the whole guard on a count error and fell through to bind, which is the one
+// direction this must never fail. With a readable empty store it refuses only a public bind that has
+// no other authentication, and otherwise permits start while asking the caller to warn.
+func tokenCountGuard(count int, countErr error, readOnly, externalAuth, loopback bool,
+	addr string) (warn bool, err error) {
+	if countErr != nil {
+		return false, fmt.Errorf("refusing to serve on %s: cannot determine whether any API tokens "+
+			"exist, so the API cannot be safely exposed: %w", addr, countErr)
+	}
+	if count > 0 {
+		return false, nil
+	}
+	if !readOnly && !externalAuth && !loopback {
+		return false, fmt.Errorf("refusing to serve an unauthenticated API on %s: no tokens and no "+
+			"SSO configured. Create a token with 'switchtender token new', configure SSO, "+
+			"bind a loopback address, or pass --read-only", addr)
+	}
+	return true, nil
+}
+
 func runServe(cmd *cobra.Command, _ []string) error {
 	log, err := logutil.New()
 	if err != nil {
@@ -703,12 +728,13 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	defer func() { _ = bundle.Close() }()
 	store, schedules := bundle.Runs(), bundle.Schedules()
 
-	if n, cerr := bundle.Tokens().Count(cmd.Context()); cerr == nil && n == 0 {
-		if !serveReadOnly && !externalAuthConfigured() && !isLoopbackAddr(serveAddr) {
-			return fmt.Errorf("refusing to serve an unauthenticated API on %s: no tokens and no "+
-				"SSO configured. Create a token with 'switchtender token new', configure SSO, "+
-				"bind a loopback address, or pass --read-only", serveAddr)
-		}
+	n, cerr := bundle.Tokens().Count(cmd.Context())
+	warn, gerr := tokenCountGuard(n, cerr, serveReadOnly, externalAuthConfigured(),
+		isLoopbackAddr(serveAddr), serveAddr)
+	if gerr != nil {
+		return gerr
+	}
+	if warn {
 		log.Warn("no API tokens exist. The API is UNAUTHENTICATED until you create one. Run: switchtender token new")
 	}
 

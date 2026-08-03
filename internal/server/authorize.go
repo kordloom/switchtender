@@ -387,11 +387,23 @@ func readableRuns(ctx context.Context, authz *authorizer, runs []*run.Run) ([]*r
 	if err != nil {
 		return nil, err
 	}
+	// When the filter keeps everything, grants are not being enforced for this caller, so no object
+	// needs its owning organization resolved and the list passes through untouched. Only a
+	// strict-grants non-admin reaches the per-object resolution below.
+	if keep("proj_probe", "") && keep("cred_probe", "") {
+		return runs, nil
+	}
+	// A run is visible when every object it uses is, which is the rule authorize applies to fetch
+	// one, so listing and fetching cannot disagree. An object owned by an organization the caller
+	// belongs to is visible through that membership, so its owning org is resolved the same way
+	// authorize resolves it and passed into the filter. Passing an empty org here dropped exactly
+	// those runs: a strict-grants member saw none of their own org's runs in any run-derived view.
+	orgOf := authz.orgResolverMemo(ctx)
 	out := make([]*run.Run, 0, len(runs))
 	for _, rn := range runs {
 		allowed := true
 		for _, id := range runObjects(rn) {
-			if !keep(id, "") {
+			if !keep(id, orgOf(id)) {
 				allowed = false
 				break
 			}
@@ -401,6 +413,28 @@ func readableRuns(ctx context.Context, authz *authorizer, runs []*run.Run) ([]*r
 		}
 	}
 	return out, nil
+}
+
+// orgResolverMemo returns a function resolving an object's owning organization once and caching the
+// result, so a run list referencing the same project or credential across many runs resolves each
+// only once. It returns empty when org ownership is not wired or the object cannot be resolved, which
+// leaves the read filter to decide on the grant alone.
+func (a *authorizer) orgResolverMemo(ctx context.Context) func(object string) string {
+	cache := make(map[string]string)
+	return func(object string) string {
+		if a == nil || a.orgOwners == nil {
+			return ""
+		}
+		if orgID, ok := cache[object]; ok {
+			return orgID
+		}
+		orgID, ok := a.orgOwners.OrgOf(ctx, object)
+		if !ok {
+			orgID = ""
+		}
+		cache[object] = orgID
+		return orgID
+	}
 }
 
 // runObjects lists the grantable objects a run uses.

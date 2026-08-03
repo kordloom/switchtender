@@ -67,7 +67,7 @@ func init() {
 	tokenCmd.PersistentFlags().BoolVar(&tokenPretty, "pretty", false, "Indent JSON output.")
 	tokenNewCmd.Flags().StringVar(&tokenName, "name", "", "Label for the token, for example ci.")
 	tokenNewCmd.Flags().DurationVar(&tokenTTL, "ttl", 0,
-		"Lifetime, for example 720h. Zero means the token never expires.")
+		"Lifetime, for example 720h. Zero means the token never expires. A negative value is refused.")
 	tokenNewCmd.Flags().StringVar(&tokenUser, "user", "",
 		"Bind the token to this account by username. The token carries the account's role "+
 			"instead of acting as admin.")
@@ -95,7 +95,15 @@ func printJSON(v any) error {
 
 // runTokenNew mints and stores a token, printing the plaintext exactly once. With --user the
 // token is bound to that account and carries its role; without it the token is unscoped admin.
+//
+// A negative --ttl is refused before anything is minted. Only a positive lifetime set an expiry, so
+// a mistyped duration produced the opposite of what was asked for: an operator who meant to hand
+// out a short-lived credential handed out one that never expires, and nothing in the output said so.
 func runTokenNew(cmd *cobra.Command, _ []string) error {
+	if tokenTTL < 0 {
+		return fmt.Errorf("%w: --ttl %s is negative: pass a positive lifetime, "+
+			"or zero for a token that never expires", ErrUsage, tokenTTL)
+	}
 	bundle, err := openBundle(tokenDB)
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)

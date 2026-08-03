@@ -534,10 +534,12 @@ func (s *Server) Handler() http.Handler {
 			Credentials: s.credentials, Templates: s.templates, Schedules: s.schedules,
 		}, true
 	}, s.log))
-	var handler http.Handler = mux
+	// Compression sits under the gate, so a refusal is written by the gate itself and only a
+	// response the handlers produced is ever encoded.
+	handler := compress(mux)
 	if s.tokens != nil {
 		gate := &authGate{tokens: s.tokens, users: s.users, jwt: s.jwt, audits: s.audits, log: s.log, authz: authz}
-		handler = gate.wrap(mux)
+		handler = gate.wrap(handler)
 	}
 	if s.readOnly {
 		handler = readOnlyGate(handler)

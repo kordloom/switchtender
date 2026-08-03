@@ -5,10 +5,12 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/spanbeat"
 )
 
 // durationBuckets are the upper bounds, in seconds, of the run-duration histogram. They span a quick
@@ -61,6 +63,7 @@ func metricsHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
 		writeWorkers(&b, store, r)
 		writeRunDurations(&b, runs)
 		writeQueueWait(&b, runs)
+		writeSpanBeats(&b, time.Now())
 
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 		_, _ = w.Write([]byte(b.String()))
@@ -167,6 +170,36 @@ func writeRunDurations(b *strings.Builder, runs []*run.Run) {
 	fmt.Fprintf(b, "switchtender_run_duration_seconds_bucket{le=\"+Inf\"} %d\n", total)
 	fmt.Fprintf(b, "switchtender_run_duration_seconds_sum %g\n", sum)
 	fmt.Fprintf(b, "switchtender_run_duration_seconds_count %d\n", total)
+}
+
+// writeSpanBeats emits the span beat counters and the age of the newest beat this process wrote.
+//
+// A beat is suppressed when the clock has not passed the last beat, because a beat's time is a
+// signed claim and a time the clock did not read would be a false statement in an attestation. The
+// record only shows a bounded gap afterwards, so the condition has to be loud while it is
+// happening: alert on the suppressed counter rising, or on the age passing the configured cadence.
+// The age gauge is omitted until a beat exists, since zero would read as a fresh beat on an install
+// that runs no beats at all.
+func writeSpanBeats(b *strings.Builder, now time.Time) {
+	stats := spanbeat.ReadStats()
+	b.WriteString("# HELP switchtender_span_beats_total Span beats appended to the audit chain.\n")
+	b.WriteString("# TYPE switchtender_span_beats_total counter\n")
+	fmt.Fprintf(b, "switchtender_span_beats_total %d\n", stats.Appended)
+	b.WriteString("# HELP switchtender_span_beats_suppressed_total Span beats not written because " +
+		"the clock had not passed the last beat.\n")
+	b.WriteString("# TYPE switchtender_span_beats_suppressed_total counter\n")
+	fmt.Fprintf(b, "switchtender_span_beats_suppressed_total %d\n", stats.Suppressed)
+	if stats.Last.IsZero() {
+		return
+	}
+	age := now.Sub(stats.Last).Seconds()
+	if age < 0 {
+		age = 0
+	}
+	b.WriteString("# HELP switchtender_span_beat_age_seconds Seconds since the last span beat was " +
+		"appended.\n")
+	b.WriteString("# TYPE switchtender_span_beat_age_seconds gauge\n")
+	fmt.Fprintf(b, "switchtender_span_beat_age_seconds %g\n", age)
 }
 
 // writeQueueWait emits a histogram of how long runs waited between submission and start, over the runs
