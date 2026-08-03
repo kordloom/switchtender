@@ -33,18 +33,14 @@ func TestDispatcherNotifiesTwilio(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	orig := twilioBaseURL
-	twilioBaseURL = srv.URL
 	store := run.NewMemStore()
 	runner := roundhouse.RunnerFunc(
 		func(context.Context, roundhouse.Spec, io.Writer) (roundhouse.Result, error) {
 			return roundhouse.Result{ExitCode: 2}, nil
 		})
 	d := New(store, runner, nil, WithTwilio("AC123", "tok", "+15550000", []string{"+15551111"}))
-	defer func() {
-		d.Close()
-		twilioBaseURL = orig
-	}()
+	d.twilioBaseURL = srv.URL
+	defer d.Close()
 
 	created, err := d.Submit(context.Background(), "play.yml", "inv")
 	if err != nil {

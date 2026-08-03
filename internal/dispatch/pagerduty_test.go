@@ -28,18 +28,14 @@ func TestDispatcherNotifiesPagerDuty(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	orig := pagerDutyEndpoint
-	pagerDutyEndpoint = srv.URL
 	store := run.NewMemStore()
 	runner := roundhouse.RunnerFunc(
 		func(context.Context, roundhouse.Spec, io.Writer) (roundhouse.Result, error) {
 			return roundhouse.Result{ExitCode: 2}, nil
 		})
 	d := New(store, runner, nil, WithPagerDuty([]string{"rk-1"}))
-	defer func() {
-		d.Close()
-		pagerDutyEndpoint = orig
-	}()
+	d.pagerDutyEndpoint = srv.URL
+	defer d.Close()
 
 	created, err := d.Submit(context.Background(), "play.yml", "inv")
 	if err != nil {

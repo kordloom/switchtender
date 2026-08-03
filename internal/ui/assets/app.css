@@ -1041,6 +1041,8 @@ body[data-theme="dark"] {
 .notify-rows { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 8px; }
 .notify-row { display: grid; grid-template-columns: 130px 1fr auto auto; gap: 8px; align-items: center; }
 .notify-row .input { font-weight: 400; text-transform: none; letter-spacing: normal; }
+.notify-fields { display: flex; gap: 8px; min-width: 0; }
+.notify-fields .input { flex: 1; min-width: 0; }
 .notify-fail { flex-direction: row; gap: 6px; white-space: nowrap; }
 #tpl-notify-add { justify-self: start; align-self: start; }
 

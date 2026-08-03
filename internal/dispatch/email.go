@@ -19,8 +19,13 @@ const emailTimeout = 10 * time.Second
 
 // Emailer sends a notification email. It is satisfied by SMTPEmailer and by test doubles.
 type Emailer interface {
-	// Send delivers a message with the given subject and body. It must honor the context deadline.
+	// Send delivers a message with the given subject and body to the configured recipients. It must
+	// honor the context deadline.
 	Send(ctx context.Context, subject, body string) error
+	// SendTo delivers to the given recipients instead of the configured ones, so a per-template
+	// email target names its own list while the transport stays server-held. An empty list uses the
+	// configured recipients.
+	SendTo(ctx context.Context, to []string, subject, body string) error
 }
 
 // WithEmail sends an email when a top-level run reaches a terminal state. When onFailureOnly is
@@ -93,6 +98,15 @@ func NewSMTPEmailer(addr, from string, to []string, auth smtp.Auth) *SMTPEmailer
 // Send delivers one message to every recipient, honoring the context deadline for the whole
 // exchange.
 func (e *SMTPEmailer) Send(ctx context.Context, subject, body string) error {
+	return e.SendTo(ctx, nil, subject, body)
+}
+
+// SendTo delivers to the given recipients, or the configured ones when to is empty.
+func (e *SMTPEmailer) SendTo(ctx context.Context, to []string, subject, body string) error {
+	recipients := e.to
+	if len(to) > 0 {
+		recipients = to
+	}
 	host, _, err := net.SplitHostPort(e.addr)
 	if err != nil {
 		return fmt.Errorf("smtp address: %w", err)
@@ -129,7 +143,7 @@ func (e *SMTPEmailer) Send(ctx context.Context, subject, body string) error {
 	if err := client.Mail(e.from); err != nil {
 		return fmt.Errorf("smtp mail from: %w", err)
 	}
-	for _, addr := range e.to {
+	for _, addr := range recipients {
 		if err := client.Rcpt(addr); err != nil {
 			return fmt.Errorf("smtp rcpt %s: %w", addr, err)
 		}

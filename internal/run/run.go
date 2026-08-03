@@ -3,6 +3,7 @@
 package run
 
 import (
+	"fmt"
 	"maps"
 	"sort"
 	"time"
@@ -241,18 +242,29 @@ type Run struct {
 // its own team instead of only the server-wide channels.
 type NotifyTarget struct {
 	// Kind selects the channel formatter: webhook, slack, mattermost, rocketchat, discord, teams,
-	// or ntfy.
+	// ntfy, pagerduty, grafana, twilio, or email.
 	Kind string `json:"kind"`
-	// URL is the incoming webhook or topic URL the formatted message posts to.
-	URL string `json:"url"`
+	// URL is the incoming webhook or topic URL a URL-configured channel posts to, or the annotation
+	// endpoint for grafana. Unused by pagerduty, twilio, and email.
+	URL string `json:"url,omitempty"`
+	// Key is the per-service secret a channel needs beyond a URL: a PagerDuty routing key or a
+	// Grafana API token. It is masked out of read responses the same way a channel URL is, and the
+	// account secrets for twilio and email are never carried here, only server-side.
+	Key string `json:"key,omitempty"`
+	// To names the recipient for a channel whose transport is held server-side: a phone number for
+	// twilio, or a comma-separated address list for email. It carries no secret.
+	To string `json:"to,omitempty"`
 	// OnFailure limits delivery to a failed or interrupted run when set, so a channel can page only
 	// on trouble.
 	OnFailure bool `json:"on_failure,omitempty"`
 }
 
-// Notification kinds a per-run target may name. These are the server channels a bare URL fully
-// configures. PagerDuty, Grafana, Twilio, and email need server-held account credentials, so they
-// stay server-wide and cannot be named per run.
+// Notification kinds a per-run target may name.
+//
+// The first group is fully configured by a URL. PagerDuty and Grafana each carry their own
+// per-service key in the target, masked out of read responses. Twilio and email name only a
+// recipient, because their account and transport secrets stay server-side and are never carried in a
+// target a template stores.
 const (
 	NotifyWebhook    = "webhook"
 	NotifySlack      = "slack"
@@ -261,13 +273,54 @@ const (
 	NotifyDiscord    = "discord"
 	NotifyTeams      = "teams"
 	NotifyNtfy       = "ntfy"
+	NotifyPagerDuty  = "pagerduty"
+	NotifyGrafana    = "grafana"
+	NotifyTwilio     = "twilio"
+	NotifyEmail      = "email"
 )
+
+// notifyNeedsURL is the set of kinds a bare URL configures.
+func notifyNeedsURL(k string) bool {
+	switch k {
+	case NotifyWebhook, NotifySlack, NotifyMattermost, NotifyRocketChat, NotifyDiscord,
+		NotifyTeams, NotifyNtfy:
+		return true
+	}
+	return false
+}
+
+// ValidateNotifyTarget reports why a target is not deliverable, or nil when it is. It checks that
+// each kind carries the field it needs, so a target that would silently reach no one is refused when
+// it is saved rather than dropped at run time.
+func ValidateNotifyTarget(t NotifyTarget) error {
+	switch {
+	case notifyNeedsURL(t.Kind):
+		if t.URL == "" {
+			return fmt.Errorf("%s target needs a url", t.Kind)
+		}
+	case t.Kind == NotifyPagerDuty:
+		if t.Key == "" {
+			return fmt.Errorf("pagerduty target needs a routing key")
+		}
+	case t.Kind == NotifyGrafana:
+		if t.URL == "" || t.Key == "" {
+			return fmt.Errorf("grafana target needs an annotation url and an api token")
+		}
+	case t.Kind == NotifyTwilio, t.Kind == NotifyEmail:
+		if t.To == "" {
+			return fmt.Errorf("%s target needs a recipient", t.Kind)
+		}
+	default:
+		return fmt.Errorf("unknown notification kind %q", t.Kind)
+	}
+	return nil
+}
 
 // ValidNotifyKind reports whether k names a supported per-run notification channel.
 func ValidNotifyKind(k string) bool {
 	switch k {
 	case NotifyWebhook, NotifySlack, NotifyMattermost, NotifyRocketChat, NotifyDiscord,
-		NotifyTeams, NotifyNtfy:
+		NotifyTeams, NotifyNtfy, NotifyPagerDuty, NotifyGrafana, NotifyTwilio, NotifyEmail:
 		return true
 	default:
 		return false

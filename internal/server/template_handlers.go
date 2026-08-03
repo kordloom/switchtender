@@ -84,9 +84,8 @@ func templateToolError(req createTemplateRequest) string {
 		return "tool must be ansible, bash, terraform, opentofu, python, powershell, or go"
 	}
 	for _, n := range req.Notifications {
-		if !run.ValidNotifyKind(n.Kind) || n.URL == "" {
-			return "each notification needs a url and a kind of webhook, slack, mattermost, " +
-				"rocketchat, discord, teams, or ntfy"
+		if err := run.ValidateNotifyTarget(n); err != nil {
+			return err.Error()
 		}
 	}
 	if run.NormalizeTool(req.Tool) == run.ToolAnsible {

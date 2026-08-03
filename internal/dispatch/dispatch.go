@@ -157,6 +157,11 @@ type Dispatcher struct {
 	twilioToken string
 	twilioFrom  string
 	twilioTo    []string
+	// pagerDutyEndpoint is the PagerDuty Events API enqueue URL, and twilioBaseURL the Twilio REST
+	// host. Each defaults to the real service and is a field, not a global, so a test points one
+	// dispatcher at its own server without racing another test through a shared package variable.
+	pagerDutyEndpoint string
+	twilioBaseURL     string
 	// emailer sends terminal run notifications by email, nil when email is off.
 	emailer Emailer
 	// emailOnFailureOnly limits email notifications to failed runs.
@@ -384,6 +389,8 @@ func New(store run.Store, runner roundhouse.Runner, log *zap.Logger, opts ...Opt
 		twilioToken:        cfg.twilioToken,
 		twilioFrom:         cfg.twilioFrom,
 		twilioTo:           cfg.twilioTo,
+		pagerDutyEndpoint:  defaultPagerDutyEndpoint,
+		twilioBaseURL:      defaultTwilioBaseURL,
 		emailer:            cfg.emailer,
 		emailOnFailureOnly: cfg.emailOnFailureOnly,
 		inventories:        cfg.inventories,

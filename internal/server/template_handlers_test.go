@@ -157,6 +157,31 @@ func TestTemplateToolError(t *testing.T) {
 		Name: "name required",
 		Req:  createTemplateRequest{Tool: "ansible", Playbook: "site.yml"},
 		Want: "name is required",
+	}, { // Test 7: A pagerduty target carrying its routing key is valid.
+		Name: "pagerduty with key",
+		Req: createTemplateRequest{Name: "t", Tool: "ansible", Playbook: "site.yml",
+			Notifications: []run.NotifyTarget{{Kind: run.NotifyPagerDuty, Key: "rk"}}},
+		Want: "",
+	}, { // Test 8: A pagerduty target with no routing key is rejected at definition, not at delivery.
+		Name: "pagerduty needs key",
+		Req: createTemplateRequest{Name: "t", Tool: "ansible", Playbook: "site.yml",
+			Notifications: []run.NotifyTarget{{Kind: run.NotifyPagerDuty}}},
+		Want: "pagerduty target needs a routing key",
+	}, { // Test 9: An email target naming a recipient is valid.
+		Name: "email with recipient",
+		Req: createTemplateRequest{Name: "t", Tool: "ansible", Playbook: "site.yml",
+			Notifications: []run.NotifyTarget{{Kind: run.NotifyEmail, To: "on@call"}}},
+		Want: "",
+	}, { // Test 10: An email target with no recipient is rejected.
+		Name: "email needs recipient",
+		Req: createTemplateRequest{Name: "t", Tool: "ansible", Playbook: "site.yml",
+			Notifications: []run.NotifyTarget{{Kind: run.NotifyEmail}}},
+		Want: "email target needs a recipient",
+	}, { // Test 11: A grafana target needs both its annotation url and its token.
+		Name: "grafana needs url and token",
+		Req: createTemplateRequest{Name: "t", Tool: "ansible", Playbook: "site.yml",
+			Notifications: []run.NotifyTarget{{Kind: run.NotifyGrafana, URL: "https://gf"}}},
+		Want: "grafana target needs an annotation url and an api token",
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
@@ -206,5 +231,44 @@ func TestNotificationURLMasking(t *testing.T) {
 	}
 	if len(after.Notifications) != 1 || after.Notifications[0].URL != secret {
 		t.Errorf("stored notifications = %+v, want the original secret preserved", after.Notifications)
+	}
+}
+
+// TestPagerDutyKeyMaskRoundTrip proves the per-service key is redacted on read and that echoing the
+// mask back on an edit preserves the stored routing key rather than overwriting it with the marker.
+// A PagerDuty routing key pages the service, so it is a bearer secret exactly like a webhook URL.
+func TestPagerDutyKeyMaskRoundTrip(t *testing.T) {
+	t.Parallel()
+	const secret = "R0UTINGKEYsecretVALUE"
+	store := template.NewMemStore()
+	if err := store.Save(context.Background(), &template.Template{
+		ID: "tpl_pd", Name: "deploy", Playbook: "site.yml",
+		Notifications: []run.NotifyTarget{{Kind: run.NotifyPagerDuty, Key: secret}},
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(),
+		WithTemplates(store)).Handler()
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/templates", nil))
+	if strings.Contains(rec.Body.String(), secret) {
+		t.Fatalf("list leaked the pagerduty routing key: %s", rec.Body.String())
+	}
+
+	// Echoing the masked key back on an edit must keep the stored key, not save the marker.
+	body := `{"name":"deploy","playbook":"site.yml",` +
+		`"notifications":[{"kind":"pagerduty","key":"` + maskMarker + `"}]}`
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPut, "/v1/templates/tpl_pd", strings.NewReader(body)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("update = %d, body %s", rec.Code, rec.Body.String())
+	}
+	after, err := store.Get(context.Background(), "tpl_pd")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if len(after.Notifications) != 1 || after.Notifications[0].Key != secret {
+		t.Errorf("stored notifications = %+v, want the routing key preserved", after.Notifications)
 	}
 }
