@@ -51,15 +51,17 @@ func (d *Dispatcher) notify(r *run.Run) {
 }
 
 // notifyExtra fans a terminal top-level run out to every registered Notifier, off the executor
-// path. The run is redacted of extra vars first, since a registered channel is external and must
-// not receive survey answers or template vars that can carry secrets. Each delivery is bounded and
-// its failure logged and dropped, like the built-in channels.
+// path. The run is redacted of extra vars and per-run notification targets first, since a registered
+// channel is external and must receive neither survey answers or template vars that can carry
+// secrets nor the target list, whose entries carry a routing key or API token. Each delivery is
+// bounded and its failure logged and dropped, like the built-in channels.
 func (d *Dispatcher) notifyExtra(r *run.Run) {
 	if len(notifiers) == 0 {
 		return
 	}
 	redacted := *r
 	redacted.ExtraVars = nil
+	redacted.Notifications = nil
 	for name, n := range notifiers {
 		d.notifyWG.Add(1)
 		go func(name string, n Notifier) {
@@ -79,10 +81,12 @@ func (d *Dispatcher) notifyWebhooks(r *run.Run) {
 	if len(d.webhooks) == 0 {
 		return
 	}
-	// Redact the run's extra vars from the payload. Survey answers and template vars can carry
-	// secrets, and a webhook is an external endpoint that must not receive them.
+	// Redact the run's extra vars and per-run notification targets from the payload. Survey answers
+	// and template vars can carry secrets, and each target carries a routing key or API token, so
+	// neither is sent to a webhook, which is an external endpoint.
 	redacted := *r
 	redacted.ExtraVars = nil
+	redacted.Notifications = nil
 	body, err := json.Marshal(notification{Event: "run.finished", Run: &redacted})
 	if err != nil {
 		d.log.Error("dispatch: encode notification: "+err.Error(), zap.String("run_id", r.ID))

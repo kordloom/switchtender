@@ -46,10 +46,16 @@ type logSink struct {
 // since a busy single writer under load must not silently drop stored output, then logged and
 // reported as a successful write so a persistent logging fault does not tear down the running
 // process. The original length is returned because the whole chunk was consumed.
+//
+// The producing step and the emit are both done under s.mu so this write, the hold timer's release,
+// and the final flush emit their chunks in the order the stream produced them. Serializing emission
+// this way is what upholds the streamMasker's guarantee that output is never reordered, at the cost
+// of holding the lock across the store append.
 func (s *logSink) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	out := p
 	if s.mask != nil {
-		s.mu.Lock()
 		if s.stream == nil {
 			s.stream = &streamMasker{mask: s.mask}
 		}
@@ -60,43 +66,44 @@ func (s *logSink) Write(p []byte) (int, error) {
 		} else {
 			s.hold.Reset(logHoldDelay)
 		}
-		s.mu.Unlock()
 	}
 	s.emit(out)
 	// The whole chunk was consumed even when part of it is being held back for the next write.
 	return len(p), nil
 }
 
-// releaseHeld emits whatever the masker is still withholding after a quiet interval, so a run that
-// writes slowly is not left with a blank log until it produces enough output to fill the hold.
+// releaseHeld emits the part of the withheld tail that is now safe to show after a quiet interval, so
+// a run that writes slowly is not left with a blank log until it produces enough output to fill the
+// hold. It releases only the prefix that cannot begin any known secret and keeps back the last
+// up-to-(longest-1) bytes, which could still be the leading half of a secret a later write completes.
+// The final flush emits that remainder once the stream is truly over. Emit runs under s.mu so a
+// release racing the writer cannot reorder the stream.
 func (s *logSink) releaseHeld() {
 	s.mu.Lock()
-	var out []byte
+	defer s.mu.Unlock()
 	if s.stream != nil {
-		out = s.stream.flush()
+		s.emit(s.stream.drain())
 	}
-	s.mu.Unlock()
-	s.emit(out)
 }
 
 // flush releases whatever the masker withheld from the last write. It is called once the process has
 // finished writing, when no further output can complete a secret that straddles a chunk boundary.
+// Emit runs under s.mu so a flush racing a late hold-timer release keeps the stream in order.
 func (s *logSink) flush() {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.hold != nil {
 		s.hold.Stop()
 	}
-	var out []byte
 	if s.stream != nil {
-		out = s.stream.flush()
+		s.emit(s.stream.flush())
 	}
-	s.mu.Unlock()
-	s.emit(out)
 }
 
-// emit stores and publishes a redacted chunk. A store failure is retried briefly, since a busy single
-// writer under load must not silently drop stored output, then logged rather than surfaced, so a
-// persistent logging fault does not tear down the running process.
+// emit stores and publishes a redacted chunk. The caller holds s.mu, so emits happen in the stream's
+// production order. A store failure is retried briefly, since a busy single writer under load must
+// not silently drop stored output, then logged rather than surfaced, so a persistent logging fault
+// does not tear down the running process.
 func (s *logSink) emit(out []byte) {
 	if len(out) == 0 {
 		return
