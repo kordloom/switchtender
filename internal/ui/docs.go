@@ -40,8 +40,24 @@ type docLink struct {
 	Active bool
 }
 
+// docPage is one documentation page prepared for the shell.
+type docPage struct {
+	// Title is the page's first heading.
+	Title string
+	// Content is the rendered HTML with its cross-page links rewritten.
+	Content template.HTML
+	// Pages is the sidebar with this page marked active.
+	Pages []docLink
+}
+
 // docsPage renders one documentation page from markdown into the UI shell with a sidebar of the
 // other pages.
+//
+// A page is built once and kept. The documentation is embedded, so its markdown cannot change while
+// the binary runs, yet every request re-ran goldmark over the page, re-ran a regular expression
+// across the whole rendered result, and then read every other page off the tree to rebuild the same
+// sidebar. The cache is keyed by slug and only ever holds pages that exist, so it is bounded by the
+// embedded tree rather than by what a caller asks for.
 func (u *UI) docsPage(w http.ResponseWriter, r *http.Request) {
 	slug := r.PathValue("page")
 	if slug == "" {
@@ -51,22 +67,35 @@ func (u *UI) docsPage(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	data, err := fs.ReadFile(u.docs, slug+".md")
-	if err != nil {
-		http.NotFound(w, r)
-		return
+	cached, ok := u.docCache.Load(slug)
+	if !ok {
+		data, err := fs.ReadFile(u.docs, slug+".md")
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		var body bytes.Buffer
+		if err := u.md.Convert(data, &body); err != nil {
+			u.log.Error("ui: render docs " + slug + ": " + err.Error())
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		// LoadOrStore rather than Store, so two first requests for the same page settle on one copy.
+		cached, _ = u.docCache.LoadOrStore(slug, &docPage{
+			Title: docTitle(data, slug),
+			//nolint:gosec // Rendered from trusted embedded docs.
+			Content: template.HTML(rewriteDocLinks(body.String())),
+			Pages:   u.docList(slug),
+		})
 	}
-	var body bytes.Buffer
-	if err := u.md.Convert(data, &body); err != nil {
-		u.log.Error("ui: render docs " + slug + ": " + err.Error())
+	page, ok := cached.(*docPage)
+	if !ok {
+		u.log.Error("ui: docs cache holds " + slug + " as something other than a page")
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 	u.render(w, "docs.html", map[string]any{
-		"Title": docTitle(data, slug),
-		//nolint:gosec // Rendered from trusted embedded docs.
-		"Content": template.HTML(rewriteDocLinks(body.String())),
-		"Pages":   u.docList(slug),
+		"Title": page.Title, "Content": page.Content, "Pages": page.Pages,
 	})
 }
 

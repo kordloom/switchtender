@@ -391,7 +391,7 @@ func New(store run.Store, submitter Submitter, log *zap.Logger, opts ...Option) 
 	if srv.oidc != nil {
 		srv.oidc.WithAudits(srv.audits)
 	}
-	srv.web = ui.New(srv.log, srv.docs, srv.readOnly, srv.matrixCap, srv.oidc != nil, srv.saml != nil)
+	srv.web = ui.New(srv.log, srv.docs, srv.readOnly, srv.matrixCap, srv.oidc != nil, srv.saml != nil, srv.ai != nil)
 	return srv
 }
 
