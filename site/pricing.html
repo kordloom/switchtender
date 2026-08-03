@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Pricing · SwitchTender</title>
+	<meta name="description" content="SwitchTender is free to self-host forever, including the provable audit chain and offline verification. Paid tiers add multi-person governance and auditor-ready evidence: SSO and SCIM, policy-gated approvals, Vault, evidence packs, Postgres and HA. Flat per-org pricing, no per-seat bill.">
+	<link rel="canonical" href="https://switchtender.com/pricing">
+	<meta property="og:title" content="Pricing · SwitchTender">
+	<meta property="og:description" content="Free to run, forever. You pay when more than one person is accountable for a change, or when someone outside your team needs the evidence. Flat per-org pricing.">
+	<meta property="og:type" content="website">
+	<meta property="og:url" content="https://switchtender.com/pricing">
+	<meta property="og:image" content="https://switchtender.com/assets/screenshot-fleet.png?v=8">
+	<meta name="twitter:card" content="summary_large_image">
+	<script type="application/ld+json">
+	{
+		"@context": "https://schema.org",
+		"@type": "Product",
+		"name": "SwitchTender",
+		"url": "https://switchtender.com/pricing",
+		"description": "Single-binary automation controller with a live host-by-task matrix, a tamper-evident audit chain, and enforced approvals.",
+		"brand": { "@type": "Organization", "name": "KordLoom LLC" },
+		"offers": {
+			"@type": "AggregateOffer",
+			"priceCurrency": "USD",
+			"lowPrice": "0",
+			"highPrice": "2500",
+			"offerCount": "3"
+		}
+	}
+	</script>
+	<link rel="icon" href="/favicon.ico" sizes="any">
+	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
+	<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="/styles.css?v=20">
+	<style>
+		/* Tier pricing layout. Reuses the card system, adding a price header, a feature checklist,
+		   and a featured-tier ring so the middle tier reads as the recommended one. */
+		.tiers { align-items: stretch; margin-top: 8px; }
+		.tiers .tier { display: flex; flex-direction: column; text-align: left; position: relative; }
+		.tier-featured { border-color: rgba(52, 211, 153, 0.5); background: var(--surface-2); }
+		.tier-featured::before {
+			content: "Recommended"; position: absolute; top: -11px; left: 22px;
+			font-size: 11px; font-weight: 600; letter-spacing: 0.6px; text-transform: uppercase;
+			color: #05140d; background: var(--accent); padding: 3px 10px; border-radius: 999px;
+		}
+		.tier-name { font-family: "Space Grotesk", sans-serif; font-size: 20px; font-weight: 600; }
+		.tier-for { color: var(--muted); font-size: 14px; margin-top: 4px; min-height: 40px; }
+		.tier-price { margin: 18px 0 2px; display: flex; align-items: baseline; gap: 4px; flex-wrap: wrap; }
+		.tier-price b { font-family: "Space Grotesk", sans-serif; font-size: 34px; font-weight: 700; line-height: 1; }
+		.tier-price .cadence { color: var(--muted); font-size: 14px; }
+		.tier-sub { color: var(--muted); font-size: 13px; min-height: 20px; }
+		.tier .btn, .tier .ghost { width: 100%; text-align: center; justify-content: center; margin: 20px 0 4px; }
+		.tier-badge {
+			display: inline-block; font-size: 11px; font-weight: 600; letter-spacing: 0.5px;
+			text-transform: uppercase; color: var(--accent-2);
+			border: 1px solid rgba(34, 211, 238, 0.3); background: rgba(34, 211, 238, 0.08);
+			padding: 2px 9px; border-radius: 999px; margin-top: 14px;
+		}
+		.tier-list { list-style: none; margin: 16px 0 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+		.tier-list li { position: relative; padding-left: 26px; font-size: 14px; color: var(--text); }
+		.tier-list li::before {
+			content: ""; position: absolute; left: 0; top: 3px; width: 16px; height: 16px;
+			background-repeat: no-repeat; background-position: center; background-size: 16px;
+			background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%2334d399' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M13.5 4.5 6 12 2.5 8.5'/%3E%3C/svg%3E");
+		}
+		.tier-list li b { font-weight: 600; }
+		.tier-inherit { margin: 16px 0 0; font-size: 13px; color: var(--muted); font-style: italic; }
+		.pricing-note { max-width: 760px; margin: 44px auto 0; text-align: center; color: var(--muted); font-size: 15px; }
+		.pricing-note strong { color: var(--text); }
+		.assurance { display: flex; flex-wrap: wrap; justify-content: center; gap: 16px; margin-top: 40px; }
+		.assurance div {
+			flex: 1 1 300px; max-width: 360px; padding: 20px 22px; border-radius: var(--radius);
+			background: var(--surface); border: 1px solid var(--border);
+		}
+		.assurance h3 { font-family: "Space Grotesk", sans-serif; font-size: 15px; margin-bottom: 6px; }
+		.assurance p { font-size: 14px; color: var(--muted); }
+		.faq { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+		.faq details {
+			border: 1px solid var(--border); border-radius: var(--radius);
+			background: var(--surface); padding: 4px 20px;
+		}
+		.faq summary { cursor: pointer; padding: 16px 0; font-weight: 600; font-family: "Space Grotesk", sans-serif; font-size: 15.5px; }
+		.faq summary::-webkit-details-marker { color: var(--accent); }
+		.faq details[open] summary { color: var(--accent); }
+		.faq p { color: var(--muted); font-size: 14.5px; padding: 0 0 16px; }
+	</style>
+</head>
+<body>
+	<div class="bg-mesh" aria-hidden="true"></div>
+	<div class="bg-grid" aria-hidden="true"></div>
+
+	<header class="nav" id="nav">
+		<div class="wrap nav-inner">
+			<a class="brand" href="/" aria-label="SwitchTender"><img src="/assets/logo-train-tracks-dark.png" alt="SwitchTender" class="brand-train"><span class="brand-word">SwitchTender</span></a>
+			<nav class="nav-links">
+				<a href="/#features">Features</a>
+				<a href="/pricing">Pricing</a>
+				<a href="/#compare">Compare</a>
+				<a href="/docs/">Docs</a>
+			</nav>
+			<div class="nav-cta">
+				<a class="ghost" href="https://github.com/kordloom/switchtender">GitHub</a>
+				<a class="btn" href="/get-started">Get started</a>
+			</div>
+			<button class="nav-toggle" id="nav-toggle" aria-label="Menu">
+				<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="7" x2="21" y2="7"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="17" x2="21" y2="17"/></svg>
+			</button>
+		</div>
+	</header>
+
+	<main>
+		<section class="wrap gs-hero reveal">
+			<span class="eyebrow">Pricing</span>
+			<h1>Free to run.<br><span class="grad">Paid to prove it to someone else.</span></h1>
+			<p class="lede">
+				The whole controller is free to self-host, forever, including the tamper-evident hash
+				chain and offline verification. The line gets crossed the moment more than one person is
+				accountable for a change, or someone outside your team needs the evidence. That is what the
+				paid tiers are for. Flat per org, never per seat.
+			</p>
+		</section>
+
+		<section class="section wrap" style="padding-top: 24px;">
+			<div class="cards-3 tiers reveal">
+
+				<article class="card tier">
+					<div class="tier-name">Free</div>
+					<p class="tier-for">Everything AWX does, in one binary, still maintained.</p>
+					<div class="tier-price"><b>$0</b><span class="cadence">forever</span></div>
+					<p class="tier-sub">Self-hosted, single binary, no cluster.</p>
+					<a class="btn" href="/get-started">Get started</a>
+					<ul class="tier-list">
+						<li>Full orchestration: inventory, projects, job templates, schedules, ad hoc runs</li>
+						<li>Single binary with an embedded <b>SQLite</b> store, one file to back up</li>
+						<li>All seven tools: Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, Go</li>
+						<li>Local auth with basic roles</li>
+						<li>REST API and outbound webhooks</li>
+						<li><b>Secrets masking</b> in run logs</li>
+						<li>Hash-chain generation and local verification, the <code>verify</code> command free forever</li>
+						<li>Community support via GitHub issues</li>
+					</ul>
+				</article>
+
+				<article class="card tier tier-featured">
+					<div class="tier-name">Team</div>
+					<p class="tier-for">For when more than one person is accountable for a change.</p>
+					<div class="tier-price"><b>$250&ndash;500</b><span class="cadence">/ mo</span></div>
+					<p class="tier-sub">Flat per org. No per-seat bill.</p>
+					<a class="ghost" href="mailto:hello@kordloom.com?subject=SwitchTender%20Team%20tier">Talk to us</a>
+					<span class="tier-badge">Available at launch</span>
+					<p class="tier-inherit">Everything in Free, plus:</p>
+					<ul class="tier-list">
+						<li><b>SSO and SCIM</b>: OIDC and SAML, with directory-synced users</li>
+						<li>Policy-gated approvals with multiple or required approvers per environment or playbook</li>
+						<li>External approvers who sign off without ever touching the automation UI</li>
+						<li><b>Vault integration</b> with dynamic secrets and lease handling</li>
+						<li>Granular RBAC and multi-team isolation</li>
+						<li>Attestation export as signed <b>LoomSeal</b> bundles</li>
+						<li>Email support with a stated response window</li>
+					</ul>
+				</article>
+
+				<article class="card tier">
+					<div class="tier-name">Governed</div>
+					<p class="tier-for">For orgs handing evidence to someone external.</p>
+					<div class="tier-price"><b>$1,000&ndash;2,500</b><span class="cadence">/ mo</span></div>
+					<p class="tier-sub">Flat per org. Migration priced separately.</p>
+					<a class="ghost" href="mailto:hello@kordloom.com?subject=SwitchTender%20Governed%20tier">Talk to us</a>
+					<span class="tier-badge">Available at launch</span>
+					<p class="tier-inherit">Everything in Team, plus:</p>
+					<ul class="tier-list">
+						<li><b>Evidence packs</b> mapped to common change-management controls, generated on a schedule</li>
+						<li>Independent chain verification an auditor can run without you</li>
+						<li><b>Postgres</b> backend and high availability</li>
+						<li>Air-gapped licensing and offline activation</li>
+						<li>AWX migration assistance, priced separately</li>
+						<li>Priority support with a real SLA</li>
+					</ul>
+				</article>
+
+			</div>
+
+			<p class="pricing-note">
+				All three tiers are published today. <strong>Team and Governed arrive at launch</strong>, and
+				we would rather talk to the first handful of teams than take a card. If a governed workflow is
+				on your roadmap, <a href="mailto:hello@kordloom.com?subject=SwitchTender%20pricing" style="color: var(--accent);">tell us what you need</a> and we will shape it with you.
+			</p>
+		</section>
+
+		<section class="section wrap" style="padding-top: 0;">
+			<div class="section-head reveal">
+				<h2>What stays free, always</h2>
+				<p>Two promises the pricing does not touch, because charging for them would make the product dishonest.</p>
+			</div>
+			<div class="assurance reveal">
+				<div>
+					<h3>The chain is free because it is the point</h3>
+					<p>Generating the tamper-evident hash chain and verifying it locally is free forever. Gating it would make "provable" a sales gimmick. You pay for evidence packs and independent verification, not for the chain existing.</p>
+				</div>
+				<div>
+					<h3>The single-operator product is complete</h3>
+					<p>The controller you run today stays complete: orchestration, the live matrix, all seven tools, the chain, offline verify. The paid tiers add governance for many people and evidence for outside auditors. They do not hold the good parts hostage.</p>
+				</div>
+			</div>
+		</section>
+
+		<section class="section wrap" style="padding-top: 0;">
+			<div class="section-head reveal">
+				<h2>Questions</h2>
+			</div>
+			<div class="faq reveal">
+				<details>
+					<summary>Is it really free, or free-until-you-need-it?</summary>
+					<p>Free to self-host with no seat cap and no expiry. The paid tiers add capabilities the free tier does not have, such as SSO, Vault, and scheduled evidence packs. They do not remove anything from Free or meter what it already does.</p>
+				</details>
+				<details>
+					<summary>Why flat per org instead of per seat?</summary>
+					<p>A controller gets more valuable the more people route work through it. Charging per seat punishes exactly the adoption you want. One org, one flat price, however many operators.</p>
+				</details>
+				<details>
+					<summary>What does the license allow?</summary>
+					<p>SwitchTender is source-available under BSL 1.1. You can read the source, self-host it, and run it in production. The license restricts offering it as a competing hosted service. See the <a href="https://github.com/kordloom/switchtender/blob/main/LICENSE" style="color: var(--accent);">LICENSE</a> for the exact terms.</p>
+				</details>
+				<details>
+					<summary>Can I move from AWX?</summary>
+					<p>Yes. Your AWX export imports in one command on the free tier. For a large or regulated migration, Governed includes hands-on assistance, priced separately. Start with the <a href="/docs/switching-from-awx" style="color: var(--accent);">switching guide</a>.</p>
+				</details>
+				<details>
+					<summary>How do I actually buy Team or Governed?</summary>
+					<p>Email <a href="mailto:hello@kordloom.com?subject=SwitchTender%20pricing" style="color: var(--accent);">hello@kordloom.com</a>. Early on this is founder-led on purpose: we would rather understand your governance needs and get the fit right than sell you a plan you outgrow in a month.</p>
+				</details>
+			</div>
+		</section>
+
+		<section class="cta wrap reveal">
+			<h2>Start free. Upgrade when the stakes do.</h2>
+			<p>Run the whole controller from one binary today. Bring us in when a second person, or an outside auditor, enters the picture.</p>
+			<div class="hero-cta center">
+				<a class="btn big" href="/get-started">Get started</a>
+				<a class="ghost big" href="https://demo.switchtender.com">Live demo</a>
+				<a class="ghost big" href="mailto:hello@kordloom.com?subject=SwitchTender%20pricing">Talk to us</a>
+			</div>
+		</section>
+	</main>
+
+	<footer class="footer">
+		<div class="wrap footer-inner">
+			<img src="/assets/logo-train-tracks-dark.png" alt="SwitchTender" class="foot-logo">
+			<nav>
+				<a href="https://github.com/kordloom/switchtender">GitHub</a>
+				<a href="/docs/">Docs</a>
+				<a href="/pricing">Pricing</a>
+				<a href="/docs/comparison">Compare</a>
+				<a href="/awx-alternative">vs AWX</a>
+				<a href="/aap-alternative">vs AAP</a>
+				<a href="/semaphore-alternative">vs Semaphore</a>
+				<a href="/privacy">Privacy</a>
+				<a href="https://github.com/kordloom/switchtender/blob/main/LICENSE">License</a>
+			</nav>
+			<span class="foot-note">Source-available · BSL 1.1 · self-host free</span>
+		</div>
+		<div style="text-align:center;margin:20px auto 0;font-size:11px;letter-spacing:1.6px;text-transform:uppercase;opacity:.5">A <a href="https://kordloom.com" style="color:inherit;text-decoration:none">KordLoom</a> product</div>
+	</footer>
+	<script src="/app.js?v=6"></script>
+</body>
+</html>
