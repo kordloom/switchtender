@@ -30,12 +30,17 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       - name: Build
         run: go build ./...
       - name: Vet
         run: go vet ./...
       - name: Test
         run: go test -race ./...
+      - name: JS unit tests
+        run: node --test internal/ui/assets/jstest/*.test.mjs
 
   lint:
     runs-on: ubuntu-latest
