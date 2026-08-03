@@ -63,7 +63,7 @@
 			<div class="cards cards-3">
 				<article class="card reveal">
 					<h3>The platform tax</h3>
-					<p>Running AWX means running Kubernetes, the AWX Operator, Postgres, and Redis, then keeping all of it patched. That is a platform team's week, every month, to run playbooks. SwitchTender is one process and one file. Upgrading is replacing a binary.</p>
+					<p>Running AWX means running Kubernetes, the AWX Operator, Postgres, and Redis, then keeping all of it patched. That's a week of platform work every month, just to run playbooks. SwitchTender is one process and one file. Upgrading is replacing a binary.</p>
 				</article>
 				<article class="card reveal">
 					<h3>Ansible-only</h3>
@@ -78,8 +78,8 @@
 
 		<section class="section wrap">
 			<div class="section-head reveal">
-				<h2>The state of AWX, in dated facts</h2>
-				<p>None of this is spin. Every line links to its source, and AWX still works where it already runs. The question is what you stand up next.</p>
+				<h2>The state of AWX, with dates and sources</h2>
+				<p>Every line links to its source, and AWX still works where it already runs. The question is what you stand up next.</p>
 			</div>
 			<div class="cards cards-3">
 				<article class="card reveal">
@@ -147,14 +147,14 @@
 		<section class="section wrap">
 			<div class="section-head reveal">
 				<h2>Where AWX is still ahead</h2>
-				<p>An honest page beats a loud one. AWX has years in production at large organizations, a deep ecosystem of credential types and inventory plugins, and a large community. SwitchTender is new: every claim on this page is backed by a test you can run, and what it does not have yet is that decade of production miles. It earns them the same way AWX did, one fleet at a time, starting with teams who want the capability without the platform. And the ecosystem gap closes differently here: any team can add a tool, a secret engine, an AI provider, or a channel as a drop-in Go plugin binary, no fork and no rebuild of the server.</p>
+				<p>AWX has years in production at large organizations, a deep ecosystem of credential types and inventory plugins, and a large community. SwitchTender is new. Every claim on this page is backed by a test you can run, but it doesn't have AWX's years in production yet. That track record only comes from teams running it, starting with the ones who want the capability without the platform. The ecosystem gap is real, but any team can add a tool, a secret engine, an AI provider, or a channel as a drop-in Go plugin binary, no fork and no rebuild of the server.</p>
 			</div>
 		</section>
 
 		<section class="section wrap">
 			<div class="section-head reveal">
-				<h2>The other exits, honestly</h2>
-				<p><a href="/ascender-alternative">Ascender</a> is a support-backed fork of the same frozen codebase, with the same Kubernetes-shaped footprint. Oracle Linux Automation Manager repackages AWX 24.6.1 for Oracle Linux hosts. Semaphore is light, but a run is a text log, RBAC sits in its paid tier, and there are no workflows. The <a href="/semaphore-alternative">full comparison is here</a>. Moving to CI pipelines works until you need RBAC, schedules, approvals, and an audit trail, at which point you have rebuilt a worse control plane. SwitchTender is the exit that keeps AWX's capabilities without inheriting its architecture.</p>
+				<h2>The other options</h2>
+				<p><a href="/ascender-alternative">Ascender</a> is a support-backed fork of the same frozen codebase, with the same Kubernetes-shaped footprint. Oracle Linux Automation Manager repackages AWX 24.6.1 for Oracle Linux hosts. Semaphore is light, but a run is a text log, RBAC sits in its paid tier, and there are no workflows. The <a href="/semaphore-alternative">full comparison is here</a>. Moving to CI pipelines works until you need RBAC, schedules, approvals, and an audit trail, at which point you have rebuilt a worse control plane. SwitchTender keeps AWX's capabilities without its architecture.</p>
 			</div>
 		</section>
 
