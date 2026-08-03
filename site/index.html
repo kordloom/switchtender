@@ -114,7 +114,7 @@
 				<article class="card reveal">
 					<div class="ic ic-tools"></div>
 					<h3>Multi-tool engine</h3>
-					<p>Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go, each with a dry run. One engine, one UI, one audit trail. Every tool runs on the host or inside a pinned container image, on Docker or Podman. Need an eighth? Write it in Go and plug it in, no fork, no rebuild of the server.</p>
+					<p>Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go, each with a dry run. One engine, one UI, one audit trail, on the host or in a pinned container image. Need an eighth? Write it in Go and plug it in.</p>
 				</article>
 				<article class="card reveal">
 					<div class="ic ic-shards"></div>
@@ -134,23 +134,12 @@
 				<article class="card reveal">
 					<div class="ic ic-schedule"></div>
 					<h3>Schedules you can trust before you save</h3>
-					<p>Type a cron expression and see its next firings before you commit to it, so a bad expression never surprises you at 3am. A scheduled launch carries its template's approvals, notifications, and timeout, and every run it fires records which schedule started it.</p>
+					<p>Type a cron expression and see its next firings before you save it. A scheduled launch carries its template's approvals, notifications, and timeout, and every run records which schedule started it.</p>
 				</article>
 				<article class="card reveal">
 					<div class="ic ic-drift"></div>
 					<h3>Drift detection</h3>
 					<p>A dry run shows exactly what has drifted, across Ansible hosts and Terraform directories, before you touch a thing. One click builds the fix, held for approval. Most of the field does neither.</p>
-				</article>
-				<article class="card reveal">
-					<div class="ic ic-audit"></div>
-					<h3>Provable audit</h3>
-					<p>Every change is linked into a tamper-evident SHA-256 hash chain. A change that cannot be recorded is refused rather than made quietly, and anchoring the chain against a public timestamp authority means a history that has lost its tail says so. Export a signed copy and verify it offline, without trusting the server.</p>
-					<p class="card-bound">What it does not claim: a chain proves the record was not changed, not that a machine recorded everything it should have. Someone who takes root on your controller can change what gets written from that point on. That is the boundary of every audit system, it costs them the whole controller to reach, and it does not hand them the past.</p>
-				</article>
-				<article class="card reveal">
-					<div class="ic ic-secret"></div>
-					<h3>Secrets that can't escape</h3>
-					<p>Sealed at rest, sourced live from Vault, AWS Secrets Manager and STS, Google Secret Manager, Azure Key Vault, CyberArk Conjur and CCP, or 1Password, and masked out of run logs. A tool that prints a secret shows <code>***</code>. Cloud credentials are typed: AWS, Azure, GCP, and VMware inject as the exact variables each tool expects, and a new credential type is a Go plugin, not a fork.</p>
 				</article>
 				<article class="card reveal">
 					<div class="ic ic-gate"></div>
@@ -173,11 +162,6 @@
 					<p>Off by default. Switch it on to triage a failure, answer a fleet question, or draft a run from a sentence. It proposes, never executes. Bring your own model: local Ollama, Claude, or any OpenAI-compatible API.</p>
 				</article>
 				<article class="card reveal">
-					<div class="ic ic-bell"></div>
-					<h3>Notifications everywhere</h3>
-					<p>A finished run reaches Slack, Teams, Discord, Mattermost, Rocket.Chat, ntfy, email, or a webhook. A failure pages PagerDuty or texts through Twilio, and every run annotates Grafana. Eleven channels built in server-wide, and every one routes per template too, so each team pages its own people.</p>
-				</article>
-				<article class="card reveal">
 					<div class="ic ic-doctor"></div>
 					<h3>A doctor for your control plane</h3>
 					<p>One click verifies every registered reference: templates to inventories, projects, and credentials, schedules to templates, every cron expression. Broken links surface with a fix button before they break a run.</p>
@@ -196,6 +180,22 @@
 					<div class="ic ic-lineage"></div>
 					<h3>Every run knows where it came from</h3>
 					<p>Each run records what fired it, the template, schedule, rerun, or drift fix behind it, and who asked. Add labels like env=prod, then search with fielded terms: status:failed host:web01 label:env=prod, resolved across your whole history.</p>
+				</article>
+				<article class="card reveal">
+					<div class="ic ic-bell"></div>
+					<h3>Notifications everywhere</h3>
+					<p>A finished run reaches Slack, Teams, Discord, Mattermost, Rocket.Chat, ntfy, email, or a webhook; a failure pages PagerDuty or texts through Twilio. Eleven channels, server-wide or per template, so each team pages its own people.</p>
+				</article>
+				<article class="card reveal">
+					<div class="ic ic-secret"></div>
+					<h3>Secrets that can't escape</h3>
+					<p>Sealed at rest, sourced live from Vault, AWS, Google, Azure, CyberArk, or 1Password, and masked out of run logs; a tool that prints a secret shows <code>***</code>. Typed cloud credentials inject the exact variables each tool expects.</p>
+				</article>
+				<article class="card reveal">
+					<div class="ic ic-audit"></div>
+					<h3>Provable audit</h3>
+					<p>Every change links into a tamper-evident SHA-256 hash chain; a change that can't be recorded is refused rather than made quietly. Export a signed copy and verify it offline, without trusting the server.</p>
+					<p class="card-bound">What it doesn't claim: the chain proves the record wasn't altered after writing, not that a compromised controller recorded everything. The full boundary statement is in <a href="/docs/concepts#provable-audit">the docs</a>.</p>
 				</article>
 			</div>
 		</section>
