@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 )
 
@@ -36,12 +35,9 @@ func mintVaultDynamic(ctx context.Context, config string) (string, *Lease, error
 	if cfg.Addr == "" || cfg.Path == "" || cfg.Field == "" {
 		return "", nil, fmt.Errorf("%w: vault_dynamic config needs addr, path, and field", ErrResolve)
 	}
-	token := cfg.Token
-	if token == "" {
-		token = os.Getenv("VAULT_TOKEN")
-	}
-	if token == "" {
-		return "", nil, fmt.Errorf("%w: vault_dynamic needs a token in the config or VAULT_TOKEN", ErrResolve)
+	token, err := vaultResolveToken(cfg.Token, cfg.Addr)
+	if err != nil {
+		return "", nil, err
 	}
 
 	addr := strings.TrimRight(cfg.Addr, "/")

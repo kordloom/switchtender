@@ -7,11 +7,18 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 )
 
 // azureAPIVersion is the Key Vault data-plane API version a resolve calls.
 const azureAPIVersion = "7.4"
+
+// azureVaultPattern matches a valid Key Vault name: it starts with a letter or digit and continues
+// with up to 62 more letters, digits, or hyphens. It rejects the '.', '/', '?', '#', '@', ':', '%',
+// and whitespace that could push the vault name past the vault.azure.net authority and send the
+// managed-identity token to an attacker's address.
+var azureVaultPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]{1,62}$`)
 
 // azureResource is the Key Vault resource a token is scoped to, used as the client-credentials scope
 // and the managed-identity resource parameter.
@@ -64,11 +71,10 @@ func resolveAzure(ctx context.Context, config string) (string, error) {
 		return "", fmt.Errorf("%w: azure config needs vault and secret", ErrResolve)
 	}
 
-	base := azureEndpoint
-	if base == "" {
-		base = fmt.Sprintf("https://%s.vault.azure.net", cfg.Vault)
+	base, err := azureVaultBase(cfg.Vault)
+	if err != nil {
+		return "", err
 	}
-	base = strings.TrimRight(base, "/")
 	secretURL := fmt.Sprintf("%s/secrets/%s?api-version=%s", base, cfg.Secret, azureAPIVersion)
 	if cfg.Version != "" {
 		secretURL = fmt.Sprintf("%s/secrets/%s/%s?api-version=%s", base, cfg.Secret, cfg.Version, azureAPIVersion)
@@ -107,6 +113,20 @@ func resolveAzure(ctx context.Context, config string) (string, error) {
 		return "", fmt.Errorf("%w: azure secret has no value", ErrResolve)
 	}
 	return out.Value, nil
+}
+
+// azureVaultBase returns the Key Vault data-plane base URL for a vault name. It validates the name
+// against azureVaultPattern first, so a config-controlled vault name cannot splice past the host and
+// send the request, and any managed-identity token, to an attacker's address. The azureEndpoint test
+// override replaces the computed base, but the name is validated either way.
+func azureVaultBase(vault string) (string, error) {
+	if !azureVaultPattern.MatchString(vault) {
+		return "", fmt.Errorf("%w: azure vault name %q is not a valid Key Vault name", ErrResolve, vault)
+	}
+	if azureEndpoint != "" {
+		return strings.TrimRight(azureEndpoint, "/"), nil
+	}
+	return "https://" + vault + ".vault.azure.net", nil
 }
 
 // azureToken obtains a Key Vault bearer token from the config: a config token used directly, a

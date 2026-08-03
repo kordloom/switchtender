@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 )
@@ -38,19 +39,16 @@ func resolveVault(ctx context.Context, config string) (string, error) {
 	if cfg.Addr == "" || cfg.Path == "" || cfg.Field == "" {
 		return "", fmt.Errorf("%w: vault config needs addr, path, and field", ErrResolve)
 	}
-	token := cfg.Token
-	if token == "" {
-		token = os.Getenv("VAULT_TOKEN")
-	}
-	if token == "" {
-		return "", fmt.Errorf("%w: vault needs a token in the config or VAULT_TOKEN", ErrResolve)
-	}
-
-	url := strings.TrimRight(cfg.Addr, "/") + "/v1/" + strings.TrimLeft(cfg.Path, "/")
-	if err := checkResolveURL(url); err != nil {
+	token, err := vaultResolveToken(cfg.Token, cfg.Addr)
+	if err != nil {
 		return "", err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+
+	reqURL := strings.TrimRight(cfg.Addr, "/") + "/v1/" + strings.TrimLeft(cfg.Path, "/")
+	if err := checkResolveURL(reqURL); err != nil {
+		return "", err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
 		return "", fmt.Errorf("%w: %v", ErrResolve, err)
 	}
@@ -93,6 +91,39 @@ func vaultField(body []byte, field string) (string, error) {
 		return rawToString(raw), nil
 	}
 	return "", fmt.Errorf("field %q not found in the vault secret", field)
+}
+
+// vaultResolveToken returns the token that authenticates a Vault request. A config token is used
+// directly. An empty config token falls back to the VAULT_TOKEN environment secret only when addr
+// points at the server's own pinned VAULT_ADDR, so a config-controlled address cannot exfiltrate the
+// server's Vault token to an arbitrary host. Any other address must carry its own token in the config.
+func vaultResolveToken(configToken, addr string) (string, error) {
+	if configToken != "" {
+		return configToken, nil
+	}
+	if envAddr := os.Getenv("VAULT_ADDR"); envAddr != "" && sameVaultEndpoint(addr, envAddr) {
+		if token := os.Getenv("VAULT_TOKEN"); token != "" {
+			return token, nil
+		}
+	}
+	return "", fmt.Errorf(
+		"%w: vault needs a token in the config, or an addr matching VAULT_ADDR with VAULT_TOKEN set", ErrResolve)
+}
+
+// sameVaultEndpoint reports whether two Vault addresses share a scheme and host, so the VAULT_TOKEN
+// fallback reaches only the server's own pinned address. Scheme and host compare case-insensitively,
+// while a difference in path or trailing slash is ignored, since only the authority decides where the
+// token is sent.
+func sameVaultEndpoint(a, b string) bool {
+	ua, err := url.Parse(strings.TrimRight(a, "/"))
+	if err != nil || ua.Host == "" {
+		return false
+	}
+	ub, err := url.Parse(strings.TrimRight(b, "/"))
+	if err != nil || ub.Host == "" {
+		return false
+	}
+	return strings.EqualFold(ua.Scheme, ub.Scheme) && strings.EqualFold(ua.Host, ub.Host)
 }
 
 // rawToString returns a JSON value as a plain string, unquoting a JSON string and otherwise
