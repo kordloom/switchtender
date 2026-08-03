@@ -113,20 +113,81 @@ func parseExtraVars(raw string) (map[string]any, error) {
 	return out, nil
 }
 
-// safeINIValue reports whether v can be written into an INI inventory as itself.
+// safeININame reports whether s can be written as a host name, group name, or variable key in an INI
+// inventory as itself.
 //
-// A line break is the whole attack. An inventory is assembled from names and variable values that
-// came out of somebody else's export, and a value carrying a newline does not land as a strange host
-// name: it closes the line and starts a new directive. A host named "web1\n[all:vars]\nansible_python_interpreter=/tmp/x"
-// produces a syntactically clean inventory that points Ansible at an arbitrary interpreter on the
-// executor for every play, and "ansible_connection=local" redirects the whole run onto the executor
-// itself. Neither has a command-line counterpart, so an inventory setting them wins.
+// Tokenizing is the whole attack. Ansible's ini inventory plugin splits a host line on whitespace
+// and reads every token after the host name as a key=value host variable, and it reads a bracketed
+// word as a section header. So a name assembled from somebody else's export does not have to carry a
+// newline to take the run over: a host named "web1 ansible_connection=local" lands as host web1 with
+// ansible_connection=local, which redirects the whole play onto the executor, and one carrying
+// ansible_python_interpreter=/tmp/x points Ansible at an interpreter of the export's choosing.
+// Neither has a command-line counterpart, so an inventory setting them wins, and the content is
+// written to a temp file and passed to ansible-playbook as -i verbatim.
 //
-// Values are refused rather than escaped. INI quoting rules differ between the parsers that read
-// these files, so a value that is safe by one reading is not by another, and a migration that
-// silently rewrote somebody's host names would be its own kind of wrong.
-func safeINIValue(v string) bool {
-	return !strings.ContainsAny(v, "\n\r")
+// A name is refused, not rewritten, when it holds ASCII whitespace, '=', '#', '[', ']', or a control
+// character. Each of those changes how the line parses, and a migration that silently renamed
+// somebody's hosts would be its own kind of wrong; an inventory is the list of machines a play
+// reaches, so a dropped-and-reported name beats an altered one.
+func safeININame(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < 0x20 || r == 0x7f {
+			return false
+		}
+		switch r {
+		case ' ', '=', '#', '[', ']':
+			return false
+		}
+	}
+	return true
+}
+
+// hasControl reports whether s holds a control character, including any line break. Such a value
+// cannot be written on a single INI line: Ansible reads the inventory line by line, so a break would
+// start a fresh directive, and even quoting cannot fold it back onto one line.
+func hasControl(s string) bool {
+	for _, r := range s {
+		if r < 0x20 || r == 0x7f {
+			return true
+		}
+	}
+	return false
+}
+
+// renderINIValue encodes v for the value side of an INI host variable and reports whether it can be
+// written at all. A value carrying a control character is refused, because it cannot live on one
+// line. Any other value is quoted when it holds whitespace, a comment mark, or a character shlex
+// would act on, so Ansible reads it as a single value rather than as further host variables; a plain
+// value is written as itself so the ordinary inventory stays readable.
+func renderINIValue(v string) (string, bool) {
+	if hasControl(v) {
+		return "", false
+	}
+	if !strings.ContainsAny(v, " \t#\"'\\") {
+		return v, true
+	}
+	return quoteINIValue(v), true
+}
+
+// quoteINIValue wraps v in double quotes so Ansible's ini inventory plugin reads it as one value.
+// The plugin tokenizes a host line with shlex, which treats a double-quoted run as a single token and
+// honors a backslash before a backslash or a double quote inside it. Both are escaped so the value
+// cannot close its own quotes early and inject further host variables.
+func quoteINIValue(v string) string {
+	var b strings.Builder
+	b.Grow(len(v) + 2)
+	b.WriteByte('"')
+	for i := 0; i < len(v); i++ {
+		if c := v[i]; c == '\\' || c == '"' {
+			b.WriteByte('\\')
+		}
+		b.WriteByte(v[i])
+	}
+	b.WriteByte('"')
+	return b.String()
 }
 
 // buildInventoryINI renders hosts and groups into an INI inventory the file plugins accept. Every
@@ -143,9 +204,10 @@ func buildInventoryINI(plan *Plan, name string, hosts []importHost, groups []imp
 		b.WriteString("\n")
 	}
 	for _, g := range groups {
-		if !safeINIValue(g.Name) {
-			plan.warn("inventory %q: group %q was dropped because its name spans more than one "+
-				"line, which would have written new inventory directives", name, oneLine(g.Name))
+		if !safeININame(g.Name) {
+			plan.warn("inventory %q: group %q was dropped because its name holds whitespace or an "+
+				"inventory metacharacter, which Ansible would read as a new section or extra "+
+				"host variables", name, oneLine(g.Name))
 			continue
 		}
 		fmt.Fprintf(&b, "[%s]\n", g.Name)
@@ -159,9 +221,10 @@ func buildInventoryINI(plan *Plan, name string, hosts []importHost, groups []imp
 
 // hostLine renders one inventory host with any host variables as inline key=value pairs.
 func hostLine(plan *Plan, inv string, h importHost) string {
-	if !safeINIValue(h.Name) {
-		plan.warn("inventory %q: host %q was dropped because its name spans more than one line, "+
-			"which would have written new inventory directives", inv, oneLine(h.Name))
+	if !safeININame(h.Name) {
+		plan.warn("inventory %q: host %q was dropped because its name holds whitespace or an "+
+			"inventory metacharacter, which Ansible would read as extra host variables or a new "+
+			"section", inv, oneLine(h.Name))
 		return ""
 	}
 	var line strings.Builder
@@ -172,11 +235,16 @@ func hostLine(plan *Plan, inv string, h importHost) string {
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
-		value := fmt.Sprintf("%v", h.Variables[k])
-		if !safeINIValue(k) || !safeINIValue(value) {
-			plan.warn("inventory %q: variable %q on host %q was dropped because it spans more "+
-				"than one line, which would have written new inventory directives",
-				inv, oneLine(k), h.Name)
+		if !safeININame(k) {
+			plan.warn("inventory %q: variable %q on host %q was dropped because its name holds "+
+				"whitespace or an inventory metacharacter, which Ansible would read as extra host "+
+				"variables", inv, oneLine(k), h.Name)
+			continue
+		}
+		value, ok := renderINIValue(fmt.Sprintf("%v", h.Variables[k]))
+		if !ok {
+			plan.warn("inventory %q: variable %q on host %q was dropped because its value carries a "+
+				"control character, which cannot be written on a single inventory line", inv, k, h.Name)
 			continue
 		}
 		fmt.Fprintf(&line, " %s=%s", k, value)

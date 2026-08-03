@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
+
 	"github.com/kordloom/switchtender/internal/schedule"
 )
 
@@ -69,6 +71,161 @@ func TestImportedInventoryCannotWriteItsOwnDirectives(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestImportedInventoryCannotInjectViaWhitespace checks that a space in a name or value out of
+// somebody else's export cannot add host variables to the inventory it is written into.
+//
+// The line does not need a newline to be taken over. Ansible's ini inventory plugin tokenizes a host
+// line on whitespace and reads each token after the host name as a key=value host variable, so a host
+// named "web1 ansible_python_interpreter=/tmp/evil" lands as host web1 with an interpreter of the
+// export's choosing, and a value "x ansible_connection=local" adds ansible_connection=local, which
+// redirects the whole play onto the executor. A name carrying the payload is dropped; a value is
+// quoted so it survives as one value. Either way the injected setting never becomes a live variable.
+func TestImportedInventoryCannotInjectViaWhitespace(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Name        string
+		Hosts       []importHost
+		Group       []importGroup
+		WantDropped bool
+	}{{ // Test 0: The host name carries a space-separated payload.
+		Name:        "host name",
+		Hosts:       []importHost{{Name: "web1 ansible_python_interpreter=/tmp/evil"}},
+		WantDropped: true,
+	}, { // Test 1: A variable name carries it, since the key side tokenizes too.
+		Name: "variable name",
+		Hosts: []importHost{{
+			Name:      "web1",
+			Variables: map[string]any{"x ansible_python_interpreter": "/tmp/evil"},
+		}},
+		WantDropped: true,
+	}, { // Test 2: A variable value carries it and is quoted rather than dropped.
+		Name: "variable value",
+		Hosts: []importHost{{
+			Name:      "web1",
+			Variables: map[string]any{"ansible_user": "x ansible_connection=local"},
+		}},
+		WantDropped: false,
+	}, { // Test 3: A group name carries it.
+		Name: "group name",
+		Group: []importGroup{{
+			Name:  "db ansible_python_interpreter=/tmp/evil",
+			Hosts: []importHost{{Name: "db1"}},
+		}},
+		WantDropped: true,
+	}}
+	for _, test := range tests {
+		t.Run(test.Name, func(t *testing.T) {
+			t.Parallel()
+			plan := &Plan{}
+			got := buildInventoryINI(plan, "prod fleet", test.Hosts, test.Group)
+			for key := range parseINIHostVars(t, got) {
+				if key == "ansible_connection" || key == "ansible_python_interpreter" {
+					t.Errorf("the generated inventory set %q as a live host variable, so the export "+
+						"took over the run:\n%s", key, got)
+				}
+			}
+			if test.WantDropped && len(plan.Warnings) == 0 {
+				t.Error("a hostile name was dropped with no warning, so a reviewer never learns of it")
+			}
+			for _, w := range plan.Warnings {
+				if strings.Contains(w, "\n") {
+					t.Errorf("a warning spans lines, so the report can be dressed up as several "+
+						"messages by the thing it reports on: %q", w)
+				}
+			}
+		})
+	}
+}
+
+// TestLegitimateSpacedValueSurvivesAsOneValue checks that quoting keeps a real value with a space
+// intact rather than dropping or splitting it, so the safety guard does not cost legitimate data.
+func TestLegitimateSpacedValueSurvivesAsOneValue(t *testing.T) {
+	t.Parallel()
+	plan := &Plan{}
+	got := buildInventoryINI(plan, "prod", []importHost{
+		{Name: "web1", Variables: map[string]any{"description": "two words"}},
+	}, nil)
+
+	want := map[string]string{"description": "two words"}
+	if diff := cmp.Diff(want, parseINIHostVars(t, got)); diff != "" {
+		t.Errorf("a legitimate spaced value was not preserved as one value (-want +got):\n%s\n"+
+			"inventory:\n%s", diff, got)
+	}
+	if len(plan.Warnings) != 0 {
+		t.Errorf("a legitimate value produced warnings: %v", plan.Warnings)
+	}
+}
+
+// parseINIHostVars reads the host variables out of a generated inventory the way Ansible's ini
+// inventory plugin does, so a test can assert what a line actually sets rather than matching
+// substrings that a quoted value legitimately contains. It returns the variables merged across every
+// host line.
+func parseINIHostVars(t *testing.T, content string) map[string]string {
+	t.Helper()
+	vars := map[string]string{}
+	for _, line := range strings.Split(content, "\n") {
+		if line == "" || strings.HasPrefix(line, "[") {
+			continue
+		}
+		tokens := shlexTokens(line)
+		for _, tok := range tokens[1:] { // Skip the host name.
+			if k, v, ok := strings.Cut(tok, "="); ok {
+				vars[k] = v
+			}
+		}
+	}
+	return vars
+}
+
+// shlexTokens splits a host line the way Ansible's ini plugin does, with shlex in posix mode: it
+// breaks on unquoted whitespace, drops the rest of the line at an unquoted '#', and honors single
+// quotes as literal runs and double quotes with a backslash escape before a backslash or a double
+// quote. It exists so the injection tests measure the real parse rather than the raw text.
+func shlexTokens(s string) []string {
+	var tokens []string
+	var cur strings.Builder
+	inToken := false
+	for i := 0; i < len(s); {
+		switch c := s[i]; c {
+		case '#':
+			i = len(s)
+		case ' ', '\t':
+			if inToken {
+				tokens = append(tokens, cur.String())
+				cur.Reset()
+				inToken = false
+			}
+			i++
+		case '\'':
+			inToken = true
+			for i++; i < len(s) && s[i] != '\''; i++ {
+				cur.WriteByte(s[i])
+			}
+			i++
+		case '"':
+			inToken = true
+			for i++; i < len(s) && s[i] != '"'; {
+				if s[i] == '\\' && i+1 < len(s) && (s[i+1] == '"' || s[i+1] == '\\') {
+					cur.WriteByte(s[i+1])
+					i += 2
+					continue
+				}
+				cur.WriteByte(s[i])
+				i++
+			}
+			i++
+		default:
+			inToken = true
+			cur.WriteByte(c)
+			i++
+		}
+	}
+	if inToken {
+		tokens = append(tokens, cur.String())
+	}
+	return tokens
 }
 
 // TestOrdinaryInventoryStillImports checks the guard did not break the normal case.
