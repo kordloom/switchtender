@@ -131,3 +131,71 @@ func TestUserNewRequiresPassword(t *testing.T) {
 		t.Error("runUserNew() with no password = nil error, want a refusal")
 	}
 }
+
+// TestTokenNewUserBinding verifies --user binds the minted token to the named account, so it
+// carries that account's role instead of acting as unscoped admin. This is the least-privilege
+// path for an automation or an AI agent: an operator-bound token can submit runs but cannot
+// approve its own held work.
+func TestTokenNewUserBinding(t *testing.T) {
+	db := filepath.Join(t.TempDir(), "tokens.db")
+	tokenDB, tokenName, tokenUser = db, "agent-bot", "agent-bot"
+	t.Cleanup(func() { tokenDB, tokenName, tokenUser = "", "", "" })
+
+	bundle, err := openBundle(db)
+	if err != nil {
+		t.Fatalf("openBundle() error = %v", err)
+	}
+	if err := bundle.Users().Save(context.Background(), &user.User{
+		ID: "usr_agent", Username: "agent-bot", Role: user.RoleOperator,
+	}); err != nil {
+		t.Fatalf("Save() user error = %v", err)
+	}
+	if err := bundle.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	if err := runTokenNew(testCommand(), nil); err != nil {
+		t.Fatalf("runTokenNew() with --user error = %v", err)
+	}
+
+	tokens, _, closeStores, err := openTokens(db)
+	if err != nil {
+		t.Fatalf("openTokens() error = %v", err)
+	}
+	defer func() { _ = closeStores() }()
+	list, err := tokens.List(context.Background())
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(list) != 1 || list[0].UserID != "usr_agent" {
+		t.Fatalf("stored tokens = %+v, want one bound to usr_agent: an unbound token acts as "+
+			"admin, which lets an agent approve its own runs", list)
+	}
+}
+
+// TestTokenNewUserUnknownRefused verifies a --user naming no account is refused and mints
+// nothing. Failing open here would mint an unscoped admin token under a name the operator
+// believed was confined.
+func TestTokenNewUserUnknownRefused(t *testing.T) {
+	db := filepath.Join(t.TempDir(), "tokens.db")
+	tokenDB, tokenName, tokenUser = db, "agent-bot", "no-such-account"
+	t.Cleanup(func() { tokenDB, tokenName, tokenUser = "", "", "" })
+
+	if err := runTokenNew(testCommand(), nil); err == nil ||
+		!strings.Contains(err.Error(), "no account named") {
+		t.Fatalf("runTokenNew() error = %v, want a refusal naming the missing account", err)
+	}
+
+	tokens, _, closeStores, err := openTokens(db)
+	if err != nil {
+		t.Fatalf("openTokens() error = %v", err)
+	}
+	defer func() { _ = closeStores() }()
+	list, err := tokens.List(context.Background())
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(list) != 0 {
+		t.Fatalf("tokens after refused mint = %d, want 0", len(list))
+	}
+}
