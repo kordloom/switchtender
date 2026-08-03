@@ -10,7 +10,7 @@
 	<meta property="og:description" content="Your agents are changing production. Prove exactly what they did: one scoped token per agent, a human approval gate on every run, and a sealed audit chain an auditor verifies offline.">
 	<meta property="og:type" content="website">
 	<meta property="og:url" content="https://switchtender.com/agents">
-	<meta property="og:image" content="https://switchtender.com/assets/screenshot-fleet.png?v=8">
+	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
 	<meta name="twitter:card" content="summary_large_image">
 	<link rel="icon" href="/favicon.ico" sizes="any">
 	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
@@ -18,7 +18,7 @@
 	<link rel="preconnect" href="https://fonts.googleapis.com">
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-	<link rel="stylesheet" href="/styles.css?v=25">
+	<link rel="stylesheet" href="/styles.css?v=26">
 </head>
 <body>
 	<div class="bg-mesh" aria-hidden="true"></div>
@@ -90,7 +90,7 @@
 		<section class="section wrap">
 			<div class="section-head reveal">
 				<h2>The one-credential architecture</h2>
-				<p>An agent with a pile of credentials has a pile of doors. An agent with one credential has one, and SwitchTender puts a gate on it. <code>switchtender token new --user</code> binds a token to an account, so a token bound to an operator carries the operator role: it can submit runs, but it cannot approve its own work and it cannot change configuration. Add one empty approval policy and every run the agent submits waits for a person. Four commands take you from nothing to an agent whose entire history is evidence.</p>
+				<p>An agent with a pile of credentials has a pile of doors. An agent with one credential has one, and SwitchTender puts a gate on it. <code>switchtender token new --user</code> binds a token to an account, so a token bound to an operator carries the operator role. It can submit runs, but it cannot approve its own work and it cannot change configuration. Add one empty approval policy and every run the agent submits waits for a person. Four commands take you from nothing to an agent whose entire history is evidence.</p>
 			</div>
 			<div class="gs-steps">
 				<ol>
@@ -133,7 +133,7 @@
 		<section class="section wrap">
 			<div class="section-head reveal">
 				<h2>What the chain does not prove</h2>
-				<p>The chain proves the record was not altered. It does not prove that every change in your infrastructure went through SwitchTender: a person or a process holding its own SSH key can still change a host behind the controller's back, and no audit system can write down what it never saw. For agents, credential scoping is what closes that gap. An agent that holds only a SwitchTender token has no way around the controller, so for that actor, the recorded history and the actual history are the same thing.</p>
+				<p>The chain proves the record was not altered. It does not prove that every change in your infrastructure went through SwitchTender. A person or a process holding its own SSH key can still change a host behind the controller's back, and no audit system can write down what it never saw. For agents, credential scoping is what closes that gap. An agent that holds only a SwitchTender token has no way around the controller, so for that actor, the recorded history and the actual history are the same thing.</p>
 			</div>
 		</section>
 

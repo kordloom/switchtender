@@ -364,11 +364,11 @@ const layout = `<!DOCTYPE html>
 	<meta property="og:description" content="{{.Description}}">
 	<meta property="og:type" content="article">
 	<meta property="og:url" content="{{.Canonical}}">
-	<meta property="og:image" content="https://switchtender.com/assets/screenshot-fleet.png?v=7">
+	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
 	<meta name="twitter:card" content="summary_large_image">
 	<meta name="twitter:title" content="{{.Title}} | SwitchTender docs">
 	<meta name="twitter:description" content="{{.Description}}">
-	<meta name="twitter:image" content="https://switchtender.com/assets/screenshot-fleet.png?v=7">
+	<meta name="twitter:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
 {{- if .HeadExtra}}
 	{{.HeadExtra}}
 {{- end}}
