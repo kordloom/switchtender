@@ -81,9 +81,13 @@ code, pre { font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, 
 	border-left: 3px solid var(--accent); padding: 4px 0 4px 18px; margin: 18px 0; color: var(--muted);
 }
 
+/* A bare URL used as link text cannot wrap; let it break rather than widen the page. */
+.prose a { overflow-wrap: anywhere; }
 .prose table {
 	width: 100%; border-collapse: collapse; margin: 20px 0; font-size: 14px;
-	border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden;
+	border: 1px solid var(--border); border-radius: var(--radius);
+	/* A wide table scrolls inside its own box on a narrow screen instead of widening the page. */
+	display: block; overflow-x: auto;
 }
 .prose th, .prose td { padding: 11px 14px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: top; }
 .prose thead th { background: var(--surface-2); font-weight: 600; color: var(--text); font-size: 13px; text-transform: uppercase; letter-spacing: 0.02em; }
