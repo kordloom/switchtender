@@ -414,6 +414,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /v1/audit", auditHandler(s.audits, s.log))
 	mux.Handle("GET /v1/audit/verify", auditVerifyHandler(s.audits, s.log))
 	mux.Handle("GET /v1/audit/export", auditExportHandler(s.audits, s.auditSigner, s.log))
+	// Served unauthenticated: the beat feed exists so an outside watcher can see the chain is
+	// alive and whole, and that watcher has no account here.
+	mux.Handle("GET /v1/audit/beats", auditBeatsHandler(s.audits, s.log))
 	// Served unversioned and unauthenticated: a relying party checking a bundle has no account here,
 	// and the document holds only the public half of the signing key.
 	mux.Handle("GET /.well-known/loomseal.json", trustHandler(s.producer, s.productVersion, s.log))

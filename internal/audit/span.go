@@ -40,6 +40,33 @@ func ParseSpanPath(path string) (beat, count int64, cadenceS int, ok bool) {
 	return b, c, s, true
 }
 
+// IsSpanMarker reports whether the entry is a well-formed span beat: the span actor, the span
+// method, and a path that round-trips through ParseSpanPath. The combination is reserved. Every
+// reader of the chain, from the beat numbering in AppendSpanBeat to the bundle builder and the
+// public feed, treats such an entry as a beat the server minted, so a store must refuse it on any
+// path other than AppendSpanBeat or a caller could inject a beat that renumbers the real ones and
+// fails every bundle built over the chain. An entry that wears the marker but whose path does not
+// round-trip is not a span marker; it stays an ordinary entry everywhere.
+func IsSpanMarker(e *Entry) bool {
+	if e.Actor != SpanActor || e.Method != SpanMethod {
+		return false
+	}
+	_, _, _, ok := ParseSpanPath(e.Path)
+	return ok
+}
+
+// NextSpanBeat computes the next beat number and its count from the chain head sequence and the
+// newest well-formed span entry's sequence and beat. A lastSpanBeat below one means the chain
+// holds no span entry: the first beat is one and its count is every prior entry, which is headSeq
+// itself. Otherwise the beat increases by exactly one and the count is the number of entries
+// appended after the last span entry.
+func NextSpanBeat(headSeq, lastSpanSeq, lastSpanBeat int64) (beat, count int64) {
+	if lastSpanBeat < 1 {
+		return 1, headSeq
+	}
+	return lastSpanBeat + 1, headSeq - lastSpanSeq
+}
+
 // NewSpanEntry builds the chain entry for one beat. It is appended like any mutation, so the
 // chain commits to the beat the same way it commits to a change.
 func NewSpanEntry(at time.Time, beat, count int64, cadenceS int) *Entry {

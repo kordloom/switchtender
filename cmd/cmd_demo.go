@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
@@ -20,6 +21,7 @@ import (
 	"github.com/kordloom/switchtender/internal/logutil"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/server"
+	"github.com/kordloom/switchtender/internal/spanbeat"
 )
 
 // demoAddr holds the value of the demo --addr flag.
@@ -33,6 +35,10 @@ var demoNoSeed bool
 
 // demoSeedOnly holds the value of the demo --seed-only flag.
 var demoSeedOnly bool
+
+// demoSpanCadence holds the value of the demo --span-cadence flag, how often a span beat is
+// appended to the audit chain. Zero leaves beats off.
+var demoSpanCadence time.Duration
 
 // demoCmd runs a seeded, read-only SwitchTender instance for evaluation. It fills a fresh database
 // with sample projects, templates, inventories, and real runs, then serves it with every mutating
@@ -54,6 +60,9 @@ func init() {
 			"a gap in service.")
 	demoCmd.Flags().BoolVar(&demoSeedOnly, "seed-only", false,
 		"Seed the database and exit without serving, so the result can be swapped in later.")
+	demoCmd.Flags().DurationVar(&demoSpanCadence, "span-cadence", 0,
+		"Append a span beat to the audit chain this often, for example 60s. Whole seconds only. "+
+			"Zero leaves beats off.")
 }
 
 // runDemo seeds a database and serves it read-only until interrupted.
@@ -91,6 +100,10 @@ func runDemo(cmd *cobra.Command, _ []string) error {
 	if demoNoSeed && demoSeedOnly {
 		return errors.New("--no-seed and --seed-only are opposites; pass at most one")
 	}
+	if demoSpanCadence != 0 && (demoSpanCadence < time.Second || demoSpanCadence%time.Second != 0) {
+		return fmt.Errorf("--span-cadence must be a whole number of seconds, at least 1s, got %s",
+			demoSpanCadence)
+	}
 	if demoNoSeed {
 		log.Info("demo: serving the database as it stands, no seeding")
 	} else {
@@ -113,6 +126,16 @@ func runDemo(cmd *cobra.Command, _ []string) error {
 	if demoSeedOnly {
 		log.Info("demo: seeded, exiting without serving")
 		return nil
+	}
+
+	// The demo serves read-only, but beats are server-initiated writes to the audit store rather
+	// than API mutations, so the live feed works there too. A --seed-only run returns above and
+	// never starts the emitter.
+	if demoSpanCadence > 0 {
+		beats := spanbeat.NewEmitter(bundle.Audits(), demoSpanCadence, log)
+		beats.Start()
+		defer beats.Close()
+		log.Info("span beats enabled", zap.Duration("cadence", demoSpanCadence))
 	}
 
 	sealer := newSealerFromEnv(log)

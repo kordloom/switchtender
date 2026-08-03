@@ -443,6 +443,12 @@ func (g *authGate) protects(r *http.Request) bool {
 	if r.Method == http.MethodGet && p == "/.well-known/loomseal.json" {
 		return false
 	}
+	// The span beat feed is how an outside watcher notices a chain that went quiet or lost its
+	// tail. Like the trust document, it exists for a party with no account here, and a feed that
+	// needs a token cannot be watched by the one the record is meant to convince.
+	if r.Method == http.MethodGet && p == "/audit/beats" {
+		return false
+	}
 	// Sign in must be reachable while the API is enforced.
 	if r.Method == http.MethodPost && p == "/auth/login" {
 		return false

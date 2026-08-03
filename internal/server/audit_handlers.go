@@ -43,6 +43,73 @@ func auditHandler(store audit.Store, log *zap.Logger) http.HandlerFunc {
 	}
 }
 
+// beatRecord is one span beat as the public feed reports it.
+type beatRecord struct {
+	// Beat is the beat number, starting at one and increasing by exactly one per beat.
+	Beat int64 `json:"beat"`
+	// At is when the beat was appended, RFC 3339 UTC.
+	At string `json:"at"`
+	// Seq is the beat entry's position in the audit chain.
+	Seq int64 `json:"seq"`
+	// Head is the beat entry's own chain hash, the head the beat attests.
+	Head string `json:"head"`
+}
+
+// defaultBeatLimit caps how many beats the feed returns when the caller sets no limit, and stands
+// in for a limit that does not parse or falls outside [1, maxBeatLimit].
+const defaultBeatLimit = 1000
+
+// maxBeatLimit is the most beats one feed request may ask for. The feed is unauthenticated, so the
+// limit is what bounds the work a stranger can demand per request.
+const maxBeatLimit = 10000
+
+// beatLimit returns the feed limit for the request: the limit parameter when it is a number within
+// [1, maxBeatLimit], the default otherwise.
+func beatLimit(r *http.Request) int {
+	v := r.URL.Query().Get("limit")
+	if v == "" {
+		return defaultBeatLimit
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 1 || n > maxBeatLimit {
+		return defaultBeatLimit
+	}
+	return n
+}
+
+// auditBeatsHandler serves the span beat feed: every well-formed span entry, oldest first, so an
+// outside watcher sees a missing or duplicate beat. When more beats exist than the limit, the
+// newest are kept and the answer stays oldest first within itself, since a watcher cares about
+// the present end of the stream. It is served without authentication for the same reason the
+// trust document is: the watcher is the party the record is meant to convince, and has no
+// account here, which is also why the store filters the beats rather than the handler walking the
+// whole chain: an anonymous request must not cost a full table scan.
+func auditBeatsHandler(store audit.Store, log *zap.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if store == nil {
+			respondError(w, log, http.StatusNotFound, "audit trail not enabled")
+			return
+		}
+		entries, err := store.SpanBeats(r.Context(), beatLimit(r))
+		if err != nil {
+			log.Error("server: span beats: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not read the audit trail")
+			return
+		}
+		beats := []beatRecord{}
+		for _, e := range entries {
+			beat, _, _, ok := audit.ParseSpanPath(e.Path)
+			if !ok {
+				continue
+			}
+			beats = append(beats, beatRecord{
+				Beat: beat, At: e.At.UTC().Format(time.RFC3339Nano), Seq: e.Seq, Head: e.Hash,
+			})
+		}
+		respondJSON(w, log, http.StatusOK, beats, wantsPretty(r))
+	}
+}
+
 // auditVerifyResponse reports whether the audit hash chain is intact.
 type auditVerifyResponse struct {
 	// OK is true when every entry's hash and link check out.

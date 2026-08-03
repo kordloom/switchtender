@@ -226,13 +226,19 @@ func TestPerTemplateEmailReachesTargetRecipient(t *testing.T) {
 		t.Fatalf("Submit() error = %v", err)
 	}
 	waitTerminal(t, store, created.ID)
-	select {
-	case <-emailer.sent:
-		want := []string{"oncall@example.com", "lead@example.com"}
-		if got := emailer.recipients(); !slices.Equal(got, want) {
-			t.Errorf("recipients = %v, want the template's list %v", got, want)
+	// The server-wide Send and the per-template SendTo feed the same channel, and only SendTo
+	// records recipients, so the first receive proves nothing about which call arrived. Poll the
+	// recorded recipients until they match or the deadline passes.
+	want := []string{"oncall@example.com", "lead@example.com"}
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		got := emailer.recipients()
+		if slices.Equal(got, want) {
+			return
 		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("per-template email target was not sent")
+		if time.Now().After(deadline) {
+			t.Fatalf("recipients = %v, want the template's list %v", got, want)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }

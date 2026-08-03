@@ -40,6 +40,7 @@ import (
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/schedule"
 	"github.com/kordloom/switchtender/internal/server"
+	"github.com/kordloom/switchtender/internal/spanbeat"
 	"github.com/kordloom/switchtender/internal/sqlitestore"
 	"github.com/kordloom/switchtender/internal/team"
 	"github.com/kordloom/switchtender/internal/template"
@@ -219,6 +220,15 @@ var (
 	serveAIModel          string
 	serveAIURL            string
 )
+
+// spanCadence holds the value of the --span-cadence flag, how often a span beat is appended to the
+// audit chain. Zero leaves beats off; when set it must be a whole number of seconds of at least
+// one, since the cadence is committed into every beat entry.
+var spanCadence time.Duration
+
+// serveAnchorTSAURL holds the value of the --anchor-tsa-url flag, the RFC 3161 timestamp authority
+// that anchors each span beat. Empty emits beats without anchors, which still verify.
+var serveAnchorTSAURL string
 
 // retainRuns holds the value of the --retain-runs flag, a duration like 90d.
 var retainRuns string
@@ -503,6 +513,12 @@ func init() {
 		"Base URL for the AI provider, for a self-hosted Ollama or a proxy. Empty uses the default.")
 	serveCmd.Flags().StringArrayVar(&serveJWTRoleMap, "jwt-role-map", nil,
 		"Map a token group to a role as group=role. A matched group sets the role on every request. Repeatable.")
+	serveCmd.Flags().DurationVar(&spanCadence, "span-cadence", 0,
+		"Append a span beat to the audit chain this often, for example 60s. Whole seconds only. "+
+			"Zero leaves beats off.")
+	serveCmd.Flags().StringVar(&serveAnchorTSAURL, "anchor-tsa-url", "",
+		"RFC 3161 timestamp authority that anchors each span beat, for example "+defaultTSA+". "+
+			"Empty emits beats without anchors.")
 	serveCmd.Flags().StringVar(&retainRuns, "retain-runs", "",
 		"Delete terminal runs older than this, for example 90d. Empty keeps them forever.")
 	serveCmd.Flags().StringVar(&retainEvents, "retain-events", "",
@@ -786,6 +802,37 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		retention.WithInterval(retentionInterval))
 	sweeper.Start()
 	defer sweeper.Close()
+
+	if spanCadence != 0 && (spanCadence < time.Second || spanCadence%time.Second != 0) {
+		return fmt.Errorf("--span-cadence must be a whole number of seconds, at least 1s, got %s",
+			spanCadence)
+	}
+	if spanCadence > 0 {
+		var beatOpts []spanbeat.Option
+		if serveAnchorTSAURL != "" {
+			anchors, ok := bundle.Audits().(audit.AnchorStore)
+			if !ok {
+				return fmt.Errorf("--anchor-tsa-url is set but this store keeps no anchors")
+			}
+			client := &http.Client{Timeout: anchorTimeout}
+			beatOpts = append(beatOpts, spanbeat.WithAnchorFunc(
+				func(ctx context.Context, e *audit.Entry) error {
+					ctx, cancel := context.WithTimeout(ctx, anchorTimeout)
+					defer cancel()
+					a, err := audit.NewAnchor(ctx, client, audit.AnchorRFC3161, serveAnchorTSAURL,
+						e.Seq, e.Hash, time.Now())
+					if err != nil {
+						return err
+					}
+					return anchors.SaveAnchor(ctx, a)
+				}))
+			log.Info("span beats will be anchored", zap.String("tsa", serveAnchorTSAURL))
+		}
+		beats := spanbeat.NewEmitter(bundle.Audits(), spanCadence, log, beatOpts...)
+		beats.Start()
+		defer beats.Close()
+		log.Info("span beats enabled", zap.Duration("cadence", spanCadence))
+	}
 
 	var oidcAuth *server.OIDCAuth
 	if serveOIDCIssuer != "" {
