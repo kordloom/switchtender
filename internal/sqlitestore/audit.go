@@ -67,7 +67,10 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
 
 // AppendSpanBeat mints and appends the next span beat under the append mutex and inside a
 // transaction, so the beat read, the count, and the insert are one atomic step and concurrent
-// callers cannot mint the same beat.
+// callers cannot mint the same beat. A time that does not advance past the newest beat is refused
+// with audit.ErrClockBehind and nothing is written: a beat's time is a signed claim, so writing a
+// time the clock did not read would be a false statement in an attestation. The skipped beat
+// surfaces as a reported gap, and its number waits for the next beat the chain accepts.
 func (s *auditStore) AppendSpanBeat(ctx context.Context, at time.Time, cadenceS int) (*audit.Entry, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -85,11 +88,17 @@ func (s *auditStore) AppendSpanBeat(ctx context.Context, at time.Time, cadenceS 
 	if prev != nil {
 		headSeq = prev.Seq
 	}
-	lastSpanSeq, lastSpanBeat, err := lastSpan(ctx, tx)
+	lastSpanSeq, lastSpanBeat, lastSpanAt, err := lastSpan(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
 	beat, count := audit.NextSpanBeat(headSeq, lastSpanSeq, lastSpanBeat)
+	// The time is checked inside this transaction, against the same newest beat the numbering came
+	// from, so a clock that stepped backward skips the beat instead of minting one that fails every
+	// bundle covering the pair. See audit.CheckBeatAdvance.
+	if err := audit.CheckBeatAdvance(at, lastSpanAt, beat); err != nil {
+		return nil, fmt.Errorf("append span beat: %w", err)
+	}
 	e := audit.NewSpanEntry(at, beat, count, cadenceS)
 	audit.Link(prev, e)
 	const q = `INSERT INTO audit_entries (id, at, actor, method, path, seq, prev_hash, hash)
@@ -104,33 +113,42 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
 	return e, nil
 }
 
-// lastSpan returns the newest well-formed span entry's sequence and beat, or zeros when the chain
-// holds none. Span-marked rows are walked newest first, and one whose path does not round-trip is
-// skipped: it is an ordinary entry that merely wears the actor, so it must not supply a beat.
-func lastSpan(ctx context.Context, tx *sql.Tx) (int64, int64, error) {
-	const q = `SELECT seq, path FROM audit_entries WHERE actor = ? AND method = ?
+// lastSpan returns the newest well-formed span entry's sequence, beat, and recorded time, or zeros
+// when the chain holds none. Span-marked rows are walked newest first, and one whose path does not
+// round-trip is skipped: it is an ordinary entry that merely wears the actor, so it must not supply
+// a beat. The time comes back with the rest because the next beat is checked against it, and both
+// reads have to see the same row.
+func lastSpan(ctx context.Context, tx *sql.Tx) (int64, int64, time.Time, error) {
+	const q = `SELECT seq, path, at FROM audit_entries WHERE actor = ? AND method = ?
 ORDER BY seq DESC`
 	rows, err := tx.QueryContext(ctx, q, audit.SpanActor, audit.SpanMethod)
 	if err != nil {
-		return 0, 0, fmt.Errorf("last span: %w", err)
+		return 0, 0, time.Time{}, fmt.Errorf("last span: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var (
 			seq  int64
 			path string
+			at   string
 		)
-		if err := rows.Scan(&seq, &path); err != nil {
-			return 0, 0, fmt.Errorf("last span: %w", err)
+		if err := rows.Scan(&seq, &path, &at); err != nil {
+			return 0, 0, time.Time{}, fmt.Errorf("last span: %w", err)
 		}
-		if beat, _, _, ok := audit.ParseSpanPath(path); ok {
-			return seq, beat, nil
+		beat, _, _, ok := audit.ParseSpanPath(path)
+		if !ok {
+			continue
 		}
+		parsed, err := sqlutil.ParseTime(at)
+		if err != nil {
+			return 0, 0, time.Time{}, fmt.Errorf("last span: %w", err)
+		}
+		return seq, beat, parsed, nil
 	}
 	if err := rows.Err(); err != nil {
-		return 0, 0, fmt.Errorf("last span: %w", err)
+		return 0, 0, time.Time{}, fmt.Errorf("last span: %w", err)
 	}
-	return 0, 0, nil
+	return 0, 0, time.Time{}, nil
 }
 
 // head returns the current chain head, the entry with the highest sequence, or nil when empty. It
@@ -150,14 +168,16 @@ func (s *auditStore) head(ctx context.Context, q rowQuerier) (*audit.Entry, erro
 // SpanBeats returns the newest limit span beat entries, oldest first. The database narrows to
 // span-marked rows and hands them back newest first, and the scan stops once limit well-formed
 // beats are in hand, so the feed never loads the whole chain. A near-miss row that wears the
-// marker without a round-tripping path is an ordinary entry and is skipped without using a slot.
+// marker without a round-tripping path is an ordinary entry and is skipped without using a slot,
+// so the SQL limit is a multiple of what was asked for rather than the limit itself. See
+// audit.SpanScanLimit.
 func (s *auditStore) SpanBeats(ctx context.Context, limit int) ([]*audit.Entry, error) {
 	if limit < 1 {
 		limit = 1
 	}
 	const q = `SELECT id, at, actor, method, path, seq, prev_hash, hash FROM audit_entries
-WHERE actor = ? AND method = ? ORDER BY seq DESC, id DESC`
-	rows, err := s.db.QueryContext(ctx, q, audit.SpanActor, audit.SpanMethod)
+WHERE actor = ? AND method = ? ORDER BY seq DESC, id DESC LIMIT ?`
+	rows, err := s.db.QueryContext(ctx, q, audit.SpanActor, audit.SpanMethod, audit.SpanScanLimit(limit))
 	if err != nil {
 		return nil, fmt.Errorf("span beats: %w", err)
 	}

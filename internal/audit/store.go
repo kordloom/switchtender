@@ -75,7 +75,11 @@ func (m *memStore) Append(_ context.Context, e *Entry) error {
 }
 
 // AppendSpanBeat mints and appends the next span beat under the append mutex, so the beat read and
-// the append are one atomic step and concurrent callers cannot mint the same beat.
+// the append are one atomic step and concurrent callers cannot mint the same beat. A time that does
+// not advance past the newest beat is refused with ErrClockBehind and nothing is written: a beat's
+// time is a signed claim, so writing a time the clock did not read would be a false statement in an
+// attestation. The skipped beat surfaces as a reported gap, and its number waits for the next beat
+// the chain accepts.
 func (m *memStore) AppendSpanBeat(_ context.Context, at time.Time, cadenceS int) (*Entry, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -86,6 +90,7 @@ func (m *memStore) AppendSpanBeat(_ context.Context, at time.Time, cadenceS int)
 		headSeq = prev.Seq
 	}
 	var lastSpanSeq, lastSpanBeat int64
+	var lastSpanAt time.Time
 	for i := len(m.entries) - 1; i >= 0; i-- {
 		e := m.entries[i]
 		if e.Actor != SpanActor || e.Method != SpanMethod {
@@ -94,11 +99,17 @@ func (m *memStore) AppendSpanBeat(_ context.Context, at time.Time, cadenceS int)
 		// A span-marked entry whose path does not round-trip is an ordinary entry that merely
 		// wears the actor, so it is skipped rather than trusted for a beat number.
 		if b, _, _, ok := ParseSpanPath(e.Path); ok {
-			lastSpanSeq, lastSpanBeat = e.Seq, b
+			lastSpanSeq, lastSpanBeat, lastSpanAt = e.Seq, b, e.At
 			break
 		}
 	}
 	beat, count := NextSpanBeat(headSeq, lastSpanSeq, lastSpanBeat)
+	// The time is checked against the same newest beat the numbering came from, under the same lock,
+	// so a clock that stepped backward skips the beat instead of minting one that fails every bundle
+	// covering the pair. See CheckBeatAdvance.
+	if err := CheckBeatAdvance(at, lastSpanAt, beat); err != nil {
+		return nil, fmt.Errorf("append span beat: %w", err)
+	}
 	e := NewSpanEntry(at, beat, count, cadenceS)
 	Link(prev, e)
 	m.entries = append(m.entries, e)

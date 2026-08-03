@@ -1534,14 +1534,27 @@ func testPurge(t *testing.T, store run.Store) {
 	}); err != nil {
 		t.Fatalf("Save(held) error = %v", err)
 	}
+	// An old terminal run that never recorded events or logs. It is eligible for trimming but has
+	// nothing to remove, so it must not inflate the trimmed count. This pins the one definition of
+	// trimmed across backends: counting every eligible run would report two here, counting only
+	// runs whose data was removed reports one, and all three stores must agree on the latter.
+	if err := store.Save(ctx, &run.Run{
+		ID: "bare", Status: run.StatusSucceeded, CreatedAt: old,
+	}); err != nil {
+		t.Fatalf("Save(bare) error = %v", err)
+	}
 
-	// Trimming events keeps the run record but drops its events.
+	// Trimming events keeps the run record but drops its events. Only "old" held data, so "bare" is
+	// not counted even though it is an eligible terminal-old run.
 	trimmed, err := store.PurgeEventsBefore(ctx, cutoff)
 	if err != nil {
 		t.Fatalf("PurgeEventsBefore() error = %v", err)
 	}
 	if trimmed != 1 {
 		t.Errorf("PurgeEventsBefore() trimmed = %d, want 1", trimmed)
+	}
+	if _, err := store.Get(ctx, "bare"); err != nil {
+		t.Errorf("bare run gone after event purge: %v", err)
 	}
 	if evs, err := store.Events(ctx, "old"); err != nil || len(evs) != 0 {
 		t.Errorf("old events = %v (err %v), want empty", evs, err)
@@ -1554,15 +1567,19 @@ func testPurge(t *testing.T, store run.Store) {
 	}
 
 	// Deleting old runs removes the record but keeps its summary and never touches newer or running.
+	// Both "old" and the event-free "bare" run are terminal and older than cutoff, so both go.
 	deleted, err := store.PurgeRunsBefore(ctx, cutoff)
 	if err != nil {
 		t.Fatalf("PurgeRunsBefore() error = %v", err)
 	}
-	if deleted != 1 {
-		t.Errorf("PurgeRunsBefore() deleted = %d, want 1", deleted)
+	if deleted != 2 {
+		t.Errorf("PurgeRunsBefore() deleted = %d, want 2", deleted)
 	}
 	if _, err := store.Get(ctx, "old"); !errors.Is(err, run.ErrNotFound) {
 		t.Errorf("Get(old) error = %v, want ErrNotFound", err)
+	}
+	if _, err := store.Get(ctx, "bare"); !errors.Is(err, run.ErrNotFound) {
+		t.Errorf("Get(bare) error = %v, want ErrNotFound", err)
 	}
 	if _, err := store.Get(ctx, "held"); err != nil {
 		t.Errorf("run awaiting approval was purged: %v", err)
