@@ -94,10 +94,18 @@
   },
   {
    "@type": "Question",
-   "name": "Can the AI change my infrastructure?",
+   "name": "Can the built-in advisory AI change my infrastructure?",
    "acceptedAnswer": {
     "@type": "Answer",
-    "text": "No. A provider only produces text a human reads or a proposal a human releases. Anything AI drafts that could become a run is born held at the same approval gate an operator faces, an admin reviews the generated command before it moves, and the request and decision both land in the audit trail."
+    "text": "No. The built-in advisory AI only produces text a human reads or a proposal a human releases. Anything it drafts that could become a run is born held at the same approval gate an operator faces, an admin reviews the generated command before it moves, and the request and decision both land in the audit trail."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "Can an AI agent operate SwitchTender?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "Yes, through the API, the same way any automation does. Mint it an operator-bound token with switchtender token new --user: it can submit runs but cannot approve its own work and cannot change configuration. Approval policies hold its runs for a person to release, every change it makes is recorded in the audit chain before it executes, and that token is the only credential it holds. See switchtender.com/agents for the full picture."
    }
   },
   {
@@ -211,11 +219,17 @@ your machines. With a cloud provider, prompts carry automation content such as c
 playbook names, masked failed-run logs, and drift summaries. Credential values are masked before
 any prompt is built, and fleet questions send metadata only. AI is off by default. See the
 <a href="/docs/ai">AI guide</a> for exactly what each feature sends.</p>
-<h2 id="can-the-ai-change-my-infrastructure">Can the AI change my infrastructure?</h2>
-<p>No. A provider only produces text a human reads or a proposal a human releases. Anything AI
-drafts that could become a run is born held at the same approval gate an operator faces, an
-admin reviews the generated command before it moves, and the request and decision both land in
-the audit trail.</p>
+<h2 id="can-the-ai-change-my-infrastructure">Can the built-in advisory AI change my infrastructure?</h2>
+<p>No. The built-in advisory AI only produces text a human reads or a proposal a human releases.
+Anything it drafts that could become a run is born held at the same approval gate an operator
+faces, an admin reviews the generated command before it moves, and the request and decision both
+land in the audit trail.</p>
+<h2 id="can-an-ai-agent-operate-switchtender">Can an AI agent operate SwitchTender?</h2>
+<p>Yes, through the API, the same way any automation does. Mint it an operator-bound token with
+<code>switchtender token new --user</code>: it can submit runs but cannot approve its own work and cannot
+change configuration. Approval policies hold its runs for a person to release, every change it
+makes is recorded in the audit chain before it executes, and that token is the only credential it
+holds. See <a href="/agents">AI agent change governance</a> for the full picture.</p>
 <h2 id="can-i-extend-switchtender">Can I extend SwitchTender?</h2>
 <p>Yes, in Go, two ways: compile an extension into the binary, or drop a plugin binary into
 <code>--plugins-dir</code> on a stock release. Both register execution tools, AI providers, secret engines,
