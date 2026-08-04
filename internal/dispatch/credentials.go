@@ -272,20 +272,7 @@ func (d *Dispatcher) materializeCredentials(ctx context.Context, r *run.Run, spe
 				return cleanup, secrets, err
 			}
 			spec.Env = append(spec.Env, inj.Env...)
-			if inj.Secrets != nil {
-				// The injector named exactly which of its values are secret, so a non-secret
-				// constant it sets, an OpenStack domain of "Default" or a region, is not redacted
-				// from every occurrence of that word in the run's output.
-				secrets = append(secrets, inj.Secrets...)
-			} else {
-				// An injector that names no secrets has every value it produced masked, the
-				// conservative default for a credential whose fields are all sensitive.
-				for _, line := range inj.Env {
-					if _, val, ok := strings.Cut(line, "="); ok {
-						secrets = append(secrets, val)
-					}
-				}
-			}
+			secrets = append(secrets, injectedMaskValues(inj)...)
 			for _, file := range inj.Files {
 				ff, err := os.CreateTemp("", "switchtender-cred-*")
 				if err != nil {
@@ -311,6 +298,23 @@ func (d *Dispatcher) materializeCredentials(ctx context.Context, r *run.Run, spe
 		}
 	}
 	return cleanup, secrets, nil
+}
+
+// injectedMaskValues returns the values to redact from run output for one injection: the ones the
+// injector named secret, or, when it named none, every value it produced. An empty Secrets slice
+// is treated the same as a nil one, so an injector that names an empty set masks everything rather
+// than nothing and cannot leak its own values by accident.
+func injectedMaskValues(inj credential.Injection) []string {
+	if len(inj.Secrets) > 0 {
+		return inj.Secrets
+	}
+	var out []string
+	for _, line := range inj.Env {
+		if _, val, ok := strings.Cut(line, "="); ok {
+			out = append(out, val)
+		}
+	}
+	return out
 }
 
 // injectTypedCredential applies a custom-typed credential to the spec, returning the path of any

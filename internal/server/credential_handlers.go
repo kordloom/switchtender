@@ -117,11 +117,14 @@ func createCredentialHandler(store credential.Store, types credential.TypeStore,
 				"source must be one of: "+credential.SourceList())
 			return
 		}
-		if req.VaultID != "" && req.Kind != credential.KindVaultPassword {
+		// Trimmed the same way the update handler trims, so one spelling of vault_id is not
+		// accepted by create and rejected by update, or the reverse.
+		vaultLabel := strings.TrimSpace(req.VaultID)
+		if vaultLabel != "" && req.Kind != credential.KindVaultPassword {
 			respondError(w, log, http.StatusBadRequest, "vault_id applies only to vault_password credentials")
 			return
 		}
-		if !credential.ValidVaultID(req.VaultID) {
+		if !credential.ValidVaultID(vaultLabel) {
 			respondError(w, log, http.StatusBadRequest,
 				"vault_id must be letters, digits, underscores, or hyphens")
 			return
@@ -149,7 +152,7 @@ func createCredentialHandler(store credential.Store, types credential.TypeStore,
 		c := &credential.Credential{
 			ID: credential.NewID(), Name: req.Name, Kind: req.Kind,
 			Source: credential.NormalizeSource(req.Source), Secret: sealed, OrgID: req.OrgID,
-			VaultID: req.VaultID, CreatedAt: time.Now(),
+			VaultID: vaultLabel, CreatedAt: time.Now(),
 		}
 		if err := store.Save(r.Context(), c); err != nil {
 			log.Error("server: save credential: " + err.Error())

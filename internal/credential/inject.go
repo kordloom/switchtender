@@ -180,10 +180,11 @@ func openstackInject(secret string) (Injection, error) {
 	if region := f["region_name"]; region != "" {
 		env = append(env, "OS_REGION_NAME="+region)
 	}
-	// Only the password is secret. Naming it explicitly keeps the caller from masking the
-	// non-secret values, above all the fabricated domain default "Default", a common word that
-	// would otherwise be redacted from every occurrence in the run's plain log text.
-	return Injection{Env: env, Secrets: []string{password}}, nil
+	// The password and username are the login identity and are masked out of run output. The rest,
+	// the auth URL, project, the domains (which default to the common word "Default"), and the
+	// region, are non-secret configuration; masking them would redact those words from every
+	// occurrence in the run's plain log text, which is the pollution this naming exists to avoid.
+	return Injection{Env: env, Secrets: []string{password, username}}, nil
 }
 
 // vmwareInject maps vCenter fields to the VMWARE_ environment variables the community.vmware modules

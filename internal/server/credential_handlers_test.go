@@ -269,3 +269,41 @@ func TestUpdateCredentialVaultID(t *testing.T) {
 		})
 	}
 }
+
+func TestCreateAndUpdateAgreeOnVaultID(t *testing.T) {
+	t.Parallel()
+	sealer := credential.NewSealer("pass", "salt")
+
+	// A vault_id with surrounding whitespace: create and update must reach the same verdict and,
+	// on acceptance, store the same trimmed label. Divergence is what the review caught.
+	create := func(body string) int {
+		store := credential.NewMemStore()
+		h := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(), WithCredentials(store, sealer)).Handler()
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/credentials", strings.NewReader(body)))
+		return rec.Code
+	}
+	updateStored := func(body string) (int, string) {
+		store := sealedVaultCred(t, sealer, "orig")
+		h := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(), WithCredentials(store, sealer)).Handler()
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodPut, "/v1/credentials/cred_1", strings.NewReader(body)))
+		got, _ := store.Get(context.Background(), "cred_1")
+		return rec.Code, got.VaultID
+	}
+
+	// A padded but otherwise valid label: both accept it, both store it trimmed.
+	cCode := create(`{"name":"v","kind":"vault_password","secret":"pw","vault_id":"  prod  "}`)
+	uCode, uLabel := updateStored(`{"name":"v","vault_id":"  prod  "}`)
+	if cCode != http.StatusCreated || uCode != http.StatusOK {
+		t.Errorf("padded label: create=%d update=%d, want create 201 and update 200", cCode, uCode)
+	}
+	if uLabel != "prod" {
+		t.Errorf("update stored vault_id = %q, want the trimmed label", uLabel)
+	}
+
+	// A label that is only whitespace collapses to empty on both, which is a valid clear.
+	if c := create(`{"name":"v","kind":"vault_password","secret":"pw","vault_id":"   "}`); c != http.StatusCreated {
+		t.Errorf("blank label on create = %d, want 201", c)
+	}
+}

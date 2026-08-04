@@ -507,7 +507,7 @@ func containsString(list []string, s string) bool {
 	return false
 }
 
-func TestMaterializeOpenStackMasksOnlyThePassword(t *testing.T) {
+func TestMaterializeOpenStackMasksTheLoginNotTheConfig(t *testing.T) {
 	t.Parallel()
 	sealer := credential.NewSealer("pass", "salt")
 	// No explicit domains, so the injector fabricates the constant "Default".
@@ -535,14 +535,50 @@ func TestMaterializeOpenStackMasksOnlyThePassword(t *testing.T) {
 		!containsString(spec.Env, "OS_USER_DOMAIN_NAME=Default") {
 		t.Fatalf("spec.Env = %v, want the OS_ variables including the fabricated domain", spec.Env)
 	}
-	// The password is masked; the non-secret constants, above all the common word "Default", are
-	// not, so plain log text is never redacted for containing them.
-	if !containsString(secrets, "os-secret") {
-		t.Errorf("secrets = %v, want the password tracked for masking", secrets)
+	// The login identity (password and username) is masked; the non-secret config, above all the
+	// common word "Default", is not, so plain log text is never redacted for containing it.
+	for _, want := range []string{"os-secret", "deploy"} {
+		if !containsString(secrets, want) {
+			t.Errorf("secrets = %v, want the login value %q tracked for masking", secrets, want)
+		}
 	}
-	for _, leaked := range []string{"Default", "prod", "deploy", "https://keystone:5000/v3"} {
+	for _, leaked := range []string{"Default", "prod", "https://keystone:5000/v3"} {
 		if containsString(secrets, leaked) {
 			t.Errorf("secrets = %v, want the non-secret value %q left out of the mask", secrets, leaked)
 		}
+	}
+}
+
+func TestInjectedMaskValues(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		// Name says what the case proves.
+		Name string
+		// In is the injection.
+		In credential.Injection
+		// Want is the values to mask.
+		Want []string
+	}{{ // Test 0: A named secret set masks exactly those, not the non-secret env values.
+		Name: "named secrets",
+		In:   credential.Injection{Env: []string{"OS_USERNAME=u", "OS_PASSWORD=p"}, Secrets: []string{"p"}},
+		Want: []string{"p"},
+	}, { // Test 1: A nil secret set masks every produced value, the conservative default.
+		Name: "nil masks all",
+		In:   credential.Injection{Env: []string{"A=1", "B=2"}},
+		Want: []string{"1", "2"},
+	}, { // Test 2: An empty but non-nil set is treated like nil and masks all, not nothing. A
+		// host injector returning an empty slice must not silently leak its values.
+		Name: "empty masks all",
+		In:   credential.Injection{Env: []string{"A=1", "B=2"}, Secrets: []string{}},
+		Want: []string{"1", "2"},
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
+			t.Parallel()
+			got := injectedMaskValues(test.In)
+			if diff := cmp.Diff(test.Want, got, cmpopts.EquateEmpty()); diff != "" {
+				t.Errorf("injectedMaskValues() mismatch (-want +got):\n%s", diff)
+			}
+		})
 	}
 }

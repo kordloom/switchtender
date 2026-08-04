@@ -101,7 +101,7 @@ func TestInject(t *testing.T) {
 			"OS_USER_DOMAIN_NAME=Default",
 			"OS_PROJECT_DOMAIN_NAME=Default",
 			"OS_IDENTITY_API_VERSION=3",
-		}, Secrets: []string{"pw"}},
+		}, Secrets: []string{"pw", "deploy"}},
 	}, { // Test 10: OpenStack with explicit domains and a region.
 		Name: "openstack full",
 		Kind: KindOpenStack,
@@ -116,7 +116,7 @@ func TestInject(t *testing.T) {
 			"OS_PROJECT_DOMAIN_NAME=corp",
 			"OS_IDENTITY_API_VERSION=3",
 			"OS_REGION_NAME=dc1",
-		}, Secrets: []string{"pw"}},
+		}, Secrets: []string{"pw", "deploy"}},
 	}, { // Test 11: OpenStack missing the project is a bad-field error.
 		Name:    "openstack missing project",
 		Kind:    KindOpenStack,
