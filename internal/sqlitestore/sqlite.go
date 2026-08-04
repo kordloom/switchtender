@@ -1293,6 +1293,66 @@ FROM run_host_summary WHERE host = ? ORDER BY ran_at DESC LIMIT ?`
 	return out, nil
 }
 
+// RunHostSummaries returns one run's stored per host summaries, ordered by host.
+func (s *store) RunHostSummaries(ctx context.Context, runID string) ([]run.HostSummary, error) {
+	const q = `
+SELECT run_id, host, ok, changed, failures, unreachable, skipped, worst, duration_seconds, ran_at
+FROM run_host_summary WHERE run_id = ? ORDER BY host ASC`
+	rows, err := s.db.QueryContext(ctx, q, runID)
+	if err != nil {
+		return nil, fmt.Errorf("run host summaries: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []run.HostSummary
+	for rows.Next() {
+		var (
+			hs    run.HostSummary
+			ranAt string
+		)
+		if err := rows.Scan(&hs.RunID, &hs.Host, &hs.OK, &hs.Changed, &hs.Failures,
+			&hs.Unreachable, &hs.Skipped, &hs.Worst, &hs.DurationSeconds, &ranAt); err != nil {
+			return nil, fmt.Errorf("run host summaries: %w", err)
+		}
+		if hs.RanAt, err = sqlutil.ParseTime(ranAt); err != nil {
+			return nil, fmt.Errorf("run host summaries: %w", err)
+		}
+		out = append(out, hs)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("run host summaries: %w", err)
+	}
+	return out, nil
+}
+
+// RunTaskSummaries returns one run's stored per task summaries, ordered by task.
+func (s *store) RunTaskSummaries(ctx context.Context, runID string) ([]run.TaskSummary, error) {
+	const q = `
+SELECT run_id, task, seconds, ran_at FROM run_task_summary WHERE run_id = ? ORDER BY task ASC`
+	rows, err := s.db.QueryContext(ctx, q, runID)
+	if err != nil {
+		return nil, fmt.Errorf("run task summaries: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []run.TaskSummary
+	for rows.Next() {
+		var (
+			ts    run.TaskSummary
+			ranAt string
+		)
+		if err := rows.Scan(&ts.RunID, &ts.Task, &ts.Seconds, &ranAt); err != nil {
+			return nil, fmt.Errorf("run task summaries: %w", err)
+		}
+		if ts.RanAt, err = sqlutil.ParseTime(ranAt); err != nil {
+			return nil, fmt.Errorf("run task summaries: %w", err)
+		}
+		out = append(out, ts)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("run task summaries: %w", err)
+	}
+	return out, nil
+}
+
 // SaveTaskSummary replaces the stored per task summaries for a run.
 func (s *store) SaveTaskSummary(ctx context.Context, runID string, summaries []run.TaskSummary) error {
 	tx, err := s.db.BeginTx(ctx, nil)

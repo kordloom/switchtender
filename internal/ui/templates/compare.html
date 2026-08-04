@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Compare runs - SwitchTender</title>
+	<link rel="icon" type="image/png" href="/ui/assets/favicon.png">
+	<link rel="stylesheet" href="/ui/assets/app.css">
+</head>
+<body data-page="compare" data-run-id="{{.RunID}}"{{if .ReadOnly}} data-readonly="true"{{end}}>
+	<header class="topbar">
+		<div class="brand"><a href="/ui/"><picture><source media="(prefers-color-scheme: dark)" srcset="/ui/assets/logo-train-tracks-dark.png"><img class="brand-logo" src="/ui/assets/logo-train-tracks.png" alt="SwitchTender"></picture>SwitchTender</a></div>
+	</header>
+
+	<main class="content">
+		<a class="back" href="/ui/runs/{{.RunID}}">Back to run</a>
+		<h1>Compare runs</h1>
+		<p class="muted">What changed between this run and its baseline, host by host and task by task. The baseline is the previous run fired by the same template or schedule unless another run is chosen.</p>
+		<div id="compare-header" class="muted"></div>
+		<div id="compare-summary" class="summary" hidden></div>
+		<div id="status" class="muted">Loading comparison.</div>
+		<section id="compare-hosts-section" hidden>
+			<h2>Hosts</h2>
+			<table class="runs">
+				<thead>
+					<tr>
+						<th>Host</th>
+						<th>Verdict</th>
+						<th>This run</th>
+						<th>Baseline</th>
+						<th>Failures</th>
+						<th>Changed</th>
+					</tr>
+				</thead>
+				<tbody id="compare-hosts"></tbody>
+			</table>
+		</section>
+		<section id="compare-tasks-section" hidden>
+			<h2>Task timing</h2>
+			<p class="muted">Largest swings first. A dash means the run did not carry the task.</p>
+			<table class="runs">
+				<thead>
+					<tr>
+						<th>Task</th>
+						<th>This run</th>
+						<th>Baseline</th>
+						<th>Delta</th>
+					</tr>
+				</thead>
+				<tbody id="compare-tasks"></tbody>
+			</table>
+		</section>
+	</main>
+
+	<script src="/ui/assets/app.js"></script>
+</body>
+</html>

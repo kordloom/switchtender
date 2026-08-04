@@ -40,6 +40,7 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Run("pipeline steps ordered", func(t *testing.T) { testSteps(t, newStore()) })
 	t.Run("non-terminal runs", func(t *testing.T) { testNonTerminal(t, newStore()) })
 	t.Run("fleet health ranking", func(t *testing.T) { testFleetHealth(t, newStore()) })
+	t.Run("run summaries round trip", func(t *testing.T) { testRunSummaries(t, newStore()) })
 	t.Run("drift status", func(t *testing.T) { testDriftStatus(t, newStore()) })
 	t.Run("host costs", func(t *testing.T) { testHostCosts(t, newStore()) })
 	t.Run("flaky detection", func(t *testing.T) { testFlaky(t, newStore()) })
@@ -749,6 +750,50 @@ func testNonTerminal(t *testing.T, store run.Store) {
 	}
 	if seen["done"] || seen["gone"] {
 		t.Error("NonTerminal returned a terminal run")
+	}
+}
+
+// testRunSummaries verifies one run's host and task summaries read back whole and ordered, since
+// the comparison view is built from exactly this read.
+func testRunSummaries(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	base := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	hosts := []run.HostSummary{
+		{Host: "web02", OK: 3, Changed: 1, Worst: "changed", DurationSeconds: 2.5, RanAt: base},
+		{Host: "web01", OK: 4, Failures: 1, Worst: "failed", DurationSeconds: 1.5, RanAt: base},
+	}
+	if err := store.SaveHostSummary(ctx, "rs1", hosts); err != nil {
+		t.Fatalf("SaveHostSummary() error = %v", err)
+	}
+	tasks := []run.TaskSummary{
+		{Task: "restart nginx", Seconds: 4.25, RanAt: base},
+		{Task: "copy config", Seconds: 1.5, RanAt: base},
+	}
+	if err := store.SaveTaskSummary(ctx, "rs1", tasks); err != nil {
+		t.Fatalf("SaveTaskSummary() error = %v", err)
+	}
+
+	gotHosts, err := store.RunHostSummaries(ctx, "rs1")
+	if err != nil {
+		t.Fatalf("RunHostSummaries() error = %v", err)
+	}
+	if len(gotHosts) != 2 || gotHosts[0].Host != "web01" || gotHosts[1].Host != "web02" {
+		t.Fatalf("hosts = %+v, want both back ordered by host", gotHosts)
+	}
+	if gotHosts[0].Worst != "failed" || gotHosts[0].Failures != 1 || gotHosts[0].RunID != "rs1" {
+		t.Errorf("web01 = %+v, want its counts and run id carried", gotHosts[0])
+	}
+	gotTasks, err := store.RunTaskSummaries(ctx, "rs1")
+	if err != nil {
+		t.Fatalf("RunTaskSummaries() error = %v", err)
+	}
+	if len(gotTasks) != 2 || gotTasks[0].Task != "copy config" || gotTasks[1].Seconds != 4.25 {
+		t.Fatalf("tasks = %+v, want both back ordered by task", gotTasks)
+	}
+
+	// A run with no summaries answers empty, not an error.
+	if none, err := store.RunHostSummaries(ctx, "rs-none"); err != nil || len(none) != 0 {
+		t.Errorf("RunHostSummaries(unknown) = %v, %v, want empty", none, err)
 	}
 }
 

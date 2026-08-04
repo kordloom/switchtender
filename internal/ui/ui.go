@@ -85,6 +85,7 @@ func (u *UI) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("GET /ui/assets/", http.StripPrefix("/ui/assets/", newAssetHandler(assets)))
 	mux.HandleFunc("GET /ui/runs/{id}", u.detail)
+	mux.HandleFunc("GET /ui/runs/{id}/compare", u.compare)
 	mux.HandleFunc("GET /ui/runs", u.runs)
 	mux.HandleFunc("GET /ui/fleet", u.fleet)
 	mux.HandleFunc("GET /ui/doctor", u.doctor)
@@ -126,6 +127,13 @@ func (u *UI) runs(w http.ResponseWriter, _ *http.Request) {
 func (u *UI) detail(w http.ResponseWriter, r *http.Request) {
 	u.render(w, "detail.html", map[string]any{
 		"RunID": r.PathValue("id"), "ReadOnly": u.readOnly, "AIOff": !u.aiEnabled, "MatrixCap": u.matrixCap,
+	})
+}
+
+// compare renders the run comparison page.
+func (u *UI) compare(w http.ResponseWriter, r *http.Request) {
+	u.render(w, "compare.html", map[string]any{
+		"RunID": r.PathValue("id"), "ReadOnly": u.readOnly,
 	})
 }
 

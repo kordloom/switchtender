@@ -110,6 +110,11 @@
 </tr>
 <tr>
 <td>GET</td>
+<td><code>/v1/runs/{id}/compare</code></td>
+<td>What changed against a baseline run: host verdicts, task timing, duration. <code>with=</code> names the baseline or <code>prev</code> for the previous run of the same source.</td>
+</tr>
+<tr>
+<td>GET</td>
 <td><code>/v1/runs/{id}/stream</code></td>
 <td>Live events and log over Server-Sent Events.</td>
 </tr>

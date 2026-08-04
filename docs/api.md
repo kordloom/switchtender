@@ -24,6 +24,7 @@ Every endpoint the server exposes. The API is served under the `/v1` base path. 
 | GET    | `/v1/runs/{id}/steps`      | Step runs of a pipeline.                                |
 | GET    | `/v1/runs/{id}/logs`       | Captured output as plain text.                          |
 | GET    | `/v1/runs/{id}/events`     | Structured events as JSON.                              |
+| GET    | `/v1/runs/{id}/compare`    | What changed against a baseline run: host verdicts, task timing, duration. `with=` names the baseline or `prev` for the previous run of the same source. |
 | GET    | `/v1/runs/{id}/stream`     | Live events and log over Server-Sent Events.            |
 | POST   | `/v1/runs/{id}/explain`    | Advisory AI explanation of a run, when a provider is configured. |
 | POST   | `/v1/ai/draft`             | Advisory AI draft of a bash, python, powershell, or go step script from a description. Operator role. |

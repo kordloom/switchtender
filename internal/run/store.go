@@ -141,6 +141,8 @@ type Store interface {
 	HostCosts(ctx context.Context, window int) (map[string]float64, error)
 	// HostHistory returns a host's most recent per run summaries, newest first, with run ids.
 	HostHistory(ctx context.Context, host string, limit int) ([]HostSummary, error)
+	// RunHostSummaries returns one run's stored per host summaries, ordered by host.
+	RunHostSummaries(ctx context.Context, runID string) ([]HostSummary, error)
 	// SaveHostFacts records the system facts a run gathered, replacing what is held for each host.
 	SaveHostFacts(ctx context.Context, runID string, facts []HostFacts) error
 	// HostFactsFor returns a host's most recently gathered facts, or ErrNotFound when a host has
@@ -148,6 +150,8 @@ type Store interface {
 	HostFactsFor(ctx context.Context, host string) (*HostFacts, error)
 	// SaveTaskSummary replaces the stored per task summaries for a run.
 	SaveTaskSummary(ctx context.Context, runID string, summaries []TaskSummary) error
+	// RunTaskSummaries returns one run's stored per task summaries, ordered by task.
+	RunTaskSummaries(ctx context.Context, runID string) ([]TaskSummary, error)
 	// TaskTrends aggregates each task's durations over its most recent window runs.
 	TaskTrends(ctx context.Context, window int) ([]TaskTrend, error)
 	// AppendLog appends raw output bytes to the run's log. Returns ErrNotFound if the run is absent.
@@ -768,6 +772,19 @@ func (m *memStore) Workers(_ context.Context) ([]WorkerInfo, error) {
 	return out, nil
 }
 
+// RunHostSummaries returns one run's stored per host summaries, ordered by host.
+func (m *memStore) RunHostSummaries(_ context.Context, runID string) ([]HostSummary, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]HostSummary, len(m.summaries[runID]))
+	copy(out, m.summaries[runID])
+	for i := range out {
+		out[i].RunID = runID
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Host < out[j].Host })
+	return out, nil
+}
+
 // SaveHostSummary replaces the stored per host summaries for a run.
 func (m *memStore) SaveHostSummary(_ context.Context, runID string, summaries []HostSummary) error {
 	m.mu.Lock()
@@ -935,6 +952,19 @@ func (m *memStore) HostHistory(_ context.Context, host string, limit int) ([]Hos
 	if len(out) > limit {
 		out = out[:limit]
 	}
+	return out, nil
+}
+
+// RunTaskSummaries returns one run's stored per task summaries, ordered by task.
+func (m *memStore) RunTaskSummaries(_ context.Context, runID string) ([]TaskSummary, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]TaskSummary, len(m.tasks[runID]))
+	copy(out, m.tasks[runID])
+	for i := range out {
+		out[i].RunID = runID
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Task < out[j].Task })
 	return out, nil
 }
 
