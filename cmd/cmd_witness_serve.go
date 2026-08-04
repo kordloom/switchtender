@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -122,11 +124,18 @@ func runWitnessServe(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("load witness identity: %w", err)
 	}
 
+	// The signal context is established first so Ctrl+C and SIGTERM actually reach the shutdown
+	// branch; cobra runs commands with a background context that no signal ever cancels.
+	ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
 	client := &http.Client{Timeout: 30 * time.Second}
 	var opts []witness.ServiceOption
 	if witnessServeWebhook != "" {
 		opts = append(opts, witness.WithServiceNotify(func(server string, f witness.Finding) {
-			postWitnessFinding(cmd.Context(), client, witnessServeWebhook, server, f)
+			// The service's findings record is the durable copy; a failed delivery is logged by
+			// the poster and the finding stays served by the API.
+			_ = postWitnessFinding(ctx, client, witnessServeWebhook, server, f)
 		}))
 	}
 	log, err := logutil.New()
@@ -159,7 +168,7 @@ func runWitnessServe(cmd *cobra.Command, _ []string) error {
 			return err
 		}
 		return nil
-	case <-cmd.Context().Done():
+	case <-ctx.Done():
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = httpSrv.Shutdown(shutdownCtx)

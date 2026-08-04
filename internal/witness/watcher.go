@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -41,25 +42,28 @@ func NewWatcher(server, statePath string, id audit.Identity, client *http.Client
 // Server returns the watched base URL, normalized.
 func (w *Watcher) Server() string { return w.server }
 
-// CheckOnce runs one watch cycle and returns the findings it raised. The checkpoint's signer is
-// pinned to this witness's key, so a replaced state file is refused rather than believed.
-func (w *Watcher) CheckOnce(ctx context.Context) ([]Finding, error) {
+// CheckOnce runs one watch cycle, returning the checkpoint it now holds and the findings it
+// raised. The checkpoint's signer is pinned to this witness's key, so a replaced state file is
+// refused rather than believed. When Save fails, the findings and the compared checkpoint are
+// returned with the error: the poll observed them, and a caller that dropped them because the
+// disk was full would lose the observation at the exact moment durability was already degraded.
+func (w *Watcher) CheckOnce(ctx context.Context) (*Checkpoint, []Finding, error) {
 	prev, err := Load(w.state, w.id.PublicKeyHex())
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	beats, err := w.fetchBeats(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("fetch beats: %w", err)
+		return nil, nil, fmt.Errorf("fetch beats: %w", err)
 	}
 	next, findings, err := Check(prev, w.server, beats, time.Now())
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := Save(w.state, next, w.id); err != nil {
-		return findings, err
+		return next, findings, err
 	}
-	return findings, nil
+	return next, findings, nil
 }
 
 // Checkpoint returns the watcher's current signed memory, nil before the first successful watch.
@@ -67,9 +71,20 @@ func (w *Watcher) Checkpoint() (*Checkpoint, error) {
 	return Load(w.state, w.id.PublicKeyHex())
 }
 
+// feedBodyCap bounds how much of a feed answer the witness will read. A full answer of FeedLimit
+// beats is a few hundred kilobytes; a body pushing past this cap is not a beat feed, it is an
+// attempt to exhaust the witness, and a hosted witness OOM-killed by one hostile server stops
+// watching every other server at the exact moment that is most interesting.
+const feedBodyCap = 4 << 20
+
+// maxHeadLen bounds a served beat's head. A real head is a 64 character hash; a feed serving
+// multi-kilobyte heads is feeding garbage into the witness's memory and its findings record.
+const maxHeadLen = 128
+
 // fetchBeats reads the unauthenticated beat feed. The limit asked for is the number the witness
 // can remember: asking for more would serve beats it forgets, and a forgotten beat's rewrite is
-// re-adopted rather than reported.
+// re-adopted rather than reported. The feed is untrusted input from the very operator the witness
+// exists to check, so its size and shape are enforced, not assumed.
 func (w *Watcher) fetchBeats(ctx context.Context) ([]Beat, error) {
 	feed := fmt.Sprintf("%s/v1/audit/beats?limit=%d", w.server, FeedLimit)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, feed, nil)
@@ -84,9 +99,22 @@ func (w *Watcher) fetchBeats(ctx context.Context) ([]Beat, error) {
 	if res.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("the feed answered %s", res.Status)
 	}
+	limited := io.LimitReader(res.Body, feedBodyCap+1)
 	var beats []Beat
-	if err := json.NewDecoder(res.Body).Decode(&beats); err != nil {
+	if err := json.NewDecoder(limited).Decode(&beats); err != nil {
 		return nil, fmt.Errorf("parse the feed: %w", err)
+	}
+	if n, _ := io.Copy(io.Discard, io.LimitReader(res.Body, 1)); n > 0 {
+		return nil, fmt.Errorf("the feed answered more than %d bytes; refusing to read it", feedBodyCap)
+	}
+	if len(beats) > FeedLimit {
+		return nil, fmt.Errorf("the feed served %d beats when %d were asked for", len(beats), FeedLimit)
+	}
+	for _, b := range beats {
+		if len(b.Head) > maxHeadLen {
+			return nil, fmt.Errorf("the feed served beat %d with a %d byte head; a head is a hash",
+				b.Beat, len(b.Head))
+		}
 	}
 	return beats, nil
 }
@@ -135,7 +163,7 @@ func (d *Delta) Fresh(findings []Finding) []Finding {
 	next := make(map[string]struct{}, len(findings))
 	var fresh []Finding
 	for _, f := range findings {
-		key := f.Kind + "\n" + f.Detail
+		key := findingKey(f)
 		next[key] = struct{}{}
 		if _, seen := d.prev[key]; !seen {
 			fresh = append(fresh, f)
@@ -143,6 +171,15 @@ func (d *Delta) Fresh(findings []Finding) []Finding {
 	}
 	d.prev = next
 	return fresh
+}
+
+// findingKey is the identity a finding is deduplicated by: its stable Key when the kind carries
+// one, otherwise its full text.
+func findingKey(f Finding) string {
+	if f.Key != "" {
+		return f.Kind + "\n" + f.Key
+	}
+	return f.Kind + "\n" + f.Detail
 }
 
 // StateFileName is the checkpoint file for a server: its host for a human reading the directory,

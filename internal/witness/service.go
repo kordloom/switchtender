@@ -19,6 +19,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/util"
 )
 
 // findingsFile is the append-only record of everything the service has witnessed, one JSON object
@@ -27,6 +28,14 @@ const findingsFile = "findings.jsonl"
 
 // findingsTail bounds how many findings an API response carries. The file keeps everything.
 const findingsTail = 200
+
+// maxDetailLen bounds a recorded finding's detail, and maxRecordLine is the longest record line
+// the readers accept. The write side clips below what the read side allows, so no finding this
+// service records can ever brick its own restart or its findings endpoint.
+const (
+	maxDetailLen  = 2048
+	maxRecordLine = 1 << 20
+)
 
 // RecordedFinding is one finding as persisted and served: what the witness saw, where, and when.
 type RecordedFinding struct {
@@ -73,6 +82,10 @@ type serverStatus struct {
 	edge BlindEdge
 	// delta keeps a persisting condition from being recorded once per poll.
 	delta Delta
+	// checkpoint is the newest signed memory this process holds for the server, loaded from disk
+	// at start and refreshed by every successful poll. Attestations and listings read it here, so
+	// a signed statement never pairs one poll's memory with another poll's totals.
+	checkpoint *Checkpoint
 }
 
 // Service watches a set of servers and serves what it has witnessed.
@@ -175,6 +188,15 @@ func (s *Service) Start() error {
 		return fmt.Errorf("witness findings record: %w", err)
 	}
 	s.findings = f
+	// Prior memory is loaded before the first sweep, so a witness restarted into an outage still
+	// attests what it holds on disk rather than claiming it witnessed nothing.
+	for key, w := range s.watchers {
+		c, err := w.Checkpoint()
+		if err != nil {
+			return fmt.Errorf("state for %s: %w", w.Server(), err)
+		}
+		s.status[key].checkpoint = c
+	}
 	// The first sweep runs before Start returns, so the API never answers from an empty memory
 	// and a caller observing after Start sees a settled state rather than racing the loop.
 	s.CheckAll(s.ctx)
@@ -206,6 +228,7 @@ func (s *Service) recount() error {
 	defer func() { _ = f.Close() }()
 	byServer := map[string]int64{}
 	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), maxRecordLine)
 	for sc.Scan() {
 		var rec RecordedFinding
 		if json.Unmarshal(sc.Bytes(), &rec) == nil {
@@ -223,37 +246,60 @@ func (s *Service) recount() error {
 	return nil
 }
 
-// CheckAll runs one watch cycle over every server, in the order they were given. The loop calls
-// it per interval; a test calls it directly.
+// sweepWorkers bounds how many servers are checked at once. A sweep that visited servers one at
+// a time would stall the whole watch behind each dark target's timeout, delaying both the API and
+// the detection this service exists for.
+const sweepWorkers = 8
+
+// CheckAll runs one watch cycle over every server and returns when the sweep is done.
 func (s *Service) CheckAll(ctx context.Context) {
+	sem := make(chan struct{}, sweepWorkers)
+	var wg sync.WaitGroup
 	for _, key := range s.order {
-		if ctx.Err() != nil {
-			return
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+			continue
 		}
-		s.checkOne(ctx, key)
+		wg.Add(1)
+		go func(k string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			s.checkOne(ctx, k)
+		}(key)
 	}
+	wg.Wait()
 }
 
 // checkOne watches one server and folds the outcome into its status and the record.
 func (s *Service) checkOne(ctx context.Context, key string) {
 	w := s.watchers[key]
-	findings, err := w.CheckOnce(ctx)
+	c, findings, err := w.CheckOnce(ctx)
 	now := s.clock()
 
 	s.mu.Lock()
 	st := s.status[key]
 	st.lastCheck = now
+	if c != nil {
+		st.checkpoint = c
+	}
 	if err != nil {
 		st.lastErr = err.Error()
 	} else {
 		st.lastErr = ""
-		// A restart starts with an empty memory here, so a condition that outlives the process is
-		// re-attested once by the process that still sees it.
+	}
+	if err == nil || len(findings) > 0 {
+		// A poll that produced findings observed the chain, even when saving its checkpoint then
+		// failed, so it is folded: a full disk must not turn one standing truncation into a
+		// recorded finding per poll. A restart starts with an empty memory here, so a condition
+		// that outlives the process is re-attested once by the process that still sees it.
 		findings = st.delta.Fresh(findings)
 	}
 	var recorded []RecordedFinding
 	for _, f := range findings {
-		rec := RecordedFinding{At: now, Server: w.Server(), Kind: f.Kind, Detail: f.Detail}
+		// Clipped here too, so the notified copy matches what the record and the API serve.
+		rec := RecordedFinding{At: now, Server: w.Server(), Kind: f.Kind,
+			Detail: util.Clip(f.Detail, maxDetailLen)}
 		if werr := s.record(rec); werr != nil {
 			// The finding still counts and still alerts; only its durability failed, and that
 			// failure is loud. Dropping the count instead would make the attestation understate
@@ -280,11 +326,13 @@ func (s *Service) checkOne(ctx context.Context, key string) {
 	}
 }
 
-// record appends one finding to the record. Callers hold mu.
+// record appends one finding to the record, clipping the detail below what the readers accept so
+// no write can brick the restart that recounts it. Callers hold mu.
 func (s *Service) record(rec RecordedFinding) error {
 	if s.findings == nil {
 		return fmt.Errorf("findings record is not open")
 	}
+	rec.Detail = util.Clip(rec.Detail, maxDetailLen)
 	line, err := json.Marshal(rec)
 	if err != nil {
 		return err
@@ -316,7 +364,7 @@ func (s *Service) states() []ServerState {
 			Server: w.Server(), Key: key, LastCheck: st.lastCheck,
 			Blind: st.edge.Blind(), LastError: st.lastErr, FindingsTotal: st.findings,
 		}
-		if c, err := w.Checkpoint(); err == nil && c != nil {
+		if c := st.checkpoint; c != nil {
 			state.CheckpointAt = c.ObservedAt
 			state.LastBeat, state.LastSeq, state.LastHead = c.LastBeat, c.LastSeq, c.LastHead
 		}
@@ -337,6 +385,7 @@ func (s *Service) tail(server string) ([]RecordedFinding, error) {
 	defer func() { _ = f.Close() }()
 	var out []RecordedFinding
 	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), maxRecordLine)
 	for sc.Scan() {
 		var rec RecordedFinding
 		if json.Unmarshal(sc.Bytes(), &rec) != nil {
@@ -368,15 +417,13 @@ func (s *Service) Attest(key string) (*Attestation, error) {
 	if !ok {
 		return nil, fmt.Errorf("no such watched server")
 	}
-	c, err := w.Checkpoint()
-	if err != nil {
-		return nil, err
-	}
-	if c == nil {
-		return nil, nil
-	}
 	s.mu.Lock()
 	st := s.status[key]
+	c := st.checkpoint
+	if c == nil {
+		s.mu.Unlock()
+		return nil, nil
+	}
 	a := &Attestation{
 		Server: w.Server(), MintedAt: s.clock().UTC(), CheckpointAt: c.ObservedAt.UTC(),
 		LastBeat: c.LastBeat, LastSeq: c.LastSeq, LastHead: c.LastHead,
@@ -424,9 +471,16 @@ func (s *Service) Handler() http.Handler {
 		s.respond(w, c)
 	})
 	mux.HandleFunc("GET /witness/servers/{key}/attestation", func(w http.ResponseWriter, r *http.Request) {
-		a, err := s.Attest(r.PathValue("key"))
+		key := r.PathValue("key")
+		if _, ok := s.watchers[key]; !ok {
+			s.fail(w, http.StatusNotFound, "no such watched server")
+			return
+		}
+		a, err := s.Attest(key)
 		if err != nil {
-			s.fail(w, http.StatusNotFound, err.Error())
+			// The detail goes to the log, not to an anonymous caller on a public API.
+			s.fail(w, http.StatusInternalServerError, "attestation could not be minted")
+			s.log.Error("witness: attest: " + err.Error())
 			return
 		}
 		if a == nil {

@@ -98,10 +98,17 @@ func runWitness(cmd *cobra.Command, _ []string) error {
 	// In loop mode a persisting condition is reported when it appears, not once per poll; the
 	// repeat delivery an operator mutes is the channel the next real finding arrives on.
 	var delta witness.Delta
+	// Findings the webhook has not accepted yet. The plain witness has no durable record behind
+	// it, so an alert lost to one failed POST would be an alert lost for good; it is retried each
+	// poll until the channel takes it.
+	var undelivered []witness.Finding
 	for {
-		findings, err := watcher.CheckOnce(cmd.Context())
+		_, findings, err := watcher.CheckOnce(cmd.Context())
 		if witnessOnce {
-			reportFindings(cmd.Context(), client, watcher.Server(), findings)
+			printFindings(findings)
+			for _, f := range findings {
+				_ = postWitnessFinding(cmd.Context(), client, witnessWebhook, watcher.Server(), f)
+			}
 			if err != nil {
 				return err
 			}
@@ -110,10 +117,13 @@ func runWitness(cmd *cobra.Command, _ []string) error {
 			}
 			return nil
 		}
-		if err == nil {
+		if err == nil || len(findings) > 0 {
+			// A poll that produced findings observed the chain, even when saving the checkpoint
+			// then failed, so it is folded rather than re-reported every poll.
 			findings = delta.Fresh(findings)
 		}
-		reportFindings(cmd.Context(), client, watcher.Server(), findings)
+		printFindings(findings)
+		undelivered = append(undelivered, findings...)
 		if err != nil {
 			// A witness that cannot check is not a witness. Logging to a stream nobody reads and
 			// looping forever is the failure mode where the process is up, the operator believes
@@ -121,8 +131,9 @@ func runWitness(cmd *cobra.Command, _ []string) error {
 			fmt.Fprintln(os.Stderr, "witness: "+err.Error())
 		}
 		if f := edge.Observe(err); f != nil {
-			postWitnessFinding(cmd.Context(), client, witnessWebhook, witnessServer, *f)
+			undelivered = append(undelivered, *f)
 		}
+		undelivered = deliverFindings(cmd.Context(), client, watcher.Server(), undelivered)
 		select {
 		case <-cmd.Context().Done():
 			return nil
@@ -131,37 +142,68 @@ func runWitness(cmd *cobra.Command, _ []string) error {
 	}
 }
 
-// reportFindings prints each finding and delivers it to the webhook when one is set.
-func reportFindings(ctx context.Context, client *http.Client, server string, findings []witness.Finding) {
+// undeliveredCap bounds the retry queue. Past it the oldest alerts are dropped with a loud line,
+// because a webhook that has been down for hundreds of findings is an operator problem the queue
+// cannot fix by growing forever.
+const undeliveredCap = 100
+
+// printFindings writes each finding to standard error.
+func printFindings(findings []witness.Finding) {
 	for _, f := range findings {
 		fmt.Fprintf(os.Stderr, "witness: FINDING %s: %s\n", f.Kind, f.Detail)
-		postWitnessFinding(ctx, client, witnessWebhook, server, f)
 	}
 }
 
-// postWitnessFinding posts one finding to the operator's channel, logging a delivery failure
-// rather than losing the finding, which already went to standard error.
-func postWitnessFinding(ctx context.Context, client *http.Client, webhook, server string, f witness.Finding) {
+// deliverFindings posts queued findings to the webhook in order, returning what still awaits
+// delivery. The first failure stops the round so ordering holds, and without a webhook there is
+// nothing to wait for.
+func deliverFindings(ctx context.Context, client *http.Client, server string,
+	queue []witness.Finding) []witness.Finding {
+	if witnessWebhook == "" || len(queue) == 0 {
+		return nil
+	}
+	for i, f := range queue {
+		if err := postWitnessFinding(ctx, client, witnessWebhook, server, f); err != nil {
+			fmt.Fprintf(os.Stderr, "witness: webhook: %v; %d finding(s) queued for redelivery\n",
+				err, len(queue)-i)
+			rest := queue[i:]
+			if len(rest) > undeliveredCap {
+				fmt.Fprintf(os.Stderr, "witness: webhook: dropping %d oldest undelivered finding(s)\n",
+					len(rest)-undeliveredCap)
+				rest = rest[len(rest)-undeliveredCap:]
+			}
+			return rest
+		}
+	}
+	return nil
+}
+
+// postWitnessFinding posts one finding to the operator's channel. A transport failure or a
+// non-2xx answer is returned, because a delivery the channel refused is a delivery that did not
+// happen, whatever the transport says.
+func postWitnessFinding(ctx context.Context, client *http.Client, webhook, server string, f witness.Finding) error {
 	if webhook == "" {
-		return
+		return nil
 	}
 	payload, err := json.Marshal(map[string]string{
 		"server": server, "kind": f.Kind, "detail": f.Detail,
 		"at": time.Now().UTC().Format(time.RFC3339),
 	})
 	if err != nil {
-		return
+		return err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, webhook, bytes.NewReader(payload))
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "witness: webhook: "+err.Error())
-		return
+		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	res, err := client.Do(req)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "witness: webhook: "+err.Error())
-		return
+		return err
 	}
 	_ = res.Body.Close()
+	if res.StatusCode < 200 || res.StatusCode > 299 {
+		return fmt.Errorf("the webhook answered %s", res.Status)
+	}
+	return nil
 }

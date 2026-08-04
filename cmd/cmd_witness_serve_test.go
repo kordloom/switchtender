@@ -1,9 +1,13 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -101,5 +105,55 @@ func TestWitnessServeRefusesBadFlags(t *testing.T) {
 				t.Error("runWitnessServe() = nil error, want the misconfiguration refused")
 			}
 		})
+	}
+}
+
+func TestPostWitnessFindingTreatsRefusalAsFailure(t *testing.T) {
+	t.Parallel()
+	var status int32 = 500
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(int(atomic.LoadInt32(&status)))
+	}))
+	defer srv.Close()
+	f := witness.Finding{Kind: "head_regression", Detail: "d"}
+	if err := postWitnessFinding(context.Background(), srv.Client(), srv.URL, "s", f); err == nil {
+		t.Error("postWitnessFinding() = nil error on a 500; a refused delivery did not happen")
+	}
+	atomic.StoreInt32(&status, 204)
+	if err := postWitnessFinding(context.Background(), srv.Client(), srv.URL, "s", f); err != nil {
+		t.Errorf("postWitnessFinding() error = %v on a 204", err)
+	}
+}
+
+func TestDeliverFindingsRetriesUntilTheChannelTakesThem(t *testing.T) {
+	var accepted []string
+	var refuse atomic.Bool
+	refuse.Store(true)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if refuse.Load() {
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		var body struct {
+			Kind string `json:"kind"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		accepted = append(accepted, body.Kind)
+	}))
+	defer srv.Close()
+	witnessWebhook = srv.URL
+	defer func() { witnessWebhook = "" }()
+
+	queue := []witness.Finding{{Kind: "a"}, {Kind: "b"}}
+	// The channel is down: everything stays queued instead of being dropped.
+	queue = deliverFindings(context.Background(), srv.Client(), "s", queue)
+	if len(queue) != 2 {
+		t.Fatalf("undelivered = %d, want both retained while the webhook refuses", len(queue))
+	}
+	// The channel recovers: the queue drains in order.
+	refuse.Store(false)
+	queue = deliverFindings(context.Background(), srv.Client(), "s", queue)
+	if len(queue) != 0 || len(accepted) != 2 || accepted[0] != "a" || accepted[1] != "b" {
+		t.Errorf("after recovery queue = %d accepted = %v, want both delivered in order", len(queue), accepted)
 	}
 }

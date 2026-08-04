@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -76,6 +77,10 @@ type Finding struct {
 	Kind string `json:"kind"`
 	// Detail says what was expected and what was seen, in words an operator can act on.
 	Detail string `json:"detail"`
+	// Key, when set, names the underlying event stably while Detail moves with each observation,
+	// so a reporter can tell "the same truncation, observed again" from a new event. Empty means
+	// Detail itself is stable and identifies the event.
+	Key string `json:"-"`
 }
 
 // Check holds a fresh read of the feed against the previous checkpoint. It returns the next
@@ -135,9 +140,12 @@ func Check(prev *Checkpoint, server string, beats []Beat, now time.Time) (*Check
 		// surely as adopting the rewritten beat itself would.
 		switch {
 		case newest.Beat < next.LastBeat:
+			// The key anchors on the witnessed beat, which does not move while the feed's newest
+			// climbs back toward it, so one truncation stays one event however long it stands.
 			findings = append(findings, Finding{Kind: "head_regression", Detail: fmt.Sprintf(
 				"the newest beat is %d and beat %d was already witnessed, so the chain lost its "+
-					"tail", newest.Beat, next.LastBeat)})
+					"tail", newest.Beat, next.LastBeat),
+				Key: fmt.Sprintf("head_regression behind witnessed beat %d", next.LastBeat)})
 		case rewroteSomething:
 			// The finding was already raised by the rewrite walk above; the memory stands.
 		default:
@@ -146,7 +154,8 @@ func Check(prev *Checkpoint, server string, beats []Beat, now time.Time) (*Check
 	} else if prev != nil && prev.LastBeat > 0 {
 		findings = append(findings, Finding{Kind: "head_regression", Detail: fmt.Sprintf(
 			"the feed is empty and beat %d was already witnessed, so the chain lost its tail",
-			prev.LastBeat)})
+			prev.LastBeat),
+			Key: fmt.Sprintf("head_regression behind witnessed beat %d", prev.LastBeat)})
 	}
 
 	// Forget the oldest remembered beats past the cap, never the newest.
@@ -172,9 +181,18 @@ func sameServer(a, b string) bool {
 }
 
 // NormalizeServer returns the base URL in the one form the witness watches and records, so the
-// checkpoint, the pin, and the feed request all agree on what "the same server" means.
+// checkpoint, the pin, and the feed request all agree on what "the same server" means. The scheme
+// and host are lowercased because they are case-insensitive on the wire: two case-variant
+// spellings of one server must not become two memories, each blind to what the other witnessed.
 func NormalizeServer(base string) string {
-	return strings.TrimRight(base, "/")
+	trimmed := strings.TrimRight(base, "/")
+	u, err := url.Parse(trimmed)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return trimmed
+	}
+	u.Scheme = strings.ToLower(u.Scheme)
+	u.Host = strings.ToLower(u.Host)
+	return u.String()
 }
 
 // signedContent is the canonical bytes a checkpoint signature covers: the checkpoint with its
