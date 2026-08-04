@@ -368,3 +368,54 @@ func TestDossierReportsACreationEntryTheChainNoLongerHolds(t *testing.T) {
 		t.Error("the dossier does not lead with the missing creation entry")
 	}
 }
+
+func TestDossierReportsAWipedChainForARunItRecordsNothingAbout(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	runs := run.NewMemStore()
+	audits := audit.NewMemStore()
+	base := time.Date(2026, 8, 1, 10, 0, 0, 0, time.UTC)
+	ended := base.Add(time.Minute)
+	// A run with no receipt and nothing in the chain naming it, which is what a scheduled run
+	// looks like, and also what a wiped chain leaves behind.
+	if err := runs.Save(ctx, &run.Run{
+		ID: "run_scheduled", Playbook: "site.yml", Status: run.StatusSucceeded,
+		CreatedAt: base, EndedAt: &ended,
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	// The chain holds only entries written after the run, and an anchor it no longer satisfies.
+	if err := audits.Append(ctx, &audit.Entry{
+		ID: audit.NewID(), At: ended.Add(time.Hour), Actor: "root", Method: "POST", Path: "/v1/projects",
+	}); err != nil {
+		t.Fatalf("Append() error = %v", err)
+	}
+	if err := audits.(audit.AnchorStore).SaveAnchor(ctx, &audit.Anchor{
+		ID: "anc_1", Type: "rfc3161", Seq: 1, Link: "the-link-that-was-anchored",
+		At: ended, Ref: "https://tsa",
+	}); err != nil {
+		t.Fatalf("SaveAnchor() error = %v", err)
+	}
+
+	in, err := Collect(ctx, runs, audits, "run_scheduled", time.Now())
+	if err != nil {
+		t.Fatalf("Collect() error = %v", err)
+	}
+	if in.RecordedBy != 0 {
+		t.Fatalf("RecordedBy = %d, want 0, or this proves nothing", in.RecordedBy)
+	}
+	if len(in.AnchorProblems) != 1 {
+		t.Fatalf("anchor problems = %v, want the disowning anchor reported even with no coverage "+
+			"position", in.AnchorProblems)
+	}
+	if len(in.Covering) != 0 {
+		t.Errorf("covering = %v, want none for a run the chain records nothing about", in.Covering)
+	}
+	doc, err := Render(in)
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+	if !strings.Contains(string(doc), "history was rewritten or lost") {
+		t.Error("a wiped chain reads as merely unanchored, hiding the tamper it exists to show")
+	}
+}

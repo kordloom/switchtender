@@ -8,7 +8,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"strconv"
 	"time"
 
 	"go.uber.org/zap"
@@ -386,8 +385,11 @@ func hookHandler(triggers trigger.Store, templates template.Store, submitter Sub
 					"refused: the webhook fire could not be recorded in the audit trail")
 				return
 			}
-			ctx = run.WithAuditReceipt(ctx,
-				strconv.FormatInt(entry.Seq, 10)+":"+entry.Hash)
+			// The fire is a recorded mutation like any other, so the sender gets its receipt
+			// back and can later prove the delivery was recorded.
+			receipt := audit.Receipt(entry)
+			w.Header().Set(AuditReceiptHeader, receipt)
+			ctx = run.WithAuditReceipt(ctx, receipt)
 		}
 
 		opts = append(opts, run.WithIdempotencyKey(key),

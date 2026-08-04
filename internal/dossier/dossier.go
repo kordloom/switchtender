@@ -143,7 +143,7 @@ func Collect(ctx context.Context, runs run.Store, audits audit.Store, id string,
 		// The entry that recorded the request creating this run cannot be matched by id, because it
 		// was written before the run existed. The run carries its receipt instead, and this is where
 		// that receipt is redeemed against the chain being walked.
-		if launchReceipt != "" && receiptOf(e) == launchReceipt {
+		if launchReceipt != "" && audit.Receipt(e) == launchReceipt {
 			in.Launch = e
 		}
 		// A run's creation is recorded at the request path, which names the template or the
@@ -177,23 +177,20 @@ func Collect(ctx context.Context, runs run.Store, audits audit.Store, id string,
 	// floor every anchor in the install passes "Seq >= 0" and the document reports history fixed
 	// over a run the chain never recorded, which is a green banner for the emptiest case there is.
 	for _, res := range results {
-		if cover == 0 {
-			break
-		}
+		// An anchor the chain no longer satisfies is always reported. Gating this on coverage put
+		// the loudest evidence of a wholesale wipe behind the quietest case there is: a run the
+		// chain records nothing about, which is exactly what a wipe leaves behind.
 		if !res.Reached {
 			in.AnchorProblems = append(in.AnchorProblems, res.Problem)
 			continue
 		}
-		if res.Anchor.Seq >= cover {
+		// Coverage still needs a position to measure from. A run the chain holds nothing about at
+		// any position is covered by nothing, rather than by every anchor in the install.
+		if cover > 0 && res.Anchor.Seq >= cover {
 			in.Covering = append(in.Covering, res.Anchor)
 		}
 	}
 	return in, nil
-}
-
-// receiptOf returns an entry's redeemable seq:link pair.
-func receiptOf(e *audit.Entry) string {
-	return fmt.Sprintf("%d:%s", e.Seq, e.Hash)
 }
 
 // worstRank orders host outcomes by severity, so merging keeps the more severe one.
@@ -337,7 +334,7 @@ func Render(in *Input) ([]byte, error) {
 		launchRow := entryRow{
 			Seq: in.Launch.Seq, At: in.Launch.At.UTC().Format(time.RFC3339), Actor: in.Launch.Actor,
 			Action: in.Launch.Method + " " + in.Launch.Path, Role: "Launched",
-			Receipt: receiptOf(in.Launch),
+			Receipt: audit.Receipt(in.Launch),
 		}
 		v.Decisions = append(v.Decisions, launchRow)
 		v.Entries = append(v.Entries, launchRow)

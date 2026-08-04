@@ -9,7 +9,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -167,7 +166,7 @@ func fetchBeats(ctx context.Context, client *http.Client) ([]witness.Beat, error
 	// The limit asked for is the number the witness can remember. Asking for more than that would
 	// serve beats it forgets, and a forgotten beat's rewrite is re-adopted rather than reported.
 	feed := fmt.Sprintf("%s/v1/audit/beats?limit=%d",
-		strings.TrimRight(witnessServer, "/"), witness.FeedLimit)
+		witness.NormalizeServer(witnessServer), witness.FeedLimit)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, feed, nil)
 	if err != nil {
 		return nil, err

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net/http"
 	"path"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -262,7 +261,7 @@ func (g *authGate) record(w http.ResponseWriter, actor string, r *http.Request) 
 			"refused: the change could not be recorded in the audit trail")
 		return "", false
 	}
-	receipt = strconv.FormatInt(entry.Seq, 10) + ":" + entry.Hash
+	receipt = audit.Receipt(entry)
 	w.Header().Set(AuditReceiptHeader, receipt)
 	return receipt, true
 }

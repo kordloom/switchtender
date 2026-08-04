@@ -69,6 +69,12 @@ type Store interface {
 	ChainScan(ctx context.Context, fn func(*Entry) error) error
 }
 
+// Receipt returns the entry's redeemable seq:link pair, the value the Audit-Receipt header carries
+// and the one "switchtender audit receipt" redeems.
+func Receipt(e *Entry) string {
+	return strconv.FormatInt(e.Seq, 10) + ":" + e.Hash
+}
+
 // NewID returns a random audit entry identifier prefixed with "aud_".
 func NewID() string {
 	return idgen.New("aud_", 6)

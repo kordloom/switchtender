@@ -784,7 +784,10 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 		// a chosen few fields meant a split silently dropped the rest: extra vars vanished, shards
 		// ran outside the execution image the parent pinned, and the run timeout did not apply.
 		inheritExecution(child, parent)
-		stampReceipt(ctx, child)
+		// A child belongs to its parent's authorization, whether it is built inside the request or
+		// after it returned. Inheriting is the one rule; re-deriving from context would make an
+		// in-request shard and a later step disagree about which receipt is truthful.
+		child.AuditReceipt = parent.AuditReceipt
 		if err := d.store.Save(ctx, child); err != nil {
 			return nil, err
 		}
@@ -939,7 +942,7 @@ func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string) (*r
 			Limit: shard.Limit,
 		}
 		inheritExecution(child, retry)
-		stampReceipt(ctx, child)
+		child.AuditReceipt = retry.AuditReceipt
 		if err := d.store.Save(ctx, child); err != nil {
 			return nil, err
 		}

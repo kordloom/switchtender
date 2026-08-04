@@ -219,7 +219,10 @@ function wireRunDownloads(runId) {
 				// A token session carries no stored role, so the control cannot know in advance
 				// that the server will refuse. Saying which rule refused, and retiring the button,
 				// beats leaving a control that fails the same way on every click.
-				if (/forbidden/i.test(err.message)) {
+				// fetchAuthed throws "HTTP <status>", so the status is what to match. Matching
+				// the word the server puts in the body instead made this branch unreachable and
+				// left the raw developer string on screen, which is what it was written to replace.
+				if (err.message === "HTTP 403") {
 					exportEvidence.hidden = true;
 					setStatus("Evidence quotes the audit trail, so it is admin only on this server.");
 					return;

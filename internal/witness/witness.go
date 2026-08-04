@@ -70,7 +70,9 @@ type Checkpoint struct {
 
 // Finding is one problem the witness can attest to.
 type Finding struct {
-	// Kind is missing_beat, rewritten_beat, or head_regression.
+	// Kind names the condition: missing_beat, rewritten_beat, or head_regression for what the
+	// record shows, and witness_blind or witness_seeing for whether this witness can see at all.
+	// A reader routing on it should treat unknown kinds as findings rather than drop them.
 	Kind string `json:"kind"`
 	// Detail says what was expected and what was seen, in words an operator can act on.
 	Detail string `json:"detail"`
@@ -80,7 +82,9 @@ type Finding struct {
 // checkpoint and every finding, and it is pure, so what the witness alerts on is testable without
 // a server. prev may be nil on the first watch.
 func Check(prev *Checkpoint, server string, beats []Beat, now time.Time) (*Checkpoint, []Finding, error) {
-	next := &Checkpoint{Server: server, Recent: map[int64]Observed{}, ObservedAt: now}
+	// Stored normalized, so a checkpoint written from one spelling matches a watch spelled the
+	// other way without every reader having to remember to normalize.
+	next := &Checkpoint{Server: NormalizeServer(server), Recent: map[int64]Observed{}, ObservedAt: now}
 	var findings []Finding
 	// A checkpoint is memory of one server's stream. Held against another server it invents
 	// findings from the difference between two unrelated chains and overwrites the memory that
@@ -164,7 +168,13 @@ func Check(prev *Checkpoint, server string, beats []Beat, now time.Time) (*Check
 // spelled with a trailing slash: refusing means no beat is ever compared again, which blinds the
 // witness permanently while it reports itself healthy.
 func sameServer(a, b string) bool {
-	return strings.TrimRight(a, "/") == strings.TrimRight(b, "/")
+	return NormalizeServer(a) == NormalizeServer(b)
+}
+
+// NormalizeServer returns the base URL in the one form the witness watches and records, so the
+// checkpoint, the pin, and the feed request all agree on what "the same server" means.
+func NormalizeServer(base string) string {
+	return strings.TrimRight(base, "/")
 }
 
 // signedContent is the canonical bytes a checkpoint signature covers: the checkpoint with its

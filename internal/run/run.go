@@ -393,6 +393,13 @@ func (r *Run) Clone() *Run {
 // SubmitOption customizes a run at submission.
 type SubmitOption func(*Run)
 
+// WithAuditReceiptOf records that this run was set in motion by the request behind receipt, for a
+// run created after that request returned. It is deliberately not part of ExecutionOptions: rerun,
+// shard retry, and reconcile replay those, and each is a new request with its own authorization.
+func WithAuditReceiptOf(receipt string) SubmitOption {
+	return func(r *Run) { r.AuditReceipt = receipt }
+}
+
 // WithCredentialIDs attaches stored credentials to the run.
 func WithCredentialIDs(ids []string) SubmitOption {
 	return func(r *Run) { r.CredentialIDs = append([]string(nil), ids...) }
