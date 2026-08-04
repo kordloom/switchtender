@@ -201,6 +201,20 @@ function wireRunDownloads(runId) {
 			}
 		});
 	}
+	const exportEvidence = document.getElementById("export-evidence");
+	if (exportEvidence) {
+		exportEvidence.dataset.tip =
+			"Click to download this run's evidence dossier, one self-contained document for an auditor";
+		exportEvidence.addEventListener("click", async (e) => {
+			e.preventDefault();
+			try {
+				const text = await (await fetchAuthed("/runs/" + runId + "/evidence")).text();
+				downloadBlob("switchtender-" + runId + "-evidence.html", "text/html", text);
+			} catch (err) {
+				setStatus("Could not export the evidence: " + err.message);
+			}
+		});
+	}
 	const exportEvents = document.getElementById("export-events");
 	if (exportEvents) {
 		exportEvents.dataset.tip = "Click to download every event as newline-delimited JSON";
