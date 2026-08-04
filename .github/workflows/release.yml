@@ -128,12 +128,33 @@ jobs:
             rm -f dist/notary_key.p8
           fi
 
+          # BINARY_SHA256SUMS names the hash of the binary inside each archive, which is what
+          # `switchtender version --verify` holds the running executable against. SHA256SUMS
+          # covers the archives; this covers the file that actually runs.
+          : > dist/BINARY_SHA256SUMS
+          for archive in dist/switchtender_*.tar.gz; do
+            name="$(basename "$archive" .tar.gz)"
+            tar -xzf "$archive" -C dist switchtender
+            hash="$(shasum -a 256 dist/switchtender | cut -d' ' -f1)"
+            printf '%s  %s\n' "$hash" "$name" >> dist/BINARY_SHA256SUMS
+            rm -f dist/switchtender
+          done
+          for archive in dist/switchtender_*windows*.zip; do
+            [ -e "$archive" ] || continue
+            name="$(basename "$archive" .zip)"
+            unzip -o -q "$archive" switchtender.exe -d dist
+            hash="$(shasum -a 256 dist/switchtender.exe | cut -d' ' -f1)"
+            printf '%s  %s.exe\n' "$hash" "$name" >> dist/BINARY_SHA256SUMS
+            rm -f dist/switchtender.exe
+          done
+
           shasum -a 256 "dist/SwitchTender_${VERSION}.dmg" >> dist/SHA256SUMS
           cosign sign-blob --yes dist/SHA256SUMS \
             --output-signature dist/SHA256SUMS.sig \
             --output-certificate dist/SHA256SUMS.pem
           gh release upload "$GITHUB_REF_NAME" \
             "dist/SwitchTender_${VERSION}.dmg" dist/SHA256SUMS dist/SHA256SUMS.sig dist/SHA256SUMS.pem \
+            dist/BINARY_SHA256SUMS \
             --clobber
 
       # SLSA build provenance for every published artifact, verifiable with `gh attestation verify`.
