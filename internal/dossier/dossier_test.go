@@ -419,3 +419,53 @@ func TestDossierReportsAWipedChainForARunItRecordsNothingAbout(t *testing.T) {
 		t.Error("a wiped chain reads as merely unanchored, hiding the tamper it exists to show")
 	}
 }
+
+func TestDossierDoesNotClaimAnchorsCoverARunTheChainNeverNamed(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	runs := run.NewMemStore()
+	audits := audit.NewMemStore()
+	base := time.Date(2026, 8, 1, 10, 0, 0, 0, time.UTC)
+	ended := base.Add(time.Minute)
+	// A scheduled run: no receipt, and no chain entry naming it. The chain holds entries from
+	// around that time, and an anchor above them that genuinely holds.
+	if err := runs.Save(ctx, &run.Run{
+		ID: "run_sched", Playbook: "site.yml", Status: run.StatusSucceeded,
+		CreatedAt: base, EndedAt: &ended, Source: "schedule", SourceID: "sch_1",
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	if err := audits.Append(ctx, &audit.Entry{
+		ID: audit.NewID(), At: base, Actor: "root", Method: "POST", Path: "/v1/projects",
+	}); err != nil {
+		t.Fatalf("Append() error = %v", err)
+	}
+	chain, err := audits.Chain(ctx)
+	if err != nil {
+		t.Fatalf("Chain() error = %v", err)
+	}
+	if err := audits.(audit.AnchorStore).SaveAnchor(ctx, &audit.Anchor{
+		ID: "anc_1", Type: "rfc3161", Seq: 1, Link: chain[0].Hash, At: ended, Ref: "https://tsa",
+	}); err != nil {
+		t.Fatalf("SaveAnchor() error = %v", err)
+	}
+
+	in, err := Collect(ctx, runs, audits, "run_sched", time.Now())
+	if err != nil {
+		t.Fatalf("Collect() error = %v", err)
+	}
+	if len(in.Covering) != 1 || in.Launch != nil || len(in.Entries) != 0 {
+		t.Fatalf("setup wrong: covering=%d launch=%v entries=%d", len(in.Covering), in.Launch, len(in.Entries))
+	}
+	doc, err := Render(in)
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+	html := string(doc)
+	if strings.Contains(html, "fix history containing this run") {
+		t.Error("the dossier claims anchors fix history containing a run the chain never named")
+	}
+	if !strings.Contains(html, "holds no entry naming this run") {
+		t.Error("the dossier does not say what the anchors actually fix")
+	}
+}

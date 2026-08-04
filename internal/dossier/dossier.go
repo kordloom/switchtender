@@ -393,6 +393,15 @@ func Render(in *Input) ([]byte, error) {
 		v.Status = "unanchored"
 		v.StatusText = "The chain verifies, but no anchor covers this run yet, so the record " +
 			"rests on this install alone. The next anchor fixes it."
+	case in.Launch == nil && len(in.Entries) == 0:
+		// The anchors hold, but over a chain that names this run nowhere. Saying they "fix history
+		// containing this run" would assert a record that does not exist: what they actually fix is
+		// the surrounding history as it stood when the run ran. An evidence document that overstates
+		// what an anchor proves is the same defect as one that understates a tamper.
+		v.Status = "unanchored"
+		v.StatusText = fmt.Sprintf("The chain verifies and %d anchor(s) fix it outside this "+
+			"install, but it holds no entry naming this run, so they fix the history around it "+
+			"rather than a record of it.", len(v.Anchors))
 	default:
 		v.Status = "verified"
 		v.StatusText = fmt.Sprintf("The chain verifies and %d anchor(s) fix history containing "+
