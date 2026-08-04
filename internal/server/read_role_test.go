@@ -48,6 +48,10 @@ func TestReadRolesBoundManagementData(t *testing.T) {
 		{"/v1/orgs/org_1/members", user.RoleAdmin},
 		{"/v1/teams", user.RoleAdmin},
 		{"/v1/doctor", user.RoleAdmin},
+		// Test 18 and 19: The evidence documents quote the audit trail, so they take its role. The
+		// run's ordinary read stays open to viewers.
+		{"/v1/runs/run_1/evidence", user.RoleAdmin},
+		{"/v1/audit/register", user.RoleAdmin},
 	}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Path), func(t *testing.T) {

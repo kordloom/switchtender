@@ -292,8 +292,11 @@ func (g *authGate) roleFor(ctx context.Context, tok *auth.Token) (user.Role, err
 func requiredRole(r *http.Request) user.Role {
 	// Path checks compare against the unversioned path, so the /v1 API prefix does not repeat.
 	p := strings.TrimPrefix(r.URL.Path, "/v1")
-	// The audit trail is management data even to read.
-	if p == "/audit" || strings.HasPrefix(p, "/audit/") {
+	// The audit trail is management data even to read. A run's evidence dossier embeds a slice of
+	// it, the approver identities and chain entries over that run, so it takes the same role as
+	// the trail it quotes rather than the viewer read its path shape suggests.
+	if p == "/audit" || strings.HasPrefix(p, "/audit/") ||
+		(strings.HasPrefix(p, "/runs/") && strings.HasSuffix(p, "/evidence")) {
 		return user.RoleAdmin
 	}
 	// An account carries a profile of personal data, so listing accounts is management data even

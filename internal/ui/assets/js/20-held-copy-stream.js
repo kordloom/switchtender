@@ -202,7 +202,12 @@ function wireRunDownloads(runId) {
 		});
 	}
 	const exportEvidence = document.getElementById("export-evidence");
-	if (exportEvidence) {
+	// The dossier quotes the audit trail, approver identities included, so the control only shows
+	// where the trail itself would: an admin session, or an open instance with no accounts.
+	const evidenceRole = localStorage.getItem("st_role");
+	if (exportEvidence && evidenceRole && evidenceRole !== "admin") {
+		exportEvidence.hidden = true;
+	} else if (exportEvidence) {
 		exportEvidence.dataset.tip =
 			"Click to download this run's evidence dossier, one self-contained document for an auditor";
 		exportEvidence.addEventListener("click", async (e) => {
