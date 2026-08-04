@@ -49,8 +49,10 @@ type RegisterInput struct {
 	ChainCount int
 	// Head is the chain head at collection, the receipt the document carries.
 	Head *audit.Entry
-	// Anchored is how many anchors exist over the chain.
+	// Anchored is how many anchors still hold against the chain.
 	Anchored int
+	// AnchorProblems describes each anchor the chain no longer satisfies.
+	AnchorProblems []string
 	// GeneratedAt is when the register was collected.
 	GeneratedAt time.Time
 }
@@ -66,9 +68,22 @@ func CollectRegister(ctx context.Context, runs run.Store, audits audit.Store, fr
 	}
 	in.Runs = rows
 
+	// The anchors are read before the walk so their links are held against the chain in the same
+	// pass. Counting anchors without checking them is how a wholesale rewrite, which is
+	// internally consistent and so passes the hash walk, earns a register that calls it verified.
+	var anchors []*audit.Anchor
+	if store, ok := audits.(audit.AnchorStore); ok {
+		var aerr error
+		if anchors, aerr = store.Anchors(ctx, 0); aerr != nil {
+			return nil, fmt.Errorf("read audit anchors: %w", aerr)
+		}
+	}
+
 	scan := audit.NewChainScanner(true)
+	anchorScan := audit.NewAnchorScanner(anchors)
 	err = audits.ChainScan(ctx, func(e *audit.Entry) error {
 		scan.Feed(e)
+		anchorScan.Feed(e)
 		in.Head = e
 		if id, verdict := decisionOf(e); id != "" {
 			// The newest decision wins: a rejection redone as an approval reads as the chain
@@ -82,12 +97,13 @@ func CollectRegister(ctx context.Context, runs run.Store, audits audit.Store, fr
 	}
 	in.ChainOK, in.ChainBrokeAt, in.ChainCount = scan.Result()
 
-	if store, ok := audits.(audit.AnchorStore); ok {
-		anchors, aerr := store.Anchors(ctx, 0)
-		if aerr != nil {
-			return nil, fmt.Errorf("read audit anchors: %w", aerr)
+	_, results := anchorScan.Results()
+	for _, res := range results {
+		if res.Reached {
+			in.Anchored++
+			continue
 		}
-		in.Anchored = len(anchors)
+		in.AnchorProblems = append(in.AnchorProblems, res.Problem)
 	}
 	return in, nil
 }
@@ -152,6 +168,8 @@ type registerView struct {
 	ChainCount int
 	// Receipt is the chain head's seq:link at collection.
 	Receipt string
+	// AnchorProblems describes each anchor the chain no longer satisfies.
+	AnchorProblems []string
 	// GeneratedAt is when the register was made, formatted.
 	GeneratedAt string
 }
@@ -197,11 +215,19 @@ func RenderRegister(in *RegisterInput) ([]byte, error) {
 		}
 		v.Rows = append(v.Rows, row)
 	}
+	v.AnchorProblems = in.AnchorProblems
 	switch {
 	case !in.ChainOK:
 		v.Status = "broken"
 		v.StatusText = fmt.Sprintf("The audit chain is broken at entry %d. This register cannot "+
 			"be relied on until the break is explained.", in.ChainBrokeAt)
+	case len(in.AnchorProblems) > 0:
+		// A wholesale rewrite is self-consistent, so the hash walk passes and only the anchors
+		// disagree. That disagreement is the finding.
+		v.Status = "broken"
+		v.StatusText = fmt.Sprintf("The chain no longer satisfies %d of its own anchors, so "+
+			"history was rewritten or lost. This register cannot be relied on until that is "+
+			"explained.", len(in.AnchorProblems))
 	case in.Anchored == 0:
 		v.Status = "unanchored"
 		v.StatusText = "The chain verifies, but it is unanchored, so the record rests on this " +

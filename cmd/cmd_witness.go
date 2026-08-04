@@ -102,7 +102,14 @@ func runWitness(cmd *cobra.Command, _ []string) error {
 			return nil
 		}
 		if err != nil {
+			// A witness that cannot check is not a witness. Logging to a stream nobody reads and
+			// looping forever is the failure mode where the process is up, the operator believes
+			// they are covered, and a truncation goes unobserved, so the channel hears about it.
 			fmt.Fprintln(os.Stderr, "witness: "+err.Error())
+			alertWebhook(cmd.Context(), client, witness.Finding{
+				Kind:   "witness_blind",
+				Detail: "the witness could not check this server: " + err.Error(),
+			})
 		}
 		select {
 		case <-cmd.Context().Done():
@@ -115,7 +122,10 @@ func runWitness(cmd *cobra.Command, _ []string) error {
 // witnessCheckOnce fetches the feed, holds it against the checkpoint, saves the next checkpoint,
 // and reports every finding. It returns how many findings were raised.
 func witnessCheckOnce(ctx context.Context, client *http.Client, id audit.Identity) (int, error) {
-	prev, err := witness.Load(witnessState)
+	// The checkpoint's signer is pinned to this witness. A signature that only checks against the
+	// key inside the same file proves the file is self-consistent, which a forger who generates
+	// their own key satisfies trivially, so pinning is what makes a replaced state file detectable.
+	prev, err := witness.Load(witnessState, id.PublicKeyHex())
 	if err != nil {
 		return 0, err
 	}
@@ -123,7 +133,10 @@ func witnessCheckOnce(ctx context.Context, client *http.Client, id audit.Identit
 	if err != nil {
 		return 0, fmt.Errorf("fetch beats: %w", err)
 	}
-	next, findings := witness.Check(prev, witnessServer, beats, time.Now())
+	next, findings, err := witness.Check(prev, witnessServer, beats, time.Now())
+	if err != nil {
+		return 0, err
+	}
 	for _, f := range findings {
 		fmt.Fprintf(os.Stderr, "witness: FINDING %s: %s\n", f.Kind, f.Detail)
 		alertWebhook(ctx, client, f)
@@ -136,7 +149,10 @@ func witnessCheckOnce(ctx context.Context, client *http.Client, id audit.Identit
 
 // fetchBeats reads the unauthenticated beat feed.
 func fetchBeats(ctx context.Context, client *http.Client) ([]witness.Beat, error) {
-	feed := strings.TrimRight(witnessServer, "/") + "/v1/audit/beats"
+	// The limit asked for is the number the witness can remember. Asking for more than that would
+	// serve beats it forgets, and a forgotten beat's rewrite is re-adopted rather than reported.
+	feed := fmt.Sprintf("%s/v1/audit/beats?limit=%d",
+		strings.TrimRight(witnessServer, "/"), witness.FeedLimit)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, feed, nil)
 	if err != nil {
 		return nil, err

@@ -91,6 +91,15 @@ footer { margin-top: 40px; color: var(--muted); font-size: 13px; }
 	</table></div>
 	{{end}}
 
+	{{if .AnchorProblems}}
+	<h2>Anchors the chain no longer satisfies</h2>
+	<p class="sub">Each line is an anchor whose recorded link is not what the chain now holds at that position. A hash chain that verifies is only self-consistent; this is what a wholesale rewrite cannot survive.</p>
+	<ul>
+		{{range .AnchorProblems}}<li>{{.}}</li>
+		{{end}}
+	</ul>
+	{{end}}
+
 	{{if .Anchors}}
 	<h2>Anchors covering this run</h2>
 	<p class="sub">Each anchor fixed the chain head, at or after this run's last entry, somewhere this install cannot rewrite.</p>

@@ -18,9 +18,14 @@ import (
 	"github.com/kordloom/switchtender/internal/audit"
 )
 
-// recentCap bounds how many observed beats a checkpoint remembers. The feed serves the newest
-// window, so remembering more than it can re-serve buys nothing.
-const recentCap = 512
+// FeedLimit is how many beats the witness asks the feed for, and recentCap is how many it
+// remembers. They are the same number on purpose: a beat the feed still serves but the witness has
+// forgotten is re-adopted as if first seen, so a rewrite of it raises nothing. Remembering less
+// than is served is the hole, not an economy.
+const (
+	FeedLimit = 1000
+	recentCap = FeedLimit
+)
 
 // Beat is one span beat as the feed serves it.
 type Beat struct {
@@ -73,9 +78,16 @@ type Finding struct {
 // Check holds a fresh read of the feed against the previous checkpoint. It returns the next
 // checkpoint and every finding, and it is pure, so what the witness alerts on is testable without
 // a server. prev may be nil on the first watch.
-func Check(prev *Checkpoint, server string, beats []Beat, now time.Time) (*Checkpoint, []Finding) {
+func Check(prev *Checkpoint, server string, beats []Beat, now time.Time) (*Checkpoint, []Finding, error) {
 	next := &Checkpoint{Server: server, Recent: map[int64]Observed{}, ObservedAt: now}
 	var findings []Finding
+	// A checkpoint is memory of one server's stream. Held against another server it invents
+	// findings from the difference between two unrelated chains and overwrites the memory that
+	// would have caught a real rewrite, so the mismatch is refused rather than reported.
+	if prev != nil && prev.Server != "" && prev.Server != server {
+		return nil, nil, fmt.Errorf("checkpoint remembers %s, not %s; use one state file per server",
+			prev.Server, server)
+	}
 	if prev != nil {
 		next.LastBeat, next.LastSeq, next.LastHead = prev.LastBeat, prev.LastSeq, prev.LastHead
 		for n, o := range prev.Recent {
@@ -110,12 +122,19 @@ func Check(prev *Checkpoint, server string, beats []Beat, now time.Time) (*Check
 
 	if len(beats) > 0 {
 		newest := beats[len(beats)-1]
+		// A rewritten newest beat is never adopted. Advancing Last* onto it would sign the
+		// rewrite into the witness's own testimony, so the checkpoint an operator pins would
+		// endorse the very chain this watch is reporting.
+		seen, known := next.Recent[newest.Beat]
+		rewritten := known && (seen.Seq != newest.Seq || seen.Head != newest.Head)
 		switch {
 		case newest.Beat < next.LastBeat:
 			findings = append(findings, Finding{Kind: "head_regression", Detail: fmt.Sprintf(
 				"the newest beat is %d and beat %d was already witnessed, so the chain lost its "+
 					"tail", newest.Beat, next.LastBeat)})
-		case newest.Beat >= next.LastBeat:
+		case rewritten:
+			// The finding was already raised by the rewrite walk above; the memory stands.
+		default:
 			next.LastBeat, next.LastSeq, next.LastHead = newest.Beat, newest.Seq, newest.Head
 		}
 	} else if prev != nil && prev.LastBeat > 0 {
@@ -135,7 +154,7 @@ func Check(prev *Checkpoint, server string, beats []Beat, now time.Time) (*Check
 			delete(next.Recent, n)
 		}
 	}
-	return next, findings
+	return next, findings, nil
 }
 
 // signedContent is the canonical bytes a checkpoint signature covers: the checkpoint with its
@@ -181,9 +200,10 @@ func Verify(c *Checkpoint) (publicKey string, err error) {
 	return c.PublicKey, nil
 }
 
-// Load reads and verifies a checkpoint file. A missing file returns nil with no error, the first
-// watch. A present file that fails verification is an error, never silently accepted.
-func Load(path string) (*Checkpoint, error) {
+// Load reads and verifies a checkpoint file, pinning its signer to expectKey when one is given. A
+// missing file returns nil with no error, the first watch. A present file that fails verification
+// or was signed by another key is an error, never silently accepted.
+func Load(path, expectKey string) (*Checkpoint, error) {
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return nil, nil
@@ -195,8 +215,16 @@ func Load(path string) (*Checkpoint, error) {
 	if err := json.Unmarshal(data, &c); err != nil {
 		return nil, fmt.Errorf("parse checkpoint: %w", err)
 	}
-	if _, err := Verify(&c); err != nil {
+	signer, err := Verify(&c)
+	if err != nil {
 		return nil, err
+	}
+	// The signature alone proves only that the file is self-consistent, which a forger who
+	// generates their own key satisfies trivially. Pinning the signer to this witness's own key is
+	// what makes a replaced state file detectable.
+	if expectKey != "" && signer != expectKey {
+		return nil, fmt.Errorf("checkpoint was signed by %s, not by this witness (%s); "+
+			"the state file was replaced", signer, expectKey)
 	}
 	return &c, nil
 }

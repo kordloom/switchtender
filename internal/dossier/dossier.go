@@ -43,9 +43,15 @@ type Input struct {
 	ChainCount int
 	// Head is the chain head at collection, the receipt the document carries.
 	Head *audit.Entry
-	// Covering are the anchors taken at or after the run's last chain entry, each one an
-	// independent fixation of history containing the run.
+	// Covering are the anchors that still hold against the chain and sit at or after the position
+	// the run was recorded by, each one an independent fixation of history containing the run.
 	Covering []*audit.Anchor
+	// AnchorProblems describes each anchor the chain no longer satisfies. A chain can hash-verify
+	// perfectly and still have been rewritten wholesale or lost its tail; this is what catches it.
+	AnchorProblems []string
+	// RecordedBy is the highest chain position reached by the run's own time, the position an
+	// anchor must reach to fix history that already held the run.
+	RecordedBy int64
 	// GeneratedAt is when the dossier was collected.
 	GeneratedAt time.Time
 }
@@ -71,17 +77,28 @@ func Collect(ctx context.Context, runs run.Store, audits audit.Store, id string,
 	if r.EndedAt != nil {
 		at = *r.EndedAt
 	}
+	// A store error is never read as absence. Rendering a dossier with no host section over a
+	// failed read would assert by omission that nothing ran, which is the one thing an evidence
+	// document must not do quietly.
 	var groups [][]run.HostSummary
-	if events, eerr := runs.Events(ctx, id); eerr == nil && len(events) > 0 {
+	events, err := runs.Events(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("read run events: %w", err)
+	}
+	if len(events) > 0 {
 		groups = append(groups, run.HostSummariesFromStats(events, at))
 	} else {
 		for _, read := range []func(context.Context, string) ([]*run.Run, error){runs.Shards, runs.Steps} {
 			children, cerr := read(ctx, id)
 			if cerr != nil {
-				continue
+				return nil, fmt.Errorf("read run children: %w", cerr)
 			}
 			for _, c := range children {
-				if ce, ceErr := runs.Events(ctx, c.ID); ceErr == nil && len(ce) > 0 {
+				ce, ceErr := runs.Events(ctx, c.ID)
+				if ceErr != nil {
+					return nil, fmt.Errorf("read run events: %w", ceErr)
+				}
+				if len(ce) > 0 {
 					groups = append(groups, run.HostSummariesFromStats(ce, at))
 				}
 			}
@@ -92,13 +109,35 @@ func Collect(ctx context.Context, runs run.Store, audits audit.Store, id string,
 	}
 	in.Hosts = mergeHosts(groups)
 
-	// One pass gives the run's entries, the whole-chain verdict, and the head receipt together.
+	// The anchors are read before the walk so their links are checked against the chain in the
+	// same pass. Counting an anchor as covering without holding its link against the entry at
+	// that position is how a rewritten chain earns a green banner: the rewrite is internally
+	// consistent, so the hash walk passes and only the anchors disagree.
+	var anchors []*audit.Anchor
+	if store, ok := audits.(audit.AnchorStore); ok {
+		var aerr error
+		if anchors, aerr = store.Anchors(ctx, 0); aerr != nil {
+			return nil, fmt.Errorf("read audit anchors: %w", aerr)
+		}
+	}
+
+	// One pass gives the run's entries, the whole-chain verdict, the anchor verdicts, the head
+	// receipt, and where the chain stood when the run was recorded.
 	scan := audit.NewChainScanner(true)
+	anchorScan := audit.NewAnchorScanner(anchors)
 	err = audits.ChainScan(ctx, func(e *audit.Entry) error {
 		scan.Feed(e)
+		anchorScan.Feed(e)
 		in.Head = e
 		if strings.Contains(e.Path, id) {
 			in.Entries = append(in.Entries, e)
+		}
+		// A run's creation is recorded at the request path, which names the template or the
+		// collection rather than the run the request went on to create, so it cannot be matched
+		// by id. The chain position as of the run's own time is what an anchor has to reach to
+		// fix history that already held it.
+		if !e.At.After(at) && e.Seq > in.RecordedBy {
+			in.RecordedBy = e.Seq
 		}
 		return nil
 	})
@@ -107,18 +146,20 @@ func Collect(ctx context.Context, runs run.Store, audits audit.Store, id string,
 	}
 	in.ChainOK, in.ChainBrokeAt, in.ChainCount = scan.Result()
 
-	// An anchor at or after the run's last entry fixes history containing the run somewhere this
-	// install cannot rewrite. Earlier anchors prove nothing about it and are left out.
-	if store, ok := audits.(audit.AnchorStore); ok && len(in.Entries) > 0 {
-		last := in.Entries[len(in.Entries)-1].Seq
-		anchors, aerr := store.Anchors(ctx, 0)
-		if aerr != nil {
-			return nil, fmt.Errorf("read audit anchors: %w", aerr)
+	// An anchor covers the run when it still holds against the chain and sits at or after the
+	// position the run was recorded by. An anchor that no longer holds is the finding itself.
+	_, results := anchorScan.Results()
+	cover := in.RecordedBy
+	if n := len(in.Entries); n > 0 && in.Entries[n-1].Seq > cover {
+		cover = in.Entries[n-1].Seq
+	}
+	for _, res := range results {
+		if !res.Reached {
+			in.AnchorProblems = append(in.AnchorProblems, res.Problem)
+			continue
 		}
-		for _, a := range anchors {
-			if a.Seq >= last {
-				in.Covering = append(in.Covering, a)
-			}
+		if res.Anchor.Seq >= cover {
+			in.Covering = append(in.Covering, res.Anchor)
 		}
 	}
 	return in, nil
@@ -230,6 +271,8 @@ type view struct {
 	Hosts []hostRow
 	// Anchors are the covering anchors.
 	Anchors []anchorRow
+	// AnchorProblems describes each anchor the chain no longer satisfies.
+	AnchorProblems []string
 	// ChainCount is the whole chain's entry count.
 	ChainCount int
 	// Receipt is the chain head's seq:link at collection.
@@ -278,11 +321,19 @@ func Render(in *Input) ([]byte, error) {
 			Ref: a.Ref, Offline: a.Proof != "",
 		})
 	}
+	v.AnchorProblems = in.AnchorProblems
 	switch {
 	case !in.ChainOK:
 		v.Status = "broken"
 		v.StatusText = fmt.Sprintf("The audit chain is broken at entry %d. Nothing below is "+
 			"trustworthy until the break is explained.", in.ChainBrokeAt)
+	case len(in.AnchorProblems) > 0:
+		// The hash walk passing proves only that the chain is self-consistent. A wholesale
+		// rewrite is self-consistent too, and this is what disproves it.
+		v.Status = "broken"
+		v.StatusText = fmt.Sprintf("The chain no longer satisfies %d of its own anchors, so "+
+			"history was rewritten or lost. Nothing below is trustworthy until that is explained.",
+			len(in.AnchorProblems))
 	case len(v.Anchors) == 0:
 		v.Status = "unanchored"
 		v.StatusText = "The chain verifies, but no anchor covers this run yet, so the record " +
@@ -301,6 +352,11 @@ func Render(in *Input) ([]byte, error) {
 }
 
 // entryRole names what a chain entry did to the run, empty for ordinary activity.
+//
+// There is no launch role. A run is created after its request was already recorded, at a path
+// naming the template or the collection rather than the run, so no chain entry can be matched to
+// it by id. Who asked for the run is carried by the run actor and source instead, and RecordedBy
+// is the position an anchor has to reach to cover the creation.
 func entryRole(e *audit.Entry) string {
 	switch {
 	case strings.HasSuffix(e.Path, "/approve"):
@@ -309,8 +365,6 @@ func entryRole(e *audit.Entry) string {
 		return "Rejected"
 	case strings.HasSuffix(e.Path, "/cancel"):
 		return "Canceled"
-	case strings.HasSuffix(e.Path, "/launch"), e.Method == "POST" && strings.HasSuffix(e.Path, "/runs"):
-		return "Launched"
 	case strings.HasSuffix(e.Path, "/retry"):
 		return "Retried"
 	}
@@ -349,9 +403,16 @@ func runMeta(r *run.Run) []metaRow {
 	add("Source", strings.TrimSpace(r.Source+" "+r.SourceID))
 	add("Intent", r.Intent)
 	if len(r.Labels) > 0 {
-		parts := make([]string, 0, len(r.Labels))
-		for k, val := range r.Labels {
-			parts = append(parts, k+"="+val)
+		// Sorted for the same reason the host table is: two generations of one dossier must differ
+		// only where the facts differ, or a diff-based review reports changes that are not real.
+		keys := make([]string, 0, len(r.Labels))
+		for k := range r.Labels {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		parts := make([]string, 0, len(keys))
+		for _, k := range keys {
+			parts = append(parts, k+"="+r.Labels[k])
 		}
 		add("Labels", strings.Join(parts, ", "))
 	}

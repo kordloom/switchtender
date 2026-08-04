@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/event"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -34,7 +35,9 @@ func seedEvidence(t *testing.T) (run.Store, audit.Store, string) {
 	for _, e := range []struct {
 		Actor, Method, Path string
 	}{
-		{"deploy-bot", "POST", "/v1/templates/tpl_web/launch?run=" + id},
+		// The real recorded path for a launch. The auth middleware records the request path
+		// before the handler runs, so it names the template, never the run it goes on to create.
+		{"deploy-bot", "POST", "/v1/templates/tpl_web/launch"},
 		{"root", "POST", "/v1/runs/" + id + "/approve"},
 		{"root", "POST", "/v1/projects"},
 	} {
@@ -57,8 +60,9 @@ func TestDossierCollectsDecisionsAndReceipts(t *testing.T) {
 	if !in.ChainOK || in.ChainCount != 3 {
 		t.Errorf("chain ok=%v count=%d, want intact with 3 entries", in.ChainOK, in.ChainCount)
 	}
-	if len(in.Entries) != 2 {
-		t.Fatalf("run entries = %d, want the launch and the approval", len(in.Entries))
+	if len(in.Entries) != 1 {
+		t.Fatalf("run entries = %d, want the approval; a launch is recorded at the request path, "+
+			"which never names the run it creates", len(in.Entries))
 	}
 	if in.Head == nil || in.Head.Seq != 3 {
 		t.Errorf("head = %+v, want the chain head at seq 3", in.Head)
@@ -71,7 +75,7 @@ func TestDossierCollectsDecisionsAndReceipts(t *testing.T) {
 	html := string(doc)
 	for _, want := range []string{
 		id, "Approved", "root", "deploy-bot",
-		"1:" + in.Entries[0].Hash, "3:" + in.Head.Hash,
+		"2:" + in.Entries[0].Hash, "3:" + in.Head.Hash,
 		"no anchor covers this run",
 	} {
 		if !strings.Contains(html, want) {
@@ -164,4 +168,119 @@ func (b *brokenChain) ChainScan(ctx context.Context, fn func(*audit.Entry) error
 		}
 		return fn(e)
 	})
+}
+
+func TestDossierRefusesARewrittenChainItsAnchorsDisown(t *testing.T) {
+	t.Parallel()
+	runs, audits, id := seedEvidence(t)
+	ctx := context.Background()
+	chain, err := audits.Chain(ctx)
+	if err != nil {
+		t.Fatalf("Chain() error = %v", err)
+	}
+	// An anchor recorded over the history as it was. The chain then comes back internally
+	// consistent but with different links, which is what a wholesale rewrite looks like: the hash
+	// walk passes and only the anchor disagrees.
+	anchorStore := audits.(audit.AnchorStore)
+	if err := anchorStore.SaveAnchor(ctx, &audit.Anchor{
+		ID: "anc_1", Type: "rfc3161", Seq: 3, Link: "the-link-that-was-anchored",
+		At: time.Now(), Ref: "https://tsa", Proof: "cHJvb2Y=",
+	}); err != nil {
+		t.Fatalf("SaveAnchor() error = %v", err)
+	}
+	_ = chain
+
+	in, err := Collect(ctx, runs, audits, id, time.Now())
+	if err != nil {
+		t.Fatalf("Collect() error = %v", err)
+	}
+	if !in.ChainOK {
+		t.Fatal("the rewritten chain must still pass the hash walk, or this proves nothing")
+	}
+	if len(in.AnchorProblems) != 1 {
+		t.Fatalf("anchor problems = %v, want the one anchor the chain no longer satisfies", in.AnchorProblems)
+	}
+	if len(in.Covering) != 0 {
+		t.Errorf("covering anchors = %v, want none: an anchor that does not hold covers nothing", in.Covering)
+	}
+	doc, err := Render(in)
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+	html := string(doc)
+	if strings.Contains(html, "The chain verifies and") {
+		t.Error("the dossier calls a chain its own anchors disown verified")
+	}
+	if !strings.Contains(html, "history was rewritten or lost") {
+		t.Error("the dossier does not lead with the anchor disagreement")
+	}
+}
+
+func TestDossierCoversARunWithNoEntriesNamingIt(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	runs := run.NewMemStore()
+	audits := audit.NewMemStore()
+	base := time.Date(2026, 8, 1, 10, 0, 0, 0, time.UTC)
+	ended := base.Add(time.Minute)
+	// An ordinary run that needed no approval: its creation is recorded at the collection path,
+	// which never carries the run id, so nothing in the chain names it.
+	if err := runs.Save(ctx, &run.Run{
+		ID: "run_plain", Playbook: "site.yml", Status: run.StatusSucceeded,
+		CreatedAt: base, EndedAt: &ended,
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	if err := audits.Append(ctx, &audit.Entry{
+		ID: audit.NewID(), At: base, Actor: "deploy-bot", Method: "POST", Path: "/v1/runs",
+	}); err != nil {
+		t.Fatalf("Append() error = %v", err)
+	}
+	chain, err := audits.Chain(ctx)
+	if err != nil {
+		t.Fatalf("Chain() error = %v", err)
+	}
+	if err := audits.(audit.AnchorStore).SaveAnchor(ctx, &audit.Anchor{
+		ID: "anc_1", Type: "rfc3161", Seq: 1, Link: chain[0].Hash,
+		At: ended, Ref: "https://tsa", Proof: "cHJvb2Y=",
+	}); err != nil {
+		t.Fatalf("SaveAnchor() error = %v", err)
+	}
+
+	in, err := Collect(ctx, runs, audits, "run_plain", time.Now())
+	if err != nil {
+		t.Fatalf("Collect() error = %v", err)
+	}
+	if len(in.Entries) != 0 {
+		t.Fatalf("entries naming the run = %d, want none, or this proves nothing", len(in.Entries))
+	}
+	if len(in.Covering) != 1 {
+		t.Fatalf("covering anchors = %d, want the anchor over the position the run was recorded by", len(in.Covering))
+	}
+	doc, err := Render(in)
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+	if strings.Contains(string(doc), "no anchor covers this run") {
+		t.Error("an anchored install's ordinary run is reported as unanchored")
+	}
+}
+
+func TestDossierFailsLoudlyWhenAStoreRead2Fails(t *testing.T) {
+	t.Parallel()
+	runs, audits, id := seedEvidence(t)
+	_, err := Collect(context.Background(), &eventsFail{Store: runs}, audits, id, time.Now())
+	if err == nil {
+		t.Fatal("Collect() rendered evidence over a failed event read, asserting by omission that nothing ran")
+	}
+}
+
+// eventsFail is a run store whose event reads fail.
+type eventsFail struct {
+	run.Store
+}
+
+// Events always fails.
+func (e *eventsFail) Events(context.Context, string) ([]event.Event, error) {
+	return nil, errors.New("event store is unavailable")
 }

@@ -63,6 +63,14 @@ footer { margin-top: 40px; color: var(--muted); font-size: 13px; }
 		<div class="card"><p class="k">Failed</p><p class="v">{{.Failed}}</p></div>
 	</div>
 
+	{{if .AnchorProblems}}
+	<h2>Anchors the chain no longer satisfies</h2>
+	<ul>
+		{{range .AnchorProblems}}<li>{{.}}</li>
+		{{end}}
+	</ul>
+	{{end}}
+
 	<div class="scroll"><table>
 		<tr><th>When (UTC)</th><th>Run</th><th>Change</th><th>Actor</th><th>Source</th><th>Risk</th><th>Decision</th><th>Outcome</th></tr>
 		{{range .Rows}}<tr>

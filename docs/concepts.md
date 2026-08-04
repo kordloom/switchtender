@@ -130,7 +130,9 @@ self-contained HTML that a reviewer reads without tooling and checks against the
 machine the server's operator does not control, polls the public beat feed, keeps a signed
 checkpoint of what it saw, and raises a finding when a beat goes missing, a witnessed beat comes
 back rewritten, or the head regresses. Its memory is first write wins, so a rewrite is reported on
-every watch.
+every watch and never signed into the checkpoint as if it were the truth. The checkpoint's signer is
+pinned to the witness's own key, so a state file replaced by a forger is refused rather than
+believed, and one state file holds one server.
 
 **Receipts make an omission detectable by the party it happened to.** Every mutation returns an
 `Audit-Receipt: seq:link` header naming where it was recorded. Keep them. `switchtender audit
