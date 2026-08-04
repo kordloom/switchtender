@@ -25,6 +25,10 @@ func TestEveryCLIMutationIsAudited(t *testing.T) {
 	exempt := map[string]string{
 		// The demo seeds a throwaway database and serves it read-only.
 		"cmd_demo.go": "seeds a disposable demo database",
+		// The witness runs on a machine outside the watched install and writes only its own signed
+		// checkpoint file. There is no chain of the watched server here to record into, and its
+		// whole purpose is memory the server cannot reach.
+		"cmd_witness.go": "writes the witness's own signed checkpoint, not a watched store",
 	}
 
 	files, err := filepath.Glob("cmd_*.go")
