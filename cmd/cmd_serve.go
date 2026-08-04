@@ -24,6 +24,7 @@ import (
 	"github.com/kordloom/switchtender/internal/auth"
 	"github.com/kordloom/switchtender/internal/credential"
 	"github.com/kordloom/switchtender/internal/dispatch"
+	"github.com/kordloom/switchtender/internal/evidence"
 	"github.com/kordloom/switchtender/internal/extplugin"
 	"github.com/kordloom/switchtender/internal/grant"
 	"github.com/kordloom/switchtender/internal/inventory"
@@ -220,6 +221,12 @@ var (
 	serveAIModel          string
 	serveAIURL            string
 )
+
+// evidenceDir holds the value of the --evidence-dir flag, where periodic change registers land.
+var evidenceDir string
+
+// evidenceCadence holds the value of the --evidence-cadence flag, how long each register covers.
+var evidenceCadence time.Duration
 
 // spanCadence holds the value of the --span-cadence flag, how often a span beat is appended to the
 // audit chain. Zero leaves beats off; when set it must be a whole number of seconds of at least
@@ -513,6 +520,11 @@ func init() {
 		"Base URL for the AI provider, for a self-hosted Ollama or a proxy. Empty uses the default.")
 	serveCmd.Flags().StringArrayVar(&serveJWTRoleMap, "jwt-role-map", nil,
 		"Map a token group to a role as group=role. A matched group sets the role on every request. Repeatable.")
+	serveCmd.Flags().StringVar(&evidenceDir, "evidence-dir", "",
+		"Directory to write periodic change registers into. Requires --evidence-cadence.")
+	serveCmd.Flags().DurationVar(&evidenceCadence, "evidence-cadence", 0,
+		"How long each change register covers, and how often one is written, for example 2160h "+
+			"for a quarter. Zero writes none.")
 	serveCmd.Flags().DurationVar(&spanCadence, "span-cadence", 0,
 		"Append a span beat to the audit chain this often, for example 60s. Whole seconds only. "+
 			"Zero leaves beats off.")
@@ -858,6 +870,28 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		beats.Start()
 		defer beats.Close()
 		log.Info("span beats enabled", zap.Duration("cadence", spanCadence))
+	}
+
+	// The evidence a review samples from is produced on a cadence rather than on the day it is
+	// asked for. A pack nobody generated is the same as no pack when an auditor asks.
+	if (evidenceDir == "") != (evidenceCadence == 0) {
+		return fmt.Errorf("--evidence-dir and --evidence-cadence are set together; " +
+			"a directory with no cadence writes nothing and a cadence with no directory has " +
+			"nowhere to write")
+	}
+	if evidenceCadence > 0 {
+		if evidenceCadence < time.Hour {
+			return fmt.Errorf("--evidence-cadence must be at least 1h, got %s", evidenceCadence)
+		}
+		packs := evidence.NewEmitter(bundle.Runs(), bundle.Audits(), evidenceDir, evidenceCadence,
+			log, evidence.WithNotify(func(path string, from, to time.Time) {
+				log.Info("evidence pack ready", zap.String("path", path),
+					zap.Time("from", from), zap.Time("to", to))
+			}))
+		packs.Start()
+		defer packs.Close()
+		log.Info("periodic change registers enabled",
+			zap.String("dir", evidenceDir), zap.Duration("cadence", evidenceCadence))
 	}
 
 	var oidcAuth *server.OIDCAuth

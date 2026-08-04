@@ -533,6 +533,16 @@ that variable is unset.</p>
 <td>How often the retention sweeper runs.</td>
 </tr>
 <tr>
+<td><code>--evidence-dir</code></td>
+<td>none</td>
+<td>Directory for periodic change registers. Set together with <code>--evidence-cadence</code>.</td>
+</tr>
+<tr>
+<td><code>--evidence-cadence</code></td>
+<td>none</td>
+<td>How long each change register covers and how often one is written, for example <code>2160h</code> for a quarter. Minimum <code>1h</code>. Zero writes none.</td>
+</tr>
+<tr>
 <td><code>--smtp-addr</code></td>
 <td>none</td>
 <td>SMTP server host:port for run notification emails. Empty disables email.</td>
