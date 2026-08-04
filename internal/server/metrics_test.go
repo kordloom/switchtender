@@ -109,6 +109,8 @@ func TestMetricsChainGauges(t *testing.T) {
 	store := run.NewMemStore()
 	audits := seedChain(t, 3)
 	health := newChainHealth(audits)
+	// Re-verify on every scrape so the test reads fresh state; production coalesces on an interval.
+	health.minInterval = 0
 	handler := metricsHandler(store, health, zap.NewNop())
 
 	body := scrape(t, handler)
@@ -128,7 +130,7 @@ func TestMetricsChainGauges(t *testing.T) {
 		t.Error("anchor age served with no anchors; zero would read as a fresh anchor")
 	}
 
-	// The chain grows between scrapes; the incremental walk picks the new entries up.
+	// The chain grows between scrapes; a fresh walk picks the new entries up.
 	e := &audit.Entry{ID: audit.NewID(), At: time.Now().UTC(), Actor: "tester",
 		Method: "POST", Path: "/v1/things"}
 	if err := audits.Append(ctx, e); err != nil {
@@ -183,12 +185,72 @@ func TestMetricsChainGaugesReportABreak(t *testing.T) {
 	}
 }
 
+// switchableChain streams the underlying chain, corrupting one entry's hash only while armed, so a
+// test can verify a clean chain and then tamper with it under the same running tracker.
+type switchableChain struct {
+	audit.Store
+	// at is the seq to corrupt when armed.
+	at int64
+	// tampered arms the corruption.
+	tampered atomic.Bool
+}
+
+// ChainScan streams the chain, substituting the armed entry's hash.
+func (c *switchableChain) ChainScan(ctx context.Context, afterSeq int64, fn func(*audit.Entry) error) error {
+	return c.Store.ChainScan(ctx, afterSeq, func(e *audit.Entry) error {
+		if c.tampered.Load() && e.Seq == c.at {
+			e.Hash = "0000"
+		}
+		return fn(e)
+	})
+}
+
+func TestMetricsChainGaugesCatchInPlaceTamper(t *testing.T) {
+	t.Parallel()
+	store := run.NewMemStore()
+	chain := &switchableChain{Store: seedChain(t, 4), at: 2}
+	health := newChainHealth(chain)
+	// Each scrape re-verifies, the whole point: a forward-only cursor would never re-read entry 2.
+	health.minInterval = 0
+	handler := metricsHandler(store, health, zap.NewNop())
+
+	if body := scrape(t, handler); !strings.Contains(body, "switchtender_audit_chain_verified 1") {
+		t.Fatalf("first scrape did not verify a sound chain:\n%s", grepLines(body, "switchtender_audit"))
+	}
+	// An already-recorded entry is rewritten in place after it was verified. The gauge must catch
+	// it on the next scrape, not keep reporting the chain sound for the life of the process.
+	chain.tampered.Store(true)
+	body := scrape(t, handler)
+	if !strings.Contains(body, "switchtender_audit_chain_verified 0") ||
+		!strings.Contains(body, "switchtender_audit_chain_broke_at 2") {
+		t.Errorf("tamper of an already-scanned entry went unreported:\n%s",
+			grepLines(body, "switchtender_audit"))
+	}
+}
+
+func TestMetricsChainGaugesNeverVerifiedIsNotSound(t *testing.T) {
+	t.Parallel()
+	store := run.NewMemStore()
+	failing := &failingChain{Store: seedChain(t, 2)}
+	failing.fail.Store(true)
+	health := newChainHealth(failing)
+	handler := metricsHandler(store, health, zap.NewNop())
+	// The very first scrape cannot read the chain. A chain never verified must not read as sound.
+	body := scrape(t, handler)
+	if !strings.Contains(body, "switchtender_audit_chain_verified 0") ||
+		!strings.Contains(body, "switchtender_audit_health_stale 1") {
+		t.Errorf("a cold-start read failure reported a verified chain:\n%s",
+			grepLines(body, "switchtender_audit"))
+	}
+}
+
 func TestMetricsChainGaugesGoStaleOnReadFailure(t *testing.T) {
 	t.Parallel()
 	store := run.NewMemStore()
 	audits := seedChain(t, 2)
 	failing := &failingChain{Store: audits}
 	health := newChainHealth(failing)
+	health.minInterval = 0
 	handler := metricsHandler(store, health, zap.NewNop())
 
 	if body := scrape(t, handler); !strings.Contains(body, "switchtender_audit_health_stale 0") {
@@ -246,4 +308,31 @@ func grepLines(body, needle string) string {
 		}
 	}
 	return strings.Join(out, "\n")
+}
+
+func TestChainHealthCoalescesWithinTheInterval(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	chain := &switchableChain{Store: seedChain(t, 3), at: 2}
+	health := newChainHealth(chain)
+	// A fixed clock and a live interval: a second refresh inside the window serves the cache.
+	fixed := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
+	health.clock = func() time.Time { return fixed }
+	health.minInterval = time.Minute
+
+	first := health.snapshot(ctx)
+	if !first.Verified {
+		t.Fatalf("first snapshot = %+v, want a verified chain", first)
+	}
+	// Tamper after the walk. Because the clock has not advanced past the interval, the next
+	// snapshot serves the cached verdict rather than re-walking, so it still reads verified.
+	chain.tampered.Store(true)
+	if again := health.snapshot(ctx); !again.Verified {
+		t.Errorf("snapshot re-walked inside the interval = %+v, want the coalesced cache", again)
+	}
+	// Once the clock passes the interval, the next snapshot re-walks and catches the tamper.
+	fixed = fixed.Add(2 * time.Minute)
+	if after := health.snapshot(ctx); after.Verified {
+		t.Errorf("snapshot after the interval = %+v, want the tamper caught", after)
+	}
 }

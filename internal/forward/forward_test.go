@@ -321,3 +321,17 @@ func TestSyslogSinkFramesEveryEvent(t *testing.T) {
 		t.Fatal("collector never received the framed messages")
 	}
 }
+
+func TestHTTPSinkNameHidesTheTokenBearingURL(t *testing.T) {
+	t.Parallel()
+	// A Splunk HEC URL carries the token in the path; Name is logged on every failure.
+	sink := NewHTTPSink("https://splunk.example:8088/services/collector/raw?token=SECRET-TOKEN",
+		nil, nil)
+	name := sink.Name()
+	if strings.Contains(name, "SECRET-TOKEN") || strings.Contains(name, "collector") {
+		t.Errorf("Name() = %q, want scheme and host only, not the token-bearing path", name)
+	}
+	if name != "http https://splunk.example:8088" {
+		t.Errorf("Name() = %q, want the scheme and host", name)
+	}
+}

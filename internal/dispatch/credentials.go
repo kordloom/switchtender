@@ -271,10 +271,19 @@ func (d *Dispatcher) materializeCredentials(ctx context.Context, r *run.Run, spe
 			if err != nil {
 				return cleanup, secrets, err
 			}
-			for _, line := range inj.Env {
-				spec.Env = append(spec.Env, line)
-				if _, val, ok := strings.Cut(line, "="); ok {
-					secrets = append(secrets, val)
+			spec.Env = append(spec.Env, inj.Env...)
+			if inj.Secrets != nil {
+				// The injector named exactly which of its values are secret, so a non-secret
+				// constant it sets, an OpenStack domain of "Default" or a region, is not redacted
+				// from every occurrence of that word in the run's output.
+				secrets = append(secrets, inj.Secrets...)
+			} else {
+				// An injector that names no secrets has every value it produced masked, the
+				// conservative default for a credential whose fields are all sensitive.
+				for _, line := range inj.Env {
+					if _, val, ok := strings.Cut(line, "="); ok {
+						secrets = append(secrets, val)
+					}
 				}
 			}
 			for _, file := range inj.Files {

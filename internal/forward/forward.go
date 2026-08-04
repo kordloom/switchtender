@@ -57,6 +57,11 @@ type Forwarder struct {
 	sinks []Sink
 	// cursorPath is the durable cursor file.
 	cursorPath string
+	// cursor is the last delivered sequence held in memory; the file is durability, not the
+	// per-poll source of truth. cursorLoaded is whether it has been read from the file yet, which
+	// happens once, at Start or on the first forward.
+	cursor       int64
+	cursorLoaded bool
 	// interval is how long the tail sleeps when caught up.
 	interval time.Duration
 	// batch caps how many entries one delivery carries.
@@ -101,7 +106,7 @@ func NewForwarder(audits audit.Store, sinks []Sink, cursorPath string, interval 
 // the first delivery, so a corrupt cursor stops the server's startup loudly instead of silently
 // restreaming the whole chain into the SIEM.
 func (f *Forwarder) Start() error {
-	if _, err := readCursor(f.cursorPath); err != nil {
+	if _, err := f.currentCursor(); err != nil {
 		return err
 	}
 	f.wg.Go(func() {
@@ -143,10 +148,26 @@ func (f *Forwarder) sleep(d time.Duration) bool {
 	}
 }
 
+// currentCursor returns the last delivered sequence, loading it from the file once and holding it
+// in memory thereafter. The forwarder is the file's only writer, so re-reading and re-parsing it
+// every poll bought nothing; loading once and trusting memory keeps the tail's fast path off the
+// disk while the file stays the durable record a restart resumes from.
+func (f *Forwarder) currentCursor() (int64, error) {
+	if f.cursorLoaded {
+		return f.cursor, nil
+	}
+	seq, err := readCursor(f.cursorPath)
+	if err != nil {
+		return 0, err
+	}
+	f.cursor, f.cursorLoaded = seq, true
+	return seq, nil
+}
+
 // forwardOnce reads one batch past the cursor, delivers it to every sink, and advances the
 // cursor. It returns how many entries were delivered.
 func (f *Forwarder) forwardOnce(ctx context.Context) (int, error) {
-	cursor, err := readCursor(f.cursorPath)
+	cursor, err := f.currentCursor()
 	if err != nil {
 		return 0, err
 	}
@@ -165,9 +186,13 @@ func (f *Forwarder) forwardOnce(ctx context.Context) (int, error) {
 			return 0, fmt.Errorf("%s: %w", sink.Name(), err)
 		}
 	}
-	if err := writeCursor(f.cursorPath, events[len(events)-1].Seq); err != nil {
+	// The file is written first: a crash after this line but before the in-memory update simply
+	// re-reads the same seq on restart, so durability leads and memory follows it.
+	newSeq := events[len(events)-1].Seq
+	if err := writeCursor(f.cursorPath, newSeq); err != nil {
 		return 0, fmt.Errorf("advance cursor: %w", err)
 	}
+	f.cursor = newSeq
 	return len(events), nil
 }
 

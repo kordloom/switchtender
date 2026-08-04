@@ -506,3 +506,43 @@ func containsString(list []string, s string) bool {
 	}
 	return false
 }
+
+func TestMaterializeOpenStackMasksOnlyThePassword(t *testing.T) {
+	t.Parallel()
+	sealer := credential.NewSealer("pass", "salt")
+	// No explicit domains, so the injector fabricates the constant "Default".
+	sealed, err := sealer.Seal("auth_url=https://keystone:5000/v3\nusername=deploy\n" +
+		"password=os-secret\nproject_name=prod")
+	if err != nil {
+		t.Fatalf("Seal() error = %v", err)
+	}
+	store := credential.NewMemStore()
+	if err := store.Save(context.Background(), &credential.Credential{
+		ID: "cred_1", Name: "os", Kind: credential.KindOpenStack, Secret: sealed,
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	d := &Dispatcher{credentials: store, sealer: sealer}
+	spec := &roundhouse.Spec{}
+	cleanup, secrets, err := d.materializeCredentials(context.Background(),
+		&run.Run{ID: "run_1", CredentialIDs: []string{"cred_1"}}, spec)
+	defer cleanup()
+	if err != nil {
+		t.Fatalf("materializeCredentials() error = %v", err)
+	}
+	if !containsString(spec.Env, "OS_PASSWORD=os-secret") ||
+		!containsString(spec.Env, "OS_USER_DOMAIN_NAME=Default") {
+		t.Fatalf("spec.Env = %v, want the OS_ variables including the fabricated domain", spec.Env)
+	}
+	// The password is masked; the non-secret constants, above all the common word "Default", are
+	// not, so plain log text is never redacted for containing them.
+	if !containsString(secrets, "os-secret") {
+		t.Errorf("secrets = %v, want the password tracked for masking", secrets)
+	}
+	for _, leaked := range []string{"Default", "prod", "deploy", "https://keystone:5000/v3"} {
+		if containsString(secrets, leaked) {
+			t.Errorf("secrets = %v, want the non-secret value %q left out of the mask", secrets, leaked)
+		}
+	}
+}

@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"time"
 )
@@ -34,8 +35,15 @@ func NewHTTPSink(url string, headers map[string]string, client *http.Client) *HT
 	return &HTTPSink{url: url, headers: headers, client: client}
 }
 
-// Name identifies the sink in logs without leaking header values.
-func (s *HTTPSink) Name() string { return "http " + s.url }
+// Name identifies the sink in logs by scheme and host only. The full URL is kept out because it
+// is logged on every delivery failure, and a path or query can carry a token (a Splunk HEC URL
+// often ends in the token) that has no business in a log line.
+func (s *HTTPSink) Name() string {
+	if u, err := url.Parse(s.url); err == nil && u.Host != "" {
+		return "http " + u.Scheme + "://" + u.Host
+	}
+	return "http sink"
+}
 
 // Deliver posts the batch and treats anything but a 2xx answer as failure, because a delivery
 // the endpoint refused did not happen, whatever the transport says.

@@ -2,42 +2,48 @@ package server
 
 import (
 	"context"
-	"strconv"
 	"sync"
 	"time"
 
 	"github.com/kordloom/switchtender/internal/audit"
 )
 
-// chainHealth keeps an incrementally verified view of the audit chain for the metrics endpoint,
-// so integrity becomes an alarm that pages rather than a page an operator has to visit. Each
-// refresh feeds only the entries appended since the last one, which keeps a scrape cheap however
-// long the trail grows; the one full walk happens on the first scrape, and again only when the
-// anchor set changes, since an anchor fixes a position the incremental walk has already passed.
+// chainHealth keeps a verified view of the audit chain for the metrics endpoint, so integrity
+// becomes an alarm that pages rather than a page an operator has to visit. Each refresh re-verifies
+// the whole chain, because tamper evidence means catching an in-place rewrite of an already-recorded
+// entry, and a forward-only cursor would never re-read the entry that changed. Repeated scrapes
+// inside a short window serve the last verdict rather than re-walking, so an aggressive scraper
+// cannot turn the endpoint into a busy loop; the window bounds how stale a reading can be.
 type chainHealth struct {
-	// audits is the chain being watched.
+	// audits is the chain being verified.
 	audits audit.Store
 	// mu guards everything below.
 	mu sync.Mutex
-	// scanner carries the link verification across refreshes.
-	scanner *audit.ChainScanner
-	// anchorScanner holds the chain against the anchor set it was built for.
-	anchorScanner *audit.AnchorScanner
-	// anchorMark fingerprints the anchor set the scanners were fed under; a change rebuilds them.
-	anchorMark string
-	// lastSeq is the highest sequence fed, the resume cursor.
-	lastSeq int64
-	// verified, brokeAt, and entries mirror the chain scanner's last result.
+	// clock reads the time, replaced in tests.
+	clock func() time.Time
+	// minInterval is the shortest gap between full walks; scrapes inside it serve the cache.
+	minInterval time.Duration
+	// lastWalk is when the last full walk ran, and everWalked whether one ever succeeded or failed.
+	lastWalk   time.Time
+	everWalked bool
+	// verified, brokeAt, and entries mirror the last walk's chain result. verified starts false so
+	// a chain that has never been verified is never reported sound.
 	verified bool
 	brokeAt  int
 	entries  int
-	// anchorsTotal, anchorProblems, and lastAnchorAt mirror the anchor check's last result.
+	// anchorsTotal, anchorProblems, and lastAnchorAt mirror the last walk's anchor result.
 	anchorsTotal   int
 	anchorProblems int
 	lastAnchorAt   time.Time
-	// stale reports that the last refresh failed and the values shown are from an earlier one.
+	// stale reports the last walk could not run, so these values are from an earlier one or, before
+	// any walk, are the unverified defaults. A relying alarm reads verified together with stale:
+	// verified==0 with stale==0 is a confirmed break; stale==1 is "could not check".
 	stale bool
 }
+
+// chainHealthInterval is how long a verified reading is served before the chain is walked again. It
+// bounds both the cost of a scrape storm and how long a tamper can sit unreported.
+const chainHealthInterval = 15 * time.Second
 
 // newChainHealth returns a tracker over the given chain. It panics on a nil store, a programming
 // error: the caller decides whether the audit trail is configured, not this.
@@ -45,50 +51,43 @@ func newChainHealth(audits audit.Store) *chainHealth {
 	if audits == nil {
 		panic("server: newChainHealth: audit store required")
 	}
-	return &chainHealth{audits: audits, verified: true}
+	return &chainHealth{audits: audits, clock: time.Now, minInterval: chainHealthInterval}
 }
 
-// refresh brings the view up to the chain's present end. On error the previous values stand and
-// the view is marked stale, because a read failure is not a broken chain and reporting either lie
-// would misdirect whoever the alarm wakes up.
+// refresh re-verifies the chain unless a walk ran within minInterval. A walk feeds a fresh scanner
+// over every entry, so an entry rewritten in place since the last walk is caught. On a read failure
+// the previous values stand and the view is marked stale, because a read failure is not a broken
+// chain and reporting it as one would page the wrong alarm.
 func (h *chainHealth) refresh(ctx context.Context) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
+	now := h.clock()
+	if h.everWalked && now.Sub(h.lastWalk) < h.minInterval {
+		return
+	}
+
 	anchors, err := h.anchorsNow(ctx)
 	if err != nil {
+		h.everWalked = true
 		h.stale = true
 		return
 	}
-	mark := anchorFingerprint(anchors)
-	if h.scanner == nil || mark != h.anchorMark {
-		// The anchor set changed, and an anchor fixes a position already streamed past, so the
-		// walk restarts to capture the hash at every anchored position.
-		h.scanner = audit.NewChainScanner(true)
-		h.anchorScanner = audit.NewAnchorScanner(anchors)
-		h.anchorMark = mark
-		h.lastSeq = 0
-	}
-	cursor := h.lastSeq
-	err = h.audits.ChainScan(ctx, cursor, func(e *audit.Entry) error {
-		h.scanner.Feed(e)
-		h.anchorScanner.Feed(e)
-		if e.Seq > cursor {
-			cursor = e.Seq
-		}
+	chainScan := audit.NewChainScanner(true)
+	anchorScan := audit.NewAnchorScanner(anchors)
+	err = h.audits.ChainScan(ctx, 0, func(e *audit.Entry) error {
+		chainScan.Feed(e)
+		anchorScan.Feed(e)
 		return nil
 	})
 	if err != nil {
-		// The scanners may have been part-fed; their state is still sound, since a later refresh
-		// resumes after the last entry they saw.
-		h.lastSeq = cursor
+		h.everWalked = true
 		h.stale = true
 		return
 	}
-	h.lastSeq = cursor
-	h.stale = false
-	h.verified, h.brokeAt, h.entries = h.scanner.Result()
-	_, checks := h.anchorScanner.Results()
+
+	h.verified, h.brokeAt, h.entries = chainScan.Result()
+	_, checks := anchorScan.Results()
 	h.anchorsTotal, h.anchorProblems = len(checks), 0
 	for _, c := range checks {
 		if !c.Reached {
@@ -101,6 +100,9 @@ func (h *chainHealth) refresh(ctx context.Context) {
 			h.lastAnchorAt = a.At
 		}
 	}
+	h.lastWalk = now
+	h.everWalked = true
+	h.stale = false
 }
 
 // anchorsNow returns the store's anchors, or none when the store keeps no anchors.
@@ -110,16 +112,6 @@ func (h *chainHealth) anchorsNow(ctx context.Context) ([]*audit.Anchor, error) {
 		return nil, nil
 	}
 	return anchored.Anchors(ctx, 0)
-}
-
-// anchorFingerprint names an anchor set: its size and its newest member. Anchors are only ever
-// added, so this changes exactly when the set does.
-func anchorFingerprint(anchors []*audit.Anchor) string {
-	if len(anchors) == 0 {
-		return "none"
-	}
-	last := anchors[len(anchors)-1]
-	return last.ID + "@" + strconv.Itoa(len(anchors))
 }
 
 // chainGauges is one consistent reading for the metrics page.
@@ -133,7 +125,7 @@ type chainGauges struct {
 	AnchorProblems int
 	// LastAnchorAt is when the newest anchor was made, zero when none exist.
 	LastAnchorAt time.Time
-	// Stale reports the values are from an earlier refresh that could not be updated.
+	// Stale reports the values could not be refreshed, or no walk has succeeded yet.
 	Stale bool
 }
 
