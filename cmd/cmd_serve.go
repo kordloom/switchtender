@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/smtp"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -26,6 +27,7 @@ import (
 	"github.com/kordloom/switchtender/internal/dispatch"
 	"github.com/kordloom/switchtender/internal/evidence"
 	"github.com/kordloom/switchtender/internal/extplugin"
+	"github.com/kordloom/switchtender/internal/forward"
 	"github.com/kordloom/switchtender/internal/grant"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/invsource"
@@ -221,6 +223,24 @@ var (
 	serveAIModel          string
 	serveAIURL            string
 )
+
+// forwardURL holds --forward-url, an HTTP endpoint audit events stream to as NDJSON.
+var forwardURL string
+
+// forwardHeaders holds --forward-header pairs set on every forwarded batch.
+var forwardHeaders []string
+
+// forwardSyslog holds --forward-syslog, a TCP syslog collector audit events stream to.
+var forwardSyslog string
+
+// forwardSyslogTLS wraps the syslog connection in TLS.
+var forwardSyslogTLS bool
+
+// forwardState holds --forward-state, the durable cursor file.
+var forwardState string
+
+// forwardInterval holds --forward-interval, how often the tail polls when caught up.
+var forwardInterval time.Duration
 
 // evidenceDir holds the value of the --evidence-dir flag, where periodic change registers land.
 var evidenceDir string
@@ -520,6 +540,18 @@ func init() {
 		"Base URL for the AI provider, for a self-hosted Ollama or a proxy. Empty uses the default.")
 	serveCmd.Flags().StringArrayVar(&serveJWTRoleMap, "jwt-role-map", nil,
 		"Map a token group to a role as group=role. A matched group sets the role on every request. Repeatable.")
+	serveCmd.Flags().StringVar(&forwardURL, "forward-url", "",
+		"HTTP endpoint audit events are forwarded to as NDJSON, each with its chain receipt.")
+	serveCmd.Flags().StringArrayVar(&forwardHeaders, "forward-header", nil,
+		"Header set on every forwarded batch, as 'Name: value'. Repeatable.")
+	serveCmd.Flags().StringVar(&forwardSyslog, "forward-syslog", "",
+		"TCP syslog collector (host:port) audit events are forwarded to as RFC 5424.")
+	serveCmd.Flags().BoolVar(&forwardSyslogTLS, "forward-syslog-tls", false,
+		"Wrap the syslog connection in TLS.")
+	serveCmd.Flags().StringVar(&forwardState, "forward-state", "switchtender-forward.json",
+		"Durable cursor file recording the last delivered chain position.")
+	serveCmd.Flags().DurationVar(&forwardInterval, "forward-interval", 5*time.Second,
+		"How often the forwarder polls the chain when caught up. At least 1s.")
 	serveCmd.Flags().StringVar(&evidenceDir, "evidence-dir", "",
 		"Directory to write periodic change registers into. Requires --evidence-cadence.")
 	serveCmd.Flags().DurationVar(&evidenceCadence, "evidence-cadence", 0,
@@ -899,6 +931,48 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		defer packs.Close()
 		log.Info("periodic change registers enabled",
 			zap.String("dir", evidenceDir), zap.Duration("cadence", evidenceCadence))
+	}
+
+	// The SIEM is where operators already look; a receipt on every forwarded event means any
+	// sampled event can be held against the live chain. The cursor advances only on delivery,
+	// so an outage delays events rather than dropping them.
+	if forwardURL != "" || forwardSyslog != "" {
+		if bundle.Audits() == nil {
+			return fmt.Errorf("--forward-url and --forward-syslog need the audit trail enabled")
+		}
+		if forwardInterval < time.Second {
+			return fmt.Errorf("--forward-interval must be at least 1s, got %s", forwardInterval)
+		}
+		var sinks []forward.Sink
+		if forwardURL != "" {
+			parsed, err := url.Parse(forwardURL)
+			if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+				return fmt.Errorf("--forward-url must be an http or https URL")
+			}
+			headers := map[string]string{}
+			for _, raw := range forwardHeaders {
+				name, value, ok := strings.Cut(raw, ":")
+				if !ok || strings.TrimSpace(name) == "" {
+					return fmt.Errorf("--forward-header %q must look like 'Name: value'", raw)
+				}
+				headers[strings.TrimSpace(name)] = strings.TrimSpace(value)
+			}
+			sinks = append(sinks, forward.NewHTTPSink(forwardURL, headers, nil))
+		}
+		if forwardSyslog != "" {
+			if _, _, err := net.SplitHostPort(forwardSyslog); err != nil {
+				return fmt.Errorf("--forward-syslog must be host:port: %w", err)
+			}
+			host, _ := os.Hostname()
+			sinks = append(sinks, forward.NewSyslogSink(forwardSyslog, forwardSyslogTLS, host))
+		}
+		tail := forward.NewForwarder(bundle.Audits(), sinks, forwardState, forwardInterval, log)
+		if err := tail.Start(); err != nil {
+			return err
+		}
+		defer tail.Close()
+		log.Info("audit forwarding enabled", zap.String("state", forwardState),
+			zap.Int("sinks", len(sinks)))
 	}
 
 	var oidcAuth *server.OIDCAuth

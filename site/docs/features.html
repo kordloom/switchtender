@@ -163,6 +163,10 @@
 <td><code>switchtender witness</code> watches the public beat feed from another machine, remembers what it saw in a signed checkpoint, and raises a finding on a missing beat, a rewritten beat, or a head regression, so an insider with database access cannot silently truncate history.</td>
 </tr>
 <tr>
+<td>SIEM forwarding</td>
+<td><code>--forward-url</code> and <code>--forward-syslog</code> stream every audit entry into the tools your security team already watches, as NDJSON over HTTP or RFC 5424 syslog. Every event carries its <code>seq:link</code> receipt, so any event sampled from the SIEM months later is redeemable against the live chain with <code>switchtender audit receipt</code>. Delivery is at least once behind a durable cursor: an outage delays events, it does not drop them.</td>
+</tr>
+<tr>
 <td>Hosted witness</td>
 <td><code>switchtender witness serve</code> watches many servers from one process, records every finding durably, and serves countersigned attestations of what it holds over a read-only API. A relying party verifies one offline with <code>switchtender witness verify-attestation</code> against the witness key they pinned, so &quot;our history is intact&quot; becomes a statement a third party signs rather than a claim the operator makes.</td>
 </tr>

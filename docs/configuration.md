@@ -124,6 +124,12 @@ Runs the HTTP API, the in-process executor, the scheduler, the retention sweeper
 | `--retention-interval` | `1h` | How often the retention sweeper runs. |
 | `--evidence-dir` | none | Directory for periodic change registers. Set together with `--evidence-cadence`. |
 | `--evidence-cadence` | none | How long each change register covers and how often one is written, for example `2160h` for a quarter. Minimum `1h`. Zero writes none. Progress is read from the archive, so a restart resumes from the newest pack rather than starting the period again. |
+| `--forward-url` | none | HTTP endpoint audit events stream to as NDJSON, one JSON object per line, each carrying its `seq:link` receipt. Splunk HEC raw, Elastic, and log routers ingest it directly. |
+| `--forward-header` | none | Header set on every forwarded batch, as `Name: value`, for example an HEC token. Repeatable. |
+| `--forward-syslog` | none | TCP syslog collector (`host:port`) audit events stream to as RFC 5424, octet-counted, one message per event with the JSON event as the body. |
+| `--forward-syslog-tls` | `false` | Wrap the syslog connection in TLS. |
+| `--forward-state` | `switchtender-forward.json` | Durable cursor recording the last position every sink accepted. The cursor advances only on delivery, so an outage delays events rather than dropping them, and a restart resumes without restreaming. |
+| `--forward-interval` | `5s` | How often the forwarder polls the chain when caught up. Minimum `1s`. |
 | `--smtp-addr` | none | SMTP server host:port for run notification emails. Empty disables email. |
 | `--smtp-from` | none | Sender address for notification emails. |
 | `--smtp-to` | none | Recipient address for notification emails. Repeatable. |

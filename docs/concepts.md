@@ -154,6 +154,14 @@ from a claim the operator makes into one a third party signs. When the witness c
 the attestation says so rather than going quiet, because a server going dark on its witness is
 itself a signal.
 
+**The chain streams into the SIEM, and stays checkable there.** `--forward-url` and
+`--forward-syslog` deliver every audit entry to the operator's collector, each event carrying its
+`seq:link` receipt. That makes the forwarded copy more than a copy: an analyst who samples any
+event from the SIEM, months later, redeems its receipt against the live chain and gets proof the
+entry still stands at that exact position. The cursor is durable and advances only when every
+sink accepted, so delivery is at least once and an outage delays events rather than dropping
+them. Deduplicate on the receipt.
+
 **Receipts make an omission detectable by the party it happened to.** Every mutation returns an
 `Audit-Receipt: seq:link` header naming where it was recorded. Keep them. `switchtender audit
 receipt 41:9f2c...` confirms the chain still holds that exact link at that exact position, and a
