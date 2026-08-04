@@ -21,7 +21,7 @@ A credential's kind decides how its value reaches a run.
 |------|------------|
 | `ssh_key` | An SSH private key, to reach hosts and clone private git projects. A passphrase protected key is unlocked in memory at run time from a passphrase sealed alongside it, so no prompt blocks the run. |
 | `ssh_password` | A machine login, injected as `ansible_user` and `ansible_password` through a file, so the password stays off the command line. |
-| `vault_password` | An Ansible Vault password. |
+| `vault_password` | An Ansible Vault password. An optional vault ID label passes it as `--vault-id label@file`, so several vault credentials on one run each unlock the secrets encrypted for their label; without a label it is the classic `--vault-password-file`. |
 | `become_password` | A privilege escalation password, kept off the command line. |
 | `become` | Privilege escalation with an optional method and user, injected as the `ansible_become_*` variables through a file. |
 | `network` | A network device login, injected as the `ansible_user`, `ansible_password`, `ansible_network_os`, and `ansible_connection` variables. |
@@ -32,6 +32,7 @@ A credential's kind decides how its value reaches a run.
 | `azure` | An Azure service principal, injected as the `ARM_*` variables Terraform reads and the `AZURE_*` variables the Ansible azure collection reads. |
 | `gcp` | A Google Cloud service account JSON, written to a private file bound to `GOOGLE_APPLICATION_CREDENTIALS`. |
 | `vmware` | A vCenter login, injected as the `VMWARE_*` environment variables the community.vmware modules read. |
+| `openstack` | An OpenStack login, injected as the `OS_*` environment variables openstacksdk and the openstack.cloud collection read. Fields: `auth_url`, `username`, `password`, `project_name` required; `user_domain_name` and `project_domain_name` default to `Default`; `region_name` optional. |
 
 ## Sources
 

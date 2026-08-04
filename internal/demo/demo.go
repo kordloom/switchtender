@@ -460,8 +460,9 @@ func seedConfig(ctx context.Context, d Deps, log *zap.Logger, assetDir string) {
 	// instance is read-only, so the placeholder is never decrypted or injected.
 	creds := []*credential.Credential{
 		{ID: credential.NewID(), Name: "prod-ssh", Kind: credential.KindSSHKey, Secret: "demo-placeholder", CreatedAt: ago(72)},
-		{ID: credential.NewID(), Name: "ansible-vault", Kind: credential.KindVaultPassword, Secret: "demo-placeholder", CreatedAt: ago(72)},
+		{ID: credential.NewID(), Name: "ansible-vault", Kind: credential.KindVaultPassword, VaultID: "prod", Secret: "demo-placeholder", CreatedAt: ago(72)},
 		{ID: credential.NewID(), Name: "dockerhub", Kind: credential.KindRegistry, Secret: "demo-placeholder", CreatedAt: ago(48)},
+		{ID: credential.NewID(), Name: "openstack-prod", Kind: credential.KindOpenStack, Secret: "demo-placeholder", CreatedAt: ago(36)},
 	}
 	for _, c := range creds {
 		if err := d.Credentials.Save(ctx, c); err != nil {

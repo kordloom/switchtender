@@ -118,3 +118,58 @@ func TestListCredentialsNeedsSecret(t *testing.T) {
 		t.Error("credential with a secret should report needs_secret=false")
 	}
 }
+
+func TestCreateCredentialVaultID(t *testing.T) {
+	t.Parallel()
+	sealer := credential.NewSealer("pass", "salt")
+	tests := []struct {
+		// Name says what the case proves.
+		Name string
+		// Body is the request JSON.
+		Body string
+		// WantCode is the expected status.
+		WantCode int
+		// WantVaultID is the stored label on a created credential.
+		WantVaultID string
+	}{{ // Test 0: A labeled vault password stores its label.
+		Name:     "labeled vault",
+		Body:     `{"name":"v","kind":"vault_password","secret":"pw","vault_id":"prod"}`,
+		WantCode: http.StatusCreated, WantVaultID: "prod",
+	}, { // Test 1: An unlabeled vault password is the classic case.
+		Name:     "unlabeled vault",
+		Body:     `{"name":"v","kind":"vault_password","secret":"pw"}`,
+		WantCode: http.StatusCreated, WantVaultID: "",
+	}, { // Test 2: A label on any other kind is refused, since --vault-id means nothing there.
+		Name:     "label on env",
+		Body:     `{"name":"v","kind":"env","secret":"A=b","vault_id":"prod"}`,
+		WantCode: http.StatusBadRequest,
+	}, { // Test 3: A label with a separator or spaces is refused before it reaches an argument.
+		Name:     "hostile label",
+		Body:     `{"name":"v","kind":"vault_password","secret":"pw","vault_id":"a@b c"}`,
+		WantCode: http.StatusBadRequest,
+	}}
+	for i, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", i, test.Name), func(t *testing.T) {
+			t.Parallel()
+			store := credential.NewMemStore()
+			handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(),
+				WithCredentials(store, sealer)).Handler()
+			req := httptest.NewRequest(http.MethodPost, "/v1/credentials", strings.NewReader(test.Body))
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if rec.Code != test.WantCode {
+				t.Fatalf("status = %d, want %d (body %s)", rec.Code, test.WantCode, rec.Body.String())
+			}
+			if rec.Code != http.StatusCreated {
+				return
+			}
+			list, err := store.List(context.Background())
+			if err != nil || len(list) != 1 {
+				t.Fatalf("List() = %v, %v, want one credential", list, err)
+			}
+			if list[0].VaultID != test.WantVaultID {
+				t.Errorf("stored vault_id = %q, want %q", list[0].VaultID, test.WantVaultID)
+			}
+		})
+	}
+}

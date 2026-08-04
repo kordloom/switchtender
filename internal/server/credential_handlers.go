@@ -42,6 +42,9 @@ type createCredentialRequest struct {
 	// Passphrase unlocks a passphrase protected ssh_key at run time. It applies only to a locally
 	// stored ssh_key and is sealed alongside the key. Optional, never echoed back.
 	Passphrase string `json:"passphrase,omitempty"`
+	// VaultID labels an Ansible Vault password for --vault-id; only meaningful on the
+	// vault_password kind.
+	VaultID string `json:"vault_id"`
 	// OrgID names the owning organization. Empty leaves the credential unowned and global. Optional.
 	OrgID string `json:"org_id,omitempty"`
 	// TypeID names a custom credential type. When set, Fields carries the type's field values and
@@ -113,6 +116,15 @@ func createCredentialHandler(store credential.Store, types credential.TypeStore,
 				"source must be one of: "+credential.SourceList())
 			return
 		}
+		if req.VaultID != "" && req.Kind != credential.KindVaultPassword {
+			respondError(w, log, http.StatusBadRequest, "vault_id applies only to vault_password credentials")
+			return
+		}
+		if !credential.ValidVaultID(req.VaultID) {
+			respondError(w, log, http.StatusBadRequest,
+				"vault_id must be letters, digits, underscores, or hyphens")
+			return
+		}
 
 		secretPlain, err := sealableSecret(req.Kind, req.Source, req.Secret, req.Passphrase)
 		if err != nil {
@@ -136,7 +148,7 @@ func createCredentialHandler(store credential.Store, types credential.TypeStore,
 		c := &credential.Credential{
 			ID: credential.NewID(), Name: req.Name, Kind: req.Kind,
 			Source: credential.NormalizeSource(req.Source), Secret: sealed, OrgID: req.OrgID,
-			CreatedAt: time.Now(),
+			VaultID: req.VaultID, CreatedAt: time.Now(),
 		}
 		if err := store.Save(r.Context(), c); err != nil {
 			log.Error("server: save credential: " + err.Error())
@@ -164,7 +176,9 @@ type updateCredentialRequest struct {
 	Passphrase string `json:"passphrase,omitempty"`
 	// OrgID names the owning organization, replacing the stored owner. Empty leaves the credential
 	// unowned and global. Optional.
-	OrgID string `json:"org_id,omitempty"`
+	// VaultID relabels an Ansible Vault password; only meaningful on the vault_password kind.
+	VaultID string `json:"vault_id"`
+	OrgID   string `json:"org_id,omitempty"`
 }
 
 // createTypedCredential stores a credential of a custom type: its field values are validated against
@@ -283,8 +297,22 @@ func updateCredentialHandler(store credential.Store, sealer *credential.Sealer, 
 		if c.OrgID != req.OrgID && authz.denyForeignOrg(w, r, log, c.OrgID) {
 			return
 		}
+		effectiveKind := c.Kind
+		if req.Kind != "" {
+			effectiveKind = req.Kind
+		}
+		if req.VaultID != "" && effectiveKind != credential.KindVaultPassword {
+			respondError(w, log, http.StatusBadRequest, "vault_id applies only to vault_password credentials")
+			return
+		}
+		if !credential.ValidVaultID(req.VaultID) {
+			respondError(w, log, http.StatusBadRequest,
+				"vault_id must be letters, digits, underscores, or hyphens")
+			return
+		}
 		c.Name = req.Name
 		c.OrgID = req.OrgID
+		c.VaultID = req.VaultID
 		if secret != "" {
 			if !sealer.Enabled() {
 				respondError(w, log, http.StatusConflict,

@@ -56,6 +56,14 @@ func (l ContainerLimits) args() []string {
 	return a
 }
 
+// VaultPassword is one Ansible Vault password file, optionally labeled for --vault-id.
+type VaultPassword struct {
+	// Label is the vault id, empty for the classic unlabeled password.
+	Label string
+	// Path is the password file on disk.
+	Path string
+}
+
 // Spec describes a single playbook execution.
 type Spec struct {
 	// Playbook is the path to the Ansible playbook file.
@@ -85,8 +93,10 @@ type Spec struct {
 	Limit string
 	// PrivateKeyPath, when set, is passed as ansible-playbook --private-key.
 	PrivateKeyPath string
-	// VaultPasswordFile, when set, is passed as ansible-playbook --vault-password-file.
-	VaultPasswordFile string
+	// VaultPasswords are the Ansible Vault passwords for the run. An unlabeled one is passed as
+	// --vault-password-file; a labeled one as --vault-id label@file, so several vaults on one run
+	// each unlock the secrets encrypted for their label.
+	VaultPasswords []VaultPassword
 	// Image, when set, names a container image to run the playbook inside instead of on the host.
 	Image string
 	// RegistryUsername is the login for pulling a private Image. Empty needs no login.
@@ -431,8 +441,12 @@ func playbookArgs(spec Spec) ([]string, error) {
 	if spec.PrivateKeyPath != "" {
 		args = append(args, "--private-key", spec.PrivateKeyPath)
 	}
-	if spec.VaultPasswordFile != "" {
-		args = append(args, "--vault-password-file", spec.VaultPasswordFile)
+	for _, vp := range spec.VaultPasswords {
+		if vp.Label == "" {
+			args = append(args, "--vault-password-file", vp.Path)
+			continue
+		}
+		args = append(args, "--vault-id", vp.Label+"@"+vp.Path)
 	}
 	// The playbook is separated from the options it follows. Without this a playbook whose name
 	// begins with a dash was read by ansible-playbook as another option rather than as the file to

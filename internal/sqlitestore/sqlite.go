@@ -281,7 +281,8 @@ CREATE TABLE IF NOT EXISTS credentials (
 	created_at TEXT NOT NULL,
 	source     TEXT NOT NULL DEFAULT '',
 	org_id     TEXT NOT NULL DEFAULT '',
-	type_id    TEXT NOT NULL DEFAULT ''
+	type_id    TEXT NOT NULL DEFAULT '',
+	vault_id   TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS credential_types (
 	id         TEXT PRIMARY KEY,
@@ -691,6 +692,7 @@ func migrateCredentials(db *sql.DB) error {
 	for _, col := range []string{
 		"ALTER TABLE credentials ADD COLUMN org_id TEXT NOT NULL DEFAULT ''",
 		"ALTER TABLE credentials ADD COLUMN type_id TEXT NOT NULL DEFAULT ''",
+		"ALTER TABLE credentials ADD COLUMN vault_id TEXT NOT NULL DEFAULT ''",
 	} {
 		if _, err := db.Exec(col); err != nil &&
 			!strings.Contains(err.Error(), "duplicate column name") {

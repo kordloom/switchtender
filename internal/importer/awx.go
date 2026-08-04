@@ -262,6 +262,14 @@ func FromAWX(data []byte, now time.Time) (*Plan, error) {
 				"it will use, and the two may not be the same kind", c.Name)
 		}
 		obj := &credential.Credential{ID: credential.NewID(), Name: c.Name, Kind: kind, CreatedAt: now}
+		// AWX keeps the vault label as a non-secret input; carrying it means a multi-vault setup
+		// imports with its --vault-id labels intact instead of every password turning unlabeled.
+		if kind == credential.KindVaultPassword {
+			if label := strings.TrimSpace(fmt.Sprint(c.Inputs["vault_id"])); label != "" &&
+				label != "<nil>" && credential.ValidVaultID(label) {
+				obj.VaultID = label
+			}
+		}
 		plan.Credentials = append(plan.Credentials, obj)
 		credentialIDs[c.Name] = obj.ID
 		if settings := publicInputs(c.Inputs); len(settings) > 0 {

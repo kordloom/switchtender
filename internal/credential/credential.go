@@ -6,6 +6,7 @@ package credential
 import (
 	"context"
 	"errors"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -34,6 +35,11 @@ const (
 	// KindToken is a single API token or JWT, exposed to a run as the TokenEnvVar environment
 	// variable so any tool can send it as a bearer token without a KEY=VALUE wrapper.
 	KindToken Kind = "token"
+	// KindOpenStack is an OpenStack application credential or password auth. Its fields
+	// (auth_url, username, password, project_name, optional user_domain_name, project_domain_name,
+	// region_name) become the OS_ environment variables openstacksdk and the openstack.cloud
+	// collection read.
+	KindOpenStack Kind = "openstack"
 	// KindAWS is an Amazon Web Services access key. Its fields (access_key, secret_key, optional
 	// session_token and region) inject as the standard AWS_ environment variables that Ansible, the
 	// aws_ec2 inventory plugin, and Terraform all read.
@@ -81,7 +87,7 @@ var (
 // editing this list.
 var builtinKinds = []Kind{
 	KindSSHKey, KindSSHPassword, KindVaultPassword, KindBecomePassword, KindBecome, KindNetwork,
-	KindEnv, KindToken, KindRegistry, KindAWS, KindAzure, KindGCP, KindVMware,
+	KindEnv, KindToken, KindRegistry, KindAWS, KindAzure, KindGCP, KindVMware, KindOpenStack,
 }
 
 // ValidKind reports whether k names a supported credential kind: a built-in, or a typed or custom
@@ -145,6 +151,16 @@ const (
 // NormalizeSource maps an empty source to the local default and otherwise returns source unchanged.
 func NormalizeSource(source string) string { return secretsource.NormalizeKind(source) }
 
+// vaultIDPattern bounds a vault label to what ansible-playbook parses unambiguously in
+// label@file: no separator, no spaces, nothing a shell or the argument parser reinterprets.
+var vaultIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
+
+// ValidVaultID reports whether v can label a vault password. Empty is valid and means the classic
+// unlabeled password file.
+func ValidVaultID(v string) bool {
+	return v == "" || vaultIDPattern.MatchString(v)
+}
+
 // ValidSource reports whether s names a supported credential source. Empty is valid and means local.
 func ValidSource(s string) bool { return secretsource.ValidKind(s) }
 
@@ -191,6 +207,10 @@ type Credential struct {
 	// Secret is the encrypted material at rest and never appears in API responses. For a command
 	// source it is the sealed command, not the secret.
 	Secret string `json:"-"`
+	// VaultID labels an Ansible Vault password for --vault-id, so several vault credentials on
+	// one run each unlock the secrets encrypted for their label. Empty passes the classic
+	// --vault-password-file. Only meaningful on KindVaultPassword.
+	VaultID string `json:"vault_id,omitempty"`
 	// OrgID is the owning organization. Empty means unowned, a global object that follows the role.
 	// When set, members of the organization gain access to the credential and, under strict grants, it
 	// is hidden from non-members who lack an explicit grant.

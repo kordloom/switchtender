@@ -274,3 +274,34 @@ func TestFromAWXReadsNaturalKeyReferences(t *testing.T) {
 		})
 	}
 }
+
+func TestFromAWXCarriesVaultID(t *testing.T) {
+	t.Parallel()
+	export := `{
+		"credentials": [
+			{"name": "prod-vault", "credential_type": "Vault", "inputs": {"vault_id": "prod", "vault_password": "$encrypted$"}},
+			{"name": "plain-vault", "credential_type": "Vault", "inputs": {"vault_password": "$encrypted$"}},
+			{"name": "bad-vault", "credential_type": "Vault", "inputs": {"vault_id": "a b@c", "vault_password": "$encrypted$"}}
+		]
+	}`
+	plan, err := importer.FromAWX([]byte(export), fixedTime)
+	if err != nil {
+		t.Fatalf("FromAWX() error = %v", err)
+	}
+	byName := map[string]*credential.Credential{}
+	for _, c := range plan.Credentials {
+		byName[c.Name] = c
+	}
+	if c := byName["prod-vault"]; c == nil || c.Kind != credential.KindVaultPassword || c.VaultID != "prod" {
+		t.Errorf("prod-vault = %+v, want a vault password labeled prod", c)
+	}
+	// A vault with no label imports unlabeled, the classic single-vault case.
+	if c := byName["plain-vault"]; c == nil || c.VaultID != "" {
+		t.Errorf("plain-vault = %+v, want no label", c)
+	}
+	// A label AWX would never have written but a hand-edited export might is dropped rather than
+	// carried into a --vault-id argument.
+	if c := byName["bad-vault"]; c == nil || c.VaultID != "" {
+		t.Errorf("bad-vault = %+v, want the malformed label dropped", c)
+	}
+}

@@ -89,7 +89,40 @@ func TestInject(t *testing.T) {
 		Kind:    KindVMware,
 		Secret:  "host=vc01\nuser=root",
 		WantErr: ErrBadField,
-	}, { // Test 9: An unregistered kind is a bad-kind error.
+	}, { // Test 9: OpenStack with the required fields and defaulted domains.
+		Name:   "openstack minimal",
+		Kind:   KindOpenStack,
+		Secret: "auth_url=https://keystone:5000/v3\nusername=deploy\npassword=pw\nproject_name=prod",
+		Want: Injection{Env: []string{
+			"OS_AUTH_URL=https://keystone:5000/v3",
+			"OS_USERNAME=deploy",
+			"OS_PASSWORD=pw",
+			"OS_PROJECT_NAME=prod",
+			"OS_USER_DOMAIN_NAME=Default",
+			"OS_PROJECT_DOMAIN_NAME=Default",
+			"OS_IDENTITY_API_VERSION=3",
+		}},
+	}, { // Test 10: OpenStack with explicit domains and a region.
+		Name: "openstack full",
+		Kind: KindOpenStack,
+		Secret: "auth_url=https://keystone:5000/v3\nusername=deploy\npassword=pw\n" +
+			"project_name=prod\nuser_domain_name=ldap\nproject_domain_name=corp\nregion_name=dc1",
+		Want: Injection{Env: []string{
+			"OS_AUTH_URL=https://keystone:5000/v3",
+			"OS_USERNAME=deploy",
+			"OS_PASSWORD=pw",
+			"OS_PROJECT_NAME=prod",
+			"OS_USER_DOMAIN_NAME=ldap",
+			"OS_PROJECT_DOMAIN_NAME=corp",
+			"OS_IDENTITY_API_VERSION=3",
+			"OS_REGION_NAME=dc1",
+		}},
+	}, { // Test 11: OpenStack missing the project is a bad-field error.
+		Name:    "openstack missing project",
+		Kind:    KindOpenStack,
+		Secret:  "auth_url=https://keystone:5000/v3\nusername=deploy\npassword=pw",
+		WantErr: ErrBadField,
+	}, { // Test 12: An unregistered kind is a bad-kind error.
 		Name:    "unknown kind",
 		Kind:    Kind("nope"),
 		Secret:  "x=y",

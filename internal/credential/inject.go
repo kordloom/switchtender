@@ -49,6 +49,7 @@ func init() {
 	RegisterInjector(KindAzure, azureInject)
 	RegisterInjector(KindGCP, gcpInject)
 	RegisterInjector(KindVMware, vmwareInject)
+	RegisterInjector(KindOpenStack, openstackInject)
 }
 
 // RegisterInjector registers an injector for a typed credential kind, letting a host add a credential
@@ -147,6 +148,39 @@ func gcpInject(secret string) (Injection, error) {
 		EnvVars: []string{"GOOGLE_APPLICATION_CREDENTIALS", "GCP_SERVICE_ACCOUNT_FILE"},
 		Content: secret,
 	}}}, nil
+}
+
+// openstackInject maps OpenStack auth fields to the OS_ environment variables openstacksdk and
+// the openstack.cloud collection read. The domain names default to Default, which is what a stock
+// Keystone ships with, so the common case needs four fields.
+func openstackInject(secret string) (Injection, error) {
+	f := Fields(secret)
+	authURL, username, password := f["auth_url"], f["username"], f["password"]
+	project := f["project_name"]
+	if authURL == "" || username == "" || password == "" || project == "" {
+		return Injection{}, fmt.Errorf(
+			"%w: openstack needs auth_url, username, password, and project_name", ErrBadField)
+	}
+	userDomain, projectDomain := f["user_domain_name"], f["project_domain_name"]
+	if userDomain == "" {
+		userDomain = "Default"
+	}
+	if projectDomain == "" {
+		projectDomain = "Default"
+	}
+	env := []string{
+		"OS_AUTH_URL=" + authURL,
+		"OS_USERNAME=" + username,
+		"OS_PASSWORD=" + password,
+		"OS_PROJECT_NAME=" + project,
+		"OS_USER_DOMAIN_NAME=" + userDomain,
+		"OS_PROJECT_DOMAIN_NAME=" + projectDomain,
+		"OS_IDENTITY_API_VERSION=3",
+	}
+	if region := f["region_name"]; region != "" {
+		env = append(env, "OS_REGION_NAME="+region)
+	}
+	return Injection{Env: env}, nil
 }
 
 // vmwareInject maps vCenter fields to the VMWARE_ environment variables the community.vmware modules

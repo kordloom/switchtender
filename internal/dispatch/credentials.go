@@ -166,7 +166,8 @@ func (d *Dispatcher) materializeCredentials(ctx context.Context, r *run.Run, spe
 			}
 			spec.PrivateKeyPath = f.Name()
 		case credential.KindVaultPassword:
-			spec.VaultPasswordFile = f.Name()
+			spec.VaultPasswords = append(spec.VaultPasswords,
+				roundhouse.VaultPassword{Label: c.VaultID, Path: f.Name()})
 		case credential.KindEnv:
 			// Environment pairs go straight into the process; the temp file is not needed.
 			paths = paths[:len(paths)-1]
