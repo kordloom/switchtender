@@ -123,7 +123,7 @@ Runs the HTTP API, the in-process executor, the scheduler, the retention sweeper
 | `--retain-events` | none | Drop run events and logs older than this, for example `30d`. Empty keeps them forever. |
 | `--retention-interval` | `1h` | How often the retention sweeper runs. |
 | `--evidence-dir` | none | Directory for periodic change registers. Set together with `--evidence-cadence`. |
-| `--evidence-cadence` | none | How long each change register covers and how often one is written, for example `2160h` for a quarter. Minimum `1h`. Zero writes none. |
+| `--evidence-cadence` | none | How long each change register covers and how often one is written, for example `2160h` for a quarter. Minimum `1h`. Zero writes none. Progress is read from the archive, so a restart resumes from the newest pack rather than starting the period again. |
 | `--smtp-addr` | none | SMTP server host:port for run notification emails. Empty disables email. |
 | `--smtp-from` | none | Sender address for notification emails. |
 | `--smtp-to` | none | Recipient address for notification emails. Repeatable. |
