@@ -165,6 +165,21 @@ function wireAudit() {
 			}
 		});
 	}
+	const reg = document.getElementById("audit-register");
+	if (reg) {
+		reg.dataset.tip = "Click to download the last 90 days as a change register, the evidence a compliance review samples from";
+		reg.addEventListener("click", async () => {
+			reg.disabled = true;
+			try {
+				const text = await (await fetchAuthed("/audit/register")).text();
+				downloadBlob("switchtender-change-register.html", "text/html", text);
+			} catch (err) {
+				setStatus("Could not build the evidence pack: " + err.message);
+			} finally {
+				reg.disabled = false;
+			}
+		});
+	}
 	const exp = document.getElementById("audit-export");
 	if (exp) {
 		exp.addEventListener("click", async () => {

@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/dossier"
 )
 
 // auditCmd groups audit trail tools.
@@ -42,11 +43,28 @@ var auditKeygenCmd = &cobra.Command{
 // auditReportOut holds the --out value for audit report.
 var auditReportOut string
 
+// Period register flags for audit report with no export argument.
+var (
+	// auditReportDB is the --db value the change register reads from.
+	auditReportDB string
+	// auditReportFrom and auditReportTo bound the register period, dates or RFC 3339 times.
+	auditReportFrom string
+	auditReportTo   string
+)
+
 // auditReportCmd renders a signed export into a shareable HTML evidence report.
 var auditReportCmd = &cobra.Command{
-	Use:   "report <export.json>",
-	Short: "Render an audit export into a self-contained HTML evidence report, verifying it offline.",
-	Args:  cobra.ExactArgs(1),
+	Use:   "report [export.json]",
+	Short: "Render evidence: an export's report, or a period change register with --from and --to.",
+	Long: `Render evidence.
+
+With an export file, verify it offline and render it as a self-contained HTML evidence report.
+
+Without one, read the database and render the period's change register: every change with who asked
+for it, the chain-recorded decision over it, its risk grade, and how it ended. That is the
+change-management evidence a SOC 2 CC8.1 or ISO/IEC 27001 A.8.32 review samples from. The period
+defaults to the last 90 days; --from and --to take a date or an RFC 3339 time.`,
+	Args: cobra.MaximumNArgs(1),
 	// A broken or unsigned export still produces a report stating so, not a usage error.
 	SilenceUsage: true,
 	RunE:         runAuditReport,
@@ -58,13 +76,22 @@ func init() {
 		"Expected signer public key in hex; verification fails when the export's key differs.")
 	auditReportCmd.Flags().StringVar(&auditReportOut, "out", "",
 		"File to write the HTML report to. Defaults to stdout.")
+	auditReportCmd.Flags().StringVar(&auditReportDB, "db", defaultDBPath,
+		"SQLite file path, or a postgres:// DSN, the change register reads from.")
+	auditReportCmd.Flags().StringVar(&auditReportFrom, "from", "",
+		"Change register period start, a date or RFC 3339 time. Defaults to 90 days before --to.")
+	auditReportCmd.Flags().StringVar(&auditReportTo, "to", "",
+		"Change register period end, exclusive. Defaults to now.")
 	auditCmd.AddCommand(auditVerifyCmd, auditKeygenCmd, auditReportCmd)
 	rootCmd.AddCommand(auditCmd)
 }
 
 // runAuditReport reads an export, verifies it, and writes a self-contained HTML evidence report an
 // auditor or a customer can read without any tooling and re-verify against the export.
-func runAuditReport(_ *cobra.Command, args []string) error {
+func runAuditReport(cmd *cobra.Command, args []string) error {
+	if len(args) == 0 {
+		return runChangeRegister(cmd)
+	}
 	data, err := os.ReadFile(args[0])
 	if err != nil {
 		return fmt.Errorf("read export: %w", err)
@@ -142,4 +169,57 @@ func shortHex(h string) string {
 		return h[:12]
 	}
 	return h
+}
+
+// runChangeRegister reads the database and writes the period's change register.
+func runChangeRegister(cmd *cobra.Command) error {
+	to := time.Now()
+	if auditReportTo != "" {
+		parsed, err := parseReportTime(auditReportTo)
+		if err != nil {
+			return fmt.Errorf("parse --to: %w", err)
+		}
+		to = parsed
+	}
+	from := to.AddDate(0, 0, -90)
+	if auditReportFrom != "" {
+		parsed, err := parseReportTime(auditReportFrom)
+		if err != nil {
+			return fmt.Errorf("parse --from: %w", err)
+		}
+		from = parsed
+	}
+	if !from.Before(to) {
+		return fmt.Errorf("--from %s does not precede --to %s", from.Format(time.RFC3339), to.Format(time.RFC3339))
+	}
+	store, err := openBundle(auditReportDB)
+	if err != nil {
+		return fmt.Errorf("open store: %w", err)
+	}
+	defer func() { _ = store.Close() }()
+	in, err := dossier.CollectRegister(cmd.Context(), store.Runs(), store.Audits(), from, to, time.Now())
+	if err != nil {
+		return fmt.Errorf("collect change register: %w", err)
+	}
+	doc, err := dossier.RenderRegister(in)
+	if err != nil {
+		return err
+	}
+	if auditReportOut == "" {
+		_, err = os.Stdout.Write(doc)
+		return err
+	}
+	if err := os.WriteFile(auditReportOut, doc, 0o600); err != nil {
+		return fmt.Errorf("write register: %w", err)
+	}
+	fmt.Fprintln(os.Stderr, "wrote", auditReportOut)
+	return nil
+}
+
+// parseReportTime accepts a date or an RFC 3339 time.
+func parseReportTime(raw string) (time.Time, error) {
+	if t, err := time.Parse("2006-01-02", raw); err == nil {
+		return t, nil
+	}
+	return time.Parse(time.RFC3339, raw)
 }

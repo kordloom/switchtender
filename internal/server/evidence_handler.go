@@ -52,3 +52,62 @@ func runEvidenceHandler(store run.Store, audits audit.Store, authz *authorizer, 
 		_, _ = w.Write(doc)
 	}
 }
+
+// auditRegisterHandler renders the period change register as a self-contained HTML document, the
+// change-management evidence a compliance review samples from. from and to accept a date or an
+// RFC 3339 time; the period defaults to the last 90 days.
+func auditRegisterHandler(store run.Store, audits audit.Store, log *zap.Logger) http.HandlerFunc {
+	if store == nil {
+		panic("server: auditRegisterHandler: Store required")
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		if audits == nil {
+			respondError(w, log, http.StatusNotFound, "audit trail not enabled")
+			return
+		}
+		to := time.Now()
+		if raw := r.URL.Query().Get("to"); raw != "" {
+			parsed, err := parseRegisterTime(raw)
+			if err != nil {
+				respondError(w, log, http.StatusBadRequest, "to must be a date or an RFC 3339 time")
+				return
+			}
+			to = parsed
+		}
+		from := to.AddDate(0, 0, -90)
+		if raw := r.URL.Query().Get("from"); raw != "" {
+			parsed, err := parseRegisterTime(raw)
+			if err != nil {
+				respondError(w, log, http.StatusBadRequest, "from must be a date or an RFC 3339 time")
+				return
+			}
+			from = parsed
+		}
+		if !from.Before(to) {
+			respondError(w, log, http.StatusBadRequest, "from must precede to")
+			return
+		}
+		in, err := dossier.CollectRegister(r.Context(), store, audits, from, to, time.Now())
+		if err != nil {
+			log.Error("server: collect change register: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not collect the register")
+			return
+		}
+		doc, err := dossier.RenderRegister(in)
+		if err != nil {
+			log.Error("server: render change register: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not render the register")
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write(doc)
+	}
+}
+
+// parseRegisterTime accepts a date or an RFC 3339 time.
+func parseRegisterTime(raw string) (time.Time, error) {
+	if t, err := time.Parse("2006-01-02", raw); err == nil {
+		return t, nil
+	}
+	return time.Parse(time.RFC3339, raw)
+}
