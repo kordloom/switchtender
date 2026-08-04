@@ -1,0 +1,228 @@
+// Package witness watches a SwitchTender server's span beat feed from outside it. It keeps a
+// signed checkpoint of what it has seen and raises a finding when a beat goes missing, an observed
+// beat comes back rewritten, or the head regresses. A chain proves what it holds was not altered;
+// it cannot prove nothing was removed from the end, because the same process decides what happens
+// and what gets written down. An outside witness that remembers is what closes that.
+package witness
+
+import (
+	"crypto/ed25519"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"time"
+
+	"github.com/kordloom/switchtender/internal/audit"
+)
+
+// recentCap bounds how many observed beats a checkpoint remembers. The feed serves the newest
+// window, so remembering more than it can re-serve buys nothing.
+const recentCap = 512
+
+// Beat is one span beat as the feed serves it.
+type Beat struct {
+	// Beat is the beat number, starting at one and rising by exactly one per beat.
+	Beat int64 `json:"beat"`
+	// At is when the beat was appended, RFC 3339.
+	At string `json:"at"`
+	// Seq is the beat entry's position in the audit chain.
+	Seq int64 `json:"seq"`
+	// Head is the beat entry's chain hash, the head the beat attests.
+	Head string `json:"head"`
+}
+
+// Observed is what the witness remembers of one beat.
+type Observed struct {
+	// Seq is the chain position the beat carried when first seen.
+	Seq int64 `json:"seq"`
+	// Head is the hash the beat carried when first seen.
+	Head string `json:"head"`
+}
+
+// Checkpoint is the witness's signed memory of a server's beat stream.
+type Checkpoint struct {
+	// Server is the watched server's base URL.
+	Server string `json:"server"`
+	// LastBeat is the highest beat number observed.
+	LastBeat int64 `json:"last_beat"`
+	// LastSeq is the chain position of that beat.
+	LastSeq int64 `json:"last_seq"`
+	// LastHead is the hash of that beat.
+	LastHead string `json:"last_head"`
+	// Recent maps observed beat numbers to what they carried, bounded to the newest recentCap.
+	Recent map[int64]Observed `json:"recent"`
+	// ObservedAt is when the checkpoint was taken.
+	ObservedAt time.Time `json:"observed_at"`
+	// PublicKey is the hex key that signed this checkpoint.
+	PublicKey string `json:"public_key,omitempty"`
+	// Sig is the hex signature over the canonical checkpoint content.
+	Sig string `json:"sig,omitempty"`
+}
+
+// Finding is one problem the witness can attest to.
+type Finding struct {
+	// Kind is missing_beat, rewritten_beat, or head_regression.
+	Kind string `json:"kind"`
+	// Detail says what was expected and what was seen, in words an operator can act on.
+	Detail string `json:"detail"`
+}
+
+// Check holds a fresh read of the feed against the previous checkpoint. It returns the next
+// checkpoint and every finding, and it is pure, so what the witness alerts on is testable without
+// a server. prev may be nil on the first watch.
+func Check(prev *Checkpoint, server string, beats []Beat, now time.Time) (*Checkpoint, []Finding) {
+	next := &Checkpoint{Server: server, Recent: map[int64]Observed{}, ObservedAt: now}
+	var findings []Finding
+	if prev != nil {
+		next.LastBeat, next.LastSeq, next.LastHead = prev.LastBeat, prev.LastSeq, prev.LastHead
+		for n, o := range prev.Recent {
+			next.Recent[n] = o
+		}
+	}
+
+	// The feed numbers beats contiguously by construction, so a gap inside one answer means the
+	// entries between were removed.
+	for i := 1; i < len(beats); i++ {
+		if beats[i].Beat != beats[i-1].Beat+1 {
+			findings = append(findings, Finding{Kind: "missing_beat", Detail: fmt.Sprintf(
+				"the feed jumps from beat %d to beat %d, so %d beat(s) between them are gone",
+				beats[i-1].Beat, beats[i].Beat, beats[i].Beat-beats[i-1].Beat-1)})
+		}
+	}
+
+	for _, b := range beats {
+		// First write wins: the witness's memory is its testimony, so a rewrite is reported on
+		// every watch rather than adopted after one alert and attested away.
+		seen, ok := next.Recent[b.Beat]
+		if ok && (seen.Seq != b.Seq || seen.Head != b.Head) {
+			findings = append(findings, Finding{Kind: "rewritten_beat", Detail: fmt.Sprintf(
+				"beat %d was seq %d link %s when witnessed and is now seq %d link %s, so the "+
+					"history under it was rewritten", b.Beat, seen.Seq, seen.Head, b.Seq, b.Head)})
+			continue
+		}
+		if !ok {
+			next.Recent[b.Beat] = Observed{Seq: b.Seq, Head: b.Head}
+		}
+	}
+
+	if len(beats) > 0 {
+		newest := beats[len(beats)-1]
+		switch {
+		case newest.Beat < next.LastBeat:
+			findings = append(findings, Finding{Kind: "head_regression", Detail: fmt.Sprintf(
+				"the newest beat is %d and beat %d was already witnessed, so the chain lost its "+
+					"tail", newest.Beat, next.LastBeat)})
+		case newest.Beat >= next.LastBeat:
+			next.LastBeat, next.LastSeq, next.LastHead = newest.Beat, newest.Seq, newest.Head
+		}
+	} else if prev != nil && prev.LastBeat > 0 {
+		findings = append(findings, Finding{Kind: "head_regression", Detail: fmt.Sprintf(
+			"the feed is empty and beat %d was already witnessed, so the chain lost its tail",
+			prev.LastBeat)})
+	}
+
+	// Forget the oldest remembered beats past the cap, never the newest.
+	if len(next.Recent) > recentCap {
+		nums := make([]int64, 0, len(next.Recent))
+		for n := range next.Recent {
+			nums = append(nums, n)
+		}
+		sort.Slice(nums, func(i, j int) bool { return nums[i] < nums[j] })
+		for _, n := range nums[:len(nums)-recentCap] {
+			delete(next.Recent, n)
+		}
+	}
+	return next, findings
+}
+
+// signedContent is the canonical bytes a checkpoint signature covers: the checkpoint with its
+// signature fields cleared.
+func signedContent(c *Checkpoint) ([]byte, error) {
+	cp := *c
+	cp.PublicKey, cp.Sig = "", ""
+	return json.Marshal(&cp)
+}
+
+// Sign stamps the checkpoint with the witness identity, so a tampered state file is detectable.
+func Sign(c *Checkpoint, id audit.Identity) error {
+	content, err := signedContent(c)
+	if err != nil {
+		return fmt.Errorf("sign checkpoint: %w", err)
+	}
+	c.PublicKey = id.PublicKeyHex()
+	c.Sig = hex.EncodeToString(ed25519.Sign(id.Private(), content))
+	return nil
+}
+
+// Verify checks the checkpoint's signature. It reports the signer's hex key so a caller can pin
+// it across restarts.
+func Verify(c *Checkpoint) (publicKey string, err error) {
+	if c.Sig == "" || c.PublicKey == "" {
+		return "", fmt.Errorf("checkpoint is unsigned")
+	}
+	pub, err := hex.DecodeString(c.PublicKey)
+	if err != nil || len(pub) != ed25519.PublicKeySize {
+		return "", fmt.Errorf("checkpoint public key is malformed")
+	}
+	sig, err := hex.DecodeString(c.Sig)
+	if err != nil {
+		return "", fmt.Errorf("checkpoint signature is malformed")
+	}
+	content, err := signedContent(c)
+	if err != nil {
+		return "", fmt.Errorf("verify checkpoint: %w", err)
+	}
+	if !ed25519.Verify(ed25519.PublicKey(pub), content, sig) {
+		return "", fmt.Errorf("checkpoint signature does not verify; the state file was altered")
+	}
+	return c.PublicKey, nil
+}
+
+// Load reads and verifies a checkpoint file. A missing file returns nil with no error, the first
+// watch. A present file that fails verification is an error, never silently accepted.
+func Load(path string) (*Checkpoint, error) {
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read checkpoint: %w", err)
+	}
+	var c Checkpoint
+	if err := json.Unmarshal(data, &c); err != nil {
+		return nil, fmt.Errorf("parse checkpoint: %w", err)
+	}
+	if _, err := Verify(&c); err != nil {
+		return nil, err
+	}
+	return &c, nil
+}
+
+// Save signs and writes the checkpoint atomically, so a crash mid-write never leaves a state file
+// that fails verification on the next start.
+func Save(path string, c *Checkpoint, id audit.Identity) error {
+	if err := Sign(c, id); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(c, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode checkpoint: %w", err)
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return fmt.Errorf("write checkpoint: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return fmt.Errorf("write checkpoint: %w", err)
+	}
+	return nil
+}
+
+// DefaultStatePath returns where the checkpoint lives when the operator does not say: beside the
+// working directory, named for the witness.
+func DefaultStatePath() string {
+	return filepath.Join(".", "switchtender-witness.json")
+}
