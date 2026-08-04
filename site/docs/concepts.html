@@ -141,10 +141,21 @@ self-contained HTML that a reviewer reads without tooling and checks against the
 <p><strong>A witness remembers what the server can no longer take back.</strong> <code>switchtender witness</code>, run on a
 machine the server's operator does not control, polls the public beat feed, keeps a signed
 checkpoint of what it saw, and raises a finding when a beat goes missing, a witnessed beat comes
-back rewritten, or the head regresses. Its memory is first write wins, so a rewrite is reported on
-every watch and never signed into the checkpoint as if it were the truth. The checkpoint's signer is
-pinned to the witness's own key, so a state file replaced by a forger is refused rather than
-believed, and one state file holds one server.</p>
+back rewritten, or the head regresses. Its memory is first write wins, so a rewrite is never signed
+into the checkpoint as if it were the truth, and a standing condition is reported when it appears
+and again when it changes, not once per poll. The checkpoint's signer is pinned to the witness's
+own key, so a state file replaced by a forger is refused rather than believed, and one state file
+holds one server.</p>
+<p><strong>A hosted witness answers auditors, not just operators.</strong> <code>switchtender witness serve</code> watches
+any number of servers from one process, records every finding durably, and serves what it has
+witnessed over a read-only API. Its centerpiece is the attestation: a countersigned statement of
+the head it holds for a server, when it saw it, and how many findings it has ever recorded there.
+A relying party fetches one and verifies it offline with <code>switchtender witness verify-attestation</code>
+against the witness key they pinned. The watched operator cannot mint one, cannot alter one, and
+cannot answer one that disagrees with the chain they serve, which turns &quot;our history is intact&quot;
+from a claim the operator makes into one a third party signs. When the witness cannot see a feed,
+the attestation says so rather than going quiet, because a server going dark on its witness is
+itself a signal.</p>
 <p><strong>Receipts make an omission detectable by the party it happened to.</strong> Every mutation returns an
 <code>Audit-Receipt: seq:link</code> header naming where it was recorded. Keep them. <code>switchtender audit receipt 41:9f2c...</code> confirms the chain still holds that exact link at that exact position, and a
 server that omitted the entry cannot produce a chain containing the receipt.</p>
