@@ -59,7 +59,7 @@ func (a *recordingAudits) List(context.Context, int) ([]*audit.Entry, error) { r
 func (a *recordingAudits) Chain(context.Context) ([]*audit.Entry, error) { return nil, nil }
 
 // ChainScan streams nothing.
-func (a *recordingAudits) ChainScan(context.Context, func(*audit.Entry) error) error { return nil }
+func (a *recordingAudits) ChainScan(context.Context, int64, func(*audit.Entry) error) error { return nil }
 
 // newHookServer builds a handler wiring triggers, one template, a submitter, a run store, and an
 // audit store, and seeds one unsigned trigger, returning its plaintext token and id.

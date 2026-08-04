@@ -162,7 +162,7 @@ func auditVerifyHandler(store audit.Store, log *zap.Logger) http.HandlerFunc {
 		// holds one entry in memory rather than all of them, however many clients ask at once.
 		chainScan := audit.NewChainScanner(true)
 		anchorScan := audit.NewAnchorScanner(anchors)
-		err := store.ChainScan(r.Context(), func(e *audit.Entry) error {
+		err := store.ChainScan(r.Context(), 0, func(e *audit.Entry) error {
 			chainScan.Feed(e)
 			anchorScan.Feed(e)
 			return nil

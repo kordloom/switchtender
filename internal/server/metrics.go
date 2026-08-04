@@ -30,7 +30,7 @@ const metricsHistogramWindow = 10000
 // exposition format, computed from the store at scrape time so no counter state lives in the
 // process. The status gauges come from a grouped count, and the histograms are derived from the
 // most recent metricsHistogramWindow runs, so a scrape stays cheap however large history grows.
-func metricsHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
+func metricsHandler(store run.Store, chain *chainHealth, log *zap.Logger) http.HandlerFunc {
 	if store == nil {
 		panic("server: metricsHandler: Store required")
 	}
@@ -64,6 +64,9 @@ func metricsHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
 		writeRunDurations(&b, runs)
 		writeQueueWait(&b, runs)
 		writeSpanBeats(&b, time.Now())
+		if chain != nil {
+			writeChainHealth(&b, chain.snapshot(r.Context()), time.Now())
+		}
 
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 		_, _ = w.Write([]byte(b.String()))
@@ -170,6 +173,51 @@ func writeRunDurations(b *strings.Builder, runs []*run.Run) {
 	fmt.Fprintf(b, "switchtender_run_duration_seconds_bucket{le=\"+Inf\"} %d\n", total)
 	fmt.Fprintf(b, "switchtender_run_duration_seconds_sum %g\n", sum)
 	fmt.Fprintf(b, "switchtender_run_duration_seconds_count %d\n", total)
+}
+
+// writeChainHealth emits the audit chain integrity gauges. Verification is incremental and
+// cached, so a scrape stays cheap however long the trail grows. The last-anchor age is omitted
+// until an anchor exists, since zero would read as a fresh anchor on an install that anchors
+// nothing.
+func writeChainHealth(b *strings.Builder, g chainGauges, now time.Time) {
+	boolGauge := func(v bool) int {
+		if v {
+			return 1
+		}
+		return 0
+	}
+	b.WriteString("# HELP switchtender_audit_chain_verified Whether the audit chain verifies " +
+		"end to end (1 sound, 0 broken).\n")
+	b.WriteString("# TYPE switchtender_audit_chain_verified gauge\n")
+	fmt.Fprintf(b, "switchtender_audit_chain_verified %d\n", boolGauge(g.Verified))
+	b.WriteString("# HELP switchtender_audit_chain_entries Audit entries verified so far.\n")
+	b.WriteString("# TYPE switchtender_audit_chain_entries gauge\n")
+	fmt.Fprintf(b, "switchtender_audit_chain_entries %d\n", g.Entries)
+	b.WriteString("# HELP switchtender_audit_chain_broke_at One-based position of the first " +
+		"entry that failed verification, 0 while the chain holds.\n")
+	b.WriteString("# TYPE switchtender_audit_chain_broke_at gauge\n")
+	fmt.Fprintf(b, "switchtender_audit_chain_broke_at %d\n", g.BrokeAt)
+	b.WriteString("# HELP switchtender_audit_anchors_total Anchors recorded over the chain.\n")
+	b.WriteString("# TYPE switchtender_audit_anchors_total gauge\n")
+	fmt.Fprintf(b, "switchtender_audit_anchors_total %d\n", g.AnchorsTotal)
+	b.WriteString("# HELP switchtender_audit_anchor_problems Anchors the chain no longer " +
+		"reaches with the anchored link.\n")
+	b.WriteString("# TYPE switchtender_audit_anchor_problems gauge\n")
+	fmt.Fprintf(b, "switchtender_audit_anchor_problems %d\n", g.AnchorProblems)
+	b.WriteString("# HELP switchtender_audit_health_stale Whether these audit gauges are from " +
+		"an earlier refresh because the last one failed (1 stale).\n")
+	b.WriteString("# TYPE switchtender_audit_health_stale gauge\n")
+	fmt.Fprintf(b, "switchtender_audit_health_stale %d\n", boolGauge(g.Stale))
+	if !g.LastAnchorAt.IsZero() {
+		age := now.Sub(g.LastAnchorAt).Seconds()
+		if age < 0 {
+			age = 0
+		}
+		b.WriteString("# HELP switchtender_audit_last_anchor_age_seconds Seconds since the " +
+			"newest anchor was made.\n")
+		b.WriteString("# TYPE switchtender_audit_last_anchor_age_seconds gauge\n")
+		fmt.Fprintf(b, "switchtender_audit_last_anchor_age_seconds %g\n", age)
+	}
 }
 
 // writeSpanBeats emits the span beat counters and the age of the newest beat this process wrote.

@@ -216,10 +216,10 @@ ORDER BY seq ASC`
 
 // ChainScan streams every entry in chain order, oldest first, one row at a time, so verifying a
 // long trail never materializes it.
-func (s *auditStore) ChainScan(ctx context.Context, fn func(*audit.Entry) error) error {
+func (s *auditStore) ChainScan(ctx context.Context, afterSeq int64, fn func(*audit.Entry) error) error {
 	const q = `SELECT id, at, actor, method, path, seq, prev_hash, hash FROM audit_entries
-ORDER BY seq ASC`
-	rows, err := s.db.QueryContext(ctx, q)
+WHERE seq > $1 ORDER BY seq ASC`
+	rows, err := s.db.QueryContext(ctx, q, afterSeq)
 	if err != nil {
 		return fmt.Errorf("chain scan audit entries: %w", err)
 	}

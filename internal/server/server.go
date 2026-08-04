@@ -403,7 +403,11 @@ func (s *Server) Handler() http.Handler {
 		orgOwners: s.orgResolver(), strict: s.strictGrants,
 	}
 	mux.Handle("GET /healthz", healthHandler())
-	mux.Handle("GET /metrics", metricsHandler(s.store, s.log))
+	var health *chainHealth
+	if s.audits != nil {
+		health = newChainHealth(s.audits)
+	}
+	mux.Handle("GET /metrics", metricsHandler(s.store, health, s.log))
 	mux.Handle("GET /v1/fleet", fleetHandler(s.store, authz, s.log))
 	mux.Handle("GET /v1/drift", driftHandler(s.store, authz, s.log))
 	mux.Handle("POST /v1/drift/reconcile", reconcileDriftHandler(s.store, s.submitter, authz, s.log))
