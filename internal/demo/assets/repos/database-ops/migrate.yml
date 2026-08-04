@@ -1,0 +1,15 @@
+---
+- name: Migrate database
+  hosts: all
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Take a pre-migration snapshot
+      command: "sleep {{ work | default(1) }}"
+      changed_when: false
+    - name: Apply pending migrations
+      debug:
+        msg: "migrations applied on {{ inventory_hostname }}"
+    - name: Verify schema version
+      debug:
+        msg: "schema current on {{ inventory_hostname }}"

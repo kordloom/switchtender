@@ -14,6 +14,9 @@ import (
 	"path/filepath"
 	"time"
 
+	git "github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/object"
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/audit"
@@ -81,7 +84,7 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 	inv := filepath.Join(dir, "inv.ini")
 	tfDir := filepath.Join(dir, "terraform")
 
-	seedConfig(ctx, d, log)
+	seedConfig(ctx, d, log, dir)
 
 	// Plain runs where db01 flaps between failing and passing, so fleet memory marks it flaky.
 	failByRun := []string{"", "db01", "", "db01", ""}
@@ -315,20 +318,67 @@ func materialize() (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if err := initDemoRepos(dir); err != nil {
+		return "", err
+	}
 	return dir, nil
+}
+
+// initDemoRepos turns each materialized repos/ subtree into a real git repository with one commit
+// on main, so the seeded projects clone from disk and a launched template gets a green run instead
+// of a git failure against a host that does not exist.
+func initDemoRepos(dir string) error {
+	entries, err := os.ReadDir(filepath.Join(dir, "repos"))
+	if err != nil {
+		return fmt.Errorf("read demo repos: %w", err)
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		path := filepath.Join(dir, "repos", entry.Name())
+		repo, err := git.PlainInitWithOptions(path, &git.PlainInitOptions{
+			InitOptions: git.InitOptions{DefaultBranch: plumbing.Main},
+		})
+		if err != nil {
+			return fmt.Errorf("init demo repo %s: %w", entry.Name(), err)
+		}
+		wt, err := repo.Worktree()
+		if err != nil {
+			return fmt.Errorf("init demo repo %s: %w", entry.Name(), err)
+		}
+		if err := wt.AddGlob("."); err != nil {
+			return fmt.Errorf("init demo repo %s: %w", entry.Name(), err)
+		}
+		if _, err := wt.Commit("Seed the demo repository", &git.CommitOptions{
+			Author: &object.Signature{
+				Name: "SwitchTender Demo", Email: "demo@switchtender.invalid", When: time.Now(),
+			},
+		}); err != nil {
+			return fmt.Errorf("init demo repo %s: %w", entry.Name(), err)
+		}
+	}
+	return nil
 }
 
 // seedConfig stores browsable sample projects, inventories, credentials, and templates. The templates
 // cover the main tools the engine drives, so the Templates list shows Ansible, Bash, Terraform, Python,
 // and Go presets even on a host that lacks a given tool's binary. It is best effort: a store error is
 // logged and skipped so the runs still seed.
-func seedConfig(ctx context.Context, d Deps, log *zap.Logger) {
+func seedConfig(ctx context.Context, d Deps, log *zap.Logger, assetDir string) {
 	now := time.Now()
 	ago := func(h int) time.Time { return now.Add(-time.Duration(h) * time.Hour) }
 
+	// The repositories are real local clones materialized beside the other assets, so launching a
+	// project-backed template on a writable instance syncs and runs green instead of failing
+	// against a host that does not exist.
 	projects := []*project.Project{
-		{ID: project.NewID(), Name: "web-platform", RepoURL: "https://github.com/acme/web-platform.git", Branch: "main", InstallDeps: true, CreatedAt: ago(72)},
-		{ID: project.NewID(), Name: "database-ops", RepoURL: "https://github.com/acme/database-ops.git", Branch: "main", InstallDeps: true, CreatedAt: ago(48)},
+		{ID: project.NewID(), Name: "web-platform",
+			RepoURL: "file://" + filepath.Join(assetDir, "repos", "web-platform"),
+			Branch:  "main", CreatedAt: ago(72)},
+		{ID: project.NewID(), Name: "database-ops",
+			RepoURL: "file://" + filepath.Join(assetDir, "repos", "database-ops"),
+			Branch:  "main", CreatedAt: ago(48)},
 	}
 	for _, p := range projects {
 		if err := d.Projects.Save(ctx, p); err != nil {
