@@ -50,6 +50,9 @@ extra vars.</p>
 <li>Give it a name, then set the same fields you would fill in at launch: the tool, the playbook or
 command, an inventory, and any credentials.</li>
 <li>Optional: set a shard count to split every launch, or a queue to pin launches to specific workers.</li>
+<li>Optional: check &quot;Always confirm before launching&quot; for a risky template, such as a production
+deploy or a destroy. Its Launch button then opens the overrides dialog for review instead of
+firing on one click. The API field is <code>confirm_on_launch</code>.</li>
 <li>Save. The template now launches from its row, or from the API.</li>
 </ol>
 <h2 id="add-a-survey">Add a survey</h2>

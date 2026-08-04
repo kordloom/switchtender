@@ -136,6 +136,7 @@ function openTemplateEdit(t) {
 	document.getElementById("tpl-tool").value = t.tool || "ansible";
 	document.getElementById("tpl-command").value = t.command || "";
 	document.getElementById("tpl-dry-run").checked = !!t.dry_run;
+	document.getElementById("tpl-confirm-launch").checked = !!t.confirm_on_launch;
 	const notifyRows = document.getElementById("tpl-notify-rows");
 	if (notifyRows) {
 		notifyRows.innerHTML = "";
@@ -202,6 +203,7 @@ function wireTemplateForm() {
 			}
 		}
 		if (document.getElementById("tpl-dry-run").checked) payload.dry_run = true;
+		if (document.getElementById("tpl-confirm-launch").checked) payload.confirm_on_launch = true;
 		const tqueue = document.getElementById("tpl-queue").value.trim();
 		if (tqueue) payload.queue = tqueue;
 		const ttimeout = parseInt(document.getElementById("tpl-timeout").value, 10);
@@ -315,11 +317,19 @@ function launchSplitButton(t) {
 	const main = document.createElement("button");
 	main.className = "button primary split-main";
 	main.dataset.mutates = "true";
-	main.dataset.tip = "Launch this template with its saved settings";
+	main.dataset.tip = t.confirm_on_launch
+		? "Review and confirm before this template launches"
+		: "Launch this template with its saved settings";
 	main.textContent = "Launch";
 	main.addEventListener("click", async (e) => {
 		e.preventDefault();
 		closeLaunchMenu();
+		// A confirm-on-launch template never fires on one click: the overrides dialog is the
+		// confirmation, and it carries the survey fields too, so it outranks the survey path.
+		if (t.confirm_on_launch) {
+			openPromptLaunch(t);
+			return;
+		}
 		if (t.survey && t.survey.length) {
 			openSurvey(t);
 			return;
