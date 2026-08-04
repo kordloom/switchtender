@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/kordloom/switchtender/internal/audit"
@@ -84,7 +85,7 @@ func Check(prev *Checkpoint, server string, beats []Beat, now time.Time) (*Check
 	// A checkpoint is memory of one server's stream. Held against another server it invents
 	// findings from the difference between two unrelated chains and overwrites the memory that
 	// would have caught a real rewrite, so the mismatch is refused rather than reported.
-	if prev != nil && prev.Server != "" && prev.Server != server {
+	if prev != nil && prev.Server != "" && !sameServer(prev.Server, server) {
 		return nil, nil, fmt.Errorf("checkpoint remembers %s, not %s; use one state file per server",
 			prev.Server, server)
 	}
@@ -105,6 +106,7 @@ func Check(prev *Checkpoint, server string, beats []Beat, now time.Time) (*Check
 		}
 	}
 
+	rewroteSomething := false
 	for _, b := range beats {
 		// First write wins: the witness's memory is its testimony, so a rewrite is reported on
 		// every watch rather than adopted after one alert and attested away.
@@ -113,6 +115,7 @@ func Check(prev *Checkpoint, server string, beats []Beat, now time.Time) (*Check
 			findings = append(findings, Finding{Kind: "rewritten_beat", Detail: fmt.Sprintf(
 				"beat %d was seq %d link %s when witnessed and is now seq %d link %s, so the "+
 					"history under it was rewritten", b.Beat, seen.Seq, seen.Head, b.Seq, b.Head)})
+			rewroteSomething = true
 			continue
 		}
 		if !ok {
@@ -122,17 +125,16 @@ func Check(prev *Checkpoint, server string, beats []Beat, now time.Time) (*Check
 
 	if len(beats) > 0 {
 		newest := beats[len(beats)-1]
-		// A rewritten newest beat is never adopted. Advancing Last* onto it would sign the
-		// rewrite into the witness's own testimony, so the checkpoint an operator pins would
-		// endorse the very chain this watch is reporting.
-		seen, known := next.Recent[newest.Beat]
-		rewritten := known && (seen.Seq != newest.Seq || seen.Head != newest.Head)
+		// No head from a watch that saw a rewrite is adopted, wherever the rewrite landed. Every
+		// beat after a rewritten one is built on the rewritten history, so advancing onto a beat
+		// that merely looks new signs the forged chain into the witness's own testimony just as
+		// surely as adopting the rewritten beat itself would.
 		switch {
 		case newest.Beat < next.LastBeat:
 			findings = append(findings, Finding{Kind: "head_regression", Detail: fmt.Sprintf(
 				"the newest beat is %d and beat %d was already witnessed, so the chain lost its "+
 					"tail", newest.Beat, next.LastBeat)})
-		case rewritten:
+		case rewroteSomething:
 			// The finding was already raised by the rewrite walk above; the memory stands.
 		default:
 			next.LastBeat, next.LastSeq, next.LastHead = newest.Beat, newest.Seq, newest.Head
@@ -155,6 +157,14 @@ func Check(prev *Checkpoint, server string, beats []Beat, now time.Time) (*Check
 		}
 	}
 	return next, findings, nil
+}
+
+// sameServer reports whether two spellings address the same server. The witness normalizes the
+// base URL before it fetches, so a checkpoint written from one spelling must not refuse a watch
+// spelled with a trailing slash: refusing means no beat is ever compared again, which blinds the
+// witness permanently while it reports itself healthy.
+func sameServer(a, b string) bool {
+	return strings.TrimRight(a, "/") == strings.TrimRight(b, "/")
 }
 
 // signedContent is the canonical bytes a checkpoint signature covers: the checkpoint with its

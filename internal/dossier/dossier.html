@@ -63,6 +63,11 @@ footer { margin-top: 40px; color: var(--muted); font-size: 13px; }
 		{{end}}
 	</dl>
 
+	{{if .NoReceipt}}
+	<p class="sub">No recorded request created this run, so there is no launch entry to redeem. A run
+	the scheduler started on its own, or one created before receipts were kept, reads this way.</p>
+	{{end}}
+
 	{{if .Decisions}}
 	<h2>Who asked and who decided</h2>
 	<div class="scroll"><table>
@@ -102,7 +107,7 @@ footer { margin-top: 40px; color: var(--muted); font-size: 13px; }
 
 	{{if .Anchors}}
 	<h2>Anchors covering this run</h2>
-	<p class="sub">Each anchor fixed the chain head, at or after this run's last entry, somewhere this install cannot rewrite.</p>
+	<p class="sub">Each anchor still holds against the chain and fixed the head at or after the position this run was recorded by, somewhere this install cannot rewrite.</p>
 	<div class="scroll"><table>
 		<tr><th>Type</th><th>Seq</th><th>When</th><th>Where</th><th>Proof</th></tr>
 		{{range .Anchors}}<tr><td>{{.Type}}</td><td class="mono">{{.Seq}}</td><td>{{.At}}</td><td class="mono">{{.Ref}}</td><td>{{if .Offline}}embedded, verifies offline{{else}}by reference{{end}}</td></tr>

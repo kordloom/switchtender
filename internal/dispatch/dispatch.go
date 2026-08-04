@@ -784,6 +784,7 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 		// a chosen few fields meant a split silently dropped the rest: extra vars vanished, shards
 		// ran outside the execution image the parent pinned, and the run timeout did not apply.
 		inheritExecution(child, parent)
+		stampReceipt(ctx, child)
 		if err := d.store.Save(ctx, child); err != nil {
 			return nil, err
 		}
@@ -802,12 +803,17 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 	return parent, nil
 }
 
-// stampReceipt records which chain entry authorized this run's creation, when the run was created
-// while serving a recorded request. An explicit option wins, so a caller that already knows the
-// receipt keeps it.
+// stampReceipt records which chain entry authorized this run's creation.
+//
+// It is deliberately not an execution option and never inherited from a source run. Options
+// describe how a run executes, and are replayed by rerun, reconcile, and shard retry, which are
+// each a new request with its own authorization. Carrying the source run's receipt through them
+// made a rerun's evidence name whoever launched the original, weeks earlier, which is worse than
+// naming nobody. The request in flight is the only truthful answer, so it always wins; a run
+// created outside a recorded request, by the scheduler or the seeder, carries none.
 func stampReceipt(ctx context.Context, r *run.Run) {
-	if r.AuditReceipt == "" {
-		r.AuditReceipt = run.AuditReceiptFrom(ctx)
+	if receipt := run.AuditReceiptFrom(ctx); receipt != "" {
+		r.AuditReceipt = receipt
 	}
 }
 
@@ -894,6 +900,8 @@ func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string) (*r
 		ShardCount: &count, RetryOf: &parent.ID, IdempotencyKey: key,
 	}
 	inheritExecution(retry, parent)
+	// A retry is authorized by the retry request, not by whatever authorized the parent weeks ago.
+	stampReceipt(ctx, retry)
 	// A retry is a fourth way to submit a run, and it inherits the parent's entire execution spec,
 	// so it has to face the same gate as the other three. Submit, SubmitSplit, and SubmitPipeline
 	// each consult the policy; this path did not, which made retrying a way to run a spec an
@@ -931,6 +939,7 @@ func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string) (*r
 			Limit: shard.Limit,
 		}
 		inheritExecution(child, retry)
+		stampReceipt(ctx, child)
 		if err := d.store.Save(ctx, child); err != nil {
 			return nil, err
 		}
@@ -1349,6 +1358,9 @@ func stepRun(parent *run.Run, step run.PipelineStep, idx, attempt int, vars map[
 		Status: run.StatusPending, CreatedAt: time.Now(),
 		ParentID: &parent.ID, StepIndex: &i, StepName: step.Name, Attempt: attempt,
 		ExtraVars: vars,
+		// A step is part of the pipeline its parent was authorized by, not a new request, and it
+		// may be built after that request returned, so the parent's receipt is the truthful one.
+		AuditReceipt: parent.AuditReceipt,
 	}
 	// A step names its own tool, command, playbook, and inventory, so those are not inherited. How
 	// the run is executed still comes from the pipeline: the environment it runs in, the credentials

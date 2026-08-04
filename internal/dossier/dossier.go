@@ -170,7 +170,16 @@ func Collect(ctx context.Context, runs run.Store, audits audit.Store, id string,
 	if n := len(in.Entries); n > 0 && in.Entries[n-1].Seq > cover {
 		cover = in.Entries[n-1].Seq
 	}
+	if in.Launch != nil && in.Launch.Seq > cover {
+		cover = in.Launch.Seq
+	}
+	// A run the chain holds nothing about, at any position, is covered by nothing. Without this
+	// floor every anchor in the install passes "Seq >= 0" and the document reports history fixed
+	// over a run the chain never recorded, which is a green banner for the emptiest case there is.
 	for _, res := range results {
+		if cover == 0 {
+			break
+		}
 		if !res.Reached {
 			in.AnchorProblems = append(in.AnchorProblems, res.Problem)
 			continue
@@ -297,6 +306,9 @@ type view struct {
 	AnchorProblems []string
 	// ReceiptMissing is true when the chain no longer holds the run's creation entry.
 	ReceiptMissing bool
+	// NoReceipt is true when no recorded request created this run, as for a scheduled run or one
+	// created before receipts were kept.
+	NoReceipt bool
 	// ChainCount is the whole chain's entry count.
 	ChainCount int
 	// Receipt is the chain head's seq:link at collection.
@@ -331,6 +343,11 @@ func Render(in *Input) ([]byte, error) {
 		v.Entries = append(v.Entries, launchRow)
 	}
 	v.ReceiptMissing = in.ReceiptMissing
+	// Silence reads as an omission in an evidence document, so the two reasons a launch row is
+	// absent are distinguished: no request authorized this run, or the entry that did is gone.
+	if in.Launch == nil && !in.ReceiptMissing {
+		v.NoReceipt = true
+	}
 	for _, e := range in.Entries {
 		row := entryRow{
 			Seq: e.Seq, At: e.At.UTC().Format(time.RFC3339), Actor: e.Actor,

@@ -140,7 +140,7 @@
 </tr>
 <tr>
 <td>Launch receipts</td>
-<td>Every run records the <code>seq:link</code> of the chain entry that authorized its creation, so who asked for a run is redeemable evidence rather than a field the server asserts. A creation entry the chain can no longer produce is reported.</td>
+<td>A run created by a recorded request, whether an API launch or a webhook fire, records the <code>seq:link</code> of the chain entry that authorized it, so who asked is redeemable evidence rather than a field the server asserts. A creation entry the chain can no longer produce is reported. A run started by the scheduler, or created before this release, carries none and its dossier says so plainly rather than implying one was lost.</td>
 </tr>
 <tr>
 <td>Run dossier</td>

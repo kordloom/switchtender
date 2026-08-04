@@ -216,6 +216,14 @@ function wireRunDownloads(runId) {
 				const text = await (await fetchAuthed("/runs/" + runId + "/evidence")).text();
 				downloadBlob("switchtender-" + runId + "-evidence.html", "text/html", text);
 			} catch (err) {
+				// A token session carries no stored role, so the control cannot know in advance
+				// that the server will refuse. Saying which rule refused, and retiring the button,
+				// beats leaving a control that fails the same way on every click.
+				if (/forbidden/i.test(err.message)) {
+					exportEvidence.hidden = true;
+					setStatus("Evidence quotes the audit trail, so it is admin only on this server.");
+					return;
+				}
 				setStatus("Could not export the evidence: " + err.message);
 			}
 		});

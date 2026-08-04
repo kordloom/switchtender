@@ -90,6 +90,9 @@ func runWitness(cmd *cobra.Command, _ []string) error {
 		witnessServer, witnessState, id.KeyID())
 
 	client := &http.Client{Timeout: 30 * time.Second}
+	// blind tracks whether the last check failed, so an outage pages on its edges rather than on
+	// every poll for as long as it lasts.
+	blind := false
 	for {
 		n, err := witnessCheckOnce(cmd.Context(), client, id)
 		if witnessOnce {
@@ -105,10 +108,22 @@ func runWitness(cmd *cobra.Command, _ []string) error {
 			// A witness that cannot check is not a witness. Logging to a stream nobody reads and
 			// looping forever is the failure mode where the process is up, the operator believes
 			// they are covered, and a truncation goes unobserved, so the channel hears about it.
+			//
+			// It hears once per outage, not once per poll. A page every minute all night for one
+			// unreachable server trains the reader to mute the channel the real finding arrives on.
 			fmt.Fprintln(os.Stderr, "witness: "+err.Error())
+			if !blind {
+				blind = true
+				alertWebhook(cmd.Context(), client, witness.Finding{
+					Kind:   "witness_blind",
+					Detail: "the witness could not check this server: " + err.Error(),
+				})
+			}
+		} else if blind {
+			blind = false
 			alertWebhook(cmd.Context(), client, witness.Finding{
-				Kind:   "witness_blind",
-				Detail: "the witness could not check this server: " + err.Error(),
+				Kind:   "witness_seeing",
+				Detail: "the witness can check this server again",
 			})
 		}
 		select {

@@ -190,3 +190,34 @@ func TestLoadRefusesACheckpointSignedByAnotherKey(t *testing.T) {
 			"replaced state file wipes the memory a truncation would have been caught by")
 	}
 }
+
+func TestCheckAcceptsTheSameServerSpelledWithATrailingSlash(t *testing.T) {
+	t.Parallel()
+	now := time.Now()
+	first, _, _ := Check(nil, "https://st.example", []Beat{beat(1, 10, "aa")}, now)
+	// The fetch normalizes the base URL, so refusing this spelling blinds the witness forever
+	// while it reports itself healthy.
+	_, _, err := Check(first, "https://st.example/", []Beat{beat(1, 10, "aa"), beat(2, 20, "bb")}, now)
+	if err != nil {
+		t.Fatalf("Check() refused the same server spelled with a trailing slash: %v", err)
+	}
+}
+
+func TestCheckDoesNotAdoptAHeadBuiltOnARewrite(t *testing.T) {
+	t.Parallel()
+	now := time.Now()
+	first, _, _ := Check(nil, "s", []Beat{beat(1, 10, "aa"), beat(2, 20, "GENUINE")}, now)
+	// Beat 2 is rewritten and beat 3 is appended on top of the rewritten history. Beat 3 looks
+	// new, but every beat after a rewrite belongs to the forged chain.
+	next, findings, err := Check(first, "s",
+		[]Beat{beat(1, 10, "aa"), beat(2, 20, "FORGED"), beat(3, 30, "onForged")}, now)
+	if err != nil {
+		t.Fatalf("Check() error = %v", err)
+	}
+	if len(findings) != 1 || findings[0].Kind != "rewritten_beat" {
+		t.Fatalf("findings = %v, want the rewrite reported", findings)
+	}
+	if next.LastHead == "onForged" {
+		t.Error("the witness signed a head built on the rewrite into its own testimony")
+	}
+}

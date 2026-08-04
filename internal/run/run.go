@@ -547,17 +547,7 @@ func (r *Run) ExecutionOptions() []SubmitOption {
 	if r.Image != "" {
 		opts = append(opts, WithImage(r.Image, r.PullCredentialID))
 	}
-	if r.AuditReceipt != "" {
-		// A shard or step was created by the same recorded request as its parent, so it points at
-		// the same chain entry. Without this a child's evidence loses the record of who asked.
-		opts = append(opts, WithAuditReceiptOption(r.AuditReceipt))
-	}
 	return opts
-}
-
-// WithAuditReceiptOption records which chain entry authorized the run's creation.
-func WithAuditReceiptOption(receipt string) SubmitOption {
-	return func(r *Run) { r.AuditReceipt = receipt }
 }
 
 // WithIdempotencyKey dedupes the submission under key so a retried submit returns the original run
