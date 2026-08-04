@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,13 +20,25 @@ import (
 	"github.com/kordloom/switchtender/internal/run"
 )
 
+// stamp is the time layout in a pack's name. It is precise to the second because the cadence can be
+// as short as an hour, and a name coarser than the cadence makes two periods the same file, so the
+// second silently replaces the first.
+const stamp = "20060102T150405Z"
+
+// namePrefix and nameSuffix bracket the period a pack covers.
+const (
+	namePrefix = "change-register-"
+	nameMiddle = "-to-"
+	nameSuffix = ".html"
+)
+
 // Emitter writes a change register covering each elapsed period.
 type Emitter struct {
 	// runs reads the period's runs.
 	runs run.Store
 	// audits reads the chain the register is drawn from and verified against.
 	audits audit.Store
-	// dir is where packs are written.
+	// dir is where packs are written, and is also where the emitter reads its own progress from.
 	dir string
 	// cadence is how long each pack covers and how often one is written.
 	cadence time.Duration
@@ -33,6 +47,8 @@ type Emitter struct {
 	// notify, when set, is called with the path of each pack written, so an operator hears about
 	// it through whatever channel they already use.
 	notify func(path string, from, to time.Time)
+	// now reads the clock, replaced in tests.
+	now func() time.Time
 	// ctx and cancel stop the loop.
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -49,13 +65,21 @@ func WithNotify(fn func(path string, from, to time.Time)) Option {
 	return func(e *Emitter) { e.notify = fn }
 }
 
-// NewEmitter returns an emitter writing a pack per cadence into dir. It panics on a nil store or a
-// cadence under an hour, both of which are programming errors: a register covering minutes is not
-// the artifact this exists to produce.
+// WithClock replaces the clock, so a test can advance periods without waiting for them.
+func WithClock(now func() time.Time) Option {
+	return func(e *Emitter) { e.now = now }
+}
+
+// NewEmitter returns an emitter writing a pack per cadence into dir. It panics on a nil store, an
+// empty directory, or a cadence under an hour, all of which are programming errors: a register
+// covering minutes is not the artifact this exists to produce.
 func NewEmitter(runs run.Store, audits audit.Store, dir string, cadence time.Duration,
 	log *zap.Logger, opts ...Option) *Emitter {
 	if runs == nil || audits == nil {
 		panic("evidence: run and audit stores required")
+	}
+	if dir == "" {
+		panic("evidence: directory required")
 	}
 	if cadence < time.Hour {
 		panic("evidence: cadence must be at least an hour")
@@ -65,47 +89,128 @@ func NewEmitter(runs run.Store, audits audit.Store, dir string, cadence time.Dur
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	e := &Emitter{runs: runs, audits: audits, dir: dir, cadence: cadence, log: log,
-		ctx: ctx, cancel: cancel}
+		now: time.Now, ctx: ctx, cancel: cancel}
 	for _, opt := range opts {
 		opt(e)
 	}
 	return e
 }
 
-// Start launches the loop, writing a pack per cadence until Close.
+// Start launches the loop and returns an error when the directory cannot be used.
 //
-// It does not write one immediately. A pack covers a period, and a restart is not the end of one:
-// emitting on every boot would fill the directory with overlapping fragments during a deploy and
-// make the archive read as though changes happened in periods that never elapsed.
-func (e *Emitter) Start() {
+// The directory is checked here rather than at the first tick, because with the documented
+// quarterly cadence the first tick is three months after the misconfiguration, and the startup log
+// would have claimed the archive was accumulating the whole time.
+//
+// Progress lives in the archive rather than in memory. The emitter resumes from the end of the
+// newest pack it finds, so a restart does not reset the period, and a server restarted more often
+// than its cadence still emits. That also means a failed write cannot be skipped past: nothing
+// advanced, so the next attempt covers the same period plus what followed it.
+func (e *Emitter) Start() error {
+	if err := os.MkdirAll(e.dir, 0o750); err != nil {
+		return fmt.Errorf("evidence directory: %w", err)
+	}
 	e.wg.Go(func() {
-		ticker := time.NewTicker(e.cadence)
+		// A short tick relative to the cadence, so a period that became due while the process was
+		// down is picked up promptly after a restart rather than a whole cadence later.
+		interval := e.cadence / 10
+		if interval < time.Minute {
+			interval = time.Minute
+		}
+		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
-		last := time.Now()
+		e.emitDue()
 		for {
 			select {
 			case <-e.ctx.Done():
 				return
-			case now := <-ticker.C:
-				if err := e.Emit(last, now); err != nil {
-					e.log.Error("evidence: write pack: " + err.Error())
-				}
-				last = now
+			case <-ticker.C:
+				e.emitDue()
 			}
 		}
 	})
+	return nil
 }
 
-// Emit writes one pack covering from until to, and returns its path. A failure is returned rather
-// than swallowed: an evidence archive with a silent hole in it is worse than one that is loudly
-// incomplete, because only the second gets fixed.
-func (e *Emitter) Emit(from, to time.Time) error {
-	if e.dir != "" {
-		if err := os.MkdirAll(e.dir, 0o750); err != nil {
-			return fmt.Errorf("evidence directory: %w", err)
+// emitDue writes a pack when a full cadence has elapsed since the archive's newest one.
+func (e *Emitter) emitDue() {
+	now := e.now()
+	last, err := e.resume(now)
+	if err != nil {
+		e.log.Error("evidence: read archive: " + err.Error())
+		return
+	}
+	if now.Sub(last) < e.cadence {
+		return
+	}
+	if err := e.Emit(e.ctx, last, now); err != nil {
+		// Nothing advances on failure, so the next attempt covers this period again. The archive
+		// is the bookkeeping, and it only moves when a pack actually lands.
+		e.log.Error("evidence: write pack: " + err.Error())
+	}
+}
+
+// resume returns the end of the newest pack in the archive, or now when the archive is empty, which
+// starts the first period from the moment the feature was switched on rather than from the epoch.
+func (e *Emitter) resume(now time.Time) (time.Time, error) {
+	entries, err := os.ReadDir(e.dir)
+	if err != nil {
+		return time.Time{}, err
+	}
+	var ends []time.Time
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if _, to, ok := parsePeriod(entry.Name()); ok {
+			ends = append(ends, to)
 		}
 	}
-	in, err := dossier.CollectRegister(e.ctx, e.runs, e.audits, from, to, time.Now())
+	if len(ends) == 0 {
+		return now, nil
+	}
+	sort.Slice(ends, func(i, j int) bool { return ends[i].Before(ends[j]) })
+	return ends[len(ends)-1], nil
+}
+
+// parsePeriod reads the period a pack name covers, reporting whether the name is one of ours.
+func parsePeriod(name string) (from, to time.Time, ok bool) {
+	if !strings.HasPrefix(name, namePrefix) || !strings.HasSuffix(name, nameSuffix) {
+		return time.Time{}, time.Time{}, false
+	}
+	body := strings.TrimSuffix(strings.TrimPrefix(name, namePrefix), nameSuffix)
+	parts := strings.Split(body, nameMiddle)
+	if len(parts) != 2 {
+		return time.Time{}, time.Time{}, false
+	}
+	f, err := time.Parse(stamp, parts[0])
+	if err != nil {
+		return time.Time{}, time.Time{}, false
+	}
+	t, err := time.Parse(stamp, parts[1])
+	if err != nil {
+		return time.Time{}, time.Time{}, false
+	}
+	return f, t, true
+}
+
+// packName is the file a period is written to. Two periods never share a name, so a pack never
+// replaces one already in the archive and a missing period is a missing file.
+func packName(from, to time.Time) string {
+	return namePrefix + from.UTC().Format(stamp) + nameMiddle + to.UTC().Format(stamp) + nameSuffix
+}
+
+// Emit writes one pack covering from until to. A failure is returned rather than swallowed: an
+// evidence archive with a silent hole in it is worse than one that is loudly incomplete, because
+// only the second gets fixed.
+//
+// It takes its own context rather than using the emitter's, so a caller generating a pack by hand
+// is not canceled by an unrelated shutdown, and so Emit stays usable after Close.
+func (e *Emitter) Emit(ctx context.Context, from, to time.Time) error {
+	if err := os.MkdirAll(e.dir, 0o750); err != nil {
+		return fmt.Errorf("evidence directory: %w", err)
+	}
+	in, err := dossier.CollectRegister(ctx, e.runs, e.audits, from, to, e.now())
 	if err != nil {
 		return fmt.Errorf("collect register: %w", err)
 	}
@@ -113,12 +218,15 @@ func (e *Emitter) Emit(from, to time.Time) error {
 	if err != nil {
 		return fmt.Errorf("render register: %w", err)
 	}
-	// Named by the period it covers, so an archive sorts chronologically and a gap is visible as a
-	// missing file rather than having to be inferred from contents.
-	name := fmt.Sprintf("change-register-%s-to-%s.html",
-		from.UTC().Format("20060102"), to.UTC().Format("20060102"))
-	path := filepath.Join(e.dir, name)
-	if err := os.WriteFile(path, doc, 0o600); err != nil {
+	path := filepath.Join(e.dir, packName(from, to))
+	// Written whole or not at all. A pack truncated by a crash or a full disk reads as a present
+	// period, which is the one way an archive lies without anything reporting it.
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, doc, 0o600); err != nil {
+		return fmt.Errorf("write pack: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
 		return fmt.Errorf("write pack: %w", err)
 	}
 	e.log.Info("evidence: wrote change register",

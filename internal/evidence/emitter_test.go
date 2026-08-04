@@ -12,7 +12,7 @@ import (
 	"github.com/kordloom/switchtender/internal/run"
 )
 
-// seedPeriod stores one run inside the period and one outside it.
+// seedPeriod stores one run inside the period and one long before it.
 func seedPeriod(t *testing.T) (run.Store, audit.Store, time.Time) {
 	t.Helper()
 	ctx := context.Background()
@@ -47,11 +47,10 @@ func TestEmitWritesThePeriodPack(t *testing.T) {
 	defer e.Close()
 
 	from, to := base.Add(-time.Hour), base.Add(24*time.Hour)
-	if err := e.Emit(from, to); err != nil {
+	if err := e.Emit(context.Background(), from, to); err != nil {
 		t.Fatalf("Emit() error = %v", err)
 	}
-	// Named for the period it covers, so a missing period is a missing file.
-	want := filepath.Join(dir, "change-register-20260701-to-20260702.html")
+	want := filepath.Join(dir, packName(from, to))
 	if gotPath != want {
 		t.Errorf("notified path = %q, want %q", gotPath, want)
 	}
@@ -71,35 +70,163 @@ func TestEmitWritesThePeriodPack(t *testing.T) {
 	}
 }
 
-func TestEmitReturnsFailureRatherThanLeavingASilentHole(t *testing.T) {
+func TestTwoPeriodsInOneDayDoNotShareAFile(t *testing.T) {
 	t.Parallel()
 	runs, audits, base := seedPeriod(t)
-	// A directory that cannot be created: an archive with an unreported gap is worse than one
-	// that is loudly incomplete, because only the second gets fixed.
+	dir := t.TempDir()
+	e := NewEmitter(runs, audits, dir, time.Hour, nil)
+	defer e.Close()
+
+	// A cadence shorter than a day is allowed, so a name at day granularity would make the second
+	// period silently replace the first and leave an archive that looks complete and is not.
+	for _, p := range [][2]time.Time{
+		{base, base.Add(6 * time.Hour)},
+		{base.Add(6 * time.Hour), base.Add(12 * time.Hour)},
+		{base.Add(12 * time.Hour), base.Add(18 * time.Hour)},
+	} {
+		if err := e.Emit(context.Background(), p[0], p[1]); err != nil {
+			t.Fatalf("Emit() error = %v", err)
+		}
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir() error = %v", err)
+	}
+	if len(entries) != 3 {
+		t.Errorf("archive holds %d packs, want 3: a period overwrote another", len(entries))
+	}
+}
+
+func TestProgressResumesFromTheArchiveNotFromMemory(t *testing.T) {
+	t.Parallel()
+	runs, audits, base := seedPeriod(t)
+	dir := t.TempDir()
+	e := NewEmitter(runs, audits, dir, time.Hour, nil)
+	defer e.Close()
+
+	// A pack already in the archive is where the next period starts. Keeping this only in memory
+	// meant a server restarted more often than its cadence never emitted at all.
+	from, to := base, base.Add(time.Hour)
+	if err := e.Emit(context.Background(), from, to); err != nil {
+		t.Fatalf("Emit() error = %v", err)
+	}
+	resumed, err := e.resume(base.Add(48 * time.Hour))
+	if err != nil {
+		t.Fatalf("resume() error = %v", err)
+	}
+	if !resumed.Equal(to.UTC()) {
+		t.Errorf("resumed at %s, want the end of the newest pack %s", resumed, to.UTC())
+	}
+
+	// An empty archive starts the first period now rather than at the epoch.
+	fresh := NewEmitter(runs, audits, t.TempDir(), time.Hour, nil)
+	defer fresh.Close()
+	now := base.Add(72 * time.Hour)
+	if got, err := fresh.resume(now); err != nil || !got.Equal(now) {
+		t.Errorf("resume(empty) = %s, %v, want %s", got, err, now)
+	}
+}
+
+func TestAFailedPeriodIsCoveredByTheNextAttempt(t *testing.T) {
+	t.Parallel()
+	runs, audits, base := seedPeriod(t)
+	dir := t.TempDir()
+	e := NewEmitter(runs, audits, dir, time.Hour, nil)
+	defer e.Close()
+
+	// One pack lands, then two cadences pass with nothing written. Because progress lives in the
+	// archive, the next attempt covers the whole unwritten span rather than only the last cadence.
+	if err := e.Emit(context.Background(), base, base.Add(time.Hour)); err != nil {
+		t.Fatalf("Emit() error = %v", err)
+	}
+	clock := base.Add(4 * time.Hour)
+	last, err := e.resume(clock)
+	if err != nil {
+		t.Fatalf("resume() error = %v", err)
+	}
+	if clock.Sub(last) != 3*time.Hour {
+		t.Errorf("next period spans %s, want the 3h since the last pack so nothing is skipped",
+			clock.Sub(last))
+	}
+}
+
+func TestEmitNamesTheDirectoryItCouldNotUse(t *testing.T) {
+	t.Parallel()
+	runs, audits, base := seedPeriod(t)
 	file := filepath.Join(t.TempDir(), "not-a-dir")
 	if err := os.WriteFile(file, []byte("x"), 0o600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 	e := NewEmitter(runs, audits, filepath.Join(file, "packs"), time.Hour, nil)
 	defer e.Close()
-	err := e.Emit(base, base.Add(time.Hour))
+	err := e.Emit(context.Background(), base, base.Add(time.Hour))
 	if err == nil {
 		t.Fatal("Emit() reported success while writing nothing")
 	}
-	// The message names the directory, so an operator reading it fixes the right thing rather
-	// than working backwards from a path deep inside a filename.
 	if !strings.Contains(err.Error(), "evidence directory") {
 		t.Errorf("error = %q, want it to name the directory that could not be made", err)
 	}
 }
 
-func TestNewEmitterRefusesACadenceTooShortToCoverAPeriod(t *testing.T) {
+func TestStartRefusesAnUnusableDirectoryImmediately(t *testing.T) {
 	t.Parallel()
 	runs, audits, _ := seedPeriod(t)
-	defer func() {
-		if recover() == nil {
-			t.Error("NewEmitter accepted a cadence that cannot produce a period register")
-		}
-	}()
-	NewEmitter(runs, audits, t.TempDir(), time.Minute, nil)
+	file := filepath.Join(t.TempDir(), "not-a-dir")
+	if err := os.WriteFile(file, []byte("x"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	// Checked at start rather than at the first tick, which with a quarterly cadence is three
+	// months after the misconfiguration, with the startup log claiming an archive was accruing.
+	e := NewEmitter(runs, audits, filepath.Join(file, "packs"), time.Hour, nil)
+	defer e.Close()
+	if err := e.Start(); err == nil {
+		t.Fatal("Start() accepted a directory it cannot write to")
+	}
+}
+
+func TestEmitOutlivesClose(t *testing.T) {
+	t.Parallel()
+	runs, audits, base := seedPeriod(t)
+	e := NewEmitter(runs, audits, t.TempDir(), time.Hour, nil)
+	e.Close()
+	// A pack generated by hand is not the loop's, so a shutdown must not abort it.
+	if err := e.Emit(context.Background(), base, base.Add(time.Hour)); err != nil {
+		t.Errorf("Emit() after Close error = %v, want a pack to still be writable", err)
+	}
+}
+
+func TestNewEmitterRefusesConfigurationThatCannotWork(t *testing.T) {
+	t.Parallel()
+	runs, audits, _ := seedPeriod(t)
+	for _, tc := range []struct {
+		Name    string
+		Dir     string
+		Cadence time.Duration
+	}{
+		{"cadence too short to cover a period", t.TempDir(), time.Minute},
+		{"no directory to write into", "", time.Hour},
+	} {
+		t.Run(tc.Name, func(t *testing.T) {
+			defer func() {
+				if recover() == nil {
+					t.Errorf("NewEmitter accepted %s", tc.Name)
+				}
+			}()
+			NewEmitter(runs, audits, tc.Dir, tc.Cadence, nil)
+		})
+	}
+}
+
+func TestPackNameRoundTripsItsPeriod(t *testing.T) {
+	t.Parallel()
+	from := time.Date(2026, 7, 1, 6, 30, 0, 0, time.UTC)
+	to := from.Add(6 * time.Hour)
+	gotFrom, gotTo, ok := parsePeriod(packName(from, to))
+	if !ok || !gotFrom.Equal(from) || !gotTo.Equal(to) {
+		t.Errorf("parsePeriod(packName(...)) = %s, %s, %v, want %s, %s, true",
+			gotFrom, gotTo, ok, from, to)
+	}
+	if _, _, ok := parsePeriod("notes.txt"); ok {
+		t.Error("parsePeriod accepted a file that is not a pack")
+	}
 }

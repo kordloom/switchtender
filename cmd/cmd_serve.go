@@ -874,6 +874,11 @@ func runServe(cmd *cobra.Command, _ []string) error {
 
 	// The evidence a review samples from is produced on a cadence rather than on the day it is
 	// asked for. A pack nobody generated is the same as no pack when an auditor asks.
+	// A negative cadence used to pass the pairing check and then fall through the positive guard,
+	// so the feature was silently off while the flags said it was on.
+	if evidenceCadence < 0 {
+		return fmt.Errorf("--evidence-cadence must be positive, got %s", evidenceCadence)
+	}
 	if (evidenceDir == "") != (evidenceCadence == 0) {
 		return fmt.Errorf("--evidence-dir and --evidence-cadence are set together; " +
 			"a directory with no cadence writes nothing and a cadence with no directory has " +
@@ -888,7 +893,9 @@ func runServe(cmd *cobra.Command, _ []string) error {
 				log.Info("evidence pack ready", zap.String("path", path),
 					zap.Time("from", from), zap.Time("to", to))
 			}))
-		packs.Start()
+		if err := packs.Start(); err != nil {
+			return err
+		}
 		defer packs.Close()
 		log.Info("periodic change registers enabled",
 			zap.String("dir", evidenceDir), zap.Duration("cadence", evidenceCadence))
