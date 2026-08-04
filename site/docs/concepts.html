@@ -126,6 +126,16 @@ afterwards and is checked offline by any verifier, with no network and no trust 
 a chain that has quietly lost its tail no longer reaches its anchor and says so. Anchor on a
 schedule. An anchor bounds how much history can vanish unnoticed to whatever happened since the last
 one.</p>
+<p><strong>Evidence comes out as documents, not screenshots.</strong> <code>switchtender audit run &lt;id&gt;</code> emits one
+run's dossier: what ran, its risk grade, who approved it, what happened on each host, and the
+receipts and anchors behind all of it. <code>switchtender audit report --from --to</code> renders the period's
+change register, the sample a SOC 2 CC8.1 or ISO/IEC 27001 A.8.32 review asks for. Both are
+self-contained HTML that a reviewer reads without tooling and checks against the live chain.</p>
+<p><strong>A witness remembers what the server can no longer take back.</strong> <code>switchtender witness</code>, run on a
+machine the server's operator does not control, polls the public beat feed, keeps a signed
+checkpoint of what it saw, and raises a finding when a beat goes missing, a witnessed beat comes
+back rewritten, or the head regresses. Its memory is first write wins, so a rewrite is reported on
+every watch.</p>
 <p><strong>Receipts make an omission detectable by the party it happened to.</strong> Every mutation returns an
 <code>Audit-Receipt: seq:link</code> header naming where it was recorded. Keep them. <code>switchtender audit receipt 41:9f2c...</code> confirms the chain still holds that exact link at that exact position, and a
 server that omitted the entry cannot produce a chain containing the receipt.</p>

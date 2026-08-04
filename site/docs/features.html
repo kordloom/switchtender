@@ -139,6 +139,18 @@
 <td><code>switchtender audit report</code> renders a signed export into a self-contained HTML compliance report, verifying it offline in the same pass, so a vendor-security or SOC 2 reviewer reads the verdict and re-verifies it against the export with no tooling.</td>
 </tr>
 <tr>
+<td>Run dossier</td>
+<td><code>switchtender audit run &lt;id&gt;</code>, or the run page's Evidence button, emits one self-contained document tying the run's spec, risk grade, approval decisions, per-host outcomes, chain receipts, and covering anchors together, so an auditor's sample request is answered in one export.</td>
+</tr>
+<tr>
+<td>Change register</td>
+<td><code>switchtender audit report --from --to</code>, or the audit page's Evidence pack button, renders every change in the period with its actor, chain-recorded decision, risk grade, and outcome. That is the change-management sample a SOC 2 CC8.1 or ISO/IEC 27001 A.8.32 review asks for.</td>
+</tr>
+<tr>
+<td>Chain witness</td>
+<td><code>switchtender witness</code> watches the public beat feed from another machine, remembers what it saw in a signed checkpoint, and raises a finding on a missing beat, a rewritten beat, or a head regression, so an insider with database access cannot silently truncate history.</td>
+</tr>
+<tr>
 <td>Inventories</td>
 <td>Stored inventories referenced by id, materialized on whichever executor runs the play.</td>
 </tr>
