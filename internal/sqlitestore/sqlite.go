@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	sqlite "modernc.org/sqlite"
@@ -373,6 +374,25 @@ func (d *splitDB) Close() error {
 type store struct {
 	// db is the open database handle.
 	db *splitDB
+	// countsMu guards countsCache and countsGen.
+	countsMu sync.Mutex
+	// countsCache memoizes the last RunStatusCounts tally, nil after a write invalidated it. The
+	// runs page asks on every request while the tally only changes on a run write, and this store
+	// is the process's single writer, so the cache is exactly as fresh as the table. Every method
+	// that inserts a run, moves a status, or purges rows calls invalidateRunCounts.
+	countsCache map[run.Status]int
+	// countsGen rises on every invalidation, so a tally computed before a concurrent write is
+	// never installed over that write's invalidation.
+	countsGen uint64
+}
+
+// invalidateRunCounts drops the memoized status tally after a write that can change it. A claim
+// or a cancel-request flag change does not call this, because the tally reads neither.
+func (s *store) invalidateRunCounts() {
+	s.countsMu.Lock()
+	s.countsCache = nil
+	s.countsGen++
+	s.countsMu.Unlock()
 }
 
 // scanner is the read side shared by sql.Row and sql.Rows.
@@ -864,6 +884,7 @@ ON CONFLICT(id) DO UPDATE SET
 		}
 		return fmt.Errorf("save run: %w", err)
 	}
+	s.invalidateRunCounts()
 	return nil
 }
 
@@ -986,8 +1007,20 @@ func runSearchClause(query string) (string, []any) {
 	return "(" + strings.Join(parts, " OR ") + ")", args
 }
 
-// RunStatusCounts tallies top-level runs by status with a single grouped query.
+// RunStatusCounts tallies top-level runs by status, serving a memoized tally until a run write
+// invalidates it, so the per-request cost stops growing with history.
 func (s *store) RunStatusCounts(ctx context.Context) (map[run.Status]int, error) {
+	s.countsMu.Lock()
+	if s.countsCache != nil {
+		out := make(map[run.Status]int, len(s.countsCache))
+		for k, v := range s.countsCache {
+			out[k] = v
+		}
+		s.countsMu.Unlock()
+		return out, nil
+	}
+	gen := s.countsGen
+	s.countsMu.Unlock()
 	rows, err := s.db.QueryContext(ctx,
 		"SELECT status, COUNT(*) FROM runs WHERE parent_id IS NULL GROUP BY status")
 	if err != nil {
@@ -1006,6 +1039,17 @@ func (s *store) RunStatusCounts(ctx context.Context) (map[run.Status]int, error)
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("run status counts: %w", err)
 	}
+	// Cache a private copy: the returned map belongs to the caller, who may mutate it. A tally
+	// raced by a write is discarded, or it would overwrite that write's invalidation and stick.
+	cached := make(map[run.Status]int, len(out))
+	for k, v := range out {
+		cached[k] = v
+	}
+	s.countsMu.Lock()
+	if s.countsGen == gen {
+		s.countsCache = cached
+	}
+	s.countsMu.Unlock()
 	return out, nil
 }
 
@@ -2067,6 +2111,9 @@ WHERE status='running' AND cancel_requested=0 AND parent_id IS NOT NULL
 	if err := tx.Commit(); err != nil {
 		return 0, fmt.Errorf("reclaim stale: %w", err)
 	}
+	if requeued+interrupted+abandoned+orphaned > 0 {
+		s.invalidateRunCounts()
+	}
 	return int(requeued + interrupted + abandoned + orphaned + stopping), nil
 }
 
@@ -2099,6 +2146,9 @@ WHERE id=? AND claimed_by='' AND status IN ('pending', 'pending_approval')`,
 	if err != nil {
 		return false, fmt.Errorf("cancel pending: %w", err)
 	}
+	if n > 0 {
+		s.invalidateRunCounts()
+	}
 	return n > 0, nil
 }
 
@@ -2124,6 +2174,9 @@ WHERE id=? AND status=? AND cancel_requested=0`,
 	if err != nil {
 		return false, fmt.Errorf("transition status and claim: %w", err)
 	}
+	if n > 0 {
+		s.invalidateRunCounts()
+	}
 	return n > 0, nil
 }
 
@@ -2137,6 +2190,9 @@ func (s *store) TransitionStatus(ctx context.Context, id string, from, to run.St
 	n, err := res.RowsAffected()
 	if err != nil {
 		return false, fmt.Errorf("transition status: %w", err)
+	}
+	if n > 0 {
+		s.invalidateRunCounts()
 	}
 	return n > 0, nil
 }

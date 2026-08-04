@@ -62,6 +62,9 @@ DELETE FROM runs WHERE id IN (
 		}
 		deleted += int(n)
 		if int(n) < purgeBatch {
+			if deleted > 0 {
+				s.invalidateRunCounts()
+			}
 			return deleted, nil
 		}
 	}
