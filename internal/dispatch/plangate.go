@@ -92,8 +92,11 @@ func (d *Dispatcher) proposeApply(
 		run.WithDryRun(false),
 		run.WithProposedFrom(r.ID),
 	}
-	if policy.PlanExceeds(policies, r, destroys) {
-		opts = append(opts, run.WithRequireApproval(true))
+	// A plan held for destroying too much records the rule and the count, since "why did this
+	// wait" is answered by the threshold it crossed, not merely by the rule's name.
+	if p := policy.Exceeding(policies, r, destroys); p != nil {
+		opts = append(opts, run.WithRequireApproval(true), run.WithHeldByPolicy(fmt.Sprintf(
+			"%s (plan destroys %d, limit %d)", p.Label(), destroys, p.MaxDestroy)))
 	}
 	if r.ProjectID != "" {
 		opts = append(opts, run.WithProject(r.ProjectID))

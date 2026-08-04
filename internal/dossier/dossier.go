@@ -482,6 +482,7 @@ func runMeta(r *run.Run) []metaRow {
 	}
 	add("Queue", r.Queue)
 	add("Image", r.Image)
+	add("Held by", r.HeldByPolicy)
 	if r.Risk != nil {
 		add("Risk", strings.TrimSpace(r.Risk.Level+" "+strings.Join(r.Risk.Reasons, "; ")))
 	}

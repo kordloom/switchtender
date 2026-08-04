@@ -206,6 +206,11 @@ type Run struct {
 	// it was machine proposed and is born held for approval, so a person releases it or it never
 	// executes.
 	ProposedFrom string `json:"proposed_from,omitempty"`
+	// HeldByPolicy names the approval rule that held this run, as that rule was named when the hold
+	// happened. It is recorded at the hold rather than looked up later, because a policy can be
+	// renamed or deleted long before anyone reads the evidence, and "which rule stopped this
+	// change" is the question a change-management review asks. Empty when nothing held the run.
+	HeldByPolicy string `json:"held_by_policy,omitempty"`
 	// AuditReceipt is the seq:link of the chain entry that recorded the request which created this
 	// run. The entry is written before the handler runs, at a path naming the template or the
 	// collection rather than the run it goes on to create, so this is the only thing that ties a
@@ -392,6 +397,11 @@ func (r *Run) Clone() *Run {
 
 // SubmitOption customizes a run at submission.
 type SubmitOption func(*Run)
+
+// WithHeldByPolicy records the approval rule that held the run, as it was named at the hold.
+func WithHeldByPolicy(label string) SubmitOption {
+	return func(r *Run) { r.HeldByPolicy = label }
+}
 
 // WithAuditReceiptOf records that this run was set in motion by the request behind receipt, for a
 // run created after that request returned. It is deliberately not part of ExecutionOptions: rerun,

@@ -36,7 +36,14 @@ func (d *Dispatcher) requiresApproval(ctx context.Context, r *run.Run) (bool, er
 		return false, fmt.Errorf("%w: approval policies could not be read, so the run is refused "+
 			"rather than run past a gate that could not be checked: %w", ErrPolicyUnavailable, err)
 	}
-	return policy.Requires(policies, r), nil
+	// The rule that held the run is recorded on it here, while the rule is in hand. Looking it up
+	// when the evidence is read would answer with today's policies rather than the one that
+	// actually stopped the change, and would answer with nothing at all once it is deleted.
+	if p := policy.Requiring(policies, r); p != nil {
+		r.HeldByPolicy = p.Label()
+		return true, nil
+	}
+	return false, nil
 }
 
 // pipelineRequiresApproval reports whether a pipeline must be held, which it must when the parent
@@ -57,11 +64,15 @@ func (d *Dispatcher) pipelineRequiresApproval(ctx context.Context, parent *run.R
 			"refused rather than run past a gate that could not be checked: %w",
 			ErrPolicyUnavailable, err)
 	}
-	if policy.Requires(policies, parent) {
+	if p := policy.Requiring(policies, parent); p != nil {
+		parent.HeldByPolicy = p.Label()
 		return true, nil
 	}
 	for i, step := range steps {
-		if policy.Requires(policies, stepRun(parent, step, i, 0, nil)) {
+		// A pipeline held because one of its steps matches records that rule too: the whole graph
+		// is held, so the evidence has to say which step's rule stopped it.
+		if p := policy.Requiring(policies, stepRun(parent, step, i, 0, nil)); p != nil {
+			parent.HeldByPolicy = p.Label()
 			return true, nil
 		}
 	}

@@ -409,6 +409,7 @@ func testListPage(t *testing.T, store run.Store) {
 		ID: "e", Playbook: "tag.yml", Status: run.StatusRunning, CreatedAt: base.Add(4 * time.Second),
 		Source: "schedule", SourceID: "sch_9", Actor: "night-cron",
 		AuditReceipt: "41:9f2caa",
+		HeldByPolicy: "prod terraform destroy",
 		Labels:       map[string]string{"env": "prod"},
 	}
 	if err := store.Save(ctx, live); err != nil {
@@ -443,6 +444,10 @@ func testListPage(t *testing.T, store run.Store) {
 		t.Fatalf("Get(e) error = %v", err)
 	} else if got.AuditReceipt != "41:9f2caa" {
 		t.Errorf("audit receipt = %q, want it to survive the round trip", got.AuditReceipt)
+	} else if got.HeldByPolicy != "prod terraform destroy" {
+		// The rule that held a run is evidence, and a policy can be renamed or deleted before
+		// anyone reads it, so the name has to survive on the run itself.
+		t.Errorf("held by policy = %q, want it to survive the round trip", got.HeldByPolicy)
 	}
 
 	// The status tally follows a transition immediately: a store may memoize it, but a stale
