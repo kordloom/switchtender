@@ -185,37 +185,51 @@ func signedContent(c *Checkpoint) ([]byte, error) {
 	return json.Marshal(&cp)
 }
 
+// signBytes signs content with the witness identity, returning the hex key and signature. Every
+// document the witness signs, its checkpoints and its attestations, goes through this one
+// envelope, so there is a single answer to what a witness signature means.
+func signBytes(id audit.Identity, content []byte) (publicKey, sig string) {
+	return id.PublicKeyHex(), hex.EncodeToString(ed25519.Sign(id.Private(), content))
+}
+
+// verifyBytes checks an envelope signature over content. subject names the document in errors.
+func verifyBytes(subject, publicKey, sig string, content []byte) error {
+	if sig == "" || publicKey == "" {
+		return fmt.Errorf("%s is unsigned", subject)
+	}
+	pub, err := hex.DecodeString(publicKey)
+	if err != nil || len(pub) != ed25519.PublicKeySize {
+		return fmt.Errorf("%s public key is malformed", subject)
+	}
+	raw, err := hex.DecodeString(sig)
+	if err != nil {
+		return fmt.Errorf("%s signature is malformed", subject)
+	}
+	if !ed25519.Verify(ed25519.PublicKey(pub), content, raw) {
+		return fmt.Errorf("%s signature does not verify; the document was altered", subject)
+	}
+	return nil
+}
+
 // Sign stamps the checkpoint with the witness identity, so a tampered state file is detectable.
 func Sign(c *Checkpoint, id audit.Identity) error {
 	content, err := signedContent(c)
 	if err != nil {
 		return fmt.Errorf("sign checkpoint: %w", err)
 	}
-	c.PublicKey = id.PublicKeyHex()
-	c.Sig = hex.EncodeToString(ed25519.Sign(id.Private(), content))
+	c.PublicKey, c.Sig = signBytes(id, content)
 	return nil
 }
 
 // Verify checks the checkpoint's signature. It reports the signer's hex key so a caller can pin
 // it across restarts.
 func Verify(c *Checkpoint) (publicKey string, err error) {
-	if c.Sig == "" || c.PublicKey == "" {
-		return "", fmt.Errorf("checkpoint is unsigned")
-	}
-	pub, err := hex.DecodeString(c.PublicKey)
-	if err != nil || len(pub) != ed25519.PublicKeySize {
-		return "", fmt.Errorf("checkpoint public key is malformed")
-	}
-	sig, err := hex.DecodeString(c.Sig)
-	if err != nil {
-		return "", fmt.Errorf("checkpoint signature is malformed")
-	}
 	content, err := signedContent(c)
 	if err != nil {
 		return "", fmt.Errorf("verify checkpoint: %w", err)
 	}
-	if !ed25519.Verify(ed25519.PublicKey(pub), content, sig) {
-		return "", fmt.Errorf("checkpoint signature does not verify; the state file was altered")
+	if err := verifyBytes("checkpoint", c.PublicKey, c.Sig, content); err != nil {
+		return "", err
 	}
 	return c.PublicKey, nil
 }

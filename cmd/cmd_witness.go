@@ -90,41 +90,38 @@ func runWitness(cmd *cobra.Command, _ []string) error {
 		witnessServer, witnessState, id.KeyID())
 
 	client := &http.Client{Timeout: 30 * time.Second}
-	// blind tracks whether the last check failed, so an outage pages on its edges rather than on
-	// every poll for as long as it lasts.
-	blind := false
+	watcher := witness.NewWatcher(witnessServer, witnessState, id, client)
+	// The outage edge pages once when checking starts failing and once when it recovers. A page
+	// every minute all night for one unreachable server trains the reader to mute the channel the
+	// real finding arrives on.
+	var edge witness.BlindEdge
+	// In loop mode a persisting condition is reported when it appears, not once per poll; the
+	// repeat delivery an operator mutes is the channel the next real finding arrives on.
+	var delta witness.Delta
 	for {
-		n, err := witnessCheckOnce(cmd.Context(), client, id)
+		findings, err := watcher.CheckOnce(cmd.Context())
 		if witnessOnce {
+			reportFindings(cmd.Context(), client, watcher.Server(), findings)
 			if err != nil {
 				return err
 			}
-			if n > 0 {
-				return fmt.Errorf("%d finding(s); the record disagrees with this witness's memory", n)
+			if len(findings) > 0 {
+				return fmt.Errorf("%d finding(s); the record disagrees with this witness's memory", len(findings))
 			}
 			return nil
 		}
+		if err == nil {
+			findings = delta.Fresh(findings)
+		}
+		reportFindings(cmd.Context(), client, watcher.Server(), findings)
 		if err != nil {
 			// A witness that cannot check is not a witness. Logging to a stream nobody reads and
 			// looping forever is the failure mode where the process is up, the operator believes
 			// they are covered, and a truncation goes unobserved, so the channel hears about it.
-			//
-			// It hears once per outage, not once per poll. A page every minute all night for one
-			// unreachable server trains the reader to mute the channel the real finding arrives on.
 			fmt.Fprintln(os.Stderr, "witness: "+err.Error())
-			if !blind {
-				blind = true
-				alertWebhook(cmd.Context(), client, witness.Finding{
-					Kind:   "witness_blind",
-					Detail: "the witness could not check this server: " + err.Error(),
-				})
-			}
-		} else if blind {
-			blind = false
-			alertWebhook(cmd.Context(), client, witness.Finding{
-				Kind:   "witness_seeing",
-				Detail: "the witness can check this server again",
-			})
+		}
+		if f := edge.Observe(err); f != nil {
+			postWitnessFinding(cmd.Context(), client, witnessWebhook, witnessServer, *f)
 		}
 		select {
 		case <-cmd.Context().Done():
@@ -134,73 +131,28 @@ func runWitness(cmd *cobra.Command, _ []string) error {
 	}
 }
 
-// witnessCheckOnce fetches the feed, holds it against the checkpoint, saves the next checkpoint,
-// and reports every finding. It returns how many findings were raised.
-func witnessCheckOnce(ctx context.Context, client *http.Client, id audit.Identity) (int, error) {
-	// The checkpoint's signer is pinned to this witness. A signature that only checks against the
-	// key inside the same file proves the file is self-consistent, which a forger who generates
-	// their own key satisfies trivially, so pinning is what makes a replaced state file detectable.
-	prev, err := witness.Load(witnessState, id.PublicKeyHex())
-	if err != nil {
-		return 0, err
-	}
-	beats, err := fetchBeats(ctx, client)
-	if err != nil {
-		return 0, fmt.Errorf("fetch beats: %w", err)
-	}
-	next, findings, err := witness.Check(prev, witnessServer, beats, time.Now())
-	if err != nil {
-		return 0, err
-	}
+// reportFindings prints each finding and delivers it to the webhook when one is set.
+func reportFindings(ctx context.Context, client *http.Client, server string, findings []witness.Finding) {
 	for _, f := range findings {
 		fmt.Fprintf(os.Stderr, "witness: FINDING %s: %s\n", f.Kind, f.Detail)
-		alertWebhook(ctx, client, f)
+		postWitnessFinding(ctx, client, witnessWebhook, server, f)
 	}
-	if err := witness.Save(witnessState, next, id); err != nil {
-		return len(findings), err
-	}
-	return len(findings), nil
 }
 
-// fetchBeats reads the unauthenticated beat feed.
-func fetchBeats(ctx context.Context, client *http.Client) ([]witness.Beat, error) {
-	// The limit asked for is the number the witness can remember. Asking for more than that would
-	// serve beats it forgets, and a forgotten beat's rewrite is re-adopted rather than reported.
-	feed := fmt.Sprintf("%s/v1/audit/beats?limit=%d",
-		witness.NormalizeServer(witnessServer), witness.FeedLimit)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, feed, nil)
-	if err != nil {
-		return nil, err
-	}
-	res, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = res.Body.Close() }()
-	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("the feed answered %s", res.Status)
-	}
-	var beats []witness.Beat
-	if err := json.NewDecoder(res.Body).Decode(&beats); err != nil {
-		return nil, fmt.Errorf("parse the feed: %w", err)
-	}
-	return beats, nil
-}
-
-// alertWebhook posts one finding to the configured channel, logging a delivery failure rather
-// than losing the finding, which already went to standard error.
-func alertWebhook(ctx context.Context, client *http.Client, f witness.Finding) {
-	if witnessWebhook == "" {
+// postWitnessFinding posts one finding to the operator's channel, logging a delivery failure
+// rather than losing the finding, which already went to standard error.
+func postWitnessFinding(ctx context.Context, client *http.Client, webhook, server string, f witness.Finding) {
+	if webhook == "" {
 		return
 	}
 	payload, err := json.Marshal(map[string]string{
-		"server": witnessServer, "kind": f.Kind, "detail": f.Detail,
+		"server": server, "kind": f.Kind, "detail": f.Detail,
 		"at": time.Now().UTC().Format(time.RFC3339),
 	})
 	if err != nil {
 		return
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, witnessWebhook, bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, webhook, bytes.NewReader(payload))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "witness: webhook: "+err.Error())
 		return
