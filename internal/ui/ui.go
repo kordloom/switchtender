@@ -114,18 +114,18 @@ func (u *UI) Handler() http.Handler {
 
 // index renders the overview home page.
 func (u *UI) index(w http.ResponseWriter, _ *http.Request) {
-	u.render(w, "overview.html", map[string]any{"ReadOnly": u.readOnly, "AIEnabled": u.aiEnabled})
+	u.render(w, "overview.html", map[string]any{"ReadOnly": u.readOnly, "AIOff": !u.aiEnabled})
 }
 
 // runs renders the run history page.
 func (u *UI) runs(w http.ResponseWriter, _ *http.Request) {
-	u.render(w, "runs.html", map[string]any{"ReadOnly": u.readOnly, "ExtraTools": run.ExtraToolNames()})
+	u.render(w, "runs.html", map[string]any{"ReadOnly": u.readOnly, "AIOff": !u.aiEnabled, "ExtraTools": run.ExtraToolNames()})
 }
 
 // detail renders the run detail page for a single run.
 func (u *UI) detail(w http.ResponseWriter, r *http.Request) {
 	u.render(w, "detail.html", map[string]any{
-		"RunID": r.PathValue("id"), "ReadOnly": u.readOnly, "MatrixCap": u.matrixCap,
+		"RunID": r.PathValue("id"), "ReadOnly": u.readOnly, "AIOff": !u.aiEnabled, "MatrixCap": u.matrixCap,
 	})
 }
 
@@ -217,7 +217,7 @@ func (u *UI) schedules(w http.ResponseWriter, _ *http.Request) {
 // workflows renders the visual workflow editor, where steps are wired into a graph and run as a
 // pipeline.
 func (u *UI) workflows(w http.ResponseWriter, _ *http.Request) {
-	u.render(w, "workflows.html", map[string]any{"ReadOnly": u.readOnly, "ExtraTools": run.ExtraToolNames()})
+	u.render(w, "workflows.html", map[string]any{"ReadOnly": u.readOnly, "AIOff": !u.aiEnabled, "ExtraTools": run.ExtraToolNames()})
 }
 
 // render executes the named template with data.

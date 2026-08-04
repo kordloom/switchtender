@@ -14,6 +14,19 @@ function wirePropose() {
 	panel.hidden = false;
 	const go = document.getElementById("propose-go");
 	const input = document.getElementById("propose-input");
+	// With no AI provider the box would look usable and fail on the first description. Show the
+	// off state plainly instead, the same way the overview's ask panel does.
+	if (aiOff()) {
+		input.disabled = true;
+		input.placeholder = "Advisory AI is off on this server";
+		go.disabled = true;
+		const note = panel.querySelector(".propose-note");
+		const off = aiOffNoticeEl(
+			"Advisory AI is off on this server. Turn it on to propose a run from a description, held for approval.");
+		if (note) note.replaceWith(off);
+		else panel.appendChild(off);
+		return;
+	}
 	go.addEventListener("click", proposeRun);
 	input.addEventListener("keydown", (e) => {
 		if (e.key === "Enter") {

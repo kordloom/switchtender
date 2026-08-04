@@ -302,7 +302,7 @@ function wireAsk() {
 	// When no AI provider is configured the panel would look usable and then fail on the first
 	// question with a line most people miss. Make the off state plain up front instead.
 	const panel = document.getElementById("ask-panel");
-	if (panel && panel.dataset.aiEnabled === "0") {
+	if (panel && aiOff()) {
 		renderAskDisabled(panel, input, go);
 		return;
 	}
@@ -324,16 +324,8 @@ function renderAskDisabled(panel, input, go) {
 	input.placeholder = "Advisory AI is off on this server";
 	go.disabled = true;
 	const note = panel.querySelector(".ask-note");
-	const off = document.createElement("div");
-	off.className = "ask-off";
-	const text = document.createElement("span");
-	text.textContent = "Advisory AI is off on this server. Turn it on to ask questions grounded in your run, health, and drift data. ";
-	const link = document.createElement("a");
-	link.href = "/ui/docs/ai";
-	link.className = "link-arrow";
-	link.textContent = "How to enable Advisory AI";
-	off.appendChild(text);
-	off.appendChild(link);
+	const off = aiOffNoticeEl(
+		"Advisory AI is off on this server. Turn it on to ask questions grounded in your run, health, and drift data.");
 	if (note) note.replaceWith(off);
 	else panel.appendChild(off);
 }

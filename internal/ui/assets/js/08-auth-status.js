@@ -192,6 +192,29 @@ function isReadOnly() {
 	return document.body.dataset.readonly === "true";
 }
 
+// aiOff reports whether the server said advisory AI is off for this page. A page without the
+// marker counts as on, so nothing changes where the server said nothing.
+function aiOff() {
+	return document.body.dataset.aiOff === "true";
+}
+
+// aiOffNoticeEl builds the standard advisory-AI-off notice: the lead sentence, then the link
+// explaining how to turn it on. Every AI surface shows the same notice, so the off state reads
+// the same wherever it is met.
+function aiOffNoticeEl(lead) {
+	const off = document.createElement("div");
+	off.className = "ask-off";
+	const text = document.createElement("span");
+	text.textContent = lead + " ";
+	const link = document.createElement("a");
+	link.href = "/ui/docs/ai";
+	link.className = "link-arrow";
+	link.textContent = "How to enable Advisory AI";
+	off.appendChild(text);
+	off.appendChild(link);
+	return off;
+}
+
 // auditObjectPages maps an id prefix to the page that shows that object, so an entry naming one
 // links to the thing it changed.
 const auditObjectPages = {

@@ -38,6 +38,14 @@ function mountWorkflow() {
 			draftStep();
 		}
 	});
+	// With no AI provider the draft row would look usable and fail on the first description. The
+	// step dialog is tight on space, so the disabled controls carry the message themselves.
+	if (aiOff()) {
+		const draftInput = document.getElementById("wf-step-draft");
+		draftInput.disabled = true;
+		draftInput.placeholder = "Advisory AI is off on this server";
+		document.getElementById("wf-step-draft-go").disabled = true;
+	}
 	document.getElementById("wf-name").addEventListener("input", wfSave);
 	document.getElementById("wf-inventory").addEventListener("input", wfSave);
 	const modal = document.getElementById("wf-step-modal");
