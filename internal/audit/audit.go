@@ -63,6 +63,10 @@ type Store interface {
 	List(ctx context.Context, limit int) ([]*Entry, error)
 	// Chain returns every entry in chain order, oldest first, for verification.
 	Chain(ctx context.Context) ([]*Entry, error)
+	// ChainScan streams every entry in chain order, oldest first, calling fn once per entry, so a
+	// long trail can be verified without materializing it. A non-nil error from fn stops the scan
+	// and is returned. The entry passed to fn is fn's to keep.
+	ChainScan(ctx context.Context, fn func(*Entry) error) error
 }
 
 // NewID returns a random audit entry identifier prefixed with "aud_".
@@ -125,19 +129,12 @@ func Link(prev, e *Entry) {
 // hash does not check out. An entry with no hash breaks the chain, so a blanked entry cannot hide
 // from verification. It requires the slice to start at genesis; use VerifyRange for part of a chain.
 func Verify(entries []*Entry) (ok bool, brokeAt int) {
-	if len(entries) > 0 {
-		// A null entry is a broken chain, not a crash. These slices are decoded from a file handed
-		// over by whoever is being audited, and this is the one command whose entire purpose is
-		// reading one you do not trust. Dereferencing without checking turned a hostile bundle into
-		// a stack trace instead of a verdict.
-		if entries[0] == nil {
-			return false, 1
-		}
-		if entries[0].Seq != 1 || entries[0].PrevHash != "" {
-			return false, 1
-		}
+	v := NewChainScanner(true)
+	for _, e := range entries {
+		v.Feed(e)
 	}
-	return VerifyRange(entries)
+	ok, brokeAt, _ = v.Result()
+	return ok, brokeAt
 }
 
 // VerifyRange walks a contiguous slice of the chain, oldest first, and reports whether it is
@@ -151,24 +148,10 @@ func Verify(entries []*Entry) (ok bool, brokeAt int) {
 // carry no previous link, and any other first entry must carry one. A bundle that gets this wrong
 // is rejected by an independent verifier, which is the worst place to find out.
 func VerifyRange(entries []*Entry) (ok bool, brokeAt int) {
-	var prev *Entry
-	for i, e := range entries {
-		// A null entry fails here rather than panicking, for the same reason Verify checks the
-		// first one: this walks a document produced by the party the record is about.
-		if e == nil {
-			return false, i + 1
-		}
-		if e.Hash == "" || e.Seq < 1 || e.Hash != EntryHash(e) {
-			return false, i + 1
-		}
-		if prev == nil {
-			if (e.Seq == 1) != (e.PrevHash == "") {
-				return false, i + 1
-			}
-		} else if e.Seq != prev.Seq+1 || e.PrevHash != prev.Hash {
-			return false, i + 1
-		}
-		prev = e
+	v := NewChainScanner(false)
+	for _, e := range entries {
+		v.Feed(e)
 	}
-	return true, 0
+	ok, brokeAt, _ = v.Result()
+	return ok, brokeAt
 }

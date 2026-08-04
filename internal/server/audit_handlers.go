@@ -147,25 +147,36 @@ func auditVerifyHandler(store audit.Store, log *zap.Logger) http.HandlerFunc {
 			respondError(w, log, http.StatusNotFound, "audit trail not enabled")
 			return
 		}
-		entries, err := store.Chain(r.Context())
+		// The anchors are read before the walk so both checks ride one streaming pass. The hash
+		// chain answers "was anything altered". It cannot answer "is anything missing from the
+		// end", because dropping the last entries leaves a chain that still verifies. Anchors are
+		// what answer that, and reporting a healthy chain without consulting them was reporting on
+		// half the question while the other half sat unread in the same database.
+		anchors, aerr := anchorsFor(r.Context(), store)
+		if aerr != nil {
+			log.Error("server: read audit anchors: " + aerr.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not read the audit anchors")
+			return
+		}
+		// The chain streams past both scanners one entry at a time, so verifying years of trail
+		// holds one entry in memory rather than all of them, however many clients ask at once.
+		chainScan := audit.NewChainScanner(true)
+		anchorScan := audit.NewAnchorScanner(anchors)
+		err := store.ChainScan(r.Context(), func(e *audit.Entry) error {
+			chainScan.Feed(e)
+			anchorScan.Feed(e)
+			return nil
+		})
 		if err != nil {
 			log.Error("server: chain audit entries: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not read the audit trail")
 			return
 		}
-		ok, brokeAt := audit.Verify(entries)
-		// The hash chain answers "was anything altered". It cannot answer "is anything missing from
-		// the end", because dropping the last entries leaves a chain that still verifies. Anchors
-		// are what answer that, and reporting a healthy chain without consulting them was reporting
-		// on half the question while the other half sat unread in the same database.
-		resp := auditVerifyResponse{OK: ok, Count: len(entries), BrokeAt: brokeAt}
-		if anchors, aerr := anchorsFor(r.Context(), store); aerr != nil {
-			log.Error("server: read audit anchors: " + aerr.Error())
-			respondError(w, log, http.StatusInternalServerError, "could not read the audit anchors")
-			return
-		} else if len(anchors) > 0 {
+		ok, brokeAt, count := chainScan.Result()
+		resp := auditVerifyResponse{OK: ok, Count: count, BrokeAt: brokeAt}
+		if len(anchors) > 0 {
 			resp.Anchored = len(anchors)
-			anchorsOK, results := audit.CheckAnchors(entries, anchors)
+			anchorsOK, results := anchorScan.Results()
 			if !anchorsOK {
 				resp.OK = false
 				for _, res := range results {

@@ -159,7 +159,7 @@ ORDER BY seq DESC`
 // head returns the current chain head, the entry with the highest sequence, or nil when empty. It
 // reads through the given querier so the caller can scope it to the append transaction.
 func (s *auditStore) head(ctx context.Context, q rowQuerier) (*audit.Entry, error) {
-	const query = "SELECT seq, hash FROM audit_entries ORDER BY seq DESC, id DESC LIMIT 1"
+	const query = "SELECT seq, hash FROM audit_entries ORDER BY seq DESC LIMIT 1"
 	var e audit.Entry
 	switch err := q.QueryRowContext(ctx, query).Scan(&e.Seq, &e.Hash); {
 	case errors.Is(err, sql.ErrNoRows):
@@ -181,7 +181,7 @@ func (s *auditStore) SpanBeats(ctx context.Context, limit int) ([]*audit.Entry, 
 		limit = 1
 	}
 	const q = `SELECT id, at, actor, method, path, seq, prev_hash, hash FROM audit_entries
-WHERE actor = $1 AND method = $2 ORDER BY seq DESC, id DESC LIMIT $3`
+WHERE actor = $1 AND method = $2 ORDER BY seq DESC LIMIT $3`
 	rows, err := s.db.QueryContext(ctx, q, audit.SpanActor, audit.SpanMethod, audit.SpanScanLimit(limit))
 	if err != nil {
 		return nil, fmt.Errorf("span beats: %w", err)
@@ -195,7 +195,7 @@ func (s *auditStore) List(ctx context.Context, limit int) ([]*audit.Entry, error
 		limit = 1
 	}
 	const q = `SELECT id, at, actor, method, path, seq, prev_hash, hash FROM audit_entries
-ORDER BY seq DESC, id DESC LIMIT $1`
+ORDER BY seq DESC LIMIT $1`
 	rows, err := s.db.QueryContext(ctx, q, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list audit entries: %w", err)
@@ -206,12 +206,44 @@ ORDER BY seq DESC, id DESC LIMIT $1`
 // Chain returns every entry in chain order, oldest first, for verification.
 func (s *auditStore) Chain(ctx context.Context) ([]*audit.Entry, error) {
 	const q = `SELECT id, at, actor, method, path, seq, prev_hash, hash FROM audit_entries
-ORDER BY seq ASC, id ASC`
+ORDER BY seq ASC`
 	rows, err := s.db.QueryContext(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("chain audit entries: %w", err)
 	}
 	return scanAudit(rows)
+}
+
+// ChainScan streams every entry in chain order, oldest first, one row at a time, so verifying a
+// long trail never materializes it.
+func (s *auditStore) ChainScan(ctx context.Context, fn func(*audit.Entry) error) error {
+	const q = `SELECT id, at, actor, method, path, seq, prev_hash, hash FROM audit_entries
+ORDER BY seq ASC`
+	rows, err := s.db.QueryContext(ctx, q)
+	if err != nil {
+		return fmt.Errorf("chain scan audit entries: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var (
+			e  audit.Entry
+			at string
+		)
+		if err := rows.Scan(&e.ID, &at, &e.Actor, &e.Method, &e.Path,
+			&e.Seq, &e.PrevHash, &e.Hash); err != nil {
+			return fmt.Errorf("chain scan audit entries: %w", err)
+		}
+		if e.At, err = sqlutil.ParseTime(at); err != nil {
+			return fmt.Errorf("chain scan audit entries: %w", err)
+		}
+		if err := fn(&e); err != nil {
+			return err
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("chain scan audit entries: %w", err)
+	}
+	return nil
 }
 
 // scanSpanBeats reads span-marked rows handed back newest first, keeps the first limit well-formed
@@ -290,7 +322,7 @@ func (s *auditStore) Anchors(ctx context.Context, seq int64) ([]*audit.Anchor, e
 		q += " WHERE seq <= $1"
 		args = append(args, seq)
 	}
-	q += " ORDER BY seq ASC, id ASC"
+	q += " ORDER BY seq ASC"
 	rows, err := s.db.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list anchors: %w", err)

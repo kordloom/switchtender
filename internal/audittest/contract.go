@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
+
 	"github.com/kordloom/switchtender/internal/audit"
 )
 
@@ -520,6 +522,39 @@ func testChain(t *testing.T, store audit.Store) {
 	}
 	if ok, at := audit.Verify(chain); !ok {
 		t.Errorf("Verify() reported a break at %d, want an intact chain", at)
+	}
+
+	// ChainScan streams the same entries in the same order Chain returns them, and a scanner fed
+	// from it reaches the same verdict.
+	var scanned []*audit.Entry
+	if err := store.ChainScan(ctx, func(e *audit.Entry) error {
+		scanned = append(scanned, e)
+		return nil
+	}); err != nil {
+		t.Fatalf("ChainScan() error = %v", err)
+	}
+	if diff := cmp.Diff(chain, scanned); diff != "" {
+		t.Errorf("ChainScan() mismatch with Chain() (-chain +scanned):\n%s", diff)
+	}
+	if ok, at := audit.Verify(scanned); !ok {
+		t.Errorf("Verify() over the scan reported a break at %d, want an intact chain", at)
+	}
+
+	// An error from fn stops the scan and comes back verbatim.
+	stop := errors.New("stop here")
+	calls := 0
+	err = store.ChainScan(ctx, func(*audit.Entry) error {
+		calls++
+		if calls == 2 {
+			return stop
+		}
+		return nil
+	})
+	if !errors.Is(err, stop) {
+		t.Errorf("ChainScan() error = %v, want the fn error back", err)
+	}
+	if calls != 2 {
+		t.Errorf("ChainScan() called fn %d times after a stop at 2", calls)
 	}
 }
 
