@@ -81,7 +81,8 @@ CREATE TABLE IF NOT EXISTS runs (
 	actor         TEXT NOT NULL DEFAULT '',
 	rerun_of      TEXT NOT NULL DEFAULT '',
 	labels        TEXT NOT NULL DEFAULT '',
-	warning       TEXT NOT NULL DEFAULT ''
+	warning       TEXT NOT NULL DEFAULT '',
+	audit_receipt TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_runs_created_at ON runs(created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_parent ON runs(parent_id, shard_index);
@@ -98,6 +99,7 @@ ALTER TABLE runs ADD COLUMN IF NOT EXISTS actor TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS rerun_of TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS labels TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS warning TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS audit_receipt TEXT NOT NULL DEFAULT '';
 CREATE UNIQUE INDEX IF NOT EXISTS idx_runs_idempotency_key ON runs(idempotency_key) WHERE idempotency_key <> '';
 CREATE TABLE IF NOT EXISTS run_logs (
 	seq    BIGSERIAL PRIMARY KEY,
@@ -585,7 +587,7 @@ const runColumns = `id, playbook, inventory, status, exit_code, error, created_a
 	retry_of, attempt, steps, extra_vars, outputs, claimed_by, claimed_at, cancel_requested,
 	credential_ids, project_id, commit_sha, inventory_id, queue, tool, command, dry_run,
 	proposed_from, intent, image, pull_credential_id, idempotency_key, timeout, notifications,
-	source, source_id, actor, rerun_of, labels, warning`
+	source, source_id, actor, rerun_of, labels, warning, audit_receipt`
 
 // Save inserts or replaces the run identified by r.ID. The cancel flag merges with GREATEST so a
 // replace from a stale snapshot cannot erase a cancel another process just requested.
@@ -597,10 +599,10 @@ INSERT INTO runs
 	 attempt, steps, extra_vars, outputs, claimed_by, claimed_at, cancel_requested, credential_ids,
 	 project_id, commit_sha, inventory_id, queue, tool, command, dry_run, proposed_from, intent,
 	 image, pull_credential_id, idempotency_key, timeout, notifications,
-	 source, source_id, actor, rerun_of, labels, warning)
+	 source, source_id, actor, rerun_of, labels, warning, audit_receipt)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
 	$21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38,
-	$39, $40, $41, $42, $43, $44, $45)
+	$39, $40, $41, $42, $43, $44, $45, $46)
 ON CONFLICT(id) DO UPDATE SET
 	playbook=excluded.playbook, inventory=excluded.inventory, status=excluded.status,
 	exit_code=excluded.exit_code, error=excluded.error, created_at=excluded.created_at,
@@ -620,7 +622,7 @@ ON CONFLICT(id) DO UPDATE SET
 	idempotency_key=excluded.idempotency_key, timeout=excluded.timeout,
 	notifications=excluded.notifications, source=excluded.source, source_id=excluded.source_id,
 	actor=excluded.actor, rerun_of=excluded.rerun_of, labels=excluded.labels,
-	warning=excluded.warning`
+	warning=excluded.warning, audit_receipt=excluded.audit_receipt`
 	_, err := s.db.ExecContext(ctx, q,
 		r.ID, r.Playbook, r.Inventory, string(r.Status), sqlutil.NullInt(r.ExitCode), r.Error,
 		sqlutil.FormatTime(r.CreatedAt), sqlutil.NullTime(r.StartedAt), sqlutil.NullTime(r.EndedAt),
@@ -630,7 +632,7 @@ ON CONFLICT(id) DO UPDATE SET
 		sqlutil.BoolToInt(r.CancelRequested), sqlutil.JoinIDs(r.CredentialIDs), r.ProjectID, r.CommitSHA,
 		r.InventoryID, r.Queue, r.Tool, r.Command, sqlutil.BoolToInt(r.DryRun), r.ProposedFrom, r.Intent,
 		r.Image, r.PullCredentialID, r.IdempotencyKey, r.Timeout, marshalNotifications(r.Notifications),
-		r.Source, r.SourceID, r.Actor, r.RerunOf, marshalLabels(r.Labels), r.Warning,
+		r.Source, r.SourceID, r.Actor, r.RerunOf, marshalLabels(r.Labels), r.Warning, r.AuditReceipt,
 	)
 	if err != nil {
 		if r.IdempotencyKey != "" && isKeyConflict(err) {
@@ -1553,7 +1555,7 @@ func scanRun(s scanner) (*run.Run, error) {
 		&r.ClaimedBy, &claimed, &cancelI, &credIDs, &r.ProjectID, &r.CommitSHA,
 		&r.InventoryID, &r.Queue, &r.Tool, &r.Command, &dryRun, &r.ProposedFrom, &r.Intent,
 		&r.Image, &r.PullCredentialID, &r.IdempotencyKey, &r.Timeout, &notifs,
-		&r.Source, &r.SourceID, &r.Actor, &r.RerunOf, &labels, &r.Warning); err != nil {
+		&r.Source, &r.SourceID, &r.Actor, &r.RerunOf, &labels, &r.Warning, &r.AuditReceipt); err != nil {
 		return nil, err
 	}
 	r.CancelRequested = cancelI != 0

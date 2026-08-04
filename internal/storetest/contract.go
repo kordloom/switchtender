@@ -408,7 +408,8 @@ func testListPage(t *testing.T, store run.Store) {
 	live := &run.Run{
 		ID: "e", Playbook: "tag.yml", Status: run.StatusRunning, CreatedAt: base.Add(4 * time.Second),
 		Source: "schedule", SourceID: "sch_9", Actor: "night-cron",
-		Labels: map[string]string{"env": "prod"},
+		AuditReceipt: "41:9f2caa",
+		Labels:       map[string]string{"env": "prod"},
 	}
 	if err := store.Save(ctx, live); err != nil {
 		t.Fatalf("Save() error = %v", err)
@@ -434,6 +435,14 @@ func testListPage(t *testing.T, store run.Store) {
 	}
 	if hit, _ := store.ListPage(ctx, run.ListFilter{Host: "web09"}, 0, 0); len(hit) != 1 || hit[0].ID != "e" {
 		t.Errorf("host filter = %v, want [e]", ids(hit))
+	}
+
+	// The audit receipt ties a run to the chain entry that recorded the request creating it. It is
+	// the only link between the two, since that entry names the request path rather than the run.
+	if got, err := store.Get(ctx, "e"); err != nil {
+		t.Fatalf("Get(e) error = %v", err)
+	} else if got.AuditReceipt != "41:9f2caa" {
+		t.Errorf("audit receipt = %q, want it to survive the round trip", got.AuditReceipt)
 	}
 
 	// The status tally follows a transition immediately: a store may memoize it, but a stale

@@ -49,6 +49,13 @@ type Input struct {
 	// AnchorProblems describes each anchor the chain no longer satisfies. A chain can hash-verify
 	// perfectly and still have been rewritten wholesale or lost its tail; this is what catches it.
 	AnchorProblems []string
+	// Launch is the chain entry that recorded the request which created this run, resolved by
+	// redeeming the run's receipt against the chain. Nil when the run carries no receipt, as a
+	// seeded or pre-upgrade run does, or when the chain no longer holds it.
+	Launch *audit.Entry
+	// ReceiptMissing is true when the run carries a receipt the chain does not hold, which is what
+	// a dropped or rewritten creation entry looks like.
+	ReceiptMissing bool
 	// RecordedBy is the highest chain position reached by the run's own time, the position an
 	// anchor must reach to fix history that already held the run.
 	RecordedBy int64
@@ -125,12 +132,19 @@ func Collect(ctx context.Context, runs run.Store, audits audit.Store, id string,
 	// receipt, and where the chain stood when the run was recorded.
 	scan := audit.NewChainScanner(true)
 	anchorScan := audit.NewAnchorScanner(anchors)
+	launchReceipt := r.AuditReceipt
 	err = audits.ChainScan(ctx, func(e *audit.Entry) error {
 		scan.Feed(e)
 		anchorScan.Feed(e)
 		in.Head = e
 		if strings.Contains(e.Path, id) {
 			in.Entries = append(in.Entries, e)
+		}
+		// The entry that recorded the request creating this run cannot be matched by id, because it
+		// was written before the run existed. The run carries its receipt instead, and this is where
+		// that receipt is redeemed against the chain being walked.
+		if launchReceipt != "" && receiptOf(e) == launchReceipt {
+			in.Launch = e
 		}
 		// A run's creation is recorded at the request path, which names the template or the
 		// collection rather than the run the request went on to create, so it cannot be matched
@@ -145,6 +159,9 @@ func Collect(ctx context.Context, runs run.Store, audits audit.Store, id string,
 		return nil, fmt.Errorf("scan audit chain: %w", err)
 	}
 	in.ChainOK, in.ChainBrokeAt, in.ChainCount = scan.Result()
+	// A run holding a receipt the chain cannot produce is the case receipts exist to catch: the
+	// entry that recorded its creation is gone or was rewritten.
+	in.ReceiptMissing = launchReceipt != "" && in.Launch == nil
 
 	// An anchor covers the run when it still holds against the chain and sits at or after the
 	// position the run was recorded by. An anchor that no longer holds is the finding itself.
@@ -163,6 +180,11 @@ func Collect(ctx context.Context, runs run.Store, audits audit.Store, id string,
 		}
 	}
 	return in, nil
+}
+
+// receiptOf returns an entry's redeemable seq:link pair.
+func receiptOf(e *audit.Entry) string {
+	return fmt.Sprintf("%d:%s", e.Seq, e.Hash)
 }
 
 // worstRank orders host outcomes by severity, so merging keeps the more severe one.
@@ -273,6 +295,8 @@ type view struct {
 	Anchors []anchorRow
 	// AnchorProblems describes each anchor the chain no longer satisfies.
 	AnchorProblems []string
+	// ReceiptMissing is true when the chain no longer holds the run's creation entry.
+	ReceiptMissing bool
 	// ChainCount is the whole chain's entry count.
 	ChainCount int
 	// Receipt is the chain head's seq:link at collection.
@@ -296,6 +320,17 @@ func Render(in *Input) ([]byte, error) {
 	if in.Head != nil {
 		v.Receipt = fmt.Sprintf("%d:%s", in.Head.Seq, in.Head.Hash)
 	}
+	// The launch leads the decisions: it is the record of who asked, and it is redeemable.
+	if in.Launch != nil {
+		launchRow := entryRow{
+			Seq: in.Launch.Seq, At: in.Launch.At.UTC().Format(time.RFC3339), Actor: in.Launch.Actor,
+			Action: in.Launch.Method + " " + in.Launch.Path, Role: "Launched",
+			Receipt: receiptOf(in.Launch),
+		}
+		v.Decisions = append(v.Decisions, launchRow)
+		v.Entries = append(v.Entries, launchRow)
+	}
+	v.ReceiptMissing = in.ReceiptMissing
 	for _, e := range in.Entries {
 		row := entryRow{
 			Seq: e.Seq, At: e.At.UTC().Format(time.RFC3339), Actor: e.Actor,
@@ -327,6 +362,12 @@ func Render(in *Input) ([]byte, error) {
 		v.Status = "broken"
 		v.StatusText = fmt.Sprintf("The audit chain is broken at entry %d. Nothing below is "+
 			"trustworthy until the break is explained.", in.ChainBrokeAt)
+	case in.ReceiptMissing:
+		// The run holds a receipt naming where its creation was recorded and the chain cannot
+		// produce that entry. A server that dropped the entry cannot answer the receipt.
+		v.Status = "broken"
+		v.StatusText = "The chain does not hold the entry that recorded this run's creation, " +
+			"though the run carries its receipt. The record of who asked for this run is missing."
 	case len(in.AnchorProblems) > 0:
 		// The hash walk passing proves only that the chain is self-consistent. A wholesale
 		// rewrite is self-consistent too, and this is what disproves it.

@@ -126,6 +126,12 @@ afterwards and is checked offline by any verifier, with no network and no trust 
 a chain that has quietly lost its tail no longer reaches its anchor and says so. Anchor on a
 schedule. An anchor bounds how much history can vanish unnoticed to whatever happened since the last
 one.</p>
+<p><strong>Every run points at the entry that authorized it.</strong> A run's creation is recorded before the
+handler runs, at a request path that names the template rather than the run it goes on to create,
+so the two cannot be matched by name. The run keeps the receipt instead, the same <code>seq:link</code> the
+<code>Audit-Receipt</code> header returned, and its dossier redeems that receipt against the live chain. A
+server that dropped the creation entry cannot answer the receipt, and the dossier says so rather
+than showing a run with no origin.</p>
 <p><strong>Evidence comes out as documents, not screenshots.</strong> <code>switchtender audit run &lt;id&gt;</code> emits one
 run's dossier: what ran, its risk grade, who approved it, what happened on each host, and the
 receipts and anchors behind all of it. <code>switchtender audit report --from --to</code> renders the period's

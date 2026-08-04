@@ -14,6 +14,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/auth"
+	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/user"
 )
 
@@ -65,8 +66,12 @@ func (g *authGate) wrap(next http.Handler) http.Handler {
 			// is fail-closed, filling the store that way eventually refuses every real mutation in
 			// the install. A hook that resolves to a trigger is recorded by the handler, where the
 			// trigger is known and the entry can say which one fired.
-			if !isSignIn(r) && !isHook(r) && !g.record(w, unauthenticatedActor(r), r) {
-				return
+			if !isSignIn(r) && !isHook(r) {
+				receipt, ok := g.record(w, unauthenticatedActor(r), r)
+				if !ok {
+					return
+				}
+				r = r.WithContext(run.WithAuditReceipt(r.Context(), receipt))
 			}
 			next.ServeHTTP(w, r)
 			return
@@ -92,10 +97,11 @@ func (g *authGate) wrap(next http.Handler) http.Handler {
 			if !g.decide(w, r, actor) {
 				return
 			}
-			if !g.record(w, u.Username, r) {
+			receipt, ok := g.record(w, u.Username, r)
+			if !ok {
 				return
 			}
-			ctx := context.WithValue(r.Context(), actorKey{}, actor)
+			ctx := run.WithAuditReceipt(context.WithValue(r.Context(), actorKey{}, actor), receipt)
 			next.ServeHTTP(w, r.WithContext(ctx))
 			return
 		}
@@ -120,10 +126,11 @@ func (g *authGate) wrap(next http.Handler) http.Handler {
 			return
 		}
 		g.touch(tok)
-		if !g.record(w, tok.Name, r) {
+		receipt, ok := g.record(w, tok.Name, r)
+		if !ok {
 			return
 		}
-		ctx := context.WithValue(r.Context(), actorKey{}, actor)
+		ctx := run.WithAuditReceipt(context.WithValue(r.Context(), actorKey{}, actor), receipt)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -240,9 +247,9 @@ const AuditReceiptHeader = "Audit-Receipt"
 // the alternative ordering loses the record entirely whenever a process dies mid-change.
 //
 // It takes the actor name directly so token and JWT callers are recorded on the same trail.
-func (g *authGate) record(w http.ResponseWriter, actor string, r *http.Request) bool {
+func (g *authGate) record(w http.ResponseWriter, actor string, r *http.Request) (receipt string, ok bool) {
 	if g.audits == nil || r.Method == http.MethodGet || r.Method == http.MethodHead {
-		return true
+		return "", true
 	}
 	entry := &audit.Entry{
 		ID: audit.NewID(), At: time.Now(), Actor: actor,
@@ -253,10 +260,11 @@ func (g *authGate) record(w http.ResponseWriter, actor string, r *http.Request) 
 			zap.String("method", r.Method), zap.String("path", auditPath(r)))
 		respondError(w, g.log, http.StatusServiceUnavailable,
 			"refused: the change could not be recorded in the audit trail")
-		return false
+		return "", false
 	}
-	w.Header().Set(AuditReceiptHeader, strconv.FormatInt(entry.Seq, 10)+":"+entry.Hash)
-	return true
+	receipt = strconv.FormatInt(entry.Seq, 10) + ":" + entry.Hash
+	w.Header().Set(AuditReceiptHeader, receipt)
+	return receipt, true
 }
 
 // errNoAccounts is returned when a token names an owning account but no account store is wired, so

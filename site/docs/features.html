@@ -139,6 +139,10 @@
 <td><code>switchtender audit report</code> renders a signed export into a self-contained HTML compliance report, verifying it offline in the same pass, so a vendor-security or SOC 2 reviewer reads the verdict and re-verifies it against the export with no tooling.</td>
 </tr>
 <tr>
+<td>Launch receipts</td>
+<td>Every run records the <code>seq:link</code> of the chain entry that authorized its creation, so who asked for a run is redeemable evidence rather than a field the server asserts. A creation entry the chain can no longer produce is reported.</td>
+</tr>
+<tr>
 <td>Run dossier</td>
 <td><code>switchtender audit run &lt;id&gt;</code>, or the run page's Evidence button, emits one self-contained document tying the run's spec, risk grade, approval decisions, per-host outcomes, chain receipts, and covering anchors together, so an auditor's sample request is answered in one export.</td>
 </tr>

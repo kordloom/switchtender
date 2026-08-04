@@ -3,6 +3,7 @@ package dossier
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -283,4 +284,87 @@ type eventsFail struct {
 // Events always fails.
 func (e *eventsFail) Events(context.Context, string) ([]event.Event, error) {
 	return nil, errors.New("event store is unavailable")
+}
+
+func TestDossierRedeemsTheRunReceiptForWhoAsked(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	runs := run.NewMemStore()
+	audits := audit.NewMemStore()
+	base := time.Date(2026, 8, 1, 10, 0, 0, 0, time.UTC)
+
+	// The launch is recorded before the run exists, at a path naming the template. The receipt is
+	// what ties the two together.
+	launch := &audit.Entry{
+		ID: audit.NewID(), At: base, Actor: "deploy-bot", Method: "POST",
+		Path: "/v1/templates/tpl_web/launch",
+	}
+	if err := audits.Append(ctx, launch); err != nil {
+		t.Fatalf("Append() error = %v", err)
+	}
+	ended := base.Add(time.Minute)
+	if err := runs.Save(ctx, &run.Run{
+		ID: "run_receipted", Playbook: "site.yml", Status: run.StatusSucceeded,
+		CreatedAt: base, EndedAt: &ended, Actor: "deploy-bot",
+		AuditReceipt: fmt.Sprintf("%d:%s", launch.Seq, launch.Hash),
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	in, err := Collect(ctx, runs, audits, "run_receipted", time.Now())
+	if err != nil {
+		t.Fatalf("Collect() error = %v", err)
+	}
+	if in.Launch == nil {
+		t.Fatal("the run's receipt did not resolve to the entry that recorded its creation")
+	}
+	if in.Launch.Actor != "deploy-bot" || in.ReceiptMissing {
+		t.Errorf("launch = %+v, missing = %v, want the recorded launch", in.Launch, in.ReceiptMissing)
+	}
+	doc, err := Render(in)
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+	html := string(doc)
+	if !strings.Contains(html, "Launched") {
+		t.Error("the dossier does not show who asked for the run")
+	}
+	if !strings.Contains(html, fmt.Sprintf("%d:%s", launch.Seq, launch.Hash)) {
+		t.Error("the launch row carries no redeemable receipt")
+	}
+}
+
+func TestDossierReportsACreationEntryTheChainNoLongerHolds(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	runs := run.NewMemStore()
+	audits := audit.NewMemStore()
+	base := time.Date(2026, 8, 1, 10, 0, 0, 0, time.UTC)
+	if err := audits.Append(ctx, &audit.Entry{
+		ID: audit.NewID(), At: base, Actor: "root", Method: "POST", Path: "/v1/projects",
+	}); err != nil {
+		t.Fatalf("Append() error = %v", err)
+	}
+	// The run holds a receipt for an entry the chain cannot produce, which is exactly what a
+	// dropped creation entry looks like to the party holding the receipt.
+	if err := runs.Save(ctx, &run.Run{
+		ID: "run_orphan", Playbook: "site.yml", Status: run.StatusSucceeded, CreatedAt: base,
+		AuditReceipt: "99:deadbeef",
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	in, err := Collect(ctx, runs, audits, "run_orphan", time.Now())
+	if err != nil {
+		t.Fatalf("Collect() error = %v", err)
+	}
+	if !in.ReceiptMissing {
+		t.Fatal("a receipt the chain cannot answer was not reported")
+	}
+	doc, err := Render(in)
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+	if !strings.Contains(string(doc), "record of who asked for this run is missing") {
+		t.Error("the dossier does not lead with the missing creation entry")
+	}
 }

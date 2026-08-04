@@ -643,6 +643,7 @@ func (d *Dispatcher) Submit(ctx context.Context, playbook, inventory string, opt
 		CreatedAt: time.Now(),
 	}
 	run.ApplyOptions(r, opts)
+	stampReceipt(ctx, r)
 	if err := requireToolInput(r); err != nil {
 		return nil, err
 	}
@@ -683,6 +684,7 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 	// Sharding fans a playbook across inventory hosts, which only Ansible does; other tools run once.
 	probe := &run.Run{}
 	run.ApplyOptions(probe, opts)
+	stampReceipt(ctx, probe)
 	// A retried split returns the original parent without re-listing hosts or resharding.
 	if existing, err := d.idempotentLookup(ctx, probe.IdempotencyKey); err != nil {
 		return nil, err
@@ -733,6 +735,7 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 		Status: run.StatusPending, CreatedAt: time.Now(), ShardCount: &count,
 	}
 	run.ApplyOptions(parent, opts)
+	stampReceipt(ctx, parent)
 	if err := d.validateRun(ctx, parent); err != nil {
 		return nil, err
 	}
@@ -797,6 +800,15 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 	go d.coordinate(parent.Clone(), children)
 
 	return parent, nil
+}
+
+// stampReceipt records which chain entry authorized this run's creation, when the run was created
+// while serving a recorded request. An explicit option wins, so a caller that already knows the
+// receipt keeps it.
+func stampReceipt(ctx context.Context, r *run.Run) {
+	if r.AuditReceipt == "" {
+		r.AuditReceipt = run.AuditReceiptFrom(ctx)
+	}
 }
 
 // inheritExecution copies onto child every field that decides how a run executes, so a shard of a
@@ -1198,6 +1210,7 @@ func (d *Dispatcher) SubmitPipeline(ctx context.Context, name, inventory string,
 		Status: run.StatusPending, CreatedAt: time.Now(),
 	}
 	run.ApplyOptions(parent, opts)
+	stampReceipt(ctx, parent)
 	// The graph is stored on the parent so a pipeline held for approval can still be executed after
 	// a restart, and so a finished pipeline can show the shape it ran.
 	parent.Steps = steps

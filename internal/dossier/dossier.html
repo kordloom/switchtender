@@ -64,7 +64,7 @@ footer { margin-top: 40px; color: var(--muted); font-size: 13px; }
 	</dl>
 
 	{{if .Decisions}}
-	<h2>Who decided</h2>
+	<h2>Who asked and who decided</h2>
 	<div class="scroll"><table>
 		<tr><th>Decision</th><th>Actor</th><th>When</th><th>Chain entry</th></tr>
 		{{range .Decisions}}<tr><td>{{.Role}}</td><td>{{.Actor}}</td><td>{{.At}}</td><td class="mono">{{.Seq}}</td></tr>

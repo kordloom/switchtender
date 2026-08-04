@@ -120,6 +120,13 @@ a chain that has quietly lost its tail no longer reaches its anchor and says so.
 schedule. An anchor bounds how much history can vanish unnoticed to whatever happened since the last
 one.
 
+**Every run points at the entry that authorized it.** A run's creation is recorded before the
+handler runs, at a request path that names the template rather than the run it goes on to create,
+so the two cannot be matched by name. The run keeps the receipt instead, the same `seq:link` the
+`Audit-Receipt` header returned, and its dossier redeems that receipt against the live chain. A
+server that dropped the creation entry cannot answer the receipt, and the dossier says so rather
+than showing a run with no origin.
+
 **Evidence comes out as documents, not screenshots.** `switchtender audit run <id>` emits one
 run's dossier: what ran, its risk grade, who approved it, what happened on each host, and the
 receipts and anchors behind all of it. `switchtender audit report --from --to` renders the period's
