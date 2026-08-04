@@ -53,3 +53,92 @@ func TestStepRunInheritsThePipelineReceipt(t *testing.T) {
 			"authorization at all", child.AuditReceipt)
 	}
 }
+
+// TestChildrenCarryTheirParentAuthorization pins that a shard records the same authorization as
+// the split it belongs to. Without this the assignment can be dropped and every shard of an
+// operator-launched split renders evidence reading "no recorded request created this run" for a
+// run a person explicitly launched.
+func TestChildrenCarryTheirParentAuthorization(t *testing.T) {
+	t.Parallel()
+	store := run.NewMemStore()
+	d := New(store, &fakeRunnerLister{hosts: []string{"a", "b", "c", "d"}}, nil)
+	defer d.Close()
+
+	ctx := run.WithAuditReceipt(context.Background(), "88:splitlaunch")
+	parent, err := d.SubmitSplit(ctx, "play.yml", "inv", 2)
+	if err != nil {
+		t.Fatalf("SubmitSplit() error = %v", err)
+	}
+	if parent.AuditReceipt != "88:splitlaunch" {
+		t.Fatalf("parent receipt = %q, want the launching request", parent.AuditReceipt)
+	}
+	shards, err := store.Shards(context.Background(), parent.ID)
+	if err != nil {
+		t.Fatalf("Shards() error = %v", err)
+	}
+	if len(shards) == 0 {
+		t.Fatal("no shards were created")
+	}
+	for _, sh := range shards {
+		if sh.AuditReceipt != parent.AuditReceipt {
+			t.Errorf("shard %s receipt = %q, want its parent's %q", sh.ID, sh.AuditReceipt,
+				parent.AuditReceipt)
+		}
+	}
+}
+
+// TestExplicitReceiptWinsOverAmbientContext pins that a caller stating which request set a run in
+// motion is believed over whatever request happens to be in flight. The plan gate depends on it:
+// a proposed apply is authorized by the request that submitted the plan, not by the executor.
+func TestExplicitReceiptWinsOverAmbientContext(t *testing.T) {
+	t.Parallel()
+	r := &run.Run{ID: "run_apply"}
+	run.ApplyOptions(r, []run.SubmitOption{run.WithAuditReceiptOf("12:planrequest")})
+	stampReceipt(run.WithAuditReceipt(context.Background(), "99:ambient"), r)
+	if r.AuditReceipt != "12:planrequest" {
+		t.Errorf("receipt = %q, want the explicitly stated request", r.AuditReceipt)
+	}
+}
+
+// TestRetryShardsCarryTheRetryAuthorization pins both halves of the retry rule: the retry run
+// records the request that asked for the retry, not the one that launched the original weeks
+// earlier, and its shards record the same as the retry they belong to.
+func TestRetryShardsCarryTheRetryAuthorization(t *testing.T) {
+	t.Parallel()
+	store := run.NewMemStore()
+	runner := &flakyRunnerLister{hosts: []string{"a", "b", "c", "d"}, failHost: "b"}
+	d := New(store, runner, nil)
+	defer d.Close()
+
+	launchCtx := run.WithAuditReceipt(context.Background(), "10:originallaunch")
+	parent, err := d.SubmitSplit(launchCtx, "play.yml", "inv", 2)
+	if err != nil {
+		t.Fatalf("SubmitSplit() error = %v", err)
+	}
+	if got := waitTerminal(t, store, parent.ID); got.Status != run.StatusFailed {
+		t.Fatalf("parent status = %q, want failed", got.Status)
+	}
+
+	runner.fixed.Store(true)
+	retryCtx := run.WithAuditReceipt(context.Background(), "20:retryrequest")
+	retry, err := d.RetryFailedShards(retryCtx, parent.ID)
+	if err != nil {
+		t.Fatalf("RetryFailedShards() error = %v", err)
+	}
+	if retry.AuditReceipt != "20:retryrequest" {
+		t.Fatalf("retry receipt = %q, want the request that asked for the retry, not %q",
+			retry.AuditReceipt, parent.AuditReceipt)
+	}
+	shards, err := store.Shards(context.Background(), retry.ID)
+	if err != nil {
+		t.Fatalf("Shards() error = %v", err)
+	}
+	if len(shards) == 0 {
+		t.Fatal("the retry created no shards")
+	}
+	for _, sh := range shards {
+		if sh.AuditReceipt != "20:retryrequest" {
+			t.Errorf("retry shard %s receipt = %q, want the retry's", sh.ID, sh.AuditReceipt)
+		}
+	}
+}

@@ -65,8 +65,8 @@ footer { margin-top: 40px; color: var(--muted); font-size: 13px; }
 
 	{{if .NoReceipt}}
 	<p class="sub">No recorded request created this run, so there is no launch entry to redeem. A run
-	the scheduler started on its own, or one created before receipts were kept, reads this way.
-	Where a request did set the run in motion, that request's receipt is carried and shown above.</p>
+	the scheduler started on its own, or one created before receipts were kept, reads this way. A run
+	a request did set in motion carries that request's receipt, and this paragraph does not appear.</p>
 	{{end}}
 
 	{{if .Decisions}}

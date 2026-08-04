@@ -97,14 +97,12 @@ func CollectRegister(ctx context.Context, runs run.Store, audits audit.Store, fr
 	}
 	in.ChainOK, in.ChainBrokeAt, in.ChainCount = scan.Result()
 
-	_, results := anchorScan.Results()
-	for _, res := range results {
-		if res.Reached {
-			in.Anchored++
-			continue
-		}
-		in.AnchorProblems = append(in.AnchorProblems, res.Problem)
-	}
+	// The register's subject is the whole period's chain rather than one run, so every anchor that
+	// still holds counts. It folds through the same helper so a disowned anchor is reported here
+	// for the same reason it is in a dossier.
+	holding, problems := foldAnchors(anchorScan, 1)
+	in.Anchored = len(holding)
+	in.AnchorProblems = problems
 	return in, nil
 }
 

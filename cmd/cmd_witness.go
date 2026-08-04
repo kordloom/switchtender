@@ -85,6 +85,7 @@ func runWitness(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("load witness identity: %w", err)
 	}
+	witnessServer = witness.NormalizeServer(witnessServer)
 	fmt.Fprintf(os.Stderr, "witness: watching %s, checkpoint %s, key %s\n",
 		witnessServer, witnessState, id.KeyID())
 

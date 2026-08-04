@@ -359,6 +359,12 @@ func hookHandler(triggers trigger.Store, templates template.Store, submitter Sub
 			return
 		}
 		if existing != nil {
+			// A sender redelivers precisely because it lost the first response, so this is the one
+			// delivery that most needs the receipt. The run already holds the receipt of the fire
+			// that created it, so the header answers with that rather than with nothing.
+			if existing.AuditReceipt != "" {
+				w.Header().Set(AuditReceiptHeader, existing.AuditReceipt)
+			}
 			respondJSON(w, log, http.StatusAccepted, existing, wantsPretty(r))
 			return
 		}

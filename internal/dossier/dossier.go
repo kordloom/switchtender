@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"html/template"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -132,7 +133,9 @@ func Collect(ctx context.Context, runs run.Store, audits audit.Store, id string,
 	// receipt, and where the chain stood when the run was recorded.
 	scan := audit.NewChainScanner(true)
 	anchorScan := audit.NewAnchorScanner(anchors)
-	launchReceipt := r.AuditReceipt
+	// The receipt is parsed once and compared as two scalars, rather than formatting a string for
+	// every entry in a chain that can run to millions.
+	launchSeq, launchHash := parseReceipt(r.AuditReceipt)
 	err = audits.ChainScan(ctx, func(e *audit.Entry) error {
 		scan.Feed(e)
 		anchorScan.Feed(e)
@@ -143,7 +146,7 @@ func Collect(ctx context.Context, runs run.Store, audits audit.Store, id string,
 		// The entry that recorded the request creating this run cannot be matched by id, because it
 		// was written before the run existed. The run carries its receipt instead, and this is where
 		// that receipt is redeemed against the chain being walked.
-		if launchReceipt != "" && audit.Receipt(e) == launchReceipt {
+		if launchSeq > 0 && e.Seq == launchSeq && e.Hash == launchHash {
 			in.Launch = e
 		}
 		// A run's creation is recorded at the request path, which names the template or the
@@ -161,11 +164,10 @@ func Collect(ctx context.Context, runs run.Store, audits audit.Store, id string,
 	in.ChainOK, in.ChainBrokeAt, in.ChainCount = scan.Result()
 	// A run holding a receipt the chain cannot produce is the case receipts exist to catch: the
 	// entry that recorded its creation is gone or was rewritten.
-	in.ReceiptMissing = launchReceipt != "" && in.Launch == nil
+	in.ReceiptMissing = r.AuditReceipt != "" && in.Launch == nil
 
 	// An anchor covers the run when it still holds against the chain and sits at or after the
 	// position the run was recorded by. An anchor that no longer holds is the finding itself.
-	_, results := anchorScan.Results()
 	cover := in.RecordedBy
 	if n := len(in.Entries); n > 0 && in.Entries[n-1].Seq > cover {
 		cover = in.Entries[n-1].Seq
@@ -173,24 +175,44 @@ func Collect(ctx context.Context, runs run.Store, audits audit.Store, id string,
 	if in.Launch != nil && in.Launch.Seq > cover {
 		cover = in.Launch.Seq
 	}
-	// A run the chain holds nothing about, at any position, is covered by nothing. Without this
-	// floor every anchor in the install passes "Seq >= 0" and the document reports history fixed
-	// over a run the chain never recorded, which is a green banner for the emptiest case there is.
+	in.Covering, in.AnchorProblems = foldAnchors(anchorScan, cover)
+	return in, nil
+}
+
+// foldAnchors splits an anchor scan into the anchors that still hold at or above cover and the
+// problems the chain no longer satisfies. Both documents fold the same way, so the rule that a
+// disowned anchor is always reported cannot hold in one and be forgotten in the other.
+//
+// A problem is collected whatever cover is. Gating that on coverage put the loudest evidence of a
+// wholesale wipe behind the quietest case there is: a run the chain records nothing about, which is
+// exactly what a wipe leaves behind. Coverage does need a position to measure from, so a cover of
+// zero means nothing is covered, rather than every anchor in the install matching Seq >= 0.
+func foldAnchors(scan *audit.AnchorScanner, cover int64) (covering []*audit.Anchor, problems []string) {
+	_, results := scan.Results()
 	for _, res := range results {
-		// An anchor the chain no longer satisfies is always reported. Gating this on coverage put
-		// the loudest evidence of a wholesale wipe behind the quietest case there is: a run the
-		// chain records nothing about, which is exactly what a wipe leaves behind.
 		if !res.Reached {
-			in.AnchorProblems = append(in.AnchorProblems, res.Problem)
+			problems = append(problems, res.Problem)
 			continue
 		}
-		// Coverage still needs a position to measure from. A run the chain holds nothing about at
-		// any position is covered by nothing, rather than by every anchor in the install.
 		if cover > 0 && res.Anchor.Seq >= cover {
-			in.Covering = append(in.Covering, res.Anchor)
+			covering = append(covering, res.Anchor)
 		}
 	}
-	return in, nil
+	return covering, problems
+}
+
+// parseReceipt splits a seq:link receipt into its parts, returning a zero sequence when it is
+// empty or malformed, which reads as "this run names no creation entry".
+func parseReceipt(receipt string) (seq int64, link string) {
+	colon := strings.IndexByte(receipt, ':')
+	if colon <= 0 {
+		return 0, ""
+	}
+	n, err := strconv.ParseInt(receipt[:colon], 10, 64)
+	if err != nil || n <= 0 {
+		return 0, ""
+	}
+	return n, receipt[colon+1:]
 }
 
 // worstRank orders host outcomes by severity, so merging keeps the more severe one.

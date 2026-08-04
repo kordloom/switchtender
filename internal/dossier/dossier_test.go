@@ -469,3 +469,56 @@ func TestDossierDoesNotClaimAnchorsCoverARunTheChainNeverNamed(t *testing.T) {
 		t.Error("the dossier does not say what the anchors actually fix")
 	}
 }
+
+func TestDossierCoverageNeedsAPositionToMeasureFrom(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	runs := run.NewMemStore()
+	audits := audit.NewMemStore()
+	base := time.Date(2026, 8, 1, 10, 0, 0, 0, time.UTC)
+	ended := base.Add(time.Minute)
+	// A run that finished before the chain held anything: no receipt, no entry names it, and every
+	// chain entry is later than the run, so there is no position to measure coverage from.
+	if err := runs.Save(ctx, &run.Run{
+		ID: "run_before", Playbook: "site.yml", Status: run.StatusSucceeded,
+		CreatedAt: base, EndedAt: &ended,
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	if err := audits.Append(ctx, &audit.Entry{
+		ID: audit.NewID(), At: ended.Add(time.Hour), Actor: "root", Method: "POST", Path: "/v1/projects",
+	}); err != nil {
+		t.Fatalf("Append() error = %v", err)
+	}
+	chain, err := audits.Chain(ctx)
+	if err != nil {
+		t.Fatalf("Chain() error = %v", err)
+	}
+	// The anchor genuinely holds, so it takes the coverage branch rather than the problem branch.
+	if err := audits.(audit.AnchorStore).SaveAnchor(ctx, &audit.Anchor{
+		ID: "anc_ok", Type: "rfc3161", Seq: 1, Link: chain[0].Hash,
+		At: ended.Add(2 * time.Hour), Ref: "https://tsa",
+	}); err != nil {
+		t.Fatalf("SaveAnchor() error = %v", err)
+	}
+
+	in, err := Collect(ctx, runs, audits, "run_before", time.Now())
+	if err != nil {
+		t.Fatalf("Collect() error = %v", err)
+	}
+	if in.RecordedBy != 0 || len(in.AnchorProblems) != 0 {
+		t.Fatalf("setup wrong: RecordedBy=%d problems=%v, this must exercise the coverage branch",
+			in.RecordedBy, in.AnchorProblems)
+	}
+	if len(in.Covering) != 0 {
+		t.Fatalf("covering = %d, want none: with no position to measure from, Seq >= 0 would "+
+			"otherwise match every anchor in the install", len(in.Covering))
+	}
+	doc, err := Render(in)
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+	if strings.Contains(string(doc), "fix history containing this run") {
+		t.Error("a run the chain records nothing about is reported as anchored")
+	}
+}

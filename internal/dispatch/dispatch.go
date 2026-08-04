@@ -806,17 +806,19 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 	return parent, nil
 }
 
-// stampReceipt records which chain entry authorized this run's creation.
+// stampReceipt records which chain entry authorized this run's creation, defaulting it to the
+// request in flight.
 //
-// It is deliberately not an execution option and never inherited from a source run. Options
-// describe how a run executes, and are replayed by rerun, reconcile, and shard retry, which are
-// each a new request with its own authorization. Carrying the source run's receipt through them
-// made a rerun's evidence name whoever launched the original, weeks earlier, which is worse than
-// naming nobody. The request in flight is the only truthful answer, so it always wins; a run
+// The receipt is not an execution option, so rerun, reconcile, and shard retry do not replay it:
+// each is a new request with its own authorization, and carrying the source run's receipt through
+// them made a rerun's evidence name whoever launched the original, weeks earlier, which is worse
+// than naming nobody. With that inheritance gone, an explicit WithAuditReceiptOf is a deliberate
+// statement about which request set this run in motion, so it wins over the ambient context; the
+// plan gate uses it to attribute a proposed apply to the request that submitted the plan. A run
 // created outside a recorded request, by the scheduler or the seeder, carries none.
 func stampReceipt(ctx context.Context, r *run.Run) {
-	if receipt := run.AuditReceiptFrom(ctx); receipt != "" {
-		r.AuditReceipt = receipt
+	if r.AuditReceipt == "" {
+		r.AuditReceipt = run.AuditReceiptFrom(ctx)
 	}
 }
 
