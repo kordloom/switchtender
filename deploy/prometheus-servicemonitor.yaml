@@ -1,0 +1,42 @@
+# Prometheus scraping for SwitchTender.
+#
+# SwitchTender serves Prometheus metrics at /metrics, unauthenticated by design so a scraper needs
+# no token. The endpoint reports run counts by status, run duration and queue-wait histograms, queue
+# depth, worker and host health, and the audit-chain health that no other controller exposes: whether
+# the chain still verifies, how long ago it was anchored, and how fresh its span beats are.
+#
+# Two ways to scrape it are below. Use the ServiceMonitor with the Prometheus Operator; use the
+# static scrape config with a plain Prometheus.
+
+---
+# For the Prometheus Operator (kube-prometheus-stack). Apply into the namespace SwitchTender runs in,
+# and label your Service so this selector matches it.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: switchtender
+  labels:
+    app.kubernetes.io/name: switchtender
+    # Match this to your Prometheus's serviceMonitorSelector, often release: prometheus.
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: switchtender
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+      # A run failing does not fail readiness, so a healthy scrape target is expected even mid-incident.
+      scrapeTimeout: 10s
+
+---
+# For a plain Prometheus, add this under scrape_configs in prometheus.yml instead. Point the target
+# at wherever SwitchTender serves, for example switchtender.internal:8080.
+#
+# scrape_configs:
+#   - job_name: switchtender
+#     metrics_path: /metrics
+#     scrape_interval: 30s
+#     static_configs:
+#       - targets: ["switchtender.internal:8080"]
