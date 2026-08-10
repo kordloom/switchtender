@@ -542,6 +542,9 @@ func (g *authGate) protects(r *http.Request) bool {
 	if r.Method == http.MethodGet && p == "/healthz" {
 		return false
 	}
+	if r.Method == http.MethodGet && p == "/readyz" {
+		return false
+	}
 	if r.Method == http.MethodGet && (p == "/" || strings.HasPrefix(p, "/ui/")) {
 		return false
 	}

@@ -47,15 +47,45 @@ var importSemaphoreCmd = &cobra.Command{
 	},
 }
 
+// importCronInventory is the inventory imported crontab schedules target, since a crontab names no
+// host. importCronSystem selects the six-field /etc/crontab form with a user column.
+var (
+	importCronInventory string
+	importCronSystem    bool
+)
+
+// importCronCmd imports a crontab into governed schedules.
+var importCronCmd = &cobra.Command{
+	Use:   "cron <crontab-file>",
+	Short: "Import a crontab into governed schedules.",
+	Long: `Import a crontab into governed schedules.
+
+Each job line becomes a scheduled bash run, so an untracked cron job turns into one that is audited,
+held for approval where a policy covers it, and tracked in host history like every other change. A
+crontab names no target host, so pass --inventory to say where the jobs run. Read /etc/crontab and
+the system tabs with --system, which parses the user column and reports it. Comments, environment
+assignments, and @reboot lines are reported and skipped rather than guessed at.
+
+Without --apply the import only reports what it would create.`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runImport(cmd, args[0], importer.FromCron(importCronInventory, importCronSystem))
+	},
+}
+
 // init registers the import commands and their flags.
 func init() {
-	for _, c := range []*cobra.Command{importAWXCmd, importSemaphoreCmd} {
+	for _, c := range []*cobra.Command{importAWXCmd, importSemaphoreCmd, importCronCmd} {
 		c.Flags().StringVar(&importDB, "db", defaultDBPath,
 			"SQLite file path, or a postgres:// DSN, to write into with --apply.")
 		c.Flags().BoolVar(&importApply, "apply", false,
 			"Create the objects. Without it the import only reports what it would create.")
 		importCmd.AddCommand(c)
 	}
+	importCronCmd.Flags().StringVar(&importCronInventory, "inventory", "",
+		"Inventory the imported schedules target, since a crontab names no host.")
+	importCronCmd.Flags().BoolVar(&importCronSystem, "system", false,
+		"Parse the six-field /etc/crontab form, whose user column sits before the command.")
 }
 
 // runImport reads an export, maps it to a plan, reports the plan, and applies it when --apply is set.

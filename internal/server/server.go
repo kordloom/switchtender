@@ -404,6 +404,7 @@ func (s *Server) Handler() http.Handler {
 		orgOwners: s.orgResolver(), strict: s.strictGrants,
 	}
 	mux.Handle("GET /healthz", healthHandler())
+	mux.Handle("GET /readyz", readyHandler(s.store))
 	var health *chainHealth
 	if s.audits != nil {
 		health = newChainHealth(s.audits)
@@ -419,6 +420,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /v1/audit", auditHandler(s.audits, s.log))
 	mux.Handle("GET /v1/audit/verify", auditVerifyHandler(s.audits, s.log))
 	mux.Handle("GET /v1/audit/export", auditExportHandler(s.audits, s.auditSigner, s.log))
+	mux.Handle("GET /v1/audit/bundle", auditBundleHandler(s.audits, s.producer, s.productVersion, s.log))
 	mux.Handle("GET /v1/audit/register", auditRegisterHandler(s.store, s.audits, s.log))
 	// Served unauthenticated: the beat feed exists so an outside watcher can see the chain is
 	// alive and whole, and that watcher has no account here.

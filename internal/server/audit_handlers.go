@@ -196,3 +196,59 @@ func auditExportHandler(store audit.Store, signer *audit.Signer, log *zap.Logger
 		respondJSON(w, log, http.StatusOK, audit.BuildExport(entries, signer, time.Now()), wantsPretty(r))
 	}
 }
+
+// auditBundleHandler assembles and serves the signed LoomSeal bundle the CLI produces, so the
+// offline-verifiable artifact no rival emits is one click from the audit view rather than only in a
+// terminal. It mirrors the bundle command exactly: build over the whole chain, hold it against every
+// anchor recorded over it and refuse a chain that cannot reach one, attach the anchors, and sign.
+//
+// The signed bytes are written exactly as SignBundleDoc produced them and never re-marshaled. A
+// re-encode would change the bytes the signature covers, so an offline verifier would then reject a
+// bundle this install actually signed.
+func auditBundleHandler(store audit.Store, producer *audit.Identity, version string, log *zap.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if store == nil || producer == nil {
+			respondError(w, log, http.StatusNotFound, "signed bundle export is not enabled")
+			return
+		}
+		entries, err := store.Chain(r.Context())
+		if err != nil {
+			log.Error("server: chain audit entries: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not read the audit trail")
+			return
+		}
+		if len(entries) == 0 {
+			respondError(w, log, http.StatusConflict, "the audit chain is empty, there is nothing to bundle")
+			return
+		}
+		doc, err := audit.BuildBundle(entries, *producer, version, time.Now())
+		if err != nil {
+			log.Error("server: build bundle: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not assemble the bundle")
+			return
+		}
+		if anchors, ok := store.(audit.AnchorStore); ok {
+			recorded, aerr := anchors.Anchors(r.Context(), 0)
+			if aerr != nil {
+				log.Error("server: read anchors: " + aerr.Error())
+				respondError(w, log, http.StatusInternalServerError, "could not read the anchors")
+				return
+			}
+			if reachedAll, _ := audit.CheckAnchors(entries, recorded); !reachedAll {
+				respondError(w, log, http.StatusConflict, "the chain does not satisfy every anchor "+
+					"recorded over it, so it cannot be published as a bundle that does")
+				return
+			}
+			doc.AttachAnchors(recorded)
+		}
+		signed, err := audit.SignBundleDoc(doc, producer.Private())
+		if err != nil {
+			log.Error("server: sign bundle: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not sign the bundle")
+			return
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Header().Set("Content-Disposition", `attachment; filename="switchtender-audit.loomseal.json"`)
+		_, _ = w.Write(signed)
+	}
+}

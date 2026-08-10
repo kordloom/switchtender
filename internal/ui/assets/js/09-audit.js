@@ -180,20 +180,33 @@ function wireAudit() {
 			}
 		});
 	}
-	const exp = document.getElementById("audit-export");
-	if (exp) {
-		exp.addEventListener("click", async () => {
+	const bundle = document.getElementById("audit-bundle");
+	if (bundle) {
+		bundle.dataset.tip = "Download the signed LoomSeal bundle: the whole chain and its anchors in one file, verifiable offline with an open tool and no trust in this server";
+		bundle.addEventListener("click", async () => {
+			bundle.disabled = true;
 			try {
-				const data = await getJSON("/audit/export");
-				const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-				const url = URL.createObjectURL(blob);
-				const a = document.createElement("a");
-				a.href = url;
-				a.download = "audit-export.json";
-				a.click();
-				URL.revokeObjectURL(url);
+				// The bundle is signed bytes served as-is. It is fetched as raw text and downloaded
+				// unchanged, never parsed and re-encoded, because re-encoding would change the bytes the
+				// signature covers and a verifier would then reject a bundle this install really signed.
+				const res = await fetch(API + "/audit/bundle", { headers: authHeaders() });
+				if (res.status === 401) {
+					requireLogin();
+					return;
+				}
+				if (!res.ok) {
+					let msg = "HTTP " + res.status;
+					try {
+						const e = await res.json();
+						if (e && e.error) msg = e.error;
+					} catch (_) { /* a non-JSON error body leaves the status message. */ }
+					throw new Error(msg);
+				}
+				downloadBlob("switchtender-audit.loomseal.json", "application/json", await res.text());
 			} catch (err) {
-				setStatus("Export failed: " + err.message);
+				setStatus("Could not build the bundle: " + err.message);
+			} finally {
+				bundle.disabled = false;
 			}
 		});
 	}

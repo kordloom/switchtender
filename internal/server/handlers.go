@@ -489,6 +489,24 @@ func healthHandler() http.HandlerFunc {
 	}
 }
 
+// readyHandler reports whether the server can serve real work, not just that its process is up. It
+// touches the store with a bounded query, so a database that is unreachable or still starting
+// answers 503 and a load balancer holds traffic off until it responds. /healthz stays a pure
+// liveness check that never touches the store, so the two probes mean different things: alive, and
+// ready. A Kubernetes deployment wires /healthz to livenessProbe and /readyz to readinessProbe.
+func readyHandler(store run.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+		defer cancel()
+		if _, err := store.RunStatusCounts(ctx); err != nil {
+			respondJSON(w, zap.NewNop(), http.StatusServiceUnavailable,
+				map[string]any{"ready": false, "reason": "the run store is not reachable"}, false)
+			return
+		}
+		respondJSON(w, zap.NewNop(), http.StatusOK, map[string]any{"ready": true}, false)
+	}
+}
+
 // createRunHandler accepts a run request and submits it for execution. It authorizes the actor for
 // every object the run references, so a run cannot borrow another user's project, inventory, or
 // credentials to reach hosts they were never granted.
