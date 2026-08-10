@@ -10,6 +10,15 @@
 #
 # Usage: deploy/build-verifier.sh v0.9.0
 #
+# Cross-check the result against the released command line verifier, which is the comparison that
+# would have caught the drift described above. Both must reach the same verdict on the same bundle:
+#
+#   go install github.com/kordloom/loomseal@v0.9.0 && loomseal verify bundle.json
+#   node -e 'globalThis.crypto??=require("node:crypto").webcrypto;require("./site/verify/wasm_exec.js");
+#     const go=new Go();WebAssembly.instantiate(require("fs").readFileSync("site/verify/loomseal.wasm"),
+#     go.importObject).then(r=>{go.run(r.instance);
+#     console.log(loomsealVerify(new Uint8Array(require("fs").readFileSync("bundle.json"))))})'
+#
 # It writes site/verify/loomseal.wasm, syncs wasm_exec.js from the toolchain that compiled it, and
 # stamps the version into site/verify/index.html so the page states which verifier it is running.
 
