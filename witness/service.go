@@ -218,6 +218,15 @@ func (s *Service) Start() error {
 		return fmt.Errorf("witness findings record: %w", err)
 	}
 	s.findings = f
+	// If Start fails past the point the record is open, its handle is closed rather than leaked. A
+	// caller that gets an error from Start does not go on to call Close, so nothing else would.
+	started := false
+	defer func() {
+		if !started {
+			_ = s.findings.Close()
+			s.findings = nil
+		}
+	}()
 	// Prior memory is loaded before the first sweep, so a witness restarted into an outage still
 	// attests what it holds on disk rather than claiming it witnessed nothing.
 	for key, w := range s.watchers {
@@ -242,6 +251,7 @@ func (s *Service) Start() error {
 			}
 		}
 	})
+	started = true
 	return nil
 }
 

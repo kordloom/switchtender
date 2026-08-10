@@ -8,6 +8,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -144,15 +146,41 @@ func EntryHash(e *Entry) string {
 // costs more than the comparison it buys.
 const MaxCanonicalDigestBytes = 1 << 20
 
-// secretPayloadKeys are the request-body keys whose values are secret material and must never enter
-// a content digest. The digest is stored in the chain and served in exports, and a SHA-256 over a
-// low-entropy secret is an offline brute-force target, so a body carrying one of these has its value
-// replaced before the digest is taken. The match is case-insensitive and by exact key: settings and
-// other non-secret fields are left in the digest so the record still proves the shape of the change.
-var secretPayloadKeys = map[string]bool{
-	"secret": true, "passphrase": true, "password": true, "token": true,
-	"private_key": true, "fields": true,
+// secretKeyStems are the substrings that mark a JSON key as secret-bearing, the same stems the
+// run-log inventory masker uses. They match anywhere in the key, so ansible_become_password,
+// secret_value, and token_id are all caught, not only the bare names. The digest is stored in the
+// chain and served in exports, and a SHA-256 over a low-entropy secret is an offline brute-force
+// target, so a value under one of these keys is replaced before the digest is taken.
+var secretKeyStems = []string{
+	"password", "passwd", "passphrase", "secret", "token", "apikey", "api_key",
+	"private_key", "privatekey",
 }
+
+// secretKey reports whether a key's value is secret material. It matches the stems above anywhere in
+// the key, the exact field "fields" (the secret bag of a custom credential type), and the bare pass
+// stem only as a whole key or a terminal _pass, so ansible_ssh_pass matches while bypass and
+// passthrough, whose values are ordinary, do not.
+func secretKey(key string) bool {
+	k := strings.ToLower(key)
+	if k == "fields" || k == "pass" || strings.HasSuffix(k, "_pass") {
+		return true
+	}
+	for _, stem := range secretKeyStems {
+		if strings.Contains(k, stem) {
+			return true
+		}
+	}
+	return false
+}
+
+// freeTextSecretKeys hold arbitrary text that can embed a connection secret, so their whole value is
+// redacted rather than trusted to key matching. An inventory's content routinely carries an
+// ansible_password or an API token in an assignment no JSON key names.
+var freeTextSecretKeys = map[string]bool{"content": true}
+
+// urlUserinfo matches the user:password@ credential in a URL-shaped string. A repo or endpoint URL
+// can carry an embedded credential, and the digest must not commit it while still showing the host.
+var urlUserinfo = regexp.MustCompile(`(?i)([a-z][a-z0-9+.\-]*://)[^/@\s]+@`)
 
 // redactedMarker stands in for a secret value in the digest input. It is a fixed constant so a
 // redacted digest is reproducible, and it is not a plausible real value.
@@ -179,9 +207,19 @@ func ContentDigestOf(body []byte) string {
 	input := body
 	if len(body) <= MaxCanonicalDigestBytes {
 		if value, err := jcs.Parse(body); err == nil {
-			redactSecrets(value)
+			value = redactSecrets(value)
+			// Once the body parsed, the digest is taken over the redacted tree and never the raw
+			// bytes. Falling back to the raw body when re-encoding failed would commit the secret the
+			// redaction just removed, which is the one thing this digest must never do. JCS is
+			// preferred so two equal requests digest alike; a value JCS cannot canonicalize, a
+			// fractional or a very large number, falls back to a plain deterministic JSON encoding of
+			// the same redacted tree, and a tree that will not encode at all digests the marker.
 			if canonical, err := jcs.Serialize(value); err == nil {
 				input = canonical
+			} else if marshaled, merr := json.Marshal(value); merr == nil {
+				input = marshaled
+			} else {
+				input = []byte(redactedMarker)
 			}
 		}
 	}
@@ -189,24 +227,38 @@ func ContentDigestOf(body []byte) string {
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
-// redactSecrets walks a parsed JSON value and replaces the value of every secret-bearing key with
-// the fixed marker, recursing through objects and arrays. Replacing rather than deleting keeps the
-// digest sensitive to whether a secret field was present at all, while never committing to what it
-// held.
-func redactSecrets(value any) {
+// redactSecrets walks a parsed JSON value and returns it with every secret removed: the value of a
+// secret-bearing key becomes the marker, a free-text secret field's string value is replaced whole,
+// and any URL credential in a string leaf is stripped to its host. Replacing rather than deleting
+// keeps the digest sensitive to whether a secret field was present while never committing what it
+// held. It returns the value so a scrubbed string leaf propagates to its parent.
+func redactSecrets(value any) any {
 	switch v := value.(type) {
 	case map[string]any:
 		for key, child := range v {
-			if secretPayloadKeys[strings.ToLower(key)] {
+			switch {
+			case secretKey(key):
 				v[key] = redactedMarker
-				continue
+			case freeTextSecretKeys[strings.ToLower(key)]:
+				if _, isString := child.(string); isString {
+					v[key] = redactedMarker
+				} else {
+					v[key] = redactSecrets(child)
+				}
+			default:
+				v[key] = redactSecrets(child)
 			}
-			redactSecrets(child)
 		}
+		return v
 	case []any:
-		for _, child := range v {
-			redactSecrets(child)
+		for i, child := range v {
+			v[i] = redactSecrets(child)
 		}
+		return v
+	case string:
+		return urlUserinfo.ReplaceAllString(v, "$1"+redactedMarker+"@")
+	default:
+		return v
 	}
 }
 

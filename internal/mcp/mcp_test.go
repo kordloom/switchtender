@@ -318,3 +318,59 @@ func TestNewClientRejectsBadInput(t *testing.T) {
 		t.Errorf("base = %q, want https for a bare host", c.base)
 	}
 }
+
+// TestGetRunLogReadsTextNotJSON proves the log tool reads the server's text/plain log as text. It
+// used to decode the body as JSON, which failed on the first character of any real log, so the tool
+// was unusable against the real API even though a JSON-returning mock made it look fine.
+func TestGetRunLogReadsTextNotJSON(t *testing.T) {
+	t.Parallel()
+	const logText = "PLAY [all] ***\nTASK [ping] ***\nok: [web]\n"
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/runs/run_1/logs" {
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = w.Write([]byte(logText))
+	}))
+	defer ts.Close()
+
+	tool := getRunLogTool(t, testClient(t, ts))
+	out, err := tool.Run(context.Background(), json.RawMessage(`{"run_id":"run_1"}`))
+	if err != nil {
+		t.Fatalf("get_run_log returned an error on a text/plain log: %v", err)
+	}
+	if out != logText {
+		t.Errorf("get_run_log = %q, want the raw log text", out)
+	}
+}
+
+// TestGetRunLogEmptyIsExplained proves an empty log reads as a clear message rather than a blank
+// string, which would once have been a JSON decode error on an empty body.
+func TestGetRunLogEmptyIsExplained(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	}))
+	defer ts.Close()
+
+	tool := getRunLogTool(t, testClient(t, ts))
+	out, err := tool.Run(context.Background(), json.RawMessage(`{"run_id":"run_1"}`))
+	if err != nil {
+		t.Fatalf("get_run_log on an empty log returned %v", err)
+	}
+	if out == "" {
+		t.Error("get_run_log returned an empty string for an empty log, want an explanation")
+	}
+}
+
+// getRunLogTool returns the get_run_log tool for the client.
+func getRunLogTool(t *testing.T, c *Client) Tool {
+	t.Helper()
+	for _, tool := range Tools(c, Options{}) {
+		if tool.Name == "get_run_log" {
+			return tool
+		}
+	}
+	t.Fatal("get_run_log tool not found")
+	return Tool{}
+}

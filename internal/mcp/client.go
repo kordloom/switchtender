@@ -70,21 +70,21 @@ func NewClient(base, token string, timeout time.Duration) (*Client, error) {
 	return &Client{base: base, token: token, http: &http.Client{Timeout: timeout}}, nil
 }
 
-// do performs one API call and decodes the JSON reply into out, which may be nil to discard it. A
-// non-2xx reply becomes an error carrying the server's message, so an agent is told why it was
-// refused rather than being handed a bare status code.
-func (c *Client) do(ctx context.Context, method, path string, body, out any) error {
+// doRaw performs one API call and returns the raw response body. A non-2xx reply becomes an error
+// carrying the server's message, so an agent is told why it was refused rather than being handed a
+// bare status code.
+func (c *Client) doRaw(ctx context.Context, method, path string, body any) ([]byte, error) {
 	var reader io.Reader
 	if body != nil {
 		encoded, err := json.Marshal(body)
 		if err != nil {
-			return fmt.Errorf("encode request: %w", err)
+			return nil, fmt.Errorf("encode request: %w", err)
 		}
 		reader = bytes.NewReader(encoded)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, c.base+path, reader)
 	if err != nil {
-		return fmt.Errorf("build request: %w", err)
+		return nil, fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+c.token)
 	req.Header.Set("Accept", "application/json")
@@ -93,16 +93,25 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 	}
 	res, err := c.http.Do(req)
 	if err != nil {
-		return fmt.Errorf("call %s: %w", path, err)
+		return nil, fmt.Errorf("call %s: %w", path, err)
 	}
 	defer func() { _ = res.Body.Close() }()
 
 	data, err := io.ReadAll(io.LimitReader(res.Body, maxResponseBytes))
 	if err != nil {
-		return fmt.Errorf("read %s: %w", path, err)
+		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
 	if res.StatusCode < 200 || res.StatusCode > 299 {
-		return fmt.Errorf("%s: %s", res.Status, serverMessage(data))
+		return nil, fmt.Errorf("%s: %s", res.Status, serverMessage(data))
+	}
+	return data, nil
+}
+
+// do performs one API call and decodes the JSON reply into out, which may be nil to discard it.
+func (c *Client) do(ctx context.Context, method, path string, body, out any) error {
+	data, err := c.doRaw(ctx, method, path, body)
+	if err != nil {
+		return err
 	}
 	if out == nil {
 		return nil
@@ -111,6 +120,17 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 		return fmt.Errorf("decode %s: %w", path, err)
 	}
 	return nil
+}
+
+// doText performs one API call and returns the response body as text, for an endpoint that serves
+// text/plain rather than JSON, such as a run's log. Decoding that body as JSON, as do would, fails
+// on the first character.
+func (c *Client) doText(ctx context.Context, method, path string) (string, error) {
+	data, err := c.doRaw(ctx, method, path, nil)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
 }
 
 // serverMessage pulls the API's error text out of a reply, falling back to the raw body clipped to

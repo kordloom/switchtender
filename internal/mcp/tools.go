@@ -148,11 +148,16 @@ func Tools(c *Client, opts Options) []Tool {
 				if err != nil {
 					return "", err
 				}
-				var out any
-				if err := c.do(ctx, "GET", "/v1/runs/"+escapeID(id)+"/logs", nil, &out); err != nil {
+				// The log endpoint serves text/plain, so it is read as text rather than decoded as
+				// JSON. The server has already masked secret values before storing the log.
+				log, err := c.doText(ctx, "GET", "/v1/runs/"+escapeID(id)+"/logs")
+				if err != nil {
 					return "", err
 				}
-				return render(out)
+				if log == "" {
+					return "(no output recorded yet)", nil
+				}
+				return log, nil
 			},
 		},
 		{

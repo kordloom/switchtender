@@ -2,6 +2,7 @@ package server
 
 import (
 	"net/http"
+	"path"
 	"strings"
 )
 
@@ -19,15 +20,28 @@ const (
 func bodyLimit(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
-		case http.MethodPost, http.MethodPut, http.MethodPatch:
+		case http.MethodGet, http.MethodHead:
+			// A read carries no body to cap.
+		default:
+			// Every mutating method is capped, not only POST, PUT, and PATCH. A DELETE or any other
+			// method left uncapped is a body the audit gate then buffers whole to digest it, which
+			// an anonymous caller could turn into an out-of-memory crash.
 			limit := int64(maxBodyBytes)
-			if strings.HasPrefix(r.URL.Path, "/v1/import/") || strings.HasPrefix(r.URL.Path, "/hooks/") {
+			if uploadPath(r.URL.Path) {
 				limit = maxUploadBodyBytes
 			}
 			r.Body = http.MaxBytesReader(w, r.Body, limit)
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// uploadPath reports whether p is one of the routes allowed a body past the ordinary cap: the import
+// endpoints and the inbound webhook hooks. It matches on the cleaned, lowercased path so a "../" or a
+// case trick cannot slip an ordinary mutation into the larger cap or past the body digest.
+func uploadPath(p string) bool {
+	clean := path.Clean("/" + strings.TrimPrefix(strings.ToLower(p), "/"))
+	return strings.HasPrefix(clean, "/v1/import/") || strings.HasPrefix(clean, "/hooks/")
 }
 
 // securityHeaders stamps every response with the browser hardening headers: no MIME sniffing, no

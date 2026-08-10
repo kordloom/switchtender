@@ -177,18 +177,33 @@ const (
 // the handler still reads it.
 //
 // A body that cannot be read fails the request closed. The alternative, recording an entry with no
-// digest and letting the change proceed, would let an oversized or truncated body buy an unrecorded
-// payload, which is the hole the digest exists to close. The body is already bounded by the
-// bodyLimit middleware above this one, so the buffer is capped before it is allocated.
+// digest and letting the change proceed, would let a truncated body buy an unrecorded payload, which
+// is the hole the digest exists to close.
+//
+// The read is bounded here rather than trusted to the bodyLimit middleware, because the digest runs
+// for every mutating method and bodyLimit does not cap all of them the same way. The import and hook
+// uploads are allowed a larger body and carry no secret by design, an export omits secret material
+// and a hook authenticates by the token in its path, so they pass through undigested rather than
+// buffered whole in the gate on top of the handler's own copy. Every other mutation, which is where
+// a secret can appear, is read up to one byte past maxBodyBytes and refused if it exceeds it, so a
+// DELETE with a multi-gigabyte body cannot exhaust memory.
 func (g *authGate) digestBody(w http.ResponseWriter, r *http.Request) (digest string, ok bool) {
 	if r.Body == nil || r.Body == http.NoBody {
 		return "", true
 	}
-	body, err := io.ReadAll(r.Body)
+	if uploadPath(r.URL.Path) {
+		return "", true
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxBodyBytes+1))
 	_ = r.Body.Close()
 	if err != nil {
 		respondError(w, g.log, http.StatusRequestEntityTooLarge,
 			"the request body could not be read, so the change was not recorded or made")
+		return "", false
+	}
+	if len(body) > maxBodyBytes {
+		respondError(w, g.log, http.StatusRequestEntityTooLarge,
+			"the request body exceeds the limit, so the change was not recorded or made")
 		return "", false
 	}
 	r.Body = io.NopCloser(bytes.NewReader(body))

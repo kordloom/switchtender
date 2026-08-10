@@ -37,7 +37,14 @@ func NewWatcher(server, statePath string, id identity.Identity, client *http.Cli
 	if client == nil {
 		client = &http.Client{Timeout: 30 * time.Second}
 	}
-	return &Watcher{server: NormalizeServer(server), state: statePath, id: id, client: client}
+	// A beat feed never legitimately redirects, and following one would let a watched server, the
+	// very party the witness exists to check, steer the witness into GET requests against other
+	// hosts it can reach. The client is copied so the caller's own redirect policy is untouched, and
+	// every redirect is refused on the copy: the fetch then sees the 3xx as a non-200 answer and
+	// treats it as a failed poll.
+	fetch := *client
+	fetch.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	return &Watcher{server: NormalizeServer(server), state: statePath, id: id, client: &fetch}
 }
 
 // Server returns the watched base URL, normalized.
