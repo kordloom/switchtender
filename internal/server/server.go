@@ -13,6 +13,7 @@ import (
 	"github.com/kordloom/switchtender/internal/ai"
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/auth"
+	"github.com/kordloom/switchtender/internal/beatfeed"
 	"github.com/kordloom/switchtender/internal/credential"
 	"github.com/kordloom/switchtender/internal/grant"
 	"github.com/kordloom/switchtender/internal/importer"
@@ -421,7 +422,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /v1/audit/register", auditRegisterHandler(s.store, s.audits, s.log))
 	// Served unauthenticated: the beat feed exists so an outside watcher can see the chain is
 	// alive and whole, and that watcher has no account here.
-	mux.Handle("GET /v1/audit/beats", auditBeatsHandler(s.audits, s.log))
+	mux.Handle("GET "+beatfeed.APIPath, auditBeatsHandler(s.audits, s.log))
 	// Served unversioned and unauthenticated: a relying party checking a bundle has no account here,
 	// and the document holds only the public half of the signing key.
 	mux.Handle("GET /.well-known/loomseal.json", trustHandler(s.producer, s.productVersion, s.log))

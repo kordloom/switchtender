@@ -13,11 +13,12 @@ import (
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/auth"
+	"github.com/kordloom/switchtender/internal/beatfeed"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
 // getBeats requests the beat feed without any credential and decodes the answer.
-func getBeats(t *testing.T, handler http.Handler, target string) (int, []beatRecord) {
+func getBeats(t *testing.T, handler http.Handler, target string) (int, []beatfeed.Beat) {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, target, nil)
 	rec := httptest.NewRecorder()
@@ -25,7 +26,7 @@ func getBeats(t *testing.T, handler http.Handler, target string) (int, []beatRec
 	if rec.Code != http.StatusOK {
 		return rec.Code, nil
 	}
-	var beats []beatRecord
+	var beats []beatfeed.Beat
 	if err := json.Unmarshal(rec.Body.Bytes(), &beats); err != nil {
 		t.Fatalf("beats feed is not a JSON array: %v", err)
 	}
@@ -111,7 +112,7 @@ func TestAuditBeatsFeed(t *testing.T) {
 	// The feed's records must be the chain's span entries verbatim, oldest first, with each head
 	// being the beat entry's own hash so a watcher can pin it. The near-miss at sequence five is
 	// not among them.
-	want := []beatRecord{{
+	want := []beatfeed.Beat{{
 		Beat: 1, At: chain[2].At.UTC().Format(time.RFC3339Nano), Seq: 3, Head: chain[2].Hash,
 	}, {
 		Beat: 2, At: chain[5].At.UTC().Format(time.RFC3339Nano), Seq: 6, Head: chain[5].Hash,

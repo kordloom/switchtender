@@ -22,6 +22,7 @@ import (
 	"context"
 
 	"github.com/kordloom/switchtender/internal/ai"
+	"github.com/kordloom/switchtender/internal/beatfeed"
 	"github.com/kordloom/switchtender/internal/dispatch"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
@@ -118,3 +119,16 @@ type SecretMinter = secretsource.MintFunc
 func RegisterDynamicSecretSource(kind string, minter SecretMinter) {
 	secretsource.RegisterDynamic(kind, minter)
 }
+
+// Beat is one span beat as the feed at BeatFeedPath serves it. It is the wire contract an
+// out-of-tree witness builds against: the server produces this shape and a watcher consumes it, so
+// exposing it here keeps an external watcher from guessing the fields and drifting from the server.
+type Beat = beatfeed.Beat
+
+// BeatFeedPath is the request path the span beat feed is served at, version prefix included, so an
+// external witness fetches <base>+BeatFeedPath. The feed is unauthenticated by design: the party it
+// exists to convince has no account on the watched server.
+const BeatFeedPath = beatfeed.APIPath
+
+// BeatFeedLimitParam is the query parameter that bounds how many beats one feed request returns.
+const BeatFeedLimitParam = beatfeed.LimitParam

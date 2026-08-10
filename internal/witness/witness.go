@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/beatfeed"
 )
 
 // FeedLimit is how many beats the witness asks the feed for, and recentCap is how many it
@@ -29,17 +30,9 @@ const (
 	recentCap = FeedLimit
 )
 
-// Beat is one span beat as the feed serves it.
-type Beat struct {
-	// Beat is the beat number, starting at one and rising by exactly one per beat.
-	Beat int64 `json:"beat"`
-	// At is when the beat was appended, RFC 3339.
-	At string `json:"at"`
-	// Seq is the beat entry's position in the audit chain.
-	Seq int64 `json:"seq"`
-	// Head is the beat entry's chain hash, the head the beat attests.
-	Head string `json:"head"`
-}
+// Beat is one span beat as the feed serves it. It is the shared feed contract the server produces
+// and the witness consumes, so the two cannot drift.
+type Beat = beatfeed.Beat
 
 // Observed is what the witness remembers of one beat.
 type Observed struct {

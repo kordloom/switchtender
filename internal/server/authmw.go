@@ -15,6 +15,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/auth"
+	"github.com/kordloom/switchtender/internal/beatfeed"
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/user"
 )
@@ -537,7 +538,7 @@ func (g *authGate) protects(r *http.Request) bool {
 	// The span beat feed is how an outside watcher notices a chain that went quiet or lost its
 	// tail. Like the trust document, it exists for a party with no account here, and a feed that
 	// needs a token cannot be watched by the one the record is meant to convince.
-	if r.Method == http.MethodGet && p == "/audit/beats" {
+	if r.Method == http.MethodGet && p == beatfeed.FeedPath {
 		return false
 	}
 	// Sign in must be reachable while the API is enforced.

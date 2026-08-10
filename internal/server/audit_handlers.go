@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/beatfeed"
 )
 
 // auditResponse wraps the audit trail.
@@ -41,18 +42,6 @@ func auditHandler(store audit.Store, log *zap.Logger) http.HandlerFunc {
 		respondJSON(w, log, http.StatusOK,
 			auditResponse{Entries: entries, Count: len(entries)}, wantsPretty(r))
 	}
-}
-
-// beatRecord is one span beat as the public feed reports it.
-type beatRecord struct {
-	// Beat is the beat number, starting at one and increasing by exactly one per beat.
-	Beat int64 `json:"beat"`
-	// At is when the beat was appended, RFC 3339 UTC.
-	At string `json:"at"`
-	// Seq is the beat entry's position in the audit chain.
-	Seq int64 `json:"seq"`
-	// Head is the beat entry's own chain hash, the head the beat attests.
-	Head string `json:"head"`
 }
 
 // defaultBeatLimit caps how many beats the feed returns when the caller sets no limit, and stands
@@ -96,13 +85,13 @@ func auditBeatsHandler(store audit.Store, log *zap.Logger) http.HandlerFunc {
 			respondError(w, log, http.StatusInternalServerError, "could not read the audit trail")
 			return
 		}
-		beats := []beatRecord{}
+		beats := []beatfeed.Beat{}
 		for _, e := range entries {
 			beat, _, _, ok := audit.ParseSpanPath(e.Path)
 			if !ok {
 				continue
 			}
-			beats = append(beats, beatRecord{
+			beats = append(beats, beatfeed.Beat{
 				Beat: beat, At: e.At.UTC().Format(time.RFC3339Nano), Seq: e.Seq, Head: e.Hash,
 			})
 		}

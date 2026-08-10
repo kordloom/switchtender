@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/beatfeed"
 )
 
 // Watcher watches one server's beat feed, keeping its signed memory in one state file. The single
@@ -86,7 +87,7 @@ const maxHeadLen = 128
 // re-adopted rather than reported. The feed is untrusted input from the very operator the witness
 // exists to check, so its size and shape are enforced, not assumed.
 func (w *Watcher) fetchBeats(ctx context.Context) ([]Beat, error) {
-	feed := fmt.Sprintf("%s/v1/audit/beats?limit=%d", w.server, FeedLimit)
+	feed := fmt.Sprintf("%s%s?%s=%d", w.server, beatfeed.APIPath, beatfeed.LimitParam, FeedLimit)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, feed, nil)
 	if err != nil {
 		return nil, err
