@@ -1,9 +1,13 @@
 package ui
 
 import (
+	"bytes"
+	"compress/gzip"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"testing/fstest"
 
@@ -71,4 +75,69 @@ func TestAssembleAppJSKeepsPartsUnservable(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestAssetGzipIsLazyAndCorrect proves gzip is not computed at construction but is served correctly
+// on demand and reused. Compressing every asset at boot was tens of milliseconds on the startup
+// path that a health probe or an API-only caller never needed, so it now happens on first request.
+func TestAssetGzipIsLazyAndCorrect(t *testing.T) {
+	t.Parallel()
+	big := bytes.Repeat([]byte("alertable and compressible content;\n"), 200)
+	h := newAssetHandler(fstest.MapFS{"app.css": {Data: big}, "js/01.js": {Data: []byte("var x=1;\n")}})
+
+	// Nothing is compressed until a request asks for it.
+	if h.assets["app.css"].gzipped != nil {
+		t.Fatal("gzip body was computed at construction; it must be lazy")
+	}
+
+	// A gzip-accepting request gets gzip that decodes back to the exact body.
+	req := httptest.NewRequest(http.MethodGet, "/app.css", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if got := rec.Header().Get("Content-Encoding"); got != "gzip" {
+		t.Fatalf("Content-Encoding = %q, want gzip", got)
+	}
+	zr, err := gzip.NewReader(rec.Body)
+	if err != nil {
+		t.Fatalf("gzip.NewReader: %v", err)
+	}
+	round, err := io.ReadAll(zr)
+	if err != nil {
+		t.Fatalf("read gzip: %v", err)
+	}
+	if !bytes.Equal(round, big) {
+		t.Error("gzip body did not decode back to the original")
+	}
+
+	// The compression is computed once and cached on the shared entry.
+	if h.assets["app.css"].gzipped == nil {
+		t.Fatal("gzip body was not cached after first use")
+	}
+
+	// A client that does not accept gzip gets the raw body.
+	plain := httptest.NewRequest(http.MethodGet, "/app.css", nil)
+	prec := httptest.NewRecorder()
+	h.ServeHTTP(prec, plain)
+	if prec.Header().Get("Content-Encoding") != "" || !bytes.Equal(prec.Body.Bytes(), big) {
+		t.Error("a non-gzip client should get the raw body")
+	}
+}
+
+// TestAssetGzipConcurrent runs many gzip requests for one asset at once, so the race detector proves
+// the lazy compute is safe under load.
+func TestAssetGzipConcurrent(t *testing.T) {
+	t.Parallel()
+	h := newAssetHandler(fstest.MapFS{"app.css": {Data: bytes.Repeat([]byte("x=1;\n"), 500)}, "js/01.js": {Data: []byte("var x=1;\n")}})
+	var wg sync.WaitGroup
+	for i := 0; i < 32; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			req := httptest.NewRequest(http.MethodGet, "/app.css", nil)
+			req.Header.Set("Accept-Encoding", "gzip")
+			h.ServeHTTP(httptest.NewRecorder(), req)
+		}()
+	}
+	wg.Wait()
 }

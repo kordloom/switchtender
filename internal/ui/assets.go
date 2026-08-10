@@ -11,19 +11,35 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"sync"
 )
 
-// asset is one embedded static file prepared for serving, with its content type, a content
-// derived ETag, and a precomputed gzip body so neither is recomputed per request.
+// asset is one embedded static file prepared for serving, with its content type and a content
+// derived ETag. Its gzip body is computed on first request and cached, not at startup: compressing
+// every asset at boot at the best level cost tens of milliseconds on the critical path, and a
+// health probe or an API-only caller never fetches an asset, so it paid for compression it never
+// used. The bytes never change for a given binary, so the once-computed gzip is reused for the
+// process's life.
 type asset struct {
 	// body is the raw file bytes.
 	body []byte
-	// gzipped is the gzip encoded body, nil when compression did not shrink the file.
-	gzipped []byte
 	// contentType is the MIME type sent with the file.
 	contentType string
 	// etag is the quoted content hash, used for conditional revalidation.
 	etag string
+	// gzipOnce guards the one-time gzip compression.
+	gzipOnce sync.Once
+	// gzipped is the gzip encoded body, computed once by gzip and nil when compression did not
+	// shrink the file.
+	gzipped []byte
+}
+
+// gzip returns the asset's gzip body, computing it once on first use and reusing it thereafter. It
+// returns nil when compression does not shrink the file, in which case the caller serves the raw
+// body.
+func (a *asset) gzip() []byte {
+	a.gzipOnce.Do(func() { a.gzipped = gzipBody(a.body) })
+	return a.gzipped
 }
 
 // assetHandler serves the embedded UI assets with content based ETags and precomputed gzip. The
@@ -31,14 +47,15 @@ type asset struct {
 // 304 instead of re-downloading the whole bundle on every page. A new build changes the content
 // and therefore the ETag, so an upgrade is never served stale.
 type assetHandler struct {
-	// assets maps a request path, such as app.js, to its prepared file.
-	assets map[string]asset
+	// assets maps a request path, such as app.js, to its prepared file. Values are pointers so an
+	// asset's lazily computed gzip body is cached on the shared entry rather than on a copy.
+	assets map[string]*asset
 }
 
 // newAssetHandler prepares every file in the embedded assets subtree for serving. It panics on a
 // read failure, which is a build time error since the tree is embedded.
 func newAssetHandler(assets fs.FS) *assetHandler {
-	h := &assetHandler{assets: make(map[string]asset)}
+	h := &assetHandler{assets: make(map[string]*asset)}
 	err := fs.WalkDir(assets, ".", func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
@@ -58,9 +75,8 @@ func newAssetHandler(assets fs.FS) *assetHandler {
 			}
 		}
 		sum := sha256.Sum256(body)
-		h.assets[p] = asset{
+		h.assets[p] = &asset{
 			body:        body,
-			gzipped:     gzipBody(body),
 			contentType: ct,
 			etag:        `"` + hex.EncodeToString(sum[:16]) + `"`,
 		}
@@ -116,9 +132,8 @@ func (h *assetHandler) assembleAppJS() {
 		delete(h.assets, p)
 	}
 	sum := sha256.Sum256(body)
-	h.assets["app.js"] = asset{
+	h.assets["app.js"] = &asset{
 		body:        body,
-		gzipped:     gzipBody(body),
 		contentType: mime.TypeByExtension(".js"),
 		etag:        `"` + hex.EncodeToString(sum[:16]) + `"`,
 	}
@@ -161,10 +176,12 @@ func (h *assetHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotModified)
 		return
 	}
-	if a.gzipped != nil && strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
-		header.Set("Content-Encoding", "gzip")
-		_, _ = w.Write(a.gzipped)
-		return
+	if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+		if gz := a.gzip(); gz != nil {
+			header.Set("Content-Encoding", "gzip")
+			_, _ = w.Write(gz)
+			return
+		}
 	}
 	_, _ = w.Write(a.body)
 }
