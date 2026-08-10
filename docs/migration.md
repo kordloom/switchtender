@@ -32,6 +32,19 @@ right:
 
 Semaphore works the same way with `import semaphore`.
 
+## Import a crontab
+
+Fleets that still schedule work from a crontab can bring it under governance in one step. Point the
+importer at a crontab file and it turns each cron line into a governed schedule, so every firing is
+approved, recorded, and provable like any other run instead of running unseen on one box.
+
+    switchtender import cron /var/spool/cron/crontabs/deploy --inventory prod --db switchtender.db
+
+A crontab names no target host, so `--inventory` says where the jobs run. Add `--system` to read
+`/etc/crontab` and the system tabs, which carry a user column the report calls out. Comments and
+environment lines are noted and skipped. As with the other imports, leave off `--apply` to preview
+the schedules first, then re-run with `--apply` to create them.
+
 ## What maps to what
 
 | Source | Becomes |

@@ -60,6 +60,13 @@ it at the template.</li>
 <p>To schedule without a template, send <code>playbook</code> and <code>inventory</code> inline, add <code>shards</code> for a split, or
 <code>steps</code> for a pipeline. A worker or the server must be running for a schedule to fire. Add capacity
 with <code>switchtender worker</code>.</p>
+<p>By default the cron expression reads in the server's local time. Add a <code>timezone</code>, an IANA name such
+as <code>America/New_York</code>, to pin it to a zone and let it follow that zone's daylight-saving shifts, so a
+nightly window stays put across the year.</p>
+<pre><code>curl -s -X POST localhost:8080/v1/schedules \
+  -H 'content-type: application/json' \
+  -d '{&quot;cron&quot;:&quot;0 2 * * *&quot;,&quot;timezone&quot;:&quot;America/New_York&quot;,&quot;template_id&quot;:&quot;tpl_abc123&quot;}'
+</code></pre>
 <p>Next: give the job its secrets with <a href="/docs/tutorial-set-a-secret">set a secret</a>.</p>
 
 		</main>

@@ -42,8 +42,8 @@
 		<main class="dcontent prose">
 			<h1 id="http-api">HTTP API</h1>
 <p>Every endpoint the server exposes. The API is served under the <code>/v1</code> base path. The web UI at
-<code>/ui/</code>, along with <code>/healthz</code>, <code>/metrics</code>, the OpenID Connect and SAML sign-in routes, the webhook
-<code>/hooks</code> path, and the <code>/relay</code> worker path, is unversioned. The root redirects to the UI.</p>
+<code>/ui/</code>, along with <code>/healthz</code>, <code>/readyz</code>, <code>/metrics</code>, the OpenID Connect and SAML sign-in routes, the
+webhook <code>/hooks</code> path, and the <code>/relay</code> worker path, is unversioned. The root redirects to the UI.</p>
 <table>
 <thead>
 <tr>
@@ -77,6 +77,11 @@
 <td>POST</td>
 <td><code>/v1/runs/{id}/retry</code></td>
 <td>New split from only the failed shards of a finished one.</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/v1/runs/{id}/relaunch-failed</code></td>
+<td>Re-run only the hosts a finished run left failed or unreachable.</td>
 </tr>
 <tr>
 <td>POST</td>
@@ -530,6 +535,11 @@
 </tr>
 <tr>
 <td>GET</td>
+<td><code>/v1/audit/bundle</code></td>
+<td>The audit chain as a signed LoomSeal bundle, verifiable offline or on the /verify page.</td>
+</tr>
+<tr>
+<td>GET</td>
 <td><code>/metrics</code></td>
 <td>Prometheus series: run, fleet, queue-depth, and worker gauges, plus a run-duration histogram.</td>
 </tr>
@@ -537,6 +547,11 @@
 <td>GET</td>
 <td><code>/healthz</code></td>
 <td>Liveness.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/readyz</code></td>
+<td>Readiness: 200 once the store answers, 503 while it does not.</td>
 </tr>
 </tbody>
 </table>
@@ -582,6 +597,88 @@ run, whether the launch came from the API, a schedule, or a webhook trigger.</p>
 <p>Zero, or the field omitted, leaves launches on the server default set by <code>--run-timeout</code>, so a
 template saved before this field existed is unchanged. A run that exceeds its timeout is canceled
 and finalized as failed. A launch cannot raise the cap; the template's value is what applies.</p>
+<h2 id="ansible-run-controls">Ansible run controls</h2>
+<p>A run submission and a template both accept the Ansible controls that used to require a hand-built
+command. They ride onto a run the same way from the API, a schedule, or a webhook trigger, and a
+retry keeps them.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>tags</code></td>
+<td>list of strings</td>
+<td>Runs only the plays and tasks carrying one of these tags. Becomes <code>--tags</code>.</td>
+</tr>
+<tr>
+<td><code>skip_tags</code></td>
+<td>list of strings</td>
+<td>Skips the plays and tasks carrying one of these tags. Becomes <code>--skip-tags</code>.</td>
+</tr>
+<tr>
+<td><code>forks</code></td>
+<td>integer</td>
+<td>How many hosts Ansible addresses at once. Zero leaves the Ansible default. Becomes <code>--forks</code>.</td>
+</tr>
+<tr>
+<td><code>verbosity</code></td>
+<td>integer 0 to 4</td>
+<td>Raises Ansible logging. One through four becomes <code>-v</code> through <code>-vvvv</code>; a higher number is clamped to four.</td>
+</tr>
+<tr>
+<td><code>diff_mode</code></td>
+<td>boolean</td>
+<td>Shows the before and after of every changed file and template. Becomes <code>--diff</code>.</td>
+</tr>
+</tbody>
+</table>
+<pre><code class="language-bash">curl -X POST https://switchtender.example.com/v1/runs \
+  -H &quot;Authorization: Bearer $SWITCHTENDER_TOKEN&quot; \
+  -H 'Content-Type: application/json' \
+  -d '{
+    &quot;playbook&quot;: &quot;plays/deploy.yml&quot;,
+    &quot;inventory&quot;: &quot;prod&quot;,
+    &quot;tags&quot;: [&quot;web&quot;, &quot;config&quot;],
+    &quot;skip_tags&quot;: [&quot;reboot&quot;],
+    &quot;forks&quot;: 25,
+    &quot;verbosity&quot;: 2,
+    &quot;diff_mode&quot;: true
+  }'
+</code></pre>
+<p>These apply to the Ansible tool. The other tools ignore them, so a Bash or Terraform template that
+carries one is unaffected.</p>
+<h2 id="survey-field-constraints">Survey field constraints</h2>
+<p>A template survey field accepts bounds beyond its type, checked at launch before any answer becomes
+an extra var. A field also takes an optional <code>help</code> string shown beneath its prompt, and a
+<code>multiline</code> type for a block of text such as a set of variables or a note.</p>
+<table>
+<thead>
+<tr>
+<th>Field kind</th>
+<th>Constraints</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>int</code></td>
+<td><code>min</code> and <code>max</code> bound the answer, inclusive.</td>
+</tr>
+<tr>
+<td><code>text</code>, <code>multiline</code></td>
+<td><code>min_length</code> and <code>max_length</code> bound the length; <code>pattern</code> is a regular expression the whole answer must match.</td>
+</tr>
+<tr>
+<td><code>choice</code></td>
+<td>The answer must be one of <code>choices</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>A launch that violates a constraint is refused with the field it failed, and no run is submitted.</p>
 <h2 id="per-template-notifications">Per-template notifications</h2>
 <p>A template or a run submission may carry <code>notifications</code>, a list of targets that receive its
 terminal state in addition to the server-wide channels. Each target names a <code>kind</code> and the field
@@ -654,6 +751,17 @@ that kind is addressed by, plus an optional <code>on_failure</code> that limits 
 delivery. A Twilio or email target names only a recipient. The account credentials stay in server
 flags, so a template never carries them. On read, webhook URLs, PagerDuty routing keys, and
 Grafana tokens come back masked; an edit that echoes the mask back keeps the stored value.</p>
+<h2 id="schedule-timezone">Schedule timezone</h2>
+<p>A schedule reads its cron expression in the server's local time unless it carries a <code>timezone</code>, an
+IANA name such as <code>America/New_York</code> or <code>Europe/Berlin</code>. With one set, <code>0 2 * * *</code> fires at 02:00
+in that zone and follows its daylight-saving shifts, so a nightly window stays put across the year.
+The field is accepted on create and update and applies to the same expression the preview endpoint
+renders.</p>
+<pre><code class="language-bash">curl -X POST https://switchtender.example.com/v1/schedules \
+  -H &quot;Authorization: Bearer $SWITCHTENDER_TOKEN&quot; \
+  -H 'Content-Type: application/json' \
+  -d '{&quot;cron&quot;:&quot;0 2 * * *&quot;,&quot;timezone&quot;:&quot;America/New_York&quot;,&quot;template_id&quot;:&quot;tpl_abc123&quot;}'
+</code></pre>
 <h2 id="relay-endpoints">Relay endpoints</h2>
 <p>With <code>--worker-token</code> set, the server also serves the mesh relay under <code>/relay</code>: the execution
 path an outbound worker started with <code>--server</code> uses instead of a database connection. Every call

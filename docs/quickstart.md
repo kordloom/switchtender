@@ -27,6 +27,10 @@ or existing credentials cannot be decrypted.
 
 Open http://localhost:8080 for the web UI, or use the API directly.
 
+A fresh install opens with an empty templates list. `./switchtender examples --db switchtender.db`
+seeds a handful of starter templates that run with no project, inventory, or credential, so a first
+launch works on the spot. It skips a template whose name is already present, so it is safe to re-run.
+
 On your own machine, `./switchtender desktop` does all of this in one command. It picks a stable
 loopback port, keeps its data in a per-user directory, and opens the UI. The
 [desktop guide](desktop.md) covers it, including packaging.

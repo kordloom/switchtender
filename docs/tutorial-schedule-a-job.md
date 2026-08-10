@@ -29,4 +29,12 @@ To schedule without a template, send `playbook` and `inventory` inline, add `sha
 `steps` for a pipeline. A worker or the server must be running for a schedule to fire. Add capacity
 with `switchtender worker`.
 
+By default the cron expression reads in the server's local time. Add a `timezone`, an IANA name such
+as `America/New_York`, to pin it to a zone and let it follow that zone's daylight-saving shifts, so a
+nightly window stays put across the year.
+
+    curl -s -X POST localhost:8080/v1/schedules \
+      -H 'content-type: application/json' \
+      -d '{"cron":"0 2 * * *","timezone":"America/New_York","template_id":"tpl_abc123"}'
+
 Next: give the job its secrets with [set a secret](tutorial-set-a-secret.md).

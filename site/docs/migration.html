@@ -61,6 +61,16 @@ right:</p>
 <pre><code>switchtender import awx awx-export.json --db switchtender.db --apply
 </code></pre>
 <p>Semaphore works the same way with <code>import semaphore</code>.</p>
+<h2 id="import-a-crontab">Import a crontab</h2>
+<p>Fleets that still schedule work from a crontab can bring it under governance in one step. Point the
+importer at a crontab file and it turns each cron line into a governed schedule, so every firing is
+approved, recorded, and provable like any other run instead of running unseen on one box.</p>
+<pre><code>switchtender import cron /var/spool/cron/crontabs/deploy --inventory prod --db switchtender.db
+</code></pre>
+<p>A crontab names no target host, so <code>--inventory</code> says where the jobs run. Add <code>--system</code> to read
+<code>/etc/crontab</code> and the system tabs, which carry a user column the report calls out. Comments and
+environment lines are noted and skipped. As with the other imports, leave off <code>--apply</code> to preview
+the schedules first, then re-run with <code>--apply</code> to create them.</p>
 <h2 id="what-maps-to-what">What maps to what</h2>
 <table>
 <thead>

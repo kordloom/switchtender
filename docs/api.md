@@ -8,8 +8,8 @@
 # HTTP API
 
 Every endpoint the server exposes. The API is served under the `/v1` base path. The web UI at
-`/ui/`, along with `/healthz`, `/metrics`, the OpenID Connect and SAML sign-in routes, the webhook
-`/hooks` path, and the `/relay` worker path, is unversioned. The root redirects to the UI.
+`/ui/`, along with `/healthz`, `/readyz`, `/metrics`, the OpenID Connect and SAML sign-in routes, the
+webhook `/hooks` path, and the `/relay` worker path, is unversioned. The root redirects to the UI.
 
 | Method | Path                    | What                                                    |
 |--------|-------------------------|---------------------------------------------------------|
@@ -18,6 +18,7 @@ Every endpoint the server exposes. The API is served under the `/v1` base path. 
 | GET    | `/v1/runs/{id}`            | One run.                                                |
 | POST   | `/v1/runs/{id}/cancel`     | Cancel a pending or running run.                        |
 | POST   | `/v1/runs/{id}/retry`      | New split from only the failed shards of a finished one.|
+| POST   | `/v1/runs/{id}/relaunch-failed` | Re-run only the hosts a finished run left failed or unreachable. |
 | POST   | `/v1/runs/{id}/approve`    | Release a run held for approval so it runs.             |
 | POST   | `/v1/runs/{id}/reject`     | Deny a run held for approval.                           |
 | GET    | `/v1/runs/{id}/shards`     | Shard runs of a split.                                  |
@@ -108,8 +109,10 @@ Every endpoint the server exposes. The API is served under the `/v1` base path. 
 | GET    | `/v1/audit`                | The mutation trail, admin only.                         |
 | GET    | `/v1/audit/verify`         | Verify the audit hash chain is intact.                  |
 | GET    | `/v1/audit/export`         | Signed, self-verifying snapshot of the audit chain.     |
+| GET    | `/v1/audit/bundle`         | The audit chain as a signed LoomSeal bundle, verifiable offline or on the /verify page. |
 | GET    | `/metrics`              | Prometheus series: run, fleet, queue-depth, and worker gauges, plus a run-duration histogram. |
 | GET    | `/healthz`              | Liveness.                                               |
+| GET    | `/readyz`               | Readiness: 200 once the store answers, 503 while it does not. |
 
 ## Account profiles
 
@@ -164,6 +167,52 @@ Zero, or the field omitted, leaves launches on the server default set by `--run-
 template saved before this field existed is unchanged. A run that exceeds its timeout is canceled
 and finalized as failed. A launch cannot raise the cap; the template's value is what applies.
 
+## Ansible run controls
+
+A run submission and a template both accept the Ansible controls that used to require a hand-built
+command. They ride onto a run the same way from the API, a schedule, or a webhook trigger, and a
+retry keeps them.
+
+| Field | Type | What it does |
+|-------|------|--------------|
+| `tags` | list of strings | Runs only the plays and tasks carrying one of these tags. Becomes `--tags`. |
+| `skip_tags` | list of strings | Skips the plays and tasks carrying one of these tags. Becomes `--skip-tags`. |
+| `forks` | integer | How many hosts Ansible addresses at once. Zero leaves the Ansible default. Becomes `--forks`. |
+| `verbosity` | integer 0 to 4 | Raises Ansible logging. One through four becomes `-v` through `-vvvv`; a higher number is clamped to four. |
+| `diff_mode` | boolean | Shows the before and after of every changed file and template. Becomes `--diff`. |
+
+```bash
+curl -X POST https://switchtender.example.com/v1/runs \
+  -H "Authorization: Bearer $SWITCHTENDER_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "playbook": "plays/deploy.yml",
+    "inventory": "prod",
+    "tags": ["web", "config"],
+    "skip_tags": ["reboot"],
+    "forks": 25,
+    "verbosity": 2,
+    "diff_mode": true
+  }'
+```
+
+These apply to the Ansible tool. The other tools ignore them, so a Bash or Terraform template that
+carries one is unaffected.
+
+## Survey field constraints
+
+A template survey field accepts bounds beyond its type, checked at launch before any answer becomes
+an extra var. A field also takes an optional `help` string shown beneath its prompt, and a
+`multiline` type for a block of text such as a set of variables or a note.
+
+| Field kind | Constraints |
+|------------|-------------|
+| `int` | `min` and `max` bound the answer, inclusive. |
+| `text`, `multiline` | `min_length` and `max_length` bound the length; `pattern` is a regular expression the whole answer must match. |
+| `choice` | The answer must be one of `choices`. |
+
+A launch that violates a constraint is refused with the field it failed, and no run is submitted.
+
 ## Per-template notifications
 
 A template or a run submission may carry `notifications`, a list of targets that receive its
@@ -200,6 +249,21 @@ A malformed target is refused at create or update with the field it lacks, not d
 delivery. A Twilio or email target names only a recipient. The account credentials stay in server
 flags, so a template never carries them. On read, webhook URLs, PagerDuty routing keys, and
 Grafana tokens come back masked; an edit that echoes the mask back keeps the stored value.
+
+## Schedule timezone
+
+A schedule reads its cron expression in the server's local time unless it carries a `timezone`, an
+IANA name such as `America/New_York` or `Europe/Berlin`. With one set, `0 2 * * *` fires at 02:00
+in that zone and follows its daylight-saving shifts, so a nightly window stays put across the year.
+The field is accepted on create and update and applies to the same expression the preview endpoint
+renders.
+
+```bash
+curl -X POST https://switchtender.example.com/v1/schedules \
+  -H "Authorization: Bearer $SWITCHTENDER_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"cron":"0 2 * * *","timezone":"America/New_York","template_id":"tpl_abc123"}'
+```
 
 ## Relay endpoints
 

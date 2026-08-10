@@ -57,9 +57,13 @@ firing on one click. The API field is <code>confirm_on_launch</code>.</li>
 </ol>
 <h2 id="add-a-survey">Add a survey</h2>
 <p>A survey is a set of typed questions asked at launch, whose answers become extra vars. Add fields of
-type text, integer, boolean, or choice, and mark the ones that are required. Ansible receives them as
-extra vars. Bash and Python receive them as environment values. Terraform receives
+type text, multiline, integer, boolean, or choice, and mark the ones that are required. Ansible
+receives them as extra vars. Bash and Python receive them as environment values. Terraform receives
 them as <code>TF_VAR_</code> variables.</p>
+<p>Each field takes bounds beyond its type, checked before the launch is accepted: <code>min</code> and <code>max</code> on an
+integer, <code>min_length</code>, <code>max_length</code>, and a <code>pattern</code> regular expression on text, and the fixed set on
+a choice. Add a <code>help</code> string to show guidance beneath the prompt. A launch that breaks a bound is
+refused with the field it failed, and no run starts.</p>
 <h2 id="launch-it">Launch it</h2>
 <p>From the UI, select the template and confirm the survey if it has one. From the API:</p>
 <pre><code>curl -s -X POST localhost:8080/v1/templates/{id}/launch \

@@ -53,7 +53,12 @@ project, so relative paths and roles behave the way they do in the repository. A
 exactly those check runs.</p>
 <p>Ansible runs are the ones that split. A split run shards the inventory across parallel slices,
 packs hosts onto shards by their measured durations from past runs, and merges every slice back
-into one matrix. Failed shards retry alone.</p>
+into one matrix. Failed shards retry alone, and <code>relaunch-failed</code> re-runs only the hosts a finished
+run left failed or unreachable.</p>
+<p>A run or template may carry the usual Ansible controls without a hand-built command: <code>tags</code> and
+<code>skip_tags</code> select or exclude tagged plays and tasks, <code>forks</code> sets how many hosts run at once,
+<code>verbosity</code> from one to four raises logging as <code>-v</code> through <code>-vvvv</code>, and <code>diff_mode</code> shows the
+before and after of every changed file. They are Ansible-only and the other tools ignore them.</p>
 <h2 id="how-values-reach-the-play">How values reach the play</h2>
 <ul>
 <li>Extra vars, including survey answers and template vars, arrive as Ansible extra vars, so
