@@ -66,8 +66,8 @@ func (f *fakeStore) AppendSpanBeat(
 ) (spanbeat.AppendedBeat, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.cadences = append(f.cadences, cadenceSeconds)
 	if f.failWith != nil {
-		f.cadences = append(f.cadences, cadenceSeconds)
 		return spanbeat.AppendedBeat{}, f.failWith
 	}
 	use := at
@@ -85,7 +85,6 @@ func (f *fakeStore) AppendSpanBeat(
 	f.lastAt = use
 	b := spanbeat.AppendedBeat{At: use, Seq: f.beat, Hash: fmt.Sprintf("hash-%d", f.beat), Beat: f.beat}
 	f.appended = append(f.appended, b)
-	f.cadences = append(f.cadences, cadenceSeconds)
 	return b, nil
 }
 
@@ -270,5 +269,47 @@ func TestNewEmitterPanics(t *testing.T) {
 			}()
 			spanbeat.NewEmitter(test.Store, test.Cadence, nil)
 		})
+	}
+}
+
+// TestReadStatsCountsBeats pins the counters the metrics endpoint alerts on. Going quiet is only a
+// bounded gap in the record, so it has to be loud here: a suppressed beat that never moved the
+// counter would leave the operator alerting on nothing. The counters are process-wide, so the test
+// asserts deltas rather than absolutes and stays safe beside the other parallel tests.
+func TestReadStatsCountsBeats(t *testing.T) {
+	t.Parallel()
+	before := spanbeat.ReadStats()
+
+	appending := &fakeStore{}
+	ordinary := spanbeat.NewEmitter(appending, time.Second, nil)
+	ordinary.Start()
+	if !waitFor(t, 3*time.Second, func() bool { return appending.count() >= 2 }) {
+		ordinary.Close()
+		t.Fatal("no beats appended")
+	}
+	ordinary.Close()
+
+	frozen := &fakeStore{freeze: true}
+	refusing := spanbeat.NewEmitter(frozen, time.Second, nil)
+	refusing.Start()
+	if !waitFor(t, 3*time.Second, func() bool { return frozen.attempts() >= 2 }) {
+		refusing.Close()
+		t.Fatal("no second append attempt against the frozen clock")
+	}
+	refusing.Close()
+
+	after := spanbeat.ReadStats()
+	if got := after.Appended - before.Appended; got < 2 {
+		t.Errorf("Appended rose by %d, want at least the 2 beats this test wrote", got)
+	}
+	if got := after.Suppressed - before.Suppressed; got < 1 {
+		t.Errorf("Suppressed rose by %d, want at least the 1 refused beat", got)
+	}
+	// Last is asserted only as set, not as ordered: the frozen-clock fakes in this file write a
+	// fixed past instant into the shared counter, so under the parallel suite its ordering is
+	// whichever emitter wrote last, and asserting more than presence races with the sibling tests.
+	if after.Last.IsZero() {
+		t.Error("Last is zero after beats were appended, so the metrics endpoint would report a " +
+			"process that never beat")
 	}
 }

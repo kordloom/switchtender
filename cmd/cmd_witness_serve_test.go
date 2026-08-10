@@ -3,10 +3,12 @@ package cmd
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -155,5 +157,78 @@ func TestDeliverFindingsRetriesUntilTheChannelTakesThem(t *testing.T) {
 	queue = deliverFindings(context.Background(), srv.Client(), "s", queue)
 	if len(queue) != 0 || len(accepted) != 2 || accepted[0] != "a" || accepted[1] != "b" {
 		t.Errorf("after recovery queue = %d accepted = %v, want both delivered in order", len(queue), accepted)
+	}
+}
+
+// TestListenIsLoopback pins the boundary the open-witness refusal turns on. A wildcard or empty
+// host binds every interface, so calling it loopback would let a public witness serve its watched
+// server list to anyone; a hostname other than localhost cannot be trusted to resolve locally.
+func TestListenIsLoopback(t *testing.T) {
+	tests := []struct {
+		Addr string
+		Want bool
+	}{{ // Test 0: The IPv4 loopback is loopback.
+		Addr: "127.0.0.1:9440", Want: true,
+	}, { // Test 1: Any address in the loopback block counts.
+		Addr: "127.0.0.2:9440", Want: true,
+	}, { // Test 2: The IPv6 loopback is loopback.
+		Addr: "[::1]:9440", Want: true,
+	}, { // Test 3: localhost is loopback.
+		Addr: "localhost:9440", Want: true,
+	}, { // Test 4: The IPv4 wildcard binds every interface.
+		Addr: "0.0.0.0:9440", Want: false,
+	}, { // Test 5: The IPv6 wildcard binds every interface.
+		Addr: "[::]:9440", Want: false,
+	}, { // Test 6: An empty host binds every interface.
+		Addr: ":9440", Want: false,
+	}, { // Test 7: A private address is still not loopback.
+		Addr: "10.0.0.5:9440", Want: false,
+	}, { // Test 8: A hostname other than localhost is not trusted to be local.
+		Addr: "witness.example.com:9440", Want: false,
+	}, { // Test 9: A bare loopback address with no port still reads as loopback.
+		Addr: "127.0.0.1", Want: true,
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			if got := listenIsLoopback(test.Addr); got != test.Want {
+				t.Errorf("listenIsLoopback(%q) = %v, want %v", test.Addr, got, test.Want)
+			}
+		})
+	}
+}
+
+// TestWitnessServeRefusesOpenOnNonLoopback proves the serve command will not expose the watched
+// server list to the network: a non-loopback bind with no read token is refused before anything
+// starts, and setting the token through the environment satisfies the check.
+func TestWitnessServeRefusesOpenOnNonLoopback(t *testing.T) {
+	witnessWatch, witnessServeInterval = []string{"https://st.example"}, time.Minute
+	witnessListen = "0.0.0.0:0"
+	defer func() {
+		witnessWatch, witnessServeInterval = nil, time.Minute
+		witnessListen = "127.0.0.1:9440"
+		witnessServeToken = ""
+	}()
+
+	// No token anywhere: refused, and the error says how to fix it.
+	t.Setenv(witnessTokenEnv, "")
+	err := runWitnessServe(testCommand(), nil)
+	if err == nil || !strings.Contains(err.Error(), witnessTokenEnv) {
+		t.Fatalf("runWitnessServe() open on 0.0.0.0 = %v, want a refusal naming %s", err, witnessTokenEnv)
+	}
+
+	// A token from the environment passes the exposure check. The state directory is forced under
+	// a file so the run then fails fast at the key directory, proving the refusal above was the
+	// token check and not a later failure.
+	t.Setenv(witnessTokenEnv, "read-token")
+	file := filepath.Join(t.TempDir(), "occupied")
+	if werr := os.WriteFile(file, []byte("x"), 0o600); werr != nil {
+		t.Fatal(werr)
+	}
+	witnessStateDir, witnessServeKeyDir = filepath.Join(file, "state"), ""
+	defer func() { witnessStateDir = "switchtender-witness" }()
+	err = runWitnessServe(testCommand(), nil)
+	if err == nil || !strings.Contains(err.Error(), "witness key directory") {
+		t.Fatalf("runWitnessServe() with env token = %v, want it past the exposure check and "+
+			"failing at the key directory", err)
 	}
 }
