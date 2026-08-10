@@ -4,26 +4,32 @@ Measured numbers for the questions people actually ask: how fast does it start, 
 it hold at idle, and how big is the binary. Every number below was measured on a release-flag build,
 the method is shown so you can reproduce it on your own hardware, and nothing here is a projection.
 
-Re-measured on 2026-08-02 at v1.53.0, on a ten-core Apple Silicon laptop and inside an Alpine Linux
-container on the same machine. Memory and binary sizes are mebibytes, the unit `ps` and `/proc`
-report. Your hardware will differ; the method will not.
+Re-measured on 2026-08-10, on a ten-core Apple Silicon laptop and inside an Alpine Linux container on
+the same machine. Memory and binary sizes are mebibytes, the unit `ps` and `/proc` report. Your
+hardware will differ; the method will not.
 
-The point of re-measuring: between v1.33.0 and v1.53.0 the product gained twenty releases, a full
-security-hardening pass, and custom credential types, and its footprint did not move. That is the
+These figures are the current main build. The footprint and binary size hold for the released
+version; the lower no-encryption boot, where UI asset compression moved off the startup path, ships
+in the next release, so a build before it comes up nearer 70 ms.
+
+The point of re-measuring: across dozens of releases, a full security-hardening pass, and custom
+credential types, the footprint did not grow, and the no-encryption boot dropped when UI asset
+compression moved off the startup path. That is the
 number worth watching over time, not any single reading.
 
 ## Boot and memory
 
 | Measurement | Value |
 |-------------|-------|
-| Cold boot to serving, no encryption key | 42 ms |
-| Cold boot to serving, credential encryption on | 85 ms |
-| Resident memory at idle, Linux, credential encryption on | 33 MiB |
-| Stripped binary, arm64 | 29 MiB |
+| Cold boot to serving, no encryption key | 26 ms |
+| Cold boot to serving, credential encryption on | 70 ms |
+| Resident memory at idle, Linux | 32 MiB |
+| Stripped binary, arm64 | 29.8 MiB |
 
-Boot times are the median of six trials after a warm-up run, timed in process from launch to a served
-`/healthz`, so no shell or subprocess overhead is counted. Memory is resident size three seconds after serving begins, read from
-`/proc` inside the container, because Linux is where servers actually run.
+Boot times are the median of five trials after a warm-up run, timed in process from launch to a
+served `/healthz`, so no shell or subprocess overhead is counted. Memory is resident size three
+seconds after serving begins, read from `/proc` inside the container, because Linux is where servers
+actually run.
 
 The gap between the two boot rows is credential key derivation: argon2id at 64 MiB memory cost, a
 deliberate security parameter, paid once at startup. It is CPU-bound, which is why it costs about
@@ -83,17 +89,16 @@ memory is the server process's `VmRSS` three seconds after it began serving. Ima
 | Container image | 40 MiB | 984 MiB | 996 MiB, plus PostgreSQL 467 MiB and Redis 136 MiB |
 | Processes to run it | one binary, or one container | one container | four or more containers under Kubernetes |
 | External services required | none; SQLite is embedded | none in this mode | Kubernetes, PostgreSQL, Redis, and a Receptor mesh |
-| Cold boot to serving | 69 ms | 49 ms | not a single number; see below |
-| Idle resident memory | 35 MiB | 44 MiB | the sum of web, task, database, and Redis |
+| Cold boot to serving | 24 ms | 45 ms | not a single number; see below |
+| Idle resident memory | 32 MiB | 42 MiB | the sum of web, task, database, and Redis |
 
-The boot row here is higher than the 42 ms in the first table because it measures `docker start` to
-serving, which includes the container runtime coming up, where the earlier figure timed the process
-itself. Both are ours, measured the same day; they differ only in what the stopwatch was started on,
-and the container figure is the one that compares like for like against the others in this table.
+The boot row matches the first table's 26 ms within noise: after asset compression moved off the
+startup path, the process comes up fast enough that `docker start` overhead is most of what is left,
+so the container figure and the in-process figure converge. Both are ours, measured the same day.
 
-**Semaphore boots faster, and it is genuinely light.** In its single-container mode with an embedded
-SQLite database, the configuration measured here, it comes up in 49 ms against our 69 ms, and it is an
-honest one-binary competitor. Where the two part company is footprint and what comes in the box: our
+**Semaphore is a genuinely light one-binary competitor, and we boot faster than it.** In its
+single-container mode with an embedded SQLite database, the configuration measured here, it comes up
+in 45 ms against our 24 ms. The two part company further on footprint and what comes in the box: our
 image is a twenty-fifth the size, holds a lower resident set, and the single file is the whole control
 plane, while a production Semaphore adds an external MySQL or PostgreSQL, and RBAC, enforced approvals,
 a provable audit trail, and the extra runtimes are ours rather than theirs. The [comparison
