@@ -44,6 +44,8 @@ func testUpdate(t *testing.T, store template.Store) {
 		ExtraVars:               map[string]any{"env": "stg"},
 		Survey:                  []template.SurveyField{{Var: "tier", Label: "Tier", Type: template.FieldText}},
 		Tool:                    "python", Command: "print('hi')", DryRun: true,
+		Tags: []string{"deploy", "web"}, SkipTags: []string{"slow"},
+		Verbosity: 3, Forks: 20, DiffMode: true,
 		ConfirmOnLaunch: true,
 		OrgID:           "org_new",
 		CreatedAt:       created,

@@ -206,7 +206,12 @@ CREATE TABLE IF NOT EXISTS templates (
 	notifications  TEXT NOT NULL DEFAULT '',
 	selectable_credential_ids TEXT NOT NULL DEFAULT '',
 	timeout        INTEGER NOT NULL DEFAULT 0,
-	confirm_on_launch INTEGER NOT NULL DEFAULT 0
+	confirm_on_launch INTEGER NOT NULL DEFAULT 0,
+	tags           TEXT NOT NULL DEFAULT '',
+	skip_tags      TEXT NOT NULL DEFAULT '',
+	verbosity      INTEGER NOT NULL DEFAULT 0,
+	forks          INTEGER NOT NULL DEFAULT 0,
+	diff_mode      INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS inventory_sources (
 	id            TEXT PRIMARY KEY,
@@ -669,6 +674,11 @@ func migrateTemplates(db *sql.DB) error {
 		"ALTER TABLE templates ADD COLUMN selectable_credential_ids TEXT NOT NULL DEFAULT ''",
 		"ALTER TABLE templates ADD COLUMN timeout INTEGER NOT NULL DEFAULT 0",
 		"ALTER TABLE templates ADD COLUMN confirm_on_launch INTEGER NOT NULL DEFAULT 0",
+		"ALTER TABLE templates ADD COLUMN tags TEXT NOT NULL DEFAULT ''",
+		"ALTER TABLE templates ADD COLUMN skip_tags TEXT NOT NULL DEFAULT ''",
+		"ALTER TABLE templates ADD COLUMN verbosity INTEGER NOT NULL DEFAULT 0",
+		"ALTER TABLE templates ADD COLUMN forks INTEGER NOT NULL DEFAULT 0",
+		"ALTER TABLE templates ADD COLUMN diff_mode INTEGER NOT NULL DEFAULT 0",
 	} {
 		if _, err := db.Exec(stmt); err != nil &&
 			!strings.Contains(err.Error(), "duplicate column name") {

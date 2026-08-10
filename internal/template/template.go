@@ -73,6 +73,16 @@ type Template struct {
 	Command string `json:"command,omitempty"`
 	// DryRun runs the tool in its no-change mode when the template launches.
 	DryRun bool `json:"dry_run,omitempty"`
+	// Tags runs only the Ansible plays and tasks carrying one of these tags on every launch.
+	Tags []string `json:"tags,omitempty"`
+	// SkipTags skips the Ansible plays and tasks carrying one of these tags on every launch.
+	SkipTags []string `json:"skip_tags,omitempty"`
+	// Verbosity raises Ansible logging from 0 to 4 on every launch.
+	Verbosity int `json:"verbosity,omitempty"`
+	// Forks sets how many hosts Ansible addresses in parallel on every launch. Zero leaves the default.
+	Forks int `json:"forks,omitempty"`
+	// DiffMode shows the before-and-after of every Ansible file and template change on every launch.
+	DiffMode bool `json:"diff_mode,omitempty"`
 	// Shards, when two or more, splits the run across that many inventory slices.
 	Shards int `json:"shards,omitempty"`
 	// Queue restricts launches to workers serving this queue.
@@ -210,6 +220,11 @@ func (t *Template) LaunchOptions() []run.SubmitOption {
 		run.WithTool(t.Tool),
 		run.WithCommand(t.Command),
 		run.WithDryRun(t.DryRun),
+		run.WithTags(t.Tags...),
+		run.WithSkipTags(t.SkipTags...),
+		run.WithVerbosity(t.Verbosity),
+		run.WithForks(t.Forks),
+		run.WithDiffMode(t.DiffMode),
 	}
 	if t.ProjectID != "" {
 		opts = append(opts, run.WithProject(t.ProjectID))

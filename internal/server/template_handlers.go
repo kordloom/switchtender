@@ -38,6 +38,16 @@ type createTemplateRequest struct {
 	Command string `json:"command,omitempty"`
 	// DryRun runs the tool in its no-change mode when the template launches.
 	DryRun bool `json:"dry_run,omitempty"`
+	// Tags runs only the Ansible plays and tasks carrying one of these tags on every launch.
+	Tags []string `json:"tags,omitempty"`
+	// SkipTags skips the Ansible plays and tasks carrying one of these tags on every launch.
+	SkipTags []string `json:"skip_tags,omitempty"`
+	// Verbosity raises Ansible logging from 0 to 4 on every launch.
+	Verbosity int `json:"verbosity,omitempty"`
+	// Forks sets how many hosts Ansible addresses in parallel on every launch. Zero leaves the default.
+	Forks int `json:"forks,omitempty"`
+	// DiffMode shows the before-and-after of every Ansible change on every launch.
+	DiffMode bool `json:"diff_mode,omitempty"`
 	// Shards, when two or more, splits launches across that many slices.
 	Shards int `json:"shards,omitempty"`
 	// Queue restricts launches to workers serving the queue.
@@ -138,6 +148,7 @@ func createTemplateHandler(store template.Store, authz *authorizer, log *zap.Log
 			ID: template.NewID(), Name: req.Name, ProjectID: req.ProjectID,
 			Playbook: req.Playbook, Inventory: req.Inventory, InventoryID: req.InventoryID,
 			Tool: req.Tool, Command: req.Command, DryRun: req.DryRun,
+			Tags: req.Tags, SkipTags: req.SkipTags, Verbosity: req.Verbosity, Forks: req.Forks, DiffMode: req.DiffMode,
 			Shards:        req.Shards,
 			CredentialIDs: req.CredentialIDs, SelectableCredentialIDs: req.SelectableCredentialIDs,
 			ExtraVars: req.ExtraVars, Survey: req.Survey,
@@ -218,6 +229,7 @@ func updateTemplateHandler(store template.Store, authz *authorizer, log *zap.Log
 			ID: id, Name: req.Name, ProjectID: req.ProjectID,
 			Playbook: req.Playbook, Inventory: req.Inventory, InventoryID: req.InventoryID,
 			Tool: req.Tool, Command: req.Command, DryRun: req.DryRun,
+			Tags: req.Tags, SkipTags: req.SkipTags, Verbosity: req.Verbosity, Forks: req.Forks, DiffMode: req.DiffMode,
 			Shards:        req.Shards,
 			CredentialIDs: req.CredentialIDs, SelectableCredentialIDs: req.SelectableCredentialIDs,
 			ExtraVars: req.ExtraVars, Survey: req.Survey,

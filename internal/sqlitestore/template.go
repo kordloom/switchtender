@@ -15,7 +15,7 @@ import (
 const templateColumns = `id, name, project_id, playbook, inventory, inventory_id, shards,
 	credential_ids, extra_vars, survey, queue, created_at, tool, command, dry_run, image,
 	pull_credential_id, org_id, notifications, selectable_credential_ids, timeout,
-	confirm_on_launch`
+	confirm_on_launch, tags, skip_tags, verbosity, forks, diff_mode`
 
 // templateStore is a template.Store backed by the shared SQLite database.
 type templateStore struct {
@@ -41,8 +41,9 @@ func (s *templateStore) Save(ctx context.Context, t *template.Template) error {
 INSERT INTO templates
 	(id, name, project_id, playbook, inventory, inventory_id, shards, credential_ids, extra_vars,
 	 survey, queue, created_at, tool, command, dry_run, image, pull_credential_id, org_id,
-	 notifications, selectable_credential_ids, timeout, confirm_on_launch)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	 notifications, selectable_credential_ids, timeout, confirm_on_launch,
+	 tags, skip_tags, verbosity, forks, diff_mode)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
 	name=excluded.name, project_id=excluded.project_id, playbook=excluded.playbook,
 	inventory=excluded.inventory, inventory_id=excluded.inventory_id, shards=excluded.shards,
@@ -52,12 +53,16 @@ ON CONFLICT(id) DO UPDATE SET
 	image=excluded.image, pull_credential_id=excluded.pull_credential_id, org_id=excluded.org_id,
 	notifications=excluded.notifications,
 	selectable_credential_ids=excluded.selectable_credential_ids, timeout=excluded.timeout,
-	confirm_on_launch=excluded.confirm_on_launch`
+	confirm_on_launch=excluded.confirm_on_launch, tags=excluded.tags,
+	skip_tags=excluded.skip_tags, verbosity=excluded.verbosity, forks=excluded.forks,
+	diff_mode=excluded.diff_mode`
 	_, err = s.db.ExecContext(ctx, q,
 		t.ID, t.Name, t.ProjectID, t.Playbook, t.Inventory, t.InventoryID, t.Shards,
 		sqlutil.JoinIDs(t.CredentialIDs), string(vars), string(survey), t.Queue, sqlutil.FormatTime(t.CreatedAt),
 		t.Tool, t.Command, sqlutil.BoolToInt(t.DryRun), t.Image, t.PullCredentialID, t.OrgID, string(notifs),
-		sqlutil.JoinIDs(t.SelectableCredentialIDs), t.Timeout, sqlutil.BoolToInt(t.ConfirmOnLaunch))
+		sqlutil.JoinIDs(t.SelectableCredentialIDs), t.Timeout, sqlutil.BoolToInt(t.ConfirmOnLaunch),
+		sqlutil.JoinIDs(t.Tags), sqlutil.JoinIDs(t.SkipTags), t.Verbosity, t.Forks,
+		sqlutil.BoolToInt(t.DiffMode))
 	if err != nil {
 		return fmt.Errorf("save template: %w", err)
 	}
@@ -82,13 +87,15 @@ func (s *templateStore) Update(ctx context.Context, t *template.Template) error 
 	name=?, project_id=?, playbook=?, inventory=?, inventory_id=?, shards=?,
 	credential_ids=?, extra_vars=?, survey=?, queue=?, tool=?, command=?, dry_run=?, image=?,
 	pull_credential_id=?, org_id=?, notifications=?, selectable_credential_ids=?, timeout=?,
-	confirm_on_launch=?
+	confirm_on_launch=?, tags=?, skip_tags=?, verbosity=?, forks=?, diff_mode=?
 	WHERE id=?`
 	res, err := s.db.ExecContext(ctx, q,
 		t.Name, t.ProjectID, t.Playbook, t.Inventory, t.InventoryID, t.Shards,
 		sqlutil.JoinIDs(t.CredentialIDs), string(vars), string(survey), t.Queue, t.Tool, t.Command,
 		sqlutil.BoolToInt(t.DryRun), t.Image, t.PullCredentialID, t.OrgID, string(notifs),
-		sqlutil.JoinIDs(t.SelectableCredentialIDs), t.Timeout, sqlutil.BoolToInt(t.ConfirmOnLaunch), t.ID)
+		sqlutil.JoinIDs(t.SelectableCredentialIDs), t.Timeout, sqlutil.BoolToInt(t.ConfirmOnLaunch),
+		sqlutil.JoinIDs(t.Tags), sqlutil.JoinIDs(t.SkipTags), t.Verbosity, t.Forks,
+		sqlutil.BoolToInt(t.DiffMode), t.ID)
 	if err != nil {
 		return fmt.Errorf("update template: %w", err)
 	}
@@ -166,15 +173,21 @@ func scanTemplate(sc scanner) (*template.Template, error) {
 		notifs     string
 		selectable string
 		confirm    int
+		tags       string
+		skipTags   string
+		diffMode   int
 	)
 	if err := sc.Scan(&t.ID, &t.Name, &t.ProjectID, &t.Playbook, &t.Inventory, &t.InventoryID,
 		&t.Shards, &creds, &vars, &survey, &t.Queue, &created, &t.Tool, &t.Command,
 		&dryRun, &t.Image, &t.PullCredentialID, &t.OrgID, &notifs, &selectable, &t.Timeout,
-		&confirm); err != nil {
+		&confirm, &tags, &skipTags, &t.Verbosity, &t.Forks, &diffMode); err != nil {
 		return nil, err
 	}
 	t.DryRun = dryRun != 0
 	t.ConfirmOnLaunch = confirm != 0
+	t.DiffMode = diffMode != 0
+	t.Tags = sqlutil.SplitIDs(tags)
+	t.SkipTags = sqlutil.SplitIDs(skipTags)
 	t.CredentialIDs = sqlutil.SplitIDs(creds)
 	t.SelectableCredentialIDs = sqlutil.SplitIDs(selectable)
 	if vars != "" && vars != "null" {
