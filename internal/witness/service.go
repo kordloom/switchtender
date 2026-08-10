@@ -8,11 +8,13 @@ package witness
 import (
 	"bufio"
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -101,6 +103,14 @@ type Service struct {
 	// notify, when set, receives every finding, including the blind edges, so alerting rides the
 	// operator's channel.
 	notify func(server string, f Finding)
+	// readToken, when set, is the bearer token every /witness route requires. It gates the whole
+	// read surface, most importantly the two global routes that would otherwise let any anonymous
+	// caller enumerate every watched server and read cross-server findings. Empty leaves the API
+	// open, which is correct for a single-tenant or local run and refused for a public one by the
+	// serve command. It does not weaken offline verification: a relying party checks an attestation
+	// it already holds against the pinned key with no call to this service, so the token gates
+	// delivery, not trust.
+	readToken string
 	// clock reads the time, replaced in tests.
 	clock func() time.Time
 	// watchers holds one watcher per server, keyed by ServerKey.
@@ -130,6 +140,12 @@ func WithServiceNotify(fn func(server string, f Finding)) ServiceOption {
 // WithServiceClock replaces the clock, so a test controls the timestamps findings carry.
 func WithServiceClock(now func() time.Time) ServiceOption {
 	return func(s *Service) { s.clock = now }
+}
+
+// WithServiceReadToken requires the given bearer token on every /witness route. An empty token
+// leaves the API open.
+func WithServiceReadToken(token string) ServiceOption {
+	return func(s *Service) { s.readToken = token }
 }
 
 // NewService returns a hosted witness over the given servers. It refuses a duplicate server,
@@ -438,6 +454,11 @@ func (s *Service) Attest(key string) (*Attestation, error) {
 
 // Handler serves the witness API. Every route is a read: the service has no mutating surface,
 // because what a witness says must come only from what it saw.
+//
+// When a read token is configured, every /witness route requires it as a bearer token, so a public
+// deployment does not hand an anonymous caller the list of watched servers or the cross-server
+// findings feed. The /healthz route stays open so a load balancer can probe it. The token is
+// compared in constant time.
 func (s *Service) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -500,7 +521,28 @@ func (s *Service) Handler() http.Handler {
 	mux.HandleFunc("GET /witness/findings", func(w http.ResponseWriter, _ *http.Request) {
 		s.serveFindings(w, "")
 	})
-	return mux
+	return s.gate(mux)
+}
+
+// gate wraps the mux so every /witness route requires the read token when one is configured, while
+// /healthz and anything else stays open. With no token the handler is returned unchanged, which is
+// the open single-tenant and local mode.
+func (s *Service) gate(next http.Handler) http.Handler {
+	if s.readToken == "" {
+		return next
+	}
+	want := []byte("Bearer " + s.readToken)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/witness/") {
+			got := r.Header.Get("Authorization")
+			if subtle.ConstantTimeCompare([]byte(got), want) != 1 {
+				w.Header().Set("WWW-Authenticate", "Bearer")
+				s.fail(w, http.StatusUnauthorized, "a bearer token is required")
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // serveFindings answers with the newest recorded findings, filtered to one server when set.

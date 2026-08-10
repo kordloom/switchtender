@@ -624,3 +624,74 @@ func TestAttestationRouteLeaksNothingToAnonymousCallers(t *testing.T) {
 		t.Errorf("error %q names filesystem details; an anonymous caller gets none", body.Error)
 	}
 }
+
+// TestReadTokenGatesEveryWitnessRoute proves the optional read token closes the two global routes
+// that would otherwise hand any caller the watched-server list and the cross-server findings feed,
+// leaves /healthz open for probes, and rejects a wrong token in constant time.
+func TestReadTokenGatesEveryWitnessRoute(t *testing.T) {
+	t.Parallel()
+	feed := newFakeFeed(t, []Beat{beat(1, 10, "aa")})
+	dir := t.TempDir()
+	id := testIdentity(t)
+	const token = "s3cret-read-token"
+	s, err := NewService(id, dir, time.Minute, []string{feed.srv.URL}, nil, feed.srv.Client(),
+		WithServiceClock(func() time.Time { return time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC) }),
+		WithServiceReadToken(token))
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	if err := s.Start(); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	t.Cleanup(s.Close)
+	s.CheckAll(context.Background())
+
+	api := httptest.NewServer(s.Handler())
+	defer api.Close()
+
+	// Every /witness route is closed without a token and closed with the wrong one.
+	guarded := []string{"/witness/servers", "/witness/findings"}
+	for _, path := range guarded {
+		for _, h := range []string{"", "Bearer wrong", "Basic " + token} {
+			req, _ := http.NewRequest(http.MethodGet, api.URL+path, nil)
+			if h != "" {
+				req.Header.Set("Authorization", h)
+			}
+			res, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("GET %s error = %v", path, err)
+			}
+			_ = res.Body.Close()
+			if res.StatusCode != http.StatusUnauthorized {
+				t.Errorf("GET %s auth=%q = %d, want 401", path, h, res.StatusCode)
+			}
+			if got := res.Header.Get("WWW-Authenticate"); got != "Bearer" {
+				t.Errorf("GET %s auth=%q WWW-Authenticate = %q, want Bearer", path, h, got)
+			}
+		}
+	}
+
+	// The right token opens them.
+	for _, path := range guarded {
+		req, _ := http.NewRequest(http.MethodGet, api.URL+path, nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("GET %s error = %v", path, err)
+		}
+		_ = res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Errorf("GET %s with token = %d, want 200", path, res.StatusCode)
+		}
+	}
+
+	// A liveness probe never carries the token, so /healthz stays open.
+	res, err := http.Get(api.URL + "/healthz")
+	if err != nil {
+		t.Fatalf("GET /healthz error = %v", err)
+	}
+	_ = res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Errorf("GET /healthz = %d, want 200 without a token", res.StatusCode)
+	}
+}
