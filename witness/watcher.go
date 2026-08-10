@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kordloom/switchtender/internal/audit"
-	"github.com/kordloom/switchtender/internal/beatfeed"
+	"github.com/kordloom/switchtender/beatfeed"
+	"github.com/kordloom/switchtender/identity"
 )
 
 // Watcher watches one server's beat feed, keeping its signed memory in one state file. The single
@@ -26,14 +26,14 @@ type Watcher struct {
 	// state is the checkpoint path.
 	state string
 	// id signs the checkpoint and pins its signer.
-	id audit.Identity
+	id identity.Identity
 	// client fetches the feed.
 	client *http.Client
 }
 
 // NewWatcher returns a watcher for one server. A nil client gets a 30 second timeout, since a
 // witness that can hang forever on one fetch is a witness that stops watching.
-func NewWatcher(server, statePath string, id audit.Identity, client *http.Client) *Watcher {
+func NewWatcher(server, statePath string, id identity.Identity, client *http.Client) *Watcher {
 	if client == nil {
 		client = &http.Client{Timeout: 30 * time.Second}
 	}

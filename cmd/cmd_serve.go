@@ -43,12 +43,12 @@ import (
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/schedule"
 	"github.com/kordloom/switchtender/internal/server"
-	"github.com/kordloom/switchtender/internal/spanbeat"
 	"github.com/kordloom/switchtender/internal/sqlitestore"
 	"github.com/kordloom/switchtender/internal/team"
 	"github.com/kordloom/switchtender/internal/template"
 	"github.com/kordloom/switchtender/internal/trigger"
 	"github.com/kordloom/switchtender/internal/user"
+	"github.com/kordloom/switchtender/spanbeat"
 )
 
 const (
@@ -909,11 +909,11 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			}
 			client := &http.Client{Timeout: anchorTimeout}
 			beatOpts = append(beatOpts, spanbeat.WithAnchorFunc(
-				func(ctx context.Context, e *audit.Entry) error {
+				func(ctx context.Context, b spanbeat.AppendedBeat) error {
 					ctx, cancel := context.WithTimeout(ctx, anchorTimeout)
 					defer cancel()
 					a, err := audit.NewAnchor(ctx, client, audit.AnchorRFC3161, serveAnchorTSAURL,
-						e.Seq, e.Hash, time.Now())
+						b.Seq, b.Hash, time.Now())
 					if err != nil {
 						return err
 					}
@@ -921,7 +921,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 				}))
 			log.Info("span beats will be anchored", zap.String("tsa", serveAnchorTSAURL))
 		}
-		beats := spanbeat.NewEmitter(bundle.Audits(), spanCadence, log, beatOpts...)
+		beats := spanbeat.NewEmitter(auditBeatStore{store: bundle.Audits()}, spanCadence, log, beatOpts...)
 		beats.Start()
 		defer beats.Close()
 		log.Info("span beats enabled", zap.Duration("cadence", spanCadence))

@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/identity"
 )
 
 // fakeFeed serves a mutable beat feed the way a watched server does.
@@ -53,9 +53,9 @@ func (f *fakeFeed) set(beats []Beat, status int) {
 }
 
 // testIdentity returns a fresh witness identity in its own directory.
-func testIdentity(t *testing.T) audit.Identity {
+func testIdentity(t *testing.T) identity.Identity {
 	t.Helper()
-	id, err := audit.LoadIdentity(t.TempDir())
+	id, err := identity.Load(t.TempDir())
 	if err != nil {
 		t.Fatalf("LoadIdentity() error = %v", err)
 	}
@@ -130,7 +130,7 @@ func TestServiceStartRefusesAnUnusableArchive(t *testing.T) {
 }
 
 // startedService returns a running service over one fake feed, with its key.
-func startedService(t *testing.T, feed *fakeFeed, dir string, id audit.Identity) (*Service, string) {
+func startedService(t *testing.T, feed *fakeFeed, dir string, id identity.Identity) (*Service, string) {
 	t.Helper()
 	s, err := NewService(id, dir, time.Minute, []string{feed.srv.URL}, nil, feed.srv.Client(),
 		WithServiceClock(func() time.Time { return time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC) }))

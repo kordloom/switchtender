@@ -17,11 +17,11 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"go.uber.org/zap"
 
-	"github.com/kordloom/switchtender/internal/audit"
-	"github.com/kordloom/switchtender/internal/util"
+	"github.com/kordloom/switchtender/identity"
 )
 
 // findingsFile is the append-only record of everything the service has witnessed, one JSON object
@@ -38,6 +38,20 @@ const (
 	maxDetailLen  = 2048
 	maxRecordLine = 1 << 20
 )
+
+// clip shortens s to at most limit bytes without splitting a UTF-8 rune, appending an ellipsis when
+// the value was cut. It is kept here rather than shared because a public package cannot import the
+// product's internal utilities, and a witness is meant to be embeddable on its own.
+func clip(s string, limit int) string {
+	if len(s) <= limit {
+		return s
+	}
+	cut := limit
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "..."
+}
 
 // RecordedFinding is one finding as persisted and served: what the witness saw, where, and when.
 type RecordedFinding struct {
@@ -93,7 +107,7 @@ type serverStatus struct {
 // Service watches a set of servers and serves what it has witnessed.
 type Service struct {
 	// id signs every checkpoint and attestation the service produces.
-	id audit.Identity
+	id identity.Identity
 	// dir holds the checkpoints and the findings record.
 	dir string
 	// interval is how often every server is checked.
@@ -152,7 +166,7 @@ func WithServiceReadToken(token string) ServiceOption {
 // however spelled, because two watchers over one state file take turns overwriting the memory
 // that catches a rewrite. It panics on an interval under ten seconds, a programming error: the
 // point of the pin is memory over time, not a busy loop.
-func NewService(id audit.Identity, dir string, interval time.Duration, servers []string,
+func NewService(id identity.Identity, dir string, interval time.Duration, servers []string,
 	log *zap.Logger, client *http.Client, opts ...ServiceOption) (*Service, error) {
 	if dir == "" {
 		panic("witness: state directory required")
@@ -315,7 +329,7 @@ func (s *Service) checkOne(ctx context.Context, key string) {
 	for _, f := range findings {
 		// Clipped here too, so the notified copy matches what the record and the API serve.
 		rec := RecordedFinding{At: now, Server: w.Server(), Kind: f.Kind,
-			Detail: util.Clip(f.Detail, maxDetailLen)}
+			Detail: clip(f.Detail, maxDetailLen)}
 		if werr := s.record(rec); werr != nil {
 			// The finding still counts and still alerts; only its durability failed, and that
 			// failure is loud. Dropping the count instead would make the attestation understate
@@ -348,7 +362,7 @@ func (s *Service) record(rec RecordedFinding) error {
 	if s.findings == nil {
 		return fmt.Errorf("findings record is not open")
 	}
-	rec.Detail = util.Clip(rec.Detail, maxDetailLen)
+	rec.Detail = clip(rec.Detail, maxDetailLen)
 	line, err := json.Marshal(rec)
 	if err != nil {
 		return err
@@ -610,7 +624,7 @@ func attestationContent(a *Attestation) ([]byte, error) {
 }
 
 // SignAttestation stamps the statement with the witness identity.
-func SignAttestation(a *Attestation, id audit.Identity) error {
+func SignAttestation(a *Attestation, id identity.Identity) error {
 	content, err := attestationContent(a)
 	if err != nil {
 		return fmt.Errorf("sign attestation: %w", err)

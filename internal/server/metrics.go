@@ -10,7 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/run"
-	"github.com/kordloom/switchtender/internal/spanbeat"
+	"github.com/kordloom/switchtender/spanbeat"
 )
 
 // durationBuckets are the upper bounds, in seconds, of the run-duration histogram. They span a quick

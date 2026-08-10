@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/kordloom/switchtender/internal/audit"
-	"github.com/kordloom/switchtender/internal/witness"
+	"github.com/kordloom/switchtender/witness"
 )
 
 // writeAttestation signs an attestation with a fresh identity and writes it, returning the path

@@ -1,12 +1,15 @@
-// Package spanbeat appends a span beat to the audit chain on a fixed cadence, so an outside
-// watcher can tell a quiet chain from one whose tail was removed. Each beat numbers itself one
-// past the last and counts the entries appended since, and a bundle over a chain with a duplicate
-// or missing beat fails verification, which is what makes the silence itself attestable.
+// Package spanbeat appends a span beat to an audit chain on a fixed cadence, so an outside watcher
+// can tell a quiet chain from one whose tail was removed. Each beat numbers itself one past the last
+// and counts the entries appended since, and a bundle over a chain with a duplicate or missing beat
+// fails verification, which is what makes the silence itself attestable.
 //
 // A beat whose time does not advance past the last one is not written. A beat's time is a signed
 // claim, so recording a time the clock did not read would be a false statement in an attestation.
 // The emitter logs the refusal and keeps beating, and the record carries a longer unattested window
 // that a verifier reports as a gap.
+//
+// The emitter's only coupling to a chain is the Store interface, so it imports nothing from the
+// product and an out-of-tree tool embeds it by adapting its own chain to Store.
 package spanbeat
 
 import (
@@ -17,9 +20,43 @@ import (
 	"time"
 
 	"go.uber.org/zap"
-
-	"github.com/kordloom/switchtender/internal/audit"
 )
+
+// AppendedBeat is what a Store reports after writing one beat: enough for the emitter to log the
+// beat, mark when the population was last counted, and anchor the entry outside the install.
+type AppendedBeat struct {
+	// At is when the beat was appended.
+	At time.Time
+	// Seq is the beat entry's position in the chain.
+	Seq int64
+	// Hash is the beat entry's own chain hash, the head the beat attests.
+	Hash string
+	// Beat is the beat number, one past the last.
+	Beat int64
+}
+
+// Store appends one span beat and reports what it wrote. It is the emitter's only coupling to a
+// chain, so any audit backend satisfies it through a small adapter and nothing here imports the
+// chain.
+//
+// A store whose clock has not passed the last beat must return an error whose chain carries a value
+// with a ClockBehind method. The emitter then logs the gap and keeps its cadence rather than
+// treating it as a hard failure, because a beat's time is a signed claim and a time the clock did
+// not read would be a false statement in an attestation.
+type Store interface {
+	// AppendSpanBeat writes one beat recorded at the given time, carrying the cadence in whole
+	// seconds, and returns what it wrote.
+	AppendSpanBeat(ctx context.Context, at time.Time, cadenceSeconds int) (AppendedBeat, error)
+}
+
+// clockBehind is satisfied by an append error meaning the clock has not passed the last beat. The
+// emitter detects it structurally, so a store reports the condition without the emitter importing
+// the store's error type.
+type clockBehind interface {
+	// ClockBehind reports the refused beat number, the last beat's recorded time, and the time the
+	// clock read.
+	ClockBehind() (beat int64, last, clock time.Time)
+}
 
 // Stats is a reading of the process-wide beat counters.
 type Stats struct {
@@ -55,9 +92,11 @@ func ReadStats() Stats {
 	return Stats{Last: last, Appended: appended.Load(), Suppressed: suppressed.Load()}
 }
 
-// AnchorFunc fixes a freshly appended beat entry somewhere outside this install. The wiring
-// decides what an anchor is, so this package stays free of network code.
-type AnchorFunc func(ctx context.Context, e *audit.Entry) error
+// AnchorFunc fixes a freshly appended beat somewhere outside this install. The wiring decides what
+// an anchor is, so this package stays free of network code. It receives the appended beat, whose Seq
+// and Hash are what an anchor commits to. Configure one only when the store can save what it
+// produces, since an anchor that cannot be stored proves nothing.
+type AnchorFunc func(ctx context.Context, b AppendedBeat) error
 
 // Emitter periodically appends a span beat to the audit chain. A tick whose clock has not passed
 // the last beat writes nothing and logs a warning, since a beat's time is a signed claim and a time
@@ -65,13 +104,12 @@ type AnchorFunc func(ctx context.Context, e *audit.Entry) error
 // gap in the record, which a verifier reports rather than fails, and the cadence resumes on its own
 // once real time passes the last beat.
 type Emitter struct {
-	// store is the audit store the beats are appended to.
-	store audit.Store
+	// store is the chain the beats are appended to.
+	store Store
 	// cadence is how often a beat is appended. It is recorded in every beat entry, which is why it
 	// must be a whole number of seconds.
 	cadence time.Duration
-	// anchor, when set, fixes each successful beat outside this install. It is only called when
-	// the store also keeps anchors, since an anchor that cannot be saved proves nothing.
+	// anchor, when set, fixes each successful beat outside this install.
 	anchor AnchorFunc
 	// log records beat activity.
 	log *zap.Logger
@@ -94,7 +132,7 @@ func WithAnchorFunc(f AnchorFunc) Option {
 // NewEmitter returns an Emitter for the store. It panics on a nil store or on a cadence that is
 // not a whole number of seconds of at least one, since the cadence is committed into every beat
 // entry; a nil logger becomes a no-op.
-func NewEmitter(store audit.Store, cadence time.Duration, log *zap.Logger, opts ...Option) *Emitter {
+func NewEmitter(store Store, cadence time.Duration, log *zap.Logger, opts ...Option) *Emitter {
 	if store == nil {
 		panic("spanbeat: Store required")
 	}
@@ -131,43 +169,40 @@ func (e *Emitter) Start() {
 	})
 }
 
-// beat appends one span beat, then anchors it when an anchor function is configured and the store
-// keeps anchors. A failure of either is logged and the loop carries on: a missed beat shows up in
-// the feed as a widening gap, which is exactly the signal the beats exist to give.
+// beat appends one span beat, then anchors it when an anchor function is configured. A failure of
+// either is logged and the loop carries on: a missed beat shows up in the feed as a widening gap,
+// which is exactly the signal the beats exist to give.
 //
-// A clock that has not passed the last beat is not a failure to retry differently. The store
-// refuses the beat, because a beat's time is a signed claim and writing a time the clock did not
-// read would be a false statement in an attestation. The refusal is logged at warning level, the
-// loop keeps its cadence, and the beat lands on a later tick once real time passes the last beat.
-// What the record shows in the meantime is a gap, which a verifier reports with its bounds and
-// duration rather than failing.
+// A clock that has not passed the last beat is not a failure to retry differently. The store refuses
+// the beat, because a beat's time is a signed claim and writing a time the clock did not read would
+// be a false statement in an attestation. The refusal is logged at warning level, the loop keeps its
+// cadence, and the beat lands on a later tick once real time passes the last beat. What the record
+// shows in the meantime is a gap, which a verifier reports with its bounds and duration rather than
+// failing.
 func (e *Emitter) beat(now time.Time) {
-	entry, err := e.store.AppendSpanBeat(e.ctx, now, int(e.cadence/time.Second))
+	b, err := e.store.AppendSpanBeat(e.ctx, now, int(e.cadence/time.Second))
 	if err != nil {
-		var behind *audit.ClockBehindError
+		var behind clockBehind
 		if errors.As(err, &behind) {
+			beat, last, clock := behind.ClockBehind()
 			suppressed.Add(1)
 			e.log.Warn("spanbeat: this clock has not passed the last beat, so no beat was written "+
 				"and the record will show an unattested window until it does. Fix the clock, and "+
 				"prefer NTP slewing over stepping",
-				zap.Int64("beat", behind.Beat), zap.Duration("behind", behind.Behind()),
-				zap.Time("last_beat", behind.Prev), zap.Time("clock", behind.At))
+				zap.Int64("beat", beat), zap.Duration("behind", last.Sub(clock)),
+				zap.Time("last_beat", last), zap.Time("clock", clock))
 			return
 		}
 		e.log.Error("spanbeat: append beat: " + err.Error())
 		return
 	}
 	appended.Add(1)
-	lastBeatUnixNano.Store(entry.At.UnixNano())
-	beat, _, _, _ := audit.ParseSpanPath(entry.Path)
-	e.log.Debug("spanbeat: beat appended", zap.Int64("beat", beat), zap.Int64("seq", entry.Seq))
+	lastBeatUnixNano.Store(b.At.UnixNano())
+	e.log.Debug("spanbeat: beat appended", zap.Int64("beat", b.Beat), zap.Int64("seq", b.Seq))
 	if e.anchor == nil {
 		return
 	}
-	if _, ok := e.store.(audit.AnchorStore); !ok {
-		return
-	}
-	if err := e.anchor(e.ctx, entry); err != nil {
+	if err := e.anchor(e.ctx, b); err != nil {
 		e.log.Error("spanbeat: anchor beat: " + err.Error())
 	}
 }

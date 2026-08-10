@@ -1,4 +1,4 @@
-package audit
+package identity
 
 import (
 	"crypto/ed25519"
@@ -46,13 +46,13 @@ func TestIdentityNeverSerializesItsSeed(t *testing.T) {
 func TestIdentityRoundTripsThroughItsFile(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("SWITCHTENDER_AUDIT_KEY", "")
-	created, err := LoadIdentity(dir)
+	created, err := Load(dir)
 	if err != nil {
-		t.Fatalf("LoadIdentity() error = %v", err)
+		t.Fatalf("Load() error = %v", err)
 	}
-	reloaded, err := LoadIdentity(dir)
+	reloaded, err := Load(dir)
 	if err != nil {
-		t.Fatalf("LoadIdentity() second call error = %v", err)
+		t.Fatalf("Load() second call error = %v", err)
 	}
 	if created.Seed != reloaded.Seed || created.InstallID != reloaded.InstallID {
 		t.Errorf("identity did not survive a reload: created %s, reloaded %s",
@@ -62,7 +62,7 @@ func TestIdentityRoundTripsThroughItsFile(t *testing.T) {
 		t.Error("the reloaded identity signs with a different key")
 	}
 	// The stored file is the one place the seed is allowed to appear, at owner-only permissions.
-	path := filepath.Join(dir, IdentityFile)
+	path := filepath.Join(dir, File)
 	info, err := os.Stat(path)
 	if err != nil {
 		t.Fatalf("Stat() error = %v", err)

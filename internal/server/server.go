@@ -10,10 +10,10 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/beatfeed"
 	"github.com/kordloom/switchtender/internal/ai"
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/auth"
-	"github.com/kordloom/switchtender/internal/beatfeed"
 	"github.com/kordloom/switchtender/internal/credential"
 	"github.com/kordloom/switchtender/internal/grant"
 	"github.com/kordloom/switchtender/internal/importer"

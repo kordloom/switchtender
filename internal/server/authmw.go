@@ -13,9 +13,9 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/beatfeed"
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/auth"
-	"github.com/kordloom/switchtender/internal/beatfeed"
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/user"
 )

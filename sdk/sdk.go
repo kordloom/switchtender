@@ -21,8 +21,8 @@ package sdk
 import (
 	"context"
 
+	"github.com/kordloom/switchtender/beatfeed"
 	"github.com/kordloom/switchtender/internal/ai"
-	"github.com/kordloom/switchtender/internal/beatfeed"
 	"github.com/kordloom/switchtender/internal/dispatch"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"

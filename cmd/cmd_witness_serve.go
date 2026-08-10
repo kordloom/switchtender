@@ -19,7 +19,7 @@ import (
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/jsonutil"
 	"github.com/kordloom/switchtender/internal/logutil"
-	"github.com/kordloom/switchtender/internal/witness"
+	"github.com/kordloom/switchtender/witness"
 )
 
 var (

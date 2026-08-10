@@ -41,5 +41,11 @@ func (e *ClockBehindError) Error() string {
 // Unwrap returns ErrClockBehind so a caller matches the sentinel with errors.Is.
 func (e *ClockBehindError) Unwrap() error { return ErrClockBehind }
 
+// ClockBehind reports the refused beat number, the last beat's recorded time, and the time the
+// clock read, satisfying the interface a beat emitter detects without importing this package.
+func (e *ClockBehindError) ClockBehind() (beat int64, last, clock time.Time) {
+	return e.Beat, e.Prev, e.At
+}
+
 // Behind reports how far the supplied time trails the last beat.
 func (e *ClockBehindError) Behind() time.Duration { return e.Prev.Sub(e.At) }

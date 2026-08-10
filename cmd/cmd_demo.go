@@ -21,7 +21,7 @@ import (
 	"github.com/kordloom/switchtender/internal/logutil"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/server"
-	"github.com/kordloom/switchtender/internal/spanbeat"
+	"github.com/kordloom/switchtender/spanbeat"
 )
 
 // demoAddr holds the value of the demo --addr flag.
@@ -150,7 +150,7 @@ func runDemo(cmd *cobra.Command, _ []string) error {
 	// than API mutations, so the live feed works there too. A --seed-only run returns above and
 	// never starts the emitter.
 	if demoSpanCadence > 0 {
-		beats := spanbeat.NewEmitter(bundle.Audits(), demoSpanCadence, log)
+		beats := spanbeat.NewEmitter(auditBeatStore{store: bundle.Audits()}, demoSpanCadence, log)
 		beats.Start()
 		defer beats.Close()
 		log.Info("span beats enabled", zap.Duration("cadence", demoSpanCadence))

@@ -1,4 +1,8 @@
-package audit
+// Package identity is the install's signing identity: an ed25519 key held in a file, the key that
+// signs a bundle and the install id derived from it. It carries no dependency on the rest of the
+// product, so a witness or any out-of-tree tool that needs to sign or pin a key builds against it
+// alone.
+package identity
 
 import (
 	"crypto/ed25519"
@@ -15,9 +19,9 @@ import (
 	"github.com/kordloom/loomseal/seal"
 )
 
-// IdentityFile is the file name the producer identity is stored under, inside the state directory
+// File is the file name the producer identity is stored under, inside the state directory
 // beside the database.
-const IdentityFile = "producer-key.json"
+const File = "producer-key.json"
 
 // Identity is the install's signing identity: the key that signs a bundle and the install id that
 // distinguishes this install from another running the same product.
@@ -78,13 +82,13 @@ func (i Identity) PublicKeyBase64() string {
 	return base64.StdEncoding.EncodeToString(i.Public())
 }
 
-// LoadIdentity reads the producer identity from dir, creating it on first use.
+// Load reads the producer identity from dir, creating it on first use.
 //
 // An operator who would rather hold the key in their own secret manager sets SWITCHTENDER_AUDIT_KEY
 // to a hex seed and it wins, so the file is a default rather than a requirement. That environment
 // variable is the same one the existing signed export already uses, so an install that has one keeps
 // the identity it has been signing with.
-func LoadIdentity(dir string) (Identity, error) {
+func Load(dir string) (Identity, error) {
 	if seed := os.Getenv("SWITCHTENDER_AUDIT_KEY"); seed != "" {
 		id, err := identityFromSeed(seed, "")
 		if err != nil {
@@ -110,13 +114,13 @@ func LoadIdentity(dir string) (Identity, error) {
 
 // readIdentityFile reads the stored identity, returning fs.ErrNotExist when there is none.
 func readIdentityFile(dir string) (Identity, error) {
-	raw, err := os.ReadFile(filepath.Join(dir, IdentityFile))
+	raw, err := os.ReadFile(filepath.Join(dir, File))
 	if err != nil {
 		return Identity{}, err
 	}
 	var stored storedIdentity
 	if err := json.Unmarshal(raw, &stored); err != nil {
-		return Identity{}, fmt.Errorf("producer identity: parse %s: %w", IdentityFile, err)
+		return Identity{}, fmt.Errorf("producer identity: parse %s: %w", File, err)
 	}
 	return Identity{InstallID: stored.InstallID, Seed: stored.Seed}, nil
 }
@@ -140,11 +144,11 @@ func createIdentity(dir string) (Identity, error) {
 	if err != nil {
 		return Identity{}, fmt.Errorf("producer identity: encode: %w", err)
 	}
-	path := filepath.Join(dir, IdentityFile)
+	path := filepath.Join(dir, File)
 	// Written through a uniquely named temporary file so a crash cannot leave a half-written key and
 	// so two processes starting at once cannot overwrite each other's, and at 0600 so the signing
 	// seed is readable only by the account running the server.
-	f, err := os.CreateTemp(dir, IdentityFile+".*.tmp")
+	f, err := os.CreateTemp(dir, File+".*.tmp")
 	if err != nil {
 		return Identity{}, fmt.Errorf("producer identity: write: %w", err)
 	}

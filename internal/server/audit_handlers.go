@@ -8,8 +8,8 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/beatfeed"
 	"github.com/kordloom/switchtender/internal/audit"
-	"github.com/kordloom/switchtender/internal/beatfeed"
 )
 
 // auditResponse wraps the audit trail.

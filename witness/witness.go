@@ -17,8 +17,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kordloom/switchtender/internal/audit"
-	"github.com/kordloom/switchtender/internal/beatfeed"
+	"github.com/kordloom/switchtender/beatfeed"
+	"github.com/kordloom/switchtender/identity"
 )
 
 // FeedLimit is how many beats the witness asks the feed for, and recentCap is how many it
@@ -199,7 +199,7 @@ func signedContent(c *Checkpoint) ([]byte, error) {
 // signBytes signs content with the witness identity, returning the hex key and signature. Every
 // document the witness signs, its checkpoints and its attestations, goes through this one
 // envelope, so there is a single answer to what a witness signature means.
-func signBytes(id audit.Identity, content []byte) (publicKey, sig string) {
+func signBytes(id identity.Identity, content []byte) (publicKey, sig string) {
 	return id.PublicKeyHex(), hex.EncodeToString(ed25519.Sign(id.Private(), content))
 }
 
@@ -223,7 +223,7 @@ func verifyBytes(subject, publicKey, sig string, content []byte) error {
 }
 
 // Sign stamps the checkpoint with the witness identity, so a tampered state file is detectable.
-func Sign(c *Checkpoint, id audit.Identity) error {
+func Sign(c *Checkpoint, id identity.Identity) error {
 	content, err := signedContent(c)
 	if err != nil {
 		return fmt.Errorf("sign checkpoint: %w", err)
@@ -276,7 +276,7 @@ func Load(path, expectKey string) (*Checkpoint, error) {
 
 // Save signs and writes the checkpoint atomically, so a crash mid-write never leaves a state file
 // that fails verification on the next start.
-func Save(path string, c *Checkpoint, id audit.Identity) error {
+func Save(path string, c *Checkpoint, id identity.Identity) error {
 	if err := Sign(c, id); err != nil {
 		return err
 	}

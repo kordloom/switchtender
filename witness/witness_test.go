@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/identity"
 )
 
 // beat builds one feed record.
@@ -76,7 +76,7 @@ func TestCheckFindsAHeadRegression(t *testing.T) {
 func TestCheckpointSignatureRoundTripAndTamper(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	id, err := audit.LoadIdentity(dir)
+	id, err := identity.Load(dir)
 	if err != nil {
 		t.Fatalf("LoadIdentity() error = %v", err)
 	}
@@ -169,14 +169,14 @@ func TestCheckRefusesACheckpointFromAnotherServer(t *testing.T) {
 func TestLoadRefusesACheckpointSignedByAnotherKey(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	mine, err := audit.LoadIdentity(dir)
+	mine, err := identity.Load(dir)
 	if err != nil {
 		t.Fatalf("LoadIdentity() error = %v", err)
 	}
 	// A forger with write access to the state file generates their own key, writes a checkpoint
 	// whose memory matches the truncated feed, and signs it. It is internally consistent.
 	forgerDir := t.TempDir()
-	forger, err := audit.LoadIdentity(forgerDir)
+	forger, err := identity.Load(forgerDir)
 	if err != nil {
 		t.Fatalf("LoadIdentity() error = %v", err)
 	}

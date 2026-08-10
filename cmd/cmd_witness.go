@@ -14,7 +14,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/kordloom/switchtender/internal/audit"
-	"github.com/kordloom/switchtender/internal/witness"
+	"github.com/kordloom/switchtender/witness"
 )
 
 var (
