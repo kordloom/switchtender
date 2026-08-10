@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Sample evidence pack | SwitchTender docs</title>
+	<meta name="description" content="This is what the change-management evidence a reviewer samples looks like, produced by switchtender audit report over a real chain.">
+	<link rel="canonical" href="https://switchtender.com/docs/sample-evidence-pack">
+	<meta property="og:title" content="Sample evidence pack | SwitchTender docs">
+	<meta property="og:description" content="This is what the change-management evidence a reviewer samples looks like, produced by switchtender audit report over a real chain.">
+	<meta property="og:type" content="article">
+	<meta property="og:url" content="https://switchtender.com/docs/sample-evidence-pack">
+	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
+	<meta name="twitter:card" content="summary_large_image">
+	<meta name="twitter:title" content="Sample evidence pack | SwitchTender docs">
+	<meta name="twitter:description" content="This is what the change-management evidence a reviewer samples looks like, produced by switchtender audit report over a real chain.">
+	<meta name="twitter:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
+	<link rel="icon" href="/favicon.ico" sizes="any">
+	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
+	<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="/docs.css?v=2">
+</head>
+<body>
+	<header class="dnav">
+		<a class="brand" href="/"><img src="/assets/logo-train-tracks-dark.png" alt="SwitchTender" class="brand-train"><span class="brand-word">SwitchTender</span></a>
+		<span class="dnav-tag">Docs</span>
+		<nav class="dnav-links">
+			<a href="/">Home</a>
+			<a href="/#compare">Compare</a>
+			<a href="https://github.com/kordloom/switchtender">GitHub</a>
+		</nav>
+	</header>
+	<div class="dshell">
+		<aside class="dside">
+			<nav>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migrate off AWX or Semaphore</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/sample-evidence-pack" class="active">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/sdk">Extend SwitchTender in Go</a>
+			</nav>
+		</aside>
+		<main class="dcontent prose">
+			<h1 id="sample-evidence-pack">Sample evidence pack</h1>
+<p>This is what the change-management evidence a reviewer samples looks like, produced by
+<code>switchtender audit report</code> over a real chain. It is the artifact you hand an auditor or a
+prospect's security team. See <a href="/docs/compliance">Compliance mapping</a> for which control clauses each
+column answers.</p>
+<p>The instance below uses fictional accounts and playbook names and touches no real infrastructure, so
+nothing here is redacted; on your own instance the same report carries your real changes. The chain
+it was rendered from verifies and is anchored to a public timestamp authority, so the header reads:</p>
+<blockquote>
+<p>The chain verifies and carries 1 anchor(s) fixing it outside this install.</p>
+</blockquote>
+<h2 id="the-period-at-a-glance">The period at a glance</h2>
+<table>
+<thead>
+<tr>
+<th style="text-align:right">Changes</th>
+<th style="text-align:right">Approved</th>
+<th style="text-align:right">Rejected</th>
+<th style="text-align:right">Failed</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align:right">6</td>
+<td style="text-align:right">4</td>
+<td style="text-align:right">1</td>
+<td style="text-align:right">2</td>
+</tr>
+</tbody>
+</table>
+<h2 id="every-change-in-the-period">Every change in the period</h2>
+<table>
+<thead>
+<tr>
+<th>When (UTC)</th>
+<th>Change</th>
+<th>Actor</th>
+<th>Source</th>
+<th>Risk</th>
+<th>Held by</th>
+<th>Decision</th>
+<th>Outcome</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>2026-08-10 11:50</td>
+<td>ansible deploy/site.yml</td>
+<td>alice-deploy</td>
+<td>api</td>
+<td>medium</td>
+<td>gate-all-production-change</td>
+<td>Approved by platform-admin #10</td>
+<td>failed</td>
+</tr>
+<tr>
+<td>2026-08-10 11:50</td>
+<td>ansible tls/rotate-certs.yml</td>
+<td>alice-deploy</td>
+<td>api</td>
+<td>medium</td>
+<td>gate-all-production-change</td>
+<td>Approved by platform-admin #11</td>
+<td>failed</td>
+</tr>
+<tr>
+<td>2026-08-10 11:50</td>
+<td>ansible web/restart-nginx.yml</td>
+<td>alice-deploy</td>
+<td>api</td>
+<td>medium</td>
+<td>gate-all-production-change</td>
+<td>Rejected by platform-admin #12</td>
+<td>rejected</td>
+</tr>
+<tr>
+<td>2026-08-10 11:50</td>
+<td>ansible db/apply-migrations.yml</td>
+<td>alice-deploy</td>
+<td>api</td>
+<td>medium</td>
+<td>gate-all-production-change</td>
+<td>—</td>
+<td>pending_approval</td>
+</tr>
+<tr>
+<td>2026-08-10 11:51</td>
+<td>bash echo deploy complete</td>
+<td>alice-deploy</td>
+<td>api</td>
+<td>low</td>
+<td>gate-all-production-change</td>
+<td>Approved by platform-admin #15</td>
+<td>succeeded</td>
+</tr>
+<tr>
+<td>2026-08-10 11:51</td>
+<td>bash echo cache purged on edge fleet</td>
+<td>alice-deploy</td>
+<td>api</td>
+<td>low</td>
+<td>gate-all-production-change</td>
+<td>Approved by platform-admin #16</td>
+<td>succeeded</td>
+</tr>
+</tbody>
+</table>
+<h2 id="how-to-read-it">How to read it</h2>
+<ul>
+<li><strong>Held by</strong> names the approval policy that stopped every change, so a reviewer sees the gate was in
+force, not that these six happened to be caught.</li>
+<li><strong>Decision</strong> is the chain-recorded approval or rejection, with the approver and the entry number
+the decision landed at (<code>#10</code>), so it is redeemable against the chain rather than a field the
+server asserts. <code>alice-deploy</code>, an operator, submitted every change; <code>platform-admin</code> decided each
+one, which is the separation of requester and approver a change-management control expects.</li>
+<li><strong>Outcome</strong> is honest, not curated. Two approved changes then failed at execution, one change was
+rejected and never ran, one is still awaiting a decision, and two succeeded. An audit trail that
+only ever showed green would be the one to distrust.</li>
+<li>Nothing in the row exposes a secret. The chain commits to a redacted digest of each change's
+payload, so the record proves what changed without carrying the credentials the change used.</li>
+</ul>
+<h2 id="produce-your-own">Produce your own</h2>
+<pre><code># a period's change register
+switchtender audit report --from 2026-07-01 --to 2026-08-01 --out evidence.html
+
+# one change in depth: spec, approvals, per-host outcomes, receipts, anchors
+switchtender audit run &lt;run-id&gt; --out run-dossier.html
+
+# fix the chain in time so a lost tail is detectable, then re-report
+switchtender audit anchor
+</code></pre>
+<p>The Governed tier produces these on a cadence, mapped to your controls and written to an archive, so
+the sample a review asks for exists before anyone asks. The report itself, and verifying it offline,
+are free in the core.</p>
+
+		</main>
+	</div>
+	<script>document.addEventListener("click",e=>{const a=e.target.closest(".dside a");if(a)document.querySelector(".dside")?.classList.remove("open")});</script>
+</body>
+</html>

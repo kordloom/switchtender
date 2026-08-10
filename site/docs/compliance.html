@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Compliance mapping | SwitchTender docs</title>
+	<meta name="description" content="This maps what SwitchTender records to the change-management and audit-control clauses an assessor asks about.">
+	<link rel="canonical" href="https://switchtender.com/docs/compliance">
+	<meta property="og:title" content="Compliance mapping | SwitchTender docs">
+	<meta property="og:description" content="This maps what SwitchTender records to the change-management and audit-control clauses an assessor asks about.">
+	<meta property="og:type" content="article">
+	<meta property="og:url" content="https://switchtender.com/docs/compliance">
+	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
+	<meta name="twitter:card" content="summary_large_image">
+	<meta name="twitter:title" content="Compliance mapping | SwitchTender docs">
+	<meta name="twitter:description" content="This maps what SwitchTender records to the change-management and audit-control clauses an assessor asks about.">
+	<meta name="twitter:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
+	<link rel="icon" href="/favicon.ico" sizes="any">
+	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
+	<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="/docs.css?v=2">
+</head>
+<body>
+	<header class="dnav">
+		<a class="brand" href="/"><img src="/assets/logo-train-tracks-dark.png" alt="SwitchTender" class="brand-train"><span class="brand-word">SwitchTender</span></a>
+		<span class="dnav-tag">Docs</span>
+		<nav class="dnav-links">
+			<a href="/">Home</a>
+			<a href="/#compare">Compare</a>
+			<a href="https://github.com/kordloom/switchtender">GitHub</a>
+		</nav>
+	</header>
+	<div class="dshell">
+		<aside class="dside">
+			<nav>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migrate off AWX or Semaphore</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance" class="active">Compliance mapping</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/sdk">Extend SwitchTender in Go</a>
+			</nav>
+		</aside>
+		<main class="dcontent prose">
+			<h1 id="compliance-mapping">Compliance mapping</h1>
+<p>This maps what SwitchTender records to the change-management and audit-control clauses an assessor
+asks about. It is a reference for the person answering the audit, not a claim of certification: the
+tool produces the evidence, and your assessor decides whether your program satisfies the control.</p>
+<p>Every mapping below points at something the free core already produces, the tamper-evident chain and
+the change register <code>switchtender audit report</code> renders from it. Nothing here is a paid feature. The
+paid Governed tier adds scheduled, control-mapped evidence packs generated to an archive on a
+cadence, which is the same evidence assembled for you rather than pulled per request.</p>
+<h2 id="what-the-record-holds">What the record holds</h2>
+<p>Every authenticated change is one entry in a SHA-256 hash chain. Each entry commits to:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>What it is</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Actor</td>
+<td>Who acted, and <code>actor_type</code> for how they authenticated: a session, a token, or the command line.</td>
+</tr>
+<tr>
+<td>On behalf of</td>
+<td>For a token bound to an account, the account whose authority it used, so an agent's change is attributable to both the token and the operator behind it.</td>
+</tr>
+<tr>
+<td>Method and path</td>
+<td>The operation performed.</td>
+</tr>
+<tr>
+<td>Content digest</td>
+<td>A hash of the change payload with secret fields redacted, so the record proves what a change contained, not only that a call was made, without exposing the secret.</td>
+</tr>
+<tr>
+<td>Time, sequence, link</td>
+<td>When it happened and its tamper-evident position in the chain.</td>
+</tr>
+</tbody>
+</table>
+<p>The change register (<code>switchtender audit report --from --to</code>) renders these per change with the
+run's actor, the approval decision recorded over it, the risk grade, and the outcome. The run dossier
+(<code>switchtender audit run &lt;id&gt;</code>) is the per-change deep view: spec, approvals, per-host results, and
+the chain receipts and anchors behind them.</p>
+<h2 id="soc-2-cc81-change-management">SOC 2 CC8.1 (change management)</h2>
+<p>CC8.1 asks that changes are authorized, tested, and tracked before they reach production.</p>
+<table>
+<thead>
+<tr>
+<th>The control expects</th>
+<th>Where SwitchTender shows it</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Changes are authorized before they take effect</td>
+<td>The approval decision on each register row, recorded in the chain; an empty approval policy holds every run for a person, and approve is admin-only so an operator or agent cannot release its own change.</td>
+</tr>
+<tr>
+<td>Change activity is tracked and attributable</td>
+<td>The actor, <code>actor_type</code>, and <code>on_behalf_of</code> on every entry; the change register lists every change in the period.</td>
+</tr>
+<tr>
+<td>The change record is complete and unaltered</td>
+<td>The hash chain: a change that cannot be recorded is refused rather than made, and altering or deleting an entry breaks verification, provable offline with <code>switchtender audit verify</code>.</td>
+</tr>
+<tr>
+<td>A dry run or test preceded the change</td>
+<td>A run's dossier records whether it ran in the tool's no-change mode; drift is shown from a dry run before the fix is built.</td>
+</tr>
+<tr>
+<td>Segregation between requester and approver</td>
+<td>Approve and reject are admin-only; the operator or agent that submits cannot approve.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="isoiec-270012022-a832-change-management">ISO/IEC 27001:2022 A.8.32 (change management)</h2>
+<p>A.8.32 asks that changes to information processing facilities are controlled through a formal process.</p>
+<table>
+<thead>
+<tr>
+<th>The control expects</th>
+<th>Where SwitchTender shows it</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Changes follow a defined, enforced procedure</td>
+<td>Policy-as-code gates changes on tool, command, or target; a gated change holds automatically.</td>
+</tr>
+<tr>
+<td>Changes are documented</td>
+<td>The change register for the period and the per-change dossier, both self-contained and re-verifiable.</td>
+</tr>
+<tr>
+<td>Changes are approved by an appropriate authority</td>
+<td>The chain-recorded approve or reject decision, with the approver's identity, on each change.</td>
+</tr>
+<tr>
+<td>Changes can be traced and, where needed, reversed</td>
+<td>Each run records what fired it and what it was a rerun or drift-fix of; the register and dossier trace the lineage.</td>
+</tr>
+<tr>
+<td>The change log is protected from tampering</td>
+<td>The hash chain, its offline verification, and an RFC 3161 anchor that bounds how much history could vanish unnoticed.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="hipaa-45-cfr-164312b-audit-controls">HIPAA 45 CFR 164.312(b) (audit controls)</h2>
+<p>164.312(b) requires mechanisms that record and examine activity in systems that handle electronic
+protected health information.</p>
+<table>
+<thead>
+<tr>
+<th>The control expects</th>
+<th>Where SwitchTender shows it</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Activity in the system is recorded</td>
+<td>Every authenticated mutation is an entry in the chain, over the API and the command line alike.</td>
+</tr>
+<tr>
+<td>The record cannot be silently altered</td>
+<td>The SHA-256 chain and its offline verification; a change that cannot be recorded is refused.</td>
+</tr>
+<tr>
+<td>The record can be examined</td>
+<td>The change register and per-change dossier render as self-contained HTML a reviewer reads without tooling.</td>
+</tr>
+<tr>
+<td>The record is retained and its integrity demonstrable over a period</td>
+<td>Scheduled evidence packs write a register per period to an archive, and an anchor fixes the chain in time so a lost tail is detectable.</td>
+</tr>
+<tr>
+<td>Access to the audit trail is itself controlled</td>
+<td>Reading the trail and the run evidence is an admin-role operation, not open to every viewer.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="the-boundary-stated-plainly">The boundary, stated plainly</h2>
+<p>The chain proves the record was not altered and, with the content digest, what each change contained.
+It does not prove that every change to your infrastructure went through SwitchTender: a person or a
+process holding its own SSH key can change a host behind the controller, and no audit system records
+what it never saw. For an AI agent the gap closes, because an agent that holds only a SwitchTender
+token has no path around the gate. State this boundary to an assessor rather than implying the record
+is exhaustive; it is the honest and defensible position. The same statement is in
+<a href="/docs/concepts#provable-audit">Concepts</a>.</p>
+<h2 id="producing-the-evidence">Producing the evidence</h2>
+<ul>
+<li>One change, in depth: <code>switchtender audit run &lt;id&gt;</code>, or the Evidence button on a run.</li>
+<li>A period's change register: <code>switchtender audit report --from 2026-07-01 --to 2026-08-01</code>.</li>
+<li>A signed, offline-verifiable bundle of the whole chain: <code>switchtender audit bundle</code>.</li>
+<li>On a cadence, unattended: <code>--evidence-dir</code> with <code>--evidence-cadence</code>, so the sample a review asks
+for already exists.</li>
+</ul>
+<p>A redacted example the reader can hold is in <a href="/docs/sample-evidence-pack">the sample evidence pack</a>.</p>
+
+		</main>
+	</div>
+	<script>document.addEventListener("click",e=>{const a=e.target.closest(".dside a");if(a)document.querySelector(".dside")?.classList.remove("open")});</script>
+</body>
+</html>

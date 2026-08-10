@@ -137,6 +137,17 @@ server that dropped the creation entry cannot answer the receipt, and the dossie
 than showing a run with no origin. A run the scheduler started on its own carries no receipt, since
 no request authorized it, and the document states that rather than leaving it ambiguous.
 
+**Authentication attempts are not in the chain, and this is deliberate.** An assessor reviewing an
+append-only trail will notice sign-ins are absent, so here is why. A sign-in and a webhook probe are
+reachable by anyone on the network, and the audit append is fail-closed: recording every attempt
+would let a stranger fill the chain with entries, and once the store filled, the fail-closed append
+would refuse every real change and lock the install, including sign-in itself on a fresh install with
+no token yet. So authentication events live in the server log instead, which records each sign-in by
+username and outcome, success, failure, and rate-limited, and never the password or a token. A
+successful sign-in also leaves a durable mark in the chain indirectly: it mints a session token, and
+every change that token then makes is recorded with that account as its actor. Forward the server log
+to your SIEM to retain and examine authentication activity alongside the change trail.
+
 **Evidence comes out as documents, not screenshots.** `switchtender audit run <id>` emits one
 run's dossier: what ran, its risk grade, who approved it, what happened on each host, and the
 receipts and anchors behind all of it. `switchtender audit report --from --to` renders the period's

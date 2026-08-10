@@ -162,6 +162,9 @@ func loginHandler(users user.Store, tokens auth.Store, ldap *LDAPAuth, log *zap.
 			return
 		}
 		if !limiter.allow(clientAddr(r) + "\x00" + req.Username) {
+			// A rate-limited attempt is logged too, since a burst against one account is exactly the
+			// signal an auditor of authentication activity is looking for.
+			log.Warn("server: sign-in rate limited", zap.String("username", req.Username))
 			respondError(w, log, http.StatusTooManyRequests, "too many sign-in attempts, wait a minute")
 			return
 		}
@@ -171,6 +174,12 @@ func loginHandler(users user.Store, tokens auth.Store, ldap *LDAPAuth, log *zap.
 		}
 		req.Password = ""
 		if err != nil {
+			// Sign-in attempts are deliberately not written to the tamper-evident chain (see the
+			// audit gate for why: an unbounded, stranger-driven append that a fail-closed audit store
+			// would then turn into a lockout). They live in the server log instead. Only the username
+			// and outcome are recorded, never the password or a token; the username is the same actor
+			// identity the chain already carries for an authenticated action.
+			log.Warn("server: sign-in failed", zap.String("username", req.Username))
 			respondError(w, log, http.StatusUnauthorized, "bad credentials")
 			return
 		}
@@ -189,6 +198,9 @@ func loginHandler(users user.Store, tokens auth.Store, ldap *LDAPAuth, log *zap.
 			respondError(w, log, http.StatusInternalServerError, "could not sign in")
 			return
 		}
+		// A successful sign-in is recorded in the server log, the home for authentication events that
+		// the chain excludes, so the trail of who signed in and when exists somewhere durable.
+		log.Info("server: sign-in", zap.String("username", u.Username), zap.String("role", string(u.Role)))
 		respondJSON(w, log, http.StatusOK,
 			loginResponse{Token: plain, Username: u.Username, Role: u.Role}, wantsPretty(r))
 	}
