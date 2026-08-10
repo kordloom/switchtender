@@ -124,7 +124,7 @@
 </tr>
 <tr>
 <td>Tamper-evident audit</td>
-<td>Every mutation is linked into a SHA-256 hash chain. <code>GET /v1/audit/verify</code> flags the first altered or deleted entry, and a signed export verified with <code>switchtender audit verify</code> proves the whole chain offline. A change that cannot be recorded is refused rather than performed silently.</td>
+<td>Every mutation is linked into a SHA-256 hash chain. <code>GET /v1/audit/verify</code> flags the first altered or deleted entry, and a signed LoomSeal bundle proves the whole chain offline to a third party running an open verifier this project does not control. A change that cannot be recorded is refused rather than performed silently.</td>
 </tr>
 <tr>
 <td>Anchored history</td>
@@ -136,7 +136,7 @@
 </tr>
 <tr>
 <td>Evidence report</td>
-<td><code>switchtender audit report</code> renders a signed export into a self-contained HTML compliance report, verifying it offline in the same pass, so a vendor-security or SOC 2 reviewer reads the verdict and re-verifies it against the export with no tooling.</td>
+<td><code>switchtender audit report</code> renders the period's changes into a self-contained HTML compliance report a vendor-security or SOC 2 reviewer reads with no tooling. The chain behind it is proved separately by verifying a signed bundle, so the narrative and the proof are independent artifacts.</td>
 </tr>
 <tr>
 <td>Launch receipts</td>

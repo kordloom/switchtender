@@ -102,7 +102,7 @@
 
 	if (!WebAssembly || !WebAssembly.instantiateStreaming) {
 		main.textContent = "This browser cannot run the verifier";
-		sub.textContent = "Use switchtender audit verify from the command line instead.";
+		sub.textContent = "Use loomseal verify from the command line instead.";
 		return;
 	}
 	var go = new Go();
@@ -114,6 +114,6 @@
 		})
 		.catch(function () {
 			main.textContent = "The verifier failed to load";
-			sub.textContent = "Reload the page, or use switchtender audit verify from the command line.";
+			sub.textContent = "Reload the page, or use loomseal verify from the command line.";
 		});
 })();

@@ -167,7 +167,7 @@ func (u *UI) credentials(w http.ResponseWriter, _ *http.Request) {
 	u.render(w, "credentials.html", map[string]any{"ReadOnly": u.readOnly})
 }
 
-// audit renders the audit trail page with chain verification and signed export.
+// audit renders the audit trail page with chain verification and signed bundle download.
 func (u *UI) audit(w http.ResponseWriter, _ *http.Request) {
 	u.render(w, "audit.html", map[string]any{"ReadOnly": u.readOnly})
 }

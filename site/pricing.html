@@ -52,6 +52,8 @@
 		.tier-price { margin: 18px 0 2px; display: flex; align-items: baseline; gap: 4px; flex-wrap: wrap; }
 		.tier-price b { font-family: "Space Grotesk", sans-serif; font-size: 34px; font-weight: 700; line-height: 1; }
 		.tier-price .cadence { color: var(--muted); font-size: 14px; }
+		/* "From" sits with the cadence, not the figure, so the number stays the thing you read. */
+		.tier-price .from { color: var(--muted); font-size: 14px; align-self: center; }
 		.tier-sub { color: var(--muted); font-size: 13px; min-height: 20px; }
 		.tier-payoff {
 			margin: 14px 0 2px; padding: 12px 14px; border-radius: 10px;
@@ -159,7 +161,7 @@
 						<li>Run approvals and policy gates</li>
 						<li>REST API, webhooks, and per-template notifications</li>
 						<li><b>Secrets masking</b> in run logs</li>
-						<li>Hash-chain generation, signed export, and local verification, the <code>verify</code> command free forever</li>
+						<li>Hash-chain generation, signed <a href="https://loomseal.com" rel="noopener">LoomSeal</a> bundles, and offline verification with an open verifier, free forever</li>
 						<li>Community support via GitHub issues</li>
 					</ul>
 				</article>
@@ -167,7 +169,7 @@
 				<article class="card tier tier-featured">
 					<div class="tier-name">Team</div>
 					<p class="tier-for">Stop hand-managing who can touch production.</p>
-					<div class="tier-price"><b>$250&ndash;500</b><span class="cadence">/ mo</span></div>
+					<div class="tier-price"><span class="from">From</span><b>$250</b><span class="cadence">/ mo</span></div>
 					<p class="tier-sub">Flat per org. No per-seat bill.</p>
 					<div class="tier-payoff">When someone leaves the company, their access <b>ends that day</b>, everywhere. Risky changes wait for a real sign-off from a link. Secrets never live in playbooks. And when something breaks, you're talking to the engineers who built it, and we put our response time in writing. Cheaper than one engineer-day a month.</div>
 					<a class="ghost" href="mailto:hello@kordloom.com?subject=SwitchTender%20Team%20tier">Talk to us</a>
@@ -185,7 +187,7 @@
 				<article class="card tier">
 					<div class="tier-name">Governed</div>
 					<p class="tier-for">Turn the audit scramble into a scheduled export.</p>
-					<div class="tier-price"><b>$1,000&ndash;2,500</b><span class="cadence">/ mo</span></div>
+					<div class="tier-price"><span class="from">From</span><b>$1,000</b><span class="cadence">/ mo</span></div>
 					<p class="tier-sub">Flat per org. Migration priced separately.</p>
 					<div class="tier-payoff">The evidence an auditor asks for <b>generates itself on a schedule</b>, mapped to your controls, and they verify it offline without you in the room. Add priority support with a real SLA and hands-on migration from us. Days of gathering screenshots become one download. One passed audit pays for the year.</div>
 					<a class="ghost" href="mailto:hello@kordloom.com?subject=SwitchTender%20Governed%20tier">Talk to us</a>
@@ -206,8 +208,9 @@
 			<p class="pricing-note">
 				<strong>Free is shipping today. Team and Governed are earlier. We're building them now with
 				our first customers</strong>, and what we build first follows what they actually need. The
-				subscription prices are public because you shouldn't have to email us to find out what
-				something costs.
+				subscription prices start where they say because you shouldn't have to email us to find out
+				roughly what something costs. Early access is priced per org and settles on scope, so the
+				figure you see is the floor, not an opening bid.
 				If you want in early, <a href="mailto:hello@kordloom.com?subject=SwitchTender%20pricing" style="color: var(--accent);">write us</a>.
 			</p>
 

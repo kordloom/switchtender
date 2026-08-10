@@ -43,7 +43,7 @@ CC8.1 asks that changes are authorized, tested, and tracked before they reach pr
 |---------------------|-----------------------------|
 | Changes are authorized before they take effect | The approval decision on each register row, recorded in the chain; an empty approval policy holds every run for a person, and approve is admin-only so an operator or agent cannot release its own change. |
 | Change activity is tracked and attributable | The actor on every entry, joined by `actor_type` and `on_behalf_of` in the next release; the change register lists every change in the period. |
-| The change record is complete and unaltered | The hash chain: a change that cannot be recorded is refused rather than made, and altering or deleting an entry breaks verification, provable offline with `switchtender audit verify`. |
+| The change record is complete and unaltered | The hash chain: a change that cannot be recorded is refused rather than made, and altering or deleting an entry breaks verification, provable offline from a signed bundle with the open `loomseal` verifier. |
 | A dry run or test preceded the change | A run's dossier records whether it ran in the tool's no-change mode; drift is shown from a dry run before the fix is built. |
 | Segregation between requester and approver | Approve and reject are admin-only; the operator or agent that submits cannot approve. |
 

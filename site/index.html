@@ -291,8 +291,8 @@
 				<pre><code><span class="c"># 1. the server re-verifies its whole chain, entry by entry</span>
 curl -s https://demo.switchtender.com/v1/audit/verify
 
-<span class="c"># 2. pull the full chain, every hash included, yours to keep</span>
-curl -s https://demo.switchtender.com/v1/audit/export
+<span class="c"># 2. pull the whole chain as a signed bundle, yours to keep and verify anywhere</span>
+curl -s https://demo.switchtender.com/v1/audit/bundle &gt; demo-bundle.json
 
 <span class="c"># 3. become its witness: keep a signed checkpoint of the head you saw.
 #    Run it again after tonight's reseed and watch it catch the rewrite.</span>
@@ -300,8 +300,16 @@ switchtender witness --server https://demo.switchtender.com --once</code></pre>
 			</div>
 		</section>
 
-		<section class="namebar wrap reveal" id="agent-gov">
-			<p><b>Agents are operators now.</b> When an AI agent runs your infrastructure, hand it one credential: a SwitchTender token bound to an operator account. Secrets stay sealed on the server, policy holds risky runs for a person to release, and every change lands in the chain under the agent's own name. The gate is the agent's only door. <a href="/agents">Run an agent with proof</a>.</p>
+		<section class="section wrap" id="agent-gov">
+			<div class="section-head reveal">
+				<span class="eyebrow">AI agent change governance</span>
+				<h2>Agents are operators now.</h2>
+				<p>When an AI agent runs your infrastructure, hand it one credential: a SwitchTender token bound to an operator account. Secrets stay sealed on the server, policy holds risky runs for a person to release, and every change lands in the chain under the agent's own name. The gate is the agent's only door.</p>
+			</div>
+			<div class="hero-cta center reveal">
+				<a class="btn big" href="/agents">Run an agent with proof</a>
+				<a class="ghost big" href="/docs/agents">How agents connect</a>
+			</div>
 		</section>
 
 		<section class="section wrap" id="ai">

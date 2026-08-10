@@ -450,6 +450,12 @@ h1 {
 @media (max-width: 560px) {
 	.signup-input { width: 100%; }
 	.signup-form .btn { width: 100%; }
+	/* Wrap commands rather than scrolling them on a phone. These blocks hold curl lines longer than
+	   any handset is wide, and a horizontally scrolling region gives no hint it scrolls, so the
+	   command reads as truncated. Wrapping shows the whole thing, and the copy button means nobody
+	   retypes the wrapped text anyway. */
+	.code pre { white-space: pre-wrap; overflow-wrap: anywhere; padding: 18px 16px; }
+	.code .copy { top: 8px; right: 8px; }
 }
 
 /* Caption under the comparison table: what it was checked against and when. */

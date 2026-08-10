@@ -170,7 +170,7 @@ const TOURS = [
 			{ sel: "#ask-panel", title: "Ask the fleet anything", body: "Advisory AI answers from run, health, and drift data. It proposes and never executes. Run it on local Ollama or your own cloud key.", hold: 7000 },
 			{ page: "workflows", path: "/ui/workflows", sel: "#wf-canvas", title: "Drag a pipeline together", body: "Wire all seven tools, and any tool you plug in, into one graph with per-step retries. AWX's signature feature, without the Kubernetes bill.", hold: 7500 },
 			{ page: "policies", path: "/ui/policies", sel: "#policy-open", title: "The gate nobody skips", body: "Policy holds a prod terraform destroy for an admin's sign-off, automatically. Approvals are enforced, not suggested.", hold: 7000 },
-			{ page: "audit", path: "/ui/audit", sel: "#audit-verify", title: "Prove every change", body: "Every change links into a tamper-evident hash chain. One click verifies it here, and a signed export verifies offline.", hold: 7000 },
+			{ page: "audit", path: "/ui/audit", sel: "#audit-verify", title: "Prove every change", body: "Every change links into a tamper-evident hash chain. One click verifies it here, and a signed bundle verifies offline with an open verifier.", hold: 7000 },
 			{ page: "overview", path: "/ui/", sel: "#tiles a[href='/ui/migrate']", title: "Switching is one command", body: "Projects, inventories, templates, surveys, and schedules import from AWX or Semaphore in a single pass.", hold: 6500 },
 			{ title: "That is the moat", body: "Running many tools is table stakes. A control plane that proves itself is not. Press Explore and try anything, nothing here can break.", hold: 8000 },
 		],

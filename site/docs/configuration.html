@@ -66,7 +66,7 @@ variable.</p>
 <tr>
 <td><code>SWITCHTENDER_AUDIT_KEY</code></td>
 <td>serve</td>
-<td>Hex-encoded ed25519 seed that signs audit exports so the trail can be verified offline. Signing is off when unset. A malformed value stops startup. Generate one with <code>switchtender audit keygen</code>.</td>
+<td>Hex-encoded ed25519 seed for the install's signing identity, which signs the LoomSeal bundles it emits. Unset, the install mints and stores its own key beside the database. A malformed value stops startup.</td>
 </tr>
 <tr>
 <td><code>SWITCHTENDER_PASSWORD</code></td>
@@ -746,12 +746,16 @@ service, or an AI agent. See <a href="/docs/agents">running an agent</a>.</li>
 <p>Both take <code>--db</code> for the target database. Without <code>--apply</code> the command only reports what it would
 create.</p>
 <h2 id="audit">audit</h2>
-<p>Audit trail tools for the signed export.</p>
+<p>Audit trail tools.</p>
 <ul>
-<li><code>audit keygen</code> generates an ed25519 signing key. Set the printed seed as <code>SWITCHTENDER_AUDIT_KEY</code>.</li>
-<li><code>audit verify &lt;export.json&gt;</code> verifies an export offline: it recomputes the hash chain and checks
-the signature. <code>--pubkey</code> pins the expected signer public key in hex, and verification fails when
-the export's key differs.</li>
+<li><code>audit bundle</code> emits the chain as a signed LoomSeal bundle. Anyone verifies it offline with the
+open <code>loomseal</code> verifier, or in a browser, without trusting the server that produced it.</li>
+<li><code>audit anchor</code> has a public timestamp authority sign the current head, so a chain that has lost
+its tail no longer reaches its anchor.</li>
+<li><code>audit receipt &lt;seq:link&gt;</code> redeems a receipt the server issued, proving that entry is still in the
+chain.</li>
+<li><code>audit report</code> renders the period's change register as a self-contained HTML evidence report.</li>
+<li><code>audit run &lt;id&gt;</code> emits one run's evidence dossier as a self-contained HTML document.</li>
 </ul>
 <h2 id="demo">demo</h2>
 <p>Seeds a fresh database with sample data and real runs, then serves it read-only, so a public

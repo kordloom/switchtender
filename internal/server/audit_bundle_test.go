@@ -85,7 +85,7 @@ func TestAuditBundleHandlerRefusals(t *testing.T) {
 		t.Fatalf("LoadIdentity() error = %v", err)
 	}
 
-	// No producer identity: signed export is off.
+	// No producer identity: bundle signing is off.
 	rec := httptest.NewRecorder()
 	auditBundleHandler(audit.NewMemStore(), nil, "v", zap.NewNop()).
 		ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/audit/bundle", nil))

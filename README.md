@@ -182,7 +182,7 @@ with a bounded worker pool, the cron scheduler, and the embedded UI.
 An AI agent that changes infrastructure is an operator, and it gets the operator's deal: one
 credential, an operator-bound SwitchTender token, and no prod credentials of its own. Every change
 it makes is recorded to the hash chain before it executes, anything policy gates waits for a human
-admin, and the signed export proves the record to a third party offline. The full setup is in
+admin, and a signed LoomSeal bundle proves the record to a third party offline. The full setup is in
 [Run an AI agent through the gate](docs/agents.md).
 
 ## The name

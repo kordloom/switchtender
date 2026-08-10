@@ -134,12 +134,11 @@ does not lose the outcome.</p>
 binary against an existing database is safe to repeat.</p>
 <p>The audit trail is a SHA-256 hash chain. Every recorded mutation carries the previous entry's hash
 and its own hash over its content, so altering, reordering, or dropping an entry breaks the chain,
-which <code>GET /v1/audit/verify</code> detects. The chain is tamper-evident with no key configured. When a
-signing key is set, <code>GET /v1/audit/export</code> seals the chain head with an ed25519 signature, and
-<code>switchtender audit verify</code> confirms the trail offline, without trusting the server that produced
-it. <code>switchtender audit report</code> turns that export into a self-contained HTML evidence report,
-verifying it in the same pass, so a compliance or vendor-security reviewer reads the result and
-re-verifies it against the export without any tooling. The append is serialized by an in-process
+which <code>GET /v1/audit/verify</code> detects. The chain is tamper-evident with no key configured. <code>GET /v1/audit/bundle</code>
+seals the chain into a signed LoomSeal bundle, and the open <code>loomseal</code> verifier confirms the trail
+offline, without trusting the server that produced it. <code>switchtender audit report</code> renders the
+period's changes as a self-contained HTML evidence report a compliance or vendor-security reviewer
+reads without any tooling, and the bundle proves the chain behind it independently. The append is serialized by an in-process
 lock on SQLite and a transaction-level advisory
 lock on PostgreSQL, with
 a unique index on the sequence number as a cross-process backstop, so the chain stays linear even

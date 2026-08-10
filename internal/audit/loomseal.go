@@ -59,8 +59,8 @@ type BundleProducer struct {
 	ProductVersion string `json:"product_version"`
 	// InstallID distinguishes this install from another running the same product.
 	InstallID string `json:"install_id"`
-	// PublicKey is the raw ed25519 public key in standard base64. The existing signed export writes
-	// the same key in hex; this is the same key and the same trust in one envelope.
+	// PublicKey is the raw ed25519 public key in standard base64, the encoding the bundle format
+	// specifies. The trust page publishes its fingerprint so a relying party can pin it.
 	PublicKey string `json:"public_key"`
 	// KeyID is the sha256 fingerprint of the raw key bytes, the value published on a trust page.
 	KeyID string `json:"key_id"`
@@ -191,7 +191,7 @@ func BuildBundle(entries []*Entry, id Identity, version string, at time.Time) (*
 	// this install has already been handed over by then.
 	if ok, brokeAt := VerifyRange(entries); !ok {
 		return nil, fmt.Errorf("%w: the chain does not verify at entry %d, sequence %d, so a bundle "+
-			"built from it would be rejected by any verifier. Run audit verify to see where",
+			"built from it would be rejected by any verifier. GET /v1/audit/verify reports where",
 			ErrExport, brokeAt, entries[brokeAt-1].Seq)
 	}
 	claims := make([]BundleClaim, 0, len(entries))
@@ -267,7 +267,7 @@ func BuildBundle(entries []*Entry, id Identity, version string, at time.Time) (*
 	// export down on the way to reporting it. Slicing a hash that was blanked out panicked instead.
 	if len(head.Hash) < 12 {
 		return nil, fmt.Errorf("%w: entry %d has no hash, so the chain is broken and cannot be "+
-			"bundled. Run audit verify to see where", ErrExport, head.Seq)
+			"bundled. GET /v1/audit/verify reports where", ErrExport, head.Seq)
 	}
 	return &Bundle{
 		LoomSeal:  loomsealVersion,

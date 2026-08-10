@@ -140,8 +140,9 @@ async function loadAudit() {
 	}
 }
 
-// wireAudit hooks the verify and export buttons. Verify recomputes the chain and shows a badge;
-// export downloads the signed snapshot for offline verification.
+// wireAudit hooks the audit page's three buttons. Verify recomputes the chain and shows a badge,
+// the evidence pack renders the period's change register, and bundle downloads a signed LoomSeal
+// bundle anyone can verify offline with an open verifier.
 function wireAudit() {
 	const badge = document.getElementById("audit-badge");
 	const verify = document.getElementById("audit-verify");

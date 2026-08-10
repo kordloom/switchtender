@@ -108,7 +108,6 @@ webhook `/hooks` path, and the `/relay` worker path, is unversioned. The root re
 | POST   | `/v1/import/{format}`      | Import an AWX, Semaphore, or Rundeck export. Format is awx, semaphore, or rundeck. Rundeck takes `?inventory=` to say which hosts its jobs target.|
 | GET    | `/v1/audit`                | The mutation trail, admin only.                         |
 | GET    | `/v1/audit/verify`         | Verify the audit hash chain is intact.                  |
-| GET    | `/v1/audit/export`         | Signed, self-verifying snapshot of the audit chain.     |
 | GET    | `/v1/audit/bundle`         | The audit chain as a signed LoomSeal bundle, verifiable offline or on the /verify page. |
 | GET    | `/metrics`              | Prometheus series: run, fleet, queue-depth, and worker gauges, plus a run-duration histogram. |
 | GET    | `/healthz`              | Liveness.                                               |

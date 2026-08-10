@@ -101,10 +101,10 @@ Every authenticated mutation is recorded in the audit trail, and each entry is l
 hash chain. Each entry commits to who acted, the method and path, and the previous entry's hash;
 from the next release it also commits to how they authenticated, the account whose authority they
 used, and a digest of the change payload. Altering,
-reordering, or deleting an entry breaks the chain, which `GET /v1/audit/verify` detects. A signed
-export from `GET /v1/audit/export` seals the chain with an ed25519 signature, so
-`switchtender audit verify` proves the trail is intact and unaltered offline, without trusting the
-server that produced it.
+reordering, or deleting an entry breaks the chain, which `GET /v1/audit/verify` detects. `GET /v1/audit/bundle`
+seals the chain into a signed LoomSeal bundle, so the open `loomseal` verifier proves the trail is
+intact and unaltered offline, on the command line or in a browser, without trusting the server that
+produced it.
 
 **The record covers the change, not only that a call was made** (next release). The link commits to
 a digest of the request payload, so a recorded change cannot be re-cast as a different one while the

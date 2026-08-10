@@ -111,10 +111,10 @@ against it lands there, no matter how it was launched.</p>
 hash chain. Each entry commits to who acted, the method and path, and the previous entry's hash;
 from the next release it also commits to how they authenticated, the account whose authority they
 used, and a digest of the change payload. Altering,
-reordering, or deleting an entry breaks the chain, which <code>GET /v1/audit/verify</code> detects. A signed
-export from <code>GET /v1/audit/export</code> seals the chain with an ed25519 signature, so
-<code>switchtender audit verify</code> proves the trail is intact and unaltered offline, without trusting the
-server that produced it.</p>
+reordering, or deleting an entry breaks the chain, which <code>GET /v1/audit/verify</code> detects. <code>GET /v1/audit/bundle</code>
+seals the chain into a signed LoomSeal bundle, so the open <code>loomseal</code> verifier proves the trail is
+intact and unaltered offline, on the command line or in a browser, without trusting the server that
+produced it.</p>
 <p><strong>The record covers the change, not only that a call was made</strong> (next release). The link commits to
 a digest of the request payload, so a recorded change cannot be re-cast as a different one while the
 chain still verifies. The digest is taken over the payload with its secret fields redacted first, so
