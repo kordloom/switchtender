@@ -204,7 +204,15 @@
 </tr>
 <tr>
 <td>Surveys</td>
-<td>Templates declare typed launch prompts, validated and injected as extra vars.</td>
+<td>Templates declare typed launch prompts, text, multiline, integer, boolean, or choice, each with bounds checked before launch: min and max on a number, length and a regular-expression pattern on text, and a help line on any field. A launch that breaks a bound is refused with the field it failed, and injected as extra vars.</td>
+</tr>
+<tr>
+<td>Ansible controls</td>
+<td>A run or template pins <code>tags</code> and <code>skip_tags</code> to select or exclude tagged plays, <code>forks</code> for how many hosts run at once, <code>verbosity</code> for <code>-v</code> through <code>-vvvv</code>, and <code>diff_mode</code> to show the before and after of every changed file, no hand-built command needed. They carry through schedules, triggers, and retries.</td>
+</tr>
+<tr>
+<td>Relaunch failures</td>
+<td>One action re-runs only the hosts a finished run left failed or unreachable, targeted at exactly that set, so a partial outage is closed without repeating the hosts that already succeeded.</td>
 </tr>
 <tr>
 <td>Worker queues</td>
@@ -308,7 +316,15 @@
 </tr>
 <tr>
 <td>Migration</td>
-<td><code>switchtender import awx</code> and <code>import semaphore</code> read an export and create the equivalent projects, inventories, templates, surveys, schedules, and credential shells, with a dry-run report first.</td>
+<td><code>switchtender import awx</code> and <code>import semaphore</code> read an export and create the equivalent projects, inventories, templates, surveys, schedules, and credential shells, with a dry-run report first. <code>switchtender import cron</code> brings a crontab under governance, turning each cron line into an approved, recorded schedule.</td>
+</tr>
+<tr>
+<td>Schedule timezones</td>
+<td>A schedule reads its cron expression in an IANA timezone such as <code>America/New_York</code>, following that zone's daylight-saving shifts, so a nightly window stays put across the year instead of drifting with the server clock.</td>
+</tr>
+<tr>
+<td>Starter templates</td>
+<td><code>switchtender examples</code> seeds a fresh install with a few templates that run with no project, inventory, or credential, so the first launch works on the spot instead of facing an empty list.</td>
 </tr>
 </tbody>
 </table>

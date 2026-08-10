@@ -49,7 +49,9 @@ What SwitchTender does today.
 | Secret masking | Credential values are redacted from run logs, live streams, and events, so a tool that echoes a secret shows `***` instead of the value.|
 | High availability | Two servers on one database share the schedule without double-firing. Tokens can carry a lifetime.|
 | Git triggers | A webhook URL launches a template on push. The project syncs fresh, so it deploys the commit just pushed.|
-| Surveys      | Templates declare typed launch prompts, validated and injected as extra vars.|
+| Surveys      | Templates declare typed launch prompts, text, multiline, integer, boolean, or choice, each with bounds checked before launch: min and max on a number, length and a regular-expression pattern on text, and a help line on any field. A launch that breaks a bound is refused with the field it failed, and injected as extra vars.|
+| Ansible controls | A run or template pins `tags` and `skip_tags` to select or exclude tagged plays, `forks` for how many hosts run at once, `verbosity` for `-v` through `-vvvv`, and `diff_mode` to show the before and after of every changed file, no hand-built command needed. They carry through schedules, triggers, and retries.|
+| Relaunch failures | One action re-runs only the hosts a finished run left failed or unreachable, targeted at exactly that set, so a partial outage is closed without repeating the hosts that already succeeded.|
 | Worker queues | Target a run at a named queue. A worker serving that queue runs it and default workers leave it alone. Pin a queue on a run, a template, or an inventory, most specific wins, so queues work like AWX instance groups.|
 | Dependency sync | A project's requirements.yml roles and collections install on each sync, so playbooks that need them just run.|
 | Execution environments | A template, run, or project pins a container image and its runs execute inside it, with their own tool and system dependencies, for any of the seven tools. The most specific wins: run, then template, then project. Private registries pull with a stored credential.|
@@ -75,7 +77,9 @@ What SwitchTender does today.
 | Drop-in plugins | The same extension builds as its own binary and loads from `--plugins-dir` on a stock release, no recompile. Plugins speak gRPC over a local socket with mutual TLS, supervised by the server, on the server and on workers.|
 | Guided tours | A tour launcher in the top bar walks the product, the pitch, and the migration path step by step in the live UI, fully keyboard accessible.|
 | Desktop mode | `switchtender desktop` serves on a stable loopback port, keeps its data in a private per-user directory, and opens the UI. Packaging recipes cover a macOS app bundle and a Windows installer.|
-| Migration | `switchtender import awx` and `import semaphore` read an export and create the equivalent projects, inventories, templates, surveys, schedules, and credential shells, with a dry-run report first.|
+| Migration | `switchtender import awx` and `import semaphore` read an export and create the equivalent projects, inventories, templates, surveys, schedules, and credential shells, with a dry-run report first. `switchtender import cron` brings a crontab under governance, turning each cron line into an approved, recorded schedule.|
+| Schedule timezones | A schedule reads its cron expression in an IANA timezone such as `America/New_York`, following that zone's daylight-saving shifts, so a nightly window stays put across the year instead of drifting with the server clock.|
+| Starter templates | `switchtender examples` seeds a fresh install with a few templates that run with no project, inventory, or credential, so the first launch works on the spot instead of facing an empty list.|
 
 ## Operator toolbelt
 
