@@ -102,8 +102,8 @@ and a run held for approval waits for a human admin, since an operator token can
 
 Yes, in Go, two ways: compile an extension into the binary, or drop a plugin binary into
 `--plugins-dir` on a stock release. Both register execution tools, AI providers, secret engines,
-and notification channels. See [Extend in Go](sdk.md) and the official
-[switchtender-plugins](https://github.com/kordloom/switchtender-plugins) repo for a working example.
+and notification channels. See [Extend in Go](sdk.md), which includes a working drop-in example:
+Discord, ntfy, and Teams built as one plugin binary.
 
 ## What about scale?
 
