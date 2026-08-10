@@ -37,6 +37,11 @@ type Schedule struct {
 	Name string `json:"name"`
 	// Cron is the cron expression that sets the cadence.
 	Cron string `json:"cron"`
+	// Timezone is the IANA name, such as America/New_York, the cron expression is read in. Empty
+	// means the server's local time, so a schedule made before this field behaves as before. A
+	// named zone makes "0 9 * * 1" mean nine in that zone through daylight saving changes, not nine
+	// wherever the server happens to sit.
+	Timezone string `json:"timezone,omitempty"`
 	// Playbook is the playbook to run for a single or split schedule.
 	Playbook string `json:"playbook,omitempty"`
 	// Inventory is the inventory to target.
@@ -80,15 +85,31 @@ func (s *Schedule) Clone() *Schedule {
 	return &out
 }
 
-// Validate reports whether the schedule has a parseable cron and a target to run.
+// Validate reports whether the schedule has a parseable cron, a valid timezone, and a target to run.
 func (s *Schedule) Validate() error {
-	if _, err := NextFire(s.Cron, time.Now()); err != nil {
+	if _, err := s.NextFire(time.Now()); err != nil {
 		return err
 	}
 	if s.Playbook == "" && len(s.Steps) == 0 && s.TemplateID == "" {
 		return ErrNoTarget
 	}
 	return nil
+}
+
+// effectiveCron returns the cron expression with the schedule's timezone applied, so the same
+// expression fires in the schedule's zone rather than the server's. An unset timezone leaves the
+// expression as the caller wrote it, keeping the server's local time.
+func (s *Schedule) effectiveCron() string {
+	if s.Timezone == "" {
+		return s.Cron
+	}
+	return "CRON_TZ=" + s.Timezone + " " + s.Cron
+}
+
+// NextFire returns the next time this schedule fires after the given time, in its own timezone. A
+// bad timezone is reported here rather than stored, since the cron parser rejects an unknown zone.
+func (s *Schedule) NextFire(after time.Time) (time.Time, error) {
+	return NextFire(s.effectiveCron(), after)
 }
 
 // NextFire returns the next time the cron expression fires after the given time.

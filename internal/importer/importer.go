@@ -88,7 +88,7 @@ func (p *Plan) addSchedule(sc *schedule.Schedule, source string, now time.Time) 
 		p.warn("schedule %q from %s was not imported: %v", sc.Name, source, err)
 		return
 	}
-	next, err := schedule.NextFire(sc.Cron, now)
+	next, err := sc.NextFire(now)
 	if err != nil {
 		p.warn("schedule %q from %s was not imported: its schedule never comes due: %v",
 			sc.Name, source, err)

@@ -118,7 +118,7 @@ func (s *Scheduler) tick(now time.Time) {
 			continue
 		}
 
-		next, err := NextFire(sc.Cron, now)
+		next, err := sc.NextFire(now)
 		if err != nil {
 			s.log.Error("schedule: next fire: "+err.Error(), zap.String("schedule_id", sc.ID))
 			continue

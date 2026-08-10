@@ -145,7 +145,8 @@ CREATE TABLE IF NOT EXISTS schedules (
 	next_run_at TEXT,
 	last_run_at TEXT,
 	last_run_id TEXT NOT NULL DEFAULT '',
-	template_id TEXT NOT NULL DEFAULT ''
+	template_id TEXT NOT NULL DEFAULT '',
+	timezone    TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_schedules_created ON schedules(created_at, id);
 CREATE TABLE IF NOT EXISTS users (
@@ -481,6 +482,10 @@ func Open(path string) (*DB, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	if err := migrateSchedules(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	if err := migrateInventories(db); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -684,6 +689,17 @@ func migrateTemplates(db *sql.DB) error {
 			!strings.Contains(err.Error(), "duplicate column name") {
 			return fmt.Errorf("migrate templates: %w", err)
 		}
+	}
+	return nil
+}
+
+// migrateSchedules adds the timezone column a schedules table created before per-schedule timezones
+// lacks. Empty is the server-local default, so a schedule made before it fires exactly as it did.
+func migrateSchedules(db *sql.DB) error {
+	if _, err := db.Exec(
+		"ALTER TABLE schedules ADD COLUMN timezone TEXT NOT NULL DEFAULT ''"); err != nil &&
+		!strings.Contains(err.Error(), "duplicate column name") {
+		return fmt.Errorf("migrate schedules: %w", err)
 	}
 	return nil
 }

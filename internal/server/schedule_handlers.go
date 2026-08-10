@@ -19,6 +19,9 @@ type createScheduleRequest struct {
 	Name string `json:"name"`
 	// Cron is the cron expression that sets the cadence. Required.
 	Cron string `json:"cron"`
+	// Timezone is the IANA name the cron expression is read in, such as America/New_York. Empty
+	// leaves it in the server's local time.
+	Timezone string `json:"timezone,omitempty"`
 	// Playbook is the playbook to run for a single or split schedule.
 	Playbook string `json:"playbook"`
 	// TemplateID fires a stored job template instead of the inline fields.
@@ -61,7 +64,7 @@ func createScheduleHandler(store schedule.Store, authz *authorizer, log *zap.Log
 			return
 		}
 		sc := &schedule.Schedule{
-			ID: schedule.NewID(), Name: req.Name, Cron: req.Cron, Playbook: req.Playbook,
+			ID: schedule.NewID(), Name: req.Name, Cron: req.Cron, Timezone: req.Timezone, Playbook: req.Playbook,
 			Inventory: req.Inventory, Shards: req.Shards, Steps: req.Steps,
 			TemplateID: req.TemplateID,
 			Enabled:    true, CreatedAt: time.Now(),
@@ -77,7 +80,7 @@ func createScheduleHandler(store schedule.Store, authz *authorizer, log *zap.Log
 			respondError(w, log, http.StatusBadRequest, msg)
 			return
 		}
-		next, err := schedule.NextFire(sc.Cron, time.Now())
+		next, err := sc.NextFire(time.Now())
 		if err != nil {
 			respondError(w, log, http.StatusBadRequest, "invalid cron expression")
 			return
@@ -131,7 +134,7 @@ func updateScheduleHandler(store schedule.Store, authz *authorizer, log *zap.Log
 			return
 		}
 		sc := &schedule.Schedule{
-			ID: id, Name: req.Name, Cron: req.Cron, Playbook: req.Playbook,
+			ID: id, Name: req.Name, Cron: req.Cron, Timezone: req.Timezone, Playbook: req.Playbook,
 			Inventory: req.Inventory, Shards: req.Shards, Steps: req.Steps,
 			TemplateID: req.TemplateID, Enabled: existing.Enabled, CreatedAt: existing.CreatedAt,
 			LastRunAt: existing.LastRunAt, LastRunID: existing.LastRunID,
@@ -147,7 +150,7 @@ func updateScheduleHandler(store schedule.Store, authz *authorizer, log *zap.Log
 			respondError(w, log, http.StatusBadRequest, msg)
 			return
 		}
-		next, err := schedule.NextFire(sc.Cron, time.Now())
+		next, err := sc.NextFire(time.Now())
 		if err != nil {
 			respondError(w, log, http.StatusBadRequest, "invalid cron expression")
 			return
