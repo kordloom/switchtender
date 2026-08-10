@@ -38,6 +38,9 @@ func Contract(t *testing.T, newStore func() audit.Store) {
 	t.Run("span beats query filters and limits store-side", func(t *testing.T) {
 		testSpanBeatsQuery(t, newStore())
 	})
+	t.Run("content and actor fields round trip and are committed", func(t *testing.T) {
+		testCommittedFields(t, newStore())
+	})
 	t.Run("empty list is non-nil", func(t *testing.T) {
 		got, err := newStore().List(context.Background(), 10)
 		if err != nil {
@@ -700,5 +703,72 @@ func testAnchors(t *testing.T, store audit.Store) {
 	}
 	if !found {
 		t.Error("Anchors(10) dropped the anchor at seq 5, which is inside the range")
+	}
+}
+
+// testCommittedFields proves the fields added beyond the original six survive a store round trip and
+// are committed by the chain link.
+//
+// The forgery attempt is the point. An entry is stored, then its content digest is altered while
+// every field the old construction hashed is left exactly as it was: same sequence, same time, same
+// actor, same method, same path, same previous link. Under the old positional construction the
+// recomputed hash matched and the tampered entry verified, so the chain proved a call had been made
+// and said nothing about what the call contained. Under the current one the hash no longer matches
+// and the chain reports the break, which is what makes "the record covers the change, not only the
+// request" a true statement rather than a marketing one.
+func testCommittedFields(t *testing.T, store audit.Store) {
+	ctx := context.Background()
+	at := time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC)
+	entry := &audit.Entry{
+		ID: audit.NewID(), At: at, Actor: "agent", ActorType: "token",
+		OnBehalfOf: "deploy-agent", Method: "POST", Path: "/v1/templates/tpl_1/launch",
+		ContentDigest: audit.ContentDigestOf([]byte(`{"limit":"web01"}`)),
+	}
+	if err := store.Append(ctx, entry); err != nil {
+		t.Fatalf("Append() error = %v", err)
+	}
+	chain, err := store.Chain(ctx)
+	if err != nil {
+		t.Fatalf("Chain() error = %v", err)
+	}
+	if len(chain) != 1 {
+		t.Fatalf("chain = %d entries, want 1", len(chain))
+	}
+	got := chain[0]
+	// The fields must come back from the store, or the entry that was hashed is not the entry stored.
+	for _, field := range []struct{ Name, Got, Want string }{
+		{"actor_type", got.ActorType, "token"},
+		{"on_behalf_of", got.OnBehalfOf, "deploy-agent"},
+		{"content_digest", got.ContentDigest, entry.ContentDigest},
+	} {
+		if field.Got != field.Want {
+			t.Errorf("%s did not round trip: got %q, want %q", field.Name, field.Got, field.Want)
+		}
+	}
+	if ok, _ := audit.Verify(chain); !ok {
+		t.Fatal("the stored chain does not verify")
+	}
+
+	// The forgery: change what the call contained, leave everything the old link hashed untouched.
+	forged := *got
+	forged.ContentDigest = audit.ContentDigestOf([]byte(`{"limit":"*"}`))
+	if forged.ContentDigest == got.ContentDigest {
+		t.Fatal("the two payloads digest alike, so this proves nothing")
+	}
+	if audit.EntryHash(&forged) == got.Hash {
+		t.Error("the content digest is not committed by the link: a change to the payload the entry " +
+			"records leaves its hash intact, so the chain proves only that a call was made")
+	}
+	// The same for the delegation, which is what attributes an agent's work to the authority it used.
+	forgedActor := *got
+	forgedActor.OnBehalfOf = "someone-else"
+	if audit.EntryHash(&forgedActor) == got.Hash {
+		t.Error("on_behalf_of is not committed by the link, so a recorded delegation can be rewritten")
+	}
+	forgedType := *got
+	forgedType.ActorType = "session"
+	if audit.EntryHash(&forgedType) == got.Hash {
+		t.Error("actor_type is not committed by the link, so an agent's change can be presented as a " +
+			"person's")
 	}
 }

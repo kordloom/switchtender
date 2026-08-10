@@ -1,8 +1,10 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"path"
 	"strings"
@@ -66,7 +68,9 @@ func (g *authGate) wrap(next http.Handler) http.Handler {
 			// the install. A hook that resolves to a trigger is recorded by the handler, where the
 			// trigger is known and the entry can say which one fired.
 			if !isSignIn(r) && !isHook(r) {
-				receipt, ok := g.record(w, unauthenticatedActor(r), r)
+				receipt, ok := g.record(w, recordedActor{
+					Name: unauthenticatedActor(r), Type: actorTypeUnauthenticated,
+				}, r)
 				if !ok {
 					return
 				}
@@ -96,7 +100,9 @@ func (g *authGate) wrap(next http.Handler) http.Handler {
 			if !g.decide(w, r, actor) {
 				return
 			}
-			receipt, ok := g.record(w, u.Username, r)
+			receipt, ok := g.record(w, recordedActor{
+				Name: u.Username, Type: actorTypeSession,
+			}, r)
 			if !ok {
 				return
 			}
@@ -115,7 +121,7 @@ func (g *authGate) wrap(next http.Handler) http.Handler {
 			unauthorized(w)
 			return
 		}
-		role, err := g.roleFor(r.Context(), tok)
+		role, boundUser, err := g.roleFor(r.Context(), tok)
 		if err != nil {
 			unauthorized(w)
 			return
@@ -125,13 +131,68 @@ func (g *authGate) wrap(next http.Handler) http.Handler {
 			return
 		}
 		g.touch(tok)
-		receipt, ok := g.record(w, tok.Name, r)
+		// A token's label is chosen by whoever minted it and is not unique, so the label alone cannot
+		// attribute a change: two tokens named "agent" on different accounts read identically. The
+		// bound account is recorded beside it, which is also the delegation an agent operates under.
+		receipt, ok := g.record(w, recordedActor{
+			Name: tok.Name, Type: actorTypeToken, OnBehalfOf: boundUser,
+		}, r)
 		if !ok {
 			return
 		}
 		ctx := run.WithAuditReceipt(context.WithValue(r.Context(), actorKey{}, actor), receipt)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// recordedActor is the identity written into one audit entry.
+//
+// Each field is something the server observed rather than something it inferred. Type says how the
+// caller authenticated, not what kind of thing they are: a token cannot tell whether a person or an
+// agent is holding it, and writing a guess into a signed record would be the one thing this trail
+// must never do. OnBehalfOf carries the account a token is bound to, which is observed directly and
+// is what distinguishes two tokens sharing a label on different accounts.
+type recordedActor struct {
+	// Name is the actor as it appears in the trail: a token label, a username, or a caller class.
+	Name string
+	// Type is how the caller authenticated: session, token, webhook, saml, or unauthenticated.
+	Type string
+	// OnBehalfOf is the account whose authority the actor used, empty when it acted as itself.
+	OnBehalfOf string
+}
+
+// Actor types, naming how a caller authenticated.
+const (
+	// actorTypeSession is an interactive sign-in, a person at a browser or an SSO session.
+	actorTypeSession = "session"
+	// actorTypeToken is an API token, held by a person, a script, or an agent.
+	actorTypeToken = "token"
+	// actorTypeUnauthenticated is a caller that presented no credential, such as a webhook whose
+	// path is its only secret.
+	actorTypeUnauthenticated = "unauthenticated"
+)
+
+// digestBody reads the request body, returns the digest committed for it, and restores the body so
+// the handler still reads it.
+//
+// A body that cannot be read fails the request closed. The alternative, recording an entry with no
+// digest and letting the change proceed, would let an oversized or truncated body buy an unrecorded
+// payload, which is the hole the digest exists to close. The body is already bounded by the
+// bodyLimit middleware above this one, so the buffer is capped before it is allocated.
+func (g *authGate) digestBody(w http.ResponseWriter, r *http.Request) (digest string, ok bool) {
+	if r.Body == nil || r.Body == http.NoBody {
+		return "", true
+	}
+	body, err := io.ReadAll(r.Body)
+	_ = r.Body.Close()
+	if err != nil {
+		respondError(w, g.log, http.StatusRequestEntityTooLarge,
+			"the request body could not be read, so the change was not recorded or made")
+		return "", false
+	}
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	// ContentLength is left as the client sent it; the restored body is the same bytes.
+	return audit.ContentDigestOf(body), true
 }
 
 // actorKey is the context key under which the authenticated actor is stored.
@@ -246,13 +307,18 @@ const AuditReceiptHeader = "Audit-Receipt"
 // the alternative ordering loses the record entirely whenever a process dies mid-change.
 //
 // It takes the actor name directly so token and JWT callers are recorded on the same trail.
-func (g *authGate) record(w http.ResponseWriter, actor string, r *http.Request) (receipt string, ok bool) {
+func (g *authGate) record(w http.ResponseWriter, who recordedActor, r *http.Request) (receipt string, ok bool) {
 	if g.audits == nil || r.Method == http.MethodGet || r.Method == http.MethodHead {
 		return "", true
 	}
+	digest, ok := g.digestBody(w, r)
+	if !ok {
+		return "", false
+	}
 	entry := &audit.Entry{
-		ID: audit.NewID(), At: time.Now(), Actor: actor,
-		Method: r.Method, Path: auditPath(r),
+		ID: audit.NewID(), At: time.Now(), Actor: who.Name,
+		ActorType: who.Type, OnBehalfOf: who.OnBehalfOf,
+		Method: r.Method, Path: auditPath(r), ContentDigest: digest,
 	}
 	if err := g.audits.Append(r.Context(), entry); err != nil {
 		g.log.Error("server: append audit entry: "+err.Error(),
@@ -279,19 +345,21 @@ var errNoAccounts = errors.New("token is bound to an account but accounts are no
 // was absent, and nothing in the reply would have said so. Every path that binds a token to an
 // account needs an account store to do it, so on a real serve path the store is always there and
 // this is unreachable; if it ever becomes reachable it denies rather than promotes.
-func (g *authGate) roleFor(ctx context.Context, tok *auth.Token) (user.Role, error) {
+// It also returns the bound account's username, empty for an unbound token, so the audit entry can
+// name the authority a token acted under rather than only the token's own label.
+func (g *authGate) roleFor(ctx context.Context, tok *auth.Token) (user.Role, string, error) {
 	if tok.UserID == "" {
-		return user.RoleAdmin, nil
+		return user.RoleAdmin, "", nil
 	}
 	if g.users == nil {
 		g.log.Error("server: " + errNoAccounts.Error())
-		return "", errNoAccounts
+		return "", "", errNoAccounts
 	}
 	u, err := g.users.Get(ctx, tok.UserID)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	return u.Role, nil
+	return u.Role, u.Username, nil
 }
 
 // requiredRole maps a request to the minimum role that may perform it. Reads are for viewers,

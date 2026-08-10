@@ -221,6 +221,18 @@ func BuildBundle(entries []*Entry, id Identity, version string, at time.Time) (*
 			},
 			Chain: BundleCoordLink{Seq: e.Seq, Prev: e.PrevHash, Link: e.Hash},
 		}
+		// The profile promises every link recomputes from the claim payload alone, so a field the
+		// link commits to must appear here. These are omitted when empty, exactly as the link omits
+		// them, so an entry that predates a field carries the same payload it always did.
+		for key, value := range map[string]string{
+			"actor_type":     e.ActorType,
+			"on_behalf_of":   e.OnBehalfOf,
+			"content_digest": e.ContentDigest,
+		} {
+			if value != "" {
+				claim.Payload[key] = value
+			}
+		}
 		// A span beat becomes the spec-owned span claim, so a verifier reads the beat stream
 		// without knowing this product's path encoding. The span members are added to the payload
 		// rather than replacing it: the chain link commits to actor, method, and path, and the

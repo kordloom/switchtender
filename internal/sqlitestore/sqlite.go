@@ -231,8 +231,11 @@ CREATE TABLE IF NOT EXISTS audit_entries (
 	id        TEXT PRIMARY KEY,
 	at        TEXT NOT NULL,
 	actor     TEXT NOT NULL DEFAULT '',
+	actor_type TEXT NOT NULL DEFAULT '',
+	on_behalf_of TEXT NOT NULL DEFAULT '',
 	method    TEXT NOT NULL,
 	path      TEXT NOT NULL,
+	content_digest TEXT NOT NULL DEFAULT '',
 	seq       INTEGER NOT NULL DEFAULT 0,
 	prev_hash TEXT NOT NULL DEFAULT '',
 	hash      TEXT NOT NULL DEFAULT ''
@@ -476,6 +479,10 @@ func Open(path string) (*DB, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	if err := migrateAuditEntries(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	if err := migrateUsers(db); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -698,6 +705,25 @@ func migrateCredentials(db *sql.DB) error {
 		if _, err := db.Exec(col); err != nil &&
 			!strings.Contains(err.Error(), "duplicate column name") {
 			return fmt.Errorf("migrate credentials: %w", err)
+		}
+	}
+	return nil
+}
+
+// migrateAuditEntries adds the columns the chain link commits to beyond the original six values: the
+// actor's authentication type, the account a token acted on behalf of, and the digest of the change
+// payload. Each defaults to empty, which is exactly what an entry recorded before the column existed
+// carries, and an empty field is omitted from the link, so migrating a database does not disturb a
+// single existing hash.
+func migrateAuditEntries(db *sql.DB) error {
+	for _, col := range []string{
+		"ALTER TABLE audit_entries ADD COLUMN actor_type TEXT NOT NULL DEFAULT ''",
+		"ALTER TABLE audit_entries ADD COLUMN on_behalf_of TEXT NOT NULL DEFAULT ''",
+		"ALTER TABLE audit_entries ADD COLUMN content_digest TEXT NOT NULL DEFAULT ''",
+	} {
+		if _, err := db.Exec(col); err != nil &&
+			!strings.Contains(err.Error(), "duplicate column name") {
+			return fmt.Errorf("migrate audit entries: %w", err)
 		}
 	}
 	return nil

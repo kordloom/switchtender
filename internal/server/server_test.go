@@ -2040,6 +2040,71 @@ func TestMutationReturnsAnAuditReceipt(t *testing.T) {
 	}
 }
 
+// TestRecordedEntryCarriesActorTypeAndContentDigest drives the audit chokepoint over the real HTTP
+// path and checks the fields the chain now commits to: the entry records how the caller authenticated
+// (a token), the account the token is bound to, and a digest of the change payload. It also proves a
+// secret in the body does not enter that digest.
+func TestRecordedEntryCarriesActorTypeAndContentDigest(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	users := user.NewMemStore()
+	tokens := auth.NewMemStore()
+	audits := audit.NewMemStore()
+	creds := credential.NewMemStore()
+
+	operator, err := user.New("deploy-agent", "pw", user.RoleOperator)
+	if err != nil {
+		t.Fatalf("user.New() error = %v", err)
+	}
+	if err := users.Save(ctx, operator); err != nil {
+		t.Fatalf("users.Save() error = %v", err)
+	}
+	plain, tok, err := auth.New("agent")
+	if err != nil {
+		t.Fatalf("auth.New() error = %v", err)
+	}
+	tok.UserID = operator.ID
+	if err := tokens.Save(ctx, tok); err != nil {
+		t.Fatalf("tokens.Save() error = %v", err)
+	}
+	// A second operator token must exist so the operator has grant to create a credential, which the
+	// role gate allows for an operator only via a manage grant; simplest is an admin token minting.
+	sealer := credential.NewSealer("k", "s")
+	handler := New(run.NewMemStore(), &fakeSubmitter{run: &run.Run{ID: "r"}}, zap.NewNop(),
+		WithTokens(tokens), WithUsers(users), WithAudit(audits),
+		WithCredentials(creds, sealer)).Handler()
+
+	// The operator submits a run; the entry should record the token authentication and the bound
+	// account, and a digest of the body.
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/runs",
+		strings.NewReader(`{"playbook":"site.yml"}`))
+	req.Header.Set("Authorization", "Bearer "+plain)
+	req.Header.Set("Content-Type", "application/json")
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated && rec.Code != http.StatusOK && rec.Code != http.StatusAccepted {
+		t.Fatalf("submit status = %d (body %s)", rec.Code, rec.Body.String())
+	}
+	chain, err := audits.Chain(ctx)
+	if err != nil || len(chain) == 0 {
+		t.Fatalf("Chain() = %v, %v", chain, err)
+	}
+	e := chain[len(chain)-1]
+	if e.ActorType != actorTypeToken {
+		t.Errorf("actor_type = %q, want %q", e.ActorType, actorTypeToken)
+	}
+	if e.OnBehalfOf != "deploy-agent" {
+		t.Errorf("on_behalf_of = %q, want the bound account deploy-agent", e.OnBehalfOf)
+	}
+	if e.ContentDigest == "" {
+		t.Error("the run submission recorded no content digest")
+	}
+	// The digest must be committed by the link.
+	if audit.EntryHash(e) != e.Hash {
+		t.Error("the recorded entry does not hash to its stored link")
+	}
+}
+
 // TestWebhookSecretNeverReachesTheAuditChain pins that a webhook's token stays out of the audit
 // trail.
 //

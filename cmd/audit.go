@@ -9,6 +9,10 @@ import (
 	"github.com/kordloom/switchtender/internal/audit"
 )
 
+// actorTypeCLI marks an entry made from the command line on the host, where the identity available
+// is the account running the binary rather than a token or a session.
+const actorTypeCLI = "cli"
+
 // cliActor names the operator behind a command-line mutation. The account running the binary is the
 // only identity available here, since no token or session is involved, and the prefix keeps it from
 // being mistaken for an API token label.
@@ -37,7 +41,11 @@ func recordCLI(ctx context.Context, audits audit.Store, command string) error {
 	}
 	entry := &audit.Entry{
 		ID: audit.NewID(), At: time.Now(), Actor: cliActor(),
-		Method: audit.MethodCLI, Path: command,
+		// A command-line mutation is made by whoever holds the host account, which is the closest
+		// thing to an observed identity here: no token and no session is involved. The type says so
+		// rather than claiming a person or a service, either of which would be a guess.
+		ActorType: actorTypeCLI,
+		Method:    audit.MethodCLI, Path: command,
 	}
 	if err := audits.Append(ctx, entry); err != nil {
 		return fmt.Errorf("refused: the change could not be recorded in the audit trail: %w", err)

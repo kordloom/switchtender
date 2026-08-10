@@ -98,11 +98,20 @@ against it lands there, no matter how it was launched.
 ## Provable audit
 
 Every authenticated mutation is recorded in the audit trail, and each entry is linked into a SHA-256
-hash chain. It carries the previous entry's hash and its own hash over its content. Altering,
+hash chain. Each entry commits to who acted, how they authenticated, the account whose authority they
+used, the method and path, a digest of the change payload, and the previous entry's hash. Altering,
 reordering, or deleting an entry breaks the chain, which `GET /v1/audit/verify` detects. A signed
 export from `GET /v1/audit/export` seals the chain with an ed25519 signature, so
 `switchtender audit verify` proves the trail is intact and unaltered offline, without trusting the
 server that produced it.
+
+**The record covers the change, not only that a call was made.** The link commits to a digest of the
+request payload, so a recorded change cannot be re-cast as a different one while the chain still
+verifies. The digest is taken over the payload with its secret fields redacted first, so it proves
+the shape and non-secret content of a change without becoming a way to brute-force a secret the
+request carried. Each entry also records how the caller authenticated and, for a token bound to an
+account, the account it acted on behalf of, so a change an AI agent made under an operator's
+authority is attributable to both and cannot later be presented as a person's.
 
 A chain proves that what it holds was not altered. On its own it cannot prove that nothing is
 missing, because the same server decides both what happens and what gets written down, and because a

@@ -9,7 +9,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"strconv"
+	"strings"
 	"time"
+
+	"github.com/kordloom/loomseal/jcs"
 
 	"github.com/kordloom/switchtender/internal/idgen"
 )
@@ -22,10 +25,22 @@ type Entry struct {
 	At time.Time `json:"at"`
 	// Actor names who acted: the token label, which for UI sessions carries the username.
 	Actor string `json:"actor"`
+	// ActorType classifies the actor: human, agent, service, or system. It is committed by the chain
+	// link, so a change an AI agent made cannot later be presented as a person's. Empty on an entry
+	// recorded before the field existed, which a reader should treat as unstated rather than human.
+	ActorType string `json:"actor_type,omitempty"`
+	// OnBehalfOf names the account whose authority the actor used, empty when the actor acted as
+	// itself. An agent bound to an operator account records the delegation here, so the trail answers
+	// who authorized the agent and not only which agent ran.
+	OnBehalfOf string `json:"on_behalf_of,omitempty"`
 	// Method is the HTTP method.
 	Method string `json:"method"`
 	// Path is the request path.
 	Path string `json:"path"`
+	// ContentDigest is "sha256:" and the hex digest of the canonical, redacted change payload, empty
+	// when the request carried no body. It is committed by the chain link, so the trail proves what a
+	// change contained and not only that a call was made. See ContentDigestOf for the exact input.
+	ContentDigest string `json:"content_digest,omitempty"`
 	// Seq is the entry's position in the chain, assigned at append starting at one.
 	Seq int64 `json:"seq"`
 	// PrevHash is the hash of the entry before this one, empty for the first entry.
@@ -85,14 +100,114 @@ func NewID() string {
 // EntryHash returns the hex SHA-256 that commits to an entry's content and its PrevHash. The time is
 // hashed in the canonical form the stores persist, so a hash computed at append matches one
 // recomputed after a database round-trip.
+//
+// The input is the canonical JSON object of the entry's claim fields, not a fixed list of values in a
+// fixed order. That choice is what makes the record extensible: a verifier canonicalizes whatever
+// fields an entry carries, so an entry written before a field existed and one written after both
+// verify, and adding a field later is not a format change. The previous construction hashed six
+// values positionally, which meant every new field was a breaking revision of the profile and of
+// every verifier implementing it.
+//
+// A field that is empty is omitted rather than hashed as an empty string, so an entry that predates
+// a field is byte-identical to one that simply does not use it.
 func EntryHash(e *Entry) string {
-	payload := canonicalStrings([]string{
-		strconv.FormatInt(e.Seq, 10),
-		e.At.UTC().Format(time.RFC3339Nano),
-		e.Actor, e.Method, e.Path, e.PrevHash,
-	})
-	sum := sha256.Sum256([]byte(payload))
+	claim := map[string]any{
+		"seq":    e.Seq,
+		"at":     e.At.UTC().Format(time.RFC3339Nano),
+		"actor":  e.Actor,
+		"method": e.Method,
+		"path":   e.Path,
+		"prev":   e.PrevHash,
+	}
+	for key, value := range map[string]string{
+		"actor_type":     e.ActorType,
+		"on_behalf_of":   e.OnBehalfOf,
+		"content_digest": e.ContentDigest,
+	} {
+		if value != "" {
+			claim[key] = value
+		}
+	}
+	canonical, err := jcs.Serialize(claim)
+	if err != nil {
+		// Serialize fails only on a value type this map cannot hold: every value here is a string or
+		// an int64. Hashing the error text would silently produce a link nothing can reproduce, so an
+		// impossible input is a programming fault, not a runtime condition to paper over.
+		panic("audit: canonicalize entry: " + err.Error())
+	}
+	sum := sha256.Sum256(canonical)
 	return hex.EncodeToString(sum[:])
+}
+
+// MaxCanonicalDigestBytes is the largest body canonicalized before digesting. A larger body is
+// digested as its exact bytes, since parsing a multi-megabyte upload to normalize its key order
+// costs more than the comparison it buys.
+const MaxCanonicalDigestBytes = 1 << 20
+
+// secretPayloadKeys are the request-body keys whose values are secret material and must never enter
+// a content digest. The digest is stored in the chain and served in exports, and a SHA-256 over a
+// low-entropy secret is an offline brute-force target, so a body carrying one of these has its value
+// replaced before the digest is taken. The match is case-insensitive and by exact key: settings and
+// other non-secret fields are left in the digest so the record still proves the shape of the change.
+var secretPayloadKeys = map[string]bool{
+	"secret": true, "passphrase": true, "password": true, "token": true,
+	"private_key": true, "fields": true,
+}
+
+// redactedMarker stands in for a secret value in the digest input. It is a fixed constant so a
+// redacted digest is reproducible, and it is not a plausible real value.
+const redactedMarker = "«redacted»"
+
+// ContentDigestOf returns the digest committed for a change payload: "sha256:" and the hex digest of
+// the canonical, secret-redacted form of body, or the empty string when there is no body.
+//
+// A JSON body is redacted and canonicalized before digesting: the value of any secret-bearing key is
+// replaced with a fixed marker, so the digest proves the non-secret shape and content of the change
+// without becoming a brute-force target for the secret, and canonicalization makes two semantically
+// identical requests digest alike so an auditor is comparing content rather than key order or
+// whitespace. A body that is not JSON, or one too large to parse economically, is digested as its
+// exact bytes; the mutating endpoints that carry a secret all take JSON, and the oversized case is an
+// upload with no secret in it.
+//
+// A request with no body carries no digest at all rather than the digest of the empty string. Using
+// sha256("") would make "there was no body" indistinguishable from "the body was empty", and an
+// absent field is the honest statement of the first.
+func ContentDigestOf(body []byte) string {
+	if len(body) == 0 {
+		return ""
+	}
+	input := body
+	if len(body) <= MaxCanonicalDigestBytes {
+		if value, err := jcs.Parse(body); err == nil {
+			redactSecrets(value)
+			if canonical, err := jcs.Serialize(value); err == nil {
+				input = canonical
+			}
+		}
+	}
+	sum := sha256.Sum256(input)
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+// redactSecrets walks a parsed JSON value and replaces the value of every secret-bearing key with
+// the fixed marker, recursing through objects and arrays. Replacing rather than deleting keeps the
+// digest sensitive to whether a secret field was present at all, while never committing to what it
+// held.
+func redactSecrets(value any) {
+	switch v := value.(type) {
+	case map[string]any:
+		for key, child := range v {
+			if secretPayloadKeys[strings.ToLower(key)] {
+				v[key] = redactedMarker
+				continue
+			}
+			redactSecrets(child)
+		}
+	case []any:
+		for _, child := range v {
+			redactSecrets(child)
+		}
+	}
 }
 
 // Link normalizes e's hashed text, then fills its chain fields from prev, the current head of the
@@ -104,6 +219,12 @@ func Link(prev, e *Entry) {
 	e.Actor = escapeInvalidUTF8(e.Actor)
 	e.Method = escapeInvalidUTF8(e.Method)
 	e.Path = escapeInvalidUTF8(e.Path)
+	// The fields added after the first release are escaped on the same terms. An actor type or a
+	// delegated account carrying a raw invalid byte would otherwise hash to a value a verifier
+	// reading decoded JSON could not reproduce, which is the hole escapeInvalidUTF8 exists to close.
+	// The digest is generated hex and cannot carry one, so it is left alone.
+	e.ActorType = escapeInvalidUTF8(e.ActorType)
+	e.OnBehalfOf = escapeInvalidUTF8(e.OnBehalfOf)
 	// The recorded time is truncated to microseconds before anything hashes it.
 	//
 	// The chain profile permits nanoseconds, but a link is only useful if an independent verifier
