@@ -77,6 +77,30 @@ held run is admin-only, so an operator-bound agent can never approve its own wor
 
 5. Hand the agent its token and the API base URL, and nothing else.
 
+## Connecting the agent over MCP
+
+*Available in the next release.*
+
+There are two ways an agent reaches the gate. The direct one is the HTTP API above: the agent holds
+the token and the base URL and makes ordinary authenticated calls. The second is the Model Context
+Protocol, which many agent runtimes speak natively. Put the operator-bound token in
+`SWITCHTENDER_MCP_TOKEN` and run:
+
+    switchtender mcp --server https://switchtender.internal
+
+The agent gets a small, deliberate set of tools: list job templates, propose a run, read a run and
+its log, pull a run's evidence dossier, and list recent runs. Every tool call is an ordinary
+authenticated API request under that same token, so it passes the same authorization, the same
+approval policy, and the same fail-closed audit append as a call from a person. A proposed run lands
+in the chain under the agent's account before it executes, and a policy-covered run waits for a human
+to release it.
+
+The tool set is narrow on purpose. There is no approve tool, so an agent cannot release its own work
+however it is prompted, and no credential, account, token, grant, or policy tool, so it cannot widen
+its own reach. The command refuses to start on an admin token. Ad-hoc runs, where the agent composes
+a command instead of launching a template a person defined, stay off unless you pass `--allow-adhoc`,
+and the approval policy still covers them when they are on.
+
 ## What the record shows
 
 The actor on every chain entry the agent produces is its token's label, `agent-bot` above. The
