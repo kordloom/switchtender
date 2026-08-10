@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"time"
 
@@ -33,6 +34,8 @@ const (
 	FieldBool FieldType = "bool"
 	// FieldChoice is one of a fixed set of strings.
 	FieldChoice FieldType = "choice"
+	// FieldMultiline is free text spanning several lines, such as a block of variables or a note.
+	FieldMultiline FieldType = "multiline"
 )
 
 // SurveyField is one prompt shown at launch, whose answer becomes an extra var.
@@ -49,6 +52,17 @@ type SurveyField struct {
 	Default any `json:"default,omitempty"`
 	// Choices lists the allowed values for a choice field.
 	Choices []string `json:"choices,omitempty"`
+	// Help is optional guidance shown beneath the prompt.
+	Help string `json:"help,omitempty"`
+	// Min and Max bound an int field's answer, inclusive. Nil leaves that side unbounded.
+	Min *int `json:"min,omitempty"`
+	Max *int `json:"max,omitempty"`
+	// MinLength and MaxLength bound a text or multiline answer's length. Zero leaves that side
+	// unbounded, except a MinLength of zero on a required field still rejects an empty answer.
+	MinLength int `json:"min_length,omitempty"`
+	MaxLength int `json:"max_length,omitempty"`
+	// Pattern is a regular expression a text answer must match in full. Empty imposes no pattern.
+	Pattern string `json:"pattern,omitempty"`
 }
 
 // Template is one saved launch preset.
@@ -147,21 +161,44 @@ func ResolveSurvey(fields []SurveyField, answers map[string]any) (map[string]any
 // coerce converts a raw answer to the field's type or reports why it cannot.
 func coerce(f SurveyField, raw any) (any, error) {
 	switch f.Type {
-	case FieldText, "":
+	case FieldText, FieldMultiline, "":
 		s, ok := raw.(string)
 		if !ok {
 			return nil, fmt.Errorf("%w: %q must be text", ErrSurvey, f.Var)
 		}
+		if f.MinLength > 0 && len(s) < f.MinLength {
+			return nil, fmt.Errorf("%w: %q must be at least %d characters", ErrSurvey, f.Var, f.MinLength)
+		}
+		if f.MaxLength > 0 && len(s) > f.MaxLength {
+			return nil, fmt.Errorf("%w: %q must be at most %d characters", ErrSurvey, f.Var, f.MaxLength)
+		}
+		if f.Pattern != "" {
+			re, err := regexp.Compile(f.Pattern)
+			if err != nil {
+				return nil, fmt.Errorf("%w: %q has an invalid pattern: %v", ErrSurvey, f.Var, err)
+			}
+			if !re.MatchString(s) {
+				return nil, fmt.Errorf("%w: %q does not match the required pattern", ErrSurvey, f.Var)
+			}
+		}
 		return s, nil
 	case FieldInt:
-		switch n := raw.(type) {
+		var n int
+		switch v := raw.(type) {
 		case float64:
-			return int(n), nil
+			n = int(v)
 		case int:
-			return n, nil
+			n = v
 		default:
 			return nil, fmt.Errorf("%w: %q must be an integer", ErrSurvey, f.Var)
 		}
+		if f.Min != nil && n < *f.Min {
+			return nil, fmt.Errorf("%w: %q must be at least %d", ErrSurvey, f.Var, *f.Min)
+		}
+		if f.Max != nil && n > *f.Max {
+			return nil, fmt.Errorf("%w: %q must be at most %d", ErrSurvey, f.Var, *f.Max)
+		}
+		return n, nil
 	case FieldBool:
 		b, ok := raw.(bool)
 		if !ok {

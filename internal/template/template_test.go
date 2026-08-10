@@ -2,6 +2,7 @@ package template_test
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/kordloom/switchtender/internal/run"
@@ -95,5 +96,38 @@ func TestLaunchOptionsCarryThePreset(t *testing.T) {
 	}
 	if r.ExtraVars["env"] != "prod" {
 		t.Errorf("ExtraVars = %v, want env=prod", r.ExtraVars)
+	}
+}
+
+// TestResolveSurveyConstraints proves the launch-time survey checks: an int range, a text length and
+// pattern, a multiline field, and the errors when an answer breaks a rule.
+func TestResolveSurveyConstraints(t *testing.T) {
+	t.Parallel()
+	min, max := 1, 10
+	fields := []template.SurveyField{
+		{Var: "count", Type: template.FieldInt, Min: &min, Max: &max},
+		{Var: "name", Type: template.FieldText, MinLength: 3, MaxLength: 8, Pattern: "^[a-z]+$"},
+		{Var: "notes", Type: template.FieldMultiline},
+	}
+	tests := []struct {
+		Name    string
+		Answers map[string]any
+		WantErr bool
+	}{
+		{"all valid", map[string]any{"count": float64(5), "name": "web", "notes": "line1\nline2"}, false},
+		{"int too high", map[string]any{"count": float64(99), "name": "web"}, true},
+		{"int too low", map[string]any{"count": float64(0), "name": "web"}, true},
+		{"text too short", map[string]any{"count": float64(5), "name": "ab"}, true},
+		{"text too long", map[string]any{"count": float64(5), "name": "abcdefghij"}, true},
+		{"text bad pattern", map[string]any{"count": float64(5), "name": "Web1"}, true},
+	}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
+			t.Parallel()
+			_, err := template.ResolveSurvey(fields, test.Answers)
+			if (err != nil) != test.WantErr {
+				t.Errorf("template.ResolveSurvey() error = %v, wantErr %v", err, test.WantErr)
+			}
+		})
 	}
 }
