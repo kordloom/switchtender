@@ -90,8 +90,6 @@ var (
 	ErrHeadMismatch = errors.New("audit head hash does not match the chain")
 	// ErrBadSignature means the signature did not verify against the public key.
 	ErrBadSignature = errors.New("audit signature invalid")
-	// ErrExport means a bundle could not be assembled from the chain.
-	ErrExport = errors.New("audit export")
 )
 
 // VerifyExport checks that an export is sound: the chain verifies, it ends at HeadHash, and, when
