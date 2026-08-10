@@ -418,6 +418,17 @@ func (p *Plan) mapSurvey(jt awxJobTemplate) []template.SurveyField {
 	}
 	var fields []template.SurveyField
 	for _, f := range survey.Spec {
+		// AWX's password survey type prompts for a secret and stores it obscured. A survey field here
+		// is plain text whose answer is kept on the run and injected as an extra var, so importing one
+		// would quietly turn a password prompt into a stored plaintext value, and AWX exports the
+		// field's default alongside it. Refusing and naming it is honest; a silent downgrade hands the
+		// operator a migration that looks complete and is less safe than what they left.
+		if strings.EqualFold(f.Type, "password") {
+			p.warn("survey field %q of template %q is a password prompt and was NOT imported. Store "+
+				"its value as a credential instead: importing it as a survey field would keep the "+
+				"answer in plain text on every run.", f.Variable, jt.Name)
+			continue
+		}
 		fieldType, exact := mapSurveyType(f.Type)
 		if !exact {
 			p.warn("survey field %q of template %q: type %q mapped to %q",

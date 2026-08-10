@@ -71,7 +71,7 @@ the schedules first, then re-run with `--apply` to create them.
 | AWX git project | Project.|
 | AWX inventory | Stored inventory, rendered as INI from its hosts and groups.|
 | AWX job template | Template, with job slicing becoming shard count.|
-| AWX survey | Template survey, field for field, with the field types translated.|
+| AWX survey | Template survey, field for field, with the field types translated. A password prompt is refused, not downgraded to plain text.|
 | AWX schedule | Schedule, with the recurrence rule converted to cron.|
 | AWX credential | Credential shell with its kind mapped from its type and its configured inputs, secret omitted.|
 | Semaphore repository | Project.|
@@ -96,6 +96,10 @@ inventories, templates, and schedules, is in place and ready to run once the sec
   and skipped rather than converted to a wrong cadence.
 - Non-git projects are skipped, since there is no repository to source playbooks from.
 - A credential type without an exact match maps to the environment kind and is flagged for review.
+- A survey field that prompts for a secret, an AWX password question or a Rundeck secure option, is
+  reported and left out rather than imported. A survey answer is stored in plain text on the run, so
+  importing one would quietly make the secret less protected than it was in the tool you left. Store
+  those values as credentials and reference them from the template.
 - Secrets are never in an export, so every credential is created as a shell and its secret has to be
   re-entered. The non-secret settings AWX did export, such as the user to connect as and how to
   become root, are stored on the credential itself and take effect at injection, so a machine

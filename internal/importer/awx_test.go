@@ -308,3 +308,52 @@ func TestFromAWXCarriesVaultID(t *testing.T) {
 		t.Errorf("bad-vault = %+v, want the malformed label dropped", c)
 	}
 }
+
+// TestAWXPasswordSurveyRefused proves an AWX password survey field is not imported as a plaintext
+// survey field.
+//
+// AWX prompts for such a value and stores it obscured. A survey field here is plain text whose
+// answer is kept on the run and injected as an extra var, and AWX exports the field's default
+// alongside it, so importing one would quietly downgrade a password prompt into a stored plaintext
+// value. The Rundeck importer refuses the equivalent secure option, and this must agree with it.
+func TestAWXPasswordSurveyRefused(t *testing.T) {
+	t.Parallel()
+	export := `{"job_templates":[{
+		"name":"Rotate keys","playbook":"rotate.yml",
+		"survey_spec":{"spec":[
+			{"variable":"vault_pass","question_name":"Vault password","type":"password",
+			 "required":true,"default":"hunter2"},
+			{"variable":"region","question_name":"Region","type":"text"}
+		]}
+	}]}`
+	plan, err := importer.FromAWX([]byte(export), time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("FromAWX() error = %v", err)
+	}
+	if len(plan.Templates) != 1 {
+		t.Fatalf("templates = %d, want 1 (warnings %v)", len(plan.Templates), plan.Warnings)
+	}
+	for _, f := range plan.Templates[0].Survey {
+		if f.Var == "vault_pass" {
+			t.Fatal("a password survey field was imported, which stores the secret in plain text")
+		}
+	}
+	if len(plan.Templates[0].Survey) != 1 {
+		t.Errorf("survey fields = %d, want only the non-secret one", len(plan.Templates[0].Survey))
+	}
+	// The exported default must not ride along in the plan either.
+	for _, f := range plan.Templates[0].Survey {
+		if fmt.Sprint(f.Default) == "hunter2" {
+			t.Error("the password field's default was imported")
+		}
+	}
+	var told bool
+	for _, w := range plan.Warnings {
+		if strings.Contains(w, "vault_pass") && strings.Contains(w, "password") {
+			told = true
+		}
+	}
+	if !told {
+		t.Errorf("refusing the password field was not reported; warnings = %v", plan.Warnings)
+	}
+}

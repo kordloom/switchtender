@@ -279,9 +279,13 @@ type importGroup struct {
 
 // mapSurveyType converts an AWX survey field type to a SwitchTender field type, reporting whether the
 // mapping is exact. Unknown types fall back to text.
+//
+// The password type is absent deliberately. Its caller refuses such a field rather than mapping it,
+// because there is no field kind here that keeps an answer secret, and mapping it to text would
+// downgrade a password prompt to a stored plaintext value without saying so.
 func mapSurveyType(awxType string) (template.FieldType, bool) {
 	switch awxType {
-	case "text", "textarea", "password":
+	case "text", "textarea":
 		return template.FieldText, true
 	case "integer":
 		return template.FieldInt, true
