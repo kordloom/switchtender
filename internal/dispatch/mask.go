@@ -244,9 +244,14 @@ func (s *streamMasker) drain() []byte {
 		// Every byte could still be the start of a secret, so none of it is safe to release yet.
 		return nil
 	}
-	// Release everything before the risky suffix and keep that suffix. A fresh slice backs the new
-	// tail so it cannot alias the emitted bytes, which redact may return pointing into the old tail.
-	cut := len(s.tail) - w
+	// Release everything before the risky suffix and keep that suffix. The release point is pushed
+	// past any secret occurrence it would otherwise split, exactly as next does: a secret's own
+	// trailing bytes can be a partial prefix of another secret (SECRET ends in ET, a prefix of
+	// ETHER), so the cut from partialTail alone can land inside a complete occurrence, releasing its
+	// head unredacted and carrying its tail forward, where the two halves emit as contiguous
+	// plaintext. A fresh slice backs the new tail so it cannot alias the emitted bytes, which redact
+	// may return pointing into the old tail.
+	cut := s.mask.wholeSecretCut(s.tail, len(s.tail)-w)
 	out := s.mask.redact(s.tail[:cut])
 	s.tail = append([]byte(nil), s.tail[cut:]...)
 	return out

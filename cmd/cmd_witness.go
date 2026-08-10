@@ -107,7 +107,13 @@ func runWitness(cmd *cobra.Command, _ []string) error {
 		if witnessOnce {
 			printFindings(findings)
 			for _, f := range findings {
-				_ = postWitnessFinding(cmd.Context(), client, witnessWebhook, watcher.Server(), f)
+				// Once mode has no retry queue behind it, so a lost POST is lost for good. It cannot
+				// be silent: the cron that runs --once triages by the channel, and a discarded error
+				// would leave the finding in the channel's silence. Report it on stderr so the run's
+				// output names the delivery failure even though it cannot retry it.
+				if derr := postWitnessFinding(cmd.Context(), client, witnessWebhook, watcher.Server(), f); derr != nil {
+					fmt.Fprintf(os.Stderr, "witness: webhook delivery failed for %s finding: %v\n", f.Kind, derr)
+				}
 			}
 			if err != nil {
 				return err

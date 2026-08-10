@@ -8,10 +8,12 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
@@ -43,6 +45,15 @@ func init() {
 			dynLease.mu.Unlock()
 			return nil
 		}), nil
+	})
+	// A registered custom kind whose injector returns an extra var, so the default injection branch's
+	// handling of Injection.ExtraVars can be exercised. Registered here because the injector registry
+	// is written only at init, before any parallel test reads it.
+	credential.RegisterInjector("test_extravars_kind", func(secret string) (credential.Injection, error) {
+		return credential.Injection{
+			ExtraVars: map[string]string{"api_token": secret},
+			Secrets:   []string{secret},
+		}, nil
 	})
 }
 
@@ -119,11 +130,57 @@ func TestValidateCredentialsToolMismatch(t *testing.T) {
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
-			err := d.validateCredentials(context.Background(), test.Tool, test.IDs)
+			err := d.validateCredentials(context.Background(), test.Tool, test.IDs, true)
 			if !errors.Is(err, test.Want) {
 				t.Errorf("validateCredentials(%q) error = %v, want %v", test.Tool, err, test.Want)
 			}
 		})
+	}
+}
+
+// TestValidateRunInventoryCredentials proves validateRun checks credentials the target inventory
+// attaches, not only the run's own: an undecryptable inventory credential fails at submit rather
+// than at execution, while an Ansible-only inventory credential on a non-Ansible run is allowed,
+// since it is inherited and inert rather than an explicit mistake.
+func TestValidateRunInventoryCredentials(t *testing.T) {
+	t.Parallel()
+	sealer := credential.NewSealer("pass", "salt")
+	keySealed, err := sealer.Seal("PRIVATE KEY DATA")
+	if err != nil {
+		t.Fatalf("Seal() error = %v", err)
+	}
+	creds := credential.NewMemStore()
+	for _, c := range []*credential.Credential{
+		{ID: "inv_ssh", Name: "deploy-key", Kind: credential.KindSSHKey, Secret: keySealed},
+		// A credential whose stored secret is not valid ciphertext: decrypt fails.
+		{ID: "inv_broken", Name: "broken", Kind: credential.KindEnv, Secret: "not-sealed-bytes"},
+	} {
+		if err := creds.Save(context.Background(), c); err != nil {
+			t.Fatalf("Save() error = %v", err)
+		}
+	}
+	invs := inventory.NewMemStore()
+	for _, inv := range []*inventory.Inventory{
+		{ID: "inv_key", Name: "keyed", Content: "[all]\nlocalhost\n", CredentialIDs: []string{"inv_ssh"}},
+		{ID: "inv_bad", Name: "bad", Content: "[all]\nlocalhost\n", CredentialIDs: []string{"inv_broken"}},
+	} {
+		if err := invs.Save(context.Background(), inv); err != nil {
+			t.Fatalf("Save() error = %v", err)
+		}
+	}
+	d := &Dispatcher{credentials: creds, sealer: sealer, inventories: invs}
+
+	// A terraform run against an inventory carrying an ssh key is accepted: the inherited cred is
+	// inert under terraform, not a mistake to reject.
+	if err := d.validateRun(context.Background(),
+		&run.Run{ID: "r1", Tool: run.ToolTerraform, InventoryID: "inv_key"}); err != nil {
+		t.Errorf("terraform run against a keyed inventory = %v, want accepted", err)
+	}
+	// An undecryptable inventory credential fails at submit rather than at execution.
+	err = d.validateRun(context.Background(),
+		&run.Run{ID: "r2", Tool: run.ToolAnsible, InventoryID: "inv_bad"})
+	if err == nil {
+		t.Error("a run whose inventory carries an undecryptable credential was accepted")
 	}
 }
 
@@ -704,6 +761,134 @@ func TestMaterializeSSHKeyPassphrase(t *testing.T) {
 	})
 }
 
+// TestRegistrySecretsMasked proves the registry pull login is collected for masking. It resolves
+// onto the spec outside materializeCredentials, so without registrySecrets a container runner that
+// echoed a failed registry login would leak the password into the run's output, unmasked.
+func TestRegistrySecretsMasked(t *testing.T) {
+	t.Parallel()
+	sealer := credential.NewSealer("pass", "salt")
+	sealed, err := sealer.Seal("reguser\nreg-p@ssw0rd-secret")
+	if err != nil {
+		t.Fatalf("Seal() error = %v", err)
+	}
+	store := credential.NewMemStore()
+	if err := store.Save(context.Background(), &credential.Credential{
+		ID: "pull_1", Name: "ghcr", Kind: credential.KindRegistry, Secret: sealed,
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	d := &Dispatcher{credentials: store, sealer: sealer}
+	spec := &roundhouse.Spec{}
+	if err := d.resolvePullCredential("pull_1", spec); err != nil {
+		t.Fatalf("resolvePullCredential() error = %v", err)
+	}
+	got := registrySecrets(spec)
+	if !containsString(got, "reg-p@ssw0rd-secret") {
+		t.Errorf("registrySecrets = %v, want the registry password tracked for masking", got)
+	}
+}
+
+// TestRegistryPasswordMaskedInLog drives a full run whose image pull uses a registry credential and
+// whose runner echoes the registry password, proving the password is masked in the stored log. This
+// covers the wiring, not just registrySecrets: the pull login resolves onto the spec outside
+// materializeCredentials, so streamSpec must add it to the masker or a failed-pull message leaks it.
+func TestRegistryPasswordMaskedInLog(t *testing.T) {
+	t.Parallel()
+	const pw = "reg-p@ssw0rd-supersecret"
+	sealer := credential.NewSealer("pass", "salt")
+	sealed, err := sealer.Seal("reguser\n" + pw)
+	if err != nil {
+		t.Fatalf("Seal() error = %v", err)
+	}
+	store := run.NewMemStore()
+	creds := credential.NewMemStore()
+	if err := creds.Save(context.Background(), &credential.Credential{
+		ID: "pull_1", Name: "ghcr", Kind: credential.KindRegistry, Secret: sealed,
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	runner := roundhouse.RunnerFunc(
+		func(_ context.Context, spec roundhouse.Spec, out io.Writer) (roundhouse.Result, error) {
+			// A container runner echoes the registry login on a failed pull; simulate that here.
+			_, _ = io.WriteString(out, "pull failed for "+spec.RegistryUsername+" pw="+spec.RegistryPassword+"\n")
+			return roundhouse.Result{ExitCode: 0}, nil
+		})
+	d := New(store, runner, nil, WithCredentials(creds, sealer), WithNoJanitor())
+	defer d.Close()
+	ctx := context.Background()
+	r := &run.Run{
+		ID: "run_reg", Playbook: "site.yml", Image: "ghcr.io/acme/ee:1",
+		PullCredentialID: "pull_1", Status: run.StatusPending, CreatedAt: time.Now(),
+	}
+	if err := store.Save(ctx, r); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	d.streamSpec(ctx, r.Clone(), false, nil,
+		func(roundhouse.Result, error, *masker) run.Status { return run.StatusSucceeded })
+
+	body, err := store.Log(ctx, r.ID)
+	if err != nil {
+		t.Fatalf("Log() error = %v", err)
+	}
+	if strings.Contains(string(body), pw) {
+		t.Errorf("registry password leaked into the run log: %q", body)
+	}
+	if !strings.Contains(string(body), maskToken) {
+		t.Errorf("expected the registry password masked with %q; log: %q", maskToken, body)
+	}
+}
+
+// TestMaterializeTypedCredentialFileCleanedUp proves the typed-credential extra-vars temp file,
+// which holds the credential's field values, is tracked by the run cleanup so it does not outlive
+// the run. The same tracking, applied before the error is checked in the caller, is what keeps a
+// file left by a failed injection from leaking secret material into TMPDIR.
+func TestMaterializeTypedCredentialFileCleanedUp(t *testing.T) {
+	t.Parallel()
+	sealer := credential.NewSealer("pass", "salt")
+	sealed, err := sealer.Seal(`{"tok":"s3cret-field"}`)
+	if err != nil {
+		t.Fatalf("Seal() error = %v", err)
+	}
+	types := credential.NewMemTypeStore()
+	if err := types.Save(context.Background(), &credential.CredentialType{
+		ID: "ct_1", Name: "custom",
+		Fields:            []credential.Field{{Name: "tok", Label: "Token", Secret: true}},
+		ExtraVarInjectors: map[string]string{"api_token": "{{tok}}"},
+	}); err != nil {
+		t.Fatalf("Save type error = %v", err)
+	}
+	store := credential.NewMemStore()
+	if err := store.Save(context.Background(), &credential.Credential{
+		ID: "cred_1", Name: "c", TypeID: "ct_1", Secret: sealed,
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	d := &Dispatcher{credentials: store, sealer: sealer, credentialTypes: types}
+	spec := &roundhouse.Spec{}
+	cleanup, secrets, err := d.materializeCredentials(context.Background(),
+		&run.Run{ID: "run_1", CredentialIDs: []string{"cred_1"}}, spec)
+	if err != nil {
+		cleanup()
+		t.Fatalf("materializeCredentials() error = %v", err)
+	}
+	if len(spec.ExtraVarsFiles) != 1 {
+		cleanup()
+		t.Fatalf("spec.ExtraVarsFiles = %v, want the typed extra-vars file", spec.ExtraVarsFiles)
+	}
+	path := spec.ExtraVarsFiles[0]
+	if _, err := os.Stat(path); err != nil {
+		cleanup()
+		t.Fatalf("extra-vars file not written: %v", err)
+	}
+	if !containsString(secrets, "s3cret-field") {
+		t.Error("the typed credential's secret field was not tracked for masking")
+	}
+	cleanup()
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("extra-vars file survived cleanup (%v), a leak of the credential's field values", err)
+	}
+}
+
 // containsString reports whether s is in list.
 func containsString(list []string, s string) bool {
 	for _, v := range list {
@@ -778,6 +963,11 @@ func TestInjectedMaskValues(t *testing.T) {
 		Name: "empty masks all",
 		In:   credential.Injection{Env: []string{"A=1", "B=2"}, Secrets: []string{}},
 		Want: []string{"1", "2"},
+	}, { // Test 3: With no named secrets, extra-vars values are masked too, not just env values. A
+		// custom kind that injects a secret extra var must not leak it because the fallback ignored it.
+		Name: "extra vars masked in fallback",
+		In:   credential.Injection{ExtraVars: map[string]string{"api_token": "sekret"}},
+		Want: []string{"sekret"},
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {

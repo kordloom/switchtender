@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/jsonutil"
@@ -129,18 +130,23 @@ func runWitnessServe(cmd *cobra.Command, _ []string) error {
 	ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	log, err := logutil.New()
+	if err != nil {
+		return fmt.Errorf("logger: %w", err)
+	}
 	client := &http.Client{Timeout: 30 * time.Second}
 	var opts []witness.ServiceOption
 	if witnessServeWebhook != "" {
 		opts = append(opts, witness.WithServiceNotify(func(server string, f witness.Finding) {
-			// The service's findings record is the durable copy; a failed delivery is logged by
-			// the poster and the finding stays served by the API.
-			_ = postWitnessFinding(ctx, client, witnessServeWebhook, server, f)
+			// The service's findings record is the durable copy, so a lost POST does not lose the
+			// finding from the API. But the operator wired a webhook to be paged on tampering, so a
+			// delivery failure must be visible rather than swallowed: log it. postWitnessFinding does
+			// not log on its own, and the earlier comment that claimed it did was wrong.
+			if derr := postWitnessFinding(ctx, client, witnessServeWebhook, server, f); derr != nil {
+				log.Warn("witness: webhook delivery failed",
+					zap.String("server", server), zap.String("finding", f.Kind), zap.Error(derr))
+			}
 		}))
-	}
-	log, err := logutil.New()
-	if err != nil {
-		return fmt.Errorf("logger: %w", err)
 	}
 	svc, err := witness.NewService(id, witnessStateDir, witnessServeInterval, witnessWatch,
 		log, client, opts...)

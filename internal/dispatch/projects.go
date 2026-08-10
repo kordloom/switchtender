@@ -126,3 +126,17 @@ func (d *Dispatcher) resolvePullCredential(id string, spec *roundhouse.Spec) err
 	spec.RegistryUsername, spec.RegistryPassword = credential.RegistryLogin(plain)
 	return nil
 }
+
+// registrySecrets returns the registry pull login values that must be masked from run output. The
+// pull credential resolves onto the spec outside materializeCredentials, so its password would not
+// otherwise reach the masker, unlike every other credential.
+func registrySecrets(spec *roundhouse.Spec) []string {
+	var out []string
+	if spec.RegistryPassword != "" {
+		out = append(out, spec.RegistryPassword)
+	}
+	if spec.RegistryUsername != "" {
+		out = append(out, spec.RegistryUsername)
+	}
+	return out
+}

@@ -1,6 +1,7 @@
 package importer_test
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -137,7 +138,9 @@ func TestFromAWX(t *testing.T) {
 	// The survey maps field for field, including the type translations.
 	wantSurvey := []template.SurveyField{
 		{Var: "version", Label: "Release version", Type: template.FieldText, Required: true, Default: "1.0.0"},
-		{Var: "count", Label: "How many", Type: template.FieldInt, Default: float64(1)},
+		// The export is decoded with UseNumber, so a numeric default arrives as json.Number and keeps
+		// its exact digits rather than passing through float64. It marshals back to the same JSON.
+		{Var: "count", Label: "How many", Type: template.FieldInt, Default: json.Number("1")},
 		{Var: "region", Label: "Region", Type: template.FieldChoice, Required: true, Choices: []string{"us-east", "us-west", "eu"}},
 	}
 	if diff := cmp.Diff(wantSurvey, tpl.Survey); diff != "" {

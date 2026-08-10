@@ -10,7 +10,32 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/credential"
+	"github.com/kordloom/switchtender/internal/user"
 )
+
+// denyNonAdminCommandSource refuses a non-admin request to give a credential the command source.
+// The command source runs a shell command on the executor when the credential resolves, so it is
+// code execution on the run host, an admin capability. A manage grant delegates rotating and
+// renaming a credential, never turning it into a shell payload, and the PUT route admits a
+// manage-delegated non-admin, so the role rather than object delegation is what must bound this.
+// It is enforced on create and update alike, and reports true when it has already answered the
+// request.
+func denyNonAdminCommandSource(w http.ResponseWriter, r *http.Request, log *zap.Logger, source string) bool {
+	if credential.NormalizeSource(source) != credential.SourceCommand {
+		return false
+	}
+	// No actor in context means the API is serving unauthenticated (no tokens, no SSO), where every
+	// caller is the local admin, the same way denyForeignOrg and the manage checks treat it. The
+	// guard bites only when auth is enforced and the caller is a real non-admin, which is the
+	// manage-delegated operator the escalation would otherwise reach.
+	actor, ok := actorFrom(r.Context())
+	if ok && actor.Role != user.RoleAdmin {
+		respondError(w, log, http.StatusForbidden,
+			"only an admin may set a credential to the command source, since it runs a command on the executor")
+		return true
+	}
+	return false
+}
 
 // sealableSecret builds the plaintext to seal, folding an ssh_key passphrase into a structured
 // secret. It rejects a passphrase on anything but a locally stored ssh_key, where the passphrase
@@ -119,6 +144,9 @@ func createCredentialHandler(store credential.Store, types credential.TypeStore,
 		if !credential.ValidSource(req.Source) {
 			respondError(w, log, http.StatusBadRequest,
 				"source must be one of: "+credential.SourceList())
+			return
+		}
+		if denyNonAdminCommandSource(w, r, log, req.Source) {
 			return
 		}
 		// Trimmed the same way the update handler trims, so one spelling of vault_id is not
@@ -389,6 +417,14 @@ func updateCredentialHandler(store credential.Store, sealer *credential.Sealer, 
 			if !credential.ValidSource(source) {
 				respondError(w, log, http.StatusBadRequest,
 					"source must be one of: "+credential.SourceList())
+				return
+			}
+			// The command source is code execution on the executor, so setting or rewriting a
+			// command credential is admin-only even for a manage-delegated caller. This sits inside
+			// the secret block because a command credential's secret is the command itself: rewriting
+			// it requires a new secret, so guarding here covers both flipping a credential to command
+			// and changing the command an existing command credential runs.
+			if denyNonAdminCommandSource(w, r, log, source) {
 				return
 			}
 			secretPlain, err := sealableSecret(kind, source, secret, passphrase)

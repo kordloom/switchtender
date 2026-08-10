@@ -9,10 +9,6 @@ import (
 	"github.com/kordloom/switchtender/internal/audit"
 )
 
-// cliMethod is the method recorded for a mutation made from the command line, so the trail reads
-// the same whether a change arrived over HTTP or from the binary on the host.
-const cliMethod = "CLI"
-
 // cliActor names the operator behind a command-line mutation. The account running the binary is the
 // only identity available here, since no token or session is involved, and the prefix keeps it from
 // being mistaken for an API token label.
@@ -41,7 +37,7 @@ func recordCLI(ctx context.Context, audits audit.Store, command string) error {
 	}
 	entry := &audit.Entry{
 		ID: audit.NewID(), At: time.Now(), Actor: cliActor(),
-		Method: cliMethod, Path: command,
+		Method: audit.MethodCLI, Path: command,
 	}
 	if err := audits.Append(ctx, entry); err != nil {
 		return fmt.Errorf("refused: the change could not be recorded in the audit trail: %w", err)

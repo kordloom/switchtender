@@ -37,8 +37,13 @@ func WithCredentialTypes(types credential.TypeStore) Option {
 }
 
 // validateCredentials confirms every referenced credential exists and is decryptable before a run
-// is accepted, so a bad reference fails at submit time instead of execution time.
-func (d *Dispatcher) validateCredentials(ctx context.Context, tool string, ids []string) error {
+// is accepted, so a bad reference fails at submit time instead of execution time. When enforceTool
+// is set, an Ansible-only credential attached to a non-Ansible run is also rejected. The tool check
+// is skipped for credentials inherited from the target inventory: those are shared by every tool
+// that targets the inventory and are inert under a tool they do not fit, so rejecting a terraform
+// run because the inventory also carries an ssh key would couple inventory config to tool choice.
+// Existence and decryptability, which do fail a run at execution, are checked in both cases.
+func (d *Dispatcher) validateCredentials(ctx context.Context, tool string, ids []string, enforceTool bool) error {
 	if len(ids) == 0 {
 		return nil
 	}
@@ -54,12 +59,35 @@ func (d *Dispatcher) validateCredentials(ctx context.Context, tool string, ids [
 		if _, err := d.sealer.Open(c.Secret); err != nil {
 			return fmt.Errorf("decrypt credential %s: %w", id, err)
 		}
-		if !ansible && credential.AnsibleOnly(c.Kind) {
+		if enforceTool && !ansible && credential.AnsibleOnly(c.Kind) {
 			return fmt.Errorf("%w: credential %s of kind %s applies only to the ansible tool, not %s",
 				ErrToolCredential, id, c.Kind, run.NormalizeTool(tool))
 		}
 	}
 	return nil
+}
+
+// inventoryCredentialIDs returns the credentials the run's target inventory attaches, minus the
+// run's own, so the caller can validate the inherited set without repeating the run's credentials.
+func (d *Dispatcher) inventoryCredentialIDs(ctx context.Context, r *run.Run) []string {
+	if r.InventoryID == "" || d.inventories == nil {
+		return nil
+	}
+	inv, err := d.inventories.Get(ctx, r.InventoryID)
+	if err != nil {
+		return nil
+	}
+	own := make(map[string]bool, len(r.CredentialIDs))
+	for _, id := range r.CredentialIDs {
+		own[id] = true
+	}
+	var out []string
+	for _, id := range inv.CredentialIDs {
+		if id != "" && !own[id] {
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
 // materializeCredentials decrypts the run's credentials into files only the executing process can
@@ -114,11 +142,15 @@ func (d *Dispatcher) materializeCredentials(ctx context.Context, r *run.Run, spe
 		// its own path and skips the per-kind switch below.
 		if c.TypeID != "" {
 			vf, err := d.injectTypedCredential(ctx, c, plain, spec, &secrets)
-			if err != nil {
-				return cleanup, secrets, err
-			}
+			// Register the file for cleanup before checking the error: injectTypedCredential can
+			// fail after creating and partially writing the extra-vars file, which holds the
+			// credential's field values, so tracking it only on success would leave a 0600 file of
+			// secret material in TMPDIR until the OS cleared it.
 			if vf != "" {
 				paths = append(paths, vf)
+			}
+			if err != nil {
+				return cleanup, secrets, err
 			}
 			continue
 		}
@@ -131,9 +163,12 @@ func (d *Dispatcher) materializeCredentials(ctx context.Context, r *run.Run, spe
 			_ = f.Close()
 			return cleanup, secrets, fmt.Errorf("materialize credential %s: %w", id, err)
 		}
-		// An ssh_key writes its own unlocked key below, so the sealed plaintext, which may hold a
-		// passphrase, never lands on disk. Every other kind writes its raw plaintext here.
-		if c.Kind != credential.KindSSHKey {
+		// Only a vault password is consumed as the raw file content, so only it writes plain here.
+		// ssh_key writes its own unlocked key; the connection and become kinds overwrite the file
+		// with a vars file; env, token, registry, and custom kinds remove it and inject by other
+		// means. Writing plain for those wrote the decrypted secret to disk only to unlink it, a
+		// needless exposure window the empty file below does not have.
+		if c.Kind == credential.KindVaultPassword {
 			if _, err := f.WriteString(plain); err != nil {
 				_ = f.Close()
 				return cleanup, secrets, fmt.Errorf("materialize credential %s: %w", id, err)
@@ -319,6 +354,24 @@ func (d *Dispatcher) materializeCredentials(ctx context.Context, r *run.Run, spe
 					spec.Env = append(spec.Env, ev+"="+ff.Name())
 				}
 			}
+			// A registered kind can declare extra vars the same as a custom type. The typed path
+			// honors them; the default branch dropped them silently, so a plugin credential's
+			// extra vars never reached the play. Write them to a private vars file like every other
+			// extra-vars carrier. Their values are masked through injectedMaskValues above.
+			if len(inj.ExtraVars) > 0 {
+				vf, err := os.CreateTemp("", "switchtender-cred-*")
+				if err != nil {
+					return cleanup, secrets, fmt.Errorf("materialize credential %s: %w", id, err)
+				}
+				paths = append(paths, vf.Name())
+				if err := vf.Close(); err != nil {
+					return cleanup, secrets, fmt.Errorf("materialize credential %s: %w", id, err)
+				}
+				if err := writeAnsibleVarsFile(vf.Name(), inj.ExtraVars); err != nil {
+					return cleanup, secrets, fmt.Errorf("materialize credential %s: %w", id, err)
+				}
+				spec.ExtraVarsFiles = append(spec.ExtraVarsFiles, vf.Name())
+			}
 		}
 	}
 	return cleanup, secrets, nil
@@ -356,9 +409,10 @@ func connectionVars(user, becomeMethod, becomeUser string) map[string]string {
 }
 
 // injectedMaskValues returns the values to redact from run output for one injection: the ones the
-// injector named secret, or, when it named none, every value it produced. An empty Secrets slice
-// is treated the same as a nil one, so an injector that names an empty set masks everything rather
-// than nothing and cannot leak its own values by accident.
+// injector named secret, or, when it named none, every value it produced, across both the
+// environment and the extra vars. An empty Secrets slice is treated the same as a nil one, so an
+// injector that names an empty set masks everything rather than nothing and cannot leak its own
+// values by accident.
 func injectedMaskValues(inj credential.Injection) []string {
 	if len(inj.Secrets) > 0 {
 		return inj.Secrets
@@ -368,6 +422,9 @@ func injectedMaskValues(inj credential.Injection) []string {
 		if _, val, ok := strings.Cut(line, "="); ok {
 			out = append(out, val)
 		}
+	}
+	for _, val := range inj.ExtraVars {
+		out = append(out, val)
 	}
 	return out
 }

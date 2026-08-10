@@ -531,12 +531,18 @@ func (d *Dispatcher) janitor() {
 	}
 }
 
-// validateRun checks a run's credential and project references before it is accepted.
+// validateRun checks a run's credential and project references before it is accepted. The run's own
+// credentials are held to the tool-compatibility gate; credentials inherited from the target
+// inventory are checked for existence and decryptability but not tool fit, since materializeCredentials
+// resolves the inherited set too and an undecryptable one there would otherwise fail only at execution.
 func (d *Dispatcher) validateRun(ctx context.Context, r *run.Run) error {
-	if err := d.validateCredentials(ctx, r.Tool, r.CredentialIDs); err != nil {
+	if err := d.validateCredentials(ctx, r.Tool, r.CredentialIDs, true); err != nil {
 		return err
 	}
 	if err := d.validateInventory(ctx, r.InventoryID); err != nil {
+		return err
+	}
+	if err := d.validateCredentials(ctx, r.Tool, d.inventoryCredentialIDs(ctx, r), false); err != nil {
 		return err
 	}
 	return d.validateProject(ctx, r.ProjectID)
@@ -1717,7 +1723,13 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 		return fail(err)
 	}
 	defer credCleanup()
-	mask.set(append(secrets, invSecrets...))
+	// The registry pull login reaches the spec through resolvePullCredential, not
+	// materializeCredentials, so its values are not in secrets. Add them here, or a container
+	// runner that echoes a failed registry login leaks the password into the run's output the way
+	// every other credential is masked against. Both the run's and the project's pull credential
+	// have resolved onto the spec by now, so masking the effective login covers both.
+	allSecrets := append(secrets, registrySecrets(&spec)...)
+	mask.set(append(allSecrets, invSecrets...))
 
 	res, runErr := d.runner.Run(ctx, spec, sink)
 	// The masker holds back the end of each chunk so a secret split across two of them is caught

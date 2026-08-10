@@ -63,12 +63,13 @@ type reportView struct {
 	Period string
 	// Actors is the per-actor breakdown, most active first.
 	Actors []actorStat
-	// ActorCount is the number of distinct actors.
+	// ActorCount is the number of distinct actors, span beats excluded.
 	ActorCount int
-	// Mutations is the number of state-changing entries.
+	// Mutations is the number of state-changing entries, HTTP and CLI alike.
 	Mutations int
-	// Reads is the number of read-only entries.
-	Reads int
+	// SpanBeats is the number of span heartbeat entries. Reads are never recorded in the chain, so
+	// every entry is either a change or a span beat, and Mutations plus SpanBeats is the entry count.
+	SpanBeats int
 	// GeneratedAt is when the report was rendered.
 	GeneratedAt string
 	// Entries is the full chain, oldest first.
@@ -129,11 +130,17 @@ func buildReportView(exp *Export, now time.Time) reportView {
 
 	actors := map[string]int{}
 	for _, e := range exp.Entries {
-		actors[e.Actor]++
-		if isMutation(e.Method) {
-			v.Mutations++
+		// A span beat is a system heartbeat, not an actor's change, so it is tallied on its own and
+		// kept out of the change count and the actor list rather than counted as a read. Reads are
+		// never recorded in the chain, so treating a span or a CLI entry as a read, as this once did,
+		// put a number in the report that stood for nothing.
+		if e.Method == SpanMethod {
+			v.SpanBeats++
 		} else {
-			v.Reads++
+			actors[e.Actor]++
+			if isMutation(e.Method) {
+				v.Mutations++
+			}
 		}
 		v.Entries = append(v.Entries, entryRow{
 			Seq: e.Seq, At: fmtTime(e.At), Actor: e.Actor,
@@ -153,11 +160,12 @@ func buildReportView(exp *Export, now time.Time) reportView {
 	return v
 }
 
-// isMutation reports whether an HTTP method changes state, so the report can separate changes from
-// reads.
+// isMutation reports whether a recorded entry's method changes state. It covers the HTTP write
+// methods and the CLI method, which records a command-line mutation and is therefore a change, not a
+// read. Span beats are handled before this is called.
 func isMutation(method string) bool {
 	switch strings.ToUpper(method) {
-	case "POST", "PUT", "PATCH", "DELETE":
+	case "POST", "PUT", "PATCH", "DELETE", MethodCLI:
 		return true
 	default:
 		return false

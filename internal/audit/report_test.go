@@ -44,6 +44,43 @@ func TestReportVerified(t *testing.T) {
 	}
 }
 
+// TestReportCountsChangesAndSpanBeats proves the summary counts a CLI entry as a change and a span
+// beat as a span beat, not as a read. Reads are never recorded in the chain, so the old Reads card,
+// which tallied exactly the span and CLI entries, stood for nothing; it is replaced by Span beats,
+// and Changes plus Span beats equals the entry count.
+func TestReportCountsChangesAndSpanBeats(t *testing.T) {
+	t.Parallel()
+	at := time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC)
+	var entries []*audit.Entry
+	var prev *audit.Entry
+	add := func(actor, method, path string) {
+		e := &audit.Entry{ID: audit.NewID(), At: at, Actor: actor, Method: method, Path: path}
+		audit.Link(prev, e)
+		entries = append(entries, e)
+		prev = e
+		at = at.Add(time.Second)
+	}
+	add("alice", "POST", "/v1/runs")
+	add("bob", "PUT", "/v1/templates/t1")
+	add("cli:root", audit.MethodCLI, "user new admin")
+	add(audit.SpanActor, audit.SpanMethod, audit.SpanPath(1, 3, 300))
+
+	html, err := audit.Report(audit.BuildExport(entries, nil, signAt), reportAt)
+	if err != nil {
+		t.Fatalf("Report() error = %v", err)
+	}
+	s := string(html)
+	if !strings.Contains(s, `<p class="k">Changes</p><p class="v">3</p>`) {
+		t.Errorf("Changes should be 3 (POST, PUT, CLI); report:\n%s", s)
+	}
+	if !strings.Contains(s, `<p class="k">Span beats</p><p class="v">1</p>`) {
+		t.Errorf("Span beats should be 1; report:\n%s", s)
+	}
+	if strings.Contains(s, `>Reads<`) {
+		t.Error("the report still shows a Reads card, which counted span and CLI entries as reads")
+	}
+}
+
 // TestReportUnsigned proves an unsigned but intact export renders as integrity-proven, attribution-not.
 func TestReportUnsigned(t *testing.T) {
 	t.Parallel()

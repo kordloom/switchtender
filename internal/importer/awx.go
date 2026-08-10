@@ -1,6 +1,7 @@
 package importer
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -201,7 +202,12 @@ func (r *awxRef) UnmarshalJSON(b []byte) error {
 // so a partial export still migrates what it can.
 func FromAWX(data []byte, now time.Time) (*Plan, error) {
 	var export awxExport
-	if err := json.Unmarshal(data, &export); err != nil {
+	// UseNumber keeps JSON numbers as json.Number rather than float64, so a host variable or survey
+	// choice that is a large integer survives to the inventory verbatim instead of being reformatted
+	// through float64, which loses precision past 2^53 and prints in scientific notation.
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+	if err := dec.Decode(&export); err != nil {
 		return nil, fmt.Errorf("parse awx export: %w", err)
 	}
 	plan := &Plan{}
@@ -470,7 +476,9 @@ func decodeVars(raw json.RawMessage) map[string]any {
 		return nil
 	}
 	var asMap map[string]any
-	if err := json.Unmarshal(raw, &asMap); err == nil {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	if err := dec.Decode(&asMap); err == nil {
 		return asMap
 	}
 	var asString string

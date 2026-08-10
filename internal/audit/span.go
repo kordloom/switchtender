@@ -18,6 +18,10 @@ const (
 	SpanMethod = "SPAN"
 )
 
+// MethodCLI is the method recorded for a mutation made from the command line, so the trail reads
+// the change apart from an HTTP one. It is a state change, counted with the HTTP write methods.
+const MethodCLI = "CLI"
+
 // SpanPath encodes one beat's payload into the entry path. The encoding is part of what the
 // chain hash commits to, so it is fixed: beat in the path, count and cadence as ordered query
 // parameters, no escaping needed because every value is a decimal integer.

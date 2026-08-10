@@ -708,6 +708,28 @@ func projectCacheDir() string {
 	return filepath.Join(base, "switchtender", "projects")
 }
 
+// identityDir returns the directory holding the producer signing identity for a database target.
+// serve, which signs the audit exports it serves, and the bundle command, which signs the bundle it
+// emits, both derive it here so one install mints a single key and every tool reads that same key. A
+// SQLite file keeps its identity beside it, so a copied database carries its key. A postgres DSN has
+// no filesystem home: filepath.Dir on a DSN yields a cwd-relative junk directory whose name embeds
+// the DSN's user:password@host, both wrong and a credential leak, so the identity falls back to a
+// stable per-user directory instead.
+func identityDir(db string) string {
+	if strings.HasPrefix(db, "postgres://") || strings.HasPrefix(db, "postgresql://") {
+		base, err := os.UserConfigDir()
+		if err != nil || base == "" {
+			base = os.TempDir()
+		}
+		return filepath.Join(base, "switchtender", "identity")
+	}
+	dir := filepath.Dir(db)
+	if dir == "" || dir == "." {
+		return "."
+	}
+	return dir
+}
+
 // runServe builds the server dependencies and serves until interrupted.
 // externalAuthConfigured reports whether any single sign-on or federated auth provider is set, in
 // which case the API is not wide open even before an API token exists.
@@ -788,11 +810,12 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	// The producer identity signs LoomSeal bundles and is published so a relying party can pin its
-	// fingerprint. It is created on first start beside the database. A failure to create it is not
-	// fatal: the server still runs and still records the audit chain, it just cannot attribute a
-	// bundle, which is better than refusing to start over an export feature.
+	// fingerprint. It is created on first start in the install's identity directory, the same one the
+	// bundle command reads, so a bundle is signed with the key serve publishes. A failure to create
+	// it is not fatal: the server still runs and still records the audit chain, it just cannot
+	// attribute a bundle, which is better than refusing to start over an export feature.
 	var producer *audit.Identity
-	if id, err := audit.LoadIdentity(filepath.Dir(serveDB)); err != nil {
+	if id, err := audit.LoadIdentity(identityDir(serveDB)); err != nil {
 		log.Warn("producer identity unavailable, bundles cannot be attributed: " + err.Error())
 	} else {
 		producer = &id

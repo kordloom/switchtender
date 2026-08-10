@@ -3,6 +3,8 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -59,5 +61,31 @@ func TestTokenCountGuard(t *testing.T) {
 				t.Errorf("%s: warn = %v, want %v", test.Name, warn, test.WantWarn)
 			}
 		})
+	}
+}
+
+// TestIdentityDir proves the producer signing identity directory is derived safely for both database
+// kinds. A SQLite file keeps its identity beside it. A postgres DSN has no filesystem home, so it
+// falls back to a stable per-user directory rather than filepath.Dir of the DSN, which would be a
+// cwd-relative junk directory whose name embeds the DSN's user:password@host.
+func TestIdentityDir(t *testing.T) {
+	t.Parallel()
+	// A SQLite file: identity lives in the directory beside it.
+	if got := identityDir("/var/lib/switchtender/demo.db"); got != "/var/lib/switchtender" {
+		t.Errorf("identityDir(sqlite) = %q, want /var/lib/switchtender", got)
+	}
+	// A postgres DSN must not become a path and must not carry the credentials into a directory name.
+	const dsn = "postgres://svc:hunter2@db.internal:5432/prod?sslmode=disable"
+	got := identityDir(dsn)
+	if strings.Contains(got, "hunter2") || strings.Contains(got, "db.internal") ||
+		strings.Contains(got, "postgres:") {
+		t.Errorf("identityDir(dsn) = %q, leaks DSN content into the path", got)
+	}
+	if !strings.HasSuffix(got, filepath.Join("switchtender", "identity")) {
+		t.Errorf("identityDir(dsn) = %q, want a stable switchtender/identity directory", got)
+	}
+	// postgresql:// is the same case.
+	if g2 := identityDir("postgresql://u:p@h/db"); g2 != got {
+		t.Errorf("identityDir(postgresql) = %q, want the same stable dir as postgres:// %q", g2, got)
 	}
 }

@@ -172,6 +172,10 @@ func TestInventorySecrets(t *testing.T) {
 		"[web:vars]\napi_token: tok-abc123\nplain_var=notsecret\n" +
 		"ansible_become_pass=BecomeMe99\nansible_ssh_pass: sshpw-4567\n" +
 		"vault_passphrase=unlock-abc\ndb_secret_value: sv-9\n" +
+		// A quoted value with spaces must be captured whole, not truncated to the first token.
+		"ansible_password: \"my secret pw\"\nvault_pass='quoted spaced'\n" +
+		// Two secrets on one INI host line: the first must not swallow the second.
+		"db02 ansible_password=firstpw db_token=secondtok\n" +
 		// These are not secrets and must not be captured. Their values are booleans and a key-file
 		// path; masking them would black out ordinary output and a common file path everywhere.
 		"bypass_proxy=true\npassive_mode: false\ngpu_passthrough=true\n" +
@@ -180,9 +184,11 @@ func TestInventorySecrets(t *testing.T) {
 	want := map[string]bool{
 		"hunter2": true, "tok-abc123": true, "BecomeMe99": true,
 		"sshpw-4567": true, "unlock-abc": true, "sv-9": true,
+		"my secret pw": true, "quoted spaced": true,
+		"firstpw": true, "secondtok": true,
 	}
 	forbidden := map[string]bool{
-		"true": true, "false": true,
+		"true": true, "false": true, "my": true, "quoted": true,
 		"/home/deploy/.ssh/id_rsa": true, "AKIAEXAMPLE123": true, "notsecret": true,
 	}
 	for _, v := range got {
