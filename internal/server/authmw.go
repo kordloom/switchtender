@@ -42,8 +42,11 @@ type authGate struct {
 	authz *authorizer
 	// mu guards enforced and checkedAt.
 	mu sync.Mutex
-	// enforced caches whether any token exists.
+	// enforced caches whether the install is configured and so must authenticate.
 	enforced bool
+	// latched records that enforcement has been on once. It never returns to off in this process,
+	// so an emptied or briefly unreadable store cannot reopen a running server.
+	latched bool
 	// checkedAt is when enforced was last refreshed.
 	checkedAt time.Time
 }
@@ -588,23 +591,57 @@ func (g *authGate) protects(r *http.Request) bool {
 	return true
 }
 
-// enforcing reports whether any token exists, cached briefly to keep request overhead flat.
+// enforcing reports whether the install has been configured and so must authenticate, cached briefly
+// to keep request overhead flat.
+//
+// Open mode is a first-run convenience, reachable only before anything has been set up. It is not a
+// state an install may return to. Enforcement keyed on the live token count alone did allow that:
+// session tokens carry a thirty day lifetime, this gate deletes an expired token the moment it meets
+// one, and the count then reached zero. A browser or single sign-on install, whose only tokens are
+// sessions, therefore served its whole API to anonymous callers with admin authority thirty days
+// after the last sign-in, silently. Revoking the last API token did it immediately.
+//
+// Two things close it. An account is durable where a session is not, so an install that has ever had
+// a user keeps authenticating across restarts. And enforcement latches in memory, so a store that
+// briefly reads empty cannot reopen a running server.
 func (g *authGate) enforcing(ctx context.Context) bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	if g.enforced && g.latched {
+		return true
+	}
 	if time.Since(g.checkedAt) < enforcementCacheTTL {
 		return g.enforced
 	}
-	n, err := g.tokens.Count(ctx)
-	if err != nil {
-		g.log.Error("server: count tokens: " + err.Error())
-		// Fail closed: an unreadable token store should not open the API.
-		g.enforced = true
-	} else {
-		g.enforced = n > 0
+	g.enforced = g.configured(ctx)
+	if g.enforced {
+		g.latched = true
 	}
 	g.checkedAt = time.Now()
 	return g.enforced
+}
+
+// configured reports whether this install has any credential or account, meaning setup has happened
+// and authentication applies. An unreadable store counts as configured, so a database problem cannot
+// open the API.
+func (g *authGate) configured(ctx context.Context) bool {
+	n, err := g.tokens.Count(ctx)
+	if err != nil {
+		g.log.Error("server: count tokens: " + err.Error())
+		return true
+	}
+	if n > 0 {
+		return true
+	}
+	if g.users == nil {
+		return false
+	}
+	accounts, err := g.users.List(ctx)
+	if err != nil {
+		g.log.Error("server: list users: " + err.Error())
+		return true
+	}
+	return len(accounts) > 0
 }
 
 // touch records the token's last use, at most once a minute, without blocking the request.

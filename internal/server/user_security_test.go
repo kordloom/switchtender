@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -50,6 +51,27 @@ func login(handler http.Handler, addr, username, password string) *httptest.Resp
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	return rec
+}
+
+// bearerFor signs in and returns the session token, so a test can make the authenticated requests a
+// real administrator makes. The API authenticates whenever an account exists, so an admin-only test
+// cannot reach a mutating route without one.
+func bearerFor(t *testing.T, handler http.Handler, username, password string) string {
+	t.Helper()
+	rec := login(handler, "10.0.0.1:1234", username, password)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("login for %s = %d, want 200 (%s)", username, rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode login response: %v", err)
+	}
+	if body.Token == "" {
+		t.Fatal("login returned no token")
+	}
+	return body.Token
 }
 
 // TestLoginRateLimit verifies repeated bad passwords are throttled per client and username, that
@@ -139,16 +161,21 @@ func TestLastAdminIsProtected(t *testing.T) {
 	admin := newAccount(t, "alice", "correct-horse", user.RoleAdmin)
 	viewer := newAccount(t, "reader", "another-secret", user.RoleViewer)
 	handler, users, _ := newAccountServer(t, admin, viewer)
+	bearer := bearerFor(t, handler, "alice", "correct-horse")
 
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/v1/users/"+admin.ID, nil))
+	del := httptest.NewRequest(http.MethodDelete, "/v1/users/"+admin.ID, nil)
+	del.Header.Set("Authorization", "Bearer "+bearer)
+	handler.ServeHTTP(rec, del)
 	if rec.Code != http.StatusConflict {
 		t.Errorf("deleting the last admin = %d, want 409", rec.Code)
 	}
 
 	rec = httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPut, "/v1/users/"+admin.ID,
-		strings.NewReader(`{"username":"alice","role":"viewer"}`)))
+	demote := httptest.NewRequest(http.MethodPut, "/v1/users/"+admin.ID,
+		strings.NewReader(`{"username":"alice","role":"viewer"}`))
+	demote.Header.Set("Authorization", "Bearer "+bearer)
+	handler.ServeHTTP(rec, demote)
 	if rec.Code != http.StatusConflict {
 		t.Errorf("demoting the last admin = %d, want 409", rec.Code)
 	}
@@ -168,7 +195,9 @@ func TestLastAdminIsProtected(t *testing.T) {
 		t.Fatalf("Save() error = %v", err)
 	}
 	rec = httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/v1/users/"+admin.ID, nil))
+	delSecond := httptest.NewRequest(http.MethodDelete, "/v1/users/"+admin.ID, nil)
+	delSecond.Header.Set("Authorization", "Bearer "+bearer)
+	handler.ServeHTTP(rec, delSecond)
 	if rec.Code != http.StatusOK && rec.Code != http.StatusNoContent {
 		t.Errorf("deleting an admin with another present = %d, want success", rec.Code)
 	}
