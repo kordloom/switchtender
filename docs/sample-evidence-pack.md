@@ -46,8 +46,9 @@ it was rendered from verifies and is anchored to a public timestamp authority, s
 - **Outcome** is honest, not curated. Two approved changes then failed at execution, one change was
   rejected and never ran, one is still awaiting a decision, and two succeeded. An audit trail that
   only ever showed green would be the one to distrust.
-- Nothing in the row exposes a secret. The chain commits to a redacted digest of each change's
-  payload, so the record proves what changed without carrying the credentials the change used.
+- Nothing in the row exposes a secret. From the next release the chain also commits to a redacted
+  digest of each change's payload, so the record proves what changed without carrying the
+  credentials the change used.
 
 ## Produce your own
 
@@ -62,6 +63,6 @@ switchtender audit run <run-id> --out run-dossier.html
 switchtender audit anchor
 ```
 
-The Governed tier produces these on a cadence, mapped to your controls and written to an archive, so
-the sample a review asks for exists before anyone asks. The report itself, and verifying it offline,
-are free in the core.
+The Governed tier (early access) assembles these on a cadence, mapped to your controls and written
+to an archive, so the sample a review asks for exists before anyone asks. The report itself, the
+free `--evidence-dir` scheduling, and verifying it all offline stay free in the core.

@@ -11,10 +11,12 @@ This maps what SwitchTender records to the change-management and audit-control c
 asks about. It is a reference for the person answering the audit, not a claim of certification: the
 tool produces the evidence, and your assessor decides whether your program satisfies the control.
 
-Every mapping below points at something the free core already produces, the tamper-evident chain and
-the change register `switchtender audit report` renders from it. Nothing here is a paid feature. The
-paid Governed tier adds scheduled, control-mapped evidence packs generated to an archive on a
-cadence, which is the same evidence assembled for you rather than pulled per request.
+Every mapping below points at the tamper-evident chain and the change register
+`switchtender audit report` renders from it, all in the free core. Rows marked next release describe
+the actor-identity and content-digest fields that land in the upcoming release; everything else ships
+in the current download. Nothing here is a paid feature. The paid Governed tier (early access) adds
+control-mapped evidence packs and auditor-facing attestation reports, assembled for you on the same
+cadence the free `--evidence-dir` registers already run on.
 
 ## What the record holds
 
@@ -22,10 +24,10 @@ Every authenticated change is one entry in a SHA-256 hash chain. Each entry comm
 
 | Field | What it is |
 |-------|------------|
-| Actor | Who acted, and `actor_type` for how they authenticated: a session, a token, or the command line. |
-| On behalf of | For a token bound to an account, the account whose authority it used, so an agent's change is attributable to both the token and the operator behind it. |
+| Actor | Who acted. From the next release, `actor_type` joins it: how they authenticated, a session, a token, or the command line. |
+| On behalf of | Next release. For a token bound to an account, the account whose authority it used, so an agent's change is attributable to both the token and the operator behind it. |
 | Method and path | The operation performed. |
-| Content digest | A hash of the change payload with secret fields redacted, so the record proves what a change contained, not only that a call was made, without exposing the secret. |
+| Content digest | Next release. A hash of the change payload with secret fields redacted, so the record proves what a change contained, not only that a call was made, without exposing the secret. |
 | Time, sequence, link | When it happened and its tamper-evident position in the chain. |
 
 The change register (`switchtender audit report --from --to`) renders these per change with the
@@ -40,7 +42,7 @@ CC8.1 asks that changes are authorized, tested, and tracked before they reach pr
 | The control expects | Where SwitchTender shows it |
 |---------------------|-----------------------------|
 | Changes are authorized before they take effect | The approval decision on each register row, recorded in the chain; an empty approval policy holds every run for a person, and approve is admin-only so an operator or agent cannot release its own change. |
-| Change activity is tracked and attributable | The actor, `actor_type`, and `on_behalf_of` on every entry; the change register lists every change in the period. |
+| Change activity is tracked and attributable | The actor on every entry, joined by `actor_type` and `on_behalf_of` in the next release; the change register lists every change in the period. |
 | The change record is complete and unaltered | The hash chain: a change that cannot be recorded is refused rather than made, and altering or deleting an entry breaks verification, provable offline with `switchtender audit verify`. |
 | A dry run or test preceded the change | A run's dossier records whether it ran in the tool's no-change mode; drift is shown from a dry run before the fix is built. |
 | Segregation between requester and approver | Approve and reject are admin-only; the operator or agent that submits cannot approve. |
@@ -72,7 +74,8 @@ protected health information.
 
 ## The boundary, stated plainly
 
-The chain proves the record was not altered and, with the content digest, what each change contained.
+The chain proves the record was not altered; with the content digest, next release, it also proves
+what each change contained.
 It does not prove that every change to your infrastructure went through SwitchTender: a person or a
 process holding its own SSH key can change a host behind the controller, and no audit system records
 what it never saw. For an AI agent the gap closes, because an agent that holds only a SwitchTender

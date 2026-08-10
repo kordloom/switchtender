@@ -158,8 +158,9 @@ one, which is the separation of requester and approver a change-management contr
 <li><strong>Outcome</strong> is honest, not curated. Two approved changes then failed at execution, one change was
 rejected and never ran, one is still awaiting a decision, and two succeeded. An audit trail that
 only ever showed green would be the one to distrust.</li>
-<li>Nothing in the row exposes a secret. The chain commits to a redacted digest of each change's
-payload, so the record proves what changed without carrying the credentials the change used.</li>
+<li>Nothing in the row exposes a secret. From the next release the chain also commits to a redacted
+digest of each change's payload, so the record proves what changed without carrying the
+credentials the change used.</li>
 </ul>
 <h2 id="produce-your-own">Produce your own</h2>
 <pre><code># a period's change register
@@ -171,9 +172,9 @@ switchtender audit run &lt;run-id&gt; --out run-dossier.html
 # fix the chain in time so a lost tail is detectable, then re-report
 switchtender audit anchor
 </code></pre>
-<p>The Governed tier produces these on a cadence, mapped to your controls and written to an archive, so
-the sample a review asks for exists before anyone asks. The report itself, and verifying it offline,
-are free in the core.</p>
+<p>The Governed tier (early access) assembles these on a cadence, mapped to your controls and written
+to an archive, so the sample a review asks for exists before anyone asks. The report itself, the
+free <code>--evidence-dir</code> scheduling, and verifying it all offline stay free in the core.</p>
 
 		</main>
 	</div>

@@ -108,6 +108,12 @@
 			</div>
 			<div class="cards cards-3">
 				<article class="card reveal">
+					<div class="ic ic-audit"></div>
+					<h3>Provable audit</h3>
+					<p>Every change links into a tamper-evident SHA-256 hash chain; a change that can't be recorded is refused rather than made quietly. Export the chain as a signed <a href="https://loomseal.com" rel="noopener">LoomSeal</a> bundle and verify it offline with an open, independent verifier, without trusting the server.</p>
+					<p class="card-bound">What it doesn't claim: the chain proves the record wasn't altered after writing, not that a compromised controller recorded everything. The full boundary statement is in <a href="/docs/concepts#provable-audit">the docs</a>.</p>
+				</article>
+				<article class="card reveal">
 					<div class="ic ic-matrix"></div>
 					<h3>Live host-by-task matrix</h3>
 					<p>Read a run like a dashboard instead of a scrollback. Every host and task paints itself live as the run happens, and each cell opens to its own output and exit code.</p>
@@ -185,18 +191,12 @@
 				<article class="card reveal">
 					<div class="ic ic-bell"></div>
 					<h3>Notifications everywhere</h3>
-					<p>A finished run reaches Slack, Teams, Discord, Mattermost, Rocket.Chat, ntfy, email, or a webhook; a failure pages PagerDuty or texts through Twilio. Eleven channels, server-wide or per template, so each team pages its own people.</p>
+					<p>A finished run reaches Slack, Teams, Discord, Mattermost, Rocket.Chat, ntfy, email, or a webhook; a failure pages PagerDuty, alerts Grafana OnCall, or texts through Twilio. Eleven channels, server-wide or per template, so each team pages its own people.</p>
 				</article>
 				<article class="card reveal">
 					<div class="ic ic-secret"></div>
 					<h3>Secrets that can't escape</h3>
 					<p>Sealed at rest, sourced live from Vault, AWS, Google, Azure, CyberArk, or 1Password, and masked out of run logs; a tool that prints a secret shows <code>***</code>. Typed cloud credentials inject the exact variables each tool expects.</p>
-				</article>
-				<article class="card reveal">
-					<div class="ic ic-audit"></div>
-					<h3>Provable audit</h3>
-					<p>Every change links into a tamper-evident SHA-256 hash chain; a change that can't be recorded is refused rather than made quietly. Export the chain as a signed <a href="https://loomseal.com" rel="noopener">LoomSeal</a> bundle and verify it offline with an open, independent verifier, without trusting the server.</p>
-					<p class="card-bound">What it doesn't claim: the chain proves the record wasn't altered after writing, not that a compromised controller recorded everything. The full boundary statement is in <a href="/docs/concepts#provable-audit">the docs</a>.</p>
 				</article>
 			</div>
 		</section>
@@ -247,7 +247,7 @@
 		<section class="section wrap" id="proof">
 			<div class="section-head reveal">
 				<h2>Evidence you can <span class="grad">hand to an auditor.</span></h2>
-				<p>Most controllers keep an activity log: rows in their own database, editable by whoever holds the database. SwitchTender writes every change into a hash chain, then gives you five ways to carry the proof out of the building. What changed, who asked, and who approved it become things you show, not things you say.</p>
+				<p>Most controllers keep an activity log: rows in their own database, editable by whoever holds the database. SwitchTender writes every change into a hash chain, then gives you six ways to carry the proof out of the building. What changed, who asked, and who approved it become things you show, not things you say.</p>
 			</div>
 			<div class="cards cards-3">
 				<article class="card reveal">
@@ -263,7 +263,7 @@
 				<article class="card reveal">
 					<div class="ic ic-lineage"></div>
 					<h3>The change register</h3>
-					<p><code>switchtender audit report</code> renders every change in a period, the sample a SOC 2 CC8.1 or ISO/IEC 27001 A.8.32 review asks for. Point <code>--evidence-dir</code> at an archive and registers write themselves on a cadence, so the evidence exists before anyone asks.</p>
+					<p><code>switchtender audit report</code> renders every change in a period, the sample a SOC 2 CC8.1 or ISO/IEC 27001 A.8.32 review asks for; the <a href="/docs/compliance">control mapping</a> and a <a href="/docs/sample-evidence-pack">sample pack</a> show exactly what an assessor gets. Point <code>--evidence-dir</code> at an archive and registers write themselves on a cadence, so the evidence exists before anyone asks.</p>
 				</article>
 				<article class="card reveal">
 					<div class="ic ic-doctor"></div>
@@ -283,7 +283,7 @@
 			</div>
 			<div class="section-head reveal" style="margin-top:48px">
 				<h3>Don't take our word for it. Check the live demo's chain right now.</h3>
-				<p>These run against <a href="https://demo.switchtender.com">demo.switchtender.com</a>, a real instance with a real history. The third one makes your machine its witness: run it again tomorrow, and a history that shrank or changed behind your back is a finding, not a feeling.</p>
+				<p>These run against <a href="https://demo.switchtender.com">demo.switchtender.com</a>, a live instance that wipes and reseeds its history every night. That makes the third command a live-fire exercise: become its witness today, run it again tomorrow, and the witness will refuse the rebuilt history with a finding. That alarm is the product working. A nightly reseed is exactly what a rewritten chain looks like from outside, and nothing the server says can talk your witness out of what it saw.</p>
 			</div>
 			<div class="code reveal">
 				<button class="copy" aria-label="Copy">Copy</button>
@@ -293,8 +293,8 @@ curl -s https://demo.switchtender.com/v1/audit/verify
 <span class="c"># 2. pull the full chain, every hash included, yours to keep</span>
 curl -s https://demo.switchtender.com/v1/audit/export
 
-<span class="c"># 3. become its witness: keep a signed checkpoint of the head you saw,
-#    then run it again later. Rewritten history can't get past you.</span>
+<span class="c"># 3. become its witness: keep a signed checkpoint of the head you saw.
+#    Run it again after tonight's reseed and watch it catch the rewrite.</span>
 switchtender witness --server https://demo.switchtender.com --once</code></pre>
 			</div>
 		</section>
@@ -354,7 +354,7 @@ func main() {
 					<tbody>
 						<tr><td>Deploy without Kubernetes</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td><td><span class="muted">VM installer</span></td><td><i class="y"></i></td><td><i class="y"></i></td></tr>
 						<tr><td>Live host-by-task matrix</td><td class="us"><i class="y"></i></td><td><span class="muted">per-host summary</span></td><td><span class="muted">per-host summary</span></td><td><i class="n"></i></td><td><span class="muted">per-node, per-step</span></td></tr>
-						<tr><td>Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, Go</td><td class="us"><i class="y"></i></td><td><span class="muted">Ansible only</span></td><td><span class="muted">Ansible only</span></td><td><span class="muted">no Python or Go</span></td><td><span class="muted">scripts, no native IaC</span></td></tr>
+						<tr><td>Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, Go</td><td class="us"><i class="y"></i></td><td><span class="muted">Ansible only</span></td><td><span class="muted">Ansible only</span></td><td><span class="muted">no Go, no uniform dry run</span></td><td><span class="muted">scripts, no native IaC</span></td></tr>
 						<tr><td>Duration-balanced job splitting</td><td class="us"><i class="y"></i></td><td><span class="muted">round-robin</span></td><td><span class="muted">round-robin</span></td><td><i class="n"></i></td><td><i class="n"></i></td></tr>
 						<tr><td>Fleet memory: flaky hosts, trends</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td><td><i class="n"></i></td><td><i class="n"></i></td><td><i class="n"></i></td></tr>
 						<tr><td>Tamper-evident, signed audit</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td><td><span class="muted">activity log</span></td><td><i class="n"></i></td><td><span class="muted">activity log</span></td></tr>

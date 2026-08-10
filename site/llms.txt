@@ -41,6 +41,8 @@ seeded read-only tour.
 
 - [Concepts](https://switchtender.com/docs/concepts): jobs, templates, fleets, runs
 - [Provable audit](https://switchtender.com/docs/concepts#provable-audit): every mutation is recorded in a fail-closed hash chain before it executes, or refused with a 503
+- [Compliance mapping](https://switchtender.com/docs/compliance): the record mapped to SOC 2 CC8.1, ISO 27001 A.8.32, HIPAA 164.312(b)
+- [Sample evidence pack](https://switchtender.com/docs/sample-evidence-pack): what a reviewer's sample looks like, produced from a real chain
 - Offline verification: signed LoomSeal bundles verify on an air-gapped machine against the key the server publishes at /.well-known/loomseal.json
 - Receipts: every mutation returns an Audit-Receipt header (seq:hash) that later proves the chain still holds that exact entry at that exact position
 - [Tools](https://switchtender.com/docs/features): Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, Go

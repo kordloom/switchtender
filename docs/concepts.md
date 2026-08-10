@@ -64,9 +64,9 @@ missing signature never launches a run.
 ## Credentials
 
 A credential is a secret sealed with AES-256-GCM, decrypted only at execution into the run's
-environment or a temporary file created mode 0600 and deleted when the run ends. Thirteen kinds cover SSH keys and SSH passwords, vault passwords, become
+environment or a temporary file created mode 0600 and deleted when the run ends. Fourteen kinds cover SSH keys and SSH passwords, vault passwords, become
 passwords and full become settings, network device logins, environment bundles for cloud SDKs, API
-tokens, container registry logins, and typed AWS, Azure, GCP, and VMware cloud credentials. The
+tokens, container registry logins, and typed AWS, Azure, GCP, VMware, and OpenStack cloud credentials. The
 [secrets guide](secrets.md) describes each. Secrets never appear in API responses.
 
 ## Teams and grants
@@ -98,20 +98,21 @@ against it lands there, no matter how it was launched.
 ## Provable audit
 
 Every authenticated mutation is recorded in the audit trail, and each entry is linked into a SHA-256
-hash chain. Each entry commits to who acted, how they authenticated, the account whose authority they
-used, the method and path, a digest of the change payload, and the previous entry's hash. Altering,
+hash chain. Each entry commits to who acted, the method and path, and the previous entry's hash;
+from the next release it also commits to how they authenticated, the account whose authority they
+used, and a digest of the change payload. Altering,
 reordering, or deleting an entry breaks the chain, which `GET /v1/audit/verify` detects. A signed
 export from `GET /v1/audit/export` seals the chain with an ed25519 signature, so
 `switchtender audit verify` proves the trail is intact and unaltered offline, without trusting the
 server that produced it.
 
-**The record covers the change, not only that a call was made.** The link commits to a digest of the
-request payload, so a recorded change cannot be re-cast as a different one while the chain still
-verifies. The digest is taken over the payload with its secret fields redacted first, so it proves
-the shape and non-secret content of a change without becoming a way to brute-force a secret the
-request carried. Each entry also records how the caller authenticated and, for a token bound to an
-account, the account it acted on behalf of, so a change an AI agent made under an operator's
-authority is attributable to both and cannot later be presented as a person's.
+**The record covers the change, not only that a call was made** (next release). The link commits to
+a digest of the request payload, so a recorded change cannot be re-cast as a different one while the
+chain still verifies. The digest is taken over the payload with its secret fields redacted first, so
+it proves the shape and non-secret content of a change without becoming a way to brute-force a
+secret the request carried. Each entry also records how the caller authenticated and, for a token
+bound to an account, the account it acted on behalf of, so a change an AI agent made under an
+operator's authority is attributable to both and cannot later be presented as a person's.
 
 A chain proves that what it holds was not altered. On its own it cannot prove that nothing is
 missing, because the same server decides both what happens and what gets written down, and because a
@@ -138,15 +139,17 @@ than showing a run with no origin. A run the scheduler started on its own carrie
 no request authorized it, and the document states that rather than leaving it ambiguous.
 
 **Authentication attempts are not in the chain, and this is deliberate.** An assessor reviewing an
-append-only trail will notice sign-ins are absent, so here is why. A sign-in and a webhook probe are
-reachable by anyone on the network, and the audit append is fail-closed: recording every attempt
-would let a stranger fill the chain with entries, and once the store filled, the fail-closed append
-would refuse every real change and lock the install, including sign-in itself on a fresh install with
-no token yet. So authentication events live in the server log instead, which records each sign-in by
-username and outcome, success, failure, and rate-limited, and never the password or a token. A
-successful sign-in also leaves a durable mark in the chain indirectly: it mints a session token, and
-every change that token then makes is recorded with that account as its actor. Forward the server log
-to your SIEM to retain and examine authentication activity alongside the change trail.
+append-only trail will notice sign-in attempts are absent, so here is why. A sign-in and a webhook
+probe are reachable by anyone on the network, and the audit append is fail-closed: recording every
+attempt would let a stranger fill the chain with entries, and once the store filled, the fail-closed
+append would refuse every real change and lock the install, including sign-in itself on a fresh
+install with no token yet. So authentication attempts live in the server log instead; from the next
+release the log records each attempt by username and outcome, success, failure, and rate-limited,
+and never the password or a token. A successful single sign-on arrival is recorded as a chain entry,
+since the identity provider already vouched for it, and every local sign-in leaves a durable mark
+indirectly: it mints a session, and every change that session then makes is recorded with that
+account as its actor. Forward the server log to your SIEM to retain and examine authentication
+activity alongside the change trail.
 
 **Evidence comes out as documents, not screenshots.** `switchtender audit run <id>` emits one
 run's dossier: what ran, its risk grade, who approved it, what happened on each host, and the

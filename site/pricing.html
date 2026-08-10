@@ -155,7 +155,7 @@
 						<li>Full orchestration: inventory, projects, job templates, schedules, ad hoc runs</li>
 						<li>Single binary with an embedded <b>SQLite</b> store; <b>Postgres and HA</b> when you outgrow it</li>
 						<li>All seven tools: Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, Go</li>
-						<li><b>SSO login</b> (OIDC and SAML), RBAC, organizations and teams</li>
+						<li><b>SSO login</b> (OIDC, SAML, and LDAP), RBAC, organizations and teams</li>
 						<li>Run approvals and policy gates</li>
 						<li>REST API, webhooks, and per-template notifications</li>
 						<li><b>Secrets masking</b> in run logs</li>
@@ -177,7 +177,6 @@
 						<li><b>SCIM</b> provisioning, the standard your identity provider uses to create and remove accounts automatically. Access ends the day someone leaves</li>
 						<li>External approvers who sign off from a link, without a seat or the automation UI</li>
 						<li>N-of-M and required-approver policies per environment or playbook</li>
-						<li><b>Vault dynamic secrets</b> with lease handling (basic Vault reads will be free)</li>
 						<li><b>Managed execution environments</b>, built and pinned centrally for the whole fleet</li>
 						<li>Private support channel to the engineers who built it, response time in writing</li>
 					</ul>
@@ -194,10 +193,10 @@
 					<p class="tier-inherit">Everything in Team, plus:</p>
 					<ul class="tier-list">
 						<li><b>Evidence packs</b> mapped to common change-management controls, generated on a schedule</li>
-						<li>Auditor-facing attestation reports; local verification stays free for everyone</li>
+						<li>Attestation report packs assembled for auditors; witness attestations and local verification stay free for everyone</li>
 						<li>Audit chain <b>archival and re-anchoring</b> for long retention windows</li>
 						<li>Air-gapped licensing and offline activation</li>
-						<li>AWX migration assistance, priced separately</li>
+						<li>Hands-on AWX migration available through the engagements below</li>
 						<li>Priority support with a real SLA</li>
 					</ul>
 				</article>
@@ -207,14 +206,15 @@
 			<p class="pricing-note">
 				<strong>Free is shipping today. Team and Governed are earlier. We're building them now with
 				our first customers</strong>, and what we build first follows what they actually need. The
-				prices are public because you shouldn't have to email us to find out what something costs.
+				subscription prices are public because you shouldn't have to email us to find out what
+				something costs.
 				If you want in early, <a href="mailto:hello@kordloom.com?subject=SwitchTender%20pricing" style="color: var(--accent);">write us</a>.
 			</p>
 
 			<div class="sprint reveal">
 				<div>
 					<h3>Migration-to-Production Sprint</h3>
-					<p>A fixed-price engagement, not a subscription: we migrate your AWX or Tower install hands-on, validate your real workflows in production, and bundle the first year of Team. One invoice, and you're live before you ever pay again.</p>
+					<p>A fixed-price engagement, not a subscription: we migrate your AWX or Tower install hands-on, validate your real workflows in production, and bundle the first year of Team. One invoice, and you're live before you ever pay again. This is the lighter engagement, for teams that need the migration done and Team running; regulated shops that also need approval-policy and evidence design want the Automation Governance Install below.</p>
 				</div>
 				<a class="btn" href="mailto:hello@kordloom.com?subject=SwitchTender%20migration%20sprint">Scope it in one call</a>
 			</div>
@@ -289,7 +289,7 @@
 				</details>
 				<details>
 					<summary>Can I move from AWX?</summary>
-					<p>Yes. Your AWX export imports in one command on the free tier. For a large or regulated migration, Governed includes hands-on assistance, priced separately. Start with the <a href="/docs/switching-from-awx" style="color: var(--accent);">switching guide</a>.</p>
+					<p>Yes. Your AWX export imports in one command on the free tier. For a large or regulated migration, add hands-on help through the Migration-to-Production Sprint or the Automation Governance Install above. Start with the <a href="/docs/switching-from-awx" style="color: var(--accent);">switching guide</a>.</p>
 				</details>
 				<details>
 					<summary>How do I actually buy Team or Governed?</summary>

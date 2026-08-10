@@ -45,7 +45,7 @@ What SwitchTender does today.
 | Inventories  | Stored inventories referenced by id, materialized on whichever executor runs the play.|
 | Dynamic sources | Inventory plugins and scripts refreshed into stored inventories, with cloud auth from an env credential.|
 | Sourced inventories | An inventory's content can come from a command, Vault, or Google Secret Manager, resolved at launch, so the host list need not live in SwitchTender.|
-| Credentials  | Thirteen kinds: SSH keys and SSH passwords, vault passwords, become passwords and full become settings, network device logins, env bundles for cloud SDKs, API tokens and JWTs, registry logins, and typed AWS, Azure, GCP, and VMware cloud credentials, all encrypted at rest.|
+| Credentials  | Fourteen kinds: SSH keys and SSH passwords, vault passwords, become passwords and full become settings, network device logins, env bundles for cloud SDKs, API tokens and JWTs, registry logins, and typed AWS, Azure, GCP, VMware, and OpenStack cloud credentials, all encrypted at rest.|
 | Secret masking | Credential values are redacted from run logs, live streams, and events, so a tool that echoes a secret shows `***` instead of the value.|
 | High availability | Two servers on one database share the schedule without double-firing. Tokens can carry a lifetime.|
 | Git triggers | A webhook URL launches a template on push. The project syncs fresh, so it deploys the commit just pushed.|

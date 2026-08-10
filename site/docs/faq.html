@@ -65,7 +65,7 @@
    "name": "How are secrets stored?",
    "acceptedAnswer": {
     "@type": "Answer",
-    "text": "Sealed with AES-256-GCM, the key derived from an operator passphrase through argon2id. Secrets decrypt only at execution, into the run's environment or a temporary file created mode 0600 and deleted when the run finishes, and never appear in API responses. Thirteen kinds cover SSH keys and SSH passwords, vault passwords, become passwords and full become settings, network device logins, environment bundles, API tokens, container registry logins, and typed AWS, Azure, GCP, and VMware credentials. Set SWITCHTENDER_ENCRYPTION_KEY and SWITCHTENDER_ENCRYPTION_SALT to enable them. A credential can also be a command source, so the value lives in an external store instead of in SwitchTender. SwitchTender seals a command, for example vault kv get -field=password secret/prod or an aws secretsmanager get-secret-value call, and runs it at execution time. The command's output is the secret and is never stored. This works with any secret manager reachable from a command: Vault, AWS, GCP, 1Password, or your own script."
+    "text": "Sealed with AES-256-GCM, the key derived from an operator passphrase through argon2id. Secrets decrypt only at execution, into the run's environment or a temporary file created mode 0600 and deleted when the run finishes, and never appear in API responses. Fourteen kinds cover SSH keys and SSH passwords, vault passwords, become passwords and full become settings, network device logins, environment bundles, API tokens, container registry logins, and typed AWS, Azure, GCP, VMware, and OpenStack credentials. Set SWITCHTENDER_ENCRYPTION_KEY and SWITCHTENDER_ENCRYPTION_SALT to enable them. A credential can also be a command source, so the value lives in an external store instead of in SwitchTender. SwitchTender seals a command, for example vault kv get -field=password secret/prod or an aws secretsmanager get-secret-value call, and runs it at execution time. The command's output is the secret and is never stored. This works with any secret manager reachable from a command: Vault, AWS, GCP, 1Password, or your own script."
    }
   },
   {
@@ -199,9 +199,9 @@ name a host set once and reuse it across templates.</p>
 <h2 id="how-are-secrets-stored">How are secrets stored?</h2>
 <p>Sealed with AES-256-GCM, the key derived from an operator passphrase through argon2id. Secrets
 decrypt only at execution, into the run's environment or a temporary file created mode 0600 and
-deleted when the run finishes, and never appear in API responses. Thirteen kinds cover SSH keys and SSH passwords, vault passwords, become passwords and
+deleted when the run finishes, and never appear in API responses. Fourteen kinds cover SSH keys and SSH passwords, vault passwords, become passwords and
 full become settings, network device logins, environment bundles, API tokens, container registry
-logins, and typed AWS, Azure, GCP, and VMware credentials. Set
+logins, and typed AWS, Azure, GCP, VMware, and OpenStack credentials. Set
 <code>SWITCHTENDER_ENCRYPTION_KEY</code> and <code>SWITCHTENDER_ENCRYPTION_SALT</code> to enable them.</p>
 <p>A credential can also be a command source, so the value lives in an external store instead of in
 SwitchTender. SwitchTender seals a command, for example <code>vault kv get -field=password secret/prod</code> or an
