@@ -984,7 +984,10 @@ func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string) (*r
 // It targets a run that recorded per-host results, which is an Ansible run; a run with none, such as
 // a single bash command, has no notion of a failed host and is refused. Relaunching the same run
 // twice inside the dedupe window returns the first relaunch, so a double click cannot fire two.
-func (d *Dispatcher) RelaunchFailedHosts(ctx context.Context, runID string) (*run.Run, error) {
+//
+// The actor is whoever asked for the relaunch, which is not necessarily whoever launched the run it
+// is built from.
+func (d *Dispatcher) RelaunchFailedHosts(ctx context.Context, runID, actor string) (*run.Run, error) {
 	existing, key, err := run.ResolveDedupe(ctx, d.store, dedupeRelaunchHosts, runID, time.Now())
 	if err != nil {
 		return nil, err
@@ -1020,7 +1023,10 @@ func (d *Dispatcher) RelaunchFailedHosts(ctx context.Context, runID string) (*ru
 		run.WithSource("relaunch", runID),
 		run.WithRetryOf(runID),
 		run.WithIdempotencyKey(key),
-		run.WithActor(src.Actor),
+		// The relaunch is a new launch by whoever asked for it, not by whoever ran the original.
+		// Stamping the source run's actor credited the relaunch to the wrong person, so asking
+		// what a given operator started missed the runs they started this way.
+		run.WithActor(actor),
 	)
 	return d.Submit(ctx, src.Playbook, src.Inventory, opts...)
 }

@@ -36,7 +36,7 @@ func TestSeedExamples(t *testing.T) {
 	}
 
 	store := template.NewMemStore()
-	added, err := seedExamples(ctx, store, now)
+	added, err := seedExamples(ctx, nil, store, now)
 	if err != nil {
 		t.Fatalf("seedExamples() error = %v", err)
 	}
@@ -52,7 +52,7 @@ func TestSeedExamples(t *testing.T) {
 	}
 
 	// Seeding again must be a no-op, so running the command twice never doubles the list.
-	again, err := seedExamples(ctx, store, now)
+	again, err := seedExamples(ctx, nil, store, now)
 	if err != nil {
 		t.Fatalf("second seedExamples() error = %v", err)
 	}

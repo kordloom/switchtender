@@ -131,3 +131,132 @@ func TestResolveSurveyConstraints(t *testing.T) {
 		})
 	}
 }
+
+// TestResolveSurveyPatternAnchored proves a survey pattern constrains the whole answer rather than
+// matching a substring of it.
+//
+// A bare regexp matches anywhere, so a field whose pattern is a four digit code accepted anything
+// that merely contained four digits. An author writing a format constraint means the format of the
+// answer, and the value is injected into a play as an extra var, so a pattern that lets arbitrary
+// text ride alongside the match is not a constraint at all.
+func TestResolveSurveyPatternAnchored(t *testing.T) {
+	t.Parallel()
+	fields := []template.SurveyField{
+		{Var: "code", Type: template.FieldText, Pattern: `\d{4}`},
+		{Var: "host", Type: template.FieldText, Pattern: `[a-z0-9-]+`},
+	}
+	tests := []struct {
+		Name    string
+		Answers map[string]any
+		WantErr bool
+	}{ // Test 0: An answer that is exactly the pattern is accepted.
+		{"exact match", map[string]any{"code": "1234", "host": "web-01"}, false},
+		// Test 1: Extra text around the match must be refused, not accepted on the substring.
+		{"substring only", map[string]any{"code": "abc1234xyz", "host": "web-01"}, true},
+		// Test 2: A trailing shell fragment is the case that makes this matter.
+		{"trailing payload", map[string]any{"code": "1234; rm -rf /", "host": "web-01"}, true},
+		// Test 3: A leading fragment is refused the same way.
+		{"leading payload", map[string]any{"code": "1234", "host": "BAD web-01"}, true},
+		// Test 4: A newline cannot be used to smuggle a second line past an anchored pattern.
+		{"newline smuggle", map[string]any{"code": "1234", "host": "web-01\nrogue"}, true},
+	}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
+			t.Parallel()
+			_, err := template.ResolveSurvey(fields, test.Answers)
+			if (err != nil) != test.WantErr {
+				t.Errorf("template.ResolveSurvey() error = %v, wantErr %v", err, test.WantErr)
+			}
+		})
+	}
+}
+
+// TestResolveSurveyRequiredRejectsEmpty proves a required text field is not satisfied by an empty
+// string. Only a missing key was refused, so sending the field with no value passed a check the
+// operator set precisely to make the value mandatory.
+func TestResolveSurveyRequiredRejectsEmpty(t *testing.T) {
+	t.Parallel()
+	fields := []template.SurveyField{{Var: "env", Type: template.FieldText, Required: true}}
+
+	if _, err := template.ResolveSurvey(fields, map[string]any{"env": ""}); !errors.Is(err, template.ErrSurvey) {
+		t.Errorf("empty answer to a required field = %v, want ErrSurvey", err)
+	}
+	if _, err := template.ResolveSurvey(fields, map[string]any{}); !errors.Is(err, template.ErrSurvey) {
+		t.Errorf("missing required field = %v, want ErrSurvey", err)
+	}
+	got, err := template.ResolveSurvey(fields, map[string]any{"env": "prod"})
+	if err != nil {
+		t.Fatalf("template.ResolveSurvey() error = %v", err)
+	}
+	if got["env"] != "prod" {
+		t.Errorf("env = %v, want prod", got["env"])
+	}
+}
+
+// TestResolveSurveyLengthCountsRunes proves length bounds count characters rather than bytes, so a
+// multibyte answer is measured the way the person typing it reads it.
+func TestResolveSurveyLengthCountsRunes(t *testing.T) {
+	t.Parallel()
+	fields := []template.SurveyField{
+		{Var: "label", Type: template.FieldText, MinLength: 2, MaxLength: 8},
+	}
+	// Five characters, fifteen bytes. Byte counting rejected this against a limit of eight.
+	if _, err := template.ResolveSurvey(fields, map[string]any{"label": "東京都市圏"}); err != nil {
+		t.Errorf("five character multibyte answer = %v, want it accepted under a max of 8", err)
+	}
+	// Nine characters must still be refused, so the bound is not simply gone.
+	if _, err := template.ResolveSurvey(fields, map[string]any{"label": "abcdefghi"}); err == nil {
+		t.Error("nine character answer was accepted, want it refused against a max of 8")
+	}
+	// One multibyte character is below a minimum of two and must be refused.
+	if _, err := template.ResolveSurvey(fields, map[string]any{"label": "東"}); err == nil {
+		t.Error("one character answer was accepted, want it refused against a min of 2")
+	}
+}
+
+// TestValidateSurvey proves a malformed survey definition is caught when the template is written
+// rather than on every launch afterward.
+func TestValidateSurvey(t *testing.T) {
+	t.Parallel()
+	low, high := 5, 1
+	tests := []struct {
+		Name   string
+		Fields []template.SurveyField
+		Want   bool
+	}{ // Test 0: A well formed survey passes.
+		{"valid", []template.SurveyField{
+			{Var: "a", Type: template.FieldText, Pattern: `^[a-z]+$`},
+			{Var: "b", Type: template.FieldChoice, Choices: []string{"x"}},
+			{Var: "c", Type: template.FieldInt},
+		}, false},
+		// Test 1: An uncompilable pattern is refused at save, not at launch.
+		{"bad pattern", []template.SurveyField{
+			{Var: "a", Type: template.FieldText, Pattern: "[unclosed"}}, true},
+		// Test 2: A choice field offering nothing can never be answered.
+		{"choice with no choices", []template.SurveyField{
+			{Var: "a", Type: template.FieldChoice}}, true},
+		// Test 3: Inverted integer bounds admit no answer at all.
+		{"min above max", []template.SurveyField{
+			{Var: "a", Type: template.FieldInt, Min: &low, Max: &high}}, true},
+		// Test 4: Inverted length bounds admit no answer at all.
+		{"min length above max length", []template.SurveyField{
+			{Var: "a", Type: template.FieldText, MinLength: 9, MaxLength: 2}}, true},
+		// Test 5: An unknown type is refused here as it is at launch.
+		{"unknown type", []template.SurveyField{
+			{Var: "a", Type: template.FieldType("wat")}}, true},
+		// Test 6: An empty survey is valid.
+		{"empty", nil, false},
+	}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
+			t.Parallel()
+			err := template.ValidateSurvey(test.Fields)
+			if (err != nil) != test.Want {
+				t.Errorf("template.ValidateSurvey() error = %v, wantErr %v", err, test.Want)
+			}
+			if err != nil && !errors.Is(err, template.ErrSurvey) {
+				t.Errorf("error %v does not wrap ErrSurvey", err)
+			}
+		})
+	}
+}

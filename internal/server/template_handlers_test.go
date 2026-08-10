@@ -272,3 +272,69 @@ func TestPagerDutyKeyMaskRoundTrip(t *testing.T) {
 		t.Errorf("stored notifications = %+v, want the routing key preserved", after.Notifications)
 	}
 }
+
+// TestTemplateSurveyValidatedAtSave proves a malformed survey definition is refused when the
+// template is written rather than on every launch afterward.
+//
+// A pattern that does not compile compiled nowhere until somebody launched, so saving one produced
+// a template that failed every single launch with an obscure error and no indication that the fault
+// was in the definition rather than the answer.
+func TestTemplateSurveyValidatedAtSave(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Name     string
+		Survey   string
+		WantCode int
+	}{{ // Test 0: A well formed survey saves.
+		Name:     "valid",
+		Survey:   `[{"var":"env","type":"text","pattern":"^[a-z]+$"}]`,
+		WantCode: http.StatusCreated,
+	}, { // Test 1: An uncompilable pattern is refused at save.
+		Name:     "bad pattern",
+		Survey:   `[{"var":"env","type":"text","pattern":"[unclosed"}]`,
+		WantCode: http.StatusBadRequest,
+	}, { // Test 2: A choice field offering nothing can never be answered.
+		Name:     "choice with no choices",
+		Survey:   `[{"var":"env","type":"choice"}]`,
+		WantCode: http.StatusBadRequest,
+	}, { // Test 3: Inverted length bounds admit no answer at all.
+		Name:     "inverted lengths",
+		Survey:   `[{"var":"env","type":"text","min_length":9,"max_length":2}]`,
+		WantCode: http.StatusBadRequest,
+	}}
+	for i, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", i, test.Name), func(t *testing.T) {
+			t.Parallel()
+			store := template.NewMemStore()
+			handler := New(run.NewMemStore(), &fakeSubmitter{run: &run.Run{ID: "run_x"}},
+				zap.NewNop(), WithTemplates(store)).Handler()
+
+			body := fmt.Sprintf(`{"name":"deploy","playbook":"site.yml","survey":%s}`, test.Survey)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/templates",
+				strings.NewReader(body)))
+			if rec.Code != test.WantCode {
+				t.Fatalf("create status = %d, want %d (body %s)",
+					rec.Code, test.WantCode, rec.Body.String())
+			}
+			if test.WantCode != http.StatusCreated {
+				return
+			}
+
+			// An update carries the same guard, or a valid template could be edited into one that
+			// cannot launch.
+			var created template.Template
+			if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+				t.Fatalf("decode created template: %v", err)
+			}
+			rec = httptest.NewRecorder()
+			handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPut, "/v1/templates/"+created.ID,
+				strings.NewReader(
+					`{"name":"deploy","playbook":"site.yml",`+
+						`"survey":[{"var":"env","type":"text","pattern":"[unclosed"}]}`)))
+			if rec.Code != http.StatusBadRequest {
+				t.Errorf("update with a bad pattern = %d, want 400", rec.Code)
+			}
+		})
+	}
+}

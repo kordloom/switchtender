@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/template"
 )
 
@@ -74,7 +75,7 @@ func runExamples(cmd *cobra.Command, _ []string) error {
 	}
 	defer func() { _ = bundle.Close() }()
 
-	added, err := seedExamples(cmd.Context(), bundle.Templates(), time.Now())
+	added, err := seedExamples(cmd.Context(), bundle.Audits(), bundle.Templates(), time.Now())
 	if err != nil {
 		return err
 	}
@@ -89,7 +90,12 @@ func runExamples(cmd *cobra.Command, _ []string) error {
 // seedExamples saves each starter template whose name is not already in the store, returning how many
 // it added. It reports names to stderr as it goes and leaves an existing template of the same name
 // untouched, so a second run is a no-op rather than a duplicate.
-func seedExamples(ctx context.Context, store template.Store, now time.Time) (int, error) {
+//
+// Seeding writes into the same store the server serves, so it is an operator action like any other
+// and is recorded in the audit chain before the first write. A change that leaves no entry is a
+// silence an auditor cannot tell apart from tampering. A run that adds nothing records nothing.
+func seedExamples(ctx context.Context, audits audit.Store, store template.Store,
+	now time.Time) (int, error) {
 	existing, err := store.List(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("list templates: %w", err)
@@ -99,11 +105,21 @@ func seedExamples(ctx context.Context, store template.Store, now time.Time) (int
 		have[t.Name] = true
 	}
 
-	added := 0
+	var missing []*template.Template
 	for _, t := range starterTemplates(now) {
-		if have[t.Name] {
-			continue
+		if !have[t.Name] {
+			missing = append(missing, t)
 		}
+	}
+	if len(missing) == 0 {
+		return 0, nil
+	}
+	if err := recordCLI(ctx, audits, "/cli/examples"); err != nil {
+		return 0, err
+	}
+
+	added := 0
+	for _, t := range missing {
 		t.ID = template.NewID()
 		if err := store.Save(ctx, t); err != nil {
 			return added, fmt.Errorf("save %q: %w", t.Name, err)

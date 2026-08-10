@@ -244,6 +244,10 @@ func deleteScheduleHandler(store schedule.Store, authz *authorizer, log *zap.Log
 
 // previewScheduleHandler returns the next five firings for a cron spec, so a form can show what a
 // schedule will do before saving it.
+//
+// The preview reads the same optional timezone a schedule carries. Without it the preview computed
+// firings in the server's local zone while the saved schedule fired in its own, so a form promised
+// times hours away from when the job actually ran.
 func previewScheduleHandler(log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		spec := r.URL.Query().Get("cron")
@@ -251,10 +255,11 @@ func previewScheduleHandler(log *zap.Logger) http.HandlerFunc {
 			respondError(w, log, http.StatusBadRequest, "cron is required")
 			return
 		}
+		preview := &schedule.Schedule{Cron: spec, Timezone: r.URL.Query().Get("timezone")}
 		next := make([]time.Time, 0, 5)
 		after := time.Now()
 		for range 5 {
-			fire, err := schedule.NextFire(spec, after)
+			fire, err := preview.NextFire(after)
 			if err != nil {
 				respondError(w, log, http.StatusBadRequest, "invalid cron expression")
 				return

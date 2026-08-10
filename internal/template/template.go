@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"slices"
 	"time"
+	"unicode/utf8"
 
 	"github.com/kordloom/switchtender/internal/idgen"
 	"github.com/kordloom/switchtender/internal/run"
@@ -158,6 +159,45 @@ func ResolveSurvey(fields []SurveyField, answers map[string]any) (map[string]any
 	return out, nil
 }
 
+// ValidateSurvey checks a survey's field definitions on their own, with no launch answers, so a
+// template with a malformed field is refused when it is saved rather than failing every launch. It
+// compiles each text pattern, confirms a choice field offers choices, and confirms bounds are
+// ordered.
+func ValidateSurvey(fields []SurveyField) error {
+	for _, f := range fields {
+		switch f.Type {
+		case FieldText, FieldMultiline, "":
+			if f.Pattern != "" {
+				if _, err := regexp.Compile(anchorPattern(f.Pattern)); err != nil {
+					return fmt.Errorf("%w: %q has an invalid pattern: %v", ErrSurvey, f.Var, err)
+				}
+			}
+			if f.MinLength > 0 && f.MaxLength > 0 && f.MinLength > f.MaxLength {
+				return fmt.Errorf("%w: %q sets min_length above max_length", ErrSurvey, f.Var)
+			}
+		case FieldInt:
+			if f.Min != nil && f.Max != nil && *f.Min > *f.Max {
+				return fmt.Errorf("%w: %q sets min above max", ErrSurvey, f.Var)
+			}
+		case FieldBool:
+		case FieldChoice:
+			if len(f.Choices) == 0 {
+				return fmt.Errorf("%w: %q is a choice field with no choices", ErrSurvey, f.Var)
+			}
+		default:
+			return fmt.Errorf("%w: %q has an unknown field type %q", ErrSurvey, f.Var, f.Type)
+		}
+	}
+	return nil
+}
+
+// anchorPattern wraps a survey pattern so it must match the whole answer, not just a substring. A
+// bare regexp matches anywhere, so "\\d{4}" would accept "abc1234xyz"; anchoring with \A and \z ties
+// it to the full string the way a format constraint is meant to read.
+func anchorPattern(p string) string {
+	return `\A(?:` + p + `)\z`
+}
+
 // coerce converts a raw answer to the field's type or reports why it cannot.
 func coerce(f SurveyField, raw any) (any, error) {
 	switch f.Type {
@@ -166,14 +206,22 @@ func coerce(f SurveyField, raw any) (any, error) {
 		if !ok {
 			return nil, fmt.Errorf("%w: %q must be text", ErrSurvey, f.Var)
 		}
-		if f.MinLength > 0 && len(s) < f.MinLength {
+		// A required field present but empty is still unanswered. ResolveSurvey only rejects a
+		// missing key, so without this an empty string satisfies a required text field.
+		if f.Required && s == "" {
+			return nil, fmt.Errorf("%w: %q is required", ErrSurvey, f.Var)
+		}
+		// Bounds count characters, not bytes, so a multibyte answer is measured the way a person
+		// reads it rather than rejected for being long in UTF-8.
+		n := utf8.RuneCountInString(s)
+		if f.MinLength > 0 && n < f.MinLength {
 			return nil, fmt.Errorf("%w: %q must be at least %d characters", ErrSurvey, f.Var, f.MinLength)
 		}
-		if f.MaxLength > 0 && len(s) > f.MaxLength {
+		if f.MaxLength > 0 && n > f.MaxLength {
 			return nil, fmt.Errorf("%w: %q must be at most %d characters", ErrSurvey, f.Var, f.MaxLength)
 		}
 		if f.Pattern != "" {
-			re, err := regexp.Compile(f.Pattern)
+			re, err := regexp.Compile(anchorPattern(f.Pattern))
 			if err != nil {
 				return nil, fmt.Errorf("%w: %q has an invalid pattern: %v", ErrSurvey, f.Var, err)
 			}

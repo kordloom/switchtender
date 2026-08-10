@@ -68,6 +68,8 @@ type fakeRetrier struct {
 	err error
 	// gotID is the id from the most recent retry call.
 	gotID string
+	// gotActor is the actor from the most recent relaunch call.
+	gotActor string
 }
 
 // RetryFailedShards records the id and returns the configured run or error.
@@ -80,8 +82,9 @@ func (f *fakeRetrier) RetryFailedShards(_ context.Context, parentID string) (*ru
 }
 
 // RelaunchFailedHosts records the id and returns the configured run or error.
-func (f *fakeRetrier) RelaunchFailedHosts(_ context.Context, runID string) (*run.Run, error) {
+func (f *fakeRetrier) RelaunchFailedHosts(_ context.Context, runID, actor string) (*run.Run, error) {
 	f.gotID = runID
+	f.gotActor = actor
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -1616,6 +1619,51 @@ func TestSchedulePreview(t *testing.T) {
 	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/schedules/preview?cron=nope", nil))
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("invalid preview = %d, want 400", rec.Code)
+	}
+}
+
+// TestSchedulePreviewTimezone proves the preview reads the same timezone a schedule fires in.
+//
+// The preview computed firings in the server's local zone while the saved schedule fired in its
+// own, so a form creating an overnight window in New York promised times hours away from when the
+// job actually ran, and the operator had no way to see the difference before saving.
+func TestSchedulePreviewTimezone(t *testing.T) {
+	t.Parallel()
+	handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop()).Handler()
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet,
+		"/v1/schedules/preview?cron=0+2+*+*+*&timezone=America/New_York", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("preview = %d %s, want 200", rec.Code, rec.Body.String())
+	}
+	var got struct {
+		Next []time.Time `json:"next"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode preview: %v", err)
+	}
+	if len(got.Next) != 5 {
+		t.Fatalf("preview returned %d firings, want 5", len(got.Next))
+	}
+	zone, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Skipf("timezone database unavailable: %v", err)
+	}
+	for i, fire := range got.Next {
+		if h, m := fire.In(zone).Hour(), fire.In(zone).Minute(); h != 2 || m != 0 {
+			t.Errorf("firing %d = %s, which is %02d:%02d in New York, want 02:00 there",
+				i, fire, h, m)
+		}
+	}
+
+	// A timezone the database does not know cannot be silently ignored, or the preview would show
+	// server-local times while claiming to show that zone's.
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet,
+		"/v1/schedules/preview?cron=0+2+*+*+*&timezone=Mars/Olympus", nil))
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("preview with an unknown timezone = %d, want 400", rec.Code)
 	}
 }
 

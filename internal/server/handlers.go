@@ -847,7 +847,7 @@ func relaunchFailedHandler(store run.Store, retrier Retrier, authz *authorizer, 
 		if authorizeRunAccess(w, r, authz, log, rn) {
 			return
 		}
-		created, err := retrier.RelaunchFailedHosts(r.Context(), id)
+		created, err := retrier.RelaunchFailedHosts(r.Context(), id, actorName(r))
 		switch {
 		case errors.Is(err, run.ErrNotFound):
 			respondError(w, log, http.StatusNotFound, "run not found")

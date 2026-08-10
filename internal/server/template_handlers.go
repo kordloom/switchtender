@@ -144,6 +144,13 @@ func createTemplateHandler(store template.Store, authz *authorizer, log *zap.Log
 			respondError(w, log, http.StatusBadRequest, msg)
 			return
 		}
+		// Check the survey's own definitions here rather than at launch. A malformed pattern
+		// compiles nowhere until somebody launches, so saving one produced a template that failed
+		// every single launch instead of being refused at the point it was written.
+		if err := template.ValidateSurvey(req.Survey); err != nil {
+			respondError(w, log, http.StatusBadRequest, err.Error())
+			return
+		}
 		t := &template.Template{
 			ID: template.NewID(), Name: req.Name, ProjectID: req.ProjectID,
 			Playbook: req.Playbook, Inventory: req.Inventory, InventoryID: req.InventoryID,
@@ -197,6 +204,13 @@ func updateTemplateHandler(store template.Store, authz *authorizer, log *zap.Log
 
 		if msg := templateToolError(req); msg != "" {
 			respondError(w, log, http.StatusBadRequest, msg)
+			return
+		}
+		// Check the survey's own definitions here rather than at launch. A malformed pattern
+		// compiles nowhere until somebody launches, so saving one produced a template that failed
+		// every single launch instead of being refused at the point it was written.
+		if err := template.ValidateSurvey(req.Survey); err != nil {
+			respondError(w, log, http.StatusBadRequest, err.Error())
 			return
 		}
 		id := r.PathValue("id")
