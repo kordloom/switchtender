@@ -281,6 +281,22 @@
 					<p>Export the chain as a signed <a href="https://loomseal.com" rel="noopener">LoomSeal</a> bundle and verify it on a machine with no network, using an open verifier that isn't SwitchTender. The binary proves itself the same way: <code>switchtender version --verify</code> checks the running build against its release hashes.</p>
 				</article>
 			</div>
+			<div class="section-head reveal" style="margin-top:48px">
+				<h3>Don't take our word for it. Check the live demo's chain right now.</h3>
+				<p>These run against <a href="https://demo.switchtender.com">demo.switchtender.com</a>, a real instance with a real history. The third one makes your machine its witness: run it again tomorrow, and a history that shrank or changed behind your back is a finding, not a feeling.</p>
+			</div>
+			<div class="code reveal">
+				<button class="copy" aria-label="Copy">Copy</button>
+				<pre><code><span class="c"># 1. the server re-verifies its whole chain, entry by entry</span>
+curl -s https://demo.switchtender.com/v1/audit/verify
+
+<span class="c"># 2. pull the full chain, every hash included, yours to keep</span>
+curl -s https://demo.switchtender.com/v1/audit/export
+
+<span class="c"># 3. become its witness: keep a signed checkpoint of the head you saw,
+#    then run it again later. Rewritten history can't get past you.</span>
+switchtender witness --server https://demo.switchtender.com --once</code></pre>
+			</div>
 		</section>
 
 		<section class="namebar wrap reveal" id="agent-gov">
