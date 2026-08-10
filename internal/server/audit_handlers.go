@@ -179,24 +179,6 @@ func auditVerifyHandler(store audit.Store, log *zap.Logger) http.HandlerFunc {
 	}
 }
 
-// auditExportHandler returns a portable, self-verifying snapshot of the audit chain, signed when an
-// audit signer is configured, so the trail can be verified offline.
-func auditExportHandler(store audit.Store, signer *audit.Signer, log *zap.Logger) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if store == nil {
-			respondError(w, log, http.StatusNotFound, "audit trail not enabled")
-			return
-		}
-		entries, err := store.Chain(r.Context())
-		if err != nil {
-			log.Error("server: chain audit entries: " + err.Error())
-			respondError(w, log, http.StatusInternalServerError, "could not read the audit trail")
-			return
-		}
-		respondJSON(w, log, http.StatusOK, audit.BuildExport(entries, signer, time.Now()), wantsPretty(r))
-	}
-}
-
 // auditBundleHandler assembles and serves the signed LoomSeal bundle the CLI produces, so the
 // offline-verifiable artifact no rival emits is one click from the audit view rather than only in a
 // terminal. It mirrors the bundle command exactly: build over the whole chain, hold it against every

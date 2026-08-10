@@ -107,11 +107,6 @@ func WithAudit(store audit.Store) Option {
 	return func(srv *Server) { srv.audits = store }
 }
 
-// WithAuditSigner signs audit exports with the given signer so they can be verified offline.
-func WithAuditSigner(signer *audit.Signer) Option {
-	return func(srv *Server) { srv.auditSigner = signer }
-}
-
 // WithProducerIdentity publishes the install's signing identity so a relying party can pin the
 // fingerprint that attributes a bundle to this install. Version stamps the trust document.
 func WithProducerIdentity(id *audit.Identity, version string) Option {
@@ -320,8 +315,6 @@ type Server struct {
 	policies policy.Store
 	// audits backs the audit trail when configured.
 	audits audit.Store
-	// auditSigner signs audit exports when configured, nil when export signing is off.
-	auditSigner *audit.Signer
 	// producer is the install's signing identity, published so a verifier can pin it. Nil when the
 	// install has none.
 	producer *audit.Identity
@@ -420,7 +413,6 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /v1/workers", workersHandler(s.store, authz, s.log))
 	mux.Handle("GET /v1/audit", auditHandler(s.audits, s.log))
 	mux.Handle("GET /v1/audit/verify", auditVerifyHandler(s.audits, s.log))
-	mux.Handle("GET /v1/audit/export", auditExportHandler(s.audits, s.auditSigner, s.log))
 	mux.Handle("GET /v1/audit/bundle", auditBundleHandler(s.audits, s.producer, s.productVersion, s.log))
 	mux.Handle("GET /v1/audit/register", auditRegisterHandler(s.store, s.audits, s.log))
 	// Served unauthenticated: the beat feed exists so an outside watcher can see the chain is

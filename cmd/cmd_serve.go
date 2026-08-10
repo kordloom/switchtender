@@ -683,21 +683,6 @@ func newSealerFromEnv(log *zap.Logger) *credential.Sealer {
 	return sealer
 }
 
-// newAuditSignerFromEnv builds an audit export Signer from SWITCHTENDER_AUDIT_KEY, a hex-encoded
-// ed25519 seed. When it is unset, export signing is off; when it is malformed the server refuses to
-// start so a bad key is caught, not silently ignored. The public key is logged so an operator can
-// record it for offline verification.
-func newAuditSignerFromEnv(log *zap.Logger) (*audit.Signer, error) {
-	signer, err := audit.NewSigner(os.Getenv("SWITCHTENDER_AUDIT_KEY"))
-	if err != nil {
-		return nil, err
-	}
-	if signer != nil {
-		log.Info("audit export signing enabled", zap.String("public_key", signer.PublicKeyHex()))
-	}
-	return signer, nil
-}
-
 // projectCacheDir returns where project checkouts live: the user cache directory when available,
 // the system temp directory otherwise.
 func projectCacheDir() string {
@@ -709,7 +694,7 @@ func projectCacheDir() string {
 }
 
 // identityDir returns the directory holding the producer signing identity for a database target.
-// serve, which signs the audit exports it serves, and the bundle command, which signs the bundle it
+// serve, which signs the bundles it serves, and the bundle command, which signs the bundle it
 // emits, both derive it here so one install mints a single key and every tool reads that same key. A
 // SQLite file keeps its identity beside it, so a copied database carries its key. A postgres DSN has
 // no filesystem home: filepath.Dir on a DSN yields a cwd-relative junk directory whose name embeds
@@ -805,10 +790,6 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	}
 
 	sealer := newSealerFromEnv(log)
-	auditSigner, err := newAuditSignerFromEnv(log)
-	if err != nil {
-		return err
-	}
 	// The producer identity signs LoomSeal bundles and is published so a relying party can pin its
 	// fingerprint. It is created on first start in the install's identity directory, the same one the
 	// bundle command reads, so a bundle is signed with the key serve publishes. A failure to create
@@ -1081,7 +1062,6 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		server.WithPolicies(policies),
 		server.WithAudit(bundle.Audits()),
 		server.WithProducerIdentity(producer, resolveVersion()),
-		server.WithAuditSigner(auditSigner),
 		server.WithInventorySources(bundle.InventorySources(), disp),
 		server.WithTriggers(bundle.Triggers(), sealer),
 		server.WithTeams(bundle.Teams()),
