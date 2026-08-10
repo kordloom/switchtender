@@ -177,6 +177,12 @@ from a claim the operator makes into one a third party signs. When the witness c
 the attestation says so rather than going quiet, because a server going dark on its witness is
 itself a signal.
 
+From the next release, a hosted witness reachable off its own host requires a read token on every
+API call, set with `--api-token` or `SWITCHTENDER_WITNESS_TOKEN`, so a public deployment does not
+hand any caller the list of watched servers or the cross-server findings feed. Offline attestation
+verification is unaffected: a relying party checks an attestation it already holds against the
+pinned key with no call to the witness at all, so the token gates delivery, not trust.
+
 **The chain streams into the SIEM, and stays checkable there.** `--forward-url` and
 `--forward-syslog` deliver every audit entry to the operator's collector, each event carrying its
 `seq:link` receipt. That makes the forwarded copy more than a copy: an analyst who samples any
