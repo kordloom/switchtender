@@ -23,6 +23,11 @@ var (
 	ErrNotFinished = errors.New("run not finished")
 	// ErrNoFailedShards is returned when a shard retry finds nothing to retry.
 	ErrNoFailedShards = errors.New("no failed shards")
+	// ErrNoFailedHosts is returned when a failed-host relaunch finds no host that failed.
+	ErrNoFailedHosts = errors.New("no failed hosts")
+	// ErrNoHostSummary is returned when a relaunch targets a run that recorded no per-host results,
+	// such as a non-Ansible run.
+	ErrNoHostSummary = errors.New("run has no per-host results")
 	// ErrUnnamedStep is returned when a dependency declaring pipeline has a step without a name.
 	ErrUnnamedStep = errors.New("step missing name")
 	// ErrDuplicateStep is returned when two pipeline steps share a name.

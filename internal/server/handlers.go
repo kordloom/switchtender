@@ -821,6 +821,57 @@ func retryRunHandler(store run.Store, retrier Retrier, authz *authorizer, log *z
 	}
 }
 
+// relaunchFailedHandler re-runs a finished run against only the hosts that failed or were
+// unreachable, linking the new run back to the one it was built to fix. It is operator work, the
+// same role that launches a run, and every derivation lands in the audit chain.
+func relaunchFailedHandler(store run.Store, retrier Retrier, authz *authorizer, log *zap.Logger) http.HandlerFunc {
+	if store == nil {
+		panic("server: relaunchFailedHandler: Store required")
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		if retrier == nil {
+			respondError(w, log, http.StatusNotFound, "relaunch not enabled")
+			return
+		}
+		id := r.PathValue("id")
+		rn, err := store.Get(r.Context(), id)
+		if errors.Is(err, run.ErrNotFound) {
+			respondError(w, log, http.StatusNotFound, "run not found")
+			return
+		}
+		if err != nil {
+			log.Error("server: relaunch failed hosts: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not relaunch run")
+			return
+		}
+		if authorizeRunAccess(w, r, authz, log, rn) {
+			return
+		}
+		created, err := retrier.RelaunchFailedHosts(r.Context(), id)
+		switch {
+		case errors.Is(err, run.ErrNotFound):
+			respondError(w, log, http.StatusNotFound, "run not found")
+			return
+		case errors.Is(err, dispatch.ErrNotFinished):
+			respondError(w, log, http.StatusConflict, "run has not finished")
+			return
+		case errors.Is(err, dispatch.ErrNoHostSummary):
+			respondError(w, log, http.StatusConflict,
+				"this run recorded no per-host results, so it has no failed hosts to relaunch")
+			return
+		case errors.Is(err, dispatch.ErrNoFailedHosts):
+			respondError(w, log, http.StatusConflict, "no hosts failed, so there is nothing to relaunch")
+			return
+		case err != nil:
+			log.Error("server: relaunch failed hosts: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not relaunch run")
+			return
+		}
+		w.Header().Set("Location", "/v1/runs/"+created.ID)
+		respondJSON(w, log, http.StatusAccepted, maskRun(created), wantsPretty(r))
+	}
+}
+
 // parseFieldedQuery splits a search string into fielded terms and free text. status:, tool:,
 // source:, actor:, and host: fill their filters, label:key=value matches a run label, and
 // everything else stays free text. Explicit query parameters win over fielded terms.

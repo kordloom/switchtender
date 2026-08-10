@@ -79,6 +79,15 @@ func (f *fakeRetrier) RetryFailedShards(_ context.Context, parentID string) (*ru
 	return f.run, nil
 }
 
+// RelaunchFailedHosts records the id and returns the configured run or error.
+func (f *fakeRetrier) RelaunchFailedHosts(_ context.Context, runID string) (*run.Run, error) {
+	f.gotID = runID
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.run, nil
+}
+
 // fakeSubmitter records the last submission and returns canned results.
 type fakeSubmitter struct {
 	// run is returned on success.

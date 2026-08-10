@@ -590,6 +590,16 @@ func WithIntent(intent string) SubmitOption {
 	}
 }
 
+// WithRetryOf links a run back to the run it was derived from, so a failed-host relaunch or a retry
+// records its lineage in the chain rather than looking like an unrelated run.
+func WithRetryOf(sourceID string) SubmitOption {
+	return func(r *Run) {
+		if sourceID != "" {
+			r.RetryOf = &sourceID
+		}
+	}
+}
+
 // ExecutionOptions returns the options that carry how r executes onto another run: the tool and its
 // command, the dry-run flag, the variables, the credentials, the project, the inventory, the queue,
 // the timeout, and the execution image with its pull credential.
@@ -610,6 +620,11 @@ func (r *Run) ExecutionOptions() []SubmitOption {
 		WithDryRun(r.DryRun),
 		WithExtraVars(r.ExtraVars),
 		WithCredentialIDs(r.CredentialIDs),
+		WithTags(r.Tags...),
+		WithSkipTags(r.SkipTags...),
+		WithVerbosity(r.Verbosity),
+		WithForks(r.Forks),
+		WithDiffMode(r.DiffMode),
 	}
 	if r.ProjectID != "" {
 		opts = append(opts, WithProject(r.ProjectID))

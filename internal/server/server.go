@@ -54,6 +54,7 @@ type Canceler interface {
 // satisfies it.
 type Retrier interface {
 	RetryFailedShards(ctx context.Context, parentID string) (*run.Run, error)
+	RelaunchFailedHosts(ctx context.Context, runID string) (*run.Run, error)
 }
 
 // Approver releases or denies a run held for approval. The dispatcher satisfies it.
@@ -432,6 +433,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /v1/pipelines", createPipelineHandler(s.submitter, authz, s.log))
 	mux.Handle("POST /v1/runs/{id}/cancel", cancelRunHandler(s.store, s.canceler, authz, s.log))
 	mux.Handle("POST /v1/runs/{id}/retry", retryRunHandler(s.store, s.retrier, authz, s.log))
+	mux.Handle("POST /v1/runs/{id}/relaunch-failed", relaunchFailedHandler(s.store, s.retrier, authz, s.log))
 	mux.Handle("POST /v1/runs/{id}/rerun", rerunRunHandler(s.store, s.submitter, authz, s.log))
 	mux.Handle("POST /v1/runs/{id}/approve", approveRunHandler(s.approver, s.store, authz, s.log))
 	mux.Handle("POST /v1/runs/{id}/reject", rejectRunHandler(s.approver, s.store, authz, s.log))

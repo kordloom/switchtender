@@ -452,7 +452,8 @@ func requiredRole(r *http.Request) user.Role {
 		// for approval, so releasing it stays admin work.
 		return user.RoleOperator
 	case strings.HasPrefix(p, "/runs/") &&
-		(strings.HasSuffix(p, "/cancel") || strings.HasSuffix(p, "/retry")):
+		(strings.HasSuffix(p, "/cancel") || strings.HasSuffix(p, "/retry") ||
+			strings.HasSuffix(p, "/relaunch-failed")):
 		return user.RoleOperator
 	case strings.HasPrefix(p, "/templates/") && strings.HasSuffix(p, "/launch"):
 		return user.RoleOperator

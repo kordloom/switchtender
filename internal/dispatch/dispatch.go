@@ -56,6 +56,8 @@ const (
 	idleBackoffShift = 3
 	// dedupeRetryShards names the shard-retry action in the idempotency keys it dedupes under.
 	dedupeRetryShards = "retry-shards"
+	// dedupeRelaunchHosts names the failed-host relaunch action it dedupes under.
+	dedupeRelaunchHosts = "relaunch-hosts"
 )
 
 // Publisher receives live run output for streaming to clients. All methods must be safe for
@@ -971,6 +973,56 @@ func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string) (*r
 	go d.coordinate(retry.Clone(), children)
 
 	return retry, nil
+}
+
+// RelaunchFailedHosts creates and starts a new run of the same spec restricted to only the hosts
+// that failed or were unreachable in a finished run, links it back to that run, and records the
+// derivation in the chain. Where AWX and Rundeck re-run the failed nodes, the new run here carries a
+// receipt to the run it came from, so an auditor can see exactly which run's failures this one was
+// built to fix rather than taking the operator's word.
+//
+// It targets a run that recorded per-host results, which is an Ansible run; a run with none, such as
+// a single bash command, has no notion of a failed host and is refused. Relaunching the same run
+// twice inside the dedupe window returns the first relaunch, so a double click cannot fire two.
+func (d *Dispatcher) RelaunchFailedHosts(ctx context.Context, runID string) (*run.Run, error) {
+	existing, key, err := run.ResolveDedupe(ctx, d.store, dedupeRelaunchHosts, runID, time.Now())
+	if err != nil {
+		return nil, err
+	}
+	if existing != nil {
+		return existing, nil
+	}
+	src, err := d.store.Get(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	if !src.Status.Terminal() {
+		return nil, ErrNotFinished
+	}
+	summaries, err := d.store.RunHostSummaries(ctx, runID)
+	if err != nil {
+		return nil, fmt.Errorf("read host summaries: %w", err)
+	}
+	if len(summaries) == 0 {
+		return nil, ErrNoHostSummary
+	}
+	var failed []string
+	for _, s := range summaries {
+		if s.Failures > 0 || s.Unreachable > 0 {
+			failed = append(failed, s.Host)
+		}
+	}
+	if len(failed) == 0 {
+		return nil, ErrNoFailedHosts
+	}
+	opts := append(src.ExecutionOptions(),
+		run.WithLimit(strings.Join(failed, ",")),
+		run.WithSource("relaunch", runID),
+		run.WithRetryOf(runID),
+		run.WithIdempotencyKey(key),
+		run.WithActor(src.Actor),
+	)
+	return d.Submit(ctx, src.Playbook, src.Inventory, opts...)
 }
 
 // parentMayStart claims the parent for this coordinator and reports whether it may begin.
