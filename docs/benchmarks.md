@@ -66,11 +66,46 @@ encryption and 937 ms with it, showing that argon2id dominates startup on a slow
 came from an earlier release and are not re-derived here, so treat them as indicative of the shape
 rather than as current numbers. This row is due a re-run.
 
-## About comparisons
+## Head to head
 
-We publish only numbers we measured ourselves, so there are no competitor columns above. What can be
-said factually is that SwitchTender boots from one binary and one file, while the AWX-lineage
-controllers stand up a Kubernetes cluster, an operator, PostgreSQL, Redis, and a mesh before they run
-a playbook. A boot-time comparison is not even shaped the same, and that is the point. The [comparison page](comparison.md) covers the feature-by-feature picture, including
-where SwitchTender is still young. If you run these benchmarks and get materially different numbers,
-open an issue with your hardware and method and we will look.
+Numbers we quote from a competitor's own marketing are not a benchmark. These were measured, on one
+machine, on 2026-08-10: SwitchTender at v1.62.0, Ansible Semaphore v2.19.7, and Ansible AWX 24.6.1,
+each in its own container on the same Docker Desktop Linux VM (five vCPU, 8 GiB) on an Apple Silicon
+laptop. Method for the timed rows: each server's binary is baked into its image, never bind-mounted
+from the host, because a mounted binary faults across the virtual-machine file boundary on every cold
+start and would flatter or punish a program for where its file sits rather than what it does. Boot is
+`docker start` to the first successful health response, the median of five after a warm-up. Resident
+memory is the server process's `VmRSS` three seconds after it began serving. Image size is what
+`docker image ls` reports.
+
+| Measurement | SwitchTender | Semaphore | AWX |
+|-------------|--------------|-----------|-----|
+| Container image | 40 MiB | 984 MiB | 996 MiB, plus PostgreSQL 467 MiB and Redis 136 MiB |
+| Processes to run it | one binary, or one container | one container | four or more containers under Kubernetes |
+| External services required | none; SQLite is embedded | none in this mode | Kubernetes, PostgreSQL, Redis, and a Receptor mesh |
+| Cold boot to serving | 69 ms | 49 ms | not a single number; see below |
+| Idle resident memory | 35 MiB | 44 MiB | the sum of web, task, database, and Redis |
+
+The boot row here is higher than the 42 ms in the first table because it measures `docker start` to
+serving, which includes the container runtime coming up, where the earlier figure timed the process
+itself. Both are ours, measured the same day; they differ only in what the stopwatch was started on,
+and the container figure is the one that compares like for like against the others in this table.
+
+**Semaphore boots faster, and it is genuinely light.** In its single-container mode with an embedded
+SQLite database, the configuration measured here, it comes up in 49 ms against our 69 ms, and it is an
+honest one-binary competitor. Where the two part company is footprint and what comes in the box: our
+image is a twenty-fifth the size, holds a lower resident set, and the single file is the whole control
+plane, while a production Semaphore adds an external MySQL or PostgreSQL, and RBAC, enforced approvals,
+a provable audit trail, and the extra runtimes are ours rather than theirs. The [comparison
+page](comparison.md) has that feature picture, including where SwitchTender is still young.
+
+**AWX is not shaped for a boot-time row, and pretending otherwise would be the dishonest thing.** It
+has no single-process mode. The AWX Operator reconciles a set of pods, web and task from the 996 MiB
+application image, PostgreSQL, and Redis, and pulls a separate execution-environment image before it
+runs a playbook, so "time to serving" is a cluster reconciling over minutes, not a process starting in
+milliseconds. What is comparable is the standing cost: roughly 1.6 GiB of images across four or more
+long-lived containers, on top of a Kubernetes cluster, before the first job. That is the architecture
+difference the whole product is built around, stated in the units that actually compare.
+
+Run these yourself and get materially different numbers, and open an issue with your hardware and
+method; we will look, and we will correct the table if it is wrong.
