@@ -302,14 +302,15 @@ var awxPublicInputs = []string{
 	"username", "validate_certs",
 }
 
-// publicInputs returns an AWX credential's non-secret inputs as sorted key=value pairs, for telling
-// an operator what the export recorded beyond the secret itself. Values that are empty or still
-// carry AWX's encrypted marker are left out, as is anything not on the allowlist.
-func publicInputs(inputs map[string]any) []string {
+// publicInputPairs returns an AWX credential's non-secret inputs as ordered key/value pairs, drawn
+// from the allowlist so a custom type's secret field can never appear. Values that are empty or still
+// carry AWX's encrypted marker are omitted. Both the operator-facing formatter and the settings
+// importer read from here, so they cannot disagree on what counts as non-secret.
+func publicInputPairs(inputs map[string]any) [][2]string {
 	if len(inputs) == 0 {
 		return nil
 	}
-	var out []string
+	var out [][2]string
 	for _, key := range awxPublicInputs {
 		v, ok := inputs[key]
 		if !ok {
@@ -319,10 +320,89 @@ func publicInputs(inputs map[string]any) []string {
 		if value == "" || value == "$encrypted$" {
 			continue
 		}
-		out = append(out, key+"="+value)
+		out = append(out, [2]string{key, value})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i][0] < out[j][0] })
+	return out
+}
+
+// publicInputs returns the non-secret inputs as sorted key=value strings, for telling an operator
+// what the export recorded beyond the secret itself.
+func publicInputs(inputs map[string]any) []string {
+	pairs := publicInputPairs(inputs)
+	if len(pairs) == 0 {
+		return nil
+	}
+	out := make([]string, len(pairs))
+	for i, p := range pairs {
+		out[i] = p[0] + "=" + p[1]
+	}
+	return out
+}
+
+// settingsKey translates an AWX input name to the settings key the kind's injection reads. The
+// connection kinds rename username and the become inputs to the field names their injectors consume;
+// every other input keeps its AWX name and rides along as reference metadata.
+func settingsKey(kind credential.Kind, awxKey string) string {
+	switch kind {
+	case credential.KindSSHKey, credential.KindSSHPassword:
+		switch awxKey {
+		case "username":
+			return "user"
+		case "become_username":
+			return "become_user"
+		}
+	case credential.KindNetwork:
+		if awxKey == "username" {
+			return "user"
+		}
+	case credential.KindBecome:
+		switch awxKey {
+		case "become_method":
+			return "method"
+		case "become_username":
+			return "user"
+		}
+	}
+	return awxKey
+}
+
+// credentialSettings converts an AWX credential's non-secret inputs into the settings stored on the
+// imported credential, keys translated to what injection reads, and returns the AWX input names that
+// were present but refused by the settings rules so the caller can report rather than silently drop
+// them. Refusing one input never fails the import, keeping the partial-import promise. Each value is
+// checked on its own so one bad input does not discard the rest; the aggregate count cap
+// ValidateSettings also enforces is satisfied by construction, since awxPublicInputs is far shorter
+// than the limit. The refused names come back in the sorted order of publicInputPairs.
+func credentialSettings(kind credential.Kind, inputs map[string]any) (map[string]string, []string) {
+	pairs := publicInputPairs(inputs)
+	if len(pairs) == 0 {
+		return nil, nil
+	}
+	out := map[string]string{}
+	var refused []string
+	for _, p := range pairs {
+		key := settingsKey(kind, p[0])
+		if credential.ValidateSettings(map[string]string{key: p[1]}) != nil {
+			refused = append(refused, p[0])
+			continue
+		}
+		out[key] = p[1]
+	}
+	if len(out) == 0 {
+		out = nil
+	}
+	return out, refused
+}
+
+// settingsList renders stored settings as sorted key=value pairs for a plan warning.
+func settingsList(settings map[string]string) string {
+	out := make([]string, 0, len(settings))
+	for k, v := range settings {
+		out = append(out, k+"="+v)
 	}
 	sort.Strings(out)
-	return out
+	return strings.Join(out, ", ")
 }
 
 // mapCredentialKind converts an AWX credential type name to a SwitchTender credential kind, reporting

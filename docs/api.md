@@ -56,7 +56,7 @@ Every endpoint the server exposes. The API is served under the `/v1` base path. 
 | GET    | `/v1/triggers`             | List webhook triggers.                                  |
 | DELETE | `/v1/triggers/{id}`        | Delete a trigger, revoking its webhook.                 |
 | POST   | `/hooks/{token}`        | Fire a trigger from a git push. A required HMAC signature is checked first.|
-| POST   | `/v1/credentials`          | Store a credential, encrypted at rest. Thirteen built-in kinds, or a custom type via `type_id` and `fields`. |
+| POST   | `/v1/credentials`          | Store a credential, encrypted at rest. Thirteen built-in kinds, or a custom type via `type_id` and `fields`. Non-secret `settings` ride beside the secret and return from the API. |
 | GET    | `/v1/credentials`          | List credentials, secrets never included.               |
 | POST   | `/v1/credential-types`     | Define a custom credential type: fields and how they inject. Admin only. |
 | GET    | `/v1/credential-types`     | List custom credential types. Admin only.               |

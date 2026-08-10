@@ -165,11 +165,33 @@ func (d *Dispatcher) materializeCredentials(ctx context.Context, r *run.Run, spe
 				return cleanup, secrets, fmt.Errorf("materialize credential %s: %w", id, err)
 			}
 			spec.PrivateKeyPath = f.Name()
+			// A key credential's settings can carry the connection user and become settings an AWX
+			// machine credential bundles beside the key, so an import lands runnable. They reach the
+			// play through a vars file like every other connection variable.
+			if vars := connectionVars(c.Settings["user"], c.Settings["become_method"],
+				c.Settings["become_user"]); len(vars) > 0 {
+				vf, err := os.CreateTemp("", "switchtender-cred-*")
+				if err != nil {
+					return cleanup, secrets, fmt.Errorf("materialize credential %s: %w", id, err)
+				}
+				paths = append(paths, vf.Name())
+				if err := vf.Close(); err != nil {
+					return cleanup, secrets, fmt.Errorf("materialize credential %s: %w", id, err)
+				}
+				if err := writeAnsibleVarsFile(vf.Name(), vars); err != nil {
+					return cleanup, secrets, fmt.Errorf("materialize credential %s: %w", id, err)
+				}
+				spec.ExtraVarsFiles = append(spec.ExtraVarsFiles, vf.Name())
+			}
 		case credential.KindVaultPassword:
 			spec.VaultPasswords = append(spec.VaultPasswords,
 				roundhouse.VaultPassword{Label: c.VaultID, Path: f.Name()})
 		case credential.KindEnv:
-			// Environment pairs go straight into the process; the temp file is not needed.
+			// Environment pairs go straight into the process; the temp file is not needed. Settings
+			// on an env credential are reference metadata only, not injected: injecting them would
+			// let a non-secret pair from one credential clobber a sealed env var of the same name on
+			// another, and an unmatched import that fell back to this kind would spill its recorded
+			// inputs into every run's environment.
 			paths = paths[:len(paths)-1]
 			_ = os.Remove(f.Name())
 			spec.Env = append(spec.Env, credential.EnvLines(plain)...)
@@ -201,22 +223,23 @@ func (d *Dispatcher) materializeCredentials(ctx context.Context, r *run.Run, spe
 		case credential.KindSSHPassword:
 			// Machine password auth reaches the play as connection vars through a file, off argv.
 			fm := credential.Fields(plain)
+			applySettings(fm, c.Settings, "user", "become_method", "become_user")
 			user, pass := fm["user"], fm["password"]
 			if user == "" || pass == "" {
 				return cleanup, secrets, fmt.Errorf("%w: ssh_password needs user and password",
 					credential.ErrBadField)
 			}
 			secrets = append(secrets, pass)
-			if err := writeAnsibleVarsFile(f.Name(), map[string]string{
-				"ansible_user":     user,
-				"ansible_password": pass,
-			}); err != nil {
+			vars := connectionVars(user, fm["become_method"], fm["become_user"])
+			vars["ansible_password"] = pass
+			if err := writeAnsibleVarsFile(f.Name(), vars); err != nil {
 				return cleanup, secrets, fmt.Errorf("materialize credential %s: %w", id, err)
 			}
 			spec.ExtraVarsFiles = append(spec.ExtraVarsFiles, f.Name())
 		case credential.KindBecome:
 			// Privilege escalation vars reach the play through a file so the password stays off argv.
 			fm := credential.Fields(plain)
+			applySettings(fm, c.Settings, "method", "user")
 			pass := fm["password"]
 			if pass == "" {
 				return cleanup, secrets, fmt.Errorf("%w: become needs password", credential.ErrBadField)
@@ -236,6 +259,7 @@ func (d *Dispatcher) materializeCredentials(ctx context.Context, r *run.Run, spe
 		case credential.KindNetwork:
 			// Network device vars reach the play through a file so the password stays off argv.
 			fm := credential.Fields(plain)
+			applySettings(fm, c.Settings, "user", "network_os", "connection")
 			user, pass := fm["user"], fm["password"]
 			if user == "" || pass == "" {
 				return cleanup, secrets, fmt.Errorf("%w: network needs user and password",
@@ -298,6 +322,37 @@ func (d *Dispatcher) materializeCredentials(ctx context.Context, r *run.Run, spe
 		}
 	}
 	return cleanup, secrets, nil
+}
+
+// applySettings fills absent fields from the credential's non-secret settings, sealed values
+// winning on conflict, so an imported credential's connection user or become method takes effect
+// without living inside the sealed secret. Settings values are deliberately never added to the mask
+// list: they are non-secret by contract, and masking a username like deploy would black out
+// ordinary output everywhere it appears.
+func applySettings(fm map[string]string, settings map[string]string, keys ...string) {
+	for _, k := range keys {
+		if fm[k] == "" && settings[k] != "" {
+			fm[k] = settings[k]
+		}
+	}
+}
+
+// connectionVars renders the connection and become fields shared by the machine credential kinds
+// into their ansible variable names, skipping any that are empty. The key path builds its vars from
+// settings and the password path from the merged secret and settings, both through here, so the two
+// kinds cannot drift on how a field maps to a variable.
+func connectionVars(user, becomeMethod, becomeUser string) map[string]string {
+	vars := map[string]string{}
+	if user != "" {
+		vars["ansible_user"] = user
+	}
+	if becomeMethod != "" {
+		vars["ansible_become_method"] = becomeMethod
+	}
+	if becomeUser != "" {
+		vars["ansible_become_user"] = becomeUser
+	}
+	return vars
 }
 
 // injectedMaskValues returns the values to redact from run output for one injection: the ones the

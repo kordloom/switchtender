@@ -3,6 +3,7 @@ package secretsource
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -34,6 +35,24 @@ func TestResolveCommand(t *testing.T) {
 	}
 	if _, err := resolveCommand(context.Background(), "exit 7"); !errors.Is(err, ErrResolve) {
 		t.Errorf("failing command error = %v, want ErrResolve", err)
+	}
+}
+
+// TestResolveCommandStderrKeptOutOfError proves a failing command's stderr never reaches the error.
+// The error lands in durable records such as run.Error, and the masker has nothing registered when
+// resolution itself fails, so anything the command printed on the way down would be stored verbatim.
+func TestResolveCommandStderrKeptOutOfError(t *testing.T) {
+	t.Parallel()
+	const leaked = "sv-verysecretvalue-9001"
+	_, err := resolveCommand(context.Background(), "echo "+leaked+" >&2; exit 3")
+	if !errors.Is(err, ErrResolve) {
+		t.Fatalf("error = %v, want ErrResolve", err)
+	}
+	if strings.Contains(err.Error(), leaked) {
+		t.Fatalf("error %q carries the command's stderr", err)
+	}
+	if !strings.Contains(err.Error(), "exit status 3") {
+		t.Errorf("error %q does not name the exit status", err)
 	}
 }
 

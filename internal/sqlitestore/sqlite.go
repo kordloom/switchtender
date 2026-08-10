@@ -693,6 +693,7 @@ func migrateCredentials(db *sql.DB) error {
 		"ALTER TABLE credentials ADD COLUMN org_id TEXT NOT NULL DEFAULT ''",
 		"ALTER TABLE credentials ADD COLUMN type_id TEXT NOT NULL DEFAULT ''",
 		"ALTER TABLE credentials ADD COLUMN vault_id TEXT NOT NULL DEFAULT ''",
+		"ALTER TABLE credentials ADD COLUMN settings TEXT NOT NULL DEFAULT ''",
 	} {
 		if _, err := db.Exec(col); err != nil &&
 			!strings.Contains(err.Error(), "duplicate column name") {

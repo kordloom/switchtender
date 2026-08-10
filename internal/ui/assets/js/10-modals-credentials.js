@@ -304,10 +304,37 @@ function openCredentialEdit(c) {
 	document.getElementById("cred-passphrase").value = "";
 	const vaultID = document.getElementById("cred-vault-id");
 	if (vaultID) vaultID.value = c.vault_id || "";
+	const settings = document.getElementById("cred-settings");
+	if (settings) settings.value = credSettingsText(c.settings);
 	syncCredFields();
 	document.getElementById("cred-status").textContent = "";
 	setModalTitle("cred", "Edit credential");
 	document.getElementById("cred-modal").hidden = false;
+}
+
+// credSettingsText renders a settings map as one key=value per line for the dialog textarea, keys
+// sorted so the same credential always renders the same way.
+function credSettingsText(settings) {
+	return Object.entries(settings || {}).sort((a, b) => a[0].localeCompare(b[0]))
+		.map(([k, v]) => k + "=" + v).join("\n");
+}
+
+// parseCredSettings reads the dialog textarea into a settings map, skipping blank lines. A line
+// with no = is kept as a key with an empty value so the server's validation names the mistake
+// instead of the dialog dropping the line silently.
+function parseCredSettings(text) {
+	const out = {};
+	for (const line of (text || "").split("\n")) {
+		const trimmed = line.trim();
+		if (!trimmed) continue;
+		const i = trimmed.indexOf("=");
+		if (i === -1) {
+			out[trimmed] = "";
+			continue;
+		}
+		out[trimmed.slice(0, i).trim()] = trimmed.slice(i + 1).trim();
+	}
+	return out;
 }
 
 // toggleCredPassphrase shows the passphrase field only for a locally stored SSH key, the one case
@@ -348,6 +375,8 @@ function wireCredentialForm() {
 		sec.value = "";
 		sec.required = true;
 		document.getElementById("cred-passphrase").value = "";
+		const settings = document.getElementById("cred-settings");
+		if (settings) settings.value = "";
 		syncCredFields();
 		document.getElementById("cred-status").textContent = "";
 		setModalTitle("cred", "Add a credential");
@@ -380,6 +409,14 @@ function wireCredentialForm() {
 		const passphrase = document.getElementById("cred-passphrase").value;
 		if (passphrase && payload.kind === "ssh_key" && payload.source === "local") {
 			payload.passphrase = passphrase;
+		}
+		// On edit the form state is the whole truth: sending the parsed map replaces the stored
+		// settings, and an emptied textarea sends {} which clears them. On create an empty map is
+		// simply omitted.
+		const settingsField = document.getElementById("cred-settings");
+		if (settingsField) {
+			const settings = parseCredSettings(settingsField.value);
+			if (editId || Object.keys(settings).length) payload.settings = settings;
 		}
 		inFlight = true;
 		if (submitBtn) submitBtn.disabled = true;
@@ -435,7 +472,16 @@ async function loadCredentials() {
 		const tbody = document.getElementById("credentials");
 		for (const c of creds) {
 			const tr = document.createElement("tr");
-			tr.appendChild(td(c.name));
+			const name = td(c.name);
+			// Non-secret settings surface on hover rather than as a column, so a machine credential's
+			// connection user is one hover away without widening the table.
+			const settingsEntries = Object.entries(c.settings || {}).sort((a, b) =>
+				a[0].localeCompare(b[0]));
+			if (settingsEntries.length) {
+				name.dataset.tip = "Settings: " +
+					settingsEntries.map(([k, v]) => k + "=" + v).join(", ");
+			}
+			tr.appendChild(name);
 			// Kind and source are chips rather than bare text, so the column reads at a glance and the
 			// facet menus can offer them as values to tick.
 			const kind = td("");

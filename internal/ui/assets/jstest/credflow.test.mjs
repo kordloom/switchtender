@@ -80,3 +80,31 @@ test("a rejected credential save hands the dialog back to the operator", async (
 	assert.equal(document.getElementById("cred-status").textContent, "Saved.");
 	net.assertClean();
 });
+
+test("the credential form carries settings as a parsed map and edit prefills them", async () => {
+	let created = null;
+	const routes = {
+		"/v1/credentials": (req) => {
+			if (req.method === "POST") { created = JSON.parse(req.body); return reply({ id: "cred-9" }); }
+			return reply({ credentials: [] });
+		},
+		"/v1/templates": reply({ templates: [] }),
+	};
+	const { app, document, net, clock } = loadPage("credentials", { parts: ALL_PARTS, routes });
+	app.wireCredentialForm();
+
+	document.getElementById("cred-name").value = "prod-ssh";
+	document.getElementById("cred-secret").value = "the secret";
+	// A blank line and spaces around = are how a person actually types into a textarea.
+	document.getElementById("cred-settings").value = "user=deploy\n\nbecome_method = sudo";
+	fire(document.getElementById("cred-form"), "submit");
+	await clock.flush();
+	assert.deepEqual(created.settings, { user: "deploy", become_method: "sudo" },
+		"the textarea did not parse into the settings map");
+
+	// An edit prefills the textarea from the record, sorted, one pair per line.
+	app.openCredentialEdit({ id: "cred-1", name: "m", kind: "ssh_password", source: "local",
+		settings: { user: "deploy", become_method: "sudo" } });
+	assert.equal(document.getElementById("cred-settings").value, "become_method=sudo\nuser=deploy");
+	net.assertClean();
+});

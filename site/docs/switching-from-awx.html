@@ -130,8 +130,10 @@ every warning.</p>
 </li>
 <li>
 <p>Re-enter secrets. Exports never contain secrets, so credentials arrive as named shells. The
-report lists which ones to fill in. Open the UI, go to Credentials, and set each secret. Until
-then, everything else is already in place.</p>
+report lists which ones to fill in. Open the UI, go to Credentials, and set each secret. The
+non-secret settings AWX exported, the connection user and become method, are already stored on
+each credential, so the secret is the only thing left to type. Until then, everything else is
+already in place.</p>
 </li>
 <li>
 <p>Launch a template and watch it run.</p>

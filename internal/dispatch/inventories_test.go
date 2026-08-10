@@ -169,10 +169,27 @@ func TestRunResolvesInventoryContentSource(t *testing.T) {
 func TestInventorySecrets(t *testing.T) {
 	t.Parallel()
 	content := "[db]\ndb01 ansible_password=hunter2 ansible_user=deploy\n" +
-		"[web:vars]\napi_token: tok-abc123\nplain_var=notsecret\n"
+		"[web:vars]\napi_token: tok-abc123\nplain_var=notsecret\n" +
+		"ansible_become_pass=BecomeMe99\nansible_ssh_pass: sshpw-4567\n" +
+		"vault_passphrase=unlock-abc\ndb_secret_value: sv-9\n" +
+		// These are not secrets and must not be captured. Their values are booleans and a key-file
+		// path; masking them would black out ordinary output and a common file path everywhere.
+		"bypass_proxy=true\npassive_mode: false\ngpu_passthrough=true\n" +
+		"ansible_ssh_private_key_file=/home/deploy/.ssh/id_rsa\naws_access_key_id=AKIAEXAMPLE123\n"
 	got := inventorySecrets(content)
-	want := map[string]bool{"hunter2": true, "tok-abc123": true}
+	want := map[string]bool{
+		"hunter2": true, "tok-abc123": true, "BecomeMe99": true,
+		"sshpw-4567": true, "unlock-abc": true, "sv-9": true,
+	}
+	forbidden := map[string]bool{
+		"true": true, "false": true,
+		"/home/deploy/.ssh/id_rsa": true, "AKIAEXAMPLE123": true, "notsecret": true,
+	}
 	for _, v := range got {
+		if forbidden[v] {
+			t.Errorf("inventorySecrets captured non-secret value %q, which the masker would black out", v)
+			continue
+		}
 		if !want[v] {
 			t.Errorf("inventorySecrets returned unexpected value %q", v)
 			continue

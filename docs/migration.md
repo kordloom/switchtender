@@ -62,9 +62,9 @@ inventories, templates, and schedules, is in place and ready to run once the sec
 - A credential type without an exact match maps to the environment kind and is flagged for review.
 - Secrets are never in an export, so every credential is created as a shell and its secret has to be
   re-entered. The non-secret settings AWX did export, such as the user to connect as and how to
-  become root, are reported with the credential so they can be entered alongside it rather than
-  looked up in the system being retired. Only known non-secret fields are reported, so a custom
-  credential type cannot spill a secret into the plan.
+  become root, are stored on the credential itself and take effect at injection, so a machine
+  credential arrives knowing its connection user and only the secret needs entering. Only known
+  non-secret fields are stored, so a custom credential type cannot spill a secret into the plan.
 - An AWX machine credential covers both key and password login under one type. Which one it is comes
   from whether the export configured a key or a password, so a password credential does not arrive as
   a key credential that fails the first time it runs.

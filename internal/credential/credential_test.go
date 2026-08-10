@@ -1,12 +1,109 @@
 package credential_test
 
 import (
+	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 
 	"github.com/kordloom/switchtender/internal/credential"
 	"github.com/kordloom/switchtender/internal/credtest"
 )
+
+func TestValidateSettings(t *testing.T) {
+	t.Parallel()
+	// The bounds are the contract: 32 entries, 512-byte values.
+	long := strings.Repeat("v", 513)
+	big := make(map[string]string, 33)
+	for i := 0; i < 33; i++ {
+		big[fmt.Sprintf("key_%d", i)] = "value"
+	}
+	tests := []struct {
+		Name string
+		In   map[string]string
+		Want error
+	}{
+		{Name: "nil", In: nil, Want: nil},                                                // Test 0.
+		{Name: "plain", In: map[string]string{"user": "deploy"}, Want: nil},              // Test 1.
+		{Name: "env style", In: map[string]string{"AWS_REGION": "us-east-1"}, Want: nil}, // Test 2.
+		{Name: "too many", In: big, Want: credential.ErrBadSetting},                      // Test 3.
+		{Name: "bad key",
+			In: map[string]string{"user name": "x"}, Want: credential.ErrBadSetting}, // Test 4.
+		{Name: "leading digit",
+			In: map[string]string{"1user": "x"}, Want: credential.ErrBadSetting}, // Test 5.
+		{Name: "empty value",
+			In: map[string]string{"user": "  "}, Want: credential.ErrBadSetting}, // Test 6.
+		{Name: "long value",
+			In: map[string]string{"user": long}, Want: credential.ErrBadSetting}, // Test 7.
+		{Name: "newline value",
+			In: map[string]string{"user": "a\nb"}, Want: credential.ErrBadSetting}, // Test 8.
+		{Name: "carriage return",
+			In: map[string]string{"user": "a\rb"}, Want: credential.ErrBadSetting}, // Test 9.
+	}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
+			t.Parallel()
+			if err := credential.ValidateSettings(test.In); !errors.Is(err, test.Want) {
+				t.Errorf("ValidateSettings() error = %v, want %v", err, test.Want)
+			}
+		})
+	}
+}
+
+func TestSettingsEncodeDecode(t *testing.T) {
+	t.Parallel()
+	in := map[string]string{"user": "deploy", "become_method": "sudo"}
+	text, err := credential.EncodeSettings(in)
+	if err != nil {
+		t.Fatalf("EncodeSettings() error = %v", err)
+	}
+	out, err := credential.DecodeSettings(text)
+	if err != nil {
+		t.Fatalf("DecodeSettings() error = %v", err)
+	}
+	if diff := cmp.Diff(in, out); diff != "" {
+		t.Errorf("round trip mismatch (-want +got):\n%s", diff)
+	}
+	// Test: empty encodes to the column default and decodes back to none.
+	text, err = credential.EncodeSettings(nil)
+	if err != nil || text != "" {
+		t.Errorf("EncodeSettings(nil) = %q, %v; want empty, nil", text, err)
+	}
+	if out, err := credential.DecodeSettings(""); err != nil || out != nil {
+		t.Errorf("DecodeSettings(empty) = %v, %v; want nil, nil", out, err)
+	}
+}
+
+// TestMemStoreSettingsIsolation proves the store copies the settings map, so a caller mutating its
+// map after a save cannot rewrite what a later Get returns.
+func TestMemStoreSettingsIsolation(t *testing.T) {
+	t.Parallel()
+	store := credential.NewMemStore()
+	settings := map[string]string{"user": "deploy"}
+	if err := store.Save(context.Background(),
+		&credential.Credential{ID: "cred_1", Settings: settings}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	settings["user"] = "mutated"
+	got, err := store.Get(context.Background(), "cred_1")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.Settings["user"] != "deploy" {
+		t.Errorf("Settings[user] = %q, want the saved value deploy", got.Settings["user"])
+	}
+	got.Settings["user"] = "mutated again"
+	again, err := store.Get(context.Background(), "cred_1")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if again.Settings["user"] != "deploy" {
+		t.Errorf("Settings[user] = %q after mutating a returned copy, want deploy", again.Settings["user"])
+	}
+}
 
 func TestMemStoreContract(t *testing.T) {
 	t.Parallel()

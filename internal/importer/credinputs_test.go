@@ -102,14 +102,16 @@ func TestPublicInputsNeverCarriesSecrets(t *testing.T) {
 	}
 }
 
-// TestImportReportsNonSecretInputs verifies a real export's non-secret settings reach the operator.
-// Without this the import dropped them silently and the operator had to open AWX to find out which
-// user a playbook connected as.
-func TestImportReportsNonSecretInputs(t *testing.T) {
+// TestImportStoresNonSecretInputs verifies a real export's non-secret inputs land as settings on
+// the imported credential, translated to the field names injection reads, so a machine credential
+// arrives knowing its connection user and become settings and only the secret needs entering. They
+// used to survive only as warning text the operator copied by hand.
+func TestImportStoresNonSecretInputs(t *testing.T) {
 	t.Parallel()
 	data := []byte(`{"credentials":[
 		{"name":"prod-ssh","credential_type":"Machine","inputs":{
-			"username":"deploy","become_method":"sudo","password":"$encrypted$"}}]}`)
+			"username":"deploy","become_method":"sudo","become_username":"root",
+			"password":"$encrypted$"}}]}`)
 	plan, err := FromAWX(data, time.Date(2026, 7, 29, 0, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatalf("FromAWX() error = %v", err)
@@ -121,13 +123,64 @@ func TestImportReportsNonSecretInputs(t *testing.T) {
 		t.Errorf("kind = %q, want ssh_password since AWX recorded a password and no key",
 			plan.Credentials[0].Kind)
 	}
+	wantSettings := map[string]string{"user": "deploy", "become_method": "sudo", "become_user": "root"}
+	if diff := cmp.Diff(wantSettings, plan.Credentials[0].Settings); diff != "" {
+		t.Errorf("stored settings mismatch (-want +got):\n%s", diff)
+	}
 	joined := strings.Join(plan.Warnings, "\n")
-	for _, want := range []string{"username=deploy", "become_method=sudo"} {
+	for _, want := range []string{"user=deploy", "become_method=sudo", "become_user=root",
+		"stored on the credential"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("warnings do not mention %q, got:\n%s", want, joined)
 		}
 	}
 	if strings.Contains(joined, "$encrypted$") {
 		t.Errorf("warnings echo AWX's encrypted marker:\n%s", joined)
+	}
+}
+
+// TestImportReportsRefusedInputs verifies a non-secret input the settings rules refuse is not
+// silently dropped: it is named in the warning so the operator knows to set it by hand, while the
+// valid inputs beside it still store. The old code dropped refused inputs with no signal.
+func TestImportReportsRefusedInputs(t *testing.T) {
+	t.Parallel()
+	// A become_username with a newline cannot be a settings value; a valid username sits beside it.
+	data := []byte(`{"credentials":[
+		{"name":"prod-ssh","credential_type":"Machine","inputs":{
+			"username":"deploy","become_username":"root\ninjected","password":"$encrypted$"}}]}`)
+	plan, err := FromAWX(data, time.Date(2026, 7, 29, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("FromAWX() error = %v", err)
+	}
+	if len(plan.Credentials) != 1 {
+		t.Fatalf("credentials = %d, want 1", len(plan.Credentials))
+	}
+	// The valid input stored; the refused one did not.
+	if diff := cmp.Diff(map[string]string{"user": "deploy"}, plan.Credentials[0].Settings); diff != "" {
+		t.Errorf("stored settings mismatch (-want +got):\n%s", diff)
+	}
+	joined := strings.Join(plan.Warnings, "\n")
+	if !strings.Contains(joined, "could not be stored") || !strings.Contains(joined, "become_username") {
+		t.Errorf("warnings do not report the refused input become_username, got:\n%s", joined)
+	}
+}
+
+// TestImportSettingsKeepAWXNamesForCloudKinds verifies a cloud credential's public inputs ride along
+// under their AWX names as reference metadata, since no built-in injector reads them.
+func TestImportSettingsKeepAWXNamesForCloudKinds(t *testing.T) {
+	t.Parallel()
+	data := []byte(`{"credentials":[
+		{"name":"vc","credential_type":"VMware vCenter","inputs":{
+			"host":"vc.example.com","username":"svc-vc","password":"$encrypted$"}}]}`)
+	plan, err := FromAWX(data, time.Date(2026, 7, 29, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("FromAWX() error = %v", err)
+	}
+	if len(plan.Credentials) != 1 {
+		t.Fatalf("credentials = %d, want 1", len(plan.Credentials))
+	}
+	wantSettings := map[string]string{"host": "vc.example.com", "username": "svc-vc"}
+	if diff := cmp.Diff(wantSettings, plan.Credentials[0].Settings); diff != "" {
+		t.Errorf("stored settings mismatch (-want +got):\n%s", diff)
 	}
 }

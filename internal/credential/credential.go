@@ -5,7 +5,9 @@ package credential
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"regexp"
 	"slices"
 	"strings"
@@ -78,6 +80,8 @@ var (
 	ErrBadKind = errors.New("unknown credential kind")
 	// ErrBadField is returned when a typed credential is missing a required field.
 	ErrBadField = errors.New("credential missing required field")
+	// ErrBadSetting is returned when a credential setting has an invalid key or value.
+	ErrBadSetting = errors.New("invalid credential setting")
 	// ErrNoKey is returned when encryption is attempted without an encryption key configured.
 	ErrNoKey = errors.New("no encryption key: set SWITCHTENDER_ENCRYPTION_KEY")
 )
@@ -116,6 +120,77 @@ func KindList() string {
 // error hint.
 func SourceList() string {
 	return strings.Join(secretsource.Kinds(), ", ")
+}
+
+// Settings bounds keep the non-secret settings map small and line-safe: it cannot become a covert
+// store for large blobs, and a value cannot smuggle an extra line into an env or extra-vars file.
+const (
+	// maxSettings is the most settings entries one credential may carry.
+	maxSettings = 32
+	// maxSettingKeyLen is the longest allowed settings key, in bytes.
+	maxSettingKeyLen = 64
+	// maxSettingValueLen is the longest allowed settings value, in bytes.
+	maxSettingValueLen = 512
+)
+
+// settingKeyPattern is the shape of a settings key: a letter followed by letters, digits, or
+// underscores. That covers field names such as become_user and environment names such as AWS_REGION.
+var settingKeyPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*$`)
+
+// EncodeSettings renders a settings map as JSON for a store's text column, empty string for an
+// empty map so an untouched credential stores the column default.
+func EncodeSettings(settings map[string]string) (string, error) {
+	if len(settings) == 0 {
+		return "", nil
+	}
+	b, err := json.Marshal(settings)
+	if err != nil {
+		return "", fmt.Errorf("encode settings: %w", err)
+	}
+	return string(b), nil
+}
+
+// DecodeSettings parses a stored settings column, treating empty as none.
+func DecodeSettings(text string) (map[string]string, error) {
+	if text == "" {
+		return nil, nil
+	}
+	var out map[string]string
+	if err := json.Unmarshal([]byte(text), &out); err != nil {
+		return nil, fmt.Errorf("decode settings: %w", err)
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return out, nil
+}
+
+// ValidateSettings checks a settings map's shape: entry count, key pattern and length, and values
+// that are non-empty, bounded, and free of control characters. A value carrying a newline could
+// append an extra line to an env or extra-vars injection, the same trick a multi-line token pulls,
+// so it is refused here rather than trusted downstream.
+func ValidateSettings(settings map[string]string) error {
+	if len(settings) > maxSettings {
+		return fmt.Errorf("%w: at most %d entries, got %d", ErrBadSetting, maxSettings, len(settings))
+	}
+	for k, v := range settings {
+		if len(k) > maxSettingKeyLen || !settingKeyPattern.MatchString(k) {
+			return fmt.Errorf("%w: key %q must be a letter followed by letters, digits, or "+
+				"underscores, at most %d bytes", ErrBadSetting, k, maxSettingKeyLen)
+		}
+		if strings.TrimSpace(v) == "" {
+			return fmt.Errorf("%w: key %q has an empty value", ErrBadSetting, k)
+		}
+		if len(v) > maxSettingValueLen {
+			return fmt.Errorf("%w: key %q value exceeds %d bytes", ErrBadSetting, k, maxSettingValueLen)
+		}
+		for _, r := range v {
+			if r < 0x20 || r == 0x7f {
+				return fmt.Errorf("%w: key %q value contains a control character", ErrBadSetting, k)
+			}
+		}
+	}
+	return nil
 }
 
 // ansibleOnlyKinds are credential kinds materialized through Ansible-specific flags or extra-vars
@@ -211,6 +286,12 @@ type Credential struct {
 	// one run each unlock the secrets encrypted for their label. Empty passes the classic
 	// --vault-password-file. Only meaningful on KindVaultPassword.
 	VaultID string `json:"vault_id,omitempty"`
+	// Settings carries the credential's non-secret fields, such as the connection user or a become
+	// method. Unlike the sealed Secret they return from the API and show in the interface, so an
+	// import can land them and an operator can see and edit them. At injection the connection kinds
+	// merge them beneath the sealed fields, sealed values winning on conflict, and their values are
+	// never added to the run's mask list. Other kinds carry them as reference metadata.
+	Settings map[string]string `json:"settings,omitempty"`
 	// OrgID is the owning organization. Empty means unowned, a global object that follows the role.
 	// When set, members of the organization gain access to the credential and, under strict grants, it
 	// is hidden from non-members who lack an explicit grant.

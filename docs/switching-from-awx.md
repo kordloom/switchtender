@@ -54,8 +54,10 @@ The fast path. It reads an AWX export and creates the equivalent SwitchTender ob
         switchtender import awx awx-export.json --db switchtender.db --apply
 
 4. Re-enter secrets. Exports never contain secrets, so credentials arrive as named shells. The
-   report lists which ones to fill in. Open the UI, go to Credentials, and set each secret. Until
-   then, everything else is already in place.
+   report lists which ones to fill in. Open the UI, go to Credentials, and set each secret. The
+   non-secret settings AWX exported, the connection user and become method, are already stored on
+   each credential, so the secret is the only thing left to type. Until then, everything else is
+   already in place.
 
 5. Launch a template and watch it run.
 

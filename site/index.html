@@ -47,6 +47,7 @@
 			<nav class="nav-links">
 				<a href="#features">Features</a>
 				<a href="#governance">Governance</a>
+				<a href="#proof">Proof</a>
 				<a href="#ai">AI</a>
 				<a href="#sdk">SDK</a>
 				<a href="#compare">Compare</a>
@@ -243,6 +244,49 @@
 			</div>
 		</section>
 
+		<section class="section wrap" id="proof">
+			<div class="section-head reveal">
+				<h2>Evidence you can <span class="grad">hand to an auditor.</span></h2>
+				<p>Most controllers keep an activity log: rows in their own database, editable by whoever holds the database. SwitchTender writes every change into a hash chain, then gives you five ways to carry the proof out of the building. What changed, who asked, and who approved it become things you show, not things you say.</p>
+			</div>
+			<div class="cards cards-3">
+				<article class="card reveal">
+					<div class="ic ic-audit"></div>
+					<h3>A receipt for every change</h3>
+					<p>Every mutation through the API returns an <code>Audit-Receipt</code> header naming its place in the chain. Keep it. Months later, <code>switchtender audit receipt</code> proves the chain still holds that entry at that position, and a server that dropped it can't answer.</p>
+				</article>
+				<article class="card reveal">
+					<div class="ic ic-export"></div>
+					<h3>A dossier for every run</h3>
+					<p>The Evidence button on any run, or <code>switchtender audit run</code>, emits one self-contained file: the spec, the risk grade, who approved it, what happened on each host, and the receipts and anchors behind all of it. An auditor's sample request is answered in one export.</p>
+				</article>
+				<article class="card reveal">
+					<div class="ic ic-lineage"></div>
+					<h3>The change register</h3>
+					<p><code>switchtender audit report</code> renders every change in a period, the sample a SOC 2 CC8.1 or ISO/IEC 27001 A.8.32 review asks for. Point <code>--evidence-dir</code> at an archive and registers write themselves on a cadence, so the evidence exists before anyone asks.</p>
+				</article>
+				<article class="card reveal">
+					<div class="ic ic-doctor"></div>
+					<h3>A witness on another machine</h3>
+					<p><code>switchtender witness</code> watches the chain's public feed from a second machine, keeps a signed checkpoint of what it saw, and raises a finding when history shrinks or a beat goes missing. The hosted witness answers with countersigned attestations that verify offline against a key you pinned.</p>
+				</article>
+				<article class="card reveal">
+					<div class="ic ic-bell"></div>
+					<h3>Receipts in your SIEM</h3>
+					<p>Stream every audit entry into your SIEM as NDJSON or RFC 5424 syslog, each event carrying its chain receipt. Delivery is at-least-once behind a durable cursor, so an outage delays events instead of dropping them, and any sampled event redeems against the live chain.</p>
+				</article>
+				<article class="card reveal">
+					<div class="ic ic-secret"></div>
+					<h3>Verified without trusting the server</h3>
+					<p>Export the chain as a signed <a href="https://loomseal.com" rel="noopener">LoomSeal</a> bundle and verify it on a machine with no network, using an open verifier that isn't SwitchTender. The binary proves itself the same way: <code>switchtender version --verify</code> checks the running build against its release hashes.</p>
+				</article>
+			</div>
+		</section>
+
+		<section class="namebar wrap reveal" id="agent-gov">
+			<p><b>Agents are operators now.</b> When an AI agent runs your infrastructure, hand it one credential: a SwitchTender token bound to an operator account. Secrets stay sealed on the server, policy holds risky runs for a person to release, and every change lands in the chain under the agent's own name. The gate is the agent's only door. <a href="/agents">Run an agent with proof</a>.</p>
+		</section>
+
 		<section class="section wrap" id="ai">
 			<div class="section-head reveal">
 				<span class="eyebrow">Optional layer, off by default</span>
@@ -353,6 +397,23 @@ open http://localhost:8080/ui/</code></pre>
 			</div>
 		</section>
 
+		<section class="section wrap reveal" id="gallery">
+			<div class="section-head">
+				<h2>Every run, <span class="grad">readable at a glance.</span></h2>
+				<p>Structured data end to end: what fired each run, who asked for it, which hosts it touched, and where it broke.</p>
+			</div>
+			<div class="themes-grid">
+				<a class="window theme-shot" href="https://demo.switchtender.com/ui/runs">
+					<div class="window-bar"><span></span><span></span><span></span><em>runs, with origin and labels</em></div>
+					<img src="/assets/screenshot-runs.png?v=2" alt="The runs list with status, type, origin, playbook, and label columns, all sortable" loading="lazy">
+				</a>
+				<a class="window theme-shot" href="https://demo.switchtender.com/ui/workflows">
+					<div class="window-bar"><span></span><span></span><span></span><em>the workflow editor</em></div>
+					<img src="/assets/screenshot-workflow.png?v=1" alt="A pipeline graph with Terraform fanning out to two Ansible steps and into a Bash smoke test" loading="lazy">
+				</a>
+			</div>
+		</section>
+
 		<section class="section wrap reveal" id="themes">
 			<div class="section-head">
 				<h2>Three looks. <span class="grad">Pick your line.</span></h2>
@@ -373,23 +434,6 @@ open http://localhost:8080/ui/</code></pre>
 				</a>
 			</div>
 			<p class="hero-note" style="text-align:center">Every theme keeps the same status colors, so a failed host reads the same in all three.</p>
-		</section>
-
-				<section class="section wrap reveal" id="gallery">
-			<div class="section-head">
-				<h2>Every run, <span class="grad">readable at a glance.</span></h2>
-				<p>Structured data end to end: what fired each run, who asked for it, which hosts it touched, and where it broke.</p>
-			</div>
-			<div class="themes-grid">
-				<a class="window theme-shot" href="https://demo.switchtender.com/ui/runs">
-					<div class="window-bar"><span></span><span></span><span></span><em>runs, with origin and labels</em></div>
-					<img src="/assets/screenshot-runs.png?v=2" alt="The runs list with status, type, origin, playbook, and label columns, all sortable" loading="lazy">
-				</a>
-				<a class="window theme-shot" href="https://demo.switchtender.com/ui/workflows">
-					<div class="window-bar"><span></span><span></span><span></span><em>the workflow editor</em></div>
-					<img src="/assets/screenshot-workflow.png?v=1" alt="A pipeline graph with Terraform fanning out to two Ansible steps and into a Bash smoke test" loading="lazy">
-				</a>
-			</div>
 		</section>
 
 <section class="cta wrap reveal">
