@@ -50,6 +50,16 @@ type createRunRequest struct {
 	Command string `json:"command,omitempty"`
 	// DryRun runs the tool in its no-change mode: ansible --check, a syntax check for bash.
 	DryRun bool `json:"dry_run,omitempty"`
+	// Tags runs only the Ansible plays and tasks carrying one of these tags. Ignored by other tools.
+	Tags []string `json:"tags,omitempty"`
+	// SkipTags skips the Ansible plays and tasks carrying one of these tags. Ignored by other tools.
+	SkipTags []string `json:"skip_tags,omitempty"`
+	// Verbosity raises Ansible logging from 0 to 4 for this run.
+	Verbosity int `json:"verbosity,omitempty"`
+	// Forks sets how many hosts Ansible addresses in parallel. Zero leaves Ansible's default.
+	Forks int `json:"forks,omitempty"`
+	// DiffMode shows the before-and-after of every Ansible file and template change.
+	DiffMode bool `json:"diff_mode,omitempty"`
 	// Labels are user-supplied key values attached to the run for slicing and audits.
 	Labels map[string]string `json:"labels,omitempty"`
 	// Shards, when two or more, splits the run across that many inventory slices.
@@ -546,6 +556,8 @@ func createRunHandler(submitter Submitter, authz *authorizer, log *zap.Logger) h
 			run.WithCredentialIDs(req.CredentialIDs),
 			run.WithTool(req.Tool), run.WithCommand(req.Command), run.WithDryRun(req.DryRun),
 			run.WithSource("api", ""), run.WithActor(actorName(r)), run.WithLabels(req.Labels),
+			run.WithTags(req.Tags...), run.WithSkipTags(req.SkipTags...),
+			run.WithVerbosity(req.Verbosity), run.WithForks(req.Forks), run.WithDiffMode(req.DiffMode),
 		}
 		if supplied := strings.TrimSpace(r.Header.Get(idempotencyKeyHeader)); supplied != "" {
 			key, err := run.ClientKey(supplied)

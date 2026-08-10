@@ -162,6 +162,16 @@ type Run struct {
 	ShardCount *int `json:"shard_count,omitempty"`
 	// Limit restricts execution to a host pattern, used to target a shard's hosts.
 	Limit string `json:"limit,omitempty"`
+	// Tags runs only Ansible plays and tasks carrying one of these tags. Ignored by other tools.
+	Tags []string `json:"tags,omitempty"`
+	// SkipTags skips Ansible plays and tasks carrying one of these tags. Ignored by other tools.
+	SkipTags []string `json:"skip_tags,omitempty"`
+	// Verbosity raises Ansible logging from 0 to 4, for debugging a run without editing the playbook.
+	Verbosity int `json:"verbosity,omitempty"`
+	// Forks sets how many hosts Ansible addresses in parallel. Zero leaves Ansible's default.
+	Forks int `json:"forks,omitempty"`
+	// DiffMode shows the before-and-after of every Ansible file and template change.
+	DiffMode bool `json:"diff_mode,omitempty"`
 	// Kind distinguishes a plain run from a split or pipeline parent. Empty means a plain run.
 	Kind string `json:"kind,omitempty"`
 	// RetryOf links a split created by a failed shard retry back to the run it retries.
@@ -510,6 +520,58 @@ func WithLimit(pattern string) SubmitOption {
 	return func(r *Run) {
 		r.Limit = pattern
 	}
+}
+
+// WithTags runs only the Ansible plays and tasks carrying one of these tags.
+func WithTags(tags ...string) SubmitOption {
+	return func(r *Run) { r.Tags = cloneNonEmpty(tags) }
+}
+
+// WithSkipTags skips the Ansible plays and tasks carrying one of these tags.
+func WithSkipTags(tags ...string) SubmitOption {
+	return func(r *Run) { r.SkipTags = cloneNonEmpty(tags) }
+}
+
+// WithVerbosity raises Ansible logging from 0 to 4, clamped to that range.
+func WithVerbosity(level int) SubmitOption {
+	return func(r *Run) {
+		if level < 0 {
+			level = 0
+		}
+		if level > 4 {
+			level = 4
+		}
+		r.Verbosity = level
+	}
+}
+
+// WithForks sets how many hosts Ansible addresses in parallel. A value below one leaves the default.
+func WithForks(n int) SubmitOption {
+	return func(r *Run) {
+		if n > 0 {
+			r.Forks = n
+		}
+	}
+}
+
+// WithDiffMode shows the before-and-after of every Ansible file and template change.
+func WithDiffMode(diff bool) SubmitOption {
+	return func(r *Run) { r.DiffMode = diff }
+}
+
+// cloneNonEmpty returns a copy of in with blank entries dropped, or nil when nothing remains, so a
+// stored tag list never carries an empty tag that would widen or narrow a run in a surprising way.
+func cloneNonEmpty(in []string) []string {
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		if s != "" {
+			out = append(out, s)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // WithProposedFrom marks the run as a machine-built reconcile proposal and records the drift check

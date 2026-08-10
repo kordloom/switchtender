@@ -1697,7 +1697,8 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 	spec := roundhouse.Spec{
 		Playbook: r.Playbook, Inventory: r.Inventory, Tool: r.Tool, Command: r.Command,
 		DryRun: dryRun, EventsPath: eventsPath, Limit: r.Limit, ExtraVars: r.ExtraVars,
-		Image: r.Image,
+		Tags: r.Tags, SkipTags: r.SkipTags, Verbosity: r.Verbosity, Forks: r.Forks,
+		DiffMode: r.DiffMode, Image: r.Image,
 	}
 	if r.Image != "" {
 		if err := d.resolvePullCredential(r.PullCredentialID, &spec); err != nil {

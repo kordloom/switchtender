@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/kordloom/switchtender/internal/run"
@@ -91,6 +92,20 @@ type Spec struct {
 	EventsPath string
 	// Limit restricts execution to a host pattern, passed as ansible-playbook --limit.
 	Limit string
+	// Tags, when set, runs only plays and tasks carrying one of these tags, passed as a single
+	// comma-separated ansible-playbook --tags argument.
+	Tags []string
+	// SkipTags, when set, skips plays and tasks carrying one of these tags, passed as a single
+	// comma-separated ansible-playbook --skip-tags argument.
+	SkipTags []string
+	// Verbosity raises ansible-playbook logging from 0 (off) to 4 (-vvvv), for debugging a run
+	// without changing the playbook.
+	Verbosity int
+	// Forks sets how many hosts ansible-playbook addresses in parallel, passed as --forks. Zero
+	// leaves Ansible's own default.
+	Forks int
+	// DiffMode shows the before-and-after of every file and template change, passed as --diff.
+	DiffMode bool
 	// PrivateKeyPath, when set, is passed as ansible-playbook --private-key.
 	PrivateKeyPath string
 	// VaultPasswords are the Ansible Vault passwords for the run. An unlabeled one is passed as
@@ -424,6 +439,25 @@ func playbookArgs(spec Spec) ([]string, error) {
 	}
 	if spec.Limit != "" {
 		args = append(args, "--limit", spec.Limit)
+	}
+	if len(spec.Tags) > 0 {
+		args = append(args, "--tags", strings.Join(spec.Tags, ","))
+	}
+	if len(spec.SkipTags) > 0 {
+		args = append(args, "--skip-tags", strings.Join(spec.SkipTags, ","))
+	}
+	if spec.Forks > 0 {
+		args = append(args, "--forks", strconv.Itoa(spec.Forks))
+	}
+	if spec.DiffMode {
+		args = append(args, "--diff")
+	}
+	// Verbosity is one -v per level, capped at four, which is ansible-playbook's most verbose.
+	if v := spec.Verbosity; v > 0 {
+		if v > 4 {
+			v = 4
+		}
+		args = append(args, "-"+strings.Repeat("v", v))
 	}
 	if spec.DryRun {
 		args = append(args, "--check")

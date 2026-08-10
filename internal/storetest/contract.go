@@ -95,6 +95,8 @@ func sampleRun(id string) *run.Run {
 		ExtraVars: map[string]any{"version": "1.2.3"},
 		Outputs:   map[string]any{"built": true, "count": float64(2)},
 		Tool:      "bash", Command: "echo hi", DryRun: true,
+		Tags: []string{"deploy", "config"}, SkipTags: []string{"slow"},
+		Verbosity: 2, Forks: 10, DiffMode: true,
 		ProposedFrom: "run_check", Intent: "echo hello on the box",
 		IdempotencyKey: "idem_sample",
 		Timeout:        3600,
