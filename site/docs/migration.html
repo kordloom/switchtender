@@ -3,17 +3,17 @@
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
-	<title>Migrate off AWX or Semaphore | SwitchTender docs</title>
-	<meta name="description" content="SwitchTender imports an AWX or Semaphore export and creates the equivalent objects, so moving over is one command rather than a rebuild.">
+	<title>Migrate off AWX, Semaphore, or Rundeck | SwitchTender docs</title>
+	<meta name="description" content="SwitchTender imports an AWX, Semaphore, or Rundeck export, or a plain crontab, and creates the equivalent objects, so moving over is one command rather than a rebuild.">
 	<link rel="canonical" href="https://switchtender.com/docs/migration">
-	<meta property="og:title" content="Migrate off AWX or Semaphore | SwitchTender docs">
-	<meta property="og:description" content="SwitchTender imports an AWX or Semaphore export and creates the equivalent objects, so moving over is one command rather than a rebuild.">
+	<meta property="og:title" content="Migrate off AWX, Semaphore, or Rundeck | SwitchTender docs">
+	<meta property="og:description" content="SwitchTender imports an AWX, Semaphore, or Rundeck export, or a plain crontab, and creates the equivalent objects, so moving over is one command rather than a rebuild.">
 	<meta property="og:type" content="article">
 	<meta property="og:url" content="https://switchtender.com/docs/migration">
 	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
 	<meta name="twitter:card" content="summary_large_image">
-	<meta name="twitter:title" content="Migrate off AWX or Semaphore | SwitchTender docs">
-	<meta name="twitter:description" content="SwitchTender imports an AWX or Semaphore export and creates the equivalent objects, so moving over is one command rather than a rebuild.">
+	<meta name="twitter:title" content="Migrate off AWX, Semaphore, or Rundeck | SwitchTender docs">
+	<meta name="twitter:description" content="SwitchTender imports an AWX, Semaphore, or Rundeck export, or a plain crontab, and creates the equivalent objects, so moving over is one command rather than a rebuild.">
 	<meta name="twitter:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
 	<link rel="icon" href="/favicon.ico" sizes="any">
 	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
@@ -36,19 +36,20 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration" class="active">Migrate off AWX or Semaphore</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/sdk">Extend SwitchTender in Go</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration" class="active">Migrate off AWX, Semaphore, or Rundeck</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/sdk">Extend SwitchTender in Go</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
-			<h1 id="migrate-off-awx-or-semaphore">Migrate off AWX or Semaphore</h1>
-<p>SwitchTender imports an AWX or Semaphore export and creates the equivalent objects, so moving over is
-one command rather than a rebuild.</p>
+			<h1 id="migrate-off-awx-semaphore-or-rundeck">Migrate off AWX, Semaphore, or Rundeck</h1>
+<p>SwitchTender imports an AWX, Semaphore, or Rundeck export, or a plain crontab, and creates the
+equivalent objects, so moving over is one command rather than a rebuild.</p>
 <h2 id="get-an-export">Get an export</h2>
 <ul>
 <li>AWX: <code>awx export</code> produces a JSON document of organizations, projects, inventories, job
 templates, credentials without secrets, schedules, and surveys.</li>
 <li>Semaphore: export the project's repositories, inventories, keys, templates, and schedules as
 JSON.</li>
+<li>Rundeck: export a project's jobs as YAML or JSON, from the project's job list or the API.</li>
 </ul>
 <h2 id="preview-then-apply">Preview, then apply</h2>
 <p>Run the import without <code>--apply</code> first to see exactly what it would create, along with every
@@ -61,6 +62,20 @@ right:</p>
 <pre><code>switchtender import awx awx-export.json --db switchtender.db --apply
 </code></pre>
 <p>Semaphore works the same way with <code>import semaphore</code>.</p>
+<h2 id="import-rundeck-jobs">Import Rundeck jobs</h2>
+<p>Export the jobs from a Rundeck project, in YAML or JSON, and point the importer at the file.</p>
+<pre><code>switchtender import rundeck jobs.yaml --inventory prod --db switchtender.db
+</code></pre>
+<p>Each job becomes a Bash template carrying its step sequence in order, its options become a survey,
+and its schedule becomes a cron schedule. Rundeck dispatches by node filter rather than by inventory
+file, so <code>--inventory</code> says which hosts the jobs target; the report names any job whose node filter
+you should check against the inventory you chose.</p>
+<p>Two details are worth knowing before you run it. A Rundeck schedule is a Quartz expression, which
+counts Sunday as one where cron counts Sunday as zero, so the weekday is renumbered rather than
+copied; a Quartz-only form such as the third Friday of the month has no cron equivalent and is
+reported instead of converted to a day it would fire wrongly on. And a secure option is never
+imported as a survey field, because a survey answer is stored in plain text on the run; the report
+names each one so you can store it as a credential instead.</p>
 <h2 id="import-a-crontab">Import a crontab</h2>
 <p>Fleets that still schedule work from a crontab can bring it under governance in one step. Point the
 importer at a crontab file and it turns each cron line into a governed schedule, so every firing is
@@ -123,6 +138,22 @@ the schedules first, then re-run with <code>--apply</code> to create them.</p>
 <tr>
 <td>Semaphore schedule</td>
 <td>Schedule.</td>
+</tr>
+<tr>
+<td>Rundeck job</td>
+<td>Template running the job's step sequence as one Bash script.</td>
+</tr>
+<tr>
+<td>Rundeck option</td>
+<td>Survey field. An enforced value list becomes a choice; a secure option is refused, not downgraded.</td>
+</tr>
+<tr>
+<td>Rundeck schedule</td>
+<td>Schedule, with the Quartz expression converted and its weekday renumbered.</td>
+</tr>
+<tr>
+<td>Rundeck dispatch thread count</td>
+<td>Template forks.</td>
 </tr>
 </tbody>
 </table>

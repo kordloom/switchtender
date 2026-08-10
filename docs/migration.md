@@ -5,10 +5,10 @@
   </picture>
 </p>
 
-# Migrate off AWX or Semaphore
+# Migrate off AWX, Semaphore, or Rundeck
 
-SwitchTender imports an AWX or Semaphore export and creates the equivalent objects, so moving over is
-one command rather than a rebuild.
+SwitchTender imports an AWX, Semaphore, or Rundeck export, or a plain crontab, and creates the
+equivalent objects, so moving over is one command rather than a rebuild.
 
 ## Get an export
 
@@ -16,6 +16,7 @@ one command rather than a rebuild.
   templates, credentials without secrets, schedules, and surveys.
 - Semaphore: export the project's repositories, inventories, keys, templates, and schedules as
   JSON.
+- Rundeck: export a project's jobs as YAML or JSON, from the project's job list or the API.
 
 ## Preview, then apply
 
@@ -31,6 +32,24 @@ right:
     switchtender import awx awx-export.json --db switchtender.db --apply
 
 Semaphore works the same way with `import semaphore`.
+
+## Import Rundeck jobs
+
+Export the jobs from a Rundeck project, in YAML or JSON, and point the importer at the file.
+
+    switchtender import rundeck jobs.yaml --inventory prod --db switchtender.db
+
+Each job becomes a Bash template carrying its step sequence in order, its options become a survey,
+and its schedule becomes a cron schedule. Rundeck dispatches by node filter rather than by inventory
+file, so `--inventory` says which hosts the jobs target; the report names any job whose node filter
+you should check against the inventory you chose.
+
+Two details are worth knowing before you run it. A Rundeck schedule is a Quartz expression, which
+counts Sunday as one where cron counts Sunday as zero, so the weekday is renumbered rather than
+copied; a Quartz-only form such as the third Friday of the month has no cron equivalent and is
+reported instead of converted to a day it would fire wrongly on. And a secure option is never
+imported as a survey field, because a survey answer is stored in plain text on the run; the report
+names each one so you can store it as a credential instead.
 
 ## Import a crontab
 
@@ -60,6 +79,10 @@ the schedules first, then re-run with `--apply` to create them.
 | Semaphore template | Template, with survey variables mapped.|
 | Semaphore key | Credential shell.|
 | Semaphore schedule | Schedule.|
+| Rundeck job | Template running the job's step sequence as one Bash script.|
+| Rundeck option | Survey field. An enforced value list becomes a choice; a secure option is refused, not downgraded.|
+| Rundeck schedule | Schedule, with the Quartz expression converted and its weekday renumbered.|
+| Rundeck dispatch thread count | Template forks.|
 
 ## Re-enter secrets
 
