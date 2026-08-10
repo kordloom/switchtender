@@ -48,9 +48,13 @@ type importResponse struct {
 // importStoresFunc returns the stores an import writes to, and whether all are enabled.
 type importStoresFunc func() (importer.ApplyStores, bool)
 
-// importHandler previews or applies an AWX or Semaphore export. POST /import/{format} with the
-// export as the body returns the plan; add ?apply=true to write it. Preview needs no stores; apply
-// needs projects, inventories, credentials, templates, and schedules all enabled.
+// importHandler previews or applies an AWX, Semaphore, or Rundeck export. POST /import/{format}
+// with the export as the body returns the plan; add ?apply=true to write it. Preview needs no
+// stores; apply needs projects, inventories, credentials, templates, and schedules all enabled.
+//
+// The Rundeck importer needs an inventory, since Rundeck dispatches by node filter and names no
+// inventory of its own. It comes from the ?inventory= query parameter, and the plan reports its
+// absence rather than refusing, so a preview still shows what the export holds.
 func importHandler(stores importStoresFunc, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var mapper func([]byte, time.Time) (*importer.Plan, error)
@@ -59,8 +63,10 @@ func importHandler(stores importStoresFunc, log *zap.Logger) http.HandlerFunc {
 			mapper = importer.FromAWX
 		case "semaphore":
 			mapper = importer.FromSemaphore
+		case "rundeck":
+			mapper = importer.FromRundeck(r.URL.Query().Get("inventory"))
 		default:
-			respondError(w, log, http.StatusBadRequest, "format must be awx or semaphore")
+			respondError(w, log, http.StatusBadRequest, "format must be awx, semaphore, or rundeck")
 			return
 		}
 		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxImportBody))

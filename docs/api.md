@@ -105,7 +105,7 @@ webhook `/hooks` path, and the `/relay` worker path, is unversioned. The root re
 | GET    | `/v1/policies`             | List approval policies.                                 |
 | PUT    | `/v1/policies/{id}`        | Update an approval policy.                              |
 | DELETE | `/v1/policies/{id}`        | Delete an approval policy.                              |
-| POST   | `/v1/import/{format}`      | Import an AWX or Semaphore export. Format is awx or semaphore.|
+| POST   | `/v1/import/{format}`      | Import an AWX, Semaphore, or Rundeck export. Format is awx, semaphore, or rundeck. Rundeck takes `?inventory=` to say which hosts its jobs target.|
 | GET    | `/v1/audit`                | The mutation trail, admin only.                         |
 | GET    | `/v1/audit/verify`         | Verify the audit hash chain is intact.                  |
 | GET    | `/v1/audit/export`         | Signed, self-verifying snapshot of the audit chain.     |

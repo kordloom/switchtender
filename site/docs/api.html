@@ -516,7 +516,7 @@ webhook <code>/hooks</code> path, and the <code>/relay</code> worker path, is un
 <tr>
 <td>POST</td>
 <td><code>/v1/import/{format}</code></td>
-<td>Import an AWX or Semaphore export. Format is awx or semaphore.</td>
+<td>Import an AWX, Semaphore, or Rundeck export. Format is awx, semaphore, or rundeck. Rundeck takes <code>?inventory=</code> to say which hosts its jobs target.</td>
 </tr>
 <tr>
 <td>GET</td>
