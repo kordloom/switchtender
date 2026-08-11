@@ -54,15 +54,20 @@ func TestSyncerCloneAndUpdate(t *testing.T) {
 	}
 	p := &project.Project{ID: "proj_x", RepoURL: repo, Branch: "main"}
 
-	dir, sha1, _, err := s.Sync(p, "")
+	wt1, err := s.Sync(p, "")
 	if err != nil {
 		t.Fatalf("Sync() clone error = %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "site.yml")); err != nil {
+	defer wt1.Cleanup()
+	if _, err := os.Stat(filepath.Join(wt1.Dir, "site.yml")); err != nil {
 		t.Fatalf("checkout missing site.yml: %v", err)
 	}
-	if len(sha1) != 40 {
-		t.Fatalf("sha = %q, want a full commit hash", sha1)
+	if len(wt1.SHA) != 40 {
+		t.Fatalf("sha = %q, want a full commit hash", wt1.SHA)
+	}
+	// The worktree is isolated, so .git is not copied into it.
+	if _, err := os.Stat(filepath.Join(wt1.Dir, ".git")); !os.IsNotExist(err) {
+		t.Errorf(".git was copied into the run checkout, err = %v", err)
 	}
 
 	// A new commit upstream shows up on the next sync with a new hash.
@@ -71,22 +76,35 @@ func TestSyncerCloneAndUpdate(t *testing.T) {
 	}
 	runGit(t, repo, "commit", "-am", "second")
 
-	dir2, sha2, _, err := s.Sync(p, "")
+	wt2, err := s.Sync(p, "")
 	if err != nil {
 		t.Fatalf("Sync() update error = %v", err)
 	}
-	if dir2 != dir {
-		t.Errorf("checkout moved from %s to %s", dir, dir2)
+	defer wt2.Cleanup()
+	// Each run gets its own checkout, so the second sync does not reuse the first's directory.
+	if wt2.Dir == wt1.Dir {
+		t.Errorf("the second run shares the first's checkout %s, so a concurrent run could change "+
+			"the files under it", wt1.Dir)
 	}
-	if sha2 == sha1 {
+	if wt2.SHA == wt1.SHA {
 		t.Error("sha did not advance after a new commit")
 	}
-	body, err := os.ReadFile(filepath.Join(dir, "site.yml"))
+	// The first worktree still holds the first commit's content: the update did not reach into it.
+	first, err := os.ReadFile(filepath.Join(wt1.Dir, "site.yml"))
 	if err != nil {
-		t.Fatalf("read synced file: %v", err)
+		t.Fatalf("read first checkout: %v", err)
 	}
-	if !strings.Contains(string(body), "v2") {
-		t.Errorf("synced content = %q, want the second commit's content", body)
+	if strings.Contains(string(first), "v2") {
+		t.Errorf("the second sync changed the first run's checkout, which is the race this prevents:\n%s",
+			first)
+	}
+	// The second worktree holds the second commit's content.
+	second, err := os.ReadFile(filepath.Join(wt2.Dir, "site.yml"))
+	if err != nil {
+		t.Fatalf("read second checkout: %v", err)
+	}
+	if !strings.Contains(string(second), "v2") {
+		t.Errorf("second checkout content = %q, want the second commit's content", second)
 	}
 }
 
@@ -138,5 +156,64 @@ func TestValidateRepoURL(t *testing.T) {
 		if err := project.ValidateRepoURL(test.In); !errors.Is(err, test.Want) {
 			t.Errorf("test %d: ValidateRepoURL(%q) error = %v, want %v", i, test.In, err, test.Want)
 		}
+	}
+}
+
+// TestSyncIsolatesConcurrentRuns proves the provenance guarantee under concurrency: a run's checkout
+// holds the commit stamped on it, and a second sync advancing the project does not change the files
+// the first run is still reading.
+//
+// The checkout used to be shared per project and hard reset in place on every sync. A run recorded
+// the commit it synced to and then executed out of that shared directory with no lock held, so a
+// second run of the same project reset the tree mid-execution and the first run ran a mix of two
+// commits while its audit record named only one. That is the audit trail asserting something the
+// files on disk did not support, which is the one failure this product cannot have.
+func TestSyncIsolatesConcurrentRuns(t *testing.T) {
+	t.Parallel()
+	repo := initRepo(t)
+	s, err := project.NewSyncer(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewSyncer() error = %v", err)
+	}
+	p := &project.Project{ID: "proj_race", RepoURL: repo, Branch: "main"}
+
+	// Run one syncs the first commit and keeps its checkout open, as a live run would.
+	wt1, err := s.Sync(p, "")
+	if err != nil {
+		t.Fatalf("first Sync() error = %v", err)
+	}
+	defer wt1.Cleanup()
+	firstContent, err := os.ReadFile(filepath.Join(wt1.Dir, "site.yml"))
+	if err != nil {
+		t.Fatalf("read first checkout: %v", err)
+	}
+
+	// A new commit lands and run two syncs it while run one is still holding its checkout.
+	if err := os.WriteFile(filepath.Join(repo, "site.yml"), []byte("---\n# rewritten\n"), 0o600); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	runGit(t, repo, "commit", "-am", "rewrite")
+	wt2, err := s.Sync(p, "")
+	if err != nil {
+		t.Fatalf("second Sync() error = %v", err)
+	}
+	defer wt2.Cleanup()
+
+	// Run one's checkout is untouched: same directory, same bytes, and its recorded commit still
+	// describes what is on disk.
+	afterContent, err := os.ReadFile(filepath.Join(wt1.Dir, "site.yml"))
+	if err != nil {
+		t.Fatalf("re-read first checkout: %v", err)
+	}
+	if string(afterContent) != string(firstContent) {
+		t.Errorf("the first run's files changed after a second sync:\nbefore %q\nafter  %q",
+			firstContent, afterContent)
+	}
+	if strings.Contains(string(afterContent), "rewritten") {
+		t.Error("the second sync's content reached the first run's checkout, so its recorded commit " +
+			"no longer matches the files it executed")
+	}
+	if wt1.SHA == wt2.SHA {
+		t.Error("both runs recorded the same commit, so the isolation cannot be observed")
 	}
 }

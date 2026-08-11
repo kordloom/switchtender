@@ -1771,7 +1771,9 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 	defer invCleanup()
 	mask.set(invSecrets)
 
-	if err := d.resolveProject(r, &spec); err != nil {
+	projectCleanup, err := d.resolveProject(r, &spec)
+	defer projectCleanup()
+	if err != nil {
 		return fail(err)
 	}
 	d.applyDefaultImage(&spec)

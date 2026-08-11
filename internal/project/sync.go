@@ -3,6 +3,7 @@ package project
 import (
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"net"
 	"net/url"
@@ -50,16 +51,48 @@ func WithGalaxy(server, token string) SyncerOption {
 	}
 }
 
+// runsSubdir holds the per-run isolated worktrees, one directory per Sync call, kept apart from the
+// canonical per-project checkouts that live directly under the cache directory.
+const runsSubdir = ".runs"
+
 // NewSyncer returns a Syncer that caches checkouts under dir, creating it if needed.
 func NewSyncer(dir string, opts ...SyncerOption) (*Syncer, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("create project cache: %w", err)
 	}
+	// A worktree is removed when its run ends, but a crash leaves it behind. Clearing the run
+	// directory on startup keeps a restarted server from accumulating dead checkouts.
+	_ = os.RemoveAll(filepath.Join(dir, runsSubdir))
 	s := &Syncer{cacheDir: dir, locks: make(map[string]*sync.Mutex)}
 	for _, opt := range opts {
 		opt(s)
 	}
 	return s, nil
+}
+
+// Worktree is an isolated checkout of a project at one commit, private to a single Sync caller.
+//
+// A run executes here rather than in the shared per-project checkout, so a second run of the same
+// project can fetch and hard reset that shared checkout without changing the files under the first.
+// Before this, the checkout was shared and the reset happened while the earlier run was still
+// reading it: the run recorded one commit and executed a mix of that commit and the next, which made
+// the commit stamped on the audit record a claim the files on disk did not support.
+type Worktree struct {
+	// Dir is the isolated checkout to execute in.
+	Dir string
+	// SHA is the commit the checkout sits on, the value stamped on the run.
+	SHA string
+	// GalaxyEnv exposes the checkout's installed Ansible roles and collections to the run.
+	GalaxyEnv []string
+	// cleanup removes the isolated checkout.
+	cleanup func()
+}
+
+// Cleanup removes the worktree. It is safe to call on a nil worktree and safe to call more than once.
+func (w *Worktree) Cleanup() {
+	if w != nil && w.cleanup != nil {
+		w.cleanup()
+	}
 }
 
 // lock returns the mutex for a project id, creating it on first use.
@@ -74,14 +107,15 @@ func (s *Syncer) lock(id string) *sync.Mutex {
 	return l
 }
 
-// Sync brings the project's checkout up to date with its remote and returns the checkout path, the
-// commit it now sits on, and any environment entries that point Ansible at the project's installed
-// role and collection dependencies. sshKey is the PEM private key for private remotes, empty
-// otherwise. When the project has InstallDeps set, a present requirements file triggers an
-// ansible-galaxy install into a project-scoped path under the checkout, all under the sync lock.
-func (s *Syncer) Sync(p *Project, sshKey string) (dir, sha string, galaxyEnv []string, err error) {
+// Sync brings the project's canonical checkout up to date with its remote, then returns a private
+// per-run Worktree copied from it: the commit it sits on and the environment that exposes its
+// installed role and collection dependencies. sshKey is the PEM private key for private remotes,
+// empty otherwise. When the project has InstallDeps set, a present requirements file triggers an
+// ansible-galaxy install into the canonical checkout, all under the sync lock, and the result is
+// copied into the worktree. The caller runs in the worktree and calls its Cleanup when the run ends.
+func (s *Syncer) Sync(p *Project, sshKey string) (*Worktree, error) {
 	if err := ValidateRepoURL(p.RepoURL); err != nil {
-		return "", "", nil, err
+		return nil, err
 	}
 
 	l := s.lock(p.ID)
@@ -90,37 +124,74 @@ func (s *Syncer) Sync(p *Project, sshKey string) (dir, sha string, galaxyEnv []s
 
 	auth, err := authFor(sshKey)
 	if err != nil {
-		return "", "", nil, err
+		return nil, err
 	}
-	dir = filepath.Join(s.cacheDir, p.ID)
+	canonical := filepath.Join(s.cacheDir, p.ID)
 
-	repo, err := git.PlainOpen(dir)
+	repo, err := git.PlainOpen(canonical)
 	if err != nil {
-		repo, err = git.PlainClone(dir, false, &git.CloneOptions{
+		repo, err = git.PlainClone(canonical, false, &git.CloneOptions{
 			URL: p.RepoURL, Auth: auth, ReferenceName: branchRef(p.Branch), SingleBranch: true,
 		})
 		if err != nil {
-			return "", "", nil, fmt.Errorf("clone %s: %w", redactRepoURL(p.RepoURL), err)
+			return nil, fmt.Errorf("clone %s: %w", redactRepoURL(p.RepoURL), err)
 		}
 	} else {
 		if err := fetchAndReset(repo, p, auth); err != nil {
-			return "", "", nil, err
+			return nil, err
 		}
 	}
 
 	head, err := repo.Head()
 	if err != nil {
-		return "", "", nil, fmt.Errorf("resolve head: %w", err)
+		return nil, fmt.Errorf("resolve head: %w", err)
 	}
-	sha = head.Hash().String()
+	sha := head.Hash().String()
 
+	var wantRoles, wantCollections bool
 	if p.InstallDeps {
-		galaxyEnv, err = s.installGalaxy(dir)
+		wantRoles, wantCollections, err = s.installGalaxy(canonical)
 		if err != nil {
-			return "", "", nil, err
+			return nil, err
 		}
 	}
-	return dir, sha, galaxyEnv, nil
+
+	// Copy the canonical checkout to a private directory while the lock is held, so the copy is a
+	// consistent snapshot of this exact commit. The run executes from the copy, so the next sync,
+	// which resets the canonical checkout, cannot reach it. The galaxy dependencies were installed
+	// into the canonical checkout and are copied with it, so the copy is self-contained and no
+	// dependency install runs per run.
+	runDir, err := s.isolate(p.ID, canonical)
+	if err != nil {
+		return nil, err
+	}
+	return &Worktree{
+		Dir:       runDir,
+		SHA:       sha,
+		GalaxyEnv: galaxyEnvIn(runDir, wantRoles, wantCollections),
+		cleanup:   func() { _ = os.RemoveAll(runDir) },
+	}, nil
+}
+
+// isolate copies a project's canonical checkout to a fresh per-run directory and returns its path.
+// The .git directory is left behind: a run executes source, not history, and the repository metadata
+// is the largest part of a checkout and the part a run never reads.
+func (s *Syncer) isolate(projectID, canonical string) (string, error) {
+	base := filepath.Join(s.cacheDir, runsSubdir)
+	if err := os.MkdirAll(base, 0o700); err != nil {
+		return "", fmt.Errorf("create run checkout base: %w", err)
+	}
+	runDir, err := os.MkdirTemp(base, projectID+"-")
+	if err != nil {
+		return "", fmt.Errorf("create run checkout: %w", err)
+	}
+	if err := copyTree(canonical, runDir, func(rel string) bool {
+		return rel == ".git" || strings.HasPrefix(rel, ".git"+string(os.PathSeparator))
+	}); err != nil {
+		_ = os.RemoveAll(runDir)
+		return "", fmt.Errorf("isolate checkout: %w", err)
+	}
+	return runDir, nil
 }
 
 // requirementFiles names the checkout-relative paths where Ansible dependency requirements live.
@@ -131,41 +202,107 @@ var requirementFiles = []string{
 }
 
 // installGalaxy installs the checkout's Ansible role and collection requirements into a
-// project-scoped path and returns the environment entries that expose them to a run. A missing
-// requirements file is a no-op; a galaxy failure is a real dependency problem and is returned so
-// the run fails with the galaxy output.
-func (s *Syncer) installGalaxy(checkout string) ([]string, error) {
+// project-scoped path under the checkout, and reports which kinds were installed so a run's
+// environment can point at them wherever the checkout is executed from. A missing requirements file
+// is a no-op; a galaxy failure is a real dependency problem and is returned so the run fails with the
+// galaxy output.
+func (s *Syncer) installGalaxy(checkout string) (wantRoles, wantCollections bool, err error) {
 	galaxyDir := filepath.Join(checkout, ".galaxy")
 	rolesPath := filepath.Join(galaxyDir, "roles")
 	collectionsPath := filepath.Join(galaxyDir, "collections")
 
-	var wantRoles, wantCollections bool
 	for _, name := range requirementFiles {
 		path := filepath.Join(checkout, name)
 		roles, collections := requirementKinds(path)
 		if roles {
 			if out, err := s.runGalaxy(checkout, "role", "install", "-r", path, "-p", rolesPath); err != nil {
-				return nil, fmt.Errorf("ansible-galaxy role install %s: %w: %s", name, err, out)
+				return false, false, fmt.Errorf("ansible-galaxy role install %s: %w: %s", name, err, out)
 			}
 			wantRoles = true
 		}
 		if collections {
 			out, err := s.runGalaxy(checkout, "collection", "install", "-r", path, "-p", collectionsPath)
 			if err != nil {
-				return nil, fmt.Errorf("ansible-galaxy collection install %s: %w: %s", name, err, out)
+				return false, false, fmt.Errorf("ansible-galaxy collection install %s: %w: %s", name, err, out)
 			}
 			wantCollections = true
 		}
 	}
+	return wantRoles, wantCollections, nil
+}
 
+// galaxyEnvIn returns the Ansible environment that points at the roles and collections installed
+// under dir, for the kinds that were installed. The paths are computed from dir so a copy of the
+// checkout exposes its own dependencies rather than the checkout they were copied from.
+func galaxyEnvIn(dir string, wantRoles, wantCollections bool) []string {
 	var env []string
 	if wantRoles {
-		env = append(env, "ANSIBLE_ROLES_PATH="+rolesPath)
+		env = append(env, "ANSIBLE_ROLES_PATH="+filepath.Join(dir, ".galaxy", "roles"))
 	}
 	if wantCollections {
-		env = append(env, "ANSIBLE_COLLECTIONS_PATH="+collectionsPath)
+		env = append(env, "ANSIBLE_COLLECTIONS_PATH="+filepath.Join(dir, ".galaxy", "collections"))
 	}
-	return env, nil
+	return env
+}
+
+// copyTree recursively copies src to dst, which must already exist. A relative path for which skip
+// returns true, and everything beneath it, is left out. File modes are preserved so an executable
+// script stays executable, and a symlink is recreated as a symlink rather than followed, so the copy
+// carries the same links the checkout did and no link is dereferenced across the tree boundary.
+func copyTree(src, dst string, skip func(rel string) bool) error {
+	return filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		if rel == "." {
+			return nil
+		}
+		if skip != nil && skip(rel) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		target := filepath.Join(dst, rel)
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		switch {
+		case d.IsDir():
+			return os.MkdirAll(target, info.Mode().Perm())
+		case info.Mode()&os.ModeSymlink != 0:
+			link, err := os.Readlink(path)
+			if err != nil {
+				return err
+			}
+			return os.Symlink(link, target)
+		default:
+			return copyFile(path, target, info.Mode().Perm())
+		}
+	})
+}
+
+// copyFile copies one regular file's contents to dst with the given mode.
+func copyFile(src, dst string, mode fs.FileMode) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = in.Close() }()
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
+		return err
+	}
+	return out.Close()
 }
 
 // requirementKinds reports whether a requirements file declares roles or collections. A bare list

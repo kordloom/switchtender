@@ -39,62 +39,68 @@ func (d *Dispatcher) validateProject(ctx context.Context, id string) error {
 }
 
 // resolveProject syncs the run's project and rewrites the spec so the playbook and inventory
-// resolve inside the checkout. It stamps the commit the run executes on.
-func (d *Dispatcher) resolveProject(r *run.Run, spec *roundhouse.Spec) error {
+// resolve inside an isolated per-run checkout. It stamps the commit the run executes on and returns
+// a cleanup that removes the checkout, which the caller defers so the copy does not outlive the run.
+// The returned cleanup is always safe to call, including on the error paths.
+func (d *Dispatcher) resolveProject(r *run.Run, spec *roundhouse.Spec) (cleanup func(), err error) {
+	cleanup = func() {}
 	if r.ProjectID == "" {
-		return nil
+		return cleanup, nil
 	}
 	if d.projects == nil || d.syncer == nil {
-		return project.ErrNotFound
+		return cleanup, project.ErrNotFound
 	}
 	p, err := d.projects.Get(context.Background(), r.ProjectID)
 	if err != nil {
-		return fmt.Errorf("project %s: %w", r.ProjectID, err)
+		return cleanup, fmt.Errorf("project %s: %w", r.ProjectID, err)
 	}
 
 	sshKey := ""
 	if p.CredentialID != "" {
 		if d.credentials == nil || d.sealer == nil {
-			return credential.ErrNoKey
+			return cleanup, credential.ErrNoKey
 		}
 		c, err := d.credentials.Get(context.Background(), p.CredentialID)
 		if err != nil {
-			return fmt.Errorf("project credential %s: %w", p.CredentialID, err)
+			return cleanup, fmt.Errorf("project credential %s: %w", p.CredentialID, err)
 		}
 		if sshKey, err = d.sealer.Open(c.Secret); err != nil {
-			return fmt.Errorf("decrypt project credential: %w", err)
+			return cleanup, fmt.Errorf("decrypt project credential: %w", err)
 		}
 	}
 
-	dir, sha, galaxyEnv, err := d.syncer.Sync(p, sshKey)
+	wt, err := d.syncer.Sync(p, sshKey)
 	if err != nil {
-		return fmt.Errorf("sync project %s: %w", p.Name, err)
+		return cleanup, fmt.Errorf("sync project %s: %w", p.Name, err)
 	}
-	spec.Env = append(spec.Env, galaxyEnv...)
+	// From here a checkout exists on disk, so every return removes it. A caller that gets a non-nil
+	// cleanup and an error still calls cleanup, so this cannot leak the copy on a later failure.
+	cleanup = wt.Cleanup
+	spec.Env = append(spec.Env, wt.GalaxyEnv...)
 
-	playbook, err := project.WithinRepo(dir, r.Playbook)
+	playbook, err := project.WithinRepo(wt.Dir, r.Playbook)
 	if err != nil {
-		return fmt.Errorf("playbook %q: %w", r.Playbook, err)
+		return cleanup, fmt.Errorf("playbook %q: %w", r.Playbook, err)
 	}
 	spec.Playbook = playbook
 	if r.Inventory != "" {
-		inventory, err := project.WithinRepo(dir, r.Inventory)
+		inventory, err := project.WithinRepo(wt.Dir, r.Inventory)
 		if err != nil {
-			return fmt.Errorf("inventory %q: %w", r.Inventory, err)
+			return cleanup, fmt.Errorf("inventory %q: %w", r.Inventory, err)
 		}
 		spec.Inventory = inventory
 	}
-	spec.Dir = dir
-	r.CommitSHA = sha
+	spec.Dir = wt.Dir
+	r.CommitSHA = wt.SHA
 
 	// The run's own image, from the request or its template, outranks the project's.
 	if p.Image != "" && spec.Image == "" {
 		spec.Image = p.Image
 		if err := d.resolvePullCredential(p.PullCredentialID, spec); err != nil {
-			return err
+			return cleanup, err
 		}
 	}
-	return nil
+	return cleanup, nil
 }
 
 // applyDefaultImage falls back to the server-wide default execution image when a run, its template,

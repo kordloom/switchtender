@@ -101,11 +101,14 @@ func (d *Dispatcher) dumpSource(ctx context.Context, src *invsource.Source) ([]b
 		if err != nil {
 			return nil, fmt.Errorf("source project %s: %w", src.ProjectID, err)
 		}
-		dir, _, _, err := d.syncer.Sync(p, "")
+		wt, err := d.syncer.Sync(p, "")
 		if err != nil {
 			return nil, fmt.Errorf("sync source project: %w", err)
 		}
-		if sourcePath, err = project.WithinRepo(dir, src.Source); err != nil {
+		// The refresh reads the inventory script out of the checkout, so the isolated copy is removed
+		// only once the dump below has finished with it.
+		defer wt.Cleanup()
+		if sourcePath, err = project.WithinRepo(wt.Dir, src.Source); err != nil {
 			return nil, fmt.Errorf("source path %q: %w", src.Source, err)
 		}
 	} else if err := validateBareSource(src.Source); err != nil {
