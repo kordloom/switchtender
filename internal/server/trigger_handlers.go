@@ -383,7 +383,7 @@ func hookHandler(triggers trigger.Store, templates template.Store, submitter Sub
 			if existing.AuditReceipt != "" {
 				w.Header().Set(AuditReceiptHeader, existing.AuditReceipt)
 			}
-			respondJSON(w, log, http.StatusAccepted, existing, wantsPretty(r))
+			respondJSON(w, log, http.StatusAccepted, maskRun(existing), wantsPretty(r))
 			return
 		}
 

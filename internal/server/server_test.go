@@ -2279,3 +2279,60 @@ func TestSignInDoesNotAppendToTheAuditChain(t *testing.T) {
 			"grow the audit chain without bound", len(chain))
 	}
 }
+
+// TestLaunchRefusesAMalformedBody pins that a launch whose body does not parse is refused rather
+// than read as empty.
+//
+// The blast radius is why this matters. A caller asking to limit a run to one canary host, whose body
+// was truncated in transit or whose limit was sent as a number, previously got a 202 and a live run
+// against the entire inventory: the decode error was discarded, so every override the caller asked
+// for silently vanished and nothing in the response said so. An empty body still means no overrides,
+// which is a real and different case.
+func TestLaunchRefusesAMalformedBody(t *testing.T) {
+	t.Parallel()
+	store := template.NewMemStore()
+	tpl := &template.Template{
+		ID: "tpl_blast", Name: "deploy", Playbook: "site.yml", Inventory: "whole-fleet.ini",
+	}
+	if err := store.Save(context.Background(), tpl); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	tests := []struct {
+		Name       string
+		Body       string
+		WantStatus int
+		WantRun    bool
+	}{
+		{
+			Name: "truncated body naming a limit", Body: `{"limit":"canary-01"`,
+			WantStatus: http.StatusBadRequest, WantRun: false,
+		},
+		{
+			Name: "limit sent as a number", Body: `{"limit":42}`,
+			WantStatus: http.StatusBadRequest, WantRun: false,
+		},
+		{
+			Name: "empty body is still a valid launch", Body: "",
+			WantStatus: http.StatusAccepted, WantRun: true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.Name, func(t *testing.T) {
+			t.Parallel()
+			sub := &fakeSubmitter{run: &run.Run{ID: "run_new", Status: run.StatusPending}}
+			handler := New(run.NewMemStore(), sub, zap.NewNop(), WithTemplates(store)).Handler()
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost,
+				"/v1/templates/"+tpl.ID+"/launch", strings.NewReader(test.Body)))
+
+			if rec.Code != test.WantStatus {
+				t.Errorf("status = %d, want %d: %s", rec.Code, test.WantStatus, rec.Body.String())
+			}
+			if got := sub.gotRun != nil; got != test.WantRun {
+				t.Errorf("a run was submitted = %v, want %v; a refused launch must not reach the "+
+					"fleet", got, test.WantRun)
+			}
+		})
+	}
+}

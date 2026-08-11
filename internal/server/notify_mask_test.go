@@ -1,6 +1,9 @@
 package server
 
 import (
+	"os"
+	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -67,5 +70,42 @@ func TestRestoreKeepsRicherChannels(t *testing.T) {
 		return t.Kind == run.NotifyTwilio && t.To == "+15550100"
 	}) {
 		t.Error("the twilio recipient was dropped")
+	}
+}
+
+// TestEveryRunResponseIsMasked pins that no handler answers with a run carrying live notification
+// secrets. It reads the handler sources rather than driving each endpoint, because the defect it
+// guards against is a new handler forgetting the mask, and a test that drives only today's endpoints
+// would not see tomorrow's.
+//
+// Three paths shipped unmasked: the template launch response, the proposed-run apply response, and
+// the webhook dedupe response, which answers an unauthenticated sender. Each returned the run with
+// its Slack or PagerDuty target intact, so a caller holding only permission to fire a template could
+// read the channel secrets behind it.
+func TestEveryRunResponseIsMasked(t *testing.T) {
+	t.Parallel()
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatalf("Glob() error = %v", err)
+	}
+	// A response carrying one of these values is a run, and a run leaves only through maskRun.
+	runValues := regexp.MustCompile(`respondJSON\([^)]*?,\s*(created|existing|launched|rn|got)\s*,`)
+	for _, f := range files {
+		if strings.HasSuffix(f, "_test.go") {
+			continue
+		}
+		src, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatalf("ReadFile(%s) error = %v", f, err)
+		}
+		for _, line := range strings.Split(string(src), "\n") {
+			if !runValues.MatchString(line) {
+				continue
+			}
+			if !strings.Contains(line, "maskRun(") {
+				t.Errorf("%s answers with an unmasked run, so its notification targets leak:\n  %s",
+					f, strings.TrimSpace(line))
+			}
+		}
 	}
 }

@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"maps"
 	"net/http"
 	"slices"
@@ -418,10 +419,20 @@ func launchTemplateHandler(store template.Store, submitter Submitter, authz *aut
 		}
 
 		// Decode the optional launch body: survey answers and a chosen credential subset. An empty
-		// body is valid and means no answers and no selection.
+		// body is valid and means no answers and no selection, but a malformed one is refused rather
+		// than silently read as empty.
+		//
+		// Discarding this error made a broken body launch the template with none of its overrides. A
+		// caller asking for a limit of one canary host, whose body was truncated or whose limit was
+		// sent as a number, got a live run against the whole inventory and a 202 saying it worked.
+		// Nothing about the response distinguished that from the run they asked for.
 		var launchReq launchTemplateRequest
 		if r.Body != nil {
-			_ = json.NewDecoder(r.Body).Decode(&launchReq)
+			if err := json.NewDecoder(r.Body).Decode(&launchReq); err != nil && !errors.Is(err, io.EOF) {
+				respondError(w, log, http.StatusBadRequest,
+					"launch body is not valid JSON: "+err.Error())
+				return
+			}
 		}
 
 		// A launch may choose only from the template's selectable set, so it cannot pull an arbitrary
@@ -529,6 +540,6 @@ func launchTemplateHandler(store template.Store, submitter Submitter, authz *aut
 			return
 		}
 		w.Header().Set("Location", "/v1/runs/"+created.ID)
-		respondJSON(w, log, http.StatusAccepted, created, wantsPretty(r))
+		respondJSON(w, log, http.StatusAccepted, maskRun(created), wantsPretty(r))
 	}
 }
