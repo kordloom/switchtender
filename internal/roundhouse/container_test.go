@@ -63,17 +63,22 @@ func TestRunArgs(t *testing.T) {
 		"--pids-limit 512",
 		"--network bridge",
 		"-w /checkout",
-		"--env-file /tmp/env",
+		// The env is mounted and sourced, never passed with --env-file, so its values never enter the
+		// container's inspectable environment.
+		"-v /tmp/env:/tmp/env:ro",
 		"-v /checkout:/checkout:ro",
-		"quay.io/ansible/creator-ee:latest ansible-playbook",
+		`sh -c . "$1"; shift; exec "$@" sh /tmp/env ansible-playbook`,
 		"-i /checkout/hosts.ini --limit web01 -- /checkout/site.yml",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("runArgs() = %q, missing %q", joined, want)
 		}
 	}
-	// The image must precede the ansible-playbook command, not appear as a mount.
-	if idx := slices.Index(args, spec.Image); idx == -1 || args[idx+1] != "ansible-playbook" {
+	if strings.Contains(joined, "--env-file") {
+		t.Errorf("runArgs() passes --env-file, which would expose secrets to docker inspect: %v", args)
+	}
+	// The image must precede the shell wrapper that sources the env and execs the tool.
+	if idx := slices.Index(args, spec.Image); idx == -1 || args[idx+1] != "sh" {
 		t.Errorf("image not positioned before the command: %v", args)
 	}
 }

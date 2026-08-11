@@ -181,7 +181,6 @@ func (c *containerRunner) runArgs(spec Spec, plan containerPlan, name, envFile s
 	if plan.workdir != "" {
 		args = append(args, "-w", plan.workdir)
 	}
-	args = append(args, "--env-file", envFile)
 
 	mounts := newMountSet()
 	var addErr error
@@ -192,6 +191,15 @@ func (c *containerRunner) runArgs(spec Spec, plan containerPlan, name, envFile s
 	}
 	for _, m := range plan.mounts {
 		addMount(m.path, !m.writable)
+	}
+	// The environment, credentials and all, is mounted and sourced inside the container rather than
+	// passed with --env-file. --env-file copies every value into the container's Config.Env, which
+	// docker inspect returns for the life of the container, so a resolved secret was readable by
+	// anything that could inspect the run. Mounting the file read-only and sourcing it in a shell
+	// wrapper keeps the values out of Config.Env; inspect shows only the mount path. The file is 0600
+	// and the container runs as its owner (see the --user flag above), so nothing else can read it.
+	if envFile != "" {
+		addMount(envFile, true)
 	}
 	if spec.EventsPath != "" {
 		dir, err := c.plugin.ensure()
@@ -208,21 +216,46 @@ func (c *containerRunner) runArgs(spec Spec, plan containerPlan, name, envFile s
 	args = append(args, mounts.args()...)
 
 	args = append(args, spec.Image)
+	if envFile != "" {
+		return append(args, sourceEnvArgv(envFile, plan.argv)...), nil
+	}
 	return append(args, plan.argv...), nil
+}
+
+// sourceEnvArgv wraps the tool argv so the container sources the mounted env file before running it.
+// The file holds shell-safe "export KEY='...'" lines, so a value with a space, a quote, or a dollar
+// sign survives intact. $0 is sh, $1 is the env path; sourcing it exports the run's environment,
+// shift drops the path, and exec replaces the shell with the tool argv verbatim. This is why a
+// container image must carry a POSIX shell, which every built-in tool's image already does.
+func sourceEnvArgv(envFile string, argv []string) []string {
+	wrapper := []string{"sh", "-c", `. "$1"; shift; exec "$@"`, "sh", envFile}
+	return append(wrapper, argv...)
 }
 
 // writeEnvFile writes the run's environment, the tool's extra environment, and, for Ansible, the
 // callback variables to a temp file passed as --env-file so secret values never appear on the
 // command line. It returns the path and a cleanup.
 func (c *containerRunner) writeEnvFile(spec Spec, extraEnv []string) (string, func(), error) {
-	lines := append([]string{}, spec.Env...)
-	lines = append(lines, extraEnv...)
+	env := append([]string{}, spec.Env...)
+	env = append(env, extraEnv...)
 	if spec.EventsPath != "" {
 		dir, err := c.plugin.ensure()
 		if err != nil {
 			return "", func() {}, err
 		}
-		lines = append(lines, callbackEnv(dir, spec.EventsPath)...)
+		env = append(env, callbackEnv(dir, spec.EventsPath)...)
+	}
+	// No environment means no file and no shell wrapper: a run that injects nothing runs the tool
+	// directly, so a container image without a shell is only a constraint for a run that has env to
+	// source, which in practice is every run that carries a credential.
+	lines := make([]string, 0, len(env))
+	for _, kv := range env {
+		if line := shellExport(kv); line != "" {
+			lines = append(lines, line)
+		}
+	}
+	if len(lines) == 0 {
+		return "", func() {}, nil
 	}
 
 	f, err := os.CreateTemp("", "switchtender-env-*")
@@ -235,16 +268,28 @@ func (c *containerRunner) writeEnvFile(spec Spec, extraEnv []string) (string, fu
 		_ = f.Close()
 		return "", cleanup, err
 	}
-	if len(lines) > 0 {
-		if _, err := f.WriteString(strings.Join(lines, "\n") + "\n"); err != nil {
-			_ = f.Close()
-			return "", cleanup, err
-		}
+	if _, err := f.WriteString(strings.Join(lines, "\n") + "\n"); err != nil {
+		_ = f.Close()
+		return "", cleanup, err
 	}
 	if err := f.Close(); err != nil {
 		return "", cleanup, err
 	}
 	return path, cleanup, nil
+}
+
+// shellExport turns a KEY=VALUE environment entry into a POSIX sh statement that exports it, with the
+// value single-quoted so any character in it, a space, a dollar sign, a backtick, a newline, is taken
+// literally. Each embedded single quote is closed, escaped, and reopened, the standard way to place
+// an arbitrary string inside single quotes. An entry without an '=' is not an assignment and is
+// skipped. The result is sourced inside the container, which is what keeps secrets out of the
+// command line and out of the container's inspectable environment.
+func shellExport(kv string) string {
+	key, value, ok := strings.Cut(kv, "=")
+	if !ok || key == "" {
+		return ""
+	}
+	return "export " + key + "='" + strings.ReplaceAll(value, "'", `'\''`) + "'"
 }
 
 // login authenticates to the image's registry so a private execution environment can be pulled. The
