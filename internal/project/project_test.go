@@ -217,3 +217,75 @@ func TestSyncIsolatesConcurrentRuns(t *testing.T) {
 		t.Error("both runs recorded the same commit, so the isolation cannot be observed")
 	}
 }
+
+// TestSyncFollowsARepointedProject checks that changing a project's remote or branch changes what
+// runs, which is the whole reason an operator makes that edit.
+//
+// The cached checkout carries the remote and branch it was cloned with, and a fetch only ever asks
+// that remote for that branch. So a project repointed at a corrected repository kept executing the
+// old one, indefinitely, with nothing in the run saying the change had been ignored. That is the
+// dangerous direction: the edit is made precisely because the old source is wrong.
+func TestSyncFollowsARepointedProject(t *testing.T) {
+	t.Parallel()
+	oldRepo := initRepo(t)
+	newRepo := initRepo(t)
+	// A file that exists only in the new remote, so its presence proves which one was checked out.
+	if err := os.WriteFile(filepath.Join(newRepo, "moved.yml"), []byte("---\n"), 0o600); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	runGit(t, newRepo, "add", ".")
+	runGit(t, newRepo, "commit", "-m", "only in the new remote")
+
+	s, err := project.NewSyncer(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewSyncer() error = %v", err)
+	}
+	p := &project.Project{ID: "proj_moved", RepoURL: oldRepo, Branch: "main"}
+	if _, err := s.Sync(p, ""); err != nil {
+		t.Fatalf("Sync() first error = %v", err)
+	}
+
+	// The operator repoints the project. The next run must execute the new remote.
+	p.RepoURL = newRepo
+	wt, err := s.Sync(p, "")
+	if err != nil {
+		t.Fatalf("Sync() after repoint error = %v", err)
+	}
+	defer wt.Cleanup()
+	if _, err := os.Stat(filepath.Join(wt.Dir, "moved.yml")); err != nil {
+		t.Errorf("the run still executes the old remote after the project was repointed: %v", err)
+	}
+}
+
+// TestSyncFollowsASwitchedBranch is the same failure through the other field: a project moved to a
+// different branch kept running the branch it was cloned on.
+func TestSyncFollowsASwitchedBranch(t *testing.T) {
+	t.Parallel()
+	repo := initRepo(t)
+	runGit(t, repo, "checkout", "-b", "release")
+	if err := os.WriteFile(filepath.Join(repo, "release-only.yml"), []byte("---\n"), 0o600); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-m", "only on release")
+	runGit(t, repo, "checkout", "main")
+
+	s, err := project.NewSyncer(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewSyncer() error = %v", err)
+	}
+	p := &project.Project{ID: "proj_branch", RepoURL: repo, Branch: "main"}
+	if _, err := s.Sync(p, ""); err != nil {
+		t.Fatalf("Sync() first error = %v", err)
+	}
+
+	p.Branch = "release"
+	wt, err := s.Sync(p, "")
+	if err != nil {
+		t.Fatalf("Sync() after branch switch error = %v", err)
+	}
+	defer wt.Cleanup()
+	if _, err := os.Stat(filepath.Join(wt.Dir, "release-only.yml")); err != nil {
+		t.Errorf("the run still executes the old branch after the project was switched: %v", err)
+	}
+}

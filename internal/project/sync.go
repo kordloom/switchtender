@@ -129,6 +129,18 @@ func (s *Syncer) Sync(p *Project, sshKey string) (*Worktree, error) {
 	canonical := filepath.Join(s.cacheDir, p.ID)
 
 	repo, err := git.PlainOpen(canonical)
+	// A checkout that no longer matches the project it belongs to is discarded and taken again. The
+	// cached copy carries the remote and branch it was cloned with, and fetching only ever asks that
+	// remote for that branch, so an operator who repointed a project kept running the code it used to
+	// hold. That is the dangerous direction: the change is made precisely because the old source is
+	// wrong, and nothing in the run says it was ignored. Re-cloning costs one fetch on a change that
+	// is rare, and it is correct for a moved remote and a switched branch alike.
+	if err == nil && !matchesProject(repo, p) {
+		if rmErr := os.RemoveAll(canonical); rmErr != nil {
+			return nil, fmt.Errorf("discard stale checkout: %w", rmErr)
+		}
+		err = git.ErrRepositoryNotExists
+	}
 	if err != nil {
 		repo, err = git.PlainClone(canonical, false, &git.CloneOptions{
 			URL: p.RepoURL, Auth: auth, ReferenceName: branchRef(p.Branch), SingleBranch: true,
@@ -605,4 +617,26 @@ func WithinRepo(root, rel string) (string, error) {
 		return "", ErrEscapesRepo
 	}
 	return joined, nil
+}
+
+// matchesProject reports whether an existing checkout was taken from the project's current remote and
+// branch. A checkout that does not match is stale in a way fetching cannot repair, because a fetch
+// asks the remote the checkout already has.
+func matchesProject(repo *git.Repository, p *Project) bool {
+	origin, err := repo.Remote("origin")
+	if err != nil || origin.Config() == nil || len(origin.Config().URLs) == 0 {
+		return false
+	}
+	if origin.Config().URLs[0] != p.RepoURL {
+		return false
+	}
+	if p.Branch == "" {
+		// The project follows the remote's default branch, so whatever the checkout is on is right.
+		return true
+	}
+	head, err := repo.Head()
+	if err != nil {
+		return false
+	}
+	return head.Name().Short() == p.Branch
 }
