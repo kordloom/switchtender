@@ -344,6 +344,15 @@ func containerPullPolicyFromFlags() string {
 	}
 }
 
+// newSelectiveRunnerFromFlags builds the run executor shared by serve and worker. The container
+// flags decide the runtime, the pull policy, and the resource caps, while the caller passes the
+// command's own execution-environment and digest-pinning flags. Both commands go through here so a
+// cap or a policy can never reach one executor and miss the other.
+func newSelectiveRunnerFromFlags(allowContainer, requireDigest bool) roundhouse.Runner {
+	return roundhouse.NewSelectiveRunner(allowContainer, containerRuntimeFromFlags(),
+		containerPullPolicyFromFlags(), requireDigest, containerLimitsFromFlags())
+}
+
 // galaxyServer holds the --galaxy-server flag: a private Ansible Galaxy or Automation Hub URL.
 var galaxyServer string
 
@@ -811,8 +820,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	defer closePlugins()
 
 	hub := live.NewHub()
-	runner := roundhouse.NewSelectiveRunner(serveAllowContainerEE, containerRuntimeFromFlags(),
-		containerPullPolicyFromFlags(), serveRequireImageDigest, containerLimitsFromFlags())
+	runner := newSelectiveRunnerFromFlags(serveAllowContainerEE, serveRequireImageDigest)
 	syncer, err := project.NewSyncer(projectCacheDir(), galaxySyncerOpts()...)
 	if err != nil {
 		return fmt.Errorf("project cache: %w", err)
