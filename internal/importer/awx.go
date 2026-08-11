@@ -171,6 +171,10 @@ type awxJobTemplate struct {
 	Related *awxRelated `json:"related"`
 }
 
+// checkMode reports whether the template runs in Ansible's no-change mode. AWX spells it as a job
+// type rather than a flag, and both the template and the workflow import paths ask the same way.
+func (t awxJobTemplate) checkMode() bool { return strings.EqualFold(t.JobType, "check") }
+
 // awxRelated holds a job template's nested related assets.
 type awxRelated struct {
 	// SurveySpec is the survey.
@@ -366,7 +370,7 @@ func FromAWX(data []byte, now time.Time) (*Plan, error) {
 	}
 	// Workflows come after the job templates they run, since each node's step inlines the playbook
 	// of the template it points at.
-	plan.addWorkflows(export, now, projectIDs, inventoryIDs)
+	plan.addWorkflows(export, now, projectIDs, inventoryIDs, credentialIDs)
 	reportUnmapped(plan, export)
 	return plan, nil
 }
@@ -430,7 +434,7 @@ func (p *Plan) addTemplate(jt awxJobTemplate, now time.Time,
 		Forks:     jt.Forks,
 		Timeout:   jt.Timeout,
 		DiffMode:  jt.DiffMode,
-		DryRun:    strings.EqualFold(jt.JobType, "check"),
+		DryRun:    jt.checkMode(),
 	}
 	if name := string(jt.Project); name != "" {
 		if id, ok := projectIDs[name]; ok {
