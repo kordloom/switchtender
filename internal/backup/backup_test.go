@@ -43,6 +43,7 @@ func freshStores() Stores {
 		Orgs:             org.NewMemStore(),
 		Grants:           grant.NewMemStore(),
 		Policies:         policy.NewMemStore(),
+		CredentialTypes:  credential.NewMemTypeStore(),
 	}
 }
 
@@ -242,6 +243,11 @@ func TestRoundTripCarriesGovernance(t *testing.T) {
 	src := freshStores()
 	populate(t, ctx, src)
 
+	if err := src.CredentialTypes.Save(ctx, &credential.CredentialType{
+		ID: "ct_1", Name: "datadog",
+	}); err != nil {
+		t.Fatalf("Save credential type: %v", err)
+	}
 	if err := src.Policies.Save(ctx, &policy.Policy{
 		ID: "pol_1", Name: "hold-prod-destroy", Tool: "terraform", CommandContains: "destroy",
 	}); err != nil {
@@ -265,6 +271,9 @@ func TestRoundTripCarriesGovernance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Write() error = %v", err)
 	}
+	if wrote.CredentialTypes == 0 {
+		t.Error("the backup carried no credential types, so every typed credential restores dead")
+	}
 	if wrote.Policies == 0 {
 		t.Error("the backup carried no approval policies, so a restore would gate nothing")
 	}
@@ -284,6 +293,13 @@ func TestRoundTripCarriesGovernance(t *testing.T) {
 	}
 	if len(pols) != 1 || pols[0].Name != "hold-prod-destroy" {
 		t.Errorf("restored policies = %+v, want the approval gate back", pols)
+	}
+	types, err := dst.CredentialTypes.List(ctx)
+	if err != nil {
+		t.Fatalf("List credential types: %v", err)
+	}
+	if len(types) != 1 || types[0].Name != "datadog" {
+		t.Errorf("restored credential types = %+v, want the type its credentials inject through", types)
 	}
 	members, err := dst.Teams.Members(ctx, "team_1")
 	if err != nil {

@@ -97,6 +97,9 @@ type Stores struct {
 	Orgs org.Store
 	// Grants holds per-object access grants.
 	Grants grant.Store
+	// CredentialTypes holds operator-defined credential types. A typed credential names its type and
+	// injects through it, so a credential restored without its type cannot be used at all.
+	CredentialTypes credential.TypeStore
 	// Policies holds the approval policies that decide which runs wait for a person. Nil when the
 	// install pins them from a file, which is its own source of truth and is backed up with the file.
 	Policies policy.Store
@@ -129,6 +132,8 @@ type Summary struct {
 	Orgs int `json:"orgs"`
 	// Policies is the approval policy count.
 	Policies int `json:"policies"`
+	// CredentialTypes is the custom credential type count.
+	CredentialTypes int `json:"credential_types"`
 	// Memberships is the number of team and organization memberships.
 	Memberships int `json:"memberships"`
 	// Grants is the access grant count.
@@ -172,6 +177,10 @@ type payload struct {
 	Teams            []*team.Team         `json:"teams,omitempty"`
 	Orgs             []*org.Org           `json:"orgs,omitempty"`
 	Grants           []*grant.Grant       `json:"grants,omitempty"`
+	// CredentialTypes are the operator-defined credential types every typed credential resolves
+	// through. Restoring the credentials without them leaves each one naming a type that is not
+	// there, so it injects nothing and every run that needs it fails.
+	CredentialTypes []*credential.CredentialType `json:"credential_types,omitempty"`
 	// Policies are the approval policies. Without them a restored control plane runs every change
 	// unapproved while still reporting a healthy restore, which is the failure that looks like
 	// success: the gates are simply gone.
@@ -406,6 +415,13 @@ func gather(ctx context.Context, s Stores) (*payload, Summary, error) {
 	}
 	sum.Grants = len(p.Grants)
 
+	if s.CredentialTypes != nil {
+		if p.CredentialTypes, err = s.CredentialTypes.List(ctx); err != nil {
+			return nil, sum, fmt.Errorf("backup: list credential types: %w", err)
+		}
+		sum.CredentialTypes = len(p.CredentialTypes)
+	}
+
 	// Policies are skipped when the install pins them from a file: that file is the source of truth,
 	// the API refuses writes to them, and restoring a copy would put a second answer in the database.
 	if s.Policies != nil {
@@ -521,6 +537,16 @@ func apply(ctx context.Context, s Stores, p *payload) (Summary, error) {
 			return sum, fmt.Errorf("restore: save user %s: %w", acct.ID, err)
 		}
 		sum.Users++
+	}
+
+	// Credential types come before the credentials that name them.
+	if s.CredentialTypes != nil {
+		for _, ct := range p.CredentialTypes {
+			if err := s.CredentialTypes.Save(ctx, ct); err != nil {
+				return sum, fmt.Errorf("restore: save credential type %s: %w", ct.ID, err)
+			}
+			sum.CredentialTypes++
+		}
 	}
 
 	for _, g := range p.Grants {
