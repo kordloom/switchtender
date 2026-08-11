@@ -15,7 +15,7 @@ import (
 const templateColumns = `id, name, project_id, playbook, inventory, inventory_id, shards,
 	credential_ids, extra_vars, survey, queue, created_at, tool, command, dry_run, image,
 	pull_credential_id, org_id, notifications, selectable_credential_ids, timeout,
-	confirm_on_launch, tags, skip_tags, verbosity, forks, diff_mode, steps`
+	confirm_on_launch, tags, skip_tags, verbosity, forks, diff_mode, steps, limit_pattern`
 
 // templateStore is a template.Store backed by the shared SQLite database.
 type templateStore struct {
@@ -42,9 +42,9 @@ INSERT INTO templates
 	(id, name, project_id, playbook, inventory, inventory_id, shards, credential_ids, extra_vars,
 	 survey, queue, created_at, tool, command, dry_run, image, pull_credential_id, org_id,
 	 notifications, selectable_credential_ids, timeout, confirm_on_launch,
-	 tags, skip_tags, verbosity, forks, diff_mode, steps)
+	 tags, skip_tags, verbosity, forks, diff_mode, steps, limit_pattern)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
-	$21, $22, $23, $24, $25, $26, $27, $28)
+	$21, $22, $23, $24, $25, $26, $27, $28, $29)
 ON CONFLICT(id) DO UPDATE SET
 	name=excluded.name, project_id=excluded.project_id, playbook=excluded.playbook,
 	inventory=excluded.inventory, inventory_id=excluded.inventory_id, shards=excluded.shards,
@@ -56,14 +56,14 @@ ON CONFLICT(id) DO UPDATE SET
 	selectable_credential_ids=excluded.selectable_credential_ids, timeout=excluded.timeout,
 	confirm_on_launch=excluded.confirm_on_launch, tags=excluded.tags,
 	skip_tags=excluded.skip_tags, verbosity=excluded.verbosity, forks=excluded.forks,
-	diff_mode=excluded.diff_mode, steps=excluded.steps`
+	diff_mode=excluded.diff_mode, steps=excluded.steps, limit_pattern=excluded.limit_pattern`
 	_, err = s.db.ExecContext(ctx, q,
 		t.ID, t.Name, t.ProjectID, t.Playbook, t.Inventory, t.InventoryID, t.Shards,
 		sqlutil.JoinIDs(t.CredentialIDs), string(vars), string(survey), t.Queue, sqlutil.FormatTime(t.CreatedAt),
 		t.Tool, t.Command, sqlutil.BoolToInt(t.DryRun), t.Image, t.PullCredentialID, t.OrgID, string(notifs),
 		sqlutil.JoinIDs(t.SelectableCredentialIDs), t.Timeout, sqlutil.BoolToInt(t.ConfirmOnLaunch),
 		sqlutil.JoinIDs(t.Tags), sqlutil.JoinIDs(t.SkipTags), t.Verbosity, t.Forks,
-		sqlutil.BoolToInt(t.DiffMode), marshalSteps(t.Steps))
+		sqlutil.BoolToInt(t.DiffMode), marshalSteps(t.Steps), t.Limit)
 	if err != nil {
 		return fmt.Errorf("save template: %w", err)
 	}
@@ -183,7 +183,7 @@ func scanTemplate(sc scanner) (*template.Template, error) {
 	if err := sc.Scan(&t.ID, &t.Name, &t.ProjectID, &t.Playbook, &t.Inventory, &t.InventoryID,
 		&t.Shards, &creds, &vars, &survey, &t.Queue, &created, &t.Tool, &t.Command,
 		&dryRun, &t.Image, &t.PullCredentialID, &t.OrgID, &notifs, &selectable, &t.Timeout,
-		&confirm, &tags, &skipTags, &t.Verbosity, &t.Forks, &diffMode, &steps); err != nil {
+		&confirm, &tags, &skipTags, &t.Verbosity, &t.Forks, &diffMode, &steps, &t.Limit); err != nil {
 		return nil, err
 	}
 	t.DryRun = dryRun != 0

@@ -88,6 +88,11 @@ type Template struct {
 	Command string `json:"command,omitempty"`
 	// DryRun runs the tool in its no-change mode when the template launches.
 	DryRun bool `json:"dry_run,omitempty"`
+	// Limit narrows every launch to the hosts matching this pattern, the way an operator types
+	// --limit by hand. A template that pins one is safe to fire unattended: a schedule and a webhook
+	// carry it too, where before they reached the whole inventory because only an interactive launch
+	// could supply one. Empty targets everything the inventory holds.
+	Limit string `json:"limit,omitempty"`
 	// Tags runs only the Ansible plays and tasks carrying one of these tags on every launch.
 	Tags []string `json:"tags,omitempty"`
 	// SkipTags skips the Ansible plays and tasks carrying one of these tags on every launch.
@@ -315,6 +320,9 @@ func (t *Template) LaunchOptions() []run.SubmitOption {
 		run.WithVerbosity(t.Verbosity),
 		run.WithForks(t.Forks),
 		run.WithDiffMode(t.DiffMode),
+	}
+	if t.Limit != "" {
+		opts = append(opts, run.WithLimit(t.Limit))
 	}
 	if t.ProjectID != "" {
 		opts = append(opts, run.WithProject(t.ProjectID))

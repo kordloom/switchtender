@@ -114,7 +114,7 @@ func TestFromAWX(t *testing.T) {
 
 	// One template, wired to the project, inventory, and credentials by id.
 	if len(plan.Templates) != 1 {
-		t.Fatalf("templates = %d, want 1", len(plan.Templates))
+		t.Fatalf("templates = %d, want 1; warnings: %s", len(plan.Templates), strings.Join(plan.Warnings, " | "))
 	}
 	tpl := plan.Templates[0]
 	if tpl.Name != "Deploy Web" || tpl.Playbook != "site.yml" {
@@ -515,5 +515,84 @@ func TestAWXWorkflowRefusedRatherThanPartial(t *testing.T) {
 				t.Errorf("the refusal does not say why (%q):\n%s", test.Because, joined)
 			}
 		})
+	}
+}
+
+// TestAWXImportsARealAwxkitExport pins the shape awxkit actually writes, which is the shape the
+// migration guide tells an operator to produce.
+//
+// awxkit nests an inventory's hosts and groups under its related block. The importer read only the
+// top level, so every inventory from a real export arrived empty and the import still reported
+// success: the inventory existed, it had no hosts, and nothing said so. The execution settings on a
+// job template were dropped the same way, which silently converted a check-mode template limited to
+// one canary host into a live template targeting the whole fleet.
+func TestAWXImportsARealAwxkitExport(t *testing.T) {
+	t.Parallel()
+	const export = `{
+	  "inventory": [{
+	    "name": "Production",
+	    "related": {
+	      "hosts": [{"name": "web01"}, {"name": "web02"}],
+	      "groups": [{"name": "web", "hosts": [{"name": "web01"}]}]
+	    }
+	  }],
+	  "projects": [{"name": "infra", "scm_type": "git", "scm_url": "https://example.com/infra.git", "scm_branch": "main"}],
+	  "job_templates": [{
+	    "name": "canary",
+	    "playbook": "site.yml",
+	    "project": "infra",
+	    "inventory": "Production",
+	    "limit": "canary-01",
+	    "job_tags": "preflight, smoke",
+	    "skip_tags": "slow",
+	    "verbosity": 2,
+	    "forks": 10,
+	    "timeout": 600,
+	    "job_type": "check",
+	    "diff_mode": true
+	  }]
+	}`
+
+	plan, err := importer.FromAWX([]byte(export), time.Now())
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	if len(plan.Inventories) != 1 {
+		t.Fatalf("inventories = %d, want 1", len(plan.Inventories))
+	}
+	content := plan.Inventories[0].Content
+	for _, host := range []string{"web01", "web02"} {
+		if !strings.Contains(content, host) {
+			t.Errorf("inventory imported without %s, so a real export arrives empty:\n%s", host, content)
+		}
+	}
+	if !strings.Contains(content, "[web]") {
+		t.Errorf("inventory imported without its group:\n%s", content)
+	}
+
+	if len(plan.Templates) != 1 {
+		t.Fatalf("templates = %d, want 1", len(plan.Templates))
+	}
+	tpl := plan.Templates[0]
+	checks := []struct {
+		Name string
+		Got  any
+		Want any
+	}{
+		{"limit", tpl.Limit, "canary-01"},
+		{"verbosity", tpl.Verbosity, 2},
+		{"forks", tpl.Forks, 10},
+		{"timeout", tpl.Timeout, 600},
+		{"diff mode", tpl.DiffMode, true},
+		{"check mode becomes dry run", tpl.DryRun, true},
+		{"tags", strings.Join(tpl.Tags, ","), "preflight,smoke"},
+		{"skip tags", strings.Join(tpl.SkipTags, ","), "slow"},
+	}
+	for _, c := range checks {
+		if c.Got != c.Want {
+			t.Errorf("%s = %v, want %v; the import silently changed what this template does",
+				c.Name, c.Got, c.Want)
+		}
 	}
 }

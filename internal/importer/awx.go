@@ -67,6 +67,38 @@ type awxInventory struct {
 type awxInventoryRelated struct {
 	// InventorySources are the inventory's dynamic sources.
 	InventorySources []awxInventorySource `json:"inventory_sources"`
+	// Hosts are the inventory's hosts when the export nests them, which awxkit does.
+	Hosts []awxHost `json:"hosts"`
+	// Groups are the inventory's groups when the export nests them, which awxkit does.
+	Groups []awxGroup `json:"groups"`
+}
+
+// hosts returns the inventory's hosts from whichever place the export carried them.
+//
+// awxkit, the tool the migration guide tells an operator to run, writes hosts and groups under the
+// inventory's related block rather than at the top level. Reading only the top level meant every
+// inventory from a real export arrived empty, and silently: the import reported success, the
+// inventory existed, and it had no hosts in it. That is the first thing an evaluator does, so it is
+// the first thing they saw fail.
+func (i awxInventory) hosts() []awxHost {
+	if len(i.Hosts) > 0 {
+		return i.Hosts
+	}
+	if i.Related != nil {
+		return i.Related.Hosts
+	}
+	return nil
+}
+
+// groups returns the inventory's groups from whichever place the export carried them.
+func (i awxInventory) groups() []awxGroup {
+	if len(i.Groups) > 0 {
+		return i.Groups
+	}
+	if i.Related != nil {
+		return i.Related.Groups
+	}
+	return nil
 }
 
 // awxInventorySource is an AWX dynamic inventory source: a file in a project or a cloud plugin that
@@ -116,6 +148,21 @@ type awxJobTemplate struct {
 	ExtraVars string `json:"extra_vars"`
 	// JobSliceCount is AWX's job slicing count, mapped to shard count.
 	JobSliceCount int `json:"job_slice_count"`
+	// Limit narrows the run to matching hosts, the same pattern ansible-playbook takes.
+	Limit string `json:"limit"`
+	// JobTags and SkipTags select and skip tagged plays and tasks.
+	JobTags  string `json:"job_tags"`
+	SkipTags string `json:"skip_tags"`
+	// Verbosity is AWX's 0 to 4 logging level.
+	Verbosity int `json:"verbosity"`
+	// Forks is how many hosts Ansible addresses in parallel.
+	Forks int `json:"forks"`
+	// Timeout caps a job's runtime in seconds.
+	Timeout int `json:"timeout"`
+	// JobType is "run" or "check"; check is Ansible's no-change mode.
+	JobType string `json:"job_type"`
+	// DiffMode shows the before and after of each change.
+	DiffMode bool `json:"diff_mode"`
 	// Credentials references credentials by natural key.
 	Credentials []awxRef `json:"credentials"`
 	// SurveySpec is the survey when exported at the top level.
@@ -249,7 +296,7 @@ func FromAWX(data []byte, now time.Time) (*Plan, error) {
 	for _, inv := range append(export.Inventory, export.Inventories...) {
 		obj := &inventory.Inventory{
 			ID: inventory.NewID(), Name: inv.Name,
-			Content:   buildInventoryINI(plan, inv.Name, convertHosts(inv.Hosts), convertGroups(inv.Groups)),
+			Content:   buildInventoryINI(plan, inv.Name, convertHosts(inv.hosts()), convertGroups(inv.groups())),
 			CreatedAt: now,
 		}
 		if _, dup := inventoryIDs[inv.Name]; dup {
@@ -373,6 +420,17 @@ func (p *Plan) addTemplate(jt awxJobTemplate, now time.Time,
 	projectIDs, inventoryIDs, credentialIDs map[string]string) {
 	tpl := &template.Template{
 		ID: template.NewID(), Name: jt.Name, Playbook: jt.Playbook, CreatedAt: now,
+		// The execution settings AWX holds on the job template. Dropping these silently changed what
+		// the template does: a check-mode template imported as a live one, and a template limited to
+		// a canary host imported targeting the whole inventory, both without a word in the report.
+		Limit:     jt.Limit,
+		Tags:      splitAWXTags(jt.JobTags),
+		SkipTags:  splitAWXTags(jt.SkipTags),
+		Verbosity: jt.Verbosity,
+		Forks:     jt.Forks,
+		Timeout:   jt.Timeout,
+		DiffMode:  jt.DiffMode,
+		DryRun:    strings.EqualFold(jt.JobType, "check"),
 	}
 	if name := string(jt.Project); name != "" {
 		if id, ok := projectIDs[name]; ok {
@@ -555,4 +613,19 @@ func reportUnmapped(plan *Plan, export awxExport) {
 		plan.warn("this export holds %d %s%s, which are not imported: %s",
 			item.Count, item.What, plural, item.Why)
 	}
+}
+
+// splitAWXTags turns AWX's comma separated tag string into the list a template holds, dropping the
+// blanks a trailing or doubled comma leaves behind.
+func splitAWXTags(v string) []string {
+	if strings.TrimSpace(v) == "" {
+		return nil
+	}
+	var out []string
+	for _, part := range strings.Split(v, ",") {
+		if t := strings.TrimSpace(part); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
 }
