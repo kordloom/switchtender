@@ -226,7 +226,7 @@ func (c *countingRunnerLister) Run(context.Context, roundhouse.Spec, io.Writer) 
 }
 
 // Hosts returns the fixed host set.
-func (c *countingRunnerLister) Hosts(context.Context, string) ([]string, error) {
+func (c *countingRunnerLister) Hosts(context.Context, string, string) ([]string, error) {
 	return c.hosts, nil
 }
 

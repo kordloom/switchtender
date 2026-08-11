@@ -53,7 +53,7 @@ func (r *recordingRunner) Run(_ context.Context, spec roundhouse.Spec, _ io.Writ
 	return roundhouse.Result{ExitCode: 0}, nil
 }
 
-func (r *recordingRunner) Hosts(context.Context, string) ([]string, error) { return nil, nil }
+func (r *recordingRunner) Hosts(context.Context, string, string) ([]string, error) { return nil, nil }
 
 // TestPipelineStepsReceiveParentExtraVars is the end-to-end proof of the blocking gap the design
 // review found: a saved workflow applies its survey answers and extra vars to the pipeline parent,

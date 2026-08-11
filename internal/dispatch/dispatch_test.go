@@ -433,7 +433,7 @@ func (f *fakeRunnerLister) Run(context.Context, roundhouse.Spec, io.Writer) (rou
 }
 
 // Hosts returns the fixed host set.
-func (f *fakeRunnerLister) Hosts(context.Context, string) ([]string, error) {
+func (f *fakeRunnerLister) Hosts(context.Context, string, string) ([]string, error) {
 	return f.hosts, nil
 }
 
@@ -608,7 +608,7 @@ func (f *flakyRunnerLister) Run(_ context.Context, spec roundhouse.Spec, _ io.Wr
 }
 
 // Hosts returns the fixed host set.
-func (f *flakyRunnerLister) Hosts(context.Context, string) ([]string, error) {
+func (f *flakyRunnerLister) Hosts(context.Context, string, string) ([]string, error) {
 	return f.hosts, nil
 }
 
@@ -678,7 +678,7 @@ func (f *eventWritingLister) Run(_ context.Context, spec roundhouse.Spec, _ io.W
 }
 
 // Hosts returns the fixed host set.
-func (f *eventWritingLister) Hosts(context.Context, string) ([]string, error) {
+func (f *eventWritingLister) Hosts(context.Context, string, string) ([]string, error) {
 	return f.hosts, nil
 }
 

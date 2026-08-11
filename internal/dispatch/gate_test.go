@@ -210,7 +210,7 @@ func (f *failingLister) Run(context.Context, roundhouse.Spec, io.Writer) (roundh
 }
 
 // Hosts returns the fixed host set.
-func (f *failingLister) Hosts(context.Context, string) ([]string, error) { return f.hosts, nil }
+func (f *failingLister) Hosts(context.Context, string, string) ([]string, error) { return f.hosts, nil }
 
 // TestCancelBeforeStartIsNotUndone pins that a parent canceled between its submit and its
 // coordinator's first write stays canceled.

@@ -11,9 +11,11 @@ import (
 // defaultInventoryBinary is the executable used to enumerate inventory hosts.
 const defaultInventoryBinary = "ansible-inventory"
 
-// HostLister enumerates the hosts in an inventory so a run can be split across them.
+// HostLister enumerates the hosts in an inventory so a run can be split across them. A non-empty
+// limit narrows enumeration to the hosts an Ansible pattern matches, so a shard cannot reach a host
+// the caller excluded.
 type HostLister interface {
-	Hosts(ctx context.Context, inventory string) ([]string, error)
+	Hosts(ctx context.Context, inventory, limit string) ([]string, error)
 }
 
 // InventoryDumper renders an inventory source to the JSON ansible-playbook can consume directly,
@@ -37,13 +39,18 @@ func (a *ansibleRunner) Dump(ctx context.Context, source string, env []string) (
 	return out, nil
 }
 
-// Hosts returns the sorted set of hosts in the inventory by invoking ansible-inventory.
-func (a *ansibleRunner) Hosts(ctx context.Context, inventory string) ([]string, error) {
+// Hosts returns the sorted set of hosts in the inventory by invoking ansible-inventory, narrowed to
+// the hosts limit matches when one is given.
+func (a *ansibleRunner) Hosts(ctx context.Context, inventory, limit string) ([]string, error) {
 	if inventory == "" {
 		return nil, ErrNoInventory
 	}
 
-	cmd := exec.CommandContext(ctx, defaultInventoryBinary, "-i", inventory, "--list")
+	args := []string{"-i", inventory, "--list"}
+	if limit != "" {
+		args = append(args, "--limit", limit)
+	}
+	cmd := exec.CommandContext(ctx, defaultInventoryBinary, args...)
 	cmd.Env = a.baseEnv
 	out, err := cmd.Output()
 	if err != nil {

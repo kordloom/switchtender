@@ -717,7 +717,10 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 		defer cleanup()
 		listPath = path
 	}
-	hosts, err := d.hostLister.Hosts(ctx, listPath)
+	// The caller's host limit narrows the enumeration, not just the runs. Listing the whole
+	// inventory and sharding that meant a limited submit fanned out across every host it excluded,
+	// and answered 202, so the first sign was the run touching hosts nobody asked for.
+	hosts, err := d.hostLister.Hosts(ctx, listPath, probe.Limit)
 	if err != nil {
 		return nil, fmt.Errorf("list hosts: %w", err)
 	}
