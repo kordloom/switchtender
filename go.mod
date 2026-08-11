@@ -76,3 +76,7 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
+
+// The tree receipt profile needs loomseal changes that are not published yet, so the module is taken
+// from the checkout beside this one. Remove this and bump the require above once loomseal is tagged.
+replace github.com/kordloom/loomseal => ../loomseal

@@ -18,6 +18,10 @@ var (
 	receiptRunDB = defaultDBPath
 	// receiptRunOut is the file the signed receipt is written to, empty for stdout.
 	receiptRunOut string
+	// receiptSparse emits the receipt on the tree profile, disclosing only this run's entries.
+	receiptSparse bool
+	// receiptFrom proves the log only appended since an earlier size, when above zero.
+	receiptFrom int64
 )
 
 // receiptCmd produces a signed, offline-verifiable receipt for one run.
@@ -43,6 +47,12 @@ func init() {
 		"SQLite file path, or a postgres:// DSN, holding the run and its chain.")
 	receiptCmd.Flags().StringVar(&receiptRunOut, "out", "",
 		"File to write the receipt to. Defaults to stdout.")
+	receiptCmd.Flags().BoolVar(&receiptSparse, "sparse", false,
+		"Disclose only this run's own chain entries, proving each belongs to the log without "+
+			"carrying the entries around it.")
+	receiptCmd.Flags().Int64Var(&receiptFrom, "append-only-from", 0,
+		"With --sparse, prove the log only appended since this size. Use a size a reader already "+
+			"saw, such as an anchored head.")
 	rootCmd.AddCommand(receiptCmd)
 }
 
@@ -90,30 +100,33 @@ func runReceipt(cmd *cobra.Command, args []string) error {
 			"chain", runID)
 	}
 
-	segment := make([]*audit.Entry, 0, outcomeSeq-creationSeq+1)
-	for _, e := range entries {
-		if e.Seq >= creationSeq && e.Seq <= outcomeSeq {
-			segment = append(segment, e)
-		}
-	}
-
 	id, err := audit.LoadIdentity(identityDir(receiptRunDB))
 	if err != nil {
 		return err
 	}
-	doc, err := audit.BuildBundle(segment, id, resolveVersion(), time.Now())
+	// The receipt is about the run, not the whole fleet, so it names the run as its subject.
+	subject := audit.BundleSubject{Type: "run", ID: runID}
+
+	var doc *audit.Bundle
+	if receiptSparse {
+		doc, err = sparseReceipt(cmd, entries, runID, creationSeq, outcomeSeq, id, subject)
+	} else {
+		doc, err = rangeReceipt(entries, creationSeq, outcomeSeq, id, subject)
+	}
 	if err != nil {
 		return err
 	}
-	// The receipt is about the run, not the whole fleet, so it names the run as its subject.
-	doc.Subject = audit.BundleSubject{Type: "run", ID: runID}
+	segment := doc.Claims
 
 	// Disclose the run's outcome inside the outcome claim, so verify can show what the run did and
-	// prove it matches the digest the chain committed. The body is rebuilt from the run's evidence and
+	// prove it matches the digest the chain committed. A sparse receipt cannot carry this: its leaf
+	// hashes are computed over the chain's own entries, so a payload member added here would not
+	// recompute, and making the leaf depend on which run is being receipted would give the same log
+	// a different root per receipt. The body is rebuilt from the run's evidence and
 	// the nonce is the one the digest was keyed under; both are added to the claim payload, which the
 	// signature then covers. They are not part of the chain link, so they do not change any claim's
 	// verification, exactly as a span claim's extra members do not.
-	if body, berr := outcome.Body(cmd.Context(), store.Runs(), r); berr == nil {
+	if body, berr := outcome.Body(cmd.Context(), store.Runs(), r); berr == nil && !receiptSparse {
 		var bodyObj any
 		if json.Unmarshal(body, &bodyObj) == nil {
 			for i := range doc.Claims {
@@ -170,4 +183,52 @@ func runReceipt(cmd *cobra.Command, args []string) error {
 			"Publish this fingerprint so a verifier can pin it:\n  %s\n",
 		runID, receiptRunOut, len(segment), receiptRunOut, id.KeyID())
 	return nil
+}
+
+// rangeReceipt builds the contiguous receipt: the chain segment from the request that created the run
+// through the entry that recorded what it did. It can disclose the run's outcome, because its claims
+// are not leaves of a tree, but on a busy install the segment also carries the entries that happened
+// to be recorded between them.
+func rangeReceipt(entries []*audit.Entry, creationSeq, outcomeSeq int64, id audit.Identity,
+	subject audit.BundleSubject) (*audit.Bundle, error) {
+	segment := make([]*audit.Entry, 0, outcomeSeq-creationSeq+1)
+	for _, e := range entries {
+		if e.Seq >= creationSeq && e.Seq <= outcomeSeq {
+			segment = append(segment, e)
+		}
+	}
+	doc, err := audit.BuildBundle(segment, id, resolveVersion(), time.Now())
+	if err != nil {
+		return nil, err
+	}
+	doc.Subject = subject
+	return doc, nil
+}
+
+// sparseReceipt builds the tree receipt: only this run's own entries, each proved to belong to the
+// whole chain by an audit path. Nothing about the entries around them travels, which is what lets a
+// receipt be handed to an outside auditor on an install that runs other people's work.
+func sparseReceipt(cmd *cobra.Command, entries []*audit.Entry, runID string,
+	creationSeq, outcomeSeq int64, id audit.Identity,
+	subject audit.BundleSubject) (*audit.Bundle, error) {
+	// The run's own entries are its creation, whose receipt it carries, and every later entry whose
+	// path names it: an approval, a rejection, a cancellation, and its outcome.
+	disclose := map[int64]bool{creationSeq: true, outcomeSeq: true}
+	for _, e := range entries {
+		if e.Seq > creationSeq && strings.Contains(e.Path, runID) {
+			disclose[e.Seq] = true
+		}
+	}
+	doc, err := audit.BuildTreeBundle(entries, disclose, id, resolveVersion(), subject, time.Now())
+	if err != nil {
+		return nil, err
+	}
+	if receiptFrom > 0 {
+		if err := doc.AttachConsistency(entries, receiptFrom, id); err != nil {
+			return nil, err
+		}
+		fmt.Fprintf(cmd.ErrOrStderr(),
+			"Proving the log only appended since size %d.\n", receiptFrom)
+	}
+	return doc, nil
 }

@@ -78,13 +78,36 @@ type BundleSubject struct {
 type BundleChain struct {
 	// Profile names the link construction.
 	Profile string `json:"profile"`
+	// Params carries profile parameters, such as the install a tree's leaves bind to.
+	Params map[string]string `json:"params,omitempty"`
 	// Keyed says whether recomputing a link needs a secret. The audit profile is unkeyed, so this is
 	// always false here, but the schema requires the member to be present rather than inferred: a
 	// reader must not have to know a profile's properties to know whether it can verify the chain.
 	Keyed bool `json:"keyed"`
 	// Head is the newest coordinate attested for the whole chain, which may lead the bundled claims
-	// when a bundle is a window into a longer history.
+	// when a bundle is a window into a longer history. In the tree profile its Seq is the tree size
+	// and its Link is the root.
 	Head BundleCoord `json:"head"`
+	// Consistency proves the log grew from an earlier root by appending only. Tree profile only.
+	Consistency *BundleConsistency `json:"consistency,omitempty"`
+}
+
+// BundleConsistency proves that a log of FromSize entries whose root was FromRoot is a prefix of the
+// log this bundle heads, so nothing that root covered was changed or dropped.
+type BundleConsistency struct {
+	// FromSize is the earlier log size.
+	FromSize int64 `json:"from_size"`
+	// FromRoot is the root at that size.
+	FromRoot string `json:"from_root"`
+	// Path is the proof's hashes.
+	Path []string `json:"path"`
+}
+
+// BundleInclusion is a claim's audit path: the sibling hashes, lowest first, that fold with its leaf
+// hash to reproduce the root the head names.
+type BundleInclusion struct {
+	// Path is the audit path, empty for a log of one entry.
+	Path []string `json:"path"`
 }
 
 // BundleCoord is a position in a chain.
@@ -106,6 +129,9 @@ type BundleClaim struct {
 	Payload map[string]any `json:"payload"`
 	// Chain is the claim's position and links.
 	Chain BundleCoordLink `json:"chain"`
+	// Inclusion is the audit path proving this claim belongs to the tree the head names. Tree
+	// profile only, and required on every claim there.
+	Inclusion *BundleInclusion `json:"inclusion,omitempty"`
 }
 
 // BundleCoordLink is a claim's chain coordinates.
@@ -211,28 +237,8 @@ func BuildBundle(entries []*Entry, id Identity, version string, at time.Time) (*
 					"precision. Bundle a later range with --limit, or re-export once the chain has "+
 					"advanced past it", ErrExport, e.Seq)
 		}
-		claim := BundleClaim{
-			Type: ClaimType,
-			At:   e.At.UTC().Format(time.RFC3339Nano),
-			Payload: map[string]any{
-				"actor":  e.Actor,
-				"method": e.Method,
-				"path":   e.Path,
-			},
-			Chain: BundleCoordLink{Seq: e.Seq, Prev: e.PrevHash, Link: e.Hash},
-		}
-		// The profile promises every link recomputes from the claim payload alone, so a field the
-		// link commits to must appear here. These are omitted when empty, exactly as the link omits
-		// them, so an entry that predates a field carries the same payload it always did.
-		for key, value := range map[string]string{
-			"actor_type":     e.ActorType,
-			"on_behalf_of":   e.OnBehalfOf,
-			"content_digest": e.ContentDigest,
-		} {
-			if value != "" {
-				claim.Payload[key] = value
-			}
-		}
+		claim := claimContent(e)
+		claim.Chain = BundleCoordLink{Seq: e.Seq, Prev: e.PrevHash, Link: e.Hash}
 		// A span beat becomes the spec-owned span claim, so a verifier reads the beat stream
 		// without knowing this product's path encoding. The span members are added to the payload
 		// rather than replacing it: the chain link commits to actor, method, and path, and the
@@ -242,7 +248,7 @@ func BuildBundle(entries []*Entry, id Identity, version string, at time.Time) (*
 		// span claim. The chain coordinates stay exactly as stored, and a span-marked entry whose
 		// path does not round-trip stays a generic claim rather than becoming a malformed span one.
 		if e.Actor == SpanActor && e.Method == SpanMethod {
-			if beat, count, cadenceS, ok := ParseSpanPath(e.Path); ok {
+			if beat, _, _, ok := ParseSpanPath(e.Path); ok {
 				// A verifier fails a bundle whose beat time does not strictly advance past the beat
 				// before it, where a cadence gap is only reported. Neither entry of such a pair can
 				// be repaired, since each link commits to the time it holds, so a chain poisoned by
@@ -253,11 +259,6 @@ func BuildBundle(entries []*Entry, id Identity, version string, at time.Time) (*
 					return nil, err
 				}
 				prevSpanAt, prevSpanBeat = e.At, beat
-				claim.Type = SpanClaimType
-				claim.Payload["stream"] = "chain"
-				claim.Payload["cadence_s"] = int64(cadenceS)
-				claim.Payload["beat"] = beat
-				claim.Payload["count"] = count
 			}
 		}
 		claims = append(claims, claim)
@@ -291,6 +292,50 @@ func BuildBundle(entries []*Entry, id Identity, version string, at time.Time) (*
 		Claims:     claims,
 		Signatures: []any{},
 	}, nil
+}
+
+// claimContent builds the type, time, and payload of a bundle claim from an entry: everything except
+// the chain coordinates, which are the only part that differs between chain profiles.
+//
+// Sharing one definition is what keeps a claim's content, and therefore the digest a tree leaf commits
+// to, identical whichever shape carries it. Two builders that drifted would produce a receipt whose
+// leaves no longer recompute against the root the producer signed.
+func claimContent(e *Entry) BundleClaim {
+	claim := BundleClaim{
+		Type: ClaimType,
+		At:   e.At.UTC().Format(time.RFC3339Nano),
+		Payload: map[string]any{
+			"actor":  e.Actor,
+			"method": e.Method,
+			"path":   e.Path,
+		},
+	}
+	// The profile promises every link recomputes from the claim payload alone, so a field the link
+	// commits to must appear here. These are omitted when empty, exactly as the link omits them, so an
+	// entry that predates a field carries the same payload it always did.
+	for key, value := range map[string]string{
+		"actor_type":     e.ActorType,
+		"on_behalf_of":   e.OnBehalfOf,
+		"content_digest": e.ContentDigest,
+	} {
+		if value != "" {
+			claim.Payload[key] = value
+		}
+	}
+	// A span beat becomes the spec-owned span claim, so a verifier reads the beat stream without
+	// knowing this product's path encoding. The span members are added to the payload rather than
+	// replacing it, because the chain link commits to actor, method, and path and the profile promises
+	// every link recomputes from the payload alone.
+	if e.Actor == SpanActor && e.Method == SpanMethod {
+		if beat, count, cadenceS, ok := ParseSpanPath(e.Path); ok {
+			claim.Type = SpanClaimType
+			claim.Payload["stream"] = "chain"
+			claim.Payload["cadence_s"] = int64(cadenceS)
+			claim.Payload["beat"] = beat
+			claim.Payload["count"] = count
+		}
+	}
+	return claim
 }
 
 // checkSpanAdvance reports why a bundle cannot be built when a beat's time does not advance past

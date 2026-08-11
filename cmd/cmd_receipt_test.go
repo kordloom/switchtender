@@ -105,3 +105,83 @@ func TestReceiptProduceAndVerifyOffline(t *testing.T) {
 		t.Error("runVerify() accepted a doctored receipt")
 	}
 }
+
+// TestSparseReceiptDisclosesOnlyTheRun proves the wedge end to end through the commands a user runs:
+// a receipt for one run, on an install whose chain also holds other runs' entries, carries this run's
+// entries and nothing about the others, and still verifies.
+func TestSparseReceiptDisclosesOnlyTheRun(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	db := filepath.Join(dir, "state.db")
+	out := filepath.Join(dir, "run.receipt")
+
+	store, err := openBundle(db)
+	if err != nil {
+		t.Fatalf("openBundle() error = %v", err)
+	}
+	at := time.Date(2026, 8, 11, 12, 0, 0, 0, time.UTC)
+
+	// Another tenant's work, recorded before and after ours, is what a contiguous receipt would sweep
+	// up and hand to whoever reads it.
+	neighbors := []string{"/v1/runs/other_alpha/approve", "/v1/projects/secret-migration"}
+	if err := store.Audits().Append(ctx, &audit.Entry{
+		ID: audit.NewID(), At: at, Actor: "bob", Method: "POST", Path: neighbors[0],
+	}); err != nil {
+		t.Fatalf("Append(neighbor) error = %v", err)
+	}
+	creation := &audit.Entry{
+		ID: audit.NewID(), At: at.Add(time.Minute), Actor: "alice", ActorType: "session",
+		Method: "POST", Path: "/v1/runs",
+	}
+	if err := store.Audits().Append(ctx, creation); err != nil {
+		t.Fatalf("Append(creation) error = %v", err)
+	}
+	if err := store.Audits().Append(ctx, &audit.Entry{
+		ID: audit.NewID(), At: at.Add(2 * time.Minute), Actor: "bob", Method: "POST",
+		Path: neighbors[1],
+	}); err != nil {
+		t.Fatalf("Append(neighbor 2) error = %v", err)
+	}
+
+	r := &run.Run{
+		ID: "run_sparse", Playbook: "site.yml", Inventory: "prod", Status: run.StatusRunning,
+		Actor: "alice", AuditReceipt: audit.Receipt(creation), CreatedAt: at,
+	}
+	if err := store.Runs().Save(ctx, r); err != nil {
+		t.Fatalf("Save(running) error = %v", err)
+	}
+	r.Status = run.StatusSucceeded
+	if err := store.Runs().Save(ctx, r); err != nil {
+		t.Fatalf("Save(succeeded) error = %v", err)
+	}
+	if err := outcome.Commit(ctx, store.Audits(), store.Runs(), r, "system:dispatcher"); err != nil {
+		t.Fatalf("outcome.Commit() error = %v", err)
+	}
+	_ = store.Close()
+
+	receiptRunDB, receiptRunOut, receiptSparse = db, out, true
+	t.Cleanup(func() {
+		receiptRunDB, receiptRunOut, receiptSparse, receiptFrom = defaultDBPath, "", false, 0
+	})
+	if err := runReceipt(testCommand(), []string{"run_sparse"}); err != nil {
+		t.Fatalf("runReceipt(--sparse) error = %v", err)
+	}
+
+	body, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	// The other tenant's paths are the readable part of their entries. A sparse receipt must not
+	// carry them in any form.
+	for _, p := range neighbors {
+		if bytes.Contains(body, []byte(p)) {
+			t.Errorf("the sparse receipt leaks a neighbor's entry: %s", p)
+		}
+	}
+	if !bytes.Contains(body, []byte("loomseal-merkle-v1")) {
+		t.Error("the sparse receipt is not on the tree profile")
+	}
+	if !bytes.Contains(body, []byte("run_sparse")) {
+		t.Error("the sparse receipt does not name its own run")
+	}
+}
