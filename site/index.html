@@ -147,7 +147,7 @@
 				<article class="card reveal">
 					<div class="ic ic-drift"></div>
 					<h3>Drift detection</h3>
-					<p>A dry run shows exactly what has drifted, across Ansible hosts and Terraform directories, before you touch a thing. One click builds the fix, held for approval. Most of the field does neither.</p>
+					<p>A dry run shows exactly what has drifted, across Ansible hosts and Terraform directories, before you touch a thing. One click builds the fix, held for approval. No other Ansible controller does either, and the Terraform control planes that do detect drift do not govern your Ansible fleet beside it.</p>
 				</article>
 				<article class="card reveal">
 					<div class="ic ic-gate"></div>
@@ -196,8 +196,9 @@
 				</article>
 				<article class="card reveal">
 					<div class="ic ic-secret"></div>
-					<h3>Secrets that can't escape</h3>
-					<p>Sealed at rest, sourced live from Vault, AWS, Google, Azure, CyberArk, or 1Password, and masked out of run logs; a tool that prints a secret shows <code>***</code>. Typed cloud credentials inject the exact variables each tool expects.</p>
+					<h3>Secrets kept out of the log</h3>
+					<p>Sealed at rest, sourced live from Vault, AWS, Google, Azure, CyberArk, or 1Password, and kept off the command line so nothing shows in the process table. A tool that prints a secret shows <code>***</code>. Typed cloud credentials inject the exact variables each tool expects.</p>
+					<p class="card-bound">What it doesn't claim: log masking matches the secret's literal text, so a value a tool re-encodes as base64 or hex, or one shorter than four characters, is not caught. Every tool in the field has the same limit; treat it as a safety net, not a boundary.</p>
 				</article>
 			</div>
 		</section>

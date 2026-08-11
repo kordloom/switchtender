@@ -106,7 +106,7 @@ type Template struct {
 	// leaves the launch on the server default, so a template that sets nothing behaves as before.
 	Timeout int `json:"timeout,omitempty"`
 	// Image names a container image every launch executes inside, its execution environment. It
-	// outranks the project's image. Only the Ansible tool runs in a container.
+	// outranks the project's image. Every tool the container runner knows executes inside it.
 	Image string `json:"image,omitempty"`
 	// PullCredentialID names a registry credential for pulling a private Image. Empty for public.
 	PullCredentialID string `json:"pull_credential_id,omitempty"`
