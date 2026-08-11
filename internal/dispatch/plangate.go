@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"strconv"
 
 	"go.uber.org/zap"
 
@@ -13,16 +12,14 @@ import (
 	"github.com/kordloom/switchtender/internal/run"
 )
 
-// parsePlanDestroys returns the destroy count from a plan's summary line, or zero when no summary is
-// found. It reuses the plan summary pattern the drift check reads, taking only the resources a plan
-// would destroy so the plan-content gate weighs destruction rather than total change.
-func parsePlanDestroys(out string) int {
-	m := planSummary.FindStringSubmatch(out)
-	if m == nil {
-		return 0
-	}
-	n, _ := strconv.Atoi(m[3])
-	return n
+// parsePlanDestroys returns the destroy count from a plan's change summary and whether that summary
+// was read at all. It reuses the parser the drift check reads, taking only the resources a plan would
+// destroy so the plan-content gate weighs destruction rather than total change. An unread summary
+// reports zero destroys with read false, and the caller must not confuse that with a plan proven to
+// destroy nothing.
+func parsePlanDestroys(out string) (destroys int, read bool) {
+	counts, ok := parsePlanSummary(out)
+	return counts.Destroy, ok
 }
 
 // planGatePolicies returns the stored policies when r is a terraform or opentofu apply that a
@@ -74,17 +71,20 @@ func (d *Dispatcher) executePlanGate(ctx context.Context, r *run.Run, policies [
 				d.finalize(r, run.StatusFailed, &res.ExitCode, "")
 				return run.StatusFailed
 			}
-			return d.proposeApply(ctx, r, policies, parsePlanDestroys(plan.String()), mask)
+			destroys, read := parsePlanDestroys(plan.String())
+			return d.proposeApply(ctx, r, policies, destroys, read, mask)
 		})
 }
 
 // proposeApply builds the apply proposed from a completed plan run and finalizes the plan run as
 // succeeded. The proposal is a clone of r run for real, held for approval when destroys exceeds a
 // scoping policy's threshold and queued to run otherwise, and it carries r's id so it never re-gates.
-// A synthesized log line records the decision beneath the plan output. A failure to create the
-// proposal fails the plan run so the missing apply is visible rather than silently dropped.
+// The read argument reports whether destroys came from a summary the parser actually found, and a
+// plan that could not be read is held rather than queued. A synthesized log line records the
+// decision beneath the plan output. A failure to create the proposal fails the plan run so the
+// missing apply is visible rather than silently dropped.
 func (d *Dispatcher) proposeApply(
-	ctx context.Context, r *run.Run, policies []*policy.Policy, destroys int, mask *masker,
+	ctx context.Context, r *run.Run, policies []*policy.Policy, destroys int, read bool, mask *masker,
 ) run.Status {
 	opts := []run.SubmitOption{
 		run.WithTool(r.Tool),
@@ -93,8 +93,14 @@ func (d *Dispatcher) proposeApply(
 		run.WithProposedFrom(r.ID),
 	}
 	// A plan held for destroying too much records the rule and the count, since "why did this
-	// wait" is answered by the threshold it crossed, not merely by the rule's name.
-	if p := policy.Exceeding(policies, r, destroys); p != nil {
+	// wait" is answered by the threshold it crossed, not merely by the rule's name. A plan whose
+	// summary could not be read is held as well: this run reached here only because a plan-content
+	// policy scopes it, and a plan nobody could weigh against the destroy limit has not passed that
+	// limit. Queuing it would apply an unmeasured plan as though it destroyed nothing.
+	if !read {
+		opts = append(opts, run.WithRequireApproval(true), run.WithHeldByPolicy(
+			"plan summary unreadable, so the destroy count was never weighed against the limit"))
+	} else if p := policy.Exceeding(policies, r, destroys); p != nil {
 		opts = append(opts, run.WithRequireApproval(true), run.WithHeldByPolicy(fmt.Sprintf(
 			"%s (plan destroys %d, limit %d)", p.Label(), destroys, p.MaxDestroy)))
 	}
@@ -134,8 +140,12 @@ func (d *Dispatcher) proposeApply(
 	if proposal.Status == run.StatusPendingApproval {
 		disposition = "held for approval"
 	}
-	note := fmt.Sprintf("switchtender: plan would destroy %d resource(s); proposed apply %s %s.\n",
-		destroys, proposal.ID, disposition)
+	effect := fmt.Sprintf("plan would destroy %d resource(s)", destroys)
+	if !read {
+		effect = "plan summary could not be read"
+	}
+	note := fmt.Sprintf("switchtender: %s; proposed apply %s %s.\n",
+		effect, proposal.ID, disposition)
 	if err := d.store.AppendLog(ctx, r.ID, []byte(note)); err != nil {
 		d.log.Error("dispatch: plan gate note: "+err.Error(), zap.String("run_id", r.ID))
 	}
