@@ -28,6 +28,8 @@ function mountWorkflow() {
 	if (wfJSON) wfJSON.addEventListener("click", () => exportWorkflow("json"));
 	const wfYAML = document.getElementById("wf-export-yaml");
 	if (wfYAML) wfYAML.addEventListener("click", () => exportWorkflow("yaml"));
+	const wfSave = document.getElementById("wf-save-template");
+	if (wfSave) wfSave.addEventListener("click", saveWorkflowTemplate);
 	document.getElementById("wf-step-tool").addEventListener("change", syncStepFields);
 	document.getElementById("wf-step-form").addEventListener("submit", saveStep);
 	document.getElementById("wf-step-delete").addEventListener("click", deleteStepFromModal);
