@@ -303,3 +303,50 @@ func TestRoundTripCarriesGovernance(t *testing.T) {
 		t.Errorf("restored org role = %q, want it preserved", orgMembers[0].Role)
 	}
 }
+
+// TestRestoreDoesNotFireEverySchedule proves a restored schedule waits for its next real occurrence
+// rather than being due the moment the restore finishes.
+//
+// The scheduler treats any next-run time that is not in the future as due. A backup carries the
+// time that was current when it was written, so restoring a day-old snapshot made every enabled
+// schedule due at once: the estate's whole nightly workload fired together, against an install
+// somebody was still bringing up.
+func TestRestoreDoesNotFireEverySchedule(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	sealer := credential.NewSealer("pass", "salt")
+	src := freshStores()
+
+	stale := time.Now().Add(-48 * time.Hour)
+	if err := src.Schedules.Save(ctx, &schedule.Schedule{
+		ID: "sch_1", Name: "nightly", Cron: "0 2 * * *", Playbook: "site.yml",
+		Enabled: true, CreatedAt: stale, NextRunAt: &stale,
+	}); err != nil {
+		t.Fatalf("Save schedule: %v", err)
+	}
+
+	var buf bytes.Buffer
+	if _, err := Write(ctx, src, sealer, &buf); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+	dst := freshStores()
+	if _, err := Read(ctx, dst, sealer, &buf); err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+
+	got, err := dst.Schedules.Get(ctx, "sch_1")
+	if err != nil {
+		t.Fatalf("Get schedule: %v", err)
+	}
+	if got.NextRunAt == nil {
+		t.Fatal("the restored schedule has no next fire time, so it would never run")
+	}
+	if !got.NextRunAt.After(time.Now()) {
+		t.Errorf("restored next fire = %s, which is already due: the restore would fire every "+
+			"enabled schedule at once", got.NextRunAt)
+	}
+	// The cadence itself is preserved; only the stale occurrence is dropped.
+	if got.Cron != "0 2 * * *" {
+		t.Errorf("cron = %q, want it unchanged", got.Cron)
+	}
+}

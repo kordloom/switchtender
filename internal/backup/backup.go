@@ -497,6 +497,8 @@ func check(ctx context.Context, s Stores, p *payload) error {
 // returns the true number written rather than zero for rows already committed.
 func apply(ctx context.Context, s Stores, p *payload) (Summary, error) {
 	var sum Summary
+	// One clock reading for the whole restore, so every schedule recomputes against the same instant.
+	now := time.Now()
 
 	for _, o := range p.Orgs {
 		if err := s.Orgs.Save(ctx, o); err != nil {
@@ -594,7 +596,25 @@ func apply(ctx context.Context, s Stores, p *payload) (Summary, error) {
 	}
 
 	for _, sc := range p.Schedules {
-		if err := s.Schedules.Save(ctx, sc); err != nil {
+		// The next fire time is recomputed from the cron rather than restored as it was written.
+		//
+		// The scheduler reads any next-run time that is not in the future as due, so a backup taken
+		// yesterday restored today made every enabled schedule due at once: the restore finished and
+		// the whole estate's nightly work fired together, against an install somebody was still
+		// bringing up. Missed occurrences are skipped the way cron skips them, so the schedule
+		// resumes on its own cadence instead of catching up.
+		restored := *sc
+		if restored.Enabled {
+			if next, err := restored.NextFire(now); err == nil {
+				restored.NextRunAt = &next
+			} else {
+				// A cadence that can never come due was already broken before the backup. It is
+				// restored without a fire time, which the scheduler skips, rather than with a stale
+				// one that would fire it immediately.
+				restored.NextRunAt = nil
+			}
+		}
+		if err := s.Schedules.Save(ctx, &restored); err != nil {
 			return sum, fmt.Errorf("restore: save schedule %s: %w", sc.ID, err)
 		}
 		sum.Schedules++
