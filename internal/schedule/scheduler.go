@@ -186,8 +186,13 @@ func (s *Scheduler) fireTemplate(ctx context.Context, sc *Schedule) (*run.Run, e
 		return nil, fmt.Errorf("schedule %s: %w", sc.ID, err)
 	}
 	opts := append(t.LaunchOptions(), run.WithSource("schedule", sc.ID))
-	if t.Shards >= 2 {
+	switch {
+	case len(t.Steps) > 0:
+		// A scheduled workflow template fires its graph, the same as an on-demand launch does.
+		return s.submitter.SubmitPipeline(ctx, t.Name, t.Inventory, t.Steps, opts...)
+	case t.Shards >= 2:
 		return s.submitter.SubmitSplit(ctx, t.Playbook, t.Inventory, t.Shards, opts...)
+	default:
+		return s.submitter.Submit(ctx, t.Playbook, t.Inventory, opts...)
 	}
-	return s.submitter.Submit(ctx, t.Playbook, t.Inventory, opts...)
 }

@@ -419,9 +419,14 @@ func hookHandler(triggers trigger.Store, templates template.Store, submitter Sub
 		opts = append(opts, run.WithIdempotencyKey(key),
 			run.WithSource("trigger", tg.ID), run.WithActor("trigger "+tg.Name))
 		var created *run.Run
-		if t.Shards >= 2 {
+		switch {
+		case len(t.Steps) > 0:
+			// A webhook that fires a workflow template runs its graph. The idempotency key still
+			// applies, so a redelivered webhook does not fire the workflow twice.
+			created, err = submitter.SubmitPipeline(ctx, t.Name, t.Inventory, t.Steps, opts...)
+		case t.Shards >= 2:
 			created, err = submitter.SubmitSplit(ctx, t.Playbook, t.Inventory, t.Shards, opts...)
-		} else {
+		default:
 			created, err = submitter.Submit(ctx, t.Playbook, t.Inventory, opts...)
 		}
 		if err != nil {

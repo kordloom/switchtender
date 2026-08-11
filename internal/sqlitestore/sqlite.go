@@ -213,7 +213,8 @@ CREATE TABLE IF NOT EXISTS templates (
 	skip_tags      TEXT NOT NULL DEFAULT '',
 	verbosity      INTEGER NOT NULL DEFAULT 0,
 	forks          INTEGER NOT NULL DEFAULT 0,
-	diff_mode      INTEGER NOT NULL DEFAULT 0
+	diff_mode      INTEGER NOT NULL DEFAULT 0,
+	steps          TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS inventory_sources (
 	id            TEXT PRIMARY KEY,
@@ -690,6 +691,7 @@ func migrateTemplates(db *sql.DB) error {
 		"ALTER TABLE templates ADD COLUMN verbosity INTEGER NOT NULL DEFAULT 0",
 		"ALTER TABLE templates ADD COLUMN forks INTEGER NOT NULL DEFAULT 0",
 		"ALTER TABLE templates ADD COLUMN diff_mode INTEGER NOT NULL DEFAULT 0",
+		"ALTER TABLE templates ADD COLUMN steps TEXT NOT NULL DEFAULT ''",
 	} {
 		if _, err := db.Exec(stmt); err != nil &&
 			!strings.Contains(err.Error(), "duplicate column name") {

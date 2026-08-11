@@ -66,6 +66,8 @@ type createTemplateRequest struct {
 	SelectableCredentialIDs []string `json:"selectable_credential_ids,omitempty"`
 	// ExtraVars are injected into every launch.
 	ExtraVars map[string]any `json:"extra_vars,omitempty"`
+	// Steps, when set, make the template a saved workflow fired as a pipeline.
+	Steps []run.PipelineStep `json:"steps,omitempty"`
 	// Survey prompts the launcher for typed values that become extra vars.
 	Survey []template.SurveyField `json:"survey,omitempty"`
 	// ConfirmOnLaunch routes the plain Launch action through the overrides dialog, so a risky
@@ -93,13 +95,19 @@ func templateToolError(req createTemplateRequest) string {
 	if req.Name == "" {
 		return "name is required"
 	}
-	if !run.ValidTool(req.Tool) {
-		return "tool must be ansible, bash, terraform, opentofu, python, powershell, or go"
-	}
 	for _, n := range req.Notifications {
 		if err := run.ValidateNotifyTarget(n); err != nil {
 			return err.Error()
 		}
+	}
+	// A saved workflow is a pipeline graph, not a single-tool launch, so it is validated on its own
+	// terms: it carries no top-level tool input or Ansible controls, since every step names its own,
+	// and the graph itself must be legal. A template is one or the other, never both.
+	if len(req.Steps) > 0 {
+		return workflowTemplateError(req)
+	}
+	if !run.ValidTool(req.Tool) {
+		return "tool must be ansible, bash, terraform, opentofu, python, powershell, or go"
 	}
 	if run.NormalizeTool(req.Tool) == run.ToolAnsible {
 		if req.Playbook == "" {
@@ -109,6 +117,27 @@ func templateToolError(req createTemplateRequest) string {
 	}
 	if req.Command == "" {
 		return "command is required for the " + req.Tool + " tool"
+	}
+	return ""
+}
+
+// workflowTemplateError validates a stepped template. The single-launch fields must be empty, since
+// a step carries its own tool, playbook, command, and Ansible controls, and leaving one set would
+// silently do nothing: nothing on a stepped template reads a top-level playbook or fork count. The
+// graph itself is checked through the same run.ValidatePipeline the dispatcher runs it through.
+func workflowTemplateError(req createTemplateRequest) string {
+	switch {
+	case req.Playbook != "" || req.Command != "" || req.Tool != "":
+		return "a workflow template carries steps, so it cannot also set a top-level tool, playbook, " +
+			"or command; each step names its own"
+	case req.Shards >= 2:
+		return "a workflow template is a pipeline, not a split, so it cannot set shards"
+	case len(req.Tags) > 0 || len(req.SkipTags) > 0 || req.Verbosity != 0 || req.Forks != 0 || req.DiffMode:
+		return "a workflow template cannot set top-level tags, verbosity, forks, or diff mode; " +
+			"set those on the individual steps that run Ansible"
+	}
+	if err := run.ValidatePipeline(req.Steps); err != nil {
+		return err.Error()
 	}
 	return ""
 }
@@ -158,7 +187,7 @@ func createTemplateHandler(store template.Store, authz *authorizer, log *zap.Log
 			Tags: req.Tags, SkipTags: req.SkipTags, Verbosity: req.Verbosity, Forks: req.Forks, DiffMode: req.DiffMode,
 			Shards:        req.Shards,
 			CredentialIDs: req.CredentialIDs, SelectableCredentialIDs: req.SelectableCredentialIDs,
-			ExtraVars: req.ExtraVars, Survey: req.Survey,
+			ExtraVars: req.ExtraVars, Steps: req.Steps, Survey: req.Survey,
 			ConfirmOnLaunch: req.ConfirmOnLaunch,
 			Notifications:   req.Notifications,
 			Queue:           req.Queue, Image: req.Image, PullCredentialID: req.PullCredentialID,
@@ -246,7 +275,7 @@ func updateTemplateHandler(store template.Store, authz *authorizer, log *zap.Log
 			Tags: req.Tags, SkipTags: req.SkipTags, Verbosity: req.Verbosity, Forks: req.Forks, DiffMode: req.DiffMode,
 			Shards:        req.Shards,
 			CredentialIDs: req.CredentialIDs, SelectableCredentialIDs: req.SelectableCredentialIDs,
-			ExtraVars: req.ExtraVars, Survey: req.Survey,
+			ExtraVars: req.ExtraVars, Steps: req.Steps, Survey: req.Survey,
 			ConfirmOnLaunch: req.ConfirmOnLaunch,
 			Notifications:   notifications,
 			Queue:           req.Queue, Image: req.Image, PullCredentialID: req.PullCredentialID,
@@ -473,16 +502,25 @@ func launchTemplateHandler(store template.Store, submitter Submitter, authz *aut
 			opts = append(opts, run.WithInventory(inventoryID))
 		}
 		var created *run.Run
-		if t.Shards >= 2 {
+		switch {
+		case len(t.Steps) > 0:
+			// A saved workflow fires as a pipeline, so its survey answers and extra vars, already
+			// folded into opts, reach every step. This takes priority over the split and single
+			// branches, which a stepped template does not use.
+			created, err = submitter.SubmitPipeline(r.Context(), t.Name, t.Inventory, t.Steps, opts...)
+		case t.Shards >= 2:
 			created, err = submitter.SubmitSplit(r.Context(), t.Playbook, t.Inventory, t.Shards, opts...)
-		} else {
+		default:
 			created, err = submitter.Submit(r.Context(), t.Playbook, t.Inventory, opts...)
 		}
 		switch {
 		case errors.Is(err, credential.ErrNotFound), errors.Is(err, credential.ErrNoKey),
 			errors.Is(err, project.ErrNotFound), errors.Is(err, inventory.ErrNotFound),
 			errors.Is(err, dispatch.ErrNoPlaybook), errors.Is(err, dispatch.ErrNoCommand),
-			errors.Is(err, dispatch.ErrUnknownTool):
+			errors.Is(err, dispatch.ErrUnknownTool), errors.Is(err, dispatch.ErrStepInput),
+			errors.Is(err, dispatch.ErrNoSteps), errors.Is(err, dispatch.ErrTooManySteps),
+			errors.Is(err, dispatch.ErrUnnamedStep), errors.Is(err, dispatch.ErrDuplicateStep),
+			errors.Is(err, dispatch.ErrUnknownDependency), errors.Is(err, dispatch.ErrDependencyCycle):
 			respondError(w, log, http.StatusBadRequest, err.Error())
 			return
 		case err != nil:

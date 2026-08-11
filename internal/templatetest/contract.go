@@ -11,6 +11,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 
+	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/template"
 )
 
@@ -43,7 +44,11 @@ func testUpdate(t *testing.T, store template.Store) {
 		SelectableCredentialIDs: []string{"cred_sel"},
 		ExtraVars:               map[string]any{"env": "stg"},
 		Survey:                  []template.SurveyField{{Var: "tier", Label: "Tier", Type: template.FieldText}},
-		Tool:                    "python", Command: "print('hi')", DryRun: true,
+		Steps: []run.PipelineStep{
+			{Name: "build", Tool: "bash", Command: "make"},
+			{Name: "deploy", Playbook: "deploy.yml", DependsOn: []string{"build"}},
+		},
+		Tool: "python", Command: "print('hi')", DryRun: true,
 		Tags: []string{"deploy", "web"}, SkipTags: []string{"slow"},
 		Verbosity: 3, Forks: 20, DiffMode: true,
 		ConfirmOnLaunch: true,

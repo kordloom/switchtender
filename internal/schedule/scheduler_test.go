@@ -163,3 +163,38 @@ func TestSchedulerFiresTemplate(t *testing.T) {
 		t.Errorf("LastRunID = %q, want run_t", got.LastRunID)
 	}
 }
+
+// TestSchedulerFiresWorkflowTemplate proves a schedule targeting a saved workflow template fires its
+// graph as a pipeline, not as an empty single run.
+func TestSchedulerFiresWorkflowTemplate(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := NewMemStore()
+	templates := template.NewMemStore()
+	if err := templates.Save(ctx, &template.Template{
+		ID: "tpl_wf", Name: "nightly-ship", Inventory: "prod",
+		Steps: []run.PipelineStep{
+			{Name: "build", Tool: "bash", Command: "make"},
+			{Name: "deploy", Playbook: "deploy.yml", DependsOn: []string{"build"}},
+		},
+		CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("Save template error = %v", err)
+	}
+	past := time.Now().Add(-time.Minute)
+	if err := store.Save(ctx, &Schedule{
+		ID: "sch_wf", Cron: "@every 1h", TemplateID: "tpl_wf", Enabled: true,
+		CreatedAt: time.Now(), NextRunAt: &past,
+	}); err != nil {
+		t.Fatalf("Save schedule error = %v", err)
+	}
+
+	sub := &fakeSubmitter{runID: "run_wf"}
+	s := NewScheduler(store, sub, zap.NewNop(), WithTemplates(templates))
+	s.tick(time.Now())
+
+	if sub.calls != 1 || sub.kind != "pipeline" {
+		t.Fatalf("calls = %d kind = %q, want one pipeline submit; a scheduled workflow template "+
+			"did not fire its graph", sub.calls, sub.kind)
+	}
+}

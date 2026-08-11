@@ -118,6 +118,11 @@ type Template struct {
 	SelectableCredentialIDs []string `json:"selectable_credential_ids,omitempty"`
 	// ExtraVars are injected into the run as extra vars, under any survey answers.
 	ExtraVars map[string]any `json:"extra_vars,omitempty"`
+	// Steps, when set, make the template a saved workflow: a pipeline graph fired as one run instead
+	// of a single tool launch. A stepped template carries no top-level tool, playbook, command, or
+	// Ansible controls, since each step names its own; the survey answers, extra vars, credentials,
+	// project, inventory, and image still apply to the whole workflow.
+	Steps []run.PipelineStep `json:"steps,omitempty"`
 	// Survey prompts the launcher for typed values that become extra vars.
 	Survey []SurveyField `json:"survey,omitempty"`
 	// ConfirmOnLaunch routes the plain Launch action through the overrides dialog, so a risky
