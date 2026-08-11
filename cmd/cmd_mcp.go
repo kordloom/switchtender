@@ -29,7 +29,16 @@ var (
 // mcpTokenEnv is the environment variable the token is read from when the flag is absent. An
 // environment variable is preferred to a flag because a flag value is visible in the process list to
 // every other user on the host.
-const mcpTokenEnv = "SWITCHTENDER_TOKEN"
+//
+// An agent is given its own variable rather than the operator's. The two are different principals:
+// an agent acts on somebody's behalf under a token whose grants and audit identity are its own, so
+// reusing whatever token happens to be exported in a shell would silently run an agent with a
+// person's authority. The shared variable is still read when the agent-specific one is unset, so an
+// existing setup keeps working.
+const mcpTokenEnv = "SWITCHTENDER_MCP_TOKEN"
+
+// mcpFallbackTokenEnv is the shared token variable, read when the agent-specific one is unset.
+const mcpFallbackTokenEnv = "SWITCHTENDER_TOKEN"
 
 // mcpCmd serves the Model Context Protocol over stdio.
 var mcpCmd = &cobra.Command{
@@ -50,7 +59,9 @@ and no credential, account, token, grant, or policy tool, so it cannot widen its
 agent an operator-bound token, minted with "switchtender token new --user", and it holds exactly one
 credential whose only door is this gate. The command refuses to start on an admin token.
 
-The token is read from ` + mcpTokenEnv + `, which is preferred to the flag because a flag value is
+The token is read from ` + mcpTokenEnv + `, falling back to ` + mcpFallbackTokenEnv + `. Give the
+agent its own token rather than reusing an operator's: the trail names whoever the token belongs to.
+An environment variable is preferred to the flag because a flag value is
 visible in the host's process list.
 
     export ` + mcpTokenEnv + `=st_...
@@ -80,6 +91,9 @@ func runMCP(cmd *cobra.Command, _ []string) error {
 	token := mcpToken
 	if token == "" {
 		token = os.Getenv(mcpTokenEnv)
+		if token == "" {
+			token = os.Getenv(mcpFallbackTokenEnv)
+		}
 	}
 	client, err := mcp.NewClient(mcpServer, token, mcpTimeout)
 	if err != nil {

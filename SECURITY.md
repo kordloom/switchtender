@@ -25,9 +25,17 @@ issues in third-party dependencies upstream, though a heads-up here is welcome.
 
 ## Verifying a release
 
-Every release ships a `SHA256SUMS` file signed with [cosign](https://docs.sigstore.dev) using
-keyless signing tied to this repository's GitHub Actions identity. There is no long-lived key to
-steal, and the signature is recorded in the public Rekor transparency log.
+A release built by this repository's `release.yml` workflow ships a `SHA256SUMS` file signed with
+[cosign](https://docs.sigstore.dev) using keyless signing tied to that workflow's GitHub Actions
+identity. There is no long-lived key to steal, and the signature is recorded in the public Rekor
+transparency log.
+
+**A release built any other way is not signed, and its assets carry no `SHA256SUMS.sig` or
+`SHA256SUMS.pem`.** Check for those two files before relying on the command below: their absence
+means the release was assembled by hand and the signature chain described here does not apply to it.
+Verify such a release against the checksums alone, and treat the checksums as unattested. This
+product's claim is that you can check what it tells you, so the honest form of that claim includes
+saying when a check is not available.
 
 Verify the signature over the checksums, then the archive against them:
 

@@ -286,10 +286,33 @@ func (c *containerRunner) writeEnvFile(spec Spec, extraEnv []string) (string, fu
 // command line and out of the container's inspectable environment.
 func shellExport(kv string) string {
 	key, value, ok := strings.Cut(kv, "=")
-	if !ok || key == "" {
+	if !ok || !validEnvName(key) {
 		return ""
 	}
 	return "export " + key + "='" + strings.ReplaceAll(value, "'", `'\''`) + "'"
+}
+
+// validEnvName reports whether a name is a POSIX shell variable name, which is what makes it safe to
+// write unquoted on the left of an assignment.
+//
+// Quoting the value and not the name leaves half a hole. A name is not quotable, since quoting it
+// would stop it being an assignment at all, so a name carrying a shell metacharacter has to be
+// refused instead. Names are not always the product's own: a custom credential type lets an operator
+// choose the variable a secret injects into, and an import reads those types out of a file from
+// another system, so the name reaching this line is not guaranteed to be well formed.
+func validEnvName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for i, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r == '_':
+		case i > 0 && r >= '0' && r <= '9':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // login authenticates to the image's registry so a private execution environment can be pulled. The

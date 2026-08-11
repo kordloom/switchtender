@@ -137,3 +137,77 @@ func TestRunArgsNoEnvNoWrapper(t *testing.T) {
 		t.Errorf("a no-env run should carry no shell wrapper: %v", args)
 	}
 }
+
+// TestShellExportRefusesAnUnsafeName pins that a variable name carrying shell metacharacters never
+// reaches the env file.
+//
+// The value is single quoted, so no value can break out. A name cannot be quoted, because quoting it
+// would stop the line being an assignment, so an unsafe name has to be refused instead. Names are not
+// always the product's own: a custom credential type lets an operator choose the variable a secret
+// injects into, and an import reads those definitions out of a file written by another system.
+func TestShellExportRefusesAnUnsafeName(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Name    string
+		Entry   string
+		Emitted bool
+	}{
+		{Name: "ordinary name", Entry: "ANSIBLE_HOST_KEY_CHECKING=False", Emitted: true},
+		{Name: "leading underscore", Entry: "_PRIVATE=x", Emitted: true},
+		{Name: "digits after the first character", Entry: "AWS_S3_V4=1", Emitted: true},
+		{Name: "command separator in the name", Entry: "FOO;touch /tmp/pwned=1", Emitted: false},
+		{Name: "substitution in the name", Entry: "FOO$(id)=1", Emitted: false},
+		{Name: "backtick in the name", Entry: "FOO`id`=1", Emitted: false},
+		{Name: "space in the name", Entry: "FOO BAR=1", Emitted: false},
+		{Name: "newline in the name", Entry: "FOO\nrm -rf /=1", Emitted: false},
+		{Name: "leading digit is not a shell name", Entry: "9LIVES=1", Emitted: false},
+		{Name: "empty name", Entry: "=novalue", Emitted: false},
+	}
+	for _, test := range tests {
+		t.Run(test.Name, func(t *testing.T) {
+			t.Parallel()
+			got := shellExport(test.Entry)
+			if emitted := got != ""; emitted != test.Emitted {
+				t.Errorf("shellExport(%q) = %q, emitted %v, want %v", test.Entry, got, emitted,
+					test.Emitted)
+			}
+		})
+	}
+}
+
+// TestEnvFileSourcesSafelyWithAHostileName runs a real shell over an env file built from a hostile
+// name beside an honest one, and requires the honest value to survive while the hostile line never
+// executes. Reasoning about escaping is how escaping bugs survive review, so this asks sh.
+func TestEnvFileSourcesSafelyWithAHostileName(t *testing.T) {
+	t.Parallel()
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("no POSIX shell to source against")
+	}
+	marker := filepath.Join(t.TempDir(), "pwned")
+	lines := []string{
+		shellExport("GOOD=kept"),
+		shellExport("EVIL;touch " + marker + "=1"),
+	}
+	var body strings.Builder
+	for _, l := range lines {
+		if l != "" {
+			body.WriteString(l + "\n")
+		}
+	}
+	path := filepath.Join(t.TempDir(), "env")
+	if err := os.WriteFile(path, []byte(body.String()), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	out, err := exec.Command(sh, "-c", `. "$1"; printf %s "$GOOD"`, "sh", path).Output()
+	if err != nil {
+		t.Fatalf("sourcing the env file error = %v", err)
+	}
+	if string(out) != "kept" {
+		t.Errorf("GOOD = %q, want kept; the honest value must survive", out)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Error("the hostile name executed a command when the env file was sourced")
+	}
+}
