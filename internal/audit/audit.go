@@ -122,23 +122,27 @@ func NewID() string {
 // A field that is empty is omitted rather than hashed as an empty string, so an entry that predates
 // a field is byte-identical to one that simply does not use it.
 func EntryHash(e *Entry) string {
-	claim := map[string]any{
-		"seq":    e.Seq,
-		"at":     e.At.UTC().Format(time.RFC3339Nano),
-		"actor":  e.Actor,
-		"method": e.Method,
-		"path":   e.Path,
-		"prev":   e.PrevHash,
-	}
+	return linkOf(claimObject(e.Seq, e.At.UTC().Format(time.RFC3339Nano),
+		e.Actor, e.Method, e.Path, e.PrevHash, e.ActorType, e.OnBehalfOf, e.ContentDigest))
+}
+
+// claimObject builds the exact map a chain link is computed over: the fields the link commits to, in
+// the shape both EntryHash and bundle verification serialize. Sharing it is what keeps producing a
+// link and recomputing one from a bundled claim on a single definition, so they cannot drift.
+func claimObject(seq int64, at, actor, method, path, prev, actorType, onBehalfOf, contentDigest string) map[string]any {
+	claim := map[string]any{"seq": seq, "at": at, "actor": actor, "method": method, "path": path, "prev": prev}
 	for key, value := range map[string]string{
-		"actor_type":     e.ActorType,
-		"on_behalf_of":   e.OnBehalfOf,
-		"content_digest": e.ContentDigest,
+		"actor_type": actorType, "on_behalf_of": onBehalfOf, "content_digest": contentDigest,
 	} {
 		if value != "" {
 			claim[key] = value
 		}
 	}
+	return claim
+}
+
+// linkOf serializes a claim object canonically and returns its hex SHA-256, the chain link.
+func linkOf(claim map[string]any) string {
 	canonical, err := jcs.Serialize(claim)
 	if err != nil {
 		// Serialize fails only on a value type this map cannot hold: every value here is a string or
