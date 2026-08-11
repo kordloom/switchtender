@@ -156,7 +156,12 @@ func updateScheduleHandler(store schedule.Store, authz *authorizer, log *zap.Log
 			return
 		}
 		sc.NextRunAt = &next
-		if err := store.Save(r.Context(), sc); err != nil {
+		// A delete landing between the read above and this write must win. Save is an upsert, so it
+		// would have re-created the schedule the operator just removed and left it firing.
+		if err := store.Update(r.Context(), sc); errors.Is(err, schedule.ErrNotFound) {
+			respondError(w, log, http.StatusNotFound, "schedule not found")
+			return
+		} else if err != nil {
 			log.Error("server: update schedule: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not save schedule")
 			return

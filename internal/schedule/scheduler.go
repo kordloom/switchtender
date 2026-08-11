@@ -137,13 +137,13 @@ func (s *Scheduler) tick(now time.Time) {
 		if err != nil {
 			s.log.Error("schedule: fire: "+err.Error(), zap.String("schedule_id", sc.ID))
 		}
-		sc.LastRunAt = &now
-		if runID != "" {
-			sc.LastRunID = runID
-		}
-		sc.NextRunAt = &next
-		if err := s.store.Save(s.ctx, sc); err != nil {
-			s.log.Error("schedule: save: "+err.Error(), zap.String("schedule_id", sc.ID))
+		// Only what the fire owns is written back. sc came from the List above, so it is a snapshot
+		// taken before the run and writing it whole reverted anything an operator changed meanwhile:
+		// a disable came back enabled, an edit was rolled back, and a delete was re-inserted as a
+		// live schedule that kept firing. NextRunAt is deliberately not written either, because
+		// ClaimDue already advanced it and rewriting it here is what reverted an edited cron.
+		if err := s.store.RecordFire(s.ctx, sc.ID, now, runID); err != nil {
+			s.log.Error("schedule: record fire: "+err.Error(), zap.String("schedule_id", sc.ID))
 		}
 	}
 }

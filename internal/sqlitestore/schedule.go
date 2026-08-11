@@ -145,6 +145,49 @@ func boolInt(b bool) int {
 	return 0
 }
 
+// Update replaces an existing schedule, or returns ErrNotFound when the row is gone. It exists so
+// an edit racing a delete cannot re-create what was deleted, which the upsert in Save would.
+func (s *scheduleStore) Update(ctx context.Context, sc *schedule.Schedule) error {
+	steps, err := json.Marshal(sc.Steps)
+	if err != nil {
+		return fmt.Errorf("update schedule: %w", err)
+	}
+	const q = `
+UPDATE schedules SET
+	name=?, cron=?, playbook=?, inventory=?, shards=?, steps=?, enabled=?, created_at=?,
+	next_run_at=?, last_run_at=?, last_run_id=?, template_id=?, timezone=?
+WHERE id=?`
+	res, err := s.db.ExecContext(ctx, q,
+		sc.Name, sc.Cron, sc.Playbook, sc.Inventory, sc.Shards, string(steps),
+		boolInt(sc.Enabled), sqlutil.FormatTime(sc.CreatedAt), sqlutil.NullTime(sc.NextRunAt),
+		sqlutil.NullTime(sc.LastRunAt), sc.LastRunID, sc.TemplateID, sc.Timezone, sc.ID,
+	)
+	if err != nil {
+		return fmt.Errorf("update schedule: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("update schedule: %w", err)
+	}
+	if n == 0 {
+		return schedule.ErrNotFound
+	}
+	return nil
+}
+
+// RecordFire records that a schedule fired, writing only the two columns a fire owns. An empty run
+// id keeps the stored one, and a row that is gone is not an error.
+func (s *scheduleStore) RecordFire(ctx context.Context, id string, at time.Time, runID string) error {
+	const q = `
+UPDATE schedules SET
+	last_run_at=?, last_run_id=COALESCE(NULLIF(?, ''), last_run_id)
+WHERE id=?`
+	if _, err := s.db.ExecContext(ctx, q, sqlutil.FormatTime(at), runID, id); err != nil {
+		return fmt.Errorf("record schedule fire: %w", err)
+	}
+	return nil
+}
+
 // ClaimDue atomically advances a schedule's next fire time and reports whether this caller won.
 func (s *scheduleStore) ClaimDue(ctx context.Context, id string, oldNext, newNext time.Time) (bool, error) {
 	res, err := s.db.ExecContext(ctx,

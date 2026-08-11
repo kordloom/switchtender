@@ -29,6 +29,10 @@ func Contract(t *testing.T, newStore func() schedule.Store) {
 	t.Run("claim due holds under concurrency", func(t *testing.T) {
 		testClaimDueUnderConcurrency(t, newStore())
 	})
+	t.Run("record fire never resurrects a deleted schedule", func(t *testing.T) {
+		testRecordFire(t, newStore())
+	})
+	t.Run("update refuses a deleted schedule", func(t *testing.T) { testUpdate(t, newStore()) })
 	t.Run("empty list is non-nil", func(t *testing.T) {
 		got, err := newStore().List(context.Background())
 		if err != nil {
@@ -206,5 +210,122 @@ func testClaimDue(t *testing.T, store schedule.Store) {
 	}
 	if got.NextRunAt == nil || !got.NextRunAt.Equal(newNext) {
 		t.Errorf("NextRunAt = %v, want the winner's %v", got.NextRunAt, newNext)
+	}
+}
+
+// testRecordFire pins that recording a fire writes only what a fire owns and never creates a row.
+//
+// The scheduler used to write the whole schedule back after firing, from a snapshot taken before the
+// run. A delete landing in between was undone: the row came back enabled with a live next run time
+// and kept firing, which is the opposite of what deleting a schedule means. A disable and an edit
+// were reverted the same way.
+func testRecordFire(t *testing.T, store schedule.Store) {
+	t.Helper()
+	ctx := context.Background()
+	created := time.Date(2026, 8, 11, 1, 0, 0, 0, time.UTC)
+	next := created.Add(time.Hour)
+	fired := created.Add(30 * time.Minute)
+
+	seed := func(id string) *schedule.Schedule {
+		sc := &schedule.Schedule{
+			ID: id, Name: id, Cron: "0 * * * *", Playbook: "p.yml", Enabled: true,
+			CreatedAt: created, NextRunAt: &next, LastRunID: "run_first",
+		}
+		if err := store.Save(ctx, sc); err != nil {
+			t.Fatalf("Save(%s) error = %v", id, err)
+		}
+		return sc
+	}
+	seed("sch_a")
+	seed("sch_b")
+
+	// A fire touches only the firing schedule. Without this, a cross-row write such as a stray
+	// "OR 1=1" or a loop over every schedule compiles and passes every other assertion here.
+	if err := store.RecordFire(ctx, "sch_a", fired, "run_second"); err != nil {
+		t.Fatalf("RecordFire() error = %v", err)
+	}
+	other, err := store.Get(ctx, "sch_b")
+	if err != nil {
+		t.Fatalf("Get(sch_b) error = %v", err)
+	}
+	if other.LastRunID != "run_first" || other.LastRunAt != nil {
+		t.Errorf("recording a fire on one schedule wrote to another: last_run_id=%q last_run_at=%v",
+			other.LastRunID, other.LastRunAt)
+	}
+
+	got, err := store.Get(ctx, "sch_a")
+	if err != nil {
+		t.Fatalf("Get(sch_a) error = %v", err)
+	}
+	if got.LastRunID != "run_second" {
+		t.Errorf("LastRunID = %q, want run_second", got.LastRunID)
+	}
+	if got.LastRunAt == nil || !got.LastRunAt.Equal(fired) {
+		t.Errorf("LastRunAt = %v, want %v", got.LastRunAt, fired)
+	}
+	// Everything a fire does not own must survive it, or a fire silently reverts an operator's edit.
+	if !got.Enabled || got.NextRunAt == nil || !got.NextRunAt.Equal(next) || got.Playbook != "p.yml" {
+		t.Errorf("a fire rewrote fields it does not own: enabled=%v next=%v playbook=%q",
+			got.Enabled, got.NextRunAt, got.Playbook)
+	}
+
+	// A fire that created no run keeps the run id already stored.
+	if err := store.RecordFire(ctx, "sch_a", fired.Add(time.Hour), ""); err != nil {
+		t.Fatalf("RecordFire(no run) error = %v", err)
+	}
+	if got, err = store.Get(ctx, "sch_a"); err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.LastRunID != "run_second" {
+		t.Errorf("LastRunID = %q, want the previous run id kept when a fire created none", got.LastRunID)
+	}
+
+	// The case this method exists for.
+	if err := store.Delete(ctx, "sch_a"); err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+	if err := store.RecordFire(ctx, "sch_a", fired, "run_third"); err != nil {
+		t.Errorf("RecordFire() on a deleted schedule error = %v, want nil; the record is a note "+
+			"about a run that already happened", err)
+	}
+	if _, err := store.Get(ctx, "sch_a"); !errors.Is(err, schedule.ErrNotFound) {
+		t.Errorf("Get() after delete then fire = %v, want ErrNotFound; the schedule came back", err)
+	}
+}
+
+// testUpdate pins that updating a schedule refuses a row that is gone, so an edit racing a delete
+// cannot re-create it. Save stays an upsert, which is what the create path needs.
+func testUpdate(t *testing.T, store schedule.Store) {
+	t.Helper()
+	ctx := context.Background()
+	created := time.Date(2026, 8, 11, 1, 0, 0, 0, time.UTC)
+	sc := &schedule.Schedule{
+		ID: "sch_1", Name: "nightly", Cron: "0 * * * *", Playbook: "p.yml", Enabled: true,
+		CreatedAt: created,
+	}
+	if err := store.Save(ctx, sc); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	sc.Playbook = "edited.yml"
+	if err := store.Update(ctx, sc); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	got, err := store.Get(ctx, "sch_1")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.Playbook != "edited.yml" {
+		t.Errorf("Playbook = %q, want edited.yml", got.Playbook)
+	}
+
+	if err := store.Delete(ctx, "sch_1"); err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+	if err := store.Update(ctx, sc); !errors.Is(err, schedule.ErrNotFound) {
+		t.Errorf("Update() on a deleted schedule = %v, want ErrNotFound", err)
+	}
+	if _, err := store.Get(ctx, "sch_1"); !errors.Is(err, schedule.ErrNotFound) {
+		t.Error("an update re-created a deleted schedule")
 	}
 }
