@@ -104,7 +104,7 @@ func Serve(ext *Extension) {
 	goplugin.Serve(&goplugin.ServeConfig{
 		HandshakeConfig: Handshake,
 		Plugins:         Set(ext),
-		GRPCServer:      goplugin.DefaultGRPCServer,
+		GRPCServer:      grpcServer,
 	})
 }
 

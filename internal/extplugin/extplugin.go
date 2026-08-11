@@ -8,19 +8,23 @@ package extplugin
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/hashicorp/go-hclog"
 	goplugin "github.com/hashicorp/go-plugin"
 	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
-	"go.uber.org/zap/zapio"
 
+	"github.com/kordloom/switchtender/internal/ai"
+	"github.com/kordloom/switchtender/internal/dispatch"
 	"github.com/kordloom/switchtender/internal/extproto"
+	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/secretsource"
 	"github.com/kordloom/switchtender/sdk"
 	"github.com/kordloom/switchtender/sdk/plugin"
 )
@@ -142,6 +146,15 @@ func load(path string, log *zap.Logger) (*goplugin.Client, error) {
 		client.Kill()
 		return nil, fmt.Errorf("describe: %w", err)
 	}
+	// The Describe response is untrusted input. Registering a bad name panics the shared registry,
+	// and that panic unwinds through the Load loop past every plugin left to load, so one bad plugin
+	// takes down the rest. Validate the whole response first and skip this plugin whole on a failure,
+	// which also means a partly wired plugin never exists: register runs only once nothing in the
+	// response can panic.
+	if err := validate(desc); err != nil {
+		client.Kill()
+		return nil, err
+	}
 
 	register(ext, desc)
 	log.Info("extplugin: loaded plugin",
@@ -153,6 +166,65 @@ func load(path string, log *zap.Logger) (*goplugin.Client, error) {
 		zap.Strings("dynamic_secret_sources", desc.GetDynamicSecretSources()))
 	return client, nil
 }
+
+// validate checks a plugin's Describe response is registrable before any of it is registered. It
+// mirrors what each registry rejects: an empty name (every registry panics on one), a name already
+// claimed by a built-in or an earlier plugin, and a duplicate within the response. Secret resolvers
+// and dynamic minters share one namespace, so a kind in either, or in both, is a collision. The
+// normalization matches each registry so a name that would collide after normalization is caught
+// here rather than at registration.
+func validate(desc *extproto.DescribeResponse) error {
+	tools := desc.GetTools()
+	channels := desc.GetNotifiers()
+	providers := desc.GetAiProviders()
+	// Resolvers and minters share the secret-kind namespace, so they are checked as one list.
+	secrets := append(append([]string{}, desc.GetSecretSources()...), desc.GetDynamicSecretSources()...)
+
+	for _, list := range [][]string{tools, channels, providers, secrets} {
+		for _, name := range list {
+			if strings.TrimSpace(name) == "" {
+				return fmt.Errorf("%w: an empty name", ErrPluginContract)
+			}
+		}
+	}
+	if err := checkNamespace(tools, run.ValidTool, run.NormalizeTool); err != nil {
+		return err
+	}
+	if err := checkNamespace(channels, dispatch.NotifierRegistered, identity); err != nil {
+		return err
+	}
+	if err := checkNamespace(providers, aiRegistered, aiNormalize); err != nil {
+		return err
+	}
+	return checkNamespace(secrets, secretsource.Registered, identity)
+}
+
+// checkNamespace reports the first name in names that is already registered, per taken, or that
+// repeats within names once put through norm, the same normalization the registry keys on.
+func checkNamespace(names []string, taken func(string) bool, norm func(string) string) error {
+	seen := make(map[string]bool, len(names))
+	for _, name := range names {
+		if taken(name) {
+			return fmt.Errorf("%w: %q is already registered", ErrPluginContract, name)
+		}
+		key := norm(name)
+		if seen[key] {
+			return fmt.Errorf("%w: %q is declared twice", ErrPluginContract, name)
+		}
+		seen[key] = true
+	}
+	return nil
+}
+
+// identity returns s unchanged, for namespaces the registry keys on verbatim.
+func identity(s string) string { return s }
+
+// aiNormalize matches how the AI registry keys a provider name, lowercase and trimmed.
+func aiNormalize(name string) string { return strings.ToLower(strings.TrimSpace(name)) }
+
+// aiRegistered reports whether an AI provider name is already registered, comparing on the registry's
+// own normalized form.
+func aiRegistered(name string) bool { return slices.Contains(ai.Names(), aiNormalize(name)) }
 
 // register wires everything a plugin declared into the process registries, through the same SDK
 // entry points a compiled-in extension uses.
@@ -174,13 +246,54 @@ func register(ext extproto.ExtensionClient, desc *extproto.DescribeResponse) {
 	}
 }
 
-// newHCLog adapts the zap logger to the hclog interface go-plugin logs through, which also
-// carries the plugin process's own stderr.
+// newHCLog adapts the zap logger to the hclog interface go-plugin logs through, which also carries
+// the plugin process's own stderr. It preserves the level of each line instead of flattening every
+// line to Debug: go-plugin routes a plugin crash and its panic trace at Error, and flattening those
+// to Debug is what let a production logger drop them, so a plugin that died left nothing to diagnose.
+// The intercept logger's own level is Trace so it never pre-filters a line, and the sink maps each
+// line to the matching zap level, where the production Info filter keeps errors and warnings and
+// drops the go-plugin handshake chatter that arrives at Trace and Debug.
 func newHCLog(log *zap.Logger) hclog.Logger {
-	return hclog.New(&hclog.LoggerOptions{
+	l := hclog.NewInterceptLogger(&hclog.LoggerOptions{
 		Name:        "extplugin",
-		Level:       hclog.Info,
-		Output:      &zapio.Writer{Log: log.Named("extplugin"), Level: zapcore.DebugLevel},
+		Level:       hclog.Trace,
+		Output:      io.Discard,
 		DisableTime: true,
 	})
+	l.RegisterSink(zapSink{log: log.Named("extplugin")})
+	return l
+}
+
+// zapSink forwards hclog lines to zap at the matching level, so a plugin's severity survives instead
+// of collapsing to one level.
+type zapSink struct {
+	// log is the destination logger.
+	log *zap.Logger
+}
+
+// Accept forwards one hclog line to zap, mapping the level and turning hclog's trailing key/value
+// args into zap fields. Trace, Debug, and any unclassified level map to Debug so go-plugin's verbose
+// internal chatter is dropped by a production logger while a crash at Error survives it.
+func (s zapSink) Accept(name string, level hclog.Level, msg string, args ...any) {
+	fields := make([]zap.Field, 0, len(args)/2+1)
+	if name != "" {
+		fields = append(fields, zap.String("logger", name))
+	}
+	for i := 0; i+1 < len(args); i += 2 {
+		key, ok := args[i].(string)
+		if !ok {
+			key = fmt.Sprintf("%v", args[i])
+		}
+		fields = append(fields, zap.Any(key, args[i+1]))
+	}
+	switch level {
+	case hclog.Error:
+		s.log.Error(msg, fields...)
+	case hclog.Warn:
+		s.log.Warn(msg, fields...)
+	case hclog.Info:
+		s.log.Info(msg, fields...)
+	default:
+		s.log.Debug(msg, fields...)
+	}
 }

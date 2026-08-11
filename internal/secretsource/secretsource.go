@@ -136,6 +136,20 @@ func RegisterDynamic(kind string, fn MintFunc) {
 	minters[kind] = fn
 }
 
+// Registered reports whether kind is already claimed, by the local default, a resolver, or a minter.
+// Resolvers and minters share one namespace, so a plugin declaring a kind already taken by either
+// would panic the shared registry; the plugin loader checks this first and refuses the plugin.
+func Registered(kind string) bool {
+	if kind == "" || kind == KindLocal {
+		return true
+	}
+	if _, ok := resolvers[kind]; ok {
+		return true
+	}
+	_, ok := minters[kind]
+	return ok
+}
+
 // NormalizeKind maps an empty kind to the local default and otherwise returns kind unchanged.
 func NormalizeKind(kind string) string {
 	if kind == "" {

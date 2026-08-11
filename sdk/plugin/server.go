@@ -4,17 +4,55 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"runtime/debug"
 	"sort"
 	"strconv"
 	"sync"
 	"sync/atomic"
 
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	"github.com/kordloom/switchtender/internal/extproto"
 	"github.com/kordloom/switchtender/sdk"
 )
+
+// grpcServer builds the plugin process's gRPC server with panic recovery on every callback, so a
+// panic in one seam returns an error to the host instead of crashing the whole process and killing
+// every other seam it serves.
+func grpcServer(opts []grpc.ServerOption) *grpc.Server {
+	opts = append(opts, grpc.ChainUnaryInterceptor(recoverUnary), grpc.ChainStreamInterceptor(recoverStream))
+	return grpc.NewServer(opts...)
+}
+
+// recoverUnary turns a panic in a unary callback into an Internal error so the plugin process
+// survives. The panic value can carry secret-bearing text, so only the method name reaches the host;
+// the stack, which is frames without values, goes to the plugin's own stderr for diagnosis.
+func recoverUnary(ctx context.Context, req any, info *grpc.UnaryServerInfo,
+	handler grpc.UnaryHandler) (resp any, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			_, _ = os.Stderr.Write(debug.Stack())
+			err = status.Errorf(codes.Internal, "plugin callback %s panicked", info.FullMethod)
+		}
+	}()
+	return handler(ctx, req)
+}
+
+// recoverStream turns a panic in a streaming callback, the RunTool path, into an Internal error so
+// the process survives. It follows the same no-secret-on-the-wire rule as recoverUnary.
+func recoverStream(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo,
+	handler grpc.StreamHandler) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			_, _ = os.Stderr.Write(debug.Stack())
+			err = status.Errorf(codes.Internal, "plugin callback %s panicked", info.FullMethod)
+		}
+	}()
+	return handler(srv, ss)
+}
 
 // server serves one Extension over the wire protocol inside the plugin process.
 type server struct {

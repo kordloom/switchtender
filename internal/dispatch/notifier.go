@@ -43,3 +43,11 @@ func RegisterNotifier(name string, n Notifier) {
 	}
 	notifiers[name] = n
 }
+
+// NotifierRegistered reports whether a notifier is already registered under name. The plugin loader
+// checks this before wiring a plugin's notifier so a duplicate name is refused rather than panicking
+// the shared registry mid-load.
+func NotifierRegistered(name string) bool {
+	_, ok := notifiers[name]
+	return ok
+}
