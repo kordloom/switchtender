@@ -102,7 +102,11 @@ function updateActions(run) {
 		return;
 	}
 	const held = run.status === "pending_approval";
-	cancel.hidden = isTerminal(run.status) || held;
+	// A held run is still cancelable, and the API has always allowed it: CancelPending accepts an
+	// unclaimed run in pending_approval. Hiding the button left the person who submitted the run with
+	// no way to stop it, because rejecting is an admin decision while canceling your own run is
+	// operator work. They had to ask an approver to reject something nobody wanted decided.
+	cancel.hidden = isTerminal(run.status);
 	if (approve) approve.hidden = !held;
 	if (reject) reject.hidden = !held;
 	const splitParent = (run.kind === "split" || run.shard_count) && !run.parent_id;
