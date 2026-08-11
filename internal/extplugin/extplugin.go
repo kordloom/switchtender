@@ -156,7 +156,7 @@ func load(path string, log *zap.Logger) (*goplugin.Client, error) {
 		return nil, err
 	}
 
-	register(ext, desc)
+	register(seam{client: ext, exited: client.Exited}, desc)
 	log.Info("extplugin: loaded plugin",
 		zap.String("file", filepath.Base(path)),
 		zap.Strings("tools", desc.GetTools()),
@@ -228,21 +228,21 @@ func aiRegistered(name string) bool { return slices.Contains(ai.Names(), aiNorma
 
 // register wires everything a plugin declared into the process registries, through the same SDK
 // entry points a compiled-in extension uses.
-func register(ext extproto.ExtensionClient, desc *extproto.DescribeResponse) {
+func register(s seam, desc *extproto.DescribeResponse) {
 	for _, tool := range desc.GetTools() {
-		sdk.RegisterTool(tool, &toolRunner{client: ext, tool: tool})
+		sdk.RegisterTool(tool, &toolRunner{seam: s, tool: tool})
 	}
 	for _, channel := range desc.GetNotifiers() {
-		sdk.RegisterNotifier(channel, &notifier{client: ext, channel: channel})
+		sdk.RegisterNotifier(channel, &notifier{seam: s, channel: channel})
 	}
 	for _, name := range desc.GetAiProviders() {
-		sdk.RegisterAIProvider(name, aiFactory(ext, name))
+		sdk.RegisterAIProvider(name, aiFactory(s, name))
 	}
 	for _, kind := range desc.GetSecretSources() {
-		sdk.RegisterSecretSource(kind, secretResolver(ext, kind))
+		sdk.RegisterSecretSource(kind, secretResolver(s, kind))
 	}
 	for _, kind := range desc.GetDynamicSecretSources() {
-		sdk.RegisterDynamicSecretSource(kind, secretMinter(ext, kind))
+		sdk.RegisterDynamicSecretSource(kind, secretMinter(s, kind))
 	}
 }
 

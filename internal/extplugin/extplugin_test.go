@@ -90,11 +90,25 @@ func TestLoadRegistersEverySeam(t *testing.T) {
 	// loader withholds anything.
 	t.Setenv("SWITCHTENDER_ENCRYPTION_KEY", "install-key-must-not-escape")
 
+	// The seam registries are process global and nothing unregisters, so a second load in the same
+	// process finds its names taken. Load refuses that plugin rather than panicking, which is right
+	// for a server that must start with its remaining plugins, but it leaves the first load's client
+	// registered and that client is dead by then. Saying so plainly beats failing later with a gRPC
+	// connection error that names none of this.
+	if run.ValidTool("exttest-hello") {
+		t.Skip("the plugin seams are already registered in this process, so a second load would be " +
+			"refused as a duplicate; run this test once per process")
+	}
 	closePlugins, err := Load(buildPlugin(t), zap.NewNop())
 	if err != nil {
 		t.Fatalf("Load error: %v", err)
 	}
 	defer closePlugins()
+	// Load skips a plugin it cannot register and reports that through the log, which is discarded
+	// here, so confirm the seam actually arrived before driving it.
+	if !run.ValidTool("exttest-hello") {
+		t.Fatal("Load did not register the plugin tool, so it was skipped rather than loaded")
+	}
 
 	// Seam 1: the tool validates and routes, with output, extra vars, dry run, and exit code
 	// crossing the wire.
@@ -187,6 +201,20 @@ func TestLoadRegistersEverySeam(t *testing.T) {
 	// means the loader handed a subprocess the secret that seals every stored credential.
 	if _, leaked, _ := strings.Cut(note, "key="); leaked != "" {
 		t.Errorf("the plugin could read the deployment encryption key %q", leaked)
+	}
+
+	// Last, because it ends the plugin process: a seam outlives the process it proxies. Nothing
+	// unregisters a name, so a plugin that dies stays registered and answers every later call with a
+	// transport error naming neither the plugin nor the reason. Killing it here is the same state a
+	// crash leaves behind, and it rides this load because a second one would be refused as a
+	// duplicate.
+	closePlugins()
+	_, err = roundhouse.NewAnsibleRunner().Run(context.Background(), roundhouse.Spec{
+		Tool: "exttest-hello", Playbook: "end-to-end",
+	}, io.Discard)
+	if !errors.Is(err, ErrPluginGone) {
+		t.Errorf("a call through a dead plugin returned %v, want ErrPluginGone so an operator reading "+
+			"a run log can tell this from a network fault or their own playbook", err)
 	}
 }
 
