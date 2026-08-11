@@ -69,10 +69,13 @@ func (c *containerRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Re
 		return Result{ExitCode: -1}, err
 	}
 	plan, cleanup, err := buildContainerPlan(spec)
+	// Deferred before the error is checked. The plan writes temp files for some tools and returns a
+	// usable cleanup even when it then fails, so checking first and deferring after left those files
+	// behind on exactly the path where something already went wrong.
+	defer cleanup()
 	if err != nil {
 		return Result{ExitCode: -1}, err
 	}
-	defer cleanup()
 
 	// A registry login is scoped to this run.
 	//
@@ -96,10 +99,13 @@ func (c *containerRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Re
 	}
 
 	envFile, cleanupEnv, err := c.writeEnvFile(spec, plan.extraEnv)
+	// Same ordering, and it matters more here: this file holds every resolved environment credential
+	// in the clear. Returning before the defer was registered left it in the temp directory until the
+	// operating system cleared it, which on most hosts is a reboot.
+	defer cleanupEnv()
 	if err != nil {
 		return Result{ExitCode: -1}, fmt.Errorf("%w: %w", ErrLaunch, err)
 	}
-	defer cleanupEnv()
 
 	name := containerName()
 	args, err := c.runArgs(spec, plan, name, envFile)
