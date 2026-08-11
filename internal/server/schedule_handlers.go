@@ -165,8 +165,13 @@ func updateScheduleHandler(store schedule.Store, authz *authorizer, log *zap.Log
 	}
 }
 
-// listSchedulesHandler returns all schedules.
-func listSchedulesHandler(store schedule.Store, log *zap.Logger) http.HandlerFunc {
+// listSchedulesHandler returns the schedules whose template the caller may use.
+//
+// Reading was unauthorized while writing and deleting were not, so any operator could enumerate the
+// whole estate's unattended automation: which template fires on what cron, against which inventory.
+// A schedule is visible on the same test that governs writing one, its template, so listing and
+// editing cannot disagree about who it belongs to.
+func listSchedulesHandler(store schedule.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil {
 			respondError(w, log, http.StatusNotFound, "scheduling not enabled")
@@ -178,13 +183,31 @@ func listSchedulesHandler(store schedule.Store, log *zap.Logger) http.HandlerFun
 			respondError(w, log, http.StatusInternalServerError, "could not list schedules")
 			return
 		}
+		restricted, err := grantsEnforced(r.Context(), authz)
+		if err != nil {
+			log.Error("server: read filter: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not list schedules")
+			return
+		}
+		if restricted {
+			kept := make([]*schedule.Schedule, 0, len(list))
+			for _, sc := range list {
+				if authz.authorizeAll(r.Context(), grant.AccessUse, sc.TemplateID) == nil {
+					kept = append(kept, sc)
+				}
+			}
+			list = kept
+		}
 		respondJSON(w, log, http.StatusOK,
 			schedulesResponse{Schedules: list, Count: len(list)}, wantsPretty(r))
 	}
 }
 
-// getScheduleHandler returns a single schedule.
-func getScheduleHandler(store schedule.Store, log *zap.Logger) http.HandlerFunc {
+// getScheduleHandler returns a single schedule the caller may see.
+//
+// Without the check this was a direct object reference: any id returned the schedule, its cron, its
+// inventory, and the template it fires.
+func getScheduleHandler(store schedule.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil {
 			respondError(w, log, http.StatusNotFound, "scheduling not enabled")
@@ -198,6 +221,10 @@ func getScheduleHandler(store schedule.Store, log *zap.Logger) http.HandlerFunc 
 		if err != nil {
 			log.Error("server: get schedule: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not get schedule")
+			return
+		}
+		if denyOnAuthzError(w, log,
+			authz.authorizeAll(r.Context(), grant.AccessUse, sc.TemplateID)) {
 			return
 		}
 		respondJSON(w, log, http.StatusOK, sc, wantsPretty(r))

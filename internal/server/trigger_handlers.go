@@ -250,7 +250,7 @@ func rotateTriggerSecretHandler(triggers trigger.Store, sealer *credential.Seale
 }
 
 // listTriggersHandler returns all triggers without their tokens.
-func listTriggersHandler(triggers trigger.Store, log *zap.Logger) http.HandlerFunc {
+func listTriggersHandler(triggers trigger.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if triggers == nil {
 			respondError(w, log, http.StatusNotFound, "triggers not enabled")
@@ -261,6 +261,24 @@ func listTriggersHandler(triggers trigger.Store, log *zap.Logger) http.HandlerFu
 			log.Error("server: list triggers: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not list triggers")
 			return
+		}
+		// A trigger is visible on the same test that governs writing and deleting one, its template.
+		// Reading was unauthorized, so any operator could enumerate every webhook launch point on
+		// the install and the template each one fires.
+		restricted, err := grantsEnforced(r.Context(), authz)
+		if err != nil {
+			log.Error("server: read filter: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not list triggers")
+			return
+		}
+		if restricted {
+			kept := make([]*trigger.Trigger, 0, len(list))
+			for _, tg := range list {
+				if authz.authorizeAll(r.Context(), grant.AccessUse, tg.TemplateID) == nil {
+					kept = append(kept, tg)
+				}
+			}
+			list = kept
 		}
 		respondJSON(w, log, http.StatusOK,
 			listTriggersResponse{Triggers: list, Count: len(list)}, wantsPretty(r))

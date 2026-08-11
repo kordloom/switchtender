@@ -382,6 +382,21 @@ func derivedReadFilter(ctx context.Context, authz *authorizer,
 	}, len(allowed) > 0, nil
 }
 
+// grantsEnforced reports whether object grants actually restrict what this caller may read.
+//
+// It answers with the same probe readableRuns uses, so the two cannot disagree about whether a
+// caller is filtered. A caller who is filtered must not be handed estate-wide aggregates: a fleet
+// health table or a drift list is derived from every run on the install, including the ones their
+// filter just removed, so passing one through would return exactly the rows the filter existed to
+// withhold.
+func grantsEnforced(ctx context.Context, authz *authorizer) (bool, error) {
+	keep, err := authz.readFilter(ctx)
+	if err != nil {
+		return false, err
+	}
+	return !keep("proj_probe", "") || !keep("cred_probe", ""), nil
+}
+
 func readableRuns(ctx context.Context, authz *authorizer, runs []*run.Run) ([]*run.Run, error) {
 	keep, err := authz.readFilter(ctx)
 	if err != nil {

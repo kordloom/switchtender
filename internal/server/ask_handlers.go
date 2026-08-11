@@ -174,7 +174,17 @@ func buildFleetSnapshot(ctx context.Context, store run.Store,
 		}
 	}
 
-	if health, err := store.FleetHealth(ctx, defaultFleetWindow); err == nil && len(health) > 0 {
+	// Fleet health and drift are aggregates over every run on the install, so a caller whose run
+	// list was just filtered must not receive them. Filtering the run list and then appending an
+	// unfiltered host table returned exactly the hosts the filter removed, and the drift lines named
+	// the run ids suppressed a few paragraphs earlier. There is no per-host grant to filter these
+	// by, since a host is not an object grants are written against, so a restricted caller is given
+	// the runs they may read and no estate-wide summary at all.
+	restricted, err := grantsEnforced(ctx, authz)
+	if err != nil {
+		return "", err
+	}
+	if health, err := store.FleetHealth(ctx, defaultFleetWindow); !restricted && err == nil && len(health) > 0 {
 		b.WriteString("\nHost health, worst first, over each host's recent runs:\n")
 		for i, h := range health {
 			if i >= askSnapshotHosts {
@@ -190,7 +200,7 @@ func buildFleetSnapshot(ctx context.Context, store run.Store,
 		}
 	}
 
-	if drift, err := store.DriftStatus(ctx); err == nil {
+	if drift, err := store.DriftStatus(ctx); !restricted && err == nil {
 		var drifted int
 		for _, d := range drift {
 			if d.DriftedTasks > 0 {

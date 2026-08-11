@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"regexp"
 
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/roundhouse"
@@ -99,35 +98,10 @@ func (d *Dispatcher) inventoryContent(ctx context.Context, inv *inventory.Invent
 	return content, nil
 }
 
-// inventorySecretPattern matches an inventory variable assignment whose name suggests a secret, in
-// the ini form key=value or the yaml form key: value. The captured group is the value, which is
-// either a quoted run (spaces allowed, up to the closing quote) or an unquoted run up to the next
-// whitespace. The quoted branch is what lets a password with spaces be masked in full; the
-// unquoted branch stops at whitespace so a second variable on the same INI host line is still
-// matched on the next pass rather than swallowed. The password, passwd, passphrase, secret, token,
-// and api_key stems may carry trailing name parts, so secret_value and token_id still match. The
-// bare pass stem is deliberately narrower: it matches only as a terminal _pass component, which
-// catches ansible_ssh_pass and ansible_become_pass without swallowing bypass, passive, or
-// passthrough, whose values are often booleans the masker would then black out everywhere in a
-// run's output. Key-file paths and access-key IDs are not secret and are left unmatched.
-var inventorySecretPattern = regexp.MustCompile(
-	`(?i)[a-z0-9_]*(?:(?:password|passwd|passphrase|secret|token|api[_-]?key)[a-z0-9_]*|_pass)` +
-		`\s*[:=]\s*("[^"\n]*"|'[^'\n]*'|[^\s]+)`)
-
-// inventorySecrets returns the values of secret-looking variables in inventory content, so a host list
-// that carries an ansible_password or an API token does not leak it into the run's log or events.
-// A quoted value is unwrapped so the masker holds the bare secret and matches it literally in output;
-// capturing the surrounding quotes would mask a string the output never contains.
+// inventorySecrets returns the values of secret-looking variables in inventory content, so a host
+// list that carries an ansible_password or an API token does not leak it into the run's log or
+// events. The detection lives with the inventory type, because the API redacts the same values when
+// it serves an inventory and the two must not drift apart.
 func inventorySecrets(content string) []string {
-	var out []string
-	for _, m := range inventorySecretPattern.FindAllStringSubmatch(content, -1) {
-		v := m[1]
-		if len(v) >= 2 && (v[0] == '"' || v[0] == '\'') && v[len(v)-1] == v[0] {
-			v = v[1 : len(v)-1]
-		}
-		if v != "" {
-			out = append(out, v)
-		}
-	}
-	return out
+	return inventory.Secrets(content)
 }

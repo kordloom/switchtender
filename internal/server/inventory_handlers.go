@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"github.com/kordloom/switchtender/internal/credential"
 	"github.com/kordloom/switchtender/internal/grant"
 	"github.com/kordloom/switchtender/internal/inventory"
+	"github.com/kordloom/switchtender/internal/user"
 )
 
 // createInventoryRequest is the JSON body accepted by POST /inventories.
@@ -213,8 +215,36 @@ func listInventoriesHandler(store inventory.Store, authz *authorizer, log *zap.L
 			return
 		}
 		respondJSON(w, log, http.StatusOK,
-			listInventoriesResponse{Inventories: visible, Count: len(visible)}, wantsPretty(r))
+			listInventoriesResponse{Inventories: redactInventories(r.Context(), visible),
+				Count: len(visible)}, wantsPretty(r))
 	}
+}
+
+// redactInventories removes secret-looking variable values from inventory content unless the caller
+// administers the install.
+//
+// A host list routinely carries an ansible_password or a become password inline, and those are
+// credentials. The credential API never returns secret material to a reader, so an inventory that
+// happens to hold the same secret as a host variable should not either. Names and hosts survive, so
+// the list still reads as an inventory. An admin already holds every secret on the install, so
+// redacting for them would only obstruct the person who maintains the file.
+//
+// The copy is shallow by intent: the stored objects must not be mutated, since these come straight
+// from the store and a memory-backed store hands back live pointers.
+func redactInventories(ctx context.Context, list []*inventory.Inventory) []*inventory.Inventory {
+	if actor, ok := actorFrom(ctx); ok && actor.Role == user.RoleAdmin {
+		return list
+	}
+	out := make([]*inventory.Inventory, 0, len(list))
+	for _, inv := range list {
+		if inv == nil {
+			continue
+		}
+		clone := *inv
+		clone.Content = inventory.Redact(clone.Content)
+		out = append(out, &clone)
+	}
+	return out
 }
 
 // deleteInventoryHandler removes an inventory.
