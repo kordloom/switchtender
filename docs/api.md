@@ -198,6 +198,26 @@ curl -X POST https://switchtender.example.com/v1/runs \
 These apply to the Ansible tool. The other tools ignore them, so a Bash or Terraform template that
 carries one is unaffected.
 
+## Saved workflows
+
+*Next release.* A template may carry `steps`, a pipeline graph, instead of a single tool. Such a
+template is a saved workflow: every path that fires a template, a launch, a schedule, or a webhook
+trigger, runs the graph as a pipeline, and the template's survey answers and extra vars reach every
+step. A workflow template sets no top-level `playbook`, `command`, `tool`, `shards`, or Ansible
+controls, since each step names its own; the graph is validated when the template is saved, so a
+cycle or an unknown dependency is refused then rather than on every launch.
+
+```bash
+curl -X POST https://switchtender.example.com/v1/templates   -H "Authorization: Bearer $SWITCHTENDER_TOKEN"   -H 'Content-Type: application/json'   -d '{
+    "name": "build and ship",
+    "inventory": "prod",
+    "steps": [
+      {"name": "build", "tool": "bash", "command": "make release"},
+      {"name": "deploy", "playbook": "deploy.yml", "depends_on": ["build"]}
+    ]
+  }'
+```
+
 ## Survey field constraints
 
 A template survey field accepts bounds beyond its type, checked at launch before any answer becomes

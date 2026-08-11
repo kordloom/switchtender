@@ -207,6 +207,10 @@
 <td>Templates declare typed launch prompts, text, multiline, integer, boolean, or choice, each with bounds checked before launch: min and max on a number, length and a regular-expression pattern on text, and a help line on any field. A launch that breaks a bound is refused with the field it failed, and injected as extra vars.</td>
 </tr>
 <tr>
+<td>Saved workflows</td>
+<td>A template can carry a pipeline graph instead of a single tool, so a multi-step workflow with parallel branches, per-step tools, and retries is one saved object that a launch, a schedule, or a webhook fires the same way, and its survey answers reach every step. <em>Next release.</em></td>
+</tr>
+<tr>
 <td>Ansible controls</td>
 <td>A run or template pins <code>tags</code> and <code>skip_tags</code> to select or exclude tagged plays, <code>forks</code> for how many hosts run at once, <code>verbosity</code> for <code>-v</code> through <code>-vvvv</code>, and <code>diff_mode</code> to show the before and after of every changed file, no hand-built command needed. They carry through schedules, triggers, and retries.</td>
 </tr>

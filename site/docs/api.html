@@ -647,6 +647,22 @@ retry keeps them.</p>
 </code></pre>
 <p>These apply to the Ansible tool. The other tools ignore them, so a Bash or Terraform template that
 carries one is unaffected.</p>
+<h2 id="saved-workflows">Saved workflows</h2>
+<p><em>Next release.</em> A template may carry <code>steps</code>, a pipeline graph, instead of a single tool. Such a
+template is a saved workflow: every path that fires a template, a launch, a schedule, or a webhook
+trigger, runs the graph as a pipeline, and the template's survey answers and extra vars reach every
+step. A workflow template sets no top-level <code>playbook</code>, <code>command</code>, <code>tool</code>, <code>shards</code>, or Ansible
+controls, since each step names its own; the graph is validated when the template is saved, so a
+cycle or an unknown dependency is refused then rather than on every launch.</p>
+<pre><code class="language-bash">curl -X POST https://switchtender.example.com/v1/templates   -H &quot;Authorization: Bearer $SWITCHTENDER_TOKEN&quot;   -H 'Content-Type: application/json'   -d '{
+    &quot;name&quot;: &quot;build and ship&quot;,
+    &quot;inventory&quot;: &quot;prod&quot;,
+    &quot;steps&quot;: [
+      {&quot;name&quot;: &quot;build&quot;, &quot;tool&quot;: &quot;bash&quot;, &quot;command&quot;: &quot;make release&quot;},
+      {&quot;name&quot;: &quot;deploy&quot;, &quot;playbook&quot;: &quot;deploy.yml&quot;, &quot;depends_on&quot;: [&quot;build&quot;]}
+    ]
+  }'
+</code></pre>
 <h2 id="survey-field-constraints">Survey field constraints</h2>
 <p>A template survey field accepts bounds beyond its type, checked at launch before any answer becomes
 an extra var. A field also takes an optional <code>help</code> string shown beneath its prompt, and a
