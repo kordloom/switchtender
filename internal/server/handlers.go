@@ -43,6 +43,10 @@ type createRunRequest struct {
 	Playbook string `json:"playbook"`
 	// Inventory is the path to the inventory to target. Optional.
 	Inventory string `json:"inventory"`
+	// Limit narrows the run to a host pattern, the same field a template launch accepts. Without it
+	// a caller asking to touch one canary host was answered 202 and run against every host in the
+	// inventory, because an unknown JSON field is dropped rather than refused.
+	Limit string `json:"limit,omitempty"`
 	// Tool selects the execution engine: ansible (default), bash, terraform, or python.
 	Tool string `json:"tool,omitempty"`
 	// Command is the tool's input for non-Ansible tools: the script for bash and python, the working
@@ -575,6 +579,9 @@ func createRunHandler(submitter Submitter, authz *authorizer, log *zap.Logger) h
 		}
 		if req.Queue != "" {
 			opts = append(opts, run.WithQueue(req.Queue))
+		}
+		if req.Limit != "" {
+			opts = append(opts, run.WithLimit(req.Limit))
 		}
 		if req.Image != "" {
 			opts = append(opts, run.WithImage(req.Image, req.PullCredentialID))

@@ -64,13 +64,18 @@ func escapeID(id string) string {
 
 // listQuery builds the query string for a run listing, omitting the parts the caller left out. A
 // non-positive limit is dropped so the server's own default applies rather than a zero page.
+//
+// The page parameter is named limit because that is the name the runs endpoint reads. Sending any
+// other name is not a rejected request, it is an ignored one: the server falls back to its own
+// default page and answers 200, so an agent that asked for ten runs quietly received two hundred and
+// had no way to tell.
 func listQuery(query string, limit int) string {
 	values := url.Values{}
 	if q := strings.TrimSpace(query); q != "" {
 		values.Set("q", q)
 	}
 	if limit > 0 {
-		values.Set("page_size", strconv.Itoa(limit))
+		values.Set("limit", strconv.Itoa(limit))
 	}
 	return values.Encode()
 }
