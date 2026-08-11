@@ -834,6 +834,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	}
 
 	disp := dispatch.New(store, runner, log, dispatch.WithPublisher(hub),
+		dispatch.WithAudits(bundle.Audits()),
 		dispatch.WithWorkers(serveWorkers),
 		dispatch.WithMaxShards(serveMaxShards),
 		dispatch.WithRunTimeout(serveRunTimeout),

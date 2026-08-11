@@ -112,6 +112,7 @@ func runDemo(cmd *cobra.Command, _ []string) error {
 	// The demo serves the policy endpoints, so it enforces them too. Displaying policies that gate
 	// nothing teaches the wrong thing about how the product behaves.
 	disp := dispatch.New(store, roundhouse.NewAnsibleRunner(), log, dispatch.WithPublisher(hub),
+		dispatch.WithAudits(bundle.Audits()),
 		dispatch.WithPolicies(bundle.Policies()))
 	defer disp.Close()
 

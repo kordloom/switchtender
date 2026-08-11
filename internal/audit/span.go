@@ -22,6 +22,11 @@ const (
 // the change apart from an HTTP one. It is a state change, counted with the HTTP write methods.
 const MethodCLI = "CLI"
 
+// MethodRun is the method recorded for the entry a run's outcome commits when it finishes, so the
+// trail reads the record of what a run did apart from the request that asked for it. It is a state
+// change, counted with the HTTP write methods.
+const MethodRun = "RUN"
+
 // SpanPath encodes one beat's payload into the entry path. The encoding is part of what the
 // chain hash commits to, so it is fixed: beat in the path, count and cadence as ordered query
 // parameters, no escaping needed because every value is a decimal integer.

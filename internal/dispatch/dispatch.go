@@ -18,6 +18,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/credential"
 	"github.com/kordloom/switchtender/internal/event"
 	"github.com/kordloom/switchtender/internal/inventory"
@@ -87,6 +88,8 @@ func (noopPublisher) CloseRun(string) {}
 type Dispatcher struct {
 	// store persists runs and their output.
 	store run.Store
+	// audits commits each run's outcome to the tamper-evident chain, nil when no trail is kept.
+	audits audit.Store
 	// runner executes a single playbook.
 	runner roundhouse.Runner
 	// log records dispatcher activity.
@@ -195,6 +198,8 @@ type Option func(*config)
 
 // config holds optional Dispatcher settings before construction.
 type config struct {
+	// audits commits each run's outcome to the audit chain, nil when no trail is kept.
+	audits audit.Store
 	// workers is the worker pool size.
 	workers int
 	// maxShards caps how many groups a split fans out into.
@@ -289,6 +294,12 @@ func WithMaxShards(n int) Option {
 	return func(c *config) { c.maxShards = n }
 }
 
+// WithAudits gives the dispatcher the audit chain, so it commits each run's outcome as a
+// tamper-evident entry when the run finishes. Nil keeps no such record.
+func WithAudits(audits audit.Store) Option {
+	return func(c *config) { c.audits = audits }
+}
+
 // WithPublisher sets the Publisher that receives live events and log chunks.
 func WithPublisher(p Publisher) Option {
 	return func(c *config) { c.publisher = p }
@@ -356,6 +367,7 @@ func New(store run.Store, runner roundhouse.Runner, log *zap.Logger, opts ...Opt
 	ctx, cancel := context.WithCancel(context.Background())
 	d := &Dispatcher{
 		store:              store,
+		audits:             cfg.audits,
 		runner:             runner,
 		log:                log,
 		sem:                make(chan struct{}, cfg.workers),
@@ -1955,6 +1967,9 @@ func (d *Dispatcher) finalize(r *run.Run, status run.Status, exitCode *int, fail
 	r.Error = failure
 	r.EndedAt = &ended
 	d.save(r)
+	// Commit the outcome to the chain before notifying anyone. A notification is external and
+	// after-the-fact; the tamper-evident record of what the run did comes first.
+	d.commitOutcome(r)
 	d.notify(r)
 }
 
