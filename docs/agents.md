@@ -47,13 +47,22 @@ held run is admin-only, so an operator-bound agent can never approve its own wor
 
        switchtender user new agent-bot --role operator
 
-2. Mint a token bound to that account:
+2. Mint a token bound to that account, marked as an agent:
 
-       switchtender token new --user agent-bot --name agent-bot --ttl 720h
+       switchtender token new --user agent-bot --name agent-bot --agent --ttl 720h
 
-   The token carries the account's operator role, and its label is the actor on everything the
-   agent does. A token minted without `--user` is unscoped and acts as admin; never hand one to an
-   agent. The TTL forces rotation, here monthly.
+   The `--agent` flag is what makes the record precise. It marks the token as held by an agent, so
+   every chain entry it produces carries `actor_type: agent` alongside its label and the human it
+   acts for, set when the token is minted rather than guessed from how a request looks. It also caps
+   the token at the operator role no matter what account it is bound to, so an agent can launch and
+   propose work but can never manage identity, access, or secrets, and can never approve its own held
+   run. That cap is enforced at the door, so it holds however the agent reaches the API, not only
+   through the client below. `--agent` requires `--user`, because an agent acting on behalf of nobody
+   is exactly the accountability gap the identity closes. The TTL forces rotation, here monthly.
+
+   *The `--agent` flag and the `actor_type: agent` attribution arrive in the next release; today a
+   token minted without it acts as a normal operator token and its label is still the actor on
+   everything the agent does.*
 
    Creating the first token turns authentication on for the whole install, so make sure an admin
    account exists before the agent holds the only credential.
@@ -103,9 +112,13 @@ and the approval policy still covers them when they are on.
 
 ## What the record shows
 
-The actor on every chain entry the agent produces is its token's label, `agent-bot` above. The
-chain hash commits to that actor along with the method, path, time, and sequence, so attribution is
-part of what the chain proves, not a field someone could rewrite later.
+The actor on every chain entry the agent produces is its token's label, `agent-bot` above, and, for
+a token minted with `--agent`, the entry also carries `actor_type: agent` and `on_behalf_of` naming
+the human account behind it. The chain hash commits to all three along with the method, path, time,
+and sequence, so who acted, what kind of actor it was, and whose authority it used are part of what
+the chain proves, not fields someone could rewrite later. That is the difference between a log, which
+is the operator's word for what happened, and a signed chain, which a third party recomputes and
+checks without trusting the operator or the agent.
 
 Every mutation response carries an `Audit-Receipt: seq:hash` header. The agent, or the system
 driving it, can retain receipts and later check each one against the chain, so the party an entry

@@ -74,12 +74,20 @@ held run is admin-only, so an operator-bound agent can never approve its own wor
 </code></pre>
 </li>
 <li>
-<p>Mint a token bound to that account:</p>
-<pre><code>switchtender token new --user agent-bot --name agent-bot --ttl 720h
+<p>Mint a token bound to that account, marked as an agent:</p>
+<pre><code>switchtender token new --user agent-bot --name agent-bot --agent --ttl 720h
 </code></pre>
-<p>The token carries the account's operator role, and its label is the actor on everything the
-agent does. A token minted without <code>--user</code> is unscoped and acts as admin; never hand one to an
-agent. The TTL forces rotation, here monthly.</p>
+<p>The <code>--agent</code> flag is what makes the record precise. It marks the token as held by an agent, so
+every chain entry it produces carries <code>actor_type: agent</code> alongside its label and the human it
+acts for, set when the token is minted rather than guessed from how a request looks. It also caps
+the token at the operator role no matter what account it is bound to, so an agent can launch and
+propose work but can never manage identity, access, or secrets, and can never approve its own held
+run. That cap is enforced at the door, so it holds however the agent reaches the API, not only
+through the client below. <code>--agent</code> requires <code>--user</code>, because an agent acting on behalf of nobody
+is exactly the accountability gap the identity closes. The TTL forces rotation, here monthly.</p>
+<p><em>The <code>--agent</code> flag and the <code>actor_type: agent</code> attribution arrive in the next release; today a
+token minted without it acts as a normal operator token and its label is still the actor on
+everything the agent does.</em></p>
 <p>Creating the first token turns authentication on for the whole install, so make sure an admin
 account exists before the agent holds the only credential.</p>
 </li>
@@ -125,9 +133,13 @@ its own reach. The command refuses to start on an admin token. Ad-hoc runs, wher
 a command instead of launching a template a person defined, stay off unless you pass <code>--allow-adhoc</code>,
 and the approval policy still covers them when they are on.</p>
 <h2 id="what-the-record-shows">What the record shows</h2>
-<p>The actor on every chain entry the agent produces is its token's label, <code>agent-bot</code> above. The
-chain hash commits to that actor along with the method, path, time, and sequence, so attribution is
-part of what the chain proves, not a field someone could rewrite later.</p>
+<p>The actor on every chain entry the agent produces is its token's label, <code>agent-bot</code> above, and, for
+a token minted with <code>--agent</code>, the entry also carries <code>actor_type: agent</code> and <code>on_behalf_of</code> naming
+the human account behind it. The chain hash commits to all three along with the method, path, time,
+and sequence, so who acted, what kind of actor it was, and whose authority it used are part of what
+the chain proves, not fields someone could rewrite later. That is the difference between a log, which
+is the operator's word for what happened, and a signed chain, which a third party recomputes and
+checks without trusting the operator or the agent.</p>
 <p>Every mutation response carries an <code>Audit-Receipt: seq:hash</code> header. The agent, or the system
 driving it, can retain receipts and later check each one against the chain, so the party an entry
 belongs to can detect an omission.</p>
