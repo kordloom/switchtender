@@ -27,6 +27,9 @@ var (
 	anchorType = audit.AnchorRFC3161
 	// anchorRef locates the anchor: a timestamp authority URL, or the URL of a published head.
 	anchorRef string
+	// anchorTree fixes the Merkle root over the whole chain instead of the newest linear link, which
+	// is the coordinate a sparse receipt proves membership in.
+	anchorTree bool
 	// anchorPretty indents the printed anchor.
 	anchorPretty bool
 )
@@ -60,6 +63,9 @@ func init() {
 		"Anchor kind: rfc3161 for a signed timestamp, or git or https for one checked by fetching it.")
 	auditAnchorCmd.Flags().StringVar(&anchorRef, "ref", "",
 		"Timestamp authority URL for rfc3161, otherwise the URL a verifier fetches. Defaults to a public authority.")
+	auditAnchorCmd.Flags().BoolVar(&anchorTree, "tree", false,
+		"Anchor the Merkle root over the whole chain, the coordinate a sparse receipt proves "+
+			"membership in, instead of the newest linear link.")
 	auditAnchorCmd.Flags().BoolVar(&anchorPretty, "pretty", false, "Indent the printed anchor.")
 	auditCmd.AddCommand(auditAnchorCmd)
 }
@@ -89,7 +95,23 @@ func runAuditAnchor(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("the chain does not verify at entry %d, so it must not be anchored; "+
 			"run audit verify to see where", brokeAt)
 	}
-	head := chain[len(chain)-1]
+	// What gets fixed depends on the shape a receipt will prove membership in. A linear anchor fixes
+	// the newest link, so a lost tail shows up later as a chain that can no longer reach it. A tree
+	// anchor fixes the root at a size, which a later consistency proof can be drawn from, turning
+	// "this chain no longer reaches its anchor" into "the log the world saw is provably still a
+	// prefix of the log there is now".
+	anchorSeq, anchorLink := chain[len(chain)-1].Seq, chain[len(chain)-1].Hash
+	if anchorTree {
+		id, ierr := audit.LoadIdentity(identityDir(anchorDB))
+		if ierr != nil {
+			return ierr
+		}
+		size, root, terr := audit.TreeHead(chain, id.InstallID)
+		if terr != nil {
+			return terr
+		}
+		anchorSeq, anchorLink = size, root
+	}
 
 	ref := anchorRef
 	if ref == "" && anchorType == audit.AnchorRFC3161 {
@@ -98,7 +120,7 @@ func runAuditAnchor(cmd *cobra.Command, _ []string) error {
 	ctx, cancel := context.WithTimeout(cmd.Context(), anchorTimeout)
 	defer cancel()
 	a, err := audit.NewAnchor(ctx, &http.Client{Timeout: anchorTimeout},
-		anchorType, ref, head.Seq, head.Hash, time.Now())
+		anchorType, ref, anchorSeq, anchorLink, time.Now())
 	if err != nil {
 		return err
 	}
@@ -106,7 +128,7 @@ func runAuditAnchor(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("save anchor: %w", err)
 	}
 	out, err := jsonutil.Marshal(map[string]any{
-		"id": a.ID, "type": a.Type, "seq": a.Seq, "link": a.Link,
+		"id": a.ID, "type": a.Type, "seq": a.Seq, "link": a.Link, "tree": anchorTree,
 		"at": a.At.UTC().Format(time.RFC3339), "ref": a.Ref, "has_proof": a.Proof != "",
 	}, anchorPretty)
 	if err != nil {

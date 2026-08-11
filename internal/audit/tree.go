@@ -14,6 +14,39 @@ import (
 // claim is proved to belong to the log by an audit path rather than by its neighbors.
 const TreeProfile = "loomseal-merkle-v1"
 
+// TreeHead returns the size and root of the Merkle tree over the whole chain, the coordinate an
+// anchor fixes for the tree profile.
+//
+// Anchoring a root rather than a link is what makes truncation refutable instead of merely suspicious.
+// A linear anchor says the chain once reached a certain link, so losing a tail shows up as a chain
+// that can no longer reach its anchor. A root anchored at a size, paired with a later consistency
+// proof from that same root, says something stronger: the log the world saw is provably a prefix of
+// the log there is now, so an entry recorded before the anchor cannot have been changed or dropped.
+func TreeHead(entries []*Entry, installID string) (int64, string, error) {
+	if len(entries) == 0 {
+		return 0, "", fmt.Errorf("%w: no entries to hash", ErrExport)
+	}
+	leaves, err := treeLeaves(entries, installID)
+	if err != nil {
+		return 0, "", err
+	}
+	return int64(len(leaves)), hex.EncodeToString(merkle.Root(leaves)), nil
+}
+
+// treeLeaves hashes every entry of a chain into its leaf bytes, in order. It is the one place the log
+// becomes a tree, so a root computed for an anchor and a root computed for a receipt cannot differ.
+func treeLeaves(entries []*Entry, installID string) ([][]byte, error) {
+	leaves := make([][]byte, 0, len(entries))
+	for _, e := range entries {
+		leaf, err := treeLeaf(claimContent(e), installID)
+		if err != nil {
+			return nil, fmt.Errorf("%w: entry %d: %w", ErrExport, e.Seq, err)
+		}
+		leaves = append(leaves, leaf)
+	}
+	return leaves, nil
+}
+
 // BuildTreeBundle assembles a bundle that discloses only the named entries, proving each belongs to
 // the whole chain without carrying the entries around it.
 //
@@ -41,18 +74,11 @@ func BuildTreeBundle(all []*Entry, disclose map[int64]bool, id Identity, version
 			"it would attest a history this install cannot stand behind", ErrExport, brokeAt)
 	}
 
-	leaves := make([][]byte, 0, len(all))
-	claims := make([]BundleClaim, 0, len(disclose))
-	index := make(map[int64]int, len(all))
-	for i, e := range all {
-		content := claimContent(e)
-		leaf, err := treeLeaf(content, id.InstallID)
-		if err != nil {
-			return nil, fmt.Errorf("%w: entry %d: %w", ErrExport, e.Seq, err)
-		}
-		leaves = append(leaves, leaf)
-		index[e.Seq] = i
+	leaves, err := treeLeaves(all, id.InstallID)
+	if err != nil {
+		return nil, err
 	}
+	claims := make([]BundleClaim, 0, len(disclose))
 	root := merkle.Root(leaves)
 
 	// Disclosed claims are emitted in chain order, which the tree profile requires and which keeps a
@@ -114,13 +140,9 @@ func (b *Bundle) AttachConsistency(all []*Entry, fromSize int64, id Identity) er
 		return fmt.Errorf("%w: cannot prove a prefix of %d against a log of %d", ErrExport, fromSize,
 			len(all))
 	}
-	leaves := make([][]byte, 0, len(all))
-	for _, e := range all {
-		leaf, err := treeLeaf(claimContent(e), id.InstallID)
-		if err != nil {
-			return fmt.Errorf("%w: entry %d: %w", ErrExport, e.Seq, err)
-		}
-		leaves = append(leaves, leaf)
+	leaves, err := treeLeaves(all, id.InstallID)
+	if err != nil {
+		return err
 	}
 	proof, err := merkle.ConsistencyProof(fromSize, leaves)
 	if err != nil {

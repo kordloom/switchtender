@@ -168,12 +168,19 @@ type BundleAnchor struct {
 // rule lives here, beside the format it comes from, rather than at each call site. Anchors must be
 // attached before the bundle is signed, since the signature covers them.
 func (b *Bundle) AttachAnchors(anchors []*Anchor) int {
-	links := make(map[int64]string, len(b.Claims)+1)
+	links := make(map[int64]string, len(b.Claims)+2)
 	for _, c := range b.Claims {
 		links[c.Chain.Seq] = c.Chain.Link
 	}
 	if b.Chain != nil {
 		links[b.Chain.Head.Seq] = b.Chain.Head.Link
+		// An anchor over the root a consistency proof starts from is the pairing that makes truncation
+		// refutable rather than merely suspicious: the anchor fixed that root at a time this install
+		// did not control, and the proof shows the log there is now grew from exactly it. Dropping such
+		// an anchor as matching nothing would discard the strongest evidence the bundle carries.
+		if c := b.Chain.Consistency; c != nil {
+			links[c.FromSize] = c.FromRoot
+		}
 	}
 	out := make([]BundleAnchor, 0, len(anchors))
 	for _, a := range anchors {

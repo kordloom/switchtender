@@ -159,3 +159,61 @@ func verifyWithLoomSeal(t *testing.T, signed []byte) loomsealReport {
 	}
 	return rep
 }
+
+// TestAnchoredRootPairsWithConsistency is the strongest statement the format makes about truncation,
+// end to end. A root is anchored at a size the world saw. The log then grows. A later receipt carries
+// a consistency proof from that root and the anchor over it, so a reader learns not only that the
+// disclosed entries belong to the log but that nothing the anchored root covered was changed or
+// dropped since. An anchor alone can only say a chain no longer reaches it; this refutes the loss.
+func TestAnchoredRootPairsWithConsistency(t *testing.T) {
+	id := treeIdentity(t)
+	chain := treeChain(t, 6)
+
+	// What an anchor would have fixed when the log held six entries.
+	anchoredSize, anchoredRoot, err := audit.TreeHead(chain, id.InstallID)
+	if err != nil {
+		t.Fatalf("TreeHead() error = %v", err)
+	}
+	if anchoredSize != 6 {
+		t.Fatalf("anchored size = %d, want 6", anchoredSize)
+	}
+
+	// The log grows. A receipt drawn now proves it only appended since that root.
+	grown := treeChain(t, 10)
+	doc, err := audit.BuildTreeBundle(grown, map[int64]bool{8: true}, id, "v-test",
+		audit.BundleSubject{Type: "run", ID: "run_demo"}, time.Now())
+	if err != nil {
+		t.Fatalf("BuildTreeBundle() error = %v", err)
+	}
+	if err := doc.AttachConsistency(grown, anchoredSize, id); err != nil {
+		t.Fatalf("AttachConsistency() error = %v", err)
+	}
+	if got := doc.Chain.Consistency.FromRoot; got != anchoredRoot {
+		t.Fatalf("consistency starts from %s, want the anchored root %s", got, anchoredRoot)
+	}
+
+	// The anchor over that root must be recognized as covering the receipt. Dropping it as matching
+	// nothing would discard the strongest evidence the bundle carries.
+	kept := doc.AttachAnchors([]*audit.Anchor{{
+		// A by-reference anchor, since what is under test is whether the coordinate is recognized,
+		// not whether a timestamp token parses. The rfc3161 proof path has its own tests.
+		ID: "anc_root", Type: "https", Seq: anchoredSize, Link: anchoredRoot,
+		At: time.Now(), Ref: "https://example.com/heads/6",
+	}})
+	if kept != 1 {
+		t.Fatalf("anchors attached = %d, want the anchor over the consistency root kept", kept)
+	}
+
+	signed, err := audit.SignBundleDoc(doc, id.Private())
+	if err != nil {
+		t.Fatalf("SignBundleDoc() error = %v", err)
+	}
+	report := verifyWithLoomSeal(t, signed)
+	if !report.OK {
+		t.Fatalf("loomseal refused the anchored, append-only receipt: %v", report.Problems)
+	}
+	if !report.ConsistencyOK || report.ConsistencyFrom != anchoredSize {
+		t.Errorf("consistency ok=%v from=%d, want true from %d", report.ConsistencyOK,
+			report.ConsistencyFrom, anchoredSize)
+	}
+}
