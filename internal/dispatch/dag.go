@@ -2,7 +2,6 @@ package dispatch
 
 import (
 	"context"
-	"fmt"
 	"maps"
 
 	"github.com/kordloom/switchtender/internal/run"
@@ -69,61 +68,6 @@ func hasDependencies(steps []run.PipelineStep) bool {
 		}
 	}
 	return false
-}
-
-// validateDAG checks that a dependency declaring pipeline has uniquely named steps, that every
-// dependency references a known step, and that the graph has no cycles.
-func validateDAG(steps []run.PipelineStep) error {
-	idx := make(map[string]int, len(steps))
-	for i, s := range steps {
-		if s.Name == "" {
-			return ErrUnnamedStep
-		}
-		if _, ok := idx[s.Name]; ok {
-			return fmt.Errorf("%w: %q", ErrDuplicateStep, s.Name)
-		}
-		idx[s.Name] = i
-	}
-
-	indegree := make([]int, len(steps))
-	dependents := make([][]int, len(steps))
-	for i, s := range steps {
-		for _, dep := range s.DependsOn {
-			j, ok := idx[dep]
-			if !ok {
-				return fmt.Errorf("%w: %q", ErrUnknownDependency, dep)
-			}
-			if j == i {
-				return fmt.Errorf("%w: %q depends on itself", ErrDependencyCycle, s.Name)
-			}
-			indegree[i]++
-			dependents[j] = append(dependents[j], i)
-		}
-	}
-
-	// Kahn's algorithm: if a topological order does not cover every step, a cycle remains.
-	queue := make([]int, 0, len(steps))
-	for i, deg := range indegree {
-		if deg == 0 {
-			queue = append(queue, i)
-		}
-	}
-	seen := 0
-	for len(queue) > 0 {
-		i := queue[0]
-		queue = queue[1:]
-		seen++
-		for _, dep := range dependents[i] {
-			indegree[dep]--
-			if indegree[dep] == 0 {
-				queue = append(queue, dep)
-			}
-		}
-	}
-	if seen != len(steps) {
-		return ErrDependencyCycle
-	}
-	return nil
 }
 
 // runStepsDAG executes the steps as a dependency graph. Steps whose dependencies are settled run

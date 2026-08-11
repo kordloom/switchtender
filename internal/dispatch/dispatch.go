@@ -584,24 +584,6 @@ func requireToolInput(r *run.Run) error {
 	return nil
 }
 
-// requireStepInput checks that a pipeline step carries the input its tool needs, mirroring
-// requireToolInput for a step.
-func requireStepInput(s run.PipelineStep) error {
-	if !run.ValidTool(s.Tool) {
-		return ErrUnknownTool
-	}
-	if run.NormalizeTool(s.Tool) == run.ToolAnsible {
-		if s.Playbook == "" {
-			return ErrNoPlaybook
-		}
-		return nil
-	}
-	if s.Command == "" {
-		return ErrNoCommand
-	}
-	return nil
-}
-
 // idempotentLookup returns the run already recorded under key, or nil when the key is empty or
 // unused. A retried submission carrying a key a prior submission already used resolves to that
 // original run, so the retry never fires a second run.
@@ -1274,18 +1256,8 @@ func (d *Dispatcher) cancelChildren(ids []string) {
 // in order, or as a dependency graph when any step declares depends_on. A step that fails stops
 // what follows or depends on it unless the step is marked continue on failure.
 func (d *Dispatcher) SubmitPipeline(ctx context.Context, name, inventory string, steps []run.PipelineStep, opts ...run.SubmitOption) (*run.Run, error) {
-	if len(steps) == 0 {
-		return nil, ErrNoSteps
-	}
-	for _, s := range steps {
-		if err := requireStepInput(s); err != nil {
-			return nil, err
-		}
-	}
-	if hasDependencies(steps) {
-		if err := validateDAG(steps); err != nil {
-			return nil, err
-		}
+	if err := run.ValidatePipeline(steps); err != nil {
+		return nil, err
 	}
 
 	parent := &run.Run{

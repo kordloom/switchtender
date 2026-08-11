@@ -701,6 +701,7 @@ func createPipelineHandler(submitter Submitter, authz *authorizer, log *zap.Logg
 			return
 		case errors.Is(err, dispatch.ErrUnnamedStep), errors.Is(err, dispatch.ErrDuplicateStep),
 			errors.Is(err, dispatch.ErrUnknownDependency), errors.Is(err, dispatch.ErrDependencyCycle),
+			errors.Is(err, dispatch.ErrStepInput), errors.Is(err, dispatch.ErrTooManySteps),
 			errors.Is(err, dispatch.ErrNoPlaybook), errors.Is(err, dispatch.ErrNoCommand),
 			errors.Is(err, dispatch.ErrUnknownTool), errors.Is(err, dispatch.ErrToolCredential):
 			respondError(w, log, http.StatusBadRequest, err.Error())

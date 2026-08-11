@@ -1,6 +1,10 @@
 package dispatch
 
-import "errors"
+import (
+	"errors"
+
+	"github.com/kordloom/switchtender/internal/run"
+)
 
 var (
 	// ErrNoPlaybook is returned when an Ansible run is submitted without a playbook path.
@@ -15,8 +19,13 @@ var (
 	ErrToolCredential = errors.New("credential kind does not apply to this tool")
 	// ErrNoHostLister is returned when a split is requested but the runner cannot list hosts.
 	ErrNoHostLister = errors.New("host listing unavailable")
-	// ErrNoSteps is returned when a pipeline is submitted with no steps.
-	ErrNoSteps = errors.New("no steps")
+	// ErrNoSteps aliases the run-package error so callers matching dispatch.ErrNoSteps still match
+	// what run.ValidatePipeline returns. The pipeline validators moved to the run package, which owns
+	// the step type, so the dispatcher and the template layer validate through one definition.
+	ErrNoSteps = run.ErrNoSteps
+	// ErrTooManySteps and ErrStepInput alias the run-package pipeline errors for the same reason.
+	ErrTooManySteps = run.ErrTooManySteps
+	ErrStepInput    = run.ErrStepInput
 	// ErrNotSplit is returned when a shard retry targets a run that is not a split parent.
 	ErrNotSplit = errors.New("not a split run")
 	// ErrNotFinished is returned when a shard retry targets a run that has not finished.
@@ -28,14 +37,12 @@ var (
 	// ErrNoHostSummary is returned when a relaunch targets a run that recorded no per-host results,
 	// such as a non-Ansible run.
 	ErrNoHostSummary = errors.New("run has no per-host results")
-	// ErrUnnamedStep is returned when a dependency declaring pipeline has a step without a name.
-	ErrUnnamedStep = errors.New("step missing name")
-	// ErrDuplicateStep is returned when two pipeline steps share a name.
-	ErrDuplicateStep = errors.New("duplicate step name")
-	// ErrUnknownDependency is returned when a step depends on a name no step carries.
-	ErrUnknownDependency = errors.New("unknown dependency")
-	// ErrDependencyCycle is returned when pipeline dependencies form a cycle.
-	ErrDependencyCycle = errors.New("dependency cycle")
+	// ErrUnnamedStep, ErrDuplicateStep, ErrUnknownDependency, and ErrDependencyCycle alias the
+	// run-package pipeline graph errors, so existing dispatch.Err* matches keep working.
+	ErrUnnamedStep       = run.ErrUnnamedStep
+	ErrDuplicateStep     = run.ErrDuplicateStep
+	ErrUnknownDependency = run.ErrUnknownDependency
+	ErrDependencyCycle   = run.ErrDependencyCycle
 	// ErrNotPendingApproval is returned when approve or reject targets a run not awaiting approval.
 	ErrNotPendingApproval = errors.New("run is not awaiting approval")
 )

@@ -57,9 +57,9 @@ func TestValidateDAG(t *testing.T) {
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
-			err := validateDAG(test.Steps)
+			err := run.ValidatePipeline(test.Steps)
 			if !errors.Is(err, test.Want) {
-				t.Errorf("validateDAG() error = %v, want %v", err, test.Want)
+				t.Errorf("run.ValidatePipeline() error = %v, want %v", err, test.Want)
 			}
 		})
 	}
