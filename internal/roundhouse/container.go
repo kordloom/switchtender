@@ -272,6 +272,12 @@ var sensitiveMountRoots = map[string]bool{
 	"/": true, "/etc": true, "/var": true, "/usr": true, "/bin": true,
 	"/sbin": true, "/lib": true, "/lib64": true, "/boot": true, "/proc": true,
 	"/sys": true, "/dev": true, "/root": true, "/home": true, "/Users": true,
+	// The container runtime's own socket lives under these, and handing a container the socket hands
+	// it the host: it can start a second container with the whole filesystem mounted and no limits.
+	// Blocking /var alone did not cover it, because subpaths are deliberately allowed so a project
+	// checkout under /var can still be mounted, and /var/run is a subpath.
+	"/run": true, "/var/run": true, "/var/lib/docker": true, "/var/lib/containerd": true,
+	"/etc/docker": true,
 }
 
 // checkMountPath rejects a host path that would expose a sensitive root directory or the docker
@@ -284,7 +290,11 @@ func checkMountPath(path string) error {
 	if sensitiveMountRoots[clean] {
 		return fmt.Errorf("%w: %s", ErrForbiddenMount, clean)
 	}
-	if filepath.Base(clean) == "docker.sock" {
+	// Any unix socket, not only docker.sock. The runtimes this executes under name theirs
+	// differently, podman.sock, containerd.sock, crio.sock, and a socket is never something an
+	// execution environment needs mounted, so the whole class is refused rather than a list of names
+	// that has to keep up with the runtimes.
+	if strings.HasSuffix(clean, ".sock") {
 		return fmt.Errorf("%w: %s", ErrForbiddenMount, clean)
 	}
 	return nil

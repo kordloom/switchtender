@@ -83,6 +83,13 @@ func TestRunArgsRefusesSensitiveMounts(t *testing.T) {
 		{"root dir", Spec{Playbook: "/site.yml", Dir: "/", Image: "alpine"}},                                     // Test 0.
 		{"etc dir", Spec{Playbook: "/etc/site.yml", Dir: "/etc", Image: "alpine"}},                               // Test 1.
 		{"docker socket", Spec{Playbook: "/checkout/s.yml", Inventory: "/var/run/docker.sock", Image: "alpine"}}, // Test 2.
+		// The socket's directory is the same escape as the socket. /var is refused but subpaths are
+		// deliberately allowed, so /var/run needs naming on its own or a container gets the host.
+		{"var run dir", Spec{Playbook: "/checkout/s.yml", Dir: "/var/run", Image: "alpine"}}, // Test 3.
+		{"run dir", Spec{Playbook: "/checkout/s.yml", Dir: "/run", Image: "alpine"}},         // Test 4.
+		{"podman socket", Spec{Playbook: "/checkout/s.yml", // Test 5.
+			Inventory: "/run/podman/podman.sock", Image: "alpine"}},
+		{"docker lib", Spec{Playbook: "/checkout/s.yml", Dir: "/var/lib/docker", Image: "alpine"}}, // Test 6.
 	}
 	for i, test := range tests {
 		plan, cleanup, err := buildContainerPlan(test.Spec)
