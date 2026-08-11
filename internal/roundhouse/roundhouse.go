@@ -106,6 +106,10 @@ type Spec struct {
 	Forks int
 	// DiffMode shows the before-and-after of every file and template change, passed as --diff.
 	DiffMode bool
+	// CredentialFiles are host paths a credential injection wrote, whose locations reach the tool
+	// through environment variables. A container has to mount them or the variable names a path that
+	// is not there, so they are tracked here rather than only in the environment.
+	CredentialFiles []string
 	// PrivateKeyPath, when set, is passed as ansible-playbook --private-key.
 	PrivateKeyPath string
 	// VaultPasswords are the Ansible Vault passwords for the run. An unlabeled one is passed as

@@ -37,6 +37,24 @@ type planMount struct {
 // returning a cleanup that removes it. Each built-in engine is containerizable; a tool missing its
 // input returns ErrNoPlaybook or ErrNoCommand, and an unrecognized tool returns ErrUnknownTool.
 func buildContainerPlan(spec Spec) (containerPlan, func(), error) {
+	plan, cleanup, err := toolContainerPlan(spec)
+	if err != nil {
+		return plan, cleanup, err
+	}
+	// A credential injection writes a file on the host and points an environment variable at it. That
+	// variable crosses into the container unchanged, so without the mount the tool is handed a path
+	// that does not exist there and the credential simply fails to apply, which reads as a broken
+	// credential rather than a missing mount. Every tool can carry one, so this is not the Ansible
+	// branch's business alone.
+	for _, f := range spec.CredentialFiles {
+		plan.mounts = append(plan.mounts, planMount{path: f})
+	}
+	return plan, cleanup, nil
+}
+
+// toolContainerPlan produces the per-tool part of the plan: the argv, the working directory, and the
+// mounts the tool's own inputs need.
+func toolContainerPlan(spec Spec) (containerPlan, func(), error) {
 	noCleanup := func() {}
 	switch run.NormalizeTool(spec.Tool) {
 	case run.ToolAnsible:

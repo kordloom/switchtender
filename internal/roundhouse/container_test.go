@@ -269,3 +269,49 @@ func TestRegistryLoginIsScopedToTheRun(t *testing.T) {
 		t.Errorf("the registry config survived the run, err = %v", err)
 	}
 }
+
+// TestCredentialFilesAreMountedForEveryTool proves a credential injection's file reaches the
+// container, whatever tool the run uses.
+//
+// An injection writes the file on the host and points an environment variable at it. The variable
+// crosses into the container unchanged, so without the mount the tool is handed a path that is not
+// there: a GCP service account or a kubeconfig silently fails to apply and the run looks like a
+// broken credential rather than a missing mount.
+func TestCredentialFilesAreMountedForEveryTool(t *testing.T) {
+	t.Parallel()
+	credFile := filepath.Join(t.TempDir(), "gcp.json")
+	if err := os.WriteFile(credFile, []byte(`{}`), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	tools := []struct {
+		Tool string
+		Spec Spec
+	}{
+		{"ansible", Spec{Tool: "ansible", Playbook: "/checkout/site.yml", Dir: "/checkout",
+			Image: "alpine", CredentialFiles: []string{credFile}}},
+		{"bash", Spec{Tool: "bash", Command: "echo hi", Dir: "/checkout",
+			Image: "alpine", CredentialFiles: []string{credFile}}},
+		{"python", Spec{Tool: "python", Command: "print(1)", Dir: "/checkout",
+			Image: "alpine", CredentialFiles: []string{credFile}}},
+		{"terraform", Spec{Tool: "terraform", Command: "/checkout", Dir: "/checkout",
+			Image: "alpine", CredentialFiles: []string{credFile}}},
+	}
+	for _, tc := range tools {
+		plan, cleanup, err := buildContainerPlan(tc.Spec)
+		if err != nil {
+			cleanup()
+			t.Fatalf("%s: buildContainerPlan() error = %v", tc.Tool, err)
+		}
+		var mounted bool
+		for _, m := range plan.mounts {
+			if m.path == credFile {
+				mounted = true
+			}
+		}
+		cleanup()
+		if !mounted {
+			t.Errorf("%s: the credential file is not mounted, so the variable pointing at it names "+
+				"a path that does not exist in the container", tc.Tool)
+		}
+	}
+}

@@ -350,6 +350,9 @@ func (d *Dispatcher) materializeCredentials(ctx context.Context, r *run.Run, spe
 					return cleanup, secrets, fmt.Errorf("materialize credential %s: %w", id, err)
 				}
 				secrets = append(secrets, file.Content)
+				// The container plan mounts these, so the path the variable names resolves inside the
+				// container as well as on the host.
+				spec.CredentialFiles = append(spec.CredentialFiles, ff.Name())
 				for _, ev := range file.EnvVars {
 					spec.Env = append(spec.Env, ev+"="+ff.Name())
 				}
