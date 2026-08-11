@@ -77,6 +77,7 @@ the schedules first, then re-run with `--apply` to create them.
 | AWX inventory | Stored inventory, rendered as INI from its hosts and groups.|
 | AWX job template | Template, with job slicing becoming shard count.|
 | AWX survey | Template survey, field for field, with the field types translated. A password prompt is refused, not downgraded to plain text.|
+| AWX workflow job template | Workflow template carrying the graph, with each node's job template inlined as a step and the success and always edges becoming dependencies. Imported whole or reported and skipped, never partially. *Next release.*|
 | AWX schedule | Schedule, with the recurrence rule converted to cron.|
 | AWX credential | Credential shell with its kind mapped from its type and its configured inputs, secret omitted.|
 | Semaphore repository | Project.|
@@ -99,6 +100,10 @@ inventories, templates, and schedules, is in place and ready to run once the sec
 
 - A schedule whose cadence a cron expression cannot represent, such as every third day, is reported
   and skipped rather than converted to a wrong cadence.
+- A workflow whose graph cannot be expressed whole is reported and skipped rather than reduced. A
+  failure edge, which runs work precisely because something failed, has no pipeline equivalent, and a
+  node pointing at a job template the export does not carry has no work to do. A partial graph would
+  keep the workflow's name and run a subset of it, which is worse than not importing it.
 - Non-git projects are skipped, since there is no repository to source playbooks from.
 - A credential type without an exact match maps to the environment kind and is flagged for review.
 - A survey field that prompts for a secret, an AWX password question or a Rundeck secure option, is

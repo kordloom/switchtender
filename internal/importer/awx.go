@@ -33,7 +33,7 @@ type awxExport struct {
 	// The rest are counted, not mapped. They are decoded as raw messages so the report can say how
 	// many of each an export held and what will not come across, rather than staying silent about
 	// the part of an AWX install a team's orchestration actually lives in.
-	WorkflowJobTemplates  []json.RawMessage `json:"workflow_job_templates"`
+	Workflows             []awxWorkflow     `json:"workflow_job_templates"`
 	Organizations         []json.RawMessage `json:"organizations"`
 	Teams                 []json.RawMessage `json:"teams"`
 	NotificationTemplates []json.RawMessage `json:"notification_templates"`
@@ -317,6 +317,9 @@ func FromAWX(data []byte, now time.Time) (*Plan, error) {
 	for _, jt := range export.JobTemplates {
 		plan.addTemplate(jt, now, projectIDs, inventoryIDs, credentialIDs)
 	}
+	// Workflows come after the job templates they run, since each node's step inlines the playbook
+	// of the template it points at.
+	plan.addWorkflows(export, now, projectIDs, inventoryIDs)
 	reportUnmapped(plan, export)
 	return plan, nil
 }
@@ -535,9 +538,6 @@ func reportUnmapped(plan *Plan, export awxExport) {
 		What  string
 		Why   string
 	}{
-		{len(export.WorkflowJobTemplates), "workflow job template",
-			"rebuild them on the Workflows page, which builds the same graph with parallel branches " +
-				"and per-step failure handling"},
 		{len(export.Organizations), "organization",
 			"create them with POST /v1/orgs and add members, which carries the same ownership"},
 		{len(export.Teams), "team",

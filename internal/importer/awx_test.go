@@ -13,6 +13,7 @@ import (
 	"github.com/kordloom/switchtender/internal/credential"
 	"github.com/kordloom/switchtender/internal/importer"
 	"github.com/kordloom/switchtender/internal/invsource"
+	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/template"
 )
 
@@ -404,11 +405,115 @@ func TestAWXReportsUnmappedObjects(t *testing.T) {
 		t.Fatalf("FromAWX() error = %v", err)
 	}
 	joined := strings.Join(plan.Warnings, "\n")
+	// Workflows are imported now rather than reported as unmapped, so only the object kinds this
+	// importer still does not create are named here.
 	for _, want := range []string{
-		"2 workflow job templates", "1 organization", "1 team", "1 notification template",
+		"1 organization", "1 team", "1 notification template",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("the report does not mention %q:\n%s", want, joined)
 		}
+	}
+}
+
+// TestAWXWorkflowImportsAsSteppedTemplate proves an AWX workflow job template becomes a saved
+// workflow template whose graph matches the AWX node wiring.
+func TestAWXWorkflowImportsAsSteppedTemplate(t *testing.T) {
+	t.Parallel()
+	export := `{
+		"job_templates":[
+			{"name":"Build","playbook":"build.yml"},
+			{"name":"Test","playbook":"test.yml"},
+			{"name":"Deploy","playbook":"deploy.yml"}
+		],
+		"workflow_job_templates":[{
+			"name":"ship it",
+			"workflow_nodes":[
+				{"id":1,"identifier":"build","unified_job_template":"Build","success_nodes":[2,3]},
+				{"id":2,"identifier":"test","unified_job_template":"Test","success_nodes":[]},
+				{"id":3,"identifier":"deploy","unified_job_template":"Deploy","success_nodes":[]}
+			]
+		}]
+	}`
+	plan, err := importer.FromAWX([]byte(export), time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("FromAWX() error = %v", err)
+	}
+	var wf *template.Template
+	for _, tpl := range plan.Templates {
+		if tpl.Name == "ship it" {
+			wf = tpl
+		}
+	}
+	if wf == nil {
+		t.Fatalf("the workflow was not imported; warnings = %v", plan.Warnings)
+	}
+	if len(wf.Steps) != 3 {
+		t.Fatalf("steps = %d, want 3", len(wf.Steps))
+	}
+	byName := map[string]run.PipelineStep{}
+	for _, s := range wf.Steps {
+		byName[s.Name] = s
+	}
+	if got := byName["build"]; len(got.DependsOn) != 0 || got.Playbook != "build.yml" {
+		t.Errorf("build step = %+v, want no dependencies and build.yml", got)
+	}
+	for _, name := range []string{"test", "deploy"} {
+		got := byName[name]
+		if len(got.DependsOn) != 1 || got.DependsOn[0] != "build" {
+			t.Errorf("%s depends on %v, want [build]", name, got.DependsOn)
+		}
+	}
+	// The imported graph must be one the dispatcher will actually run.
+	if err := run.ValidatePipeline(wf.Steps); err != nil {
+		t.Errorf("the imported graph does not validate: %v", err)
+	}
+}
+
+// TestAWXWorkflowRefusedRatherThanPartial proves a workflow this importer cannot express whole is
+// skipped and reported, never reduced to a subset.
+//
+// A partial graph is the dangerous outcome: it carries the workflow's name and runs some of its
+// steps, so an operator who migrated would believe their change process moved across when part of it
+// silently did not.
+func TestAWXWorkflowRefusedRatherThanPartial(t *testing.T) {
+	t.Parallel()
+	at := time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)
+	tests := []struct {
+		Name    string
+		Export  string
+		Because string
+	}{{ // A failure edge runs work because something failed, which a pipeline cannot express.
+		Name: "failure edge",
+		Export: `{"job_templates":[{"name":"A","playbook":"a.yml"},{"name":"B","playbook":"b.yml"}],
+			"workflow_job_templates":[{"name":"wf","workflow_nodes":[
+				{"id":1,"unified_job_template":"A","failure_nodes":[2]},
+				{"id":2,"unified_job_template":"B"}]}]}`,
+		Because: "failure",
+	}, { // A node pointing at a job template the export does not carry has no work to do.
+		Name: "unresolved node",
+		Export: `{"job_templates":[{"name":"A","playbook":"a.yml"}],
+			"workflow_job_templates":[{"name":"wf","workflow_nodes":[
+				{"id":1,"unified_job_template":"A","success_nodes":[2]},
+				{"id":2,"unified_job_template":"Ghost"}]}]}`,
+		Because: "not a job template",
+	}}
+	for _, test := range tests {
+		t.Run(test.Name, func(t *testing.T) {
+			t.Parallel()
+			plan, err := importer.FromAWX([]byte(test.Export), at)
+			if err != nil {
+				t.Fatalf("FromAWX() error = %v", err)
+			}
+			for _, tpl := range plan.Templates {
+				if tpl.Name == "wf" {
+					t.Fatalf("a workflow that cannot be expressed whole was imported anyway: %+v", tpl.Steps)
+				}
+			}
+			joined := strings.Join(plan.Warnings, "\n")
+			if !strings.Contains(joined, test.Because) {
+				t.Errorf("the refusal does not say why (%q):\n%s", test.Because, joined)
+			}
+		})
 	}
 }

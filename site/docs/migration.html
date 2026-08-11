@@ -116,6 +116,10 @@ the schedules first, then re-run with <code>--apply</code> to create them.</p>
 <td>Template survey, field for field, with the field types translated. A password prompt is refused, not downgraded to plain text.</td>
 </tr>
 <tr>
+<td>AWX workflow job template</td>
+<td>Workflow template carrying the graph, with each node's job template inlined as a step and the success and always edges becoming dependencies. Imported whole or reported and skipped, never partially. <em>Next release.</em></td>
+</tr>
+<tr>
 <td>AWX schedule</td>
 <td>Schedule, with the recurrence rule converted to cron.</td>
 </tr>
@@ -169,6 +173,10 @@ inventories, templates, and schedules, is in place and ready to run once the sec
 <ul>
 <li>A schedule whose cadence a cron expression cannot represent, such as every third day, is reported
 and skipped rather than converted to a wrong cadence.</li>
+<li>A workflow whose graph cannot be expressed whole is reported and skipped rather than reduced. A
+failure edge, which runs work precisely because something failed, has no pipeline equivalent, and a
+node pointing at a job template the export does not carry has no work to do. A partial graph would
+keep the workflow's name and run a subset of it, which is worse than not importing it.</li>
 <li>Non-git projects are skipped, since there is no repository to source playbooks from.</li>
 <li>A credential type without an exact match maps to the environment kind and is flagged for review.</li>
 <li>A survey field that prompts for a secret, an AWX password question or a Rundeck secure option, is
