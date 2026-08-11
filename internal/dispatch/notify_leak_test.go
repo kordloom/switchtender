@@ -28,6 +28,8 @@ const (
 	leakRoutingKey = "secret-rk"
 	// leakWebhookURL is a per-run webhook URL a target carries, a bearer secret.
 	leakWebhookURL = "https://hooks.example/secret-webhook-path"
+	// leakCommandScript is a run's raw command body, which can embed an inline secret.
+	leakCommandScript = "curl -H 'Authorization: Bearer secret-cmd-token' https://x"
 )
 
 // TestNotifyExtraRedactsNotificationTargets proves a run handed to a registered external Notifier
@@ -71,6 +73,50 @@ func TestNotifyExtraRedactsNotificationTargets(t *testing.T) {
 			t.Fatalf("Marshal() error = %v", err)
 		}
 		assertNoLeak(t, body)
+	case <-time.After(3 * time.Second):
+		t.Fatal("registered notifier never received the run")
+	}
+}
+
+// TestNotifyExtraRedactsCommand proves a run handed to a registered external Notifier carries no
+// command body. For a bash, python, powershell, or go run the command is the raw script, which can
+// embed an inline secret, and the notifier marshals the whole run to an external plugin process. It
+// does not call t.Parallel: it writes the package notifier registry, so it runs in the sequential
+// phase.
+func TestNotifyExtraRedactsCommand(t *testing.T) {
+	got := make(chan *run.Run, 8)
+	RegisterNotifier("regleakcmd", NotifierFunc(func(_ context.Context, r *run.Run) error {
+		select {
+		case got <- r:
+		default:
+		}
+		return nil
+	}))
+
+	store := run.NewMemStore()
+	d := New(store, roundhouse.RunnerFunc(
+		func(context.Context, roundhouse.Spec, io.Writer) (roundhouse.Result, error) {
+			return roundhouse.Result{ExitCode: 0}, nil
+		}), nil)
+	defer d.Close()
+
+	d.notifyExtra(&run.Run{
+		ID: "r-cmd", Playbook: "p.yml", Tool: "bash", Status: run.StatusSucceeded,
+		Command: leakCommandScript,
+	})
+
+	select {
+	case rec := <-got:
+		if rec.Command != "" {
+			t.Errorf("notifier received command %q, want it redacted", rec.Command)
+		}
+		body, err := json.Marshal(rec)
+		if err != nil {
+			t.Fatalf("Marshal() error = %v", err)
+		}
+		if strings.Contains(string(body), leakCommandScript) {
+			t.Errorf("marshaled run leaks the command body: %s", body)
+		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("registered notifier never received the run")
 	}

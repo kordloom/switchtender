@@ -55,13 +55,26 @@ func (d *Dispatcher) notify(r *run.Run) {
 // channel is external and must receive neither survey answers or template vars that can carry
 // secrets nor the target list, whose entries carry a routing key or API token. Each delivery is
 // bounded and its failure logged and dropped, like the built-in channels.
+// redactForExternal returns a copy of r safe to send off the host to an external channel, a plugin
+// notifier or a webhook. Survey answers and template vars can carry secrets, each notification
+// target carries a routing key or API token, and Command holds the raw script body of a bash,
+// python, powershell, or go run, which can embed inline secrets or sensitive arguments. All three
+// are cleared here so the two external paths stay in parity and neither forgets a field the other
+// strips. The in-tenant run store, the SSE hub, and the run-detail API keep Command; only what
+// leaves the host loses it.
+func redactForExternal(r *run.Run) run.Run {
+	out := *r
+	out.ExtraVars = nil
+	out.Notifications = nil
+	out.Command = ""
+	return out
+}
+
 func (d *Dispatcher) notifyExtra(r *run.Run) {
 	if len(notifiers) == 0 {
 		return
 	}
-	redacted := *r
-	redacted.ExtraVars = nil
-	redacted.Notifications = nil
+	redacted := redactForExternal(r)
 	for name, n := range notifiers {
 		d.notifyWG.Add(1)
 		go func(name string, n Notifier) {
@@ -81,12 +94,7 @@ func (d *Dispatcher) notifyWebhooks(r *run.Run) {
 	if len(d.webhooks) == 0 {
 		return
 	}
-	// Redact the run's extra vars and per-run notification targets from the payload. Survey answers
-	// and template vars can carry secrets, and each target carries a routing key or API token, so
-	// neither is sent to a webhook, which is an external endpoint.
-	redacted := *r
-	redacted.ExtraVars = nil
-	redacted.Notifications = nil
+	redacted := redactForExternal(r)
 	body, err := json.Marshal(notification{Event: "run.finished", Run: &redacted})
 	if err != nil {
 		d.log.Error("dispatch: encode notification: "+err.Error(), zap.String("run_id", r.ID))
