@@ -169,6 +169,15 @@ func (c *containerRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Re
 func (c *containerRunner) runArgs(spec Spec, plan containerPlan, name, envFile string) ([]string, error) {
 	args := []string{"run", "--rm", "--name", name, "--pull", c.pullPolicy}
 	args = append(args, c.limits.args()...)
+	// Run as the host executor's own uid and gid. The plugin dir (0700), the callback config and
+	// inline script files (0600), the credential files, and the events sidecar are all owned by this
+	// uid and kept private. Without a matching --user the in-container process runs as a different uid
+	// and silently cannot read the callback config or write the events sidecar, so a run's events and
+	// summaries are lost with no error. Matching the uid keeps every secret-bearing file at 0600
+	// rather than loosening it. The guard skips Windows, where Getuid returns -1.
+	if uid := os.Getuid(); uid >= 0 {
+		args = append(args, "--user", fmt.Sprintf("%d:%d", uid, os.Getgid()))
+	}
 	if plan.workdir != "" {
 		args = append(args, "-w", plan.workdir)
 	}

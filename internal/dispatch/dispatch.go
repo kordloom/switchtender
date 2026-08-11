@@ -1767,6 +1767,11 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 		return fail(err)
 	}
 	d.applyDefaultImage(&spec)
+	// Record the image the run actually executed in. spec.Image was seeded from r.Image and is only
+	// ever filled when it was empty, so a run that pinned its own image sees no change, a run that
+	// took a project or server default now has that image on its record, and a host run stays empty.
+	// The evidence a run leaves must show which environment ran it, not only the one it asked for.
+	r.Image = spec.Image
 
 	credCleanup, secrets, err := d.materializeCredentials(ctx, r, &spec)
 	if err != nil {

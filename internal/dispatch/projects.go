@@ -96,6 +96,10 @@ func (d *Dispatcher) resolveProject(r *run.Run, spec *roundhouse.Spec) (cleanup 
 	// The run's own image, from the request or its template, outranks the project's.
 	if p.Image != "" && spec.Image == "" {
 		spec.Image = p.Image
+		// Record the pull credential that goes with the adopted image. Without this, a later retry or
+		// proposed-apply reconstructs the spec from the run with the image set but the login gone,
+		// since the image is no longer empty for resolveProject to re-resolve the credential from.
+		r.PullCredentialID = p.PullCredentialID
 		if err := d.resolvePullCredential(p.PullCredentialID, spec); err != nil {
 			return cleanup, err
 		}

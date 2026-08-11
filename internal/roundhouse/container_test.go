@@ -3,12 +3,15 @@ package roundhouse
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 )
 
 func TestRegistryHost(t *testing.T) {
@@ -313,5 +316,39 @@ func TestCredentialFilesAreMountedForEveryTool(t *testing.T) {
 			t.Errorf("%s: the credential file is not mounted, so the variable pointing at it names "+
 				"a path that does not exist in the container", tc.Tool)
 		}
+	}
+}
+
+// TestRunArgsRunsAsHostUser checks the container runs as the host executor's own uid:gid, so the
+// private 0600/0700 files it owns (callback config, credential files, events sidecar) are readable
+// and writable by the identically-uid'd in-container process. Without a matching --user the sidecar
+// and callback silently fail and a run's events are lost.
+func TestRunArgsRunsAsHostUser(t *testing.T) {
+	t.Parallel()
+	if os.Getuid() < 0 {
+		t.Skip("uid mapping is a unix concern")
+	}
+	c := newContainerRunner("docker", "missing", false, nil, &pluginCache{}, DefaultContainerLimits())
+	spec := Spec{Playbook: "/work/site.yml", Dir: "/work", Image: "alpine"}
+	plan, cleanup, err := buildContainerPlan(spec)
+	if err != nil {
+		t.Fatalf("buildContainerPlan() error = %v", err)
+	}
+	defer cleanup()
+	args, err := c.runArgs(spec, plan, "ym-test", "/tmp/env")
+	if err != nil {
+		t.Fatalf("runArgs() error = %v", err)
+	}
+	idx := slices.Index(args, "--user")
+	if idx == -1 || idx+1 >= len(args) {
+		t.Fatalf("runArgs() = %q, missing a --user flag", args)
+	}
+	want := fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid())
+	if diff := cmp.Diff(want, args[idx+1]); diff != "" {
+		t.Errorf("--user value mismatch (-want +got):\n%s", diff)
+	}
+	// The flag must precede the image so it configures the run, not the tool.
+	if img := slices.Index(args, "alpine"); img != -1 && idx > img {
+		t.Errorf("--user at %d comes after the image at %d, want it as a run flag", idx, img)
 	}
 }

@@ -1734,3 +1734,53 @@ func TestSubmitStartsWithoutWaitingOutTheBackoff(t *testing.T) {
 			"its idle backoff instead of being woken by the submit", latency, base)
 	}
 }
+
+// TestExecutedImageRecordedOnRun checks the run records the image it actually executed in, not only
+// the one it explicitly pinned. A run that took the server default or a project default previously
+// saved an empty image, so the evidence never showed which environment ran it.
+func TestExecutedImageRecordedOnRun(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Name      string
+		Pinned    string
+		Default   string
+		WantImage string
+	}{ // Test 0: The server default is written back onto the run.
+		{Name: "server default", Default: "ghcr.io/acme/default:1", WantImage: "ghcr.io/acme/default:1"},
+		// Test 1: An explicit pin is recorded and not overridden by the default.
+		{Name: "explicit pin", Pinned: "ghcr.io/acme/pinned:2", Default: "ghcr.io/acme/default:1",
+			WantImage: "ghcr.io/acme/pinned:2"},
+		// Test 2: A host run pins and defaults nothing, so it records no image.
+		{Name: "host run", WantImage: ""},
+	}
+	for testNum, test := range tests {
+		t.Run(test.Name, func(t *testing.T) {
+			t.Parallel()
+			runner := roundhouse.RunnerFunc(
+				func(_ context.Context, _ roundhouse.Spec, _ io.Writer) (roundhouse.Result, error) {
+					return roundhouse.Result{ExitCode: 0}, nil
+				},
+			)
+			store := run.NewMemStore()
+			var opts []Option
+			if test.Default != "" {
+				opts = append(opts, WithDefaultImage(test.Default))
+			}
+			d := New(store, runner, nil, opts...)
+			defer d.Close()
+
+			var submitOpts []run.SubmitOption
+			if test.Pinned != "" {
+				submitOpts = append(submitOpts, run.WithImage(test.Pinned, ""))
+			}
+			created, err := d.Submit(context.Background(), "play.yml", "inv", submitOpts...)
+			if err != nil {
+				t.Fatalf("test %d: Submit() error = %v", testNum, err)
+			}
+			got := waitTerminal(t, store, created.ID)
+			if diff := cmp.Diff(test.WantImage, got.Image); diff != "" {
+				t.Errorf("test %d: recorded image mismatch (-want +got):\n%s", testNum, diff)
+			}
+		})
+	}
+}
