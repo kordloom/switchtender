@@ -1420,11 +1420,25 @@ func runLogsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.Ha
 		// materializes in the control plane's memory.
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
-		var after int64
+		var (
+			after     int64
+			atLineEnd = true
+		)
 		for {
 			chunks, err := store.LogAfter(r.Context(), id, after, streamBatch)
 			if err != nil {
+				// The status line is already out, so a reader would otherwise receive a short log
+				// that reads like the whole one. The log has a recorded digest to check a copy
+				// against, which the event export does not, but the download should still say so
+				// itself. The marker takes a line of its own so it is never read as part of
+				// whatever the playbook was printing when the store went away.
 				log.Error("server: get run log: " + err.Error())
+				if !atLineEnd {
+					if _, werr := w.Write([]byte("\n")); werr != nil {
+						return
+					}
+				}
+				writeExportSentinel(w, log, "the log store failed part way through this download")
 				return
 			}
 			for _, c := range chunks {
@@ -1432,6 +1446,9 @@ func runLogsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.Ha
 				if _, err := w.Write(c.Data); err != nil {
 					log.Error("server: write run log: " + err.Error())
 					return
+				}
+				if len(c.Data) > 0 {
+					atLineEnd = c.Data[len(c.Data)-1] == '\n'
 				}
 			}
 			if len(chunks) < streamBatch {
@@ -1447,6 +1464,30 @@ const (
 	defaultEventsPage = 5000
 	maxEventsPage     = 20000
 )
+
+// exportSentinel is the trailing line a streaming export writes when it stops short. The status
+// line left with the first byte of the body, so a truncated transfer still reads as a clean 200 and
+// the file it produced still parses. The sentinel is the only thing that tells whoever opens the
+// file that entries are missing from it.
+type exportSentinel struct {
+	// Incomplete is always true. Its presence in the file is the whole signal.
+	Incomplete bool `json:"export_incomplete"`
+	// Reason says in plain words what stopped the export.
+	Reason string `json:"reason"`
+}
+
+// writeExportSentinel appends the incomplete marker as its own line to a body already in flight. A
+// write that fails here means the reader is already gone, so there is nobody left to warn.
+func writeExportSentinel(w http.ResponseWriter, log *zap.Logger, reason string) {
+	line, err := json.Marshal(exportSentinel{Incomplete: true, Reason: reason})
+	if err != nil {
+		log.Error("server: marshal export sentinel: " + err.Error())
+		return
+	}
+	if _, err := w.Write(append(line, '\n')); err != nil {
+		log.Error("server: write export sentinel: " + err.Error())
+	}
+}
 
 // runEventsHandler returns a page of a run's structured events as JSON with a next_after cursor.
 func runEventsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
@@ -1476,21 +1517,41 @@ func runEventsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.
 			// server's memory at once, for every concurrent download. The log export already streams;
 			// this now matches it. NDJSON is written a line at a time, so a reader sees output
 			// immediately and the server holds one page.
-			w.Header().Set("Content-Type", "application/x-ndjson; charset=utf-8")
-			w.Header().Set("Content-Disposition", `attachment; filename="`+id+`-events.ndjson"`)
-			enc := json.NewEncoder(w)
-			flusher, _ := w.(http.Flusher)
-			var after int64
+			var (
+				enc     *json.Encoder
+				flusher http.Flusher
+				after   int64
+				started bool
+			)
 			for {
 				page, err := store.EventsAfter(r.Context(), id, after, maxEventsPage)
 				if err != nil {
-					// The header is already sent, so the status cannot change. Stopping mid-stream
-					// leaves a short file rather than a wrong one, and the reason goes to the log.
 					log.Error("server: export run events: " + err.Error())
+					if !started {
+						// Nothing has been written, so this can still be an honest failure rather
+						// than a file. A 500 with no attachment header cannot be mistaken for an
+						// export the way a zero byte download can.
+						respondError(w, log, http.StatusInternalServerError,
+							"could not export run events")
+						return
+					}
+					// The status line left with the first byte, so it cannot change now. A short
+					// file that parses cleanly reads as a whole export, and this one is an audit
+					// artifact, so its last line says it is incomplete.
+					writeExportSentinel(w, log,
+						"the event store failed part way through this export")
 					return
 				}
 				if len(page) == 0 {
 					return
+				}
+				if !started {
+					started = true
+					w.Header().Set("Content-Type", "application/x-ndjson; charset=utf-8")
+					w.Header().Set("Content-Disposition",
+						`attachment; filename="`+id+`-events.ndjson"`)
+					enc = json.NewEncoder(w)
+					flusher, _ = w.(http.Flusher)
 				}
 				for i := range page {
 					if err := enc.Encode(&page[i]); err != nil {

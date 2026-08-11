@@ -113,6 +113,12 @@ webhook `/hooks` path, and the `/relay` worker path, is unversioned. The root re
 | GET    | `/healthz`              | Liveness.                                               |
 | GET    | `/readyz`               | Readiness: 200 once the store answers, 503 while it does not. |
 
+A streamed export whose status line has already been sent cannot report a later failure with a
+status code. The run event NDJSON download and the run log download therefore end with a
+`{"export_incomplete":true,"reason":"..."}` line when they stop early, so a short file is never
+mistaken for a whole one.
+
+
 ## Account profiles
 
 An account carries an optional profile alongside its role: `full_name`, `email`, `phone`, `title`,
