@@ -50,8 +50,14 @@ new host or migrates it between backends.</p>
 <li>Credentials, with their sealed secrets.</li>
 <li>Projects, templates, inventories, and inventory sources.</li>
 <li>Schedules and webhook triggers.</li>
-<li>Users, teams, organizations, and access grants.</li>
+<li>Users, teams, organizations, their memberships, and access grants.</li>
+<li>Approval policies, unless the install pins them from a file with <code>--policy-file</code>, in which case
+that file is the source of truth and is backed up alongside your other configuration.</li>
+<li>Custom credential types, which every typed credential injects through.</li>
 </ul>
+<p>A restored schedule waits for its next real occurrence rather than firing the moment the restore
+finishes. Missed occurrences are skipped the way cron skips them, so recovering from a day-old
+backup does not fire the whole estate's nightly work at once.</p>
 <p>Run history and the audit chain are not included. The audit chain has its own signed, self-verifying
 export through <code>switchtender audit</code>, which keeps its integrity guarantees intact.</p>
 <h2 id="how-it-is-secured">How it is secured</h2>
