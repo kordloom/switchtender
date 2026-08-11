@@ -41,8 +41,13 @@ Export the jobs from a Rundeck project, in YAML or JSON, and point the importer 
 
 Each job becomes a Bash template carrying its step sequence in order, its options become a survey,
 and its schedule becomes a cron schedule. Rundeck dispatches by node filter rather than by inventory
-file, so `--inventory` says which hosts the jobs target; the report names any job whose node filter
-you should check against the inventory you chose.
+file, so `--inventory` records which hosts the jobs are meant for and the report names any job whose
+node filter you should check against it.
+
+Know what that inventory does and does not do. A Rundeck job imports as a Bash template, and the Bash
+tool runs the script where the worker runs it; the inventory is carried on the template for you to
+act on, not used to fan the script out across those hosts. Rewrite the job as an Ansible template
+when you want it to run against the inventory.
 
 Two details are worth knowing before you run it. A Rundeck schedule is a Quartz expression, which
 counts Sunday as one where cron counts Sunday as zero, so the weekday is renumbered rather than
@@ -82,7 +87,7 @@ the schedules first, then re-run with `--apply` to create them.
 | Rundeck job | Template running the job's step sequence as one Bash script.|
 | Rundeck option | Survey field. An enforced value list becomes a choice; a secure option is refused, not downgraded.|
 | Rundeck schedule | Schedule, with the Quartz expression converted and its weekday renumbered.|
-| Rundeck dispatch thread count | Template forks.|
+| Rundeck dispatch thread count | Recorded on the template, and reported. It paces Ansible runs; a Bash template, which is what a Rundeck job imports as, does not read it.|
 
 ## Re-enter secrets
 

@@ -30,6 +30,13 @@ type awxExport struct {
 	// InventorySources are dynamic inventory sources exported at the top level. Some exports nest them
 	// under each inventory's related block instead.
 	InventorySources []awxInventorySource `json:"inventory_sources"`
+	// The rest are counted, not mapped. They are decoded as raw messages so the report can say how
+	// many of each an export held and what will not come across, rather than staying silent about
+	// the part of an AWX install a team's orchestration actually lives in.
+	WorkflowJobTemplates  []json.RawMessage `json:"workflow_job_templates"`
+	Organizations         []json.RawMessage `json:"organizations"`
+	Teams                 []json.RawMessage `json:"teams"`
+	NotificationTemplates []json.RawMessage `json:"notification_templates"`
 }
 
 // awxProject is an AWX project.
@@ -310,6 +317,7 @@ func FromAWX(data []byte, now time.Time) (*Plan, error) {
 	for _, jt := range export.JobTemplates {
 		plan.addTemplate(jt, now, projectIDs, inventoryIDs, credentialIDs)
 	}
+	reportUnmapped(plan, export)
 	return plan, nil
 }
 
@@ -456,8 +464,22 @@ func (p *Plan) addSchedules(jt awxJobTemplate, templateID string, now time.Time)
 			continue
 		}
 		enabled := s.Enabled == nil || *s.Enabled
+		// AWX records the zone on the rule. Keeping it is what makes an imported 2am window still
+		// fire at 2am where the operator lives, and follow that zone's daylight saving shifts. A zone
+		// this build cannot resolve is reported and the schedule still imports, in server time,
+		// because a job that runs at the wrong hour is recoverable and one that was never created is
+		// easy to miss.
+		zone := dtstartZone(s.RRule)
+		if zone != "" {
+			if _, err := time.LoadLocation(zone); err != nil {
+				p.warn("schedule %q of template %q names the timezone %q, which this system cannot "+
+					"resolve, so it imports in the server's local time: %v",
+					s.Name, jt.Name, oneLine(zone), err)
+				zone = ""
+			}
+		}
 		p.addSchedule(&schedule.Schedule{
-			ID: schedule.NewID(), Name: s.Name, Cron: cron, TemplateID: templateID,
+			ID: schedule.NewID(), Name: s.Name, Cron: cron, Timezone: zone, TemplateID: templateID,
 			Enabled: enabled, CreatedAt: now,
 		}, "this AWX export", now)
 	}
@@ -499,4 +521,38 @@ func decodeVars(raw json.RawMessage) map[string]any {
 		}
 	}
 	return nil
+}
+
+// reportUnmapped names the AWX objects an export held that this importer does not create, so the
+// report says what is not coming across instead of leaving the operator to discover it later.
+//
+// Workflows matter most: an AWX shop's orchestration lives in workflow job templates, and an import
+// that recreates every job template while silently dropping the graph that sequences them looks
+// complete and is not.
+func reportUnmapped(plan *Plan, export awxExport) {
+	for _, item := range []struct {
+		Count int
+		What  string
+		Why   string
+	}{
+		{len(export.WorkflowJobTemplates), "workflow job template",
+			"rebuild them on the Workflows page, which builds the same graph with parallel branches " +
+				"and per-step failure handling"},
+		{len(export.Organizations), "organization",
+			"create them with POST /v1/orgs and add members, which carries the same ownership"},
+		{len(export.Teams), "team",
+			"create them with POST /v1/teams and grant access per object"},
+		{len(export.NotificationTemplates), "notification template",
+			"set notifications on each template, or configure the server-wide channels"},
+	} {
+		if item.Count == 0 {
+			continue
+		}
+		plural := "s"
+		if item.Count == 1 {
+			plural = ""
+		}
+		plan.warn("this export holds %d %s%s, which are not imported: %s",
+			item.Count, item.What, plural, item.Why)
+	}
 }

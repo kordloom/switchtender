@@ -31,7 +31,7 @@ set rather than by not finding it.
 | Live per-host status | Host-by-task matrix | Host status bar, per-event drill-down [11] | Host status bar, per-event drill-down [12] | Status and a streamed log [13] | Host status bar, per-event drill-down [14] | Per-node, per-step monitor [15] |
 | Tamper-evident audit | Hash-chained, signed, anchored | No [16] | No [17] | No [18] | No [19] | No [20] |
 | Verifiable offline by a third party | Yes, open format and verifier | Not documented | Not documented | Not documented | Not documented | Not documented |
-| Approval gates | Yes, by policy | Yes [21] | Yes [22] | Not documented [23] | Yes [24] | Not documented [25] |
+| Approval gates | Yes, by policy | Yes [21] | Yes [22] | Not documented [23] | Yes [24] | Not in open-source Rundeck; the commercial Runbook Automation ships them [25] |
 | RBAC in the free tier | Full, plus per-object grants | Yes, no paid tier exists [26] | Yes, subscription required for the product [27] | Four fixed project roles; custom roles are Enterprise [28] | Yes [29] | Yes, and finely grained; GUI editor is commercial [30] |
 | Drift detection | Yes, from a dry run | Not documented | Not documented | Not documented | Not documented | Not documented |
 | Workflows | DAG with a drag-and-drop editor | Visual editor [31] | Visual editor [32] | Basic build and deploy chaining [33] | Visual editor [34] | Engine yes; visualization is commercial [35] |
@@ -101,6 +101,18 @@ than "structured versus scrollback".
 | Capability | Status |
 |------------|--------|
 | Maturity | AWX and Semaphore have years of production use and large communities. SwitchTender is young. AWX's years now cut both ways: its last release was July 2024, and its next one removes LDAP, SAML, and OIDC from core. |
+| Saved workflow definitions | The Workflows page builds a dependency graph and submits it as a pipeline, but a graph is not saved as a reusable object the way an AWX workflow job template is, so a schedule or a webhook fires a template rather than a stored graph. |
+| Approval steps inside a workflow | A whole run is held for approval. AWX places an approval node at a point in the graph, so the first half runs, waits, and continues. |
+| Recurrence beyond cron | AWX schedules take an RRULE, so "the last Friday of the quarter" is expressible. SwitchTender takes a cron expression with a timezone, and a cadence cron cannot say is reported and skipped on import rather than converted wrongly. |
+| Secret survey answers | AWX offers a password survey field whose answer is stored encrypted. A survey answer here is stored in plain text on the run, so a secret belongs in a credential instead, and both importers refuse to downgrade one rather than accept it quietly. |
+| Constructed and smart inventories | An inventory is static content or a refreshed dynamic source. AWX composes one inventory from others by filter. |
+| Credential file injectors | A custom credential type contributes environment variables and extra vars. AWX also writes a templated file and hands the play its path, which is how a kubeconfig or a cloud config is delivered. |
+| Fact caching | AWX caches gathered facts between runs and can serve them to later plays. |
+| Provisioning callbacks | A host can ask AWX to run its own job at boot. SwitchTender launches from a webhook trigger, which is not the same host-initiated flow. |
+| Reusable notification objects | Channels are configured server-wide or per template. AWX defines a notification template once and attaches it to many objects. |
+| Policy language | Approval policy is a YAML file matching on tool, command, inventory, and destroy count, held in git and fail-closed. It is not a general policy language, so a Rego or Sentinel rule does not port. |
+| VCS-native review flow | Spacelift, env0, Atlantis, and Terraform Cloud comment a plan onto the pull request that proposed it. SwitchTender gates in its own approval queue instead. |
+| Federated cloud credentials | Those tools mint short-lived cloud credentials over OIDC, so nothing durable is stored. SwitchTender stores a credential encrypted at rest. |
 
 ## The short version
 
@@ -142,7 +154,9 @@ Fetched and read on 2026-07-31.
 22. AAP approval nodes: <https://docs.redhat.com/en/documentation/red_hat_ansible_automation_platform/2.7>
 23. Semaphore documentation set, searched in full for approval features
 24. Ascender approval nodes: <https://docs.ascender-automation.org/userguide/workflow_templates.html>
-25. Rundeck documentation set, searched in full for approval features
+25. Rundeck documentation set, searched in full for approval features. Approvals are a Runbook
+    Automation feature, so the open-source column says no and the commercial product is named rather
+    than left out
 26. AWX licensing, which returns an open license for every AWX build: <https://raw.githubusercontent.com/ansible/awx/devel/awx/main/utils/licensing.py>
 27. AAP access management and subscription types: <https://docs.redhat.com/en/documentation/red_hat_ansible_automation_platform/2.7>
 28. Semaphore team roles and Extended RBAC: <https://semaphoreui.com/docs/user-guide/team>, <https://semaphoreui.com/pricing>

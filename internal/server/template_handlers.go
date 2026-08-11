@@ -429,6 +429,20 @@ func launchTemplateHandler(store template.Store, submitter Submitter, authz *aut
 		vars := map[string]any{}
 		maps.Copy(vars, t.ExtraVars)
 		if len(t.Survey) > 0 {
+			// A launch may not set a survey variable through extra vars. Overrides are merged last
+			// so a launch can add a variable the template does not set, which meant an extra var
+			// named after a survey field simply overwrote the answer that had just been validated:
+			// every choice list, length bound, and pattern on that field was bypassable by sending
+			// the value under extra_vars instead of answers. The survey is a control, so a launch
+			// that tries to write around it is refused rather than quietly preferred.
+			for _, f := range t.Survey {
+				if _, taken := launchReq.ExtraVars[f.Var]; taken {
+					respondError(w, log, http.StatusBadRequest,
+						"extra_vars sets "+f.Var+", which this template asks as a survey question. "+
+							"Answer it under answers so it is validated.")
+					return
+				}
+			}
 			resolved, err := template.ResolveSurvey(t.Survey, launchReq.Answers)
 			if err != nil {
 				respondError(w, log, http.StatusBadRequest, err.Error())

@@ -108,7 +108,7 @@
 		<section class="section wrap">
 			<div class="section-head reveal">
 				<h2>Where Rundeck is still ahead</h2>
-				<p>Honesty first. Rundeck's live per-node, per-step monitor is a peer capability it has shipped for years, not a gap. Its file-based ACL model applies regex-matched, deny-first policy to authorization as a whole, which is more granular than SwitchTender's approval policy files in that one respect. It has more than a decade of production history, a large plugin ecosystem, and a commercial vendor behind it. And there is no one-command Rundeck import into SwitchTender yet, unlike the AWX and Semaphore paths, so jobs move by pointing SwitchTender at the same playbooks, scripts, and inventories.</p>
+				<p>Honesty first. Rundeck's live per-node, per-step monitor is a peer capability it has shipped for years, not a gap. Its file-based ACL model applies regex-matched, deny-first policy to authorization as a whole, which is more granular than SwitchTender's approval policy files in that one respect. It has more than a decade of production history, a large plugin ecosystem, and a commercial vendor behind it. <code>switchtender import rundeck</code> reads a job export and creates the equivalent templates, surveys, and schedules, converting the Quartz recurrence as it goes, but a job arrives as a Bash template rather than an Ansible one, so a job you want fanned across an inventory is rewritten by hand afterward.</p>
 			</div>
 		</section>
 

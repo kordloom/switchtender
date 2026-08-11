@@ -357,3 +357,58 @@ func TestAWXPasswordSurveyRefused(t *testing.T) {
 		t.Errorf("refusing the password field was not reported; warnings = %v", plan.Warnings)
 	}
 }
+
+// TestAWXScheduleKeepsItsTimezone proves an AWX schedule's zone survives the import.
+//
+// AWX records the zone on the recurrence rule. Dropping it moved every imported maintenance window
+// by the offset between that zone and the server's, silently, and the cron expression looked correct
+// either way.
+func TestAWXScheduleKeepsItsTimezone(t *testing.T) {
+	t.Parallel()
+	export := `{"job_templates":[{
+		"name":"Nightly","playbook":"site.yml",
+		"related":{"schedules":[
+			{"name":"ny window","enabled":true,
+			 "rrule":"DTSTART;TZID=America/New_York:20260101T020000 RRULE:FREQ=DAILY;INTERVAL=1"},
+			{"name":"plain window","enabled":true,
+			 "rrule":"DTSTART:20260101T030000Z RRULE:FREQ=DAILY;INTERVAL=1"}
+		]}
+	}]}`
+	plan, err := importer.FromAWX([]byte(export), time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("FromAWX() error = %v", err)
+	}
+	byName := map[string]string{}
+	for _, sc := range plan.Schedules {
+		byName[sc.Name] = sc.Timezone
+	}
+	if got := byName["ny window"]; got != "America/New_York" {
+		t.Errorf("timezone = %q, want America/New_York; the window would fire at the wrong hour", got)
+	}
+	if got := byName["plain window"]; got != "" {
+		t.Errorf("a rule with no TZID got timezone %q, want none", got)
+	}
+}
+
+// TestAWXReportsUnmappedObjects proves the report names what an export held and the importer does
+// not create, rather than staying silent about it.
+func TestAWXReportsUnmappedObjects(t *testing.T) {
+	t.Parallel()
+	export := `{"job_templates":[{"name":"a","playbook":"a.yml"}],
+		"workflow_job_templates":[{"name":"deploy chain"},{"name":"nightly chain"}],
+		"organizations":[{"name":"acme"}],
+		"teams":[{"name":"ops"}],
+		"notification_templates":[{"name":"slack"}]}`
+	plan, err := importer.FromAWX([]byte(export), time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("FromAWX() error = %v", err)
+	}
+	joined := strings.Join(plan.Warnings, "\n")
+	for _, want := range []string{
+		"2 workflow job templates", "1 organization", "1 team", "1 notification template",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("the report does not mention %q:\n%s", want, joined)
+		}
+	}
+}

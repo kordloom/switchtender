@@ -338,3 +338,53 @@ func TestTemplateSurveyValidatedAtSave(t *testing.T) {
 		})
 	}
 }
+
+// TestLaunchCannotWriteAroundTheSurvey proves a launch may not set a survey variable through extra
+// vars, which would skip the validation the survey exists to apply.
+//
+// Overrides merge last so a launch can add a variable the template does not set. That meant an extra
+// var named after a survey field simply overwrote the answer that had just been checked, and every
+// choice list, length bound, and pattern on that field was bypassable by moving the value from
+// answers to extra_vars. The docs describe the survey as enforced, so this was a governance control
+// that quietly did nothing.
+func TestLaunchCannotWriteAroundTheSurvey(t *testing.T) {
+	t.Parallel()
+	store := template.NewMemStore()
+	if err := store.Save(context.Background(), &template.Template{
+		ID: "tpl_1", Name: "deploy", Playbook: "site.yml",
+		Survey: []template.SurveyField{{
+			Var: "environment", Type: template.FieldChoice,
+			Choices: []string{"staging", "prod"}, Required: true,
+		}},
+		CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	sub := &fakeSubmitter{run: &run.Run{ID: "run_x"}}
+	handler := New(run.NewMemStore(), sub, zap.NewNop(), WithTemplates(store)).Handler()
+
+	launch := func(body string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost,
+			"/v1/templates/tpl_1/launch", strings.NewReader(body)))
+		return rec
+	}
+
+	// A value outside the choice list is refused when answered honestly.
+	if rec := launch(`{"answers":{"environment":"production-oops"}}`); rec.Code != http.StatusBadRequest {
+		t.Errorf("an answer outside the choices = %d, want 400", rec.Code)
+	}
+	// The same value smuggled through extra_vars must also be refused, not preferred.
+	rec := launch(`{"answers":{"environment":"staging"},"extra_vars":{"environment":"production-oops"}}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("extra_vars overriding a survey field = %d, want 400 (body %s)",
+			rec.Code, rec.Body.String())
+	}
+	if sub.gotRun != nil && sub.gotRun.ExtraVars["environment"] == "production-oops" {
+		t.Error("the launch reached the dispatcher carrying the unvalidated value")
+	}
+	// An extra var the survey does not ask about is still allowed.
+	if rec := launch(`{"answers":{"environment":"staging"},"extra_vars":{"note":"hello"}}`); rec.Code != http.StatusAccepted {
+		t.Errorf("an unrelated extra var = %d, want 202 (body %s)", rec.Code, rec.Body.String())
+	}
+}
