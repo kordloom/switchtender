@@ -16,6 +16,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/auth"
 	"github.com/kordloom/switchtender/internal/event"
+	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -324,6 +325,16 @@ func (s *relayServer) save(w http.ResponseWriter, r *http.Request) {
 	// Only the transition into a terminal state is recorded. A worker saves repeatedly as a run
 	// progresses, and the outcome is the part somebody asks about later.
 	if !wasTerminal && stored.Status.Terminal() {
+		// The control node commits the run's outcome to the chain here, the same entry a run executed
+		// in process gets, so a relay run is receiptable too. The worker streamed its log, events, and
+		// summaries before this terminal save, so the evidence is in the store to digest. A child of a
+		// split or pipeline is skipped, its outcome rolled into the parent the coordinator commits, and
+		// the commit is not fail-closed since the run has already happened.
+		if s.audits != nil && stored.ParentID == nil {
+			if err := outcome.Commit(r.Context(), s.audits, s.store, stored, "system:relay"); err != nil {
+				s.log.Error("relay: commit run outcome: "+err.Error(), zap.String("run_id", stored.ID))
+			}
+		}
 		s.record(r.Context(), poolFrom(r.Context()), stored.ClaimedBy,
 			"/relay/finished/"+stored.ID+"/"+string(stored.Status))
 	}

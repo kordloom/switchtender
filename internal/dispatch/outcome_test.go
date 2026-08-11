@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -38,39 +39,39 @@ func TestFinalizeCommitsRunOutcomeToChain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Chain() error = %v", err)
 	}
-	var outcome *audit.Entry
+	var outcomeEntry *audit.Entry
 	for _, e := range chain {
 		if e.Method == audit.MethodRun && strings.Contains(e.Path, created.ID) {
-			outcome = e
+			outcomeEntry = e
 			break
 		}
 	}
-	if outcome == nil {
+	if outcomeEntry == nil {
 		t.Fatal("no outcome entry was committed for the finished run")
 	}
-	if want := "/runs/" + created.ID + "/outcome/succeeded"; outcome.Path != want {
-		t.Errorf("outcome path = %q, want %q", outcome.Path, want)
+	if want := "/runs/" + created.ID + "/outcome/succeeded"; outcomeEntry.Path != want {
+		t.Errorf("outcome path = %q, want %q", outcomeEntry.Path, want)
 	}
-	if outcome.ActorType != "system" {
-		t.Errorf("outcome actor type = %q, want system", outcome.ActorType)
+	if outcomeEntry.ActorType != "system" {
+		t.Errorf("outcome actor type = %q, want system", outcomeEntry.ActorType)
 	}
-	if outcome.OnBehalfOf != "alice" {
-		t.Errorf("outcome on_behalf_of = %q, want alice", outcome.OnBehalfOf)
+	if outcomeEntry.OnBehalfOf != "alice" {
+		t.Errorf("outcome on_behalf_of = %q, want alice", outcomeEntry.OnBehalfOf)
 	}
-	if outcome.ContentDigest == "" {
+	if outcomeEntry.ContentDigest == "" {
 		t.Fatal("outcome entry carries no content digest")
 	}
 
 	// The committed digest must verify against the run's real outcome, reconstructed from the store.
-	body, err := d.outcomeBody(ctx, got)
+	body, err := outcome.Body(ctx, store, got)
 	if err != nil {
 		t.Fatalf("outcomeBody() error = %v", err)
 	}
-	if !audit.VerifyContentDigest(outcome.ContentDigest, outcome.Nonce, body) {
+	if !audit.VerifyContentDigest(outcomeEntry.ContentDigest, outcomeEntry.Nonce, body) {
 		t.Error("committed outcome digest does not verify against the run's actual outcome")
 	}
 	// A tampered body must not verify, or the commitment proves nothing.
-	if audit.VerifyContentDigest(outcome.ContentDigest, outcome.Nonce, append(body, '!')) {
+	if audit.VerifyContentDigest(outcomeEntry.ContentDigest, outcomeEntry.Nonce, append(body, '!')) {
 		t.Error("a tampered outcome body verified against the committed digest")
 	}
 }
