@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/outcome"
 )
 
 var (
@@ -72,9 +74,11 @@ func runReceipt(cmd *cobra.Command, args []string) error {
 	}
 	outcomePrefix := "/runs/" + runID + "/outcome/"
 	var outcomeSeq int64
+	var outcomeEntry *audit.Entry
 	for _, e := range entries {
 		if e.Method == audit.MethodRun && strings.HasPrefix(e.Path, outcomePrefix) {
 			outcomeSeq = e.Seq
+			outcomeEntry = e
 		}
 	}
 	if outcomeSeq == 0 {
@@ -103,6 +107,26 @@ func runReceipt(cmd *cobra.Command, args []string) error {
 	}
 	// The receipt is about the run, not the whole fleet, so it names the run as its subject.
 	doc.Subject = audit.BundleSubject{Type: "run", ID: runID}
+
+	// Disclose the run's outcome inside the outcome claim, so verify can show what the run did and
+	// prove it matches the digest the chain committed. The body is rebuilt from the run's evidence and
+	// the nonce is the one the digest was keyed under; both are added to the claim payload, which the
+	// signature then covers. They are not part of the chain link, so they do not change any claim's
+	// verification, exactly as a span claim's extra members do not.
+	if body, berr := outcome.Body(cmd.Context(), store.Runs(), r); berr == nil {
+		var bodyObj any
+		if json.Unmarshal(body, &bodyObj) == nil {
+			for i := range doc.Claims {
+				if doc.Claims[i].Chain.Seq == outcomeSeq {
+					doc.Claims[i].Payload["outcome_body"] = bodyObj
+					doc.Claims[i].Payload["outcome_nonce"] = outcomeEntry.Nonce
+				}
+			}
+		}
+	} else {
+		fmt.Fprintf(os.Stderr, "Could not rebuild the outcome to disclose it: %v. The receipt still "+
+			"proves the chain, but verify will not show what the run did.\n", berr)
+	}
 
 	// Anchors that fix a position in the receipt's range are attached before signing, so a verifier
 	// can see the segment has not been shortened. The whole chain is held against every anchor first,

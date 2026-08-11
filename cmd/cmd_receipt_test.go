@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -34,20 +35,28 @@ func TestReceiptProduceAndVerifyOffline(t *testing.T) {
 	if err := store.Audits().Append(ctx, creation); err != nil {
 		t.Fatalf("Append(creation) error = %v", err)
 	}
+	// Mirror the real flow: evidence is written while the run is running, then it is finalized, then
+	// its outcome is committed. Log append is fenced to a non-terminal run, so the order matters.
 	r := &run.Run{
-		ID: "run_demo", Playbook: "site.yml", Inventory: "prod", Status: run.StatusSucceeded,
+		ID: "run_demo", Playbook: "site.yml", Inventory: "prod", Status: run.StatusRunning,
 		Actor: "alice", AuditReceipt: audit.Receipt(creation), CreatedAt: at,
 	}
 	if err := store.Runs().Save(ctx, r); err != nil {
-		t.Fatalf("Save(run) error = %v", err)
+		t.Fatalf("Save(running) error = %v", err)
 	}
-	outcome := &audit.Entry{
-		ID: audit.NewID(), At: at.Add(time.Minute), Actor: "system:dispatcher", ActorType: "system",
-		OnBehalfOf: "alice", Method: audit.MethodRun, Path: "/runs/run_demo/outcome/succeeded",
-		ContentDigest: "sha256s:deadbeef",
+	if err := store.Runs().AppendLog(ctx, "run_demo", []byte("PLAY RECAP\nweb01 : ok=5 changed=1\n")); err != nil {
+		t.Fatalf("AppendLog() error = %v", err)
 	}
-	if err := store.Audits().Append(ctx, outcome); err != nil {
-		t.Fatalf("Append(outcome) error = %v", err)
+	if err := store.Runs().SaveHostSummary(ctx, "run_demo",
+		[]run.HostSummary{{Host: "web01", OK: 5, Changed: 1, Worst: "changed"}}); err != nil {
+		t.Fatalf("SaveHostSummary() error = %v", err)
+	}
+	r.Status = run.StatusSucceeded
+	if err := store.Runs().Save(ctx, r); err != nil {
+		t.Fatalf("Save(succeeded) error = %v", err)
+	}
+	if err := outcome.Commit(ctx, store.Audits(), store.Runs(), r, "system:dispatcher"); err != nil {
+		t.Fatalf("outcome.Commit() error = %v", err)
 	}
 	_ = store.Close()
 
@@ -71,6 +80,12 @@ func TestReceiptProduceAndVerifyOffline(t *testing.T) {
 	}
 	if !bytes.Contains(buf.Bytes(), []byte("run run_demo")) {
 		t.Errorf("verify output does not name the run subject:\n%s", buf.String())
+	}
+	// The receipt discloses the outcome and verify shows what the run did, matching the commitment.
+	for _, want := range []string{"outcome      OK", "what happened", "web01", "ok=5 changed=1"} {
+		if !bytes.Contains(buf.Bytes(), []byte(want)) {
+			t.Errorf("verify output missing %q:\n%s", want, buf.String())
+		}
 	}
 	t.Logf("switchtender verify run.receipt:\n%s", buf.String())
 

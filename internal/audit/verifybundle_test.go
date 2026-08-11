@@ -130,3 +130,82 @@ func TestVerifyBundleRefusesAnUnpinnedKey(t *testing.T) {
 		t.Errorf("VerifyBundle() with a wrong pinned key error = %v, want ErrVerify", err)
 	}
 }
+
+// TestVerifyBundleChecksOutcomeDisclosure proves a receipt that discloses a run's outcome is only
+// trusted when the disclosed body matches the digest the chain committed. Tampering the body and
+// re-signing keeps the signature and chain valid but must still fail, because the disclosure is a
+// claim about what the run did that the chain has to back.
+func TestVerifyBundleChecksOutcomeDisclosure(t *testing.T) {
+	t.Setenv("SWITCHTENDER_AUDIT_KEY", "")
+	id, err := audit.LoadIdentity(t.TempDir())
+	if err != nil {
+		t.Fatalf("LoadIdentity() error = %v", err)
+	}
+	at := time.Date(2026, 8, 11, 12, 0, 0, 0, time.UTC)
+	body := []byte(`{"run_id":"run_x","status":"succeeded","exit_code":0,"log_sha256":"abc",` +
+		`"hosts":[{"host":"web01","worst":"ok","ok":1,"changed":0,"failures":0,"unreachable":0,"skipped":0}]}`)
+	digest, nonce, err := audit.ContentDigestOf(body)
+	if err != nil {
+		t.Fatalf("ContentDigestOf() error = %v", err)
+	}
+
+	creation := &audit.Entry{ID: "c", At: at, Actor: "alice", Method: "POST", Path: "/v1/runs"}
+	audit.Link(nil, creation)
+	outcomeE := &audit.Entry{
+		ID: "o", At: at.Add(time.Minute), Actor: "system:dispatcher", ActorType: "system",
+		OnBehalfOf: "alice", Method: audit.MethodRun, Path: "/runs/run_x/outcome/succeeded",
+		ContentDigest: digest, Nonce: nonce,
+	}
+	audit.Link(creation, outcomeE)
+
+	build := func(mutate func(m map[string]any)) []byte {
+		doc, berr := audit.BuildBundle([]*audit.Entry{creation, outcomeE}, id, "v", at)
+		if berr != nil {
+			t.Fatalf("BuildBundle() error = %v", berr)
+		}
+		var bodyObj any
+		if uerr := json.Unmarshal(body, &bodyObj); uerr != nil {
+			t.Fatalf("Unmarshal() error = %v", uerr)
+		}
+		for i := range doc.Claims {
+			if doc.Claims[i].Chain.Seq == outcomeE.Seq {
+				doc.Claims[i].Payload["outcome_body"] = bodyObj
+				doc.Claims[i].Payload["outcome_nonce"] = nonce
+				if mutate != nil {
+					mutate(bodyObj.(map[string]any))
+				}
+			}
+		}
+		signed, serr := audit.SignBundleDoc(doc, id.Private())
+		if serr != nil {
+			t.Fatalf("SignBundleDoc() error = %v", serr)
+		}
+		return signed
+	}
+
+	// Genuine: the disclosure is present and matches, and the whole receipt is OK.
+	rep, err := audit.VerifyBundle(build(nil), "")
+	if err != nil {
+		t.Fatalf("VerifyBundle() error = %v", err)
+	}
+	if !rep.OutcomePresent || !rep.OutcomeDigestOK || !rep.OK() {
+		t.Errorf("genuine disclosure: present=%v digestOK=%v ok=%v, want all true",
+			rep.OutcomePresent, rep.OutcomeDigestOK, rep.OK())
+	}
+
+	// Tampered body, re-signed: signature and chain still hold, but the disclosure does not, so the
+	// receipt is not OK.
+	rep, err = audit.VerifyBundle(build(func(m map[string]any) { m["status"] = "failed" }), "")
+	if err != nil {
+		t.Fatalf("VerifyBundle() error = %v", err)
+	}
+	if !rep.SignatureOK || !rep.ChainOK {
+		t.Errorf("re-signed bundle: signature=%v chain=%v, want both true", rep.SignatureOK, rep.ChainOK)
+	}
+	if rep.OutcomeDigestOK {
+		t.Error("a tampered disclosed outcome reported OutcomeDigestOK")
+	}
+	if rep.OK() {
+		t.Error("a receipt with a mismatched outcome disclosure reported OK")
+	}
+}

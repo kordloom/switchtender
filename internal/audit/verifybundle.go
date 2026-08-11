@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/kordloom/loomseal/jcs"
 )
@@ -37,11 +38,22 @@ type BundleReport struct {
 	// ClaimCount and AnchorCount report the size of what was checked.
 	ClaimCount  int
 	AnchorCount int
+	// OutcomePresent reports that the receipt discloses a run's outcome, so a verifier can read what
+	// the run did, not only that the chain around it is intact.
+	OutcomePresent bool
+	// OutcomeDigestOK reports that the disclosed outcome matches the digest the chain committed. A
+	// receipt that discloses an outcome the chain never committed is not trustworthy.
+	OutcomeDigestOK bool
+	// OutcomeBody is the disclosed outcome JSON, meaningful only when OutcomeDigestOK. A caller reads
+	// what the run did from it after this report confirms it matches the commitment.
+	OutcomeBody []byte
 }
 
-// OK reports whether every check passed, the single question a verify command answers yes or no.
+// OK reports whether every check passed, the single question a verify command answers yes or no. A
+// disclosed outcome that does not match its commitment fails the whole receipt: it is a claim about
+// what the run did that the chain does not back.
 func (r *BundleReport) OK() bool {
-	return r.SignatureOK && r.ChainOK && r.AnchorsOK
+	return r.SignatureOK && r.ChainOK && r.AnchorsOK && (!r.OutcomePresent || r.OutcomeDigestOK)
 }
 
 // VerifyBundle checks a signed bundle with no store and no network: it confirms the producer's
@@ -75,7 +87,37 @@ func VerifyBundle(signed []byte, pinnedKeyID string) (*BundleReport, error) {
 	rep.SignatureOK = sigOK
 	rep.ChainOK, rep.BrokeAtSeq = verifyBundleChain(b.Claims)
 	rep.AnchorsOK = verifyBundleAnchors(&b)
+	verifyOutcomeDisclosure(b.Claims, rep)
 	return rep, nil
+}
+
+// verifyOutcomeDisclosure checks a receipt that discloses a run's outcome. The outcome claim carries
+// the outcome body and the nonce its digest was keyed under alongside the content_digest the chain
+// commits. This confirms the disclosed body is exactly what the chain committed, so a verifier can
+// trust what it reads about the run, not only that the chain is intact. A receipt without a
+// disclosure leaves OutcomePresent false and is judged on its chain alone.
+func verifyOutcomeDisclosure(claims []BundleClaim, rep *BundleReport) {
+	for _, c := range claims {
+		method, _ := c.Payload["method"].(string)
+		path, _ := c.Payload["path"].(string)
+		if method != MethodRun || !strings.Contains(path, "/outcome/") {
+			continue
+		}
+		bodyVal, hasBody := c.Payload["outcome_body"]
+		digest, _ := c.Payload["content_digest"].(string)
+		if !hasBody || digest == "" {
+			continue
+		}
+		nonce, _ := c.Payload["outcome_nonce"].(string)
+		body, err := json.Marshal(bodyVal)
+		if err != nil {
+			return
+		}
+		rep.OutcomePresent = true
+		rep.OutcomeBody = body
+		rep.OutcomeDigestOK = VerifyContentDigest(digest, nonce, body)
+		return
+	}
 }
 
 // verifyBundleSignature reconstructs the exact bytes the producer signed, the canonical bundle with

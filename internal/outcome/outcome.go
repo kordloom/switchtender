@@ -19,12 +19,12 @@ import (
 // run with a large log is hashed in bounded memory rather than loaded whole.
 const logDigestPage = 512
 
-// runOutcome is the canonical, non-secret record of what a run did, the body an outcome entry
+// Record is the canonical, non-secret record of what a run did, the body an outcome entry
 // commits a digest of. It holds only facts an auditor needs and nothing a run could carry a secret
 // in: the raw log and events stay in the store, named here by their digest. The field set and its
 // order are fixed, and the slices are sorted, so the same run reduces to the same bytes every time
 // and a receipt holder can recompute the digest the chain committed.
-type runOutcome struct {
+type Record struct {
 	// RunID is the run this outcome belongs to.
 	RunID string `json:"run_id"`
 	// Status is the terminal status the run reached.
@@ -47,13 +47,13 @@ type runOutcome struct {
 	// operator reads to this record.
 	LogSHA256 string `json:"log_sha256"`
 	// Hosts are the per-host outcomes, sorted by host.
-	Hosts []outcomeHost `json:"hosts,omitempty"`
+	Hosts []RecordHost `json:"hosts,omitempty"`
 	// Tasks are the per-task durations, sorted by task.
-	Tasks []outcomeTask `json:"tasks,omitempty"`
+	Tasks []RecordTask `json:"tasks,omitempty"`
 }
 
-// outcomeHost is one host's result in a run, the counts an auditor reads.
-type outcomeHost struct {
+// RecordHost is one host's result in a run, the counts an auditor reads.
+type RecordHost struct {
 	// Host is the target host.
 	Host string `json:"host"`
 	// Worst is the most severe outcome the host reached.
@@ -66,8 +66,8 @@ type outcomeHost struct {
 	Skipped     int `json:"skipped"`
 }
 
-// outcomeTask is one task's wall-clock cost in a run.
-type outcomeTask struct {
+// RecordTask is one task's wall-clock cost in a run.
+type RecordTask struct {
 	// Task is the task name.
 	Task string `json:"task"`
 	// Seconds is the task's summed wall-clock time across its occurrences.
@@ -114,20 +114,20 @@ func Body(ctx context.Context, store run.Store, r *run.Run) ([]byte, error) {
 		return nil, err
 	}
 
-	out := runOutcome{
+	out := Record{
 		RunID: r.ID, Status: string(r.Status), ExitCode: r.ExitCode,
 		Tool: r.Tool, Playbook: r.Playbook, Inventory: r.Inventory, Image: r.Image,
 		StartedAt: r.StartedAt, EndedAt: r.EndedAt, LogSHA256: logSHA,
 	}
 	for _, h := range hosts {
-		out.Hosts = append(out.Hosts, outcomeHost{
+		out.Hosts = append(out.Hosts, RecordHost{
 			Host: h.Host, Worst: h.Worst, OK: h.OK, Changed: h.Changed,
 			Failures: h.Failures, Unreachable: h.Unreachable, Skipped: h.Skipped,
 		})
 	}
 	sort.Slice(out.Hosts, func(i, j int) bool { return out.Hosts[i].Host < out.Hosts[j].Host })
 	for _, t := range tasks {
-		out.Tasks = append(out.Tasks, outcomeTask{Task: t.Task, Seconds: t.Seconds})
+		out.Tasks = append(out.Tasks, RecordTask{Task: t.Task, Seconds: t.Seconds})
 	}
 	sort.Slice(out.Tasks, func(i, j int) bool { return out.Tasks[i].Task < out.Tasks[j].Task })
 
@@ -156,4 +156,12 @@ func logDigest(ctx context.Context, store run.Store, runID string) (string, erro
 		}
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// Parse decodes a disclosed outcome body, the JSON Body produces, so a verifier can read what a run
+// did after confirming the body matches the digest the chain committed.
+func Parse(body []byte) (Record, error) {
+	var rec Record
+	err := json.Unmarshal(body, &rec)
+	return rec, err
 }
