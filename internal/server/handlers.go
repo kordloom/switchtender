@@ -1464,21 +1464,40 @@ func runEventsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.
 		// download=1 streams every event as a named NDJSON attachment, the export form tooling
 		// consumes line by line; the paged JSON form below serves the UI.
 		if r.URL.Query().Get("download") == "1" {
-			events, err := store.Events(r.Context(), id)
-			if err != nil {
-				log.Error("server: export run events: " + err.Error())
-				respondError(w, log, http.StatusInternalServerError, "could not export run events")
-				return
-			}
+			// Paged rather than loaded whole. A run over a thousand hosts holds tens of thousands of
+			// events, and reading them all before writing the first byte put the entire export in the
+			// server's memory at once, for every concurrent download. The log export already streams;
+			// this now matches it. NDJSON is written a line at a time, so a reader sees output
+			// immediately and the server holds one page.
 			w.Header().Set("Content-Type", "application/x-ndjson; charset=utf-8")
 			w.Header().Set("Content-Disposition", `attachment; filename="`+id+`-events.ndjson"`)
 			enc := json.NewEncoder(w)
-			for i := range events {
-				if err := enc.Encode(&events[i]); err != nil {
+			flusher, _ := w.(http.Flusher)
+			var after int64
+			for {
+				page, err := store.EventsAfter(r.Context(), id, after, maxEventsPage)
+				if err != nil {
+					// The header is already sent, so the status cannot change. Stopping mid-stream
+					// leaves a short file rather than a wrong one, and the reason goes to the log.
+					log.Error("server: export run events: " + err.Error())
+					return
+				}
+				if len(page) == 0 {
+					return
+				}
+				for i := range page {
+					if err := enc.Encode(&page[i]); err != nil {
+						return
+					}
+				}
+				after = page[len(page)-1].Seq
+				if flusher != nil {
+					flusher.Flush()
+				}
+				if len(page) < maxEventsPage {
 					return
 				}
 			}
-			return
 		}
 		after := queryInt64(r, "after")
 		limit := queryInt(r, "limit")
