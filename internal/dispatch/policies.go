@@ -87,7 +87,7 @@ func (d *Dispatcher) pipelineRequiresApproval(ctx context.Context, parent *run.R
 	for i, step := range steps {
 		// A pipeline held because one of its steps matches records that rule too: the whole graph
 		// is held, so the evidence has to say which step's rule stopped it.
-		if p := policy.Requiring(policies, stepRun(parent, step, i, 0, nil)); p != nil {
+		if p := policy.Requiring(policies, stepRun(parent, step, i, 0, baseStepVars(parent))); p != nil {
 			parent.HeldByPolicy = p.Label()
 			return true, nil
 		}

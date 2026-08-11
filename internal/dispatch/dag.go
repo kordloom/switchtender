@@ -146,13 +146,14 @@ func (d *Dispatcher) runStepsDAG(ctx context.Context, parent *run.Run, steps []r
 	// inputsFor merges the outputs of the step's transitive dependencies in declaration order, so
 	// the result does not depend on which branch finished first.
 	inputsFor := func(i int) map[string]any {
-		var vars map[string]any
+		// The parent's own vars are the base every step starts from, so a workflow's survey answers
+		// reach each step; a transitive dependency's outputs are layered on top in declaration order,
+		// so a published output overrides a parent var of the same name and the result does not
+		// depend on which branch finished first.
+		vars := baseStepVars(parent)
 		for j := range steps {
 			if !closures[i][j] || len(outputs[j]) == 0 {
 				continue
-			}
-			if vars == nil {
-				vars = make(map[string]any)
 			}
 			maps.Copy(vars, outputs[j])
 		}

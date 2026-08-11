@@ -1387,7 +1387,7 @@ func (d *Dispatcher) runPipeline(parent *run.Run, steps []run.PipelineStep) {
 // step continues on failure. It returns whether any step failed and whether execution was
 // canceled.
 func (d *Dispatcher) runStepsLinear(ctx context.Context, parent *run.Run, steps []run.PipelineStep) (failed, canceled bool) {
-	vars := make(map[string]any)
+	vars := baseStepVars(parent)
 	for i, step := range steps {
 		if ctx.Err() != nil {
 			return failed, true
@@ -1416,6 +1416,20 @@ func cloneVars(vars map[string]any) map[string]any {
 		return nil
 	}
 	return maps.Clone(vars)
+}
+
+// baseStepVars is the variable map a step starts from before any dependency outputs are layered on.
+//
+// It is the pipeline parent's own extra vars, so a workflow's survey answers and extra vars reach its
+// steps. A saved workflow template applies its survey answers to the pipeline parent, and without
+// this seed those answers reached no step and were silently dropped. A fresh map is returned each
+// call so a step mutating its inputs cannot reach the parent or another step. Dependency outputs are
+// copied on top of this, so a step's published output still overrides a parent var of the same name
+// for anything downstream.
+func baseStepVars(parent *run.Run) map[string]any {
+	vars := make(map[string]any, len(parent.ExtraVars))
+	maps.Copy(vars, parent.ExtraVars)
+	return vars
 }
 
 // stepRun builds the run a pipeline step executes as. The approval gate and the executor both go
@@ -1449,6 +1463,10 @@ func stepRun(parent *run.Run, step run.PipelineStep, idx, attempt int, vars map[
 	child.PullCredentialID = parent.PullCredentialID
 	child.Labels = parent.Labels
 	child.Actor = parent.Actor
+	// A launch-time host limit constrains every step, matching how a workflow limit applies to each
+	// job. A step names its own inventory but never its own host limit, so the parent's is the only
+	// one, and dropping it would run a limited launch against the whole fleet.
+	child.Limit = parent.Limit
 	// A dry-run pipeline is dry all the way down. A step cannot opt out of a parent that was
 	// submitted to make no changes: check mode is a promise about the whole run, and a step running
 	// for real underneath it would break that promise silently.
