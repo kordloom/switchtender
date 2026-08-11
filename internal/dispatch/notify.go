@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/safedial"
 )
 
 // webhookTimeout bounds one notification delivery attempt.
@@ -118,7 +119,12 @@ func (d *Dispatcher) deliver(url, runID string, body []byte) {
 // failures once. The JSON channels use deliver; a channel like ntfy that sends a text body and
 // custom headers uses this directly.
 func (d *Dispatcher) deliverWithHeaders(url, runID string, body []byte, headers map[string]string) {
-	client := &http.Client{Timeout: webhookTimeout}
+	// A notification target is an operator-supplied URL the server fetches on its own network, the
+	// same shape as a secret source or a project remote, so it gets the same refusal: a resolved
+	// address that is link-local or unspecified is not dialed. Without it a per-run notification
+	// target pointed at the cloud metadata endpoint turned every finished run into a request for
+	// instance credentials, delivered by the server to whoever set the target.
+	client := safedial.Client(webhookTimeout)
 	var lastErr error
 	for attempt := 0; attempt < 2; attempt++ {
 		req, err := http.NewRequestWithContext(context.Background(),

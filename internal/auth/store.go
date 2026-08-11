@@ -4,6 +4,7 @@ import (
 	"context"
 	"sort"
 	"sync"
+	"time"
 )
 
 // memStore is an in-memory token Store guarded by a mutex.
@@ -44,6 +45,18 @@ func (m *memStore) List(_ context.Context) ([]*Token, error) {
 		return out[i].CreatedAt.Before(out[j].CreatedAt)
 	})
 	return out, nil
+}
+
+// Touch records a token's last use without creating one. A revoke that lands first wins: the token
+// is simply absent and there is nothing to update.
+func (m *memStore) Touch(_ context.Context, id string, at time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if t, ok := m.tokens[id]; ok {
+		cp := at
+		t.LastUsedAt = &cp
+	}
+	return nil
 }
 
 // Delete removes the token with the given id, or returns ErrNotFound.

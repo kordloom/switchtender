@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/kordloom/switchtender/internal/auth"
 	"github.com/kordloom/switchtender/internal/sqlutil"
@@ -121,4 +122,15 @@ func scanToken(sc scanner) (*auth.Token, error) {
 		return nil, err
 	}
 	return &t, nil
+}
+
+// Touch records a token's last use with an update that cannot insert, so a token revoked while a
+// touch was in flight is not brought back by it. A missing row is not an error: the note is about a
+// request that already happened.
+func (s *tokenStore) Touch(ctx context.Context, id string, at time.Time) error {
+	if _, err := s.db.ExecContext(ctx,
+		"UPDATE tokens SET last_used_at=? WHERE id=?", sqlutil.FormatTime(at), id); err != nil {
+		return fmt.Errorf("touch token: %w", err)
+	}
+	return nil
 }

@@ -688,8 +688,13 @@ func (g *authGate) touch(tok *auth.Token) {
 	}
 	now := time.Now()
 	tok.LastUsedAt = &now
+	// Touch updates the stored row and cannot create one. Saving the whole token here re-inserted it,
+	// so an admin who revoked a token while a request was in flight watched it come back: the
+	// attacker's own polling kept firing touches, and each one restored the row that had just been
+	// deleted. A note about a request that already happened must never resurrect the authority for
+	// the next one.
 	go func() {
-		if err := g.tokens.Save(context.Background(), tok); err != nil {
+		if err := g.tokens.Touch(context.Background(), tok.ID, now); err != nil {
 			g.log.Error("server: touch token: " + err.Error())
 		}
 	}()

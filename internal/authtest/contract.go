@@ -17,6 +17,7 @@ func Contract(t *testing.T, newStore func() auth.Store) {
 	t.Run("save find delete", func(t *testing.T) { testLifecycle(t, newStore()) })
 	t.Run("list ordered", func(t *testing.T) { testList(t, newStore()) })
 	t.Run("count", func(t *testing.T) { testCount(t, newStore()) })
+	t.Run("touch never resurrects a revoked token", func(t *testing.T) { testTouch(t, newStore()) })
 }
 
 // testLifecycle verifies a token round trips by hash, updates, and deletes.
@@ -96,5 +97,43 @@ func testCount(t *testing.T, store auth.Store) {
 	}
 	if n, _ := store.Count(ctx); n != 1 {
 		t.Errorf("Count() = %d, want 1", n)
+	}
+}
+
+// testTouch verifies that recording a token's last use updates an existing token and never creates
+// one.
+//
+// This is the revoke race. The gate records last-used in the background, so a token revoked while a
+// request was in flight had its row rewritten by the touch that request had already scheduled. An
+// attacker polling the API kept firing touches, and each one restored the token an admin had just
+// deleted, so the revoke never took effect from the attacker's point of view.
+func testTouch(t *testing.T, store auth.Store) {
+	ctx := context.Background()
+	tok := &auth.Token{ID: "tok_touch", Name: "ci", Hash: "TOUCHHASH", CreatedAt: time.Now()}
+	if err := store.Save(ctx, tok); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	at := time.Now().Truncate(time.Second)
+	if err := store.Touch(ctx, tok.ID, at); err != nil {
+		t.Fatalf("Touch() error = %v", err)
+	}
+	got, err := store.FindByHash(ctx, "TOUCHHASH")
+	if err != nil {
+		t.Fatalf("FindByHash() error = %v", err)
+	}
+	if got.LastUsedAt == nil {
+		t.Error("Touch() did not record the last use")
+	}
+
+	// The revoke lands, then a touch that was already in flight arrives.
+	if err := store.Delete(ctx, tok.ID); err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+	if err := store.Touch(ctx, tok.ID, time.Now()); err != nil {
+		t.Errorf("Touch() on a revoked token error = %v, want it to pass quietly", err)
+	}
+	if _, err := store.FindByHash(ctx, "TOUCHHASH"); !errors.Is(err, auth.ErrNotFound) {
+		t.Error("a revoked token came back to life, so revoking it did not take effect")
 	}
 }

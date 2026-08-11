@@ -61,6 +61,11 @@ type Store interface {
 	Save(ctx context.Context, t *Token) error
 	// List returns all tokens ordered by creation time, oldest first.
 	List(ctx context.Context) ([]*Token, error)
+	// Touch records that a token authenticated a request, at the given time. It updates an existing
+	// row and never creates one, so a token revoked while a touch was in flight stays revoked. It
+	// reports no error when the token is gone, because a touch is a note about a request that already
+	// happened rather than a change anyone is waiting on.
+	Touch(ctx context.Context, id string, at time.Time) error
 	// Delete removes the token with the given id, or returns ErrNotFound.
 	Delete(ctx context.Context, id string) error
 	// FindByHash returns the token with the given hash, or ErrNotFound.
