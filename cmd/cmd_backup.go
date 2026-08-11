@@ -1,13 +1,17 @@
 package cmd
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/backup"
 )
 
@@ -25,7 +29,7 @@ var (
 // backupCmd writes an encrypted snapshot of the control plane.
 var backupCmd = &cobra.Command{
 	Use:   "backup",
-	Short: "Write an encrypted backup of credentials, projects, templates, inventories, schedules, triggers, and access.",
+	Short: "Write an encrypted backup of credentials, projects, templates, inventories, schedules, triggers, tokens, and access.",
 	Long: "Write an encrypted, portable backup of the control-plane configuration and secrets. The whole " +
 		"file is sealed with the deployment encryption key, so it stays confidential and tamper-evident, and " +
 		"it restores into either the SQLite or the PostgreSQL backend. Run history and the audit chain are " +
@@ -64,6 +68,7 @@ func backupStores(bundle storeBundle) backup.Stores {
 		Schedules:        bundle.Schedules(),
 		Triggers:         bundle.Triggers(),
 		Users:            bundle.Users(),
+		Tokens:           bundle.Tokens(),
 		Teams:            bundle.Teams(),
 		Orgs:             bundle.Orgs(),
 		Grants:           bundle.Grants(),
@@ -148,6 +153,16 @@ func runRestore(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	sum, err := backup.Read(cmd.Context(), backupStores(bundle), newSealerFromEnv(zap.NewNop()), in)
+	// Record what the restore drew from, once it is known. sum.CreatedAt is set as the file decrypts
+	// and validates, before anything is written, so it is non-zero exactly when data may have been
+	// applied and zero when a bad key or format meant nothing was touched. The pre-restore guard entry
+	// proved the trail is writable, so a failure to record this provenance is a real fault and is
+	// returned even when the restore itself succeeded.
+	if !sum.CreatedAt.IsZero() {
+		if perr := recordRestoreProvenance(cmd.Context(), bundle.Audits(), sum); perr != nil {
+			return perr
+		}
+	}
 	if err != nil {
 		// A restore is not atomic across stores, so a failure can still have written some of the
 		// file. The counts say how far it got, which is the difference between an operator who
@@ -161,11 +176,25 @@ func runRestore(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
+// recordRestoreProvenance records, after a restore, what it drew from: the instant the source backup
+// was taken and the per-kind counts the Summary already holds. The pre-restore guard entry cannot
+// carry these because they are known only once the file is read. The Summary is a struct of times and
+// counts with no restored object in it, so the content digest it commits exposes nothing sensitive.
+// The source instant also rides in the path so a reader sees it without opening the digest.
+func recordRestoreProvenance(ctx context.Context, audits audit.Store, sum backup.Summary) error {
+	body, err := json.Marshal(sum)
+	if err != nil {
+		return fmt.Errorf("encode restore provenance: %w", err)
+	}
+	path := fmt.Sprintf("/cli/restore?taken_at=%s", sum.CreatedAt.UTC().Format(time.RFC3339))
+	return recordCLIChange(ctx, audits, path, body)
+}
+
 // reportBackup writes the object counts to stderr so they never mix with a backup written to stdout.
 func reportBackup(s backup.Summary) {
 	fmt.Fprintf(os.Stderr,
 		"credentials %d, projects %d, templates %d, inventories %d, inventory sources %d, "+
-			"schedules %d, triggers %d, users %d, teams %d, orgs %d, grants %d\n",
+			"schedules %d, triggers %d, users %d, tokens %d, teams %d, orgs %d, grants %d\n",
 		s.Credentials, s.Projects, s.Templates, s.Inventories, s.InventorySources,
-		s.Schedules, s.Triggers, s.Users, s.Teams, s.Orgs, s.Grants)
+		s.Schedules, s.Triggers, s.Users, s.Tokens, s.Teams, s.Orgs, s.Grants)
 }

@@ -1,6 +1,6 @@
 // Package backup writes and reads a portable snapshot of a SwitchTender control plane: its
-// credentials, projects, templates, inventories, inventory sources, schedules, triggers, and the
-// identity and access objects. The snapshot is a logical export, so it restores into either the
+// credentials, projects, templates, inventories, inventory sources, schedules, triggers, API tokens,
+// and the identity and access objects. The snapshot is a logical export, so it restores into either the
 // SQLite or the PostgreSQL backend, which makes it a migration tool as well as a disaster-recovery
 // one.
 //
@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kordloom/switchtender/internal/auth"
 	"github.com/kordloom/switchtender/internal/credential"
 	"github.com/kordloom/switchtender/internal/grant"
 	"github.com/kordloom/switchtender/internal/inventory"
@@ -91,6 +92,8 @@ type Stores struct {
 	Triggers trigger.Store
 	// Users holds accounts.
 	Users user.Store
+	// Tokens holds API bearer tokens, restored by their hash.
+	Tokens auth.Store
 	// Teams holds teams.
 	Teams team.Store
 	// Orgs holds organizations.
@@ -126,6 +129,8 @@ type Summary struct {
 	Triggers int `json:"triggers"`
 	// Users is the account count.
 	Users int `json:"users"`
+	// Tokens is the API token count.
+	Tokens int `json:"tokens"`
 	// Teams is the team count.
 	Teams int `json:"teams"`
 	// Orgs is the organization count.
@@ -174,6 +179,7 @@ type payload struct {
 	Schedules        []*schedule.Schedule `json:"schedules,omitempty"`
 	Triggers         []triggerDTO         `json:"triggers,omitempty"`
 	Users            []userDTO            `json:"users,omitempty"`
+	Tokens           []tokenDTO           `json:"tokens,omitempty"`
 	Teams            []*team.Team         `json:"teams,omitempty"`
 	Orgs             []*org.Org           `json:"orgs,omitempty"`
 	Grants           []*grant.Grant       `json:"grants,omitempty"`
@@ -238,6 +244,15 @@ type userDTO struct {
 	user.User
 	// PasswordHash is the hashed password, restored onto the entity's hidden field.
 	PasswordHash string `json:"password_hash"`
+}
+
+// tokenDTO carries an API token with its hidden hash, restored onto the entity's hidden field. The
+// Token entity hides its Hash from JSON, so the backup carries it explicitly, sealed inside the
+// payload like every other secret.
+type tokenDTO struct {
+	auth.Token
+	// Hash is the SHA-256 of the plaintext token, restored onto the entity's hidden field.
+	Hash string `json:"hash"`
 }
 
 // Write gathers every control-plane object, seals it with the deployment key, and writes the backup
@@ -400,6 +415,15 @@ func gather(ctx context.Context, s Stores) (*payload, Summary, error) {
 	}
 	sum.Users = len(users)
 
+	toks, err := s.Tokens.List(ctx)
+	if err != nil {
+		return nil, sum, fmt.Errorf("backup: list tokens: %w", err)
+	}
+	for _, t := range toks {
+		p.Tokens = append(p.Tokens, tokenDTO{Token: *t, Hash: t.Hash})
+	}
+	sum.Tokens = len(toks)
+
 	if p.Teams, err = s.Teams.List(ctx); err != nil {
 		return nil, sum, fmt.Errorf("backup: list teams: %w", err)
 	}
@@ -469,8 +493,13 @@ func gather(ctx context.Context, s Stores) (*payload, Summary, error) {
 // script URL. The role and grant cases fail closed, but the profile link is rendered as an anchor in
 // the users page on the strength of the server having validated it.
 func check(ctx context.Context, s Stores, p *payload) error {
-	for _, u := range p.Users {
-		acct := u.User
+	for i := range p.Users {
+		// Point at the payload element so NormalizeProfile mutates the value that apply then stores.
+		// Copying it here normalized a throwaway and let the raw, un-normalized profile reach the
+		// store, so the value that passed validation was not the value kept. check runs before apply
+		// on the same payload, and Read discards the payload on any check error, so no partly
+		// normalized state is ever stored.
+		acct := &p.Users[i].User
 		if !user.ValidRole(acct.Role) {
 			return fmt.Errorf("%w: user %s has role %q, which is not a role", ErrFormat,
 				acct.ID, acct.Role)
@@ -537,6 +566,16 @@ func apply(ctx context.Context, s Stores, p *payload) (Summary, error) {
 			return sum, fmt.Errorf("restore: save user %s: %w", acct.ID, err)
 		}
 		sum.Users++
+	}
+
+	// Tokens reference a user, so they are restored after the users that own them.
+	for _, t := range p.Tokens {
+		tok := t.Token
+		tok.Hash = t.Hash
+		if err := s.Tokens.Save(ctx, &tok); err != nil {
+			return sum, fmt.Errorf("restore: save token %s: %w", tok.ID, err)
+		}
+		sum.Tokens++
 	}
 
 	// Credential types come before the credentials that name them.

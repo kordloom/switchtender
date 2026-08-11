@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
+	"github.com/kordloom/switchtender/internal/auth"
 	"github.com/kordloom/switchtender/internal/credential"
 	"github.com/kordloom/switchtender/internal/grant"
 	"github.com/kordloom/switchtender/internal/inventory"
@@ -39,6 +40,7 @@ func freshStores() Stores {
 		Schedules:        schedule.NewMemStore(),
 		Triggers:         trigger.NewMemStore(),
 		Users:            user.NewMemStore(),
+		Tokens:           auth.NewMemStore(),
 		Teams:            team.NewMemStore(),
 		Orgs:             org.NewMemStore(),
 		Grants:           grant.NewMemStore(),
@@ -73,6 +75,8 @@ func populate(t *testing.T, ctx context.Context, s Stores) {
 		ID: "trg_1", Name: "hook", TemplateID: "tpl_1", TokenHash: "TOKEN-HASH", SigningSecret: "SEALED-SIGN", CreatedAt: testTime}))
 	must(s.Users.Save(ctx, &user.User{
 		ID: "usr_1", Username: "admin", Role: user.RoleAdmin, PasswordHash: "HASHED-PW", CreatedAt: testTime}))
+	must(s.Tokens.Save(ctx, &auth.Token{
+		ID: "tok_1", Name: "ci", UserID: "usr_1", Kind: auth.KindAgent, Hash: "TOKEN-SHA", CreatedAt: testTime}))
 	must(s.Teams.Save(ctx, &team.Team{ID: "team_1", Name: "sre", CreatedAt: testTime}))
 	must(s.Orgs.Save(ctx, &org.Org{ID: "org_1", Name: "acme", CreatedAt: testTime}))
 	must(s.Grants.Save(ctx, &grant.Grant{
@@ -143,7 +147,7 @@ func TestConfidential(t *testing.T) {
 	if _, err := Write(ctx, src, sealer, &buf); err != nil {
 		t.Fatalf("Write() error = %v", err)
 	}
-	for _, secret := range []string{"SEALED-SECRET", "HASHED-PW", "SEALED-CONFIG", "SEALED-SIGN", "TOKEN-HASH"} {
+	for _, secret := range []string{"SEALED-SECRET", "HASHED-PW", "SEALED-CONFIG", "SEALED-SIGN", "TOKEN-HASH", "TOKEN-SHA"} {
 		if strings.Contains(buf.String(), secret) {
 			t.Errorf("backup file exposes %q in the clear", secret)
 		}
@@ -364,5 +368,46 @@ func TestRestoreDoesNotFireEverySchedule(t *testing.T) {
 	// The cadence itself is preserved; only the stale occurrence is dropped.
 	if got.Cron != "0 2 * * *" {
 		t.Errorf("cron = %q, want it unchanged", got.Cron)
+	}
+}
+
+// TestRoundTripCarriesTokens proves an API token survives a backup and restore by its hash, so a
+// restored control plane still authenticates the tokens it issued. The hash is hidden from JSON, so
+// this also proves the DTO carries it explicitly rather than dropping it silently.
+func TestRoundTripCarriesTokens(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	sealer := credential.NewSealer("pass", "salt")
+	src := freshStores()
+	if err := src.Tokens.Save(ctx, &auth.Token{
+		ID: "tok_1", Name: "ci", UserID: "usr_1", Kind: auth.KindAgent, Hash: "TOKEN-SHA",
+		CreatedAt: testTime}); err != nil {
+		t.Fatalf("Save token: %v", err)
+	}
+
+	var buf bytes.Buffer
+	wrote, err := Write(ctx, src, sealer, &buf)
+	if err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+	if wrote.Tokens != 1 {
+		t.Errorf("Write summary tokens = %d, want 1", wrote.Tokens)
+	}
+
+	dst := freshStores()
+	read, err := Read(ctx, dst, sealer, &buf)
+	if err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+	if read.Tokens != 1 {
+		t.Errorf("Read summary tokens = %d, want 1", read.Tokens)
+	}
+	// The token authenticates by hash, so restoring by hash is the property that matters.
+	got, err := dst.Tokens.FindByHash(ctx, "TOKEN-SHA")
+	if err != nil {
+		t.Fatalf("token not restored by hash: %v", err)
+	}
+	if got.ID != "tok_1" || got.UserID != "usr_1" {
+		t.Errorf("restored token = %+v, want tok_1 for usr_1", got)
 	}
 }

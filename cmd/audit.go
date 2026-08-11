@@ -36,6 +36,15 @@ func cliActor() string {
 // not happen. Every command-line mutation routes through here rather than appending its own entry,
 // so a command added later either uses it or is visibly missing from this file.
 func recordCLI(ctx context.Context, audits audit.Store, command string) error {
+	return recordCLIChange(ctx, audits, command, nil)
+}
+
+// recordCLIChange records a command-line mutation and, when body is non-empty, commits a content
+// digest of it into the chain the same way an HTTP mutation commits the change it made. body must
+// carry no secret: the digest is recomputable by any holder of the exported chain, so it is meant for
+// a summary such as counts and timestamps, not a payload. A nil body records the call alone, which is
+// what recordCLI does for a mutation whose content is not summarized.
+func recordCLIChange(ctx context.Context, audits audit.Store, command string, body []byte) error {
 	if audits == nil {
 		return nil
 	}
@@ -46,6 +55,13 @@ func recordCLI(ctx context.Context, audits audit.Store, command string) error {
 		// rather than claiming a person or a service, either of which would be a guess.
 		ActorType: actorTypeCLI,
 		Method:    audit.MethodCLI, Path: command,
+	}
+	if len(body) > 0 {
+		digest, nonce, err := audit.ContentDigestOf(body)
+		if err != nil {
+			return fmt.Errorf("refused: the change could not be recorded in the audit trail: %w", err)
+		}
+		entry.ContentDigest, entry.Nonce = digest, nonce
 	}
 	if err := audits.Append(ctx, entry); err != nil {
 		return fmt.Errorf("refused: the change could not be recorded in the audit trail: %w", err)
