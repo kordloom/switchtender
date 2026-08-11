@@ -187,11 +187,18 @@ func TestAppendLogFlushesOnDelay(t *testing.T) {
 	if err := backing.Save(ctx, r); err != nil {
 		t.Fatalf("seed Save() error = %v", err)
 	}
+	start := time.Now()
 	if err := c.AppendLog(ctx, "run_quiet", []byte("one line\n")); err != nil {
 		t.Fatalf("AppendLog() error = %v", err)
 	}
-	if got := posts(); got != 0 {
-		t.Fatalf("log posts = %d immediately after a small write, want 0", got)
+	// A small write is buffered rather than posted, and the buffer is flushed once the batch delay
+	// passes. The property is that no post happens BEFORE that delay, which is not the same as no
+	// post having happened by the time this line runs: under a loaded race build the flush timer can
+	// legitimately fire between the write above and the check below. Asserting the instant made this
+	// test fail on a machine that was merely busy, which is a false report about correct behavior.
+	if got := posts(); got != 0 && time.Since(start) < relay.LogBatchDelayForTest() {
+		t.Fatalf("log posts = %d after %v, before the batch delay of %v had passed", got,
+			time.Since(start), relay.LogBatchDelayForTest())
 	}
 
 	deadline := time.Now().Add(5 * time.Second)
