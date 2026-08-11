@@ -522,3 +522,33 @@ func TestDossierCoverageNeedsAPositionToMeasureFrom(t *testing.T) {
 		t.Error("a run the chain records nothing about is reported as anchored")
 	}
 }
+
+// TestDossierSurfacesTheCommittedOutcome checks a finished run's committed outcome shows as a
+// decision-grade event in the dossier, not a bare chain row. This is what turns the document from a
+// record of what was asked into a record of what happened.
+func TestDossierSurfacesTheCommittedOutcome(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	runs, audits, id := seedEvidence(t)
+	if err := audits.Append(ctx, &audit.Entry{
+		ID: audit.NewID(), At: time.Date(2026, 8, 1, 10, 2, 0, 0, time.UTC),
+		Actor: "system:dispatcher", ActorType: "system", OnBehalfOf: "deploy-bot",
+		Method: audit.MethodRun, Path: "/runs/" + id + "/outcome/succeeded",
+		ContentDigest: "sha256s:abc",
+	}); err != nil {
+		t.Fatalf("Append(outcome) error = %v", err)
+	}
+
+	in, err := Collect(ctx, runs, audits, id, time.Date(2026, 8, 3, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("Collect() error = %v", err)
+	}
+	doc, err := Render(in)
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+	// The role label only appears when the outcome is recognized as a decision-grade event.
+	if !strings.Contains(string(doc), "<td>Outcome</td>") {
+		t.Errorf("dossier does not surface the committed outcome as a decision:\n%s", string(doc))
+	}
+}

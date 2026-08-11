@@ -453,6 +453,11 @@ func entryRole(e *audit.Entry) string {
 		return "Canceled"
 	case strings.HasSuffix(e.Path, "/retry"):
 		return "Retried"
+	case e.Method == audit.MethodRun && strings.Contains(e.Path, "/outcome/"):
+		// The outcome is the run's committed result, what it did rather than what was asked. It
+		// carries a content digest over the run's evidence, so it is a decision-grade event: this is
+		// the line that turns a dossier from a record of requests into a record of what happened.
+		return "Outcome"
 	}
 	return ""
 }
