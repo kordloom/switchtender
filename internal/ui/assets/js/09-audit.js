@@ -112,9 +112,35 @@ function auditPathCell(path) {
 	return cell;
 }
 
+// AUDIT_PAGE is how many entries the audit table asks the server for. The answer carries has_more
+// when the trail runs past it, which is the only thing that tells this page it is holding a page
+// rather than the whole trail.
+const AUDIT_PAGE = 500;
+
+// markTrailTruncated says on the page that the table is one page of the trail, and turns off the
+// table exports. A CSV or JSON taken from a cut table is an audit artifact that looks complete and
+// says nothing about the changes it left out, so the button is refused rather than answered with a
+// partial file. The signed export beside it still covers the whole chain.
+function markTrailTruncated(shown) {
+	const table = document.querySelector("main.content table.runs");
+	if (table && !document.getElementById("audit-truncated")) {
+		const notice = document.createElement("div");
+		notice.id = "audit-truncated";
+		notice.className = "trail-notice";
+		notice.textContent = "Showing the " + shown + " most recent entries. The trail holds more "
+			+ "than this, so the table exports are off. Use Export signed for the whole chain.";
+		table.parentNode.insertBefore(notice, table);
+	}
+	for (const btn of document.querySelectorAll("button.table-export")) {
+		btn.disabled = true;
+		btn.dataset.tip = "Off: this table shows only the newest " + shown
+			+ " entries, so the export would leave the rest out. Use Export signed.";
+	}
+}
+
 async function loadAudit() {
 	try {
-		const data = await getJSON("/audit?limit=500");
+		const data = await getJSON("/audit?limit=" + AUDIT_PAGE);
 		const entries = data.entries || [];
 		if (entries.length === 0) {
 			showEmpty("No audit entries yet. Every change is recorded here.");
@@ -135,6 +161,7 @@ async function loadAudit() {
 		setStatus("");
 		document.querySelector("table.runs").hidden = false;
 		showListControls();
+		if (data.has_more) markTrailTruncated(entries.length);
 	} catch (e) {
 		setStatus("Failed to load the audit trail: " + e.message);
 	}

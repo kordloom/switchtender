@@ -12,35 +12,52 @@ import (
 	"github.com/kordloom/switchtender/internal/audit"
 )
 
-// auditResponse wraps the audit trail.
+// defaultAuditPage is the page size when an audit read names no limit, and maxAuditPage is the
+// largest page one request may ask for. The cap bounds the work a single read can demand; the
+// has_more flag is what keeps the capped answer honest about being a page rather than the trail.
+const (
+	defaultAuditPage = 100
+	maxAuditPage     = 1000
+)
+
+// auditResponse wraps a page of the audit trail.
 type auditResponse struct {
-	// Entries is the trail, newest first.
+	// Entries is the page, newest first.
 	Entries []*audit.Entry `json:"entries"`
-	// Count is the number returned.
+	// Count is the number of entries on this page, which is not the size of the trail whenever
+	// HasMore is set.
 	Count int `json:"count"`
+	// HasMore reports whether the trail holds older entries beyond this page.
+	HasMore bool `json:"has_more"`
 }
 
-// auditHandler returns recent audit entries.
+// auditHandler returns a page of recent audit entries, newest first.
 func auditHandler(store audit.Store, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil {
 			respondError(w, log, http.StatusNotFound, "audit trail not enabled")
 			return
 		}
-		limit := 100
+		limit := defaultAuditPage
 		if v := r.URL.Query().Get("limit"); v != "" {
 			if n, err := strconv.Atoi(v); err == nil && n > 0 {
-				limit = n
+				limit = min(n, maxAuditPage)
 			}
 		}
-		entries, err := store.List(r.Context(), limit)
+		// Read one entry past the page so a cut trail is reported as cut. A reader handed a
+		// truncated trail with a count equal to its length believes it saw every change there was.
+		entries, err := store.List(r.Context(), limit+1)
 		if err != nil {
 			log.Error("server: list audit entries: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not read the audit trail")
 			return
 		}
+		hasMore := len(entries) > limit
+		if hasMore {
+			entries = entries[:limit]
+		}
 		respondJSON(w, log, http.StatusOK,
-			auditResponse{Entries: entries, Count: len(entries)}, wantsPretty(r))
+			auditResponse{Entries: entries, Count: len(entries), HasMore: hasMore}, wantsPretty(r))
 	}
 }
 

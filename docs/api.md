@@ -106,7 +106,7 @@ webhook `/hooks` path, and the `/relay` worker path, is unversioned. The root re
 | PUT    | `/v1/policies/{id}`        | Update an approval policy.                              |
 | DELETE | `/v1/policies/{id}`        | Delete an approval policy.                              |
 | POST   | `/v1/import/{format}`      | Import an AWX, Semaphore, or Rundeck export. Format is awx, semaphore, or rundeck. Rundeck takes `?inventory=` to say which hosts its jobs target.|
-| GET    | `/v1/audit`                | The mutation trail, admin only.                         |
+| GET    | `/v1/audit`                | A page of the mutation trail, admin only. `?limit=` up to 1000, default 100; `has_more` reports whether older entries remain. |
 | GET    | `/v1/audit/verify`         | Verify the audit hash chain is intact.                  |
 | GET    | `/v1/audit/bundle`         | The audit chain as a signed LoomSeal bundle, verifiable offline or on the /verify page. |
 | GET    | `/metrics`              | Prometheus series: run, fleet, queue-depth, and worker gauges, plus a run-duration histogram. |

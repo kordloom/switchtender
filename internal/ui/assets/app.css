@@ -140,6 +140,9 @@ body[data-readonly] [data-mutates]::after { display: none; }
 .empty-state svg { opacity: 0.45; }
 .empty-state p { margin: 0; font-size: 14px; }
 
+/* Truncated trail notice, shown above a table holding one page of a longer record */
+.trail-notice { margin: 0 0 12px; padding: 10px 14px; border: 1px solid color-mix(in srgb, var(--changed) 45%, var(--border)); border-radius: 8px; background: color-mix(in srgb, var(--changed) 12%, transparent); color: color-mix(in srgb, var(--changed) 75%, var(--text)); font-size: 14px; }
+
 html { -webkit-text-size-adjust: 100%; }
 
 body {
