@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -224,5 +226,46 @@ func TestContainerRunRejectsUnpinnedImage(t *testing.T) {
 	}
 	if res.ExitCode != -1 {
 		t.Errorf("ExitCode = %d, want -1", res.ExitCode)
+	}
+}
+
+// TestRegistryLoginIsScopedToTheRun proves a private-image credential does not outlive the run that
+// used it, and does not authenticate a later run of a different project.
+//
+// The runtime writes a login into its config directory, and that directory used to be the executor's
+// own. One project's credential therefore stayed on disk after its run and served every later pull,
+// so a project with no credential could pull from a registry it was never granted. The login now
+// lands in a per-run directory that is removed with the run.
+func TestRegistryLoginIsScopedToTheRun(t *testing.T) {
+	t.Parallel()
+	dir, cleanup, err := newRuntimeConfigDir()
+	if err != nil {
+		t.Fatalf("newRuntimeConfigDir() error = %v", err)
+	}
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatalf("Stat() error = %v", err)
+	}
+	// Another user on the executor must not read a credential out of it.
+	if perm := info.Mode().Perm(); perm != 0o700 {
+		t.Errorf("config dir mode = %v, want 0700", perm)
+	}
+	// A second run gets its own directory, so one run's login cannot serve another.
+	other, cleanupOther, err := newRuntimeConfigDir()
+	if err != nil {
+		t.Fatalf("second newRuntimeConfigDir() error = %v", err)
+	}
+	if other == dir {
+		t.Error("two runs share a registry config directory, so one run's login serves the other")
+	}
+	cleanupOther()
+
+	// Writing a credential there and cleaning up removes it from disk.
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{"auths":{}}`), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	cleanup()
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Errorf("the registry config survived the run, err = %v", err)
 	}
 }

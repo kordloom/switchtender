@@ -392,6 +392,15 @@ func (s *relayServer) heldForReport(w http.ResponseWriter, r *http.Request) bool
 		writeErr(w, http.StatusConflict, "run is not claimed, so there is nothing to report on")
 		return false
 	}
+	// A split or pipeline parent is coordinated by the control node and executed by nobody, so no
+	// worker has output to add to it. Its captured log and events are the rollup of its children, and
+	// letting a worker append to it would write output into the record of work it did not do. This is
+	// the same boundary the report check draws, applied to the writers that carry the evidence.
+	if stored.Kind != "" {
+		writeErr(w, http.StatusConflict,
+			"run is coordinated by the control node and is not a worker's to add to")
+		return false
+	}
 	return true
 }
 

@@ -74,8 +74,23 @@ func (c *containerRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Re
 	}
 	defer cleanup()
 
+	// A registry login is scoped to this run.
+	//
+	// The runtime writes the credential into its config directory, and that directory was the
+	// executor's own, shared by every run on the machine. One project's private-image credential
+	// therefore stayed on disk after its run and authenticated every later pull, so a project with no
+	// credential of its own could pull from a registry it was never given access to. A per-run
+	// directory means the credential exists for the length of the run and is removed with it.
+	runEnv := c.baseEnv
 	if spec.RegistryUsername != "" {
-		if err := c.login(ctx, spec, out); err != nil {
+		configDir, cleanupConfig, err := newRuntimeConfigDir()
+		if err != nil {
+			return Result{ExitCode: -1}, fmt.Errorf("%w: %w", ErrLaunch, err)
+		}
+		defer cleanupConfig()
+		runEnv = append(append([]string(nil), c.baseEnv...), "DOCKER_CONFIG="+configDir,
+			"REGISTRY_AUTH_FILE="+filepath.Join(configDir, "config.json"))
+		if err := c.login(ctx, spec, runEnv, out); err != nil {
 			return Result{ExitCode: -1}, fmt.Errorf("%w: registry login: %w", ErrLaunch, err)
 		}
 	}
@@ -95,7 +110,8 @@ func (c *containerRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Re
 	cmd := exec.CommandContext(ctx, c.runtime, args...)
 	cmd.Stdout = out
 	cmd.Stderr = out
-	cmd.Env = c.baseEnv
+	// The same config the login wrote to, so the pull this command performs can see it.
+	cmd.Env = runEnv
 
 	// A canceled run must stop the container itself: killing the client leaves the container running
 	// under the daemon, so remove it by name. A cancel during a slow image pull can land before the
@@ -218,7 +234,7 @@ func (c *containerRunner) writeEnvFile(spec Spec, extraEnv []string) (string, fu
 
 // login authenticates to the image's registry so a private execution environment can be pulled. The
 // password is fed on stdin, never as an argument.
-func (c *containerRunner) login(ctx context.Context, spec Spec, out io.Writer) error {
+func (c *containerRunner) login(ctx context.Context, spec Spec, env []string, out io.Writer) error {
 	args := []string{"login"}
 	if host := registryHost(spec.Image); host != "" {
 		args = append(args, host)
@@ -228,8 +244,23 @@ func (c *containerRunner) login(ctx context.Context, spec Spec, out io.Writer) e
 	cmd.Stdin = strings.NewReader(spec.RegistryPassword)
 	cmd.Stdout = out
 	cmd.Stderr = out
-	cmd.Env = c.baseEnv
+	cmd.Env = env
 	return cmd.Run()
+}
+
+// newRuntimeConfigDir makes a private config directory for one run's registry login and returns it
+// with a cleanup that removes it. Both the Docker and Podman variable names point at it, so the
+// login lands there whichever runtime is configured.
+func newRuntimeConfigDir() (string, func(), error) {
+	dir, err := os.MkdirTemp("", "switchtender-registry-*")
+	if err != nil {
+		return "", func() {}, fmt.Errorf("create registry config dir: %w", err)
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		_ = os.RemoveAll(dir)
+		return "", func() {}, fmt.Errorf("secure registry config dir: %w", err)
+	}
+	return dir, func() { _ = os.RemoveAll(dir) }, nil
 }
 
 // mountSet collects unique host paths to bind mount into the container at the same path.

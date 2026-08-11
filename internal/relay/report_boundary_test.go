@@ -187,5 +187,19 @@ func TestWorkerCannotReportOnACoordinatorParent(t *testing.T) {
 		if got.Status != run.StatusRunning {
 			t.Errorf("%s parent status = %q, want it untouched as running", kind, got.Status)
 		}
+
+		// The record writers draw the same boundary. A parent's captured output is the rollup of its
+		// children, so a worker appending to it would write output into the record of work it did not
+		// do, and that record is the evidence this product sells.
+		for _, path := range []string{"/log", "/events", "/hosts", "/tasks"} {
+			code := postAsWorker(t, ts.URL, "/relay/v1/runs/"+parent.ID+path, []byte(`[]`))
+			if code < 400 {
+				t.Errorf("a worker wrote to a %s parent's %s: HTTP %d", kind, path, code)
+			}
+		}
+		gotLog, err := backing.Log(ctx, parent.ID)
+		if err == nil && len(gotLog) != 0 {
+			t.Errorf("a worker's output reached the %s parent's log: %q", kind, gotLog)
+		}
 	}
 }
