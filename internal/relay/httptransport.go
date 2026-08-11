@@ -56,10 +56,16 @@ type httpTransport struct {
 	token string
 	// client issues the HTTP requests.
 	client *http.Client
-	// mu guards batches.
+	// mu guards batches and leases.
 	mu sync.Mutex
 	// batches holds each running run's buffered output, keyed by run id.
 	batches map[string]*logBatch
+	// leases holds the per-claim capability the control node minted for each run this worker holds,
+	// keyed by run id. The claim response carries it once, and every report, record write, and
+	// heartbeat this worker makes for that run presents it back. An entry is dropped when the run's
+	// batch is, which is the last point anything could still be reported for the run. It is kept only
+	// in memory and never written anywhere the run is serialized, matching the json:"-" on the field.
+	leases map[string]string
 }
 
 // logBatch accumulates one run's output between posts. A tool writes output in small chunks, so
@@ -102,20 +108,42 @@ func NewHTTPTransport(baseURL, token string, client *http.Client) Transport {
 		token:   token,
 		client:  client,
 		batches: make(map[string]*logBatch),
+		leases:  make(map[string]string),
 	}
+}
+
+// leaseFor returns the per-claim capability held for a run, or the empty string when none is held,
+// which is the case for a run claimed from a control node that predates the capability.
+func (t *httpTransport) leaseFor(id string) string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.leases[id]
 }
 
 // Claim leases the oldest pending run the owner's queues serve, mapping 204 to ErrNonePending.
 func (t *httpTransport) Claim(ctx context.Context, owner string, queues []string) (*run.Run, error) {
 	resp, err := t.sendJSON(ctx, http.MethodPost, "/relay/v1/claim",
-		claimRequest{Owner: owner, Queues: queues})
+		claimRequest{Owner: owner, Queues: queues}, "")
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	switch resp.StatusCode {
 	case http.StatusOK:
-		return decodeRun(resp.Body)
+		leased, derr := decodeRun(resp.Body)
+		if derr != nil {
+			return nil, derr
+		}
+		// The capability rode in on a header, not the body: the field is json:"-", so decodeRun never
+		// saw it. It is kept in memory, keyed by run, and presented on every report made for this run.
+		// A control node that predates the capability sends no header, and the run is reported the
+		// older way.
+		if lease := resp.Header.Get(leaseHeader); lease != "" {
+			t.mu.Lock()
+			t.leases[leased.ID] = lease
+			t.mu.Unlock()
+		}
+		return leased, nil
 	case http.StatusNoContent:
 		return nil, run.ErrNonePending
 	default:
@@ -126,7 +154,7 @@ func (t *httpTransport) Claim(ctx context.Context, owner string, queues []string
 // Heartbeat renews the owner's lease on a run, mapping 404 to ErrNotFound.
 func (t *httpTransport) Heartbeat(ctx context.Context, id, owner string) error {
 	resp, err := t.sendJSON(ctx, http.MethodPost, "/relay/v1/heartbeat",
-		heartbeatRequest{ID: id, Owner: owner})
+		heartbeatRequest{ID: id, Owner: owner}, t.leaseFor(id))
 	if err != nil {
 		return err
 	}
@@ -136,7 +164,7 @@ func (t *httpTransport) Heartbeat(ctx context.Context, id, owner string) error {
 
 // Policies reads the approval policies in force on the control node.
 func (t *httpTransport) Policies(ctx context.Context) ([]*policy.Policy, error) {
-	resp, err := t.do(ctx, http.MethodGet, "/relay/v1/policies", "", nil)
+	resp, err := t.do(ctx, http.MethodGet, "/relay/v1/policies", "", nil, "")
 	if err != nil {
 		return nil, err
 	}
@@ -153,7 +181,7 @@ func (t *httpTransport) Policies(ctx context.Context) ([]*policy.Policy, error) 
 
 // Get returns the run with the given id, mapping 404 to ErrNotFound.
 func (t *httpTransport) Get(ctx context.Context, id string) (*run.Run, error) {
-	resp, err := t.do(ctx, http.MethodGet, runPath(id, ""), "", nil)
+	resp, err := t.do(ctx, http.MethodGet, runPath(id, ""), "", nil, "")
 	if err != nil {
 		return nil, err
 	}
@@ -194,13 +222,26 @@ func (t *httpTransport) Save(ctx context.Context, r *run.Run) error {
 		}
 		t.mu.Unlock()
 	}
-	resp, err := t.sendJSON(ctx, http.MethodPost, runPath(r.ID, "/save"), r)
+	resp, err := t.sendJSON(ctx, http.MethodPost, runPath(r.ID, "/save"), r, t.leaseFor(r.ID))
 	if err != nil {
 		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if err := expectNoContent("save", resp); err != nil {
 		return err
+	}
+	// The terminal save landed and is the last report a run makes for its own execution: summaries
+	// and events are written while it is still running, before this. If nothing is still buffered,
+	// the capability has no more reports to authorize and is dropped here, which also covers a run
+	// that produced no output and so never had a batch to drop it with. A batch still retrying its
+	// tail keeps the lease, and postFailed or postSucceeded drops it when that tail is delivered or
+	// abandoned. The drop waits until the save succeeds so a retry after a failed save still holds it.
+	if r.Status.Terminal() {
+		t.mu.Lock()
+		if _, ok := t.batches[r.ID]; !ok {
+			delete(t.leases, r.ID)
+		}
+		t.mu.Unlock()
 	}
 	return flushErr
 }
@@ -306,6 +347,9 @@ func (t *httpTransport) postFailed(id string) {
 			b.timer = nil
 		}
 		delete(t.batches, id)
+		// The tail is abandoned, so nothing more will be reported for this run and the capability it
+		// would have been reported under is dropped with the batch.
+		delete(t.leases, id)
 		return
 	}
 	wait := logRetryBase << min(b.fails-1, logRetryShift)
@@ -336,6 +380,9 @@ func (t *httpTransport) postSucceeded(id string) {
 			b.timer = nil
 		}
 		delete(t.batches, id)
+		// The last of the run's output has landed, so no further report will be made for it and the
+		// capability is dropped with the batch.
+		delete(t.leases, id)
 	}
 }
 
@@ -358,7 +405,7 @@ func (t *httpTransport) requeue(id string, out []byte) {
 // postLog sends one batch of output to the control node, mapping 404 to ErrNotFound.
 func (t *httpTransport) postLog(ctx context.Context, id string, p []byte) error {
 	resp, err := t.do(ctx, http.MethodPost, runPath(id, "/log"),
-		"application/octet-stream", bytes.NewReader(p))
+		"application/octet-stream", bytes.NewReader(p), t.leaseFor(id))
 	if err != nil {
 		return err
 	}
@@ -368,7 +415,7 @@ func (t *httpTransport) postLog(ctx context.Context, id string, p []byte) error 
 
 // AppendEvents streams structured events to the control node, mapping 404 to ErrNotFound.
 func (t *httpTransport) AppendEvents(ctx context.Context, id string, events []event.Event) error {
-	resp, err := t.sendJSON(ctx, http.MethodPost, runPath(id, "/events"), events)
+	resp, err := t.sendJSON(ctx, http.MethodPost, runPath(id, "/events"), events, t.leaseFor(id))
 	if err != nil {
 		return err
 	}
@@ -378,7 +425,7 @@ func (t *httpTransport) AppendEvents(ctx context.Context, id string, events []ev
 
 // SaveHostSummary records a run's per-host outcomes on the control node.
 func (t *httpTransport) SaveHostSummary(ctx context.Context, runID string, summaries []run.HostSummary) error {
-	resp, err := t.sendJSON(ctx, http.MethodPost, runPath(runID, "/host-summary"), summaries)
+	resp, err := t.sendJSON(ctx, http.MethodPost, runPath(runID, "/host-summary"), summaries, t.leaseFor(runID))
 	if err != nil {
 		return err
 	}
@@ -388,7 +435,7 @@ func (t *httpTransport) SaveHostSummary(ctx context.Context, runID string, summa
 
 // SaveTaskSummary records a run's per-task durations on the control node.
 func (t *httpTransport) SaveTaskSummary(ctx context.Context, runID string, summaries []run.TaskSummary) error {
-	resp, err := t.sendJSON(ctx, http.MethodPost, runPath(runID, "/task-summary"), summaries)
+	resp, err := t.sendJSON(ctx, http.MethodPost, runPath(runID, "/task-summary"), summaries, t.leaseFor(runID))
 	if err != nil {
 		return err
 	}
@@ -396,23 +443,28 @@ func (t *httpTransport) SaveTaskSummary(ctx context.Context, runID string, summa
 	return expectNoContent("save task summary", resp)
 }
 
-// sendJSON issues an authenticated request whose body is v encoded as JSON.
-func (t *httpTransport) sendJSON(ctx context.Context, method, path string, v any) (*http.Response, error) {
+// sendJSON issues an authenticated request whose body is v encoded as JSON. A non-empty lease is
+// presented as the per-claim capability for the run the request concerns.
+func (t *httpTransport) sendJSON(ctx context.Context, method, path string, v any, lease string) (*http.Response, error) {
 	buf, err := json.Marshal(v)
 	if err != nil {
 		return nil, fmt.Errorf("encode request: %w", err)
 	}
-	return t.do(ctx, method, path, "application/json", bytes.NewReader(buf))
+	return t.do(ctx, method, path, "application/json", bytes.NewReader(buf), lease)
 }
 
 // do issues an authenticated request with an optional body and returns the response for the caller
-// to interpret. It is the one place the worker token is attached to the wire.
-func (t *httpTransport) do(ctx context.Context, method, path, contentType string, body io.Reader) (*http.Response, error) {
+// to interpret. It is the one place the worker token, and the per-claim capability when one is given,
+// are attached to the wire.
+func (t *httpTransport) do(ctx context.Context, method, path, contentType string, body io.Reader, lease string) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, method, t.baseURL+path, body)
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+t.token)
+	if lease != "" {
+		req.Header.Set(leaseHeader, lease)
+	}
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}

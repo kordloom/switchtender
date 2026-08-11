@@ -2,6 +2,7 @@ package relay
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,6 +19,12 @@ import (
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/run"
 )
+
+// leaseHeader carries the per-claim capability. The claim response sets it once, and every report,
+// record write, and heartbeat a worker makes for that run presents it back. It is a header rather
+// than a body field because the field is json:"-": the secret must never land in a body a worker can
+// log, cache, or forward, and a header is read once into memory instead.
+const leaseHeader = "X-Switchtender-Lease"
 
 // claimRequest is the body of a relay claim: the owner leasing work and the queues it serves.
 type claimRequest struct {
@@ -165,6 +172,11 @@ func (s *relayServer) claim(w http.ResponseWriter, r *http.Request) {
 		// A worker took a run onto a machine the control node cannot reach. That is the moment the
 		// work left this side of the boundary, so it is the moment worth recording.
 		s.record(r.Context(), "worker:"+body.Owner, "/relay/claim/"+leased.ID)
+		// The capability travels in a header, not the body. The field is json:"-", so it is not in
+		// the body a worker can log, cache, or forward, and this claim response is the one place it
+		// crosses the wire. The transport reads it once and keeps it only in memory, presenting it on
+		// the reports it makes for this run.
+		w.Header().Set(leaseHeader, leased.ClaimSecret)
 		s.writeJSON(w, leased)
 	}
 }
@@ -176,17 +188,26 @@ func (s *relayServer) heartbeat(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid heartbeat body")
 		return
 	}
-	// Renewing a lease keeps a run alive, so it answers the same question every other call does.
+	// Renewing a lease keeps a run alive, so it answers the same question every other call does: is
+	// this the run's holder, and is this a run this pool serves. The stored run is fetched for both,
+	// and the not-found answer is reused for a mismatch so a caller learns nothing about a run it
+	// does not hold.
+	stored, gerr := s.store.Get(r.Context(), body.ID)
+	if gerr != nil {
+		writeErr(w, http.StatusNotFound, "run not found")
+		return
+	}
 	if pool := poolFrom(r.Context()); pool != nil {
-		stored, gerr := s.store.Get(r.Context(), body.ID)
-		if gerr != nil {
-			writeErr(w, http.StatusNotFound, "run not found")
-			return
-		}
 		if _, ok := pool.allows([]string{stored.Queue}); !ok {
 			writeErr(w, http.StatusNotFound, "run not found")
 			return
 		}
+	}
+	// The capability minted at claim renews the lease, the same proof the reports carry. A run
+	// claimed before it existed has no secret and falls back to the owner match the store applies.
+	if !leaseHeld(stored, r) {
+		writeErr(w, http.StatusNotFound, "run not found")
+		return
 	}
 	err := s.store.Heartbeat(r.Context(), body.ID, body.Owner)
 	switch {
@@ -267,7 +288,15 @@ func (s *relayServer) save(w http.ResponseWriter, r *http.Request) {
 	if stored == nil {
 		return
 	}
-	if err := checkWorkerReport(stored, &body); err != nil {
+	// The capability minted at claim is the proof this report comes from the run's holder. Every
+	// worker presents the same shared token, so the lease name a report carries is asserted, not
+	// proven, and a worker that reads another run's id could otherwise forge a terminal report for
+	// it. A run claimed before the capability existed carries no secret and is checked the older way.
+	if !leaseHeld(stored, r) {
+		writeErr(w, http.StatusForbidden, "the run's lease was not presented or did not match")
+		return
+	}
+	if err := checkWorkerReport(stored, &body, stored.ClaimSecret != ""); err != nil {
 		writeErr(w, http.StatusConflict, err.Error())
 		return
 	}
@@ -303,7 +332,27 @@ var workerStatuses = map[run.Status]bool{
 // reported on at all. Without that, a token holder could mark a queued run succeeded so its
 // playbook never ran, cancel a run another worker was executing, or report on a run nobody had
 // claimed and take it out of band, bypassing the queue that decides order.
-func checkWorkerReport(stored, reported *run.Run) error {
+// leaseHeld reports whether the request carries the capability minted for this run's current claim.
+// A run claimed before the capability existed carries no stored secret, so it is accepted here and
+// the caller falls back to the older lease-name check; this is what keeps runs already in flight at
+// upgrade time from stranding. A run that has a secret must present the matching one, compared in
+// constant time so a wrong guess reveals nothing through how long the comparison took.
+func leaseHeld(stored *run.Run, r *http.Request) bool {
+	if stored.ClaimSecret == "" {
+		return true
+	}
+	presented := r.Header.Get(leaseHeader)
+	if presented == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(presented), []byte(stored.ClaimSecret)) == 1
+}
+
+// checkWorkerReport rejects a report a worker has no business making. leaseVerified is true when the
+// run carried a per-claim secret and the request presented the matching one, which already proves
+// the report comes from the holder; the older lease-name comparison then adds nothing and is skipped.
+// It stays in force for a run claimed before the capability existed, whose secret is empty.
+func checkWorkerReport(stored, reported *run.Run, leaseVerified bool) error {
 	if !workerStatuses[reported.Status] {
 		return fmt.Errorf("a worker may not set status %q", reported.Status)
 	}
@@ -327,12 +376,14 @@ func checkWorkerReport(stored, reported *run.Run) error {
 	if stored.Status == run.StatusPendingApproval || stored.Status == run.StatusRejected {
 		return fmt.Errorf("run is awaiting a decision and is not a worker's to report on")
 	}
-	// A report has to come from the holder. The lease is the only identity available here, since
-	// every worker presents the same token.
-	// Compared even when the field is absent. Treating an empty value as "no claim to check" meant
-	// a worker omitting claimed_by skipped the holder test entirely and could report on, and
-	// terminate, a run held by somebody else.
-	if reported.ClaimedBy != stored.ClaimedBy {
+	// A report has to come from the holder. When the run carries a per-claim secret, presenting it
+	// is that proof and the caller has already checked it, so the lease name need not be sent. For a
+	// run claimed before the capability existed there is no secret, and the lease name is the only
+	// identity available since every worker presents the same token. It is compared even when the
+	// field is absent: treating an empty value as "no claim to check" let a worker omitting
+	// claimed_by skip the holder test entirely and report on, and terminate, a run held by somebody
+	// else.
+	if !leaseVerified && reported.ClaimedBy != stored.ClaimedBy {
 		return fmt.Errorf("run is held by another executor")
 	}
 	return nil
@@ -374,6 +425,14 @@ func applyWorkerReport(stored, reported *run.Run) {
 func (s *relayServer) heldForReport(w http.ResponseWriter, r *http.Request) bool {
 	stored := s.servesRun(w, r)
 	if stored == nil {
+		return false
+	}
+	// The same capability that gates a status report gates the writes that build the record. A
+	// worker's captured log and events are what an approver reads while deciding, so they are exactly
+	// the thing worth forging, and one shared token is not proof of who is writing. A run claimed
+	// before the capability existed carries no secret and is left to the holder checks below.
+	if !leaseHeld(stored, r) {
+		writeErr(w, http.StatusForbidden, "the run's lease was not presented or did not match")
 		return false
 	}
 	// A finished run is not an error, it is a no-op. The store already drops these writes silently,

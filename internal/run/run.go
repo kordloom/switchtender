@@ -3,6 +3,8 @@
 package run
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"maps"
 	"sort"
@@ -195,6 +197,14 @@ type Run struct {
 	ClaimedBy string `json:"claimed_by,omitempty"`
 	// ClaimedAt is when the lease was taken or last renewed.
 	ClaimedAt *time.Time `json:"claimed_at,omitempty"`
+	// ClaimSecret is the per-claim capability minted when a worker leases the run. It authorizes the
+	// reports that worker makes back over the relay, where every worker presents the same shared
+	// token and the lease name alone is not proof. The json:"-" tag is load-bearing: it keeps the
+	// secret out of the relay's own run reads, every bundle, every SIEM forward, and every evidence
+	// document, so a worker cannot read it back the way it can read the lease name. A fresh claim
+	// mints a new one and a reclaim clears it, so a report minted against a stale claim no longer
+	// verifies. It is not derived from anything a worker supplies.
+	ClaimSecret string `json:"-"`
 	// CancelRequested asks whichever process holds the run to stop it.
 	CancelRequested bool `json:"cancel_requested,omitempty"`
 	// CredentialIDs names the stored credentials materialized for this run.
@@ -682,4 +692,17 @@ func ApplyOptions(r *Run, opts []SubmitOption) {
 // NewID returns a random run identifier prefixed with "run_".
 func NewID() string {
 	return idgen.New("run_", 8)
+}
+
+// NewClaimSecret returns a fresh 256-bit capability for a claim, hex encoded. It is minted by the
+// control node when a worker leases a run and never derived from anything the worker supplies, so a
+// worker cannot predict or reconstruct another claim's secret.
+func NewClaimSecret() string {
+	var b [32]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// The system random source failing is not a condition to paper over with a weak secret: a
+		// predictable capability is worse than none, so this is a programming-time fault.
+		panic("run: read claim secret: " + err.Error())
+	}
+	return hex.EncodeToString(b[:])
 }

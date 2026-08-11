@@ -566,6 +566,10 @@ func (m *memStore) Claim(_ context.Context, owner string, queues []string) (*Run
 	now := time.Now()
 	oldest.ClaimedBy = owner
 	oldest.ClaimedAt = &now
+	// Mint a fresh capability for this claim. The worker receives it once, over the relay, and
+	// presents it on every report it makes. A later reclaim replaces it, so a report a worker
+	// minted against a claim it has since lost no longer verifies.
+	oldest.ClaimSecret = NewClaimSecret()
 	return oldest.Clone(), nil
 }
 
@@ -611,12 +615,14 @@ func (m *memStore) ReclaimStale(_ context.Context, ttl time.Duration) (int, erro
 		case StatusPending:
 			r.ClaimedBy = ""
 			r.ClaimedAt = nil
+			r.ClaimSecret = ""
 			changed++
 		case StatusRunning:
 			now := time.Now()
 			r.Status = StatusInterrupted
 			r.ClaimedBy = ""
 			r.ClaimedAt = nil
+			r.ClaimSecret = ""
 			r.EndedAt = &now
 			if r.Error == "" {
 				r.Error = "interrupted: executor lease expired"
@@ -652,6 +658,7 @@ func (m *memStore) resolveOrphans() int {
 			r.Status = StatusCanceled
 			r.ClaimedBy = ""
 			r.ClaimedAt = nil
+			r.ClaimSecret = ""
 			r.EndedAt = &now
 			if r.Error == "" {
 				r.Error = orphanError

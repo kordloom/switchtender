@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS runs (
 	outputs       TEXT NOT NULL DEFAULT '',
 	claimed_by    TEXT NOT NULL DEFAULT '',
 	claimed_at    TEXT,
+	claim_secret  TEXT NOT NULL DEFAULT '',
 	cancel_requested INTEGER NOT NULL DEFAULT 0,
 	credential_ids TEXT NOT NULL DEFAULT '',
 	project_id    TEXT NOT NULL DEFAULT '',
@@ -589,7 +590,7 @@ func migrateRuns(db *sql.DB) error {
 		!strings.Contains(err.Error(), "duplicate column name") {
 		return fmt.Errorf("add notifications column: %w", err)
 	}
-	for _, column := range []string{"source", "source_id", "actor", "rerun_of", "labels", "steps", "warning", "audit_receipt", "held_by_policy", "tags", "skip_tags"} {
+	for _, column := range []string{"source", "source_id", "actor", "rerun_of", "labels", "steps", "warning", "audit_receipt", "held_by_policy", "tags", "skip_tags", "claim_secret"} {
 		if _, err := db.Exec(
 			"ALTER TABLE runs ADD COLUMN " + column + " TEXT NOT NULL DEFAULT ''"); err != nil &&
 			!strings.Contains(err.Error(), "duplicate column name") {
@@ -903,7 +904,7 @@ const runColumns = `id, playbook, inventory, status, exit_code, error, created_a
 	credential_ids, project_id, commit_sha, inventory_id, queue, tool, command, dry_run,
 	proposed_from, intent, image, pull_credential_id, idempotency_key, timeout, notifications,
 	source, source_id, actor, rerun_of, labels, warning, audit_receipt, held_by_policy,
-	tags, skip_tags, verbosity, forks, diff_mode`
+	tags, skip_tags, verbosity, forks, diff_mode, claim_secret`
 
 // Save inserts or replaces the run identified by r.ID. The cancel flag merges with MAX so a
 // replace from a stale snapshot cannot erase a cancel another process just requested.
@@ -916,8 +917,8 @@ INSERT INTO runs
 	 project_id, commit_sha, inventory_id, queue, tool, command, dry_run, proposed_from, intent,
 	 image, pull_credential_id, idempotency_key, timeout, notifications,
 	 source, source_id, actor, rerun_of, labels, warning, audit_receipt, held_by_policy,
-	 tags, skip_tags, verbosity, forks, diff_mode)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	 tags, skip_tags, verbosity, forks, diff_mode, claim_secret)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
 	playbook=excluded.playbook, inventory=excluded.inventory, status=excluded.status,
 	exit_code=excluded.exit_code, error=excluded.error, created_at=excluded.created_at,
@@ -939,7 +940,8 @@ ON CONFLICT(id) DO UPDATE SET
 	actor=excluded.actor, rerun_of=excluded.rerun_of, labels=excluded.labels,
 	warning=excluded.warning, audit_receipt=excluded.audit_receipt,
 	held_by_policy=excluded.held_by_policy, tags=excluded.tags, skip_tags=excluded.skip_tags,
-	verbosity=excluded.verbosity, forks=excluded.forks, diff_mode=excluded.diff_mode`
+	verbosity=excluded.verbosity, forks=excluded.forks, diff_mode=excluded.diff_mode,
+	claim_secret=excluded.claim_secret`
 	_, err := s.db.ExecContext(ctx, q,
 		r.ID, r.Playbook, r.Inventory, string(r.Status), sqlutil.NullInt(r.ExitCode), r.Error,
 		sqlutil.FormatTime(r.CreatedAt), sqlutil.NullTime(r.StartedAt), sqlutil.NullTime(r.EndedAt),
@@ -951,7 +953,7 @@ ON CONFLICT(id) DO UPDATE SET
 		r.Image, r.PullCredentialID, r.IdempotencyKey, r.Timeout, marshalNotifications(r.Notifications),
 		r.Source, r.SourceID, r.Actor, r.RerunOf, marshalLabels(r.Labels), r.Warning, r.AuditReceipt,
 		r.HeldByPolicy, sqlutil.JoinIDs(r.Tags), sqlutil.JoinIDs(r.SkipTags), r.Verbosity, r.Forks,
-		sqlutil.BoolToInt(r.DiffMode),
+		sqlutil.BoolToInt(r.DiffMode), r.ClaimSecret,
 	)
 	if err != nil {
 		if r.IdempotencyKey != "" && isKeyConflict(err) {
@@ -1940,7 +1942,8 @@ func scanRun(s scanner) (*run.Run, error) {
 		&r.InventoryID, &r.Queue, &r.Tool, &r.Command, &dryRun, &r.ProposedFrom, &r.Intent,
 		&r.Image, &r.PullCredentialID, &r.IdempotencyKey, &r.Timeout, &notifs,
 		&r.Source, &r.SourceID, &r.Actor, &r.RerunOf, &labels, &r.Warning, &r.AuditReceipt,
-		&r.HeldByPolicy, &tags, &skipTags, &r.Verbosity, &r.Forks, &diffMode); err != nil {
+		&r.HeldByPolicy, &tags, &skipTags, &r.Verbosity, &r.Forks, &diffMode,
+		&r.ClaimSecret); err != nil {
 		return nil, err
 	}
 	r.CancelRequested = cancelI != 0
@@ -2096,7 +2099,7 @@ func parseNotifications(s string) []run.NotifyTarget {
 func (s *store) Claim(ctx context.Context, owner string, queues []string) (*run.Run, error) {
 	placeholders, args := sqlutil.QueuePlaceholders(queues, "?", 0)
 	q := `
-UPDATE runs SET claimed_by=?, claimed_at=?
+UPDATE runs SET claimed_by=?, claimed_at=?, claim_secret=?
 WHERE id = (
 	SELECT id FROM runs
 	WHERE status='pending' AND claimed_by='' AND kind='' AND cancel_requested=0
@@ -2106,7 +2109,8 @@ WHERE id = (
 	ORDER BY created_at, id LIMIT 1
 )
 RETURNING ` + runColumns
-	full := append([]any{owner, sqlutil.FormatTime(time.Now())}, args...)
+	// The capability is minted here, when the claim is won, and returned to the worker in the run row.
+	full := append([]any{owner, sqlutil.FormatTime(time.Now()), run.NewClaimSecret()}, args...)
 	// The claim is a write that returns its row, so it must run on the write connection.
 	r, err := scanRun(s.db.writeQueryRowContext(ctx, q, full...))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -2161,7 +2165,7 @@ func (s *store) ReclaimStale(ctx context.Context, ttl time.Duration) (int, error
 	defer func() { _ = tx.Rollback() }()
 
 	res, err := tx.ExecContext(ctx, `
-UPDATE runs SET claimed_by='', claimed_at=NULL
+UPDATE runs SET claimed_by='', claimed_at=NULL, claim_secret=''
 WHERE status='pending' AND claimed_by!='' AND claimed_at < ?`, cut)
 	if err != nil {
 		return 0, fmt.Errorf("reclaim stale: %w", err)
@@ -2171,7 +2175,7 @@ WHERE status='pending' AND claimed_by!='' AND claimed_at < ?`, cut)
 		return 0, fmt.Errorf("reclaim stale: %w", err)
 	}
 	res, err = tx.ExecContext(ctx, `
-UPDATE runs SET status='interrupted', claimed_by='', claimed_at=NULL,
+UPDATE runs SET status='interrupted', claimed_by='', claimed_at=NULL, claim_secret='',
 ended_at=?, error='interrupted: executor lease expired'
 WHERE status='running' AND claimed_by!='' AND claimed_at < ?`, sqlutil.FormatTime(time.Now()), cut)
 	if err != nil {
@@ -2205,7 +2209,7 @@ WHERE status IN ('pending','running') AND claimed_by='' AND kind IN ('split','pi
 	// children up. A child no executor has started is canceled outright, since leaving it pending
 	// means it stays claimable and would run long after its parent gave up.
 	res, err = tx.ExecContext(ctx, `
-UPDATE runs SET status='canceled', claimed_by='', claimed_at=NULL, ended_at=?,
+UPDATE runs SET status='canceled', claimed_by='', claimed_at=NULL, claim_secret='', ended_at=?,
 error=CASE WHEN error='' THEN '`+run.OrphanError()+`' ELSE error END
 WHERE status IN ('pending','pending_approval') AND parent_id IS NOT NULL
 	AND parent_id IN (SELECT id FROM runs WHERE status='interrupted' AND kind IN ('split','pipeline'))`,

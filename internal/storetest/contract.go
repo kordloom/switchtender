@@ -49,6 +49,7 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Run("claim leases oldest", func(t *testing.T) { testClaim(t, newStore()) })
 	t.Run("claim respects queue", func(t *testing.T) { testClaimQueue(t, newStore()) })
 	t.Run("heartbeat and reclaim", func(t *testing.T) { testLeaseLifecycle(t, newStore()) })
+	t.Run("claim mints a per-claim secret", func(t *testing.T) { testClaimSecret(t, newStore()) })
 	t.Run("reclaim resolves orphaned children", func(t *testing.T) { testReclaimOrphans(t, newStore()) })
 	t.Run("transition and claim are one step", func(t *testing.T) { testTransitionStatusAndClaim(t, newStore()) })
 	t.Run("reclaim settles abandoned parents", func(t *testing.T) { testReclaimAbandonedParents(t, newStore()) })
@@ -1220,6 +1221,62 @@ func testLeaseLifecycle(t *testing.T, store run.Store) {
 	}
 	if err := store.Heartbeat(ctx, gone.ID, "worker-b"); !errors.Is(err, run.ErrNotFound) {
 		t.Errorf("Heartbeat() on interrupted run = %v, want ErrNotFound", err)
+	}
+}
+
+// testClaimSecret verifies a claim mints a fresh per-claim capability, that it is stored and read
+// back, that two claims never share one, and that a reclaim clears it so a report minted against the
+// lost claim no longer verifies against the run. This is the capability that authorizes a worker's
+// relay reports, so it must be present, unique, persisted, and revoked on reclaim.
+func testClaimSecret(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	if err := store.Save(ctx, &run.Run{
+		ID: "run_secret", Playbook: "p", Status: run.StatusPending, CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	first, err := store.Claim(ctx, "worker-a", []string{""})
+	if err != nil {
+		t.Fatalf("Claim() error = %v", err)
+	}
+	if first.ClaimSecret == "" {
+		t.Fatal("Claim() returned an empty claim secret, want a fresh capability")
+	}
+
+	// The secret is stored, not only returned, so the control node can verify a later report against
+	// it. Get reads the same column Save wrote.
+	stored, err := store.Get(ctx, "run_secret")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if stored.ClaimSecret != first.ClaimSecret {
+		t.Errorf("stored secret = %q, want the one the claim returned %q",
+			stored.ClaimSecret, first.ClaimSecret)
+	}
+
+	// A reclaim releases the run and, with it, the capability: the report a worker could still mint
+	// from the first claim no longer matches the run.
+	if _, err := store.ReclaimStale(ctx, 0); err != nil {
+		t.Fatalf("ReclaimStale() error = %v", err)
+	}
+	back, err := store.Get(ctx, "run_secret")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if back.ClaimSecret != "" {
+		t.Errorf("reclaimed run still carries a claim secret %q, want it cleared", back.ClaimSecret)
+	}
+
+	// The re-claim mints a new capability. It must not equal the first, or a stale report would
+	// still verify after the run changed hands.
+	second, err := store.Claim(ctx, "worker-b", []string{""})
+	if err != nil {
+		t.Fatalf("Claim() error = %v", err)
+	}
+	if second.ClaimSecret == "" || second.ClaimSecret == first.ClaimSecret {
+		t.Errorf("re-claim secret = %q, want a fresh value distinct from the first %q",
+			second.ClaimSecret, first.ClaimSecret)
 	}
 }
 

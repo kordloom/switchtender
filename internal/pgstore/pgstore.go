@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS runs (
 	outputs       TEXT NOT NULL DEFAULT '',
 	claimed_by    TEXT NOT NULL DEFAULT '',
 	claimed_at    TEXT,
+	claim_secret  TEXT NOT NULL DEFAULT '',
 	cancel_requested INTEGER NOT NULL DEFAULT 0,
 	credential_ids TEXT NOT NULL DEFAULT '',
 	project_id    TEXT NOT NULL DEFAULT '',
@@ -112,6 +113,7 @@ ALTER TABLE runs ADD COLUMN IF NOT EXISTS skip_tags TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS verbosity INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS forks INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS diff_mode INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS claim_secret TEXT NOT NULL DEFAULT '';
 CREATE UNIQUE INDEX IF NOT EXISTS idx_runs_idempotency_key ON runs(idempotency_key) WHERE idempotency_key <> '';
 CREATE TABLE IF NOT EXISTS run_logs (
 	seq    BIGSERIAL PRIMARY KEY,
@@ -626,7 +628,7 @@ const runColumns = `id, playbook, inventory, status, exit_code, error, created_a
 	credential_ids, project_id, commit_sha, inventory_id, queue, tool, command, dry_run,
 	proposed_from, intent, image, pull_credential_id, idempotency_key, timeout, notifications,
 	source, source_id, actor, rerun_of, labels, warning, audit_receipt, held_by_policy,
-	tags, skip_tags, verbosity, forks, diff_mode`
+	tags, skip_tags, verbosity, forks, diff_mode, claim_secret`
 
 // Save inserts or replaces the run identified by r.ID. The cancel flag merges with GREATEST so a
 // replace from a stale snapshot cannot erase a cancel another process just requested.
@@ -639,10 +641,10 @@ INSERT INTO runs
 	 project_id, commit_sha, inventory_id, queue, tool, command, dry_run, proposed_from, intent,
 	 image, pull_credential_id, idempotency_key, timeout, notifications,
 	 source, source_id, actor, rerun_of, labels, warning, audit_receipt, held_by_policy,
-	 tags, skip_tags, verbosity, forks, diff_mode)
+	 tags, skip_tags, verbosity, forks, diff_mode, claim_secret)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
 	$21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38,
-	$39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52)
+	$39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53)
 ON CONFLICT(id) DO UPDATE SET
 	playbook=excluded.playbook, inventory=excluded.inventory, status=excluded.status,
 	exit_code=excluded.exit_code, error=excluded.error, created_at=excluded.created_at,
@@ -664,7 +666,8 @@ ON CONFLICT(id) DO UPDATE SET
 	actor=excluded.actor, rerun_of=excluded.rerun_of, labels=excluded.labels,
 	warning=excluded.warning, audit_receipt=excluded.audit_receipt,
 	held_by_policy=excluded.held_by_policy, tags=excluded.tags, skip_tags=excluded.skip_tags,
-	verbosity=excluded.verbosity, forks=excluded.forks, diff_mode=excluded.diff_mode`
+	verbosity=excluded.verbosity, forks=excluded.forks, diff_mode=excluded.diff_mode,
+	claim_secret=excluded.claim_secret`
 	_, err := s.db.ExecContext(ctx, q,
 		r.ID, r.Playbook, r.Inventory, string(r.Status), sqlutil.NullInt(r.ExitCode), r.Error,
 		sqlutil.FormatTime(r.CreatedAt), sqlutil.NullTime(r.StartedAt), sqlutil.NullTime(r.EndedAt),
@@ -676,7 +679,7 @@ ON CONFLICT(id) DO UPDATE SET
 		r.Image, r.PullCredentialID, r.IdempotencyKey, r.Timeout, marshalNotifications(r.Notifications),
 		r.Source, r.SourceID, r.Actor, r.RerunOf, marshalLabels(r.Labels), r.Warning, r.AuditReceipt,
 		r.HeldByPolicy, sqlutil.JoinIDs(r.Tags), sqlutil.JoinIDs(r.SkipTags), r.Verbosity, r.Forks,
-		sqlutil.BoolToInt(r.DiffMode),
+		sqlutil.BoolToInt(r.DiffMode), r.ClaimSecret,
 	)
 	if err != nil {
 		if r.IdempotencyKey != "" && isKeyConflict(err) {
@@ -1663,7 +1666,8 @@ func scanRun(s scanner) (*run.Run, error) {
 		&r.InventoryID, &r.Queue, &r.Tool, &r.Command, &dryRun, &r.ProposedFrom, &r.Intent,
 		&r.Image, &r.PullCredentialID, &r.IdempotencyKey, &r.Timeout, &notifs,
 		&r.Source, &r.SourceID, &r.Actor, &r.RerunOf, &labels, &r.Warning, &r.AuditReceipt,
-		&r.HeldByPolicy, &tags, &skipTags, &r.Verbosity, &r.Forks, &diffMode); err != nil {
+		&r.HeldByPolicy, &tags, &skipTags, &r.Verbosity, &r.Forks, &diffMode,
+		&r.ClaimSecret); err != nil {
 		return nil, err
 	}
 	r.CancelRequested = cancelI != 0
@@ -1814,11 +1818,12 @@ func parseNotifications(s string) []run.NotifyTarget {
 // through the start fence, and pipeline steps are created only after it. A parent whose coordinator
 // dies before the fence leaves its children unclaimable, which the abandoned-parent sweep settles.
 func (s *store) Claim(ctx context.Context, owner string, queues []string) (*run.Run, error) {
-	placeholders, args := sqlutil.QueuePlaceholders(queues, "$", 2)
+	placeholders, args := sqlutil.QueuePlaceholders(queues, "$", 3)
 	// The lease is stamped from the database clock, not this worker's, so the janitor on another node
-	// ages it against the clock that wrote it.
+	// ages it against the clock that wrote it. The capability in $2 is minted here, when the claim is
+	// won, and returned to the worker in the run row.
 	q := `
-UPDATE runs SET claimed_by=$1, claimed_at=` + pgNowText + `
+UPDATE runs SET claimed_by=$1, claimed_at=` + pgNowText + `, claim_secret=$2
 WHERE id = (
 	SELECT id FROM runs
 	WHERE status='pending' AND claimed_by='' AND kind='' AND cancel_requested=0
@@ -1829,7 +1834,7 @@ WHERE id = (
 	FOR UPDATE SKIP LOCKED
 )
 RETURNING ` + runColumns
-	full := append([]any{owner}, args...)
+	full := append([]any{owner, run.NewClaimSecret()}, args...)
 	r, err := scanRun(s.db.QueryRowContext(ctx, q, full...))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, run.ErrNonePending
@@ -1883,7 +1888,7 @@ func (s *store) ReclaimStale(ctx context.Context, ttl time.Duration) (int, error
 	defer func() { _ = tx.Rollback() }()
 
 	res, err := tx.ExecContext(ctx, `
-UPDATE runs SET claimed_by='', claimed_at=NULL
+UPDATE runs SET claimed_by='', claimed_at=NULL, claim_secret=''
 WHERE status='pending' AND claimed_by!=''
   AND claimed_at::timestamptz < now() - make_interval(secs => $1)`, age)
 	if err != nil {
@@ -1894,7 +1899,7 @@ WHERE status='pending' AND claimed_by!=''
 		return 0, fmt.Errorf("reclaim stale: %w", err)
 	}
 	res, err = tx.ExecContext(ctx, `
-UPDATE runs SET status='interrupted', claimed_by='', claimed_at=NULL,
+UPDATE runs SET status='interrupted', claimed_by='', claimed_at=NULL, claim_secret='',
 ended_at=`+pgNowText+`, error='interrupted: executor lease expired'
 WHERE status='running' AND claimed_by!=''
   AND claimed_at::timestamptz < now() - make_interval(secs => $1)`, age)
@@ -1936,7 +1941,7 @@ WHERE status IN ('pending','running') AND claimed_by='' AND kind IN ('split','pi
 	// children up. A child no executor has started is canceled outright, since leaving it pending
 	// means it stays claimable and would run long after its parent gave up.
 	res, err = tx.ExecContext(ctx, `
-UPDATE runs SET status='canceled', claimed_by='', claimed_at=NULL, ended_at=`+pgNowText+`,
+UPDATE runs SET status='canceled', claimed_by='', claimed_at=NULL, claim_secret='', ended_at=`+pgNowText+`,
 error=CASE WHEN error='' THEN '`+run.OrphanError()+`' ELSE error END
 WHERE status IN ('pending','pending_approval') AND parent_id IS NOT NULL
   AND parent_id IN (SELECT id FROM runs WHERE status='interrupted' AND kind IN ('split','pipeline'))`)
