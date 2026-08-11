@@ -26,6 +26,9 @@ var tokenTTL time.Duration
 // tokenUser holds the value of the token new --user flag.
 var tokenUser string
 
+// tokenAgent holds the value of the token new --agent flag.
+var tokenAgent bool
+
 // tokenCmd groups API token management.
 var tokenCmd = &cobra.Command{
 	Use:   "token",
@@ -68,6 +71,10 @@ func init() {
 	tokenNewCmd.Flags().StringVar(&tokenName, "name", "", "Label for the token, for example ci.")
 	tokenNewCmd.Flags().DurationVar(&tokenTTL, "ttl", 0,
 		"Lifetime, for example 720h. Zero means the token never expires. A negative value is refused.")
+	tokenNewCmd.Flags().BoolVar(&tokenAgent, "agent", false,
+		"Mint the token for an AI agent. Its actions are recorded under the agent identity in the "+
+			"chain, and it is capped so it cannot manage identity, access, or secrets, or approve its "+
+			"own held runs. Requires --user so the human it acts for is recorded.")
 	tokenNewCmd.Flags().StringVar(&tokenUser, "user", "",
 		"Bind the token to this account by username. The token carries the account's role "+
 			"instead of acting as admin.")
@@ -113,11 +120,24 @@ func runTokenNew(cmd *cobra.Command, _ []string) error {
 	if err := recordCLI(cmd.Context(), bundle.Audits(), "/cli/token/new"); err != nil {
 		return err
 	}
+	// An agent token must name the human it acts for, or the chain records an action by an agent on
+	// behalf of nobody, which is exactly the accountability the agent identity exists to provide. An
+	// unbound token is also an admin token, and an admin agent is a contradiction.
+	if tokenAgent && tokenUser == "" {
+		return fmt.Errorf("an agent token must be bound to an account with --user, so the chain " +
+			"records who it acts for")
+	}
 	plain, tok, err := auth.New(tokenName)
 	if err != nil {
 		return fmt.Errorf("mint token: %w", err)
 	}
+	if tokenAgent {
+		tok.Kind = auth.KindAgent
+	}
 	out := map[string]string{"id": tok.ID, "name": tok.Name}
+	if tokenAgent {
+		out["kind"] = auth.KindAgent
+	}
 	if tokenUser != "" {
 		u, err := bundle.Users().FindByUsername(cmd.Context(), tokenUser)
 		if err != nil {

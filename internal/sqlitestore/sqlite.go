@@ -170,7 +170,8 @@ CREATE TABLE IF NOT EXISTS tokens (
 	user_id      TEXT NOT NULL DEFAULT '',
 	created_at   TEXT NOT NULL,
 	last_used_at TEXT,
-	expires_at   TEXT
+	expires_at   TEXT,
+	kind         TEXT NOT NULL DEFAULT ''
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_tokens_hash ON tokens(hash);
 CREATE TABLE IF NOT EXISTS projects (
@@ -502,6 +503,10 @@ func Open(path string) (*DB, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	if err := migrateTokens(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	if err := normalizeScheduleTimes(db); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -719,6 +724,17 @@ func migrateInventories(db *sql.DB) error {
 // migrateUsers adds the profile columns to a users table created before them. Every one defaults to
 // empty, so an account made before this migration keeps working with no profile at all. Adding a
 // column that already exists is the ordinary case for a current database and is treated as success.
+// migrateTokens adds the kind column to a tokens table created before it, defaulting to a person.
+func migrateTokens(db *sql.DB) error {
+	if _, err := db.Exec(
+		"ALTER TABLE tokens ADD COLUMN kind TEXT NOT NULL DEFAULT ''"); err != nil &&
+		!strings.Contains(err.Error(), "duplicate column name") {
+		return fmt.Errorf("add tokens kind column: %w", err)
+	}
+	return nil
+}
+
+// migrateUsers adds the profile columns to a users table created before them. Every one defaults to
 func migrateUsers(db *sql.DB) error {
 	for _, column := range []string{"full_name", "email", "phone", "title", "links", "notes"} {
 		if _, err := db.Exec(

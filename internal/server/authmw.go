@@ -130,7 +130,17 @@ func (g *authGate) wrap(next http.Handler) http.Handler {
 			unauthorized(w)
 			return
 		}
-		actor := Actor{UserID: tok.UserID, Role: role, Name: tok.Name}
+		// An agent token is capped at operator no matter what account it is bound to, so it can
+		// launch and propose work but can never manage identity, access, or secrets, and can never
+		// approve its own held run. Every route that does those is admin, so one ceiling closes the
+		// whole surface at the door. Capping here, before decide, means the guarantee holds however
+		// the agent reaches the API, not only through the MCP client that also restricts it.
+		actorType := actorTypeToken
+		if tok.IsAgent() {
+			actorType = actorTypeAgent
+			role = capAgentRole(role)
+		}
+		actor := Actor{UserID: tok.UserID, Role: role, Name: tok.Name, Agent: tok.IsAgent()}
 		if !g.decide(w, r, actor) {
 			return
 		}
@@ -138,8 +148,10 @@ func (g *authGate) wrap(next http.Handler) http.Handler {
 		// A token's label is chosen by whoever minted it and is not unique, so the label alone cannot
 		// attribute a change: two tokens named "agent" on different accounts read identically. The
 		// bound account is recorded beside it, which is also the delegation an agent operates under.
+		// The type says whether a person or an agent held the token, which is set when the token is
+		// minted rather than inferred from the request.
 		receipt, ok := g.record(w, recordedActor{
-			Name: tok.Name, Type: actorTypeToken, OnBehalfOf: boundUser,
+			Name: tok.Name, Type: actorType, OnBehalfOf: boundUser,
 		}, r)
 		if !ok {
 			return
@@ -169,8 +181,11 @@ type recordedActor struct {
 const (
 	// actorTypeSession is an interactive sign-in, a person at a browser or an SSO session.
 	actorTypeSession = "session"
-	// actorTypeToken is an API token, held by a person, a script, or an agent.
+	// actorTypeToken is an API token held by a person or a script.
 	actorTypeToken = "token"
+	// actorTypeAgent is a token minted for an AI agent, declared at issuance and recorded so the
+	// chain attributes the change to an agent rather than leaving a reader to guess.
+	actorTypeAgent = "agent"
 	// actorTypeUnauthenticated is a caller that presented no credential, such as a webhook whose
 	// path is its only secret.
 	actorTypeUnauthenticated = "unauthenticated"
@@ -222,10 +237,23 @@ type actorKey struct{}
 type Actor struct {
 	// UserID is the caller's account id, empty for a command-line admin token.
 	UserID string
-	// Role is the caller's global role.
+	// Role is the caller's global role, already capped when the caller is an agent.
 	Role user.Role
 	// Name is the token name, used for audit attribution.
 	Name string
+	// Agent reports whether an AI agent holds the token, so a handler that needs to treat an agent
+	// differently can, without re-reading the token.
+	Agent bool
+}
+
+// capAgentRole lowers an admin role to operator for an agent, and leaves any lower role unchanged.
+// An agent may launch and propose work but must not manage identity, access, or secrets, or approve
+// its own held run, all of which are admin.
+func capAgentRole(role user.Role) user.Role {
+	if role == user.RoleAdmin {
+		return user.RoleOperator
+	}
+	return role
 }
 
 // actorFrom returns the authenticated actor from the context, and whether one was present. It is

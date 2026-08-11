@@ -11,7 +11,7 @@ import (
 )
 
 // tokenColumns is the shared select list for token reads.
-const tokenColumns = `id, name, hash, user_id, created_at, last_used_at, expires_at`
+const tokenColumns = `id, name, hash, user_id, created_at, last_used_at, expires_at, kind`
 
 // tokenStore is an auth.Store backed by the shared SQLite database.
 type tokenStore struct {
@@ -22,15 +22,15 @@ type tokenStore struct {
 // Save inserts or replaces the token.
 func (s *tokenStore) Save(ctx context.Context, t *auth.Token) error {
 	const q = `
-INSERT INTO tokens (id, name, hash, user_id, created_at, last_used_at, expires_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO tokens (id, name, hash, user_id, created_at, last_used_at, expires_at, kind)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 ON CONFLICT(id) DO UPDATE SET
 	name=excluded.name, hash=excluded.hash, user_id=excluded.user_id,
 	created_at=excluded.created_at, last_used_at=excluded.last_used_at,
-	expires_at=excluded.expires_at`
+	expires_at=excluded.expires_at, kind=excluded.kind`
 	_, err := s.db.ExecContext(ctx, q,
 		t.ID, t.Name, t.Hash, t.UserID, sqlutil.FormatTime(t.CreatedAt), sqlutil.NullTime(t.LastUsedAt),
-		sqlutil.NullTime(t.ExpiresAt))
+		sqlutil.NullTime(t.ExpiresAt), t.Kind)
 	if err != nil {
 		return fmt.Errorf("save token: %w", err)
 	}
@@ -106,7 +106,7 @@ func scanToken(sc scanner) (*auth.Token, error) {
 		lastUsed sql.NullString
 		expires  sql.NullString
 	)
-	if err := sc.Scan(&t.ID, &t.Name, &t.Hash, &t.UserID, &created, &lastUsed, &expires); err != nil {
+	if err := sc.Scan(&t.ID, &t.Name, &t.Hash, &t.UserID, &created, &lastUsed, &expires, &t.Kind); err != nil {
 		return nil, err
 	}
 	at, err := sqlutil.ParseTime(created)

@@ -23,7 +23,7 @@ func Contract(t *testing.T, newStore func() auth.Store) {
 func testLifecycle(t *testing.T, store auth.Store) {
 	ctx := context.Background()
 	created := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
-	tok := &auth.Token{ID: "tok_1", Name: "ci", Hash: "abc123", CreatedAt: created}
+	tok := &auth.Token{ID: "tok_1", Name: "ci", Hash: "abc123", Kind: auth.KindAgent, CreatedAt: created}
 	if err := store.Save(ctx, tok); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
@@ -34,6 +34,11 @@ func testLifecycle(t *testing.T, store auth.Store) {
 	}
 	if got.ID != "tok_1" || got.Name != "ci" || !got.CreatedAt.Equal(created) {
 		t.Errorf("FindByHash() = %+v, want tok_1 ci", got)
+	}
+	// The token kind must survive the round trip, or an agent token reads back as a person and the
+	// chain records the wrong identity for everything it does.
+	if !got.IsAgent() {
+		t.Errorf("FindByHash() kind = %q, want the agent kind to round-trip", got.Kind)
 	}
 	if _, err := store.FindByHash(ctx, "nope"); !errors.Is(err, auth.ErrNotFound) {
 		t.Errorf("FindByHash(miss) error = %v, want ErrNotFound", err)

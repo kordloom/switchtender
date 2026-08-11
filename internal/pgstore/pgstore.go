@@ -195,9 +195,11 @@ CREATE TABLE IF NOT EXISTS tokens (
 	user_id      TEXT NOT NULL DEFAULT '',
 	created_at   TEXT NOT NULL,
 	last_used_at TEXT,
-	expires_at   TEXT
+	expires_at   TEXT,
+	kind         TEXT NOT NULL DEFAULT ''
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_tokens_hash ON tokens(hash);
+ALTER TABLE tokens ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT '';
 CREATE TABLE IF NOT EXISTS projects (
 	id            TEXT PRIMARY KEY,
 	name          TEXT NOT NULL DEFAULT '',
