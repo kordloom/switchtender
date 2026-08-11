@@ -16,6 +16,7 @@ import (
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/invsource"
 	"github.com/kordloom/switchtender/internal/org"
+	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/schedule"
 	"github.com/kordloom/switchtender/internal/team"
@@ -41,6 +42,7 @@ func freshStores() Stores {
 		Teams:            team.NewMemStore(),
 		Orgs:             org.NewMemStore(),
 		Grants:           grant.NewMemStore(),
+		Policies:         policy.NewMemStore(),
 	}
 }
 
@@ -222,5 +224,82 @@ func TestDisabled(t *testing.T) {
 	}
 	if _, err := Read(ctx, freshStores(), off, strings.NewReader("{}")); !errors.Is(err, ErrDisabled) {
 		t.Errorf("Read() without a key error = %v, want ErrDisabled", err)
+	}
+}
+
+// TestRoundTripCarriesGovernance proves the objects that decide who may do what, and which changes
+// wait for a person, survive a backup and restore.
+//
+// A restore that returns every credential and template but no approval policies looks completely
+// successful and leaves the install running every gated change unapproved. The same is true of
+// membership: teams and organizations came back as empty shells, so every grant written to one
+// reached nobody and access silently narrowed to whoever held a direct grant. Both are the shape of
+// failure that is worst here, because the operator's own check says the restore worked.
+func TestRoundTripCarriesGovernance(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	sealer := credential.NewSealer("pass", "salt")
+	src := freshStores()
+	populate(t, ctx, src)
+
+	if err := src.Policies.Save(ctx, &policy.Policy{
+		ID: "pol_1", Name: "hold-prod-destroy", Tool: "terraform", CommandContains: "destroy",
+	}); err != nil {
+		t.Fatalf("Save policy: %v", err)
+	}
+	if err := src.Teams.Save(ctx, &team.Team{ID: "team_1", Name: "ops"}); err != nil {
+		t.Fatalf("Save team: %v", err)
+	}
+	if err := src.Teams.AddMember(ctx, "team_1", "user_1"); err != nil {
+		t.Fatalf("AddMember team: %v", err)
+	}
+	if err := src.Orgs.Save(ctx, &org.Org{ID: "org_1", Name: "acme"}); err != nil {
+		t.Fatalf("Save org: %v", err)
+	}
+	if err := src.Orgs.AddMember(ctx, "org_1", "user_1", org.RoleAdmin); err != nil {
+		t.Fatalf("AddMember org: %v", err)
+	}
+
+	var buf bytes.Buffer
+	wrote, err := Write(ctx, src, sealer, &buf)
+	if err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+	if wrote.Policies == 0 {
+		t.Error("the backup carried no approval policies, so a restore would gate nothing")
+	}
+	if wrote.Memberships < 2 {
+		t.Errorf("the backup carried %d memberships, want the team and organization ones",
+			wrote.Memberships)
+	}
+
+	dst := freshStores()
+	if _, err := Read(ctx, dst, sealer, &buf); err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+
+	pols, err := dst.Policies.List(ctx)
+	if err != nil {
+		t.Fatalf("List policies: %v", err)
+	}
+	if len(pols) != 1 || pols[0].Name != "hold-prod-destroy" {
+		t.Errorf("restored policies = %+v, want the approval gate back", pols)
+	}
+	members, err := dst.Teams.Members(ctx, "team_1")
+	if err != nil {
+		t.Fatalf("Members: %v", err)
+	}
+	if len(members) != 1 || members[0] != "user_1" {
+		t.Errorf("restored team members = %v, want user_1; grants to this team reach nobody", members)
+	}
+	orgMembers, err := dst.Orgs.Members(ctx, "org_1")
+	if err != nil {
+		t.Fatalf("Org Members: %v", err)
+	}
+	if len(orgMembers) != 1 || orgMembers[0].UserID != "user_1" {
+		t.Errorf("restored org members = %+v, want user_1", orgMembers)
+	}
+	if len(orgMembers) == 1 && orgMembers[0].Role != org.RoleAdmin {
+		t.Errorf("restored org role = %q, want it preserved", orgMembers[0].Role)
 	}
 }

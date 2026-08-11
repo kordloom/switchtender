@@ -27,6 +27,7 @@ import (
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/invsource"
 	"github.com/kordloom/switchtender/internal/org"
+	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/schedule"
 	"github.com/kordloom/switchtender/internal/team"
@@ -96,6 +97,9 @@ type Stores struct {
 	Orgs org.Store
 	// Grants holds per-object access grants.
 	Grants grant.Store
+	// Policies holds the approval policies that decide which runs wait for a person. Nil when the
+	// install pins them from a file, which is its own source of truth and is backed up with the file.
+	Policies policy.Store
 }
 
 // Summary reports how many objects of each kind a backup or restore moved, so the operator sees what
@@ -123,6 +127,10 @@ type Summary struct {
 	Teams int `json:"teams"`
 	// Orgs is the organization count.
 	Orgs int `json:"orgs"`
+	// Policies is the approval policy count.
+	Policies int `json:"policies"`
+	// Memberships is the number of team and organization memberships.
+	Memberships int `json:"memberships"`
 	// Grants is the access grant count.
 	Grants int `json:"grants"`
 }
@@ -164,6 +172,33 @@ type payload struct {
 	Teams            []*team.Team         `json:"teams,omitempty"`
 	Orgs             []*org.Org           `json:"orgs,omitempty"`
 	Grants           []*grant.Grant       `json:"grants,omitempty"`
+	// Policies are the approval policies. Without them a restored control plane runs every change
+	// unapproved while still reporting a healthy restore, which is the failure that looks like
+	// success: the gates are simply gone.
+	Policies []*policy.Policy `json:"policies,omitempty"`
+	// TeamMembers and OrgMembers carry who belongs to what. A team or an organization restores as an
+	// empty shell without them, so every grant written to one reaches nobody and access silently
+	// narrows to whoever holds a direct grant.
+	TeamMembers []teamMemberDTO `json:"team_members,omitempty"`
+	OrgMembers  []orgMemberDTO  `json:"org_members,omitempty"`
+}
+
+// teamMemberDTO is one user's membership of one team.
+type teamMemberDTO struct {
+	// TeamID is the team joined.
+	TeamID string `json:"team_id"`
+	// UserID is the member.
+	UserID string `json:"user_id"`
+}
+
+// orgMemberDTO is one user's membership of one organization, with the role it carries there.
+type orgMemberDTO struct {
+	// OrgID is the organization joined.
+	OrgID string `json:"org_id"`
+	// UserID is the member.
+	UserID string `json:"user_id"`
+	// Role is the member's organization role.
+	Role org.Role `json:"role"`
 }
 
 // credentialDTO carries a credential with its sealed Secret, which the entity hides from JSON.
@@ -371,6 +406,37 @@ func gather(ctx context.Context, s Stores) (*payload, Summary, error) {
 	}
 	sum.Grants = len(p.Grants)
 
+	// Policies are skipped when the install pins them from a file: that file is the source of truth,
+	// the API refuses writes to them, and restoring a copy would put a second answer in the database.
+	if s.Policies != nil {
+		if p.Policies, err = s.Policies.List(ctx); err != nil {
+			return nil, sum, fmt.Errorf("backup: list policies: %w", err)
+		}
+		sum.Policies = len(p.Policies)
+	}
+
+	// Membership is stored separately from the team and organization rows, so listing those alone
+	// captured empty shells.
+	for _, t := range p.Teams {
+		members, err := s.Teams.Members(ctx, t.ID)
+		if err != nil {
+			return nil, sum, fmt.Errorf("backup: list members of team %s: %w", t.ID, err)
+		}
+		for _, uid := range members {
+			p.TeamMembers = append(p.TeamMembers, teamMemberDTO{TeamID: t.ID, UserID: uid})
+		}
+	}
+	for _, o := range p.Orgs {
+		members, err := s.Orgs.Members(ctx, o.ID)
+		if err != nil {
+			return nil, sum, fmt.Errorf("backup: list members of organization %s: %w", o.ID, err)
+		}
+		for _, m := range members {
+			p.OrgMembers = append(p.OrgMembers, orgMemberDTO{OrgID: o.ID, UserID: m.UserID, Role: m.Role})
+		}
+	}
+	sum.Memberships = len(p.TeamMembers) + len(p.OrgMembers)
+
 	return &p, sum, nil
 }
 
@@ -460,6 +526,32 @@ func apply(ctx context.Context, s Stores, p *payload) (Summary, error) {
 			return sum, fmt.Errorf("restore: save grant %s: %w", g.ID, err)
 		}
 		sum.Grants++
+	}
+
+	// Memberships come after the users, teams, and organizations they join, since they reference all
+	// three.
+	for _, m := range p.TeamMembers {
+		if err := s.Teams.AddMember(ctx, m.TeamID, m.UserID); err != nil {
+			return sum, fmt.Errorf("restore: add %s to team %s: %w", m.UserID, m.TeamID, err)
+		}
+		sum.Memberships++
+	}
+	for _, m := range p.OrgMembers {
+		if err := s.Orgs.AddMember(ctx, m.OrgID, m.UserID, m.Role); err != nil {
+			return sum, fmt.Errorf("restore: add %s to organization %s: %w", m.UserID, m.OrgID, err)
+		}
+		sum.Memberships++
+	}
+
+	// Policies last among the access objects, and only when this install manages them in the
+	// database. A restore that silently dropped them left every gated change running unapproved.
+	if s.Policies != nil {
+		for _, pol := range p.Policies {
+			if err := s.Policies.Save(ctx, pol); err != nil {
+				return sum, fmt.Errorf("restore: save policy %s: %w", pol.ID, err)
+			}
+			sum.Policies++
+		}
 	}
 
 	for _, pr := range p.Projects {

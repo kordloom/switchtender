@@ -67,6 +67,7 @@ func backupStores(bundle storeBundle) backup.Stores {
 		Teams:            bundle.Teams(),
 		Orgs:             bundle.Orgs(),
 		Grants:           bundle.Grants(),
+		Policies:         bundle.Policies(),
 	}
 }
 
