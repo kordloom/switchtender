@@ -2043,3 +2043,52 @@ func (s *store) TransitionStatus(ctx context.Context, id string, from, to run.St
 	}
 	return n > 0, nil
 }
+
+// RunTimings returns the timing fields of the most recent top-level runs, newest first.
+//
+// It selects seven columns rather than the whole row on purpose. The metrics endpoint reads this on
+// every scrape, and a run row carries its extra vars, steps, labels, and notification targets, so
+// decoding full rows for ten thousand runs cost more than everything else the endpoint does put
+// together.
+func (s *store) RunTimings(ctx context.Context, limit int) ([]run.RunTiming, error) {
+	const q = `
+SELECT status, kind, queue, claimed_by, created_at, started_at, ended_at
+FROM runs WHERE parent_id IS NULL
+ORDER BY created_at DESC, id DESC LIMIT $1`
+	rows, err := s.db.QueryContext(ctx, q, limit)
+	if err != nil {
+		return nil, fmt.Errorf("run timings: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	return scanTimings(rows)
+}
+
+// scanTimings reads the narrow timing rows.
+func scanTimings(rows *sql.Rows) ([]run.RunTiming, error) {
+	var out []run.RunTiming
+	for rows.Next() {
+		var (
+			t              run.RunTiming
+			status         string
+			created        string
+			started, ended sql.NullString
+		)
+		if err := rows.Scan(&status, &t.Kind, &t.Queue, &t.ClaimedBy, &created, &started, &ended); err != nil {
+			return nil, fmt.Errorf("run timings: %w", err)
+		}
+		t.Status = run.Status(status)
+		at, err := sqlutil.ParseTime(created)
+		if err != nil {
+			return nil, fmt.Errorf("run timings: %w", err)
+		}
+		t.CreatedAt = at
+		if t.StartedAt, err = sqlutil.ParseNullTime(started); err != nil {
+			return nil, fmt.Errorf("run timings: %w", err)
+		}
+		if t.EndedAt, err = sqlutil.ParseNullTime(ended); err != nil {
+			return nil, fmt.Errorf("run timings: %w", err)
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}

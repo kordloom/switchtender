@@ -87,6 +87,11 @@ type Store interface {
 	// RunStatusCounts returns the number of top-level runs in each status. The runs view uses it
 	// for the summary cards without loading every run.
 	RunStatusCounts(ctx context.Context) (map[Status]int, error)
+	// RunTimings returns the timing fields of the most recent top-level runs, newest first. It exists
+	// so the metrics endpoint can build its histograms without reading whole runs: a run row carries
+	// its extra vars, steps, labels, and notification targets, and decoding those for ten thousand
+	// runs on every scrape costs far more than the seven values the histograms use.
+	RunTimings(ctx context.Context, limit int) ([]RunTiming, error)
 	// Shards returns the shard runs of a parent ordered by shard index.
 	Shards(ctx context.Context, parentID string) ([]*Run, error)
 	// Steps returns the pipeline step runs of a parent ordered by step index.
@@ -197,6 +202,26 @@ type Store interface {
 // stamp, so without a bound the listing would aggregate every run ever recorded and report
 // workers dead for months.
 const WorkerWindow = 48 * time.Hour
+
+// RunTiming is the slice of a run the metrics histograms need: when it was asked for, when it
+// started, when it ended, and how it is grouped. It is deliberately small, because it is read in
+// bulk on a schedule.
+type RunTiming struct {
+	// Status is the run's current status.
+	Status Status
+	// Kind distinguishes a coordinator parent from an executable run, which is empty.
+	Kind string
+	// Queue is the queue the run was submitted to.
+	Queue string
+	// ClaimedBy is the executor holding the run, empty when none does.
+	ClaimedBy string
+	// CreatedAt is when the run was submitted.
+	CreatedAt time.Time
+	// StartedAt is when execution began, nil until it does.
+	StartedAt *time.Time
+	// EndedAt is when the run reached a terminal state, nil until it does.
+	EndedAt *time.Time
+}
 
 // LogChunk is one stored piece of a run's log. Seq orders chunks within the run and serves as an
 // opaque cursor for LogAfter.
@@ -438,6 +463,35 @@ func matchesQuery(r *Run, term string) bool {
 		}
 	}
 	return false
+}
+
+// RunTimings returns the timing fields of the most recent top-level runs, newest first.
+func (m *memStore) RunTimings(_ context.Context, limit int) ([]RunTiming, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]*Run, 0, len(m.runs))
+	for _, r := range m.runs {
+		if r.ParentID == nil {
+			out = append(out, r)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			return out[i].ID > out[j].ID
+		}
+		return out[i].CreatedAt.After(out[j].CreatedAt)
+	})
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	timings := make([]RunTiming, 0, len(out))
+	for _, r := range out {
+		timings = append(timings, RunTiming{
+			Status: r.Status, Kind: r.Kind, Queue: r.Queue, ClaimedBy: r.ClaimedBy,
+			CreatedAt: r.CreatedAt, StartedAt: r.StartedAt, EndedAt: r.EndedAt,
+		})
+	}
+	return timings, nil
 }
 
 // RunStatusCounts tallies top-level runs by status.

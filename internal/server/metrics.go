@@ -41,7 +41,10 @@ func metricsHandler(store run.Store, chain *chainHealth, log *zap.Logger) http.H
 			respondError(w, log, http.StatusInternalServerError, "could not compute metrics")
 			return
 		}
-		runs, err := store.ListPage(r.Context(), run.ListFilter{}, metricsHistogramWindow, 0)
+		// Seven columns, not whole rows. A run carries its extra vars, steps, labels, and notification
+		// targets, and decoding those for the whole window on every scrape cost more than the rest of
+		// this endpoint together, for values none of the histograms read.
+		runs, err := store.RunTimings(r.Context(), metricsHistogramWindow)
 		if err != nil {
 			log.Error("server: metrics: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not compute metrics")
@@ -145,7 +148,7 @@ func writeWorkers(b *strings.Builder, store run.Store, r *http.Request) {
 
 // writeRunDurations emits a histogram of run execution time from start to end over the terminal runs
 // that carry both timestamps, so scrape sees the fleet's latency distribution.
-func writeRunDurations(b *strings.Builder, runs []*run.Run) {
+func writeRunDurations(b *strings.Builder, runs []run.RunTiming) {
 	counts := make([]int, len(durationBuckets))
 	total := 0
 	sum := 0.0
@@ -253,7 +256,7 @@ func writeSpanBeats(b *strings.Builder, now time.Time) {
 // writeQueueWait emits a histogram of how long runs waited between submission and start, over the runs
 // that carry a start time, so scrape sees whether the pool keeps up with the backlog. A run held for
 // approval includes that wait, which is honest: it is time the submitter waited before work began.
-func writeQueueWait(b *strings.Builder, runs []*run.Run) {
+func writeQueueWait(b *strings.Builder, runs []run.RunTiming) {
 	counts := make([]int, len(queueBuckets))
 	total := 0
 	sum := 0.0

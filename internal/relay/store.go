@@ -92,6 +92,11 @@ func (c *Client) RunStatusCounts(context.Context) (map[run.Status]int, error) {
 	return nil, ErrUnsupported
 }
 
+// RunTimings is a control-node read and is not served to workers.
+func (c *Client) RunTimings(context.Context, int) ([]run.RunTiming, error) {
+	return nil, ErrUnsupported
+}
+
 // Shards is a control-node query and is not served to workers.
 func (c *Client) Shards(context.Context, string) ([]*run.Run, error) { return nil, ErrUnsupported }
 

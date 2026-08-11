@@ -50,6 +50,7 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Run("claim respects queue", func(t *testing.T) { testClaimQueue(t, newStore()) })
 	t.Run("heartbeat and reclaim", func(t *testing.T) { testLeaseLifecycle(t, newStore()) })
 	t.Run("claim mints a per-claim secret", func(t *testing.T) { testClaimSecret(t, newStore()) })
+	t.Run("run timings", func(t *testing.T) { testRunTimings(t, newStore()) })
 	t.Run("reclaim resolves orphaned children", func(t *testing.T) { testReclaimOrphans(t, newStore()) })
 	t.Run("transition and claim are one step", func(t *testing.T) { testTransitionStatusAndClaim(t, newStore()) })
 	t.Run("reclaim settles abandoned parents", func(t *testing.T) { testReclaimAbandonedParents(t, newStore()) })
@@ -2488,5 +2489,78 @@ func testTransitionStatusAndClaim(t *testing.T, store run.Store) {
 	} else if after.Status == run.StatusRunning || after.ClaimedBy != "" {
 		t.Errorf("canceled run is %q claimed by %q, want it left unclaimed",
 			after.Status, after.ClaimedBy)
+	}
+}
+
+// testRunTimings verifies the narrow read the metrics endpoint uses returns the newest top-level
+// runs with their timings, and excludes children.
+//
+// It reads seven columns instead of whole rows because a scrape happens every few seconds and a run
+// row carries its extra vars, steps, labels, and notification targets. The contract is that it agrees
+// with the full read about which runs exist and when they ran, so a cheaper query does not become a
+// different answer.
+func testRunTimings(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	base := time.Date(2026, 8, 11, 9, 0, 0, 0, time.UTC)
+	started := base.Add(time.Minute)
+	ended := base.Add(3 * time.Minute)
+	parentID := "run_t_parent"
+
+	for _, r := range []*run.Run{
+		{ID: "run_t_old", Playbook: "p", Status: run.StatusSucceeded, Queue: "prod",
+			CreatedAt: base, StartedAt: &started, EndedAt: &ended, ClaimedBy: "worker-a"},
+		{ID: "run_t_new", Playbook: "p", Status: run.StatusRunning, Queue: "dmz",
+			CreatedAt: base.Add(time.Hour), ClaimedBy: "worker-b"},
+		{ID: parentID, Playbook: "p", Kind: run.KindSplit, Status: run.StatusRunning,
+			CreatedAt: base.Add(2 * time.Hour)},
+	} {
+		if err := store.Save(ctx, r); err != nil {
+			t.Fatalf("Save(%s) error = %v", r.ID, err)
+		}
+	}
+	// A child must not appear: the histograms describe runs somebody asked for, and a shard is part
+	// of one that is already counted.
+	idx, count := 0, 1
+	if err := store.Save(ctx, &run.Run{
+		ID: "run_t_child", Playbook: "p", Status: run.StatusRunning, CreatedAt: base.Add(3 * time.Hour),
+		ParentID: &parentID, ShardIndex: &idx, ShardCount: &count,
+	}); err != nil {
+		t.Fatalf("Save(child) error = %v", err)
+	}
+
+	got, err := store.RunTimings(ctx, 10)
+	if err != nil {
+		t.Fatalf("RunTimings() error = %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("timings = %d, want the three top-level runs", len(got))
+	}
+	// Newest first, matching the list order the metrics window assumes.
+	if !got[0].CreatedAt.After(got[1].CreatedAt) {
+		t.Errorf("timings are not newest first: %v then %v", got[0].CreatedAt, got[1].CreatedAt)
+	}
+	var oldest run.RunTiming
+	for _, tm := range got {
+		if tm.Queue == "prod" {
+			oldest = tm
+		}
+	}
+	if oldest.Status != run.StatusSucceeded || oldest.ClaimedBy != "worker-a" {
+		t.Errorf("timing = %+v, want the succeeded run held by worker-a", oldest)
+	}
+	if oldest.StartedAt == nil || oldest.EndedAt == nil {
+		t.Fatalf("timing carries no start or end: %+v", oldest)
+	}
+	if !oldest.StartedAt.Equal(started) || !oldest.EndedAt.Equal(ended) {
+		t.Errorf("timings = %v to %v, want %v to %v", oldest.StartedAt, oldest.EndedAt, started, ended)
+	}
+
+	// The limit bounds the window, which is what keeps a scrape cheap as history grows.
+	short, err := store.RunTimings(ctx, 1)
+	if err != nil {
+		t.Fatalf("RunTimings(1) error = %v", err)
+	}
+	if len(short) != 1 {
+		t.Errorf("limited timings = %d, want 1", len(short))
 	}
 }
