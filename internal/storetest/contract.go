@@ -45,6 +45,9 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Run("host costs", func(t *testing.T) { testHostCosts(t, newStore()) })
 	t.Run("flaky detection", func(t *testing.T) { testFlaky(t, newStore()) })
 	t.Run("host history", func(t *testing.T) { testHostHistory(t, newStore()) })
+	t.Run("sub-second host order is exact and stable", func(t *testing.T) {
+		testSubSecondHostOrder(t, newStore)
+	})
 	t.Run("task trends", func(t *testing.T) { testTaskTrends(t, newStore()) })
 	t.Run("claim leases oldest", func(t *testing.T) { testClaim(t, newStore()) })
 	t.Run("claim respects queue", func(t *testing.T) { testClaimQueue(t, newStore()) })
@@ -948,6 +951,84 @@ func testFlaky(t *testing.T, store run.Store) {
 	}
 	if h := byHost["solid"]; h.Flips != 0 || h.Flaky {
 		t.Errorf("solid = flips %d flaky %v, want 0 false", h.Flips, h.Flaky)
+	}
+}
+
+// testSubSecondHostOrder pins the order of host summaries that share a second, which is where the
+// stored timestamp stops being a reliable sort key.
+//
+// Two things go wrong there. Times are stored as RFC 3339 with the fractional second trimmed, so a
+// run on a whole second is stored with no fraction at all and sorts, as text, after a later run in
+// the same second. And two runs can carry the very same instant, which leaves the order undecided
+// unless something else decides it, so the in-memory store answered differently from one call to
+// the next. Both move the wrong row into the head of the window, so the fleet view reports the wrong
+// current outcome for a host.
+//
+// The fixture covers both: r1 lands on a whole second, r4 a quarter second later, and r2 and r3
+// share the same instant. The expected answer is checked exactly, not merely for self-consistency,
+// because a wrong order can be perfectly repeatable. The whole fixture is rebuilt from a fresh store
+// on every pass so a store that leans on map iteration order gets many chances to disagree.
+func testSubSecondHostOrder(t *testing.T, newStore func() run.Store) {
+	ctx := context.Background()
+	base := time.Date(2026, 8, 11, 10, 0, 0, 0, time.UTC)
+	half := base.Add(500 * time.Millisecond)
+	writes := []struct {
+		RunID string
+		Worst string
+		RanAt time.Time
+	}{
+		{RunID: "r1", Worst: "failed", RanAt: base},
+		{RunID: "r2", Worst: "ok", RanAt: half},
+		{RunID: "r3", Worst: "changed", RanAt: half},
+		{RunID: "r4", Worst: "failed", RanAt: base.Add(250 * time.Millisecond)},
+	}
+	// Newest first: r3 and r2 tie on the half second and the run id breaks it, then r4, then r1 on
+	// the whole second, which plain text order would have hoisted to the front.
+	wantHealth := []run.HostHealth{{
+		Host: "db01", Failures: 2, Total: 4, LastOutcome: "changed", LastRun: half, Flips: 1,
+		Recent:     []string{"changed", "ok", "failed", "failed"},
+		RecentRuns: []string{"r3", "r2", "r4", "r1"},
+	}}
+	wantWindowed := []run.HostHealth{{
+		Host: "db01", Failures: 0, Total: 1, LastOutcome: "changed", LastRun: half,
+		Recent: []string{"changed"}, RecentRuns: []string{"r3"},
+	}}
+	wantHistory := []string{"r3", "r2", "r4", "r1"}
+
+	const passes = 20
+	for pass := range passes {
+		store := newStore()
+		for _, w := range writes {
+			sums := []run.HostSummary{{Host: "db01", Worst: w.Worst, RanAt: w.RanAt}}
+			if err := store.SaveHostSummary(ctx, w.RunID, sums); err != nil {
+				t.Fatalf("pass %d: SaveHostSummary() error = %v", pass, err)
+			}
+		}
+		health, err := store.FleetHealth(ctx, 10)
+		if err != nil {
+			t.Fatalf("pass %d: FleetHealth() error = %v", pass, err)
+		}
+		if diff := cmp.Diff(wantHealth, health, cmpopts.EquateEmpty()); diff != "" {
+			t.Fatalf("pass %d: FleetHealth mismatch (-want +got):\n%s", pass, diff)
+		}
+		windowed, err := store.FleetHealth(ctx, 1)
+		if err != nil {
+			t.Fatalf("pass %d: FleetHealth(1) error = %v", pass, err)
+		}
+		if diff := cmp.Diff(wantWindowed, windowed, cmpopts.EquateEmpty()); diff != "" {
+			t.Fatalf("pass %d: FleetHealth(1) mismatch (-want +got):\n%s", pass, diff)
+		}
+		history, err := store.HostHistory(ctx, "db01", 10)
+		if err != nil {
+			t.Fatalf("pass %d: HostHistory() error = %v", pass, err)
+		}
+		gotHistory := make([]string, len(history))
+		for i, hs := range history {
+			gotHistory[i] = hs.RunID
+		}
+		if diff := cmp.Diff(wantHistory, gotHistory, cmpopts.EquateEmpty()); diff != "" {
+			t.Fatalf("pass %d: HostHistory order mismatch (-want +got):\n%s", pass, diff)
+		}
 	}
 }
 

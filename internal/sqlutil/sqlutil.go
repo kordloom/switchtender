@@ -64,12 +64,30 @@ func ParseMap(s string) (map[string]any, error) {
 // existing schedule became unclaimable and stopped firing, silently and permanently.
 //
 // Text comparison of two different widths can disagree with time comparison, but only for instants
-// inside the same second, and every place that relies on the order tolerates a sub-second tie. The
-// one comparison where being wrong mattered, the PostgreSQL lease sweep, casts to a real timestamp
-// and does not depend on the text form at all.
+// inside the same second. Queries that need the real order sort on [TimeOrder] instead of the raw
+// column. The one comparison where being wrong mattered, the PostgreSQL lease sweep, casts to a real
+// timestamp and does not depend on the text form at all.
 func FormatTime(t time.Time) string {
 	return t.UTC().Format(time.RFC3339Nano)
 }
+
+// TimeOrder is the SQL expression that sorts a stored ran_at column in true chronological order,
+// for the SQLite and PostgreSQL stores alike.
+//
+// Sorting the raw column is wrong below the second. FormatTime trims the fractional second, so an
+// instant on a whole second has no fraction at all, and the trailing "Z" then outranks the "." of a
+// later instant in the same second: "10:00:00Z" sorts above "10:00:00.5Z". The same inversion hits
+// two fractions where one is a prefix of the other, since "Z" also outranks a digit, so
+// "10:00:00.1Z" sorts above "10:00:00.100001Z". Both put a later run ahead of an earlier one, which
+// reorders host history and moves the wrong rows inside a ROW_NUMBER window.
+//
+// Dropping the trailing "Z" removes the character that outranks "." and the digits. What is left is
+// compared position by position, and because a trimmed fraction never ends in a zero, a string that
+// is a prefix of another is always the smaller instant. Ordering is therefore fixed without
+// rewriting a single stored row, which matters because the stored format is load bearing: ClaimDue
+// compares next_run_at for exact text equality, and a past attempt to change the format silently
+// stopped every existing schedule from firing.
+const TimeOrder = `rtrim(ran_at, 'Z')`
 
 // ParseTime parses a stored time string.
 func ParseTime(s string) (time.Time, error) {

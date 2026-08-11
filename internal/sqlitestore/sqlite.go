@@ -34,7 +34,9 @@ import (
 )
 
 // schema is the full table layout created on open. It uses IF NOT EXISTS, so opening an existing
-// database is safe.
+// database is safe. The summary indexes are dropped by their old names first because they were
+// created over the raw ran_at column, which does not sort in time order; the replacements carry new
+// names so IF NOT EXISTS cannot skip them on an upgrade.
 const schema = `
 CREATE TABLE IF NOT EXISTS runs (
 	id            TEXT PRIMARY KEY,
@@ -118,7 +120,9 @@ CREATE TABLE IF NOT EXISTS run_host_summary (
 	ran_at      TEXT NOT NULL,
 	PRIMARY KEY (run_id, host)
 );
-CREATE INDEX IF NOT EXISTS idx_host_summary_host ON run_host_summary(host, ran_at DESC);
+DROP INDEX IF EXISTS idx_host_summary_host;
+CREATE INDEX IF NOT EXISTS idx_host_summary_order
+	ON run_host_summary(host, ` + sqlutil.TimeOrder + ` DESC, run_id DESC);
 CREATE TABLE IF NOT EXISTS host_facts (
 	host        TEXT PRIMARY KEY,
 	run_id      TEXT NOT NULL,
@@ -132,7 +136,9 @@ CREATE TABLE IF NOT EXISTS run_task_summary (
 	ran_at  TEXT NOT NULL,
 	PRIMARY KEY (run_id, task)
 );
-CREATE INDEX IF NOT EXISTS idx_task_summary_task ON run_task_summary(task, ran_at DESC);
+DROP INDEX IF EXISTS idx_task_summary_task;
+CREATE INDEX IF NOT EXISTS idx_task_summary_order
+	ON run_task_summary(task, ` + sqlutil.TimeOrder + ` DESC, run_id DESC);
 CREATE TABLE IF NOT EXISTS schedules (
 	id          TEXT PRIMARY KEY,
 	name        TEXT NOT NULL DEFAULT '',
@@ -1199,13 +1205,13 @@ func (s *store) FleetHealth(ctx context.Context, window int) ([]run.HostHealth, 
 	const q = `
 WITH ranked AS (
 	SELECT host, worst, run_id, ran_at,
-		ROW_NUMBER() OVER (PARTITION BY host ORDER BY ran_at DESC) AS rn
+		ROW_NUMBER() OVER (PARTITION BY host ORDER BY ` + sqlutil.TimeOrder + ` DESC, run_id DESC) AS rn
 	FROM run_host_summary
 ), recent AS (
 	SELECT host, worst, run_id, ran_at, rn,
 		CASE WHEN worst IN ('failed', 'unreachable') THEN 1 ELSE 0 END AS bad,
 		LAG(CASE WHEN worst IN ('failed', 'unreachable') THEN 1 ELSE 0 END)
-			OVER (PARTITION BY host ORDER BY ran_at DESC) AS prev_bad
+			OVER (PARTITION BY host ORDER BY ` + sqlutil.TimeOrder + ` DESC, run_id DESC) AS prev_bad
 	FROM ranked
 	WHERE rn <= ?
 )
@@ -1213,7 +1219,7 @@ SELECT host,
 	SUM(bad) AS failures,
 	COUNT(*) AS total,
 	MAX(CASE WHEN rn = 1 THEN worst END) AS last_outcome,
-	MAX(ran_at) AS last_run,
+	MAX(CASE WHEN rn = 1 THEN ran_at END) AS last_run,
 	SUM(CASE WHEN prev_bad IS NOT NULL AND bad != prev_bad THEN 1 ELSE 0 END) AS flips,
 	GROUP_CONCAT(worst, ',' ORDER BY rn) AS recent,
 	GROUP_CONCAT(run_id, ',' ORDER BY rn) AS recent_runs
@@ -1264,7 +1270,7 @@ func (s *store) DriftStatus(ctx context.Context) ([]run.HostDrift, error) {
 	const q = `
 WITH checks AS (
 	SELECT hs.host, hs.changed, hs.run_id, hs.ran_at,
-		ROW_NUMBER() OVER (PARTITION BY hs.host ORDER BY hs.ran_at DESC) AS rn
+		ROW_NUMBER() OVER (PARTITION BY hs.host ORDER BY ` + sqlutil.TimeOrder + ` DESC, run_id DESC) AS rn
 	FROM run_host_summary hs
 	JOIN runs r ON r.id = hs.run_id
 	WHERE r.dry_run = 1
@@ -1359,7 +1365,7 @@ func (s *store) HostHistory(ctx context.Context, host string, limit int) ([]run.
 	}
 	const q = `
 SELECT run_id, host, ok, changed, failures, unreachable, skipped, worst, duration_seconds, ran_at
-FROM run_host_summary WHERE host = ? ORDER BY ran_at DESC LIMIT ?`
+FROM run_host_summary WHERE host = ? ORDER BY ` + sqlutil.TimeOrder + ` DESC, run_id DESC LIMIT ?`
 
 	rows, err := s.db.QueryContext(ctx, q, host, limit)
 	if err != nil {
@@ -1492,10 +1498,10 @@ func (s *store) TaskTrends(ctx context.Context, window int) ([]run.TaskTrend, er
 	const q = `
 WITH ranked AS (
 	SELECT task, seconds, ran_at,
-		ROW_NUMBER() OVER (PARTITION BY task ORDER BY ran_at DESC) AS rn
+		ROW_NUMBER() OVER (PARTITION BY task ORDER BY ` + sqlutil.TimeOrder + ` DESC, run_id DESC) AS rn
 	FROM run_task_summary
 )
-SELECT task, seconds, ran_at FROM ranked WHERE rn <= ? ORDER BY task, ran_at`
+SELECT task, seconds, ran_at FROM ranked WHERE rn <= ? ORDER BY task, rn DESC`
 
 	rows, err := s.db.QueryContext(ctx, q, window)
 	if err != nil {
@@ -1545,7 +1551,7 @@ func (s *store) HostCosts(ctx context.Context, window int) (map[string]float64, 
 	const q = `
 WITH ranked AS (
 	SELECT host, duration_seconds,
-		ROW_NUMBER() OVER (PARTITION BY host ORDER BY ran_at DESC) AS rn
+		ROW_NUMBER() OVER (PARTITION BY host ORDER BY ` + sqlutil.TimeOrder + ` DESC, run_id DESC) AS rn
 	FROM run_host_summary
 )
 SELECT host, AVG(duration_seconds) FROM ranked WHERE rn <= ? GROUP BY host`

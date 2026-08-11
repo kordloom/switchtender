@@ -867,6 +867,26 @@ func (m *memStore) SaveHostSummary(_ context.Context, runID string, summaries []
 	return nil
 }
 
+// newerHostSummary reports whether a comes before b when host summaries read newest first. Two
+// summaries can share an instant, and the map they are gathered from has no order, so the run id
+// decides ties, descending. Without it the answer changes from one call to the next and disagrees
+// with the SQL stores, which break the same tie the same way.
+func newerHostSummary(a, b HostSummary) bool {
+	if !a.RanAt.Equal(b.RanAt) {
+		return a.RanAt.After(b.RanAt)
+	}
+	return a.RunID > b.RunID
+}
+
+// newerTaskSummary reports whether a comes before b when task summaries read newest first, breaking
+// an equal instant by run id, descending, for the same reason as newerHostSummary.
+func newerTaskSummary(a, b TaskSummary) bool {
+	if !a.RanAt.Equal(b.RanAt) {
+		return a.RanAt.After(b.RanAt)
+	}
+	return a.RunID > b.RunID
+}
+
 // recentByHost groups all host summaries by host, newest first, trimmed to window per host.
 func (m *memStore) recentByHost(window int) map[string][]HostSummary {
 	byHost := make(map[string][]HostSummary)
@@ -876,7 +896,7 @@ func (m *memStore) recentByHost(window int) map[string][]HostSummary {
 		}
 	}
 	for host, list := range byHost {
-		sort.Slice(list, func(i, j int) bool { return list[i].RanAt.After(list[j].RanAt) })
+		sort.Slice(list, func(i, j int) bool { return newerHostSummary(list[i], list[j]) })
 		if len(list) > window {
 			byHost[host] = list[:window]
 		}
@@ -936,7 +956,7 @@ func (m *memStore) DriftStatus(_ context.Context) ([]HostDrift, error) {
 			continue
 		}
 		for _, hs := range summaries {
-			if cur, seen := latest[hs.Host]; !seen || hs.RanAt.After(cur.RanAt) {
+			if cur, seen := latest[hs.Host]; !seen || newerHostSummary(hs, cur) {
 				latest[hs.Host] = hs
 			}
 		}
@@ -1009,7 +1029,7 @@ func (m *memStore) HostHistory(_ context.Context, host string, limit int) ([]Hos
 			}
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].RanAt.After(out[j].RanAt) })
+	sort.Slice(out, func(i, j int) bool { return newerHostSummary(out[i], out[j]) })
 	if len(out) > limit {
 		out = out[:limit]
 	}
@@ -1067,7 +1087,7 @@ func (m *memStore) TaskTrends(_ context.Context, window int) ([]TaskTrend, error
 
 	out := make([]TaskTrend, 0, len(byTask))
 	for task, list := range byTask {
-		sort.Slice(list, func(i, j int) bool { return list[i].RanAt.After(list[j].RanAt) })
+		sort.Slice(list, func(i, j int) bool { return newerTaskSummary(list[i], list[j]) })
 		recent := list
 		if len(recent) > window {
 			recent = recent[:window]
@@ -1106,7 +1126,7 @@ func (m *memStore) HostCosts(_ context.Context, window int) (map[string]float64,
 
 	out := make(map[string]float64, len(byHost))
 	for host, list := range byHost {
-		sort.Slice(list, func(i, j int) bool { return list[i].RanAt.After(list[j].RanAt) })
+		sort.Slice(list, func(i, j int) bool { return newerHostSummary(list[i], list[j]) })
 		recent := list
 		if len(recent) > window {
 			recent = recent[:window]
