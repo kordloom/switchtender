@@ -315,6 +315,14 @@ func checkWorkerReport(stored, reported *run.Run) error {
 	if stored.ClaimedBy == "" {
 		return fmt.Errorf("run is not claimed, so there is nothing for a worker to report on")
 	}
+	// A split or pipeline parent is coordinated by the control node, never executed by a worker: the
+	// claim loop skips any run carrying a kind, so no worker can ever have been handed one. Its
+	// holder is the control node's own coordinator, so without this a worker that learned the
+	// parent's id, which its own claim response gives it, could terminalize the coordinator's run and
+	// strand every shard beneath it. A report on one is a report on work this worker did not do.
+	if stored.Kind != "" {
+		return fmt.Errorf("run is coordinated by the control node and is not a worker's to report on")
+	}
 	// A run awaiting a decision was never claimable in the first place.
 	if stored.Status == run.StatusPendingApproval || stored.Status == run.StatusRejected {
 		return fmt.Errorf("run is awaiting a decision and is not a worker's to report on")
