@@ -115,6 +115,13 @@ func (s *relayServer) authed(next http.Handler) http.Handler {
 // from an API call without parsing the path.
 const relayMethod = "RELAY"
 
+// actorTypeWorker classifies a relay entry as a machine acting for the estate, distinct from the
+// API's human and token actors. A relay worker executes runs on a machine the control node cannot
+// reach, so "service" is the right class from the vocabulary audit.Entry.ActorType documents, and it
+// is different from every value the API emits, which is what lets a reader tell a worker's report
+// from an operator's API call in the chain.
+const actorTypeWorker = "service"
+
 // record writes one relay decision into the audit chain.
 //
 // The relay serves the mesh from outside the API's own gate, so nothing a worker reported reached
@@ -130,12 +137,20 @@ const relayMethod = "RELAY"
 // store is unhealthy does not un-finish the run; it loses the outcome of work that already happened
 // on real hosts. The API refuses a mutation it cannot record because refusing prevents it. This one
 // cannot be prevented, so it is logged loudly instead.
-func (s *relayServer) record(ctx context.Context, actor, path string) {
+func (s *relayServer) record(ctx context.Context, pool *Pool, owner, path string) {
 	if s.audits == nil {
 		return
 	}
+	// The proven identity is the pool the presented token resolved to, since every worker in a pool
+	// shares one token. The owner is the lease name the worker asserted, which is not proof of
+	// anything on its own. Record the proven pool first, then the asserted name, so a reader can tell
+	// them apart. pool.Name is a non-secret operator label; only the token's hash is ever stored.
+	actor := "worker:" + owner
+	if pool != nil {
+		actor = "pool:" + pool.Name + " " + actor
+	}
 	entry := &audit.Entry{
-		ID: audit.NewID(), At: time.Now(), Actor: actor,
+		ID: audit.NewID(), At: time.Now(), Actor: actor, ActorType: actorTypeWorker,
 		Method: relayMethod, Path: path,
 	}
 	if err := s.audits.Append(ctx, entry); err != nil {
@@ -171,7 +186,7 @@ func (s *relayServer) claim(w http.ResponseWriter, r *http.Request) {
 	default:
 		// A worker took a run onto a machine the control node cannot reach. That is the moment the
 		// work left this side of the boundary, so it is the moment worth recording.
-		s.record(r.Context(), "worker:"+body.Owner, "/relay/claim/"+leased.ID)
+		s.record(r.Context(), poolFrom(r.Context()), body.Owner, "/relay/claim/"+leased.ID)
 		// The capability travels in a header, not the body. The field is json:"-", so it is not in
 		// the body a worker can log, cache, or forward, and this claim response is the one place it
 		// crosses the wire. The transport reads it once and keeps it only in memory, presenting it on
@@ -309,7 +324,7 @@ func (s *relayServer) save(w http.ResponseWriter, r *http.Request) {
 	// Only the transition into a terminal state is recorded. A worker saves repeatedly as a run
 	// progresses, and the outcome is the part somebody asks about later.
 	if !wasTerminal && stored.Status.Terminal() {
-		s.record(r.Context(), "worker:"+stored.ClaimedBy,
+		s.record(r.Context(), poolFrom(r.Context()), stored.ClaimedBy,
 			"/relay/finished/"+stored.ID+"/"+string(stored.Status))
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -508,25 +523,59 @@ func (s *relayServer) appendLog(w http.ResponseWriter, r *http.Request) {
 
 // maxRelayElements bounds how many items one relay call may carry.
 //
-// The body is capped in bytes, which is not a cap on work: "[{},{},{}...]" fits a million empty
-// structs into a megabyte, and each one becomes a marshal and a single-row insert inside one
-// transaction. Measured, a one megabyte body decoded into 349,525 events and 366 MB of heap, and on
-// SQLite held the single writer for that many round trips. A real run reports in batches of tens.
+// A count cap is not a work cap on its own: "[{},{},{}...]" fits a million empty structs into a
+// megabyte, and each one becomes a marshal and a single-row insert inside one transaction. Measured,
+// a one megabyte body decoded into 349,525 events and 366 MB of heap, and on SQLite held the single
+// writer for that many round trips. A real run reports in batches of tens. The cap is enforced during
+// the decode, not after it, so a body over the cap never lands whole in memory.
 const maxRelayElements = 5000
+
+// errTooManyElements is returned by decodeCapped when the body carries more than the cap allows. It
+// is mapped to 413 so a worker learns to report in smaller batches.
+var errTooManyElements = errors.New("too many items in one call; report in smaller batches")
+
+// decodeCapped decodes a JSON array of T, refusing once it holds more than max elements so a worker
+// cannot force the whole array into memory before the cap applies. It streams the array a token at a
+// time rather than decoding the slice whole, which is what makes the cap bound the work rather than
+// only the result. A body that is not a JSON array is a decode error, the same as before.
+func decodeCapped[T any](r io.Reader, max int) ([]T, error) {
+	dec := json.NewDecoder(r)
+	tok, err := dec.Token()
+	if err != nil {
+		return nil, err
+	}
+	if d, ok := tok.(json.Delim); !ok || d != '[' {
+		return nil, fmt.Errorf("expected a JSON array")
+	}
+	out := make([]T, 0)
+	for dec.More() {
+		if len(out) >= max {
+			return nil, errTooManyElements
+		}
+		var v T
+		if err := dec.Decode(&v); err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	if _, err := dec.Token(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
 
 // appendEvents appends the structured events in the body to the run, or 404 when the run is gone.
 func (s *relayServer) appendEvents(w http.ResponseWriter, r *http.Request) {
 	if !s.heldForReport(w, r) {
 		return
 	}
-	var events []event.Event
-	if err := json.NewDecoder(r.Body).Decode(&events); err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid events body")
+	events, derr := decodeCapped[event.Event](r.Body, maxRelayElements)
+	switch {
+	case errors.Is(derr, errTooManyElements):
+		writeErr(w, http.StatusRequestEntityTooLarge, derr.Error())
 		return
-	}
-	if len(events) > maxRelayElements {
-		writeErr(w, http.StatusRequestEntityTooLarge,
-			"too many items in one call; report in smaller batches")
+	case derr != nil:
+		writeErr(w, http.StatusBadRequest, "invalid events body")
 		return
 	}
 	err := s.store.AppendEvents(r.Context(), r.PathValue("id"), events)
@@ -545,14 +594,13 @@ func (s *relayServer) saveHostSummary(w http.ResponseWriter, r *http.Request) {
 	if !s.heldForReport(w, r) {
 		return
 	}
-	var summaries []run.HostSummary
-	if err := json.NewDecoder(r.Body).Decode(&summaries); err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid host summary body")
+	summaries, derr := decodeCapped[run.HostSummary](r.Body, maxRelayElements)
+	switch {
+	case errors.Is(derr, errTooManyElements):
+		writeErr(w, http.StatusRequestEntityTooLarge, derr.Error())
 		return
-	}
-	if len(summaries) > maxRelayElements {
-		writeErr(w, http.StatusRequestEntityTooLarge,
-			"too many items in one call; report in smaller batches")
+	case derr != nil:
+		writeErr(w, http.StatusBadRequest, "invalid host summary body")
 		return
 	}
 	if err := s.store.SaveHostSummary(r.Context(), r.PathValue("id"), summaries); err != nil {
@@ -567,14 +615,13 @@ func (s *relayServer) saveTaskSummary(w http.ResponseWriter, r *http.Request) {
 	if !s.heldForReport(w, r) {
 		return
 	}
-	var summaries []run.TaskSummary
-	if err := json.NewDecoder(r.Body).Decode(&summaries); err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid task summary body")
+	summaries, derr := decodeCapped[run.TaskSummary](r.Body, maxRelayElements)
+	switch {
+	case errors.Is(derr, errTooManyElements):
+		writeErr(w, http.StatusRequestEntityTooLarge, derr.Error())
 		return
-	}
-	if len(summaries) > maxRelayElements {
-		writeErr(w, http.StatusRequestEntityTooLarge,
-			"too many items in one call; report in smaller batches")
+	case derr != nil:
+		writeErr(w, http.StatusBadRequest, "invalid task summary body")
 		return
 	}
 	if err := s.store.SaveTaskSummary(r.Context(), r.PathValue("id"), summaries); err != nil {
