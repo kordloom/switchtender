@@ -1,7 +1,7 @@
 // Command helloplugin is the extension binary the extplugin tests build and load. It provides
 // every seam once, with observable behavior: the tool echoes its command and takes its exit code
 // from the run's extra vars, and the notifier records each delivery to the file named by the
-// EXTTEST_NOTIFY_FILE environment variable.
+// SWITCHTENDER_PLUGIN_NOTIFY_FILE environment variable.
 package main
 
 import (
@@ -48,13 +48,19 @@ func runHello(_ context.Context, spec sdk.ToolSpec, out io.Writer) (sdk.ToolResu
 	return sdk.ToolResult{ExitCode: exit}, nil
 }
 
-// notify records the delivered run's id and extra var count to the EXTTEST_NOTIFY_FILE path.
+// notify records the delivered run's id and extra var count to the SWITCHTENDER_PLUGIN_NOTIFY_FILE path.
 func notify(_ context.Context, r *sdk.Run) error {
-	path := os.Getenv("EXTTEST_NOTIFY_FILE")
+	path := os.Getenv("SWITCHTENDER_PLUGIN_NOTIFY_FILE")
 	if path == "" {
 		return nil
 	}
-	return os.WriteFile(path, fmt.Appendf(nil, "%s|%d", r.ID, len(r.ExtraVars)), 0o600)
+	// The install secret this plugin can see is reported alongside the run, so a test can assert the
+	// loader withheld it. A plugin that can read the deployment encryption key can decrypt every
+	// stored credential, so "the plugin saw nothing" has to be observable from the plugin's side
+	// rather than inferred from the loader's own helper.
+	leaked := os.Getenv("SWITCHTENDER_ENCRYPTION_KEY")
+	return os.WriteFile(path,
+		fmt.Appendf(nil, "%s|%d|key=%s", r.ID, len(r.ExtraVars), leaked), 0o600)
 }
 
 // newAI builds a provider whose reply proves the settings and prompt crossed the wire.

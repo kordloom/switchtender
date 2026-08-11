@@ -82,7 +82,13 @@ func TestLoadSkipsBrokenEntries(t *testing.T) {
 //nolint:funlen // One load drives all five seams; splitting would rebuild and reload per seam.
 func TestLoadRegistersEverySeam(t *testing.T) {
 	notifyFile := filepath.Join(t.TempDir(), "notified")
-	t.Setenv("EXTTEST_NOTIFY_FILE", notifyFile)
+	// A plugin receives only the namespaced environment an operator passes it deliberately, so the
+	// test fixture is configured the same way a real plugin would be.
+	t.Setenv("SWITCHTENDER_PLUGIN_NOTIFY_FILE", notifyFile)
+	// Set the deployment encryption key in this process so the plugin's report about whether it
+	// could read one means something. Without it the assertion below passes whether or not the
+	// loader withholds anything.
+	t.Setenv("SWITCHTENDER_ENCRYPTION_KEY", "install-key-must-not-escape")
 
 	closePlugins, err := Load(buildPlugin(t), zap.NewNop())
 	if err != nil {
@@ -173,8 +179,14 @@ func TestLoadRegistersEverySeam(t *testing.T) {
 		t.Fatalf("run status = %q, want succeeded", status)
 	}
 	note := waitFile(t, notifyFile)
-	if want := submitted.ID + "|0"; note != want {
-		t.Errorf("notifier recorded %q, want %q (run id with extra vars redacted)", note, want)
+	if want := submitted.ID + "|0|key="; note != want {
+		t.Errorf("notifier recorded %q, want %q (run id, extra vars redacted, and no install key)",
+			note, want)
+	}
+	// The plugin reports what it could read of the deployment encryption key. Anything after "key="
+	// means the loader handed a subprocess the secret that seals every stored credential.
+	if _, leaked, _ := strings.Cut(note, "key="); leaked != "" {
+		t.Errorf("the plugin could read the deployment encryption key %q", leaked)
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/hashicorp/go-hclog"
@@ -68,14 +69,51 @@ func Load(dir string, log *zap.Logger) (func(), error) {
 	}, nil
 }
 
+// pluginEnvPrefix namespaces the environment an operator may deliberately pass to plugins. A
+// variable outside the pass-through list below reaches a plugin only under this prefix, so
+// configuring one is an explicit act rather than a consequence of what the server happens to hold.
+const pluginEnvPrefix = "SWITCHTENDER_PLUGIN_"
+
+// pluginPassThrough names the environment every process needs to function, none of which says
+// anything about this install. Everything else is withheld.
+var pluginPassThrough = map[string]bool{
+	"PATH": true, "HOME": true, "TMPDIR": true, "TMP": true, "TEMP": true,
+	"LANG": true, "LC_ALL": true, "SYSTEMROOT": true, "USERPROFILE": true,
+}
+
+// pluginEnv builds the environment a plugin subprocess runs with: the few variables any process
+// needs, plus anything the operator namespaced for plugins. It is an allowlist because the deny
+// list is unbounded and grows every time this server learns to read another secret from the
+// environment, and a missed entry hands that secret to every plugin on the machine.
+func pluginEnv() []string {
+	out := make([]string, 0, 8)
+	for _, kv := range os.Environ() {
+		name, _, ok := strings.Cut(kv, "=")
+		if !ok {
+			continue
+		}
+		if pluginPassThrough[strings.ToUpper(name)] || strings.HasPrefix(name, pluginEnvPrefix) {
+			out = append(out, kv)
+		}
+	}
+	return out
+}
+
 // load launches one plugin binary, asks what it provides, and registers each seam. It returns the
 // running client so the caller can shut it down, or an error when the binary cannot be launched
 // or described.
 func load(path string, log *zap.Logger) (*goplugin.Client, error) {
+	cmd := exec.Command(path)
+	cmd.Env = pluginEnv()
 	client := goplugin.NewClient(&goplugin.ClientConfig{
-		HandshakeConfig:  plugin.Handshake,
-		Plugins:          plugin.Set(nil),
-		Cmd:              exec.Command(path),
+		HandshakeConfig: plugin.Handshake,
+		Plugins:         plugin.Set(nil),
+		Cmd:             cmd,
+		// The plugin gets the environment this loader hands it and nothing else. Without this the
+		// library appends the server's whole environment, which carries the deployment encryption key
+		// and salt, the worker token, and every configured provider secret: a drop-in binary could
+		// read the key that seals every stored credential without asking for anything.
+		SkipHostEnv:      true,
 		AllowedProtocols: []goplugin.Protocol{goplugin.ProtocolGRPC},
 		AutoMTLS:         true,
 		Logger:           newHCLog(log),
