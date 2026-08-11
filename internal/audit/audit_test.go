@@ -18,24 +18,39 @@ func TestMemStoreContract(t *testing.T) {
 // identically, and neither digest input may contain the secret.
 func TestContentDigestRedactsSecrets(t *testing.T) {
 	t.Parallel()
+	// The digest is a keyed commitment now, so the property is proven by disclosure: a body that
+	// differs only in a secret value verifies against the same commitment, because the secret was
+	// replaced before the commitment was taken. If the secret influenced the commitment, disclosing
+	// the other secret would fail.
 	a := []byte(`{"name":"prod","kind":"ssh_key","secret":"hunter2","passphrase":"unlock-me"}`)
 	b := []byte(`{"name":"prod","kind":"ssh_key","secret":"totally-different","passphrase":"other"}`)
-	da, db := audit.ContentDigestOf(a), audit.ContentDigestOf(b)
-	if da == "" || da != db {
-		t.Errorf("digests differ on secret value alone: %s vs %s; the secret leaked into the digest",
-			da, db)
+	digest, nonce, err := audit.ContentDigestOf(a)
+	if err != nil {
+		t.Fatalf("ContentDigestOf() error = %v", err)
 	}
-	// A change in a non-secret field must change the digest, or the digest proves nothing about the
+	if digest == "" || !audit.VerifyContentDigest(digest, nonce, b) {
+		t.Error("a body differing only in the secret does not verify; the secret leaked into the digest")
+	}
+	// A change in a non-secret field must NOT verify, or the commitment proves nothing about the
 	// shape of the change.
 	c := []byte(`{"name":"staging","kind":"ssh_key","secret":"hunter2","passphrase":"unlock-me"}`)
-	if audit.ContentDigestOf(c) == da {
-		t.Error("changing the name did not change the digest, so it commits to nothing useful")
+	if audit.VerifyContentDigest(digest, nonce, c) {
+		t.Error("a body differing in the name still verified, so the commitment covers nothing useful")
 	}
 	// A nested secret, as a typed credential's fields object carries, is also redacted.
 	nested := []byte(`{"name":"dd","type_id":"ct_1","fields":{"api_key":"sk-live-123"}}`)
 	nested2 := []byte(`{"name":"dd","type_id":"ct_1","fields":{"api_key":"sk-live-999"}}`)
-	if audit.ContentDigestOf(nested) != audit.ContentDigestOf(nested2) {
-		t.Error("a typed credential's field values leaked into the digest")
+	nd, nn, err := audit.ContentDigestOf(nested)
+	if err != nil {
+		t.Fatalf("ContentDigestOf() error = %v", err)
+	}
+	if !audit.VerifyContentDigest(nd, nn, nested2) {
+		t.Error("a typed credential's field value influenced the commitment")
+	}
+	// The nonce is what protects it: a holder of the commitment without the nonce cannot confirm a
+	// guessed body, so a wrong nonce never verifies.
+	if audit.VerifyContentDigest(nd, "00", nested) {
+		t.Error("the commitment verified under the wrong nonce, so it is not actually keyed")
 	}
 }
 
@@ -43,10 +58,10 @@ func TestContentDigestRedactsSecrets(t *testing.T) {
 // request whose body is the empty JSON object.
 func TestContentDigestOfNoBodyIsAbsent(t *testing.T) {
 	t.Parallel()
-	if got := audit.ContentDigestOf(nil); got != "" {
-		t.Errorf("no body digested to %q, want empty so absence is distinguishable", got)
+	if d, n, err := audit.ContentDigestOf(nil); d != "" || n != "" || err != nil {
+		t.Errorf("no body digested to %q/%q (err %v), want empty so absence is distinguishable", d, n, err)
 	}
-	if got := audit.ContentDigestOf([]byte(`{}`)); got == "" {
+	if d, _, err := audit.ContentDigestOf([]byte(`{}`)); err != nil || d == "" {
 		t.Error("an empty JSON object should still carry a digest, distinct from no body at all")
 	}
 }
@@ -57,7 +72,11 @@ func TestContentDigestCanonicalizes(t *testing.T) {
 	t.Parallel()
 	a := []byte(`{"name":"a","kind":"env"}`)
 	b := []byte("{  \"kind\":\"env\",\n  \"name\":\"a\"  }")
-	if audit.ContentDigestOf(a) != audit.ContentDigestOf(b) {
-		t.Error("key order or whitespace changed the digest; it is not canonical")
+	digest, nonce, err := audit.ContentDigestOf(a)
+	if err != nil {
+		t.Fatalf("ContentDigestOf() error = %v", err)
+	}
+	if !audit.VerifyContentDigest(digest, nonce, b) {
+		t.Error("key order or whitespace changed the commitment; it is not canonical")
 	}
 }

@@ -719,10 +719,14 @@ func testAnchors(t *testing.T, store audit.Store) {
 func testCommittedFields(t *testing.T, store audit.Store) {
 	ctx := context.Background()
 	at := time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC)
+	digest, nonce, err := audit.ContentDigestOf([]byte(`{"limit":"web01"}`))
+	if err != nil {
+		t.Fatalf("ContentDigestOf() error = %v", err)
+	}
 	entry := &audit.Entry{
 		ID: audit.NewID(), At: at, Actor: "agent", ActorType: "token",
 		OnBehalfOf: "deploy-agent", Method: "POST", Path: "/v1/templates/tpl_1/launch",
-		ContentDigest: audit.ContentDigestOf([]byte(`{"limit":"web01"}`)),
+		ContentDigest: digest, Nonce: nonce,
 	}
 	if err := store.Append(ctx, entry); err != nil {
 		t.Fatalf("Append() error = %v", err)
@@ -740,6 +744,7 @@ func testCommittedFields(t *testing.T, store audit.Store) {
 		{"actor_type", got.ActorType, "token"},
 		{"on_behalf_of", got.OnBehalfOf, "deploy-agent"},
 		{"content_digest", got.ContentDigest, entry.ContentDigest},
+		{"nonce", got.Nonce, entry.Nonce},
 	} {
 		if field.Got != field.Want {
 			t.Errorf("%s did not round trip: got %q, want %q", field.Name, field.Got, field.Want)
@@ -750,8 +755,12 @@ func testCommittedFields(t *testing.T, store audit.Store) {
 	}
 
 	// The forgery: change what the call contained, leave everything the old link hashed untouched.
+	otherDigest, _, err := audit.ContentDigestOf([]byte(`{"limit":"*"}`))
+	if err != nil {
+		t.Fatalf("ContentDigestOf() error = %v", err)
+	}
 	forged := *got
-	forged.ContentDigest = audit.ContentDigestOf([]byte(`{"limit":"*"}`))
+	forged.ContentDigest = otherDigest
 	if forged.ContentDigest == got.ContentDigest {
 		t.Fatal("the two payloads digest alike, so this proves nothing")
 	}

@@ -22,7 +22,7 @@ func TestDigestBodyBoundsAndSkips(t *testing.T) {
 	// An over-limit body on a normal mutating route is refused with 413, not buffered whole.
 	del := httptest.NewRequest(http.MethodDelete, "/v1/credentials/cred_1", bytes.NewReader(big))
 	dw := httptest.NewRecorder()
-	if _, ok := g.digestBody(dw, del); ok {
+	if _, _, ok := g.digestBody(dw, del); ok {
 		t.Error("digestBody accepted an over-limit DELETE body; a stranger could exhaust memory")
 	}
 	if dw.Code != http.StatusRequestEntityTooLarge {
@@ -32,9 +32,9 @@ func TestDigestBodyBoundsAndSkips(t *testing.T) {
 	// An upload path is passed through undigested, so its body still reaches the handler intact.
 	up := httptest.NewRequest(http.MethodPost, "/v1/import/awx", bytes.NewReader(big))
 	uw := httptest.NewRecorder()
-	digest, ok := g.digestBody(uw, up)
-	if !ok || digest != "" {
-		t.Errorf("upload path: digest=%q ok=%v, want an empty digest and ok", digest, ok)
+	digest, nonce, ok := g.digestBody(uw, up)
+	if !ok || digest != "" || nonce != "" {
+		t.Errorf("upload path: digest=%q nonce=%q ok=%v, want empty and ok", digest, nonce, ok)
 	}
 	if body, _ := io.ReadAll(up.Body); len(body) != len(big) {
 		t.Errorf("upload body was consumed by the gate: %d of %d bytes left for the handler", len(body), len(big))
@@ -44,9 +44,9 @@ func TestDigestBodyBoundsAndSkips(t *testing.T) {
 	small := []byte(`{"password":"x","name":"web"}`)
 	put := httptest.NewRequest(http.MethodPut, "/v1/credentials/cred_1", bytes.NewReader(small))
 	pw := httptest.NewRecorder()
-	d, ok := g.digestBody(pw, put)
-	if !ok || d == "" {
-		t.Errorf("small body: digest=%q ok=%v, want a digest and ok", d, ok)
+	d, n, ok := g.digestBody(pw, put)
+	if !ok || d == "" || n == "" {
+		t.Errorf("small body: digest=%q nonce=%q ok=%v, want a digest, a nonce, and ok", d, n, ok)
 	}
 	if restored, _ := io.ReadAll(put.Body); !bytes.Equal(restored, small) {
 		t.Error("small body was not restored for the handler after digesting")

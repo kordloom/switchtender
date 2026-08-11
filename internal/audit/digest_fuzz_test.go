@@ -7,10 +7,11 @@ import (
 	"testing"
 )
 
-// FuzzContentDigestOf holds the digest to its contract on arbitrary bodies: it never panics, it is
-// deterministic, an empty body carries no digest, and above all a secret value never influences the
-// digest, since the digest is served in exports and a digest a secret can influence is an offline
-// brute-force target.
+// FuzzContentDigestOf holds the digest to its contract on arbitrary bodies: it never panics, an empty
+// body carries no digest, the commitment verifies against the very body it was taken over, and above
+// all a secret value never influences the commitment. That last one is what keeps a body whose secret
+// slipped past redaction from being confirmed by a holder of an export, and it is proven by
+// disclosure: a body differing only in a secret verifies against the same keyed commitment.
 func FuzzContentDigestOf(f *testing.F) {
 	f.Add([]byte(`{"name":"web","password":"hunter2"}`))
 	f.Add([]byte(`{"vars":{"token":"t"},"list":[{"secret":"s"},{"ok":1}]}`))
@@ -29,18 +30,25 @@ func FuzzContentDigestOf(f *testing.F) {
 	f.Add([]byte(`{"repo_url":"https://user:tok@github.com/o/r.git"}`))
 	f.Add([]byte{0xff, 0xfe, 0x00})
 	f.Fuzz(func(t *testing.T, body []byte) {
-		got := ContentDigestOf(body)
+		digest, nonce, err := ContentDigestOf(body)
+		if err != nil {
+			t.Fatalf("ContentDigestOf() error = %v", err)
+		}
 		if len(body) == 0 {
-			if got != "" {
-				t.Fatalf("empty body digest = %q, want absent", got)
+			if digest != "" || nonce != "" {
+				t.Fatalf("empty body digest = %q nonce = %q, want absent", digest, nonce)
 			}
 			return
 		}
-		if !strings.HasPrefix(got, "sha256:") || len(got) != len("sha256:")+64 {
-			t.Fatalf("digest %q is not sha256: plus 64 hex characters", got)
+		if !strings.HasPrefix(digest, "sha256s:") {
+			t.Fatalf("digest %q is not a keyed sha256s commitment", digest)
 		}
-		if again := ContentDigestOf(body); again != got {
-			t.Fatalf("digest is not deterministic: %q then %q", got, again)
+		// The commitment must verify against the body it was taken over, and only with its nonce.
+		if !VerifyContentDigest(digest, nonce, body) {
+			t.Fatalf("digest does not verify against its own body")
+		}
+		if VerifyContentDigest(digest, "00", body) {
+			t.Fatalf("digest verified under a wrong nonce, so it is not keyed")
 		}
 
 		// The redaction invariant: when the body is a JSON object, two bodies that differ only in
@@ -63,9 +71,13 @@ func FuzzContentDigestOf(f *testing.F) {
 		if len(oneRaw) > MaxCanonicalDigestBytes || len(twoRaw) > MaxCanonicalDigestBytes {
 			return
 		}
-		if d1, d2 := ContentDigestOf(oneRaw), ContentDigestOf(twoRaw); d1 != d2 {
-			t.Fatalf("digests differ on bodies equal except for a password value: %q vs %q; "+
-				"the secret influenced the digest", d1, d2)
+		d, n, err := ContentDigestOf(oneRaw)
+		if err != nil {
+			return
+		}
+		if !VerifyContentDigest(d, n, twoRaw) {
+			t.Fatalf("a body differing only in a password value does not verify against the " +
+				"commitment; the secret influenced it")
 		}
 	})
 }
@@ -103,12 +115,16 @@ func TestContentDigestNoSecretLeak(t *testing.T) {
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
 			t.Parallel()
-			a, b := ContentDigestOf([]byte(test.A)), ContentDigestOf([]byte(test.B))
-			if a != b {
-				t.Errorf("digests differ though only the secret changed: %q vs %q; the secret leaked", a, b)
+			digest, nonce, err := ContentDigestOf([]byte(test.A))
+			if err != nil {
+				t.Fatalf("ContentDigestOf() error = %v", err)
 			}
-			if a == "" || !strings.HasPrefix(a, "sha256:") {
-				t.Errorf("digest = %q, want a sha256 digest", a)
+			if digest == "" || !strings.HasPrefix(digest, "sha256s:") {
+				t.Errorf("digest = %q, want a keyed sha256s commitment", digest)
+			}
+			if !VerifyContentDigest(digest, nonce, []byte(test.B)) {
+				t.Errorf("the body with a different secret does not verify against the commitment; " +
+					"the secret leaked into it")
 			}
 		})
 	}

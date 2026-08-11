@@ -250,7 +250,8 @@ CREATE TABLE IF NOT EXISTS audit_entries (
 	content_digest TEXT NOT NULL DEFAULT '',
 	seq       INTEGER NOT NULL DEFAULT 0,
 	prev_hash TEXT NOT NULL DEFAULT '',
-	hash      TEXT NOT NULL DEFAULT ''
+	hash      TEXT NOT NULL DEFAULT '',
+	nonce     TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS audit_anchors (
 	id    TEXT PRIMARY KEY,
@@ -774,6 +775,7 @@ func migrateAuditEntries(db *sql.DB) error {
 		"ALTER TABLE audit_entries ADD COLUMN actor_type TEXT NOT NULL DEFAULT ''",
 		"ALTER TABLE audit_entries ADD COLUMN on_behalf_of TEXT NOT NULL DEFAULT ''",
 		"ALTER TABLE audit_entries ADD COLUMN content_digest TEXT NOT NULL DEFAULT ''",
+		"ALTER TABLE audit_entries ADD COLUMN nonce TEXT NOT NULL DEFAULT ''",
 	} {
 		if _, err := db.Exec(col); err != nil &&
 			!strings.Contains(err.Error(), "duplicate column name") {

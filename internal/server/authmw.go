@@ -205,28 +205,37 @@ const (
 // buffered whole in the gate on top of the handler's own copy. Every other mutation, which is where
 // a secret can appear, is read up to one byte past maxBodyBytes and refused if it exceeds it, so a
 // DELETE with a multi-gigabyte body cannot exhaust memory.
-func (g *authGate) digestBody(w http.ResponseWriter, r *http.Request) (digest string, ok bool) {
+func (g *authGate) digestBody(w http.ResponseWriter, r *http.Request) (digest, nonce string, ok bool) {
 	if r.Body == nil || r.Body == http.NoBody {
-		return "", true
+		return "", "", true
 	}
 	if uploadPath(r.URL.Path) {
-		return "", true
+		return "", "", true
 	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxBodyBytes+1))
 	_ = r.Body.Close()
 	if err != nil {
 		respondError(w, g.log, http.StatusRequestEntityTooLarge,
 			"the request body could not be read, so the change was not recorded or made")
-		return "", false
+		return "", "", false
 	}
 	if len(body) > maxBodyBytes {
 		respondError(w, g.log, http.StatusRequestEntityTooLarge,
 			"the request body exceeds the limit, so the change was not recorded or made")
-		return "", false
+		return "", "", false
 	}
 	r.Body = io.NopCloser(bytes.NewReader(body))
 	// ContentLength is left as the client sent it; the restored body is the same bytes.
-	return audit.ContentDigestOf(body), true
+	digest, nonce, err = audit.ContentDigestOf(body)
+	if err != nil {
+		// The nonce comes from the system random source. If it cannot be read the change is refused
+		// rather than recorded under a weaker digest, the same fail-closed stance the trail takes
+		// when the entry cannot be appended at all.
+		respondError(w, g.log, http.StatusServiceUnavailable,
+			"refused: the change could not be recorded in the audit trail")
+		return "", "", false
+	}
+	return digest, nonce, true
 }
 
 // actorKey is the context key under which the authenticated actor is stored.
@@ -358,14 +367,14 @@ func (g *authGate) record(w http.ResponseWriter, who recordedActor, r *http.Requ
 	if g.audits == nil || r.Method == http.MethodGet || r.Method == http.MethodHead {
 		return "", true
 	}
-	digest, ok := g.digestBody(w, r)
+	digest, nonce, ok := g.digestBody(w, r)
 	if !ok {
 		return "", false
 	}
 	entry := &audit.Entry{
 		ID: audit.NewID(), At: time.Now(), Actor: who.Name,
 		ActorType: who.Type, OnBehalfOf: who.OnBehalfOf,
-		Method: r.Method, Path: auditPath(r), ContentDigest: digest,
+		Method: r.Method, Path: auditPath(r), ContentDigest: digest, Nonce: nonce,
 	}
 	if err := g.audits.Append(r.Context(), entry); err != nil {
 		g.log.Error("server: append audit entry: "+err.Error(),

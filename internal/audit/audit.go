@@ -6,6 +6,8 @@ package audit
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -39,10 +41,17 @@ type Entry struct {
 	Method string `json:"method"`
 	// Path is the request path.
 	Path string `json:"path"`
-	// ContentDigest is "sha256:" and the hex digest of the canonical, redacted change payload, empty
-	// when the request carried no body. It is committed by the chain link, so the trail proves what a
-	// change contained and not only that a call was made. See ContentDigestOf for the exact input.
+	// ContentDigest is the keyed commitment to the canonical, redacted change payload, empty when the
+	// request carried no body. It is committed by the chain link, so the trail proves what a change
+	// contained and not only that a call was made, and it is keyed by Nonce so it cannot be guessed
+	// back to the payload by a holder of an export. See ContentDigestOf for the exact form.
 	ContentDigest string `json:"content_digest,omitempty"`
+	// Nonce is the random key the ContentDigest commits under, hex encoded, stored beside the entry
+	// and never exported. The json:"-" tag is load-bearing: it keeps the nonce out of every bundle,
+	// SIEM forward, and evidence document, which is what stops a party holding one of those from
+	// recomputing the payload. It is not part of the chain hash; the digest already commits to the
+	// nonce's own hash, so a swapped nonce is detectable without the nonce being in the link.
+	Nonce string `json:"-"`
 	// Seq is the entry's position in the chain, assigned at append starting at one.
 	Seq int64 `json:"seq"`
 	// PrevHash is the hash of the entry before this one, empty for the first entry.
@@ -186,34 +195,59 @@ var urlUserinfo = regexp.MustCompile(`(?i)([a-z][a-z0-9+.\-]*://)[^/@\s]+@`)
 // redacted digest is reproducible, and it is not a plausible real value.
 const redactedMarker = "«redacted»"
 
-// ContentDigestOf returns the digest committed for a change payload: "sha256:" and the hex digest of
-// the canonical, secret-redacted form of body, or the empty string when there is no body.
+// ContentDigestOf returns the keyed commitment to a change payload and the nonce it is keyed under,
+// or empty strings when there is no body. The digest is "sha256s:", the hex SHA-256 of the nonce,
+// and the hex HMAC-SHA256 of the canonical redacted payload under the nonce. The caller stores the
+// nonce beside the entry and never exports it, and commits the digest into the chain.
 //
-// A JSON body is redacted and canonicalized before digesting: the value of any secret-bearing key is
-// replaced with a fixed marker, so the digest proves the non-secret shape and content of the change
-// without becoming a brute-force target for the secret, and canonicalization makes two semantically
-// identical requests digest alike so an auditor is comparing content rather than key order or
-// whitespace. A body that is not JSON, or one too large to parse economically, is digested as its
-// exact bytes; the mutating endpoints that carry a secret all take JSON, and the oversized case is an
-// upload with no secret in it.
+// A JSON body is redacted and canonicalized before it is committed: the value of any secret-bearing
+// key becomes a fixed marker, so the commitment proves the non-secret shape and content of the change
+// without carrying the secret. Keying it with a per-entry nonce is what prevents a holder of a bundle
+// or a SIEM event, which carry the digest but not the nonce, from guessing a payload whose secret
+// slipped past redaction and confirming it by recomputation. A body that is not JSON, or one too
+// large to parse economically, is committed as its exact bytes; the mutating endpoints that carry a
+// secret all take JSON, and the oversized case is an upload with no secret in it.
 //
-// A request with no body carries no digest at all rather than the digest of the empty string. Using
-// sha256("") would make "there was no body" indistinguishable from "the body was empty", and an
-// absent field is the honest statement of the first.
-func ContentDigestOf(body []byte) string {
+// A request with no body carries no digest at all rather than the digest of the empty string. Using a
+// commitment over "" would make "there was no body" indistinguishable from "the body was empty", and
+// an absent field is the honest statement of the first.
+func ContentDigestOf(body []byte) (digest, nonce string, err error) {
 	if len(body) == 0 {
-		return ""
+		return "", "", nil
 	}
+	input := canonicalForDigest(body)
+
+	// A plain SHA-256 over the redacted body is recomputable by anyone holding it, which is what an
+	// export and a SIEM event both carry. That makes a body whose secret slipped past redaction, a
+	// secret under a variable name the stem list does not know, an offline guessing target: try a
+	// candidate, recompute, compare. Keying the commitment with a fresh random nonce removes that:
+	// the digest is HMAC(nonce, body), so guessing the body is useless without the nonce, and the
+	// nonce is stored beside the entry and never leaves in a bundle. The nonce's own hash is
+	// committed too, so a nonce that was later swapped no longer matches what the chain fixed, which
+	// keeps a disclosure honest. See VerifyContentDigest for how a holder of the body and nonce
+	// checks one entry without being handed any other.
+	var raw [32]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", "", err
+	}
+	nonceHash := sha256.Sum256(raw[:])
+	mac := hmac.New(sha256.New, raw[:])
+	mac.Write(input)
+	return "sha256s:" + hex.EncodeToString(nonceHash[:]) + ":" + hex.EncodeToString(mac.Sum(nil)),
+		hex.EncodeToString(raw[:]), nil
+}
+
+// canonicalForDigest reduces a request body to the bytes the digest commits to: the redacted,
+// canonical JSON when it parses, or the raw body when it is too large to canonicalize economically.
+// A body that parses is never digested raw, so a secret the redaction removed is not committed by a
+// re-encoding failure falling back to the original bytes. A value JCS cannot canonicalize falls back
+// to a plain deterministic JSON encoding of the same redacted tree, and a tree that will not encode
+// at all reduces to the marker.
+func canonicalForDigest(body []byte) []byte {
 	input := body
 	if len(body) <= MaxCanonicalDigestBytes {
 		if value, err := jcs.Parse(body); err == nil {
 			value = redactSecrets(value)
-			// Once the body parsed, the digest is taken over the redacted tree and never the raw
-			// bytes. Falling back to the raw body when re-encoding failed would commit the secret the
-			// redaction just removed, which is the one thing this digest must never do. JCS is
-			// preferred so two equal requests digest alike; a value JCS cannot canonicalize, a
-			// fractional or a very large number, falls back to a plain deterministic JSON encoding of
-			// the same redacted tree, and a tree that will not encode at all digests the marker.
 			if canonical, err := jcs.Serialize(value); err == nil {
 				input = canonical
 			} else if marshaled, merr := json.Marshal(value); merr == nil {
@@ -223,8 +257,39 @@ func ContentDigestOf(body []byte) string {
 			}
 		}
 	}
-	sum := sha256.Sum256(input)
-	return "sha256:" + hex.EncodeToString(sum[:])
+	return input
+}
+
+// VerifyContentDigest reports whether body, under nonce, is the change committed by digest. It is how
+// a party handed one entry's body and nonce proves that entry without being shown any other: the body
+// is redacted and canonicalized the same way it was at record time, and the keyed commitment is
+// recomputed. It accepts the legacy unkeyed form so an entry written before the nonce existed still
+// verifies from the body alone.
+func VerifyContentDigest(digest, nonce string, body []byte) bool {
+	input := canonicalForDigest(body)
+	switch {
+	case strings.HasPrefix(digest, "sha256s:"):
+		parts := strings.Split(strings.TrimPrefix(digest, "sha256s:"), ":")
+		if len(parts) != 2 {
+			return false
+		}
+		raw, err := hex.DecodeString(nonce)
+		if err != nil || len(raw) == 0 {
+			return false
+		}
+		nonceHash := sha256.Sum256(raw)
+		if !hmac.Equal([]byte(hex.EncodeToString(nonceHash[:])), []byte(parts[0])) {
+			return false
+		}
+		mac := hmac.New(sha256.New, raw)
+		mac.Write(input)
+		return hmac.Equal([]byte(hex.EncodeToString(mac.Sum(nil))), []byte(parts[1]))
+	case strings.HasPrefix(digest, "sha256:"):
+		sum := sha256.Sum256(input)
+		return hmac.Equal([]byte("sha256:"+hex.EncodeToString(sum[:])), []byte(digest))
+	default:
+		return false
+	}
 }
 
 // redactSecrets walks a parsed JSON value and returns it with every secret removed: the value of a
