@@ -29,17 +29,21 @@ type Store interface {
 	RecordFire(ctx context.Context, id string, at time.Time, runID string) error
 	// ClaimDue atomically advances a schedule's next fire time from oldNext to newNext and
 	// reports whether this caller won. Concurrent scheduler instances race on the same row; only
-	// the winner fires, so a highly available pair never double-launches.
+	// the winner fires, so a highly available pair never double-launches. A missing row loses
+	// rather than erroring: the scheduler claims after listing, so a schedule deleted in that
+	// window is a lost race, and the caller skips it exactly as it skips a row another node won.
 	ClaimDue(ctx context.Context, id string, oldNext, newNext time.Time) (bool, error)
 }
 
-// ClaimDue atomically advances a schedule's next fire time and reports whether this caller won.
+// ClaimDue atomically advances a schedule's next fire time and reports whether this caller won. A
+// row that is gone loses without an error, the same answer the SQL backends give, since neither can
+// tell a deleted schedule from one another node already advanced and the caller treats both alike.
 func (m *memStore) ClaimDue(_ context.Context, id string, oldNext, newNext time.Time) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	sc, ok := m.schedules[id]
 	if !ok {
-		return false, ErrNotFound
+		return false, nil
 	}
 	if sc.NextRunAt == nil || !sc.NextRunAt.Equal(oldNext) {
 		return false, nil

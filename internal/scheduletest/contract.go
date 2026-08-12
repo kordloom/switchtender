@@ -1,5 +1,5 @@
 // Package scheduletest provides a shared behavior contract for schedule.Store implementations so the
-// in memory and SQLite backends cannot drift apart.
+// in memory, SQLite, and PostgreSQL backends cannot drift apart.
 package scheduletest
 
 import (
@@ -33,6 +33,10 @@ func Contract(t *testing.T, newStore func() schedule.Store) {
 		testRecordFire(t, newStore())
 	})
 	t.Run("update refuses a deleted schedule", func(t *testing.T) { testUpdate(t, newStore()) })
+	t.Run("missing row and zero value", func(t *testing.T) { testMissingAndZero(t, newStore()) })
+	t.Run("claim due on a missing row is a lost race", func(t *testing.T) {
+		testClaimDueMissing(t, newStore())
+	})
 	t.Run("empty list is non-nil", func(t *testing.T) {
 		got, err := newStore().List(context.Background())
 		if err != nil {
@@ -290,6 +294,162 @@ func testRecordFire(t *testing.T, store schedule.Store) {
 	}
 	if _, err := store.Get(ctx, "sch_a"); !errors.Is(err, schedule.ErrNotFound) {
 		t.Errorf("Get() after delete then fire = %v, want ErrNotFound; the schedule came back", err)
+	}
+}
+
+// testMissingAndZero sweeps every method against a row that is not there, an empty store, and a
+// zero-value argument, and pins the single answer all backends have to give.
+//
+// Nothing in the interface forces a backend to agree here, so each one used to answer for itself.
+// The split is between the two kinds of failure a caller has to tell apart: an error means the store
+// could not carry out the request and somebody should look, while a normal negative answer means the
+// request was carried out and the row was not there. A read or an edit that names a row that is gone
+// is the caller working from a stale id, so it reports ErrNotFound. Recording a fire is a note about
+// a run that already happened, so a missing row is nothing to report. Claiming is a lost race, which
+// testClaimDueMissing covers on its own.
+func testMissingAndZero(t *testing.T, store schedule.Store) {
+	ctx := context.Background()
+
+	tests := []struct {
+		Call func(schedule.Store) error
+		Want error
+		Name string
+	}{{ // Test 0: Get names a row that is not there.
+		Name: "get missing",
+		Call: func(s schedule.Store) error { _, err := s.Get(ctx, "nope"); return err },
+		Want: schedule.ErrNotFound,
+	}, { // Test 1: Get with the zero-value id.
+		Name: "get empty id",
+		Call: func(s schedule.Store) error { _, err := s.Get(ctx, ""); return err },
+		Want: schedule.ErrNotFound,
+	}, { // Test 2: Delete names a row that is not there.
+		Name: "delete missing",
+		Call: func(s schedule.Store) error { return s.Delete(ctx, "nope") },
+		Want: schedule.ErrNotFound,
+	}, { // Test 3: Delete with the zero-value id.
+		Name: "delete empty id",
+		Call: func(s schedule.Store) error { return s.Delete(ctx, "") },
+		Want: schedule.ErrNotFound,
+	}, { // Test 4: Update names a row that is not there.
+		Name: "update missing",
+		Call: func(s schedule.Store) error {
+			return s.Update(ctx, &schedule.Schedule{ID: "nope", Cron: "0 * * * *", Playbook: "p.yml"})
+		},
+		Want: schedule.ErrNotFound,
+	}, { // Test 5: Update with a zero-value schedule, whose id is empty.
+		Name: "update zero value schedule",
+		Call: func(s schedule.Store) error { return s.Update(ctx, &schedule.Schedule{}) },
+		Want: schedule.ErrNotFound,
+	}, { // Test 6: RecordFire names a row that is not there.
+		Name: "record fire missing",
+		Call: func(s schedule.Store) error { return s.RecordFire(ctx, "nope", time.Now(), "run_1") },
+		Want: nil,
+	}, { // Test 7: RecordFire with a zero-value id, time, and run id.
+		Name: "record fire zero values",
+		Call: func(s schedule.Store) error { return s.RecordFire(ctx, "", time.Time{}, "") },
+		Want: nil,
+	}}
+
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
+			if err := test.Call(store); !errors.Is(err, test.Want) {
+				t.Errorf("%s = %v, want %v", test.Name, err, test.Want)
+			}
+		})
+	}
+
+	// None of the above may have created anything. A backend that upserts where it should update
+	// passes every assertion so far and leaves a schedule behind that fires.
+	left, err := store.List(ctx)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(left) != 0 {
+		t.Errorf("calls against missing rows left %d schedule(s) behind, want an empty store", len(left))
+	}
+
+	// A zero-value schedule is storable and reads back as itself, including the zero created time.
+	// A backend that cannot round trip the zero time reports a schedule the others do not.
+	if err := store.Save(ctx, &schedule.Schedule{}); err != nil {
+		t.Fatalf("Save(zero value) error = %v", err)
+	}
+	got, err := store.Get(ctx, "")
+	if err != nil {
+		t.Fatalf("Get() after saving a zero-value schedule error = %v", err)
+	}
+	if diff := cmp.Diff(&schedule.Schedule{}, got, cmpopts.EquateEmpty()); diff != "" {
+		t.Errorf("zero-value schedule round trip mismatch (-want +got):\n%s", diff)
+	}
+}
+
+// testClaimDueMissing pins that claiming a row that is not there reports a lost race rather than an
+// error, on every backend.
+//
+// ClaimDue is a compare-and-swap the scheduler runs after listing, so a schedule deleted in the
+// window between the list and the claim is unavoidable and expected. It is not a fault: the caller's
+// right move is the same one it makes when another scheduler node got there first, which is to skip
+// the schedule and carry on. Reporting it as an error conflates "I could not tell you the outcome"
+// with "the outcome is no", and only the first deserves a log line or a retry. The SQL backends also
+// cannot tell a deleted row from a row another node already advanced without a second query, since
+// both are zero rows affected, so the error would cost a round trip to manufacture a distinction the
+// caller must not act on anyway. A claim against a row that is gone loses, quietly.
+func testClaimDueMissing(t *testing.T, store schedule.Store) {
+	ctx := context.Background()
+	next := time.Date(2026, 8, 11, 2, 0, 0, 0, time.UTC)
+
+	won, err := store.ClaimDue(ctx, "never_existed", next, next.Add(time.Hour))
+	if err != nil {
+		t.Errorf("ClaimDue() on a row that never existed error = %v, want nil; a schedule that is "+
+			"not there is a lost race, not a fault", err)
+	}
+	if won {
+		t.Error("ClaimDue() on a row that never existed won, want it to lose")
+	}
+	if won, err = store.ClaimDue(ctx, "", time.Time{}, time.Time{}); err != nil || won {
+		t.Errorf("ClaimDue() with zero-value arguments = (%v, %v), want (false, nil)", won, err)
+	}
+
+	// The same claim against a schedule deleted after it was listed, which is the case the scheduler
+	// actually hits. Nothing may be re-created by the losing claim.
+	sc := &schedule.Schedule{
+		ID: "sch_gone", Name: "gone", Cron: "0 * * * *", Playbook: "p.yml", Enabled: true,
+		CreatedAt: time.Date(2026, 8, 11, 1, 0, 0, 0, time.UTC), NextRunAt: &next,
+	}
+	if err := store.Save(ctx, sc); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	if err := store.Delete(ctx, "sch_gone"); err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+	won, err = store.ClaimDue(ctx, "sch_gone", next, next.Add(time.Hour))
+	if err != nil {
+		t.Errorf("ClaimDue() on a schedule deleted after it was listed error = %v, want nil", err)
+	}
+	if won {
+		t.Error("ClaimDue() on a deleted schedule won, so the scheduler would fire a deleted schedule")
+	}
+	if _, err := store.Get(ctx, "sch_gone"); !errors.Is(err, schedule.ErrNotFound) {
+		t.Errorf("Get() after claiming a deleted schedule = %v, want ErrNotFound; the claim "+
+			"re-created it", err)
+	}
+
+	// A claim against a live schedule with no next run time must also lose rather than match a null.
+	live := &schedule.Schedule{
+		ID: "sch_idle", Name: "idle", Cron: "0 * * * *", Playbook: "p.yml", Enabled: true,
+		CreatedAt: time.Date(2026, 8, 11, 1, 0, 0, 0, time.UTC),
+	}
+	if err := store.Save(ctx, live); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	if won, err = store.ClaimDue(ctx, "sch_idle", time.Time{}, next); err != nil || won {
+		t.Errorf("ClaimDue() against an unscheduled row = (%v, %v), want (false, nil)", won, err)
+	}
+	idle, err := store.Get(ctx, "sch_idle")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if idle.NextRunAt != nil {
+		t.Errorf("a lost claim advanced NextRunAt to %v, want it left unset", idle.NextRunAt)
 	}
 }
 
