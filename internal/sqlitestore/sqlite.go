@@ -2378,6 +2378,27 @@ func (s *store) TransitionStatus(ctx context.Context, id string, from, to run.St
 	return n > 0, nil
 }
 
+// FinalizeRunning moves a running run to its terminal status and records the exit code, failure
+// detail, resolved image, and end time in the same statement, so a run is never terminal with the
+// facts that explain it missing.
+func (s *store) FinalizeRunning(ctx context.Context, id string, fin run.Finalization) (bool, error) {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE runs SET status=?, exit_code=?, error=?, image=?, commit_sha=?,
+pull_credential_id=?, outputs=?, warning=?, ended_at=?
+WHERE id=? AND status=?`,
+		string(fin.Status), sqlutil.NullInt(fin.ExitCode), fin.Error, fin.Image,
+		fin.CommitSHA, fin.PullCredentialID, sqlutil.JSONMap(fin.Outputs), fin.Warning,
+		sqlutil.FormatTime(fin.EndedAt), id, string(run.StatusRunning))
+	if err != nil {
+		return false, fmt.Errorf("finalize running run: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("finalize running run: %w", err)
+	}
+	return n > 0, nil
+}
+
 // RunTimings returns the timing fields of the most recent top-level runs, newest first.
 //
 // It selects seven columns rather than the whole row on purpose. The metrics endpoint reads this on

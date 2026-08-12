@@ -124,6 +124,12 @@ func (c *Client) TransitionStatus(context.Context, string, run.Status, run.Statu
 	return false, ErrUnsupported
 }
 
+// FinalizeRunning is a control-node write and is not served to workers. A relay worker reports how
+// a run ended through Save, and the control node applies that report to the run it holds.
+func (c *Client) FinalizeRunning(context.Context, string, run.Finalization) (bool, error) {
+	return false, ErrUnsupported
+}
+
 // Workers is a control-node query and is not served to workers.
 func (c *Client) Workers(context.Context) ([]run.WorkerInfo, error) { return nil, ErrUnsupported }
 

@@ -1133,7 +1133,7 @@ func (d *Dispatcher) coordinate(parent *run.Run, children []*run.Run) {
 	parent.StartedAt = &started
 	parent.ClaimedBy = d.owner
 	parent.ClaimedAt = &started
-	d.save(parent)
+	_ = d.save(parent)
 
 	watchCtx, stopWatch := context.WithCancel(parentCtx)
 	defer stopWatch()
@@ -1364,7 +1364,7 @@ func (d *Dispatcher) runPipeline(parent *run.Run, steps []run.PipelineStep) {
 	parent.StartedAt = &started
 	parent.ClaimedBy = d.owner
 	parent.ClaimedAt = &started
-	d.save(parent)
+	_ = d.save(parent)
 
 	watchCtx, stopWatch := context.WithCancel(pipeCtx)
 	defer stopWatch()
@@ -1688,7 +1688,7 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 	r.StartedAt = &started
 	r.ClaimedBy = d.owner
 	r.ClaimedAt = &started
-	d.save(r)
+	_ = d.save(r)
 
 	watchCtx, stopWatch := context.WithCancel(ctx)
 	defer stopWatch()
@@ -1700,7 +1700,7 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 		// Capture is off, so this run will finish with an empty matrix and no events however well
 		// it goes. Record why on the run, rather than leaving a green run that shows nothing.
 		r.Warning = "event capture unavailable, so this run records no events: " + eventsErr.Error()
-		d.save(r)
+		_ = d.save(r)
 	}
 
 	parent := ""
@@ -1979,69 +1979,99 @@ func (d *Dispatcher) Cancel(id string) bool {
 	return ok
 }
 
-// finalize records the terminal status, exit code, failure detail, and end time of r, and sends
-// webhook notifications for top-level runs. It refuses to resurrect a run another actor already moved
-// to a different terminal state, such as the janitor interrupting an expired lease, so a slow but
-// still alive worker that is reclaimed cannot overwrite the interrupt with a success.
+// finalize records the terminal status, exit code, failure detail, and end time of r, commits the
+// run's outcome to the audit chain, and sends webhook notifications for top-level runs. It refuses to
+// resurrect a run another actor already moved to a different terminal state, such as the janitor
+// interrupting an expired lease, so a slow but still alive worker that is reclaimed cannot overwrite
+// the interrupt with a success.
+//
+// The chain is written only after the store confirms the terminal record landed. An outcome entry
+// commits a digest of what the stored evidence says the run did, so committing one the store never
+// accepted leaves the chain asserting an outcome the database contradicts and a receipt nobody can
+// verify. When the write does not land, r keeps the status the store holds and the run is left for
+// the sweep to reclaim and mark interrupted, which is retryable.
 func (d *Dispatcher) finalize(r *run.Run, status run.Status, exitCode *int, failure string) {
-	if stored, fenced := d.fencedFinalize(r.ID, status); fenced {
+	fin := run.Finalization{
+		Status: status, ExitCode: exitCode, Error: failure, Image: r.Image,
+		CommitSHA: r.CommitSHA, PullCredentialID: r.PullCredentialID,
+		Outputs: r.Outputs, Warning: r.Warning, EndedAt: time.Now(),
+	}
+	stored, recorded := d.recordTerminal(r, fin)
+	if !recorded {
 		r.Status = stored
-		d.log.Warn("dispatch: run already finalized by another actor, not overwriting",
-			zap.String("run_id", r.ID), zap.String("stored", string(stored)),
-			zap.String("attempted", string(status)))
 		return
 	}
-	ended := time.Now()
-	r.Status = status
-	r.ExitCode = exitCode
-	r.Error = failure
-	r.EndedAt = &ended
-	d.save(r)
 	// Commit the outcome to the chain before notifying anyone. A notification is external and
 	// after-the-fact; the tamper-evident record of what the run did comes first.
 	d.commitOutcome(r)
 	d.notify(r)
 }
 
-// fencedFinalize reports whether a run must not be finalized to status because another actor already
-// moved it to a different terminal state. It first tries to claim the terminal transition atomically
-// from running, the state every executing run finalizes from; a successful claim means no other actor
-// intervened. When the store cannot compare and swap, such as the relay client, or the run was not in
-// running, it falls back to reading the current status. It returns the stored status alongside the
-// decision so the caller can reflect reality. A legitimate finalize from a non running state, such as
-// a rejected run, is never fenced because its stored status already equals the target. When even a
-// retried read cannot establish the stored state, the finalize is fenced: skipping the write risks a
-// janitor interrupt on a healthy run, but writing blind risks resurrecting a run another actor
-// already terminalized, which is the failure the fence exists to stop.
-func (d *Dispatcher) fencedFinalize(id string, status run.Status) (run.Status, bool) {
+// recordTerminal writes r's terminal record to the store and reports the run's stored status and
+// whether the write landed. It applies fin to r only once the store has accepted it, so an in-memory
+// run that says succeeded is a run the database says succeeded too.
+//
+// The first attempt is one conditional update from running, the state every executing run finalizes
+// from: it claims the transition and records the facts that explain it together, so no failure can
+// leave a run terminal with no exit code, where neither this dispatcher nor the janitor, which sweeps
+// pending and running runs, would ever look at it again.
+//
+// A run that is not running falls back to reading the stored state and deciding from it. That covers
+// a legitimate finalize from a non running state, such as a rejection, which is never fenced because
+// its stored status already equals the target, and it covers a relay worker, whose client cannot
+// compare and swap and reports through Save. When even a retried read cannot establish the stored
+// state, nothing is written: skipping the write risks a janitor interrupt on a healthy run, but
+// writing blind risks resurrecting a run another actor already terminalized, which is the failure the
+// fence exists to stop.
+func (d *Dispatcher) recordTerminal(r *run.Run, fin run.Finalization) (run.Status, bool) {
 	ctx := context.Background()
-	if moved, err := d.store.TransitionStatus(ctx, id, run.StatusRunning, status); err == nil && moved {
-		return status, false
+	if moved, err := d.store.FinalizeRunning(ctx, r.ID, fin); err == nil && moved {
+		applyFinalization(r, fin)
+		return fin.Status, true
 	}
-	var cur *run.Run
-	if err := withRetries(func() error {
-		var err error
-		cur, err = d.store.Get(ctx, id)
-		return err
-	}); err != nil {
+	cur, err := d.storeGetWithRetries(ctx, r.ID)
+	if err != nil {
 		d.log.Warn("dispatch: cannot verify run state, skipping finalize: "+err.Error(),
-			zap.String("run_id", id))
-		return status, true
+			zap.String("run_id", r.ID))
+		return r.Status, false
 	}
-	if cur.Status.Terminal() && cur.Status != status {
-		return cur.Status, true
+	if cur.Status.Terminal() && cur.Status != fin.Status {
+		d.log.Warn("dispatch: run already finalized by another actor, not overwriting",
+			zap.String("run_id", r.ID), zap.String("stored", string(cur.Status)),
+			zap.String("attempted", string(fin.Status)))
+		return cur.Status, false
 	}
-	return cur.Status, false
+	// Save writes the whole run, so the terminal fields go on a copy: a save that fails must leave
+	// the caller's run reading the way the store still does.
+	next := *r
+	applyFinalization(&next, fin)
+	if err := d.save(&next); err != nil {
+		return cur.Status, false
+	}
+	*r = next
+	return fin.Status, true
+}
+
+// applyFinalization copies a stored terminal record onto the run in memory.
+func applyFinalization(r *run.Run, fin run.Finalization) {
+	ended := fin.EndedAt
+	r.Status = fin.Status
+	r.ExitCode = fin.ExitCode
+	r.Error = fin.Error
+	r.EndedAt = &ended
 }
 
 // save persists r using a background context so terminal state is recorded even during shutdown.
-// A failed save retries briefly, since losing a terminal status strands the run as running.
-func (d *Dispatcher) save(r *run.Run) {
-	if err := withRetries(func() error {
+// A failed save retries briefly, since losing a terminal status strands the run as running, and is
+// logged here and returned for a caller whose next step depends on the write having landed.
+func (d *Dispatcher) save(r *run.Run) error {
+	err := withRetries(func() error {
 		return d.store.Save(context.Background(), r)
-	}); err != nil {
+	})
+	if err != nil {
 		d.log.Error("dispatch: save run: "+err.Error(), zap.String("run_id", r.ID))
 	}
+	return err
 }
 
 // withRetries runs a store write, retrying transient failures with a short backoff. Concurrent

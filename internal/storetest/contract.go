@@ -84,6 +84,7 @@ func Contract(t *testing.T, newStore func() run.Store) {
 		testStoreAgreementOnEdges(t, newStore())
 	})
 	t.Run("transition status", func(t *testing.T) { testTransitionStatus(t, newStore()) })
+	t.Run("finalize running is one write", func(t *testing.T) { testFinalizeRunning(t, newStore()) })
 	t.Run("workers", func(t *testing.T) { testWorkers(t, newStore()) })
 	t.Run("retention purge", func(t *testing.T) { testPurge(t, newStore()) })
 	t.Run("summary trim bounds growth", func(t *testing.T) { testTrimSummaries(t, newStore()) })
@@ -150,6 +151,122 @@ func testTransitionStatus(t *testing.T, store run.Store) {
 	}
 	if ok, err := store.TransitionStatus(ctx, "run_missing", run.StatusPending, run.StatusRejected); err != nil || ok {
 		t.Errorf("missing run transition = (%v, %v), want (false, nil)", ok, err)
+	}
+}
+
+// testFinalizeRunning checks the terminal write: it moves a running run and records every fact that
+// explains how it ended in the same operation, and it changes nothing at all for a run that is not
+// running, whether that run is still queued, already terminal, or missing. A store that moved the
+// status without the facts would leave a run terminal with no exit code, which no sweep reclaims.
+func testFinalizeRunning(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	ended := time.Date(2026, 2, 3, 4, 5, 6, 0, time.UTC)
+	code := 7
+	fin := run.Finalization{
+		Status: run.StatusFailed, ExitCode: &code, Error: "the play failed",
+		Image: "ghcr.io/example/runner:1.2", CommitSHA: "c0ffee1234567890c0ffee1234567890c0ffee12",
+		PullCredentialID: "cred_pull", Outputs: map[string]any{"version": "1.2.3"},
+		Warning: "this run recorded no per-host result", EndedAt: ended,
+	}
+
+	r := sampleRun("run_fin")
+	r.Status = run.StatusRunning
+	r.ExitCode = nil
+	r.EndedAt = nil
+	r.Error = ""
+	r.Image = ""
+	// Resolved while the run is under way, after the last whole-run save, so the terminal write is
+	// their only chance to land.
+	r.CommitSHA = ""
+	r.PullCredentialID = ""
+	r.Outputs = nil
+	r.Warning = ""
+	r.IdempotencyKey = "idem_fin"
+	if err := store.Save(ctx, r); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	ok, err := store.FinalizeRunning(ctx, "run_fin", fin)
+	if err != nil {
+		t.Fatalf("FinalizeRunning() error = %v", err)
+	}
+	if !ok {
+		t.Fatal("FinalizeRunning() changed nothing for a running run, want it to record the result")
+	}
+	got, err := store.Get(ctx, "run_fin")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.Status != run.StatusFailed {
+		t.Errorf("status = %q, want failed", got.Status)
+	}
+	if got.ExitCode == nil || *got.ExitCode != code {
+		t.Errorf("exit code = %v, want %d", got.ExitCode, code)
+	}
+	if got.Error != fin.Error {
+		t.Errorf("error = %q, want %q", got.Error, fin.Error)
+	}
+	if got.Image != fin.Image {
+		t.Errorf("image = %q, want %q", got.Image, fin.Image)
+	}
+	if got.EndedAt == nil || !got.EndedAt.Equal(ended) {
+		t.Errorf("ended_at = %v, want %v", got.EndedAt, ended)
+	}
+	// The commit the run executed and the credential its image was pulled with are resolved after
+	// the last whole-run save. Dropping them leaves the dossier without provenance and narrows the
+	// grantable objects the run's own authorization is rebuilt from.
+	if got.CommitSHA != fin.CommitSHA {
+		t.Errorf("commit_sha = %q, want %q", got.CommitSHA, fin.CommitSHA)
+	}
+	if got.PullCredentialID != fin.PullCredentialID {
+		t.Errorf("pull_credential_id = %q, want %q", got.PullCredentialID, fin.PullCredentialID)
+	}
+	// Outputs are what the next pipeline step reads as its inputs, and the warning is the run's note
+	// about itself. Both are folded as the run finishes, so this write is their only chance to land.
+	if diff := cmp.Diff(fin.Outputs, got.Outputs, cmpopts.EquateEmpty()); diff != "" {
+		t.Errorf("outputs mismatch (-want +got):\n%s", diff)
+	}
+	if got.Warning != fin.Warning {
+		t.Errorf("warning = %q, want %q", got.Warning, fin.Warning)
+	}
+
+	// A second attempt has nothing to finalize, and it must not rewrite what the first one recorded.
+	second := run.Finalization{Status: run.StatusSucceeded, Error: "", Image: "", EndedAt: ended}
+	if ok, err := store.FinalizeRunning(ctx, "run_fin", second); err != nil || ok {
+		t.Errorf("second FinalizeRunning() = (%v, %v), want (false, nil)", ok, err)
+	}
+	again, err := store.Get(ctx, "run_fin")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if again.Status != run.StatusFailed || again.Error != fin.Error {
+		t.Errorf("terminal run changed to (%q, %q), want it left at (failed, %q)",
+			again.Status, again.Error, fin.Error)
+	}
+
+	// A queued run has not been executed by anybody, so nothing about how it ended can be recorded.
+	queued := sampleRun("run_fin_pending")
+	queued.Status = run.StatusPending
+	queued.ExitCode = nil
+	queued.EndedAt = nil
+	queued.IdempotencyKey = "idem_fin_pending"
+	if err := store.Save(ctx, queued); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	if ok, err := store.FinalizeRunning(ctx, "run_fin_pending", fin); err != nil || ok {
+		t.Errorf("pending FinalizeRunning() = (%v, %v), want (false, nil)", ok, err)
+	}
+	stillQueued, err := store.Get(ctx, "run_fin_pending")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if stillQueued.Status != run.StatusPending || stillQueued.EndedAt != nil {
+		t.Errorf("pending run became (%q, ended %v), want it untouched",
+			stillQueued.Status, stillQueued.EndedAt)
+	}
+
+	if ok, err := store.FinalizeRunning(ctx, "run_missing", fin); err != nil || ok {
+		t.Errorf("missing FinalizeRunning() = (%v, %v), want (false, nil)", ok, err)
 	}
 }
 

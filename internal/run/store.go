@@ -65,6 +65,40 @@ func AbandonedParent(r *Run, cutoff time.Time) bool {
 	return r.ClaimedBy == "" && r.CreatedAt.Before(cutoff)
 }
 
+// Finalization is everything an executor learns by running a run: how it ended and the facts that
+// explain it. It is one value because a store writes it as one statement, so a run is never left
+// terminal with the facts missing.
+type Finalization struct {
+	// Status is the terminal status the run reached.
+	Status Status
+	// ExitCode is the tool's exit code, nil when the run never produced one.
+	ExitCode *int
+	// Error is the failure detail, empty when the run ended without one.
+	Error string
+	// Image is the container image the run actually executed in, empty for a host run. It is part of
+	// the terminal write because an executor only resolves the image while the run is under way, and
+	// the outcome digest commits to it, so it has to land with the terminal status or the digest can
+	// never be recomputed from the stored run.
+	Image string
+	// CommitSHA is the project commit the run executed, empty when it used no project. It is
+	// resolved with the checkout while the run is under way, after the last whole-run save, so it
+	// lands here or not at all, and the run dossier reports the provenance of what actually ran.
+	CommitSHA string
+	// PullCredentialID is the credential the run's image was pulled with, empty when none was used.
+	// It is resolved with the project and is one of the grantable objects a run's authorization is
+	// built from, so losing it silently narrows what the stored run is checked against.
+	PullCredentialID string
+	// Outputs are the values the run published with set_stats, which a later pipeline step reads as
+	// its inputs. They are folded from the run's events as it finishes, so the terminal write is the
+	// first and only chance to store them.
+	Outputs map[string]any
+	// Warning is the note a run carries about itself, such as having recorded no per-host result.
+	// It is written while the run finishes, for the same reason.
+	Warning string
+	// EndedAt is when the run reached its terminal state.
+	EndedAt time.Time
+}
+
 // Store persists runs, their captured log output, and their structured events.
 // Implementations must be safe for concurrent use.
 type Store interface {
@@ -131,6 +165,17 @@ type Store interface {
 	// whether it changed a row. It changes nothing and returns false when the run is missing or is
 	// not in the from status, so two callers racing to approve or reject the same run cannot both win.
 	TransitionStatus(ctx context.Context, id string, from, to Status) (bool, error)
+	// FinalizeRunning atomically moves a running run to its terminal status and records the fields
+	// that explain how it ended in the same write, reporting whether it changed a row. It changes
+	// nothing and returns false when the run is missing or is no longer running, so an executor
+	// cannot overwrite a terminal state another actor already recorded.
+	//
+	// The transition and the facts belong in one statement. Moving the status first and writing the
+	// exit code, failure text, and end time after left a run terminal with none of them whenever the
+	// second write failed, and a terminal run is swept by nothing: the janitor reclaims pending and
+	// running runs only. The caller must treat a false or an error as "the run did not finish here"
+	// and leave it for the sweep.
+	FinalizeRunning(ctx context.Context, id string, fin Finalization) (bool, error)
 	// Workers lists executors by the leases they hold, most recently seen first. Only leases
 	// stamped within WorkerWindow count, so the listing stays bounded as run history grows.
 	Workers(ctx context.Context) ([]WorkerInfo, error)
@@ -818,6 +863,28 @@ func (m *memStore) TransitionStatus(_ context.Context, id string, from, to Statu
 		return false, nil
 	}
 	r.Status = to
+	return true, nil
+}
+
+// FinalizeRunning moves a running run to its terminal status and records the exit code, failure
+// detail, resolved image, and end time in the same locked write.
+func (m *memStore) FinalizeRunning(_ context.Context, id string, fin Finalization) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r, ok := m.runs[id]
+	if !ok || r.Status != StatusRunning {
+		return false, nil
+	}
+	ended := fin.EndedAt
+	r.Status = fin.Status
+	r.ExitCode = fin.ExitCode
+	r.Error = fin.Error
+	r.Image = fin.Image
+	r.CommitSHA = fin.CommitSHA
+	r.PullCredentialID = fin.PullCredentialID
+	r.Outputs = fin.Outputs
+	r.Warning = fin.Warning
+	r.EndedAt = &ended
 	return true, nil
 }
 
