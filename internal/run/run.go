@@ -215,6 +215,14 @@ type Run struct {
 	CommitSHA string `json:"commit_sha,omitempty"`
 	// InventoryID names a stored inventory materialized for this run instead of a file path.
 	InventoryID string `json:"inventory_id,omitempty"`
+	// OrgID is the owning organization stamped from the submitting actor at creation. It is what
+	// scopes a run that references no stored object: an inline script, a proposed run, or a
+	// terraform working directory names no project, inventory, or credential, so there is nothing
+	// for the per-object grant check to filter on and the run would otherwise be readable, cancelable,
+	// and approvable across every tenant. The run-scoped authorizer treats an objectless run as owned
+	// by this org, so a caller outside it who holds no grant on any object the run references is
+	// denied. Empty for a run created outside an actor's request, such as a seeded demo run.
+	OrgID string `json:"org_id,omitempty"`
 	// Queue restricts execution to workers serving this queue. Empty runs on the default pool.
 	Queue string `json:"queue,omitempty"`
 	// Image names a container image the run executes inside, its execution environment. It outranks
@@ -443,6 +451,16 @@ func WithProject(id string) SubmitOption {
 // WithInventory targets a stored inventory instead of a file path.
 func WithInventory(id string) SubmitOption {
 	return func(r *Run) { r.InventoryID = id }
+}
+
+// WithOrgID stamps the owning organization on the run, the org of the submitting actor. It is what
+// scopes an objectless run to a tenant. An empty id leaves the run unowned.
+func WithOrgID(orgID string) SubmitOption {
+	return func(r *Run) {
+		if orgID != "" {
+			r.OrgID = orgID
+		}
+	}
 }
 
 // WithQueue restricts the run to workers serving the named queue.

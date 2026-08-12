@@ -129,6 +129,11 @@ func (d *Dispatcher) proposeApply(
 	if r.AuditReceipt != "" {
 		opts = append(opts, run.WithAuditReceiptOf(r.AuditReceipt))
 	}
+	// The apply is proposed by the executor, whose context carries no submitting org, so the plan
+	// run's org is the truthful one: the apply belongs to the same tenant as the plan that spawned
+	// it, and a plan of an objectless working directory would otherwise leave the apply readable
+	// across every tenant.
+	opts = append(opts, run.WithOrgID(r.OrgID))
 	proposal, err := d.Submit(ctx, r.Playbook, r.Inventory, opts...)
 	if err != nil {
 		d.log.Error("dispatch: propose apply: "+err.Error(), zap.String("run_id", r.ID))

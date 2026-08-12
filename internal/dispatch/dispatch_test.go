@@ -132,6 +132,55 @@ func okRunner() roundhouse.Runner {
 	)
 }
 
+// TestSubmitStampsSubmitterOrg proves an objectless run is stamped with the submitting actor's org
+// from the request context, so the run-scoped authorizer has something to confine it by. Without the
+// stamp an inline script, which names no project, inventory, or credential, would be an objectless
+// run readable across every tenant. A split parent, its shards, a pipeline parent, and its steps all
+// carry the same org, since each names no object of its own.
+func TestSubmitStampsSubmitterOrg(t *testing.T) {
+	t.Parallel()
+	ctx := run.WithSubmitterOrg(context.Background(), "org_tenant")
+
+	t.Run("single inline run", func(t *testing.T) {
+		t.Parallel()
+		store := run.NewMemStore()
+		d := New(store, okRunner(), nil)
+		defer d.Close()
+		created, err := d.Submit(ctx, "", "", run.WithTool(run.ToolBash), run.WithCommand("echo hi"))
+		if err != nil {
+			t.Fatalf("Submit() error = %v", err)
+		}
+		got, err := store.Get(context.Background(), created.ID)
+		if err != nil {
+			t.Fatalf("Get() error = %v", err)
+		}
+		if got.OrgID != "org_tenant" {
+			t.Errorf("OrgID = %q, want org_tenant, so the objectless run is scoped to its tenant",
+				got.OrgID)
+		}
+	})
+
+	t.Run("explicit org wins over context", func(t *testing.T) {
+		t.Parallel()
+		store := run.NewMemStore()
+		d := New(store, okRunner(), nil)
+		defer d.Close()
+		created, err := d.Submit(ctx, "", "", run.WithTool(run.ToolBash), run.WithCommand("echo hi"),
+			run.WithOrgID("org_explicit"))
+		if err != nil {
+			t.Fatalf("Submit() error = %v", err)
+		}
+		got, err := store.Get(context.Background(), created.ID)
+		if err != nil {
+			t.Fatalf("Get() error = %v", err)
+		}
+		if got.OrgID != "org_explicit" {
+			t.Errorf("OrgID = %q, want org_explicit, an explicit stamp must win over the context",
+				got.OrgID)
+		}
+	})
+}
+
 // TestSubmitIdempotency verifies a keyed submit dedupes: the same key returns the original run, a
 // different key is a new run, and a keyless submit never dedupes.
 func TestSubmitIdempotency(t *testing.T) {

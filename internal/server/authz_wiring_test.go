@@ -15,6 +15,7 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/internal/ai"
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/grant"
 	"github.com/kordloom/switchtender/internal/inventory"
@@ -36,6 +37,9 @@ const (
 	wiringMyOrg = "org_intruder"
 	// wiringTheirOrg is the organization the caller has no membership in.
 	wiringTheirOrg = "org_victim"
+	// bareVictimCommand is the inline script of the objectless victim run, a distinctive string so a
+	// test can prove it did or did not leak into a response body.
+	bareVictimCommand = "rm -rf /victim/data # VICTIM_SECRET_COMMAND"
 )
 
 // recordingRetrier is a Retrier that records which runs a relaunch reached, so a test can tell a
@@ -201,6 +205,17 @@ func newWiringFixture(t *testing.T) *wiringFixture {
 			ProjectID: "proj_mine", InventoryID: "inv_mine",
 			Status: run.StatusPendingApproval, CreatedAt: time.Now(),
 		},
+		// The objectless runs of B3: an inline script that names no project, inventory, or
+		// credential, so there is nothing for the per-object grant check to filter on. Each is
+		// scoped only by the org it was stamped with at submit.
+		{
+			ID: "run_victim_bare", Tool: run.ToolBash, Command: bareVictimCommand,
+			OrgID: wiringTheirOrg, Status: run.StatusPendingApproval, CreatedAt: time.Now(),
+		},
+		{
+			ID: "run_mine_bare", Tool: run.ToolBash, Command: "echo mine",
+			OrgID: wiringMyOrg, Status: run.StatusPendingApproval, CreatedAt: time.Now(),
+		},
 	} {
 		if err := runs.Save(ctx, rn); err != nil {
 			t.Fatalf("Save() run %s error = %v", rn.ID, err)
@@ -219,11 +234,15 @@ func newWiringFixture(t *testing.T) *wiringFixture {
 
 	sources := invsource.NewMemStore()
 	retrier := &recordingRetrier{}
+	explainer := ai.ProviderFunc(func(_ context.Context, _, _ string) (string, error) {
+		return "an explanation", nil
+	})
 	srv := New(runs, &fakeSubmitter{}, zap.NewNop(),
 		WithGrants(grants, true), WithOrgs(orgs), WithProjects(projects),
 		WithInventories(inventories), WithTemplates(templates), WithSchedules(schedules),
 		WithInventorySources(sources, nil), WithAudit(audit.NewMemStore()),
-		WithApprover(&recordingApprover{runs: runs}), WithRetrier(retrier))
+		WithApprover(&recordingApprover{runs: runs}), WithRetrier(retrier),
+		WithAI(explainer))
 
 	return &wiringFixture{
 		Handler: srv.Handler(), Runs: runs, Projects: projects, Inventories: inventories,
@@ -253,6 +272,145 @@ func (f *wiringFixture) projectIDs(t *testing.T) []string {
 	ids := orgProjectIDs(list)
 	slices.Sort(ids)
 	return ids
+}
+
+// runStatus reads a run's stored status, so a case can prove a refused decision left it unchanged.
+func (f *wiringFixture) runStatus(t *testing.T, id string) run.Status {
+	t.Helper()
+	rn, err := f.Runs.Get(context.Background(), id)
+	if err != nil {
+		t.Fatalf("Get(%s) error = %v", id, err)
+	}
+	return rn.Status
+}
+
+// TestObjectlessRunIsScopedToItsOrg proves B3: a run that references no stored object is confined to
+// the organization it was stamped with, so a grantless actor in another org cannot read it, cancel
+// it, retry it, relaunch it, rerun it, approve it, reject it, export it, compare it, explain it, or
+// stream it.
+//
+// authorizeAll over zero objects returns nil, so every run-scoped route authorized an objectless run
+// vacuously: the foreign actor read the victim's full command and log, and a decision route settled
+// or killed the victim's held run. Each case asserts the effect, that the body does not carry the
+// victim's command and that a refused decision left the run's status unchanged, not merely a status
+// code.
+func TestObjectlessRunIsScopedToItsOrg(t *testing.T) {
+	t.Parallel()
+
+	// readRoutes must all refuse the foreign caller and never render the victim's command.
+	readRoutes := []struct {
+		// Name identifies the route.
+		Name string
+		// Method is the HTTP method.
+		Method string
+		// Path is the route reached against the objectless victim run.
+		Path string
+	}{
+		{"get", http.MethodGet, "/v1/runs/run_victim_bare"},
+		{"logs", http.MethodGet, "/v1/runs/run_victim_bare/logs"},
+		{"events", http.MethodGet, "/v1/runs/run_victim_bare/events"},
+		{"stream", http.MethodGet, "/v1/runs/run_victim_bare/stream"},
+		{"evidence", http.MethodGet, "/v1/runs/run_victim_bare/evidence"},
+		{"compare", http.MethodGet, "/v1/runs/run_victim_bare/compare?with=run_mine_bare"},
+		{"explain", http.MethodPost, "/v1/runs/run_victim_bare/explain"},
+	}
+	for _, rt := range readRoutes {
+		t.Run("read "+rt.Name, func(t *testing.T) {
+			t.Parallel()
+			f := newWiringFixture(t)
+			// The stream is an open-ended SSE response, so the request carries a short deadline: a
+			// refusal answers 403 at once, while a route that wrongly admits the foreign caller
+			// writes its 200 status line and then unblocks on the deadline, which the code check
+			// below catches as the leak it is.
+			ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+			defer cancel()
+			req := httptest.NewRequest(rt.Method, rt.Path, nil)
+			req = req.WithContext(context.WithValue(ctx, actorKey{},
+				Actor{UserID: wiringActor, Role: user.RoleOperator, Name: "intruder"}))
+			rec := httptest.NewRecorder()
+			f.Handler.ServeHTTP(rec, req)
+			if rec.Code < 400 {
+				t.Errorf("%s answered %d, want a refusal of another tenant's objectless run",
+					rt.Name, rec.Code)
+			}
+			if strings.Contains(rec.Body.String(), "VICTIM_SECRET_COMMAND") {
+				t.Errorf("%s leaked the victim's command:\n%s", rt.Name, rec.Body.String())
+			}
+		})
+	}
+
+	// decisionRoutes must all refuse the foreign caller and leave the run held for approval.
+	decisionRoutes := []struct {
+		// Name identifies the route.
+		Name string
+		// Path is the route reached against the objectless victim run.
+		Path string
+		// Body is the request body, if any.
+		Body string
+		// WantReached reports whether the recording retrier should have been reached.
+		WantReached bool
+	}{
+		{"cancel", "/v1/runs/run_victim_bare/cancel", "", false},
+		{"approve", "/v1/runs/run_victim_bare/approve", "", false},
+		{"reject", "/v1/runs/run_victim_bare/reject", "", false},
+		{"retry", "/v1/runs/run_victim_bare/retry", "", false},
+		{"relaunch", "/v1/runs/run_victim_bare/relaunch-failed", "", false},
+		{"rerun", "/v1/runs/run_victim_bare/rerun", "", false},
+	}
+	for _, rt := range decisionRoutes {
+		t.Run("decide "+rt.Name, func(t *testing.T) {
+			t.Parallel()
+			f := newWiringFixture(t)
+			rec := f.do(t, http.MethodPost, rt.Path, rt.Body)
+			if rec.Code < 400 {
+				t.Errorf("%s answered %d, want a refusal", rt.Name, rec.Code)
+			}
+			if got := f.runStatus(t, "run_victim_bare"); got != run.StatusPendingApproval {
+				t.Errorf("%s moved the victim's run to %q, want it still held for approval",
+					rt.Name, got)
+			}
+			if reached := len(f.Retrier.reached()) > 0; reached != rt.WantReached {
+				t.Errorf("%s reached=%v, want %v", rt.Name, reached, rt.WantReached)
+			}
+		})
+	}
+
+	// The runs list is derived from every run on the install, so it must drop the foreign
+	// objectless run while keeping the caller's own. Fetching one and listing many decide the same
+	// way, so a run hidden by id is hidden here too.
+	t.Run("list excludes the foreign objectless run", func(t *testing.T) {
+		t.Parallel()
+		f := newWiringFixture(t)
+		rec := f.do(t, http.MethodGet, "/v1/runs", "")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("list answered %d, want 200: %s", rec.Code, rec.Body.String())
+		}
+		body := rec.Body.String()
+		if strings.Contains(body, "run_victim_bare") || strings.Contains(body, "VICTIM_SECRET_COMMAND") {
+			t.Errorf("list leaked another tenant's objectless run:\n%s", body)
+		}
+		if !strings.Contains(body, "run_mine_bare") {
+			t.Errorf("list dropped the caller's own objectless run:\n%s", body)
+		}
+	})
+
+	// The owner reaches the same routes: the confinement isolates a tenant, it does not lock the
+	// run away from its own organization.
+	t.Run("owner reads own objectless run", func(t *testing.T) {
+		t.Parallel()
+		f := newWiringFixture(t)
+		req := httptest.NewRequest(http.MethodGet, "/v1/runs/run_victim_bare", nil)
+		req = req.WithContext(context.WithValue(req.Context(), actorKey{},
+			Actor{UserID: "user_victim", Role: user.RoleOperator, Name: "victim"}))
+		rec := httptest.NewRecorder()
+		f.Handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("owner get answered %d, want 200: %s", rec.Code, rec.Body.String())
+		}
+		if !strings.Contains(rec.Body.String(), "run_victim_bare") {
+			t.Errorf("owner get did not return the run:\n%s", rec.Body.String())
+		}
+	})
 }
 
 // TestEvidenceExportRefusesAForeignRun proves the evidence route authorizes the run before it

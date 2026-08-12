@@ -141,6 +141,29 @@ func (a *authorizer) orgAccess(ctx context.Context, actor Actor, object string) 
 	return "", false, nil
 }
 
+// submitterOrg returns the organization a run submitted by actor is stamped with, so an objectless
+// run is scoped to the actor's tenant. An actor in one organization stamps that one; an actor in
+// several stamps the lexicographically smallest, a deterministic choice, since a run carries a
+// single owning org and any org the actor belongs to isolates the run from every other tenant while
+// leaving the actor able to read it. It returns empty when org membership is not wired, the actor is
+// not a member of any organization, or the actor is a command-line token with no account.
+func (a *authorizer) submitterOrg(ctx context.Context, actor Actor) (string, error) {
+	if a == nil || a.orgs == nil || actor.UserID == "" {
+		return "", nil
+	}
+	memberships, err := a.orgs.OrgsForUser(ctx, actor.UserID)
+	if err != nil {
+		return "", err
+	}
+	orgID := ""
+	for _, m := range memberships {
+		if orgID == "" || m.OrgID < orgID {
+			orgID = m.OrgID
+		}
+	}
+	return orgID, nil
+}
+
 // subjectsFor returns the set of grant subject ids that represent the actor: their own user id and
 // every team they belong to.
 func (a *authorizer) subjectsFor(ctx context.Context, actor Actor) (map[string]bool, error) {
@@ -416,8 +439,20 @@ func readableRuns(ctx context.Context, authz *authorizer, runs []*run.Run) ([]*r
 	orgOf := authz.orgResolverMemo(ctx)
 	out := make([]*run.Run, 0, len(runs))
 	for _, rn := range runs {
+		objs := runObjects(rn)
+		if len(objs) == 0 {
+			// An objectless run has nothing for the per-object filter to decide on, so it is scoped
+			// by the org it was stamped with. keep with an empty id resolves to that org's
+			// membership alone: readable[""] is never set, so this is true only when the caller
+			// belongs to the run's org, and an ownerless objectless run is dropped for every
+			// strict-grants non-admin, matching what fetching it by id decides.
+			if keep("", rn.OrgID) {
+				out = append(out, rn)
+			}
+			continue
+		}
 		allowed := true
-		for _, id := range runObjects(rn) {
+		for _, id := range objs {
 			if !keep(id, orgOf(id)) {
 				allowed = false
 				break
@@ -473,10 +508,55 @@ func runObjects(rn *run.Run) []string {
 	return append(objs, rn.CredentialIDs...)
 }
 
+// authorizeRun reports whether the request actor may exercise want on the run under strict grants.
+//
+// A run that references stored objects is scoped by them: the actor must be able to use every
+// project, inventory, and credential it names, which is what authorizeAll checks and what org
+// ownership of those objects already extends to their members. A run that references no stored
+// object has nothing for that check to filter on, so it is scoped by the org it was stamped with at
+// submit. Without this an objectless run, every inline script and every proposed run, was readable,
+// cancelable, retryable, and approvable across every tenant, because authorizeAll over zero objects
+// allows. Such a run is denied to a caller who is not in its org, and an objectless run with no
+// owning org is denied to every non-admin under strict grants, the same as an ungranted object.
+func (a *authorizer) authorizeRun(ctx context.Context, want grant.Access, rn *run.Run) error {
+	objs := runObjects(rn)
+	if len(objs) > 0 {
+		return a.authorizeAll(ctx, want, objs...)
+	}
+	return a.authorizeOwningOrg(ctx, rn.OrgID)
+}
+
+// authorizeOwningOrg reports whether the request actor may act on an object owned by orgID when it
+// carries nothing else to authorize against. It grants access to a member of that org and, under
+// strict grants, denies everyone else; without strict grants it defers to the role like any
+// ungranted object. A nil authorizer or grant store, an absent actor, or an admin all pass.
+func (a *authorizer) authorizeOwningOrg(ctx context.Context, orgID string) error {
+	if a == nil || a.grants == nil {
+		return nil
+	}
+	actor, ok := actorFrom(ctx)
+	if !ok || actor.Role == user.RoleAdmin {
+		return nil
+	}
+	if !a.strict {
+		return nil
+	}
+	if orgID != "" {
+		subjects, err := a.subjectsFor(ctx, actor)
+		if err != nil {
+			return err
+		}
+		if subjects[orgID] {
+			return nil
+		}
+	}
+	return errForbiddenGrant
+}
+
 // authorizeRunAccess confirms the request actor may use the project, inventory, and credentials a
-// run references, so a read or a run operation stays scoped to the objects the actor is granted when
-// strict grants are on. It writes the denial and returns true when access is refused.
+// run references, or belongs to the org an objectless run was stamped with, so a read or a run
+// operation stays scoped when strict grants are on. It writes the denial and returns true when
+// access is refused.
 func authorizeRunAccess(w http.ResponseWriter, r *http.Request, authz *authorizer, log *zap.Logger, rn *run.Run) bool {
-	return denyOnAuthzError(w, log,
-		authz.authorizeAll(r.Context(), grant.AccessUse, runObjects(rn)...))
+	return denyOnAuthzError(w, log, authz.authorizeRun(r.Context(), grant.AccessUse, rn))
 }

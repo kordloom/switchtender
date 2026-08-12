@@ -646,6 +646,7 @@ func (d *Dispatcher) Submit(ctx context.Context, playbook, inventory string, opt
 	}
 	run.ApplyOptions(r, opts)
 	stampReceipt(ctx, r)
+	stampOrg(ctx, r)
 	if err := requireToolInput(r); err != nil {
 		return nil, err
 	}
@@ -742,6 +743,7 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 	}
 	run.ApplyOptions(parent, opts)
 	stampReceipt(ctx, parent)
+	stampOrg(ctx, parent)
 	if err := d.validateRun(ctx, parent); err != nil {
 		return nil, err
 	}
@@ -798,6 +800,9 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 		// after it returned. Inheriting is the one rule; re-deriving from context would make an
 		// in-request shard and a later step disagree about which receipt is truthful.
 		child.AuditReceipt = parent.AuditReceipt
+		// A shard owns the same tenant as its parent. A shard names no stored object of its own, so
+		// without the parent's org it would be an objectless run readable across every tenant.
+		child.OrgID = parent.OrgID
 		if err := d.store.Save(ctx, child); err != nil {
 			return nil, err
 		}
@@ -829,6 +834,17 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 func stampReceipt(ctx context.Context, r *run.Run) {
 	if r.AuditReceipt == "" {
 		r.AuditReceipt = run.AuditReceiptFrom(ctx)
+	}
+}
+
+// stampOrg records the submitting actor's owning organization on the run, defaulting it to the org
+// carried on the request context. It is what scopes an objectless run to a tenant: a run that names
+// no stored project, inventory, or credential has nothing for the per-object grant check to filter
+// on, so without an owning org it is readable, cancelable, and approvable across every tenant. An
+// explicit WithOrgID, such as a child inheriting its parent's org, wins over the ambient context.
+func stampOrg(ctx context.Context, r *run.Run) {
+	if r.OrgID == "" {
+		r.OrgID = run.SubmitterOrgFrom(ctx)
 	}
 }
 
@@ -915,6 +931,7 @@ func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string) (*r
 		ShardCount: &count, RetryOf: &parent.ID, IdempotencyKey: key,
 	}
 	inheritExecution(retry, parent)
+	retry.OrgID = parent.OrgID
 	// A retry is authorized by the retry request, not by whatever authorized the parent weeks ago.
 	stampReceipt(ctx, retry)
 	// A retry is a fourth way to submit a run, and it inherits the parent's entire execution spec,
@@ -955,6 +972,7 @@ func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string) (*r
 		}
 		inheritExecution(child, retry)
 		child.AuditReceipt = retry.AuditReceipt
+		child.OrgID = retry.OrgID
 		if err := d.store.Save(ctx, child); err != nil {
 			return nil, err
 		}
@@ -1024,6 +1042,10 @@ func (d *Dispatcher) RelaunchFailedHosts(ctx context.Context, runID, actor strin
 		// Stamping the source run's actor credited the relaunch to the wrong person, so asking
 		// what a given operator started missed the runs they started this way.
 		run.WithActor(actor),
+		// The relaunch belongs to the same tenant as the run it fixes. A relaunch of an objectless
+		// run names no stored object, so without the source run's org it would be readable across
+		// every tenant.
+		run.WithOrgID(src.OrgID),
 	)
 	return d.Submit(ctx, src.Playbook, src.Inventory, opts...)
 }
@@ -1281,6 +1303,7 @@ func (d *Dispatcher) SubmitPipeline(ctx context.Context, name, inventory string,
 	}
 	run.ApplyOptions(parent, opts)
 	stampReceipt(ctx, parent)
+	stampOrg(ctx, parent)
 	// The graph is stored on the parent so a pipeline held for approval can still be executed after
 	// a restart, and so a finished pipeline can show the shape it ran.
 	parent.Steps = steps
@@ -1450,6 +1473,9 @@ func stepRun(parent *run.Run, step run.PipelineStep, idx, attempt int, vars map[
 	child.PullCredentialID = parent.PullCredentialID
 	child.Labels = parent.Labels
 	child.Actor = parent.Actor
+	// A step is scoped to the pipeline's tenant. A step may name no stored object, so without the
+	// parent's org it would be an objectless run readable across every tenant.
+	child.OrgID = parent.OrgID
 	// A launch-time host limit constrains every step, matching how a workflow limit applies to each
 	// job. A step names its own inventory but never its own host limit, so the parent's is the only
 	// one, and dropping it would run a limited launch against the whole fleet.

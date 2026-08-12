@@ -111,6 +111,7 @@ func (g *authGate) wrap(next http.Handler) http.Handler {
 				return
 			}
 			ctx := run.WithAuditReceipt(context.WithValue(r.Context(), actorKey{}, actor), receipt)
+			ctx = g.stampSubmitterOrg(ctx, actor)
 			next.ServeHTTP(w, r.WithContext(ctx))
 			return
 		}
@@ -157,8 +158,26 @@ func (g *authGate) wrap(next http.Handler) http.Handler {
 			return
 		}
 		ctx := run.WithAuditReceipt(context.WithValue(r.Context(), actorKey{}, actor), receipt)
+		ctx = g.stampSubmitterOrg(ctx, actor)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// stampSubmitterOrg carries the actor's owning organization on the context so a run created while
+// handling the request is stamped with the tenant that scopes an objectless run. Resolving it here,
+// once per request beside the actor and the receipt, keeps every submit path stamping the same way
+// without each handler re-deriving it. A resolution failure leaves the org unset, which fails closed
+// for reads: an unowned objectless run is visible only to an admin under strict grants.
+func (g *authGate) stampSubmitterOrg(ctx context.Context, actor Actor) context.Context {
+	if g.authz == nil {
+		return ctx
+	}
+	orgID, err := g.authz.submitterOrg(ctx, actor)
+	if err != nil {
+		g.log.Error("server: resolve submitter org: " + err.Error())
+		return ctx
+	}
+	return run.WithSubmitterOrg(ctx, orgID)
 }
 
 // recordedActor is the identity written into one audit entry.

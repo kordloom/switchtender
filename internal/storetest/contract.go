@@ -108,6 +108,7 @@ func sampleRun(id string) *run.Run {
 		Tags: []string{"deploy", "config"}, SkipTags: []string{"slow"},
 		Verbosity: 2, Forks: 10, DiffMode: true,
 		ProposedFrom: "run_check", Intent: "echo hello on the box",
+		OrgID:          "org_sample",
 		IdempotencyKey: "idem_sample",
 		Timeout:        3600,
 		Notifications: []run.NotifyTarget{

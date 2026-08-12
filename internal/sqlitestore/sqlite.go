@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS runs (
 	project_id    TEXT NOT NULL DEFAULT '',
 	commit_sha    TEXT NOT NULL DEFAULT '',
 	inventory_id  TEXT NOT NULL DEFAULT '',
+	org_id        TEXT NOT NULL DEFAULT '',
 	queue         TEXT NOT NULL DEFAULT '',
 	tool          TEXT NOT NULL DEFAULT '',
 	command       TEXT NOT NULL DEFAULT '',
@@ -927,7 +928,7 @@ func (d *DB) Close() error {
 const runColumns = `id, playbook, inventory, status, exit_code, error, created_at, started_at,
 	ended_at, parent_id, shard_index, shard_count, limit_pattern, kind, step_name, step_index,
 	retry_of, attempt, steps, extra_vars, outputs, claimed_by, claimed_at, cancel_requested,
-	credential_ids, project_id, commit_sha, inventory_id, queue, tool, command, dry_run,
+	credential_ids, project_id, commit_sha, inventory_id, org_id, queue, tool, command, dry_run,
 	proposed_from, intent, image, pull_credential_id, idempotency_key, timeout, notifications,
 	source, source_id, actor, rerun_of, labels, warning, audit_receipt, held_by_policy,
 	tags, skip_tags, verbosity, forks, diff_mode, claim_secret`
@@ -963,11 +964,11 @@ INSERT INTO runs
 	(id, playbook, inventory, status, exit_code, error, created_at, started_at, ended_at,
 	 parent_id, shard_index, shard_count, limit_pattern, kind, step_name, step_index, retry_of,
 	 attempt, steps, extra_vars, outputs, claimed_by, claimed_at, cancel_requested, credential_ids,
-	 project_id, commit_sha, inventory_id, queue, tool, command, dry_run, proposed_from, intent,
+	 project_id, commit_sha, inventory_id, org_id, queue, tool, command, dry_run, proposed_from, intent,
 	 image, pull_credential_id, idempotency_key, timeout, notifications,
 	 source, source_id, actor, rerun_of, labels, warning, audit_receipt, held_by_policy,
 	 tags, skip_tags, verbosity, forks, diff_mode, claim_secret)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
 	playbook=excluded.playbook, inventory=excluded.inventory, status=excluded.status,
 	exit_code=excluded.exit_code, error=excluded.error, created_at=excluded.created_at,
@@ -981,7 +982,7 @@ ON CONFLICT(id) DO UPDATE SET
 	cancel_requested=MAX(runs.cancel_requested, excluded.cancel_requested),
 	credential_ids=excluded.credential_ids,
 	project_id=excluded.project_id, commit_sha=excluded.commit_sha,
-	inventory_id=excluded.inventory_id, queue=excluded.queue, tool=excluded.tool,
+	inventory_id=excluded.inventory_id, org_id=excluded.org_id, queue=excluded.queue, tool=excluded.tool,
 	command=excluded.command, dry_run=excluded.dry_run, proposed_from=excluded.proposed_from,
 	intent=excluded.intent, image=excluded.image, pull_credential_id=excluded.pull_credential_id,
 	idempotency_key=excluded.idempotency_key, timeout=excluded.timeout,
@@ -998,7 +999,7 @@ ON CONFLICT(id) DO UPDATE SET
 		r.Kind, r.StepName, sqlutil.NullInt(r.StepIndex), sqlutil.NullString(r.RetryOf), r.Attempt,
 		marshalSteps(r.Steps), sqlutil.JSONMap(r.ExtraVars), sqlutil.JSONMap(r.Outputs), r.ClaimedBy, sqlutil.NullTime(r.ClaimedAt),
 		sqlutil.BoolToInt(r.CancelRequested), sqlutil.JoinIDs(r.CredentialIDs), r.ProjectID, r.CommitSHA,
-		r.InventoryID, r.Queue, r.Tool, r.Command, sqlutil.BoolToInt(r.DryRun), r.ProposedFrom, r.Intent,
+		r.InventoryID, r.OrgID, r.Queue, r.Tool, r.Command, sqlutil.BoolToInt(r.DryRun), r.ProposedFrom, r.Intent,
 		r.Image, r.PullCredentialID, r.IdempotencyKey, r.Timeout, marshalNotifications(r.Notifications),
 		r.Source, r.SourceID, r.Actor, r.RerunOf, marshalLabels(r.Labels), r.Warning, r.AuditReceipt,
 		r.HeldByPolicy, sqlutil.JoinIDs(r.Tags), sqlutil.JoinIDs(r.SkipTags), r.Verbosity, r.Forks,
@@ -1995,7 +1996,7 @@ func scanRun(s scanner) (*run.Run, error) {
 		&created, &started, &ended, &parent, &shardIdx, &shardCnt, &r.Limit,
 		&r.Kind, &r.StepName, &stepIdx, &retryOf, &r.Attempt, &steps, &extra, &outputs,
 		&r.ClaimedBy, &claimed, &cancelI, &credIDs, &r.ProjectID, &r.CommitSHA,
-		&r.InventoryID, &r.Queue, &r.Tool, &r.Command, &dryRun, &r.ProposedFrom, &r.Intent,
+		&r.InventoryID, &r.OrgID, &r.Queue, &r.Tool, &r.Command, &dryRun, &r.ProposedFrom, &r.Intent,
 		&r.Image, &r.PullCredentialID, &r.IdempotencyKey, &r.Timeout, &notifs,
 		&r.Source, &r.SourceID, &r.Actor, &r.RerunOf, &labels, &r.Warning, &r.AuditReceipt,
 		&r.HeldByPolicy, &tags, &skipTags, &r.Verbosity, &r.Forks, &diffMode,
