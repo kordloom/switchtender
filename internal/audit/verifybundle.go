@@ -118,7 +118,10 @@ func VerifyBundle(signed []byte, pinnedKeyID string) (*BundleReport, error) {
 	} else {
 		rep.ChainOK, rep.BrokeAtSeq = verifyBundleChain(b.Claims, head)
 	}
-	rep.AnchorsOK = verifyBundleAnchors(&b)
+	// An anchor is checked against the claim links, and for a tree those links are precisely what the
+	// chain check validates. Reporting anchors satisfied over a chain that did not verify would let a
+	// forged link poison both answers at once, so anchors are only meaningful once the chain holds.
+	rep.AnchorsOK = rep.ChainOK && verifyBundleAnchors(&b)
 	verifyOutcomeDisclosure(b.Claims, rep)
 	return rep, nil
 }
@@ -217,14 +220,30 @@ func verifyBundleTree(b *Bundle) (bool, int64) {
 		return false, 0
 	}
 	size := b.Chain.Head.Seq
+	var prevSeq int64
 	for _, c := range b.Claims {
 		if c.Inclusion == nil {
 			return false, c.Chain.Seq
 		}
+		// A tree has no per-entry predecessor, and sequences must ascend, or a claim could be
+		// presented twice or out of order to satisfy a proof built for a different position.
+		if c.Chain.Prev != "" || c.Chain.Seq <= prevSeq {
+			return false, c.Chain.Seq
+		}
+		prevSeq = c.Chain.Seq
+
 		leafData, err := treeLeaf(c, installID)
 		if err != nil {
 			return false, c.Chain.Seq
 		}
+		// The declared link has to be the hash of the leaf the claim's content produces. Without
+		// this the fold proved only that SOME leaf sits at the claimed position, never that it is
+		// this claim's leaf, so a producer could declare any link, fold a matching path, and anchor
+		// over it, and the receipt read as verified. This is the check the whole receipt rests on.
+		if hex.EncodeToString(merkle.LeafHash(leafData)) != c.Chain.Link {
+			return false, c.Chain.Seq
+		}
+
 		path, err := decodeProofHashes(c.Inclusion.Path)
 		if err != nil {
 			return false, c.Chain.Seq

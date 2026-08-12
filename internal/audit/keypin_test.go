@@ -330,3 +330,45 @@ func TestSparseReceiptWithDisagreeingInstallIsRefused(t *testing.T) {
 		t.Error("a receipt whose params name a different install than its producer verified")
 	}
 }
+
+// TestForgedTreeLinkIsRefused is the receipt equivalent of the forged-head bug, and the one the
+// cross-verify harness missed because it only tampered with linear bundles.
+//
+// The tree verifier folded the leaf computed from a claim's content through its audit path, but
+// never checked that the leaf's hash equaled the link the claim declared. So the fold proved only
+// that SOME leaf sat at the claimed position, never that it was this claim's. A producer could
+// declare any link, present a matching path, and anchor over it, and switchtender verify reported
+// the receipt verified and anchored while the reference verifier rejected the same bytes. For a
+// product whose receipts are the whole pitch, a verifier that accepts a forged link verifies
+// nothing.
+func TestForgedTreeLinkIsRefused(t *testing.T) {
+	id := treeIdentity(t)
+	chain := treeChain(t, 6)
+	doc, err := audit.BuildTreeBundle(chain, map[int64]bool{3: true}, id, "1.34.1",
+		audit.BundleSubject{Type: "run", ID: "run_3"},
+		time.Date(2026, 8, 11, 16, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("BuildTreeBundle() error = %v", err)
+	}
+	forged := strings.Repeat("f", 64)
+	doc.Claims[0].Chain.Link = forged
+	doc.Anchors = append(doc.Anchors, audit.BundleAnchor{
+		Type: "rfc3161", Seq: doc.Claims[0].Chain.Seq, Link: forged,
+		At: "2026-08-11T16:00:00Z", Ref: "tsa",
+	})
+	signed, err := audit.SignBundleDoc(doc, id.Private())
+	if err != nil {
+		t.Fatalf("SignBundleDoc() error = %v", err)
+	}
+
+	rep, err := audit.VerifyBundle(signed, id.KeyID())
+	if err != nil {
+		t.Fatalf("VerifyBundle() error = %v", err)
+	}
+	if rep.ChainOK {
+		t.Error("a receipt whose declared link is not its leaf hash reported a good chain")
+	}
+	if rep.AnchorsOK {
+		t.Error("an anchor over a forged link reported as satisfied")
+	}
+}

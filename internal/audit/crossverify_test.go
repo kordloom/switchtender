@@ -158,3 +158,56 @@ func signBundle(t *testing.T, doc *audit.Bundle, id audit.Identity) []byte {
 	}
 	return signed
 }
+
+// TestBothVerifiersRejectTreeTampering is the tree-profile counterpart, and it exists because its
+// absence is exactly how the forged-link hole survived.
+//
+// The linear tampering test above never built a tree bundle, so the harness that was supposed to
+// keep the two verifiers in agreement had a blind spot precisely under the profile that had just
+// been added. Each row here is a forgery the tree verifier once accepted, or would accept if a check
+// were removed, that the reference verifier refuses.
+func TestBothVerifiersRejectTreeTampering(t *testing.T) {
+	id := treeIdentity(t)
+	chain := treeChain(t, 6)
+	at := time.Date(2026, 8, 11, 16, 0, 0, 0, time.UTC)
+
+	tamper := []struct {
+		Name string
+		Do   func(b *audit.Bundle)
+	}{
+		{
+			Name: "a disclosed claim declares a link that is not its leaf hash",
+			Do:   func(b *audit.Bundle) { b.Claims[0].Chain.Link = strings.Repeat("f", 64) },
+		},
+		{
+			Name: "a disclosed claim carries a previous link a tree has no place for",
+			Do:   func(b *audit.Bundle) { b.Claims[0].Chain.Prev = strings.Repeat("a", 64) },
+		},
+		{
+			Name: "the anchored root is not the head the claims fold to",
+			Do:   func(b *audit.Bundle) { b.Chain.Head.Link = strings.Repeat("b", 64) },
+		},
+	}
+	for _, tc := range tamper {
+		t.Run(tc.Name, func(t *testing.T) {
+			doc, err := audit.BuildTreeBundle(chain, map[int64]bool{2: true, 4: true}, id, "1.34.1",
+				audit.BundleSubject{Type: "run", ID: "run_2"}, at)
+			if err != nil {
+				t.Fatalf("BuildTreeBundle() error = %v", err)
+			}
+			tc.Do(doc)
+			signed := signBundle(t, doc, id)
+
+			theirs := verifyWithLoomSeal(t, signed)
+			if theirs.OK {
+				t.Fatalf("the reference verifier accepted the tampering, so this test is not "+
+					"describing the format's rule: %s", tc.Name)
+			}
+			rep, err := audit.VerifyBundle(signed, "")
+			if err == nil && rep.ChainOK {
+				t.Errorf("our verifier accepted what the reference verifier refused: %v",
+					theirs.Problems)
+			}
+		})
+	}
+}
