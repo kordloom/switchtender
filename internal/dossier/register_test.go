@@ -49,7 +49,7 @@ func TestRegisterWindowsAndDecisions(t *testing.T) {
 	runs, audits, base := seedRegister(t)
 	from := base.Add(-time.Hour)
 	to := base.Add(7 * 24 * time.Hour)
-	in, err := CollectRegister(context.Background(), runs, audits, from, to, to)
+	in, err := CollectRegister(context.Background(), runs, audits, from, to, to, 0)
 	if err != nil {
 		t.Fatalf("CollectRegister() error = %v", err)
 	}
@@ -88,7 +88,7 @@ func TestRegisterTallies(t *testing.T) {
 	t.Parallel()
 	runs, audits, base := seedRegister(t)
 	in, err := CollectRegister(context.Background(), runs, audits,
-		base.Add(-time.Hour), base.Add(7*24*time.Hour), base)
+		base.Add(-time.Hour), base.Add(7*24*time.Hour), base, 0)
 	if err != nil {
 		t.Fatalf("CollectRegister() error = %v", err)
 	}

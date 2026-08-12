@@ -407,6 +407,18 @@ func testListPage(t *testing.T, store run.Store) {
 		t.Errorf("ListPage oldest first = %v, want [a b c d]", ids(all))
 	}
 
+	// A limit alongside OldestFirst returns the earliest runs and no more. The change register
+	// bounds itself this way, and a store that answered with the whole window would hand it the
+	// unbounded read the bound exists to prevent, on that store alone.
+	if got, _ := store.ListPage(ctx, run.ListFilter{OldestFirst: true}, 2, 0); cmp.Diff([]string{"a", "b"}, ids(got)) != "" {
+		t.Errorf("ListPage oldest first, limit 2 = %v, want [a b]", ids(got))
+	}
+	if got, _ := store.ListPage(ctx, run.ListFilter{
+		After: base.Add(1 * time.Second), Before: base.Add(4 * time.Second), OldestFirst: true,
+	}, 2, 0); cmp.Diff([]string{"b", "c"}, ids(got)) != "" {
+		t.Errorf("ListPage window, oldest first, limit 2 = %v, want [b c]", ids(got))
+	}
+
 	counts, err := store.RunStatusCounts(ctx)
 	if err != nil {
 		t.Fatalf("RunStatusCounts() error = %v", err)

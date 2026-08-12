@@ -91,7 +91,8 @@ func runChangeRegister(cmd *cobra.Command) error {
 		return fmt.Errorf("open store: %w", err)
 	}
 	defer func() { _ = store.Close() }()
-	in, err := dossier.CollectRegister(cmd.Context(), store.Runs(), store.Audits(), from, to, time.Now())
+	in, err := dossier.CollectRegister(cmd.Context(), store.Runs(), store.Audits(), from, to,
+		time.Now(), dossier.MaxRegisterRuns)
 	if err != nil {
 		return fmt.Errorf("collect change register: %w", err)
 	}

@@ -29,6 +29,7 @@ h2 { font-size: 16px; margin: 32px 0 12px; }
 .banner.verified { background: var(--ok-bg); border-color: var(--ok); color: var(--ok); }
 .banner.unanchored { background: var(--warn-bg); border-color: var(--warn); color: var(--warn); }
 .banner.broken { background: var(--bad-bg); border-color: var(--bad); color: var(--bad); }
+.banner.truncated { background: var(--bad-bg); border-color: var(--bad); color: var(--bad); }
 .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 8px; }
 .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
 .card .k { color: var(--muted); font-size: 13px; margin: 0 0 6px; }
@@ -56,8 +57,15 @@ footer { margin-top: 40px; color: var(--muted); font-size: 13px; }
 
 	<div class="banner {{.Status}}"><span>{{if eq .Status "verified"}}&#10003;{{else if eq .Status "unanchored"}}&#9888;{{else}}&#10007;{{end}}</span><span>{{.StatusText}}</span></div>
 
+	{{if .Truncated}}
+	<div class="banner truncated"><span>&#9888;</span><span>This register is truncated and is not the
+	whole period. A register carries at most {{.Limit}} changes; this one carries the earliest
+	{{.Total}} and stops at {{.CoveredTo}}. Changes created after {{.CoveredTo}} are not in this
+	document. The register that starts at {{.CoveredTo}} carries the rest of the period.</span></div>
+	{{end}}
+
 	<div class="cards">
-		<div class="card"><p class="k">Changes</p><p class="v">{{.Total}}</p></div>
+		<div class="card"><p class="k">{{if .Truncated}}Changes shown{{else}}Changes{{end}}</p><p class="v">{{.Total}}</p></div>
 		<div class="card"><p class="k">Approved</p><p class="v">{{.Approved}}</p></div>
 		<div class="card"><p class="k">Rejected</p><p class="v">{{.Rejected}}</p></div>
 		<div class="card"><p class="k">Failed</p><p class="v">{{.Failed}}</p></div>

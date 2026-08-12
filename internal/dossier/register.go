@@ -21,6 +21,13 @@ var registerTemplateSource string
 // registerTemplate is the parsed change register template.
 var registerTemplate = template.Must(template.New("register").Parse(registerTemplateSource))
 
+// MaxRegisterRuns is how many changes one register renders when the caller names no other bound.
+// The register is a single HTML document held whole in memory and handed to a browser, so a period
+// nobody bounded is a document nobody can open and a request that can take the process down with
+// it. The bound is spent in the store query rather than on the rows after they arrive, because a
+// hundred thousand runs already decoded have already cost what the bound exists to save.
+const MaxRegisterRuns = 5000
+
 // Decision is one approval or rejection read from the chain.
 type Decision struct {
 	// Verdict is Approved or Rejected.
@@ -37,8 +44,18 @@ type Decision struct {
 type RegisterInput struct {
 	// From and To bound the period, half open: From inclusive, To exclusive.
 	From, To time.Time
-	// Runs are the period's top-level runs, oldest first.
+	// Runs are the period's top-level runs, oldest first, at most Limit of them.
 	Runs []*run.Run
+	// Limit is the cap the store query carried, so the document can say what bound it was read
+	// under rather than leaving the reader to assume there was none.
+	Limit int
+	// Truncated reports that the period holds more changes than Limit, so Runs is the earliest
+	// page of it and not the whole period.
+	Truncated bool
+	// CoveredTo is the creation time of the first change left out, the point the document stops
+	// covering. It is zero when Truncated is false. A caller writing consecutive registers resumes
+	// from here, since the changes at this instant are the ones the page cut through.
+	CoveredTo time.Time
 	// Decisions maps a run id to its approval or rejection, where the chain records one.
 	Decisions map[string]Decision
 	// ChainOK reports whether the whole chain verified during collection.
@@ -57,14 +74,37 @@ type RegisterInput struct {
 	GeneratedAt time.Time
 }
 
-// CollectRegister gathers the period's change register: every top-level run in the window, the
-// chain-recorded decision over each, and the chain's own verdict, in one streaming pass.
-func CollectRegister(ctx context.Context, runs run.Store, audits audit.Store, from, to, now time.Time) (*RegisterInput, error) {
-	in := &RegisterInput{From: from, To: to, GeneratedAt: now, Decisions: map[string]Decision{}}
+// CollectRegister gathers the period's change register: the window's top-level runs, the
+// chain-recorded decision over each, and the chain's own verdict, in one streaming pass. limit
+// caps how many changes the document carries, defaulting to MaxRegisterRuns when it is not
+// positive, and a period holding more than that comes back marked truncated.
+func CollectRegister(ctx context.Context, runs run.Store, audits audit.Store, from, to, now time.Time,
+	limit int) (*RegisterInput, error) {
+	if limit <= 0 {
+		limit = MaxRegisterRuns
+	}
+	in := &RegisterInput{From: from, To: to, GeneratedAt: now, Limit: limit,
+		Decisions: map[string]Decision{}}
 
-	rows, err := runs.ListPage(ctx, run.ListFilter{After: from, Before: to, OldestFirst: true}, 0, 0)
+	// One row past the cap is asked for and never rendered. It is what separates a period that
+	// ends exactly on the cap from one that runs past it, and its creation time is the instant the
+	// document stops covering, which is what a caller writing the next register has to resume from.
+	rows, err := runs.ListPage(ctx, run.ListFilter{After: from, Before: to, OldestFirst: true},
+		limit+1, 0)
 	if err != nil {
 		return nil, fmt.Errorf("list runs: %w", err)
+	}
+	if len(rows) > limit {
+		in.Truncated = true
+		in.CoveredTo = rows[limit].CreatedAt
+		rows = rows[:limit]
+		// Rows sharing the instant the page cut through are dropped, so the document covers a
+		// clean half-open range and the register resuming at that instant repeats nothing. When
+		// the whole page shares it there is no clean cut, and the rows stay: the next register
+		// then repeats them, which an auditor can reconcile, where dropping them would lose them.
+		if kept := trimAt(rows, in.CoveredTo); len(kept) > 0 {
+			rows = kept
+		}
 	}
 	in.Runs = rows
 
@@ -104,6 +144,15 @@ func CollectRegister(ctx context.Context, runs run.Store, audits audit.Store, fr
 	in.Anchored = len(holding)
 	in.AnchorProblems = problems
 	return in, nil
+}
+
+// trimAt returns rows, which are oldest first, without the tail created at or after at.
+func trimAt(rows []*run.Run, at time.Time) []*run.Run {
+	cut := len(rows)
+	for cut > 0 && !rows[cut-1].CreatedAt.Before(at) {
+		cut--
+	}
+	return rows[:cut]
 }
 
 // decisionOf reads an approval or rejection from a chain entry's path, returning the run id it
@@ -163,6 +212,12 @@ type registerView struct {
 	Rows []registerRow
 	// Total, Approved, Rejected, Held tally the rows.
 	Total, Approved, Rejected int
+	// Truncated reports that the period held more changes than the document carries.
+	Truncated bool
+	// Limit is the cap the store query carried, named in the truncation notice.
+	Limit int
+	// CoveredTo is the instant the document stops covering, formatted, empty unless Truncated.
+	CoveredTo string
 	// Failed tallies rows whose outcome is a failure.
 	Failed int
 	// ChainCount is the whole chain's entry count.
@@ -185,6 +240,14 @@ func RenderRegister(in *RegisterInput) ([]byte, error) {
 		ChainCount:  in.ChainCount,
 		GeneratedAt: in.GeneratedAt.UTC().Format(time.RFC3339),
 		Total:       len(in.Runs),
+		Truncated:   in.Truncated,
+		Limit:       in.Limit,
+	}
+	// A truncated register that does not say so is the worst artifact this package can produce: it
+	// reads as the whole period, so an auditor sampling it believes they saw everything. The notice
+	// is rendered from the same fields the bound was applied with.
+	if in.Truncated {
+		v.CoveredTo = in.CoveredTo.UTC().Format(time.RFC3339)
 	}
 	if in.Head != nil {
 		v.Receipt = fmt.Sprintf("%d:%s", in.Head.Seq, in.Head.Hash)

@@ -87,7 +87,10 @@ func auditRegisterHandler(store run.Store, audits audit.Store, log *zap.Logger) 
 			respondError(w, log, http.StatusBadRequest, "from must precede to")
 			return
 		}
-		in, err := dossier.CollectRegister(r.Context(), store, audits, from, to, time.Now())
+		// The period is caller controlled, so the bound is the store query's and not the reader's
+		// good manners. A truncated document says so on its face.
+		in, err := dossier.CollectRegister(r.Context(), store, audits, from, to, time.Now(),
+			dossier.MaxRegisterRuns)
 		if err != nil {
 			log.Error("server: collect change register: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not collect the register")
