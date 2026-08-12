@@ -196,12 +196,40 @@ type Store interface {
 	// keeping the per host and per task summaries that power the cross-run views. It returns how
 	// many runs were deleted. Non-terminal runs are never purged.
 	PurgeRunsBefore(ctx context.Context, cutoff time.Time) (int, error)
+	// TrimSummaries keeps the newest keep per host summaries for each host and the newest keep per
+	// task summaries for each task, deleting the rest, and returns how many rows it deleted. Nothing
+	// else ever removes a summary: they outlive the runs they came from on purpose, so a host's
+	// outcome history survives run retention. That makes this the only bound on those two tables,
+	// which otherwise grow by one row per host per run forever. A keep below one is treated as one,
+	// so no caller can empty the tables. Holding keep at or above MinRetainSummaries is the
+	// configuration's job, not the store's.
+	TrimSummaries(ctx context.Context, keep int) (int, error)
 }
 
 // WorkerWindow bounds how far back Workers looks for leases. Terminal runs keep their last lease
 // stamp, so without a bound the listing would aggregate every run ever recorded and report
 // workers dead for months.
 const WorkerWindow = 48 * time.Hour
+
+// Summary window bounds. The window on the fleet and task trend views and the limit on host
+// history are caller supplied, and every row a window admits becomes an element of the answer, so
+// without a cap one request asks the store to rank, concatenate and serialize every summary ever
+// recorded. MinRetainSummaries ties the retention trim to those caps: keeping at least as many
+// rows as the largest window any caller may ask for makes the trim invisible through the API.
+const (
+	// MaxSummaryWindow is the largest window FleetHealth and TaskTrends accept from a caller. Both
+	// return window entries for every host or task, so their cost is the window times the fleet's
+	// cardinality, which is why it is the tighter of the two caps.
+	MaxSummaryWindow = 100
+	// MaxHostHistory is the largest limit HostHistory accepts from a caller. It reads one host's
+	// rows straight off the ordered index, so it can afford a deeper page than the fleet views.
+	MaxHostHistory = 500
+	// MinRetainSummaries is the fewest summaries per host and per task a configured trim may leave
+	// behind. It equals the largest caller-visible window, so trimmed history is history no view
+	// could have reached. The retention sweeper raises a smaller setting to it; the stores trim to
+	// whatever count they are given, so the floor is stated once, where the count is chosen.
+	MinRetainSummaries = MaxHostHistory
+)
 
 // RunTiming is the slice of a run the metrics histograms need: when it was asked for, when it
 // started, when it ended, and how it is grouped. It is deliberately small, because it is read in
@@ -1304,4 +1332,72 @@ func (m *memStore) PurgeRunsBefore(_ context.Context, cutoff time.Time) (int, er
 		deleted++
 	}
 	return deleted, nil
+}
+
+// TrimSummaries keeps the newest keep summaries for each host and each task and drops the rest.
+func (m *memStore) TrimSummaries(_ context.Context, keep int) (int, error) {
+	if keep < 1 {
+		keep = 1
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	deleted := trimNewestPerKey(m.summaries, keep,
+		func(hs HostSummary) string { return hs.Host }, newerHostSummary)
+	deleted += trimNewestPerKey(m.tasks, keep,
+		func(ts TaskSummary) string { return ts.Task }, newerTaskSummary)
+	return deleted, nil
+}
+
+// summaryRef locates one summary inside the per run slices trimNewestPerKey walks.
+type summaryRef struct {
+	// runID is the run whose slice holds the summary.
+	runID string
+	// index is the summary's position in that slice.
+	index int
+}
+
+// trimNewestPerKey keeps the newest keep entries under each group key across every run's slice in
+// byRun and removes the rest, returning how many entries it removed. key groups an entry, and
+// newer reports whether a sorts ahead of b when the group is ordered newest first.
+func trimNewestPerKey[T any](byRun map[string][]T, keep int, key func(T) string,
+	newer func(a, b T) bool) int {
+	groups := make(map[string][]summaryRef)
+	for runID, list := range byRun {
+		for i, entry := range list {
+			k := key(entry)
+			groups[k] = append(groups[k], summaryRef{runID: runID, index: i})
+		}
+	}
+	drop := make(map[string]map[int]bool)
+	removed := 0
+	for _, refs := range groups {
+		if len(refs) <= keep {
+			continue
+		}
+		sort.Slice(refs, func(i, j int) bool {
+			return newer(byRun[refs[i].runID][refs[i].index], byRun[refs[j].runID][refs[j].index])
+		})
+		for _, ref := range refs[keep:] {
+			if drop[ref.runID] == nil {
+				drop[ref.runID] = make(map[int]bool)
+			}
+			drop[ref.runID][ref.index] = true
+			removed++
+		}
+	}
+	for runID, indexes := range drop {
+		list := byRun[runID]
+		kept := make([]T, 0, len(list)-len(indexes))
+		for i, entry := range list {
+			if !indexes[i] {
+				kept = append(kept, entry)
+			}
+		}
+		if len(kept) == 0 {
+			delete(byRun, runID)
+			continue
+		}
+		byRun[runID] = kept
+	}
+	return removed
 }

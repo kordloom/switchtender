@@ -25,6 +25,25 @@ import (
 // defaultFleetWindow is the number of recent runs per host considered when no window is given.
 const defaultFleetWindow = 10
 
+// summaryWindow returns the window the caller asked for in param, clamped to [1, hardCap], or the
+// default when the parameter is absent or does not parse.
+//
+// The clamp is the point. The summary tables are the ones retention keeps rather than deletes, so
+// they hold a row per host per run for the life of the fleet, and the fleet views turn every row a
+// window admits into an element of the answer. Left uncapped, one query string could ask a single
+// request to rank, concatenate and serialize the whole history of every host.
+func summaryWindow(r *http.Request, param string, hardCap int) int {
+	v := r.URL.Query().Get(param)
+	if v == "" {
+		return defaultFleetWindow
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 1 {
+		return defaultFleetWindow
+	}
+	return min(n, hardCap)
+}
+
 // idempotencyKeyHeader carries a client-chosen key that dedupes a retried submission, so a dropped
 // response or a client retry on POST /runs and POST /pipelines cannot double-fire a run.
 const idempotencyKeyHeader = "Idempotency-Key"
@@ -214,12 +233,7 @@ func fleetHandler(store run.Store, authz *authorizer, log *zap.Logger) http.Hand
 		panic("server: fleetHandler: Store required")
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
-		window := defaultFleetWindow
-		if v := r.URL.Query().Get("window"); v != "" {
-			if n, err := strconv.Atoi(v); err == nil && n > 0 {
-				window = n
-			}
-		}
+		window := summaryWindow(r, "window", run.MaxSummaryWindow)
 		keep, _, ferr := derivedReadFilter(r.Context(), authz, store)
 		if ferr != nil {
 			log.Error("server: read filter: " + ferr.Error())
@@ -397,12 +411,7 @@ func hostHistoryHandler(store run.Store, authz *authorizer, log *zap.Logger) htt
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		host := r.PathValue("host")
-		limit := defaultFleetWindow
-		if v := r.URL.Query().Get("limit"); v != "" {
-			if n, err := strconv.Atoi(v); err == nil && n > 0 {
-				limit = n
-			}
-		}
+		limit := summaryWindow(r, "limit", run.MaxHostHistory)
 		keep, _, ferr := derivedReadFilter(r.Context(), authz, store)
 		if ferr != nil {
 			log.Error("server: read filter: " + ferr.Error())
@@ -432,12 +441,7 @@ func taskTrendsHandler(store run.Store, authz *authorizer, log *zap.Logger) http
 		panic("server: taskTrendsHandler: Store required")
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
-		window := defaultFleetWindow
-		if v := r.URL.Query().Get("window"); v != "" {
-			if n, err := strconv.Atoi(v); err == nil && n > 0 {
-				window = n
-			}
-		}
+		window := summaryWindow(r, "window", run.MaxSummaryWindow)
 		_, anyReadable, ferr := derivedReadFilter(r.Context(), authz, store)
 		if ferr != nil {
 			log.Error("server: read filter: " + ferr.Error())

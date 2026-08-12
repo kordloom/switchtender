@@ -263,6 +263,9 @@ var retainRuns string
 // retainEvents holds the value of the --retain-events flag, a duration like 30d.
 var retainEvents string
 
+// retainHistory holds the value of the --retain-history flag, a count of summaries per host.
+var retainHistory int
+
 // retentionInterval holds the value of the --retention-interval flag.
 var retentionInterval time.Duration
 
@@ -576,6 +579,11 @@ func init() {
 		"Delete terminal runs older than this, for example 90d. Empty keeps them forever.")
 	serveCmd.Flags().StringVar(&retainEvents, "retain-events", "",
 		"Drop run events and logs older than this, for example 30d. Empty keeps them forever.")
+	serveCmd.Flags().IntVar(&retainHistory, "retain-history", 0,
+		"Keep only this many per-host and per-task summaries for each host and task, for example "+
+			"500. Summaries outlive the runs they came from, so this is the only bound on them. "+
+			"Zero keeps every summary forever. Values below "+
+			strconv.Itoa(run.MinRetainSummaries)+" are raised to it.")
 	serveCmd.Flags().DurationVar(&retentionInterval, "retention-interval", retention.DefaultInterval,
 		"How often the retention sweeper runs.")
 	serveCmd.Flags().StringVar(&smtpAddr, "smtp-addr", "",
@@ -882,7 +890,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	}
 	sweeper := retention.NewSweeper(store, log,
 		retention.WithRetainRuns(runsWindow), retention.WithRetainEvents(eventsWindow),
-		retention.WithInterval(retentionInterval))
+		retention.WithRetainHistory(retainHistory), retention.WithInterval(retentionInterval))
 	sweeper.Start()
 	defer sweeper.Close()
 

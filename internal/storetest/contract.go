@@ -86,6 +86,7 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Run("transition status", func(t *testing.T) { testTransitionStatus(t, newStore()) })
 	t.Run("workers", func(t *testing.T) { testWorkers(t, newStore()) })
 	t.Run("retention purge", func(t *testing.T) { testPurge(t, newStore()) })
+	t.Run("summary trim bounds growth", func(t *testing.T) { testTrimSummaries(t, newStore()) })
 	t.Run("terminal run fences writes", func(t *testing.T) { testTerminalFence(t, newStore()) })
 }
 
@@ -2766,5 +2767,114 @@ func testRunTimings(t *testing.T, store run.Store) {
 	}
 	if len(short) != 1 {
 		t.Errorf("limited timings = %d, want 1", len(short))
+	}
+}
+
+// testTrimSummaries verifies the only bound on the two summary tables.
+//
+// Summaries outlive the runs they came from, so nothing in retention deletes them by age and the
+// tables grow by one row per host per run forever. TrimSummaries is what stops that, and the
+// contract it has to keep on every backend is exact: the newest keep rows per host and per task
+// survive, the older ones are gone, a key already under the limit is untouched, the two tables are
+// trimmed independently, and no keep can empty a key entirely.
+func testTrimSummaries(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	base := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	const (
+		keep      = 3
+		busyRuns  = 10
+		taskFrom  = 3
+		quietRuns = 2
+	)
+	runID := func(i int) string { return fmt.Sprintf("run_%02d", i) }
+
+	// The host table gets more rows than the task table, so a store that trimmed one and reported
+	// the other's count, or trimmed both to the same depth by accident, is caught by the total.
+	for i := range busyRuns {
+		at := base.Add(time.Duration(i) * time.Minute)
+		hosts := []run.HostSummary{{Host: "busy", Worst: "ok", RanAt: at}}
+		if i < quietRuns {
+			hosts = append(hosts, run.HostSummary{Host: "quiet", Worst: "ok", RanAt: at})
+		}
+		if err := store.SaveHostSummary(ctx, runID(i), hosts); err != nil {
+			t.Fatalf("SaveHostSummary(%s) error = %v", runID(i), err)
+		}
+		if i < taskFrom {
+			continue
+		}
+		tasks := []run.TaskSummary{{Task: "busy-task", Seconds: float64(i), RanAt: at}}
+		if i < taskFrom+quietRuns {
+			tasks = append(tasks, run.TaskSummary{Task: "quiet-task", Seconds: 1, RanAt: at})
+		}
+		if err := store.SaveTaskSummary(ctx, runID(i), tasks); err != nil {
+			t.Fatalf("SaveTaskSummary(%s) error = %v", runID(i), err)
+		}
+	}
+
+	wantDeleted := (busyRuns - keep) + (busyRuns - taskFrom - keep)
+	deleted, err := store.TrimSummaries(ctx, keep)
+	if err != nil {
+		t.Fatalf("TrimSummaries() error = %v", err)
+	}
+	if deleted != wantDeleted {
+		t.Errorf("TrimSummaries() deleted = %d, want %d", deleted, wantDeleted)
+	}
+
+	// The newest survive, in order, and the oldest are gone. Trimming the wrong end would leave the
+	// same row count and answer every fleet view with a fossil.
+	history, err := store.HostHistory(ctx, "busy", busyRuns)
+	if err != nil {
+		t.Fatalf("HostHistory(busy) error = %v", err)
+	}
+	gotRuns := make([]string, len(history))
+	for i, hs := range history {
+		gotRuns[i] = hs.RunID
+	}
+	wantRuns := []string{runID(9), runID(8), runID(7)}
+	if diff := cmp.Diff(wantRuns, gotRuns, cmpopts.EquateEmpty()); diff != "" {
+		t.Errorf("busy history after trim mismatch (-want +got):\n%s", diff)
+	}
+
+	quiet, err := store.HostHistory(ctx, "quiet", busyRuns)
+	if err != nil {
+		t.Fatalf("HostHistory(quiet) error = %v", err)
+	}
+	if len(quiet) != quietRuns {
+		t.Errorf("quiet history len = %d, want %d untouched", len(quiet), quietRuns)
+	}
+
+	trends, err := store.TaskTrends(ctx, busyRuns)
+	if err != nil {
+		t.Fatalf("TaskTrends() error = %v", err)
+	}
+	runsByTask := make(map[string]int, len(trends))
+	for _, tr := range trends {
+		runsByTask[tr.Task] = tr.Runs
+	}
+	want := map[string]int{"busy-task": keep, "quiet-task": quietRuns}
+	if diff := cmp.Diff(want, runsByTask, cmpopts.EquateEmpty()); diff != "" {
+		t.Errorf("task rows after trim mismatch (-want +got):\n%s", diff)
+	}
+
+	// A second sweep over tables already at the limit deletes nothing.
+	again, err := store.TrimSummaries(ctx, keep)
+	if err != nil {
+		t.Fatalf("TrimSummaries() second error = %v", err)
+	}
+	if again != 0 {
+		t.Errorf("TrimSummaries() second deleted = %d, want 0", again)
+	}
+
+	// A keep of zero is not a wipe. Each key is left with its newest row, so a misconfiguration
+	// cannot erase the fleet's history.
+	if _, err := store.TrimSummaries(ctx, 0); err != nil {
+		t.Fatalf("TrimSummaries(0) error = %v", err)
+	}
+	floored, err := store.HostHistory(ctx, "busy", busyRuns)
+	if err != nil {
+		t.Fatalf("HostHistory(busy) after zero keep error = %v", err)
+	}
+	if len(floored) != 1 || floored[0].RunID != runID(9) {
+		t.Errorf("busy history after zero keep = %+v, want only %s", floored, runID(9))
 	}
 }

@@ -199,3 +199,6 @@ func (c *Client) PurgeEventsBefore(context.Context, time.Time) (int, error) {
 
 // PurgeRunsBefore is a control-node retention sweep and is not served to workers.
 func (c *Client) PurgeRunsBefore(context.Context, time.Time) (int, error) { return 0, ErrUnsupported }
+
+// TrimSummaries is a control-node retention sweep and is not served to workers.
+func (c *Client) TrimSummaries(context.Context, int) (int, error) { return 0, ErrUnsupported }

@@ -1,6 +1,8 @@
 // Package retention trims a run store on a schedule so a busy fleet's database does not grow
 // forever. It drops the events and logs of old runs, then deletes runs older than a longer window,
-// always keeping the per host and per task summaries that power the cross-run views.
+// keeping the per host and per task summaries that power the cross-run views. Those summaries
+// outlive their runs on purpose, so they are bounded by count rather than by age: a sweep keeps the
+// newest few hundred per host and per task and drops the rest.
 package retention
 
 import (
@@ -24,6 +26,9 @@ type Sweeper struct {
 	retainRuns time.Duration
 	// retainEvents is how long a run's events and logs are kept. Zero disables event trimming.
 	retainEvents time.Duration
+	// retainHistory is how many summaries per host and per task survive a sweep. Zero disables
+	// history trimming, which leaves the two summary tables growing forever.
+	retainHistory int
 	// interval is how often the sweeper runs.
 	interval time.Duration
 	// log records sweep activity.
@@ -47,6 +52,19 @@ func WithRetainRuns(d time.Duration) Option {
 // WithRetainEvents sets how long a run's events and logs are kept. Zero disables it.
 func WithRetainEvents(d time.Duration) Option {
 	return func(s *Sweeper) { s.retainEvents = d }
+}
+
+// WithRetainHistory sets how many summaries per host and per task survive a sweep. Zero disables
+// history trimming. A positive count below run.MinRetainSummaries is raised to it, because the
+// fleet views let a caller ask for a window that deep and answering a legal window with a truncated
+// history would report a host as healthier, or quieter, than it was.
+func WithRetainHistory(n int) Option {
+	return func(s *Sweeper) {
+		if n > 0 && n < run.MinRetainSummaries {
+			n = run.MinRetainSummaries
+		}
+		s.retainHistory = n
+	}
 }
 
 // WithInterval sets how often the sweeper runs.
@@ -77,7 +95,7 @@ func NewSweeper(store run.Store, log *zap.Logger, opts ...Option) *Sweeper {
 // Enabled reports whether any retention window is configured, so a caller can skip starting a
 // sweeper that would do nothing.
 func (s *Sweeper) Enabled() bool {
-	return s.retainRuns > 0 || s.retainEvents > 0
+	return s.retainRuns > 0 || s.retainEvents > 0 || s.retainHistory > 0
 }
 
 // Start launches the sweep loop, which runs once immediately and then on the interval, until Close.
@@ -101,7 +119,10 @@ func (s *Sweeper) Start() {
 	})
 }
 
-// sweep trims events older than the events window, then deletes runs older than the runs window.
+// sweep trims events older than the events window, deletes runs older than the runs window, then
+// bounds the summary tables. Trimming summaries comes last because deleting runs does not touch
+// them: they are kept on purpose so a host's outcome history outlives the runs it came from, which
+// is also why they are the only tables with no other bound.
 func (s *Sweeper) sweep(now time.Time) {
 	if s.retainEvents > 0 {
 		n, err := s.store.PurgeEventsBefore(s.ctx, now.Add(-s.retainEvents))
@@ -117,6 +138,14 @@ func (s *Sweeper) sweep(now time.Time) {
 			s.log.Error("retention: purge runs: " + err.Error())
 		} else if n > 0 {
 			s.log.Info("retention: deleted old runs", zap.Int("runs", n))
+		}
+	}
+	if s.retainHistory > 0 {
+		n, err := s.store.TrimSummaries(s.ctx, s.retainHistory)
+		if err != nil {
+			s.log.Error("retention: trim summaries: " + err.Error())
+		} else if n > 0 {
+			s.log.Info("retention: trimmed host and task summaries", zap.Int("rows", n))
 		}
 	}
 }

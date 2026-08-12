@@ -290,6 +290,25 @@ curl -X POST https://switchtender.example.com/v1/schedules \
   -d '{"cron":"0 2 * * *","timezone":"America/New_York","template_id":"tpl_abc123"}'
 ```
 
+## Fleet view windows
+
+`/v1/fleet` and `/v1/tasks` take a `window`, the number of recent runs per host or per task the
+view considers, and `/v1/hosts/{host}/runs` takes a `limit`. All three default to 10. The window is
+capped at 100 and the host history limit at 500; a larger value is answered with the cap, and the
+response echoes the window it actually used. The caps exist because the per-host and per-task
+summaries are kept when their runs are deleted, so on a long-lived fleet the tables hold a row for
+every host of every run, and every row a window admits becomes an element of the answer.
+
+The same tables are bounded by count rather than by age. `--retain-history` keeps the newest N
+summaries for each host and each task and drops the rest, so a host's outcome history still
+outlives its runs without the tables growing forever. N is never allowed below 500, the deepest
+window these endpoints will answer, so trimmed history is history no request could have reached.
+
+```bash
+curl -s "https://switchtender.example.com/v1/fleet?window=30" \
+  -H "Authorization: Bearer $SWITCHTENDER_TOKEN"
+```
+
 ## Relay endpoints
 
 With `--worker-token` set, the server also serves the mesh relay under `/relay`: the execution
