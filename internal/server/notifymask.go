@@ -1,29 +1,12 @@
 package server
 
 import (
-	"net/url"
 	"strings"
 
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/template"
+	"github.com/kordloom/switchtender/internal/util"
 )
-
-// maskMarker is the ellipsis a masked notification URL carries in place of its secret path. A
-// submitted URL holding it is a redacted value coming back unchanged, not a new address.
-const maskMarker = "…"
-
-// maskNotifyURL redacts a notification URL for display. A webhook URL is a bearer secret: anyone
-// holding it can post to the channel, so only the scheme and host survive a read.
-func maskNotifyURL(raw string) string {
-	if raw == "" {
-		return ""
-	}
-	u, err := url.Parse(raw)
-	if err != nil || u.Host == "" {
-		return maskMarker
-	}
-	return u.Scheme + "://" + u.Host + "/" + maskMarker
-}
 
 // maskedNotifications returns a copy of the targets with their URLs redacted, for any response
 // that carries a template.
@@ -33,12 +16,12 @@ func maskedNotifications(targets []run.NotifyTarget) []run.NotifyTarget {
 	}
 	out := make([]run.NotifyTarget, len(targets))
 	for i, t := range targets {
-		t.URL = maskNotifyURL(t.URL)
+		t.URL = util.MaskURL(t.URL)
 		// The per-service key is a bearer secret too: a PagerDuty routing key pages the service and
 		// a Grafana token writes annotations. It is redacted on read the same as a URL. The
 		// recipient a twilio or email target names is not a secret and is left readable.
 		if t.Key != "" {
-			t.Key = maskMarker
+			t.Key = util.MaskMarker
 		}
 		out[i] = t
 	}
@@ -80,20 +63,20 @@ func restoreMaskedNotifications(incoming, stored []run.NotifyTarget) []run.Notif
 		// editor, so it is restored from the stored target beside it rather than saved as the
 		// ellipsis. This applies to the URL and to the per-service key, the two masked fields.
 		if i < len(stored) && stored[i].Kind == out[i].Kind {
-			if strings.Contains(out[i].URL, maskMarker) {
+			if strings.Contains(out[i].URL, util.MaskMarker) {
 				out[i].URL = stored[i].URL
 			}
-			if strings.Contains(out[i].Key, maskMarker) {
+			if strings.Contains(out[i].Key, util.MaskMarker) {
 				out[i].Key = stored[i].Key
 			}
 			continue
 		}
 		// A masked value with no stored counterpart is meaningless: clear it so the row is judged
 		// on what it actually carries.
-		if strings.Contains(out[i].URL, maskMarker) {
+		if strings.Contains(out[i].URL, util.MaskMarker) {
 			out[i].URL = ""
 		}
-		if strings.Contains(out[i].Key, maskMarker) {
+		if strings.Contains(out[i].Key, util.MaskMarker) {
 			out[i].Key = ""
 		}
 	}

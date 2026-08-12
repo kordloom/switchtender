@@ -11,6 +11,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/safedial"
+	"github.com/kordloom/switchtender/internal/util"
 )
 
 // webhookTimeout bounds one notification delivery attempt.
@@ -146,9 +147,14 @@ func (d *Dispatcher) deliverWithHeaders(url, runID string, body []byte, headers 
 		lastErr = err
 		time.Sleep(time.Duration(attempt+1) * 250 * time.Millisecond)
 	}
+	// The address is the credential for these channels, and a Twilio endpoint carries the account
+	// SID in its path, so neither the field nor the transport error's own text may show it. The
+	// error is the half that is easy to miss: net/http wraps a failure in a *url.Error that
+	// re-embeds the whole address, so masking the field alone leaves the secret in the same line.
 	msg := "delivery failed"
 	if lastErr != nil {
-		msg = lastErr.Error()
+		msg = util.MaskURLError(lastErr, url).Error()
 	}
-	d.log.Warn("dispatch: webhook: "+msg, zap.String("run_id", runID), zap.String("url", url))
+	d.log.Warn("dispatch: webhook: "+msg,
+		zap.String("run_id", runID), zap.String("url", util.MaskURL(url)))
 }

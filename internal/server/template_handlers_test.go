@@ -17,6 +17,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/template"
+	"github.com/kordloom/switchtender/internal/util"
 )
 
 // TestLaunchTemplateCredentialSelection verifies prompt-on-launch credential selection: a chosen
@@ -218,7 +219,7 @@ func TestNotificationURLMasking(t *testing.T) {
 	}
 
 	// Saving the masked value back must not clobber the stored URL.
-	masked := maskNotifyURL(secret)
+	masked := util.MaskURL(secret)
 	body := `{"name":"deploy","playbook":"site.yml","notifications":[{"kind":"slack","url":"` + masked + `"}]}`
 	rec = httptest.NewRecorder()
 	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPut, "/v1/templates/tpl_1", strings.NewReader(body)))
@@ -258,7 +259,7 @@ func TestPagerDutyKeyMaskRoundTrip(t *testing.T) {
 
 	// Echoing the masked key back on an edit must keep the stored key, not save the marker.
 	body := `{"name":"deploy","playbook":"site.yml",` +
-		`"notifications":[{"kind":"pagerduty","key":"` + maskMarker + `"}]}`
+		`"notifications":[{"kind":"pagerduty","key":"` + util.MaskMarker + `"}]}`
 	rec = httptest.NewRecorder()
 	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPut, "/v1/templates/tpl_pd", strings.NewReader(body)))
 	if rec.Code != http.StatusOK {

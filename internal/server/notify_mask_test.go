@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/util"
 )
 
 // TestNotifyKeyIsMaskedOnRead pins that a per-service key never leaves on a read, the same as a
@@ -54,7 +55,7 @@ func TestRestoreKeepsRicherChannels(t *testing.T) {
 	}
 	// What an editor sends back after loading the masked template and changing nothing.
 	incoming := []run.NotifyTarget{
-		{Kind: run.NotifyPagerDuty, Key: maskMarker},
+		{Kind: run.NotifyPagerDuty, Key: util.MaskMarker},
 		{Kind: run.NotifyTwilio, To: "+15550100"},
 		{Kind: run.NotifyEmail, To: "team@example.com"},
 	}

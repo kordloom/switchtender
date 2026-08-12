@@ -9,9 +9,10 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/url"
 	"strconv"
 	"time"
+
+	"github.com/kordloom/switchtender/internal/util"
 )
 
 // HTTPSink delivers events as one NDJSON body per batch: one JSON object per line, the shape
@@ -35,14 +36,16 @@ func NewHTTPSink(url string, headers map[string]string, client *http.Client) *HT
 	return &HTTPSink{url: url, headers: headers, client: client}
 }
 
-// Name identifies the sink in logs by scheme and host only. The full URL is kept out because it
-// is logged on every delivery failure, and a path or query can carry a token (a Splunk HEC URL
-// often ends in the token) that has no business in a log line.
+// Name identifies the sink in logs by scheme and host, the path and query replaced by the mask
+// marker. The full URL is kept out because it is logged on every delivery failure, and a path or
+// query can carry a token (a Splunk HEC URL often ends in the token) that has no business in a log
+// line. It masks through the same helper the delivery error does, so the two cannot drift.
 func (s *HTTPSink) Name() string {
-	if u, err := url.Parse(s.url); err == nil && u.Host != "" {
-		return "http " + u.Scheme + "://" + u.Host
+	masked := util.MaskURL(s.url)
+	if masked == "" || masked == util.MaskMarker {
+		return "http sink"
 	}
-	return "http sink"
+	return "http " + masked
 }
 
 // Deliver posts the batch and treats anything but a 2xx answer as failure, because a delivery
@@ -57,7 +60,7 @@ func (s *HTTPSink) Deliver(ctx context.Context, events []Event) error {
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.url, &body)
 	if err != nil {
-		return err
+		return util.MaskURLError(err, s.url)
 	}
 	req.Header.Set("Content-Type", "application/x-ndjson")
 	for k, v := range s.headers {
@@ -65,7 +68,10 @@ func (s *HTTPSink) Deliver(ctx context.Context, events []Event) error {
 	}
 	res, err := s.client.Do(req)
 	if err != nil {
-		return err
+		// The client hands back a *url.Error carrying the whole endpoint, which the forwarder logs
+		// on every failure. That undoes the redaction Name exists to provide, so the address is
+		// masked out of the message before the error leaves the sink. The cause stays in the chain.
+		return util.MaskURLError(err, s.url)
 	}
 	defer func() { _ = res.Body.Close() }()
 	_, _ = io.Copy(io.Discard, io.LimitReader(res.Body, 4096))
