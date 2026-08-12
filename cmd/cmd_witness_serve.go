@@ -161,7 +161,7 @@ func runWitnessServe(cmd *cobra.Command, _ []string) error {
 	if err := os.MkdirAll(keyDir, 0o750); err != nil {
 		return fmt.Errorf("witness key directory: %w", err)
 	}
-	id, err := audit.LoadIdentity(keyDir)
+	id, err := audit.LoadWitnessIdentity(keyDir)
 	if err != nil {
 		return fmt.Errorf("load witness identity: %w", err)
 	}

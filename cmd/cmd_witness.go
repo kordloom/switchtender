@@ -81,7 +81,7 @@ func runWitness(cmd *cobra.Command, _ []string) error {
 	if keyDir == "" {
 		keyDir = filepath.Dir(witnessState)
 	}
-	id, err := audit.LoadIdentity(keyDir)
+	id, err := audit.LoadWitnessIdentity(keyDir)
 	if err != nil {
 		return fmt.Errorf("load witness identity: %w", err)
 	}

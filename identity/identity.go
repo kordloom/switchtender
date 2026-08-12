@@ -102,6 +102,20 @@ func Load(dir string) (Identity, error) {
 		return id, nil
 	}
 
+	return LoadFile(dir)
+}
+
+// LoadFile reads the identity from dir alone, creating it on first use, and never consults
+// SWITCHTENDER_AUDIT_KEY.
+//
+// A witness needs this. Load lets that variable win so an operator can hold the producer key in
+// their own secret manager, which is right for the server that produces a chain and wrong for
+// anything meant to be independent of it. A witness started where the variable is set signed its
+// attestations with the watched server's key, so a relying party who pinned the witness key was
+// pinning the producer's, and the watched operator could mint the very statement the witness exists
+// to make unforgeable. It reads the same file under the same name, so a witness that already has a
+// key keeps it, along with the checkpoints that key protects.
+func LoadFile(dir string) (Identity, error) {
 	stored, err := readIdentityFile(dir)
 	if err == nil {
 		return identityFromSeed(stored.Seed, stored.InstallID)

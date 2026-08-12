@@ -46,7 +46,7 @@ func main() {
 func run(server, stateDir string, interval time.Duration) error {
 	// The identity is created on first use and never leaves the state directory. Publishing its
 	// key id is what lets a relying party pin this witness rather than trust whoever answers.
-	id, err := identity.Load(stateDir)
+	id, err := identity.LoadFile(stateDir)
 	if err != nil {
 		return fmt.Errorf("load witness identity: %w", err)
 	}
