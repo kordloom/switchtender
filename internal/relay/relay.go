@@ -50,6 +50,12 @@ type Transport interface {
 	AppendEvents(ctx context.Context, id string, events []event.Event) error
 	// SaveHostSummary records a run's per-host outcomes.
 	SaveHostSummary(ctx context.Context, runID string, summaries []run.HostSummary) error
+	// SaveHostFacts records the system facts a run gathered per host.
+	//
+	// A worker folds them out of the run's own event stream, and the control node is the only place
+	// they can be kept. Without this call the facts a relay-executed run gathered were dropped, so
+	// the host inventory the product shows knew nothing about any host a worker ran against.
+	SaveHostFacts(ctx context.Context, runID string, facts []run.HostFacts) error
 	// SaveTaskSummary records a run's per-task durations.
 	SaveTaskSummary(ctx context.Context, runID string, summaries []run.TaskSummary) error
 }
@@ -106,6 +112,11 @@ func (l loopback) AppendEvents(ctx context.Context, id string, events []event.Ev
 // SaveHostSummary delegates to the backing store.
 func (l loopback) SaveHostSummary(ctx context.Context, runID string, summaries []run.HostSummary) error {
 	return l.store.SaveHostSummary(ctx, runID, summaries)
+}
+
+// SaveHostFacts delegates to the backing store.
+func (l loopback) SaveHostFacts(ctx context.Context, runID string, facts []run.HostFacts) error {
+	return l.store.SaveHostFacts(ctx, runID, facts)
 }
 
 // SaveTaskSummary delegates to the backing store.

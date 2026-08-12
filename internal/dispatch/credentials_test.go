@@ -824,7 +824,7 @@ func TestRegistryPasswordMaskedInLog(t *testing.T) {
 		t.Fatalf("Save() error = %v", err)
 	}
 	d.streamSpec(ctx, r.Clone(), false, nil,
-		func(roundhouse.Result, error, *masker) run.Status { return run.StatusSucceeded })
+		func(roundhouse.Result, error, *masker, *run.SummaryFold) run.Status { return run.StatusSucceeded })
 
 	body, err := store.Log(ctx, r.ID)
 	if err != nil {

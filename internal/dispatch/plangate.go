@@ -57,7 +57,7 @@ func (d *Dispatcher) planGatePolicies(ctx context.Context, r *run.Run) ([]*polic
 func (d *Dispatcher) executePlanGate(ctx context.Context, r *run.Run, policies []*policy.Policy) run.Status {
 	var plan bytes.Buffer
 	return d.streamSpec(ctx, r, true, &plan,
-		func(res roundhouse.Result, runErr error, mask *masker) run.Status {
+		func(res roundhouse.Result, runErr error, mask *masker, _ *run.SummaryFold) run.Status {
 			switch {
 			case runErr != nil && ctx.Err() != nil:
 				d.finalize(r, run.StatusCanceled, nil, "")

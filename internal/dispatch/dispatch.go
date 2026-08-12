@@ -46,9 +46,6 @@ const (
 	watchInterval = 3 * time.Second
 	// leaseTTL is how stale a lease may grow before the janitor treats its holder as dead.
 	leaseTTL = 30 * time.Second
-	// summaryPageSize is how many events are read at a time when folding a finished run's summaries.
-	// It bounds peak memory at completion, which is when several runs tend to finish at once.
-	summaryPageSize = 5000
 	// janitorInterval is how often stale leases are swept.
 	janitorInterval = 10 * time.Second
 	// idleBackoffShift is how many times an idle claim wait may double, so the ceiling is the claim
@@ -1517,41 +1514,24 @@ func (d *Dispatcher) runStepAttempts(ctx context.Context, parent *run.Run, step 
 	return status, nil
 }
 
-// stepOutputs reads a finished step's published outputs from its events and records them on the
-// run. It is best effort; a read failure just means no outputs flow downstream. The outputs are
-// recorded on a fresh read of the run, never on the coordinator's pre-claim snapshot, because
-// saving that stale snapshot would flip the finished step back to pending and a claim loop would
-// execute it a second time.
+// stepOutputs returns what a finished step published with set_stats, read from the step's own run
+// record. It is best effort; a read failure just means no outputs flow downstream.
+//
+// The values are folded and recorded by whichever process executed the step, before the step went
+// terminal, so the coordinator reads the answer rather than recomputing it from events. Recomputing
+// it here re-read the step's events through the coordinator's store, and a step executed across the
+// relay leaves its events on the control node while the executor's store cannot read them back at
+// all, so every relay-executed step silently published nothing to its dependents.
 func (d *Dispatcher) stepOutputs(child *run.Run) map[string]any {
-	fold := run.NewSummaryFold(child.CreatedAt)
-	var after int64
-	for {
-		batch, err := d.store.EventsAfter(context.Background(), child.ID, after, summaryPageSize)
-		if err != nil {
-			d.log.Error("dispatch: read events for outputs: "+err.Error(), zap.String("run_id", child.ID))
-			return nil
-		}
-		if len(batch) == 0 {
-			break
-		}
-		fold.Add(batch)
-		after = batch[len(batch)-1].Seq
-		if len(batch) < summaryPageSize {
-			break
-		}
-	}
-	outputs := fold.Outputs()
-	if len(outputs) == 0 {
-		return nil
-	}
-	fresh, err := d.store.Get(context.Background(), child.ID)
+	fresh, err := d.storeGetWithRetries(context.Background(), child.ID)
 	if err != nil {
 		d.log.Error("dispatch: read run for outputs: "+err.Error(), zap.String("run_id", child.ID))
-		return outputs
+		return nil
 	}
-	fresh.Outputs = outputs
-	d.save(fresh)
-	return outputs
+	if len(fresh.Outputs) == 0 {
+		return nil
+	}
+	return fresh.Outputs
 }
 
 // DefaultMaxShards caps how many groups a split fans out into when an operator sets no override, so
@@ -1677,12 +1657,12 @@ func (d *Dispatcher) execute(ctx context.Context, r *run.Run) run.Status {
 // outcome. It is the single-phase path taken by every run a plan-content policy does not gate.
 func (d *Dispatcher) executeRun(ctx context.Context, r *run.Run) run.Status {
 	return d.streamSpec(ctx, r, r.DryRun, nil,
-		func(res roundhouse.Result, runErr error, mask *masker) run.Status {
+		func(res roundhouse.Result, runErr error, mask *masker, fold *run.SummaryFold) run.Status {
 			// Write the summaries and any drift while the run is still non-terminal. The store fences
 			// auxiliary writes to a terminal run, so finalizing first would reject the run's own final
 			// summaries; ordering the writes before finalize lets them land and drops only a
 			// reclaimed-but-alive worker's late writes.
-			d.summarize(r)
+			d.summarize(r, fold)
 			if res.Drift {
 				d.recordPlanDrift(r)
 			}
@@ -1697,8 +1677,12 @@ func (d *Dispatcher) executeRun(ctx context.Context, r *run.Run) run.Status {
 // the gate can inspect the plan. A setup failure finalizes r as failed, redacting the detail, and
 // returns without calling finish. It always closes the run's output stream before returning, and
 // returns finish's status on success or StatusFailed on a setup failure.
+//
+// finish also receives the summary fold the tailer filled from the run's events. The tailer has
+// stopped by the time finish is called, so the fold is complete and safe to read.
 func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, tee io.Writer,
-	finish func(res roundhouse.Result, runErr error, mask *masker) run.Status) run.Status {
+	finish func(res roundhouse.Result, runErr error, mask *masker, fold *run.SummaryFold) run.Status,
+) run.Status {
 	started := time.Now()
 	r.Status = run.StatusRunning
 	r.StartedAt = &started
@@ -1726,9 +1710,12 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 	stop := make(chan struct{})
 	tailed := make(chan struct{})
 	mask := &masker{}
+	// The fold accumulates the run's summaries as its events go by, so finishing needs no second
+	// read of them. Only the tail goroutine writes to it, and it has exited before finish reads it.
+	fold := run.NewSummaryFold(r.CreatedAt)
 	go func() {
 		defer close(tailed)
-		d.tailEvents(r.ID, parent, eventsPath, stop, mask)
+		d.tailEvents(r.ID, parent, eventsPath, stop, mask, fold)
 	}()
 
 	// fail finalizes r as failed and closes its output stream when a setup step cannot complete, so a
@@ -1837,7 +1824,7 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 	close(stop)
 	<-tailed
 
-	status := finish(res, runErr, mask)
+	status := finish(res, runErr, mask, fold)
 	d.publisher.CloseRun(r.ID)
 	return status
 }
@@ -1880,37 +1867,35 @@ func (d *Dispatcher) watch(ctx context.Context, id string) {
 	}
 }
 
-// summarize computes the run's per host and per task summaries from its events and stores them for
-// summarize folds the run's events into its per-host, per-task, and facts summaries.
+// summarize records the run's per-host, per-task, and facts summaries and the values it published,
+// from the fold the tailer filled as the run's events streamed past. It runs while the run is still
+// non-terminal, so the writes are not fenced, and it must run before the run's terminal save, which
+// is what commits its outcome.
 //
-// The events are paged rather than loaded whole. A long run can carry hundreds of thousands of them,
-// and unmarshaling the list at once cost hundreds of megabytes at the exact moment several runs tend
-// to finish together, which is how a small control node ran out of memory. The fold keeps state
-// proportional to hosts and tasks, so peak memory is now one page.
-func (d *Dispatcher) summarize(r *run.Run) {
-	fold := run.NewSummaryFold(r.CreatedAt)
-	var after int64
-	for {
-		batch, err := d.store.EventsAfter(context.Background(), r.ID, after, summaryPageSize)
-		if err != nil {
-			d.log.Error("dispatch: read events for summary: "+err.Error(), zap.String("run_id", r.ID))
-			return
-		}
-		if len(batch) == 0 {
-			break
-		}
-		fold.Add(batch)
-		after = batch[len(batch)-1].Seq
-		if len(batch) < summaryPageSize {
-			break
-		}
-	}
-	if summaries := fold.HostSummaries(); len(summaries) > 0 {
+// The fold is filled while the events go by rather than read back afterwards. Reading them back
+// asked the store for a run's own events, which the control node can serve and a relay worker's
+// store cannot: every run executed across the relay recorded no host at all, emptying fleet health,
+// drift, host history, task trends, host costs, run comparison, and the failed-host relaunch for it,
+// while the outcome committed on the control node said the run had no hosts. Folding as the events
+// stream also keeps the state proportional to hosts and tasks rather than to a page of events, and
+// spends no second pass over a run that can carry hundreds of thousands of them.
+//
+// The caller must have stopped the tailer before calling this, which is what makes reading the
+// fold safe: the tail goroutine is the only writer, and its completion happens before this read.
+func (d *Dispatcher) summarize(r *run.Run, fold *run.SummaryFold) {
+	summaries := fold.HostSummaries()
+	if len(summaries) > 0 {
 		if err := withRetries(func() error {
 			return d.store.SaveHostSummary(context.Background(), r.ID, summaries)
 		}); err != nil {
 			d.log.Error("dispatch: save host summary: "+err.Error(), zap.String("run_id", r.ID))
 		}
+	} else if run.NormalizeTool(r.Tool) == run.ToolAnsible {
+		// A playbook run with no recap leaves nothing behind for fleet health, drift, host history,
+		// or a failed-host relaunch. Recording zero hosts silently is what made that invisible, so
+		// the run says so on its own record.
+		addWarning(r, "this run recorded no per-host result, so it is absent from fleet health, "+
+			"drift, and host history")
 	}
 	if facts := fold.HostFacts(); len(facts) > 0 {
 		if err := withRetries(func() error {
@@ -1926,6 +1911,22 @@ func (d *Dispatcher) summarize(r *run.Run) {
 			d.log.Error("dispatch: save task summary: "+err.Error(), zap.String("run_id", r.ID))
 		}
 	}
+	// The values a playbook published belong on the run, so a pipeline step's dependents read them
+	// from the step's record instead of re-reading its events from a store that may not hold them.
+	// The terminal save that follows carries them, across the relay as well as in process.
+	if outputs := fold.Outputs(); len(outputs) > 0 {
+		r.Outputs = outputs
+	}
+}
+
+// addWarning records a degradation on r, keeping any warning already there. A run can be degraded
+// more than once, and the later note must not erase the earlier one.
+func addWarning(r *run.Run, warning string) {
+	if r.Warning == "" {
+		r.Warning = warning
+		return
+	}
+	r.Warning += "; " + warning
 }
 
 // outcome finalizes r from the run result and returns the terminal status. Failure text passes
@@ -2087,8 +2088,10 @@ func (d *Dispatcher) eventsFile(id string) (string, func(), error) {
 // line as one batch, so a chatty tool costs one store write per tick instead of one per line.
 // Events from a child run are also published under its parent so a split or pipeline page streams
 // live. The final drain keeps a trailing line missing its newline, since a killed tool can be cut
-// off mid-write and what it managed to publish still belongs to the run.
-func (d *Dispatcher) tailEvents(id, parent, path string, stop <-chan struct{}, mask *masker) {
+// off mid-write and what it managed to publish still belongs to the run. Every line it parses also
+// goes into fold, which is how the run's summaries are built without reading its events back.
+func (d *Dispatcher) tailEvents(id, parent, path string, stop <-chan struct{}, mask *masker,
+	fold *run.SummaryFold) {
 	if path == "" {
 		<-stop
 		return
@@ -2122,7 +2125,7 @@ func (d *Dispatcher) tailEvents(id, parent, path string, stop <-chan struct{}, m
 			lines = append(lines, append([]byte(nil), partial...))
 			partial = partial[:0]
 		}
-		d.flushEventLines(id, parent, lines, mask)
+		d.flushEventLines(id, parent, lines, mask, fold)
 	}
 
 	ticker := time.NewTicker(tailPollInterval)
@@ -2143,7 +2146,12 @@ func (d *Dispatcher) tailEvents(id, parent, path string, stop <-chan struct{}, m
 // child of a split or pipeline, it also publishes them to the parent's topic, where the parent's
 // stream forwards them live, since a coordinator keeps no event log of its own to re-read. A single
 // damaged line is logged and skipped so the rest of the batch lands.
-func (d *Dispatcher) flushEventLines(id, parent string, lines [][]byte, mask *masker) {
+//
+// The batch is folded into the run's summaries here too, after redaction, so what a summary records
+// is what the store holds. Folding as the batch passes is what lets a run be summarized without
+// reading its events back out of a store, which a relay worker cannot do.
+func (d *Dispatcher) flushEventLines(id, parent string, lines [][]byte, mask *masker,
+	fold *run.SummaryFold) {
 	var events []event.Event
 	for _, raw := range lines {
 		e, ok, err := event.ParseLine(raw)
@@ -2162,6 +2170,7 @@ func (d *Dispatcher) flushEventLines(id, parent string, lines [][]byte, mask *ma
 	for i := range events {
 		mask.redactEvent(&events[i])
 	}
+	fold.Add(events)
 	if err := withRetries(func() error {
 		return d.store.AppendEvents(context.Background(), id, events)
 	}); err != nil {

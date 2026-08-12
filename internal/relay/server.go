@@ -92,6 +92,7 @@ func NewHandler(store run.Store, pools *Pools, log *zap.Logger,
 	mux.HandleFunc("POST /relay/v1/runs/{id}/log", s.appendLog)
 	mux.HandleFunc("POST /relay/v1/runs/{id}/events", s.appendEvents)
 	mux.HandleFunc("POST /relay/v1/runs/{id}/host-summary", s.saveHostSummary)
+	mux.HandleFunc("POST /relay/v1/runs/{id}/host-facts", s.saveHostFacts)
 	mux.HandleFunc("POST /relay/v1/runs/{id}/task-summary", s.saveTaskSummary)
 	return s.authed(mux)
 }
@@ -616,6 +617,27 @@ func (s *relayServer) saveHostSummary(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := s.store.SaveHostSummary(r.Context(), r.PathValue("id"), summaries); err != nil {
 		s.internal(w, "save host summary", err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// saveHostFacts replaces the facts the run gathered per host with those in the body.
+func (s *relayServer) saveHostFacts(w http.ResponseWriter, r *http.Request) {
+	if !s.heldForReport(w, r) {
+		return
+	}
+	facts, derr := decodeCapped[run.HostFacts](r.Body, maxRelayElements)
+	switch {
+	case errors.Is(derr, errTooManyElements):
+		writeErr(w, http.StatusRequestEntityTooLarge, derr.Error())
+		return
+	case derr != nil:
+		writeErr(w, http.StatusBadRequest, "invalid host facts body")
+		return
+	}
+	if err := s.store.SaveHostFacts(r.Context(), r.PathValue("id"), facts); err != nil {
+		s.internal(w, "save host facts", err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

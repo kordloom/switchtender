@@ -99,8 +99,8 @@ func TestWorkerTokenCannotWriteTheRecordOfARunItDoesNotHold(t *testing.T) {
 		t.Errorf("a finished run now records %q", got)
 	}
 
-	// The other three writers build the same record and answer the same question.
-	for _, path := range []string{"events", "host-summary", "task-summary"} {
+	// The other writers build the same record and answer the same question.
+	for _, path := range []string{"events", "host-summary", "host-facts", "task-summary"} {
 		if code := postAsWorker(t, ts.URL, "/relay/v1/runs/run_held/"+path, []byte("[]")); code < 400 {
 			t.Errorf("posting %s to a run awaiting a decision answered %d", path, code)
 		}

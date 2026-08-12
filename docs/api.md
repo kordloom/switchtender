@@ -331,4 +331,5 @@ presents the worker bearer token.
 | POST   | `/relay/v1/runs/{id}/log`          | Append captured output.                       |
 | POST   | `/relay/v1/runs/{id}/events`       | Append structured events.                     |
 | POST   | `/relay/v1/runs/{id}/host-summary` | Save the run's per-host summaries.            |
+| POST   | `/relay/v1/runs/{id}/host-facts`   | Save the facts the run gathered per host.     |
 | POST   | `/relay/v1/runs/{id}/task-summary` | Save the run's per-task summaries.            |

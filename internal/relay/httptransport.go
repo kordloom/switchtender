@@ -433,6 +433,16 @@ func (t *httpTransport) SaveHostSummary(ctx context.Context, runID string, summa
 	return expectNoContent("save host summary", resp)
 }
 
+// SaveHostFacts records the system facts a run gathered per host on the control node.
+func (t *httpTransport) SaveHostFacts(ctx context.Context, runID string, facts []run.HostFacts) error {
+	resp, err := t.sendJSON(ctx, http.MethodPost, runPath(runID, "/host-facts"), facts, t.leaseFor(runID))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	return expectNoContent("save host facts", resp)
+}
+
 // SaveTaskSummary records a run's per-task durations on the control node.
 func (t *httpTransport) SaveTaskSummary(ctx context.Context, runID string, summaries []run.TaskSummary) error {
 	resp, err := t.sendJSON(ctx, http.MethodPost, runPath(runID, "/task-summary"), summaries, t.leaseFor(runID))

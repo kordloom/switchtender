@@ -478,9 +478,10 @@ func TestDispatcherPipelineDAGValidation(t *testing.T) {
 	}
 }
 
-// TestStepOutputsDoesNotResurrectRun verifies recording a finished step's outputs never writes the
+// TestStepOutputsDoesNotResurrectRun verifies reading a finished step's outputs never writes the
 // coordinator's stale pre-claim snapshot back to the store. Before the fresh-read fix, the stale
-// save reverted the step to pending and unclaimed, and a claim loop executed it a second time.
+// save reverted the step to pending and unclaimed, and a claim loop executed it a second time. The
+// outputs now come from the step's own record, which its executor wrote before it went terminal.
 func TestStepOutputsDoesNotResurrectRun(t *testing.T) {
 	t.Parallel()
 	store := run.NewMemStore()
@@ -508,8 +509,8 @@ func TestStepOutputsDoesNotResurrectRun(t *testing.T) {
 		t.Fatalf("Save() error = %v", err)
 	}
 
-	// An executor claimed the step, ran it, published its outputs while running, then finalized it
-	// succeeded. Outputs are appended before finalize because the store fences writes to a terminal run.
+	// An executor claimed the step, ran it, folded the values it published out of its event stream,
+	// and carried them on the record it finalized succeeded.
 	if err := store.AppendEvents(ctx, "run_step", []event.Event{
 		{Type: event.TypeStats, Outputs: map[string]any{"version": "1.2.3"}},
 	}); err != nil {
@@ -519,6 +520,7 @@ func TestStepOutputsDoesNotResurrectRun(t *testing.T) {
 	done := stale.Clone()
 	done.Status = run.StatusSucceeded
 	done.ClaimedBy = "worker-1"
+	done.Outputs = map[string]any{"version": "1.2.3"}
 	done.ClaimedAt, done.StartedAt, done.EndedAt = &now, &now, &now
 	if err := store.Save(ctx, done); err != nil {
 		t.Fatalf("Save(done) error = %v", err)

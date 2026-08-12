@@ -59,6 +59,11 @@ func (c *Client) SaveHostSummary(ctx context.Context, runID string, summaries []
 	return c.t.SaveHostSummary(ctx, runID, summaries)
 }
 
+// SaveHostFacts records the system facts a run gathered per host on the control node.
+func (c *Client) SaveHostFacts(ctx context.Context, runID string, facts []run.HostFacts) error {
+	return c.t.SaveHostFacts(ctx, runID, facts)
+}
+
 // SaveTaskSummary records a run's per-task durations on the control node.
 func (c *Client) SaveTaskSummary(ctx context.Context, runID string, summaries []run.TaskSummary) error {
 	return c.t.SaveTaskSummary(ctx, runID, summaries)
@@ -148,11 +153,6 @@ func (c *Client) RunHostSummaries(context.Context, string) ([]run.HostSummary, e
 // RunTaskSummaries is a control-node read and is not served to workers.
 func (c *Client) RunTaskSummaries(context.Context, string) ([]run.TaskSummary, error) {
 	return nil, ErrUnsupported
-}
-
-// SaveHostFacts is a control-node write and is not served to workers.
-func (c *Client) SaveHostFacts(context.Context, string, []run.HostFacts) error {
-	return ErrUnsupported
 }
 
 // HostFactsFor is a control-node read and is not served to workers.

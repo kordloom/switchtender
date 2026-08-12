@@ -56,7 +56,7 @@ func TestCancelFenceOutageDoesNotDestroyAHealthyRun(t *testing.T) {
 		t.Fatalf("Save() error = %v", err)
 	}
 	got := d.streamSpec(ctx, r.Clone(), false, nil,
-		func(roundhouse.Result, error, *masker) run.Status { return run.StatusSucceeded })
+		func(roundhouse.Result, error, *masker, *run.SummaryFold) run.Status { return run.StatusSucceeded })
 
 	if store.refused.Load() == 0 {
 		t.Fatal("the outage was never exercised")

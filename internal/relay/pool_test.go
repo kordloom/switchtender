@@ -259,6 +259,7 @@ func TestQueueConfinementCoversEveryEndpoint(t *testing.T) {
 		{"append output", http.MethodPost, "/relay/v1/runs/run_prod/log", "PLAY RECAP ok=12\n"},
 		{"append events", http.MethodPost, "/relay/v1/runs/run_prod/events", "[]"},
 		{"host summary", http.MethodPost, "/relay/v1/runs/run_prod/host-summary", "[]"},
+		{"host facts", http.MethodPost, "/relay/v1/runs/run_prod/host-facts", "[]"},
 		{"task summary", http.MethodPost, "/relay/v1/runs/run_prod/task-summary", "[]"},
 		{"kill the run", http.MethodPost, "/relay/v1/runs/run_prod/save",
 			`{"status":"canceled","error":"killed by another pool"}`},
