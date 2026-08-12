@@ -19,6 +19,7 @@ import (
 	"github.com/kordloom/loomseal/jcs"
 
 	"github.com/kordloom/switchtender/internal/idgen"
+	"github.com/kordloom/switchtender/internal/util"
 )
 
 // Entry is one recorded API mutation, linked into a tamper-evident hash chain.
@@ -159,31 +160,12 @@ func linkOf(claim map[string]any) string {
 // costs more than the comparison it buys.
 const MaxCanonicalDigestBytes = 1 << 20
 
-// secretKeyStems are the substrings that mark a JSON key as secret-bearing, the same stems the
-// run-log inventory masker uses. They match anywhere in the key, so ansible_become_password,
-// secret_value, and token_id are all caught, not only the bare names. The digest is stored in the
-// chain and served in exports, and a SHA-256 over a low-entropy secret is an offline brute-force
-// target, so a value under one of these keys is replaced before the digest is taken.
-var secretKeyStems = []string{
-	"password", "passwd", "passphrase", "secret", "token", "apikey", "api_key",
-	"private_key", "privatekey",
-}
-
-// secretKey reports whether a key's value is secret material. It matches the stems above anywhere in
-// the key, the exact field "fields" (the secret bag of a custom credential type), and the bare pass
-// stem only as a whole key or a terminal _pass, so ansible_ssh_pass matches while bypass and
-// passthrough, whose values are ordinary, do not.
+// secretKey reports whether a key's value is secret material, deferring to the one classifier the
+// inventory redactor and the run-log masker also use. The digest is stored in the chain and served
+// in exports, and a SHA-256 over a low-entropy secret is an offline brute-force target, so a value
+// under such a key is replaced before the digest is taken.
 func secretKey(key string) bool {
-	k := strings.ToLower(key)
-	if k == "fields" || k == "pass" || strings.HasSuffix(k, "_pass") {
-		return true
-	}
-	for _, stem := range secretKeyStems {
-		if strings.Contains(k, stem) {
-			return true
-		}
-	}
-	return false
+	return util.SecretKey(key)
 }
 
 // freeTextSecretKeys hold arbitrary text that can embed a connection secret, so their whole value is

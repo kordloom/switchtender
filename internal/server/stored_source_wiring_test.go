@@ -179,10 +179,20 @@ func TestInventoryListRedactionIsWired(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	const content = "[web]\nweb01 ansible_password=hunter2 ansible_user=deploy\n"
+	// A dynamic inventory is stored as the JSON document the dump conversion writes, and a user may
+	// paste the same from ansible-inventory --list. The variable name is quoted there, which is why
+	// redaction cannot be a line pattern: it saw nothing to remove and served the password whole.
+	const jsonContent = `{"web": {"hosts": {"web02": {"ansible_password": "swordfish",` +
+		` "ansible_user": "deploy"}}}}`
 
 	store := inventory.NewMemStore()
 	if err := store.Save(ctx, &inventory.Inventory{
 		ID: "inv_1", Name: "prod", Content: content,
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	if err := store.Save(ctx, &inventory.Inventory{
+		ID: "inv_2", Name: "dynamic", Content: jsonContent,
 	}); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
@@ -207,8 +217,11 @@ func TestInventoryListRedactionIsWired(t *testing.T) {
 	if strings.Contains(body, "hunter2") {
 		t.Error("the list response carried an inline ansible_password to a viewer")
 	}
+	if strings.Contains(body, "swordfish") {
+		t.Error("the list response carried a JSON-encoded ansible_password to a viewer")
+	}
 	// Redaction must remove the value and nothing else, or an operator cannot read their inventory.
-	for _, keep := range []string{"web01", "ansible_password", "deploy"} {
+	for _, keep := range []string{"web01", "web02", "ansible_password", "deploy"} {
 		if !strings.Contains(body, keep) {
 			t.Errorf("redaction removed %q, which is not a secret", keep)
 		}
@@ -216,8 +229,11 @@ func TestInventoryListRedactionIsWired(t *testing.T) {
 
 	// An admin is trusted with the real values, and that branch is the one a change would break
 	// silently in the other direction.
-	if adminBody := get(&Actor{UserID: "root", Role: user.RoleAdmin}); !strings.Contains(adminBody, "hunter2") {
-		t.Error("an admin could not read the value, so the bypass no longer works")
+	adminBody := get(&Actor{UserID: "root", Role: user.RoleAdmin})
+	for _, want := range []string{"hunter2", "swordfish"} {
+		if !strings.Contains(adminBody, want) {
+			t.Errorf("an admin could not read %q, so the bypass no longer works", want)
+		}
 	}
 
 	// The response is built from a copy. If it were not, redacting once would erase the real
