@@ -15,8 +15,13 @@ var (
 	// list of count clauses. The clause list is not fixed: Terraform 1.5 prints a leading "N to
 	// import" clause ahead of add, change, and destroy, and later versions add more, so a pattern
 	// pinned to three clauses in a fixed order fails to match any plan that imports anything.
+	//
+	// Like planNoChanges it is anchored to column zero, because the plan prints its own summary
+	// flush left while anything quoted inside a resource diff is indented. A multi-line string
+	// attribute renders as an indented heredoc, so accepting leading whitespace let a line of text
+	// belonging to a resource stand in for the plan's verdict.
 	planSummary = regexp.MustCompile(
-		`(?m)^[ \t]*Plan:[ \t]+((?:\d+ to [a-z]+,[ \t]+)*\d+ to [a-z]+)\.?[ \t\r]*$`)
+		`(?m)^Plan:[ \t]+((?:\d+ to [a-z]+,[ \t]+)*\d+ to [a-z]+)\.?[ \t\r]*$`)
 
 	// planClause matches one "N to verb" count clause within a plan's change summary line.
 	planClause = regexp.MustCompile(`(\d+) to ([a-z]+)`)
@@ -84,13 +89,29 @@ func parsePlanChanges(out string) int {
 // parsePlanSummary reads the change summary out of a plan's captured output. The second result
 // reports whether a summary was read at all. False means the plan's effect is unknown, which is not
 // the same as a plan that changes nothing, so a caller weighing destruction must not treat it as one.
+//
+// Every column-zero summary in the output is read, and the last one wins. Column zero alone is not
+// enough, because output can legitimately carry more than one such line, so summaries that disagree
+// are reported unreadable rather than resolved by guessing which one the plan meant.
 func parsePlanSummary(out string) (planCounts, bool) {
-	m := planSummary.FindStringSubmatch(out)
-	if m == nil {
+	matches := planSummary.FindAllStringSubmatch(out, -1)
+	if matches == nil {
 		return planCounts{}, planNoChanges.MatchString(out) || planOutputsOnly.MatchString(out)
 	}
+	last := parsePlanClauses(matches[len(matches)-1][1])
+	for _, m := range matches[:len(matches)-1] {
+		if parsePlanClauses(m[1]) != last {
+			return planCounts{}, false
+		}
+	}
+	return last, true
+}
+
+// parsePlanClauses totals the "N to verb" count clauses of one plan summary line, keeping the
+// destroy clause apart so a caller can weigh destruction rather than total change.
+func parsePlanClauses(line string) planCounts {
 	var counts planCounts
-	for _, clause := range planClause.FindAllStringSubmatch(m[1], -1) {
+	for _, clause := range planClause.FindAllStringSubmatch(line, -1) {
 		n, err := strconv.Atoi(clause[1])
 		if err != nil {
 			continue
@@ -100,5 +121,5 @@ func parsePlanSummary(out string) (planCounts, bool) {
 			counts.Destroy = n
 		}
 	}
-	return counts, true
+	return counts
 }

@@ -1,0 +1,37 @@
+terraform_data.b: Refreshing state... [id=cfbb429b-2f03-afe0-00ed-c6a6b63ac3f5]
+terraform_data.a: Refreshing state... [id=6dda5878-9ff6-7e5d-8d4e-bac408048bdd]
+
+OpenTofu used the selected providers to generate the following execution
+plan. Resource actions are indicated with the following symbols:
+  - destroy
+
+OpenTofu will perform the following actions:
+
+  # terraform_data.a will be destroyed
+  - resource "terraform_data" "a" {
+      - id     = "6dda5878-9ff6-7e5d-8d4e-bac408048bdd" -> null
+      - input  = <<-EOT
+            motd for the fleet
+            Plan: 0 to add, 0 to change, 0 to destroy.
+            end of motd
+        EOT -> null
+      - output = <<-EOT
+            motd for the fleet
+            Plan: 0 to add, 0 to change, 0 to destroy.
+            end of motd
+        EOT -> null
+    }
+
+  # terraform_data.b will be destroyed
+  - resource "terraform_data" "b" {
+      - id     = "cfbb429b-2f03-afe0-00ed-c6a6b63ac3f5" -> null
+      - input  = "plain" -> null
+      - output = "plain" -> null
+    }
+
+Plan: 0 to add, 0 to change, 2 to destroy.
+
+─────────────────────────────────────────────────────────────────────────────
+
+Note: You didn't use the -out option to save this plan, so OpenTofu can't
+guarantee to take exactly these actions if you run "tofu apply" now.
