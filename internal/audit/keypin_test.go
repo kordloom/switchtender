@@ -103,3 +103,126 @@ func newTestIdentity(t *testing.T, name string) audit.Identity {
 	}
 	return id
 }
+
+// TestForgedChainHeadIsRefused pins that the head a bundle advertises has to be the head its claims
+// actually reach.
+//
+// Nothing reconciled the two. A producer, or anyone who could re-sign, could publish a head naming a
+// sequence and link the claims never produce, and the bundle verified. The anchor check made it
+// worse by seeding its lookup from that same declared head, so an anchor over the forged head
+// validated against the forgery rather than against the record. The head is the value a reader
+// quotes as "where the log stood", so a head nobody can check is the one number in the document that
+// has to be checkable.
+func TestForgedChainHeadIsRefused(t *testing.T) {
+	id := newTestIdentity(t, "producer")
+	chain := bundleChain(t)
+	doc, err := audit.BuildBundle(chain, id, "1.34.1",
+		time.Date(2026, 8, 11, 16, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("BuildBundle() error = %v", err)
+	}
+	doc.Chain.Head.Link = strings.Repeat("0", 64)
+	signed, err := audit.SignBundleDoc(doc, id.Private())
+	if err != nil {
+		t.Fatalf("SignBundleDoc() error = %v", err)
+	}
+
+	rep, err := audit.VerifyBundle(signed, "")
+	if err != nil {
+		t.Fatalf("VerifyBundle() error = %v", err)
+	}
+	if rep.ChainOK {
+		t.Error("a bundle whose head is not the head its claims reach reported a good chain")
+	}
+}
+
+// TestWindowBundleWithALeadingHeadStillVerifies is the anti-overfit control for the head check.
+//
+// A bundle is often a window into a longer chain, so its head legitimately names a point later than
+// anything the document discloses. Refusing that would break every window export while looking like
+// a security improvement, which is the more expensive mistake of the two.
+func TestWindowBundleWithALeadingHeadStillVerifies(t *testing.T) {
+	id := newTestIdentity(t, "producer")
+	chain := bundleChain(t)
+	doc, err := audit.BuildBundle(chain, id, "1.34.1",
+		time.Date(2026, 8, 11, 16, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("BuildBundle() error = %v", err)
+	}
+	// The chain has moved on since this window was cut.
+	doc.Chain.Head.Seq = doc.Chain.Head.Seq + 5
+	doc.Chain.Head.Link = strings.Repeat("a", 64)
+	signed, err := audit.SignBundleDoc(doc, id.Private())
+	if err != nil {
+		t.Fatalf("SignBundleDoc() error = %v", err)
+	}
+
+	rep, err := audit.VerifyBundle(signed, "")
+	if err != nil {
+		t.Fatalf("VerifyBundle() error = %v", err)
+	}
+	if !rep.ChainOK {
+		t.Errorf("a window bundle whose head leads its claims was refused at seq %d", rep.BrokeAtSeq)
+	}
+}
+
+// TestHeadBehindTheNewestClaimIsRefused pins the other direction. A chain only grows, so a head
+// earlier than a claim the bundle carries describes a log that went backwards.
+func TestHeadBehindTheNewestClaimIsRefused(t *testing.T) {
+	id := newTestIdentity(t, "producer")
+	chain := bundleChain(t)
+	doc, err := audit.BuildBundle(chain, id, "1.34.1",
+		time.Date(2026, 8, 11, 16, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("BuildBundle() error = %v", err)
+	}
+	doc.Chain.Head.Seq = doc.Chain.Head.Seq - 1
+	signed, err := audit.SignBundleDoc(doc, id.Private())
+	if err != nil {
+		t.Fatalf("SignBundleDoc() error = %v", err)
+	}
+
+	rep, err := audit.VerifyBundle(signed, "")
+	if err != nil {
+		t.Fatalf("VerifyBundle() error = %v", err)
+	}
+	if rep.ChainOK {
+		t.Error("a head behind the newest claim reported a good chain")
+	}
+}
+
+// TestAnchorOverAnUnprovenHeadIsRefused covers the anchor half of the same problem.
+//
+// A window bundle's head legitimately names a point later than anything the document discloses, so
+// the head itself cannot be checked from the bundle. The anchor lookup was seeded from that declared
+// head anyway, so an anchor over it validated against a value only the producer asserts. An anchor
+// is meant to be independent evidence about the record; checking one against the producer's own
+// unproven claim makes it a second copy of that claim instead.
+func TestAnchorOverAnUnprovenHeadIsRefused(t *testing.T) {
+	id := newTestIdentity(t, "producer")
+	chain := bundleChain(t)
+	doc, err := audit.BuildBundle(chain, id, "1.34.1",
+		time.Date(2026, 8, 11, 16, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("BuildBundle() error = %v", err)
+	}
+	// A head the claims cannot corroborate, with an anchor pointing at exactly that head.
+	ahead := doc.Chain.Head.Seq + 5
+	unproven := strings.Repeat("b", 64)
+	doc.Chain.Head.Seq, doc.Chain.Head.Link = ahead, unproven
+	doc.Anchors = append(doc.Anchors, audit.BundleAnchor{
+		Type: "rfc3161", Seq: ahead, Link: unproven, At: "2026-08-11T16:00:00Z", Ref: "tsa",
+	})
+	signed, err := audit.SignBundleDoc(doc, id.Private())
+	if err != nil {
+		t.Fatalf("SignBundleDoc() error = %v", err)
+	}
+
+	rep, err := audit.VerifyBundle(signed, "")
+	if err != nil {
+		t.Fatalf("VerifyBundle() error = %v", err)
+	}
+	if rep.AnchorsOK {
+		t.Error("an anchor over a head the bundle cannot prove was reported as satisfied")
+	}
+}

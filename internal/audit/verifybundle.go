@@ -100,7 +100,11 @@ func VerifyBundle(signed []byte, pinnedKeyID string) (*BundleReport, error) {
 		return rep, err
 	}
 	rep.SignatureOK = sigOK
-	rep.ChainOK, rep.BrokeAtSeq = verifyBundleChain(b.Claims)
+	var head BundleCoord
+	if b.Chain != nil {
+		head = b.Chain.Head
+	}
+	rep.ChainOK, rep.BrokeAtSeq = verifyBundleChain(b.Claims, head)
 	rep.AnchorsOK = verifyBundleAnchors(&b)
 	verifyOutcomeDisclosure(b.Claims, rep)
 	return rep, nil
@@ -183,7 +187,7 @@ func verifyBundleSignature(signed []byte, pub ed25519.PublicKey, keyID string) (
 // first claim carries whatever previous link the chain held at that point, since a bundle is often a
 // window into a longer history rather than the genesis; every claim after it must name the previous
 // claim's link as its own previous. It returns the sequence of the first claim that does not verify.
-func verifyBundleChain(claims []BundleClaim) (bool, int64) {
+func verifyBundleChain(claims []BundleClaim, head BundleCoord) (bool, int64) {
 	for i, c := range claims {
 		str := func(k string) string { s, _ := c.Payload[k].(string); return s }
 		recomputed := linkOf(claimObject(c.Chain.Seq, c.At,
@@ -196,6 +200,21 @@ func verifyBundleChain(claims []BundleClaim) (bool, int64) {
 			return false, c.Chain.Seq
 		}
 	}
+	// The head is the value a reader quotes as where the log stood, and nothing checked it, so a
+	// head naming a sequence and link the claims never produce verified as well as a true one.
+	//
+	// A head AHEAD of the newest claim is ordinary and stays allowed: a bundle is often a window into
+	// a longer chain, and the head then attests a point this document cannot show. A head BEHIND the
+	// newest claim is impossible, since the chain only grows. A head level with it must be it.
+	if len(claims) > 0 {
+		newest := claims[len(claims)-1].Chain
+		if head.Seq < newest.Seq {
+			return false, newest.Seq
+		}
+		if head.Seq == newest.Seq && head.Link != newest.Link {
+			return false, newest.Seq
+		}
+	}
 	return true, 0
 }
 
@@ -203,12 +222,14 @@ func verifyBundleChain(claims []BundleClaim) (bool, int64) {
 // holds at the anchored link. An anchor for a sequence the bundle does not carry is the tampered
 // export the reference verifier rejects, so it fails here too.
 func verifyBundleAnchors(b *Bundle) bool {
-	links := make(map[int64]string, len(b.Claims)+1)
+	// Built from the claims alone. Seeding it from the declared head let an anchor over a forged
+	// head check against the forgery, which turned the anchor into a second copy of the producer's
+	// own claim rather than independent evidence about it. The head is admissible here only once the
+	// chain check above has confirmed it is the newest claim, at which point it is already in this
+	// map by way of that claim.
+	links := make(map[int64]string, len(b.Claims))
 	for _, c := range b.Claims {
 		links[c.Chain.Seq] = c.Chain.Link
-	}
-	if b.Chain != nil {
-		links[b.Chain.Head.Seq] = b.Chain.Head.Link
 	}
 	for _, a := range b.Anchors {
 		if link, ok := links[a.Seq]; !ok || link != a.Link {
