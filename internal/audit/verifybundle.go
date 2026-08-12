@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/kordloom/loomseal/jcs"
+	"github.com/kordloom/loomseal/seal"
 )
 
 // ErrVerify is returned when a bundle cannot be checked at all: it does not parse, or its producer
@@ -75,12 +76,26 @@ func VerifyBundle(signed []byte, pinnedKeyID string) (*BundleReport, error) {
 	if b.Chain != nil {
 		rep.Head = b.Chain.Head
 	}
+	// The advertised fingerprint has to be the fingerprint of the key that is actually embedded, and
+	// this must be settled before the pin is consulted. Comparing a caller's pin against a string the
+	// bundle declares proves only that the bundle claims the right author: an attacker signs with a
+	// key of their own, leaves it embedded so the signature is genuine, and writes the victim's
+	// published fingerprint into producer.key_id. Both halves then pass and the forgery reads as
+	// verified and pinned.
+	pub, err := base64.StdEncoding.DecodeString(b.Producer.PublicKey)
+	if err != nil || len(pub) != ed25519.PublicKeySize {
+		return rep, fmt.Errorf("%w: producer public key is not a valid ed25519 key", ErrVerify)
+	}
+	if actual := seal.KeyID(pub); actual != b.Producer.KeyID {
+		return rep, fmt.Errorf("%w: bundle declares key %s but carries key %s",
+			ErrVerify, b.Producer.KeyID, actual)
+	}
 	if pinnedKeyID != "" && pinnedKeyID != b.Producer.KeyID {
 		return rep, fmt.Errorf("%w: bundle is signed by %s, not the pinned key %s",
 			ErrVerify, b.Producer.KeyID, pinnedKeyID)
 	}
 
-	sigOK, err := verifyBundleSignature(signed, b.Producer.PublicKey)
+	sigOK, err := verifyBundleSignature(signed, pub, b.Producer.KeyID)
 	if err != nil {
 		return rep, err
 	}
@@ -123,11 +138,7 @@ func verifyOutcomeDisclosure(claims []BundleClaim, rep *BundleReport) {
 // verifyBundleSignature reconstructs the exact bytes the producer signed, the canonical bundle with
 // its signatures emptied, and checks the ed25519 signature over them. It mirrors seal.SignBundle so
 // the two cannot disagree about what a signature covers.
-func verifyBundleSignature(signed []byte, publicKeyB64 string) (bool, error) {
-	pub, err := base64.StdEncoding.DecodeString(publicKeyB64)
-	if err != nil || len(pub) != ed25519.PublicKeySize {
-		return false, fmt.Errorf("%w: producer public key is not a valid ed25519 key", ErrVerify)
-	}
+func verifyBundleSignature(signed []byte, pub ed25519.PublicKey, keyID string) (bool, error) {
 	value, err := jcs.Parse(signed)
 	if err != nil {
 		return false, fmt.Errorf("%w: canonicalize bundle: %w", ErrVerify, err)
@@ -140,11 +151,22 @@ func verifyBundleSignature(signed []byte, publicKeyB64 string) (bool, error) {
 	if !ok || len(sigs) == 0 {
 		return false, nil
 	}
-	sigObj, ok := sigs[0].(map[string]any)
-	if !ok {
+	// The producer's own signature, not whichever was written first. A bundle may carry several, and
+	// taking the first lets anyone prepend one and decide which key gets checked.
+	var sigB64 string
+	for _, raw := range sigs {
+		sigObj, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if id, _ := sigObj["key_id"].(string); id == keyID {
+			sigB64, _ = sigObj["sig"].(string)
+			break
+		}
+	}
+	if sigB64 == "" {
 		return false, nil
 	}
-	sigB64, _ := sigObj["sig"].(string)
 	sig, err := base64.StdEncoding.DecodeString(sigB64)
 	if err != nil {
 		return false, nil
