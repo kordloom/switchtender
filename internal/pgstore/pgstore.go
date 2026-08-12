@@ -141,8 +141,10 @@ CREATE TABLE IF NOT EXISTS run_host_summary (
 	worst            TEXT NOT NULL,
 	duration_seconds DOUBLE PRECISION NOT NULL DEFAULT 0,
 	ran_at           TEXT NOT NULL,
+	dry_run          INTEGER NOT NULL DEFAULT 0,
 	PRIMARY KEY (run_id, host)
 );
+ALTER TABLE run_host_summary ADD COLUMN IF NOT EXISTS dry_run INTEGER NOT NULL DEFAULT 0;
 DROP INDEX IF EXISTS idx_host_summary_host;
 CREATE INDEX IF NOT EXISTS idx_host_summary_order
 	ON run_host_summary(host, ` + sqlutil.TimeOrder + ` DESC, run_id DESC);
@@ -638,6 +640,29 @@ const runColumns = `id, playbook, inventory, status, exit_code, error, created_a
 	source, source_id, actor, rerun_of, labels, warning, audit_receipt, held_by_policy,
 	tags, skip_tags, verbosity, forks, diff_mode, claim_secret`
 
+// hostSummaryColumns is the shared run_host_summary column list, in the one order the insert binds
+// its placeholders and every read scans, so a column cannot land on one path and be missed on
+// another.
+const hostSummaryColumns = `run_id, host, ok, changed, failures, unreachable, skipped, worst,
+	duration_seconds, ran_at, dry_run`
+
+// scanHostSummary reads one host summary row selected as hostSummaryColumns.
+func scanHostSummary(rows *sql.Rows) (run.HostSummary, error) {
+	var (
+		hs     run.HostSummary
+		ranAt  string
+		dryRun int
+	)
+	if err := rows.Scan(&hs.RunID, &hs.Host, &hs.OK, &hs.Changed, &hs.Failures, &hs.Unreachable,
+		&hs.Skipped, &hs.Worst, &hs.DurationSeconds, &ranAt, &dryRun); err != nil {
+		return hs, err
+	}
+	hs.DryRun = dryRun != 0
+	var err error
+	hs.RanAt, err = sqlutil.ParseTime(ranAt)
+	return hs, err
+}
+
 // Save inserts or replaces the run identified by r.ID. The cancel flag merges with GREATEST so a
 // replace from a stale snapshot cannot erase a cancel another process just requested.
 func (s *store) Save(ctx context.Context, r *run.Run) error {
@@ -855,7 +880,6 @@ func (s *store) NonTerminal(ctx context.Context) ([]*run.Run, error) {
 	return s.queryRuns(ctx, "list non-terminal runs", q)
 }
 
-// SaveHostSummary replaces the stored per host summaries for a run.
 // summaryFenced reports whether a run's summaries must not be written because the run has reached a
 // terminal state, in which case a reclaimed-but-alive worker must not overwrite the final summary a
 // healthy finalize already stored. A run with no row is not fenced, since cross-run summary views are
@@ -872,6 +896,22 @@ func summaryFenced(ctx context.Context, q rowQuerier, runID string) (bool, error
 	return run.Status(status).Terminal(), nil
 }
 
+// runIsDryRun reports whether a run was a check. A run with no row counts as an apply, since
+// nothing proves it was a check and drift must not be invented from a missing record.
+func runIsDryRun(ctx context.Context, q rowQuerier, runID string) (bool, error) {
+	var dryRun int
+	err := q.QueryRowContext(ctx, "SELECT dry_run FROM runs WHERE id=$1", runID).Scan(&dryRun)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return dryRun != 0, nil
+}
+
+// SaveHostSummary replaces the stored per host summaries for a run, stamping each row with the
+// run's dry-run flag so the drift view reads the summary alone and outlives the run record.
 func (s *store) SaveHostSummary(ctx context.Context, runID string, summaries []run.HostSummary) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -884,13 +924,17 @@ func (s *store) SaveHostSummary(ctx context.Context, runID string, summaries []r
 	} else if fenced {
 		return nil
 	}
+	dry, err := runIsDryRun(ctx, tx, runID)
+	if err != nil {
+		return fmt.Errorf("save host summary: %w", err)
+	}
 	if _, err := tx.ExecContext(ctx, "DELETE FROM run_host_summary WHERE run_id=$1", runID); err != nil {
 		return fmt.Errorf("save host summary: %w", err)
 	}
 	stmt, err := tx.PrepareContext(ctx, `
 INSERT INTO run_host_summary
-	(run_id, host, ok, changed, failures, unreachable, skipped, worst, duration_seconds, ran_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`)
+	(`+hostSummaryColumns+`)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`)
 	if err != nil {
 		return fmt.Errorf("save host summary: %w", err)
 	}
@@ -898,7 +942,8 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`)
 
 	for _, hs := range summaries {
 		if _, err := stmt.ExecContext(ctx, runID, hs.Host, hs.OK, hs.Changed, hs.Failures,
-			hs.Unreachable, hs.Skipped, hs.Worst, hs.DurationSeconds, sqlutil.FormatTime(hs.RanAt)); err != nil {
+			hs.Unreachable, hs.Skipped, hs.Worst, hs.DurationSeconds, sqlutil.FormatTime(hs.RanAt),
+			sqlutil.BoolToInt(dry)); err != nil {
 			return fmt.Errorf("save host summary: %w", err)
 		}
 	}
@@ -1014,16 +1059,18 @@ SELECT host, AVG(duration_seconds) FROM ranked WHERE rn <= $1 GROUP BY host`
 }
 
 // DriftStatus reports each host's most recent drift check, the latest dry run to touch it, worst
-// drift first. It joins host summaries to their run so only dry runs count, where a changed result
-// means a task would change, so the host has diverged from the desired state.
+// drift first. Only dry runs count, where a changed result means a task would change, so the host
+// has diverged from the desired state. The dry-run flag is read off the summary row that
+// SaveHostSummary stamped, not off the runs table, because retention deletes runs and keeps the
+// summaries. Joining runs dropped purged hosts out of this view while fleet health, which reads the
+// same summaries, kept them, so the two views of one fleet stopped reconciling.
 func (s *store) DriftStatus(ctx context.Context) ([]run.HostDrift, error) {
 	const q = `
 WITH checks AS (
 	SELECT hs.host, hs.changed, hs.run_id, hs.ran_at,
 		ROW_NUMBER() OVER (PARTITION BY hs.host ORDER BY ` + sqlutil.TimeOrder + ` DESC, run_id DESC) AS rn
 	FROM run_host_summary hs
-	JOIN runs r ON r.id = hs.run_id
-	WHERE r.dry_run = 1
+	WHERE hs.dry_run = 1
 )
 SELECT host, changed, run_id, ran_at FROM checks WHERE rn = 1 ORDER BY changed DESC, host`
 
@@ -1109,12 +1156,12 @@ func (s *store) HostFactsFor(ctx context.Context, host string) (*run.HostFacts, 
 	return &out, nil
 }
 
+// HostHistory returns a host's most recent per run summaries, newest first, with run ids.
 func (s *store) HostHistory(ctx context.Context, host string, limit int) ([]run.HostSummary, error) {
 	if limit < 1 {
 		limit = 1
 	}
-	const q = `
-SELECT run_id, host, ok, changed, failures, unreachable, skipped, worst, duration_seconds, ran_at
+	const q = `SELECT ` + hostSummaryColumns + `
 FROM run_host_summary WHERE host = $1 ORDER BY ` + sqlutil.TimeOrder + ` DESC, run_id DESC LIMIT $2`
 
 	rows, err := s.db.QueryContext(ctx, q, host, limit)
@@ -1125,15 +1172,8 @@ FROM run_host_summary WHERE host = $1 ORDER BY ` + sqlutil.TimeOrder + ` DESC, r
 
 	var out []run.HostSummary
 	for rows.Next() {
-		var (
-			hs    run.HostSummary
-			ranAt string
-		)
-		if err := rows.Scan(&hs.RunID, &hs.Host, &hs.OK, &hs.Changed, &hs.Failures,
-			&hs.Unreachable, &hs.Skipped, &hs.Worst, &hs.DurationSeconds, &ranAt); err != nil {
-			return nil, fmt.Errorf("host history: %w", err)
-		}
-		if hs.RanAt, err = sqlutil.ParseTime(ranAt); err != nil {
+		hs, err := scanHostSummary(rows)
+		if err != nil {
 			return nil, fmt.Errorf("host history: %w", err)
 		}
 		out = append(out, hs)
@@ -1146,8 +1186,7 @@ FROM run_host_summary WHERE host = $1 ORDER BY ` + sqlutil.TimeOrder + ` DESC, r
 
 // RunHostSummaries returns one run's stored per host summaries, ordered by host.
 func (s *store) RunHostSummaries(ctx context.Context, runID string) ([]run.HostSummary, error) {
-	const q = `
-SELECT run_id, host, ok, changed, failures, unreachable, skipped, worst, duration_seconds, ran_at
+	const q = `SELECT ` + hostSummaryColumns + `
 FROM run_host_summary WHERE run_id = $1 ORDER BY host ASC`
 	rows, err := s.db.QueryContext(ctx, q, runID)
 	if err != nil {
@@ -1156,15 +1195,8 @@ FROM run_host_summary WHERE run_id = $1 ORDER BY host ASC`
 	defer func() { _ = rows.Close() }()
 	var out []run.HostSummary
 	for rows.Next() {
-		var (
-			hs    run.HostSummary
-			ranAt string
-		)
-		if err := rows.Scan(&hs.RunID, &hs.Host, &hs.OK, &hs.Changed, &hs.Failures,
-			&hs.Unreachable, &hs.Skipped, &hs.Worst, &hs.DurationSeconds, &ranAt); err != nil {
-			return nil, fmt.Errorf("run host summaries: %w", err)
-		}
-		if hs.RanAt, err = sqlutil.ParseTime(ranAt); err != nil {
+		hs, err := scanHostSummary(rows)
+		if err != nil {
 			return nil, fmt.Errorf("run host summaries: %w", err)
 		}
 		out = append(out, hs)

@@ -846,11 +846,13 @@ func (m *memStore) RunHostSummaries(_ context.Context, runID string) ([]HostSumm
 	return out, nil
 }
 
-// SaveHostSummary replaces the stored per host summaries for a run.
+// SaveHostSummary replaces the stored per host summaries for a run, stamping each row with the
+// run's id and its dry-run flag so later reads need nothing from the run record itself.
 func (m *memStore) SaveHostSummary(_ context.Context, runID string, summaries []HostSummary) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if r, ok := m.runs[runID]; ok && r.Status.Terminal() {
+	r, known := m.runs[runID]
+	if known && r.Status.Terminal() {
 		// Fence a terminal run so a reclaimed-but-alive worker cannot overwrite the final summary.
 		return nil
 	}
@@ -858,10 +860,12 @@ func (m *memStore) SaveHostSummary(_ context.Context, runID string, summaries []
 		delete(m.summaries, runID)
 		return nil
 	}
+	dry := known && r.DryRun
 	cp := make([]HostSummary, len(summaries))
 	copy(cp, summaries)
 	for i := range cp {
 		cp[i].RunID = runID
+		cp[i].DryRun = dry
 	}
 	m.summaries[runID] = cp
 	return nil
@@ -944,18 +948,19 @@ func (m *memStore) FleetHealth(_ context.Context, window int) ([]HostHealth, err
 }
 
 // DriftStatus reports each host's most recent drift check, the latest dry run to touch it, worst
-// drift first. A host with no dry run in its history is omitted, having no drift signal.
+// drift first. A host with no dry run in its history is omitted, having no drift signal. It reads
+// the dry-run flag stamped on the summary rather than the run record, which retention deletes, so
+// it reports on exactly the history fleet health reports on.
 func (m *memStore) DriftStatus(_ context.Context) ([]HostDrift, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	latest := make(map[string]HostSummary)
-	for runID, summaries := range m.summaries {
-		r, ok := m.runs[runID]
-		if !ok || !r.DryRun {
-			continue
-		}
+	for _, summaries := range m.summaries {
 		for _, hs := range summaries {
+			if !hs.DryRun {
+				continue
+			}
 			if cur, seen := latest[hs.Host]; !seen || newerHostSummary(hs, cur) {
 				latest[hs.Host] = hs
 			}

@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -42,6 +43,9 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Run("fleet health ranking", func(t *testing.T) { testFleetHealth(t, newStore()) })
 	t.Run("run summaries round trip", func(t *testing.T) { testRunSummaries(t, newStore()) })
 	t.Run("drift status", func(t *testing.T) { testDriftStatus(t, newStore()) })
+	t.Run("drift and fleet health agree after a purge", func(t *testing.T) {
+		testDriftSurvivesPurge(t, newStore())
+	})
 	t.Run("host costs", func(t *testing.T) { testHostCosts(t, newStore()) })
 	t.Run("flaky detection", func(t *testing.T) { testFlaky(t, newStore()) })
 	t.Run("host history", func(t *testing.T) { testHostHistory(t, newStore()) })
@@ -906,6 +910,125 @@ func testDriftStatus(t *testing.T, store run.Store) {
 	if len(drift) < 1 || drift[0].Host != "web01" {
 		t.Errorf("drift order = %+v, want web01 first", drift)
 	}
+}
+
+// saveFinishedRun writes a run, its host summaries, then finalizes it, which is the order a real
+// run takes. Summary writes are fenced once a run is terminal, so the summary has to land first.
+func saveFinishedRun(t *testing.T, store run.Store, id string, at time.Time, dry bool,
+	sums []run.HostSummary,
+) {
+	t.Helper()
+	ctx := context.Background()
+	r := &run.Run{ID: id, Playbook: "site.yml", Status: run.StatusRunning, CreatedAt: at, DryRun: dry}
+	if err := store.Save(ctx, r); err != nil {
+		t.Fatalf("Save(%s) error = %v", id, err)
+	}
+	if err := store.SaveHostSummary(ctx, id, sums); err != nil {
+		t.Fatalf("SaveHostSummary(%s) error = %v", id, err)
+	}
+	r.Status = run.StatusSucceeded
+	if err := store.Save(ctx, r); err != nil {
+		t.Fatalf("Save(%s) finalize error = %v", id, err)
+	}
+}
+
+// testDriftSurvivesPurge verifies the drift view and the fleet health view stay reconciled across a
+// retention purge. Purging deletes the run records but deliberately keeps the host summaries, so a
+// host that has a drift check must keep its drift entry, and a host that only ever had real runs
+// must stay out of the drift view. Both views read the same surviving rows and must agree on them.
+func testDriftSurvivesPurge(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	base := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+
+	// web01 was checked by a dry run. app01 only ever had a real run, so it has no drift signal.
+	// app01's summary arrives claiming to be a check, as a compromised remote worker could, and the
+	// store must overwrite that with the run's own flag rather than trust it.
+	saveFinishedRun(t, store, "chk1", base, true,
+		[]run.HostSummary{{Host: "web01", Changed: 2, Worst: "changed", RanAt: base}})
+	saveFinishedRun(t, store, "apply1", base.Add(time.Hour), false, []run.HostSummary{
+		{Host: "app01", Changed: 7, Worst: "changed", RanAt: base.Add(time.Hour), DryRun: true},
+	})
+
+	wantDrift := []run.HostDrift{{Host: "web01", DriftedTasks: 2, RunID: "chk1", CheckedAt: base}}
+	before, err := store.DriftStatus(ctx)
+	if err != nil {
+		t.Fatalf("DriftStatus() before purge error = %v", err)
+	}
+	if diff := cmp.Diff(wantDrift, before, cmpopts.EquateEmpty()); diff != "" {
+		t.Fatalf("DriftStatus() before purge mismatch (-want +got):\n%s", diff)
+	}
+	beforeHealth, err := hostsInHealth(ctx, store)
+	if err != nil {
+		t.Fatalf("FleetHealth() before purge error = %v", err)
+	}
+	if diff := cmp.Diff([]string{"app01", "web01"}, beforeHealth, cmpopts.EquateEmpty()); diff != "" {
+		t.Fatalf("FleetHealth() before purge mismatch (-want +got):\n%s", diff)
+	}
+
+	deleted, err := store.PurgeRunsBefore(ctx, base.Add(24*time.Hour))
+	if err != nil {
+		t.Fatalf("PurgeRunsBefore() error = %v", err)
+	}
+	if deleted != 2 {
+		t.Fatalf("PurgeRunsBefore() deleted = %d, want 2", deleted)
+	}
+
+	// Host history is kept on purpose, so fleet health still knows both hosts.
+	afterHealth, err := hostsInHealth(ctx, store)
+	if err != nil {
+		t.Fatalf("FleetHealth() after purge error = %v", err)
+	}
+	if diff := cmp.Diff([]string{"app01", "web01"}, afterHealth, cmpopts.EquateEmpty()); diff != "" {
+		t.Fatalf("FleetHealth() after purge mismatch (-want +got):\n%s", diff)
+	}
+	// The drift view reads the same surviving rows, so it must be unchanged: web01 keeps its check
+	// and app01 stays out, since a purged run must not turn a real run into a drift check.
+	after, err := store.DriftStatus(ctx)
+	if err != nil {
+		t.Fatalf("DriftStatus() after purge error = %v", err)
+	}
+	if diff := cmp.Diff(wantDrift, after, cmpopts.EquateEmpty()); diff != "" {
+		t.Errorf("DriftStatus() after purge mismatch (-want +got):\n%s", diff)
+	}
+
+	// The surviving rows carry the flag drift is read from, so it is readable on its own and the
+	// answer is traceable to the row rather than to a run record that no longer exists.
+	wantStamps := map[string]bool{"chk1": true, "apply1": false}
+	for runID, wantDry := range wantStamps {
+		sums, err := store.RunHostSummaries(ctx, runID)
+		if err != nil {
+			t.Fatalf("RunHostSummaries(%s) error = %v", runID, err)
+		}
+		if len(sums) != 1 {
+			t.Fatalf("RunHostSummaries(%s) = %d rows, want 1 kept past the purge", runID, len(sums))
+		}
+		if sums[0].DryRun != wantDry {
+			t.Errorf("RunHostSummaries(%s) dry run = %v, want %v", runID, sums[0].DryRun, wantDry)
+		}
+	}
+	// The same flag reads back through host history, the view that outlives the run.
+	hist, err := store.HostHistory(ctx, "app01", 10)
+	if err != nil {
+		t.Fatalf("HostHistory() error = %v", err)
+	}
+	if len(hist) != 1 || hist[0].DryRun {
+		t.Errorf("HostHistory(app01) = %+v, want one apply row, since a worker cannot claim a check", hist)
+	}
+}
+
+// hostsInHealth returns the hosts fleet health reports, sorted, so a test can compare the set of
+// hosts the two fleet views know about without depending on failure ranking.
+func hostsInHealth(ctx context.Context, store run.Store) ([]string, error) {
+	health, err := store.FleetHealth(ctx, 10)
+	if err != nil {
+		return nil, err
+	}
+	hosts := make([]string, 0, len(health))
+	for _, h := range health {
+		hosts = append(hosts, h.Host)
+	}
+	sort.Strings(hosts)
+	return hosts, nil
 }
 
 // testFlaky verifies flip counting marks intermittent hosts flaky and steady hosts not.
