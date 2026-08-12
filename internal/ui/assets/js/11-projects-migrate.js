@@ -323,13 +323,13 @@ function migrateGroup(label, names) {
 }
 
 // syncTemplateTool shows the Ansible fields or the command box in the template dialog to match the
-// selected tool, so a bash, terraform, python, or go template hides playbook, inventory, shards,
-// and the execution image.
+// selected tool, so a bash, terraform, python, or go template hides playbook, inventory, limit,
+// shards, and the execution image.
 function syncTemplateTool() {
 	const tool = document.getElementById("tpl-tool").value;
 	const ansible = tool === "ansible" || tool === "";
-	const ansibleFields = ["tpl-field-playbook", "tpl-field-inventory", "tpl-field-shards",
-		"tpl-field-image", "tpl-field-pull-credential"];
+	const ansibleFields = ["tpl-field-playbook", "tpl-field-inventory", "tpl-field-limit",
+		"tpl-field-shards", "tpl-field-image", "tpl-field-pull-credential"];
 	for (const id of ansibleFields) {
 		const el = document.getElementById(id);
 		if (el) el.hidden = !ansible;

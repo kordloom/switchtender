@@ -39,6 +39,11 @@ type createTemplateRequest struct {
 	Command string `json:"command,omitempty"`
 	// DryRun runs the tool in its no-change mode when the template launches.
 	DryRun bool `json:"dry_run,omitempty"`
+	// Limit narrows every launch to the hosts matching this pattern. The API could not carry it at
+	// all, so a template pinned to a canary host could only be created by the importer, and the
+	// first edit of one wrote the template back with no limit and answered 200: every later
+	// schedule, webhook, and launch reached the whole inventory. Empty targets everything.
+	Limit string `json:"limit,omitempty"`
 	// Tags runs only the Ansible plays and tasks carrying one of these tags on every launch.
 	Tags []string `json:"tags,omitempty"`
 	// SkipTags skips the Ansible plays and tasks carrying one of these tags on every launch.
@@ -184,7 +189,7 @@ func createTemplateHandler(store template.Store, authz *authorizer, log *zap.Log
 		t := &template.Template{
 			ID: template.NewID(), Name: req.Name, ProjectID: req.ProjectID,
 			Playbook: req.Playbook, Inventory: req.Inventory, InventoryID: req.InventoryID,
-			Tool: req.Tool, Command: req.Command, DryRun: req.DryRun,
+			Tool: req.Tool, Command: req.Command, DryRun: req.DryRun, Limit: req.Limit,
 			Tags: req.Tags, SkipTags: req.SkipTags, Verbosity: req.Verbosity, Forks: req.Forks, DiffMode: req.DiffMode,
 			Shards:        req.Shards,
 			CredentialIDs: req.CredentialIDs, SelectableCredentialIDs: req.SelectableCredentialIDs,
@@ -272,7 +277,7 @@ func updateTemplateHandler(store template.Store, authz *authorizer, log *zap.Log
 		t := &template.Template{
 			ID: id, Name: req.Name, ProjectID: req.ProjectID,
 			Playbook: req.Playbook, Inventory: req.Inventory, InventoryID: req.InventoryID,
-			Tool: req.Tool, Command: req.Command, DryRun: req.DryRun,
+			Tool: req.Tool, Command: req.Command, DryRun: req.DryRun, Limit: req.Limit,
 			Tags: req.Tags, SkipTags: req.SkipTags, Verbosity: req.Verbosity, Forks: req.Forks, DiffMode: req.DiffMode,
 			Shards:        req.Shards,
 			CredentialIDs: req.CredentialIDs, SelectableCredentialIDs: req.SelectableCredentialIDs,

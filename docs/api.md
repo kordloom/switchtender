@@ -180,6 +180,7 @@ retry keeps them.
 
 | Field | Type | What it does |
 |-------|------|--------------|
+| `limit` | string | Narrows the run to the hosts matching this pattern. Becomes `--limit`. Empty targets the whole inventory. |
 | `tags` | list of strings | Runs only the plays and tasks carrying one of these tags. Becomes `--tags`. |
 | `skip_tags` | list of strings | Skips the plays and tasks carrying one of these tags. Becomes `--skip-tags`. |
 | `forks` | integer | How many hosts Ansible addresses at once. Zero leaves the Ansible default. Becomes `--forks`. |
@@ -193,6 +194,7 @@ curl -X POST https://switchtender.example.com/v1/runs \
   -d '{
     "playbook": "plays/deploy.yml",
     "inventory": "prod",
+    "limit": "canary01",
     "tags": ["web", "config"],
     "skip_tags": ["reboot"],
     "forks": 25,
@@ -203,6 +205,10 @@ curl -X POST https://switchtender.example.com/v1/runs \
 
 These apply to the Ansible tool. The other tools ignore them, so a Bash or Terraform template that
 carries one is unaffected.
+
+A run submission also accepts `extra_vars`, an object of variables injected into the run. Ansible
+receives them the way `--extra-vars` supplies them, and a plugin tool reads them as its input. A
+template carries its own `extra_vars` and a launch may merge more over them.
 
 ## Saved workflows
 

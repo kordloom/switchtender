@@ -85,6 +85,10 @@ type createRunRequest struct {
 	DiffMode bool `json:"diff_mode,omitempty"`
 	// Labels are user-supplied key values attached to the run for slicing and audits.
 	Labels map[string]string `json:"labels,omitempty"`
+	// ExtraVars are the variables injected into the run, the same field a template carries and a
+	// template launch overrides. A plugin tool reads them as its input, so dropping them ran the
+	// tool with none of the configuration the caller sent and answered 202 as though it had.
+	ExtraVars map[string]any `json:"extra_vars,omitempty"`
 	// Shards, when two or more, splits the run across that many inventory slices.
 	Shards int `json:"shards,omitempty"`
 	// CredentialIDs names stored credentials to materialize for the run.
@@ -566,6 +570,7 @@ func createRunHandler(submitter Submitter, authz *authorizer, log *zap.Logger) h
 			run.WithSource("api", ""), run.WithActor(actorName(r)), run.WithLabels(req.Labels),
 			run.WithTags(req.Tags...), run.WithSkipTags(req.SkipTags...),
 			run.WithVerbosity(req.Verbosity), run.WithForks(req.Forks), run.WithDiffMode(req.DiffMode),
+			run.WithExtraVars(req.ExtraVars),
 		}
 		if supplied := strings.TrimSpace(r.Header.Get(idempotencyKeyHeader)); supplied != "" {
 			key, err := run.ClientKey(supplied)
