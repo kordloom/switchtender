@@ -52,11 +52,14 @@ func Contract(t *testing.T, newStore func() schedule.Store) {
 func testSaveGet(t *testing.T, store schedule.Store) {
 	ctx := context.Background()
 	next := time.Date(2026, 7, 6, 1, 0, 0, 0, time.UTC)
+	// The owning organization round trips like every other field. It is what scopes an inline
+	// schedule to a tenant, so a backend that drops it hands another organization's crontab import,
+	// command lines and all, to anybody who asks.
 	want := &schedule.Schedule{
 		ID: "sch_1", Name: "nightly", Cron: "0 2 * * *", Timezone: "America/New_York", Inventory: "hosts",
 		Steps:      []run.PipelineStep{{Name: "one", Playbook: "one.yml", ContinueOnFailure: true}},
-		TemplateID: "tpl_x",
-		Enabled:    true, CreatedAt: time.Date(2026, 7, 5, 0, 0, 0, 0, time.UTC), NextRunAt: &next,
+		TemplateID: "tpl_x", OrgID: "org_owner",
+		Enabled: true, CreatedAt: time.Date(2026, 7, 5, 0, 0, 0, 0, time.UTC), NextRunAt: &next,
 	}
 	if err := store.Save(ctx, want); err != nil {
 		t.Fatalf("Save() error = %v", err)
@@ -461,13 +464,17 @@ func testUpdate(t *testing.T, store schedule.Store) {
 	created := time.Date(2026, 8, 11, 1, 0, 0, 0, time.UTC)
 	sc := &schedule.Schedule{
 		ID: "sch_1", Name: "nightly", Cron: "0 * * * *", Playbook: "p.yml", Enabled: true,
-		CreatedAt: created,
+		CreatedAt: created, OrgID: "org_a",
 	}
 	if err := store.Save(ctx, sc); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
 
 	sc.Playbook = "edited.yml"
+	// The owning organization is written by an update like any other column. A backend that leaves
+	// it out of the statement keeps whatever was there, so a schedule handed to another tenant, or
+	// held back from its own, would read as correct in the store and wrong to the authorizer.
+	sc.OrgID = "org_b"
 	if err := store.Update(ctx, sc); err != nil {
 		t.Fatalf("Update() error = %v", err)
 	}
@@ -477,6 +484,9 @@ func testUpdate(t *testing.T, store schedule.Store) {
 	}
 	if got.Playbook != "edited.yml" {
 		t.Errorf("Playbook = %q, want edited.yml", got.Playbook)
+	}
+	if got.OrgID != "org_b" {
+		t.Errorf("OrgID = %q, want org_b; an update did not write the owning organization", got.OrgID)
 	}
 
 	if err := store.Delete(ctx, "sch_1"); err != nil {

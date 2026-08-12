@@ -14,7 +14,7 @@ import (
 
 // scheduleColumns is the shared select list for schedule reads.
 const scheduleColumns = `id, name, cron, playbook, inventory, shards, steps, enabled,
-	created_at, next_run_at, last_run_at, last_run_id, template_id, timezone`
+	created_at, next_run_at, last_run_at, last_run_id, template_id, timezone, org_id`
 
 // scheduleStore is a schedule.Store backed by the shared SQLite database.
 type scheduleStore struct {
@@ -31,18 +31,18 @@ func (s *scheduleStore) Save(ctx context.Context, sc *schedule.Schedule) error {
 	const q = `
 INSERT INTO schedules
 	(id, name, cron, playbook, inventory, shards, steps, enabled, created_at,
-	 next_run_at, last_run_at, last_run_id, template_id, timezone)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	 next_run_at, last_run_at, last_run_id, template_id, timezone, org_id)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
 	name=excluded.name, cron=excluded.cron, playbook=excluded.playbook,
 	inventory=excluded.inventory, shards=excluded.shards, steps=excluded.steps,
 	enabled=excluded.enabled, created_at=excluded.created_at, next_run_at=excluded.next_run_at,
 	last_run_at=excluded.last_run_at, last_run_id=excluded.last_run_id,
-	template_id=excluded.template_id, timezone=excluded.timezone`
+	template_id=excluded.template_id, timezone=excluded.timezone, org_id=excluded.org_id`
 	_, err = s.db.ExecContext(ctx, q,
 		sc.ID, sc.Name, sc.Cron, sc.Playbook, sc.Inventory, sc.Shards, string(steps),
 		boolInt(sc.Enabled), sqlutil.FormatTime(sc.CreatedAt), sqlutil.NullTime(sc.NextRunAt), sqlutil.NullTime(sc.LastRunAt),
-		sc.LastRunID, sc.TemplateID, sc.Timezone,
+		sc.LastRunID, sc.TemplateID, sc.Timezone, sc.OrgID,
 	)
 	if err != nil {
 		return fmt.Errorf("save schedule: %w", err)
@@ -114,7 +114,7 @@ func scanSchedule(sc scanner) (*schedule.Schedule, error) {
 	)
 	if err := sc.Scan(&out.ID, &out.Name, &out.Cron, &out.Playbook, &out.Inventory, &out.Shards,
 		&steps, &enabled, &created, &nextRun, &lastRun, &out.LastRunID,
-		&out.TemplateID, &out.Timezone); err != nil {
+		&out.TemplateID, &out.Timezone, &out.OrgID); err != nil {
 		return nil, err
 	}
 	out.Enabled = enabled != 0
@@ -155,12 +155,12 @@ func (s *scheduleStore) Update(ctx context.Context, sc *schedule.Schedule) error
 	const q = `
 UPDATE schedules SET
 	name=?, cron=?, playbook=?, inventory=?, shards=?, steps=?, enabled=?, created_at=?,
-	next_run_at=?, last_run_at=?, last_run_id=?, template_id=?, timezone=?
+	next_run_at=?, last_run_at=?, last_run_id=?, template_id=?, timezone=?, org_id=?
 WHERE id=?`
 	res, err := s.db.ExecContext(ctx, q,
 		sc.Name, sc.Cron, sc.Playbook, sc.Inventory, sc.Shards, string(steps),
 		boolInt(sc.Enabled), sqlutil.FormatTime(sc.CreatedAt), sqlutil.NullTime(sc.NextRunAt),
-		sqlutil.NullTime(sc.LastRunAt), sc.LastRunID, sc.TemplateID, sc.Timezone, sc.ID,
+		sqlutil.NullTime(sc.LastRunAt), sc.LastRunID, sc.TemplateID, sc.Timezone, sc.OrgID, sc.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("update schedule: %w", err)

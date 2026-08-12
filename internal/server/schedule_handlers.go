@@ -61,11 +61,16 @@ func createScheduleHandler(store schedule.Store, authz *authorizer, log *zap.Log
 			authz.authorizeAll(r.Context(), grant.AccessUse, req.TemplateID)) {
 			return
 		}
+		// The creating actor's organization is stamped on the schedule, which is what scopes an
+		// inline one: it names no template, so there is no grantable object to scope it by and
+		// without an owner it belongs to everybody. The org is the one the request already carries,
+		// resolved once beside the actor, so a schedule and a run submitted by the same caller are
+		// stamped with the same tenant.
 		sc := &schedule.Schedule{
 			ID: schedule.NewID(), Name: req.Name, Cron: req.Cron, Timezone: req.Timezone, Playbook: req.Playbook,
 			Inventory: req.Inventory, Shards: req.Shards, Steps: req.Steps,
-			TemplateID: req.TemplateID,
-			Enabled:    true, CreatedAt: time.Now(),
+			TemplateID: req.TemplateID, OrgID: run.SubmitterOrgFrom(r.Context()),
+			Enabled: true, CreatedAt: time.Now(),
 		}
 		if err := sc.Validate(); err != nil {
 			msg := "invalid schedule"
@@ -125,15 +130,23 @@ func updateScheduleHandler(store schedule.Store, authz *authorizer, log *zap.Log
 		// Both the template being named and the one already stored are authorized. Checking only the
 		// body let a caller take over somebody else's schedule by leaving template_id out: nothing
 		// was named, so nothing was checked, and the schedule was rewritten to run a playbook of
-		// the caller's choosing on the original owner's timetable.
-		if denyOnAuthzError(w, log,
-			authz.authorizeAll(r.Context(), grant.AccessUse, req.TemplateID, existing.TemplateID)) {
+		// the caller's choosing on the original owner's timetable. The stored schedule is asked the
+		// full question, so an inline one, which names no template at all, is scoped by its owning
+		// organization rather than authorized by default over zero objects.
+		if denyOnAuthzError(w, log, authz.authorizeSchedule(r.Context(), grant.AccessUse, existing)) {
 			return
 		}
+		if denyOnAuthzError(w, log,
+			authz.authorizeAll(r.Context(), grant.AccessUse, req.TemplateID)) {
+			return
+		}
+		// The owning organization is the schedule's, not the editor's, so an edit cannot move a
+		// schedule into the editor's tenant or strand it as unowned.
 		sc := &schedule.Schedule{
 			ID: id, Name: req.Name, Cron: req.Cron, Timezone: req.Timezone, Playbook: req.Playbook,
 			Inventory: req.Inventory, Shards: req.Shards, Steps: req.Steps,
-			TemplateID: req.TemplateID, Enabled: existing.Enabled, CreatedAt: existing.CreatedAt,
+			TemplateID: req.TemplateID, OrgID: existing.OrgID,
+			Enabled: existing.Enabled, CreatedAt: existing.CreatedAt,
 			LastRunAt: existing.LastRunAt, LastRunID: existing.LastRunID,
 		}
 		if err := sc.Validate(); err != nil {
@@ -194,7 +207,7 @@ func listSchedulesHandler(store schedule.Store, authz *authorizer, log *zap.Logg
 		if restricted {
 			kept := make([]*schedule.Schedule, 0, len(list))
 			for _, sc := range list {
-				if authz.authorizeAll(r.Context(), grant.AccessUse, sc.TemplateID) == nil {
+				if authz.authorizeSchedule(r.Context(), grant.AccessUse, sc) == nil {
 					kept = append(kept, sc)
 				}
 			}
@@ -225,8 +238,7 @@ func getScheduleHandler(store schedule.Store, authz *authorizer, log *zap.Logger
 			respondError(w, log, http.StatusInternalServerError, "could not get schedule")
 			return
 		}
-		if denyOnAuthzError(w, log,
-			authz.authorizeAll(r.Context(), grant.AccessUse, sc.TemplateID)) {
+		if denyOnAuthzError(w, log, authz.authorizeSchedule(r.Context(), grant.AccessUse, sc)) {
 			return
 		}
 		respondJSON(w, log, http.StatusOK, sc, wantsPretty(r))
@@ -242,7 +254,8 @@ func deleteScheduleHandler(store schedule.Store, authz *authorizer, log *zap.Log
 		}
 		id := r.PathValue("id")
 		// Deleting a schedule silently stops work somebody relies on, so it asks the same question
-		// writing one does: may this caller use the template behind it.
+		// reading and writing one do: the template behind it when it fires one, and the owning
+		// organization when it is inline and there is no template to ask about.
 		existing, gerr := store.Get(r.Context(), r.PathValue("id"))
 		if errors.Is(gerr, schedule.ErrNotFound) {
 			respondError(w, log, http.StatusNotFound, "schedule not found")
@@ -253,8 +266,7 @@ func deleteScheduleHandler(store schedule.Store, authz *authorizer, log *zap.Log
 			respondError(w, log, http.StatusInternalServerError, "could not read schedule")
 			return
 		}
-		if denyOnAuthzError(w, log,
-			authz.authorizeAll(r.Context(), grant.AccessUse, existing.TemplateID)) {
+		if denyOnAuthzError(w, log, authz.authorizeSchedule(r.Context(), grant.AccessUse, existing)) {
 			return
 		}
 		err := store.Delete(r.Context(), id)

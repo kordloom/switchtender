@@ -180,9 +180,11 @@ CREATE TABLE IF NOT EXISTS schedules (
 	last_run_at TEXT,
 	last_run_id TEXT NOT NULL DEFAULT '',
 	template_id TEXT NOT NULL DEFAULT '',
-	timezone    TEXT NOT NULL DEFAULT ''
+	timezone    TEXT NOT NULL DEFAULT '',
+	org_id      TEXT NOT NULL DEFAULT ''
 );
 ALTER TABLE schedules ADD COLUMN IF NOT EXISTS timezone TEXT NOT NULL DEFAULT '';
+ALTER TABLE schedules ADD COLUMN IF NOT EXISTS org_id TEXT NOT NULL DEFAULT '';
 CREATE INDEX IF NOT EXISTS idx_schedules_created ON schedules(created_at, id);
 CREATE TABLE IF NOT EXISTS users (
 	id            TEXT PRIMARY KEY,

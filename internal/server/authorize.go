@@ -10,6 +10,7 @@ import (
 	"github.com/kordloom/switchtender/internal/grant"
 	"github.com/kordloom/switchtender/internal/org"
 	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/schedule"
 	"github.com/kordloom/switchtender/internal/team"
 	"github.com/kordloom/switchtender/internal/user"
 )
@@ -524,6 +525,26 @@ func (a *authorizer) authorizeRun(ctx context.Context, want grant.Access, rn *ru
 		return a.authorizeAll(ctx, want, objs...)
 	}
 	return a.authorizeOwningOrg(ctx, rn.OrgID)
+}
+
+// authorizeSchedule reports whether the request actor may exercise want on the schedule, the one
+// question reading, editing, deleting, and listing one all ask, so they cannot disagree about who a
+// schedule belongs to.
+//
+// A schedule that fires a stored template is scoped by that template, which org ownership of the
+// template already extends to its members. A schedule that names no template carries its target
+// inline, a playbook or a shell command line, and no grantable object at all, so it is scoped by the
+// org it was stamped with when it was created. Without this an inline schedule was readable,
+// rewritable, and deletable by any operator in any organization, because authorizeAll over zero
+// objects allows: a crontab import lands hundreds of them, each holding the command line it runs.
+// An inline schedule with no owning org is denied to every non-admin under strict grants, the same
+// as an ungranted object.
+func (a *authorizer) authorizeSchedule(ctx context.Context, want grant.Access,
+	sc *schedule.Schedule) error {
+	if sc.TemplateID != "" {
+		return a.authorize(ctx, sc.TemplateID, want)
+	}
+	return a.authorizeOwningOrg(ctx, sc.OrgID)
 }
 
 // authorizeOwningOrg reports whether the request actor may act on an object owned by orgID when it

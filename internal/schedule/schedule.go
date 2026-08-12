@@ -52,6 +52,14 @@ type Schedule struct {
 	Steps []run.PipelineStep `json:"steps,omitempty"`
 	// TemplateID, when set, fires a stored job template instead of the inline fields.
 	TemplateID string `json:"template_id,omitempty"`
+	// OrgID is the owning organization stamped from the creating actor. It is what scopes a
+	// schedule that names no template: an inline schedule carries a playbook or a shell command
+	// line and no grantable object, so there is nothing for the per-object grant check to filter on
+	// and the schedule would otherwise be readable, editable, and deletable across every tenant. A
+	// crontab import produces these by the hundred, each holding a full command line. Empty for a
+	// schedule created outside an actor's request, such as an import or a seeded demo, which under
+	// strict grants leaves it visible to admins alone.
+	OrgID string `json:"org_id,omitempty"`
 	// Enabled reports whether the schedule fires.
 	Enabled bool `json:"enabled"`
 	// CreatedAt is when the schedule was created.
