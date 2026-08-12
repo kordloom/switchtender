@@ -3,12 +3,14 @@ package audit
 import (
 	"crypto/ed25519"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/kordloom/loomseal/jcs"
+	"github.com/kordloom/loomseal/merkle"
 	"github.com/kordloom/loomseal/seal"
 )
 
@@ -101,10 +103,21 @@ func VerifyBundle(signed []byte, pinnedKeyID string) (*BundleReport, error) {
 	}
 	rep.SignatureOK = sigOK
 	var head BundleCoord
+	profile := ChainProfile
 	if b.Chain != nil {
 		head = b.Chain.Head
+		if b.Chain.Profile != "" {
+			profile = b.Chain.Profile
+		}
 	}
-	rep.ChainOK, rep.BrokeAtSeq = verifyBundleChain(b.Claims, head)
+	// A sparse receipt is a different construction, not a broken linear one. Recomputing the linear
+	// link over a tree claim always fails, so this command refused the output of its own
+	// "receipt --sparse", which prints "Verify it with: switchtender verify".
+	if profile == TreeProfile {
+		rep.ChainOK, rep.BrokeAtSeq = verifyBundleTree(&b)
+	} else {
+		rep.ChainOK, rep.BrokeAtSeq = verifyBundleChain(b.Claims, head)
+	}
 	rep.AnchorsOK = verifyBundleAnchors(&b)
 	verifyOutcomeDisclosure(b.Claims, rep)
 	return rep, nil
@@ -181,6 +194,60 @@ func verifyBundleSignature(signed []byte, pub ed25519.PublicKey, keyID string) (
 		return false, fmt.Errorf("%w: canonicalize bundle: %w", ErrVerify, err)
 	}
 	return ed25519.Verify(pub, canonical, sig), nil
+}
+
+// verifyBundleTree checks a sparse receipt: every disclosed claim folds through its audit path to
+// the tree head the bundle names.
+//
+// The install id the leaves are bound to is taken from the producer, never from the chain params a
+// bundle carries alongside them. A copier who lifted somebody else's receipt and rewrote only the
+// producer block would otherwise still fold, because the leaves would keep hashing under the
+// original install. Requiring the two to agree is what ties the receipt to the install that signed
+// it, and it is the rule the reference verifier applies.
+func verifyBundleTree(b *Bundle) (bool, int64) {
+	if b.Chain == nil {
+		return false, 0
+	}
+	installID := b.Producer.InstallID
+	if installID == "" || b.Chain.Params["install_id"] != installID {
+		return false, 0
+	}
+	root, err := hex.DecodeString(b.Chain.Head.Link)
+	if err != nil || len(root) == 0 {
+		return false, 0
+	}
+	size := b.Chain.Head.Seq
+	for _, c := range b.Claims {
+		if c.Inclusion == nil {
+			return false, c.Chain.Seq
+		}
+		leafData, err := treeLeaf(c, installID)
+		if err != nil {
+			return false, c.Chain.Seq
+		}
+		path, err := decodeProofHashes(c.Inclusion.Path)
+		if err != nil {
+			return false, c.Chain.Seq
+		}
+		// A claim's sequence is one based and the tree is zero based.
+		if !merkle.VerifyInclusion(leafData, c.Chain.Seq-1, size, path, root) {
+			return false, c.Chain.Seq
+		}
+	}
+	return true, 0
+}
+
+// decodeProofHashes turns a claim's hex audit path into the raw hashes the folder takes.
+func decodeProofHashes(in []string) ([][]byte, error) {
+	out := make([][]byte, 0, len(in))
+	for _, h := range in {
+		raw, err := hex.DecodeString(h)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, raw)
+	}
+	return out, nil
 }
 
 // verifyBundleChain recomputes each claim's link and checks the claims chain to one another. The

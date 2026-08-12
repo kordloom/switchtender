@@ -226,3 +226,107 @@ func TestAnchorOverAnUnprovenHeadIsRefused(t *testing.T) {
 		t.Error("an anchor over a head the bundle cannot prove was reported as satisfied")
 	}
 }
+
+// TestSparseReceiptVerifies pins that a sparse receipt passes the verifier the tool tells a reader
+// to use.
+//
+// The verifier had no profile dispatch: it recomputed the linear link over every claim, which a tree
+// claim never satisfies because a tree claim carries a leaf hash and no previous link. So the
+// command refused the output of "switchtender receipt --sparse", which prints "Verify it with:
+// switchtender verify". A verifier that rejects its own product teaches a reader that a red result
+// means nothing, which is worse than having no verifier.
+func TestSparseReceiptVerifies(t *testing.T) {
+	id := newTestIdentity(t, "producer")
+	chain := bundleChain(t)
+
+	doc, err := audit.BuildTreeBundle(chain, map[int64]bool{2: true}, id, "1.34.1",
+		audit.BundleSubject{Type: "run", ID: "run_1"},
+		time.Date(2026, 8, 11, 16, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("BuildTreeBundle() error = %v", err)
+	}
+	signed, err := audit.SignBundleDoc(doc, id.Private())
+	if err != nil {
+		t.Fatalf("SignBundleDoc() error = %v", err)
+	}
+
+	rep, err := audit.VerifyBundle(signed, id.KeyID())
+	if err != nil {
+		t.Fatalf("VerifyBundle() refused a sparse receipt: %v", err)
+	}
+	if !rep.ChainOK {
+		t.Errorf("a sparse receipt reported a broken chain at seq %d", rep.BrokeAtSeq)
+	}
+	if !rep.SignatureOK {
+		t.Error("a sparse receipt reported a bad signature")
+	}
+}
+
+// TestLiftedSparseReceiptIsRefused pins that a receipt is tied to the install that signed it.
+//
+// The leaves are hashed under an install id, and the bundle also carries one in its chain params. If
+// the verifier folds using the params rather than the producer, someone can lift another install's
+// receipt, rewrite only the producer block, sign it with their own key, and every leaf still folds,
+// because the leaves keep hashing under the original install. The receipt then reads as evidence
+// about a run on a machine that never ran it. Requiring the two to agree is what closes it.
+func TestLiftedSparseReceiptIsRefused(t *testing.T) {
+	victim := newTestIdentity(t, "victim")
+	attacker := newTestIdentity(t, "attacker")
+	chain := bundleChain(t)
+
+	doc, err := audit.BuildTreeBundle(chain, map[int64]bool{2: true}, victim, "1.34.1",
+		audit.BundleSubject{Type: "run", ID: "run_1"},
+		time.Date(2026, 8, 11, 16, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("BuildTreeBundle() error = %v", err)
+	}
+	// The attacker publishes the victim's receipt as their own, honestly signed by their own key.
+	doc.Producer.InstallID = attacker.InstallID
+	doc.Producer.PublicKey = attacker.PublicKeyBase64()
+	doc.Producer.KeyID = attacker.KeyID()
+	signed, err := audit.SignBundleDoc(doc, attacker.Private())
+	if err != nil {
+		t.Fatalf("SignBundleDoc() error = %v", err)
+	}
+
+	rep, err := audit.VerifyBundle(signed, attacker.KeyID())
+	if err != nil {
+		t.Fatalf("VerifyBundle() error = %v", err)
+	}
+	if rep.ChainOK {
+		t.Error("a receipt lifted from another install verified under the copier's own key")
+	}
+}
+
+// TestSparseReceiptWithDisagreeingInstallIsRefused gates the rule that the install a receipt is
+// bound to and the install its chain params declare must be the same one.
+//
+// The fold already refuses a receipt lifted wholesale, because the leaves are hashed under the
+// producer's install and stop folding the moment the producer changes. This is the other half: a
+// bundle whose params name a different install than its producer is malformed however it folds, and
+// the reference verifier says so, so a document that disagrees with itself must not read as
+// verified here either.
+func TestSparseReceiptWithDisagreeingInstallIsRefused(t *testing.T) {
+	id := newTestIdentity(t, "producer")
+	chain := bundleChain(t)
+	doc, err := audit.BuildTreeBundle(chain, map[int64]bool{2: true}, id, "1.34.1",
+		audit.BundleSubject{Type: "run", ID: "run_1"},
+		time.Date(2026, 8, 11, 16, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("BuildTreeBundle() error = %v", err)
+	}
+	// Everything folds; only the declared install disagrees with the producer.
+	doc.Chain.Params["install_id"] = "in_someoneelse"
+	signed, err := audit.SignBundleDoc(doc, id.Private())
+	if err != nil {
+		t.Fatalf("SignBundleDoc() error = %v", err)
+	}
+
+	rep, err := audit.VerifyBundle(signed, id.KeyID())
+	if err != nil {
+		t.Fatalf("VerifyBundle() error = %v", err)
+	}
+	if rep.ChainOK {
+		t.Error("a receipt whose params name a different install than its producer verified")
+	}
+}
