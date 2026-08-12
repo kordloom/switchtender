@@ -50,6 +50,19 @@ func (m *memStore) Anchors(_ context.Context, seq int64) ([]*Anchor, error) {
 	return out, nil
 }
 
+// DeleteAnchor removes the anchor with the given id, or reports ErrAnchorNotFound.
+func (m *memStore) DeleteAnchor(_ context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i, a := range m.anchors {
+		if a.ID == id {
+			m.anchors = append(m.anchors[:i], m.anchors[i+1:]...)
+			return nil
+		}
+	}
+	return fmt.Errorf("delete anchor %s: %w", id, ErrAnchorNotFound)
+}
+
 // NewMemStore returns an empty in-memory audit Store.
 func NewMemStore() Store {
 	return &memStore{}

@@ -267,6 +267,7 @@ CREATE TABLE IF NOT EXISTS audit_entries (
 CREATE TABLE IF NOT EXISTS audit_anchors (
 	id    TEXT PRIMARY KEY,
 	type  TEXT NOT NULL,
+	shape TEXT NOT NULL,
 	seq   INTEGER NOT NULL,
 	link  TEXT NOT NULL,
 	at    TEXT NOT NULL,
@@ -621,6 +622,13 @@ func migrateRuns(db *sql.DB) error {
 		"CREATE UNIQUE INDEX IF NOT EXISTS idx_runs_idempotency_key " +
 			"ON runs(idempotency_key) WHERE idempotency_key <> ''"); err != nil {
 		return fmt.Errorf("index idempotency_key: %w", err)
+	}
+	// An anchor records which coordinate space its link lives in, a linear entry hash or a tree
+	// root, and a database created before the column existed gains it here.
+	if _, err := db.Exec(
+		"ALTER TABLE audit_anchors ADD COLUMN shape TEXT NOT NULL DEFAULT 'linear'"); err != nil &&
+		!strings.Contains(err.Error(), "duplicate column name") {
+		return fmt.Errorf("add anchor shape column: %w", err)
 	}
 	return nil
 }

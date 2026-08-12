@@ -57,7 +57,7 @@ happened since the last one.`,
 
 // init registers the anchor command and its flags.
 func init() {
-	auditAnchorCmd.Flags().StringVar(&anchorDB, "db", defaultDBPath,
+	auditAnchorCmd.PersistentFlags().StringVar(&anchorDB, "db", defaultDBPath,
 		"SQLite file path, or a postgres:// DSN, holding the chain to anchor.")
 	auditAnchorCmd.Flags().StringVar(&anchorType, "type", audit.AnchorRFC3161,
 		"Anchor kind: rfc3161 for a signed timestamp, or git or https for one checked by fetching it.")
@@ -100,6 +100,7 @@ func runAuditAnchor(cmd *cobra.Command, _ []string) error {
 	// anchor fixes the root at a size, which a later consistency proof can be drawn from, turning
 	// "this chain no longer reaches its anchor" into "the log the world saw is provably still a
 	// prefix of the log there is now".
+	shape := audit.AnchorShapeLinear
 	anchorSeq, anchorLink := chain[len(chain)-1].Seq, chain[len(chain)-1].Hash
 	if anchorTree {
 		id, ierr := audit.LoadIdentity(identityDir(anchorDB))
@@ -110,7 +111,7 @@ func runAuditAnchor(cmd *cobra.Command, _ []string) error {
 		if terr != nil {
 			return terr
 		}
-		anchorSeq, anchorLink = size, root
+		shape, anchorSeq, anchorLink = audit.AnchorShapeTree, size, root
 	}
 
 	ref := anchorRef
@@ -120,7 +121,7 @@ func runAuditAnchor(cmd *cobra.Command, _ []string) error {
 	ctx, cancel := context.WithTimeout(cmd.Context(), anchorTimeout)
 	defer cancel()
 	a, err := audit.NewAnchor(ctx, &http.Client{Timeout: anchorTimeout},
-		anchorType, ref, anchorSeq, anchorLink, time.Now())
+		anchorType, ref, shape, anchorSeq, anchorLink, time.Now())
 	if err != nil {
 		return err
 	}
@@ -128,12 +129,50 @@ func runAuditAnchor(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("save anchor: %w", err)
 	}
 	out, err := jsonutil.Marshal(map[string]any{
-		"id": a.ID, "type": a.Type, "seq": a.Seq, "link": a.Link, "tree": anchorTree,
+		"id": a.ID, "type": a.Type, "shape": a.Shape, "seq": a.Seq, "link": a.Link,
 		"at": a.At.UTC().Format(time.RFC3339), "ref": a.Ref, "has_proof": a.Proof != "",
 	}, anchorPretty)
 	if err != nil {
 		return err
 	}
 	fmt.Println(string(out))
+	return nil
+}
+
+// auditAnchorDeleteCmd withdraws one recorded anchor by id.
+var auditAnchorDeleteCmd = &cobra.Command{
+	Use:   "delete <anchor-id>",
+	Short: "Withdraw one recorded anchor by id.",
+	Long: `Withdraw one recorded anchor by id.
+
+An anchor recorded over the wrong coordinates fails every bundle, receipt, and verification drawn
+from the chain, and nothing else removes it. Deleting an anchor only narrows what the record can
+prove; it never touches the chain itself.`,
+	Args: cobra.ExactArgs(1),
+	RunE: runAuditAnchorDelete,
+}
+
+// init registers the anchor delete command.
+func init() {
+	auditAnchorCmd.AddCommand(auditAnchorDeleteCmd)
+}
+
+// runAuditAnchorDelete removes one anchor from the store.
+func runAuditAnchorDelete(cmd *cobra.Command, args []string) error {
+	store, err := openBundle(anchorDB)
+	if err != nil {
+		return fmt.Errorf("open store: %w", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	anchors, ok := store.Audits().(audit.AnchorStore)
+	if !ok {
+		return fmt.Errorf("this store does not keep anchors")
+	}
+	if err := anchors.DeleteAnchor(cmd.Context(), args[0]); err != nil {
+		return err
+	}
+	fmt.Fprintf(cmd.ErrOrStderr(), "Deleted anchor %s. The chain is unchanged; only this "+
+		"external fixation of it is withdrawn.\n", args[0])
 	return nil
 }

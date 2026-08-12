@@ -14,7 +14,10 @@ import (
 
 // runEvidenceHandler renders one run's evidence dossier as a self-contained HTML document, so the
 // run page answers an auditor's sample request with one export instead of five screenshots.
-func runEvidenceHandler(store run.Store, audits audit.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
+// installID is the install the tree profile's leaves bind to, which checking a tree anchor
+// requires.
+func runEvidenceHandler(store run.Store, audits audit.Store, installID string, authz *authorizer,
+	log *zap.Logger) http.HandlerFunc {
 	if store == nil {
 		panic("server: runEvidenceHandler: Store required")
 	}
@@ -36,7 +39,7 @@ func runEvidenceHandler(store run.Store, audits audit.Store, authz *authorizer, 
 		if authorizeRunAccess(w, r, authz, log, got) {
 			return
 		}
-		in, err := dossier.Collect(r.Context(), store, audits, got.ID, time.Now())
+		in, err := dossier.Collect(r.Context(), store, audits, installID, got.ID, time.Now())
 		if err != nil {
 			log.Error("server: collect run evidence: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not collect the evidence")
@@ -54,9 +57,11 @@ func runEvidenceHandler(store run.Store, audits audit.Store, authz *authorizer, 
 }
 
 // auditRegisterHandler renders the period change register as a self-contained HTML document, the
-// change-management evidence a compliance review samples from. from and to accept a date or an
-// RFC 3339 time; the period defaults to the last 90 days.
-func auditRegisterHandler(store run.Store, audits audit.Store, log *zap.Logger) http.HandlerFunc {
+// change-management evidence a compliance review samples from. installID is the install the tree
+// profile's leaves bind to. from and to accept a date or an RFC 3339 time; the period defaults to
+// the last 90 days.
+func auditRegisterHandler(store run.Store, audits audit.Store, installID string,
+	log *zap.Logger) http.HandlerFunc {
 	if store == nil {
 		panic("server: auditRegisterHandler: Store required")
 	}
@@ -89,8 +94,8 @@ func auditRegisterHandler(store run.Store, audits audit.Store, log *zap.Logger) 
 		}
 		// The period is caller controlled, so the bound is the store query's and not the reader's
 		// good manners. A truncated document says so on its face.
-		in, err := dossier.CollectRegister(r.Context(), store, audits, from, to, time.Now(),
-			dossier.MaxRegisterRuns)
+		in, err := dossier.CollectRegister(r.Context(), store, audits, installID, from, to,
+			time.Now(), dossier.MaxRegisterRuns)
 		if err != nil {
 			log.Error("server: collect change register: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not collect the register")

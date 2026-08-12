@@ -20,43 +20,43 @@ type AnchorCheck struct {
 // one thing anchoring exists to catch, and nothing was checking it. Verification reported a healthy
 // chain while the evidence that disproved it sat unread in the same database.
 //
-// An anchor names a sequence and the link that was at it. Three things can be true of one:
+// An anchor names a coordinate and the value that was at it. Three things can be true of one:
 //
-//   - The chain reaches that sequence and the link matches. The chain still contains the history the
-//     anchor was taken over.
-//   - The chain reaches that sequence and the link differs. History was rewritten under the anchor.
-//   - The chain ends before that sequence. Entries that existed when the anchor was taken are gone.
+//   - The chain reaches that coordinate and the value matches. The chain still contains the history
+//     the anchor was taken over.
+//   - The chain reaches that coordinate and the value differs. History was rewritten under the
+//     anchor.
+//   - The chain ends before that coordinate. Entries that existed when the anchor was taken are
+//     gone.
 //
 // Only the first is a pass. The other two are the finding, and an unanchored chain proves neither,
 // which is why an install that never anchors gets no assurance from this rather than a false one.
-func CheckAnchors(entries []*Entry, anchors []*Anchor) (ok bool, results []AnchorCheck) {
-	s := NewAnchorScanner(anchors)
+//
+// A linear anchor's coordinate is an entry hash at a chain position. A tree anchor's is the Merkle
+// root over the first Seq entries, so it is checked by recomputing that tree with the leaves bound
+// to installID, exactly as TreeHead builds it, never against the linear hash map.
+func CheckAnchors(entries []*Entry, anchors []*Anchor, installID string) (ok bool, results []AnchorCheck) {
+	s := NewAnchorScanner(anchors, installID)
 	for _, e := range entries {
 		s.Feed(e)
 	}
 	return s.Results()
 }
 
-// anchorVerdicts turns the links captured at anchored positions into per-anchor verdicts. atSeq
-// holds the link found at each anchored sequence and highest is the largest sequence seen.
-func anchorVerdicts(anchors []*Anchor, atSeq map[int64]string, highest int64) (ok bool, results []AnchorCheck) {
+// anchorVerdicts turns what the scan captured at anchored coordinates into per-anchor verdicts.
+func anchorVerdicts(s *AnchorScanner) (ok bool, results []AnchorCheck) {
 	ok = true
-	results = make([]AnchorCheck, 0, len(anchors))
-	for _, a := range anchors {
+	results = make([]AnchorCheck, 0, len(s.anchors))
+	for _, a := range s.anchors {
 		res := AnchorCheck{Anchor: a}
-		switch link, found := atSeq[a.Seq]; {
-		case !found && a.Seq > highest:
-			res.Problem = fmt.Sprintf("the chain ends at entry %d, and this anchor was taken over "+
-				"entry %d, so %d entries that existed when it was taken are missing",
-				highest, a.Seq, a.Seq-highest)
-		case !found:
-			res.Problem = fmt.Sprintf("the chain has no entry %d, which this anchor was taken over",
-				a.Seq)
-		case link != a.Link:
-			res.Problem = fmt.Sprintf("entry %d is now link %s, and this anchor recorded %s, so "+
-				"the history under the anchor was rewritten", a.Seq, link, a.Link)
+		switch a.Shape {
+		case AnchorShapeTree:
+			res = treeVerdict(s, a)
+		case AnchorShapeLinear:
+			res = linearVerdict(s, a)
 		default:
-			res.Reached = true
+			res.Problem = fmt.Sprintf("this anchor carries the unknown coordinate shape %q, so it "+
+				"cannot be checked", a.Shape)
 		}
 		if !res.Reached {
 			ok = false
@@ -64,4 +64,49 @@ func anchorVerdicts(anchors []*Anchor, atSeq map[int64]string, highest int64) (o
 		results = append(results, res)
 	}
 	return ok, results
+}
+
+// linearVerdict holds one linear anchor against the entry hash captured at its position.
+func linearVerdict(s *AnchorScanner, a *Anchor) AnchorCheck {
+	res := AnchorCheck{Anchor: a}
+	switch link, found := s.atSeq[a.Seq]; {
+	case !found && a.Seq > s.highest:
+		res.Problem = fmt.Sprintf("the chain ends at entry %d, and this anchor was taken over "+
+			"entry %d, so %d entries that existed when it was taken are missing",
+			s.highest, a.Seq, a.Seq-s.highest)
+	case !found:
+		res.Problem = fmt.Sprintf("the chain has no entry %d, which this anchor was taken over",
+			a.Seq)
+	case link != a.Link:
+		res.Problem = fmt.Sprintf("entry %d is now link %s, and this anchor recorded %s, so "+
+			"the history under the anchor was rewritten", a.Seq, link, a.Link)
+	default:
+		res.Reached = true
+	}
+	return res
+}
+
+// treeVerdict holds one tree anchor against the root recomputed at its size.
+func treeVerdict(s *AnchorScanner, a *Anchor) AnchorCheck {
+	res := AnchorCheck{Anchor: a}
+	switch root, found := s.rootAt[a.Seq]; {
+	case s.installID == "":
+		res.Problem = "this install's identity is unavailable, so the tree this anchor fixes a " +
+			"root of cannot be recomputed and the anchor cannot be checked"
+	case s.treeErr != nil:
+		res.Problem = fmt.Sprintf("the chain's entries could not be hashed into the tree this "+
+			"anchor fixes a root of: %v", s.treeErr)
+	case !found && a.Seq > s.fed:
+		res.Problem = fmt.Sprintf("the chain holds %d entries, and this anchor fixed the root over "+
+			"the first %d, so %d entries that existed when it was taken are missing",
+			s.fed, a.Seq, a.Seq-s.fed)
+	case !found:
+		res.Problem = fmt.Sprintf("no root could be recomputed at tree size %d", a.Seq)
+	case root != a.Link:
+		res.Problem = fmt.Sprintf("the tree over the first %d entries now has root %s, and this "+
+			"anchor recorded %s, so the history under the anchor was rewritten", a.Seq, root, a.Link)
+	default:
+		res.Reached = true
+	}
+	return res
 }

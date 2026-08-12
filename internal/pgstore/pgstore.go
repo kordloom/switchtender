@@ -312,12 +312,17 @@ CREATE TABLE IF NOT EXISTS audit_entries (
 CREATE TABLE IF NOT EXISTS audit_anchors (
 	id    TEXT PRIMARY KEY,
 	type  TEXT NOT NULL,
+	shape TEXT NOT NULL,
 	seq   BIGINT NOT NULL,
 	link  TEXT NOT NULL,
 	at    TEXT NOT NULL,
 	ref   TEXT NOT NULL DEFAULT '',
 	proof TEXT NOT NULL DEFAULT ''
 );
+-- An anchor records which coordinate space its link lives in, a linear entry hash or a tree root.
+-- A database created before the column existed gains it here, the same way every other added column
+-- in this schema does.
+ALTER TABLE audit_anchors ADD COLUMN IF NOT EXISTS shape TEXT NOT NULL DEFAULT 'linear';
 CREATE INDEX IF NOT EXISTS idx_audit_anchor_seq ON audit_anchors(seq);
 CREATE INDEX IF NOT EXISTS idx_audit_at ON audit_entries(at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_seq ON audit_entries(seq);

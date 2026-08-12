@@ -150,7 +150,7 @@ func runReceipt(cmd *cobra.Command, args []string) error {
 		if aerr != nil {
 			return fmt.Errorf("read anchors: %w", aerr)
 		}
-		if reachedAll, results := audit.CheckAnchors(entries, recorded); !reachedAll {
+		if reachedAll, results := audit.CheckAnchors(entries, recorded, id.InstallID); !reachedAll {
 			for _, res := range results {
 				if !res.Reached {
 					fmt.Fprintln(os.Stderr, "anchor "+res.Anchor.ID+": "+res.Problem)
@@ -159,8 +159,18 @@ func runReceipt(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("this chain does not satisfy every anchor recorded over it, so a " +
 				"receipt drawn from it must not be published as one that does")
 		}
-		if n := doc.AttachAnchors(recorded); n > 0 {
+		n := doc.AttachAnchors(recorded)
+		if n > 0 {
 			fmt.Fprintf(os.Stderr, "Attached %d anchor(s) covering the receipt.\n", n)
+		}
+		// A sparse receipt proves membership in a tree coordinate, which only a tree anchor can
+		// fix, so shipping one silently unanchored would hand over a receipt whose root rests on
+		// this install's word alone.
+		if receiptSparse && n == 0 {
+			fmt.Fprintln(cmd.ErrOrStderr(), "No tree anchor covers this receipt, so nothing "+
+				"outside this install fixes the root it proves membership in. Run switchtender "+
+				"audit anchor --tree and issue the receipt again, or pass --append-only-from "+
+				"with a size a tree anchor already fixed.")
 		}
 	}
 

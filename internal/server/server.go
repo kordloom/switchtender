@@ -399,9 +399,16 @@ func (s *Server) Handler() http.Handler {
 	}
 	mux.Handle("GET /healthz", healthHandler())
 	mux.Handle("GET /readyz", readyHandler(s.store))
+	// The producer identity's install id binds the tree profile's leaves, so every anchor check
+	// that may meet a tree anchor carries it. Without a producer it stays empty and tree anchors
+	// are reported uncheckable rather than silently passed.
+	var installID string
+	if s.producer != nil {
+		installID = s.producer.InstallID
+	}
 	var health *chainHealth
 	if s.audits != nil {
-		health = newChainHealth(s.audits)
+		health = newChainHealth(s.audits, installID)
 	}
 	mux.Handle("GET /metrics", metricsHandler(s.store, health, s.log))
 	mux.Handle("GET /v1/fleet", fleetHandler(s.store, authz, s.log))
@@ -412,9 +419,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /v1/tasks", taskTrendsHandler(s.store, authz, s.log))
 	mux.Handle("GET /v1/workers", workersHandler(s.store, authz, s.log))
 	mux.Handle("GET /v1/audit", auditHandler(s.audits, s.log))
-	mux.Handle("GET /v1/audit/verify", auditVerifyHandler(s.audits, s.log))
+	mux.Handle("GET /v1/audit/verify", auditVerifyHandler(s.audits, installID, s.log))
 	mux.Handle("GET /v1/audit/bundle", auditBundleHandler(s.audits, s.producer, s.productVersion, s.log))
-	mux.Handle("GET /v1/audit/register", auditRegisterHandler(s.store, s.audits, s.log))
+	mux.Handle("GET /v1/audit/register", auditRegisterHandler(s.store, s.audits, installID, s.log))
 	// Served unauthenticated: the beat feed exists so an outside watcher can see the chain is
 	// alive and whole, and that watcher has no account here.
 	mux.Handle("GET "+beatfeed.APIPath, auditBeatsHandler(s.audits, s.log))
@@ -436,7 +443,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /v1/runs/{id}/steps", runStepsHandler(s.store, authz, s.log))
 	mux.Handle("GET /v1/runs/{id}/logs", runLogsHandler(s.store, authz, s.log))
 	mux.Handle("GET /v1/runs/{id}/events", runEventsHandler(s.store, authz, s.log))
-	mux.Handle("GET /v1/runs/{id}/evidence", runEvidenceHandler(s.store, s.audits, authz, s.log))
+	mux.Handle("GET /v1/runs/{id}/evidence",
+		runEvidenceHandler(s.store, s.audits, installID, authz, s.log))
 	mux.Handle("POST /v1/runs/{id}/explain", explainRunHandler(s.store, s.ai, authz, s.log))
 	mux.Handle("POST /v1/ai/draft", draftStepHandler(s.ai, s.log))
 	mux.Handle("POST /v1/ai/ask", askFleetHandler(s.store, s.ai, authz, s.log))

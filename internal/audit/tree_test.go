@@ -197,7 +197,7 @@ func TestAnchoredRootPairsWithConsistency(t *testing.T) {
 	kept := doc.AttachAnchors([]*audit.Anchor{{
 		// A by-reference anchor, since what is under test is whether the coordinate is recognized,
 		// not whether a timestamp token parses. The rfc3161 proof path has its own tests.
-		ID: "anc_root", Type: "https", Seq: anchoredSize, Link: anchoredRoot,
+		ID: "anc_root", Type: "https", Shape: audit.AnchorShapeTree, Seq: anchoredSize, Link: anchoredRoot,
 		At: time.Now(), Ref: "https://example.com/heads/6",
 	}})
 	if kept != 1 {

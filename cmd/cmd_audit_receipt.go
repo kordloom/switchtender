@@ -77,7 +77,13 @@ func runAuditReceipt(cmd *cobra.Command, args []string) error {
 		if aerr != nil {
 			return fmt.Errorf("read anchors: %w", aerr)
 		}
-		if reached, results := audit.CheckAnchors(chain, recorded); !reached {
+		// The install identity binds the tree profile's leaves, so a tree anchor cannot be checked
+		// without it.
+		id, ierr := audit.LoadIdentity(identityDir(receiptDB))
+		if ierr != nil {
+			return ierr
+		}
+		if reached, results := audit.CheckAnchors(chain, recorded, id.InstallID); !reached {
 			for _, res := range results {
 				if !res.Reached {
 					fmt.Fprintln(os.Stderr, "anchor "+res.Anchor.ID+": "+res.Problem)

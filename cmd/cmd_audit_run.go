@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/dossier"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -52,7 +53,14 @@ func runAuditRunDossier(cmd *cobra.Command, args []string) error {
 	}
 	defer func() { _ = store.Close() }()
 
-	in, err := dossier.Collect(cmd.Context(), store.Runs(), store.Audits(), args[0], time.Now())
+	// The install identity binds the tree profile's leaves, so a tree anchor cannot be checked
+	// without it.
+	id, err := audit.LoadIdentity(identityDir(dossierDB))
+	if err != nil {
+		return err
+	}
+	in, err := dossier.Collect(cmd.Context(), store.Runs(), store.Audits(), id.InstallID, args[0],
+		time.Now())
 	if errors.Is(err, run.ErrNotFound) {
 		return fmt.Errorf("run %s is not in this database", args[0])
 	}

@@ -101,7 +101,7 @@ func runAuditBundle(cmd *cobra.Command, _ []string) error {
 		if aerr != nil {
 			return fmt.Errorf("read anchors: %w", aerr)
 		}
-		if reachedAll, results := audit.CheckAnchors(full, recorded); !reachedAll {
+		if reachedAll, results := audit.CheckAnchors(full, recorded, id.InstallID); !reachedAll {
 			for _, res := range results {
 				if !res.Reached {
 					fmt.Fprintln(os.Stderr, "anchor "+res.Anchor.ID+": "+res.Problem)

@@ -107,7 +107,7 @@ func TestRegisterBoundsThePageInTheStoreQuery(t *testing.T) {
 			runs := seedOffsets(t, base, test.Seed)
 			audits := audit.NewMemStore()
 			from, to := base.Add(-time.Hour), base.Add(24*time.Hour)
-			in, err := CollectRegister(context.Background(), runs, audits, from, to, to, test.Limit)
+			in, err := CollectRegister(context.Background(), runs, audits, "", from, to, to, test.Limit)
 			if err != nil {
 				t.Fatalf("CollectRegister() error = %v", err)
 			}

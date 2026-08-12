@@ -20,6 +20,9 @@ func Contract(t *testing.T, newStore func() audit.Store) {
 	t.Run("append and list", func(t *testing.T) { testAppendList(t, newStore()) })
 	t.Run("chain verifies", func(t *testing.T) { testChain(t, newStore()) })
 	t.Run("anchors round trip and scope", func(t *testing.T) { testAnchors(t, newStore()) })
+	t.Run("anchor delete removes exactly the named anchor", func(t *testing.T) {
+		testAnchorDelete(t, newStore())
+	})
 	t.Run("concurrent appends do not fork", func(t *testing.T) { testConcurrentAppend(t, newStore()) })
 	t.Run("span beats increment with counts", func(t *testing.T) { testSpanBeats(t, newStore()) })
 	t.Run("span beat one adopts prior history", func(t *testing.T) { testSpanAdoption(t, newStore()) })
@@ -636,11 +639,12 @@ func testAnchors(t *testing.T, store audit.Store) {
 
 	at := time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC)
 	stamped := &audit.Anchor{
-		ID: audit.NewAnchorID(), Type: audit.AnchorRFC3161, Seq: 5, Link: "aa", At: at,
-		Ref: "https://freetsa.org/tsr", Proof: "MIIBase64Token",
+		ID: audit.NewAnchorID(), Type: audit.AnchorRFC3161, Shape: audit.AnchorShapeLinear,
+		Seq: 5, Link: "aa", At: at, Ref: "https://freetsa.org/tsr", Proof: "MIIBase64Token",
 	}
 	committed := &audit.Anchor{
-		ID: audit.NewAnchorID(), Type: audit.AnchorGit, Seq: 20, Link: "bb", At: at.Add(time.Hour),
+		ID: audit.NewAnchorID(), Type: audit.AnchorGit, Shape: audit.AnchorShapeTree,
+		Seq: 20, Link: "bb", At: at.Add(time.Hour),
 		Ref: "https://github.com/acme/anchors/commit/deadbeef",
 	}
 	for _, a := range []*audit.Anchor{stamped, committed} {
@@ -681,6 +685,14 @@ func testAnchors(t *testing.T, store audit.Store) {
 	if !got.At.Equal(at) {
 		t.Errorf("anchor time = %s, want %s", got.At, at)
 	}
+	// The shape decides how an anchor is checked, so losing it in storage turns a tree anchor into
+	// one held against the linear hash map, the exact confusion the field exists to prevent.
+	if got.Shape != audit.AnchorShapeLinear {
+		t.Errorf("shape = %q, want %q stored verbatim", got.Shape, audit.AnchorShapeLinear)
+	}
+	if tree := byID[committed.ID]; tree == nil || tree.Shape != audit.AnchorShapeTree {
+		t.Errorf("tree anchor shape did not round trip: %+v", tree)
+	}
 
 	// A bundle covering the first ten entries must not carry an anchor for entry twenty: a verifier
 	// rejects a bundle whose anchor names a link it does not hold.
@@ -703,6 +715,56 @@ func testAnchors(t *testing.T, store audit.Store) {
 	}
 	if !found {
 		t.Error("Anchors(10) dropped the anchor at seq 5, which is inside the range")
+	}
+}
+
+// testAnchorDelete verifies an anchor can be withdrawn by id: the named anchor is gone from the
+// listing, the others survive, and deleting a missing id reports audit.ErrAnchorNotFound. Without
+// a delete path, an anchor recorded over the wrong coordinates fails every export forever.
+func testAnchorDelete(t *testing.T, store audit.Store) {
+	t.Helper()
+	ctx := context.Background()
+	anchors, ok := store.(audit.AnchorStore)
+	if !ok {
+		t.Fatalf("%T does not persist anchors", store)
+	}
+	at := time.Date(2026, 8, 11, 12, 0, 0, 0, time.UTC)
+	doomed := &audit.Anchor{
+		ID: audit.NewAnchorID(), Type: audit.AnchorHTTPS, Shape: audit.AnchorShapeTree,
+		Seq: 7, Link: "cc", At: at, Ref: "https://anchors.example/head",
+	}
+	kept := &audit.Anchor{
+		ID: audit.NewAnchorID(), Type: audit.AnchorHTTPS, Shape: audit.AnchorShapeLinear,
+		Seq: 3, Link: "dd", At: at, Ref: "https://anchors.example/head",
+	}
+	for _, a := range []*audit.Anchor{doomed, kept} {
+		if err := anchors.SaveAnchor(ctx, a); err != nil {
+			t.Fatalf("SaveAnchor(%s) error = %v", a.ID, err)
+		}
+	}
+
+	if err := anchors.DeleteAnchor(ctx, doomed.ID); err != nil {
+		t.Fatalf("DeleteAnchor(%s) error = %v", doomed.ID, err)
+	}
+	after, err := anchors.Anchors(ctx, 0)
+	if err != nil {
+		t.Fatalf("Anchors() error = %v", err)
+	}
+	keptSeen := false
+	for _, a := range after {
+		if a.ID == doomed.ID {
+			t.Error("the deleted anchor is still listed")
+		}
+		if a.ID == kept.ID {
+			keptSeen = true
+		}
+	}
+	if !keptSeen {
+		t.Error("deleting one anchor removed another")
+	}
+
+	if err := anchors.DeleteAnchor(ctx, doomed.ID); !errors.Is(err, audit.ErrAnchorNotFound) {
+		t.Errorf("DeleteAnchor() of a missing id error = %v, want audit.ErrAnchorNotFound", err)
 	}
 }
 

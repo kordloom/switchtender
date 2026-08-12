@@ -167,7 +167,13 @@ type BundleAnchor struct {
 // an anchor for a sequence outside the exported range turns a good export into a failing one. The
 // rule lives here, beside the format it comes from, rather than at each call site. Anchors must be
 // attached before the bundle is signed, since the signature covers them.
+//
+// The anchor's shape must match the bundle's profile: a linear anchor fixes an entry hash, which a
+// tree bundle holds nowhere, and a tree anchor fixes a root, which a linear bundle holds nowhere.
+// The coordinate spaces share the same integer positions, so without the shape gate a collision
+// between an entry hash and a root would attach an anchor that means something else entirely.
 func (b *Bundle) AttachAnchors(anchors []*Anchor) int {
+	tree := b.Chain != nil && b.Chain.Profile == TreeProfile
 	links := make(map[int64]string, len(b.Claims)+2)
 	for _, c := range b.Claims {
 		links[c.Chain.Seq] = c.Chain.Link
@@ -185,6 +191,9 @@ func (b *Bundle) AttachAnchors(anchors []*Anchor) int {
 	out := make([]BundleAnchor, 0, len(anchors))
 	for _, a := range anchors {
 		if a == nil || a.Link == "" {
+			continue
+		}
+		if !ValidAnchorShape(a.Shape) || (a.Shape == AnchorShapeTree) != tree {
 			continue
 		}
 		// The two-value read matters: comparing against a map miss let an anchor name a sequence the

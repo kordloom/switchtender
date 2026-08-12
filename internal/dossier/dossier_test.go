@@ -54,7 +54,7 @@ func seedEvidence(t *testing.T) (run.Store, audit.Store, string) {
 func TestDossierCollectsDecisionsAndReceipts(t *testing.T) {
 	t.Parallel()
 	runs, audits, id := seedEvidence(t)
-	in, err := Collect(context.Background(), runs, audits, id, time.Date(2026, 8, 3, 0, 0, 0, 0, time.UTC))
+	in, err := Collect(context.Background(), runs, audits, "", id, time.Date(2026, 8, 3, 0, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatalf("Collect() error = %v", err)
 	}
@@ -90,7 +90,7 @@ func TestDossierReportsABrokenChain(t *testing.T) {
 	runs, audits, id := seedEvidence(t)
 	// A rewritten entry breaks verification; the dossier must lead with that, not bury it.
 	broken := &brokenChain{Store: audits}
-	in, err := Collect(context.Background(), runs, broken, id, time.Now())
+	in, err := Collect(context.Background(), runs, broken, "", id, time.Now())
 	if err != nil {
 		t.Fatalf("Collect() error = %v", err)
 	}
@@ -117,16 +117,18 @@ func TestDossierAnchorsCoverTheRun(t *testing.T) {
 	anchorStore := audits.(audit.AnchorStore)
 	// One anchor before the run's last entry proves nothing about it; one at the head covers it.
 	if err := anchorStore.SaveAnchor(ctx, &audit.Anchor{
-		ID: "anc_early", Type: "https", Seq: 1, Link: chain[0].Hash, At: time.Now(), Ref: "https://x/1",
+		ID: "anc_early", Type: "https", Shape: audit.AnchorShapeLinear, Seq: 1, Link: chain[0].Hash,
+		At: time.Now(), Ref: "https://x/1",
 	}); err != nil {
 		t.Fatalf("SaveAnchor() error = %v", err)
 	}
 	if err := anchorStore.SaveAnchor(ctx, &audit.Anchor{
-		ID: "anc_head", Type: "rfc3161", Seq: 3, Link: chain[2].Hash, At: time.Now(), Ref: "https://tsa", Proof: "cHJvb2Y=",
+		ID: "anc_head", Type: "rfc3161", Shape: audit.AnchorShapeLinear, Seq: 3, Link: chain[2].Hash,
+		At: time.Now(), Ref: "https://tsa", Proof: "cHJvb2Y=",
 	}); err != nil {
 		t.Fatalf("SaveAnchor() error = %v", err)
 	}
-	in, err := Collect(ctx, runs, audits, id, time.Now())
+	in, err := Collect(ctx, runs, audits, "", id, time.Now())
 	if err != nil {
 		t.Fatalf("Collect() error = %v", err)
 	}
@@ -149,7 +151,7 @@ func TestDossierAnchorsCoverTheRun(t *testing.T) {
 func TestDossierMissingRun(t *testing.T) {
 	t.Parallel()
 	runs, audits, _ := seedEvidence(t)
-	_, err := Collect(context.Background(), runs, audits, "run_ghost", time.Now())
+	_, err := Collect(context.Background(), runs, audits, "", "run_ghost", time.Now())
 	if !errors.Is(err, run.ErrNotFound) {
 		t.Errorf("Collect(ghost) error = %v, want run.ErrNotFound", err)
 	}
@@ -184,14 +186,15 @@ func TestDossierRefusesARewrittenChainItsAnchorsDisown(t *testing.T) {
 	// walk passes and only the anchor disagrees.
 	anchorStore := audits.(audit.AnchorStore)
 	if err := anchorStore.SaveAnchor(ctx, &audit.Anchor{
-		ID: "anc_1", Type: "rfc3161", Seq: 3, Link: "the-link-that-was-anchored",
-		At: time.Now(), Ref: "https://tsa", Proof: "cHJvb2Y=",
+		ID: "anc_1", Type: "rfc3161", Shape: audit.AnchorShapeLinear, Seq: 3,
+		Link: "the-link-that-was-anchored",
+		At:   time.Now(), Ref: "https://tsa", Proof: "cHJvb2Y=",
 	}); err != nil {
 		t.Fatalf("SaveAnchor() error = %v", err)
 	}
 	_ = chain
 
-	in, err := Collect(ctx, runs, audits, id, time.Now())
+	in, err := Collect(ctx, runs, audits, "", id, time.Now())
 	if err != nil {
 		t.Fatalf("Collect() error = %v", err)
 	}
@@ -242,13 +245,13 @@ func TestDossierCoversARunWithNoEntriesNamingIt(t *testing.T) {
 		t.Fatalf("Chain() error = %v", err)
 	}
 	if err := audits.(audit.AnchorStore).SaveAnchor(ctx, &audit.Anchor{
-		ID: "anc_1", Type: "rfc3161", Seq: 1, Link: chain[0].Hash,
+		ID: "anc_1", Type: "rfc3161", Shape: audit.AnchorShapeLinear, Seq: 1, Link: chain[0].Hash,
 		At: ended, Ref: "https://tsa", Proof: "cHJvb2Y=",
 	}); err != nil {
 		t.Fatalf("SaveAnchor() error = %v", err)
 	}
 
-	in, err := Collect(ctx, runs, audits, "run_plain", time.Now())
+	in, err := Collect(ctx, runs, audits, "", "run_plain", time.Now())
 	if err != nil {
 		t.Fatalf("Collect() error = %v", err)
 	}
@@ -270,7 +273,7 @@ func TestDossierCoversARunWithNoEntriesNamingIt(t *testing.T) {
 func TestDossierFailsLoudlyWhenAStoreRead2Fails(t *testing.T) {
 	t.Parallel()
 	runs, audits, id := seedEvidence(t)
-	_, err := Collect(context.Background(), &eventsFail{Store: runs}, audits, id, time.Now())
+	_, err := Collect(context.Background(), &eventsFail{Store: runs}, audits, "", id, time.Now())
 	if err == nil {
 		t.Fatal("Collect() rendered evidence over a failed event read, asserting by omission that nothing ran")
 	}
@@ -311,7 +314,7 @@ func TestDossierRedeemsTheRunReceiptForWhoAsked(t *testing.T) {
 		t.Fatalf("Save() error = %v", err)
 	}
 
-	in, err := Collect(ctx, runs, audits, "run_receipted", time.Now())
+	in, err := Collect(ctx, runs, audits, "", "run_receipted", time.Now())
 	if err != nil {
 		t.Fatalf("Collect() error = %v", err)
 	}
@@ -353,7 +356,7 @@ func TestDossierReportsACreationEntryTheChainNoLongerHolds(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
-	in, err := Collect(ctx, runs, audits, "run_orphan", time.Now())
+	in, err := Collect(ctx, runs, audits, "", "run_orphan", time.Now())
 	if err != nil {
 		t.Fatalf("Collect() error = %v", err)
 	}
@@ -391,13 +394,14 @@ func TestDossierReportsAWipedChainForARunItRecordsNothingAbout(t *testing.T) {
 		t.Fatalf("Append() error = %v", err)
 	}
 	if err := audits.(audit.AnchorStore).SaveAnchor(ctx, &audit.Anchor{
-		ID: "anc_1", Type: "rfc3161", Seq: 1, Link: "the-link-that-was-anchored",
-		At: ended, Ref: "https://tsa",
+		ID: "anc_1", Type: "rfc3161", Shape: audit.AnchorShapeLinear, Seq: 1,
+		Link: "the-link-that-was-anchored",
+		At:   ended, Ref: "https://tsa",
 	}); err != nil {
 		t.Fatalf("SaveAnchor() error = %v", err)
 	}
 
-	in, err := Collect(ctx, runs, audits, "run_scheduled", time.Now())
+	in, err := Collect(ctx, runs, audits, "", "run_scheduled", time.Now())
 	if err != nil {
 		t.Fatalf("Collect() error = %v", err)
 	}
@@ -445,12 +449,13 @@ func TestDossierDoesNotClaimAnchorsCoverARunTheChainNeverNamed(t *testing.T) {
 		t.Fatalf("Chain() error = %v", err)
 	}
 	if err := audits.(audit.AnchorStore).SaveAnchor(ctx, &audit.Anchor{
-		ID: "anc_1", Type: "rfc3161", Seq: 1, Link: chain[0].Hash, At: ended, Ref: "https://tsa",
+		ID: "anc_1", Type: "rfc3161", Shape: audit.AnchorShapeLinear, Seq: 1, Link: chain[0].Hash,
+		At: ended, Ref: "https://tsa",
 	}); err != nil {
 		t.Fatalf("SaveAnchor() error = %v", err)
 	}
 
-	in, err := Collect(ctx, runs, audits, "run_sched", time.Now())
+	in, err := Collect(ctx, runs, audits, "", "run_sched", time.Now())
 	if err != nil {
 		t.Fatalf("Collect() error = %v", err)
 	}
@@ -496,13 +501,13 @@ func TestDossierCoverageNeedsAPositionToMeasureFrom(t *testing.T) {
 	}
 	// The anchor genuinely holds, so it takes the coverage branch rather than the problem branch.
 	if err := audits.(audit.AnchorStore).SaveAnchor(ctx, &audit.Anchor{
-		ID: "anc_ok", Type: "rfc3161", Seq: 1, Link: chain[0].Hash,
+		ID: "anc_ok", Type: "rfc3161", Shape: audit.AnchorShapeLinear, Seq: 1, Link: chain[0].Hash,
 		At: ended.Add(2 * time.Hour), Ref: "https://tsa",
 	}); err != nil {
 		t.Fatalf("SaveAnchor() error = %v", err)
 	}
 
-	in, err := Collect(ctx, runs, audits, "run_before", time.Now())
+	in, err := Collect(ctx, runs, audits, "", "run_before", time.Now())
 	if err != nil {
 		t.Fatalf("Collect() error = %v", err)
 	}
@@ -539,7 +544,7 @@ func TestDossierSurfacesTheCommittedOutcome(t *testing.T) {
 		t.Fatalf("Append(outcome) error = %v", err)
 	}
 
-	in, err := Collect(ctx, runs, audits, id, time.Date(2026, 8, 3, 0, 0, 0, 0, time.UTC))
+	in, err := Collect(ctx, runs, audits, "", id, time.Date(2026, 8, 3, 0, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatalf("Collect() error = %v", err)
 	}

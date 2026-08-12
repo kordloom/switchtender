@@ -83,7 +83,7 @@ func TestATruncatedPeriodIsSplitSoTheArchiveHasNoHole(t *testing.T) {
 	// covers moves the archive past the rest of that period forever.
 	runs, audits := seedSpread(t, base, 0, hour, 2*hour, 3*hour, 4*hour, 5*hour, 6*hour, 7*hour)
 	dir := t.TempDir()
-	e := NewEmitter(runs, audits, dir, hour, nil, WithMaxChanges(2))
+	e := NewEmitter(runs, audits, "", dir, hour, nil, WithMaxChanges(2))
 	defer e.Close()
 
 	ctx := context.Background()

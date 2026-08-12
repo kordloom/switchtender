@@ -108,7 +108,7 @@ func TestMetricsChainGauges(t *testing.T) {
 	ctx := context.Background()
 	store := run.NewMemStore()
 	audits := seedChain(t, 3)
-	health := newChainHealth(audits)
+	health := newChainHealth(audits, "")
 	// Re-verify on every scrape so the test reads fresh state; production coalesces on an interval.
 	health.minInterval = 0
 	handler := metricsHandler(store, health, zap.NewNop())
@@ -146,7 +146,8 @@ func TestMetricsChainGauges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Chain() error = %v", err)
 	}
-	if err := anchored.SaveAnchor(ctx, &audit.Anchor{ID: audit.NewAnchorID(), Type: audit.AnchorHTTPS,
+	if err := anchored.SaveAnchor(ctx, &audit.Anchor{
+		ID: audit.NewAnchorID(), Type: audit.AnchorHTTPS, Shape: audit.AnchorShapeLinear,
 		Seq: chain[1].Seq, Link: chain[1].Hash, At: time.Now().UTC(), Ref: "https://x"}); err != nil {
 		t.Fatalf("SaveAnchor() error = %v", err)
 	}
@@ -161,7 +162,8 @@ func TestMetricsChainGauges(t *testing.T) {
 			t.Errorf("metrics missing %q after a sound anchor", want)
 		}
 	}
-	if err := anchored.SaveAnchor(ctx, &audit.Anchor{ID: audit.NewAnchorID(), Type: audit.AnchorHTTPS,
+	if err := anchored.SaveAnchor(ctx, &audit.Anchor{
+		ID: audit.NewAnchorID(), Type: audit.AnchorHTTPS, Shape: audit.AnchorShapeLinear,
 		Seq: chain[2].Seq, Link: "not-the-link", At: time.Now().UTC(), Ref: "https://x"}); err != nil {
 		t.Fatalf("SaveAnchor() error = %v", err)
 	}
@@ -176,7 +178,7 @@ func TestMetricsChainGaugesReportABreak(t *testing.T) {
 	t.Parallel()
 	store := run.NewMemStore()
 	audits := seedChain(t, 3)
-	health := newChainHealth(&tamperedChain{Store: audits, at: 2})
+	health := newChainHealth(&tamperedChain{Store: audits, at: 2}, "")
 	handler := metricsHandler(store, health, zap.NewNop())
 	body := scrape(t, handler)
 	if !strings.Contains(body, "switchtender_audit_chain_verified 0") ||
@@ -209,7 +211,7 @@ func TestMetricsChainGaugesCatchInPlaceTamper(t *testing.T) {
 	t.Parallel()
 	store := run.NewMemStore()
 	chain := &switchableChain{Store: seedChain(t, 4), at: 2}
-	health := newChainHealth(chain)
+	health := newChainHealth(chain, "")
 	// Each scrape re-verifies, the whole point: a forward-only cursor would never re-read entry 2.
 	health.minInterval = 0
 	handler := metricsHandler(store, health, zap.NewNop())
@@ -233,7 +235,7 @@ func TestMetricsChainGaugesNeverVerifiedIsNotSound(t *testing.T) {
 	store := run.NewMemStore()
 	failing := &failingChain{Store: seedChain(t, 2)}
 	failing.fail.Store(true)
-	health := newChainHealth(failing)
+	health := newChainHealth(failing, "")
 	handler := metricsHandler(store, health, zap.NewNop())
 	// The very first scrape cannot read the chain. A chain never verified must not read as sound.
 	body := scrape(t, handler)
@@ -249,7 +251,7 @@ func TestMetricsChainGaugesGoStaleOnReadFailure(t *testing.T) {
 	store := run.NewMemStore()
 	audits := seedChain(t, 2)
 	failing := &failingChain{Store: audits}
-	health := newChainHealth(failing)
+	health := newChainHealth(failing, "")
 	health.minInterval = 0
 	handler := metricsHandler(store, health, zap.NewNop())
 
@@ -314,7 +316,7 @@ func TestChainHealthCoalescesWithinTheInterval(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	chain := &switchableChain{Store: seedChain(t, 3), at: 2}
-	health := newChainHealth(chain)
+	health := newChainHealth(chain, "")
 	// A fixed clock and a live interval: a second refresh inside the window serves the cache.
 	fixed := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
 	health.clock = func() time.Time { return fixed }

@@ -253,6 +253,22 @@ func verifyBundleTree(b *Bundle) (bool, int64) {
 			return false, c.Chain.Seq
 		}
 	}
+	// A carried consistency proof is verified, not merely displayed. Its from-root becomes an
+	// admissible anchor coordinate below, and admitting a root the proof does not actually fold to
+	// the head would let a producer pair a fabricated history with a genuine-looking anchor.
+	if c := b.Chain.Consistency; c != nil {
+		fromRoot, err := hex.DecodeString(c.FromRoot)
+		if err != nil || len(fromRoot) == 0 {
+			return false, 0
+		}
+		path, err := decodeProofHashes(c.Path)
+		if err != nil {
+			return false, 0
+		}
+		if !merkle.VerifyConsistency(c.FromSize, size, fromRoot, root, path) {
+			return false, 0
+		}
+	}
 	return true, 0
 }
 
@@ -304,18 +320,30 @@ func verifyBundleChain(claims []BundleClaim, head BundleCoord) (bool, int64) {
 	return true, 0
 }
 
-// verifyBundleAnchors reports whether every anchor names a claim, or the head, the bundle actually
-// holds at the anchored link. An anchor for a sequence the bundle does not carry is the tampered
-// export the reference verifier rejects, so it fails here too.
+// verifyBundleAnchors reports whether every anchor names a coordinate the bundle actually holds at
+// the anchored value. An anchor for a coordinate the bundle does not carry is the tampered export
+// the reference verifier rejects, so it fails here too. It runs only after the chain check passed,
+// which is what decides which coordinates are admissible.
 func verifyBundleAnchors(b *Bundle) bool {
-	// Built from the claims alone. Seeding it from the declared head let an anchor over a forged
-	// head check against the forgery, which turned the anchor into a second copy of the producer's
-	// own claim rather than independent evidence about it. The head is admissible here only once the
-	// chain check above has confirmed it is the newest claim, at which point it is already in this
-	// map by way of that claim.
-	links := make(map[int64]string, len(b.Claims))
+	// For the linear profile the map is built from the claims alone. Seeding it from the declared
+	// head let an anchor over a forged head check against the forgery, which turned the anchor into
+	// a second copy of the producer's own claim rather than independent evidence about it. The head
+	// is admissible only once the chain check has confirmed it is the newest claim, at which point
+	// it is already in this map by way of that claim.
+	links := make(map[int64]string, len(b.Claims)+2)
 	for _, c := range b.Claims {
 		links[c.Chain.Seq] = c.Chain.Link
+	}
+	// For the tree profile the head and the consistency from-root are admissible, because by now
+	// the chain check has proved them: every disclosed claim folded through its audit path to the
+	// head root, and the consistency proof folded the from-root to it. A root-anchored sparse
+	// receipt is the shape an anchored install actually emits, and holding its anchor against the
+	// leaf hashes alone refused every honest one.
+	if b.Chain != nil && b.Chain.Profile == TreeProfile {
+		links[b.Chain.Head.Seq] = b.Chain.Head.Link
+		if c := b.Chain.Consistency; c != nil {
+			links[c.FromSize] = c.FromRoot
+		}
 	}
 	for _, a := range b.Anchors {
 		if link, ok := links[a.Seq]; !ok || link != a.Link {

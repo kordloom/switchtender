@@ -146,8 +146,9 @@ func anchorsFor(ctx context.Context, store audit.Store) ([]*audit.Anchor, error)
 }
 
 // auditVerifyHandler recomputes the audit hash chain and reports whether it is intact, so an
-// operator can prove the trail has not been altered.
-func auditVerifyHandler(store audit.Store, log *zap.Logger) http.HandlerFunc {
+// operator can prove the trail has not been altered. installID is the install the tree profile's
+// leaves bind to, which checking a tree anchor requires.
+func auditVerifyHandler(store audit.Store, installID string, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil {
 			respondError(w, log, http.StatusNotFound, "audit trail not enabled")
@@ -167,7 +168,7 @@ func auditVerifyHandler(store audit.Store, log *zap.Logger) http.HandlerFunc {
 		// The chain streams past both scanners one entry at a time, so verifying years of trail
 		// holds one entry in memory rather than all of them, however many clients ask at once.
 		chainScan := audit.NewChainScanner(true)
-		anchorScan := audit.NewAnchorScanner(anchors)
+		anchorScan := audit.NewAnchorScanner(anchors, installID)
 		err := store.ChainScan(r.Context(), 0, func(e *audit.Entry) error {
 			chainScan.Feed(e)
 			anchorScan.Feed(e)
@@ -233,7 +234,7 @@ func auditBundleHandler(store audit.Store, producer *audit.Identity, version str
 				respondError(w, log, http.StatusInternalServerError, "could not read the anchors")
 				return
 			}
-			if reachedAll, _ := audit.CheckAnchors(entries, recorded); !reachedAll {
+			if reachedAll, _ := audit.CheckAnchors(entries, recorded, producer.InstallID); !reachedAll {
 				respondError(w, log, http.StatusConflict, "the chain does not satisfy every anchor "+
 					"recorded over it, so it cannot be published as a bundle that does")
 				return

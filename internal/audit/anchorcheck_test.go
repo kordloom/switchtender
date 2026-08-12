@@ -40,12 +40,12 @@ func TestCheckAnchorsCatchesATruncatedTail(t *testing.T) {
 	full := buildChain(t, 10)
 	head := full[len(full)-1]
 	anchor := &Anchor{
-		ID: "anc_head", Type: AnchorRFC3161, Seq: head.Seq, Link: head.Hash,
+		ID: "anc_head", Type: AnchorRFC3161, Shape: AnchorShapeLinear, Seq: head.Seq, Link: head.Hash,
 		At: time.Now(), Ref: "https://freetsa.org/tsr",
 	}
 
 	// The untouched chain satisfies its anchor.
-	if ok, results := CheckAnchors(full, []*Anchor{anchor}); !ok {
+	if ok, results := CheckAnchors(full, []*Anchor{anchor}, ""); !ok {
 		t.Fatalf("the full chain fails its own anchor: %+v", results)
 	}
 
@@ -54,7 +54,7 @@ func TestCheckAnchorsCatchesATruncatedTail(t *testing.T) {
 	if ok, brokeAt := Verify(truncated); !ok {
 		t.Fatalf("a truncated chain should still verify by hash alone, broke at %d", brokeAt)
 	}
-	ok, results := CheckAnchors(truncated, []*Anchor{anchor})
+	ok, results := CheckAnchors(truncated, []*Anchor{anchor}, "")
 	if ok {
 		t.Fatal("a chain missing four entries satisfied an anchor taken over its head, so " +
 			"truncation is invisible to every verification path")
@@ -71,7 +71,8 @@ func TestCheckAnchorsCatchesRewrittenHistory(t *testing.T) {
 	t.Parallel()
 	original := buildChain(t, 5)
 	anchor := &Anchor{
-		ID: "anc_mid", Type: AnchorRFC3161, Seq: 3, Link: original[2].Hash, At: time.Now(),
+		ID: "anc_mid", Type: AnchorRFC3161, Shape: AnchorShapeLinear, Seq: 3,
+		Link: original[2].Hash, At: time.Now(),
 	}
 
 	// A chain of the same length whose entries differ, rebuilt so it verifies cleanly.
@@ -89,7 +90,7 @@ func TestCheckAnchorsCatchesRewrittenHistory(t *testing.T) {
 		t.Fatalf("the rewritten chain should verify by hash alone, broke at %d", at)
 	}
 
-	ok, results := CheckAnchors(rewritten, []*Anchor{anchor})
+	ok, results := CheckAnchors(rewritten, []*Anchor{anchor}, "")
 	if ok {
 		t.Fatal("a rewritten history satisfied an anchor taken over the original")
 	}
@@ -100,7 +101,7 @@ func TestCheckAnchorsCatchesRewrittenHistory(t *testing.T) {
 // nothing from this rather than a false assurance, and is not failed for it either.
 func TestCheckAnchorsPassesAnUnanchoredChain(t *testing.T) {
 	t.Parallel()
-	ok, results := CheckAnchors(buildChain(t, 4), nil)
+	ok, results := CheckAnchors(buildChain(t, 4), nil, "")
 	if !ok {
 		t.Error("a chain with no anchors over it was reported as failing one")
 	}

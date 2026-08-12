@@ -911,7 +911,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 					ctx, cancel := context.WithTimeout(ctx, anchorTimeout)
 					defer cancel()
 					a, err := audit.NewAnchor(ctx, client, audit.AnchorRFC3161, serveAnchorTSAURL,
-						b.Seq, b.Hash, time.Now())
+						audit.AnchorShapeLinear, b.Seq, b.Hash, time.Now())
 					if err != nil {
 						return err
 					}
@@ -941,7 +941,12 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		if evidenceCadence < time.Hour {
 			return fmt.Errorf("--evidence-cadence must be at least 1h, got %s", evidenceCadence)
 		}
-		packs := evidence.NewEmitter(bundle.Runs(), bundle.Audits(), evidenceDir, evidenceCadence,
+		var packInstallID string
+		if producer != nil {
+			packInstallID = producer.InstallID
+		}
+		packs := evidence.NewEmitter(bundle.Runs(), bundle.Audits(), packInstallID, evidenceDir,
+			evidenceCadence,
 			log, evidence.WithNotify(func(path string, from, to time.Time) {
 				log.Info("evidence pack ready", zap.String("path", path),
 					zap.Time("from", from), zap.Time("to", to))

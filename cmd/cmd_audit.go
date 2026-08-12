@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/dossier"
 )
 
@@ -91,8 +92,14 @@ func runChangeRegister(cmd *cobra.Command) error {
 		return fmt.Errorf("open store: %w", err)
 	}
 	defer func() { _ = store.Close() }()
-	in, err := dossier.CollectRegister(cmd.Context(), store.Runs(), store.Audits(), from, to,
-		time.Now(), dossier.MaxRegisterRuns)
+	// The install identity binds the tree profile's leaves, so a tree anchor cannot be checked
+	// without it.
+	id, err := audit.LoadIdentity(identityDir(auditReportDB))
+	if err != nil {
+		return err
+	}
+	in, err := dossier.CollectRegister(cmd.Context(), store.Runs(), store.Audits(), id.InstallID,
+		from, to, time.Now(), dossier.MaxRegisterRuns)
 	if err != nil {
 		return fmt.Errorf("collect change register: %w", err)
 	}

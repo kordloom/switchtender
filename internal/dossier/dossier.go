@@ -65,8 +65,10 @@ type Input struct {
 }
 
 // Collect gathers a run's evidence from the stores in one streaming pass over the chain. It
-// returns run.ErrNotFound when the run does not exist.
-func Collect(ctx context.Context, runs run.Store, audits audit.Store, id string, now time.Time) (*Input, error) {
+// returns run.ErrNotFound when the run does not exist. installID is the install the tree
+// profile's leaves bind to, which checking a tree anchor requires.
+func Collect(ctx context.Context, runs run.Store, audits audit.Store, installID, id string,
+	now time.Time) (*Input, error) {
 	r, err := runs.Get(ctx, id)
 	if err != nil {
 		return nil, err
@@ -132,7 +134,7 @@ func Collect(ctx context.Context, runs run.Store, audits audit.Store, id string,
 	// One pass gives the run's entries, the whole-chain verdict, the anchor verdicts, the head
 	// receipt, and where the chain stood when the run was recorded.
 	scan := audit.NewChainScanner(true)
-	anchorScan := audit.NewAnchorScanner(anchors)
+	anchorScan := audit.NewAnchorScanner(anchors, installID)
 	// The receipt is parsed once and compared as two scalars, rather than formatting a string for
 	// every entry in a chain that can run to millions.
 	launchSeq, launchHash := parseReceipt(r.AuditReceipt)

@@ -74,8 +74,8 @@ func TestTimestampRefusesAForgedTokenSoNothingIsStored(t *testing.T) {
 			// The caller's path: an anchor is saved only when NewAnchor succeeds, so a refused
 			// token must leave the store with nothing in it.
 			var store AnchorStore = &memStore{}
-			a, err := NewAnchor(ctx, srv.Client(), AnchorRFC3161, srv.URL, head.Seq, head.Hash,
-				genTime())
+			a, err := NewAnchor(ctx, srv.Client(), AnchorRFC3161, srv.URL, AnchorShapeLinear,
+				head.Seq, head.Hash, genTime())
 			if err == nil {
 				if err := store.SaveAnchor(ctx, a); err != nil {
 					t.Fatalf("SaveAnchor() error = %v", err)
@@ -89,7 +89,7 @@ func TestTimestampRefusesAForgedTokenSoNothingIsStored(t *testing.T) {
 			if diff := cmp.Diff([]*Anchor(nil), stored, cmpopts.EquateEmpty()); diff != "" {
 				t.Errorf("stored anchors (-want +got):\n%s", diff)
 			}
-			_, results := CheckAnchors(chain, stored)
+			_, results := CheckAnchors(chain, stored, "")
 			verified := 0
 			for _, r := range results {
 				if r.Reached {
