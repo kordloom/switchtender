@@ -181,7 +181,7 @@ function makeSandbox() {
 	sandbox.innerHeight = 800;
 	sandbox.window = sandbox;
 	sandbox.self = sandbox;
-	return { sandbox, clock };
+	return { sandbox, clock, winListeners };
 }
 
 // loadParts reads the named part files from ../js/, concatenates them in order, and evaluates the
@@ -189,7 +189,7 @@ function makeSandbox() {
 // falls back to resolving top-level const and let bindings by name, so a test reaches
 // app.fmtDuration and app.NOTIFY_KINDS the same way.
 export function loadParts(names) {
-	const { sandbox, clock } = makeSandbox();
+	const { sandbox, clock, winListeners } = makeSandbox();
 	const context = vm.createContext(sandbox);
 	let source = "";
 	for (const name of names) {
@@ -207,8 +207,35 @@ export function loadParts(names) {
 			}
 		},
 	});
-	LOADED.set(handle, { sandbox, context, clock });
+	LOADED.set(handle, { sandbox, context, clock, winListeners });
 	return handle;
+}
+
+// evalIn evaluates a source string inside a loaded handle's sandbox, for a script that does not
+// live under js/. The standalone reports carry their script inline in the generated document, so a
+// test that drives one extracts it from the document and runs it through here. Pass an empty parts
+// list to loadParts to get a sandbox with nothing in it first.
+export function evalIn(app, source, filename) {
+	const loaded = LOADED.get(app);
+	if (!loaded) throw new Error("jstest: handle was not produced by loadParts");
+	return vm.runInContext(source, loaded.context, { filename: filename || "inline" });
+}
+
+// fireWindow dispatches an event at the sandbox window and returns it. Window listeners are
+// recorded rather than fired by default, since layout never changes in a test, so this is how a
+// test drives one deliberately: a print handler, above all, which nothing else can reach.
+export function fireWindow(app, type, init) {
+	const loaded = LOADED.get(app);
+	if (!loaded) throw new Error("jstest: handle was not produced by loadParts");
+	const event = makeEvent(type, init);
+	event.target = loaded.sandbox;
+	event.currentTarget = loaded.sandbox;
+	for (const listener of loaded.winListeners.slice()) {
+		if (listener.type !== type) continue;
+		event.results.push(listener.handler.call(loaded.sandbox, event));
+		if (event.stoppedImmediate) break;
+	}
+	return event;
 }
 
 // ALL_PARTS is every source part in the order the server concatenates them, for a test that drives
