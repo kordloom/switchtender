@@ -5,6 +5,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/outcome"
@@ -35,20 +36,7 @@ func TestFinalizeCommitsRunOutcomeToChain(t *testing.T) {
 	}
 	got := waitTerminal(t, store, created.ID)
 
-	chain, err := audits.Chain(ctx)
-	if err != nil {
-		t.Fatalf("Chain() error = %v", err)
-	}
-	var outcomeEntry *audit.Entry
-	for _, e := range chain {
-		if e.Method == audit.MethodRun && strings.Contains(e.Path, created.ID) {
-			outcomeEntry = e
-			break
-		}
-	}
-	if outcomeEntry == nil {
-		t.Fatal("no outcome entry was committed for the finished run")
-	}
+	outcomeEntry := waitOutcomeEntry(t, audits, created.ID)
 	if want := "/runs/" + created.ID + "/outcome/succeeded"; outcomeEntry.Path != want {
 		t.Errorf("outcome path = %q, want %q", outcomeEntry.Path, want)
 	}
@@ -95,4 +83,33 @@ func TestNoAuditsNoOutcomeEntry(t *testing.T) {
 	}
 	// Reaching a terminal state without a nil-audits panic is the assertion.
 	waitTerminal(t, store, created.ID)
+}
+
+// waitOutcomeEntry polls the chain for the run's outcome entry and returns it, failing at the
+// deadline if it never arrives.
+//
+// The entry is committed after the terminal status is saved, deliberately: the append is not
+// fail-closed, because the run has already happened and a chain that cannot record it is logged
+// rather than pretended away. So a run reading as terminal does not yet mean its outcome has landed,
+// and reading the chain at that instant made this test report a failure about correct behavior under
+// load. Polling asserts the property the product actually promises, that a finished run commits its
+// outcome, rather than the instant the test happened to look.
+func waitOutcomeEntry(t *testing.T, audits audit.Store, runID string) *audit.Entry {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		chain, err := audits.Chain(context.Background())
+		if err != nil {
+			t.Fatalf("Chain() error = %v", err)
+		}
+		for _, e := range chain {
+			if e.Method == audit.MethodRun && strings.Contains(e.Path, runID) {
+				return e
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("no outcome entry was committed for the finished run")
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
 }
