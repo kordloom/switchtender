@@ -12,7 +12,7 @@ require (
 	github.com/hashicorp/go-hclog v1.6.3
 	github.com/hashicorp/go-plugin v1.8.0
 	github.com/jackc/pgx/v5 v5.10.0
-	github.com/kordloom/loomseal v0.9.0
+	github.com/kordloom/loomseal v0.10.0
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/spf13/cobra v1.10.2
 	github.com/yuin/goldmark v1.8.2
@@ -76,7 +76,3 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
-
-// The tree receipt profile needs loomseal changes that are not published yet, so the module is taken
-// from the checkout beside this one. Remove this and bump the require above once loomseal is tagged.
-replace github.com/kordloom/loomseal => ../loomseal

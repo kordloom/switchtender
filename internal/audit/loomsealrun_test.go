@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -47,5 +48,39 @@ func loomsealRepo(t *testing.T) string {
 	if _, err := os.Stat(filepath.Join(repo, "go.mod")); err != nil {
 		t.Skip("loomseal checkout not found beside this repository")
 	}
+	requireCheckoutMatchesModule(t, repo)
 	return repo
+}
+
+// requireCheckoutMatchesModule fails when the loomseal checkout is not the version this module
+// depends on.
+//
+// The cross-verification runs the verifier out of the checkout while the product compiles against
+// the published module. Those were the same thing while a replace directive pointed one at the
+// other. They are no longer, so a commit in the checkout that is not yet released would have this
+// suite checking the product against a verifier nobody has, quietly, and reporting agreement with
+// something that is not what ships. Saying so is the whole value of the cross-check.
+func requireCheckoutMatchesModule(t *testing.T, repo string) {
+	t.Helper()
+	want, err := exec.Command("go", "list", "-m", "-f", "{{.Version}}",
+		"github.com/kordloom/loomseal").Output()
+	if err != nil {
+		t.Fatalf("read the required loomseal version: %v", err)
+	}
+	version := strings.TrimSpace(string(want))
+
+	tagged, err := exec.Command("git", "-C", repo, "rev-list", "-n1", version).Output()
+	if err != nil {
+		t.Fatalf("the loomseal checkout has no %s tag, so it cannot be the version this module "+
+			"depends on: %v", version, err)
+	}
+	head, err := exec.Command("git", "-C", repo, "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Fatalf("read the loomseal checkout HEAD: %v", err)
+	}
+	if strings.TrimSpace(string(tagged)) != strings.TrimSpace(string(head)) {
+		t.Fatalf("the loomseal checkout is at %s but this module depends on %s (%s), so the "+
+			"cross-check would compare this product against a verifier it does not ship with",
+			strings.TrimSpace(string(head))[:12], version, strings.TrimSpace(string(tagged))[:12])
+	}
 }
