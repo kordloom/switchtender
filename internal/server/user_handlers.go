@@ -1,7 +1,6 @@
 package server
 
 import (
-	"encoding/json"
 	"errors"
 	"net"
 	"net/http"
@@ -157,8 +156,7 @@ func loginHandler(users user.Store, tokens auth.Store, ldap *LDAPAuth, log *zap.
 			return
 		}
 		var req loginRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			respondError(w, log, http.StatusBadRequest, "invalid request body")
+		if !decodeStrict(w, log, r.Body, &req) {
 			return
 		}
 		if !limiter.allow(clientAddr(r) + "\x00" + req.Username) {
@@ -214,8 +212,7 @@ func createUserHandler(users user.Store, log *zap.Logger) http.HandlerFunc {
 			return
 		}
 		var req createUserRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			respondError(w, log, http.StatusBadRequest, "invalid request body")
+		if !decodeStrict(w, log, r.Body, &req) {
 			return
 		}
 		if req.Username == "" || req.Password == "" {
@@ -275,8 +272,7 @@ func updateUserHandler(users user.Store, log *zap.Logger) http.HandlerFunc {
 			return
 		}
 		var req updateUserRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			respondError(w, log, http.StatusBadRequest, "invalid request body")
+		if !decodeStrict(w, log, r.Body, &req) {
 			return
 		}
 		password := req.Password

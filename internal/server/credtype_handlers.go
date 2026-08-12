@@ -1,7 +1,6 @@
 package server
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
@@ -32,8 +31,7 @@ func createCredTypeHandler(store credential.TypeStore, log *zap.Logger) http.Han
 			return
 		}
 		var t credential.CredentialType
-		if err := json.NewDecoder(r.Body).Decode(&t); err != nil {
-			respondError(w, log, http.StatusBadRequest, "invalid request body")
+		if !decodeStrict(w, log, r.Body, &t) {
 			return
 		}
 		t.ID = credential.NewTypeID()
@@ -59,8 +57,7 @@ func updateCredTypeHandler(store credential.TypeStore, log *zap.Logger) http.Han
 			return
 		}
 		var t credential.CredentialType
-		if err := json.NewDecoder(r.Body).Decode(&t); err != nil {
-			respondError(w, log, http.StatusBadRequest, "invalid request body")
+		if !decodeStrict(w, log, r.Body, &t) {
 			return
 		}
 		id := r.PathValue("id")

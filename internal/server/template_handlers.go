@@ -1,9 +1,7 @@
 package server
 
 import (
-	"encoding/json"
 	"errors"
-	"io"
 	"maps"
 	"net/http"
 	"slices"
@@ -156,8 +154,7 @@ func createTemplateHandler(store template.Store, authz *authorizer, log *zap.Log
 			return
 		}
 		var req createTemplateRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			respondError(w, log, http.StatusBadRequest, "invalid request body")
+		if !decodeStrict(w, log, r.Body, &req) {
 			return
 		}
 		// A template is a saved launch spec, so writing one has to authorize the objects it will
@@ -218,8 +215,7 @@ func updateTemplateHandler(store template.Store, authz *authorizer, log *zap.Log
 			return
 		}
 		var req createTemplateRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			respondError(w, log, http.StatusBadRequest, "invalid request body")
+		if !decodeStrict(w, log, r.Body, &req) {
 			return
 		}
 		// A template is a saved launch spec, so writing one has to authorize the objects it will
@@ -430,14 +426,11 @@ func launchTemplateHandler(store template.Store, submitter Submitter, authz *aut
 		// Discarding this error made a broken body launch the template with none of its overrides. A
 		// caller asking for a limit of one canary host, whose body was truncated or whose limit was
 		// sent as a number, got a live run against the whole inventory and a 202 saying it worked.
-		// Nothing about the response distinguished that from the run they asked for.
+		// Nothing about the response distinguished that from the run they asked for. A misspelled
+		// override reads the same way, so an unknown field is refused here too.
 		var launchReq launchTemplateRequest
-		if r.Body != nil {
-			if err := json.NewDecoder(r.Body).Decode(&launchReq); err != nil && !errors.Is(err, io.EOF) {
-				respondError(w, log, http.StatusBadRequest,
-					"launch body is not valid JSON: "+err.Error())
-				return
-			}
+		if !decodeStrictOptional(w, log, r.Body, &launchReq) {
+			return
 		}
 
 		// A launch may choose only from the template's selectable set, so it cannot pull an arbitrary

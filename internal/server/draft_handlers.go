@@ -1,7 +1,6 @@
 package server
 
 import (
-	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
@@ -47,8 +46,7 @@ func draftStepHandler(provider ai.Provider, log *zap.Logger) http.HandlerFunc {
 			return
 		}
 		var req draftRequest
-		if err := json.NewDecoder(io.LimitReader(r.Body, draftBodyCap)).Decode(&req); err != nil {
-			respondError(w, log, http.StatusBadRequest, "invalid json body")
+		if !decodeStrict(w, log, io.LimitReader(r.Body, draftBodyCap), &req) {
 			return
 		}
 		tool := strings.ToLower(strings.TrimSpace(req.Tool))

@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
@@ -55,8 +54,7 @@ func createSourceHandler(sources invsource.Store, inventories inventory.Store, a
 			return
 		}
 		var req createSourceRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			respondError(w, log, http.StatusBadRequest, "invalid request body")
+		if !decodeStrict(w, log, r.Body, &req) {
 			return
 		}
 		if req.Name == "" || req.Source == "" {
@@ -126,8 +124,7 @@ func updateSourceHandler(sources invsource.Store, authz *authorizer, log *zap.Lo
 			return
 		}
 		var req createSourceRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			respondError(w, log, http.StatusBadRequest, "invalid request body")
+		if !decodeStrict(w, log, r.Body, &req) {
 			return
 		}
 		if req.Name == "" || req.Source == "" {

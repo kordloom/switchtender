@@ -1,7 +1,6 @@
 package server
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
@@ -37,8 +36,7 @@ func createGrantHandler(store grant.Store, log *zap.Logger) http.HandlerFunc {
 			return
 		}
 		var req createGrantRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			respondError(w, log, http.StatusBadRequest, "invalid request body")
+		if !decodeStrict(w, log, r.Body, &req) {
 			return
 		}
 		if !grant.ValidSubject(req.Subject) {

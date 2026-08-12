@@ -328,8 +328,7 @@ func reconcileDriftHandler(store run.Store, submitter Submitter, authz *authoriz
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req reconcileRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			respondError(w, log, http.StatusBadRequest, "invalid json body")
+		if !decodeStrict(w, log, r.Body, &req) {
 			return
 		}
 		host := strings.TrimSpace(req.Host)
@@ -537,9 +536,14 @@ func createRunHandler(submitter Submitter, authz *authorizer, log *zap.Logger) h
 		panic("server: createRunHandler: Submitter required")
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Not decodeStrict yet, and the exemption in TestEveryHandlerDecodesStrictly says why:
+		// createRunRequest declares no extra_vars, so a submission that carries them, which the
+		// plugin tool contract expects, would be refused outright instead of merely having them
+		// dropped. The field lands with the run submission DTOs, and this decode turns strict with
+		// it. Until then a misspelled control here is still accepted and silently ignored.
 		var req createRunRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			respondError(w, log, http.StatusBadRequest, "invalid request body")
+			respondError(w, log, http.StatusBadRequest, badBodyMessage)
 			return
 		}
 		if !run.ValidTool(req.Tool) {
@@ -647,8 +651,7 @@ func createPipelineHandler(submitter Submitter, authz *authorizer, log *zap.Logg
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req createPipelineRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			respondError(w, log, http.StatusBadRequest, "invalid request body")
+		if !decodeStrict(w, log, r.Body, &req) {
 			return
 		}
 		if len(req.Steps) == 0 {
@@ -1184,7 +1187,12 @@ func rejectRunHandler(approver Approver, store run.Store, authz *authorizer,
 		var req struct {
 			Reason string `json:"reason"`
 		}
-		_ = json.NewDecoder(r.Body).Decode(&req)
+		// A rejection needs no reason, so an absent body is fine, but a body that is present is held
+		// to the same rule as every other: a misspelled reason is refused rather than dropped, so the
+		// audit trail never records a rejection whose stated cause quietly went missing.
+		if !decodeStrictOptional(w, log, r.Body, &req) {
+			return
+		}
 		// A decision on a run is a decision about the objects it will touch, so the approver has to
 		// be someone who may use them. Every other run mutation checks; these two did not, and they
 		// are the two that release a held run onto real hosts.

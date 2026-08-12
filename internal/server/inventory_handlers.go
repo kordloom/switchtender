@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
@@ -84,8 +83,7 @@ func createInventoryHandler(store inventory.Store, authz *authorizer, sealer *cr
 			return
 		}
 		var req createInventoryRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			respondError(w, log, http.StatusBadRequest, "invalid request body")
+		if !decodeStrict(w, log, r.Body, &req) {
 			return
 		}
 		if req.Name == "" {
@@ -130,8 +128,7 @@ func updateInventoryHandler(store inventory.Store, authz *authorizer, sealer *cr
 			return
 		}
 		var req createInventoryRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			respondError(w, log, http.StatusBadRequest, "invalid request body")
+		if !decodeStrict(w, log, r.Body, &req) {
 			return
 		}
 		if req.Name == "" {

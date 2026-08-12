@@ -1,7 +1,6 @@
 package server
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
@@ -50,8 +49,7 @@ func createScheduleHandler(store schedule.Store, authz *authorizer, log *zap.Log
 			return
 		}
 		var req createScheduleRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			respondError(w, log, http.StatusBadRequest, "invalid request body")
+		if !decodeStrict(w, log, r.Body, &req) {
 			return
 		}
 
@@ -106,8 +104,7 @@ func updateScheduleHandler(store schedule.Store, authz *authorizer, log *zap.Log
 			return
 		}
 		var req createScheduleRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			respondError(w, log, http.StatusBadRequest, "invalid request body")
+		if !decodeStrict(w, log, r.Body, &req) {
 			return
 		}
 		id := r.PathValue("id")

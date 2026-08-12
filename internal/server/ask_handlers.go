@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -86,8 +85,7 @@ func askFleetHandler(store run.Store, provider ai.Provider, authz *authorizer,
 			return
 		}
 		var req askRequest
-		if err := json.NewDecoder(io.LimitReader(r.Body, askBodyCap)).Decode(&req); err != nil {
-			respondError(w, log, http.StatusBadRequest, "invalid json body")
+		if !decodeStrict(w, log, io.LimitReader(r.Body, askBodyCap), &req) {
 			return
 		}
 		question := strings.TrimSpace(req.Question)

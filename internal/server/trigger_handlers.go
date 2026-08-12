@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -66,8 +65,7 @@ func createTriggerHandler(triggers trigger.Store, templates template.Store, seal
 			return
 		}
 		var req createTriggerRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			respondError(w, log, http.StatusBadRequest, "invalid request body")
+		if !decodeStrict(w, log, r.Body, &req) {
 			return
 		}
 		if req.Name == "" || req.TemplateID == "" {
@@ -153,8 +151,7 @@ func updateTriggerHandler(triggers trigger.Store, templates template.Store, auth
 			return
 		}
 		var req updateTriggerRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			respondError(w, log, http.StatusBadRequest, "invalid request body")
+		if !decodeStrict(w, log, r.Body, &req) {
 			return
 		}
 		if req.Name == "" {

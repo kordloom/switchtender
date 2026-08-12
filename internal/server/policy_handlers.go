@@ -1,7 +1,6 @@
 package server
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
@@ -56,8 +55,7 @@ func createPolicyHandler(store policy.Store, log *zap.Logger) http.HandlerFunc {
 			return
 		}
 		var req createPolicyRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			respondError(w, log, http.StatusBadRequest, "invalid request body")
+		if !decodeStrict(w, log, r.Body, &req) {
 			return
 		}
 		if req.Name == "" {
@@ -94,8 +92,7 @@ func updatePolicyHandler(store policy.Store, log *zap.Logger) http.HandlerFunc {
 			return
 		}
 		var req createPolicyRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			respondError(w, log, http.StatusBadRequest, "invalid request body")
+		if !decodeStrict(w, log, r.Body, &req) {
 			return
 		}
 		if req.Name == "" {

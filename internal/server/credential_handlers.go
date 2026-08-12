@@ -117,8 +117,7 @@ func createCredentialHandler(store credential.Store, types credential.TypeStore,
 			return
 		}
 		var req createCredentialRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			respondError(w, log, http.StatusBadRequest, "invalid request body")
+		if !decodeStrict(w, log, r.Body, &req) {
 			return
 		}
 		if req.Name == "" {
@@ -302,8 +301,7 @@ func updateCredentialHandler(store credential.Store, sealer *credential.Sealer, 
 			return
 		}
 		var req updateCredentialRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			respondError(w, log, http.StatusBadRequest, "invalid request body")
+		if !decodeStrict(w, log, r.Body, &req) {
 			return
 		}
 		secret := req.Secret
