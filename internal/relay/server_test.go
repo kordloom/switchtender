@@ -201,13 +201,20 @@ func TestAppendLogFlushesOnDelay(t *testing.T) {
 			time.Since(start), relay.LogBatchDelayForTest())
 	}
 
+	// Wait for the line to reach the store, not for the request to be counted. The counter is
+	// incremented as the request arrives, before the handler that writes has run, so waiting on it
+	// and then reading the store races the handler and loses whenever the machine is busy.
 	deadline := time.Now().Add(5 * time.Second)
-	for posts() == 0 && time.Now().Before(deadline) {
+	var gotLog []byte
+	for time.Now().Before(deadline) {
+		var err error
+		if gotLog, err = backing.Log(ctx, "run_quiet"); err != nil {
+			t.Fatalf("backing Log() error = %v", err)
+		}
+		if len(gotLog) > 0 {
+			break
+		}
 		time.Sleep(5 * time.Millisecond)
-	}
-	gotLog, err := backing.Log(ctx, "run_quiet")
-	if err != nil {
-		t.Fatalf("backing Log() error = %v", err)
 	}
 	if diff := cmp.Diff("one line\n", string(gotLog)); diff != "" {
 		t.Errorf("delayed flush mismatch (-want +got):\n%s", diff)
