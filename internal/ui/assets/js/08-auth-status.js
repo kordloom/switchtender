@@ -99,8 +99,11 @@ function setStatus(msg) {
 	if (msg) { el.textContent = msg; el.hidden = false; } else { el.hidden = true; }
 }
 
-// showEmpty renders a centered empty-state card in place of the status line.
-function showEmpty(msg) {
+// showEmpty renders a centered empty-state card in place of the status line. keepControls leaves
+// the filter toolbar visible, for an emptiness that is about the query rather than the instance:
+// hiding the controls there took away the search box the person was typing in, which turned a
+// no-match search into a dead end only a reload could leave.
+function showEmpty(msg, keepControls) {
 	const el = document.getElementById("status");
 	if (!el) return;
 	el.hidden = false;
@@ -110,6 +113,7 @@ function showEmpty(msg) {
 		'<path d="M3 14h4l2 3h6l2-3h4"/>' +
 		'<path d="M5.5 5.5h13l2.5 8.5v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4z"/></svg><p></p>';
 	el.querySelector("p").textContent = msg;
+	if (keepControls) return;
 	// Controls that filter, page, or export an empty list are noise, so they hide with it.
 	for (const sel of [".list-filter", ".runs-toolbar", ".table-foot"]) {
 		for (const node of document.querySelectorAll(sel)) node.hidden = true;

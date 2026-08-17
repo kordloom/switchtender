@@ -69,6 +69,19 @@ function wireRunsSearch() {
 	});
 }
 
+// runsFiltered reports whether a search, a status or tool filter, or a date window narrows the
+// table. An empty result then speaks about the query, not the instance, so the controls that
+// created it have to stay on screen to be revised.
+function runsFiltered() {
+	if (runsQuery()) return true;
+	for (const id of ["runs-status", "runs-tool"]) {
+		const el = document.getElementById(id);
+		if (el && el.value) return true;
+	}
+	const url = new URLSearchParams(location.search);
+	return !!(url.get("after") || url.get("before"));
+}
+
 // runsLoadGen counts run-table loads so a slow response from an earlier search or page size cannot
 // overwrite the table after a newer load has already rendered.
 let runsLoadGen = 0;
@@ -100,9 +113,11 @@ async function loadRuns() {
 		tbody.innerHTML = "";
 		if (runs.length === 0) {
 			table.hidden = true;
-			showEmpty(runsQuery() ? "No runs match your search." : "No runs yet.");
+			const filtered = runsFiltered();
+			showEmpty(filtered ? "No runs match your search." : "No runs yet.", filtered);
 			return;
 		}
+		showListControls();
 		renderSummary(data.summary || {});
 		appendRunRows(tbody, runs);
 		wireRunsMore(tbody, runs.length, data.has_more);
