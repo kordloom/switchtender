@@ -209,3 +209,81 @@ func TestVerifyBundleChecksOutcomeDisclosure(t *testing.T) {
 		t.Error("a receipt with a mismatched outcome disclosure reported OK")
 	}
 }
+
+// TestVerifyBundleCatchesASpecInconsistency proves the receipt's three statements about the spec
+// must agree: a bundle whose decision binds one digest while its outcome commits another is
+// internally coherent claim by claim, and still refused, because the approval and the execution it
+// ties together are not about the same change.
+func TestVerifyBundleCatchesASpecInconsistency(t *testing.T) {
+	t.Setenv("SWITCHTENDER_AUDIT_KEY", "")
+	id, err := audit.LoadIdentity(t.TempDir())
+	if err != nil {
+		t.Fatalf("LoadIdentity() error = %v", err)
+	}
+	at := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
+
+	decisionBody := []byte(`{"run_id":"run_x","verdict":"approved","spec_digest":"sha256:aaaa"}`)
+	decisionDigest, decisionNonce, err := audit.ContentDigestOf(decisionBody)
+	if err != nil {
+		t.Fatalf("ContentDigestOf(decision) error = %v", err)
+	}
+	outcomeBody := []byte(`{"run_id":"run_x","status":"succeeded","exit_code":0,` +
+		`"log_sha256":"abc","spec_digest":"sha256:bbbb"}`)
+	outcomeDigest, outcomeNonce, err := audit.ContentDigestOf(outcomeBody)
+	if err != nil {
+		t.Fatalf("ContentDigestOf(outcome) error = %v", err)
+	}
+
+	decision := &audit.Entry{
+		ID: "d", At: at, Actor: "approver-pat", ActorType: "session",
+		Method: audit.MethodDecision, Path: "/runs/run_x/decision/approved",
+		ContentDigest: decisionDigest, Nonce: decisionNonce,
+	}
+	audit.Link(nil, decision)
+	outcomeE := &audit.Entry{
+		ID: "o", At: at.Add(time.Minute), Actor: "system:dispatcher", ActorType: "system",
+		Method: audit.MethodRun, Path: "/runs/run_x/outcome/succeeded",
+		ContentDigest: outcomeDigest, Nonce: outcomeNonce,
+	}
+	audit.Link(decision, outcomeE)
+
+	doc, err := audit.BuildBundle([]*audit.Entry{decision, outcomeE}, id, "v", at)
+	if err != nil {
+		t.Fatalf("BuildBundle() error = %v", err)
+	}
+	attach := func(seq int64, key string, body []byte, nonceKey, nonce string) {
+		var obj any
+		if err := json.Unmarshal(body, &obj); err != nil {
+			t.Fatalf("Unmarshal() error = %v", err)
+		}
+		for i := range doc.Claims {
+			if doc.Claims[i].Chain.Seq == seq {
+				doc.Claims[i].Payload[key] = obj
+				doc.Claims[i].Payload[nonceKey] = nonce
+			}
+		}
+	}
+	attach(decision.Seq, "decision_body", decisionBody, "decision_nonce", decisionNonce)
+	attach(outcomeE.Seq, "outcome_body", outcomeBody, "outcome_nonce", outcomeNonce)
+	signed, err := audit.SignBundleDoc(doc, id.Private())
+	if err != nil {
+		t.Fatalf("SignBundleDoc() error = %v", err)
+	}
+
+	rep, err := audit.VerifyBundle(signed, "")
+	if err != nil {
+		t.Fatalf("VerifyBundle() error = %v", err)
+	}
+	if !rep.DecisionsOK || rep.DecisionsPresent != 1 {
+		t.Errorf("decisions = ok %v present %d, want the disclosure itself to verify", rep.DecisionsOK, rep.DecisionsPresent)
+	}
+	if !rep.OutcomeDigestOK {
+		t.Error("the outcome disclosure itself should verify")
+	}
+	if rep.SpecConsistent {
+		t.Error("a decision bound to one spec digest while the outcome commits another reported consistent")
+	}
+	if rep.OK() {
+		t.Error("a receipt whose approved and executed specs disagree reported OK")
+	}
+}
