@@ -179,7 +179,7 @@ const TOURS = [
 		id: "migrate", title: "Coming from AWX", desc: "Move your automation over",
 		page: "migrate", path: "/ui/migrate",
 		steps: [
-			{ title: "Leave AWX or Semaphore behind", body: "Import your projects, inventories, templates, surveys, and schedules in a single pass." },
+			{ title: "Leave AWX or Semaphore behind", body: "Import your projects, inventories, templates, surveys, workflows, credential shells, and schedules in a single pass." },
 			{ title: "Preview before you commit", body: "Every import runs as a dry run first, showing exactly what it will create. Apply it when it looks right." },
 			{ title: "No lock-in", body: "You can export and leave anytime, too. SwitchTender earns the switch. It does not trap you." },
 		],

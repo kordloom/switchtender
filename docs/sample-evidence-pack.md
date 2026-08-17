@@ -46,9 +46,9 @@ it was rendered from verifies and is anchored to a public timestamp authority, s
 - **Outcome** is honest, not curated. Two approved changes then failed at execution, one change was
   rejected and never ran, one is still awaiting a decision, and two succeeded. An audit trail that
   only ever showed green would be the one to distrust.
-- Nothing in the row exposes a secret. From the next release the chain also commits to a redacted
-  digest of each change's payload, so the record proves what changed without carrying the
-  credentials the change used.
+- Nothing in the row exposes a secret. The chain also commits to a redacted digest of each
+  change's payload, so the record proves what changed without carrying the credentials the
+  change used.
 
 ## Produce your own
 

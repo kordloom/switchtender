@@ -12,9 +12,8 @@ asks about. It is a reference for the person answering the audit, not a claim of
 tool produces the evidence, and your assessor decides whether your program satisfies the control.
 
 Every mapping below points at the tamper-evident chain and the change register
-`switchtender audit report` renders from it, all in the free core. Rows marked next release describe
-the actor-identity and content-digest fields that land in the upcoming release; everything else ships
-in the current download. Nothing here is a paid feature. The paid Governed tier (early access) adds
+`switchtender audit report` renders from it, all in the free core, shipping in the current
+download. Nothing here is a paid feature. The paid Governed tier (early access) adds
 control-mapped evidence packs and auditor-facing attestation reports, assembled for you on the same
 cadence the free `--evidence-dir` registers already run on.
 
@@ -24,10 +23,10 @@ Every authenticated change is one entry in a SHA-256 hash chain. Each entry comm
 
 | Field | What it is |
 |-------|------------|
-| Actor | Who acted. From the next release, `actor_type` joins it: how they authenticated, a session, a token, or the command line. |
-| On behalf of | Next release. For a token bound to an account, the account whose authority it used, so an agent's change is attributable to both the token and the operator behind it. |
+| Actor | Who acted, and beside it `actor_type`: how they authenticated, a session, a token, an AI agent's token, or the command line. |
+| On behalf of | For a token bound to an account, the account whose authority it used, so an agent's change is attributable to both the token and the operator behind it. |
 | Method and path | The operation performed. |
-| Content digest | Next release. A hash of the change payload with secret fields redacted, so the record proves what a change contained, not only that a call was made, without exposing the secret. |
+| Content digest | A hash of the change payload with secret fields redacted, so the record proves what a change contained, not only that a call was made, without exposing the secret. |
 | Time, sequence, link | When it happened and its tamper-evident position in the chain. |
 
 The change register (`switchtender audit report --from --to`) renders these per change with the

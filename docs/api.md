@@ -212,7 +212,7 @@ template carries its own `extra_vars` and a launch may merge more over them.
 
 ## Saved workflows
 
-*Next release.* A template may carry `steps`, a pipeline graph, instead of a single tool. Such a
+A template may carry `steps`, a pipeline graph, instead of a single tool. Such a
 template is a saved workflow: every path that fires a template, a launch, a schedule, or a webhook
 trigger, runs the graph as a pipeline, and the template's survey answers and extra vars reach every
 step. A workflow template sets no top-level `playbook`, `command`, `tool`, `shards`, or Ansible
