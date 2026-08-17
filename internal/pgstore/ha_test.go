@@ -45,6 +45,13 @@ func waitFor(t *testing.T, what string, check func() bool) {
 
 // TestHAReplicasShareTheQueue proves two active replicas divide pending work without ever claiming
 // the same run twice: every run finishes, every claim names one replica, and both replicas do work.
+//
+// Each replica is held to one worker slot on purpose. A claim is first-come-first-served, so with the
+// default four slots one replica can hold four runs at once and drain a twenty-run queue in roughly the
+// time the other's ticker takes to fire a few times. Taking every run is then correct behavior and the
+// test failed anyway, on a timing coincidence rather than on anything the store promises. One slot each
+// makes the queue outlast both tickers, so what is being checked is that two replicas draw from one
+// queue rather than which of them happened to poll first.
 func TestHAReplicasShareTheQueue(t *testing.T) {
 	dsn := testDSN(t)
 	// Opening applies the schema, so a fresh database has tables before the truncate.
@@ -58,10 +65,12 @@ func TestHAReplicasShareTheQueue(t *testing.T) {
 		},
 	)
 	a := dispatch.New(openReplica(t, dsn).Runs(), runner, zap.NewNop(),
-		dispatch.WithOwner("replica-a"), dispatch.WithClaimInterval(20*time.Millisecond))
+		dispatch.WithOwner("replica-a"), dispatch.WithClaimInterval(20*time.Millisecond),
+		dispatch.WithWorkers(1))
 	defer a.Close()
 	b := dispatch.New(openReplica(t, dsn).Runs(), runner, zap.NewNop(),
-		dispatch.WithOwner("replica-b"), dispatch.WithClaimInterval(20*time.Millisecond))
+		dispatch.WithOwner("replica-b"), dispatch.WithClaimInterval(20*time.Millisecond),
+		dispatch.WithWorkers(1))
 	defer b.Close()
 
 	store := openReplica(t, dsn).Runs()
@@ -121,10 +130,12 @@ func TestHAIdempotentSubmitNeverDoubleFires(t *testing.T) {
 		},
 	)
 	a := dispatch.New(openReplica(t, dsn).Runs(), runner, zap.NewNop(),
-		dispatch.WithOwner("replica-a"), dispatch.WithClaimInterval(20*time.Millisecond))
+		dispatch.WithOwner("replica-a"), dispatch.WithClaimInterval(20*time.Millisecond),
+		dispatch.WithWorkers(1))
 	defer a.Close()
 	b := dispatch.New(openReplica(t, dsn).Runs(), runner, zap.NewNop(),
-		dispatch.WithOwner("replica-b"), dispatch.WithClaimInterval(20*time.Millisecond))
+		dispatch.WithOwner("replica-b"), dispatch.WithClaimInterval(20*time.Millisecond),
+		dispatch.WithWorkers(1))
 	defer b.Close()
 
 	const key = "idem-ha"
@@ -260,7 +271,8 @@ func TestHAFailoverReclaimsStaleWork(t *testing.T) {
 		},
 	)
 	survivor := dispatch.New(openReplica(t, dsn).Runs(), runner, zap.NewNop(),
-		dispatch.WithOwner("replica-b"), dispatch.WithClaimInterval(20*time.Millisecond))
+		dispatch.WithOwner("replica-b"), dispatch.WithClaimInterval(20*time.Millisecond),
+		dispatch.WithWorkers(1))
 	defer survivor.Close()
 
 	waitFor(t, "the orphaned run to finish on the survivor", func() bool {
