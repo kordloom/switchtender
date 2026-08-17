@@ -65,7 +65,7 @@ func runAuditReceipt(cmd *cobra.Command, args []string) error {
 	// checked before the receipt is looked for in it.
 	if ok, brokeAt := audit.Verify(chain); !ok {
 		return fmt.Errorf("the chain does not verify at entry %d, so no receipt can be redeemed "+
-			"against it; run audit verify to see where", brokeAt)
+			"against it; GET /v1/audit/verify reports where", brokeAt)
 	}
 	// The anchors are consulted too. A receipt is what somebody outside this install holds, and the
 	// question they are really asking is whether the record still contains what they were told it

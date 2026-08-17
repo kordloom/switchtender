@@ -93,7 +93,7 @@ func runAuditAnchor(cmd *cobra.Command, _ []string) error {
 	// standing of an anchored one.
 	if ok, brokeAt := audit.Verify(chain); !ok {
 		return fmt.Errorf("the chain does not verify at entry %d, so it must not be anchored; "+
-			"run audit verify to see where", brokeAt)
+			"GET /v1/audit/verify reports where", brokeAt)
 	}
 	// What gets fixed depends on the shape a receipt will prove membership in. A linear anchor fixes
 	// the newest link, so a lost tail shows up later as a chain that can no longer reach it. A tree
