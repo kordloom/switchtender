@@ -29,7 +29,7 @@ func TestApproveRefusesARunAlreadyCanceled(t *testing.T) {
 	if err := store.Save(ctx, held); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
-	if _, err := d.Approve(ctx, held.ID); err == nil {
+	if _, err := d.Approve(ctx, held.ID, "approver-pat", "session"); err == nil {
 		t.Error("approving a run whose cancel was already requested reported success, leaving a " +
 			"run nothing will claim and nothing will finish")
 	}
@@ -61,10 +61,10 @@ func TestRejectRefusesAShard(t *testing.T) {
 	if err := store.Save(ctx, shard); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
-	if _, err := d.Reject(ctx, shard.ID, "no"); !errors.Is(err, ErrChildNotApprovable) {
+	if _, err := d.Reject(ctx, shard.ID, "no", "approver-pat", "session"); !errors.Is(err, ErrChildNotApprovable) {
 		t.Errorf("Reject(shard) error = %v, want ErrChildNotApprovable", err)
 	}
-	if _, err := d.Approve(ctx, shard.ID); !errors.Is(err, ErrChildNotApprovable) {
+	if _, err := d.Approve(ctx, shard.ID, "approver-pat", "session"); !errors.Is(err, ErrChildNotApprovable) {
 		t.Errorf("Approve(shard) error = %v, want ErrChildNotApprovable", err)
 	}
 }

@@ -23,6 +23,7 @@ import (
 	"github.com/kordloom/switchtender/internal/event"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/invsource"
+	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/roundhouse"
@@ -1654,6 +1655,25 @@ func (d *Dispatcher) executeLeased(base context.Context, r *run.Run) run.Status 
 // single phase, unchanged. The run carries this process's lease while it executes: a watcher renews
 // it and honors cancel requests written to the store by any process.
 func (d *Dispatcher) execute(ctx context.Context, r *run.Run) run.Status {
+	// An approved run executes exactly the spec that was approved. The digest was committed to the
+	// chain when the decision was made and stamped on the run; a mismatch here means the row
+	// changed underneath the decision, so the run fails with that stated rather than executing
+	// something nobody approved. The chain catches the same tampering at verify time; this refuses
+	// to perform it in the first place.
+	if r.ApprovedSpecDigest != "" {
+		got, serr := outcome.SpecDigest(r)
+		if serr != nil {
+			d.finalize(r, run.StatusFailed, nil, "could not recompute the approved spec: "+serr.Error())
+			d.publisher.CloseRun(r.ID)
+			return run.StatusFailed
+		}
+		if got != r.ApprovedSpecDigest {
+			d.finalize(r, run.StatusFailed, nil,
+				"refused: the spec changed after it was approved, so this is not the change the approver released")
+			d.publisher.CloseRun(r.ID)
+			return run.StatusFailed
+		}
+	}
 	policies, perr := d.planGatePolicies(ctx, r)
 	if perr != nil {
 		// The plan-content gate could not be evaluated, so applying now would apply past a gate

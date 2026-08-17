@@ -57,10 +57,11 @@ type Retrier interface {
 	RelaunchFailedHosts(ctx context.Context, runID, actor, actorType string) (*run.Run, error)
 }
 
-// Approver releases or denies a run held for approval. The dispatcher satisfies it.
+// Approver releases or denies a run held for approval, naming the deciding actor so the decision
+// entry on the chain carries who decided. The dispatcher satisfies it.
 type Approver interface {
-	Approve(ctx context.Context, id string) (*run.Run, error)
-	Reject(ctx context.Context, id, reason string) (*run.Run, error)
+	Approve(ctx context.Context, id, by, byType string) (*run.Run, error)
+	Reject(ctx context.Context, id, reason, by, byType string) (*run.Run, error)
 }
 
 // Option configures a Server.

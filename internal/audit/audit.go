@@ -223,6 +223,22 @@ func ContentDigestOf(body []byte) (digest, nonce string, err error) {
 		hex.EncodeToString(raw[:]), nil
 }
 
+// CanonicalRedacted reduces a JSON body to its canonical redacted bytes, the exact form every
+// digest in this package commits to. It is exported for values that are disclosed beside their
+// digest, such as a run's spec in a receipt, so the discloser can never hand out bytes the
+// redaction did not pass over.
+func CanonicalRedacted(body []byte) []byte {
+	return canonicalForDigest(body)
+}
+
+// UnkeyedDigestOf returns "sha256:" plus the hex SHA-256 of the canonical redacted body. It is for
+// values disclosed beside their digest, where recomputability by any holder is the point. A value
+// that stays undisclosed gets the keyed ContentDigestOf instead, so it cannot be guessed offline.
+func UnkeyedDigestOf(body []byte) string {
+	sum := sha256.Sum256(canonicalForDigest(body))
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
 // canonicalForDigest reduces a request body to the bytes the digest commits to: the redacted,
 // canonical JSON when it parses, or the raw body when it is too large to canonicalize economically.
 // A body that parses is never digested raw, so a secret the redaction removed is not committed by a

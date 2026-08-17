@@ -609,7 +609,7 @@ func migrateRuns(db *sql.DB) error {
 		!strings.Contains(err.Error(), "duplicate column name") {
 		return fmt.Errorf("add notifications column: %w", err)
 	}
-	for _, column := range []string{"source", "source_id", "actor", "rerun_of", "labels", "steps", "warning", "audit_receipt", "held_by_policy", "tags", "skip_tags", "claim_secret", "actor_type"} {
+	for _, column := range []string{"source", "source_id", "actor", "rerun_of", "labels", "steps", "warning", "audit_receipt", "held_by_policy", "tags", "skip_tags", "claim_secret", "actor_type", "approved_spec_digest"} {
 		if _, err := db.Exec(
 			"ALTER TABLE runs ADD COLUMN " + column + " TEXT NOT NULL DEFAULT ''"); err != nil &&
 			!strings.Contains(err.Error(), "duplicate column name") {
@@ -951,7 +951,7 @@ const runColumns = `id, playbook, inventory, status, exit_code, error, created_a
 	credential_ids, project_id, commit_sha, inventory_id, org_id, queue, tool, command, dry_run,
 	proposed_from, intent, image, pull_credential_id, idempotency_key, timeout, notifications,
 	source, source_id, actor, rerun_of, labels, warning, audit_receipt, held_by_policy,
-	tags, skip_tags, verbosity, forks, diff_mode, claim_secret, actor_type`
+	tags, skip_tags, verbosity, forks, diff_mode, claim_secret, actor_type, approved_spec_digest`
 
 // hostSummaryColumns is the shared run_host_summary column list, in the one order the insert binds
 // its placeholders and every read scans, so a column cannot land on one path and be missed on
@@ -987,8 +987,8 @@ INSERT INTO runs
 	 project_id, commit_sha, inventory_id, org_id, queue, tool, command, dry_run, proposed_from, intent,
 	 image, pull_credential_id, idempotency_key, timeout, notifications,
 	 source, source_id, actor, rerun_of, labels, warning, audit_receipt, held_by_policy,
-	 tags, skip_tags, verbosity, forks, diff_mode, claim_secret, actor_type)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	 tags, skip_tags, verbosity, forks, diff_mode, claim_secret, actor_type, approved_spec_digest)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
 	playbook=excluded.playbook, inventory=excluded.inventory, status=excluded.status,
 	exit_code=excluded.exit_code, error=excluded.error, created_at=excluded.created_at,
@@ -1011,7 +1011,8 @@ ON CONFLICT(id) DO UPDATE SET
 	warning=excluded.warning, audit_receipt=excluded.audit_receipt,
 	held_by_policy=excluded.held_by_policy, tags=excluded.tags, skip_tags=excluded.skip_tags,
 	verbosity=excluded.verbosity, forks=excluded.forks, diff_mode=excluded.diff_mode,
-	claim_secret=excluded.claim_secret, actor_type=excluded.actor_type`
+	claim_secret=excluded.claim_secret, actor_type=excluded.actor_type,
+	approved_spec_digest=excluded.approved_spec_digest`
 	_, err := s.db.ExecContext(ctx, q,
 		r.ID, r.Playbook, r.Inventory, string(r.Status), sqlutil.NullInt(r.ExitCode), r.Error,
 		sqlutil.FormatTime(r.CreatedAt), sqlutil.NullTime(r.StartedAt), sqlutil.NullTime(r.EndedAt),
@@ -1023,7 +1024,7 @@ ON CONFLICT(id) DO UPDATE SET
 		r.Image, r.PullCredentialID, r.IdempotencyKey, r.Timeout, marshalNotifications(r.Notifications),
 		r.Source, r.SourceID, r.Actor, r.RerunOf, marshalLabels(r.Labels), r.Warning, r.AuditReceipt,
 		r.HeldByPolicy, sqlutil.JoinIDs(r.Tags), sqlutil.JoinIDs(r.SkipTags), r.Verbosity, r.Forks,
-		sqlutil.BoolToInt(r.DiffMode), r.ClaimSecret, r.ActorType,
+		sqlutil.BoolToInt(r.DiffMode), r.ClaimSecret, r.ActorType, r.ApprovedSpecDigest,
 	)
 	if err != nil {
 		if r.IdempotencyKey != "" && isKeyConflict(err) {
@@ -2020,7 +2021,7 @@ func scanRun(s scanner) (*run.Run, error) {
 		&r.Image, &r.PullCredentialID, &r.IdempotencyKey, &r.Timeout, &notifs,
 		&r.Source, &r.SourceID, &r.Actor, &r.RerunOf, &labels, &r.Warning, &r.AuditReceipt,
 		&r.HeldByPolicy, &tags, &skipTags, &r.Verbosity, &r.Forks, &diffMode,
-		&r.ClaimSecret, &r.ActorType); err != nil {
+		&r.ClaimSecret, &r.ActorType, &r.ApprovedSpecDigest); err != nil {
 		return nil, err
 	}
 	r.CancelRequested = cancelI != 0
@@ -2388,6 +2389,24 @@ func (s *store) TransitionStatus(ctx context.Context, id string, from, to run.St
 		return false, fmt.Errorf("transition status: %w", err)
 	}
 	return n > 0, nil
+}
+
+// StampApprovedSpec records the spec digest an approver decided on, in a narrow write that cannot
+// clobber a concurrent claim or cancel.
+func (s *store) StampApprovedSpec(ctx context.Context, id, digest string) error {
+	res, err := s.db.ExecContext(ctx,
+		"UPDATE runs SET approved_spec_digest=? WHERE id=?", digest, id)
+	if err != nil {
+		return fmt.Errorf("stamp approved spec: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("stamp approved spec: %w", err)
+	}
+	if n == 0 {
+		return run.ErrNotFound
+	}
+	return nil
 }
 
 // FinalizeRunning moves a running run to its terminal status and records the exit code, failure

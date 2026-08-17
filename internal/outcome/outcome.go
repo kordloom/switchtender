@@ -1,6 +1,8 @@
 // Package outcome commits a finished run's outcome to the audit chain. It is the single definition
 // both the in-process dispatcher and the relay control node call, so a run has exactly one outcome
 // entry in the same shape however it executed, and a receipt drawn from either verifies the same way.
+// It also defines the run's canonical spec record and the decision entry an approval commits, since
+// those are the same kind of thing: a canonical body a chain entry commits and a verifier rebuilds.
 package outcome
 
 import (
@@ -47,6 +49,16 @@ type Record struct {
 	// LogSHA256 is the SHA-256 of the run's captured log bytes in order, binding the output an
 	// operator reads to this record.
 	LogSHA256 string `json:"log_sha256"`
+	// SpecDigest is the digest of the run's spec as it stood when the run finished. With the same
+	// digest in the decision entry, the chain proves the spec an approver decided on is the spec
+	// that executed, not merely that a run with the same id did.
+	SpecDigest string `json:"spec_digest,omitempty"`
+	// CommitSHA is the exact project commit the run executed, stamped after the project sync, so
+	// the record names the content that ran rather than a branch that has since moved.
+	CommitSHA string `json:"commit_sha,omitempty"`
+	// DryRun reports the run executed in its tool's no-change mode, so a preview cannot later be
+	// presented as the change itself.
+	DryRun bool `json:"dry_run,omitempty"`
 	// Hosts are the per-host outcomes, sorted by host.
 	Hosts []RecordHost `json:"hosts,omitempty"`
 	// Tasks are the per-task durations, sorted by task.
@@ -117,10 +129,15 @@ func Body(ctx context.Context, store run.Store, r *run.Run) ([]byte, error) {
 		return nil, err
 	}
 
+	specDigest, err := SpecDigest(r)
+	if err != nil {
+		return nil, err
+	}
 	out := Record{
 		RunID: r.ID, Status: string(r.Status), ExitCode: r.ExitCode,
 		Tool: r.Tool, Playbook: r.Playbook, Inventory: r.Inventory, Image: r.Image,
 		StartedAt: r.StartedAt, EndedAt: r.EndedAt, LogSHA256: logSHA,
+		SpecDigest: specDigest, CommitSHA: r.CommitSHA, DryRun: r.DryRun,
 	}
 	for _, h := range hosts {
 		out.Hosts = append(out.Hosts, RecordHost{

@@ -39,10 +39,17 @@ func TestReceiptProduceAndVerifyOffline(t *testing.T) {
 	// its outcome is committed. Log append is fenced to a non-terminal run, so the order matters.
 	r := &run.Run{
 		ID: "run_demo", Playbook: "site.yml", Inventory: "prod", Status: run.StatusRunning,
-		Actor: "alice", AuditReceipt: audit.Receipt(creation), CreatedAt: at,
+		Actor: "alice", ActorType: "agent", AuditReceipt: audit.Receipt(creation), CreatedAt: at,
+		ExtraVars: map[string]any{"service": "api"},
 	}
 	if err := store.Runs().Save(ctx, r); err != nil {
 		t.Fatalf("Save(running) error = %v", err)
+	}
+	// The approval decision lands on the chain between creation and outcome, binding the approver
+	// to the spec digest, exactly as the dispatcher commits it.
+	if _, err := outcome.CommitDecision(ctx, store.Audits(), r, "approved",
+		"approver-pat", "session"); err != nil {
+		t.Fatalf("CommitDecision() error = %v", err)
 	}
 	if err := store.Runs().AppendLog(ctx, "run_demo", []byte("PLAY RECAP\nweb01 : ok=5 changed=1\n")); err != nil {
 		t.Fatalf("AppendLog() error = %v", err)
@@ -93,7 +100,36 @@ func TestReceiptProduceAndVerifyOffline(t *testing.T) {
 			t.Errorf("verify output missing %q:\n%s", want, buf.String())
 		}
 	}
+	// It also shows who decided and proves the approved, executed, and disclosed spec digests are
+	// the same change.
+	for _, want := range []string{"decisions    OK", "approved by approver-pat (session)", "spec         OK"} {
+		if !bytes.Contains(buf.Bytes(), []byte(want)) {
+			t.Errorf("verify output missing %q:\n%s", want, buf.String())
+		}
+	}
 	t.Logf("switchtender verify run.receipt:\n%s", buf.String())
+
+	// A spec edited after the decision produces a receipt whose rebuilt decision body no longer
+	// matches the digest the chain committed, and verify refuses it. This is the exact tamper the
+	// binding exists to surface.
+	tampered, err := openBundle(db)
+	if err != nil {
+		t.Fatalf("openBundle(tamper) error = %v", err)
+	}
+	r.ExtraVars = map[string]any{"service": "api", "limit_override": "all"}
+	r.Status = run.StatusSucceeded
+	if err := tampered.Runs().Save(ctx, r); err != nil {
+		t.Fatalf("Save(tampered) error = %v", err)
+	}
+	_ = tampered.Close()
+	tamperedOut := filepath.Join(dir, "tampered.receipt")
+	receiptRunDB, receiptRunOut = db, tamperedOut
+	if err := runReceipt(testCommand(), []string{"run_demo"}); err != nil {
+		t.Fatalf("runReceipt(tampered) error = %v", err)
+	}
+	if err := runVerify(testCommand(), []string{tamperedOut}); err == nil {
+		t.Error("runVerify() accepted a receipt whose spec changed after the decision")
+	}
 
 	// A doctored receipt must fail.
 	signed, err := os.ReadFile(out)

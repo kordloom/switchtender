@@ -50,13 +50,44 @@ type BundleReport struct {
 	// OutcomeBody is the disclosed outcome JSON, meaningful only when OutcomeDigestOK. A caller reads
 	// what the run did from it after this report confirms it matches the commitment.
 	OutcomeBody []byte
+	// DecisionsPresent counts the approval decisions the receipt disclosed.
+	DecisionsPresent int
+	// DecisionsOK reports every disclosed decision matches the digest its chain entry committed,
+	// true when none are disclosed. A decision the chain does not back fails the receipt.
+	DecisionsOK bool
+	// Decisions are the digest-verified decisions: who decided, what they decided, and the spec
+	// digest their decision bound to. Meaningful when DecisionsOK.
+	Decisions []DisclosedDecision
+	// SpecPresent reports the receipt disclosed the run's redacted spec.
+	SpecPresent bool
+	// SpecConsistent reports every possible comparison among the disclosed spec's digest, the spec
+	// digest the outcome record committed, and the digest each decision bound to, agreed. True when
+	// there was nothing to compare. A disagreement means the spec that executed is not the spec
+	// that was approved, which is exactly what this receipt exists to rule out.
+	SpecConsistent bool
+	// SpecBody is the disclosed redacted spec JSON, meaningful when SpecConsistent.
+	SpecBody []byte
+}
+
+// DisclosedDecision is one digest-verified approval decision read back from a receipt.
+type DisclosedDecision struct {
+	// Actor is who decided, as the chain committed it.
+	Actor string
+	// ActorType is how the decider authenticated.
+	ActorType string
+	// Verdict is approved or rejected.
+	Verdict string
+	// SpecDigest is the digest of the spec the decision bound to.
+	SpecDigest string
 }
 
 // OK reports whether every check passed, the single question a verify command answers yes or no. A
-// disclosed outcome that does not match its commitment fails the whole receipt: it is a claim about
-// what the run did that the chain does not back.
+// disclosed outcome or decision that does not match its commitment fails the whole receipt: it is a
+// claim the chain does not back. A spec inconsistency fails it too, because then the approval and
+// the execution the receipt ties together are not about the same change.
 func (r *BundleReport) OK() bool {
-	return r.SignatureOK && r.ChainOK && r.AnchorsOK && (!r.OutcomePresent || r.OutcomeDigestOK)
+	return r.SignatureOK && r.ChainOK && r.AnchorsOK &&
+		(!r.OutcomePresent || r.OutcomeDigestOK) && r.DecisionsOK && r.SpecConsistent
 }
 
 // VerifyBundle checks a signed bundle with no store and no network: it confirms the producer's
@@ -123,7 +154,92 @@ func VerifyBundle(signed []byte, pinnedKeyID string) (*BundleReport, error) {
 	// forged link poison both answers at once, so anchors are only meaningful once the chain holds.
 	rep.AnchorsOK = rep.ChainOK && verifyBundleAnchors(&b)
 	verifyOutcomeDisclosure(b.Claims, rep)
+	verifyDecisionDisclosures(b.Claims, rep)
+	verifySpecConsistency(b.Claims, rep)
 	return rep, nil
+}
+
+// verifyDecisionDisclosures checks every disclosed approval decision against the digest its chain
+// entry committed, and collects the verified ones so a reader learns who decided what. A receipt
+// with no disclosed decisions leaves DecisionsOK true and is judged on its chain alone.
+func verifyDecisionDisclosures(claims []BundleClaim, rep *BundleReport) {
+	rep.DecisionsOK = true
+	for _, c := range claims {
+		method, _ := c.Payload["method"].(string)
+		if method != MethodDecision {
+			continue
+		}
+		bodyVal, hasBody := c.Payload["decision_body"]
+		digest, _ := c.Payload["content_digest"].(string)
+		if !hasBody || digest == "" {
+			continue
+		}
+		rep.DecisionsPresent++
+		nonce, _ := c.Payload["decision_nonce"].(string)
+		body, err := json.Marshal(bodyVal)
+		if err != nil || !VerifyContentDigest(digest, nonce, body) {
+			rep.DecisionsOK = false
+			continue
+		}
+		var rec struct {
+			Verdict    string `json:"verdict"`
+			SpecDigest string `json:"spec_digest"`
+		}
+		if err := json.Unmarshal(body, &rec); err != nil {
+			rep.DecisionsOK = false
+			continue
+		}
+		actor, _ := c.Payload["actor"].(string)
+		actorType, _ := c.Payload["actor_type"].(string)
+		rep.Decisions = append(rep.Decisions, DisclosedDecision{
+			Actor: actor, ActorType: actorType, Verdict: rec.Verdict, SpecDigest: rec.SpecDigest,
+		})
+	}
+}
+
+// verifySpecConsistency ties the receipt's three statements about the run's spec to one another:
+// the disclosed spec's recomputed digest, the spec digest the outcome record committed, and the
+// digest each verified decision bound to. Every comparison that is possible must agree; a receipt
+// missing one side simply has less to compare, which is reported through the Present fields rather
+// than counted as a failure.
+func verifySpecConsistency(claims []BundleClaim, rep *BundleReport) {
+	rep.SpecConsistent = true
+	var outcomeSpec string
+	if rep.OutcomePresent && rep.OutcomeDigestOK {
+		var rec struct {
+			SpecDigest string `json:"spec_digest"`
+		}
+		if json.Unmarshal(rep.OutcomeBody, &rec) == nil {
+			outcomeSpec = rec.SpecDigest
+		}
+	}
+	var disclosed string
+	for _, c := range claims {
+		specVal, has := c.Payload["spec_body"]
+		if !has {
+			continue
+		}
+		body, err := json.Marshal(specVal)
+		if err != nil {
+			rep.SpecConsistent = false
+			return
+		}
+		rep.SpecPresent = true
+		rep.SpecBody = body
+		disclosed = UnkeyedDigestOf(body)
+		break
+	}
+	if disclosed != "" && outcomeSpec != "" && disclosed != outcomeSpec {
+		rep.SpecConsistent = false
+	}
+	for _, d := range rep.Decisions {
+		if disclosed != "" && d.SpecDigest != disclosed {
+			rep.SpecConsistent = false
+		}
+		if outcomeSpec != "" && d.SpecDigest != outcomeSpec {
+			rep.SpecConsistent = false
+		}
+	}
 }
 
 // verifyOutcomeDisclosure checks a receipt that discloses a run's outcome. The outcome claim carries

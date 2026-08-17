@@ -1183,7 +1183,7 @@ func approveRunHandler(approver Approver, store run.Store, authz *authorizer,
 				return
 			}
 		}
-		created, err := approver.Approve(r.Context(), r.PathValue("id"))
+		created, err := approver.Approve(r.Context(), r.PathValue("id"), actorName(r), actorType(r))
 		switch {
 		case errors.Is(err, run.ErrNotFound):
 			respondError(w, log, http.StatusNotFound, "run not found")
@@ -1239,7 +1239,7 @@ func rejectRunHandler(approver Approver, store run.Store, authz *authorizer,
 				return
 			}
 		}
-		created, err := approver.Reject(r.Context(), r.PathValue("id"), req.Reason)
+		created, err := approver.Reject(r.Context(), r.PathValue("id"), req.Reason, actorName(r), actorType(r))
 		switch {
 		case errors.Is(err, run.ErrNotFound):
 			respondError(w, log, http.StatusNotFound, "run not found")

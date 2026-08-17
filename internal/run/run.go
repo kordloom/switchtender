@@ -245,6 +245,11 @@ type Run struct {
 	// run to the record of who asked for it. Empty for a run created outside a recorded request,
 	// such as a seeded demo run.
 	AuditReceipt string `json:"audit_receipt,omitempty"`
+	// ApprovedSpecDigest is the digest of the run's spec at the moment an approver decided on it,
+	// stamped when the decision chain entry commits the same value. The executor recomputes the
+	// spec digest before running and refuses a mismatch, so an approval releases exactly the change
+	// that was decided on. Empty for a run that never needed a decision.
+	ApprovedSpecDigest string `json:"approved_spec_digest,omitempty"`
 	// Intent is the plain-language request an AI turned into this proposed run. A run carrying it
 	// was proposed from a description and is born held for approval, so an approver can judge the
 	// generated run against what was asked before anything executes.

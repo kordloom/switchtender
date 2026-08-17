@@ -124,6 +124,12 @@ func (c *Client) TransitionStatus(context.Context, string, run.Status, run.Statu
 	return false, ErrUnsupported
 }
 
+// StampApprovedSpec is a control-node write and is not served to workers: decisions are made where
+// the approver is, never on the far side of the relay.
+func (c *Client) StampApprovedSpec(context.Context, string, string) error {
+	return ErrUnsupported
+}
+
 // FinalizeRunning is a control-node write and is not served to workers. A relay worker reports how
 // a run ended through Save, and the control node applies that report to the run it holds.
 func (c *Client) FinalizeRunning(context.Context, string, run.Finalization) (bool, error) {

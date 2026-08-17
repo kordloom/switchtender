@@ -77,6 +77,18 @@ func runVerify(cmd *cobra.Command, args []string) error {
 			printOutcome(out, rep.OutcomeBody)
 		}
 	}
+	if rep.DecisionsPresent > 0 {
+		fmt.Fprintf(out, "decisions    %s (%d, each matches what the chain committed)\n",
+			mark(rep.DecisionsOK), rep.DecisionsPresent)
+		for _, d := range rep.Decisions {
+			fmt.Fprintf(out, "  %s by %s (%s), binding spec %s\n",
+				d.Verdict, d.Actor, d.ActorType, d.SpecDigest)
+		}
+	}
+	if rep.SpecPresent || rep.DecisionsPresent > 0 {
+		fmt.Fprintf(out, "spec         %s (approved, executed, and disclosed digests agree)\n",
+			mark(rep.SpecConsistent))
+	}
 
 	if !rep.OK() {
 		fmt.Fprintln(out, "\nNOT VERIFIED")

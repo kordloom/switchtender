@@ -165,6 +165,10 @@ type Store interface {
 	// whether it changed a row. It changes nothing and returns false when the run is missing or is
 	// not in the from status, so two callers racing to approve or reject the same run cannot both win.
 	TransitionStatus(ctx context.Context, id string, from, to Status) (bool, error)
+	// StampApprovedSpec records the spec digest an approver decided on, in a narrow write that
+	// touches nothing else, so it cannot clobber a concurrent claim or cancel the way a full Save
+	// from a stale snapshot would.
+	StampApprovedSpec(ctx context.Context, id, digest string) error
 	// FinalizeRunning atomically moves a running run to its terminal status and records the fields
 	// that explain how it ended in the same write, reporting whether it changed a row. It changes
 	// nothing and returns false when the run is missing or is no longer running, so an executor
@@ -864,6 +868,18 @@ func (m *memStore) TransitionStatus(_ context.Context, id string, from, to Statu
 	}
 	r.Status = to
 	return true, nil
+}
+
+// StampApprovedSpec records the spec digest an approver decided on, touching nothing else.
+func (m *memStore) StampApprovedSpec(_ context.Context, id, digest string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r, ok := m.runs[id]
+	if !ok {
+		return ErrNotFound
+	}
+	r.ApprovedSpecDigest = digest
+	return nil
 }
 
 // FinalizeRunning moves a running run to its terminal status and records the exit code, failure

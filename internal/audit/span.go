@@ -27,6 +27,10 @@ const MethodCLI = "CLI"
 // change, counted with the HTTP write methods.
 const MethodRun = "RUN"
 
+// MethodDecision is the method recorded for the entry an approval decision commits, binding the
+// deciding actor to a digest of the exact spec decided on, not just to a run id.
+const MethodDecision = "DECISION"
+
 // SpanPath encodes one beat's payload into the entry path. The encoding is part of what the
 // chain hash commits to, so it is fixed: beat in the path, count and cadence as ordered query
 // parameters, no escaping needed because every value is a decimal integer.

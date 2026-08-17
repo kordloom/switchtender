@@ -53,7 +53,7 @@ func TestRunApprovalGate(t *testing.T) {
 	}
 
 	// Approval releases it to run.
-	approved, err := d.Approve(context.Background(), created.ID)
+	approved, err := d.Approve(context.Background(), created.ID, "approver-pat", "session")
 	if err != nil {
 		t.Fatalf("Approve() error = %v", err)
 	}
@@ -80,7 +80,7 @@ func TestRunReject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	rejected, err := d.Reject(context.Background(), created.ID, "not allowed on prod")
+	rejected, err := d.Reject(context.Background(), created.ID, "not allowed on prod", "approver-pat", "session")
 	if err != nil {
 		t.Fatalf("Reject() error = %v", err)
 	}
@@ -112,10 +112,10 @@ func TestApproveRejectRequireHeld(t *testing.T) {
 	}
 	waitTerminal(t, store, created.ID)
 
-	if _, err := d.Approve(context.Background(), created.ID); !errors.Is(err, ErrNotPendingApproval) {
+	if _, err := d.Approve(context.Background(), created.ID, "approver-pat", "session"); !errors.Is(err, ErrNotPendingApproval) {
 		t.Errorf("Approve on a non-held run: err = %v, want ErrNotPendingApproval", err)
 	}
-	if _, err := d.Reject(context.Background(), created.ID, ""); !errors.Is(err, ErrNotPendingApproval) {
+	if _, err := d.Reject(context.Background(), created.ID, "", "approver-pat", "session"); !errors.Is(err, ErrNotPendingApproval) {
 		t.Errorf("Reject on a non-held run: err = %v, want ErrNotPendingApproval", err)
 	}
 }

@@ -11,6 +11,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/outcome"
+	"github.com/kordloom/switchtender/internal/run"
 )
 
 var (
@@ -133,12 +134,16 @@ func runReceipt(cmd *cobra.Command, args []string) error {
 				if doc.Claims[i].Chain.Seq == outcomeSeq {
 					doc.Claims[i].Payload["outcome_body"] = bodyObj
 					doc.Claims[i].Payload["outcome_nonce"] = outcomeEntry.Nonce
+					discloseSpec(&doc.Claims[i], r)
 				}
 			}
 		}
 	} else {
 		fmt.Fprintf(os.Stderr, "Could not rebuild the outcome to disclose it: %v. The receipt still "+
 			"proves the chain, but verify will not show what the run did.\n", berr)
+	}
+	if !receiptSparse {
+		discloseDecisions(doc, entries, r)
 	}
 
 	// Anchors that fix a position in the receipt's range are attached before signing, so a verifier
@@ -193,6 +198,48 @@ func runReceipt(cmd *cobra.Command, args []string) error {
 			"Publish this fingerprint so a verifier can pin it:\n  %s\n",
 		runID, receiptRunOut, len(segment), receiptRunOut, id.KeyID())
 	return nil
+}
+
+// discloseSpec attaches the run's redacted spec to the outcome claim, so a verifier can read what
+// the digests commit to and recompute them. The spec is redacted before it leaves the outcome
+// package, so this never hands out bytes the redaction did not pass over.
+func discloseSpec(claim *audit.BundleClaim, r *run.Run) {
+	spec, err := outcome.Spec(r)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Could not rebuild the spec to disclose it: %v.\n", err)
+		return
+	}
+	var specObj any
+	if json.Unmarshal(spec, &specObj) == nil {
+		claim.Payload["spec_body"] = specObj
+	}
+}
+
+// discloseDecisions attaches each approval decision's body and nonce to its claim, the same way the
+// outcome is disclosed, so verify can show who approved exactly what and prove the chain committed
+// it. The bodies are rebuilt from the run, so a row that changed since the decision produces a body
+// the committed digest refuses, which is the tamper this disclosure exists to surface.
+func discloseDecisions(doc *audit.Bundle, entries []*audit.Entry, r *run.Run) {
+	prefix := "/runs/" + r.ID + "/decision/"
+	for _, e := range entries {
+		if e.Method != audit.MethodDecision || !strings.HasPrefix(e.Path, prefix) {
+			continue
+		}
+		body, _, err := outcome.DecisionBody(r, strings.TrimPrefix(e.Path, prefix))
+		if err != nil {
+			continue
+		}
+		var bodyObj any
+		if json.Unmarshal(body, &bodyObj) != nil {
+			continue
+		}
+		for i := range doc.Claims {
+			if doc.Claims[i].Chain.Seq == e.Seq {
+				doc.Claims[i].Payload["decision_body"] = bodyObj
+				doc.Claims[i].Payload["decision_nonce"] = e.Nonce
+			}
+		}
+	}
 }
 
 // rangeReceipt builds the contiguous receipt: the chain segment from the request that created the run
