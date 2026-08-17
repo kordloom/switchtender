@@ -145,6 +145,22 @@ func ProposeApplyFor(ctx context.Context, store run.Store, policies []*policy.Po
 		IdempotencyKey: applyKeyFor(plan.ID),
 	}
 	run.ApplyOptions(proposal, applyOptions(plan, policies, destroys, read))
+
+	// The apply faces the rules every other submission faces. This path wrote straight to the store, so
+	// a deny rule never refused it, a blanket approval rule never held it, and the rule set in force was
+	// never recorded: the same install refused the apply when the control node claimed the plan and ran
+	// it when a worker did. The plan-content threshold applyOptions weighs is one rule among them, not
+	// the only one.
+	stampPolicySet(proposal, policies)
+	if p := policy.Denying(policies, proposal); p != nil {
+		return nil, fmt.Errorf("%w: policy %q refuses this apply", ErrPolicyDenied, p.Label())
+	}
+	if p := policy.Requiring(policies, proposal); p != nil {
+		proposal.Status = run.StatusPendingApproval
+		proposal.HeldByPolicy = p.Label()
+		proposal.RequireDistinctApprover = p.RequireDistinctApprover
+	}
+
 	err := store.Save(ctx, proposal)
 	if errors.Is(err, run.ErrDuplicateKey) {
 		existing, ferr := store.ByIdempotencyKey(ctx, proposal.IdempotencyKey)

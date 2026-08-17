@@ -847,6 +847,12 @@ func (s *relayServer) proposeApply(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	proposal, err := dispatch.ProposeApplyFor(r.Context(), s.store, policies, plan, body.Destroys, read)
+	if errors.Is(err, dispatch.ErrPolicyDenied) {
+		// A rule refused the apply. That is an answer, not a fault, and the worker records it on the
+		// plan run, so the reason travels rather than becoming "propose apply failed".
+		writeErr(w, http.StatusConflict, err.Error())
+		return
+	}
 	if err != nil {
 		s.internal(w, "propose apply", err)
 		return
