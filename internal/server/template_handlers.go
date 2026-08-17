@@ -101,10 +101,8 @@ func templateToolError(req createTemplateRequest) string {
 	if req.Name == "" {
 		return "name is required"
 	}
-	for _, n := range req.Notifications {
-		if err := run.ValidateNotifyTarget(n); err != nil {
-			return err.Error()
-		}
+	if err := run.ValidateNotifyTargets(req.Notifications); err != nil {
+		return err.Error()
 	}
 	// A saved workflow is a pipeline graph, not a single-tool launch, so it is validated on its own
 	// terms: it carries no top-level tool input or Ansible controls, since every step names its own,

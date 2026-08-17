@@ -18,7 +18,17 @@ func (d *Dispatcher) notifyRunTargets(r *run.Run) {
 	}
 	byKind := map[string][]string{}
 	var richer []run.NotifyTarget
-	for _, t := range r.Notifications {
+	// The list is bounded where it is written, and bounded again here so a run stored before that limit
+	// existed cannot still fan out into a goroutine and a socket per target. What is dropped is named,
+	// because silently delivering to some of a list reads as delivering to all of it.
+	targets := r.Notifications
+	if len(targets) > run.MaxNotifyTargets {
+		d.log.Warn("dispatch: notification targets truncated to the limit",
+			zap.String("run_id", r.ID), zap.Int("carried", len(targets)),
+			zap.Int("delivered", run.MaxNotifyTargets))
+		targets = targets[:run.MaxNotifyTargets]
+	}
+	for _, t := range targets {
 		if !run.ValidNotifyKind(t.Kind) {
 			continue
 		}

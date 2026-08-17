@@ -609,11 +609,9 @@ func createRunHandler(submitter Submitter, authz *authorizer, log *zap.Logger) h
 		if req.Timeout > 0 {
 			opts = append(opts, run.WithTimeout(req.Timeout))
 		}
-		for _, t := range req.Notifications {
-			if err := run.ValidateNotifyTarget(t); err != nil {
-				respondError(w, log, http.StatusBadRequest, err.Error())
-				return
-			}
+		if err := run.ValidateNotifyTargets(req.Notifications); err != nil {
+			respondError(w, log, http.StatusBadRequest, err.Error())
+			return
 		}
 		if len(req.Notifications) > 0 {
 			opts = append(opts, run.WithNotifications(req.Notifications))
