@@ -543,14 +543,12 @@ func createRunHandler(submitter Submitter, authz *authorizer, log *zap.Logger) h
 		panic("server: createRunHandler: Submitter required")
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Not decodeStrict yet, and the exemption in TestEveryHandlerDecodesStrictly says why:
-		// createRunRequest declares no extra_vars, so a submission that carries them, which the
-		// plugin tool contract expects, would be refused outright instead of merely having them
-		// dropped. The field lands with the run submission DTOs, and this decode turns strict with
-		// it. Until then a misspelled control here is still accepted and silently ignored.
+		// Strict, like every other mutating endpoint. The controls here are the safety controls, so a
+		// key this endpoint does not recognize is refused rather than dropped: a submission asking for
+		// dry_run, require_approval, or limit by a name one character off was accepted, executed
+		// without it, and answered with a body indistinguishable from the run that was asked for.
 		var req createRunRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			respondError(w, log, http.StatusBadRequest, badBodyMessage)
+		if !decodeStrict(w, log, r.Body, &req) {
 			return
 		}
 		if !run.ValidTool(req.Tool) {

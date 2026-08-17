@@ -340,10 +340,7 @@ func responseError(t *testing.T, rec *httptest.ResponseRecorder) string {
 // misspelled control silently, so it stays only as long as the reason does. A body whose shape
 // belongs to somebody else is not exempted here; it goes through decodeForeign, which the guard
 // recognizes by name.
-var rawJSONExemptHandlers = map[string]string{
-	"createRunHandler": "createRunRequest declares no extra_vars, which the plugin tool contract " +
-		"sends, so strict decoding would refuse a valid submission. Convert with that field.",
-}
+var rawJSONExemptHandlers = map[string]string{}
 
 // TestEveryHandlerDecodesStrictly reads the handler sources and fails on any request body decoded
 // without the strict rule. It scans source rather than driving each endpoint because the defect it
