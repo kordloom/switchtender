@@ -40,6 +40,9 @@ const (
 	// bareVictimCommand is the inline script of the objectless victim run, a distinctive string so a
 	// test can prove it did or did not leak into a response body.
 	bareVictimCommand = "rm -rf /victim/data # VICTIM_SECRET_COMMAND"
+	// victimCheckPlaybook is the inline playbook of the objectless victim drift check, distinctive for
+	// the same reason.
+	victimCheckPlaybook = "/srv/victim/VICTIM_SECRET_PLAYBOOK.yml"
 )
 
 // recordingRetrier is a Retrier that records which runs a relaunch reached, so a test can tell a
@@ -127,6 +130,9 @@ type wiringFixture struct {
 	Sources invsource.Store
 	// Retrier records which runs a relaunch reached.
 	Retrier *recordingRetrier
+	// Submitter records what a route asked to run, so a case can tell a refused request from one
+	// that quietly proposed a change against somebody else's hosts.
+	Submitter *fakeSubmitter
 }
 
 // newWiringFixture seeds two tenants and returns a server serving them under strict grants.
@@ -240,7 +246,8 @@ func newWiringFixture(t *testing.T) *wiringFixture {
 	explainer := ai.ProviderFunc(func(_ context.Context, _, _ string) (string, error) {
 		return "an explanation", nil
 	})
-	srv := New(runs, &fakeSubmitter{}, zap.NewNop(),
+	submitter := &fakeSubmitter{run: &run.Run{ID: "run_proposed", Status: run.StatusPendingApproval}}
+	srv := New(runs, submitter, zap.NewNop(),
 		WithGrants(grants, true), WithOrgs(orgs), WithProjects(projects),
 		WithInventories(inventories), WithTemplates(templates), WithSchedules(schedules),
 		WithInventorySources(sources, nil), WithAudit(audit.NewMemStore()),
@@ -249,7 +256,7 @@ func newWiringFixture(t *testing.T) *wiringFixture {
 
 	return &wiringFixture{
 		Handler: srv.Handler(), Runs: runs, Projects: projects, Inventories: inventories,
-		Schedules: schedules, Sources: sources, Retrier: retrier,
+		Schedules: schedules, Sources: sources, Retrier: retrier, Submitter: submitter,
 	}
 }
 

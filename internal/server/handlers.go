@@ -287,7 +287,7 @@ func driftHandler(store run.Store, authz *authorizer, log *zap.Logger) http.Hand
 		panic("server: driftHandler: Store required")
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
-		_, anyReadable, ferr := derivedReadFilter(r.Context(), authz, store)
+		keep, _, ferr := derivedReadFilter(r.Context(), authz, store)
 		if ferr != nil {
 			log.Error("server: read filter: " + ferr.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not read runs")
@@ -299,12 +299,15 @@ func driftHandler(store run.Store, authz *authorizer, log *zap.Logger) http.Hand
 			respondError(w, log, http.StatusInternalServerError, "could not compute drift status")
 			return
 		}
-		// Drift rows name a host and the tasks that keep changing on it, with no run id to check
-		// against, so the whole view is withheld from a caller who can read no runs at all. Showing
-		// it would be a summary of work they are not allowed to know happened.
-		visible := hosts
-		if !anyReadable {
-			visible = nil
+		// Each drift row names the check run that observed it, so it is kept only when that run is
+		// readable, the same rule the run list applies. Deciding it once for the whole view instead
+		// showed every host on the install, and their names and drifting task counts, to any caller
+		// who could read a single run of their own.
+		visible := make([]run.HostDrift, 0, len(hosts))
+		for _, h := range hosts {
+			if keep(h.RunID) {
+				visible = append(visible, h)
+			}
 		}
 		respondJSON(w, log, http.StatusOK,
 			driftResponse{Hosts: visible, Count: len(visible)}, wantsPretty(r))
@@ -371,12 +374,14 @@ func reconcileDriftHandler(store run.Store, submitter Submitter, authz *authoriz
 			return
 		}
 
-		// Authorize every object the proposal will touch, so a reconcile cannot borrow a project,
-		// inventory, or credentials the actor was never granted. The registry credential that pulls
-		// the execution image is one of them, since the reconcile runs inside the check's pinned image.
-		objects := append([]string{check.ProjectID, check.InventoryID, check.PullCredentialID},
-			check.CredentialIDs...)
-		if denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse, objects...)) {
+		// Authorize the check the way every other run operation authorizes a run, so a reconcile
+		// cannot borrow a project, inventory, or credentials the actor was never granted, and a check
+		// that names none of them is still scoped by the organization that ran it. Authorizing the
+		// object list alone allowed the one case that matters most here: an inline playbook against an
+		// inline inventory presents no objects, and authorizing no objects authorizes nothing, so any
+		// operator on the install could turn another organization's drift check into a real change on
+		// that organization's hosts.
+		if denyOnAuthzError(w, log, authz.authorizeRun(r.Context(), grant.AccessUse, check)) {
 			return
 		}
 
