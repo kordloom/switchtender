@@ -425,16 +425,36 @@ const reportBatch = 1000
 // inBatches sends items in slices of at most reportBatch through send, stopping at the first failure.
 // An empty slice sends nothing, so a run that reported nothing makes no call.
 func inBatches[T any](items []T, send func([]T) error) error {
+	return inBatchesPart(items, func(batch []T, _ bool) error { return send(batch) })
+}
+
+// inBatchesPart is inBatches for a report whose endpoint replaces what it stores. It tells send whether
+// a batch continues an earlier one, because a replacing endpoint given several batches keeps only the
+// last: a run wide enough to need two calls had every result but its final partial batch deleted, and
+// the run's committed outcome, its receipt, and every fleet view were built from the remainder.
+func inBatchesPart[T any](items []T, send func(batch []T, continues bool) error) error {
 	for start := 0; start < len(items); start += reportBatch {
 		end := start + reportBatch
 		if end > len(items) {
 			end = len(items)
 		}
-		if err := send(items[start:end]); err != nil {
+		if err := send(items[start:end], start > 0); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// continuePart is the query the transport marks a continuation batch with, so the control node adds it
+// to what the run has already reported instead of replacing that with it.
+const continuePart = "?part=continue"
+
+// partQuery returns the query to append to a report path for one batch.
+func partQuery(continues bool) string {
+	if continues {
+		return continuePart
+	}
+	return ""
 }
 
 // AppendEvents streams structured events to the control node, mapping 404 to ErrNotFound.
@@ -481,8 +501,9 @@ func (t *httpTransport) ProposeApply(ctx context.Context, planID string, destroy
 
 // SaveHostSummary records a run's per-host outcomes on the control node.
 func (t *httpTransport) SaveHostSummary(ctx context.Context, runID string, summaries []run.HostSummary) error {
-	return inBatches(summaries, func(batch []run.HostSummary) error {
-		resp, err := t.sendJSON(ctx, http.MethodPost, runPath(runID, "/host-summary"), batch, t.leaseFor(runID))
+	return inBatchesPart(summaries, func(batch []run.HostSummary, continues bool) error {
+		resp, err := t.sendJSON(ctx, http.MethodPost,
+			runPath(runID, "/host-summary")+partQuery(continues), batch, t.leaseFor(runID))
 		if err != nil {
 			return err
 		}
@@ -505,8 +526,9 @@ func (t *httpTransport) SaveHostFacts(ctx context.Context, runID string, facts [
 
 // SaveTaskSummary records a run's per-task durations on the control node.
 func (t *httpTransport) SaveTaskSummary(ctx context.Context, runID string, summaries []run.TaskSummary) error {
-	return inBatches(summaries, func(batch []run.TaskSummary) error {
-		resp, err := t.sendJSON(ctx, http.MethodPost, runPath(runID, "/task-summary"), batch, t.leaseFor(runID))
+	return inBatchesPart(summaries, func(batch []run.TaskSummary, continues bool) error {
+		resp, err := t.sendJSON(ctx, http.MethodPost,
+			runPath(runID, "/task-summary")+partQuery(continues), batch, t.leaseFor(runID))
 		if err != nil {
 			return err
 		}
