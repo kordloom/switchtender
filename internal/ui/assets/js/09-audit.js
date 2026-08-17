@@ -140,7 +140,11 @@ function markTrailTruncated(shown) {
 
 async function loadAudit() {
 	try {
-		const data = await getJSON("/audit?limit=" + AUDIT_PAGE);
+		// A ?q= arrival is a search, usually a run id from the run page's Audit trail button, so
+		// the page asks for the server's maximum window instead of its display default: a run
+		// older than the default page filtered to an empty table with nothing explaining why.
+		const preset = new URLSearchParams(location.search).get("q");
+		const data = await getJSON("/audit?limit=" + (preset ? 1000 : AUDIT_PAGE));
 		const entries = data.entries || [];
 		if (entries.length === 0) {
 			showEmpty("No audit entries yet. Every change is recorded here.");
@@ -161,7 +165,17 @@ async function loadAudit() {
 		setStatus("");
 		document.querySelector("table.runs").hidden = false;
 		showListControls();
-		if (data.has_more) markTrailTruncated(entries.length);
+		if (data.has_more) {
+			markTrailTruncated(entries.length);
+			if (preset) {
+				const notice = document.getElementById("audit-truncated");
+				if (notice) {
+					notice.textContent += " A search only covers this window, so older entries " +
+						"mentioning \"" + preset + "\" may exist beyond it. A run's receipt " +
+						"(switchtender receipt) carries its own chain entries whole.";
+				}
+			}
+		}
 	} catch (e) {
 		setStatus("Failed to load the audit trail: " + e.message);
 	}
