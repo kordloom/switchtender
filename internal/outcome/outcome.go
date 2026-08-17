@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"math"
 	"sort"
 	"time"
 
@@ -70,8 +71,10 @@ type RecordHost struct {
 type RecordTask struct {
 	// Task is the task name.
 	Task string `json:"task"`
-	// Seconds is the task's summed wall-clock time across its occurrences.
-	Seconds float64 `json:"seconds"`
+	// Milliseconds is the task's summed wall-clock time across its occurrences. The record keeps
+	// integer milliseconds because the LoomSeal JCS profile refuses fractional numbers, so a float
+	// here would make the record unsignable.
+	Milliseconds int64 `json:"ms"`
 }
 
 // Commit records a finished run's outcome as a tamper-evident chain entry, so the chain commits not
@@ -127,7 +130,7 @@ func Body(ctx context.Context, store run.Store, r *run.Run) ([]byte, error) {
 	}
 	sort.Slice(out.Hosts, func(i, j int) bool { return out.Hosts[i].Host < out.Hosts[j].Host })
 	for _, t := range tasks {
-		out.Tasks = append(out.Tasks, RecordTask{Task: t.Task, Seconds: t.Seconds})
+		out.Tasks = append(out.Tasks, RecordTask{Task: t.Task, Milliseconds: int64(math.Round(t.Seconds * 1000))})
 	}
 	sort.Slice(out.Tasks, func(i, j int) bool { return out.Tasks[i].Task < out.Tasks[j].Task })
 

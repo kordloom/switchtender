@@ -95,7 +95,7 @@ func TestRelayRunRecordsHostsInOutcome(t *testing.T) {
 	if diff := cmp.Diff(want, record.Hosts, cmpopts.EquateEmpty()); diff != "" {
 		t.Errorf("committed outcome hosts mismatch (-want +got):\n%s", diff)
 	}
-	wantTasks := []outcome.RecordTask{{Task: "install", Seconds: 2}}
+	wantTasks := []outcome.RecordTask{{Task: "install", Milliseconds: 2000}}
 	if diff := cmp.Diff(wantTasks, record.Tasks, cmpopts.EquateEmpty()); diff != "" {
 		t.Errorf("committed outcome tasks mismatch (-want +got):\n%s", diff)
 	}

@@ -51,6 +51,12 @@ func TestReceiptProduceAndVerifyOffline(t *testing.T) {
 		[]run.HostSummary{{Host: "web01", OK: 5, Changed: 1, Worst: "changed"}}); err != nil {
 		t.Fatalf("SaveHostSummary() error = %v", err)
 	}
+	// A fractional task duration is what every real run records, and it once made the range
+	// receipt unsignable under the integer-only JCS profile.
+	if err := store.Runs().SaveTaskSummary(ctx, "run_demo",
+		[]run.TaskSummary{{Task: "say hello", Seconds: 0.013500213}}); err != nil {
+		t.Fatalf("SaveTaskSummary() error = %v", err)
+	}
 	r.Status = run.StatusSucceeded
 	if err := store.Runs().Save(ctx, r); err != nil {
 		t.Fatalf("Save(succeeded) error = %v", err)
