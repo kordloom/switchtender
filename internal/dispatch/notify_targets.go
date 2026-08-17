@@ -67,11 +67,10 @@ func (d *Dispatcher) notifyRunTargets(r *run.Run) {
 		d.deliverSlackFormat(urls, "rocketchat", r)
 	}
 	if urls := byKind[run.NotifyWebhook]; len(urls) > 0 {
-		// Redact extra vars: survey answers and template vars can carry secrets and a webhook is
-		// external, exactly as the server-wide webhook channel does.
-		redacted := *r
-		redacted.ExtraVars = nil
-		redacted.Notifications = nil
+		// Redacted through the one helper the server-wide webhook uses, so the two paths cannot disagree
+		// about what a webhook may see. Listing the fields here instead let this one keep the command,
+		// which is the run's raw script body, while the server-wide webhook for the same run stripped it.
+		redacted := redactForExternal(r)
 		if body := encode("webhook", notification{Event: "run.finished", Run: &redacted}); body != nil {
 			postJSON(urls, body)
 		}

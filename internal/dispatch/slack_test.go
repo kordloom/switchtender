@@ -35,9 +35,12 @@ func TestSlackMessage(t *testing.T) {
 			StartedAt: &start, EndedAt: &end,
 		},
 		Want: ":x: SwitchTender run *deploy.yml* failed in 1m30s\n> exit status 2",
-	}, { // Test 2: A run without timing omits the elapsed clause.
-		In:   &run.Run{Command: "terraform apply", Tool: "terraform", Status: run.StatusSucceeded},
-		Want: ":white_check_mark: SwitchTender run *terraform apply* succeeded",
+	}, { // Test 2: A run without timing omits the elapsed clause, and a run with no playbook is named by
+		// its tool and id rather than by its command, which is a script body that must not leave the host.
+		In: &run.Run{
+			ID: "r-2", Command: "terraform apply", Tool: "terraform", Status: run.StatusSucceeded,
+		},
+		Want: ":white_check_mark: SwitchTender run *terraform r-2* succeeded",
 	}, { // Test 3: A run with no label falls back to the id.
 		In:   &run.Run{ID: "r-1", Status: run.StatusSucceeded},
 		Want: ":white_check_mark: SwitchTender run *r-1* succeeded",
