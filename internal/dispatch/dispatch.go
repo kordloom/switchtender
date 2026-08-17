@@ -1196,7 +1196,7 @@ func (d *Dispatcher) coordinate(parent *run.Run, children []*run.Run) {
 	parent.Status = run.StatusRunning
 	parent.StartedAt = &started
 	parent.ClaimedBy = d.owner
-	parent.ClaimedAt = &started
+	// The lease time is left to the store, for the reason streamSpec states.
 	_ = d.save(parent)
 
 	watchCtx, stopWatch := context.WithCancel(parentCtx)
@@ -1460,7 +1460,7 @@ func (d *Dispatcher) runPipeline(parent *run.Run, steps []run.PipelineStep) {
 	parent.Status = run.StatusRunning
 	parent.StartedAt = &started
 	parent.ClaimedBy = d.owner
-	parent.ClaimedAt = &started
+	// The lease time is left to the store, for the reason streamSpec states.
 	_ = d.save(parent)
 
 	watchCtx, stopWatch := context.WithCancel(pipeCtx)
@@ -1808,7 +1808,11 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 	r.Status = run.StatusRunning
 	r.StartedAt = &started
 	r.ClaimedBy = d.owner
-	r.ClaimedAt = &started
+	// The lease time is left to the store. Postgres stamps it from the database clock and ages leases
+	// against that same clock, so writing this process's time here recorded a lease already older than
+	// its lifetime whenever a worker's clock trailed the database, and the next sweep interrupted a run
+	// that had just started. The watcher renews it immediately below, so the store's clock owns it from
+	// the first moment.
 	_ = d.save(r)
 
 	watchCtx, stopWatch := context.WithCancel(ctx)
@@ -1970,6 +1974,11 @@ func (d *Dispatcher) watch(ctx context.Context, id string) {
 	defer ticker.Stop()
 	// The lease was stamped by the claim that led here, so it is live as of now.
 	lastRenewed := time.Now()
+	// Renewed once before the first tick, so the store's clock stamps the lease from the moment the run
+	// is running rather than up to a tick later. The save that set it running rewrote the whole row, and
+	// the lease time it carried came from whatever the claim reported, so on a fleet whose clocks differ
+	// this closes the window in which a sweep could read a fresh lease as an old one.
+	_ = d.store.Heartbeat(context.Background(), id, d.owner)
 	for {
 		select {
 		case <-ctx.Done():
