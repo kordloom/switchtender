@@ -336,6 +336,7 @@ async function loadDoctor() {
 			kind.textContent = f.object_type;
 			obj.appendChild(kind);
 			obj.title = f.object_id;
+			obj.dataset.export = (obj.textContent || "").trim() + " (" + (f.object_id || "") + ")";
 			tr.appendChild(obj);
 			tr.appendChild(td(f.problem));
 			const fix = td("");

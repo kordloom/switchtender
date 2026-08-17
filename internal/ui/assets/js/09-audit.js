@@ -178,7 +178,24 @@ async function loadAudit() {
 			tr.appendChild(auditChangeCell(e.method, e.path));
 			tr.appendChild(td(e.method, "mono"));
 			tr.appendChild(auditPathCell(e.path));
-			tr.appendChild(td((e.hash || "").slice(0, 12), "mono"));
+			// The cell shows a prefix a person can compare; the export carries the whole hash,
+			// which is the value a verifier actually needs.
+			const hashCell = td((e.hash || "").slice(0, 12), "mono");
+			hashCell.dataset.export = e.hash || "";
+			tr.appendChild(hashCell);
+			inspectable(tr, "Chain entry " + e.seq, [
+				{ label: "Sequence", value: String(e.seq) },
+				{ label: "At", value: e.at },
+				{ label: "Actor", value: e.actor },
+				{ label: "Actor type", value: e.actor_type },
+				{ label: "On behalf of", value: e.on_behalf_of },
+				{ label: "Change", value: auditChange(e.method, e.path) },
+				{ label: "Method", value: e.method },
+				{ label: "Path", value: e.path, block: true },
+				{ label: "Content digest", value: e.content_digest, block: true },
+				{ label: "Entry hash", value: e.hash, block: true, copy: true },
+				{ label: "Previous hash", value: e.prev_hash, block: true },
+			]);
 			tbody.appendChild(tr);
 		}
 		setStatus("");

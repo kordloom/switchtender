@@ -105,7 +105,12 @@ function tableRowsData(table) {
 		const row = [];
 		Array.from(tr.cells).forEach((cell, i) => {
 			if (skip.has(i)) return;
-			row.push(cell.textContent.replace(/\s+/g, " ").trim());
+			// A cell that shows a truncated or graphical value carries the exportable one in
+			// data-export, so the file gets the fact and not the abbreviation drawn from it.
+			const exact = cell.dataset && cell.dataset.export;
+			row.push(exact !== undefined && exact !== ""
+				? exact
+				: cell.textContent.replace(/\s+/g, " ").trim());
 		});
 		rows.push(row);
 	}
@@ -179,25 +184,37 @@ function csvCell(v) {
 }
 
 // mountTableExport adds CSV and JSON export buttons beside the list filter, so any table can
-// leave the app for an audit, a spreadsheet, or a colleague.
+// leave the app for an audit, a spreadsheet, or a colleague. Every table on the page gets its
+// own set: the compare page's task-timing table used to sit beside an exported table with no
+// export of its own, which reads as an oversight because it was one.
 function mountTableExport() {
 	const page = document.body.dataset.page;
 	if (!EXPORT_PAGES.includes(page)) return;
-	const table = document.querySelector("main.content table");
-	if (!table || !table.tHead || !table.tBodies[0]) return;
+	const tables = Array.from(document.querySelectorAll("main.content table"))
+		.filter((t) => t.tHead && t.tBodies[0]);
+	tables.forEach((table, index) => mountExportsForTable(page, table, index));
+}
+
+// mountExportsForTable mounts one table's export buttons. The page's first table joins the
+// existing toolbar or filter row; each later table gets its own row, and its files carry a
+// numbered name so two tables from one page do not collide.
+function mountExportsForTable(page, table, index) {
 	// On the runs page the toolbar holds the filter and the dropdowns, so the export buttons join
 	// the toolbar itself and land after them rather than beside the search box.
-	let host = document.querySelector(".runs-toolbar") || document.querySelector(".list-filter");
+	let host = index === 0
+		? (document.querySelector(".runs-toolbar") || document.querySelector(".list-filter"))
+		: null;
 	if (!host) {
 		host = document.createElement("div");
 		host.className = "list-filter";
 		table.parentNode.insertBefore(host, table);
 	}
+	const filePart = page + (index > 0 ? "-" + (index + 1) : "");
 	const stamp = () => new Date().toISOString().slice(0, 10);
 	// prepare completes the table before it is read. The runs page pages from the server, so its
 	// preparer pulls the rest of the current query in; every other page already renders whole.
 	const prepare = async () => {
-		if (page === "runs" && typeof runsExportPrepare === "function") {
+		if (page === "runs" && index === 0 && typeof runsExportPrepare === "function") {
 			return (await runsExportPrepare()) || "";
 		}
 		return "";
@@ -218,20 +235,20 @@ function mountTableExport() {
 		const suffix = await prepare();
 		const { headers, rows } = tableRowsData(table);
 		const csv = [headers, ...rows].map((r) => r.map(csvCell).join(",")).join("\n") + "\n";
-		downloadBlob("switchtender-" + page + "-" + stamp() + suffix + ".csv", "text/csv", csv);
+		downloadBlob("switchtender-" + filePart + "-" + stamp() + suffix + ".csv", "text/csv", csv);
 	});
 	make("JSON", "Click to export the filtered rows as JSON", async () => {
 		const suffix = await prepare();
 		const { headers, rows } = tableRowsData(table);
 		const objs = rows.map((r) => Object.fromEntries(headers.map((h, i) => [h, r[i] ?? ""])));
-		downloadBlob("switchtender-" + page + "-" + stamp() + suffix + ".json", "application/json",
+		downloadBlob("switchtender-" + filePart + "-" + stamp() + suffix + ".json", "application/json",
 			JSON.stringify(objs, null, 2) + "\n");
 	});
 	make("YAML", "Click to export the filtered rows as YAML", async () => {
 		const suffix = await prepare();
 		const { headers, rows } = tableRowsData(table);
 		const objs = rows.map((r) => Object.fromEntries(headers.map((h, i) => [h, r[i] ?? ""])));
-		downloadBlob("switchtender-" + page + "-" + stamp() + suffix + ".yaml", "text/yaml", toYAML(objs));
+		downloadBlob("switchtender-" + filePart + "-" + stamp() + suffix + ".yaml", "text/yaml", toYAML(objs));
 	});
 }
 

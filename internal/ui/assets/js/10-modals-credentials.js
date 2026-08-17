@@ -482,6 +482,13 @@ async function loadCredentials() {
 					settingsEntries.map(([k, v]) => k + "=" + v).join(", ");
 			}
 			tr.appendChild(name);
+			// The row opens as a drawer too, so the settings a tooltip carries are reachable on
+			// touch and readable whole rather than clipped into one hover line.
+			inspectable(tr, c.name, [
+				{ label: "Kind", value: c.kind },
+				{ label: "Source", value: c.source || "local" },
+				{ label: "Settings", value: settingsEntries.map(([k, v]) => k + "=" + v).join("\n"), block: true },
+			]);
 			// Kind and source are chips rather than bare text, so the column reads at a glance and the
 			// facet menus can offer them as values to tick.
 			const kind = td("");

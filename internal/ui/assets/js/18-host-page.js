@@ -90,6 +90,8 @@ async function loadFleet() {
 			tr.appendChild(stability);
 			const sparkCell = document.createElement("td");
 			sparkCell.appendChild(sparkline(h.recent || [], h.recent_runs || []));
+			// The drawing exports as its underlying outcomes, oldest first, not as an empty cell.
+			sparkCell.dataset.export = (h.recent || []).join(" ");
 			tr.appendChild(sparkCell);
 			tr.appendChild(td(String(h.total)));
 			const last = document.createElement("td");
@@ -253,6 +255,7 @@ async function loadTasks() {
 			tr.appendChild(trend);
 			const spark = document.createElement("td");
 			spark.appendChild(durationSpark(t.recent));
+			spark.dataset.export = (t.recent || []).join(" ");
 			tr.appendChild(spark);
 			tr.appendChild(td(String(t.runs)));
 			tr.appendChild(td(fmtSeconds(t.avg_seconds)));

@@ -179,6 +179,15 @@ async function loadSources() {
 			chip.textContent = src.last_error ? "error" : (src.synced_at ? "synced" : "pending");
 			if (src.last_error) chip.title = src.last_error;
 			state.appendChild(chip);
+			// A failure's reason belongs where a person and an export can both read it, not only
+			// under a hover nothing on a phone can reach.
+			if (src.last_error) {
+				state.dataset.export = "error: " + src.last_error;
+				const why = document.createElement("div");
+				why.className = "muted";
+				why.textContent = src.last_error;
+				state.appendChild(why);
+			}
 			tr.appendChild(state);
 			const actions = document.createElement("td");
 			const refresh = document.createElement("button");
@@ -241,6 +250,11 @@ async function loadWorkers() {
 				chip.className = "chip failed";
 				chip.textContent = "stale";
 				chip.title = "Holds runs but has stopped renewing its lease.";
+				health.dataset.export = "stale: holds runs but has stopped renewing its lease";
+				const why = document.createElement("div");
+				why.className = "muted";
+				why.textContent = "holds runs, lease renewals stopped";
+				health.appendChild(why);
 			} else {
 				chip.className = "chip none";
 				chip.textContent = "idle";
