@@ -336,12 +336,14 @@ func TestFromRundeckMalformed(t *testing.T) {
 		WantErr bool
 	}{ // Test 0: A document that is not a job list is an error, not a silent empty plan.
 		{"not a list", "just a string", true},
-		// Test 1: An empty list imports nothing and says so.
-		{"empty list", "[]", false},
+		// Test 1: An empty list creates nothing, which is a failed import rather than a clean one: an
+		// operator who exported the wrong thing must not be told it worked.
+		{"empty list", "[]", true},
 		// Test 2: A wrapped list is accepted, since some exports nest under a jobs key.
 		{"wrapped", "jobs:\n  - name: X\n    sequence:\n      commands:\n        - exec: x.sh\n", false},
-		// Test 3: A job with no name is reported rather than imported unnamed.
-		{"no name", "- sequence:\n    commands:\n      - exec: x.sh\n", false},
+		// Test 3: A job with no name is reported rather than imported unnamed, and since it was the
+		// only job the import created nothing, which is a refusal.
+		{"no name", "- sequence:\n    commands:\n      - exec: x.sh\n", true},
 		// Test 4: JSON is valid YAML, so a JSON export reads too.
 		{"json", `[{"name":"J","sequence":{"commands":[{"exec":"j.sh"}]}}]`, false},
 	}

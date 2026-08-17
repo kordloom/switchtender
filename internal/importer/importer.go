@@ -6,6 +6,7 @@ package importer
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -43,6 +44,31 @@ type Plan struct {
 	Warnings []string
 	// suppressed counts the warnings past the cap, so the total is still knowable.
 	suppressed int
+}
+
+// objects counts everything the plan would create, which is what makes an import a success or a
+// document nothing recognized.
+func (p *Plan) objects() int {
+	return len(p.Projects) + len(p.Inventories) + len(p.Sources) + len(p.Templates) +
+		len(p.Schedules) + len(p.Credentials)
+}
+
+// ErrNothingRecognized is returned when a document parses but yields no objects at all.
+//
+// An empty plan used to be reported as a plan: a summary of zeros, exit status zero, and with --apply
+// the words "Created 0 objects". An operator who exported from the wrong endpoint, the wrong API
+// version, or the wrong project was told their migration had succeeded and had nothing to show for it.
+// The one thing an import must never do is look complete when it read nothing.
+var ErrNothingRecognized = errors.New("nothing in this document was recognized")
+
+// requireObjects turns an empty plan into a refusal, naming what the importer was looking for so the
+// operator can tell a wrong export from an empty one.
+func (p *Plan) requireObjects(expected string) error {
+	if p.objects() > 0 {
+		return nil
+	}
+	return fmt.Errorf("%w: no %s were found. Check that this is the right export and the right "+
+		"format, then try again", ErrNothingRecognized, expected)
 }
 
 // maxWarnings bounds how many warnings one plan reports.

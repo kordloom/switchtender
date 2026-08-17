@@ -39,6 +39,15 @@ func (p *Plan) Apply(ctx context.Context, s ApplyStores) (int, error) {
 		return 0, fmt.Errorf("cannot import %d inventory sources: inventory sources not enabled",
 			len(p.Sources))
 	}
+	// The inventory an operator named on the command line is resolved here, against the inventories
+	// this install actually holds, because the mapping stage has no store to ask. A crontab and a
+	// Rundeck export name no inventory file, so the caller supplies one, and the obvious thing to type
+	// is the name of a stored inventory. That value used to be written straight into the field that
+	// holds a filesystem path, so the imported templates pointed at a file that does not exist and the
+	// operator found out when one launched.
+	if err := p.resolveInventoryNames(ctx, s.Inventories); err != nil {
+		return 0, err
+	}
 	created := 0
 	for _, pr := range p.Projects {
 		if err := s.Projects.Save(ctx, pr); err != nil {
@@ -77,4 +86,52 @@ func (p *Plan) Apply(ctx context.Context, s ApplyStores) (int, error) {
 		created++
 	}
 	return created, nil
+}
+
+// resolveInventoryNames rewrites a template's inventory path into an inventory id when the path names
+// a stored inventory. Anything that matches nothing is left as a path and reported, so an operator who
+// meant a file gets a file and an operator who meant a stored inventory gets the object.
+//
+// It runs before anything is written, and only for templates that carry a path and no id, so an import
+// that already wired an inventory by id is untouched.
+func (p *Plan) resolveInventoryNames(ctx context.Context, store inventory.Store) error {
+	needed := map[string]bool{}
+	for _, t := range p.Templates {
+		if t.InventoryID == "" && t.Inventory != "" {
+			needed[t.Inventory] = true
+		}
+	}
+	if len(needed) == 0 || store == nil {
+		return nil
+	}
+	// The plan's own inventories are not stored yet, so both they and the existing ones are consulted.
+	byName := map[string]string{}
+	for _, inv := range p.Inventories {
+		byName[inv.Name] = inv.ID
+	}
+	stored, err := store.List(ctx)
+	if err != nil {
+		return fmt.Errorf("read inventories to resolve the named one: %w", err)
+	}
+	for _, inv := range stored {
+		byName[inv.Name] = inv.ID
+	}
+	reported := map[string]bool{}
+	for _, t := range p.Templates {
+		if t.InventoryID != "" || t.Inventory == "" {
+			continue
+		}
+		if id, ok := byName[t.Inventory]; ok {
+			t.InventoryID = id
+			t.Inventory = ""
+			continue
+		}
+		if !reported[t.Inventory] {
+			reported[t.Inventory] = true
+			p.warn("no stored inventory is named %q, so it is used as a path on the server's "+
+				"filesystem. Create an inventory with that name, or point the templates at one, if "+
+				"that is not what you meant.", t.Inventory)
+		}
+	}
+	return nil
 }

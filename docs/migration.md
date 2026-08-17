@@ -64,7 +64,11 @@ approved, recorded, and provable like any other run instead of running unseen on
 
     switchtender import cron /var/spool/cron/crontabs/deploy --inventory prod --db switchtender.db
 
-A crontab names no target host, so `--inventory` says where the jobs run. Add `--system` to read
+A crontab names no target host, so `--inventory` records which inventory the jobs belong to. It does
+not move where they run: each line imports as a shell step, and a shell step runs on the SwitchTender
+host, not on the machine the crontab came from. The report says so on every cron import. Change a step
+to Ansible when you want it to run against the inventory. When the name matches a stored inventory, the
+import wires the object by id; anything else is used as a path on the server and the report says which. Add `--system` to read
 `/etc/crontab` and the system tabs, which carry a user column the report calls out. Comments and
 environment lines are noted and skipped. As with the other imports, leave off `--apply` to preview
 the schedules first, then re-run with `--apply` to create them.
@@ -77,6 +81,8 @@ the schedules first, then re-run with `--apply` to create them.
 | AWX inventory | Stored inventory, rendered as INI from its hosts and groups.|
 | AWX job template | Template, with job slicing becoming shard count.|
 | AWX survey | Template survey, field for field, with the field types translated. A password prompt is refused, not downgraded to plain text.|
+| Semaphore survey | Template survey, field for field. A secret variable is refused, not downgraded to plain text: store its value as a credential.|
+| AWX schedule that stops | Refused and named. A rule with `COUNT` or `UNTIL` bounds itself, a cron entry never stops, and importing one would leave a job firing forever.|
 | AWX workflow job template | Workflow template carrying the graph, with each node's job template inlined as a step and the success and always edges becoming dependencies. Imported whole or reported and skipped, never partially.|
 | AWX schedule | Schedule, with the recurrence rule converted to cron.|
 | AWX credential | Credential shell with its kind mapped from its type and its configured inputs, secret omitted.|

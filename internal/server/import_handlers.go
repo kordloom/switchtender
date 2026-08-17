@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"time"
@@ -75,6 +76,13 @@ func importHandler(stores importStoresFunc, log *zap.Logger) http.HandlerFunc {
 			return
 		}
 		plan, err := mapper(body, time.Now())
+		if errors.Is(err, importer.ErrNothingRecognized) {
+			// The document parsed and held nothing this importer reads, which is a different problem
+			// from malformed bytes and has a different remedy: the caller exported the wrong thing.
+			// Carrying the mapper's own sentence is what tells them which.
+			respondError(w, log, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
 		if err != nil {
 			log.Error("server: map import export: " + err.Error())
 			respondError(w, log, http.StatusBadRequest, "could not read the export, check the format")

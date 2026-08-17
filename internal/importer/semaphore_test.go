@@ -52,3 +52,44 @@ func TestFromSemaphore(t *testing.T) {
 
 	assertWarns(t, plan.Warnings, "needs its secret re-entered")
 }
+
+// TestSemaphoreSecretSurveyIsNotImportedAsPlainText covers the mirror of a rule the AWX importer
+// already holds. Semaphore's survey variables have a "secret" type, prompted for and stored obscured
+// on their side. A survey field here is plain text whose answer is kept on the run and injected as an
+// extra var, so importing one turned a secret prompt into a value stored in the clear on every run of
+// that template, in its record, its exports, and the evidence drawn from it. A migration that looks
+// complete and is less safe than what the operator left is worse than one that says what it skipped.
+func TestSemaphoreSecretSurveyIsNotImportedAsPlainText(t *testing.T) {
+	t.Parallel()
+	export := []byte(`{
+	  "projects": [{
+	    "name": "acme",
+	    "templates": [{
+	      "name": "deploy",
+	      "playbook": "site.yml",
+	      "survey_vars": [
+	        {"name": "env", "title": "Environment", "type": "string"},
+	        {"name": "vault_pass", "title": "Vault password", "type": "secret", "required": true}
+	      ]
+	    }]
+	  }]
+	}`)
+	plan, err := importer.FromSemaphore(export, fixedTime)
+	if err != nil {
+		t.Fatalf("FromSemaphore() error = %v", err)
+	}
+	if len(plan.Templates) != 1 {
+		t.Fatalf("templates = %d, want 1", len(plan.Templates))
+	}
+	for _, f := range plan.Templates[0].Survey {
+		if f.Var == "vault_pass" {
+			t.Errorf("the secret survey variable was imported as a %q field, so its answer would be "+
+				"typed in the clear and stored on every run", f.Type)
+		}
+	}
+	if len(plan.Templates[0].Survey) != 1 || plan.Templates[0].Survey[0].Var != "env" {
+		t.Errorf("survey = %+v, want the ordinary field kept", plan.Templates[0].Survey)
+	}
+	assertWarns(t, plan.Warnings, "vault_pass")
+	assertWarns(t, plan.Warnings, "credential")
+}
