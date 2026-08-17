@@ -721,6 +721,32 @@ func (m *memStore) Heartbeat(_ context.Context, id, owner string) error {
 // split or pipeline parents left pending with no coordinator. The lease was stamped by this same
 // process, so its own clock is the authoritative one. Interrupting a parent orphans its children, so
 // they are resolved in the same sweep. See AbandonedParent for what makes a parent unrecoverable.
+// ReclaimStaleSettled sweeps like ReclaimStale and names the top-level runs it drove terminal, so a
+// caller can record their outcomes. A child's outcome rolls up into its parent, so children are left
+// out the same way the terminal save leaves them out.
+func (m *memStore) ReclaimStaleSettled(ctx context.Context, ttl time.Duration) (int, []string, error) {
+	before := map[string]Status{}
+	m.mu.RLock()
+	for id, r := range m.runs {
+		before[id] = r.Status
+	}
+	m.mu.RUnlock()
+	n, err := m.ReclaimStale(ctx, ttl)
+	if err != nil {
+		return n, nil, err
+	}
+	var settled []string
+	m.mu.RLock()
+	for id, r := range m.runs {
+		if r.ParentID == nil && r.Status.Terminal() && !before[id].Terminal() {
+			settled = append(settled, id)
+		}
+	}
+	m.mu.RUnlock()
+	sort.Strings(settled)
+	return n, settled, nil
+}
+
 func (m *memStore) ReclaimStale(_ context.Context, ttl time.Duration) (int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

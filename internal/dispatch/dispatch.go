@@ -514,12 +514,56 @@ func (d *Dispatcher) idleWait(idle int) time.Duration {
 	return wait/2 + time.Duration(rand.Int64N(int64(wait)))
 }
 
+// settledReporter is a store whose sweep can name the top-level runs it settled, so their outcomes
+// reach the chain. A store that cannot, such as the relay client, leaves the reporting to whichever
+// process owns the sweep.
+type settledReporter interface {
+	// ReclaimStaleSettled sweeps like ReclaimStale and also returns the ids of the top-level runs the
+	// sweep drove to a terminal state.
+	ReclaimStaleSettled(ctx context.Context, ttl time.Duration) (int, []string, error)
+}
+
+// commitSettled records the outcome of every run the sweep drove to a terminal state.
+//
+// The sweep is a bulk update in the store rather than a pass through finalize, so these runs used to
+// end with no chain entry at all: not receiptable, and absent from their own dossiers. A run whose
+// worker died mid-change is precisely the incident somebody asks about afterward, so it is the last
+// run that should have no record. The commit is best effort, as it is on the relay's terminal save
+// and for the same reason: the run has already happened, and refusing to record it would not unhappen
+// it. A failure is logged where an operator can find it.
+func (d *Dispatcher) commitSettled(ids []string) {
+	if d.audits == nil || len(ids) == 0 {
+		return
+	}
+	for _, id := range ids {
+		r, err := d.store.Get(d.ctx, id)
+		if err != nil {
+			if d.ctx.Err() == nil {
+				d.log.Error("dispatch: read settled run: "+err.Error(), zap.String("run_id", id))
+			}
+			continue
+		}
+		if err := outcome.Commit(d.ctx, d.audits, d.store, r, "system:janitor"); err != nil {
+			if d.ctx.Err() == nil {
+				d.log.Error("dispatch: commit settled outcome: "+err.Error(), zap.String("run_id", id))
+			}
+		}
+	}
+}
+
 // janitor sweeps stale leases so runs owned by dead processes requeue or resolve. It runs once
 // immediately, covering restarts, then on an interval.
 func (d *Dispatcher) janitor() {
 	defer d.wg.Done()
 	sweep := func() {
-		n, err := d.store.ReclaimStale(d.ctx, leaseTTL)
+		var n int
+		var settled []string
+		var err error
+		if reporter, ok := d.store.(settledReporter); ok {
+			n, settled, err = reporter.ReclaimStaleSettled(d.ctx, leaseTTL)
+		} else {
+			n, err = d.store.ReclaimStale(d.ctx, leaseTTL)
+		}
 		if err != nil {
 			if d.ctx.Err() == nil {
 				d.log.Error("dispatch: reclaim stale: " + err.Error())
@@ -529,6 +573,7 @@ func (d *Dispatcher) janitor() {
 		if n > 0 {
 			d.log.Info("dispatch: reclaimed stale runs", zap.Int("count", n))
 		}
+		d.commitSettled(settled)
 	}
 	sweep()
 	ticker := time.NewTicker(janitorInterval)

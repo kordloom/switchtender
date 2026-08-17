@@ -2437,6 +2437,74 @@ func (s *store) Heartbeat(ctx context.Context, id, owner string) error {
 }
 
 // ReclaimStale requeues stale claimed pending runs and interrupts stale running runs.
+// terminalCandidateQuery selects the top-level runs a sweep of this age would drive terminal. The
+// cutoff is the same Go-formatted timestamp the sweep itself compares against, because the stored
+// times are RFC 3339 text: routing this through SQL's datetime would compare two different spellings
+// of an instant and match nothing.
+const terminalCandidateQuery = `
+SELECT id FROM runs
+WHERE parent_id IS NULL AND (
+  (status='running' AND claimed_by!='' AND claimed_at < ?)
+  OR (status IN ('pending','running') AND claimed_by='' AND kind IN ('split','pipeline')
+      AND created_at < ?))`
+
+// ReclaimStaleSettled sweeps like ReclaimStale and names the top-level runs the sweep drove to a
+// terminal state, so the caller can commit their outcomes to the chain. The sweep is a bulk update
+// rather than a pass through the dispatcher's finalize, so without this those runs, the ones whose
+// worker died mid-change, ended with no evidence at all. A child's outcome rolls up into its parent,
+// so children are left out here exactly as the terminal save leaves them out.
+func (s *store) ReclaimStaleSettled(ctx context.Context, ttl time.Duration) (int, []string, error) {
+	settled, err := s.terminalCandidates(ctx, ttl)
+	if err != nil {
+		return 0, nil, err
+	}
+	n, err := s.ReclaimStale(ctx, ttl)
+	if err != nil {
+		return n, nil, err
+	}
+	// The candidates were read before the sweep; only the ones it actually settled are reported, so a
+	// run another process finished first is not recorded twice.
+	return n, s.confirmSettled(ctx, settled), nil
+}
+
+// terminalCandidates lists the top-level runs this sweep would drive terminal: a running run whose
+// lease has expired, and an abandoned split or pipeline parent.
+func (s *store) terminalCandidates(ctx context.Context, ttl time.Duration) ([]string, error) {
+	cut := sqlutil.FormatTime(time.Now().Add(-ttl))
+	rows, err := s.db.QueryContext(ctx, terminalCandidateQuery, cut, cut)
+	if err != nil {
+		return nil, fmt.Errorf("reclaim stale: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("reclaim stale: %w", err)
+		}
+		out = append(out, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("reclaim stale: %w", err)
+	}
+	return out, nil
+}
+
+// confirmSettled keeps the candidates that are terminal now, after the sweep ran. A read failure
+// drops the id rather than failing the sweep: the reclaim itself has already succeeded, and the
+// caller's commit is best effort by design.
+func (s *store) confirmSettled(ctx context.Context, candidates []string) []string {
+	var out []string
+	for _, id := range candidates {
+		r, err := s.Get(ctx, id)
+		if err != nil || r == nil || !r.Status.Terminal() {
+			continue
+		}
+		out = append(out, id)
+	}
+	return out
+}
+
 func (s *store) ReclaimStale(ctx context.Context, ttl time.Duration) (int, error) {
 	// A SQLite deployment is one node: the process that stamps a lease is the process that sweeps it,
 	// so the local clock is the authoritative one and there is no skew to reconcile.
