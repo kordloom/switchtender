@@ -371,8 +371,10 @@ func TestAWXScheduleKeepsItsTimezone(t *testing.T) {
 		"related":{"schedules":[
 			{"name":"ny window","enabled":true,
 			 "rrule":"DTSTART;TZID=America/New_York:20260101T020000 RRULE:FREQ=DAILY;INTERVAL=1"},
-			{"name":"plain window","enabled":true,
-			 "rrule":"DTSTART:20260101T030000Z RRULE:FREQ=DAILY;INTERVAL=1"}
+			{"name":"utc window","enabled":true,
+			 "rrule":"DTSTART:20260101T030000Z RRULE:FREQ=DAILY;INTERVAL=1"},
+			{"name":"floating window","enabled":true,
+			 "rrule":"DTSTART:20260101T030000 RRULE:FREQ=DAILY;INTERVAL=1"}
 		]}
 	}]}`
 	plan, err := importer.FromAWX([]byte(export), time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC))
@@ -386,8 +388,16 @@ func TestAWXScheduleKeepsItsTimezone(t *testing.T) {
 	if got := byName["ny window"]; got != "America/New_York" {
 		t.Errorf("timezone = %q, want America/New_York; the window would fire at the wrong hour", got)
 	}
-	if got := byName["plain window"]; got != "" {
-		t.Errorf("a rule with no TZID got timezone %q, want none", got)
+	// The Zulu form names UTC. It carries no TZID, which is what AWX wrote before it recorded zones and
+	// what it still writes for a UTC schedule, and reading no zone from it imported the window into the
+	// server's local time with the UTC hour, firing it hours off.
+	if got := byName["utc window"]; got != "UTC" {
+		t.Errorf("a Zulu DTSTART got timezone %q, want UTC; the window would fire at the server's "+
+			"local hour instead of the UTC one it was written in", got)
+	}
+	// A floating local time names no zone, which is what it means.
+	if got := byName["floating window"]; got != "" {
+		t.Errorf("a floating DTSTART got timezone %q, want none", got)
 	}
 }
 
