@@ -2,6 +2,7 @@ package witness
 
 import (
 	"fmt"
+	"strconv"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -219,5 +220,117 @@ func TestCheckDoesNotAdoptAHeadBuiltOnARewrite(t *testing.T) {
 	}
 	if next.LastHead == "onForged" {
 		t.Error("the witness signed a head built on the rewrite into its own testimony")
+	}
+}
+
+// TestWholeChainReplacementUnderFreshBeatNumbersIsCaught proves the hole an adversarial review
+// reproduced: rewrite detection keyed on the beat number, so an operator who replaced the entire
+// chain and served it under beat numbers the witness had never seen was adopted in silence and
+// attested clean. The chain position is the coordinate the watched server cannot renumber, and a
+// chain only appends, so a newest position behind the witnessed one is a replaced history.
+func TestWholeChainReplacementUnderFreshBeatNumbersIsCaught(t *testing.T) {
+	now := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
+
+	// The witness watches a healthy server: beats 1..3 at chain positions 1..3.
+	first, findings, err := Check(nil, "https://st.example",
+		[]Beat{beat(1, 1, "aa01"), beat(2, 2, "aa02"), beat(3, 3, "aa03")}, now)
+	if err != nil {
+		t.Fatalf("Check() error = %v", err)
+	}
+	if len(findings) != 0 {
+		t.Fatalf("first watch = %v, want a clean baseline", findings)
+	}
+
+	// The operator replaces the whole chain and serves it under beat numbers 4..6, so no beat the
+	// witness remembers is ever presented again. The chain is now three entries long, so its
+	// newest position is 3 while the witness has already seen position 3 on a different history.
+	_, findings, err = Check(first, "https://st.example",
+		[]Beat{beat(4, 1, "bb01"), beat(5, 2, "bb02"), beat(6, 3, "bb03")}, now.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("Check() error = %v", err)
+	}
+	var caught bool
+	for _, f := range findings {
+		if f.Kind == "rewritten_history" || f.Kind == "seq_regression" {
+			caught = true
+		}
+	}
+	if !caught {
+		t.Errorf("a whole-chain replacement under fresh beat numbers raised %v, want the "+
+			"replacement named", findings)
+	}
+}
+
+// TestGapAcrossPollsIsCaught proves a feed that jumps past the witnessed beat between polls is
+// reported. The gap walk only ever compared beats inside one answer, so the entries between the
+// witnessed beat and the oldest beat of the next answer went missing in silence.
+func TestGapAcrossPollsIsCaught(t *testing.T) {
+	now := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
+	first, _, err := Check(nil, "https://st.example",
+		[]Beat{beat(1, 1, "aa01"), beat(2, 2, "aa02")}, now)
+	if err != nil {
+		t.Fatalf("Check() error = %v", err)
+	}
+	_, findings, err := Check(first, "https://st.example",
+		[]Beat{beat(9, 9, "aa09"), beat(10, 10, "aa10")}, now.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("Check() error = %v", err)
+	}
+	var sawMissing bool
+	for _, f := range findings {
+		if f.Kind == "missing_beat" {
+			sawMissing = true
+		}
+	}
+	if !sawMissing {
+		t.Errorf("a cross-poll gap raised %v, want missing_beat", findings)
+	}
+}
+
+// TestImplausibleBeatsAreRefusedNotRemembered proves a beat the witness cannot check is kept out of
+// signed memory and named, rather than adopted and wedging the checkpoint at whatever it claims.
+func TestImplausibleBeatsAreRefusedNotRemembered(t *testing.T) {
+	now := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
+	cp, findings, err := Check(nil, "https://st.example", []Beat{
+		beat(1, 1, "aa01"),
+		{Beat: 1 << 62, Seq: 5, Head: "aa02", At: "2026-08-01T00:00:00Z"},
+		{Beat: 3, Seq: 0, Head: "aa03", At: "2026-08-01T00:00:00Z"},
+		{Beat: 4, Seq: 4, Head: "", At: "2026-08-01T00:00:00Z"},
+	}, now)
+	if err != nil {
+		t.Fatalf("Check() error = %v", err)
+	}
+	var sawMalformed bool
+	for _, f := range findings {
+		if f.Kind == "malformed_feed" {
+			sawMalformed = true
+		}
+	}
+	if !sawMalformed {
+		t.Errorf("findings = %v, want malformed_feed", findings)
+	}
+	if cp.LastBeat != 1 {
+		t.Errorf("checkpoint adopted beat %d, want the only plausible beat 1", cp.LastBeat)
+	}
+}
+
+// TestOneHostileFeedDoesNotBecomeAThousandFindings proves the gap walk is summarized. A feed can
+// serve a thousand beats each one past the last, and reporting a finding per gap turned one poll
+// into a thousand disk records and a thousand webhook deliveries.
+func TestOneHostileFeedDoesNotBecomeAThousandFindings(t *testing.T) {
+	now := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
+	beats := make([]Beat, 0, 500)
+	for i := int64(0); i < 500; i++ {
+		beats = append(beats, beat(1+i*2, 1+i*2, "aa"+strconv.FormatInt(i, 16)))
+	}
+	_, findings, err := Check(nil, "https://st.example", beats, now)
+	if err != nil {
+		t.Fatalf("Check() error = %v", err)
+	}
+	if len(findings) > 2 {
+		t.Errorf("a feed with 499 gaps raised %d findings, want them summarized", len(findings))
+	}
+	if len(findings) == 0 {
+		t.Error("a feed with 499 gaps raised nothing")
 	}
 }
