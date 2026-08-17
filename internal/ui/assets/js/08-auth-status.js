@@ -102,6 +102,24 @@ async function getJSON(url) {
 	return res.json();
 }
 
+// authedDelete deletes a resource with the session's credentials, translating the failures a
+// person can act on: a 401 walks to sign-in, a 403 explains itself in role terms, and anything
+// else carries the server's own error text instead of a bare HTTP status.
+async function authedDelete(path) {
+	const res = await fetch(API + path, { method: "DELETE", headers: authHeaders() });
+	if (res.status === 401) {
+		requireLogin();
+		throw new Error("authentication required");
+	}
+	if (res.status === 403) {
+		throw new Error("deleting this needs a higher role than this session holds");
+	}
+	if (!res.ok) {
+		const data = await res.json().catch(() => ({}));
+		throw new Error(data.error || ("the server refused with HTTP " + res.status));
+	}
+}
+
 // mountLiveRegions marks every status line as a polite live region so assistive tech announces the
 // async success and failure text written into it, including sign-in errors and empty states.
 function mountLiveRegions() {

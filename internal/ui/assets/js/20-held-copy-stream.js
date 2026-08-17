@@ -153,8 +153,7 @@ async function loadPolicies() {
 				e.preventDefault();
 				if (!window.confirm("Delete policy " + p.name + "?")) return;
 				try {
-					const res = await fetch(API + "/policies/" + p.id, { method: "DELETE", headers: authHeaders() });
-					if (!res.ok) throw new Error("HTTP " + res.status);
+					await authedDelete("/policies/" + p.id);
 					removeRow(tr, "No policies yet. Add one to require approval for the runs it matches.");
 				} catch (err) {
 					setStatus("Delete failed: " + err.message);

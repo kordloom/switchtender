@@ -383,6 +383,8 @@ document.addEventListener("DOMContentLoaded", () => {
 		loadProjects();
 	} else if (page === "jobtemplates") {
 		wireModal("template");
+		wireModalExits("prompt");
+		wireModalExits("survey");
 		wireTemplateForm();
 		loadTemplates();
 	} else if (page === "users") {

@@ -292,6 +292,21 @@ function refreshRelTimes() {
 	}
 }
 
+// wireModalExits gives a dialog the standard three exits, the close button, a backdrop click, and
+// Escape, without requiring an open button, for dialogs the page opens programmatically. The
+// launch-with-overrides and survey dialogs had only their close control, which on a phone is the
+// difference between a dialog and a trap.
+function wireModalExits(name) {
+	const modal = document.getElementById(name + "-modal");
+	if (!modal || modal.dataset.exitsWired) return;
+	modal.dataset.exitsWired = "true";
+	const close = () => { modal.hidden = true; };
+	const closeBtn = document.getElementById(name + "-close");
+	if (closeBtn) closeBtn.addEventListener("click", close);
+	modal.addEventListener("click", (e) => { if (e.target === modal) close(); });
+	document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !modal.hidden) close(); });
+}
+
 // wireModal wires a create dialog: the open button shows it; the close button, a backdrop click, and
 // Escape hide it. name is the shared id prefix for the open, modal, and close elements.
 function wireModal(name) {

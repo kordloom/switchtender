@@ -387,6 +387,27 @@ function showDrill(info) {
 		note.textContent = "Output truncated.";
 		body.appendChild(note);
 	}
+	// A failure that carried nothing but its return code explains itself in the run log, so the
+	// pane says so and takes the reader there instead of ending the story at a bare number.
+	if (info.outcome === "failed" && !info.message && !info.stdout && !info.stderr) {
+		const note = document.createElement("div");
+		note.className = "drill-note";
+		note.textContent = "This task reported only its return code. The full run log usually carries the reason. ";
+		const jump = document.createElement("button");
+		jump.type = "button";
+		jump.className = "linkish";
+		jump.textContent = "Open the log";
+		jump.addEventListener("click", () => {
+			closeDrill();
+			const panel = document.getElementById("log-panel");
+			if (panel) {
+				panel.hidden = false;
+				if (panel.scrollIntoView) panel.scrollIntoView();
+			}
+		});
+		note.appendChild(jump);
+		body.appendChild(note);
+	}
 
 	document.getElementById("drill").hidden = false;
 	document.getElementById("drill-backdrop").hidden = false;

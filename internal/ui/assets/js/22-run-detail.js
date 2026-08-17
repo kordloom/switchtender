@@ -50,6 +50,13 @@ function wireActions(runId) {
 			}
 		});
 	}
+	const explainClose = document.getElementById("explain-close");
+	if (explainClose) {
+		explainClose.addEventListener("click", () => {
+			const panel = document.getElementById("explain-panel");
+			if (panel) panel.hidden = true;
+		});
+	}
 	const explain = document.getElementById("explain-run");
 	if (explain) {
 		explain.addEventListener("click", async () => {

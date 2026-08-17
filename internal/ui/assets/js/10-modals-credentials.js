@@ -539,10 +539,7 @@ async function loadCredentials() {
 				e.preventDefault();
 				if (!window.confirm("Delete credential " + c.name + "?")) return;
 				try {
-					const res = await fetch(API + "/credentials/" + c.id, {
-						method: "DELETE", headers: authHeaders(),
-					});
-					if (!res.ok) throw new Error("HTTP " + res.status);
+					await authedDelete("/credentials/" + c.id);
 					removeRow(tr, "No credentials yet.");
 				} catch (err) {
 					setStatus("Delete failed: " + err.message);

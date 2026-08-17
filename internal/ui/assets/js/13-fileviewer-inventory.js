@@ -181,8 +181,7 @@ function deleteCell(path, label, tr, emptyMsg) {
 		e.stopPropagation();
 		if (!window.confirm("Delete " + label + "?")) return;
 		try {
-			const res = await fetch(API + path, { method: "DELETE", headers: authHeaders() });
-			if (!res.ok) throw new Error("HTTP " + res.status);
+			await authedDelete(path);
 			removeRow(tr, emptyMsg);
 		} catch (err) {
 			setStatus("Delete failed: " + err.message);

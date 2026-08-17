@@ -432,8 +432,7 @@ async function loadSchedules() {
 				e.preventDefault();
 				if (!window.confirm("Delete schedule " + (s.name || s.id) + "?")) return;
 				try {
-					const res = await fetch(API + "/schedules/" + s.id, { method: "DELETE", headers: authHeaders() });
-					if (!res.ok) throw new Error("HTTP " + res.status);
+					await authedDelete("/schedules/" + s.id);
 					removeRow(tr, "No schedules yet. Add one to fire a template on a cadence.");
 				} catch (err) {
 					setStatus("Delete failed: " + err.message);
