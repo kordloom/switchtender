@@ -20,6 +20,15 @@ import (
 // a run that was actually gated.
 func held(t *testing.T, verdict string) (run.Store, audit.Store, audit.Identity, *run.Run) {
 	t.Helper()
+	return heldWith(t, verdict, nil)
+}
+
+// heldWith is held with a hook to shape the run before anything commits, so a case can vary what the
+// spec digest is computed over. The hook runs before the decision and the outcome, which is the only
+// point where a change to the spec is the spec the evidence binds to rather than a tamper.
+func heldWith(t *testing.T, verdict string,
+	shape func(*run.Run)) (run.Store, audit.Store, audit.Identity, *run.Run) {
+	t.Helper()
 	ctx := context.Background()
 	runs := run.NewMemStore()
 	audits := audit.NewMemStore()
@@ -43,6 +52,9 @@ func held(t *testing.T, verdict string) (run.Store, audit.Store, audit.Identity,
 		ID: "run_1", Status: run.StatusRunning, CreatedAt: time.Now(),
 		Tool: run.ToolBash, Command: "deploy the thing", Actor: "casey", ActorType: "session",
 		HeldByPolicy: "deploys need a person", AuditReceipt: chainReceipt(creation),
+	}
+	if shape != nil {
+		shape(r)
 	}
 	if err := runs.Save(ctx, r); err != nil {
 		t.Fatalf("save run: %v", err)

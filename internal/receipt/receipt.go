@@ -202,15 +202,20 @@ func sparseBundle(entries []*audit.Entry, runID string, creationSeq, outcomeSeq 
 // discloseSpec attaches the run's redacted spec to the outcome claim, so a verifier can read what
 // the digests commit to and recompute them. The spec is redacted before it leaves the outcome
 // package, so this never hands out bytes the redaction did not pass over.
+//
+// It is attached as the exact bytes the digest was taken over rather than as a parsed tree. A tree
+// has to survive the signature's canonicalization, whose numbers are integers only, so a single
+// fractional extra var made the receipt impossible to sign and therefore impossible to issue for that
+// run, ever. A tree also has to survive being marshaled again on the verifier's side, and an integer
+// too wide for a float came back a different number, so the disclosed spec stopped matching the digest
+// the chain committed and the receipt read as tampered. The bytes have neither problem: a string is
+// representable whatever it holds, and it is what the digest already covers.
 func discloseSpec(claim *audit.BundleClaim, r *run.Run) {
 	spec, err := outcome.Spec(r)
 	if err != nil {
 		return
 	}
-	var specObj any
-	if json.Unmarshal(spec, &specObj) == nil {
-		claim.Payload["spec_body"] = specObj
-	}
+	claim.Payload["spec_body"] = string(spec)
 }
 
 // discloseDecisions attaches each approval decision's body and nonce to its claim, the same way the
