@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+
+	"github.com/kordloom/switchtender/internal/util"
 )
 
 // resolveCommand runs a command and returns its stdout as the value, so the real secret is fetched
@@ -20,8 +22,15 @@ import (
 // redacted. Logging it would break the same rule from the other side. The caller wraps this error
 // with the credential id (see openCredential) and the exit status is preserved, so the operator
 // learns which source failed and how without the value leaking anywhere.
+//
+// The command runs without SwitchTender's own configuration, the same as any tool a run executes.
+// This is shell somebody configured, and the server reads its master encryption key and salt from the
+// environment, so inheriting that environment let the command that fetches one credential print the
+// key that protects all of them. What the command legitimately needs to reach a secret store, a Vault
+// token or cloud credentials, is outside our prefix and survives.
 func resolveCommand(ctx context.Context, command string) (string, error) {
 	cmd := exec.CommandContext(ctx, "sh", "-c", command)
+	cmd.Env = util.RunEnviron()
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	if err := cmd.Run(); err != nil {
