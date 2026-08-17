@@ -24,22 +24,24 @@
     alt="License"></a>
 </p>
 
-Run everything. Watch every host. Prove every change. One Go binary runs Ansible, Terraform, OpenTofu,
-Bash, PowerShell, Python, and Go across your fleet, paints every run live as a host-by-task matrix instead of a text
-scroll, splits big jobs across parallel shards, and proves exactly what ran and who approved it.
-AI agents are operators now too, and their changes are proven the same way, gated and chained under
-the agent's own name.
+Run everything. Watch every host. Prove every change. SwitchTender is the governed execution
+boundary between your operators, human or AI agent, and the systems they change. One Go binary runs
+Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go across your fleet, paints every run
+live as a host-by-task matrix instead of a text scroll, and splits big jobs across parallel shards.
+Every change walks one path through it, and comes out the other side as a signed receipt anyone can
+verify offline.
 No Kubernetes operator, no Postgres, no Redis, no message bus. One process, one SQLite file.
 
 ## Contents
 
 - [Why](#why)
+- [The path every change walks](#the-path-every-change-walks)
+- [AI agents as principals](#ai-agents-as-principals)
 - [See it](#see-it)
 - [Requirements](#requirements)
 - [Quick start](#quick-start)
 - [Documentation](#documentation)
 - [Design](#design)
-- [AI agents as operators](#ai-agents-as-operators)
 - [The name](#the-name)
 - [Roadmap](#roadmap)
 - [Status](#status)
@@ -70,6 +72,98 @@ The full head-to-head, including where SwitchTender is behind, is in the
 Checked against vendor documentation on 2026-07-31, for AWX 24.6.1 and Semaphore 2.18.29. These
 products ship, and a table like this decays. If a row is out of date, open an issue and it gets
 corrected.
+
+SwitchTender sits above or alongside whatever already runs your changes. It does not ask you to rip
+out Terraform, Jenkins, or GitHub Actions; it governs the changes that flow through it, and the
+one-command AWX import is the on-ramp.
+
+## The path every change walks
+
+    request -> identity -> policy -> risk -> approval -> execution -> evidence -> verification
+
+Eight stages, one gate, no side doors. Five of them are the ones a change-control review asks about:
+
+**1. Request.** Every change enters through one submission path: the API, the UI, a template launch,
+a schedule, a webhook, or an AI agent over MCP. The request is recorded on the tamper-evident hash
+chain before anything acts on it, with who asked, how they authenticated, and a commitment to
+exactly what was asked. A change that cannot be recorded is refused, not performed silently.
+
+**2. Policy.** A separable, fail-closed engine decides before execution: proceed, hold for a
+person's sign-off, or refuse outright. Policies match on the tool, the command, the target
+inventory, the assessed risk of the operation, and who is asking, so an agent's request can face
+rules a person's request does not. Policies live in the database or in a reviewed YAML file, and a
+gate that cannot be evaluated refuses the run rather than waving it through. Terraform and OpenTofu
+get a second, content-aware gate: the plan runs first, and an apply that would destroy more than the
+policy allows is held with the plan attached.
+
+**3. Approval.** A held run cannot be claimed by any executor until an approver releases it. The
+decision is itself a chain entry: it names the approver and commits a digest of the exact spec being
+released, so an approval binds to content, not to a run id whose meaning could drift. The executor
+recomputes that digest before running and refuses a spec that changed after the decision.
+
+**4. Execution.** Local workers, shared-database workers, or relay workers across a network
+boundary, with container execution for every tool. The same policies gate execution wherever the
+run is claimed, fail closed, and the outcome, exit code, per-host results, a digest of the full log,
+and the spec digest, is committed to the chain by the process that observed it finish.
+
+**5. Evidence.** `switchtender receipt <run-id>` seals the whole story, the request, the decision,
+the execution, the outcome, into one signed file. `switchtender verify` checks it with no database,
+no network, and no trust in the server that produced it: every chain link recomputes, the approver's
+decision provably binds the digest of the spec that executed, and external RFC 3161 timestamps fix
+the history in time. The same bytes verify under the open [loomseal](https://loomseal.com) verifier
+and its independent Python reference implementation.
+
+The remaining three stages are load-bearing but not headline: identity resolves who is asking and
+caps what an agent may ever do, risk grades each operation from its command and blast radius so
+policy can act on it, and independent verification is what turns the evidence from a claim the
+operator makes into a statement a third party checks.
+
+Precision about the offline claim, because it is the claim that matters: verification reads one
+file and the key fingerprint you obtained out of band. Without the pinned fingerprint, verify
+proves the receipt is internally intact but not who signed it. A range receipt discloses the run's
+outcome, decisions, and redacted spec; a sparse receipt proves the same chain facts while
+disclosing nothing about neighboring tenants' entries. A run that dies with the process that ran it
+and never commits an outcome cannot be receipted, and the receipt command says so rather than
+producing something weaker.
+
+## AI agents as principals
+
+An AI agent that changes infrastructure is a principal here, not an API key. Its token is minted as
+an agent's, naming the human it acts for, and that classification is enforced and recorded, never
+guessed from traffic:
+
+    switchtender token new --agent --user owner --name prod-remediator
+
+- **Bounded authority.** An agent token is capped below admin no matter what account it is bound
+  to. It can launch and propose work; it can never manage identity, access, or secrets, and it can
+  never approve a run, including its own. Separation of duties for machine changes holds by
+  construction, not by convention.
+- **Its own rules.** Policies can name what an agent may do, what it may never do, and what needs a
+  person first:
+
+      policies:
+        - name: agents-never-drop-databases
+          actor_kind: agent
+          command_contains: "drop database"
+          effect: deny
+        - name: agent-destructive-needs-a-person
+          actor_kind: agent
+          min_risk: high
+        - name: agent-terraform-needs-a-person
+          actor_kind: agent
+          tool: terraform
+
+- **Attributed forever.** Every action lands in the chain as `actor_type: agent`, on behalf of the
+  named human, committed by the entry hash, so a change an agent made cannot later be presented as
+  a person's.
+- **The same receipt.** The run an agent requested and a person approved produces the same signed,
+  offline-verifiable receipt as any other change, showing the agent asked, the person approved
+  exactly this spec, and this is what happened.
+
+The MCP server (`switchtender mcp`) is how an agent talks to the gate: it can list templates,
+propose runs, and read results, and it deliberately has no approve tool, no credential access, and
+refuses to start on an admin token. The full walkthrough is in
+[Run an AI agent through the gate](docs/agents.md).
 
 ## See it
 
@@ -176,14 +270,6 @@ with a bounded worker pool, the cron scheduler, and the embedded UI.
   publishing events without touching the human-readable log.
 - Every run executes under its own cancel context. Canceling a split parent stops all of its
   shards. Canceling a pipeline stops the current step and halts the sequence.
-
-## AI agents as operators
-
-An AI agent that changes infrastructure is an operator, and it gets the operator's deal: one
-credential, an operator-bound SwitchTender token, and no prod credentials of its own. Every change
-it makes is recorded to the hash chain before it executes, anything policy gates waits for a human
-admin, and a signed LoomSeal bundle proves the record to a third party offline. The full setup is in
-[Run an AI agent through the gate](docs/agents.md).
 
 ## The name
 

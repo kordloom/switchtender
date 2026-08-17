@@ -73,12 +73,12 @@
 					<p>Secrets are sealed on the server and decrypt only at execution, so an agent holds exactly one credential: its SwitchTender token. It never sees an SSH key, a cloud login, or a vault password. Revoking that one token shuts the door.</p>
 				</article>
 				<article class="card reveal">
-					<h3>A human approval gate</h3>
-					<p>One empty approval policy gates every run. An agent can queue work all day, and nothing executes until a person releases it. The gate is enforced in the dispatcher, so API-driven and scheduled runs are held the same as manual ones.</p>
+					<h3>A human approval gate, bound to content</h3>
+					<p>Policies can hold an agent's runs for a person, refuse them outright, or key on the operation's assessed risk, and the approval itself is a chain entry committing a digest of the exact change released. The executor refuses a change that drifted after the decision, so what a person approved is provably what ran.</p>
 				</article>
 				<article class="card reveal">
 					<h3>Speaks MCP</h3>
-					<p><b>Next release.</b> An agent runtime that speaks the Model Context Protocol connects straight to <code>switchtender mcp</code> with its operator-bound token. It can list templates, propose a run, and read the run's evidence, and nothing else. There is no approve tool and no way to widen its own reach, so the same gated, chained, fail-closed request a person makes is the only thing an agent can make.</p>
+					<p>An agent runtime that speaks the Model Context Protocol connects straight to <code>switchtender mcp</code> with its operator-bound token. It can list templates, propose a run, and read the run's evidence, and nothing else. There is no approve tool and no way to widen its own reach, so the same gated, chained, fail-closed request a person makes is the only thing an agent can make.</p>
 				</article>
 				<article class="card reveal">
 					<h3>Sealed offline verification</h3>
@@ -86,7 +86,7 @@
 				</article>
 				<article class="card reveal">
 					<h3>Actor-level provenance</h3>
-					<p>Every entry names the actor behind it, so an agent's changes stay attributable instead of blurring into a shared account. The <a href="https://demo.switchtender.com">live demo</a> seeds a deploy-bot service account whose API and scheduled runs, and their audit entries, are on screen right now.</p>
+					<p>Every entry names the actor behind it, whether it was a person or an agent (<code>actor_type</code>), and whose authority it used (<code>on_behalf_of</code>), all committed by the entry hash, so an agent's changes stay attributable instead of blurring into a shared account. The <a href="https://demo.switchtender.com">live demo</a> seeds a deploy-bot service account whose API and scheduled runs, and their audit entries, are on screen right now.</p>
 				</article>
 			</div>
 		</section>

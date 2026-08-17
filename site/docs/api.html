@@ -496,7 +496,7 @@ webhook <code>/hooks</code> path, and the <code>/relay</code> worker path, is un
 <tr>
 <td>POST</td>
 <td><code>/v1/policies</code></td>
-<td>Create an approval policy that gates matching runs.</td>
+<td>Create a policy that holds or denies matching runs.</td>
 </tr>
 <tr>
 <td>GET</td>
@@ -521,7 +521,7 @@ webhook <code>/hooks</code> path, and the <code>/relay</code> worker path, is un
 <tr>
 <td>GET</td>
 <td><code>/v1/audit</code></td>
-<td>The mutation trail, admin only.</td>
+<td>A page of the mutation trail, admin only. <code>?limit=</code> up to 1000, default 100; <code>has_more</code> reports whether older entries remain.</td>
 </tr>
 <tr>
 <td>GET</td>
@@ -550,6 +550,10 @@ webhook <code>/hooks</code> path, and the <code>/relay</code> worker path, is un
 </tr>
 </tbody>
 </table>
+<p>A streamed export whose status line has already been sent cannot report a later failure with a
+status code. The run event NDJSON download and the run log download therefore end with a
+<code>{&quot;export_incomplete&quot;:true,&quot;reason&quot;:&quot;...&quot;}</code> line when they stop early, so a short file is never
+mistaken for a whole one.</p>
 <h2 id="account-profiles">Account profiles</h2>
 <p>An account carries an optional profile alongside its role: <code>full_name</code>, <code>email</code>, <code>phone</code>, <code>title</code>,
 <code>links</code>, and <code>notes</code>. All of them are optional, so an account created by the CLI or provisioned over
@@ -606,6 +610,11 @@ retry keeps them.</p>
 </thead>
 <tbody>
 <tr>
+<td><code>limit</code></td>
+<td>string</td>
+<td>Narrows the run to the hosts matching this pattern. Becomes <code>--limit</code>. Empty targets the whole inventory.</td>
+</tr>
+<tr>
 <td><code>tags</code></td>
 <td>list of strings</td>
 <td>Runs only the plays and tasks carrying one of these tags. Becomes <code>--tags</code>.</td>
@@ -638,6 +647,7 @@ retry keeps them.</p>
   -d '{
     &quot;playbook&quot;: &quot;plays/deploy.yml&quot;,
     &quot;inventory&quot;: &quot;prod&quot;,
+    &quot;limit&quot;: &quot;canary01&quot;,
     &quot;tags&quot;: [&quot;web&quot;, &quot;config&quot;],
     &quot;skip_tags&quot;: [&quot;reboot&quot;],
     &quot;forks&quot;: 25,
@@ -647,6 +657,9 @@ retry keeps them.</p>
 </code></pre>
 <p>These apply to the Ansible tool. The other tools ignore them, so a Bash or Terraform template that
 carries one is unaffected.</p>
+<p>A run submission also accepts <code>extra_vars</code>, an object of variables injected into the run. Ansible
+receives them the way <code>--extra-vars</code> supplies them, and a plugin tool reads them as its input. A
+template carries its own <code>extra_vars</code> and a launch may merge more over them.</p>
 <h2 id="saved-workflows">Saved workflows</h2>
 <p><em>Next release.</em> A template may carry <code>steps</code>, a pipeline graph, instead of a single tool. Such a
 template is a saved workflow: every path that fires a template, a launch, a schedule, or a webhook
@@ -772,6 +785,20 @@ renders.</p>
   -H &quot;Authorization: Bearer $SWITCHTENDER_TOKEN&quot; \
   -H 'Content-Type: application/json' \
   -d '{&quot;cron&quot;:&quot;0 2 * * *&quot;,&quot;timezone&quot;:&quot;America/New_York&quot;,&quot;template_id&quot;:&quot;tpl_abc123&quot;}'
+</code></pre>
+<h2 id="fleet-view-windows">Fleet view windows</h2>
+<p><code>/v1/fleet</code> and <code>/v1/tasks</code> take a <code>window</code>, the number of recent runs per host or per task the
+view considers, and <code>/v1/hosts/{host}/runs</code> takes a <code>limit</code>. All three default to 10. The window is
+capped at 100 and the host history limit at 500; a larger value is answered with the cap, and the
+response echoes the window it actually used. The caps exist because the per-host and per-task
+summaries are kept when their runs are deleted, so on a long-lived fleet the tables hold a row for
+every host of every run, and every row a window admits becomes an element of the answer.</p>
+<p>The same tables are bounded by count rather than by age. <code>--retain-history</code> keeps the newest N
+summaries for each host and each task and drops the rest, so a host's outcome history still
+outlives its runs without the tables growing forever. N is never allowed below 500, the deepest
+window these endpoints will answer, so trimmed history is history no request could have reached.</p>
+<pre><code class="language-bash">curl -s &quot;https://switchtender.example.com/v1/fleet?window=30&quot; \
+  -H &quot;Authorization: Bearer $SWITCHTENDER_TOKEN&quot;
 </code></pre>
 <h2 id="relay-endpoints">Relay endpoints</h2>
 <p>With <code>--worker-token</code> set, the server also serves the mesh relay under <code>/relay</code>: the execution

@@ -85,9 +85,6 @@ propose work but can never manage identity, access, or secrets, and can never ap
 run. That cap is enforced at the door, so it holds however the agent reaches the API, not only
 through the client below. <code>--agent</code> requires <code>--user</code>, because an agent acting on behalf of nobody
 is exactly the accountability gap the identity closes. The TTL forces rotation, here monthly.</p>
-<p><em>The <code>--agent</code> flag and the <code>actor_type: agent</code> attribution arrive in the next release; today a
-token minted without it acts as a normal operator token and its label is still the actor on
-everything the agent does.</em></p>
 <p>Creating the first token turns authentication on for the whole install, so make sure an admin
 account exists before the agent holds the only credential.</p>
 </li>
@@ -103,6 +100,26 @@ empty policy is a gate-everything switch:</p>
     tool: terraform
     command_contains: destroy
 </code></pre>
+<p>Policies also see who is asking, how risky the operation grades, and can refuse outright rather
+than hold. That is what turns a policy file into an agent's authorization scope: what it may do
+freely, what needs a person first, and what it may never do at all:</p>
+<pre><code>policies:
+  - name: agents-never-drop-databases
+    actor_kind: agent
+    command_contains: &quot;drop database&quot;
+    effect: deny
+  - name: agent-destructive-needs-a-person
+    actor_kind: agent
+    min_risk: high
+  - name: agent-terraform-needs-a-person
+    actor_kind: agent
+    tool: terraform
+</code></pre>
+<p><code>actor_kind: agent</code> scopes a rule to runs an agent submitted, identified by its minted token,
+never guessed from traffic. <code>actor: prod-remediator</code> pins a rule to one named principal.
+<code>min_risk</code> matches on the run's assessed risk grade, so &quot;destructive operations need a person&quot;
+is one line. <code>effect: deny</code> refuses the submission outright; the refused request is still on the
+chain, because the gate records every mutation before anything acts on it.</p>
 </li>
 <li>
 <p>Pin the policies by starting the server with <code>serve --policy-file policies.yml</code>. The file is the
@@ -114,7 +131,6 @@ them. An agent cannot loosen its own gate, and neither can a leaked admin token.
 </li>
 </ol>
 <h2 id="connecting-the-agent-over-mcp">Connecting the agent over MCP</h2>
-<p><em>Available in the next release.</em></p>
 <p>There are two ways an agent reaches the gate. The direct one is the HTTP API above: the agent holds
 the token and the base URL and makes ordinary authenticated calls. The second is the Model Context
 Protocol, which many agent runtimes speak natively. Put the operator-bound token in
@@ -146,11 +162,45 @@ belongs to can detect an omission.</p>
 <p>Runs record their source, one of api, template, schedule, rerun, reconcile, propose, or trigger,
 along with the actor. <code>actor:agent-bot</code> in run search pulls everything the agent ran, and
 <code>source:api</code> separates direct API submissions from scheduled or triggered work.</p>
-<h2 id="handing-evidence-to-someone-else">Handing evidence to someone else</h2>
-<p><code>switchtender audit bundle</code> exports a signed LoomSeal bundle. A third party verifies it offline
-with the open loomseal verifier, with no trust in the server that produced it. The install
-publishes its signing key at <code>/.well-known/loomseal.json</code>, so a verifier pins the key from a
-channel independent of the bundle it was handed.</p>
+<p>An approval is a chain entry of its own. When a person releases a held run, the chain gains a
+DECISION entry naming the approver and committing a digest of the exact spec released, and the
+executor refuses a spec that changed after the decision. So the record does not say &quot;someone
+approved run 123&quot;; it says this person approved exactly this change, and exactly this change ran.</p>
+<h2 id="the-whole-path-end-to-end">The whole path, end to end</h2>
+<p>This is the golden path a governed agent change takes, with the commands to watch it happen.</p>
+<ol>
+<li>
+<p>The agent proposes a change through MCP or the API. The request lands on the chain before
+anything acts, attributed <code>actor_type: agent</code>, on behalf of its human.</p>
+</li>
+<li>
+<p>Policy sees an agent asking. A deny rule refuses it outright, with the rule named. A matching
+approval rule holds it: the run is born <code>pending_approval</code> and no executor can claim it.</p>
+</li>
+<li>
+<p>A person reviews the held run, its assessed risk, and its parameters, and approves. The DECISION
+entry commits who approved and the digest of exactly what.</p>
+</li>
+<li>
+<p>The run executes, on whichever worker claims it, after re-checking the approved digest. The
+outcome lands on the chain: status, exit code, per-host results, the log digest, and the same
+spec digest.</p>
+</li>
+<li>
+<p>Seal it and verify it anywhere:</p>
+<pre><code>switchtender receipt run_abc123 --out run.receipt
+switchtender verify run.receipt --pubkey sha256:&lt;the fingerprint the install published&gt;
+</code></pre>
+<p>Verify reads one file, touches no database and no network, and prints who asked, who approved
+exactly what, and what happened, with every claim recomputed from the chain. <code>--sparse</code> produces
+a receipt that proves the same chain facts while disclosing nothing about the entries around the
+run, for handing to an outside auditor on a shared install.</p>
+</li>
+</ol>
+<p><code>switchtender audit bundle</code> exports the whole chain the same way, and a third party can verify
+either artifact with the open loomseal verifier, with no trust in the server that produced it. The
+install publishes its signing key at <code>/.well-known/loomseal.json</code>, so a verifier pins the key from
+a channel independent of the bundle it was handed.</p>
 <p>That is the shape an auditor accepts: here is what the agent did, here is the math showing the
 record was not altered, check it yourself.</p>
 <h2 id="the-boundary">The boundary</h2>

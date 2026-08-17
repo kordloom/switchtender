@@ -60,10 +60,6 @@ held run is admin-only, so an operator-bound agent can never approve its own wor
    through the client below. `--agent` requires `--user`, because an agent acting on behalf of nobody
    is exactly the accountability gap the identity closes. The TTL forces rotation, here monthly.
 
-   *The `--agent` flag and the `actor_type: agent` attribution arrive in the next release; today a
-   token minted without it acts as a normal operator token and its label is still the actor on
-   everything the agent does.*
-
    Creating the first token turns authentication on for the whole install, so make sure an admin
    account exists before the agent holds the only credential.
 
@@ -80,6 +76,28 @@ held run is admin-only, so an operator-bound agent can never approve its own wor
            tool: terraform
            command_contains: destroy
 
+   Policies also see who is asking, how risky the operation grades, and can refuse outright rather
+   than hold. That is what turns a policy file into an agent's authorization scope: what it may do
+   freely, what needs a person first, and what it may never do at all:
+
+       policies:
+         - name: agents-never-drop-databases
+           actor_kind: agent
+           command_contains: "drop database"
+           effect: deny
+         - name: agent-destructive-needs-a-person
+           actor_kind: agent
+           min_risk: high
+         - name: agent-terraform-needs-a-person
+           actor_kind: agent
+           tool: terraform
+
+   `actor_kind: agent` scopes a rule to runs an agent submitted, identified by its minted token,
+   never guessed from traffic. `actor: prod-remediator` pins a rule to one named principal.
+   `min_risk` matches on the run's assessed risk grade, so "destructive operations need a person"
+   is one line. `effect: deny` refuses the submission outright; the refused request is still on the
+   chain, because the gate records every mutation before anything acts on it.
+
 4. Pin the policies by starting the server with `serve --policy-file policies.yml`. The file is the
    source of truth and the API refuses policy writes, so even an admin API caller cannot rewrite
    them. An agent cannot loosen its own gate, and neither can a leaked admin token.
@@ -87,8 +105,6 @@ held run is admin-only, so an operator-bound agent can never approve its own wor
 5. Hand the agent its token and the API base URL, and nothing else.
 
 ## Connecting the agent over MCP
-
-*Available in the next release.*
 
 There are two ways an agent reaches the gate. The direct one is the HTTP API above: the agent holds
 the token and the base URL and makes ordinary authenticated calls. The second is the Model Context
@@ -128,12 +144,38 @@ Runs record their source, one of api, template, schedule, rerun, reconcile, prop
 along with the actor. `actor:agent-bot` in run search pulls everything the agent ran, and
 `source:api` separates direct API submissions from scheduled or triggered work.
 
-## Handing evidence to someone else
+An approval is a chain entry of its own. When a person releases a held run, the chain gains a
+DECISION entry naming the approver and committing a digest of the exact spec released, and the
+executor refuses a spec that changed after the decision. So the record does not say "someone
+approved run 123"; it says this person approved exactly this change, and exactly this change ran.
 
-`switchtender audit bundle` exports a signed LoomSeal bundle. A third party verifies it offline
-with the open loomseal verifier, with no trust in the server that produced it. The install
-publishes its signing key at `/.well-known/loomseal.json`, so a verifier pins the key from a
-channel independent of the bundle it was handed.
+## The whole path, end to end
+
+This is the golden path a governed agent change takes, with the commands to watch it happen.
+
+1. The agent proposes a change through MCP or the API. The request lands on the chain before
+   anything acts, attributed `actor_type: agent`, on behalf of its human.
+2. Policy sees an agent asking. A deny rule refuses it outright, with the rule named. A matching
+   approval rule holds it: the run is born `pending_approval` and no executor can claim it.
+3. A person reviews the held run, its assessed risk, and its parameters, and approves. The DECISION
+   entry commits who approved and the digest of exactly what.
+4. The run executes, on whichever worker claims it, after re-checking the approved digest. The
+   outcome lands on the chain: status, exit code, per-host results, the log digest, and the same
+   spec digest.
+5. Seal it and verify it anywhere:
+
+       switchtender receipt run_abc123 --out run.receipt
+       switchtender verify run.receipt --pubkey sha256:<the fingerprint the install published>
+
+   Verify reads one file, touches no database and no network, and prints who asked, who approved
+   exactly what, and what happened, with every claim recomputed from the chain. `--sparse` produces
+   a receipt that proves the same chain facts while disclosing nothing about the entries around the
+   run, for handing to an outside auditor on a shared install.
+
+`switchtender audit bundle` exports the whole chain the same way, and a third party can verify
+either artifact with the open loomseal verifier, with no trust in the server that produced it. The
+install publishes its signing key at `/.well-known/loomseal.json`, so a verifier pins the key from
+a channel independent of the bundle it was handed.
 
 That is the shape an auditor accepts: here is what the agent did, here is the math showing the
 record was not altered, check it yourself.

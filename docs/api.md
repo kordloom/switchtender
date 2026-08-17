@@ -101,7 +101,7 @@ webhook `/hooks` path, and the `/relay` worker path, is unversioned. The root re
 | GET    | `/v1/inventories`          | List stored inventories.                                |
 | PUT    | `/v1/inventories/{id}`     | Update a stored inventory.                              |
 | DELETE | `/v1/inventories/{id}`     | Delete a stored inventory.                              |
-| POST   | `/v1/policies`             | Create an approval policy that gates matching runs.     |
+| POST   | `/v1/policies`             | Create a policy that holds or denies matching runs.     |
 | GET    | `/v1/policies`             | List approval policies.                                 |
 | PUT    | `/v1/policies/{id}`        | Update an approval policy.                              |
 | DELETE | `/v1/policies/{id}`        | Delete an approval policy.                              |

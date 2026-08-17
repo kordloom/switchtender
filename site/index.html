@@ -71,8 +71,10 @@
 				<span class="eyebrow">Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, Go</span>
 				<h1>Run everything.<br>Watch every host.<br><span class="grad">Prove every change.</span></h1>
 				<p class="lede">
-					Your whole automation stack in one Go binary. Every run painted live, host by task.
-					Every change hash-chained and verifiable offline, every risky run held for sign-off.
+					The governed execution boundary between your operators, human or AI agent, and the
+					systems they change. Every run painted live, host by task. Every change walks one
+					path: request, policy, approval, execution, evidence, and comes out as a signed
+					receipt anyone verifies offline.
 					<strong>All of it ships in one binary that starts in seconds.</strong>
 				</p>
 				<div class="hero-cta">
@@ -93,6 +95,14 @@
 
 		<section class="namebar wrap reveal">
 			<p><b>Why SwitchTender?</b> A switchtender is the person who throws the track switches in a rail yard, deciding which train goes where. Nothing moves without them. That's the job here too: one control point for every playbook on every host.</p>
+		</section>
+
+		<section class="strip wrap reveal" aria-label="The path every change walks">
+			<div><b>Request</b><span>recorded before anything acts</span></div>
+			<div><b>Policy</b><span>sees who's asking, can refuse</span></div>
+			<div><b>Approval</b><span>binds to the exact change</span></div>
+			<div><b>Execution</b><span>gated wherever it runs</span></div>
+			<div><b>Evidence</b><span>a receipt verified offline</span></div>
 		</section>
 
 		<section class="strip wrap reveal">
@@ -304,8 +314,8 @@ switchtender witness --server https://demo.switchtender.com --once</code></pre>
 		<section class="section wrap" id="agent-gov">
 			<div class="section-head reveal">
 				<span class="eyebrow">AI agent change governance</span>
-				<h2>Agents are operators now.</h2>
-				<p>When an AI agent runs your infrastructure, hand it one credential: a SwitchTender token bound to an operator account. Secrets stay sealed on the server, policy holds risky runs for a person to release, and every change lands in the chain under the agent's own name. The gate is the agent's only door.</p>
+				<h2>Agents are principals here, not API keys.</h2>
+				<p>An agent's token is minted as an agent's, naming the human it acts for, and capped below admin so it can never approve its own work or touch identity, access, or secrets. Policy can say what an agent may do, what needs a person first, and what it may never do at all. Every change lands in the chain as the agent's, on behalf of its human, and the receipt proves a person approved exactly the change that ran. The gate is the agent's only door.</p>
 			</div>
 			<div class="hero-cta center reveal">
 				<a class="btn big" href="/agents">Run an agent with proof</a>

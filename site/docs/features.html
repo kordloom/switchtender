@@ -112,11 +112,11 @@
 </tr>
 <tr>
 <td>Approvals</td>
-<td>Mark a run to require sign-off, or require it automatically by policy on tool, command, or target. A held run never executes until an admin approves or rejects it, and the request and decision land in the tamper-evident audit trail.</td>
+<td>Mark a run to require sign-off, or require it automatically by policy on tool, command, target, assessed risk, or who is asking. A held run never executes until an admin approves or rejects it. The decision is a chain entry committing a digest of the exact spec released, the executor refuses a spec that changed after the decision, and the receipt proves the approved and executed change are the same.</td>
 </tr>
 <tr>
 <td>Policy as code</td>
-<td>Point <code>--policy-file</code> at a YAML file and it becomes the source of truth for approval policies. A change to what needs approval is then a reviewed diff with a commit behind it, the API refuses policy writes with a 409 that says where to make the change, and a malformed file stops the server rather than silently gating nothing.</td>
+<td>Point <code>--policy-file</code> at a YAML file and it becomes the source of truth for policies. A rule can hold a run for approval or deny it outright (<code>effect: deny</code>), can scope itself to agents or people (<code>actor_kind</code>), to one named principal (<code>actor</code>), or to a risk floor (<code>min_risk</code>), so an agent's authorization boundary is a reviewed diff with a commit behind it. The API refuses policy writes with a 409 that says where to make the change, and a malformed file stops the server rather than silently gating nothing.</td>
 </tr>
 <tr>
 <td>Observability</td>

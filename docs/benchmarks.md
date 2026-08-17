@@ -9,8 +9,8 @@ the same machine. Memory and binary sizes are mebibytes, the unit `ps` and `/pro
 hardware will differ; the method will not.
 
 These figures are the current main build. The footprint and binary size hold for the released
-version; the lower no-encryption boot, where UI asset compression moved off the startup path, ships
-in the next release, so a build before it comes up nearer 70 ms.
+version. The lower no-encryption boot comes from UI asset compression moving off the startup path;
+a build older than that change comes up nearer 70 ms.
 
 The point of re-measuring: across dozens of releases, a full security-hardening pass, and custom
 credential types, the footprint did not grow, and the no-encryption boot dropped when UI asset

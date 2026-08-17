@@ -102,7 +102,7 @@ the chain receipts and anchors behind them.</p>
 </tr>
 <tr>
 <td>Change activity is tracked and attributable</td>
-<td>The actor on every entry, joined by <code>actor_type</code> and <code>on_behalf_of</code> in the next release; the change register lists every change in the period.</td>
+<td>The actor on every entry, with <code>actor_type</code> saying whether a person, an agent, or the system acted and <code>on_behalf_of</code> naming whose authority it used, all committed by the entry hash; the change register lists every change in the period.</td>
 </tr>
 <tr>
 <td>The change record is complete and unaltered</td>
@@ -114,7 +114,7 @@ the chain receipts and anchors behind them.</p>
 </tr>
 <tr>
 <td>Segregation between requester and approver</td>
-<td>Approve and reject are admin-only; the operator or agent that submits cannot approve.</td>
+<td>Approve and reject are admin-only, so an operator or agent can never release its own change; for machine changes the separation holds by construction. An admin who submits a run can still approve it, so keep admin accounts for people whose changes your process allows to self-approve, and put day-to-day submitters at operator.</td>
 </tr>
 </tbody>
 </table>
@@ -184,8 +184,9 @@ protected health information.</p>
 </tbody>
 </table>
 <h2 id="the-boundary-stated-plainly">The boundary, stated plainly</h2>
-<p>The chain proves the record was not altered; with the content digest, next release, it also proves
-what each change contained.
+<p>The chain proves the record was not altered, and the content digest on each entry commits what the
+change contained. An approval additionally commits the digest of the exact spec it released, so the
+record ties the decision to the content decided on.
 It does not prove that every change to your infrastructure went through SwitchTender: a person or a
 process holding its own SSH key can change a host behind the controller, and no audit system records
 what it never saw. For an AI agent the gap closes, because an agent that holds only a SwitchTender

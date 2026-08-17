@@ -528,6 +528,11 @@ that variable is unset.</p>
 <td>Drop run events and logs older than this, for example <code>30d</code>. Empty keeps them forever.</td>
 </tr>
 <tr>
+<td><code>--retain-history</code></td>
+<td>none</td>
+<td>Keep only this many per-host and per-task summaries for each host and each task, for example <code>500</code>. Summaries outlive the runs they came from, so this is the only bound on them. Zero keeps every summary forever. A smaller value is raised to 500, the deepest window the fleet views will answer.</td>
+</tr>
+<tr>
 <td><code>--retention-interval</code></td>
 <td><code>1h</code></td>
 <td>How often the retention sweeper runs.</td>

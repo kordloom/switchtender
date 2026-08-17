@@ -42,10 +42,10 @@ CC8.1 asks that changes are authorized, tested, and tracked before they reach pr
 | The control expects | Where SwitchTender shows it |
 |---------------------|-----------------------------|
 | Changes are authorized before they take effect | The approval decision on each register row, recorded in the chain; an empty approval policy holds every run for a person, and approve is admin-only so an operator or agent cannot release its own change. |
-| Change activity is tracked and attributable | The actor on every entry, joined by `actor_type` and `on_behalf_of` in the next release; the change register lists every change in the period. |
+| Change activity is tracked and attributable | The actor on every entry, with `actor_type` saying whether a person, an agent, or the system acted and `on_behalf_of` naming whose authority it used, all committed by the entry hash; the change register lists every change in the period. |
 | The change record is complete and unaltered | The hash chain: a change that cannot be recorded is refused rather than made, and altering or deleting an entry breaks verification, provable offline from a signed bundle with the open `loomseal` verifier. |
 | A dry run or test preceded the change | A run's dossier records whether it ran in the tool's no-change mode; drift is shown from a dry run before the fix is built. |
-| Segregation between requester and approver | Approve and reject are admin-only; the operator or agent that submits cannot approve. |
+| Segregation between requester and approver | Approve and reject are admin-only, so an operator or agent can never release its own change; for machine changes the separation holds by construction. An admin who submits a run can still approve it, so keep admin accounts for people whose changes your process allows to self-approve, and put day-to-day submitters at operator. |
 
 ## ISO/IEC 27001:2022 A.8.32 (change management)
 
@@ -74,8 +74,9 @@ protected health information.
 
 ## The boundary, stated plainly
 
-The chain proves the record was not altered; with the content digest, next release, it also proves
-what each change contained.
+The chain proves the record was not altered, and the content digest on each entry commits what the
+change contained. An approval additionally commits the digest of the exact spec it released, so the
+record ties the decision to the content decided on.
 It does not prove that every change to your infrastructure went through SwitchTender: a person or a
 process holding its own SSH key can change a host behind the controller, and no audit system records
 what it never saw. For an AI agent the gap closes, because an agent that holds only a SwitchTender

@@ -98,15 +98,15 @@ against it lands there, no matter how it was launched.
 ## Provable audit
 
 Every authenticated mutation is recorded in the audit trail, and each entry is linked into a SHA-256
-hash chain. Each entry commits to who acted, the method and path, and the previous entry's hash;
-from the next release it also commits to how they authenticated, the account whose authority they
-used, and a digest of the change payload. Altering,
+hash chain. Each entry commits to who acted, how they authenticated, the account whose authority
+they used, the method and path, a digest of the change payload, and the previous entry's hash.
+Altering,
 reordering, or deleting an entry breaks the chain, which `GET /v1/audit/verify` detects. `GET /v1/audit/bundle`
 seals the chain into a signed LoomSeal bundle, so the open `loomseal` verifier proves the trail is
 intact and unaltered offline, on the command line or in a browser, without trusting the server that
 produced it.
 
-**The record covers the change, not only that a call was made** (next release). The link commits to
+**The record covers the change, not only that a call was made.** The link commits to
 a digest of the request payload, so a recorded change cannot be re-cast as a different one while the
 chain still verifies. The digest is taken over the payload with its secret fields redacted first, so
 it proves the shape and non-secret content of a change without becoming a way to brute-force a
@@ -135,8 +135,10 @@ handler runs, at a request path that names the template rather than the run it g
 so the two cannot be matched by name. The run keeps the receipt instead, the same `seq:link` the
 `Audit-Receipt` header returned, and its dossier redeems that receipt against the live chain. A
 server that dropped the creation entry cannot answer the receipt, and the dossier says so rather
-than showing a run with no origin. A run the scheduler started on its own carries no receipt, since
-no request authorized it, and the document states that rather than leaving it ambiguous.
+than showing a run with no origin. A run the scheduler starts carries a receipt too: the fire is
+recorded as its own chain entry before the run exists, naming the schedule and committing what it
+was configured to launch, and a fire that cannot be recorded is skipped rather than performed
+silently.
 
 **Authentication attempts are not in the chain, and this is deliberate.** An assessor reviewing an
 append-only trail will notice sign-in attempts are absent, so here is why. A sign-in and a webhook
@@ -177,7 +179,7 @@ from a claim the operator makes into one a third party signs. When the witness c
 the attestation says so rather than going quiet, because a server going dark on its witness is
 itself a signal.
 
-From the next release, a hosted witness reachable off its own host requires a read token on every
+A hosted witness reachable off its own host requires a read token on every
 API call, set with `--api-token` or `SWITCHTENDER_WITNESS_TOKEN`, so a public deployment does not
 hand any caller the list of watched servers or the cross-server findings feed. Offline attestation
 verification is unaffected: a relying party checks an attestation it already holds against the
