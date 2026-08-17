@@ -269,6 +269,17 @@ func updateTemplateHandler(store template.Store, authz *authorizer, log *zap.Log
 			if existing.OrgID != req.OrgID && authz.denyForeignOrg(w, r, log, existing.OrgID) {
 				return
 			}
+			// A saved workflow's graph is the template. The update writes the record whole, and
+			// the single-run edit dialog carries no steps, so accepting a steps-less edit of a
+			// stepped template silently replaced a pipeline with one playbook and answered 200.
+			// Losing a graph is a decision the caller has to make by sending the replacement.
+			if len(existing.Steps) > 0 && len(req.Steps) == 0 {
+				respondError(w, log, http.StatusConflict,
+					"this template is a saved workflow and this edit carries no steps, so saving "+
+						"would erase its graph. Send the full steps to change it, or delete it and "+
+						"create a single-run template in its place")
+				return
+			}
 		}
 		t := &template.Template{
 			ID: id, Name: req.Name, ProjectID: req.ProjectID,

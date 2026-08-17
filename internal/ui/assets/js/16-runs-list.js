@@ -135,6 +135,11 @@ async function loadRuns() {
 // toolLabel returns a short label for what a run executed: its playbook file, or its command for a
 // non-Ansible tool, collapsed and truncated so a long command does not stretch the row.
 function toolLabel(r) {
+	// A saved workflow's identity is its graph, not a playbook it does not have. Without this a
+	// stepped template listed with a blank what-it-runs label and read as a broken ansible entry.
+	if (r.steps && r.steps.length) {
+		return "workflow, " + r.steps.length + (r.steps.length === 1 ? " step" : " steps");
+	}
 	if (r.playbook) return baseName(r.playbook) || r.playbook;
 	const cmd = (r.command || "").replace(/\s+/g, " ").trim();
 	return cmd.length > 48 ? cmd.slice(0, 47) + "…" : cmd;
@@ -274,14 +279,19 @@ function labelCellEl(labels) {
 // labeled, aligned column instead of floating beside names.
 function typeCellEl(r) {
 	const cell = td("");
-	const tool = (r.tool || "ansible").toLowerCase();
-	const chip = document.createElement("span");
-	chip.className = "tool-badge " + tool;
-	chip.dataset.tool = tool;
-	chip.textContent = tool;
-	if (KIND_TIPS[tool]) chip.dataset.tip = KIND_TIPS[tool];
-	cell.appendChild(chip);
-	for (const kind of [r.kind === "split" ? "split" : "", r.kind === "pipeline" ? "pipeline" : "", r.dry_run ? "dry" : ""]) {
+	// A stepped template names no tool of its own, each step does, so a tool chip here would
+	// claim ansible for a graph that may run none. The pipeline tag below is its identity.
+	const stepped = !r.tool && r.steps && r.steps.length;
+	if (!stepped) {
+		const tool = (r.tool || "ansible").toLowerCase();
+		const chip = document.createElement("span");
+		chip.className = "tool-badge " + tool;
+		chip.dataset.tool = tool;
+		chip.textContent = tool;
+		if (KIND_TIPS[tool]) chip.dataset.tip = KIND_TIPS[tool];
+		cell.appendChild(chip);
+	}
+	for (const kind of [r.kind === "split" ? "split" : "", (r.kind === "pipeline" || stepped) ? "pipeline" : "", r.dry_run ? "dry" : ""]) {
 		if (!kind) continue;
 		const tag = document.createElement("span");
 		tag.className = "run-kind " + kind;
