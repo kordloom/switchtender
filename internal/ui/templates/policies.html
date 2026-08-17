@@ -15,8 +15,8 @@
 	<main class="content">
 		<div class="page-head">
 			<div class="page-head-text">
-				<h1>Approval policies</h1>
-				<p class="muted">A policy holds every run it matches for approval, so the gate cannot be skipped. An empty field matches any value.</p>
+				<h1>Policies</h1>
+				<p class="muted">A policy holds every run it matches for a person's sign-off, or refuses it outright. Rules can see who is asking, an AI agent or a person, and how risky the operation grades. An empty field matches any value.</p>
 			</div>
 			<button id="policy-open" class="button primary">
 				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -53,6 +53,34 @@
 				<label class="field-label">Inventory
 					<select id="policy-inventory" class="input"><option value="">Any inventory</option></select>
 				</label>
+				<label class="field-label">Effect
+					<select id="policy-effect" class="input">
+						<option value="">Hold for approval</option>
+						<option value="deny">Deny outright</option>
+					</select>
+				</label>
+				<label class="field-label">Who is asking
+					<select id="policy-actor-kind" class="input">
+						<option value="">Any actor</option>
+						<option value="agent">AI agents</option>
+						<option value="human">People</option>
+					</select>
+				</label>
+				<label class="field-label">Named actor
+					<input id="policy-actor" class="input mono" placeholder="prod-remediator">
+				</label>
+				<label class="field-label">Minimum risk
+					<select id="policy-min-risk" class="input">
+						<option value="">Any risk</option>
+						<option value="low">Low or above</option>
+						<option value="medium">Medium or above</option>
+						<option value="high">High only</option>
+					</select>
+				</label>
+				<label class="field-label">Max destroy
+					<input id="policy-max-destroy" class="input" type="number" min="0" placeholder="off">
+					<span class="muted">Hold a terraform or opentofu apply when its plan destroys more than this many resources. Empty leaves the plan check off. Not valid on a deny rule.</span>
+				</label>
 				<label class="field-label check-label">
 					<input id="policy-exclude-dry" type="checkbox">
 					Skip dry runs, so a no-change preview does not need approval
@@ -70,9 +98,13 @@
 			<thead>
 				<tr>
 					<th>Name</th>
+					<th>Effect</th>
+					<th>Who</th>
+					<th>Min risk</th>
 					<th>Tool</th>
 					<th>Command contains</th>
 					<th>Inventory</th>
+					<th>Max destroy</th>
 					<th>Skip dry runs</th>
 					<th>Holding</th>
 					<th>Created</th>

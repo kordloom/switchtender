@@ -147,6 +147,12 @@ function openPolicyEdit(p) {
 	document.getElementById("policy-tool").value = p.tool || "";
 	document.getElementById("policy-command").value = p.command_contains || "";
 	document.getElementById("policy-inventory").value = p.inventory_id || "";
+	document.getElementById("policy-effect").value = p.effect === "deny" ? "deny" : "";
+	document.getElementById("policy-actor-kind").value = p.actor_kind || "";
+	document.getElementById("policy-actor").value = p.actor || "";
+	document.getElementById("policy-min-risk").value = p.min_risk || "";
+	document.getElementById("policy-max-destroy").value =
+		(p.max_destroy !== undefined && p.max_destroy !== null && p.max_destroy >= 0) ? String(p.max_destroy) : "";
 	document.getElementById("policy-exclude-dry").checked = !!p.exclude_dry_run;
 	document.getElementById("policy-status").textContent = "";
 	setModalTitle("policy", "Edit policy");
@@ -164,6 +170,11 @@ function wirePolicyForm() {
 		document.getElementById("policy-tool").value = "";
 		document.getElementById("policy-command").value = "";
 		document.getElementById("policy-inventory").value = "";
+		document.getElementById("policy-effect").value = "";
+		document.getElementById("policy-actor-kind").value = "";
+		document.getElementById("policy-actor").value = "";
+		document.getElementById("policy-min-risk").value = "";
+		document.getElementById("policy-max-destroy").value = "";
 		document.getElementById("policy-exclude-dry").checked = false;
 		document.getElementById("policy-status").textContent = "";
 		setModalTitle("policy", "Add a policy");
@@ -181,13 +192,25 @@ function wirePolicyForm() {
 		if (inFlight) return;
 		const status = document.getElementById("policy-status");
 		const editId = form.dataset.editId;
+		// Every field the API knows is carried, filled or empty. Sending only the filled ones
+		// made an edit a silent downgrade: the update handler rebuilds the policy whole, so a
+		// deny rule saved from a dialog that did not know about effect came back as an approval
+		// rule with no warning.
 		const payload = {
 			name: document.getElementById("policy-name").value.trim(),
 			tool: document.getElementById("policy-tool").value,
 			command_contains: document.getElementById("policy-command").value.trim(),
 			inventory_id: document.getElementById("policy-inventory").value,
+			effect: document.getElementById("policy-effect").value,
+			actor_kind: document.getElementById("policy-actor-kind").value,
+			actor: document.getElementById("policy-actor").value.trim(),
+			min_risk: document.getElementById("policy-min-risk").value,
 			exclude_dry_run: document.getElementById("policy-exclude-dry").checked,
 		};
+		const maxDestroy = document.getElementById("policy-max-destroy").value.trim();
+		if (maxDestroy !== "") {
+			payload.max_destroy = parseInt(maxDestroy, 10);
+		}
 		inFlight = true;
 		if (submitBtn) submitBtn.disabled = true;
 		try {
