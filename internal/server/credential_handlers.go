@@ -13,14 +13,17 @@ import (
 	"github.com/kordloom/switchtender/internal/user"
 )
 
-// denyNonAdminCommandSource refuses a non-admin request to give a credential the command source.
-// The command source runs a shell command on the executor when the credential resolves, so it is
-// code execution on the run host, an admin capability. A manage grant delegates rotating and
-// renaming a credential, never turning it into a shell payload, and the PUT route admits a
-// manage-delegated non-admin, so the role rather than object delegation is what must bound this.
-// It is enforced on create and update alike, and reports true when it has already answered the
-// request.
-func denyNonAdminCommandSource(w http.ResponseWriter, r *http.Request, log *zap.Logger, source string) bool {
+// denyNonAdminCommandSource refuses a non-admin request to give what the command source. The command
+// source runs a shell command on the executor when the value resolves, so it is code execution on the
+// run host, an admin capability. A manage grant delegates rotating and renaming an object, never
+// turning it into a shell payload, and the PUT routes admit a manage-delegated non-admin, so the role
+// rather than object delegation is what must bound this. It is enforced on create and update alike,
+// and reports true when it has already answered the request.
+//
+// what names the object in the refusal, since a credential and an inventory both carry a command
+// source and both reach the same executor.
+func denyNonAdminCommandSource(w http.ResponseWriter, r *http.Request, log *zap.Logger,
+	source, what string) bool {
 	if credential.NormalizeSource(source) != credential.SourceCommand {
 		return false
 	}
@@ -31,7 +34,7 @@ func denyNonAdminCommandSource(w http.ResponseWriter, r *http.Request, log *zap.
 	actor, ok := actorFrom(r.Context())
 	if ok && actor.Role != user.RoleAdmin {
 		respondError(w, log, http.StatusForbidden,
-			"only an admin may set a credential to the command source, since it runs a command on the executor")
+			"only an admin may set "+what+" to the command source, since it runs a command on the executor")
 		return true
 	}
 	return false
@@ -146,7 +149,7 @@ func createCredentialHandler(store credential.Store, types credential.TypeStore,
 				"source must be one of: "+credential.SourceList())
 			return
 		}
-		if denyNonAdminCommandSource(w, r, log, req.Source) {
+		if denyNonAdminCommandSource(w, r, log, req.Source, "a credential") {
 			return
 		}
 		// Trimmed the same way the update handler trims, so one spelling of vault_id is not
@@ -426,7 +429,7 @@ func updateCredentialHandler(store credential.Store, sealer *credential.Sealer, 
 			// the secret block because a command credential's secret is the command itself: rewriting
 			// it requires a new secret, so guarding here covers both flipping a credential to command
 			// and changing the command an existing command credential runs.
-			if denyNonAdminCommandSource(w, r, log, source) {
+			if denyNonAdminCommandSource(w, r, log, source, "a credential") {
 				return
 			}
 			secretPlain, err := sealableSecret(kind, source, secret, passphrase)
