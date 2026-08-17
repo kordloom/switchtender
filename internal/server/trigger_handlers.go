@@ -414,7 +414,8 @@ func hookHandler(triggers trigger.Store, templates template.Store, submitter Sub
 		}
 
 		opts = append(opts, run.WithIdempotencyKey(key),
-			run.WithSource("trigger", tg.ID), run.WithActor("trigger "+tg.Name))
+			run.WithSource("trigger", tg.ID), run.WithActor("trigger "+tg.Name),
+			run.WithActorType("webhook"))
 		var created *run.Run
 		switch {
 		case len(t.Steps) > 0:

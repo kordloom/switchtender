@@ -61,7 +61,7 @@ func (r *recordingRetrier) RetryFailedShards(_ context.Context, parentID string)
 
 // RelaunchFailedHosts records the run id and returns a fresh run standing in for the relaunch. The
 // relaunch-failed route reaches this one, so a guard that stopped firing would show up here.
-func (r *recordingRetrier) RelaunchFailedHosts(_ context.Context, runID, _ string) (*run.Run, error) {
+func (r *recordingRetrier) RelaunchFailedHosts(_ context.Context, runID, _, _ string) (*run.Run, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.parents = append(r.parents, runID)

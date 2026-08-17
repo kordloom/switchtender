@@ -42,7 +42,7 @@ func TestRelaunchFailedHosts(t *testing.T) {
 		t.Fatalf("Save(finished) error = %v", err)
 	}
 
-	relaunch, err := d.RelaunchFailedHosts(ctx, "run_src", "operator_b")
+	relaunch, err := d.RelaunchFailedHosts(ctx, "run_src", "operator_b", "session")
 	if err != nil {
 		t.Fatalf("RelaunchFailedHosts() error = %v", err)
 	}
@@ -70,14 +70,14 @@ func TestRelaunchFailedHosts(t *testing.T) {
 	_ = store.SaveHostSummary(ctx, "run_green", []run.HostSummary{{Host: "a", OK: 3}})
 	green.Status = run.StatusSucceeded
 	_ = store.Save(ctx, green)
-	if _, err := d.RelaunchFailedHosts(ctx, "run_green", "operator_b"); !errors.Is(err, ErrNoFailedHosts) {
+	if _, err := d.RelaunchFailedHosts(ctx, "run_green", "operator_b", "session"); !errors.Is(err, ErrNoFailedHosts) {
 		t.Errorf("relaunch of an all-green run = %v, want ErrNoFailedHosts", err)
 	}
 
 	// A run with no per-host results, such as a bash command, is refused rather than guessed at.
 	bash := &run.Run{ID: "run_bash", Tool: "bash", Command: "echo hi", Status: run.StatusFailed, CreatedAt: time.Now()}
 	_ = store.Save(ctx, bash)
-	if _, err := d.RelaunchFailedHosts(ctx, "run_bash", "operator_b"); !errors.Is(err, ErrNoHostSummary) {
+	if _, err := d.RelaunchFailedHosts(ctx, "run_bash", "operator_b", "session"); !errors.Is(err, ErrNoHostSummary) {
 		t.Errorf("relaunch of a run with no host results = %v, want ErrNoHostSummary", err)
 	}
 }

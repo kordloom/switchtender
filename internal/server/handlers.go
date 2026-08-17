@@ -390,7 +390,7 @@ func reconcileDriftHandler(store run.Store, submitter Submitter, authz *authoriz
 			run.WithRequireApproval(true),
 			run.WithProposedFrom(check.ID),
 			run.WithSource("reconcile", check.ID),
-			run.WithActor(actorName(r)),
+			run.WithActor(actorName(r)), run.WithActorType(actorType(r)),
 		)
 		if tool == run.ToolAnsible {
 			// The Ansible fix reruns the playbook limited to the drifted host, applying exactly the
@@ -571,7 +571,8 @@ func createRunHandler(submitter Submitter, authz *authorizer, log *zap.Logger) h
 		opts := []run.SubmitOption{
 			run.WithCredentialIDs(req.CredentialIDs),
 			run.WithTool(req.Tool), run.WithCommand(req.Command), run.WithDryRun(req.DryRun),
-			run.WithSource("api", ""), run.WithActor(actorName(r)), run.WithLabels(req.Labels),
+			run.WithSource("api", ""), run.WithActor(actorName(r)),
+			run.WithActorType(actorType(r)), run.WithLabels(req.Labels),
 			run.WithTags(req.Tags...), run.WithSkipTags(req.SkipTags...),
 			run.WithVerbosity(req.Verbosity), run.WithForks(req.Forks), run.WithDiffMode(req.DiffMode),
 			run.WithExtraVars(req.ExtraVars),
@@ -688,7 +689,8 @@ func createPipelineHandler(submitter Submitter, authz *authorizer, log *zap.Logg
 			return
 		}
 
-		popts := []run.SubmitOption{run.WithCredentialIDs(req.CredentialIDs)}
+		popts := []run.SubmitOption{run.WithCredentialIDs(req.CredentialIDs),
+			run.WithActor(actorName(r)), run.WithActorType(actorType(r))}
 		// Validated exactly as a run submission is. Taking the header verbatim here let a caller
 		// mint a key in the reserved namespace that derived keys use, plant a run under the key a
 		// webhook or a rerun would later compute, and have that later launch resolve to the planted
@@ -867,7 +869,7 @@ func relaunchFailedHandler(store run.Store, retrier Retrier, authz *authorizer, 
 		if authorizeRunAccess(w, r, authz, log, rn) {
 			return
 		}
-		created, err := retrier.RelaunchFailedHosts(r.Context(), id, actorName(r))
+		created, err := retrier.RelaunchFailedHosts(r.Context(), id, actorName(r), actorType(r))
 		switch {
 		case errors.Is(err, run.ErrNotFound):
 			respondError(w, log, http.StatusNotFound, "run not found")
@@ -969,6 +971,15 @@ func hostFactsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.
 func actorName(r *http.Request) string {
 	if a, ok := actorFrom(r.Context()); ok {
 		return a.Name
+	}
+	return ""
+}
+
+// actorType returns how the caller authenticated, in the audit chain's vocabulary, empty when the
+// API runs open. Stamped on submitted runs so a policy can tell an agent's request from a person's.
+func actorType(r *http.Request) string {
+	if a, ok := actorFrom(r.Context()); ok {
+		return a.Type
 	}
 	return ""
 }
@@ -1112,7 +1123,8 @@ func rerunRunHandler(store run.Store, submitter Submitter, authz *authorizer, lo
 			return
 		}
 		opts := append(rerunOptions(rn), run.WithSource("rerun", rn.ID), run.WithRerunOf(rn.ID),
-			run.WithActor(actorName(r)), run.WithIdempotencyKey(key))
+			run.WithActor(actorName(r)), run.WithActorType(actorType(r)),
+			run.WithIdempotencyKey(key))
 		var created *run.Run
 		if rn.Kind == run.KindSplit && rn.ShardCount != nil && *rn.ShardCount > 1 {
 			created, err = submitter.SubmitSplit(r.Context(), rn.Playbook, rn.Inventory, *rn.ShardCount, opts...)

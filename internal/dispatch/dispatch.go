@@ -999,7 +999,7 @@ func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string) (*r
 //
 // The actor is whoever asked for the relaunch, which is not necessarily whoever launched the run it
 // is built from.
-func (d *Dispatcher) RelaunchFailedHosts(ctx context.Context, runID, actor string) (*run.Run, error) {
+func (d *Dispatcher) RelaunchFailedHosts(ctx context.Context, runID, actor, actorType string) (*run.Run, error) {
 	existing, key, err := run.ResolveDedupe(ctx, d.store, dedupeRelaunchHosts, runID, time.Now())
 	if err != nil {
 		return nil, err
@@ -1039,6 +1039,7 @@ func (d *Dispatcher) RelaunchFailedHosts(ctx context.Context, runID, actor strin
 		// Stamping the source run's actor credited the relaunch to the wrong person, so asking
 		// what a given operator started missed the runs they started this way.
 		run.WithActor(actor),
+		run.WithActorType(actorType),
 		// The relaunch belongs to the same tenant as the run it fixes. A relaunch of an objectless
 		// run names no stored object, so without the source run's org it would be readable across
 		// every tenant.

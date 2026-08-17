@@ -257,6 +257,11 @@ type Run struct {
 	SourceID string `json:"source_id,omitempty"`
 	// Actor is the authenticated user who fired the run, when the server knows one.
 	Actor string `json:"actor,omitempty"`
+	// ActorType is how the requesting actor authenticated, in the audit chain's vocabulary: agent
+	// for an AI agent's token, session for a signed-in person, token for an owner-held API token,
+	// cli for the command line, webhook for a trigger. Empty when the server does not know. It is
+	// what lets a policy treat an agent's request differently from a person's.
+	ActorType string `json:"actor_type,omitempty"`
 	// RerunOf is the finished run whose spec this run replayed.
 	RerunOf string `json:"rerun_of,omitempty"`
 	// Labels are user-supplied key values for slicing runs: env, ticket, team.
@@ -525,6 +530,12 @@ func WithSource(source, sourceID string) SubmitOption {
 // WithActor stamps the authenticated user who fired the run.
 func WithActor(actor string) SubmitOption {
 	return func(r *Run) { r.Actor = actor }
+}
+
+// WithActorType stamps how the requesting actor authenticated, so a policy can tell an agent's
+// request from a person's.
+func WithActorType(kind string) SubmitOption {
+	return func(r *Run) { r.ActorType = kind }
 }
 
 // WithRerunOf records the finished run whose spec this run replays.

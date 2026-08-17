@@ -82,7 +82,7 @@ func (f *fakeRetrier) RetryFailedShards(_ context.Context, parentID string) (*ru
 }
 
 // RelaunchFailedHosts records the id and returns the configured run or error.
-func (f *fakeRetrier) RelaunchFailedHosts(_ context.Context, runID, actor string) (*run.Run, error) {
+func (f *fakeRetrier) RelaunchFailedHosts(_ context.Context, runID, actor, _ string) (*run.Run, error) {
 	f.gotID = runID
 	f.gotActor = actor
 	if f.err != nil {

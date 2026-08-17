@@ -54,7 +54,7 @@ type Canceler interface {
 // satisfies it.
 type Retrier interface {
 	RetryFailedShards(ctx context.Context, parentID string) (*run.Run, error)
-	RelaunchFailedHosts(ctx context.Context, runID, actor string) (*run.Run, error)
+	RelaunchFailedHosts(ctx context.Context, runID, actor, actorType string) (*run.Run, error)
 }
 
 // Approver releases or denies a run held for approval. The dispatcher satisfies it.

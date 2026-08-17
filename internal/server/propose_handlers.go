@@ -97,6 +97,7 @@ func proposeRunHandler(submitter Submitter, provider ai.Provider, log *zap.Logge
 			run.WithIntent(intent),
 			run.WithSource("propose", ""),
 			run.WithActor(actorName(r)),
+			run.WithActorType(actorType(r)),
 		}
 		created, err := submitter.Submit(r.Context(), proposal.Playbook, "", opts...)
 		if err != nil {

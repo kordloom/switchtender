@@ -100,7 +100,7 @@ func (g *authGate) wrap(next http.Handler) http.Handler {
 				unauthorized(w)
 				return
 			}
-			actor := Actor{UserID: u.ID, Role: u.Role, Name: u.Username}
+			actor := Actor{UserID: u.ID, Role: u.Role, Name: u.Username, Type: actorTypeSession}
 			if !g.decide(w, r, actor) {
 				return
 			}
@@ -141,7 +141,8 @@ func (g *authGate) wrap(next http.Handler) http.Handler {
 			actorType = actorTypeAgent
 			role = capAgentRole(role)
 		}
-		actor := Actor{UserID: tok.UserID, Role: role, Name: tok.Name, Agent: tok.IsAgent()}
+		actor := Actor{UserID: tok.UserID, Role: role, Name: tok.Name, Agent: tok.IsAgent(),
+			Type: actorType}
 		if !g.decide(w, r, actor) {
 			return
 		}
@@ -272,6 +273,9 @@ type Actor struct {
 	// Agent reports whether an AI agent holds the token, so a handler that needs to treat an agent
 	// differently can, without re-reading the token.
 	Agent bool
+	// Type is how the caller authenticated, in the audit chain's vocabulary: session, token, or
+	// agent. It is stamped onto submitted runs so policies can tell who is asking.
+	Type string
 }
 
 // capAgentRole lowers an admin role to operator for an agent, and leaves any lower role unchanged.

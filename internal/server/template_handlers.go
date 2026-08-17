@@ -502,6 +502,7 @@ func launchTemplateHandler(store template.Store, submitter Submitter, authz *aut
 			run.WithExtraVars(vars),
 			run.WithDryRun(dryRun),
 			run.WithSource("template", t.ID), run.WithActor(actorName(r)),
+			run.WithActorType(actorType(r)),
 			run.WithLabels(launchReq.Labels),
 		)
 		if launchReq.Limit != nil && *launchReq.Limit != "" {
