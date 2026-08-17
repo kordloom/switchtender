@@ -80,9 +80,9 @@ func createSourceHandler(sources invsource.Store, inventories inventory.Store, a
 		src := &invsource.Source{
 			ID: invsource.NewID(), Name: req.Name, Source: req.Source,
 			CredentialID: req.CredentialID, ProjectID: req.ProjectID,
-			UpdateOnLaunch: req.UpdateOnLaunch != nil && *req.UpdateOnLaunch,
+			UpdateOnLaunch:      req.UpdateOnLaunch != nil && *req.UpdateOnLaunch,
 			SyncIntervalSeconds: intOrZero(req.SyncIntervalSeconds),
-			InventoryID: inv.ID, CreatedAt: time.Now(),
+			InventoryID:         inv.ID, CreatedAt: time.Now(),
 		}
 		if err := sources.Save(r.Context(), src); err != nil {
 			log.Error("server: save source: " + err.Error())

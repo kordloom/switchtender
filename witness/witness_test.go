@@ -2,8 +2,8 @@ package witness
 
 import (
 	"fmt"
-	"strconv"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"

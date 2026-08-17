@@ -72,7 +72,7 @@ func TestScheduleEditKeepsWhatItDoesNotSend(t *testing.T) {
 	}
 
 	// Test 1: The same for a split's shard count.
-	rec = put("sch_split", `{"name":"fleet patch","cron":"0 4 * * *","playbook":"patch.yml",` +
+	rec = put("sch_split", `{"name":"fleet patch","cron":"0 4 * * *","playbook":"patch.yml",`+
 		`"inventory":"prod.ini"}`)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("edit split schedule = %d, want 200 (body %s)", rec.Code, rec.Body.String())

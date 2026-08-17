@@ -113,7 +113,6 @@ func TestPinnedApplyRefusesADifferentCommit(t *testing.T) {
 	}
 }
 
-
 // proposingStore is a run store that also knows how to have an apply proposed for it, which is what a
 // relay-backed store does. It records the call so a test can prove the dispatcher took that path
 // instead of creating the run itself.
@@ -136,7 +135,7 @@ func (p *proposingStore) ProposeApply(ctx context.Context, planID string, destro
 		ID: run.NewID(), Status: run.StatusPendingApproval, ProposedFrom: planID,
 		Tool: run.ToolTerraform, Command: "infra/prod", CreatedAt: time.Now(),
 	}
-	if err := p.Store.Save(ctx, proposal); err != nil {
+	if err := p.Save(ctx, proposal); err != nil {
 		return nil, err
 	}
 	return proposal, nil

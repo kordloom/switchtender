@@ -202,8 +202,6 @@ func Check(prev *Checkpoint, server string, beats []Beat, now time.Time) (*Check
 			Key: fmt.Sprintf("missing_beat after witnessed beat %d", prev.LastBeat)})
 	}
 
-
-
 	for _, b := range beats {
 		// First write wins: the witness's memory is its testimony, so a rewrite is reported on
 		// every watch rather than adopted after one alert and attested away.
