@@ -518,6 +518,17 @@ func runMeta(r *run.Run) []metaRow {
 	if r.PinnedCommit != "" {
 		add("Pinned to commit", r.PinnedCommit)
 	}
+	// What the rules were, not only which one fired. A run nothing stopped has no rule to name, and
+	// without this the record could not tell that from an install that had no rules at the time.
+	if set := r.PolicySet; set != nil {
+		if set.Count == 0 {
+			add("Rules in force", "none: no approval rule existed when this run was submitted ("+
+				set.Digest[:min(12, len(set.Digest))]+")")
+		} else {
+			add("Rules in force", fmt.Sprintf("%d (%s): %s", set.Count,
+				set.Digest[:min(12, len(set.Digest))], strings.Join(set.Rules, "; ")))
+		}
+	}
 	if r.Risk != nil {
 		add("Risk", strings.TrimSpace(r.Risk.Level+" "+strings.Join(r.Risk.Reasons, "; ")))
 	}

@@ -59,6 +59,11 @@ type Record struct {
 	// DryRun reports the run executed in its tool's no-change mode, so a preview cannot later be
 	// presented as the change itself.
 	DryRun bool `json:"dry_run,omitempty"`
+	// PolicySet is the approval rule set that was in force when this run was submitted: a digest, how
+	// many rules it covers, and how those rules read. Without it the record could show what a gate
+	// stopped and never that nothing should have stopped a run that went straight through, so a rule
+	// deleted shortly beforehand left no trace. Absent on a run submitted before this was recorded.
+	PolicySet *run.PolicySet `json:"policy_set,omitempty"`
 	// Hosts are the per-host outcomes, sorted by host.
 	Hosts []RecordHost `json:"hosts,omitempty"`
 	// Tasks are the per-task durations, sorted by task.
@@ -137,7 +142,7 @@ func Body(ctx context.Context, store run.Store, r *run.Run) ([]byte, error) {
 		RunID: r.ID, Status: string(r.Status), ExitCode: r.ExitCode,
 		Tool: r.Tool, Playbook: r.Playbook, Inventory: r.Inventory, Image: r.Image,
 		StartedAt: utcOrNil(r.StartedAt), EndedAt: utcOrNil(r.EndedAt), LogSHA256: logSHA,
-		SpecDigest: specDigest, CommitSHA: r.CommitSHA, DryRun: r.DryRun,
+		SpecDigest: specDigest, CommitSHA: r.CommitSHA, DryRun: r.DryRun, PolicySet: r.PolicySet,
 	}
 	for _, h := range hosts {
 		out.Hosts = append(out.Hosts, RecordHost{

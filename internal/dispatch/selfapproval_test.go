@@ -3,6 +3,7 @@ package dispatch
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"go.uber.org/zap"
@@ -102,4 +103,69 @@ func submit2(t *testing.T, ctx context.Context, d *Dispatcher, actor string) *ru
 		t.Fatalf("a rule that does not ask for a distinct approver marked the run as needing one")
 	}
 	return r
+}
+
+// TestEveryRunRecordsTheRulesInForce covers the evidence gap on the far side of the gate. A held run
+// names the rule that held it, and its decision is signed, so a change somebody questioned has a strong
+// record. A change that sailed through had none: nothing recorded what the rules were, so "no rule
+// applied to this run" and "there were no rules" left the same trace, and a gate deleted an hour before
+// a change was invisible afterward.
+func TestEveryRunRecordsTheRulesInForce(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	policies := policy.NewMemStore()
+	store := run.NewMemStore()
+	d := New(store, okRunner(), zap.NewNop(), WithPolicies(policies))
+
+	submit := func() *run.Run {
+		r, err := d.Submit(ctx, "", "", run.WithTool(run.ToolBash), run.WithCommand("echo hi"),
+			run.WithActor("casey"), run.WithActorType("session"))
+		if err != nil {
+			t.Fatalf("Submit: %v", err)
+		}
+		return r
+	}
+
+	// Test 0: With no rules at all, the run says so rather than saying nothing.
+	bare := submit()
+	if bare.PolicySet == nil || bare.PolicySet.Digest == "" {
+		t.Fatalf("a run submitted under no rules recorded no rule set: %+v", bare.PolicySet)
+	}
+	if bare.PolicySet.Count != 0 {
+		t.Errorf("count = %d, want 0", bare.PolicySet.Count)
+	}
+
+	// Test 1: With a rule in place, the run records the set including that rule by name.
+	if err := policies.Save(ctx, &policy.Policy{
+		ID: "pol_1", Name: "prod destroys need a person", Tool: run.ToolTerraform, MaxDestroy: 2,
+	}); err != nil {
+		t.Fatalf("Save policy: %v", err)
+	}
+	gated := submit()
+	if gated.PolicySet == nil || gated.PolicySet.Count != 1 {
+		t.Fatalf("run under one rule recorded %+v, want a set of one", gated.PolicySet)
+	}
+	if gated.PolicySet.Digest == bare.PolicySet.Digest {
+		t.Error("adding a rule did not change the recorded set, so a gate added or removed between " +
+			"two runs is invisible")
+	}
+	var named bool
+	for _, r := range gated.PolicySet.Rules {
+		if strings.Contains(r, "prod destroys need a person") {
+			named = true
+		}
+	}
+	if !named {
+		t.Errorf("rules = %v, want the rule named so the evidence reads without the server",
+			gated.PolicySet.Rules)
+	}
+
+	// Test 2: The set survives the store, since the evidence is read long after the submit.
+	stored, err := store.Get(ctx, gated.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if stored.PolicySet == nil || stored.PolicySet.Digest != gated.PolicySet.Digest {
+		t.Errorf("stored set = %+v, want the digest recorded at submit", stored.PolicySet)
+	}
 }

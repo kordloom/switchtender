@@ -97,7 +97,8 @@ CREATE TABLE IF NOT EXISTS runs (
 	forks         INTEGER NOT NULL DEFAULT 0,
 	diff_mode     INTEGER NOT NULL DEFAULT 0,
 	distinct_approver INTEGER NOT NULL DEFAULT 0,
-	pinned_commit TEXT NOT NULL DEFAULT ''
+	pinned_commit TEXT NOT NULL DEFAULT '',
+	policy_set TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_runs_created_at ON runs(created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_parent ON runs(parent_id, shard_index);
@@ -120,6 +121,7 @@ ALTER TABLE runs ADD COLUMN IF NOT EXISTS audit_receipt TEXT NOT NULL DEFAULT ''
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS held_by_policy TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS distinct_approver INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS pinned_commit TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS policy_set TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS tags TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS skip_tags TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS verbosity INTEGER NOT NULL DEFAULT 0;
@@ -668,7 +670,7 @@ const runColumns = `id, playbook, inventory, status, exit_code, error, created_a
 	proposed_from, intent, image, pull_credential_id, idempotency_key, timeout, notifications,
 	source, source_id, actor, rerun_of, labels, warning, audit_receipt, held_by_policy,
 	tags, skip_tags, verbosity, forks, diff_mode, claim_secret, actor_type, approved_spec_digest,
-	distinct_approver, pinned_commit`
+	distinct_approver, pinned_commit, policy_set`
 
 // hostSummaryColumns is the shared run_host_summary column list, in the one order the insert binds
 // its placeholders and every read scans, so a column cannot land on one path and be missed on
@@ -705,11 +707,11 @@ INSERT INTO runs
 	 image, pull_credential_id, idempotency_key, timeout, notifications,
 	 source, source_id, actor, rerun_of, labels, warning, audit_receipt, held_by_policy,
 	 tags, skip_tags, verbosity, forks, diff_mode, claim_secret, actor_type, approved_spec_digest,
-	 distinct_approver, pinned_commit)
+	 distinct_approver, pinned_commit, policy_set)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
 	$21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38,
 	$39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57,
-	$58)
+	$58, $59)
 ON CONFLICT(id) DO UPDATE SET
 	playbook=excluded.playbook, inventory=excluded.inventory, status=excluded.status,
 	exit_code=excluded.exit_code, error=excluded.error, created_at=excluded.created_at,
@@ -734,7 +736,8 @@ ON CONFLICT(id) DO UPDATE SET
 	verbosity=excluded.verbosity, forks=excluded.forks, diff_mode=excluded.diff_mode,
 	claim_secret=excluded.claim_secret, actor_type=excluded.actor_type,
 	approved_spec_digest=excluded.approved_spec_digest,
-	distinct_approver=excluded.distinct_approver, pinned_commit=excluded.pinned_commit`
+	distinct_approver=excluded.distinct_approver, pinned_commit=excluded.pinned_commit,
+	policy_set=excluded.policy_set`
 	_, err := s.db.ExecContext(ctx, q,
 		r.ID, r.Playbook, r.Inventory, string(r.Status), sqlutil.NullInt(r.ExitCode), r.Error,
 		sqlutil.FormatTime(r.CreatedAt), sqlutil.NullTime(r.StartedAt), sqlutil.NullTime(r.EndedAt),
@@ -747,7 +750,7 @@ ON CONFLICT(id) DO UPDATE SET
 		r.Source, r.SourceID, r.Actor, r.RerunOf, marshalLabels(r.Labels), r.Warning, r.AuditReceipt,
 		r.HeldByPolicy, sqlutil.JoinIDs(r.Tags), sqlutil.JoinIDs(r.SkipTags), r.Verbosity, r.Forks,
 		sqlutil.BoolToInt(r.DiffMode), r.ClaimSecret, r.ActorType, r.ApprovedSpecDigest,
-		sqlutil.BoolToInt(r.RequireDistinctApprover), r.PinnedCommit,
+		sqlutil.BoolToInt(r.RequireDistinctApprover), r.PinnedCommit, marshalPolicySet(r.PolicySet),
 	)
 	if err != nil {
 		if r.IdempotencyKey != "" && isKeyConflict(err) {
@@ -1736,6 +1739,8 @@ func scanRun(s scanner) (*run.Run, error) {
 		// distinctApprover is the separation-of-duties flag, stored as an integer like every other
 		// boolean on a run.
 		distinctApprover int
+		// policySet is the recorded rule set, stored as JSON like the run's other structured fields.
+		policySet string
 	)
 	if err := s.Scan(&r.ID, &r.Playbook, &r.Inventory, &status, &exit, &r.Error,
 		&created, &started, &ended, &parent, &shardIdx, &shardCnt, &r.Limit,
@@ -1745,10 +1750,11 @@ func scanRun(s scanner) (*run.Run, error) {
 		&r.Image, &r.PullCredentialID, &r.IdempotencyKey, &r.Timeout, &notifs,
 		&r.Source, &r.SourceID, &r.Actor, &r.RerunOf, &labels, &r.Warning, &r.AuditReceipt,
 		&r.HeldByPolicy, &tags, &skipTags, &r.Verbosity, &r.Forks, &diffMode,
-		&r.ClaimSecret, &r.ActorType, &r.ApprovedSpecDigest, &distinctApprover, &r.PinnedCommit); err != nil {
+		&r.ClaimSecret, &r.ActorType, &r.ApprovedSpecDigest, &distinctApprover, &r.PinnedCommit, &policySet); err != nil {
 		return nil, err
 	}
 	r.RequireDistinctApprover = distinctApprover != 0
+	r.PolicySet = unmarshalPolicySet(policySet)
 	r.CancelRequested = cancelI != 0
 	r.DryRun = dryRun != 0
 	r.DiffMode = diffMode != 0
@@ -1832,6 +1838,33 @@ func parseLabels(s string) (map[string]string, error) {
 		return nil, fmt.Errorf("parse labels: %w", err)
 	}
 	return out, nil
+}
+
+// marshalPolicySet encodes the rule set recorded on a run, empty when there is none. The set is stored
+// as JSON rather than as columns because it is evidence read whole: a digest, a count, and the rules as
+// they read, which is what lets a receipt be checked without asking this server what a digest meant.
+func marshalPolicySet(set *run.PolicySet) string {
+	if set == nil {
+		return ""
+	}
+	b, err := json.Marshal(set)
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
+// unmarshalPolicySet decodes a stored rule set. An empty column is a run from before the set was
+// recorded, which is nil rather than an empty set: "no rules" and "not recorded" are different facts.
+func unmarshalPolicySet(s string) *run.PolicySet {
+	if s == "" {
+		return nil
+	}
+	var set run.PolicySet
+	if err := json.Unmarshal([]byte(s), &set); err != nil {
+		return nil
+	}
+	return &set
 }
 
 // marshalSteps encodes a pipeline's step graph for storage, returning empty for no steps so an

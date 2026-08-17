@@ -213,6 +213,12 @@ type Run struct {
 	ProjectID string `json:"project_id,omitempty"`
 	// CommitSHA is the exact commit the run executed, stamped after the project sync.
 	CommitSHA string `json:"commit_sha,omitempty"`
+	// PolicySet describes the approval rules that were in force when this run was submitted. It is
+	// recorded on every run, gated or not, because the boundary could otherwise only prove what it
+	// stopped: for a run nothing stopped, "no rule applied" and "there were no rules" left the same
+	// trace, so a gate deleted shortly before a change was invisible afterward. Nil on a run submitted
+	// before this was recorded.
+	PolicySet *PolicySet `json:"policy_set,omitempty"`
 	// PinnedCommit is the commit this run is only allowed to execute. It is set when a run stands in
 	// for work already judged at a known revision, which today means the apply a plan gate proposes:
 	// the approver read that plan, so releasing an apply of different code would be a substitution
@@ -546,6 +552,22 @@ func WithSource(source, sourceID string) SubmitOption {
 // WithActor stamps the authenticated user who fired the run.
 func WithActor(actor string) SubmitOption {
 	return func(r *Run) { r.Actor = actor }
+}
+
+// PolicySet is the approval rule set in force at one moment, as recorded on a run. The rules are
+// rendered rather than referenced so the evidence reads without asking any server what a digest meant.
+type PolicySet struct {
+	// Digest is the hex SHA-256 over the canonical form of every rule in the set, order-independent.
+	Digest string `json:"digest"`
+	// Count is how many rules the digest covers.
+	Count int `json:"count"`
+	// Rules names each rule and what it does, sorted, capped by the producer.
+	Rules []string `json:"rules,omitempty"`
+}
+
+// WithPolicySet records the rule set in force at submit. See Run.PolicySet.
+func WithPolicySet(digest string, count int, rules []string) SubmitOption {
+	return func(r *Run) { r.PolicySet = &PolicySet{Digest: digest, Count: count, Rules: rules} }
 }
 
 // WithPinnedCommit binds the run to one commit, refusing to execute any other. See Run.PinnedCommit.

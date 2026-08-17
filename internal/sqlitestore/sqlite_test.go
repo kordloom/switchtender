@@ -574,6 +574,9 @@ func TestPinnedCommitSurvivesTheStore(t *testing.T) {
 		ID: "run_apply", Status: run.StatusPendingApproval, CreatedAt: time.Now(),
 		Tool: "terraform", Command: "infra/prod", ProposedFrom: "run_plan",
 		PinnedCommit: "abc123def456", Actor: "casey", ActorType: "session",
+		PolicySet: &run.PolicySet{
+			Digest: "d1e2f3a4b5c6", Count: 1, Rules: []string{"prod apply: requires approval"},
+		},
 	}
 	if err := store.Save(ctx, apply); err != nil {
 		t.Fatalf("Save() error = %v", err)
@@ -585,6 +588,18 @@ func TestPinnedCommitSurvivesTheStore(t *testing.T) {
 	if got.PinnedCommit != "abc123def456" {
 		t.Errorf("stored PinnedCommit = %q, want the commit the approver read: the apply would run "+
 			"whatever the branch holds when it is released", got.PinnedCommit)
+	}
+	// The rule set in force is evidence read long after the submit, by a process that was not there for
+	// it. A set the store drops leaves the same gap it was added to close.
+	if got.PolicySet == nil {
+		t.Fatal("the stored run lost the rule set in force at submit, so the evidence cannot say " +
+			"whether a rule should have stopped it")
+	}
+	if got.PolicySet.Digest != apply.PolicySet.Digest || got.PolicySet.Count != 1 {
+		t.Errorf("stored rule set = %+v, want the one recorded at submit", got.PolicySet)
+	}
+	if len(got.PolicySet.Rules) != 1 || got.PolicySet.Rules[0] != "prod apply: requires approval" {
+		t.Errorf("stored rules = %v, want them readable without asking the server", got.PolicySet.Rules)
 	}
 	if got.Actor != "casey" || got.ActorType != "session" {
 		t.Errorf("stored actor = %q/%q, want casey/session", got.Actor, got.ActorType)

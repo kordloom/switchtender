@@ -104,6 +104,10 @@ the chain receipts and anchors behind them.</p>
 <td>The actor on every entry, with <code>actor_type</code> saying whether a person, an agent, or the system acted and <code>on_behalf_of</code> naming whose authority it used, all committed by the entry hash; the change register lists every change in the period.</td>
 </tr>
 <tr>
+<td>The rules in force are known for every change</td>
+<td>Every run records the approval rule set that was in force when it was submitted: a digest over the set, how many rules it covered, and how each read. That is what lets a review tell &quot;no rule applied to this change&quot; from &quot;there were no rules&quot;, so a gate deleted or loosened shortly before a change is visible afterward rather than leaving the same trace as a change nothing gated. It appears in the run's dossier and in the signed receipt, so a relying party reads it offline.</td>
+</tr>
+<tr>
 <td>The change record is complete and unaltered</td>
 <td>The hash chain: a change that cannot be recorded is refused rather than made, and altering or deleting an entry breaks verification, provable offline from a signed bundle with the open <code>loomseal</code> verifier.</td>
 </tr>

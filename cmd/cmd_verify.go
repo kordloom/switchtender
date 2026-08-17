@@ -122,6 +122,15 @@ func runVerify(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// shortDigest renders a digest at a length a person can compare across two receipts by eye, which is
+// what a reader actually does with it: the full value is in the record either way.
+func shortDigest(d string) string {
+	if len(d) > 12 {
+		return d[:12]
+	}
+	return d
+}
+
 // matchWord is the caption verb for a digest comparison, in the tense the result calls for.
 func matchWord(ok bool) string {
 	if ok {
@@ -187,6 +196,18 @@ func printOutcome(out io.Writer, body []byte) {
 	}
 	if rec.SpecDigest != "" {
 		fmt.Fprintf(out, "  spec digest    %s\n", rec.SpecDigest)
+	}
+	// The rules that were in force, which is what makes "nothing stopped this" a statement rather than
+	// an absence. A receipt from an install with no rules says so in as many words.
+	if set := rec.PolicySet; set != nil {
+		if set.Count == 0 {
+			fmt.Fprintf(out, "  rules in force none recorded at submit (%s)\n", shortDigest(set.Digest))
+		} else {
+			fmt.Fprintf(out, "  rules in force %d (%s)\n", set.Count, shortDigest(set.Digest))
+			for _, rule := range set.Rules {
+				fmt.Fprintf(out, "    - %s\n", rule)
+			}
+		}
 	}
 	if rec.Image != "" {
 		fmt.Fprintf(out, "  image          %s\n", rec.Image)
