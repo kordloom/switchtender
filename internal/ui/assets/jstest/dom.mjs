@@ -472,6 +472,19 @@ class STElement {
 	// click dispatches a bubbling click, which is how a test presses a control.
 	click() { return this.dispatchEvent(makeEvent("click")); }
 
+	// reset clears the controls inside a form, the way a browser does. Without it a page that
+	// resets its dialog after a successful save threw inside the success path, so a test could not
+	// tell a refused submit from one that worked and then tripped over the harness.
+	reset() {
+		for (const el of this.querySelectorAll("input, textarea, select")) {
+			if (el.type === "checkbox" || el.type === "radio") {
+				el.checked = false;
+				continue;
+			}
+			el.value = "";
+		}
+	}
+
 	// focus and blur are recorded rather than simulated, since nothing here has a focus ring.
 	focus() { if (this.ownerDocument) this.ownerDocument.activeElement = this; }
 	blur() {

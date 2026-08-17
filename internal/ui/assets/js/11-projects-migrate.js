@@ -328,8 +328,12 @@ function migrateGroup(label, names) {
 function syncTemplateTool() {
 	const tool = document.getElementById("tpl-tool").value;
 	const ansible = tool === "ansible" || tool === "";
+	// The execution image and its pull credential are not Ansible-only: the container runner plans
+	// every tool, so a terraform or bash template can be pinned to an image. Hiding them for those
+	// tools left an image nobody could see or set, and an edit of a containerized non-Ansible
+	// template stripped it, so the next run executed on the host instead of in the container.
 	const ansibleFields = ["tpl-field-playbook", "tpl-field-inventory", "tpl-field-limit",
-		"tpl-field-shards", "tpl-field-image", "tpl-field-pull-credential"];
+		"tpl-field-shards"];
 	for (const id of ansibleFields) {
 		const el = document.getElementById(id);
 		if (el) el.hidden = !ansible;

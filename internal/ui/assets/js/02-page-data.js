@@ -554,7 +554,15 @@ function mountTablePager() {
 		let matched = 0;
 		for (const row of tbody.rows) {
 			if (row.classList.contains("skeleton-row")) continue;
-			if (row.dataset.fhide === "1") { row.dataset.phide = ""; applyRowVisibility(row); continue; }
+			// Both filters have to be honored here. Counting a facet-hidden row as a match let it
+			// consume a page slot, so ticking a facet value whose rows all sat past the page size
+			// emptied the table while the facet panel still reported matches: the filter read as
+			// broken, and a reviewer concluded there were no such entries.
+			if (row.dataset.fhide === "1" || row.dataset.xhide === "1") {
+				row.dataset.phide = "";
+				applyRowVisibility(row);
+				continue;
+			}
 			matched++;
 			row.dataset.phide = size && matched > size ? "1" : "";
 			applyRowVisibility(row);

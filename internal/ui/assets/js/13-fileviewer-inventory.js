@@ -314,9 +314,13 @@ function wireInventoryForm() {
 	const creds = document.getElementById("inv-credentials");
 	const sourceSel = document.getElementById("inv-content-source");
 	const hint = document.getElementById("inv-source-hint");
-	const sourceFields = ["inv-content", "inv-command", "inv-vault-addr", "inv-vault-path",
-		"inv-vault-field", "inv-vault-token", "inv-gsm-project", "inv-gsm-secret", "inv-gsm-version",
-		"inv-gsm-token"];
+	// Derived from the markup rather than listed by hand. The hand-written list missed every AWS and
+	// Azure field, so New inventory opened with the previous record's secret id, region, and static
+	// access keys still in the form: saving created a second inventory pointing at the first one's
+	// secret, and a typed secret access key stayed live in the DOM across what looked like a fresh
+	// dialog. A new source family cannot be forgotten this way.
+	const sourceFieldEls = () => form.querySelectorAll(
+		"[data-source-group] input, [data-source-group] textarea, [data-source-group] select");
 	fillSelect(creds, "/credentials", "credentials", (c) => c.name + " (" + c.kind + ")");
 
 	const syncSource = () => {
@@ -332,7 +336,7 @@ function wireInventoryForm() {
 		delete form.dataset.editId;
 		document.getElementById("inv-name").value = "";
 		document.getElementById("inv-queue").value = "";
-		for (const id of sourceFields) document.getElementById(id).value = "";
+		for (const el of sourceFieldEls()) el.value = "";
 		for (const o of creds.options) o.selected = false;
 		sourceSel.value = "local";
 		syncSource();

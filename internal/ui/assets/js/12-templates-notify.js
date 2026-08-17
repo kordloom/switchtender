@@ -206,6 +206,16 @@ function wireTemplateForm() {
 			name: document.getElementById("tpl-name").value.trim(),
 			project_id: document.getElementById("tpl-project").value,
 		};
+		// The execution image is not an Ansible concept: the container runner plans every tool, so a
+		// terraform or bash template can be pinned to an image too. Sending it only on the Ansible
+		// branch meant editing a containerized non-Ansible template stripped its image and pull
+		// credential, and the next run of it executed on the host instead of inside the container.
+		const image = document.getElementById("tpl-image").value.trim();
+		if (image) {
+			payload.image = image;
+			const pull = document.getElementById("tpl-pull-credential").value;
+			if (pull) payload.pull_credential_id = pull;
+		}
 		if (tool && tool !== "ansible") {
 			payload.tool = tool;
 			payload.command = document.getElementById("tpl-command").value.trim();
@@ -216,12 +226,6 @@ function wireTemplateForm() {
 			if (tlimit) payload.limit = tlimit;
 			const shards = parseInt(document.getElementById("tpl-shards").value, 10);
 			if (shards >= 2) payload.shards = shards;
-			const image = document.getElementById("tpl-image").value.trim();
-			if (image) {
-				payload.image = image;
-				const pull = document.getElementById("tpl-pull-credential").value;
-				if (pull) payload.pull_credential_id = pull;
-			}
 		}
 		if (document.getElementById("tpl-dry-run").checked) payload.dry_run = true;
 		if (document.getElementById("tpl-confirm-launch").checked) payload.confirm_on_launch = true;
