@@ -81,17 +81,24 @@ async function loadOverview() {
 	renderJumpTiles();
 	wireTileFilter();
 	try {
-		const [runsRes, fleetRes] = await Promise.all([
+		// Each half fails alone: one refused endpoint used to blank the whole dashboard, runs,
+		// fleet, and all, when the other half had answered fine.
+		const [runsRes, fleetRes] = await Promise.allSettled([
 			getJSON("/runs"),
 			getJSON("/fleet"),
 		]);
-		const runs = runsRes.runs || [];
-		const hosts = fleetRes.hosts || [];
+		if (runsRes.status === "rejected" && fleetRes.status === "rejected") {
+			throw runsRes.reason;
+		}
+		const runs = runsRes.status === "fulfilled" ? (runsRes.value.runs || []) : [];
+		const hosts = fleetRes.status === "fulfilled" ? (fleetRes.value.hosts || []) : [];
 		renderOverviewMetrics(runs, hosts);
 		renderActivity(runs);
 		renderRecentRuns(runs.slice(0, 8));
 		renderFleetSnapshot(hosts);
-		setStatus("");
+		setStatus(runsRes.status === "rejected" ? "Could not load runs: " + runsRes.reason.message
+			: fleetRes.status === "rejected" ? "Could not load fleet health: " + fleetRes.reason.message
+			: "");
 	} catch (e) {
 		setStatus("Failed to load the overview: " + e.message);
 	}

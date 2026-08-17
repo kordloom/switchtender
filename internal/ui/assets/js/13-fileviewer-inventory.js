@@ -125,7 +125,17 @@ async function openPromptLaunch(t) {
 				opt.textContent = c ? c.name + " (" + c.kind + ")" : cid;
 				credSel.appendChild(opt);
 			}
-		} catch { credField.hidden = true; }
+		} catch {
+			// A picker that silently vanishes reads as "no credentials to choose", which is the
+			// opposite of what happened.
+			credField.hidden = false;
+			credSel.innerHTML = "";
+			const opt = document.createElement("option");
+			opt.value = "";
+			opt.textContent = "could not load the credential list; the template defaults apply";
+			credSel.appendChild(opt);
+			credSel.disabled = true;
+		}
 	}
 
 	modal.hidden = false;

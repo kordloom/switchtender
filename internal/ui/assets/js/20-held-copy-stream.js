@@ -497,7 +497,12 @@ function loadLogin() {
 				}),
 			});
 			if (!res.ok) {
-				setStatus("Sign in failed. Check the username and password.");
+				// Only a 401 means the credentials were wrong. Reading a database outage or a 500
+				// as "check the username and password" sent people to reset passwords that worked.
+				setStatus(res.status === 401
+					? "Sign in failed. Check the username and password."
+					: "Sign in failed: the server answered HTTP " + res.status + ". Try again, and " +
+						"check the server log if it persists.");
 				return;
 			}
 			const session = await res.json();
