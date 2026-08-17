@@ -22,6 +22,8 @@ type skewedClockStore struct {
 	skew time.Duration
 	// interrupted counts the runs a sweep drove terminal for a lease it judged stale.
 	interrupted atomic.Int64
+	// sweeping guards against the inline sweep in Save recursing through its own writes.
+	sweeping atomic.Bool
 }
 
 // now is the store's clock.
@@ -53,6 +55,26 @@ func (s *skewedClockStore) Heartbeat(ctx context.Context, id, owner string) erro
 	at := s.now()
 	got.ClaimedAt = &at
 	return s.Save(ctx, got)
+}
+
+// Save records the run and, the moment one is written running, sweeps once before returning.
+//
+// The sweep is placed here rather than on a timer on purpose. What is being tested is the window between
+// the save that sets a run running and the first renewal of its lease, and a sweep fired on a ticker
+// lands inside that window only by luck, so the test would report the defect only sometimes. Sweeping
+// inline puts a janitor tick at exactly the instant the window opens, every run.
+func (s *skewedClockStore) Save(ctx context.Context, r *run.Run) error {
+	if err := s.Store.Save(ctx, r); err != nil {
+		return err
+	}
+	if r.Status == run.StatusRunning && r.ClaimedBy != "" && !s.sweeping.Load() {
+		s.sweeping.Store(true)
+		defer s.sweeping.Store(false)
+		if _, err := s.ReclaimStale(ctx, leaseTTL); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ReclaimStale ages leases against the store's clock and interrupts a running run whose lease it judges
