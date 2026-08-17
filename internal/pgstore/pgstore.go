@@ -571,6 +571,23 @@ func migrate(db *sql.DB) error {
 	if _, err := tx.Exec(schema); err != nil {
 		return fmt.Errorf("migrate schema: %w", err)
 	}
+	// Every column the schema declares is also added IF NOT EXISTS, derived from the schema itself
+	// rather than from the hand-kept ALTER list above. The list drifted once on the SQLite side, where
+	// runs.org_id reached the CREATE and the shared select list and never the migrations, and every
+	// database from before it failed every read of the runs table after an upgrade. Deriving the
+	// statements removes the list there was to forget; the hand list stays because it is idempotent
+	// and documents when each column arrived.
+	for table, cols := range sqlutil.ParseSchemaColumns(schema) {
+		for _, col := range cols {
+			if !col.Addable() {
+				continue
+			}
+			if _, err := tx.Exec("ALTER TABLE " + table + " ADD COLUMN IF NOT EXISTS " +
+				col.Name + " " + col.Clause); err != nil {
+				return fmt.Errorf("heal %s.%s: %w", table, col.Name, err)
+			}
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("migrate schema: %w", err)
 	}

@@ -483,6 +483,17 @@ func Open(path string) (*DB, error) {
 			return nil, fmt.Errorf("apply %q: %w", p, err)
 		}
 	}
+	// Heal existing tables before anything else touches them. The schema's CREATE TABLE IF NOT
+	// EXISTS is a no-op on a table that already exists, however old its shape, and both the schema's
+	// index statements and ensureRunIndexes fail outright on a column an old table is missing.
+	// Healing derives what to add from the schema itself, so a new column needs no migration entry:
+	// the hand-kept ALTER lists below drifted once, runs.org_id reached the CREATE and the shared
+	// select list and never the lists, and every database from before it failed every read of the
+	// runs table after an upgrade.
+	if err := healColumns(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	if _, err := db.Exec(schema); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
@@ -593,6 +604,55 @@ func openReadPool(path string) (*sql.DB, error) {
 		return nil, fmt.Errorf("open sqlite read pool: %w", err)
 	}
 	return r, nil
+}
+
+// healColumns adds every column the schema declares that an existing table lacks, with the type and
+// default the schema declares for it. Tables the database does not have yet are left to the schema's
+// own CREATE. Columns ALTER cannot add, primary key members and NOT NULL without a default, are
+// original-era columns a created table always has, so skipping them skips nothing real.
+func healColumns(db *sql.DB) error {
+	for table, cols := range sqlutil.ParseSchemaColumns(schema) {
+		var exists int
+		if err := db.QueryRow(
+			"SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?", table).Scan(&exists); err != nil {
+			return fmt.Errorf("heal %s: %w", table, err)
+		}
+		if exists == 0 {
+			continue
+		}
+		have := map[string]bool{}
+		rows, err := db.Query("PRAGMA table_info(" + table + ")")
+		if err != nil {
+			return fmt.Errorf("heal %s: %w", table, err)
+		}
+		for rows.Next() {
+			var cid int
+			var name, typ string
+			var notnull int
+			var dflt sql.NullString
+			var pk int
+			if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+				_ = rows.Close()
+				return fmt.Errorf("heal %s: %w", table, err)
+			}
+			have[name] = true
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("heal %s: %w", table, err)
+		}
+		_ = rows.Close()
+		for _, col := range cols {
+			if have[col.Name] || !col.Addable() {
+				continue
+			}
+			if _, err := db.Exec(
+				"ALTER TABLE " + table + " ADD COLUMN " + col.Name + " " + col.Clause); err != nil {
+				return fmt.Errorf("heal %s: add %s: %w", table, col.Name, err)
+			}
+		}
+	}
+	return nil
 }
 
 // migrateRuns brings an existing runs table up to the current shape. CREATE TABLE IF NOT EXISTS is a
