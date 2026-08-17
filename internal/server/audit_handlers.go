@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -197,6 +198,40 @@ func auditVerifyHandler(store audit.Store, installID string, log *zap.Logger) ht
 	}
 }
 
+// maxBundleEntries is how many entries an unwindowed bundle export will assemble.
+//
+// A bundle is one signed document over every claim it carries, so unlike the streaming verify it has to
+// hold them all at once. An audit chain grows for the life of an install, a row per mutating request,
+// per webhook fire, and per span beat, so on a long-lived install an unwindowed export assembles the
+// whole history in memory, several times its stored size, on every request. Past this the caller is
+// asked to name a window instead, which the command has always offered.
+const maxBundleEntries = 250_000
+
+// bundleWindow narrows entries to the newest limit of them, and reports the message to answer with when
+// the request cannot be served as asked. An empty limit means the whole chain, up to the ceiling.
+func bundleWindow(entries []*audit.Entry, limit string) ([]*audit.Entry, string) {
+	if limit == "" {
+		if len(entries) > maxBundleEntries {
+			return nil, fmt.Sprintf("this chain holds %d entries, more than the %d one bundle "+
+				"assembles at once. Ask for a window with limit=<count>, which bundles that many of "+
+				"the newest entries", len(entries), maxBundleEntries)
+		}
+		return entries, ""
+	}
+	n, err := strconv.Atoi(limit)
+	if err != nil || n < 1 {
+		return nil, "limit must be a count of the newest entries to bundle, such as limit=1000"
+	}
+	if n > maxBundleEntries {
+		return nil, fmt.Sprintf("limit must be at most %d, the number of entries one bundle "+
+			"assembles at once", maxBundleEntries)
+	}
+	if n >= len(entries) {
+		return entries, ""
+	}
+	return entries[len(entries)-n:], ""
+}
+
 // auditBundleHandler assembles and serves the signed LoomSeal bundle the CLI produces, so the
 // offline-verifiable artifact no rival emits is one click from the audit view rather than only in a
 // terminal. It mirrors the bundle command exactly: build over the whole chain, hold it against every
@@ -221,6 +256,16 @@ func auditBundleHandler(store audit.Store, producer *audit.Identity, version str
 			respondError(w, log, http.StatusConflict, "the audit chain is empty, there is nothing to bundle")
 			return
 		}
+		// The chain is held against the anchors in full below, before any window is applied, the same
+		// way the command does it: checking a window against the anchors reads a deliberate narrowing
+		// as lost history.
+		full := entries
+		windowed, msg := bundleWindow(entries, r.URL.Query().Get("limit"))
+		if msg != "" {
+			respondError(w, log, http.StatusBadRequest, msg)
+			return
+		}
+		entries = windowed
 		doc, err := audit.BuildBundle(entries, *producer, version, time.Now())
 		if err != nil {
 			log.Error("server: build bundle: " + err.Error())
@@ -234,7 +279,7 @@ func auditBundleHandler(store audit.Store, producer *audit.Identity, version str
 				respondError(w, log, http.StatusInternalServerError, "could not read the anchors")
 				return
 			}
-			if reachedAll, _ := audit.CheckAnchors(entries, recorded, producer.InstallID); !reachedAll {
+			if reachedAll, _ := audit.CheckAnchors(full, recorded, producer.InstallID); !reachedAll {
 				respondError(w, log, http.StatusConflict, "the chain does not satisfy every anchor "+
 					"recorded over it, so it cannot be published as a bundle that does")
 				return
