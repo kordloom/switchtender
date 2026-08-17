@@ -225,6 +225,19 @@ func WithSAML(a *SAMLAuth) Option {
 // WithJWT enables bearer JWT authentication. When set, a request whose bearer token is a JWT is
 // validated against the issuer's keys instead of the token store, so a service can present a JWT
 // minted elsewhere.
+// WithEnforcedAuth declares that this install authenticates, whatever the token and account tables
+// currently hold, so the gate never falls back to open mode.
+//
+// Open mode exists so a fresh install works before anything is set up, and it was keyed on finding
+// no tokens and no accounts. An install whose way in is single sign-on has exactly that shape: SSO
+// provisions an account on the first sign-in, so before anybody has signed in there is nothing in
+// either table, and the whole API was served to anonymous callers with admin authority. The sign-in
+// and single sign-on handshake routes are exempt from the gate, so enforcing from the first request
+// still lets the first person in.
+func WithEnforcedAuth() Option {
+	return func(s *Server) { s.enforceAuth = true }
+}
+
 func WithJWT(j *JWTAuth) Option {
 	return func(srv *Server) { srv.jwt = j }
 }
@@ -339,6 +352,9 @@ type Server struct {
 	docs fs.FS
 	// readOnly rejects mutating requests when set, for a public demo.
 	readOnly bool
+	// enforceAuth declares the install authenticates regardless of what the token and account
+	// tables hold, so the gate never serves open mode. Set for an install whose way in is SSO.
+	enforceAuth bool
 	// matrixCap is the largest host matrix, in cells, the UI draws. Zero or less means no limit.
 	matrixCap int
 	// oidc enables single sign-on when configured, nil when SSO is off.
@@ -552,7 +568,8 @@ func (s *Server) Handler() http.Handler {
 	// response the handlers produced is ever encoded.
 	handler := compress(mux)
 	if s.tokens != nil {
-		gate := &authGate{tokens: s.tokens, users: s.users, jwt: s.jwt, audits: s.audits, log: s.log, authz: authz}
+		gate := &authGate{tokens: s.tokens, users: s.users, jwt: s.jwt, audits: s.audits, log: s.log,
+			authz: authz, alwaysEnforce: s.enforceAuth}
 		handler = gate.wrap(handler)
 	}
 	if s.readOnly {

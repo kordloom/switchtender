@@ -757,6 +757,15 @@ func isLoopbackAddr(addr string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
+// enforcedAuthOption turns external auth into the server option that keeps the gate enforcing, or a
+// no-op when there is none, so the call site reads as one decision.
+func enforcedAuthOption(externalAuth bool) server.Option {
+	if !externalAuth {
+		return func(*server.Server) {}
+	}
+	return server.WithEnforcedAuth()
+}
+
 // tokenCountGuard decides whether the server may start given the API token count and reports whether
 // the caller should warn that the API is unauthenticated.
 //
@@ -774,7 +783,12 @@ func tokenCountGuard(count int, countErr error, readOnly, externalAuth, loopback
 	if count > 0 {
 		return false, nil
 	}
-	if !readOnly && !externalAuth && !loopback {
+	// An install with external auth enforces from the first request, so there is nothing
+	// unauthenticated to warn about even with an empty token table.
+	if externalAuth {
+		return false, nil
+	}
+	if !readOnly && !loopback {
 		return false, fmt.Errorf("refusing to serve an unauthenticated API on %s: no tokens and no "+
 			"SSO configured. Create a token with 'switchtender token new', configure SSO, "+
 			"bind a loopback address, or pass --read-only", addr)
@@ -1099,7 +1113,11 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		server.WithLDAP(ldapAuth),
 		server.WithJWT(jwtAuth),
 		server.WithAI(aiProvider),
-		server.WithDocs(docsFS))
+		server.WithDocs(docsFS),
+		// An install whose way in is single sign-on authenticates from the first request. Its
+		// token and account tables are empty until somebody signs in, and deriving enforcement
+		// from them served the whole API to anonymous callers as admin in the meantime.
+		enforcedAuthOption(externalAuthConfigured()))
 	httpServer := &http.Server{
 		Addr:              serveAddr,
 		Handler:           srv.Handler(),

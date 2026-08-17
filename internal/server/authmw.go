@@ -40,6 +40,10 @@ type authGate struct {
 	// authz enforces object grants so a manage grant can delegate editing a specific object beyond
 	// the global role. Nil leaves only the global role gate in force.
 	authz *authorizer
+	// alwaysEnforce declares this install authenticates whatever the tables hold, so open mode is
+	// never entered. It is set for an install configured with single sign-on, whose tables are
+	// legitimately empty until the first person signs in.
+	alwaysEnforce bool
 	// mu guards enforced and checkedAt.
 	mu sync.Mutex
 	// enforced caches whether the install is configured and so must authenticate.
@@ -555,6 +559,14 @@ func (g *authGate) allowed(ctx context.Context, actor Actor, r *http.Request) (b
 	if roleAllows(actor.Role, requiredRole(r)) {
 		return true, nil
 	}
+	// An agent gets its role and nothing more. The cap lowers an agent to operator so it can never
+	// manage identity, access, or secrets, and the manage-grant path walked straight around it: an
+	// agent token inherited whatever object grants its human held, which let it replace the secret
+	// inside a credential and delete the credential a schedule depended on. Delegation is a person
+	// lending authority to another person; it is not a channel an agent operates through.
+	if actor.Agent {
+		return false, nil
+	}
 	object := delegatedObject(r)
 	if object == "" {
 		return false, nil
@@ -685,6 +697,12 @@ func (g *authGate) enforcing(ctx context.Context) bool {
 // and authentication applies. An unreadable store counts as configured, so a database problem cannot
 // open the API.
 func (g *authGate) configured(ctx context.Context) bool {
+	// An install told it authenticates does, from the first request, before any table has a row.
+	// Deriving this from the tables alone is what served an SSO install's whole API to anonymous
+	// callers as admin until somebody happened to sign in.
+	if g.alwaysEnforce {
+		return true
+	}
 	n, err := g.tokens.Count(ctx)
 	if err != nil {
 		g.log.Error("server: count tokens: " + err.Error())

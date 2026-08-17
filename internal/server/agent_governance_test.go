@@ -6,11 +6,13 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/auth"
+	"github.com/kordloom/switchtender/internal/grant"
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/user"
 )
@@ -47,8 +49,10 @@ func TestAgentTokenIsGovernedAndAttributed(t *testing.T) {
 	}
 
 	sub := &fakeSubmitter{run: &run.Run{ID: "run_x"}}
+	grants := grant.NewMemStore()
 	handler := New(run.NewMemStore(), sub, zap.NewNop(),
-		WithTokens(tokens), WithUsers(users), WithAudit(audits)).Handler()
+		WithTokens(tokens), WithUsers(users), WithAudit(audits),
+		WithGrants(grants, false)).Handler()
 
 	call := func(method, path, body string) int {
 		var r *http.Request
@@ -77,6 +81,27 @@ func TestAgentTokenIsGovernedAndAttributed(t *testing.T) {
 		if code := call(d.method, d.path, d.body); code != http.StatusForbidden {
 			t.Errorf("agent %s %s = %d, want 403: an agent must not reach the authority surface",
 				d.method, d.path, code)
+		}
+	}
+
+	// The manage-grant path must not walk around the cap. A grant to the human the agent acts for
+	// used to authorize the agent's own PUT and DELETE on a credential: it could replace the secret
+	// the fleet is reached with, and delete the credential a schedule depends on. Delegation is
+	// between people; an agent gets its role and nothing more.
+	grantedObject := "cred_delegated"
+	if err := grants.Save(ctx, &grant.Grant{
+		ID: grant.NewID(), Subject: admin.ID, Object: grantedObject,
+		Access: grant.AccessManage, CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("Save grant: %v", err)
+	}
+	// 403 is the gate refusing. Anything else means the gate let the request through on the
+	// human's grant and the handler answered on its own terms, which is the bypass: no credential
+	// store is wired here, so a request that reaches the handler answers 404.
+	for _, m := range []string{http.MethodPut, http.MethodDelete} {
+		if code := call(m, "/v1/credentials/"+grantedObject, `{"name":"x","kind":"ssh_key","secret":"agent-replaced"}`); code != http.StatusForbidden {
+			t.Errorf("agent %s on a delegated credential = %d, want 403: the manage grant must not "+
+				"lend an agent the authority its role denies", m, code)
 		}
 	}
 
