@@ -10,7 +10,7 @@ import (
 
 // TestASweptCancelIsSettledNotRequeued is the in-memory store's half of the rule the SQL stores keep.
 //
-// Cancelling a claimed run is cooperative: the flag is set for its holder to read. A holder that died
+// Canceling a claimed run is cooperative: the flag is set for its holder to read. A holder that died
 // before starting the run leaves nobody to read it, and a claim will not take a cancel-flagged run, so
 // requeuing it left the run pending, unclaimable, and past the reach of every sweep, reported as
 // canceling for as long as anyone looked. The sweep settles it instead, which is what the person asked

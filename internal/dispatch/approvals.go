@@ -144,7 +144,7 @@ func (d *Dispatcher) startSplit(ctx context.Context, parent *run.Run) {
 	// with a stated reason rather than left held: a shard in pending_approval is unclaimable, the
 	// coordinator waits on its children with no timeout, and the parent is leased and heartbeating so no
 	// sweep reaches it, so one lost statement left the whole split running forever with a log line as
-	// the only explanation, until somebody cancelled the parent by hand.
+	// the only explanation, until somebody canceled the parent by hand.
 	for _, s := range shards {
 		err := withRetries(func() error {
 			_, terr := d.store.TransitionStatus(ctx, s.ID,

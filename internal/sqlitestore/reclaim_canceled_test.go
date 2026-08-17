@@ -12,12 +12,12 @@ import (
 
 // TestASweptCancelDoesNotStrandTheRun covers a state nothing could get a run out of.
 //
-// Cancelling a run that a worker holds is cooperative: the flag is set and the executor stops when it
+// Canceling a run that a worker holds is cooperative: the flag is set and the executor stops when it
 // reads it. If that worker dies before it ever saved the run running, the run is still pending with a
 // dead holder, so the janitor requeues it by clearing the lease. It kept the cancel flag, and a claim
 // will not take a cancel-flagged run, so the run sat pending forever: unclaimable because of the flag,
 // never terminal because nothing sweeps a pending run, and reported as canceling for as long as anyone
-// cared to look. No retry, no sweep, and no timeout resolved it. Only a person cancelling a second time
+// cared to look. No retry, no sweep, and no timeout resolved it. Only a person canceling a second time
 // ended it, which an automation that issued its one cancel would never do.
 //
 // The approval path was fixed for this exact black hole. The requeue recreated it.

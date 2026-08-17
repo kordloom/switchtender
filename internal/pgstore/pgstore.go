@@ -2112,7 +2112,7 @@ func (s *store) ReclaimStale(ctx context.Context, ttl time.Duration) (int, error
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	// A stale claim on a run somebody asked to cancel is settled, not requeued. Cancelling a claimed run
+	// A stale claim on a run somebody asked to cancel is settled, not requeued. Canceling a claimed run
 	// is cooperative: the flag is set for its holder to read. If that holder died before starting the
 	// run, requeuing it cleared the lease and kept the flag, and a claim will not take a cancel-flagged
 	// run, so the run sat pending and unclaimable with nothing that sweeps a pending run to end it,

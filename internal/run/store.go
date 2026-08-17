@@ -773,7 +773,7 @@ func (m *memStore) ReclaimStale(_ context.Context, ttl time.Duration) (int, erro
 			r.ClaimedBy = ""
 			r.ClaimedAt = nil
 			r.ClaimSecret = ""
-			// A run somebody asked to cancel is settled rather than put back in the queue. Cancelling a
+			// A run somebody asked to cancel is settled rather than put back in the queue. Canceling a
 			// claimed run is cooperative, so if its holder died before starting it the flag has nobody
 			// left to read it, and a claim will not take a cancel-flagged run: requeuing left it pending
 			// and unclaimable with nothing that sweeps a pending run to end it.

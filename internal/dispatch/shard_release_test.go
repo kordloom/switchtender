@@ -41,7 +41,7 @@ func (s *stubbornStore) TransitionStatus(ctx context.Context, id string, from, t
 // pending_approval is unclaimable, the coordinator waits on its children with no timeout, and the parent
 // is leased and heartbeating so no sweep touches it. So one lost statement out of fifty left the other
 // forty-nine running to completion and the split running forever, with nothing but a log line to say
-// why, until somebody cancelled the parent by hand.
+// why, until somebody canceled the parent by hand.
 //
 // The release retries now, and a shard that still cannot be released is settled with a stated reason, so
 // the split reaches an end and the record says what happened to that shard.

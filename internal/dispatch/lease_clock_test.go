@@ -35,7 +35,7 @@ func (s *skewedClockStore) Claim(ctx context.Context, owner string, queues []str
 	}
 	at := s.now()
 	r.ClaimedAt = &at
-	if serr := s.Store.Save(ctx, r); serr != nil {
+	if serr := s.Save(ctx, r); serr != nil {
 		return nil, serr
 	}
 	return r, nil
@@ -43,7 +43,7 @@ func (s *skewedClockStore) Claim(ctx context.Context, owner string, queues []str
 
 // Heartbeat renews the lease from the store's clock.
 func (s *skewedClockStore) Heartbeat(ctx context.Context, id, owner string) error {
-	got, err := s.Store.Get(ctx, id)
+	got, err := s.Get(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -52,14 +52,14 @@ func (s *skewedClockStore) Heartbeat(ctx context.Context, id, owner string) erro
 	}
 	at := s.now()
 	got.ClaimedAt = &at
-	return s.Store.Save(ctx, got)
+	return s.Save(ctx, got)
 }
 
 // ReclaimStale ages leases against the store's clock and interrupts a running run whose lease it judges
 // expired, which is what the janitor does.
 func (s *skewedClockStore) ReclaimStale(ctx context.Context, ttl time.Duration) (int, error) {
 	cut := s.now().Add(-ttl)
-	list, err := s.Store.List(ctx)
+	list, err := s.List(ctx)
 	if err != nil {
 		return 0, err
 	}
@@ -72,7 +72,7 @@ func (s *skewedClockStore) ReclaimStale(ctx context.Context, ttl time.Duration) 
 		r.Status = run.StatusInterrupted
 		r.EndedAt = &ended
 		r.Error = "interrupted: executor lease expired"
-		if serr := s.Store.Save(ctx, r); serr != nil {
+		if serr := s.Save(ctx, r); serr != nil {
 			return n, serr
 		}
 		s.interrupted.Add(1)
