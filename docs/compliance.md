@@ -56,7 +56,7 @@ A.8.32 asks that changes to information processing facilities are controlled thr
 | Changes are documented | The change register for the period and the per-change dossier, both self-contained and re-verifiable. |
 | Changes are approved by an appropriate authority | The chain-recorded approve or reject decision, with the approver's identity, on each change. |
 | Changes can be traced and, where needed, reversed | Each run records what fired it and what it was a rerun or drift-fix of; the register and dossier trace the lineage. |
-| The change log is protected from tampering | The hash chain, its offline verification, and an RFC 3161 anchor that bounds how much history could vanish unnoticed. |
+| The change log is protected from tampering | The hash chain, its offline verification, and an RFC 3161 anchor that bounds how much history could vanish unnoticed. `switchtender verify` reads the anchor's timestamp token and refuses a receipt whose token commits to a different link, so the anchor is the authority's statement rather than another of ours. Which authorities to believe is the relying party's decision: the token travels with the receipt for their own tooling to check against their own trust store. |
 
 ## HIPAA 45 CFR 164.312(b) (audit controls)
 

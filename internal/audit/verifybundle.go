@@ -38,6 +38,12 @@ type BundleReport struct {
 	Subject BundleSubject
 	// Head is the newest coordinate the producer attests.
 	Head BundleCoord
+	// TimestampsVerified counts the carried RFC 3161 tokens that were checked and found to commit to
+	// the link their anchor names. Zero with anchors present means those anchors carry no embedded
+	// proof, which is the ordinary git or https anchor.
+	TimestampsVerified int
+	// TimestampProblems names each carried token that does not fix its anchor's link.
+	TimestampProblems []string
 	// ClaimCount and AnchorCount report the size of what was checked.
 	ClaimCount  int
 	AnchorCount int
@@ -153,6 +159,13 @@ func VerifyBundle(signed []byte, pinnedKeyID string) (*BundleReport, error) {
 	// chain check validates. Reporting anchors satisfied over a chain that did not verify would let a
 	// forged link poison both answers at once, so anchors are only meaningful once the chain holds.
 	rep.AnchorsOK = rep.ChainOK && verifyBundleAnchors(&b)
+	// A carried timestamp token is read, not taken on trust. A token that does not fix the link its
+	// anchor names is a failure of the anchor, not a note beside it: the anchor's whole purpose is to be
+	// the part of the record the producer cannot write.
+	rep.TimestampsVerified, rep.TimestampProblems = verifyBundleProofs(&b)
+	if len(rep.TimestampProblems) > 0 {
+		rep.AnchorsOK = false
+	}
 	verifyOutcomeDisclosure(b.Claims, rep)
 	verifyDecisionDisclosures(b.Claims, rep)
 	verifySpecConsistency(b.Claims, rep)
@@ -467,4 +480,27 @@ func verifyBundleAnchors(b *Bundle) bool {
 		}
 	}
 	return true
+}
+
+// verifyBundleProofs checks every embedded timestamp token against the link its anchor names, and
+// reports how many verified and what was wrong with the rest.
+//
+// A carried token used to be described rather than checked: an anchor reported as satisfied because the
+// chain reached its link, and a proof string reported as an offline proof because it was present. The
+// authority's own statement, which is the only part of an anchor that does not come from the producer,
+// went unread by every verifier.
+func verifyBundleProofs(b *Bundle) (int, []string) {
+	var verified int
+	var problems []string
+	for _, a := range b.Anchors {
+		if a.Type != AnchorRFC3161 || a.Proof == "" {
+			continue
+		}
+		if err := VerifyTimestampProof(a.Link, a.Proof); err != nil {
+			problems = append(problems, fmt.Sprintf("anchor at %d: %v", a.Seq, err))
+			continue
+		}
+		verified++
+	}
+	return verified, problems
 }

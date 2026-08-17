@@ -68,7 +68,22 @@ func runVerify(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(out, "chain        FAILED (does not recompute at seq %d)\n", rep.BrokeAtSeq)
 	}
 	if rep.AnchorCount > 0 {
-		fmt.Fprintf(out, "anchors      %s (%d)\n", mark(rep.AnchorsOK), rep.AnchorCount)
+		// The count of anchors was the whole line, which said nothing about the one part of an anchor
+		// that does not come from the producer: the authority's own token. A reader has to be able to
+		// tell an anchor this tool actually read from one it merely counted.
+		detail := fmt.Sprintf("%d", rep.AnchorCount)
+		switch {
+		case rep.TimestampsVerified > 0:
+			detail += fmt.Sprintf(", %d with a timestamp token that fixes this chain",
+				rep.TimestampsVerified)
+		case len(rep.TimestampProblems) == 0:
+			detail += ", none carrying a timestamp token, so their positions rest on where they " +
+				"were published"
+		}
+		fmt.Fprintf(out, "anchors      %s (%s)\n", mark(rep.AnchorsOK), detail)
+		for _, p := range rep.TimestampProblems {
+			fmt.Fprintf(out, "  %s\n", p)
+		}
 	} else {
 		fmt.Fprintln(out, "anchors      none (nothing outside this install fixes its position)")
 	}
@@ -128,7 +143,11 @@ func failedChecks(rep *audit.BundleReport) string {
 		failed = append(failed, fmt.Sprintf("the chain does not recompute at seq %d", rep.BrokeAtSeq))
 	}
 	if !rep.AnchorsOK {
-		failed = append(failed, "an anchor names a position this receipt does not prove")
+		if len(rep.TimestampProblems) > 0 {
+			failed = append(failed, "a timestamp token does not fix the link its anchor names")
+		} else {
+			failed = append(failed, "an anchor names a position this receipt does not prove")
+		}
 	}
 	if rep.OutcomePresent && !rep.OutcomeDigestOK {
 		failed = append(failed, "the disclosed outcome is not what the chain committed")

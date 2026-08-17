@@ -143,8 +143,14 @@ func TestDossierAnchorsCoverTheRun(t *testing.T) {
 	if !strings.Contains(html, "1 anchor(s) fix history") {
 		t.Error("dossier does not report the covering anchor in its banner")
 	}
-	if !strings.Contains(html, "embedded, verifies offline") {
-		t.Error("dossier does not mark the rfc3161 anchor's embedded proof")
+	// The proof on this fixture anchor is a placeholder, not a timestamp token, and the dossier now
+	// reads it rather than describing it. Saying "verifies offline" about bytes nobody parsed is the
+	// claim that used to be made here, and an auditor acting on it would have been acting on nothing.
+	if !strings.Contains(html, "timestamp token REFUSED") {
+		t.Errorf("dossier does not report that the anchor's proof failed to verify:\n%s", html)
+	}
+	if strings.Contains(html, "it fixes this link") {
+		t.Error("dossier claims a placeholder proof fixes the link")
 	}
 }
 

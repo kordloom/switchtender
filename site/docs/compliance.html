@@ -145,7 +145,7 @@ the chain receipts and anchors behind them.</p>
 </tr>
 <tr>
 <td>The change log is protected from tampering</td>
-<td>The hash chain, its offline verification, and an RFC 3161 anchor that bounds how much history could vanish unnoticed.</td>
+<td>The hash chain, its offline verification, and an RFC 3161 anchor that bounds how much history could vanish unnoticed. <code>switchtender verify</code> reads the anchor's timestamp token and refuses a receipt whose token commits to a different link, so the anchor is the authority's statement rather than another of ours. Which authorities to believe is the relying party's decision: the token travels with the receipt for their own tooling to check against their own trust store.</td>
 </tr>
 </tbody>
 </table>

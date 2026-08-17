@@ -284,8 +284,12 @@ type anchorRow struct {
 	At string
 	// Ref locates it.
 	Ref string
-	// Offline is true when the anchor embeds its own proof.
+	// Offline is true when the anchor embeds a timestamp token that was read here and found to fix
+	// this anchor's link.
 	Offline bool
+	// ProofProblem says why an embedded token does not fix the link, empty when there is none or when
+	// it verified.
+	ProofProblem string
 }
 
 // hostRow is one host outcome as rendered.
@@ -392,10 +396,20 @@ func Render(in *Input) ([]byte, error) {
 		})
 	}
 	for _, a := range in.Covering {
-		v.Anchors = append(v.Anchors, anchorRow{
+		// An embedded token is read here rather than described. The row used to say an anchor
+		// "verifies offline" on the strength of a proof string being present, which is a claim about
+		// the authority's statement made without looking at it.
+		row := anchorRow{
 			Type: a.Type, Seq: a.Seq, At: a.At.UTC().Format(time.RFC3339),
 			Ref: a.Ref, Offline: a.Proof != "",
-		})
+		}
+		if a.Proof != "" {
+			if err := audit.VerifyTimestampProof(a.Link, a.Proof); err != nil {
+				row.Offline = false
+				row.ProofProblem = err.Error()
+			}
+		}
+		v.Anchors = append(v.Anchors, row)
 	}
 	v.AnchorProblems = in.AnchorProblems
 	switch {
