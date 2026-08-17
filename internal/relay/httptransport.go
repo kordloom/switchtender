@@ -201,6 +201,15 @@ func (t *httpTransport) Get(ctx context.Context, id string) (*run.Run, error) {
 // state drops its batch, which is the last point anything could still be buffered for it.
 func (t *httpTransport) Save(ctx context.Context, r *run.Run) error {
 	flushErr := t.flushLog(ctx, r.ID)
+	// A terminal save closes the record. Once it lands the control node answers every later append for
+	// this run with a no-op, by design, so a tail still buffered here can never be delivered afterward:
+	// the retry that exists for it reads the no-op as success and drops the bytes. Meanwhile the control
+	// node commits the run's outcome as soon as the save lands, over the log it has, so a lost tail is
+	// attested as a complete log. The flush is retried for a bounded window before the record closes,
+	// which covers the blip this actually happens on.
+	if r.Status.Terminal() && flushErr != nil {
+		flushErr = t.flushTailBeforeClosing(ctx, r)
+	}
 	// A terminal run drops its batch, but only once there is nothing left in it. A failed final
 	// flush puts its bytes back, and deleting the batch then would throw away the end of the run's
 	// output even though the relay might recover a moment later.
@@ -244,6 +253,40 @@ func (t *httpTransport) Save(ctx context.Context, r *run.Run) error {
 		t.mu.Unlock()
 	}
 	return flushErr
+}
+
+// terminalFlushWindow is how long a terminal save waits for the run's last output to land before it
+// closes the record. It is short because the run is finished and its status is owed to whoever is
+// watching, and long enough to outlast the restart or brief fault this happens on.
+const terminalFlushWindow = 10 * time.Second
+
+// terminalFlushInterval is how often the tail is retried inside that window.
+const terminalFlushInterval = 500 * time.Millisecond
+
+// flushTailBeforeClosing retries the run's buffered output until it lands or the window closes. When it
+// cannot be delivered, the run is marked with a warning saying so, because the outcome the control node
+// commits will digest a log missing its end and the record must not read as complete.
+func (t *httpTransport) flushTailBeforeClosing(ctx context.Context, r *run.Run) error {
+	deadline := time.Now().Add(terminalFlushWindow)
+	var err error
+	for time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(terminalFlushInterval):
+		}
+		if err = t.flushLog(ctx, r.ID); err == nil {
+			return nil
+		}
+	}
+	// The bytes are still buffered and the record is about to close over a log without them. Saying so
+	// on the run is the difference between evidence that is incomplete and evidence that lies.
+	if r.Warning == "" {
+		r.Warning = "the end of this run's output could not be delivered to the control node, so the " +
+			"stored log is incomplete and the digest recorded for it covers only what arrived: " +
+			err.Error()
+	}
+	return err
 }
 
 // AppendLog buffers captured output and posts it once it reaches logBatchBytes or has waited
