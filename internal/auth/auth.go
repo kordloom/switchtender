@@ -42,8 +42,15 @@ type Token struct {
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 }
 
-// KindAgent marks a token held by an AI agent rather than a person. An empty kind is a person.
-const KindAgent = "agent"
+const (
+	// KindAgent marks a token held by an AI agent rather than a person. An empty kind is a person
+	// holding a token they minted, such as one on a laptop or in a scheduled job.
+	KindAgent = "agent"
+	// KindSession marks a token minted by an interactive sign-in, at the password form or through
+	// single sign-on. It is the difference between a person at a keyboard and a scripted call, which
+	// the chain has to record rather than infer, and it is what a sign out revokes.
+	KindSession = "session"
+)
 
 // Expired reports whether the token is past its expiry.
 func (t *Token) Expired(now time.Time) bool {
@@ -53,6 +60,11 @@ func (t *Token) Expired(now time.Time) bool {
 // IsAgent reports whether the token was issued to an agent.
 func (t *Token) IsAgent() bool {
 	return t.Kind == KindAgent
+}
+
+// IsSession reports whether the token came from an interactive sign-in.
+func (t *Token) IsSession() bool {
+	return t.Kind == KindSession
 }
 
 // Store persists API tokens. Implementations must be safe for concurrent use.

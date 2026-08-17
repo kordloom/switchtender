@@ -507,9 +507,29 @@ async function loadAllEvents(runId) {
 	return events;
 }
 
+// offerStoredSession shows the way back when this browser already holds a session, so arriving at
+// sign in is not a dead end. A reader who followed a link here, or whose one expired call sent them
+// here while the rest of the session still works, had no route back to the page they came from and no
+// indication which account the browser was holding.
+function offerStoredSession() {
+	const back = document.getElementById("signed-in-return");
+	if (!back) return;
+	if (!apiToken()) {
+		back.hidden = true;
+		return;
+	}
+	const name = localStorage.getItem("st_user") || "";
+	const label = document.getElementById("signed-in-name");
+	if (label) label.textContent = name ? "as " + name : "with a token";
+	back.hidden = false;
+	const leave = document.getElementById("signed-in-out");
+	if (leave) leave.addEventListener("click", () => signOut());
+}
+
 // loadLogin wires both sign in forms: account login mints a session token, and the raw token
 // form verifies a pasted token against the API.
 function loadLogin() {
+	offerStoredSession();
 	const ssoErr = ssoError();
 	if (ssoErr) {
 		setStatus(ssoErr);

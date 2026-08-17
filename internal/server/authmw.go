@@ -141,12 +141,19 @@ func (g *authGate) wrap(next http.Handler) http.Handler {
 		// whole surface at the door. Capping here, before decide, means the guarantee holds however
 		// the agent reaches the API, not only through the MCP client that also restricts it.
 		actorType := actorTypeToken
-		if tok.IsAgent() {
+		switch {
+		case tok.IsAgent():
 			actorType = actorTypeAgent
 			role = capAgentRole(role)
+		case tok.IsSession():
+			// A person at a browser is a session, not a script. The chain recorded every interactive
+			// change as actor_type "token", which is exactly the distinction the identity stage of the
+			// boundary exists to make, and it made the session indistinguishable from a job's token in
+			// every entry, dossier, and receipt.
+			actorType = actorTypeSession
 		}
 		actor := Actor{UserID: tok.UserID, Role: role, Name: tok.Name, Agent: tok.IsAgent(),
-			Type: actorType}
+			Type: actorType, TokenID: tok.ID}
 		if !g.decide(w, r, actor) {
 			return
 		}
@@ -280,6 +287,10 @@ type Actor struct {
 	// Type is how the caller authenticated, in the audit chain's vocabulary: session, token, or
 	// agent. It is stamped onto submitted runs so policies can tell who is asking.
 	Type string
+	// TokenID identifies the credential that authenticated this request, so a handler can revoke
+	// exactly it. Empty for a sign-in that carries no stored token, such as a bearer JWT verified
+	// against an issuer.
+	TokenID string
 }
 
 // capAgentRole lowers an admin role to operator for an agent, and leaves any lower role unchanged.
@@ -502,7 +513,10 @@ func requiredRole(r *http.Request) user.Role {
 		return user.RoleViewer
 	}
 	switch {
-	case p == "/auth/check":
+	case p == "/auth/check", p == "/auth/logout":
+		// Ending your own session is not management: it acts on the credential the caller already
+		// holds and on nothing else, so every role may do it. Requiring admin here left a viewer
+		// signed in with no way out.
 		return user.RoleViewer
 	case p == "/runs", p == "/pipelines":
 		return user.RoleOperator
@@ -763,6 +777,40 @@ func unauthorized(w http.ResponseWriter) {
 // time it runs, so it only needs to answer.
 func authCheckHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// authLogoutHandler ends the caller's own session by revoking the token that authenticated the
+// request, so the credential stops working everywhere rather than only in the tab that dropped it.
+//
+// A session token lives for thirty days. Before this there was no way to end one at all: signing out
+// could only clear the browser's copy, and anyone who had obtained the token, from a shared machine,
+// a synced profile, or a copied header, kept full use of the account for the rest of that month. A
+// person who suspects they left a session somewhere needs the credential itself invalidated.
+//
+// Only a session is revoked. An API token used to browse belongs to whatever else holds it, a
+// scheduled job most likely, and a browser tab closing must not take that down. The response is the
+// same either way, because from the caller's side the session is over regardless.
+func authLogoutHandler(tokens auth.Store, log *zap.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		actor, ok := actorFrom(r.Context())
+		if !ok {
+			// An install running without authentication has no session to end, and no caller to
+			// identify. Saying so is more honest than reporting a sign out that did nothing.
+			respondError(w, log, http.StatusConflict,
+				"this install runs without authentication, so there is no session to end")
+			return
+		}
+		if actor.Type == actorTypeSession && actor.TokenID != "" && tokens != nil {
+			if err := tokens.Delete(r.Context(), actor.TokenID); err != nil &&
+				!errors.Is(err, auth.ErrNotFound) {
+				log.Error("server: revoke session: " + err.Error())
+				respondError(w, log, http.StatusInternalServerError, "could not end the session")
+				return
+			}
+			log.Info("server: sign-out", zap.String("username", actor.Name))
+		}
 		w.WriteHeader(http.StatusNoContent)
 	}
 }

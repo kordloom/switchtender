@@ -16,11 +16,12 @@ import (
 // Every single sign-on flow mints through here, so an SSO session looks exactly like one from the
 // password login.
 func mintSessionToken(ctx context.Context, tokens auth.Store, u *user.User) (string, error) {
-	plain, tok, err := auth.New("sso " + u.Username)
+	plain, tok, err := auth.New(u.Username)
 	if err != nil {
 		return "", err
 	}
 	tok.UserID = u.ID
+	tok.Kind = auth.KindSession
 	expires := time.Now().Add(sessionTokenTTL)
 	tok.ExpiresAt = &expires
 	if err := tokens.Save(ctx, tok); err != nil {

@@ -111,7 +111,14 @@ class STElement {
 		this.parentNode = null;
 		this.childNodes = [];
 		this.attrs = new Map();
-		this.style = {};
+		// Style is a plain bag of properties a test can read, plus the two custom-property methods
+		// real code uses to drive layout variables. Those write into the same bag under their own
+		// name, so a test asserts on style["--topbar-h"] the way it asserts on style.width.
+		this.style = {
+			setProperty: (name, value) => { this.style[name] = String(value); },
+			getPropertyValue: (name) => this.style[name] || "",
+			removeProperty: (name) => { delete this.style[name]; },
+		};
 		this.listeners = new Map();
 		// Layout is not simulated, so every geometry read is a plain number a test can overwrite.
 		this.scrollTop = 0;

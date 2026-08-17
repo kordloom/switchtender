@@ -182,13 +182,17 @@ func loginHandler(users user.Store, tokens auth.Store, ldap *LDAPAuth, log *zap.
 			return
 		}
 
-		plain, tok, err := auth.New("session " + u.Username)
+		// The token is named for the person and marked as a session, so the chain attributes what
+		// they do to them rather than to a row labeled "session casey", and so signing out has
+		// something to revoke.
+		plain, tok, err := auth.New(u.Username)
 		if err != nil {
 			log.Error("server: mint session token: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not sign in")
 			return
 		}
 		tok.UserID = u.ID
+		tok.Kind = auth.KindSession
 		expires := time.Now().Add(sessionTokenTTL)
 		tok.ExpiresAt = &expires
 		if err := tokens.Save(r.Context(), tok); err != nil {
