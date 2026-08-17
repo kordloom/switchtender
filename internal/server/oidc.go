@@ -146,15 +146,27 @@ func (o *OIDCAuth) callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var claims struct {
-		Email             string `json:"email"`
+		Email string `json:"email"`
+		// EmailVerified is the provider's assertion that the address belongs to this person. Most
+		// providers let a person type any address; only this claim says one was proven.
+		EmailVerified     bool   `json:"email_verified"`
 		PreferredUsername string `json:"preferred_username"`
 	}
 	if err := idToken.Claims(&claims); err != nil {
 		o.fail(w, r, "sign-in claims unreadable")
 		return
 	}
-	username := util.FirstNonEmpty(claims.Email, claims.PreferredUsername, idToken.Subject)
-	u, err := o.provision(r.Context(), username)
+	username, vouched := oidcIdentity(claims.Email, claims.EmailVerified,
+		claims.PreferredUsername, idToken.Subject)
+	u, err := o.provision(r.Context(), username, vouched)
+	if errors.Is(err, errOIDCUnverified) {
+		o.log.Warn("oidc: refused an unverified claim naming an existing account",
+			zap.String("username", username))
+		o.fail(w, r, "your identity provider did not confirm this address belongs to you, so it "+
+			"cannot be used to sign in to the existing account of that name. Ask your administrator "+
+			"to have the provider assert a verified email.")
+		return
+	}
 	if err != nil {
 		o.log.Error("oidc: provision account: " + err.Error())
 		o.fail(w, r, "could not sign in")
@@ -171,12 +183,36 @@ func (o *OIDCAuth) callback(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/ui/#"+frag.Encode(), http.StatusFound)
 }
 
+// errOIDCUnverified is returned when a sign-in whose identity the provider did not vouch for names
+// an account that already exists. Creating a new account under that name is fine; stepping into an
+// existing one, with whatever role it holds, is not.
+var errOIDCUnverified = errors.New("oidc: the identity provider did not verify this address")
+
+// oidcIdentity picks the username for a sign-in and reports whether the provider vouched for it.
+//
+// The email claim is the best name a person recognizes, so it is used whether or not the provider
+// marked it verified: many providers omit the claim entirely, and refusing those outright would lock
+// out working deployments. What the verified flag decides is narrower and more important: whether this
+// sign-in is allowed to take over an account that already exists.
+func oidcIdentity(email string, verified bool, preferred, subject string) (string, bool) {
+	name := util.FirstNonEmpty(email, preferred, subject)
+	return name, verified && email != "" && name == email
+}
+
 // provision returns the account for username or creates one with the default role on first
 // sign-in. A new account gets a random password so password login never works for it, keeping
 // SSO the only way in.
-func (o *OIDCAuth) provision(ctx context.Context, username string) (*user.User, error) {
+//
+// An existing account is only handed to a sign-in the provider vouched for. Without that rule the
+// username came from an unverified email claim and the matching account was adopted along with its
+// role, so at any provider that lets a person set their own address, and that is most of them, typing
+// an admin's address was enough to become that admin.
+func (o *OIDCAuth) provision(ctx context.Context, username string, vouched bool) (*user.User, error) {
 	u, err := o.users.FindByUsername(ctx, username)
 	if err == nil {
+		if !vouched {
+			return nil, errOIDCUnverified
+		}
 		return u, nil
 	}
 	if !errors.Is(err, user.ErrNotFound) {

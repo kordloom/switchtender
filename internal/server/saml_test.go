@@ -252,3 +252,38 @@ func TestProtectsSAMLPaths(t *testing.T) {
 		}
 	}
 }
+
+// TestSAMLCookieSurvivesTheCrossSiteAssertion covers the reason SAML sign-in could never complete. The
+// identity provider returns its assertion as a form POST from its own origin to /auth/saml/acs, which
+// is a cross-site POST. A SameSite=Lax cookie is not sent on one, so the request-id cookie written at
+// the start of the handshake never arrived, readRequestID failed, and every assertion was refused as
+// a sign-in this browser did not start. Nothing in the product's own tests noticed, because a test
+// adds the cookie to the request by hand and a browser is the only thing that applies the rule.
+//
+// The cookie has to ride the cross-site POST, which means SameSite=None, which browsers accept only on
+// a Secure cookie. On an https base URL that is exactly what it gets. On a plain http base URL, where
+// Secure would make the cookie unusable, it stays Lax and the server says so at startup, because a
+// SAML deployment on http cannot work anyway.
+func TestSAMLCookieSurvivesTheCrossSiteAssertion(t *testing.T) {
+	t.Parallel()
+	s := newTestSAML(t, nil)
+	rec := httptest.NewRecorder()
+	s.login(rec, httptest.NewRequest(http.MethodGet, "/auth/saml/login", nil))
+	cookies := rec.Result().Cookies()
+	if len(cookies) != 1 {
+		t.Fatalf("login cookies = %d, want 1", len(cookies))
+	}
+	c := cookies[0]
+	if c.SameSite != http.SameSiteNoneMode {
+		t.Errorf("request-id cookie SameSite = %v, want None: the identity provider posts its "+
+			"assertion cross-site, and a Lax cookie is not sent on that request, so sign-in can "+
+			"never complete", c.SameSite)
+	}
+	if !c.Secure {
+		t.Error("request-id cookie is not Secure, which every browser requires before it will " +
+			"accept SameSite=None")
+	}
+	if !c.HttpOnly {
+		t.Error("request-id cookie is readable by script")
+	}
+}

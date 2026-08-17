@@ -88,6 +88,16 @@ type listUsersResponse struct {
 const (
 	loginWindowLength = time.Minute
 	loginWindowMax    = 10
+	// loginAddressMax bounds failed sign-ins from one client address, whatever usernames they name.
+	// The per-username window above cannot do this: its key includes the username, so a caller who
+	// varies it gets a fresh budget every request, and each request costs a full password hash. That
+	// is a credential-stuffing sweep across every account at full speed, and a way to spend the
+	// server's processor with no credential at all.
+	//
+	// Only failures count against it. A person signing in successfully never touches this budget, so
+	// a whole office behind one address is unaffected however many of them sign in at once, while an
+	// attacker guessing wrong is cut off after thirty tries a minute.
+	loginAddressMax = 30
 )
 
 // loginLimiter is a fixed-window sign-in counter keyed by client address and username.
@@ -135,6 +145,38 @@ func (l *loginLimiter) allow(key string) bool {
 	return w.count <= limit
 }
 
+// spent reports whether the key's window is already used up, without consuming an attempt. It is the
+// peek half of a budget that only failures pay into.
+func (l *loginLimiter) spent(key string, max int) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	w, ok := l.windows[key]
+	if !ok || time.Since(w.start) > loginWindowLength {
+		return false
+	}
+	return w.count >= max
+}
+
+// record consumes one attempt for the key, opening a window when none is current.
+func (l *loginLimiter) record(key string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	now := time.Now()
+	if len(l.windows) > 4096 {
+		for k, w := range l.windows {
+			if now.Sub(w.start) > loginWindowLength {
+				delete(l.windows, k)
+			}
+		}
+	}
+	w, ok := l.windows[key]
+	if !ok || now.Sub(w.start) > loginWindowLength {
+		l.windows[key] = &loginWindow{start: now, count: 1}
+		return
+	}
+	w.count++
+}
+
 // clientAddr returns the request's client host without the port, the stable half of the limiter
 // key. The remote address is used as seen; forwarding headers are spoofable and are not trusted.
 func clientAddr(r *http.Request) string {
@@ -150,6 +192,9 @@ func clientAddr(r *http.Request) string {
 // at full speed.
 func loginHandler(users user.Store, tokens auth.Store, ldap *LDAPAuth, log *zap.Logger) http.HandlerFunc {
 	limiter := &loginLimiter{windows: make(map[string]*loginWindow)}
+	// The address budget is kept in its own limiter so its keys cannot collide with the per-username
+	// ones and its larger cap applies to nothing else.
+	addresses := &loginLimiter{windows: make(map[string]*loginWindow)}
 	return func(w http.ResponseWriter, r *http.Request) {
 		if users == nil || tokens == nil {
 			respondError(w, log, http.StatusNotFound, "accounts not enabled")
@@ -159,7 +204,18 @@ func loginHandler(users user.Store, tokens auth.Store, ldap *LDAPAuth, log *zap.
 		if !decodeStrict(w, log, r.Body, &req) {
 			return
 		}
-		if !limiter.allow(clientAddr(r) + "\x00" + req.Username) {
+		addr := clientAddr(r)
+		// Two brakes, because one attempt is bounded two ways: how many times this address may guess
+		// wrong at all, and how many times anyone may guess at this account. The address budget is
+		// checked before any hashing happens, which is what makes it a brake on the work rather than
+		// only on the outcome.
+		if addresses.spent(addr, loginAddressMax) {
+			log.Warn("server: sign-in flood from one address", zap.String("address", addr))
+			respondError(w, log, http.StatusTooManyRequests,
+				"too many failed sign-in attempts from this address, wait a minute")
+			return
+		}
+		if !limiter.allow(addr + "\x00" + req.Username) {
 			// A rate-limited attempt is logged too, since a burst against one account is exactly the
 			// signal an auditor of authentication activity is looking for.
 			log.Warn("server: sign-in rate limited", zap.String("username", req.Username))
@@ -178,6 +234,9 @@ func loginHandler(users user.Store, tokens auth.Store, ldap *LDAPAuth, log *zap.
 			// and outcome are recorded, never the password or a token; the username is the same actor
 			// identity the chain already carries for an authenticated action.
 			log.Warn("server: sign-in failed", zap.String("username", req.Username))
+			// Only a failure pays into the address budget, so a person who signs in correctly never
+			// spends it and an office behind one address is never locked out by its own traffic.
+			addresses.record(addr)
 			respondError(w, log, http.StatusUnauthorized, "bad credentials")
 			return
 		}
