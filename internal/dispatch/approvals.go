@@ -139,11 +139,24 @@ func (d *Dispatcher) startSplit(ctx context.Context, parent *run.Run) {
 	// that only fires for an interrupted parent. Part of the fan-out executed on real hosts while
 	// the API reported a failure. Starting the coordinator over whatever released is the outcome
 	// that keeps the rollup honest, and a shard left held is settled by the run's own cancel path.
+	// The release retries, because on SQLite contention here is expected rather than exceptional and
+	// every other write on this path already retries. A shard that still cannot be released is settled
+	// with a stated reason rather than left held: a shard in pending_approval is unclaimable, the
+	// coordinator waits on its children with no timeout, and the parent is leased and heartbeating so no
+	// sweep reaches it, so one lost statement left the whole split running forever with a log line as
+	// the only explanation, until somebody cancelled the parent by hand.
 	for _, s := range shards {
-		if _, err := d.store.TransitionStatus(ctx, s.ID,
-			run.StatusPendingApproval, run.StatusPending); err != nil {
-			d.log.Error("dispatch: release shard " + s.ID + ": " + err.Error())
+		err := withRetries(func() error {
+			_, terr := d.store.TransitionStatus(ctx, s.ID,
+				run.StatusPendingApproval, run.StatusPending)
+			return terr
+		})
+		if err == nil {
+			continue
 		}
+		d.log.Error("dispatch: release shard " + s.ID + ": " + err.Error())
+		d.finalize(s, run.StatusFailed, nil,
+			"could not be released for execution when the split was approved: "+err.Error())
 	}
 	d.wake()
 	d.wg.Add(1)
