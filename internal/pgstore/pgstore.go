@@ -341,9 +341,6 @@ ALTER TABLE audit_anchors ADD COLUMN IF NOT EXISTS shape TEXT NOT NULL DEFAULT '
 -- And which install computed the value it fixes, so a chain read under a different identity, which is
 -- what every replica minting its own key produces, is diagnosed rather than called a rewrite.
 ALTER TABLE audit_anchors ADD COLUMN IF NOT EXISTS install_id TEXT NOT NULL DEFAULT '';
--- A policy can demand that the approver be someone other than the requester. Without the column the
--- rule loaded back with the requirement off, so the requester could approve their own run.
-ALTER TABLE policies ADD COLUMN IF NOT EXISTS distinct_approver INTEGER NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS idx_audit_anchor_seq ON audit_anchors(seq);
 CREATE INDEX IF NOT EXISTS idx_audit_at ON audit_entries(at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_seq ON audit_entries(seq);
@@ -365,6 +362,12 @@ CREATE TABLE IF NOT EXISTS policies (
 	distinct_approver INTEGER NOT NULL DEFAULT 0,
 	created_at       TEXT NOT NULL
 );
+-- A policy can demand that the approver be someone other than the requester. The column rides an
+-- ALTER for databases from before it; without it the rule loaded back with the requirement off, so
+-- the requester could approve their own run. It sits after the CREATE it amends, because this blob
+-- executes top to bottom and an ALTER naming a table that does not exist yet fails the whole
+-- migration on a fresh database, which is exactly what it did.
+ALTER TABLE policies ADD COLUMN IF NOT EXISTS distinct_approver INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE policies ADD COLUMN IF NOT EXISTS max_destroy INTEGER NOT NULL DEFAULT -1;
 ALTER TABLE policies ADD COLUMN IF NOT EXISTS actor_kind TEXT NOT NULL DEFAULT '';
 ALTER TABLE policies ADD COLUMN IF NOT EXISTS actor TEXT NOT NULL DEFAULT '';
