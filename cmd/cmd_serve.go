@@ -710,6 +710,16 @@ func projectCacheDir() string {
 	return filepath.Join(base, "switchtender", "projects")
 }
 
+// producerInstallID returns the install id an anchor should record, empty when this install has no
+// identity. An anchor records it so a later check can tell a chain read under a different identity, the
+// shape a restore without its key file takes, from a chain that was rewritten.
+func producerInstallID(id *audit.Identity) string {
+	if id == nil {
+		return ""
+	}
+	return id.InstallID
+}
+
 // identityDir returns the directory holding the producer signing identity for a database target.
 // serve, which signs the bundles it serves, and the bundle command, which signs the bundle it
 // emits, both derive it here so one install mints a single key and every tool reads that same key. A
@@ -827,7 +837,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	// it is not fatal: the server still runs and still records the audit chain, it just cannot
 	// attribute a bundle, which is better than refusing to start over an export feature.
 	var producer *audit.Identity
-	if id, err := audit.LoadIdentity(identityDir(serveDB)); err != nil {
+	if id, err := audit.LoadIdentityForStore(serveDB, identityDir(serveDB)); err != nil {
 		log.Warn("producer identity unavailable, bundles cannot be attributed: " + err.Error())
 	} else {
 		producer = &id
@@ -926,7 +936,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 					ctx, cancel := context.WithTimeout(ctx, anchorTimeout)
 					defer cancel()
 					a, err := audit.NewAnchor(ctx, client, audit.AnchorRFC3161, serveAnchorTSAURL,
-						audit.AnchorShapeLinear, b.Seq, b.Hash, time.Now())
+						audit.AnchorShapeLinear, producerInstallID(producer), b.Seq, b.Hash, time.Now())
 					if err != nil {
 						return err
 					}

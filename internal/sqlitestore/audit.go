@@ -301,10 +301,11 @@ func scanAudit(rows *sql.Rows) ([]*audit.Entry, error) {
 // SaveAnchor records one anchor, which fixes a chain link somewhere this install cannot rewrite
 // alone.
 func (s *auditStore) SaveAnchor(ctx context.Context, a *audit.Anchor) error {
-	const q = `INSERT INTO audit_anchors (id, type, shape, seq, link, at, ref, proof)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+	const q = `INSERT INTO audit_anchors (id, type, shape, seq, link, at, ref, proof, install_id)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
 	if _, err := s.db.ExecContext(ctx, q,
-		a.ID, a.Type, a.Shape, a.Seq, a.Link, sqlutil.FormatTime(a.At), a.Ref, a.Proof); err != nil {
+		a.ID, a.Type, a.Shape, a.Seq, a.Link, sqlutil.FormatTime(a.At), a.Ref, a.Proof,
+		a.InstallID); err != nil {
 		return fmt.Errorf("save anchor: %w", err)
 	}
 	return nil
@@ -329,7 +330,7 @@ func (s *auditStore) DeleteAnchor(ctx context.Context, id string) error {
 // Anchors returns every anchor at or below seq, oldest first. A seq of zero or less returns all of
 // them, since a caller with no range in mind wants the whole set.
 func (s *auditStore) Anchors(ctx context.Context, seq int64) ([]*audit.Anchor, error) {
-	q := "SELECT id, type, shape, seq, link, at, ref, proof FROM audit_anchors"
+	q := "SELECT id, type, shape, seq, link, at, ref, proof, install_id FROM audit_anchors"
 	args := []any{}
 	if seq > 0 {
 		q += " WHERE seq <= ?"
@@ -345,7 +346,8 @@ func (s *auditStore) Anchors(ctx context.Context, seq int64) ([]*audit.Anchor, e
 	for rows.Next() {
 		var a audit.Anchor
 		var at string
-		if err := rows.Scan(&a.ID, &a.Type, &a.Shape, &a.Seq, &a.Link, &at, &a.Ref, &a.Proof); err != nil {
+		if err := rows.Scan(&a.ID, &a.Type, &a.Shape, &a.Seq, &a.Link, &at, &a.Ref, &a.Proof,
+			&a.InstallID); err != nil {
 			return nil, fmt.Errorf("list anchors: %w", err)
 		}
 		parsed, err := sqlutil.ParseTime(at)

@@ -75,7 +75,7 @@ func TestTimestampRefusesAForgedTokenSoNothingIsStored(t *testing.T) {
 			// token must leave the store with nothing in it.
 			var store AnchorStore = &memStore{}
 			a, err := NewAnchor(ctx, srv.Client(), AnchorRFC3161, srv.URL, AnchorShapeLinear,
-				head.Seq, head.Hash, genTime())
+				"inst_test", head.Seq, head.Hash, genTime())
 			if err == nil {
 				if err := store.SaveAnchor(ctx, a); err != nil {
 					t.Fatalf("SaveAnchor() error = %v", err)

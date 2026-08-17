@@ -354,7 +354,12 @@ func randomNonce() (*big.Int, error) {
 // NewAnchor builds an anchor record for a chain coordinate, timestamping it when the type calls
 // for one. shape names the coordinate space seq and link live in, linear or tree. The clock is
 // passed in so the recorded time is the caller's, matching every other audit time.
-func NewAnchor(ctx context.Context, client *http.Client, kind, ref, shape string,
+//
+// installID is the install whose identity the anchored value was computed under. A tree root is
+// computed over leaves bound to that identity, so without it a check has no way to tell a chain read
+// under a different identity, which is what a restore without its key file and a replica with its own
+// key both produce, from a chain that was actually rewritten.
+func NewAnchor(ctx context.Context, client *http.Client, kind, ref, shape, installID string,
 	seq int64, link string, now time.Time) (*Anchor, error) {
 	if !ValidAnchorType(kind) {
 		return nil, fmt.Errorf("%w: %q", ErrAnchorType, kind)
@@ -367,7 +372,7 @@ func NewAnchor(ctx context.Context, client *http.Client, kind, ref, shape string
 	}
 	a := &Anchor{
 		ID: NewAnchorID(), Type: kind, Shape: shape, Seq: seq, Link: link,
-		At: now.UTC().Truncate(time.Microsecond), Ref: ref,
+		At: now.UTC().Truncate(time.Microsecond), Ref: ref, InstallID: installID,
 	}
 	if kind != AnchorRFC3161 {
 		if ref == "" {

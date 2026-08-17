@@ -23,6 +23,10 @@ import (
 // beside the database.
 const File = "producer-key.json"
 
+// KeyEnv is the environment variable that supplies the producer seed, for an operator holding the key
+// in their own secret manager and for every process that must sign as one shared install.
+const KeyEnv = "SWITCHTENDER_AUDIT_KEY"
+
 // WitnessFile is the file name a witness's own signing identity is stored under. A witness must not
 // share a file with the server it watches: reading producer-key.json meant a witness pointed at the
 // watched server's state directory, which is what the default does when the two run on one host,
@@ -97,10 +101,10 @@ func (i Identity) PublicKeyBase64() string {
 // variable is the same one the existing signed export already uses, so an install that has one keeps
 // the identity it has been signing with.
 func Load(dir string) (Identity, error) {
-	if seed := os.Getenv("SWITCHTENDER_AUDIT_KEY"); seed != "" {
+	if seed := os.Getenv(KeyEnv); seed != "" {
 		id, err := identityFromSeed(seed, "")
 		if err != nil {
-			return Identity{}, fmt.Errorf("SWITCHTENDER_AUDIT_KEY: %w", err)
+			return Identity{}, fmt.Errorf("%s: %w", KeyEnv, err)
 		}
 		// The install id is derived from the key that signs, never taken from a file written for a
 		// different key. Reading it from the file meant an operator who set this variable over an

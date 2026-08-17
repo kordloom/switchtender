@@ -23,6 +23,21 @@ backup does not fire the whole estate's nightly work at once.
 Run history and the audit chain are not included. The audit chain has its own signed, self-verifying
 export through `switchtender audit`, which keeps its integrity guarantees intact.
 
+The signing identity is not included either, and it is the one thing to copy by hand. `producer-key.json`
+sits in the state directory beside the database and is what makes a bundle attributable to this install:
+a tree anchor's Merkle leaves are bound to the install id derived from that key, so a deployment restored
+without it signs as a different install and its own anchors can no longer be recomputed. Copy the file
+with the same care as the encryption key, and keep it out of the same place if you keep the backup
+somewhere a reader could reach both. An anchor records which install took it, so a mismatch is reported
+as an identity that does not match rather than as a chain that was rewritten, but the remedy is still to
+restore the key.
+
+Against PostgreSQL there is no directory beside the database, so the key has to be supplied rather than
+found: set `SWITCHTENDER_AUDIT_KEY` to one seed on every process, or place the same `producer-key.json` in
+each host's identity directory. A shared database with no identity supplied is refused at startup instead
+of silently minting a per-host key, because two replicas signing as two installs is a fleet whose own
+anchors disagree with it.
+
 ## How it is secured
 
 The whole backup is sealed with the deployment's encryption key using AES-256-GCM before it is

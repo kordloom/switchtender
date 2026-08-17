@@ -63,7 +63,7 @@ func runReceipt(cmd *cobra.Command, args []string) error {
 	}
 	defer func() { _ = store.Close() }()
 
-	id, err := audit.LoadIdentity(identityDir(receiptRunDB))
+	id, err := audit.LoadIdentityForStore(receiptRunDB, identityDir(receiptRunDB))
 	if err != nil {
 		return err
 	}

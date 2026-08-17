@@ -327,12 +327,16 @@ CREATE TABLE IF NOT EXISTS audit_anchors (
 	link  TEXT NOT NULL,
 	at    TEXT NOT NULL,
 	ref   TEXT NOT NULL DEFAULT '',
-	proof TEXT NOT NULL DEFAULT ''
+	proof TEXT NOT NULL DEFAULT '',
+	install_id TEXT NOT NULL DEFAULT ''
 );
 -- An anchor records which coordinate space its link lives in, a linear entry hash or a tree root.
 -- A database created before the column existed gains it here, the same way every other added column
 -- in this schema does.
 ALTER TABLE audit_anchors ADD COLUMN IF NOT EXISTS shape TEXT NOT NULL DEFAULT 'linear';
+-- And which install computed the value it fixes, so a chain read under a different identity, which is
+-- what every replica minting its own key produces, is diagnosed rather than called a rewrite.
+ALTER TABLE audit_anchors ADD COLUMN IF NOT EXISTS install_id TEXT NOT NULL DEFAULT '';
 CREATE INDEX IF NOT EXISTS idx_audit_anchor_seq ON audit_anchors(seq);
 CREATE INDEX IF NOT EXISTS idx_audit_at ON audit_entries(at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_seq ON audit_entries(seq);

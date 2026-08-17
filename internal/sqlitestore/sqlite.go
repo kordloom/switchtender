@@ -275,7 +275,8 @@ CREATE TABLE IF NOT EXISTS audit_anchors (
 	link  TEXT NOT NULL,
 	at    TEXT NOT NULL,
 	ref   TEXT NOT NULL DEFAULT '',
-	proof TEXT NOT NULL DEFAULT ''
+	proof TEXT NOT NULL DEFAULT '',
+	install_id TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_audit_anchor_seq ON audit_anchors(seq);
 CREATE INDEX IF NOT EXISTS idx_audit_at ON audit_entries(at DESC);
@@ -636,6 +637,14 @@ func migrateRuns(db *sql.DB) error {
 		"ALTER TABLE audit_anchors ADD COLUMN shape TEXT NOT NULL DEFAULT 'linear'"); err != nil &&
 		!strings.Contains(err.Error(), "duplicate column name") {
 		return fmt.Errorf("add anchor shape column: %w", err)
+	}
+	// An anchor also records which install computed the value it fixes, so a chain read under a
+	// different identity, which is what a restore without its key file produces, is diagnosed rather
+	// than reported as a rewrite. An anchor from before the column has none, and is checked the old way.
+	if _, err := db.Exec(
+		"ALTER TABLE audit_anchors ADD COLUMN install_id TEXT NOT NULL DEFAULT ''"); err != nil &&
+		!strings.Contains(err.Error(), "duplicate column name") {
+		return fmt.Errorf("add anchor install_id column: %w", err)
 	}
 	return nil
 }
