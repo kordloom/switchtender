@@ -23,6 +23,11 @@ import (
 // ?sparse=1 discloses only this run's own chain entries, each proved to belong to the log, which is
 // the shape to hand outside an install that runs other people's work. ?from=<size> pairs with it to
 // prove the log only appended since a size the reader already saw.
+//
+// A non-admin always receives the sparse shape. The contiguous one carries the chain segment recorded
+// between the run's creation and its outcome, which is the trail itself, and the trail is admin-only.
+// The sparse shape names the run's outcome entry and the digest it committed but does not reproduce the
+// body, since a tree leaf's hash covers its claim's whole payload.
 func runReceiptHandler(store run.Store, audits audit.Store, producer *audit.Identity, version string,
 	authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	if store == nil {
@@ -60,6 +65,16 @@ func runReceiptHandler(store run.Store, audits audit.Store, producer *audit.Iden
 			return
 		}
 		opts := receipt.Options{Sparse: r.URL.Query().Get("sparse") != ""}
+		// A non-admin receives the sparse shape whatever they asked for. The contiguous shape carries
+		// the chain segment recorded between this run's creation and its outcome, which on a shared
+		// install holds other organizations' entries: their actors, their methods, and their request
+		// paths with the object ids in them. The trail itself is admin-only for that reason, so leaving
+		// the choice to the caller let an operator who could not read a line of it take a signed slice
+		// away by asking for a receipt of their own run. The sparse shape proves the same run with the
+		// same outcome and discloses nothing around it.
+		if !actorIsAdmin(r) {
+			opts.Sparse = true
+		}
 		if from := r.URL.Query().Get("from"); from != "" {
 			n, perr := strconv.ParseInt(from, 10, 64)
 			if perr != nil || n < 1 {
