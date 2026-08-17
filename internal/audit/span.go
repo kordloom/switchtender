@@ -31,6 +31,10 @@ const MethodRun = "RUN"
 // deciding actor to a digest of the exact spec decided on, not just to a run id.
 const MethodDecision = "DECISION"
 
+// MethodSchedule is the method recorded for the entry a schedule's fire commits before the run it
+// launches exists, so a scheduled run carries creation evidence like any other.
+const MethodSchedule = "SCHEDULE"
+
 // SpanPath encodes one beat's payload into the entry path. The encoding is part of what the
 // chain hash commits to, so it is fixed: beat in the path, count and cadence as ordered query
 // parameters, no escaping needed because every value is a decimal integer.

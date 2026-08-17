@@ -876,7 +876,8 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	defer disp.Close()
 
 	scheduler := schedule.NewScheduler(schedules, disp, log,
-		schedule.WithInterval(scheduleInterval), schedule.WithTemplates(bundle.Templates()))
+		schedule.WithInterval(scheduleInterval), schedule.WithTemplates(bundle.Templates()),
+		schedule.WithAudits(bundle.Audits()))
 	scheduler.Start()
 	defer scheduler.Close()
 
