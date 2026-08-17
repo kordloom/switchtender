@@ -346,12 +346,18 @@ func updateCredentialHandler(store credential.Store, sealer *credential.Sealer, 
 		// Moving a credential into an organization grants every member use of it, and moving it out
 		// takes that away from the members it had. Both directions change who may use a secret, so
 		// both are checked.
+		// Only a change of organization is a placement. Asking the question on every edit refused a
+		// manage-delegated caller who is not a member every change, including a rename that moves
+		// nothing, while delete asked nothing and succeeded, so the delegation forbade the safe
+		// operation and allowed the unrecoverable one.
 		orgID := orgForUpdate(req.OrgID, c.OrgID)
-		if authz.denyForeignOrg(w, r, log, orgID) {
-			return
-		}
-		if c.OrgID != orgID && authz.denyForeignOrg(w, r, log, c.OrgID) {
-			return
+		if c.OrgID != orgID {
+			if authz.denyForeignOrg(w, r, log, orgID) {
+				return
+			}
+			if authz.denyForeignOrg(w, r, log, c.OrgID) {
+				return
+			}
 		}
 		// The kind only changes when a new secret is sent, since a kind change re-seals the secret
 		// in the new format. So the vault_id rules must be checked against the kind that will

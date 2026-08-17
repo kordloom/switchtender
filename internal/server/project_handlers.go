@@ -118,16 +118,21 @@ func updateProjectHandler(store project.Store, authz *authorizer, log *zap.Logge
 		id := r.PathValue("id")
 		// The owner an omitted field resolves to is the stored one, so it has to be read before the
 		// organization is checked at all.
+		// Only a change of organization is a placement. Asking on every edit refused a manage-delegated
+		// caller who is not a member even a rename, while delete asked nothing and succeeded. A project
+		// this handler is creating has no stored organization to compare against, so the check applies.
 		orgID := orgForCreate(req.OrgID)
+		placing := true
 		if existing, gerr := store.Get(r.Context(), id); gerr == nil {
 			orgID = orgForUpdate(req.OrgID, existing.OrgID)
+			placing = existing.OrgID != orgID
 			// Moving a project out of an organization is as much a change of who controls it as
 			// moving one in, so the organization it leaves is checked too.
-			if existing.OrgID != orgID && authz.denyForeignOrg(w, r, log, existing.OrgID) {
+			if placing && authz.denyForeignOrg(w, r, log, existing.OrgID) {
 				return
 			}
 		}
-		if authz.denyForeignOrg(w, r, log, orgID) {
+		if placing && authz.denyForeignOrg(w, r, log, orgID) {
 			return
 		}
 		if denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse,

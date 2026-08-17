@@ -186,12 +186,16 @@ func updateInventoryHandler(store inventory.Store, authz *authorizer, sealer *cr
 		}
 		// Both directions of an organization change are checked: entering one gives every member
 		// use of this inventory, and leaving one takes it away from the members it had.
+		// Only a change of organization is a placement. Asking on every edit refused a manage-delegated
+		// caller who is not a member even a rename, while delete asked nothing and succeeded.
 		orgID := orgForUpdate(req.OrgID, existing.OrgID)
-		if authz.denyForeignOrg(w, r, log, orgID) {
-			return
-		}
-		if existing.OrgID != orgID && authz.denyForeignOrg(w, r, log, existing.OrgID) {
-			return
+		if existing.OrgID != orgID {
+			if authz.denyForeignOrg(w, r, log, orgID) {
+				return
+			}
+			if authz.denyForeignOrg(w, r, log, existing.OrgID) {
+				return
+			}
 		}
 		inv := &inventory.Inventory{
 			ID: id, Name: req.Name, Content: req.Content, CredentialIDs: req.CredentialIDs,
