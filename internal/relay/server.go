@@ -636,11 +636,66 @@ func (s *relayServer) saveHostFacts(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid host facts body")
 		return
 	}
+	// Facts are bounded by the hosts this run has recorded results for. The table is keyed on the host
+	// alone, so without this a worker leased one run could replace the recorded facts for any machine in
+	// the fleet, or invent machines outright, and the control node would store it as gathered evidence.
+	//
+	// A worker also authors those results, so this does not make one trustworthy; it makes a fabrication
+	// attributable. To write facts about a machine, a worker must first say on its own run's record that
+	// the run touched it, which shows up in that run's dossier and on the fleet page.
+	if bad := s.unrecordedHost(r.Context(), r.PathValue("id"), factHosts(facts)); bad != "" {
+		writeErr(w, http.StatusForbidden, "this run has recorded no result for host "+bad+
+			", so facts for it are refused: report the run's per-host results first")
+		return
+	}
 	if err := s.store.SaveHostFacts(r.Context(), r.PathValue("id"), facts); err != nil {
 		s.internal(w, "save host facts", err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// factHosts lists the hosts a facts body names, in order.
+func factHosts(facts []run.HostFacts) []string {
+	out := make([]string, 0, len(facts))
+	for _, f := range facts {
+		out = append(out, f.Host)
+	}
+	return out
+}
+
+// unrecordedHost returns the first host in want that the run has no recorded result for, or empty when
+// every one of them is accounted for. A host named as empty is skipped, since the store drops those
+// anyway.
+//
+// The comparison is against the run's stored per-host summaries, which the executor writes before it
+// writes facts, so an ordinary report passes and one arriving out of order is told to send its results
+// first rather than being silently trusted.
+func (s *relayServer) unrecordedHost(ctx context.Context, runID string, want []string) string {
+	need := make(map[string]bool, len(want))
+	for _, h := range want {
+		if h != "" {
+			need[h] = true
+		}
+	}
+	if len(need) == 0 {
+		return ""
+	}
+	summaries, err := s.store.RunHostSummaries(ctx, runID)
+	if err != nil {
+		// A store that cannot answer is not a store that said yes.
+		s.log.Error("relay: read host summaries: " + err.Error())
+		return want[0]
+	}
+	for _, hs := range summaries {
+		delete(need, hs.Host)
+	}
+	for _, h := range want {
+		if need[h] {
+			return h
+		}
+	}
+	return ""
 }
 
 // saveTaskSummary replaces the run's per-task summaries with those in the body.

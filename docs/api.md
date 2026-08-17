@@ -338,3 +338,14 @@ presents the worker bearer token.
 | POST   | `/relay/v1/runs/{id}/host-summary` | Save the run's per-host summaries.            |
 | POST   | `/relay/v1/runs/{id}/host-facts`   | Save the facts the run gathered per host.     |
 | POST   | `/relay/v1/runs/{id}/task-summary` | Save the run's per-task summaries.            |
+
+Each report call is bounded twice. It presents the per-claim capability the claim response issued, so it
+can only write to the run this worker holds, and one call carries at most a few thousand items, so a
+worker cannot force an unbounded decode on the control node; the worker sends a wide run's evidence in
+several calls rather than losing it to that cap. Host facts are bounded further: a worker may write
+facts only for hosts its run has already reported results for, so nothing can be recorded about a
+machine no run claims to have touched.
+
+What that does and does not give you: a worker authors its own results, so a worker you do not trust can
+still describe its own run untruthfully. What it cannot do is reach past that run into the recorded state
+of the rest of the fleet. Give a queue only to workers you would let touch the hosts that queue targets.

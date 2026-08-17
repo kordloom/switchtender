@@ -413,44 +413,76 @@ func (t *httpTransport) postLog(ctx context.Context, id string, p []byte) error 
 	return noContentOr404("append log", resp)
 }
 
+// reportBatch is how many items a worker sends in one report call.
+//
+// The control node refuses a call over maxRelayElements items, which is what stops a worker forcing an
+// unbounded decode there. The worker used to send whatever it had in one call, so a run wide enough to
+// produce more results than the cap, which for a 250-host playbook is a few dozen tasks, had its
+// events, per-host outcomes, or timings refused with a 413 and lost. It is set below the cap rather
+// than at it, so the two can be tuned independently without the worker suddenly posting at the limit.
+const reportBatch = 1000
+
+// inBatches sends items in slices of at most reportBatch through send, stopping at the first failure.
+// An empty slice sends nothing, so a run that reported nothing makes no call.
+func inBatches[T any](items []T, send func([]T) error) error {
+	for start := 0; start < len(items); start += reportBatch {
+		end := start + reportBatch
+		if end > len(items) {
+			end = len(items)
+		}
+		if err := send(items[start:end]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // AppendEvents streams structured events to the control node, mapping 404 to ErrNotFound.
 func (t *httpTransport) AppendEvents(ctx context.Context, id string, events []event.Event) error {
-	resp, err := t.sendJSON(ctx, http.MethodPost, runPath(id, "/events"), events, t.leaseFor(id))
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	return noContentOr404("append events", resp)
+	return inBatches(events, func(batch []event.Event) error {
+		resp, err := t.sendJSON(ctx, http.MethodPost, runPath(id, "/events"), batch, t.leaseFor(id))
+		if err != nil {
+			return err
+		}
+		defer func() { _ = resp.Body.Close() }()
+		return noContentOr404("append events", resp)
+	})
 }
 
 // SaveHostSummary records a run's per-host outcomes on the control node.
 func (t *httpTransport) SaveHostSummary(ctx context.Context, runID string, summaries []run.HostSummary) error {
-	resp, err := t.sendJSON(ctx, http.MethodPost, runPath(runID, "/host-summary"), summaries, t.leaseFor(runID))
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	return expectNoContent("save host summary", resp)
+	return inBatches(summaries, func(batch []run.HostSummary) error {
+		resp, err := t.sendJSON(ctx, http.MethodPost, runPath(runID, "/host-summary"), batch, t.leaseFor(runID))
+		if err != nil {
+			return err
+		}
+		defer func() { _ = resp.Body.Close() }()
+		return expectNoContent("save host summary", resp)
+	})
 }
 
 // SaveHostFacts records the system facts a run gathered per host on the control node.
 func (t *httpTransport) SaveHostFacts(ctx context.Context, runID string, facts []run.HostFacts) error {
-	resp, err := t.sendJSON(ctx, http.MethodPost, runPath(runID, "/host-facts"), facts, t.leaseFor(runID))
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	return expectNoContent("save host facts", resp)
+	return inBatches(facts, func(batch []run.HostFacts) error {
+		resp, err := t.sendJSON(ctx, http.MethodPost, runPath(runID, "/host-facts"), batch, t.leaseFor(runID))
+		if err != nil {
+			return err
+		}
+		defer func() { _ = resp.Body.Close() }()
+		return expectNoContent("save host facts", resp)
+	})
 }
 
 // SaveTaskSummary records a run's per-task durations on the control node.
 func (t *httpTransport) SaveTaskSummary(ctx context.Context, runID string, summaries []run.TaskSummary) error {
-	resp, err := t.sendJSON(ctx, http.MethodPost, runPath(runID, "/task-summary"), summaries, t.leaseFor(runID))
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	return expectNoContent("save task summary", resp)
+	return inBatches(summaries, func(batch []run.TaskSummary) error {
+		resp, err := t.sendJSON(ctx, http.MethodPost, runPath(runID, "/task-summary"), batch, t.leaseFor(runID))
+		if err != nil {
+			return err
+		}
+		defer func() { _ = resp.Body.Close() }()
+		return expectNoContent("save task summary", resp)
+	})
 }
 
 // sendJSON issues an authenticated request whose body is v encoded as JSON. A non-empty lease is
