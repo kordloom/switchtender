@@ -2528,9 +2528,27 @@ func (s *store) ReclaimStale(ctx context.Context, ttl time.Duration) (int, error
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	// A stale claim on a run somebody asked to cancel is settled, not requeued. Cancelling a claimed run
+	// is cooperative: the flag is set for its holder to read. If that holder died before starting the
+	// run, requeuing it cleared the lease and kept the flag, and a claim will not take a cancel-flagged
+	// run, so the run sat pending and unclaimable with nothing that sweeps a pending run to end it,
+	// reported as canceling forever. The person already asked for this outcome and the run never began,
+	// so it ends canceled. This runs before the requeue so the requeue cannot pick the row up first.
 	res, err := tx.ExecContext(ctx, `
+UPDATE runs SET status='canceled', claimed_by='', claimed_at=NULL, claim_secret='', ended_at=?
+WHERE status='pending' AND claimed_by!='' AND claimed_at < ? AND cancel_requested=1`,
+		sqlutil.FormatTime(time.Now()), cut)
+	if err != nil {
+		return 0, fmt.Errorf("reclaim stale: %w", err)
+	}
+	canceled, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("reclaim stale: %w", err)
+	}
+
+	res, err = tx.ExecContext(ctx, `
 UPDATE runs SET claimed_by='', claimed_at=NULL, claim_secret=''
-WHERE status='pending' AND claimed_by!='' AND claimed_at < ?`, cut)
+WHERE status='pending' AND claimed_by!='' AND claimed_at < ? AND cancel_requested=0`, cut)
 	if err != nil {
 		return 0, fmt.Errorf("reclaim stale: %w", err)
 	}
@@ -2538,6 +2556,7 @@ WHERE status='pending' AND claimed_by!='' AND claimed_at < ?`, cut)
 	if err != nil {
 		return 0, fmt.Errorf("reclaim stale: %w", err)
 	}
+	requeued += canceled
 	res, err = tx.ExecContext(ctx, `
 UPDATE runs SET status='interrupted', claimed_by='', claimed_at=NULL, claim_secret='',
 ended_at=?, error='interrupted: executor lease expired'
