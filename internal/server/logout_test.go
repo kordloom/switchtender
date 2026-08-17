@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -108,5 +109,76 @@ func TestSignInIsIdentifiableAndRevocable(t *testing.T) {
 	// Test 3: Sign out needs a caller. An anonymous one has no session to end.
 	if rec := call(http.MethodPost, "/v1/auth/logout", "", ""); rec.Code != http.StatusUnauthorized {
 		t.Errorf("anonymous sign out = %d, want 401", rec.Code)
+	}
+}
+
+// TestSelfApprovalFollowsThePersonNotTheCredential covers a way around separation of duties that the
+// control's own shape left open. The actor recorded on a run is the credential's name: a token's label
+// for a token, the username for a browser session. So the same person submitting with their token and
+// then approving in their browser presented two different actor names, and a comparison of names let
+// them release their own change while the record showed two actors. The rule is about the person, so it
+// compares the account behind the credential whenever both sides have one.
+func TestSelfApprovalFollowsThePersonNotTheCredential(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	tokens := auth.NewMemStore()
+	users := user.NewMemStore()
+	runs := run.NewMemStore()
+
+	casey, err := user.New("casey", "correct-horse", user.RoleAdmin)
+	if err != nil {
+		t.Fatalf("user.New: %v", err)
+	}
+	if err := users.Save(ctx, casey); err != nil {
+		t.Fatalf("Save user: %v", err)
+	}
+	// Casey's own API token, whose label is nothing like their username.
+	_, tok, err := auth.New("casey-laptop")
+	if err != nil {
+		t.Fatalf("auth.New: %v", err)
+	}
+	tok.UserID = casey.ID
+	if err := tokens.Save(ctx, tok); err != nil {
+		t.Fatalf("Save token: %v", err)
+	}
+
+	// The held run, as the submit path records it: the credential's label, and the account behind it.
+	held := &run.Run{
+		ID: "run_held", Status: run.StatusPendingApproval, CreatedAt: time.Now(),
+		Tool: "bash", Command: "deploy", Actor: "casey-laptop", ActorUserID: casey.ID,
+		ActorType: "token", HeldByPolicy: "deploys need a second person",
+		RequireDistinctApprover: true,
+	}
+	if err := runs.Save(ctx, held); err != nil {
+		t.Fatalf("Save run: %v", err)
+	}
+
+	handler := New(runs, &fakeSubmitter{run: &run.Run{ID: "run_x"}}, zap.NewNop(),
+		WithTokens(tokens), WithUsers(users),
+		WithApprover(&recordingApprover{runs: runs})).Handler()
+
+	// Casey signs in at the browser, where their actor name is their username, and approves.
+	login := httptest.NewRequest(http.MethodPost, "/v1/auth/login",
+		strings.NewReader(`{"username":"casey","password":"correct-horse"}`))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, login)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("sign in = %d, want 200 (body %s)", rec.Code, rec.Body.String())
+	}
+	var session struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &session); err != nil {
+		t.Fatalf("decode sign in: %v", err)
+	}
+
+	approve := httptest.NewRequest(http.MethodPost, "/v1/runs/run_held/approve", nil)
+	approve.Header.Set("Authorization", "Bearer "+session.Token)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, approve)
+	if rec.Code != http.StatusConflict {
+		t.Errorf("approving one's own run from another credential = %d, want 409: the same person "+
+			"released their own change by switching from a token to a browser session (body %s)",
+			rec.Code, rec.Body.String())
 	}
 }

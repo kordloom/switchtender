@@ -98,7 +98,8 @@ CREATE TABLE IF NOT EXISTS runs (
 	diff_mode     INTEGER NOT NULL DEFAULT 0,
 	distinct_approver INTEGER NOT NULL DEFAULT 0,
 	pinned_commit TEXT NOT NULL DEFAULT '',
-	policy_set TEXT NOT NULL DEFAULT ''
+	policy_set TEXT NOT NULL DEFAULT '',
+	actor_user_id TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_runs_created_at ON runs(created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_parent ON runs(parent_id, shard_index);
@@ -122,6 +123,7 @@ ALTER TABLE runs ADD COLUMN IF NOT EXISTS held_by_policy TEXT NOT NULL DEFAULT '
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS distinct_approver INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS pinned_commit TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS policy_set TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS actor_user_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS tags TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS skip_tags TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS verbosity INTEGER NOT NULL DEFAULT 0;
@@ -339,6 +341,9 @@ ALTER TABLE audit_anchors ADD COLUMN IF NOT EXISTS shape TEXT NOT NULL DEFAULT '
 -- And which install computed the value it fixes, so a chain read under a different identity, which is
 -- what every replica minting its own key produces, is diagnosed rather than called a rewrite.
 ALTER TABLE audit_anchors ADD COLUMN IF NOT EXISTS install_id TEXT NOT NULL DEFAULT '';
+-- A policy can demand that the approver be someone other than the requester. Without the column the
+-- rule loaded back with the requirement off, so the requester could approve their own run.
+ALTER TABLE policies ADD COLUMN IF NOT EXISTS distinct_approver INTEGER NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS idx_audit_anchor_seq ON audit_anchors(seq);
 CREATE INDEX IF NOT EXISTS idx_audit_at ON audit_entries(at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_seq ON audit_entries(seq);
@@ -357,6 +362,7 @@ CREATE TABLE IF NOT EXISTS policies (
 	actor            TEXT NOT NULL DEFAULT '',
 	min_risk         TEXT NOT NULL DEFAULT '',
 	effect           TEXT NOT NULL DEFAULT '',
+	distinct_approver INTEGER NOT NULL DEFAULT 0,
 	created_at       TEXT NOT NULL
 );
 ALTER TABLE policies ADD COLUMN IF NOT EXISTS max_destroy INTEGER NOT NULL DEFAULT -1;
@@ -670,7 +676,7 @@ const runColumns = `id, playbook, inventory, status, exit_code, error, created_a
 	proposed_from, intent, image, pull_credential_id, idempotency_key, timeout, notifications,
 	source, source_id, actor, rerun_of, labels, warning, audit_receipt, held_by_policy,
 	tags, skip_tags, verbosity, forks, diff_mode, claim_secret, actor_type, approved_spec_digest,
-	distinct_approver, pinned_commit, policy_set`
+	distinct_approver, pinned_commit, policy_set, actor_user_id`
 
 // hostSummaryColumns is the shared run_host_summary column list, in the one order the insert binds
 // its placeholders and every read scans, so a column cannot land on one path and be missed on
@@ -707,11 +713,11 @@ INSERT INTO runs
 	 image, pull_credential_id, idempotency_key, timeout, notifications,
 	 source, source_id, actor, rerun_of, labels, warning, audit_receipt, held_by_policy,
 	 tags, skip_tags, verbosity, forks, diff_mode, claim_secret, actor_type, approved_spec_digest,
-	 distinct_approver, pinned_commit, policy_set)
+	 distinct_approver, pinned_commit, policy_set, actor_user_id)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
 	$21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38,
 	$39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57,
-	$58, $59)
+	$58, $59, $60)
 ON CONFLICT(id) DO UPDATE SET
 	playbook=excluded.playbook, inventory=excluded.inventory, status=excluded.status,
 	exit_code=excluded.exit_code, error=excluded.error, created_at=excluded.created_at,
@@ -737,7 +743,7 @@ ON CONFLICT(id) DO UPDATE SET
 	claim_secret=excluded.claim_secret, actor_type=excluded.actor_type,
 	approved_spec_digest=excluded.approved_spec_digest,
 	distinct_approver=excluded.distinct_approver, pinned_commit=excluded.pinned_commit,
-	policy_set=excluded.policy_set`
+	policy_set=excluded.policy_set, actor_user_id=excluded.actor_user_id`
 	_, err := s.db.ExecContext(ctx, q,
 		r.ID, r.Playbook, r.Inventory, string(r.Status), sqlutil.NullInt(r.ExitCode), r.Error,
 		sqlutil.FormatTime(r.CreatedAt), sqlutil.NullTime(r.StartedAt), sqlutil.NullTime(r.EndedAt),
@@ -750,7 +756,7 @@ ON CONFLICT(id) DO UPDATE SET
 		r.Source, r.SourceID, r.Actor, r.RerunOf, marshalLabels(r.Labels), r.Warning, r.AuditReceipt,
 		r.HeldByPolicy, sqlutil.JoinIDs(r.Tags), sqlutil.JoinIDs(r.SkipTags), r.Verbosity, r.Forks,
 		sqlutil.BoolToInt(r.DiffMode), r.ClaimSecret, r.ActorType, r.ApprovedSpecDigest,
-		sqlutil.BoolToInt(r.RequireDistinctApprover), r.PinnedCommit, marshalPolicySet(r.PolicySet),
+		sqlutil.BoolToInt(r.RequireDistinctApprover), r.PinnedCommit, marshalPolicySet(r.PolicySet), r.ActorUserID,
 	)
 	if err != nil {
 		if r.IdempotencyKey != "" && isKeyConflict(err) {
@@ -1750,7 +1756,7 @@ func scanRun(s scanner) (*run.Run, error) {
 		&r.Image, &r.PullCredentialID, &r.IdempotencyKey, &r.Timeout, &notifs,
 		&r.Source, &r.SourceID, &r.Actor, &r.RerunOf, &labels, &r.Warning, &r.AuditReceipt,
 		&r.HeldByPolicy, &tags, &skipTags, &r.Verbosity, &r.Forks, &diffMode,
-		&r.ClaimSecret, &r.ActorType, &r.ApprovedSpecDigest, &distinctApprover, &r.PinnedCommit, &policySet); err != nil {
+		&r.ClaimSecret, &r.ActorType, &r.ApprovedSpecDigest, &distinctApprover, &r.PinnedCommit, &policySet, &r.ActorUserID); err != nil {
 		return nil, err
 	}
 	r.RequireDistinctApprover = distinctApprover != 0

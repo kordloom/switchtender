@@ -95,7 +95,8 @@ CREATE TABLE IF NOT EXISTS runs (
 	diff_mode INTEGER NOT NULL DEFAULT 0,
 	distinct_approver INTEGER NOT NULL DEFAULT 0,
 	pinned_commit TEXT NOT NULL DEFAULT '',
-	policy_set TEXT NOT NULL DEFAULT ''
+	policy_set TEXT NOT NULL DEFAULT '',
+	actor_user_id TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_runs_created_at ON runs(created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_parent ON runs(parent_id, shard_index);
@@ -297,6 +298,7 @@ CREATE TABLE IF NOT EXISTS policies (
 	actor            TEXT NOT NULL DEFAULT '',
 	min_risk         TEXT NOT NULL DEFAULT '',
 	effect           TEXT NOT NULL DEFAULT '',
+	distinct_approver INTEGER NOT NULL DEFAULT 0,
 	created_at       TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS inventories (
@@ -613,7 +615,7 @@ func migrateRuns(db *sql.DB) error {
 		!strings.Contains(err.Error(), "duplicate column name") {
 		return fmt.Errorf("add notifications column: %w", err)
 	}
-	for _, column := range []string{"source", "source_id", "actor", "rerun_of", "labels", "steps", "warning", "audit_receipt", "held_by_policy", "tags", "skip_tags", "claim_secret", "actor_type", "approved_spec_digest", "pinned_commit", "policy_set"} {
+	for _, column := range []string{"source", "source_id", "actor", "rerun_of", "labels", "steps", "warning", "audit_receipt", "held_by_policy", "tags", "skip_tags", "claim_secret", "actor_type", "approved_spec_digest", "pinned_commit", "policy_set", "actor_user_id"} {
 		if _, err := db.Exec(
 			"ALTER TABLE runs ADD COLUMN " + column + " TEXT NOT NULL DEFAULT ''"); err != nil &&
 			!strings.Contains(err.Error(), "duplicate column name") {
@@ -638,6 +640,14 @@ func migrateRuns(db *sql.DB) error {
 		"ALTER TABLE audit_anchors ADD COLUMN shape TEXT NOT NULL DEFAULT 'linear'"); err != nil &&
 		!strings.Contains(err.Error(), "duplicate column name") {
 		return fmt.Errorf("add anchor shape column: %w", err)
+	}
+	// A policy can demand that the approver be someone other than the requester, which a database
+	// created before the column gains here. Without the column the rule loaded back with the
+	// requirement off, so the requester could approve their own run.
+	if _, err := db.Exec(
+		"ALTER TABLE policies ADD COLUMN distinct_approver INTEGER NOT NULL DEFAULT 0"); err != nil &&
+		!strings.Contains(err.Error(), "duplicate column name") {
+		return fmt.Errorf("add policy distinct_approver column: %w", err)
 	}
 	// An anchor also records which install computed the value it fixes, so a chain read under a
 	// different identity, which is what a restore without its key file produces, is diagnosed rather
@@ -964,7 +974,7 @@ const runColumns = `id, playbook, inventory, status, exit_code, error, created_a
 	proposed_from, intent, image, pull_credential_id, idempotency_key, timeout, notifications,
 	source, source_id, actor, rerun_of, labels, warning, audit_receipt, held_by_policy,
 	tags, skip_tags, verbosity, forks, diff_mode, claim_secret, actor_type, approved_spec_digest,
-	distinct_approver, pinned_commit, policy_set`
+	distinct_approver, pinned_commit, policy_set, actor_user_id`
 
 // hostSummaryColumns is the shared run_host_summary column list, in the one order the insert binds
 // its placeholders and every read scans, so a column cannot land on one path and be missed on
@@ -1001,8 +1011,8 @@ INSERT INTO runs
 	 image, pull_credential_id, idempotency_key, timeout, notifications,
 	 source, source_id, actor, rerun_of, labels, warning, audit_receipt, held_by_policy,
 	 tags, skip_tags, verbosity, forks, diff_mode, claim_secret, actor_type, approved_spec_digest,
-	 distinct_approver, pinned_commit, policy_set)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	 distinct_approver, pinned_commit, policy_set, actor_user_id)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
 	playbook=excluded.playbook, inventory=excluded.inventory, status=excluded.status,
 	exit_code=excluded.exit_code, error=excluded.error, created_at=excluded.created_at,
@@ -1028,7 +1038,7 @@ ON CONFLICT(id) DO UPDATE SET
 	claim_secret=excluded.claim_secret, actor_type=excluded.actor_type,
 	approved_spec_digest=excluded.approved_spec_digest,
 	distinct_approver=excluded.distinct_approver, pinned_commit=excluded.pinned_commit,
-	policy_set=excluded.policy_set`
+	policy_set=excluded.policy_set, actor_user_id=excluded.actor_user_id`
 	_, err := s.db.ExecContext(ctx, q,
 		r.ID, r.Playbook, r.Inventory, string(r.Status), sqlutil.NullInt(r.ExitCode), r.Error,
 		sqlutil.FormatTime(r.CreatedAt), sqlutil.NullTime(r.StartedAt), sqlutil.NullTime(r.EndedAt),
@@ -1041,7 +1051,7 @@ ON CONFLICT(id) DO UPDATE SET
 		r.Source, r.SourceID, r.Actor, r.RerunOf, marshalLabels(r.Labels), r.Warning, r.AuditReceipt,
 		r.HeldByPolicy, sqlutil.JoinIDs(r.Tags), sqlutil.JoinIDs(r.SkipTags), r.Verbosity, r.Forks,
 		sqlutil.BoolToInt(r.DiffMode), r.ClaimSecret, r.ActorType, r.ApprovedSpecDigest,
-		sqlutil.BoolToInt(r.RequireDistinctApprover), r.PinnedCommit, marshalPolicySet(r.PolicySet),
+		sqlutil.BoolToInt(r.RequireDistinctApprover), r.PinnedCommit, marshalPolicySet(r.PolicySet), r.ActorUserID,
 	)
 	if err != nil {
 		if r.IdempotencyKey != "" && isKeyConflict(err) {
@@ -2043,7 +2053,7 @@ func scanRun(s scanner) (*run.Run, error) {
 		&r.Image, &r.PullCredentialID, &r.IdempotencyKey, &r.Timeout, &notifs,
 		&r.Source, &r.SourceID, &r.Actor, &r.RerunOf, &labels, &r.Warning, &r.AuditReceipt,
 		&r.HeldByPolicy, &tags, &skipTags, &r.Verbosity, &r.Forks, &diffMode,
-		&r.ClaimSecret, &r.ActorType, &r.ApprovedSpecDigest, &distinctApprover, &r.PinnedCommit, &policySet); err != nil {
+		&r.ClaimSecret, &r.ActorType, &r.ApprovedSpecDigest, &distinctApprover, &r.PinnedCommit, &policySet, &r.ActorUserID); err != nil {
 		return nil, err
 	}
 	r.RequireDistinctApprover = distinctApprover != 0

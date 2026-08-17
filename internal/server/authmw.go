@@ -363,12 +363,23 @@ func denyUnlessAdminOrActor(w http.ResponseWriter, r *http.Request, log *zap.Log
 	if roleAllows(actor.Role, user.RoleAdmin) {
 		return false
 	}
-	if rn != nil && actor.Name != "" && actor.Name == rn.Actor {
+	if rn != nil && sameActor(actor, rn) {
 		return false
 	}
 	respondError(w, log, http.StatusForbidden,
 		"reading a run's evidence needs the admin role, or that you are the actor who asked for it")
 	return true
+}
+
+// sameActor reports whether the caller is the actor recorded on the run. The account is compared first
+// and the credential's name only when one side has no account: a person's token and their browser
+// session record different names, so a name comparison alone answers "same person" wrongly in the
+// direction that matters.
+func sameActor(actor Actor, rn *run.Run) bool {
+	if actor.UserID != "" && rn.ActorUserID != "" {
+		return actor.UserID == rn.ActorUserID
+	}
+	return actor.Name != "" && actor.Name == rn.Actor
 }
 
 // unauthenticatedActor names the kind of caller on a path that carries no token.

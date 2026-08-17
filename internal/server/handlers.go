@@ -391,7 +391,8 @@ func reconcileDriftHandler(store run.Store, submitter Submitter, authz *authoriz
 			run.WithRequireApproval(true),
 			run.WithProposedFrom(check.ID),
 			run.WithSource("reconcile", check.ID),
-			run.WithActor(actorName(r)), run.WithActorType(actorType(r)),
+			run.WithActor(actorName(r)), run.WithActorAccount(actorAccount(r)),
+			run.WithActorType(actorType(r)),
 		)
 		if tool == run.ToolAnsible {
 			// The Ansible fix reruns the playbook limited to the drifted host, applying exactly the
@@ -573,6 +574,7 @@ func createRunHandler(submitter Submitter, authz *authorizer, log *zap.Logger) h
 			run.WithCredentialIDs(req.CredentialIDs),
 			run.WithTool(req.Tool), run.WithCommand(req.Command), run.WithDryRun(req.DryRun),
 			run.WithSource("api", ""), run.WithActor(actorName(r)),
+			run.WithActorAccount(actorAccount(r)),
 			run.WithActorType(actorType(r)), run.WithLabels(req.Labels),
 			run.WithTags(req.Tags...), run.WithSkipTags(req.SkipTags...),
 			run.WithVerbosity(req.Verbosity), run.WithForks(req.Forks), run.WithDiffMode(req.DiffMode),
@@ -694,7 +696,8 @@ func createPipelineHandler(submitter Submitter, authz *authorizer, log *zap.Logg
 		}
 
 		popts := []run.SubmitOption{run.WithCredentialIDs(req.CredentialIDs),
-			run.WithActor(actorName(r)), run.WithActorType(actorType(r))}
+			run.WithActor(actorName(r)), run.WithActorAccount(actorAccount(r)),
+			run.WithActorType(actorType(r))}
 		// Validated exactly as a run submission is. Taking the header verbatim here let a caller
 		// mint a key in the reserved namespace that derived keys use, plant a run under the key a
 		// webhook or a rerun would later compute, and have that later launch resolve to the planted
@@ -988,6 +991,36 @@ func actorName(r *http.Request) string {
 	return ""
 }
 
+// denySelfApproval refuses an approval by the person who asked for the run, when the rule that held it
+// requires a different approver. It reports whether the handler should stop.
+//
+// Rejecting your own run is untouched: withdrawing a request needs nobody else, and blocking it would
+// leave a requester unable to take back their own change.
+func denySelfApproval(w http.ResponseWriter, r *http.Request, log *zap.Logger, rn *run.Run) bool {
+	if rn == nil || !rn.RequireDistinctApprover {
+		return false
+	}
+	actor, ok := actorFrom(r.Context())
+	if !ok || !sameActor(actor, rn) {
+		return false
+	}
+	respondError(w, log, http.StatusConflict, "the rule that held this run requires a different "+
+		"person to approve it, and you are the one who asked for it. You can still reject it to "+
+		"withdraw the request")
+	return true
+}
+
+// actorAccount returns the account behind the caller's credential, empty when the API runs open or the
+// credential names no account. It is stamped beside the actor's name because the name is the
+// credential's and differs between a person's token and their browser session, so anything asking "is
+// this the same person" has to compare the account.
+func actorAccount(r *http.Request) string {
+	if a, ok := actorFrom(r.Context()); ok {
+		return a.UserID
+	}
+	return ""
+}
+
 // actorType returns how the caller authenticated, in the audit chain's vocabulary, empty when the
 // API runs open. Stamped on submitted runs so a policy can tell an agent's request from a person's.
 func actorType(r *http.Request) string {
@@ -1136,7 +1169,8 @@ func rerunRunHandler(store run.Store, submitter Submitter, authz *authorizer, lo
 			return
 		}
 		opts := append(rerunOptions(rn), run.WithSource("rerun", rn.ID), run.WithRerunOf(rn.ID),
-			run.WithActor(actorName(r)), run.WithActorType(actorType(r)),
+			run.WithActor(actorName(r)), run.WithActorAccount(actorAccount(r)),
+			run.WithActorType(actorType(r)),
 			run.WithIdempotencyKey(key))
 		var created *run.Run
 		if rn.Kind == run.KindSplit && rn.ShardCount != nil && *rn.ShardCount > 1 {
@@ -1181,6 +1215,13 @@ func approveRunHandler(approver Approver, store run.Store, authz *authorizer,
 				return
 			}
 			if authorizeRunAccess(w, r, authz, log, rn) {
+				return
+			}
+			// Separation of duties is enforced here as well as in the dispatcher, because only here is
+			// the caller's account in hand. The actor recorded on a run is the credential's name, a
+			// token's label or a username, so the dispatcher's comparison of names cannot tell that a
+			// person submitting with their token and approving in their browser is one person.
+			if denySelfApproval(w, r, log, rn) {
 				return
 			}
 		}

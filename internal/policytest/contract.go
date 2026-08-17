@@ -30,9 +30,17 @@ func Contract(t *testing.T, newStore func() policy.Store) {
 // testGet verifies a saved policy round-trips through Get and a missing id reports ErrNotFound.
 func testGet(t *testing.T, store policy.Store) {
 	ctx := context.Background()
+	// Every field that decides what a rule does is set, because a field a store drops is a rule that
+	// silently does something else. The separation-of-duties flag was added to the type and to the API
+	// and not to the tables, so on a real install the rule loaded back with the requirement off: the
+	// requester could approve their own run, and the record of the rules in force described a rule that
+	// did not ask for a second person. Only a store-level check catches that, since an in-memory store
+	// round-trips whatever struct it was handed.
 	p := &policy.Policy{
 		ID: policy.NewID(), Name: "prod-destroy", Tool: "terraform", CommandContains: "destroy",
 		InventoryID: "inv_prod", ExcludeDryRun: true, MaxDestroy: 3,
+		ActorKind: policy.ActorKindAgent, Actor: "deploy-bot", MinRisk: "high",
+		Effect: policy.EffectDeny, RequireDistinctApprover: true,
 		CreatedAt: time.Date(2026, 7, 10, 0, 0, 0, 0, time.UTC),
 	}
 	if err := store.Save(ctx, p); err != nil {
@@ -45,6 +53,14 @@ func testGet(t *testing.T, store policy.Store) {
 	if got.Name != "prod-destroy" || got.Tool != "terraform" || got.CommandContains != "destroy" ||
 		got.InventoryID != "inv_prod" || !got.ExcludeDryRun || got.MaxDestroy != 3 {
 		t.Errorf("Get() = %+v, want the saved policy", got)
+	}
+	if got.ActorKind != policy.ActorKindAgent || got.Actor != "deploy-bot" || got.MinRisk != "high" ||
+		got.Effect != policy.EffectDeny {
+		t.Errorf("Get() criteria = %+v, want the saved actor, risk floor, and effect", got)
+	}
+	if !got.RequireDistinctApprover {
+		t.Error("Get() lost require_distinct_approver, so the rule loads back allowing the requester " +
+			"to approve their own run")
 	}
 	if _, err := store.Get(ctx, "pol_missing"); !errors.Is(err, policy.ErrNotFound) {
 		t.Errorf("Get(missing) = %v, want ErrNotFound", err)

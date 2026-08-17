@@ -574,6 +574,7 @@ func TestPinnedCommitSurvivesTheStore(t *testing.T) {
 		ID: "run_apply", Status: run.StatusPendingApproval, CreatedAt: time.Now(),
 		Tool: "terraform", Command: "infra/prod", ProposedFrom: "run_plan",
 		PinnedCommit: "abc123def456", Actor: "casey", ActorType: "session",
+		ActorUserID: "user_casey",
 		PolicySet: &run.PolicySet{
 			Digest: "d1e2f3a4b5c6", Count: 1, Rules: []string{"prod apply: requires approval"},
 		},
@@ -600,6 +601,12 @@ func TestPinnedCommitSurvivesTheStore(t *testing.T) {
 	}
 	if len(got.PolicySet.Rules) != 1 || got.PolicySet.Rules[0] != "prod apply: requires approval" {
 		t.Errorf("stored rules = %v, want them readable without asking the server", got.PolicySet.Rules)
+	}
+	// The account behind the requester, which is what separation of duties compares: the credential's
+	// name differs between a person's token and their browser session, so a store that keeps only the
+	// name lets the same person approve their own change from the other credential.
+	if got.ActorUserID != "user_casey" {
+		t.Errorf("stored actor account = %q, want user_casey", got.ActorUserID)
 	}
 	if got.Actor != "casey" || got.ActorType != "session" {
 		t.Errorf("stored actor = %q/%q, want casey/session", got.Actor, got.ActorType)

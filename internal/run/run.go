@@ -279,6 +279,12 @@ type Run struct {
 	SourceID string `json:"source_id,omitempty"`
 	// Actor is the authenticated user who fired the run, when the server knows one.
 	Actor string `json:"actor,omitempty"`
+	// ActorUserID is the account behind the credential that fired the run, empty for an unscoped
+	// command-line token or an unattributed source. Actor is the credential's name, which differs
+	// between a token and a browser session for the same person, so any rule about who a person is
+	// compares this: separation of duties keyed on the name alone let the same person submit with a
+	// token and approve in a browser.
+	ActorUserID string `json:"actor_user_id,omitempty"`
 	// ActorType is how the requesting actor authenticated, in the audit chain's vocabulary: agent
 	// for an AI agent's token, session for a signed-in person, token for an owner-held API token,
 	// cli for the command line, webhook for a trigger. Empty when the server does not know. It is
@@ -573,6 +579,11 @@ func WithPolicySet(digest string, count int, rules []string) SubmitOption {
 // WithPinnedCommit binds the run to one commit, refusing to execute any other. See Run.PinnedCommit.
 func WithPinnedCommit(sha string) SubmitOption {
 	return func(r *Run) { r.PinnedCommit = sha }
+}
+
+// WithActorAccount records the account behind the credential that fired the run. See Run.ActorUserID.
+func WithActorAccount(userID string) SubmitOption {
+	return func(r *Run) { r.ActorUserID = userID }
 }
 
 // WithActorType stamps how the requesting actor authenticated, so a policy can tell an agent's
