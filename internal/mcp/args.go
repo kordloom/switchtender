@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -28,13 +29,96 @@ func prop(kind, description string) map[string]any {
 
 // decode reads a tool's arguments into out, treating absent arguments as an empty object so a tool
 // with only optional inputs can be called with none.
+//
+// An argument the tool does not define is refused, not ignored. A model reaching for a control it
+// half-remembers writes the name from the tool it knows: check_mode rather than dry_run, extra_vars
+// rather than answers, host rather than limit. Dropping those quietly meant the run executed with the
+// control unset, which for a preview flag means the change happened for real, and the tool answered
+// with a success the model then reported as a preview. Refusing puts the mistake in the one exchange
+// where it can still be corrected.
 func decode(args json.RawMessage, out any) error {
 	trimmed := strings.TrimSpace(string(args))
 	if trimmed == "" || trimmed == "null" {
 		return nil
 	}
-	if err := json.Unmarshal(args, out); err != nil {
-		return fmt.Errorf("invalid arguments: %w", err)
+	dec := json.NewDecoder(strings.NewReader(trimmed))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(out); err != nil {
+		return fmt.Errorf("invalid arguments: %w%s", err, argHint(err.Error()))
+	}
+	return nil
+}
+
+// deliberatelyUnsupported maps an argument a model is likely to reach for onto what to use instead.
+// These are not typos: they are controls another tool really has, and this one withholds on purpose, so
+// the refusal says why and where to go rather than only that the name is unknown.
+var deliberatelyUnsupported = map[string]string{
+	"extra_vars": "extra vars override everything a template and its inventory set, so an agent " +
+		"cannot supply them: use answers to fill the survey fields the operator declared, or ask an " +
+		"operator to add a survey field for the value you need",
+	"vars":       "use answers to fill the survey fields the operator declared",
+	"check_mode": "use dry_run for the tool's no-change mode",
+	"check":      "use dry_run for the tool's no-change mode",
+	"hosts":      "use limit to narrow which hosts a run touches",
+	"host":       "use limit to narrow which hosts a run touches",
+	"playbook": "a playbook is not chosen here: propose a template from list_templates, or ask an " +
+		"operator to enable ad-hoc proposals",
+	"command": "a command is not chosen here: propose a template from list_templates, or ask an " +
+		"operator to enable ad-hoc proposals",
+}
+
+// argHint returns the guidance for a rejected argument, or empty when there is none to give. It reads
+// the field name back out of the decoder's own message, which is the only place it appears.
+func argHint(msg string) string {
+	const marker = `unknown field "`
+	at := strings.Index(msg, marker)
+	if at == -1 {
+		return ""
+	}
+	rest := msg[at+len(marker):]
+	end := strings.IndexByte(rest, '"')
+	if end == -1 {
+		return ""
+	}
+	if hint, ok := deliberatelyUnsupported[rest[:end]]; ok {
+		return ": " + hint
+	}
+	return ""
+}
+
+// everyHostPatterns are the Ansible spellings of "no narrowing at all".
+var everyHostPatterns = map[string]bool{"all": true, "*": true, "all:*": true, "*:all": true}
+
+// checkLimit refuses a host pattern that widens what a template may touch rather than narrowing it.
+//
+// The launch endpoint takes a caller's limit as a replacement for the template's, which is right for a
+// person who chose the template and is wrong for an agent working from a menu: a template pinned to one
+// canary host could be aimed at an entire inventory by passing a limit, under the same template name
+// the audit trail records. Passing "all" was worse than widening, because the risk grade the approval
+// policies key on is computed partly from how wide a run reaches, so the widest possible run also
+// graded itself down and could fall under the threshold that would otherwise have held it.
+//
+// Narrowing is left alone. An agent asking to touch one host out of many is the useful case, and it is
+// the direction that cannot cause harm the template did not already permit.
+func checkLimit(ctx context.Context, c *Client, templateID, limit string) error {
+	limit = strings.TrimSpace(limit)
+	if limit == "" {
+		return nil
+	}
+	if everyHostPatterns[strings.ToLower(limit)] {
+		return fmt.Errorf("limit %q means every host, which widens the run rather than narrowing it: "+
+			"name the hosts this run should touch, or leave limit out to use the template's own target",
+			limit)
+	}
+	var tpl struct {
+		Limit string `json:"limit"`
+	}
+	if err := c.do(ctx, "GET", "/v1/templates/"+escapeID(templateID), nil, &tpl); err != nil {
+		return err
+	}
+	if pinned := strings.TrimSpace(tpl.Limit); pinned != "" && pinned != limit {
+		return fmt.Errorf("this template pins its target to %q, so limit cannot be changed: launch it "+
+			"as defined, or ask an operator for a template that targets %q", pinned, limit)
 	}
 	return nil
 }

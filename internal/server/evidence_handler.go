@@ -39,10 +39,22 @@ func runEvidenceHandler(store run.Store, audits audit.Store, installID string, a
 		if authorizeRunAccess(w, r, authz, log, got) {
 			return
 		}
+		// Evidence quotes the audit trail, so it is admin ground with one exception: the actor who asked
+		// for this run may read the evidence for it.
+		if denyUnlessAdminOrActor(w, r, log, got) {
+			return
+		}
 		in, err := dossier.Collect(r.Context(), store, audits, installID, got.ID, time.Now())
 		if err != nil {
 			log.Error("server: collect run evidence: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not collect the evidence")
+			return
+		}
+		// The dossier is an HTML page for a person. A caller that asks for JSON gets the same collected
+		// record as data, which is what a program, and an AI agent above all, can actually read: the
+		// tool that reads a run's evidence used to hand a model a page of markup.
+		if r.URL.Query().Get("format") == "json" {
+			respondJSON(w, log, http.StatusOK, in, wantsPretty(r))
 			return
 		}
 		doc, err := dossier.Render(in)

@@ -349,6 +349,28 @@ func isSignIn(r *http.Request) bool {
 		strings.HasPrefix(p, "/auth/oidc/") || strings.HasPrefix(p, "/auth/saml/")
 }
 
+// denyUnlessAdminOrActor refuses a caller who is neither an admin nor the actor recorded on this run,
+// writing the refusal and reporting that the handler should stop. It is what makes a run's evidence
+// readable by whoever asked for that run and by nobody else below admin.
+//
+// An install with authentication off has no actor to compare against and no roles to speak of, so
+// everything is allowed there, exactly as every other check behaves.
+func denyUnlessAdminOrActor(w http.ResponseWriter, r *http.Request, log *zap.Logger, rn *run.Run) bool {
+	actor, ok := actorFrom(r.Context())
+	if !ok {
+		return false
+	}
+	if roleAllows(actor.Role, user.RoleAdmin) {
+		return false
+	}
+	if rn != nil && actor.Name != "" && actor.Name == rn.Actor {
+		return false
+	}
+	respondError(w, log, http.StatusForbidden,
+		"reading a run's evidence needs the admin role, or that you are the actor who asked for it")
+	return true
+}
+
 // unauthenticatedActor names the kind of caller on a path that carries no token.
 func unauthenticatedActor(r *http.Request) string {
 	switch {
@@ -467,10 +489,18 @@ func requiredRole(r *http.Request) user.Role {
 	// A signed receipt is drawn from the same trail: it carries the chain entries over that run,
 	// the approver identities that decided it, and, on the contiguous shape, the entries recorded
 	// between them. It takes the trail's role for the same reason the dossier does.
-	if p == "/audit" || strings.HasPrefix(p, "/audit/") ||
-		(strings.HasPrefix(p, "/runs/") &&
-			(strings.HasSuffix(p, "/evidence") || strings.HasSuffix(p, "/receipt"))) {
+	if p == "/audit" || strings.HasPrefix(p, "/audit/") {
 		return user.RoleAdmin
+	}
+	// A run's evidence and its signed receipt quote the trail, so they are management data, with one
+	// exception the handlers enforce themselves: the actor who asked for that run may read the evidence
+	// for it. Without that exception the whole point of an accountable machine principal was
+	// unreachable, since the MCP server refuses an admin token by design and so could never call the
+	// evidence tool it advertises. The gate lets an operator through and the handler decides whether
+	// this is their own run; a viewer is stopped here.
+	if strings.HasPrefix(p, "/runs/") &&
+		(strings.HasSuffix(p, "/evidence") || strings.HasSuffix(p, "/receipt")) {
+		return user.RoleOperator
 	}
 	// An account carries a profile of personal data, so listing accounts is management data even
 	// to read. Without this a viewer could read every user's name, email, phone, and notes.

@@ -59,15 +59,14 @@ func Tools(c *Client, opts Options) []Tool {
 				"tells you whether it is running or awaiting approval.",
 			InputSchema: object(map[string]any{
 				"template_id": prop("string", "The template to launch, from list_templates."),
-				"extra_vars": map[string]any{
-					"type":        "object",
-					"description": "Variables merged over the template's own.",
-				},
 				"answers": map[string]any{
 					"type":        "object",
 					"description": "Survey answers, keyed by the survey field's variable name.",
 				},
-				"limit":   prop("string", "Narrow this launch to a host pattern."),
+				"limit": prop("string",
+					"Narrow this launch to a host pattern. It can only narrow: a template that pins "+
+						"its own target refuses a different one, and a pattern meaning every host is "+
+						"refused."),
 				"dry_run": prop("boolean", "Run in the tool's no-change mode."),
 				"reason": prop("string",
 					"Why this run is being proposed. Recorded as a label so the audit trail carries "+
@@ -76,7 +75,6 @@ func Tools(c *Client, opts Options) []Tool {
 			Run: func(ctx context.Context, args json.RawMessage) (string, error) {
 				var in struct {
 					TemplateID string         `json:"template_id"`
-					ExtraVars  map[string]any `json:"extra_vars,omitempty"`
 					Answers    map[string]any `json:"answers,omitempty"`
 					Limit      string         `json:"limit,omitempty"`
 					DryRun     *bool          `json:"dry_run,omitempty"`
@@ -88,10 +86,10 @@ func Tools(c *Client, opts Options) []Tool {
 				if strings.TrimSpace(in.TemplateID) == "" {
 					return "", fmt.Errorf("template_id is required")
 				}
-				body := map[string]any{}
-				if len(in.ExtraVars) > 0 {
-					body["extra_vars"] = in.ExtraVars
+				if err := checkLimit(ctx, c, in.TemplateID, in.Limit); err != nil {
+					return "", err
 				}
+				body := map[string]any{}
 				if len(in.Answers) > 0 {
 					body["answers"] = in.Answers
 				}
@@ -164,7 +162,8 @@ func Tools(c *Client, opts Options) []Tool {
 			Name: "get_run_evidence",
 			Description: "Read a run's evidence dossier: its spec, risk grade, approval decisions, " +
 				"per-host outcomes, and the audit-chain receipts behind all of it. This is the " +
-				"record an auditor is given, and it is what proves what actually happened.",
+				"record an auditor is given, and it is what proves what actually happened. You can " +
+				"read it for runs you proposed; another actor's evidence needs an admin.",
 			InputSchema: object(map[string]any{
 				"run_id": prop("string", "The run whose evidence to read."),
 			}, []string{"run_id"}),
@@ -174,7 +173,12 @@ func Tools(c *Client, opts Options) []Tool {
 					return "", err
 				}
 				var out any
-				if err := c.do(ctx, "GET", "/v1/runs/"+escapeID(id)+"/evidence", nil, &out); err != nil {
+				// The dossier is served as a page for a person and as data for a program; a model needs
+				// the data. This tool also used to be unreachable: the endpoint required admin, and this
+				// server refuses to start on an admin token, so every call was refused. A caller may now
+				// read the evidence for a run it asked for, which is exactly this tool's case.
+				path := "/v1/runs/" + escapeID(id) + "/evidence?format=json"
+				if err := c.do(ctx, "GET", path, nil, &out); err != nil {
 					return "", err
 				}
 				return render(out)

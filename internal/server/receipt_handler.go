@@ -29,15 +29,9 @@ func runReceiptHandler(store run.Store, audits audit.Store, producer *audit.Iden
 		panic("server: runReceiptHandler: Store required")
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
-		if audits == nil {
-			respondError(w, log, http.StatusNotFound, "audit trail not enabled")
-			return
-		}
-		if producer == nil {
-			respondError(w, log, http.StatusNotFound,
-				"this install has no signing identity, so it cannot sign a receipt")
-			return
-		}
+		// Who is asking is settled before anything about this install is described. Answering "no
+		// signing identity" to a caller who may not read this run at all tells them something about the
+		// install's configuration in exchange for a request that was going to be refused.
 		got, err := store.Get(r.Context(), r.PathValue("id"))
 		if errors.Is(err, run.ErrNotFound) {
 			respondError(w, log, http.StatusNotFound, "run not found")
@@ -49,6 +43,20 @@ func runReceiptHandler(store run.Store, audits audit.Store, producer *audit.Iden
 			return
 		}
 		if authorizeRunAccess(w, r, authz, log, got) {
+			return
+		}
+		// The receipt is drawn from the same trail as the dossier and follows the same rule: admin, or
+		// the actor who asked for this run, so an agent can hand somebody a proof of its own work.
+		if denyUnlessAdminOrActor(w, r, log, got) {
+			return
+		}
+		if audits == nil {
+			respondError(w, log, http.StatusNotFound, "audit trail not enabled")
+			return
+		}
+		if producer == nil {
+			respondError(w, log, http.StatusNotFound,
+				"this install has no signing identity, so it cannot sign a receipt")
 			return
 		}
 		opts := receipt.Options{Sparse: r.URL.Query().Get("sparse") != ""}

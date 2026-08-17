@@ -139,6 +139,21 @@ its own reach. The command refuses to start on an admin token. Ad-hoc runs, wher
 a command instead of launching a template a person defined, stay off unless you pass `--allow-adhoc`,
 and the approval policy still covers them when they are on.
 
+The narrowness holds inside a template launch too, which is where it would otherwise leak:
+
+- An agent cannot supply extra vars. Extra vars sit at Ansible's highest precedence, above everything
+  the template and the inventory set, so an agent that could send them could rewrite what a vetted
+  template does while the audit trail recorded the template's name. Survey answers are the supported
+  channel: the operator declares which fields a caller may fill, and the template says so.
+- A `limit` can only narrow. A template that pins its own target refuses a different one, and a
+  pattern meaning every host is refused outright, because the risk grade approval policies key on is
+  computed partly from how wide a run reaches.
+- An argument the tool does not define is refused rather than dropped. A model writing `check_mode`
+  instead of `dry_run` is told so, rather than having the flag silently ignored and a real change
+  reported back as a preview.
+- An agent can read the evidence and the signed receipt for runs it proposed. Another actor's
+  evidence needs an admin.
+
 ## What the record shows
 
 The actor on every chain entry the agent produces is its token's label, `agent-bot` above, and, for
