@@ -305,6 +305,36 @@ function wireRunDownloads(runId) {
 			}
 		});
 	}
+	// The signed receipt is the artifact the whole claim rests on, and it was reachable only from a
+	// shell on the server: the run on screen could be read and exported as a dossier, but not turned
+	// into the one file a third party checks without trusting this install. It reads the same trail
+	// the dossier does, so it shows where the dossier does.
+	const receiptBtn = document.getElementById("download-receipt");
+	if (receiptBtn && roleAtLeast("admin")) {
+		receiptBtn.hidden = false;
+		receiptBtn.dataset.tip =
+			"Click to download this run's signed receipt, verifiable offline with switchtender verify";
+		receiptBtn.addEventListener("click", async () => {
+			receiptBtn.disabled = true;
+			try {
+				const res = await fetchAuthed("/runs/" + runId + "/receipt");
+				const key = res.headers.get("Switchtender-Key-Id") || "";
+				downloadBlob("switchtender-" + runId + ".receipt", "application/json", await res.text());
+				setStatus(key
+					? "Receipt downloaded. Verify it with: switchtender verify the file --pubkey " + key
+					: "Receipt downloaded. Verify it with: switchtender verify the file");
+			} catch (err) {
+				// A run still going, or one the scheduler started before its fire was recorded, has
+				// nothing to attest yet. That is the ordinary case, so it reads as a state rather
+				// than as a failure.
+				setStatus(err.message === "HTTP 409"
+					? "This run has nothing to attest yet: a receipt covers a run that has finished."
+					: "Could not download the receipt: " + err.message);
+			} finally {
+				receiptBtn.disabled = false;
+			}
+		});
+	}
 	const exportEvents = document.getElementById("export-events");
 	if (exportEvents) {
 		exportEvents.dataset.tip = "Click to download every event as newline-delimited JSON";

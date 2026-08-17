@@ -462,6 +462,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /v1/runs/{id}/events", runEventsHandler(s.store, authz, s.log))
 	mux.Handle("GET /v1/runs/{id}/evidence",
 		runEvidenceHandler(s.store, s.audits, installID, authz, s.log))
+	mux.Handle("GET /v1/runs/{id}/receipt",
+		runReceiptHandler(s.store, s.audits, s.producer, s.productVersion, authz, s.log))
 	mux.Handle("POST /v1/runs/{id}/explain", explainRunHandler(s.store, s.ai, authz, s.log))
 	mux.Handle("POST /v1/ai/draft", draftStepHandler(s.ai, s.log))
 	mux.Handle("POST /v1/ai/ask", askFleetHandler(s.store, s.ai, authz, s.log))

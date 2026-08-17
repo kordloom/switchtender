@@ -453,8 +453,12 @@ func requiredRole(r *http.Request) user.Role {
 	// The audit trail is management data even to read. A run's evidence dossier embeds a slice of
 	// it, the approver identities and chain entries over that run, so it takes the same role as
 	// the trail it quotes rather than the viewer read its path shape suggests.
+	// A signed receipt is drawn from the same trail: it carries the chain entries over that run,
+	// the approver identities that decided it, and, on the contiguous shape, the entries recorded
+	// between them. It takes the trail's role for the same reason the dossier does.
 	if p == "/audit" || strings.HasPrefix(p, "/audit/") ||
-		(strings.HasPrefix(p, "/runs/") && strings.HasSuffix(p, "/evidence")) {
+		(strings.HasPrefix(p, "/runs/") &&
+			(strings.HasSuffix(p, "/evidence") || strings.HasSuffix(p, "/receipt"))) {
 		return user.RoleAdmin
 	}
 	// An account carries a profile of personal data, so listing accounts is management data even
