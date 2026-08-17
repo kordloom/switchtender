@@ -47,6 +47,23 @@ function auditChange(method, path) {
 	if (parts[0] === "hooks") {
 		return "Fired a webhook trigger";
 	}
+	// The chain's own entry kinds read as sentences, not as lowercase path fragments: a decision
+	// binding a spec, a schedule firing, and a run's committed outcome are the entries an auditor
+	// reads first.
+	if (method === "DECISION") {
+		const verdict = parts[parts.length - 1];
+		const runID = parts[1] || "";
+		if (verdict === "approved") return "Approved run " + runID + ", binding its spec digest";
+		if (verdict === "rejected") return "Rejected run " + runID;
+		return "Decided run " + runID;
+	}
+	if (method === "SCHEDULE") {
+		return "Schedule " + (parts[1] || "") + " fired";
+	}
+	if (method === "RUN") {
+		return "Run " + (parts[1] || "") + " finished " +
+			String(parts[parts.length - 1] || "").replace(/_/g, " ");
+	}
 	if (parts[0] === "auth") {
 		return parts.includes("acs") || parts.includes("callback") || parts.includes("login")
 			? "Signed in" : "Changed authentication";
@@ -156,6 +173,8 @@ async function loadAudit() {
 			tr.appendChild(td(String(e.seq)));
 			tr.appendChild(tdTime(e.at));
 			tr.appendChild(td(e.actor || "-"));
+			tr.appendChild(td(e.actor_type || "-"));
+			tr.appendChild(td(e.on_behalf_of || "-"));
 			tr.appendChild(auditChangeCell(e.method, e.path));
 			tr.appendChild(td(e.method, "mono"));
 			tr.appendChild(auditPathCell(e.path));

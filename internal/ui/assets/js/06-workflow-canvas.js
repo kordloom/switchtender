@@ -345,6 +345,7 @@ document.addEventListener("DOMContentLoaded", () => {
 		wirePropose();
 		wireRunsSearch();
 		wireRunsFilters();
+		wireRunsAutoRefresh();
 		loadRuns();
 	} else if (page === "detail") {
 		loadDetail(document.body.dataset.runId);
