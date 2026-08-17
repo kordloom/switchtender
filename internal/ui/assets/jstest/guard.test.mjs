@@ -6,7 +6,8 @@ import assert from "node:assert/strict";
 import { loadParts } from "./loader.mjs";
 
 const app = loadParts([
-	"01-boot.js", "07-nav-theme.js", "08-auth-status.js", "10-modals-credentials.js",
+	// 09-audit.js carries the shared modal helpers both launch dialogs open through.
+	"01-boot.js", "07-nav-theme.js", "08-auth-status.js", "09-audit.js", "10-modals-credentials.js",
 	"12-templates-notify.js", "13-fileviewer-inventory.js", "20-held-copy-stream.js",
 ]);
 
@@ -93,9 +94,15 @@ function stubDOM(ids) {
 	for (const id of ids) {
 		registry[id] = {
 			id, value: "", checked: false, hidden: true, disabled: false, textContent: "",
-			innerHTML: "", selectedOptions: [], dataset: {}, style: {},
+			innerHTML: "", selectedOptions: [], dataset: {}, style: {}, attrs: {},
 			appendChild(child) { return child; },
 			addEventListener() {},
+			// A dialog announces itself and takes focus when it opens, so the double has to answer
+			// those the way an element does; without them this stub only proves the code never
+			// touched the page it is standing in for.
+			setAttribute(name, value) { this.attrs[name] = String(value); },
+			getAttribute(name) { return this.attrs[name] ?? null; },
+			focus() { registry.focused = this; },
 			querySelector() { return null; },
 			querySelectorAll() { return []; },
 		};
