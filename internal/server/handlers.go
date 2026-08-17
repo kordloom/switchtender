@@ -1739,12 +1739,27 @@ func runStreamHandler(streamer Streamer, store run.Store, authz *authorizer, log
 	if shutdown != nil {
 		draining = shutdown.Done()
 	}
+	openStreams := &streamCount{}
 	return func(w http.ResponseWriter, r *http.Request) {
 		flusher, ok := w.(http.Flusher)
 		if !ok {
 			respondError(w, log, http.StatusInternalServerError, "streaming unsupported")
 			return
 		}
+
+		// A stream is held open for as long as its run lasts, and each one keeps a goroutine, a
+		// subscription, and a poll of the store every second. Nothing bounded how many one caller could
+		// open, so a viewer, the lowest role that can read a run, could hold thousands open against
+		// still-executing runs and drive the store at thousands of reads a second for as long as they
+		// liked. The interface opens one per run page, so a real reader never approaches either limit.
+		release, admitted := openStreams.admit(actorKeyFor(r))
+		if !admitted {
+			w.Header().Set("Retry-After", "5")
+			respondError(w, log, http.StatusTooManyRequests,
+				"too many live streams are open; close one before opening another")
+			return
+		}
+		defer release()
 
 		id := r.PathValue("id")
 		rn, gerr := store.Get(r.Context(), id)
