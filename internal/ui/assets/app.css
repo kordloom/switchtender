@@ -478,12 +478,16 @@ select.input[multiple] { padding: 4px; }
 .alt-auth summary { cursor: pointer; font-size: 13px; }
 .alt-auth .stack { margin-top: 10px; }
 
-.modal { position: fixed; inset: 0; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center; z-index: 50; }
+.modal { position: fixed; inset: 0; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center; z-index: 50; padding: 12px; }
 .modal[hidden] { display: none; }
-.modal-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 22px 24px; width: 420px; max-width: 92vw; box-shadow: var(--shadow-lg); }
+/* A card taller than the screen scrolls inside itself. Without the cap a long form clipped at both
+   viewport edges with no scrollbar anywhere, leaving the close above the screen and the submit
+   below it, which on a phone was a dialog that could be neither finished nor left. */
+.modal-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 22px 24px; width: 420px; max-width: 92vw; max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px); overflow-y: auto; box-shadow: var(--shadow-lg); }
 .modal-card.wide { width: 620px; }
 .modal-card h2 { margin-bottom: 14px; }
-.modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+/* The head stays pinned while the card scrolls, so the close is reachable from any scroll depth. */
+.modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; position: sticky; top: -22px; margin-top: -22px; padding-top: 22px; background: var(--surface); z-index: 1; }
 .modal-head h2 { margin-bottom: 0; }
 .modal-close { background: none; border: none; color: var(--muted); font-size: 20px; line-height: 1; cursor: pointer; padding: 2px 7px; border-radius: var(--radius); }
 .modal-close:hover { background: var(--surface-2); color: var(--text); }
