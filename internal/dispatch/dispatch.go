@@ -102,7 +102,7 @@ type Dispatcher struct {
 	// ctx is canceled by Close to stop in-flight and pending runs.
 	ctx context.Context
 	// cancel cancels ctx.
-	cancel context.CancelFunc
+	cancel context.CancelCauseFunc
 	// publisher receives live output for streaming.
 	publisher Publisher
 	// hostLister enumerates inventory hosts for split runs, nil when the runner cannot list hosts.
@@ -190,6 +190,12 @@ type Dispatcher struct {
 // errRunTimeout is the cancellation cause when a run is stopped for exceeding runTimeout, so the
 // outcome can record a timeout rather than a user cancel.
 var errRunTimeout = errors.New("run exceeded its timeout")
+
+// errShuttingDown is the cancellation cause when the dispatcher itself is stopping, so a run in flight
+// during a restart is recorded as interrupted rather than canceled. Without the cause every graceful
+// restart left the same record a person clicking cancel leaves, and a partial retry, which accepts the
+// interrupted state an unclean kill produces, refused the tidy shutdown.
+var errShuttingDown = errors.New("the server stopped while this run was executing")
 
 // Option configures a Dispatcher.
 type Option func(*config)
@@ -362,7 +368,7 @@ func New(store run.Store, runner roundhouse.Runner, log *zap.Logger, opts ...Opt
 
 	lister, _ := runner.(roundhouse.HostLister)
 	dumper, _ := runner.(roundhouse.InventoryDumper)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancelCause(context.Background())
 	d := &Dispatcher{
 		store:              store,
 		audits:             cfg.audits,
@@ -1205,18 +1211,27 @@ func (d *Dispatcher) coordinate(parent *run.Run, children []*run.Run) {
 
 	allSucceeded := true
 	anyCanceled := false
+	anyInterrupted := false
 	for _, status := range statuses {
 		if status != run.StatusSucceeded {
 			allSucceeded = false
 		}
-		if status == run.StatusCanceled {
+		switch status {
+		case run.StatusCanceled:
 			anyCanceled = true
+		case run.StatusInterrupted:
+			anyInterrupted = true
 		}
 	}
 	switch {
 	case allSucceeded:
 		code := 0
 		d.finalize(parent, run.StatusSucceeded, &code, "")
+	// A shard the server stopped explains the whole split, and it takes precedence over a failure:
+	// nothing was learned about the shards that never finished, so calling the split failed would
+	// state an outcome the run never reached. It is also the state a partial retry accepts.
+	case anyInterrupted:
+		d.finalize(parent, run.StatusInterrupted, nil, errShuttingDown.Error())
 	case anyCanceled:
 		d.finalize(parent, run.StatusCanceled, nil, "")
 	default:
@@ -1270,13 +1285,14 @@ func (d *Dispatcher) waitChildren(ctx context.Context, ids []string) []run.Statu
 		case <-ctx.Done():
 			// Shutting down or the parent was canceled: request cancellation once, then stop waiting
 			// instead of polling a store that may be closing. Children still running are reported
-			// canceled so the parent finalizes as canceled.
+			// stopped, so the parent finalizes the same way they did.
 			if !canceled {
 				d.cancelChildren(ids)
 			}
+			stopped := d.stoppedStatus()
 			for i := range statuses {
 				if !statuses[i].Terminal() {
-					statuses[i] = run.StatusCanceled
+					statuses[i] = stopped
 				}
 			}
 			return statuses
@@ -1320,8 +1336,28 @@ func (d *Dispatcher) childStatuses(ctx context.Context, ids []string, parent *st
 	return out
 }
 
+// stoppedStatus reports the terminal status to record for a run this dispatcher is stopping: canceled
+// when somebody asked for it, interrupted when the server itself is going down. The two read the same
+// from inside a stop, and telling them apart is what keeps a restart from writing the record a person
+// clicking cancel leaves, and what lets a partial retry recover afterward.
+func (d *Dispatcher) stoppedStatus() run.Status {
+	if errors.Is(context.Cause(d.ctx), errShuttingDown) {
+		return run.StatusInterrupted
+	}
+	return run.StatusCanceled
+}
+
+// stoppedReason is the error text to store beside stoppedStatus, empty for a cancel because a cancel
+// speaks for itself.
+func (d *Dispatcher) stoppedReason() string {
+	if errors.Is(context.Cause(d.ctx), errShuttingDown) {
+		return errShuttingDown.Error()
+	}
+	return ""
+}
+
 // cancelChildren asks every non-terminal child to stop: claimed children through their executor's
-// cancel watch, unclaimed ones finalized canceled directly since no executor will ever run them.
+// cancel watch, unclaimed ones finalized directly since no executor will ever run them.
 func (d *Dispatcher) cancelChildren(ids []string) {
 	for _, id := range ids {
 		r, err := d.store.Get(context.Background(), id)
@@ -1338,7 +1374,7 @@ func (d *Dispatcher) cancelChildren(ids []string) {
 		// in the approval queue forever, and approving it ran it under a parent that is gone.
 		if r.ClaimedBy == "" &&
 			(r.Status == run.StatusPending || r.Status == run.StatusPendingApproval) {
-			d.finalize(r, run.StatusCanceled, nil, "")
+			d.finalize(r, d.stoppedStatus(), nil, d.stoppedReason())
 		}
 	}
 }
@@ -1440,7 +1476,7 @@ func (d *Dispatcher) runPipeline(parent *run.Run, steps []run.PipelineStep) {
 
 	switch {
 	case canceled:
-		d.finalize(parent, run.StatusCanceled, nil, "")
+		d.finalize(parent, d.stoppedStatus(), nil, d.stoppedReason())
 	case failed:
 		code := 1
 		d.finalize(parent, run.StatusFailed, &code, "")
@@ -1462,7 +1498,9 @@ func (d *Dispatcher) runStepsLinear(ctx context.Context, parent *run.Run, steps 
 		}
 
 		status, outputs := d.runStepAttempts(ctx, parent, step, i, cloneVars(vars))
-		if status == run.StatusCanceled {
+		// A step the server stopped ends the pipeline the same way a canceled one does. The parent
+		// records which of the two it was from the dispatcher's own state.
+		if status == run.StatusCanceled || status == run.StatusInterrupted {
 			return failed, true
 		}
 		if status != run.StatusSucceeded {
@@ -1665,9 +1703,11 @@ func hostWeights(hosts []string, costs map[string]float64) map[string]float64 {
 	return out
 }
 
-// Close stops accepting new work, cancels in-flight runs, and waits for workers to drain.
+// Close stops accepting new work, cancels in-flight runs, and waits for workers to drain. The
+// cancellation carries its cause, so a run stopped by the shutdown is recorded as interrupted, which is
+// what happened, rather than as the cancel a person asks for.
 func (d *Dispatcher) Close() {
-	d.cancel()
+	d.cancel(errShuttingDown)
 	d.wg.Wait()
 	d.notifyWG.Wait()
 }
@@ -2019,6 +2059,11 @@ func (d *Dispatcher) outcome(
 	case err != nil && errors.Is(context.Cause(ctx), errRunTimeout):
 		d.finalize(r, run.StatusFailed, nil, "run canceled: exceeded its timeout")
 		return run.StatusFailed
+	case err != nil && errors.Is(context.Cause(ctx), errShuttingDown):
+		// The server stopped mid-run. That is interrupted, the status whose meaning is exactly this and
+		// which a partial retry accepts, not the cancel a person asks for.
+		d.finalize(r, run.StatusInterrupted, nil, errShuttingDown.Error())
+		return run.StatusInterrupted
 	case err != nil && ctx.Err() != nil:
 		d.finalize(r, run.StatusCanceled, nil, "")
 		return run.StatusCanceled
