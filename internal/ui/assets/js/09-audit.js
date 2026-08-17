@@ -364,6 +364,47 @@ function wireModalExits(name) {
 	document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !modal.hidden) close(); });
 }
 
+// dialogOpeners remembers what had focus when each dialog opened, keyed by the dialog's id prefix, so
+// closing hands focus back rather than dropping it.
+const dialogOpeners = {};
+
+// openDialog shows a dialog that is not a create form, giving it the same treatment wireModal gives
+// those: it announces itself as a dialog, takes focus, and hands focus back when it closes.
+//
+// The launch dialogs are the last thing between a click and a change on real hosts, and they had none of
+// it. A keyboard user who pressed Launch was still standing on the page behind, with the dialog's own
+// fields reachable only by tabbing through everything else, and a screen reader was told nothing had
+// happened at all.
+function openDialog(name) {
+	const modal = document.getElementById(name + "-modal");
+	if (!modal) return;
+	const card = modal.querySelector(".modal-card") || modal;
+	card.setAttribute("role", "dialog");
+	card.setAttribute("aria-modal", "true");
+	dialogOpeners[name] = document.activeElement;
+	modal.hidden = false;
+	const first = modal.querySelector(
+		"input:not([type=hidden]):not([disabled]), select:not([disabled]), textarea:not([disabled])") ||
+		modal.querySelector("button:not(.modal-close):not([disabled])") ||
+		modal.querySelector(".modal-close");
+	if (first && first.focus) first.focus();
+	if (!modal.dataset.escWired) {
+		modal.dataset.escWired = "true";
+		document.addEventListener("keydown", (e) => {
+			if (e.key === "Escape" && !modal.hidden) closeDialog(name);
+		});
+	}
+}
+
+// closeDialog hides a dialog opened with openDialog and returns focus to whatever opened it.
+function closeDialog(name) {
+	const modal = document.getElementById(name + "-modal");
+	if (modal) modal.hidden = true;
+	const opener = dialogOpeners[name];
+	if (opener && opener.focus) opener.focus();
+	dialogOpeners[name] = null;
+}
+
 // wireModal wires a create dialog: the open button shows it; the close button, a backdrop click, and
 // Escape hide it. name is the shared id prefix for the open, modal, and close elements.
 function wireModal(name) {

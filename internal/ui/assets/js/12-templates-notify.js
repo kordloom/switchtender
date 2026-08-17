@@ -585,9 +585,11 @@ function openSurvey(t) {
 	document.getElementById("survey-title").textContent = "Launch " + t.name;
 	document.getElementById("survey-status").textContent = "";
 	surveyFieldsInto(form, t.survey);
-	modal.hidden = false;
+	// The dialog is opened through the shared path, so it announces itself, takes focus, and gives it
+	// back: it is the last thing between a click and a change on real hosts.
+	openDialog("survey");
 
-	document.getElementById("survey-cancel").onclick = () => { modal.hidden = true; };
+	document.getElementById("survey-cancel").onclick = () => closeDialog("survey");
 	const go = document.getElementById("survey-go");
 	go.disabled = false;
 	go.onclick = guardedSubmit(go, async () => {

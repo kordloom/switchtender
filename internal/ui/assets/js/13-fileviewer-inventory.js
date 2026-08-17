@@ -138,8 +138,8 @@ async function openPromptLaunch(t) {
 		}
 	}
 
-	modal.hidden = false;
-	document.getElementById("prompt-close").onclick = () => { modal.hidden = true; };
+	openDialog("prompt");
+	document.getElementById("prompt-close").onclick = () => closeDialog("prompt");
 	const status = document.getElementById("prompt-status");
 	const go = document.getElementById("prompt-go");
 	go.disabled = false;

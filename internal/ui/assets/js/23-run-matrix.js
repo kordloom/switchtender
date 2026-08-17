@@ -490,9 +490,20 @@ function showDrill(info) {
 		body.appendChild(note);
 	}
 
-	document.getElementById("drill").hidden = false;
+	const panel = document.getElementById("drill");
+	panel.hidden = false;
 	document.getElementById("drill-backdrop").hidden = false;
+	// The element that opened the panel is remembered so closing can hand focus back to it. Without
+	// that, closing left focus nowhere and the next Tab started over at the top of the document.
+	drillOpener = document.activeElement;
+	// Focus moves into the panel, since that is where everything the reader can now act on lives. The
+	// close button is the safe landing: it is present in every drill, and it is the way out.
+	const first = panel.querySelector(".drill-close");
+	if (first && first.focus) first.focus();
 }
+
+// drillOpener is what had focus when the inspect panel opened, so closing can return it.
+let drillOpener = null;
 
 // drillBlock builds a labeled monospace block for multi line output.
 function drillBlock(label, value) {
@@ -557,6 +568,12 @@ function ensureDrill() {
 		drill.appendChild(body);
 		document.body.appendChild(drill);
 	}
+	// The panel sits over the page, so it says what it is, whether it came from the template or was
+	// built here: a screen reader is otherwise not told the page changed under the reader, and a
+	// keyboard user has no idea the controls they want are now a page of tab stops away.
+	drill.setAttribute("role", "dialog");
+	drill.setAttribute("aria-modal", "true");
+	if (!drill.getAttribute("aria-label")) drill.setAttribute("aria-label", "Task detail");
 	if (!drill.dataset.exitsWired) {
 		drill.dataset.exitsWired = "true";
 		backdrop.addEventListener("click", closeDrill);
@@ -569,12 +586,14 @@ function ensureDrill() {
 	return document.getElementById("drill-body");
 }
 
-// closeDrill hides the inspect panel and its backdrop.
+// closeDrill hides the inspect panel and its backdrop, returning focus to whatever opened it.
 function closeDrill() {
 	const drill = document.getElementById("drill");
 	const backdrop = document.getElementById("drill-backdrop");
 	if (drill) drill.hidden = true;
 	if (backdrop) backdrop.hidden = true;
+	if (drillOpener && drillOpener.focus) drillOpener.focus();
+	drillOpener = null;
 }
 
 // inspectDrawer opens the shared panel with a title and a list of fields. A field marked block

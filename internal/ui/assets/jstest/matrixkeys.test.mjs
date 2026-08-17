@@ -101,3 +101,34 @@ test("a timeline bar is a labeled control a keyboard can open", () => {
 	assert.equal(page.document.getElementById("drill").hidden, false,
 		"Enter on a timeline bar opened nothing");
 });
+
+// The inspect drawer opens over the page, and it opened behind the reader's focus: a keyboard user who
+// pressed Enter on a cell was still standing on the grid, with the panel's close button and its "Open
+// the log" control reachable only by tabbing through the whole page. Closing it dropped focus entirely,
+// so the next Tab started over from the top of the document.
+test("the inspect drawer takes focus and gives it back", async () => {
+	const page = mountMatrix();
+	const win = sandboxOf(page.app);
+	const cells = [...page.document.querySelectorAll(".cell")];
+	const failed = cells.find((c) => c.dataset.outcome === "failed");
+	assert.ok(failed, "the fixture has no failed cell to open");
+
+	failed.focus();
+	fire(win.document.activeElement, "keydown", { key: "Enter" });
+	await page.clock.flush();
+
+	const drill = page.document.getElementById("drill");
+	assert.equal(drill.hidden, false, "the drawer did not open");
+	assert.equal(drill.getAttribute("role"), "dialog",
+		"the drawer announces as nothing, so a screen reader is not told the page now has a panel over it");
+	assert.equal(drill.getAttribute("aria-modal"), "true");
+	assert.ok(drill.contains(win.document.activeElement),
+		"focus stayed on the grid behind the drawer, so its controls are reachable only by tabbing " +
+		"through the page");
+
+	fire(page.document.getElementById("drill-close"), "click");
+	await page.clock.flush();
+	assert.equal(drill.hidden, true, "the drawer did not close");
+	assert.equal(win.document.activeElement, failed,
+		"closing the drawer dropped focus, so the next Tab starts over at the top of the document");
+});
