@@ -700,6 +700,38 @@ func (s *relayServer) unrecordedHost(ctx context.Context, runID string, want []s
 	return ""
 }
 
+// proposableFrom reports why a run cannot have an apply proposed from it, or nil when it can.
+//
+// The apply is a clone of the run with the dry-run flag forced off, so the run has to be the thing that
+// clone is meant to be: a plan of infrastructure, still executing, that is not itself a proposal. Any
+// other run reaching here means a worker is asking the control node to build a real execution of
+// something nobody gated.
+func proposableFrom(plan *run.Run) error {
+	switch tool := run.NormalizeTool(plan.Tool); tool {
+	case run.ToolTerraform, run.ToolOpenTofu:
+	default:
+		return fmt.Errorf("an apply is proposed from a terraform or opentofu plan, not from %s", tool)
+	}
+	if !plan.DryRun {
+		return errors.New("an apply is proposed from a plan, and this run is not one")
+	}
+	// A plan proposes its apply while it is still the run in hand. A finished one does not: the lease
+	// secret outlives the run, so without this a worker could return to any plan it ever executed.
+	if plan.Status.Terminal() {
+		return fmt.Errorf("this plan already finished as %q, so its apply cannot be proposed now",
+			plan.Status)
+	}
+	// A run waiting on a person is not planning anything, and building an apply from it would put a
+	// second real change behind the decision they were asked to make.
+	if plan.Status == run.StatusPendingApproval {
+		return errors.New("this run is held for approval, so it is not a plan proposing an apply")
+	}
+	if plan.ProposedFrom != "" {
+		return errors.New("this run is itself a proposed apply, so it does not propose another")
+	}
+	return nil
+}
+
 // proposeApply creates the apply a worker's plan gated, from the plan run the control node holds.
 //
 // A worker has no path to create a run, on purpose, so the plan-content gate could not complete on one:
@@ -723,8 +755,20 @@ func (s *relayServer) proposeApply(w http.ResponseWriter, r *http.Request) {
 	if plan == nil {
 		return
 	}
-	if !leaseHeld(plan, r) {
+	// This is the only endpoint that causes a run to exist, so it demands the per-claim capability
+	// itself rather than accepting the empty-secret fallback the report paths allow for runs claimed
+	// before the capability existed. A worker holding no secret has no business minting an apply.
+	if plan.ClaimSecret == "" || !leaseHeld(plan, r) {
 		writeErr(w, http.StatusForbidden, "the run's lease was not presented or did not match")
+		return
+	}
+	// And it must be the live plan this is for. The check was the queue and the lease alone, and a
+	// lease secret is never cleared when a run finishes, so a worker that had once claimed anything
+	// could come back later and have its apply built from it: a finished check-mode run became a real
+	// change against the same hosts with the same credentials, since every field is copied from the
+	// named run with the dry-run flag forced off.
+	if err := proposableFrom(plan); err != nil {
+		writeErr(w, http.StatusConflict, err.Error())
 		return
 	}
 	// The policies are read here rather than taken from the worker, so the rule that decides the hold is
