@@ -42,8 +42,13 @@ func TestTokenCountGuard(t *testing.T) {
 		{ // Test 4: An empty store on loopback is allowed with a warning.
 			Name: "empty loopback", Count: 0, Loopback: true, Addr: "127.0.0.1:8080", WantWarn: true,
 		},
-		{ // Test 5: An empty store with external auth on a public bind is allowed with a warning.
-			Name: "empty sso public", Count: 0, ExternalAuth: true, Addr: "0.0.0.0:8080", WantWarn: true,
+		{ // Test 5: An empty store with external auth on a public bind serves with no warning,
+			// because the API is not unauthenticated: an install configured for single sign-on
+			// enforces from the first request. This case used to warn, which was the honest
+			// reading of the old behavior, where the gate derived enforcement from the empty
+			// token and account tables and served the whole API to anonymous callers as admin
+			// until somebody happened to sign in.
+			Name: "empty sso public", Count: 0, ExternalAuth: true, Addr: "0.0.0.0:8080",
 		},
 		{ // Test 6: An empty store in read-only mode on a public bind is allowed with a warning.
 			Name: "empty read-only public", Count: 0, ReadOnly: true, Addr: "0.0.0.0:8080", WantWarn: true,
