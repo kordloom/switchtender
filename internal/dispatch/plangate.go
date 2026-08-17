@@ -86,6 +86,35 @@ func (d *Dispatcher) executePlanGate(ctx context.Context, r *run.Run, policies [
 func (d *Dispatcher) proposeApply(
 	ctx context.Context, r *run.Run, policies []*policy.Policy, destroys int, read bool, mask *masker,
 ) run.Status {
+	opts := applyOptions(r, policies, destroys, read)
+	proposal, err := d.Submit(ctx, r.Playbook, r.Inventory, opts...)
+	if err != nil {
+		d.log.Error("dispatch: propose apply: "+err.Error(), zap.String("run_id", r.ID))
+		d.finalize(r, run.StatusFailed, nil, "propose apply: "+mask.redactString(err.Error()))
+		return run.StatusFailed
+	}
+
+	disposition := "queued to apply"
+	if proposal.Status == run.StatusPendingApproval {
+		disposition = "held for approval"
+	}
+	effect := fmt.Sprintf("plan would destroy %d resource(s)", destroys)
+	if !read {
+		effect = "plan summary could not be read"
+	}
+	note := fmt.Sprintf("switchtender: %s; proposed apply %s %s.\n",
+		effect, proposal.ID, disposition)
+	if err := d.store.AppendLog(ctx, r.ID, []byte(note)); err != nil {
+		d.log.Error("dispatch: plan gate note: "+err.Error(), zap.String("run_id", r.ID))
+	}
+	code := 0
+	d.finalize(r, run.StatusSucceeded, &code, "")
+	return run.StatusSucceeded
+}
+
+// applyOptions builds the submit options for the apply a plan proposes: everything about the plan run
+// that decides what the apply does, who asked for it, and which code it runs.
+func applyOptions(r *run.Run, policies []*policy.Policy, destroys int, read bool) []run.SubmitOption {
 	opts := []run.SubmitOption{
 		run.WithTool(r.Tool),
 		run.WithCommand(r.Command),
@@ -134,27 +163,19 @@ func (d *Dispatcher) proposeApply(
 	// it, and a plan of an objectless working directory would otherwise leave the apply readable
 	// across every tenant.
 	opts = append(opts, run.WithOrgID(r.OrgID))
-	proposal, err := d.Submit(ctx, r.Playbook, r.Inventory, opts...)
-	if err != nil {
-		d.log.Error("dispatch: propose apply: "+err.Error(), zap.String("run_id", r.ID))
-		d.finalize(r, run.StatusFailed, nil, "propose apply: "+mask.redactString(err.Error()))
-		return run.StatusFailed
+	// The apply inherits the plan's actor. It is created by the executor, so nothing filled this in
+	// and the run that actually destroys infrastructure was attributed to nobody: an actor-scoped
+	// approval policy could not match it, and its chain entries named no requester. The plan's actor is
+	// the truthful answer, for the same reason its receipt and its organization are.
+	if r.Actor != "" {
+		opts = append(opts, run.WithActor(r.Actor), run.WithActorType(r.ActorType))
 	}
-
-	disposition := "queued to apply"
-	if proposal.Status == run.StatusPendingApproval {
-		disposition = "held for approval"
+	// And it is pinned to the commit the plan was read from. An approver reads a plan and releases the
+	// apply on the strength of what it said it would destroy; without a pin the apply re-syncs the
+	// project and takes whatever the branch head is by then, so an approval of one plan could release
+	// an apply of different code with nothing in the record showing the substitution.
+	if r.CommitSHA != "" {
+		opts = append(opts, run.WithPinnedCommit(r.CommitSHA))
 	}
-	effect := fmt.Sprintf("plan would destroy %d resource(s)", destroys)
-	if !read {
-		effect = "plan summary could not be read"
-	}
-	note := fmt.Sprintf("switchtender: %s; proposed apply %s %s.\n",
-		effect, proposal.ID, disposition)
-	if err := d.store.AppendLog(ctx, r.ID, []byte(note)); err != nil {
-		d.log.Error("dispatch: plan gate note: "+err.Error(), zap.String("run_id", r.ID))
-	}
-	code := 0
-	d.finalize(r, run.StatusSucceeded, &code, "")
-	return run.StatusSucceeded
+	return opts
 }

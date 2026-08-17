@@ -556,3 +556,37 @@ func TestDistinctApproverSurvivesTheStore(t *testing.T) {
 		t.Errorf("an ungated run came back requiring a distinct approver")
 	}
 }
+
+// TestPinnedCommitSurvivesTheStore proves the plan gate's guarantee is durable. An apply proposed from
+// an approved plan waits in the database, often for hours, and is executed by whichever process claims
+// it. A pin the store drops is a guarantee that holds until the moment it matters.
+func TestPinnedCommitSurvivesTheStore(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "switchtender.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	store := db.Runs()
+
+	apply := &run.Run{
+		ID: "run_apply", Status: run.StatusPendingApproval, CreatedAt: time.Now(),
+		Tool: "terraform", Command: "infra/prod", ProposedFrom: "run_plan",
+		PinnedCommit: "abc123def456", Actor: "casey", ActorType: "session",
+	}
+	if err := store.Save(ctx, apply); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	got, err := store.Get(ctx, "run_apply")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.PinnedCommit != "abc123def456" {
+		t.Errorf("stored PinnedCommit = %q, want the commit the approver read: the apply would run "+
+			"whatever the branch holds when it is released", got.PinnedCommit)
+	}
+	if got.Actor != "casey" || got.ActorType != "session" {
+		t.Errorf("stored actor = %q/%q, want casey/session", got.Actor, got.ActorType)
+	}
+}

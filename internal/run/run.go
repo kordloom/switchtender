@@ -213,6 +213,12 @@ type Run struct {
 	ProjectID string `json:"project_id,omitempty"`
 	// CommitSHA is the exact commit the run executed, stamped after the project sync.
 	CommitSHA string `json:"commit_sha,omitempty"`
+	// PinnedCommit is the commit this run is only allowed to execute. It is set when a run stands in
+	// for work already judged at a known revision, which today means the apply a plan gate proposes:
+	// the approver read that plan, so releasing an apply of different code would be a substitution
+	// nothing in the record shows. The executor compares it against what the project sync produced and
+	// refuses a mismatch. Empty on an ordinary run, which runs whatever the branch holds.
+	PinnedCommit string `json:"pinned_commit,omitempty"`
 	// InventoryID names a stored inventory materialized for this run instead of a file path.
 	InventoryID string `json:"inventory_id,omitempty"`
 	// OrgID is the owning organization stamped from the submitting actor at creation. It is what
@@ -540,6 +546,11 @@ func WithSource(source, sourceID string) SubmitOption {
 // WithActor stamps the authenticated user who fired the run.
 func WithActor(actor string) SubmitOption {
 	return func(r *Run) { r.Actor = actor }
+}
+
+// WithPinnedCommit binds the run to one commit, refusing to execute any other. See Run.PinnedCommit.
+func WithPinnedCommit(sha string) SubmitOption {
+	return func(r *Run) { r.PinnedCommit = sha }
 }
 
 // WithActorType stamps how the requesting actor authenticated, so a policy can tell an agent's

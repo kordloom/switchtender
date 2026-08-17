@@ -91,7 +91,12 @@ func (d *Dispatcher) resolveProject(r *run.Run, spec *roundhouse.Spec) (cleanup 
 		spec.Inventory = inventory
 	}
 	spec.Dir = wt.Dir
-	r.CommitSHA = wt.SHA
+	// Recording which commit was checked out and enforcing the pin are one step, deliberately: a run
+	// pinned to a commit executes that commit or nothing, and the moment the commit becomes known is
+	// the moment that can be decided.
+	if err := stampCommit(r, wt.SHA); err != nil {
+		return cleanup, err
+	}
 
 	// The run's own image, from the request or its template, outranks the project's.
 	if p.Image != "" && spec.Image == "" {
@@ -105,6 +110,30 @@ func (d *Dispatcher) resolveProject(r *run.Run, spec *roundhouse.Spec) (cleanup 
 		}
 	}
 	return cleanup, nil
+}
+
+// stampCommit records the commit a sync checked out and refuses a run pinned to a different one. The
+// two are one function so a caller cannot record the commit without honoring the pin: the apply a plan
+// gate proposes is pinned to the commit the approver's plan was read from, and a branch that moved in
+// between must stop the run rather than apply code nobody judged.
+func stampCommit(r *run.Run, sha string) error {
+	r.CommitSHA = sha
+	return checkPinnedCommit(r)
+}
+
+// checkPinnedCommit refuses a run whose project sync produced a commit other than the one the run is
+// pinned to. An unpinned run, which is every ordinary one, passes; so does a pinned run that synced
+// nothing, since there is no contradiction in that.
+//
+// The message names both commits because the operator's next step is to look at what changed between
+// them and then re-run the plan.
+func checkPinnedCommit(r *run.Run) error {
+	if r.PinnedCommit == "" || r.CommitSHA == "" || r.PinnedCommit == r.CommitSHA {
+		return nil
+	}
+	return fmt.Errorf("%w: this run was approved against commit %s and the project now holds %s, so "+
+		"it would apply code that was never judged: run the plan again against the current commit",
+		ErrCommitMoved, r.PinnedCommit, r.CommitSHA)
 }
 
 // applyDefaultImage falls back to the server-wide default execution image when a run, its template,

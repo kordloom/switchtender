@@ -234,11 +234,19 @@ Omitting `max_destroy` makes a blanket policy that holds every matching run. Set
 plan-content policy that holds only when a Terraform or OpenTofu plan would destroy more than that
 many resources.
 
+The apply that a plan proposes is pinned to the commit the plan was read from, and it inherits the
+plan's requester. So an approval releases the code the approver actually saw: if the project's branch
+has moved by the time the apply runs, the run refuses and names both commits rather than applying
+changes nobody judged. The pin appears in the run's dossier.
+
 ## Approvals
 
 A run can be marked to require approval. It is held in a pending-approval state that the claim loop
 never picks up, until an admin approves it, which releases it to run, or rejects it, which ends it.
-An operator can request the run, but only an admin can release it, so duties are separated. A held
+An operator can request the run, but only an admin can release it, so duties are separated. Set
+`require_distinct_approver` on the policy and the separation covers admins too: the person who asked
+for the change cannot be the one who approves it, and the requirement is recorded on the run at the
+moment it is held, so editing the policy afterward cannot loosen a decision already pending. A held
 run submitted by an AI agent is released the same way, only by a human admin, so an operator-bound
 agent never approves its own work. Both the request and the decision are recorded in the audit
 trail, making who asked for a change and who signed off provable.

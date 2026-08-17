@@ -495,6 +495,12 @@ func runMeta(r *run.Run) []metaRow {
 	if r.RequireDistinctApprover {
 		add("Approver rule", "a different person than the requester was required")
 	}
+	// A pinned run could only execute one revision, which is what ties an approved plan to the apply
+	// that followed it. The evidence says so rather than leaving a reader to compare two commits and
+	// hope the match was enforced.
+	if r.PinnedCommit != "" {
+		add("Pinned to commit", r.PinnedCommit)
+	}
 	if r.Risk != nil {
 		add("Risk", strings.TrimSpace(r.Risk.Level+" "+strings.Join(r.Risk.Reasons, "; ")))
 	}
