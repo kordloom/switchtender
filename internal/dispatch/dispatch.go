@@ -2236,6 +2236,12 @@ func withRetries(f func() error) error {
 		if err = f(); err == nil {
 			return nil
 		}
+		// A write that landed in part is not retried as a whole: what already arrived is recorded, and
+		// sending it again would record it twice. The store that reports this has retried the part that
+		// actually failed.
+		if errors.Is(err, run.ErrPartlyDelivered) {
+			return err
+		}
 		time.Sleep(time.Duration(attempt+1) * 75 * time.Millisecond)
 	}
 	return err

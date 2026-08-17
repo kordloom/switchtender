@@ -481,11 +481,37 @@ func inBatchesPart[T any](items []T, send func(batch []T, continues bool) error)
 		if end > len(items) {
 			end = len(items)
 		}
-		if err := send(items[start:end], start > 0); err != nil {
-			return err
+		// Each batch is retried where it failed. Leaving the retry to the caller meant starting the whole
+		// sequence over, and the batches that had already landed were sent again, so a run's event record
+		// held the same tasks twice.
+		err := retryBatch(func() error { return send(items[start:end], start > 0) })
+		if err == nil {
+			continue
 		}
+		if start > 0 {
+			// Earlier batches are already recorded, so the caller must not repeat this call as a whole.
+			return fmt.Errorf("%w: %w", run.ErrPartlyDelivered, err)
+		}
+		return err
 	}
 	return nil
+}
+
+// batchAttempts is how many times one batch is posted before the send is reported as failed. It matches
+// the executor's own retry budget, so moving the retry down here changes where the attempts happen and
+// not how many.
+const batchAttempts = 4
+
+// retryBatch posts one batch, retrying a failure with the same backoff the executor's wrapper uses.
+func retryBatch(post func() error) error {
+	var err error
+	for attempt := 0; attempt < batchAttempts; attempt++ {
+		if err = post(); err == nil {
+			return nil
+		}
+		time.Sleep(time.Duration(attempt+1) * 75 * time.Millisecond)
+	}
+	return err
 }
 
 // continuePart is the query the transport marks a continuation batch with, so the control node adds it
