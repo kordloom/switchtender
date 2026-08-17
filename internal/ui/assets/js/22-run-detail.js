@@ -176,14 +176,35 @@ async function loadPipeline(pipelineId) {
 	}
 }
 
+// streamIndicator wires a stream's lifecycle into the live indicator. The browser retries a
+// dropped stream on its own, so an error normally only flips the label to reconnecting. But a
+// stream the browser has given up on, an expired token answered with 401 or a response that is
+// not a stream at all, fires its error with the source already closed and never retries: saying
+// "reconnecting" forever was a promise nothing was keeping. That state now says the live view is
+// gone and offers the reload that actually resumes it.
+function streamIndicator(source) {
+	const indicator = document.getElementById("live-indicator");
+	if (!indicator) return;
+	indicator.hidden = false;
+	source.onopen = () => { indicator.textContent = "live"; };
+	source.onerror = () => {
+		if (source.readyState === 2) {
+			indicator.textContent = "";
+			const link = document.createElement("a");
+			link.href = location.href;
+			link.textContent = "live view lost, reload to resume";
+			indicator.appendChild(link);
+			return;
+		}
+		indicator.textContent = "reconnecting";
+	};
+}
+
 // openPipelineStream refreshes the header and step list as step events arrive, coalescing bursts
 // into one refresh, and settles on the final state at the end signal.
 function openPipelineStream(pipelineId) {
-	const indicator = document.getElementById("live-indicator");
 	const source = new EventSource(streamURL("/runs/" + pipelineId + "/stream"));
-	// The browser retries the stream on its own, so an error only flips the indicator.
-	source.onopen = () => { if (indicator) indicator.textContent = "live"; };
-	source.onerror = () => { if (indicator) indicator.textContent = "reconnecting"; };
+	streamIndicator(source);
 	let pending = null;
 	const refresh = async () => {
 		pending = null;
@@ -297,11 +318,8 @@ async function reconcileParent(parentId) {
 // shard and refolds the matrix. That closes the window between the per-shard reads and the stream
 // connecting: whatever the live view missed is on the page by the time the run is finished.
 function openParentStream(parentId) {
-	const indicator = document.getElementById("live-indicator");
 	const source = new EventSource(streamURL("/runs/" + parentId + "/stream"));
-	// The browser retries the stream on its own, so an error only flips the indicator.
-	source.onopen = () => { if (indicator) indicator.textContent = "live"; };
-	source.onerror = () => { if (indicator) indicator.textContent = "reconnecting"; };
+	streamIndicator(source);
 	const refreshShards = async () => {
 		try {
 			const shardData = await getJSON("/runs/" + parentId + "/shards");
@@ -413,13 +431,8 @@ function runStreamPath(runId, afterSeq) {
 // It resumes after afterSeq so history is never re-sent, and skips any event at or before the
 // cursor in case a reconnect replays one.
 function openStream(runId, afterSeq) {
-	const indicator = document.getElementById("live-indicator");
-	if (indicator) indicator.hidden = false;
-
 	const source = new EventSource(streamURL(runStreamPath(runId, afterSeq)));
-	// The browser retries the stream on its own, so an error only flips the indicator.
-	source.onopen = () => { if (indicator) indicator.textContent = "live"; };
-	source.onerror = () => { if (indicator) indicator.textContent = "reconnecting"; };
+	streamIndicator(source);
 	source.addEventListener("event", (e) => {
 		try {
 			const ev = JSON.parse(e.data);
@@ -433,6 +446,7 @@ function openStream(runId, afterSeq) {
 	});
 	source.addEventListener("end", async () => {
 		source.close();
+		const indicator = document.getElementById("live-indicator");
 		if (indicator) indicator.hidden = true;
 		try {
 			detailState.run = await getJSON("/runs/" + runId);
