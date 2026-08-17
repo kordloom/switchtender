@@ -522,6 +522,10 @@ table.matrix td { padding: 3px; text-align: center; }
 .cell.none { background: var(--none); cursor: default; opacity: 0.45; }
 .cell.col-hi:not(.none), .cell.row-hi:not(.none) { box-shadow: inset 0 0 0 100px rgba(150, 150, 150, 0.18); }
 .cell:hover:not(.none) { transform: scale(1.14); box-shadow: 0 0 0 2px var(--surface), 0 0 0 3px var(--text); }
+/* A keyboard walking the grid needs the same "you are here" the mouse gets from hover, and the ring
+   has to sit outside the cell so a dark outcome color does not swallow it. */
+.cell:focus-visible { transform: scale(1.14); outline: 2px solid var(--accent); outline-offset: 2px; }
+.tl-bar:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* Timeline */
 .timeline { display: flex; flex-direction: column; gap: 6px; }

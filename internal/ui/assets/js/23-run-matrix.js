@@ -159,6 +159,8 @@ function renderMatrix(model) {
 	table.appendChild(thead);
 
 	const tbody = document.createElement("tbody");
+	// firstStop is the cell that holds the grid's tab stop until the arrows move it.
+	let firstStop = null;
 	hosts.forEach((host, ri) => {
 		const tr = document.createElement("tr");
 		const rowTh = document.createElement("th");
@@ -177,6 +179,18 @@ function renderMatrix(model) {
 			const div = document.createElement("div");
 			div.className = "cell " + outcome;
 			div.title = host + " / " + task + ": " + outcome;
+			// The grid is the result of the run, and it used to be readable only by eye and reachable
+			// only by mouse: a bare div whose outcome lived in a background color. Each cell now names
+			// itself and its outcome, announces that it opens something, and takes focus. A cell with
+			// no result is not a control, so it says what it is and stays out of the tab order.
+			div.setAttribute("role", outcome === "none" ? "presentation" : "button");
+			div.setAttribute("aria-label", outcome === "none"
+				? host + ", " + task + ": not run"
+				: host + ", " + task + ": " + outcome + ". Opens the detail.");
+			// One tab stop for the whole grid, the first cell that has a result: the arrows move it.
+			// A thousand-cell matrix must not put a thousand stops in the tab order.
+			div.tabIndex = outcome !== "none" && !firstStop ? 0 : -1;
+			if (outcome !== "none" && !firstStop) firstStop = div;
 			div.dataset.host = host;
 			div.dataset.task = task;
 			div.dataset.ri = ri;
@@ -219,10 +233,48 @@ function wireMatrixDelegation(table) {
 	table.addEventListener("click", (e) => {
 		const div = e.target.closest(".cell");
 		if (!div) return;
-		const model = detailState.model;
-		const info = model && model.cells[div.dataset.host] && model.cells[div.dataset.host][div.dataset.task];
-		if (info) showDrill(Object.assign({ host: div.dataset.host, task: div.dataset.task }, info));
+		openCellDrill(div);
 	});
+	// A grid is walked with the arrow keys and opened with Enter or Space, which is how a keyboard
+	// reaches a cell at all: the mouse handlers above were the only way in.
+	table.addEventListener("keydown", (e) => {
+		const div = e.target.closest && e.target.closest(".cell");
+		if (!div) return;
+		if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") {
+			e.preventDefault();
+			openCellDrill(div);
+			return;
+		}
+		const step = MATRIX_STEPS[e.key];
+		if (!step) return;
+		e.preventDefault();
+		moveCellFocus(table, div, step[0], step[1]);
+	});
+}
+
+// MATRIX_STEPS maps an arrow key to the row and column it moves the grid focus by.
+const MATRIX_STEPS = {
+	ArrowRight: [0, 1], ArrowLeft: [0, -1], ArrowDown: [1, 0], ArrowUp: [-1, 0],
+};
+
+// openCellDrill opens the detail for one matrix cell, whether a click or a key asked for it. A cell
+// with no result has nothing to show and opens nothing.
+function openCellDrill(div) {
+	const model = detailState && detailState.model;
+	const info = model && model.cells[div.dataset.host] && model.cells[div.dataset.host][div.dataset.task];
+	if (info) showDrill(Object.assign({ host: div.dataset.host, task: div.dataset.task }, info));
+}
+
+// moveCellFocus moves the grid's single tab stop by one row or column and focuses it, stopping at the
+// edges rather than wrapping, so arrowing along a row does not silently jump to another host.
+function moveCellFocus(table, from, dRow, dCol) {
+	const ri = parseInt(from.dataset.ri, 10) + dRow;
+	const ci = parseInt(from.dataset.ci, 10) + dCol;
+	const next = table.querySelector('.cell[data-ri="' + ri + '"][data-ci="' + ci + '"]');
+	if (!next) return;
+	from.tabIndex = -1;
+	next.tabIndex = 0;
+	next.focus();
 }
 
 // updateCell repaints one matrix cell from the model after a live event and adjusts the outcome
@@ -242,6 +294,13 @@ function updateCell(host, task) {
 	div.className = "cell " + outcome;
 	div.dataset.outcome = outcome;
 	div.title = host + " / " + task + ": " + outcome;
+	// The name has to follow the color, or a screen reader keeps reading the outcome the cell had
+	// when the page loaded while the grid shows the one it has now.
+	div.setAttribute("role", outcome === "none" ? "presentation" : "button");
+	div.setAttribute("aria-label", outcome === "none"
+		? host + ", " + task + ": not run"
+		: host + ", " + task + ": " + outcome + ". Opens the detail.");
+	if (outcome !== "none" && div.tabIndex !== 0) div.tabIndex = -1;
 	renderMatrixSummary(detailState.model.hosts.length, detailState.model.tasks.length, detailState.counts);
 	return true;
 }
@@ -252,7 +311,16 @@ function updateTimelineBar(task) {
 	const bar = detailState.tlBars && detailState.tlBars.get(task);
 	if (!bar) return;
 	const m = detailState.model;
-	bar.className = "tl-bar " + worstOutcome(task, m.cells, m.hosts);
+	const outcome = worstOutcome(task, m.cells, m.hosts);
+	bar.className = "tl-bar " + outcome;
+	// The label carries the outcome, so recoloring without relabeling leaves a bar that is read as
+	// one thing and shown as another. The duration is not recomputed here because the bar's width and
+	// the row's duration column are not either; only the outcome changed.
+	const label = bar.getAttribute("aria-label") || "";
+	const tail = label.indexOf(", ");
+	bar.setAttribute("aria-label", tail === -1
+		? task + ": " + outcome
+		: task + ": " + outcome + label.slice(tail));
 }
 
 // applyLiveEvent folds a streamed event into the live model and repaints only what changed: the
@@ -325,12 +393,25 @@ function renderTimeline(model) {
 		track.className = "tl-track";
 		const bar = document.createElement("div");
 		bar.className = "tl-bar " + outcome;
+		// Each bar is one task's slice of the run and opens its detail, so it says what it is, how it
+		// ended, and how long it took, and it takes focus. There are as many bars as tasks, an order of
+		// magnitude fewer than cells, so each one being its own tab stop is a short walk rather than a
+		// trap.
+		bar.setAttribute("role", "button");
+		bar.tabIndex = 0;
+		bar.setAttribute("aria-label", task + ": " + outcome + ", " + fmtMs(dur) + ". Opens the detail.");
 		detailState.tlBars.set(task, bar);
 		const leftPct = Math.min(Math.max(((start - t0) / span) * 100, 0), 99);
 		const widthPct = Math.min(Math.max((dur / span) * 100, 1), 100 - leftPct);
 		bar.style.left = leftPct + "%";
 		bar.style.width = widthPct + "%";
-		bar.addEventListener("click", () => showDrill({ task, outcome, duration: fmtMs(dur) }));
+		const open = () => showDrill({ task, outcome, duration: fmtMs(dur) });
+		bar.addEventListener("click", open);
+		bar.addEventListener("keydown", (e) => {
+			if (e.key !== "Enter" && e.key !== " " && e.key !== "Spacebar") return;
+			e.preventDefault();
+			open();
+		});
 		track.appendChild(bar);
 		const durEl = document.createElement("div");
 		durEl.className = "tl-dur";

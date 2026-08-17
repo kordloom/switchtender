@@ -127,7 +127,6 @@ class STElement {
 		this.offsetWidth = 0;
 		this.offsetHeight = 0;
 		this.title = "";
-		this.tabIndex = -1;
 		this._classList = null;
 		this._dataset = null;
 	}
@@ -517,6 +516,17 @@ for (const [prop, attr] of Object.entries(STRING_ATTRS)) {
 		set(v) { this.setAttribute(attr, v); },
 	});
 }
+// tabIndex is a number in both directions, and an element with no tabindex attribute reports -1,
+// which is what a real element does and what focus order depends on.
+Object.defineProperty(STElement.prototype, "tabIndex", {
+	configurable: true,
+	get() {
+		const raw = this.attrs.get("tabindex");
+		const n = parseInt(raw, 10);
+		return Number.isNaN(n) ? -1 : n;
+	},
+	set(v) { this.setAttribute("tabindex", String(parseInt(v, 10) || 0)); },
+});
 for (const prop of BOOL_ATTRS) {
 	const attr = prop.toLowerCase();
 	Object.defineProperty(STElement.prototype, prop, {
