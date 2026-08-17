@@ -581,3 +581,27 @@ func (a *authorizer) authorizeOwningOrg(ctx context.Context, orgID string) error
 func authorizeRunAccess(w http.ResponseWriter, r *http.Request, authz *authorizer, log *zap.Logger, rn *run.Run) bool {
 	return denyOnAuthzError(w, log, authz.authorizeRun(r.Context(), grant.AccessUse, rn))
 }
+
+// orgForUpdate resolves the owning organization an update should store: the one the request names,
+// or the stored owner when the request names none at all.
+//
+// The field is a pointer for exactly this reason. Every edit dialog in the product sends the fields
+// it renders and no others, and none of them renders an organization, so a rename arrived with the
+// field absent, the handler wrote the zero value, and the record silently stopped belonging to its
+// organization. Under strict grants its members lost it; otherwise every operator in the install
+// gained it. Absent means keep, and a present empty string is the explicit "move this out".
+func orgForUpdate(requested *string, stored string) string {
+	if requested == nil {
+		return stored
+	}
+	return *requested
+}
+
+// orgForCreate resolves the owning organization a create should store, treating an absent field as
+// unowned.
+func orgForCreate(requested *string) string {
+	if requested == nil {
+		return ""
+	}
+	return *requested
+}

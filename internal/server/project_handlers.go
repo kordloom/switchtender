@@ -28,8 +28,10 @@ type createProjectRequest struct {
 	Image string `json:"image,omitempty"`
 	// PullCredentialID names a registry credential for pulling a private Image. Optional.
 	PullCredentialID string `json:"pull_credential_id,omitempty"`
-	// OrgID names the owning organization. Empty leaves the project unowned and global. Optional.
-	OrgID string `json:"org_id,omitempty"`
+	// OrgID names the owning organization. A pointer so an omitted field keeps the stored owner on
+	// an update rather than un-owning the record, and leaves a create unowned. A present empty
+	// string is the explicit "move this out of its organization".
+	OrgID *string `json:"org_id,omitempty"`
 }
 
 // listProjectsResponse wraps the project list.
@@ -65,7 +67,7 @@ func createProjectHandler(store project.Store, authz *authorizer, log *zap.Logge
 		// manage a project could point it at a repository of their choosing and clone it with a
 		// credential they were never granted, then read the result back through the file browser.
 		// The organization is checked by membership rather than as an object, because it is not one.
-		if authz.denyForeignOrg(w, r, log, req.OrgID) {
+		if authz.denyForeignOrg(w, r, log, orgForCreate(req.OrgID)) {
 			return
 		}
 		if denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse,
@@ -76,7 +78,7 @@ func createProjectHandler(store project.Store, authz *authorizer, log *zap.Logge
 			ID: project.NewID(), Name: req.Name, RepoURL: req.RepoURL,
 			Branch: req.Branch, CredentialID: req.CredentialID,
 			InstallDeps: req.InstallDeps == nil || *req.InstallDeps,
-			Image:       req.Image, PullCredentialID: req.PullCredentialID, OrgID: req.OrgID,
+			Image:       req.Image, PullCredentialID: req.PullCredentialID, OrgID: orgForCreate(req.OrgID),
 			CreatedAt: time.Now(),
 		}
 		if err := store.Save(r.Context(), p); err != nil {
@@ -113,26 +115,30 @@ func updateProjectHandler(store project.Store, authz *authorizer, log *zap.Logge
 		// manage a project could point it at a repository of their choosing and clone it with a
 		// credential they were never granted, then read the result back through the file browser.
 		// The organization is checked by membership rather than as an object, because it is not one.
-		if authz.denyForeignOrg(w, r, log, req.OrgID) {
+		id := r.PathValue("id")
+		// The owner an omitted field resolves to is the stored one, so it has to be read before the
+		// organization is checked at all.
+		orgID := orgForCreate(req.OrgID)
+		if existing, gerr := store.Get(r.Context(), id); gerr == nil {
+			orgID = orgForUpdate(req.OrgID, existing.OrgID)
+			// Moving a project out of an organization is as much a change of who controls it as
+			// moving one in, so the organization it leaves is checked too.
+			if existing.OrgID != orgID && authz.denyForeignOrg(w, r, log, existing.OrgID) {
+				return
+			}
+		}
+		if authz.denyForeignOrg(w, r, log, orgID) {
 			return
 		}
 		if denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse,
 			req.CredentialID, req.PullCredentialID)) {
 			return
 		}
-		id := r.PathValue("id")
-		// Moving a project out of an organization is as much a change of who controls it as moving
-		// one in, so the organization it leaves is checked too.
-		if existing, gerr := store.Get(r.Context(), id); gerr == nil && existing.OrgID != req.OrgID {
-			if authz.denyForeignOrg(w, r, log, existing.OrgID) {
-				return
-			}
-		}
 		p := &project.Project{
 			ID: id, Name: req.Name, RepoURL: req.RepoURL,
 			Branch: req.Branch, CredentialID: req.CredentialID,
 			InstallDeps: req.InstallDeps == nil || *req.InstallDeps,
-			Image:       req.Image, PullCredentialID: req.PullCredentialID, OrgID: req.OrgID,
+			Image:       req.Image, PullCredentialID: req.PullCredentialID, OrgID: orgID,
 		}
 		err := store.Update(r.Context(), p)
 		if errors.Is(err, project.ErrNotFound) {

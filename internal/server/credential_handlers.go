@@ -71,8 +71,9 @@ type createCredentialRequest struct {
 	// VaultID labels an Ansible Vault password for --vault-id; only meaningful on the
 	// vault_password kind.
 	VaultID string `json:"vault_id"`
-	// OrgID names the owning organization. Empty leaves the credential unowned and global. Optional.
-	OrgID string `json:"org_id,omitempty"`
+	// OrgID names the owning organization. Absent or empty leaves the credential unowned and
+	// global. Optional.
+	OrgID *string `json:"org_id,omitempty"`
 	// TypeID names a custom credential type. When set, Fields carries the type's field values and
 	// Kind and Secret are not used.
 	TypeID string `json:"type_id,omitempty"`
@@ -181,12 +182,12 @@ func createCredentialHandler(store credential.Store, types credential.TypeStore,
 		// Putting a credential in an organization grants every member of it use of that credential,
 		// so entering one is checked by membership. It is checked here rather than as an object,
 		// because an organization is not one.
-		if authz.denyForeignOrg(w, r, log, req.OrgID) {
+		if authz.denyForeignOrg(w, r, log, orgForCreate(req.OrgID)) {
 			return
 		}
 		c := &credential.Credential{
 			ID: credential.NewID(), Name: req.Name, Kind: req.Kind,
-			Source: credential.NormalizeSource(req.Source), Secret: sealed, OrgID: req.OrgID,
+			Source: credential.NormalizeSource(req.Source), Secret: sealed, OrgID: orgForCreate(req.OrgID),
 			VaultID: vaultLabel, Settings: req.Settings, CreatedAt: time.Now(),
 		}
 		if err := store.Save(r.Context(), c); err != nil {
@@ -213,9 +214,11 @@ type updateCredentialRequest struct {
 	// Passphrase unlocks a passphrase protected ssh_key. It applies only when a new secret is sent for
 	// a locally stored ssh_key and is sealed alongside the key. Optional, never echoed back.
 	Passphrase string `json:"passphrase,omitempty"`
-	// OrgID names the owning organization, replacing the stored owner. Empty leaves the credential
-	// unowned and global. Optional.
-	OrgID string `json:"org_id,omitempty"`
+	// OrgID names the owning organization, replacing the stored owner. A pointer so an omitted
+	// field keeps the stored owner rather than un-owning the record: every edit dialog sends the
+	// fields it renders, and none of them renders an organization. A present empty string is the
+	// explicit "move this out of its organization".
+	OrgID *string `json:"org_id,omitempty"`
 	// VaultID relabels an Ansible Vault password; only meaningful on the vault_password kind. A
 	// pointer so an omitted field keeps the stored label rather than clearing it: a rename that
 	// sends only the name must not wipe the vault id a multi-vault run depends on. A present empty
@@ -276,12 +279,12 @@ func createTypedCredential(w http.ResponseWriter, r *http.Request, store credent
 		respondError(w, log, http.StatusInternalServerError, "could not store credential")
 		return
 	}
-	if authz.denyForeignOrg(w, r, log, req.OrgID) {
+	if authz.denyForeignOrg(w, r, log, orgForCreate(req.OrgID)) {
 		return
 	}
 	c := &credential.Credential{
 		ID: credential.NewID(), Name: req.Name, TypeID: req.TypeID,
-		Secret: sealed, OrgID: req.OrgID, CreatedAt: time.Now(),
+		Secret: sealed, OrgID: orgForCreate(req.OrgID), CreatedAt: time.Now(),
 	}
 	if err := store.Save(r.Context(), c); err != nil {
 		log.Error("server: save credential: " + err.Error())
@@ -340,10 +343,11 @@ func updateCredentialHandler(store credential.Store, sealer *credential.Sealer, 
 		// Moving a credential into an organization grants every member use of it, and moving it out
 		// takes that away from the members it had. Both directions change who may use a secret, so
 		// both are checked.
-		if authz.denyForeignOrg(w, r, log, req.OrgID) {
+		orgID := orgForUpdate(req.OrgID, c.OrgID)
+		if authz.denyForeignOrg(w, r, log, orgID) {
 			return
 		}
-		if c.OrgID != req.OrgID && authz.denyForeignOrg(w, r, log, c.OrgID) {
+		if c.OrgID != orgID && authz.denyForeignOrg(w, r, log, c.OrgID) {
 			return
 		}
 		// The kind only changes when a new secret is sent, since a kind change re-seals the secret
@@ -392,7 +396,7 @@ func updateCredentialHandler(store credential.Store, sealer *credential.Sealer, 
 			c.Settings = nil
 		}
 		c.Name = req.Name
-		c.OrgID = req.OrgID
+		c.OrgID = orgForUpdate(req.OrgID, c.OrgID)
 		if secret != "" {
 			if !sealer.Enabled() {
 				respondError(w, log, http.StatusConflict,

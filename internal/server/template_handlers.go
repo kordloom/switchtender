@@ -80,8 +80,10 @@ type createTemplateRequest struct {
 	// Notifications route every launch's terminal state to specific channels beyond the server-wide
 	// ones. Optional.
 	Notifications []run.NotifyTarget `json:"notifications,omitempty"`
-	// OrgID names the owning organization. Empty leaves the template unowned and global. Optional.
-	OrgID string `json:"org_id,omitempty"`
+	// OrgID names the owning organization. A pointer so an omitted field keeps the stored owner on
+	// an update rather than un-owning the record, and leaves a create unowned. A present empty
+	// string is the explicit "move this out of its organization".
+	OrgID *string `json:"org_id,omitempty"`
 }
 
 // listTemplatesResponse wraps the template list.
@@ -163,7 +165,7 @@ func createTemplateHandler(store template.Store, authz *authorizer, log *zap.Log
 		// and a schedule or webhook already attached to that template then fires it with no
 		// authorization at all.
 		// The organization is checked by membership rather than as an object, because it is not one.
-		if authz.denyForeignOrg(w, r, log, req.OrgID) {
+		if authz.denyForeignOrg(w, r, log, orgForCreate(req.OrgID)) {
 			return
 		}
 		objects := append([]string{req.ProjectID, req.InventoryID, req.PullCredentialID},
@@ -195,7 +197,7 @@ func createTemplateHandler(store template.Store, authz *authorizer, log *zap.Log
 			Notifications:   req.Notifications,
 			Queue:           req.Queue, Image: req.Image, PullCredentialID: req.PullCredentialID,
 			Timeout:   req.Timeout,
-			OrgID:     req.OrgID,
+			OrgID:     orgForCreate(req.OrgID),
 			CreatedAt: time.Now(),
 		}
 		if err := store.Save(r.Context(), t); err != nil {
@@ -224,7 +226,7 @@ func updateTemplateHandler(store template.Store, authz *authorizer, log *zap.Log
 		// and a schedule or webhook already attached to that template then fires it with no
 		// authorization at all.
 		// The organization is checked by membership rather than as an object, because it is not one.
-		if authz.denyForeignOrg(w, r, log, req.OrgID) {
+		if authz.denyForeignOrg(w, r, log, orgForCreate(req.OrgID)) {
 			return
 		}
 		objects := append([]string{req.ProjectID, req.InventoryID, req.PullCredentialID},
@@ -251,6 +253,7 @@ func updateTemplateHandler(store template.Store, authz *authorizer, log *zap.Log
 		// A lookup that fails for any reason other than the template being absent must not skip the
 		// leaving-organization check below. Treating every error as "carry on" made this the one
 		// place where a store problem turned a denial into an allow.
+		orgID := orgForCreate(req.OrgID)
 		existing, gerr := store.Get(r.Context(), id)
 		switch {
 		case errors.Is(gerr, template.ErrNotFound):
@@ -261,14 +264,21 @@ func updateTemplateHandler(store template.Store, authz *authorizer, log *zap.Log
 			return
 		}
 		if existing != nil {
-			notifications = restoreMaskedNotifications(req.Notifications, existing.Notifications)
+			restored, rerr := restoreMaskedNotifications(req.Notifications, existing.Notifications)
+			if rerr != nil {
+				respondError(w, log, http.StatusConflict, rerr.Error())
+				return
+			}
+			notifications = restored
 			// Moving a template out of an organization is as much a change of who controls it as
 			// moving one in, and it is the direction a caller with a manage grant would take: clear
 			// the org and the org's admins lose management of it while its members lose sight of
 			// it. Both directions are checked, so the org it leaves is checked too.
-			if existing.OrgID != req.OrgID && authz.denyForeignOrg(w, r, log, existing.OrgID) {
+			if existing.OrgID != orgForUpdate(req.OrgID, existing.OrgID) &&
+				authz.denyForeignOrg(w, r, log, existing.OrgID) {
 				return
 			}
+			orgID = orgForUpdate(req.OrgID, existing.OrgID)
 			// A saved workflow's graph is the template. The update writes the record whole, and
 			// the single-run edit dialog carries no steps, so accepting a steps-less edit of a
 			// stepped template silently replaced a pipeline with one playbook and answered 200.
@@ -293,7 +303,7 @@ func updateTemplateHandler(store template.Store, authz *authorizer, log *zap.Log
 			Notifications:   notifications,
 			Queue:           req.Queue, Image: req.Image, PullCredentialID: req.PullCredentialID,
 			Timeout: req.Timeout,
-			OrgID:   req.OrgID,
+			OrgID:   orgID,
 		}
 		err := store.Update(r.Context(), t)
 		if errors.Is(err, template.ErrNotFound) {
