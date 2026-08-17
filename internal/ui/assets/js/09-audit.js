@@ -217,6 +217,53 @@ async function loadAudit() {
 	}
 }
 
+// renderVerifyVerdict states what the verify pass actually found. The server checks two independent
+// things and the badge used to report one of them: whether every link recomputes, and whether the
+// chain still satisfies the anchors recorded over it.
+//
+// Collapsing both into one sentence produced two wrong answers. An unsatisfied anchor, which is how a
+// truncated tail is caught, was reported as "Tampered at entry 0", naming a position that does not
+// exist and sending the reader to look for an alteration that never happened, while the server's own
+// diagnosis of which anchor and why was dropped. And a chain that has never been anchored was called
+// "Chain verified", contradicting the dossier drawn from the same chain, which tells the auditor that
+// nothing outside this install fixes its position. A hash chain cannot detect its own truncation: a
+// prefix of a valid chain is a valid chain. Saying so is the difference between evidence and a claim.
+function renderVerifyVerdict(badge, r) {
+	if (r.ok && r.anchored > 0) {
+		badge.className = "chip ok";
+		badge.textContent = "Chain verified: " + r.count + " entries, " + r.anchored +
+			" anchor" + (r.anchored === 1 ? "" : "s") + " held";
+		setStatus("Every entry recomputes and the chain still satisfies every anchor recorded over it.");
+		return;
+	}
+	if (r.ok) {
+		// Intact but unanchored: the strongest true statement is that nothing was altered, and that
+		// nothing outside this install can vouch for what is missing from the end.
+		badge.className = "chip warn";
+		badge.textContent = "Chain intact: " + r.count + " entries, not anchored";
+		setStatus("Every entry recomputes, so nothing in the trail was altered. Nothing outside this " +
+			"install fixes where the trail ends, though, and a hash chain cannot detect its own " +
+			"truncation: dropping entries from the end leaves a chain that still verifies. Run " +
+			"switchtender audit anchor to fix the current head somewhere this install cannot rewrite.");
+		return;
+	}
+	badge.className = "chip failed";
+	if (r.broke_at > 0) {
+		badge.textContent = "Tampered at entry " + r.broke_at;
+		setStatus("Entry " + r.broke_at + " does not recompute, so the trail was altered at or before " +
+			"it. Every entry after it is unreliable. Preserve the database and compare it against the " +
+			"most recent signed bundle or anchor.");
+		return;
+	}
+	const problems = r.anchor_problems || [];
+	badge.textContent = problems.length === 1
+		? "An anchor is unsatisfied"
+		: problems.length + " anchors are unsatisfied";
+	setStatus("Every entry recomputes, but the chain no longer satisfies " +
+		(problems.length === 1 ? "an anchor" : "anchors") + " recorded over it, which is how a missing " +
+		"tail shows up: " + (problems.length ? problems.join("; ") : "the server gave no detail") + ".");
+}
+
 // wireAudit hooks the audit page's three buttons. Verify recomputes the chain and shows a badge,
 // the evidence pack renders the period's change register, and bundle downloads a signed LoomSeal
 // bundle anyone can verify offline with an open verifier.
@@ -229,14 +276,7 @@ function wireAudit() {
 			badge.className = "chip none";
 			badge.textContent = "Verifying...";
 			try {
-				const r = await getJSON("/audit/verify");
-				if (r.ok) {
-					badge.className = "chip ok";
-					badge.textContent = "Chain verified: " + r.count + " entries";
-				} else {
-					badge.className = "chip failed";
-					badge.textContent = "Tampered at entry " + r.broke_at;
-				}
+				renderVerifyVerdict(badge, await getJSON("/audit/verify"));
 			} catch (err) {
 				badge.className = "chip failed";
 				badge.textContent = "Verify failed: " + err.message;

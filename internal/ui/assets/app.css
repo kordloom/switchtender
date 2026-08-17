@@ -442,6 +442,9 @@ table.runs td.mono { max-width: 380px; overflow: hidden; text-overflow: ellipsis
 .chip.skipped { background: var(--skipped); }
 .chip.none { background: var(--surface-3); color: var(--muted); }
 .chip.flaky { background: var(--changed); }
+/* An intact but unanchored chain is neither a pass nor a failure, and it must not wear the same
+   badge as an anchored one: it reads as a caution, the same weight as a changed result. */
+.chip.warn { background: var(--changed); }
 .spark { display: inline-flex; gap: 2px; align-items: center; }
 .tick { display: inline-block; width: 7px; height: 17px; border-radius: 3px; background: var(--surface-3); }
 a.tick { cursor: pointer; transition: transform 0.1s ease, box-shadow 0.1s ease; }
@@ -452,7 +455,7 @@ a.tick:hover { transform: scaleY(1.18); box-shadow: 0 0 0 2px var(--surface), 0 
 .tick.unreachable { background: var(--unreachable); }
 .tick.skipped { background: var(--skipped); }
 
-.chip.changed, .chip.unreachable, .chip.flaky { color: var(--on-warn); }
+.chip.changed, .chip.unreachable, .chip.flaky, .chip.warn { color: var(--on-warn); }
 
 /* Forms */
 .content.narrow { max-width: 460px; }
