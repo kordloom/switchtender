@@ -136,7 +136,7 @@ func Body(ctx context.Context, store run.Store, r *run.Run) ([]byte, error) {
 	out := Record{
 		RunID: r.ID, Status: string(r.Status), ExitCode: r.ExitCode,
 		Tool: r.Tool, Playbook: r.Playbook, Inventory: r.Inventory, Image: r.Image,
-		StartedAt: r.StartedAt, EndedAt: r.EndedAt, LogSHA256: logSHA,
+		StartedAt: utcOrNil(r.StartedAt), EndedAt: utcOrNil(r.EndedAt), LogSHA256: logSHA,
 		SpecDigest: specDigest, CommitSHA: r.CommitSHA, DryRun: r.DryRun,
 	}
 	for _, h := range hosts {
@@ -152,6 +152,22 @@ func Body(ctx context.Context, store run.Store, r *run.Run) ([]byte, error) {
 	sort.Slice(out.Tasks, func(i, j int) bool { return out.Tasks[i].Task < out.Tasks[j].Task })
 
 	return json.Marshal(out)
+}
+
+// utcOrNil normalizes a timestamp to UTC, keeping nil as nil.
+//
+// The record has to reduce to the same bytes whichever copy of the run it is built from. A run in
+// memory carries the server's local offset, and the store writes and reads every timestamp as UTC,
+// so a record built at commit time and the same record rebuilt from the stored run differed by an
+// offset on every install outside UTC. The digest is over these bytes, so the receipt that discloses
+// the outcome reported it as not matching the chain: the flagship artifact failed to verify
+// everywhere except one time zone, and every test built its timestamps in that zone.
+func utcOrNil(t *time.Time) *time.Time {
+	if t == nil {
+		return nil
+	}
+	u := t.UTC()
+	return &u
 }
 
 // logDigest streams a run's log in order and returns the hex SHA-256 of its bytes. Paging keeps the
