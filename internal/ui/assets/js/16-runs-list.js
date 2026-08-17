@@ -340,6 +340,38 @@ function appendRunRows(tbody, runs) {
 	}
 }
 
+// runsHasMore remembers whether the server holds more rows than the table shows, which is what
+// an export has to know to avoid shipping a partial file that looks whole.
+let runsHasMore = false;
+
+// runsExportBound caps how many rows an export pulls in one click, ten server pages, so an export
+// cannot ask for an unbounded history. A pull cut at the bound says so instead of staying quiet.
+const runsExportBound = 10000;
+
+// runsExportPrepare pulls every remaining page of the current query into the table before an
+// export. The export reads the rendered table, so without this it silently carried only the rows
+// already scrolled into view: a file that reads as the record and quietly is not. It returns ""
+// when the table is complete and "-partial" with a page notice when the bound cut the pull short.
+async function runsExportPrepare() {
+	const tbody = document.getElementById("runs");
+	if (!tbody) return "";
+	while (runsHasMore) {
+		const offset = tbody.querySelectorAll("tr").length;
+		if (offset >= runsExportBound) {
+			setStatus("The export carries the first " + offset + " matching runs. Narrow the " +
+				"search or the date window to export the rest.");
+			return "-partial";
+		}
+		const data = await getJSON("/runs?limit=1000&offset=" + offset +
+			"&q=" + encodeURIComponent(runsQuery()) + runsFilterParams());
+		const runs = data.runs || [];
+		appendRunRows(tbody, runs);
+		runsHasMore = !!data.has_more && runs.length > 0;
+	}
+	wireRunsMore(tbody, tbody.querySelectorAll("tr").length, runsHasMore);
+	return "";
+}
+
 // wireRunsMore keeps a Load more control below the runs table. Each click fetches the next page
 // from the current offset and appends it, so the table grows a page at a time rather than
 // rendering every run at once.
@@ -353,6 +385,7 @@ function wireRunsMore(tbody, offset, hasMore) {
 		const table = document.querySelector("table.runs");
 		table.parentNode.insertBefore(btn, table.nextSibling);
 	}
+	runsHasMore = !!hasMore;
 	btn.hidden = !hasMore;
 	btn.onclick = async () => {
 		btn.disabled = true;

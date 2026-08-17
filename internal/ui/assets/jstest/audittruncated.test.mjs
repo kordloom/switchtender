@@ -65,6 +65,9 @@ test("a whole audit trail exports normally and says nothing about truncation", a
 		assert.equal(btn.disabled, false, "export button " + btn.textContent + " was turned off");
 	}
 	page.buttons[0].click();
+	// The export handlers are async so the runs page can complete its table first; a settled
+	// microtask queue is part of the contract now.
+	await page.clock.flush();
 	assert.equal(page.downloads.length, 1, "the CSV export did not produce a file");
 	assert.match(page.downloads[0].name, /^switchtender-audit-\d{4}-\d{2}-\d{2}\.csv$/);
 	// The file has to hold the rows the table shows, or the export is broken in a quieter way.
