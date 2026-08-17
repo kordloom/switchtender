@@ -325,6 +325,31 @@ webhook <code>/hooks</code> path, and the <code>/relay</code> worker path, is un
 </tr>
 <tr>
 <td>GET</td>
+<td><code>/v1/auth/me</code></td>
+<td>Who the server resolved the caller to be.</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/v1/auth/logout</code></td>
+<td>End the caller's own session, revoking its token.</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/v1/tokens</code></td>
+<td>Mint a token bound to an account. Returns it once.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/v1/tokens</code></td>
+<td>List tokens without secrets. Admin only.</td>
+</tr>
+<tr>
+<td>DELETE</td>
+<td><code>/v1/tokens/{id}</code></td>
+<td>Revoke a token everywhere at once. Admin only.</td>
+</tr>
+<tr>
+<td>GET</td>
 <td><code>/auth/oidc/login</code></td>
 <td>Start the OpenID Connect sign-in handshake.</td>
 </tr>

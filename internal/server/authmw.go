@@ -474,7 +474,12 @@ func requiredRole(r *http.Request) user.Role {
 	}
 	// An account carries a profile of personal data, so listing accounts is management data even
 	// to read. Without this a viewer could read every user's name, email, phone, and notes.
-	if p == "/users" || strings.HasPrefix(p, "/users/") {
+	// Tokens belong here for the same reason and more sharply: the list names every credential that
+	// holds access to this install, which account each acts as, and when each was last used. It
+	// carries no secret, but it is a map of what is worth stealing, and reading it is not a viewer's
+	// business. Without this the GET fallback below would have made it one.
+	if p == "/users" || strings.HasPrefix(p, "/users/") ||
+		p == "/tokens" || strings.HasPrefix(p, "/tokens/") {
 		return user.RoleAdmin
 	}
 	// Grants and approval policies decide who may do what, so they are management data even to

@@ -80,6 +80,42 @@
 			</div>
 		</div>
 
+		<div id="token-modal" class="modal" hidden>
+			<div class="modal-card">
+				<div class="modal-head">
+					<h2>Issue an API token</h2>
+					<button type="button" class="modal-close" id="token-close" aria-label="Close">&times;</button>
+				</div>
+			<form id="token-form" class="stack">
+				<label class="field-label">Label
+					<input id="token-name" class="input" placeholder="deploy-bot" required>
+					<span class="field-hint">What holds this token. It is how you will recognize it here later.</span>
+				</label>
+				<label class="field-label">Acts as
+					<select id="token-user" class="input" required><option value="">Select an account</option></select>
+					<span class="field-hint">The token carries this account's role, and the audit trail records its actions under it.</span>
+				</label>
+				<label class="field-label">Expires in
+					<input id="token-ttl" class="input mono" placeholder="720h">
+					<span class="field-hint">A lifetime such as 24h or 720h. Empty means it never expires.</span>
+				</label>
+				<label class="field-label check-label">
+					<input id="token-agent" type="checkbox">
+					An AI agent holds this token, so cap it at operator and record its actions as an agent
+				</label>
+				<div class="launch-actions">
+					<button type="submit" class="button primary">Issue token</button>
+					<span id="token-status" class="muted"></span>
+				</div>
+				<div id="token-secret" class="secret-reveal" hidden>
+					<p>Copy this now. It is not shown again and nothing can recover it.</p>
+					<code id="token-value" class="mono"></code>
+					<button id="token-copy" class="button" type="button">Copy</button>
+				</div>
+			</form>
+			</div>
+		</div>
+
 		<div id="status" class="muted">Loading users.</div>
 		<table class="runs" hidden>
 			<thead>
@@ -95,6 +131,32 @@
 				</tr>
 			</thead>
 			<tbody id="users"></tbody>
+		</table>
+
+		<div class="page-head section-head">
+			<div class="page-head-text">
+				<h2>API tokens</h2>
+				<p class="muted">Every credential that reaches this install, including browser sessions and the tokens agents hold. Revoking one stops it working everywhere at once.</p>
+			</div>
+			<button id="token-open" class="button primary">
+				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+				Issue token
+			</button>
+		</div>
+		<div id="token-list-status" class="muted">Loading tokens.</div>
+		<table id="tokens-table" class="runs" hidden>
+			<thead>
+				<tr>
+					<th>Label</th>
+					<th>Kind</th>
+					<th>Acts as</th>
+					<th>Last used</th>
+					<th>Expires</th>
+					<th>Created</th>
+					<th class="col-actions">Actions</th>
+				</tr>
+			</thead>
+			<tbody id="tokens"></tbody>
 		</table>
 	</main>
 

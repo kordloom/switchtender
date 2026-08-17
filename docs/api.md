@@ -67,6 +67,11 @@ webhook `/hooks` path, and the `/relay` worker path, is unversioned. The root re
 | DELETE | `/v1/credentials/{id}`     | Delete a credential. 409 while an object still uses it. |
 | POST   | `/v1/auth/login`           | Sign in with username and password, returns a token.    |
 | POST   | `/v1/auth/check`           | Verify an API token.                                    |
+| GET    | `/v1/auth/me`              | Who the server resolved the caller to be.               |
+| POST   | `/v1/auth/logout`          | End the caller's own session, revoking its token.       |
+| POST   | `/v1/tokens`               | Mint a token bound to an account. Returns it once.      |
+| GET    | `/v1/tokens`               | List tokens without secrets. Admin only.                |
+| DELETE | `/v1/tokens/{id}`          | Revoke a token everywhere at once. Admin only.          |
 | GET    | `/auth/oidc/login`      | Start the OpenID Connect sign-in handshake.             |
 | GET    | `/auth/oidc/callback`   | Complete the OIDC handshake and issue a token.          |
 | GET    | `/auth/saml/login`      | Start the SAML sign-in handshake.                       |

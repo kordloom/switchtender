@@ -442,6 +442,14 @@ table.runs td.mono { max-width: 380px; overflow: hidden; text-overflow: ellipsis
 .chip.skipped { background: var(--skipped); }
 .chip.none { background: var(--surface-3); color: var(--muted); }
 .chip.flaky { background: var(--changed); }
+/* A second page section, such as the tokens beside the accounts: the same head layout with air above
+   it so the two do not read as one list. */
+.section-head { margin-top: 34px; }
+/* A minted secret shown exactly once. It reads as something to act on now, not as a result. */
+.secret-reveal { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 4px; padding: 12px 14px; background: var(--accent-soft); border: 1px solid var(--border); border-radius: 10px; }
+.secret-reveal p { flex: 1 1 100%; margin: 0; color: var(--text); font-size: 13px; font-weight: 600; }
+.secret-reveal code { overflow-x: auto; flex: 1 1 260px; min-width: 0; padding: 8px 10px; background: var(--surface); border: 1px solid var(--border-muted); border-radius: 7px; font-size: 12.5px; white-space: nowrap; }
+
 /* An intact but unanchored chain is neither a pass nor a failure, and it must not wear the same
    badge as an anchored one: it reads as a caution, the same weight as a changed result. */
 .chip.warn { background: var(--changed); }

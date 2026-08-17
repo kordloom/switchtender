@@ -391,6 +391,10 @@ document.addEventListener("DOMContentLoaded", () => {
 		wireModal("user");
 		wireUserForm();
 		loadUsers();
+		// Tokens live beside accounts because they are the other half of who can reach this install.
+		wireModal("token");
+		wireTokenForm();
+		loadTokens();
 	} else if (page === "workers") {
 		loadWorkers();
 	} else if (page === "inventories") {

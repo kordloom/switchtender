@@ -77,6 +77,14 @@ held run is admin-only, so an operator-bound agent can never approve its own wor
 <p>Mint a token bound to that account, marked as an agent:</p>
 <pre><code>switchtender token new --user agent-bot --name agent-bot --agent --ttl 720h
 </code></pre>
+<p>Or from the interface, on the Users page under API tokens, or over the API when you have no shell
+on the server:</p>
+<pre><code>curl -X POST https://switchtender.example.com/v1/tokens \
+  -H &quot;Authorization: Bearer $ADMIN_TOKEN&quot; -H 'Content-Type: application/json' \
+  -d '{&quot;name&quot;:&quot;agent-bot&quot;,&quot;username&quot;:&quot;agent-bot&quot;,&quot;kind&quot;:&quot;agent&quot;,&quot;ttl_hours&quot;:720}'
+</code></pre>
+<p>The API refuses a token bound to no account, so a credential minted over the network always names
+the account it acts as and can never exceed that account's role.</p>
 <p>The <code>--agent</code> flag is what makes the record precise. It marks the token as held by an agent, so
 every chain entry it produces carries <code>actor_type: agent</code> alongside its label and the human it
 acts for, set when the token is minted rather than guessed from how a request looks. It also caps

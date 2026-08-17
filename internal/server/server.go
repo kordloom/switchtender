@@ -484,6 +484,11 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /v1/auth/check", authCheckHandler())
 	mux.Handle("GET /v1/auth/me", authMeHandler(s.log))
 	mux.Handle("POST /v1/auth/logout", authLogoutHandler(s.tokens, s.log))
+	// Token management is admin work by the default in requiredRole, which is what keeps an agent's
+	// capped token from minting itself a wider one.
+	mux.Handle("GET /v1/tokens", listTokensHandler(s.tokens, s.log))
+	mux.Handle("POST /v1/tokens", createTokenHandler(s.tokens, s.users, s.log))
+	mux.Handle("DELETE /v1/tokens/{id}", deleteTokenHandler(s.tokens, s.log))
 	mux.Handle("POST /v1/auth/login", loginHandler(s.users, s.tokens, s.ldap, s.log))
 	if s.oidc != nil {
 		mux.HandleFunc("GET /auth/oidc/login", s.oidc.login)
