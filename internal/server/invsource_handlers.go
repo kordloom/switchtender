@@ -29,11 +29,15 @@ type createSourceRequest struct {
 	CredentialID string `json:"credential_id,omitempty"`
 	// ProjectID sources the config from a git project. Optional.
 	ProjectID string `json:"project_id,omitempty"`
-	// UpdateOnLaunch refreshes the source before a run targeting its inventory. Optional.
-	UpdateOnLaunch bool `json:"update_on_launch,omitempty"`
+	// UpdateOnLaunch refreshes the source before a run targeting its inventory. A pointer so an
+	// omitted field keeps the stored cadence on an update rather than turning refreshing off: no
+	// edit dialog renders these two fields, so a rename silently stopped the source syncing while
+	// the table went on claiming it synced. Optional.
+	UpdateOnLaunch *bool `json:"update_on_launch,omitempty"`
 	// SyncIntervalSeconds sets the background sync cadence and the update-on-launch staleness window.
 	// Zero disables scheduled sync. Optional.
-	SyncIntervalSeconds int `json:"sync_interval_seconds,omitempty"`
+	// A pointer for the same reason as UpdateOnLaunch: absent means keep what is stored.
+	SyncIntervalSeconds *int `json:"sync_interval_seconds,omitempty"`
 }
 
 // listSourcesResponse wraps the source list.
@@ -76,7 +80,8 @@ func createSourceHandler(sources invsource.Store, inventories inventory.Store, a
 		src := &invsource.Source{
 			ID: invsource.NewID(), Name: req.Name, Source: req.Source,
 			CredentialID: req.CredentialID, ProjectID: req.ProjectID,
-			UpdateOnLaunch: req.UpdateOnLaunch, SyncIntervalSeconds: req.SyncIntervalSeconds,
+			UpdateOnLaunch: req.UpdateOnLaunch != nil && *req.UpdateOnLaunch,
+			SyncIntervalSeconds: intOrZero(req.SyncIntervalSeconds),
 			InventoryID: inv.ID, CreatedAt: time.Now(),
 		}
 		if err := sources.Save(r.Context(), src); err != nil {
@@ -140,10 +145,28 @@ func updateSourceHandler(sources invsource.Store, authz *authorizer, log *zap.Lo
 			return
 		}
 		id := r.PathValue("id")
+		stored, gerr := sources.Get(r.Context(), id)
+		if errors.Is(gerr, invsource.ErrNotFound) {
+			respondError(w, log, http.StatusNotFound, "source not found")
+			return
+		}
+		if gerr != nil {
+			log.Error("server: read inventory source: " + gerr.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not read source")
+			return
+		}
+		onLaunch := stored.UpdateOnLaunch
+		if req.UpdateOnLaunch != nil {
+			onLaunch = *req.UpdateOnLaunch
+		}
+		interval := stored.SyncIntervalSeconds
+		if req.SyncIntervalSeconds != nil {
+			interval = *req.SyncIntervalSeconds
+		}
 		err := sources.Update(r.Context(), &invsource.Source{
 			ID: id, Name: req.Name, Source: req.Source,
 			CredentialID: req.CredentialID, ProjectID: req.ProjectID,
-			UpdateOnLaunch: req.UpdateOnLaunch, SyncIntervalSeconds: req.SyncIntervalSeconds,
+			UpdateOnLaunch: onLaunch, SyncIntervalSeconds: interval,
 		})
 		if errors.Is(err, invsource.ErrNotFound) {
 			respondError(w, log, http.StatusNotFound, "source not found")

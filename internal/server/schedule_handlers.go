@@ -142,8 +142,17 @@ func updateScheduleHandler(store schedule.Store, authz *authorizer, log *zap.Log
 		}
 		// The owning organization is the schedule's, not the editor's, so an edit cannot move a
 		// schedule into the editor's tenant or strand it as unowned.
+		// A cron expression means nothing without the zone it is read in, and no edit dialog in the
+		// product renders one, so an edit that named no zone silently moved when the schedule fires:
+		// an imported schedule pinned to America/New_York began firing in the server's local time,
+		// hours off, with nothing on screen to show it. An empty zone from an editor means "leave it
+		// as it is"; a caller that wants server-local time can send it explicitly as UTC.
+		zone := req.Timezone
+		if zone == "" {
+			zone = existing.Timezone
+		}
 		sc := &schedule.Schedule{
-			ID: id, Name: req.Name, Cron: req.Cron, Timezone: req.Timezone, Playbook: req.Playbook,
+			ID: id, Name: req.Name, Cron: req.Cron, Timezone: zone, Playbook: req.Playbook,
 			Inventory: req.Inventory, Shards: req.Shards, Steps: req.Steps,
 			TemplateID: req.TemplateID, OrgID: existing.OrgID,
 			Enabled: existing.Enabled, CreatedAt: existing.CreatedAt,

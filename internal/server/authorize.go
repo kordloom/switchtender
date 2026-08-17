@@ -605,3 +605,11 @@ func orgForCreate(requested *string) string {
 	}
 	return *requested
 }
+
+// intOrZero reads an optional integer, treating absent as zero.
+func intOrZero(v *int) int {
+	if v == nil {
+		return 0
+	}
+	return *v
+}

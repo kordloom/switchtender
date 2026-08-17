@@ -10,8 +10,10 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/inventory"
+	"github.com/kordloom/switchtender/internal/invsource"
 	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/schedule"
 	"github.com/kordloom/switchtender/internal/template"
 )
 
@@ -99,5 +101,75 @@ func TestAnEditKeepsTheOwningOrganization(t *testing.T) {
 	}
 	if tpl.OrgID != "" {
 		t.Errorf("template owner after an explicit move-out = %q, want it unowned", tpl.OrgID)
+	}
+}
+
+// TestAnEditKeepsTheScheduleTimezoneAndSourceCadence proves the same class of loss in the two other
+// records that carry settings no dialog renders.
+//
+// A cron expression means nothing without the zone it is read in: an imported schedule pinned to
+// America/New_York silently began firing in the server's local time after a rename, hours off
+// target, with nothing on screen to show it. An inventory source's refresh cadence was turned off
+// entirely by a rename, while the table went on saying it refreshed.
+func TestAnEditKeepsTheScheduleTimezoneAndSourceCadence(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	schedules := schedule.NewMemStore()
+	if err := schedules.Save(ctx, &schedule.Schedule{
+		ID: "sch_1", Name: "nightly", Cron: "0 2 * * *", Timezone: "America/New_York",
+		TemplateID: "tpl_1", Enabled: true,
+	}); err != nil {
+		t.Fatalf("Save schedule: %v", err)
+	}
+	sources := invsource.NewMemStore()
+	if err := sources.Save(ctx, &invsource.Source{
+		ID: "src_1", Name: "aws production", Source: "aws_ec2.yml", InventoryID: "inv_1",
+		UpdateOnLaunch: true, SyncIntervalSeconds: 900,
+	}); err != nil {
+		t.Fatalf("Save source: %v", err)
+	}
+	inventories := inventory.NewMemStore()
+	if err := inventories.Save(ctx, &inventory.Inventory{ID: "inv_1", Name: "prod", Content: "web01\n"}); err != nil {
+		t.Fatalf("Save inventory: %v", err)
+	}
+	templates := template.NewMemStore()
+	if err := templates.Save(ctx, &template.Template{ID: "tpl_1", Name: "deploy", Playbook: "site.yml"}); err != nil {
+		t.Fatalf("Save template: %v", err)
+	}
+
+	handler := New(run.NewMemStore(), &fakeSubmitter{run: &run.Run{ID: "run_x"}}, zap.NewNop(),
+		WithSchedules(schedules), WithTemplates(templates), WithInventories(inventories),
+		WithInventorySources(sources, nil)).Handler()
+	put := func(path, body string) int {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPut, path, strings.NewReader(body)))
+		return rec.Code
+	}
+
+	// Exactly what the schedule dialog sends: name, cron, template. No zone.
+	if code := put("/v1/schedules/sch_1", `{"name":"nightly renamed","cron":"0 2 * * *","template_id":"tpl_1"}`); code != http.StatusOK {
+		t.Fatalf("schedule update = %d, want 200", code)
+	}
+	sc, err := schedules.Get(ctx, "sch_1")
+	if err != nil {
+		t.Fatalf("Get schedule: %v", err)
+	}
+	if sc.Timezone != "America/New_York" {
+		t.Errorf("timezone after a rename = %q, want America/New_York: the schedule now fires at a "+
+			"different moment than it did", sc.Timezone)
+	}
+
+	// Exactly what the source dialog sends: name, source, references. No cadence.
+	if code := put("/v1/inventory-sources/src_1", `{"name":"aws production renamed","source":"aws_ec2.yml"}`); code != http.StatusOK {
+		t.Fatalf("source update = %d, want 200", code)
+	}
+	src, err := sources.Get(ctx, "src_1")
+	if err != nil {
+		t.Fatalf("Get source: %v", err)
+	}
+	if !src.UpdateOnLaunch || src.SyncIntervalSeconds != 900 {
+		t.Errorf("cadence after a rename = on-launch %v every %ds, want it preserved at on-launch "+
+			"every 900s: the source silently stopped refreshing", src.UpdateOnLaunch, src.SyncIntervalSeconds)
 	}
 }
