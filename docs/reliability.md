@@ -28,6 +28,10 @@ every write through a single connection while reads run on a separate read-only 
 long listing or log read never blocks a claim or a finalize. That is why SQLite fits one process and
 PostgreSQL backs a fleet. Run multiple workers against PostgreSQL.
 
+Every process that finishes a run commits that run's outcome to the audit chain, so a run's evidence
+does not depend on which worker happened to claim it. PostgreSQL serializes those appends with a
+transaction-level advisory lock, which is what lets a fleet write one chain without forking it.
+
 ## Recovery when a worker dies
 
 A running run carries a lease that its holder renews every few seconds. If a worker crashes or loses

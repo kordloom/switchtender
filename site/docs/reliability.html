@@ -57,6 +57,9 @@ so two workers never claim the same run even when they poll at the same instant.
 every write through a single connection while reads run on a separate read-only pool under WAL, so a
 long listing or log read never blocks a claim or a finalize. That is why SQLite fits one process and
 PostgreSQL backs a fleet. Run multiple workers against PostgreSQL.</p>
+<p>Every process that finishes a run commits that run's outcome to the audit chain, so a run's evidence
+does not depend on which worker happened to claim it. PostgreSQL serializes those appends with a
+transaction-level advisory lock, which is what lets a fleet write one chain without forking it.</p>
 <h2 id="recovery-when-a-worker-dies">Recovery when a worker dies</h2>
 <p>A running run carries a lease that its holder renews every few seconds. If a worker crashes or loses
 the network, the lease goes stale, and a janitor sweeps it after thirty seconds. Work that was still
