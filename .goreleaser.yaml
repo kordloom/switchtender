@@ -103,7 +103,7 @@ nfpms:
     bindir: /usr/bin
 
 changelog:
-  use: github
+  use: git
   sort: asc
   filters:
     exclude:
