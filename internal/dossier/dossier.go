@@ -490,6 +490,11 @@ func runMeta(r *run.Run) []metaRow {
 	add("Queue", r.Queue)
 	add("Image", r.Image)
 	add("Held by", r.HeldByPolicy)
+	// Separation of duties is the control a change-management review asks about first, so the evidence
+	// says whether it applied to this run rather than leaving the reader to infer it from the names.
+	if r.RequireDistinctApprover {
+		add("Approver rule", "a different person than the requester was required")
+	}
 	if r.Risk != nil {
 		add("Risk", strings.TrimSpace(r.Risk.Level+" "+strings.Join(r.Risk.Reasons, "; ")))
 	}

@@ -113,7 +113,7 @@ the chain receipts and anchors behind them.</p>
 </tr>
 <tr>
 <td>Segregation between requester and approver</td>
-<td>Approve and reject are admin-only, so an operator or agent can never release its own change; for machine changes the separation holds by construction. An admin who submits a run can still approve it, so keep admin accounts for people whose changes your process allows to self-approve, and put day-to-day submitters at operator.</td>
+<td>Approve and reject are admin-only, so an operator or agent can never release its own change; for machine changes the separation holds by construction. For admins, set <code>require_distinct_approver</code> on the approval rule and the server refuses a decision made by the person who asked for the change. The requirement is copied onto each run the rule holds, so editing or deleting the rule afterward cannot weaken a decision already pending, and the run's dossier records that it applied.</td>
 </tr>
 </tbody>
 </table>

@@ -128,6 +128,21 @@ async function loadPolicies() {
 				dry.appendChild(span);
 			}
 			tr.appendChild(dry);
+			// Separation of duties reads at a glance, beside the other thing a rule does to a match.
+			const distinct = document.createElement("td");
+			if (p.require_distinct_approver) {
+				const chip = document.createElement("span");
+				chip.className = "chip ok";
+				chip.textContent = "required";
+				chip.dataset.tip = "The person who asks for a matching run cannot approve it";
+				distinct.appendChild(chip);
+			} else {
+				const span = document.createElement("span");
+				span.className = "muted";
+				span.textContent = "any approver";
+				distinct.appendChild(span);
+			}
+			tr.appendChild(distinct);
 			const holding = document.createElement("td");
 			const ruleHeld = heldByRule(held, p);
 			if (ruleHeld > 0) {

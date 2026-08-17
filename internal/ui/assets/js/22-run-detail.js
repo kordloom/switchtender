@@ -116,8 +116,18 @@ function updateActions(run) {
 	// Each control also honors the session's role: the server refuses a viewer's cancel and an
 	// operator's approve anyway, and a button whose only future is a 403 reads as breakage.
 	cancel.hidden = isTerminal(run.status) || !roleAtLeast("operator");
-	if (approve) approve.hidden = !held || !roleAtLeast("admin");
+	// Separation of duties, shown rather than only enforced. When the rule that held this run requires
+	// a second person, the requester's Approve button has no future but a refusal, so it is not drawn
+	// and the reason is stated. Reject stays: withdrawing your own request needs nobody else, and
+	// removing it would leave the requester with no way out of a decision they no longer want.
+	const ownRequest = held && run.require_distinct_approver && signedInAs(run.actor);
+	if (approve) approve.hidden = !held || !roleAtLeast("admin") || ownRequest;
 	if (reject) reject.hidden = !held || !roleAtLeast("admin");
+	if (ownRequest) {
+		setStatus("You asked for this run, and the rule that held it (" +
+			(run.held_by_policy || "an approval rule") + ") requires a different person to approve " +
+			"it. You can still reject it to withdraw the request.");
+	}
 	const splitParent = (run.kind === "split" || run.shard_count) && !run.parent_id;
 	retry.hidden = !(splitParent && isTerminal(run.status) && run.status !== "succeeded") ||
 		!roleAtLeast("operator");

@@ -85,6 +85,10 @@
 					<input id="policy-exclude-dry" type="checkbox">
 					Skip dry runs, so a no-change preview does not need approval
 				</label>
+				<label class="field-label check-label">
+					<input id="policy-distinct-approver" type="checkbox">
+					Require a different person to approve, so the requester cannot release their own run
+				</label>
 				<div class="launch-actions">
 					<button type="submit" class="button primary">Save</button>
 					<span id="policy-status" class="muted"></span>
@@ -106,6 +110,7 @@
 					<th>Inventory</th>
 					<th>Max destroy</th>
 					<th>Skip dry runs</th>
+					<th>Second approver</th>
 					<th>Holding</th>
 					<th>Created</th>
 					<th class="col-actions">Actions</th>

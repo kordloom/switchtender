@@ -119,7 +119,10 @@ freely, what needs a person first, and what it may never do at all:</p>
 never guessed from traffic. <code>actor: prod-remediator</code> pins a rule to one named principal.
 <code>min_risk</code> matches on the run's assessed risk grade, so &quot;destructive operations need a person&quot;
 is one line. <code>effect: deny</code> refuses the submission outright; the refused request is still on the
-chain, because the gate records every mutation before anything acts on it.</p>
+chain, because the gate records every mutation before anything acts on it.
+<code>require_distinct_approver: true</code> refuses a decision made by whoever asked for the change, which
+matters for admins, since an agent or operator can never approve anything. The requirement is
+copied onto each run the rule holds, so editing the rule later cannot weaken a pending decision.</p>
 </li>
 <li>
 <p>Pin the policies by starting the server with <code>serve --policy-file policies.yml</code>. The file is the

@@ -44,7 +44,7 @@ CC8.1 asks that changes are authorized, tested, and tracked before they reach pr
 | Change activity is tracked and attributable | The actor on every entry, with `actor_type` saying whether a person, an agent, or the system acted and `on_behalf_of` naming whose authority it used, all committed by the entry hash; the change register lists every change in the period. |
 | The change record is complete and unaltered | The hash chain: a change that cannot be recorded is refused rather than made, and altering or deleting an entry breaks verification, provable offline from a signed bundle with the open `loomseal` verifier. |
 | A dry run or test preceded the change | A run's dossier records whether it ran in the tool's no-change mode; drift is shown from a dry run before the fix is built. |
-| Segregation between requester and approver | Approve and reject are admin-only, so an operator or agent can never release its own change; for machine changes the separation holds by construction. An admin who submits a run can still approve it, so keep admin accounts for people whose changes your process allows to self-approve, and put day-to-day submitters at operator. |
+| Segregation between requester and approver | Approve and reject are admin-only, so an operator or agent can never release its own change; for machine changes the separation holds by construction. For admins, set `require_distinct_approver` on the approval rule and the server refuses a decision made by the person who asked for the change. The requirement is copied onto each run the rule holds, so editing or deleting the rule afterward cannot weaken a decision already pending, and the run's dossier records that it applied. |
 
 ## ISO/IEC 27001:2022 A.8.32 (change management)
 

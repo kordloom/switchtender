@@ -1196,6 +1196,11 @@ func approveRunHandler(approver Approver, store run.Store, authz *authorizer,
 			respondError(w, log, http.StatusConflict,
 				"a shard or step is decided through its parent, not on its own")
 			return
+		case errors.Is(err, dispatch.ErrSelfApproval):
+			// Separation of duties. The message carries the rule's own words rather than a bare
+			// status, because the caller's next move is to find a second person.
+			respondError(w, log, http.StatusConflict, err.Error())
+			return
 		case err != nil:
 			log.Error("server: approve run: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not approve run")

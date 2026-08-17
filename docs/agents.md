@@ -97,6 +97,9 @@ held run is admin-only, so an operator-bound agent can never approve its own wor
    `min_risk` matches on the run's assessed risk grade, so "destructive operations need a person"
    is one line. `effect: deny` refuses the submission outright; the refused request is still on the
    chain, because the gate records every mutation before anything acts on it.
+   `require_distinct_approver: true` refuses a decision made by whoever asked for the change, which
+   matters for admins, since an agent or operator can never approve anything. The requirement is
+   copied onto each run the rule holds, so editing the rule later cannot weaken a pending decision.
 
 4. Pin the policies by starting the server with `serve --policy-file policies.yml`. The file is the
    source of truth and the API refuses policy writes, so even an admin API caller cannot rewrite

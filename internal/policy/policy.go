@@ -72,6 +72,11 @@ type Policy struct {
 	Effect string `json:"effect,omitempty"`
 	// ExcludeDryRun leaves dry-run runs unmatched, so a no-change preview does not need approval.
 	ExcludeDryRun bool `json:"exclude_dry_run,omitempty"`
+	// RequireDistinctApprover refuses a decision made by the person who asked for the change, which
+	// is separation of duties: an approval gate the requester can release themselves records a
+	// signature but stops nothing. The requirement is copied onto each run this rule holds, so a
+	// later edit to the rule cannot weaken a decision that is already pending.
+	RequireDistinctApprover bool `json:"require_distinct_approver,omitempty"`
 	// MaxDestroy holds a matched terraform or opentofu run for approval when its plan would destroy
 	// more than this many resources. A negative value disables the plan-content check, the safe
 	// default, so a policy without a threshold is a blanket rule rather than one that holds on any

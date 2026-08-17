@@ -154,6 +154,7 @@ function openPolicyEdit(p) {
 	document.getElementById("policy-max-destroy").value =
 		(p.max_destroy !== undefined && p.max_destroy !== null && p.max_destroy >= 0) ? String(p.max_destroy) : "";
 	document.getElementById("policy-exclude-dry").checked = !!p.exclude_dry_run;
+	document.getElementById("policy-distinct-approver").checked = !!p.require_distinct_approver;
 	document.getElementById("policy-status").textContent = "";
 	setModalTitle("policy", "Edit policy");
 	document.getElementById("policy-modal").hidden = false;
@@ -176,6 +177,7 @@ function wirePolicyForm() {
 		document.getElementById("policy-min-risk").value = "";
 		document.getElementById("policy-max-destroy").value = "";
 		document.getElementById("policy-exclude-dry").checked = false;
+		document.getElementById("policy-distinct-approver").checked = false;
 		document.getElementById("policy-status").textContent = "";
 		setModalTitle("policy", "Add a policy");
 	};
@@ -206,6 +208,7 @@ function wirePolicyForm() {
 			actor: document.getElementById("policy-actor").value.trim(),
 			min_risk: document.getElementById("policy-min-risk").value,
 			exclude_dry_run: document.getElementById("policy-exclude-dry").checked,
+			require_distinct_approver: document.getElementById("policy-distinct-approver").checked,
 		};
 		const maxDestroy = document.getElementById("policy-max-destroy").value.trim();
 		if (maxDestroy !== "") {

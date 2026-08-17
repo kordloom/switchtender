@@ -509,3 +509,50 @@ func TestStoreMigratesProvenance(t *testing.T) {
 		t.Errorf("ListPage(label) = %d runs, err %v, want 1 run", len(labeled), err)
 	}
 }
+
+// TestDistinctApproverSurvivesTheStore proves the separation-of-duties requirement is durable. It is
+// recorded on the run when the rule holds it, and the run then lives in the database until a person
+// decides on it, which is usually a different process from the one that held it. A field the store
+// drops is a control that works in memory and disappears the moment the server is restarted or the
+// decision is made through another replica.
+func TestDistinctApproverSurvivesTheStore(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "switchtender.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	store := db.Runs()
+
+	held := &run.Run{
+		ID: "run_held", Playbook: "site.yml", Status: run.StatusPendingApproval,
+		CreatedAt: time.Now(), Actor: "casey", ActorType: "session",
+		HeldByPolicy: "production apply", RequireDistinctApprover: true,
+	}
+	if err := store.Save(ctx, held); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	got, err := store.Get(ctx, "run_held")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if !got.RequireDistinctApprover {
+		t.Errorf("the stored run lost its distinct-approver requirement, so the requester can " +
+			"approve their own change through any process that reads it back")
+	}
+
+	// A run nothing gated does not acquire the requirement on the way through the store.
+	open := &run.Run{ID: "run_open", Playbook: "site.yml", Status: run.StatusPending,
+		CreatedAt: time.Now(), Actor: "casey"}
+	if err := store.Save(ctx, open); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	got, err = store.Get(ctx, "run_open")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.RequireDistinctApprover {
+		t.Errorf("an ungated run came back requiring a distinct approver")
+	}
+}

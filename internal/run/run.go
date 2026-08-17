@@ -239,6 +239,11 @@ type Run struct {
 	// renamed or deleted long before anyone reads the evidence, and "which rule stopped this
 	// change" is the question a change-management review asks. Empty when nothing held the run.
 	HeldByPolicy string `json:"held_by_policy,omitempty"`
+	// RequireDistinctApprover refuses a decision on this run by the person who asked for it. It is
+	// copied from the rule that held the run, at the moment of the hold, rather than read from the
+	// rule when the decision is made: an admin who edits or deletes the rule afterward must not be
+	// able to weaken a decision already pending, and an admin is who this control constrains.
+	RequireDistinctApprover bool `json:"require_distinct_approver,omitempty"`
 	// AuditReceipt is the seq:link of the chain entry that recorded the request which created this
 	// run. The entry is written before the handler runs, at a path naming the template or the
 	// collection rather than the run it goes on to create, so this is the only thing that ties a
