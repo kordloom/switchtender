@@ -81,6 +81,13 @@ func runVerify(cmd *cobra.Command, args []string) error {
 				"were published"
 		}
 		fmt.Fprintf(out, "anchors      %s (%s)\n", mark(rep.AnchorsOK), detail)
+		// What was checked is that the token commits to this chain's link. Whether the authority that
+		// issued it is worth believing is a trust decision this tool cannot make for a reader, and a
+		// count with nothing said about it invites reading it as one we did make. It goes on its own
+		// line beside the problems, rather than as a second parenthetical inside the first.
+		if rep.TimestampsVerified > 0 {
+			fmt.Fprintln(out, "  the issuing authority's signature is yours to check")
+		}
 		for _, p := range rep.TimestampProblems {
 			fmt.Fprintf(out, "  %s\n", p)
 		}
