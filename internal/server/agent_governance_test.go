@@ -46,7 +46,8 @@ func TestAgentTokenIsGovernedAndAttributed(t *testing.T) {
 		t.Fatalf("Save token: %v", err)
 	}
 
-	handler := New(run.NewMemStore(), &fakeSubmitter{run: &run.Run{ID: "run_x"}}, zap.NewNop(),
+	sub := &fakeSubmitter{run: &run.Run{ID: "run_x"}}
+	handler := New(run.NewMemStore(), sub, zap.NewNop(),
 		WithTokens(tokens), WithUsers(users), WithAudit(audits)).Handler()
 
 	call := func(method, path, body string) int {
@@ -82,6 +83,11 @@ func TestAgentTokenIsGovernedAndAttributed(t *testing.T) {
 	// It can still do operator work, which is the point of handing an agent a token.
 	if code := call(http.MethodPost, "/v1/runs", `{"playbook":"site.yml","inventory":"h"}`); code != http.StatusAccepted {
 		t.Errorf("agent launching a run = %d, want 202: an agent must still be able to work", code)
+	}
+	// The run itself carries who asked and how they authenticated, which is what lets a policy
+	// treat an agent's request differently from a person's at the submission gate.
+	if sub.gotRun == nil || sub.gotRun.Actor != "deploy-bot" || sub.gotRun.ActorType != "agent" {
+		t.Errorf("submitted run actor = %+v, want deploy-bot (agent)", sub.gotRun)
 	}
 
 	// Every action it took is in the chain, attributed to the agent and to the human it acts for.
