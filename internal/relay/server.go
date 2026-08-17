@@ -15,6 +15,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/auth"
+	"github.com/kordloom/switchtender/internal/dispatch"
 	"github.com/kordloom/switchtender/internal/event"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/policy"
@@ -91,6 +92,7 @@ func NewHandler(store run.Store, pools *Pools, log *zap.Logger,
 	mux.HandleFunc("POST /relay/v1/runs/{id}/save", s.save)
 	mux.HandleFunc("POST /relay/v1/runs/{id}/log", s.appendLog)
 	mux.HandleFunc("POST /relay/v1/runs/{id}/events", s.appendEvents)
+	mux.HandleFunc("POST /relay/v1/runs/{id}/propose-apply", s.proposeApply)
 	mux.HandleFunc("POST /relay/v1/runs/{id}/host-summary", s.saveHostSummary)
 	mux.HandleFunc("POST /relay/v1/runs/{id}/host-facts", s.saveHostFacts)
 	mux.HandleFunc("POST /relay/v1/runs/{id}/task-summary", s.saveTaskSummary)
@@ -698,6 +700,59 @@ func (s *relayServer) unrecordedHost(ctx context.Context, runID string, want []s
 	return ""
 }
 
+// proposeApply creates the apply a worker's plan gated, from the plan run the control node holds.
+//
+// A worker has no path to create a run, on purpose, so the plan-content gate could not complete on one:
+// the proposal failed with a 404 and the plan failed with it, leaving a gated terraform apply neither
+// held nor run. The worker reports what its plan found and nothing else. Every field of the apply, its
+// command, target, credentials, image, organization, requester, and the commit it is pinned to, comes
+// from the stored plan, so a worker cannot use this to propose an apply of something it was not asked
+// to plan.
+func (s *relayServer) proposeApply(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		// Destroys is how many resources the plan said it would destroy.
+		Destroys int `json:"destroys"`
+		// Read reports whether that count came from a summary the parser found.
+		Read bool `json:"read"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid propose body")
+		return
+	}
+	plan := s.servesRun(w, r)
+	if plan == nil {
+		return
+	}
+	if !leaseHeld(plan, r) {
+		writeErr(w, http.StatusForbidden, "the run's lease was not presented or did not match")
+		return
+	}
+	// The policies are read here rather than taken from the worker, so the rule that decides the hold is
+	// the control node's. A store that cannot answer holds the apply instead of queueing it, the same
+	// fail-closed rule the in-process gate follows: a gate that could not be evaluated has not passed.
+	var policies []*policy.Policy
+	read := body.Read
+	if s.policies == nil {
+		read = false
+	} else {
+		list, err := s.policies.List(r.Context())
+		if err != nil {
+			s.log.Error("relay: list policies: " + err.Error())
+			read = false
+		} else {
+			policies = list
+		}
+	}
+	proposal, err := dispatch.ProposeApplyFor(r.Context(), s.store, policies, plan, body.Destroys, read)
+	if err != nil {
+		s.internal(w, "propose apply", err)
+		return
+	}
+	s.record(r.Context(), poolFrom(r.Context()), plan.ClaimedBy,
+		"/relay/proposed/"+plan.ID+"/"+proposal.ID)
+	s.writeJSONStatus(w, http.StatusCreated, proposal)
+}
+
 // saveTaskSummary replaces the run's per-task summaries with those in the body.
 func (s *relayServer) saveTaskSummary(w http.ResponseWriter, r *http.Request) {
 	if !s.heldForReport(w, r) {
@@ -721,13 +776,19 @@ func (s *relayServer) saveTaskSummary(w http.ResponseWriter, r *http.Request) {
 
 // writeJSON writes v as a 200 JSON response.
 func (s *relayServer) writeJSON(w http.ResponseWriter, v any) {
+	s.writeJSONStatus(w, http.StatusOK, v)
+}
+
+// writeJSONStatus writes v as a JSON response with the given status, for the one call that creates
+// something and answers 201.
+func (s *relayServer) writeJSONStatus(w http.ResponseWriter, status int, v any) {
 	body, err := json.Marshal(v)
 	if err != nil {
 		s.internal(w, "marshal response", err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
+	w.WriteHeader(status)
 	if _, err := w.Write(body); err != nil {
 		s.log.Error("relay: write response: " + err.Error())
 	}

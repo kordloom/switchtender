@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -86,8 +87,15 @@ func (d *Dispatcher) executePlanGate(ctx context.Context, r *run.Run, policies [
 func (d *Dispatcher) proposeApply(
 	ctx context.Context, r *run.Run, policies []*policy.Policy, destroys int, read bool, mask *masker,
 ) run.Status {
-	opts := applyOptions(r, policies, destroys, read)
-	proposal, err := d.Submit(ctx, r.Playbook, r.Inventory, opts...)
+	// A relay-backed store cannot create a run, so the control node is asked to build the proposal
+	// from the plan it already holds. Everywhere else this submits directly, unchanged.
+	var proposal *run.Run
+	var err error
+	if proposer, ok := d.store.(applyProposer); ok {
+		proposal, err = proposer.ProposeApply(ctx, r.ID, destroys, read)
+	} else {
+		proposal, err = d.Submit(ctx, r.Playbook, r.Inventory, applyOptions(r, policies, destroys, read)...)
+	}
 	if err != nil {
 		d.log.Error("dispatch: propose apply: "+err.Error(), zap.String("run_id", r.ID))
 		d.finalize(r, run.StatusFailed, nil, "propose apply: "+mask.redactString(err.Error()))
@@ -110,6 +118,38 @@ func (d *Dispatcher) proposeApply(
 	code := 0
 	d.finalize(r, run.StatusSucceeded, &code, "")
 	return run.StatusSucceeded
+}
+
+// ProposeApplyFor builds and stores the apply a plan run proposes, deciding the hold from policies.
+//
+// It exists for the relay. A worker has no path to create a run, deliberately: the save endpoint
+// refuses an unknown id because a worker only ever reports on what it claimed. That left the
+// plan-content gate unable to complete anywhere but the control node, so a gated terraform apply
+// executed on a worker failed instead of waiting for an approver. The worker now reports what its plan
+// found and the control node builds the proposal from the plan run it already holds, which is narrower
+// than letting a worker submit a run: the apply's command, target, credentials, image, and commit come
+// from the stored plan rather than from the worker's request.
+func ProposeApplyFor(ctx context.Context, store run.Store, policies []*policy.Policy, plan *run.Run,
+	destroys int, read bool) (*run.Run, error) {
+	if plan == nil {
+		return nil, fmt.Errorf("propose apply: no plan run")
+	}
+	proposal := &run.Run{
+		ID: run.NewID(), Playbook: plan.Playbook, Inventory: plan.Inventory,
+		Status: run.StatusPending, CreatedAt: time.Now(),
+	}
+	run.ApplyOptions(proposal, applyOptions(plan, policies, destroys, read))
+	if err := store.Save(ctx, proposal); err != nil {
+		return nil, fmt.Errorf("propose apply: %w", err)
+	}
+	return proposal, nil
+}
+
+// applyProposer is a store that can create the apply a plan proposes on its behalf. A relay-backed
+// store implements it because a worker cannot create runs itself.
+type applyProposer interface {
+	// ProposeApply asks the control node to create the apply for the named plan run.
+	ProposeApply(ctx context.Context, planID string, destroys int, read bool) (*run.Run, error)
 }
 
 // applyOptions builds the submit options for the apply a plan proposes: everything about the plan run

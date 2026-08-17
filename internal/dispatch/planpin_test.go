@@ -1,8 +1,10 @@
 package dispatch
 
 import (
+	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/run"
@@ -111,3 +113,68 @@ func TestPinnedApplyRefusesADifferentCommit(t *testing.T) {
 	}
 }
 
+
+// proposingStore is a run store that also knows how to have an apply proposed for it, which is what a
+// relay-backed store does. It records the call so a test can prove the dispatcher took that path
+// instead of creating the run itself.
+type proposingStore struct {
+	run.Store
+	// planID is the plan the dispatcher asked about.
+	planID string
+	// destroys and read are what it reported.
+	destroys int
+	read     bool
+	// calls counts how many times it was asked.
+	calls int
+}
+
+// ProposeApply records the request and stores a held apply, standing in for the control node.
+func (p *proposingStore) ProposeApply(ctx context.Context, planID string, destroys int, read bool) (*run.Run, error) {
+	p.calls++
+	p.planID, p.destroys, p.read = planID, destroys, read
+	proposal := &run.Run{
+		ID: run.NewID(), Status: run.StatusPendingApproval, ProposedFrom: planID,
+		Tool: run.ToolTerraform, Command: "infra/prod", CreatedAt: time.Now(),
+	}
+	if err := p.Store.Save(ctx, proposal); err != nil {
+		return nil, err
+	}
+	return proposal, nil
+}
+
+// TestThePlanGateAsksAStoreThatCannotCreateRuns proves the wiring the relay depends on. A worker's store
+// cannot create a run, so the gate has to ask the control node to build the proposal rather than
+// submitting one. Without this the gated apply failed with a 404 on every worker, and the plan failed
+// with it.
+func TestThePlanGateAsksAStoreThatCannotCreateRuns(t *testing.T) {
+	t.Parallel()
+	store := &proposingStore{Store: run.NewMemStore()}
+	policies := policy.NewMemStore()
+	if err := policies.Save(context.Background(), &policy.Policy{
+		ID: policy.NewID(), Name: "tf-destroy-guard", Tool: run.ToolTerraform, MaxDestroy: 1,
+	}); err != nil {
+		t.Fatalf("Save policy: %v", err)
+	}
+	d := New(store, planRunner("Plan: 0 to add, 0 to change, 3 to destroy"), nil, WithPolicies(policies))
+	defer d.Close()
+
+	created, err := d.Submit(context.Background(), "", "",
+		run.WithTool(run.ToolTerraform), run.WithCommand("infra/prod"))
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	plan := waitTerminal(t, store, created.ID)
+	if plan.Status != run.StatusSucceeded {
+		t.Fatalf("plan run status = %q, want succeeded: %s", plan.Status, plan.Error)
+	}
+	if store.calls != 1 {
+		t.Fatalf("the store was asked to propose %d times, want exactly 1: the gate submitted the "+
+			"apply itself, which a worker's store cannot do", store.calls)
+	}
+	if store.planID != created.ID {
+		t.Errorf("proposed for plan %q, want %q", store.planID, created.ID)
+	}
+	if store.destroys != 3 || !store.read {
+		t.Errorf("reported destroys=%d read=%v, want 3 and true", store.destroys, store.read)
+	}
+}

@@ -449,6 +449,36 @@ func (t *httpTransport) AppendEvents(ctx context.Context, id string, events []ev
 	})
 }
 
+// proposeApplyRequest is what a worker reports about the plan it just ran. It carries findings, not a
+// run: the control node builds the apply from the plan it already holds, so a worker cannot propose an
+// apply of anything other than what it was asked to plan.
+type proposeApplyRequest struct {
+	// Destroys is how many resources the plan said it would destroy.
+	Destroys int `json:"destroys"`
+	// Read reports whether that count came from a summary the parser actually found. A plan nobody
+	// could weigh against the limit has not passed it.
+	Read bool `json:"read"`
+}
+
+// ProposeApply asks the control node to create the apply the named plan gated.
+func (t *httpTransport) ProposeApply(ctx context.Context, planID string, destroys int, read bool) (*run.Run, error) {
+	body := proposeApplyRequest{Destroys: destroys, Read: read}
+	resp, err := t.sendJSON(ctx, http.MethodPost, runPath(planID, "/propose-apply"), body,
+		t.leaseFor(planID))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusCreated {
+		return nil, statusErr("propose apply", resp)
+	}
+	var proposal run.Run
+	if err := json.NewDecoder(resp.Body).Decode(&proposal); err != nil {
+		return nil, fmt.Errorf("propose apply: decode response: %w", err)
+	}
+	return &proposal, nil
+}
+
 // SaveHostSummary records a run's per-host outcomes on the control node.
 func (t *httpTransport) SaveHostSummary(ctx context.Context, runID string, summaries []run.HostSummary) error {
 	return inBatches(summaries, func(batch []run.HostSummary) error {
