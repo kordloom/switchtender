@@ -61,6 +61,30 @@ async function loadInventories() {
 	}
 }
 
+// parseInterval reads a duration the way an operator writes one: 30s, 15m, 2h, or a bare number of
+// seconds. It returns zero for an empty field, meaning no automatic refresh, and null for anything it
+// cannot read, so an unreadable value is refused rather than quietly becoming "never".
+function parseInterval(text) {
+	if (!text) return 0;
+	const m = /^(\d+)\s*(s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hr|hrs|hour|hours)?$/i
+		.exec(text.trim());
+	if (!m) return null;
+	const n = parseInt(m[1], 10);
+	if (!Number.isFinite(n) || n < 0) return null;
+	const unit = (m[2] || "s").toLowerCase();
+	if (unit.startsWith("h")) return n * 3600;
+	if (unit.startsWith("m")) return n * 60;
+	return n;
+}
+
+// intervalText renders a stored interval back into the compact form the field accepts, so opening an
+// edit shows what was typed rather than a second count nobody entered.
+function intervalText(seconds) {
+	if (seconds % 3600 === 0) return seconds / 3600 + "h";
+	if (seconds % 60 === 0) return seconds / 60 + "m";
+	return seconds + "s";
+}
+
 // openSourceEdit fills the source dialog with an existing record and switches it to edit mode so
 // the next save issues a PUT rather than a create.
 function openSourceEdit(src) {
@@ -70,6 +94,11 @@ function openSourceEdit(src) {
 	document.getElementById("src-source").value = src.source;
 	document.getElementById("src-credential").value = src.credential_id || "";
 	document.getElementById("src-project").value = src.project_id || "";
+	// The cadence is what the table's two cadence columns report, and the dialog had no field for it,
+	// so a source made here could never refresh and an edit could not restore one that could.
+	document.getElementById("src-interval").value = src.sync_interval_seconds
+		? intervalText(src.sync_interval_seconds) : "";
+	document.getElementById("src-update-on-launch").checked = !!src.update_on_launch;
 	document.getElementById("src-status").textContent = "";
 	setModalTitle("source", "Edit source");
 	document.getElementById("source-modal").hidden = false;
@@ -88,6 +117,8 @@ function wireSourceForm() {
 		document.getElementById("src-source").value = "";
 		document.getElementById("src-credential").value = "";
 		document.getElementById("src-project").value = "";
+		document.getElementById("src-interval").value = "";
+		document.getElementById("src-update-on-launch").checked = false;
 		document.getElementById("src-status").textContent = "";
 		setModalTitle("source", "Add a source");
 	};
@@ -104,11 +135,22 @@ function wireSourceForm() {
 		if (inFlight) return;
 		const status = document.getElementById("src-status");
 		const editId = form.dataset.editId;
+		const everyText = document.getElementById("src-interval").value.trim();
+		const every = parseInterval(everyText);
+		if (every === null) {
+			status.textContent = "Refresh every needs a duration like 30s, 15m, or 2h. Leave it " +
+				"empty to refresh only when asked.";
+			return;
+		}
+		// Every field the API knows is sent, filled or empty: the update handler rebuilds the source
+		// whole, so an omitted cadence is a cadence turned off.
 		const payload = {
 			name: document.getElementById("src-name").value.trim(),
 			source: document.getElementById("src-source").value.trim(),
 			credential_id: document.getElementById("src-credential").value,
 			project_id: document.getElementById("src-project").value,
+			sync_interval_seconds: every,
+			update_on_launch: document.getElementById("src-update-on-launch").checked,
 		};
 		inFlight = true;
 		if (submitBtn) submitBtn.disabled = true;
