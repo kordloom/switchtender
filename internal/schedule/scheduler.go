@@ -211,19 +211,23 @@ func (s *Scheduler) fire(ctx context.Context, sc *Schedule) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// The run belongs to the organization whose schedule fired it. Nothing else can supply that: the
+	// tick loop carries no actor for the submit path to infer an org from, and an inline schedule's run
+	// names no stored object for grants to reach, so an unstamped run is ownerless, which under strict
+	// grants means denied to every non-admin. The tenant that owns the schedule could see the schedule
+	// and none of the runs it produced.
+	base := []run.SubmitOption{run.WithSource("schedule", sc.ID), run.WithOrgID(sc.OrgID)}
+
 	var created *run.Run
 	switch {
 	case sc.TemplateID != "":
 		created, err = s.fireTemplate(ctx, sc)
 	case len(sc.Steps) > 0:
-		created, err = s.submitter.SubmitPipeline(ctx, sc.Name, sc.Inventory, sc.Steps,
-			run.WithSource("schedule", sc.ID))
+		created, err = s.submitter.SubmitPipeline(ctx, sc.Name, sc.Inventory, sc.Steps, base...)
 	case sc.Shards >= 2:
-		created, err = s.submitter.SubmitSplit(ctx, sc.Playbook, sc.Inventory, sc.Shards,
-			run.WithSource("schedule", sc.ID))
+		created, err = s.submitter.SubmitSplit(ctx, sc.Playbook, sc.Inventory, sc.Shards, base...)
 	default:
-		created, err = s.submitter.Submit(ctx, sc.Playbook, sc.Inventory,
-			run.WithSource("schedule", sc.ID))
+		created, err = s.submitter.Submit(ctx, sc.Playbook, sc.Inventory, base...)
 	}
 	if err != nil {
 		return "", err
@@ -243,7 +247,14 @@ func (s *Scheduler) fireTemplate(ctx context.Context, sc *Schedule) (*run.Run, e
 	if err != nil {
 		return nil, fmt.Errorf("schedule %s: %w", sc.ID, err)
 	}
-	opts := append(t.LaunchOptions(), run.WithSource("schedule", sc.ID))
+	// The schedule's own organization owns the run, and the template's stands in when an older schedule
+	// carries none, so a run fired from a template is never left ownerless either.
+	owner := sc.OrgID
+	if owner == "" {
+		owner = t.OrgID
+	}
+	opts := append(t.LaunchOptions(),
+		run.WithSource("schedule", sc.ID), run.WithOrgID(owner))
 	switch {
 	case len(t.Steps) > 0:
 		// A scheduled workflow template fires its graph, the same as an on-demand launch does.
