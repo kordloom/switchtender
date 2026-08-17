@@ -168,7 +168,10 @@ back rewritten, or the head regresses. Its memory is first write wins, so a rewr
 into the checkpoint as if it were the truth, and a standing condition is reported when it appears
 and again when it changes, not once per poll. The checkpoint's signer is pinned to the witness's
 own key, so a state file replaced by a forger is refused rather than believed, and one state file
-holds one server.</p>
+holds one server. That key is the witness's own, kept in <code>witness-key.json</code> and never the watched
+server's <code>producer-key.json</code>, so a witness run on the host it watches still signs with a key its
+operator does not hold. A feed that serves nothing, or one whose newest beat stops moving for a day, is
+a finding in its own right: a witness with nothing to witness must not read as a clean bill of health.</p>
 <p><strong>A hosted witness answers auditors, not just operators.</strong> <code>switchtender witness serve</code> watches
 any number of servers from one process, records every finding durably, and serves what it has
 witnessed over a read-only API. Its centerpiece is the attestation: a countersigned statement of

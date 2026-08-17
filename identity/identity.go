@@ -23,6 +23,14 @@ import (
 // beside the database.
 const File = "producer-key.json"
 
+// WitnessFile is the file name a witness's own signing identity is stored under. A witness must not
+// share a file with the server it watches: reading producer-key.json meant a witness pointed at the
+// watched server's state directory, which is what the default does when the two run on one host,
+// signed its attestations with that server's own key. A relying party pinning it was pinning the
+// operator's key, and the operator could then mint the statement the witness exists to make
+// unforgeable.
+const WitnessFile = "witness-key.json"
+
 // Identity is the install's signing identity: the key that signs a bundle and the install id that
 // distinguishes this install from another running the same product.
 //
@@ -126,21 +134,64 @@ func LoadFile(dir string) (Identity, error) {
 	return createIdentity(dir)
 }
 
-// readIdentityFile reads the stored identity, returning fs.ErrNotExist when there is none.
+// LoadWitnessFile reads a witness's own identity from dir, creating it on first use, under a file name
+// of its own so a witness can never sign with the producer key of the server it watches. Like LoadFile
+// it never consults SWITCHTENDER_AUDIT_KEY.
+//
+// A key that matches a producer identity sitting in the same directory is refused rather than used. That
+// only happens if somebody copied one file over the other, and the whole value of a witness signature is
+// that it is not the watched party's.
+func LoadWitnessFile(dir string) (Identity, error) {
+	id, err := loadNamed(dir, WitnessFile)
+	if err != nil {
+		return Identity{}, err
+	}
+	producer, perr := readNamed(dir, File)
+	if perr == nil && producer.Seed == id.Seed {
+		return Identity{}, fmt.Errorf("witness identity: %s in %s holds the same key as %s, so this "+
+			"witness would countersign the server it watches: delete it and let a new witness key be "+
+			"created", WitnessFile, dir, File)
+	}
+	return id, nil
+}
+
+// readIdentityFile reads the stored producer identity, returning fs.ErrNotExist when there is none.
 func readIdentityFile(dir string) (Identity, error) {
-	raw, err := os.ReadFile(filepath.Join(dir, File))
+	return readNamed(dir, File)
+}
+
+// loadNamed reads the identity stored under name in dir, creating it when there is none.
+func loadNamed(dir, name string) (Identity, error) {
+	stored, err := readNamed(dir, name)
+	if err == nil {
+		return identityFromSeed(stored.Seed, stored.InstallID)
+	}
+	if !errors.Is(err, fs.ErrNotExist) {
+		return Identity{}, err
+	}
+	return createNamed(dir, name)
+}
+
+// readNamed reads one stored identity file, returning fs.ErrNotExist when it is not there.
+func readNamed(dir, name string) (Identity, error) {
+	raw, err := os.ReadFile(filepath.Join(dir, name))
 	if err != nil {
 		return Identity{}, err
 	}
 	var stored storedIdentity
 	if err := json.Unmarshal(raw, &stored); err != nil {
-		return Identity{}, fmt.Errorf("producer identity: parse %s: %w", File, err)
+		return Identity{}, fmt.Errorf("identity: parse %s: %w", name, err)
 	}
 	return Identity{InstallID: stored.InstallID, Seed: stored.Seed}, nil
 }
 
 // createIdentity generates a new identity and writes it to dir with owner-only permissions.
 func createIdentity(dir string) (Identity, error) {
+	return createNamed(dir, File)
+}
+
+// createNamed generates an identity and writes it to dir under name with owner-only permissions.
+func createNamed(dir, name string) (Identity, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return Identity{}, fmt.Errorf("producer identity: create %s: %w", dir, err)
 	}
@@ -158,11 +209,11 @@ func createIdentity(dir string) (Identity, error) {
 	if err != nil {
 		return Identity{}, fmt.Errorf("producer identity: encode: %w", err)
 	}
-	path := filepath.Join(dir, File)
+	path := filepath.Join(dir, name)
 	// Written through a uniquely named temporary file so a crash cannot leave a half-written key and
 	// so two processes starting at once cannot overwrite each other's, and at 0600 so the signing
 	// seed is readable only by the account running the server.
-	f, err := os.CreateTemp(dir, File+".*.tmp")
+	f, err := os.CreateTemp(dir, name+".*.tmp")
 	if err != nil {
 		return Identity{}, fmt.Errorf("producer identity: write: %w", err)
 	}

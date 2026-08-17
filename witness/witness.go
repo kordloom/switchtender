@@ -67,6 +67,12 @@ type Checkpoint struct {
 	Sig string `json:"sig,omitempty"`
 }
 
+// StaleAfter is how long the newest beat may stand unchanged before the witness reports the feed as
+// stopped. A span beat is emitted on a schedule rather than only on a change, so a day of no movement is
+// far outside any plausible interval, while an hour is not: a server beating every thirty minutes that
+// misses one beat to a restart is not a finding.
+const StaleAfter = 24 * time.Hour
+
 // Finding is one problem the witness can attest to.
 type Finding struct {
 	// Kind names the condition: missing_beat, rewritten_beat, or head_regression for what the
@@ -267,6 +273,36 @@ func Check(prev *Checkpoint, server string, beats []Beat, now time.Time) (*Check
 			"the feed is empty and beat %d was already witnessed, so the chain lost its tail",
 			prev.LastBeat),
 			Key: fmt.Sprintf("head_regression behind witnessed beat %d", prev.LastBeat)})
+	} else {
+		// A witness with nothing to witness is not a witness, and it must not sign a checkpoint that
+		// reads as one. An empty feed with no memory behind it used to produce no findings at all: the
+		// checkpoint saved, the command exited zero, and a nightly cron reported success every night
+		// while covering nothing. The usual cause is a server whose span beat was never turned on,
+		// which is a configuration to fix rather than an attack, so the finding says so.
+		findings = append(findings, Finding{Kind: "empty_feed", Detail: "this server served no beats " +
+			"at all, so there is nothing to witness: start the span beat on it, with serve " +
+			"--beat-interval, or point the witness at a server that emits beats",
+			Key: "empty_feed"})
+	}
+
+	// A feed that stopped moving reads exactly like a healthy quiet one, and that is the state an
+	// operator who stopped recording wants to be in. A span beat is emitted on a schedule whether or
+	// not the chain changed, so a newest beat that has not advanced for longer than any plausible beat
+	// interval means the beats stopped, the server is replaying a fixed answer, or the chain is frozen.
+	// The witness cannot tell which from here, and does not guess: it reports that the feed has not
+	// moved and for how long.
+	if prev != nil && prev.LastBeat > 0 && next.LastBeat == prev.LastBeat &&
+		next.LastSeq == prev.LastSeq && next.LastHead == prev.LastHead &&
+		!prev.ObservedAt.IsZero() && now.Sub(prev.ObservedAt) > StaleAfter {
+		findings = append(findings, Finding{Kind: "stalled_feed", Detail: fmt.Sprintf(
+			"beat %d at chain position %d has been the newest since %s, %s ago, so the feed has "+
+				"stopped moving: either the beats stopped, the chain stopped appending, or this "+
+				"answer is a replay", next.LastBeat, next.LastSeq,
+			prev.ObservedAt.UTC().Format(time.RFC3339), now.Sub(prev.ObservedAt).Round(time.Minute)),
+			Key: fmt.Sprintf("stalled_feed at beat %d", next.LastBeat)})
+		// The witnessed time is not advanced past the observation that first stood still, so the
+		// finding keeps naming when the feed actually stopped rather than resetting each poll.
+		next.ObservedAt = prev.ObservedAt
 	}
 
 	// Forget the oldest remembered positions past the cap, never the newest.
