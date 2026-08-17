@@ -656,6 +656,11 @@ func (d *Dispatcher) Submit(ctx context.Context, playbook, inventory string, opt
 		return nil, err
 	}
 	d.resolveQueue(ctx, r)
+	// Deny is checked before the hold, and even for a run born held: a rule that refuses a
+	// submission outright must not be satisfied by parking the run in front of an approver.
+	if err := d.denied(ctx, r); err != nil {
+		return nil, err
+	}
 	if r.Status != run.StatusPendingApproval {
 		held, perr := d.requiresApproval(ctx, r)
 		if perr != nil {
@@ -750,6 +755,9 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 	// held for an approver executed on every host the moment it was split in two. A shard matches
 	// exactly what its parent matches, since it inherits everything but its host group, so the
 	// parent is the only thing worth testing.
+	if err := d.denied(ctx, parent); err != nil {
+		return nil, err
+	}
 	if parent.Status != run.StatusPendingApproval {
 		held, perr := d.requiresApproval(ctx, parent)
 		if perr != nil {
@@ -935,6 +943,9 @@ func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string) (*r
 	// so it has to face the same gate as the other three. Submit, SubmitSplit, and SubmitPipeline
 	// each consult the policy; this path did not, which made retrying a way to run a spec an
 	// approver would have held.
+	if err := d.denied(ctx, retry); err != nil {
+		return nil, err
+	}
 	held, perr := d.requiresApproval(ctx, retry)
 	if perr != nil {
 		return nil, perr
@@ -1315,6 +1326,9 @@ func (d *Dispatcher) SubmitPipeline(ctx context.Context, name, inventory string,
 		return nil, err
 	}
 	d.resolveQueue(ctx, parent)
+	if err := d.pipelineDenied(ctx, parent, steps); err != nil {
+		return nil, err
+	}
 	if parent.Status != run.StatusPendingApproval {
 		held, perr := d.pipelineRequiresApproval(ctx, parent, steps)
 		if perr != nil {
@@ -1471,6 +1485,7 @@ func stepRun(parent *run.Run, step run.PipelineStep, idx, attempt int, vars map[
 	child.PullCredentialID = parent.PullCredentialID
 	child.Labels = parent.Labels
 	child.Actor = parent.Actor
+	child.ActorType = parent.ActorType
 	// A step is scoped to the pipeline's tenant. A step may name no stored object, so without the
 	// parent's org it would be an objectless run readable across every tenant.
 	child.OrgID = parent.OrgID

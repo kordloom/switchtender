@@ -2,7 +2,9 @@ package dispatch
 
 import (
 	"context"
+	"errors"
 	"io"
+	"strings"
 	"testing"
 	"time"
 
@@ -233,5 +235,69 @@ func TestPlanGateLeavesUngatedRuns(t *testing.T) {
 
 	if n := countProposals(t, store); n != 0 {
 		t.Errorf("ungated runs proposed %d applies, want 0", n)
+	}
+}
+
+// TestDenyPolicyRefusesSubmission proves a deny policy refuses the submission outright: the run is
+// never created, the refusal names the rule, a run born held is refused too rather than parked in
+// front of an approver, and wrapping the refused command in a pipeline step does not launder it.
+func TestDenyPolicyRefusesSubmission(t *testing.T) {
+	t.Parallel()
+	store := run.NewMemStore()
+	policies := policy.NewMemStore()
+	if err := policies.Save(context.Background(), &policy.Policy{
+		ID: policy.NewID(), Name: "no agent drops", ActorKind: policy.ActorKindAgent,
+		CommandContains: "drop database", Effect: policy.EffectDeny,
+		MaxDestroy: policy.DisabledMaxDestroy,
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	runner := roundhouse.RunnerFunc(
+		func(_ context.Context, _ roundhouse.Spec, _ io.Writer) (roundhouse.Result, error) {
+			return roundhouse.Result{ExitCode: 0}, nil
+		},
+	)
+	d := New(store, runner, nil, WithPolicies(policies))
+	defer d.Close()
+
+	deniedOpts := []run.SubmitOption{
+		run.WithTool("bash"), run.WithCommand("psql -c 'drop database prod'"),
+		run.WithActor("prod-remediator"), run.WithActorType("agent"),
+	}
+	if _, err := d.Submit(context.Background(), "", "", deniedOpts...); !errors.Is(err, ErrPolicyDenied) {
+		t.Fatalf("Submit() error = %v, want ErrPolicyDenied", err)
+	} else if !strings.Contains(err.Error(), "no agent drops") {
+		t.Errorf("refusal %q does not name the rule", err)
+	}
+
+	// Asking for approval at submission must not soften a deny into a hold.
+	heldOpts := append(deniedOpts, run.WithRequireApproval(true))
+	if _, err := d.Submit(context.Background(), "", "", heldOpts...); !errors.Is(err, ErrPolicyDenied) {
+		t.Fatalf("Submit(born held) error = %v, want ErrPolicyDenied", err)
+	}
+
+	// The same command from a person is outside the rule's scope and proceeds.
+	if _, err := d.Submit(context.Background(), "", "",
+		run.WithTool("bash"), run.WithCommand("psql -c 'drop database prod'"),
+		run.WithActor("dba-jane"), run.WithActorType("session")); err != nil {
+		t.Fatalf("Submit(human) error = %v, want nil", err)
+	}
+
+	// A pipeline whose step matches is refused whole.
+	steps := []run.PipelineStep{{Name: "drop", Tool: "bash", Command: "psql -c 'drop database prod'"}}
+	if _, err := d.SubmitPipeline(context.Background(), "wrap", "", steps,
+		run.WithActor("prod-remediator"), run.WithActorType("agent")); !errors.Is(err, ErrPolicyDenied) {
+		t.Fatalf("SubmitPipeline() error = %v, want ErrPolicyDenied", err)
+	}
+
+	// Nothing denied was created.
+	runs, err := store.List(context.Background())
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	for _, r := range runs {
+		if strings.Contains(r.Command, "drop database") && r.ActorType == "agent" {
+			t.Errorf("a denied submission left run %s in the store", r.ID)
+		}
 	}
 }

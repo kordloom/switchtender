@@ -27,6 +27,14 @@ type createPolicyRequest struct {
 	// more than this many resources. A pointer so a missing field disables the plan-content check
 	// rather than holding on any destroy, and a negative value disables it explicitly.
 	MaxDestroy *int `json:"max_destroy,omitempty"`
+	// ActorKind matches who fired the run: agent or human, empty for any.
+	ActorKind string `json:"actor_kind,omitempty"`
+	// Actor matches the exact requesting actor recorded on the run, empty for any.
+	Actor string `json:"actor,omitempty"`
+	// MinRisk matches only runs assessed at least this risky: low, medium, or high. Empty for any.
+	MinRisk string `json:"min_risk,omitempty"`
+	// Effect is what a match does: require_approval (the default) or deny.
+	Effect string `json:"effect,omitempty"`
 }
 
 // resolveMaxDestroy returns the request's max_destroy, defaulting a missing value to the disabled
@@ -70,7 +78,12 @@ func createPolicyHandler(store policy.Store, log *zap.Logger) http.HandlerFunc {
 			ID: policy.NewID(), Name: req.Name, Tool: req.Tool,
 			CommandContains: req.CommandContains, InventoryID: req.InventoryID,
 			ExcludeDryRun: req.ExcludeDryRun, MaxDestroy: resolveMaxDestroy(req.MaxDestroy),
+			ActorKind: req.ActorKind, Actor: req.Actor, MinRisk: req.MinRisk, Effect: req.Effect,
 			CreatedAt: time.Now(),
+		}
+		if err := p.Validate(); err != nil {
+			respondError(w, log, http.StatusBadRequest, err.Error())
+			return
 		}
 		if err := store.Save(r.Context(), p); err != nil {
 			log.Error("server: save policy: " + err.Error())
@@ -118,7 +131,12 @@ func updatePolicyHandler(store policy.Store, log *zap.Logger) http.HandlerFunc {
 			ID: id, Name: req.Name, Tool: req.Tool,
 			CommandContains: req.CommandContains, InventoryID: req.InventoryID,
 			ExcludeDryRun: req.ExcludeDryRun, MaxDestroy: resolveMaxDestroy(req.MaxDestroy),
+			ActorKind: req.ActorKind, Actor: req.Actor, MinRisk: req.MinRisk, Effect: req.Effect,
 			CreatedAt: existing.CreatedAt,
+		}
+		if err := p.Validate(); err != nil {
+			respondError(w, log, http.StatusBadRequest, err.Error())
+			return
 		}
 		if err := store.Save(r.Context(), p); err != nil {
 			log.Error("server: update policy: " + err.Error())

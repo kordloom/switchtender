@@ -162,3 +162,48 @@ func TestFilePolicyIDIsStable(t *testing.T) {
 		t.Errorf("Get(%s) = (%v, %v), want the alpha policy", a[0].ID, got, err)
 	}
 }
+
+// TestFileStoreLoadsActorRules confirms the file schema carries the actor, risk, and effect
+// vocabulary, and that a rule with an unknown word in it refuses to load rather than silently
+// matching nothing.
+func TestFileStoreLoadsActorRules(t *testing.T) {
+	t.Parallel()
+	path := writePolicyFile(t, `
+policies:
+  - name: agent-destructive-deny
+    actor_kind: agent
+    command_contains: "drop database"
+    effect: deny
+  - name: agent-high-risk-approval
+    actor_kind: agent
+    min_risk: high
+`)
+	store, err := policy.NewFileStore(path)
+	if err != nil {
+		t.Fatalf("NewFileStore() error = %v", err)
+	}
+	all, err := store.List(context.Background())
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("loaded %d policies, want 2", len(all))
+	}
+	agentDrop := &run.Run{Tool: "bash", Command: "psql -c 'drop database prod'", ActorType: "agent"}
+	if got := policy.Denying(all, agentDrop); got == nil || got.Name != "agent-destructive-deny" {
+		t.Errorf("Denying() = %v, want the deny rule from the file", got)
+	}
+	risky := &run.Run{Tool: "bash", Command: "rm -rf /srv/data", ActorType: "agent"}
+	if got := policy.Requiring(all, risky); got == nil || got.Name != "agent-high-risk-approval" {
+		t.Errorf("Requiring() = %v, want the high-risk rule from the file", got)
+	}
+
+	bad := writePolicyFile(t, `
+policies:
+  - name: typo
+    effect: denny
+`)
+	if _, err := policy.NewFileStore(bad); err == nil {
+		t.Error("NewFileStore() accepted an unknown effect")
+	}
+}

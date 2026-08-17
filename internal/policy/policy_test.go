@@ -53,6 +53,39 @@ func TestPolicyMatches(t *testing.T) {
 	}, { // Test 10: A real run is not excluded.
 		Name: "real run not excluded", Policy: policy.Policy{Tool: "terraform", ExcludeDryRun: true},
 		Run: run.Run{Tool: "terraform", DryRun: false}, Want: true,
+	}, { // Test 11: An agent-scoped rule matches an agent's run.
+		Name: "agent kind match", Policy: policy.Policy{ActorKind: policy.ActorKindAgent},
+		Run: run.Run{ActorType: "agent"}, Want: true,
+	}, { // Test 12: An agent-scoped rule leaves a person's run alone.
+		Name: "agent kind mismatch", Policy: policy.Policy{ActorKind: policy.ActorKindAgent},
+		Run: run.Run{ActorType: "session"}, Want: false,
+	}, { // Test 13: A human-scoped rule matches a signed-in person.
+		Name: "human kind session", Policy: policy.Policy{ActorKind: policy.ActorKindHuman},
+		Run: run.Run{ActorType: "session"}, Want: true,
+	}, { // Test 14: A human-scoped rule matches an owner-held token.
+		Name: "human kind token", Policy: policy.Policy{ActorKind: policy.ActorKindHuman},
+		Run: run.Run{ActorType: "token"}, Want: true,
+	}, { // Test 15: A webhook run is neither kind, so an actor-scoped rule never fires on it.
+		Name: "webhook is neither kind", Policy: policy.Policy{ActorKind: policy.ActorKindHuman},
+		Run: run.Run{ActorType: "webhook"}, Want: false,
+	}, { // Test 16: A run with no recorded actor type matches no named kind.
+		Name: "unknown actor unmatched", Policy: policy.Policy{ActorKind: policy.ActorKindAgent},
+		Run: run.Run{}, Want: false,
+	}, { // Test 17: A named-actor rule binds to exactly that principal.
+		Name: "actor name match", Policy: policy.Policy{Actor: "prod-remediator"},
+		Run: run.Run{Actor: "prod-remediator", ActorType: "agent"}, Want: true,
+	}, { // Test 18: A named-actor rule leaves every other principal alone.
+		Name: "actor name mismatch", Policy: policy.Policy{Actor: "prod-remediator"},
+		Run: run.Run{Actor: "operator-jane", ActorType: "session"}, Want: false,
+	}, { // Test 19: A misspelled kind matches nothing rather than everything.
+		Name: "unknown kind matches nothing", Policy: policy.Policy{ActorKind: "robot"},
+		Run: run.Run{ActorType: "agent"}, Want: false,
+	}, { // Test 20: A destructive command grades high and meets a high floor.
+		Name: "min risk met", Policy: policy.Policy{MinRisk: run.RiskHigh},
+		Run: run.Run{Tool: "bash", Command: "rm -rf /var/data"}, Want: true,
+	}, { // Test 21: A dry run grades low and stays under a high floor.
+		Name: "min risk unmet", Policy: policy.Policy{MinRisk: run.RiskHigh},
+		Run: run.Run{Tool: "bash", Command: "echo ok", DryRun: true}, Want: false,
 	}}
 	for _, test := range tests {
 		t.Run(test.Name, func(t *testing.T) {
@@ -164,6 +197,82 @@ func TestPlanExceeds(t *testing.T) {
 			r := test.Run
 			if got := policy.PlanExceeds(test.Policies, &r, test.Destroys); got != test.Want {
 				t.Errorf("PlanExceeds() = %v, want %v", got, test.Want)
+			}
+		})
+	}
+}
+
+// TestDenying confirms a deny policy is found for the runs it matches, that a deny rule never
+// doubles as an approval rule, and that Requiring skips it so a denied run is refused rather than
+// parked in front of an approver.
+func TestDenying(t *testing.T) {
+	t.Parallel()
+	deny := &policy.Policy{
+		ID: "pol_deny", Name: "no agent drops", ActorKind: policy.ActorKindAgent,
+		CommandContains: "drop database", Effect: policy.EffectDeny,
+		MaxDestroy: policy.DisabledMaxDestroy,
+	}
+	hold := &policy.Policy{
+		ID: "pol_hold", Name: "hold tf", Tool: "terraform", MaxDestroy: policy.DisabledMaxDestroy,
+	}
+	policies := []*policy.Policy{deny, hold}
+
+	agentDrop := &run.Run{Tool: "bash", Command: "psql -c 'drop database prod'", ActorType: "agent"}
+	if got := policy.Denying(policies, agentDrop); got != deny {
+		t.Errorf("Denying(agent drop) = %v, want the deny policy", got)
+	}
+	if got := policy.Requiring(policies, agentDrop); got != nil {
+		t.Errorf("Requiring(agent drop) = %v, want nil: a denied run is refused, not held", got)
+	}
+
+	humanDrop := &run.Run{Tool: "bash", Command: "psql -c 'drop database prod'", ActorType: "session"}
+	if got := policy.Denying(policies, humanDrop); got != nil {
+		t.Errorf("Denying(human drop) = %v, want nil: the rule is scoped to agents", got)
+	}
+
+	tfRun := &run.Run{Tool: "terraform", Command: "terraform apply", ActorType: "agent"}
+	if got := policy.Denying(policies, tfRun); got != nil {
+		t.Errorf("Denying(tf) = %v, want nil", got)
+	}
+	if got := policy.Requiring(policies, tfRun); got != hold {
+		t.Errorf("Requiring(tf) = %v, want the hold policy", got)
+	}
+}
+
+// TestPolicyValidate confirms the vocabulary is checked where a rule is written, so a typo is an
+// error rather than a rule that silently matches nothing or gates nothing.
+func TestPolicyValidate(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Name    string
+		Policy  policy.Policy
+		WantErr bool
+	}{{ // Test 0: An empty policy is valid.
+		Name: "empty", Policy: policy.Policy{MaxDestroy: policy.DisabledMaxDestroy}, WantErr: false,
+	}, { // Test 1: The full valid vocabulary.
+		Name: "valid full", Policy: policy.Policy{
+			ActorKind: policy.ActorKindAgent, MinRisk: run.RiskHigh,
+			Effect: policy.EffectDeny, MaxDestroy: policy.DisabledMaxDestroy,
+		}, WantErr: false,
+	}, { // Test 2: An unknown effect is refused.
+		Name: "bad effect", Policy: policy.Policy{Effect: "refuse",
+			MaxDestroy: policy.DisabledMaxDestroy}, WantErr: true,
+	}, { // Test 3: An unknown actor kind is refused.
+		Name: "bad kind", Policy: policy.Policy{ActorKind: "robot",
+			MaxDestroy: policy.DisabledMaxDestroy}, WantErr: true,
+	}, { // Test 4: An unknown risk level is refused.
+		Name: "bad risk", Policy: policy.Policy{MinRisk: "severe",
+			MaxDestroy: policy.DisabledMaxDestroy}, WantErr: true,
+	}, { // Test 5: Deny cannot combine with a plan-content threshold.
+		Name: "deny with max destroy", Policy: policy.Policy{Effect: policy.EffectDeny,
+			MaxDestroy: 0}, WantErr: true,
+	}}
+	for _, test := range tests {
+		t.Run(test.Name, func(t *testing.T) {
+			t.Parallel()
+			p := test.Policy
+			if err := p.Validate(); (err != nil) != test.WantErr {
+				t.Errorf("Validate() error = %v, want error %v", err, test.WantErr)
 			}
 		})
 	}

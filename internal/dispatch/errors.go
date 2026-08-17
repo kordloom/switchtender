@@ -47,6 +47,11 @@ var (
 	ErrNotPendingApproval = errors.New("run is not awaiting approval")
 )
 
+// ErrPolicyDenied is returned when a deny policy refuses a submission outright, so the run is
+// never created. The refused request is still evidence: the gate records every mutation on the
+// audit chain before its handler acts.
+var ErrPolicyDenied = errors.New("submission denied by policy")
+
 // ErrPolicyUnavailable is returned when the approval policies cannot be read, so the dispatcher
 // cannot tell whether a run needs sign-off. The submission is refused rather than run: a gate that
 // cannot be evaluated has not been passed.

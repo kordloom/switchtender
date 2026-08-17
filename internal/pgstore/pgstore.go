@@ -341,9 +341,17 @@ CREATE TABLE IF NOT EXISTS policies (
 	inventory_id     TEXT NOT NULL DEFAULT '',
 	exclude_dry_run  INTEGER NOT NULL DEFAULT 0,
 	max_destroy      INTEGER NOT NULL DEFAULT -1,
+	actor_kind       TEXT NOT NULL DEFAULT '',
+	actor            TEXT NOT NULL DEFAULT '',
+	min_risk         TEXT NOT NULL DEFAULT '',
+	effect           TEXT NOT NULL DEFAULT '',
 	created_at       TEXT NOT NULL
 );
 ALTER TABLE policies ADD COLUMN IF NOT EXISTS max_destroy INTEGER NOT NULL DEFAULT -1;
+ALTER TABLE policies ADD COLUMN IF NOT EXISTS actor_kind TEXT NOT NULL DEFAULT '';
+ALTER TABLE policies ADD COLUMN IF NOT EXISTS actor TEXT NOT NULL DEFAULT '';
+ALTER TABLE policies ADD COLUMN IF NOT EXISTS min_risk TEXT NOT NULL DEFAULT '';
+ALTER TABLE policies ADD COLUMN IF NOT EXISTS effect TEXT NOT NULL DEFAULT '';
 CREATE TABLE IF NOT EXISTS inventories (
 	id             TEXT PRIMARY KEY,
 	name           TEXT NOT NULL DEFAULT '',

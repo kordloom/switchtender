@@ -533,6 +533,9 @@ func launchTemplateHandler(store template.Store, submitter Submitter, authz *aut
 			errors.Is(err, dispatch.ErrUnknownDependency), errors.Is(err, dispatch.ErrDependencyCycle):
 			respondError(w, log, http.StatusBadRequest, err.Error())
 			return
+		case errors.Is(err, dispatch.ErrPolicyDenied):
+			respondError(w, log, http.StatusForbidden, err.Error())
+			return
 		case err != nil:
 			log.Error("server: launch template: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not launch template")

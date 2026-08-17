@@ -289,6 +289,10 @@ CREATE TABLE IF NOT EXISTS policies (
 	inventory_id     TEXT NOT NULL DEFAULT '',
 	exclude_dry_run  INTEGER NOT NULL DEFAULT 0,
 	max_destroy      INTEGER NOT NULL DEFAULT -1,
+	actor_kind       TEXT NOT NULL DEFAULT '',
+	actor            TEXT NOT NULL DEFAULT '',
+	min_risk         TEXT NOT NULL DEFAULT '',
+	effect           TEXT NOT NULL DEFAULT '',
 	created_at       TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS inventories (
@@ -694,6 +698,13 @@ func migratePolicies(db *sql.DB) error {
 		"ALTER TABLE policies ADD COLUMN max_destroy INTEGER NOT NULL DEFAULT -1"); err != nil &&
 		!strings.Contains(err.Error(), "duplicate column name") {
 		return fmt.Errorf("migrate policies: %w", err)
+	}
+	for _, column := range []string{"actor_kind", "actor", "min_risk", "effect"} {
+		if _, err := db.Exec(
+			"ALTER TABLE policies ADD COLUMN " + column + " TEXT NOT NULL DEFAULT ''"); err != nil &&
+			!strings.Contains(err.Error(), "duplicate column name") {
+			return fmt.Errorf("migrate policies: add %s: %w", column, err)
+		}
 	}
 	return nil
 }

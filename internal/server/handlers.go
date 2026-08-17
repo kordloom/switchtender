@@ -632,6 +632,9 @@ func createRunHandler(submitter Submitter, authz *authorizer, log *zap.Logger) h
 			errors.Is(err, dispatch.ErrUnknownTool), errors.Is(err, dispatch.ErrToolCredential):
 			respondError(w, log, http.StatusBadRequest, err.Error())
 			return
+		case errors.Is(err, dispatch.ErrPolicyDenied):
+			respondError(w, log, http.StatusForbidden, err.Error())
+			return
 		case err != nil:
 			log.Error("server: submit run: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not submit run")
@@ -726,6 +729,9 @@ func createPipelineHandler(submitter Submitter, authz *authorizer, log *zap.Logg
 			errors.Is(err, dispatch.ErrNoPlaybook), errors.Is(err, dispatch.ErrNoCommand),
 			errors.Is(err, dispatch.ErrUnknownTool), errors.Is(err, dispatch.ErrToolCredential):
 			respondError(w, log, http.StatusBadRequest, err.Error())
+			return
+		case errors.Is(err, dispatch.ErrPolicyDenied):
+			respondError(w, log, http.StatusForbidden, err.Error())
 			return
 		case err != nil:
 			log.Error("server: submit pipeline: " + err.Error())
@@ -833,6 +839,9 @@ func retryRunHandler(store run.Store, retrier Retrier, authz *authorizer, log *z
 		case errors.Is(err, dispatch.ErrNoFailedShards):
 			respondError(w, log, http.StatusConflict, "no failed shards to retry")
 			return
+		case errors.Is(err, dispatch.ErrPolicyDenied):
+			respondError(w, log, http.StatusForbidden, err.Error())
+			return
 		case err != nil:
 			log.Error("server: retry run: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not retry run")
@@ -883,6 +892,9 @@ func relaunchFailedHandler(store run.Store, retrier Retrier, authz *authorizer, 
 			return
 		case errors.Is(err, dispatch.ErrNoFailedHosts):
 			respondError(w, log, http.StatusConflict, "no hosts failed, so there is nothing to relaunch")
+			return
+		case errors.Is(err, dispatch.ErrPolicyDenied):
+			respondError(w, log, http.StatusForbidden, err.Error())
 			return
 		case err != nil:
 			log.Error("server: relaunch failed hosts: " + err.Error())
@@ -1130,6 +1142,10 @@ func rerunRunHandler(store run.Store, submitter Submitter, authz *authorizer, lo
 			created, err = submitter.SubmitSplit(r.Context(), rn.Playbook, rn.Inventory, *rn.ShardCount, opts...)
 		} else {
 			created, err = submitter.Submit(r.Context(), rn.Playbook, rn.Inventory, opts...)
+		}
+		if errors.Is(err, dispatch.ErrPolicyDenied) {
+			respondError(w, log, http.StatusForbidden, err.Error())
+			return
 		}
 		if err != nil {
 			log.Error("server: rerun: " + err.Error())

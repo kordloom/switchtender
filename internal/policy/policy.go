@@ -5,6 +5,7 @@ package policy
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -15,6 +16,31 @@ import (
 // DisabledMaxDestroy is the MaxDestroy value that turns a policy's plan-content check off. It is the
 // safe default, so a policy created without a destroy threshold never holds a run on plan content.
 const DisabledMaxDestroy = -1
+
+// Policy effects. An empty effect means EffectRequireApproval, so every policy written before
+// effects existed keeps its meaning.
+const (
+	// EffectRequireApproval holds a matched run for a person's sign-off, the default.
+	EffectRequireApproval = "require_approval"
+	// EffectDeny refuses a matched submission outright, so the run is never created. The refused
+	// request is still on the chain: the gate records it before any handler acts.
+	EffectDeny = "deny"
+)
+
+// Actor kinds a policy can match. An empty kind matches any actor.
+const (
+	// ActorKindAgent matches runs an AI agent submitted, identified by its minted token kind,
+	// never guessed from how the request looks.
+	ActorKindAgent = "agent"
+	// ActorKindHuman matches runs a person submitted: a browser session, an owner-held API token,
+	// or the command line. A run fired by a webhook or a schedule is neither kind, so it is
+	// matched only by a policy that leaves ActorKind empty.
+	ActorKindHuman = "human"
+)
+
+// humanActorTypes are the authentication types that mean a person asked, in the audit chain's
+// vocabulary.
+var humanActorTypes = map[string]bool{"session": true, "token": true, "cli": true}
 
 // Policy is a rule that requires approval for the runs it matches. Each criterion is optional; an
 // empty criterion matches any value, so a policy with no criteria requires approval for every run.
@@ -31,6 +57,19 @@ type Policy struct {
 	CommandContains string `json:"command_contains,omitempty"`
 	// InventoryID matches a run targeting this stored inventory. Empty matches any.
 	InventoryID string `json:"inventory_id,omitempty"`
+	// ActorKind matches who fired the run: agent for an AI agent's token, human for a person.
+	// Empty matches any actor. This is what turns a policy into an authorization boundary for a
+	// machine principal, distinct from the rules that bind people.
+	ActorKind string `json:"actor_kind,omitempty"`
+	// Actor matches the exact requesting actor recorded on the run, for a rule scoped to one named
+	// principal. Empty matches any.
+	Actor string `json:"actor,omitempty"`
+	// MinRisk matches only runs whose assessed risk is at least this level: low, medium, or high.
+	// Empty matches any risk. It turns the advisory risk grade into an enforceable criterion.
+	MinRisk string `json:"min_risk,omitempty"`
+	// Effect is what a matched blanket policy does: require_approval holds the run, deny refuses
+	// the submission. Empty means require_approval.
+	Effect string `json:"effect,omitempty"`
 	// ExcludeDryRun leaves dry-run runs unmatched, so a no-change preview does not need approval.
 	ExcludeDryRun bool `json:"exclude_dry_run,omitempty"`
 	// MaxDestroy holds a matched terraform or opentofu run for approval when its plan would destroy
@@ -42,7 +81,7 @@ type Policy struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// Matches reports whether the policy requires approval for r. Every non-empty criterion must match,
+// Matches reports whether the policy's criteria match r. Every non-empty criterion must match,
 // so a policy narrows the runs it gates rather than widening them.
 func (p *Policy) Matches(r *run.Run) bool {
 	if p.ExcludeDryRun && r.DryRun {
@@ -57,7 +96,88 @@ func (p *Policy) Matches(r *run.Run) bool {
 	if p.InventoryID != "" && p.InventoryID != r.InventoryID {
 		return false
 	}
+	if !p.matchesActor(r) {
+		return false
+	}
+	if p.MinRisk != "" && riskRank(run.AssessRisk(r).Level) < riskRank(p.MinRisk) {
+		return false
+	}
 	return true
+}
+
+// matchesActor reports whether the policy's actor criteria match who fired r. A run whose actor
+// type is unknown, such as one fired by a webhook or a schedule, matches neither named kind, so an
+// actor-scoped rule never fires on a request it cannot attribute.
+func (p *Policy) matchesActor(r *run.Run) bool {
+	if p.Actor != "" && p.Actor != r.Actor {
+		return false
+	}
+	switch p.ActorKind {
+	case "":
+		return true
+	case ActorKindAgent:
+		return r.ActorType == ActorKindAgent
+	case ActorKindHuman:
+		return humanActorTypes[r.ActorType]
+	default:
+		// An unknown kind matches nothing: a typo must not silently widen a rule to every run.
+		return false
+	}
+}
+
+// riskRank orders risk levels so MinRisk can compare them. An unknown level ranks above high, so a
+// policy naming a level this build does not know fails toward holding rather than passing.
+func riskRank(level string) int {
+	switch level {
+	case run.RiskLow:
+		return 1
+	case run.RiskMedium:
+		return 2
+	case run.RiskHigh:
+		return 3
+	default:
+		return 4
+	}
+}
+
+// Denies reports whether the policy refuses matched submissions outright.
+func (p *Policy) Denies() bool { return p.Effect == EffectDeny }
+
+// Denying returns the first deny policy matching r, or nil when none does, so the rule that
+// refused a submission can be named in the refusal and in the evidence.
+func Denying(policies []*Policy, r *run.Run) *Policy {
+	for _, p := range policies {
+		if p.Denies() && p.Matches(r) {
+			return p
+		}
+	}
+	return nil
+}
+
+// Validate checks the policy's declared vocabulary, so a rule with a typo is refused where it is
+// written rather than silently matching nothing, or worse, everything.
+func (p *Policy) Validate() error {
+	switch p.Effect {
+	case "", EffectRequireApproval, EffectDeny:
+	default:
+		return fmt.Errorf("effect must be %q or %q, not %q", EffectRequireApproval, EffectDeny, p.Effect)
+	}
+	switch p.ActorKind {
+	case "", ActorKindAgent, ActorKindHuman:
+	default:
+		return fmt.Errorf("actor_kind must be %q or %q, not %q", ActorKindAgent, ActorKindHuman, p.ActorKind)
+	}
+	switch p.MinRisk {
+	case "", run.RiskLow, run.RiskMedium, run.RiskHigh:
+	default:
+		return fmt.Errorf("min_risk must be %q, %q, or %q, not %q",
+			run.RiskLow, run.RiskMedium, run.RiskHigh, p.MinRisk)
+	}
+	if p.Denies() && p.MaxDestroy >= 0 {
+		return fmt.Errorf("a deny policy cannot set max_destroy: a plan-content rule holds an " +
+			"apply for review, and a denied run is never planned at all")
+	}
+	return nil
 }
 
 // Requires reports whether any blanket policy requires approval for r at submission. A plan-content
@@ -71,10 +191,11 @@ func Requires(policies []*Policy, r *run.Run) bool {
 // Requiring returns the first blanket policy requiring approval for r, or nil when none does. The
 // rule that held a run is evidence: an auditor asking why a change waited wants the rule named, and
 // the answer has to be recorded when the hold happens, since a policy can be renamed or deleted
-// long before anyone reads the register.
+// long before anyone reads the register. Deny policies are not approval rules and are skipped;
+// Denying finds those, and the dispatcher consults it first.
 func Requiring(policies []*Policy, r *run.Run) *Policy {
 	for _, p := range policies {
-		if p.MaxDestroy < 0 && p.Matches(r) {
+		if p.MaxDestroy < 0 && !p.Denies() && p.Matches(r) {
 			return p
 		}
 	}

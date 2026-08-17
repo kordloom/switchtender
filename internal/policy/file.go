@@ -51,6 +51,14 @@ type filePolicy struct {
 	// MaxDestroy holds a matched terraform or opentofu run when its plan would destroy more than
 	// this many resources. Omit it for a blanket policy, which is the safe default.
 	MaxDestroy *int `yaml:"max_destroy,omitempty" json:"max_destroy,omitempty"`
+	// ActorKind matches who fired the run: agent or human. Omit to match any actor.
+	ActorKind string `yaml:"actor_kind,omitempty" json:"actor_kind,omitempty"`
+	// Actor matches the exact requesting actor recorded on the run. Omit to match any.
+	Actor string `yaml:"actor,omitempty" json:"actor,omitempty"`
+	// MinRisk matches only runs assessed at least this risky: low, medium, or high. Omit for any.
+	MinRisk string `yaml:"min_risk,omitempty" json:"min_risk,omitempty"`
+	// Effect is what a match does: require_approval, the default, or deny.
+	Effect string `yaml:"effect,omitempty" json:"effect,omitempty"`
 }
 
 // FileStore serves approval policies from a file on disk rather than from the database.
@@ -141,7 +149,7 @@ func (s *FileStore) load() ([]*Policy, error) {
 			}
 			maxDestroy = *fp.MaxDestroy
 		}
-		parsed = append(parsed, &Policy{
+		p := &Policy{
 			// The id is derived from the name so it is stable across reloads and across installs
 			// reading the same file, and so an approval recorded against a policy still resolves.
 			ID:              filePolicyID(fp.Name),
@@ -151,8 +159,16 @@ func (s *FileStore) load() ([]*Policy, error) {
 			InventoryID:     fp.InventoryID,
 			ExcludeDryRun:   fp.ExcludeDryRun,
 			MaxDestroy:      maxDestroy,
+			ActorKind:       fp.ActorKind,
+			Actor:           fp.Actor,
+			MinRisk:         fp.MinRisk,
+			Effect:          fp.Effect,
 			CreatedAt:       info.ModTime().UTC(),
-		})
+		}
+		if err := p.Validate(); err != nil {
+			return nil, fmt.Errorf("policy file %s: policy %q: %w", s.path, fp.Name, err)
+		}
+		parsed = append(parsed, p)
 	}
 
 	s.mu.Lock()

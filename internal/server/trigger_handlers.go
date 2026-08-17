@@ -13,6 +13,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/credential"
+	"github.com/kordloom/switchtender/internal/dispatch"
 	"github.com/kordloom/switchtender/internal/grant"
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/template"
@@ -426,6 +427,10 @@ func hookHandler(triggers trigger.Store, templates template.Store, submitter Sub
 			created, err = submitter.SubmitSplit(ctx, t.Playbook, t.Inventory, t.Shards, opts...)
 		default:
 			created, err = submitter.Submit(ctx, t.Playbook, t.Inventory, opts...)
+		}
+		if errors.Is(err, dispatch.ErrPolicyDenied) {
+			respondError(w, log, http.StatusForbidden, err.Error())
+			return
 		}
 		if err != nil {
 			log.Error("server: fire trigger: " + err.Error())
