@@ -320,10 +320,9 @@ document.addEventListener("DOMContentLoaded", () => {
 		mountListFilter();
 		mountFacetFilters();
 	}
-	const close = document.getElementById("drill-close");
-	if (close) {
-		close.addEventListener("click", () => { document.getElementById("drill").hidden = true; });
-	}
+	// A page that declares the drill panel in its template gets the exits wired here, at boot,
+	// through the same path that builds the panel elsewhere: close button, backdrop, and Escape.
+	if (document.getElementById("drill")) ensureDrill();
 	const page = document.body.dataset.page;
 	if (page === "overview") {
 		loadOverview();
