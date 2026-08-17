@@ -33,6 +33,19 @@ function openScheduleEdit(s) {
 	document.getElementById("schedule-name").value = s.name || "";
 	document.getElementById("schedule-cron").value = s.cron || "";
 	document.getElementById("schedule-template").value = s.template_id || "";
+	// A schedule the interface did not create carries a zone and, for an imported crontab line, a
+	// direct target instead of a template. The dialog knew about neither, so opening one of the
+	// hundreds an import produces and pressing Save either moved when it fires or was refused for
+	// having no template it never had.
+	document.getElementById("schedule-timezone").value = s.timezone || "";
+	document.getElementById("schedule-playbook").value = s.playbook || "";
+	document.getElementById("schedule-inventory").value = s.inventory || "";
+	// A pipeline or split schedule is a graph the dialog cannot express, so the fields it does show
+	// stay read-only rather than offering an edit that would flatten it into a single run.
+	const inline = document.getElementById("schedule-inline");
+	inline.open = !s.template_id;
+	const graph = (s.steps && s.steps.length > 0) || s.shards > 1;
+	setScheduleGraphNotice(graph ? s : null);
 	document.getElementById("schedule-status").textContent = "";
 	setModalTitle("schedule", "Edit schedule");
 	document.getElementById("schedule-modal").hidden = false;
@@ -43,11 +56,17 @@ function openScheduleEdit(s) {
 function wireScheduleForm() {
 	const form = document.getElementById("schedule-form");
 	fillTemplateSelect(document.getElementById("schedule-template"));
+	fillZoneList(document.getElementById("tz-list"));
 	const resetToCreate = () => {
 		delete form.dataset.editId;
 		document.getElementById("schedule-name").value = "";
 		document.getElementById("schedule-cron").value = "";
 		document.getElementById("schedule-template").value = "";
+		document.getElementById("schedule-timezone").value = "";
+		document.getElementById("schedule-playbook").value = "";
+		document.getElementById("schedule-inventory").value = "";
+		document.getElementById("schedule-inline").open = false;
+		setScheduleGraphNotice(null);
 		document.getElementById("schedule-status").textContent = "";
 		setModalTitle("schedule", "Add a schedule");
 	};
@@ -65,14 +84,27 @@ function wireScheduleForm() {
 		const status = document.getElementById("schedule-status");
 		const editId = form.dataset.editId;
 		const templateID = document.getElementById("schedule-template").value;
-		if (!templateID) {
-			status.textContent = "Pick a template.";
+		const playbook = document.getElementById("schedule-playbook").value.trim();
+		if (!templateID && !playbook) {
+			status.textContent = "Pick a template, or fill in a playbook or command to run directly.";
 			return;
 		}
+		if (templateID && playbook) {
+			// Both would leave which one fires up to the server's precedence rules, which is not a
+			// thing to guess at when the answer decides what runs on real hosts.
+			status.textContent = "Pick a template or a direct target, not both.";
+			return;
+		}
+		// Every field the API knows is sent, filled or empty, because the update handler rebuilds the
+		// schedule whole: an omitted timezone used to move when an imported schedule fires, and an
+		// omitted target used to leave it firing nothing.
 		const payload = {
 			name: document.getElementById("schedule-name").value.trim(),
 			cron: document.getElementById("schedule-cron").value.trim(),
+			timezone: document.getElementById("schedule-timezone").value.trim(),
 			template_id: templateID,
+			playbook: playbook,
+			inventory: document.getElementById("schedule-inventory").value.trim(),
 		};
 		inFlight = true;
 		if (submitBtn) submitBtn.disabled = true;
@@ -94,6 +126,42 @@ function wireScheduleForm() {
 			if (submitBtn) submitBtn.disabled = false;
 		}
 	});
+}
+
+// setScheduleGraphNotice warns, when a schedule fires a pipeline or a split, that the dialog shows
+// only its cadence. Saving does not touch the graph, but a reader looking at a form with one playbook
+// field would reasonably conclude the schedule runs one playbook.
+function setScheduleGraphNotice(s) {
+	const el = document.getElementById("schedule-graph-notice");
+	if (!el) return;
+	if (!s) {
+		el.hidden = true;
+		el.textContent = "";
+		return;
+	}
+	el.hidden = false;
+	el.textContent = s.steps && s.steps.length
+		? "This schedule fires a pipeline of " + s.steps.length +
+			" steps. Its cadence is editable here; the steps are not."
+		: "This schedule fires a split across " + s.shards +
+			" shards. Its cadence is editable here; the split is not.";
+}
+
+// fillZoneList offers the browser's own zone and the common ones, so the field can be typed or
+// picked. The list is a convenience: any IANA name the server accepts may be typed.
+function fillZoneList(list) {
+	if (!list) return;
+	const here = (Intl.DateTimeFormat().resolvedOptions() || {}).timeZone || "";
+	const zones = [here, "UTC", "America/New_York", "America/Chicago", "America/Denver",
+		"America/Los_Angeles", "Europe/London", "Europe/Berlin", "Asia/Tokyo", "Australia/Sydney"];
+	const seen = new Set();
+	for (const z of zones) {
+		if (!z || seen.has(z)) continue;
+		seen.add(z);
+		const opt = document.createElement("option");
+		opt.value = z;
+		list.appendChild(opt);
+	}
 }
 
 // scheduleTarget describes what a schedule fires.
