@@ -464,6 +464,7 @@ func (s *Server) Handler() http.Handler {
 		http.Redirect(w, r, "/ui/", http.StatusFound)
 	})
 	mux.Handle("POST /v1/auth/check", authCheckHandler())
+	mux.Handle("GET /v1/auth/me", authMeHandler(s.log))
 	mux.Handle("POST /v1/auth/login", loginHandler(s.users, s.tokens, s.ldap, s.log))
 	if s.oidc != nil {
 		mux.HandleFunc("GET /auth/oidc/login", s.oidc.login)

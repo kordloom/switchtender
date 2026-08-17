@@ -106,14 +106,18 @@ function updateActions(run) {
 	// unclaimed run in pending_approval. Hiding the button left the person who submitted the run with
 	// no way to stop it, because rejecting is an admin decision while canceling your own run is
 	// operator work. They had to ask an approver to reject something nobody wanted decided.
-	cancel.hidden = isTerminal(run.status);
-	if (approve) approve.hidden = !held;
-	if (reject) reject.hidden = !held;
+	// Each control also honors the session's role: the server refuses a viewer's cancel and an
+	// operator's approve anyway, and a button whose only future is a 403 reads as breakage.
+	cancel.hidden = isTerminal(run.status) || !roleAtLeast("operator");
+	if (approve) approve.hidden = !held || !roleAtLeast("admin");
+	if (reject) reject.hidden = !held || !roleAtLeast("admin");
 	const splitParent = (run.kind === "split" || run.shard_count) && !run.parent_id;
-	retry.hidden = !(splitParent && isTerminal(run.status) && run.status !== "succeeded");
+	retry.hidden = !(splitParent && isTerminal(run.status) && run.status !== "succeeded") ||
+		!roleAtLeast("operator");
 	if (explain) {
 		const heldProposal = held && (run.proposed_from || run.intent);
-		explain.hidden = !(run.status === "failed" || run.status === "interrupted" || heldProposal);
+		explain.hidden = !(run.status === "failed" || run.status === "interrupted" || heldProposal) ||
+			!roleAtLeast("operator");
 	}
 }
 

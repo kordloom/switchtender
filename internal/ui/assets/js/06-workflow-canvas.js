@@ -323,6 +323,18 @@ document.addEventListener("DOMContentLoaded", () => {
 	// A page that declares the drill panel in its template gets the exits wired here, at boot,
 	// through the same path that builds the panel elsewhere: close button, backdrop, and Escape.
 	if (document.getElementById("drill")) ensureDrill();
+	// Controls this session's role cannot use are not drawn. The server refuses them anyway; a
+	// button whose only future is a 403 reads as breakage rather than as policy.
+	if (!roleAtLeast("operator")) {
+		const launch = document.getElementById("launch-open");
+		if (launch) launch.hidden = true;
+	}
+	if (!roleAtLeast("admin")) {
+		for (const id of ["template-open", "schedule-open", "policy-open"]) {
+			const el = document.getElementById(id);
+			if (el) el.hidden = true;
+		}
+	}
 	const page = document.body.dataset.page;
 	if (page === "overview") {
 		loadOverview();

@@ -744,3 +744,29 @@ func authCheckHandler() http.HandlerFunc {
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
+
+// authMeHandler tells an authenticated caller who the server resolved it to be: the audit name,
+// the effective role after any agent cap, and how it authenticated. The UI gates its controls
+// with this instead of guessing, which used to make every token session look like an admin and
+// rendered buttons whose only future was a 403.
+func authMeHandler(log *zap.Logger) http.HandlerFunc {
+	type me struct {
+		// Name is the caller's audit name: the username or the token label.
+		Name string `json:"name,omitempty"`
+		// Role is the effective role, after the agent cap.
+		Role string `json:"role,omitempty"`
+		// ActorType is how the caller authenticated, in the audit chain's vocabulary.
+		ActorType string `json:"actor_type,omitempty"`
+		// Open reports the API is running without authentication, where there is nobody to be.
+		Open bool `json:"open,omitempty"`
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		out := me{}
+		if a, ok := actorFrom(r.Context()); ok {
+			out.Name, out.Role, out.ActorType = a.Name, string(a.Role), a.Type
+		} else {
+			out.Open = true
+		}
+		respondJSON(w, log, http.StatusOK, out, wantsPretty(r))
+	}
+}

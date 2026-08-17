@@ -439,9 +439,13 @@ async function loadSchedules() {
 					setStatus("Delete failed: " + err.message);
 				}
 			});
-			actions.appendChild(editButton(() => openScheduleEdit(s), "Click to edit this schedule's cadence and target"));
-			actions.appendChild(document.createTextNode(" "));
-			actions.appendChild(del);
+			// Changing or deleting a schedule is admin work, so the controls only draw for a
+			// session that can use them.
+			if (roleAtLeast("admin")) {
+				actions.appendChild(editButton(() => openScheduleEdit(s), "Click to edit this schedule's cadence and target"));
+				actions.appendChild(document.createTextNode(" "));
+				actions.appendChild(del);
+			}
 			tr.appendChild(actions);
 			tbody.appendChild(tr);
 		}

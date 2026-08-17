@@ -325,7 +325,10 @@ function wireRunDownloads(runId) {
 async function loadDetail(runId) {
 	wireRunDownloads(runId);
 	const auditLink = document.getElementById("audit-link");
-	if (auditLink) {
+	// The audit page is management data even to read, so the link only shows where it would answer.
+	if (auditLink && !roleAtLeast("admin")) {
+		auditLink.hidden = true;
+	} else if (auditLink) {
 		auditLink.href = "/ui/audit?q=" + encodeURIComponent(runId);
 		auditLink.dataset.tip = "Click to see every audited change that mentions this run";
 	}
@@ -373,7 +376,10 @@ async function loadDetail(runId) {
 		// API refuses to replay either, so the button is not offered for them.
 		const decided = run.status === "rejected" ||
 			(run.status === "canceled" && !run.started_at);
-		if (rerun && !run.parent_id && run.kind !== "pipeline" && !decided) {
+		// The server refuses to replay a run that has not finished, so the button waits for the
+		// terminal state instead of offering a click whose only future is a refusal.
+		if (rerun && !run.parent_id && run.kind !== "pipeline" && !decided &&
+			isTerminal(run.status) && roleAtLeast("operator")) {
 			rerun.hidden = false;
 			rerun.dataset.tip = "Click to start a fresh run with this exact spec";
 			if (isReadOnly()) {
@@ -515,6 +521,19 @@ function loadLogin() {
 			localStorage.setItem("st_token", token);
 			localStorage.removeItem("st_role");
 			localStorage.removeItem("st_user");
+			// The server knows who this token is; asking beats guessing. Without the answer every
+			// role-gated control treated a token session as admin and drew buttons that could only
+			// 403. An older server without the endpoint just leaves the role unknown, as before.
+			try {
+				const meRes = await fetch(API + "/auth/me", {
+					headers: { "Authorization": "Bearer " + token },
+				});
+				if (meRes.ok) {
+					const me = await meRes.json();
+					if (me && me.role) localStorage.setItem("st_role", me.role);
+					if (me && me.name) localStorage.setItem("st_user", me.name);
+				}
+			} catch (_) { /* the role stays unknown and the server still enforces */ }
 			location.href = sessionStorage.getItem("st_return") || "/ui/";
 			return;
 		}
