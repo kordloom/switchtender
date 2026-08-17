@@ -123,10 +123,10 @@ func TestResolveDedupeStraddlesABucketBoundary(t *testing.T) {
 // server derives, which would make a later rerun resolve to it and never execute.
 func TestClientKeyRefusesTheReservedNamespace(t *testing.T) {
 	t.Parallel()
-	if _, err := ClientKey(DedupeKey("rerun", "run_a", time.Now())); !errors.Is(err, ErrReservedKey) {
+	if _, err := ClientKey(DedupeKey("rerun", "run_a", time.Now()), ""); !errors.Is(err, ErrReservedKey) {
 		t.Errorf("ClientKey(derived key) error = %v, want ErrReservedKey", err)
 	}
-	if got, err := ClientKey("caller-supplied"); err != nil || got != "caller-supplied" {
+	if got, err := ClientKey("caller-supplied", ""); err != nil || got != "caller-supplied" {
 		t.Errorf("ClientKey(caller-supplied) = (%q, %v), want (caller-supplied, nil)", got, err)
 	}
 }

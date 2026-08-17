@@ -581,7 +581,7 @@ func createRunHandler(submitter Submitter, authz *authorizer, log *zap.Logger) h
 			run.WithExtraVars(req.ExtraVars),
 		}
 		if supplied := strings.TrimSpace(r.Header.Get(idempotencyKeyHeader)); supplied != "" {
-			key, err := run.ClientKey(supplied)
+			key, err := run.ClientKey(supplied, run.SubmitterOrgFrom(r.Context()))
 			if err != nil {
 				respondError(w, log, http.StatusBadRequest, err.Error())
 				return
@@ -704,7 +704,7 @@ func createPipelineHandler(submitter Submitter, authz *authorizer, log *zap.Logg
 		// run and never execute. The git host is answered 202 and the deployment silently does not
 		// happen, which is the worst shape a failure can take.
 		if supplied := strings.TrimSpace(r.Header.Get(idempotencyKeyHeader)); supplied != "" {
-			key, err := run.ClientKey(supplied)
+			key, err := run.ClientKey(supplied, run.SubmitterOrgFrom(r.Context()))
 			if err != nil {
 				respondError(w, log, http.StatusBadRequest, err.Error())
 				return
