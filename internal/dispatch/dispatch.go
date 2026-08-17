@@ -1950,33 +1950,49 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 	return status
 }
 
-// leaseMissLimit is how many consecutive heartbeat failures mean the lease is really gone. A
-// single miss can be a transient store error or a first save that has not landed yet, so one
-// failure never kills a run.
-const leaseMissLimit = 3
-
 // watch renews the executing run's lease and cancels it when another process requests a stop or
 // the lease is convincingly lost. It exits when the run's context ends.
+//
+// An unreachable store is not a lost lease. The lease in the store lives leaseTTL from its last
+// renewal, and no sweep can reclaim a lease that has not expired, so while it is still valid nothing
+// else can touch this run and stopping early only kills a tool partway through its changes for
+// nothing. Counting a fixed three failures instead gave up after about nine seconds of a thirty second
+// lease, and a refused connection comes back in microseconds, so every control node restart and every
+// brief store outage killed the runs on every healthy worker mid-change and recorded each as canceled
+// with no error, indistinguishable from a cancel somebody asked for. The executor now works on while
+// the lease could still be its own and stops when it has actually expired, which is the first moment
+// another process could claim the run.
+//
+// A store that reports the run is not this owner's is different: somebody else holds it, and carrying
+// on would mean two executors changing the same hosts. That stops at once.
 func (d *Dispatcher) watch(ctx context.Context, id string) {
 	ticker := time.NewTicker(watchInterval)
 	defer ticker.Stop()
-	misses := 0
+	// The lease was stamped by the claim that led here, so it is live as of now.
+	lastRenewed := time.Now()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
 		}
-		if err := d.store.Heartbeat(context.Background(), id, d.owner); err != nil {
-			misses++
-			if misses < leaseMissLimit {
+		switch err := d.store.Heartbeat(context.Background(), id, d.owner); {
+		case err == nil:
+			lastRenewed = time.Now()
+		case errors.Is(err, run.ErrNotFound):
+			d.log.Warn("dispatch: lease is no longer ours: "+err.Error(), zap.String("run_id", id))
+			d.Cancel(id)
+			return
+		default:
+			if expired := time.Since(lastRenewed); expired < leaseTTL {
+				d.log.Warn("dispatch: heartbeat failed, lease still valid: "+err.Error(),
+					zap.String("run_id", id), zap.Duration("unrenewed_for", expired))
 				continue
 			}
-			d.log.Warn("dispatch: lease lost: "+err.Error(), zap.String("run_id", id))
+			d.log.Warn("dispatch: lease expired unrenewed: "+err.Error(), zap.String("run_id", id))
 			d.Cancel(id)
 			return
 		}
-		misses = 0
 		r, err := d.store.Get(context.Background(), id)
 		if err != nil {
 			continue
