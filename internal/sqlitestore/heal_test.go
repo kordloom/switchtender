@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -142,5 +143,119 @@ func TestOpenHealsEveryMissingColumn(t *testing.T) {
 	}
 	if len(list) != 1 || list[0].OrgID != "org_1" {
 		t.Errorf("List after heal = %+v, want the saved run with its org", list)
+	}
+}
+
+// TestPreChainAuditTrailIsRefusedWithDirections covers the oldest databases this product ever made:
+// an audit trail from the few days before the hash chain existed has no seq, and no backfill can join
+// it to a chain whose hashes commit to one. The open used to die with "UNIQUE constraint failed:
+// audit_entries.seq", which reads as corruption and points nowhere. It now refuses with what happened
+// and what to do.
+func TestPreChainAuditTrailIsRefusedWithDirections(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "old.db")
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open raw: %v", err)
+	}
+	// The audit table exactly as its first commit shaped it, with the rows any real database of that
+	// era holds, since every mutation was recorded.
+	stmts := []string{
+		"CREATE TABLE audit_entries (id TEXT PRIMARY KEY, at TEXT NOT NULL, actor TEXT NOT NULL, " +
+			"method TEXT NOT NULL, path TEXT NOT NULL)",
+		"INSERT INTO audit_entries VALUES ('aud_1','2026-07-07T00:00:00Z','alice','POST','/v1/runs')",
+		"INSERT INTO audit_entries VALUES ('aud_2','2026-07-07T00:01:00Z','alice','POST','/v1/runs')",
+	}
+	for _, stmt := range stmts {
+		if _, err := raw.Exec(stmt); err != nil {
+			t.Fatalf("build pre-chain database: %v", err)
+		}
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatalf("close raw: %v", err)
+	}
+
+	_, err = sqlitestore.Open(path)
+	if err == nil {
+		t.Fatal("a pre-chain audit trail opened cleanly, so its entries were minted into a chain " +
+			"they never belonged to")
+	}
+	for _, want := range []string{"predates", "Archive", "2 "} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("refusal %q does not mention %q", err.Error(), want)
+		}
+	}
+}
+
+// TestTeamMembersGainsItsPromisedForeignKey covers a constraint added to the CREATE one day after the
+// table shipped, with no migration and no ALTER that could add it: a first-day database enforced
+// nothing while every fresh one cascaded a deleted team's memberships. The open now rebuilds the
+// table with the constraint, keeping its rows.
+func TestTeamMembersGainsItsPromisedForeignKey(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "old.db")
+	db, err := sqlitestore.Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open raw: %v", err)
+	}
+	// Rebuild the table as its first day shaped it: same columns, no constraint, with a team and a
+	// member already in it.
+	stmts := []string{
+		"DROP INDEX IF EXISTS idx_team_members_user",
+		"DROP TABLE team_members",
+		"CREATE TABLE team_members (team_id TEXT NOT NULL, user_id TEXT NOT NULL, " +
+			"PRIMARY KEY (team_id, user_id))",
+		"INSERT INTO teams (id, name, created_at) VALUES ('team_1','ops','2026-07-07T00:00:00Z')",
+		"INSERT INTO team_members VALUES ('team_1','user_1')",
+	}
+	for _, stmt := range stmts {
+		if _, err := raw.Exec(stmt); err != nil {
+			t.Fatalf("build first-day table: %v", err)
+		}
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatalf("close raw: %v", err)
+	}
+
+	healed, err := sqlitestore.Open(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	t.Cleanup(func() { _ = healed.Close() })
+	members, err := healed.Teams().Members(ctx, "team_1")
+	if err != nil {
+		t.Fatalf("Members: %v", err)
+	}
+	if len(members) != 1 || members[0] != "user_1" {
+		t.Fatalf("members after rebuild = %v, want the stored membership kept", members)
+	}
+	// The constraint itself, which is the point: deleting the team cascades the membership, exactly
+	// as a fresh database does.
+	raw, err = sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open raw: %v", err)
+	}
+	defer func() { _ = raw.Close() }()
+	if _, err := raw.Exec("PRAGMA foreign_keys=ON"); err != nil {
+		t.Fatalf("pragma: %v", err)
+	}
+	if _, err := raw.Exec("DELETE FROM teams WHERE id='team_1'"); err != nil {
+		t.Fatalf("delete team: %v", err)
+	}
+	var left int
+	if err := raw.QueryRow("SELECT COUNT(*) FROM team_members WHERE team_id='team_1'").Scan(&left); err != nil {
+		t.Fatalf("count members: %v", err)
+	}
+	if left != 0 {
+		t.Errorf("%d membership rows survived the team's deletion, so the rebuilt table still has "+
+			"no cascade", left)
 	}
 }

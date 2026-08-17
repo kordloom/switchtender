@@ -203,7 +203,13 @@ CREATE TABLE IF NOT EXISTS users (
 	username      TEXT NOT NULL,
 	password_hash TEXT NOT NULL,
 	role          TEXT NOT NULL,
-	created_at    TEXT NOT NULL
+	created_at    TEXT NOT NULL,
+	full_name     TEXT NOT NULL DEFAULT '',
+	email         TEXT NOT NULL DEFAULT '',
+	phone         TEXT NOT NULL DEFAULT '',
+	title         TEXT NOT NULL DEFAULT '',
+	links         TEXT NOT NULL DEFAULT '',
+	notes         TEXT NOT NULL DEFAULT ''
 );
 -- The profile columns are added rather than declared above, so a database created before them is
 -- migrated by the same statement that creates a fresh one. Empty is the default everywhere, so an
@@ -268,7 +274,8 @@ CREATE TABLE IF NOT EXISTS templates (
 	verbosity      INTEGER NOT NULL DEFAULT 0,
 	forks          INTEGER NOT NULL DEFAULT 0,
 	diff_mode      INTEGER NOT NULL DEFAULT 0,
-	steps          TEXT NOT NULL DEFAULT ''
+	steps          TEXT NOT NULL DEFAULT '',
+	limit_pattern  TEXT NOT NULL DEFAULT ''
 );
 ALTER TABLE templates ADD COLUMN IF NOT EXISTS org_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE templates ADD COLUMN IF NOT EXISTS notifications TEXT NOT NULL DEFAULT '';
@@ -392,7 +399,10 @@ CREATE TABLE IF NOT EXISTS credentials (
 	secret     TEXT NOT NULL,
 	created_at TEXT NOT NULL,
 	source     TEXT NOT NULL DEFAULT '',
-	org_id     TEXT NOT NULL DEFAULT ''
+	org_id     TEXT NOT NULL DEFAULT '',
+	type_id    TEXT NOT NULL DEFAULT '',
+	vault_id   TEXT NOT NULL DEFAULT '',
+	settings   TEXT NOT NULL DEFAULT ''
 );
 ALTER TABLE credentials ADD COLUMN IF NOT EXISTS org_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE credentials ADD COLUMN IF NOT EXISTS type_id TEXT NOT NULL DEFAULT '';
@@ -571,16 +581,26 @@ func migrate(db *sql.DB) error {
 	if _, err := tx.Exec("SELECT pg_advisory_xact_lock($1)", migrateLockKey); err != nil {
 		return fmt.Errorf("migration lock: %w", err)
 	}
-	if _, err := tx.Exec(schema); err != nil {
-		return fmt.Errorf("migrate schema: %w", err)
-	}
-	// Every column the schema declares is also added IF NOT EXISTS, derived from the schema itself
-	// rather than from the hand-kept ALTER list above. The list drifted once on the SQLite side, where
-	// runs.org_id reached the CREATE and the shared select list and never the migrations, and every
-	// database from before it failed every read of the runs table after an upgrade. Deriving the
-	// statements removes the list there was to forget; the hand list stays because it is idempotent
-	// and documents when each column arrived.
+	// Healing runs BEFORE the schema blob, on every table that already exists. The blob's own CREATE
+	// INDEX statements reference columns only the heal would add: idx_runs_pending_claim covers queue,
+	// and a database from before the queue column, which the deleted hand ALTERs prove exists, failed
+	// the blob with "column does not exist" and aborted the transaction before the heal it needed ever
+	// ran. The SQLite store orders these the same way for the same reason. A table the database does
+	// not have yet is skipped here and created whole by the blob.
+	//
+	// The statements are derived from the schema itself rather than from the hand-kept ALTER list in
+	// the blob. That list drifted once on the SQLite side, where runs.org_id reached the CREATE and
+	// the shared select list and never the migrations, and every database from before it failed every
+	// read of the runs table after an upgrade. The hand list stays because it is idempotent and
+	// documents when each column arrived.
 	for table, cols := range sqlutil.ParseSchemaColumns(schema) {
+		var exists bool
+		if err := tx.QueryRow("SELECT to_regclass($1) IS NOT NULL", table).Scan(&exists); err != nil {
+			return fmt.Errorf("heal %s: %w", table, err)
+		}
+		if !exists {
+			continue
+		}
 		for _, col := range cols {
 			if !col.Addable() {
 				continue
@@ -590,6 +610,9 @@ func migrate(db *sql.DB) error {
 				return fmt.Errorf("heal %s.%s: %w", table, col.Name, err)
 			}
 		}
+	}
+	if _, err := tx.Exec(schema); err != nil {
+		return fmt.Errorf("migrate schema: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("migrate schema: %w", err)

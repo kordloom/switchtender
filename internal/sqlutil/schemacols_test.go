@@ -65,3 +65,48 @@ ALTER TABLE runs ADD COLUMN IF NOT EXISTS later TEXT NOT NULL DEFAULT '';
 		}
 	}
 }
+
+// TestParseSchemaColumnsHardening pins the ways the scan itself was shown to go wrong: a marker
+// phrase inside a comment minting a phantom table, a comment's unbalanced parenthesis corrupting the
+// depth count that finds the end of a CREATE body, a constraint keyword matching the front of a real
+// column's name, and a non-identifier table key reaching the ALTER splice.
+func TestParseSchemaColumnsHardening(t *testing.T) {
+	t.Parallel()
+	const schema = `
+-- This comment says CREATE TABLE IF NOT EXISTS is a no-op on an existing table, and the phrase in
+-- prose must not become a parse.
+CREATE TABLE IF NOT EXISTS runs (
+	id       TEXT PRIMARY KEY,
+	checksum TEXT NOT NULL DEFAULT '',
+	-- a comment with an unbalanced parenthesis (see the docs
+	unique_key TEXT NOT NULL DEFAULT '',
+	constraint_ref TEXT NOT NULL DEFAULT '',
+	checked_at TEXT,
+	UNIQUE (checksum, unique_key)
+);
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS later TEXT NOT NULL DEFAULT '';
+`
+	got := ParseSchemaColumns(schema)
+	if len(got) != 1 {
+		t.Fatalf("parsed tables = %v, want exactly runs: a phantom key here becomes a junk ALTER "+
+			"or a silently unhealed table", keysOf(got))
+	}
+	var names []string
+	for _, c := range got["runs"] {
+		names = append(names, c.Name)
+	}
+	want := []string{"id", "checksum", "unique_key", "constraint_ref", "checked_at"}
+	if diff := cmp.Diff(want, names); diff != "" {
+		t.Errorf("runs columns (-want +got):\n%s\nA missing name here is a column every upgraded "+
+			"database silently never gains.", diff)
+	}
+}
+
+// keysOf lists a parse result's table names for a failure message.
+func keysOf(m map[string][]SchemaColumn) []string {
+	var out []string
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}

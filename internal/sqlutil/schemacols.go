@@ -25,10 +25,14 @@ type SchemaColumn struct {
 // database against a fresh one are what keep this honest.
 func ParseSchemaColumns(schema string) map[string][]SchemaColumn {
 	out := map[string][]SchemaColumn{}
-	rest := schema
+	// Comments go first, before the marker scan ever runs. The pg schema contains a comment that
+	// names the marker phrase, and matching it produced a phantom table whose key was the comment's
+	// tail: harmless by coincidence, one edit away from either failing every open with a junk ALTER
+	// or silently stealing a real table's columns onto an unhealable key.
+	rest := stripLineComments(schema)
 	const marker = "CREATE TABLE IF NOT EXISTS "
 	for {
-		at := strings.Index(rest, marker)
+		at := indexAtLineStart(rest, marker)
 		if at == -1 {
 			return out
 		}
@@ -43,8 +47,60 @@ func ParseSchemaColumns(schema string) map[string][]SchemaColumn {
 			return out
 		}
 		rest = after
+		// A table name that is not a plain identifier means the scan latched onto something that is
+		// not a CREATE statement. Skipping it silently would hide a parse gone wrong, and these
+		// parsed names are spliced into ALTER statements, so nothing that is not an identifier may
+		// pass this point.
+		if !isIdentifier(table) {
+			continue
+		}
 		out[table] = parseColumnLines(body)
 	}
+}
+
+// stripLineComments removes -- comments, each to its end of line, so nothing inside one can be
+// mistaken for SQL.
+func stripLineComments(s string) string {
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		if at := strings.Index(line, "--"); at != -1 {
+			lines[i] = line[:at]
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// indexAtLineStart returns the index of marker where it begins a statement: at the start of a line,
+// allowing leading whitespace. A marker phrase in the middle of a line is prose, not SQL.
+func indexAtLineStart(s, marker string) int {
+	from := 0
+	for {
+		at := strings.Index(s[from:], marker)
+		if at == -1 {
+			return -1
+		}
+		at += from
+		lineStart := strings.LastIndexByte(s[:at], '\n') + 1
+		if strings.TrimSpace(s[lineStart:at]) == "" {
+			return at
+		}
+		from = at + len(marker)
+	}
+}
+
+// isIdentifier reports whether s is a plain SQL identifier: letters, digits, and underscores,
+// starting with a letter or underscore.
+func isIdentifier(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i, r := range s {
+		alpha := r == '_' || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')
+		if !alpha && (i == 0 || r < '0' || r > '9') {
+			return false
+		}
+	}
+	return true
 }
 
 // cutBalanced returns the text inside the first balanced parenthesis pair, and what follows it. The
@@ -89,7 +145,11 @@ func parseColumnLines(body string) []SchemaColumn {
 		upper := strings.ToUpper(line)
 		var constraint bool
 		for _, p := range constraintPrefixes {
-			if strings.HasPrefix(upper, p) {
+			// The keyword has to stand alone: a column named checksum starts with CHECK, and a column
+			// named unique_key starts with UNIQUE, and treating either as a table constraint would
+			// silently drop it from every heal, which is the org_id incident again through the
+			// mechanism built to end it.
+			if upper == p || strings.HasPrefix(upper, p+" ") || strings.HasPrefix(upper, p+"(") {
 				constraint = true
 				break
 			}

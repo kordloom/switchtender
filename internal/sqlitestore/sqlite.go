@@ -93,6 +93,8 @@ CREATE TABLE IF NOT EXISTS runs (
 	verbosity INTEGER NOT NULL DEFAULT 0,
 	forks INTEGER NOT NULL DEFAULT 0,
 	diff_mode INTEGER NOT NULL DEFAULT 0,
+	actor_type TEXT NOT NULL DEFAULT '',
+	approved_spec_digest TEXT NOT NULL DEFAULT '',
 	distinct_approver INTEGER NOT NULL DEFAULT 0,
 	pinned_commit TEXT NOT NULL DEFAULT '',
 	policy_set TEXT NOT NULL DEFAULT '',
@@ -321,7 +323,8 @@ CREATE TABLE IF NOT EXISTS credentials (
 	source     TEXT NOT NULL DEFAULT '',
 	org_id     TEXT NOT NULL DEFAULT '',
 	type_id    TEXT NOT NULL DEFAULT '',
-	vault_id   TEXT NOT NULL DEFAULT ''
+	vault_id   TEXT NOT NULL DEFAULT '',
+	settings   TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS credential_types (
 	id         TEXT PRIMARY KEY,
@@ -506,6 +509,10 @@ func Open(path string) (*DB, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	if err := migrateTeamMembers(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	if err := migrateSources(db); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -611,6 +618,9 @@ func openReadPool(path string) (*sql.DB, error) {
 // own CREATE. Columns ALTER cannot add, primary key members and NOT NULL without a default, are
 // original-era columns a created table always has, so skipping them skips nothing real.
 func healColumns(db *sql.DB) error {
+	if err := refusePreChainAudit(db); err != nil {
+		return err
+	}
 	for table, cols := range sqlutil.ParseSchemaColumns(schema) {
 		var exists int
 		if err := db.QueryRow(
@@ -653,6 +663,46 @@ func healColumns(db *sql.DB) error {
 		}
 	}
 	return nil
+}
+
+// refusePreChainAudit refuses a database whose audit trail predates the hash chain, with a message an
+// operator can act on.
+//
+// A trail from before the chain has no seq. Healing would add one with every row at zero, and the
+// schema's unique index over seq then fails on the duplicates, so the open died with "UNIQUE
+// constraint failed: audit_entries.seq", which reads as corruption and says nothing about the cause
+// or the way out. No backfill can help: the chain's hashes commit to seq, so rows written before it
+// cannot be minted into a valid chain after the fact, and pretending otherwise would manufacture
+// evidence. Only databases from the few days between the audit trail existing and the chain existing
+// are in this state.
+func refusePreChainAudit(db *sql.DB) error {
+	var exists int
+	if err := db.QueryRow(
+		"SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='audit_entries'").Scan(&exists); err != nil {
+		return fmt.Errorf("audit trail check: %w", err)
+	}
+	if exists == 0 {
+		return nil
+	}
+	var hasSeq int
+	if err := db.QueryRow(
+		"SELECT COUNT(*) FROM pragma_table_info('audit_entries') WHERE name='seq'").Scan(&hasSeq); err != nil {
+		return fmt.Errorf("audit trail check: %w", err)
+	}
+	if hasSeq > 0 {
+		return nil
+	}
+	var rows int
+	if err := db.QueryRow("SELECT COUNT(*) FROM audit_entries").Scan(&rows); err != nil {
+		return fmt.Errorf("audit trail check: %w", err)
+	}
+	if rows == 0 {
+		return nil
+	}
+	return fmt.Errorf("this database's audit trail predates the tamper-evident chain and its %d "+
+		"entries cannot be joined to one: the chain's hashes commit to a sequence those entries never "+
+		"had. Archive the database if the old trail matters, then either start fresh or delete the "+
+		"audit_entries rows to begin the chain from here", rows)
 }
 
 // migrateRuns brings an existing runs table up to the current shape. CREATE TABLE IF NOT EXISTS is a
@@ -718,6 +768,53 @@ func migrateRuns(db *sql.DB) error {
 		return fmt.Errorf("add anchor install_id column: %w", err)
 	}
 	return nil
+}
+
+// migrateTeamMembers rebuilds team_members with the foreign key its CREATE promises. The constraint
+// was added to the CREATE one day after the table first shipped, with no migration, and SQLite has no
+// ALTER that adds one: a database from that first day enforced nothing while every fresh database
+// cascaded a deleted team's memberships. The rebuild is the standard SQLite shape, copy and swap, and
+// runs only when the constraint is actually absent.
+func migrateTeamMembers(db *sql.DB) error {
+	var exists int
+	if err := db.QueryRow(
+		"SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='team_members'").Scan(&exists); err != nil {
+		return fmt.Errorf("team_members migration: %w", err)
+	}
+	if exists == 0 {
+		return nil
+	}
+	var fks int
+	if err := db.QueryRow(
+		"SELECT COUNT(*) FROM pragma_foreign_key_list('team_members')").Scan(&fks); err != nil {
+		return fmt.Errorf("team_members migration: %w", err)
+	}
+	if fks > 0 {
+		return nil
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("team_members migration: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, stmt := range []string{
+		`CREATE TABLE team_members_new (
+	team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+	user_id TEXT NOT NULL,
+	PRIMARY KEY (team_id, user_id)
+)`,
+		"INSERT INTO team_members_new SELECT team_id, user_id FROM team_members",
+		"DROP TABLE team_members",
+		"ALTER TABLE team_members_new RENAME TO team_members",
+		// Dropping the old table dropped its index, and the schema exec that would recreate it has
+		// already run this open, so the rebuild recreates it itself.
+		"CREATE INDEX IF NOT EXISTS idx_team_members_user ON team_members(user_id)",
+	} {
+		if _, err := tx.Exec(stmt); err != nil {
+			return fmt.Errorf("team_members migration: %w", err)
+		}
+	}
+	return tx.Commit()
 }
 
 // migrateHostSummary adds the dry-run flag to an existing host summary table. The flag is copied
