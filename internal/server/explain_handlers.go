@@ -196,8 +196,12 @@ func explainRunHandler(store run.Store, provider ai.Provider, authz *authorizer,
 			system = intentProposalSystemPrompt
 			prompt = buildIntentProposalPrompt(rn)
 		default:
-			body, _ := store.Log(r.Context(), id) // best effort: a run may have produced no log
-			prompt = buildExplainPrompt(rn, body, explainEvents(r.Context(), store, id))
+			// Only the tail is wanted, so only the tail is read. Reading the whole log to slice the end
+			// off meant a run that failed after a gigabyte of output, which is exactly the run somebody
+			// asks about, allocated that gigabyte to use six kilobytes of it, on a path a viewer may
+			// call.
+			prompt = buildExplainPrompt(rn, logTail(r.Context(), store, id, explainLogTail),
+				explainEvents(r.Context(), store, id))
 		}
 		answer, err := group.do(id+"|"+string(rn.Status), func() (string, error) {
 			return provider.Complete(r.Context(), system, prompt)
@@ -209,6 +213,54 @@ func explainRunHandler(store run.Store, provider ai.Provider, authz *authorizer,
 		respondJSON(w, log, http.StatusOK,
 			map[string]string{"explanation": strings.TrimSpace(answer)}, wantsPretty(r))
 	}
+}
+
+// tailChunkBatch is how many stored log chunks a tail read walks back at a time. A chunk is one flush
+// from the executor, so a handful covers the wanted bytes on any real run, and the walk continues when
+// they do not.
+const tailChunkBatch = 16
+
+// logTail returns at most want trailing bytes of a run's log, reading only as far back as it needs.
+//
+// A run's log is stored as appended chunks with a rising sequence, so the end can be read directly. This
+// walks back from the newest sequence, widening the window until it holds enough bytes, and each read
+// replaces the last rather than adding to it: the two stores number log chunks differently, one by chunk
+// and one by byte offset, and re-reading from an earlier point is correct under both. It stops as soon as
+// it has the wanted bytes, so the cost tracks the size of the tail rather than the size of the log.
+//
+// Reading the whole log to slice the end off it meant a run that failed after a gigabyte of output, which
+// is exactly the run somebody asks about, allocated that gigabyte on the control node to use six kilobytes
+// of it, on a path a viewer may call.
+//
+// It is best effort throughout. A run may have produced no log, and an explanation without a tail is
+// better than no explanation.
+func logTail(ctx context.Context, store run.Store, id string, want int) []byte {
+	last, err := store.LastLogSeq(ctx, id)
+	if err != nil || last <= 0 {
+		return nil
+	}
+	var held []byte
+	for step := int64(tailChunkBatch); ; step *= 4 {
+		start := last - step
+		if start < 0 {
+			start = 0
+		}
+		chunks, cerr := store.LogAfter(ctx, id, start, 0)
+		if cerr != nil {
+			break
+		}
+		held = held[:0]
+		for _, c := range chunks {
+			held = append(held, c.Data...)
+		}
+		if len(held) >= want || start == 0 {
+			break
+		}
+	}
+	if len(held) > want {
+		held = held[len(held)-want:]
+	}
+	return held
 }
 
 // buildExplainPrompt assembles a compact triage prompt from a run, its structured events, and the
