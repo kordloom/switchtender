@@ -109,10 +109,23 @@ func runDemo(cmd *cobra.Command, _ []string) error {
 	store := bundle.Runs()
 
 	hub := live.NewHub()
+	// A clock parked in the recent past so seeded runs carry a believable history: their records, the
+	// audit entries that record their outcomes, and the receipts built from those entries all agree on
+	// a time hours ago rather than the single instant the seed ran. The seeder steps it between runs.
+	// It governs only the run and outcome timestamps, never the leases the store ages against.
+	seedClock := demo.NewSeedClock()
 	// The demo serves the policy endpoints, so it enforces them too. Displaying policies that gate
 	// nothing teaches the wrong thing about how the product behaves.
+	// The stale-lease janitor is off for the demo. It abandons a split or pipeline parent still pending
+	// past a cutoff it measures against the real clock, which assumes the parent's created time tracks
+	// that clock. The seed clock deliberately parks created times hours in the past, so every fresh
+	// parent would read as long abandoned and be interrupted the instant it was submitted. The demo is
+	// one process driving every run to completion in hand, with no dead coordinator to reclaim, so the
+	// janitor has nothing to do here anyway.
 	disp := dispatch.New(store, roundhouse.NewAnsibleRunner(), log, dispatch.WithPublisher(hub),
 		dispatch.WithAudits(bundle.Audits()),
+		dispatch.WithClock(seedClock.Now),
+		dispatch.WithNoJanitor(),
 		dispatch.WithPolicies(bundle.Policies()))
 	defer disp.Close()
 
@@ -136,6 +149,7 @@ func runDemo(cmd *cobra.Command, _ []string) error {
 		InvSources: bundle.InventorySources(),
 		Audit:      bundle.Audits(),
 		Schedules:  bundle.Schedules(),
+		Clock:      seedClock,
 	}
 	if !demoNoSeed {
 		if err := demo.Seed(cmd.Context(), seedDeps, log); err != nil {

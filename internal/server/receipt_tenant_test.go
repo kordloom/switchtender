@@ -82,7 +82,7 @@ func TestAReceiptDoesNotCarryAnotherTenantsAuditTrail(t *testing.T) {
 	if err := runs.Save(ctx, r); err != nil {
 		t.Fatalf("Save(succeeded) error = %v", err)
 	}
-	if err := outcome.Commit(ctx, audits, runs, r, "system:dispatcher"); err != nil {
+	if err := outcome.Commit(ctx, audits, runs, r, "system:dispatcher", nil); err != nil {
 		t.Fatalf("Commit() error = %v", err)
 	}
 

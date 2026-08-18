@@ -185,6 +185,9 @@ type Dispatcher struct {
 	// runTimeout bounds how long a single run may execute before it is canceled and finalized failed.
 	// Zero disables the cap, so a run may take as long as it needs.
 	runTimeout time.Duration
+	// now reads the wall clock for a run's record and outcome timestamps. It is time.Now outside the
+	// demo, which parks it in the past to seed runs with a believable, self-consistent history.
+	now func() time.Time
 }
 
 // errRunTimeout is the cancellation cause when a run is stopped for exceeding runTimeout, so the
@@ -274,6 +277,11 @@ type config struct {
 	// noJanitor disables the stale-lease janitor. A relay worker sets it because the store it runs
 	// against cannot reclaim leases; that stays the control node's job.
 	noJanitor bool
+	// now reads the wall clock for the timestamps a run carries on its record and its outcome entry:
+	// created, started, ended. Nil defaults to time.Now. It exists so the demo can seed a run as of a
+	// past instant, with its record, chain entry, and receipt all agreeing on that time. It never
+	// governs lease or dedupe timing, which must read the real clock the store ages leases against.
+	now func() time.Time
 }
 
 // WithWorkers sets the worker pool size. Values below one fall back to DefaultWorkers.
@@ -302,6 +310,15 @@ func WithMaxShards(n int) Option {
 // tamper-evident entry when the run finishes. Nil keeps no such record.
 func WithAudits(audits audit.Store) Option {
 	return func(c *config) { c.audits = audits }
+}
+
+// WithClock overrides the wall clock the dispatcher stamps run records and outcome entries from. The
+// demo passes a clock parked in the past so a seeded run's created, started, and ended times, the
+// audit entry that records its outcome, and the receipt built from that entry all agree on when it
+// ran. A nil function restores time.Now. It does not move the clock leases or dedupe keys are aged
+// against; those stay on the real time the store shares with every worker.
+func WithClock(now func() time.Time) Option {
+	return func(c *config) { c.now = now }
 }
 
 // WithPublisher sets the Publisher that receives live events and log chunks.
@@ -365,6 +382,9 @@ func New(store run.Store, runner roundhouse.Runner, log *zap.Logger, opts ...Opt
 	if len(cfg.queues) == 0 {
 		cfg.queues = []string{""}
 	}
+	if cfg.now == nil {
+		cfg.now = time.Now
+	}
 
 	lister, _ := runner.(roundhouse.HostLister)
 	dumper, _ := runner.(roundhouse.InventoryDumper)
@@ -385,6 +405,7 @@ func New(store run.Store, runner roundhouse.Runner, log *zap.Logger, opts ...Opt
 		claimInterval:      cfg.claimInterval,
 		wakeCh:             make(chan struct{}, 1),
 		runTimeout:         cfg.runTimeout,
+		now:                cfg.now,
 		maxShards:          cfg.maxShards,
 		queues:             cfg.queues,
 		credentials:        cfg.credentials,
@@ -549,7 +570,7 @@ func (d *Dispatcher) commitSettled(ids []string) {
 			}
 			continue
 		}
-		if err := outcome.Commit(d.ctx, d.audits, d.store, r, "system:janitor"); err != nil {
+		if err := outcome.Commit(d.ctx, d.audits, d.store, r, "system:janitor", d.now); err != nil {
 			if d.ctx.Err() == nil {
 				d.log.Error("dispatch: commit settled outcome: "+err.Error(), zap.String("run_id", id))
 			}
@@ -691,7 +712,7 @@ func (d *Dispatcher) Submit(ctx context.Context, playbook, inventory string, opt
 		Playbook:  playbook,
 		Inventory: inventory,
 		Status:    run.StatusPending,
-		CreatedAt: time.Now(),
+		CreatedAt: d.now(),
 	}
 	run.ApplyOptions(r, opts)
 	stampReceipt(ctx, r)
@@ -793,7 +814,7 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 	count := len(groups)
 	parent := &run.Run{
 		ID: run.NewID(), Playbook: playbook, Inventory: inventory, Kind: run.KindSplit,
-		Status: run.StatusPending, CreatedAt: time.Now(), ShardCount: &count,
+		Status: run.StatusPending, CreatedAt: d.now(), ShardCount: &count,
 	}
 	run.ApplyOptions(parent, opts)
 	stampReceipt(ctx, parent)
@@ -842,7 +863,7 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 		idx, shardCount := i, count
 		child := &run.Run{
 			ID: run.NewID(), Playbook: playbook, Inventory: inventory,
-			Status: childStatus, CreatedAt: time.Now(),
+			Status: childStatus, CreatedAt: d.now(),
 			ParentID: &parentID, ShardIndex: &idx, ShardCount: &shardCount,
 			Limit: strings.Join(group, ","),
 		}
@@ -984,7 +1005,7 @@ func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string) (*r
 	count := len(failed)
 	retry := &run.Run{
 		ID: run.NewID(), Playbook: parent.Playbook, Inventory: parent.Inventory,
-		Kind: run.KindSplit, Status: run.StatusPending, CreatedAt: time.Now(),
+		Kind: run.KindSplit, Status: run.StatusPending, CreatedAt: d.now(),
 		ShardCount: &count, RetryOf: &parent.ID, IdempotencyKey: key,
 	}
 	inheritExecution(retry, parent)
@@ -1024,7 +1045,7 @@ func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string) (*r
 		idx, shardCount := i, count
 		child := &run.Run{
 			ID: run.NewID(), Playbook: retry.Playbook, Inventory: retry.Inventory,
-			Status: retryChildStatus, CreatedAt: time.Now(),
+			Status: retryChildStatus, CreatedAt: d.now(),
 			ParentID: &retryID, ShardIndex: &idx, ShardCount: &shardCount,
 			// The host group is the one thing a shard owns; everything about how it executes comes
 			// from the run it is a shard of.
@@ -1192,7 +1213,7 @@ func (d *Dispatcher) coordinate(parent *run.Run, children []*run.Run) {
 		return
 	}
 
-	started := time.Now()
+	started := d.now()
 	parent.Status = run.StatusRunning
 	parent.StartedAt = &started
 	parent.ClaimedBy = d.owner
@@ -1390,7 +1411,7 @@ func (d *Dispatcher) SubmitPipeline(ctx context.Context, name, inventory string,
 
 	parent := &run.Run{
 		ID: run.NewID(), Playbook: name, Inventory: inventory, Kind: run.KindPipeline,
-		Status: run.StatusPending, CreatedAt: time.Now(),
+		Status: run.StatusPending, CreatedAt: d.now(),
 	}
 	run.ApplyOptions(parent, opts)
 	stampReceipt(ctx, parent)
@@ -1456,7 +1477,7 @@ func (d *Dispatcher) runPipeline(parent *run.Run, steps []run.PipelineStep) {
 		return
 	}
 
-	started := time.Now()
+	started := d.now()
 	parent.Status = run.StatusRunning
 	parent.StartedAt = &started
 	parent.ClaimedBy = d.owner
@@ -1598,6 +1619,7 @@ func (d *Dispatcher) runStepAttempts(ctx context.Context, parent *run.Run, step 
 			return run.StatusCanceled, nil
 		}
 		child := stepRun(parent, step, idx, attempt, vars)
+		child.CreatedAt = d.now()
 		if err := d.store.Save(context.Background(), child); err != nil {
 			d.log.Error("dispatch: save pipeline step: "+err.Error(), zap.String("run_id", parent.ID))
 			return run.StatusFailed, nil
@@ -1804,7 +1826,7 @@ func (d *Dispatcher) executeRun(ctx context.Context, r *run.Run) run.Status {
 func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, tee io.Writer,
 	finish func(res roundhouse.Result, runErr error, mask *masker, fold *run.SummaryFold) run.Status,
 ) run.Status {
-	started := time.Now()
+	started := d.now()
 	r.Status = run.StatusRunning
 	r.StartedAt = &started
 	r.ClaimedBy = d.owner
@@ -2149,7 +2171,7 @@ func (d *Dispatcher) finalize(r *run.Run, status run.Status, exitCode *int, fail
 	fin := run.Finalization{
 		Status: status, ExitCode: exitCode, Error: failure, Image: r.Image,
 		CommitSHA: r.CommitSHA, PullCredentialID: r.PullCredentialID,
-		Outputs: r.Outputs, Warning: r.Warning, EndedAt: time.Now(),
+		Outputs: r.Outputs, Warning: r.Warning, EndedAt: d.now(),
 	}
 	stored, recorded := d.recordTerminal(r, fin)
 	if !recorded {

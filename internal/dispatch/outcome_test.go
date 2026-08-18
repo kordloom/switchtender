@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -83,6 +84,74 @@ func TestNoAuditsNoOutcomeEntry(t *testing.T) {
 	}
 	// Reaching a terminal state without a nil-audits panic is the assertion.
 	waitTerminal(t, store, created.ID)
+}
+
+// TestClockSeedsRunAndOutcomeInThePast proves WithClock parks a run's whole history in the past: the
+// created, started, and ended times on its record, and the time the audit entry claims for its
+// outcome, all read the injected clock rather than the wall clock. This is what lets the demo seed a
+// run as of hours ago with its record, its chain entry, and the receipt built from that entry all
+// agreeing on when it ran. A production dispatcher passes no clock and keeps time.Now.
+func TestClockSeedsRunAndOutcomeInThePast(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	runner := roundhouse.RunnerFunc(
+		func(_ context.Context, _ roundhouse.Spec, out io.Writer) (roundhouse.Result, error) {
+			_, _ = io.WriteString(out, "PLAY RECAP *****\nweb01 : ok=1 changed=0\n")
+			return roundhouse.Result{ExitCode: 0}, nil
+		})
+	store := run.NewMemStore()
+	audits := audit.NewMemStore()
+
+	// A clock parked eight hours back that advances a millisecond a call, so every stamp lands in the
+	// past and strictly after the one before it, the way a real clock would over the life of one run.
+	base := time.Now().Add(-8 * time.Hour)
+	var mu sync.Mutex
+	var seq int64
+	clock := func() time.Time {
+		mu.Lock()
+		defer mu.Unlock()
+		seq++
+		return base.Add(time.Duration(seq) * time.Millisecond)
+	}
+	d := New(store, runner, nil, WithAudits(audits), WithClock(clock))
+	defer d.Close()
+
+	created, err := d.Submit(ctx, "site.yml", "inv", run.WithActor("alice"))
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+	got := waitTerminal(t, store, created.ID)
+
+	// Every record stamp lands well in the injected past, not at the real wall clock.
+	recent := time.Now().Add(-7 * time.Hour)
+	if !got.CreatedAt.Before(recent) {
+		t.Errorf("created_at = %s, want before %s (the injected past)", got.CreatedAt, recent)
+	}
+	if got.StartedAt == nil || got.EndedAt == nil {
+		t.Fatalf("run has no start or end: started=%v ended=%v", got.StartedAt, got.EndedAt)
+	}
+	if !got.StartedAt.Before(recent) || !got.EndedAt.Before(recent) {
+		t.Errorf("started=%s ended=%s, want both before %s", got.StartedAt, got.EndedAt, recent)
+	}
+	// The lifecycle stays ordered within the injected clock: created, then started, then ended.
+	if got.StartedAt.Before(got.CreatedAt) || got.EndedAt.Before(*got.StartedAt) {
+		t.Errorf("lifecycle out of order: created=%s started=%s ended=%s",
+			got.CreatedAt, got.StartedAt, got.EndedAt)
+	}
+
+	// The outcome entry is stamped from the same clock, so the chain and the receipt built from it
+	// reconcile with the record instead of claiming the run finished just now.
+	outcomeEntry := waitOutcomeEntry(t, audits, created.ID)
+	if !outcomeEntry.At.Before(recent) {
+		t.Errorf("outcome entry at = %s, want in the injected past before %s", outcomeEntry.At, recent)
+	}
+	if outcomeEntry.At.Before(*got.EndedAt) {
+		t.Errorf("outcome at %s precedes the run's end %s", outcomeEntry.At, got.EndedAt)
+	}
+	if outcomeEntry.At.Sub(*got.EndedAt) > time.Minute {
+		t.Errorf("outcome at %s is more than a minute past end %s; not reconciled",
+			outcomeEntry.At, got.EndedAt)
+	}
 }
 
 // waitOutcomeEntry polls the chain for the run's outcome entry and returns it, failing at the

@@ -334,7 +334,7 @@ func (s *relayServer) save(w http.ResponseWriter, r *http.Request) {
 		// split or pipeline is skipped, its outcome rolled into the parent the coordinator commits, and
 		// the commit is not fail-closed since the run has already happened.
 		if s.audits != nil && stored.ParentID == nil {
-			if err := outcome.Commit(r.Context(), s.audits, s.store, stored, "system:relay"); err != nil {
+			if err := outcome.Commit(r.Context(), s.audits, s.store, stored, "system:relay", time.Now); err != nil {
 				s.log.Error("relay: commit run outcome: "+err.Error(), zap.String("run_id", stored.ID))
 			}
 		}
