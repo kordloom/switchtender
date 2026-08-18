@@ -77,3 +77,35 @@ jobs:
           if ! go run golang.org/x/vuln/cmd/govulncheck@latest ./...; then
             echo "::warning title=govulncheck::Vulnerabilities found; review the log above."
           fi
+
+  # Real-browser smoke tests. The js unit job above drives the same production JavaScript against a
+  # simulated DOM, which proves the logic but not that a page renders and clicks through in a real
+  # engine. This job runs the pages in headless Chromium against a seeded demo server, catching layout,
+  # CSS, and browser-only script breakage the simulated DOM cannot see.
+  ui-e2e:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: internal/ui/e2e
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm ci
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Build the binary the demo server runs from
+        run: npm run build:bin
+      - name: Run the smoke tests
+        run: npm run test:ci
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: internal/ui/e2e/playwright-report/
+          retention-days: 7

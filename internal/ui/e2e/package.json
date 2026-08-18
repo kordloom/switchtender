@@ -1,0 +1,14 @@
+{
+  "name": "switchtender-ui-e2e",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Real-browser smoke tests for the SwitchTender web UI, driven by Playwright against a seeded demo server. These complement the dependency-free node --test suite in ../assets/jstest, which drives the same production JS against a simulated DOM: that suite proves the logic and wiring, and this one proves the pages actually render and click through in a real browser engine.",
+  "scripts": {
+    "build:bin": "go build -o .bin/switchtender ../../..",
+    "test": "npm run build:bin && playwright test",
+    "test:ci": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56.0"
+  }
+}
