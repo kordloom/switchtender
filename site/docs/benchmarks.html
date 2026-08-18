@@ -44,16 +44,16 @@
 <p>Measured numbers for the questions people actually ask: how fast does it start, how much memory does
 it hold at idle, and how big is the binary. Every number below was measured on a release-flag build,
 the method is shown so you can reproduce it on your own hardware, and nothing here is a projection.</p>
-<p>Re-measured on 2026-08-10, on a ten-core Apple Silicon laptop and inside an Alpine Linux container on
-the same machine. Memory and binary sizes are mebibytes, the unit <code>ps</code> and <code>/proc</code> report. Your
-hardware will differ; the method will not.</p>
-<p>These figures are the current main build. The footprint and binary size hold for the released
-version. The lower no-encryption boot comes from UI asset compression moving off the startup path;
-a build older than that change comes up nearer 70 ms.</p>
-<p>The point of re-measuring: across dozens of releases, a full security-hardening pass, and custom
-credential types, the footprint did not grow, and the no-encryption boot dropped when UI asset
-compression moved off the startup path. That is the
-number worth watching over time, not any single reading.</p>
+<p>The boot, memory, and binary figures here were re-measured on 2026-08-18 against v1.66.1, on a ten-core
+Apple Silicon laptop and inside an Alpine Linux container on the same machine. The container head to
+head further down is a 2026-08-10 snapshot; its competitor images were re-confirmed unchanged on
+2026-08-18. Memory and binary sizes are mebibytes, the unit <code>ps</code> and <code>/proc</code> report. Your hardware will
+differ; the method will not.</p>
+<p>These figures are the current release, v1.66.1. The lower no-encryption boot comes from UI asset
+compression moving off the startup path; a build older than that change comes up slower.</p>
+<p>The point of re-measuring: across dozens of releases, a full security-hardening pass, custom credential
+types, and new governance features, the binary moved only from about 29 to 31 mebibytes and the idle
+memory held flat. That stability is the number worth watching over time, not any single reading.</p>
 <h2 id="boot-and-memory">Boot and memory</h2>
 <table>
 <thead>
@@ -65,11 +65,11 @@ number worth watching over time, not any single reading.</p>
 <tbody>
 <tr>
 <td>Cold boot to serving, no encryption key</td>
-<td>26 ms</td>
+<td>28 ms</td>
 </tr>
 <tr>
 <td>Cold boot to serving, credential encryption on</td>
-<td>70 ms</td>
+<td>77 ms</td>
 </tr>
 <tr>
 <td>Resident memory at idle, Linux</td>
@@ -77,7 +77,7 @@ number worth watching over time, not any single reading.</p>
 </tr>
 <tr>
 <td>Stripped binary, arm64</td>
-<td>29.8 MiB</td>
+<td>31.4 MiB</td>
 </tr>
 </tbody>
 </table>
@@ -106,21 +106,21 @@ The Linux figures above are the ones to plan against.</p>
 <tbody>
 <tr>
 <td>linux/arm64</td>
-<td>28.8 MiB</td>
+<td>30.4 MiB</td>
 </tr>
 <tr>
 <td>darwin/arm64</td>
-<td>29.8 MiB</td>
+<td>31.4 MiB</td>
 </tr>
 <tr>
 <td>linux/amd64</td>
-<td>30.7 MiB</td>
+<td>32.4 MiB</td>
 </tr>
 </tbody>
 </table>
 <p>That single file is the whole control plane: server, workers, UI, importers, and the CLI.</p>
 <h2 id="reproduce-it">Reproduce it</h2>
-<p>The repository carries the harness the boot and memory rows came from, and the 2026-08-02 figures
+<p>The repository carries the harness the boot and memory rows came from, and the 2026-08-18 figures
 above are its output:</p>
 <pre><code>go run ./cmd/bench
 </code></pre>
@@ -184,9 +184,9 @@ memory is the server process's <code>VmRSS</code> three seconds after it began s
 </tr>
 </tbody>
 </table>
-<p>The boot row matches the first table's 26 ms within noise: after asset compression moved off the
+<p>The boot row is close to the first table's in-process figure: after asset compression moved off the
 startup path, the process comes up fast enough that <code>docker start</code> overhead is most of what is left,
-so the container figure and the in-process figure converge. Both are ours, measured the same day.</p>
+so the container figure and the in-process figure converge. Both are ours.</p>
 <p><strong>Semaphore is a genuinely light one-binary competitor, and we boot faster than it.</strong> In its
 single-container mode with an embedded SQLite database, the configuration measured here, it comes up
 in 45 ms against our 24 ms. The two part company further on footprint and what comes in the box: our
