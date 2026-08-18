@@ -42,9 +42,12 @@ test("a cut audit trail is announced and its table exports are refused", async (
 	assert.ok(notice, "the page shows nothing about the trail being cut");
 	assert.match(notice.textContent, /Showing the 3 most recent entries/);
 	assert.match(notice.textContent, /Export signed/);
-	// The notice belongs above the table it is describing, not appended anywhere in the document.
+	// The notice belongs above the table it is describing, not appended anywhere in the document. The
+	// table sits inside a .list-scroll wrapper that carries its horizontal overflow, so the notice
+	// lands directly above that wrapper rather than inside it.
 	const table = page.document.querySelector("main.content table.runs");
-	assert.equal(notice.nextSibling, table, "the notice is not sitting above the table");
+	const wrap = table.closest(".list-scroll") || table;
+	assert.equal(notice.nextSibling, wrap, "the notice is not sitting above the table");
 
 	assert.equal(page.buttons.length, 3, "the audit page should carry CSV, JSON, and YAML exports");
 	for (const btn of page.buttons) {

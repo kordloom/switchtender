@@ -146,7 +146,8 @@ function markTrailTruncated(shown) {
 		notice.className = "trail-notice";
 		notice.textContent = "Showing the " + shown + " most recent entries. The trail holds more "
 			+ "than this, so the table exports are off. Use Export signed for the whole chain.";
-		table.parentNode.insertBefore(notice, table);
+		const anchor = table.closest(".list-scroll") || table;
+		anchor.parentNode.insertBefore(notice, anchor);
 	}
 	for (const btn of document.querySelectorAll("button.table-export")) {
 		btn.disabled = true;
