@@ -78,10 +78,11 @@ jobs:
             echo "::warning title=govulncheck::Vulnerabilities found; review the log above."
           fi
 
-  # Real-browser smoke tests. The js unit job above drives the same production JavaScript against a
-  # simulated DOM, which proves the logic but not that a page renders and clicks through in a real
-  # engine. This job runs the pages in headless Chromium against a seeded demo server, catching layout,
-  # CSS, and browser-only script breakage the simulated DOM cannot see.
+  # Real-browser tests. The js unit job above drives the same production JavaScript against a simulated
+  # DOM, which proves the logic but not that a page renders, clicks through, and mutates in a real
+  # engine. This job runs headless Chromium against two servers: a seeded read-only demo for rendering
+  # and navigation, and a writable serve instance where it launches a run and creates objects and checks
+  # the change persisted. It catches layout, CSS, and browser-only breakage the simulated DOM cannot see.
   ui-e2e:
     runs-on: ubuntu-latest
     defaults:

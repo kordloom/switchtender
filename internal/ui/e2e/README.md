@@ -1,10 +1,19 @@
-# UI smoke tests
+# UI real-browser tests
 
-Real-browser smoke tests for the web UI, driven by Playwright against a seeded `switchtender demo`
-server. They complement the dependency-free `node --test` suite in `../assets/jstest`, which drives the
-same production JavaScript against a simulated DOM: that suite proves the logic and the wiring, and this
-one proves the pages actually render and click through in a real browser engine, catching layout, CSS,
-real event, and browser-only script breakage the simulated DOM cannot see.
+Two Playwright suites drive the web UI in a real browser engine. They complement the dependency-free
+`node --test` suite in `../assets/jstest`, which drives the same production JavaScript against a
+simulated DOM: that suite proves the logic and the wiring, and these prove the pages render, click
+through, and mutate in a real browser, catching layout, CSS, real event, and browser-only script
+breakage the simulated DOM cannot see.
+
+- **smoke** (`smoke.spec.mjs`) drives the seeded, read-only `switchtender demo`: rendering and
+  navigation of the overview, runs list, a run's detail, the launch control, the audit page, and
+  browser history, each asserting real render height so a collapsed layout fails.
+- **interactive** (`interactive.spec.mjs`) drives a writable `switchtender serve` instance: it launches
+  a bash run and creates a project and an inventory through the real dialogs, then reloads to confirm
+  each change persisted server-side.
+
+Both fail on any uncaught page error or console error.
 
 ## Run them
 
@@ -15,13 +24,10 @@ npx playwright install --with-deps chromium
 npm test
 ```
 
-`npm test` builds the binary into `.bin/switchtender` and Playwright starts a `demo` instance on
-`127.0.0.1:18777` for the run. Seeding runs a few real playbooks and takes a moment, so the readiness
-timeout is generous. To point the tests at a demo you already have running, start one on that port and
-Playwright reuses it (outside CI).
+`npm test` builds the binary into `.bin/switchtender`, and Playwright starts both servers for the run: a
+`demo` on `127.0.0.1:18777` and a `serve` on `127.0.0.1:18778`. Seeding the demo runs a few real
+playbooks and takes a moment, so the readiness timeout is generous. Outside CI, a server already running
+on either port is reused.
 
-## What they cover
-
-The seeded demo's overview, runs list, a run's detail, the launch dialog, the audit page, and the top
-navigation, each asserting real render height so a collapsed layout fails, and each failing on any
-uncaught page error or console error.
+On a machine whose Playwright browser download is flaky but that already has Chrome, run with
+`ST_E2E_CHANNEL=chrome` to drive the system browser instead of the bundled one.
