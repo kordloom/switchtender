@@ -33,6 +33,7 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Run("save updates existing", func(t *testing.T) { testSaveUpdate(t, newStore()) })
 	t.Run("list newest first", func(t *testing.T) { testList(t, newStore()) })
 	t.Run("list page and status counts", func(t *testing.T) { testListPage(t, newStore()) })
+	t.Run("pagination at volume", func(t *testing.T) { testPaginationAtVolume(t, newStore()) })
 	t.Run("log append and read", func(t *testing.T) { testLog(t, newStore()) })
 	t.Run("log after cursor", func(t *testing.T) { testLogAfter(t, newStore()) })
 	t.Run("events append and read", func(t *testing.T) { testEvents(t, newStore()) })
@@ -613,6 +614,110 @@ func testListPage(t *testing.T, store run.Store) {
 	wantAfter := map[run.Status]int{run.StatusSucceeded: 3, run.StatusFailed: 2}
 	if diff := cmp.Diff(wantAfter, after, cmpopts.EquateEmpty()); diff != "" {
 		t.Errorf("RunStatusCounts() after transition mismatch (-want +got):\n%s", diff)
+	}
+}
+
+// testPaginationAtVolume proves offset paging over the run list and cursor paging over a run's events
+// stay correct across many pages, not just the handful other tests use. Every run comes back exactly
+// once in newest-first order with no gap or duplicate at a page boundary, a deep offset lands on the
+// right slice, and a run's events stream back once each in store-sequence order.
+func testPaginationAtVolume(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	const n = 3000
+	// Zero-padded ids so lexical order matches numeric order, and increasing created times so newest
+	// first is a strict, checkable ordering.
+	for i := range n {
+		r := &run.Run{
+			ID: fmt.Sprintf("r%05d", i), Status: run.StatusSucceeded, Playbook: "p.yml",
+			CreatedAt: base.Add(time.Duration(i) * time.Second),
+		}
+		if err := store.Save(ctx, r); err != nil {
+			t.Fatalf("Save(%d) error = %v", i, err)
+		}
+	}
+
+	// Page the whole list newest first: every id once, strictly descending, no boundary gap or repeat.
+	const page = 100
+	seen := make(map[string]bool, n)
+	prevID := ""
+	got := 0
+	for offset := 0; ; offset += page {
+		batch, err := store.ListPage(ctx, run.ListFilter{}, page, offset)
+		if err != nil {
+			t.Fatalf("ListPage(%d,%d) error = %v", page, offset, err)
+		}
+		if len(batch) == 0 {
+			break
+		}
+		for _, r := range batch {
+			if seen[r.ID] {
+				t.Fatalf("run %s came back twice across pages", r.ID)
+			}
+			seen[r.ID] = true
+			if prevID != "" && r.ID >= prevID {
+				t.Fatalf("run order broke at %s after %s: not strictly newest first", r.ID, prevID)
+			}
+			prevID = r.ID
+			got++
+		}
+	}
+	if got != n {
+		t.Fatalf("paged %d runs, want %d; a page boundary dropped or duplicated runs", got, n)
+	}
+
+	// A deep offset lands on the oldest slice, not off the end or on the wrong rows.
+	deep, err := store.ListPage(ctx, run.ListFilter{}, 10, n-5)
+	if err != nil {
+		t.Fatalf("deep ListPage error = %v", err)
+	}
+	if len(deep) != 5 || deep[0].ID != "r00004" {
+		t.Fatalf("deep page has %d rows starting %q, want 5 starting r00004", len(deep),
+			func() string {
+				if len(deep) == 0 {
+					return ""
+				}
+				return deep[0].ID
+			}())
+	}
+
+	// Cursor paging over one run's events returns every event once, in sequence order. A still-running
+	// run, since a terminal run fences further event writes.
+	if err := store.Save(ctx, &run.Run{
+		ID: "revents", Status: run.StatusRunning, Playbook: "p.yml", CreatedAt: base,
+	}); err != nil {
+		t.Fatalf("Save(revents) error = %v", err)
+	}
+	events := make([]event.Event, n)
+	for i := range events {
+		events[i] = event.Event{Type: event.TypeRunnerOK, Host: "h", Task: fmt.Sprintf("t%05d", i)}
+	}
+	if err := store.AppendEvents(ctx, "revents", events); err != nil {
+		t.Fatalf("AppendEvents() error = %v", err)
+	}
+	var after int64
+	streamed := 0
+	for {
+		batch, err := store.EventsAfter(ctx, "revents", after, page)
+		if err != nil {
+			t.Fatalf("EventsAfter(%d) error = %v", after, err)
+		}
+		if len(batch) == 0 {
+			break
+		}
+		for _, e := range batch {
+			if e.Seq <= after {
+				t.Fatalf("event seq %d is not above the cursor %d, so paging can loop or skip", e.Seq, after)
+			}
+		}
+		after = batch[len(batch)-1].Seq
+		streamed += len(batch)
+		if len(batch) < page {
+			break
+		}
+	}
+	if streamed != n {
+		t.Fatalf("cursor-paged %d events, want %d", streamed, n)
 	}
 }
 
