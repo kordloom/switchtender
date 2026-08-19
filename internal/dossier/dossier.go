@@ -228,7 +228,9 @@ var worstRank = map[string]int{"skipped": 0, "ok": 1, "changed": 2, "unreachable
 // back sorted by name so the table reads the same on every generation.
 // eventPage is how many events are folded at a time when a run's per-host outcomes have to be rebuilt
 // from its event stream. It matches the window the run export pages by.
-const eventPage = 20_000
+// eventPage is a var, not a const, only so a test can shrink the window to force multi-page folding
+// without seeding tens of thousands of events. Production never changes it.
+var eventPage = 20_000
 
 // hostSummaries returns one run's per-host outcomes.
 //
@@ -264,7 +266,10 @@ func hostSummaries(ctx context.Context, runs run.Store, id string,
 		}
 		fold.Add(page)
 		folded = true
-		after += int64(len(page))
+		// Advance by the last event's store sequence, not the page length. The sequence is a global
+		// autoincrement, so a run's events are sparse and high-valued; advancing by count would never
+		// pass them and would re-read the early pages forever.
+		after = page[len(page)-1].Seq
 		if len(page) < eventPage {
 			break
 		}
