@@ -167,6 +167,10 @@ h1 {
 	background: linear-gradient(120deg, #fff, var(--accent)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
 }
 .strip span { font-size: 13.5px; color: var(--muted); }
+/* The path strip carries five word-labeled steps, not big numbers, so it lays out as five even
+   columns and its labels are sized for words rather than stats. */
+.strip.path { grid-template-columns: repeat(5, 1fr); gap: 16px; }
+.strip.path b { font-size: 22px; }
 
 /* Sections */
 .section { padding: 96px 24px; }
@@ -363,6 +367,11 @@ h1 {
 	.strip { grid-template-columns: repeat(2, 1fr); gap: 26px; }
 	.cards .card { flex-basis: 100%; }
 	.section { padding: 68px 24px; }
+}
+/* Below tablet width, five columns of words crush together, so the path stacks into a vertical
+   sequence that reads top to bottom: request, policy, approval, execution, evidence. */
+@media (max-width: 760px) {
+	.strip.path { grid-template-columns: 1fr; gap: 10px; padding: 24px; }
 }
 @media (prefers-reduced-motion: reduce) {
 	* { animation: none !important; }
