@@ -167,10 +167,13 @@ h1 {
 	background: linear-gradient(120deg, #fff, var(--accent)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
 }
 .strip span { font-size: 13.5px; color: var(--muted); }
-/* The path strip carries five word-labeled steps, not big numbers, so it lays out as five even
-   columns and its labels are sized for words rather than stats. */
-.strip.path { grid-template-columns: repeat(5, 1fr); gap: 16px; }
-.strip.path b { font-size: 22px; }
+/* The path strip is the pipeline every change walks, so it reads as a numbered sequence on a
+   connecting line rather than five loose stats. */
+.strip.path { grid-template-columns: repeat(5, 1fr); gap: 16px; position: relative; }
+.strip.path::before { content: ""; position: absolute; top: 47px; left: 10%; right: 10%; height: 2px; background: var(--border-2); z-index: 1; }
+.strip.path div { position: relative; padding-top: 52px; }
+.strip.path i { position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: 34px; height: 34px; border-radius: 50%; border: 2px solid var(--accent); background: var(--bg); color: var(--accent); font-style: normal; font-weight: 700; font-size: 15px; font-family: "Space Grotesk", sans-serif; display: grid; place-items: center; z-index: 2; }
+.strip.path b { font-size: 19px; }
 
 /* Sections */
 .section { padding: 96px 24px; }
@@ -368,10 +371,12 @@ h1 {
 	.cards .card { flex-basis: 100%; }
 	.section { padding: 68px 24px; }
 }
-/* Below tablet width, five columns of words crush together, so the path stacks into a vertical
-   sequence that reads top to bottom: request, policy, approval, execution, evidence. */
+/* Below tablet width the horizontal line does not fit, so the path stacks into a numbered vertical
+   sequence: each step keeps its node above its label, and the connecting line is dropped. */
 @media (max-width: 760px) {
-	.strip.path { grid-template-columns: 1fr; gap: 10px; padding: 24px; }
+	.strip.path { grid-template-columns: 1fr; gap: 18px; padding: 28px 24px; }
+	.strip.path::before { display: none; }
+	.strip.path div { padding-top: 46px; }
 }
 @media (prefers-reduced-motion: reduce) {
 	* { animation: none !important; }
