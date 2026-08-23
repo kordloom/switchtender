@@ -4,7 +4,7 @@
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>Pricing | SwitchTender</title>
-	<meta name="description" content="SwitchTender is free to self-host forever, including SSO, RBAC, approvals, Postgres, and the provable audit chain. Paid tiers add new governance capabilities: SCIM, external approvers, evidence packs, air-gapped licensing. Nothing moves from free to paid. Flat per-org pricing, no per-seat bill.">
+	<meta name="description" content="SwitchTender is free to self-host forever, including SSO, RBAC, approvals, Postgres, and the provable audit chain. Paid tiers add new governance capabilities: SCIM, external approvers, evidence packs, air-gapped deployment support. Nothing moves from free to paid. Flat per-org pricing, no per-seat bill.">
 	<link rel="canonical" href="https://switchtender.com/pricing">
 	<meta property="og:title" content="Pricing | SwitchTender">
 	<meta property="og:description" content="The complete controller is free forever. Paid tiers add SCIM, external approvers, control-mapped evidence packs, and direct support from the engineers who built it. Flat per-org pricing.">
@@ -135,7 +135,8 @@
 			<span class="eyebrow">Pricing</span>
 			<h1>Run free forever.<br><span class="grad">Pay for guardrails, evidence, and a team behind you.</span></h1>
 			<p class="lede">
-				Free is the complete controller, no caps, no expiry. The paid tiers are for teams that
+				Free SwitchTender runs your infrastructure. Paid SwitchTender proves your organization
+				governed it. Free is the complete controller, no caps, no expiry. The paid tiers are for teams that
 				answer to more people: access that shuts off the day someone leaves, real sign-offs
 				before risky changes, audit evidence that writes itself, and a private line to the
 				engineers who built this, with a response time we put in writing. Flat per org, never
@@ -170,7 +171,7 @@
 					<div class="tier-name">Team</div>
 					<p class="tier-for">Stop hand-managing who can touch production.</p>
 					<div class="tier-price"><span class="from">From</span><b>$250</b><span class="cadence">/ mo</span></div>
-					<p class="tier-sub">Flat per org. No per-seat bill.</p>
+					<p class="tier-sub">Flat per org, sized once by org size. No per-seat bill.</p>
 					<div class="tier-payoff">When someone leaves the company, their access <b>ends that day</b>, everywhere. Risky changes wait for a real sign-off from a link. Secrets never live in playbooks. And when something breaks, you're talking to the engineers who built it, and we put our response time in writing. Cheaper than one engineer-day a month.</div>
 					<a class="ghost" href="mailto:hello@kordloom.com?subject=SwitchTender%20Team%20tier">Talk to us</a>
 					<span class="tier-badge">Early access</span>
@@ -188,7 +189,7 @@
 					<div class="tier-name">Governed</div>
 					<p class="tier-for">Turn the audit scramble into a scheduled export.</p>
 					<div class="tier-price"><span class="from">From</span><b>$1,000</b><span class="cadence">/ mo</span></div>
-					<p class="tier-sub">Flat per org. Migration priced separately.</p>
+					<p class="tier-sub">Flat per org, sized once by org size. Migration priced separately.</p>
 					<div class="tier-payoff">The evidence an auditor asks for <b>generates itself on a schedule</b>, mapped to your controls, and they verify it offline without you in the room. Add priority support with a real SLA and hands-on migration from us. Days of gathering screenshots become one download. One passed audit pays for the year.</div>
 					<a class="ghost" href="mailto:hello@kordloom.com?subject=SwitchTender%20Governed%20tier">Talk to us</a>
 					<span class="tier-badge">Early access</span>
@@ -197,7 +198,7 @@
 						<li><b>Evidence packs</b> mapped to common change-management controls, generated on a schedule, covering human and agent changes alike</li>
 						<li>Attestation report packs assembled for auditors; witness attestations and local verification stay free for everyone</li>
 						<li>Audit chain <b>archival and re-anchoring</b> for long retention windows</li>
-						<li>Air-gapped licensing and offline activation</li>
+						<li>Air-gapped deployment support</li>
 						<li>Hands-on AWX migration available through the engagements below</li>
 						<li>Priority support with a real SLA</li>
 					</ul>
@@ -209,17 +210,18 @@
 				<strong>Free is shipping today. Team and Governed are earlier. We're building them now with
 				our first customers</strong>, and what we build first follows what they actually need. The
 				subscription prices start where they say because you shouldn't have to email us to find out
-				roughly what something costs. Early access is priced per org and settles on scope, so the
-				figure you see is the floor, not an opening bid.
+				roughly what something costs. The one thing that moves the price above the starting figure
+				is org size, it is set once in one call, and the number we agree is the number: you keep it
+				for as long as you stay on the tier.
 				If you want in early, <a href="mailto:hello@kordloom.com?subject=SwitchTender%20pricing" style="color: var(--accent);">write us</a>.
 			</p>
 
 			<div class="sprint reveal">
 				<div>
 					<h3>Migration-to-Production Sprint</h3>
-					<p>A fixed-price engagement, not a subscription: we migrate your AWX or Tower install hands-on, validate your real workflows in production, and bundle the first year of Team. One invoice, and you're live before you ever pay again. This is the lighter engagement, for teams that need the migration done and Team running; regulated shops that also need approval-policy and evidence design want the Automation Governance Install below.</p>
+					<p>A fixed-price engagement, not a subscription: we migrate your AWX or Tower install hands-on, validate your real workflows in production, and bundle the first year of Team. One invoice, and you're live before you ever pay again. This is the lighter engagement, for teams that need the migration done and Team running, and it lands well under the $25,000 install below; regulated shops that also need approval-policy and evidence design want the Automation Governance Install.</p>
 				</div>
-				<a class="btn" href="mailto:hello@kordloom.com?subject=SwitchTender%20migration%20sprint">Scope it in one call</a>
+				<a class="btn" href="mailto:hello@kordloom.com?subject=SwitchTender%20migration%20sprint">Email us to scope it</a>
 			</div>
 		</section>
 
@@ -281,6 +283,21 @@
 				<details>
 					<summary>What is actually built today?</summary>
 					<p>Everything in the Free column ships in the current release. Team and Governed are in development with our first customers, which is why those tiers say early access instead of checkout. If you sign on early you pay as the features you need arrive, and you get a direct say in what we build first.</p>
+				</details>
+				<details>
+					<summary>What happens at renewal?</summary>
+					<p>The price you agree at signup is the price you keep for as long as you stay on the
+					tier. Billing is month to month with no annual lock-in, you can cancel anytime, and for
+					early-access tiers billing starts when the first capability you signed for is running in
+					your environment, not at signature.</p>
+				</details>
+				<details>
+					<summary>What happens to paid features if you disappear?</summary>
+					<p>The same thing that happens to free ones: nothing. Everything ships in the one
+					self-hosted binary, there is no license server, no online activation, and no phone-home
+					anywhere in it, so nothing you run depends on us existing. The source is BSL 1.1 and
+					every release converts to Apache 2.0 after four years. A lapsed subscription stops
+					future updates and support, never your running install.</p>
 				</details>
 				<details>
 					<summary>Why flat per org instead of per seat?</summary>
