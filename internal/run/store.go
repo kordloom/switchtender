@@ -737,38 +737,32 @@ func (m *memStore) Heartbeat(_ context.Context, id, owner string) error {
 // split or pipeline parents left pending with no coordinator. The lease was stamped by this same
 // process, so its own clock is the authoritative one. Interrupting a parent orphans its children, so
 // they are resolved in the same sweep. See AbandonedParent for what makes a parent unrecoverable.
-// ReclaimStaleSettled sweeps like ReclaimStale and names the top-level runs it drove terminal, so a
-// caller can record their outcomes. A child's outcome rolls up into its parent, so children are left
-// out the same way the terminal save leaves them out.
+// ReclaimStaleSettled sweeps like ReclaimStale and names the top-level runs this sweep itself drove
+// terminal, so a caller can record their outcomes. A child's outcome rolls up into its parent, so
+// children are left out the same way the terminal save leaves them out. Attribution comes from the
+// sweep's own writes, under the same lock: a before-and-after diff credited the sweep with any run
+// that happened to finish while it ran, and the caller then committed a second outcome for a run
+// whose real finisher had already committed one.
 func (m *memStore) ReclaimStaleSettled(ctx context.Context, ttl time.Duration) (int, []string, error) {
-	before := map[string]Status{}
-	m.mu.RLock()
-	for id, r := range m.runs {
-		before[id] = r.Status
-	}
-	m.mu.RUnlock()
-	n, err := m.ReclaimStale(ctx, ttl)
-	if err != nil {
-		return n, nil, err
-	}
-	var settled []string
-	m.mu.RLock()
-	for id, r := range m.runs {
-		if r.ParentID == nil && r.Status.Terminal() && !before[id].Terminal() {
-			settled = append(settled, id)
-		}
-	}
-	m.mu.RUnlock()
+	n, settled, err := m.reclaimStale(ctx, ttl)
 	sort.Strings(settled)
-	return n, settled, nil
+	return n, settled, err
 }
 
-func (m *memStore) ReclaimStale(_ context.Context, ttl time.Duration) (int, error) {
+func (m *memStore) ReclaimStale(ctx context.Context, ttl time.Duration) (int, error) {
+	n, _, err := m.reclaimStale(ctx, ttl)
+	return n, err
+}
+
+// reclaimStale is the sweep, returning both how many rows it changed and which top-level runs it
+// drove terminal. It runs under one lock acquisition, so what it reports is exactly what it did.
+func (m *memStore) reclaimStale(_ context.Context, ttl time.Duration) (int, []string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	cutoff := time.Now().Add(-ttl)
 	changed := 0
-	for _, r := range m.runs {
+	var settled []string
+	for id, r := range m.runs {
 		// An abandoned parent is interrupted before orphans are resolved, so its children settle in
 		// the same sweep rather than waiting for the next one.
 		if AbandonedParent(r, cutoff) {
@@ -779,6 +773,9 @@ func (m *memStore) ReclaimStale(_ context.Context, ttl time.Duration) (int, erro
 				r.Error = abandonedParentError
 			}
 			changed++
+			if r.ParentID == nil {
+				settled = append(settled, id)
+			}
 			continue
 		}
 		if r.ClaimedBy == "" || r.ClaimedAt == nil || !r.ClaimedAt.Before(cutoff) {
@@ -810,9 +807,12 @@ func (m *memStore) ReclaimStale(_ context.Context, ttl time.Duration) (int, erro
 				r.Error = "interrupted: executor lease expired"
 			}
 			changed++
+			if r.ParentID == nil {
+				settled = append(settled, id)
+			}
 		}
 	}
-	return changed + m.resolveOrphans(), nil
+	return changed + m.resolveOrphans(), settled, nil
 }
 
 // resolveOrphans settles the children of an interrupted parent, whose coordinator died holding the
