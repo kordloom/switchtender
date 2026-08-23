@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -197,8 +198,17 @@ func updateInventoryHandler(store inventory.Store, authz *authorizer, sealer *cr
 				return
 			}
 		}
+		content := req.Content
+		if source == credential.SourceLocal {
+			restored, refuse := restoreRedactedInventoryContent(req.Content, existing.Content)
+			if refuse != "" {
+				respondError(w, log, http.StatusBadRequest, refuse)
+				return
+			}
+			content = restored
+		}
 		inv := &inventory.Inventory{
-			ID: id, Name: req.Name, Content: req.Content, CredentialIDs: req.CredentialIDs,
+			ID: id, Name: req.Name, Content: content, CredentialIDs: req.CredentialIDs,
 			Queue: req.Queue, OrgID: orgID,
 		}
 		if source != credential.SourceLocal {
@@ -277,6 +287,25 @@ func redactInventories(ctx context.Context, list []*inventory.Inventory) []*inve
 		out = append(out, &clone)
 	}
 	return out
+}
+
+// restoreRedactedInventoryContent guards a local-inventory update against a caller who echoes back the
+// redacted content they were shown. The list endpoint masks inline secrets to inventory.RedactedValue
+// for non-admins, so storing that submission verbatim would replace the real ansible_password and the
+// like with the mask, destroying the credential and failing every later run silently. When the
+// submission is exactly the redacted view of the stored content, the secrets were not touched, so the
+// stored content is kept. When it still carries a mask but differs from that view, which secret each
+// mask stands for cannot be told, so it is refused rather than guessed at or blanked. It mirrors
+// restoreMaskedNotifications for inventory text. refuse is a message and empty on success.
+func restoreRedactedInventoryContent(incoming, stored string) (content, refuse string) {
+	if !strings.Contains(incoming, inventory.RedactedValue) {
+		return incoming, ""
+	}
+	if inventory.Redact(stored) == incoming {
+		return stored, ""
+	}
+	return "", "the submitted inventory still contains redacted secrets (" + inventory.RedactedValue +
+		"); re-enter the secret value for each masked entry, or ask an admin to edit the raw content"
 }
 
 // deleteInventoryHandler removes an inventory.
