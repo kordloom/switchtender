@@ -78,7 +78,7 @@ code, pre { font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, 
 
 /* Buttons */
 .btn {
-	display: inline-flex; align-items: center; justify-content: center;
+	display: inline-flex; align-items: center; justify-content: center; white-space: nowrap;
 	padding: 10px 20px; border-radius: 10px; font-weight: 600; font-size: 14.5px;
 	color: #05261a;
 	background: linear-gradient(135deg, var(--accent), #6ee7b7);
@@ -281,7 +281,9 @@ h1 {
 .start .code { max-width: 720px; margin: 0 auto; }
 .code pre {
 	background: #0c1017; border: 1px solid var(--border-2); border-radius: var(--radius);
-	padding: 24px 22px; overflow-x: auto; font-size: 14px; line-height: 1.9;
+	/* The right padding clears the absolutely positioned Copy button, which otherwise sat on top of
+	   the first line of exactly the commands a visitor is trying to read and copy. */
+	padding: 24px 84px 24px 22px; overflow-x: auto; font-size: 14px; line-height: 1.9;
 	box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
 }
 .code code { color: #dbe4ee; }
@@ -351,7 +353,13 @@ h1 {
 .reveal.in { opacity: 1; transform: none; }
 
 /* Responsive */
-@media (max-width: 900px) {
+/* The nav carries nine links plus two buttons, which is wider than a tablet: between 900px and
+   1100px the row overflowed off-screen with the CTA unreachable, so the hamburger takes over at the
+   width the full row genuinely needs, and the link gap tightens on narrow desktops first. */
+@media (max-width: 1280px) {
+	.nav-links { gap: 18px; }
+}
+@media (max-width: 1100px) {
 	.nav-links, .nav-cta { display: none; }
 	.nav-toggle { display: block; }
 	.nav.open .nav-links {
@@ -359,6 +367,8 @@ h1 {
 		background: rgba(8, 11, 16, 0.96); backdrop-filter: blur(14px); padding: 16px 24px; gap: 16px;
 		border-bottom: 1px solid var(--border);
 	}
+}
+@media (max-width: 900px) {
 	.hero { grid-template-columns: 1fr; padding-top: 56px; gap: 44px; }
 	.hero-shot { order: 2; }
 	.window { transform: none; }

@@ -49,7 +49,7 @@ Apple Silicon laptop and inside an Alpine Linux container on the same machine. T
 head further down is a 2026-08-10 snapshot; its competitor images were re-confirmed unchanged on
 2026-08-18. Memory and binary sizes are mebibytes, the unit <code>ps</code> and <code>/proc</code> report. Your hardware will
 differ; the method will not.</p>
-<p>These figures are the current release, v1.66.1. The lower no-encryption boot comes from UI asset
+<p>These figures were measured on v1.66.1, and releases since have not changed the engine measured here. The lower no-encryption boot comes from UI asset
 compression moving off the startup path; a build older than that change comes up slower.</p>
 <p>The point of re-measuring: across dozens of releases, a full security-hardening pass, custom credential
 types, and new governance features, the binary moved only from about 29 to 31 mebibytes and the idle
