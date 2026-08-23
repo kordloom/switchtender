@@ -59,16 +59,19 @@ func (d *Dispatcher) notify(r *run.Run) {
 // bounded and its failure logged and dropped, like the built-in channels.
 // redactForExternal returns a copy of r safe to send off the host to an external channel, a plugin
 // notifier or a webhook. Survey answers and template vars can carry secrets, each notification
-// target carries a routing key or API token, and Command holds the raw script body of a bash,
-// python, powershell, or go run, which can embed inline secrets or sensitive arguments. All three
-// are cleared here so the two external paths stay in parity and neither forgets a field the other
-// strips. The in-tenant run store, the SSE hub, and the run-detail API keep Command; only what
-// leaves the host loses it.
+// target carries a routing key or API token, Command holds the raw script body of a bash, python,
+// powershell, or go run, which can embed inline secrets or sensitive arguments, and Outputs holds the
+// values a playbook published with set_stats, which is exactly how a stripped extra var, survey
+// answer, or runtime-fetched token re-enters the run and is not covered by the run masker unless it
+// was a registered credential. All four are cleared here so the two external paths stay in parity and
+// neither forgets a field the other strips. The in-tenant run store, the SSE hub, and the run-detail
+// API keep them; only what leaves the host loses them.
 func redactForExternal(r *run.Run) run.Run {
 	out := *r
 	out.ExtraVars = nil
 	out.Notifications = nil
 	out.Command = ""
+	out.Outputs = nil
 	return out
 }
 

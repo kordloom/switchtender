@@ -383,7 +383,8 @@ func denyOnAuthzError(w http.ResponseWriter, log *zap.Logger, err error) bool {
 // which is the same rule fetching one run applies, so listing and fetching cannot disagree.
 // derivedReadScan bounds how many recent runs are consulted when deciding what a derived view may
 // show. The views themselves are already windowed, so this only has to cover the same ground.
-const derivedReadScan = 2000
+// It is a var, not a const, only so a test can shrink it to force the aged-out-of-window case.
+var derivedReadScan = 2000
 
 // derivedReadFilter returns a predicate deciding whether a row derived from a run may be shown, and
 // whether the caller may see fleet-wide aggregates at all.
@@ -405,25 +406,37 @@ func derivedReadFilter(ctx context.Context, authz *authorizer,
 	if filter("proj_probe", "") && filter("cred_probe", "") {
 		return func(string) bool { return true }, true, nil
 	}
+	// Whether the caller can read anything decides only whether estate-wide aggregates that name no
+	// run are shown at all, so a bounded probe of recent runs answers it. Which individual rows show
+	// is decided per run below, not from this scan.
 	page, err := store.ListPage(ctx, run.ListFilter{}, derivedReadScan, 0)
 	if err != nil {
 		return nil, false, err
 	}
-	// Decided the same way the run list decides it: a run is readable when every object it touches
-	// is. Answering differently here would mean a host page and a run page disagreed about the same
-	// run, which is its own kind of wrong.
-	readable, err := readableRuns(ctx, authz, page)
+	probe, err := readableRuns(ctx, authz, page)
 	if err != nil {
 		return nil, false, err
 	}
-	allowed := make(map[string]struct{}, len(readable))
-	for _, rn := range readable {
-		allowed[rn.ID] = struct{}{}
-	}
-	return func(id string) bool {
-		_, ok := allowed[id]
+	// A row is shown when its own governing run is readable, checked on demand and memoized, however
+	// old that run is. The predicate used to keep only the ids of the 2000 newest runs, so on a busy
+	// install a grant-restricted caller silently lost every drift, host-history, and host-facts row
+	// whose run had aged past that window: the fix has to consult the actual governing run, not a
+	// recent slice of the whole install. A run is readable when every object it touches is, the same
+	// rule the run list applies, so a host page and a run page cannot disagree about one run.
+	seen := make(map[string]bool)
+	keep = func(id string) bool {
+		if v, ok := seen[id]; ok {
+			return v
+		}
+		ok := false
+		if rn, gerr := store.Get(ctx, id); gerr == nil {
+			readable, rerr := readableRuns(ctx, authz, []*run.Run{rn})
+			ok = rerr == nil && len(readable) == 1
+		}
+		seen[id] = ok
 		return ok
-	}, len(allowed) > 0, nil
+	}
+	return keep, len(probe) > 0, nil
 }
 
 // grantsEnforced reports whether object grants actually restrict what this caller may read.
