@@ -101,3 +101,49 @@ func TestAWorkerReportCannotResurrectASettledRun(t *testing.T) {
 		t.Errorf("the cleared lease came back as %q", got.ClaimedBy)
 	}
 }
+
+// TestARunningReportCannotResurrectASettledRun proves the non-terminal (progress) branch of the save
+// handler is fenced too. The terminal branch went through the compare-and-swap, but a running
+// progress report racing the same sweep still did a plain whole-row save that put the run back to
+// running under its stale lease, and a later terminal report then committed a second, contradictory
+// outcome. The fence now refuses a report on a run the sweep has settled.
+func TestARunningReportCannotResurrectASettledRun(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	backing := run.NewMemStore()
+	wrapped := &staleSnapshotStore{Store: backing}
+	ts := httptest.NewServer(relay.NewHandler(wrapped, relay.SinglePool(testWorkerToken), nil, nil, nil))
+	t.Cleanup(ts.Close)
+	c := relay.NewClient(relay.NewHTTPTransport(ts.URL, testWorkerToken, ts.Client()))
+
+	claimed := time.Now()
+	running := &run.Run{
+		ID: "run_raced2", Playbook: "site.yml", Status: run.StatusRunning, CreatedAt: claimed,
+		ClaimedBy: "worker-a", ClaimedAt: &claimed, StartedAt: &claimed,
+	}
+	settled := *running
+	settled.Status = run.StatusInterrupted
+	settled.ClaimedBy = ""
+	settled.ClaimedAt = nil
+	if err := backing.Save(ctx, &settled); err != nil {
+		t.Fatalf("seed settled run: %v", err)
+	}
+	// The handler's own read answers with the stale running view; every later read sees the truth.
+	wrapped.stale = running
+	wrapped.remaining = 1
+
+	report := *running // status stays running: a progress report, not a terminal one
+	if err := c.Save(ctx, &report); err == nil {
+		t.Error("a running progress report over a settled run was accepted, want a refusal")
+	}
+	got, err := backing.Get(ctx, "run_raced2")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Status != run.StatusInterrupted {
+		t.Fatalf("the settled run is now %q: a progress report resurrected it", got.Status)
+	}
+	if got.ClaimedBy != "" {
+		t.Errorf("the cleared lease came back as %q", got.ClaimedBy)
+	}
+}

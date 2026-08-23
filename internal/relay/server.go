@@ -393,7 +393,44 @@ func (s *relayServer) save(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	if err := s.store.Save(r.Context(), stored); err != nil {
+	// A non-terminal (running) progress report. Like the terminal branch, it must never move a run
+	// the janitor has already settled back to running, nor restore a lease the sweep cleared, which a
+	// plain whole-row save of the pre-read snapshot did: that resurrected the run and set up a second,
+	// contradictory outcome commit exactly as the terminal path's fence prevents. So the run's own row
+	// is re-read, a settled one is refused, the pending-to-running move goes through the same
+	// compare-and-swap as everything else here, and only the progress the worker learned is written
+	// onto the authoritative row, never its status or lease from the snapshot.
+	fresh, err := s.store.Get(r.Context(), id)
+	if err != nil {
+		s.internal(w, "save", err)
+		return
+	}
+	if fresh.Status.Terminal() {
+		writeErr(w, http.StatusConflict,
+			"the run settled elsewhere while this report was in flight, so it was not applied")
+		return
+	}
+	if fresh.Status == run.StatusPending {
+		if moved, terr := s.store.TransitionStatus(r.Context(), id, run.StatusPending, run.StatusRunning); terr != nil {
+			s.internal(w, "save", terr)
+			return
+		} else if !moved {
+			writeErr(w, http.StatusConflict,
+				"the run settled elsewhere while this report was in flight, so it was not applied")
+			return
+		}
+		fresh.Status = run.StatusRunning
+	}
+	if fresh.StartedAt == nil {
+		fresh.StartedAt = stored.StartedAt
+	}
+	if stored.Warning != "" {
+		fresh.Warning = stored.Warning
+	}
+	if len(stored.Outputs) > 0 {
+		fresh.Outputs = stored.Outputs
+	}
+	if err := s.store.Save(r.Context(), fresh); err != nil {
 		s.internal(w, "save", err)
 		return
 	}

@@ -143,7 +143,7 @@ func createInventoryHandler(store inventory.Store, authz *authorizer, sealer *cr
 			respondError(w, log, http.StatusInternalServerError, "could not store inventory")
 			return
 		}
-		respondJSON(w, log, http.StatusCreated, i, wantsPretty(r))
+		respondJSON(w, log, http.StatusCreated, redactInventory(r.Context(), i), wantsPretty(r))
 	}
 }
 
@@ -230,7 +230,7 @@ func updateInventoryHandler(store inventory.Store, authz *authorizer, sealer *cr
 			respondError(w, log, http.StatusInternalServerError, "could not read inventory")
 			return
 		}
-		respondJSON(w, log, http.StatusOK, updated, wantsPretty(r))
+		respondJSON(w, log, http.StatusOK, redactInventory(r.Context(), updated), wantsPretty(r))
 	}
 }
 
@@ -260,6 +260,15 @@ func listInventoriesHandler(store inventory.Store, authz *authorizer, log *zap.L
 			listInventoriesResponse{Inventories: redactInventories(r.Context(), visible),
 				Count: len(visible)}, wantsPretty(r))
 	}
+}
+
+// redactInventory returns the inventory with its secret-looking variable values masked for a
+// non-admin caller, and unchanged for an admin. The create and update responses return the stored
+// record, so without this a manager who was served a redacted list, then saved and got the full
+// record back, would read the plaintext the list path deliberately hides. It reuses redactInventories
+// so one place decides what a non-admin may see.
+func redactInventory(ctx context.Context, inv *inventory.Inventory) *inventory.Inventory {
+	return redactInventories(ctx, []*inventory.Inventory{inv})[0]
 }
 
 // redactInventories removes secret-looking variable values from inventory content unless the caller
