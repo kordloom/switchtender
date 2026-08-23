@@ -93,53 +93,51 @@ const (
 	seedHistoryBackshiftHours = 12
 )
 
-// SeedClock is the demo's stand-in for the wall clock. It opens in the past and advances a fixed step
-// each read, so one run's handful of timestamps cluster in a small window rather than sharing a single
-// instant, and the seeder steps it forward between runs so successive runs land further apart in time.
-// It never reads past its ceiling, so no seeded time is ever in the future however many runs are
-// seeded. It is safe for the dispatcher's worker goroutines and the seeder to read and step at once.
+// SeedClock is the demo's stand-in for the wall clock. It reads the real clock shifted into the
+// past, so elapsed time between two readings is real elapsed time: a run whose tasks took six
+// seconds shows a six-second duration beside its timeline. The old design advanced a fixed
+// millisecond per reading, which collapsed every run's start-to-end span to a couple of
+// milliseconds while its task events plainly took seconds, and a stranger who noticed the numbers
+// disagreeing on one screen concluded the records were fabricated. The seeder steps the shift
+// forward between runs so successive runs land further apart, and the shift never shrinks past
+// seedRunMargin, so no seeded time is ever near or past now. It is safe for the dispatcher's worker
+// goroutines and the seeder to read and step at once.
 type SeedClock struct {
 	// mu serializes reads and steps so concurrent shard executions and the seeder never race.
 	mu sync.Mutex
-	// cursor is the last time handed out; every read advances it.
-	cursor time.Time
-	// step is how far each read moves the cursor, so successive stamps within one run strictly advance.
-	step time.Duration
-	// ceiling is the latest time the clock will ever return, holding every stamp safely before now.
-	ceiling time.Time
+	// shift is how far into the past this clock reads, always at least seedRunMargin.
+	shift time.Duration
+	// last is the previous reading, so stamps strictly advance even if two reads land on the same
+	// wall nanosecond.
+	last time.Time
 }
 
-// NewSeedClock returns a clock opened seedRunWindow before now, reading forward a millisecond at a
-// time and never passing seedRunMargin before now.
+// NewSeedClock returns a clock reading seedRunWindow in the past.
 func NewSeedClock() *SeedClock {
-	now := time.Now()
-	return &SeedClock{
-		cursor:  now.Add(-seedRunWindow),
-		step:    time.Millisecond,
-		ceiling: now.Add(-seedRunMargin),
-	}
+	return &SeedClock{shift: seedRunWindow}
 }
 
-// Now returns the next reading, one step past the last and never past the ceiling. It is the function
-// handed to dispatch.WithClock.
+// Now returns the shifted reading, strictly after the previous one. It is the function handed to
+// dispatch.WithClock.
 func (c *SeedClock) Now() time.Time {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.cursor = c.cursor.Add(c.step)
-	if c.cursor.After(c.ceiling) {
-		c.cursor = c.ceiling
+	t := time.Now().Add(-c.shift)
+	if !t.After(c.last) {
+		t = c.last.Add(time.Millisecond)
 	}
-	return c.cursor
+	c.last = t
+	return t
 }
 
-// advance steps the clock forward by gap so the next seeded run lands that much later, without passing
-// the ceiling.
+// advance shrinks the shift by gap so the next seeded run lands that much later, never closer to now
+// than seedRunMargin.
 func (c *SeedClock) advance(gap time.Duration) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.cursor = c.cursor.Add(gap)
-	if c.cursor.After(c.ceiling) {
-		c.cursor = c.ceiling
+	c.shift -= gap
+	if c.shift < seedRunMargin {
+		c.shift = seedRunMargin
 	}
 }
 
@@ -167,7 +165,7 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 		if i%2 == 1 {
 			source, sourceID, actor = "template", "tpl_deploy_web", "admin"
 		}
-		opts := seedOpts(source, sourceID, actor,
+		opts := seedOpts(ctx, d, source, sourceID, actor,
 			map[string]string{"env": "prod", "team": "platform"}, failVars(failHost)...)
 		r, err := d.Submitter.Submit(ctx, playbook, inv, opts...)
 		if err != nil {
@@ -178,7 +176,7 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 
 	// A split where one shard fails, showing the merged matrix and failed-shard isolation.
 	split, err := d.Submitter.SubmitSplit(ctx, playbook, inv, 3,
-		seedOpts("template", "tpl_deploy_web", "admin",
+		seedOpts(ctx, d, "template", "tpl_deploy_web", "admin",
 			map[string]string{"env": "prod", "ticket": "OPS-482"}, failVars("db01")...)...)
 	if err != nil {
 		return fmt.Errorf("seed split: %w", err)
@@ -192,7 +190,7 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 		{Name: "verify", Playbook: playbook},
 	}
 	pipe, err := d.Submitter.SubmitPipeline(ctx, "Release 4.2", inv, steps,
-		seedOpts("api", "", "deploy-bot", map[string]string{"env": "prod", "ticket": "REL-42"})...)
+		seedOpts(ctx, d, "api", "", "deploy-bot", map[string]string{"env": "prod", "ticket": "REL-42"})...)
 	if err != nil {
 		return fmt.Errorf("seed pipeline: %w", err)
 	}
@@ -200,7 +198,7 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 
 	// One more failure on a different host for variety.
 	last, err := d.Submitter.Submit(ctx, playbook, inv,
-		seedOpts("rerun", "", "admin",
+		seedOpts(ctx, d, "rerun", "", "admin",
 			map[string]string{"env": "staging"}, failVars("edge01")...)...)
 	if err != nil {
 		return fmt.Errorf("seed run: %w", err)
@@ -210,7 +208,7 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 	// One fact-gathering play, so every host page shows its distribution, kernel, and the rest
 	// rather than an empty panel.
 	factsPlay := filepath.Join(dir, "facts.yml")
-	factsOpts := seedOpts("schedule", "sch_facts", "deploy-bot", map[string]string{"env": "prod"})
+	factsOpts := seedOpts(ctx, d, "schedule", "sch_facts", "deploy-bot", map[string]string{"env": "prod"})
 	if factsRun, err := d.Submitter.Submit(ctx, factsPlay, inv, factsOpts...); err == nil {
 		settle(ctx, d, factsRun.ID)
 	} else {
@@ -219,7 +217,7 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 
 	// A dry run of a check playbook surfaces configuration drift per host on the Drift page.
 	driftPlay := filepath.Join(dir, "drift.yml")
-	driftOpts := seedOpts("schedule", "sch_drift_check", "deploy-bot",
+	driftOpts := seedOpts(ctx, d, "schedule", "sch_drift_check", "deploy-bot",
 		map[string]string{"env": "prod"}, run.WithDryRun(true))
 	if driftRun, err := d.Submitter.Submit(ctx, driftPlay, inv, driftOpts...); err == nil {
 		settle(ctx, d, driftRun.ID)
@@ -243,7 +241,7 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 // finishes cleanly on whatever host serves the demo.
 func seedMultiTool(ctx context.Context, d Deps, tfDir, playbook, inv string, log *zap.Logger) error {
 	bash, err := d.Submitter.Submit(ctx, "", "",
-		seedOpts("schedule", "sch_log_rotate", "deploy-bot", map[string]string{"env": "prod"},
+		seedOpts(ctx, d, "schedule", "sch_log_rotate", "deploy-bot", map[string]string{"env": "prod"},
 			run.WithTool(run.ToolBash), run.WithCommand(scriptLogRotate))...)
 	if err != nil {
 		return fmt.Errorf("seed bash run: %w", err)
@@ -252,7 +250,7 @@ func seedMultiTool(ctx context.Context, d Deps, tfDir, playbook, inv string, log
 
 	if have("python3") {
 		py, err := d.Submitter.Submit(ctx, "", "",
-			seedOpts("template", "tpl_reconcile", "admin", map[string]string{"env": "prod"},
+			seedOpts(ctx, d, "template", "tpl_reconcile", "admin", map[string]string{"env": "prod"},
 				run.WithTool(run.ToolPython), run.WithCommand(scriptReconcile))...)
 		if err != nil {
 			return fmt.Errorf("seed python run: %w", err)
@@ -264,7 +262,7 @@ func seedMultiTool(ctx context.Context, d Deps, tfDir, playbook, inv string, log
 
 	if have("terraform") {
 		tf, err := d.Submitter.Submit(ctx, "", "",
-			seedOpts("api", "", "deploy-bot", map[string]string{"env": "staging"},
+			seedOpts(ctx, d, "api", "", "deploy-bot", map[string]string{"env": "staging"},
 				run.WithTool(run.ToolTerraform), run.WithCommand(tfDir), run.WithDryRun(true))...)
 		if err != nil {
 			return fmt.Errorf("seed terraform run: %w", err)
@@ -276,7 +274,7 @@ func seedMultiTool(ctx context.Context, d Deps, tfDir, playbook, inv string, log
 
 	if have("go") {
 		gorun, err := d.Submitter.Submit(ctx, "", "",
-			seedOpts("template", "tpl_capacity", "admin", map[string]string{"env": "prod"},
+			seedOpts(ctx, d, "template", "tpl_capacity", "admin", map[string]string{"env": "prod"},
 				run.WithTool(run.ToolGo), run.WithCommand(scriptFleetGo))...)
 		if err != nil {
 			return fmt.Errorf("seed go run: %w", err)
@@ -292,7 +290,7 @@ func seedMultiTool(ctx context.Context, d Deps, tfDir, playbook, inv string, log
 		{Name: "smoke-test", Tool: run.ToolBash, Command: scriptSmoke},
 	}
 	pipe, err := d.Submitter.SubmitPipeline(ctx, "Provision and deploy", inv, steps,
-		seedOpts("template", "tpl_provision", "admin",
+		seedOpts(ctx, d, "template", "tpl_provision", "admin",
 			map[string]string{"env": "prod", "ticket": "OPS-503"})...)
 	if err != nil {
 		return fmt.Errorf("seed mixed pipeline: %w", err)
@@ -333,13 +331,35 @@ func failVars(host string) []run.SubmitOption {
 
 // seedOpts adds the provenance and labels a real deployment records, so the demo shows the origin
 // column, the actor, and label filtering with believable data rather than blanks.
-func seedOpts(source, sourceID, actor string, labels map[string]string, extra ...run.SubmitOption) []run.SubmitOption {
+func seedOpts(ctx context.Context, d Deps, source, sourceID, actor string, labels map[string]string,
+	extra ...run.SubmitOption) []run.SubmitOption {
 	opts := []run.SubmitOption{
 		run.WithSource(source, sourceID),
 		run.WithActor(actor),
 		run.WithLabels(labels),
 	}
+	// Every seeded run gets the creation entry an API-created run gets, and carries its receipt, so
+	// the receipt button works on the demo. Without it every run answered "no creation receipt, so
+	// its start cannot be placed on the chain", which is the flagship feature failing on the one
+	// install strangers try first.
+	if d.Audit != nil {
+		entry := &audit.Entry{
+			ID: audit.NewID(), At: seedTime(d), Actor: actor, Method: "POST", Path: "/v1/runs",
+		}
+		if err := d.Audit.Append(ctx, entry); err == nil {
+			opts = append(opts, run.WithAuditReceiptOf(audit.Receipt(entry)))
+		}
+	}
 	return append(opts, extra...)
+}
+
+// seedTime reads the seed clock when one is set, so a creation entry lands just before the run it
+// creates, and the wall clock otherwise.
+func seedTime(d Deps) time.Time {
+	if d.Clock != nil {
+		return d.Clock.Now()
+	}
+	return time.Now()
 }
 
 // settle waits for a seeded run to finish, then for its outcome to reach the chain, and only then
