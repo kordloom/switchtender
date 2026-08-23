@@ -113,7 +113,19 @@ func Build(ctx context.Context, runs run.Store, audits audit.Store, id audit.Ide
 	// therefore proves its own entries belong to the log, and names the outcome entry and the digest it
 	// committed, without reproducing the body.
 	if !opts.Sparse {
-		if body, berr := outcome.Body(ctx, runs, r); berr == nil {
+		switch body, berr := outcome.Body(ctx, runs, r); {
+		case berr != nil:
+			res.Notes = append(res.Notes, "the outcome could not be rebuilt, so the receipt proves "+
+				"the chain but does not show what the run did: "+berr.Error())
+		case !audit.VerifyContentDigest(outcomeEntry.ContentDigest, outcomeEntry.Nonce, body):
+			// The rebuilt record no longer matches what the chain committed, which happens after
+			// routine retention deletes the run's logs or trims its summaries. Attaching it anyway
+			// would hand out a receipt whose own verifier rejects it as forged, so the disclosure is
+			// withheld and the receipt says why. The chain segment it proves is still intact.
+			res.Notes = append(res.Notes, "the outcome rebuilt today no longer matches the digest "+
+				"the chain committed, usually because retention has pruned this run's logs or "+
+				"summaries, so the receipt proves the chain but does not show what the run did")
+		default:
 			var bodyObj any
 			if json.Unmarshal(body, &bodyObj) == nil {
 				if claim := outcomeClaim(doc); claim != nil {
@@ -122,9 +134,6 @@ func Build(ctx context.Context, runs run.Store, audits audit.Store, id audit.Ide
 					discloseSpec(claim, r)
 				}
 			}
-		} else {
-			res.Notes = append(res.Notes, "the outcome could not be rebuilt, so the receipt proves "+
-				"the chain but does not show what the run did: "+berr.Error())
 		}
 		discloseDecisions(doc, entries, r)
 	}
