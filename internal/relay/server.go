@@ -331,27 +331,71 @@ func (s *relayServer) save(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusConflict, err.Error())
 		return
 	}
-	wasTerminal := stored.Status.Terminal()
 	applyWorkerReport(stored, &body)
-	if err := s.store.Save(r.Context(), stored); err != nil {
-		s.internal(w, "save", err)
-		return
-	}
-	// Only the transition into a terminal state is recorded. A worker saves repeatedly as a run
-	// progresses, and the outcome is the part somebody asks about later.
-	if !wasTerminal && stored.Status.Terminal() {
+	if stored.Status.Terminal() {
+		// The terminal transition goes through the same compare-and-swap the in-process executor
+		// uses, never a whole-row save. The guards above evaluated a snapshot, and a janitor sweep
+		// that settled the run between that read and this write must win: a plain save silently
+		// resurrected the settled run, restored the stale lease over a requeue, and then committed a
+		// second, contradictory outcome entry, which poisons the run's receipt permanently.
+		ended := time.Now()
+		if stored.EndedAt != nil {
+			ended = *stored.EndedAt
+		}
+		fin := run.Finalization{
+			Status: stored.Status, ExitCode: stored.ExitCode, Error: stored.Error,
+			Warning: stored.Warning, CommitSHA: stored.CommitSHA,
+			Image: stored.Image, PullCredentialID: stored.PullCredentialID,
+			Outputs: stored.Outputs, EndedAt: ended,
+		}
+		moved, err := s.store.FinalizeRunning(r.Context(), id, fin)
+		if err != nil {
+			s.internal(w, "save", err)
+			return
+		}
+		if !moved {
+			// A claimed run stays pending until its first progress report, and a fast worker may
+			// report terminal before ever sending one, so the run is stepped to running first, by
+			// compare-and-swap like everything else here, and finalized again. A run a sweep settled
+			// fails both swaps and the report is refused, which is the point of the fence.
+			if ok, terr := s.store.TransitionStatus(r.Context(), id, run.StatusPending, run.StatusRunning); terr == nil && ok {
+				moved, err = s.store.FinalizeRunning(r.Context(), id, fin)
+				if err != nil {
+					s.internal(w, "save", err)
+					return
+				}
+			}
+		}
+		if !moved {
+			writeErr(w, http.StatusConflict,
+				"the run settled elsewhere while this report was in flight, so it was not applied")
+			return
+		}
+		// The outcome digests what the store now holds, so the finalized row is read back rather
+		// than trusting this handler's in-memory copy of it.
+		final, gerr := s.store.Get(r.Context(), id)
+		if gerr != nil {
+			final = stored
+			final.EndedAt = &ended
+		}
 		// The control node commits the run's outcome to the chain here, the same entry a run executed
 		// in process gets, so a relay run is receiptable too. The worker streamed its log, events, and
 		// summaries before this terminal save, so the evidence is in the store to digest. A child of a
 		// split or pipeline is skipped, its outcome rolled into the parent the coordinator commits, and
 		// the commit is not fail-closed since the run has already happened.
-		if s.audits != nil && stored.ParentID == nil {
-			if err := outcome.Commit(r.Context(), s.audits, s.store, stored, "system:relay", time.Now); err != nil {
-				s.log.Error("relay: commit run outcome: "+err.Error(), zap.String("run_id", stored.ID))
+		if s.audits != nil && final.ParentID == nil {
+			if err := outcome.Commit(r.Context(), s.audits, s.store, final, "system:relay", time.Now); err != nil {
+				s.log.Error("relay: commit run outcome: "+err.Error(), zap.String("run_id", final.ID))
 			}
 		}
-		s.record(r.Context(), poolFrom(r.Context()), stored.ClaimedBy,
-			"/relay/finished/"+stored.ID+"/"+string(stored.Status))
+		s.record(r.Context(), poolFrom(r.Context()), final.ClaimedBy,
+			"/relay/finished/"+final.ID+"/"+string(final.Status))
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if err := s.store.Save(r.Context(), stored); err != nil {
+		s.internal(w, "save", err)
+		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
