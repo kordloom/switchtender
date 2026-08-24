@@ -421,17 +421,23 @@ func (s *relayServer) save(w http.ResponseWriter, r *http.Request) {
 		}
 		fresh.Status = run.StatusRunning
 	}
-	if fresh.StartedAt == nil {
-		fresh.StartedAt = stored.StartedAt
-	}
-	if stored.Warning != "" {
-		fresh.Warning = stored.Warning
-	}
-	if len(stored.Outputs) > 0 {
-		fresh.Outputs = stored.Outputs
-	}
-	if err := s.store.Save(r.Context(), fresh); err != nil {
+	// The progress itself lands through a fenced write rather than a whole-row save. Saving the
+	// re-read snapshot still lost the race it was meant to close: between the Get above and the
+	// write, the sweep could settle the run, and the save then restored its status, its lease, and
+	// its cleared claim secret from a snapshot taken before that happened. One statement that
+	// carries the fence cannot be overtaken that way.
+	moved, err := s.store.ApplyRunningProgress(r.Context(), id, fresh.ClaimedBy, run.Progress{
+		StartedAt: stored.StartedAt,
+		Warning:   stored.Warning,
+		Outputs:   stored.Outputs,
+	})
+	if err != nil {
 		s.internal(w, "save", err)
+		return
+	}
+	if !moved {
+		writeErr(w, http.StatusConflict,
+			"the run settled elsewhere while this report was in flight, so it was not applied")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

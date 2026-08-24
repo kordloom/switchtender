@@ -88,6 +88,7 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	})
 	t.Run("transition status", func(t *testing.T) { testTransitionStatus(t, newStore()) })
 	t.Run("finalize running is one write", func(t *testing.T) { testFinalizeRunning(t, newStore()) })
+	t.Run("running progress is fenced", func(t *testing.T) { testApplyRunningProgress(t, newStore()) })
 	t.Run("workers", func(t *testing.T) { testWorkers(t, newStore()) })
 	t.Run("retention purge", func(t *testing.T) { testPurge(t, newStore()) })
 	t.Run("summary trim bounds growth", func(t *testing.T) { testTrimSummaries(t, newStore()) })
@@ -154,6 +155,112 @@ func testTransitionStatus(t *testing.T, store run.Store) {
 	}
 	if ok, err := store.TransitionStatus(ctx, "run_missing", run.StatusPending, run.StatusRejected); err != nil || ok {
 		t.Errorf("missing run transition = (%v, %v), want (false, nil)", ok, err)
+	}
+}
+
+// testApplyRunningProgress checks the non-terminal write is fenced the same way the terminal one is:
+// it records progress for a run still running under the reporting worker, and changes nothing for a
+// run that has settled, that another worker now holds, or that does not exist.
+//
+// The relay used to re-read the run, check it was not terminal, and save the whole row. The sweep
+// could settle the run inside that window, and the save then restored the status, the lease, and the
+// cleared claim secret from the pre-sweep snapshot. The run came back to life under a lease the
+// control node had declared dead, and its later terminal report put a second outcome on the chain
+// beside the interrupted one already committed for it.
+func testApplyRunningProgress(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	started := time.Date(2026, 2, 3, 4, 0, 0, 0, time.UTC)
+	progress := run.Progress{
+		StartedAt: &started,
+		Warning:   "one host was unreachable",
+		Outputs:   map[string]any{"stage": "deploy"},
+	}
+
+	r := sampleRun("run_prog")
+	r.Status = run.StatusRunning
+	r.ClaimedBy = "worker-a"
+	r.StartedAt = nil
+	r.Warning = ""
+	r.Outputs = nil
+	r.IdempotencyKey = "idem_prog"
+	if err := store.Save(ctx, r); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	ok, err := store.ApplyRunningProgress(ctx, "run_prog", "worker-a", progress)
+	if err != nil {
+		t.Fatalf("ApplyRunningProgress() error = %v", err)
+	}
+	if !ok {
+		t.Fatal("ApplyRunningProgress() changed nothing for a running run it holds")
+	}
+	got, err := store.Get(ctx, "run_prog")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.StartedAt == nil || !got.StartedAt.Equal(started) {
+		t.Errorf("started at = %v, want %v", got.StartedAt, started)
+	}
+	if got.Warning != progress.Warning {
+		t.Errorf("warning = %q, want %q", got.Warning, progress.Warning)
+	}
+	if got.Outputs["stage"] != "deploy" {
+		t.Errorf("outputs = %v, want the reported stage", got.Outputs)
+	}
+
+	// A repeated report must not move the start time, so a retry cannot rewrite when work began.
+	later := started.Add(time.Hour)
+	if _, err := store.ApplyRunningProgress(ctx, "run_prog", "worker-a",
+		run.Progress{StartedAt: &later}); err != nil {
+		t.Fatalf("ApplyRunningProgress(repeat) error = %v", err)
+	}
+	if got, err = store.Get(ctx, "run_prog"); err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.StartedAt == nil || !got.StartedAt.Equal(started) {
+		t.Errorf("a repeated report moved the start time to %v, want %v", got.StartedAt, started)
+	}
+	// An empty report leaves what is stored alone rather than blanking it.
+	if got.Warning != progress.Warning || got.Outputs["stage"] != "deploy" {
+		t.Errorf("an empty report cleared stored progress: warning=%q outputs=%v",
+			got.Warning, got.Outputs)
+	}
+
+	// Another worker's report is refused, so a reclaimed executor cannot write onto the run the
+	// worker that replaced it now holds.
+	if ok, err := store.ApplyRunningProgress(ctx, "run_prog", "worker-b",
+		run.Progress{Warning: "from the wrong worker"}); err != nil {
+		t.Fatalf("ApplyRunningProgress(other worker) error = %v", err)
+	} else if ok {
+		t.Error("a worker that does not hold the run wrote progress onto it")
+	}
+
+	// The case that matters: the sweep settles the run, and a report already in flight must not
+	// bring it back.
+	settled := run.Finalization{Status: run.StatusInterrupted, Error: "executor lease expired",
+		EndedAt: time.Date(2026, 2, 3, 5, 0, 0, 0, time.UTC)}
+	if moved, err := store.FinalizeRunning(ctx, "run_prog", settled); err != nil || !moved {
+		t.Fatalf("FinalizeRunning() moved = %v, err = %v", moved, err)
+	}
+	if ok, err := store.ApplyRunningProgress(ctx, "run_prog", "worker-a",
+		run.Progress{Warning: "still going"}); err != nil {
+		t.Fatalf("ApplyRunningProgress(settled) error = %v", err)
+	} else if ok {
+		t.Error("a report resurrected a run the sweep had already settled")
+	}
+	if got, err = store.Get(ctx, "run_prog"); err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.Status != run.StatusInterrupted {
+		t.Errorf("status = %q, want it to stay interrupted", got.Status)
+	}
+
+	// A run that does not exist changes nothing and is not an error.
+	if ok, err := store.ApplyRunningProgress(ctx, "run_missing", "worker-a",
+		run.Progress{Warning: "x"}); err != nil {
+		t.Fatalf("ApplyRunningProgress(missing) error = %v", err)
+	} else if ok {
+		t.Error("a missing run reported a change")
 	}
 }
 

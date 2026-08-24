@@ -68,6 +68,19 @@ func AbandonedParent(r *Run, cutoff time.Time) bool {
 // Finalization is everything an executor learns by running a run: how it ended and the facts that
 // explain it. It is one value because a store writes it as one statement, so a run is never left
 // terminal with the facts missing.
+// Progress is what an executor learns about a run while it is still under way, as opposed to the
+// facts that explain how it ended, which travel in a Finalization.
+type Progress struct {
+	// StartedAt is when execution began. It is applied only when the stored run has none, so a
+	// repeated report cannot move a start time backward.
+	StartedAt *time.Time
+	// Warning is the executor's advisory note. Empty leaves the stored one alone.
+	Warning string
+	// Outputs are the set_stats values published so far. Nil leaves the stored ones alone.
+	Outputs map[string]any
+}
+
+// Finalization holds the facts that explain how a run ended.
 type Finalization struct {
 	// Status is the terminal status the run reached.
 	Status Status
@@ -180,6 +193,18 @@ type Store interface {
 	// running runs only. The caller must treat a false or an error as "the run did not finish here"
 	// and leave it for the sweep.
 	FinalizeRunning(ctx context.Context, id string, fin Finalization) (bool, error)
+	// ApplyRunningProgress records what an executor learned while a run is under way, in one write
+	// fenced on the run still being running and still held by owner. It changes nothing and returns
+	// false otherwise.
+	//
+	// The relay's progress handler used to re-read the row, check it was not terminal, and then save
+	// the whole row back. Between that read and that write the janitor could settle the run, and the
+	// save then restored the status, the lease, and the cleared claim secret from the snapshot: the
+	// run was resurrected, the worker kept executing under a lease the control node had already
+	// declared dead, and its later terminal report put a second, contradictory outcome on the audit
+	// chain beside the interrupted one the sweep had already committed. A fenced write cannot do
+	// that, for the same reason FinalizeRunning cannot.
+	ApplyRunningProgress(ctx context.Context, id, owner string, p Progress) (bool, error)
 	// Workers lists executors by the leases they hold, most recently seen first. Only leases
 	// stamped within WorkerWindow count, so the listing stays bounded as run history grows.
 	Workers(ctx context.Context) ([]WorkerInfo, error)
@@ -952,6 +977,27 @@ func (m *memStore) FinalizeRunning(_ context.Context, id string, fin Finalizatio
 	r.Outputs = fin.Outputs
 	r.Warning = fin.Warning
 	r.EndedAt = &ended
+	return true, nil
+}
+
+// ApplyRunningProgress records a worker's progress on a run it still holds, in one locked write.
+func (m *memStore) ApplyRunningProgress(_ context.Context, id, owner string, p Progress) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r, ok := m.runs[id]
+	if !ok || r.Status != StatusRunning || r.ClaimedBy != owner {
+		return false, nil
+	}
+	if r.StartedAt == nil && p.StartedAt != nil {
+		started := *p.StartedAt
+		r.StartedAt = &started
+	}
+	if p.Warning != "" {
+		r.Warning = p.Warning
+	}
+	if len(p.Outputs) > 0 {
+		r.Outputs = p.Outputs
+	}
 	return true, nil
 }
 

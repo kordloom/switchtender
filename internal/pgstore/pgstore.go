@@ -2390,6 +2390,31 @@ WHERE id=$10 AND status=$11`,
 	return n > 0, nil
 }
 
+// ApplyRunningProgress records a worker's progress in one write fenced on the run still being
+// running and still held by owner, so a report in flight cannot resurrect a run the sweep settled.
+//
+// started_at uses COALESCE so a repeated report never moves a start time backward, and warning and
+// outputs keep their stored value when the report carries none, which is what lets one statement
+// stand in for the read-modify-write this replaced.
+func (s *store) ApplyRunningProgress(ctx context.Context, id, owner string,
+	p run.Progress) (bool, error) {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE runs SET started_at=COALESCE(NULLIF(started_at,''), $1),
+warning=CASE WHEN $2='' THEN warning ELSE $2 END,
+outputs=CASE WHEN $3='' THEN outputs ELSE $3 END
+WHERE id=$4 AND status=$5 AND claimed_by=$6`,
+		sqlutil.NullTime(p.StartedAt), p.Warning, sqlutil.JSONMap(p.Outputs),
+		id, string(run.StatusRunning), owner)
+	if err != nil {
+		return false, fmt.Errorf("apply running progress: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("apply running progress: %w", err)
+	}
+	return n > 0, nil
+}
+
 // RunTimings returns the timing fields of the most recent top-level runs, newest first.
 //
 // It selects seven columns rather than the whole row on purpose. The metrics endpoint reads this on
