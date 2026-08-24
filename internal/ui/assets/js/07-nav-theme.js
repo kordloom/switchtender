@@ -45,7 +45,10 @@ function buildNav() {
 				a.className = "nav-item" + (it.key === activeKey ? " active" : "");
 				a.href = it.href;
 				a.innerHTML = svgIcon(NAV_ICONS[it.key] || "");
-				a.appendChild(document.createTextNode(it.label));
+				const lbl = document.createElement("span");
+				lbl.className = "nav-label";
+				lbl.textContent = it.label;
+				a.appendChild(lbl);
 				if (it.key === activeKey) a.setAttribute("aria-current", "page");
 				g.appendChild(a);
 			}
@@ -61,7 +64,7 @@ function buildNav() {
 	const sideBrand = document.createElement("a");
 	sideBrand.className = "side-brand";
 	sideBrand.href = "/ui/";
-	sideBrand.innerHTML = '<picture><source media="(prefers-color-scheme: dark)" srcset="/ui/assets/logo-train-tracks-dark.png"><img src="/ui/assets/logo-train-tracks.png" alt=""></picture>SwitchTender';
+	sideBrand.innerHTML = '<picture><source media="(prefers-color-scheme: dark)" srcset="/ui/assets/logo-train-tracks-dark.png"><img src="/ui/assets/logo-train-tracks.png" alt=""></picture><span class="side-brand-word">SwitchTender</span>';
 	side.appendChild(sideBrand);
 	const sideNav = document.createElement("nav");
 	sideNav.setAttribute("aria-label", "Primary navigation");
@@ -69,6 +72,33 @@ function buildNav() {
 	side.appendChild(sideNav);
 	side.appendChild(accountGroup());
 	side.appendChild(themeGroup());
+
+	// Collapse control: shrink the docked sidebar to an icon rail and back, remembered per browser.
+	// Collapsed, each item's label moves to a hover tip, so the icons stay reachable without the text.
+	const collapseBtn = document.createElement("button");
+	collapseBtn.type = "button";
+	collapseBtn.className = "side-collapse";
+	const chevron = (collapsed) => svgIcon(collapsed
+		? '<polyline points="9 18 15 12 9 6"/>'
+		: '<polyline points="15 18 9 12 15 6"/>') + '<span class="nav-label">Collapse</span>';
+	const applyCollapsed = (v) => {
+		document.body.dataset.navCollapsed = v ? "true" : "false";
+		collapseBtn.setAttribute("aria-label", v ? "Expand navigation" : "Collapse navigation");
+		collapseBtn.setAttribute("aria-pressed", v ? "true" : "false");
+		collapseBtn.innerHTML = chevron(v);
+		side.querySelectorAll(".nav-item").forEach((a) => {
+			const l = a.querySelector(".nav-label");
+			if (v && l) a.dataset.tip = l.textContent;
+			else delete a.dataset.tip;
+		});
+	};
+	collapseBtn.addEventListener("click", () => {
+		const next = document.body.dataset.navCollapsed !== "true";
+		localStorage.setItem("st_nav_collapsed", next ? "1" : "0");
+		applyCollapsed(next);
+	});
+	side.appendChild(collapseBtn);
+	applyCollapsed(localStorage.getItem("st_nav_collapsed") === "1");
 
 	document.body.appendChild(backdrop);
 	document.body.appendChild(drawer);
