@@ -92,6 +92,7 @@ func (u *UI) Handler() http.Handler {
 	mux.HandleFunc("GET /ui/runs/{id}/compare", u.compare)
 	mux.HandleFunc("GET /ui/runs", u.runs)
 	mux.HandleFunc("GET /ui/fleet", u.fleet)
+	mux.HandleFunc("GET /ui/activity", u.activity)
 	mux.HandleFunc("GET /ui/doctor", u.doctor)
 	mux.HandleFunc("GET /ui/drift", u.drift)
 	mux.HandleFunc("GET /ui/hosts/{host}", u.host)
@@ -225,6 +226,12 @@ func (u *UI) login(w http.ResponseWriter, _ *http.Request) {
 // schedules renders the schedules page.
 func (u *UI) schedules(w http.ResponseWriter, _ *http.Request) {
 	u.render(w, "schedules.html", map[string]any{"ReadOnly": u.readOnly})
+}
+
+// activity renders the full-page activity view: the windowed run chart with an outcome breakdown and
+// a CSV export of the bucketed data.
+func (u *UI) activity(w http.ResponseWriter, _ *http.Request) {
+	u.render(w, "activity.html", map[string]any{"ReadOnly": u.readOnly})
 }
 
 // workflows renders the visual workflow editor, where steps are wired into a graph and run as a

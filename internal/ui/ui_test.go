@@ -30,6 +30,10 @@ func TestUIRoutes(t *testing.T) {
 		{ // Test 1: Runs page renders.
 			Name: "runs", Path: "/ui/runs", WantStatus: http.StatusOK, WantContains: `data-page="runs"`,
 		},
+		{ // Test 1b: Activity detail page renders.
+			Name: "activity", Path: "/ui/activity", WantStatus: http.StatusOK,
+			WantContains: `data-page="activity"`,
+		},
 		{ // Test 2: Detail page carries the run id.
 			Name: "detail", Path: "/ui/runs/run_1", WantStatus: http.StatusOK,
 			WantContains: `data-run-id="run_1"`,

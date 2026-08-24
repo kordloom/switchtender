@@ -364,6 +364,60 @@ function renderActivity(runs) {
 	renderActivityView();
 }
 
+// loadActivityPage draws the full-page activity view: the windowed chart, an outcome breakdown that
+// tracks the window, and a CSV export of whatever window and filter are showing. It shares the chart
+// with the overview, so the same controls and drawing serve both.
+async function loadActivityPage() {
+	const status = document.getElementById("status");
+	try {
+		const res = await getJSON("/runs");
+		renderActivity((res && res.runs) || []);
+		wireActivityExport();
+		if (status) status.hidden = true;
+	} catch (e) {
+		if (status) status.textContent = "Could not load activity: " + e.message;
+	}
+}
+
+// updateActivitySummary fills the activity page's headline cards from the current model, so the
+// totals track the chosen window and filter. It is a no-op on any page without the summary element,
+// which is every page but the activity detail one.
+function updateActivitySummary(model) {
+	const el = document.getElementById("activity-summary");
+	if (!el) return;
+	let s = 0, f = 0, o = 0;
+	for (const d of model.days) { s += d.succeeded; f += d.failed; o += d.other; }
+	const total = s + f + o;
+	const rate = total ? Math.round((s / total) * 100) + "%" : "-";
+	el.innerHTML = "";
+	el.appendChild(statCard(total, "Runs in window", ""));
+	el.appendChild(statCard(rate, "Success rate", ""));
+	el.appendChild(statCard(f, "Failed", f ? "failed" : ""));
+	el.appendChild(statCard(o, "Other", ""));
+	el.hidden = false;
+}
+
+// wireActivityExport hooks the Export CSV button to dump the current window's buckets.
+function wireActivityExport() {
+	const btn = document.getElementById("activity-export");
+	if (btn && !btn.dataset.wired) { btn.dataset.wired = "1"; btn.addEventListener("click", exportActivityCSV); }
+}
+
+// exportActivityCSV writes the current window and filter's buckets as CSV: one row per column, with
+// its start, label, and outcome counts, so the chart on screen leaves with the operator as data.
+function exportActivityCSV() {
+	const model = activityBuckets(activityState.runs, new Date(),
+		{ windowH: activityState.windowH, filter: activityState.filter });
+	const rows = [["bucket_start", "label", "succeeded", "failed", "other", "total"]];
+	for (const d of model.days) {
+		rows.push([d.start.toISOString(), d.label, d.succeeded, d.failed, d.other,
+			d.succeeded + d.failed + d.other]);
+	}
+	const csv = rows.map((r) => r.map(csvCell).join(",")).join("\n");
+	const day = new Date().toISOString().slice(0, 10);
+	downloadBlob("switchtender-activity-" + day + ".csv", "text/csv", csv);
+}
+
 // renderActivityView reads the current window, chart style, and filter, models the runs, and draws
 // either the stacked bars or the area-and-dots line into the chart element, then updates the note.
 function renderActivityView() {
@@ -371,6 +425,7 @@ function renderActivityView() {
 	if (!el) return;
 	const model = activityBuckets(activityState.runs, new Date(),
 		{ windowH: activityState.windowH, filter: activityState.filter });
+	updateActivitySummary(model);
 	el.classList.toggle("as-line", activityState.chart === "line");
 	if (activityState.chart === "line") renderActivitySvg(el, model);
 	else renderActivityBars(el, model);

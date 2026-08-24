@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Activity - SwitchTender</title>
+	<link rel="icon" type="image/png" href="/ui/assets/favicon.png">
+	<link rel="stylesheet" href="/ui/assets/app.css">
+</head>
+<body data-page="activity"{{if .ReadOnly}} data-readonly="true"{{end}}>
+	<header class="topbar">
+		<div class="brand"><a href="/ui/"><picture><source media="(prefers-color-scheme: dark)" srcset="/ui/assets/logo-train-tracks-dark.png"><img class="brand-logo" src="/ui/assets/logo-train-tracks.png" alt="SwitchTender"></picture>SwitchTender</a></div>
+	</header>
+
+	<main class="content">
+		<div class="page-head">
+			<div class="page-head-text">
+				<h1>Activity</h1>
+				<p class="muted">Every run over time, windowed and filterable. <a href="/ui/">Back to overview</a>.</p>
+			</div>
+			<button id="activity-export" class="button" type="button">
+				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+				Export CSV
+			</button>
+		</div>
+
+		<div class="summary" id="activity-summary" hidden></div>
+
+		<section class="panel" id="activity-panel" hidden>
+			<div class="panel-head">
+				<h2>Runs over time</h2>
+				<div class="activity-controls" id="activity-controls"></div>
+			</div>
+			<div id="activity" class="activity"></div>
+			<div id="activity-note" class="muted activity-note"></div>
+		</section>
+		<div id="status" class="muted">Loading activity.</div>
+	</main>
+
+	<script src="/ui/assets/app.js"></script>
+</body>
+</html>
