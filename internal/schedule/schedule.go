@@ -166,5 +166,30 @@ func NextFire(spec string, after time.Time) (time.Time, error) {
 		return time.Time{}, fmt.Errorf("%w: %q parses but never comes due, so it would be read as "+
 			"due on every tick", ErrBadCron, spec)
 	}
+	// On the day a zone falls back, the same local minute comes round twice, an hour apart, and the
+	// cron library returns both. The scheduler advances from the moment it fired, so a nightly job
+	// inside the repeated hour fired, advanced to the same wall-clock minute in the new offset, and
+	// fired again: two full executions of the same non-idempotent playbook on one nominal day. A
+	// cron slot is minute-granular, so two distinct instants sharing a local minute can only be that
+	// repeat, and the second one is skipped.
+	if sameLocalMinute(next, after) {
+		next = sched.Next(next)
+		if next.IsZero() {
+			return time.Time{}, fmt.Errorf("%w: %q parses but never comes due after the "+
+				"daylight-saving repeat", ErrBadCron, spec)
+		}
+	}
 	return next, nil
+}
+
+// sameLocalMinute reports whether two instants fall in the same wall-clock minute of the same zone
+// while being different instants, which happens only where a zone rewinds.
+func sameLocalMinute(a, b time.Time) bool {
+	if a.Equal(b) {
+		return false
+	}
+	loc := a.Location()
+	x, y := a.In(loc), b.In(loc)
+	return x.Year() == y.Year() && x.Month() == y.Month() && x.Day() == y.Day() &&
+		x.Hour() == y.Hour() && x.Minute() == y.Minute()
 }
