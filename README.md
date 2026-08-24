@@ -69,7 +69,7 @@ instead of scrollback.
 The full head-to-head, including where SwitchTender is behind, is in the
 [comparison](docs/comparison.md).
 
-Checked against vendor documentation on 2026-07-31, for AWX 24.6.1 and Semaphore 2.18.29. These
+Checked against vendor documentation on 2026-08-10, for AWX 24.6.1 and Semaphore 2.19.7. These
 products ship, and a table like this decays. If a row is out of date, open an issue and it gets
 corrected.
 
