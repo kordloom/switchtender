@@ -277,7 +277,7 @@ func buildExplainPrompt(rn *run.Run, logBytes []byte, events []event.Event) stri
 	}
 	if rn.Command != "" {
 		b.WriteString("\nCommand: ")
-		b.WriteString(headBytes(rn.Command, explainCommandCap))
+		b.WriteString(promptCommand(rn.Command, explainCommandCap))
 	}
 	if rn.Error != "" {
 		b.WriteString("\nError: ")
@@ -340,7 +340,7 @@ func buildIntentProposalPrompt(rn *run.Run) string {
 	}
 	if rn.Command != "" {
 		b.WriteString("\nCommand: ")
-		b.WriteString(headBytes(rn.Command, explainCommandCap))
+		b.WriteString(promptCommand(rn.Command, explainCommandCap))
 	}
 	if rn.Limit != "" {
 		b.WriteString("\nLimited to hosts: ")
@@ -484,6 +484,25 @@ func statsSection(events []event.Event) string {
 
 // headBytes returns up to limit leading bytes of s without splitting a multibyte rune, appending a
 // truncation note when the value was cut.
+// promptCommand returns a run's script trimmed to limit and with inline secrets removed, for the one
+// place the raw script leaves the host.
+//
+// redactForExternal blanks Command from every webhook and plugin notification, saying plainly that it
+// "holds the raw script body of a bash, python, powershell, or go run, which can embed inline secrets
+// or sensitive arguments". The AI prompts wrote that same field straight into a payload POSTed to
+// api.openai.com or api.anthropic.com, so a bash run whose script carried a bearer token or a
+// postgres URL handed it to a third party the moment somebody clicked Explain. The log tail beside it
+// in the same prompt was already masked, which is what made this the one unredacted field in the
+// payload.
+//
+// Blanking it outright would gut the feature, since the script is the thing being explained. The
+// assignment scrub is what the audit chain and the inventory reader already use: a value under a
+// secret-sounding name goes, everything else stays readable.
+func promptCommand(command string, limit int) string {
+	redacted, _ := util.RedactAssignments(command, "[redacted]")
+	return headBytes(redacted, limit)
+}
+
 func headBytes(s string, limit int) string {
 	if len(s) <= limit {
 		return s

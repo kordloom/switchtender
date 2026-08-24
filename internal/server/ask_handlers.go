@@ -159,7 +159,10 @@ func buildFleetSnapshot(ctx context.Context, store run.Store,
 		for _, r := range runs {
 			target := r.Playbook
 			if run.NormalizeTool(r.Tool) != run.ToolAnsible {
-				target = util.Clip(strings.SplitN(r.Command, "\n", 2)[0], 60)
+				// The fleet snapshot carries one line of each recent run's script into the same
+				// third-party prompt, so it gets the same scrub the explain path does.
+				scrubbed, _ := util.RedactAssignments(r.Command, "[redacted]")
+				target = util.Clip(strings.SplitN(scrubbed, "\n", 2)[0], 60)
 			}
 			line := fmt.Sprintf("- %s %s %s %s", r.ID, run.NormalizeTool(r.Tool), r.Status, target)
 			if r.DryRun {
