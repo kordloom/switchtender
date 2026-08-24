@@ -11,7 +11,26 @@ permissions:
   attestations: write
 
 jobs:
+  # A tag published whatever it pointed at. CI runs on pushes to main and on pull requests, so a tag
+  # placed on an unmerged commit, or on main while it was red, went straight to a signed release with
+  # nothing having checked it. This is the same suite, run once against the exact commit being
+  # released, and everything else waits on it.
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build
+        run: go build ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test -race ./...
+
   release:
+    needs: gate
     runs-on: macos-latest
     env:
       MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
@@ -192,11 +211,16 @@ jobs:
   # Multi-arch container images on ghcr.io. A separate Linux job because the release job runs on
   # macOS for the desktop bundle, and Docker is unavailable there.
   docker:
+    needs: gate
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+      # Keyless signing and provenance both mint an ambient OIDC token; without this the signature
+      # step fails and the images publish unsigned again.
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v4
 
@@ -222,6 +246,7 @@ jobs:
             type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
 
       - name: Build and push the images
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -231,3 +256,21 @@ jobs:
             VERSION=${{ steps.meta.outputs.version }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+      # The binaries carry a keyless cosign signature and SLSA provenance; the images carried
+      # neither, so somebody pulling ghcr.io/kordloom/switchtender had nothing to check while
+      # somebody downloading the tarball had two things. Both are signed by digest rather than tag,
+      # because a tag can be moved and a digest cannot.
+      - uses: sigstore/cosign-installer@v3
+      - name: Sign the image
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: cosign sign --yes "ghcr.io/kordloom/switchtender@${DIGEST}"
+
+      - name: Attest the image build provenance
+        continue-on-error: true
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ghcr.io/kordloom/switchtender
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true

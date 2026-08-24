@@ -99,11 +99,13 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      # A finding fails the job. It was downgraded to a warning, which meant the check could never
+      # stop anything: a real advisory in a package this code calls would have gone by as a yellow
+      # annotation nobody opens. The scan reports only vulnerabilities actually reachable from this
+      # code, so a hit is worth stopping for, and an unfixable one is silenced by name in the config
+      # rather than by ignoring every result.
       - name: govulncheck
-        run: |
-          if ! go run golang.org/x/vuln/cmd/govulncheck@latest ./...; then
-            echo "::warning title=govulncheck::Vulnerabilities found; review the log above."
-          fi
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
   # Real-browser tests. The js unit job above drives the same production JavaScript against a simulated
   # DOM, which proves the logic but not that a page renders, clicks through, and mutates in a real

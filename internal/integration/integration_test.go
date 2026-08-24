@@ -39,7 +39,7 @@ const image = "switchtender-it-sshhost:1"
 // dockerfile builds a minimal SSH server with Python for Ansible modules. The public key arrives
 // through the SSH_PUBKEY environment variable at run time.
 const dockerfile = `
-FROM alpine:3.20
+FROM alpine:3.22
 RUN apk add --no-cache openssh python3 && ssh-keygen -A && mkdir -p /root/.ssh && chmod 700 /root/.ssh
 CMD ["/bin/sh", "-c", "echo \"$SSH_PUBKEY\" > /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys && exec /usr/sbin/sshd -D -e"]
 `
