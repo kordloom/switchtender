@@ -72,3 +72,22 @@ test("a window with nothing in it still draws its axis instead of blanking", () 
 	// The auto path, with no window, still returns null on nothing, the property its own tests pin.
 	assert.equal(app.activityBuckets([], now), null);
 });
+
+test("the filter matches the fields a run actually carries", () => {
+	const now = new Date(2026, 7, 3, 12, 30);
+	const runs = [
+		{ created_at: "2026-08-03T17:00:00Z", status: "succeeded", playbook: "site.yml",
+			inventory: "prod.ini", actor: "deploy-bot", source: "schedule", labels: { env: "prod" } },
+		{ created_at: "2026-08-03T17:05:00Z", status: "failed", playbook: "db.yml",
+			inventory: "staging.ini", actor: "admin", source: "template", labels: { env: "staging" } },
+	];
+	const only = (q, n) => assert.equal(app.activityBuckets(runs, now, { windowH: 12, filter: q }).matched, n,
+		"filter " + q);
+	only("deploy-bot", 1); // actor
+	only("schedule", 1);   // source
+	only("prod", 1);       // label value (and prod.ini inventory on the same run)
+	only("staging", 1);    // inventory / label on the other run
+	only("site", 1);       // playbook / name
+	only("failed", 1);     // status
+	only("nomatch-xyz", 0);
+})

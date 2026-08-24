@@ -200,11 +200,14 @@ function activityBucketEnd(start, hourly) {
 }
 
 // activityHaystack is the lowercased text a filter query is tested against: status, playbook or
-// name, id, labels, and hosts, so "failed", "web01", or "prod" each narrow the chart.
+// name, inventory, actor, source, labels, and any hosts, so "failed", "deploy-bot", "schedule", or
+// "prod" each narrow the chart. The run list carries no per-host breakdown, so a host query only
+// matches where an install populates hosts on the run; the label stays off host for that reason.
 function activityHaystack(r) {
-	const parts = [r.status, r.playbook, r.name, r.id];
-	if (r.labels) for (const k in r.labels) parts.push(k, r.labels[k]);
+	const parts = [r.status, r.playbook, r.inventory, r.id, r.source, r.actor];
+	if (typeof toolLabel === "function") parts.push(toolLabel(r));
 	if (Array.isArray(r.hosts)) parts.push(...r.hosts);
+	if (r.labels) for (const k in r.labels) parts.push(k, r.labels[k]);
 	return parts.filter(Boolean).join(" ").toLowerCase();
 }
 
@@ -336,7 +339,7 @@ function buildActivityControls() {
 	filter.type = "search";
 	filter.className = "input activity-filter";
 	filter.placeholder = "Filter runs";
-	filter.setAttribute("aria-label", "Filter activity by name, host, or status");
+	filter.setAttribute("aria-label", "Filter activity by name, status, actor, or label");
 	filter.value = activityState.filter;
 	let t = null;
 	filter.addEventListener("input", () => {
