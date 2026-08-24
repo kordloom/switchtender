@@ -61,8 +61,15 @@ func toolContainerPlan(spec Spec) (containerPlan, func(), error) {
 		if spec.Playbook == "" {
 			return containerPlan{}, noCleanup, ErrNoPlaybook
 		}
+		// Off argv before the plan is built, so the vars land in a mounted file rather than in the
+		// docker command line, which the container keeps in Config.Cmd for docker inspect to read.
+		varsCleanup, err := materializeExtraVars(&spec)
+		if err != nil {
+			return containerPlan{}, noCleanup, err
+		}
 		pargs, err := playbookArgs(spec)
 		if err != nil {
+			varsCleanup()
 			return containerPlan{}, noCleanup, err
 		}
 		mounts := []planMount{
@@ -81,7 +88,7 @@ func toolContainerPlan(spec Spec) (containerPlan, func(), error) {
 			argv:    append([]string{"ansible-playbook"}, pargs...),
 			workdir: spec.Dir,
 			mounts:  mounts,
-		}, noCleanup, nil
+		}, varsCleanup, nil
 	case run.ToolBash:
 		if spec.Command == "" {
 			return containerPlan{}, noCleanup, ErrNoCommand

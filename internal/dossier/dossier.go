@@ -17,6 +17,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/util"
 )
 
 // templateSource is the self-contained HTML dossier.
@@ -547,7 +548,12 @@ func runMeta(r *run.Run) []metaRow {
 	add("Kind", r.Kind)
 	add("Tool", r.Tool)
 	add("Playbook", r.Playbook)
-	add("Command", r.Command)
+	// The dossier is the document handed to an outside auditor, and a bash, python, powershell, or
+	// go run stores its whole script here, which can carry an inline token or a connection string.
+	// The receipt path already runs the same field through a redactor before disclosing it; this one
+	// rendered it verbatim, so exporting a run and mailing it published whatever the script held.
+	redactedCommand, _ := util.RedactAssignments(r.Command, "[redacted]")
+	add("Command", redactedCommand)
 	add("Inventory", r.Inventory)
 	add("Inventory id", r.InventoryID)
 	add("Project", r.ProjectID)

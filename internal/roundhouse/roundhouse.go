@@ -385,6 +385,11 @@ func (a *ansibleRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Resu
 		env = append(env, callbackEnv(dir, spec.EventsPath)...)
 	}
 
+	varsCleanup, err := materializeExtraVars(&spec)
+	if err != nil {
+		return Result{ExitCode: -1}, fmt.Errorf("%w: %w", ErrLaunch, err)
+	}
+	defer varsCleanup()
 	pargs, err := playbookArgs(spec)
 	if err != nil {
 		return Result{ExitCode: -1}, fmt.Errorf("%w: %w", ErrLaunch, err)
@@ -393,6 +398,52 @@ func (a *ansibleRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Resu
 	cmd.Dir = spec.Dir
 	cmd.Env = env
 	return runProcess(ctx, cmd, out)
+}
+
+// materializeExtraVars moves a Spec's extra vars off the command line and into a private file,
+// returning the cleanup that removes it.
+//
+// Every credential-derived value already takes this route, deliberately, so the password stays off
+// argv. The run's own extra vars did not: they were marshaled to JSON and handed to ansible-playbook
+// as --extra-vars, where ps auxww shows them to any local account on the executor for the life of the
+// run. A template survey collects them, there is no password field type so a secret is collected as
+// ordinary text, and for a container run the same argv becomes the docker command line and is kept in
+// the container's Config.Cmd, readable by docker inspect after the run has finished. Ansible was the
+// only tool that did this; the script tools pass their vars in the environment.
+//
+// The spec is updated in place so the caller's mount list picks the file up, and the inline copy is
+// cleared so the two cannot both be sent.
+func materializeExtraVars(spec *Spec) (func(), error) {
+	noCleanup := func() {}
+	if len(spec.ExtraVars) == 0 {
+		return noCleanup, nil
+	}
+	data, err := json.Marshal(spec.ExtraVars)
+	if err != nil {
+		return noCleanup, fmt.Errorf("marshal extra vars: %w", err)
+	}
+	f, err := os.CreateTemp("", "switchtender-vars-*.json")
+	if err != nil {
+		return noCleanup, fmt.Errorf("create extra vars file: %w", err)
+	}
+	cleanup := func() { _ = os.Remove(f.Name()) }
+	if err := f.Chmod(0o600); err != nil {
+		_ = f.Close()
+		cleanup()
+		return noCleanup, fmt.Errorf("secure extra vars file: %w", err)
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		cleanup()
+		return noCleanup, fmt.Errorf("write extra vars file: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		cleanup()
+		return noCleanup, fmt.Errorf("close extra vars file: %w", err)
+	}
+	spec.ExtraVarsFiles = append(spec.ExtraVarsFiles, f.Name())
+	spec.ExtraVars = nil
+	return cleanup, nil
 }
 
 // runProcess supervises cmd, streaming its combined stdout and stderr to out, and maps the outcome
@@ -503,13 +554,6 @@ func playbookArgs(spec Spec) ([]string, error) {
 	}
 	if spec.DryRun {
 		args = append(args, "--check")
-	}
-	if len(spec.ExtraVars) > 0 {
-		data, err := json.Marshal(spec.ExtraVars)
-		if err != nil {
-			return nil, fmt.Errorf("marshal extra vars: %w", err)
-		}
-		args = append(args, "--extra-vars", string(data))
 	}
 	for _, file := range spec.ExtraVarsFiles {
 		args = append(args, "--extra-vars", "@"+file)
