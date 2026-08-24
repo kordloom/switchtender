@@ -690,24 +690,33 @@ func (g *authGate) protects(r *http.Request) bool {
 	// Compare against the unversioned path so the /v1 API prefix does not repeat, while the bare
 	// infrastructure paths (healthz, the UI, OIDC, hooks) still match unchanged.
 	p := strings.TrimPrefix(r.URL.Path, "/v1")
-	if r.Method == http.MethodGet && p == "/healthz" {
+	// HEAD is GET without a body, and Go's ServeMux answers a GET pattern for it automatically. The
+	// carve-outs below only matched GET, so once the first token existed the gate refused every HEAD
+	// before the mux ever saw it: an uptime monitor or a load balancer configured for HEAD /healthz,
+	// which is a very common default, reported the install permanently down, and a third party that
+	// HEADs the trust document before fetching it could not read the key at all.
+	method := r.Method
+	if method == http.MethodHead {
+		method = http.MethodGet
+	}
+	if method == http.MethodGet && p == "/healthz" {
 		return false
 	}
-	if r.Method == http.MethodGet && p == "/readyz" {
+	if method == http.MethodGet && p == "/readyz" {
 		return false
 	}
-	if r.Method == http.MethodGet && (p == "/" || strings.HasPrefix(p, "/ui/")) {
+	if method == http.MethodGet && (p == "/" || strings.HasPrefix(p, "/ui/")) {
 		return false
 	}
 	// The trust document is how a third party learns which key signs this install's bundles. They
 	// have no account here, and requiring one would defeat a record meant to be checkable without us.
-	if r.Method == http.MethodGet && p == "/.well-known/loomseal.json" {
+	if method == http.MethodGet && p == "/.well-known/loomseal.json" {
 		return false
 	}
 	// The span beat feed is how an outside watcher notices a chain that went quiet or lost its
 	// tail. Like the trust document, it exists for a party with no account here, and a feed that
 	// needs a token cannot be watched by the one the record is meant to convince.
-	if r.Method == http.MethodGet && p == beatfeed.FeedPath {
+	if method == http.MethodGet && p == beatfeed.FeedPath {
 		return false
 	}
 	// Sign in must be reachable while the API is enforced.
@@ -715,13 +724,13 @@ func (g *authGate) protects(r *http.Request) bool {
 		return false
 	}
 	// The single sign-on handshake runs before the user has a token.
-	if r.Method == http.MethodGet && strings.HasPrefix(p, "/auth/oidc/") {
+	if method == http.MethodGet && strings.HasPrefix(p, "/auth/oidc/") {
 		return false
 	}
 	// The SAML handshake also runs before the user has a token: the login redirect, the metadata an
 	// IdP administrator reads, and the assertion the identity provider posts back to the ACS.
 	if strings.HasPrefix(p, "/auth/saml/") &&
-		(r.Method == http.MethodGet || (r.Method == http.MethodPost && p == "/auth/saml/acs")) {
+		(method == http.MethodGet || (r.Method == http.MethodPost && p == "/auth/saml/acs")) {
 		return false
 	}
 	// Webhook triggers carry their own secret token in the path, so they bypass the token gate.

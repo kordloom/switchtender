@@ -431,7 +431,7 @@ func (s *Server) Handler() http.Handler {
 	if s.audits != nil {
 		health = newChainHealth(s.audits, installID)
 	}
-	mux.Handle("GET /metrics", metricsHandler(s.store, health, s.log))
+	mux.Handle("GET /metrics", metricsHandler(s.store, health, authz, s.log))
 	mux.Handle("GET /v1/fleet", fleetHandler(s.store, authz, s.log))
 	mux.Handle("GET /v1/drift", driftHandler(s.store, authz, s.log))
 	mux.Handle("POST /v1/drift/reconcile", reconcileDriftHandler(s.store, s.submitter, authz, s.log))
