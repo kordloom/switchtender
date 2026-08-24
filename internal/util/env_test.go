@@ -60,3 +60,51 @@ func TestFilterConfigEnvRemovesEverySwitchTenderVariable(t *testing.T) {
 		})
 	}
 }
+
+// TestRunEnvStripsTheServersOwnCredentials checks the credentials SwitchTender reaches an external
+// secret manager with never reach a run, while the secret-fetch command keeps them.
+//
+// These carry no SwitchTender prefix, so the prefix scrub left them in place and every host run
+// inherited them. Submitting a run needs only the operator role and no credential access, so one
+// line of shell returned the Vault token that opens every secret the server can reach, and the
+// masker held only the run's own credentials so it landed in the stored log verbatim.
+//
+// The two environments genuinely differ: a fetch command authenticates to the store with the same
+// token, so stripping it there would break the feature rather than protect anything.
+func TestRunEnvStripsTheServersOwnCredentials(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Entry       string
+		WantInRun   bool
+		WantInFetch bool
+	}{ // Test 0 to 3: The server's own credentials for reaching a secret manager.
+		{"VAULT_TOKEN=hvs.example", false, true},
+		{"AWS_SECRET_ACCESS_KEY=secret", false, true},
+		{"AWS_SESSION_TOKEN=session", false, true},
+		{"AWS_ACCESS_KEY_ID=AKIAEXAMPLE", false, true},
+		// Test 4: SwitchTender's own configuration reaches neither.
+		{"SWITCHTENDER_ENCRYPTION_KEY=master", false, false},
+		// Test 5 to 7: The host environment both legitimately need.
+		{"PATH=/usr/bin", true, true},
+		{"AWS_REGION=us-east-1", true, true},
+		{"HTTPS_PROXY=http://proxy:3128", true, true},
+	}
+	in := make([]string, 0, len(tests))
+	for _, test := range tests {
+		in = append(in, test.Entry)
+	}
+	runEnv, fetchEnv := filterRunEnv(in), FilterConfigEnv(in)
+
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			if got := slices.Contains(runEnv, test.Entry); got != test.WantInRun {
+				t.Errorf("%q in a run environment = %v, want %v", test.Entry, got, test.WantInRun)
+			}
+			if got := slices.Contains(fetchEnv, test.Entry); got != test.WantInFetch {
+				t.Errorf("%q in a secret-fetch environment = %v, want %v",
+					test.Entry, got, test.WantInFetch)
+			}
+		})
+	}
+}
