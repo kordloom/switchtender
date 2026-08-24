@@ -136,9 +136,35 @@ type rundeckNodeFilters struct {
 // rundeckDispatch paces a job's fan out.
 type rundeckDispatch struct {
 	// ThreadCount is how many nodes run at once, the equivalent of Ansible forks.
-	ThreadCount int `yaml:"threadcount" json:"threadcount"`
+	ThreadCount rundeckInt `yaml:"threadcount" json:"threadcount"`
 	// KeepGoing continues across nodes after one fails.
 	KeepGoing bool `yaml:"keepgoing" json:"keepgoing"`
+}
+
+// rundeckInt is a whole number Rundeck may write either as a number or as a quoted string.
+//
+// Rundeck's own published job exports quote threadcount. Decoding straight into an int failed the
+// whole document on that one field, and because the bare-list attempt was discarded the operator was
+// told the top level was the wrong shape. The file was fine; one scalar was quoted.
+type rundeckInt int
+
+// UnmarshalYAML decodes a number or a quoted number, and treats an empty value as zero.
+func (n *rundeckInt) UnmarshalYAML(value *yaml.Node) error {
+	var raw string
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		*n = 0
+		return nil
+	}
+	parsed, err := strconv.Atoi(raw)
+	if err != nil {
+		return fmt.Errorf("%q is not a whole number", raw)
+	}
+	*n = rundeckInt(parsed)
+	return nil
 }
 
 // FromRundeck maps a Rundeck job export into a plan of equivalent objects.
@@ -175,8 +201,15 @@ func FromRundeck(inventory string) func([]byte, time.Time) (*Plan, error) {
 // mapping, so a bare list and a wrapped one are both accepted.
 func decodeRundeck(data []byte) ([]rundeckJob, error) {
 	var jobs []rundeckJob
-	if err := yaml.Unmarshal(data, &jobs); err == nil {
+	listErr := yaml.Unmarshal(data, &jobs)
+	if listErr == nil {
 		return jobs, nil
+	}
+	// A document whose root is a list is the bare form, so its own error is the one worth showing.
+	// Falling through to the wrapped attempt reported "cannot unmarshal !!seq into struct", which
+	// blamed the top-level shape for what was really one field inside a job.
+	if rootIsSequence(data) {
+		return nil, fmt.Errorf("parse rundeck export: %w", listErr)
 	}
 	var wrapped struct {
 		// Jobs is the job list when the export wraps it.
@@ -189,6 +222,19 @@ func decodeRundeck(data []byte) ([]rundeckJob, error) {
 		return nil, fmt.Errorf("parse rundeck export: no job list found")
 	}
 	return wrapped.Jobs, nil
+}
+
+// rootIsSequence reports whether a document's top level is a list, which tells the two export shapes
+// apart without decoding either into its target type.
+func rootIsSequence(data []byte) bool {
+	var root yaml.Node
+	if err := yaml.Unmarshal(data, &root); err != nil {
+		return false
+	}
+	if root.Kind == yaml.DocumentNode && len(root.Content) > 0 {
+		return root.Content[0].Kind == yaml.SequenceNode
+	}
+	return root.Kind == yaml.SequenceNode
 }
 
 // addRundeckJob maps one job into the plan as a template, plus a schedule when the job has one.
@@ -209,7 +255,7 @@ func (p *Plan) addRundeckJob(job rundeckJob, inventoryName string, now time.Time
 	tmpl := &template.Template{
 		ID: template.NewID(), Name: name, Tool: "bash", Command: command,
 		Inventory: inventoryName, Survey: p.rundeckSurvey(job, name),
-		Forks: job.NodeFilters.Dispatch.ThreadCount, Timeout: p.rundeckTimeout(job, name),
+		Forks: int(job.NodeFilters.Dispatch.ThreadCount), Timeout: p.rundeckTimeout(job, name),
 		CreatedAt: now,
 	}
 	if job.NodeFilters.Filter != "" {

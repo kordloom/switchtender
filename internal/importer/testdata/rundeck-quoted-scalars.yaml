@@ -1,0 +1,23 @@
+- id: 7a1e
+  name: Dispatch to Remote Nodes
+  group: Dispatch
+  loglevel: INFO
+  nodefilters:
+    filter: 'tags: web'
+    dispatch:
+      threadcount: '4'
+      keepgoing: true
+  sequence:
+    keepgoing: false
+    strategy: node-first
+    commands:
+      - exec: uptime
+  schedule:
+    month: '*'
+    time:
+      hour: '2'
+      minute: '30'
+      seconds: '0'
+    weekday:
+      day: '*'
+    year: '*'
