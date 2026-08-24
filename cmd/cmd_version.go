@@ -41,7 +41,12 @@ var versionCmd = &cobra.Command{
 With --verify, hash the running executable and compare it against the BINARY_SHA256SUMS asset
 published with this version's GitHub release. A match proves this file is byte-identical to the
 released binary. A mismatch does not by itself mean tampering: source builds, Homebrew bottles,
-and repackaged binaries hash differently. Nothing is fetched unless --verify is given.`,
+and repackaged binaries hash differently. Nothing is fetched unless --verify is given.
+
+This check trusts whoever can write the release assets, since it fetches the manifest over HTTPS and
+nothing more. BINARY_SHA256SUMS is covered by the cosign-signed SHA256SUMS, so verify that signature
+once out of band to turn this into a check on the build rather than on GitHub. SECURITY.md has the
+commands.`,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		if !versionVerify {

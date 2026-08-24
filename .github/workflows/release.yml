@@ -148,7 +148,22 @@ jobs:
             rm -f dist/switchtender.exe
           done
 
-          shasum -a 256 "dist/SwitchTender_${VERSION}.dmg" >> dist/SHA256SUMS
+          # Hashed from inside dist so the names match goreleaser's, which are bare. A "dist/" prefix
+          # here would land in the published file and make `shasum -c SHA256SUMS` fail for anyone
+          # checking a download directory, on exactly the two lines this script adds.
+          #
+          # BINARY_SHA256SUMS is folded in before anything is signed, so the one signature covers it
+          # too. It was uploaded outside the signature while `switchtender version --verify` treated
+          # it as authoritative, which left the binary self-check resting on nothing but TLS to
+          # GitHub: anyone able to alter release assets could swap the binary and its manifest
+          # together and the check would still say ok, while the archive beside it had a real
+          # signature. Nothing may be appended to SHA256SUMS after this point.
+          (
+            cd dist
+            shasum -a 256 "SwitchTender_${VERSION}.dmg" >> SHA256SUMS
+            shasum -a 256 BINARY_SHA256SUMS >> SHA256SUMS
+          )
+
           cosign sign-blob --yes dist/SHA256SUMS \
             --output-signature dist/SHA256SUMS.sig \
             --output-certificate dist/SHA256SUMS.pem
@@ -202,7 +217,9 @@ jobs:
           images: ghcr.io/kordloom/switchtender
           tags: |
             type=semver,pattern={{version}}
-            type=raw,value=latest
+            # Only a final release moves latest. type=raw is unconditional, so tagging v1.67.0-rc1
+            # would have pointed latest at a release candidate for everyone pulling the image.
+            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
 
       - name: Build and push the images
         uses: docker/build-push-action@v6
