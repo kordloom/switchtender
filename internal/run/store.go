@@ -419,7 +419,7 @@ func NewMemStore() Store {
 // stored cancel request survives the replace so a stale snapshot cannot erase a concurrent cancel.
 func (m *memStore) Save(_ context.Context, r *Run) error {
 	// Cleaned here so every backend stores the same bytes for the same input.
-	r.SanitizeText()
+	r.Sanitize()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if r.IdempotencyKey != "" {

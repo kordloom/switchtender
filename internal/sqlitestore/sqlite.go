@@ -1162,7 +1162,7 @@ func scanHostSummary(rows *sql.Rows) (run.HostSummary, error) {
 func (s *store) Save(ctx context.Context, r *run.Run) error {
 	// Cleaned here so a stray byte from a tool's output cannot make this write behave differently
 	// from the same write on PostgreSQL.
-	r.SanitizeText()
+	r.Sanitize()
 	const q = `
 INSERT INTO runs
 	(id, playbook, inventory, status, exit_code, error, created_at, started_at, ended_at,
@@ -1382,7 +1382,12 @@ func (s *store) Shards(ctx context.Context, parentID string) ([]*run.Run, error)
 
 // Steps returns the pipeline step runs of a parent ordered by step index.
 func (s *store) Steps(ctx context.Context, parentID string) ([]*run.Run, error) {
-	const q = "SELECT " + runColumns + " FROM runs WHERE parent_id=? ORDER BY step_index, attempt"
+	// The same NULL-ordering hazard the shard listing above was fixed for, left here. SQLite sorts
+	// NULLs first and PostgreSQL sorts them last, and step_index is nullable, so the two backends
+	// returned different orders for the same rows. GET /runs/{id}/steps is not gated on kind, so
+	// calling it on a split parent lists shard children, every one of which has a null step index.
+	const q = "SELECT " + runColumns +
+		" FROM runs WHERE parent_id=? ORDER BY step_index IS NULL, step_index, attempt"
 	return s.queryRuns(ctx, "list steps", q, parentID)
 }
 

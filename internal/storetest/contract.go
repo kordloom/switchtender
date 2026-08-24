@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"sync"
@@ -92,6 +93,7 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Run("finalize running is one write", func(t *testing.T) { testFinalizeRunning(t, newStore()) })
 	t.Run("running progress is fenced", func(t *testing.T) { testApplyRunningProgress(t, newStore()) })
 	t.Run("unrepresentable text is stored", func(t *testing.T) { testUnrepresentableText(t, newStore()) })
+	t.Run("backends agree on edges", func(t *testing.T) { testBackendEdgeParity(t, newStore()) })
 	t.Run("workers", func(t *testing.T) { testWorkers(t, newStore()) })
 	t.Run("retention purge", func(t *testing.T) { testPurge(t, newStore()) })
 	t.Run("summary trim bounds growth", func(t *testing.T) { testTrimSummaries(t, newStore()) })
@@ -160,6 +162,96 @@ func testTransitionStatus(t *testing.T, store run.Store) {
 		t.Errorf("missing run transition = (%v, %v), want (false, nil)", ok, err)
 	}
 }
+
+// testBackendEdgeParity pins three places the two backends answered differently for the same data.
+//
+// None of them needed unusual input. INTEGER is 64 bits on SQLite and 32 on PostgreSQL, so a run
+// timeout past two billion was stored by one and refused by the other with an encoding error, and
+// the same submission answered 202 or 500 depending on the database behind it. step_index is
+// nullable and SQLite sorts NULLs first where PostgreSQL sorts them last, so the steps listing, which
+// is not gated on kind and therefore lists a split parent's shard children too, came back in a
+// different order. And PostgreSQL's LIKE treats a backslash as an escape where SQLite's does not, so
+// one search term matched different rows.
+func testBackendEdgeParity(t *testing.T, store run.Store) {
+	ctx := context.Background()
+
+	// A timeout past what a 32-bit column holds is stored, not refused, and comes back bounded.
+	big := sampleRun("run_big")
+	big.Timeout = 3_000_000_000
+	big.IdempotencyKey = "idem_big"
+	if err := store.Save(ctx, big); err != nil {
+		t.Fatalf("Save() with an oversized timeout error = %v", err)
+	}
+	got, err := store.Get(ctx, "run_big")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.Timeout != math.MaxInt32 {
+		t.Errorf("timeout = %d, want it held at %d so both backends store the same value",
+			got.Timeout, math.MaxInt32)
+	}
+
+	// Children with a null step index sort last, the same way on both backends.
+	parent := sampleRun("run_parent")
+	parent.Status = run.StatusRunning
+	parent.IdempotencyKey = "idem_parent"
+	if err := store.Save(ctx, parent); err != nil {
+		t.Fatalf("Save() parent error = %v", err)
+	}
+	for i, spec := range []struct {
+		ID    string
+		Index *int
+	}{
+		{"run_step_b", intPtr(1)},
+		{"run_step_null", nil},
+		{"run_step_a", intPtr(0)},
+	} {
+		child := sampleRun(spec.ID)
+		child.ParentID = &parent.ID
+		child.StepIndex = spec.Index
+		child.IdempotencyKey = fmt.Sprintf("idem_child_%d", i)
+		if err := store.Save(ctx, child); err != nil {
+			t.Fatalf("Save() child %s error = %v", spec.ID, err)
+		}
+	}
+	steps, err := store.Steps(ctx, parent.ID)
+	if err != nil {
+		t.Fatalf("Steps() error = %v", err)
+	}
+	order := make([]string, 0, len(steps))
+	for _, st := range steps {
+		order = append(order, st.ID)
+	}
+	want := []string{"run_step_a", "run_step_b", "run_step_null"}
+	if diff := cmp.Diff(want, order); diff != "" {
+		t.Errorf("steps order mismatch, so the two backends disagree (-want +got):\n%s", diff)
+	}
+
+	// A backslash in a search term is a literal on both backends, not an escape on one.
+	slashed := sampleRun("run_slash")
+	slashed.Command = `deploy c:\builds\web`
+	slashed.IdempotencyKey = "idem_slash"
+	if err := store.Save(ctx, slashed); err != nil {
+		t.Fatalf("Save() slashed error = %v", err)
+	}
+	page, err := store.ListPage(ctx, run.ListFilter{Query: `c:\builds`}, 50, 0)
+	if err != nil {
+		t.Fatalf("ListPage() error = %v", err)
+	}
+	var found bool
+	for _, r := range page {
+		if r.ID == "run_slash" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("a search term containing a backslash did not match the run holding it, so the "+
+			"two backends read the term differently (%d rows returned)", len(page))
+	}
+}
+
+// intPtr returns a pointer to n, for the nullable index columns above.
+func intPtr(n int) *int { return &n }
 
 // testUnrepresentableText checks a run whose text carries a NUL byte or invalid UTF-8 is stored and
 // finished the same way on every backend.

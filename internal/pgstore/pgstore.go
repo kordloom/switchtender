@@ -750,7 +750,7 @@ func scanHostSummary(rows *sql.Rows) (run.HostSummary, error) {
 func (s *store) Save(ctx context.Context, r *run.Run) error {
 	// Cleaned here rather than left to fail: PostgreSQL refuses a NUL byte and invalid UTF-8 with
 	// SQLSTATE 22021, and the write that carried them is the one recording what the run did.
-	r.SanitizeText()
+	r.Sanitize()
 	const q = `
 INSERT INTO runs
 	(id, playbook, inventory, status, exit_code, error, created_at, started_at, ended_at,
@@ -924,7 +924,10 @@ func runSearchClause(query string) (string, []any) {
 	}
 	parts := make([]string, len(runSearchColumns))
 	for i, col := range runSearchColumns {
-		parts[i] = "lower(" + col + ") LIKE $1"
+		// ESCAPE '' turns off PostgreSQL's default backslash escape, which SQLite's LIKE does not
+		// have. Without it the same search term matched different rows on the two backends: a term
+		// containing a backslash was read as an escape here and as a literal there.
+		parts[i] = "lower(" + col + ") LIKE $1 ESCAPE ''"
 	}
 	return "(" + strings.Join(parts, " OR ") + ")", []any{"%" + term + "%"}
 }
@@ -960,7 +963,10 @@ func (s *store) Shards(ctx context.Context, parentID string) ([]*run.Run, error)
 
 // Steps returns the pipeline step runs of a parent ordered by step index then attempt.
 func (s *store) Steps(ctx context.Context, parentID string) ([]*run.Run, error) {
-	const q = "SELECT " + runColumns + " FROM runs WHERE parent_id=$1 ORDER BY step_index, attempt"
+	// NULLS LAST for the same reason the shard listing above states it: SQLite sorts NULLs first and
+	// PostgreSQL last, and step_index is nullable.
+	const q = "SELECT " + runColumns +
+		" FROM runs WHERE parent_id=$1 ORDER BY step_index NULLS LAST, attempt"
 	return s.queryRuns(ctx, "list steps", q, parentID)
 }
 

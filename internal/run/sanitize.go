@@ -1,9 +1,14 @@
 package run
 
-import "github.com/kordloom/switchtender/internal/util"
+import (
+	"math"
 
-// SanitizeText replaces anything in r's text fields that a text column cannot hold: a NUL byte, and
-// any byte sequence that is not valid UTF-8.
+	"github.com/kordloom/switchtender/internal/util"
+)
+
+// Sanitize makes a run storable identically on every backend: it replaces anything in the text
+// fields that a text column cannot hold, and holds the numeric fields inside the range the narrowest
+// backend's integer column can take.
 //
 // Every store calls this before it writes, so both backends behave the same way. They did not: SQLite
 // stores arbitrary bytes and PostgreSQL refuses them, so the same run finished on one and was
@@ -15,7 +20,7 @@ import "github.com/kordloom/switchtender/internal/util"
 // no write path can miss it. Fields holding an identifier this package mints, a digest, or a status
 // are left alone: they cannot carry an unrepresentable byte, and cleaning them would only hide a bug
 // that should surface.
-func (r *Run) SanitizeText() {
+func (r *Run) Sanitize() {
 	if r == nil {
 		return
 	}
@@ -41,6 +46,45 @@ func (r *Run) SanitizeText() {
 		r.Steps[i].Command = util.SafeText(r.Steps[i].Command)
 		r.Steps[i].Inventory = util.SafeText(r.Steps[i].Inventory)
 		r.Steps[i].DependsOn = util.SafeTexts(r.Steps[i].DependsOn)
+		r.Steps[i].Retries = boundInt32(r.Steps[i].Retries)
+	}
+	// The numeric columns are declared INTEGER on both backends, which is 64 bits on SQLite and 32 on
+	// PostgreSQL. A run submitted with a timeout of three billion seconds was therefore stored on one
+	// and refused by the other with an encoding error, so the same request answered 202 or 500
+	// depending on which database was behind it. Nothing was clamping them on the way in. The bound
+	// is the widest value both can hold rather than a product limit: a timeout of sixty-eight years
+	// is already no limit at all, so holding it there changes nothing anybody meant.
+	r.Timeout = boundInt32(r.Timeout)
+	r.Verbosity = boundInt32(r.Verbosity)
+	r.Forks = boundInt32(r.Forks)
+	r.Attempt = boundInt32(r.Attempt)
+	if r.ShardIndex != nil {
+		bounded := boundInt32(*r.ShardIndex)
+		r.ShardIndex = &bounded
+	}
+	if r.StepIndex != nil {
+		bounded := boundInt32(*r.StepIndex)
+		r.StepIndex = &bounded
+	}
+	if r.ShardCount != nil {
+		bounded := boundInt32(*r.ShardCount)
+		r.ShardCount = &bounded
+	}
+	if r.ExitCode != nil {
+		bounded := boundInt32(*r.ExitCode)
+		r.ExitCode = &bounded
+	}
+}
+
+// boundInt32 holds n inside the range a 32-bit integer column can store.
+func boundInt32(n int) int {
+	switch {
+	case n > math.MaxInt32:
+		return math.MaxInt32
+	case n < math.MinInt32:
+		return math.MinInt32
+	default:
+		return n
 	}
 }
 
@@ -55,6 +99,10 @@ func (f *Finalization) SanitizeText() {
 	f.Warning = util.SafeText(f.Warning)
 	f.Image = util.SafeText(f.Image)
 	f.Outputs = util.SafeAnyMap(f.Outputs)
+	if f.ExitCode != nil {
+		bounded := boundInt32(*f.ExitCode)
+		f.ExitCode = &bounded
+	}
 }
 
 // SanitizeText replaces anything in the progress write's text fields that a text column cannot hold.
