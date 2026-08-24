@@ -1098,6 +1098,41 @@ body[data-theme="dark"] {
 .activity-seg.empty { height: 3px; background: var(--surface-3); }
 .activity-label { font-size: 10.5px; color: var(--muted); white-space: nowrap; }
 
+/* Activity controls: window pills, the bars-or-line toggle, and a filter, in the panel header. */
+.activity-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.seg { display: inline-flex; background: var(--surface-2); border: 1px solid var(--border); border-radius: 999px; padding: 2px; gap: 2px; }
+.seg-btn { appearance: none; -webkit-appearance: none; border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 12px; font-weight: 600; line-height: 1; padding: 5px 10px; border-radius: 999px; cursor: pointer; transition: color .15s var(--ease), background .15s var(--ease); display: inline-flex; align-items: center; justify-content: center; }
+.seg-btn:hover { color: var(--text); }
+.seg-btn.active { background: var(--accent); color: #fff; box-shadow: 0 1px 5px -1px color-mix(in srgb, var(--accent) 55%, transparent); }
+.seg-btn.icon { padding: 5px 8px; }
+.seg-btn.icon svg { width: 15px; height: 15px; display: block; }
+.activity-filter { padding: 5px 12px; font-size: 12.5px; width: 120px; border-radius: 999px; transition: width .18s var(--ease); }
+.activity-filter:focus { width: 176px; }
+.activity-note { margin-top: 10px; font-size: 11.5px; text-align: right; }
+
+/* Line view: a full-width SVG with a soft gradient area, two outcome lines, dots, and an axis row. */
+.activity.as-line { display: block; padding: 0; }
+.activity-svg { width: 100%; height: 190px; display: block; }
+.act-grid { stroke: var(--border); stroke-width: 1; opacity: .5; vector-effect: non-scaling-stroke; }
+.act-line { stroke-width: 2.5; fill: none; vector-effect: non-scaling-stroke; stroke-linejoin: round; stroke-linecap: round; }
+.act-line.ok { stroke: var(--ok); filter: drop-shadow(0 1px 4px color-mix(in srgb, var(--ok) 40%, transparent)); }
+.act-line.fail { stroke: var(--failed); opacity: .95; }
+.act-dot { fill: var(--ok); stroke: var(--surface); stroke-width: 1.5; transition: r .12s var(--ease); }
+.act-dot.fail { fill: var(--failed); }
+.act-dot.zero { fill: var(--surface-3); }
+.act-dot-hit { cursor: pointer; }
+.act-dot-hit:hover .act-dot { r: 5.5; }
+.activity-axis { display: flex; justify-content: space-between; padding: 8px 14px 0; }
+.activity-axis span { font-size: 10.5px; color: var(--muted); white-space: nowrap; }
+.activity-axis span.axis-thin, .activity-label.axis-thin { visibility: hidden; }
+
+/* On a narrow screen the controls wrap under the title and the filter takes the row. */
+@media (max-width: 640px) {
+	.activity-controls { justify-content: flex-start; }
+	.activity-filter, .activity-filter:focus { width: 100%; }
+}
+
+
 /* Notification target rows in the template dialog. */
 .notify-block { grid-column: 1 / -1; }
 .notify-rows { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 8px; }
