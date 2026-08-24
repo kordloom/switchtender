@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/base64"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -83,5 +84,35 @@ func TestOIDCHandshakeMissing(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/auth/oidc/callback", nil)
 	if _, err := oidcTest().readHandshake(req); err == nil {
 		t.Error("readHandshake() with no cookie should error")
+	}
+}
+
+// TestOIDCBrandMatchesRegistrableHost proves the sign-in button brand is chosen by the issuer's host,
+// not a substring of the whole issuer, so a known provider is labeled and a vanity domain that merely
+// contains a provider's name is not mislabeled.
+func TestOIDCBrandMatchesRegistrableHost(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Issuer string
+		Want   string
+	}{
+		{Issuer: "https://accounts.google.com", Want: "google"},
+		{Issuer: "https://login.microsoftonline.com/tenant/v2.0", Want: "microsoft"},
+		{Issuer: "https://sts.windows.net/abc/", Want: "microsoft"},
+		{Issuer: "https://token.actions.example.gitlab.com", Want: "gitlab"},
+		{Issuer: "https://dev-12345.okta.com", Want: "okta"},
+		{Issuer: "https://github.com", Want: "github"},
+		// A vanity host that only contains a provider's name must not borrow its brand.
+		{Issuer: "https://auth.mycompany-google.com", Want: ""},
+		{Issuer: "https://notgoogle.example.com", Want: ""},
+		{Issuer: "https://keycloak.internal/realms/x", Want: ""},
+	}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			if got := oidcBrand(test.Issuer); got != test.Want {
+				t.Errorf("oidcBrand(%q) = %q, want %q", test.Issuer, got, test.Want)
+			}
+		})
 	}
 }

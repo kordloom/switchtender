@@ -66,18 +66,25 @@ func (o *OIDCAuth) Brand() string { return o.brand }
 // provider's name and mark instead of a generic label. An unrecognized issuer returns the empty
 // string.
 func oidcBrand(issuer string) string {
-	s := strings.ToLower(issuer)
+	host := strings.ToLower(issuer)
+	if u, err := url.Parse(issuer); err == nil && u.Host != "" {
+		host = strings.ToLower(u.Hostname())
+	}
+	// Match the registrable host, not a substring of the whole issuer, so a vanity domain that merely
+	// contains a provider's name is not mislabeled. An unrecognized host returns the generic button.
+	hostIs := func(domain string) bool {
+		return host == domain || strings.HasSuffix(host, "."+domain)
+	}
 	switch {
-	case strings.Contains(s, "google"):
+	case hostIs("google.com") || hostIs("googleapis.com"):
 		return "google"
-	case strings.Contains(s, "microsoftonline"), strings.Contains(s, "windows.net"),
-		strings.Contains(s, "azure"), strings.Contains(s, "microsoft"):
+	case hostIs("microsoftonline.com") || hostIs("windows.net") || hostIs("microsoft.com"):
 		return "microsoft"
-	case strings.Contains(s, "github"):
+	case hostIs("github.com"):
 		return "github"
-	case strings.Contains(s, "gitlab"):
+	case hostIs("gitlab.com"):
 		return "gitlab"
-	case strings.Contains(s, "okta"):
+	case hostIs("okta.com") || hostIs("oktapreview.com"):
 		return "okta"
 	default:
 		return ""
