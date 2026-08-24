@@ -426,10 +426,12 @@ func decodeProofHashes(in []string) ([][]byte, error) {
 func verifyBundleChain(claims []BundleClaim, head BundleCoord) (bool, int64) {
 	for i, c := range claims {
 		str := func(k string) string { s, _ := c.Payload[k].(string); return s }
-		recomputed := linkOf(claimObject(c.Chain.Seq, c.At,
+		// The claim's values came from the document under test, not from this install, so a value
+		// canonicalization refuses is a bad bundle rather than a bug here.
+		recomputed, err := checkedLinkOf(claimObject(c.Chain.Seq, c.At,
 			str("actor"), str("method"), str("path"), c.Chain.Prev,
 			str("actor_type"), str("on_behalf_of"), str("content_digest")))
-		if recomputed != c.Chain.Link {
+		if err != nil || recomputed != c.Chain.Link {
 			return false, c.Chain.Seq
 		}
 		if i > 0 && c.Chain.Prev != claims[i-1].Chain.Link {
