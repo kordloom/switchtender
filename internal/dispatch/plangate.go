@@ -206,8 +206,14 @@ func applyOptions(r *run.Run, policies []*policy.Policy, destroys int, read bool
 		opts = append(opts, run.WithRequireApproval(true), run.WithHeldByPolicy(
 			"plan summary unreadable, so the destroy count was never weighed against the limit"))
 	} else if p := policy.Exceeding(policies, r, destroys); p != nil {
-		opts = append(opts, run.WithRequireApproval(true), run.WithHeldByPolicy(fmt.Sprintf(
-			"%s (plan destroys %d, limit %d)", p.Label(), destroys, p.MaxDestroy)))
+		// The rule's own second-approver requirement travels with the hold. policy.Requiring, which
+		// the dispatcher's pass consults, only considers rules with no destroy limit, so the rule
+		// that held this apply is the one rule that pass excludes: without copying it here nothing
+		// would, and whoever asked for the destroy could release it themselves.
+		opts = append(opts, run.WithRequireApproval(true),
+			run.WithRequireDistinctApprover(p.RequireDistinctApprover),
+			run.WithHeldByPolicy(fmt.Sprintf(
+				"%s (plan destroys %d, limit %d)", p.Label(), destroys, p.MaxDestroy)))
 	}
 	if r.ProjectID != "" {
 		opts = append(opts, run.WithProject(r.ProjectID))

@@ -734,14 +734,18 @@ func (d *Dispatcher) Submit(ctx context.Context, playbook, inventory string, opt
 	if err := d.denied(ctx, r); err != nil {
 		return nil, err
 	}
-	if r.Status != run.StatusPendingApproval {
-		held, perr := d.requiresApproval(ctx, r)
-		if perr != nil {
-			return nil, perr
-		}
-		if held {
-			r.Status = run.StatusPendingApproval
-		}
+	// The policy pass runs even for a run that arrives held, for the same reason denied does. A run
+	// born held skipped it, so the rule that governs it was never consulted and its
+	// require_distinct_approver was never copied onto the run. The run was still held, so it looked
+	// governed, but whoever asked for it could approve it themselves. Every path that submits with
+	// approval already requested reaches this, including the AI proposal and the drift reconcile,
+	// which is exactly where a second pair of eyes is the point.
+	held, perr := d.requiresApproval(ctx, r)
+	if perr != nil {
+		return nil, perr
+	}
+	if held {
+		r.Status = run.StatusPendingApproval
 	}
 	recordHold(r, holdRequested)
 	created, _, err := d.idempotentSave(ctx, r)
@@ -831,14 +835,13 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 	if err := d.denied(ctx, parent); err != nil {
 		return nil, err
 	}
-	if parent.Status != run.StatusPendingApproval {
-		held, perr := d.requiresApproval(ctx, parent)
-		if perr != nil {
-			return nil, perr
-		}
-		if held {
-			parent.Status = run.StatusPendingApproval
-		}
+	// Consulted even when the parent arrives held, so the rule governing it binds its approval.
+	held, perr := d.requiresApproval(ctx, parent)
+	if perr != nil {
+		return nil, perr
+	}
+	if held {
+		parent.Status = run.StatusPendingApproval
 	}
 	recordHold(parent, holdRequested)
 	created, dup, err := d.idempotentSave(ctx, parent)
@@ -1446,14 +1449,13 @@ func (d *Dispatcher) SubmitPipeline(ctx context.Context, name, inventory string,
 	if err := d.pipelineDenied(ctx, parent, steps); err != nil {
 		return nil, err
 	}
-	if parent.Status != run.StatusPendingApproval {
-		held, perr := d.pipelineRequiresApproval(ctx, parent, steps)
-		if perr != nil {
-			return nil, perr
-		}
-		if held {
-			parent.Status = run.StatusPendingApproval
-		}
+	// Consulted even when the parent arrives held, so the rule governing it binds its approval.
+	held, perr := d.pipelineRequiresApproval(ctx, parent, steps)
+	if perr != nil {
+		return nil, perr
+	}
+	if held {
+		parent.Status = run.StatusPendingApproval
 	}
 	recordHold(parent, holdRequested)
 	created, dup, err := d.idempotentSave(ctx, parent)
