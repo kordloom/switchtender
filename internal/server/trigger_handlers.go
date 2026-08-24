@@ -347,8 +347,12 @@ func hookHandler(triggers trigger.Store, templates template.Store, submitter Sub
 			respondError(w, log, http.StatusNotFound, "unknown webhook")
 			return
 		}
-		if tg.RequireSignature && !verifyHookSignature(w, r, tg, sealer, log) {
-			return
+		var signed []byte
+		if tg.RequireSignature {
+			var ok bool
+			if signed, ok = verifyHookSignature(w, r, tg, sealer, log); !ok {
+				return
+			}
 		}
 		t, err := templates.Get(r.Context(), tg.TemplateID)
 		if err != nil {
@@ -368,7 +372,8 @@ func hookHandler(triggers trigger.Store, templates template.Store, submitter Sub
 		// was told it had, while a replay outside the bucket fired a fresh run every time because the
 		// bucket had moved on. A sender that supplies no delivery id falls back to the bounded time
 		// bucket keyed on the trigger, the old behavior and the best that can be done without one.
-		existing, key, err := resolveHookDedupe(r.Context(), store, tg.ID, hookDelivery(r), time.Now())
+		existing, key, err := resolveHookDedupe(r.Context(), store, tg.ID,
+			hookDelivery(r, signed), time.Now())
 		if err != nil {
 			log.Error("server: resolve trigger dedupe: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not fire the trigger")
@@ -452,12 +457,27 @@ func hookHandler(triggers trigger.Store, templates template.Store, submitter Sub
 // which is what an endpoint reachable without a credential had.
 const hookWindowMax = 120
 
-// hookDelivery returns a suffix identifying this delivery, or empty when the sender supplies none.
+// hookDelivery returns a suffix identifying this delivery, or empty when there is nothing to
+// identify it by.
 //
-// The headers are the ones the common forges send: GitHub and Gitea use X-GitHub-Delivery, GitLab
-// uses X-Gitlab-Event-UUID, and Bitbucket uses X-Request-UUID. A value is hashed rather than used
-// directly, so a sender cannot steer the key into another trigger's bucket by choosing what to send.
-func hookDelivery(r *http.Request) string {
+// When the trigger requires a signature the suffix comes from the verified body, because that is the
+// only part of the request the signature covers. Keying on the delivery header instead made the
+// signature worth nothing against replay: the header sits outside the signed material, so anyone
+// holding one captured delivery, which a repository admin can read straight out of the forge's
+// "Recent Deliveries" pane, could resend the same signed body under a new header and launch a real
+// deployment again, as many times as they liked. A sender whose body never varies now collapses onto
+// one run, which is the honest answer: two deliveries this install cannot tell apart are two
+// deliveries it must not treat as separate events.
+//
+// Without a signature there is nothing trustworthy to key on, so the delivery header is used as
+// before. The headers are the ones the common forges send: GitHub and Gitea use X-GitHub-Delivery,
+// GitLab uses X-Gitlab-Event-UUID, and Bitbucket uses X-Request-UUID. A value is hashed rather than
+// used directly, so a sender cannot steer the key into another trigger's bucket.
+func hookDelivery(r *http.Request, signed []byte) string {
+	if len(signed) > 0 {
+		sum := sha256.Sum256(signed)
+		return ":body:" + hex.EncodeToString(sum[:8])
+	}
 	for _, h := range []string{"X-GitHub-Delivery", "X-Gitlab-Event-UUID", "X-Request-UUID"} {
 		if v := r.Header.Get(h); v != "" {
 			sum := sha256.Sum256([]byte(v))
@@ -499,28 +519,32 @@ func resolveHookDedupe(ctx context.Context, store run.Store, triggerID, delivery
 
 // verifyHookSignature reads the request body and checks its X-Hub-Signature-256 against the
 // trigger's sealed signing secret. It writes the error response and returns false when the
-// signature is missing, wrong, or cannot be checked; on success it returns true. A trigger that
-// requires a signature but has no usable secret is a server misconfiguration, not a client error.
-func verifyHookSignature(w http.ResponseWriter, r *http.Request, tg *trigger.Trigger, sealer *credential.Sealer, log *zap.Logger) bool {
+// signature is missing, wrong, or cannot be checked; on success it returns the bytes it verified
+// and true. A trigger that requires a signature but has no usable secret is a server
+// misconfiguration, not a client error.
+//
+// The verified bytes are returned because they are the only part of the request the signature
+// covers, and the dedupe key has to be derived from them rather than from a header anyone can change.
+func verifyHookSignature(w http.ResponseWriter, r *http.Request, tg *trigger.Trigger, sealer *credential.Sealer, log *zap.Logger) ([]byte, bool) {
 	if sealer == nil || !sealer.Enabled() || tg.SigningSecret == "" {
 		log.Error("server: trigger requires a signature but no signing secret is available: " + tg.ID)
 		respondError(w, log, http.StatusInternalServerError, "signature verification unavailable")
-		return false
+		return nil, false
 	}
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxHookBody))
 	if err != nil {
 		respondError(w, log, http.StatusRequestEntityTooLarge, "webhook body too large")
-		return false
+		return nil, false
 	}
 	secret, err := sealer.Open(tg.SigningSecret)
 	if err != nil {
 		log.Error("server: open signing secret: " + err.Error())
 		respondError(w, log, http.StatusInternalServerError, "signature verification unavailable")
-		return false
+		return nil, false
 	}
 	if !trigger.VerifySignature(secret, body, r.Header.Get("X-Hub-Signature-256")) {
 		respondError(w, log, http.StatusUnauthorized, "invalid webhook signature")
-		return false
+		return nil, false
 	}
-	return true
+	return body, true
 }
