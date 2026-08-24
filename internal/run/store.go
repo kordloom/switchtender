@@ -418,6 +418,8 @@ func NewMemStore() Store {
 // different run is rejected with ErrDuplicateKey so a concurrent retry cannot create a second run. A
 // stored cancel request survives the replace so a stale snapshot cannot erase a concurrent cancel.
 func (m *memStore) Save(_ context.Context, r *Run) error {
+	// Cleaned here so every backend stores the same bytes for the same input.
+	r.SanitizeText()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if r.IdempotencyKey != "" {
@@ -961,6 +963,7 @@ func (m *memStore) StampApprovedSpec(_ context.Context, id, digest string) error
 // FinalizeRunning moves a running run to its terminal status and records the exit code, failure
 // detail, resolved image, and end time in the same locked write.
 func (m *memStore) FinalizeRunning(_ context.Context, id string, fin Finalization) (bool, error) {
+	fin.SanitizeText()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	r, ok := m.runs[id]
@@ -982,6 +985,7 @@ func (m *memStore) FinalizeRunning(_ context.Context, id string, fin Finalizatio
 
 // ApplyRunningProgress records a worker's progress on a run it still holds, in one locked write.
 func (m *memStore) ApplyRunningProgress(_ context.Context, id, owner string, p Progress) (bool, error) {
+	p.SanitizeText()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	r, ok := m.runs[id]

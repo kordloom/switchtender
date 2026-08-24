@@ -7,10 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
@@ -89,6 +91,7 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Run("transition status", func(t *testing.T) { testTransitionStatus(t, newStore()) })
 	t.Run("finalize running is one write", func(t *testing.T) { testFinalizeRunning(t, newStore()) })
 	t.Run("running progress is fenced", func(t *testing.T) { testApplyRunningProgress(t, newStore()) })
+	t.Run("unrepresentable text is stored", func(t *testing.T) { testUnrepresentableText(t, newStore()) })
 	t.Run("workers", func(t *testing.T) { testWorkers(t, newStore()) })
 	t.Run("retention purge", func(t *testing.T) { testPurge(t, newStore()) })
 	t.Run("summary trim bounds growth", func(t *testing.T) { testTrimSummaries(t, newStore()) })
@@ -155,6 +158,78 @@ func testTransitionStatus(t *testing.T, store run.Store) {
 	}
 	if ok, err := store.TransitionStatus(ctx, "run_missing", run.StatusPending, run.StatusRejected); err != nil || ok {
 		t.Errorf("missing run transition = (%v, %v), want (false, nil)", ok, err)
+	}
+}
+
+// testUnrepresentableText checks a run whose text carries a NUL byte or invalid UTF-8 is stored and
+// finished the same way on every backend.
+//
+// The backends disagreed, and the disagreement lost the run. SQLite stores arbitrary bytes, so such a
+// run finished normally. PostgreSQL refuses both with SQLSTATE 22021, so the terminal write failed,
+// FinalizeRunning reported no change, the run stayed running until the lease sweep interrupted it,
+// and the real outcome and exit code were gone. Nothing unusual is needed to reach it: the text comes
+// from whatever a tool printed as it failed, from an imported inventory, or from a JSON body
+// carrying an escaped NUL. The contract suite never exercised a byte outside ASCII, which is why the
+// divergence sat there.
+func testUnrepresentableText(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	// A NUL, a lone continuation byte, and a truncated multi-byte sequence.
+	nasty := "boom\x00 \xff\xfe end \xe2\x82"
+
+	r := sampleRun("run_text")
+	r.Status = run.StatusRunning
+	r.Command = "echo " + nasty
+	r.Error = ""
+	r.IdempotencyKey = "idem_text"
+	r.ExtraVars = map[string]any{"note": nasty, "count": 3}
+	r.Labels = map[string]string{"env": nasty}
+	if err := store.Save(ctx, r); err != nil {
+		t.Fatalf("Save() with unrepresentable text error = %v", err)
+	}
+
+	code := 2
+	fin := run.Finalization{
+		Status: run.StatusFailed, ExitCode: &code, Error: nasty,
+		Warning: nasty, Outputs: map[string]any{"tail": nasty},
+		EndedAt: time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC),
+	}
+	moved, err := store.FinalizeRunning(ctx, "run_text", fin)
+	if err != nil {
+		t.Fatalf("FinalizeRunning() with unrepresentable text error = %v", err)
+	}
+	if !moved {
+		t.Fatal("FinalizeRunning() recorded nothing, so the run keeps running and its outcome is lost")
+	}
+
+	got, err := store.Get(ctx, "run_text")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.Status != run.StatusFailed {
+		t.Errorf("status = %q, want failed", got.Status)
+	}
+	if got.ExitCode == nil || *got.ExitCode != code {
+		t.Errorf("exit code = %v, want %d", got.ExitCode, code)
+	}
+	// What is stored must be readable text, and it must still say something about what happened.
+	for _, field := range []struct {
+		Name  string
+		Value string
+	}{
+		{"command", got.Command}, {"error", got.Error}, {"warning", got.Warning},
+	} {
+		if !utf8.ValidString(field.Value) {
+			t.Errorf("%s round-tripped as invalid UTF-8: %q", field.Name, field.Value)
+		}
+		if strings.ContainsRune(field.Value, 0) {
+			t.Errorf("%s round-tripped with a NUL byte: %q", field.Name, field.Value)
+		}
+	}
+	if !strings.Contains(got.Error, "boom") || !strings.Contains(got.Error, "end") {
+		t.Errorf("error lost the readable part of what the tool said: %q", got.Error)
+	}
+	if !strings.Contains(got.Command, "echo") {
+		t.Errorf("command lost its readable part: %q", got.Command)
 	}
 }
 

@@ -1160,6 +1160,9 @@ func scanHostSummary(rows *sql.Rows) (run.HostSummary, error) {
 // Save inserts or replaces the run identified by r.ID. The cancel flag merges with MAX so a
 // replace from a stale snapshot cannot erase a cancel another process just requested.
 func (s *store) Save(ctx context.Context, r *run.Run) error {
+	// Cleaned here so a stray byte from a tool's output cannot make this write behave differently
+	// from the same write on PostgreSQL.
+	r.SanitizeText()
 	const q = `
 INSERT INTO runs
 	(id, playbook, inventory, status, exit_code, error, created_at, started_at, ended_at,
@@ -2777,6 +2780,7 @@ func (s *store) StampApprovedSpec(ctx context.Context, id, digest string) error 
 // detail, resolved image, and end time in the same statement, so a run is never terminal with the
 // facts that explain it missing.
 func (s *store) FinalizeRunning(ctx context.Context, id string, fin run.Finalization) (bool, error) {
+	fin.SanitizeText()
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE runs SET status=?, exit_code=?, error=?, image=?, commit_sha=?,
 pull_credential_id=?, outputs=?, warning=?, ended_at=?
@@ -2802,6 +2806,7 @@ WHERE id=? AND status=?`,
 // stand in for the read-modify-write this replaced.
 func (s *store) ApplyRunningProgress(ctx context.Context, id, owner string,
 	p run.Progress) (bool, error) {
+	p.SanitizeText()
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE runs SET started_at=COALESCE(NULLIF(started_at,''), ?),
 warning=CASE WHEN ?='' THEN warning ELSE ? END,

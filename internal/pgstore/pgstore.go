@@ -748,6 +748,9 @@ func scanHostSummary(rows *sql.Rows) (run.HostSummary, error) {
 // Save inserts or replaces the run identified by r.ID. The cancel flag merges with GREATEST so a
 // replace from a stale snapshot cannot erase a cancel another process just requested.
 func (s *store) Save(ctx context.Context, r *run.Run) error {
+	// Cleaned here rather than left to fail: PostgreSQL refuses a NUL byte and invalid UTF-8 with
+	// SQLSTATE 22021, and the write that carried them is the one recording what the run did.
+	r.SanitizeText()
 	const q = `
 INSERT INTO runs
 	(id, playbook, inventory, status, exit_code, error, created_at, started_at, ended_at,
@@ -2373,6 +2376,7 @@ func (s *store) StampApprovedSpec(ctx context.Context, id, digest string) error 
 // detail, resolved image, and end time in the same statement, so a run is never terminal with the
 // facts that explain it missing.
 func (s *store) FinalizeRunning(ctx context.Context, id string, fin run.Finalization) (bool, error) {
+	fin.SanitizeText()
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE runs SET status=$1, exit_code=$2, error=$3, image=$4, commit_sha=$5,
 pull_credential_id=$6, outputs=$7, warning=$8, ended_at=$9
@@ -2398,6 +2402,7 @@ WHERE id=$10 AND status=$11`,
 // stand in for the read-modify-write this replaced.
 func (s *store) ApplyRunningProgress(ctx context.Context, id, owner string,
 	p run.Progress) (bool, error) {
+	p.SanitizeText()
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE runs SET started_at=COALESCE(NULLIF(started_at,''), $1),
 warning=CASE WHEN $2='' THEN warning ELSE $2 END,
