@@ -53,6 +53,35 @@ type OIDCAuth struct {
 	secureCookie bool
 	// log records sign-in failures without leaking token contents.
 	log *zap.Logger
+	// brand names the identity provider for the sign-in button's label and mark, derived from the
+	// issuer host. Empty for a provider the button does not have a logo for.
+	brand string
+}
+
+// Brand returns the identity provider's short name for the sign-in button, one of "google",
+// "microsoft", "github", "gitlab", "okta", or "" for an issuer the button renders generically.
+func (o *OIDCAuth) Brand() string { return o.brand }
+
+// oidcBrand maps an issuer URL to a known provider brand, so the sign-in button can carry that
+// provider's name and mark instead of a generic label. An unrecognized issuer returns the empty
+// string.
+func oidcBrand(issuer string) string {
+	s := strings.ToLower(issuer)
+	switch {
+	case strings.Contains(s, "google"):
+		return "google"
+	case strings.Contains(s, "microsoftonline"), strings.Contains(s, "windows.net"),
+		strings.Contains(s, "azure"), strings.Contains(s, "microsoft"):
+		return "microsoft"
+	case strings.Contains(s, "github"):
+		return "github"
+	case strings.Contains(s, "gitlab"):
+		return "gitlab"
+	case strings.Contains(s, "okta"):
+		return "okta"
+	default:
+		return ""
+	}
 }
 
 // newOIDCAuth discovers the provider at issuer and builds an OIDCAuth. Discovery does network I/O,
@@ -85,6 +114,7 @@ func NewOIDCAuth(ctx context.Context, issuer, clientID, clientSecret, redirectUR
 		signKey:      key[:],
 		secureCookie: strings.HasPrefix(strings.ToLower(redirectURL), "https"),
 		log:          log,
+		brand:        oidcBrand(issuer),
 	}, nil
 }
 

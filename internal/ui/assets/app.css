@@ -562,6 +562,15 @@ table.matrix td { padding: 3px; text-align: center; }
 .matrix-too-large { padding: 24px; color: var(--muted); font-size: 14px; line-height: 1.5; }
 .sso { width: 100%; justify-content: center; text-decoration: none; }
 .sso-divider { text-align: center; margin: 10px 0; font-size: 13px; }
+/* Branded single sign-on button: a clean surface button so a provider's colored mark reads true,
+   unlike the green primary button the generic SSO and SAML buttons use. */
+.button.sso.brand { background: var(--surface); color: var(--text); border-color: var(--border); font-weight: 600; }
+.button.sso.brand:hover:not(:disabled) { background: var(--surface-2); border-color: var(--muted); }
+.button.sso.brand svg { flex-shrink: 0; }
+.button.sso[disabled] { opacity: 0.55; cursor: default; }
+.button.primary.sso svg { flex-shrink: 0; }
+.sso-demo-note { font-size: 12px; margin: 8px 0 2px; text-align: center; color: var(--muted); }
+
 .button svg { width: 14px; height: 14px; }
 .button:hover { text-decoration: none; background: var(--surface-3); border-color: var(--muted); }
 .button:disabled { opacity: 0.5; cursor: default; }

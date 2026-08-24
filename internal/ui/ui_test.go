@@ -15,7 +15,7 @@ import (
 
 func TestUIRoutes(t *testing.T) {
 	t.Parallel()
-	handler := ui.New(zap.NewNop(), nil, false, 50000, false, false, false).Handler()
+	handler := ui.New(zap.NewNop(), nil, false, 50000, false, false, false, "").Handler()
 
 	tests := []struct {
 		Name         string
@@ -82,7 +82,7 @@ func TestUIDocs(t *testing.T) {
 		"README.md":   {Data: []byte("# Overview\n\nWelcome to the docs.\n")},
 		"concepts.md": {Data: []byte("# Concepts\n\n| A | B |\n|---|---|\n| 1 | 2 |\n")},
 	}
-	handler := ui.New(zap.NewNop(), docs, false, 0, false, false, false).Handler()
+	handler := ui.New(zap.NewNop(), docs, false, 0, false, false, false, "").Handler()
 
 	tests := []struct {
 		Name         string
@@ -127,7 +127,7 @@ func TestUIDocs(t *testing.T) {
 // broken build, not a smaller download.
 func TestAppJSAssembledFromParts(t *testing.T) {
 	t.Parallel()
-	handler := ui.New(zap.NewNop(), nil, false, 50000, false, false, false).Handler()
+	handler := ui.New(zap.NewNop(), nil, false, 50000, false, false, false, "").Handler()
 
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/ui/assets/app.js", nil))
@@ -150,5 +150,59 @@ func TestAppJSAssembledFromParts(t *testing.T) {
 	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/ui/assets/js/01-boot.js", nil))
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("js/01-boot.js = %d, want 404: parts ship only inside app.js", rec.Code)
+	}
+}
+
+// TestLoginBrandedSSO proves the sign-in page renders the OIDC button with the configured provider's
+// label, and falls back to a generic single sign-on button for an unbranded issuer.
+func TestLoginBrandedSSO(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Brand        string
+		WantContains string
+	}{
+		{Brand: "google", WantContains: "Sign in with Google"},
+		{Brand: "microsoft", WantContains: "Sign in with Microsoft"},
+		{Brand: "github", WantContains: "Sign in with GitHub"},
+		{Brand: "gitlab", WantContains: "Sign in with GitLab"},
+		{Brand: "okta", WantContains: "Sign in with Okta"},
+		{Brand: "", WantContains: "Sign in with SSO"},
+	}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			handler := ui.New(zap.NewNop(), nil, false, 0, true, false, false, test.Brand).Handler()
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/ui/login", nil))
+			if rec.Code != http.StatusOK {
+				t.Fatalf("login status = %d, want 200", rec.Code)
+			}
+			body := rec.Body.String()
+			if !strings.Contains(body, test.WantContains) {
+				t.Errorf("login for brand %q missing %q", test.Brand, test.WantContains)
+			}
+			if !strings.Contains(body, "/auth/oidc/login") {
+				t.Errorf("login for brand %q has no OIDC link", test.Brand)
+			}
+		})
+	}
+}
+
+// TestLoginDemoShowcase proves a read-only demo with no identity provider still advertises SSO with a
+// disabled button, so a visitor sees the capability exists, and never a live sign-in link.
+func TestLoginDemoShowcase(t *testing.T) {
+	t.Parallel()
+	handler := ui.New(zap.NewNop(), nil, true, 0, false, false, false, "").Handler()
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/ui/login", nil))
+	body := rec.Body.String()
+	if !strings.Contains(body, "sso-demo-note") {
+		t.Error("the demo login does not advertise SSO")
+	}
+	if !strings.Contains(body, "disabled") {
+		t.Error("the demo SSO button is not disabled")
+	}
+	if strings.Contains(body, "/auth/oidc/login") || strings.Contains(body, "/auth/saml/login") {
+		t.Error("the demo login exposes a live SSO link with no provider configured")
 	}
 }

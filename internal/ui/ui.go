@@ -49,6 +49,9 @@ type UI struct {
 	matrixCap int
 	// oidcEnabled shows the single sign-on button on the sign-in page when set.
 	oidcEnabled bool
+	// oidcBrand names the OIDC provider ("google", "microsoft", ...) so the sign-in button carries
+	// that provider's label and mark. Empty renders a generic single sign-on button.
+	oidcBrand string
 	// samlEnabled shows the SAML sign-in button on the sign-in page when set.
 	samlEnabled bool
 	// aiEnabled reports whether an advisory AI provider is configured, so the overview can make the
@@ -59,7 +62,7 @@ type UI struct {
 // New parses the embedded templates and returns a UI. It panics if the embedded templates fail to
 // parse, which is a build time programming error. docs, when non-nil, is the documentation tree
 // served under /ui/docs; readOnly hides the launch panel and run action buttons for a demo.
-func New(log *zap.Logger, docs fs.FS, readOnly bool, matrixCap int, oidcEnabled, samlEnabled, aiEnabled bool) *UI {
+func New(log *zap.Logger, docs fs.FS, readOnly bool, matrixCap int, oidcEnabled, samlEnabled, aiEnabled bool, oidcBrand string) *UI {
 	if log == nil {
 		log = zap.NewNop()
 	}
@@ -71,6 +74,7 @@ func New(log *zap.Logger, docs fs.FS, readOnly bool, matrixCap int, oidcEnabled,
 		readOnly:    readOnly,
 		matrixCap:   matrixCap,
 		oidcEnabled: oidcEnabled,
+		oidcBrand:   oidcBrand,
 		samlEnabled: samlEnabled,
 		aiEnabled:   aiEnabled,
 	}
@@ -214,8 +218,8 @@ func (u *UI) sources(w http.ResponseWriter, _ *http.Request) {
 
 // login renders the token sign in page.
 func (u *UI) login(w http.ResponseWriter, _ *http.Request) {
-	u.render(w, "login.html", map[string]any{"OIDCEnabled": u.oidcEnabled, "SAMLEnabled": u.samlEnabled,
-		"ReadOnly": u.readOnly})
+	u.render(w, "login.html", map[string]any{"OIDCEnabled": u.oidcEnabled, "OIDCBrand": u.oidcBrand,
+		"SAMLEnabled": u.samlEnabled, "ReadOnly": u.readOnly})
 }
 
 // schedules renders the schedules page.
