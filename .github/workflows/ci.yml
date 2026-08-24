@@ -42,6 +42,33 @@ jobs:
       - name: JS unit tests
         run: node --test internal/ui/assets/jstest/*.test.mjs
 
+  # The audit package cross-checks every bundle shape this product emits against the loomseal
+  # verifier a relying party would actually run, and requires both to reach the same verdict. That
+  # harness locates the verifier in a checkout beside this one and skips when it is absent, so on a
+  # runner that clones only this repository it silently skipped: the strongest claim the product
+  # makes had no automated gate anywhere, and drift would have been found by a customer. Checking
+  # out the exact version this module depends on is what makes the check run.
+  crossverify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: switchtender
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: switchtender/go.mod
+      - name: Check out the loomseal version this module depends on
+        working-directory: switchtender
+        run: |
+          set -euo pipefail
+          version="$(go list -m -f '{{.Version}}' github.com/kordloom/loomseal)"
+          echo "cross-checking against loomseal $version"
+          git clone --quiet https://github.com/kordloom/loomseal.git ../loomseal
+          git -C ../loomseal checkout --quiet "$version"
+      - name: Cross-verify every bundle shape
+        working-directory: switchtender
+        run: go test -count=1 ./internal/audit/...
+
   lint:
     runs-on: ubuntu-latest
     steps:
