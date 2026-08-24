@@ -260,11 +260,14 @@ answering the whole time the replacement is being built.
 
 Prints the SwitchTender version.
 
-## Global flags
+## Output flags
 
-| Flag | Purpose |
-|------|---------|
-| `--pretty` | Indent JSON output instead of the compact default. |
+JSON goes to stdout compact by default. Three commands take `--pretty` to indent it; it is not a
+global flag, so passing it elsewhere is an error rather than a no-op.
+
+| Flag | Where | Purpose |
+|------|-------|---------|
+| `--pretty` | `token` and its subcommands, `audit anchor`, `audit receipt` | Indent JSON output instead of the compact default. |
 
 
 ## Confining relay workers to their queues

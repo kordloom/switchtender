@@ -8,8 +8,13 @@
 # HTTP API
 
 Every endpoint the server exposes. The API is served under the `/v1` base path. The web UI at
-`/ui/`, along with `/healthz`, `/readyz`, `/metrics`, the OpenID Connect and SAML sign-in routes, the
-webhook `/hooks` path, and the `/relay` worker path, is unversioned. The root redirects to the UI.
+`/ui/`, along with `/healthz`, `/readyz`, `/metrics`, `/.well-known/loomseal.json`, the OpenID
+Connect and SAML sign-in routes, the webhook `/hooks` path, and the `/relay` worker path, is
+unversioned. The root redirects to the UI.
+
+`/.well-known/loomseal.json` is deliberately public and unauthenticated: it publishes this install's
+signing key and identifiers so a relying party can pin the key from a channel independent of any
+bundle it is handed.
 
 | Method | Path                    | What                                                    |
 |--------|-------------------------|---------------------------------------------------------|
@@ -24,6 +29,9 @@ webhook `/hooks` path, and the `/relay` worker path, is unversioned. The root re
 | GET    | `/v1/runs/{id}/shards`     | Shard runs of a split.                                  |
 | GET    | `/v1/runs/{id}/steps`      | Step runs of a pipeline.                                |
 | GET    | `/v1/runs/{id}/logs`       | Captured output as plain text.                          |
+| GET    | `/v1/runs/{id}/evidence`   | Self-contained HTML evidence document for one run. `?format=json` returns the same content as JSON. |
+| GET    | `/v1/runs/{id}/receipt`    | Signed LoomSeal receipt proving what this run did.      |
+| POST   | `/v1/runs/{id}/rerun`      | Submit a fresh run with this run's execution settings.  |
 | GET    | `/v1/runs/{id}/events`     | Structured events as JSON.                              |
 | GET    | `/v1/runs/{id}/compare`    | What changed against a baseline run: host verdicts, task timing, duration. `with=` names the baseline or `prev` for the previous run of the same source. |
 | GET    | `/v1/runs/{id}/stream`     | Live events and log over Server-Sent Events.            |
@@ -35,17 +43,21 @@ webhook `/hooks` path, and the `/relay` worker path, is unversioned. The root re
 | POST   | `/v1/pipelines`            | Submit ordered playbook steps as one pipeline.          |
 | POST   | `/v1/schedules`            | Cron schedule for a run, split, pipeline, or template.  |
 | GET    | `/v1/schedules`            | List schedules.                                         |
+| GET    | `/v1/schedules/preview`    | Next fire times for a cron expression and timezone, without saving anything. |
 | GET    | `/v1/schedules/{id}`       | One schedule.                                           |
 | PUT    | `/v1/schedules/{id}`       | Update a schedule.                                      |
 | DELETE | `/v1/schedules/{id}`       | Delete a schedule.                                      |
 | GET    | `/v1/fleet`                | Hosts ranked by failures over recent runs, flaky flags. |
 | GET    | `/v1/hosts/{host}/runs`    | One host's recent per-run outcomes.                     |
+| GET    | `/v1/hosts/{host}/facts`   | The most recent Ansible facts gathered for one host.    |
 | GET    | `/v1/tasks`                | Per-task duration trends over recent runs.              |
 | GET    | `/v1/drift`                | Resources drifting from desired state, from dry runs.   |
 | POST   | `/v1/projects`             | Register a git project. Runs record their commit.       |
 | GET    | `/v1/projects`             | List projects.                                          |
 | PUT    | `/v1/projects/{id}`        | Update a project.                                       |
 | DELETE | `/v1/projects/{id}`        | Delete a project. 409 while a template or source uses it.|
+| GET    | `/v1/projects/{id}/files`  | Browse the project checkout's tree.                     |
+| GET    | `/v1/projects/{id}/file`   | Read one file from the project checkout. `?path=` within the repo. |
 | POST   | `/v1/templates`            | Save a launch preset.                                   |
 | GET    | `/v1/templates`            | List templates.                                         |
 | POST   | `/v1/templates/{id}/launch`| Launch a template, answering its survey and choosing selectable credentials if it has them. |
@@ -61,6 +73,7 @@ webhook `/hooks` path, and the `/relay` worker path, is unversioned. The root re
 | GET    | `/v1/credentials`          | List credentials, secrets never included.               |
 | POST   | `/v1/credential-types`     | Define a custom credential type: fields and how they inject. Admin only. |
 | GET    | `/v1/credential-types`     | List custom credential types. Admin only.               |
+| GET    | `/v1/credential-types/{id}`| One custom credential type. Admin only.                 |
 | PUT    | `/v1/credential-types/{id}` | Replace a custom credential type. Admin only.          |
 | DELETE | `/v1/credential-types/{id}` | Delete a custom credential type. Admin only.           |
 | PUT    | `/v1/credentials/{id}`     | Update a credential.                                    |
@@ -112,6 +125,8 @@ webhook `/hooks` path, and the `/relay` worker path, is unversioned. The root re
 | DELETE | `/v1/policies/{id}`        | Delete an approval policy.                              |
 | POST   | `/v1/import/{format}`      | Import an AWX, Semaphore, or Rundeck export. Format is awx, semaphore, or rundeck. Rundeck takes `?inventory=` to say which hosts its jobs target.|
 | GET    | `/v1/audit`                | A page of the mutation trail, admin only. `?limit=` up to 1000, default 100; `has_more` reports whether older entries remain. |
+| GET    | `/v1/audit/register`       | The change register as a self-contained HTML document, admin only. |
+| GET    | `/v1/doctor`               | Install health checks and their findings, admin only.   |
 | GET    | `/v1/audit/verify`         | Verify the audit hash chain is intact.                  |
 | GET    | `/v1/audit/bundle`         | The audit chain as a signed LoomSeal bundle, verifiable offline or on the /verify page. |
 | GET    | `/metrics`              | Prometheus series: run, fleet, queue-depth, and worker gauges, plus a run-duration histogram. |

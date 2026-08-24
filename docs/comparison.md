@@ -67,7 +67,7 @@ than "structured versus scrollback".
 | Capability | SwitchTender | AWX | Semaphore |
 |------------|------------|-----|-----------|
 | Deployment | One binary, SQLite by default and PostgreSQL optional. | Kubernetes plus PostgreSQL, Redis, and Receptor. | One binary. |
-| Run view | A structured host-by-task matrix with per-task drill-down, painted live over Server-Sent Events. | A text log stream. | A text log stream. |
+| Run view | A structured host-by-task matrix with per-task drill-down, painted live over Server-Sent Events. | A host status bar with per-event drill-down, which is a summary rather than a matrix. | A text log stream. |
 | Job splitting | Shards balanced by each host's measured past duration, with only the failed shards retried. | Job slicing, round-robin. | Not available. |
 | Pipelines | A dependency graph with parallel branches, per-step retries, and typed set_stats outputs passed to dependents. | Visual workflows. | Limited task chaining. |
 | Visual workflow editor | A drag-and-drop canvas at Workflows builds the dependency graph in the browser: draft persistence, undo, keyboard editing, cycle refusal, and a pan, zoom, and fit-to-view viewport, on the same DAG engine the API uses. | A drag-and-drop editor. | On the roadmap. |
@@ -101,7 +101,6 @@ than "structured versus scrollback".
 | Capability | Status |
 |------------|--------|
 | Maturity | AWX and Semaphore have years of production use and large communities. SwitchTender is young. AWX's years now cut both ways: its last release was July 2024, and its next one removes LDAP, SAML, and OIDC from core. |
-| Saved workflow definitions | The Workflows page builds a dependency graph and submits it as a pipeline, but a graph is not saved as a reusable object the way an AWX workflow job template is, so a schedule or a webhook fires a template rather than a stored graph. |
 | Approval steps inside a workflow | A whole run is held for approval. AWX places an approval node at a point in the graph, so the first half runs, waits, and continues. |
 | Recurrence beyond cron | AWX schedules take an RRULE, so "the last Friday of the quarter" is expressible. SwitchTender takes a cron expression with a timezone, and a cadence cron cannot say is reported and skipped on import rather than converted wrongly. |
 | Secret survey answers | AWX offers a password survey field whose answer is stored encrypted. A survey answer here is stored in plain text on the run, so a secret belongs in a credential instead, and both importers refuse to downgrade one rather than accept it quietly. |

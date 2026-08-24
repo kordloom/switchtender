@@ -195,8 +195,9 @@ One line with a Go toolchain installed:
     go install github.com/kordloom/switchtender@latest
 
 Or grab a build for your platform from the [releases page](https://github.com/kordloom/switchtender/releases):
-a `SwitchTender.dmg` for macOS, a `windows_amd64.zip` for Windows, or a `tar.gz` of the binary for
-macOS and Linux. Verify any download with `switchtender version --verify`, which checks the running
+a `windows_amd64.zip` for Windows, a `tar.gz` of the binary for macOS and Linux, or a `deb`, `rpm`,
+or `apk` package. On macOS the binary is the desktop app: run `switchtender desktop` and it opens
+the UI in its own window. Verify any download with `switchtender version --verify`, which checks the running
 binary against the release's published hashes; see [verifying a release](SECURITY.md#verifying-a-release)
 for that and for the cosign signature CI-built releases carry. Or build from source:
 
