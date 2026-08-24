@@ -48,3 +48,23 @@ test("the window control re-buckets the page chart the same as the overview", as
 	assert.match(doc.getElementById("activity-summary").textContent, /Runs in window/,
 		"the summary vanished after changing the window");
 });
+
+test("a shared link restores its window and filter", async () => {
+	const page = loadPage("activity", {
+		routes: { "/v1/runs": { runs: sample() } },
+		search: "?window=24&filter=db01",
+	});
+	await page.app.loadActivityPage();
+	await page.clock.flush();
+	const doc = page.document;
+
+	assert.equal(doc.querySelectorAll("#activity .activity-col").length, 24,
+		"the shared 24h window was not applied");
+	assert.ok(doc.querySelector('.activity-windows .seg-btn[data-window="24"]').classList.contains("active"),
+		"the 24h pill is not marked active from the link");
+	assert.equal(doc.querySelector(".activity-filter").value, "db01",
+		"the shared filter is not in the box");
+	assert.match(doc.getElementById("activity-note").textContent, /1 of 3 match/,
+		"the shared filter did not narrow the chart");
+	assert.ok(doc.getElementById("activity-share"), "the share button is missing");
+})
