@@ -48,15 +48,109 @@ type awxWorkflowNode struct {
 	// UnifiedJobTemplate names the job template this node runs, by natural key.
 	UnifiedJobTemplate awxRef `json:"unified_job_template"`
 	// SuccessNodes are the nodes that run when this one succeeds.
-	SuccessNodes []int64 `json:"success_nodes"`
+	SuccessNodes []awxNodeRef `json:"success_nodes"`
 	// FailureNodes are the nodes that run when this one fails, which a pipeline cannot express.
-	FailureNodes []int64 `json:"failure_nodes"`
+	FailureNodes []awxNodeRef `json:"failure_nodes"`
 	// AlwaysNodes are the nodes that run whatever this one did.
-	AlwaysNodes []int64 `json:"always_nodes"`
+	AlwaysNodes []awxNodeRef `json:"always_nodes"`
+	// Related carries the outgoing edges when the export nests them, which awxkit does.
+	Related *awxWorkflowNodeRelated `json:"related"`
 	// ExtraData are the node's own extra vars, which AWX layers over its job template's.
 	ExtraData json.RawMessage `json:"extra_data"`
 	// Credentials are credentials the node adds on top of its job template's, by natural key.
 	Credentials []awxRef `json:"credentials"`
+}
+
+// awxWorkflowNodeRelated holds a node's nested outgoing edges.
+type awxWorkflowNodeRelated struct {
+	// SuccessNodes, FailureNodes, and AlwaysNodes are the edges awxkit writes as natural keys.
+	SuccessNodes []awxNodeRef `json:"success_nodes"`
+	FailureNodes []awxNodeRef `json:"failure_nodes"`
+	AlwaysNodes  []awxNodeRef `json:"always_nodes"`
+}
+
+// awxNodeRef references a workflow node by whichever key the export used.
+//
+// A top-level export wires the graph with integer ids. awxkit strips every id and wires it with
+// identifiers instead, so a decoder that reads only integers saw every node as id zero and refused
+// any workflow with more than one node. Both shapes normalize to one string here so the graph can be
+// keyed once.
+type awxNodeRef string
+
+// UnmarshalJSON decodes a node reference from an id number, an identifier string, or an object
+// carrying either.
+func (r *awxNodeRef) UnmarshalJSON(b []byte) error {
+	var id int64
+	if json.Unmarshal(b, &id) == nil {
+		*r = awxNodeRef(nodeKeyForID(id))
+		return nil
+	}
+	var str string
+	if json.Unmarshal(b, &str) == nil {
+		*r = awxNodeRef(str)
+		return nil
+	}
+	var obj struct {
+		Identifier string `json:"identifier"`
+		ID         int64  `json:"id"`
+	}
+	if json.Unmarshal(b, &obj) == nil {
+		if obj.Identifier != "" {
+			*r = awxNodeRef(obj.Identifier)
+			return nil
+		}
+		if obj.ID != 0 {
+			*r = awxNodeRef(nodeKeyForID(obj.ID))
+		}
+	}
+	return nil
+}
+
+// nodeKeyForID spells a numeric node id as a graph key, kept in one place so the key a node
+// registers and the key an edge resolves against cannot drift apart.
+func nodeKeyForID(id int64) string { return fmt.Sprintf("id-%d", id) }
+
+// successors returns the node's success and always edges, from whichever place the export carried
+// them. Both are plain dependencies, so they are read together.
+func (n awxWorkflowNode) successors() []awxNodeRef {
+	out := append([]awxNodeRef(nil), n.SuccessNodes...)
+	out = append(out, n.AlwaysNodes...)
+	if n.Related != nil {
+		out = append(out, n.Related.SuccessNodes...)
+		out = append(out, n.Related.AlwaysNodes...)
+	}
+	return out
+}
+
+// failures returns the node's failure edges from whichever place the export carried them.
+func (n awxWorkflowNode) failures() []awxNodeRef {
+	out := append([]awxNodeRef(nil), n.FailureNodes...)
+	if n.Related != nil {
+		out = append(out, n.Related.FailureNodes...)
+	}
+	return out
+}
+
+// continues reports whether the node has an always edge, which makes it a step downstream work may
+// proceed past even when it fails.
+func (n awxWorkflowNode) continues() bool {
+	if len(n.AlwaysNodes) > 0 {
+		return true
+	}
+	return n.Related != nil && len(n.Related.AlwaysNodes) > 0
+}
+
+// keys returns every key an edge may use to name this node, so a graph wired by id resolves against
+// a node carrying an identifier and the other way round.
+func (n awxWorkflowNode) keys() []string {
+	out := make([]string, 0, 2)
+	if n.Identifier != "" {
+		out = append(out, n.Identifier)
+	}
+	if n.ID != 0 {
+		out = append(out, nodeKeyForID(n.ID))
+	}
+	return out
 }
 
 // nodes returns the workflow's graph nodes from whichever place the export carried them.
@@ -121,7 +215,7 @@ func (p *Plan) addWorkflow(wf awxWorkflow, jobs map[string]awxJobTemplate, now t
 	// dependencies allow it, and there is no run-because-it-failed step, so a workflow using one
 	// cannot be expressed and is refused rather than imported without its error handling.
 	for _, n := range nodes {
-		if len(n.FailureNodes) > 0 {
+		if len(n.failures()) > 0 {
 			p.warn("workflow %q was not imported: node %s runs other nodes on failure, which a "+
 				"pipeline cannot express. Rebuild it on the Workflows page, where a step can be set "+
 				"to continue on failure.", name, nodeLabel(n))
@@ -131,7 +225,7 @@ func (p *Plan) addWorkflow(wf awxWorkflow, jobs map[string]awxJobTemplate, now t
 
 	// Every node must resolve to a job template in this export, or its step has no work to do.
 	steps := make([]run.PipelineStep, 0, len(nodes))
-	stepName := make(map[int64]string, len(nodes))
+	stepName := make(map[string]string, len(nodes))
 	projectID := ""
 	for _, n := range nodes {
 		jt, ok := jobs[string(n.UnifiedJobTemplate)]
@@ -157,11 +251,19 @@ func (p *Plan) addWorkflow(wf awxWorkflow, jobs map[string]awxJobTemplate, now t
 			projectID = id
 		}
 		label := nodeLabel(n)
-		if _, taken := stepName[n.ID]; taken {
-			p.warn("workflow %q was not imported: two nodes share the id %d", name, n.ID)
+		keys := n.keys()
+		if len(keys) == 0 {
+			p.warn("workflow %q was not imported: a node carries neither an id nor an identifier, "+
+				"so its place in the graph cannot be resolved", name)
 			return
 		}
-		stepName[n.ID] = label
+		for _, k := range keys {
+			if _, taken := stepName[k]; taken {
+				p.warn("workflow %q was not imported: two nodes share the key %q", name, k)
+				return
+			}
+			stepName[k] = label
+		}
 		// A node running a check-mode job template must stay check mode. A step carries its own
 		// DryRun and the dispatcher honors it, so dropping this imported a node that made no changes
 		// as one that makes them, against whatever the workflow targets.
@@ -172,21 +274,23 @@ func (p *Plan) addWorkflow(wf awxWorkflow, jobs map[string]awxJobTemplate, now t
 
 	// Wire the edges. A success edge is a plain dependency. An always edge is a dependency whose
 	// upstream is allowed to fail, which is what continue-on-failure means on the upstream step.
-	byID := make(map[int64]int, len(nodes))
+	byKey := make(map[string]int, len(nodes)*2)
 	for i, n := range nodes {
-		byID[n.ID] = i
+		for _, k := range n.keys() {
+			byKey[k] = i
+		}
 	}
 	for i, n := range nodes {
-		for _, next := range append(append([]int64(nil), n.SuccessNodes...), n.AlwaysNodes...) {
-			j, ok := byID[next]
+		for _, next := range n.successors() {
+			j, ok := byKey[string(next)]
 			if !ok {
-				p.warn("workflow %q was not imported: node %s points at node %d, which is not in "+
-					"the workflow", name, nodeLabel(n), next)
+				p.warn("workflow %q was not imported: node %s points at node %q, which is not in "+
+					"the workflow", name, nodeLabel(n), oneLine(string(next)))
 				return
 			}
 			steps[j].DependsOn = append(steps[j].DependsOn, steps[i].Name)
 		}
-		if len(n.AlwaysNodes) > 0 {
+		if n.continues() {
 			steps[i].ContinueOnFailure = true
 		}
 	}

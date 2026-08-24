@@ -130,8 +130,32 @@ type awxHost struct {
 type awxGroup struct {
 	// Name is the group name.
 	Name string `json:"name"`
+	// Hosts are the group's members when the export carries them at the top level.
+	Hosts []awxHost `json:"hosts"`
+	// Related carries the group's members when the export nests them, which awxkit does.
+	Related *awxGroupRelated `json:"related"`
+}
+
+// awxGroupRelated holds a group's nested related assets.
+type awxGroupRelated struct {
 	// Hosts are the group's members.
 	Hosts []awxHost `json:"hosts"`
+}
+
+// hosts returns the group's members from whichever place the export carried them.
+//
+// Reading only the top level was the same bug the inventory accessors above fix, one level down and
+// with a worse failure: the hosts still imported, because they also appear on the inventory, so an
+// import reported the right host count with every group empty. A template carrying limit "web" then
+// matched nothing, and the run reported success having touched no hosts at all.
+func (g awxGroup) hosts() []awxHost {
+	if len(g.Hosts) > 0 {
+		return g.Hosts
+	}
+	if g.Related != nil {
+		return g.Related.Hosts
+	}
+	return nil
 }
 
 // awxJobTemplate is an AWX job template.
@@ -163,12 +187,29 @@ type awxJobTemplate struct {
 	JobType string `json:"job_type"`
 	// DiffMode shows the before and after of each change.
 	DiffMode bool `json:"diff_mode"`
-	// Credentials references credentials by natural key.
+	// Credentials references credentials by natural key when the export carries them at the top
+	// level.
 	Credentials []awxRef `json:"credentials"`
 	// SurveySpec is the survey when exported at the top level.
 	SurveySpec *awxSurvey `json:"survey_spec"`
-	// Related carries the survey and schedules when exported nested.
+	// Related carries the survey, schedules, and credentials when exported nested.
 	Related *awxRelated `json:"related"`
+}
+
+// credentials returns the template's credentials from whichever place the export carried them.
+//
+// awxkit never writes them at the top level: credentials are an exportable relation, so they arrive
+// under related as natural keys. Reading only the top level meant every template from a real export
+// arrived with no credentials and no warning, and the first run failed to authenticate with nothing
+// to point at.
+func (t awxJobTemplate) credentials() []awxRef {
+	if len(t.Credentials) > 0 {
+		return t.Credentials
+	}
+	if t.Related != nil {
+		return t.Related.Credentials
+	}
+	return nil
 }
 
 // checkMode reports whether the template runs in Ansible's no-change mode. AWX spells it as a job
@@ -181,6 +222,8 @@ type awxRelated struct {
 	SurveySpec *awxSurvey `json:"survey_spec"`
 	// Schedules are the template's schedules.
 	Schedules []awxSchedule `json:"schedules"`
+	// Credentials references the template's credentials by natural key.
+	Credentials []awxRef `json:"credentials"`
 }
 
 // awxSurvey is an AWX survey specification.
@@ -465,7 +508,7 @@ func (p *Plan) addTemplate(jt awxJobTemplate, now time.Time,
 	if jt.JobSliceCount >= 2 {
 		tpl.Shards = jt.JobSliceCount
 	}
-	for _, ref := range jt.Credentials {
+	for _, ref := range jt.credentials() {
 		if id, ok := credentialIDs[string(ref)]; ok {
 			tpl.CredentialIDs = append(tpl.CredentialIDs, id)
 		} else if ref != "" {
@@ -570,7 +613,7 @@ func convertHosts(hosts []awxHost) []importHost {
 func convertGroups(groups []awxGroup) []importGroup {
 	out := make([]importGroup, 0, len(groups))
 	for _, g := range groups {
-		out = append(out, importGroup{Name: g.Name, Hosts: convertHosts(g.Hosts)})
+		out = append(out, importGroup{Name: g.Name, Hosts: convertHosts(g.hosts())})
 	}
 	return out
 }

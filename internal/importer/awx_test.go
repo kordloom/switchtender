@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -605,4 +606,99 @@ func TestAWXImportsARealAwxkitExport(t *testing.T) {
 				c.Name, c.Got, c.Want)
 		}
 	}
+}
+
+// TestAWXImportsAwxkitRelatedAttachments pins the three attachments awxkit writes under a related
+// block and nowhere else, from a fixture rather than from a string built to match the parser.
+//
+// Every other AWX fixture in this package was hand-authored, including the one named for a real
+// export, so all three of these read as working while a genuine export lost them. Group members
+// arrived empty, which is the worst of the three: hosts still import from the inventory's own
+// related block, so the host count looked right and a template limited to a group matched nothing
+// and reported success having touched nothing. Template credentials vanished with no warning, and
+// every id-stripped workflow was refused as though its nodes collided.
+func TestAWXImportsAwxkitRelatedAttachments(t *testing.T) {
+	t.Parallel()
+	raw, err := os.ReadFile(filepath.Join("testdata", "awx-awxkit-export.json"))
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	plan, err := importer.FromAWX(raw, time.Now())
+	if err != nil {
+		t.Fatalf("FromAWX() error = %v", err)
+	}
+
+	// Group membership: the members live under group.related.hosts.
+	if len(plan.Inventories) != 1 {
+		t.Fatalf("inventories = %d, want 1", len(plan.Inventories))
+	}
+	content := plan.Inventories[0].Content
+	for _, want := range []string{"[web]", "[db]"} {
+		if !strings.Contains(content, want) {
+			t.Errorf("inventory is missing the %s group:\n%s", want, content)
+		}
+	}
+	web := groupBlock(content, "[web]")
+	for _, host := range []string{"web01.acme.internal", "web02.acme.internal"} {
+		if !strings.Contains(web, host) {
+			t.Errorf("group web has no %s, so a template limited to it matches nothing:\n%s",
+				host, content)
+		}
+	}
+	if db := groupBlock(content, "[db]"); !strings.Contains(db, "db01.acme.internal") {
+		t.Errorf("group db has no db01.acme.internal:\n%s", content)
+	}
+
+	// Template credentials: they live under job_template.related.credentials.
+	var deploy *template.Template
+	for _, tpl := range plan.Templates {
+		if tpl.Name == "Deploy Web" {
+			deploy = tpl
+		}
+	}
+	if deploy == nil {
+		t.Fatalf("the Deploy Web template was not imported")
+	}
+	if len(deploy.CredentialIDs) != 1 {
+		t.Errorf("Deploy Web carries %d credentials, want the one its related block names; without "+
+			"it every play fails to authenticate with nothing in the report to point at",
+			len(deploy.CredentialIDs))
+	}
+
+	// Workflow graph: awxkit strips every node id and wires the graph by identifier.
+	var release *template.Template
+	for _, tpl := range plan.Templates {
+		if tpl.Name == "Release" {
+			release = tpl
+		}
+	}
+	if release == nil {
+		t.Fatalf("the Release workflow was not imported")
+	}
+	if len(release.Steps) != 2 {
+		t.Fatalf("Release has %d steps, want 2", len(release.Steps))
+	}
+	var smoke *run.PipelineStep
+	for i, s := range release.Steps {
+		if s.Name == "smoke" {
+			smoke = &release.Steps[i]
+		}
+	}
+	if smoke == nil {
+		t.Fatalf("Release has no step named smoke: %+v", release.Steps)
+	}
+	if len(smoke.DependsOn) != 1 || smoke.DependsOn[0] != "build" {
+		t.Errorf("smoke depends on %v, want the success edge from build", smoke.DependsOn)
+	}
+}
+
+// groupBlock returns the lines of an INI inventory that follow header, up to the next blank line, so
+// a membership assertion cannot be satisfied by a host listed elsewhere in the file.
+func groupBlock(content, header string) string {
+	_, after, found := strings.Cut(content, header)
+	if !found {
+		return ""
+	}
+	block, _, _ := strings.Cut(strings.TrimLeft(after, "\n"), "\n\n")
+	return block
 }
