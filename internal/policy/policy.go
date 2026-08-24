@@ -57,6 +57,13 @@ type Policy struct {
 	CommandContains string `json:"command_contains,omitempty"`
 	// InventoryID matches a run targeting this stored inventory. Empty matches any.
 	InventoryID string `json:"inventory_id,omitempty"`
+	// Queue matches a run routed to this worker queue. Empty matches any.
+	//
+	// A queue decides which segment of the estate executes the run, so it is the criterion a rule
+	// needs to say "hold anything headed for production". Nothing could match on it, which left the
+	// queue governable only by a grant; this makes it governable by a rule as well, for an install
+	// that has not turned strict grants on.
+	Queue string `json:"queue,omitempty"`
 	// ActorKind matches who fired the run: agent for an AI agent's token, human for a person.
 	// Empty matches any actor. This is what turns a policy into an authorization boundary for a
 	// machine principal, distinct from the rules that bind people.
@@ -99,6 +106,9 @@ func (p *Policy) Matches(r *run.Run) bool {
 		return false
 	}
 	if p.InventoryID != "" && p.InventoryID != r.InventoryID {
+		return false
+	}
+	if p.Queue != "" && p.Queue != r.Queue {
 		return false
 	}
 	if !p.matchesActor(r) {

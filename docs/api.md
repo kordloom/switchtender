@@ -93,7 +93,7 @@ webhook `/hooks` path, and the `/relay` worker path, is unversioned. The root re
 | POST   | `/v1/orgs/{id}/members`    | Add a user to an organization with an organization role.|
 | GET    | `/v1/orgs/{id}/members`    | List an organization's members and their roles.         |
 | DELETE | `/v1/orgs/{id}/members/{userID}` | Remove a user from an organization.               |
-| POST   | `/v1/grants`               | Grant a user or team read, use, or manage on an object. |
+| POST   | `/v1/grants`               | Grant a user or team read, use, or manage on an object: a project, template, inventory, or credential id, or a worker queue as `queue:<name>`. |
 | GET    | `/v1/grants`               | List access grants.                                     |
 | DELETE | `/v1/grants/{id}`          | Delete an access grant.                                 |
 | GET    | `/v1/workers`              | The executor fleet with lease freshness.                |

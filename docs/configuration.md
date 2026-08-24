@@ -293,6 +293,27 @@ Generate a digest with `printf %s "$TOKEN" | shasum -a 256`. A malformed file st
 than falling back to no confinement, because an install that believes it is segmented and is not is
 worse than one that refuses to start.
 
+That confines the lease side. The submit side is confined by granting the queue, which is a grantable
+object named `queue:<name>`:
+
+    curl -X POST localhost:8080/v1/grants \
+      -H "Authorization: Bearer $TOKEN" \
+      -d '{"subject": "team_sre", "object": "queue:prod", "access": "use"}'
+
+A queue nobody has granted follows the same rule every other object does: the global role decides,
+unless `--strict-grants` is on, in which case an ungranted queue is refused. Granting a queue makes
+it access-controlled, so only the subjects named may route work to it. The grant is checked wherever
+a queue is chosen: on a run, on a template, on an inventory, and at launch against the template's own
+queue.
+
+An install that has not turned strict grants on can gate a queue with a rule instead, since a policy
+matches on `queue`:
+
+    policies:
+      - name: hold anything headed for production
+        queue: prod
+        require_distinct_approver: true
+
 
 ## What a relay worker writes into the audit trail
 

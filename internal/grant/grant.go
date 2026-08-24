@@ -33,8 +33,22 @@ const (
 // subjectPrefixes are the id prefixes a grant subject may carry.
 var subjectPrefixes = []string{"user_", "team_", "org_"}
 
+// QueuePrefix names a worker queue as a grant object.
+//
+// A queue is the one grantable thing that is not a stored row: it is a free-text name a run, a
+// template, or an inventory pins work to, and the pool file binds each worker token to the queues it
+// may lease from. That made the boundary one-sided. The queues a token may serve were confined,
+// while the queue a submitter could ask for was not checked anywhere, so a low-privilege caller
+// could name the production queue and have the production relay execute their run inside that
+// segment. Naming a queue here puts the submit side under the same access rules as every other
+// object.
+const QueuePrefix = "queue:"
+
+// QueueObject returns the grant object naming a worker queue.
+func QueueObject(queue string) string { return QueuePrefix + queue }
+
 // objectPrefixes are the id prefixes a grant object may carry.
-var objectPrefixes = []string{"proj_", "tpl_", "inv_", "cred_"}
+var objectPrefixes = []string{"proj_", "tpl_", "inv_", "cred_", QueuePrefix}
 
 // Grant ties a subject to an object at an access level.
 type Grant struct {
@@ -42,7 +56,8 @@ type Grant struct {
 	ID string `json:"id"`
 	// Subject is the granted identity: a user id (user_...), a team id (team_...), or an org id (org_...).
 	Subject string `json:"subject"`
-	// Object is the target: a project, template, inventory, or credential id.
+	// Object is the target: a project, template, inventory, or credential id, or a worker queue
+	// named as queue:<name>.
 	Object string `json:"object"`
 	// Access is the level conferred: read, use, or manage, each implying the ones below it.
 	Access Access `json:"access"`
@@ -95,8 +110,12 @@ func ValidSubject(s string) bool {
 	return hasAnyPrefix(s, subjectPrefixes)
 }
 
-// ValidObject reports whether o names a grantable object.
+// ValidObject reports whether o names a grantable object. A queue object must name a queue, so the
+// bare prefix is refused rather than standing for every queue at once.
 func ValidObject(o string) bool {
+	if strings.HasPrefix(o, QueuePrefix) {
+		return strings.TrimSpace(strings.TrimPrefix(o, QueuePrefix)) != ""
+	}
 	return hasAnyPrefix(o, objectPrefixes)
 }
 

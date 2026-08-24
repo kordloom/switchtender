@@ -166,8 +166,8 @@ func createTemplateHandler(store template.Store, authz *authorizer, log *zap.Log
 		if authz.denyForeignOrg(w, r, log, orgForCreate(req.OrgID)) {
 			return
 		}
-		objects := append([]string{req.ProjectID, req.InventoryID, req.PullCredentialID},
-			req.CredentialIDs...)
+		objects := append([]string{req.ProjectID, req.InventoryID, req.PullCredentialID,
+			queueObject(req.Queue)}, req.CredentialIDs...)
 		if denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse, objects...)) {
 			return
 		}
@@ -227,8 +227,8 @@ func updateTemplateHandler(store template.Store, authz *authorizer, log *zap.Log
 		if authz.denyForeignOrg(w, r, log, orgForCreate(req.OrgID)) {
 			return
 		}
-		objects := append([]string{req.ProjectID, req.InventoryID, req.PullCredentialID},
-			req.CredentialIDs...)
+		objects := append([]string{req.ProjectID, req.InventoryID, req.PullCredentialID,
+			queueObject(req.Queue)}, req.CredentialIDs...)
 		if denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse, objects...)) {
 			return
 		}
@@ -476,9 +476,12 @@ func launchTemplateHandler(store template.Store, submitter Submitter, authz *aut
 		}
 
 		// Use on the template is not enough. Authorize every object the run will touch, so a launch
-		// cannot borrow a project, inventory, or credential the actor was never granted, including a
-		// credential chosen at launch.
-		objects := append([]string{t.ProjectID, inventoryID, t.PullCredentialID}, credIDs...)
+		// cannot borrow a project, inventory, credential, or worker queue the actor was never
+		// granted, including a credential chosen at launch. The queue is the template's own, so a
+		// template pinned to a confined queue cannot be used as a way around that confinement by
+		// somebody who may launch it but may not reach the queue.
+		objects := append([]string{t.ProjectID, inventoryID, t.PullCredentialID,
+			queueObject(t.Queue)}, credIDs...)
 		if denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse, objects...)) {
 			return
 		}
