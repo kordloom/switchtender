@@ -518,7 +518,7 @@ func (s *Server) Handler() http.Handler {
 	// refs lets a credential or project delete refuse to orphan an object that still uses it.
 	refs := &refChecker{
 		templates: s.templates, inventories: s.inventories,
-		projects: s.projects, invSources: s.invSources,
+		projects: s.projects, invSources: s.invSources, schedules: s.schedules,
 	}
 	mux.Handle("DELETE /v1/credentials/{id}", deleteCredentialHandler(s.credentials, refs, s.log))
 	mux.Handle("POST /v1/projects", createProjectHandler(s.projects, authz, s.log))
@@ -559,7 +559,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("DELETE /v1/teams/{id}/members/{userID}", removeTeamMemberHandler(s.teams, s.log))
 	mux.Handle("POST /v1/orgs", createOrgHandler(s.orgs, s.log))
 	mux.Handle("GET /v1/orgs", listOrgsHandler(s.orgs, s.log))
-	mux.Handle("DELETE /v1/orgs/{id}", deleteOrgHandler(s.orgs, s.log))
+	mux.Handle("DELETE /v1/orgs/{id}", deleteOrgHandler(s.orgs, refs, s.log))
 	mux.Handle("GET /v1/orgs/{id}/members", listOrgMembersHandler(s.orgs, s.log))
 	mux.Handle("POST /v1/orgs/{id}/members", addOrgMemberHandler(s.orgs, s.log))
 	mux.Handle("DELETE /v1/orgs/{id}/members/{userID}", removeOrgMemberHandler(s.orgs, s.log))

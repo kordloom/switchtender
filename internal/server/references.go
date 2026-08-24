@@ -10,6 +10,7 @@ import (
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/invsource"
 	"github.com/kordloom/switchtender/internal/project"
+	"github.com/kordloom/switchtender/internal/schedule"
 	"github.com/kordloom/switchtender/internal/template"
 )
 
@@ -37,6 +38,8 @@ type refChecker struct {
 	inventories inventory.Store
 	// projects are searched for credential references.
 	projects project.Store
+	// schedules are searched for organization references.
+	schedules schedule.Store
 	// invSources are searched for credential and project references.
 	invSources invsource.Store
 }
@@ -113,6 +116,62 @@ func (c *refChecker) projectRefs(ctx context.Context, id string) (usedBy, error)
 		for _, s := range list {
 			if s.ProjectID == id {
 				out["inventory_sources"] = append(out["inventory_sources"], nameOr(s.Name, s.ID))
+			}
+		}
+	}
+	return out, nil
+}
+
+// orgRefs returns the objects that would keep firing under an organization that no longer exists.
+//
+// A schedule stamps the organization it was created in and nothing revalidates that at fire time, so
+// deleting an organization left its nightly playbooks launching with real credentials, stamped to a
+// tenant that had been removed. Under strict grants those runs then belong to nobody, which makes
+// them visible to admins alone. Refusing the delete is the same answer a project or a credential
+// gives when something still uses it: say what to detach rather than silently orphan it.
+func (c *refChecker) orgRefs(ctx context.Context, id string) (usedBy, error) {
+	out := usedBy{}
+	if c.schedules != nil {
+		list, err := c.schedules.List(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, sc := range list {
+			if sc.OrgID == id {
+				out["schedules"] = append(out["schedules"], nameOr(sc.Name, sc.ID))
+			}
+		}
+	}
+	if c.templates != nil {
+		list, err := c.templates.List(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, t := range list {
+			if t.OrgID == id {
+				out["templates"] = append(out["templates"], nameOr(t.Name, t.ID))
+			}
+		}
+	}
+	if c.inventories != nil {
+		list, err := c.inventories.List(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, i := range list {
+			if i.OrgID == id {
+				out["inventories"] = append(out["inventories"], nameOr(i.Name, i.ID))
+			}
+		}
+	}
+	if c.projects != nil {
+		list, err := c.projects.List(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, p := range list {
+			if p.OrgID == id {
+				out["projects"] = append(out["projects"], nameOr(p.Name, p.ID))
 			}
 		}
 	}
