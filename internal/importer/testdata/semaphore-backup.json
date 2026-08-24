@@ -1,0 +1,40 @@
+{
+  "meta": {
+    "name": "Acme Platform"
+  },
+  "repositories": [
+    {"name": "infra", "git_url": "https://git.example.com/infra.git", "git_branch": "main"}
+  ],
+  "inventories": [
+    {
+      "name": "Production",
+      "type": "static",
+      "inventory": "[web]\nweb01.acme.internal\nweb02.acme.internal\n"
+    }
+  ],
+  "keys": [
+    {"name": "deploy-key", "type": "ssh"}
+  ],
+  "templates": [
+    {
+      "name": "Deploy Web",
+      "playbook": "site.yml",
+      "app": "ansible",
+      "repository": "infra",
+      "inventory": "Production",
+      "survey_vars": [
+        {"name": "release", "title": "Release tag", "type": "string", "required": true}
+      ]
+    }
+  ],
+  "schedules": [
+    {"name": "nightly", "cron_format": "0 2 * * *", "template": "Deploy Web"}
+  ],
+  "environments": [],
+  "views": [],
+  "integrations": [],
+  "secret_storages": [],
+  "roles": [],
+  "runners": [],
+  "workflows": []
+}
