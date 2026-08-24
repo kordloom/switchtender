@@ -171,14 +171,18 @@ func tailImage(argv []string) []string {
 	return nil
 }
 
-// TestServeRefusesUnauthenticatedPublicBind drives runServe with an empty token store and a public
-// bind address and proves the startup guard is actually consulted: serve returns the refusal and
-// nothing ever answers on the listener. Asserting only the error would pass on a serve that
-// refused for some later reason, so the probe checks the effect that matters, which is that no API
-// was exposed.
+// TestServeBootstrapsTokenOnPublicBind drives runServe with an empty token store and a public bind
+// address and proves the startup guard is actually consulted.
+//
+// Refusing this bind outright is what the guard used to do, and it made the first command in the
+// quickstart, the README, and the homepage exit 1 on every fresh install. Minting a token is the
+// replacement, so the property to hold is no longer "nothing answers" but "nothing answers
+// unauthenticated": the listener comes up, an anonymous caller is refused, and a credential exists
+// for the operator to use. Asserting only that serve returned would pass on a serve that bound an
+// open API, so the probe checks the status the API actually gives an anonymous caller.
 //
 // The test is serial: it sets the package-level serve flag variables.
-func TestServeRefusesUnauthenticatedPublicBind(t *testing.T) {
+func TestServeBootstrapsTokenOnPublicBind(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("Listen() error = %v", err)
@@ -208,19 +212,37 @@ func TestServeRefusesUnauthenticatedPublicBind(t *testing.T) {
 	errCh := make(chan error, 1)
 	go func() { errCh <- runServe(cmd, nil) }()
 
-	if body, served := probeListener(ln.Addr().String(), 1500*time.Millisecond); served {
-		t.Errorf("the API answered on %s with %q; the guard did not stop the bind",
-			ln.Addr(), body)
+	body, served := probeListener(ln.Addr().String(), 1500*time.Millisecond)
+	if !served {
+		t.Fatalf("nothing answered on %s; the bind was refused rather than bootstrapped", ln.Addr())
+	}
+	if !strings.Contains(body, "401") {
+		t.Errorf("an anonymous caller got %q from %s, want 401: the public bind is unauthenticated",
+			body, ln.Addr())
 	}
 
 	select {
 	case err := <-errCh:
-		const want = "refusing to serve an unauthenticated API on 0.0.0.0:8080"
-		if err == nil || !strings.Contains(err.Error(), want) {
-			t.Fatalf("runServe() error = %v, want one containing %q", err, want)
+		if err != nil {
+			t.Fatalf("runServe() error = %v, want a clean shutdown after the context expired", err)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("runServe() did not return; it is still serving")
+	}
+
+	// The credential the operator was handed must actually be in the store, or the printed token is
+	// a value nothing will ever accept.
+	bundle, err := openBundle(serveDB)
+	if err != nil {
+		t.Fatalf("openBundle() error = %v", err)
+	}
+	defer func() { _ = bundle.Close() }()
+	n, err := bundle.Tokens().Count(context.Background())
+	if err != nil {
+		t.Fatalf("Count() error = %v", err)
+	}
+	if n != 1 {
+		t.Errorf("token count = %d, want the one minted at startup", n)
 	}
 }
 

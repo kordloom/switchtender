@@ -188,7 +188,7 @@ node over the mesh relay, with no database access of its own.
 
 ## token
 
-Manages API tokens. Creating the first token turns on authentication.
+Manages API tokens. A public bind on an empty database mints an initial admin token at startup.
 
 - `token new --name <label> [--user <username>] [--ttl <duration>]` mints a token, printed once. A
   zero TTL never expires.

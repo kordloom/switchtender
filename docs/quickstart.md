@@ -69,10 +69,13 @@ For more than one machine, use a PostgreSQL DSN as the `--db` value on every pro
 
 ## Lock down the API
 
-Creating the first token turns on authentication. Until then the API is open so a fresh install
-works immediately.
+The first start on an empty database mints an initial admin token and prints it once, so the API
+is authenticated from the first request. Keep that token or replace it with named ones:
 
     switchtender token new --db switchtender.db --name ci
+
+A loopback bind, or `--read-only`, serves without authentication instead, since neither exposes an
+unauthenticated API to the network.
 
 Create user accounts with roles for sign-in:
 

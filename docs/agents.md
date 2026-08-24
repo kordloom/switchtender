@@ -70,8 +70,9 @@ held run is admin-only, so an operator-bound agent can never approve its own wor
    through the client below. `--agent` requires `--user`, because an agent acting on behalf of nobody
    is exactly the accountability gap the identity closes. The TTL forces rotation, here monthly.
 
-   Creating the first token turns authentication on for the whole install, so make sure an admin
-   account exists before the agent holds the only credential.
+   A public bind on an empty database already minted an initial admin token at first start, so
+   authentication is on before the agent holds any credential. Make sure a human admin account
+   exists too, so the agent's held runs have somebody who can approve them.
 
 3. Decide what a human must approve. An approval policy with no criteria matches every run, so one
    empty policy is a gate-everything switch:

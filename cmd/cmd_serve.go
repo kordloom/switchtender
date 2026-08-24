@@ -776,34 +776,85 @@ func enforcedAuthOption(externalAuth bool) server.Option {
 	return server.WithEnforcedAuth()
 }
 
-// tokenCountGuard decides whether the server may start given the API token count and reports whether
-// the caller should warn that the API is unauthenticated.
+// servePosture is what the API token count says the server must do before it binds.
+type servePosture int
+
+const (
+	// postureReady means authentication is already in place and the server starts silently.
+	postureReady servePosture = iota
+	// postureWarn means the API is unauthenticated but only reachable where that is acceptable,
+	// so the server starts and says so.
+	postureWarn
+	// postureBootstrap means a public bind has no authentication yet, so the server mints an
+	// initial admin token and prints it before serving.
+	postureBootstrap
+)
+
+// tokenCountGuard decides what the server must do about authentication given the API token count.
 //
 // A count error is fail-closed: an unreadable token store refuses to start rather than binding, since
 // the only alternative is to guess there are no tokens and expose the network on that guess. The
 // former code skipped the whole guard on a count error and fell through to bind, which is the one
-// direction this must never fail. With a readable empty store it refuses only a public bind that has
-// no other authentication, and otherwise permits start while asking the caller to warn.
+// direction this must never fail.
+//
+// A readable empty store on a public bind used to be refused outright. That was safe and unusable:
+// the documented first command binds a public address on a fresh database, so the quickstart, the
+// README, and the homepage all opened with a command that exited 1, and the quickstart went on to
+// promise the API was open until the first token. Minting the token instead keeps the bind
+// authenticated from the first request and lets the documented command work as written.
 func tokenCountGuard(count int, countErr error, readOnly, externalAuth, loopback bool,
-	addr string) (warn bool, err error) {
+	addr string) (servePosture, error) {
 	if countErr != nil {
-		return false, fmt.Errorf("refusing to serve on %s: cannot determine whether any API tokens "+
-			"exist, so the API cannot be safely exposed: %w", addr, countErr)
+		return postureReady, fmt.Errorf("refusing to serve on %s: cannot determine whether any API "+
+			"tokens exist, so the API cannot be safely exposed: %w", addr, countErr)
 	}
 	if count > 0 {
-		return false, nil
+		return postureReady, nil
 	}
 	// An install with external auth enforces from the first request, so there is nothing
 	// unauthenticated to warn about even with an empty token table.
 	if externalAuth {
-		return false, nil
+		return postureReady, nil
 	}
-	if !readOnly && !loopback {
-		return false, fmt.Errorf("refusing to serve an unauthenticated API on %s: no tokens and no "+
-			"SSO configured. Create a token with 'switchtender token new', configure SSO, "+
-			"bind a loopback address, or pass --read-only", addr)
+	// Read-only serves no mutation, and loopback is reachable only from the host, so both are
+	// allowed to run open. Everything else gets a token minted for it.
+	if readOnly || loopback {
+		return postureWarn, nil
 	}
-	return true, nil
+	return postureBootstrap, nil
+}
+
+// bootstrapAdminToken mints the initial admin token for an install that has none and prints it once.
+//
+// The value goes to stderr with fmt rather than through the logger. A token is exactly what the
+// logging rules say never to log, and the run log is the wrong place for a credential; this is a
+// one-time handover to the person at the terminal, the same disclosure 'token new' makes.
+//
+// The mint is recorded in the audit chain like any other token creation, so an install cannot come
+// into existence with an admin credential the trail does not mention.
+func bootstrapAdminToken(ctx context.Context, bundle storeBundle, addr string) error {
+	plain, tok, err := auth.New("initial")
+	if err != nil {
+		return fmt.Errorf("mint the initial admin token: %w", err)
+	}
+	if err := bundle.Tokens().Save(ctx, tok); err != nil {
+		return fmt.Errorf("save the initial admin token: %w", err)
+	}
+	if err := recordCLI(ctx, bundle.Audits(), "/cli/serve/bootstrap-token"); err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, `
+  No API tokens exist, so %s would have served an unauthenticated API.
+  Created an initial admin token instead. It is shown only this once:
+
+      %s
+
+  Use it as:     Authorization: Bearer %s
+  Name more:     switchtender token new --name ci
+  Revoke this:   switchtender token revoke %s
+
+`, addr, plain, plain, tok.ID)
+	return nil
 }
 
 func runServe(cmd *cobra.Command, _ []string) error {
@@ -821,13 +872,19 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	store, schedules := bundle.Runs(), bundle.Schedules()
 
 	n, cerr := bundle.Tokens().Count(cmd.Context())
-	warn, gerr := tokenCountGuard(n, cerr, serveReadOnly, externalAuthConfigured(),
+	posture, gerr := tokenCountGuard(n, cerr, serveReadOnly, externalAuthConfigured(),
 		isLoopbackAddr(serveAddr), serveAddr)
 	if gerr != nil {
 		return gerr
 	}
-	if warn {
+	switch posture {
+	case postureWarn:
 		log.Warn("no API tokens exist. The API is UNAUTHENTICATED until you create one. Run: switchtender token new")
+	case postureBootstrap:
+		if err := bootstrapAdminToken(cmd.Context(), bundle, serveAddr); err != nil {
+			return err
+		}
+	case postureReady:
 	}
 
 	sealer := newSealerFromEnv(log)
