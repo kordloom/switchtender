@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -86,5 +87,70 @@ func TestMetricsWithheldFromACallerWhoMayReadNothing(t *testing.T) {
 	metricsHandler(store, nil, open, zap.NewNop())(rec, req)
 	if rec.Body.Len() == 0 {
 		t.Error("an unrestricted caller got no metrics at all")
+	}
+}
+
+// TestCrossSiteWritesAreRefused covers the drive-by an install in open mode was reachable by.
+//
+// Nothing looked at Origin or Sec-Fetch-Site, and the JSON decoder accepts any body whatever the
+// content type claims. A fresh install on a loopback bind runs open by design, so a cross-site page
+// could POST a run as a CORS simple request, with Content-Type text/plain and mode no-cors so it
+// never needs to read the response. An operator browsing anywhere while their own install was up had
+// a run executed against their fleet.
+func TestCrossSiteWritesAreRefused(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Name      string
+		Method    string
+		Path      string
+		FetchSite string
+		Origin    string
+		WantBlock bool
+	}{{ // Test 0: The attack. A page on another site posting a run.
+		Name: "cross-site post", Method: http.MethodPost, Path: "/v1/runs",
+		FetchSite: "cross-site", WantBlock: true,
+	}, { // Test 1: An older browser that sends Origin but not Sec-Fetch-Site.
+		Name: "foreign origin", Method: http.MethodPost, Path: "/v1/runs",
+		Origin: "https://evil.example", WantBlock: true,
+	}, { // Test 2: A sibling subdomain is still not this origin.
+		Name: "same-site post", Method: http.MethodPost, Path: "/v1/runs",
+		FetchSite: "same-site", WantBlock: true,
+	}, { // Test 3: The product's own UI, which must keep working.
+		Name: "same-origin post", Method: http.MethodPost, Path: "/v1/runs",
+		FetchSite: "same-origin",
+	}, { // Test 4: curl and the CLI send neither header.
+		Name: "no browser headers", Method: http.MethodPost, Path: "/v1/runs",
+	}, { // Test 5: A read is not a state change, so a cross-site GET is not this control's business.
+		Name: "cross-site get", Method: http.MethodGet, Path: "/v1/runs", FetchSite: "cross-site",
+	}, { // Test 6: The SAML assertion arrives as a cross-site POST by design, through the operator's
+		// browser, and has its own InResponseTo defense.
+		Name: "saml acs", Method: http.MethodPost, Path: "/auth/saml/acs", FetchSite: "cross-site",
+	}, { // Test 7: A forge delivering a webhook is server-side and sends neither header.
+		Name: "webhook delivery", Method: http.MethodPost, Path: "/hooks/tok",
+	}}
+
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
+			t.Parallel()
+			req := httptest.NewRequest(test.Method, test.Path, nil)
+			req.Host = "switchtender.example"
+			if test.FetchSite != "" {
+				req.Header.Set("Sec-Fetch-Site", test.FetchSite)
+			}
+			if test.Origin != "" {
+				req.Header.Set("Origin", test.Origin)
+			}
+			if got := crossSiteWrite(req); got != test.WantBlock {
+				t.Errorf("%s: blocked = %v, want %v", test.Name, got, test.WantBlock)
+			}
+		})
+	}
+
+	// An Origin naming this very host is the UI itself and must pass.
+	same := httptest.NewRequest(http.MethodPost, "/v1/runs", nil)
+	same.Host = "switchtender.example"
+	same.Header.Set("Origin", "https://switchtender.example")
+	if crossSiteWrite(same) {
+		t.Error("the product's own origin was refused, so the UI cannot submit anything")
 	}
 }

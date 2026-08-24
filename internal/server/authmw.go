@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"path"
 	"strings"
 	"sync"
@@ -55,9 +56,60 @@ type authGate struct {
 	checkedAt time.Time
 }
 
+// crossSiteWrite reports whether a request is a state-changing one a browser sent from another site.
+//
+// Nothing in the stack looked at Origin or Sec-Fetch-Site, and the JSON decoder accepts any body
+// whatever the content type says. While an install runs open, which is the documented state of a
+// fresh one on a loopback bind, a cross-site page needs no CORS preflight to POST a run: it sends a
+// simple request with Content-Type text/plain and never has to read the response. An operator with a
+// fresh install on 127.0.0.1 who browses to any page can have a run executed against their fleet.
+//
+// Sec-Fetch-Site is sent by every current browser and cannot be set by page script, so it is the
+// reliable signal; Origin is checked too for anything older. A request from curl, the CLI, or a
+// server-side webhook sender carries neither and is unaffected.
+//
+// The SAML assertion consumer is exempt because a cross-site POST is exactly what it is: the identity
+// provider posts the assertion back through the operator's browser. It has its own defense, an
+// InResponseTo bound to a signed request-id cookie.
+func crossSiteWrite(r *http.Request) bool {
+	switch r.Method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		return false
+	}
+	if strings.HasSuffix(strings.TrimPrefix(r.URL.Path, "/v1"), "/auth/saml/acs") {
+		return false
+	}
+	switch r.Header.Get("Sec-Fetch-Site") {
+	case "cross-site", "same-site":
+		return true
+	case "same-origin", "none":
+		return false
+	}
+	// No Sec-Fetch-Site: a non-browser client, unless it named an origin.
+	origin := r.Header.Get("Origin")
+	if origin == "" || origin == "null" {
+		return false
+	}
+	return !sameOriginAs(origin, r)
+}
+
+// sameOriginAs reports whether origin names the host this request arrived at.
+func sameOriginAs(origin string, r *http.Request) bool {
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	return u.Host == r.Host
+}
+
 // wrap guards next with token authentication.
 func (g *authGate) wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if crossSiteWrite(r) {
+			respondError(w, g.log, http.StatusForbidden,
+				"a state-changing request from another site is refused")
+			return
+		}
 		if !g.protects(r) || !g.enforcing(r.Context()) {
 			// A webhook trigger starts real runs without a token, so it is recorded. Sign-in is
 			// not.
