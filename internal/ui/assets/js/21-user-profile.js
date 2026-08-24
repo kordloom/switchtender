@@ -260,7 +260,14 @@ async function loadTokens() {
 		status.hidden = true;
 		table.hidden = false;
 	} catch (err) {
-		status.textContent = "Could not read the tokens: " + err.message;
+		// A read-only or SSO-only install serves no token endpoint at all, and a 404 there is not an
+		// error to put in front of a visitor, just a panel with nothing to manage. Only a genuine
+		// failure is surfaced.
+		if (String((err && err.message) || "").includes("404")) {
+			status.textContent = "Token management is not enabled on this instance.";
+		} else {
+			status.textContent = "Could not read the tokens: " + err.message;
+		}
 		table.hidden = true;
 	}
 }
