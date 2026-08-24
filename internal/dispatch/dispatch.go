@@ -49,6 +49,13 @@ const (
 	leaseTTL = 30 * time.Second
 	// janitorInterval is how often stale leases are swept.
 	janitorInterval = 10 * time.Second
+	// overrunGrace is how long past its own timeout a run is left alone before the control node ends
+	// it. The executor should end its own run, with the real exit code and captured output, so this
+	// waits until it has clearly failed to.
+	overrunGrace = 2 * time.Minute
+	// overrunScan bounds how many running runs one sweep examines, so the check stays cheap on an
+	// install with a large fleet.
+	overrunScan = 500
 	// idleBackoffShift is how many times an idle claim wait may double, so the ceiling is the claim
 	// interval shifted by it. A dispatcher with nothing to claim backs off toward that ceiling
 	// rather than hammering the store, and drops back to the base interval the moment it claims.
@@ -578,6 +585,56 @@ func (d *Dispatcher) commitSettled(ids []string) {
 	}
 }
 
+// settleOverrunning ends a run that has been running past its own timeout, whatever its executor says.
+//
+// The lease sweep above reclaims on a stale heartbeat, so it never touches a worker that keeps
+// heartbeating. A run's timeout was enforced only inside the executing process, which means it bound
+// a cooperative executor and nothing else: a relay that claimed work and kept the lease fresh held it
+// forever, and nothing on the control node ever timed it out. One compromised relay could therefore
+// take the queue and stall the estate indefinitely, and even an honest worker that wedged held its
+// run until somebody noticed.
+//
+// The grace is deliberate. The executor should be the one to end its own run, with the real exit code
+// and output, so this only acts once the executor has clearly failed to.
+func (d *Dispatcher) settleOverrunning() {
+	running, err := d.store.ListPage(d.ctx, run.ListFilter{Status: string(run.StatusRunning)},
+		overrunScan, 0)
+	if err != nil {
+		if d.ctx.Err() == nil {
+			d.log.Error("dispatch: list running: " + err.Error())
+		}
+		return
+	}
+	now := d.now()
+	for _, r := range running {
+		if r.Timeout <= 0 || r.StartedAt == nil {
+			continue
+		}
+		deadline := r.StartedAt.Add(time.Duration(r.Timeout)*time.Second + overrunGrace)
+		if now.Before(deadline) {
+			continue
+		}
+		fin := run.Finalization{
+			Status: run.StatusFailed,
+			Error: fmt.Sprintf("timed out: still running %s after its %ds timeout, so the control "+
+				"node ended it", now.Sub(*r.StartedAt).Round(time.Second), r.Timeout),
+			EndedAt: now,
+		}
+		moved, ferr := d.store.FinalizeRunning(d.ctx, r.ID, fin)
+		if ferr != nil {
+			if d.ctx.Err() == nil {
+				d.log.Error("dispatch: settle overrunning run: "+ferr.Error(), zap.String("run_id", r.ID))
+			}
+			continue
+		}
+		if moved {
+			d.log.Warn("dispatch: ended a run past its timeout", zap.String("run_id", r.ID),
+				zap.Int("timeout_seconds", r.Timeout))
+			d.commitSettled([]string{r.ID})
+		}
+	}
+}
+
 // janitor sweeps stale leases so runs owned by dead processes requeue or resolve. It runs once
 // immediately, covering restarts, then on an interval.
 func (d *Dispatcher) janitor() {
@@ -601,6 +658,7 @@ func (d *Dispatcher) janitor() {
 			d.log.Info("dispatch: reclaimed stale runs", zap.Int("count", n))
 		}
 		d.commitSettled(settled)
+		d.settleOverrunning()
 	}
 	sweep()
 	ticker := time.NewTicker(janitorInterval)
