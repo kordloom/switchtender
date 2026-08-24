@@ -579,6 +579,23 @@ func migrate(db *sql.DB) error {
 		return fmt.Errorf("migration lock: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	// Bound how long this transaction will wait for a lock, and how long any one statement may run.
+	//
+	// An ADD COLUMN IF NOT EXISTS that changes nothing still takes AccessExclusiveLock, and this
+	// transaction issues one for every declared column plus the schema's own ALTERs, so it ends up
+	// holding an exclusive lock on every table until it commits. Every process calls Open, workers
+	// included, so this runs on ordinary starts and not only on upgrades. With no timeout a new node
+	// coming up behind one long read queued for the lock, and because the lock queue is first in
+	// first out every later reader queued behind the migration: one slow retention purge or chain
+	// scan could stall the whole cluster, API, claim loop and heartbeats alike, for as long as it
+	// ran. Failing fast instead means the starting process retries rather than freezing everyone
+	// else, which is the direction this should fail in.
+	if _, err := tx.Exec("SET LOCAL lock_timeout = '5s'"); err != nil {
+		return fmt.Errorf("migration lock timeout: %w", err)
+	}
+	if _, err := tx.Exec("SET LOCAL statement_timeout = '60s'"); err != nil {
+		return fmt.Errorf("migration statement timeout: %w", err)
+	}
 	if _, err := tx.Exec("SELECT pg_advisory_xact_lock($1)", migrateLockKey); err != nil {
 		return fmt.Errorf("migration lock: %w", err)
 	}
