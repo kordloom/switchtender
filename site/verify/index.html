@@ -75,6 +75,7 @@
 			<div id="out" aria-live="polite"></div>
 
 			<p class="note">A bundle carries the audit chain, the install's public key, and any timestamp anchors. This page checks the producer signature and the hash chain in full and reports what each anchor proves. Get a bundle from the audit page of any SwitchTender install, or run <code>switchtender audit bundle</code>. Evidence artifacts stay on your disk, so their digests are reported as referenced rather than opened. The boundary a verdict draws is set out in the <a href="/docs/concepts#provable-audit">concepts</a>.</p>
+				<p class="note">The bundle names the key that signed it, but a name is not trust. Anchor that key one of three ways: fetch it from the producing install's own domain at <code>/.well-known/loomseal.json</code>, so HTTPS and the domain vouch for it; paste a fingerprint you were handed out of band into the box above, and the verdict holds the bundle to that exact key; or rely on the hosted witness, which countersigns the key so an independent party attests to it rather than the install attesting to itself.</p>
 		</div>
 	</main>
 

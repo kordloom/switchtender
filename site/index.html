@@ -33,7 +33,7 @@
 	<link rel="preconnect" href="https://fonts.googleapis.com">
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-	<link rel="stylesheet" href="/styles.css?v=31">
+	<link rel="stylesheet" href="/styles.css?v=32">
 </head>
 <body>
 	<div class="bg-mesh" aria-hidden="true"></div>
@@ -290,7 +290,7 @@
 				<article class="card reveal">
 					<div class="ic ic-secret"></div>
 					<h3>Verified without trusting the server</h3>
-					<p>Export the chain as a signed <a href="https://loomseal.com" rel="noopener">LoomSeal</a> bundle and verify it on a machine with no network, using an open verifier that isn't SwitchTender. Or <a href="/verify">drop it into your browser</a> and watch the same verifier check it, offline, with nothing uploaded. The binary proves itself the same way: <code>switchtender version --verify</code> checks the running build against its release hashes.</p>
+					<p>Export the chain as a signed <a href="https://loomseal.com" rel="noopener">LoomSeal</a> bundle and verify it on a machine with no network, using an open verifier that isn't SwitchTender. Or <a href="/verify">drop it into your browser</a> and watch the same verifier check it, offline, with nothing uploaded. A checker anchors the signing key without taking the server's word for it: each install publishes its key at <code>/.well-known/loomseal.json</code>, you can pin a fingerprint handed over out of band, and the hosted witness countersigns it, so the key's authenticity is checked independently, not asserted by the same box. The binary proves itself the same way: <code>switchtender version --verify</code> hashes the running build against the <code>BINARY_SHA256SUMS</code> published with its GitHub release.</p>
 				</article>
 			</div>
 			<div class="section-head reveal" style="margin-top:48px">

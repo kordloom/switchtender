@@ -35,7 +35,7 @@
 	<link rel="preconnect" href="https://fonts.googleapis.com">
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-	<link rel="stylesheet" href="/styles.css?v=31">
+	<link rel="stylesheet" href="/styles.css?v=32">
 	<style>
 		/* Tier pricing layout. Reuses the card system, adding a price header, a feature checklist,
 		   and a featured-tier ring so the middle tier reads as the recommended one. */
@@ -212,12 +212,16 @@
 				our first customers</strong>, and what we build first follows what they actually need. The
 				subscription prices start where they say because you shouldn't have to email us to find out
 				roughly what something costs. The one thing that moves the price above the starting figure
-				is org size, it is set once in one call, and the number we agree is the number: you keep it
-				for as long as you stay on the tier.
+				is org size, and by that we mean the fleet you manage, the count of hosts under SwitchTender,
+					not seats, runs, or CPU. The starting figure is set to cover a normal team's fleet; it climbs
+					only for a large estate. It is set once in one call, and the number we agree is the number:
+					you keep it for as long as you stay on the tier. Need the migration done for you now? The
+					<a href="#sprint" style="color: var(--accent);">Migration-to-Production Sprint</a> below is a
+					fixed-price engagement you can start today, on the free tier, without waiting for Team.
 				If you want in early, <a href="mailto:hello@kordloom.com?subject=SwitchTender%20pricing" style="color: var(--accent);">write us</a>.
 			</p>
 
-			<div class="sprint reveal">
+			<div class="sprint reveal" id="sprint">
 				<div>
 					<h3>Migration-to-Production Sprint</h3>
 					<p>A fixed-price engagement, not a subscription: we migrate your AWX or Tower install hands-on, validate your real workflows in production, and bundle the first year of Team. One invoice, and you're live before you ever pay again. This is the lighter engagement, for teams that need the migration done and Team running, and it lands well under the $25,000 install below; regulated shops that also need approval-policy and evidence design want the Automation Governance Install.</p>
