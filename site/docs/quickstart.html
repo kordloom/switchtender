@@ -44,21 +44,28 @@
 <p>No install needed to look around. The <a href="https://demo.switchtender.com">live demo</a> is a seeded, read-only instance of exactly what you get.</p>
 <h2 id="requirements">Requirements</h2>
 <p>Ansible on the PATH: <code>ansible-playbook</code> and <code>ansible-inventory</code>. Nothing else for the default
-SQLite setup. Go 1.26 to build from source, or Docker Compose, where <code>docker compose up --build</code>
-builds the image from this repository.</p>
+SQLite setup. Building from source instead of installing the release binary needs Go 1.26, and
+Docker Compose is an alternative, where <code>docker compose up --build</code> builds the image from this
+repository.</p>
+<h2 id="install">Install</h2>
+<pre><code>curl -fsSL https://switchtender.com/install.sh | sh
+</code></pre>
+<p>The script downloads the release binary for your platform, checks it against the published
+checksums, and puts <code>switchtender</code> on your PATH. Running in about a minute. Prefer to build it
+yourself, or want to hack on it? <code>go build -o switchtender .</code> from a clone produces the same
+binary; the commands below assume it is on your PATH, so prefix a locally built binary with <code>./</code>.</p>
 <h2 id="run-the-server">Run the server</h2>
-<pre><code>go build -o switchtender .
-SWITCHTENDER_ENCRYPTION_KEY=change-me SWITCHTENDER_ENCRYPTION_SALT=change-me-too \
-  ./switchtender serve --addr :8080 --db switchtender.db
+<pre><code>SWITCHTENDER_ENCRYPTION_KEY=change-me SWITCHTENDER_ENCRYPTION_SALT=change-me-too \
+  switchtender serve --addr :8080 --db switchtender.db
 </code></pre>
 <p>The key and salt together seal stored credentials at rest with argon2id and AES-256-GCM. Without
 both the server still runs, but credential features stay off. Keep the salt stable across restarts
 or existing credentials cannot be decrypted.</p>
 <p>Open http://localhost:8080 for the web UI, or use the API directly.</p>
-<p>A fresh install opens with an empty templates list. <code>./switchtender examples --db switchtender.db</code>
+<p>A fresh install opens with an empty templates list. <code>switchtender examples --db switchtender.db</code>
 seeds a handful of starter templates that run with no project, inventory, or credential, so a first
 launch works on the spot. It skips a template whose name is already present, so it is safe to re-run.</p>
-<p>On your own machine, <code>./switchtender desktop</code> does all of this in one command. It picks a stable
+<p>On your own machine, <code>switchtender desktop</code> does all of this in one command. It picks a stable
 loopback port, keeps its data in a per-user directory, and opens the UI. The
 <a href="/docs/desktop">desktop guide</a> covers it, including packaging.</p>
 <h2 id="submit-a-run">Submit a run</h2>
@@ -75,16 +82,16 @@ each host's measured duration in recent runs.</p>
 <h2 id="add-a-worker">Add a worker</h2>
 <p>Point a worker at the same database and it competes for queued runs:</p>
 <pre><code>SWITCHTENDER_ENCRYPTION_KEY=change-me SWITCHTENDER_ENCRYPTION_SALT=change-me-too \
-  ./switchtender worker --db switchtender.db --name laptop
+  switchtender worker --db switchtender.db --name laptop
 </code></pre>
 <p>For more than one machine, use a PostgreSQL DSN as the <code>--db</code> value on every process.</p>
 <h2 id="lock-down-the-api">Lock down the API</h2>
 <p>Creating the first token turns on authentication. Until then the API is open so a fresh install
 works immediately.</p>
-<pre><code>./switchtender token new --db switchtender.db --name ci
+<pre><code>switchtender token new --db switchtender.db --name ci
 </code></pre>
 <p>Create user accounts with roles for sign-in:</p>
-<pre><code>SWITCHTENDER_PASSWORD=secret ./switchtender user new operator-jane --role operator --db switchtender.db
+<pre><code>SWITCHTENDER_PASSWORD=secret switchtender user new operator-jane --role operator --db switchtender.db
 </code></pre>
 <h2 id="run-with-docker">Run with Docker</h2>
 <pre><code>export SWITCHTENDER_ENCRYPTION_KEY=change-me
@@ -96,14 +103,14 @@ docker compose up --build
 <h2 id="set-up-a-production-server">Set up a production server</h2>
 <p>For a real install, <code>init</code> generates the encryption key and salt, creates the first admin account, and
 writes a config file in one step. It can also write a systemd unit:</p>
-<pre><code>./switchtender init --db switchtender.db --config switchtender.env --systemd switchtender.service
+<pre><code>switchtender init --db switchtender.db --config switchtender.env --systemd switchtender.service
 </code></pre>
 <p>It prints the admin password once, so save it. Move the unit into place and start it:</p>
 <pre><code>sudo cp switchtender.service /etc/systemd/system/switchtender.service
 sudo systemctl enable --now switchtender
 </code></pre>
 <p>Serve HTTPS directly, with no reverse proxy in front, by pointing the server at a certificate and key:</p>
-<pre><code>./switchtender serve --db switchtender.db --tls-cert tls.crt --tls-key tls.key
+<pre><code>switchtender serve --db switchtender.db --tls-cert tls.crt --tls-key tls.key
 </code></pre>
 <h2 id="run-on-kubernetes">Run on Kubernetes</h2>
 <p>SwitchTender needs no operator. A Helm chart installs the server and a worker as ordinary pods sharing a
@@ -114,7 +121,7 @@ database:</p>
 <p>To look around without setting anything up, run the seeded demo. It fills a fresh database with
 sample projects, templates, inventories, and real runs, including a flaky host, a split, and a
 pipeline, then serves it read-only so it is safe to expose:</p>
-<pre><code>./switchtender demo --addr :8080
+<pre><code>switchtender demo --addr :8080
 </code></pre>
 <p>Or with Docker: <code>docker compose --profile demo up --build</code>.</p>
 
