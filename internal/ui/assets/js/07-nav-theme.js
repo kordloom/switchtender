@@ -86,6 +86,10 @@ function buildNav() {
 		collapseBtn.setAttribute("aria-label", v ? "Expand navigation" : "Collapse navigation");
 		collapseBtn.setAttribute("aria-pressed", v ? "true" : "false");
 		collapseBtn.innerHTML = chevron(v);
+		// Collapsed, the button is just a chevron, so it carries its own hover tip; expanded, it wears
+		// its "Collapse" label and needs none.
+		if (v) collapseBtn.dataset.tip = "Expand navigation";
+		else delete collapseBtn.dataset.tip;
 		side.querySelectorAll(".nav-item").forEach((a) => {
 			const l = a.querySelector(".nav-label");
 			if (v && l) a.dataset.tip = l.textContent;
