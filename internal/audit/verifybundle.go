@@ -153,7 +153,14 @@ func VerifyBundle(signed []byte, pinnedKeyID string) (*BundleReport, error) {
 	if profile == TreeProfile {
 		rep.ChainOK, rep.BrokeAtSeq = verifyBundleTree(&b)
 	} else {
+		// The linear chain is bound to its producer the same way the tree is. A link is a hash of the
+		// entry's own fields and says nothing about who produced it, so a second install could
+		// otherwise lift a published receipt whole, keep its claims and its genuine third-party
+		// anchor, rewrite the producer block, and re-sign as itself.
 		rep.ChainOK, rep.BrokeAtSeq = verifyBundleChain(b.Claims, head)
+		if rep.ChainOK && !linearInstallMatches(&b) {
+			rep.ChainOK, rep.BrokeAtSeq = false, head.Seq
+		}
 	}
 	// An anchor is checked against the claim links, and for a tree those links are precisely what the
 	// chain check validates. Reporting anchors satisfied over a chain that did not verify would let a
@@ -452,8 +459,30 @@ func verifyBundleChain(claims []BundleClaim, head BundleCoord) (bool, int64) {
 		if head.Seq == newest.Seq && head.Link != newest.Link {
 			return false, newest.Seq
 		}
+		return true, 0
 	}
-	return true, 0
+	// A bundle carrying no claims proves nothing, so it must not report that nothing was altered.
+	// The head is only constrained by the claims, so with none the loop above never ran and this
+	// returned true for any subject and any head at all: a document naming a run that never happened,
+	// at a sequence and link nobody produced, read as VERIFIED with only a parenthetical "(0 entries
+	// recompute)" to give it away. A receipt is a claim about something; an empty one is not a true
+	// claim about everything.
+	if head.Seq != 0 || head.Link != "" {
+		return false, head.Seq
+	}
+	return false, 0
+}
+
+// linearInstallMatches reports whether a linear chain names the install that signed it.
+//
+// A bundle from before the binding existed carries no install id at all. Those are refused rather
+// than grandfathered: the whole value of the check is that a receipt names its origin, and an
+// exception for documents that omit it is an exception any forger would take.
+func linearInstallMatches(b *Bundle) bool {
+	if b.Chain == nil || b.Producer.InstallID == "" {
+		return false
+	}
+	return b.Chain.Params["install_id"] == b.Producer.InstallID
 }
 
 // verifyBundleAnchors reports whether every anchor names a coordinate the bundle actually holds at

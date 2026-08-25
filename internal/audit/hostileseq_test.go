@@ -42,3 +42,21 @@ func TestLinkOfStillPanicsForOurOwnEntries(t *testing.T) {
 	}()
 	_ = linkOf(claimObject(1<<60, "2026-08-24T00:00:00Z", "a", "POST", "/p", "", "", "", ""))
 }
+
+// TestVerifyBundleChainRefusesAnEmptyBundle checks a document carrying no claims does not report
+// that nothing was altered.
+//
+// The head is only constrained by the claims, so with none the recompute loop never ran and the
+// chain check returned true for any subject and any head at all. A bundle naming a run that never
+// happened, at a sequence and link nobody ever produced, read as VERIFIED, with only a parenthetical
+// "(0 entries recompute)" to give it away. A receipt is a claim about something; an empty one is not
+// a true claim about everything.
+func TestVerifyBundleChainRefusesAnEmptyBundle(t *testing.T) {
+	t.Parallel()
+	if ok, _ := verifyBundleChain(nil, BundleCoord{Seq: 9999, Link: "cafebabe"}); ok {
+		t.Error("a bundle with no claims verified against a head nobody produced")
+	}
+	if ok, _ := verifyBundleChain([]BundleClaim{}, BundleCoord{}); ok {
+		t.Error("a bundle with no claims and no head verified")
+	}
+}
