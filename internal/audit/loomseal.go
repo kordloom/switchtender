@@ -303,12 +303,12 @@ func BuildBundle(entries []*Entry, id Identity, version string, at time.Time) (*
 		Chain: &BundleChain{
 			Profile: ChainProfile,
 			Keyed:   false,
-			// The install this history belongs to, stated the same way the tree profile states it.
-			// A linear chain link is a hash of the entry's own fields and commits to nothing about
-			// who produced it, so without this a second install could take a published receipt, keep
-			// its claims and its genuine third-party timestamp anchor, rewrite only the producer
-			// block, re-sign with its own key, and have a relying party pinning that second key read
-			// the first install's history as its own.
+			// Stated for a reader, not relied on. The binding that matters is per entry: each
+			// claim written since the binding existed carries its own install_id, folded into its
+			// link, so a copier who rewrites the producer breaks the equality check and one who
+			// rewrites the claim's id too breaks the link. A chain-level value could not do that
+			// job, because it applies to every claim at once and a chain spanning the upgrade holds
+			// both bound and pre-binding entries.
 			Params: map[string]string{"install_id": id.InstallID},
 			Head:   BundleCoord{Seq: head.Seq, Link: head.Hash},
 		},
@@ -340,6 +340,7 @@ func claimContent(e *Entry) BundleClaim {
 		"actor_type":     e.ActorType,
 		"on_behalf_of":   e.OnBehalfOf,
 		"content_digest": e.ContentDigest,
+		"install_id":     e.InstallID,
 	} {
 		if value != "" {
 			claim.Payload[key] = value

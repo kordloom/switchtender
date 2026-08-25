@@ -437,7 +437,7 @@ func verifyBundleChain(claims []BundleClaim, head BundleCoord) (bool, int64) {
 		// canonicalization refuses is a bad bundle rather than a bug here.
 		recomputed, err := checkedLinkOf(claimObject(c.Chain.Seq, c.At,
 			str("actor"), str("method"), str("path"), c.Chain.Prev,
-			str("actor_type"), str("on_behalf_of"), str("content_digest")))
+			str("actor_type"), str("on_behalf_of"), str("content_digest"), str("install_id")))
 		if err != nil || recomputed != c.Chain.Link {
 			return false, c.Chain.Seq
 		}
@@ -473,7 +473,13 @@ func verifyBundleChain(claims []BundleClaim, head BundleCoord) (bool, int64) {
 	return false, 0
 }
 
-// linearInstallMatches reports whether a linear chain names the install that signed it.
+// linearInstallMatches reports whether every claim that names an install names the signer's.
+//
+// A claim that names one is bound: the id is folded into its link, so a copier who rewrites the
+// producer breaks this equality, and one who rewrites the claim's id too breaks the link. A claim
+// that names none predates the binding and is left alone, which is what lets a chain spanning the
+// upgrade verify rather than forcing a re-anchor. Those entries stay liftable and nothing here can
+// change that: a link already written commits to what it committed to.
 //
 // A bundle from before the binding existed carries no install id at all. Those are refused rather
 // than grandfathered: the whole value of the check is that a receipt names its origin, and an
@@ -486,10 +492,18 @@ func verifyBundleChain(claims []BundleClaim, head BundleCoord) (bool, int64) {
 // install into the link, as the format's other two profiles do, which is a change to the shared
 // format and the reference verifier rather than to this file alone.
 func linearInstallMatches(b *Bundle) bool {
-	if b.Chain == nil || b.Producer.InstallID == "" {
-		return false
+	for i := range b.Claims {
+		named, _ := b.Claims[i].Payload["install_id"].(string)
+		if named == "" {
+			// An entry written before the binding existed. It hashes as it always did and is not
+			// bound, which is a fact about that entry rather than a fault in this document.
+			continue
+		}
+		if b.Producer.InstallID == "" || named != b.Producer.InstallID {
+			return false
+		}
 	}
-	return b.Chain.Params["install_id"] == b.Producer.InstallID
+	return true
 }
 
 // verifyBundleAnchors reports whether every anchor names a coordinate the bundle actually holds at

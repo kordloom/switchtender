@@ -54,6 +54,20 @@ type Entry struct {
 	// recomputing the payload. It is not part of the chain hash; the digest already commits to the
 	// nonce's own hash, so a swapped nonce is detectable without the nonce being in the link.
 	Nonce string `json:"-"`
+	// InstallID names the install whose chain this entry belongs to, and is folded into the
+	// entry's link so the link commits to it.
+	//
+	// A link used to hash the entry's own fields and nothing about who produced them, so a
+	// second install could take a published receipt, keep its claims and its genuine
+	// third-party timestamp anchor, rewrite the producer block, re-sign, and have a relying
+	// party pinning that second key read the first install's history as its own. The tree
+	// profile always bound its leaves this way; the linear one is the profile that did not.
+	//
+	// It is empty on every entry written before the binding existed, and an empty field is
+	// omitted from the hashed object, so those entries hash exactly as they always did and no
+	// chain needs re-anchoring. They stay liftable, which cannot be fixed after the fact: a
+	// link already written commits to what it committed to.
+	InstallID string `json:"install_id,omitempty"`
 	// Seq is the entry's position in the chain, assigned at append starting at one.
 	Seq int64 `json:"seq"`
 	// PrevHash is the hash of the entry before this one, empty for the first entry.
@@ -65,6 +79,17 @@ type Entry struct {
 
 // Store persists audit entries. Implementations must be safe for concurrent use and must serialize
 // appends so the hash chain stays linear.
+// InstallBinder is an audit store that can be told which install its chain belongs to, so every
+// entry it appends afterward carries that id and is bound by its link.
+//
+// It is an optional interface rather than part of Store because binding is a property of a running
+// install, not of storage: a store opened by a one-off command has no identity loaded and appends
+// pre-binding entries, which verify exactly as they always did.
+type InstallBinder interface {
+	// BindInstall sets the install every later append is stamped with. An empty id unbinds.
+	BindInstall(installID string)
+}
+
 type Store interface {
 	// Append records one entry, assigning its chain fields from the current head. It refuses an
 	// entry for which IsSpanMarker is true with ErrReservedSpan: the marker means "the server
@@ -125,16 +150,19 @@ func NewID() string {
 // a field is byte-identical to one that simply does not use it.
 func EntryHash(e *Entry) string {
 	return linkOf(claimObject(e.Seq, e.At.UTC().Format(time.RFC3339Nano),
-		e.Actor, e.Method, e.Path, e.PrevHash, e.ActorType, e.OnBehalfOf, e.ContentDigest))
+		e.Actor, e.Method, e.Path, e.PrevHash, e.ActorType, e.OnBehalfOf, e.ContentDigest,
+		e.InstallID))
 }
 
 // claimObject builds the exact map a chain link is computed over: the fields the link commits to, in
 // the shape both EntryHash and bundle verification serialize. Sharing it is what keeps producing a
 // link and recomputing one from a bundled claim on a single definition, so they cannot drift.
-func claimObject(seq int64, at, actor, method, path, prev, actorType, onBehalfOf, contentDigest string) map[string]any {
+func claimObject(seq int64, at, actor, method, path, prev, actorType, onBehalfOf, contentDigest,
+	installID string) map[string]any {
 	claim := map[string]any{"seq": seq, "at": at, "actor": actor, "method": method, "path": path, "prev": prev}
 	for key, value := range map[string]string{
 		"actor_type": actorType, "on_behalf_of": onBehalfOf, "content_digest": contentDigest,
+		"install_id": installID,
 	} {
 		if value != "" {
 			claim[key] = value
@@ -357,6 +385,15 @@ func redactSecrets(value any) any {
 // Link normalizes e's hashed text, then fills its chain fields from prev, the current head of the
 // chain, or a genesis link when prev is nil. A store calls it once per append while holding the
 // append lock, so the chain stays linear and the entry it persists is the entry that was hashed.
+// BindEntryInstall stamps an entry with the install its chain belongs to, leaving an entry that
+// already names one alone. It must run before Link, since the id is folded into the hash. It is
+// exported for the store implementations, which live in their own packages.
+func BindEntryInstall(e *Entry, installID string) {
+	if e != nil && e.InstallID == "" {
+		e.InstallID = installID
+	}
+}
+
 func Link(prev, e *Entry) {
 	// The text fields are escaped before anything commits to them, so the stored entry is valid
 	// UTF-8 and no two distinct requests can share a chain link. See escapeInvalidUTF8.
@@ -369,6 +406,9 @@ func Link(prev, e *Entry) {
 	// The digest is generated hex and cannot carry one, so it is left alone.
 	e.ActorType = escapeInvalidUTF8(e.ActorType)
 	e.OnBehalfOf = escapeInvalidUTF8(e.OnBehalfOf)
+	// The install id is left alone on the same grounds as the digest. It is minted as "in_" plus
+	// hex, and the one path that does not mint it reads it out of a JSON file, which cannot yield
+	// an invalid byte either. Escaping it would only risk rewriting a percent somebody put there.
 	// The recorded time is truncated to microseconds before anything hashes it.
 	//
 	// The chain profile permits nanoseconds, but a link is only useful if an independent verifier

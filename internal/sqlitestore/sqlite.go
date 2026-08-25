@@ -273,7 +273,8 @@ CREATE TABLE IF NOT EXISTS audit_entries (
 	seq       INTEGER NOT NULL DEFAULT 0,
 	prev_hash TEXT NOT NULL DEFAULT '',
 	hash      TEXT NOT NULL DEFAULT '',
-	nonce     TEXT NOT NULL DEFAULT ''
+	nonce     TEXT NOT NULL DEFAULT '',
+	install_id TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS audit_anchors (
 	id    TEXT PRIMARY KEY,
@@ -770,6 +771,15 @@ func migrateRuns(db *sql.DB) error {
 		"ALTER TABLE audit_anchors ADD COLUMN install_id TEXT NOT NULL DEFAULT ''"); err != nil &&
 		!strings.Contains(err.Error(), "duplicate column name") {
 		return fmt.Errorf("add anchor install_id column: %w", err)
+	}
+	// An entry records the install that wrote it, which is folded into its chain link so a receipt
+	// cannot be presented as another install's history. The column has to exist wherever the link
+	// is recomputed: hashing a value the read path cannot return breaks every chain in the install.
+	// An entry from before the column has none, and hashes exactly as it did when it was written.
+	if _, err := db.Exec(
+		"ALTER TABLE audit_entries ADD COLUMN install_id TEXT NOT NULL DEFAULT ''"); err != nil &&
+		!strings.Contains(err.Error(), "duplicate column name") {
+		return fmt.Errorf("add entry install_id column: %w", err)
 	}
 	return nil
 }

@@ -12,6 +12,14 @@ import (
 // treeChain returns a linked chain of n entries, standing in for an install's audit log.
 func treeChain(t *testing.T, n int) []*audit.Entry {
 	t.Helper()
+	return treeChainFor(t, n, "")
+}
+
+// treeChainFor builds a chain whose entries name installID, or a pre-binding chain when it is empty.
+// A bound entry folds the install into its link, which is what stops a second install lifting the
+// receipt whole; an unbound one hashes as entries always did.
+func treeChainFor(t *testing.T, n int, installID string) []*audit.Entry {
+	t.Helper()
 	at := time.Date(2026, 8, 11, 10, 0, 0, 0, time.UTC)
 	var chain []*audit.Entry
 	var prev *audit.Entry
@@ -19,6 +27,7 @@ func treeChain(t *testing.T, n int) []*audit.Entry {
 		e := &audit.Entry{
 			ID: audit.NewID(), At: at.Add(time.Duration(i) * time.Minute),
 			Actor: "alice", Method: "POST", Path: "/v1/runs/" + string(rune('a'+i)),
+			InstallID: installID,
 		}
 		audit.Link(prev, e)
 		chain = append(chain, e)

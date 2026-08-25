@@ -900,6 +900,16 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		producer = &id
 		log.Info("producer identity ready", zap.String("key_id", id.KeyID()),
 			zap.String("install_id", id.InstallID))
+		// Every entry appended from here carries the install, so its link commits to who produced
+		// it. Without this a published receipt could be lifted whole by a second install: keep the
+		// claims and the genuine third-party anchor, rewrite the producer, re-sign, and a relying
+		// party pinning that second key reads somebody else's history as its own.
+		if binder, ok := bundle.Audits().(audit.InstallBinder); ok {
+			binder.BindInstall(id.InstallID)
+		} else {
+			log.Warn("audit store cannot be bound to this install, so its entries will not commit " +
+				"to who produced them")
+		}
 	}
 
 	closePlugins, err := extplugin.Load(pluginsDir(servePluginsDir), log)

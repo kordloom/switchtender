@@ -335,7 +335,8 @@ CREATE TABLE IF NOT EXISTS audit_entries (
 	seq       BIGINT NOT NULL DEFAULT 0,
 	prev_hash TEXT NOT NULL DEFAULT '',
 	hash      TEXT NOT NULL DEFAULT '',
-	nonce     TEXT NOT NULL DEFAULT ''
+	nonce     TEXT NOT NULL DEFAULT '',
+	install_id TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS audit_anchors (
 	id    TEXT PRIMARY KEY,
@@ -419,6 +420,10 @@ ALTER TABLE audit_entries ADD COLUMN IF NOT EXISTS actor_type TEXT NOT NULL DEFA
 ALTER TABLE audit_entries ADD COLUMN IF NOT EXISTS on_behalf_of TEXT NOT NULL DEFAULT '';
 ALTER TABLE audit_entries ADD COLUMN IF NOT EXISTS content_digest TEXT NOT NULL DEFAULT '';
 ALTER TABLE audit_entries ADD COLUMN IF NOT EXISTS nonce TEXT NOT NULL DEFAULT '';
+-- The install that wrote an entry is folded into its chain link, so the column has to exist
+-- wherever the link is recomputed. Without it the read path returns nothing for a value the
+-- write path hashed, and every chain in the install reports broken at its first entry.
+ALTER TABLE audit_entries ADD COLUMN IF NOT EXISTS install_id TEXT NOT NULL DEFAULT '';
 CREATE TABLE IF NOT EXISTS credential_types (
 	id         TEXT PRIMARY KEY,
 	name       TEXT NOT NULL,

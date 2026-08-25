@@ -15,6 +15,8 @@ type memStore struct {
 	mu sync.RWMutex
 	// entries holds every appended entry in chain order.
 	entries []*Entry
+	// installID stamps every appended entry, empty when no identity is bound.
+	installID string
 	// anchors holds every recorded anchor.
 	anchors []*Anchor
 }
@@ -76,6 +78,7 @@ func (m *memStore) Append(_ context.Context, e *Entry) error {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	BindEntryInstall(e, m.installID)
 	var prev *Entry
 	if n := len(m.entries); n > 0 {
 		prev = m.entries[n-1]
@@ -124,6 +127,7 @@ func (m *memStore) AppendSpanBeat(_ context.Context, at time.Time, cadenceS int)
 		return nil, fmt.Errorf("append span beat: %w", err)
 	}
 	e := NewSpanEntry(at, beat, count, cadenceS)
+	BindEntryInstall(e, m.installID)
 	Link(prev, e)
 	m.entries = append(m.entries, e)
 	cp := *e
@@ -202,4 +206,11 @@ func (m *memStore) ChainScan(ctx context.Context, afterSeq int64, fn func(*Entry
 		}
 	}
 	return nil
+}
+
+// BindInstall sets the install every later append is stamped with.
+func (m *memStore) BindInstall(installID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.installID = installID
 }
