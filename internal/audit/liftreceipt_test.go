@@ -87,3 +87,67 @@ func thiefPublicKey(t *testing.T, id audit.Identity) string {
 	}
 	return doc.Producer.PublicKey
 }
+
+// TestLiftingByRewritingBothInstallIDsIsStillPossible records a gap this package cannot close alone,
+// so it is written down rather than believed closed.
+//
+// Comparing chain.params.install_id against producer.install_id catches a forger who rewrote one of
+// them. It does not catch one who rewrites both, because the switchtender-audit-v1 link preimage is
+// seq, at, actor, method, path, and prev, and commits to nothing about the producer: every link
+// recomputes unchanged under a different install. The other two profiles in the format,
+// loomseal-chain-v1 and loomseal-merkle-v1, both hash the install id into the link itself for
+// exactly this reason, and the format's own text argues at length for why they must.
+//
+// Closing it means adding install_id to this profile's link preimage, which both implementations
+// build from whatever fields a claim carries, omitting empty ones, so an entry written before the
+// field existed still recomputes. That is a change to the shared format and to the reference
+// verifier, not something this repository can make on its own: doing it here alone would make the
+// two verifiers disagree on every new bundle, which is the property worth most.
+//
+// This asserts the current behavior on purpose. When the format binds the install, this test starts
+// failing, which is precisely when somebody should come back and invert it.
+func TestLiftingByRewritingBothInstallIDsIsStillPossible(t *testing.T) {
+	victim := treeIdentity(t)
+	thief := treeIdentity(t)
+	chain := treeChain(t, 4)
+	at := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
+
+	doc, err := audit.BuildBundle(chain, victim, "1.67.0", at)
+	if err != nil {
+		t.Fatalf("BuildBundle() error = %v", err)
+	}
+	honest := signBundle(t, doc, victim)
+
+	var raw map[string]any
+	if err := json.Unmarshal(honest, &raw); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	producer := raw["producer"].(map[string]any)
+	producer["install_id"] = thief.InstallID
+	producer["key_id"] = thief.KeyID()
+	producer["public_key"] = thiefPublicKey(t, thief)
+	// The difference from the test above: the thief rewrites the chain's stated install too.
+	if chainBlock, ok := raw["chain"].(map[string]any); ok {
+		if params, ok := chainBlock["params"].(map[string]any); ok {
+			params["install_id"] = thief.InstallID
+		}
+	}
+	delete(raw, "signatures")
+
+	lifted, err := json.Marshal(raw)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	var stolen audit.Bundle
+	if err := json.Unmarshal(lifted, &stolen); err != nil {
+		t.Fatalf("Unmarshal(stolen) error = %v", err)
+	}
+	resigned := signBundle(t, &stolen, thief)
+
+	got, err := audit.VerifyBundle(resigned, thief.KeyID())
+	if err != nil || !got.OK() {
+		t.Errorf("the known gap appears to be closed: a receipt lifted with both install ids "+
+			"rewritten no longer verifies (err=%v). If the link preimage now binds the install, "+
+			"invert this test and delete this message", err)
+	}
+}

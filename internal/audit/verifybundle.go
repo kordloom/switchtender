@@ -478,6 +478,13 @@ func verifyBundleChain(claims []BundleClaim, head BundleCoord) (bool, int64) {
 // A bundle from before the binding existed carries no install id at all. Those are refused rather
 // than grandfathered: the whole value of the check is that a receipt names its origin, and an
 // exception for documents that omit it is an exception any forger would take.
+//
+// This is a partial defense and it is worth being exact about what it does not do. Both values it
+// compares are restatable, and the link preimage for this profile commits to neither, so a copier
+// who rewrites the producer block and the chain params together passes it with every link still
+// recomputing. It catches the careless case and costs nothing. The complete fix is to hash the
+// install into the link, as the format's other two profiles do, which is a change to the shared
+// format and the reference verifier rather than to this file alone.
 func linearInstallMatches(b *Bundle) bool {
 	if b.Chain == nil || b.Producer.InstallID == "" {
 		return false
