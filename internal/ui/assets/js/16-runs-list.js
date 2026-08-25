@@ -152,17 +152,68 @@ async function loadRuns() {
 	}
 }
 
-// toolLabel returns a short label for what a run executed: its playbook file, or its command for a
-// non-Ansible tool, collapsed and truncated so a long command does not stretch the row.
+// toolLabel returns a short label for what a run executed: its name where it has one, its playbook
+// file, or the most informative line of its script, collapsed and truncated so a long one does not
+// stretch the row.
 function toolLabel(r) {
 	// A saved workflow's identity is its graph, not a playbook it does not have. Without this a
 	// stepped template listed with a blank what-it-runs label and read as a broken ansible entry.
+	// A named one keeps its name: "Provision and deploy, 3 steps" says what ran, where the count
+	// alone said only that something did, and every workflow in the list looked like every other.
 	if (r.steps && r.steps.length) {
-		return "workflow, " + r.steps.length + (r.steps.length === 1 ? " step" : " steps");
+		const count = r.steps.length + (r.steps.length === 1 ? " step" : " steps");
+		return r.playbook ? clipLabel(r.playbook) + ", " + count : "workflow, " + count;
 	}
 	if (r.playbook) return baseName(r.playbook) || r.playbook;
-	const cmd = (r.command || "").replace(/\s+/g, " ").trim();
-	return cmd.length > 48 ? cmd.slice(0, 47) + "…" : cmd;
+	return clipLabel(scriptLabel(r.command || ""));
+}
+
+// scriptLabel picks the line of a script that describes it.
+//
+// A script has no filename, so the whole source was collapsed onto one line and cut at 48
+// characters. What fits in 48 characters of a script is its preamble, so a Go run listed as
+// "package main import ( "encoding/json" "fmt" ) t" and a Python one as "import json want = {" and
+// neither said anything about what the run did. Two scripts that differ entirely looked identical.
+//
+// A leading comment is how people already title a script, so it wins. Failing that, the first line
+// that is not ceremony: a shebang, an import, a package or module declaration, or a shell setting
+// its own options. Failing that the whole thing, which is no worse than before.
+function scriptLabel(command) {
+	// A command that fits is shown whole, whatever it is spread across. "terraform apply
+	// -auto-approve" written over two lines is one instruction, not a script with a title line, and
+	// picking a line out of it would drop half the meaning. Only something too long to show needs a
+	// line chosen to stand for it.
+	const whole = command.replace(/\s+/g, " ").trim();
+	if (whole.length <= 48) return whole;
+	const lines = command.split("\n").map((l) => l.trim()).filter(Boolean);
+	for (const line of lines) {
+		const comment = line.match(/^(?:#|\/\/|--)\s*(.+)$/);
+		// A shebang starts with # too and is ceremony, not a title.
+		if (comment && !line.startsWith("#!")) return comment[1];
+	}
+	// A parenthesized import or declaration block is ceremony too, and its contents are just
+	// quoted paths: without this a Go program was described as "encoding/json".
+	let inBlock = false;
+	for (const line of lines) {
+		if (inBlock) {
+			if (/^\)/.test(line)) inBlock = false;
+			continue;
+		}
+		if (/^(import|var|const|require|use)\s*\($/.test(line)) {
+			inBlock = true;
+			continue;
+		}
+		if (/^(#!|import\b|from\b|package\b|use\b|require\b|set\s+-|@echo\b)/.test(line)) continue;
+		if (/^[)}\]]/.test(line)) continue;
+		return line;
+	}
+	return command.replace(/\s+/g, " ").trim();
+}
+
+// clipLabel collapses whitespace and cuts a label to the width a row can hold.
+function clipLabel(text) {
+	const one = String(text || "").replace(/\s+/g, " ").trim();
+	return one.length > 48 ? one.slice(0, 47) + "…" : one;
 }
 
 // KIND_TIPS explains each run kind and tool chip on hover.

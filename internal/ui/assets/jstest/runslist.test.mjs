@@ -54,7 +54,7 @@ function mountRunsPage(values, search) {
 	return handle;
 }
 
-test("toolLabel shows the playbook file or the collapsed command", () => {
+test("toolLabel names what a run executed rather than quoting its source", () => {
 	const tests = [
 		// Test 0: A playbook shows its file, not its path.
 		{ In: { playbook: "deploy/site.yml" }, Want: "site.yml" },
@@ -72,6 +72,37 @@ test("toolLabel shows the playbook file or the collapsed command", () => {
 		{ In: { command: "x".repeat(49) }, Want: "x".repeat(47) + "…" },
 		// Test 7: Nothing to show.
 		{ In: {}, Want: "" },
+		// Test 8: A named workflow keeps its name beside the step count, since the count alone made
+		// every workflow in the list read the same.
+		{ In: { playbook: "Provision and deploy", steps: [1, 2, 3] },
+			Want: "Provision and deploy, 3 steps" },
+		// Test 9: An unnamed workflow still says what it is.
+		{ In: { steps: [1] }, Want: "workflow, 1 step" },
+		// Test 10: A Go program is described by its comment, not by its package clause.
+		{ In: { command: "// Report spare capacity per host\npackage main\n\nimport (\n\t\"fmt\"\n)" },
+			Want: "Report spare capacity per host" },
+		// Test 11: With no comment, the first line that is not ceremony. The body is realistically
+		// long, since a command short enough to show whole is shown whole.
+		{ In: { command: "package main\n\nimport (\n\t\"encoding/json\"\n\t\"fmt\"\n)\n\n" +
+			"type Host struct{ Name string }\n\nfunc main() { fmt.Println(\"spare capacity\") }" },
+			Want: "type Host struct{ Name string }" },
+		// Test 12: Python skips its imports.
+		{ In: { command: "import json\nimport sys\n\n" +
+			"want = {\"web01\", \"web02\", \"db01\"}\nprint(sorted(want))" },
+			Want: "want = {\"web01\", \"web02\", \"db01\"}" },
+		// Test 13: A shell script skips the shebang and its own options.
+		{ In: { command: "#!/usr/bin/env bash\nset -euo pipefail\n" +
+			"echo \"Rotating application logs\"\nlogrotate -f /etc/logrotate.conf\nsystemctl reload nginx" },
+			Want: "echo \"Rotating application logs\"" },
+		// Test 14: A shebang is not read as a comment title, and a real comment below it is.
+		{ In: { command: "#!/bin/sh\n# Rotate the logs on every web host in the fleet\n" +
+			"echo hi\nlogrotate -f /etc/logrotate.conf\nsystemctl reload nginx" },
+			Want: "Rotate the logs on every web host in the fleet" },
+		// Test 15: A script that is nothing but ceremony still shows something rather than nothing.
+		{ In: { command: "import os\nimport sys\nimport json\nimport time\nimport socket\nimport re" },
+			Want: "import os import sys import json import time im…" },
+		// Test 16: The chosen line is still cut to the row width.
+		{ In: { command: "# " + "x".repeat(60) }, Want: "x".repeat(47) + "…" },
 	];
 	for (const [i, tc] of tests.entries()) {
 		assert.equal(app.toolLabel(tc.In), tc.Want, "test " + i);
