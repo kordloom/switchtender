@@ -113,7 +113,7 @@ Runs the HTTP API, the in-process executor, the scheduler, the retention sweeper
 | `--container-runtime` | `docker` | Container CLI for containerized runs: docker or podman. |
 | `--container-pull-policy` | `missing` | Image pull policy for containerized runs, as docker `--pull`: always, missing, or never. |
 | `--galaxy-server` | none | Private Ansible Galaxy or Automation Hub URL for project collection installs. Token from `SWITCHTENDER_GALAXY_TOKEN`. |
-| `--strict-grants` | `false` | Deny non-admins access to an object that has no grants, instead of deferring to the global role. |
+| `--strict-grants` | `false` | Deny non-admins access to an object that has no grants, instead of deferring to the global role. Off by default, which means separation between organizations is not enforced until you turn it on: see below. |
 | `--read-only` | `false` | Reject every mutating request, for a safely exposable instance. |
 | `--matrix-cap` | `50000` | Largest host matrix, in cells, the UI draws before showing a notice. 0 means no limit. |
 | `--plugins-dir` | none | Directory of extension plugin binaries loaded at startup. Also `SWITCHTENDER_PLUGINS_DIR`. See [Extend in Go](sdk.md). |
@@ -269,6 +269,19 @@ global flag, so passing it elsewhere is an error rather than a no-op.
 |------|-------|---------|
 | `--pretty` | `token` and its subcommands, `audit anchor`, `audit receipt` | Indent JSON output instead of the compact default. |
 
+
+## Separation between organizations is opt-in
+
+Organizations, teams, and grants exist, but with `--strict-grants` off an object nobody has granted
+falls back to the caller's global role. On that default any operator may use any project, inventory,
+or credential in the install, whichever organization it belongs to. That is deliberate: a small team
+should not have to grant every object before anything works, and an upgrade should not lock people
+out of what they were already using.
+
+It does mean an install with several organizations on it is not separated until `--strict-grants` is
+on. If you are running work for more than one team, more than one customer, or anything where one
+group must not reach another's credentials, turn it on and grant deliberately. Objects created
+before you do carry no grants, so plan to assign them.
 
 ## Directory sign-in and existing accounts
 

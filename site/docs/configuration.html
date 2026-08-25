@@ -490,7 +490,7 @@ that variable is unset.</p>
 <tr>
 <td><code>--strict-grants</code></td>
 <td><code>false</code></td>
-<td>Deny non-admins access to an object that has no grants, instead of deferring to the global role.</td>
+<td>Deny non-admins access to an object that has no grants, instead of deferring to the global role. Off by default, which means separation between organizations is not enforced until you turn it on: see below.</td>
 </tr>
 <tr>
 <td><code>--read-only</code></td>
@@ -825,6 +825,16 @@ global flag, so passing it elsewhere is an error rather than a no-op.</p>
 </tr>
 </tbody>
 </table>
+<h2 id="separation-between-organizations-is-opt-in">Separation between organizations is opt-in</h2>
+<p>Organizations, teams, and grants exist, but with <code>--strict-grants</code> off an object nobody has granted
+falls back to the caller's global role. On that default any operator may use any project, inventory,
+or credential in the install, whichever organization it belongs to. That is deliberate: a small team
+should not have to grant every object before anything works, and an upgrade should not lock people
+out of what they were already using.</p>
+<p>It does mean an install with several organizations on it is not separated until <code>--strict-grants</code> is
+on. If you are running work for more than one team, more than one customer, or anything where one
+group must not reach another's credentials, turn it on and grant deliberately. Objects created
+before you do carry no grants, so plan to assign them.</p>
 <h2 id="directory-sign-in-and-existing-accounts">Directory sign-in and existing accounts</h2>
 <p>An account records what created it: an administrator, or the directory that provisioned it. A
 directory identity signs in to an account only when that account is its own, so an identity provider

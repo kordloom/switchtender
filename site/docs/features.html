@@ -232,7 +232,7 @@
 </tr>
 <tr>
 <td>Teams and grants</td>
-<td>Group users into teams and grant read, use, or manage on a specific project, template, inventory, or credential, each level implying the ones below it. A read grant delegates view of one object without a global viewer role; a manage grant delegates editing and deleting without global admin. Grants layer on the global role and default open, or lock down with strict grants.</td>
+<td>Group users into teams and grant read, use, or manage on a specific project, template, inventory, or credential, each level implying the ones below it. A read grant delegates view of one object without a global viewer role; a manage grant delegates editing and deleting without global admin. Grants layer on the global role and default open, so an ungranted object falls back to the caller's global role: separation between organizations is not enforced until <code>--strict-grants</code> is on.</td>
 </tr>
 <tr>
 <td>Reach isolated networks</td>
