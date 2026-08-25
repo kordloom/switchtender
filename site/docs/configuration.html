@@ -305,7 +305,7 @@ that variable is unset.</p>
 <tr>
 <td><code>--jwt-audience</code></td>
 <td>none</td>
-<td>Expected token audience, empty to skip the audience check.</td>
+<td>Expected token audience. Left empty the audience is not checked, so every token the issuer signs is accepted, including one minted for a different application at the same issuer. Set it unless the issuer serves this install alone.</td>
 </tr>
 <tr>
 <td><code>--jwt-username-claim</code></td>
@@ -470,7 +470,7 @@ that variable is unset.</p>
 <tr>
 <td><code>--container-network</code></td>
 <td><code>bridge</code></td>
-<td>Network mode for containerized runs, as docker <code>--network</code>, for example bridge or none.</td>
+<td>Network mode for containerized runs, as docker <code>--network</code>, for example bridge or none. A run with network access can reach the host's cloud metadata service and read the instance identity, which on a cloud host is a credential. Use none for runs that do not need the network, and block the link-local metadata address at the host firewall where they do.</td>
 </tr>
 <tr>
 <td><code>--container-runtime</code></td>

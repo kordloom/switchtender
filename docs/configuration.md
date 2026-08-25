@@ -76,7 +76,7 @@ Runs the HTTP API, the in-process executor, the scheduler, the retention sweeper
 | `--saml-role-map` | none | Map an asserted group to a role as `group=role`. A matched group sets the role on every sign-in. Repeatable. |
 | `--jwt-jwks-url` | none | JWKS URL to enable bearer JWT sign-in, so a service can present a JWT minted elsewhere. |
 | `--jwt-issuer` | none | Expected token issuer, the `iss` claim. |
-| `--jwt-audience` | none | Expected token audience, empty to skip the audience check. |
+| `--jwt-audience` | none | Expected token audience. Left empty the audience is not checked, so every token the issuer signs is accepted, including one minted for a different application at the same issuer. Set it unless the issuer serves this install alone. |
 | `--jwt-username-claim` | `sub` | Claim naming the account. |
 | `--jwt-groups-claim` | none | Claim holding the user's groups, used with `--jwt-role-map`. |
 | `--jwt-role-map` | none | Map a token group to a role as `group=role`. Repeatable. |
@@ -109,7 +109,7 @@ Runs the HTTP API, the in-process executor, the scheduler, the retention sweeper
 | `--container-memory` | `2g` | Memory cap for containerized runs, as docker `--memory`. Empty removes the cap. |
 | `--container-cpus` | `2` | CPU cap for containerized runs, as docker `--cpus`. Empty removes the cap. |
 | `--container-pids-limit` | `2048` | Process cap for containerized runs, as docker `--pids-limit`. Zero removes the cap. |
-| `--container-network` | `bridge` | Network mode for containerized runs, as docker `--network`, for example bridge or none. |
+| `--container-network` | `bridge` | Network mode for containerized runs, as docker `--network`, for example bridge or none. A run with network access can reach the host's cloud metadata service and read the instance identity, which on a cloud host is a credential. Use none for runs that do not need the network, and block the link-local metadata address at the host firewall where they do. |
 | `--container-runtime` | `docker` | Container CLI for containerized runs: docker or podman. |
 | `--container-pull-policy` | `missing` | Image pull policy for containerized runs, as docker `--pull`: always, missing, or never. |
 | `--galaxy-server` | none | Private Ansible Galaxy or Automation Hub URL for project collection installs. Token from `SWITCHTENDER_GALAXY_TOKEN`. |

@@ -312,7 +312,9 @@ func registerContainerFlags(cmd *cobra.Command) {
 	cmd.Flags().IntVar(&containerPidsLimit, "container-pids-limit", d.PidsLimit,
 		"Process cap for containerized runs, as docker --pids-limit. Zero removes the cap.")
 	cmd.Flags().StringVar(&containerNetwork, "container-network", d.Network,
-		"Network mode for containerized runs, as docker --network, for example bridge or none.")
+		"Network mode for containerized runs, as docker --network, for example bridge or none. "+
+			"With network access a run can reach the host's cloud metadata service and read the "+
+			"instance identity, so prefer none for runs that do not need the network.")
 	cmd.Flags().StringVar(&containerRuntime, "container-runtime", "docker",
 		"Container CLI for containerized runs: docker or podman.")
 	cmd.Flags().StringVar(&containerPullPolicy, "container-pull-policy", "missing",
@@ -1143,8 +1145,33 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
+	// Organizations without separation are a shape somebody gets wrong quietly. Grants default open,
+	// so an object nobody has granted falls back to the caller's global role, and an operator who
+	// created a second organization and assumed it was a boundary has none: every tenant reads and
+	// cancels every other tenant's runs. That is documented, and a default is stronger than a
+	// document, so an install that has more than one organization and has not turned separation on
+	// is told at startup rather than finding out from a customer.
+	if !serveStrictGrants {
+		if orgs, err := bundle.Orgs().List(cmd.Context()); err == nil && len(orgs) > 1 {
+			log.Warn("this install has more than one organization and separation between them is "+
+				"off, so a member of one can read and cancel another's runs: pass --strict-grants "+
+				"to deny access to an object that has no grant instead of falling back to the "+
+				"caller's global role", zap.Int("organizations", len(orgs)))
+		}
+	}
+
 	var jwtAuth *server.JWTAuth
 	if serveJWTJWKSURL != "" {
+		// An issuer usually mints tokens for more than one application, and the audience claim is
+		// what says which one a token was for. Without it every token that issuer signs is accepted
+		// here, including one minted for a different application entirely, so a service holding a
+		// token for something else at the same provider can sign in as whatever its claims map to.
+		// The check is optional because a single-application issuer does not need it, not because
+		// leaving it off is equivalent.
+		if serveJWTAudience == "" {
+			log.Warn("jwt sign-in accepts any audience: set --jwt-audience so a token minted for " +
+				"another application at the same issuer is not accepted here")
+		}
 		jwtAuth, err = server.NewJWTAuth(cmd.Context(), serveJWTJWKSURL, serveJWTIssuer,
 			serveJWTAudience, serveJWTUsernameClaim, serveJWTGroupsClaim,
 			user.Role(serveJWTDefaultRole), parseRoleMap(serveJWTRoleMap), bundle.Users(), log)
