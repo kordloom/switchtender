@@ -451,3 +451,89 @@ func wrapSignedData(t *testing.T, before func(*tsaSignedData), digest []byte,
 	}
 	return out
 }
+
+// TestTokenOutsideItsSignersValidityIsRefused covers the window check the reference verifier added.
+//
+// A token whose genTime falls outside its signer's validity was either issued by a certificate that
+// had already expired or backdated to before it existed, and either way that certificate does not
+// vouch for the instant claimed. Expiry on its own is deliberately not checked: a token is routinely
+// read long after its signer's certificate lapsed, which says nothing about when it was issued.
+func TestTokenOutsideItsSignersValidityIsRefused(t *testing.T) {
+	t.Parallel()
+	value := sha256.Sum256([]byte("a head to timestamp"))
+
+	// The test authority is valid 2020 to 2040 and genTime is fixed at 2026, comfortably inside.
+	if err := checkTimestampToken(tokenOver(t, value[:]), value[:], nil); err != nil {
+		t.Fatalf("a token inside its signer's window was refused: %v", err)
+	}
+
+	// Backdated to before the certificate existed, and genuinely signed over that payload so the
+	// message-digest check passes and the window check is what refuses it.
+	outside := tokenOverInfo(t, tstInfoAt(t, value[:], time.Date(2001, 1, 1, 0, 0, 0, 0, time.UTC)))
+	err := checkTimestampToken(outside, value[:], nil)
+	if err == nil {
+		t.Fatal("a token dated before its signer existed was accepted")
+	}
+	if !strings.Contains(err.Error(), "outside its signer's validity") {
+		t.Errorf("error = %v, want it to name the validity window", err)
+	}
+}
+
+// TestATokenWithTwoSignaturesIsRefused matches the reference verifier's rule that a timestamp token
+// carries exactly one signer. Taking the first of several that verifies would let a forger attach
+// their own beside the authority's and have the token pass on whichever happens to check out.
+func TestATokenWithTwoSignaturesIsRefused(t *testing.T) {
+	t.Parallel()
+	value := sha256.Sum256([]byte("a head to timestamp"))
+	doubled := wrapSignedData(t, func(sd *tsaSignedData) {
+		// Two copies of the same valid signer info.
+		sd.SignerInfos.Bytes = append(append([]byte(nil), sd.SignerInfos.Bytes...),
+			sd.SignerInfos.Bytes...)
+	}, value[:], nil)
+
+	err := checkTimestampToken(doubled, value[:], nil)
+	if err == nil {
+		t.Fatal("a token carrying two signatures was accepted")
+	}
+	if !strings.Contains(err.Error(), "has one") {
+		t.Errorf("error = %v, want it to say a token carries one signature", err)
+	}
+}
+
+// tstInfoAt builds a TSTInfo over digest with an explicit generation time.
+func tstInfoAt(t *testing.T, digest []byte, at time.Time) []byte {
+	t.Helper()
+	info := tsaTSTInfo{
+		Version: 1,
+		Policy:  asn1.ObjectIdentifier{1, 2, 3, 4},
+		MessageImprint: tsaImprint{
+			Algorithm: tsaAlgorithm{Algorithm: sha256OID, Parameters: asn1.RawValue{Tag: asn1.TagNull}},
+			Digest:    digest,
+		},
+		SerialNumber: bigOne(),
+		GenTime:      at,
+	}
+	encoded, err := asn1.Marshal(info)
+	if err != nil {
+		t.Fatalf("marshal TSTInfo: %v", err)
+	}
+	return encoded
+}
+
+// tokenOverInfo signs a prebuilt TSTInfo and wraps it as a ContentInfo, so a test can control the
+// payload the signature actually covers rather than swapping it afterward.
+func tokenOverInfo(t *testing.T, info []byte) []byte {
+	t.Helper()
+	sdBytes, err := asn1.Marshal(signedDataOver(t, info))
+	if err != nil {
+		t.Fatalf("marshal SignedData: %v", err)
+	}
+	out, err := asn1.Marshal(tsaContentInfo{
+		ContentType: signedDataOID,
+		Content:     asn1.RawValue{Class: 2, Tag: 0, IsCompound: true, Bytes: sdBytes},
+	})
+	if err != nil {
+		t.Fatalf("marshal ContentInfo: %v", err)
+	}
+	return out
+}
