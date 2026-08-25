@@ -32,9 +32,10 @@ bundle it is handed.
 | GET    | `/v1/runs/{id}/evidence`   | Self-contained HTML evidence document for one run. `?format=json` returns the same content as JSON. |
 | GET    | `/v1/runs/{id}/receipt`    | Signed LoomSeal receipt proving what this run did.      |
 | POST   | `/v1/runs/{id}/rerun`      | Submit a fresh run with this run's execution settings.  |
+| POST   | `/v1/runs/{id}/stream-ticket` | Mint a short-lived, single-use ticket for opening this run's event stream. |
 | GET    | `/v1/runs/{id}/events`     | Structured events as JSON.                              |
 | GET    | `/v1/runs/{id}/compare`    | What changed against a baseline run: host verdicts, task timing, duration. `with=` names the baseline or `prev` for the previous run of the same source. |
-| GET    | `/v1/runs/{id}/stream`     | Live events and log over Server-Sent Events.            |
+| GET    | `/v1/runs/{id}/stream`     | Live events and log over Server-Sent Events. Opened with `?ticket=` from the endpoint above, since EventSource cannot set a header. |
 | POST   | `/v1/runs/{id}/explain`    | Advisory AI explanation of a run, when a provider is configured. |
 | POST   | `/v1/ai/draft`             | Advisory AI draft of a bash, python, powershell, or go step script from a description. Operator role. |
 | POST   | `/v1/ai/ask`               | Advisory AI answer to a fleet question, from run, health, and drift metadata. Rate limited. |
@@ -138,6 +139,22 @@ status code. The run event NDJSON download and the run log download therefore en
 `{"export_incomplete":true,"reason":"..."}` line when they stop early, so a short file is never
 mistaken for a whole one.
 
+
+## Opening a live stream
+
+`EventSource` cannot set a header, so `GET /v1/runs/{id}/stream` takes a short-lived ticket in the
+query string instead of a bearer token. Mint one over the ordinary authenticated route and open the
+stream with it:
+
+    curl -X POST -H "Authorization: Bearer $TOKEN" \
+      localhost:8080/v1/runs/run_abc/stream-ticket
+    # {"ticket":"...","expires_in":30}
+
+A ticket opens that one run, works once, and expires in thirty seconds. The reason is that a URL is
+not private: a reverse proxy logs the full request line by default, so a session token in the query
+string reaches every access log downstream. A ticket in the same place is worth almost nothing.
+
+An install running open, with no tokens, needs no ticket and the plain path works.
 
 ## Account profiles
 

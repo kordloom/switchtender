@@ -414,6 +414,9 @@ func New(store run.Store, submitter Submitter, log *zap.Logger, opts ...Option) 
 // Handler returns the HTTP handler serving the SwitchTender API and web interface.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	// tickets are the short-lived permissions the event stream is opened with, minted over the
+	// ordinary header-authenticated route because EventSource cannot set a header.
+	tickets := newStreamTickets()
 	authz := &authorizer{
 		grants: s.grants, teams: s.teams, orgs: s.orgs,
 		orgOwners: s.orgResolver(), strict: s.strictGrants,
@@ -472,6 +475,10 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /v1/ai/draft", draftStepHandler(s.ai, s.log))
 	mux.Handle("POST /v1/ai/ask", askFleetHandler(s.store, s.ai, authz, s.log))
 	mux.Handle("POST /v1/ai/propose-run", proposeRunHandler(s.submitter, s.ai, s.log))
+	// EventSource cannot set a header, so a stream is opened with a short-lived ticket minted here
+	// over the ordinary header-authenticated route rather than with the caller's own bearer token in
+	// the URL, which every reverse proxy logs.
+	mux.Handle("POST /v1/runs/{id}/stream-ticket", streamTicketHandler(tickets, s.log))
 	mux.Handle("GET /v1/runs/{id}/stream",
 		runStreamHandler(s.streamer, s.store, authz, s.log, s.shutdown))
 	mux.Handle("GET /v1/schedules/preview", previewScheduleHandler(s.log))
@@ -581,7 +588,7 @@ func (s *Server) Handler() http.Handler {
 	handler := compress(mux)
 	if s.tokens != nil {
 		gate := &authGate{tokens: s.tokens, users: s.users, jwt: s.jwt, audits: s.audits, log: s.log,
-			authz: authz, alwaysEnforce: s.enforceAuth}
+			authz: authz, alwaysEnforce: s.enforceAuth, tickets: tickets}
 		handler = gate.wrap(handler)
 	}
 	if s.readOnly {

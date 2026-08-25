@@ -7,16 +7,18 @@ import assert from "node:assert/strict";
 import { loadPage } from "./pages.mjs";
 
 // mountStream mounts the detail page and opens a single-run stream directly.
-function mountStream() {
+async function mountStream() {
 	const page = loadPage("detail");
-	page.app.openStream("run_1", 0);
+	// Awaited because opening a stream now mints a ticket first rather than concatenating the
+	// reader's own token into the URL.
+	await page.app.openStream("run_1", 0);
 	const source = page.streams.last();
 	assert.ok(source, "a stream was opened");
 	return { page, source };
 }
 
 test("a transient stream error reads as reconnecting", async () => {
-	const { page, source } = mountStream();
+	const { page, source } = await mountStream();
 	await source.emitRaw("error");
 	const indicator = page.document.getElementById("live-indicator");
 	assert.equal(indicator.textContent, "reconnecting");
@@ -24,7 +26,7 @@ test("a transient stream error reads as reconnecting", async () => {
 });
 
 test("a closed stream reads as lost with a reload path, not as reconnecting", async () => {
-	const { page, source } = mountStream();
+	const { page, source } = await mountStream();
 	source.readyState = 2;
 	await source.emitRaw("error");
 	const indicator = page.document.getElementById("live-indicator");
@@ -33,7 +35,7 @@ test("a closed stream reads as lost with a reload path, not as reconnecting", as
 });
 
 test("a stream that recovers after a transient error reads live again", async () => {
-	const { page, source } = mountStream();
+	const { page, source } = await mountStream();
 	await source.emitRaw("error");
 	await source.emitRaw("open");
 	const indicator = page.document.getElementById("live-indicator");

@@ -4,24 +4,55 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { loadParts } from "./loader.mjs";
 
-test("streamURL leaves the path bare when no token is stored", () => {
+test("streamURL leaves the path bare when no token is stored", async () => {
 	const app = loadParts(["01-boot.js", "07-nav-theme.js", "20-held-copy-stream.js"]);
-	assert.equal(app.streamURL("/runs/run_1/events/stream"), "/v1/runs/run_1/events/stream");
+	assert.equal(await app.streamURL("/runs/run_1/events/stream", "run_1"),
+		"/v1/runs/run_1/events/stream");
 });
 
-test("streamURL appends the stored token, encoded, with the right separator", () => {
+// The stream carries a short-lived ticket rather than the reader's own bearer token.
+//
+// The token used to go in the query, because EventSource cannot set a header. The URL was always
+// opened and dropped and never written into an href, but a URL is not private once it leaves the
+// browser: nginx, Traefik, and an ALB all log the full request line by default, so a thirty-day
+// session credential ended up in access logs and everything downstream of them.
+test("streamURL carries a minted ticket, not the session token", async () => {
 	const app = loadParts(["01-boot.js", "07-nav-theme.js", "20-held-copy-stream.js"]);
 	app.localStorage.setItem("st_token", "tok abc+/=");
+
+	const asked = [];
+	app.postAction = async (path) => {
+		asked.push(path);
+		return { ticket: "tkt abc+/=" };
+	};
+
 	// A bare path gets a query string.
 	assert.equal(
-		app.streamURL("/runs/run_1/events/stream"),
-		"/v1/runs/run_1/events/stream?access_token=tok%20abc%2B%2F%3D",
+		await app.streamURL("/runs/run_1/events/stream", "run_1"),
+		"/v1/runs/run_1/events/stream?ticket=tkt%20abc%2B%2F%3D",
 	);
 	// A path that already carries a query gets an ampersand.
 	assert.equal(
-		app.streamURL("/runs/run_1/events/stream?after=5"),
-		"/v1/runs/run_1/events/stream?after=5&access_token=tok%20abc%2B%2F%3D",
+		await app.streamURL("/runs/run_1/events/stream?after=5", "run_1"),
+		"/v1/runs/run_1/events/stream?after=5&ticket=tkt%20abc%2B%2F%3D",
 	);
+	// The ticket is minted for the run being watched, over the header-authenticated route.
+	assert.deepEqual(asked, ["/runs/run_1/stream-ticket", "/runs/run_1/stream-ticket"]);
+
+	// The session token never appears in a stream URL again.
+	const url = await app.streamURL("/runs/run_1/events/stream", "run_1");
+	assert.ok(!url.includes("access_token"), "the session token is back in the stream URL: " + url);
+	assert.ok(!url.includes("tok%20abc"), "the session token is back in the stream URL: " + url);
+});
+
+// A mint that fails leaves the plain path, so the stream answers 401 and the indicator shows it.
+// Opening a stream that silently receives nothing would be a worse failure to diagnose.
+test("streamURL falls back to the bare path when a ticket cannot be minted", async () => {
+	const app = loadParts(["01-boot.js", "07-nav-theme.js", "20-held-copy-stream.js"]);
+	app.localStorage.setItem("st_token", "tok");
+	app.postAction = async () => { throw new Error("nope"); };
+	assert.equal(await app.streamURL("/runs/run_1/events/stream", "run_1"),
+		"/v1/runs/run_1/events/stream");
 });
 
 test("lastSeq returns the highest store sequence, zero when none carry one", () => {

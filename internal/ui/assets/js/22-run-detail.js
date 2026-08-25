@@ -195,7 +195,7 @@ async function loadPipeline(pipelineId) {
 	renderSteps(stepData.steps || []);
 	setStatus("");
 	if (!isTerminal(run.status)) {
-		openPipelineStream(pipelineId);
+		await openPipelineStream(pipelineId);
 	}
 }
 
@@ -254,8 +254,8 @@ function streamIndicator(source, onReconnect) {
 
 // openPipelineStream refreshes the header and step list as step events arrive, coalescing bursts
 // into one refresh, and settles on the final state at the end signal.
-function openPipelineStream(pipelineId) {
-	const source = new EventSource(streamURL("/runs/" + pipelineId + "/stream"));
+async function openPipelineStream(pipelineId) {
+	const source = new EventSource(await streamURL("/runs/" + pipelineId + "/stream", pipelineId));
 	streamIndicator(source);
 	let pending = null;
 	const refresh = async () => {
@@ -318,7 +318,7 @@ async function loadSingle(run) {
 	renderDetail();
 	setStatus("");
 	if (!isTerminal(run.status)) {
-		openStream(run.id, detailState.lastSeq);
+		await openStream(run.id, detailState.lastSeq);
 	}
 }
 
@@ -336,7 +336,7 @@ async function loadParent(parentId) {
 	setStatus("");
 
 	if (!isTerminal(run.status)) {
-		openParentStream(parentId);
+		await openParentStream(parentId);
 	}
 }
 
@@ -369,8 +369,8 @@ async function reconcileParent(parentId) {
 // no parent-space cursor to derive from what the page has, so instead the end signal re-reads every
 // shard and refolds the matrix. That closes the window between the per-shard reads and the stream
 // connecting: whatever the live view missed is on the page by the time the run is finished.
-function openParentStream(parentId) {
-	const source = new EventSource(streamURL("/runs/" + parentId + "/stream"));
+async function openParentStream(parentId) {
+	const source = new EventSource(await streamURL("/runs/" + parentId + "/stream", parentId));
 	// The parent stream has no resume cursor, so a reconnect re-reads every shard whole.
 	streamIndicator(source, () => { reconcileParent(parentId).catch(() => {}); });
 	const refreshShards = async () => {
@@ -484,8 +484,8 @@ function runStreamPath(runId, afterSeq) {
 // openStream subscribes to the run's live output and applies events, logs, and the end signal.
 // It resumes after afterSeq so history is never re-sent, and skips any event at or before the
 // cursor in case a reconnect replays one.
-function openStream(runId, afterSeq) {
-	const source = new EventSource(streamURL(runStreamPath(runId, afterSeq)));
+async function openStream(runId, afterSeq) {
+	const source = new EventSource(await streamURL(runStreamPath(runId, afterSeq), runId));
 	streamIndicator(source);
 	source.addEventListener("event", (e) => {
 		try {

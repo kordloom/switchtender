@@ -128,6 +128,11 @@ bundle it is handed.</p>
 <td>Submit a fresh run with this run's execution settings.</td>
 </tr>
 <tr>
+<td>POST</td>
+<td><code>/v1/runs/{id}/stream-ticket</code></td>
+<td>Mint a short-lived, single-use ticket for opening this run's event stream.</td>
+</tr>
+<tr>
 <td>GET</td>
 <td><code>/v1/runs/{id}/events</code></td>
 <td>Structured events as JSON.</td>
@@ -140,7 +145,7 @@ bundle it is handed.</p>
 <tr>
 <td>GET</td>
 <td><code>/v1/runs/{id}/stream</code></td>
-<td>Live events and log over Server-Sent Events.</td>
+<td>Live events and log over Server-Sent Events. Opened with <code>?ticket=</code> from the endpoint above, since EventSource cannot set a header.</td>
 </tr>
 <tr>
 <td>POST</td>
@@ -633,6 +638,18 @@ bundle it is handed.</p>
 status code. The run event NDJSON download and the run log download therefore end with a
 <code>{&quot;export_incomplete&quot;:true,&quot;reason&quot;:&quot;...&quot;}</code> line when they stop early, so a short file is never
 mistaken for a whole one.</p>
+<h2 id="opening-a-live-stream">Opening a live stream</h2>
+<p><code>EventSource</code> cannot set a header, so <code>GET /v1/runs/{id}/stream</code> takes a short-lived ticket in the
+query string instead of a bearer token. Mint one over the ordinary authenticated route and open the
+stream with it:</p>
+<pre><code>curl -X POST -H &quot;Authorization: Bearer $TOKEN&quot; \
+  localhost:8080/v1/runs/run_abc/stream-ticket
+# {&quot;ticket&quot;:&quot;...&quot;,&quot;expires_in&quot;:30}
+</code></pre>
+<p>A ticket opens that one run, works once, and expires in thirty seconds. The reason is that a URL is
+not private: a reverse proxy logs the full request line by default, so a session token in the query
+string reaches every access log downstream. A ticket in the same place is worth almost nothing.</p>
+<p>An install running open, with no tokens, needs no ticket and the plain path works.</p>
 <h2 id="account-profiles">Account profiles</h2>
 <p>An account carries an optional profile alongside its role: <code>full_name</code>, <code>email</code>, <code>phone</code>, <code>title</code>,
 <code>links</code>, and <code>notes</code>. All of them are optional, so an account created by the CLI or provisioned over
