@@ -158,7 +158,11 @@ func failedChecks(rep *audit.BundleReport) string {
 	if !rep.ChainOK {
 		failed = append(failed, fmt.Sprintf("the chain does not recompute at seq %d", rep.BrokeAtSeq))
 	}
-	if !rep.AnchorsOK {
+	// Only when the receipt carries an anchor. Anchors are not trusted over a chain that does not
+	// recompute, so a broken chain marks them failed too, and a receipt holding no anchor at all was
+	// reported as having one that does not prove its position. That sends a reader looking for a
+	// problem with evidence the receipt never claimed to have.
+	if !rep.AnchorsOK && rep.AnchorCount > 0 {
 		if len(rep.TimestampProblems) > 0 {
 			failed = append(failed, "a timestamp token does not fix the link its anchor names")
 		} else {
