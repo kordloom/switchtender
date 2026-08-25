@@ -324,7 +324,7 @@
 </tr>
 <tr>
 <td>Schedule timezones</td>
-<td>A schedule reads its cron expression in an IANA timezone such as <code>America/New_York</code>, following that zone's daylight-saving shifts, so a nightly window stays put across the year instead of drifting with the server clock. On the day a zone falls back the repeated hour fires once, not twice. A slot inside the hour a zone skips forward does not exist that day and does not fire, so avoid scheduling in the transition hour if the run must happen every day.</td>
+<td>A schedule reads its cron expression in an IANA timezone such as <code>America/New_York</code>, following that zone's daylight-saving shifts, so a nightly window stays put across the year instead of drifting with the server clock. On the day a zone falls back the repeated hour fires once, not twice, and on the day it springs forward a slot inside the hour that never happens fires at the instant the clocks jumped, so a nightly job runs every night of the year.</td>
 </tr>
 <tr>
 <td>Starter templates</td>
