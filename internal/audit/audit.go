@@ -149,9 +149,30 @@ func NewID() string {
 // A field that is empty is omitted rather than hashed as an empty string, so an entry that predates
 // a field is byte-identical to one that simply does not use it.
 func EntryHash(e *Entry) string {
-	return linkOf(claimObject(e.Seq, e.At.UTC().Format(time.RFC3339Nano),
+	return linkOf(entryClaim(e))
+}
+
+// checkedEntryHash is EntryHash for an entry this package did not build, reporting a refusal rather
+// than panicking on one it cannot canonicalize.
+//
+// The producing side controls its entries and a link it cannot compute is a programming fault, so
+// EntryHash panics. Verification does not: it recomputes over rows read back from storage, and the
+// whole point of that walk is to survive an audit log somebody has interfered with. Two inputs a
+// tampered row can carry are refused by JCS rather than serialized, a sequence above 2^53 and text
+// that is not valid UTF-8, and on both of them recomputing through EntryHash crashed the caller
+// with a stack trace instead of reporting the chain as broken. That turns the detection this
+// package exists to provide into a denial of service triggered by the tampering it is meant to
+// catch.
+func checkedEntryHash(e *Entry) (string, error) {
+	return checkedLinkOf(entryClaim(e))
+}
+
+// entryClaim builds the claim object for an entry, shared by the panicking and checked hashes so
+// the two cannot come to commit to different fields.
+func entryClaim(e *Entry) map[string]any {
+	return claimObject(e.Seq, e.At.UTC().Format(time.RFC3339Nano),
 		e.Actor, e.Method, e.Path, e.PrevHash, e.ActorType, e.OnBehalfOf, e.ContentDigest,
-		e.InstallID))
+		e.InstallID)
 }
 
 // claimObject builds the exact map a chain link is computed over: the fields the link commits to, in
