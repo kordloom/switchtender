@@ -66,7 +66,7 @@ variable.</p>
 <tr>
 <td><code>SWITCHTENDER_AUDIT_KEY</code></td>
 <td>serve</td>
-<td>Hex-encoded ed25519 seed for the install's signing identity, which signs the LoomSeal bundles it emits. Unset, the install mints and stores its own key beside the database. A malformed value stops startup.</td>
+<td>Hex-encoded ed25519 seed for the install's signing identity, which signs the LoomSeal bundles it emits and binds every audit entry to this install. Unset beside a local database, the install mints and stores its own key there. Unset against a shared database it mints nothing, since every process must sign as the same install, and the chain is recorded unattributed and unbound until a seed is supplied to all of them. A malformed value stops startup.</td>
 </tr>
 <tr>
 <td><code>SWITCHTENDER_PASSWORD</code></td>

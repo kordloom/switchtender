@@ -34,9 +34,11 @@ restore the key.
 
 Against PostgreSQL there is no directory beside the database, so the key has to be supplied rather than
 found: set `SWITCHTENDER_AUDIT_KEY` to one seed on every process, or place the same `producer-key.json` in
-each host's identity directory. A shared database with no identity supplied is refused at startup instead
-of silently minting a per-host key, because two replicas signing as two installs is a fleet whose own
-anchors disagree with it.
+each host's identity directory. A shared database with no identity supplied will not mint a per-host key,
+because two replicas signing as two installs is a fleet whose own anchors disagree with it. The server
+still starts and still records the chain; it warns, and runs with the chain unattributed and unbound, so
+its entries commit to no install and its receipts can be lifted onto another one. Supply the key before
+the receipts matter to anybody.
 
 ## How it is secured
 

@@ -28,6 +28,7 @@ Every authenticated change is one entry in a SHA-256 hash chain. Each entry comm
 | Method and path | The operation performed. |
 | Content digest | A hash of the change payload with secret fields redacted, so the record proves what a change contained, not only that a call was made, without exposing the secret. |
 | Time, sequence, link | When it happened and its tamper-evident position in the chain. |
+| Install | Which install wrote the entry, so a signed record cannot be presented as another install's history. Entries written before this existed carry no install and are unaffected. |
 
 The change register (`switchtender audit report --from --to`) renders these per change with the
 run's actor, the approval decision recorded over it, the risk grade, and the outcome. The run dossier

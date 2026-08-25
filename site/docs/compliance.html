@@ -79,6 +79,10 @@ cadence the free <code>--evidence-dir</code> registers already run on.</p>
 <td>Time, sequence, link</td>
 <td>When it happened and its tamper-evident position in the chain.</td>
 </tr>
+<tr>
+<td>Install</td>
+<td>Which install wrote the entry, so a signed record cannot be presented as another install's history. Entries written before this existed carry no install and are unaffected.</td>
+</tr>
 </tbody>
 </table>
 <p>The change register (<code>switchtender audit report --from --to</code>) renders these per change with the
