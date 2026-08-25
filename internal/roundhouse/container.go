@@ -378,24 +378,42 @@ func (m *mountSet) add(path string, ro bool) error {
 	return nil
 }
 
-// sensitiveMountRoots are host directories that must never be bind mounted whole into a container.
-// Subpaths stay allowed, since project checkouts and temp files legitimately live under some of
-// these, but mounting the directory itself would hand the container the host's configuration,
-// secrets, or entire filesystem.
-var sensitiveMountRoots = map[string]bool{
-	"/": true, "/etc": true, "/var": true, "/usr": true, "/bin": true,
-	"/sbin": true, "/lib": true, "/lib64": true, "/boot": true, "/proc": true,
-	"/sys": true, "/dev": true, "/root": true, "/home": true, "/Users": true,
+// sensitiveMountTrees are host directories that must not be bind mounted, nor any path beneath
+// them. Nothing a run legitimately needs lives here: a project checkout, a temp file, and a
+// credential file are all written somewhere else, so the whole tree is refused rather than the
+// directory alone.
+//
+// Blocking only the directory was not containment. Subpaths were deliberately allowed so a checkout
+// under /var or /home could still be mounted, but that reasoning does not extend to /etc or /root,
+// and the exact-match list let the interesting children straight through: /etc blocked while
+// /etc/shadow passed, /root blocked while /root/.ssh passed. A run names the file it wants, never
+// the directory above it, so the blocklist stopped the mount nobody was trying to make.
+var sensitiveMountTrees = []string{
+	"/proc", "/sys", "/dev", "/boot", "/root", "/etc",
 	// The container runtime's own socket lives under these, and handing a container the socket hands
 	// it the host: it can start a second container with the whole filesystem mounted and no limits.
-	// Blocking /var alone did not cover it, because subpaths are deliberately allowed so a project
-	// checkout under /var can still be mounted, and /var/run is a subpath.
-	"/run": true, "/var/run": true, "/var/lib/docker": true, "/var/lib/containerd": true,
-	"/etc/docker": true,
+	"/run", "/var/run", "/var/lib/docker", "/var/lib/containerd",
 }
 
-// checkMountPath rejects a host path that would expose a sensitive root directory or the docker
-// socket to the container. An empty path is not a mount and passes.
+// sensitiveMountRoots are host directories that must never be bind mounted whole into a container,
+// but whose subpaths stay allowed because a project checkout, a temp file, or the state directory
+// legitimately lives under one of them. Mounting the directory itself would hand the container the
+// host's configuration, secrets, or entire filesystem.
+var sensitiveMountRoots = map[string]bool{
+	"/": true, "/usr": true, "/bin": true, "/sbin": true, "/lib": true,
+	"/lib64": true, "/var": true, "/home": true, "/Users": true,
+}
+
+// sensitiveMountNames are directory names that carry credentials wherever they appear. They sit
+// under a user's home, which cannot be refused as a tree because a checkout and the state directory
+// live there too, so they are matched by name at any depth instead.
+var sensitiveMountNames = map[string]bool{
+	".ssh": true, ".aws": true, ".kube": true, ".docker": true, ".gnupg": true,
+	".azure": true, ".config/gcloud": true,
+}
+
+// checkMountPath rejects a host path that would expose a sensitive host location to the container.
+// An empty path is not a mount and passes.
 func checkMountPath(path string) error {
 	if path == "" {
 		return nil
@@ -403,6 +421,22 @@ func checkMountPath(path string) error {
 	clean := filepath.Clean(path)
 	if sensitiveMountRoots[clean] {
 		return fmt.Errorf("%w: %s", ErrForbiddenMount, clean)
+	}
+	for _, tree := range sensitiveMountTrees {
+		if clean == tree || strings.HasPrefix(clean, tree+"/") {
+			return fmt.Errorf("%w: %s", ErrForbiddenMount, clean)
+		}
+	}
+	// Matched on the components rather than the whole string, so a directory merely ending in one of
+	// these names is not refused and one buried mid-path still is.
+	parts := strings.Split(clean, "/")
+	for i, part := range parts {
+		if sensitiveMountNames[part] {
+			return fmt.Errorf("%w: %s", ErrForbiddenMount, clean)
+		}
+		if i > 0 && sensitiveMountNames[parts[i-1]+"/"+part] {
+			return fmt.Errorf("%w: %s", ErrForbiddenMount, clean)
+		}
 	}
 	// Any unix socket, not only docker.sock. The runtimes this executes under name theirs
 	// differently, podman.sock, containerd.sock, crio.sock, and a socket is never something an
