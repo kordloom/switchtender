@@ -212,7 +212,8 @@ CREATE TABLE IF NOT EXISTS users (
 	phone         TEXT NOT NULL DEFAULT '',
 	title         TEXT NOT NULL DEFAULT '',
 	links         TEXT NOT NULL DEFAULT '',
-	notes         TEXT NOT NULL DEFAULT ''
+	notes         TEXT NOT NULL DEFAULT '',
+	source        TEXT NOT NULL DEFAULT ''
 );
 -- The profile columns are added rather than declared above, so a database created before them is
 -- migrated by the same statement that creates a fresh one. Empty is the default everywhere, so an
@@ -223,6 +224,7 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT NOT NULL DEFAULT '';
 ALTER TABLE users ADD COLUMN IF NOT EXISTS title TEXT NOT NULL DEFAULT '';
 ALTER TABLE users ADD COLUMN IF NOT EXISTS links TEXT NOT NULL DEFAULT '';
 ALTER TABLE users ADD COLUMN IF NOT EXISTS notes TEXT NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT '';
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username);
 CREATE TABLE IF NOT EXISTS tokens (
 	id           TEXT PRIMARY KEY,

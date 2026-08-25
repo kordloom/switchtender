@@ -303,6 +303,9 @@ func createUserHandler(users user.Store, log *zap.Logger) http.HandlerFunc {
 			return
 		}
 		u.CreatedAt = time.Now()
+		// Created by an administrator through the API, not provisioned by a directory, so a
+		// directory identity asserting this username cannot later be handed this account.
+		u.Source = "local"
 		if err := users.Save(r.Context(), u); err != nil {
 			log.Error("server: save user: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not create user")

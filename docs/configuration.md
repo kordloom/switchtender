@@ -270,6 +270,23 @@ global flag, so passing it elsewhere is an error rather than a no-op.
 | `--pretty` | `token` and its subcommands, `audit anchor`, `audit receipt` | Indent JSON output instead of the compact default. |
 
 
+## Directory sign-in and existing accounts
+
+An account records what created it: an administrator, or the directory that provisioned it. A
+directory identity signs in to an account only when that account is its own, so an identity provider
+asserting the username of a local administrator is refused rather than handed that administrator's
+account and role.
+
+This matters most when the username does not come from a stable subject. With
+`--jwt-username-claim email` or a SAML username attribute pointing at an email, against an issuer
+that lets a user set their own address, matching on username alone was account takeover. OIDC has
+always refused the equivalent when the provider does not vouch for the address.
+
+An account created before this was recorded carries no source, so it cannot be told apart from a
+local one of the same name. Those are still signed in to, because refusing them would lock out every
+directory user on upgrade, and each is logged so an administrator can set the source and remove the
+ambiguity.
+
 ## Confining relay workers to their queues
 
 A relay worker runs in a segment the control node cannot reach, which means the least trusted machine

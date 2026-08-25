@@ -178,7 +178,8 @@ CREATE TABLE IF NOT EXISTS users (
 	phone         TEXT NOT NULL DEFAULT '',
 	title         TEXT NOT NULL DEFAULT '',
 	links         TEXT NOT NULL DEFAULT '',
-	notes         TEXT NOT NULL DEFAULT ''
+	notes         TEXT NOT NULL DEFAULT '',
+	source        TEXT NOT NULL DEFAULT ''
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username);
 CREATE TABLE IF NOT EXISTS tokens (
