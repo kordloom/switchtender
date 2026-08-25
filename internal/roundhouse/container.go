@@ -163,6 +163,20 @@ func (c *containerRunner) Run(ctx context.Context, spec Spec, out io.Writer) (Re
 	return Result{ExitCode: -1}, fmt.Errorf("%w: %w", ErrLaunch, runErr)
 }
 
+// containerHome is the home directory a containerized tool is given. It is inside the container's
+// own filesystem rather than a mount, so nothing a tool writes there reaches the host.
+const containerHome = "/tmp"
+
+// hasEnvName reports whether env already assigns name, so a caller that set one keeps it.
+func hasEnvName(env []string, name string) bool {
+	for _, kv := range env {
+		if k, _, ok := strings.Cut(kv, "="); ok && k == name {
+			return true
+		}
+	}
+	return false
+}
+
 // runArgs builds the container run argument list from the plan: resource caps, the working
 // directory, an env file for variables and secrets, a bind mount for every host path the plan
 // references plus the events sidecar for Ansible, the image, and the tool command to run inside it.
@@ -177,6 +191,16 @@ func (c *containerRunner) runArgs(spec Spec, plan containerPlan, name, envFile s
 	// rather than loosening it. The guard skips Windows, where Getuid returns -1.
 	if uid := os.Getuid(); uid >= 0 {
 		args = append(args, "--user", fmt.Sprintf("%d:%d", uid, os.Getgid()))
+		// Running as that uid is what makes a home directory necessary. The uid belongs to the host
+		// and almost never has a passwd entry in somebody else's image, so the runtime sets HOME to
+		// "/", which the container's own root filesystem will not let it write. Ansible creates
+		// $HOME/.ansible/tmp before it does anything else and exits 5 with a permission error, so
+		// every containerized play failed on an image that does not happen to carry this uid, which
+		// is nearly all of them. A writable home costs nothing: the container is removed on exit,
+		// so nothing in it outlives the run.
+		if !hasEnvName(spec.Env, "HOME") {
+			args = append(args, "--env", "HOME="+containerHome)
+		}
 	}
 	if plan.workdir != "" {
 		args = append(args, "-w", plan.workdir)
