@@ -115,7 +115,7 @@ func TestAPerRunWebhookRedactsWhatTheServerWideOneDoes(t *testing.T) {
 	defer sink.Close()
 	r.Notifications[0].URL = sink.URL
 
-	d := New(run.NewMemStore(), okRunner(), zap.NewNop(), WithNoJanitor())
+	d := New(run.NewMemStore(), okRunner(), zap.NewNop(), WithNoJanitor(), WithNotifyClient(http.DefaultClient))
 	defer d.Close()
 	d.notifyRunTargets(r)
 	d.notifyWG.Wait()

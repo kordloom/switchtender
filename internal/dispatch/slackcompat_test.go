@@ -42,6 +42,7 @@ func TestDispatcherNotifiesSlackCompat(t *testing.T) {
 			return roundhouse.Result{ExitCode: 0}, nil
 		})
 	d := New(store, runner, nil,
+		WithNotifyClient(http.DefaultClient),
 		WithMattermost([]string{mmSrv.URL}), WithRocketChat([]string{rcSrv.URL}))
 	defer d.Close()
 

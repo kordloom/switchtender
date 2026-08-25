@@ -90,7 +90,7 @@ func TestDispatcherExecute(t *testing.T) {
 					return test.Result, test.RunErr
 				},
 			)
-			d := New(store, runner, nil)
+			d := New(store, runner, nil, WithNotifyClient(http.DefaultClient))
 			defer d.Close()
 
 			created, err := d.Submit(context.Background(), "play.yml", "inv")
@@ -144,7 +144,7 @@ func TestSubmitStampsSubmitterOrg(t *testing.T) {
 	t.Run("single inline run", func(t *testing.T) {
 		t.Parallel()
 		store := run.NewMemStore()
-		d := New(store, okRunner(), nil)
+		d := New(store, okRunner(), nil, WithNotifyClient(http.DefaultClient))
 		defer d.Close()
 		created, err := d.Submit(ctx, "", "", run.WithTool(run.ToolBash), run.WithCommand("echo hi"))
 		if err != nil {
@@ -163,7 +163,7 @@ func TestSubmitStampsSubmitterOrg(t *testing.T) {
 	t.Run("explicit org wins over context", func(t *testing.T) {
 		t.Parallel()
 		store := run.NewMemStore()
-		d := New(store, okRunner(), nil)
+		d := New(store, okRunner(), nil, WithNotifyClient(http.DefaultClient))
 		defer d.Close()
 		created, err := d.Submit(ctx, "", "", run.WithTool(run.ToolBash), run.WithCommand("echo hi"),
 			run.WithOrgID("org_explicit"))
@@ -186,7 +186,7 @@ func TestSubmitStampsSubmitterOrg(t *testing.T) {
 func TestSubmitIdempotency(t *testing.T) {
 	t.Parallel()
 	store := run.NewMemStore()
-	d := New(store, okRunner(), nil)
+	d := New(store, okRunner(), nil, WithNotifyClient(http.DefaultClient))
 	defer d.Close()
 	ctx := context.Background()
 
@@ -237,7 +237,7 @@ func TestSubmitIdempotency(t *testing.T) {
 func TestSubmitIdempotencyConcurrent(t *testing.T) {
 	t.Parallel()
 	store := run.NewMemStore()
-	d := New(store, okRunner(), nil)
+	d := New(store, okRunner(), nil, WithNotifyClient(http.DefaultClient))
 	defer d.Close()
 
 	const n = 8
@@ -282,7 +282,7 @@ func TestSubmitIdempotencyConcurrent(t *testing.T) {
 func TestSubmitPipelineIdempotency(t *testing.T) {
 	t.Parallel()
 	store := run.NewMemStore()
-	d := New(store, okRunner(), nil)
+	d := New(store, okRunner(), nil, WithNotifyClient(http.DefaultClient))
 	defer d.Close()
 	ctx := context.Background()
 	steps := []run.PipelineStep{{Name: "s1", Playbook: "step.yml"}}
@@ -320,7 +320,7 @@ func TestDispatcherStoresEvents(t *testing.T) {
 			return roundhouse.Result{ExitCode: 0}, nil
 		},
 	)
-	d := New(store, runner, nil)
+	d := New(store, runner, nil, WithNotifyClient(http.DefaultClient))
 	defer d.Close()
 
 	created, err := d.Submit(context.Background(), "play.yml", "inv")
@@ -354,7 +354,7 @@ func TestDispatcherBashRun(t *testing.T) {
 			return roundhouse.Result{ExitCode: 0}, nil
 		},
 	)
-	d := New(store, runner, nil)
+	d := New(store, runner, nil, WithNotifyClient(http.DefaultClient))
 	defer d.Close()
 
 	created, err := d.Submit(context.Background(), "", "",
@@ -379,7 +379,8 @@ func TestDispatcherRejectsBashWithoutCommand(t *testing.T) {
 	d := New(run.NewMemStore(), roundhouse.RunnerFunc(
 		func(context.Context, roundhouse.Spec, io.Writer) (roundhouse.Result, error) {
 			return roundhouse.Result{ExitCode: 0}, nil
-		}), nil)
+		}), nil,
+		WithNotifyClient(http.DefaultClient))
 	defer d.Close()
 
 	if _, err := d.Submit(context.Background(), "", "", run.WithTool(run.ToolBash)); !errors.Is(err, ErrNoCommand) {
@@ -395,7 +396,7 @@ func TestDispatcherSubmitNoPlaybook(t *testing.T) {
 			return roundhouse.Result{}, nil
 		},
 	)
-	d := New(store, runner, nil)
+	d := New(store, runner, nil, WithNotifyClient(http.DefaultClient))
 	defer d.Close()
 
 	if _, err := d.Submit(context.Background(), "", "inv"); !errors.Is(err, ErrNoPlaybook) {
@@ -418,7 +419,7 @@ func TestDispatcherCloseStopsRun(t *testing.T) {
 			return roundhouse.Result{ExitCode: -1}, ctx.Err()
 		},
 	)
-	d := New(store, runner, nil, WithWorkers(1))
+	d := New(store, runner, nil, WithWorkers(1), WithNotifyClient(http.DefaultClient))
 
 	created, err := d.Submit(context.Background(), "play.yml", "inv")
 	if err != nil {
@@ -453,7 +454,8 @@ func TestWaitChildrenReturnsPromptlyOnCancel(t *testing.T) {
 	d := New(store, roundhouse.RunnerFunc(
 		func(context.Context, roundhouse.Spec, io.Writer) (roundhouse.Result, error) {
 			return roundhouse.Result{}, nil
-		}), nil)
+		}), nil,
+		WithNotifyClient(http.DefaultClient))
 	defer d.Close()
 
 	// The parent context is already canceled, as it would be during shutdown.
@@ -545,7 +547,7 @@ func TestPartition(t *testing.T) {
 func TestDispatcherSubmitSplit(t *testing.T) {
 	t.Parallel()
 	store := run.NewMemStore()
-	d := New(store, &fakeRunnerLister{hosts: []string{"a", "b", "c", "d"}}, nil)
+	d := New(store, &fakeRunnerLister{hosts: []string{"a", "b", "c", "d"}}, nil, WithNotifyClient(http.DefaultClient))
 	defer d.Close()
 
 	parent, err := d.SubmitSplit(context.Background(), "play.yml", "inv", 2)
@@ -594,7 +596,7 @@ func TestDispatcherSubmitSplit(t *testing.T) {
 func TestDispatcherSplitClampsToMaxShards(t *testing.T) {
 	t.Parallel()
 	store := run.NewMemStore()
-	d := New(store, &fakeRunnerLister{hosts: []string{"a", "b", "c", "d"}}, nil, WithMaxShards(2))
+	d := New(store, &fakeRunnerLister{hosts: []string{"a", "b", "c", "d"}}, nil, WithMaxShards(2), WithNotifyClient(http.DefaultClient))
 	defer d.Close()
 
 	parent, err := d.SubmitSplit(context.Background(), "play.yml", "inv", 4)
@@ -622,7 +624,7 @@ func TestDispatcherSplitFallsBackAndErrors(t *testing.T) {
 			return roundhouse.Result{}, nil
 		},
 	)
-	d := New(run.NewMemStore(), plain, nil)
+	d := New(run.NewMemStore(), plain, nil, WithNotifyClient(http.DefaultClient))
 	defer d.Close()
 	if _, err := d.SubmitSplit(context.Background(), "play.yml", "inv", 2); !errors.Is(err, ErrNoHostLister) {
 		t.Errorf("SubmitSplit() error = %v, want ErrNoHostLister", err)
@@ -630,7 +632,7 @@ func TestDispatcherSplitFallsBackAndErrors(t *testing.T) {
 
 	// One shard falls back to a single non-shard run.
 	store := run.NewMemStore()
-	d2 := New(store, &fakeRunnerLister{hosts: []string{"a", "b"}}, nil)
+	d2 := New(store, &fakeRunnerLister{hosts: []string{"a", "b"}}, nil, WithNotifyClient(http.DefaultClient))
 	defer d2.Close()
 	single, err := d2.SubmitSplit(context.Background(), "play.yml", "inv", 1)
 	if err != nil {
@@ -739,7 +741,7 @@ func TestDispatcherEchoesChildEventsToParent(t *testing.T) {
 	t.Parallel()
 	store := run.NewMemStore()
 	pub := newCapturingPublisher()
-	d := New(store, &eventWritingLister{hosts: []string{"a", "b", "c", "d"}}, nil, WithPublisher(pub))
+	d := New(store, &eventWritingLister{hosts: []string{"a", "b", "c", "d"}}, nil, WithPublisher(pub), WithNotifyClient(http.DefaultClient))
 	defer d.Close()
 
 	parent, err := d.SubmitSplit(context.Background(), "play.yml", "inv", 2)
@@ -771,7 +773,7 @@ func TestDispatcherEchoesStepEventsToPipeline(t *testing.T) {
 	t.Parallel()
 	store := run.NewMemStore()
 	pub := newCapturingPublisher()
-	d := New(store, &eventWritingLister{}, nil, WithPublisher(pub))
+	d := New(store, &eventWritingLister{}, nil, WithPublisher(pub), WithNotifyClient(http.DefaultClient))
 	defer d.Close()
 
 	parent, err := d.SubmitPipeline(context.Background(), "deploy", "inv", []run.PipelineStep{
@@ -789,7 +791,7 @@ func TestDispatcherRetryFailedShards(t *testing.T) {
 	t.Parallel()
 	store := run.NewMemStore()
 	runner := &flakyRunnerLister{hosts: []string{"a", "b", "c", "d"}, failHost: "b"}
-	d := New(store, runner, nil)
+	d := New(store, runner, nil, WithNotifyClient(http.DefaultClient))
 	defer d.Close()
 
 	parent, err := d.SubmitSplit(context.Background(), "play.yml", "inv", 2)
@@ -853,7 +855,7 @@ func TestDispatcherRetryFailedShardsErrors(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	store := run.NewMemStore()
-	d := New(store, &fakeRunnerLister{}, nil)
+	d := New(store, &fakeRunnerLister{}, nil, WithNotifyClient(http.DefaultClient))
 	defer d.Close()
 
 	code := 0
@@ -906,7 +908,7 @@ func TestDispatcherCancel(t *testing.T) {
 			return roundhouse.Result{ExitCode: -1}, ctx.Err()
 		},
 	)
-	d := New(store, runner, nil)
+	d := New(store, runner, nil, WithNotifyClient(http.DefaultClient))
 	defer d.Close()
 
 	r, err := d.Submit(context.Background(), "play.yml", "inv")
@@ -944,7 +946,7 @@ func (s *scriptedRunner) Run(_ context.Context, spec roundhouse.Spec, _ io.Write
 func TestDispatcherSubmitPipeline(t *testing.T) {
 	t.Parallel()
 	store := run.NewMemStore()
-	d := New(store, &scriptedRunner{}, nil)
+	d := New(store, &scriptedRunner{}, nil, WithNotifyClient(http.DefaultClient))
 	defer d.Close()
 
 	parent, err := d.SubmitPipeline(context.Background(), "deploy", "inv", []run.PipelineStep{
@@ -974,7 +976,7 @@ func TestDispatcherSubmitPipeline(t *testing.T) {
 func TestDispatcherPipelineStopOnFailure(t *testing.T) {
 	t.Parallel()
 	store := run.NewMemStore()
-	d := New(store, &scriptedRunner{failOn: "two.yml"}, nil)
+	d := New(store, &scriptedRunner{failOn: "two.yml"}, nil, WithNotifyClient(http.DefaultClient))
 	defer d.Close()
 
 	parent, err := d.SubmitPipeline(context.Background(), "deploy", "inv", []run.PipelineStep{
@@ -998,7 +1000,7 @@ func TestDispatcherPipelineStopOnFailure(t *testing.T) {
 func TestDispatcherPipelineContinueOnFailure(t *testing.T) {
 	t.Parallel()
 	store := run.NewMemStore()
-	d := New(store, &scriptedRunner{failOn: "two.yml"}, nil)
+	d := New(store, &scriptedRunner{failOn: "two.yml"}, nil, WithNotifyClient(http.DefaultClient))
 	defer d.Close()
 
 	parent, err := d.SubmitPipeline(context.Background(), "deploy", "inv", []run.PipelineStep{
@@ -1021,7 +1023,7 @@ func TestDispatcherPipelineContinueOnFailure(t *testing.T) {
 
 func TestDispatcherPipelineNoSteps(t *testing.T) {
 	t.Parallel()
-	d := New(run.NewMemStore(), &scriptedRunner{}, nil)
+	d := New(run.NewMemStore(), &scriptedRunner{}, nil, WithNotifyClient(http.DefaultClient))
 	defer d.Close()
 	if _, err := d.SubmitPipeline(context.Background(), "x", "inv", nil); !errors.Is(err, ErrNoSteps) {
 		t.Errorf("SubmitPipeline() error = %v, want ErrNoSteps", err)
@@ -1043,10 +1045,10 @@ func TestNewPanicsOnNilDeps(t *testing.T) {
 			t.Parallel()
 			defer func() {
 				if recover() == nil {
-					t.Error("New() did not panic on nil dependency")
+					t.Error("New(, WithNotifyClient(http.DefaultClient)) did not panic on nil dependency")
 				}
 			}()
-			New(test.Store, test.Runner, nil)
+			New(test.Store, test.Runner, nil, WithNotifyClient(http.DefaultClient))
 		})
 	}
 }
@@ -1074,7 +1076,7 @@ func TestDispatcherNotifiesWebhook(t *testing.T) {
 		func(context.Context, roundhouse.Spec, io.Writer) (roundhouse.Result, error) {
 			return roundhouse.Result{ExitCode: 0}, nil
 		})
-	d := New(store, runner, nil, WithWebhooks([]string{hook.URL}))
+	d := New(store, runner, nil, WithWebhooks([]string{hook.URL}), WithNotifyClient(http.DefaultClient))
 	defer d.Close()
 
 	created, err := d.Submit(context.Background(), "play.yml", "inv")
@@ -1135,7 +1137,7 @@ func TestDispatcherEmailsOnFailure(t *testing.T) {
 		func(context.Context, roundhouse.Spec, io.Writer) (roundhouse.Result, error) {
 			return roundhouse.Result{ExitCode: 2}, nil
 		})
-	d := New(store, fail, nil, WithEmail(emailer, true))
+	d := New(store, fail, nil, WithEmail(emailer, true), WithNotifyClient(http.DefaultClient))
 	defer d.Close()
 
 	created, err := d.Submit(context.Background(), "play.yml", "inv")
@@ -1162,7 +1164,7 @@ func TestDispatcherSkipsEmailOnSuccessWhenFailureOnly(t *testing.T) {
 		func(context.Context, roundhouse.Spec, io.Writer) (roundhouse.Result, error) {
 			return roundhouse.Result{ExitCode: 0}, nil
 		})
-	d := New(store, ok, nil, WithEmail(emailer, true))
+	d := New(store, ok, nil, WithEmail(emailer, true), WithNotifyClient(http.DefaultClient))
 	defer d.Close()
 
 	created, err := d.Submit(context.Background(), "play.yml", "inv")
@@ -1202,7 +1204,7 @@ func TestRunImageReachesSpec(t *testing.T) {
 		},
 	)
 	store := run.NewMemStore()
-	d := New(store, runner, nil, WithCredentials(creds, sealer))
+	d := New(store, runner, nil, WithCredentials(creds, sealer), WithNotifyClient(http.DefaultClient))
 	defer d.Close()
 
 	created, err := d.Submit(context.Background(), "play.yml", "inv.ini",
@@ -1247,7 +1249,7 @@ func TestDefaultImageFallback(t *testing.T) {
 		},
 	)
 	store := run.NewMemStore()
-	d := New(store, runner, nil, WithDefaultImage("ghcr.io/acme/default:1"))
+	d := New(store, runner, nil, WithDefaultImage("ghcr.io/acme/default:1"), WithNotifyClient(http.DefaultClient))
 	defer d.Close()
 
 	// Test 0: A run pinning no image falls back to the configured default.
@@ -1286,7 +1288,7 @@ func TestDispatcherRunTimeout(t *testing.T) {
 			return roundhouse.Result{ExitCode: -1}, ctx.Err()
 		},
 	)
-	d := New(store, runner, nil, WithRunTimeout(150*time.Millisecond))
+	d := New(store, runner, nil, WithRunTimeout(150*time.Millisecond), WithNotifyClient(http.DefaultClient))
 	defer d.Close()
 
 	created, err := d.Submit(context.Background(), "play.yml", "inv")
@@ -1314,7 +1316,7 @@ func TestDispatcherPerRunTimeout(t *testing.T) {
 			return roundhouse.Result{ExitCode: -1}, ctx.Err()
 		},
 	)
-	d := New(store, runner, nil)
+	d := New(store, runner, nil, WithNotifyClient(http.DefaultClient))
 	defer d.Close()
 
 	created, err := d.Submit(context.Background(), "play.yml", "inv", run.WithTimeout(1))
@@ -1342,7 +1344,8 @@ func TestDispatcherPerRunNotification(t *testing.T) {
 	d := New(store, roundhouse.RunnerFunc(
 		func(_ context.Context, _ roundhouse.Spec, _ io.Writer) (roundhouse.Result, error) {
 			return roundhouse.Result{ExitCode: 0}, nil
-		}), nil)
+		}), nil,
+		WithNotifyClient(http.DefaultClient))
 	defer d.Close()
 
 	created, err := d.Submit(context.Background(), "play.yml", "inv",
@@ -1370,7 +1373,7 @@ func TestSplitShardsInheritExecution(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	store := run.NewMemStore()
-	d := New(store, &fakeRunnerLister{hosts: []string{"web01", "web02", "web03", "web04"}}, nil)
+	d := New(store, &fakeRunnerLister{hosts: []string{"web01", "web02", "web03", "web04"}}, nil, WithNotifyClient(http.DefaultClient))
 
 	parent, err := d.SubmitSplit(ctx, "site.yml", "inv", 2,
 		run.WithExtraVars(map[string]any{"env": "prod"}),
@@ -1416,7 +1419,7 @@ func TestRetryShardsInheritExecution(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	store := run.NewMemStore()
-	d := New(store, &fakeRunnerLister{hosts: []string{"a", "b", "c", "d"}}, nil)
+	d := New(store, &fakeRunnerLister{hosts: []string{"a", "b", "c", "d"}}, nil, WithNotifyClient(http.DefaultClient))
 
 	parent, err := d.SubmitSplit(ctx, "site.yml", "inv", 2,
 		run.WithExtraVars(map[string]any{"env": "prod"}),
@@ -1520,7 +1523,7 @@ func TestClaimIdleBackoff(t *testing.T) {
 	t.Parallel()
 	const base = 50 * time.Millisecond
 	rec := &pollRecorder{Store: run.NewMemStore()}
-	d := New(rec, okRunner(), nil, WithClaimInterval(base), WithNoJanitor())
+	d := New(rec, okRunner(), nil, WithClaimInterval(base), WithNoJanitor(), WithNotifyClient(http.DefaultClient))
 	defer d.Close()
 
 	// Long enough for the wait to reach its ceiling several times over.
@@ -1544,7 +1547,8 @@ func TestClaimIdleBackoff(t *testing.T) {
 func TestClaimJitter(t *testing.T) {
 	t.Parallel()
 	d := New(run.NewMemStore(), okRunner(), nil,
-		WithClaimInterval(DefaultClaimInterval), WithNoJanitor())
+		WithClaimInterval(DefaultClaimInterval), WithNoJanitor(),
+		WithNotifyClient(http.DefaultClient))
 	defer d.Close()
 
 	seen := make(map[time.Duration]bool)
@@ -1585,7 +1589,7 @@ func TestClaimBackoffResetsOnWork(t *testing.T) {
 		}
 		return nil, run.ErrNonePending
 	}
-	d := New(rec, okRunner(), nil, WithClaimInterval(base), WithNoJanitor())
+	d := New(rec, okRunner(), nil, WithClaimInterval(base), WithNoJanitor(), WithNotifyClient(http.DefaultClient))
 	defer d.Close()
 
 	time.Sleep(4 * time.Second)
@@ -1609,7 +1613,7 @@ func TestRetryFailedShardsDedupes(t *testing.T) {
 	ctx := context.Background()
 	store := run.NewMemStore()
 	runner := &flakyRunnerLister{hosts: []string{"a", "b", "c", "d"}, failHost: "b"}
-	d := New(store, runner, nil)
+	d := New(store, runner, nil, WithNotifyClient(http.DefaultClient))
 	defer d.Close()
 
 	parent, err := d.SubmitSplit(ctx, "play.yml", "inv", 2)
@@ -1658,7 +1662,7 @@ func TestEventCaptureFailureWarnsOnRun(t *testing.T) {
 	t.Setenv("TMPDIR", filepath.Join(t.TempDir(), "not-a-directory"))
 	ctx := context.Background()
 	store := run.NewMemStore()
-	d := New(store, okRunner(), nil, WithNoJanitor())
+	d := New(store, okRunner(), nil, WithNoJanitor(), WithNotifyClient(http.DefaultClient))
 	defer d.Close()
 
 	created, err := d.Submit(ctx, "site.yml", "inv.ini")
@@ -1759,7 +1763,7 @@ func TestSubmitStartsWithoutWaitingOutTheBackoff(t *testing.T) {
 	t.Parallel()
 	const base = 200 * time.Millisecond
 	rec := &startRecorder{starts: map[string]time.Time{}}
-	d := New(run.NewMemStore(), rec, nil, WithClaimInterval(base), WithNoJanitor())
+	d := New(run.NewMemStore(), rec, nil, WithClaimInterval(base), WithNoJanitor(), WithNotifyClient(http.DefaultClient))
 	defer d.Close()
 
 	// Let the loop back off to its ceiling, which is the state a quiet controller sits in.
@@ -1819,7 +1823,7 @@ func TestExecutedImageRecordedOnRun(t *testing.T) {
 			if test.Default != "" {
 				opts = append(opts, WithDefaultImage(test.Default))
 			}
-			d := New(store, runner, nil, opts...)
+			d := New(store, runner, nil, append(opts, WithNotifyClient(http.DefaultClient))...)
 			defer d.Close()
 
 			var submitOpts []run.SubmitOption

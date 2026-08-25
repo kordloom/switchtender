@@ -38,7 +38,7 @@ func TestDispatcherNotifiesTwilio(t *testing.T) {
 		func(context.Context, roundhouse.Spec, io.Writer) (roundhouse.Result, error) {
 			return roundhouse.Result{ExitCode: 2}, nil
 		})
-	d := New(store, runner, nil, WithTwilio("AC123", "tok", "+15550000", []string{"+15551111"}))
+	d := New(store, runner, nil, WithTwilio("AC123", "tok", "+15550000", []string{"+15551111"}), WithNotifyClient(http.DefaultClient))
 	d.twilioBaseURL = srv.URL
 	defer d.Close()
 
