@@ -573,6 +573,17 @@ const pgUniqueViolation = "23505"
 const migrateLockKey = 7973821001
 
 // migrate applies the schema under a transaction-scoped advisory lock.
+// collationNote records why the text tiebreakers in this file say COLLATE "C".
+//
+// SQLite always orders text by bytes. PostgreSQL orders it by the database collation, which on the
+// default postgres:16 image and on most managed instances is a glibc locale that sorts
+// linguistically, so punctuation and case are weighted differently. The two backends therefore
+// returned the same rows in different orders for the same data: an identical four-host set came back
+// as Web2, web-10, web1, web_3 on one and web1, web-10, Web2, web_3 on the other. On a listing that
+// is cosmetic. On the summary trim it is not, because that query picks which rows to delete, so a
+// tie decided differently meant the two backends kept and destroyed different history. The alpine
+// image CI runs its PostgreSQL service on hides this, since musl has no collation tables and falls
+// back to byte order.
 func migrate(db *sql.DB) error {
 	tx, err := db.Begin()
 	if err != nil {
@@ -1097,7 +1108,7 @@ SELECT host,
 	STRING_AGG(run_id, ',' ORDER BY rn) AS recent_runs
 FROM recent
 GROUP BY host
-ORDER BY failures DESC, host`
+ORDER BY failures DESC, host COLLATE "C"` // C collation matches SQLite's byte order; see collationNote.
 
 	rows, err := s.db.QueryContext(ctx, q, window)
 	if err != nil {
@@ -1186,7 +1197,7 @@ WITH checks AS (
 	FROM run_host_summary hs
 	WHERE hs.dry_run = 1
 )
-SELECT host, changed, run_id, ran_at FROM checks WHERE rn = 1 ORDER BY changed DESC, host`
+SELECT host, changed, run_id, ran_at FROM checks WHERE rn = 1 ORDER BY changed DESC, host COLLATE "C"`
 
 	rows, err := s.db.QueryContext(ctx, q)
 	if err != nil {
@@ -1535,7 +1546,7 @@ SELECT claimed_by,
 FROM runs
 WHERE claimed_by != '' AND claimed_at IS NOT NULL AND claimed_at >= $1
 GROUP BY claimed_by
-ORDER BY last_seen DESC, claimed_by`
+ORDER BY last_seen DESC, claimed_by COLLATE "C"`
 
 	rows, err := s.db.QueryContext(ctx, q, sqlutil.FormatTime(time.Now().Add(-run.WorkerWindow)))
 	if err != nil {

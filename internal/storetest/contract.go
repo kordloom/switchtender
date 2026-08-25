@@ -227,6 +227,42 @@ func testBackendEdgeParity(t *testing.T, store run.Store) {
 		t.Errorf("steps order mismatch, so the two backends disagree (-want +got):\n%s", diff)
 	}
 
+	// Host ordering is byte order on both backends. PostgreSQL's default glibc collation sorts text
+	// linguistically, so the same host set came back in a different order, and the summary trim uses
+	// the same kind of tiebreaker to choose which rows to delete.
+	hostRun := sampleRun("run_hosts")
+	hostRun.Status = run.StatusRunning
+	hostRun.DryRun = false
+	hostRun.IdempotencyKey = "idem_hosts"
+	if err := store.Save(ctx, hostRun); err != nil {
+		t.Fatalf("Save() host run error = %v", err)
+	}
+	summaries := make([]run.HostSummary, 0, 4)
+	for _, host := range []string{"web1", "Web2", "web-10", "web_3"} {
+		summaries = append(summaries, run.HostSummary{Host: host, OK: 1})
+	}
+	if err := store.SaveHostSummary(ctx, hostRun.ID, summaries); err != nil {
+		t.Fatalf("SaveHostSummary() error = %v", err)
+	}
+	health, err := store.FleetHealth(ctx, 50)
+	if err != nil {
+		t.Fatalf("FleetHealth() error = %v", err)
+	}
+	// These four all have zero failures, so they tie on the primary key and the text tiebreaker is
+	// the only thing ordering them against each other.
+	mine := map[string]bool{"web1": true, "Web2": true, "web-10": true, "web_3": true}
+	hosts := make([]string, 0, 4)
+	for _, h := range health {
+		if mine[h.Host] {
+			hosts = append(hosts, h.Host)
+		}
+	}
+	wantHosts := []string{"Web2", "web-10", "web1", "web_3"} // byte order
+	if diff := cmp.Diff(wantHosts, hosts); diff != "" {
+		t.Errorf("tied hosts are not in byte order, so the two backends order them differently "+
+			"(-want +got):\n%s", diff)
+	}
+
 	// A backslash in a search term is a literal on both backends, not an escape on one.
 	slashed := sampleRun("run_slash")
 	slashed.Command = `deploy c:\builds\web`
