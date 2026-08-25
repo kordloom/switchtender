@@ -323,6 +323,10 @@
 <td><code>switchtender import awx</code> and <code>import semaphore</code> read an export and create the equivalent projects, inventories, templates, surveys, schedules, and credential shells, with a dry-run report first. <code>switchtender import rundeck</code> reads a Rundeck job export, converting Quartz schedules and refusing to downgrade secure options to plaintext. <code>switchtender import cron</code> brings a crontab under governance, turning each cron line into an approved, recorded schedule.</td>
 </tr>
 <tr>
+<td>Schedule overlap</td>
+<td>A schedule waits for its own previous run. A five-minute schedule whose playbook takes eight minutes skips the tick rather than stacking a second copy of the same work on the same hosts, and stays on its cadence rather than firing the moment the slow run ends. Each skip is logged.</td>
+</tr>
+<tr>
 <td>Schedule timezones</td>
 <td>A schedule reads its cron expression in an IANA timezone such as <code>America/New_York</code>, following that zone's daylight-saving shifts, so a nightly window stays put across the year instead of drifting with the server clock. On the day a zone falls back the repeated hour fires once, not twice, and on the day it springs forward a slot inside the hour that never happens fires at the instant the clocks jumped, so a nightly job runs every night of the year.</td>
 </tr>

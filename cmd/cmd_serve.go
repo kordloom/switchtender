@@ -958,7 +958,19 @@ func runServe(cmd *cobra.Command, _ []string) error {
 
 	scheduler := schedule.NewScheduler(schedules, disp, log,
 		schedule.WithInterval(scheduleInterval), schedule.WithTemplates(bundle.Templates()),
-		schedule.WithAudits(bundle.Audits()))
+		schedule.WithAudits(bundle.Audits()),
+		// A schedule waits for its own previous run rather than stacking a second copy of the same
+		// work on the same hosts.
+		schedule.WithRunActive(func(ctx context.Context, runID string) (bool, error) {
+			r, err := store.Get(ctx, runID)
+			if errors.Is(err, run.ErrNotFound) {
+				return false, nil
+			}
+			if err != nil {
+				return false, err
+			}
+			return !r.Status.Terminal(), nil
+		}))
 	scheduler.Start()
 	defer scheduler.Close()
 
