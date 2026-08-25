@@ -115,6 +115,8 @@ github.com/klauspost/cpuid/v2 v2.3.0 h1:S4CRMLnYUhGeDFDqkGriYKdfoFlDnMtqTiI/sFzh
 github.com/klauspost/cpuid/v2 v2.3.0/go.mod h1:hqwkgyIinND0mEev00jJYCxPNVRVXFQeu1XKlok6oO0=
 github.com/kordloom/loomseal v0.11.0 h1:rmyAE8fKKewXPE9+mgTyeJznjJwD2TZqFayu9aM/YFg=
 github.com/kordloom/loomseal v0.11.0/go.mod h1:4BcnQHXa8iBy/1+M92tdE8dLPSWyg7695rVeEtqrNrk=
+github.com/kordloom/loomseal v0.11.1 h1:bHv8GPzlsvu1Ci71AqpMh7+mCwq7H3Tfbxr/YdIB7vg=
+github.com/kordloom/loomseal v0.11.1/go.mod h1:4BcnQHXa8iBy/1+M92tdE8dLPSWyg7695rVeEtqrNrk=
 github.com/kr/pretty v0.1.0/go.mod h1:dAy3ld7l9f0ibDNOQOHHMYYIIbhfbHSm3C4ZsoJORNo=
 github.com/kr/pretty v0.3.1 h1:flRD4NNwYAUpkphVc1HcthR4KEIFJ65n8Mw5qdRn3LE=
 github.com/kr/pretty v0.3.1/go.mod h1:hoEshYVHaxMs3cyo3Yncou5ZscifuDolrwPKZanG3xk=
