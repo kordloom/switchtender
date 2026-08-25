@@ -1631,9 +1631,12 @@ const nonTerminalRun = "status NOT IN ('succeeded', 'failed', 'canceled', 'inter
 // insert-select folds the missing-run check into the write so the per-chunk output path costs one
 // statement instead of two.
 func (s *store) AppendLog(ctx context.Context, id string, p []byte) error {
+	// The accumulated size is fenced in the same statement as the terminal check, so two writers
+	// racing cannot both read a size under the cap and both append past it.
 	res, err := s.db.ExecContext(ctx,
-		"INSERT INTO run_logs (run_id, chunk) SELECT $1, $2 WHERE EXISTS (SELECT 1 FROM runs WHERE id=$1 AND "+nonTerminalRun+")",
-		id, p)
+		"INSERT INTO run_logs (run_id, chunk) SELECT $1, $2 WHERE EXISTS (SELECT 1 FROM runs WHERE id=$1 AND "+
+			nonTerminalRun+") AND COALESCE((SELECT SUM(LENGTH(chunk)) FROM run_logs WHERE run_id=$1), 0) < $3",
+		id, p, run.MaxLogBytes)
 	if err != nil {
 		return fmt.Errorf("append log: %w", err)
 	}
@@ -1650,6 +1653,13 @@ func (s *store) AppendLog(ctx context.Context, id string, p []byte) error {
 		}
 		if !ok {
 			return run.ErrNotFound
+		}
+		// The run is still live, so the cap is what refused the write. Say so on the run itself,
+		// once, or a reader sees a log that simply stops and reads it as a run that went quiet.
+		if _, err := s.db.ExecContext(ctx,
+			"UPDATE runs SET warning=$1 WHERE id=$2 AND (warning IS NULL OR warning='')",
+			run.LogTruncatedWarning, id); err != nil {
+			return fmt.Errorf("append log: %w", err)
 		}
 	}
 	return nil
