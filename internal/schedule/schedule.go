@@ -67,6 +67,15 @@ type Schedule struct {
 	CreatedAt time.Time `json:"created_at"`
 	// NextRunAt is when the schedule fires next.
 	NextRunAt *time.Time `json:"next_run_at,omitempty"`
+	// CreatedBy names the actor who created the schedule, empty for one that predates the field or
+	// was created before any authentication existed.
+	//
+	// It changes nothing about when the schedule fires. A schedule is organization infrastructure
+	// rather than one person's property, so deleting an account deliberately does not stop the work
+	// that account set up: halting production automation the moment somebody is offboarded is its
+	// own outage. What was missing is the record of who set it up, which is what an offboarding
+	// review actually needs in order to decide, so it is recorded and left at that.
+	CreatedBy string `json:"created_by,omitempty"`
 	// LastRunAt is when the schedule last fired.
 	LastRunAt *time.Time `json:"last_run_at,omitempty"`
 	// LastRunID is the run created by the most recent fire.

@@ -99,6 +99,10 @@ func createTriggerHandler(triggers trigger.Store, templates template.Store, seal
 			return
 		}
 		tg.RequireSignature = req.RequireSignature
+		// Recorded so an offboarding review can find the webhooks somebody set up. A trigger's token
+		// is a bearer credential belonging to the trigger rather than to a person, so removing an
+		// account does not revoke it, and the record is what makes those findable and rotatable.
+		tg.CreatedBy = actorName(r)
 
 		var secret string
 		if sealer != nil && sealer.Enabled() {

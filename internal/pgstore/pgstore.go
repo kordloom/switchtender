@@ -194,10 +194,12 @@ CREATE TABLE IF NOT EXISTS schedules (
 	last_run_id TEXT NOT NULL DEFAULT '',
 	template_id TEXT NOT NULL DEFAULT '',
 	timezone    TEXT NOT NULL DEFAULT '',
-	org_id      TEXT NOT NULL DEFAULT ''
+	org_id      TEXT NOT NULL DEFAULT '',
+	created_by  TEXT NOT NULL DEFAULT ''
 );
 ALTER TABLE schedules ADD COLUMN IF NOT EXISTS timezone TEXT NOT NULL DEFAULT '';
 ALTER TABLE schedules ADD COLUMN IF NOT EXISTS org_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE schedules ADD COLUMN IF NOT EXISTS created_by TEXT NOT NULL DEFAULT '';
 CREATE INDEX IF NOT EXISTS idx_schedules_created ON schedules(created_at, id);
 CREATE TABLE IF NOT EXISTS users (
 	id            TEXT PRIMARY KEY,
@@ -314,8 +316,10 @@ CREATE TABLE IF NOT EXISTS triggers (
 	signing_secret    TEXT NOT NULL DEFAULT '',
 	require_signature INTEGER NOT NULL DEFAULT 0,
 	last_fired_at     TEXT,
-	created_at        TEXT NOT NULL
+	created_at        TEXT NOT NULL,
+	created_by        TEXT NOT NULL DEFAULT ''
 );
+ALTER TABLE triggers ADD COLUMN IF NOT EXISTS created_by TEXT NOT NULL DEFAULT '';
 CREATE UNIQUE INDEX IF NOT EXISTS idx_triggers_hash ON triggers(token_hash);
 CREATE TABLE IF NOT EXISTS audit_entries (
 	id        TEXT PRIMARY KEY,

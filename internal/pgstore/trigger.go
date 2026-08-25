@@ -11,7 +11,8 @@ import (
 )
 
 // triggerColumns is the shared select list for trigger reads.
-const triggerColumns = `id, name, template_id, token_hash, signing_secret, require_signature, last_fired_at, created_at`
+const triggerColumns = `id, name, template_id, token_hash, signing_secret, require_signature,
+	last_fired_at, created_at, created_by`
 
 // triggerStore is a trigger.Store backed by the shared SQLite database.
 type triggerStore struct {
@@ -22,15 +23,17 @@ type triggerStore struct {
 // Save inserts or replaces the trigger.
 func (s *triggerStore) Save(ctx context.Context, t *trigger.Trigger) error {
 	const q = `
-INSERT INTO triggers (id, name, template_id, token_hash, signing_secret, require_signature, last_fired_at, created_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+INSERT INTO triggers (id, name, template_id, token_hash, signing_secret, require_signature,
+	last_fired_at, created_at, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 ON CONFLICT(id) DO UPDATE SET
 	name=excluded.name, template_id=excluded.template_id, token_hash=excluded.token_hash,
 	signing_secret=excluded.signing_secret, require_signature=excluded.require_signature,
-	last_fired_at=excluded.last_fired_at, created_at=excluded.created_at`
+	last_fired_at=excluded.last_fired_at, created_at=excluded.created_at,
+	created_by=excluded.created_by`
 	_, err := s.db.ExecContext(ctx, q,
 		t.ID, t.Name, t.TemplateID, t.TokenHash, t.SigningSecret, sqlutil.BoolToInt(t.RequireSignature),
-		sqlutil.NullTime(t.LastFiredAt), sqlutil.FormatTime(t.CreatedAt))
+		sqlutil.NullTime(t.LastFiredAt), sqlutil.FormatTime(t.CreatedAt), t.CreatedBy)
 	if err != nil {
 		return fmt.Errorf("save trigger: %w", err)
 	}
@@ -111,7 +114,7 @@ func scanTrigger(sc scanner) (*trigger.Trigger, error) {
 		created string
 	)
 	if err := sc.Scan(&t.ID, &t.Name, &t.TemplateID, &t.TokenHash,
-		&t.SigningSecret, &require, &fired, &created); err != nil {
+		&t.SigningSecret, &require, &fired, &created, &t.CreatedBy); err != nil {
 		return nil, err
 	}
 	t.RequireSignature = require != 0

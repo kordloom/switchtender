@@ -41,7 +41,7 @@ bundle it is handed.
 | POST   | `/v1/ai/propose-run`       | Turn a plain-language request into a run proposal, validated and held for approval. Operator role. |
 | POST   | `/v1/drift/reconcile`      | Build a reconcile proposal for a drifted host, held for approval. Operator role. |
 | POST   | `/v1/pipelines`            | Submit ordered playbook steps as one pipeline.          |
-| POST   | `/v1/schedules`            | Cron schedule for a run, split, pipeline, or template.  |
+| POST   | `/v1/schedules`            | Cron schedule for a run, split, pipeline, or template. The response records `created_by`. |
 | GET    | `/v1/schedules`            | List schedules.                                         |
 | GET    | `/v1/schedules/preview`    | Next fire times for a cron expression and timezone, without saving anything. |
 | GET    | `/v1/schedules/{id}`       | One schedule.                                           |
