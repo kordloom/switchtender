@@ -101,6 +101,20 @@ type Finalization struct {
 	// It is resolved with the project and is one of the grantable objects a run's authorization is
 	// built from, so losing it silently narrows what the stored run is checked against.
 	PullCredentialID string
+	// Owner is the executor lease this write must still hold, and empty when the caller is not an
+	// executor finalizing its own run.
+	//
+	// The terminal write fenced on status alone. That is enough on the relay path, where the HTTP
+	// layer has already checked the per-claim capability, but not for a second in-process dispatcher
+	// on a shared database: one whose pending-to-running save failed, then lost its heartbeats to a
+	// partition, could come back after the janitor requeued the run and another worker claimed and
+	// started it, and terminalize the run the second worker was still executing. Status matched,
+	// because the second worker had made it running again.
+	//
+	// It is left empty deliberately by the two callers that are not executors: the sweep that ends a
+	// run for overrunning its timeout, and the relay handler, which is gated on the claim secret
+	// instead. Naming it here is what keeps that a stated choice rather than an omission.
+	Owner string
 	// Outputs are the values the run published with set_stats, which a later pipeline step reads as
 	// its inputs. They are folded from the run's events as it finishes, so the terminal write is the
 	// first and only chance to store them.
@@ -968,6 +982,9 @@ func (m *memStore) FinalizeRunning(_ context.Context, id string, fin Finalizatio
 	defer m.mu.Unlock()
 	r, ok := m.runs[id]
 	if !ok || r.Status != StatusRunning {
+		return false, nil
+	}
+	if fin.Owner != "" && r.ClaimedBy != fin.Owner {
 		return false, nil
 	}
 	ended := fin.EndedAt

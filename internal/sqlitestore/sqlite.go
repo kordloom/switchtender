@@ -2789,10 +2789,10 @@ func (s *store) FinalizeRunning(ctx context.Context, id string, fin run.Finaliza
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE runs SET status=?, exit_code=?, error=?, image=?, commit_sha=?,
 pull_credential_id=?, outputs=?, warning=?, ended_at=?
-WHERE id=? AND status=?`,
+WHERE id=? AND status=? AND (?='' OR claimed_by=?)`,
 		string(fin.Status), sqlutil.NullInt(fin.ExitCode), fin.Error, fin.Image,
 		fin.CommitSHA, fin.PullCredentialID, sqlutil.JSONMap(fin.Outputs), fin.Warning,
-		sqlutil.FormatTime(fin.EndedAt), id, string(run.StatusRunning))
+		sqlutil.FormatTime(fin.EndedAt), id, string(run.StatusRunning), fin.Owner, fin.Owner)
 	if err != nil {
 		return false, fmt.Errorf("finalize running run: %w", err)
 	}

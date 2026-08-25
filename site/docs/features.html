@@ -220,7 +220,7 @@
 </tr>
 <tr>
 <td>Worker queues</td>
-<td>Target a run at a named queue. A worker serving that queue runs it and default workers leave it alone. Pin a queue on a run, a template, or an inventory, most specific wins, so queues work like AWX instance groups.</td>
+<td>Target a run at a named queue. A worker serving that queue runs it and default workers leave it alone. Pin a queue on a run, a template, or an inventory, most specific wins, so queues work like AWX instance groups. A queue is grantable as <code>queue:&lt;name&gt;</code> and matchable in a policy, so choosing one is access-controlled on both sides rather than only on the worker's.</td>
 </tr>
 <tr>
 <td>Dependency sync</td>
@@ -324,7 +324,7 @@
 </tr>
 <tr>
 <td>Schedule timezones</td>
-<td>A schedule reads its cron expression in an IANA timezone such as <code>America/New_York</code>, following that zone's daylight-saving shifts, so a nightly window stays put across the year instead of drifting with the server clock.</td>
+<td>A schedule reads its cron expression in an IANA timezone such as <code>America/New_York</code>, following that zone's daylight-saving shifts, so a nightly window stays put across the year instead of drifting with the server clock. On the day a zone falls back the repeated hour fires once, not twice. A slot inside the hour a zone skips forward does not exist that day and does not fire, so avoid scheduling in the transition hour if the run must happen every day.</td>
 </tr>
 <tr>
 <td>Starter templates</td>

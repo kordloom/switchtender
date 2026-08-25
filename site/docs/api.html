@@ -42,8 +42,12 @@
 		<main class="dcontent prose">
 			<h1 id="http-api">HTTP API</h1>
 <p>Every endpoint the server exposes. The API is served under the <code>/v1</code> base path. The web UI at
-<code>/ui/</code>, along with <code>/healthz</code>, <code>/readyz</code>, <code>/metrics</code>, the OpenID Connect and SAML sign-in routes, the
-webhook <code>/hooks</code> path, and the <code>/relay</code> worker path, is unversioned. The root redirects to the UI.</p>
+<code>/ui/</code>, along with <code>/healthz</code>, <code>/readyz</code>, <code>/metrics</code>, <code>/.well-known/loomseal.json</code>, the OpenID
+Connect and SAML sign-in routes, the webhook <code>/hooks</code> path, and the <code>/relay</code> worker path, is
+unversioned. The root redirects to the UI.</p>
+<p><code>/.well-known/loomseal.json</code> is deliberately public and unauthenticated: it publishes this install's
+signing key and identifiers so a relying party can pin the key from a channel independent of any
+bundle it is handed.</p>
 <table>
 <thead>
 <tr>
@@ -110,6 +114,21 @@ webhook <code>/hooks</code> path, and the <code>/relay</code> worker path, is un
 </tr>
 <tr>
 <td>GET</td>
+<td><code>/v1/runs/{id}/evidence</code></td>
+<td>Self-contained HTML evidence document for one run. <code>?format=json</code> returns the same content as JSON.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/v1/runs/{id}/receipt</code></td>
+<td>Signed LoomSeal receipt proving what this run did.</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/v1/runs/{id}/rerun</code></td>
+<td>Submit a fresh run with this run's execution settings.</td>
+</tr>
+<tr>
+<td>GET</td>
 <td><code>/v1/runs/{id}/events</code></td>
 <td>Structured events as JSON.</td>
 </tr>
@@ -165,6 +184,11 @@ webhook <code>/hooks</code> path, and the <code>/relay</code> worker path, is un
 </tr>
 <tr>
 <td>GET</td>
+<td><code>/v1/schedules/preview</code></td>
+<td>Next fire times for a cron expression and timezone, without saving anything.</td>
+</tr>
+<tr>
+<td>GET</td>
 <td><code>/v1/schedules/{id}</code></td>
 <td>One schedule.</td>
 </tr>
@@ -187,6 +211,11 @@ webhook <code>/hooks</code> path, and the <code>/relay</code> worker path, is un
 <td>GET</td>
 <td><code>/v1/hosts/{host}/runs</code></td>
 <td>One host's recent per-run outcomes.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/v1/hosts/{host}/facts</code></td>
+<td>The most recent Ansible facts gathered for one host.</td>
 </tr>
 <tr>
 <td>GET</td>
@@ -217,6 +246,16 @@ webhook <code>/hooks</code> path, and the <code>/relay</code> worker path, is un
 <td>DELETE</td>
 <td><code>/v1/projects/{id}</code></td>
 <td>Delete a project. 409 while a template or source uses it.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/v1/projects/{id}/files</code></td>
+<td>Browse the project checkout's tree.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/v1/projects/{id}/file</code></td>
+<td>Read one file from the project checkout. <code>?path=</code> within the repo.</td>
 </tr>
 <tr>
 <td>POST</td>
@@ -292,6 +331,11 @@ webhook <code>/hooks</code> path, and the <code>/relay</code> worker path, is un
 <td>GET</td>
 <td><code>/v1/credential-types</code></td>
 <td>List custom credential types. Admin only.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/v1/credential-types/{id}</code></td>
+<td>One custom credential type. Admin only.</td>
 </tr>
 <tr>
 <td>PUT</td>
@@ -456,7 +500,7 @@ webhook <code>/hooks</code> path, and the <code>/relay</code> worker path, is un
 <tr>
 <td>POST</td>
 <td><code>/v1/grants</code></td>
-<td>Grant a user or team read, use, or manage on an object.</td>
+<td>Grant a user or team read, use, or manage on an object: a project, template, inventory, or credential id, or a worker queue as <code>queue:&lt;name&gt;</code>.</td>
 </tr>
 <tr>
 <td>GET</td>
@@ -547,6 +591,16 @@ webhook <code>/hooks</code> path, and the <code>/relay</code> worker path, is un
 <td>GET</td>
 <td><code>/v1/audit</code></td>
 <td>A page of the mutation trail, admin only. <code>?limit=</code> up to 1000, default 100; <code>has_more</code> reports whether older entries remain.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/v1/audit/register</code></td>
+<td>The change register as a self-contained HTML document, admin only.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/v1/doctor</code></td>
+<td>Install health checks and their findings, admin only.</td>
 </tr>
 <tr>
 <td>GET</td>

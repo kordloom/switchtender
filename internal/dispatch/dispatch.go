@@ -2270,6 +2270,12 @@ func (d *Dispatcher) finalize(r *run.Run, status run.Status, exitCode *int, fail
 // fence exists to stop.
 func (d *Dispatcher) recordTerminal(r *run.Run, fin run.Finalization) (run.Status, bool) {
 	ctx := context.Background()
+	// This dispatcher is finalizing a run it executed, so the write is fenced on the lease it thinks
+	// it holds as well as on the status. If the janitor requeued the run and another worker claimed
+	// and started it, the status is running again and the status fence alone would let this write
+	// terminalize the second worker's live run. The fallback below then reads the stored state and
+	// decides from it, which is exactly the path a lost lease should take.
+	fin.Owner = r.ClaimedBy
 	if moved, err := d.store.FinalizeRunning(ctx, r.ID, fin); err == nil && moved {
 		applyFinalization(r, fin)
 		return fin.Status, true

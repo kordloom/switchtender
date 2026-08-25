@@ -2414,10 +2414,10 @@ func (s *store) FinalizeRunning(ctx context.Context, id string, fin run.Finaliza
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE runs SET status=$1, exit_code=$2, error=$3, image=$4, commit_sha=$5,
 pull_credential_id=$6, outputs=$7, warning=$8, ended_at=$9
-WHERE id=$10 AND status=$11`,
+WHERE id=$10 AND status=$11 AND ($12='' OR claimed_by=$12)`,
 		string(fin.Status), sqlutil.NullInt(fin.ExitCode), fin.Error, fin.Image,
 		fin.CommitSHA, fin.PullCredentialID, sqlutil.JSONMap(fin.Outputs), fin.Warning,
-		sqlutil.FormatTime(fin.EndedAt), id, string(run.StatusRunning))
+		sqlutil.FormatTime(fin.EndedAt), id, string(run.StatusRunning), fin.Owner)
 	if err != nil {
 		return false, fmt.Errorf("finalize running run: %w", err)
 	}

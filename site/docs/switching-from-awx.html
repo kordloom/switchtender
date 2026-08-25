@@ -148,8 +148,8 @@ job template in AWX.</p>
   ./switchtender serve --addr :8080 --db switchtender.db
 </code></pre>
 <p>The key and salt seal credentials at rest. Keep the salt stable across restarts. Open
-http://localhost:8080 for the UI. The API is open until you create the first account or token, so
-you can set up before locking it down.</p>
+http://localhost:8080 for the UI. On an empty database the first start mints an initial admin token
+and prints it once, so copy it before moving on.</p>
 <h3 id="2-create-your-first-account">2. Create your first account</h3>
 <pre><code>SWITCHTENDER_PASSWORD=secret ./switchtender user new admin-you --role admin --db switchtender.db
 </code></pre>

@@ -499,6 +499,19 @@ func testFinalizeRunning(t *testing.T, store run.Store) {
 		t.Fatalf("Save() error = %v", err)
 	}
 
+	// A write claiming a lease the run does not carry changes nothing. The relay path is gated on the
+	// claim secret at the HTTP layer, but a second in-process dispatcher on a shared database is not:
+	// one that lost its heartbeats to a partition, came back after the janitor requeued the run, and
+	// found another worker had claimed and started it would otherwise terminalize that worker's live
+	// run, because the status fence alone was satisfied by the second worker making it running again.
+	stale := fin
+	stale.Owner = "worker-that-lost-the-lease"
+	if moved, err := store.FinalizeRunning(ctx, "run_fin", stale); err != nil {
+		t.Fatalf("FinalizeRunning(stale lease) error = %v", err)
+	} else if moved {
+		t.Error("a finalize naming a lease the run does not hold was applied")
+	}
+
 	ok, err := store.FinalizeRunning(ctx, "run_fin", fin)
 	if err != nil {
 		t.Fatalf("FinalizeRunning() error = %v", err)
