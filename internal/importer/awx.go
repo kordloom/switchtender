@@ -341,9 +341,24 @@ func FromAWX(data []byte, now time.Time) (*Plan, error) {
 	inventoryIDs := map[string]string{}
 	var nestedSources []awxInventorySource
 	for _, inv := range append(export.Inventory, export.Inventories...) {
+		hosts, groups := inv.hosts(), inv.groups()
+		// An inventory that arrives with nothing in it is reported, whatever the reason.
+		//
+		// AWX writes hosts in more than one place and this importer reads the two it knows. When a
+		// real export put them somewhere else, every inventory was created empty and the import
+		// still said it had succeeded, so an operator migrated a fleet and got a set of inventories
+		// that targeted no hosts. Chasing shapes does not close that: the next export format the
+		// importer has not seen fails the same silent way. Reporting the outcome does, because the
+		// outcome is the same whichever shape the hosts were in, and an inventory that is genuinely
+		// empty in AWX is worth a line to the operator too.
+		if len(hosts) == 0 && len(groups) == 0 {
+			plan.warn("inventory %q imported with no hosts and no groups. If it is not empty in "+
+				"AWX, this export puts them somewhere this importer does not read, and the "+
+				"inventory will target nothing", inv.Name)
+		}
 		obj := &inventory.Inventory{
 			ID: inventory.NewID(), Name: inv.Name,
-			Content:   buildInventoryINI(plan, inv.Name, convertHosts(inv.hosts()), convertGroups(inv.groups())),
+			Content:   buildInventoryINI(plan, inv.Name, convertHosts(hosts), convertGroups(groups)),
 			CreatedAt: now,
 		}
 		if _, dup := inventoryIDs[inv.Name]; dup {
