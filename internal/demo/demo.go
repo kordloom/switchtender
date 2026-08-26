@@ -167,7 +167,11 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 	}
 	playbook := filepath.Join(dir, "site.yml")
 	inv := filepath.Join(dir, "inv.ini")
-	tfDir := filepath.Join(dir, "terraform")
+	// The seeded project's own network root rather than the flat scratch directory beside it: the
+	// path lands in the runs list, where "network" reads as a Terraform root somebody would really
+	// have and "terraform" beside a TERRAFORM badge says nothing. Both configurations declare only
+	// variables, locals, and outputs, so either plans offline with no provider download.
+	tfDir := filepath.Join(dir, "repos", "database-ops", "infra", "network")
 
 	seedConfig(ctx, d, log, dir)
 
