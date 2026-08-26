@@ -270,6 +270,30 @@ function mountDocsChrome() {
 	}
 }
 
+// copyButton lives here rather than beside the run detail it was written for, because a shared
+// table cell now offers one and a cell is on every page. A helper reached from a shared
+// component belongs with the shared components.
+// copyButton returns a small clipboard control that copies text and confirms with a checkmark.
+function copyButton(text, tip) {
+	const btn = document.createElement("button");
+	btn.type = "button";
+	btn.className = "copy-btn";
+	btn.dataset.tip = tip;
+	btn.setAttribute("aria-label", tip);
+	const glyph = '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>';
+	btn.innerHTML = svgIcon(glyph);
+	btn.addEventListener("click", async () => {
+		try { await navigator.clipboard.writeText(text); } catch { return; }
+		btn.innerHTML = svgIcon('<polyline points="20 6 9 17 4 12"/>');
+		btn.classList.add("copied");
+		window.setTimeout(() => {
+			btn.innerHTML = svgIcon(glyph);
+			btn.classList.remove("copied");
+		}, 1200);
+	});
+	return btn;
+}
+
 // svgIcon wraps inner SVG markup in a stroked 24 by 24 icon that inherits the current color.
 function svgIcon(inner) {
 	return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" ' +

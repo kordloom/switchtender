@@ -209,6 +209,20 @@ function fmtTime(iso) {
 	return isNaN(d) ? iso : d.toLocaleString();
 }
 
+// exactTime renders a time for somebody who needs the value rather than a sense of when.
+//
+// A relative age answers "is this recent", which is the question a list is usually being scanned
+// for, and a locale string answers "when, in my day". Neither can be pasted into a ticket, a query,
+// or another tool: they are not the timestamp, they are descriptions of it. The record holds RFC
+// 3339 and that is what the chain, the API, and every export carry, so it is shown alongside rather
+// than instead of the readable form.
+function exactTime(iso) {
+	if (!iso) return "";
+	const d = new Date(iso);
+	if (isNaN(d)) return iso;
+	return d.toISOString() + "  (" + d.toLocaleString() + ")";
+}
+
 // relTime renders an ISO time as a short relative age, such as "2m ago", falling back to the date
 // for anything older than a month.
 function relTime(iso) {

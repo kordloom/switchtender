@@ -81,9 +81,13 @@ function mountTopbar() {
 }
 
 // EXPORT_PAGES are the pages whose main table gets CSV and JSON export of the shown rows.
-// Credentials stays out on purpose, so secret-adjacent data never leaves by accident.
+//
 // Credentials are included on purpose: the API never returns a secret value, so an export lists
-// names, kinds, secret state, and what uses them, which is what an access review needs.
+// names, kinds, secret state, and what uses them, which is what an access review needs. An earlier
+// line here said the opposite, that credentials stayed out so secret-adjacent data could not leave
+// by accident, and it sat directly above a list containing them. Whichever was written first, a
+// comment that contradicts itself is worse than no comment: a reader cannot tell which half is the
+// rule and which is the leftover.
 const EXPORT_PAGES = ["runs", "fleet", "drift", "tasks", "compare", "workers", "schedules", "jobtemplates",
 	"users", "audit", "host", "projects", "inventories", "sources", "policies", "doctor",
 	"credentials"];
