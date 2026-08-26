@@ -446,6 +446,28 @@ function showSkeletonRows(tbody, rows, cols) {
 
 // applyReadOnly keeps the forms and controls visible so the demo conveys what the product does, but
 // disables the actions that would mutate and adds a banner. Row action buttons are dimmed by CSS.
+// opensADialog reports whether a button's job is to open a modal rather than to change something
+// itself. The pairing is by id: a control named "x-open" opens the modal named "x-modal".
+function opensADialog(btn) {
+	if (!btn.id || !btn.id.endsWith("-open")) return false;
+	return Boolean(document.getElementById(btn.id.slice(0, -"-open".length) + "-modal"));
+}
+
+// sealDialogSubmits disables the control inside each modal that would commit the change, so a
+// visitor can open a form, read every field, and see exactly what the product would ask for,
+// without the demo being able to run anything. The refusal is on the button that does the thing
+// rather than on the door to the room it is in.
+function sealDialogSubmits() {
+	for (const form of document.querySelectorAll(".modal form")) {
+		form.addEventListener("submit", (e) => e.preventDefault());
+		for (const submit of form.querySelectorAll('button[type="submit"]')) {
+			submit.disabled = true;
+			submit.dataset.mutates = "true";
+			submit.dataset.tip = "Click to " + submit.textContent.trim().toLowerCase();
+		}
+	}
+}
+
 function applyReadOnly() {
 	const main = document.querySelector(".content");
 	if (main && !main.querySelector(".ro-banner")) {
@@ -457,12 +479,20 @@ function applyReadOnly() {
 	// Anything that would change state is disabled wherever it lives: rows, panels, drills, and
 	// page headers alike, each explaining itself rather than silently doing nothing.
 	// The page header's primary action creates something, so it is mutating by definition.
+	//
+	// A button that only opens a dialog is the exception. Swallowing its click meant a visitor
+	// never saw the form behind it, so the demo showed what this product had already done and
+	// never what using it looks like: the whole of launching a run, choosing a tool, a project, an
+	// inventory, a host limit, was behind a button that did nothing. The dialog opens, and the
+	// control inside it that would actually start something is the one that refuses.
 	for (const btn of document.querySelectorAll(".page-head .button.primary, .wf-toolbar .button.primary")) {
+		if (opensADialog(btn)) continue;
 		btn.dataset.mutates = "true";
 		if (!btn.dataset.tip) {
 			btn.dataset.tip = "Click to " + btn.textContent.trim().toLowerCase();
 		}
 	}
+	sealDialogSubmits();
 	// Table rows and drill panels are built after this pass runs, so rather than disabling the
 	// controls that exist right now, swallow the click for anything marked as mutating. The
 	// control stays hoverable, which is what lets it explain why it is unavailable.
