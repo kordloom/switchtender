@@ -1,6 +1,7 @@
 package importer
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -346,5 +347,55 @@ func TestRRULECannotChooseTheCadence(t *testing.T) {
 		if got != want {
 			t.Errorf("RRULEToCron(%q) = %q, want %q", rule, got, want)
 		}
+	}
+}
+
+// TestRRULEWeeklyAndDailyKeepTheirDaySet pins that a converted rule fires on the days the rule names
+// and no others.
+//
+// Two shapes widened silently. A weekly rule that names no BYDAY repeats on its DTSTART's weekday,
+// but the empty day set became cron's "*", so a weekly patch or reboot window imported as a nightly
+// one and fired seven times a week. A daily rule that names BYDAY is a weekday-only job, but BYDAY
+// was ignored, so it fired on Saturday and Sunday too. Both reported a clean conversion with no
+// warning, which is the worst way to be wrong: the operator sees a schedule that looks right.
+func TestRRULEWeeklyAndDailyKeepTheirDaySet(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Name   string
+		In     string
+		Want   string
+		WantOK bool
+	}{{ // Test 0: A weekly rule with no BYDAY repeats on its DTSTART's weekday. 2026-01-01 is a Thursday.
+		Name: "weekly without byday follows dtstart",
+		In:   "DTSTART:20260101T020000Z RRULE:FREQ=WEEKLY;INTERVAL=1",
+		Want: "0 2 * * 4", WantOK: true,
+	}, { // Test 1: A weekly rule naming its days is unchanged.
+		Name: "weekly with byday",
+		In:   "DTSTART:20260101T020000Z RRULE:FREQ=WEEKLY;INTERVAL=1;BYDAY=MO",
+		Want: "0 2 * * 1", WantOK: true,
+	}, { // Test 2: A daily rule naming weekdays stays weekday-only.
+		Name: "daily with byday is weekdays only",
+		In:   "DTSTART:20260101T020000Z RRULE:FREQ=DAILY;INTERVAL=1;BYDAY=MO,TU,WE,TH,FR",
+		Want: "0 2 * * 1,2,3,4,5", WantOK: true,
+	}, { // Test 3: A plain daily rule still fires every day.
+		Name: "daily without byday",
+		In:   "DTSTART:20260101T020000Z RRULE:FREQ=DAILY;INTERVAL=1",
+		Want: "0 2 * * *", WantOK: true,
+	}, { // Test 4: A weekly rule with neither BYDAY nor a usable DTSTART is refused, not widened.
+		Name: "weekly with no day and no dtstart is refused",
+		In:   "RRULE:FREQ=WEEKLY;INTERVAL=1",
+		Want: "", WantOK: false,
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
+			t.Parallel()
+			got, ok := RRULEToCron(test.In)
+			if ok != test.WantOK {
+				t.Fatalf("RRULEToCron(%q) ok = %v, want %v (got %q)", test.In, ok, test.WantOK, got)
+			}
+			if got != test.Want {
+				t.Errorf("RRULEToCron(%q) = %q, want %q", test.In, got, test.Want)
+			}
+		})
 	}
 }

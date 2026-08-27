@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // weekdayCron maps an iCalendar weekday code to its cron day-of-week number.
@@ -65,12 +66,34 @@ func RRULEToCron(rrule string) (string, bool) {
 		if interval != "1" {
 			return "", false
 		}
-		return fmt.Sprintf("%s %s * * *", minute, hour), true
+		// A daily rule can still name the days it applies to, and BYDAY was dropped on the floor:
+		// FREQ=DAILY;BYDAY=MO,TU,WE,TH,FR is a weekday-only job, and it imported firing on Saturday
+		// and Sunday too, with ok reported true and nothing warned. Cron says the same thing the
+		// rule does, so it is honored rather than refused.
+		days, ok := cronDays(parts["BYDAY"])
+		if !ok {
+			return "", false
+		}
+		return fmt.Sprintf("%s %s * * %s", minute, hour, days), true
 	case "WEEKLY":
 		if interval != "1" {
 			return "", false
 		}
-		days, ok := cronDays(parts["BYDAY"])
+		byday := parts["BYDAY"]
+		if byday == "" {
+			// A weekly rule that names no day repeats on the weekday its DTSTART falls on, which is
+			// what iCalendar says and what AWX shows. Treating the empty set as "every day" turned a
+			// weekly window into a nightly one: a patch or reboot job migrated from AWX fired seven
+			// times a week instead of once, reported as a clean conversion with no warning. A rule
+			// with no usable DTSTART is refused instead, so the operator sets it by hand rather than
+			// inheriting a cadence nobody chose.
+			day, ok := dtstartWeekday(rrule)
+			if !ok {
+				return "", false
+			}
+			return fmt.Sprintf("%s %s * * %s", minute, hour, day), true
+		}
+		days, ok := cronDays(byday)
 		if !ok {
 			return "", false
 		}
@@ -156,6 +179,33 @@ func dtstartTime(rrule string) (hour, minute string) {
 		return trimZero(h), trimZero(m)
 	}
 	return "0", "0"
+}
+
+// dtstartWeekday returns the cron weekday number a DTSTART's date falls on, and whether one could be
+// read. A weekly rule that names no BYDAY repeats on this day, so it is what the conversion needs to
+// avoid widening the rule to every day of the week.
+func dtstartWeekday(rrule string) (string, bool) {
+	for field := range strings.FieldsSeq(strings.ReplaceAll(rrule, "\n", " ")) {
+		if !strings.HasPrefix(strings.ToUpper(field), "DTSTART") {
+			continue
+		}
+		idx := strings.LastIndex(field, ":")
+		if idx < 0 {
+			continue
+		}
+		value := field[idx+1:]
+		// The date is the eight digits before the time separator: 20260101T020000Z.
+		if len(value) < 8 {
+			continue
+		}
+		date := value[:8]
+		t, err := time.Parse("20060102", date)
+		if err != nil {
+			continue
+		}
+		return strconv.Itoa(int(t.Weekday())), true
+	}
+	return "", false
 }
 
 // isTwoDigits reports whether s is exactly two ASCII digits.
