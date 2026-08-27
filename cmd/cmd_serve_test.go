@@ -98,3 +98,50 @@ func TestIdentityDir(t *testing.T) {
 		t.Errorf("identityDir(postgresql) = %q, want the same stable dir as postgres:// %q", g2, got)
 	}
 }
+
+// TestNotifySecretsPreferTheEnvironment pins that a third-party notification credential can be given
+// through a channel a run cannot read.
+//
+// These were flag-only. A run executes as a child of this process under the same uid, so an
+// operator-role user could read the server's argv from inside a bash run and lift the ntfy bearer,
+// the Grafana API token, or the Twilio auth token, none of which their role grants. The environment
+// is already closed against that: filterRunEnv drops every SWITCHTENDER_ variable before a run sees
+// it. This checks the environment wins, that the flag still works where nobody cares, and that the
+// help says which channel is the safe one.
+func TestNotifySecretsPreferTheEnvironment(t *testing.T) {
+	const fromEnv = "env-supplied-secret"
+	const fromFlag = "flag-supplied-secret"
+
+	t.Setenv("SWITCHTENDER_NOTIFY_NTFY_TOKEN", fromEnv)
+	if got := notifySecret(fromFlag, "SWITCHTENDER_NOTIFY_NTFY_TOKEN"); got != fromEnv {
+		t.Errorf("notifySecret = %q, want the environment value: the flag is visible in the process "+
+			"list to any run this server starts", got)
+	}
+
+	// With nothing in the environment the flag still configures it.
+	if got := notifySecret(fromFlag, "SWITCHTENDER_NOTIFY_UNSET_FOR_TEST"); got != fromFlag {
+		t.Errorf("notifySecret = %q, want the flag value when the environment is empty", got)
+	}
+
+	// The variables live behind the same prefix filterRunEnv strips, which is what makes the
+	// environment the safe channel rather than merely a different one.
+	for _, name := range []string{
+		"SWITCHTENDER_NOTIFY_NTFY_TOKEN",
+		"SWITCHTENDER_NOTIFY_GRAFANA_TOKEN",
+		"SWITCHTENDER_NOTIFY_TWILIO_TOKEN",
+	} {
+		if !strings.HasPrefix(name, "SWITCHTENDER_") {
+			t.Errorf("%s is not behind the prefix a run's environment is filtered on", name)
+		}
+		flagName := strings.ToLower(strings.ReplaceAll(strings.TrimPrefix(name, "SWITCHTENDER_"), "_", "-"))
+		f := serveCmd.Flags().Lookup(flagName)
+		if f == nil {
+			t.Errorf("no --%s flag to document %s against", flagName, name)
+			continue
+		}
+		if !strings.Contains(f.Usage, name) {
+			t.Errorf("--%s does not name %s, so an operator is not told which channel is safe",
+				flagName, name)
+		}
+	}
+}

@@ -453,17 +453,17 @@ func init() {
 	serveCmd.Flags().StringArrayVar(&notifyNtfy, "notify-ntfy", nil,
 		"ntfy topic URL that receives a notification when a run finishes, such as https://ntfy.sh/my-topic. Repeatable.")
 	serveCmd.Flags().StringVar(&notifyNtfyToken, "notify-ntfy-token", "",
-		"Optional bearer token for a protected ntfy topic, applied to every --notify-ntfy URL.")
+		"Optional bearer token for a protected ntfy topic, applied to every --notify-ntfy URL. Prefer SWITCHTENDER_NOTIFY_NTFY_TOKEN, which a run cannot read, since a flag is visible in the process list.")
 	serveCmd.Flags().StringArrayVar(&notifyPagerDuty, "notify-pagerduty", nil,
 		"PagerDuty Events API routing key that triggers an incident when a run fails. Repeatable.")
 	serveCmd.Flags().StringArrayVar(&notifyGrafana, "notify-grafana", nil,
 		"Grafana base URL that receives an annotation when a run finishes. Repeatable.")
 	serveCmd.Flags().StringVar(&notifyGrafanaToken, "notify-grafana-token", "",
-		"Bearer token for the Grafana annotations API, applied to every --notify-grafana URL.")
+		"Bearer token for the Grafana annotations API, applied to every --notify-grafana URL. Prefer SWITCHTENDER_NOTIFY_GRAFANA_TOKEN, which a run cannot read, since a flag is visible in the process list.")
 	serveCmd.Flags().StringVar(&notifyTwilioSID, "notify-twilio-sid", "",
 		"Twilio Account SID for SMS notifications on a failed run.")
 	serveCmd.Flags().StringVar(&notifyTwilioToken, "notify-twilio-token", "",
-		"Twilio Auth Token, paired with --notify-twilio-sid.")
+		"Twilio Auth Token, paired with --notify-twilio-sid. Prefer SWITCHTENDER_NOTIFY_TWILIO_TOKEN, which a run cannot read, since a flag is visible in the process list.")
 	serveCmd.Flags().StringVar(&notifyTwilioFrom, "notify-twilio-from", "",
 		"Twilio sender phone number that texts run failures.")
 	serveCmd.Flags().StringArrayVar(&notifyTwilioTo, "notify-twilio-to", nil,
@@ -964,10 +964,13 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		dispatch.WithRocketChat(notifyRocketChat),
 		dispatch.WithDiscord(notifyDiscord),
 		dispatch.WithTeams(notifyTeams),
-		dispatch.WithNtfy(notifyNtfy, notifyNtfyToken),
+		dispatch.WithNtfy(notifyNtfy, notifySecret(notifyNtfyToken, "SWITCHTENDER_NOTIFY_NTFY_TOKEN")),
 		dispatch.WithPagerDuty(notifyPagerDuty),
-		dispatch.WithGrafana(notifyGrafana, notifyGrafanaToken),
-		dispatch.WithTwilio(notifyTwilioSID, notifyTwilioToken, notifyTwilioFrom, notifyTwilioTo),
+		dispatch.WithGrafana(notifyGrafana,
+			notifySecret(notifyGrafanaToken, "SWITCHTENDER_NOTIFY_GRAFANA_TOKEN")),
+		dispatch.WithTwilio(notifyTwilioSID,
+			notifySecret(notifyTwilioToken, "SWITCHTENDER_NOTIFY_TWILIO_TOKEN"),
+			notifyTwilioFrom, notifyTwilioTo),
 		dispatch.WithEmail(emailer, onFailureOnly),
 		dispatch.WithInventories(bundle.Inventories()),
 		dispatch.WithInventorySources(bundle.InventorySources()),
@@ -1290,4 +1293,21 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		}
 		return <-errCh
 	}
+}
+
+// notifySecret returns a notification secret, preferring the environment variable so it never has to
+// appear on the command line.
+//
+// These were flag-only. A run executes as a child of this process under the same uid, so an
+// operator-role user could read the server's argv from inside a bash run and lift a third-party
+// credential their role was never granted: the ntfy bearer, the Grafana API token, the Twilio auth
+// token. The environment is already closed against exactly that, because filterRunEnv drops every
+// SWITCHTENDER_ variable before a run sees it, so moving the secret there puts it behind the boundary
+// the rest of the configuration already sits behind. The flag stays for compatibility and for a
+// deployment that does not care, and its help now says which channel is safe.
+func notifySecret(flagValue, env string) string {
+	if v := os.Getenv(env); v != "" {
+		return v
+	}
+	return flagValue
 }
