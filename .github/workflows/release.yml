@@ -72,14 +72,21 @@ jobs:
             echo "usable=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          code=$(curl -sS -o /dev/null -w '%{http_code}' \
+          # Readability is not the question. A token that can read the tap and not write it passes a
+          # plain GET and then fails the push with 403, which is the same release-sinking failure one
+          # step later. The repository object reports the authenticated token's own rights, so ask for
+          # the one the cask actually needs.
+          body=$(curl -sS -w '\n%{http_code}' \
             -H "Authorization: Bearer $TAP_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/kordloom/homebrew-tap)
-          if [ "$code" = "200" ]; then
+          code=$(printf '%s' "$body" | tail -n1)
+          push=$(printf '%s' "$body" | sed '$d' | jq -r '.permissions.push // false')
+          if [ "$code" = "200" ] && [ "$push" = "true" ]; then
             echo "usable=true" >> "$GITHUB_OUTPUT"
           else
             echo "usable=false" >> "$GITHUB_OUTPUT"
-            echo "::warning title=Homebrew cask skipped::the tap token answered $code, so the cask is not published; rotate HOMEBREW_TAP_GITHUB_TOKEN"
+            echo "::warning title=Homebrew cask skipped::the tap token answered $code with push=$push, so the cask is not published; give HOMEBREW_TAP_GITHUB_TOKEN Contents write on kordloom/homebrew-tap"
           fi
 
       # Standard artifacts: cross-compiled binaries, a universal macOS binary, archives, SHA256SUMS,
