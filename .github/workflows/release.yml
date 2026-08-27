@@ -56,6 +56,32 @@ jobs:
           p12-file-base64: ${{ secrets.MACOS_CERTIFICATE }}
           p12-password: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
 
+      # A tap token that is set but no longer valid failed the whole release at its very last step,
+      # after every archive had already been uploaded. Everything after that step was skipped, so the
+      # release shipped without its desktop bundle and without BINARY_SHA256SUMS, which is the manifest
+      # `switchtender version --verify` reads: the published binary could not check itself, and the one
+      # thing that broke it was a convenience nobody installs from on release day. The cask must not be
+      # able to cost a release its own verification, so an unusable token is dropped here and
+      # skip_upload then leaves the cask alone rather than failing.
+      - name: Check the Homebrew tap token before it can fail the release
+        id: tap
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+        run: |
+          if [ -z "${TAP_TOKEN:-}" ]; then
+            echo "usable=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          code=$(curl -sS -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer $TAP_TOKEN" \
+            https://api.github.com/repos/kordloom/homebrew-tap)
+          if [ "$code" = "200" ]; then
+            echo "usable=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "usable=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Homebrew cask skipped::the tap token answered $code, so the cask is not published; rotate HOMEBREW_TAP_GITHUB_TOKEN"
+          fi
+
       # Standard artifacts: cross-compiled binaries, a universal macOS binary, archives, SHA256SUMS,
       # a keyless cosign signature, SBOMs, the Homebrew cask, and deb/rpm/apk packages.
       - name: Run GoReleaser
@@ -68,7 +94,9 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          # Empty when the probe above could not use it, which makes skip_upload true in
+          # .goreleaser.yaml rather than letting the cask fail the release.
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ steps.tap.outputs.usable == 'true' && secrets.HOMEBREW_TAP_GITHUB_TOKEN || '' }}
 
       # The desktop app is the one bespoke artifact: a double-clickable macOS bundle whose launcher
       # runs `switchtender desktop`. It is ad-hoc signed unless MACOS_SIGN_IDENTITY is set, in which
