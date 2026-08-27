@@ -24,6 +24,7 @@ the app at `/ui/docs`.
 | [Desktop](desktop.md) | Run SwitchTender as a local desktop app.|
 | [Features](features.md) | The full capability list.|
 | [Compliance mapping](compliance.md) | What the record shows for SOC 2, ISO 27001, and HIPAA change controls.|
+| [Threat model](threat-model.md) | Each homepage claim mapped to its mechanism, the adversaries defended against, and the limits.|
 | [Sample evidence pack](sample-evidence-pack.md) | What the evidence a reviewer samples actually looks like.|
 | [Advisory AI](ai.md) | The five AI features, the guarantees, providers, and what a model sees.|
 | [AI agents](agents.md) | Run an AI agent through the gate: one token, gated, chained, provable.|
