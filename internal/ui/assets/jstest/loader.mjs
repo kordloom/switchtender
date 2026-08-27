@@ -148,6 +148,15 @@ function makeSandbox() {
 		Event: class Event {
 			constructor(type, init) { Object.assign(this, makeEvent(type, init)); }
 		},
+		// CustomEvent carries a detail payload. The list tables announce a changed visible set with
+		// one, so without it every facet tick threw and the pager could not be driven through the
+		// control that actually fires it.
+		CustomEvent: class CustomEvent {
+			constructor(type, init) {
+				Object.assign(this, makeEvent(type, init));
+				this.detail = (init && init.detail) !== undefined ? init.detail : null;
+			}
+		},
 		// Observers record what they were asked to watch and never fire, so anything depending on
 		// one has to be driven directly.
 		MutationObserver: class MutationObserver {
