@@ -290,18 +290,26 @@ func Check(prev *Checkpoint, server string, beats []Beat, now time.Time) (*Check
 	// interval means the beats stopped, the server is replaying a fixed answer, or the chain is frozen.
 	// The witness cannot tell which from here, and does not guess: it reports that the feed has not
 	// moved and for how long.
-	if prev != nil && prev.LastBeat > 0 && next.LastBeat == prev.LastBeat &&
-		next.LastSeq == prev.LastSeq && next.LastHead == prev.LastHead &&
-		!prev.ObservedAt.IsZero() && now.Sub(prev.ObservedAt) > StaleAfter {
+	// The observation time belongs to the newest distinct head, not to the poll that happened to look
+	// at it. It was carried forward only once a finding had already been raised, so every poll that
+	// found the feed unmoved stamped the current time and the next poll measured the gap between two
+	// consecutive polls. That is the poll interval, which is always well under StaleAfter in any sane
+	// configuration, so the elapsed time never accumulated and this check could not fire: a frozen
+	// chain, a stopped beat writer, or a server replaying one fixed answer was signed as healthy
+	// forever, with Blind false and no findings. Carrying it forward whenever the head is unchanged is
+	// what lets the duration grow.
+	unmoved := prev != nil && prev.LastBeat > 0 && next.LastBeat == prev.LastBeat &&
+		next.LastSeq == prev.LastSeq && next.LastHead == prev.LastHead
+	if unmoved && !prev.ObservedAt.IsZero() {
+		next.ObservedAt = prev.ObservedAt
+	}
+	if unmoved && !prev.ObservedAt.IsZero() && now.Sub(prev.ObservedAt) > StaleAfter {
 		findings = append(findings, Finding{Kind: "stalled_feed", Detail: fmt.Sprintf(
 			"beat %d at chain position %d has been the newest since %s, %s ago, so the feed has "+
 				"stopped moving: either the beats stopped, the chain stopped appending, or this "+
 				"answer is a replay", next.LastBeat, next.LastSeq,
 			prev.ObservedAt.UTC().Format(time.RFC3339), now.Sub(prev.ObservedAt).Round(time.Minute)),
 			Key: fmt.Sprintf("stalled_feed at beat %d", next.LastBeat)})
-		// The witnessed time is not advanced past the observation that first stood still, so the
-		// finding keeps naming when the feed actually stopped rather than resetting each poll.
-		next.ObservedAt = prev.ObservedAt
 	}
 
 	// Forget the oldest remembered positions past the cap, never the newest.
