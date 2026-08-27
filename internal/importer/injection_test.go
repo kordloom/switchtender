@@ -403,7 +403,7 @@ func TestRRULEWeeklyAndDailyKeepTheirDaySet(t *testing.T) {
 // TestAWXInventoryKeepsGroupVarsAndChildren pins that an inventory's own variables, a group's
 // variables, and the groups nested under it survive the import.
 //
-// Only host-level variables were modelled, so an export carrying all-group variables, group
+// Only host-level variables were modeled, so an export carrying all-group variables, group
 // variables, and a child group imported with all three silently gone and nothing warned. A playbook
 // reading a group variable then ran with the wrong value or none at all, and a play targeting a
 // parent group reached none of the child group's hosts, which is the failure that looks like the
