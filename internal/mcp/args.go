@@ -7,6 +7,8 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+
+	"github.com/kordloom/switchtender/internal/run"
 )
 
 // object builds a JSON Schema object for a tool's arguments. A tool taking nothing still declares an
@@ -86,8 +88,11 @@ func argHint(msg string) string {
 	return ""
 }
 
-// everyHostPatterns are the Ansible spellings of "no narrowing at all".
-var everyHostPatterns = map[string]bool{"all": true, "*": true, "all:*": true, "*:all": true}
+// everyHostPatterns was four literal spellings of "no narrowing at all", which an agent walks around
+// by writing a fifth: "all:all", "all,all", "*:*" and "all:!nogroup" all reach every host and none of
+// them were in the list. The reading now comes from run.WholeInventoryLimit, the same function the
+// risk grade uses, so a pattern that widens the run is refused here and graded wide there rather than
+// the two disagreeing about what "all" means.
 
 // checkLimit refuses a host pattern that widens what a template may touch rather than narrowing it.
 //
@@ -105,7 +110,7 @@ func checkLimit(ctx context.Context, c *Client, templateID, limit string) error 
 	if limit == "" {
 		return nil
 	}
-	if everyHostPatterns[strings.ToLower(limit)] {
+	if run.WholeInventoryLimit(limit) {
 		return fmt.Errorf("limit %q means every host, which widens the run rather than narrowing it: "+
 			"name the hosts this run should touch, or leave limit out to use the template's own target",
 			limit)

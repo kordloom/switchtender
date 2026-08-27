@@ -60,7 +60,7 @@ func AssessRisk(r *Run) Risk {
 
 	// A wide target multiplies the blast radius: a mutating run against every host, or a large fan
 	// out, is at least medium.
-	if r.Limit == "" && NormalizeTool(r.Tool) == ToolAnsible {
+	if WholeInventoryLimit(r.Limit) && NormalizeTool(r.Tool) == ToolAnsible {
 		reasons = append(reasons, "targets the whole inventory, no limit")
 		level = raise(level, RiskMedium)
 	}
@@ -82,4 +82,34 @@ func raise(cur, next string) string {
 		return next
 	}
 	return cur
+}
+
+// WholeInventoryLimit reports whether an Ansible limit pattern still selects the whole inventory.
+//
+// The blast radius test used to read emptiness, so "--limit all", which is the same instruction
+// written out, graded a whole-fleet run as low risk and passed under every rule keyed on a minimum
+// risk. It is not an exotic input either: naming the target explicitly is a common habit, so the
+// widest run a person can ask for was the one the gate was least likely to hold.
+//
+// A pattern only narrows when it names something other than everything. Terms are separated by a
+// colon or a comma, a leading "!" excludes and a leading "&" intersects rather than selects, and both
+// "all" and "*" name the entire inventory. A pattern of nothing but exclusions still starts from
+// everything, so it counts as whole-inventory too: it is wide, and grading wide runs high is the
+// direction a risk gate should err in.
+func WholeInventoryLimit(limit string) bool {
+	trimmed := strings.TrimSpace(limit)
+	if trimmed == "" {
+		return true
+	}
+	terms := strings.FieldsFunc(trimmed, func(r rune) bool { return r == ':' || r == ',' })
+	for _, term := range terms {
+		term = strings.ToLower(strings.TrimSpace(term))
+		if term == "" || term[0] == '!' || term[0] == '&' {
+			continue
+		}
+		if term != "all" && term != "*" {
+			return false
+		}
+	}
+	return true
 }
