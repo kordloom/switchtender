@@ -125,6 +125,19 @@ func ControlOffHost(_, address string, _ syscall.RawConn) error {
 	return BlockedOffHost(address)
 }
 
+// OffHostTransport returns a transport that refuses an unsafe address and this server itself at the
+// dial, for a caller that supplies its own client. A git remote needs one: the library dials on its
+// own schedule and takes a transport rather than a client with a redirect policy.
+func OffHostTransport() *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.DialContext = (&net.Dialer{
+		Timeout:   dialTimeout,
+		KeepAlive: dialTimeout,
+		Control:   ControlOffHost,
+	}).DialContext
+	return t
+}
+
 // OffHostClient returns an HTTP client for a caller-supplied URL: it refuses an unsafe address,
 // refuses this server itself, and does not follow redirects.
 func OffHostClient(timeout time.Duration) *http.Client {
