@@ -352,6 +352,15 @@ func verifyBundleTree(b *Bundle) (bool, int64) {
 	if b.Chain == nil {
 		return false, 0
 	}
+	// A receipt that discloses nothing proves nothing, so it must not report that nothing was
+	// altered. With no claims the fold below never runs and every check it performs is skipped, so
+	// this returned true for any head at all: a document naming an arbitrary sequence and root,
+	// signed by its author, read as VERIFIED backed by no entry, and the head it named was then
+	// admissible as an anchor coordinate. The linear profile refuses an empty bundle for the same
+	// reason, and this is the tree profile's half of that rule.
+	if len(b.Claims) == 0 {
+		return false, 0
+	}
 	installID := b.Producer.InstallID
 	if installID == "" || b.Chain.Params["install_id"] != installID {
 		return false, 0

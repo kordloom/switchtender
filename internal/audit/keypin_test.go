@@ -372,3 +372,44 @@ func TestForgedTreeLinkIsRefused(t *testing.T) {
 		t.Error("an anchor over a forged link reported as satisfied")
 	}
 }
+
+// TestEmptyTreeReceiptIsRefused pins that a sparse receipt disclosing nothing cannot report VERIFIED.
+//
+// The fold loop is the whole of the tree profile's evidence, so a bundle carrying no claims skipped
+// every check it performs and the terminal success ran anyway. Anyone able to sign could publish a
+// document naming an arbitrary sequence and root, have it read as "nothing has been altered", and
+// then place a genuine third-party anchor over the head it invented, because a head admitted by the
+// chain check is admissible as an anchor coordinate. A receipt is a claim about something; one that
+// discloses nothing is not a true claim about everything. The linear profile already refused this.
+func TestEmptyTreeReceiptIsRefused(t *testing.T) {
+	id := newTestIdentity(t, "producer")
+	chain := bundleChain(t)
+
+	doc, err := audit.BuildTreeBundle(chain, map[int64]bool{2: true}, id, "1.34.1",
+		audit.BundleSubject{Type: "run", ID: "run_1"},
+		time.Date(2026, 8, 11, 16, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("BuildTreeBundle() error = %v", err)
+	}
+	// Disclose nothing, and name a head nobody produced, which is what a fabricated attestation is.
+	doc.Claims = nil
+	doc.Chain.Head.Seq = 1000000
+	doc.Chain.Head.Link = strings.Repeat("ab", 32)
+	signed, err := audit.SignBundleDoc(doc, id.Private())
+	if err != nil {
+		t.Fatalf("SignBundleDoc() error = %v", err)
+	}
+
+	rep, err := audit.VerifyBundle(signed, id.KeyID())
+	if err != nil {
+		return // Refusing outright is a stronger answer than reporting a broken chain.
+	}
+	if rep.ChainOK {
+		t.Error("a sparse receipt disclosing no claims reported a good chain, so a signed document " +
+			"naming any head at all reads as verified")
+	}
+	if rep.AnchorsOK {
+		t.Error("an empty sparse receipt reported its anchors satisfied, so a fabricated head is " +
+			"anchorable")
+	}
+}
