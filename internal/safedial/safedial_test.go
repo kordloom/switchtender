@@ -1,6 +1,7 @@
 package safedial
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -52,5 +53,38 @@ func TestClientDoesNotFollowRedirects(t *testing.T) {
 	}
 	if err := c.CheckRedirect(nil, nil); err == nil || !strings.Contains(err.Error(), "last response") {
 		t.Errorf("CheckRedirect = %v, want the redirect refused", err)
+	}
+}
+
+// TestBlockedRefusesNonLinkLocalMetadataEndpoints pins the metadata addresses that are not link-local.
+//
+// The link-local test covers 169.254.169.254, which is what most of these attacks want, but Alibaba
+// answers on 100.100.100.200 and AWS serves an IPv6 metadata endpoint at fd00:ec2::254. Neither is
+// link-local, so on those platforms a configured URL pointed at the metadata service was dialed while
+// this package's own documentation said the endpoint was blocked. The private ranges stay allowed,
+// because a secrets agent on the loopback and a git host inside the network are the reason this
+// function is permissive there.
+func TestBlockedRefusesNonLinkLocalMetadataEndpoints(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Name    string
+		Address string
+		Want    bool
+	}{
+		{Name: "alibaba metadata", Address: "100.100.100.200:80", Want: true},
+		{Name: "aws ipv6 metadata", Address: "[fd00:ec2::254]:80", Want: true},
+		{Name: "link local metadata still blocked", Address: "169.254.169.254:80", Want: true},
+		{Name: "ordinary carrier space allowed", Address: "100.64.0.1:443", Want: false},
+		{Name: "private range still allowed", Address: "10.0.0.5:443", Want: false},
+		{Name: "loopback still allowed", Address: "127.0.0.1:8200", Want: false},
+	}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
+			t.Parallel()
+			err := Blocked(test.Address)
+			if got := err != nil; got != test.Want {
+				t.Errorf("Blocked(%q) blocked = %v, want %v (err = %v)", test.Address, got, test.Want, err)
+			}
+		})
 	}
 }
