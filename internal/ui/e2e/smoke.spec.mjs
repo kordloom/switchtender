@@ -55,9 +55,10 @@ test("clicking a run opens its detail page", async ({ page }) => {
   await page.goto("/ui/runs");
   const firstRun = page.locator("#runs tr.row-nav").first();
   await expect(firstRun).toBeVisible();
-  // The row is a role=link with a click handler that navigates to the run's detail, which is how an
-  // operator opens a run. Clicking the real element exercises that handler in the real engine.
-  await firstRun.click();
+  // Click the run's own id cell, the "Open run details" affordance, rather than the row's center,
+  // which lands on the origin chip: a chip is its own link and correctly opens templates, so opening
+  // the run means clicking the run, not its shortcut.
+  await firstRun.locator("td.mono").click();
   await expect(page).toHaveURL(/\/ui\/runs\/run_[0-9a-f]+$/);
   await expect(page.locator('[data-page="detail"]')).toBeVisible();
   // The detail page rendered its own content, not just the shell: the run header carries the run's
@@ -99,7 +100,7 @@ test("navigation and browser history move between pages", async ({ page }) => {
   // simulated DOM has neither of.
   await page.goto("/ui/runs");
   await expect(page.locator('[data-page="runs"]')).toBeVisible();
-  await page.locator("#runs tr.row-nav").first().click();
+  await page.locator("#runs tr.row-nav").first().locator("td.mono").click();
   await expect(page).toHaveURL(/\/ui\/runs\/run_[0-9a-f]+$/);
   await expect(page.locator('[data-page="detail"]')).toBeVisible();
   await page.goBack();
