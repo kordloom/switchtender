@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -187,5 +188,49 @@ func TestPlanGateHoldsImportPlan(t *testing.T) {
 				t.Errorf("applies = %d, want 1: an unheld apply did not run", n)
 			}
 		})
+	}
+}
+
+// TestCappedBufferHoldsALimitAndSaysWhenItStopped pins the bound on the plan the gate reads.
+//
+// The whole plan was buffered with no limit while the run's own log is capped, so a large or
+// deliberately inflated plan escaped the container's memory limit into the server heap and was copied
+// again to be parsed. Several gated applies at once could take the process down, and with it every
+// other run, the API, and the UI. The bound has to report that it stopped, because a truncated plan
+// must be treated as unweighed rather than judged from the part that fit.
+func TestCappedBufferHoldsALimitAndSaysWhenItStopped(t *testing.T) {
+	t.Parallel()
+
+	// Under the limit: everything is held and nothing is reported truncated.
+	small := &cappedBuffer{cap: 64}
+	line := []byte("Plan: 1 to add, 0 to change, 3 to destroy.")
+	n, err := small.Write(line)
+	if err != nil || n != len(line) {
+		t.Fatalf("Write() = %d, %v; want %d and no error", n, err, len(line))
+	}
+	if small.truncated {
+		t.Error("a buffer under its limit reported truncation")
+	}
+	if !strings.Contains(small.String(), "3 to destroy") {
+		t.Errorf("the summary was not held: %q", small.String())
+	}
+
+	// Over the limit: bounded, flagged, and still reporting the full write length so the writer it
+	// tees from is never told its output was short.
+	big := &cappedBuffer{cap: 1024}
+	huge := strings.Repeat("x", 5<<20)
+	n, err = big.Write([]byte(huge))
+	if err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+	if n != len(huge) {
+		t.Errorf("Write() reported %d of %d bytes; a short write would break the tee", n, len(huge))
+	}
+	if !big.truncated {
+		t.Error("a buffer past its limit did not report truncation, so a partial plan would be " +
+			"weighed as though it were whole")
+	}
+	if got := len(big.String()); got > 1024 {
+		t.Errorf("held %d bytes past a 1024 limit: the plan is not actually bounded", got)
 	}
 }

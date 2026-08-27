@@ -57,8 +57,8 @@ func (d *Dispatcher) planGatePolicies(ctx context.Context, r *run.Run) ([]*polic
 // proposed apply carries r's id in ProposedFrom so it never re-gates. This run finalizes as succeeded
 // because it ran a plan; a plan that cannot run finalizes as failed or canceled and proposes nothing.
 func (d *Dispatcher) executePlanGate(ctx context.Context, r *run.Run, policies []*policy.Policy) run.Status {
-	var plan bytes.Buffer
-	return d.streamSpec(ctx, r, true, &plan,
+	plan := &cappedBuffer{cap: planReadCap}
+	return d.streamSpec(ctx, r, true, plan,
 		func(res roundhouse.Result, runErr error, mask *masker, _ *run.SummaryFold) run.Status {
 			switch {
 			case runErr != nil && ctx.Err() != nil:
@@ -74,6 +74,14 @@ func (d *Dispatcher) executePlanGate(ctx context.Context, r *run.Run, policies [
 				return run.StatusFailed
 			}
 			destroys, read := parsePlanDestroys(plan.String())
+			// A plan too large to hold was never weighed, so it is not reported as weighed. The
+			// summary sits at the end and the parser also requires every summary line in the output
+			// to agree, so judging a truncated copy could both miss the answer and miss a
+			// disagreement. Declining is the existing fail-safe: an unreadable summary holds the
+			// apply for a person, which is what an unmeasured plan deserves.
+			if plan.truncated {
+				read = false
+			}
 			return d.proposeApply(ctx, r, policies, destroys, read, mask)
 		})
 }
@@ -267,3 +275,40 @@ func applyOptions(r *run.Run, policies []*policy.Policy, destroys int, read bool
 	}
 	return opts
 }
+
+// planReadCap bounds how much plan output is held in memory to read the summary from.
+//
+// The whole plan was buffered with no limit while the run's stored log is capped, so a large or
+// deliberately inflated plan escaped the container's memory limit into the server's heap, and
+// plan.String copied it again. Several gated applies at once could then take the process down, and
+// with it every other run, the API, and the UI. A few megabytes is far more than any real summary
+// needs and small enough that a fleet of them costs nothing.
+const planReadCap = 4 << 20
+
+// cappedBuffer accumulates up to cap bytes and remembers that it stopped, so a caller can tell a
+// complete answer from a partial one rather than reading a truncated copy as though it were whole.
+type cappedBuffer struct {
+	// buf holds what fit.
+	buf bytes.Buffer
+	// cap is the most that will be held.
+	cap int
+	// truncated reports that output was discarded, so what is held is not the whole of it.
+	truncated bool
+}
+
+// Write stores what fits and discards the rest, always reporting the full length so the writer it
+// tees from is never told its output was short.
+func (b *cappedBuffer) Write(p []byte) (int, error) {
+	if room := b.cap - b.buf.Len(); room > 0 {
+		if len(p) <= room {
+			b.buf.Write(p)
+			return len(p), nil
+		}
+		b.buf.Write(p[:room])
+	}
+	b.truncated = true
+	return len(p), nil
+}
+
+// String returns what was held.
+func (b *cappedBuffer) String() string { return b.buf.String() }
