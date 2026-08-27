@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
@@ -778,5 +780,61 @@ func testTrimSummaries(t *testing.T, store run.Store) {
 	}
 	if len(floored) != 1 || floored[0].RunID != runID(9) {
 		t.Errorf("busy history after zero keep = %+v, want only %s", floored, runID(9))
+	}
+}
+
+// testSummaryUnrepresentableText pins that a host or task name carrying a byte a text column cannot
+// hold is stored the same way on every backend.
+//
+// A run's own fields are cleaned by Run.Sanitize, but the summaries written beside it were not, and
+// their names are somebody else's: a host name comes from an imported or dynamic inventory and a task
+// name from a playbook. SQLite stores an arbitrary byte and PostgreSQL refuses it with SQLSTATE
+// 22021, so the same finished run recorded its fleet summary on one backend and silently lost it on
+// the other, while the run itself finalized and looked complete. The run was then absent from fleet
+// health, host history, and task trends on PostgreSQL alone, which is the cross-backend divergence
+// the contract exists to catch.
+func testSummaryUnrepresentableText(t *testing.T, store run.Store) {
+	t.Helper()
+	ctx := context.Background()
+	base := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	const badHost = "web\x0001"
+	const badTask = "Restart \xff service"
+
+	if err := store.SaveHostSummary(ctx, "rbad", []run.HostSummary{
+		{Host: badHost, OK: 1, Worst: "ok", RanAt: base},
+	}); err != nil {
+		t.Fatalf("SaveHostSummary() refused a host name carrying an unrepresentable byte: %v", err)
+	}
+	hosts, err := store.RunHostSummaries(ctx, "rbad")
+	if err != nil {
+		t.Fatalf("RunHostSummaries() error = %v", err)
+	}
+	if len(hosts) != 1 {
+		t.Fatalf("host summaries = %d, want 1: the summary was dropped rather than cleaned", len(hosts))
+	}
+	if strings.ContainsRune(hosts[0].Host, 0) || !utf8.ValidString(hosts[0].Host) {
+		t.Errorf("stored host %q still carries a byte a text column cannot hold", hosts[0].Host)
+	}
+
+	if err := store.SaveTaskSummary(ctx, "rbad", []run.TaskSummary{
+		{Task: badTask, Seconds: 1.5, RanAt: base},
+	}); err != nil {
+		t.Fatalf("SaveTaskSummary() refused a task name carrying an unrepresentable byte: %v", err)
+	}
+	tasks, err := store.RunTaskSummaries(ctx, "rbad")
+	if err != nil {
+		t.Fatalf("RunTaskSummaries() error = %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("task summaries = %d, want 1: the summary was dropped rather than cleaned", len(tasks))
+	}
+	if !utf8.ValidString(tasks[0].Task) {
+		t.Errorf("stored task %q is not valid UTF-8", tasks[0].Task)
+	}
+
+	if err := store.SaveHostFacts(ctx, "rbad", []run.HostFacts{
+		{Host: badHost, Facts: map[string]string{"distro": "deb\x00ian"}, GatheredAt: base},
+	}); err != nil {
+		t.Fatalf("SaveHostFacts() refused facts carrying an unrepresentable byte: %v", err)
 	}
 }

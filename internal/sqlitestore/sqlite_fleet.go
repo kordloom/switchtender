@@ -39,6 +39,9 @@ func scanHostSummary(rows *sql.Rows) (run.HostSummary, error) {
 // SaveHostSummary replaces the stored per host summaries for a run, stamping each row with the
 // run's dry-run flag so the drift view reads the summary alone and outlives the run record.
 func (s *store) SaveHostSummary(ctx context.Context, runID string, summaries []run.HostSummary) error {
+	// Cleaned here so both backends store the same bytes: a host or task name carries whatever an
+	// inventory or playbook called it, and PostgreSQL refuses a byte SQLite accepts.
+	run.SanitizeHostSummaries(summaries)
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("save host summary: %w", err)
@@ -193,6 +196,9 @@ SELECT host, changed, run_id, ran_at FROM checks WHERE rn = 1 ORDER BY changed D
 // SaveHostFacts records each host's gathered facts, replacing what was held before since the
 // newest gather is the truth about a host.
 func (s *store) SaveHostFacts(ctx context.Context, runID string, facts []run.HostFacts) error {
+	// Cleaned here so both backends store the same bytes: a host or task name carries whatever an
+	// inventory or playbook called it, and PostgreSQL refuses a byte SQLite accepts.
+	run.SanitizeHostFacts(facts)
 	if len(facts) == 0 {
 		return nil
 	}
@@ -327,6 +333,9 @@ SELECT run_id, task, seconds, ran_at FROM run_task_summary WHERE run_id = ? ORDE
 
 // SaveTaskSummary replaces the stored per task summaries for a run.
 func (s *store) SaveTaskSummary(ctx context.Context, runID string, summaries []run.TaskSummary) error {
+	// Cleaned here so both backends store the same bytes: a host or task name carries whatever an
+	// inventory or playbook called it, and PostgreSQL refuses a byte SQLite accepts.
+	run.SanitizeTaskSummaries(summaries)
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("save task summary: %w", err)
@@ -363,6 +372,9 @@ func (s *store) SaveTaskSummary(ctx context.Context, runID string, summaries []r
 // leaving the run's other rows in place, so a relay report continued across batches writes only its
 // batch instead of the whole growing set. It fences a terminal run and ignores an empty batch.
 func (s *store) AppendHostSummary(ctx context.Context, runID string, summaries []run.HostSummary) error {
+	// Cleaned here so both backends store the same bytes: a host or task name carries whatever an
+	// inventory or playbook called it, and PostgreSQL refuses a byte SQLite accepts.
+	run.SanitizeHostSummaries(summaries)
 	if len(summaries) == 0 {
 		return nil
 	}
@@ -410,6 +422,9 @@ ON CONFLICT(run_id, host) DO UPDATE SET
 // AppendTaskSummary upserts the given per-task summaries into the run's set, keyed by (run_id, task),
 // with the same fencing and empty-batch behavior as AppendHostSummary.
 func (s *store) AppendTaskSummary(ctx context.Context, runID string, summaries []run.TaskSummary) error {
+	// Cleaned here so both backends store the same bytes: a host or task name carries whatever an
+	// inventory or playbook called it, and PostgreSQL refuses a byte SQLite accepts.
+	run.SanitizeTaskSummaries(summaries)
 	if len(summaries) == 0 {
 		return nil
 	}

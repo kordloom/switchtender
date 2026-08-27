@@ -113,3 +113,60 @@ func (p *Progress) SanitizeText() {
 	p.Warning = util.SafeText(p.Warning)
 	p.Outputs = util.SafeAnyMap(p.Outputs)
 }
+
+// Sanitize replaces anything in a host summary's text fields that a text column cannot hold.
+//
+// The run's own fields go through Run.Sanitize, but the per-host and per-task summaries written
+// beside it did not, and they carry names this install did not choose: a host name comes from an
+// imported or dynamic inventory, and a task name comes from somebody's playbook. SQLite stores an
+// unrepresentable byte and PostgreSQL refuses it, so the same finished run recorded its fleet
+// summary on one backend and, on the other, failed the insert while the run itself finalized. The
+// caller logs and continues, so the run looked complete and was silently missing from fleet health,
+// drift, host history, task trends, and host costs, on PostgreSQL only.
+func (h *HostSummary) Sanitize() {
+	if h == nil {
+		return
+	}
+	h.Host = util.SafeText(h.Host)
+	h.Worst = util.SafeText(h.Worst)
+}
+
+// Sanitize replaces anything in a task summary's text fields that a text column cannot hold.
+func (t *TaskSummary) Sanitize() {
+	if t == nil {
+		return
+	}
+	t.Task = util.SafeText(t.Task)
+}
+
+// Sanitize replaces anything in a host's gathered facts that a text column cannot hold. The keys and
+// values both come from the target machine rather than from this install.
+func (f *HostFacts) Sanitize() {
+	if f == nil {
+		return
+	}
+	f.Host = util.SafeText(f.Host)
+	f.Facts = util.SafeStringMap(f.Facts)
+}
+
+// SanitizeHostSummaries cleans every summary in place, so a store writes the same bytes on every
+// backend from one call at its boundary.
+func SanitizeHostSummaries(in []HostSummary) {
+	for i := range in {
+		in[i].Sanitize()
+	}
+}
+
+// SanitizeTaskSummaries cleans every task summary in place.
+func SanitizeTaskSummaries(in []TaskSummary) {
+	for i := range in {
+		in[i].Sanitize()
+	}
+}
+
+// SanitizeHostFacts cleans every host's facts in place.
+func SanitizeHostFacts(in []HostFacts) {
+	for i := range in {
+		in[i].Sanitize()
+	}
+}

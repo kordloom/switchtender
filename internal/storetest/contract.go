@@ -40,6 +40,9 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Run("fleet health ranking", func(t *testing.T) { testFleetHealth(t, newStore()) })
 	t.Run("run summaries round trip", func(t *testing.T) { testRunSummaries(t, newStore()) })
 	t.Run("append summaries accumulate", func(t *testing.T) { testAppendSummaries(t, newStore()) })
+	t.Run("unrepresentable text in a summary stores the same on every backend", func(t *testing.T) {
+		testSummaryUnrepresentableText(t, newStore())
+	})
 	t.Run("reclaim attribution is exact", func(t *testing.T) { testReclaimAttribution(t, newStore()) })
 	t.Run("drift status", func(t *testing.T) { testDriftStatus(t, newStore()) })
 	t.Run("drift and fleet health agree after a purge", func(t *testing.T) {

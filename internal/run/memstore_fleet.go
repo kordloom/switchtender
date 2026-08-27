@@ -63,6 +63,9 @@ func (m *memStore) RunHostSummaries(_ context.Context, runID string) ([]HostSumm
 // SaveHostSummary replaces the stored per host summaries for a run, stamping each row with the
 // run's id and its dry-run flag so later reads need nothing from the run record itself.
 func (m *memStore) SaveHostSummary(_ context.Context, runID string, summaries []HostSummary) error {
+	// Cleaned here so every backend stores the same bytes for the same input, the way Save does for
+	// the run itself.
+	SanitizeHostSummaries(summaries)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	r, known := m.runs[runID]
@@ -90,6 +93,9 @@ func (m *memStore) SaveHostSummary(_ context.Context, runID string, summaries []
 // SaveHostSummary, so a relay report continued across batches accumulates the same way it would in a
 // persisting store.
 func (m *memStore) AppendHostSummary(_ context.Context, runID string, summaries []HostSummary) error {
+	// Cleaned here so every backend stores the same bytes for the same input, the way Save does for
+	// the run itself.
+	SanitizeHostSummaries(summaries)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	r, known := m.runs[runID]
@@ -233,6 +239,9 @@ func (m *memStore) DriftStatus(_ context.Context) ([]HostDrift, error) {
 // SaveHostFacts records each host's gathered facts, replacing whatever was held before, since the
 // newest gather is the truth about a host.
 func (m *memStore) SaveHostFacts(_ context.Context, runID string, facts []HostFacts) error {
+	// Cleaned here so every backend stores the same bytes for the same input, the way Save does for
+	// the run itself.
+	SanitizeHostFacts(facts)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.facts == nil {
@@ -304,6 +313,9 @@ func (m *memStore) RunTaskSummaries(_ context.Context, runID string) ([]TaskSumm
 
 // SaveTaskSummary replaces the stored per task summaries for a run.
 func (m *memStore) SaveTaskSummary(_ context.Context, runID string, summaries []TaskSummary) error {
+	// Cleaned here so every backend stores the same bytes for the same input, the way Save does for
+	// the run itself.
+	SanitizeTaskSummaries(summaries)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if r, ok := m.runs[runID]; ok && r.Status.Terminal() {
@@ -326,6 +338,9 @@ func (m *memStore) SaveTaskSummary(_ context.Context, runID string, summaries []
 // AppendTaskSummary upserts the given per-task summaries into the run's set, keyed by task, leaving
 // tasks already recorded in place, with the same fencing and empty-batch behavior as SaveTaskSummary.
 func (m *memStore) AppendTaskSummary(_ context.Context, runID string, summaries []TaskSummary) error {
+	// Cleaned here so every backend stores the same bytes for the same input, the way Save does for
+	// the run itself.
+	SanitizeTaskSummaries(summaries)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if r, ok := m.runs[runID]; ok && r.Status.Terminal() {
