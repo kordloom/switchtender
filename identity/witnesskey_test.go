@@ -1,6 +1,9 @@
 package identity_test
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/kordloom/switchtender/identity"
@@ -94,5 +97,43 @@ func TestWitnessKeyIsItsOwnFile(t *testing.T) {
 	}
 	if alone.KeyID() == witnessKey.KeyID() {
 		t.Error("two witnesses in different directories share a key")
+	}
+}
+
+// TestWitnessRefusesTheProducerKeyCopiedIntoItsFile pins the last line of the separation, the one
+// that fires when the two files hold the same key rather than merely sharing a directory.
+//
+// The distinct filename stops a witness from reading the producer file by accident. It does not stop
+// somebody copying producer-key.json over witness-key.json, by a careless deploy script or a restore
+// that fanned one key across a directory. A witness that then signed with it would countersign the
+// server it watches, and its output would look correct: the file it wanted, holding a valid key. The
+// loader refuses that key instead of using it, so the failure is loud and at startup rather than a
+// silent forgery. Without this test the whole separation could be reverted to a plain read and only
+// the accidental-read cases would notice.
+func TestWitnessRefusesTheProducerKeyCopiedIntoItsFile(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	// A server identity, written where a server writes it.
+	if _, err := identity.LoadFile(dir); err != nil {
+		t.Fatalf("LoadFile() error = %v", err)
+	}
+
+	// Somebody copies the producer key over the witness key, so both files hold the same seed.
+	producerBytes, err := os.ReadFile(filepath.Join(dir, identity.File))
+	if err != nil {
+		t.Fatalf("read %s: %v", identity.File, err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, identity.WitnessFile), producerBytes, 0o600); err != nil {
+		t.Fatalf("write %s: %v", identity.WitnessFile, err)
+	}
+
+	_, err = identity.LoadWitnessFile(dir)
+	if err == nil {
+		t.Fatal("a witness whose key file is a copy of the producer's was accepted, so it would " +
+			"countersign the server it watches")
+	}
+	if !strings.Contains(err.Error(), "same key") {
+		t.Errorf("refusal did not name the reason: %v", err)
 	}
 }
