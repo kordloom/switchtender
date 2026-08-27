@@ -175,3 +175,37 @@ func TestExplainIntentProposal(t *testing.T) {
 		}
 	}
 }
+
+// TestProposedRunCarriesTheRequestersAccount pins that an AI proposal records who asked for it, not
+// only what they are called.
+//
+// Separation of duties compares accounts: sameActor prefers UserID and falls back to the display name
+// only when one side has no account. A proposal that stored a name alone therefore let its own
+// requester release it, because the fallback compared the browser session's username against the
+// token label the run was created under and those never match. That is the ordinary arrangement, an
+// admin holding a CI token and a browser session, and it left the one control between a generated
+// command and production not applying at all.
+func TestProposedRunCarriesTheRequestersAccount(t *testing.T) {
+	t.Parallel()
+	good := ai.ProviderFunc(func(_ context.Context, _, _ string) (string, error) {
+		return `{"tool":"bash","command":"systemctl restart nginx","summary":"Restart nginx"}`, nil
+	})
+	fake := &fakeSubmitter{run: &run.Run{ID: "run_prop", Status: run.StatusPendingApproval}}
+	handler := New(run.NewMemStore(), fake, zap.NewNop(), WithAI(good)).Handler()
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/ai/propose-run",
+		strings.NewReader(`{"intent":"restart nginx"}`))
+	req = req.WithContext(context.WithValue(req.Context(), actorKey{},
+		Actor{UserID: "usr_alice", Name: "alice-ci", Type: "token"}))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("propose status = %d, want 202: %s", rec.Code, rec.Body.String())
+	}
+	if fake.gotRun.ActorUserID != "usr_alice" {
+		t.Errorf("proposed run ActorUserID = %q, want %q; without it the distinct-approver check "+
+			"falls back to name comparison and the requester can release their own proposal",
+			fake.gotRun.ActorUserID, "usr_alice")
+	}
+}

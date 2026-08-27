@@ -98,6 +98,12 @@ func proposeRunHandler(submitter Submitter, provider ai.Provider, log *zap.Logge
 			run.WithSource("propose", ""),
 			run.WithActor(actorName(r)),
 			run.WithActorType(actorType(r)),
+			// The account, not only the display name. Separation of duties compares accounts, so a
+			// proposal that carried a name alone let its own requester release it: the rule fell back
+			// to matching a credential label against a username, which never matches, and the one
+			// control standing between a generated command and production stopped applying. Every
+			// other submit path records it; this one is where an AI proposal enters.
+			run.WithActorAccount(actorAccount(r)),
 		}
 		created, err := submitter.Submit(r.Context(), proposal.Playbook, "", opts...)
 		if err != nil {

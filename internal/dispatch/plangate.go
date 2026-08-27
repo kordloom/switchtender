@@ -250,7 +250,13 @@ func applyOptions(r *run.Run, policies []*policy.Policy, destroys int, read bool
 	// approval policy could not match it, and its chain entries named no requester. The plan's actor is
 	// the truthful answer, for the same reason its receipt and its organization are.
 	if r.Actor != "" {
-		opts = append(opts, run.WithActor(r.Actor), run.WithActorType(r.ActorType))
+		// The account travels with the name. Separation of duties compares accounts, so an apply that
+		// inherited only the display name let the person who submitted the plan release the apply that
+		// destroys the infrastructure: the distinct-approver rule compared a credential label against
+		// a username, never matched, and the chain then recorded the release as correctly approved.
+		// This is the highest blast radius run the gate governs, so it is the last place to lose it.
+		opts = append(opts, run.WithActor(r.Actor), run.WithActorType(r.ActorType),
+			run.WithActorAccount(r.ActorUserID))
 	}
 	// And it is pinned to the commit the plan was read from. An approver reads a plan and releases the
 	// apply on the strength of what it said it would destroy; without a pin the apply re-syncs the
