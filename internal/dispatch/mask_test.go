@@ -469,3 +469,57 @@ func TestLogSinkReleasesHeldOutput(t *testing.T) {
 	}
 	t.Fatal("held output was never released, so a slow run shows a blank log")
 }
+
+// TestRunMasksSecretPassedAsExtraVar pins that a secret the operator hands the run directly is held
+// back from the log, not only a secret that arrived through a stored credential or an inventory.
+//
+// Passing a password as an extra var is an ordinary way to run a playbook, and a survey field
+// collects one the same way. The receipt already redacts those values, so the chain and the log
+// disagreed: the evidence showed the value masked while the stored log, the live stream, and every
+// export carried it in plaintext as soon as a debug task, a verbose run, or a failed task echoing
+// its module arguments printed it.
+func TestRunMasksSecretPassedAsExtraVar(t *testing.T) {
+	t.Parallel()
+	runner := roundhouse.RunnerFunc(
+		func(_ context.Context, _ roundhouse.Spec, out io.Writer) (roundhouse.Result, error) {
+			// What `debug: var=db_password` or a failed task's module arguments print.
+			_, _ = io.WriteString(out, "ok: [web01] => db_password: hunter2secret\n")
+			_, _ = io.WriteString(out, "cmd was psql --password=inlinepassword123\n")
+			return roundhouse.Result{ExitCode: 0}, nil
+		},
+	)
+
+	store := run.NewMemStore()
+	d := New(store, runner, nil)
+	defer d.Close()
+
+	created, err := d.Submit(context.Background(), "play.yml", "inv",
+		run.WithExtraVars(map[string]any{
+			"db_password": "hunter2secret",
+			"deploy_cmd":  "psql --password=inlinepassword123",
+			"env":         "prod",
+		}))
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+
+	got := waitTerminal(t, store, created.ID)
+	if got.Status != run.StatusSucceeded {
+		t.Fatalf("run status = %q, want succeeded", got.Status)
+	}
+	body, err := store.Log(context.Background(), created.ID)
+	if err != nil {
+		t.Fatalf("Log() error = %v", err)
+	}
+	logStr := string(body)
+	if strings.Contains(logStr, "hunter2secret") {
+		t.Errorf("a secret passed as an extra var leaked into the stored log: %q", logStr)
+	}
+	if strings.Contains(logStr, "inlinepassword123") {
+		t.Errorf("a secret assigned inside an extra var's value leaked into the stored log: %q", logStr)
+	}
+	// The non-secret variable is untouched, so masking did not swallow ordinary output.
+	if !strings.Contains(logStr, "web01") {
+		t.Errorf("masking swallowed ordinary output: %q", logStr)
+	}
+}

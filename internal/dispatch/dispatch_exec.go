@@ -223,7 +223,14 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 		return fail(err)
 	}
 	defer invCleanup()
-	mask.set(invSecrets)
+	// The run's own request can carry a secret the credential and inventory paths never see, so it is
+	// registered here with them rather than only once credentials resolve: output written before that
+	// point is masked too.
+	ownSecrets := runOwnSecrets(r.ExtraVars, r.Command)
+	early := make([]string, 0, len(invSecrets)+len(ownSecrets))
+	early = append(early, invSecrets...)
+	early = append(early, ownSecrets...)
+	mask.set(early)
 
 	projectCleanup, err := d.resolveProject(r, &spec)
 	defer projectCleanup()
@@ -248,8 +255,12 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 	// runner that echoes a failed registry login leaks the password into the run's output the way
 	// every other credential is masked against. Both the run's and the project's pull credential
 	// have resolved onto the spec by now, so masking the effective login covers both.
-	allSecrets := append(secrets, registrySecrets(&spec)...)
-	mask.set(append(allSecrets, invSecrets...))
+	allSecrets := make([]string, 0, len(secrets)+len(invSecrets)+len(ownSecrets)+4)
+	allSecrets = append(allSecrets, secrets...)
+	allSecrets = append(allSecrets, registrySecrets(&spec)...)
+	allSecrets = append(allSecrets, invSecrets...)
+	allSecrets = append(allSecrets, ownSecrets...)
+	mask.set(allSecrets)
 
 	res, runErr := d.runner.Run(ctx, spec, sink)
 	// The masker holds back the end of each chunk so a secret split across two of them is caught
