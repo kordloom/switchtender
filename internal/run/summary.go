@@ -182,9 +182,23 @@ func FailedOutcome(worst string) bool {
 // FlipCount returns how many times the outcomes switch between failing and passing. The summaries
 // must already be ordered; the count is direction agnostic.
 func FlipCount(summaries []HostSummary) int {
+	outcomes := make([]string, len(summaries))
+	for i, s := range summaries {
+		outcomes[i] = s.Worst
+	}
+	return FlipOutcomes(outcomes)
+}
+
+// FlipOutcomes counts the switches between failing and passing across consecutive outcomes.
+//
+// It exists so a caller holding outcome strings rather than whole summaries counts flips the same
+// way FlipCount does. A view that recomputes a host's flakiness over a filtered window has to reach
+// the same answer as the store did over the full one, or the same host reads flaky on one page and
+// steady on another.
+func FlipOutcomes(outcomes []string) int {
 	flips := 0
-	for i := 1; i < len(summaries); i++ {
-		if FailedOutcome(summaries[i].Worst) != FailedOutcome(summaries[i-1].Worst) {
+	for i := 1; i < len(outcomes); i++ {
+		if FailedOutcome(outcomes[i]) != FailedOutcome(outcomes[i-1]) {
 			flips++
 		}
 	}

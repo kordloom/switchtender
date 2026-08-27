@@ -87,17 +87,11 @@ func fleetHandler(store run.Store, authz *authorizer, log *zap.Logger) http.Hand
 		// refused a 403 on by name.
 		shown := make([]run.HostHealth, 0, len(hosts))
 		for _, h := range hosts {
-			visible := make([]string, 0, len(h.RecentRuns))
-			for _, id := range h.RecentRuns {
-				if keep(id) {
-					visible = append(visible, id)
-				}
-			}
-			if len(visible) == 0 && len(h.RecentRuns) > 0 {
+			kept, ok := filterHostHealth(h, keep)
+			if !ok {
 				continue
 			}
-			h.RecentRuns = visible
-			shown = append(shown, h)
+			shown = append(shown, kept)
 		}
 		respondJSON(w, log, http.StatusOK,
 			fleetResponse{Hosts: shown, Count: len(shown), Window: window}, wantsPretty(r))
@@ -370,4 +364,51 @@ func hostFactsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.
 		}
 		respondJSON(w, log, http.StatusOK, facts, wantsPretty(r))
 	}
+}
+
+// filterHostHealth narrows one host's health to the runs keep admits, and reports whether the host
+// still has anything to show.
+//
+// Recent and RecentRuns are index-parallel by contract: entry i is the outcome of run i, and the host
+// page draws its sparkline by walking them together so every tick links to the run that produced it.
+// Compacting the ids and leaving the outcomes whole broke that pairing, so the ticks drew the full
+// outcome history against whichever ids survived and a tick labeled failed linked to a run that
+// succeeded, on the page whose entire job is pointing at the run that broke. The counts were worse:
+// failures, total, the flip count, and the last outcome all kept describing runs the caller is
+// refused by name, which is the invariant the handler's own comment claims to hold. Everything
+// derived from the pair is recomputed here over what survived, so the two cannot drift apart again.
+func filterHostHealth(h run.HostHealth, keep func(string) bool) (run.HostHealth, bool) {
+	visible := make([]string, 0, len(h.RecentRuns))
+	outcomes := make([]string, 0, len(h.RecentRuns))
+	failures := 0
+	for i, id := range h.RecentRuns {
+		if !keep(id) {
+			continue
+		}
+		outcome := ""
+		if i < len(h.Recent) {
+			outcome = h.Recent[i]
+		}
+		visible = append(visible, id)
+		outcomes = append(outcomes, outcome)
+		if run.FailedOutcome(outcome) {
+			failures++
+		}
+	}
+	// A host whose runs are all hidden is not shown at all. One that never carried run ids, which is
+	// history recorded before they were tracked, is left as it stands rather than emptied.
+	if len(visible) == 0 && len(h.RecentRuns) > 0 {
+		return run.HostHealth{}, false
+	}
+	if len(h.RecentRuns) == 0 {
+		return h, true
+	}
+	h.RecentRuns, h.Recent = visible, outcomes
+	h.Failures, h.Total = failures, len(visible)
+	h.Flips = run.FlipOutcomes(outcomes)
+	h.Flaky = h.Flips >= 2
+	if len(outcomes) > 0 {
+		h.LastOutcome = outcomes[0]
+	}
+	return h, true
 }

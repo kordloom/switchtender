@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"slices"
 	"testing"
-
 	"time"
 
 	"github.com/kordloom/switchtender/internal/grant"
@@ -142,5 +142,69 @@ func TestDerivedReadsRespectTheRunFilter(t *testing.T) {
 		t.Fatalf("derivedReadFilter() error = %v", ferr)
 	} else if any {
 		t.Error("a caller granted nothing is shown fleet-wide aggregates")
+	}
+}
+
+// TestFilterHostHealthKeepsOutcomesPairedWithTheirRuns pins that narrowing a host's health to the
+// runs a caller may read leaves the two index-parallel slices aligned.
+//
+// Recent and RecentRuns are paired by contract: entry i is the outcome of run i, and the host page
+// draws its sparkline by walking them together so every tick links to the run that produced it. The
+// ids were compacted and the outcomes left whole, so the ticks drew the full history against
+// whichever ids survived and a tick labeled failed linked to a run that succeeded, on the page whose
+// entire job is pointing at the run that broke. Failures, total, flips, and the last outcome were
+// worse still, since they kept describing runs the caller is refused by name.
+func TestFilterHostHealthKeepsOutcomesPairedWithTheirRuns(t *testing.T) {
+	t.Parallel()
+	// Newest first, the order the store returns: a failure the caller cannot read, then two runs it
+	// can. A correct filter leaves two outcomes, both "ok", paired with their own runs.
+	h := run.HostHealth{
+		Host:        "web01",
+		Recent:      []string{"failed", "ok", "ok"},
+		RecentRuns:  []string{"run_hidden", "run_seen", "run_older"},
+		Failures:    1,
+		Total:       3,
+		Flips:       1,
+		Flaky:       false,
+		LastOutcome: "failed",
+	}
+	keep := func(id string) bool { return id != "run_hidden" }
+
+	got, ok := filterHostHealth(h, keep)
+	if !ok {
+		t.Fatal("a host with readable runs was dropped entirely")
+	}
+	if len(got.Recent) != len(got.RecentRuns) {
+		t.Fatalf("%d outcomes against %d runs: the sparkline pairs them by index, so a tick carries "+
+			"another run's result", len(got.Recent), len(got.RecentRuns))
+	}
+	if want := []string{"run_seen", "run_older"}; !slices.Equal(got.RecentRuns, want) {
+		t.Fatalf("visible runs = %v, want %v", got.RecentRuns, want)
+	}
+	if want := []string{"ok", "ok"}; !slices.Equal(got.Recent, want) {
+		t.Errorf("outcomes = %v, want %v: the readable runs are shown with the hidden run's result",
+			got.Recent, want)
+	}
+	if got.Failures != 0 || got.Total != 2 {
+		t.Errorf("failures/total = %d/%d, want 0/2: the counts still describe a run this caller is "+
+			"refused by name", got.Failures, got.Total)
+	}
+	if got.LastOutcome != "ok" {
+		t.Errorf("last outcome = %q, want ok: it names a run the caller cannot read", got.LastOutcome)
+	}
+	if got.Flips != 0 || got.Flaky {
+		t.Errorf("flips/flaky = %d/%v, want 0/false: the host reads flaky on the strength of a run "+
+			"the caller cannot see", got.Flips, got.Flaky)
+	}
+
+	// A host whose runs are all hidden is not shown at all.
+	if _, ok := filterHostHealth(h, func(string) bool { return false }); ok {
+		t.Error("a host with no readable runs was still shown")
+	}
+
+	// History recorded before run ids were tracked carries none, and is left as it stands.
+	bare := run.HostHealth{Host: "old01", Recent: []string{"ok"}, Total: 1}
+	if kept, ok := filterHostHealth(bare, func(string) bool { return false }); !ok || kept.Total != 1 {
+		t.Error("a host recorded before run ids were tracked was emptied or dropped")
 	}
 }
