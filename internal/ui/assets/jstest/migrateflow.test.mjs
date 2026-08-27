@@ -74,3 +74,26 @@ test("a rejected migrate import hands Import back to the operator", async () => 
 	assert.equal(document.getElementById("migrate-status").textContent, "Imported 1 objects.");
 	net.assertClean();
 });
+
+test("the read-only demo keeps the client-side sample loader usable while blocking Import", () => {
+	// Load a sample export fills the box from a constant and calls no endpoint, so it is the one
+	// control on this page a demo visitor can use to see what an import looks like. applyReadOnly
+	// disabled every button in the form, which left its tip promising to fill the box while a click
+	// did nothing, and a visitor could not try the migration the demo exists to show. Import and
+	// Preview are POSTs the read-only server refuses, so they must stay disabled.
+	const { app, document } = loadPage("migrate", { parts: ALL_PARTS });
+	document.body.dataset.readonly = "true";
+	app.wireMigrate();
+	app.applyReadOnly();
+
+	const sample = document.getElementById("migrate-sample");
+	const apply = document.getElementById("migrate-apply");
+	assert.equal(sample.disabled, false, "Load a sample export was disabled in the demo, so its tip lied");
+	assert.equal(apply.disabled, true, "Import must stay disabled in the read-only demo");
+
+	fire(sample, "click");
+	assert.ok(
+		document.getElementById("migrate-export").value.length > 0,
+		"clicking Load a sample export in the demo did not fill the box",
+	);
+});
