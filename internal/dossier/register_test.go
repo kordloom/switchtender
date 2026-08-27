@@ -109,3 +109,47 @@ func TestRegisterTallies(t *testing.T) {
 		}
 	}
 }
+
+// TestRegisterRedactsAnInlineSecretInAScript pins that the change register does not publish a secret
+// a run's own script carried.
+//
+// A bash, python, powershell, or go run stores its whole script in Command, and a script holds
+// whatever it was written with. The register is the one document built to be mailed to an outside
+// auditor, and it printed that field verbatim in the Change column and copied it into the CSV export,
+// which is exactly the disclosure the dossier already redacts the same field to prevent. The two
+// documents describe the same run to the same reader and must not disagree about what is safe to
+// show.
+func TestRegisterRedactsAnInlineSecretInAScript(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	runs := run.NewMemStore()
+	audits := audit.NewMemStore()
+	base := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
+
+	if err := runs.Save(ctx, &run.Run{
+		ID: "run_secret", Tool: run.ToolBash, Status: run.StatusSucceeded,
+		Command:   "export DB_PASSWORD=hunter2secret\npsql -c 'select 1'",
+		CreatedAt: base, StartedAt: &base, EndedAt: &base,
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	in, err := CollectRegister(ctx, runs, audits, "", base.Add(-time.Hour), base.Add(time.Hour),
+		base.Add(time.Hour), 0)
+	if err != nil {
+		t.Fatalf("CollectRegister() error = %v", err)
+	}
+	if len(in.Runs) != 1 {
+		t.Fatalf("rows = %d, want 1", len(in.Runs))
+	}
+
+	// The rendered document is what reaches the auditor, and the CSV export is built from the same
+	// Change column, so this covers both.
+	html, err := RenderRegister(in)
+	if err != nil {
+		t.Fatalf("RenderRegister() error = %v", err)
+	}
+	if strings.Contains(string(html), "hunter2secret") {
+		t.Error("the rendered change register publishes a secret from the run's script")
+	}
+}
