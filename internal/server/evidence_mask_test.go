@@ -38,6 +38,10 @@ func TestRunEvidenceMasksNotificationSecrets(t *testing.T) {
 
 	const webhookSecret = "T000/B000/SLACKWEBHOOKSECRET"
 	const routingKey = "PAGERDUTY-ROUTING-KEY-SECRET"
+	// A bash, python, powershell, or go run stores its whole script in Command, and a script carries
+	// whatever it was written with. The HTML dossier redacts this field; the JSON shape returned it
+	// verbatim, and the JSON shape is exactly what the MCP get_run_evidence tool hands a model.
+	const inlineSecret = "hunter2-inline-db-password"
 
 	at := time.Date(2026, 8, 17, 9, 0, 0, 0, time.UTC)
 	creation := &audit.Entry{
@@ -50,7 +54,8 @@ func TestRunEvidenceMasksNotificationSecrets(t *testing.T) {
 
 	r := &run.Run{
 		ID: "run_notified", Playbook: "site.yml", Inventory: "prod", Status: run.StatusRunning,
-		Actor: "jane", ActorType: "session", AuditReceipt: audit.Receipt(creation),
+		Command: "export DB_PASSWORD=" + inlineSecret + "\npsql -c 'select 1'",
+		Actor:   "jane", ActorType: "session", AuditReceipt: audit.Receipt(creation),
 		CreatedAt: at, StartedAt: &at,
 		Notifications: []run.NotifyTarget{
 			{Kind: run.NotifySlack, URL: "https://hooks.slack.com/services/" + webhookSecret},
@@ -115,6 +120,7 @@ func TestRunEvidenceMasksNotificationSecrets(t *testing.T) {
 		}{
 			{"Slack webhook", webhookSecret},
 			{"PagerDuty routing key", routingKey},
+			{"inline command secret", inlineSecret},
 		} {
 			if strings.Contains(body, secret.Value) {
 				t.Errorf("%s returns the run's %s in cleartext, which every other run route masks",

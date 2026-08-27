@@ -10,6 +10,7 @@ import (
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/dossier"
 	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/util"
 )
 
 // runEvidenceHandler renders one run's evidence dossier as a self-contained HTML document, so the
@@ -55,7 +56,13 @@ func runEvidenceHandler(store run.Store, audits audit.Store, installID string, a
 		// is a bearer secret by itself and a target's key is a routing key or API token, and this route
 		// admits the non-admin who fired the run, which is exactly who the masking is for. Masking only
 		// the JSON would leave the next thing rendered from this record to rediscover it.
-		in.Run = maskRun(in.Run)
+		//
+		// The script is masked here for the same reason and in the same place. A bash, python,
+		// powershell, or go run keeps its whole script in Command, and a script holds whatever it was
+		// written with: an inline password, a connection string, a token on a command line. The HTML
+		// dossier redacts it, so the two shapes of one endpoint disagreed about what was safe to
+		// disclose, and the JSON shape is the one an AI agent reads through get_run_evidence.
+		in.Run = redactRunCommand(maskRun(in.Run))
 		// The dossier is an HTML page for a person. A caller that asks for JSON gets the same collected
 		// record as data, which is what a program, and an AI agent above all, can actually read: the
 		// tool that reads a run's evidence used to hand a model a page of markup.
@@ -136,4 +143,19 @@ func parseRegisterTime(raw string) (time.Time, error) {
 		return t, nil
 	}
 	return time.Parse(time.RFC3339, raw)
+}
+
+// redactRunCommand returns rn with any secret assigned inside its script masked, copied so the stored
+// record is left alone. A run whose script carries nothing to mask is returned untouched.
+func redactRunCommand(rn *run.Run) *run.Run {
+	if rn == nil || rn.Command == "" {
+		return rn
+	}
+	masked, _ := util.RedactAssignments(rn.Command, "[redacted]")
+	if masked == rn.Command {
+		return rn
+	}
+	cp := *rn
+	cp.Command = masked
+	return &cp
 }
