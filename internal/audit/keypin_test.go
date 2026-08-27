@@ -1,6 +1,7 @@
 package audit_test
 
 import (
+	"encoding/base64"
 	"strings"
 	"testing"
 	"time"
@@ -412,4 +413,63 @@ func TestEmptyTreeReceiptIsRefused(t *testing.T) {
 		t.Error("an empty sparse receipt reported its anchors satisfied, so a fabricated head is " +
 			"anchorable")
 	}
+}
+
+// TestReceiptReSignedUnderAnotherKeyIsRefused pins that a bundle's install id has to belong to the
+// key that signed it.
+//
+// The lift this closes is quieter than rewriting the producer outright. Take somebody else's
+// receipt, leave its install id alone in both the producer block and the chain params, swap only the
+// public key and its fingerprint for your own, and re-sign. Every check still passed: the signature
+// is genuine because it is yours, the declared fingerprint matches the key you embedded, the leaves
+// still fold because they keep hashing under the install id you did not touch, and the anchors still
+// hold because they are over links you did not touch either. A relying party pinning your key then
+// read another install's history, and its genuine third-party anchors, as vouched for by you.
+func TestReceiptReSignedUnderAnotherKeyIsRefused(t *testing.T) {
+	victim := newTestIdentity(t, "victim")
+	attacker := newTestIdentity(t, "attacker")
+	chain := bundleChain(t)
+
+	doc, err := audit.BuildBundle(chain, victim, "1.34.1",
+		time.Date(2026, 8, 11, 16, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("BuildBundle() error = %v", err)
+	}
+	// Swap only the key material. The victim's install id stays exactly where it was.
+	doc.Producer.PublicKey = base64.StdEncoding.EncodeToString(attacker.Public())
+	doc.Producer.KeyID = attacker.KeyID()
+	signed, err := audit.SignBundleDoc(doc, attacker.Private())
+	if err != nil {
+		t.Fatalf("SignBundleDoc() error = %v", err)
+	}
+
+	// Pinned to the attacker's key, which is the trust a relying party would have been given.
+	if _, err := audit.VerifyBundle(signed, attacker.KeyID()); err == nil {
+		t.Fatal("a receipt re-signed under another key verified, so one install's history reads as " +
+			"vouched for by a key it never held")
+	}
+
+	// The control: the victim's own bundle, untouched, still verifies under the victim's pin.
+	honest, err := audit.SignBundleDoc(mustBuildBundle(t, chain, victim), victim.Private())
+	if err != nil {
+		t.Fatalf("SignBundleDoc(honest) error = %v", err)
+	}
+	rep, err := audit.VerifyBundle(honest, victim.KeyID())
+	if err != nil {
+		t.Fatalf("the honest bundle was refused: %v", err)
+	}
+	if !rep.ChainOK || !rep.SignatureOK {
+		t.Errorf("the honest bundle did not verify: chain=%v signature=%v", rep.ChainOK, rep.SignatureOK)
+	}
+}
+
+// mustBuildBundle builds a bundle or fails the test, so the control above reads in one line.
+func mustBuildBundle(t *testing.T, chain []*audit.Entry, id audit.Identity) *audit.Bundle {
+	t.Helper()
+	doc, err := audit.BuildBundle(chain, id, "1.34.1",
+		time.Date(2026, 8, 11, 16, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("BuildBundle() error = %v", err)
+	}
+	return doc
 }

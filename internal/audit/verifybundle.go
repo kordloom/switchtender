@@ -12,6 +12,7 @@ import (
 	"github.com/kordloom/loomseal/jcs"
 	"github.com/kordloom/loomseal/merkle"
 	"github.com/kordloom/loomseal/seal"
+	"github.com/kordloom/switchtender/identity"
 )
 
 // ErrVerify is returned when a bundle cannot be checked at all: it does not parse, or its producer
@@ -128,6 +129,19 @@ func VerifyBundle(signed []byte, pinnedKeyID string) (*BundleReport, error) {
 	if actual := seal.KeyID(pub); actual != b.Producer.KeyID {
 		return rep, fmt.Errorf("%w: bundle declares key %s but carries key %s",
 			ErrVerify, b.Producer.KeyID, actual)
+	}
+	// The install a bundle names has to be the install that key belongs to. The id is derived from
+	// the signing key, but nothing checked the two against each other, so the tie could be cut: keep
+	// somebody else's claims, leaves, and genuine anchors, swap the producer's public key and key id
+	// for your own, re-sign, and every remaining check still passed because the leaves keep hashing
+	// under the original install id the params still name. A relying party pinning the new key then
+	// read the original install's history as vouched for by a key that install never held.
+	//
+	// A bundle naming no install predates the binding and is left alone, which is the same
+	// grandfathering the per-claim check applies.
+	if b.Producer.InstallID != "" && b.Producer.InstallID != identity.InstallIDFromKey(pub) {
+		return rep, fmt.Errorf("%w: bundle names install %s, which is not the install key %s belongs to",
+			ErrVerify, b.Producer.InstallID, b.Producer.KeyID)
 	}
 	if pinnedKeyID != "" && pinnedKeyID != b.Producer.KeyID {
 		return rep, fmt.Errorf("%w: bundle is signed by %s, not the pinned key %s",

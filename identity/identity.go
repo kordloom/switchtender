@@ -267,6 +267,11 @@ func identityFromSeed(hexSeed, installID string) (Identity, error) {
 	return id, nil
 }
 
+// InstallIDFromKey returns the install id that belongs to a public key. A verifier needs it to check
+// that a bundle naming an install was signed by that install's key rather than by whoever re-signed
+// it, which is the tie the id alone does not make.
+func InstallIDFromKey(pub ed25519.PublicKey) string { return installIDFromKey(pub) }
+
 // installIDFromKey derives a stable install id from the public key, so the id needs no separate
 // management and always corresponds to the key that signs the bundles carrying it.
 func installIDFromKey(pub ed25519.PublicKey) string {
