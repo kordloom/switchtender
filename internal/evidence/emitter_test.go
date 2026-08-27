@@ -230,3 +230,49 @@ func TestPackNameRoundTripsItsPeriod(t *testing.T) {
 		t.Error("parsePeriod accepted a file that is not a pack")
 	}
 }
+
+// TestEmitterWritesItsFirstPackFromAnEmptyArchive pins the bootstrap, which nothing exercised.
+//
+// Every other test in this file calls Emit directly, which seeds the archive before the scheduler is
+// ever consulted, so none of them crossed the path a real install takes. From a clean directory
+// resume answered with the caller's own clock and emitDue compared that instant against itself, so
+// the elapsed time was zero on every tick and the first pack was never due. The feature was inert for
+// the life of the install while the server logged that periodic change registers were enabled: no
+// error, no warning, and an empty evidence directory a year later, by which time retention may have
+// trimmed the runs the packs would have covered.
+func TestEmitterWritesItsFirstPackFromAnEmptyArchive(t *testing.T) {
+	t.Parallel()
+	runs, audits, base := seedPeriod(t)
+	dir := t.TempDir()
+
+	clock := base
+	var written []string
+	e := NewEmitter(runs, audits, "", dir, time.Hour, nil,
+		WithClock(func() time.Time { return clock }),
+		WithNotify(func(p string, _, _ time.Time) { written = append(written, p) }))
+	defer e.Close()
+
+	if err := e.Start(); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	// Start stamps the period's origin and runs one immediate check, which must not emit: no cadence
+	// has passed yet.
+	if len(written) != 0 {
+		t.Fatalf("a pack was written before a cadence elapsed: %v", written)
+	}
+
+	// Walk past one cadence and ask again, the way the loop's ticker does.
+	clock = base.Add(90 * time.Minute)
+	e.emitDue()
+	if len(written) != 1 {
+		t.Fatalf("packs after one elapsed cadence = %d, want 1: an empty archive never becomes due, "+
+			"so the archive stays empty for the life of the install", len(written))
+	}
+
+	// And it keeps going rather than emitting once and stalling.
+	clock = base.Add(3 * time.Hour)
+	e.emitDue()
+	if len(written) < 2 {
+		t.Errorf("packs after a second cadence = %d, want at least 2", len(written))
+	}
+}

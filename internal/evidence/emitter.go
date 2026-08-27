@@ -54,6 +54,10 @@ type Emitter struct {
 	notify func(path string, from, to time.Time)
 	// now reads the clock, replaced in tests.
 	now func() time.Time
+	// started is when this emitter began watching, and is where the first period is measured from
+	// while the archive is still empty. Without it resume answered with the caller's own clock, so
+	// the elapsed time was zero on every tick and the first pack was never due.
+	started time.Time
 	// ctx and cancel stop the loop.
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -124,6 +128,10 @@ func (e *Emitter) Start() error {
 	if err := os.MkdirAll(e.dir, 0o750); err != nil {
 		return fmt.Errorf("evidence directory: %w", err)
 	}
+	// Stamped before the loop can tick, so an empty archive has a fixed point to measure the first
+	// period from. Reading the clock inside resume instead meant the start moved forward with every
+	// tick and a cadence could never elapse.
+	e.started = e.now()
 	e.wg.Go(func() {
 		// A short tick relative to the cadence, so a period that became due while the process was
 		// down is picked up promptly after a restart rather than a whole cadence later.
@@ -164,8 +172,16 @@ func (e *Emitter) emitDue() {
 	}
 }
 
-// resume returns the end of the newest pack in the archive, or now when the archive is empty, which
-// starts the first period from the moment the feature was switched on rather than from the epoch.
+// resume returns the end of the newest pack in the archive, or the moment this emitter started when
+// the archive is empty, which starts the first period from when the feature was switched on rather
+// than from the epoch.
+//
+// It used to answer with the caller's own clock. That reads as the same sentence and is not: emitDue
+// asks for the archive's progress and compares it against the same instant it just read, so on an
+// empty archive the elapsed time was zero on every tick and no cadence ever elapsed. The feature was
+// therefore inert from a clean install, for as long as the install ran, while the server logged that
+// periodic change registers were enabled. Nothing errored and nothing warned, and by the time anyone
+// looked for the packs the runs behind them may already have been trimmed by retention.
 func (e *Emitter) resume(now time.Time) (time.Time, error) {
 	entries, err := os.ReadDir(e.dir)
 	if err != nil {
@@ -181,7 +197,12 @@ func (e *Emitter) resume(now time.Time) (time.Time, error) {
 		}
 	}
 	if len(ends) == 0 {
-		return now, nil
+		// A fixed point, not the clock: see above. Zero only when Start was never called, which is a
+		// direct Emit caller, and answering with its own clock keeps that path as it was.
+		if e.started.IsZero() {
+			return now, nil
+		}
+		return e.started, nil
 	}
 	sort.Slice(ends, func(i, j int) bool { return ends[i].Before(ends[j]) })
 	return ends[len(ends)-1], nil
