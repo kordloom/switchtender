@@ -345,11 +345,13 @@ jobs:
       - name: Publish the Homebrew cask
         continue-on-error: true
         env:
-          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          # Either secret name works, newest-set first: the token was pasted under both names while
+          # it was being fixed, and a release should not fail its cask over which one stuck.
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN != '' && secrets.HOMEBREW_TAP_TOKEN || secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           if [ -z "${TAP_TOKEN:-}" ]; then
-            echo "cask skipped: HOMEBREW_TAP_GITHUB_TOKEN is not set"
+            echo "cask skipped: no tap token secret is set"
             exit 0
           fi
           cask="$(find dist -name 'switchtender.rb' -print -quit)"
