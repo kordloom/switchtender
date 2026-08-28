@@ -104,3 +104,67 @@ func TestOverrunGraceLetsTheExecutorFinishFirst(t *testing.T) {
 			got.Status)
 	}
 }
+
+// TestOverrunSweepLeavesSplitAndPipelineParents pins that the control-node timeout sweep never
+// settles a split or pipeline parent.
+//
+// A parent's running spans the whole fan-out, and it inherits the request timeout the same as any
+// run, so a fan-out that runs longer than one child's timeout used to settle the parent as failed
+// while its children were still progressing: a successful change permanently attested as timed out
+// on the tamper-evident chain, with pending children stranded under it. Each child carries the
+// timeout and is swept on its own; the lease sweep settles a dead coordinator.
+func TestOverrunSweepLeavesSplitAndPipelineParents(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := run.NewMemStore()
+
+	now := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
+	started := now.Add(-time.Hour) // well past a short timeout plus the grace
+	fresh := now.Add(-time.Second)
+
+	split := &run.Run{
+		ID: "run_split", Playbook: "site.yml", Kind: run.KindSplit, Status: run.StatusRunning,
+		CreatedAt: started, StartedAt: &started, ClaimedBy: "coordinator", ClaimedAt: &fresh,
+		Timeout: 60,
+	}
+	pipeline := &run.Run{
+		ID: "run_pipeline", Playbook: "release", Kind: run.KindPipeline, Status: run.StatusRunning,
+		CreatedAt: started, StartedAt: &started, ClaimedBy: "coordinator", ClaimedAt: &fresh,
+		Timeout: 60,
+	}
+	// A plain run in the same overrun state is still ended, so the guard is on the parent kind and
+	// not on something that also spares real overruns.
+	plain := &run.Run{
+		ID: "run_plain", Playbook: "site.yml", Status: run.StatusRunning,
+		CreatedAt: started, StartedAt: &started, ClaimedBy: "worker-a", ClaimedAt: &fresh,
+		Timeout: 60,
+	}
+	for _, r := range []*run.Run{split, pipeline, plain} {
+		if err := store.Save(ctx, r); err != nil {
+			t.Fatalf("Save(%s): %v", r.ID, err)
+		}
+	}
+
+	d := &Dispatcher{store: store, log: zap.NewNop(), ctx: ctx, now: func() time.Time { return now }}
+	d.settleOverrunning()
+
+	for _, id := range []string{"run_split", "run_pipeline"} {
+		r, err := store.Get(ctx, id)
+		if err != nil {
+			t.Fatalf("Get(%s): %v", id, err)
+		}
+		if r.Status != run.StatusRunning {
+			t.Errorf("%s was settled to %q by the overrun sweep: its fan-out legitimately outruns "+
+				"one child's timeout, and a false timed-out attestation is the exact failure the "+
+				"product exists to prevent", id, r.Status)
+		}
+	}
+	plainGot, err := store.Get(ctx, "run_plain")
+	if err != nil {
+		t.Fatalf("Get(run_plain): %v", err)
+	}
+	if plainGot.Status != run.StatusFailed {
+		t.Errorf("a plain run an hour past its timeout is still %q: the parent guard must not spare "+
+			"real overruns", plainGot.Status)
+	}
+}
