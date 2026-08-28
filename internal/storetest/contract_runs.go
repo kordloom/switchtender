@@ -1384,6 +1384,14 @@ func testRunTimings(t *testing.T, store run.Store) {
 	if !got[0].CreatedAt.After(got[1].CreatedAt) {
 		t.Errorf("timings are not newest first: %v then %v", got[0].CreatedAt, got[1].CreatedAt)
 	}
+	// The metrics histograms fold each run in exactly once and tell two runs that end in the same
+	// instant apart by id, so a backend that leaves it empty makes them count one run and drop the
+	// other, quietly and only under load.
+	for _, tm := range got {
+		if tm.ID == "" {
+			t.Errorf("timing carries no run id: %+v", tm)
+		}
+	}
 	var oldest run.RunTiming
 	for _, tm := range got {
 		if tm.Queue == "prod" {

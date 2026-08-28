@@ -237,7 +237,7 @@ func (m *memStore) RunTimings(_ context.Context, limit int) ([]RunTiming, error)
 	timings := make([]RunTiming, 0, len(out))
 	for _, r := range out {
 		timings = append(timings, RunTiming{
-			Status: r.Status, Kind: r.Kind, Queue: r.Queue, ClaimedBy: r.ClaimedBy,
+			ID: r.ID, Status: r.Status, Kind: r.Kind, Queue: r.Queue, ClaimedBy: r.ClaimedBy,
 			CreatedAt: r.CreatedAt, StartedAt: r.StartedAt, EndedAt: r.EndedAt,
 		})
 	}

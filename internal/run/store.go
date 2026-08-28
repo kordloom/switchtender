@@ -350,6 +350,9 @@ const (
 // started, when it ended, and how it is grouped. It is deliberately small, because it is read in
 // bulk on a schedule.
 type RunTiming struct {
+	// ID is the run's identifier, which a caller folding timings into a running total uses to tell
+	// two runs sharing an end instant apart.
+	ID string
 	// Status is the run's current status.
 	Status Status
 	// Kind distinguishes a coordinator parent from an executable run, which is empty.
