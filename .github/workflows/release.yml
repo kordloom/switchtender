@@ -120,33 +120,6 @@ jobs:
           p12-file-base64: ${{ secrets.MACOS_CERTIFICATE }}
           p12-password: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
 
-      # The cask is pushed to the tap by the last step of this job, after the release is public, so
-      # a bad tap token can no longer sink anything and the cask never points at a draft nobody can
-      # download. This probe only decides whether that final push is attempted. Readability is not
-      # the question: a token that can read the tap and not write it passes a plain GET and then
-      # fails the push with 403, so the probe asks for the right the push actually needs.
-      - name: Check whether the Homebrew tap token can push
-        id: tap
-        env:
-          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
-        run: |
-          if [ -z "${TAP_TOKEN:-}" ]; then
-            echo "usable=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          body=$(curl -sS -w '\n%{http_code}' \
-            -H "Authorization: Bearer $TAP_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/kordloom/homebrew-tap)
-          code=$(printf '%s' "$body" | tail -n1)
-          push=$(printf '%s' "$body" | sed '$d' | jq -r '.permissions.push // false')
-          if [ "$code" = "200" ] && [ "$push" = "true" ]; then
-            echo "usable=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "usable=false" >> "$GITHUB_OUTPUT"
-            echo "::warning title=Homebrew cask skipped::the tap token answered $code with push=$push, so the cask is not published; give HOMEBREW_TAP_GITHUB_TOKEN Contents write on kordloom/homebrew-tap"
-          fi
-
       # Standard artifacts: cross-compiled binaries, a universal macOS binary, archives, SHA256SUMS,
       # SBOMs, and deb/rpm/apk packages, assembled onto a draft release. The checksums signature is
       # made later in this job, after the dmg and BINARY_SHA256SUMS lines are appended, so exactly
@@ -364,17 +337,24 @@ jobs:
         run: gh release edit "$GITHUB_REF_NAME" --draft=false
 
       # The cask goes to the tap only after the release is public, so its download URL resolves the
-      # moment it lands, and a tap failure costs the cask alone, never the release.
+      # moment it lands, and a tap failure costs the cask alone, never the release. The step judges
+      # the token by attempting the push, not by probing beforehand: a fine-grained token that
+      # cannot write still shows push=true on the repository object, because that field reflects
+      # the owner's rights rather than the token's grants, so the old probe blessed a token the
+      # push then refused. A failure surfaces as a warning annotation instead of sinking anything.
       - name: Publish the Homebrew cask
-        if: steps.tap.outputs.usable == 'true'
         continue-on-error: true
         env:
           TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+          if [ -z "${TAP_TOKEN:-}" ]; then
+            echo "cask skipped: HOMEBREW_TAP_GITHUB_TOKEN is not set"
+            exit 0
+          fi
           cask="$(find dist -name 'switchtender.rb' -print -quit)"
           if [ -z "$cask" ]; then
-            echo "::warning title=Homebrew cask skipped::goreleaser rendered no cask file"
+            echo "::warning title=Homebrew cask not published::goreleaser rendered no cask file"
             exit 0
           fi
           sha="$(GH_TOKEN="$TAP_TOKEN" gh api \
@@ -383,7 +363,10 @@ jobs:
             -f message="Update switchtender to ${GITHUB_REF_NAME}"
             -f content="$(base64 -i "$cask" | tr -d '\n')")
           if [ -n "$sha" ]; then args+=(-f sha="$sha"); fi
-          GH_TOKEN="$TAP_TOKEN" gh api "${args[@]}" > /dev/null
+          if ! GH_TOKEN="$TAP_TOKEN" gh api "${args[@]}" > /dev/null; then
+            echo "::warning title=Homebrew cask not published::the tap push was refused; give HOMEBREW_TAP_GITHUB_TOKEN Contents read and write on kordloom/homebrew-tap"
+            exit 0
+          fi
           echo "cask updated on kordloom/homebrew-tap"
 
   # Multi-arch container images on ghcr.io. A separate Linux job because the release job runs on
