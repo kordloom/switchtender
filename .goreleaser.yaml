@@ -54,36 +54,30 @@ checksum:
   name_template: SHA256SUMS
   algorithm: sha256
 
-# Keyless cosign signature over the checksums, matching the current release. The workflow supplies
-# the ambient OIDC token, so no key material is stored.
-signs:
-  - cmd: cosign
-    certificate: "${artifact}.pem"
-    signature: "${artifact}.sig"
-    args:
-      - sign-blob
-      - "--output-certificate=${certificate}"
-      - "--output-signature=${signature}"
-      - "${artifact}"
-      - --yes
-    artifacts: checksum
-    output: true
+# The keyless cosign signature over SHA256SUMS is made by the workflow, not here. The workflow
+# appends the dmg and BINARY_SHA256SUMS lines to that file after this runs, so a signature made at
+# this point covers a document that no longer exists by the time anyone downloads it. Signing here
+# and again there also meant two different signed SHA256SUMS existed for one tag, with the second
+# overwriting the first on a live release. There is one signature now, over the finished file.
 
 sboms:
   - id: archives
     artifacts: archive
 
-# Homebrew cask, pushed to kordloom/homebrew-tap. It skips the push until the tap token secret
-# exists, so a release never fails just because the tap is not set up yet.
+# Homebrew cask, rendered here and pushed to kordloom/homebrew-tap by the workflow's final step,
+# after the release is public. Pushing from here twice cost a release: it ran inside the publish
+# phase, so a tap token problem, a 403 first and a stale token before that, failed the whole
+# release after every archive was already uploaded. The upload is always skipped now; the rendered
+# cask lands in dist for the workflow to push once nothing can be sunk by it.
 homebrew_casks:
   - name: switchtender
-    skip_upload: '{{ if isEnvSet "HOMEBREW_TAP_GITHUB_TOKEN" }}false{{ else }}true{{ end }}'
+    skip_upload: true
     repository:
       owner: kordloom
       name: homebrew-tap
-      # The workflow always defines this env var, empty when the secret is unset, in which case
-      # skip_upload already stops the publish. The token field's template context has no helper
-      # functions, so plain .Env is the only portable form.
+      # Unused while skip_upload is true, but the template must still resolve, so the workflow
+      # defines the env var empty. The token field's template context has no helper functions, so
+      # plain .Env is the only portable form.
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     homepage: "https://switchtender.com"
     description: "Run everything, watch every host, prove every change: one binary control plane for Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go."
@@ -116,6 +110,12 @@ release:
     owner: kordloom
     name: switchtender
   prerelease: auto
-  # The desktop .dmg is built and attached by the release workflow after this runs.
+  # Assembled as a draft and promoted by the workflow's last step. Publishing here instead put the
+  # release in front of users while three artifact-producing steps still had to run, so any failure
+  # in that tail landed on something already public and irreversible rather than on a draft. That is
+  # what shipped v1.69.0 without its dmg, without provenance, and without BINARY_SHA256SUMS, which
+  # is the manifest `switchtender version --verify` reads. The last thing that happens to a release
+  # is now that people can see it.
+  draft: true
 
 report_sizes: true

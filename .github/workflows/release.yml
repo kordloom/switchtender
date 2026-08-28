@@ -13,57 +13,119 @@ permissions:
 jobs:
   # A tag published whatever it pointed at. CI runs on pushes to main and on pull requests, so a tag
   # placed on an unmerged commit, or on main while it was red, went straight to a signed release with
-  # nothing having checked it. This is the same suite, run once against the exact commit being
-  # released, and everything else waits on it.
+  # nothing having checked it. This runs the suite once against the exact commit being released, and
+  # everything else waits on it.
+  #
+  # The suite here must actually be the suite. Without a database the PostgreSQL contract skips, and
+  # without a loomseal checkout the cross-verification against the reference verifier skips, so the
+  # gate was green while the two proofs a release rests on never ran. Both dependencies are provided
+  # here, and SWITCHTENDER_REQUIRE_FULL_SUITE turns their skips into failures so the gate cannot
+  # quietly regress into the smaller suite again.
+  #
+  # This is also the one job in the workflow that executes the repository's own test code, so it
+  # gets none of the workflow's write grants: no id-token that could mint a Fulcio certificate
+  # identical to a genuine release signature, no persisted contents token in .git/config.
   gate:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: switchtender
+          POSTGRES_PASSWORD: switchtender
+          POSTGRES_DB: switchtender
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U switchtender"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      SWITCHTENDER_TEST_POSTGRES_DSN: postgres://switchtender:switchtender@localhost:5432/switchtender?sslmode=disable
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
+      - name: Check out the loomseal version this module depends on
+        run: |
+          set -euo pipefail
+          version="$(go list -m -f '{{.Version}}' github.com/kordloom/loomseal)"
+          echo "cross-checking against loomseal $version"
+          git clone --quiet https://github.com/kordloom/loomseal.git "$RUNNER_TEMP/loomseal"
+          git -C "$RUNNER_TEMP/loomseal" checkout --quiet "$version"
+          echo "SWITCHTENDER_LOOMSEAL_REPO=$RUNNER_TEMP/loomseal" >> "$GITHUB_ENV"
       - name: Build
         run: go build ./...
       - name: Vet
         run: go vet ./...
       - name: Test
+        env:
+          SWITCHTENDER_REQUIRE_FULL_SUITE: "1"
         run: go test -race ./...
 
+  # The release job assembles everything as a draft and publishes at the very end. It used to
+  # publish in the middle: GoReleaser flipped the release public the moment its own uploads
+  # finished, while the dmg, BINARY_SHA256SUMS, and the provenance attestation were still to come,
+  # so any failure in that tail landed on a release users could already see. v1.69.0 shipped
+  # without all three because the very last thing GoReleaser did, a Homebrew cask push, answered
+  # 403. Now every failure before the final step leaves an unpublished draft that a human can
+  # inspect, repair, or delete, with nothing public and wrong.
+  #
+  # The tag guard makes workflow_dispatch on a branch a no-op for this job. Without it, a dispatch
+  # from main ran the whole job with the tag-gated steps silently skipped and reported success: a
+  # published release with no dmg, no manifest, and no attestation, from a button press. To re-run
+  # a release, dispatch against the tag ref itself.
   release:
     needs: gate
+    if: github.ref_type == 'tag'
     runs-on: macos-latest
-    env:
-      MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
-      MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
 
-      - uses: sigstore/cosign-installer@v3
-      - uses: anchore/sbom-action/download-syft@v0
+      - uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
+      - uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0
+
+      # The certificate is examined in a step whose env is the only place it appears, rather than
+      # sitting in job-wide env where every later step, GoReleaser and its plugins included, could
+      # read it.
+      - name: Probe for the Apple signing certificate
+        id: apple
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+        run: |
+          if [ -n "${MACOS_CERTIFICATE:-}" ]; then
+            echo "have=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "have=false" >> "$GITHUB_OUTPUT"
+          fi
 
       # Import the Apple Developer ID certificate only when it is configured, so releases keep
       # working before notarization is set up and gain it automatically once the secret exists.
       - name: Import the Apple Developer ID certificate
-        if: env.MACOS_CERTIFICATE != ''
-        uses: apple-actions/import-codesign-certs@v3
+        if: steps.apple.outputs.have == 'true'
+        uses: apple-actions/import-codesign-certs@63fff01cd422d4b7b855d40ca1e9d34d2de9427d # v3
         with:
           p12-file-base64: ${{ secrets.MACOS_CERTIFICATE }}
           p12-password: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
 
-      # A tap token that is set but no longer valid failed the whole release at its very last step,
-      # after every archive had already been uploaded. Everything after that step was skipped, so the
-      # release shipped without its desktop bundle and without BINARY_SHA256SUMS, which is the manifest
-      # `switchtender version --verify` reads: the published binary could not check itself, and the one
-      # thing that broke it was a convenience nobody installs from on release day. The cask must not be
-      # able to cost a release its own verification, so an unusable token is dropped here and
-      # skip_upload then leaves the cask alone rather than failing.
-      - name: Check the Homebrew tap token before it can fail the release
+      # The cask is pushed to the tap by the last step of this job, after the release is public, so
+      # a bad tap token can no longer sink anything and the cask never points at a draft nobody can
+      # download. This probe only decides whether that final push is attempted. Readability is not
+      # the question: a token that can read the tap and not write it passes a plain GET and then
+      # fails the push with 403, so the probe asks for the right the push actually needs.
+      - name: Check whether the Homebrew tap token can push
         id: tap
         env:
           TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
@@ -72,10 +134,6 @@ jobs:
             echo "usable=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          # Readability is not the question. A token that can read the tap and not write it passes a
-          # plain GET and then fails the push with 403, which is the same release-sinking failure one
-          # step later. The repository object reports the authenticated token's own rights, so ask for
-          # the one the cask actually needs.
           body=$(curl -sS -w '\n%{http_code}' \
             -H "Authorization: Bearer $TAP_TOKEN" \
             -H "Accept: application/vnd.github+json" \
@@ -90,9 +148,13 @@ jobs:
           fi
 
       # Standard artifacts: cross-compiled binaries, a universal macOS binary, archives, SHA256SUMS,
-      # a keyless cosign signature, SBOMs, the Homebrew cask, and deb/rpm/apk packages.
+      # SBOMs, and deb/rpm/apk packages, assembled onto a draft release. The checksums signature is
+      # made later in this job, after the dmg and BINARY_SHA256SUMS lines are appended, so exactly
+      # one signature is ever published and it covers the finished file. The cask is rendered here
+      # but pushed after publication. The token env var must exist for the cask template to resolve;
+      # it is deliberately empty.
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v6
+        uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6
         with:
           distribution: goreleaser
           # Pinned exactly so a goreleaser release cannot change our pipeline under us. Bump
@@ -101,17 +163,51 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Empty when the probe above could not use it, which makes skip_upload true in
-          # .goreleaser.yaml rather than letting the cask fail the release.
-          HOMEBREW_TAP_GITHUB_TOKEN: ${{ steps.tap.outputs.usable == 'true' && secrets.HOMEBREW_TAP_GITHUB_TOKEN || '' }}
+          HOMEBREW_TAP_GITHUB_TOKEN: ""
+
+      # BINARY_SHA256SUMS names the hash of the binary inside each archive, which is what
+      # `switchtender version --verify` holds the running executable against. SHA256SUMS covers the
+      # archives; this covers the file that actually runs. It is built here, straight after the
+      # archives exist and before any macOS packaging, because it used to be manufactured at the
+      # tail of the dmg step: an icon rendering failure, an hdiutil error, or a notary stall could
+      # withhold the one cheap artifact that makes every published binary self-verifiable.
+      - name: Build the binary manifest
+        id: manifest
+        run: |
+          set -euo pipefail
+          : > dist/BINARY_SHA256SUMS
+          for archive in dist/switchtender_*.tar.gz; do
+            [ -e "$archive" ] || continue
+            name="$(basename "$archive" .tar.gz)"
+            tar -xzf "$archive" -C dist switchtender
+            hash="$(shasum -a 256 dist/switchtender | cut -d' ' -f1)"
+            printf '%s  %s\n' "$hash" "$name" >> dist/BINARY_SHA256SUMS
+            rm -f dist/switchtender
+          done
+          for archive in dist/switchtender_*windows*.zip; do
+            [ -e "$archive" ] || continue
+            name="$(basename "$archive" .zip)"
+            unzip -o -q "$archive" switchtender.exe -d dist
+            hash="$(shasum -a 256 dist/switchtender.exe | cut -d' ' -f1)"
+            printf '%s  %s.exe\n' "$hash" "$name" >> dist/BINARY_SHA256SUMS
+            rm -f dist/switchtender.exe
+          done
+          # A manifest with no entries is worse than a missing one: it verifies nothing while
+          # looking like the thing the binary checks itself against.
+          [ -s dist/BINARY_SHA256SUMS ]
+          cat dist/BINARY_SHA256SUMS
 
       # The desktop app is the one bespoke artifact: a double-clickable macOS bundle whose launcher
       # runs `switchtender desktop`. It is ad-hoc signed unless MACOS_SIGN_IDENTITY is set, in which
-      # case it is Developer ID signed and, when notary credentials are present, notarized and stapled.
+      # case it is Developer ID signed and, when notary credentials are present, notarized and
+      # stapled. It may fail without sinking the release: the manifest and signature are complete
+      # without it, and the promote step publishes a release that verifies. What a failure here
+      # costs is the dmg alone.
       - name: Build and attach the desktop app and dmg
-        if: github.ref_type == 'tag'
+        id: dmg
+        continue-on-error: true
         env:
-          GH_TOKEN: ${{ github.token }}
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
           NOTARY_KEY_P8: ${{ secrets.NOTARY_KEY_P8 }}
           NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
           NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
@@ -168,72 +264,82 @@ jobs:
           fi
           codesign --verify --verbose=1 "$APP"
 
+          # codesign rewrites the binary, so the app can never hash like the archive it came from.
+          # Without its own manifest entry, `switchtender version --verify` inside the shipped app
+          # called the official artifact "not the released binary".
+          hash="$(shasum -a 256 "$APP/Contents/MacOS/switchtender" | cut -d' ' -f1)"
+          printf '%s  switchtender_%s_darwin_app\n' "$hash" "$VERSION" >> dist/BINARY_SHA256SUMS
+
           mkdir dist/dmg
           cp -R "$APP" dist/dmg/
           ln -s /Applications dist/dmg/Applications
           hdiutil create -volname SwitchTender -srcfolder dist/dmg -ov -format UDZO \
             "dist/SwitchTender_${VERSION}.dmg"
 
-          if [ -n "${MACOS_SIGN_IDENTITY:-}" ] && [ -n "${NOTARY_KEY_P8:-}" ]; then
+          # Notarization needs the full credential set; a partial one used to reach notarytool and
+          # fail there. The timeout keeps an Apple notary outage from holding the job to the
+          # six-hour limit.
+          if [ -n "${MACOS_SIGN_IDENTITY:-}" ] && [ -n "${NOTARY_KEY_P8:-}" ] \
+            && [ -n "${NOTARY_KEY_ID:-}" ] && [ -n "${NOTARY_ISSUER_ID:-}" ]; then
             printf '%s' "$NOTARY_KEY_P8" | base64 --decode > dist/notary_key.p8
             xcrun notarytool submit "dist/SwitchTender_${VERSION}.dmg" \
-              --key dist/notary_key.p8 --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" --wait
+              --key dist/notary_key.p8 --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" \
+              --wait --timeout 30m
             xcrun stapler staple "dist/SwitchTender_${VERSION}.dmg"
             rm -f dist/notary_key.p8
           fi
 
-          # BINARY_SHA256SUMS names the hash of the binary inside each archive, which is what
-          # `switchtender version --verify` holds the running executable against. SHA256SUMS
-          # covers the archives; this covers the file that actually runs.
-          : > dist/BINARY_SHA256SUMS
-          for archive in dist/switchtender_*.tar.gz; do
-            name="$(basename "$archive" .tar.gz)"
-            tar -xzf "$archive" -C dist switchtender
-            hash="$(shasum -a 256 dist/switchtender | cut -d' ' -f1)"
-            printf '%s  %s\n' "$hash" "$name" >> dist/BINARY_SHA256SUMS
-            rm -f dist/switchtender
-          done
-          for archive in dist/switchtender_*windows*.zip; do
-            [ -e "$archive" ] || continue
-            name="$(basename "$archive" .zip)"
-            unzip -o -q "$archive" switchtender.exe -d dist
-            hash="$(shasum -a 256 dist/switchtender.exe | cut -d' ' -f1)"
-            printf '%s  %s.exe\n' "$hash" "$name" >> dist/BINARY_SHA256SUMS
-            rm -f dist/switchtender.exe
-          done
-
-          # Hashed from inside dist so the names match goreleaser's, which are bare. A "dist/" prefix
-          # here would land in the published file and make `shasum -c SHA256SUMS` fail for anyone
-          # checking a download directory, on exactly the two lines this script adds.
-          #
-          # BINARY_SHA256SUMS is folded in before anything is signed, so the one signature covers it
-          # too. It was uploaded outside the signature while `switchtender version --verify` treated
-          # it as authoritative, which left the binary self-check resting on nothing but TLS to
-          # GitHub: anyone able to alter release assets could swap the binary and its manifest
-          # together and the check would still say ok, while the archive beside it had a real
-          # signature. Nothing may be appended to SHA256SUMS after this point.
+      # The one signature over the finished checksums. BINARY_SHA256SUMS and the dmg are folded
+      # into SHA256SUMS before signing, so the signature covers them: the manifest was once
+      # uploaded outside the signature while `switchtender version --verify` treated it as
+      # authoritative, which left the binary self-check resting on nothing but TLS to GitHub.
+      # Nothing may be appended to SHA256SUMS after this step.
+      #
+      # This runs under !cancelled() so a GoReleaser failure after its uploads still gets a
+      # complete, signed draft a human can inspect and publish by hand; the promote step below
+      # still refuses on any failure. The names are hashed from inside dist so they match
+      # goreleaser's, which are bare: a "dist/" prefix would land in the published file and make
+      # `shasum -c SHA256SUMS` fail for anyone checking a download directory.
+      - name: Sign and attach the checksums manifest
+        if: ${{ !cancelled() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION=${GITHUB_REF_NAME#v}
           (
             cd dist
-            shasum -a 256 "SwitchTender_${VERSION}.dmg" >> SHA256SUMS
+            if [ -f "SwitchTender_${VERSION}.dmg" ]; then
+              shasum -a 256 "SwitchTender_${VERSION}.dmg" >> SHA256SUMS
+            fi
             shasum -a 256 BINARY_SHA256SUMS >> SHA256SUMS
           )
+          grep -q '  BINARY_SHA256SUMS$' dist/SHA256SUMS
+          for i in 1 2 3; do
+            if cosign sign-blob --yes dist/SHA256SUMS \
+                --output-signature dist/SHA256SUMS.sig \
+                --output-certificate dist/SHA256SUMS.pem; then
+              break
+            fi
+            if [ "$i" = 3 ]; then exit 1; fi
+            sleep 15
+          done
+          assets="dist/SHA256SUMS dist/SHA256SUMS.sig dist/SHA256SUMS.pem dist/BINARY_SHA256SUMS"
+          if [ -f "dist/SwitchTender_${VERSION}.dmg" ]; then
+            assets="$assets dist/SwitchTender_${VERSION}.dmg"
+          fi
+          # shellcheck disable=SC2086
+          gh release upload "$GITHUB_REF_NAME" $assets --clobber
 
-          cosign sign-blob --yes dist/SHA256SUMS \
-            --output-signature dist/SHA256SUMS.sig \
-            --output-certificate dist/SHA256SUMS.pem
-          gh release upload "$GITHUB_REF_NAME" \
-            "dist/SwitchTender_${VERSION}.dmg" dist/SHA256SUMS dist/SHA256SUMS.sig dist/SHA256SUMS.pem \
-            dist/BINARY_SHA256SUMS \
-            --clobber
-
-      # SLSA build provenance for every published artifact, verifiable with `gh attestation verify`.
-      # GitHub only persists attestations for public or paid repositories, so this step is allowed to
-      # fail without failing the release. It starts recording provenance automatically once the
-      # repository is public.
+      # SLSA build provenance for every published artifact, verifiable with `gh attestation
+      # verify`. GitHub only persists attestations for public or paid repositories, so these steps
+      # are allowed to fail without failing the release. The dmg is attested separately because its
+      # glob matches nothing when the dmg step failed, which would have taken the archives'
+      # provenance down with it.
       - name: Attest build provenance
-        if: github.ref_type == 'tag'
+        if: ${{ !cancelled() }}
         continue-on-error: true
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
         with:
           subject-path: |
             dist/*.tar.gz
@@ -241,7 +347,44 @@ jobs:
             dist/*.deb
             dist/*.rpm
             dist/*.apk
-            dist/SwitchTender_*.dmg
+
+      - name: Attest the desktop dmg
+        if: ${{ !cancelled() && steps.dmg.outcome == 'success' }}
+        continue-on-error: true
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
+        with:
+          subject-path: dist/SwitchTender_*.dmg
+
+      # Publication is the last irreversible act. This step runs only when everything above it that
+      # is allowed to fail the job has succeeded, so a failure anywhere in the tail leaves a draft
+      # instead of a public release missing the pieces that make it verifiable.
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$GITHUB_REF_NAME" --draft=false
+
+      # The cask goes to the tap only after the release is public, so its download URL resolves the
+      # moment it lands, and a tap failure costs the cask alone, never the release.
+      - name: Publish the Homebrew cask
+        if: steps.tap.outputs.usable == 'true'
+        continue-on-error: true
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          cask="$(find dist -name 'switchtender.rb' -print -quit)"
+          if [ -z "$cask" ]; then
+            echo "::warning title=Homebrew cask skipped::goreleaser rendered no cask file"
+            exit 0
+          fi
+          sha="$(GH_TOKEN="$TAP_TOKEN" gh api \
+            repos/kordloom/homebrew-tap/contents/Casks/switchtender.rb -q .sha 2>/dev/null || true)"
+          args=(--method PUT repos/kordloom/homebrew-tap/contents/Casks/switchtender.rb
+            -f message="Update switchtender to ${GITHUB_REF_NAME}"
+            -f content="$(base64 -i "$cask" | tr -d '\n')")
+          if [ -n "$sha" ]; then args+=(-f sha="$sha"); fi
+          GH_TOKEN="$TAP_TOKEN" gh api "${args[@]}" > /dev/null
+          echo "cask updated on kordloom/homebrew-tap"
 
   # Multi-arch container images on ghcr.io. A separate Linux job because the release job runs on
   # macOS for the desktop bundle, and Docker is unavailable there.
@@ -257,32 +400,50 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Log in to ghcr.io
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # latest moves only when this tag is the newest final release, decided against the tag list
+      # rather than by tag shape. Shape alone meant re-running an old tag, or tagging a backport,
+      # repointed latest backwards for everyone pulling the image.
+      - name: Decide whether this tag moves latest
+        id: newest
+        run: |
+          set -euo pipefail
+          git fetch --tags --quiet
+          top="$(git tag --list 'v*' --sort=-v:refname | grep -v -- - | head -1)"
+          if [ "$GITHUB_REF_NAME" = "$top" ]; then
+            echo "move=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "move=false" >> "$GITHUB_OUTPUT"
+            echo "this tag is not the newest final release ($top is), so latest stays where it is"
+          fi
+
       - name: Compute image tags
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
         with:
           images: ghcr.io/kordloom/switchtender
+          # latest=false turns off the flavor's own automatic latest, which ignores the enable
+          # condition on the raw tag below and would reapply latest to any semver tag.
+          flavor: |
+            latest=false
           tags: |
             type=semver,pattern={{version}}
-            # Only a final release moves latest. type=raw is unconditional, so tagging v1.67.0-rc1
-            # would have pointed latest at a release candidate for everyone pulling the image.
-            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
+            type=raw,value=latest,enable=${{ steps.newest.outputs.move }}
 
       - name: Build and push the images
         id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           platforms: linux/amd64,linux/arm64
@@ -296,7 +457,7 @@ jobs:
       # neither, so somebody pulling ghcr.io/kordloom/switchtender had nothing to check while
       # somebody downloading the tarball had two things. Both are signed by digest rather than tag,
       # because a tag can be moved and a digest cannot.
-      - uses: sigstore/cosign-installer@v3
+      - uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
       - name: Sign the image
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
@@ -304,7 +465,7 @@ jobs:
 
       - name: Attest the image build provenance
         continue-on-error: true
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
         with:
           subject-name: ghcr.io/kordloom/switchtender
           subject-digest: ${{ steps.build.outputs.digest }}
