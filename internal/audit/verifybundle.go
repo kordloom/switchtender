@@ -455,6 +455,18 @@ func decodeProofHashes(in []string) ([][]byte, error) {
 // claim's link as its own previous. It returns the sequence of the first claim that does not verify.
 func verifyBundleChain(claims []BundleClaim, head BundleCoord) (bool, int64) {
 	for i, c := range claims {
+		// The genesis rule and contiguous ascending sequence numbers, the two checks the loomseal
+		// reference verifier enforces that recomputing each link from the claim's own prev does not.
+		// Without them a self-consistent chain with entries dropped between two it kept, or a window
+		// opening past sequence one with an empty prev, recomputed cleanly and read as VERIFIED here
+		// while the reference verifier the product tells relying parties to trust refused it.
+		if i == 0 {
+			if (c.Chain.Seq == 1) != (c.Chain.Prev == "") {
+				return false, c.Chain.Seq
+			}
+		} else if c.Chain.Seq != claims[i-1].Chain.Seq+1 {
+			return false, c.Chain.Seq
+		}
 		str := func(k string) string { s, _ := c.Payload[k].(string); return s }
 		// The claim's values came from the document under test, not from this install, so a value
 		// canonicalization refuses is a bad bundle rather than a bug here.
