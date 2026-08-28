@@ -102,8 +102,8 @@ and a run held for approval waits for a human admin, since an operator token can
 
 Yes, in Go, two ways: compile an extension into the binary, or drop a plugin binary into
 `--plugins-dir` on a stock release. Both register execution tools, AI providers, secret engines,
-and notification channels. See [Extend in Go](sdk.md), which includes a working drop-in example:
-Discord, ntfy, and Teams built as one plugin binary.
+and notification channels. See [Extend in Go](sdk.md), which carries a complete extension you can
+build and drop in, and the seams it can register.
 
 ## What about scale?
 
