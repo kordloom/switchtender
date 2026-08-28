@@ -79,7 +79,7 @@ func runAuditReceipt(cmd *cobra.Command, args []string) error {
 		}
 		// The install identity binds the tree profile's leaves, so a tree anchor cannot be checked
 		// without it.
-		id, ierr := audit.LoadIdentityForStore(receiptDB, identityDir(receiptDB))
+		id, ierr := loadProducerIdentity(receiptDB)
 		if ierr != nil {
 			return ierr
 		}

@@ -7,7 +7,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/dossier"
 )
 
@@ -94,7 +93,7 @@ func runChangeRegister(cmd *cobra.Command) error {
 	defer func() { _ = store.Close() }()
 	// The install identity binds the tree profile's leaves, so a tree anchor cannot be checked
 	// without it.
-	id, err := audit.LoadIdentityForStore(auditReportDB, identityDir(auditReportDB))
+	id, err := loadProducerIdentity(auditReportDB)
 	if err != nil {
 		return err
 	}

@@ -106,7 +106,7 @@ func runAuditAnchor(cmd *cobra.Command, _ []string) error {
 	// value it fixes. For a tree anchor that is what makes the root recomputable at all; for a linear
 	// one it says which install's chain the link belongs to, which is the same question asked of a
 	// restored copy.
-	id, ierr := audit.LoadIdentityForStore(anchorDB, identityDir(anchorDB))
+	id, ierr := loadProducerIdentity(anchorDB)
 	if ierr != nil {
 		return ierr
 	}

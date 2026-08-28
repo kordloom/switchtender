@@ -69,6 +69,11 @@ variable.</p>
 <td>Hex-encoded ed25519 seed for the install's signing identity, which signs the LoomSeal bundles it emits and binds every audit entry to this install. Unset beside a local database, the install mints and stores its own key there. Unset against a shared database it mints nothing, since every process must sign as the same install, and the chain is recorded unattributed and unbound until a seed is supplied to all of them. A malformed value stops startup.</td>
 </tr>
 <tr>
+<td><code>SWITCHTENDER_IDENTITY_DIR</code></td>
+<td>serve, audit, receipt</td>
+<td>Directory holding the install's producer signing identity. A SQLite install keeps it beside the database and needs no setting. A postgres install has no filesystem home, so it uses a per-user configuration directory; when the account has no home, as in a container, there is nowhere durable to put a key and startup refuses rather than choosing a path a restart would empty. Point this at a durable path the server owns.</td>
+</tr>
+<tr>
 <td><code>SWITCHTENDER_PASSWORD</code></td>
 <td>user new</td>
 <td>Initial account password, read instead of prompting so it never lands on the command line.</td>

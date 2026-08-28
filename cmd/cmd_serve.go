@@ -722,6 +722,10 @@ func producerInstallID(id *audit.Identity) string {
 	return id.InstallID
 }
 
+// identityDirEnv names the environment variable that places the producer signing identity
+// explicitly, for an install whose account has no home directory to derive one from.
+const identityDirEnv = "SWITCHTENDER_IDENTITY_DIR"
+
 // identityDir returns the directory holding the producer signing identity for a database target.
 // serve, which signs the bundles it serves, and the bundle command, which signs the bundle it
 // emits, both derive it here so one install mints a single key and every tool reads that same key. A
@@ -729,19 +733,34 @@ func producerInstallID(id *audit.Identity) string {
 // no filesystem home: filepath.Dir on a DSN yields a cwd-relative junk directory whose name embeds
 // the DSN's user:password@host, both wrong and a credential leak, so the identity falls back to a
 // stable per-user directory instead.
-func identityDir(db string) string {
+//
+// When there is no per-user directory to fall back to, this refuses rather than choosing one. It
+// used to answer with the system temp directory, which is the one place a signing key must never
+// live. os.UserConfigDir fails when the account has no home, which is the ordinary shape of a
+// container running a postgres-backed server, so the fallback was not a remote branch: on those
+// installs the key was minted in a world-writable directory that the next restart empties. A key
+// that vanishes is not an outage, it is a new install identity, and since every audit entry is bound
+// to the install that wrote it, the chain would silently start attributing entries to a different
+// install on every restart while continuing to report itself sound.
+func identityDir(db string) (string, error) {
+	if dir := strings.TrimSpace(os.Getenv(identityDirEnv)); dir != "" {
+		return dir, nil
+	}
 	if strings.HasPrefix(db, "postgres://") || strings.HasPrefix(db, "postgresql://") {
 		base, err := os.UserConfigDir()
 		if err != nil || base == "" {
-			base = os.TempDir()
+			return "", fmt.Errorf("%w: this account has no configuration directory to keep the "+
+				"producer signing identity in, and the system temp directory is not one, because a "+
+				"key that a restart deletes silently becomes a second install: set %s to a durable "+
+				"path this server owns", errNoIdentityHome, identityDirEnv)
 		}
-		return filepath.Join(base, "switchtender", "identity")
+		return filepath.Join(base, "switchtender", "identity"), nil
 	}
 	dir := filepath.Dir(db)
 	if dir == "" || dir == "." {
-		return "."
+		return ".", nil
 	}
-	return dir
+	return dir, nil
 }
 
 // runServe builds the server dependencies and serves until interrupted.
@@ -902,7 +921,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	// by design and an operator reading about bundles would not know the binding went with it. The
 	// error it carries already ends with the remedy and the path to put the key in.
 	var producer *audit.Identity
-	if id, err := audit.LoadIdentityForStore(serveDB, identityDir(serveDB)); err != nil {
+	if id, err := loadProducerIdentity(serveDB); err != nil {
 		log.Warn("producer identity unavailable, so bundles cannot be attributed and entries are not " +
 			"bound to this install, which lets a receipt be lifted onto another one: " + err.Error())
 	} else {
@@ -1310,4 +1329,15 @@ func notifySecret(flagValue, env string) string {
 		return v
 	}
 	return flagValue
+}
+
+// loadProducerIdentity reads the install's producer signing identity, resolving where it lives
+// first so a server with nowhere durable to keep it says so rather than signing with a key the next
+// restart throws away.
+func loadProducerIdentity(db string) (audit.Identity, error) {
+	dir, err := identityDir(db)
+	if err != nil {
+		return audit.Identity{}, err
+	}
+	return audit.LoadIdentityForStore(db, dir)
 }
