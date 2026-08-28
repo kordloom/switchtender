@@ -21,6 +21,12 @@ import (
 func TestMigrateFailsFastRatherThanQueueingBehindALock(t *testing.T) {
 	dsn := os.Getenv("SWITCHTENDER_TEST_POSTGRES_DSN")
 	if dsn == "" {
+		// The release gate demands the full suite, in which a missing database is a failure
+		// rather than a quiet green.
+		if os.Getenv("SWITCHTENDER_REQUIRE_FULL_SUITE") == "1" {
+			t.Fatal("SWITCHTENDER_REQUIRE_FULL_SUITE is set and SWITCHTENDER_TEST_POSTGRES_DSN " +
+				"is not: the full suite was demanded and this migration check cannot run")
+		}
 		t.Skip("SWITCHTENDER_TEST_POSTGRES_DSN not set")
 	}
 	ctx := context.Background()

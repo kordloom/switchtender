@@ -46,11 +46,18 @@ import (
 // is skipped, so the default suite needs no PostgreSQL; CI provides one as a service container.
 const dsnEnv = "SWITCHTENDER_TEST_POSTGRES_DSN"
 
-// testDSN returns the test database DSN or skips the test.
+// testDSN returns the test database DSN or skips the test. Under SWITCHTENDER_REQUIRE_FULL_SUITE
+// the skip is a failure instead: the release gate sets it because a gate that lets this contract
+// quietly skip is green without the proof a release rests on, which is how the gate spent months
+// claiming to run "the same suite" while never touching PostgreSQL.
 func testDSN(t *testing.T) string {
 	t.Helper()
 	dsn := os.Getenv(dsnEnv)
 	if dsn == "" {
+		if os.Getenv("SWITCHTENDER_REQUIRE_FULL_SUITE") == "1" {
+			t.Fatalf("SWITCHTENDER_REQUIRE_FULL_SUITE is set and %s is not: the full suite was "+
+				"demanded and the PostgreSQL contract cannot run", dsnEnv)
+		}
 		t.Skipf("set %s to run the PostgreSQL contract", dsnEnv)
 	}
 	return dsn
