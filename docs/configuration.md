@@ -38,7 +38,7 @@ environment file, and optionally a systemd unit. Run it once, then start `serve`
 |------|---------|---------|
 | `--db` | `switchtender.db` | SQLite database path. |
 | `--config` | `switchtender.env` | Environment file to write. |
-| `--addr` | `:8080` | Address the server listens on. |
+| `--addr` | `127.0.0.1:8080` | Address the server listens on. Loopback by default. |
 | `--admin` | `admin` | Username for the first admin account. |
 | `--systemd` | none | Path to write a systemd unit to, empty to skip. |
 | `--force` | `false` | Overwrite an existing config file. |
@@ -52,7 +52,7 @@ Runs the HTTP API, the in-process executor, the scheduler, the retention sweeper
 
 | Flag | Default | Purpose |
 |------|---------|---------|
-| `--addr` | `:8080` | Address the server listens on. |
+| `--addr` | `127.0.0.1:8080` | Address the server listens on. Loopback by default. Set `0.0.0.0:8080` to expose it on the network. |
 | `--db` | `switchtender.db` | SQLite file path, or a `postgres://` DSN for the PostgreSQL backend. |
 | `--tls-cert` | none | TLS certificate file, to serve HTTPS directly with no reverse proxy. Requires `--tls-key`. |
 | `--tls-key` | none | TLS private key file. Requires `--tls-cert`. |
@@ -241,7 +241,7 @@ instance is safe to expose. It needs ansible on the PATH to run the sample playb
 
 | Flag | Default | Purpose |
 |------|---------|---------|
-| `--addr` | `:8080` | Address the demo listens on. |
+| `--addr` | `127.0.0.1:8080` | Address the demo listens on. Loopback by default. |
 | `--db` | temporary file | Database to seed and serve. Empty uses a fresh temporary SQLite file. |
 | `--seed-only` | off | Seed the database and exit without serving. |
 | `--no-seed` | off | Serve the database as it already stands instead of seeding it. |
