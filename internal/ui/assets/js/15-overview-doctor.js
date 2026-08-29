@@ -391,8 +391,20 @@ async function loadActivityPage() {
 	const status = document.getElementById("status");
 	try {
 		const res = await getJSON("/runs");
+		const runs = (res && res.runs) || [];
 		applyActivityURLParams();
-		renderActivity((res && res.runs) || []);
+		renderActivity(runs);
+		if (!runs.length) {
+			// A fresh install has no runs, so the chart, the summary strip, and the status line were
+			// all hidden and the middle of the page was blank, with the Share and Export controls
+			// still live over an all-zero export. Say what the page is for instead, and take away the
+			// controls that have nothing to act on, matching the guided empty states elsewhere.
+			showEmpty("No runs yet. Launch one and this view fills in over time: a windowed activity "
+				+ "chart, an outcome breakdown, and a CSV you can take away.");
+			const actions = document.querySelector(".page-head-actions");
+			if (actions) actions.hidden = true;
+			return;
+		}
 		wireActivityExport();
 		wireActivityShare();
 		if (status) status.hidden = true;

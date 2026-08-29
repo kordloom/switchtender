@@ -132,7 +132,8 @@ async function loadUsers() {
 		const data = await getJSON("/users");
 		const users = data.users || [];
 		if (users.length === 0) {
-			showEmpty("No users yet.");
+			showEmpty("No accounts yet. This install runs open until you add one. Add a user to require "
+			+ "sign-in: viewers read, operators run work, admins manage everything.");
 			return;
 		}
 		const tbody = document.getElementById("users");

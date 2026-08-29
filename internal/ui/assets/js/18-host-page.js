@@ -224,6 +224,7 @@ async function loadHost(host) {
 			tr.appendChild(td(String(r.ok)));
 			tr.appendChild(td(String(r.changed)));
 			tr.appendChild(td(String(r.failures)));
+			tr.appendChild(td(String(r.unreachable)));
 			tr.appendChild(td(r.duration_seconds ? r.duration_seconds.toFixed(1) + "s" : "0s"));
 			tr.appendChild(tdTime(r.ran_at));
 			tbody.appendChild(tr);
@@ -392,7 +393,11 @@ async function loadSchedules() {
 			const cron = td(s.cron, "mono");
 			cron.dataset.cron = s.cron || "";
 			tr.appendChild(cron);
-			const cadence = td(describeCron(s.cron));
+			// The zone the cron is read in rides alongside the cadence: two identical expressions in
+			// different zones fire at different times, and without it the rows are indistinguishable.
+			const cadenceText = s.timezone ? describeCron(s.cron) + " (" + s.timezone + ")"
+				: describeCron(s.cron);
+			const cadence = td(cadenceText);
 			cadence.dataset.cron = s.cron || "";
 			tr.appendChild(cadence);
 			const target = document.createElement("td");
