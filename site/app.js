@@ -6,7 +6,9 @@ window.addEventListener("scroll", onScroll, { passive: true });
 
 const toggle = document.getElementById("nav-toggle");
 if (toggle) toggle.addEventListener("click", () => nav.classList.toggle("open"));
-for (const a of document.querySelectorAll(".nav-links a")) {
+// Any nav link or CTA button closes the open drawer, so tapping Get started from the mobile menu
+// dismisses it rather than leaving it open over the destination.
+for (const a of document.querySelectorAll(".nav-links a, .nav-cta a")) {
 	a.addEventListener("click", () => nav.classList.remove("open"));
 }
 
