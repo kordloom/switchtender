@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/kordloom/switchtender/identity"
 )
 
 // TestIdentityDirRefusesAVolatileHome pins that the producer signing identity is never placed in the
@@ -97,5 +99,35 @@ func TestIdentityDirKeepsASQLiteKeyBesideItsDatabase(t *testing.T) {
 	}
 	if bare != "." {
 		t.Errorf("identityDir = %q, want the working directory", bare)
+	}
+}
+
+// TestIdentityDirAcceptsAnEnvKeyWithNoHome pins that a seed in SWITCHTENDER_AUDIT_KEY needs no
+// durable directory, so a keyed no-home install is not refused.
+//
+// The env seed signs directly: that path in identity.Load never reads or writes the key file. The
+// refusal for a homeless postgres install fired before that was reached, so the documented way to
+// sign a shared chain, a keyed container, was turned away over a directory its key never touches,
+// and serve fell back to an unattributed chain with unsigned bundles.
+func TestIdentityDirAcceptsAnEnvKeyWithNoHome(t *testing.T) {
+	const dsn = "postgres://user:secret@db.internal:5432/switchtender?sslmode=require"
+	t.Setenv("HOME", "")
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("AppData", "")
+	t.Setenv(identityDirEnv, "")
+	// A valid 32-byte hex seed, the shape identity.Load accepts.
+	t.Setenv(identity.KeyEnv, strings.Repeat("ab", 32))
+
+	dir, err := identityDir(dsn)
+	if err != nil {
+		t.Fatalf("identityDir with %s set errored on a no-home install: %v", identity.KeyEnv, err)
+	}
+	if dir != "." {
+		t.Errorf("identityDir = %q, want the don't-care directory: the env seed needs none", dir)
+	}
+	// With no env key, the same no-home install still refuses rather than choosing a volatile dir.
+	t.Setenv(identity.KeyEnv, "")
+	if _, err := identityDir(dsn); err == nil {
+		t.Error("identityDir accepted a no-home file-backed install, want the refusal")
 	}
 }
