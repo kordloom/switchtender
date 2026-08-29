@@ -63,8 +63,28 @@ func RedactAssignments(text, mask string) (string, []Assignment) {
 	for _, pattern := range assignmentPatterns {
 		text = redactPattern(pattern, text, mask, &found)
 	}
+	// A credential can also ride inside a URL, as scheme://user:password@host, where no name=value
+	// pattern sees it: pg_dump postgres://backup:pass@db and git clone https://x:token@host both
+	// carry a secret no assignment names. Only the audit digest scrubbed this shape, so a receipt
+	// showed the password redacted while the dossier mailed to an outside auditor, the evidence
+	// page, and the text sent to an LLM all showed it plain, and the run-log masker never learned
+	// the value so a set -x echoed it into the stored log. It is masked here so the one reading
+	// every disclosure path shares closes all of them, and the stripped password is reported like
+	// any other assignment so the masker matches it in output too.
+	text = urlUserinfo.ReplaceAllStringFunc(text, func(m string) string {
+		scheme := m[:strings.Index(m, "://")+3]
+		userinfo := m[len(scheme) : len(m)-1]
+		if i := strings.IndexByte(userinfo, ':'); i >= 0 && userinfo[i+1:] != "" {
+			found = append(found, Assignment{Name: "url_userinfo", Value: userinfo[i+1:]})
+		}
+		return scheme + mask + "@"
+	})
 	return text, found
 }
+
+// urlUserinfo matches the user:password@ credential embedded in a URL-shaped string. The value the
+// masker needs is the password after the colon, which the caller extracts from the match.
+var urlUserinfo = regexp.MustCompile(`(?i)([a-z][a-z0-9+.\-]*://)[^/@\s]+@`)
 
 // redactPattern applies one assignment pattern across text, replacing the values whose names the
 // classifier calls secret and recording each one.

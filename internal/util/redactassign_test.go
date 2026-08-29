@@ -2,6 +2,7 @@ package util
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -69,5 +70,54 @@ func TestRedactAssignmentsStaysLinear(t *testing.T) {
 			t.Errorf("a chain of non-secret assignments was altered: len(got)=%d, len(in)=%d",
 				len(got), len(in))
 		}
+	}
+}
+
+// TestRedactAssignmentsMasksURLCredentials pins that a credential embedded in a URL, which no
+// name=value pattern names, is masked and reported like any other secret.
+//
+// pg_dump postgres://backup:pass@db and git clone https://x:token@host both carry a password no
+// assignment sees. Only the audit digest scrubbed this shape, so a receipt showed it redacted while
+// the dossier, the evidence page, and the text sent to an LLM showed it plain, and the run-log
+// masker never learned the value. Masking it in the one shared reading closes every path at once.
+func TestRedactAssignmentsMasksURLCredentials(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		In       string
+		WantMask string
+		WantVal  string
+	}{{ // Test 0: a postgres URL in a command.
+		In:       "pg_dump postgres://backup:Hunter2Pass@db.internal:5432/prod",
+		WantMask: "pg_dump postgres://X@db.internal:5432/prod", WantVal: "Hunter2Pass",
+	}, { // Test 1: an https URL with a token.
+		In:       "git clone https://user:ghp_abc123@github.com/x/y",
+		WantMask: "git clone https://X@github.com/x/y", WantVal: "ghp_abc123",
+	}, { // Test 2: userinfo with no password contributes nothing to mask.
+		In: "ssh://bastion@host", WantMask: "ssh://X@host", WantVal: "",
+	}, { // Test 3: an ordinary URL with no userinfo is left alone.
+		In: "curl https://example.com/health", WantMask: "curl https://example.com/health", WantVal: "",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			got, found := RedactAssignments(test.In, "X")
+			if got != test.WantMask {
+				t.Errorf("masked = %q, want %q", got, test.WantMask)
+			}
+			var vals []string
+			for _, a := range found {
+				vals = append(vals, a.Value)
+			}
+			if test.WantVal == "" {
+				if slices.Contains(vals, test.WantVal) || len(vals) != 0 {
+					t.Errorf("found = %v, want no password reported", vals)
+				}
+				return
+			}
+			if !slices.Contains(vals, test.WantVal) {
+				t.Errorf("found = %v, want the password %q reported so the masker can match it",
+					vals, test.WantVal)
+			}
+		})
 	}
 }
