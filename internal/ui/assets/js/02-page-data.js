@@ -352,6 +352,9 @@ const FACET_COLUMNS = {
 	policies: ["Tool", "Holding"],
 	audit: ["Method"],
 	doctor: ["Severity"],
+	host: ["Outcome"],
+	tasks: ["Trend"],
+	compare: ["Verdict"],
 };
 
 // CHIP_SELECTOR matches the small labels a cell shows instead of plain text. A cell built from chips

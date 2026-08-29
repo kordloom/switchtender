@@ -94,7 +94,8 @@ function mountPageDocs() {
 // LIST_PAGES get the client-side row filter. The runs page is excluded because it searches on the
 // server, across every run rather than only the loaded page.
 const LIST_PAGES = ["jobtemplates", "credentials", "projects", "inventories", "sources",
-	"schedules", "users", "workers", "fleet", "tasks", "host", "policies", "drift", "audit", "doctor"];
+	"schedules", "users", "workers", "fleet", "tasks", "host", "policies", "drift", "audit", "doctor",
+	"compare"];
 
 // mountListFilter adds a search box above the main list table and filters its rows by text as you
 // type, so every list is searchable. It reads the rows live, so it works no matter when they load.
