@@ -143,6 +143,7 @@ func (d *Dispatcher) Submit(ctx context.Context, playbook, inventory string, opt
 		r.Status = run.StatusPendingApproval
 	}
 	recordHold(r, holdRequested)
+	d.pinHeldRunCommit(r)
 	created, _, err := d.idempotentSave(ctx, r)
 	if err != nil {
 		return nil, err
@@ -239,6 +240,7 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 		parent.Status = run.StatusPendingApproval
 	}
 	recordHold(parent, holdRequested)
+	d.pinHeldRunCommit(parent)
 	created, dup, err := d.idempotentSave(ctx, parent)
 	if err != nil {
 		return nil, err
