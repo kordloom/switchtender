@@ -227,5 +227,23 @@ func printOutcome(out io.Writer, body []byte) {
 		fmt.Fprintf(out, "  host %-16s %s  ok=%d changed=%d failed=%d unreachable=%d\n",
 			h.Host, h.Worst, h.OK, h.Changed, h.Failures, h.Unreachable)
 	}
+	// A split or pipeline coordinator has no hosts of its own; the execution lives in its children.
+	// Not rendering them made the flagship offline artifact read "nothing happened" over a fan-out
+	// that ran on real machines, then say VERIFIED, which is exactly the shape a skeptic distrusts.
+	for _, c := range rec.Children {
+		name := c.Name
+		if name == "" && c.Index != nil {
+			name = fmt.Sprintf("shard %d", *c.Index)
+		}
+		exit := "none"
+		if c.ExitCode != nil {
+			exit = fmt.Sprintf("%d", *c.ExitCode)
+		}
+		attempt := ""
+		if c.Attempt > 1 {
+			attempt = fmt.Sprintf(" attempt %d", c.Attempt)
+		}
+		fmt.Fprintf(out, "  child %-15s %s (exit %s, run %s%s)\n", name, c.Status, exit, c.RunID, attempt)
+	}
 	fmt.Fprintf(out, "  log sha256     %s\n", rec.LogSHA256)
 }
