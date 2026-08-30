@@ -38,7 +38,7 @@ func testGet(t *testing.T, store policy.Store) {
 	// round-trips whatever struct it was handed.
 	p := &policy.Policy{
 		ID: policy.NewID(), Name: "prod-destroy", Tool: "terraform", CommandContains: "destroy",
-		InventoryID: "inv_prod", ExcludeDryRun: true, MaxDestroy: 3,
+		InventoryID: "inv_prod", Queue: "dmz", ExcludeDryRun: true, MaxDestroy: 3,
 		ActorKind: policy.ActorKindAgent, Actor: "deploy-bot", MinRisk: "high",
 		Effect: policy.EffectDeny, RequireDistinctApprover: true,
 		CreatedAt: time.Date(2026, 7, 10, 0, 0, 0, 0, time.UTC),
@@ -51,7 +51,7 @@ func testGet(t *testing.T, store policy.Store) {
 		t.Fatalf("Get() error = %v", err)
 	}
 	if got.Name != "prod-destroy" || got.Tool != "terraform" || got.CommandContains != "destroy" ||
-		got.InventoryID != "inv_prod" || !got.ExcludeDryRun || got.MaxDestroy != 3 {
+		got.InventoryID != "inv_prod" || got.Queue != "dmz" || !got.ExcludeDryRun || got.MaxDestroy != 3 {
 		t.Errorf("Get() = %+v, want the saved policy", got)
 	}
 	if got.ActorKind != policy.ActorKindAgent || got.Actor != "deploy-bot" || got.MinRisk != "high" ||

@@ -17,21 +17,22 @@ type policyStore struct {
 }
 
 // policyColumns lists the policy columns in a stable order for reads and writes.
-const policyColumns = `id, name, tool, command_contains, inventory_id, exclude_dry_run, max_destroy, actor_kind, actor, min_risk, effect, distinct_approver, created_at`
+const policyColumns = `id, name, tool, command_contains, inventory_id, queue, exclude_dry_run, max_destroy, actor_kind, actor, min_risk, effect, distinct_approver, created_at`
 
 // Save stores a policy, inserting or replacing by id.
 func (s *policyStore) Save(ctx context.Context, p *policy.Policy) error {
 	const q = `
-INSERT INTO policies (id, name, tool, command_contains, inventory_id, exclude_dry_run, max_destroy, actor_kind, actor, min_risk, effect, distinct_approver, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO policies (id, name, tool, command_contains, inventory_id, queue, exclude_dry_run, max_destroy, actor_kind, actor, min_risk, effect, distinct_approver, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
 	name=excluded.name, tool=excluded.tool, command_contains=excluded.command_contains,
-	inventory_id=excluded.inventory_id, exclude_dry_run=excluded.exclude_dry_run,
+	inventory_id=excluded.inventory_id, queue=excluded.queue,
+	exclude_dry_run=excluded.exclude_dry_run,
 	max_destroy=excluded.max_destroy, actor_kind=excluded.actor_kind, actor=excluded.actor,
 	min_risk=excluded.min_risk, effect=excluded.effect,
 	distinct_approver=excluded.distinct_approver`
 	_, err := s.db.ExecContext(ctx, q,
-		p.ID, p.Name, p.Tool, p.CommandContains, p.InventoryID,
+		p.ID, p.Name, p.Tool, p.CommandContains, p.InventoryID, p.Queue,
 		sqlutil.BoolToInt(p.ExcludeDryRun), p.MaxDestroy, p.ActorKind, p.Actor, p.MinRisk,
 		p.Effect, sqlutil.BoolToInt(p.RequireDistinctApprover), sqlutil.FormatTime(p.CreatedAt))
 	if err != nil {
@@ -100,7 +101,7 @@ func scanPolicy(sc scanner) (*policy.Policy, error) {
 		distinct int
 		created  string
 	)
-	if err := sc.Scan(&p.ID, &p.Name, &p.Tool, &p.CommandContains, &p.InventoryID, &dry,
+	if err := sc.Scan(&p.ID, &p.Name, &p.Tool, &p.CommandContains, &p.InventoryID, &p.Queue, &dry,
 		&p.MaxDestroy, &p.ActorKind, &p.Actor, &p.MinRisk, &p.Effect, &distinct,
 		&created); err != nil {
 		return nil, err

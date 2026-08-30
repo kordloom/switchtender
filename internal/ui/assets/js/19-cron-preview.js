@@ -229,6 +229,7 @@ function openPolicyEdit(p) {
 	document.getElementById("policy-tool").value = p.tool || "";
 	document.getElementById("policy-command").value = p.command_contains || "";
 	document.getElementById("policy-inventory").value = p.inventory_id || "";
+	document.getElementById("policy-queue").value = p.queue || "";
 	document.getElementById("policy-effect").value = p.effect === "deny" ? "deny" : "";
 	document.getElementById("policy-actor-kind").value = p.actor_kind || "";
 	document.getElementById("policy-actor").value = p.actor || "";
@@ -253,6 +254,7 @@ function wirePolicyForm() {
 		document.getElementById("policy-tool").value = "";
 		document.getElementById("policy-command").value = "";
 		document.getElementById("policy-inventory").value = "";
+		document.getElementById("policy-queue").value = "";
 		document.getElementById("policy-effect").value = "";
 		document.getElementById("policy-actor-kind").value = "";
 		document.getElementById("policy-actor").value = "";
@@ -285,6 +287,7 @@ function wirePolicyForm() {
 			tool: document.getElementById("policy-tool").value,
 			command_contains: document.getElementById("policy-command").value.trim(),
 			inventory_id: document.getElementById("policy-inventory").value,
+			queue: document.getElementById("policy-queue").value.trim(),
 			effect: document.getElementById("policy-effect").value,
 			actor_kind: document.getElementById("policy-actor-kind").value,
 			actor: document.getElementById("policy-actor").value.trim(),

@@ -101,6 +101,7 @@ async function loadPolicies() {
 			tr.appendChild(toolCell);
 			tr.appendChild(p.command_contains ? td(p.command_contains, "mono") : anyCell());
 			tr.appendChild(p.inventory_id ? td(invByID[p.inventory_id] || p.inventory_id) : anyCell());
+			tr.appendChild(p.queue ? td(p.queue, "mono") : anyCell());
 			const destroyCell = document.createElement("td");
 			if (p.max_destroy !== undefined && p.max_destroy !== null && p.max_destroy >= 0) {
 				const span = document.createElement("span");
