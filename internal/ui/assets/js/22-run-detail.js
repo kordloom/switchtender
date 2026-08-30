@@ -226,7 +226,7 @@ function scheduleHeaderRefresh(runId) {
 // not a stream at all, fires its error with the source already closed and never retries: saying
 // "reconnecting" forever was a promise nothing was keeping. That state now says the live view is
 // gone and offers the reload that actually resumes it.
-function streamIndicator(source, onReconnect) {
+function streamIndicator(source, onReconnect, onClosed) {
 	const indicator = document.getElementById("live-indicator");
 	if (!indicator) return;
 	indicator.hidden = false;
@@ -240,6 +240,16 @@ function streamIndicator(source, onReconnect) {
 	};
 	source.onerror = () => {
 		if (source.readyState === 2) {
+			// The browser gave up and will never retry this source. On a secured install that is
+			// every drop, because the ticket in the URL was consumed on first open, so the live
+			// view used to die on one sleep or idle-recycle. The caller re-mints a fresh ticket
+			// and resumes from its cursor; only when it declines, out of retries, is the view
+			// honestly lost.
+			if (onClosed && onClosed()) {
+				dropped = true;
+				indicator.textContent = "reconnecting";
+				return;
+			}
 			indicator.textContent = "";
 			const link = document.createElement("a");
 			link.href = location.href;
@@ -396,6 +406,7 @@ async function openParentStream(parentId) {
 		} catch (_) { /* ignore a malformed event */ }
 	});
 	source.addEventListener("end", async () => {
+		streamState.ended = true;
 		source.close();
 		try {
 			detailState.run = await getJSON("/runs/" + parentId);
@@ -543,9 +554,30 @@ function runStreamPath(runId, afterSeq) {
 // openStream subscribes to the run's live output and applies events, logs, and the end signal.
 // It resumes after afterSeq so history is never re-sent, and skips any event at or before the
 // cursor in case a reconnect replays one.
+//
+// Reconnection is owned here rather than left to EventSource. A stream ticket is single-use by
+// design, so the browser's automatic reconnect replayed a consumed ticket and got 401: one laptop
+// sleep, background tab, or load-balancer idle-recycle permanently killed the live view on every
+// secured install, and the resume cursor built for exactly that moment never fired. On an error
+// the source is closed and reopened with a fresh ticket and the last applied sequence, with a
+// small backoff, so the view survives the network instead of dying on it.
+// streamState tracks the recovery loop for the run stream now open: how many re-mints in a row
+// have been spent and whether the run already ended, reset when a different run's stream opens.
+let streamState = { runId: "", retries: 0, ended: false };
+
 async function openStream(runId, afterSeq) {
+	if (streamState.runId !== runId) streamState = { runId: runId, retries: 0, ended: false };
 	const source = new EventSource(await streamURL(runStreamPath(runId, afterSeq), runId));
-	streamIndicator(source);
+	streamIndicator(source, null, () => {
+		if (streamState.ended || streamState.retries >= 6) return false;
+		streamState.retries++;
+		source.close();
+		const cursor = (detailState && detailState.lastSeq) || afterSeq || 0;
+		setTimeout(() => { openStream(runId, cursor); },
+			Math.min(15000, 1000 * Math.pow(2, streamState.retries - 1)));
+		return true;
+	});
+	source.addEventListener("open", () => { streamState.retries = 0; });
 	source.addEventListener("event", (e) => {
 		try {
 			const ev = JSON.parse(e.data);

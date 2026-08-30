@@ -25,8 +25,23 @@ test("a transient stream error reads as reconnecting", async () => {
 	assert.equal(indicator.hidden, false);
 });
 
-test("a closed stream reads as lost with a reload path, not as reconnecting", async () => {
+test("a closed stream re-mints a fresh ticket and resumes instead of dying", async () => {
+	// A stream ticket is single-use, so the browser's own retry can never succeed on a secured
+	// install: every drop landed on readyState 2 and the view said lost forever. The client owns
+	// the recovery now, re-opening with a fresh ticket from its resume cursor.
 	const { page, source } = await mountStream();
+	source.readyState = 2;
+	await source.emitRaw("error");
+	const indicator = page.document.getElementById("live-indicator");
+	assert.equal(indicator.textContent, "reconnecting");
+	await page.clock.tick(1100);
+	const next = page.streams.last();
+	assert.ok(next && next !== source, "a fresh stream was opened after the backoff");
+});
+
+test("a closed stream out of retries reads as lost with a reload path", async () => {
+	const { page, source } = await mountStream();
+	page.app.streamState.retries = 6;
 	source.readyState = 2;
 	await source.emitRaw("error");
 	const indicator = page.document.getElementById("live-indicator");
