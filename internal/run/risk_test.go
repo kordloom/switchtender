@@ -100,3 +100,24 @@ func TestRiskGradesAWholeInventoryLimitAsWide(t *testing.T) {
 		})
 	}
 }
+
+// TestAssessRiskReadsExtraVars pins that a destructive command riding in an extra var grades like
+// the same text on the command line.
+//
+// A variable is string material a playbook or script splices into what it executes, so
+// -e cmd='rm -rf /data' on a harmless-looking playbook graded low and slipped past a min_risk
+// hold, while the identical text typed as the command was caught.
+func TestAssessRiskReadsExtraVars(t *testing.T) {
+	t.Parallel()
+	r := &Run{Playbook: "maintenance.yml", ExtraVars: map[string]any{"cmd": "rm -rf /data"}}
+	risk := AssessRisk(r)
+	if risk.Level != RiskHigh {
+		t.Errorf("risk = %s, want high: the destructive text is in an extra var", risk.Level)
+	}
+	// Non-string values stay out of it, and clean vars do not raise anything.
+	clean := AssessRisk(&Run{Playbook: "maintenance.yml",
+		ExtraVars: map[string]any{"replicas": 3, "env": "prod"}})
+	if clean.Level != RiskLow {
+		t.Errorf("clean vars graded %s, want low", clean.Level)
+	}
+}
