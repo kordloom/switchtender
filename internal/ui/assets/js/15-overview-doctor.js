@@ -181,11 +181,23 @@ function renderRecentRuns(runs) {
 		row.className = "ov-row";
 		row.href = "/ui/runs/" + r.id;
 		row.appendChild(badge(r.status));
+		// Ansible is the default and carries no badge, so the builder returns null for it.
+		const tool = toolBadgeEl(r);
+		if (tool) row.appendChild(tool);
 		const name = document.createElement("span");
 		name.className = "ov-row-name";
 		name.textContent = toolLabel(r);
 		name.title = r.playbook || r.command || r.id;
 		row.appendChild(name);
+		// The row used to be one word left, one word right, and dead space between. The tool badge
+		// and the duration the row already knows fill it without a second fetch.
+		const dur = fmtDuration(r.started_at, r.ended_at);
+		if (dur) {
+			const d = document.createElement("span");
+			d.className = "ov-row-meta";
+			d.textContent = dur;
+			row.appendChild(d);
+		}
 		const started = r.started_at || r.created_at;
 		const meta = document.createElement("span");
 		meta.className = "ov-row-meta";
@@ -526,7 +538,11 @@ function renderActivityBars(el, model) {
 			if (!part.n) continue;
 			const seg = document.createElement("div");
 			seg.className = "activity-seg " + part.cls;
-			seg.style.height = Math.max(3, Math.round((part.n / model.max) * 64)) + "px";
+			// The tallest bar fills the chart it lives in: 64px on the overview embed, the full
+			// column on the activity page. A fixed 64 made the dedicated page render a tall empty
+			// panel with the same tiny sparkline at the bottom.
+			const chartHeight = document.body.dataset.page === "activity" ? 232 : 64;
+			seg.style.height = Math.max(3, Math.round((part.n / model.max) * chartHeight)) + "px";
 			bar.appendChild(seg);
 		}
 		if (!total) bar.appendChild(Object.assign(document.createElement("div"), { className: "activity-seg empty" }));
@@ -764,6 +780,9 @@ function renderFleetSnapshot(hosts) {
 		name.className = "ov-row-name mono";
 		name.textContent = h.host;
 		row.appendChild(name);
+		if (h.recent && h.recent.length) {
+			row.appendChild(sparkline(h.recent, h.recent_runs));
+		}
 		const meta = document.createElement("span");
 		meta.className = "ov-row-meta" + (h.failures ? " fail-count" : "");
 		meta.textContent = h.failures + " / " + h.total + " failed";

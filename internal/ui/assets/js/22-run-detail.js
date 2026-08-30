@@ -677,6 +677,29 @@ async function resolveInventoryName(id, link) {
 function renderHeader(run) {
 	const el = document.getElementById("run-header");
 	el.innerHTML = "";
+	// The proof strip. A run whose request is committed to the chain is the product's whole story,
+	// and it used to be invisible here: the spec digest was one of ten identical fields and the
+	// evidence exports two of nine identical buttons. One line above the header now says it.
+	const oldStrip = document.getElementById("chain-callout");
+	if (oldStrip) oldStrip.remove();
+	if (run.audit_receipt) {
+		const strip = document.createElement("a");
+		strip.id = "chain-callout";
+		strip.className = "chain-callout";
+		strip.href = "/ui/audit";
+		strip.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" ' +
+			'stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ' +
+			'aria-hidden="true"><path d="M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6z"/>' +
+			'<polyline points="8.5 12 11 14.5 15.5 9.5"/></svg>';
+		const text = document.createElement("span");
+		const seq = String(run.audit_receipt).split(":")[0];
+		text.textContent = "On the tamper-evident chain \u00b7 entry " + seq +
+			(run.approved_spec_digest ? " \u00b7 spec digest bound at approval" : "");
+		strip.appendChild(text);
+		strip.dataset.tip = "This run's request is committed to the hash chain and its evidence " +
+			"verifies offline. Click to open the trail";
+		el.parentNode.insertBefore(strip, el);
+	}
 	el.appendChild(field("Status", null, badge(run.status)));
 	const runField = field("Run", shortId(run.id), null, run.id);
 	runField.querySelector(".value").appendChild(copyButton(run.id, "Copy the full run id"));

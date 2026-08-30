@@ -154,12 +154,18 @@ async function loadDrift() {
 			runCell.appendChild(runLink);
 			tr.appendChild(runCell);
 			const actions = document.createElement("td");
-			if (h.drifted_tasks > 0 && !isReadOnly() && canOperate()) {
+			if (h.drifted_tasks > 0) {
+				// Rendered even when the viewer cannot act, dimmed by the read-only convention like
+				// every other page. Hiding it left a headed Actions column empty on every row of the
+				// public demo, which read as half-built.
 				const btn = document.createElement("button");
 				btn.type = "button";
 				btn.className = "button";
+				btn.dataset.mutates = "true";
 				btn.textContent = "Propose reconcile";
-				btn.addEventListener("click", () => proposeReconcile(h.host, btn));
+				if (!isReadOnly() && canOperate()) {
+					btn.addEventListener("click", () => proposeReconcile(h.host, btn));
+				}
 				actions.appendChild(btn);
 			}
 			tr.appendChild(actions);

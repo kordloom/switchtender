@@ -153,7 +153,9 @@ const TOURS = [
 		id: "welcome", title: "Sixty-second tour", desc: "The whole product at a glance",
 		page: "overview", path: "/ui/",
 		steps: [
-			{ title: "Welcome to SwitchTender", body: "One binary runs Ansible, Terraform, Bash, Python, and Go, with no Kubernetes. Here is the sixty-second tour." },
+			// Anchored on the hero tiles rather than centered: a centered first step dimmed the
+			// whole screen and sat exactly over the numbers a first visit should be looking at.
+			{ sel: "#ov-metrics", title: "Welcome to SwitchTender", body: "One binary runs Ansible, Terraform, Bash, Python, and Go, with no Kubernetes. Every change lands on the tamper-evident chain you can see verified right here." },
 			{ sel: ".page-head .button.primary", title: "Launch any tool", body: "Start a run with Ansible, Bash, Terraform, or Python, each with a dry run, and mix them in a single pipeline." },
 			{ sel: ".panel-runs", title: "Watch every run", body: "Runs stream live here, with a host matrix, sharded splits, and multi-step pipelines all in one place." },
 			{ sel: "#tiles a[href='/ui/migrate']", title: "Bring your work with you", body: "Migrating from another tool? Import projects, inventories, templates, and schedules in a few clicks." },

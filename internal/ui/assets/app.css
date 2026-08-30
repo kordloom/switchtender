@@ -107,6 +107,16 @@
 /* A control the read-only demo blocks stays visible, so the page still conveys what the product
    does, but reads as unavailable and stays hoverable so it can explain why. The rule matches on
    the marker rather than the disabled attribute, since rows are built after the read-only pass. */
+/* The proof strip above the run header: the one line that says this run is provable. */
+.chain-callout { display: inline-flex; align-items: center; gap: 7px; margin: 0 0 10px; padding: 6px 12px; border: 1px solid color-mix(in srgb, var(--ok) 45%, var(--border)); background: color-mix(in srgb, var(--ok) 9%, transparent); color: var(--ok); border-radius: 999px; font-size: 12.5px; font-weight: 600; width: fit-content; }
+.chain-callout:hover { text-decoration: none; background: color-mix(in srgb, var(--ok) 16%, transparent); }
+.chain-callout svg { flex: none; }
+
+/* The two artifacts that make a run provable used to be two of nine identical gray buttons, so
+   nothing on the page signaled that this product's runs come with proof. They carry the accent. */
+.button.evidence { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); font-weight: 600; }
+.button.evidence:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+
 body[data-readonly] [data-mutates], body[data-readonly] .button[disabled] {
 	opacity: 0.45;
 	cursor: not-allowed;
@@ -563,7 +573,9 @@ table.matrix tbody th { position: sticky; left: 0; z-index: 2; background: var(-
 table.matrix thead th.corner { position: sticky; left: 0; z-index: 4; border-right: 1px solid var(--border-muted); }
 table.matrix td { padding: 3px; text-align: center; }
 .cell { margin: 0 auto; }
-.cell { width: 30px; height: 24px; border-radius: 4px; cursor: pointer; transition: transform 0.08s ease, box-shadow 0.08s ease; }
+.cell { width: 44px; height: 30px; border-radius: 5px; cursor: pointer; transition: transform 0.08s ease, box-shadow 0.08s ease; }
+/* At fleet scale the grid earns its density back so five hundred hosts still fit a screen. */
+table.matrix.dense .cell { width: 30px; height: 24px; border-radius: 4px; }
 .cell.ok { background: var(--ok); }
 .cell.changed { background: var(--changed); }
 .cell.failed { background: var(--failed); }
@@ -1136,6 +1148,9 @@ body[data-theme="dark"] {
 .activity { display: flex; align-items: flex-end; gap: 6px; padding: 4px 2px 0; }
 .activity-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 0; }
 .activity-bar { display: flex; flex-direction: column-reverse; justify-content: flex-start; width: 100%; max-width: 34px; min-height: 66px; }
+/* The dedicated activity page used to draw the same 66px sparkline as the overview embed over an
+   otherwise blank screen, which read as a placeholder. Only the full page gets the tall columns. */
+body[data-page="activity"] .activity-bar { min-height: 240px; max-width: 60px; }
 .activity-seg { width: 100%; border-radius: 3px; margin-top: 2px; }
 .activity-seg.succeeded { background: var(--ok); }
 .activity-seg.failed { background: var(--failed); }
