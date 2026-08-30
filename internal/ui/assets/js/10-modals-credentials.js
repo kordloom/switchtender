@@ -458,30 +458,7 @@ function wireCredentialForm() {
 }
 
 // loadCredentials populates the credential table with delete actions.
-// credentialUsers maps a credential id to the names of the templates that reference it, so the
-// list can answer what breaks if one is deleted.
-async function credentialUsers() {
-	const map = new Map();
-	try {
-		const data = await getJSON("/templates");
-		for (const t of data.templates || []) {
-			const ids = [].concat(t.credential_ids || [], t.selectable_credential_ids || [],
-				t.pull_credential_id ? [t.pull_credential_id] : []);
-			for (const id of ids) {
-				if (!map.has(id)) map.set(id, []);
-				if (!map.get(id).includes(t.name)) map.get(id).push(t.name);
-			}
-		}
-	} catch {
-		// A failed lookup is not an empty one: rendering it as "no template references this"
-		// asserted a fact nobody checked. Null tells the column to say it does not know.
-		return null;
-	}
-	return map;
-}
-
 async function loadCredentials() {
-	const templateUsers = await credentialUsers();
 	try {
 		const data = await getJSON("/credentials");
 		const creds = data.credentials || [];
@@ -543,26 +520,28 @@ async function loadCredentials() {
 				: "A secret is stored, encrypted at rest and never shown again";
 			secret.appendChild(secretChip);
 			tr.appendChild(secret);
+			// The server computes used_by with the same reading its delete guard uses, across
+			// templates, inventories, projects, and inventory sources. Counting templates alone here
+			// made a credential holding a project's deploy key read as safe to delete right up until
+			// the delete was refused for being in use.
 			const usedBy = td("");
-			if (!templateUsers) {
-				usedBy.textContent = "unknown";
-				usedBy.className = "muted";
-				usedBy.dataset.tip = "The template list could not be read, so what uses this credential is unknown";
-				tr.appendChild(usedBy);
-			} else {
-			const users = templateUsers.get(c.id) || [];
-			if (users.length) {
+			const kinds = Object.entries(c.used_by || {}).filter(([, v]) => v && v.length);
+			if (kinds.length) {
+				const total = kinds.reduce((n, [, v]) => n + v.length, 0);
+				const pages = { templates: "/ui/jobtemplates", inventories: "/ui/inventories",
+					projects: "/ui/projects", inventory_sources: "/ui/sources" };
 				const link = document.createElement("a");
-				link.href = "/ui/templates";
-				link.textContent = users.length === 1 ? users[0] : users.length + " templates";
-				link.dataset.tip = "Used by: " + users.join(", ") + ". Click to open templates";
+				link.href = pages[kinds[0][0]] || "/ui/jobtemplates";
+				link.textContent = total === 1 ? kinds[0][1][0] : total + " objects";
+				link.dataset.tip = "Used by " + kinds.map(([k, v]) =>
+					k.replace("_", " ") + ": " + v.join(", ")).join(" \u00b7 ") +
+					". Deleting is refused while anything still uses it";
 				usedBy.appendChild(link);
 			} else {
 				usedBy.textContent = "\u2014";
-				usedBy.dataset.tip = "No template references this credential";
+				usedBy.dataset.tip = "Nothing references this credential, so it can be deleted";
 			}
 			tr.appendChild(usedBy);
-			}
 			tr.appendChild(tdTime(c.created_at));
 			const actions = document.createElement("td");
 			const del = document.createElement("button");

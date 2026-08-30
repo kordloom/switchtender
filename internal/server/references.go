@@ -94,6 +94,67 @@ func (c *refChecker) credentialRefs(ctx context.Context, id string) (usedBy, err
 	return out, nil
 }
 
+// allCredentialRefs returns every credential's users in one pass over the four stores, keyed by
+// credential id. The list endpoint uses it so the Used by column speaks with the same voice as the
+// delete guard: the column used to count templates alone, so a credential holding a project's
+// deploy key read as unused right up until the delete was refused for being in use.
+func (c *refChecker) allCredentialRefs(ctx context.Context) (map[string]usedBy, error) {
+	out := map[string]usedBy{}
+	add := func(id, kind, name string) {
+		if id == "" {
+			return
+		}
+		if out[id] == nil {
+			out[id] = usedBy{}
+		}
+		out[id][kind] = append(out[id][kind], name)
+	}
+	if c.templates != nil {
+		list, err := c.templates.List(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, t := range list {
+			for _, id := range t.CredentialIDs {
+				add(id, "templates", nameOr(t.Name, t.ID))
+			}
+		}
+	}
+	if c.inventories != nil {
+		list, err := c.inventories.List(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, i := range list {
+			for _, id := range i.CredentialIDs {
+				add(id, "inventories", nameOr(i.Name, i.ID))
+			}
+		}
+	}
+	if c.projects != nil {
+		list, err := c.projects.List(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, p := range list {
+			add(p.CredentialID, "projects", nameOr(p.Name, p.ID))
+			if p.PullCredentialID != p.CredentialID {
+				add(p.PullCredentialID, "projects", nameOr(p.Name, p.ID))
+			}
+		}
+	}
+	if c.invSources != nil {
+		list, err := c.invSources.List(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, sc := range list {
+			add(sc.CredentialID, "inventory_sources", nameOr(sc.Name, sc.ID))
+		}
+	}
+	return out, nil
+}
+
 // projectRefs returns the configuration objects that still use the project id.
 func (c *refChecker) projectRefs(ctx context.Context, id string) (usedBy, error) {
 	out := usedBy{}

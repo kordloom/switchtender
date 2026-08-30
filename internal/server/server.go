@@ -521,12 +521,13 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("DELETE /v1/credential-types/{id}", deleteCredTypeHandler(s.credTypes, s.log))
 	mux.Handle("POST /v1/credentials", createCredentialHandler(s.credentials, s.credTypes, s.sealer, authz, s.log))
 	mux.Handle("PUT /v1/credentials/{id}", updateCredentialHandler(s.credentials, s.sealer, authz, s.log))
-	mux.Handle("GET /v1/credentials", listCredentialsHandler(s.credentials, authz, s.log))
-	// refs lets a credential or project delete refuse to orphan an object that still uses it.
+	// refs lets a credential or project delete refuse to orphan an object that still uses it, and
+	// gives the credential list the same reading so its Used by column cannot disagree.
 	refs := &refChecker{
 		templates: s.templates, inventories: s.inventories,
 		projects: s.projects, invSources: s.invSources, schedules: s.schedules,
 	}
+	mux.Handle("GET /v1/credentials", listCredentialsHandler(s.credentials, refs, authz, s.log))
 	mux.Handle("DELETE /v1/credentials/{id}", deleteCredentialHandler(s.credentials, refs, s.log))
 	mux.Handle("POST /v1/projects", createProjectHandler(s.projects, authz, s.log))
 	mux.Handle("PUT /v1/projects/{id}", updateProjectHandler(s.projects, authz, s.log))
