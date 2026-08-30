@@ -7,7 +7,9 @@ function renderHostSummary(host, runs) {
 	let changed = 0;
 	let busy = 0;
 	for (const r of runs) {
-		if (r.outcome === "failed" || r.outcome === "unreachable") failed++;
+		// The API's field is worst, not outcome: counting a field that does not exist made
+		// Failures read zero and Success rate 100% while the table below showed red chips.
+		if (r.worst === "failed" || r.worst === "unreachable") failed++;
 		if (r.changed) changed += r.changed;
 		busy += r.duration_seconds || 0;
 	}

@@ -128,7 +128,10 @@ function renderOverviewMetrics(runs, hosts, summary) {
 			else if (r.status === "failed") failed++;
 		}
 	}
-	const rate = total ? Math.round((succeeded / total) * 100) + "%" : "-";
+	// Finished runs are the denominator: dividing by everything pending, held, or canceled dragged
+	// the rate down while the Failed card beside it said zero.
+	const finished = succeeded + failed;
+	const rate = finished ? Math.round((succeeded / finished) * 100) + "%" : "-";
 	const el = document.getElementById("ov-metrics");
 	el.innerHTML = "";
 	el.appendChild(statCard(total, "Total runs", ""));

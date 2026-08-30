@@ -557,6 +557,9 @@ async function openStream(runId, afterSeq) {
 	});
 	source.addEventListener("log", (e) => {
 		try { appendLog(JSON.parse(e.data)); } catch (_) { /* ignore a malformed chunk */ }
+		// Tools without structured events stream only log chunks, so the header froze at pending
+		// while the log scrolled. The refresh coalesces, so this is cheap.
+		scheduleHeaderRefresh(runId);
 	});
 	source.addEventListener("end", async () => {
 		source.close();

@@ -186,7 +186,8 @@ func listRunsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.H
 		limit = min(limit, maxRunsPage)
 		offset := queryInt(r, "offset")
 		filter := run.ListFilter{
-			Status:      r.URL.Query().Get("status"),
+			// Normalized like the fielded status: term; a mixed-case value silently matched nothing.
+			Status:      strings.ToLower(r.URL.Query().Get("status")),
 			OldestFirst: r.URL.Query().Get("order") == "oldest",
 		}
 		parseFieldedQuery(r.URL.Query().Get("q"), &filter)

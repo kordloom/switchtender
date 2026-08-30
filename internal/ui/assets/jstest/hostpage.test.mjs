@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { loadParts } from "./loader.mjs";
 
-const app = loadParts(["01-boot.js", "18-host-page.js"]);
+const app = loadParts(["01-boot.js", "16-runs-list.js", "18-host-page.js"]);
 
 test("badge builds a status span with underscores read as spaces", () => {
 	const tests = [
@@ -36,4 +36,24 @@ test("fmtInterval renders the largest whole unit that fits", () => {
 	for (const [i, tc] of tests.entries()) {
 		assert.equal(app.fmtInterval(tc.In), tc.Want, "test " + i);
 	}
+});
+
+test("the host summary counts failures from the field the API actually returns", () => {
+	// The rows carry worst, not outcome. Counting a nonexistent field made Failures read zero and
+	// Success rate 100% while the table below showed red failed chips: three views of one host
+	// disagreed on the demo's first click.
+	const host = app.document.createElement("div");
+	host.id = "host-summary";
+	app.document.body.appendChild(host);
+	app.renderHostSummary("web01", [
+		{ worst: "failed", changed: 1, duration_seconds: 2 },
+		{ worst: "unreachable", changed: 0, duration_seconds: 1 },
+		{ worst: "ok", changed: 3, duration_seconds: 4 },
+		{ worst: "changed", changed: 2, duration_seconds: 3 },
+	]);
+	const text = host.textContent;
+	assert.ok(text.includes("2") && text.includes("Failures"),
+		"two of four runs went bad on this host; the card said: " + text);
+	assert.ok(text.includes("50%"),
+		"success rate should be 50%, not 100%; the card said: " + text);
 });

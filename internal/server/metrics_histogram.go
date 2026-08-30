@@ -85,6 +85,11 @@ func (a *runHistograms) fold(runs []run.RunTiming, windowFull bool) {
 
 	for i := len(runs) - 1; i >= 0; i-- {
 		rn := runs[i]
+		// A split or pipeline parent spans its whole fan-out and its wait can be a human approval,
+		// so folding it in moved the tails by orders of magnitude. The children carry the truth.
+		if rn.Kind != "" {
+			continue
+		}
 		if rn.EndedAt == nil || rn.StartedAt == nil {
 			continue
 		}

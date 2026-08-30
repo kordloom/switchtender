@@ -452,7 +452,7 @@ table.runs td.mono { max-width: 380px; overflow: hidden; text-overflow: ellipsis
 .run-header { display: flex; flex-wrap: wrap; gap: 12px 28px; align-items: center; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 20px; margin-bottom: 18px; }
 .run-header .field { display: flex; flex-direction: column; gap: 3px; }
 .run-header .field .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); font-weight: 600; }
-.run-header .field .value { font-size: 14px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.run-header .field .value { font-size: 14px; font-family: var(--mono); }
 
 /* Panels */
 .panel { background-color: var(--surface); background-image: linear-gradient(180deg, var(--card-top), transparent 46%); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 16px 20px; margin-bottom: 18px; box-shadow: var(--shadow); }
@@ -551,7 +551,7 @@ table.matrix { border-collapse: separate; border-spacing: 0; }
 table.matrix thead th { position: sticky; top: 0; z-index: 3; background: var(--surface-2); padding: 9px 12px; font-size: 12px; font-weight: 600; white-space: nowrap; text-align: left; color: var(--muted); border-bottom: 1px solid var(--border-muted); }
 table.matrix tbody th a { color: inherit; }
 table.matrix tbody th a:hover { color: var(--accent); text-decoration: none; }
-table.matrix tbody th { position: sticky; left: 0; z-index: 2; background: var(--surface-2); padding: 7px 14px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; white-space: nowrap; text-align: left; border-right: 1px solid var(--border-muted); border-bottom: 1px solid var(--border-muted); }
+table.matrix tbody th { position: sticky; left: 0; z-index: 2; background: var(--surface-2); padding: 7px 14px; font-family: var(--mono); font-size: 12.5px; white-space: nowrap; text-align: left; border-right: 1px solid var(--border-muted); border-bottom: 1px solid var(--border-muted); }
 table.matrix thead th.corner { position: sticky; left: 0; z-index: 4; border-right: 1px solid var(--border-muted); }
 table.matrix td { padding: 3px; text-align: center; }
 .cell { margin: 0 auto; }
@@ -581,7 +581,7 @@ table.matrix td { padding: 3px; text-align: center; }
 .tl-bar.changed { background: var(--changed); }
 .tl-bar.failed { background: var(--failed); }
 .tl-bar.skipped { background: var(--skipped); }
-.tl-dur { font-size: 12px; color: var(--muted); text-align: right; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.tl-dur { font-size: 12px; color: var(--muted); text-align: right; font-family: var(--mono); }
 
 /* Buttons */
 .actions { margin-top: 8px; }
@@ -619,7 +619,7 @@ table.matrix td { padding: 3px; text-align: center; }
 .shards { display: flex; flex-direction: column; gap: 8px; }
 .shard-row { display: flex; align-items: center; gap: 12px; padding: 10px 14px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); transition: border-color 0.08s ease; }
 .shard-row:hover { border-color: var(--accent); text-decoration: none; }
-.shard-label { font-size: 13px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.shard-label { font-size: 13px; font-family: var(--mono); }
 
 /* Drill panel */
 /* Above the sticky topbar (62) and the side rail (70): a drawer whose close button paints under
@@ -633,12 +633,12 @@ table.matrix td { padding: 3px; text-align: center; }
 .drill h3 { margin: 0 0 16px; font-size: 15px; font-weight: 600; padding-right: 24px; }
 .drill .field { margin-bottom: 13px; }
 .drill .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); font-weight: 600; }
-.drill .value { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; word-break: break-word; margin-top: 3px; }
-.drill-pre { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; margin: 5px 0 0; max-height: 220px; overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+.drill .value { font-family: var(--mono); font-size: 13px; word-break: break-word; margin-top: 3px; }
+.drill-pre { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; margin: 5px 0 0; max-height: 220px; overflow: auto; font-family: var(--mono); font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
 .drill-note { color: var(--changed); font-size: 12px; margin-top: 10px; }
 
 /* Live log */
-.log { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; max-height: 380px; overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 1.5; white-space: pre-wrap; margin: 0; }
+.log { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; max-height: 380px; overflow: auto; font-family: var(--mono); font-size: 12px; line-height: 1.5; white-space: pre-wrap; margin: 0; }
 .live-dot { font-size: 12px; color: var(--ok); display: inline-flex; align-items: center; gap: 6px; font-weight: 500; }
 .live-dot::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--ok); animation: pulse 1.4s infinite; }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
@@ -1140,7 +1140,7 @@ body[data-theme="dark"] {
 .seg { display: inline-flex; background: var(--surface-2); border: 1px solid var(--border); border-radius: 999px; padding: 2px; gap: 2px; }
 .seg-btn { appearance: none; -webkit-appearance: none; border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 12px; font-weight: 600; line-height: 1; padding: 5px 10px; border-radius: 999px; cursor: pointer; transition: color .15s var(--ease), background .15s var(--ease); display: inline-flex; align-items: center; justify-content: center; }
 .seg-btn:hover { color: var(--text); }
-.seg-btn.active { background: var(--accent); color: #fff; box-shadow: 0 1px 5px -1px color-mix(in srgb, var(--accent) 55%, transparent); }
+.seg-btn.active { background: var(--accent); color: var(--primary-text); box-shadow: 0 1px 5px -1px color-mix(in srgb, var(--accent) 55%, transparent); }
 .seg-btn.icon { padding: 5px 8px; }
 .seg-btn.icon svg { width: 15px; height: 15px; display: block; }
 .activity-filter { padding: 5px 12px; font-size: 12.5px; width: 120px; border-radius: 999px; transition: width .18s var(--ease); }
