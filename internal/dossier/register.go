@@ -157,22 +157,30 @@ func trimAt(rows []*run.Run, at time.Time) []*run.Run {
 	return rows[:cut]
 }
 
-// decisionOf reads an approval or rejection from a chain entry's path, returning the run id it
-// decided and the verdict, or empty strings for ordinary activity.
+// decisionOf reads an approval or rejection from a chain entry, returning the run id it decided
+// and the verdict, or empty strings for ordinary activity.
+//
+// Only the committed DECISION entry counts. The HTTP attempt the middleware records looks almost
+// identical, but it is written whether or not the decision took: a self-approval the separation
+// gate refused still logged the attempt, and the register then read "Approved by" the requester,
+// naming the wrong person in the one document built for an auditor. A later failed re-approve
+// likewise overwrote the true approver. The DECISION entry is written only when the decision
+// committed, carries the deciding actor, and its digest binds the exact spec decided on.
 func decisionOf(e *audit.Entry) (id, verdict string) {
-	switch {
-	case strings.HasSuffix(e.Path, "/approve"):
-		verdict = "Approved"
-	case strings.HasSuffix(e.Path, "/reject"):
-		verdict = "Rejected"
-	default:
+	if e.Method != audit.MethodDecision {
 		return "", ""
 	}
-	parts := strings.Split(strings.TrimSuffix(strings.TrimSuffix(e.Path, "/approve"), "/reject"), "/")
-	if len(parts) == 0 {
+	runID, v, ok := strings.Cut(strings.TrimPrefix(e.Path, "/runs/"), "/decision/")
+	if !ok || runID == "" {
 		return "", ""
 	}
-	return parts[len(parts)-1], verdict
+	switch v {
+	case "approved":
+		return runID, "Approved"
+	case "rejected":
+		return runID, "Rejected"
+	}
+	return "", ""
 }
 
 // registerRow is one change as rendered.

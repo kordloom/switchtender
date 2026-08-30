@@ -39,7 +39,10 @@ func seedEvidence(t *testing.T) (run.Store, audit.Store, string) {
 		// The real recorded path for a launch. The auth middleware records the request path
 		// before the handler runs, so it names the template, never the run it goes on to create.
 		{"deploy-bot", "POST", "/v1/templates/tpl_web/launch"},
-		{"root", "POST", "/v1/runs/" + id + "/approve"},
+		// The attempt under the wrong actor and the committed decision under the right one: the
+		// dossier must label the decision and leave the attempt as ordinary activity.
+		{"impostor", "POST", "/v1/runs/" + id + "/approve"},
+		{"root", audit.MethodDecision, "/runs/" + id + "/decision/approved"},
 		{"root", "POST", "/v1/projects"},
 	} {
 		if err := audits.Append(ctx, &audit.Entry{
@@ -58,15 +61,15 @@ func TestDossierCollectsDecisionsAndReceipts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Collect() error = %v", err)
 	}
-	if !in.ChainOK || in.ChainCount != 3 {
-		t.Errorf("chain ok=%v count=%d, want intact with 3 entries", in.ChainOK, in.ChainCount)
+	if !in.ChainOK || in.ChainCount != 4 {
+		t.Errorf("chain ok=%v count=%d, want intact with 4 entries", in.ChainOK, in.ChainCount)
 	}
-	if len(in.Entries) != 1 {
-		t.Fatalf("run entries = %d, want the approval; a launch is recorded at the request path, "+
-			"which never names the run it creates", len(in.Entries))
+	if len(in.Entries) != 2 {
+		t.Fatalf("run entries = %d, want the attempt and the committed decision; a launch is "+
+			"recorded at the request path, which never names the run it creates", len(in.Entries))
 	}
-	if in.Head == nil || in.Head.Seq != 3 {
-		t.Errorf("head = %+v, want the chain head at seq 3", in.Head)
+	if in.Head == nil || in.Head.Seq != 4 {
+		t.Errorf("head = %+v, want the chain head at seq 4", in.Head)
 	}
 
 	doc, err := Render(in)
@@ -123,7 +126,7 @@ func TestDossierAnchorsCoverTheRun(t *testing.T) {
 		t.Fatalf("SaveAnchor() error = %v", err)
 	}
 	if err := anchorStore.SaveAnchor(ctx, &audit.Anchor{
-		ID: "anc_head", Type: "rfc3161", Shape: audit.AnchorShapeLinear, Seq: 3, Link: chain[2].Hash,
+		ID: "anc_head", Type: "rfc3161", Shape: audit.AnchorShapeLinear, Seq: 4, Link: chain[3].Hash,
 		At: time.Now(), Ref: "https://tsa", Proof: "cHJvb2Y=",
 	}); err != nil {
 		t.Fatalf("SaveAnchor() error = %v", err)
