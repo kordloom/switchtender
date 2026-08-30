@@ -79,7 +79,7 @@ func TestDossierCollectsDecisionsAndReceipts(t *testing.T) {
 	html := string(doc)
 	for _, want := range []string{
 		id, "Approved", "root", "deploy-bot",
-		"2:" + in.Entries[0].Hash, "3:" + in.Head.Hash,
+		"2:" + in.Entries[0].Hash, "4:" + in.Head.Hash,
 		"no anchor covers this run",
 	} {
 		if !strings.Contains(html, want) {
