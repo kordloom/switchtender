@@ -33,6 +33,9 @@ type runSummary struct {
 	Failed int `json:"failed"`
 	// Active is how many are running or pending.
 	Active int `json:"active"`
+	// AwaitingApproval is how many are held at the approval gate, the number the overview leads
+	// with: it is the governance story in one figure.
+	AwaitingApproval int `json:"awaiting_approval"`
 }
 
 // summarize folds status counts into the summary the runs view shows.
@@ -47,6 +50,8 @@ func summarize(counts map[run.Status]int) runSummary {
 			s.Failed += n
 		case run.StatusRunning, run.StatusPending:
 			s.Active += n
+		case run.StatusPendingApproval:
+			s.AwaitingApproval += n
 		}
 	}
 	return s

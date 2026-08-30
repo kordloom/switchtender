@@ -382,9 +382,17 @@ input.tile-filter { width: 240px; max-width: 46vw; padding: 7px 11px 7px 31px; f
    inside its own box instead of clipping the last columns off the page. The table itself keeps
    display:table and width:100%, so it fills the wrapper when the columns fit and grows past it (which
    the wrapper then scrolls) when they do not. */
-.list-scroll { overflow-x: auto; overflow-y: visible; border-radius: var(--radius-lg); }
+.list-scroll { overflow-x: auto; overflow-y: visible; border-radius: var(--radius-lg);
+	/* A table wider than its wrapper used to clip its last columns with nothing saying so, and the
+	   two columns operators scan first, Started and Duration, looked absent. The local-attached
+	   cover rides the content's far right edge: while more columns wait off-screen it is out of
+	   view and the fixed shadow shows; at the end of the scroll it slides over and hides it. */
+	background:
+		linear-gradient(to left, var(--surface) 45%, transparent) right / 44px 100% no-repeat local,
+		linear-gradient(to left, color-mix(in srgb, var(--text) 16%, transparent), transparent)
+			right / 18px 100% no-repeat scroll; }
 table.runs { width: 100%; border-collapse: separate; border-spacing: 0; background-color: var(--surface); background-image: linear-gradient(180deg, var(--card-top), transparent 30%); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow); }
-table.runs th, table.runs td { text-align: left; padding: 10px 16px; border-bottom: 1px solid var(--border-muted); }
+table.runs th, table.runs td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border-muted); }
 /* Faint vertical dividers between columns, the mirror of the row borders. Half the strength of a
    row border so columns read as separated without the grid feeling boxed in. */
 table.runs th:not(:last-child), table.runs td:not(:last-child) { border-right: 1px solid color-mix(in srgb, var(--border-muted) 67%, transparent); }
@@ -394,7 +402,7 @@ table.runs tbody tr { transition: background 0.08s ease; }
 table.runs tbody tr.row-nav, table.runs tbody tr.row-inspect { cursor: pointer; }
 table.runs tbody tr.row-nav:hover, table.runs tbody tr.row-inspect:hover { background: var(--surface-2); }
 table.runs td button + button { margin-left: 8px; }
-table.runs td.mono { max-width: 380px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+table.runs td.mono { max-width: 118px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Status badges */
 .badge { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 2px 9px; min-width: 96px; border-radius: 999px; font-size: 11.5px; font-weight: 600; letter-spacing: 0.01em; line-height: 1.6; white-space: nowrap; border: 1px solid transparent; }
@@ -1207,7 +1215,7 @@ a.origin-chip:hover { text-decoration: none; background: var(--accent-soft); col
 .origin-chip.reconcile, .origin-chip.propose { background: color-mix(in srgb, var(--changed) 16%, transparent); color: var(--changed); }
 .origin-actor { margin-left: 7px; font-size: 11.5px; color: var(--muted); white-space: nowrap; }
 table.runs td:has(> .origin-chip) { white-space: nowrap; }
-.label-chip { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 6px; background: var(--surface-3); color: var(--muted); font-family: var(--mono); font-size: 11px; }
+.label-chip { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 6px; background: var(--surface-3); color: var(--muted); font-family: var(--mono); font-size: 11px; max-width: 104px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
 .label-chip:hover { text-decoration: none; background: var(--accent-soft); color: var(--accent); }
 .label-wrap .label-chip:first-child { margin-left: 0; }
 
@@ -1407,7 +1415,7 @@ td.col-labels { white-space: nowrap; }
 .label-more:hover { border-style: solid; }
 /* A run's playbook stays on one line, truncated, so every row keeps the same height. The full
    value is on the cell's title and in the export. */
-td.col-playbook .clamp { display: block; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+td.col-playbook .clamp { display: block; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 td.col-playbook .clamp .linkish { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
 /* Two label chips sit side by side; the column holds them without pushing the row taller. */
 td.col-labels .label-wrap { flex-wrap: nowrap; }
