@@ -21,6 +21,10 @@ type listRunsResponse struct {
 	Summary runSummary `json:"summary"`
 	// HasMore reports whether another page follows this one.
 	HasMore bool `json:"has_more"`
+	// NextOffset is where the next page starts in the store's own ordering. It advances by the
+	// page the store returned, before the read filter thinned it: a strict-grants caller advancing
+	// by the rows it could see re-read the rows it could not, and Load more repeated the page.
+	NextOffset int `json:"next_offset"`
 }
 
 // runSummary is the per-status rollup of all top-level runs, shown as cards above the list.
@@ -215,6 +219,7 @@ func listRunsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.H
 		// thins it. Computing it from the trimmed page reported no more whenever the filter dropped a
 		// row from a full page, so later readable runs never paged in.
 		storeFullPage := len(runs) == limit
+		nextOffset := offset + len(runs)
 		runs, err = readableRuns(r.Context(), authz, runs)
 		if err != nil {
 			log.Error("server: filter runs: " + err.Error())
@@ -247,10 +252,11 @@ func listRunsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.H
 			summary = summarize(counts)
 		}
 		respondJSON(w, log, http.StatusOK, listRunsResponse{
-			Runs:    maskRuns(runs),
-			Count:   len(runs),
-			Summary: summary,
-			HasMore: storeFullPage,
+			Runs:       maskRuns(runs),
+			Count:      len(runs),
+			Summary:    summary,
+			HasMore:    storeFullPage,
+			NextOffset: nextOffset,
 		}, wantsPretty(r))
 	}
 }
