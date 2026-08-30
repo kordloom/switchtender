@@ -147,9 +147,12 @@ async function loadPolicies() {
 			const ruleHeld = heldByRule(held, p);
 			if (ruleHeld > 0) {
 				const link = document.createElement("a");
-				link.href = "/ui/runs?q=" + encodeURIComponent("status:pending_approval");
+				// The link names the rule, quoted since rules are named in prose, so the count and
+				// its destination finally agree: it used to open every held run on the install.
+				link.href = "/ui/runs?q=" +
+					encodeURIComponent('held_by:"' + (p.name || p.id) + '" status:pending_approval');
 				link.textContent = ruleHeld === 1 ? "1 run waiting" : ruleHeld + " runs waiting";
-				link.dataset.tip = "Click to see the runs held for approval";
+				link.dataset.tip = "Click to see the runs this rule is holding";
 				holding.appendChild(link);
 			} else {
 				holding.textContent = "nothing waiting";

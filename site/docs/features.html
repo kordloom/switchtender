@@ -371,8 +371,9 @@ Origin column that links back to the template, schedule, or earlier run.</li>
 <li>Runs carry labels, arbitrary key values such as env=prod or ticket=OPS-123, set at launch and
 clickable in the list to filter by that pair.</li>
 <li>The runs search box accepts fielded terms alongside free text: status:failed, tool:bash,
-source:schedule, actor:alice, host:web01, and label:env=prod, all resolved by the server across
-the whole history rather than the loaded page.</li>
+source:schedule, actor:alice, host:web01, worker:web-01, held_by:&quot;prod freeze&quot;, and
+label:env=prod, all resolved by the server across the whole history rather than the loaded
+page. A value holding spaces is double-quoted.</li>
 <li>Playbook names open the file itself, read only, from the project's cached checkout.</li>
 </ul>
 <h2 id="host-facts">Host facts</h2>

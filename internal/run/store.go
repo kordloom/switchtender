@@ -407,4 +407,10 @@ type ListFilter struct {
 	LabelKey string
 	// LabelValue is the value LabelKey must hold.
 	LabelValue string
+	// ClaimedBy keeps only runs executed by this worker when set, so a worker's row can open the
+	// work it actually did instead of being a dead end.
+	ClaimedBy string
+	// HeldBy keeps only runs held by the approval rule with this label when set. The field is a
+	// historical record, so a caller wanting only the currently held ones pairs it with Status.
+	HeldBy string
 }

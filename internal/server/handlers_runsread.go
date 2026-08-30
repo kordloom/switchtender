@@ -79,12 +79,40 @@ type stepsResponse struct {
 	Count int `json:"count"`
 }
 
+// fieldedTokens splits a query into terms, keeping a double-quoted value together with the key it
+// belongs to. Splitting on spaces alone made every multi-word value unaddressable: an approval
+// rule is named in prose, so held_by:"prod terraform destroy" fell apart into free text and the
+// deep link from a policy row could never say which rule it meant.
+func fieldedTokens(q string) []string {
+	var tokens []string
+	var cur strings.Builder
+	inQuote := false
+	for _, r := range q {
+		switch {
+		case r == '"':
+			inQuote = !inQuote
+		case r == ' ' && !inQuote:
+			if cur.Len() > 0 {
+				tokens = append(tokens, cur.String())
+				cur.Reset()
+			}
+		default:
+			cur.WriteRune(r)
+		}
+	}
+	if cur.Len() > 0 {
+		tokens = append(tokens, cur.String())
+	}
+	return tokens
+}
+
 // parseFieldedQuery splits a search string into fielded terms and free text. status:, tool:,
-// source:, actor:, and host: fill their filters, label:key=value matches a run label, and
-// everything else stays free text. Explicit query parameters win over fielded terms.
+// source:, actor:, host:, worker:, and held_by: fill their filters, label:key=value matches a run
+// label, and everything else stays free text. A value holding spaces is double-quoted. Explicit
+// query parameters win over fielded terms.
 func parseFieldedQuery(q string, filter *run.ListFilter) {
 	var free []string
-	for _, token := range strings.Fields(q) {
+	for _, token := range fieldedTokens(q) {
 		key, value, ok := strings.Cut(token, ":")
 		if !ok || value == "" {
 			free = append(free, token)
@@ -108,6 +136,13 @@ func parseFieldedQuery(q string, filter *run.ListFilter) {
 			filter.SourceID = value
 		case "host":
 			filter.Host = value
+		case "worker":
+			// The executor that claimed the run, so a worker's row opens the work it did.
+			filter.ClaimedBy = value
+		case "held_by":
+			// The approval rule that held the run. The stored field is historical, so pair it with
+			// status:pending_approval to see only what the rule is holding now.
+			filter.HeldBy = value
 		case "label":
 			if lk, lv, ok := strings.Cut(value, "="); ok && lk != "" {
 				filter.LabelKey, filter.LabelValue = lk, lv

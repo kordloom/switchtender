@@ -176,6 +176,14 @@ func (s *store) ListPage(ctx context.Context, filter run.ListFilter, limit, offs
 		q += " AND EXISTS (SELECT 1 FROM run_host_summary hs WHERE hs.run_id = runs.id AND hs.host = ?)"
 		args = append(args, filter.Host)
 	}
+	if filter.ClaimedBy != "" {
+		q += " AND claimed_by = ?"
+		args = append(args, filter.ClaimedBy)
+	}
+	if filter.HeldBy != "" {
+		q += " AND held_by_policy = ?"
+		args = append(args, filter.HeldBy)
+	}
 	order := "DESC"
 	if filter.OldestFirst {
 		order = "ASC"

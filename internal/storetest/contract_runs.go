@@ -1417,3 +1417,64 @@ func testRunTimings(t *testing.T, store run.Store) {
 		t.Errorf("limited timings = %d, want 1", len(short))
 	}
 }
+
+// testListWorkerAndHeldBy pins the two filters that turn dead ends into links: the worker that
+// claimed a run and the approval rule that held one.
+//
+// The workers page showed a count of runs with no way to open them, and a policy's Holding count
+// linked to every held run on the install rather than the rule's own. Both needed the store to
+// answer "which runs" for a claimed_by and a held_by_policy value, including a rule label that
+// holds spaces, which is the ordinary shape of a rule named in prose.
+func testListWorkerAndHeldBy(t *testing.T, store run.Store) {
+	t.Helper()
+	ctx := context.Background()
+	base := time.Now().UTC().Truncate(time.Second)
+	runs := []*run.Run{
+		{ID: "run_w1", Playbook: "site.yml", Status: run.StatusSucceeded, CreatedAt: base,
+			ClaimedBy: "worker-a"},
+		{ID: "run_w2", Playbook: "site.yml", Status: run.StatusRunning, CreatedAt: base.Add(time.Second),
+			ClaimedBy: "worker-a"},
+		{ID: "run_w3", Playbook: "site.yml", Status: run.StatusSucceeded, CreatedAt: base.Add(2 * time.Second),
+			ClaimedBy: "worker-b"},
+		{ID: "run_h1", Playbook: "deploy.yml", Status: run.StatusPendingApproval,
+			CreatedAt: base.Add(3 * time.Second), HeldByPolicy: "prod terraform destroy"},
+		{ID: "run_h2", Playbook: "deploy.yml", Status: run.StatusSucceeded,
+			CreatedAt: base.Add(4 * time.Second), HeldByPolicy: "prod terraform destroy"},
+		{ID: "run_h3", Playbook: "deploy.yml", Status: run.StatusPendingApproval,
+			CreatedAt: base.Add(5 * time.Second), HeldByPolicy: "other rule"},
+	}
+	for _, r := range runs {
+		if err := store.Save(ctx, r); err != nil {
+			t.Fatalf("Save(%s) error = %v", r.ID, err)
+		}
+	}
+
+	got, err := store.ListPage(ctx, run.ListFilter{ClaimedBy: "worker-a"}, 0, 0)
+	if err != nil {
+		t.Fatalf("ListPage(claimed_by) error = %v", err)
+	}
+	if ids := runIDs(got); !cmp.Equal(ids, []string{"run_w2", "run_w1"}) {
+		t.Errorf("worker-a runs = %v, want the two it claimed, newest first", ids)
+	}
+
+	// The rule label carries spaces, and the field is historical, so pairing it with a status keeps
+	// only what the rule is holding right now.
+	got, err = store.ListPage(ctx, run.ListFilter{
+		HeldBy: "prod terraform destroy", Status: string(run.StatusPendingApproval),
+	}, 0, 0)
+	if err != nil {
+		t.Fatalf("ListPage(held_by) error = %v", err)
+	}
+	if ids := runIDs(got); !cmp.Equal(ids, []string{"run_h1"}) {
+		t.Errorf("held runs = %v, want only the one this rule is holding now", ids)
+	}
+}
+
+// runIDs lists the ids of a run slice in order.
+func runIDs(runs []*run.Run) []string {
+	out := make([]string, 0, len(runs))
+	for _, r := range runs {
+		out = append(out, r.ID)
+	}
+	return out
+}
