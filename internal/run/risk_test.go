@@ -114,10 +114,12 @@ func TestAssessRiskReadsExtraVars(t *testing.T) {
 	if risk.Level != RiskHigh {
 		t.Errorf("risk = %s, want high: the destructive text is in an extra var", risk.Level)
 	}
-	// Non-string values stay out of it, and clean vars do not raise anything.
+	// Non-string values stay out of it, and clean vars raise nothing beyond what the same run
+	// grades without them; other rules, like an unlimited inventory, apply either way.
+	base := AssessRisk(&Run{Playbook: "maintenance.yml"})
 	clean := AssessRisk(&Run{Playbook: "maintenance.yml",
 		ExtraVars: map[string]any{"replicas": 3, "env": "prod"}})
-	if clean.Level != RiskLow {
-		t.Errorf("clean vars graded %s, want low", clean.Level)
+	if clean.Level != base.Level {
+		t.Errorf("clean vars graded %s, want the var-free baseline %s", clean.Level, base.Level)
 	}
 }
