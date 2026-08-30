@@ -65,6 +65,15 @@ function wireProjectForm() {
 // loadProjects populates the project table with delete actions.
 async function loadProjects() {
 	try {
+		// Credential names for the inspect drawer: a raw id answers nothing, and the reader had to
+		// carry it to the credentials page by hand to learn what it was. A failed lookup falls back
+		// to showing the id rather than hiding the field.
+		let credNames = {};
+		try {
+			const cd = await getJSON("/credentials");
+			for (const c of cd.credentials || []) credNames[c.id] = c.name;
+		} catch { /* names stay unresolved */ }
+		const credLabel = (id) => id ? (credNames[id] || id) : "";
 		const data = await getJSON("/projects");
 		const projects = data.projects || [];
 		if (projects.length === 0) {
@@ -104,10 +113,10 @@ async function loadProjects() {
 			inspectable(tr, p.name, [
 				{ label: "Repository", value: p.repo_url, copy: true },
 				{ label: "Branch", value: p.branch || "default" },
-				{ label: "Credential", value: p.credential_id },
+				{ label: "Credential", value: credLabel(p.credential_id) },
 				{ label: "Image", value: p.image },
 				{ label: "Install deps", value: p.install_deps ? "yes" : "no" },
-				{ label: "Pull credential", value: p.pull_credential_id },
+				{ label: "Pull credential", value: credLabel(p.pull_credential_id) },
 				{ label: "Created", value: fmtTime(p.created_at) },
 				{ label: "ID", value: p.id, copy: true },
 			]);

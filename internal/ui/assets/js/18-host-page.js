@@ -403,9 +403,12 @@ async function loadSchedules() {
 			const target = document.createElement("td");
 			if (s.template_id) {
 				const tpl = document.createElement("a");
-				tpl.href = "/ui/templates";
-				tpl.textContent = tplByID[s.template_id] || "template";
-				tpl.dataset.tip = "Open templates";
+				// The link lands on the named template rather than the whole list: the list honors
+				// ?q=, so arriving unfiltered made the reader search again for a name already known.
+				const tplName = tplByID[s.template_id];
+				tpl.href = tplName ? "/ui/templates?q=" + encodeURIComponent(tplName) : "/ui/templates";
+				tpl.textContent = tplName || "template";
+				tpl.dataset.tip = tplName ? "Open " + tplName : "Open templates";
 				target.appendChild(tpl);
 			} else {
 				target.textContent = scheduleTarget(s);

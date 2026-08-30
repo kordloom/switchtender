@@ -509,6 +509,28 @@ function openTemplateView(t) {
 	addRow("Shards", t.shards && t.shards > 1 ? t.shards : "");
 	addRow("Limit", t.limit);
 	addRow("Timeout", t.timeout ? t.timeout + "s" : "");
+	// The rest of what a launch will actually use. An operator deciding whether to press the button
+	// could not see the queue, image, credentials, vars, or notifications this template carries
+	// without admin access to the edit form, so the view answered "what does this run" with half
+	// the answer. Extra vars show their keys only, since values can carry material a viewer should
+	// not see; presence is what the decision needs.
+	addRow("Queue", t.queue);
+	addRow("Image", t.image);
+	const credNameOf = (id) => {
+		const picker = document.getElementById("launch-credentials");
+		const opt = picker && picker.querySelector('option[value="' + id + '"]');
+		return opt ? opt.textContent : id;
+	};
+	const creds = [].concat(t.credential_ids || [],
+		t.pull_credential_id ? [t.pull_credential_id] : []);
+	addRow("Credentials", creds.map(credNameOf).join(", "));
+	addRow("Tags", (t.tags || []).join(", "));
+	addRow("Skip tags", (t.skip_tags || []).join(", "));
+	addRow("Verbosity", t.verbosity ? "-" + "v".repeat(Math.min(t.verbosity, 4)) : "");
+	addRow("Diff mode", t.diff_mode ? "on" : "");
+	addRow("Dry run", t.dry_run ? "always" : "");
+	addRow("Extra vars", Object.keys(t.extra_vars || {}).sort().join(", "));
+	addRow("Notifies", (t.notifications || []).map((n) => n.kind).join(", "));
 	addRow("Created", t.created_at ? fmtTime(t.created_at) : "");
 	const code = document.getElementById("view-code");
 	code.hidden = !t.command;

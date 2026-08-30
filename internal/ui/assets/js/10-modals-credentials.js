@@ -528,10 +528,13 @@ async function loadCredentials() {
 			const kinds = Object.entries(c.used_by || {}).filter(([, v]) => v && v.length);
 			if (kinds.length) {
 				const total = kinds.reduce((n, [, v]) => n + v.length, 0);
-				const pages = { templates: "/ui/jobtemplates", inventories: "/ui/inventories",
+				const pages = { templates: "/ui/templates", inventories: "/ui/inventories",
 					projects: "/ui/projects", inventory_sources: "/ui/sources" };
 				const link = document.createElement("a");
-				link.href = pages[kinds[0][0]] || "/ui/jobtemplates";
+				const firstPage = pages[kinds[0][0]] || "/ui/jobtemplates";
+				link.href = total === 1
+					? firstPage + "?q=" + encodeURIComponent(kinds[0][1][0])
+					: firstPage;
 				link.textContent = total === 1 ? kinds[0][1][0] : total + " objects";
 				link.dataset.tip = "Used by " + kinds.map(([k, v]) =>
 					k.replace("_", " ") + ": " + v.join(", ")).join(" \u00b7 ") +
