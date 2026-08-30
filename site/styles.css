@@ -503,3 +503,6 @@ h1 {
 
 /* The limit stated next to the claim it bounds, quieter than the claim but not hidden. */
 .card-bound{margin-top:10px;font-size:0.86rem;line-height:1.6;opacity:.66}
+
+/* The legal line: the common-law trademark claim, publicly dated, on every page. */
+.foot-legal { text-align: center; margin: 18px auto 0; font-size: 12px; color: var(--muted, #8a93a6); opacity: .8; }
