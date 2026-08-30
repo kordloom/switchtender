@@ -45,7 +45,9 @@ func (d *Dispatcher) requiresApproval(ctx context.Context, r *run.Run) (bool, er
 	// actually stopped the change, and would answer with nothing at all once it is deleted.
 	if p := policy.Requiring(policies, r); p != nil {
 		r.HeldByPolicy = p.Label()
-		r.RequireDistinctApprover = p.RequireDistinctApprover
+		// The label names the first rule for the evidence; the flag is the OR of every matching
+		// rule, and an explicitly requested distinct approver is never lowered by a policy.
+		r.RequireDistinctApprover = r.RequireDistinctApprover || policy.RequireDistinct(policies, r)
 		return true, nil
 	}
 	return false, nil
@@ -138,7 +140,8 @@ func (d *Dispatcher) pipelineRequiresApproval(ctx context.Context, parent *run.R
 	}
 	if p := policy.Requiring(policies, parent); p != nil {
 		parent.HeldByPolicy = p.Label()
-		parent.RequireDistinctApprover = p.RequireDistinctApprover
+		parent.RequireDistinctApprover = parent.RequireDistinctApprover ||
+			policy.RequireDistinct(policies, parent)
 		return true, nil
 	}
 	for i, step := range steps {
@@ -146,7 +149,8 @@ func (d *Dispatcher) pipelineRequiresApproval(ctx context.Context, parent *run.R
 		// is held, so the evidence has to say which step's rule stopped it.
 		if p := policy.Requiring(policies, stepRun(parent, step, i, 0, baseStepVars(parent))); p != nil {
 			parent.HeldByPolicy = p.Label()
-			parent.RequireDistinctApprover = p.RequireDistinctApprover
+			parent.RequireDistinctApprover = parent.RequireDistinctApprover ||
+				policy.RequireDistinct(policies, stepRun(parent, step, i, 0, baseStepVars(parent)))
 			return true, nil
 		}
 	}

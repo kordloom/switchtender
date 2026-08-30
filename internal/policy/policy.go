@@ -217,6 +217,22 @@ func Requiring(policies []*Policy, r *run.Run) *Policy {
 	return nil
 }
 
+// RequireDistinct reports whether any matching non-deny rule demands a distinct approver.
+//
+// The flag used to be copied from whichever matching rule Requiring returned first, so a stricter
+// separation-of-duties rule later in the list silently did nothing, and reordering policies could
+// lower a control nobody meant to lower. Separation of duties composes by OR: if any rule that
+// covers this run demands a second person, the run demands a second person. Plan-content rules
+// count too, since the plan gate holds under the same requirement.
+func RequireDistinct(policies []*Policy, r *run.Run) bool {
+	for _, p := range policies {
+		if p.RequireDistinctApprover && !p.Denies() && p.Matches(r) {
+			return true
+		}
+	}
+	return false
+}
+
 // Label returns how a policy should be named in evidence: its name, or its id when it has none.
 func (p *Policy) Label() string {
 	if p == nil {
