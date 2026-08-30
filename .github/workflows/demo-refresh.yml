@@ -1,0 +1,67 @@
+# Upgrades demo.switchtender.com to the latest tagged release and reseeds it, from CI where the
+# deploy key lives. Dispatch-only: nothing here runs on push or on a schedule. The droplet must
+# already be provisioned; this only swaps the binary and reseeds, mirroring the on-box contract
+# (BIN_DIR and reseed.sh) the demo service was set up with.
+name: demo-refresh
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuse without the deploy key
+        env:
+          DEMO_SSH_KEY: ${{ secrets.DEMO_SSH_KEY }}
+        run: |
+          if [ -z "${DEMO_SSH_KEY:-}" ]; then
+            echo "DEMO_SSH_KEY is not set on this repository, so there is nothing to deploy with" >&2
+            exit 1
+          fi
+
+      - name: Upgrade the droplet to the latest release
+        env:
+          DEMO_SSH_KEY: ${{ secrets.DEMO_SSH_KEY }}
+          DEMO_SSH_HOST: ${{ secrets.DEMO_SSH_HOST || 'root@167.99.157.117' }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          printf '%s\n' "$DEMO_SSH_KEY" > ~/.ssh/demo_key
+          chmod 600 ~/.ssh/demo_key
+          ssh -i ~/.ssh/demo_key -o StrictHostKeyChecking=accept-new "$DEMO_SSH_HOST" bash -s <<'REMOTE'
+          set -euo pipefail
+          BIN_DIR=/opt/switchtender/bin
+
+          echo "==> Resolving the latest release"
+          arch=$(dpkg --print-architecture)
+          # Fetch first, parse second: piping curl straight into grep -m1 makes grep close the
+          # pipe early, which kills the whole script under pipefail.
+          release_json=$(curl -fsSL https://api.github.com/repos/kordloom/switchtender/releases/latest)
+          tag=$(grep -m1 '"tag_name"' <<<"$release_json" | cut -d '"' -f 4)
+          [ -n "$tag" ] || { echo "could not resolve the latest release tag" >&2; exit 1; }
+          version="${tag#v}"
+          asset="switchtender_${version}_linux_${arch}.tar.gz"
+          base="https://github.com/kordloom/switchtender/releases/download/${tag}"
+          echo "    ${tag} (${arch})"
+
+          echo "==> Downloading and verifying the checksum"
+          workdir=$(mktemp -d)
+          trap 'rm -rf "$workdir"' EXIT
+          curl -fsSL -o "$workdir/$asset" "$base/$asset"
+          curl -fsSL -o "$workdir/SHA256SUMS" "$base/SHA256SUMS"
+          (cd "$workdir" && grep " ${asset}\$" SHA256SUMS | sha256sum -c - >/dev/null)
+          echo "    ${asset} verified"
+
+          echo "==> Installing ${tag}"
+          tar -xzf "$workdir/$asset" -C "$workdir"
+          install -m 0755 "$workdir/switchtender" "$BIN_DIR/switchtender"
+
+          echo "==> Reseeding and restarting the service"
+          "$BIN_DIR/reseed.sh"
+
+          echo "==> Demo is on ${tag}"
+          REMOTE
