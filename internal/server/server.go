@@ -526,6 +526,7 @@ func (s *Server) Handler() http.Handler {
 	refs := &refChecker{
 		templates: s.templates, inventories: s.inventories,
 		projects: s.projects, invSources: s.invSources, schedules: s.schedules,
+		policies: s.policies,
 	}
 	mux.Handle("GET /v1/credentials", listCredentialsHandler(s.credentials, refs, authz, s.log))
 	mux.Handle("DELETE /v1/credentials/{id}", deleteCredentialHandler(s.credentials, refs, s.log))
@@ -538,7 +539,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /v1/inventories", createInventoryHandler(s.inventories, authz, s.sealer, s.log))
 	mux.Handle("PUT /v1/inventories/{id}", updateInventoryHandler(s.inventories, authz, s.sealer, s.log))
 	mux.Handle("GET /v1/inventories", listInventoriesHandler(s.inventories, authz, s.log))
-	mux.Handle("DELETE /v1/inventories/{id}", deleteInventoryHandler(s.inventories, s.log))
+	mux.Handle("DELETE /v1/inventories/{id}", deleteInventoryHandler(s.inventories, refs, s.log))
 	mux.Handle("POST /v1/policies", createPolicyHandler(s.policies, s.log))
 	mux.Handle("GET /v1/policies", listPoliciesHandler(s.policies, s.log))
 	mux.Handle("PUT /v1/policies/{id}", updatePolicyHandler(s.policies, s.log))
@@ -557,7 +558,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /v1/templates", createTemplateHandler(s.templates, authz, s.log))
 	mux.Handle("PUT /v1/templates/{id}", updateTemplateHandler(s.templates, authz, s.log))
 	mux.Handle("GET /v1/templates", listTemplatesHandler(s.templates, authz, s.log))
-	mux.Handle("DELETE /v1/templates/{id}", deleteTemplateHandler(s.templates, s.log))
+	mux.Handle("DELETE /v1/templates/{id}", deleteTemplateHandler(s.templates, refs, s.log))
 	mux.Handle("POST /v1/templates/{id}/launch", launchTemplateHandler(s.templates, s.submitter, authz, s.log))
 	mux.Handle("POST /v1/teams", createTeamHandler(s.teams, s.log))
 	mux.Handle("GET /v1/teams", listTeamsHandler(s.teams, s.log))

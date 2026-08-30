@@ -10,8 +10,11 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/credential"
+	"github.com/kordloom/switchtender/internal/inventory"
+	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/schedule"
 	"github.com/kordloom/switchtender/internal/template"
 )
 
@@ -162,5 +165,110 @@ func TestCredentialListCarriesEveryUser(t *testing.T) {
 	}
 	if free := byID["cred_free"]; len(free) != 0 {
 		t.Errorf("unused credential carries used_by %v, want it absent", free)
+	}
+}
+
+func TestDeleteInventoryInUse(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	invs := inventory.NewMemStore()
+	for _, i := range []*inventory.Inventory{
+		{ID: "inv_used", Name: "prod-fleet", Content: "[web]\nh1\n"},
+		{ID: "inv_free", Name: "scratch", Content: "[web]\nh2\n"},
+	} {
+		if err := invs.Save(ctx, i); err != nil {
+			t.Fatalf("Save inventory: %v", err)
+		}
+	}
+	tmpls := template.NewMemStore()
+	if err := tmpls.Save(ctx, &template.Template{
+		ID: "tpl_1", Name: "deploy-web", Playbook: "p.yml", InventoryID: "inv_used",
+	}); err != nil {
+		t.Fatalf("Save template: %v", err)
+	}
+	pols := policy.NewMemStore()
+	if err := pols.Save(ctx, &policy.Policy{
+		ID: "pol_1", Name: "prod holds", InventoryID: "inv_used",
+	}); err != nil {
+		t.Fatalf("Save policy: %v", err)
+	}
+	handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(),
+		WithInventories(invs), WithTemplates(tmpls), WithPolicies(pols)).Handler()
+
+	del := func(id string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/v1/inventories/"+id, nil))
+		return rec
+	}
+
+	// Test 0: A referenced inventory is refused with 409 naming the template and the policy.
+	rec := del("inv_used")
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("delete in-use inventory status = %d, want 409", rec.Code)
+	}
+	var body struct {
+		UsedBy map[string][]string `json:"used_by"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got := body.UsedBy["templates"]; len(got) != 1 || got[0] != "deploy-web" {
+		t.Errorf("used_by templates = %v, want [deploy-web]", got)
+	}
+	if got := body.UsedBy["policies"]; len(got) != 1 || got[0] != "prod holds" {
+		t.Errorf("used_by policies = %v, want [prod holds]", got)
+	}
+
+	// Test 1: An unreferenced inventory deletes normally.
+	if rec := del("inv_free"); rec.Code != http.StatusOK {
+		t.Errorf("delete unused inventory status = %d, want 200", rec.Code)
+	}
+}
+
+func TestDeleteTemplateInUse(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	tmpls := template.NewMemStore()
+	for _, tm := range []*template.Template{
+		{ID: "tpl_used", Name: "nightly-deploy", Playbook: "p.yml"},
+		{ID: "tpl_free", Name: "one-off", Playbook: "q.yml"},
+	} {
+		if err := tmpls.Save(ctx, tm); err != nil {
+			t.Fatalf("Save template: %v", err)
+		}
+	}
+	scheds := schedule.NewMemStore()
+	if err := scheds.Save(ctx, &schedule.Schedule{
+		ID: "sch_1", Name: "3am deploy", Cron: "0 3 * * *", TemplateID: "tpl_used", Enabled: true,
+	}); err != nil {
+		t.Fatalf("Save schedule: %v", err)
+	}
+	handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(),
+		WithTemplates(tmpls), WithSchedules(scheds)).Handler()
+
+	del := func(id string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/v1/templates/"+id, nil))
+		return rec
+	}
+
+	// Test 0: A scheduled template is refused with 409 naming the schedule.
+	rec := del("tpl_used")
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("delete in-use template status = %d, want 409", rec.Code)
+	}
+	var body struct {
+		UsedBy map[string][]string `json:"used_by"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got := body.UsedBy["schedules"]; len(got) != 1 || got[0] != "3am deploy" {
+		t.Errorf("used_by schedules = %v, want [3am deploy]", got)
+	}
+
+	// Test 1: An unscheduled template deletes normally.
+	if rec := del("tpl_free"); rec.Code != http.StatusOK {
+		t.Errorf("delete unused template status = %d, want 200", rec.Code)
 	}
 }
