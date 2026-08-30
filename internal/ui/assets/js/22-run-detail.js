@@ -649,6 +649,27 @@ function renderWarningCallout(run) {
 	host.hidden = false;
 }
 
+// inventoryNames caches stored-inventory names by id for the header, filled once per page.
+let inventoryNames = null;
+
+// resolveInventoryName fills the header's inventory link with the stored inventory's name once the
+// list answers, leaving the unfiltered link in place when it cannot.
+async function resolveInventoryName(id, link) {
+	if (inventoryNames === null) {
+		inventoryNames = {};
+		try {
+			const data = await getJSON("/inventories");
+			for (const i of data.inventories || []) inventoryNames[i.id] = i.name;
+		} catch { /* the unfiltered link still works */ }
+	}
+	const name = inventoryNames[id];
+	if (name && link.isConnected) {
+		link.textContent = name;
+		link.href = "/ui/inventories?q=" + encodeURIComponent(name);
+		link.dataset.tip = "Open " + name;
+	}
+}
+
 // renderHeader fills the run header fields.
 function renderHeader(run) {
 	const el = document.getElementById("run-header");
@@ -761,12 +782,16 @@ function renderHeader(run) {
 		el.appendChild(inv);
 	} else if (run.inventory_id) {
 		// A run launched from a stored inventory carries the id, not a path, so the header showed no
-		// inventory at all and the run dead-ended. Link to the inventory list rather than leaving it
-		// blank, and carry the id for copy.
+		// inventory at all and the run dead-ended. The name is resolved from the inventory list and
+		// the link lands filtered on it; until the lookup returns, the link still works unfiltered.
 		const link = document.createElement("a");
-		link.href = "/ui/inventories";
-		link.textContent = "stored inventory";
-		link.dataset.tip = "This run ran against a stored inventory. Open inventories";
+		const known = inventoryNames && inventoryNames[run.inventory_id];
+		link.href = known ? "/ui/inventories?q=" + encodeURIComponent(known) : "/ui/inventories";
+		link.textContent = known || "stored inventory";
+		link.dataset.tip = "This run ran against a stored inventory. Open it";
+		if (!known) {
+			resolveInventoryName(run.inventory_id, link);
+		}
 		const inv = field("Inventory", null, link);
 		inv.querySelector(".value").appendChild(copyButton(run.inventory_id, "Copy the inventory id"));
 		el.appendChild(inv);

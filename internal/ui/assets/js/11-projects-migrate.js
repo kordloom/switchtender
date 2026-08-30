@@ -302,15 +302,26 @@ function renderMigratePlan(data) {
 		["Templates", data.templates],
 		["Schedules", data.schedules],
 	];
+	let shown = 0;
 	for (const [label, names] of groups) {
-		if (names && names.length) el.appendChild(migrateGroup(label, names));
+		if (names && names.length) {
+			el.appendChild(migrateGroup(label, names));
+			shown++;
+		}
 	}
 
 	if (data.warnings && data.warnings.length) {
 		el.appendChild(migrateGroup("Warnings", data.warnings));
+		shown++;
 	}
 
-	if (!el.children.length) el.appendChild(emptyLine("Nothing to import from this export."));
+	// The export buttons land in el before the groups do, so checking children could never see an
+	// empty preview: a file with nothing importable showed two lone buttons offering to export
+	// nothing, and the message written for that case was unreachable.
+	if (!shown && !data.applied) {
+		exportRow.remove();
+		el.appendChild(emptyLine("Nothing to import from this export."));
+	}
 }
 
 // migrateGroup builds a labeled block listing the names in one import category.
