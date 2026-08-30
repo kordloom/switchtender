@@ -194,6 +194,10 @@ One line with a Go toolchain installed:
 
     go install github.com/kordloom/switchtender@latest
 
+The module floor is Go 1.26.6, which carries standard-library security fixes this product refuses
+to build without. The default `GOTOOLCHAIN=auto` fetches it for you; a toolchain pinned with
+`GOTOOLCHAIN=local` needs 1.26.6 or newer installed.
+
 Or grab a build for your platform from the [releases page](https://github.com/kordloom/switchtender/releases):
 a `windows_amd64.zip` for Windows, a `tar.gz` of the binary for macOS and Linux, or a `deb`, `rpm`,
 or `apk` package. On macOS the binary is the desktop app: run `switchtender desktop` and it opens
