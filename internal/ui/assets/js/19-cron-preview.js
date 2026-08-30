@@ -45,6 +45,15 @@ function openScheduleEdit(s) {
 	const inline = document.getElementById("schedule-inline");
 	inline.open = !s.template_id;
 	const graph = (s.steps && s.steps.length > 0) || s.shards > 1;
+	// The notice says the cadence is editable, but Save was still refused for having no template or
+	// playbook, which a graph schedule never has, and typing a playbook to satisfy the check saved
+	// a value the scheduler ignores. Every schedule a crontab import creates is a graph, so the
+	// headline import produced hundreds of scheduables nobody could edit. The target inputs lock
+	// and the check steps aside; the server preserves the steps and shards on update.
+	form.dataset.graph = graph ? "1" : "";
+	for (const id of ["schedule-template", "schedule-playbook", "schedule-inventory"]) {
+		document.getElementById(id).disabled = graph;
+	}
 	setScheduleGraphNotice(graph ? s : null);
 	document.getElementById("schedule-status").textContent = "";
 	setModalTitle("schedule", "Edit schedule");
@@ -59,6 +68,10 @@ function wireScheduleForm() {
 	fillZoneList(document.getElementById("tz-list"));
 	const resetToCreate = () => {
 		delete form.dataset.editId;
+		form.dataset.graph = "";
+		for (const id of ["schedule-template", "schedule-playbook", "schedule-inventory"]) {
+			document.getElementById(id).disabled = false;
+		}
 		document.getElementById("schedule-name").value = "";
 		document.getElementById("schedule-cron").value = "";
 		document.getElementById("schedule-template").value = "";
@@ -83,13 +96,14 @@ function wireScheduleForm() {
 		if (inFlight) return;
 		const status = document.getElementById("schedule-status");
 		const editId = form.dataset.editId;
+		const isGraph = form.dataset.graph === "1";
 		const templateID = document.getElementById("schedule-template").value;
 		const playbook = document.getElementById("schedule-playbook").value.trim();
-		if (!templateID && !playbook) {
+		if (!isGraph && !templateID && !playbook) {
 			status.textContent = "Pick a template, or fill in a playbook or command to run directly.";
 			return;
 		}
-		if (templateID && playbook) {
+		if (!isGraph && templateID && playbook) {
 			// Both would leave which one fires up to the server's precedence rules, which is not a
 			// thing to guess at when the answer decides what runs on real hosts.
 			status.textContent = "Pick a template or a direct target, not both.";

@@ -85,3 +85,28 @@ test("a schedule with neither a template nor a target is refused with a reason",
 	assert.match(page.document.getElementById("schedule-status").textContent, /template|run/i,
 		"the refusal does not say what is missing");
 });
+
+test("an imported pipeline schedule saves its cadence without inventing a target", async () => {
+	// Every schedule a crontab import creates is an inline pipeline: no template, no playbook,
+	// steps only. The dialog's target-required check refused Save for exactly that shape, so the
+	// headline one-command import produced hundreds of schedules nobody could edit, and typing a
+	// playbook to appease the check saved a value the scheduler ignores.
+	const page = loadPage("schedules", {
+		routes: { "/v1/schedules/sch_pipe": reply({ ok: true }) },
+	});
+	page.app.wireScheduleForm();
+	page.app.openScheduleEdit({
+		id: "sch_pipe", name: "nightly", cron: "0 3 * * *", timezone: "America/Chicago",
+		steps: [{ name: "fetch" }, { name: "apply" }],
+	});
+	const form = page.document.getElementById("schedule-form");
+	assert.equal(form.dataset.graph, "1", "the form knows this is a graph schedule");
+	assert.ok(page.document.getElementById("schedule-playbook").disabled,
+		"the target inputs lock so a typed playbook cannot shadow the steps");
+
+	await fire(form, "submit");
+	await page.clock.flush();
+	const put = page.net.calls.find((c) => c.path === "/v1/schedules/sch_pipe");
+	assert.ok(put, "the cadence edit saved: " +
+		page.document.getElementById("schedule-status").textContent);
+});
