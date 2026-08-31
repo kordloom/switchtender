@@ -1,0 +1,135 @@
+{
+ "environments": [
+  {
+   "env": "{}",
+   "json": "{\"env\": \"prod\", \"region\": \"us-east-1\"}",
+   "name": "prod"
+  }
+ ],
+ "integration_aliases": [],
+ "integrations": [],
+ "inventories": [
+  {
+   "inventory": "[web]\nweb01 ansible_host=10.0.0.11\nweb02 ansible_host=10.0.0.12\n[db]\ndb01 ansible_host=10.0.0.21\n",
+   "name": "prod-fleet",
+   "ssh_key": "deploy-key",
+   "type": "static"
+  }
+ ],
+ "keys": [
+  {
+   "name": "None",
+   "owner": "",
+   "synchronized": false,
+   "type": "none"
+  },
+  {
+   "name": "deploy-key",
+   "owner": "",
+   "synchronized": false,
+   "type": "none"
+  }
+ ],
+ "meta": {
+  "alert": false,
+  "max_parallel_tasks": 0,
+  "name": "database-ops",
+  "type": ""
+ },
+ "repositories": [
+  {
+   "git_branch": "main",
+   "git_url": "https://example.test/infra.git",
+   "name": "infra",
+   "ssh_key": "deploy-key"
+  }
+ ],
+ "roles": [],
+ "runners": [],
+ "schedules": [
+  {
+   "active": true,
+   "cron_format": "0 3 * * *",
+   "delete_after_run": false,
+   "name": "3am patching",
+   "template": "Nightly patching",
+   "type": ""
+  }
+ ],
+ "secret_storages": [],
+ "templates": [
+  {
+   "allow_override_args_in_task": false,
+   "allow_override_branch_in_task": false,
+   "allow_parallel_tasks": false,
+   "app": "ansible",
+   "arguments": "[\"--limit\", \"web\"]",
+   "autorun": false,
+   "environments": [
+    "prod"
+   ],
+   "inventory": "prod-fleet",
+   "name": "Deploy web tier",
+   "playbook": "playbooks/deploy-web.yml",
+   "repository": "infra",
+   "roles": [],
+   "suppress_success_alerts": false,
+   "survey_vars": [],
+   "task_params": {},
+   "type": "",
+   "vaults": []
+  },
+  {
+   "allow_override_args_in_task": false,
+   "allow_override_branch_in_task": false,
+   "allow_parallel_tasks": false,
+   "app": "ansible",
+   "arguments": "[]",
+   "autorun": false,
+   "environments": [
+    "prod"
+   ],
+   "inventory": "prod-fleet",
+   "name": "Nightly patching",
+   "playbook": "playbooks/patch.yml",
+   "repository": "infra",
+   "roles": [],
+   "suppress_success_alerts": false,
+   "survey_vars": [],
+   "task_params": {},
+   "type": "",
+   "vaults": []
+  },
+  {
+   "allow_override_args_in_task": false,
+   "allow_override_branch_in_task": false,
+   "allow_parallel_tasks": false,
+   "app": "ansible",
+   "arguments": "[\"--tags\", \"rotate\"]",
+   "autorun": false,
+   "environments": [
+    "prod"
+   ],
+   "inventory": "prod-fleet",
+   "name": "Rotate application logs",
+   "playbook": "playbooks/rotate-logs.yml",
+   "repository": "infra",
+   "roles": [],
+   "suppress_success_alerts": false,
+   "survey_vars": [],
+   "task_params": {},
+   "type": "",
+   "vaults": []
+  }
+ ],
+ "views": [
+  {
+   "hidden": false,
+   "position": 0,
+   "sort_reverse": false,
+   "title": "All",
+   "type": "all"
+  }
+ ],
+ "workflows": []
+}
