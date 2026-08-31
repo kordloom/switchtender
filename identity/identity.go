@@ -106,11 +106,17 @@ func Load(dir string) (Identity, error) {
 		if err != nil {
 			return Identity{}, fmt.Errorf("%s: %w", KeyEnv, err)
 		}
-		// The install id is derived from the key that signs, never taken from a file written for a
-		// different key. Reading it from the file meant an operator who set this variable over an
-		// existing install emitted bundles signed by one key and attributed to another install, and
-		// the documented relationship between the id and the key silently stopped holding.
-		id.InstallID = installIDFromKey(id.Public())
+		// The install id is a stable identifier that survives key changes: it names the install,
+		// not the key. When a stored identity exists, a new env key keeps the stored id, which is
+		// what makes setting this variable over an existing install a key rotation rather than a
+		// silent second install whose history looks unrelated. Only a first boot derives the id
+		// from the key. Relying parties pin keys, so the rotated key is a visible event to accept,
+		// never an ambient one.
+		if stored, ferr := readIdentityFile(dir); ferr == nil && stored.InstallID != "" {
+			id.InstallID = stored.InstallID
+		} else {
+			id.InstallID = installIDFromKey(id.Public())
+		}
 		return id, nil
 	}
 
