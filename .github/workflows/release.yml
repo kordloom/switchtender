@@ -243,17 +243,22 @@ jobs:
           hash="$(shasum -a 256 "$APP/Contents/MacOS/switchtender" | cut -d' ' -f1)"
           printf '%s  switchtender_%s_darwin_app\n' "$hash" "$VERSION" >> dist/BINARY_SHA256SUMS
 
-          # hdiutil hit ENOSPC on a stock runner while the Go build and module caches from
-          # everything above still held gigabytes. Nothing after this point compiles, so the
-          # caches are ballast; the df line records what the dmg actually had to work with.
-          go clean -cache -modcache
+          # The disk is not the constraint and never was: the run that failed this step had
+          # 95 GiB free, and clearing the Go caches here only looked like a fix because the next
+          # release happened to pass. hdiutil sizes an image from its source folder, under-sizes
+          # it, and then fails mid-copy with ENOSPC while the volume it just made fills up. The
+          # size is therefore stated outright with room to spare, and because UDZO compresses the
+          # result, the slack costs nothing in the shipped artifact. A stale mount from an earlier
+          # attempt is detached first so -ov cannot trip over it. df stays as the line that
+          # settled which resource was actually short.
           df -h /
-
           mkdir dist/dmg
           cp -R "$APP" dist/dmg/
           ln -s /Applications dist/dmg/Applications
-          hdiutil create -volname SwitchTender -srcfolder dist/dmg -ov -format UDZO \
-            "dist/SwitchTender_${VERSION}.dmg"
+          hdiutil detach /Volumes/SwitchTender -force 2>/dev/null || true
+          staged=$(du -sm dist/dmg | cut -f1)
+          hdiutil create -volname SwitchTender -srcfolder dist/dmg -ov -format UDZO -fs HFS+ \
+            -size "$(( staged * 2 + 300 ))m" "dist/SwitchTender_${VERSION}.dmg"
 
           # Notarization needs the full credential set; a partial one used to reach notarytool and
           # fail there. The timeout keeps an Apple notary outage from holding the job to the
