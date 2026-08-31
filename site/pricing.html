@@ -80,10 +80,23 @@
 		.pricing-note { max-width: 760px; margin: 44px auto 0; text-align: center; color: var(--muted); font-size: 15px; }
 		.pricing-note strong { color: var(--text); }
 		.sprint {
-			display: flex; align-items: center; justify-content: space-between; gap: 24px; flex-wrap: wrap;
-			max-width: 860px; margin: 32px auto 0; padding: 22px 26px; border-radius: var(--radius);
+			max-width: 860px; margin: 32px auto 0; padding: 26px 28px; border-radius: var(--radius);
 			background: var(--surface); border: 1px solid rgba(34, 211, 238, 0.32);
 		}
+		.sprint .sprint-head {
+			display: flex; align-items: baseline; justify-content: space-between; gap: 18px; flex-wrap: wrap;
+		}
+		.sprint .sprint-price { font-family: "Space Grotesk", sans-serif; font-size: 30px; font-weight: 700; }
+		.sprint .sprint-price span { font-size: 14px; font-weight: 500; color: var(--muted); margin-left: 8px; }
+		.sprint h4 {
+			font-size: 12px; letter-spacing: 0.8px; text-transform: uppercase; color: var(--muted);
+			margin: 22px 0 8px;
+		}
+		.sprint ol, .sprint ul { margin: 0; padding-left: 20px; }
+		.sprint li { color: var(--muted); font-size: 14.5px; margin: 7px 0; }
+		.sprint li b { color: var(--text); }
+		.sprint .fineprint { font-size: 13.5px; color: var(--muted); margin-top: 18px; }
+		.sprint .sprint-cta { margin-top: 22px; display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
 		.sprint > div { flex: 1 1 480px; min-width: 0; }
 		.sprint h3 { font-family: "Space Grotesk", sans-serif; font-size: 17px; margin-bottom: 6px; }
 		.sprint p { color: var(--muted); font-size: 14.5px; }
@@ -224,20 +237,69 @@
 			</p>
 
 			<div class="sprint reveal" id="sprint">
-				<div>
-					<h3>SwitchTender Migration Program &mdash; $25,000, four weeks</h3>
-					<p>The one thing you can buy outright today. We move you off AWX, Semaphore, or
-					Rundeck: inventories, projects, job templates, schedules and credentials migrated and
-					verified against the originals, SwitchTender deployed in your environment on your
-					infrastructure, approval policy built from the change process you already run, agent
-					policy for anything proposing changes automatically, evidence mapped to the controls
-					your auditors ask about, runbooks, and a handoff session, because your team owns this
-					when we leave. Fixed scope, fixed price, one invoice. Milestone-based with scheduled
-					working windows, not on-call. A portion credits toward your first year of Assurance if
-					you want us to keep the evidence running afterward. Founder-led, so we take a limited
-					number at a time.</p>
+				<div class="sprint-head">
+					<h3>SwitchTender Migration Program</h3>
+					<div class="sprint-price">$25,000<span>fixed price, four milestones</span></div>
 				</div>
-				<a class="btn" href="mailto:hello@kordloom.com?subject=SwitchTender%20Migration%20Program">Start a migration</a>
+				<p>The one SwitchTender service you can buy today. We move you off AWX, Semaphore, or
+				Rundeck and into production on SwitchTender, with the change controls you already run and
+				your evidence workflows carried forward. Milestones are scheduled around your access,
+				approvals, credential owners, and production change windows, and a delay in any of those
+				moves the affected milestone. Most migrations complete within about six weeks of kickoff
+				once the readiness items below are in place.</p>
+
+				<h4>Before milestone one begins</h4>
+				<ul>
+					<li>Access provisioned to the environment, the repositories, and the target hosts.</li>
+					<li>One named technical counterpart who can <b>coordinate access</b> and answer
+					migration questions within a business day.</li>
+					<li>The people who hold your credential values, since exports never contain secrets.</li>
+					<li>A representative set of production workflows chosen for validation, so we agree up
+					front what "working" means.</li>
+					<li>Someone who can <b>decide</b> approval policy, and someone who can authorize the
+					production cutover. Often two different people.</li>
+					<li>Your own backup and rollback for the source controller, kept until you sign off.</li>
+				</ul>
+
+				<h4>The four milestones</h4>
+				<ol>
+					<li><b>Discovery and import.</b> We inventory what you have, run the import, and show
+					you item by item what was in the old controller and what landed.</li>
+					<li><b>Environment.</b> SwitchTender deployed on your infrastructure, sized to your
+					fleet, wired to your identity provider, with credentials entered by their owners and
+					exercised against the agreed validation workflows.</li>
+					<li><b>Governance.</b> Approval policy built from the change process you already run,
+					agent policy for anything proposing changes automatically, and evidence configured
+					against the controls you identify with us during discovery.</li>
+					<li><b>Cutover and handoff.</b> The validation set agreed in milestone one runs green,
+					which is what completes this milestone rather than an open-ended parallel period. You
+					authorize the cutover through your own change process, and you get runbooks and a
+					working session, because your team owns this when we leave.</li>
+				</ol>
+
+				<p class="fineprint">Flat $25,000 for a standard migration: one source controller, one
+				production environment, standard integrations. Playbook and host counts do not set the
+				price by themselves, because the importer handles bulk. What we scope together first is
+				complexity that changes the work rather than its size: more than one independently
+				operated production environment, custom execution environments with baked-in dependencies,
+				custom plugins, callbacks, or filters, unmaintained modules or collections, dynamic
+				inventory calling internal APIs, workflow approval nodes or survey logic that does not map
+				cleanly, a large number of credential types spread across many owners, custom integrations
+				with ticketing, CMDB, or change-management systems, identity or secret-store wiring beyond standard OIDC, SAML,
+				LDAP, JWT, or vault configuration, nonstandard network paths such as bastions or segmented
+				VPN routes, air-gapped targets, high availability across sites, or unusual scale and
+				topology that materially changes migration or validation work.</p>
+
+				<p class="fineprint">Migration reproduces the behavior of your source controller. Anything
+				that also fails in the source environment is outside migration scope, as is new automation,
+				architectural redesign, and rewriting existing content. We flag whatever we find early and
+				quote it separately if you want it fixed. Founder-led and limited to one active migration
+				at a time. A portion credits toward your first year of Assurance if you want us to keep the
+				evidence running afterward.</p>
+
+				<div class="sprint-cta">
+					<a class="btn" href="mailto:hello@kordloom.com?subject=SwitchTender%20Migration%20Program">Start a migration</a>
+				</div>
 			</div>
 		</section>
 
