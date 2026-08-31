@@ -12,9 +12,10 @@ require (
 	github.com/hashicorp/go-hclog v1.6.3
 	github.com/hashicorp/go-plugin v1.8.0
 	github.com/jackc/pgx/v5 v5.10.0
-	github.com/kordloom/loomseal v0.11.1
+	github.com/kordloom/loomseal v1.0.0-rc.1
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/spf13/cobra v1.10.2
+	github.com/spf13/pflag v1.0.10
 	github.com/yuin/goldmark v1.8.2
 	go.uber.org/zap v1.28.0
 	golang.org/x/crypto v0.53.0
@@ -63,7 +64,6 @@ require (
 	github.com/russellhaering/goxmldsig v1.6.0 // indirect
 	github.com/sergi/go-diff v1.3.2-0.20230802210424-5b0b94c5c0d3 // indirect
 	github.com/skeema/knownhosts v1.3.1 // indirect
-	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/xanzy/ssh-agent v0.3.3 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/net v0.56.0 // indirect
