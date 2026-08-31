@@ -226,6 +226,7 @@ const activityState = {
 	chart: localStorage.getItem("st_activity_chart") === "line" ? "line" : "bars",
 	filter: "",
 	built: false,
+	userPicked: false,
 };
 
 // ACTIVITY_WINDOWS are the selectable spans, in hours, with the label shown on each pill and the
@@ -362,6 +363,7 @@ function buildActivityControls() {
 		b.dataset.window = String(w.h);
 		b.addEventListener("click", () => {
 			activityState.windowH = w.h;
+			activityState.userPicked = true;
 			localStorage.setItem("st_activity_window", String(w.h));
 			windows.querySelectorAll(".seg-btn").forEach((x) => x.classList.toggle("active", x === b));
 			renderActivityView();
@@ -413,6 +415,31 @@ function buildActivityControls() {
 	host.appendChild(filter);
 }
 
+// autoWidenActivityWindow steps the window up to the smallest span that actually shows a run.
+// The chart opens on a preferred window, but a quiet install or an aging demo seed can have
+// nothing that recent, and a blank flagship chart reads as broken rather than idle. It runs only
+// on data arrival, never after the reader picks a pill or follows a shared window link, only ever
+// widens, and does not persist, so the stored preference stays whatever was chosen by hand.
+function autoWidenActivityWindow() {
+	if (activityState.userPicked || !activityState.runs.length) return;
+	const now = new Date();
+	const probe = (h) => {
+		const m = activityBuckets(activityState.runs, now, { windowH: h });
+		return m && m.matched > 0;
+	};
+	if (probe(activityState.windowH)) return;
+	for (const w of ACTIVITY_WINDOWS) {
+		if (w.h <= activityState.windowH || !probe(w.h)) continue;
+		activityState.windowH = w.h;
+		const host = document.getElementById("activity-controls");
+		if (host) {
+			host.querySelectorAll(".activity-windows .seg-btn").forEach((b) =>
+				b.classList.toggle("active", Number(b.dataset.window) === w.h));
+		}
+		return;
+	}
+}
+
 // renderActivity stores the runs the overview fetched and draws the current view. A fresh install
 // with no runs leaves the panel hidden rather than showing an empty frame; once there are runs the
 // controls build once and later calls redraw without rebuilding them.
@@ -421,6 +448,7 @@ function renderActivity(runs) {
 	if (!panel) return;
 	activityState.runs = runs || [];
 	if (!activityState.runs.length) { panel.hidden = true; return; }
+	autoWidenActivityWindow();
 	buildActivityControls();
 	panel.hidden = false;
 	renderActivityView();
@@ -578,7 +606,10 @@ function activityShareURL(absolute) {
 function applyActivityURLParams() {
 	const q = new URLSearchParams(location.search || "");
 	const w = Number(q.get("window"));
-	if (ACTIVITY_WINDOWS.some((x) => x.h === w)) activityState.windowH = w;
+	if (ACTIVITY_WINDOWS.some((x) => x.h === w)) {
+		activityState.windowH = w;
+		activityState.userPicked = true;
+	}
 	const f = q.get("filter");
 	if (f != null) activityState.filter = f;
 }

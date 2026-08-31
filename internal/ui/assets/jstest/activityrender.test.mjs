@@ -79,3 +79,45 @@ test("the filter narrows the note after its debounce", async () => {
 	// Filtering counts, it does not drop columns.
 	assert.equal(document.querySelectorAll("#activity .activity-col").length, 12, "a column vanished under the filter");
 });
+
+// staleRuns returns runs sixteen to twenty hours old: outside the default twelve-hour window,
+// inside the twenty-four-hour one. This is exactly the shape of an aging demo seed.
+function staleRuns() {
+	const now = Date.now();
+	const ago = (h) => new Date(now - h * 3600 * 1000).toISOString();
+	return [
+		{ created_at: ago(16), status: "succeeded", playbook: "site.yml", hosts: ["web01"] },
+		{ created_at: ago(18), status: "failed", playbook: "network.yml", hosts: ["sw01"] },
+		{ created_at: ago(20), status: "succeeded", playbook: "site.yml", hosts: ["web02"] },
+	];
+}
+
+test("a window with no runs auto-widens to the smallest one that shows something", () => {
+	const { app, document } = loadPage("overview", { parts: PARTS });
+	app.renderActivity(staleRuns());
+
+	const day = document.querySelector('.activity-windows .seg-btn[data-window="24"]');
+	assert.ok(day.classList.contains("active"), "the 24h pill did not become the active window");
+	assert.equal(document.querySelectorAll("#activity .activity-col").length, 24, "the chart did not widen");
+	const segs = document.querySelectorAll("#activity .activity-seg.succeeded, #activity .activity-seg.failed");
+	assert.ok(segs.length >= 2, "the widened chart still shows no runs");
+});
+
+test("auto-widening never overrides a window the reader picked by hand", () => {
+	const { app, document } = loadPage("overview", { parts: PARTS });
+	app.renderActivity(staleRuns());
+	document.querySelector('.activity-windows .seg-btn[data-window="6"]').click();
+
+	// New data arrives while the six-hour choice is on screen; the empty view must hold.
+	app.renderActivity(staleRuns());
+	const six = document.querySelector('.activity-windows .seg-btn[data-window="6"]');
+	assert.ok(six.classList.contains("active"), "the reader's 6h choice was taken away");
+	assert.equal(document.querySelectorAll("#activity .activity-col").length, 6, "the chart left 6h");
+});
+
+test("auto-widening leaves runs inside the default window alone", () => {
+	const { app, document } = loadPage("overview", { parts: PARTS });
+	app.renderActivity(recentRuns());
+	const twelve = document.querySelector('.activity-windows .seg-btn[data-window="12"]');
+	assert.ok(twelve.classList.contains("active"), "the default window moved with data present");
+});
