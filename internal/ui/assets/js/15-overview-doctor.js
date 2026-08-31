@@ -809,7 +809,8 @@ function renderFleetSnapshot(hosts) {
 		row.href = "/ui/hosts/" + encodeURIComponent(h.host);
 		const name = document.createElement("span");
 		name.className = "ov-row-name mono";
-		name.textContent = h.host;
+		name.textContent = hostLabel(h.host);
+		name.title = h.host;
 		row.appendChild(name);
 		if (h.recent && h.recent.length) {
 			row.appendChild(sparkline(h.recent, h.recent_runs));

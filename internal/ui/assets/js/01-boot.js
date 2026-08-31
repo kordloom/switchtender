@@ -91,3 +91,15 @@ const NAV_GROUPS = [
 	] },
 ];
 
+
+// hostLabel compacts a path-shaped host key for display. A dry-run plan records drift keyed on
+// its working directory, so a Terraform root sits beside inventory hosts in fleet and drift
+// views; the full path is the row's identity, but as a label it reads as noise and crushes the
+// column, so only the last two segments show. Inventory hostnames carry no slash and pass
+// through untouched. Callers put the full key in the row's title so hover still tells the truth.
+function hostLabel(host) {
+	if (!host || host.indexOf("/") === -1) return host;
+	const parts = host.split("/").filter(Boolean);
+	if (parts.length <= 2) return host;
+	return parts.slice(-2).join("/");
+}

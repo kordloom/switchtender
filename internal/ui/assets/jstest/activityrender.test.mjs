@@ -9,6 +9,8 @@ import { loadPage } from "./pages.mjs";
 import { makeEvent } from "./dom.mjs";
 
 const PARTS = ["01-boot.js", "15-overview-doctor.js"];
+// The fleet snapshot leans on svgIcon and sparkline from other parts.
+const FLEET_PARTS = ["01-boot.js", "07-nav-theme.js", "20-held-copy-stream.js", "15-overview-doctor.js"];
 
 // recentRuns returns a few runs inside the last few hours, so the default twelve-hour window holds
 // them whatever wall-clock moment the test runs at.
@@ -120,4 +122,25 @@ test("auto-widening leaves runs inside the default window alone", () => {
 	app.renderActivity(recentRuns());
 	const twelve = document.querySelector('.activity-windows .seg-btn[data-window="12"]');
 	assert.ok(twelve.classList.contains("active"), "the default window moved with data present");
+});
+
+test("a path-shaped drift key shows its last two segments with the full path on hover", () => {
+	const { app, document } = loadPage("overview", { parts: FLEET_PARTS });
+	assert.equal(app.hostLabel("db01"), "db01", "a hostname must pass through untouched");
+	assert.equal(app.hostLabel("/tmp/switchtender-demo-assets/repos/database-ops/infra/network"),
+		"infra/network", "a deep path must compact to its last two segments");
+	assert.equal(app.hostLabel("infra/network"), "infra/network", "two segments already read fine");
+
+	app.renderFleetSnapshot([
+		{ host: "/tmp/demo-assets/repos/db-ops/infra/network", failures: 0, total: 2, flaky: false },
+		{ host: "db01", failures: 1, total: 10, flaky: true },
+	]);
+	const names = [...document.querySelectorAll("#ov-fleet .ov-row-name")];
+	const path = names.find((n) => n.textContent === "infra/network");
+	assert.ok(path, "the fleet card still shows the raw path");
+	assert.equal(path.title, "/tmp/demo-assets/repos/db-ops/infra/network",
+		"the full key must survive in the title");
+	const link = path.closest("a");
+	assert.ok(decodeURIComponent(link.getAttribute("href")).includes("/tmp/demo-assets"),
+		"the row link must keep the full key as identity");
 });
