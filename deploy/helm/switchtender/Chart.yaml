@@ -2,5 +2,5 @@ apiVersion: v2
 name: switchtender
 description: Playbook execution and fleet orchestration, an alternative to AWX and Semaphore.
 type: application
-version: 0.2.3
-appVersion: "1.71.2"
+version: 0.2.4
+appVersion: "1.72.0"
