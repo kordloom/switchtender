@@ -114,4 +114,4 @@ than one instance against PostgreSQL when a single binary is not enough.
 ## What is the license?
 
 Business Source License 1.1: free to self-host and modify, with a restriction on offering it as a
-competing hosted service, and it converts to Apache 2.0 after four years.
+competing hosted service, and it converts to Apache 2.0 two years after each release.

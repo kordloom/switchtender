@@ -279,6 +279,17 @@ jobs:
       # still refuses on any failure. The names are hashed from inside dist so they match
       # goreleaser's, which are bare: a "dist/" prefix would land in the published file and make
       # `shasum -c SHA256SUMS` fail for anyone checking a download directory.
+      # The source escrow layer of docs/continuity.md: every release carries its own exact
+      # source as an asset inside the signed manifest, so keeping a release keeps its source
+      # even if the repository or the account hosting it goes away.
+      - name: Pack the source tree
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          VERSION=${GITHUB_REF_NAME#v}
+          git archive --format=tar.gz --prefix "switchtender-${VERSION}/" \
+            -o "dist/switchtender_${VERSION}_source.tar.gz" "$GITHUB_REF_NAME"
+
       - name: Sign and attach the checksums manifest
         if: ${{ !cancelled() }}
         env:
@@ -292,6 +303,9 @@ jobs:
               shasum -a 256 "SwitchTender_${VERSION}.dmg" >> SHA256SUMS
             fi
             shasum -a 256 BINARY_SHA256SUMS >> SHA256SUMS
+            if [ -f "switchtender_${VERSION}_source.tar.gz" ]; then
+              shasum -a 256 "switchtender_${VERSION}_source.tar.gz" >> SHA256SUMS
+            fi
           )
           grep -q '  BINARY_SHA256SUMS$' dist/SHA256SUMS
           for i in 1 2 3; do
@@ -304,6 +318,9 @@ jobs:
             sleep 15
           done
           assets="dist/SHA256SUMS dist/SHA256SUMS.sig dist/SHA256SUMS.pem dist/BINARY_SHA256SUMS"
+          if [ -f "dist/switchtender_${VERSION}_source.tar.gz" ]; then
+            assets="$assets dist/switchtender_${VERSION}_source.tar.gz"
+          fi
           if [ -f "dist/SwitchTender_${VERSION}.dmg" ]; then
             assets="$assets dist/SwitchTender_${VERSION}.dmg"
           fi

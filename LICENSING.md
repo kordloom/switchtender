@@ -51,9 +51,8 @@ requirement to use the software. If either would help your team, get in touch.
 ## Conversion to open source
 
 The Business Source License is time-limited. Each released version converts to the Apache License
-2.0 on the Change Date recorded in `LICENSE` (2030-07-07) or four years after that version's
-release, whichever comes first. After a version converts, the reserved right no longer applies to
-it.
+2.0 two years after that version's release, the Change Date recorded in `LICENSE`. After a version
+converts, the reserved right no longer applies to it.
 
 ## Getting in touch
 
