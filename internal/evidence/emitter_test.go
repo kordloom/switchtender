@@ -266,6 +266,27 @@ func TestEmitterWritesItsFirstPackFromAnEmptyArchive(t *testing.T) {
 		defer mu.Unlock()
 		return len(written)
 	}
+	// Packs on disk, which is the emitter's own bookkeeping and the only race-free measure here.
+	// Start runs an immediate check in its goroutine, so under load that check can land between
+	// this test's advance and its emitDue: the goroutine writes the pack file, this test's
+	// emitDue correctly declines because the archive already covers the period, and the
+	// goroutine has not reached its notify callback yet. Counting callbacks then reads zero
+	// packs for a period that was written. Emit renames a temp file into place, so a pack that
+	// is visible is complete.
+	packs := func() int {
+		t.Helper()
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatalf("ReadDir() error = %v", err)
+		}
+		n := 0
+		for _, entry := range entries {
+			if !entry.IsDir() && !strings.HasSuffix(entry.Name(), ".tmp") {
+				n++
+			}
+		}
+		return n
+	}
 
 	e := NewEmitter(runs, audits, "", dir, time.Hour, nil,
 		WithClock(now),
@@ -281,14 +302,14 @@ func TestEmitterWritesItsFirstPackFromAnEmptyArchive(t *testing.T) {
 	}
 	// Start stamps the period's origin and runs one immediate check, which must not emit: no cadence
 	// has passed yet.
-	if n := count(); n != 0 {
+	if n := packs(); n != 0 {
 		t.Fatalf("a pack was written before a cadence elapsed: %d", n)
 	}
 
 	// Walk past one cadence and ask again, the way the loop's ticker does.
 	advance(90 * time.Minute)
 	e.emitDue()
-	if n := count(); n < 1 {
+	if n := packs(); n < 1 {
 		t.Fatalf("packs after one elapsed cadence = %d, want at least 1: an empty archive never "+
 			"becomes due, so the archive stays empty for the life of the install", n)
 	}
@@ -296,7 +317,16 @@ func TestEmitterWritesItsFirstPackFromAnEmptyArchive(t *testing.T) {
 	// And it keeps going rather than emitting once and stalling.
 	advance(3 * time.Hour)
 	e.emitDue()
-	if n := count(); n < 2 {
+	if n := packs(); n < 2 {
 		t.Errorf("packs after a second cadence = %d, want at least 2", n)
+	}
+	// The notify callback still has to fire for what landed, once the emitter's goroutine has
+	// caught up. Nothing here depends on when it does.
+	deadline := time.Now().Add(5 * time.Second)
+	for count() < 1 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if count() < 1 {
+		t.Error("packs landed in the archive but the notify callback never fired for any of them")
 	}
 }
