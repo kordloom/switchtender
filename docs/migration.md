@@ -31,7 +31,9 @@ right:
 
     switchtender import awx awx-export.json --db switchtender.db --apply
 
-Semaphore works the same way with `import semaphore`.
+Semaphore works the same way with `import semaphore`. The importer is proven against a real
+backup taken from a live current Semaphore release, unknown newer fields included, not only
+against hand-built samples.
 
 ## Import Rundeck jobs
 

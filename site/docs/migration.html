@@ -61,7 +61,9 @@ created, and calls out anything that could not be mapped cleanly. Apply it when 
 right:</p>
 <pre><code>switchtender import awx awx-export.json --db switchtender.db --apply
 </code></pre>
-<p>Semaphore works the same way with <code>import semaphore</code>.</p>
+<p>Semaphore works the same way with <code>import semaphore</code>. The importer is proven against a real
+backup taken from a live current Semaphore release, unknown newer fields included, not only
+against hand-built samples.</p>
 <h2 id="import-rundeck-jobs">Import Rundeck jobs</h2>
 <p>Export the jobs from a Rundeck project, in YAML or JSON, and point the importer at the file.</p>
 <pre><code>switchtender import rundeck jobs.yaml --inventory prod --db switchtender.db
