@@ -144,3 +144,18 @@ test("a path-shaped drift key shows its last two segments with the full path on 
 	assert.ok(decodeURIComponent(link.getAttribute("href")).includes("/tmp/demo-assets"),
 		"the row link must keep the full key as identity");
 });
+
+test("a phone-width axis seats only as many labels as fit clear of each other", () => {
+	const { app, document } = loadPage("overview", { parts: PARTS });
+	app.renderActivity(recentRuns());
+	document.querySelector('.activity-windows .seg-btn[data-window="720"]').click();
+
+	const chart = document.getElementById("activity");
+	// The simulated DOM cannot measure, so hand the chart a phone's width and redraw.
+	chart.getBoundingClientRect = () => ({ width: 330 });
+	app.renderActivity(recentRuns());
+	const visible = [...document.querySelectorAll("#activity .activity-label")]
+		.filter((l) => !l.classList.contains("axis-thin"));
+	assert.ok(visible.length <= 7, `${visible.length} labels survive at 330px; they overlap`);
+	assert.ok(visible.length >= 4, `${visible.length} labels is too sparse to read a month`);
+});

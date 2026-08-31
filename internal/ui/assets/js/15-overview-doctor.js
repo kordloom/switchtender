@@ -778,15 +778,21 @@ if (typeof window !== "undefined" && window.addEventListener) {
 	});
 }
 
-// thinActivityLabels hides all but roughly eight evenly spaced axis labels, so a 24-column window
-// shows a readable handful rather than an overlapping smear. Works on either the bar columns or the
-// line chart's axis row, whichever child list it is handed.
+// thinActivityLabels hides axis labels down to what the container's real width can seat, so the
+// axis reads as evenly spaced ticks instead of an overlapping smear. A fixed survivor count was
+// tuned for a desktop chart and left fifteen day labels fighting over a phone's 330 pixels, which
+// is exactly the smear it existed to prevent. Works on either the bar columns or the line chart's
+// axis row, whichever child list it is handed; the resize re-render keeps it honest on rotation.
 function thinActivityLabels(container, n) {
 	const labels = container.classList && container.classList.contains("activity-axis")
 		? container.children
 		: container.querySelectorAll(".activity-label");
-	if (n <= 24) return;
-	const step = Math.ceil(n / 15);
+	// A label needs about 48px to sit clear of its neighbors. An unmeasurable container (the
+	// simulated test DOM) falls back to a desktop width so behavior there stays as it was.
+	const width = (container.getBoundingClientRect && container.getBoundingClientRect().width) || 1000;
+	const maxFit = Math.max(4, Math.floor(width / 48));
+	if (n <= maxFit) return;
+	const step = Math.ceil(n / maxFit);
 	Array.prototype.forEach.call(labels, (lab, i) => {
 		if (i % step !== 0 && i !== n - 1) lab.classList.add("axis-thin");
 	});
