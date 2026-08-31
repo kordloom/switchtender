@@ -1,6 +1,9 @@
 package audit_test
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -207,6 +210,84 @@ func TestBothVerifiersRejectTreeTampering(t *testing.T) {
 			if err == nil && rep.ChainOK {
 				t.Errorf("our verifier accepted what the reference verifier refused: %v",
 					theirs.Problems)
+			}
+		})
+	}
+}
+
+// TestMirrorAgreesWithTheReferenceCorpus runs this product's verifier over the reference
+// repository's own conformance corpus, the reverse direction of every other test in this file.
+// The pinned key-set tests cannot catch a mirror that quietly falls a release behind the strip
+// list, because this product's own bundles never carry the members the strip covers; the corpus
+// bundles do. Signature verdicts must agree on every vector. Chain verdicts are compared only for
+// the profiles this product implements, and vectors under other profiles must be refused by name
+// as unsupported, never misreported as a broken chain.
+func TestMirrorAgreesWithTheReferenceCorpus(t *testing.T) {
+	dir := loomsealRepo(t)
+	raw, err := os.ReadFile(filepath.Join(dir, "testdata", "vectors", "manifest.json"))
+	if err != nil {
+		t.Fatalf("read corpus manifest: %v", err)
+	}
+	var man struct {
+		Vectors []struct {
+			Name         string `json:"name"`
+			File         string `json:"file"`
+			MustVerify   bool   `json:"must_verify"`
+			FailingCheck string `json:"failing_check"`
+		} `json:"vectors"`
+	}
+	if err := json.Unmarshal(raw, &man); err != nil {
+		t.Fatalf("parse corpus manifest: %v", err)
+	}
+	if len(man.Vectors) == 0 {
+		t.Fatal("the corpus manifest lists no vectors")
+	}
+	for _, v := range man.Vectors {
+		t.Run(v.Name, func(t *testing.T) {
+			signed, rerr := os.ReadFile(filepath.Join(dir, "testdata", "vectors", v.File))
+			if rerr != nil {
+				t.Fatalf("read vector: %v", rerr)
+			}
+			var probe struct {
+				Producer struct {
+					KeyID     string `json:"key_id"`
+					InstallID string `json:"install_id"`
+				} `json:"producer"`
+			}
+			if json.Unmarshal(signed, &probe) != nil {
+				return
+			}
+			// The corpus asks whether the mirror agrees on format verdicts, not whether it
+			// trusts fixture producers, so each vector's own declared install-and-key pair is
+			// accepted the way a relying party accepts a rotation. The product's strict
+			// derivation tie stays exactly as strict for real verification.
+			var rep *audit.BundleReport
+			var err error
+			if probe.Producer.InstallID != "" && probe.Producer.KeyID != "" {
+				rep, err = audit.VerifyBundleForInstall(signed, probe.Producer.KeyID,
+					probe.Producer.InstallID)
+			} else {
+				rep, err = audit.VerifyBundle(signed, "")
+			}
+			named := err != nil && strings.Contains(err.Error(), "this product does not verify")
+			if v.MustVerify {
+				// A scoped mirror may refuse a surface or profile it does not implement, by
+				// name, never on signature or chain grounds: "unimplemented here" and "invalid"
+				// must not share a message, the same rule the reference applies to unsupported.
+				if err != nil && !named {
+					t.Fatalf("refused a must-verify vector for the wrong reason: %v", err)
+				}
+				// Even a named refusal must agree with the reference about the signature: the
+				// strip list is what this asserts, since these are the only vectors carrying
+				// the stripped surfaces.
+				if rep != nil && !rep.SignatureOK {
+					t.Errorf("the mirror failed the signature on a must-verify vector (err=%v)", err)
+				}
+				return
+			}
+			// A must-not-verify vector must never be called fully good.
+			if err == nil && rep.SignatureOK && rep.ChainOK && rep.AnchorsOK {
+				t.Errorf("the mirror fully verified a must-not-verify vector (%s)", v.FailingCheck)
 			}
 		})
 	}

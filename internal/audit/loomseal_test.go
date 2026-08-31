@@ -382,10 +382,11 @@ func TestIdentityConcurrentFirstStart(t *testing.T) {
 	}
 }
 
-// TestIdentityEnvKeyDerivesItsOwnInstallID covers an operator setting the documented environment
-// key over an install that already has a file. The id used to come from the file while the key came
-// from the environment, so bundles were signed by one key and attributed to another install.
-func TestIdentityEnvKeyDerivesItsOwnInstallID(t *testing.T) {
+// TestIdentityEnvKeyOverExistingInstallRotates covers an operator setting the documented
+// environment key over an install that already has a file. The id names the install, not the key,
+// so the stored id survives and the change is a key rotation rather than a silent second install.
+// Deriving a fresh id here is the behavior this replaces: it split one install's history in two.
+func TestIdentityEnvKeyOverExistingInstallRotates(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("SWITCHTENDER_AUDIT_KEY", "")
 	fromFile, err := audit.LoadIdentity(dir)
@@ -401,9 +402,9 @@ func TestIdentityEnvKeyDerivesItsOwnInstallID(t *testing.T) {
 	if fromEnv.KeyID() == fromFile.KeyID() {
 		t.Fatal("the environment key was ignored")
 	}
-	if fromEnv.InstallID == fromFile.InstallID {
-		t.Error("the environment key kept the file's install id, so a bundle would be signed by " +
-			"one key and attributed to another install")
+	if fromEnv.InstallID != fromFile.InstallID {
+		t.Error("the install id changed with the key, so a rotation reads as a second install " +
+			"whose history looks unrelated")
 	}
 }
 

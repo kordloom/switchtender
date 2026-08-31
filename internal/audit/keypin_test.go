@@ -290,11 +290,10 @@ func TestLiftedSparseReceiptIsRefused(t *testing.T) {
 		t.Fatalf("SignBundleDoc() error = %v", err)
 	}
 
+	// The refusal may arrive as an early named error (the params rule) or as a failed chain;
+	// either way the lift must not verify.
 	rep, err := audit.VerifyBundle(signed, attacker.KeyID())
-	if err != nil {
-		t.Fatalf("VerifyBundle() error = %v", err)
-	}
-	if rep.ChainOK {
+	if err == nil && rep.ChainOK {
 		t.Error("a receipt lifted from another install verified under the copier's own key")
 	}
 }
@@ -323,12 +322,14 @@ func TestSparseReceiptWithDisagreeingInstallIsRefused(t *testing.T) {
 		t.Fatalf("SignBundleDoc() error = %v", err)
 	}
 
+	// The params rule now refuses this before the chain is walked, matching the reference
+	// verifier's wording-level rule; a report-level chain failure would be equally refused.
 	rep, err := audit.VerifyBundle(signed, id.KeyID())
-	if err != nil {
-		t.Fatalf("VerifyBundle() error = %v", err)
-	}
-	if rep.ChainOK {
+	if err == nil && rep.ChainOK {
 		t.Error("a receipt whose params name a different install than its producer verified")
+	}
+	if err != nil && !strings.Contains(err.Error(), "disagrees with producer install") {
+		t.Errorf("refused for the wrong reason: %v", err)
 	}
 }
 
@@ -472,4 +473,47 @@ func mustBuildBundle(t *testing.T, chain []*audit.Entry, id audit.Identity) *aud
 		t.Fatalf("BuildBundle() error = %v", err)
 	}
 	return doc
+}
+
+// TestRotatedInstallVerifiesOnlyWithExplicitAcceptance drives the rotation contract from both
+// sides: the same bundle shape that VerifyBundle refuses as a lift verifies through
+// VerifyBundleForInstall, because the caller has stated the install-and-key pair out loud. A bare
+// key pin never stands in for that statement.
+func TestRotatedInstallVerifiesOnlyWithExplicitAcceptance(t *testing.T) {
+	born := newTestIdentity(t, "born")
+	rotated := newTestIdentity(t, "rotated")
+	// The rotated identity keeps the born install id with the new key, which is exactly what
+	// identity.Load produces after a key change over an existing install.
+	rotated.InstallID = born.InstallID
+	chain := bundleChain(t)
+
+	doc, err := audit.BuildBundle(chain, rotated, "1.34.1",
+		time.Date(2026, 8, 31, 16, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("BuildBundle() error = %v", err)
+	}
+	signed, err := audit.SignBundleDoc(doc, rotated.Private())
+	if err != nil {
+		t.Fatalf("SignBundleDoc() error = %v", err)
+	}
+
+	// A bare pin on the new key refuses: from the bytes alone this is indistinguishable from a
+	// lift of another install's history.
+	if _, err := audit.VerifyBundle(signed, rotated.KeyID()); err == nil {
+		t.Fatal("a rotated bundle verified on a bare key pin, so a lift would too")
+	}
+
+	// The explicit pair verifies.
+	rep, err := audit.VerifyBundleForInstall(signed, rotated.KeyID(), born.InstallID)
+	if err != nil {
+		t.Fatalf("VerifyBundleForInstall() error = %v", err)
+	}
+	if !rep.SignatureOK || !rep.ChainOK {
+		t.Errorf("rotated bundle did not verify: signature=%v chain=%v", rep.SignatureOK, rep.ChainOK)
+	}
+
+	// Acceptance names one install: it must not wave through some other install's bundle.
+	if _, err := audit.VerifyBundleForInstall(signed, rotated.KeyID(), "in_other"); err == nil {
+		t.Fatal("acceptance of one install id verified a bundle naming a different one")
+	}
 }

@@ -192,6 +192,23 @@ func Timestamp(ctx context.Context, client *http.Client, tsaURL, link string) (s
 // believing: that trust decision belongs to the relying party, who has the token and can hold it
 // against the roots their own tooling trusts. Saying so is the point; claiming a check we do not
 // perform is what the finding was about, and for a while the unperformed check was the signature.
+// VerifyTimestampProofTime is VerifyTimestampProof, additionally returning the token's genTime
+// so the caller can apply the backdate rule: an attestation cannot precede the entry it covers.
+func VerifyTimestampProofTime(link, proof string) (time.Time, error) {
+	err := VerifyTimestampProof(link, proof)
+	if err != nil {
+		return time.Time{}, err
+	}
+	token, derr := base64.StdEncoding.DecodeString(proof)
+	if derr != nil {
+		return time.Time{}, derr
+	}
+	if t, ok := proofGenTime(token); ok {
+		return t, nil
+	}
+	return time.Time{}, nil
+}
+
 func VerifyTimestampProof(link, proof string) error {
 	if proof == "" {
 		return fmt.Errorf("this anchor carries no embedded proof, so there is nothing to verify offline")
@@ -322,6 +339,20 @@ func checkTimestampToken(token, want []byte, nonce *big.Int) error {
 		return fmt.Errorf("token signature: %w", err)
 	}
 	return nil
+}
+
+// proofGenTime unwraps a raw token to its TSTInfo and reads the generation time, best effort:
+// a token that already verified structurally will yield one.
+func proofGenTime(token []byte) (time.Time, bool) {
+	var ci tsaContentInfo
+	if _, err := asn1.Unmarshal(token, &ci); err != nil {
+		return time.Time{}, false
+	}
+	var sd tsaSignedData
+	if _, err := asn1.Unmarshal(ci.Content.Bytes, &sd); err != nil {
+		return time.Time{}, false
+	}
+	return tokenGenTime(sd.EncapContentInfo.EContent)
 }
 
 // tokenGenTime returns the time a TSTInfo says it was generated, and whether it could be read.
