@@ -241,12 +241,12 @@
 					<h3>SwitchTender Migration Program</h3>
 					<div class="sprint-price">$25,000<span>fixed price, four milestones</span></div>
 				</div>
-				<p>The one SwitchTender service you can buy today. We move you off AWX, Semaphore, or
-				Rundeck and into production on SwitchTender, with the change controls you already run and
-				your evidence workflows carried forward. Milestones are scheduled around your access,
-				approvals, credential owners, and production change windows, and a delay in any of those
-				moves the affected milestone. Most migrations complete within about six weeks of kickoff
-				once the readiness items below are in place.</p>
+				<p>A founder-led program that moves you off AWX, Semaphore, or Rundeck and into production
+				on SwitchTender, with the change controls you already run and your evidence workflows
+				carried forward. Milestones are scheduled around your access, approvals, credential owners,
+				and production change windows, and a delay in any of those moves the affected milestone.
+				The four milestones are normally completed over about six weeks once the readiness items
+				below are in place.</p>
 
 				<h4>Before milestone one begins</h4>
 				<ul>
@@ -254,11 +254,10 @@
 					<li>One named technical counterpart who can <b>coordinate access</b> and answer
 					migration questions within a business day.</li>
 					<li>The people who hold your credential values, since exports never contain secrets.</li>
-					<li>A representative set of production workflows chosen for validation, so we agree up
-					front what "working" means.</li>
+					<li>A representative set of production workflows <b>chosen and recorded</b> for
+					validation, so we agree up front what "working" means.</li>
 					<li>Someone who can <b>decide</b> approval policy, and someone who can authorize the
 					production cutover. Often two different people.</li>
-					<li>Your own backup and rollback for the source controller, kept until you sign off.</li>
 				</ul>
 
 				<h4>The four milestones</h4>
@@ -267,39 +266,43 @@
 					you item by item what was in the old controller and what landed.</li>
 					<li><b>Environment.</b> SwitchTender deployed on your infrastructure, sized to your
 					fleet, wired to your identity provider, with credentials entered by their owners and
-					exercised against the agreed validation workflows.</li>
+					exercised against the recorded validation set.</li>
 					<li><b>Governance.</b> Approval policy built from the change process you already run,
 					agent policy for anything proposing changes automatically, and evidence configured
 					against the controls you identify with us during discovery.</li>
-					<li><b>Cutover and handoff.</b> The validation set agreed in milestone one runs green,
-					which is what completes this milestone rather than an open-ended parallel period. You
-					authorize the cutover through your own change process, and you get runbooks and a
-					working session, because your team owns this when we leave.</li>
+					<li><b>Cutover and handoff.</b> The validation set recorded in milestone one runs
+					green, meaning every workflow in it completes with a zero exit status, which is what
+					finishes this milestone rather than an open-ended parallel period. You authorize the
+					cutover through your own change process, and you get runbooks and a working session,
+					because your team owns this when we leave.</li>
 				</ol>
+
+				<p>At handoff you have the migrated configuration running in your environment, documented
+				identity and governance configuration, the recorded validation set passing, evidence
+				configured against your controls, production runbooks, and a team that has been walked
+				through all of it.</p>
 
 				<p class="fineprint">Flat $25,000 for a standard migration: one source controller, one
 				production environment, standard integrations. Playbook and host counts do not set the
-				price by themselves, because the importer handles bulk. What we scope together first is
-				complexity that changes the work rather than its size: more than one independently
-				operated production environment, custom execution environments with baked-in dependencies,
-				custom plugins, callbacks, or filters, unmaintained modules or collections, dynamic
-				inventory calling internal APIs, workflow approval nodes or survey logic that does not map
-				cleanly, a large number of credential types spread across many owners, custom integrations
-				with ticketing, CMDB, or change-management systems, identity or secret-store wiring beyond standard OIDC, SAML,
-				LDAP, JWT, or vault configuration, nonstandard network paths such as bastions or segmented
-				VPN routes, air-gapped targets, high availability across sites, or unusual scale and
-				topology that materially changes migration or validation work.</p>
+				price by themselves, because the importer handles bulk. We scope together first when the
+				work changes in nature rather than size, such as multiple independently operated
+				environments, custom execution dependencies or plugins, nonstandard network paths,
+				air-gapped targets, or complex identity and secret-store integration. We will tell you
+				which of those you have during the first conversation, not after you have paid.</p>
 
-				<p class="fineprint">Migration reproduces the behavior of your source controller. Anything
-				that also fails in the source environment is outside migration scope, as is new automation,
-				architectural redesign, and rewriting existing content. We flag whatever we find early and
-				quote it separately if you want it fixed. Founder-led and limited to one active migration
-				at a time. A portion credits toward your first year of Assurance if you want us to keep the
-				evidence running afterward.</p>
+				<p class="fineprint">Migration reproduces the agreed behavior of your source controller
+				for the recorded validation set. Anything that also fails in the source environment is
+				outside migration scope, as is new automation, architectural redesign, and rewriting
+				existing content. We flag whatever we find early and quote it separately if you want it
+				fixed. Work runs under a mutual NDA and a fixed-price statement of work with the
+				milestones above. Founder-led and limited to one active migration at a time. A portion
+				credits toward your first year of Assurance if you want us to keep the evidence running
+				afterward.</p>
 
 				<div class="sprint-cta">
 					<a class="btn" href="mailto:hello@kordloom.com?subject=SwitchTender%20Migration%20Program">Start a migration</a>
 				</div>
+			</div>
 			</div>
 		</section>
 
