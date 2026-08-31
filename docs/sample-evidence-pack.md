@@ -63,6 +63,6 @@ switchtender audit run <run-id> --out run-dossier.html
 switchtender audit anchor
 ```
 
-The Governed tier (early access) assembles these on a cadence, mapped to your controls and written
+The Assurance service (design partners) assembles these on a cadence, mapped to your controls and written
 to an archive, so the sample a review asks for exists before anyone asks. The report itself, the
 free `--evidence-dir` scheduling, and verifying it all offline stay free in the core.
