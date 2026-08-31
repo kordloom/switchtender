@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Vendor risk review | SwitchTender docs</title>
+	<meta name="description" content="The answers a security questionnaire asks about SwitchTender and about KordLoom, in the order reviews usually ask them.">
+	<link rel="canonical" href="https://switchtender.com/docs/vendor-risk">
+	<meta property="og:title" content="Vendor risk review | SwitchTender docs">
+	<meta property="og:description" content="The answers a security questionnaire asks about SwitchTender and about KordLoom, in the order reviews usually ask them.">
+	<meta property="og:type" content="article">
+	<meta property="og:url" content="https://switchtender.com/docs/vendor-risk">
+	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
+	<meta name="twitter:card" content="summary_large_image">
+	<meta name="twitter:title" content="Vendor risk review | SwitchTender docs">
+	<meta name="twitter:description" content="The answers a security questionnaire asks about SwitchTender and about KordLoom, in the order reviews usually ask them.">
+	<meta name="twitter:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
+	<link rel="icon" href="/favicon.ico" sizes="any">
+	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
+	<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="/docs.css?v=2">
+</head>
+<body>
+	<header class="dnav">
+		<a class="brand" href="/"><img src="/assets/logo-train-tracks-dark.png" alt="SwitchTender" class="brand-train"><span class="brand-word">SwitchTender</span></a>
+		<span class="dnav-tag">Docs</span>
+		<nav class="dnav-links">
+			<a href="/">Home</a>
+			<a href="/#compare">Compare</a>
+			<a href="https://github.com/kordloom/switchtender">GitHub</a>
+		</nav>
+	</header>
+	<div class="dshell">
+		<aside class="dside">
+			<nav>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migrate off AWX, Semaphore, or Rundeck</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/continuity">Continuity</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/vendor-risk" class="active">Vendor risk review</a>
+			</nav>
+		</aside>
+		<main class="dcontent prose">
+			<h1 id="vendor-risk-review">Vendor risk review</h1>
+<p>The answers a security questionnaire asks about SwitchTender and about KordLoom, in the order
+reviews usually ask them. Each answer links to the page that carries the detail, and every claim
+here is checkable against the source, the signed releases, or your own running install.</p>
+<h2 id="the-vendor">The vendor</h2>
+<p>KordLoom LLC, a United States company. SwitchTender is source-available under BSL 1.1: read,
+modify, self-host, and run it in production for your own organization, free. Each release
+converts to Apache 2.0 two years after it ships. The bus-factor question is answered in full on
+the <a href="/docs/continuity">continuity page</a>: the install keeps running, the evidence stays verifiable
+offline forever, and every release carries its own source tarball inside the signed manifest.</p>
+<h2 id="where-it-runs-and-what-data-leaves">Where it runs and what data leaves</h2>
+<p>Self-hosted, one binary, your infrastructure. There is no SaaS control plane, no telemetry, no
+usage reporting, no license server, and no update phone-home. Outbound connections happen only
+when you configure them, and each is optional:</p>
+<table>
+<thead>
+<tr>
+<th>Connection</th>
+<th>When</th>
+<th>Where</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Timestamp anchoring</td>
+<td>You run <code>switchtender audit anchor</code></td>
+<td>The RFC 3161 timestamp authority you name; the default is freetsa.org</td>
+</tr>
+<tr>
+<td>Witness countersignatures</td>
+<td>You point the install at a witness</td>
+<td>The hosted witness, or one you run yourself; the witness command ships in this binary</td>
+</tr>
+<tr>
+<td>Advisory AI</td>
+<td>You configure a provider</td>
+<td>Your provider, including local Ollama; read-only, executes nothing</td>
+</tr>
+<tr>
+<td>Project sync</td>
+<td>You add a git project</td>
+<td>Your repository host</td>
+</tr>
+<tr>
+<td>Notifications and webhooks</td>
+<td>You configure them</td>
+<td>Your endpoints</td>
+</tr>
+</tbody>
+</table>
+<h2 id="authentication-and-access">Authentication and access</h2>
+<p>SSO over OIDC, SAML, and LDAP, with JIT provisioning and group-to-role mapping. Role-based
+access control with per-object grants, organizations, and teams. API access is bearer tokens; an
+agent's token can be bound to an account so its actions attribute to both. Details in
+<a href="/docs/configuration">configuration</a>.</p>
+<h2 id="secrets">Secrets</h2>
+<p>Secrets are stored sealed, masked in run logs, and injectable from external managers: Vault
+(static and dynamic), AWS Secrets Manager, Google Secret Manager, Azure Key Vault, Conjur,
+CyberArk CCP, and 1Password, plus AWS STS and generic command and HTTP connectors. The
+<a href="/docs/secrets">secrets page</a> covers masking rules and injection boundaries.</p>
+<h2 id="change-control-and-audit">Change control and audit</h2>
+<p>Every change lands on a tamper-evident hash chain or is refused: an entry that cannot be
+recorded blocks the change rather than proceeding unrecorded. Approvals bind the exact content
+digest and pinned commit the approver saw, separation of duties is enforced at two layers, AI
+agents pass the same gates under their own policy rules, and every run can produce a signed
+receipt a relying party verifies offline with the open verifier. The <a href="/docs/threat-model">threat model</a>
+states the claims and their mechanisms, including what the record cannot prove. The
+<a href="/docs/compliance">compliance mapping</a> walks SOC 2 CC8.1, change-management ITGCs, and log-integrity
+controls row by row, and the <a href="/docs/sample-evidence-pack">sample evidence pack</a> shows the artifact
+itself.</p>
+<h2 id="supply-chain">Supply chain</h2>
+<p>Releases are built in CI from a tagged public tree. The checksums manifest is signed with
+cosign (keyless, verifiable against the repository identity), artifacts carry SLSA build
+provenance verifiable with <code>gh attestation verify</code>, archives include SBOMs, and the binary
+verifies itself against the signed manifest with <code>switchtender version --verify</code>. GitHub Actions
+are SHA-pinned. The release gate runs the full suite against both database backends and refuses
+to publish on any failure.</p>
+<h2 id="vulnerability-management">Vulnerability management</h2>
+<p><code>govulncheck</code> runs in CI on every change, and the Go toolchain floor is raised when a stdlib
+CVE lands in the dependency path. Reports go to the address on the <a href="https://github.com/kordloom/switchtender/security">security policy</a>.
+There is no auto-update: you choose when to upgrade, and <code>switchtender version --verify</code> proves
+what you are running afterward.</p>
+<h2 id="data-retention-and-portability">Data retention and portability</h2>
+<p>Your data sits in your SQLite file or Postgres database, covered by your own backups
+(<a href="/docs/backup">backup and restore</a>). Everything exports: runs, hosts, audit bundles, receipts,
+evidence registers, CSV from every table in the UI. Exported evidence verifies offline forever,
+without this vendor.</p>
+<h2 id="subprocessors">Subprocessors</h2>
+<p>None in the self-hosted product. If you use the hosted witness, KordLoom operates that single
+service; the anchor default, freetsa.org, is a third party you can replace with any RFC 3161
+authority, including your own.</p>
+
+		</main>
+	</div>
+	<div class="foot-legal" style="text-align:center;margin:26px auto 34px;font-size:12px;opacity:.75">SwitchTender&trade; is a trademark of KordLoom LLC. Copyright 2026 KordLoom LLC.</div>
+	<script>document.addEventListener("click",e=>{const a=e.target.closest(".dside a");if(a)document.querySelector(".dside")?.classList.remove("open")});</script>
+</body>
+</html>
