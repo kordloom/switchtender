@@ -971,3 +971,307 @@ func TestJenkinsAliasesExpandTheWayJenkinsExpandsThem(t *testing.T) {
 		})
 	}
 }
+
+// TestEveryRefusalIsNamedInTheReport covers the promise the import makes.
+//
+// This importer's value is not that it maps what it can; it is that it says what it could not. An
+// operator reads the report, sees the counts, and decides the migration is done. A refusal that
+// happens silently is worse than a refusal that fails loudly: the job is gone, the report looks
+// clean, and nobody learns until the thing that job did has not happened for a month.
+//
+// A mutation run showed most of these warnings could be deleted outright without a single test
+// noticing, which is the same as not having them.
+func TestEveryRefusalIsNamedInTheReport(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Name     string
+		Doc      string
+		Inv      string
+		WantWarn []string
+	}{{ // Test 0: No inventory named, so every template lands with no target.
+		Name: "no inventory", Doc: freestyle(shellStep("echo hi")), Inv: "",
+		WantWarn: []string{"no inventory was named"},
+	}, { // Test 1: A job pinned to an agent label targets machines an inventory may not cover.
+		Name: "agent label", Inv: "prod",
+		Doc:      freestyle("<assignedNode>linux-heavy</assignedNode>" + shellStep("echo hi")),
+		WantWarn: []string{"linux-heavy", "inventory you attached"},
+	}, { // Test 2: A Pipeline is skipped whole and must be named.
+		Name: "pipeline", Inv: "prod", Doc: "<flow-definition><definition/></flow-definition>",
+		WantWarn: []string{"Pipeline job", "not imported"},
+	}, { // Test 3: A job with nothing runnable is skipped and must be named.
+		Name: "nothing runnable", Inv: "prod", Doc: freestyle("<builders/>"),
+		WantWarn: []string{"was skipped", "reported success without running anything"},
+	}, { // Test 4: A checkout that mattered is named rather than silently dropped.
+		Name: "scm", Inv: "prod",
+		Doc: freestyle(`<scm class="hudson.plugins.git.GitSCM"><userRemoteConfigs>` +
+			`<hudson.plugins.git.UserRemoteConfig><url>https://example.com/r.git</url>` +
+			`</hudson.plugins.git.UserRemoteConfig></userRemoteConfigs></scm>` +
+			shellStep("make")),
+		WantWarn: []string{"example.com/r.git", "Attach it as a project"},
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
+			t.Parallel()
+			// A runnable job rides along so a plan exists even when the subject is refused.
+			plan, err := importer.FromJenkins(test.Inv)(jenkinsBundle(
+				[2]string{"subject", test.Doc},
+				[2]string{"other", freestyle(shellStep("echo ok"))},
+			), fixedTime)
+			if err != nil {
+				t.Fatalf("FromJenkins() error = %v", err)
+			}
+			assertWarns(t, plan.Warnings, test.WantWarn...)
+		})
+	}
+}
+
+// TestWarningsNumberStepsTheWayJenkinsDoes covers the step numbers inside those warnings.
+//
+// A report saying a job's step 2 was left out is only useful if step 2 is the step Jenkins shows as
+// the second one. Off-by-one here sends somebody to the wrong build step, and a mutation run moved
+// the numbering in both directions without any test objecting.
+func TestWarningsNumberStepsTheWayJenkinsDoes(t *testing.T) {
+	t.Parallel()
+	// Three steps: shell, batch, shell. Only the batch one is refused, and it is the second.
+	doc := freestyle(`<builders>` +
+		`<hudson.tasks.Shell><command>echo one</command></hudson.tasks.Shell>` +
+		`<hudson.tasks.BatchFile><command>dir</command></hudson.tasks.BatchFile>` +
+		`<hudson.tasks.Shell><command>echo three</command></hudson.tasks.Shell>` +
+		`</builders>`)
+	plan, err := importer.FromJenkins("prod")(jenkinsBundle([2]string{"mixed", doc}), fixedTime)
+	if err != nil {
+		t.Fatalf("FromJenkins() error = %v", err)
+	}
+	assertWarns(t, plan.Warnings, "step 2 is a Windows batch step")
+	for _, w := range plan.Warnings {
+		for _, wrong := range []string{"step 0", "step 1 is a Windows", "step 3 is a Windows"} {
+			if strings.Contains(w, wrong) {
+				t.Errorf("a warning numbered the batch step wrongly: %q", w)
+			}
+		}
+	}
+}
+
+// TestJobNameSanitizerKeepsOrdinarySpaces covers the boundary of the control-character strip.
+//
+// A Jenkins job may legitimately be named with spaces. The strip removes control characters so a
+// name cannot forge lines in the report, and widening it by one code point would quietly rewrite
+// every name that contains a space.
+func TestJobNameSanitizerKeepsOrdinarySpaces(t *testing.T) {
+	t.Parallel()
+	plan, err := importer.FromJenkins("prod")(
+		jenkinsBundle([2]string{"nightly backup job", freestyle(shellStep("echo hi"))}), fixedTime)
+	if err != nil {
+		t.Fatalf("FromJenkins() error = %v", err)
+	}
+	if len(plan.Templates) != 1 {
+		t.Fatalf("templates = %d, want 1", len(plan.Templates))
+	}
+	if got := plan.Templates[0].Name; got != "nightly backup job" {
+		t.Errorf("name = %q, want the spaces kept", got)
+	}
+}
+
+// TestFromJenkinsAgainstAWildJenkins runs the importer over a second real corpus, built to hold the
+// shapes a Jenkins accumulates over years rather than the tidy ones a fixture author reaches for.
+//
+// The other corpus proves the ordinary mapping. This one exists because the risk that matters is not
+// a bug in a path already covered, it is a real install whose XML this has never seen. Somebody
+// moving off Jenkins runs this once, on their own jobs, and either it works or they go back. So the
+// jobs here were created on a running Jenkins with ten plugins and are its own serialization: three
+// levels of folders, a name with spaces, unicode and XML entities in a script, every parameter kind
+// Jenkins ships, every timer alias, a timer holding four rules and comments, a matrix job, a
+// pipeline inside a folder, a disabled job inside a folder, a job with no builders at all, and a job
+// of thirteen steps ending in a Windows one.
+func TestFromJenkinsAgainstAWildJenkins(t *testing.T) {
+	t.Parallel()
+	bundle, err := importer.JenkinsBundle("testdata/jenkins-wild")
+	if err != nil {
+		t.Fatalf("JenkinsBundle() error = %v", err)
+	}
+	plan, err := importer.FromJenkins("prod")(bundle, fixedTime)
+	if err != nil {
+		t.Fatalf("FromJenkins() error = %v", err)
+	}
+
+	var names []string
+	for _, tpl := range plan.Templates {
+		names = append(names, tpl.Name)
+	}
+	// Folders are containers, a matrix job and a pipeline have no translation, and a job with no
+	// runnable step would import as a template that reports success having done nothing.
+	if diff := cmp.Diff([]string{
+		"Nightly Backup JOB", "at-daily", "at-hourly", "at-midnight", "at-monthly", "at-weekly",
+		"at-yearly", "every-parameter", "many-steps", "many-timers",
+		"platform/data/warehouse/nightly-compact", "platform/retired", "unicode-job",
+	}, names); diff != "" {
+		t.Errorf("templates mismatch (-want +got):\n%s", diff)
+	}
+
+	// A folder three deep must qualify the job's name the whole way down, not just one level.
+	deep := findTemplate(t, plan, "platform/data/warehouse/nightly-compact")
+	if !strings.Contains(deep.Command, "compactdb") {
+		t.Errorf("the deeply nested job lost its script: %q", deep.Command)
+	}
+
+	// Unicode and XML entities travel through the parser and the canonicalizer untouched.
+	uni := findTemplate(t, plan, "unicode-job")
+	for _, want := range []string{"中文", "<xml>&amp;</xml>"} {
+		if !strings.Contains(uni.Command, want) {
+			t.Errorf("unicode job lost %q:\n%s", want, uni.Command)
+		}
+	}
+
+	// Every parameter kind: the three that cannot be represented are refused, the rest survive.
+	params := findTemplate(t, plan, "every-parameter")
+	var kept []string
+	for _, f := range params.Survey {
+		kept = append(kept, f.Var)
+	}
+	if diff := cmp.Diff([]string{"STR", "TXT", "BOOL", "CH"}, kept); diff != "" {
+		t.Errorf("survey mismatch (-want +got):\n%s", diff)
+	}
+
+	byName := map[string][]string{}
+	for _, s := range plan.Schedules {
+		byName[s.Name] = append(byName[s.Name], s.Cron)
+	}
+	// One trigger holding four rules and two comments becomes four schedules, in order.
+	if got := byName["many-timers"]; len(got) != 4 {
+		t.Errorf("many-timers produced %d schedules, want 4: %v", len(got), got)
+	}
+	// Sunday written as seven is the one the scheduler rejects outright.
+	if !containsCron(byName["many-timers"], "0 4 * * 0") {
+		t.Errorf("the Sunday-as-seven rule did not renumber: %v", byName["many-timers"])
+	}
+	// Each alias lands inside the window Jenkins allows for it.
+	assertHashedInto(t, byName["at-midnight"], 1, 0, 2)
+	assertHashedInto(t, byName["at-monthly"], 2, 1, 28)
+	assertHashedInto(t, byName["at-weekly"], 4, 0, 6)
+	assertHashedInto(t, byName["at-yearly"], 3, 1, 12)
+
+	// A disabled job imports, but not switched on.
+	for _, s := range plan.Schedules {
+		if s.Name == "platform/retired" && s.Enabled {
+			t.Error("a job disabled in Jenkins imported with its schedule live")
+		}
+	}
+
+	assertWarns(t, plan.Warnings,
+		"matrix job", "Pipeline job", "no-builders", "step 13 is a Windows batch step",
+		"password parameter and was NOT imported", "uploads a file at launch",
+		"disabled in Jenkins")
+}
+
+// containsCron reports whether a schedule set holds an exact expression.
+func containsCron(all []string, want string) bool {
+	for _, c := range all {
+		if c == want {
+			return true
+		}
+	}
+	return false
+}
+
+// TestMalformedHashSpecsAreRefusedNotGuessed covers the edges of the H parser.
+//
+// The whole point of resolving H is that the job keeps firing when it used to. Every case here is a
+// specification the parser cannot honestly resolve, and each must produce no schedule at all rather
+// than a plausible-looking one. A wrong schedule is the worst outcome an import can produce: it does
+// not fail, it does not warn, the job simply runs at a time nobody chose, and the first sign is
+// something that should have happened at 3am happening at noon.
+//
+// A mutation run showed the range and step validation could be loosened in several directions
+// without a single test objecting, which means these paths were reasoned about and never exercised.
+func TestMalformedHashSpecsAreRefusedNotGuessed(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Name string
+		Spec string
+	}{
+		{"window never closes", "H(0-2 * * * *"},
+		{"window is backwards", "H(20-10) * * * *"},
+		{"window starts below the field", "H(-5-20) * * * *"},
+		{"window ends above the field", "H(0-99) * * * *"},
+		{"window above the hour field", "* H(0-40) * * *"},
+		{"step is zero", "H/0 * * * *"},
+		{"step is negative", "H/-5 * * * *"},
+		{"step is not a number", "H/abc * * * *"},
+		{"window bounds are not numbers", "H(a-b) * * * *"},
+		{"window has no separator", "H(20) * * * *"},
+		{"trailing junk after H", "Hx * * * *"},
+		{"too few fields", "H H *"},
+		{"too many fields", "H H * * * *"},
+		{"an alias that is not one", "@sometimes"},
+	}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
+			t.Parallel()
+			doc := freestyle(timer(test.Spec) + shellStep("echo hi"))
+			plan, err := importer.FromJenkins("prod")(
+				jenkinsBundle([2]string{"edge", doc}), fixedTime)
+			if err != nil {
+				t.Fatalf("FromJenkins() error = %v", err)
+			}
+			// The job itself still imports; only its unreadable schedule is dropped.
+			if len(plan.Templates) != 1 {
+				t.Fatalf("templates = %d, want the job itself still imported", len(plan.Templates))
+			}
+			if len(plan.Schedules) != 0 {
+				t.Fatalf("%q produced schedule %q, want none: an unreadable specification must "+
+					"never resolve to a time nobody chose",
+					test.Spec, plan.Schedules[0].Cron)
+			}
+			if len(plan.Warnings) == 0 {
+				t.Errorf("%q was dropped with no warning, so the operator never learns the job "+
+					"lost its schedule", test.Spec)
+			}
+		})
+	}
+}
+
+// TestSundayDetectionReadsWholeNumbers covers the boundary either side of a weekday seven.
+//
+// Jenkins accepts seven for Sunday and the scheduler rejects it, so a seven standing alone is
+// renumbered. A seven that is part of a larger number is a different day entirely, and rewriting it
+// moves the job. The check looks at the characters either side, and a mutation run moved both
+// without any test noticing.
+func TestSundayDetectionReadsWholeNumbers(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Spec string
+		Want string
+	}{
+		{"0 3 * * 7", "0 3 * * 0"},     // a lone seven is Sunday
+		{"0 3 * * 1,7", "0 3 * * 1,0"}, // a seven in a list is Sunday
+		{"0 3 * * 7-7", "0 3 * * 0"},   // a range that is only Sunday is just Sunday
+		// Monday through Sunday. No single cron range spans it, because Sunday sits at the far end
+		// of Jenkins' week and the near end of cron's, so the days are listed instead.
+		{"0 3 * * 1-7", "0 3 * * 1,2,3,4,5,6,0"},
+		{"0 3 * * 5-7", "0 3 * * 5,6,0"},       // Friday through Sunday
+		{"0 3 * * 1-7/2", "0 3 * * 1,3,5,0"},   // a step through the split range keeps its stride
+		{"0 3 * * MON-FRI", "0 3 * * MON-FRI"}, // names are the same in both dialects
+		{"17 7 * * 1", "17 7 * * 1"},           // sevens outside the weekday field are untouched
+		{"0 3 * * 6", "0 3 * * 6"},             // Saturday is not Sunday
+	}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			doc := freestyle(timer(test.Spec) + shellStep("echo hi"))
+			plan, err := importer.FromJenkins("prod")(
+				jenkinsBundle([2]string{"dow", doc}), fixedTime)
+			if err != nil {
+				t.Fatalf("FromJenkins() error = %v", err)
+			}
+			// A converted expression the scheduler refuses never reaches the plan, so a missing
+			// schedule here means the conversion produced something unusable.
+			if len(plan.Schedules) != 1 {
+				t.Fatalf("%q produced %d schedules, warnings %v", test.Spec,
+					len(plan.Schedules), plan.Warnings)
+			}
+			if got := plan.Schedules[0].Cron; got != test.Want {
+				t.Errorf("%q converted to %q, want %q", test.Spec, got, test.Want)
+			}
+		})
+	}
+}
