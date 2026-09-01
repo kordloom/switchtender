@@ -676,6 +676,15 @@ type storeBundle interface {
 // openBundle opens the stores for the --db value: a postgres:// or postgresql:// DSN selects the
 // PostgreSQL backend, anything else is a SQLite file path.
 func openBundle(db string) (storeBundle, error) {
+	// The license loads before the store opens, because initializing a new PostgreSQL schema is
+	// itself gated, and it loads here so init, import, the server, and the workers all read the
+	// same answer from one place. A file that does not verify is loud and non-fatal: broken
+	// licensing fails toward Community, never toward a command that will not run.
+	if lic, lerr := license.Load(license.PathFor(db)); lerr != nil {
+		fmt.Fprintln(os.Stderr, "license file did not verify, running Community: "+lerr.Error())
+	} else if lic != nil {
+		license.Set(lic)
+	}
 	if strings.HasPrefix(db, "postgres://") || strings.HasPrefix(db, "postgresql://") {
 		return pgstore.Open(db)
 	}
@@ -895,13 +904,12 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	}
 	defer func() { _ = log.Sync() }()
 
-	// The license loads before anything it gates. A missing file is Community and says nothing; a
-	// file that does not verify is loud but never fatal, because a broken license must fail toward
-	// Community, not toward a server that will not start.
-	if lic, lerr := license.Load(license.PathFor(serveDB)); lerr != nil {
-		log.Warn("license file did not verify, running Community: " + lerr.Error())
-	} else if lic != nil {
-		license.Set(lic)
+	bundle, err := openBundle(serveDB)
+	if err != nil {
+		return fmt.Errorf("open store: %w", err)
+	}
+	defer func() { _ = bundle.Close() }()
+	if lic := license.Current(); lic != nil {
 		log.Info("licensed: " + lic.Claims.Tier + " (" + lic.Claims.Org + "), expires " +
 			lic.Claims.Expires)
 	}
@@ -912,12 +920,6 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			return aerr
 		}
 	}
-
-	bundle, err := openBundle(serveDB)
-	if err != nil {
-		return fmt.Errorf("open store: %w", err)
-	}
-	defer func() { _ = bundle.Close() }()
 	store, schedules := bundle.Runs(), bundle.Schedules()
 
 	n, cerr := bundle.Tokens().Count(cmd.Context())
@@ -992,6 +994,19 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		}
 		policies = filePolicies
 		count, _ := filePolicies.List(cmd.Context())
+		// The file is explicit configuration, so a license gap here is a misconfiguration worth
+		// one line at startup, the same treatment SSO gets.
+		needsFull := len(count) > 1
+		for _, fp := range count {
+			if fp.Advanced() {
+				needsFull = true
+			}
+		}
+		if needsFull {
+			if aerr := license.Allow(license.FeaturePolicyFull); aerr != nil {
+				return aerr
+			}
+		}
 		log.Info("serve: approval policies read from file",
 			zap.String("path", policyFile), zap.Int("policies", len(count)))
 	}

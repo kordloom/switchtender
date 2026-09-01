@@ -2,6 +2,7 @@ package server
 
 import (
 	"errors"
+	"github.com/kordloom/switchtender/internal/license"
 	"net/http"
 	"time"
 
@@ -78,6 +79,22 @@ func createPolicyHandler(store policy.Store, log *zap.Logger) http.HandlerFunc {
 			respondError(w, log, http.StatusBadRequest, "tool is not a supported execution tool")
 			return
 		}
+		// One plain require-approval policy is Community; the full engine and a second policy are
+		// Team. The check sits before the write so a refusal changes nothing.
+		advanced := req.Effect == policy.EffectDeny || req.MinRisk != "" ||
+			req.RequireDistinctApprover
+		existing, lerr := store.List(r.Context())
+		if lerr != nil {
+			log.Error("server: list policies: " + lerr.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not read the policies")
+			return
+		}
+		if advanced || len(existing) >= 1 {
+			if aerr := license.Allow(license.FeaturePolicyFull); aerr != nil {
+				respondError(w, log, http.StatusForbidden, aerr.Error())
+				return
+			}
+		}
 		p := &policy.Policy{
 			ID: policy.NewID(), Name: req.Name, Tool: req.Tool,
 			CommandContains: req.CommandContains, InventoryID: req.InventoryID, Queue: req.Queue,
@@ -120,6 +137,14 @@ func updatePolicyHandler(store policy.Store, log *zap.Logger) http.HandlerFunc {
 		if req.Tool != "" && !run.ValidTool(req.Tool) {
 			respondError(w, log, http.StatusBadRequest, "tool is not a supported execution tool")
 			return
+		}
+		// Editing the one Community policy into the full engine is the same purchase as creating
+		// an advanced one, so the same gate answers.
+		if req.Effect == policy.EffectDeny || req.MinRisk != "" || req.RequireDistinctApprover {
+			if aerr := license.Allow(license.FeaturePolicyFull); aerr != nil {
+				respondError(w, log, http.StatusForbidden, aerr.Error())
+				return
+			}
 		}
 		id := r.PathValue("id")
 		existing, err := store.Get(r.Context(), id)

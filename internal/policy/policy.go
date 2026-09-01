@@ -140,6 +140,14 @@ func (p *Policy) matchesActor(r *run.Run) bool {
 	}
 }
 
+// Advanced reports whether a policy uses the full engine: a deny effect, a risk floor, or
+// distinct-approver separation of duties. One plain require-approval policy is the Community
+// gate; everything past it is what a Team license covers, and this is the one definition every
+// enforcement point shares so they cannot drift.
+func (p *Policy) Advanced() bool {
+	return p.Effect == EffectDeny || p.MinRisk != "" || p.RequireDistinctApprover
+}
+
 // riskRank orders risk levels so MinRisk can compare them. An unknown level ranks above high, so a
 // policy naming a level this build does not know fails toward holding rather than passing.
 func riskRank(level string) int {

@@ -3,6 +3,7 @@ package pgstore
 import (
 	"database/sql"
 	"fmt"
+	"github.com/kordloom/switchtender/internal/license"
 	"time"
 
 	"github.com/kordloom/switchtender/internal/sqlutil"
@@ -463,6 +464,20 @@ func Open(dsn string) (*DB, error) {
 	}
 	// Cap the pool so a burst of API reads and SSE streams cannot exhaust the server's
 	// max_connections, and recycle connections so a load balancer or pooler can rebalance.
+	// Initializing a brand-new schema is a Team feature; opening a database that already holds
+	// one is never gated, in any license state, because a lapsed license must take nothing. The
+	// probe runs before the migration lock so a Community refusal leaves the database untouched.
+	var initialized bool
+	if err := db.QueryRow("SELECT to_regclass('runs') IS NOT NULL").Scan(&initialized); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("probe postgres schema: %w", err)
+	}
+	if !initialized {
+		if aerr := license.Allow(license.FeaturePostgresInit); aerr != nil {
+			_ = db.Close()
+			return nil, aerr
+		}
+	}
 	db.SetMaxOpenConns(24)
 	db.SetMaxIdleConns(8)
 	db.SetConnMaxLifetime(30 * time.Minute)

@@ -2,6 +2,7 @@ package server
 
 import (
 	"errors"
+	"github.com/kordloom/switchtender/internal/license"
 	"net/http"
 	"strconv"
 	"strings"
@@ -156,6 +157,12 @@ func reconcileDriftHandler(store run.Store, submitter Submitter, authz *authoriz
 		panic("server: reconcileDriftHandler: Store and Submitter required")
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Seeing drift is Community; the one-click reconcile proposal is Team. The gate sits
+		// before the body is even read, so a refusal does no work and changes nothing.
+		if aerr := license.Allow(license.FeatureReconcile); aerr != nil {
+			respondError(w, log, http.StatusForbidden, aerr.Error())
+			return
+		}
 		var req reconcileRequest
 		if !decodeStrict(w, log, r.Body, &req) {
 			return

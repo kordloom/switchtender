@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/kordloom/loomseal/jcs"
@@ -173,14 +174,15 @@ func Load(path string) (*License, error) {
 	return Verify(raw, path)
 }
 
-// current is the process-wide license, set once at startup. Nil is Community.
-var current *License
+// current is the process-wide license. Nil is Community. Atomic because gates read it from
+// request handlers while tests, and one day a reload signal, swap it.
+var current atomic.Pointer[License]
 
 // Set installs the process's license. Serve and the CLI commands call it once after Load.
-func Set(l *License) { current = l }
+func Set(l *License) { current.Store(l) }
 
 // Current returns the process's license, nil for Community.
-func Current() *License { return current }
+func Current() *License { return current.Load() }
 
 // Allow reports whether a feature may be used right now, and if not, why not, in one line.
 //
@@ -189,7 +191,7 @@ func Current() *License { return current }
 // while the server runs drops it to Community without a restart, exactly as the pricing page
 // promises.
 func Allow(f Feature) error {
-	return allowAt(current, f, time.Now())
+	return allowAt(current.Load(), f, time.Now())
 }
 
 // allowAt is Allow against an explicit license and clock, which is what makes the rule testable.
@@ -224,9 +226,17 @@ var featureNames = map[Feature]string{
 	FeatureReconcile:    "One-click drift reconcile",
 }
 
-// PathFor returns where an install's license lives: beside its database, the same rule the producer
-// identity follows, so backup and restore carry both or neither.
+// PathFor returns where an install's license lives. SWITCHTENDER_LICENSE overrides everything.
+// A SQLite install keeps it beside the database file, the same rule the producer identity follows,
+// so backup and restore carry both or neither. A DSN has no directory, so a PostgreSQL install
+// reads it from the working directory unless the override says otherwise.
 func PathFor(db string) string {
+	if p := os.Getenv("SWITCHTENDER_LICENSE"); p != "" {
+		return p
+	}
+	if strings.Contains(db, "://") {
+		return "./switchtender-license.json"
+	}
 	dir := "."
 	if i := strings.LastIndexByte(db, '/'); i >= 0 {
 		dir = db[:i]
