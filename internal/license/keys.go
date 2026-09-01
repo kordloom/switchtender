@@ -3,6 +3,7 @@ package license
 import (
 	"crypto/ed25519"
 	"encoding/hex"
+	"sync"
 )
 
 // publicKeys are the signing keys this build trusts, by kid. Adding a key is a release; removing
@@ -11,6 +12,10 @@ import (
 // IssuerKid is the kid the mint command stamps into every license it signs. It must name a key in
 // publicKeys or minting refuses at the source.
 const IssuerKid = "k1"
+
+// keysMu guards publicKeys: production only ever reads it, but tests register keys from parallel
+// tests, and an unguarded map made the whole package fail under the race detector.
+var keysMu sync.RWMutex
 
 var publicKeys = map[string]ed25519.PublicKey{
 	// k1 is the launch issuer key. The private seed lives offline with the founder; it has never
@@ -28,4 +33,16 @@ func mustKey(hexKey string) ed25519.PublicKey {
 }
 
 // RegisterKey adds a trusted signing key. The real key ships compiled in; tests register their own.
-func RegisterKey(kid string, pub ed25519.PublicKey) { publicKeys[kid] = pub }
+func RegisterKey(kid string, pub ed25519.PublicKey) {
+	keysMu.Lock()
+	defer keysMu.Unlock()
+	publicKeys[kid] = pub
+}
+
+// keyFor returns the trusted key for kid.
+func keyFor(kid string) (ed25519.PublicKey, bool) {
+	keysMu.RLock()
+	defer keysMu.RUnlock()
+	pub, ok := publicKeys[kid]
+	return pub, ok
+}

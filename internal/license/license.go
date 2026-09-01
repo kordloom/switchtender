@@ -117,7 +117,7 @@ func Verify(raw []byte, path string) (*License, error) {
 	if f.Claims.V != 1 {
 		return nil, fmt.Errorf("license version %d is not one this build reads", f.Claims.V)
 	}
-	pub, ok := publicKeys[f.Claims.Kid]
+	pub, ok := keyFor(f.Claims.Kid)
 	if !ok {
 		return nil, fmt.Errorf("license names signing key %q, which this build does not trust",
 			f.Claims.Kid)
