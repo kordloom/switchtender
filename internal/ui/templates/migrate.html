@@ -16,7 +16,7 @@
 		<div class="page-head">
 			<div class="page-head-text">
 				<h1>Migrate</h1>
-				<p class="muted">Import projects, inventories, templates, surveys, workflows, credential shells, and schedules from AWX, Semaphore, or Rundeck. Preview first. Nothing is created until you import.</p>
+				<p class="muted">Import projects, inventories, templates, surveys, workflows, credential shells, and schedules from AWX, Semaphore, Rundeck, or Jenkins. Preview first. Nothing is created until you import.</p>
 			</div>
 			<div class="head-actions"></div>
 		</div>
@@ -27,16 +27,22 @@
 					<option value="awx">AWX</option>
 					<option value="semaphore">Semaphore</option>
 					<option value="rundeck">Rundeck</option>
+					<option value="jenkins">Jenkins</option>
 				</select>
 			</label>
 			<label class="field-label" id="migrate-inventory-field" hidden>Inventory
 				<input id="migrate-inventory" class="input" type="text" placeholder="prod-hosts"
-					data-tip="Rundeck dispatches by node filter and names no inventory, so say which hosts these jobs target">
-				<span class="muted">Rundeck jobs name no inventory of their own, so say which hosts they target.</span>
+					data-tip="These jobs name no inventory of their own, so say which hosts they target">
+				<span class="muted" id="migrate-inventory-help">Rundeck jobs name no inventory of their own, so say which hosts they target.</span>
+			</label>
+			<label class="field-label" id="migrate-file-field">Export file
+				<input id="migrate-file" class="input" type="file" accept=".json,.yaml,.yml,.xml,.zip,.txt"
+					data-tip="Choose an export file instead of pasting it. A Jenkins jobs directory can be zipped and uploaded whole">
+				<span class="muted" id="migrate-file-help">Or paste the export below.</span>
 			</label>
 			<label class="field-label">Export
 				<textarea id="migrate-export" class="input mono" rows="12"
-					placeholder="Paste your AWX, Semaphore, or Rundeck export here"></textarea>
+					placeholder="Paste your AWX, Semaphore, Rundeck, or Jenkins export here"></textarea>
 			</label>
 			<div class="launch-actions">
 				<button id="migrate-sample" type="button" class="button" data-demo-safe="true" data-tip="Click to fill the box with a sample AWX export so you can try the import">Load a sample export</button>

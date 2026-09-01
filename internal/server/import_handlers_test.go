@@ -95,13 +95,15 @@ func TestImportRundeckFormat(t *testing.T) {
 
 	// An unknown format is still refused, and the message names what is accepted.
 	rec = httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/import/jenkins",
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/import/bamboo",
 		strings.NewReader("{}")))
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("unknown format = %d, want 400", rec.Code)
 	}
-	if !strings.Contains(rec.Body.String(), "rundeck") {
-		t.Errorf("the error does not name rundeck as accepted: %s", rec.Body.String())
+	for _, format := range []string{"awx", "semaphore", "rundeck", "jenkins"} {
+		if !strings.Contains(rec.Body.String(), format) {
+			t.Errorf("the error does not name %s as accepted: %s", format, rec.Body.String())
+		}
 	}
 }
 

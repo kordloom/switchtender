@@ -213,12 +213,30 @@ function wireMigrate() {
 		});
 	}
 
+	wireMigrateFile();
 	// Only Rundeck needs a target inventory, so the field appears with that format and is hidden
 	// otherwise rather than asking for something the other importers would ignore.
 	const format = document.getElementById("migrate-format");
 	const inventoryField = document.getElementById("migrate-inventory-field");
 	if (format && inventoryField) {
-		const sync = () => { inventoryField.hidden = format.value !== "rundeck"; };
+		// Jenkins picks an agent by label rather than naming hosts, so it needs the same answer
+		// Rundeck does.
+		const help = document.getElementById("migrate-inventory-help");
+		const sync = () => {
+			const needs = format.value === "rundeck" || format.value === "jenkins";
+			inventoryField.hidden = !needs;
+			if (help) {
+				help.textContent = format.value === "jenkins"
+					? "Jenkins picks an agent by label rather than naming hosts, so say which machines these jobs run against."
+					: "Rundeck jobs name no inventory of their own, so say which hosts they target.";
+			}
+			const fileHelp = document.getElementById("migrate-file-help");
+			if (fileHelp) {
+				fileHelp.textContent = format.value === "jenkins"
+					? "Zip the jobs directory from your JENKINS_HOME and upload it, or paste one job's config.xml below."
+					: "Or paste the export below.";
+			}
+		};
 		format.addEventListener("change", sync);
 		sync();
 	}
@@ -231,9 +249,11 @@ function wireMigrate() {
 async function runMigrate(apply) {
 	const status = document.getElementById("migrate-status");
 	const format = document.getElementById("migrate-format").value;
-	const body = document.getElementById("migrate-export").value;
-	if (!body.trim()) {
-		status.textContent = "Paste an export first.";
+	// An uploaded archive is bytes, not text, so it cannot travel through the textarea. When one is
+	// loaded it is what gets sent, and the box stays empty rather than showing unreadable content.
+	const body = migrateFileBytes || document.getElementById("migrate-export").value;
+	if (!migrateFileBytes && !String(body).trim()) {
+		status.textContent = "Paste an export or choose a file first.";
 		return;
 	}
 	document.getElementById("migrate-plan").innerHTML = "";
@@ -243,7 +263,9 @@ async function runMigrate(apply) {
 	const params = [];
 	if (apply) params.push("apply=true");
 	const inventory = (document.getElementById("migrate-inventory")?.value || "").trim();
-	if (format === "rundeck" && inventory) params.push("inventory=" + encodeURIComponent(inventory));
+	if ((format === "rundeck" || format === "jenkins") && inventory) {
+		params.push("inventory=" + encodeURIComponent(inventory));
+	}
 	const path = API + "/import/" + format + (params.length ? "?" + params.join("&") : "");
 	const res = await fetch(path, { method: "POST", headers: authHeaders(), body });
 	if (res.status === 401) {
@@ -256,6 +278,47 @@ async function runMigrate(apply) {
 		? "Imported " + (data.created || 0) + " objects."
 		: "Preview ready.";
 	renderMigratePlan(data);
+}
+
+// migrateFileBytes holds an uploaded archive's bytes. A zip cannot round trip through a textarea, so
+// it is kept aside and sent as the request body directly.
+let migrateFileBytes = null;
+
+// wireMigrateFile loads a chosen export file. A text export fills the box so it can still be read
+// and edited before importing; an archive is kept as bytes, because showing it would fill the box
+// with binary and editing it would corrupt it.
+function wireMigrateFile() {
+	const input = document.getElementById("migrate-file");
+	const box = document.getElementById("migrate-export");
+	const status = document.getElementById("migrate-status");
+	if (!input || !box) return;
+	input.addEventListener("change", async () => {
+		const file = input.files && input.files[0];
+		migrateFileBytes = null;
+		if (!file) return;
+		const isArchive = /\.zip$/i.test(file.name);
+		try {
+			if (isArchive) {
+				migrateFileBytes = await file.arrayBuffer();
+				box.value = "";
+				box.placeholder = "Using " + file.name + " (" + Math.ceil(file.size / 1024) + " KB).";
+				status.textContent = "Loaded " + file.name + ".";
+				return;
+			}
+			box.value = await file.text();
+			status.textContent = "Loaded " + file.name + ".";
+		} catch (err) {
+			status.textContent = "Could not read that file: " + err.message;
+		}
+	});
+	// Typing over a loaded archive should use what was typed, not silently send the file instead.
+	box.addEventListener("input", () => {
+		if (box.value.trim() && migrateFileBytes) {
+			migrateFileBytes = null;
+			input.value = "";
+			box.placeholder = "Paste your AWX, Semaphore, Rundeck, or Jenkins export here";
+		}
+	});
 }
 
 // renderMigratePlan draws the import plan: each non-empty resource list with its names, any warnings,

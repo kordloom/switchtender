@@ -24,7 +24,7 @@ type mapFunc func(data []byte, now time.Time) (*importer.Plan, error)
 // importCmd groups the migration importers.
 var importCmd = &cobra.Command{
 	Use:   "import",
-	Short: "Import AWX, Semaphore, Rundeck, or crontab definitions into SwitchTender.",
+	Short: "Import AWX, Semaphore, Rundeck, Jenkins, or crontab definitions into SwitchTender.",
 }
 
 // importAWXCmd imports an awx export document.
@@ -58,6 +58,12 @@ var (
 // dispatches by node filter rather than by inventory file.
 var (
 	importRundeckInventory string
+)
+
+// importJenkinsInventory is the inventory imported Jenkins templates target, since Jenkins picks an
+// agent by label rather than naming hosts.
+var (
+	importJenkinsInventory string
 )
 
 // importCronCmd imports a crontab into governed schedules.
@@ -100,9 +106,45 @@ Without --apply the import only reports what it would create.`,
 	},
 }
 
+// importJenkinsCmd imports Jenkins freestyle jobs.
+var importJenkinsCmd = &cobra.Command{
+	Use:   "jenkins <JENKINS_HOME|jobs-dir|config.xml>",
+	Short: "Import Jenkins freestyle jobs into SwitchTender.",
+	Long: `Import Jenkins freestyle jobs into SwitchTender.
+
+Point this at a JENKINS_HOME, at its jobs directory, or at a single job's config.xml. Folders are
+followed and each job keeps its full name. A job's build steps become one Bash template, its
+parameters become a survey, and every line of its build trigger becomes a schedule, with Jenkins H
+notation resolved to concrete times and the weekday renumbered where the two disagree.
+
+Only freestyle jobs are imported. A Pipeline job is a Groovy program with no honest mechanical
+translation into a template, so it is named and skipped rather than half-imported. A poll trigger is
+also skipped: it builds only when the repository changed, so importing it as a schedule would run
+the job every interval whether anything changed or not.
+
+Password parameters and remote trigger tokens are never imported, because both would turn a secret
+into a stored plaintext value. Jenkins picks an agent by label rather than naming hosts, so pass
+--inventory to say which machines these jobs run against.
+
+Without --apply the import only reports what it would create.`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		bundle, err := importer.JenkinsBundle(args[0])
+		if err != nil {
+			return err
+		}
+		if line := importer.JenkinsFoundLine(importer.JenkinsJobNames(bundle)); line != "" {
+			fmt.Fprintln(os.Stderr, line)
+		}
+		return runImportData(cmd, bundle, importer.FromJenkins(importJenkinsInventory))
+	},
+}
+
 // init registers the import commands and their flags.
 func init() {
-	for _, c := range []*cobra.Command{importAWXCmd, importSemaphoreCmd, importCronCmd, importRundeckCmd} {
+	for _, c := range []*cobra.Command{
+		importAWXCmd, importSemaphoreCmd, importCronCmd, importRundeckCmd, importJenkinsCmd,
+	} {
 		c.Flags().StringVar(&importDB, "db", defaultDBPath,
 			"SQLite file path, or a postgres:// DSN, to write into with --apply.")
 		c.Flags().BoolVar(&importApply, "apply", false,
@@ -115,6 +157,8 @@ func init() {
 		"Parse the six-field /etc/crontab form, whose user column sits before the command.")
 	importRundeckCmd.Flags().StringVar(&importRundeckInventory, "inventory", "",
 		"Inventory the imported templates target, since Rundeck dispatches by node filter.")
+	importJenkinsCmd.Flags().StringVar(&importJenkinsInventory, "inventory", "",
+		"Inventory the imported templates target, since Jenkins picks an agent by label.")
 }
 
 // runImport reads an export, maps it to a plan, reports the plan, and applies it when --apply is set.
@@ -123,6 +167,12 @@ func runImport(cmd *cobra.Command, path string, mapper mapFunc) error {
 	if err != nil {
 		return fmt.Errorf("read export: %w", err)
 	}
+	return runImportData(cmd, data, mapper)
+}
+
+// runImportData maps an export document already in hand, reports the plan, and applies it when
+// --apply is set.
+func runImportData(cmd *cobra.Command, data []byte, mapper mapFunc) error {
 	plan, err := mapper(data, time.Now())
 	if err != nil {
 		return err

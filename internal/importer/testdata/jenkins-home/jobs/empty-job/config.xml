@@ -1,0 +1,17 @@
+<?xml version='1.1' encoding='UTF-8'?>
+<project>
+  <keepDependencies>false</keepDependencies>
+  <properties/>
+  <scm class="hudson.scm.NullSCM"/>
+  <assignedNode>linux-heavy</assignedNode>
+  <canRoam>false</canRoam>
+  <disabled>false</disabled>
+  <blockBuildWhenDownstreamBuilding>false</blockBuildWhenDownstreamBuilding>
+  <blockBuildWhenUpstreamBuilding>false</blockBuildWhenUpstreamBuilding>
+  <authToken>{AQAAABAAAAAgSla/hY2NgKMhoBskxqB9LemODpu976t773Z+zJUgAOv910eZkCBEsCJto+0eukB9}</authToken>
+  <triggers/>
+  <concurrentBuild>false</concurrentBuild>
+  <builders/>
+  <publishers/>
+  <buildWrappers/>
+</project>
