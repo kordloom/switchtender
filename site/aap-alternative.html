@@ -198,6 +198,60 @@
 			<p class="gs-note reveal">The <a href="/docs/switching-from-awx">switching guide</a> maps every Controller concept to its SwitchTender equivalent, and the <a href="/docs/migration">migration reference</a> covers the details. Weighing the community edition instead? The <a href="/awx-alternative">AWX alternative page</a> and the <a href="/ascender-alternative">Ascender alternative page</a> make those cases.</p>
 		</section>
 
+		<!-- st:faq -->
+		<section class="section wrap">
+			<div class="section-head reveal">
+				<h2>Common questions</h2>
+				<p>The three asked most often when somebody is comparing this against what they already run.</p>
+			</div>
+			<div class="cards cards-3">
+				<article class="card reveal">
+					<h3>Does it need an agent on each host?</h3>
+					<p>No. It reaches the machines it manages over SSH, the same way Ansible does, and installs nothing on them. There is no per-host daemon to deploy, patch, or account for. You run the one server binary, and optionally a few more worker processes against the same store for throughput, which are pool members rather than agents belonging to a host.</p>
+				</article>
+				<article class="card reveal">
+					<h3>Can it read secrets from AWS Secrets Manager, Azure Key Vault, or Vault?</h3>
+					<p>All three, resolved at launch rather than copied into this database. Vault dynamic secrets go further: a short-lived credential is minted for each run and revoked when the run ends. AWS and Azure both authenticate from an instance role or managed identity with no stored key, and anything else resolves through a command whose output is the secret.</p>
+				</article>
+				<article class="card reveal">
+					<h3>Can I run a Terraform plan, hold it for approval, then run Ansible?</h3>
+					<p>Yes, and it is what pipelines are for here. Steps mix tools freely on a dependency graph with parallel branches, built on a drag-and-drop canvas. The approval is not a convention somebody can skip: a policy decides which runs are held, the core enforces the hold, and the approval binds to the exact plan reviewed, so a run cannot be approved as one thing and executed as another.</p>
+				</article>
+			</div>
+			<script type="application/ld+json">
+{
+ "@context": "https://schema.org",
+ "@type": "FAQPage",
+ "mainEntity": [
+  {
+   "@type": "Question",
+   "name": "Does it need an agent on each host?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "No. It reaches the machines it manages over SSH, the same way Ansible does, and installs nothing on them. There is no per-host daemon to deploy, patch, or account for. You run the one server binary, and optionally a few more worker processes against the same store for throughput, which are pool members rather than agents belonging to a host."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "Can it read secrets from AWS Secrets Manager, Azure Key Vault, or Vault?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "All three, resolved at launch rather than copied into this database. Vault dynamic secrets go further: a short-lived credential is minted for each run and revoked when the run ends. AWS and Azure both authenticate from an instance role or managed identity with no stored key, and anything else resolves through a command whose output is the secret."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "Can I run a Terraform plan, hold it for approval, then run Ansible?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "Yes, and it is what pipelines are for here. Steps mix tools freely on a dependency graph with parallel branches, built on a drag-and-drop canvas. The approval is not a convention somebody can skip: a policy decides which runs are held, the core enforces the hold, and the approval binds to the exact plan reviewed, so a run cannot be approved as one thing and executed as another."
+   }
+  }
+ ]
+}
+</script>
+		</section>
+		<!-- /st:faq -->
 		<section class="cta wrap reveal">
 			<h2>Keep the capabilities. Drop the subscription.</h2>
 			<div class="hero-cta">

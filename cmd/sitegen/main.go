@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"html"
 	"html/template"
 	"os"
 	"path/filepath"
@@ -389,6 +390,78 @@ func switchtenderEntity() map[string]any {
 	}
 }
 
+// landingQA is one question and its short answer on a comparison landing page.
+type landingQA struct {
+	// Question is the question as somebody would type it.
+	Question string
+	// Answer is a card-length answer, plain text.
+	Answer string
+}
+
+// landingFAQ answers the three capabilities that comparison summaries were handing to competitors.
+//
+// Each of these is a thing this product does, described on the page already, in prose inside a
+// table. A summarizer did not attribute them here and credited the incumbent instead. Stating them
+// as the literal question somebody asks, on the page a comparison query lands on, is what makes the
+// answer quotable rather than inferable.
+var landingFAQ = []landingQA{{
+	Question: "Does it need an agent on each host?",
+	Answer: "No. It reaches the machines it manages over SSH, the same way Ansible does, and " +
+		"installs nothing on them. There is no per-host daemon to deploy, patch, or account for. " +
+		"You run the one server binary, and optionally a few more worker processes against the " +
+		"same store for throughput, which are pool members rather than agents belonging to a host.",
+}, {
+	Question: "Can it read secrets from AWS Secrets Manager, Azure Key Vault, or Vault?",
+	Answer: "All three, resolved at launch rather than copied into this database. Vault dynamic " +
+		"secrets go further: a short-lived credential is minted for each run and revoked when the " +
+		"run ends. AWS and Azure both authenticate from an instance role or managed identity with " +
+		"no stored key, and anything else resolves through a command whose output is the secret.",
+}, {
+	Question: "Can I run a Terraform plan, hold it for approval, then run Ansible?",
+	Answer: "Yes, and it is what pipelines are for here. Steps mix tools freely on a dependency " +
+		"graph with parallel branches, built on a drag-and-drop canvas. The approval is not a " +
+		"convention somebody can skip: a policy decides which runs are held, the core enforces " +
+		"the hold, and the approval binds to the exact plan reviewed, so a run cannot be approved " +
+		"as one thing and executed as another.",
+}}
+
+// faqMarkers bracket the shared landing-page questions, the same way the entity markers work.
+const (
+	faqOpen  = "<!-- st:faq -->"
+	faqClose = "<!-- /st:faq -->"
+)
+
+// landingFAQBlock renders the shared questions as a section matching the page around it, followed by
+// the structured data describing the same words. The markup and the schema are generated together
+// from one source, which is what keeps the structured data honest: it can only ever describe
+// questions and answers a reader can actually see on the page.
+func landingFAQBlock() string {
+	var b strings.Builder
+	b.WriteString("\n\t\t<section class=\"section wrap\">\n")
+	b.WriteString("\t\t\t<div class=\"section-head reveal\">\n")
+	b.WriteString("\t\t\t\t<h2>Common questions</h2>\n")
+	b.WriteString("\t\t\t\t<p>The three asked most often when somebody is comparing this against " +
+		"what they already run.</p>\n")
+	b.WriteString("\t\t\t</div>\n")
+	b.WriteString("\t\t\t<div class=\"cards cards-3\">\n")
+	questions := make([]faqQuestion, 0, len(landingFAQ))
+	for _, qa := range landingFAQ {
+		fmt.Fprintf(&b, "\t\t\t\t<article class=\"card reveal\">\n\t\t\t\t\t<h3>%s</h3>\n"+
+			"\t\t\t\t\t<p>%s</p>\n\t\t\t\t</article>\n",
+			html.EscapeString(qa.Question), html.EscapeString(qa.Answer))
+		questions = append(questions, faqQuestion{
+			Type: "Question", Name: qa.Question,
+			AcceptedAnswer: faqAnswer{Type: "Answer", Text: qa.Answer},
+		})
+	}
+	b.WriteString("\t\t\t</div>\n")
+	b.WriteString("\t\t\t" + string(marshalSchema(map[string]any{
+		"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": questions,
+	})) + "\n")
+	b.WriteString("\t\t</section>\n\t\t")
+	return b.String()
+}
+
 // entityMarkers bracket the shared application entity inside a hand-written page, so the generator
 // can refresh it without touching anything the page's author wrote around it.
 const (
@@ -407,7 +480,7 @@ func writeEntityPages() (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	block := string(marshalSchema(switchtenderEntity()))
+	entity := "\n\t" + string(marshalSchema(switchtenderEntity())) + "\n\t"
 	changed := 0
 	for _, path := range paths {
 		src, err := os.ReadFile(path)
@@ -415,16 +488,14 @@ func writeEntityPages() (int, error) {
 			return 0, err
 		}
 		text := string(src)
-		start := strings.Index(text, entityOpen)
-		if start < 0 {
-			continue
+		updated, err := fillMarkers(path, text, entityOpen, entityClose, entity)
+		if err != nil {
+			return 0, err
 		}
-		end := strings.Index(text[start:], entityClose)
-		if end < 0 {
-			return 0, fmt.Errorf("sitegen: %s opens the entity block and never closes it", path)
+		updated, err = fillMarkers(path, updated, faqOpen, faqClose, landingFAQBlock())
+		if err != nil {
+			return 0, err
 		}
-		end += start + len(entityClose)
-		updated := text[:start] + entityOpen + "\n\t" + block + "\n\t" + entityClose + text[end:]
 		if updated == text {
 			continue
 		}
@@ -434,6 +505,20 @@ func writeEntityPages() (int, error) {
 		changed++
 	}
 	return changed, nil
+}
+
+// fillMarkers replaces whatever sits between one marker pair, leaving a page without them alone.
+func fillMarkers(path, text, openTag, closeTag, body string) (string, error) {
+	start := strings.Index(text, openTag)
+	if start < 0 {
+		return text, nil
+	}
+	end := strings.Index(text[start:], closeTag)
+	if end < 0 {
+		return "", fmt.Errorf("sitegen: %s opens %s and never closes it", path, openTag)
+	}
+	end += start + len(closeTag)
+	return text[:start] + openTag + body + closeTag + text[end:], nil
 }
 
 // docsSchema builds the structured data for one docs page: the application entity on the pages that

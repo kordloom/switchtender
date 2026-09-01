@@ -58,6 +58,10 @@ full become settings, network device logins, environment bundles, API tokens, co
 logins, and typed AWS, Azure, GCP, VMware, and OpenStack credentials. Set
 `SWITCHTENDER_ENCRYPTION_KEY` and `SWITCHTENDER_ENCRYPTION_SALT` to enable them.
 
+A credential does not have to be stored here at all. It can instead be resolved at launch from
+HashiCorp Vault, AWS Secrets Manager, or Azure Key Vault, so the value lives in the manager you
+already run and never rests in this database.
+
 A credential can also be a command source, so the value lives in an external store instead of in
 SwitchTender. SwitchTender seals a command, for example `vault kv get -field=password secret/prod` or an
 `aws secretsmanager get-secret-value` call, and runs it at execution time. The command's output is
@@ -110,6 +114,79 @@ build and drop in, and the seams it can register.
 Runs stream and page by a sequence cursor, the runs list and event history paginate, and a large host
 matrix renders one cell at a time. Split a run across workers by measured host duration, and run more
 than one instance against PostgreSQL when a single binary is not enough.
+
+## Does SwitchTender need an agent on each host?
+
+No. It reaches the machines it manages over SSH, the same way Ansible does, and installs nothing
+on them. There is no per-host daemon to deploy, patch, or account for.
+
+What you do run is the server itself, one binary, plus optionally a few extra worker processes
+against the same store when one machine is not enough throughput. A worker is a pool member that
+picks up queued runs, not an agent belonging to a particular target, so their number has nothing
+to do with how many hosts you manage.
+
+## Which Semaphore is this an alternative to?
+
+Semaphore UI, at semaphoreui.com, which was called Ansible Semaphore until it was renamed. It is
+the open-source web UI for running Ansible, Terraform, and scripts, and it is the tool
+`switchtender import semaphore` reads a backup from.
+
+It is not Semaphore CI/CD by Rendered Text, at semaphoreci.com, which is a hosted continuous
+integration service for building and testing code. The two share a name and nothing else.
+SwitchTender does not compete with it: if you need to compile code and run test suites on every
+pull request, that is a build pipeline, and this is not one.
+
+## Can it read secrets from AWS Secrets Manager, Azure Key Vault, or Vault?
+
+All three, resolved at launch rather than copied into this database.
+
+Vault is read over its HTTP API and handles KV v1 and v2. Vault dynamic secrets go further: a
+fresh, short-lived credential is minted for each run and revoked when the run ends, so nothing
+long-lived exists to leak. AWS Secrets Manager is read over a Signature Version 4 signed request,
+and credentials fall back to the standard AWS environment, so an instance role needs no stored
+key. Azure Key Vault authenticates with a service principal or, on Azure, the attached managed
+identity, again with no stored key.
+
+Anything else resolves through a command credential, whose standard output becomes the secret, so
+GCP Secret Manager, 1Password, or an internal tool work with no integration to write.
+
+## Can I run a Terraform plan, hold it for approval, then run Ansible?
+
+Yes, and that sequence is the reason pipelines exist here rather than a workaround for them.
+
+A pipeline is an ordered set of steps or a dependency graph with parallel branches, built on a
+drag-and-drop canvas or posted as JSON. Steps can mix tools freely, so a Terraform plan, an
+approval, and an Ansible play are three steps of one run. A failure skips exactly the steps that
+depended on it, and `set_stats` output flows to dependent steps as extra vars.
+
+The approval is not a convention someone can skip. A policy decides which runs are held, the hold
+is enforced in the core, and the approval is bound to the exact plan that was reviewed, so a run
+cannot be approved as one thing and executed as another.
+
+## How fine-grained is access control?
+
+Beyond the global admin, operator, and viewer roles, users group into teams and a team gets read,
+use, or manage on one specific project, template, inventory, or credential, each level implying
+the ones below it.
+
+That covers the two cases a global role cannot: a read grant shows somebody one object without
+making them a viewer of everything, and a manage grant lets somebody edit and delete one object
+without making them an admin. Grants layer on top of the global role and default open, so an
+object nobody granted falls back to the caller's global role. Turn on `--strict-grants` when you
+want an ungranted object to be invisible instead.
+
+## How mature is SwitchTender?
+
+Young, and worth saying plainly. AWX has years of production use, a large community, and a
+commercial edition behind it. Semaphore UI has an established user base. SwitchTender has neither,
+and if what you need most is a tool thousands of people have already hit the edges of, that is a
+real reason to choose one of them.
+
+What offsets it is verifiability rather than reputation. The audit trail is hash-chained and
+signed, and a third party can verify a run offline with a separate open-source verifier, so the
+claims do not rest on trusting the vendor. The license converts to Apache 2.0 on a fixed schedule
+and the source is available now, so the project outliving the company is a documented path rather
+than a hope. The continuity and vendor risk pages set out what happens if this goes away.
 
 ## What is the license?
 
