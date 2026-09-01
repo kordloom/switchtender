@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"github.com/kordloom/switchtender/internal/license"
 	"net/http"
 	"os"
 	"os/signal"
@@ -116,6 +117,14 @@ func init() {
 
 // runWorker leases and executes runs until interrupted.
 func runWorker(cmd *cobra.Command, _ []string) error {
+	// A worker is distributed execution, which is Team. The license sits beside the shared
+	// database the worker points at, so the worker and the server read the same answer.
+	if lic, lerr := license.Load(license.PathFor(workerDB)); lerr == nil && lic != nil {
+		license.Set(lic)
+	}
+	if err := license.Allow(license.FeatureWorkers); err != nil {
+		return err
+	}
 	log, err := logutil.New()
 	if err != nil {
 		return fmt.Errorf("init logger: %w", err)

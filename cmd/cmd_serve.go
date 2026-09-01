@@ -32,6 +32,7 @@ import (
 	"github.com/kordloom/switchtender/internal/grant"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/invsource"
+	"github.com/kordloom/switchtender/internal/license"
 	"github.com/kordloom/switchtender/internal/live"
 	"github.com/kordloom/switchtender/internal/logutil"
 	"github.com/kordloom/switchtender/internal/org"
@@ -893,6 +894,24 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("init logger: %w", err)
 	}
 	defer func() { _ = log.Sync() }()
+
+	// The license loads before anything it gates. A missing file is Community and says nothing; a
+	// file that does not verify is loud but never fatal, because a broken license must fail toward
+	// Community, not toward a server that will not start.
+	if lic, lerr := license.Load(license.PathFor(serveDB)); lerr != nil {
+		log.Warn("license file did not verify, running Community: " + lerr.Error())
+	} else if lic != nil {
+		license.Set(lic)
+		log.Info("licensed: " + lic.Claims.Tier + " (" + lic.Claims.Org + "), expires " +
+			lic.Claims.Expires)
+	}
+	// SSO is configured explicitly by flag, so a missing license here is a misconfiguration worth
+	// refusing at startup with one line, not a silently unauthenticated directory.
+	if externalAuthConfigured() {
+		if aerr := license.Allow(license.FeatureSSO); aerr != nil {
+			return aerr
+		}
+	}
 
 	bundle, err := openBundle(serveDB)
 	if err != nil {
