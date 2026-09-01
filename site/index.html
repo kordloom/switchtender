@@ -12,21 +12,52 @@
 	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
 	<meta name="twitter:card" content="summary_large_image">
 	<link rel="canonical" href="https://switchtender.com/">
+	<!-- st:entity -->
 	<script type="application/ld+json">
-	{
-		"@context": "https://schema.org",
-		"@type": "SoftwareApplication",
-		"name": "SwitchTender",
-		"url": "https://switchtender.com/",
-		"applicationCategory": "DeveloperApplication",
-		"operatingSystem": "Linux, macOS, Windows",
-		"description": "Run everything, watch every host, prove every change. Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go in one Go binary with a live host-by-task matrix, a tamper-evident audit trail, and enforced approval policies.",
-		"license": "https://mariadb.com/bsl11/",
-		"offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
-		"publisher": { "@type": "Organization", "name": "KordLoom LLC", "url": "https://kordloom.com", "sameAs": ["https://github.com/kordloom", "https://www.linkedin.com/company/kordloom", "https://x.com/kordloom"] },
-		"sameAs": ["https://github.com/kordloom/switchtender"]
-	}
-	</script>
+{
+ "@context": "https://schema.org",
+ "@type": "SoftwareApplication",
+ "applicationCategory": "DeveloperApplication",
+ "description": "An agentless, single-binary automation controller for Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go, with enforced approval policies and a tamper-evident audit trail that can be verified offline.",
+ "featureList": [
+  "Agentless: reaches managed hosts over SSH with nothing installed on them",
+  "Runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go",
+  "Reads secrets from HashiCorp Vault KV v1 and v2, Vault dynamic secrets minted per run and revoked when it ends, AWS Secrets Manager, and Azure Key Vault",
+  "Per-object access grants: read, use, or manage on one project, template, inventory, or credential, layered over global roles",
+  "Single sign-on through OIDC and LDAP",
+  "Pipelines with a dependency graph and parallel branches, built in a drag-and-drop editor",
+  "Approval gates enforced by policy before a run executes",
+  "Tamper-evident hash-chained audit trail a third party can verify offline",
+  "Live host-by-task matrix and per-host history across runs",
+  "Drift detection from a dry run",
+  "One static Go binary and one SQLite file, with PostgreSQL optional",
+  "One-command import from AWX, Semaphore UI, Rundeck, Jenkins, and crontab"
+ ],
+ "license": "https://mariadb.com/bsl11/",
+ "name": "SwitchTender",
+ "offers": {
+  "@type": "Offer",
+  "price": "0",
+  "priceCurrency": "USD"
+ },
+ "operatingSystem": "Linux, macOS, Windows",
+ "publisher": {
+  "@type": "Organization",
+  "name": "KordLoom LLC",
+  "sameAs": [
+   "https://github.com/kordloom",
+   "https://www.linkedin.com/company/kordloom",
+   "https://x.com/kordloom"
+  ],
+  "url": "https://kordloom.com"
+ },
+ "sameAs": [
+  "https://github.com/kordloom/switchtender"
+ ],
+ "url": "https://switchtender.com/"
+}
+</script>
+	<!-- /st:entity -->
 	<link rel="icon" href="/favicon.ico" sizes="any">
 	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
 	<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">

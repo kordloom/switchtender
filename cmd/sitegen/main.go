@@ -128,7 +128,12 @@ func run() error {
 	if err := writeSitemap(slugs); err != nil {
 		return err
 	}
-	fmt.Printf("sitegen: wrote %d pages and the sitemap to %s\n", len(slugs), outDir)
+	entities, err := writeEntityPages()
+	if err != nil {
+		return err
+	}
+	fmt.Printf("sitegen: wrote %d pages and the sitemap to %s, and refreshed the entity on %d "+
+		"hand-written pages\n", len(slugs), outDir, entities)
 	return nil
 }
 
@@ -254,8 +259,10 @@ func render(md goldmark.Markdown, slug string) (page, error) {
 		Slug: slug, Title: title(slug, src), Description: description(src),
 		Content: template.HTML(html), //nolint:gosec // trusted docs
 	}
+	p.HeadExtra = docsSchema(slug, p)
 	if slug == "faq" {
-		p.HeadExtra = faqSchema(src)
+		// The FAQ carries both: the questions a summarizer can quote, and the entity they are about.
+		p.HeadExtra += "\n\t" + faqSchema(src)
 	}
 	return p, nil
 }
@@ -320,6 +327,150 @@ func faqSchema(src []byte) template.HTML {
 		panic("sitegen: marshal faq schema: " + err.Error())
 	}
 	//nolint:gosec // built from trusted docs and JSON-escaped
+	return template.HTML("<script type=\"application/ld+json\">\n" + string(data) + "\n</script>")
+}
+
+// switchtenderFeatures is the canonical capability list the structured data advertises.
+//
+// It exists because answer engines were crediting competitors with capabilities this product has.
+// A comparison summary named an external secret manager and fine-grained access control as reasons
+// to pick AWX, and a Terraform-then-approve-then-Ansible pipeline as a reason to pick Semaphore UI,
+// all three of which are listed below. Prose in a table on one page is not something a summarizer
+// reliably attributes; a machine-readable claim on the page it lands on is.
+//
+// Every line here must be true and checkable in the docs. This is the one place they are written,
+// so the landing pages and the docs cannot drift into saying different things.
+var switchtenderFeatures = []string{
+	"Agentless: reaches managed hosts over SSH with nothing installed on them",
+	"Runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go",
+	"Reads secrets from HashiCorp Vault KV v1 and v2, Vault dynamic secrets minted per run and " +
+		"revoked when it ends, AWS Secrets Manager, and Azure Key Vault",
+	"Per-object access grants: read, use, or manage on one project, template, inventory, or " +
+		"credential, layered over global roles",
+	"Single sign-on through OIDC and LDAP",
+	"Pipelines with a dependency graph and parallel branches, built in a drag-and-drop editor",
+	"Approval gates enforced by policy before a run executes",
+	"Tamper-evident hash-chained audit trail a third party can verify offline",
+	"Live host-by-task matrix and per-host history across runs",
+	"Drift detection from a dry run",
+	"One static Go binary and one SQLite file, with PostgreSQL optional",
+	"One-command import from AWX, Semaphore UI, Rundeck, Jenkins, and crontab",
+}
+
+// entitySlugs are the docs pages that carry the full application entity rather than only an article
+// one. These are the pages a capability question lands on, so they are the ones worth answering.
+var entitySlugs = map[string]bool{"features": true, "secrets": true, "comparison": true}
+
+// switchtenderEntity is the SoftwareApplication description shared by every page that advertises
+// what the product does.
+func switchtenderEntity() map[string]any {
+	return map[string]any{
+		"@context": "https://schema.org", "@type": "SoftwareApplication",
+		"name": "SwitchTender", "url": "https://switchtender.com/",
+		"applicationCategory": "DeveloperApplication",
+		"operatingSystem":     "Linux, macOS, Windows",
+		"description": "An agentless, single-binary automation controller for Ansible, Terraform, " +
+			"OpenTofu, Bash, PowerShell, Python, and Go, with enforced approval policies and a " +
+			"tamper-evident audit trail that can be verified offline.",
+		"license":     "https://mariadb.com/bsl11/",
+		"featureList": switchtenderFeatures,
+		"offers": map[string]any{
+			"@type": "Offer", "price": "0", "priceCurrency": "USD",
+		},
+		"publisher": map[string]any{
+			"@type": "Organization", "name": "KordLoom LLC", "url": "https://kordloom.com",
+			"sameAs": []string{
+				"https://github.com/kordloom",
+				"https://www.linkedin.com/company/kordloom",
+				"https://x.com/kordloom",
+			},
+		},
+		"sameAs": []string{"https://github.com/kordloom/switchtender"},
+	}
+}
+
+// entityMarkers bracket the shared application entity inside a hand-written page, so the generator
+// can refresh it without touching anything the page's author wrote around it.
+const (
+	entityOpen  = "<!-- st:entity -->"
+	entityClose = "<!-- /st:entity -->"
+)
+
+// writeEntityPages refreshes the shared application entity inside every hand-written page that opts
+// in by carrying the markers.
+//
+// The landing pages are written by hand while the docs are generated, so the same capability claims
+// used to live in two places and were free to disagree. They are now written once, here, and copied
+// into both. A page opts in by holding the marker pair; nothing else about it is touched.
+func writeEntityPages() (int, error) {
+	paths, err := filepath.Glob(filepath.Join("site", "*.html"))
+	if err != nil {
+		return 0, err
+	}
+	block := string(marshalSchema(switchtenderEntity()))
+	changed := 0
+	for _, path := range paths {
+		src, err := os.ReadFile(path)
+		if err != nil {
+			return 0, err
+		}
+		text := string(src)
+		start := strings.Index(text, entityOpen)
+		if start < 0 {
+			continue
+		}
+		end := strings.Index(text[start:], entityClose)
+		if end < 0 {
+			return 0, fmt.Errorf("sitegen: %s opens the entity block and never closes it", path)
+		}
+		end += start + len(entityClose)
+		updated := text[:start] + entityOpen + "\n\t" + block + "\n\t" + entityClose + text[end:]
+		if updated == text {
+			continue
+		}
+		if err := os.WriteFile(path, []byte(updated), 0o644); err != nil {
+			return 0, err
+		}
+		changed++
+	}
+	return changed, nil
+}
+
+// docsSchema builds the structured data for one docs page: the application entity on the pages that
+// describe what it does, and a technical article entity everywhere else.
+func docsSchema(slug string, p page) template.HTML {
+	var doc map[string]any
+	if entitySlugs[slug] {
+		doc = switchtenderEntity()
+		doc["url"] = canonicalFor(slug)
+	} else {
+		doc = map[string]any{
+			"@context": "https://schema.org", "@type": "TechArticle",
+			"headline": p.Title, "description": p.Description, "url": canonicalFor(slug),
+			"isPartOf": map[string]any{
+				"@type": "WebSite", "name": "SwitchTender docs",
+				"url": "https://switchtender.com/docs/",
+			},
+			"about": map[string]any{
+				"@type": "SoftwareApplication", "name": "SwitchTender",
+				"url": "https://switchtender.com/",
+			},
+			"publisher": map[string]any{
+				"@type": "Organization", "name": "KordLoom LLC", "url": "https://kordloom.com",
+			},
+		}
+	}
+	return marshalSchema(doc)
+}
+
+// marshalSchema renders one structured data document as a script tag.
+func marshalSchema(doc map[string]any) template.HTML {
+	data, err := json.MarshalIndent(doc, "", " ")
+	if err != nil {
+		// The documents are built from strings and maps of strings, so a failure is a code error.
+		panic("sitegen: marshal schema: " + err.Error())
+	}
+	//nolint:gosec // built from trusted constants and JSON-escaped
 	return template.HTML("<script type=\"application/ld+json\">\n" + string(data) + "\n</script>")
 }
 
