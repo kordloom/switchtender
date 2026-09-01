@@ -198,7 +198,6 @@
 				automation, free forever. Team unlocks the org-scale features with a license that is
 				just a signed file the binary verifies offline: no license server, no activation, no
 				seat counting, no call home, ever. Enterprise adds the things we operate for you.
-				Fleet bands are self-reported and we will never ask to check.
 			</p>
 		</section>
 
@@ -221,6 +220,7 @@
 						<li><b>One approval policy</b>, digest-bound: a held run is approved as the exact content the approver saw</li>
 						<li>The full evidence engine: hash chain, RFC 3161 anchoring, signed per-run receipts, the run dossier, and offline verification with the open verifier</li>
 						<li>Sealed credentials with secrets masking in logs</li>
+						<li>The <b>MCP agent gate</b>: an AI agent gets one operator-bound token and can only propose runs through the same approvals a person faces</li>
 						<li>Advisory AI, read-only; community support on GitHub</li>
 					</ul>
 				</article>
@@ -229,7 +229,7 @@
 					<div class="tier-name">Team</div>
 					<p class="tier-for">The features an organization needs the week it grows.</p>
 					<div class="tier-price"><b>$4,800</b><span class="cadence">per year, flat per org</span></div>
-					<p class="tier-sub">By fleet band: <b>$4,800</b> to 250 hosts &middot; <b>$12,000</b> to 1,000 &middot; <b>$30,000</b> unlimited. Bands are self-reported, and we never audit them.</p>
+					<p class="tier-sub">By fleet band: <b>$4,800</b> to 250 hosts &middot; <b>$12,000</b> to 1,000 &middot; <b>$30,000</b> unlimited.</p>
 					<div class="tier-payoff">A signed license file, verified offline by the binary you already run. Thirty-day trial from an email, no card. <b>A lapsed license takes nothing</b>: paid features stop, and your data, evidence, and every Community feature keep working.</div>
 					<a class="btn" href="mailto:hello@kordloom.com?subject=SwitchTender%20Team%20trial&body=Org%20name%3A%0AFleet%20band%20(250%2F1000%2Funlimited)%3A%0A">Start a 30-day trial</a>
 					<a class="ghost" href="mailto:hello@kordloom.com?subject=Buy%20SwitchTender%20Team">Buy Team</a>
@@ -237,7 +237,7 @@
 					<ul class="tier-list">
 						<li><b>SSO</b>: OIDC, SAML, and LDAP directory sign-in with just-in-time provisioning</li>
 						<li><b>The full policy engine</b>: unlimited policies, outright denials, risk floors, separation of duties, and agent-scoped rules</li>
-						<li><b>PostgreSQL</b> for new installs, and active-active <b>HA</b></li>
+						<li><b>PostgreSQL</b> and active-active <b>HA</b></li>
 						<li><b>Distributed workers</b> and queues, for fleets one machine cannot reach</li>
 						<li><b>One-click drift reconcile</b>, from detection to a held, approvable fix</li>
 						<li><b>The period change register</b>: the SOC 2 CC8.1 / ISO 27001 A.8.32 evidence export, assembled from your real run history</li>
@@ -247,7 +247,7 @@
 
 				<article class="card tier">
 					<div class="tier-name">Enterprise</div>
-					<p class="tier-for">Independent verification, custody, and hands.</p>
+					<p class="tier-for">Independent verification, custody, and people on your audit calendar.</p>
 					<div class="tier-price"><b>$50,000</b><span class="cadence">and up, per year</span></div>
 					<p class="tier-sub">Negotiated. Includes Team for the whole organization.</p>
 					<div class="tier-payoff">Everything in Team, plus the things that require <b>someone outside your install</b>: an independent witness countersigning your history, custody that keeps a seven-year-old receipt verifiable, and people on the hook on your audit calendar.</div>
@@ -277,70 +277,18 @@
 			<div class="sprint reveal" id="sprint">
 				<div class="sprint-head">
 					<h3>SwitchTender Migration Program</h3>
-					<div class="sprint-price">$25,000<span>fixed price, four milestones</span></div>
+					<div class="sprint-price">$25,000<span>fixed price, four milestones, first year of Team included</span></div>
 				</div>
-				<p>A founder-led program that moves you off AWX, Semaphore, or Rundeck and into production
-				on SwitchTender, with the change controls you already run and your evidence workflows
-				carried forward. Milestones are scheduled around your access, approvals, credential owners,
-				and production change windows, and a delay in any of those moves the affected milestone.
-				The four milestones are normally completed over about six weeks once the readiness items
-				below are in place.</p>
-
-				<h4>Before milestone one begins</h4>
-				<ul>
-					<li>Access provisioned to the environment, the repositories, and the target hosts.</li>
-					<li>One named technical counterpart who can <b>coordinate access</b> and answer
-					migration questions within a business day.</li>
-					<li>The people who hold your credential values, since exports never contain secrets.</li>
-					<li>A representative set of production workflows <b>chosen and recorded</b> for
-					validation, so we agree up front what "working" means.</li>
-					<li>Someone who can <b>decide</b> approval policy, and someone who can authorize the
-					production cutover. Often two different people.</li>
-				</ul>
-
-				<h4>The four milestones</h4>
-				<ol>
-					<li><b>Discovery and import.</b> We inventory what you have, run the import, and show
-					you item by item what was in the old controller and what landed.</li>
-					<li><b>Environment.</b> SwitchTender deployed on your infrastructure, sized to your
-					fleet, wired to your identity provider, with credentials entered by their owners and
-					exercised against the recorded validation set.</li>
-					<li><b>Governance.</b> Approval policy built from the change process you already run,
-					agent policy for anything proposing changes automatically, and evidence configured
-					against the controls you identify with us during discovery.</li>
-					<li><b>Cutover and handoff.</b> The validation set recorded in milestone one runs
-					green, meaning every workflow in it completes with a zero exit status, which is what
-					finishes this milestone rather than an open-ended parallel period. You authorize the
-					cutover through your own change process, and you get runbooks and a working session,
-					because your team owns this when we leave.</li>
-				</ol>
-
-				<p>At handoff you have the migrated configuration running in your environment, documented
-				identity and governance configuration, the recorded validation set passing, evidence
-				configured against your controls, production runbooks, and a team that has been walked
-				through all of it.</p>
-
-				<p class="fineprint">Flat $25,000 for a standard migration: one source controller, one
-				production environment, standard integrations. Playbook and host counts do not set the
-				price by themselves, because the importer handles bulk. We scope together first when the
-				work changes in nature rather than size, such as multiple independently operated
-				environments, custom execution dependencies or plugins, nonstandard network paths,
-				air-gapped targets, or complex identity and secret-store integration. We will tell you
-				which of those you have during the first conversation, not after you have paid.</p>
-
-				<p class="fineprint">Migration reproduces the agreed behavior of your source controller
-				for the recorded validation set. Anything that also fails in the source environment is
-				outside migration scope, as is new automation, architectural redesign, and rewriting
-				existing content. We flag whatever we find early and quote it separately if you want it
-				fixed. Work runs under a mutual NDA and a fixed-price statement of work with the
-				milestones above. Founder-led and limited to one active migration at a time. A portion
-				credits toward your first year of Enterprise if you want us to keep the evidence running
-				afterward.</p>
-
+				<p>A founder-led program that moves you off AWX, Semaphore, or Rundeck and into
+				production on SwitchTender, with the change controls you already run and your evidence
+				workflows carried forward. Four milestones, normally about six weeks: discovery and
+				import, environment, governance, cutover and handoff. Your first year of Team at your
+				band is included, so everything wired during the program keeps working after it.
+				Founder-led and limited to one active migration at a time.</p>
 				<div class="sprint-cta">
 					<a class="btn" href="mailto:hello@kordloom.com?subject=SwitchTender%20Migration%20Program">Start a migration</a>
+					<a class="ghost" href="/migration">Full program details</a>
 				</div>
-			</div>
 			</div>
 		</section>
 
@@ -348,7 +296,7 @@
 			<div class="section-head reveal">
 				<h2>What we promise</h2>
 				<p>Seven commitments, published before we have a single customer, every one enforceable
-				by us alone and none of them a constraint on what we may build and sell next.</p>
+				by us alone.</p>
 			</div>
 			<div class="assurance reveal">
 				<div>
@@ -359,7 +307,7 @@
 				<div>
 					<h3>A lapsed license takes nothing</h3>
 					<p>Data, evidence, receipts, and every Community feature keep working. Paid features
-					stop. Nothing is deleted, exported, or locked, and dropping to Community needs no
+					stop. Nothing is deleted, locked, or held for ransom, and dropping to Community needs no
 					restart.</p>
 				</div>
 				<div>
@@ -409,6 +357,16 @@
 					without a restart, and a database you initialized on PostgreSQL stays fully usable
 					forever. We built the gate so that it cannot hold your data hostage even if we
 					wanted it to.</p>
+				</details>
+				<details>
+					<summary>I started on SQLite. How do I get to Postgres and HA?</summary>
+					<p>Team includes Postgres. Today the supported move is <code>switchtender backup</code>
+					and <code>restore</code>, which carries your configuration: projects, templates,
+					inventories, credential shells, schedules, and tokens. Run history and the audit
+					chain stay with the SQLite file, and that is not a loss: the old database remains
+					readable and its evidence verifiable forever, because receipts never depend on
+					where the data lives now. If you want the history physically merged, tell us and
+					we will do the move with you.</p>
 				</details>
 				<details>
 					<summary>Do you count my hosts?</summary>

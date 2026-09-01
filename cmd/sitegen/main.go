@@ -164,6 +164,7 @@ func writeSitemap(slugs []string) error {
 		"https://switchtender.com/awx-alternative", "https://switchtender.com/ascender-alternative",
 		"https://switchtender.com/semaphore-alternative", "https://switchtender.com/aap-alternative",
 		"https://switchtender.com/rundeck-alternative", "https://switchtender.com/jenkins-alternative",
+		"https://switchtender.com/migration",
 		"https://switchtender.com/privacy",
 		"https://switchtender.com/verify",
 	}
