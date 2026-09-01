@@ -105,6 +105,7 @@
 						<h3>Install</h3>
 						<p>One line downloads the right binary for your machine, verifies it against the published checksums, and installs it:</p>
 						<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>curl -fsSL https://switchtender.com/install.sh | sh</code></pre></div>
+						<p class="gs-note">Prefer not to pipe to a shell? Every release ships cosign-signed checksums and SBOMs: <a href="/verify">verify a release in your browser</a> or with <code>cosign</code>, then run the binary you checked.</p>
 						<p>Or grab a prebuilt binary yourself. No toolchain required. Every release ships macOS, Linux, and Windows builds you can download and run.</p>
 						<div class="hero-cta">
 							<a class="btn" href="https://github.com/kordloom/switchtender/releases/latest">Download the latest release</a>
@@ -120,7 +121,7 @@
 					<div class="gs-num">2</div>
 					<div class="gs-body">
 						<h3>Serve</h3>
-						<p>Start the server. SQLite is the default. Point <code>--db</code> at a Postgres DSN when you want more than one instance. Set the encryption pair if you plan to store credentials.</p>
+						<p>Start the server. SQLite is the default. Point <code>--db</code> at a Postgres DSN when you want more than one instance. Set the encryption pair if you plan to store credentials. On a public address with no tokens yet, serve mints your initial admin token and prints it once, so the API requires auth from its very first request; only loopback may run open, and it says so.</p>
 						<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code><span class="c"># optional, only needed for stored secrets</span>
 export SWITCHTENDER_ENCRYPTION_KEY=change-me
 export SWITCHTENDER_ENCRYPTION_SALT=change-me-too
@@ -149,14 +150,15 @@ switchtender serve --addr :8080 --db switchtender.db</code></pre></div>
 				<li class="gs-step reveal">
 					<div class="gs-num">5</div>
 					<div class="gs-body">
-						<h3>Lock it down</h3>
-						<p>Mint an admin token. The moment the first token exists, the API requires auth, so create one before you expose the server, then send it as a bearer token.</p>
-						<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>switchtender token new --name admin --db switchtender.db</code></pre></div>
+						<h3>Name your tokens</h3>
+						<p>The server never listens openly on a network interface: step 2 already minted your initial admin token. Now mint named tokens for each person and each CI job, send them as bearer tokens, and retire the initial one so every credential in the audit trail names its owner.</p>
+						<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>switchtender token new --name admin --db switchtender.db
+switchtender token revoke &lt;initial-token-id&gt; --db switchtender.db</code></pre></div>
 					</div>
 				</li>
 			</ol>
 			<div class="gs-callout reveal">
-				<p><strong>Moving from another controller?</strong> AWX and Semaphore exports import your projects, inventories, templates, and schedules in one command. Ansible Automation Platform, Tower, and Ascender share the AWX export format. Rundeck is by hand for now.</p>
+				<p><strong>Moving from another controller?</strong> AWX, Semaphore, Rundeck, and Jenkins each import in one command: projects, inventories, templates, surveys, and schedules. Ansible Automation Platform, Tower, and Ascender share the AWX export format, and even a crontab imports into governed schedules.</p>
 				<a class="btn" href="/docs/switching-from-awx">Migration guide</a>
 			</div>
 		</section>

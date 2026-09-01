@@ -9,6 +9,7 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -80,6 +81,14 @@ type Deps struct {
 	Audit audit.Store
 	// Schedules holds the sample cron entries, so that page shows real cadences.
 	Schedules schedule.Store
+	// AnchorTSA is the RFC 3161 authority the seeder asks to fix the seeded chain's head, so the
+	// demo shows a real anchor rather than none. Empty skips anchoring, which is what tests and
+	// hermetic seeds want. Failure to reach the authority is a log line, never an error, so an
+	// offline demo still seeds; it simply stays unanchored the way any offline install would.
+	AnchorTSA string
+	// InstallID names the install whose chain the anchor fixes. Required when AnchorTSA is set,
+	// and it is what makes the tree anchor's root recomputable at all.
+	InstallID string
 	// Clock parks the timestamps of seeded runs in the recent past and steps forward between them, so
 	// the run history spreads across the last several hours the way a live fleet's would rather than
 	// piling into the seed instant. Nil seeds every run at the real wall clock. It must be the same
@@ -260,8 +269,59 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 
 	normalizeClaimStamps(ctx, d, log)
 
+	seedAnchors(ctx, d, log)
+
 	log.Info("demo: seeded sample projects, templates, inventories, and runs")
 	return nil
+}
+
+// seedAnchors fixes the seeded chain at a public timestamp authority, once by its newest link and
+// once by its tree root, so the demo's verify endpoint and its receipts each show a real anchor.
+//
+// The homepage dares a visitor to pull the demo's history and try to refute it. With zero anchors
+// the strongest verdict a verifier can reach is "nothing was altered", while "nothing was removed
+// from the end" goes unanswered, and the one box built to demonstrate the product undersells it.
+// The tokens are real ones from a real authority. A reference anchor would point a refuter at a
+// location holding nothing, which is worse than no anchor at all.
+func seedAnchors(ctx context.Context, d Deps, log *zap.Logger) {
+	if d.AnchorTSA == "" || d.InstallID == "" {
+		return
+	}
+	anchors, ok := d.Audit.(audit.AnchorStore)
+	if !ok {
+		return
+	}
+	var chain []*audit.Entry
+	if err := d.Audit.ChainScan(ctx, 0, func(e *audit.Entry) error {
+		chain = append(chain, e)
+		return nil
+	}); err != nil || len(chain) == 0 {
+		log.Warn("demo: anchoring skipped: could not read the chain")
+		return
+	}
+	client := &http.Client{Timeout: 15 * time.Second}
+	newest := chain[len(chain)-1]
+
+	mint := func(shape string, seq int64, link string) {
+		actx, cancel := context.WithTimeout(ctx, 20*time.Second)
+		defer cancel()
+		a, err := audit.NewAnchor(actx, client, audit.AnchorRFC3161, d.AnchorTSA, shape,
+			d.InstallID, seq, link, time.Now())
+		if err != nil {
+			log.Warn("demo: " + shape + " anchor skipped, seeding continues unanchored: " +
+				err.Error())
+			return
+		}
+		if err := anchors.SaveAnchor(ctx, a); err != nil {
+			log.Warn("demo: " + shape + " anchor could not be saved: " + err.Error())
+			return
+		}
+		log.Info("demo: chain anchored (" + shape + ") at " + d.AnchorTSA)
+	}
+	mint(audit.AnchorShapeLinear, newest.Seq, newest.Hash)
+	if size, root, err := audit.TreeHead(chain, d.InstallID); err == nil {
+		mint(audit.AnchorShapeTree, size, root)
+	}
 }
 
 // seedGovernance seeds the two runs that show the policy gate doing its job: one a rule is still

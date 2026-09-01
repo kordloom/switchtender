@@ -105,14 +105,14 @@
 					SwitchTender is the boundary every change comes through, human operator or AI
 					agent. Nothing runs until it clears one path: request, policy, approval. Then
 					watch every task land on every host, live. Every run leaves behind a
-					cryptographically signed receipt anyone can verify offline, without us.
+					cryptographically signed receipt anyone can verify offline against our published key, with no server of ours involved.
 					<strong>One binary. Starts in seconds.</strong>
 				</p>
 				<div class="hero-cta">
 					<a class="btn big" href="https://demo.switchtender.com">Open the live demo</a>
 					<a class="ghost big" href="/get-started">Install</a>
 				</div>
-				<p class="hero-note hero-dare">Don't take the receipts on faith. Pull the live demo's signed history with <code>curl</code> and check it with a verifier that isn't ours. <a href="#proof">Try to refute it &rarr;</a></p>
+				<p class="hero-note hero-dare">Don't take the receipts on faith. Pull the live demo's signed history with <code>curl</code> and check it with the open LoomSeal verifier: Apache-2.0, a published format with conformance vectors, and an independent Python reference, so you are not taking our binary's word for it. <a href="#proof">Try to refute it &rarr;</a></p>
 				<p class="hero-note">Already on AWX? <code>switchtender import awx</code> brings your projects, inventories, templates, surveys, and schedules across in one command. Preview the plan, then apply.</p>
 				<p class="hero-note">Source-available. BSL 1.1. Go SDK with drop-in plugins. One file to back up.</p>
 			</div>
@@ -189,7 +189,7 @@
 				<article class="card reveal">
 					<div class="ic ic-drift"></div>
 					<h3>Drift detection</h3>
-					<p>A dry run shows exactly what has drifted, across Ansible hosts and Terraform directories, before you touch a thing. One click builds the fix, held for approval. No other Ansible controller does either, and the Terraform control planes that do detect drift do not govern your Ansible fleet beside it.</p>
+					<p>A dry run shows exactly what has drifted, across Ansible hosts and Terraform directories, before you touch a thing. One click builds the fix, held for approval. None of the controllers in our comparison document it, and the Terraform control planes that do detect drift do not govern your Ansible fleet beside it.</p>
 				</article>
 				<article class="card reveal">
 					<div class="ic ic-gate"></div>
@@ -435,7 +435,7 @@ func main() {
 		<section class="section wrap" id="migrate">
 			<div class="section-head reveal">
 				<h2>Bring the whole thing<br>with you.</h2>
-				<p>A migration is one command, not a rebuild. AWX and Semaphore each have an importer, and Ansible Automation Platform, Tower, and Ascender export through the same awxkit command with the same top-level keys, so the same importer reads them. Rundeck has no importer yet, so that move is still by hand. Export, preview exactly what will land, then apply. Projects, inventories with their hosts and groups, dynamic inventory sources, job templates, surveys, schedules, and credential shells all come across in one pass. A malformed asset is skipped with a warning instead of failing the import, so even a partial export migrates everything it can.</p>
+				<p>A migration is one command, not a rebuild. AWX, Semaphore, Rundeck, and Jenkins each have an importer, and Ansible Automation Platform, Tower, and Ascender export through the same awxkit command with the same top-level keys, so the AWX importer reads them too. Even a crontab imports, line by line, into governed schedules. Export, preview exactly what will land, then apply. Projects, inventories with their hosts and groups, dynamic inventory sources, job templates, surveys, schedules, and credential shells all come across in one pass. A malformed asset is skipped with a warning instead of failing the import, so even a partial export migrates everything it can.</p>
 			</div>
 			<div class="code reveal">
 				<button class="copy" aria-label="Copy">Copy</button>

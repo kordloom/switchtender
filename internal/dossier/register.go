@@ -306,7 +306,9 @@ func RenderRegister(in *RegisterInput) ([]byte, error) {
 	case in.Anchored == 0:
 		v.Status = "unanchored"
 		v.StatusText = "The chain verifies, but it is unanchored, so the record rests on this " +
-			"install alone."
+			"install alone. One command fixes its head at a public timestamp authority: " +
+			"switchtender audit anchor. An independent witness (switchtender witness) can then " +
+			"countersign what it saw."
 	default:
 		v.Status = "verified"
 		v.StatusText = fmt.Sprintf("The chain verifies and carries %d anchor(s) fixing it outside "+

@@ -40,6 +40,10 @@ var demoSeedOnly bool
 // appended to the audit chain. Zero leaves beats off.
 var demoSpanCadence time.Duration
 
+// demoAnchorTSA holds the value of the demo --anchor-tsa flag, the RFC 3161 authority the seeded
+// chain is anchored at.
+var demoAnchorTSA string
+
 // demoCmd runs a seeded, read-only SwitchTender instance for evaluation. It fills a fresh database
 // with sample projects, templates, inventories, and real runs, then serves it with every mutating
 // request rejected, so it is safe to expose publicly.
@@ -60,6 +64,9 @@ func init() {
 			"a gap in service.")
 	demoCmd.Flags().BoolVar(&demoSeedOnly, "seed-only", false,
 		"Seed the database and exit without serving, so the result can be swapped in later.")
+	demoCmd.Flags().StringVar(&demoAnchorTSA, "anchor-tsa", defaultTSA,
+		"RFC 3161 authority that anchors the seeded chain, so the demo shows a real anchor. "+
+			"Empty seeds without anchoring; an unreachable authority is skipped with a warning.")
 	demoCmd.Flags().DurationVar(&demoSpanCadence, "span-cadence", 0,
 		"Append a span beat to the audit chain this often, for example 60s. Whole seconds only. "+
 			"Zero leaves beats off.")
@@ -151,6 +158,16 @@ func runDemo(cmd *cobra.Command, _ []string) error {
 		Audit:      bundle.Audits(),
 		Schedules:  bundle.Schedules(),
 		Clock:      seedClock,
+		AnchorTSA:  demoAnchorTSA,
+	}
+	// The anchor binds to the install identity the demo publishes, so a fetched bundle names the
+	// same install the anchor does. No identity is not fatal: the seed continues unanchored.
+	if demoAnchorTSA != "" {
+		if id, ierr := loadProducerIdentity(db); ierr == nil {
+			seedDeps.InstallID = id.InstallID
+		} else {
+			log.Warn("demo: anchoring skipped, no producer identity: " + ierr.Error())
+		}
 	}
 	if !demoNoSeed {
 		if err := demo.Seed(cmd.Context(), seedDeps, log); err != nil {
