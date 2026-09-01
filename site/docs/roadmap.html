@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Roadmap | SwitchTender docs</title>
+	<meta name="description" content="What is being built next, in the order it is being built. Shipped work moves off this page and into the release notes.">
+	<link rel="canonical" href="https://switchtender.com/docs/roadmap">
+	<meta property="og:title" content="Roadmap | SwitchTender docs">
+	<meta property="og:description" content="What is being built next, in the order it is being built. Shipped work moves off this page and into the release notes.">
+	<meta property="og:type" content="article">
+	<meta property="og:url" content="https://switchtender.com/docs/roadmap">
+	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
+	<meta name="twitter:card" content="summary_large_image">
+	<meta name="twitter:title" content="Roadmap | SwitchTender docs">
+	<meta name="twitter:description" content="What is being built next, in the order it is being built. Shipped work moves off this page and into the release notes.">
+	<meta name="twitter:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
+	<script type="application/ld+json">
+{
+ "@context": "https://schema.org",
+ "@type": "TechArticle",
+ "about": {
+  "@type": "SoftwareApplication",
+  "name": "SwitchTender",
+  "url": "https://switchtender.com/"
+ },
+ "description": "What is being built next, in the order it is being built. Shipped work moves off this page and into the release notes.",
+ "headline": "Roadmap",
+ "isPartOf": {
+  "@type": "WebSite",
+  "name": "SwitchTender docs",
+  "url": "https://switchtender.com/docs/"
+ },
+ "publisher": {
+  "@type": "Organization",
+  "name": "KordLoom LLC",
+  "url": "https://kordloom.com"
+ },
+ "url": "https://switchtender.com/docs/roadmap"
+}
+</script>
+	<link rel="icon" href="/favicon.ico" sizes="any">
+	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
+	<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="/docs.css?v=2">
+</head>
+<body>
+	<header class="dnav">
+		<a class="brand" href="/"><img src="/assets/logo-train-tracks-dark.png" alt="SwitchTender" class="brand-train"><span class="brand-word">SwitchTender</span></a>
+		<span class="dnav-tag">Docs</span>
+		<nav class="dnav-links">
+			<a href="/">Home</a>
+			<a href="/#compare">Compare</a>
+			<a href="https://github.com/kordloom/switchtender">GitHub</a>
+		</nav>
+	</header>
+	<div class="dshell">
+		<aside class="dside">
+			<nav>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migrate off AWX, Semaphore, Rundeck, or Jenkins</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/continuity">Continuity</a><a href="/docs/roadmap" class="active">Roadmap</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/vendor-risk">Vendor risk review</a>
+			</nav>
+		</aside>
+		<main class="dcontent prose">
+			<h1 id="roadmap">Roadmap</h1>
+<p>What is being built next, in the order it is being built. Shipped work moves off this page and
+into the <a href="https://github.com/kordloom/switchtender/releases">release notes</a>.</p>
+<h2 id="engines">Engines</h2>
+<p>SwitchTender governs automation estates: approvals, drift, host history, and sealed evidence
+over the tools a fleet already runs.</p>
+<ul>
+<li><strong>Ansible</strong> is engine one, shipped, alongside Terraform, OpenTofu, Bash, PowerShell, Python,
+and Go, with one-command imports from AWX, AAP, Tower, Ascender, Semaphore, Rundeck, Jenkins,
+and crontabs.</li>
+<li><strong>OpenVox is engine two.</strong> Report ingestion, node classification, and orchestration for
+Puppet estates running the open fork, with the same approval gates and offline-verifiable
+evidence. We are scoping it with Puppet operators now; if that is you,
+<a href="mailto:hello@kordloom.com?subject=OpenVox%20on%20SwitchTender">we want to talk</a>.</li>
+</ul>
+<h2 id="near-term">Near term</h2>
+<ul>
+<li>SQLite to PostgreSQL full-history migration in one command, so a Community install moves to
+Team's Postgres and HA without leaving its run history behind.</li>
+<li>Card checkout for Team, replacing the email-and-invoice path.</li>
+<li>A hosted witness enrollment command, so an Enterprise install registers for countersigned
+attestations in one line.</li>
+</ul>
+<p>Dates are deliberately absent. Everything here ships when it holds up under the same gates as
+everything before it.</p>
+
+		</main>
+	</div>
+	<div class="foot-legal" style="text-align:center;margin:26px auto 34px;font-size:12px;opacity:.75">SwitchTender&trade; is a trademark of KordLoom LLC. Copyright 2026 KordLoom LLC.</div>
+	<script>document.addEventListener("click",e=>{const a=e.target.closest(".dside a");if(a)document.querySelector(".dside")?.classList.remove("open")});</script>
+</body>
+</html>
