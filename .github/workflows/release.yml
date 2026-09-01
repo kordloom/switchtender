@@ -431,14 +431,24 @@ jobs:
       - name: Decide whether this tag moves latest
         id: newest
         run: |
-          set -euo pipefail
-          git fetch --tags --quiet
-          top="$(git tag --list 'v*' --sort=-v:refname | grep -v -- - | head -1)"
-          if [ "$GITHUB_REF_NAME" = "$top" ]; then
+          set -uo pipefail
+          # The checkout is depth 1 with no tags, so the list has to be fetched. An explicit refspec
+          # is used rather than --tags, whose behavior on a shallow clone is not worth depending on:
+          # it started returning nothing after a runner git upgrade, and because the result was piped
+          # straight into grep, an empty list failed the step and took the whole image publish with
+          # it. Deciding a boolean must never be able to do that.
+          git fetch --quiet --force origin 'refs/tags/*:refs/tags/*' \
+            || echo "could not refresh the tag list"
+          top="$(git tag --list 'v*' --sort=-v:refname | grep -v -- - | sed -n '1p')"
+          echo "this tag: $GITHUB_REF_NAME, newest final tag seen: ${top:-none}"
+          if [ -n "$top" ] && [ "$GITHUB_REF_NAME" = "$top" ]; then
             echo "move=true" >> "$GITHUB_OUTPUT"
           else
             echo "move=false" >> "$GITHUB_OUTPUT"
-            echo "this tag is not the newest final release ($top is), so latest stays where it is"
+            # Leaving latest where it is, is the safe answer to both "this is an older tag" and "the
+            # tag list could not be read." Moving it wrongly points every plain docker pull at the
+            # wrong build.
+            echo "not moving latest: ${top:-the tag list could not be read}"
           fi
 
       - name: Compute image tags
