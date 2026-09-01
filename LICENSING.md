@@ -29,9 +29,9 @@ operate: no license server, no online activation, no phone-home:
 Internal production use by a company, on its own hosts, for its own infrastructure, is fully covered
 at no cost.
 
-Two commitments follow from this, and they are permanent. Nothing that ships free ever becomes paid:
-paid offerings are services KordLoom operates or hours KordLoom works, never capabilities carved back
-out of the binary you already run. And the verifier stays open: the LoomSeal library that checks a
+Two commitments follow from this, and they are permanent. Nothing that ships free ever becomes
+paid: whatever KordLoom sells is never carved back out of the binary you already run, so what
+shipped free stays free in that release and every release after it. And the verifier stays open: the LoomSeal library that checks a
 receipt is Apache 2.0 and independent of this project, so your evidence remains verifiable offline
 whatever happens to KordLoom.
 
