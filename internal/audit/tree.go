@@ -2,6 +2,7 @@ package audit
 
 import (
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -160,25 +161,60 @@ func (b *Bundle) AttachConsistency(all []*Entry, fromSize int64, id Identity) er
 // profile, the install, and a digest of the claim's content. The digest covers the claim without the
 // members that describe where it sits or how it is proved, so the same entry yields the same leaf
 // however it is later disclosed.
-func treeLeaf(claim BundleClaim, installID string) ([]byte, error) {
-	content := map[string]any{
-		"type":    claim.Type,
-		"at":      claim.At,
-		"payload": claim.Payload,
+// treeLeafExcluded are the claim members a leaf never commits to: position, proof, and the holder-
+// and third-party-controlled surfaces. FORMAT.md fixes this list for format 1.0.
+var treeLeafExcluded = []string{"chain", "inclusion", "disclosures", "attestations"}
+
+// treeLeafFor builds the leaf a claim commits to.
+//
+// A claim decoded from a document is hashed from its own bytes with the excluded members removed,
+// so a member this build does not model is still committed, which is what keeps this mirror's
+// commitment identical to the reference's. A claim built here is hashed from its fields, because
+// this is the code that decided what those fields are.
+func treeLeafFor(claim BundleClaim, installID string) ([]byte, error) {
+	if len(claim.source) == 0 {
+		return treeLeaf(claim, installID)
 	}
+	var m map[string]any
+	if err := json.Unmarshal(claim.source, &m); err != nil {
+		return nil, err
+	}
+	for _, k := range treeLeafExcluded {
+		delete(m, k)
+	}
+	// An evidence entry's present and location say whether and where the artifact travels beside
+	// this copy, which is packaging rather than content. Every other member, the digest included,
+	// stays in the leaf.
+	if ev, ok := m["evidence"].([]any); ok {
+		for _, e := range ev {
+			if obj, ok := e.(map[string]any); ok {
+				delete(obj, "present")
+				delete(obj, "location")
+			}
+		}
+	}
+	return treeLeafEnvelope(m, installID)
+}
+
+// treeLeafEnvelope wraps committed claim content in the domain-separated leaf preimage.
+func treeLeafEnvelope(content map[string]any, installID string) ([]byte, error) {
 	canonical, err := jcs.Serialize(content)
 	if err != nil {
 		return nil, err
 	}
-	sum, err := jcs.Serialize(map[string]any{
+	return jcs.Serialize(map[string]any{
 		"domain":     TreeProfile,
 		"install_id": installID,
 		"claim":      "sha256:" + merkle.Sum256Hex(canonical),
 	})
-	if err != nil {
-		return nil, err
-	}
-	return sum, nil
+}
+
+func treeLeaf(claim BundleClaim, installID string) ([]byte, error) {
+	return treeLeafEnvelope(map[string]any{
+		"type":    claim.Type,
+		"at":      claim.At,
+		"payload": claim.Payload,
+	}, installID)
 }
 
 // hexHashes encodes a proof's hashes for a bundle.

@@ -465,7 +465,7 @@ func verifyBundleTree(b *Bundle) (bool, int64) {
 		}
 		prevSeq = c.Chain.Seq
 
-		leafData, err := treeLeaf(c, installID)
+		leafData, err := treeLeafFor(c, installID)
 		if err != nil {
 			return false, c.Chain.Seq
 		}

@@ -283,6 +283,17 @@ func TestMirrorAgreesWithTheReferenceCorpus(t *testing.T) {
 				if rep != nil && !rep.SignatureOK {
 					t.Errorf("the mirror failed the signature on a must-verify vector (err=%v)", err)
 				}
+				// And the chain, for a profile this product implements. Asserting only the
+				// signature left the committed-content rule unchecked, which is the half the
+				// mirror is most likely to drift on: a leaf built from a fixed list of members
+				// agrees with one built by removing members only while the claim shape happens
+				// to hold no others, and a corpus vector carrying one more member is exactly
+				// what that accident does not survive.
+				if rep != nil && err == nil && implementsProfile(signed) && !rep.ChainOK {
+					t.Errorf("the mirror failed the chain on a must-verify vector under a " +
+						"profile it implements, so its committed content differs from the " +
+						"reference's")
+				}
 				return
 			}
 			// A must-not-verify vector must never be called fully good.
@@ -291,4 +302,18 @@ func TestMirrorAgreesWithTheReferenceCorpus(t *testing.T) {
 			}
 		})
 	}
+}
+
+// implementsProfile reports whether a corpus bundle declares a chain profile this product builds and
+// verifies, which is the only case where its chain verdict has to match the reference's.
+func implementsProfile(signed []byte) bool {
+	var probe struct {
+		Chain struct {
+			Profile string `json:"profile"`
+		} `json:"chain"`
+	}
+	if json.Unmarshal(signed, &probe) != nil {
+		return false
+	}
+	return probe.Chain.Profile == audit.ChainProfile || probe.Chain.Profile == audit.TreeProfile
 }
