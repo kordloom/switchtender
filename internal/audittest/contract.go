@@ -90,8 +90,12 @@ func appendMutations(t *testing.T, store audit.Store, base time.Time, n int) {
 // by a third party and would poison every bundle after it.
 func checkBeat(t *testing.T, e *audit.Entry, at time.Time, wantBeat, wantCount int64, wantCadence int) {
 	t.Helper()
+	// Report and return rather than calling t.Fatal: this helper can run outside the test's own
+	// goroutine, where Fatal marks the failure without stopping the caller, and every line below
+	// dereferences e.
 	if e == nil {
-		t.Fatal("AppendSpanBeat() returned a nil entry")
+		t.Error("AppendSpanBeat() returned a nil entry")
+		return
 	}
 	if e.Actor != audit.SpanActor || e.Method != audit.SpanMethod {
 		t.Errorf("beat entry actor %q method %q, want %q %q", e.Actor, e.Method,

@@ -96,7 +96,8 @@ func TestSeedGovernanceShowsTheGateHoldingAndReleasing(t *testing.T) {
 
 	// Test 0: a run the gate is still holding, so the demo always shows a change being refused.
 	if held == nil {
-		t.Fatal("no run left held for approval, so the demo shows no change the gate is stopping")
+		t.Error("no run left held for approval, so the demo shows no change the gate is stopping")
+		return
 	}
 	if held.HeldByPolicy == "" {
 		t.Error("the held run names no rule, so a visitor cannot tell what stopped it")
@@ -107,7 +108,8 @@ func TestSeedGovernanceShowsTheGateHoldingAndReleasing(t *testing.T) {
 
 	// Test 1: a run carried through the whole gate, released by somebody other than the requester.
 	if released == nil {
-		t.Fatal("no run was held and then released, so the demo never shows an approval")
+		t.Error("no run was held and then released, so the demo never shows an approval")
+		return
 	}
 	if !released.Status.Terminal() {
 		t.Errorf("the approved run is %s, so the demo shows an approval that never executed",
