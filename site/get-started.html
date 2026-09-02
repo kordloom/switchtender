@@ -133,7 +133,7 @@ switchtender serve --addr :8080 --db switchtender.db</code></pre></div>
 					<div class="gs-num">3</div>
 					<div class="gs-body">
 						<h3>Open the UI</h3>
-						<p>The whole interface lives at <code>/ui/</code>. This is where you launch runs and read them as a live host-by-task matrix.</p>
+						<p>The whole interface lives at <code>/ui/</code>. Sign in with the admin token serve just printed: pick <em>Use an API token instead</em> on the login page and paste it. This is where you launch runs and read them as a live host-by-task matrix.</p>
 						<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>open http://localhost:8080/ui/</code></pre></div>
 					</div>
 				</li>
@@ -141,8 +141,12 @@ switchtender serve --addr :8080 --db switchtender.db</code></pre></div>
 					<div class="gs-num">4</div>
 					<div class="gs-body">
 						<h3>Launch your first run</h3>
-						<p>Click <strong>Launch run</strong> in the UI, or fire one over the API. No Ansible required for this one. It's a plain Bash run you can watch stream live.</p>
-						<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>curl -s -X POST localhost:8080/v1/runs \
+						<p>Click <strong>Launch run</strong> in the UI, or fire one over the API with the token from step 2. No Ansible required for this one. It's a plain Bash run you can watch stream live.</p>
+						<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code><span class="c"># the admin token serve printed at startup</span>
+export ST_TOKEN=paste-it-here
+
+curl -s -X POST localhost:8080/v1/runs \
+  -H "authorization: Bearer $ST_TOKEN" \
   -H 'content-type: application/json' \
   -d '{"tool":"bash","command":"echo hello from switchtender"}'</code></pre></div>
 					</div>
