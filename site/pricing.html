@@ -345,20 +345,23 @@
 			</div>
 			<div class="faq reveal">
 				<details>
-					<summary>What exactly is the license file?</summary>
-					<p>A small signed JSON document. The binary carries our public key and verifies the
-					signature offline; nothing is fetched, ever. Install it with
-					<code>switchtender license install</code>, see where you stand with
-					<code>switchtender license status</code>. No license server, no activation, no
-					phone-home, and losing internet changes nothing.</p>
+					<summary>Which tier do I need?</summary>
+					<p>Community, until somebody else has to sign in. The week you need directory
+					sign-in, more than one approval policy, PostgreSQL behind more than one controller,
+					workers reaching fleets a single machine cannot, or a change register an auditor will
+					actually read, that is Team. Enterprise is for when the proof has to come from outside
+					your own install: an independent witness countersigning your history, custody that
+					outlives your own retention, and people on the hook on your audit calendar. Most
+					organizations should start on Community and let the gate tell them when they have
+					outgrown it.</p>
 				</details>
 				<details>
-					<summary>What happens when a license lapses?</summary>
-					<p>Paid features stop; nothing else changes. Your data, your evidence, your receipts,
-					and every Community feature keep working, the running server drops to Community
-					without a restart, and a database you initialized on PostgreSQL stays fully usable
-					forever. We built the gate so that it cannot hold your data hostage even if we
-					wanted it to.</p>
+					<summary>Can I move from AWX?</summary>
+					<p>Yes, on Community, in one command, and the same goes for Semaphore, Rundeck,
+					Jenkins freestyle jobs, and plain crontabs. AAP, Tower, and Ascender share the AWX
+					export format. For a large or regulated move, the
+					<a href="#sprint" style="color: var(--accent);">Migration Program</a> does it for you.
+					Start with the <a href="/docs/switching-from-awx" style="color: var(--accent);">switching guide</a>.</p>
 				</details>
 				<details>
 					<summary>I started on SQLite. How do I get to Postgres and HA?</summary>
@@ -371,10 +374,25 @@
 					we will do the move with you.</p>
 				</details>
 				<details>
+					<summary>How do I buy or trial today?</summary>
+					<p>Email <a href="mailto:hello@kordloom.com?subject=SwitchTender%20Team%20trial" style="color: var(--accent);">hello@kordloom.com</a>
+					with your org name and band. A signed 30-day trial license usually lands within
+					hours, no card. Buying works the same way with an invoice until card checkout ships.
+					Enterprise starts with a conversation.</p>
+				</details>
+				<details>
 					<summary>Do you count my hosts?</summary>
 					<p>No. Bands are self-reported at purchase, the binary counts nothing and reports
 					nothing, and we will never ask to audit. If your fleet grows past your band, we trust
 					you to move up at renewal, and that trust is priced in.</p>
+				</details>
+				<details>
+					<summary>What happens when a license lapses?</summary>
+					<p>Paid features stop; nothing else changes. Your data, your evidence, your receipts,
+					and every Community feature keep working, the running server drops to Community
+					without a restart, and a database you initialized on PostgreSQL stays fully usable
+					forever. We built the gate so that it cannot hold your data hostage even if we
+					wanted it to.</p>
 				</details>
 				<details>
 					<summary>Why is the change register paid when receipts are free?</summary>
@@ -385,11 +403,19 @@
 					assembling deliverables is a thing organizations pay for.</p>
 				</details>
 				<details>
-					<summary>How do I buy or trial today?</summary>
-					<p>Email <a href="mailto:hello@kordloom.com?subject=SwitchTender%20Team%20trial" style="color: var(--accent);">hello@kordloom.com</a>
-					with your org name and band. A signed 30-day trial license usually lands within
-					hours, no card. Buying works the same way with an invoice until card checkout ships.
-					Enterprise starts with a conversation.</p>
+					<summary>What does the license allow?</summary>
+					<p>SwitchTender is source-available under BSL 1.1. You can read the source, modify it,
+					self-host it, and run it in production for your own organization. The restriction is
+					offering it as a competing hosted service. Each release converts to Apache 2.0 two
+					years after it ships. See the <a href="https://github.com/kordloom/switchtender/blob/main/LICENSE" style="color: var(--accent);">LICENSE</a> for the exact terms.</p>
+				</details>
+				<details>
+					<summary>What exactly is the license file?</summary>
+					<p>A small signed JSON document. The binary carries our public key and verifies the
+					signature offline; nothing is fetched, ever. Install it with
+					<code>switchtender license install</code>, see where you stand with
+					<code>switchtender license status</code>. No license server, no activation, no
+					phone-home, and losing internet changes nothing.</p>
 				</details>
 				<details>
 					<summary>What happens to paid features if you disappear?</summary>
@@ -398,21 +424,6 @@
 					data, and your receipts work forever, and the open verifier does not depend on us.
 					Each release also converts to Apache 2.0 two years after it ships, so the code
 					itself outlives the company.</p>
-				</details>
-				<details>
-					<summary>What does the license allow?</summary>
-					<p>SwitchTender is source-available under BSL 1.1. You can read the source, modify it,
-					self-host it, and run it in production for your own organization. The restriction is
-					offering it as a competing hosted service. Each release converts to Apache 2.0 two
-					years after it ships. See the <a href="https://github.com/kordloom/switchtender/blob/main/LICENSE" style="color: var(--accent);">LICENSE</a> for the exact terms.</p>
-				</details>
-				<details>
-					<summary>Can I move from AWX?</summary>
-					<p>Yes, on Community, in one command, and the same goes for Semaphore, Rundeck,
-					Jenkins freestyle jobs, and plain crontabs. AAP, Tower, and Ascender share the AWX
-					export format. For a large or regulated move, the
-					<a href="#sprint" style="color: var(--accent);">Migration Program</a> does it for you.
-					Start with the <a href="/docs/switching-from-awx" style="color: var(--accent);">switching guide</a>.</p>
 				</details>
 			</div>
 		</section>
