@@ -7,10 +7,11 @@
 > schedules in one command. Every change returns a chain receipt, every run exports an evidence
 > dossier, a change register covers each period, an external witness countersigns attestations,
 > and the chain exports as a LoomSeal bundle verified offline. State lives in one SQLite file by default, with Postgres optional.
-> No Kubernetes, no Redis, no message bus. Source-available under BSL 1.1: everything shipped
-> today is free to self-host and nothing ever moves from free to paid; paid tiers add new
-> governance capabilities (SCIM, external approvers, evidence packs). Converts to Apache 2.0
-> four years per release.
+> No Kubernetes, no Redis, no message bus. Source-available under BSL 1.1: the controller, every
+> tool, and the full evidence chain are free to self-host with no seat, host, or run limits. Paid
+> tiers add what an organization needs around it: SSO, the full policy engine, PostgreSQL and
+> active-active HA, distributed workers, drift reconcile, and audit-ready change registers. Each
+> release converts to Apache 2.0 two years after it ships.
 
 Install: `go install github.com/kordloom/switchtender@latest`, Homebrew, or release binaries
 with SHA256SUMS for Linux, macOS, and Windows at https://github.com/kordloom/switchtender/releases.
@@ -21,7 +22,7 @@ seeded read-only tour.
 - Live demo, read-only and seeded with real runs, nothing to install: https://demo.switchtender.com
 
 - [Homepage](https://switchtender.com/): what it is and the live matrix
-- [Pricing](https://switchtender.com/pricing): free to self-host forever, paid tiers for multi-person governance and auditor-ready evidence
+- [Pricing](https://switchtender.com/pricing): Community free forever, Team from $4,800/year flat per org by fleet band, Enterprise from $50,000/year for independent witnessing and evidence operations
 - [Get started](https://switchtender.com/get-started): install and first run
 - [AI agents](https://switchtender.com/agents): give an agent one operator-bound token, gate every run behind human approval, and prove what it did
 - [Quickstart](https://switchtender.com/docs/quickstart): first job in minutes
