@@ -34,7 +34,7 @@ var order = []string{
 	"tutorial-set-a-secret", "tutorial-migrate",
 	"tool-ansible", "tool-bash", "tool-terraform", "tool-opentofu", "tool-python", "tool-powershell", "tool-go",
 	"concepts", "reliability", "configuration", "desktop", "features", "secrets", "drift",
-	"compliance", "threat-model", "sample-evidence-pack", "api", "comparison",
+	"compliance", "threat-model", "agent-red-team", "sample-evidence-pack", "api", "comparison",
 }
 
 // titles overrides the sidebar label for a slug where its first heading reads poorly.
@@ -371,9 +371,11 @@ func switchtenderEntity() map[string]any {
 		"name": "SwitchTender", "url": "https://switchtender.com/",
 		"applicationCategory": "DeveloperApplication",
 		"operatingSystem":     "Linux, macOS, Windows",
-		"description": "An agentless, single-binary automation controller for Ansible, Terraform, " +
-			"OpenTofu, Bash, PowerShell, Python, and Go, with enforced approval policies and a " +
-			"tamper-evident audit trail that can be verified offline.",
+		"description": "The control plane for infrastructure automation. Every change, whether it " +
+			"comes from a person, a schedule, or an AI agent, passes one governed path of request, " +
+			"policy, and approval, and leaves a cryptographically signed receipt that can be " +
+			"verified offline without the vendor. Runs Ansible, Terraform, OpenTofu, Bash, " +
+			"PowerShell, Python, and Go from a single self-hosted Go binary, agentless over SSH.",
 		"license":     "https://mariadb.com/bsl11/",
 		"featureList": switchtenderFeatures,
 		"offers": map[string]any{

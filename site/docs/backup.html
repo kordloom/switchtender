@@ -60,7 +60,7 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migrate off AWX, Semaphore, Rundeck, or Jenkins</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup" class="active">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/continuity">Continuity</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/vendor-risk">Vendor risk review</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migrate off AWX, Semaphore, Rundeck, or Jenkins</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup" class="active">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/continuity">Continuity</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/vendor-risk">Vendor risk review</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
@@ -127,7 +127,6 @@ never deletes objects that are absent from the file, so restoring into a live de
 than replaces. Without <code>--in</code> the backup is read from standard input. Nothing is applied until the
 whole file has decrypted and decoded, so a corrupt or truncated file cannot leave a half-applied
 restore.</p>
-
 <h2 id="moving-from-sqlite-to-postgresql">Moving from SQLite to PostgreSQL</h2>
 <p>Backup and restore are also the growth path. An install that started on SQLite moves to
 PostgreSQL with the same two commands, because both accept either a file path or a
@@ -136,8 +135,9 @@ PostgreSQL with the same two commands, because both accept either a file path or
 SWITCHTENDER_ENCRYPTION_KEY=... SWITCHTENDER_ENCRYPTION_SALT=... \
   switchtender backup --db switchtender.db --out move.stbak
 SWITCHTENDER_ENCRYPTION_KEY=... SWITCHTENDER_ENCRYPTION_SALT=... \
-  switchtender restore --db "postgres://user:pass@host/db" --in move.stbak
-switchtender serve --db "postgres://user:pass@host/db"</code></pre>
+  switchtender restore --db &quot;postgres://user:pass@host/db&quot; --in move.stbak
+switchtender serve --db &quot;postgres://user:pass@host/db&quot;
+</code></pre>
 <p>The restore initializes the PostgreSQL schema, which requires a Team license, so install the
 license first. Use the same encryption key and salt on both sides, since they seal the file and
 the stored secrets.</p>
