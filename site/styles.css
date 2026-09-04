@@ -116,6 +116,12 @@ h1 {
 }
 .lede { font-size: 19px; color: var(--muted); margin: 24px 0 32px; max-width: 560px; }
 .lede strong { color: var(--text); font-weight: 600; }
+/* Names the dated moment a reader arrived on, sitting between the lede and the buttons. Set
+   apart with a rule and slightly smaller type so it reads as recognition, not more pitch. */
+.moment {
+	font-size: 16.5px; line-height: 1.65; color: var(--muted); max-width: 560px;
+	margin: -14px 0 30px; padding-left: 16px; border-left: 2px solid var(--line);
+}
 .hero-copy .eyebrow { font-size: 12.5px; letter-spacing: 0.035em; text-wrap: balance; }
 @media (min-width: 1150px) { .hero-copy .eyebrow { white-space: nowrap; } }
 .hero-cta { display: flex; gap: 14px; flex-wrap: wrap; }
