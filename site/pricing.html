@@ -4,10 +4,10 @@
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>Pricing | SwitchTender</title>
-	<meta name="description" content="Running SwitchTender and proving every change are free forever: leave AWX in one command with the receipts included. Team adds SSO, the full policy engine, PostgreSQL and active-active HA, distributed workers, and audit-ready change registers, priced flat per org by fleet band and verified offline with no phone-home. Enterprise adds hosted witness, evidence custody, and evidence operations on your audit calendar.">
+	<meta name="description" content="Running SwitchTender and proving every change are free forever: leave AWX in one command with the receipts included. Pro adds SSO at $490. Team adds the full policy engine, PostgreSQL and active-active HA, distributed workers, and audit-ready change registers, priced flat per org by fleet band and verified offline with no phone-home. Enterprise adds hosted witness, evidence custody, and evidence operations on your audit calendar.">
 	<link rel="canonical" href="https://switchtender.com/pricing">
 	<meta property="og:title" content="Pricing | SwitchTender">
-	<meta property="og:description" content="Running SwitchTender and proving every change are free forever: leave AWX in one command with the receipts included. Team adds SSO, the full policy engine, PostgreSQL and active-active HA, distributed workers, and audit-ready change registers, priced flat per org by fleet band and verified offline with no phone-home. Enterprise adds hosted witness, evidence custody, and evidence operations on your audit calendar.">
+	<meta property="og:description" content="Running SwitchTender and proving every change are free forever: leave AWX in one command with the receipts included. Pro adds SSO at $490. Team adds the full policy engine, PostgreSQL and active-active HA, distributed workers, and audit-ready change registers, priced flat per org by fleet band and verified offline with no phone-home. Enterprise adds hosted witness, evidence custody, and evidence operations on your audit calendar.">
 	<meta property="og:type" content="website">
 	<meta property="og:url" content="https://switchtender.com/pricing">
 	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
@@ -40,6 +40,9 @@
 		/* Tier pricing layout. Reuses the card system, adding a price header, a feature checklist,
 		   and a featured-tier ring so the middle tier reads as the recommended one. */
 		.tiers { align-items: stretch; margin-top: 8px; }
+		.cards-4 { display: grid; gap: 18px; grid-template-columns: repeat(4, 1fr); }
+		@media (max-width: 1100px) { .cards-4 { grid-template-columns: repeat(2, 1fr); } }
+		@media (max-width: 640px) { .cards-4 { grid-template-columns: 1fr; } }
 		.tiers .tier { display: flex; flex-direction: column; text-align: left; position: relative; }
 		.tier-featured { border-color: rgba(52, 211, 153, 0.5); background: var(--surface-2); }
 		.tier-featured::before {
@@ -194,9 +197,10 @@
 			<span class="eyebrow">Pricing</span>
 			<h1>You never pay for permission to run it.<br><span class="grad">You pay for SSO, scale, and the paperwork.</span></h1>
 			<p class="lede">
-				One binary, three tiers. Community runs every tool, imports your whole AWX estate, and
+				One binary, four tiers. Community runs every tool, imports your whole AWX estate, and
 				produces signed receipts anyone can verify offline: free forever, and not a trial.
-				Team adds what a second team makes necessary: SSO, the full policy engine, PostgreSQL
+				Pro adds directory sign-in at the price the rest of this market charges for it.
+				Team adds what a second team makes necessary: the full policy engine, PostgreSQL
 				and active-active HA, distributed workers, and audit-ready change
 				registers. Enterprise adds the parts we operate for you. Every license is a signed
 				file the binary checks offline, so nothing ever phones home.
@@ -204,7 +208,7 @@
 		</section>
 
 		<section class="section wrap" style="padding-top: 24px;">
-			<div class="cards-3 tiers reveal">
+			<div class="cards-4 tiers reveal">
 
 				<article class="card tier">
 					<div class="tier-name">Community</div>
@@ -237,7 +241,7 @@
 					<a class="ghost" href="mailto:hello@kordloom.com?subject=Buy%20SwitchTender%20Team">Buy Team</a>
 					<p class="tier-inherit">Everything in Community, plus:</p>
 					<ul class="tier-list">
-						<li><b>SSO</b>: OIDC, SAML, and LDAP directory sign-in with just-in-time provisioning</li>
+						<li>Everything in Pro, plus:</li>
 						<li><b>The full policy engine</b>: unlimited policies, outright denials, risk floors, separation of duties, and agent-scoped rules</li>
 						<li><b>PostgreSQL</b> and active-active <b>HA</b></li>
 						<li><b>Distributed workers</b> and queues, for fleets one machine cannot reach</li>

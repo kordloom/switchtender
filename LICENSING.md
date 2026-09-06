@@ -31,10 +31,15 @@ server, no online activation, no phone-home:
 Internal production use by a company, on its own hosts, for its own infrastructure, is fully covered
 at no cost.
 
-The commercial model is open core. Team features ship in the same binary and unlock with a
-license that is a small signed file verified offline against a key compiled into the binary:
-directory sign-in (OIDC, SAML, and LDAP, with group-to-role mapping and just-in-time
-provisioning), the full policy engine (unlimited policies, outright denials, risk floors,
+The commercial model is open core, and paid features ship in the same binary, unlocked by a
+small signed file verified offline against a key compiled into the binary.
+
+Pro, at $490 a year flat per organization to 250 hosts, adds directory sign-in (OIDC, SAML,
+and LDAP, with group-to-role mapping and just-in-time provisioning) and five approval
+policies instead of one. That is deliberately the same price the rest of this market charges
+for single sign-on, because a tier nobody can afford to cross is not a tier.
+
+Team adds the full policy engine (unlimited policies, outright denials, risk floors,
 agent-scoped rules, and distinct-approver separation of duties), the period change register,
 distributed workers, initializing a new PostgreSQL database for active-active high availability,
 and one-click drift reconcile. No license server, no activation, no phone-home, no seat counting,
