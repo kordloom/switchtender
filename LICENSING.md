@@ -6,34 +6,41 @@ arrange a commercial license.
 
 ## What self-hosting grants you
 
-Run the binary anywhere, in production, at any scale, for free. Every feature SwitchTender ships is in
-that binary. There is no separate paid build, nothing is unlocked with a license key, and there are no
-seat, host, or execution caps. The self-hosted platform never requires KordLoom infrastructure to
-operate: no license server, no online activation, no phone-home:
+Run the Community binary anywhere, in production, at any scale, for free. Community is complete
+for leaving AWX and running governed automation: no seat cap, no host cap, no execution cap, no
+expiry, and no license key. It never requires KordLoom infrastructure to operate: no license
+server, no online activation, no phone-home:
 
 - All execution engines: Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go.
-- Single sign-on through OIDC, SAML, LDAP, and JWT, with directory group-to-role mapping.
-- Role-based access control, per-object grants, and teams.
-- The tamper-evident, hash-chained audit trail with signed, offline-verifiable export.
-- The whole policy engine: approval gates, per-agent rules, risk floors, denials, separation of
-  duties, and N-of-M sign-off, with each approval bound to the exact content digest and pinned
-  commit the approver saw.
-- SCIM provisioning alongside single sign-on.
-- Active-active high availability on PostgreSQL.
-- External secrets through nine managers: HashiCorp Vault (static and dynamic), AWS Secrets
-  Manager, AWS STS, Google Secret Manager, Azure Key Vault, CyberArk Conjur, CyberArk CCP, and
-  1Password Connect, plus any store through a command.
+- One-command importers: AWX, AAP, Tower, Ascender, Semaphore, Rundeck, Jenkins, and crontabs.
+- Role-based access control, per-object grants, organizations, and teams, plus JWT sign-in.
+- The whole evidence engine: the tamper-evident hash chain, RFC 3161 anchoring, signed per-run
+  receipts, run dossiers, and offline verification with the open verifier. The proofs are free
+  forever, on every tier.
+- One approval policy, with each approval bound to the exact content digest and pinned commit
+  the approver saw. An agent behind the MCP gate faces that same approval and can never release
+  its own work.
+- Sealed credentials, decrypted only at execution, through nine external managers: HashiCorp
+  Vault (static and dynamic), AWS Secrets Manager, AWS STS, Google Secret Manager, Azure Key
+  Vault, CyberArk Conjur, CyberArk CCP, and 1Password Connect, plus any store through a command.
 - Notifications over eleven channels: webhook, Slack, Mattermost, Rocket.Chat, Discord, Microsoft
   Teams, ntfy, PagerDuty, Grafana, Twilio SMS, and email, plus retention policies.
+- Drift detection, the live host-by-task matrix, balanced splits, fleet memory, pipelines,
+  schedules, and webhooks.
 
 Internal production use by a company, on its own hosts, for its own infrastructure, is fully covered
 at no cost.
 
-The commercial model is open core. The Community tier is free and complete for leaving AWX and
-running governed automation. Team features in the same binary unlock with a license that is a
-small signed file verified offline against a key compiled into the binary: no license server, no
-activation, no phone-home, no seat counting, and fleet bands that are self-reported and never
-audited. Enterprise adds services that by definition come from outside your install, such as the
+The commercial model is open core. Team features ship in the same binary and unlock with a
+license that is a small signed file verified offline against a key compiled into the binary:
+directory sign-in (OIDC, SAML, and LDAP, with group-to-role mapping and just-in-time
+provisioning), the full policy engine (unlimited policies, outright denials, risk floors,
+agent-scoped rules, and distinct-approver separation of duties), the period change register,
+distributed workers, initializing a new PostgreSQL database for active-active high availability,
+and one-click drift reconcile. No license server, no activation, no phone-home, no seat counting,
+and fleet bands are self-reported and never audited. A lapsed license takes nothing: opening an
+existing PostgreSQL database is never gated, in any state, and every Community feature keeps
+working. Enterprise adds services that by definition come from outside your install, such as the
 hosted witness and evidence custody.
 
 Seven commitments, held for every user from day one. What is free today stays free, and the

@@ -69,7 +69,8 @@ instead of scrollback.
 The full head-to-head, including where SwitchTender is behind, is in the
 [comparison](docs/comparison.md).
 
-Checked against vendor documentation on 2026-08-10, for AWX 24.6.1 and Semaphore 2.19.7. These
+Checked against vendor documentation on 2026-08-10, for AWX 24.6.1 and Semaphore 2.19.7; release
+state re-verified 2026-09-06 (AWX still 24.6.1, Semaphore at 2.19.12). These
 products ship, and a table like this decays. If a row is out of date, open an issue and it gets
 corrected.
 
@@ -306,11 +307,14 @@ the 1.x line.
 
 ## License
 
-Business Source License 1.1. Read the source, run it, and use it in production. The self-hosted
-binary ships every enterprise feature at no cost: single sign-on, role-based access control, the
-tamper-evident audit chain, approval gates, and active-active HA. The one reserved right is offering
-SwitchTender to others as a hosted or managed service that competes with the maintainer. Each version
-converts to Apache-2.0 two years after its release.
+Business Source License 1.1. Read the source, run it, and use it in production. Community is free
+and complete for leaving AWX: all seven engines, the importers, RBAC with organizations and teams,
+one digest-bound approval policy, the MCP agent gate, and the whole evidence engine with signed
+receipts and offline verification. Team features (SSO, the full policy engine, Postgres and
+active-active HA, distributed workers, the change register, one-click drift reconcile) unlock in
+the same binary with a signed license file: no license server, no phone-home, flat per org. The one
+reserved right is offering SwitchTender to others as a hosted or managed service that competes with
+the maintainer. Each version converts to Apache-2.0 two years after its release.
 
 See `LICENSE` for the exact terms and [`LICENSING.md`](LICENSING.md) for what self-hosting grants,
 how a commercial license works, and how to ask about support or a hosted plan.

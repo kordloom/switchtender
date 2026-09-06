@@ -63,3 +63,6 @@ witness-key.json
 /sitegen
 /bench
 /embedded-witness
+
+# Internal campaign hold records, never published.
+campaigns/
