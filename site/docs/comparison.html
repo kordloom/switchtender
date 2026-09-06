@@ -368,11 +368,11 @@ than &quot;structured versus scrollback&quot;.</p>
 </tr>
 <tr>
 <td>Access control</td>
-<td>SwitchTender has global roles plus organizations, teams, and per-object read, use, and manage grants, all in the source-available core. AWX has mature organization RBAC. Semaphore gates RBAC behind its Enterprise tier.</td>
+<td>SwitchTender has global roles plus organizations, teams, and per-object read, use, and manage grants, all in the source-available core. AWX has mature organization RBAC. Semaphore gates advanced RBAC (custom roles, identity group mapping) behind its Enterprise tier.</td>
 </tr>
 <tr>
 <td>Credentials</td>
-<td>Sealed with AES-256-GCM under a key derived by Argon2id, decrypted only at execution into the run's environment or a temporary file created mode 0600, kept off the command line either way, and deleted when the run ends. Fourteen credential kinds and eleven sources, nine of them external secret managers: HashiCorp Vault static and dynamic, AWS Secrets Manager and STS, Azure Key Vault, GCP Secret Manager, CyberArk Conjur and CCP, and 1Password. Several credentials of different kinds attach to one run. AWX matches this through credential plugins. Semaphore stores an SSH key or a username and password, with no external secret managers.</td>
+<td>Sealed with AES-256-GCM under a key derived by Argon2id, decrypted only at execution into the run's environment or a temporary file created mode 0600, kept off the command line either way, and deleted when the run ends. Fourteen credential kinds and eleven sources, nine of them external secret managers: HashiCorp Vault static and dynamic, AWS Secrets Manager and STS, Azure Key Vault, GCP Secret Manager, CyberArk Conjur and CCP, and 1Password. Several credentials of different kinds attach to one run. AWX matches this through credential plugins. Semaphore's built-in key store holds an SSH key or a username and password; HashiCorp Vault support is in its paid Pro tier, and no other external manager is offered.</td>
 </tr>
 <tr>
 <td>Scheduling</td>
@@ -407,7 +407,7 @@ than &quot;structured versus scrollback&quot;.</p>
 <tbody>
 <tr>
 <td>Maturity</td>
-<td>AWX and Semaphore have years of production use and large communities. SwitchTender is young. AWX's years now cut both ways: its last release was July 2024, and its next one removes LDAP, SAML, and OIDC from core.</td>
+<td>AWX and Semaphore have years of production use and large communities. SwitchTender is young. AWX's years now cut both ways: its last release was July 2024, and <a href="https://forum.ansible.com/t/awx-modernization-moving-forward/45134">mid-refactor development builds have moved external authentication out of core</a> into a shared library.</td>
 </tr>
 <tr>
 <td>Approval steps inside a workflow</td>
