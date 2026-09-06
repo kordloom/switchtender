@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -74,5 +75,49 @@ func TestGatesRefuseInOneLineOnCommunity(t *testing.T) {
 		strings.NewReader(`{"name":"hold stage","effect":"deny"}`)))
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("licensed deny policy = %d, want 201: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestProGatesHoldTheLine covers what a Pro install sees: five policies fit, the sixth refuses
+// toward Team, and the full engine stays refused even with a live Pro license installed.
+func TestProGatesHoldTheLine(t *testing.T) {
+	store := policy.NewMemStore()
+	handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(), WithPolicies(store)).Handler()
+
+	prior := license.Current()
+	license.Set(&license.License{Claims: license.Claims{
+		Tier: license.TierPro, Org: "Acme", Expires: "2099-01-01T00:00:00Z"}})
+	defer license.Set(prior)
+
+	// Test 0: five plain policies are inside the Pro cap.
+	for i := range 5 {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/policies",
+			strings.NewReader(fmt.Sprintf(`{"name":"hold %d"}`, i))))
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("Pro policy %d = %d, want 201: %s", i, rec.Code, rec.Body.String())
+		}
+	}
+
+	// Test 1: the sixth refuses in one line pointing at Team.
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/policies",
+		strings.NewReader(`{"name":"hold six"}`)))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("sixth Pro policy = %d, want 403: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "Team removes the cap") {
+		t.Errorf("sixth-policy refusal does not teach the fix: %s", rec.Body.String())
+	}
+
+	// Test 2: a deny policy is the full engine, which Pro does not include.
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/policies",
+		strings.NewReader(`{"name":"deny prod","effect":"deny"}`)))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("Pro deny policy = %d, want 403: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "Pro license does not include") {
+		t.Errorf("full-engine refusal does not name the Pro tier: %s", rec.Body.String())
 	}
 }

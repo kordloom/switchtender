@@ -24,8 +24,9 @@ import (
 // signed value from one surface can never be replayed as another.
 const preimageDomain = "switchtender-license/1\n"
 
-// Tiers a license may grant. Enterprise includes everything Team does.
+// Tiers a license may grant, in ascending order. Each tier includes everything below it.
 const (
+	TierPro        = "pro"
 	TierTeam       = "team"
 	TierEnterprise = "enterprise"
 )
@@ -61,7 +62,8 @@ type Claims struct {
 	ID string `json:"id"`
 	// Org is the organization the license was issued to, as it should appear in status output.
 	Org string `json:"org"`
-	// Tier is team or enterprise.
+	// Tier is pro, team, or enterprise. Licenses minted before Pro existed carry team, and an
+	// empty tier is read as team so no issued license is ever downgraded by a build upgrade.
 	Tier string `json:"tier"`
 	// Hosts is the self-reported band: "250", "1000", or "unlimited". Informational; nothing counts.
 	Hosts string `json:"hosts,omitempty"`
@@ -99,10 +101,64 @@ func (l *License) Expired(now time.Time) bool {
 	return now.After(exp)
 }
 
-// covers reports whether the license's tier includes a feature. Every feature in this file is Team;
-// Enterprise includes Team.
-func (l *License) covers(Feature) bool {
-	return l.Claims.Tier == TierTeam || l.Claims.Tier == TierEnterprise
+// tierRank orders the tiers for comparison. An unrecognized tier ranks below every real one, so a
+// license naming a tier this build has never heard of covers nothing rather than everything.
+func tierRank(tier string) int {
+	switch tier {
+	case TierPro:
+		return 1
+	case TierTeam:
+		return 2
+	case TierEnterprise:
+		return 3
+	}
+	return 0
+}
+
+// normalizeTier maps a license's stored tier to the tier it grants. The empty string is a license
+// minted before tiers below Team existed; every one of those was sold as Team.
+func normalizeTier(tier string) string {
+	if tier == "" {
+		return TierTeam
+	}
+	return tier
+}
+
+// featureTier is the lowest tier that includes each feature. A feature absent from this map
+// requires Team, so forgetting to place a new feature fails toward the paid side, never the free.
+var featureTier = map[Feature]string{
+	FeatureSSO:          TierPro,
+	FeaturePolicyFull:   TierTeam,
+	FeatureRegister:     TierTeam,
+	FeatureWorkers:      TierTeam,
+	FeaturePostgresInit: TierTeam,
+	FeatureReconcile:    TierTeam,
+}
+
+// minTierFor returns the lowest tier that includes a feature.
+func minTierFor(f Feature) string {
+	if tier, ok := featureTier[f]; ok {
+		return tier
+	}
+	return TierTeam
+}
+
+// tierLabel is the capitalized tier name gate errors print.
+func tierLabel(tier string) string {
+	switch tier {
+	case TierPro:
+		return "Pro"
+	case TierTeam:
+		return "Team"
+	case TierEnterprise:
+		return "Enterprise"
+	}
+	return tier
+}
+
+// covers reports whether the license's tier includes a feature.
+func (l *License) covers(f Feature) bool {
+	return tierRank(normalizeTier(l.Claims.Tier)) >= tierRank(minTierFor(f))
 }
 
 // Verify checks a license file's signature against the compiled-in keys and returns the license.
@@ -200,20 +256,55 @@ func allowAt(l *License, f Feature, now time.Time) error {
 	if name == "" {
 		name = string(f)
 	}
+	need := tierLabel(minTierFor(f))
 	if l == nil {
-		return fmt.Errorf("%s requires a Team license; this install runs Community. "+
-			"https://switchtender.com/pricing", name)
+		return fmt.Errorf("%s requires a %s license; this install runs Community. "+
+			"https://switchtender.com/pricing", name, need)
 	}
 	if l.Expired(now) {
-		return fmt.Errorf("%s requires a Team license and this install's license for %s lapsed "+
+		return fmt.Errorf("%s requires a %s license and this install's license for %s lapsed "+
 			"on %s; everything Community keeps working. https://switchtender.com/pricing",
-			name, l.Claims.Org, l.Claims.Expires)
+			name, need, l.Claims.Org, l.Claims.Expires)
 	}
 	if !l.covers(f) {
-		return fmt.Errorf("%s is not covered by this install's %s license. "+
-			"https://switchtender.com/pricing", name, l.Claims.Tier)
+		return fmt.Errorf("%s requires a %s license; this install's %s license does not "+
+			"include it. https://switchtender.com/pricing",
+			name, need, tierLabel(normalizeTier(l.Claims.Tier)))
 	}
 	return nil
+}
+
+// proPolicyCap is how many approval policies a Pro license holds at once.
+const proPolicyCap = 5
+
+// AllowPolicies reports whether the install may hold total approval policies: one on Community,
+// five on Pro, and any number on Team and above. Like Allow, the clock is checked on every call,
+// so a license lapsing while the server runs caps the install like Community without a restart.
+func AllowPolicies(total int) error {
+	return allowPoliciesAt(current.Load(), total, time.Now())
+}
+
+// allowPoliciesAt is AllowPolicies against an explicit license and clock, which makes it testable.
+func allowPoliciesAt(l *License, total int, now time.Time) error {
+	if l != nil && !l.Expired(now) {
+		tier := normalizeTier(l.Claims.Tier)
+		if tierRank(tier) >= tierRank(TierTeam) {
+			return nil
+		}
+		if tier == TierPro {
+			if total <= proPolicyCap {
+				return nil
+			}
+			return fmt.Errorf("a Pro license holds %d approval policies and this would make %d; "+
+				"Team removes the cap. https://switchtender.com/pricing", proPolicyCap, total)
+		}
+	}
+	if total <= 1 {
+		return nil
+	}
+	return fmt.Errorf("Community holds one approval policy and this would make %d; "+
+		"Pro holds %d and Team removes the cap. https://switchtender.com/pricing",
+		total, proPolicyCap)
 }
 
 // featureNames are the human names gates print.

@@ -98,6 +98,10 @@ var licenseMintCmd = &cobra.Command{
 			return fmt.Errorf("issuer key must be a %d-byte hex seed", ed25519.SeedSize)
 		}
 		priv := ed25519.NewKeyFromSeed(seed)
+		if mintTier != license.TierPro && mintTier != license.TierTeam &&
+			mintTier != license.TierEnterprise {
+			return fmt.Errorf("tier %q is not pro, team, or enterprise", mintTier)
+		}
 		now := time.Now().UTC()
 		c := license.Claims{
 			V: 1, ID: "lic_" + hex.EncodeToString(priv.Public().(ed25519.PublicKey)[:4]) +
@@ -145,7 +149,7 @@ func init() {
 	}
 	licenseMintCmd.Flags().StringVar(&mintKey, "key", "", "Issuer private key file, hex seed.")
 	licenseMintCmd.Flags().StringVar(&mintOrg, "org", "", "Organization the license names.")
-	licenseMintCmd.Flags().StringVar(&mintTier, "tier", license.TierTeam, "team or enterprise.")
+	licenseMintCmd.Flags().StringVar(&mintTier, "tier", license.TierTeam, "pro, team, or enterprise.")
 	licenseMintCmd.Flags().StringVar(&mintHosts, "hosts", "250", "Host band: 250, 1000, unlimited.")
 	licenseMintCmd.Flags().IntVar(&mintDays, "days", 365, "Term length in days.")
 	licenseMintCmd.Flags().StringVar(&mintOut, "out", "license.json", "Where to write the license.")

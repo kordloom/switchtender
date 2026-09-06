@@ -89,11 +89,15 @@ func createPolicyHandler(store policy.Store, log *zap.Logger) http.HandlerFunc {
 			respondError(w, log, http.StatusInternalServerError, "could not read the policies")
 			return
 		}
-		if advanced || len(existing) >= 1 {
+		if advanced {
 			if aerr := license.Allow(license.FeaturePolicyFull); aerr != nil {
 				respondError(w, log, http.StatusForbidden, aerr.Error())
 				return
 			}
+		}
+		if aerr := license.AllowPolicies(len(existing) + 1); aerr != nil {
+			respondError(w, log, http.StatusForbidden, aerr.Error())
+			return
 		}
 		p := &policy.Policy{
 			ID: policy.NewID(), Name: req.Name, Tool: req.Tool,
