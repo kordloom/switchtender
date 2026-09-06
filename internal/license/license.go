@@ -302,7 +302,7 @@ func allowPoliciesAt(l *License, total int, now time.Time) error {
 	if total <= 1 {
 		return nil
 	}
-	return fmt.Errorf("Community holds one approval policy and this would make %d; "+
+	return fmt.Errorf("the Community tier holds one approval policy and this would make %d; "+
 		"Pro holds %d and Team removes the cap. https://switchtender.com/pricing",
 		total, proPolicyCap)
 }
