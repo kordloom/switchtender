@@ -348,6 +348,11 @@ matches on `queue`:
         queue: prod
         require_distinct_approver: true
 
+A policy with `queue` holds only what is routed to that queue, and a run on a named queue executes
+only when a worker serving that queue claims it; the control node's own runner takes unqueued runs
+alone. On an install without relay workers, a queued run therefore waits as `pending` indefinitely,
+even after approval. To gate runs the server itself executes, write the policy without `queue`.
+
 
 ## What a relay worker writes into the audit trail
 
