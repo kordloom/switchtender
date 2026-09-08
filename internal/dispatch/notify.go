@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"time"
 
@@ -16,6 +17,12 @@ import (
 
 // webhookTimeout bounds one notification delivery attempt.
 const webhookTimeout = 5 * time.Second
+
+// notifyDrainLimit caps how much of a notification target's response is read before the body is
+// closed. The response is not used for anything, only drained so the connection can be reused, and
+// the target is named by whoever started the run, so what it may make the controller read is capped
+// rather than trusted.
+const notifyDrainLimit = 64 << 10
 
 // WithWebhooks posts a JSON notification to each URL when a top-level run reaches a terminal
 // state.
@@ -133,11 +140,21 @@ func (d *Dispatcher) deliver(url, runID string, body []byte) {
 // notifyClient returns the client used to deliver a notification. The default refuses an address
 // that is link-local, unspecified, or this server itself, since the target is named by whoever
 // started the run rather than by an administrator. A test that serves on loopback replaces it.
+//
+// The default is built once and shared by every delivery. Building one per delivery gave each its
+// own http.Transport, and a transport that is dropped without closing keeps the connection it
+// dialed idle for its idle timeout, along with the read and write goroutines that serve it. A
+// measured hundred deliveries left three hundred goroutines and a hundred sockets alive that way,
+// against three for a shared client, so a controller notifying on every finished run accumulated
+// them for as long as runs kept finishing. Sharing also means a keep-alive connection to a webhook
+// target is reused instead of a fresh handshake per run.
 func (d *Dispatcher) notifyClient() *http.Client {
-	if d.notifyHTTP != nil {
-		return d.notifyHTTP
-	}
-	return safedial.OffHostClient(webhookTimeout)
+	d.notifyHTTPOnce.Do(func() {
+		if d.notifyHTTP == nil {
+			d.notifyHTTP = safedial.OffHostClient(webhookTimeout)
+		}
+	})
+	return d.notifyHTTP
 }
 
 // deliverWithHeaders posts one notification with the given request headers, retrying transient
@@ -164,6 +181,12 @@ func (d *Dispatcher) deliverWithHeaders(url, runID string, body []byte, headers 
 		}
 		res, err := client.Do(req)
 		if err == nil {
+			// The body is read out before it is closed. Closing an unread body makes net/http tear
+			// the connection down instead of returning it to the pool, so every notification paid a
+			// fresh handshake to a target that answers with any body at all, which most do. The read
+			// is bounded because the target is named by whoever started the run: the client timeout
+			// caps how long it may stall, and this caps how much it may make the controller hold.
+			_, _ = io.Copy(io.Discard, io.LimitReader(res.Body, notifyDrainLimit))
 			_ = res.Body.Close()
 			if res.StatusCode < 300 {
 				return

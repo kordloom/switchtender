@@ -98,8 +98,11 @@ type Dispatcher struct {
 	// notifyWG tracks in-flight webhook and email deliveries so Close waits for them to finish
 	// instead of cutting them off mid-send.
 	notifyWG sync.WaitGroup
-	// notifyHTTP dials notification targets, nil for the guarded default.
+	// notifyHTTP dials notification targets, nil until the guarded default is built.
 	notifyHTTP *http.Client
+	// notifyHTTPOnce builds the guarded default exactly once, so every delivery shares one
+	// connection pool rather than each one creating and abandoning its own.
+	notifyHTTPOnce sync.Once
 	// ctx is canceled by Close to stop in-flight and pending runs.
 	ctx context.Context
 	// cancel cancels ctx.

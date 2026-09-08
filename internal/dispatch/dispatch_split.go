@@ -162,7 +162,9 @@ const childPollInterval = 500 * time.Millisecond
 // statuses in order. Reads use ctx, so a shutdown or a canceled parent stops the poll promptly
 // rather than spinning against a closing store. On cancellation the children are cancel-requested
 // through the store, any that no executor has claimed yet are finalized canceled directly, and any
-// child not yet terminal is reported canceled, the honest summary for an interrupted parent.
+// child not yet terminal is reported canceled, the honest summary for an interrupted parent. A child
+// that already reached a terminal state keeps its own result, because that result is what the store
+// holds and what the parent's committed outcome has to agree with.
 func (d *Dispatcher) waitChildren(ctx context.Context, ids []string) []run.Status {
 	statuses := make([]run.Status, len(ids))
 	canceled := false
@@ -179,9 +181,11 @@ func (d *Dispatcher) waitChildren(ctx context.Context, ids []string) []run.Statu
 			if !ok {
 				continue
 			}
-			if ctx.Err() != nil && !canceled {
-				continue
-			}
+			// A terminal status is recorded whatever the parent's context is doing. Skipping the
+			// tick that first notices the cancellation dropped results that were already sitting
+			// terminal in the store, and the stop path below then reported those shards stopped, so
+			// a parent's committed outcome said a change which landed on every host did not happen.
+			// Only a child that is genuinely not terminal is the coordinator's to summarize.
 			if status.Terminal() {
 				statuses[i] = status
 				done++
