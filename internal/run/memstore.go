@@ -242,10 +242,22 @@ func (m *memStore) RunTimings(_ context.Context, limit int) ([]RunTiming, error)
 	}
 	timings := make([]RunTiming, 0, len(out))
 	for _, r := range out {
-		timings = append(timings, RunTiming{
+		timing := RunTiming{
 			ID: r.ID, Status: r.Status, Kind: r.Kind, Queue: r.Queue, ClaimedBy: r.ClaimedBy,
-			CreatedAt: r.CreatedAt, StartedAt: r.StartedAt, EndedAt: r.EndedAt,
-		})
+			CreatedAt: r.CreatedAt,
+		}
+		// The instants are copied rather than shared, the same way every other read on this store
+		// clones what it hands out. This one is scraped on a schedule by the metrics endpoint, so a
+		// shared pointer would be a reader able to rewrite a stored run's recorded duration.
+		if r.StartedAt != nil {
+			started := *r.StartedAt
+			timing.StartedAt = &started
+		}
+		if r.EndedAt != nil {
+			ended := *r.EndedAt
+			timing.EndedAt = &ended
+		}
+		timings = append(timings, timing)
 	}
 	return timings, nil
 }

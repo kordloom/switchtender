@@ -45,14 +45,12 @@ func AssessRisk(r *Run) Risk {
 
 	// Extra vars are scanned too: a variable is string material a playbook or script splices into
 	// what it executes, so a destructive command riding in -e graded low and slipped past a
-	// min_risk hold while the same text on the command line was caught.
+	// min_risk hold while the same text on the command line was caught. The walk goes through lists
+	// and nested objects because a variable is not only a string: -e '{"cmds":["rm -rf /"]}' is an
+	// ordinary body against the same API and reaches a command line the same way, so scanning only
+	// the top-level strings left the gap open one level down.
 	var vars strings.Builder
-	for _, v := range r.ExtraVars {
-		if sv, ok := v.(string); ok {
-			vars.WriteByte(' ')
-			vars.WriteString(sv)
-		}
-	}
+	writeVarText(&vars, r.ExtraVars, maxVarScanDepth)
 	lower := strings.ToLower(r.Command + " " + r.Playbook + vars.String())
 	for _, m := range destructiveMarkers {
 		if strings.Contains(lower, m) {
@@ -83,6 +81,41 @@ func AssessRisk(r *Run) Risk {
 		reasons = append(reasons, "no elevated signal")
 	}
 	return Risk{Level: level, Reasons: reasons}
+}
+
+// maxVarScanDepth bounds how far the variable walk descends. A variable body arrives from a request,
+// so the nesting is attacker-chosen; the cap keeps grading a run cheap while reaching far deeper than
+// any variable a person writes by hand.
+const maxVarScanDepth = 32
+
+// writeVarText appends every string reachable inside v to b, separated by spaces, so the destructive
+// marker scan reads a nested variable the same way it reads a plain one. Map keys are left out
+// because a key names a variable rather than carrying the text a tool executes.
+func writeVarText(b *strings.Builder, v any, depth int) {
+	if depth <= 0 {
+		return
+	}
+	switch val := v.(type) {
+	case string:
+		b.WriteByte(' ')
+		b.WriteString(val)
+	case []string:
+		for _, item := range val {
+			writeVarText(b, item, depth-1)
+		}
+	case []any:
+		for _, item := range val {
+			writeVarText(b, item, depth-1)
+		}
+	case map[string]string:
+		for _, item := range val {
+			writeVarText(b, item, depth-1)
+		}
+	case map[string]any:
+		for _, item := range val {
+			writeVarText(b, item, depth-1)
+		}
+	}
 }
 
 // raise returns the higher of two risk levels.
