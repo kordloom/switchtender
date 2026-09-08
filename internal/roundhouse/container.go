@@ -458,9 +458,12 @@ var sensitiveMountTrees = []string{
 // but whose subpaths stay allowed because a project checkout, a temp file, or the state directory
 // legitimately lives under one of them. Mounting the directory itself would hand the container the
 // host's configuration, secrets, or entire filesystem.
+//
+// The entries are written in lower case because the lookup folds case, so the macOS home root is
+// "/users" here and matches whichever way a run spells it.
 var sensitiveMountRoots = map[string]bool{
 	"/": true, "/usr": true, "/bin": true, "/sbin": true, "/lib": true,
-	"/lib64": true, "/var": true, "/home": true, "/Users": true,
+	"/lib64": true, "/var": true, "/home": true, "/users": true,
 }
 
 // sensitiveMountNames are directory names that carry credentials wherever they appear. They sit
@@ -471,40 +474,122 @@ var sensitiveMountNames = map[string]bool{
 	".azure": true, ".config/gcloud": true,
 }
 
+// maxMountLinkHops bounds the symlink walk a mount path is judged over. A pair of links pointing
+// at each other never resolves, so the walk stops rather than spinning, and a path with links left
+// after this many hops is beyond anything a checkout legitimately builds.
+const maxMountLinkHops = 40
+
 // checkMountPath rejects a host path that would expose a sensitive host location to the container.
 // An empty path is not a mount and passes.
+//
+// Every path the symlinks along it resolve through is judged, not only the name the run wrote. The
+// spelling check alone was satisfied by a name inside the checkout that is really a link to /etc,
+// /root/.ssh, or the filesystem root: the string is ordinary, the directory is not, and the
+// container runtime resolves the source for real and bind mounts the target. This is the mount-side
+// twin of the containment toolWorkDir already performs, and a link committed to a project's own
+// repository is enough to place one, since the Ansible plan mounts the playbook directory, the
+// inventory, the private key, and every vault password path exactly as they were given.
 func checkMountPath(path string) error {
 	if path == "" {
 		return nil
 	}
 	clean := filepath.Clean(path)
-	if sensitiveMountRoots[clean] {
+	for _, candidate := range mountPathChain(clean) {
+		if !forbiddenMountPath(candidate) {
+			continue
+		}
+		if candidate != clean {
+			return fmt.Errorf("%w: %s: resolves to %s", ErrForbiddenMount, clean, candidate)
+		}
 		return fmt.Errorf("%w: %s", ErrForbiddenMount, clean)
 	}
+	return nil
+}
+
+// forbiddenMountPath reports whether one already-resolved path names a sensitive host location.
+//
+// The comparison folds case, because the filesystems this runs on do: macOS and Windows both hand
+// /Users/ops/.SSH/id_rsa to a caller who asked for .ssh, so matching the names byte for byte handed
+// out exactly the files the guard exists to withhold. Folding everywhere rather than only where the
+// filesystem folds costs a run nothing, since no run needs a directory differing from a credential
+// store in case alone, and it means the guard does not depend on knowing which filesystem a path is
+// on to reach the same verdict.
+func forbiddenMountPath(path string) bool {
+	lower := strings.ToLower(path)
+	if sensitiveMountRoots[lower] {
+		return true
+	}
 	for _, tree := range sensitiveMountTrees {
-		if clean == tree || strings.HasPrefix(clean, tree+"/") {
-			return fmt.Errorf("%w: %s", ErrForbiddenMount, clean)
+		if lower == tree || strings.HasPrefix(lower, tree+"/") {
+			return true
 		}
 	}
 	// Matched on the components rather than the whole string, so a directory merely ending in one of
 	// these names is not refused and one buried mid-path still is.
-	parts := strings.Split(clean, "/")
+	parts := strings.Split(lower, "/")
 	for i, part := range parts {
 		if sensitiveMountNames[part] {
-			return fmt.Errorf("%w: %s", ErrForbiddenMount, clean)
+			return true
 		}
 		if i > 0 && sensitiveMountNames[parts[i-1]+"/"+part] {
-			return fmt.Errorf("%w: %s", ErrForbiddenMount, clean)
+			return true
 		}
 	}
 	// Any unix socket, not only docker.sock. The runtimes this executes under name theirs
 	// differently, podman.sock, containerd.sock, crio.sock, and a socket is never something an
 	// execution environment needs mounted, so the whole class is refused rather than a list of names
 	// that has to keep up with the runtimes.
-	if strings.HasSuffix(clean, ".sock") {
-		return fmt.Errorf("%w: %s", ErrForbiddenMount, clean)
+	return strings.HasSuffix(lower, ".sock")
+}
+
+// mountPathChain returns clean followed by every path the symlinks along it resolve through. Each
+// hop is judged in its own right rather than only the final destination, because the destination is
+// often a further link on the host itself: /etc is a link to /private/etc on macOS, so a guard that
+// looked only at where the walk ended would never see the /etc the blocklist names.
+func mountPathChain(clean string) []string {
+	chain := []string{clean}
+	for range maxMountLinkHops {
+		next, ok := followFirstLink(chain[len(chain)-1])
+		if !ok {
+			break
+		}
+		chain = append(chain, next)
 	}
-	return nil
+	return chain
+}
+
+// followFirstLink replaces the shallowest symlinked component of path with what it points at and
+// reports whether it found one. Resolving from the outside in is the order the kernel resolves in,
+// so every path the walk passes through is a path the mount really reaches. A component that cannot
+// be read stops the walk: nothing below a path that does not exist can be a link either.
+func followFirstLink(path string) (string, bool) {
+	parts := strings.Split(path, "/")
+	prefix := ""
+	if strings.HasPrefix(path, "/") {
+		prefix = "/"
+	}
+	for i, part := range parts {
+		if part == "" {
+			continue
+		}
+		prefix = filepath.Join(prefix, part)
+		info, err := os.Lstat(prefix)
+		if err != nil {
+			return "", false
+		}
+		if info.Mode()&os.ModeSymlink == 0 {
+			continue
+		}
+		target, err := os.Readlink(prefix)
+		if err != nil {
+			return "", false
+		}
+		if !filepath.IsAbs(target) {
+			target = filepath.Join(filepath.Dir(prefix), target)
+		}
+		return filepath.Join(target, filepath.Join(parts[i+1:]...)), true
+	}
+	return "", false
 }
 
 // imageRefPattern matches a conservative container image reference: it must start with an
