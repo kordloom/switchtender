@@ -1,0 +1,5 @@
+# Package versions every host in the fleet is held at.
+chrony=4.3
+nginx=1.24.0
+openssl=3.0.13
+postgresql-client=16.3
