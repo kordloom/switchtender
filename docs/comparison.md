@@ -12,8 +12,9 @@ where it is behind, because credibility comes from being straight about all thre
 
 Every claim about another product was checked against that vendor's own documentation on
 2026-08-10, for AWX 24.6.1, Ansible Automation Platform 2.7, Semaphore 2.19.7, Ascender 25.4.0,
-and Rundeck 6.0.1. Release state re-verified 2026-09-06: AWX is still 24.6.1 and Semaphore is at
-2.19.12, whose releases since 2.19.7 are bugfix-only and change no row. All of these ship, and a
+and Rundeck 6.0.1. Versions re-checked 2026-09-07: AWX is unchanged at 24.6.1, Semaphore is
+at 2.19.12, whose releases since 2.19.7 are bugfix-only and change no row, Ascender is at
+25.6.1, and Rundeck is at 6.1.0. All of these ship, and a
 comparison decays the day it is written. Check a row
 against the current release before relying on it, and open an issue if one has gone stale.
 
