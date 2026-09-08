@@ -2,8 +2,10 @@ package sqlitestore
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/kordloom/switchtender/internal/sqlutil"
 )
@@ -76,7 +78,35 @@ CREATE TABLE IF NOT EXISTS runs (
 	actor_user_id TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_runs_created_at ON runs(created_at DESC, id DESC);
-CREATE INDEX IF NOT EXISTS idx_runs_parent ON runs(parent_id, shard_index);
+-- Every run listing selects top-level runs and pages them by creation time, and that pair has to sit
+-- in one index or the planner cannot serve both halves at once. Given only separate indexes it drove
+-- the query off idx_runs_parent to satisfy parent_id IS NULL, then pushed every matching row through
+-- a sorter to recover the ordering, so asking for a page of fifty read and sorted every top-level run
+-- on the install and the LIMIT saved nothing. These carry the page ordering underneath the top-level
+-- filter, so a page is the first rows of the index and shard rows are not in it at all. Both are
+-- scanned backwards for the oldest-first ordering, so neither needs a second ascending copy.
+CREATE INDEX IF NOT EXISTS idx_runs_toplevel_created
+	ON runs(created_at DESC, id DESC) WHERE parent_id IS NULL;
+CREATE INDEX IF NOT EXISTS idx_runs_toplevel_status
+	ON runs(status, created_at DESC, id DESC) WHERE parent_id IS NULL;
+-- Dropped by its old name and recreated under a new one, because IF NOT EXISTS would keep the old
+-- definition on every existing database and the change is the WHERE, not the columns. The index
+-- exists to find a parent's children, and every query that reads it names a parent, so restricting it
+-- to rows that have one costs nothing and shrinks it to the shard and step rows. It also takes the
+-- index away from parent_id IS NULL, which matters: SQLite reads that as an equality test and,
+-- without table statistics, estimates it selects a handful of rows when it selects nearly all of
+-- them, which is what sent every run listing through a sorter.
+DROP INDEX IF EXISTS idx_runs_parent;
+CREATE INDEX IF NOT EXISTS idx_runs_child_parent
+	ON runs(parent_id, shard_index) WHERE parent_id IS NOT NULL;
+-- The dispatcher sweeps every unfinished run on a timer, and that read used to be a full scan of the
+-- runs table, so its cost was the size of the whole history rather than the size of the work in
+-- flight: an install with a year of runs behind it paid for all of them on every tick to find the
+-- handful still moving. The partial index holds only the unfinished rows, so the sweep stays the
+-- size of the queue. Its condition is the nonTerminalRun predicate itself, not a copy of it, because
+-- SQLite only uses a partial index when the query's WHERE matches the index's, so a predicate that
+-- drifted from the index would silently return the scan rather than fail.
+CREATE INDEX IF NOT EXISTS idx_runs_live ON runs(created_at) WHERE ` + nonTerminalRun + `;
 CREATE TABLE IF NOT EXISTS run_logs (
 	seq    INTEGER PRIMARY KEY AUTOINCREMENT,
 	run_id TEXT NOT NULL,
@@ -312,7 +342,7 @@ CREATE TABLE IF NOT EXISTS credential_types (
 	fields     TEXT NOT NULL DEFAULT '[]',
 	env        TEXT NOT NULL DEFAULT '{}',
 	extra_vars TEXT NOT NULL DEFAULT '{}',
-	created_at INTEGER NOT NULL DEFAULT 0
+	created_at TEXT NOT NULL DEFAULT '0001-01-01T00:00:00Z'
 );
 CREATE TABLE IF NOT EXISTS teams (
 	id         TEXT PRIMARY KEY,
@@ -398,6 +428,10 @@ func Open(path string) (*DB, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	if err := migrateOrgMembers(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	if err := migrateSources(db); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -423,6 +457,10 @@ func Open(path string) (*DB, error) {
 		return nil, err
 	}
 	if err := migrateCredentials(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if err := migrateCredentialTypes(db); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -669,6 +707,14 @@ func migrateRuns(db *sql.DB) error {
 // ALTER that adds one: a database from that first day enforced nothing while every fresh database
 // cascaded a deleted team's memberships. The rebuild is the standard SQLite shape, copy and swap, and
 // runs only when the constraint is actually absent.
+//
+// The copy skips memberships whose team does not exist. Those rows are exactly what the
+// pre-constraint table permitted, since AddMember on a table with no foreign key accepted any team
+// id at all, and they are what the constraint was added to stop. Copying one into a table that
+// declares the reference aborts the insert, and the abort reaches Open, so a single membership
+// nobody can see would stop the whole install from starting: no server, no audit chain, no runs.
+// Dropping the orphan is the safe direction, since a membership pointing at no team grants access
+// to nothing and a fresh install would have refused to record it.
 func migrateTeamMembers(db *sql.DB) error {
 	var exists int
 	if err := db.QueryRow(
@@ -697,7 +743,8 @@ func migrateTeamMembers(db *sql.DB) error {
 	user_id TEXT NOT NULL,
 	PRIMARY KEY (team_id, user_id)
 )`,
-		"INSERT INTO team_members_new SELECT team_id, user_id FROM team_members",
+		"INSERT INTO team_members_new SELECT team_id, user_id FROM team_members " +
+			"WHERE team_id IN (SELECT id FROM teams)",
 		"DROP TABLE team_members",
 		"ALTER TABLE team_members_new RENAME TO team_members",
 		// Dropping the old table dropped its index, and the schema exec that would recreate it has
@@ -709,6 +756,142 @@ func migrateTeamMembers(db *sql.DB) error {
 		}
 	}
 	return tx.Commit()
+}
+
+// migrateOrgMembers rebuilds org_members with the foreign key its CREATE promises, for the same
+// reason migrateTeamMembers rebuilds the table beside it. org_members declares the identical
+// ON DELETE CASCADE reference, so without this rebuild a database whose copy of the table predates
+// the reference enforces nothing forever: a membership can name an organization that does not
+// exist, and deleting an organization leaves its memberships behind, while every fresh install
+// refuses the first and cascades the second. Organization membership carries a role, so the gap
+// let an upgraded install hold an admin grant on nothing at all.
+//
+// The copy drops memberships whose organization is missing, which the pre-constraint table
+// permitted and the constraint refuses, so one unreferenced row cannot abort Open.
+func migrateOrgMembers(db *sql.DB) error {
+	var exists int
+	if err := db.QueryRow(
+		"SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='org_members'").Scan(&exists); err != nil {
+		return fmt.Errorf("org_members migration: %w", err)
+	}
+	if exists == 0 {
+		return nil
+	}
+	var fks int
+	if err := db.QueryRow(
+		"SELECT COUNT(*) FROM pragma_foreign_key_list('org_members')").Scan(&fks); err != nil {
+		return fmt.Errorf("org_members migration: %w", err)
+	}
+	if fks > 0 {
+		return nil
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("org_members migration: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, stmt := range []string{
+		`CREATE TABLE org_members_new (
+	org_id  TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+	user_id TEXT NOT NULL,
+	role    TEXT NOT NULL DEFAULT 'member',
+	PRIMARY KEY (org_id, user_id)
+)`,
+		"INSERT INTO org_members_new SELECT org_id, user_id, role FROM org_members " +
+			"WHERE org_id IN (SELECT id FROM orgs)",
+		"DROP TABLE org_members",
+		"ALTER TABLE org_members_new RENAME TO org_members",
+		// Dropping the old table dropped its index, and the schema exec that would recreate it has
+		// already run this open, so the rebuild recreates it itself.
+		"CREATE INDEX IF NOT EXISTS idx_org_members_user ON org_members(user_id)",
+	} {
+		if _, err := tx.Exec(stmt); err != nil {
+			return fmt.Errorf("org_members migration: %w", err)
+		}
+	}
+	return tx.Commit()
+}
+
+// migrateCredentialTypes moves credential_types.created_at from the UnixNano integer it first held
+// to the text form every other stored timestamp uses. The read path now parses text, so an
+// untouched integer column would fail every read of the table after an upgrade. SQLite cannot
+// change a column's declared type, so the table is rebuilt in the standard copy and swap shape,
+// and the rebuild runs only while the column is still declared INTEGER.
+//
+// Each stored integer is converted through the same time.Unix it was read through before, so an
+// existing type keeps the creation time it has been reporting all along. A type stamped with the
+// overflowed zero time keeps the eighteenth-century value it already shows, and unlike before it
+// can now be corrected by saving the type again.
+func migrateCredentialTypes(db *sql.DB) error {
+	var typ string
+	err := db.QueryRow(
+		"SELECT type FROM pragma_table_info('credential_types') WHERE name='created_at'").Scan(&typ)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("credential_types migration: %w", err)
+	}
+	if !strings.EqualFold(typ, "INTEGER") {
+		return nil
+	}
+	stamps, err := readCredTypeNanos(db)
+	if err != nil {
+		return err
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("credential_types migration: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, stmt := range []string{
+		`CREATE TABLE credential_types_new (
+	id         TEXT PRIMARY KEY,
+	name       TEXT NOT NULL,
+	fields     TEXT NOT NULL DEFAULT '[]',
+	env        TEXT NOT NULL DEFAULT '{}',
+	extra_vars TEXT NOT NULL DEFAULT '{}',
+	created_at TEXT NOT NULL DEFAULT '0001-01-01T00:00:00Z'
+)`,
+		"INSERT INTO credential_types_new (id, name, fields, env, extra_vars) " +
+			"SELECT id, name, fields, env, extra_vars FROM credential_types",
+		"DROP TABLE credential_types",
+		"ALTER TABLE credential_types_new RENAME TO credential_types",
+	} {
+		if _, err := tx.Exec(stmt); err != nil {
+			return fmt.Errorf("credential_types migration: %w", err)
+		}
+	}
+	for id, nanos := range stamps {
+		if _, err := tx.Exec("UPDATE credential_types SET created_at=? WHERE id=?",
+			sqlutil.FormatTime(time.Unix(0, nanos)), id); err != nil {
+			return fmt.Errorf("credential_types migration: %w", err)
+		}
+	}
+	return tx.Commit()
+}
+
+// readCredTypeNanos reads the stored UnixNano creation stamp of every credential type, keyed by id,
+// before the rebuild replaces the column that holds them.
+func readCredTypeNanos(db *sql.DB) (map[string]int64, error) {
+	rows, err := db.Query("SELECT id, created_at FROM credential_types")
+	if err != nil {
+		return nil, fmt.Errorf("credential_types migration: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[string]int64{}
+	for rows.Next() {
+		var id string
+		var nanos int64
+		if err := rows.Scan(&id, &nanos); err != nil {
+			return nil, fmt.Errorf("credential_types migration: %w", err)
+		}
+		out[id] = nanos
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("credential_types migration: %w", err)
+	}
+	return out, nil
 }
 
 // migrateHostSummary adds the dry-run flag to an existing host summary table. The flag is copied

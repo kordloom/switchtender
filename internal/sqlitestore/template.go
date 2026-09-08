@@ -70,6 +70,11 @@ ON CONFLICT(id) DO UPDATE SET
 }
 
 // Update changes an existing template's fields, or returns template.ErrNotFound.
+//
+// The SET list carries every column Save writes except created_at, which an edit must not move.
+// limit_pattern belongs in it because the limit is the blast radius of the saved spec: a column
+// left out of the list is not reported as unwritten, so an operator narrowing a template to one
+// host would get a success and a template that still launches against the whole fleet.
 func (s *templateStore) Update(ctx context.Context, t *template.Template) error {
 	vars, err := json.Marshal(t.ExtraVars)
 	if err != nil {
@@ -87,7 +92,8 @@ func (s *templateStore) Update(ctx context.Context, t *template.Template) error 
 	name=?, project_id=?, playbook=?, inventory=?, inventory_id=?, shards=?,
 	credential_ids=?, extra_vars=?, survey=?, queue=?, tool=?, command=?, dry_run=?, image=?,
 	pull_credential_id=?, org_id=?, notifications=?, selectable_credential_ids=?, timeout=?,
-	confirm_on_launch=?, tags=?, skip_tags=?, verbosity=?, forks=?, diff_mode=?, steps=?
+	confirm_on_launch=?, tags=?, skip_tags=?, verbosity=?, forks=?, diff_mode=?, steps=?,
+	limit_pattern=?
 	WHERE id=?`
 	res, err := s.db.ExecContext(ctx, q,
 		t.Name, t.ProjectID, t.Playbook, t.Inventory, t.InventoryID, t.Shards,
@@ -95,7 +101,7 @@ func (s *templateStore) Update(ctx context.Context, t *template.Template) error 
 		sqlutil.BoolToInt(t.DryRun), t.Image, t.PullCredentialID, t.OrgID, string(notifs),
 		sqlutil.JoinIDs(t.SelectableCredentialIDs), t.Timeout, sqlutil.BoolToInt(t.ConfirmOnLaunch),
 		sqlutil.JoinIDs(t.Tags), sqlutil.JoinIDs(t.SkipTags), t.Verbosity, t.Forks,
-		sqlutil.BoolToInt(t.DiffMode), marshalSteps(t.Steps), t.ID)
+		sqlutil.BoolToInt(t.DiffMode), marshalSteps(t.Steps), t.Limit, t.ID)
 	if err != nil {
 		return fmt.Errorf("update template: %w", err)
 	}
