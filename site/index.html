@@ -24,7 +24,7 @@
   "Runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go",
   "Reads secrets from HashiCorp Vault KV v1 and v2, Vault dynamic secrets minted per run and revoked when it ends, AWS Secrets Manager, and Azure Key Vault",
   "Per-object access grants: read, use, or manage on one project, template, inventory, or credential, layered over global roles",
-  "Single sign-on through OIDC and LDAP",
+  "Single sign-on through OIDC, SAML, LDAP, and JWT",
   "Pipelines with a dependency graph and parallel branches, built in a drag-and-drop editor",
   "Approval gates enforced by policy before a run executes",
   "Tamper-evident hash-chained audit trail a third party can verify offline",
@@ -191,12 +191,12 @@
 				<article class="card reveal">
 					<div class="ic ic-drift"></div>
 					<h3>Drift detection</h3>
-					<p>A dry run shows exactly what has drifted, across Ansible hosts and Terraform directories, before you touch a thing. One click builds the fix, held for approval. None of the controllers in our comparison document it, and the Terraform control planes that do detect drift do not govern your Ansible fleet beside it.</p>
+					<p>A dry run shows exactly what has drifted, across Ansible hosts and Terraform directories, before you touch a thing. One click builds the fix, held for approval. None of the controllers in our comparison document it, and the Terraform control planes that do detect drift do not govern your Ansible fleet beside it. Detection is free. The one-click reconcile needs Team.</p>
 				</article>
 				<article class="card reveal">
 					<div class="ic ic-gate"></div>
 					<h3>Enforced approvals</h3>
-					<p>Hold risky runs for sign-off, gated by policy on tool, command, or target. Operators request, admins release. No skipping the gate.</p>
+					<p>Hold risky runs for sign-off, gated by policy on tool, command, or target. Operators request, admins release. No skipping the gate. Community holds one policy. The full engine, with deny rules, risk floors, actor scoping, and distinct-approver separation of duties, is Team.</p>
 				</article>
 				<article class="card reveal">
 					<div class="ic ic-roles"></div>
@@ -206,7 +206,7 @@
 				<article class="card reveal">
 					<div class="ic ic-shards"></div>
 					<h3>Reach isolated networks</h3>
-					<p>A worker dials out to the control node with a token and opens no inbound port, so it runs jobs inside an air-gapped segment, a DMZ, or a customer network the control node can't reach. One binary, one outbound connection.</p>
+					<p>A worker dials out to the control node with a token and opens no inbound port, so it runs jobs inside an air-gapped segment, a DMZ, or a customer network the control node can't reach. One binary, one outbound connection. The mesh relay needs Team. A worker that shares the database is free.</p>
 				</article>
 				<article class="card reveal">
 					<div class="ic ic-ai"></div>
@@ -309,7 +309,7 @@
 				<article class="card reveal">
 					<div class="ic ic-lineage"></div>
 					<h3>The change register</h3>
-					<p><code>switchtender audit report</code> renders every change in a period, the sample a SOC 2 CC8.1 or ISO/IEC 27001 A.8.32 review asks for; the <a href="/docs/compliance">control mapping</a> and a <a href="/docs/sample-evidence-pack">sample pack</a> show exactly what an assessor gets. Point <code>--evidence-dir</code> at an archive and registers write themselves on a cadence, so the evidence exists before anyone asks.</p>
+					<p><code>switchtender audit report</code> renders every change in a period, the sample a SOC 2 CC8.1 or ISO/IEC 27001 A.8.32 review asks for; the <a href="/docs/compliance">control mapping</a> and a <a href="/docs/sample-evidence-pack">sample pack</a> show exactly what an assessor gets. Point <code>--evidence-dir</code> at an archive and registers write themselves on a cadence, so the evidence exists before anyone asks. The register needs Team. The receipts, dossiers, and signed bundles beside it are free.</p>
 				</article>
 				<article class="card reveal">
 					<div class="ic ic-doctor"></div>
@@ -427,7 +427,7 @@ func main() {
 						<tr><td>Typed cloud credentials, pluggable types</td><td class="us"><i class="y"></i></td><td><span class="muted">typed, not pluggable</span></td><td><span class="muted">typed, not pluggable</span></td><td><i class="n"></i></td><td><i class="n"></i></td></tr>
 						<tr><td>Organizations, teams, per-object grants</td><td class="us"><i class="y"></i></td><td><i class="y"></i></td><td><i class="y"></i></td><td><span class="muted">teams, four fixed roles</span></td><td><span class="muted">policy files, no GUI editor</span></td></tr>
 						<tr><td>Instance groups: pin work to worker pools</td><td class="us"><i class="y"></i></td><td><i class="y"></i></td><td><i class="y"></i></td><td><i class="n"></i></td><td><span class="muted">enterprise</span></td></tr>
-						<tr><td>Active-active HA on PostgreSQL</td><td class="us"><i class="y"></i></td><td><span class="muted">via Kubernetes</span></td><td><span class="muted">via Kubernetes</span></td><td><i class="n"></i></td><td><span class="muted">enterprise</span></td></tr>
+						<tr><td>Active-active HA on PostgreSQL</td><td class="us"><i class="y"></i> <span class="muted">creating the schema is Team; opening an existing one is never gated</span></td><td><span class="muted">via Kubernetes</span></td><td><span class="muted">via Kubernetes</span></td><td><i class="n"></i></td><td><span class="muted">enterprise</span></td></tr>
 					</tbody>
 				</table>
 				<p class="compare-note">Every row was checked against each vendor's own documentation on 10 August 2026, at AWX 24.6.1, Ansible Automation Platform 2.7, Semaphore 2.19.7, Ascender 25.4.0, and Rundeck 6.0.1. Versions were re-checked on 7 September 2026: AWX is unchanged, Semaphore is now 2.19.12, Ascender 25.6.1, and Rundeck 6.1.0. All five of these products keep shipping, so a table like this starts going stale the day it's written. If a row is wrong, <a href="https://github.com/kordloom/switchtender/issues">open an issue</a> and we'll fix it.</p>

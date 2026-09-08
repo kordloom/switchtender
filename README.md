@@ -140,7 +140,9 @@ guessed from traffic:
   never approve a run, including its own. Separation of duties for machine changes holds by
   construction, not by convention.
 - **Its own rules.** Policies can name what an agent may do, what it may never do, and what needs a
-  person first:
+  person first. Holding an agent's runs for a person is free: one plain require-approval rule, which
+  Community holds, already gates every run an agent submits. Scoping rules by actor, grading them by
+  risk, and refusing outright are the full policy engine, which Team covers:
 
       policies:
         - name: agents-never-drop-databases
@@ -295,7 +297,6 @@ required.
 
 - A hosted option.
 - Signed desktop packages for macOS and Windows.
-- An OpenStack credential kind.
 - Group-driven roles for OIDC sign-in, which LDAP, SAML, and JWT already have.
 
 ## Status
@@ -310,7 +311,7 @@ the 1.x line.
 Business Source License 1.1. Read the source, run it, and use it in production. Community is free
 and complete for leaving AWX: all seven engines, the importers, RBAC with organizations and teams,
 one digest-bound approval policy, the MCP agent gate, and the whole evidence engine with signed
-receipts and offline verification. Pro adds directory sign-in (OIDC, SAML, LDAP) and five
+receipts and offline verification. Pro adds directory sign-in (OIDC, SAML, LDAP, JWT) and five
 approval policies at $490 a year. Team adds the full policy engine, Postgres and active-active
 HA, distributed workers, the change register, and one-click drift reconcile. Every paid feature
 unlocks in the same binary with a signed license file: no license server, no phone-home, flat

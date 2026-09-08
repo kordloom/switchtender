@@ -24,8 +24,8 @@
 			"@type": "AggregateOffer",
 			"priceCurrency": "USD",
 			"lowPrice": "0",
-			"highPrice": "25000",
-			"offerCount": "2"
+			"highPrice": "50000",
+			"offerCount": "4"
 		}
 	}
 	</script>
@@ -133,7 +133,7 @@
   "Runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go",
   "Reads secrets from HashiCorp Vault KV v1 and v2, Vault dynamic secrets minted per run and revoked when it ends, AWS Secrets Manager, and Azure Key Vault",
   "Per-object access grants: read, use, or manage on one project, template, inventory, or credential, layered over global roles",
-  "Single sign-on through OIDC and LDAP",
+  "Single sign-on through OIDC, SAML, LDAP, and JWT",
   "Pipelines with a dependency graph and parallel branches, built in a drag-and-drop editor",
   "Approval gates enforced by policy before a run executes",
   "Tamper-evident hash-chained audit trail a third party can verify offline",
@@ -231,6 +231,21 @@
 					</ul>
 				</article>
 
+				<article class="card tier">
+					<div class="tier-name">Pro</div>
+					<p class="tier-for">Your directory, on the smallest fleet.</p>
+					<div class="tier-price"><b>$490</b><span class="cadence">per year, flat per org</span></div>
+					<p class="tier-sub">To 250 hosts, single-node. The same binary, unlocked by a signed license file the product verifies offline.</p>
+					<div class="tier-payoff">The tier that exists because directory sign-in should not cost what the rest of this market charges for it. <b>A lapsed license takes nothing</b>: sign-in falls back to local accounts, and your data, evidence, and every Community feature keep working.</div>
+					<a class="btn" href="mailto:hello@kordloom.com?subject=SwitchTender%20Pro%20trial&amp;body=Org%20name%3A%0A">Start a 30-day trial</a>
+					<a class="ghost" href="mailto:hello@kordloom.com?subject=Buy%20SwitchTender%20Pro">Buy Pro</a>
+					<p class="tier-inherit">Everything in Community, plus:</p>
+					<ul class="tier-list">
+						<li><b>Directory sign-in</b>: OIDC, SAML, LDAP, and JWT, so accounts come from the directory you already run</li>
+						<li><b>Five approval policies</b> instead of one, for an estate with more than a single rule worth writing down</li>
+					</ul>
+				</article>
+
 				<article class="card tier tier-featured">
 					<div class="tier-name">Team</div>
 					<p class="tier-for">Community runs it. Team governs it.</p>
@@ -239,9 +254,8 @@
 					<div class="tier-payoff">A signed license file, verified offline by the binary you already run. Thirty-day trial from an email, no card. <b>A lapsed license takes nothing</b>: paid features stop, and your data, evidence, and every Community feature keep working.</div>
 					<a class="btn" href="mailto:hello@kordloom.com?subject=SwitchTender%20Team%20trial&body=Org%20name%3A%0AFleet%20band%20(250%2F1000%2Funlimited)%3A%0A">Start a 30-day trial</a>
 					<a class="ghost" href="mailto:hello@kordloom.com?subject=Buy%20SwitchTender%20Team">Buy Team</a>
-					<p class="tier-inherit">Everything in Community, plus:</p>
+					<p class="tier-inherit">Everything in Pro, plus:</p>
 					<ul class="tier-list">
-						<li>Everything in Pro, plus:</li>
 						<li><b>The full policy engine</b>: unlimited policies, outright denials, risk floors, separation of duties, and agent-scoped rules</li>
 						<li><b>PostgreSQL</b> and active-active <b>HA</b></li>
 						<li><b>Distributed workers</b> and queues, for fleets one machine cannot reach</li>

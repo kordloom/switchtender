@@ -57,4 +57,8 @@ The same action is one request, for an operator token:
 
 The `host` field names the drifted target, an Ansible host or a Terraform working directory.
 
+Detecting drift is free. One-click reconcile, both the button and this request, needs a Team license,
+and is refused rather than ignored without one. Without it, drift is still reported and still fixed
+by launching the run yourself.
+
 See also the [FAQ](faq.md) and the [tutorials](tutorials.md).

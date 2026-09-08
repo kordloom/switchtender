@@ -121,6 +121,14 @@ held run is admin-only, so an operator-bound agent can never approve its own wor
    matters for admins, since an agent or operator can never approve anything. The requirement is
    copied onto each run the rule holds, so editing the rule later cannot weaken a pending decision.
 
+   Every criterion in that file is the full policy engine, which a Team license covers: actor
+   scoping, risk floors, deny rules, and distinct-approver separation of duties. A server started
+   with a policy file it is not licensed for refuses at startup and says so, rather than running with
+   the rules quietly dropped. The gate itself is free: a Community install holds one plain
+   require-approval policy, and one empty rule already holds every run an agent submits for a person,
+   which is the whole containment story on this page. What Team buys is scoping that hold, so agents
+   are held while people are not, and so a rule can refuse outright rather than wait.
+
 4. Pin the policies by starting the server with `serve --policy-file policies.yml`. The file is the
    source of truth and the API refuses policy writes, so even an admin API caller cannot rewrite
    them. An agent cannot loosen its own gate, and neither can a leaked admin token.
@@ -237,6 +245,6 @@ The advisory AI is a feature you switch on; an agent is a client you let in.
 token is operator-bound. A held run the agent submits waits for a human admin.
 
 That answer is a claim, so it is also tested. [Red team: can an agent get a change past the
-gate?](/docs/agent-red-team) is the transcript of an agent holding an admin-role token trying
+gate?](agent-red-team.md) is the transcript of an agent holding an admin-role token trying
 thirteen ways through, including approving its own work, minting itself a wider token, and
 rewriting the specification while it waited.

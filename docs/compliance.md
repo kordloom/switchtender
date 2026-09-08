@@ -11,9 +11,11 @@ This maps what SwitchTender records to the change-management and audit-control c
 asks about. It is a reference for the person answering the audit, not a claim of certification: the
 tool produces the evidence, and your assessor decides whether your program satisfies the control.
 
-Every mapping below points at the tamper-evident chain and the change register
-`switchtender audit report` renders from it, all in the free core, shipping in the current
-download. Nothing here is a paid feature. The paid Assurance service (design partners) adds
+Every mapping below points at the tamper-evident chain, which is free in every install: the
+chain, RFC 3161 anchoring, signed per-run receipts, and offline verification with the open
+verifier are Community features and always will be. The period change register that
+`switchtender audit report` renders over a date range is a Team feature, so the evidence is
+yours for nothing and the report that assembles it for an auditor is what a license pays for. The paid Assurance service (design partners) adds
 control-mapped evidence packs and auditor-facing attestation reports, assembled for you on the same
 cadence the free `--evidence-dir` registers already run on.
 

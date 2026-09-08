@@ -172,7 +172,9 @@ activity alongside the change trail.
 run's dossier: what ran, its risk grade, who approved it, what happened on each host, and the
 receipts and anchors behind all of it. `switchtender audit report --from --to` renders the period's
 change register, the sample a SOC 2 CC8.1 or ISO/IEC 27001 A.8.32 review asks for. Both are
-self-contained HTML that a reviewer reads without tooling and checks against the live chain.
+self-contained HTML that a reviewer reads without tooling and checks against the live chain. The
+per-run dossier is free. The period register is a Team feature, so the evidence is yours either way
+and what a license pays for is the report that assembles it.
 
 **A witness remembers what the server can no longer take back.** `switchtender witness`, run on a
 machine the server's operator does not control, polls the public beat feed, keeps a signed

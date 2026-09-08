@@ -28,7 +28,7 @@ when you configure them, and each is optional:
 
 ## Authentication and access
 
-SSO over OIDC, SAML, and LDAP, with JIT provisioning and group-to-role mapping. Role-based
+SSO over OIDC, SAML, LDAP, and JWT, with JIT provisioning and group-to-role mapping. Role-based
 access control with per-object grants, organizations, and teams. API access is bearer tokens; an
 agent's token can be bound to an account so its actions attribute to both. Details in
 [configuration](configuration.md).

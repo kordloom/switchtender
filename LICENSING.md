@@ -13,7 +13,9 @@ server, no online activation, no phone-home:
 
 - All execution engines: Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go.
 - One-command importers: AWX, AAP, Tower, Ascender, Semaphore, Rundeck, Jenkins, and crontabs.
-- Role-based access control, per-object grants, organizations, and teams, plus JWT sign-in.
+- Role-based access control, per-object grants, organizations, and teams, with local accounts.
+  Directory sign-in, which is OIDC, SAML, LDAP, and JWT, is a Pro feature: the server refuses to
+  start with any of them configured unless a Pro or higher license is installed.
 - The whole evidence engine: the tamper-evident hash chain, RFC 3161 anchoring, signed per-run
   receipts, run dossiers, and offline verification with the open verifier. The proofs are free
   forever, on every tier.
@@ -35,7 +37,7 @@ The commercial model is open core, and paid features ship in the same binary, un
 small signed file verified offline against a key compiled into the binary.
 
 Pro, at $490 a year flat per organization to 250 hosts, adds directory sign-in (OIDC, SAML,
-and LDAP, with group-to-role mapping and just-in-time provisioning) and five approval
+LDAP, and JWT, with group-to-role mapping and just-in-time provisioning) and five approval
 policies instead of one. That is deliberately the same price the rest of this market charges
 for single sign-on, because a tier nobody can afford to cross is not a tier.
 
@@ -45,8 +47,10 @@ distributed workers, initializing a new PostgreSQL database for active-active hi
 and one-click drift reconcile. No license server, no activation, no phone-home, no seat counting,
 and fleet bands are self-reported and never audited. A lapsed license takes nothing: opening an
 existing PostgreSQL database is never gated, in any state, and every Community feature keeps
-working. Enterprise adds services that by definition come from outside your install, such as the
-hosted witness and evidence custody.
+working. Restoring a backup carries your approval policies back whatever tier the install runs,
+because an install that came back without the gates it had is a worse outcome than one holding a
+rule it is no longer licensed to create. Enterprise adds services that by definition come from
+outside your install, such as the hosted witness and evidence custody.
 
 Seven commitments, held for every user from day one. What is free today stays free, and the
 Community tier never shrinks. A lapsed license takes nothing: data, evidence, receipts, and every

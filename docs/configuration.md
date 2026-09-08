@@ -10,6 +10,26 @@
 SwitchTender is one binary with subcommands. This page lists every command, flag, and environment
 variable.
 
+## Licensed features
+
+Almost everything on this page runs on Community, which needs no license. Six features are licensed,
+and separately an install is capped on how many approval policies it holds at once. A flag or request
+that turns on a licensed feature is refused outright rather than quietly ignored, so an install never
+believes it has a control it does not have.
+
+| Capability | Tier | Turned on by |
+|------------|------|--------------|
+| Directory sign-in (OIDC, SAML, LDAP, JWT) | Pro | Any `--oidc-*`, `--saml-*`, `--ldap-*`, or `--jwt-*` flag. `serve` refuses to start with one set and no license. |
+| The full policy engine: deny rules, risk floors, actor scoping, distinct-approver separation of duties | Team | Creating a policy that uses one. A single require-approval policy stays Community. |
+| More approval policies at once | Pro holds five, Team is uncapped | Creating policies. Community holds one. |
+| The period change register | Team | `audit report`, and `GET /v1/audit/register`. |
+| Distributed workers | Team | `worker --server`, the mesh relay. A worker sharing the database is not gated. |
+| Initializing a new PostgreSQL database | Team | The first `serve` against a `postgres://` DSN. Opening a schema that already exists is never gated. |
+| One-click drift reconcile | Team | `POST /v1/drift/reconcile`. Drift detection itself is free. |
+
+`license status` prints the tier this install runs and when a license lapses. Tiers and prices are at
+<https://switchtender.com/pricing>.
+
 ## Environment variables
 
 | Variable | Used by | Purpose |
@@ -212,6 +232,18 @@ Manages accounts with roles: admin, operator, and viewer.
 
 All user subcommands take `--db`.
 
+## license
+
+Shows or installs this install's license. No license is Community, which is complete in itself. What
+each tier covers is listed at <https://switchtender.com/pricing>.
+
+- `license status` shows the tier this install runs and when a license lapses.
+- `license install <file>` verifies a license file and installs it beside the database.
+
+A license is read from `SWITCHTENDER_LICENSE`, or from `switchtender-license.json` in the same
+directory as the database. A license this install cannot parse or that has lapsed reads as
+Community rather than failing the server, so an expiry never takes an install down.
+
 ## import
 
 Migrates from AWX or Semaphore. See [Migration](migration.md).
@@ -235,6 +267,76 @@ Audit trail tools.
 - `audit report` renders the period's change register as a self-contained HTML evidence report.
 - `audit run <id>` emits one run's evidence dossier as a self-contained HTML document.
 
+## receipt
+
+Writes a signed receipt for one finished run, which a third party verifies offline with `verify`. A
+receipt is the chain segment from the request that created the run through the entry recording what
+it did, signed with this install's key and carrying any anchors that fix its position.
+
+| Flag | Default | Purpose |
+|------|---------|---------|
+| `--db` | `switchtender.db` | Database holding the run and its chain. |
+| `--out` | stdout | File to write the receipt to. |
+| `--sparse` | off | Disclose only this run's own chain entries, proving each belongs to the log without carrying the entries around it. |
+| `--append-only-from` | unset | With `--sparse`, prove the log only appended since this size. Use a size a reader already saw, such as an anchored head. |
+
+Publish the key fingerprint the command prints so a verifier can pin it.
+
+## verify
+
+Verifies a receipt written by `receipt`. It trusts nothing this server says: it recomputes every
+chain link from the receipt's own claims, checks the signature covers the exact bytes, and confirms
+any anchors name an entry the receipt holds. It reads only the file, reaches no database and no
+network, and does not run the server, so a relying party can check a receipt on a machine that has
+never seen this install.
+
+    switchtender verify run.receipt --pubkey sha256:...
+
+Pass `--pubkey` with the fingerprint the producer published to tie the result to a key obtained out
+of band. Without it the receipt is checked against the key it names, which proves it was not altered
+but not who signed it.
+
+## witness
+
+Watches a server's span beat feed from outside it. A chain proves what it holds was not altered, but
+not that nothing was removed from the end, because the process running the chain also decides what
+gets written down. A witness on another machine remembers what the feed served, keeps that memory in
+a signed checkpoint, and raises a finding when a beat goes missing, an already-witnessed beat comes
+back rewritten, or the head regresses. Run it where the server's operator has no hand.
+
+| Flag | Default | Purpose |
+|------|---------|---------|
+| `--server` | required | Base URL of the server to watch. |
+| `--state` | `switchtender-witness.json` | Signed checkpoint holding what this witness has seen. |
+| `--interval` | `1m` | How often to poll the feed. |
+| `--key-dir` | the state file's directory | Directory holding the witness signing key. |
+| `--once` | off | Run one check and exit nonzero on findings, for cron. |
+| `--webhook` | unset | URL that receives each finding as a JSON POST. |
+
+- `witness serve` watches many servers from one process and answers auditors with countersigned
+  attestations.
+- `witness verify-attestation` verifies an attestation offline against a pinned witness key.
+
+## mcp
+
+Serves the Model Context Protocol over stdio, so an agent can list templates, propose a run, and read
+what happened. Every tool call is an ordinary authenticated API request carrying the token given
+here, so it passes the same authorization, the same approval policy, and the same fail-closed audit
+append as a request from a person. See [Agents](agents.md).
+
+    export SWITCHTENDER_MCP_TOKEN=ymt_...
+    switchtender mcp --server https://switchtender.internal
+
+The token is read from `SWITCHTENDER_MCP_TOKEN`, falling back to `SWITCHTENDER_TOKEN`. Prefer the
+environment variable to a flag, whose value is visible in the host's process list. The command
+refuses to start on an admin token. There is deliberately no approve tool, so an agent cannot release
+its own work, and no credential, account, token, grant, or policy tool, so it cannot widen its own
+reach.
+
+| Flag | Default | Purpose |
+|------|---------|---------|
+| `--allow-adhoc` | off | Also expose the ad-hoc run tool, letting the agent compose a run rather than launch a template an operator defined. Approval policy still applies. |
+
 ## demo
 
 Seeds a fresh database with sample data and real runs, then serves it read-only, so a public
@@ -257,9 +359,47 @@ demo reseeds in place. The two flags split that work in half so it can happen of
 A host wired this way reseeds without a visible outage, since the running instance keeps
 answering the whole time the replacement is being built.
 
+## examples
+
+Seeds a handful of starter templates, so a first launch works on the spot rather than opening on an
+empty list. They use the Bash tool and print or read something local, needing no project, inventory,
+or credential. Delete them once you have your own.
+
+Run it against the same database `serve` uses. It skips a template whose name is already present, so
+it is safe to run twice. Takes `--db`.
+
+## backup
+
+Writes an encrypted, portable backup of the control-plane configuration and secrets. The whole file
+is sealed with the deployment encryption key, so it stays confidential and tamper-evident, and it
+restores into either the SQLite or the PostgreSQL backend. See [Backup and restore](backup.md).
+
+| Flag | Default | Purpose |
+|------|---------|---------|
+| `--db` | `switchtender.db` | SQLite file path, or a `postgres://` DSN, to back up. |
+| `--out` | stdout | File to write the backup to. |
+
+Run history and the audit chain are not included. The audit chain has its own signed export, through
+`audit bundle`.
+
+## restore
+
+Reads a backup and upserts its objects into the store by id. It needs the same encryption key the
+backup was written with, and it never deletes objects absent from the file.
+
+| Flag | Default | Purpose |
+|------|---------|---------|
+| `--db` | `switchtender.db` | SQLite file path, or a `postgres://` DSN, to restore into. |
+| `--in` | stdin | Backup file to read. |
+
 ## version
 
 Prints the SwitchTender version.
+
+## help and completion
+
+Both are the standard Cobra built-ins. `help` prints usage for any command, and `completion` emits a
+shell completion script for bash, zsh, fish, or PowerShell.
 
 ## Output flags
 

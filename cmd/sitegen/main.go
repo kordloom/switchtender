@@ -41,6 +41,9 @@ var order = []string{
 var titles = map[string]string{
 	"README":             "Overview",
 	"switching-from-awx": "Switching from AWX",
+	// The page's own heading names every source it covers, which is right on the page and four times
+	// the length of any other entry in the sidebar beside it.
+	"migration": "Migration",
 }
 
 // logoBlock matches the centered logo and badge blocks the markdown files open with, which reference
@@ -349,7 +352,7 @@ var switchtenderFeatures = []string{
 		"revoked when it ends, AWS Secrets Manager, and Azure Key Vault",
 	"Per-object access grants: read, use, or manage on one project, template, inventory, or " +
 		"credential, layered over global roles",
-	"Single sign-on through OIDC and LDAP",
+	"Single sign-on through OIDC, SAML, LDAP, and JWT",
 	"Pipelines with a dependency graph and parallel branches, built in a drag-and-drop editor",
 	"Approval gates enforced by policy before a run executes",
 	"Tamper-evident hash-chained audit trail a third party can verify offline",

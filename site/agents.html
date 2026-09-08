@@ -57,7 +57,7 @@
 		<section class="section wrap">
 			<div class="section-head reveal">
 				<h2>What governed agent changes look like</h2>
-				<p>Six properties, each one testable against a running server. Together they turn agent activity into a record an auditor can rely on.</p>
+				<p>Seven properties, each one testable against a running server. Together they turn agent activity into a record an auditor can rely on.</p>
 			</div>
 			<div class="cards cards-3">
 				<article class="card reveal">
@@ -74,11 +74,11 @@
 				</article>
 				<article class="card reveal">
 					<h3>A human approval gate, bound to content</h3>
-					<p>Policies can hold an agent's runs for a person, refuse them outright, or key on the operation's assessed risk, and the approval itself is a chain entry committing a digest of the exact change released. The executor refuses a change that drifted after the decision, so what a person approved is provably what ran.</p>
+					<p>Policies can hold an agent's runs for a person, refuse them outright, or key on the operation's assessed risk, or on whether an agent or a person asked, and the approval itself is a chain entry committing a digest of the exact change released. The executor refuses a change that drifted after the decision, so what a person approved is provably what ran. Community holds one require-approval policy, and it can be narrowed, to a single tool for instance, rather than having to hold everything. The full engine is Team: scoping a rule to agents or to a named actor, refusing a run outright, keying on risk, and requiring that the approver not be the requester.</p>
 				</article>
 				<article class="card reveal">
 					<h3>Speaks MCP</h3>
-					<p>An agent runtime that speaks the Model Context Protocol connects straight to <code>switchtender mcp</code> with its operator-bound token. It can list templates, propose a run, and read the run's evidence, and nothing else. There is no approve tool and no way to widen its own reach, so the same gated, chained, fail-closed request a person makes is the only thing an agent can make.</p>
+					<p>An agent runtime that speaks the Model Context Protocol connects straight to <code>switchtender mcp</code> with its agent token. It serves six MCP tools: list templates, propose a run, list recent runs, and read a run, its log, and its evidence. There is no approve tool and no way to widen its own reach. <code>--allow-adhoc</code> adds a seventh that lets the agent compose a run of its own rather than launch a template an operator wrote, and even that one goes through the same approval policy. Hand it an admin token, which an agent could use to release its own runs, and the command exits instead of starting. Serving on one anyway means typing <code>--allow-admin-token</code>, which exists for a local trial and prints a warning naming the risk at every start. The safe setting is the one you get without asking for it, so the same gated, chained, fail-closed request a person makes is the only thing an agent can make.</p>
 				</article>
 				<article class="card reveal">
 					<h3>Sealed offline verification</h3>
@@ -86,7 +86,7 @@
 				</article>
 				<article class="card reveal">
 					<h3>Actor-level provenance</h3>
-					<p>Every entry names the actor behind it, whether it was a person or an agent (<code>actor_type</code>), and whose authority it used (<code>on_behalf_of</code>), all committed by the entry hash, so an agent's changes stay attributable instead of blurring into a shared account. The <a href="https://demo.switchtender.com">live demo</a> seeds a deploy-bot service account whose API and scheduled runs, and their audit entries, are on screen right now.</p>
+					<p>Every entry names the actor behind it, whether it was a person or an agent (<code>actor_type</code>), and whose authority it used (<code>on_behalf_of</code>), all committed by the entry hash. The kind is declared when the token is minted, with <code>--agent</code>, rather than guessed from how a request looks, so an agent's changes stay attributable instead of blurring into a shared account. The <a href="https://demo.switchtender.com">live demo</a> seeds a deploy-bot service account whose API and scheduled runs, and the audit entries behind them, are on screen right now. It is a plain operator account rather than an <code>--agent</code> token, so what the demo shows is the actor named on every run and entry. The agent kind is what you add when you mint the token yourself.</p>
 				</article>
 			</div>
 		</section>
@@ -94,7 +94,7 @@
 		<section class="section wrap">
 			<div class="section-head reveal">
 				<h2>The one-credential architecture</h2>
-				<p>An agent with a pile of credentials has a pile of doors. An agent with one credential has one, and SwitchTender puts a gate on it. <code>switchtender token new --user</code> binds a token to an account, so a token bound to an operator carries the operator role. It can submit runs, but it cannot approve its own work and it cannot change configuration. Add one empty approval policy and every run the agent submits waits for a person. Four commands take you from nothing to an agent whose entire history is evidence.</p>
+				<p>An agent with a pile of credentials has a pile of doors. An agent with one credential has one, and SwitchTender puts a gate on it. <code>--user</code> binds the token to an account so it carries that account's role instead of acting as admin. <code>--agent</code> is what makes it an agent's credential: the ceiling moves onto the token itself, capped at operator whatever account it is bound to, so it can submit runs but can never manage identity, access, or secrets, and can never approve its own held run. It also declares the holder at mint time, so every entry the token writes is recorded as an agent rather than as an ordinary API token. Add one approval policy with no conditions and every run the agent submits waits for a person. That rule needs no license, so the walkthrough below runs end to end on a self-hosted install. Scoping a rule to agents alone, so people are not held with them, is part of the full policy engine and needs Team. Four commands take you from nothing to an agent whose entire history is evidence.</p>
 			</div>
 			<div class="gs-steps">
 				<ol>
@@ -108,14 +108,16 @@
 					<li class="gs-step reveal">
 						<div class="gs-num">2</div>
 						<div class="gs-body">
-							<h3>Mint the bound token, the only credential the agent gets</h3>
-							<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>switchtender token new --name deploy-agent --user deploy-agent --db switchtender.db</code></pre></div>
+							<h3>Mint the agent token, the only credential the agent gets</h3>
+							<p><code>--agent</code> is not decoration. It caps the token at operator no matter what account it is bound to, and it marks every chain entry the token writes as <code>actor_type: agent</code>. Leave it off and you get an ordinary API token: the same entries record <code>actor_type: token</code>, indistinguishable from a person's script, and a rule scoped to agent runs never matches it. <code>--agent</code> requires <code>--user</code>, so the human the agent acts for is on the record. The TTL forces rotation, here monthly.</p>
+							<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>switchtender token new --name deploy-agent --user deploy-agent --agent --ttl 720h --db switchtender.db</code></pre></div>
 						</div>
 					</li>
 					<li class="gs-step reveal">
 						<div class="gs-num">3</div>
 						<div class="gs-body">
 							<h3>Gate everything with one empty policy</h3>
+							<p>No conditions, so it matches every run, agents and people alike, and one policy is all Community holds. Add <code>"actor_kind":"agent"</code> to hold only the agent's runs and the same call answers 403 until the install carries a Team license, so the free path gates everything rather than gating agents alone.</p>
 							<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>curl -s -X POST localhost:8080/v1/policies \
   -H "authorization: Bearer $ADMIN_TOKEN" \
   -H 'content-type: application/json' \
@@ -131,7 +133,7 @@
 					</li>
 				</ol>
 			</div>
-			<p class="gs-note reveal">This page is about external agents driving the <a href="/docs/api">API</a>. The built-in <a href="/docs/ai">advisory AI</a> is a separate feature: it proposes text and never executes anything.</p>
+			<p class="gs-note reveal">The longer walkthrough, including the MCP wiring, is in the <a href="/docs/agents">agent guide</a>. This page is about external agents driving the <a href="/docs/api">API</a>. The built-in <a href="/docs/ai">advisory AI</a> is a separate feature: it proposes text and never executes anything.</p>
 		</section>
 
 		<section class="section wrap">
