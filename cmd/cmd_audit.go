@@ -15,6 +15,8 @@ import (
 var auditCmd = &cobra.Command{
 	Use:   "audit",
 	Short: "Audit trail tools.",
+	Args:  cobra.NoArgs,
+	RunE:  runGroupHelp,
 }
 
 // auditReportOut holds the --out value for audit report.

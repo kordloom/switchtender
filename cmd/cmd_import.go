@@ -25,6 +25,8 @@ type mapFunc func(data []byte, now time.Time) (*importer.Plan, error)
 var importCmd = &cobra.Command{
 	Use:   "import",
 	Short: "Import AWX, Semaphore, Rundeck, Jenkins, or crontab definitions into SwitchTender.",
+	Args:  cobra.NoArgs,
+	RunE:  runGroupHelp,
 }
 
 // importAWXCmd imports an awx export document.

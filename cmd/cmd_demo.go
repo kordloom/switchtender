@@ -50,6 +50,7 @@ var demoAnchorTSA string
 var demoCmd = &cobra.Command{
 	Use:   "demo",
 	Short: "Run a seeded, read-only demo instance.",
+	Args:  cobra.NoArgs,
 	RunE:  runDemo,
 }
 

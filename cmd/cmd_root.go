@@ -18,7 +18,20 @@ var rootCmd = &cobra.Command{
 	Use:              "switchtender",
 	Short:            "Automation execution and fleet orchestration platform.",
 	Long: "SwitchTender runs and governs automation across a fleet of hosts: Ansible, Terraform, " +
-		"Bash, Python, and Go from one binary, with a provable audit trail over every change.",
+		"OpenTofu, Bash, PowerShell, Python, and Go from one binary, with a provable audit trail " +
+		"over every change.",
+}
+
+// runGroupHelp prints a group command's help and is the body every container command carries.
+//
+// Cobra decides a command is not runnable before it validates arguments, so a group with no body of
+// its own returned help and exited 0 for anything typed after it. A mistyped "token revok tok_abc"
+// left the leaked credential live while the operator read success, and a mistyped "audit anchr" in
+// the scheduled cron line anchored nothing forever while the monitor watching that exit code called
+// the job healthy. Giving every group a body makes its cobra.NoArgs validator reachable, so an
+// unknown subcommand is refused, and the bare group still prints the same help it always did.
+func runGroupHelp(cmd *cobra.Command, _ []string) error {
+	return cmd.Help()
 }
 
 // init registers the SwitchTender subcommands on the root command.

@@ -49,6 +49,7 @@ This check trusts whoever can write the release assets, since it fetches the man
 nothing more. BINARY_SHA256SUMS is covered by the cosign-signed SHA256SUMS, so verify that signature
 once out of band to turn this into a check on the build rather than on GitHub. SECURITY.md has the
 commands.`,
+	Args:         cobra.NoArgs,
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		if !versionVerify {

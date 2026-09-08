@@ -23,6 +23,8 @@ var userRole string
 var userCmd = &cobra.Command{
 	Use:   "user",
 	Short: "Manage accounts. Sign in through the UI or POST /auth/login.",
+	Args:  cobra.NoArgs,
+	RunE:  runGroupHelp,
 }
 
 // userNewCmd creates an account. The password comes from SWITCHTENDER_PASSWORD or an interactive
@@ -38,6 +40,7 @@ var userNewCmd = &cobra.Command{
 var userListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List accounts.",
+	Args:  cobra.NoArgs,
 	RunE:  runUserList,
 }
 
