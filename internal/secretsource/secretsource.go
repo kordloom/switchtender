@@ -191,20 +191,45 @@ func Kinds() []string {
 // ResolveLeased returns the value a source names and, for a dynamic engine, a lease that revokes the
 // minted secret. A local source returns its config with no lease. A registered resolver returns its
 // value with no lease. A dynamic engine mints a short-lived value and returns a lease for it.
+//
+// A source that reports success but produces nothing is refused here, once, for every kind rather
+// than in each engine. Several engines already refuse an empty read of their own, but the ones that
+// did not let a blank Vault field, a Secret Manager reply with no payload, or a fetch command that
+// prints nothing and exits zero resolve to an empty credential, and the run then proceeded with it
+// while the audit trail recorded a successful resolve. An empty password or token is the failure a
+// credential exists to prevent, so the check belongs on the path every source takes, including the
+// ones plugins register. A local source is exempt: its config is the value, and an operator who
+// stored nothing chose that.
 func ResolveLeased(ctx context.Context, kind, config string) (string, *Lease, error) {
 	k := NormalizeKind(kind)
 	if k == KindLocal {
 		return config, nil, nil
 	}
 	if mint, ok := minters[k]; ok {
-		return mint(ctx, config)
+		value, lease, err := mint(ctx, config)
+		if err == nil && value == "" {
+			// The engine minted something before answering blank, so the lease is revoked here rather
+			// than left to run out its TTL, since the refusal means nothing else will hold it.
+			_ = lease.Revoke(ctx)
+			return "", nil, emptySecretErr(k)
+		}
+		return value, lease, err
 	}
 	fn, ok := resolvers[k]
 	if !ok {
 		return "", nil, fmt.Errorf("%w: unknown source %q", ErrResolve, kind)
 	}
 	value, err := fn(ctx, config)
+	if err == nil && value == "" {
+		return "", nil, emptySecretErr(k)
+	}
 	return value, nil, err
+}
+
+// emptySecretErr reports a source that succeeded and produced no value. It names the kind and never
+// the config, since the config of a source is the address, the token, or the secret itself.
+func emptySecretErr(kind string) error {
+	return fmt.Errorf("%w: source %q resolved to an empty secret", ErrResolve, kind)
 }
 
 // Resolve returns the value a source names, fetching it at call time and discarding any lease. It
