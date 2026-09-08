@@ -110,3 +110,51 @@ test("navigation and browser history move between pages", async ({ page }) => {
   await expect(page.locator("#runs tr.row-nav").first()).toBeVisible();
   assertNoErrors();
 });
+
+// Every page the navigation offers, so a page nobody wrote a spec for cannot render broken unnoticed.
+// The tests above cover four pages; the rest were reachable in one click and checked by nobody.
+const PAGES = [
+  "/ui/", "/ui/runs", "/ui/fleet", "/ui/activity", "/ui/doctor", "/ui/drift",
+  "/ui/tasks", "/ui/login", "/ui/users", "/ui/workers", "/ui/inventories",
+  "/ui/sources", "/ui/credentials", "/ui/audit", "/ui/policies", "/ui/projects",
+  "/ui/templates", "/ui/schedules", "/ui/workflows", "/ui/migrate", "/ui/docs",
+];
+
+// The demo serves no token store, so the users page asks for /v1/tokens, is told no, and says so in
+// its own words. The browser still logs the 404 it saw, and no script can unlog it, so the guard
+// below allows that one line rather than pretending the page is broken.
+const ALLOWED_CONSOLE = [/Failed to load resource.*404/];
+
+for (const path of PAGES) {
+  test(`the page at ${path} renders without browser errors`, async ({ page }) => {
+    const errors = [];
+    page.on("pageerror", (err) => errors.push(`pageerror: ${err.message}`));
+    page.on("console", (msg) => {
+      if (msg.type() !== "error") return;
+      if (ALLOWED_CONSOLE.some((re) => re.test(msg.text()))) return;
+      errors.push(`console.error: ${msg.text()}`);
+    });
+
+    const response = await page.goto(path, { waitUntil: "domcontentloaded" });
+    expect(response.status(), `${path} did not answer 200`).toBe(200);
+    // The page is laid out rather than collapsed, which is the check a simulated DOM cannot make.
+    expect(await visibleHeight(page, "body")).toBeGreaterThan(200);
+    // A shell that renders with an empty body still has height, so the page must also claim its own
+    // identity: every template sets data-page, and the value is what routing decided to serve.
+    await expect(page.locator("body")).toHaveAttribute("data-page", /.+/);
+    // Late failures arrive after load, when the page's own fetches come back.
+    await page.waitForTimeout(500);
+    expect(errors, `${path} reported browser errors:\n${errors.join("\n")}`).toEqual([]);
+  });
+}
+
+test("an unknown ui path is refused rather than served as the overview", async ({ page }) => {
+  // "/ui/" is a subtree pattern, so it also matches every path beneath it that no route claims. Left
+  // alone it answered a mistyped or renamed route with the overview page and a 200, which tells a
+  // reader the page they asked for exists. Each of these is a path no route owns, including the one
+  // a stale link in the credentials page used to point at.
+  for (const missing of ["/ui/nope", "/ui/jobtemplates", "/ui/runs/nope/deep"]) {
+    const response = await page.goto(missing);
+    expect(response.status(), `${missing} should be refused, not rendered`).toBe(404);
+  }
+});
