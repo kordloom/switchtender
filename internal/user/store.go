@@ -2,10 +2,18 @@ package user
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"slices"
 	"sort"
 	"sync"
 )
+
+// errUsernameTaken is returned when a write would leave two accounts sharing a sign-in name. Both
+// SQL backends carry a unique index on username and refuse such a write, and FindByUsername here
+// scans a map, so accepting a duplicate would let Go's randomized iteration order decide which
+// account an incoming sign in resolves to and which role its session is granted.
+var errUsernameTaken = errors.New("username already in use")
 
 // memStore is an in-memory user Store guarded by a mutex.
 type memStore struct {
@@ -28,22 +36,40 @@ func clone(u *User) *User {
 	return &cp
 }
 
-// Save inserts or replaces the user identified by u.ID.
+// usernameTakenLocked reports whether an account other than id already holds username. Comparison is
+// exact, matching the unique index the SQL backends carry. The caller holds the write lock, so no
+// second writer can claim the name between this and the write it guards.
+func (m *memStore) usernameTakenLocked(id, username string) bool {
+	for _, u := range m.users {
+		if u.ID != id && u.Username == username {
+			return true
+		}
+	}
+	return false
+}
+
+// Save inserts or replaces the user identified by u.ID, refusing a username another account holds.
 func (m *memStore) Save(_ context.Context, u *User) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.usernameTakenLocked(u.ID, u.Username) {
+		return fmt.Errorf("save user: %w", errUsernameTaken)
+	}
 	m.users[u.ID] = clone(u)
 	return nil
 }
 
 // Update changes an existing user's username, role, password hash, and profile, preserving the
-// creation time, or returns ErrNotFound.
+// creation time, or returns ErrNotFound. Renaming onto a username another account holds is refused.
 func (m *memStore) Update(_ context.Context, u *User) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	existing, ok := m.users[u.ID]
 	if !ok {
 		return ErrNotFound
+	}
+	if m.usernameTakenLocked(u.ID, u.Username) {
+		return fmt.Errorf("update user: %w", errUsernameTaken)
 	}
 	existing.Username = u.Username
 	existing.Role = u.Role
@@ -88,7 +114,8 @@ func (m *memStore) DeleteUnlessLastAdmin(_ context.Context, id string) (bool, er
 	return true, nil
 }
 
-// UpdateUnlessLastAdmin applies the update unless it would demote the only administrator.
+// UpdateUnlessLastAdmin applies the update unless it would demote the only administrator. Renaming
+// onto a username another account holds is refused.
 func (m *memStore) UpdateUnlessLastAdmin(_ context.Context, u *User) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -98,6 +125,9 @@ func (m *memStore) UpdateUnlessLastAdmin(_ context.Context, u *User) (bool, erro
 	}
 	if u.Role != RoleAdmin && m.lastAdminLocked(u.ID) {
 		return false, nil
+	}
+	if m.usernameTakenLocked(u.ID, u.Username) {
+		return false, fmt.Errorf("update user: %w", errUsernameTaken)
 	}
 	existing.Username = u.Username
 	existing.Role = u.Role
