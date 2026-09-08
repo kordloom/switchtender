@@ -17,6 +17,12 @@ No. SwitchTender is one binary that is the API, the executor, the scheduler, and
 database: a SQLite file to start, or PostgreSQL when you want more than one instance. No Redis, no
 operator, no separate task engine.
 
+One caveat on the second half of that sentence. SQLite is free forever, but creating a new
+PostgreSQL database is a Team feature: a Community or Pro install pointed at an empty PostgreSQL
+refuses to start and says `Initializing a new PostgreSQL database requires a Team license`. Opening
+a PostgreSQL database that already holds the schema is never gated, in any license state, so a
+lapsed license never locks a server out of its own data.
+
 ## What is a dry run?
 
 A run that makes no changes. Ansible runs in check mode, Terraform runs plan instead of apply, and
@@ -53,20 +59,22 @@ name a host set once and reuse it across templates.
 
 Sealed with AES-256-GCM, the key derived from an operator passphrase through argon2id. Secrets
 decrypt only at execution, into the run's environment or a temporary file created mode 0600 and
-deleted when the run finishes, and never appear in API responses. Fourteen kinds cover SSH keys and SSH passwords, vault passwords, become passwords and
-full become settings, network device logins, environment bundles, API tokens, container registry
-logins, and typed AWS, Azure, GCP, VMware, and OpenStack credentials. Set
-`SWITCHTENDER_ENCRYPTION_KEY` and `SWITCHTENDER_ENCRYPTION_SALT` to enable them.
+deleted when the run finishes, and never appear in API responses. Fourteen kinds cover SSH keys and
+SSH passwords, vault passwords, become passwords and full become settings, network device logins,
+environment bundles, API tokens, container registry logins, and typed AWS, Azure, GCP, VMware, and
+OpenStack credentials. Set `SWITCHTENDER_ENCRYPTION_KEY` and `SWITCHTENDER_ENCRYPTION_SALT` to
+enable them.
 
-A credential does not have to be stored here at all. It can instead be resolved at launch from
-HashiCorp Vault, AWS Secrets Manager, or Azure Key Vault, so the value lives in the manager you
-already run and never rests in this database.
+A credential does not have to be stored here at all. Nine managers are read natively at launch:
+HashiCorp Vault, Vault dynamic secrets, AWS Secrets Manager, AWS STS, Google Secret Manager, Azure
+Key Vault, CyberArk Conjur, CyberArk Central Credential Provider, and 1Password Connect. The value
+lives in the manager you already run and never rests in this database.
 
-A credential can also be a command source, so the value lives in an external store instead of in
-SwitchTender. SwitchTender seals a command, for example `vault kv get -field=password secret/prod` or an
-`aws secretsmanager get-secret-value` call, and runs it at execution time. The command's output is
-the secret and is never stored. This works with any secret manager reachable from a command: Vault,
-AWS, GCP, 1Password, or your own script.
+A credential can also be a command source, for a store none of those covers. SwitchTender seals a
+command, for example `vault kv get -field=password secret/prod` or a call to an internal tool, and
+runs it at execution time. The command's output is the secret and is never stored. Reach for it
+when your store has no native source here. The nine above need no command and no vendor CLI on the
+runner.
 
 ## Are webhook triggers safe to expose?
 
@@ -77,8 +85,10 @@ rotate at any time.
 
 ## Does it support single sign-on?
 
-Yes: OpenID Connect, SAML, and LDAP directory sign-in, with just-in-time account provisioning
-and a configurable default role.
+Yes, on Pro and above: OpenID Connect, SAML, LDAP, and JWT directory sign-in, with just-in-time
+account provisioning and a configurable default role. Community signs in with local accounts and
+API tokens. Starting a server with a directory configured but no Pro license is refused at startup,
+rather than quietly serving an unauthenticated directory.
 
 ## Does SwitchTender send my data to an AI model?
 
@@ -112,8 +122,19 @@ build and drop in, and the seams it can register.
 ## What about scale?
 
 Runs stream and page by a sequence cursor, the runs list and event history paginate, and a large host
-matrix renders one cell at a time. Split a run across workers by measured host duration, and run more
-than one instance against PostgreSQL when a single binary is not enough.
+matrix renders one cell at a time. An Ansible run shards across the inventory by measured host
+duration, and the server executes those shards in its own concurrent slots on any tier.
+
+Sharding is Ansible only. It fans one playbook across inventory hosts, which is a thing Ansible
+does and the other tools do not: a Bash, Python, PowerShell, Go, Terraform, or OpenTofu run, or one
+using a tool an extension registered, executes once wherever it is claimed. Submitting one with a
+shard count is not an error and does not warn. It simply runs as a single run, with no `kind` of
+`split` and no shard count on it, so read the submitted run back if you expected a fan-out.
+
+Going wider is Team. Separate worker processes and initializing a new PostgreSQL database for more
+than one instance both need a Team license. Opening a PostgreSQL database that already holds the
+schema is never gated, in any license state, so a lapsed license never locks a server out of its own
+data, though starting a worker process after one lapses is refused.
 
 ## Does SwitchTender need an agent on each host?
 
@@ -121,9 +142,10 @@ No. It reaches the machines it manages over SSH, the same way Ansible does, and 
 on them. There is no per-host daemon to deploy, patch, or account for.
 
 What you do run is the server itself, one binary, plus optionally a few extra worker processes
-against the same store when one machine is not enough throughput. A worker is a pool member that
-picks up queued runs, not an agent belonging to a particular target, so their number has nothing
-to do with how many hosts you manage.
+against the same store when one machine is not enough throughput. Those extra processes are
+distributed workers, a Team feature. A worker is a pool member that picks up queued runs, not an
+agent belonging to a particular target, so their number has nothing to do with how many hosts you
+manage.
 
 ## Which Semaphore is this an alternative to?
 
@@ -136,19 +158,29 @@ integration service for building and testing code. The two share a name and noth
 SwitchTender does not compete with it: if you need to compile code and run test suites on every
 pull request, that is a build pipeline, and this is not one.
 
-## Can it read secrets from AWS Secrets Manager, Azure Key Vault, or Vault?
+## Can it read secrets from Vault, AWS, Azure, Google, CyberArk, or 1Password?
 
-All three, resolved at launch rather than copied into this database.
+All of them, natively, resolved at launch rather than copied into this database. Nine external
+managers ship as credential sources: Vault, Vault dynamic secrets, AWS Secrets Manager, AWS STS,
+Google Secret Manager, Azure Key Vault, CyberArk Conjur, CyberArk Central Credential Provider, and
+1Password Connect. Each is an HTTP call the server makes, so no vendor CLI or SDK goes on the
+runner.
 
 Vault is read over its HTTP API and handles KV v1 and v2. Vault dynamic secrets go further: a
 fresh, short-lived credential is minted for each run and revoked when the run ends, so nothing
-long-lived exists to leak. AWS Secrets Manager is read over a Signature Version 4 signed request,
-and credentials fall back to the standard AWS environment, so an instance role needs no stored
-key. Azure Key Vault authenticates with a service principal or, on Azure, the attached managed
-identity, again with no stored key.
+long-lived exists to leak. AWS STS is the same idea on AWS: it assumes a role and mints short-lived
+role credentials for each run. AWS Secrets Manager is read over a Signature Version 4 signed
+request, and credentials fall back to the standard AWS environment, so an instance role needs no
+stored key. Azure Key Vault authenticates with a service principal or, on Azure, the attached
+managed identity, again with no stored key. Google Secret Manager reads a secret version over the
+Secret Manager API with an access token from the config or, on GCP, from the metadata server, so an
+attached service account needs no stored key either. Conjur exchanges an API key for a short-lived
+access token, the Central Credential Provider authenticates the application by client certificate
+or allowed-machine rule, and 1Password reads a field of an item through a self-hosted Connect
+server.
 
-Anything else resolves through a command credential, whose standard output becomes the secret, so
-GCP Secret Manager, 1Password, or an internal tool work with no integration to write.
+A store outside that set resolves through a command credential, whose standard output becomes the
+secret, so an internal tool works with no integration to write.
 
 ## Can I run a Terraform plan, hold it for approval, then run Ansible?
 
@@ -162,6 +194,10 @@ depended on it, and `set_stats` output flows to dependent steps as extra vars.
 The approval is not a convention someone can skip. A policy decides which runs are held, the hold
 is enforced in the core, and the approval is bound to the exact plan that was reviewed, so a run
 cannot be approved as one thing and executed as another.
+
+A Community install holds one approval policy and Pro holds five. Team removes the cap and adds the
+rest of the policy engine: outright denials, risk floors, actor-scoped rules, and distinct-approver
+separation of duties.
 
 ## How fine-grained is access control?
 
@@ -192,7 +228,9 @@ than a hope. The continuity and vendor risk pages set out what happens if this g
 
 Business Source License 1.1: free to self-host and modify, with a restriction on offering it as a
 competing hosted service, and it converts to Apache 2.0 two years after each release. The
-Community tier is free and complete; Team features unlock with a signed license file the binary
-verifies offline, flat per organization by fleet band, and a lapsed license takes nothing: paid
-features stop while your data, evidence, and every Community feature keep working. There is no
-license server and nothing ever phones home.
+Community tier is free and complete on its own. Pro adds directory sign-in and five approval
+policies instead of one. Team adds the full policy engine, the period change register, distributed
+workers, initializing a new PostgreSQL database, and one-click drift reconcile. Both unlock with a
+signed license file the binary verifies offline, flat per organization by fleet band, and a lapsed
+license takes nothing: paid features stop while your data, evidence, and every Community feature
+keep working. There is no license server and nothing ever phones home.

@@ -24,7 +24,7 @@ just live behind a smaller, faster surface.
 
 | In AWX | In SwitchTender |
 |--------|---------------|
-| Organization | No direct equivalent. Scope access with teams and grants instead.|
+| Organization | Organization. A project, template, inventory, or credential can name its owning `org_id`. Access adds a global role and optional per-object grants.|
 | Project (git) | Project.|
 | Inventory | Stored inventory, or a dynamic inventory source that refreshes into one.|
 | Job template | Template.|
@@ -112,6 +112,8 @@ Open Credentials and add what your runs need. Kinds:
 - `gcp`: a Google Cloud service account JSON, bound to `GOOGLE_APPLICATION_CREDENTIALS`.
 - `vmware`: a vCenter login, injected as the `VMWARE_*` environment variables the
   community.vmware modules read.
+- `openstack`: an OpenStack login, injected as the `OS_*` environment variables
+  openstacksdk and the openstack.cloud collection read.
 
 Secrets are encrypted at rest and never returned by the API.
 

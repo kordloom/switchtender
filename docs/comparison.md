@@ -20,7 +20,7 @@ against the current release before relying on it, and open an issue if one has g
 
 ## The field, side by side
 
-Six controllers, eleven capabilities, every cell checked against that vendor's own documentation.
+Six controllers, thirteen capabilities, every cell checked against that vendor's own documentation.
 Sources are numbered and listed at the bottom. A cell reading "not documented" means the vendor's
 documentation does not describe the capability, established by searching their whole documentation
 set rather than by not finding it.
