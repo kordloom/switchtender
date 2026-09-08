@@ -280,14 +280,28 @@ type awxCredential struct {
 }
 
 // awxRef is an AWX natural-key reference that decodes from a name string, a natural-key array whose
-// last element is the name, or an object with a name field.
+// last element is the name, or an object with a name field. The REST API writes the same reference
+// as the target's integer id, which decodes into the id-N spelling the workflow node reference
+// already uses, since no natural key resolves it.
 type awxRef string
 
 // UnmarshalJSON decodes the several shapes AWX uses for a natural-key reference into the name.
+//
+// An integer id keeps a name of its own rather than decoding to the empty string, because the empty
+// name means "no reference was given" and an id means "this reference could not be resolved". Read
+// as absent, a numeric project and inventory slipped past the fail-closed refusal in addTemplate and
+// the template imported with neither, silently: dispatch skips its containment check when a template
+// has no project, so an export taken from the REST API rather than through awxkit converted every
+// contained playbook path into one resolved against the server's own directory, with no warning.
 func (r *awxRef) UnmarshalJSON(b []byte) error {
 	var s string
 	if json.Unmarshal(b, &s) == nil {
 		*r = awxRef(s)
+		return nil
+	}
+	var id json.Number
+	if json.Unmarshal(b, &id) == nil {
+		*r = awxRef("id-" + id.String())
 		return nil
 	}
 	var arr []string
@@ -392,10 +406,12 @@ func FromAWX(data []byte, now time.Time) (*Plan, error) {
 		}
 		obj := &credential.Credential{ID: credential.NewID(), Name: c.Name, Kind: kind, CreatedAt: now}
 		// AWX keeps the vault label as a non-secret input; carrying it means a multi-vault setup
-		// imports with its --vault-id labels intact instead of every password turning unlabeled.
+		// imports with its --vault-id labels intact instead of every password turning unlabeled. The
+		// label is rendered by jsonScalarString, which reads a JSON null as empty, so an absent label
+		// no longer has to be told apart from a real one by the "<nil>" text Go prints for it.
 		if kind == credential.KindVaultPassword {
-			if label := strings.TrimSpace(fmt.Sprint(c.Inputs["vault_id"])); label != "" &&
-				label != "<nil>" && credential.ValidVaultID(label) {
+			if label := strings.TrimSpace(jsonScalarString(c.Inputs["vault_id"])); label != "" &&
+				credential.ValidVaultID(label) {
 				obj.VaultID = label
 			}
 		}

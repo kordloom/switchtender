@@ -153,10 +153,16 @@ func parseExtraVars(raw string) (map[string]any, error) {
 // Neither has a command-line counterpart, so an inventory setting them wins, and the content is
 // written to a temp file and passed to ansible-playbook as -i verbatim.
 //
-// A name is refused, not rewritten, when it holds ASCII whitespace, '=', '#', '[', ']', or a control
-// character. Each of those changes how the line parses, and a migration that silently renamed
-// somebody's hosts would be its own kind of wrong; an inventory is the list of machines a play
-// reaches, so a dropped-and-reported name beats an altered one.
+// A name is refused, not rewritten, when it holds ASCII whitespace, '=', '#', '[', ']', a quote, a
+// backslash, or a control character. Each of those changes how the line parses, and a migration that
+// silently renamed somebody's hosts would be its own kind of wrong; an inventory is the list of
+// machines a play reaches, so a dropped-and-reported name beats an altered one.
+//
+// The quotes and the backslash are refused for that same reason rather than for a redirection: the
+// plugin tokenizes each line with shlex, which consumes them, so a host named a"b"c is read as abc
+// and one named a\b is read as ab. That is the silent rename this refuses to perform. An odd quote
+// is worse still, since shlex then reads to the end of the line looking for its partner and the file
+// stops parsing, taking every host in it down with the one bad name.
 func safeININame(s string) bool {
 	if s == "" {
 		return false
@@ -166,7 +172,7 @@ func safeININame(s string) bool {
 			return false
 		}
 		switch r {
-		case ' ', '=', '#', '[', ']':
+		case ' ', '=', '#', '[', ']', '"', '\'', '\\':
 			return false
 		}
 	}
@@ -234,9 +240,9 @@ func buildInventoryINI(plan *Plan, name string, hosts []importHost, groups []imp
 	}
 	for _, g := range groups {
 		if !safeININame(g.Name) {
-			plan.warn("inventory %q: group %q was dropped because its name holds whitespace or an "+
-				"inventory metacharacter, which Ansible would read as a new section or extra "+
-				"host variables", name, oneLine(g.Name))
+			plan.warn("inventory %q: group %q was dropped because its name holds whitespace, a "+
+				"quote, or an inventory metacharacter, which Ansible would read as a new section "+
+				"or extra host variables", name, oneLine(g.Name))
 			continue
 		}
 		fmt.Fprintf(&b, "[%s]\n", g.Name)
@@ -259,7 +265,7 @@ func buildInventoryINI(plan *Plan, name string, hosts []importHost, groups []imp
 // hostLine renders one inventory host with any host variables as inline key=value pairs.
 func hostLine(plan *Plan, inv string, h importHost) string {
 	if !safeININame(h.Name) {
-		plan.warn("inventory %q: host %q was dropped because its name holds whitespace or an "+
+		plan.warn("inventory %q: host %q was dropped because its name holds whitespace, a quote, or an "+
 			"inventory metacharacter, which Ansible would read as extra host variables or a new "+
 			"section", inv, oneLine(h.Name))
 		return ""
@@ -274,7 +280,7 @@ func hostLine(plan *Plan, inv string, h importHost) string {
 	for _, k := range keys {
 		if !safeININame(k) {
 			plan.warn("inventory %q: variable %q on host %q was dropped because its name holds "+
-				"whitespace or an inventory metacharacter, which Ansible would read as extra host "+
+				"whitespace, a quote, or an inventory metacharacter, which Ansible would read as extra host "+
 				"variables", inv, oneLine(k), h.Name)
 			continue
 		}
@@ -353,6 +359,11 @@ var awxPublicInputs = []string{
 // from the allowlist so a custom type's secret field can never appear. Values that are empty or still
 // carry AWX's encrypted marker are omitted. Both the operator-facing formatter and the settings
 // importer read from here, so they cannot disagree on what counts as non-secret.
+//
+// Each value is rendered by jsonScalarString rather than by fmt.Sprint, so a JSON null is the empty
+// string and drops out here. Printed the Go way it became the literal "<nil>", which is not empty, so
+// an input the export said was unset imported as the setting user=<nil> and a run tried to connect as
+// a user of that name.
 func publicInputPairs(inputs map[string]any) [][2]string {
 	if len(inputs) == 0 {
 		return nil
@@ -363,7 +374,7 @@ func publicInputPairs(inputs map[string]any) [][2]string {
 		if !ok {
 			continue
 		}
-		value := strings.TrimSpace(fmt.Sprint(v))
+		value := strings.TrimSpace(jsonScalarString(v))
 		if value == "" || value == "$encrypted$" {
 			continue
 		}
@@ -517,12 +528,16 @@ func mapCredentialKind(awxType string, inputs map[string]any) (credential.Kind, 
 
 // hasInput reports whether an AWX credential configured the named input. AWX exports a secret as the
 // literal "$encrypted$", so a set secret is present but unreadable, which is all this needs to know.
+//
+// The value is rendered by jsonScalarString, so a JSON null reads as unset. Printed the Go way it
+// became "<nil>", which counted as configured, and a machine credential whose password is null
+// imported as the password kind rather than the key kind: the wrong material to prompt for.
 func hasInput(inputs map[string]any, key string) bool {
 	v, ok := inputs[key]
 	if !ok {
 		return false
 	}
-	return strings.TrimSpace(fmt.Sprint(v)) != ""
+	return strings.TrimSpace(jsonScalarString(v)) != ""
 }
 
 // choicesFrom normalizes a survey field's choices, which AWX encodes as either a list or a newline
@@ -565,7 +580,7 @@ func varsSection(plan *Plan, inv, section string, vars map[string]any) string {
 	for _, k := range keys {
 		if !safeININame(k) {
 			plan.warn("inventory %q: variable %q in [%s] was dropped because its name holds "+
-				"whitespace or an inventory metacharacter", inv, oneLine(k), section)
+				"whitespace, a quote, or an inventory metacharacter", inv, oneLine(k), section)
 			continue
 		}
 		value, ok := renderINIValue(jsonScalarString(vars[k]))
@@ -590,7 +605,7 @@ func childrenSection(plan *Plan, inv string, g importGroup) string {
 	for _, child := range g.Children {
 		if !safeININame(child) {
 			plan.warn("inventory %q: child group %q of %q was dropped because its name holds "+
-				"whitespace or an inventory metacharacter", inv, oneLine(child), g.Name)
+				"whitespace, a quote, or an inventory metacharacter", inv, oneLine(child), g.Name)
 			continue
 		}
 		b.WriteString(child + "\n")

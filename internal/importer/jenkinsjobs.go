@@ -125,10 +125,68 @@ func encodeJenkinsBundle(jobs []jenkinsJobFile) ([]byte, error) {
 	return b.Bytes(), nil
 }
 
+// jenkinsDocumentBody returns a Jenkins document with its leading XML declaration removed, refusing
+// one that declares something this decoder cannot honor.
+//
+// A real Jenkins writes every config.xml with an XML 1.1 declaration and Go's encoding/xml supports
+// only 1.0, so the decoder refused the file before a single element was read. The CLI never met this
+// because a bundle strips the declaration on the way in, but the HTTP import endpoint documents that
+// its body may be one config.xml and hands those bytes straight to the mapper. Nothing a job's markup
+// needs is decided by the version: 1.1 differs in which control characters it admits, and a name
+// carrying one is refused here anyway.
+//
+// The encoding is read before the declaration goes, because dropping it also drops the decoder's own
+// refusal of an encoding it cannot read. A latin-1 export would then be decoded as UTF-8 and import
+// host names spelled in mojibake, which is a fleet naming machines that do not exist rather than a
+// failed import.
+func jenkinsDocumentBody(data []byte) ([]byte, error) {
+	trimmed := bytes.TrimLeft(data, xmlLeadingBytes)
+	end := bytes.Index(trimmed, []byte("?>"))
+	if !bytes.HasPrefix(trimmed, []byte("<?xml")) || end < 0 {
+		// No declaration, or an unterminated one the decoder reports better than this could.
+		return trimmed, nil
+	}
+	decl := string(trimmed[:end])
+	if enc := xmlDeclValue(decl, "encoding"); enc != "" &&
+		!strings.EqualFold(enc, "utf-8") && !strings.EqualFold(enc, "utf8") {
+		return nil, fmt.Errorf("parse jenkins xml: the document declares encoding %q and only "+
+			"UTF-8 is read: re-save it as UTF-8", oneLine(enc))
+	}
+	if v := xmlDeclValue(decl, "version"); v != "" && v != "1.0" && v != "1.1" {
+		return nil, fmt.Errorf("parse jenkins xml: the document declares XML version %q, which is "+
+			"not a version Jenkins writes", oneLine(v))
+	}
+	return stripXMLDeclaration(data), nil
+}
+
+// xmlDeclValue returns the value of a named pseudo-attribute of an XML declaration, or empty when the
+// declaration does not carry it. The declaration is read here rather than by the decoder, because the
+// point of reading it is to decide what to do before the decoder sees the document.
+func xmlDeclValue(decl, name string) string {
+	i := strings.Index(decl, name+"=")
+	if i < 0 {
+		return ""
+	}
+	rest := strings.TrimSpace(decl[i+len(name)+1:])
+	if rest == "" || (rest[0] != '\'' && rest[0] != '"') {
+		return ""
+	}
+	quote, rest := rest[0], rest[1:]
+	end := strings.IndexByte(rest, quote)
+	if end < 0 {
+		return ""
+	}
+	return rest[:end]
+}
+
+// xmlLeadingBytes are what may sit before a document's declaration: ASCII whitespace and a byte order
+// mark, none of which is part of the declaration itself.
+const xmlLeadingBytes = " \t\r\n\uFEFF"
+
 // stripXMLDeclaration removes a leading <?xml ... ?> from a document, which is only legal at the
 // very start of one and so cannot survive being nested inside the bundle.
 func stripXMLDeclaration(data []byte) []byte {
-	trimmed := bytes.TrimLeft(data, " \t\r\n\uFEFF")
+	trimmed := bytes.TrimLeft(data, xmlLeadingBytes)
 	if !bytes.HasPrefix(trimmed, []byte("<?xml")) {
 		return trimmed
 	}
