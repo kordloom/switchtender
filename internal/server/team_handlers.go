@@ -109,8 +109,18 @@ func listTeamMembersHandler(store team.Store, log *zap.Logger) http.HandlerFunc 
 			respondError(w, log, http.StatusNotFound, "teams not enabled")
 			return
 		}
-		if _, err := store.Get(r.Context(), r.PathValue("id")); errors.Is(err, team.ErrNotFound) {
-			respondError(w, log, http.StatusNotFound, "team not found")
+		// A store failure that is not a missing record stops the read rather than falling through it.
+		// Only the not-found case means the team is not there; every other error means nobody can
+		// tell. Carrying on answered 200 with an empty list, so an administrator running an access
+		// review read "this team has nobody in it" when the truth was "the roster is unreadable",
+		// and those are opposite answers with only one of them safe to act on.
+		if _, err := store.Get(r.Context(), r.PathValue("id")); err != nil {
+			if errors.Is(err, team.ErrNotFound) {
+				respondError(w, log, http.StatusNotFound, "team not found")
+				return
+			}
+			log.Error("server: read team: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not read team")
 			return
 		}
 		members, err := store.Members(r.Context(), r.PathValue("id"))
@@ -132,8 +142,16 @@ func addTeamMemberHandler(store team.Store, log *zap.Logger) http.HandlerFunc {
 			return
 		}
 		id := r.PathValue("id")
-		if _, err := store.Get(r.Context(), id); errors.Is(err, team.ErrNotFound) {
-			respondError(w, log, http.StatusNotFound, "team not found")
+		// An unreadable store is not a confirmation that the team exists. Treating it as one
+		// answered 201 for a membership nobody had checked, so the reply said the person was added
+		// to a team the server never managed to look at.
+		if _, err := store.Get(r.Context(), id); err != nil {
+			if errors.Is(err, team.ErrNotFound) {
+				respondError(w, log, http.StatusNotFound, "team not found")
+				return
+			}
+			log.Error("server: read team: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not read team")
 			return
 		}
 		var req teamMemberRequest

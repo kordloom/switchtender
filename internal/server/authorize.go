@@ -397,8 +397,6 @@ func denyOnAuthzError(w http.ResponseWriter, log *zap.Logger, err error) bool {
 	return true
 }
 
-// readableRuns drops any run the caller may not read. A run is readable when every object it uses is,
-// which is the same rule fetching one run applies, so listing and fetching cannot disagree.
 // derivedReadScan bounds how many recent runs are consulted when deciding what a derived view may
 // show. The views themselves are already windowed, so this only has to cover the same ground.
 // It is a var, not a const, only so a test can shrink it to force the aged-out-of-window case.
@@ -424,14 +422,21 @@ func derivedReadFilter(ctx context.Context, authz *authorizer,
 	if filter("proj_probe", "") && filter("cred_probe", "") {
 		return func(string) bool { return true }, true, nil
 	}
-	// Whether the caller can read anything decides only whether estate-wide aggregates that name no
-	// run are shown at all, so a bounded probe of recent runs answers it. Which individual rows show
-	// is decided per run below, not from this scan.
-	page, err := store.ListPage(ctx, run.ListFilter{}, derivedReadScan, 0)
+	// The run filter and the org resolver are built once for the whole request and shared by every
+	// row decided below. They are assembled from the entire grant table, so rebuilding them per row
+	// made one fleet or drift read cost rows times grants: at a thousand rows and ten thousand grants
+	// a single request took seconds and allocated a gigabyte. Neither depends on which run is being
+	// decided, so hoisting them changes no answer. A grant-store failure is reported here instead of
+	// quietly hiding one row, which still refuses rather than discloses.
+	runKeep, err := authz.runReadFilter(ctx)
 	if err != nil {
 		return nil, false, err
 	}
-	probe, err := readableRuns(ctx, authz, page)
+	orgOf := authz.orgResolverMemo(ctx)
+	// Whether the caller can read anything decides only whether estate-wide aggregates that name no
+	// run are shown at all, so a bounded probe of recent runs answers it. Which individual rows show
+	// is decided per run below, not from this scan.
+	anyReadable, err = probeAnyReadable(ctx, store, runKeep, orgOf)
 	if err != nil {
 		return nil, false, err
 	}
@@ -448,13 +453,48 @@ func derivedReadFilter(ctx context.Context, authz *authorizer,
 		}
 		ok := false
 		if rn, gerr := store.Get(ctx, id); gerr == nil {
-			readable, rerr := readableRuns(ctx, authz, []*run.Run{rn})
-			ok = rerr == nil && len(readable) == 1
+			ok = runReadable(rn, runKeep, orgOf)
 		}
 		seen[id] = ok
 		return ok
 	}
-	return keep, len(probe) > 0, nil
+	return keep, anyReadable, nil
+}
+
+// derivedReadProbeHead is how many of the newest runs the aggregate probe looks at before it falls
+// back to the full derivedReadScan window.
+//
+// A caller who reads anything at all almost always reads something recent, and one readable run is
+// the whole answer, so materializing two thousand rows on every fleet, drift, host, worker, and
+// metrics request to find it was work the answer never used. The head is a prefix of the same
+// ordering the full window walks, so a run found here would have been found there: the answer is
+// unchanged, only the common case stops earlier.
+const derivedReadProbeHead = 100
+
+// probeAnyReadable reports whether the caller can read any recent run, which is what decides if
+// the estate-wide aggregates that name no run are shown at all. It checks the newest runs first
+// and only widens to the full derivedReadScan window when that head holds nothing readable, so the
+// answer matches the full scan while the usual request pays for a fraction of it.
+func probeAnyReadable(ctx context.Context, store run.Store, keep func(id, orgID string) bool,
+	orgOf func(string) string) (bool, error) {
+	head := min(derivedReadProbeHead, derivedReadScan)
+	for _, limit := range [2]int{head, derivedReadScan} {
+		page, err := store.ListPage(ctx, run.ListFilter{}, limit, 0)
+		if err != nil {
+			return false, err
+		}
+		for _, rn := range page {
+			if runReadable(rn, keep, orgOf) {
+				return true, nil
+			}
+		}
+		// A short head means the install holds fewer runs than the head asked for, so the wider window
+		// would read exactly the same rows again and reach the same answer.
+		if limit == derivedReadScan || len(page) < limit {
+			break
+		}
+	}
+	return false, nil
 }
 
 // grantsEnforced reports whether object grants actually restrict what this caller may read.
@@ -472,6 +512,8 @@ func grantsEnforced(ctx context.Context, authz *authorizer) (bool, error) {
 	return !keep("proj_probe", "") || !keep("cred_probe", ""), nil
 }
 
+// readableRuns drops any run the caller may not read. A run is readable when every object it uses is,
+// which is the same rule fetching one run applies, so listing and fetching cannot disagree.
 func readableRuns(ctx context.Context, authz *authorizer, runs []*run.Run) ([]*run.Run, error) {
 	// Filtered at use, which is what fetching a run by id requires, rather than at read. Any grant
 	// satisfies read, so filtering there put a run in the list whose by-id fetch answered 403: an
@@ -482,44 +524,57 @@ func readableRuns(ctx context.Context, authz *authorizer, runs []*run.Run) ([]*r
 	if err != nil {
 		return nil, err
 	}
+	return readableRunsWith(runs, keep, authz.orgResolverMemo(ctx)), nil
+}
+
+// readableRunsWith is readableRuns over a filter and an org resolver the caller has already built,
+// for a view that decides one run at a time.
+//
+// Building them is not cheap: the filter is assembled from every grant on the install and the
+// resolver caches an object's owning organization. Rebuilding both per run made a fleet, drift, or
+// host-history read cost the whole grant table once for every row it showed, so the request grew
+// as rows times grants and allocated proportionally. Hoisting the construction to the request
+// keeps the answer identical, since neither depends on which run is being decided.
+func readableRunsWith(runs []*run.Run, keep func(id, orgID string) bool,
+	orgOf func(string) string) []*run.Run {
 	// When the filter keeps everything, grants are not being enforced for this caller, so no object
 	// needs its owning organization resolved and the list passes through untouched. Only a
 	// strict-grants non-admin reaches the per-object resolution below.
 	if keep("proj_probe", "") && keep("cred_probe", "") {
-		return runs, nil
+		return runs
 	}
-	// A run is visible when every object it uses is, which is the rule authorize applies to fetch
-	// one, so listing and fetching cannot disagree. An object owned by an organization the caller
-	// belongs to is visible through that membership, so its owning org is resolved the same way
-	// authorize resolves it and passed into the filter. Passing an empty org here dropped exactly
-	// those runs: a strict-grants member saw none of their own org's runs in any run-derived view.
-	orgOf := authz.orgResolverMemo(ctx)
 	out := make([]*run.Run, 0, len(runs))
 	for _, rn := range runs {
-		objs := runObjects(rn)
-		if len(objs) == 0 {
-			// An objectless run has nothing for the per-object filter to decide on, so it is scoped
-			// by the org it was stamped with. keep with an empty id resolves to that org's
-			// membership alone: readable[""] is never set, so this is true only when the caller
-			// belongs to the run's org, and an ownerless objectless run is dropped for every
-			// strict-grants non-admin, matching what fetching it by id decides.
-			if keep("", rn.OrgID) {
-				out = append(out, rn)
-			}
-			continue
-		}
-		allowed := true
-		for _, id := range objs {
-			if !keep(id, orgOf(id)) {
-				allowed = false
-				break
-			}
-		}
-		if allowed {
+		if runReadable(rn, keep, orgOf) {
 			out = append(out, rn)
 		}
 	}
-	return out, nil
+	return out
+}
+
+// runReadable reports whether one run passes the read filter.
+//
+// A run is visible when every object it uses is, which is the rule authorize applies to fetch one,
+// so listing and fetching cannot disagree. An object owned by an organization the caller belongs
+// to is visible through that membership, so its owning org is resolved the same way authorize
+// resolves it and passed into the filter. Passing an empty org here dropped exactly those runs: a
+// strict-grants member saw none of their own org's runs in any run-derived view.
+func runReadable(rn *run.Run, keep func(id, orgID string) bool, orgOf func(string) string) bool {
+	objs := runObjects(rn)
+	if len(objs) == 0 {
+		// An objectless run has nothing for the per-object filter to decide on, so it is scoped by the
+		// org it was stamped with. keep with an empty id resolves to that org's membership alone:
+		// readable[""] is never set, so this is true only when the caller belongs to the run's org, and
+		// an ownerless objectless run is dropped for every strict-grants non-admin, matching what
+		// fetching it by id decides.
+		return keep("", rn.OrgID)
+	}
+	for _, id := range objs {
+		if !keep(id, orgOf(id)) {
+			return false
+		}
+	}
+	return true
 }
 
 // orgResolverMemo returns a function resolving an object's owning organization once and caching the

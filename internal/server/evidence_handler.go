@@ -9,6 +9,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/dossier"
+	"github.com/kordloom/switchtender/internal/license"
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/util"
 )
@@ -93,6 +94,13 @@ func auditRegisterHandler(store run.Store, audits audit.Store, installID string,
 	return func(w http.ResponseWriter, r *http.Request) {
 		if audits == nil {
 			respondError(w, log, http.StatusNotFound, "audit trail not enabled")
+			return
+		}
+		// The per-run dossier, receipts, anchoring, and verification are Community: proofs are
+		// free. The period register is the compliance packaging Team buys, and the CLI has gated
+		// it since it shipped. This endpoint, and the UI button that calls it, did not.
+		if aerr := license.Allow(license.FeatureRegister); aerr != nil {
+			respondError(w, log, http.StatusForbidden, aerr.Error())
 			return
 		}
 		to := time.Now()

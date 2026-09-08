@@ -9,6 +9,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/license"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/run"
@@ -75,6 +76,43 @@ func TestGatesRefuseInOneLineOnCommunity(t *testing.T) {
 		strings.NewReader(`{"name":"hold stage","effect":"deny"}`)))
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("licensed deny policy = %d, want 201: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestChangeRegisterIsTeamOverHTTP pins the period register to Team on the HTTP surface. The CLI
+// gated it from the start and this endpoint did not, so a Community install served the paid
+// artifact to anyone who pressed the button on the audit page. The free proofs beside it, the
+// signed bundle and the chain verification, must stay open at the same time, since a gate that
+// also caught those would break the promise that proofs are free on every tier.
+func TestChangeRegisterIsTeamOverHTTP(t *testing.T) {
+	audits := audit.NewMemStore()
+	handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(), WithAudit(audits)).Handler()
+
+	asCommunity(t, func() {
+		// Test 0: the register refuses, names Team, and points at the price list.
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/audit/register", nil))
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("register = %d, want 403: %s", rec.Code, rec.Body.String())
+		}
+		if !strings.Contains(rec.Body.String(), "Team license") ||
+			!strings.Contains(rec.Body.String(), "switchtender.com/pricing") {
+			t.Errorf("register refusal does not teach the fix: %s", rec.Body.String())
+		}
+
+		// Test 1: chain verification is free on every tier.
+		rec = httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/audit/verify", nil))
+		if rec.Code != http.StatusOK {
+			t.Errorf("verify on Community = %d, want 200: %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	// Test 2: with the license back the same request renders, so the gate is what refused it.
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/audit/register", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("licensed register = %d, want 200: %s", rec.Code, rec.Body.String())
 	}
 }
 

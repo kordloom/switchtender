@@ -39,7 +39,15 @@ func respondJSON(w http.ResponseWriter, log *zap.Logger, status int, v any, pret
 	// API responses are per-caller and often carry the account roster, tokens, or credential
 	// metadata. Without this a browser or an intermediary may write them to a disk cache that
 	// outlives the session, readable afterward from the profile directory of a shared machine.
-	w.Header().Set("Cache-Control", "no-store")
+	//
+	// A handler that already declared a caching policy keeps it. Setting the header here replaces
+	// rather than adds, so the one document deliberately published as cacheable, the trust document
+	// a relying party polls for the key that signs this install's bundles, was served uncacheable
+	// and the caching it states never took effect. Saying nothing still means no-store, so a
+	// cacheable reply is only ever something a handler opts into by name.
+	if w.Header().Get("Cache-Control") == "" {
+		w.Header().Set("Cache-Control", "no-store")
+	}
 	w.WriteHeader(status)
 	if _, err := w.Write(body); err != nil {
 		log.Error("server: write response: " + err.Error())

@@ -56,7 +56,13 @@ func (c *refChecker) credentialRefs(ctx context.Context, id string) (usedBy, err
 			return nil, err
 		}
 		for _, t := range list {
-			if slices.Contains(t.CredentialIDs, id) {
+			// Every field a template names a credential from counts, not just the materialized
+			// list. The pull credential fetches the execution environment, which the doctor already
+			// calls broken when it is missing, and a selectable id is an option a launch may pick,
+			// which a launch rejects once it is gone. Checking only CredentialIDs reported both as
+			// unused, so the delete went through and took the secret with it.
+			if slices.Contains(t.CredentialIDs, id) || t.PullCredentialID == id ||
+				slices.Contains(t.SelectableCredentialIDs, id) {
 				out["templates"] = append(out["templates"], nameOr(t.Name, t.ID))
 			}
 		}
@@ -118,7 +124,15 @@ func (c *refChecker) allCredentialRefs(ctx context.Context) (map[string]usedBy, 
 			return nil, err
 		}
 		for _, t := range list {
-			for _, id := range t.CredentialIDs {
+			// The same three fields credentialRefs checks, so the Used by column and the delete
+			// guard cannot disagree about whether a credential is in use.
+			seen := map[string]bool{}
+			for _, id := range append(append([]string{t.PullCredentialID},
+				t.CredentialIDs...), t.SelectableCredentialIDs...) {
+				if seen[id] {
+					continue
+				}
+				seen[id] = true
 				add(id, "templates", nameOr(t.Name, t.ID))
 			}
 		}

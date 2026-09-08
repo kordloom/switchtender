@@ -392,9 +392,20 @@ func isHook(r *http.Request) bool {
 // refused either way, but the entry is written before the refusal, and that entry is hash-linked,
 // unredactable without breaking the chain, and carried into every bundle handed to a third party. A
 // mistyped curl was enough to embed a live webhook token in an artifact meant to be shared.
+//
+// Both spellings count: the path as it was written and the path it resolves to. Matching only the
+// resolved form let /hooks/<token>/../../probe resolve away from the prefix, so the request read as
+// an ordinary path while its text still carried a live token, and the record wrote that text down
+// verbatim. A request that names the hooks prefix is a hook attempt whatever a traversal segment
+// later does to it, so it is treated as one on both sides: the token gate it skips and the
+// redaction it gets.
 func hookPath(p string) bool {
-	clean := path.Clean("/" + strings.TrimPrefix(strings.ToLower(p), "/v1"))
-	return strings.HasPrefix(clean, "/hooks/")
+	lower := strings.TrimPrefix(strings.ToLower(p), "/v1")
+	if strings.HasPrefix(path.Clean("/"+lower), "/hooks/") {
+		return true
+	}
+	segments := strings.FieldsFunc(lower, func(r rune) bool { return r == '/' })
+	return len(segments) > 1 && segments[0] == "hooks"
 }
 
 // isSignIn reports whether the request is an authentication attempt.
@@ -482,12 +493,17 @@ func unauthenticatedActor(r *http.Request) string {
 func auditPath(r *http.Request) string {
 	// Redaction keys on the path alone. The method decides whether a hook runs, never whether its
 	// token is a secret.
-	if !hookPath(r.URL.Path) {
-		return r.URL.Path
+	if hookPath(r.URL.Path) {
+		// Everything after the prefix is redacted, not just the first segment. An encoded slash
+		// inside a token would otherwise split it and record the tail, and nothing downstream needs
+		// the rest.
+		return "/hooks/[redacted]"
 	}
-	// Everything after the prefix is redacted, not just the first segment. An encoded slash inside
-	// a token would otherwise split it and record the tail, and nothing downstream needs the rest.
-	return "/hooks/[redacted]"
+	// What gets recorded is the resolved path, never the text as it arrived. Copying the request
+	// verbatim carried whatever a traversal segment had walked past into a permanent entry, and the
+	// mux resolves the path before it dispatches anyway, so the resolved form is also the one that
+	// was actually served.
+	return path.Clean("/" + r.URL.Path)
 }
 
 // AuditReceiptHeader carries the chain position of the entry recorded for a mutation, as
