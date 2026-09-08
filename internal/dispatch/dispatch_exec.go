@@ -99,7 +99,7 @@ func (d *Dispatcher) executeRun(ctx context.Context, r *run.Run) run.Status {
 			if res.Drift {
 				d.recordPlanDrift(r)
 			}
-			return d.outcome(ctx, r, res, runErr, mask)
+			return d.outcome(ctx, r, res, runErr, mask, fold)
 		})
 }
 
@@ -404,8 +404,12 @@ func addWarning(r *run.Run, warning string) {
 
 // outcome finalizes r from the run result and returns the terminal status. Failure text passes
 // through the run's masker so a runner error cannot leak a resolved secret into the stored run.
+//
+// A clean exit is not on its own a success. An Ansible run whose recap named no host touched
+// nothing, and fold carries that answer, so the zero-host check sits ahead of the clean-exit case.
 func (d *Dispatcher) outcome(
 	ctx context.Context, r *run.Run, res roundhouse.Result, err error, mask *masker,
+	fold *run.SummaryFold,
 ) run.Status {
 	switch {
 	case err != nil && errors.Is(context.Cause(ctx), errRunTimeout):
@@ -422,6 +426,12 @@ func (d *Dispatcher) outcome(
 	case err != nil:
 		d.finalize(r, run.StatusFailed, nil, mask.redactString(err.Error()))
 		return run.StatusFailed
+	case res.ExitCode == 0 && touchedNoHost(r, fold):
+		// The tool's own exit code is kept beside the failure. It is zero, which is the whole reason
+		// this run was recorded as a success before, so the record has to show both what the tool
+		// reported and why it was not believed.
+		d.finalize(r, run.StatusFailed, &res.ExitCode, errNoHostTouched)
+		return run.StatusFailed
 	case res.ExitCode == 0:
 		d.finalize(r, run.StatusSucceeded, &res.ExitCode, "")
 		return run.StatusSucceeded
@@ -429,6 +439,54 @@ func (d *Dispatcher) outcome(
 		d.finalize(r, run.StatusFailed, &res.ExitCode, "")
 		return run.StatusFailed
 	}
+}
+
+// errNoHostTouched is recorded on an Ansible run that finished cleanly without touching a host. It
+// names the cause rather than the symptom, so a reader of the run's error learns why the clean exit
+// was not believed. It reaches the run record and the API, and it stays under the 200-character cut
+// notifications apply, so the whole reason survives into a channel message. It does not reach the
+// signed outcome: that body carries the status, the exit code, the hosts, and the log digest, and
+// has no field for a failure reason.
+//
+// All three causes are named because all three produce the same empty recap, measured against
+// ansible core 2.21.1. Naming only the inventory and the host pattern stated two causes that are
+// both false for a run whose --tags matched no task, which is a supported run control here.
+const errNoHostTouched = "no host was touched: the playbook recap named no host, so nothing ran. " +
+	"The inventory may be empty or missing, the play's host pattern may match none of it, or a " +
+	"tag filter may have left no task."
+
+// touchedNoHost reports whether r is an Ansible run proven to have touched no host.
+//
+// The signal is the run's own recap, the machine-readable PLAY RECAP the callback plugin emits as
+// the final stats event. ansible-playbook exits zero when a host pattern matches nothing: it warns,
+// prints an empty recap, and stops. A recap naming no host is therefore proof no host was touched.
+// A play that ran against three hosts and skipped every task still names those three hosts in its
+// recap with their skipped counts, so it is not caught here and stays the success it is.
+//
+// The two alternatives were both weaker. Ansible's prose, "skipping: no hosts matched" or an empty
+// PLAY RECAP block, comes from the stdout callback, so matching it means matching an English
+// sentence a different callback, a verbosity level, or a release can change. Re-resolving the
+// inventory here would answer a question ansible-playbook already answered, using a second
+// implementation of host patterns and limits that can disagree with the one that ran, and
+// disagreeing would fail runs that did touch hosts.
+//
+// A run that reported no recap at all is left alone. That is what event capture being unavailable
+// looks like, and unproven is not the same as proven empty.
+//
+// Three shapes reach this, all measured against ansible core 2.21.1 with the callback plugin in
+// internal/roundhouse/plugins: a host pattern that matched nothing, a play with no tasks at all,
+// and a --tags or --skip-tags filter that left no task. The last one matched its hosts fine, so
+// the recorded reason names the tag filter alongside the inventory and the host pattern rather than
+// asserting a cause it cannot tell apart. All three touched no host and changed nothing.
+//
+// This is Ansible-scoped deliberately. A bash, Terraform, OpenTofu, Python, PowerShell, or Go run
+// has no host pattern and emits no recap, so none of them can reach the failure.
+func touchedNoHost(r *run.Run, fold *run.SummaryFold) bool {
+	if fold == nil || run.NormalizeTool(r.Tool) != run.ToolAnsible {
+		return false
+	}
+	hosts, reported := fold.Recap()
+	return reported && hosts == 0
 }
 
 // register records a cancel func for a run so it can be stopped by id.
