@@ -6,6 +6,7 @@ package schedule
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -99,6 +100,15 @@ func (s *Schedule) Clone() *Schedule {
 	if len(s.Steps) > 0 {
 		out.Steps = make([]run.PipelineStep, len(s.Steps))
 		copy(out.Steps, s.Steps)
+		// A step carries its own dependency slice, and copying the step copies the slice header
+		// rather than what it points at. Left shared, a handler that edits a dependency on what the
+		// store handed it rewrites the stored pipeline's graph, so the step order of a scheduled
+		// pipeline changes with nothing saved and nothing recorded.
+		for i := range out.Steps {
+			if len(out.Steps[i].DependsOn) > 0 {
+				out.Steps[i].DependsOn = slices.Clone(out.Steps[i].DependsOn)
+			}
+		}
 	}
 	return &out
 }
@@ -166,6 +176,9 @@ func (s *Schedule) NextFire(after time.Time) (time.Time, error) {
 // rewritten to zero again: one authenticated call produced a run every fifteen seconds forever,
 // with nothing logged and no rate limit in front of it.
 func NextFire(spec string, after time.Time) (time.Time, error) {
+	if err := checkSpec(spec); err != nil {
+		return time.Time{}, err
+	}
 	sched, err := cron.ParseStandard(spec)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("%w: %w", ErrBadCron, err)
@@ -174,6 +187,14 @@ func NextFire(spec string, after time.Time) (time.Time, error) {
 	if next.IsZero() {
 		return time.Time{}, fmt.Errorf("%w: %q parses but never comes due, so it would be read as "+
 			"due on every tick", ErrBadCron, spec)
+	}
+	// An interval schedule counts elapsed real time from the last fire, so it has no wall clock to
+	// repeat or to lose and neither daylight-saving correction below applies to it. Both are written
+	// for minute-granular cron slots, and an interval is not minute-granular: this parser accepts
+	// intervals well under a minute, so the repeat guard read every second fire of "@every 30s" as a
+	// zone rewind and dropped it, every day of the year rather than the one it was written for.
+	if _, interval := sched.(cron.ConstantDelaySchedule); interval {
+		return next, nil
 	}
 	// On the day a zone falls back, the same local minute comes round twice, an hour apart, and the
 	// cron library returns both. The scheduler advances from the moment it fired, so a nightly job
@@ -198,6 +219,65 @@ func NextFire(spec string, after time.Time) (time.Time, error) {
 		return skipped, nil
 	}
 	return next, nil
+}
+
+// checkSpec refuses the two expressions the cron parser does not turn away on its own, before it is
+// handed anything. Both are caller-supplied text that reaches here from the schedule preview and
+// from schedule creation, and a stored row carrying either is read again on every tick.
+func checkSpec(spec string) error {
+	expr, err := withoutZoneDescriptor(spec)
+	if err != nil {
+		return err
+	}
+	return checkInterval(expr)
+}
+
+// withoutZoneDescriptor returns the expression with a leading zone descriptor removed, and refuses
+// a descriptor that names no expression at all.
+//
+// The cron parser finds the end of the descriptor by looking for the first space, and with no space
+// anywhere it slices to a negative index and panics rather than returning an error. So "TZ=UTC", a
+// string a person could easily paste into the preview, crashed the process, and a row holding one
+// took the scheduler goroutine down on every tick after every restart. A zone on its own is not a
+// cadence in any case, so it is refused here and never reaches the parser.
+func withoutZoneDescriptor(spec string) (string, error) {
+	for _, prefix := range []string{"CRON_TZ=", "TZ="} {
+		body, ok := strings.CutPrefix(spec, prefix)
+		if !ok {
+			continue
+		}
+		_, expr, found := strings.Cut(body, " ")
+		if !found {
+			return "", fmt.Errorf("%w: %q names a timezone and no cadence, so there is nothing "+
+				"to fire", ErrBadCron, spec)
+		}
+		return strings.TrimSpace(expr), nil
+	}
+	return spec, nil
+}
+
+// checkInterval refuses an interval expression that names a duration of zero or less.
+//
+// The cron library clamps any duration under a second up to one second rather than complaining, so
+// "@every 0s" and "@every -1h" parsed, were stored, and then came due on every tick for as long as
+// the schedule existed: one authenticated call producing a run every fifteen seconds forever. That
+// is the same harm as an expression which never comes due, arriving from the other direction, and
+// neither value can be what anybody meant. A duration that does not parse at all is left to the
+// library, which names what is wrong with it.
+func checkInterval(expr string) error {
+	raw, ok := strings.CutPrefix(expr, "@every ")
+	if !ok {
+		return nil
+	}
+	every, err := time.ParseDuration(raw)
+	if err != nil {
+		return nil
+	}
+	if every <= 0 {
+		return fmt.Errorf("%w: an interval must be positive, and %q would be read as due on every "+
+			"tick", ErrBadCron, expr)
+	}
+	return nil
 }
 
 // skippedBySpringForward reports the instant to fire at when the zone jumped over the scheduled wall

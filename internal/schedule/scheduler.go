@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -49,6 +51,11 @@ type Scheduler struct {
 	cancel context.CancelFunc
 	// done closes when the loop exits.
 	done chan struct{}
+	// startOnce launches the loop at most once, so a second Start cannot leave two loops firing the
+	// same schedules or close done twice.
+	startOnce sync.Once
+	// started reports whether the loop was ever launched, which is what Close waits on.
+	started atomic.Bool
 }
 
 // SchedulerOption configures a Scheduler.
@@ -115,26 +122,38 @@ func NewScheduler(store Store, submitter Submitter, log *zap.Logger, opts ...Sch
 	return s
 }
 
-// Start begins the scheduler loop in a background goroutine.
+// Start begins the scheduler loop in a background goroutine. A second call does nothing: two loops
+// over one store would race each other's ClaimDue on every due row, and whichever exited second
+// would close done a second time, which panics and takes the process with it.
 func (s *Scheduler) Start() {
-	go func() {
-		defer close(s.done)
-		ticker := time.NewTicker(s.interval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-s.ctx.Done():
-				return
-			case t := <-ticker.C:
-				s.tick(t)
+	s.startOnce.Do(func() {
+		s.started.Store(true)
+		go func() {
+			defer close(s.done)
+			ticker := time.NewTicker(s.interval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-s.ctx.Done():
+					return
+				case t := <-ticker.C:
+					s.tick(t)
+				}
 			}
-		}
-	}()
+		}()
+	})
 }
 
-// Close stops the scheduler loop and waits for it to exit.
+// Close stops the scheduler loop and waits for it to exit. It returns at once on a scheduler that
+// was never started: done is closed by the loop and by nothing else, so waiting on it when no loop
+// was ever launched blocked the caller forever. That turned a startup that gave up before Start
+// into a process that hangs in shutdown rather than one that exits with the error, and the shutdown
+// goroutine and everything it held stayed alive for the life of the process.
 func (s *Scheduler) Close() {
 	s.cancel()
+	if !s.started.Load() {
+		return
+	}
 	<-s.done
 }
 
