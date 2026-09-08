@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -129,10 +131,31 @@ func checkLimit(ctx context.Context, c *Client, templateID, limit string) error 
 }
 
 // idArg reads one required string argument by name.
+//
+// An argument the tool does not define is refused here, not left to decode. decode asks the JSON
+// decoder to disallow unknown fields, which does nothing when the destination is a map: every key
+// fits a map, so the read tools accepted any argument at all and dropped it. A model asking
+// get_run_log for the last hundred lines was handed the whole log and a success, which is the same
+// silent drop the refusal rule exists to prevent, so the keys are checked against the one this tool
+// defines instead.
 func idArg(args json.RawMessage, name string) (string, error) {
 	var in map[string]any
 	if err := decode(args, &in); err != nil {
 		return "", err
+	}
+	unknown := make([]string, 0, len(in))
+	for key := range in {
+		if key != name {
+			unknown = append(unknown, key)
+		}
+	}
+	if len(unknown) > 0 {
+		// Sorted so the same arguments always draw the same refusal, whatever order the map ranged
+		// in. The message is shaped like the decoder's own so argHint can read the field back out
+		// and add the guidance for a control this server withholds on purpose.
+		sort.Strings(unknown)
+		msg := fmt.Sprintf("unknown field %q", unknown[0])
+		return "", fmt.Errorf("invalid arguments: %s%s", msg, argHint(msg))
 	}
 	value, _ := in[name].(string)
 	if strings.TrimSpace(value) == "" {
@@ -147,8 +170,20 @@ func idArg(args json.RawMessage, name string) (string, error) {
 // bare id concatenated into a path lets "../../v1/users" or a query string walk to a different
 // endpoint than the tool intends, turning a read tool into a request the caller never authorized.
 // PathEscape confines it to a single segment.
+//
+// PathEscape alone is not enough for a value made only of dots, since neither "." nor ".." holds a
+// character it escapes. A run id of ".." therefore survived as a real dot segment: the request line
+// read /v1/runs/../logs, any server that cleans paths, which net/http's own mux does, resolves that
+// to /v1/logs and redirects there, and the client follows carrying the operator's bearer token.
+// That is the walk to another endpoint this function exists to prevent, so the dots are
+// percent-encoded, which leaves a path cleaner nothing to act on and still decodes back to the id
+// the model named.
 func escapeID(id string) string {
-	return url.PathEscape(id)
+	escaped := url.PathEscape(id)
+	if escaped != "" && strings.Trim(escaped, ".") == "" {
+		return strings.ReplaceAll(escaped, ".", "%2E")
+	}
+	return escaped
 }
 
 // listQuery builds the query string for a run listing, omitting the parts the caller left out. A
@@ -170,11 +205,25 @@ func listQuery(query string, limit int) string {
 }
 
 // clip shortens s to at most max bytes, so a model's free text cannot write an unbounded label.
+//
+// The bound is spent in bytes, which is what keeps a model from writing a megabyte of label
+// whatever alphabet it uses, but the cut lands on a character boundary. The label rides into the
+// hash-chained audit trail as the agent's stated reason, and a reason written in any non-ASCII
+// alphabet cut through the middle of a character was recorded as invalid UTF-8: a record no reader
+// can render and no auditor can quote back. Dropping the trailing partial character costs at most
+// three bytes of a reason already past its bound.
 func clip(s string, max int) string {
 	if len(s) <= max {
 		return s
 	}
-	return s[:max]
+	cut := s[:max]
+	for len(cut) > 0 {
+		if r, size := utf8.DecodeLastRuneInString(cut); r != utf8.RuneError || size > 1 {
+			break
+		}
+		cut = cut[:len(cut)-1]
+	}
+	return cut
 }
 
 // render turns an API reply into the indented JSON the model reads. Indented rather than compact
