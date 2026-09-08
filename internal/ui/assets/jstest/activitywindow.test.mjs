@@ -1,6 +1,6 @@
 // Tests for the overview activity chart's window control, filter, and empty-window behavior, added
 // with the Grafana-style controls in 15-overview-doctor.js. Pinned off UTC, like the sibling
-// activity tests, so a bucketing offset error shows up rather than cancelling to zero.
+// activity tests, so a bucketing offset error shows up rather than canceling to zero.
 process.env.TZ = "America/Chicago";
 
 import { test } from "node:test";

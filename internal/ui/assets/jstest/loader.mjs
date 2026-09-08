@@ -256,6 +256,7 @@ export const ALL_PARTS = [
 	"13-fileviewer-inventory.js", "14-inventories-workers.js", "15-overview-doctor.js",
 	"16-runs-list.js", "17-cron.js", "18-host-page.js", "19-cron-preview.js",
 	"20-held-copy-stream.js", "21-user-profile.js", "22-run-detail.js", "23-run-matrix.js",
+	"24-run-compare.js",
 ];
 
 // sandboxOf returns the raw globals behind a loaded handle, for the helpers that install stubs.

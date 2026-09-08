@@ -106,7 +106,7 @@ test("a finished run shows the output it produced", async () => {
 		"the output panel stayed hidden for a finished run");
 	assert.match(document.getElementById("log").textContent, /Fleet capacity report/);
 	assert.equal(document.querySelector("#log-panel h2").textContent, "Output",
-		"a finished run's record should not be labelled live");
+		"a finished run's record should not be labeled live");
 });
 
 test("an empty or unreadable log leaves the panel hidden rather than showing an empty box", async () => {
