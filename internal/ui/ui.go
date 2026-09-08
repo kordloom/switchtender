@@ -4,6 +4,7 @@
 package ui
 
 import (
+	"bytes"
 	"embed"
 	"html/template"
 	"io/fs"
@@ -118,8 +119,16 @@ func (u *UI) Handler() http.Handler {
 	return mux
 }
 
-// index renders the overview home page.
-func (u *UI) index(w http.ResponseWriter, _ *http.Request) {
+// index renders the overview home page. It is registered on the subtree pattern
+// "/ui/", which also matches every path beneath it that no other route claims, so
+// a path this handler does not own is refused rather than answered with the
+// overview page: a mistyped or renamed route must say so instead of rendering
+// something plausible.
+func (u *UI) index(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/ui/" {
+		http.NotFound(w, r)
+		return
+	}
 	u.render(w, "overview.html", map[string]any{"ReadOnly": u.readOnly, "AIOff": !u.aiEnabled})
 }
 
@@ -241,10 +250,23 @@ func (u *UI) workflows(w http.ResponseWriter, _ *http.Request) {
 }
 
 // render executes the named template with data.
+//
+// The page is built in memory and only written once it is whole. Executing straight to the response
+// put the part that rendered before a fault on the wire, which sent the status line with it: the
+// reader got a two hundred, a truncated page, and the error message appended to it, and nothing
+// counting statuses ever saw a failure. Every page here is a single template with no partial-write
+// protection in front of it, so any fault past the first action landed that way.
 func (u *UI) render(w http.ResponseWriter, name string, data any) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := u.tmpl.ExecuteTemplate(w, name, data); err != nil {
+	var buf bytes.Buffer
+	if err := u.tmpl.ExecuteTemplate(&buf, name, data); err != nil {
 		u.log.Error("ui: render " + name + ": " + err.Error())
 		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if _, err := w.Write(buf.Bytes()); err != nil {
+		// The status line is already sent, so the reader can only be told by the connection ending.
+		// The record of the short write belongs in the log.
+		u.log.Error("ui: write " + name + ": " + err.Error())
 	}
 }
