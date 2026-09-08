@@ -87,22 +87,33 @@ type Finding struct {
 	Key string `json:"-"`
 }
 
-// maxBeatJump bounds how far past the last witnessed beat a served beat may claim to be. A feed is
-// allowed to run far ahead of a witness that was down, but a number vastly beyond the plausible is
-// a value the watched server chose to wedge the checkpoint with.
+// maxBeatJump bounds how far past the last witnessed beat a served beat may claim to be, and it
+// bounds the chain position the same way. A feed is allowed to run far ahead of a witness that was
+// down, but a number vastly beyond the plausible is a value the watched server chose to wedge the
+// checkpoint with. The position needs the bound as much as the beat number does: one answer
+// claiming position 2^62 on a first watch was adopted in silence, and from then on every honest
+// answer reported a position below the witnessed one, which raises seq_regression forever and
+// refuses to adopt any head again. The only repair was deleting the state file, which is also the
+// one action that destroys the memory a truncation would have been measured against.
 const maxBeatJump = 1 << 40
 
+// maxDuplicateFindings bounds how many distinct out-of-order pairs one answer is allowed to name
+// individually. A few named pairs are what an operator acts on; a feed producing more than that is
+// not merely out of order, and naming each pair turns one answer into a flood of records,
+// notifications, and findings-total increments.
+const maxDuplicateFindings = 4
+
 // plausibleBeats drops the beats a witness cannot responsibly remember and returns a finding naming
-// what was refused. A beat is implausible when its number or chain position is not positive, or its
-// head is not a chain link's 64 hex characters. Refusing beats the witness cannot check keeps
-// nonsense out of signed memory, where it would stand as testimony.
+// what was refused. A beat is implausible when its number or chain position is not positive or runs
+// past maxBeatJump, or when its head is not a chain link's 64 hex characters. Refusing beats the
+// witness cannot check keeps nonsense out of signed memory, where it would stand as testimony.
 func plausibleBeats(beats []Beat) ([]Beat, []Finding) {
 	kept := make([]Beat, 0, len(beats))
 	refused := 0
 	var why string
 	for _, b := range beats {
 		switch {
-		case b.Beat < 1, b.Seq < 1, b.Beat > maxBeatJump:
+		case b.Beat < 1, b.Seq < 1, b.Beat > maxBeatJump, b.Seq > maxBeatJump:
 			refused++
 			if why == "" {
 				why = fmt.Sprintf("beat %d at chain position %d is out of range", b.Beat, b.Seq)
@@ -170,25 +181,58 @@ func Check(prev *Checkpoint, server string, beats []Beat, now time.Time) (*Check
 	// removed. The walk is summarized rather than reported per gap: a hostile feed can serve a
 	// thousand beats with a thousand gaps, and one finding per gap turns each poll into a thousand
 	// records and a thousand notifications.
-	gaps, missing := 0, int64(0)
+	gaps, missing, firstGapAfter := 0, int64(0), int64(0)
+	// The out-of-order walk is bounded the same way, and it was not: a feed serving one beat a
+	// thousand times produced nine hundred and ninety-nine findings from a single poll, each one a
+	// line appended to the findings record, a webhook delivery, and an increment of the findings
+	// total an attestation carries. Poll-level deduplication did not collapse them either, because
+	// it only compares against the previous poll's set and never within the current one. So an
+	// identical wording is recorded once however many pairs produced it, distinct wordings are named
+	// up to the cap, and anything past that is summarized.
+	seenDup := map[string]struct{}{}
+	var dupDetails []string
+	dupPairs := 0
 	for i := 1; i < len(beats); i++ {
 		if beats[i].Beat != beats[i-1].Beat+1 {
 			// A repeat or a step backwards inside one answer is not a gap; the old arithmetic
 			// reported it as a negative count of missing beats.
 			if beats[i].Beat <= beats[i-1].Beat {
-				findings = append(findings, Finding{Kind: "duplicate_beat", Detail: fmt.Sprintf(
-					"the feed serves beat %d after beat %d, so it is not ordered and one of them is "+
-						"a repeat", beats[i].Beat, beats[i-1].Beat)})
+				dupPairs++
+				detail := fmt.Sprintf("the feed serves beat %d after beat %d, so it is not ordered "+
+					"and one of them is a repeat", beats[i].Beat, beats[i-1].Beat)
+				if _, dup := seenDup[detail]; !dup && len(dupDetails) < maxDuplicateFindings {
+					seenDup[detail] = struct{}{}
+					dupDetails = append(dupDetails, detail)
+				}
 				continue
+			}
+			if gaps == 0 {
+				firstGapAfter = beats[i-1].Beat
 			}
 			gaps++
 			missing += beats[i].Beat - beats[i-1].Beat - 1
 		}
 	}
+	for _, detail := range dupDetails {
+		findings = append(findings, Finding{Kind: "duplicate_beat", Detail: detail})
+	}
+	if dupPairs > len(dupDetails) {
+		findings = append(findings, Finding{Kind: "duplicate_beat", Detail: fmt.Sprintf(
+			"the feed serves %d pairs of beats out of order in one answer, more than can be named "+
+				"one at a time, so the ordering of this feed cannot be relied on", dupPairs)})
+	}
 	if gaps > 0 {
+		// The key anchors on the size and the start of the gap rather than on the wording, which
+		// names the oldest and the newest beat in the answer and so moves every time the feed
+		// advances. Without it a gap that simply stands there was a fresh event on every poll: at a
+		// sixty second interval one permanent gap is fourteen hundred records and fourteen hundred
+		// alerts a day, and a findings total that climbs by that much says the witness saw fourteen
+		// hundred separate events when it saw one.
 		findings = append(findings, Finding{Kind: "missing_beat", Detail: fmt.Sprintf(
 			"the feed skips %d beat(s) across %d gap(s) between beat %d and beat %d, so entries "+
-				"between them are gone", missing, gaps, beats[0].Beat, beats[len(beats)-1].Beat)})
+				"between them are gone", missing, gaps, beats[0].Beat, beats[len(beats)-1].Beat),
+			Key: fmt.Sprintf("missing_beat: %d beat(s) gone across %d gap(s) after beat %d",
+				missing, gaps, firstGapAfter)})
 	}
 
 	// A gap ACROSS polls was invisible: the walk above only compares beats inside one answer, so a
@@ -449,6 +493,16 @@ func Load(path, expectKey string) (*Checkpoint, error) {
 
 // Save signs and writes the checkpoint atomically, so a crash mid-write never leaves a state file
 // that fails verification on the next start.
+//
+// The scratch file is created exclusively under a name nobody else can pick, rather than at the
+// fixed path+".tmp" every watcher of one server derived. Two overlapping watches wrote the one
+// shared name with a plain truncating create, interleaved inside it, and renamed whatever was
+// there: the result was a state file that would not parse or, worse, would not verify, which is the
+// exact error raised when a state file has been tampered with. An operator reading "the document
+// was altered" had no way to tell a race from an attack, and the damage was durable, because a
+// witness that cannot load its memory never saves a repaired one. Nothing shipped runs two watches
+// at once, but the ways there are ordinary: a cron firing faster than one fetch takes, two crons on
+// one state path, or any caller of CheckAll while the service's own ticker runs.
 func Save(path string, c *Checkpoint, id identity.Identity) error {
 	if err := Sign(c, id); err != nil {
 		return err
@@ -457,11 +511,25 @@ func Save(path string, c *Checkpoint, id identity.Identity) error {
 	if err != nil {
 		return fmt.Errorf("encode checkpoint: %w", err)
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+	dir, base := filepath.Dir(path), filepath.Base(path)
+	// Created in the destination directory so the rename stays on one filesystem, and therefore
+	// stays atomic: a cross-device rename copies, and a reader can catch a partial copy.
+	tmp, err := os.CreateTemp(dir, base+".tmp-*")
+	if err != nil {
 		return fmt.Errorf("write checkpoint: %w", err)
 	}
-	if err := os.Rename(tmp, path); err != nil {
+	name := tmp.Name()
+	// A failed write must not leave the scratch file behind, or a directory of them accumulates
+	// under a disk that is already full.
+	defer func() { _ = os.Remove(name) }()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("write checkpoint: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("write checkpoint: %w", err)
+	}
+	if err := os.Rename(name, path); err != nil {
 		return fmt.Errorf("write checkpoint: %w", err)
 	}
 	return nil
