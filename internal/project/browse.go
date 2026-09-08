@@ -52,8 +52,16 @@ type FileContent struct {
 
 // checkoutRoot returns the resolved checkout directory for a project id, following symlinks so
 // later containment checks compare fully resolved paths.
+//
+// The id has to name one plain directory under the cache, so an empty id, an id carrying a
+// separator, and an id beginning with a dot are all refused. Listing only ".." left "." accepted,
+// and "." joins to the cache directory itself: the listing then walks every project's checkout at
+// once and the file reader serves any file under any of them. The same dot rule keeps ".runs", the
+// directory holding the private per-run checkouts, out of reach. The handler in front looks the id
+// up in the project store first, so this is defense in depth, and it is the one check standing
+// between a project id and the whole cache.
 func (s *Syncer) checkoutRoot(projectID string) (string, error) {
-	if projectID == "" || strings.ContainsAny(projectID, `/\`) || projectID == ".." {
+	if projectID == "" || strings.ContainsAny(projectID, `/\`) || strings.HasPrefix(projectID, ".") {
 		return "", ErrOutsideCheckout
 	}
 	dir := filepath.Join(s.cacheDir, projectID)
@@ -177,13 +185,38 @@ func (s *Syncer) File(projectID, rel string) (*FileContent, error) {
 		return nil, fmt.Errorf("read file: %w", err)
 	}
 	buf = buf[:n]
+	truncated := info.Size() > int64(n)
+	// A cut at the limit can land in the middle of a multi-byte character. Testing those bytes as
+	// they stand made an ordinary large playbook fail the UTF-8 test and come back with Binary set
+	// and no content, which says the file is not text when what happened is the truncation Truncated
+	// already describes. The trailing partial character is dropped so the report matches the file.
+	if truncated {
+		buf = trimPartialRune(buf)
+	}
 	if !utf8.Valid(buf) || strings.ContainsRune(string(buf), 0) {
 		out.Binary = true
 		return out, nil
 	}
 	out.Content = string(buf)
-	out.Truncated = info.Size() > int64(n)
+	out.Truncated = truncated
 	return out, nil
+}
+
+// trimPartialRune drops a trailing byte sequence that begins a multi-byte UTF-8 character the read
+// limit cut short, and returns the bytes unchanged when the last character is whole. Only the final
+// character is examined, so bytes that are invalid for any other reason still read as binary.
+func trimPartialRune(b []byte) []byte {
+	start := len(b) - 1
+	for start >= 0 && start > len(b)-utf8.UTFMax && !utf8.RuneStart(b[start]) {
+		start--
+	}
+	if start < 0 || !utf8.RuneStart(b[start]) {
+		return b
+	}
+	if r, size := utf8.DecodeRune(b[start:]); r == utf8.RuneError && size <= 1 {
+		return b[:start]
+	}
+	return b
 }
 
 // isGitPath reports whether a relative path names a git directory at any depth.

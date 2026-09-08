@@ -17,6 +17,7 @@ import (
 	"github.com/kordloom/switchtender/internal/util"
 
 	"github.com/go-git/go-git/v5"
+	gitconfig "github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	gitssh "github.com/go-git/go-git/v5/plumbing/transport/ssh"
@@ -147,6 +148,16 @@ func (s *Syncer) Sync(p *Project, sshKey string) (*Worktree, error) {
 		})
 		if err != nil {
 			return nil, fmt.Errorf("clone %s: %w", redactRepoURL(p.RepoURL), err)
+		}
+		// A clone that pinned no branch is left tracking the branch it landed on, so the update path
+		// finds it. The checkout is discarded when that fails, because a checkout the next sync
+		// cannot update is worse than no checkout at all: it is kept, it never advances, and every
+		// run of the project executes the commit of the first clone.
+		if p.Branch == "" {
+			if err := trackClonedBranch(repo); err != nil {
+				_ = os.RemoveAll(canonical)
+				return nil, err
+			}
 		}
 	} else {
 		if err := fetchAndReset(repo, p, auth); err != nil {
@@ -385,8 +396,21 @@ func fetchAndReset(repo *git.Repository, p *Project, auth transport.AuthMethod) 
 		}
 		branch = head.Name().Short()
 	}
-	remote, err := repo.Reference(
-		plumbing.NewRemoteReferenceName("origin", branch), true)
+	tracking := plumbing.NewRemoteReferenceName("origin", branch)
+	remote, err := repo.Reference(tracking, true)
+	// A checkout taken before the clone pinned its branch carries only refs/remotes/origin/HEAD, so
+	// the reference above is missing and the sync fails. Pinning the branch and fetching once more
+	// repairs that checkout in place, which matters because nothing else would: the checkout matches
+	// its project, so it is kept, and every run of the project would fail at sync from then on.
+	if err != nil && p.Branch == "" {
+		if fixErr := trackClonedBranch(repo); fixErr == nil {
+			if fetchErr := repo.Fetch(&git.FetchOptions{Auth: auth, Force: true}); fetchErr != nil &&
+				fetchErr != git.NoErrAlreadyUpToDate {
+				return fmt.Errorf("fetch %s: %w", redactRepoURL(p.RepoURL), fetchErr)
+			}
+			remote, err = repo.Reference(tracking, true)
+		}
+	}
 	if err != nil {
 		return fmt.Errorf("resolve origin/%s: %w", branch, err)
 	}
@@ -439,12 +463,19 @@ func ValidateRepoURL(raw string) error {
 	return checkRepoHost(host)
 }
 
-// checkRepoUserinfo rejects a scheme-prefixed repository URL that embeds credentials. A token or
-// password in the URL surfaces in clone and fetch errors and in stored project rows, so credentials
-// belong in a stored credential instead. An ssh username alone passes, since it names the login and
-// carries no secret.
+// checkRepoUserinfo rejects a repository URL that embeds credentials. A token or password in the
+// URL surfaces in clone and fetch errors and in stored project rows, so credentials belong in a
+// stored credential instead. An ssh username alone passes, since it names the login and carries no
+// secret.
+//
+// The scp-like shorthand is held to the same rule. It has no password slot in its syntax, but
+// go-git reads everything before the last "@" as the login, so "tok:secret@host:path" is a remote
+// it dials with the secret in it, and only the scheme-prefixed spelling was ever refused.
 func checkRepoUserinfo(raw string) error {
 	if !strings.Contains(raw, "://") {
+		if end := scpUserinfoEnd(raw); strings.Contains(raw[:end], ":") {
+			return fmt.Errorf("%w: credentials embedded in url", ErrBadRepoURL)
+		}
 		return nil
 	}
 	u, err := url.Parse(raw)
@@ -459,9 +490,20 @@ func checkRepoUserinfo(raw string) error {
 
 // redactRepoURL returns the URL with any embedded userinfo removed so error text never carries a
 // token or password from the URL. A URL that does not parse is replaced entirely, since its shape
-// is unknown. The scp-like shorthand has no password slot and passes through unchanged.
+// is unknown.
+//
+// The scp-like shorthand has no password slot, but that is a statement about the syntax rather than
+// about what people write. go-git reads everything before the last "@" as the login, so
+// "tok:secret@host:path" is a remote it dials with the whole string as the login, and every clone
+// and fetch failure interpolated that secret into logs, run records, and API responses. A shorthand
+// login carrying a colon is that password shape and is cut at the same "@" go-git splits on, which
+// leaves the host and path the error text needs. A bare login names the ssh user and holds no
+// secret, which is the same line checkRepoUserinfo draws, so it is kept.
 func redactRepoURL(raw string) string {
 	if !strings.Contains(raw, "://") {
+		if end := scpUserinfoEnd(raw); strings.Contains(raw[:end], ":") {
+			return raw[end:]
+		}
 		return raw
 	}
 	u, err := url.Parse(raw)
@@ -492,25 +534,44 @@ func repoURLParts(raw string) (host, scheme string, err error) {
 	}
 	// The scp-like shorthand is [user@]host:path, where the host part carries no slash. Anything
 	// without this colon and without a scheme is a local filesystem path.
-	if i := strings.IndexByte(raw, ':'); i >= 0 && !strings.Contains(raw[:i], "/") {
-		hostPart := raw[:i]
-		if at := strings.LastIndexByte(hostPart, '@'); at >= 0 {
-			hostPart = hostPart[at+1:]
-		}
-		return hostPart, "ssh", nil
+	//
+	// The userinfo is cut off before the colon is looked for, because go-git splits the shorthand at
+	// the last "@" and the login may hold a colon of its own. Searching the whole value for the first
+	// colon read "u:p@127.0.0.1:repo.git" as host "u", which the host check found nothing wrong with
+	// while go-git dialed 127.0.0.1, so a loopback and metadata address walked straight through the
+	// one check that exists to refuse them.
+	rest := raw[scpUserinfoEnd(raw):]
+	if i := strings.IndexByte(rest, ':'); i >= 0 && !strings.Contains(rest[:i], "/") {
+		return rest[:i], "ssh", nil
 	}
 	return "", "file", nil
 }
 
+// scpUserinfoEnd returns the offset where the host begins in git's scp-like user@host:path
+// shorthand, which is just past the last "@" ahead of the path, and zero when there is no userinfo.
+// go-git splits the shorthand there, so everything in front of that "@" is login text rather than
+// host text. An "@" that sits after the first slash belongs to the path and is left alone, which
+// keeps a local path such as "/srv/git/a@b/repo.git" intact.
+func scpUserinfoEnd(raw string) int {
+	at := strings.LastIndexByte(raw, '@')
+	if at < 0 {
+		return 0
+	}
+	if slash := strings.IndexByte(raw, '/'); slash >= 0 && slash < at {
+		return 0
+	}
+	return at + 1
+}
+
 // parseLooseIP parses a host as an IP address, accepting the shorthand forms a resolver honors but
-// net.ParseIP does not: a dotted form with fewer than four parts, and a bare 32-bit integer. Both
-// reach 127.0.0.1, so a validator that only understands the canonical spelling blocks the obvious
-// way in and leaves two beside it.
+// net.ParseIP does not: a dotted form with fewer than four parts, a bare 32-bit integer, and the
+// octal and hex spellings of a part. All of them reach 127.0.0.1, so a validator that only
+// understands the canonical spelling blocks the obvious way in and leaves the rest beside it.
 func parseLooseIP(host string) net.IP {
 	if ip := net.ParseIP(host); ip != nil {
 		return ip
 	}
-	if n, err := strconv.ParseUint(host, 10, 32); err == nil {
+	if n, err := parseInetAtonPart(host); err == nil {
 		return net.IPv4(byte(n>>24), byte(n>>16), byte(n>>8), byte(n))
 	}
 	parts := strings.Split(host, ".")
@@ -519,7 +580,7 @@ func parseLooseIP(host string) net.IP {
 	}
 	nums := make([]uint64, len(parts))
 	for i, p := range parts {
-		n, err := strconv.ParseUint(p, 10, 32)
+		n, err := parseInetAtonPart(p)
 		if err != nil {
 			return nil
 		}
@@ -538,6 +599,26 @@ func parseLooseIP(host string) net.IP {
 	}
 	v |= nums[len(nums)-1]
 	return net.IPv4(byte(v>>24), byte(v>>16), byte(v>>8), byte(v))
+}
+
+// parseInetAtonPart parses one part of an address the way inet_aton does, which is what the
+// platform resolver uses on macOS and on glibc: a "0x" prefix is hex, a leading zero is octal, and
+// everything else is decimal. Reading every part as decimal left "0177.0.0.1" and "0x7f.0.0.1"
+// looking like names rather than addresses, so the host check never saw the loopback they both
+// reach.
+func parseInetAtonPart(part string) (uint64, error) {
+	base := 10
+	switch {
+	case len(part) > 2 && part[0] == '0' && (part[1] == 'x' || part[1] == 'X'):
+		base, part = 16, part[2:]
+	case len(part) > 1 && part[0] == '0':
+		base, part = 8, part[1:]
+	}
+	n, err := strconv.ParseUint(part, base, 32)
+	if err != nil {
+		return 0, fmt.Errorf("parse address part: %w", err)
+	}
+	return n, nil
 }
 
 // checkRepoHost rejects a repository host that is empty, explicitly blocked, or a loopback,
@@ -617,6 +698,46 @@ func WithinRepo(root, rel string) (string, error) {
 		return "", ErrEscapesRepo
 	}
 	return joined, nil
+}
+
+// trackClonedBranch points a fresh clone's origin remote at the branch the clone landed on and
+// writes the matching remote-tracking reference.
+//
+// A project pinning no branch follows the remote default, so the clone names no reference, and
+// go-git takes such a clone with "+HEAD:refs/remotes/origin/HEAD" as the remote's only refspec, so
+// refs/remotes/origin/<branch> is never written. The update path reads the branch name off the
+// local head and resolves refs/remotes/origin/<branch>, so every sync after the first clone failed
+// with "reference not found", and nothing repaired it: matchesProject reports a match for a project
+// with no branch pinned, so the stale checkout was kept rather than taken again, and every run of
+// that project failed at sync from then on. Giving the clone the layout a branch-pinned clone gets
+// makes "empty means the remote default" hold on the second sync as well as the first.
+func trackClonedBranch(repo *git.Repository) error {
+	head, err := repo.Head()
+	if err != nil {
+		return fmt.Errorf("resolve cloned head: %w", err)
+	}
+	if !head.Name().IsBranch() {
+		return fmt.Errorf("clone is not on a branch: %s", head.Name())
+	}
+	branch := head.Name().Short()
+	cfg, err := repo.Config()
+	if err != nil {
+		return fmt.Errorf("read checkout config: %w", err)
+	}
+	origin, ok := cfg.Remotes["origin"]
+	if !ok {
+		return errors.New("clone has no origin remote")
+	}
+	origin.Fetch = []gitconfig.RefSpec{gitconfig.RefSpec(
+		fmt.Sprintf("+refs/heads/%s:refs/remotes/origin/%s", branch, branch))}
+	if err := repo.SetConfig(cfg); err != nil {
+		return fmt.Errorf("track branch %s: %w", branch, err)
+	}
+	tracking := plumbing.NewRemoteReferenceName("origin", branch)
+	if err := repo.Storer.SetReference(plumbing.NewHashReference(tracking, head.Hash())); err != nil {
+		return fmt.Errorf("write %s: %w", tracking, err)
+	}
+	return nil
 }
 
 // matchesProject reports whether an existing checkout was taken from the project's current remote and
