@@ -538,10 +538,15 @@ func entryRole(e *audit.Entry) string {
 		// The committed decision, not the HTTP attempt: an attempt is recorded whether or not the
 		// separation gate let it take, so labeling attempts credited refused self-approvals to the
 		// requester and let a failed re-approve overwrite the true approver's name.
-		if strings.HasSuffix(e.Path, "/rejected") {
-			return "Rejected"
-		}
-		return "Approved"
+		//
+		// The verdict is read from the entry rather than inferred from what it is not. Treating
+		// every committed decision that does not end in "/rejected" as an approval reported an
+		// approval nobody gave for any other verdict the chain carries, an expiry or a withdrawal,
+		// and disagreed with the register, which reads the same entries and names no verdict it
+		// does not recognize. Both documents read the decision through decisionOf now, so one run
+		// cannot be described two ways.
+		_, verdict := decisionOf(e)
+		return verdict
 	case strings.HasSuffix(e.Path, "/cancel"):
 		return "Canceled"
 	case strings.HasSuffix(e.Path, "/retry"):

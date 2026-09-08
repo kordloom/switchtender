@@ -8,6 +8,7 @@ import (
 	"html/template"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/run"
@@ -338,8 +339,12 @@ func changeOf(r *run.Run) string {
 		// survive as a fragment of a cut line.
 		what, _ = util.RedactAssignments(r.Command, "[redacted]")
 	}
-	if len(what) > 80 {
-		what = what[:77] + "..."
+	// The cut is counted in runes, not bytes. A byte cut split the last character of a script
+	// written in any non-ASCII alphabet, so the Change column and the CSV export beside it carried
+	// bytes that are not valid UTF-8, and a reader that validates its input rejects the whole
+	// document over one row.
+	if utf8.RuneCountInString(what) > 80 {
+		what = string([]rune(what)[:77]) + "..."
 	}
 	return strings.TrimSpace(tool + " " + what)
 }
