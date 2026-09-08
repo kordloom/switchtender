@@ -1,14 +1,39 @@
 ---
+# Checks every host against the configuration the platform is meant to be running.
+#
+# The play is pinned to check mode, so it reports what would change and writes nothing however it is
+# started. That pin is load bearing. The copy tasks below place the desired file on the host, so a
+# run outside check mode overwrites every state file with the desired one, and the files under
+# state/ are the only copy of the drift this demo exists to show. Started by hand once, the obvious
+# thing to do with a playbook, it reported the fleet's drift and erased it in the same pass, and the
+# second run reported a fleet in perfect sync. Refusing to start outside check mode would protect
+# the same files, but a check whose safety depends on remembering a flag is the wrong shape for a
+# check, and the pin travels with the file if somebody lifts it into their own repository.
+#
+# The files under state/ are what each demo host is running now and the files under config/desired
+# are what it should be, both written out by the seeder, so the count on the drift page is a real
+# difference between two files: hosts that are in sync report none, and the ones that fell behind
+# report exactly what has fallen behind.
 - name: Configuration drift check
   hosts: all
   connection: local
   gather_facts: false
+  check_mode: true
+  vars:
+    desired_dir: "{{ playbook_dir }}/config/desired"
+    state_dir: "{{ playbook_dir }}/state/{{ inventory_hostname }}"
   tasks:
-    - name: Ensure app config present
-      file:
-        path: "/tmp/ym-demo-config-{{ inventory_hostname }}"
-        state: touch
-    - name: Ensure service marker present
-      file:
-        path: "/tmp/ym-demo-service-{{ inventory_hostname }}"
-        state: touch
+    - name: Application config matches the deployed release
+      copy:
+        src: "{{ desired_dir }}/app.conf"
+        dest: "{{ state_dir }}/app.conf"
+
+    - name: Worker unit matches the deployed release
+      copy:
+        src: "{{ desired_dir }}/worker.service"
+        dest: "{{ state_dir }}/worker.service"
+
+    - name: Package pins match the fleet baseline
+      copy:
+        src: "{{ desired_dir }}/packages.pin"
+        dest: "{{ state_dir }}/packages.pin"
