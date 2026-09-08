@@ -52,6 +52,12 @@ witness-key.json
 *.pem
 *.key
 
+# Python bytecode from the Ansible callback plugin. internal/roundhouse/plugins/switchtender.py is
+# executed by ansible-playbook on every run the test suite performs, so the interpreter writes a
+# __pycache__ beside it that regenerates constantly and belongs to nobody.
+__pycache__/
+*.pyc
+
 # Local config
 .claude/
 
