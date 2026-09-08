@@ -1,7 +1,37 @@
-// Package demo seeds a SwitchTender store with lifelike sample data by running real jobs through the
-// engine: Ansible playbooks plus Bash, Python, Terraform, and Go. A public read-only instance then shows
-// genuine host matrices, split runs, mixed-tool pipelines, and cross-run fleet memory rather than
-// fabricated records.
+// Package demo seeds a SwitchTender store with sample data by running real jobs through the engine:
+// Ansible playbooks plus Bash, Python, Terraform, and Go. A public read-only instance then serves
+// what those runs produced. Part of what a visitor reads there is measured and part of it is
+// declared, and the line between the two is drawn here, in one place, because the demo is what a
+// skeptical evaluator opens first.
+//
+// Measured. Every seeded run except the one the policy gate holds is a process this host really
+// executed, and its events, per-task and per-host results, exit statuses, and durations are read
+// back from that process's own output. The split shards, the mixed-tool pipelines, and the flaky
+// host on the fleet page are what those runs did. The audit chain is appended and hash linked the
+// way a live mutation appends it, each run's receipt redeems against its own creation entry, and
+// the anchor, where an authority is configured and reachable, is a token that authority signed.
+// The count on the drift page is a byte comparison the check playbook really performed.
+//
+// Declared. The estate is a fixture. Every host in the sample inventory is the single box serving
+// the demo, reached over a local connection, so each host's identity is declared in
+// assets/facts.yml and published through the same facts channel a gather uses, and each host's
+// current configuration is written out per host by the seeder from assets/config. Which host fails
+// is chosen as well: site.yml runs /bin/false on the host a run's fail_host variable names, so the
+// failure is a real nonzero exit on a real task, staged so fleet memory has something to remember.
+// The creation entry each run carries and the change history seedConfig appends name API calls the
+// seeder performed directly rather than over HTTP. Their times are chosen too. The seed clock parks
+// the runs across the recent past so the history reads like a fleet that has been working, while
+// each run's duration stays the real elapsed time of the process that produced it. A run's origin
+// is declared as well: the source and source identifier it carries, such as sch_drift_check on the
+// drift check, are fixed strings chosen here rather than the identifiers the seeded templates and
+// schedules were minted with, so nothing in this store answers to them and the origin chip on the
+// runs list opens the templates or schedules page rather than the record it names.
+//
+// The line sits there because moving it either way costs more than it buys. Gathering the truth
+// about the one box reports that box once per host, which leaves the fleet, host, and drift pages
+// showing one machine six times and publishes the demo server's own hostname and address to anyone
+// who loads a page. Staging the runs, their results, or the chain would fake the evidence this
+// product exists to produce, on the install strangers use to decide whether to believe any of it.
 package demo
 
 import (
@@ -13,6 +43,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -20,7 +51,6 @@ import (
 	git "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
-	cron "github.com/robfig/cron/v3"
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/audit"
@@ -110,6 +140,13 @@ const (
 	// keeping the history older leaves the chain's times descending with its sequence, the way a live
 	// chain reads, rather than a run outcome from hours ago landing beneath a newer config change.
 	seedHistoryBackshiftHours = 12
+	// seedScheduleZone is the zone every seeded cron expression is read in, and the one the schedules
+	// page names beside each cadence. Without it a schedule is read in whatever zone the server
+	// happens to sit in and the page shows the expression alone, so "0 2 * * *" tells a visitor that
+	// something fires at two o'clock somewhere they cannot see. UTC is the only zone that is always
+	// resolvable, including on an install with no timezone database, so naming it can never be the
+	// reason a seeded schedule is refused.
+	seedScheduleZone = "UTC"
 )
 
 // SeedClock is the demo's stand-in for the wall clock. Its cursor opens in the past and advances by
@@ -191,7 +228,7 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 	// variables, locals, and outputs, so either plans offline with no provider download.
 	tfDir := filepath.Join(dir, "repos", "database-ops", "infra", "network")
 
-	seedConfig(ctx, d, log, dir)
+	seedConfig(ctx, d, log)
 
 	// Plain runs where db01 flaps between failing and passing, so fleet memory marks it flaky.
 	failByRun := []string{"", "db01", "", "db01", ""}
@@ -232,10 +269,12 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 	}
 	settle(ctx, d, pipe.ID)
 
-	// One more failure on a different host for variety.
+	// One more failure on a different host for variety. It is labeled for the estate it targets: the
+	// demo seeds one inventory, so a run against it labeled with another environment contradicts the
+	// inventory page a click away.
 	last, err := d.Submitter.Submit(ctx, playbook, inv,
 		seedOpts(ctx, d, "rerun", "", "admin",
-			map[string]string{"env": "staging"}, failVars("edge01")...)...)
+			map[string]string{"env": "prod", "team": "edge"}, failVars("edge01")...)...)
 	if err != nil {
 		return fmt.Errorf("seed run: %w", err)
 	}
@@ -455,7 +494,7 @@ func seedMultiTool(ctx context.Context, d Deps, tfDir, playbook, inv string, log
 
 	if have("terraform") {
 		tf, err := d.Submitter.Submit(ctx, "", "",
-			seedOpts(ctx, d, "api", "", "deploy-bot", map[string]string{"env": "staging"},
+			seedOpts(ctx, d, "api", "", "deploy-bot", map[string]string{"env": "prod", "team": "network"},
 				run.WithTool(run.ToolTerraform), run.WithCommand(tfDir), run.WithDryRun(true))...)
 		if err != nil {
 			return fmt.Errorf("seed terraform run: %w", err)
@@ -677,12 +716,74 @@ func materialize() (string, error) {
 	if err := initDemoRepos(dir); err != nil {
 		return "", err
 	}
+	if err := writeFleetState(dir); err != nil {
+		return "", err
+	}
 	return dir, nil
 }
 
+// fleetHost is one demo host's configuration state on disk.
+type fleetHost struct {
+	// Name is the hostname the demo inventory declares.
+	Name string
+	// Stale names the configuration files the host is still running from the previous release.
+	// Empty means the host matches the desired configuration in every file the check compares.
+	Stale []string
+}
+
+// fleetHosts is the demo estate, host for host with assets/inv.ini, and which of each host's
+// configuration files have fallen behind the release the platform is meant to be running.
+//
+// The drift check compares what is written here against assets/config/desired, so what the drift
+// page reports is a real difference between two files. Giving every host the same answer, which is
+// what a check that touches a file on every host does, makes the feature look like it does nothing:
+// the reader cannot tell drift from noise when no host is ever in sync. The spread here is the one
+// the run history tells elsewhere. The database primary and the edge host are the ones that fall
+// behind, and edge01, which is also the host the last seeded run fails on, is a whole release back.
+var fleetHosts = []fleetHost{
+	{Name: "web01"},
+	{Name: "web02", Stale: []string{"app.conf"}},
+	{Name: "web03"},
+	{Name: "db01", Stale: []string{"app.conf", "packages.pin"}},
+	{Name: "db02", Stale: []string{"packages.pin"}},
+	{Name: "edge01", Stale: []string{"app.conf", "worker.service", "packages.pin"}},
+}
+
+// fleetConfigFiles are the configuration files the drift check compares on every host, in the order
+// the check reads them.
+var fleetConfigFiles = []string{"app.conf", "worker.service", "packages.pin"}
+
+// writeFleetState writes each demo host's current configuration under state/, taking the desired
+// file for a host that is in sync and the previous release's file for one that has drifted. The
+// drift check runs against this tree, so it finds a difference on the hosts that carry one and
+// none on the hosts that do not.
+func writeFleetState(dir string) error {
+	for _, h := range fleetHosts {
+		hostDir := filepath.Join(dir, "state", h.Name)
+		if err := os.MkdirAll(hostDir, 0o750); err != nil {
+			return fmt.Errorf("demo state for %s: %w", h.Name, err)
+		}
+		for _, name := range fleetConfigFiles {
+			source := "assets/config/desired/" + name
+			if slices.Contains(h.Stale, name) {
+				source = "assets/config/previous/" + name
+			}
+			body, err := assets.ReadFile(source)
+			if err != nil {
+				return fmt.Errorf("demo state for %s: %w", h.Name, err)
+			}
+			if err := os.WriteFile(filepath.Join(hostDir, name), body, 0o600); err != nil {
+				return fmt.Errorf("demo state for %s: %w", h.Name, err)
+			}
+		}
+	}
+	return nil
+}
+
 // initDemoRepos turns each materialized repos/ subtree into a real git repository with one commit
-// on main, so the seeded projects clone from disk and a launched template gets a green run instead
-// of a git failure against a host that does not exist.
+// on main. The seeded projects publish a remote rather than this path, so nothing on the demo
+// clones from here. What it leaves behind is a checked-out working copy an operator can point a
+// writable install at, holding the Terraform root the seeded runs plan from.
 func initDemoRepos(dir string) error {
 	entries, err := os.ReadDir(filepath.Join(dir, "repos"))
 	if err != nil {
@@ -721,19 +822,24 @@ func initDemoRepos(dir string) error {
 // cover the main tools the engine drives, so the Templates list shows Ansible, Bash, Terraform, Python,
 // and Go presets even on a host that lacks a given tool's binary. It is best effort: a store error is
 // logged and skipped so the runs still seed.
-func seedConfig(ctx context.Context, d Deps, log *zap.Logger, assetDir string) {
+func seedConfig(ctx context.Context, d Deps, log *zap.Logger) {
 	now := time.Now()
 	ago := func(h int) time.Time { return now.Add(-time.Duration(h) * time.Hour) }
 
-	// The repositories are real local clones materialized beside the other assets, so launching a
-	// project-backed template on a writable instance syncs and runs green instead of failing
-	// against a host that does not exist.
+	// The remotes name the demo fleet's own git host, on the reserved example.com domain the rest
+	// of this project's sample data uses, so the projects page reads as somebody's estate.
+	//
+	// It used to publish the materialized asset path, which is where the working copies still are.
+	// That put "file:///tmp/switchtender-demo-assets/repos/web-platform" in the one column a
+	// visitor reads to learn where the demo's playbooks come from, and a scratch path under /tmp is
+	// what a half-finished install looks like. Nothing seeded clones a project, and the demo serves
+	// read-only, so the path bought nothing at the point where it cost the most.
 	projects := []*project.Project{
 		{ID: project.NewID(), Name: "web-platform",
-			RepoURL: "file://" + filepath.Join(assetDir, "repos", "web-platform"),
+			RepoURL: "https://git.example.com/platform/web-platform.git",
 			Branch:  "main", CreatedAt: ago(72)},
 		{ID: project.NewID(), Name: "database-ops",
-			RepoURL: "file://" + filepath.Join(assetDir, "repos", "database-ops"),
+			RepoURL: "https://git.example.com/platform/database-ops.git",
 			Branch:  "main", CreatedAt: ago(48)},
 	}
 	for _, p := range projects {
@@ -742,10 +848,16 @@ func seedConfig(ctx context.Context, d Deps, log *zap.Logger, assetDir string) {
 		}
 	}
 
+	// One static inventory, and it is the estate every seeded run, fact, drift row, and fleet entry
+	// belongs to. A second inventory named staging used to sit beside it holding one host, stage01,
+	// that no seeded run targeted and no declared fact described. It listed on the inventories page
+	// and appeared nowhere else, so a visitor who followed it reached a host with no facts, no drift
+	// row, no fleet health, and no history. Backing it properly means seeding a second estate that
+	// shows nothing this one does not, and splitting the fleet memory the demo is built around across
+	// two of them, so the row was removed rather than filled out.
 	invContent, _ := assets.ReadFile("assets/inv.ini")
 	inventories := []*inventory.Inventory{
 		{ID: inventory.NewID(), Name: "production", Content: string(invContent), CreatedAt: ago(72)},
-		{ID: inventory.NewID(), Name: "staging", Content: "[all]\nstage01 ansible_connection=local\n", CreatedAt: ago(48)},
 	}
 	for _, inv := range inventories {
 		if err := d.Inventories.Save(ctx, inv); err != nil {
@@ -814,9 +926,13 @@ func seedConfig(ctx context.Context, d Deps, log *zap.Logger, assetDir string) {
 	// Each carries placeholder sealed material: the doctor flags a credential with no secret, and
 	// a demo full of warnings reads as misconfigured. Nothing seeded references these, and the
 	// instance is read-only, so the placeholder is never decrypted or injected.
+	//
+	// No two share a creation time. The list is ordered oldest first and ties break on the
+	// identifier, which every seed mints afresh, so a shared timestamp would make the page reorder
+	// between reseeds on a product whose pitch is that its records reproduce.
 	creds := []*credential.Credential{
 		{ID: credential.NewID(), Name: "prod-ssh", Kind: credential.KindSSHKey, Secret: "demo-placeholder", CreatedAt: ago(72)},
-		{ID: credential.NewID(), Name: "ansible-vault", Kind: credential.KindVaultPassword, VaultID: "prod", Secret: "demo-placeholder", CreatedAt: ago(72)},
+		{ID: credential.NewID(), Name: "ansible-vault", Kind: credential.KindVaultPassword, VaultID: "prod", Secret: "demo-placeholder", CreatedAt: ago(60)},
 		{ID: credential.NewID(), Name: "dockerhub", Kind: credential.KindRegistry, Secret: "demo-placeholder", CreatedAt: ago(48)},
 		{ID: credential.NewID(), Name: "openstack-prod", Kind: credential.KindOpenStack, Secret: "demo-placeholder", CreatedAt: ago(36)},
 	}
@@ -841,49 +957,52 @@ func seedConfig(ctx context.Context, d Deps, log *zap.Logger, assetDir string) {
 		}
 	}
 
+	// Cron entries against the seeded templates, so the schedules page shows real cadences and
+	// the plain-language reading of each expression. The schedule store is its own optional
+	// dependency: an install wired with schedules but no policy store still fills this page,
+	// because an empty schedules page for a reason that has nothing to do with schedules reads as
+	// the scheduler being broken.
+	if d.Schedules != nil && len(templates) >= 3 {
+		schedules := []*schedule.Schedule{
+			{
+				ID: schedule.NewID(), Name: "Nightly audit", Cron: "0 2 * * *",
+				Timezone: seedScheduleZone, TemplateID: templates[2].ID, Enabled: true,
+				CreatedAt: ago(70),
+			},
+			{
+				ID: schedule.NewID(), Name: "Weekday deploy window", Cron: "30 9 * * 1-5",
+				Timezone: seedScheduleZone, TemplateID: templates[0].ID, Enabled: true,
+				CreatedAt: ago(46),
+			},
+			{
+				ID: schedule.NewID(), Name: "Hourly drift check", Cron: "0 * * * *",
+				Timezone: seedScheduleZone, TemplateID: templates[1].ID, Enabled: false,
+				CreatedAt: ago(20),
+			},
+		}
+		for _, sc := range schedules {
+			// The next run is the actual next fire of the schedule from now, read in the schedule's
+			// own zone, so the time on the page matches the cadence beside it. Seeding it as a fixed
+			// offset showed "daily at 2am" firing next at 3:18, which on an audit-and-scheduling
+			// product reads as the schedule being wrong; computing it without the zone reintroduces
+			// the same mismatch wherever the demo server does not sit in the zone on the page.
+			if sc.Enabled {
+				if at, err := sc.NextFire(now); err == nil {
+					sc.NextRunAt = &at
+				}
+			}
+			if err := d.Schedules.Save(ctx, sc); err != nil {
+				log.Warn("demo: seed schedule: " + err.Error())
+			}
+		}
+	}
+
 	if d.Policies != nil {
 		tfDestroy := policy.NewPolicy("prod terraform destroy")
 		tfDestroy.Tool, tfDestroy.CommandContains, tfDestroy.ExcludeDryRun, tfDestroy.CreatedAt =
 			run.ToolTerraform, "destroy", true, ago(40)
 		anyProd := policy.NewPolicy("any production run")
 		anyProd.InventoryID, anyProd.CreatedAt = inventories[0].ID, ago(22)
-		// Cron entries against the seeded templates, so the schedules page shows real cadences and
-		// the plain-language reading of each expression.
-		if d.Schedules != nil && len(templates) >= 3 {
-			// The next run is the actual next fire of each cron from now, so the time on the page
-			// matches the cadence beside it. Seeding it as a fixed offset showed "daily at 2am" firing
-			// next at 3:18, which on an audit-and-scheduling product reads as the schedule being wrong.
-			next := func(expr string) *time.Time {
-				parsed, err := cron.ParseStandard(expr)
-				if err != nil {
-					return nil
-				}
-				t := parsed.Next(now)
-				return &t
-			}
-			schedules := []*schedule.Schedule{
-				{
-					ID: schedule.NewID(), Name: "Nightly audit", Cron: "0 2 * * *",
-					TemplateID: templates[2].ID, Enabled: true,
-					NextRunAt: next("0 2 * * *"), CreatedAt: ago(70),
-				},
-				{
-					ID: schedule.NewID(), Name: "Weekday deploy window", Cron: "30 9 * * 1-5",
-					TemplateID: templates[0].ID, Enabled: true,
-					NextRunAt: next("30 9 * * 1-5"), CreatedAt: ago(46),
-				},
-				{
-					ID: schedule.NewID(), Name: "Hourly drift check", Cron: "0 * * * *",
-					TemplateID: templates[1].ID, Enabled: false,
-					CreatedAt: ago(20),
-				},
-			}
-			for _, sc := range schedules {
-				if err := d.Schedules.Save(ctx, sc); err != nil {
-					log.Warn("demo: seed schedule: " + err.Error())
-				}
-			}
-		}
 
 		policies := []*policy.Policy{tfDestroy, anyProd}
 		for _, p := range policies {
