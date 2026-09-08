@@ -87,6 +87,24 @@ type logBatch struct {
 	fails int
 }
 
+// capBuffer holds the batch to logBatchLimit by dropping the oldest output, so what survives a
+// relay that is not coming back is the end of the run, the part that says how it finished.
+//
+// It is applied wherever the buffer grows, not only after a failed post: while the retry backoff is
+// open no post is attempted at all, so a run writing quickly would otherwise hold everything it
+// produced in that window. The kept bytes are copied into a fresh slice rather than resliced, since
+// reslicing leaves the whole dropped burst alive behind the window. The caller holds the
+// transport's mu.
+func (b *logBatch) capBuffer() {
+	excess := len(b.buf) - logBatchLimit
+	if excess <= 0 {
+		return
+	}
+	kept := make([]byte, logBatchLimit)
+	copy(kept, b.buf[excess:])
+	b.buf = kept
+}
+
 // compile-time proof that httpTransport is a Transport.
 var _ Transport = (*httpTransport)(nil)
 
@@ -303,6 +321,7 @@ func (t *httpTransport) AppendLog(ctx context.Context, id string, p []byte) erro
 		t.batches[id] = b
 	}
 	b.buf = append(b.buf, p...)
+	b.capBuffer()
 	// A full batch posts at once, unless a post just failed. While a relay is down every append
 	// would otherwise be a size-triggered flush, since the buffer stays full once the bytes are put
 	// back, turning each write into its own failing request on the execution path.
@@ -430,8 +449,8 @@ func (t *httpTransport) postSucceeded(id string) {
 }
 
 // requeue puts unsent output back at the front of the batch so the next flush carries it, which is
-// what makes a caller's retry of a failed append mean anything. Output past logBatchLimit is dropped
-// oldest first, so a relay that stays down cannot grow the buffer without bound.
+// what makes a caller's retry of a failed append mean anything. capBuffer then holds the result to
+// logBatchLimit, so a relay that stays down cannot grow the buffer without bound.
 func (t *httpTransport) requeue(id string, out []byte) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -440,9 +459,7 @@ func (t *httpTransport) requeue(id string, out []byte) {
 		return
 	}
 	b.buf = append(out, b.buf...)
-	if excess := len(b.buf) - logBatchLimit; excess > 0 {
-		b.buf = b.buf[excess:]
-	}
+	b.capBuffer()
 }
 
 // postLog sends one batch of output to the control node, mapping 404 to ErrNotFound.
