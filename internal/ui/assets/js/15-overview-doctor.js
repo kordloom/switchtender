@@ -744,7 +744,7 @@ function renderActivitySvg(el, model) {
 
 	// Two lines from one baseline need saying which is which. The bar view does not: its segments
 	// sit in one column in a fixed order, so the shape carries the meaning. Here the only difference
-	// between the series is colour.
+	// between the series is color.
 	const legend = document.createElement("div");
 	legend.className = "legend activity-legend";
 	for (const [cls, label] of [["ok", "succeeded"], ["failed", "failed"]]) {

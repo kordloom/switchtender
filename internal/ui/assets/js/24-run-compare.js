@@ -137,9 +137,13 @@ async function loadCompare() {
 	try {
 		const c = await getJSON("/runs/" + encodeURIComponent(runId) +
 			"/compare?with=" + encodeURIComponent(withRun));
-		status.hidden = true;
+		// The status line is hidden only once the render has finished. Hiding it first meant a
+		// comparison document the render choked on, a truncated body or one a proxy emptied, wrote
+		// the explanation into a line already hidden: the page went blank and said nothing at all.
 		renderCompare(c);
+		status.hidden = true;
 	} catch (e) {
+		status.hidden = false;
 		status.textContent = "Comparison unavailable: " + e.message +
 			". A run needs an earlier run of the same template to compare against.";
 	}

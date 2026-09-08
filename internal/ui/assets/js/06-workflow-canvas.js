@@ -460,10 +460,26 @@ function opensADialog(btn) {
 function sealDialogSubmits() {
 	for (const form of document.querySelectorAll(".modal form")) {
 		form.addEventListener("submit", (e) => e.preventDefault());
-		for (const submit of form.querySelectorAll('button[type="submit"]')) {
-			submit.disabled = true;
-			submit.dataset.mutates = "true";
-			submit.dataset.tip = "Click to " + submit.textContent.trim().toLowerCase();
+	}
+	// A dialog's committing control is not always a form submit. The launch prompt and the survey
+	// prompt are type="button" controls sitting outside any form, so sealing only form submits let a
+	// visitor fill in an entire launch, press the button, and be refused by the server after the
+	// work rather than before it. Every primary action inside a modal commits something unless it
+	// says otherwise, so seal on that and let data-demo-safe carry the exceptions.
+	//
+	// Both the marker and the disabled flag are set. The marker is what holds: a dialog that
+	// re-enables its own control on open, as the launch prompt does, would undo the flag alone, and
+	// the capture-phase swallower catches the click either way.
+	const committing = new Set([
+		...document.querySelectorAll('.modal form button[type="submit"]'),
+		...document.querySelectorAll(".modal .button.primary"),
+	]);
+	for (const btn of committing) {
+		if (btn.dataset.demoSafe) continue;
+		btn.disabled = true;
+		btn.dataset.mutates = "true";
+		if (!btn.dataset.tip) {
+			btn.dataset.tip = "Click to " + btn.textContent.trim().toLowerCase();
 		}
 	}
 }
@@ -487,6 +503,13 @@ function applyReadOnly() {
 	// control inside it that would actually start something is the one that refuses.
 	for (const btn of document.querySelectorAll(".page-head .button.primary, .wf-toolbar .button.primary")) {
 		if (opensADialog(btn)) continue;
+		// A control that only navigates or only reads changes nothing, and disabling it made the
+		// demo lie about the product twice: the overview's primary action is a link to the runs
+		// page, and the audit page's bundle download is a GET the server serves in read-only mode,
+		// sitting one line under copy promising the reader can download it. A page header's primary
+		// action is usually a create, but "usually" is not a rule a refusal can be built on.
+		if (btn.tagName === "A" && btn.getAttribute("href") && !btn.getAttribute("href").startsWith("#")) continue;
+		if (btn.dataset.demoSafe) continue;
 		btn.dataset.mutates = "true";
 		if (!btn.dataset.tip) {
 			btn.dataset.tip = "Click to " + btn.textContent.trim().toLowerCase();
@@ -519,7 +542,10 @@ function applyReadOnly() {
 		}
 	}
 	// Building, dragging, zooming, and exporting a graph never touch the server, so the editor
-	// stays fully usable in the demo. Only running the pipeline is blocked.
+	// stays usable in the demo: adding a step, editing one, and deleting one all rewrite the local
+	// graph and are marked demo-safe in the template. What is blocked is everything that leaves the
+	// browser: running the pipeline, saving it as a template, and drafting a step with the model,
+	// which posts the prompt to this server.
 	const wfRun = document.getElementById("wf-run");
 	if (wfRun) {
 		wfRun.dataset.mutates = "true";

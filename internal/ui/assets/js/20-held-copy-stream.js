@@ -516,7 +516,13 @@ async function loadAllEvents(runId) {
 		const page = data.events || [];
 		for (const e of page) events.push(e);
 		if (page.length < batch) break;
-		after = data.next_after;
+		// The cursor has to move, or the next request is the one just answered. A response missing
+		// next_after asked for "after=undefined" forever: the run never rendered and the server was
+		// asked for the same five thousand events without end. A cursor that cannot advance ends
+		// the paging with what has been read rather than looping on it.
+		const next = data.next_after;
+		if (typeof next !== "number" || !(next > after)) break;
+		after = next;
 	}
 	return events;
 }
