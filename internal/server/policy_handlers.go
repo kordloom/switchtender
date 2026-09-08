@@ -42,6 +42,25 @@ type createPolicyRequest struct {
 	RequireDistinctApprover bool `json:"require_distinct_approver,omitempty"`
 }
 
+// usesFullPolicyEngine reports whether a policy reaches past the single plain require-approval rule
+// the Community tier holds. Deny rules, risk floors, actor scoping, and distinct-approver separation
+// of duties are the full engine, which a Team license covers.
+//
+// The create and update handlers both ask this question. They asked it as two separately written
+// expressions and the two drifted from what the product says it sells: actor scoping is named as
+// part of the full engine by the licensing terms, the API reference, the FAQ, and the comment on
+// license.FeaturePolicyFull, and neither expression tested for it, so a rule scoped to a named actor
+// or to agents as a class was free on Community. Scoping a hold to a machine principal is the
+// difference between one blanket gate and an authorization boundary around agents, which is the
+// thing being sold, so it belongs here and both handlers now read the same answer.
+func usesFullPolicyEngine(req createPolicyRequest) bool {
+	return req.Effect == policy.EffectDeny ||
+		req.MinRisk != "" ||
+		req.RequireDistinctApprover ||
+		req.ActorKind != "" ||
+		req.Actor != ""
+}
+
 // resolveMaxDestroy returns the request's max_destroy, defaulting a missing value to the disabled
 // sentinel so a policy created without the field leaves the plan-content check off rather than
 // holding on any destroy.
@@ -81,8 +100,7 @@ func createPolicyHandler(store policy.Store, log *zap.Logger) http.HandlerFunc {
 		}
 		// One plain require-approval policy is Community; the full engine and a second policy are
 		// Team. The check sits before the write so a refusal changes nothing.
-		advanced := req.Effect == policy.EffectDeny || req.MinRisk != "" ||
-			req.RequireDistinctApprover
+		advanced := usesFullPolicyEngine(req)
 		existing, lerr := store.List(r.Context())
 		if lerr != nil {
 			log.Error("server: list policies: " + lerr.Error())
@@ -144,7 +162,7 @@ func updatePolicyHandler(store policy.Store, log *zap.Logger) http.HandlerFunc {
 		}
 		// Editing the one Community policy into the full engine is the same purchase as creating
 		// an advanced one, so the same gate answers.
-		if req.Effect == policy.EffectDeny || req.MinRisk != "" || req.RequireDistinctApprover {
+		if usesFullPolicyEngine(req) {
 			if aerr := license.Allow(license.FeaturePolicyFull); aerr != nil {
 				respondError(w, log, http.StatusForbidden, aerr.Error())
 				return

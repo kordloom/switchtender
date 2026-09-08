@@ -53,7 +53,9 @@ type Policy struct {
 	Name string `json:"name"`
 	// Tool matches a run's execution tool: ansible, bash, terraform, opentofu, python, powershell, or go. Empty matches any.
 	Tool string `json:"tool,omitempty"`
-	// CommandContains matches when a run's command contains this text. Empty matches any.
+	// CommandContains matches when a run's command contains this text, ignoring case. Empty matches
+	// any. Case is ignored because "drop database" and "DROP DATABASE" are the same statement, so a
+	// case-sensitive rule refuses one spelling and waves the other through.
 	CommandContains string `json:"command_contains,omitempty"`
 	// InventoryID matches a run targeting this stored inventory. Empty matches any.
 	InventoryID string `json:"inventory_id,omitempty"`
@@ -102,7 +104,7 @@ func (p *Policy) Matches(r *run.Run) bool {
 	if p.Tool != "" && run.NormalizeTool(p.Tool) != run.NormalizeTool(r.Tool) {
 		return false
 	}
-	if p.CommandContains != "" && !strings.Contains(r.Command, p.CommandContains) {
+	if p.CommandContains != "" && !containsFold(r.Command, p.CommandContains) {
 		return false
 	}
 	if p.InventoryID != "" && p.InventoryID != r.InventoryID {
@@ -114,10 +116,33 @@ func (p *Policy) Matches(r *run.Run) bool {
 	if !p.matchesActor(r) {
 		return false
 	}
-	if p.MinRisk != "" && riskRank(run.AssessRisk(r).Level) < riskRank(p.MinRisk) {
+	if p.MinRisk != "" && !meetsRiskFloor(run.AssessRisk(r).Level, p.MinRisk) {
 		return false
 	}
 	return true
+}
+
+// containsFold reports whether text contains want, ignoring case. Command criteria are matched this
+// way because the shell and every database that accepts "drop database" accepts "DROP DATABASE" as
+// the same statement, so a case-sensitive rule is a refusal anyone can step around by holding down
+// shift. The risk grader already lowercases before hunting for the same markers, so matching on
+// case here also kept the two halves of the product disagreeing about whether case matters.
+func containsFold(text, want string) bool {
+	return strings.Contains(strings.ToLower(text), strings.ToLower(want))
+}
+
+// meetsRiskFloor reports whether a run assessed at level clears a policy's floor.
+//
+// A floor this build cannot rank holds every run rather than none. Comparing ranks directly put an
+// unknown floor above every level a run can be graded, so a rule written on a newer build, or
+// restored from a backup taken across a version change, read as an active gate on screen and
+// matched nothing at all. An unrankable floor is a rule this build does not understand, and the
+// only safe reading of a rule you do not understand is that it applies.
+func meetsRiskFloor(level, floor string) bool {
+	if riskRank(floor) > riskRank(run.RiskHigh) {
+		return true
+	}
+	return riskRank(level) >= riskRank(floor)
 }
 
 // matchesActor reports whether the policy's actor criteria match who fired r. A run whose actor
@@ -140,16 +165,30 @@ func (p *Policy) matchesActor(r *run.Run) bool {
 	}
 }
 
-// Advanced reports whether a policy uses the full engine: a deny effect, a risk floor, or
-// distinct-approver separation of duties. One plain require-approval policy is the Community
-// gate; everything past it is what a Team license covers, and this is the one definition every
-// enforcement point shares so they cannot drift.
+// Advanced reports whether a policy uses the full engine: a deny effect, a risk floor, actor
+// scoping, or distinct-approver separation of duties. One plain require-approval policy is the
+// Community gate; everything past it is what a Team license covers.
+//
+// This is meant to be the one definition every enforcement point shares. It said so before it was,
+// which is how the drift lived: the create and update handlers each carried their own copy of the
+// condition and this carried a third, and none of the three tested for actor scoping while the
+// licensing terms, the API reference, the FAQ, and the comment on license.FeaturePolicyFull all sold
+// it as Team. A rule scoped to agents as a class was free through the API and free through
+// --policy-file, which is the path an install that takes policy seriously actually uses.
+//
+// Actor scoping belongs here because it is the criterion that turns a blanket hold into an
+// authorization boundary around a machine principal, which is the thing being sold.
 func (p *Policy) Advanced() bool {
-	return p.Effect == EffectDeny || p.MinRisk != "" || p.RequireDistinctApprover
+	return p.Effect == EffectDeny ||
+		p.MinRisk != "" ||
+		p.RequireDistinctApprover ||
+		p.ActorKind != "" ||
+		p.Actor != ""
 }
 
 // riskRank orders risk levels so MinRisk can compare them. An unknown level ranks above high, so a
-// policy naming a level this build does not know fails toward holding rather than passing.
+// run this build cannot grade fails toward holding rather than passing. An unknown floor is handled
+// by meetsRiskFloor, since ranking alone would push it out of reach of every run.
 func riskRank(level string) int {
 	switch level {
 	case run.RiskLow:
