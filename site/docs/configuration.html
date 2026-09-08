@@ -60,13 +60,66 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migrate off AWX, Semaphore, Rundeck, or Jenkins</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration" class="active">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/continuity">Continuity</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/vendor-risk">Vendor risk review</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration" class="active">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/continuity">Continuity</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/vendor-risk">Vendor risk review</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
 			<h1 id="configuration">Configuration</h1>
 <p>SwitchTender is one binary with subcommands. This page lists every command, flag, and environment
 variable.</p>
+<h2 id="licensed-features">Licensed features</h2>
+<p>Almost everything on this page runs on Community, which needs no license. Six features are licensed,
+and separately an install is capped on how many approval policies it holds at once. A flag or request
+that turns on a licensed feature is refused outright rather than quietly ignored, so an install never
+believes it has a control it does not have.</p>
+<table>
+<thead>
+<tr>
+<th>Capability</th>
+<th>Tier</th>
+<th>Turned on by</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Directory sign-in (OIDC, SAML, LDAP, JWT)</td>
+<td>Pro</td>
+<td>Any <code>--oidc-*</code>, <code>--saml-*</code>, <code>--ldap-*</code>, or <code>--jwt-*</code> flag. <code>serve</code> refuses to start with one set and no license.</td>
+</tr>
+<tr>
+<td>The full policy engine: deny rules, risk floors, actor scoping, distinct-approver separation of duties</td>
+<td>Team</td>
+<td>Creating a policy that uses one. A single require-approval policy stays Community.</td>
+</tr>
+<tr>
+<td>More approval policies at once</td>
+<td>Pro holds five, Team is uncapped</td>
+<td>Creating policies. Community holds one.</td>
+</tr>
+<tr>
+<td>The period change register</td>
+<td>Team</td>
+<td><code>audit report</code>, and <code>GET /v1/audit/register</code>.</td>
+</tr>
+<tr>
+<td>Distributed workers</td>
+<td>Team</td>
+<td><code>worker --server</code>, the mesh relay. A worker sharing the database is not gated.</td>
+</tr>
+<tr>
+<td>Initializing a new PostgreSQL database</td>
+<td>Team</td>
+<td>The first <code>serve</code> against a <code>postgres://</code> DSN. Opening a schema that already exists is never gated.</td>
+</tr>
+<tr>
+<td>One-click drift reconcile</td>
+<td>Team</td>
+<td><code>POST /v1/drift/reconcile</code>. Drift detection itself is free.</td>
+</tr>
+</tbody>
+</table>
+<p><code>license status</code> prints the tier this install runs and when a license lapses. Tiers and prices are at
+<a href="https://switchtender.com/pricing">https://switchtender.com/pricing</a>.</p>
 <h2 id="environment-variables">Environment variables</h2>
 <table>
 <thead>
@@ -771,6 +824,16 @@ service, or an AI agent. See <a href="/docs/agents">running an agent</a>.</li>
 <li><code>user delete &lt;id&gt;</code> deletes an account. Its tokens stop working.</li>
 </ul>
 <p>All user subcommands take <code>--db</code>.</p>
+<h2 id="license">license</h2>
+<p>Shows or installs this install's license. No license is Community, which is complete in itself. What
+each tier covers is listed at <a href="https://switchtender.com/pricing">https://switchtender.com/pricing</a>.</p>
+<ul>
+<li><code>license status</code> shows the tier this install runs and when a license lapses.</li>
+<li><code>license install &lt;file&gt;</code> verifies a license file and installs it beside the database.</li>
+</ul>
+<p>A license is read from <code>SWITCHTENDER_LICENSE</code>, or from <code>switchtender-license.json</code> in the same
+directory as the database. A license this install cannot parse or that has lapsed reads as
+Community rather than failing the server, so an expiry never takes an install down.</p>
 <h2 id="import">import</h2>
 <p>Migrates from AWX or Semaphore. See <a href="/docs/migration">Migration</a>.</p>
 <ul>
@@ -791,6 +854,134 @@ chain.</li>
 <li><code>audit report</code> renders the period's change register as a self-contained HTML evidence report.</li>
 <li><code>audit run &lt;id&gt;</code> emits one run's evidence dossier as a self-contained HTML document.</li>
 </ul>
+<h2 id="receipt">receipt</h2>
+<p>Writes a signed receipt for one finished run, which a third party verifies offline with <code>verify</code>. A
+receipt is the chain segment from the request that created the run through the entry recording what
+it did, signed with this install's key and carrying any anchors that fix its position.</p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Default</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--db</code></td>
+<td><code>switchtender.db</code></td>
+<td>Database holding the run and its chain.</td>
+</tr>
+<tr>
+<td><code>--out</code></td>
+<td>stdout</td>
+<td>File to write the receipt to.</td>
+</tr>
+<tr>
+<td><code>--sparse</code></td>
+<td>off</td>
+<td>Disclose only this run's own chain entries, proving each belongs to the log without carrying the entries around it.</td>
+</tr>
+<tr>
+<td><code>--append-only-from</code></td>
+<td>unset</td>
+<td>With <code>--sparse</code>, prove the log only appended since this size. Use a size a reader already saw, such as an anchored head.</td>
+</tr>
+</tbody>
+</table>
+<p>Publish the key fingerprint the command prints so a verifier can pin it.</p>
+<h2 id="verify">verify</h2>
+<p>Verifies a receipt written by <code>receipt</code>. It trusts nothing this server says: it recomputes every
+chain link from the receipt's own claims, checks the signature covers the exact bytes, and confirms
+any anchors name an entry the receipt holds. It reads only the file, reaches no database and no
+network, and does not run the server, so a relying party can check a receipt on a machine that has
+never seen this install.</p>
+<pre><code>switchtender verify run.receipt --pubkey sha256:...
+</code></pre>
+<p>Pass <code>--pubkey</code> with the fingerprint the producer published to tie the result to a key obtained out
+of band. Without it the receipt is checked against the key it names, which proves it was not altered
+but not who signed it.</p>
+<h2 id="witness">witness</h2>
+<p>Watches a server's span beat feed from outside it. A chain proves what it holds was not altered, but
+not that nothing was removed from the end, because the process running the chain also decides what
+gets written down. A witness on another machine remembers what the feed served, keeps that memory in
+a signed checkpoint, and raises a finding when a beat goes missing, an already-witnessed beat comes
+back rewritten, or the head regresses. Run it where the server's operator has no hand.</p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Default</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--server</code></td>
+<td>required</td>
+<td>Base URL of the server to watch.</td>
+</tr>
+<tr>
+<td><code>--state</code></td>
+<td><code>switchtender-witness.json</code></td>
+<td>Signed checkpoint holding what this witness has seen.</td>
+</tr>
+<tr>
+<td><code>--interval</code></td>
+<td><code>1m</code></td>
+<td>How often to poll the feed.</td>
+</tr>
+<tr>
+<td><code>--key-dir</code></td>
+<td>the state file's directory</td>
+<td>Directory holding the witness signing key.</td>
+</tr>
+<tr>
+<td><code>--once</code></td>
+<td>off</td>
+<td>Run one check and exit nonzero on findings, for cron.</td>
+</tr>
+<tr>
+<td><code>--webhook</code></td>
+<td>unset</td>
+<td>URL that receives each finding as a JSON POST.</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><code>witness serve</code> watches many servers from one process and answers auditors with countersigned
+attestations.</li>
+<li><code>witness verify-attestation</code> verifies an attestation offline against a pinned witness key.</li>
+</ul>
+<h2 id="mcp">mcp</h2>
+<p>Serves the Model Context Protocol over stdio, so an agent can list templates, propose a run, and read
+what happened. Every tool call is an ordinary authenticated API request carrying the token given
+here, so it passes the same authorization, the same approval policy, and the same fail-closed audit
+append as a request from a person. See <a href="/docs/agents">Agents</a>.</p>
+<pre><code>export SWITCHTENDER_MCP_TOKEN=ymt_...
+switchtender mcp --server https://switchtender.internal
+</code></pre>
+<p>The token is read from <code>SWITCHTENDER_MCP_TOKEN</code>, falling back to <code>SWITCHTENDER_TOKEN</code>. Prefer the
+environment variable to a flag, whose value is visible in the host's process list. The command
+refuses to start on an admin token. There is deliberately no approve tool, so an agent cannot release
+its own work, and no credential, account, token, grant, or policy tool, so it cannot widen its own
+reach.</p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Default</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--allow-adhoc</code></td>
+<td>off</td>
+<td>Also expose the ad-hoc run tool, letting the agent compose a run rather than launch a template an operator defined. Approval policy still applies.</td>
+</tr>
+</tbody>
+</table>
 <h2 id="demo">demo</h2>
 <p>Seeds a fresh database with sample data and real runs, then serves it read-only, so a public
 instance is safe to expose. It needs ansible on the PATH to run the sample playbooks.</p>
@@ -833,8 +1024,68 @@ switchtender demo --db demo.db --no-seed       # serves the prepared data in und
 </code></pre>
 <p>A host wired this way reseeds without a visible outage, since the running instance keeps
 answering the whole time the replacement is being built.</p>
+<h2 id="examples">examples</h2>
+<p>Seeds a handful of starter templates, so a first launch works on the spot rather than opening on an
+empty list. They use the Bash tool and print or read something local, needing no project, inventory,
+or credential. Delete them once you have your own.</p>
+<p>Run it against the same database <code>serve</code> uses. It skips a template whose name is already present, so
+it is safe to run twice. Takes <code>--db</code>.</p>
+<h2 id="backup">backup</h2>
+<p>Writes an encrypted, portable backup of the control-plane configuration and secrets. The whole file
+is sealed with the deployment encryption key, so it stays confidential and tamper-evident, and it
+restores into either the SQLite or the PostgreSQL backend. See <a href="/docs/backup">Backup and restore</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Default</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--db</code></td>
+<td><code>switchtender.db</code></td>
+<td>SQLite file path, or a <code>postgres://</code> DSN, to back up.</td>
+</tr>
+<tr>
+<td><code>--out</code></td>
+<td>stdout</td>
+<td>File to write the backup to.</td>
+</tr>
+</tbody>
+</table>
+<p>Run history and the audit chain are not included. The audit chain has its own signed export, through
+<code>audit bundle</code>.</p>
+<h2 id="restore">restore</h2>
+<p>Reads a backup and upserts its objects into the store by id. It needs the same encryption key the
+backup was written with, and it never deletes objects absent from the file.</p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Default</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--db</code></td>
+<td><code>switchtender.db</code></td>
+<td>SQLite file path, or a <code>postgres://</code> DSN, to restore into.</td>
+</tr>
+<tr>
+<td><code>--in</code></td>
+<td>stdin</td>
+<td>Backup file to read.</td>
+</tr>
+</tbody>
+</table>
 <h2 id="version">version</h2>
 <p>Prints the SwitchTender version.</p>
+<h2 id="help-and-completion">help and completion</h2>
+<p>Both are the standard Cobra built-ins. <code>help</code> prints usage for any command, and <code>completion</code> emits a
+shell completion script for bash, zsh, fish, or PowerShell.</p>
 <h2 id="output-flags">Output flags</h2>
 <p>JSON goes to stdout compact by default. Three commands take <code>--pretty</code> to indent it; it is not a
 global flag, so passing it elsewhere is an error rather than a no-op.</p>
