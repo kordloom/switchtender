@@ -282,10 +282,21 @@ func verifyTimeOrder(claims []BundleClaim, rep *BundleReport) {
 		return ordered[i].Chain.Seq < ordered[j].Chain.Seq
 	})
 
+	// Approvals and outcomes are matched by the run they name, not by their order in the chain.
+	// Scoping this to "an approval seen earlier in the sequence" was the first version of this check
+	// and it missed the same defect written the other way round: a chain that records the outcome
+	// first and the approval second passed, because no approval had been seen yet when the outcome
+	// was read.
+	approved := make(map[string]time.Time)
+	type ranAt struct {
+		run string
+		at  time.Time
+		seq int64
+	}
+	var runs []ranAt
+
 	var prevAt time.Time
 	var prevSeq int64
-	var lastApproval time.Time
-	var haveApproval bool
 	for _, c := range ordered {
 		at, err := time.Parse(time.RFC3339Nano, c.At)
 		if err != nil {
@@ -302,20 +313,43 @@ func verifyTimeOrder(claims []BundleClaim, rep *BundleReport) {
 
 		method, _ := c.Payload["method"].(string)
 		path, _ := c.Payload["path"].(string)
+		id := runIDFromPath(path)
 		switch {
 		case method == MethodDecision && strings.Contains(path, "/decision/approved"):
-			if !haveApproval || at.After(lastApproval) {
-				lastApproval, haveApproval = at, true
+			if prev, seen := approved[id]; !seen || at.After(prev) {
+				approved[id] = at
 			}
 		case method == MethodRun && strings.Contains(path, "/outcome/"):
-			if haveApproval && lastApproval.After(at) {
-				rep.ApprovalPrecedesRun = false
-				rep.TimeProblems = append(rep.TimeProblems, fmt.Sprintf(
-					"the run recorded at %s was approved at %s, after it ran",
-					at.UTC().Format(time.RFC3339), lastApproval.UTC().Format(time.RFC3339)))
-			}
+			runs = append(runs, ranAt{run: id, at: at, seq: c.Chain.Seq})
 		}
 	}
+
+	for _, r := range runs {
+		ap, seen := approved[r.run]
+		if !seen || !ap.After(r.at) {
+			continue
+		}
+		rep.ApprovalPrecedesRun = false
+		rep.TimeProblems = append(rep.TimeProblems, fmt.Sprintf(
+			"the run recorded at %s was approved at %s, after it ran",
+			r.at.UTC().Format(time.RFC3339), ap.UTC().Format(time.RFC3339)))
+	}
+}
+
+// runIDFromPath returns the run a claim's path names, so an approval and an outcome are matched by
+// the run they belong to rather than by where they sit in the chain. An empty string groups every
+// claim whose path names no run, which is correct: they are compared only against each other.
+func runIDFromPath(path string) string {
+	const marker = "/runs/"
+	i := strings.Index(path, marker)
+	if i < 0 {
+		return ""
+	}
+	rest := path[i+len(marker):]
+	if j := strings.IndexByte(rest, '/'); j >= 0 {
+		return rest[:j]
+	}
+	return rest
 }
 
 // verifyDecisionDisclosures checks every disclosed approval decision against the digest its chain
