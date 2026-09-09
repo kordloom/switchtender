@@ -2,6 +2,7 @@ package importer
 
 import (
 	"fmt"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -75,6 +76,9 @@ type rundeckCommand struct {
 	Exec string `yaml:"exec" json:"exec"`
 	// Script is an inline script body.
 	Script string `yaml:"script" json:"script"`
+	// ScriptInterpreter names the program an inline script is fed to. Empty means a shell, which is
+	// what a Bash template runs.
+	ScriptInterpreter string `yaml:"scriptinterpreter" json:"scriptinterpreter"`
 	// ScriptFile names a script on the node rather than inline content.
 	ScriptFile string `yaml:"scriptfile" json:"scriptfile"`
 	// ScriptURL names a script fetched from a URL.
@@ -167,26 +171,30 @@ func (n *rundeckInt) UnmarshalYAML(value *yaml.Node) error {
 	return nil
 }
 
-// FromRundeck maps a Rundeck job export into a plan of equivalent objects.
+// FromRundeck maps a Rundeck export into a plan of equivalent objects.
 //
-// A Rundeck export is a list of job definitions in YAML or JSON. Each job becomes a Bash template
-// carrying its steps, its options become a survey, and its schedule becomes a cron schedule. Rundeck
-// dispatches by node filter rather than by inventory file and its projects are not git repositories,
-// so neither an inventory nor a project is invented here; both are reported for the operator to
-// attach, because guessing which hosts somebody's job targets is the one thing an importer must not
-// do.
+// Two artifacts are accepted and told apart by their content, since the one an operator reaches for
+// depends on what they were leaving with. A job export is a list of job definitions in YAML or JSON.
+// A project archive is the zip the web interface hands back for a whole project, which carries the
+// same jobs as XML plus the project's own configuration.
+//
+// Each job becomes a Bash template carrying its steps, its options become a survey, and its schedule
+// becomes a cron schedule. Rundeck dispatches by node filter rather than by inventory file, so no
+// inventory is invented here from either artifact: guessing which hosts somebody's job targets is
+// the one thing an importer must not do, and an archive carries no node definitions to read anyway.
+// A project comes across only from an archive whose SCM configuration names a repository this can
+// reach.
 func FromRundeck(inventory string) func([]byte, time.Time) (*Plan, error) {
 	return func(data []byte, now time.Time) (*Plan, error) {
+		if IsRundeckArchive(data) {
+			return fromRundeckArchive(data, inventory, now)
+		}
 		jobs, err := decodeRundeck(data)
 		if err != nil {
 			return nil, err
 		}
 		plan := &Plan{}
-		if inventory == "" {
-			plan.warn("no inventory was named, so every imported template launches without one. " +
-				"Re-run with --inventory to say which hosts these jobs target, or set it on each " +
-				"template afterward.")
-		}
+		plan.warnRundeckInventory(inventory)
 		for _, job := range jobs {
 			plan.addRundeckJob(job, inventory, now)
 		}
@@ -315,6 +323,13 @@ func (p *Plan) rundeckCommand(job rundeckJob, name string) (string, bool) {
 			p.writeRundeckStep(&b, cmd.Description, cmd.Exec)
 			steps++
 		case cmd.Script != "":
+			if !rundeckShellScript(cmd.ScriptInterpreter) {
+				p.warn("job %q step %d feeds its script to %q rather than to a shell, and a "+
+					"template runs one Bash script, so the step was left out. Rewrite it as a "+
+					"step that calls that interpreter itself.",
+					name, i+1, oneLine(cmd.ScriptInterpreter))
+				continue
+			}
 			p.writeRundeckStep(&b, cmd.Description, cmd.Script)
 			steps++
 		case cmd.ScriptFile != "":
@@ -339,6 +354,28 @@ func (p *Plan) rundeckCommand(job rundeckJob, name string) (string, bool) {
 		return "", false
 	}
 	return b.String(), true
+}
+
+// rundeckShellScript reports whether an inline script's interpreter is a plain shell, which is what
+// lets the step be inlined into the one Bash script a template runs.
+//
+// Rundeck writes the script body to a file and feeds it to whatever the step names, so a step naming
+// python3 holds Python source and a step naming "sudo -u deploy /bin/bash" runs as somebody else.
+// Inlining either into a Bash script keeps the job's name on something that does not do what the job
+// did, so only a bare shell passes and every other interpreter is reported and left out.
+func rundeckShellScript(interpreter string) bool {
+	fields := strings.Fields(interpreter)
+	if len(fields) == 0 {
+		return true
+	}
+	if len(fields) > 1 {
+		return false
+	}
+	switch path.Base(fields[0]) {
+	case "sh", "bash", "dash", "ksh", "zsh", "ash":
+		return true
+	}
+	return false
 }
 
 // writeRundeckStep appends one step's body to the script, preceded by its description as a comment.

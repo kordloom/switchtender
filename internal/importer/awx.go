@@ -561,7 +561,9 @@ func (p *Plan) addTemplate(jt awxJobTemplate, now time.Time,
 	tpl.Survey = p.mapSurvey(jt)
 
 	p.Templates = append(p.Templates, tpl)
-	p.addSchedules(jt, tpl.ID, now)
+	if jt.Related != nil {
+		p.addSchedules(fmt.Sprintf("template %q", jt.Name), jt.Related.Schedules, tpl.ID, now)
+	}
 }
 
 // mapSurvey converts a job template's survey, whether top level or nested under related, into
@@ -600,20 +602,20 @@ func (p *Plan) mapSurvey(jt awxJobTemplate) []template.SurveyField {
 	return fields
 }
 
-// addSchedules maps a job template's schedules into the plan, converting each RRULE to cron and
-// warning on any that cron cannot express.
-func (p *Plan) addSchedules(jt awxJobTemplate, templateID string, now time.Time) {
-	if jt.Related == nil {
-		return
-	}
-	for _, s := range jt.Related.Schedules {
+// addSchedules maps the schedules of one imported object into the plan, converting each RRULE to
+// cron and warning on any that cron cannot express.
+//
+// owner names the thing the schedules belong to, already quoted, such as template "patch" or
+// workflow "rollout". Both kinds arrive here so the two paths cannot drift apart on which rules
+// they accept or how they report a refusal, and the report says which object lost its cadence.
+func (p *Plan) addSchedules(owner string, schedules []awxSchedule, templateID string, now time.Time) {
+	for _, s := range schedules {
 		cron, ok := RRULEToCron(s.RRule)
 		if !ok {
 			// A rule that bounds itself is the common case here, and its remedy is different from a
 			// cadence cron cannot express, so it says so: a cron entry has no end, and creating one
 			// from a rule that was meant to stop would leave a job firing forever.
-			p.warn("schedule %q of template %q skipped: %s (%q)", s.Name, jt.Name, rruleProblem(s.RRule),
-				s.RRule)
+			p.warn("schedule %q of %s skipped: %s (%q)", s.Name, owner, rruleProblem(s.RRule), s.RRule)
 			continue
 		}
 		enabled := s.Enabled == nil || *s.Enabled
@@ -625,9 +627,9 @@ func (p *Plan) addSchedules(jt awxJobTemplate, templateID string, now time.Time)
 		zone := dtstartZone(s.RRule)
 		if zone != "" {
 			if _, err := time.LoadLocation(zone); err != nil {
-				p.warn("schedule %q of template %q names the timezone %q, which this system cannot "+
+				p.warn("schedule %q of %s names the timezone %q, which this system cannot "+
 					"resolve, so it imports in the server's local time: %v",
-					s.Name, jt.Name, oneLine(zone), err)
+					s.Name, owner, oneLine(zone), err)
 				zone = ""
 			}
 		}
@@ -701,13 +703,17 @@ func reportUnmapped(plan *Plan, export awxExport) {
 		if item.Count == 0 {
 			continue
 		}
-		plural := "s"
-		if item.Count == 1 {
-			plural = ""
-		}
 		plan.warn("this export holds %d %s%s, which are not imported: %s",
-			item.Count, item.What, plural, item.Why)
+			item.Count, item.What, plural(item.Count), item.Why)
 	}
+}
+
+// plural returns the "s" a count needs, so a report reads one schedule and two schedules.
+func plural(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
 }
 
 // splitAWXTags turns AWX's comma separated tag string into the list a template holds, dropping the

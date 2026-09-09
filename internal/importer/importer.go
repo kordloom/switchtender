@@ -1,7 +1,13 @@
-// Package importer maps an AWX or Semaphore export into equivalent SwitchTender objects so a team can
-// migrate in one command instead of a quarter. The mapping is pure: it reads export JSON and
-// returns typed projects, inventories, templates, schedules, and credential shells plus warnings,
-// with cross-references already wired by generated id. The command layer persists the result.
+// Package importer maps an AWX, Semaphore, Rundeck, Jenkins, or crontab export into equivalent
+// SwitchTender objects so a team can migrate in one command instead of a quarter. The mapping is
+// pure: it reads an export and returns typed projects, inventories, templates, schedules, and
+// credential shells plus warnings, with cross-references already wired by generated id. The command
+// layer persists the result.
+//
+// The sources do not all carry the same things. AWX and Semaphore hold projects, inventories, and
+// credentials of their own, so those come across with the templates. Rundeck and Jenkins hold none
+// of the three: their jobs become templates and schedules, and the caller names the inventory those
+// templates target. A crontab is schedules alone.
 package importer
 
 import (

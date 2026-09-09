@@ -14,15 +14,16 @@ the equivalent objects, so moving over is one command rather than a rebuild.
 
 There are five importers, and they do not all carry the same objects. AWX and Semaphore export a
 whole control plane, so they bring projects, inventories, credential shells, templates, surveys, and
-schedules. Rundeck and Jenkins export jobs and nothing else, so they bring templates, surveys, and
-schedules only, and you name the inventory yourself. A crontab is a list of timed commands, so it
-brings schedules alone.
+schedules. Jenkins exports jobs and nothing else, so it brings templates, surveys, and schedules
+only, and you name the inventory yourself. Rundeck brings the same three, plus one project when you
+hand it a project archive whose source control configuration names a repository this can reach. A
+crontab is a list of timed commands, so it brings schedules alone.
 
 | Command | Projects | Inventories | Credential shells | Templates | Surveys | Schedules |
 |---------|----------|-------------|-------------------|-----------|---------|-----------|
-| `import awx` | Yes | Yes, static and dynamic | Yes | Yes, job templates and workflows | Yes | Yes, from job templates only|
+| `import awx` | Yes | Yes, static and dynamic | Yes | Yes, job templates and workflows | Yes | Yes|
 | `import semaphore` | Yes | Yes | Yes | Yes | Yes | Yes|
-| `import rundeck` | No | No, name one with `--inventory` | No | Yes | Yes | Yes|
+| `import rundeck` | From a project archive whose source control names a reachable repository | No, name one with `--inventory` | No | Yes | Yes | Yes|
 | `import jenkins` | No | No, name one with `--inventory` | No | Yes | Yes | Yes|
 | `import cron` | No | No, name one with `--inventory` | No | No | No | Yes|
 
@@ -37,7 +38,9 @@ crontab import creates no template either, so an imported cron line has nothing 
   and notification templates are counted in the report rather than imported.
 - Semaphore: export the project's repositories, inventories, keys, templates, and schedules as
   JSON. Semaphore's own single-project backup file and the multi-project wrapper are both read.
-- Rundeck: export a project's jobs as YAML or JSON, from the project's job list or the API.
+- Rundeck: either export a project's jobs as YAML or JSON from the project's job list or the API, or
+  export the whole project as an archive, which is the zip Project Settings hands back. The importer
+  tells the two apart by content, so there is no flag to set and nothing to get wrong.
 - Jenkins: there is no export file to fetch. Point the importer at a `JENKINS_HOME`, at its `jobs`
   directory, at one job's `config.xml`, or at a zip of any of those.
 - cron: the crontab file itself, either a user tab or, with `--system`, `/etc/crontab` and the
@@ -78,11 +81,19 @@ Semaphore has no equivalent. An inventory of any type other than static imports 
 export's inventory field held, and the report names the type it was. For a file inventory that field
 is a path rather than a host list, so read each one the report names before relying on it.
 
-## Import Rundeck jobs
+## Import Rundeck jobs or a project archive
 
-Export the jobs from a Rundeck project, in YAML or JSON, and point the importer at the file.
+Two artifacts import and the importer tells them apart by content, so point it at whichever one you
+have.
 
     switchtender import rundeck jobs.yaml --inventory prod --db switchtender.db
+    switchtender import rundeck rundeck-payments-batch.zip --inventory prod --db switchtender.db
+
+The first is a job export, the YAML or JSON list Rundeck writes from a project's job list or from
+its API. The second is a project archive, the zip Project Settings hands back for a whole project,
+which is what most people leaving Rundeck reach for. The same job produces the same template either
+way. The archive writes jobs as XML and the export writes them as YAML, and both are mapped through
+one path, so the two artifacts cannot drift into importing the same job differently.
 
 Each job becomes a Bash template carrying its step sequence in order, its options become a survey,
 and its schedule becomes a cron schedule. Rundeck dispatches by node filter rather than by inventory
@@ -93,6 +104,31 @@ Know what that inventory does and does not do. A Rundeck job imports as a Bash t
 tool runs the script where the worker runs it; the inventory is carried on the template for you to
 act on, not used to fan the script out across those hosts. Rewrite the job as an Ansible template
 when you want it to run against the inventory.
+
+**A project archive brings no inventory, and none can be built from it.** The archive carries the
+configuration of where Rundeck fetched its nodes from and not one node definition, at any path. A
+`file` source names a path on the Rundeck server, a `url` source names an endpoint, and neither
+travels in the zip. The report names each source it saw, with its path or its URL, so you can fetch
+the same list and create the inventory yourself. Rebuilding hosts out of the archive's execution
+history would be worse than not trying: it holds bare node names, only for the nodes that happened
+to run, with no address, login, or connection attributes, so the result would be a fleet of machines
+nobody could reach. A path carrying `%PROJECT_BASEDIR%` is left as it stands, because that token is
+the project's own directory on the server that exported it and expanding it here would be a guess.
+
+**A project archive brings one project only when its source control configuration names a repository
+this can reach.** A Rundeck project is a job store rather than a git repository, so there is nothing
+to make a project out of unless the SCM plugin was mirroring the jobs into one. Where it was, the
+repository and its branch come across. A `file:///` URL does not: it names a directory on the
+Rundeck server, which is a different machine, so a project built from it either fails on its sync or
+finds an unrelated directory of that name on this host and clones that instead. The report names the
+path so you can push that repository somewhere reachable and create the project yourself. Where a
+project is created, know what is in it: the repository holds the job definitions Rundeck exported
+into it, not Ansible playbooks, so point your templates at your own playbook repository if that is a
+different one.
+
+An archive also carries execution logs, run state, reports, ACL policies, webhooks, and the project
+readme. None of them import. Approvals and access here come from policies and grants you write, not
+from a Rundeck ACL, and a webhook is a trigger you create against this server.
 
 Two details are worth knowing before you run it. A Rundeck schedule is a Quartz expression, which
 counts Sunday as one where cron counts Sunday as zero, so the weekday is renumbered rather than
@@ -108,7 +144,9 @@ single export file to fetch. Point the importer at the directory and it reads th
 
     switchtender import jenkins /var/jenkins_home --inventory prod --db switchtender.db
 
-A `JENKINS_HOME`, its `jobs` directory, one job's `config.xml`, or a zip of any of those all work.
+A `JENKINS_HOME`, its `jobs` directory, one job's `config.xml`, or a zip of a `JENKINS_HOME` or a
+`jobs` directory all work. A job is named by the directory holding its `config.xml`, so a zip whose
+only entry is a bare `config.xml` is refused with the reason rather than imported unnamed.
 Folders are followed and each job keeps its full name, so a job in the `platform` folder imports as
 `platform/db-vacuum`. To import from the web page instead, zip the `jobs` directory and upload it;
 zip that directory rather than the whole `JENKINS_HOME`, which also holds every build log and
@@ -183,7 +221,7 @@ jenkins, not cron.
 | AWX schedule that stops | Refused and named. A rule with `COUNT` or `UNTIL` bounds itself, a cron entry never stops, and importing one would leave a job firing forever.|
 | AWX workflow job template | Workflow template carrying the graph, with each node's job template inlined as a step and the success and always edges becoming dependencies. Imported whole or reported and skipped, never partially.|
 | AWX job template schedule | Schedule, with the recurrence rule converted to cron and its timezone kept.|
-| AWX workflow schedule | Nothing, and no warning. Only job template schedules are read, so a nightly workflow imports as a workflow template that never fires. Recreate it by hand and check the export yourself, because the report will not remind you.|
+| AWX workflow schedule | Schedule on the imported workflow template, read from whichever place the export carried it. A workflow that was refused has no template to fire, so its schedules are named in the report as not imported rather than dropped silently.|
 | AWX credential | Credential shell with its kind mapped from its type and its configured inputs, secret omitted.|
 | AWX organization, team, or notification template | Counted in the report, not imported. The report names what to create by hand in their place.|
 | Semaphore repository | Project.|
@@ -192,8 +230,12 @@ jenkins, not cron.
 | Semaphore template | Template, with survey variables mapped.|
 | Semaphore key | Credential shell.|
 | Semaphore schedule | Schedule.|
-| Rundeck job | Template running the job's step sequence as one Bash script.|
+| Rundeck job | Template running the job's step sequence as one Bash script. The same job from a job export and from a project archive produces the same template.|
 | Rundeck option | Survey field. An enforced value list becomes a choice; a secure option is refused, not downgraded.|
+| Rundeck script step naming an interpreter | Kept when the interpreter is a shell. Anything else, a Python interpreter or a command such as `sudo -u deploy /bin/bash`, is refused and named: a template runs one Bash script, so the step body would not be run by what the job ran it with.|
+| Rundeck project archive `resources.source.N` | Reported, never imported. The archive carries the node source's configuration and no node definitions, so the report names the file path or the endpoint and you attach an inventory of your own.|
+| Rundeck project archive SCM configuration | Project, when it names a repository this can reach, carrying the repository and its branch. A `file:///` URL is refused and named, since it is a path on the Rundeck server. The export's path template, format, and committer identity have no equivalent and do not carry.|
+| Rundeck project archive ACL policy, webhook, execution, or report | Not imported. Access here comes from policies and grants, a webhook is a trigger created against this server, and the execution history is not a source of hosts.|
 | Rundeck schedule | Schedule, with the Quartz expression converted and its weekday renumbered.|
 | Rundeck job timeout | Template timeout, converted to whole seconds from a duration such as `30m` or from a plain number of seconds. One that cannot be read is reported and the template imports with no timeout.|
 | Rundeck dispatch thread count | Recorded on the template as its fork count. It paces Ansible runs; a Bash template, which is what a Rundeck job imports as, does not read it. The report does not name it, so check it yourself if it mattered.|
@@ -226,21 +268,28 @@ import has none to re-enter and none to attach.
   failure edge, which runs work precisely because something failed, has no pipeline equivalent, and a
   node pointing at a job template the export does not carry has no work to do. A partial graph would
   keep the workflow's name and run a subset of it, which is worse than not importing it.
-- **A workflow's own schedules are not imported, and no warning says so.** Schedules are read from
-  job templates only, so a workflow that fired nightly in AWX arrives as a workflow template with no
-  schedule. Read that twice, because it does not show up in the report at all. The workflow does get
-  a warning line, and that line is about its graph and its per-node prompts, not about its schedule.
-  So after an AWX import, go back to the export, list the workflow job templates that carried a
-  schedule, and recreate each one against the imported workflow template before you consider the
-  migration finished. Until you do, that work simply stops running, with no failed run to notice.
+- A workflow's own schedules import onto the workflow template, so a graph that fired nightly in AWX
+  keeps firing nightly here. The one case that does not carry is a workflow the import refused: with
+  no template to fire, its schedules cannot import either, and the report says so by name and count
+  rather than leaving the loss to be discovered later.
 - An AWX export's organizations, teams, and notification templates are counted in the report and not
   imported. The report names what to create in their place.
 - Non-git projects are skipped, since there is no repository to source playbooks from.
+- A Rundeck project archive never produces an inventory. It carries no node definitions, so the node
+  sources it named are reported and you attach an inventory yourself. Every imported template lands
+  against the inventory you named with `--inventory`, the same as from a job export.
+- A Rundeck archive whose source control points at a `file:///` path produces no project, since the
+  path is on the Rundeck server rather than on a machine this can clone from. It is reported by
+  path, so you can push the repository somewhere reachable and create the project yourself.
+- An archive whose members would escape where they are unpacked, by an absolute path, a parent
+  segment, or a symbolic link, is refused whole rather than read down to the members that looked
+  reasonable. No Rundeck export writes one.
 - A credential type without an exact match maps to the environment kind and is flagged for review.
-- A survey field that prompts for a secret, an AWX password question or a Rundeck secure option, is
-  reported and left out rather than imported. A survey answer is stored in plain text on the run, so
-  importing one would quietly make the secret less protected than it was in the tool you left. Store
-  those values as credentials and reference them from the template.
+- A survey field that prompts for a secret, an AWX password question, a Semaphore secret variable, a
+  Rundeck secure option, or a Jenkins password parameter, is reported and left out rather than
+  imported. A survey answer is stored in plain text on the run, so importing one would quietly make
+  the secret less protected than it was in the tool you left. Store those values as credentials and
+  reference them from the template.
 - Secrets are never in an export, so every credential is created as a shell and its secret has to be
   re-entered. The non-secret settings AWX did export, such as the user to connect as and how to
   become root, are stored on the credential itself and take effect at injection, so a machine

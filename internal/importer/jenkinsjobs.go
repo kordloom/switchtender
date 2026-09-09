@@ -268,7 +268,7 @@ func JenkinsBundleFromZip(data []byte) ([]byte, error) {
 			return nil, fmt.Errorf("read jenkins archive: %s is larger than a job definition "+
 				"should be", path.Clean(f.Name))
 		}
-		data, err := readZipEntry(f)
+		data, err := readZipEntry(f, "jenkins", maxJenkinsConfigSize)
 		if err != nil {
 			return nil, err
 		}
@@ -291,22 +291,23 @@ func JenkinsBundleFromZip(data []byte) ([]byte, error) {
 	return encodeJenkinsBundle(jobs)
 }
 
-// readZipEntry reads one archive member under the per-entry ceiling.
-func readZipEntry(f *zip.File) ([]byte, error) {
+// readZipEntry reads one archive member under a per-entry ceiling, naming the artifact it came out
+// of so the Jenkins and Rundeck readers report their own failures rather than each other's.
+func readZipEntry(f *zip.File, artifact string, limit int64) ([]byte, error) {
 	rc, err := f.Open()
 	if err != nil {
-		return nil, fmt.Errorf("read jenkins archive: %w", err)
+		return nil, fmt.Errorf("read %s archive: %w", artifact, err)
 	}
 	defer func() { _ = rc.Close() }()
 	// The declared size is a claim the archive makes about itself, so the read is bounded again
 	// rather than trusted: a zip may declare one byte and deliver a terabyte.
-	data, err := io.ReadAll(io.LimitReader(rc, maxJenkinsConfigSize+1))
+	data, err := io.ReadAll(io.LimitReader(rc, limit+1))
 	if err != nil {
-		return nil, fmt.Errorf("read jenkins archive: %w", err)
+		return nil, fmt.Errorf("read %s archive: %w", artifact, err)
 	}
-	if len(data) > maxJenkinsConfigSize {
-		return nil, fmt.Errorf("read jenkins archive: %s expands to more than a job definition "+
-			"should", path.Clean(f.Name))
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("read %s archive: %s expands to more than one definition should",
+			artifact, path.Clean(f.Name))
 	}
 	return data, nil
 }

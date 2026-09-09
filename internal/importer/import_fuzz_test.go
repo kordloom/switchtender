@@ -1,6 +1,8 @@
 package importer
 
 import (
+	"archive/zip"
+	"bytes"
 	"testing"
 	"time"
 )
@@ -41,10 +43,44 @@ func FuzzRRULEToCron(f *testing.F) {
 	})
 }
 
+// rundeckArchiveSeed builds a small project archive for the Rundeck fuzzer's corpus, so mutations
+// reach the archive reader rather than only the job export decoder.
+func rundeckArchiveSeed(f *testing.F) []byte {
+	f.Helper()
+	var buf bytes.Buffer
+	w := zip.NewWriter(&buf)
+	entries := map[string]string{
+		"META-INF/MANIFEST.MF": "Manifest-Version: 1.0\nRundeck-Archive-Project-Name: p\n\n",
+		"rundeck-p/files/etc/project.properties": "resources.source.1.type=url\n" +
+			"resources.source.1.config.url=https\\://c.example.com/n.yaml\n",
+		"rundeck-p/files/etc/scm-export.properties": "scm.export.config.url=file\\:///r/j.git\n",
+		"rundeck-p/jobs/job-1.xml": "<joblist><job><name>a</name><schedule crontab='0 0 2 * * ? *'/>" +
+			"<sequence><command><exec>x</exec></command></sequence></job></joblist>",
+	}
+	for name, body := range entries {
+		e, err := w.Create(name)
+		if err != nil {
+			f.Fatalf("create zip entry %q: %v", name, err)
+		}
+		if _, err := e.Write([]byte(body)); err != nil {
+			f.Fatalf("write zip entry %q: %v", name, err)
+		}
+	}
+	if err := w.Close(); err != nil {
+		f.Fatalf("close zip: %v", err)
+	}
+	return buf.Bytes()
+}
+
 // FuzzFromRundeck feeds arbitrary bytes to the Rundeck importer to prove it never panics on a
 // malformed or hostile job export. The Quartz schedule converter walks the weekday field character
 // by character, so a hostile expression is worth reaching from here.
+//
+// A project archive is worth reaching too, and from the same entry point, since the artifact is
+// chosen by content. It opens a zip decoder, a properties parser that walks backslash escapes byte
+// by byte, and an XML decoder, all on a file somebody else wrote and uploaded.
 func FuzzFromRundeck(f *testing.F) {
+	f.Add(rundeckArchiveSeed(f))
 	f.Add([]byte(`- name: a
   sequence:
     commands:
