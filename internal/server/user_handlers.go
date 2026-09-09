@@ -110,6 +110,23 @@ type loginLimiter struct {
 	// max is how many attempts a window allows. Zero means loginWindowMax, so a sign-in limiter
 	// needs no configuration and a caller with a different shape of traffic can state its own.
 	max int
+	// now reads the clock. Nil means time.Now. A test sets it so a window cannot roll over midway
+	// through a burst, which is the difference between asserting on the limiter and asserting on how
+	// fast the machine happened to be.
+	now func() time.Time
+}
+
+// loginClock is the time source new sign-in limiters read. Nil in production, which means the real
+// clock. A test sets it so a burst cannot straddle a window boundary and fail for being slow rather
+// than for being wrong.
+var loginClock func() time.Time
+
+// clock returns the limiter's time source, defaulting to the real one.
+func (l *loginLimiter) clock() time.Time {
+	if l.now != nil {
+		return l.now()
+	}
+	return time.Now()
 }
 
 // loginWindow is one key's open window.
@@ -125,7 +142,7 @@ type loginWindow struct {
 func (l *loginLimiter) allow(key string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	now := time.Now()
+	now := l.clock()
 	if len(l.windows) > 4096 {
 		for k, w := range l.windows {
 			if now.Sub(w.start) > loginWindowLength {
@@ -152,7 +169,7 @@ func (l *loginLimiter) spent(key string, max int) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	w, ok := l.windows[key]
-	if !ok || time.Since(w.start) > loginWindowLength {
+	if !ok || l.clock().Sub(w.start) > loginWindowLength {
 		return false
 	}
 	return w.count >= max
@@ -162,7 +179,7 @@ func (l *loginLimiter) spent(key string, max int) bool {
 func (l *loginLimiter) record(key string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	now := time.Now()
+	now := l.clock()
 	if len(l.windows) > 4096 {
 		for k, w := range l.windows {
 			if now.Sub(w.start) > loginWindowLength {
@@ -253,10 +270,10 @@ func forwardedClient(r *http.Request) string {
 // Attempts are rate limited per client and username so stolen password lists cannot be replayed
 // at full speed.
 func loginHandler(users user.Store, tokens auth.Store, ldap *LDAPAuth, log *zap.Logger) http.HandlerFunc {
-	limiter := &loginLimiter{windows: make(map[string]*loginWindow)}
+	limiter := &loginLimiter{windows: make(map[string]*loginWindow), now: loginClock}
 	// The address budget is kept in its own limiter so its keys cannot collide with the per-username
 	// ones and its larger cap applies to nothing else.
-	addresses := &loginLimiter{windows: make(map[string]*loginWindow)}
+	addresses := &loginLimiter{windows: make(map[string]*loginWindow), now: loginClock}
 	return func(w http.ResponseWriter, r *http.Request) {
 		if users == nil || tokens == nil {
 			respondError(w, log, http.StatusNotFound, "accounts not enabled")
