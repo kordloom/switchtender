@@ -197,10 +197,6 @@ func TestServeBootstrapsTokenOnPublicBind(t *testing.T) {
 	serveListener = ln
 
 	setString(t, &serveDB, filepath.Join(t.TempDir(), "serve.db"))
-	// This case is a genuine first run, so it opts into creating the database. serve declines by
-	// default: a missing path is usually a wrong path, and creating one silently stands up an empty
-	// install with authentication off in place of the operator's real one.
-	setBool(t, &serveCreateDB, true)
 	setString(t, &serveAddr, "0.0.0.0:8080")
 	setBool(t, &serveReadOnly, false)
 	setString(t, &serveOIDCIssuer, "")

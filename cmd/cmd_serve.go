@@ -104,11 +104,6 @@ var (
 	serveClientIPHeader string
 )
 
-// serveCreateDB permits serve to create a SQLite database that does not exist. Off by default,
-// because a missing path is usually a wrong path, and creating one silently stands up an empty
-// install with authentication off in place of the operator's real one.
-var serveCreateDB bool
-
 // scheduleInterval holds the value of the --schedule-interval flag.
 var scheduleInterval time.Duration
 
@@ -499,9 +494,6 @@ func init() {
 	serveCmd.Flags().StringVar(&serveClientIPHeader, "client-ip-header", "",
 		"Header carrying the real client address from a trusted proxy. Defaults to the leftmost "+
 			"X-Forwarded-For entry.")
-	serveCmd.Flags().BoolVar(&serveCreateDB, "create-db", false,
-		"Create the SQLite database if it does not exist. Off by default: a missing path is usually "+
-			"a wrong path, and an empty database serves nothing with authentication off.")
 	serveCmd.Flags().BoolVar(&serveStrictGrants, "strict-grants", false,
 		"Deny non-admins access to an object that has no grants, instead of deferring to the role.")
 	serveCmd.Flags().BoolVar(&serveReadOnly, "read-only", false,
@@ -927,17 +919,17 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	}
 	defer func() { _ = log.Sync() }()
 
-	// A SQLite path that does not exist is far more often a wrong path than a deliberate first run,
-	// and serving one silently is the expensive mistake: the server comes up on a fresh database with
-	// no admin account, no tokens, authentication off, and a new producer identity, so the operator's
-	// real chain is not being served and nothing says so. init creates the database; serve serves it.
+	// Starting on a database that is not there is a legitimate first run, and the quickstart, the
+	// container image, and the switching guide all do exactly that. It is also what a mistyped --db
+	// looks like, and then the server comes up healthy on an empty chain with no admin account and
+	// authentication off while the operator's real install sits unserved. So it is said out loud
+	// rather than refused, because refusing breaks every documented first run.
 	if !strings.HasPrefix(serveDB, "postgres://") && !strings.HasPrefix(serveDB, "postgresql://") {
-		if _, serr := os.Stat(serveDB); errors.Is(serr, os.ErrNotExist) && !serveCreateDB {
-			return fmt.Errorf(
-				"no database at %s, and starting here would create an empty one with no admin account "+
-					"and authentication off rather than serve yours: run switchtender init to set one up, "+
-					"correct --db if the path is wrong, or pass --create-db if an empty database is what "+
-					"you want", serveDB)
+		if _, serr := os.Stat(serveDB); errors.Is(serr, os.ErrNotExist) {
+			fmt.Fprintf(os.Stderr,
+				"creating a new database at %s. If you meant to serve an existing install, stop now "+
+					"and check --db: this one starts empty, with no admin account and no tokens.\n",
+				serveDB)
 		}
 	}
 	var proxies []*net.IPNet
