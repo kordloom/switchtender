@@ -205,16 +205,16 @@ func loginHandler(users user.Store, tokens auth.Store, ldap *LDAPAuth, log *zap.
 			return
 		}
 		addr := clientAddr(r)
-		// Two brakes, because one attempt is bounded two ways: how many times this address may guess
-		// wrong at all, and how many times anyone may guess at this account. The address budget is
-		// checked before any hashing happens, which is what makes it a brake on the work rather than
-		// only on the outcome.
-		if addresses.spent(addr, loginAddressMax) {
-			log.Warn("server: sign-in flood from one address", zap.String("address", addr))
-			respondError(w, log, http.StatusTooManyRequests,
-				"too many failed sign-in attempts from this address, wait a minute")
-			return
-		}
+		// Two brakes, because one attempt is bounded two ways: how many times anyone may guess at
+		// this account, and how many times this address may guess wrong at all.
+		//
+		// The address budget is read here and enforced only after the credential is checked. It used
+		// to refuse before authentication, which read as a brake on the hashing work but was a
+		// lockout in practice: behind a reverse proxy every client shares one remote address, so one
+		// stranger spending the budget with wrong guesses stopped everyone else signing in, correct
+		// password and all, and with it the approval queue. The per-username brake below still bounds
+		// the work, and a correct credential now always wins.
+		addrSpent := addresses.spent(addr, loginAddressMax)
 		if !limiter.allow(addr + "\x00" + req.Username) {
 			// A rate-limited attempt is logged too, since a burst against one account is exactly the
 			// signal an auditor of authentication activity is looking for.
@@ -237,6 +237,12 @@ func loginHandler(users user.Store, tokens auth.Store, ldap *LDAPAuth, log *zap.
 			// Only a failure pays into the address budget, so a person who signs in correctly never
 			// spends it and an office behind one address is never locked out by its own traffic.
 			addresses.record(addr)
+			if addrSpent {
+				log.Warn("server: sign-in flood from one address", zap.String("address", addr))
+				respondError(w, log, http.StatusTooManyRequests,
+					"too many failed sign-in attempts from this address, wait a minute")
+				return
+			}
 			respondError(w, log, http.StatusUnauthorized, "bad credentials")
 			return
 		}

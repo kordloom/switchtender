@@ -96,6 +96,11 @@ var (
 	serveTLSKey  string
 )
 
+// serveCreateDB permits serve to create a SQLite database that does not exist. Off by default,
+// because a missing path is usually a wrong path, and creating one silently stands up an empty
+// install with authentication off in place of the operator's real one.
+var serveCreateDB bool
+
 // scheduleInterval holds the value of the --schedule-interval flag.
 var scheduleInterval time.Duration
 
@@ -480,6 +485,9 @@ func init() {
 		"Reject a container run whose image is not pinned to an @sha256: digest.")
 	registerContainerFlags(serveCmd)
 	registerGalaxyFlag(serveCmd)
+	serveCmd.Flags().BoolVar(&serveCreateDB, "create-db", false,
+		"Create the SQLite database if it does not exist. Off by default: a missing path is usually "+
+			"a wrong path, and an empty database serves nothing with authentication off.")
 	serveCmd.Flags().BoolVar(&serveStrictGrants, "strict-grants", false,
 		"Deny non-admins access to an object that has no grants, instead of deferring to the role.")
 	serveCmd.Flags().BoolVar(&serveReadOnly, "read-only", false,
@@ -688,6 +696,18 @@ func openBundle(db string) (storeBundle, error) {
 	}
 	if strings.HasPrefix(db, "postgres://") || strings.HasPrefix(db, "postgresql://") {
 		return pgstore.Open(db)
+	}
+	// A SQLite path that does not exist is far more often a wrong path than a deliberate first run,
+	// and creating it silently is the expensive mistake: the server comes up on a fresh database
+	// with no admin account, no tokens, authentication off, and a new producer identity, so the
+	// operator's real chain is not serving and nothing says so. init creates the database; serve
+	// serves it. Pass --create-db to say you meant it.
+	if _, err := os.Stat(db); errors.Is(err, os.ErrNotExist) && !serveCreateDB {
+		return nil, fmt.Errorf(
+			"no database at %s, and starting here would create an empty one with no admin account "+
+				"and authentication off rather than serve yours: run switchtender init to set one up, "+
+				"correct --db if the path is wrong, or pass --create-db if an empty database is what "+
+				"you want", db)
 	}
 	return sqlitestore.Open(db)
 }

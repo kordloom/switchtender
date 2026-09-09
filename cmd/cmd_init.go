@@ -120,7 +120,16 @@ func runInit(cmd *cobra.Command, _ []string) error {
 		if err != nil {
 			return fmt.Errorf("resolve config path: %w", err)
 		}
-		if err := os.WriteFile(initSystemd, []byte(systemdUnit(initDB, initAddr, cfgPath)), 0o644); err != nil {
+		dbPath, err := filepath.Abs(initDB)
+		if err != nil {
+			return fmt.Errorf("resolve database path: %w", err)
+		}
+		exe, err := os.Executable()
+		if err != nil {
+			return fmt.Errorf("resolve this binary's path for the unit: %w", err)
+		}
+		unit := systemdUnit(dbPath, initAddr, cfgPath, exe, filepath.Dir(dbPath))
+		if err := os.WriteFile(initSystemd, []byte(unit), 0o644); err != nil {
 			return fmt.Errorf("write systemd unit: %w", err)
 		}
 	}
@@ -175,9 +184,17 @@ func randomHex(n int) (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-// systemdUnit renders a systemd service that starts the server with the config file's secrets and the
-// given database and address.
-func systemdUnit(db, addr, configPath string) string {
+// systemdUnit renders a systemd service that starts the server with the config file's secrets and
+// the given database and address.
+//
+// Every path here is absolute and every one of them was a defect. ExecStart hardcoded
+// /usr/local/bin/switchtender, which the published install script does not use when that directory
+// is not writable, so the unit failed 203/EXEC for any non-root install. The database was passed
+// through as written, and systemd runs a service with a working directory of /, so a relative --db
+// resolved somewhere the operator never chose. Both together produced the worst version: a service
+// that started against a database that did not exist, created it, and stood up a new empty chain
+// with no admin account and authentication off, in place of the one the operator had just set up.
+func systemdUnit(db, addr, configPath, exePath, workDir string) string {
 	return fmt.Sprintf(`[Unit]
 Description=SwitchTender
 After=network-online.target
@@ -186,13 +203,14 @@ Wants=network-online.target
 [Service]
 Type=simple
 EnvironmentFile=%s
-ExecStart=/usr/local/bin/switchtender serve --db %s --addr %s
+WorkingDirectory=%s
+ExecStart=%s serve --db %s --addr %s
 Restart=on-failure
 NoNewPrivileges=true
 
 [Install]
 WantedBy=multi-user.target
-`, configPath, db, addr)
+`, configPath, workDir, exePath, db, addr)
 }
 
 // printInitSummary writes the setup result and the next steps to stderr, keeping stdout clean. The

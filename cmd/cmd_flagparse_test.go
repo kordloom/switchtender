@@ -571,11 +571,18 @@ func TestRandomHexIsTheRightLengthAndNotRepeated(t *testing.T) {
 // privilege escalation available to it.
 func TestSystemdUnitStartsTheServerItWasAskedFor(t *testing.T) {
 	t.Parallel()
-	unit := systemdUnit("/var/lib/switchtender/st.db", "127.0.0.1:8080", "/etc/switchtender.env")
+	unit := systemdUnit("/var/lib/switchtender/st.db", "127.0.0.1:8080", "/etc/switchtender.env",
+		"/opt/switchtender/bin/switchtender", "/var/lib/switchtender")
 	wants := []string{
 		"EnvironmentFile=/etc/switchtender.env",
-		"ExecStart=/usr/local/bin/switchtender serve --db /var/lib/switchtender/st.db " +
+		// The binary is the one that generated the unit, not a guess at where it was installed.
+		// The hardcoded /usr/local/bin here failed 203/EXEC for every install the published script
+		// put in ~/.local/bin, which is what it does whenever /usr/local/bin is not writable.
+		"ExecStart=/opt/switchtender/bin/switchtender serve --db /var/lib/switchtender/st.db " +
 			"--addr 127.0.0.1:8080",
+		// systemd runs a service with a working directory of /, so without this a relative --db
+		// resolved to /switchtender.db and the server came up on an empty chain nobody chose.
+		"WorkingDirectory=/var/lib/switchtender",
 		"NoNewPrivileges=true",
 		"Restart=on-failure",
 		"WantedBy=multi-user.target",
