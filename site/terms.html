@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Terms | SwitchTender</title>
+	<meta name="description" content="The operating terms for SwitchTender: no telemetry, no license audits, a lapsed license takes nothing, and your price is fixed for the term.">
+	<meta name="robots" content="index, follow">
+	<meta property="og:title" content="Terms | SwitchTender">
+	<meta property="og:description" content="No telemetry, no license audits, no seat counting. A lapsed license takes nothing. Your price is fixed for the term.">
+	<meta property="og:type" content="website">
+	<meta property="og:url" content="https://switchtender.com/terms">
+	<link rel="canonical" href="https://switchtender.com/terms">
+	<link rel="icon" href="/favicon.ico" sizes="any">
+	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
+	<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="/styles.css?v=35">
+	<style>
+		/* Legal prose. styles.css resets every margin and carries no rules for bare headings or
+		   paragraphs, so a long text page defines its own spacing here, the way pricing and 404 do. */
+		.legal h2 { font-family: "Space Grotesk", sans-serif; font-size: 19px; margin: 34px 0 10px; }
+		.legal h2:first-child { margin-top: 0; }
+		.legal p { color: var(--muted); margin-bottom: 14px; }
+		.legal a { color: var(--accent); }
+		.legal code { font-size: 13.5px; color: var(--text); }
+		.legal .foot-note { color: #63707d; margin-bottom: 0; }
+		/* Conspicuous disclaimer. UCC 2-316 wants the implied-warranty disclaimer to stand out
+		   from the prose around it, so it gets a box, full contrast text, and a capitalized line. */
+		.legal .disclaimer {
+			color: var(--text); background: var(--surface); border: 1px solid var(--border);
+			border-radius: 10px; padding: 14px 16px;
+		}
+		.legal .disclaimer strong {
+			display: block; margin: 8px 0; font-weight: 700; letter-spacing: 0.3px;
+		}
+	</style>
+</head>
+<body>
+	<div class="bg-mesh" aria-hidden="true"></div>
+	<div class="bg-grid" aria-hidden="true"></div>
+
+	<header class="nav" id="nav">
+		<div class="wrap nav-inner">
+			<a class="brand" href="/" aria-label="SwitchTender"><img src="/assets/logo-train-tracks-dark.png" alt="SwitchTender" class="brand-train"><span class="brand-word">SwitchTender</span></a>
+			<nav class="nav-links">
+				<a href="/#features">Features</a>
+				<a href="/#compare">Compare</a>
+				<a href="/pricing">Pricing</a>
+				<a href="/agents">Agents</a>
+				<a href="/docs/">Docs</a>
+			</nav>
+			<div class="nav-cta">
+				<a class="ghost" href="https://github.com/kordloom/switchtender">GitHub</a>
+				<a class="btn" href="/get-started">Install</a>
+			</div>
+			<button class="nav-toggle" id="nav-toggle" aria-label="Menu">
+				<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="7" x2="21" y2="7"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="17" x2="21" y2="17"/></svg>
+			</button>
+		</div>
+	</header>
+
+	<main>
+		<section class="wrap gs-hero reveal">
+			<span class="eyebrow">Legal</span>
+			<h1>Terms at <span class="grad">SwitchTender.</span></h1>
+			<p class="lede">These are the operating terms of the business: how we sell SwitchTender, what a license grants, and what we owe you after you pay. They are our terms, not legal advice to you.</p>
+		</section>
+
+		<section class="wrap reveal legal" style="max-width:760px">
+			<h2>Who this is between</h2>
+			<p>You, or the organization you buy for, and KordLoom LLC, a Texas limited liability company. These terms apply from the moment you install a paid license file or pay an invoice for SwitchTender, and they govern that license for its term.</p>
+
+			<h2>What the software is</h2>
+			<p>SwitchTender is source-available under the Business Source License 1.1. You can read the source, modify it, self-host it, and run it in production for your own organization. The one reserved right is offering SwitchTender to third parties as a hosted or managed service that provides its primary functionality. Every version converts to the Apache License, Version 2.0 two years after that version is first publicly released. The conversion is automatic and it lives in the <a href="https://github.com/kordloom/switchtender/blob/main/LICENSE">license text</a>, not in our goodwill.</p>
+
+			<h2>What a license adds</h2>
+			<p>Community needs no license and never expires. A paid license is a small signed JSON file that turns on the paid features of the tier you bought, for the organization named in it, within the fleet band it names. It is flat per organization: never per seat, never per run. It grants no extra rights over the source code, because the source is under the same license either way.</p>
+
+			<h2>Fleet bands</h2>
+			<p>Bands are self-reported at purchase and at renewal. The binary counts nothing and reports nothing, we have no way to check, and we are not reserving a right to. This agreement has no audit clause and one cannot be added to it while it runs. If a later version of these terms ever reads differently, it governs only the agreements entered under it, you would see it at least 60 days before a renewal, and the term you already paid for stays untouched. If your fleet outgrows its band, move up at renewal and tell us the new number. That is the entire mechanism, and the trust it requires is priced in.</p>
+
+			<h2>No phone-home</h2>
+			<p>The license is verified offline, against a public key compiled into the binary. There is no license server, no activation, and no check-in, so losing internet changes nothing. We do not collect telemetry or usage data from your install, we cannot see your hosts, runs, or users, and nothing in these terms gives us the right to look.</p>
+			<p>That describes the software you run. Enterprise agreements can add services we operate ourselves, such as a hosted witness that countersigns a chain feed you send us, or evidence custody. Those services work only because data reaches us, so they are the deliberate exception to this section and to the one on your data below. What any of them receives, holds, and for how long is written into the Enterprise order form before you send us anything, and nothing sends us data unless you have bought a service that asks for it and configured your install to do so.</p>
+
+			<h2>Trials</h2>
+			<p>A 30-day trial license is an email to <a href="mailto:hello@kordloom.com?subject=SwitchTender%20trial">hello@kordloom.com</a> with your organization name and band. No card, no payment details, no auto-renewal, and nothing to cancel. At 30 days the trial license expires and the install drops to Community by itself, keeping everything it produced.</p>
+			<p>The offer is built for one trial per organization, and we will extend one if you are still evaluating and say so. We can decline or shorten a trial, which in practice means a repeat trial standing in for a purchase, or a request from a company selling a competing product. That reservation is small on purpose, and it exists so the offer can stay this open for everyone else.</p>
+
+			<h2>Buying today</h2>
+			<p>Card checkout is on the way. Today a purchase is an email and an invoice, and the signed license usually lands within hours. Invoices are due 30 days from the invoice date, and we will work to your purchasing terms if you tell us what they are before we invoice.</p>
+			<p>The trial email, the purchase email, and the invoice each name this page at <code>https://switchtender.com/terms</code> and the <a href="/refund">refund policy</a> at <code>https://switchtender.com/refund</code>. Paying an invoice for SwitchTender, or installing a license file we issue you, is how you accept these terms for that term. If your organization needs its own paperwork signed instead, tell us before you pay and we will work from it.</p>
+
+			<h2>Your price</h2>
+			<p>The price we agree is the price for the whole term. It does not move mid-term, for any reason. If the price of your tier or band changes at renewal, you hear it from us at least 60 days before your renewal date, not on the invoice.</p>
+
+			<h2>Taxes and currency</h2>
+			<p>Prices are in US dollars and exclude tax. You cover any sales, use, excise, VAT, GST, or similar tax that applies to what you buy, along with any withholding your jurisdiction imposes. We cover tax on our own net income. If you are exempt, send the certificate before we invoice and we will bill you accordingly.</p>
+			<p>A tax that first becomes applicable during your term is passed through at cost on the next invoice, and that is not a price change under the section above. The price freeze is about our price, which stays where we agreed it. It was never a promise to pay somebody else's tax for you.</p>
+
+			<h2>When a license lapses</h2>
+			<p>Paid features stop. Nothing else happens. Your data, your run history, your audit chain, your receipts, your dossiers, and every Community feature keep working, the running server drops to Community without a restart, and a PostgreSQL database initialized under a license stays fully usable. Nothing is deleted, locked, disabled, repossessed, or withheld.</p>
+			<p>The software enforces that. Opening an existing PostgreSQL database is never gated in any state, in the source, because a lapsed license must take nothing. We do not reserve a right to disable the software, revoke it remotely, or hold your evidence against an unpaid invoice, and we will not brick a running install over a billing dispute. Compare what the alternatives do on non-payment, where read-only instances and destroy-and-certify obligations are normal.</p>
+			<p>That is a promise about the software, not a release of the debt. An invoice you owe is still owed. We pursue an unpaid one the ordinary way any business does, including through the courts, and you cover the reasonable costs of collection if it goes that far. What we give up is the technical lever over your production systems, never the money. Those are different things, and only the first one is worth promising.</p>
+
+			<h2>Community</h2>
+			<p>The Community tier never shrinks. The list it is measured against is the Community feature list in <a href="https://github.com/kordloom/switchtender/blob/community-baseline-2026-09-09/LICENSING.md">LICENSING.md</a> in the public repository as it stood on 2026-09-09, frozen at the tag <code>community-baseline-2026-09-09</code> so that neither of us has to remember what it said. We add paid features, and we never move a feature on that list behind the key. That binds every release we ship, and it is a term of this agreement.</p>
+
+			<h2>Your data</h2>
+			<p>Everything the software produces is yours, entirely: configuration, run history, the audit chain, receipts, dossiers, and evidence exports. We claim no rights in any of it, on any tier.</p>
+			<p>On Community, Pro, and Team we also hold no copy of it, so we could not hand it over, delete it, or be compelled to produce it. That is a fact about where the software runs rather than a promise about our conduct, which is why it is worth more than a promise.</p>
+			<p>One narrow permission keeps support workable. When you send us a log bundle, a run dossier, a configuration file, or a receipt to get help, you let us open it, read it, and use it to answer the question you asked. That permission covers nothing else, no other use, and no other recipient. You can withdraw it by telling us, and we delete what you sent once the question is closed if you ask.</p>
+			<p>Enterprise services we operate are the exception, because a hosted witness and evidence custody cannot do their job without holding what you send. Ownership does not change: it stays yours and we claim nothing. On written request we return it or destroy it within 30 days, in the format you sent it or another format named on your order form, and we confirm in writing which we did.</p>
+			<p>Two limits on that, both ordinary. Routine encrypted backups are not searched through for individual records, and they age out on the retention cycle written into your order form, staying subject to this section until they do. Where a law, a court order, or a legal hold requires us to keep a copy, we keep that copy for exactly as long as it requires and we tell you, unless telling you is what we are barred from doing. What else we hold, where, and what happens to it when the agreement ends is written into the order form rather than left to this page.</p>
+
+			<h2>Receipts</h2>
+			<p>The receipt format is published with conformance vectors and the verifier is open source. A receipt issued today verifies offline in ten years, whether KordLoom exists or not. Nothing in these terms lets us withdraw that, and we built no mechanism by which we could.</p>
+
+			<h2>Acceptable use</h2>
+			<p>Two things. Do not offer SwitchTender to third parties as a hosted or managed service providing its primary functionality, which is the single restriction the license carries. Do not use it to reach systems you are not authorized to reach. What you run through it beyond that is your business, and we have neither visibility into it nor an opinion about it.</p>
+
+			<h2>Support</h2>
+			<p>Community support is the public issue tracker on GitHub. Paid tiers add the support described for that tier on the <a href="/pricing">pricing page</a>. Where we commit to a support response time, that commitment is written into your order rather than implied by this page.</p>
+			<p>The refund timings are the exception, because they are set here. The <a href="/refund">refund policy</a> says we answer a refund request within five business days and pay an approved refund within 15 days, and both of those bind us under this agreement.</p>
+
+			<h2>Services are separate</h2>
+			<p>The SwitchTender Migration Program, and any other work we do for you, is a services engagement governed by a separate written agreement rather than by these terms.</p>
+
+			<h2>Warranty</h2>
+			<p>The software is provided as is. We do not warrant that it is free of defects, that it runs uninterrupted, or that it meets every requirement you have.</p>
+			<p class="disclaimer">To the fullest extent the law allows:
+				<strong>KORDLOOM DISCLAIMS ALL IMPLIED WARRANTIES, INCLUDING THE IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT.</strong>
+				Some states do not allow that disclaimer. Where yours does not, it does not apply to you and the rest of this section still does.</p>
+			<p>What we do warrant is short and named. The seven commitments published on the <a href="/pricing">pricing page</a> are contractual: what is free today stays free, a lapsed license takes nothing, no phone-home and no seat counting and no audits, every receipt verifies without us, your price is fixed for the term with 60 days notice before a renewal change, every release converts to Apache 2.0 two years after it ships, and pricing is flat per organization within a band. So are the tier, fleet band, price, and term written on your order. We intend to be held to those.</p>
+			<p>The rest of the site is description rather than warranty. Feature lists, comparisons, benchmarks, docs, and roadmap notes tell you what we are building and how we think it behaves, and none of them adds a promise beyond the ones above.</p>
+
+			<h2>Liability</h2>
+			<p>If we end up owing you money under this agreement, the most we owe is the greater of what you paid us in the 12 months before the thing that caused it and $1,000. Neither of us is liable to the other for lost profits, lost revenue, or indirect or consequential losses. Community costs nothing, so on Community the floor is what stands, and the software is still yours to run under its license.</p>
+			<p>Two things sit outside those limits, in both directions. A party's own willful misconduct or fraud is not capped, and neither is money you owe us for a license you bought. A limit on damages was never meant to work as a discount on an invoice.</p>
+
+			<h2>Term and renewal</h2>
+			<p>A paid license runs for its term, normally one year, and renews only when you decide to renew. There is no automatic renewal to remember to cancel, because there is no card on file to charge. We invoice, you decide.</p>
+			<p>You end the agreement by not renewing, and the install drops to Community and keeps working. We can decline to renew as well, and you will hear that before the term ends rather than after.</p>
+			<p>One situation ends a paid term early, and it is the acceptable use section: offering SwitchTender to third parties as a hosted or managed service that provides its primary functionality, or using it to reach systems you are not authorized to reach. If that happens we write to you, say plainly what the breach is, and you have 30 days to end it. End it inside that window and the term carries on untouched. If it is still running at the end of the window, we can terminate the paid license, and the install drops to Community with your data, your evidence, your receipts, and every Community feature intact, exactly as a lapse would leave it.</p>
+			<p>Nothing else ends a paid term early. Not a billing dispute, not a disagreement about your fleet band, and never as pressure to move you up a tier. That narrow right exists so the one restriction the license carries is not unenforceable, and it is the only lever of its kind in this agreement.</p>
+
+			<h2>Refunds</h2>
+			<p>The trial exists so that nobody has to buy SwitchTender to find out whether it works. If you buy anyway and it was the wrong call, the <a href="/refund">refund policy</a> covers what happens, and it forms part of these terms.</p>
+
+			<h2>Changes</h2>
+			<p>If these terms change, the effective date below changes with them, and the terms you bought under keep governing the term you already paid for. A change never reaches back into a paid term. Changes that affect a renewal are announced at least 60 days before that renewal, on the same clock as a price change.</p>
+
+			<h2>Which document wins</h2>
+			<p>When two of our documents disagree about the same thing, the order is your signed order form or statement of work first, then these terms, then the <a href="/refund">refund policy</a>, then the <a href="/pricing">pricing page</a>. Those four are the whole agreement between us about SwitchTender, and they replace whatever was said before in a sales email, a slide, or a call. Changing them takes writing from both of us. Preprinted terms on your purchase order do not apply, even where we sign the purchase order so that your system can raise it.</p>
+
+			<h2>If one part fails</h2>
+			<p>A term a court will not enforce is narrowed to what is enforceable, or comes out entirely, and the rest of the agreement keeps running as written. Letting something go once does not give it up: if we do not enforce a term at the time, we can still enforce it later, and the same goes for you.</p>
+
+			<h2>Handing the agreement on</h2>
+			<p>You can assign this agreement to whoever buys or merges with your business, without asking us, by telling us within 30 days of the close. The license moves with it at the same tier, band, price, and term. If the combined fleet lands in a larger band, move up at renewal, the same as any other growth. We can assign the agreement to a successor of KordLoom's business, and every commitment on this page goes with it, because a commitment that dies at an acquisition was never one. Beyond those two cases, neither of us assigns this agreement without the other's written consent.</p>
+
+			<h2>Notices</h2>
+			<p>Notice to us goes to <a href="mailto:hello@kordloom.com">hello@kordloom.com</a>. Notice to you goes to the billing and technical contacts on your order, and to the address your invoice went to. Email counts, and it takes effect the day it is sent unless it bounces back to the sender. Keep your contacts current with us, because a notice sent to an address nobody reads any more still counts as sent.</p>
+
+			<h2>Export and sanctions</h2>
+			<p>The binary is a download anyone in the world can reach, so this part is on both of us. You agree not to install, use, or pass on SwitchTender in a country under US embargo, or where you or your organization appear on a US denied, blocked, or sanctioned party list, and not to use it for an end use US export law prohibits, including nuclear, chemical, biological, and missile applications. We will not knowingly sell to a party we are barred from selling to, and we will not keep money we would be required to return. This is the one section where neither of us gets to be generous.</p>
+
+			<h2>Governing law</h2>
+			<p>The laws of the State of Texas govern this agreement, without regard to conflict of laws rules. Any dispute goes to the state or federal courts located in Texas, and both of us agree to that. There is no arbitration clause and no waiver of a jury trial here, because we did not want either one.</p>
+
+			<h2>Reaching us</h2>
+			<p>Questions about these terms, pricing, trials, and purchases go to <a href="mailto:hello@kordloom.com">hello@kordloom.com</a>. Commercial licensing goes to <a href="mailto:licensing@switchtender.com">licensing@switchtender.com</a>, and security reports go to <a href="mailto:security@switchtender.com">security@switchtender.com</a>.</p>
+
+			<p class="foot-note" style="margin-top:26px">Effective 2026-09-09</p>
+		</section>
+	</main>
+
+	<footer class="footer">
+		<div class="wrap footer-inner">
+			<img src="/assets/logo-train-tracks-dark.png" alt="SwitchTender" class="foot-logo">
+			<nav>
+				<a href="https://github.com/kordloom/switchtender">GitHub</a>
+				<a href="/docs/">Docs</a>
+				<a href="/agents">Agents</a>
+				<a href="/docs/comparison">Compare</a>
+				<a href="/pricing">Pricing</a>
+				<a href="/privacy">Privacy</a>
+				<a href="/terms">Terms</a>
+				<a href="/refund">Refunds</a>
+				<a href="https://github.com/kordloom/switchtender/blob/main/LICENSE">License</a>
+			</nav>
+			<span class="foot-note">Source-available. BSL 1.1. Self-host free.</span>
+		</div>
+		<div style="text-align:center;margin:20px auto 0;font-size:11px;letter-spacing:1.6px;text-transform:uppercase;opacity:.5">A <a href="https://kordloom.com" style="color:inherit;text-decoration:none">KordLoom</a> product</div>
+			<div class="foot-legal">SwitchTender&trade; is a trademark of KordLoom LLC. Copyright 2026 KordLoom LLC.</div>
+	</footer>
+
+	<script src="/app.js?v=7"></script>
+</body>
+</html>
