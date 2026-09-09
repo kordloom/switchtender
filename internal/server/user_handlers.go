@@ -116,11 +116,6 @@ type loginLimiter struct {
 	now func() time.Time
 }
 
-// loginClock is the time source new sign-in limiters read. Nil in production, which means the real
-// clock. A test sets it so a burst cannot straddle a window boundary and fail for being slow rather
-// than for being wrong.
-var loginClock func() time.Time
-
 // clock returns the limiter's time source, defaulting to the real one.
 func (l *loginLimiter) clock() time.Time {
 	if l.now != nil {
@@ -270,10 +265,20 @@ func forwardedClient(r *http.Request) string {
 // Attempts are rate limited per client and username so stolen password lists cannot be replayed
 // at full speed.
 func loginHandler(users user.Store, tokens auth.Store, ldap *LDAPAuth, log *zap.Logger) http.HandlerFunc {
-	limiter := &loginLimiter{windows: make(map[string]*loginWindow), now: loginClock}
+	return loginHandlerWithClock(users, tokens, ldap, log, nil)
+}
+
+// loginHandlerWithClock is loginHandler with the limiters' time source stated. Production passes
+// nil, meaning the real clock. A test passes a frozen one so a burst cannot straddle a window
+// boundary and fail for how fast the machine was rather than for anything about the limiter. The
+// clock is per handler rather than a package variable, because a variable a test writes while a
+// parallel handler reads it is a data race, and the race detector finds it.
+func loginHandlerWithClock(users user.Store, tokens auth.Store, ldap *LDAPAuth, log *zap.Logger,
+	now func() time.Time) http.HandlerFunc {
+	limiter := &loginLimiter{windows: make(map[string]*loginWindow), now: now}
 	// The address budget is kept in its own limiter so its keys cannot collide with the per-username
 	// ones and its larger cap applies to nothing else.
-	addresses := &loginLimiter{windows: make(map[string]*loginWindow), now: loginClock}
+	addresses := &loginLimiter{windows: make(map[string]*loginWindow), now: now}
 	return func(w http.ResponseWriter, r *http.Request) {
 		if users == nil || tokens == nil {
 			respondError(w, log, http.StatusNotFound, "accounts not enabled")
