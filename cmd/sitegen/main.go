@@ -155,22 +155,29 @@ func hrefFor(slug string) string {
 	return "/docs/" + slug
 }
 
+// landingURLs are the canonical URLs of the hand-written landing pages. sitegen does not generate
+// them and so cannot discover them, which means a page added under site/ is absent from the sitemap
+// until it is listed here. TestEveryLandingPageIsListed catches that omission.
+var landingURLs = []string{
+	"https://switchtender.com/", "https://switchtender.com/pricing",
+	"https://switchtender.com/get-started", "https://switchtender.com/agents",
+	"https://switchtender.com/awx-alternative", "https://switchtender.com/ascender-alternative",
+	"https://switchtender.com/semaphore-alternative", "https://switchtender.com/aap-alternative",
+	"https://switchtender.com/rundeck-alternative", "https://switchtender.com/jenkins-alternative",
+	"https://switchtender.com/migration",
+	"https://switchtender.com/privacy",
+	"https://switchtender.com/terms",
+	"https://switchtender.com/refund",
+	"https://switchtender.com/verify",
+}
+
 // writeSitemap emits site/sitemap.xml covering the landing pages and every docs page, so crawlers
 // discover the whole site from one file.
 func writeSitemap(slugs []string) error {
 	var b strings.Builder
 	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>` + "\n")
 	b.WriteString(`<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">` + "\n")
-	urls := []string{
-		"https://switchtender.com/", "https://switchtender.com/pricing",
-		"https://switchtender.com/get-started", "https://switchtender.com/agents",
-		"https://switchtender.com/awx-alternative", "https://switchtender.com/ascender-alternative",
-		"https://switchtender.com/semaphore-alternative", "https://switchtender.com/aap-alternative",
-		"https://switchtender.com/rundeck-alternative", "https://switchtender.com/jenkins-alternative",
-		"https://switchtender.com/migration",
-		"https://switchtender.com/privacy",
-		"https://switchtender.com/verify",
-	}
+	urls := append([]string{}, landingURLs...)
 	for _, slug := range slugs {
 		urls = append(urls, canonicalFor(slug))
 	}
