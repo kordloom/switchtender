@@ -697,18 +697,6 @@ func openBundle(db string) (storeBundle, error) {
 	if strings.HasPrefix(db, "postgres://") || strings.HasPrefix(db, "postgresql://") {
 		return pgstore.Open(db)
 	}
-	// A SQLite path that does not exist is far more often a wrong path than a deliberate first run,
-	// and creating it silently is the expensive mistake: the server comes up on a fresh database
-	// with no admin account, no tokens, authentication off, and a new producer identity, so the
-	// operator's real chain is not serving and nothing says so. init creates the database; serve
-	// serves it. Pass --create-db to say you meant it.
-	if _, err := os.Stat(db); errors.Is(err, os.ErrNotExist) && !serveCreateDB {
-		return nil, fmt.Errorf(
-			"no database at %s, and starting here would create an empty one with no admin account "+
-				"and authentication off rather than serve yours: run switchtender init to set one up, "+
-				"correct --db if the path is wrong, or pass --create-db if an empty database is what "+
-				"you want", db)
-	}
 	return sqlitestore.Open(db)
 }
 
@@ -925,6 +913,19 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	}
 	defer func() { _ = log.Sync() }()
 
+	// A SQLite path that does not exist is far more often a wrong path than a deliberate first run,
+	// and serving one silently is the expensive mistake: the server comes up on a fresh database with
+	// no admin account, no tokens, authentication off, and a new producer identity, so the operator's
+	// real chain is not being served and nothing says so. init creates the database; serve serves it.
+	if !strings.HasPrefix(serveDB, "postgres://") && !strings.HasPrefix(serveDB, "postgresql://") {
+		if _, serr := os.Stat(serveDB); errors.Is(serr, os.ErrNotExist) && !serveCreateDB {
+			return fmt.Errorf(
+				"no database at %s, and starting here would create an empty one with no admin account "+
+					"and authentication off rather than serve yours: run switchtender init to set one up, "+
+					"correct --db if the path is wrong, or pass --create-db if an empty database is what "+
+					"you want", serveDB)
+		}
+	}
 	bundle, err := openBundle(serveDB)
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)

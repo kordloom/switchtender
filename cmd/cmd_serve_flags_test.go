@@ -27,6 +27,11 @@ func quietServeFlags(t *testing.T) {
 	t.Setenv("SWITCHTENDER_LICENSE", filepath.Join(home, "no-license.json"))
 
 	setString(t, &serveDB, filepath.Join(t.TempDir(), "switchtender.db"))
+	// These cases exercise flag validation, so the database has to be one serve will open rather
+	// than one it refuses. serve declines to create a database that is not there, because a missing
+	// path is usually a wrong path and creating one stands up an empty install with authentication
+	// off in place of the operator's real one.
+	setBool(t, &serveCreateDB, true)
 	setString(t, &serveAddr, defaultServeAddr)
 	setString(t, &policyFile, "")
 	setString(t, &serveTLSCert, "")
