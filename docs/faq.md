@@ -37,7 +37,11 @@ From the command line:
     switchtender import awx export.json --apply    # import
 
 It maps projects, inventories, job templates with their surveys and schedules and job slicing, and
-credentials. See [switching from AWX](switching-from-awx.md) for the full mapping.
+credentials. A workflow job template arrives as a workflow template carrying its graph as a
+pipeline, and its own schedules come with it. A graph a pipeline cannot express, such as a node that
+runs other nodes on failure, is reported and skipped whole rather than imported in part, and the
+report says its schedules did not import either. See [switching from AWX](switching-from-awx.md) for
+the full mapping.
 
 The preview prints the inventory content it would write, not just the names, because an export is a
 document somebody else produced and the inventory decides which machines a play reaches. Read it
@@ -54,16 +58,20 @@ Five sources in all. AWX is the one above; the other four are:
 
     switchtender import semaphore export.json
     switchtender import rundeck jobs.yaml --inventory prod
+    switchtender import rundeck project-archive.zip --inventory prod
     switchtender import jenkins /var/jenkins_home --inventory prod
     switchtender import cron /etc/crontab --system --inventory prod
 
 Semaphore brings projects, inventories, credential shells, templates, surveys, and schedules, the
-same kinds AWX does apart from the dynamic inventory sources AWX alone carries. Rundeck and Jenkins
-export jobs and nothing else, so they bring templates, surveys, and schedules, and `--inventory`
-names the hosts those templates target. A crontab brings schedules alone, one per job line, and no
-template for them to fire, so each carries its own one-step bash pipeline. That step runs on the
-SwitchTender host, not on the machine the crontab came from, and the report says so on every cron
-import. Rundeck, Jenkins, and cron create no credentials at all. The table is in
+same kinds AWX does apart from the dynamic inventory sources AWX alone carries. Jenkins exports jobs
+and nothing else, so it brings templates, surveys, and schedules, and `--inventory` names the hosts
+those templates target. Rundeck brings the same three from either a job export or a project archive,
+told apart by content, plus one project from an archive whose source control configuration names a
+repository this can reach. Neither Rundeck artifact carries a node definition, so no inventory comes
+from either and `--inventory` answers for both. A crontab brings schedules alone, one per job line,
+and no template for them to fire, so each carries its own one-step bash pipeline. That step runs on
+the SwitchTender host, not on the machine the crontab came from, and the report says so on every
+cron import. Rundeck, Jenkins, and cron create no credentials at all. The table is in
 [what each source brings over](migration.md#what-each-source-brings-over).
 
 Jenkins has no single export file: point the importer at a `JENKINS_HOME`, at its `jobs` directory,
@@ -72,7 +80,9 @@ the directory holding its `config.xml`, so a zip whose only entry is a bare `con
 with the reason rather than imported under a name it does not have. Only freestyle jobs import,
 since a Pipeline job is a Groovy program with no honest mechanical translation. The
 `/v1/import/{format}` endpoint and the Migrate page in the UI take awx, semaphore, rundeck, and
-jenkins; a crontab imports from the command line only.
+jenkins; a crontab imports from the command line only. Both cap an upload at 25 MiB, so a Rundeck
+project archive from a busy project, which carries every execution log beside the definitions the
+importer reads, may need the command line.
 
 ## How do I rerun the same job on a set of hosts without re-entering everything?
 

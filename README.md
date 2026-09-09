@@ -64,7 +64,7 @@ instead of scrollback.
 | Big&nbsp;jobs                        | Sharded across hosts, balanced by their measured duration, only failed shards retried. | Sliced round-robin, with no balancing.     | No splitting at all.     |
 | Memory&nbsp;across&nbsp;runs         | Flaky hosts flagged, durations trended, every host's history kept.               | Forgotten the moment a run ends.                | Forgotten the moment a run ends. |
 | Pipelines                            | A dependency graph with a drag-and-drop editor, passing typed outputs from one step to the next. | A visual workflow builder.       | Basic chaining.          |
-| Leaving&nbsp;your&nbsp;old&nbsp;tool | One command imports AWX, Semaphore, Rundeck, Jenkins, or a crontab. AWX and Semaphore bring projects, inventories, credential shells, templates, surveys, and schedules; Rundeck and Jenkins bring templates, surveys, and schedules, against an inventory you name; a crontab brings schedules. [What each source brings over](docs/migration.md#what-each-source-brings-over). | Not applicable.                     | Not applicable.          |
+| Leaving&nbsp;your&nbsp;old&nbsp;tool | One command imports AWX, Semaphore, Rundeck, Jenkins, or a crontab. AWX and Semaphore bring projects, inventories, credential shells, templates, surveys, and schedules; Rundeck and Jenkins bring templates, surveys, and schedules, against an inventory you name, and a Rundeck project archive brings one project as well when its source control configuration names a repository this can reach; a crontab brings schedules. [What each source brings over](docs/migration.md#what-each-source-brings-over). | Not applicable.                     | Not applicable.          |
 
 The full head-to-head, including where SwitchTender is behind, is in the
 [comparison](docs/comparison.md).
@@ -231,8 +231,9 @@ Migrating is one command. Point it at an export to see what it would create, the
     ./switchtender import awx awx-export.json            # dry-run report
     ./switchtender import awx awx-export.json --apply     # create the objects
 
-The same for `import semaphore`, `import rundeck`, `import cron`, and `import jenkins`, which reads a
-Jenkins jobs directory or a zip of one and turns freestyle jobs into templates.
+The same for `import semaphore`, `import cron`, `import rundeck`, which reads either a Rundeck job
+export or a project archive, and `import jenkins`, which reads a Jenkins jobs directory or a zip of
+one and turns freestyle jobs into templates.
 
 Credentials come across as shells. Re-enter their secrets, since exports omit them by design. The
 [switching-from-AWX guide](docs/switching-from-awx.md) walks the whole move, and the

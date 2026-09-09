@@ -165,7 +165,9 @@ binary against an existing database is safe to repeat.</p>
 and its own hash over its content, so altering, reordering, or dropping an entry breaks the chain,
 which <code>GET /v1/audit/verify</code> detects. The chain is tamper-evident with no key configured. <code>GET /v1/audit/bundle</code>
 seals the chain into a signed LoomSeal bundle, and the open <code>loomseal</code> verifier confirms the trail
-offline, without trusting the server that produced it. <code>switchtender audit report</code> renders the
+offline, without trusting the server that produced it. A chain that does not verify is refused
+rather than sealed: the endpoint answers 409 naming what failed and where, so a broken chain is
+never signed over. <code>switchtender audit report</code>, a Team feature, renders the
 period's changes as a self-contained HTML evidence report a compliance or vendor-security reviewer
 reads without any tooling, and the bundle proves the chain behind it independently. The append is serialized by an in-process
 lock on SQLite and a transaction-level advisory

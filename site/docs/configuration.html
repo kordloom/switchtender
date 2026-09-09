@@ -806,11 +806,18 @@ node over the mesh relay, with no database access of its own.</p>
 <h2 id="token">token</h2>
 <p>Manages API tokens. A public bind on an empty database mints an initial admin token at startup.</p>
 <ul>
-<li><code>token new --name &lt;label&gt; [--user &lt;username&gt;] [--ttl &lt;duration&gt;]</code> mints a token, printed once. A
-zero TTL never expires.</li>
+<li><code>token new --name &lt;label&gt; [--user &lt;username&gt;] [--ttl &lt;duration&gt;] [--agent]</code> mints a token, printed
+once. A zero TTL never expires.</li>
 <li><code>--user</code> binds the token to an account, and the token carries that account's role. A token minted
 without <code>--user</code> is unscoped and acts as admin, so bind every token you hand to a person, a
 service, or an AI agent. See <a href="/docs/agents">running an agent</a>.</li>
+<li><code>--agent</code> marks the token as held by an AI agent rather than a person. It caps the token at
+operator whatever role its account holds, so an agent can launch and propose work but can never
+manage identity, access, or secrets, and can never approve its own held run. Every action it takes
+is recorded in the chain as <code>actor_type: agent</code> with the account it acts for beside it, which is
+what <code>actor_kind: agent</code> policy rules match on. It requires <code>--user</code>, so the chain always records
+the human the agent acts for; without one the command refuses. Mint every agent token with it: a
+token without <code>--agent</code> is indistinguishable from a person's in the record.</li>
 <li><code>token list</code> lists tokens without their secrets.</li>
 <li><code>token revoke &lt;id&gt;</code> deletes a token.</li>
 </ul>
@@ -835,13 +842,29 @@ each tier covers is listed at <a href="https://switchtender.com/pricing">https:/
 directory as the database. A license this install cannot parse or that has lapsed reads as
 Community rather than failing the server, so an expiry never takes an install down.</p>
 <h2 id="import">import</h2>
-<p>Migrates from AWX or Semaphore. See <a href="/docs/migration">Migration</a>.</p>
+<p>Migrates from AWX, Semaphore, Rundeck, Jenkins, or cron. Which objects each one carries across is in
+<a href="/docs/migration#what-each-source-brings-over">what each source brings over</a>.</p>
 <ul>
-<li><code>import awx &lt;export.json&gt; [--apply]</code>.</li>
-<li><code>import semaphore &lt;export.json&gt; [--apply]</code>.</li>
+<li><code>import awx &lt;export.json&gt; [--apply]</code> brings projects, inventories static and dynamic, credential
+shells, job templates and workflows, surveys, and schedules.</li>
+<li><code>import semaphore &lt;export.json&gt; [--apply]</code> brings the same kinds from a Semaphore export, apart
+from the dynamic inventory sources AWX alone carries.</li>
+<li><code>import rundeck &lt;jobs.yaml|project-archive.zip&gt; [--inventory &lt;name&gt;] [--apply]</code> brings templates,
+surveys, and schedules from either a job export or a project archive, told apart by content. An
+archive brings one project as well, but only when its source control configuration names a
+repository this can reach. Neither artifact carries a node definition, so no inventory is imported
+from either and <code>--inventory</code> names the hosts its jobs target.</li>
+<li><code>import jenkins &lt;JENKINS_HOME|jobs-dir|config.xml&gt; [--inventory &lt;name&gt;] [--apply]</code> brings
+templates, surveys, and schedules from freestyle jobs. Jenkins picks an agent by label, so
+<code>--inventory</code> names the machines.</li>
+<li><code>import cron &lt;crontab-file&gt; [--inventory &lt;name&gt;] [--system] [--apply]</code> brings schedules alone, one
+per crontab line, each carrying its own one-step bash pipeline rather than a template. <code>--system</code>
+parses the six-field <code>/etc/crontab</code> form, whose user column sits before the command. That step
+runs on the SwitchTender host, not on the machine the crontab came from.</li>
 </ul>
-<p>Both take <code>--db</code> for the target database. Without <code>--apply</code> the command only reports what it would
-create.</p>
+<p>All five take <code>--db</code> for the target database. Without <code>--apply</code> the command only reports what it
+would create. Rundeck, Jenkins, and cron import no credentials, so a job that needed a login needs
+one built by hand afterward.</p>
 <h2 id="audit">audit</h2>
 <p>Audit trail tools.</p>
 <ul>

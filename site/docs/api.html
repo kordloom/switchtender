@@ -650,7 +650,7 @@ either licensed or absent.</li>
 <tr>
 <td>POST</td>
 <td><code>/v1/import/{format}</code></td>
-<td>Import an AWX, Semaphore, or Rundeck export. Format is awx, semaphore, or rundeck. Rundeck takes <code>?inventory=</code> to say which hosts its jobs target.</td>
+<td>Import an AWX, Semaphore, Rundeck, or Jenkins export. Format is awx, semaphore, rundeck, or jenkins; any other format is refused. Rundeck and Jenkins take <code>?inventory=</code> to say which hosts their jobs target, since neither brings an inventory. Two formats accept a zip: the Jenkins body is one <code>config.xml</code> or a zip of a jobs directory, and the Rundeck body is a job export or a project archive, each told apart by content. The body is capped at 25 MiB and a larger one is refused with 413, which is lower than the CLI, where a project archive is bounded only by the archive reader's own limits. Previews by default; <code>?apply=true</code> writes the plan. A crontab imports from the CLI only, with <code>switchtender import cron</code>. Which objects each format carries is in <a href="/docs/migration#what-each-source-brings-over">what each source brings over</a>.</td>
 </tr>
 <tr>
 <td>GET</td>

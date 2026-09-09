@@ -8,20 +8,24 @@
 # Migrate your setup
 
 You do not rebuild your automation by hand. SwitchTender reads an AWX, Semaphore, Rundeck, or
-Jenkins export, or a plain crontab, and creates the equivalent objects in one pass.
+Jenkins export, a Rundeck project archive, or a plain crontab, and creates the equivalent objects in
+one pass.
 
 The five sources do not carry the same things. AWX and Semaphore export a whole control plane, so
-they bring projects, inventories, credential shells, templates, surveys, and schedules. Rundeck and
-Jenkins export jobs and nothing else, so they bring templates, surveys, and schedules, against an
-inventory you name. A crontab brings schedules alone. The table is in
+they bring projects, inventories, credential shells, templates, surveys, and schedules. Jenkins
+exports jobs and nothing else, so it brings templates, surveys, and schedules against an inventory
+you name. Rundeck brings those same three, plus one project when you hand it a project archive whose
+source control configuration names a repository this can reach. Neither Rundeck artifact brings an
+inventory. A crontab brings schedules alone. The table is in
 [what each source brings over](migration.md#what-each-source-brings-over).
 
 ## From the UI
 
 1. Export from your current tool. `awx export` produces a JSON document. Semaphore has no single
    export command, so gather the project's repositories, inventories, keys, templates, and schedules
-   from its API into one JSON document. Rundeck exports a project's jobs as YAML or JSON. Jenkins
-   has no export file at all, so zip its `jobs` directory and upload that.
+   from its API into one JSON document. Rundeck exports a project's jobs as YAML or JSON, or a whole
+   project as an archive from Project Settings; either one uploads and the importer tells them apart
+   by content. Jenkins has no export file at all, so zip its `jobs` directory and upload that.
 2. Open Migrate from the top of the overview, or go to `/ui/migrate`.
 3. Choose the format: AWX, Semaphore, Rundeck, or Jenkins. Rundeck and Jenkins ask for the inventory
    their templates should target, since neither names hosts of its own.
@@ -32,17 +36,21 @@ inventory you name. A crontab brings schedules alone. The table is in
 A crontab imports from the command line only. The Migrate page and the `/v1/import/{format}`
 endpoint take the other four.
 
+Both cap an upload at 25 MiB and answer a larger one with 413. The command line applies no such cap,
+so a Rundeck project archive from a busy project, which carries every execution log alongside the
+definitions the importer reads, may need `switchtender import rundeck` rather than the page.
+
 ## From the CLI
 
     switchtender import awx awx-export.json --db switchtender.db            # preview
     switchtender import awx awx-export.json --db switchtender.db --apply    # write
 
-`import semaphore` reads a Semaphore export the same way. `import rundeck jobs.yaml`,
-`import jenkins /var/jenkins_home`, and `import cron /etc/crontab --system` each take
-`--inventory <name>`, since none of those three names hosts of its own. A cron line imports as a
-shell step, and a shell step runs on the SwitchTender host rather than on the machine the crontab
-came from, so naming an inventory does not move it; the report says so on every cron import. Preview
-first, always. `--apply` is the only step that writes.
+`import semaphore` reads a Semaphore export the same way. `import rundeck jobs.yaml` or
+`import rundeck project-archive.zip`, `import jenkins /var/jenkins_home`, and
+`import cron /etc/crontab --system` each take `--inventory <name>`, since none of those three names
+hosts of its own. A cron line imports as a shell step, and a shell step runs on the SwitchTender
+host rather than on the machine the crontab came from, so naming an inventory does not move it; the
+report says so on every cron import. Preview first, always. `--apply` is the only step that writes.
 
 ## Finish by setting secrets
 
@@ -55,5 +63,10 @@ none. A job that needed a login needs a credential built by hand and attached to
 afterward. A secure Rundeck option or a Jenkins password parameter is refused rather than imported
 as a survey field, and the report names each one, because a survey answer is stored in plain text on
 every run.
+
+A Rundeck import needs an inventory attached by hand for the same reason. A job export names no
+host, and a project archive carries the configuration of where Rundeck fetched its nodes from and
+not one node definition, so the report names each node source by kind and location for you to build
+the inventory from rather than guessing at a list of machines.
 
 The full field-by-field mapping and its current limits are in the [migration guide](migration.md).

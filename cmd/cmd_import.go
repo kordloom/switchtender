@@ -57,7 +57,8 @@ var (
 )
 
 // importRundeckInventory is the inventory imported Rundeck templates target, since Rundeck
-// dispatches by node filter rather than by inventory file.
+// dispatches by node filter rather than by inventory file and neither artifact carries a node
+// definition.
 var (
 	importRundeckInventory string
 )
@@ -87,15 +88,25 @@ Without --apply the import only reports what it would create.`,
 	},
 }
 
-// importRundeckCmd imports a Rundeck job export.
+// importRundeckCmd imports a Rundeck job export or a Rundeck project archive.
 var importRundeckCmd = &cobra.Command{
-	Use:   "rundeck <jobs.yaml>",
-	Short: "Import a Rundeck job export into SwitchTender.",
-	Long: `Import a Rundeck job export into SwitchTender.
+	Use:   "rundeck <jobs.yaml|project-archive.zip>",
+	Short: "Import a Rundeck job export or project archive into SwitchTender.",
+	Long: `Import a Rundeck job export or project archive into SwitchTender.
+
+Point this at a job export, the YAML or JSON list a project's job list or the API writes, or at a
+project archive, the zip Project Settings hands back for a whole project. The two are told apart by
+content, so there is no flag to set. The same job produces the same template from either artifact.
 
 Each job becomes a Bash template carrying its step sequence, its options become a survey, and its
 schedule becomes a cron schedule with the Quartz weekday numbering converted. Rundeck dispatches by
 node filter rather than by inventory file, so pass --inventory to say which hosts these jobs target.
+
+Neither artifact brings an inventory. A project archive carries the configuration of where Rundeck
+fetched its nodes from and not one node definition, so each node source is reported by kind and
+location for you to attach an inventory of your own. An archive brings one project when its SCM
+configuration names a repository this can reach; a file:// URL names a path on the Rundeck server,
+so it is reported rather than cloned.
 
 A secure option is never imported as a survey field, because that would turn a password prompt into
 a value stored in plain text on every run. Store those as credentials instead; the report names each
@@ -158,7 +169,7 @@ func init() {
 	importCronCmd.Flags().BoolVar(&importCronSystem, "system", false,
 		"Parse the six-field /etc/crontab form, whose user column sits before the command.")
 	importRundeckCmd.Flags().StringVar(&importRundeckInventory, "inventory", "",
-		"Inventory the imported templates target, since Rundeck dispatches by node filter.")
+		"Inventory the imported templates target, since neither Rundeck artifact carries nodes.")
 	importJenkinsCmd.Flags().StringVar(&importJenkinsInventory, "inventory", "",
 		"Inventory the imported templates target, since Jenkins picks an agent by label.")
 }

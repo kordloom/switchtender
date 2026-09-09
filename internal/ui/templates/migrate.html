@@ -16,7 +16,7 @@
 		<div class="page-head">
 			<div class="page-head-text">
 				<h1>Migrate</h1>
-				<p class="muted">Import from AWX, Semaphore, Rundeck, or Jenkins. AWX and Semaphore bring their projects, inventories, and credential shells across with their templates, surveys, and schedules, and an AWX workflow arrives as a workflow template. Rundeck and Jenkins hold none of those three, so their jobs arrive as templates with their surveys and schedules, and you name the inventory those templates target. Preview first. Nothing is created until you import.</p>
+				<p class="muted">Import from AWX, Semaphore, Rundeck, or Jenkins. AWX and Semaphore bring their projects, inventories, and credential shells across with their templates, surveys, and schedules, and an AWX workflow arrives as a workflow template keeping its own schedules, or is reported and skipped whole where its graph is one a pipeline cannot express. Rundeck and Jenkins bring no inventory and no credential shells, so their jobs arrive as templates with their surveys and schedules and you name the inventory those templates target. A Rundeck project archive brings one project as well, but only when its source control configuration names a repository this can reach. An upload here is capped at 25 MiB; a larger project archive imports from the command line. Preview first. Nothing is created until you import.</p>
 			</div>
 			<div class="head-actions"></div>
 		</div>
@@ -37,7 +37,7 @@
 			</label>
 			<label class="field-label" id="migrate-file-field">Export file
 				<input id="migrate-file" class="input" type="file" accept=".json,.yaml,.yml,.xml,.zip,.txt"
-					data-tip="Choose an export file instead of pasting it. A Jenkins jobs directory can be zipped and uploaded whole">
+					data-tip="Choose an export file instead of pasting it. A Jenkins jobs directory can be zipped and uploaded whole, and a Rundeck project archive uploads as it is">
 				<span class="muted" id="migrate-file-help">Or paste the export below.</span>
 			</label>
 			<label class="field-label">Export

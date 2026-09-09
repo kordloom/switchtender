@@ -260,10 +260,14 @@ Migrates from AWX, Semaphore, Rundeck, Jenkins, or cron. Which objects each one 
   shells, job templates and workflows, surveys, and schedules.
 - `import semaphore <export.json> [--apply]` brings the same kinds from a Semaphore export, apart
   from the dynamic inventory sources AWX alone carries.
-- `import rundeck <jobs.yaml> [--inventory <name>] [--apply]` brings templates, surveys, and
-  schedules. Rundeck dispatches by node filter, so `--inventory` names the hosts its jobs target.
-- `import jenkins <JENKINS_HOME|jobs-dir|config.xml> [--inventory <name>] [--apply]` brings the same
-  three from freestyle jobs. Jenkins picks an agent by label, so `--inventory` names the machines.
+- `import rundeck <jobs.yaml|project-archive.zip> [--inventory <name>] [--apply]` brings templates,
+  surveys, and schedules from either a job export or a project archive, told apart by content. An
+  archive brings one project as well, but only when its source control configuration names a
+  repository this can reach. Neither artifact carries a node definition, so no inventory is imported
+  from either and `--inventory` names the hosts its jobs target.
+- `import jenkins <JENKINS_HOME|jobs-dir|config.xml> [--inventory <name>] [--apply]` brings
+  templates, surveys, and schedules from freestyle jobs. Jenkins picks an agent by label, so
+  `--inventory` names the machines.
 - `import cron <crontab-file> [--inventory <name>] [--system] [--apply]` brings schedules alone, one
   per crontab line, each carrying its own one-step bash pipeline rather than a template. `--system`
   parses the six-field `/etc/crontab` form, whose user column sits before the command. That step

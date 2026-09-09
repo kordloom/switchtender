@@ -5,9 +5,10 @@
 // layer persists the result.
 //
 // The sources do not all carry the same things. AWX and Semaphore hold projects, inventories, and
-// credentials of their own, so those come across with the templates. Rundeck and Jenkins hold none
-// of the three: their jobs become templates and schedules, and the caller names the inventory those
-// templates target. A crontab is schedules alone.
+// credentials of their own, so those come across with the templates. Jenkins holds none of the
+// three: its jobs become templates, surveys, and schedules, and the caller names the inventory
+// those templates target. Rundeck is the same, except that a project archive brings one project
+// where its SCM configuration names a repository this can reach. A crontab is schedules alone.
 package importer
 
 import (

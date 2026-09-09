@@ -4,16 +4,16 @@
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>Features | SwitchTender docs</title>
-	<meta name="description" content="What SwitchTender does today.">
+	<meta name="description" content="What SwitchTender does today. Almost all of it runs on Community, which needs no license.">
 	<link rel="canonical" href="https://switchtender.com/docs/features">
 	<meta property="og:title" content="Features | SwitchTender docs">
-	<meta property="og:description" content="What SwitchTender does today.">
+	<meta property="og:description" content="What SwitchTender does today. Almost all of it runs on Community, which needs no license.">
 	<meta property="og:type" content="article">
 	<meta property="og:url" content="https://switchtender.com/docs/features">
 	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
 	<meta name="twitter:card" content="summary_large_image">
 	<meta name="twitter:title" content="Features | SwitchTender docs">
-	<meta name="twitter:description" content="What SwitchTender does today.">
+	<meta name="twitter:description" content="What SwitchTender does today. Almost all of it runs on Community, which needs no license.">
 	<meta name="twitter:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
 	<script type="application/ld+json">
 {
@@ -85,7 +85,11 @@
 		</aside>
 		<main class="dcontent prose">
 			<h1 id="features">Features</h1>
-<p>What SwitchTender does today.</p>
+<p>What SwitchTender does today. Almost all of it runs on Community, which needs no license. Six
+capabilities are licensed, and the rows below say so where they appear: directory sign-in is Pro,
+and the full policy engine, the period change register, distributed workers over the mesh relay,
+creating a new PostgreSQL schema, and one-click drift reconcile are Team. Tiers are at
+<a href="https://switchtender.com/pricing">https://switchtender.com/pricing</a>.</p>
 <table>
 <thead>
 <tr>
@@ -140,7 +144,7 @@
 </tr>
 <tr>
 <td>Storage</td>
-<td>SQLite by default. The same flag takes a PostgreSQL DSN for multi-instance.</td>
+<td>SQLite by default. The same flag takes a PostgreSQL DSN for multi-instance. Creating a new PostgreSQL schema needs Team; opening one that already exists is never gated.</td>
 </tr>
 <tr>
 <td>Projects</td>
@@ -159,7 +163,7 @@
 <td>Mark a run to require sign-off, or require it automatically by policy on tool, command, target, assessed risk, or who is asking. A held run never executes until an admin approves or rejects it. The decision is a chain entry committing a digest of the exact spec released, the executor refuses a spec that changed after the decision, and the receipt proves the approved and executed change are the same.</td>
 </tr>
 <tr>
-<td>Policy as code</td>
+<td>Policy as code (Team past one plain rule)</td>
 <td>Point <code>--policy-file</code> at a YAML file and it becomes the source of truth for policies. A rule can hold a run for approval or deny it outright (<code>effect: deny</code>), can scope itself to agents or people (<code>actor_kind</code>), to one named principal (<code>actor</code>), or to a risk floor (<code>min_risk</code>), and can demand that the approver be someone other than the requester (<code>require_distinct_approver</code>), so an agent's authorization boundary is a reviewed diff with a commit behind it. The API refuses policy writes with a 409 that says where to make the change, and a malformed file stops the server rather than silently gating nothing.</td>
 </tr>
 <tr>
@@ -179,7 +183,7 @@
 <td>Every mutation returns an <code>Audit-Receipt</code> header naming where it landed in the chain. <code>switchtender audit receipt</code> redeems one, so a party who holds a receipt can prove their entry was not dropped.</td>
 </tr>
 <tr>
-<td>Evidence report</td>
+<td>Evidence report (Team)</td>
 <td><code>switchtender audit report</code> renders the period's changes into a self-contained HTML compliance report a vendor-security or SOC 2 reviewer reads with no tooling. The chain behind it is proved separately by verifying a signed bundle, so the narrative and the proof are independent artifacts.</td>
 </tr>
 <tr>
@@ -279,7 +283,7 @@
 <td>Group users into teams and grant read, use, or manage on a specific project, template, inventory, or credential, each level implying the ones below it. A read grant delegates view of one object without a global viewer role; a manage grant delegates editing and deleting without global admin. Grants layer on the global role and default open, so an ungranted object falls back to the caller's global role: separation between organizations is not enforced until <code>--strict-grants</code> is on.</td>
 </tr>
 <tr>
-<td>Reach isolated networks</td>
+<td>Reach isolated networks (Team)</td>
 <td>A worker dials out to the control node over the mesh relay with a token and needs no inbound port, so it runs jobs inside an air-gapped segment, a DMZ, or a customer network the control node cannot reach directly. Point <code>switchtender worker --server</code> at the control node and set the worker token.</td>
 </tr>
 <tr>
@@ -364,7 +368,7 @@
 </tr>
 <tr>
 <td>Migration</td>
-<td><code>switchtender import awx</code> and <code>import semaphore</code> read an export and create the equivalent projects, inventories, templates, surveys, schedules, and credential shells, with a dry-run report first. <code>switchtender import rundeck</code> reads a Rundeck job export, converting Quartz schedules and refusing to downgrade secure options to plaintext. <code>switchtender import jenkins</code> reads a Jenkins jobs directory or a zip of one, turning freestyle jobs into Bash templates, resolving Jenkins H notation into real cron times, and refusing to import a password parameter or a poll trigger. <code>switchtender import cron</code> brings a crontab under governance, turning each cron line into an approved, recorded schedule.</td>
+<td><code>switchtender import awx</code> and <code>import semaphore</code> read an export and create the equivalent projects, inventories, templates, surveys, schedules, and credential shells, with a dry-run report first. An AWX workflow job template arrives as a workflow template and keeps its own schedules, unless its graph is one a pipeline cannot express, such as a node that runs other nodes on failure, which is reported and skipped whole rather than imported in part. <code>switchtender import rundeck</code> reads either a job export or a project archive, told apart by content, converting Quartz schedules and refusing to downgrade secure options to plaintext. Neither Rundeck artifact carries a node definition, so no inventory is imported from either and each node source is reported by kind and location instead. An archive brings one project when its source control configuration names a repository this can reach. <code>switchtender import jenkins</code> reads a Jenkins jobs directory or a zip of one, turning freestyle jobs into Bash templates, resolving Jenkins H notation into real cron times, and refusing to import a password parameter or a poll trigger. <code>switchtender import cron</code> brings a crontab under governance, turning each cron line into an approved, recorded schedule. The per-source table is in <a href="/docs/migration#what-each-source-brings-over">what each source brings over</a>.</td>
 </tr>
 <tr>
 <td>Offboarding record</td>

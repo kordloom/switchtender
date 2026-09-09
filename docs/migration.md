@@ -130,6 +130,12 @@ An archive also carries execution logs, run state, reports, ACL policies, webhoo
 readme. None of them import. Approvals and access here come from policies and grants you write, not
 from a Rundeck ACL, and a webhook is a trigger you create against this server.
 
+That freight is why a busy project's archive can be too large to upload. `/v1/import/{format}` and
+the Migrate page cap a body at 25 MiB and answer a larger one with 413. The command line applies no
+such cap: it reads the file whole, and only the archive reader's own ceilings bound it at 20,000
+archive members, 4 MiB for any one member it reads, and 64 MiB of definitions read in total. So an
+archive over 25 MiB imports with `switchtender import rundeck` rather than through the page.
+
 Two details are worth knowing before you run it. A Rundeck schedule is a Quartz expression, which
 counts Sunday as one where cron counts Sunday as zero, so the weekday is renumbered rather than
 copied; a Quartz-only form such as the third Friday of the month has no cron equivalent and is
@@ -206,7 +212,8 @@ the schedules first, then re-run with `--apply` to create them.
 No template is created by a crontab import. Each imported schedule carries its own one-step bash
 pipeline, so the plan shows schedules and nothing else. This importer is command line only: the
 `/v1/import/{format}` endpoint and the Migrate page in the UI take awx, semaphore, rundeck, and
-jenkins, not cron.
+jenkins, not cron. Both cap a body at 25 MiB, which the command line does not, so a Rundeck project
+archive over that size imports from the CLI alone.
 
 ## What maps to what
 

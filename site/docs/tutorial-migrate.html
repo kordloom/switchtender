@@ -4,16 +4,16 @@
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>Migrate your setup | SwitchTender docs</title>
-	<meta name="description" content="You do not rebuild your automation by hand. SwitchTender reads an AWX or Semaphore export and creates the equivalent projects, inventories, templates, surveys, schedules, and credentials in one pass.">
+	<meta name="description" content="You do not rebuild your automation by hand. SwitchTender reads an AWX, Semaphore, Rundeck, or Jenkins export, a Rundeck project archive, or a plain crontab, and creates the equivalent objects in one">
 	<link rel="canonical" href="https://switchtender.com/docs/tutorial-migrate">
 	<meta property="og:title" content="Migrate your setup | SwitchTender docs">
-	<meta property="og:description" content="You do not rebuild your automation by hand. SwitchTender reads an AWX or Semaphore export and creates the equivalent projects, inventories, templates, surveys, schedules, and credentials in one pass.">
+	<meta property="og:description" content="You do not rebuild your automation by hand. SwitchTender reads an AWX, Semaphore, Rundeck, or Jenkins export, a Rundeck project archive, or a plain crontab, and creates the equivalent objects in one">
 	<meta property="og:type" content="article">
 	<meta property="og:url" content="https://switchtender.com/docs/tutorial-migrate">
 	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
 	<meta name="twitter:card" content="summary_large_image">
 	<meta name="twitter:title" content="Migrate your setup | SwitchTender docs">
-	<meta name="twitter:description" content="You do not rebuild your automation by hand. SwitchTender reads an AWX or Semaphore export and creates the equivalent projects, inventories, templates, surveys, schedules, and credentials in one pass.">
+	<meta name="twitter:description" content="You do not rebuild your automation by hand. SwitchTender reads an AWX, Semaphore, Rundeck, or Jenkins export, a Rundeck project archive, or a plain crontab, and creates the equivalent objects in one">
 	<meta name="twitter:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
 	<script type="application/ld+json">
 {
@@ -24,7 +24,7 @@
   "name": "SwitchTender",
   "url": "https://switchtender.com/"
  },
- "description": "You do not rebuild your automation by hand. SwitchTender reads an AWX or Semaphore export and creates the equivalent projects, inventories, templates, surveys, schedules, and credentials in one pass.",
+ "description": "You do not rebuild your automation by hand. SwitchTender reads an AWX, Semaphore, Rundeck, or Jenkins export, a Rundeck project archive, or a plain crontab, and creates the equivalent objects in one",
  "headline": "Migrate your setup",
  "isPartOf": {
   "@type": "WebSite",
@@ -65,28 +65,58 @@
 		</aside>
 		<main class="dcontent prose">
 			<h1 id="migrate-your-setup">Migrate your setup</h1>
-<p>You do not rebuild your automation by hand. SwitchTender reads an AWX or Semaphore export and creates
-the equivalent projects, inventories, templates, surveys, schedules, and credentials in one pass.</p>
+<p>You do not rebuild your automation by hand. SwitchTender reads an AWX, Semaphore, Rundeck, or
+Jenkins export, a Rundeck project archive, or a plain crontab, and creates the equivalent objects in
+one pass.</p>
+<p>The five sources do not carry the same things. AWX and Semaphore export a whole control plane, so
+they bring projects, inventories, credential shells, templates, surveys, and schedules. Jenkins
+exports jobs and nothing else, so it brings templates, surveys, and schedules against an inventory
+you name. Rundeck brings those same three, plus one project when you hand it a project archive whose
+source control configuration names a repository this can reach. Neither Rundeck artifact brings an
+inventory. A crontab brings schedules alone. The table is in
+<a href="/docs/migration#what-each-source-brings-over">what each source brings over</a>.</p>
 <h2 id="from-the-ui">From the UI</h2>
 <ol>
 <li>Export from your current tool. <code>awx export</code> produces a JSON document. Semaphore has no single
 export command, so gather the project's repositories, inventories, keys, templates, and schedules
-from its API into one JSON document.</li>
+from its API into one JSON document. Rundeck exports a project's jobs as YAML or JSON, or a whole
+project as an archive from Project Settings; either one uploads and the importer tells them apart
+by content. Jenkins has no export file at all, so zip its <code>jobs</code> directory and upload that.</li>
 <li>Open Migrate from the top of the overview, or go to <code>/ui/migrate</code>.</li>
-<li>Paste the export and select Preview. Nothing is written yet. You get a report of exactly what
-would be created, with every warning.</li>
+<li>Choose the format: AWX, Semaphore, Rundeck, or Jenkins. Rundeck and Jenkins ask for the inventory
+their templates should target, since neither names hosts of its own.</li>
+<li>Paste the export, or choose the file, and select Preview. Nothing is written yet. You get a
+report of exactly what would be created, with every warning.</li>
 <li>Select Import to apply it.</li>
 </ol>
+<p>A crontab imports from the command line only. The Migrate page and the <code>/v1/import/{format}</code>
+endpoint take the other four.</p>
+<p>Both cap an upload at 25 MiB and answer a larger one with 413. The command line applies no such cap,
+so a Rundeck project archive from a busy project, which carries every execution log alongside the
+definitions the importer reads, may need <code>switchtender import rundeck</code> rather than the page.</p>
 <h2 id="from-the-cli">From the CLI</h2>
 <pre><code>switchtender import awx awx-export.json --db switchtender.db            # preview
 switchtender import awx awx-export.json --db switchtender.db --apply    # write
 </code></pre>
-<p>Use <code>import semaphore</code> for a Semaphore export. Preview first, always. <code>--apply</code> is the only step that
-writes.</p>
+<p><code>import semaphore</code> reads a Semaphore export the same way. <code>import rundeck jobs.yaml</code> or
+<code>import rundeck project-archive.zip</code>, <code>import jenkins /var/jenkins_home</code>, and
+<code>import cron /etc/crontab --system</code> each take <code>--inventory &lt;name&gt;</code>, since none of those three names
+hosts of its own. A cron line imports as a shell step, and a shell step runs on the SwitchTender
+host rather than on the machine the crontab came from, so naming an inventory does not move it; the
+report says so on every cron import. Preview first, always. <code>--apply</code> is the only step that writes.</p>
 <h2 id="finish-by-setting-secrets">Finish by setting secrets</h2>
-<p>Exports never contain secret values, so credentials arrive as named shells. The report lists which
-ones need a secret. Fill them in once with <a href="/docs/tutorial-set-a-secret">set a secret</a>, and everything
-else is already in place.</p>
+<p>Exports never contain secret values, so an AWX or Semaphore credential arrives as a named shell. The
+report lists which ones need a secret. Fill them in once with
+<a href="/docs/tutorial-set-a-secret">set a secret</a>, and everything else is already in place.</p>
+<p>A Rundeck, Jenkins, or crontab import creates no credentials at all, because those exports hold
+none. A job that needed a login needs a credential built by hand and attached to its template
+afterward. A secure Rundeck option or a Jenkins password parameter is refused rather than imported
+as a survey field, and the report names each one, because a survey answer is stored in plain text on
+every run.</p>
+<p>A Rundeck import needs an inventory attached by hand for the same reason. A job export names no
+host, and a project archive carries the configuration of where Rundeck fetched its nodes from and
+not one node definition, so the report names each node source by kind and location for you to build
+the inventory from rather than guessing at a list of machines.</p>
 <p>The full field-by-field mapping and its current limits are in the <a href="/docs/migration">migration guide</a>.</p>
 
 		</main>

@@ -174,15 +174,15 @@ const TOURS = [
 			{ page: "workflows", path: "/ui/workflows", sel: "#wf-canvas", title: "Drag a pipeline together", body: "Wire all seven tools, and any tool you plug in, into one graph with per-step retries. AWX's signature feature, without the Kubernetes bill.", hold: 7500 },
 			{ page: "policies", path: "/ui/policies", sel: "#policy-open", title: "The gate nobody skips", body: "Policy holds a prod terraform destroy for an admin's sign-off, automatically. Approvals are enforced, not suggested.", hold: 7000 },
 			{ page: "audit", path: "/ui/audit", sel: "#audit-verify", title: "Prove every change", body: "Every change links into a tamper-evident hash chain. One click verifies it here, and a signed bundle verifies offline with an open verifier.", hold: 7000 },
-			{ page: "overview", path: "/ui/", sel: "#tiles a[href='/ui/migrate']", title: "Switching is one command", body: "Projects, inventories, templates, surveys, and schedules import from AWX or Semaphore in a single pass.", hold: 6500 },
+			{ page: "overview", path: "/ui/", sel: "#tiles a[href='/ui/migrate']", title: "Switching is one command", body: "Import from AWX, Semaphore, Rundeck, Jenkins, or a crontab in a single pass. AWX and Semaphore bring projects, inventories, templates, surveys, and schedules.", hold: 6500 },
 			{ title: "That is the moat", body: "Running many tools is table stakes. A control plane that proves itself is not. Press Explore and try anything, nothing here can break.", hold: 8000 },
 		],
 	},
 	{
-		id: "migrate", title: "Coming from AWX", desc: "Move your automation over",
+		id: "migrate", title: "Coming from another controller", desc: "Move your automation over",
 		page: "migrate", path: "/ui/migrate",
 		steps: [
-			{ title: "Leave AWX or Semaphore behind", body: "Import your projects, inventories, templates, surveys, credential shells, and schedules in a single pass, and an AWX workflow arrives as a workflow template." },
+			{ title: "Leave your old controller behind", body: "AWX and Semaphore bring projects, inventories, templates, surveys, credential shells, and schedules in a single pass. Rundeck and Jenkins bring templates, surveys, and schedules against an inventory you name. An AWX workflow arrives as a workflow template unless its graph is one a pipeline cannot express, and then it is reported rather than dropped." },
 			{ title: "Preview before you commit", body: "Every import runs as a dry run first, showing exactly what it will create. Apply it when it looks right." },
 			{ title: "No lock-in", body: "You can export and leave anytime, too. SwitchTender earns the switch. It does not trap you." },
 		],

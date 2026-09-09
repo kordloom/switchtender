@@ -328,7 +328,7 @@ than &quot;structured versus scrollback&quot;.</p>
 </tr>
 <tr>
 <td>Migration in</td>
-<td>One command imports an AWX or Semaphore export.</td>
+<td>One command imports an AWX, Semaphore, Rundeck, or Jenkins export, a Rundeck project archive, or a plain crontab. AWX and Semaphore bring projects, inventories, and credential shells across with their templates, surveys, and schedules; Rundeck and Jenkins bring templates, surveys, and schedules against an inventory you name, and a Rundeck project archive brings one project as well when its source control configuration names a repository this can reach; a crontab brings schedules. Neither Rundeck artifact brings an inventory. See <a href="/docs/migration#what-each-source-brings-over">what each source brings over</a>.</td>
 <td>Not applicable.</td>
 <td>Not applicable.</td>
 </tr>
@@ -426,7 +426,7 @@ than &quot;structured versus scrollback&quot;.</p>
 </tr>
 <tr>
 <td>Secret survey answers</td>
-<td>AWX offers a password survey field whose answer is stored encrypted. A survey answer here is stored in plain text on the run, so a secret belongs in a credential instead, and both importers refuse to downgrade one rather than accept it quietly.</td>
+<td>AWX offers a password survey field whose answer is stored encrypted. A survey answer here is stored in plain text on the run, so a secret belongs in a credential instead, and every importer that carries surveys refuses to downgrade one rather than accept it quietly: an AWX password field, a Semaphore secret variable, a Rundeck secure option, and a Jenkins password parameter are each named in the report and left out.</td>
 </tr>
 <tr>
 <td>Constructed and smart inventories</td>

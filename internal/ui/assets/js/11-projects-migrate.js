@@ -232,9 +232,14 @@ function wireMigrate() {
 			}
 			const fileHelp = document.getElementById("migrate-file-help");
 			if (fileHelp) {
+				// A Rundeck project archive is a zip, so it uploads and cannot be pasted. Naming both
+				// artifacts keeps an operator holding an archive from looking for a paste that will
+				// not work.
 				fileHelp.textContent = format.value === "jenkins"
 					? "Zip the jobs directory from your JENKINS_HOME and upload it, or paste one job's config.xml below."
-					: "Or paste the export below.";
+					: format.value === "rundeck"
+						? "Upload a project archive as it is, or paste a job export below."
+						: "Or paste the export below.";
 			}
 		};
 		format.addEventListener("change", sync);
