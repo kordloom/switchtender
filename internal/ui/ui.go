@@ -196,7 +196,8 @@ func (u *UI) projects(w http.ResponseWriter, _ *http.Request) {
 	u.render(w, "projects.html", map[string]any{"ReadOnly": u.readOnly})
 }
 
-// migrate renders the AWX and Semaphore import page.
+// migrate renders the import page, which offers the four export formats the server reads: AWX,
+// Semaphore, Rundeck, and Jenkins.
 func (u *UI) migrate(w http.ResponseWriter, _ *http.Request) {
 	u.render(w, "migrate.html", map[string]any{"ReadOnly": u.readOnly})
 }

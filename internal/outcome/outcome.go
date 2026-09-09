@@ -22,11 +22,17 @@ import (
 // run with a large log is hashed in bounded memory rather than loaded whole.
 const logDigestPage = 512
 
-// Record is the canonical, non-secret record of what a run did, the body an outcome entry
-// commits a digest of. It holds only facts an auditor needs and nothing a run could carry a secret
-// in: the raw log and events stay in the store, named here by their digest. The field set and its
-// order are fixed, and the slices are sorted, so the same run reduces to the same bytes every time
-// and a receipt holder can recompute the digest the chain committed.
+// Record is the canonical record of what a run did, the body an outcome entry commits a digest of.
+// It holds the facts an auditor needs and none of the bulk: the raw log and events stay in the
+// store, named here by their digest. The field set and its order are fixed, and the slices are
+// sorted, so the same run reduces to the same bytes every time and a receipt holder can recompute
+// the digest the chain committed.
+//
+// The digest is taken over the redacted canonical form, so no secret in any string leaf is ever
+// committed to the chain. What a receipt discloses is this body as it is built, which is not the
+// same guarantee: Error is the one field whose text a run supplies rather than the server, and it
+// is disclosed exactly as the run row holds it, the same way the run API and the run dossier
+// already show it.
 type Record struct {
 	// RunID is the run this outcome belongs to.
 	RunID string `json:"run_id"`
@@ -34,6 +40,24 @@ type Record struct {
 	Status string `json:"status"`
 	// ExitCode is the tool's exit code, null when the run never produced one.
 	ExitCode *int `json:"exit_code"`
+	// Error is the failure detail the run finished with, empty when it finished without one. It is
+	// what stops the status and the exit code from being the whole of what the chain says about a
+	// failure.
+	//
+	// Without it the record commits status failed beside exit code 0 and nothing that says why,
+	// which is precisely the shape a zero-host Ansible run produces: ansible-playbook exits clean,
+	// and the run is failed anyway because its recap named no host. An auditor reading that pair
+	// with no reason holds a record of the verdict with the grounds withheld, and evidence that
+	// cannot say why a change failed is not evidence anyone acts on.
+	//
+	// The value is the run's own stored failure text, written with the terminal record before the
+	// outcome is committed and never rewritten afterwards, so a receipt rebuilt from the store
+	// reproduces the bytes the chain committed. It is the same detail the run API and the run
+	// dossier already show, so the chain commits nothing the evidence did not already disclose, and
+	// it passes through the same string-leaf redaction every other field in this record does before
+	// it is digested. A run that carried no failure text omits the key and reduces to the bytes it
+	// always did.
+	Error string `json:"error,omitempty"`
 	// Tool is the engine the run executed with.
 	Tool string `json:"tool,omitempty"`
 	// Playbook is the playbook a run executed, empty for a command tool.
@@ -172,7 +196,7 @@ func Body(ctx context.Context, store run.Store, r *run.Run) ([]byte, error) {
 		return nil, err
 	}
 	out := Record{
-		RunID: r.ID, Status: string(r.Status), ExitCode: r.ExitCode,
+		RunID: r.ID, Status: string(r.Status), ExitCode: r.ExitCode, Error: r.Error,
 		Tool: r.Tool, Playbook: r.Playbook, Inventory: r.Inventory, Image: r.Image,
 		StartedAt: utcOrNil(r.StartedAt), EndedAt: utcOrNil(r.EndedAt), LogSHA256: logSHA,
 		SpecDigest: specDigest, CommitSHA: r.CommitSHA, DryRun: r.DryRun, PolicySet: r.PolicySet,

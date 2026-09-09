@@ -28,9 +28,14 @@ same database, a PostgreSQL DSN for separate machines, and they compete for work
 
 ## import
 
-Migrates from AWX or Semaphore. Reports what it would create, then writes it with `--apply`.
+Migrates from AWX, Semaphore, Rundeck, Jenkins, or cron. Reports what it would create, then writes
+it with `--apply`. AWX and Semaphore bring projects, inventories, credential shells, templates,
+surveys, and schedules. Rundeck and Jenkins bring templates, surveys, and schedules, against the
+inventory `--inventory` names. A crontab brings schedules alone. The per-source table is in
+[what each source brings over](../docs/migration.md#what-each-source-brings-over).
 
     switchtender import awx export.json --db switchtender.db --apply
+    switchtender import jenkins /var/jenkins_home --inventory prod --db switchtender.db --apply
 
 ## token
 

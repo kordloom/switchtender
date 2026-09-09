@@ -211,11 +211,18 @@ node over the mesh relay, with no database access of its own.
 
 Manages API tokens. A public bind on an empty database mints an initial admin token at startup.
 
-- `token new --name <label> [--user <username>] [--ttl <duration>]` mints a token, printed once. A
-  zero TTL never expires.
+- `token new --name <label> [--user <username>] [--ttl <duration>] [--agent]` mints a token, printed
+  once. A zero TTL never expires.
 - `--user` binds the token to an account, and the token carries that account's role. A token minted
   without `--user` is unscoped and acts as admin, so bind every token you hand to a person, a
   service, or an AI agent. See [running an agent](agents.md).
+- `--agent` marks the token as held by an AI agent rather than a person. It caps the token at
+  operator whatever role its account holds, so an agent can launch and propose work but can never
+  manage identity, access, or secrets, and can never approve its own held run. Every action it takes
+  is recorded in the chain as `actor_type: agent` with the account it acts for beside it, which is
+  what `actor_kind: agent` policy rules match on. It requires `--user`, so the chain always records
+  the human the agent acts for; without one the command refuses. Mint every agent token with it: a
+  token without `--agent` is indistinguishable from a person's in the record.
 - `token list` lists tokens without their secrets.
 - `token revoke <id>` deletes a token.
 
@@ -246,13 +253,25 @@ Community rather than failing the server, so an expiry never takes an install do
 
 ## import
 
-Migrates from AWX or Semaphore. See [Migration](migration.md).
+Migrates from AWX, Semaphore, Rundeck, Jenkins, or cron. Which objects each one carries across is in
+[what each source brings over](migration.md#what-each-source-brings-over).
 
-- `import awx <export.json> [--apply]`.
-- `import semaphore <export.json> [--apply]`.
+- `import awx <export.json> [--apply]` brings projects, inventories static and dynamic, credential
+  shells, job templates and workflows, surveys, and schedules.
+- `import semaphore <export.json> [--apply]` brings the same kinds from a Semaphore export, apart
+  from the dynamic inventory sources AWX alone carries.
+- `import rundeck <jobs.yaml> [--inventory <name>] [--apply]` brings templates, surveys, and
+  schedules. Rundeck dispatches by node filter, so `--inventory` names the hosts its jobs target.
+- `import jenkins <JENKINS_HOME|jobs-dir|config.xml> [--inventory <name>] [--apply]` brings the same
+  three from freestyle jobs. Jenkins picks an agent by label, so `--inventory` names the machines.
+- `import cron <crontab-file> [--inventory <name>] [--system] [--apply]` brings schedules alone, one
+  per crontab line, each carrying its own one-step bash pipeline rather than a template. `--system`
+  parses the six-field `/etc/crontab` form, whose user column sits before the command. That step
+  runs on the SwitchTender host, not on the machine the crontab came from.
 
-Both take `--db` for the target database. Without `--apply` the command only reports what it would
-create.
+All five take `--db` for the target database. Without `--apply` the command only reports what it
+would create. Rundeck, Jenkins, and cron import no credentials, so a job that needed a login needs
+one built by hand afterward.
 
 ## audit
 

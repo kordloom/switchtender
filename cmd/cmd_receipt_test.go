@@ -3,10 +3,15 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/outcome"
@@ -229,5 +234,124 @@ func TestSparseReceiptDisclosesOnlyTheRun(t *testing.T) {
 	}
 	if !bytes.Contains(body, []byte("run_sparse")) {
 		t.Error("the sparse receipt does not name its own run")
+	}
+}
+
+// TestReceiptRefusesAChainThatDoesNotVerify pins what the receipt command does on an intact chain
+// and on a tampered one, in both shapes.
+//
+// The command signed a receipt and printed its fingerprint over a chain whose entry 1 had been
+// altered, while GET /v1/runs/{id}/receipt refused the same database and GET /v1/audit/verify named
+// the position. The contiguous shape only ever showed its builder the segment between the run's
+// creation and its outcome, so a break outside that segment was never looked at, and the disclosed
+// entries really were intact, which is what made it dangerous: the offline verifier reads such a
+// file and reports that nothing has been altered. The asymmetry was the worst part. The command is
+// what an operator reaches for when they suspect something is wrong, so the tool most likely to be
+// asked was the one that answered wrongly.
+func TestReceiptRefusesAChainThatDoesNotVerify(t *testing.T) {
+	// Not parallel: the receipt command reads package-level flag variables.
+	tests := []struct {
+		// Name labels the state of the chain.
+		Name string
+		// Edit is the SQL tamper applied to the seeded database, empty to leave it intact.
+		Edit string
+		// WantReason is the reason code the refusal must open with, empty when a receipt must be
+		// written.
+		WantReason string
+		// WantHas is text the refusal must carry.
+		WantHas []string
+		// WantLacks is text the refusal must not carry.
+		WantLacks []string
+		// Sparse asks for the tree shape, the one handed outside an install that runs other
+		// people's work.
+		Sparse bool
+	}{{ // Test 0: The control. An intact chain still signs the contiguous shape.
+		Name: "intact",
+	}, { // Test 1: The control for the other shape.
+		Name: "intact and sparse", Sparse: true,
+	}, { // Test 2: A break before the run's own entries. Every claim the receipt would carry is
+		// past it, so the command signed one and said nothing.
+		Name: "a break before the run's entries",
+		Edit: "UPDATE audit_entries SET actor = 'mallory' WHERE seq = 1", WantReason: reasonChainBreak,
+		WantHas: []string{
+			"entry 1 of 5", "sequence 1", "as a receipt", "not a fault in this command",
+			"GET /v1/audit/verify",
+		},
+		// The sentinel names the operation rather than the problem, which is the wording GET
+		// /v1/runs/{id}/receipt was changed away from.
+		WantLacks: []string{"audit export"},
+	}, { // Test 3: A break after the run's own entries, which the segment walk equally never saw.
+		Name:       "a break after the run's entries",
+		Edit:       "UPDATE audit_entries SET path = '/v1/runs/deleted' WHERE seq = 5",
+		WantReason: reasonChainBreak, WantHas: []string{"entry 5 of 5", "sequence 5"},
+	}, { // Test 4: The same break under the sparse shape. This one the builder did catch, because it
+		// hashes the whole chain into a tree, but it refused with a bare sentinel and none of the
+		// coordinates the sibling answers report, so this pins that they are there now.
+		Name: "a break before the run's entries, sparse", Sparse: true,
+		Edit: "UPDATE audit_entries SET actor = 'mallory' WHERE seq = 1", WantReason: reasonChainBreak,
+		WantHas:   []string{"entry 1 of 5", "sequence 1"},
+		WantLacks: []string{"audit export"},
+	}, { // Test 5: An entry deleted, so the entry after it links to something no longer there and
+		// the refusal names the entry that lost its link.
+		Name: "an entry deleted", Edit: "DELETE FROM audit_entries WHERE seq = 1",
+		WantReason: reasonChainBreak,
+		WantHas:    []string{"entry 1 of 4", "sequence 2", "altered, reordered, or removed"},
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
+			seed := seedChainDB(t)
+			if test.Edit != "" {
+				editChain(t, seed.DB, test.Edit)
+			}
+			out := filepath.Join(filepath.Dir(seed.DB), "run.receipt")
+			receiptRunDB, receiptRunOut, receiptSparse = seed.DB, out, test.Sparse
+			t.Cleanup(func() {
+				receiptRunDB, receiptRunOut, receiptSparse, receiptFrom = defaultDBPath, "", false, 0
+			})
+
+			err := runReceipt(testCommand(), []string{seed.RunID})
+			if test.WantReason == "" {
+				if err != nil {
+					t.Fatalf("runReceipt() error = %v, want a receipt", err)
+				}
+				signed, rerr := os.ReadFile(out)
+				if rerr != nil {
+					t.Fatalf("ReadFile() error = %v", rerr)
+				}
+				id, ierr := loadProducerIdentity(seed.DB)
+				if ierr != nil {
+					t.Fatalf("loadProducerIdentity() error = %v", ierr)
+				}
+				report, verr := audit.VerifyBundle(signed, id.KeyID())
+				if verr != nil {
+					t.Fatalf("VerifyBundle() error = %v", verr)
+				}
+				if !report.OK() {
+					t.Errorf("the written receipt does not verify: %+v", report)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("runReceipt() error = nil, want it to refuse a chain that does not verify")
+			}
+			if diff := cmp.Diff(test.WantReason, refusalReason(err), cmpopts.EquateEmpty()); diff != "" {
+				t.Errorf("reason code mismatch (-want +got):\n%s\nrefusal: %v", diff, err)
+			}
+			for _, want := range test.WantHas {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("refusal %q does not name %q", err, want)
+				}
+			}
+			for _, unwanted := range test.WantLacks {
+				if strings.Contains(err.Error(), unwanted) {
+					t.Errorf("refusal %q still carries %q", err, unwanted)
+				}
+			}
+			// Nothing signed may reach the disk. A receipt left behind beside a refusal is the file
+			// somebody hands on, and it verifies.
+			if _, serr := os.Stat(out); serr == nil {
+				t.Error("the command refused and wrote the receipt anyway")
+			}
+		})
 	}
 }

@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -8,6 +10,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/kordloom/switchtender/internal/mcp"
 )
 
 // TestMCPRefusesToStartOnAnAdminToken proves the mcp command probes the token's authority before it
@@ -72,5 +76,125 @@ func TestMCPRefusesToStartOnAnAdminToken(t *testing.T) {
 				t.Errorf("test %d: probe authorization = %q, want the agent's token", testNum, got)
 			}
 		})
+	}
+}
+
+// errProbeFailed stands in for an authority probe that failed for a reason other than the token
+// being an admin token, such as an unreachable server or a rejected token.
+var errProbeFailed = errors.New("the token was rejected by the server")
+
+// TestRefuseAdminAuthority pins what the authority probe's answer turns into, including the one
+// thing that gets past the refusal.
+//
+// The long help stated the refusal flatly and never mentioned --allow-admin-token, which overrides
+// exactly that, so the security claim a reader took away was stronger than the one the code makes.
+// The override is real and deliberate, and it warns on every start, so both halves are pinned here:
+// the refusal is the default, and the flag is the only way past it.
+func TestRefuseAdminAuthority(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		// In is what the authority probe answered.
+		In error
+		// Want is the error that must come back, matched with errors.Is. Nil means either nothing
+		// comes back or the refusal is matched by its text instead.
+		Want error
+		// Name labels the probe's answer.
+		Name string
+		// WantErrorHas is text the returned error must carry.
+		WantErrorHas []string
+		// WantWarn is text the warning writer must receive, empty when it must stay untouched.
+		WantWarn string
+		// Allow is --allow-admin-token.
+		Allow bool
+		// WantRefused says whether an error must come back at all.
+		WantRefused bool
+	}{{ // Test 0: The probe passed, so the token cannot administer the install and serving proceeds.
+		Name: "an operator-bound token",
+	}, { // Test 1: The probe itself failed, which is neither verdict and is reported as itself.
+		Name: "a probe that failed", In: fmt.Errorf("probe: %w", errProbeFailed),
+		Want: errProbeFailed, WantRefused: true,
+		WantErrorHas: []string{"the token was rejected by the server"},
+	}, { // Test 2: An admin token with the override off, which is the default an agent gets. The
+		// refusal names the override, since a refusal that hides its own escape hatch reads as
+		// stronger than it is.
+		Name: "an admin token", In: fmt.Errorf("probe: %w", mcp.ErrAdminToken), WantRefused: true,
+		WantErrorHas: []string{
+			"refusing to serve an agent on an admin token", "switchtender token new --user",
+			"--allow-admin-token",
+		},
+	}, { // Test 3: An admin token with the override on. It serves, and it says so, because an
+		// install running an agent on a token that can approve its own work should be told at every
+		// start rather than once when somebody typed the flag.
+		Name: "an admin token with the override", In: fmt.Errorf("probe: %w", mcp.ErrAdminToken),
+		Allow: true, WantWarn: "serving an agent on an admin token, which can approve its own runs",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
+			t.Parallel()
+			var warn bytes.Buffer
+			err := refuseAdminAuthority(test.In, test.Allow, &warn)
+			if test.WantRefused && err == nil {
+				t.Fatal("refuseAdminAuthority() error = nil, want it to stop before serving")
+			}
+			if !test.WantRefused && err != nil {
+				t.Fatalf("refuseAdminAuthority() error = %v, want it to serve", err)
+			}
+			if test.Want != nil && !errors.Is(err, test.Want) {
+				t.Errorf("refuseAdminAuthority() error = %v, want it to carry %v", err, test.Want)
+			}
+			for _, want := range test.WantErrorHas {
+				if err == nil || !strings.Contains(err.Error(), want) {
+					t.Errorf("refuseAdminAuthority() error = %v, want it to name %q", err, want)
+				}
+			}
+			if test.WantWarn == "" {
+				if warn.Len() != 0 {
+					t.Errorf("nothing should have been warned about, got %q", warn.String())
+				}
+				return
+			}
+			if !strings.Contains(warn.String(), test.WantWarn) {
+				t.Errorf("warning = %q, want it to name %q", warn.String(), test.WantWarn)
+			}
+		})
+	}
+}
+
+// TestMCPHelpNamesTheOverrideItRefusesWith holds the long help against the code it describes.
+//
+// It ended on "The command refuses to start on an admin token" and stopped there, while
+// --allow-admin-token sat in the flag list overriding exactly that. A security claim stated without
+// its override is the kind an evaluator punctures in a minute, and the claim survives being stated
+// accurately: the refusal is still the default, the override still warns, and nothing else turns
+// the check off.
+func TestMCPHelpNamesTheOverrideItRefusesWith(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		// Name labels what the help must say.
+		Name string
+		// Want is text the long help must carry.
+		Want string
+	}{{ // Test 0: The refusal itself, which is the claim being made.
+		Name: "the refusal", Want: "refuses to start on an admin token",
+	}, { // Test 1: The flag that overrides it, named in the same paragraph.
+		Name: "the override", Want: "--allow-admin-token",
+	}, { // Test 2: That the override is not silent, which is what keeps the default meaningful.
+		Name: "the warning", Want: "prints a warning",
+	}, { // Test 3: That nothing else turns the check off, so a reader does not go looking.
+		Name: "no other way past", Want: "Nothing else turns the check off",
+	}}
+	// The help is wrapped to fit a terminal, so a sentence under test is split across lines wherever
+	// it happens to fall. The words are what is being checked, not where the wrap put them.
+	unwrapped := strings.Join(strings.Fields(mcpCmd.Long), " ")
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
+			t.Parallel()
+			if !strings.Contains(unwrapped, test.Want) {
+				t.Errorf("test %d: the mcp long help does not say %q", testNum, test.Want)
+			}
+		})
+	}
+	if mcpCmd.Flags().Lookup("allow-admin-token") == nil {
+		t.Error("the help names --allow-admin-token and the command does not register it")
 	}
 }

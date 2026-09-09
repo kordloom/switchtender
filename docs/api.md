@@ -143,7 +143,7 @@ Two more are enforced somewhere other than the request:
 | GET    | `/v1/policies`             | List approval policies.                                 |
 | PUT    | `/v1/policies/{id}`        | Update an approval policy.                              |
 | DELETE | `/v1/policies/{id}`        | Delete an approval policy.                              |
-| POST   | `/v1/import/{format}`      | Import an AWX, Semaphore, or Rundeck export. Format is awx, semaphore, or rundeck. Rundeck takes `?inventory=` to say which hosts its jobs target.|
+| POST   | `/v1/import/{format}`      | Import an AWX, Semaphore, Rundeck, or Jenkins export. Format is awx, semaphore, rundeck, or jenkins; any other format is refused. Rundeck and Jenkins take `?inventory=` to say which hosts their jobs target. The Jenkins body is one `config.xml` or a zip of a jobs directory, told apart by content. Previews by default; `?apply=true` writes the plan. A crontab imports from the CLI only, with `switchtender import cron`. Which objects each format carries is in [what each source brings over](migration.md#what-each-source-brings-over).|
 | GET    | `/v1/audit`                | A page of the mutation trail, admin only. `?limit=` up to 1000, default 100; `has_more` reports whether older entries remain. |
 | GET    | `/v1/audit/register`       | The change register as a self-contained HTML document, admin only. |
 | GET    | `/v1/doctor`               | Install health checks and their findings, admin only.   |

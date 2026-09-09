@@ -44,6 +44,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -682,10 +683,22 @@ func waitOutcomeCommitted(ctx context.Context, audits audit.Store, id string) {
 
 // materialize writes the embedded assets to a temp directory, recreating their tree, and returns its
 // path. The tree carries the Ansible playbook and inventory plus the Terraform working directory.
+// The path is the same on every call within a process and different in any other process.
 func materialize() (string, error) {
-	// A fixed name rather than a random suffix: the path lands in run records, where
-	// switchtender-demo-assets reads as intentional and a scratch dir reads as debris.
-	dir := filepath.Join(os.TempDir(), "switchtender-demo-assets")
+	// A named directory rather than a random one: the path lands in run records, where
+	// switchtender-demo-assets reads as intentional and a scratch dir reads as debris. The process
+	// id keeps that name and still gives each process its own tree.
+	//
+	// One shared name was a collision. Every materialization starts by removing the directory whole,
+	// so a second seeder, or a second test binary, deleted and rewrote the tree the first was reading
+	// from mid-walk. It surfaced as a missing file, a half-written git object, or a directory that
+	// would not unlink, never as anything naming the real cause.
+	//
+	// The cost is one small tree per process rather than one per machine, left where the operating
+	// system cleans its temp directory. Pruning the others is not worth the risk: the process that
+	// owns a tree keeps using it for as long as it serves the demo, so anything old enough to look
+	// abandoned may still be in use.
+	dir := filepath.Join(os.TempDir(), "switchtender-demo-assets-"+strconv.Itoa(os.Getpid()))
 	if err := os.RemoveAll(dir); err != nil {
 		return "", err
 	}

@@ -95,7 +95,7 @@ func (d *Dispatcher) executeRun(ctx context.Context, r *run.Run) run.Status {
 			// auxiliary writes to a terminal run, so finalizing first would reject the run's own final
 			// summaries; ordering the writes before finalize lets them land and drops only a
 			// reclaimed-but-alive worker's late writes.
-			d.summarize(r, fold)
+			d.summarize(r, fold, noHostFailure(r, res, runErr, fold))
 			if res.Drift {
 				d.recordPlanDrift(r)
 			}
@@ -355,7 +355,10 @@ func (d *Dispatcher) watch(ctx context.Context, id string) {
 //
 // The caller must have stopped the tailer before calling this, which is what makes reading the
 // fold safe: the tail goroutine is the only writer, and its completion happens before this read.
-func (d *Dispatcher) summarize(r *run.Run, fold *run.SummaryFold) {
+//
+// noHostFailed reports that the outcome about to be decided is the zero-host failure, which is the
+// one case whose record already states that nothing ran.
+func (d *Dispatcher) summarize(r *run.Run, fold *run.SummaryFold, noHostFailed bool) {
 	summaries := fold.HostSummaries()
 	if len(summaries) > 0 {
 		if err := withRetries(func() error {
@@ -363,10 +366,20 @@ func (d *Dispatcher) summarize(r *run.Run, fold *run.SummaryFold) {
 		}); err != nil {
 			d.log.Error("dispatch: save host summary: "+err.Error(), zap.String("run_id", r.ID))
 		}
-	} else if run.NormalizeTool(r.Tool) == run.ToolAnsible {
-		// A playbook run with no recap leaves nothing behind for fleet health, drift, host history,
-		// or a failed-host relaunch. Recording zero hosts silently is what made that invisible, so
-		// the run says so on its own record.
+	} else if run.NormalizeTool(r.Tool) == run.ToolAnsible && !noHostFailed {
+		// A playbook run with no per-host result leaves nothing behind for fleet health, drift, host
+		// history, or a failed-host relaunch. Recording zero hosts silently is what made that
+		// invisible, so the run says so on its own record.
+		//
+		// The zero-host failure is the one case this stays quiet for, because that record already
+		// states in its failure reason that nothing ran. Warning as well put a second, softer
+		// account of the same fact beside the failure: one line saying no host was touched, another
+		// saying the run merely went unreported, and no way for a reader to tell which is the
+		// finding. Every other empty case still warrants it. A run that reported no recap at all is
+		// unproven rather than proven empty and finishes green, so this is the only thing that says
+		// it shows nothing. A run that failed on its own, by a nonzero exit or a runner error, is
+		// exactly the run an operator reaches for a failed-host relaunch on, and there are no hosts
+		// there to relaunch.
 		addWarning(r, "this run recorded no per-host result, so it is absent from fleet health, "+
 			"drift, and host history")
 	}
@@ -426,7 +439,7 @@ func (d *Dispatcher) outcome(
 	case err != nil:
 		d.finalize(r, run.StatusFailed, nil, mask.redactString(err.Error()))
 		return run.StatusFailed
-	case res.ExitCode == 0 && touchedNoHost(r, fold):
+	case noHostFailure(r, res, err, fold):
 		// The tool's own exit code is kept beside the failure. It is zero, which is the whole reason
 		// this run was recorded as a success before, so the record has to show both what the tool
 		// reported and why it was not believed.
@@ -443,10 +456,9 @@ func (d *Dispatcher) outcome(
 
 // errNoHostTouched is recorded on an Ansible run that finished cleanly without touching a host. It
 // names the cause rather than the symptom, so a reader of the run's error learns why the clean exit
-// was not believed. It reaches the run record and the API, and it stays under the 200-character cut
-// notifications apply, so the whole reason survives into a channel message. It does not reach the
-// signed outcome: that body carries the status, the exit code, the hosts, and the log digest, and
-// has no field for a failure reason.
+// was not believed. It reaches the run record, the API, and the signed outcome the chain commits,
+// which carries the run's failure text beside its status and exit code, and it stays under the
+// 200-character cut notifications apply, so the whole reason survives into a channel message.
 //
 // All three causes are named because all three produce the same empty recap, measured against
 // ansible core 2.21.1. Naming only the inventory and the host pattern stated two causes that are
@@ -454,6 +466,18 @@ func (d *Dispatcher) outcome(
 const errNoHostTouched = "no host was touched: the playbook recap named no host, so nothing ran. " +
 	"The inventory may be empty or missing, the play's host pattern may match none of it, or a " +
 	"tag filter may have left no task."
+
+// noHostFailure reports whether this result becomes the zero-host failure: the tool finished on its
+// own, exited clean, and its recap named no host. It is the single condition under which a run's
+// record carries the reason that nothing ran, so the outcome decision and the warning in summarize
+// both read it from here instead of restating it and drifting apart.
+//
+// A run that failed for a reason of its own, a runner error or a nonzero exit, is not this case
+// even with an empty recap. Its record already carries a failure that is true, and inventing a
+// second one over the top of it would describe a run the tool never reported.
+func noHostFailure(r *run.Run, res roundhouse.Result, err error, fold *run.SummaryFold) bool {
+	return err == nil && res.ExitCode == 0 && touchedNoHost(r, fold)
+}
 
 // touchedNoHost reports whether r is an Ansible run proven to have touched no host.
 //

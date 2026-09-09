@@ -64,7 +64,7 @@ instead of scrollback.
 | Big&nbsp;jobs                        | Sharded across hosts, balanced by their measured duration, only failed shards retried. | Sliced round-robin, with no balancing.     | No splitting at all.     |
 | Memory&nbsp;across&nbsp;runs         | Flaky hosts flagged, durations trended, every host's history kept.               | Forgotten the moment a run ends.                | Forgotten the moment a run ends. |
 | Pipelines                            | A dependency graph with a drag-and-drop editor, passing typed outputs from one step to the next. | A visual workflow builder.       | Basic chaining.          |
-| Leaving&nbsp;your&nbsp;old&nbsp;tool | One command imports your AWX, Semaphore, Rundeck, or Jenkins projects, inventories, templates, surveys, and schedules. | Not applicable.                     | Not applicable.          |
+| Leaving&nbsp;your&nbsp;old&nbsp;tool | One command imports AWX, Semaphore, Rundeck, Jenkins, or a crontab. AWX and Semaphore bring projects, inventories, credential shells, templates, surveys, and schedules; Rundeck and Jenkins bring templates, surveys, and schedules, against an inventory you name; a crontab brings schedules. [What each source brings over](docs/migration.md#what-each-source-brings-over). | Not applicable.                     | Not applicable.          |
 
 The full head-to-head, including where SwitchTender is behind, is in the
 [comparison](docs/comparison.md).
@@ -265,8 +265,8 @@ The docs live in [docs/](docs/) and also render inside the app at `/ui/docs`.
 | [AI agents](docs/agents.md) | Put an AI agent behind the approval gate and prove what it did |
 | [Extend in Go](docs/sdk.md) | The SDK: add tools, AI providers, secret engines, and notifiers |
 | [HTTP API](docs/api.md) | Every endpoint the server exposes |
-| [Migration](docs/migration.md) | Moving off AWX, Semaphore, Rundeck, or Jenkins in detail |
-| [Comparison](docs/comparison.md) | How SwitchTender compares to AWX and Semaphore |
+| [Migration](docs/migration.md) | Moving off AWX, Semaphore, Rundeck, Jenkins, or cron in detail |
+| [Comparison](docs/comparison.md) | How SwitchTender compares to AWX, AAP, Semaphore, Ascender, and Rundeck |
 
 Deploy with the `docker-compose.yml` at the root, which brings up a server, a database, and a
 worker, or the Helm chart under [deploy/helm](deploy/helm).
@@ -302,9 +302,9 @@ required.
 ## Status
 
 Version 1.x. Source-available under the Business Source License 1.1. The execution engine, the
-control plane, and the one-command AWX and Semaphore migration are complete. The HTTP API is served
-under a stable `/v1` base path and follows semantic versioning, so no breaking change lands within
-the 1.x line.
+control plane, and the one-command migration off AWX, Semaphore, Rundeck, Jenkins, and cron are
+complete. The HTTP API is served under a stable `/v1` base path and follows semantic versioning, so
+no breaking change lands within the 1.x line.
 
 ## License
 

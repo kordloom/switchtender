@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"syscall"
@@ -57,7 +58,13 @@ before it executes. Where an approval policy covers the run, it is held until a 
 There is deliberately no approve tool, so an agent cannot release its own work however it is prompted,
 and no credential, account, token, grant, or policy tool, so it cannot widen its own reach. Give the
 agent an operator-bound token, minted with "switchtender token new --user", and it holds exactly one
-credential whose only door is this gate. The command refuses to start on an admin token.
+credential whose only door is this gate.
+
+The token's authority is probed before anything is served, and the command refuses to start on an
+admin token, since an agent holding one could approve its own runs and rewrite the policies meant to
+gate it. --allow-admin-token is the one thing that gets past that refusal: it serves anyway and
+prints a warning naming what the token can do, and it is there for a local trial. Nothing else turns
+the check off, and the refusal is what an agent gets without anyone asking for it.
 
 The token is read from ` + mcpTokenEnv + `, falling back to ` + mcpFallbackTokenEnv + `. Give the
 agent its own token rather than reusing an operator's: the trail names whoever the token belongs to.
@@ -108,17 +115,9 @@ func runMCP(cmd *cobra.Command, _ []string) error {
 	// An agent holding an admin token could approve its own runs and rewrite the policies meant to
 	// gate it, which would make the whole arrangement theater. The check is a real request, so it
 	// also proves the server is reachable and the token is accepted before any agent connects.
-	if err := client.RefuseAdminToken(ctx); err != nil {
-		if errors.Is(err, mcp.ErrAdminToken) && !mcpAllowAdminToken {
-			return fmt.Errorf("refusing to serve an agent on an admin token: mint an operator-bound " +
-				"token with \"switchtender token new --user <account>\", or pass --allow-admin-token " +
-				"for a local trial")
-		}
-		if !errors.Is(err, mcp.ErrAdminToken) {
-			return err
-		}
-		fmt.Fprintln(os.Stderr, "mcp: warning: serving an agent on an admin token, which can approve "+
-			"its own runs; use an operator-bound token instead")
+	probe := client.RefuseAdminToken(ctx)
+	if err := refuseAdminAuthority(probe, mcpAllowAdminToken, os.Stderr); err != nil {
+		return err
 	}
 
 	tools := mcp.Tools(client, mcp.Options{AllowAdhoc: mcpAllowAdhoc})
@@ -127,4 +126,27 @@ func runMCP(cmd *cobra.Command, _ []string) error {
 	fmt.Fprintf(os.Stderr, "mcp: serving %d tool(s) against %s\n", len(tools), mcpServer)
 	srv := mcp.NewServer("switchtender", Version, tools)
 	return srv.Serve(ctx, os.Stdin, os.Stdout)
+}
+
+// refuseAdminAuthority turns the authority probe's answer into the command's decision: nil when the
+// token cannot administer the install, the probe's own error when the probe itself failed, and the
+// refusal otherwise. allow is --allow-admin-token, which serves anyway and writes the warning to
+// warn instead, so an install that overrode the check says so on every start.
+//
+// The refusal carries no formatting verbs and wraps nothing, so it is built with errors.New.
+func refuseAdminAuthority(err error, allow bool, warn io.Writer) error {
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, mcp.ErrAdminToken) {
+		return err
+	}
+	if !allow {
+		return errors.New("refusing to serve an agent on an admin token: mint an operator-bound " +
+			"token with \"switchtender token new --user <account>\", or pass --allow-admin-token " +
+			"for a local trial")
+	}
+	fmt.Fprintln(warn, "mcp: warning: serving an agent on an admin token, which can approve "+
+		"its own runs; use an operator-bound token instead")
+	return nil
 }

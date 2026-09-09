@@ -46,8 +46,33 @@ before you pass `--apply`. Anything the import refuses is listed as a warning wi
 Two things to know. These exports omit secret values for security, so credentials import without
 their secrets and you set those once after importing. Dynamic inventory sources import too, as
 sources that run their plugin and refresh the hosts into a stored inventory on a schedule or before a
-run; static inventories import fully. A Semaphore importer exists too, with
-`switchtender import semaphore export.json`.
+run; static inventories import fully.
+
+## What else can I migrate from?
+
+Five sources in all. AWX is the one above; the other four are:
+
+    switchtender import semaphore export.json
+    switchtender import rundeck jobs.yaml --inventory prod
+    switchtender import jenkins /var/jenkins_home --inventory prod
+    switchtender import cron /etc/crontab --system --inventory prod
+
+Semaphore brings projects, inventories, credential shells, templates, surveys, and schedules, the
+same kinds AWX does apart from the dynamic inventory sources AWX alone carries. Rundeck and Jenkins
+export jobs and nothing else, so they bring templates, surveys, and schedules, and `--inventory`
+names the hosts those templates target. A crontab brings schedules alone, one per job line, and no
+template for them to fire, so each carries its own one-step bash pipeline. That step runs on the
+SwitchTender host, not on the machine the crontab came from, and the report says so on every cron
+import. Rundeck, Jenkins, and cron create no credentials at all. The table is in
+[what each source brings over](migration.md#what-each-source-brings-over).
+
+Jenkins has no single export file: point the importer at a `JENKINS_HOME`, at its `jobs` directory,
+at one job's `config.xml`, or at a zip of a `JENKINS_HOME` or a `jobs` directory. A job is named by
+the directory holding its `config.xml`, so a zip whose only entry is a bare `config.xml` is refused
+with the reason rather than imported under a name it does not have. Only freestyle jobs import,
+since a Pipeline job is a Groovy program with no honest mechanical translation. The
+`/v1/import/{format}` endpoint and the Migrate page in the UI take awx, semaphore, rundeck, and
+jenkins; a crontab imports from the command line only.
 
 ## How do I rerun the same job on a set of hosts without re-entering everything?
 

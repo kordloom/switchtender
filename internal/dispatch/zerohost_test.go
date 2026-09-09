@@ -11,6 +11,8 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 
+	"github.com/kordloom/switchtender/internal/audit"
+	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -171,6 +173,133 @@ func TestARunThatTouchedNoHostIsNotASuccess(t *testing.T) {
 					got.ExitCode, test.WantExit)
 			}
 		})
+	}
+}
+
+// unreportedWarning is the note a playbook run gets when it recorded no per-host result. It is
+// pinned here rather than matched loosely so a reworded warning has to come back through these
+// cases, which are about which runs may carry it at all.
+const unreportedWarning = "this run recorded no per-host result, so it is absent from fleet " +
+	"health, drift, and host history"
+
+// TestTheZeroHostFailureDoesNotAlsoCarryTheUnreportedWarning reconciles two statements that were
+// made about the same run.
+//
+// The warning was written for a run that finished green with no per-host result: nothing else on
+// that record said it shows nothing, so the warning was the only thing that did. A run whose recap
+// named no host now fails with the reason stated on the same record, and warning as well left the
+// failure standing beside a softer account of the same fact, one line saying no host was touched and
+// another saying the run merely went unreported, with no way for a reader to tell which is the
+// finding.
+//
+// The cases that keep the warning are the load-bearing half. A run that reported no recap at all is
+// unproven rather than proven empty and still finishes succeeded, so the warning remains the only
+// thing that says its evidence is thin. A run that failed on its own, by a nonzero exit, carries a
+// failure that is true and does not carry the zero-host reason, and it is exactly the run an
+// operator reaches for a failed-host relaunch on, with no hosts there to relaunch.
+func TestTheZeroHostFailureDoesNotAlsoCarryTheUnreportedWarning(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Name        string
+		Tool        string
+		Command     string
+		Events      string
+		WantStatus  run.Status
+		WantError   string
+		WantWarning string
+		ExitCode    int
+	}{{ // Test 0: The reconciliation. The reason is on the record, so the warning is not repeated.
+		Name: "recap named no host", Tool: run.ToolAnsible, Events: emptyRecapEvents, ExitCode: 0,
+		WantStatus: run.StatusFailed, WantError: errNoHostTouched, WantWarning: "",
+	}, { // Test 1: No recap at all. Green, showing nothing, and the warning is all that says so.
+		Name: "no recap at all", Tool: run.ToolAnsible, ExitCode: 0,
+		WantStatus: run.StatusSucceeded, WantWarning: unreportedWarning,
+	}, { // Test 2: An empty recap under a nonzero exit fails on the tool's own terms, so no reason
+		// is invented and the warning still earns its place.
+		Name: "recap named no host and exited nonzero", Tool: run.ToolAnsible,
+		Events: emptyRecapEvents, ExitCode: 2, WantStatus: run.StatusFailed,
+		WantWarning: unreportedWarning,
+	}, { // Test 3: A run that recorded hosts is warned about nothing.
+		Name: "recorded a host", Tool: run.ToolAnsible, Events: changedOneHostEvents, ExitCode: 0,
+		WantStatus: run.StatusSucceeded, WantWarning: "",
+	}, { // Test 4: A command tool has no recap to miss, so neither statement is made about it.
+		Name: "bash", Tool: run.ToolBash, Command: "echo hi", ExitCode: 0,
+		WantStatus: run.StatusSucceeded, WantWarning: "",
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
+			t.Parallel()
+			store := run.NewMemStore()
+			runner := &recapRunner{events: test.Events, exitCode: test.ExitCode}
+			d := New(store, runner, nil, WithNotifyClient(http.DefaultClient))
+			defer d.Close()
+
+			playbook := "site.yml"
+			if test.Tool != run.ToolAnsible {
+				playbook = ""
+			}
+			created, err := d.Submit(context.Background(), playbook, "inv",
+				run.WithTool(test.Tool), run.WithCommand(test.Command))
+			if err != nil {
+				t.Fatalf("Submit() error = %v", err)
+			}
+			got := waitTerminal(t, store, created.ID)
+
+			if diff := cmp.Diff(test.WantStatus, got.Status, cmpopts.EquateEmpty()); diff != "" {
+				t.Errorf("status mismatch (-want +got):\n%s", diff)
+			}
+			if diff := cmp.Diff(test.WantError, got.Error, cmpopts.EquateEmpty()); diff != "" {
+				t.Errorf("error mismatch (-want +got):\n%s", diff)
+			}
+			if diff := cmp.Diff(test.WantWarning, got.Warning, cmpopts.EquateEmpty()); diff != "" {
+				t.Errorf("warning mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+// TestZeroHostOutcomeCommitsWhyTheRunFailed is the end-to-end statement the product sells. The chain
+// entry a zero-host run commits must carry the reason and not only the verdict, and the digest it
+// committed must cover that reason, so a receipt drawn from the chain shows an auditor why a run
+// that exited zero was failed anyway.
+func TestZeroHostOutcomeCommitsWhyTheRunFailed(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := run.NewMemStore()
+	audits := audit.NewMemStore()
+	d := New(store, &recapRunner{events: emptyRecapEvents}, nil, WithAudits(audits))
+	defer d.Close()
+
+	created, err := d.Submit(ctx, "site.yml", "inv", run.WithActor("alice"))
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+	got := waitTerminal(t, store, created.ID)
+	if got.Status != run.StatusFailed {
+		t.Fatalf("run status = %q, want failed", got.Status)
+	}
+
+	entry := waitOutcomeEntry(t, audits, created.ID)
+	if want := "/runs/" + created.ID + "/outcome/failed"; entry.Path != want {
+		t.Errorf("outcome path = %q, want %q", entry.Path, want)
+	}
+	body, err := outcome.Body(ctx, store, got)
+	if err != nil {
+		t.Fatalf("outcome.Body() error = %v", err)
+	}
+	if !audit.VerifyContentDigest(entry.ContentDigest, entry.Nonce, body) {
+		t.Fatal("the committed digest does not verify against the run's rebuilt outcome")
+	}
+	rec, err := outcome.Parse(body)
+	if err != nil {
+		t.Fatalf("outcome.Parse() error = %v", err)
+	}
+	if rec.ExitCode == nil || *rec.ExitCode != 0 || rec.Status != string(run.StatusFailed) {
+		t.Fatalf("committed status=%q exit=%v, want failed at exit 0, the pair that needs a reason",
+			rec.Status, rec.ExitCode)
+	}
+	if diff := cmp.Diff(errNoHostTouched, rec.Error, cmpopts.EquateEmpty()); diff != "" {
+		t.Errorf("committed failure reason mismatch (-want +got):\n%s", diff)
 	}
 }
 
