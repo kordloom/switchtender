@@ -705,7 +705,7 @@ func TestSparseReceiptDoesNotDiscloseARunWhoseIDMerelyContainsThisOne(t *testing
 	if err := runs.Save(ctx, neighbor); err != nil {
 		t.Fatalf("save neighbor: %v", err)
 	}
-	_, err := outcome.CommitDecision(ctx, audits, neighbor, "approved", "stranger", "session")
+	_, err := outcome.CommitDecision(ctx, audits, neighbor, "approved", "stranger", "session", time.Now)
 	if err != nil {
 		t.Fatalf("CommitDecision for the neighbor: %v", err)
 	}
@@ -732,7 +732,7 @@ func TestReceiptOmitsADecisionRecordedAfterTheOutcome(t *testing.T) {
 	runs, audits, id, r := held(t, "approved")
 
 	// A second decision lands on the chain after the run already finished.
-	if _, err := outcome.CommitDecision(ctx, audits, r, "rejected", "dana", "session"); err != nil {
+	if _, err := outcome.CommitDecision(ctx, audits, r, "rejected", "dana", "session", time.Now); err != nil {
 		t.Fatalf("CommitDecision after the outcome: %v", err)
 	}
 

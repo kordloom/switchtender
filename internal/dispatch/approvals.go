@@ -46,7 +46,7 @@ func (d *Dispatcher) Approve(ctx context.Context, id, by, byType string) (*run.R
 	// second decision. The digest is also stamped on the run so the executor can refuse a spec
 	// that changed underneath the decision.
 	if d.audits != nil {
-		specDigest, derr := outcome.CommitDecision(ctx, d.audits, r, "approved", by, byType)
+		specDigest, derr := outcome.CommitDecision(ctx, d.audits, r, "approved", by, byType, d.now)
 		if derr != nil {
 			return nil, fmt.Errorf("record the approval decision: %w", derr)
 		}
@@ -188,7 +188,7 @@ func (d *Dispatcher) Reject(ctx context.Context, id, reason, by, byType string) 
 		return nil, ErrChildNotApprovable
 	}
 	if d.audits != nil {
-		if _, derr := outcome.CommitDecision(ctx, d.audits, r, "rejected", by, byType); derr != nil {
+		if _, derr := outcome.CommitDecision(ctx, d.audits, r, "rejected", by, byType, d.now); derr != nil {
 			return nil, fmt.Errorf("record the rejection decision: %w", derr)
 		}
 	}

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -75,6 +76,15 @@ type BundleReport struct {
 	SpecConsistent bool
 	// SpecBody is the disclosed redacted spec JSON, meaningful when SpecConsistent.
 	SpecBody []byte
+	// TimeProblems names each place a claim's recorded time does not advance past the claim before
+	// it. A written link commits to the time it holds and cannot be repaired, so this is reported
+	// rather than treated as a broken chain, and a reader decides what a clock that went backward
+	// means for the record in front of them.
+	TimeProblems []string
+	// ApprovalPrecedesRun reports that every approval a receipt discloses was recorded before the
+	// outcome it released. False means the record shows a run executing before it was approved,
+	// which is the gate not holding, and it fails the receipt.
+	ApprovalPrecedesRun bool
 }
 
 // DisclosedDecision is one digest-verified approval decision read back from a receipt.
@@ -95,7 +105,8 @@ type DisclosedDecision struct {
 // the execution the receipt ties together are not about the same change.
 func (r *BundleReport) OK() bool {
 	return r.SignatureOK && r.ChainOK && r.AnchorsOK &&
-		(!r.OutcomePresent || r.OutcomeDigestOK) && r.DecisionsOK && r.SpecConsistent
+		(!r.OutcomePresent || r.OutcomeDigestOK) && r.DecisionsOK && r.SpecConsistent &&
+		r.ApprovalPrecedesRun
 }
 
 // VerifyBundle checks a signed bundle with no store and no network: it confirms the producer's
@@ -247,7 +258,64 @@ func verifyBundle(signed []byte, pinnedKeyID, acceptedInstall string) (*BundleRe
 	verifyOutcomeDisclosure(b.Claims, rep)
 	verifyDecisionDisclosures(b.Claims, rep)
 	verifySpecConsistency(b.Claims, rep)
+	verifyTimeOrder(b.Claims, rep)
 	return rep, nil
+}
+
+// verifyTimeOrder reads the times the chain committed. Two different questions live here.
+//
+// The first is whether time advances across the chain at all. It usually should, and when it does
+// not the record is worth a second look, but a written link commits to the time it holds and cannot
+// be corrected afterward, so a clock that stepped backward is reported and left for the reader
+// rather than treated as tampering.
+//
+// The second is the one this product exists to answer: an approval must be recorded before the run
+// it released. A receipt showing a run that executed and was approved twenty minutes later is a
+// receipt showing the gate being bypassed, and until this check existed the verifier printed
+// VERIFIED over exactly that. Digests agreeing is not enough, because the same spec can be approved
+// after the fact.
+func verifyTimeOrder(claims []BundleClaim, rep *BundleReport) {
+	rep.ApprovalPrecedesRun = true
+	ordered := make([]BundleClaim, len(claims))
+	copy(ordered, claims)
+	sort.Slice(ordered, func(i, j int) bool {
+		return ordered[i].Chain.Seq < ordered[j].Chain.Seq
+	})
+
+	var prevAt time.Time
+	var prevSeq int64
+	var lastApproval time.Time
+	var haveApproval bool
+	for _, c := range ordered {
+		at, err := time.Parse(time.RFC3339Nano, c.At)
+		if err != nil {
+			rep.TimeProblems = append(rep.TimeProblems,
+				fmt.Sprintf("claim %d carries an unreadable time %q", c.Chain.Seq, c.At))
+			continue
+		}
+		if !prevAt.IsZero() && at.Before(prevAt) {
+			rep.TimeProblems = append(rep.TimeProblems, fmt.Sprintf(
+				"claim %d is dated %s, before claim %d at %s",
+				c.Chain.Seq, at.UTC().Format(time.RFC3339), prevSeq, prevAt.UTC().Format(time.RFC3339)))
+		}
+		prevAt, prevSeq = at, c.Chain.Seq
+
+		method, _ := c.Payload["method"].(string)
+		path, _ := c.Payload["path"].(string)
+		switch {
+		case method == MethodDecision && strings.Contains(path, "/decision/approved"):
+			if !haveApproval || at.After(lastApproval) {
+				lastApproval, haveApproval = at, true
+			}
+		case method == MethodRun && strings.Contains(path, "/outcome/"):
+			if haveApproval && lastApproval.After(at) {
+				rep.ApprovalPrecedesRun = false
+				rep.TimeProblems = append(rep.TimeProblems, fmt.Sprintf(
+					"the run recorded at %s was approved at %s, after it ran",
+					at.UTC().Format(time.RFC3339), lastApproval.UTC().Format(time.RFC3339)))
+			}
+		}
+	}
 }
 
 // verifyDecisionDisclosures checks every disclosed approval decision against the digest its chain
