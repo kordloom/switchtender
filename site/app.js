@@ -20,7 +20,7 @@ const io = new IntersectionObserver((entries) => {
 			io.unobserve(e.target);
 		}
 	}
-}, { threshold: 0.12, rootMargin: "0px 0px -8% 0px" });
+}, { threshold: 0, rootMargin: "0px 0px -8% 0px" });
 for (const el of document.querySelectorAll(".reveal")) io.observe(el);
 
 // Copy any code block: each .copy button copies the code in its own .code container.
