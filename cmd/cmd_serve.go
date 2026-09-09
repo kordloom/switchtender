@@ -96,6 +96,14 @@ var (
 	serveTLSKey  string
 )
 
+// serveTrustedProxy names networks in CIDR form whose forwarding headers the server believes, and
+// serveClientIPHeader names the header they set. Without these, every client behind one reverse
+// proxy shares a rate-limit key, so one stranger's failed sign-ins refuse everybody.
+var (
+	serveTrustedProxy   []string
+	serveClientIPHeader string
+)
+
 // serveCreateDB permits serve to create a SQLite database that does not exist. Off by default,
 // because a missing path is usually a wrong path, and creating one silently stands up an empty
 // install with authentication off in place of the operator's real one.
@@ -485,6 +493,12 @@ func init() {
 		"Reject a container run whose image is not pinned to an @sha256: digest.")
 	registerContainerFlags(serveCmd)
 	registerGalaxyFlag(serveCmd)
+	serveCmd.Flags().StringSliceVar(&serveTrustedProxy, "trusted-proxy", nil,
+		"CIDR of a reverse proxy whose client IP header to believe, repeatable. Required behind a "+
+			"proxy: without it every client shares one rate-limit key.")
+	serveCmd.Flags().StringVar(&serveClientIPHeader, "client-ip-header", "",
+		"Header carrying the real client address from a trusted proxy. Defaults to the leftmost "+
+			"X-Forwarded-For entry.")
 	serveCmd.Flags().BoolVar(&serveCreateDB, "create-db", false,
 		"Create the SQLite database if it does not exist. Off by default: a missing path is usually "+
 			"a wrong path, and an empty database serves nothing with authentication off.")
@@ -926,6 +940,17 @@ func runServe(cmd *cobra.Command, _ []string) error {
 					"you want", serveDB)
 		}
 	}
+	var proxies []*net.IPNet
+	for _, c := range serveTrustedProxy {
+		_, n, perr := net.ParseCIDR(strings.TrimSpace(c))
+		if perr != nil {
+			return fmt.Errorf("--trusted-proxy %q is not a CIDR: %w", c, perr)
+		}
+		proxies = append(proxies, n)
+	}
+	server.SetTrustedProxies(proxies)
+	server.SetClientIPHeader(serveClientIPHeader)
+
 	bundle, err := openBundle(serveDB)
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)

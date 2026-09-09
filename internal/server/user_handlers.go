@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -177,14 +178,75 @@ func (l *loginLimiter) record(key string) {
 	w.count++
 }
 
-// clientAddr returns the request's client host without the port, the stable half of the limiter
-// key. The remote address is used as seen; forwarding headers are spoofable and are not trusted.
+// trustedProxies holds the networks whose forwarding headers this server believes, set by the
+// operator with --trusted-proxy. Empty means believe nobody, which is the default.
+var trustedProxies []*net.IPNet
+
+// SetTrustedProxies configures which peers may set a client IP header. It is called once at startup.
+func SetTrustedProxies(nets []*net.IPNet) { trustedProxies = nets }
+
+// clientIPHeader names the header carrying the real client address, set by the operator with
+// --client-ip-header. Empty means use the leftmost X-Forwarded-For entry.
+var clientIPHeader string
+
+// SetClientIPHeader configures which header carries the client address behind a trusted proxy.
+func SetClientIPHeader(name string) { clientIPHeader = name }
+
+// clientAddr returns the request's client host without the port, the stable half of the limiter key.
+//
+// The remote address is used as seen unless the immediate peer is a proxy the operator explicitly
+// trusted, because a forwarding header from anyone else is a value a stranger chooses and would let
+// them spend or evade any budget keyed on it. Trusting a named proxy is not a loosening: without it
+// every client behind that proxy shares one key, so one stranger's failed guesses spend the budget
+// for everybody, and the sign-in endpoint stops answering for the whole install.
 func clientAddr(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
-		return r.RemoteAddr
+		host = r.RemoteAddr
+	}
+	if len(trustedProxies) == 0 {
+		return host
+	}
+	peer := net.ParseIP(host)
+	if peer == nil || !fromTrustedProxy(peer) {
+		return host
+	}
+	if fwd := forwardedClient(r); fwd != "" {
+		return fwd
 	}
 	return host
+}
+
+// fromTrustedProxy reports whether the immediate peer sits in a network the operator trusts.
+func fromTrustedProxy(peer net.IP) bool {
+	for _, n := range trustedProxies {
+		if n.Contains(peer) {
+			return true
+		}
+	}
+	return false
+}
+
+// forwardedClient reads the client address a trusted proxy forwarded, preferring the operator's
+// named header and falling back to the leftmost X-Forwarded-For entry, which is the original client.
+func forwardedClient(r *http.Request) string {
+	if clientIPHeader != "" {
+		if v := strings.TrimSpace(r.Header.Get(clientIPHeader)); v != "" {
+			if ip := net.ParseIP(v); ip != nil {
+				return ip.String()
+			}
+		}
+		return ""
+	}
+	xff := r.Header.Get("X-Forwarded-For")
+	if xff == "" {
+		return ""
+	}
+	first, _, _ := strings.Cut(xff, ",")
+	if ip := net.ParseIP(strings.TrimSpace(first)); ip != nil {
+		return ip.String()
+	}
+	return ""
 }
 
 // loginHandler authenticates a username and password and mints a session token owned by the user.
@@ -205,16 +267,21 @@ func loginHandler(users user.Store, tokens auth.Store, ldap *LDAPAuth, log *zap.
 			return
 		}
 		addr := clientAddr(r)
-		// Two brakes, because one attempt is bounded two ways: how many times anyone may guess at
-		// this account, and how many times this address may guess wrong at all.
+		// Two brakes, because one attempt is bounded two ways: how many times this address may guess
+		// wrong at all, and how many times anyone may guess at this account. The address budget is
+		// checked before any hashing happens, which is what makes it a brake on the work rather than
+		// only on the outcome.
 		//
-		// The address budget is read here and enforced only after the credential is checked. It used
-		// to refuse before authentication, which read as a brake on the hashing work but was a
-		// lockout in practice: behind a reverse proxy every client shares one remote address, so one
-		// stranger spending the budget with wrong guesses stopped everyone else signing in, correct
-		// password and all, and with it the approval queue. The per-username brake below still bounds
-		// the work, and a correct credential now always wins.
-		addrSpent := addresses.spent(addr, loginAddressMax)
+		// This only refuses the right people because clientAddr resolves the real client behind a
+		// trusted proxy. Keyed on the raw peer address instead, every client behind one proxy shares
+		// a budget, and a stranger's failed guesses lock the whole install out of the approval queue.
+		// An operator running behind a proxy must set --trusted-proxy or that is what they get.
+		if addresses.spent(addr, loginAddressMax) {
+			log.Warn("server: sign-in flood from one address", zap.String("address", addr))
+			respondError(w, log, http.StatusTooManyRequests,
+				"too many failed sign-in attempts from this address, wait a minute")
+			return
+		}
 		if !limiter.allow(addr + "\x00" + req.Username) {
 			// A rate-limited attempt is logged too, since a burst against one account is exactly the
 			// signal an auditor of authentication activity is looking for.
@@ -237,12 +304,6 @@ func loginHandler(users user.Store, tokens auth.Store, ldap *LDAPAuth, log *zap.
 			// Only a failure pays into the address budget, so a person who signs in correctly never
 			// spends it and an office behind one address is never locked out by its own traffic.
 			addresses.record(addr)
-			if addrSpent {
-				log.Warn("server: sign-in flood from one address", zap.String("address", addr))
-				respondError(w, log, http.StatusTooManyRequests,
-					"too many failed sign-in attempts from this address, wait a minute")
-				return
-			}
 			respondError(w, log, http.StatusUnauthorized, "bad credentials")
 			return
 		}
