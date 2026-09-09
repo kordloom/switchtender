@@ -3,10 +3,15 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"database/sql"
+	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/backup"
@@ -54,7 +59,7 @@ func TestBackupRestoreMovesSQLiteToPostgres(t *testing.T) {
 		t.Fatalf("Write() error = %v", err)
 	}
 
-	dst, err := openBundle(dsn)
+	dst, err := openBundle(ownDatabase(t, dsn))
 	if err != nil {
 		t.Fatalf("open postgres destination: %v", err)
 	}
@@ -74,4 +79,42 @@ func TestBackupRestoreMovesSQLiteToPostgres(t *testing.T) {
 		t.Errorf("migrated template = %q %q %q, want %q %q %q",
 			got.Name, got.Tool, got.Command, want.Name, want.Tool, want.Command)
 	}
+}
+
+// ownDatabase creates a database of this test's own on the server dsn names and returns a dsn
+// pointing at it, dropping it when the test ends.
+//
+// The suite runs packages in parallel and this package and internal/pgstore share one server. Both
+// open a store against it, so a restore writing rows across every table ran beside pgstore's log
+// appends, and the two deadlocked on the foreign key from run_logs to runs. That is a shape no
+// deployment has, because an install owns its database. internal/pgstore already solved the
+// same collision one level down by opening a single handle per binary; this is that fix across
+// binaries.
+func ownDatabase(t *testing.T, dsn string) string {
+	t.Helper()
+	admin, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatalf("open the server named by SWITCHTENDER_TEST_POSTGRES_DSN: %v", err)
+	}
+	defer func() { _ = admin.Close() }()
+
+	name := fmt.Sprintf("st_cmd_%d", time.Now().UnixNano())
+	if _, err := admin.Exec("CREATE DATABASE " + name); err != nil {
+		t.Fatalf("create the test database %s: %v", name, err)
+	}
+	t.Cleanup(func() {
+		drop, err := sql.Open("pgx", dsn)
+		if err != nil {
+			return
+		}
+		defer func() { _ = drop.Close() }()
+		_, _ = drop.Exec("DROP DATABASE IF EXISTS " + name + " WITH (FORCE)")
+	})
+
+	u, err := url.Parse(dsn)
+	if err != nil {
+		t.Fatalf("parse SWITCHTENDER_TEST_POSTGRES_DSN: %v", err)
+	}
+	u.Path = "/" + name
+	return u.String()
 }
