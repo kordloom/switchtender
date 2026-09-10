@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - "site/**"
+      - "go.mod"
+      - "go.sum"
       - ".github/workflows/deploy-site.yml"
   workflow_dispatch:
 
@@ -20,6 +22,57 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # The browser verifier is built here rather than committed, so the version it runs is the
+      # version go.mod pins and cannot drift from it. A committed artifact is a promise that somebody
+      # remembered to rebuild, and site/verify shipped a verifier five releases behind the module for
+      # exactly that reason, with nothing to notice it.
+      - name: Build the browser verifier from the pinned LoomSeal
+        run: |
+          set -euo pipefail
+          MOD="$(go list -m -f '{{.Dir}}' github.com/kordloom/loomseal)"
+          VER="$(go list -m -f '{{.Version}}' github.com/kordloom/loomseal)"
+          echo "building loomseal $VER from $MOD"
+          GOOS=js GOARCH=wasm go build -ldflags="-s -w" \
+            -o site/verify/loomseal.wasm github.com/kordloom/loomseal/wasm
+          cp "$(go env GOROOT)/lib/wasm/wasm_exec.js" site/verify/wasm_exec.js
+          echo "LOOMSEAL_VERSION=$VER" >> "$GITHUB_ENV"
+          echo "LOOMSEAL_MOD=$MOD" >> "$GITHUB_ENV"
+
+      # A verifier that disagrees with the format's own conformance vectors never reaches the site.
+      # This is the difference between "we rebuilt it" and "we rebuilt it and it agrees with the
+      # spec": the vectors are the spec's own statement of what each verdict must be.
+      - name: Check the built verifier against the conformance vectors
+        run: |
+          set -euo pipefail
+          cd "$LOOMSEAL_MOD"
+          node wasm/selftest.mjs "$GITHUB_WORKSPACE/site/verify"
+
+      # The page states which verifier it runs. That sentence is written here from the version just
+      # built, never by hand, because a hand-maintained version string is a claim about the artifact
+      # that nothing checks.
+      - name: Stamp the verifier version into the page
+        run: |
+          set -euo pipefail
+          python3 - "$LOOMSEAL_VERSION" <<'PY'
+          import re, sys
+          ver = sys.argv[1]
+          p = "site/verify/index.html"
+          s = open(p).read()
+          new = re.sub(r'(<span id="verifier-version">)[^<]*(</span>)',
+                       lambda m: m.group(1) + "loomseal " + ver + m.group(2), s, count=1)
+          if new == s:
+              raise SystemExit("deploy-site: no verifier-version span to stamp in " + p)
+          open(p, "w").write(new)
+          print("stamped", ver)
+          PY
+
       - name: Deploy site to Cloudflare Pages
         uses: cloudflare/wrangler-action@v4
         with:
