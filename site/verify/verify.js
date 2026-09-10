@@ -25,16 +25,33 @@
 
 	// render turns the verifier's report into the verdict block and a details table. The wording
 	// mirrors the command line so the two never drift in a reader's memory.
-	function render(report, name) {
+	function render(report, name, pinned) {
 		var ok = report.ok === true;
-		var html = '<div class="verdict ' + (ok ? "ok" : "no") + '">' +
-			(ok ? "VERIFIED" : "NOT VERIFIED") + "   " + esc(report.level || "") + "</div>";
+		// A signature proves a bundle was signed. It does not prove who signed it, because any key
+		// signs its own bundle. Without a pin this page can say the chain is intact and cannot say
+		// whose chain it is, and the visitor who leaves the box blank is exactly the one who will not
+		// know that. So an unpinned pass is its own verdict rather than a quiet VERIFIED.
+		var unpinned = ok && !pinned;
+		var cls = ok ? (unpinned ? "part" : "ok") : "no";
+		var word = ok ? (unpinned ? "INTACT, BUT UNIDENTIFIED" : "VERIFIED") : "NOT VERIFIED";
+		var html = '<div class="verdict ' + cls + '">' + word + "   " + esc(report.level || "") + "</div>";
+		if (unpinned) {
+			html += '<p class="unpinned">Nothing here was altered after it was signed. Who signed it is ' +
+				'unchecked, because no fingerprint was pinned, and any key signs its own bundle. ' +
+				'Pin the fingerprint the producing install publishes at ' +
+				'<code>/.well-known/loomseal.json</code> and run it again.</p>';
+		}
 		var rows = [];
 		if (report.bundle_id) rows.push(["bundle", report.bundle_id + " from " + (report.producer || "")]);
 		if (report.subject) rows.push(["subject", report.subject]);
 		if (report.key_id) rows.push(["signature", (report.signature_ok ? "ok, key " : "failed, key ") + report.key_id]);
-		if (report.fingerprint_match === true) rows.push(["pin", "matches the fingerprint you pinned"]);
-		if (report.fingerprint_match === false) rows.push(["pin", "DOES NOT match the fingerprint you pinned"]);
+		if (report.fingerprint_match === true) {
+			rows.push(["pin", "matches the fingerprint you pinned, so this is that install's key"]);
+		} else if (report.fingerprint_match === false) {
+			rows.push(["pin", "DOES NOT match the fingerprint you pinned"]);
+		} else {
+			rows.push(["pin", "NONE, so this says the bundle was signed, not who signed it"]);
+		}
 		if (report.chain_present) {
 			rows.push(["chain", (report.chain_profile || "") + ", " + (report.chain_mode || "") +
 				", " + (report.claims_checked || 0) + " claims, head matched " + !!report.head_matched]);
@@ -73,8 +90,9 @@
 			var bytes = new Uint8Array(reader.result);
 			var pin = fp.value.trim();
 			var raw = pin ? loomsealVerify(bytes, pin) : loomsealVerify(bytes);
+			var pinned = pin !== "";
 			try {
-				render(JSON.parse(raw), f.name);
+				render(JSON.parse(raw), f.name, pinned);
 			} catch (e) {
 				out.innerHTML = '<div class="verdict no">NOT VERIFIED   report could not be read</div>';
 			}
