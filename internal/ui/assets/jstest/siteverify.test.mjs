@@ -156,3 +156,33 @@ test("the fingerprint input does not present itself as optional", async () => {
 	assert.doesNotMatch(placeholder, /optional/i,
 		"the field that decides whether identity is checked is labelled optional: " + placeholder);
 });
+
+test("a counter-signature nobody can check is not rendered as endorsement", async () => {
+	// LoomSeal's own audit found that attestations sit outside the producer signature, so any holder
+	// of a bundle can attach one signed by a key minted for the purpose, under any role they choose,
+	// and it verifies. The browser verifier takes a producer fingerprint and has no way to pin a
+	// counter-signer, so this page can never establish who vouched. SwitchTender also never emits
+	// these, which means one appearing is itself evidence somebody added it.
+	const page = await mount({ ...SOUND, head_attestors: ["independent-auditor (sha256:deadbeef)"] });
+	const text = page.drop("sha256:good").textContent;
+
+	assert.doesNotMatch(text, /^\s*VERIFIED/,
+		"a receipt carrying an unverifiable counter-signature read as a clean verification: " +
+		text.slice(0, 140));
+	assert.match(text, /RIDER/,
+		"the verdict does not mention the rider: " + text.slice(0, 140));
+	assert.match(text, /SwitchTender never adds them/,
+		"the reader is not told that a SwitchTender receipt should never carry one");
+	assert.match(text, /NOT CHECKED/,
+		"the attestor row does not say the counter-signers went unchecked");
+});
+
+test("a receipt with no riders says nothing about them", async () => {
+	// The disclosure must not fire on every receipt, or it becomes noise a reader learns to skip.
+	const page = await mount(SOUND);
+	const text = page.drop("sha256:good").textContent;
+
+	assert.doesNotMatch(text, /RIDER|rider|attestors/,
+		"a receipt carrying no counter-signatures still mentioned them: " + text.slice(0, 200));
+	assert.match(text, /VERIFIED/, "a clean pinned receipt no longer reads as verified");
+});
