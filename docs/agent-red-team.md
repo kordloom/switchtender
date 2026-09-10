@@ -75,7 +75,7 @@ the actor, so passing through an approval does not relabel who asked.
 The receipt was then verified with the server stopped:
 
     switchtender receipt <run-id> > receipt.json
-    switchtender verify receipt.json
+    switchtender verify receipt.json --pubkey sha256:<the fingerprint this install published>
 
     rules in force 1
       - agent-work-needs-a-person: requires approval
@@ -84,6 +84,11 @@ The receipt was then verified with the server stopped:
     spec         OK (approved, executed, and disclosed digests agree)
 
     VERIFIED: nothing has been altered since this receipt was signed
+
+Pass `--pubkey` with the fingerprint the producing install published at
+`/.well-known/loomseal.json`. Without it the verifier confirms the receipt was signed and says
+nothing about who signed it, because any key signs its own bundle. That is a weaker answer than it
+looks, and it is the answer an auditor takes away if the flag is left off.
 
 That output carries the whole claim in one place: which rule applied, that a person and not the
 agent released it, the exact specification the approval was bound to, and that the approved,
