@@ -36,8 +36,16 @@ jobs:
       - name: Build the browser verifier from the pinned LoomSeal
         run: |
           set -euo pipefail
+          # The module has to be extracted before its directory exists. Without this, .Dir is empty,
+          # and an empty path is the dangerous kind of wrong: cd "" succeeds and leaves you where you
+          # were, so the conformance step ran against the workspace and looked like a missing file
+          # rather than a misconfigured one.
+          go mod download github.com/kordloom/loomseal
           MOD="$(go list -m -f '{{.Dir}}' github.com/kordloom/loomseal)"
           VER="$(go list -m -f '{{.Version}}' github.com/kordloom/loomseal)"
+          test -n "$MOD" || { echo "loomseal module directory did not resolve"; exit 1; }
+          test -f "$MOD/wasm/selftest.mjs" || { echo "no selftest at $MOD/wasm"; exit 1; }
+          test -f "$MOD/testdata/vectors/manifest.json" || { echo "no vectors at $MOD/testdata"; exit 1; }
           echo "building loomseal $VER from $MOD"
           GOOS=js GOARCH=wasm go build -ldflags="-s -w" \
             -o site/verify/loomseal.wasm github.com/kordloom/loomseal/wasm
@@ -51,6 +59,7 @@ jobs:
       - name: Check the built verifier against the conformance vectors
         run: |
           set -euo pipefail
+          test -n "${LOOMSEAL_MOD:-}" || { echo "LOOMSEAL_MOD is empty; the build step did not set it"; exit 1; }
           cd "$LOOMSEAL_MOD"
           node wasm/selftest.mjs "$GITHUB_WORKSPACE/site/verify"
 
