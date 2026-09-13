@@ -10,6 +10,7 @@ change with `go-licenses csv ./...` from the repository root.
 ## Apache License 2.0
 
 - github.com/coreos/go-oidc/v3
+- github.com/kordloom/loomseal
 - github.com/go-git/go-billy/v5
 - github.com/go-git/go-git/v5
 - github.com/go-jose/go-jose/v4
