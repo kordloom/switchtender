@@ -131,14 +131,16 @@ func main() {
 <p>Build it, run it, and submit a run that names the new tool:</p>
 <pre><code>go mod tidy &amp;&amp; go build -o switchtender-hello .
 ./switchtender-hello serve --addr :8080 --db switchtender.db
-
-curl -s -X POST localhost:8080/v1/runs \
+</code></pre>
+<p>The first start mints an admin token and prints it once; send it as the bearer token:</p>
+<pre><code>curl -s -X POST localhost:8080/v1/runs \
+  -H &quot;Authorization: Bearer $ST_TOKEN&quot; \
   -H 'Content-Type: application/json' \
   -d '{&quot;tool&quot;:&quot;hello&quot;,&quot;command&quot;:&quot;world&quot;}'
 </code></pre>
 <p>The run is accepted, executed, and audited like any built-in tool, and its log holds the runner's
 output:</p>
-<pre><code>curl -s localhost:8080/v1/runs/&lt;id&gt;/logs
+<pre><code>curl -s -H &quot;Authorization: Bearer $ST_TOKEN&quot; localhost:8080/v1/runs/&lt;id&gt;/logs
 hello from an external plugin: world
 </code></pre>
 <p>The binary keeps every stock command: <code>serve</code>, <code>worker</code>, <code>desktop</code>, <code>demo</code>, <code>import</code>, <code>token</code>,

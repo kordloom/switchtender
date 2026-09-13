@@ -116,6 +116,7 @@ on a lease.
 ## From the API
 
     curl -s -X POST localhost:8080/v1/credentials \
+      -H "Authorization: Bearer $ST_TOKEN" \
       -H 'content-type: application/json' \
       -d '{"name":"ci-token","kind":"env","source":"command","secret":"vault kv get -field=token secret/ci"}'
 
@@ -153,6 +154,7 @@ edit an inventory, leave the source fields blank to keep the stored one.
 ### From the API
 
     curl -s -X POST localhost:8080/v1/inventories \
+      -H "Authorization: Bearer $ST_TOKEN" \
       -H 'content-type: application/json' \
       -d '{"name":"prod-fleet","content_source":"command","content_config":"./bin/hosts --env prod"}'
 

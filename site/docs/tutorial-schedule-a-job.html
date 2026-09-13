@@ -78,6 +78,7 @@ it at the template.</li>
 </ol>
 <h2 id="from-the-api">From the API</h2>
 <pre><code>curl -s -X POST localhost:8080/v1/schedules \
+  -H &quot;Authorization: Bearer $ST_TOKEN&quot; \
   -H 'content-type: application/json' \
   -d '{&quot;cron&quot;:&quot;0 2 * * *&quot;,&quot;template_id&quot;:&quot;tpl_abc123&quot;}'
 </code></pre>
@@ -88,6 +89,7 @@ with <code>switchtender worker</code>.</p>
 as <code>America/New_York</code>, to pin it to a zone and let it follow that zone's daylight-saving shifts, so a
 nightly window stays put across the year.</p>
 <pre><code>curl -s -X POST localhost:8080/v1/schedules \
+  -H &quot;Authorization: Bearer $ST_TOKEN&quot; \
   -H 'content-type: application/json' \
   -d '{&quot;cron&quot;:&quot;0 2 * * *&quot;,&quot;timezone&quot;:&quot;America/New_York&quot;,&quot;template_id&quot;:&quot;tpl_abc123&quot;}'
 </code></pre>
