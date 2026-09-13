@@ -65,21 +65,18 @@ trap 'rm -rf "$tmp"' EXIT INT TERM
 say "Downloading $BIN $version for $os/$arch..."
 download "$base/$archive" "$tmp/$archive" || die "download failed: $base/$archive"
 
-# Verify the archive against the published checksums before touching anything.
-if download "$base/SHA256SUMS" "$tmp/SHA256SUMS" 2>/dev/null; then
-	want=$(grep " ${archive}\$" "$tmp/SHA256SUMS" | awk '{print $1}')
-	if [ -n "$want" ]; then
-		if have sha256sum; then got=$(sha256sum "$tmp/$archive" | awk '{print $1}');
-		elif have shasum; then got=$(shasum -a 256 "$tmp/$archive" | awk '{print $1}');
-		else got=""; say "no sha256 tool found; skipping checksum verification"; fi
-		if [ -n "$got" ] && [ "$got" != "$want" ]; then
-			die "checksum mismatch for $archive; refusing to install"
-		fi
-		[ -n "$got" ] && say "Checksum verified."
-	fi
-else
-	say "Checksums not available for this release; installing without verification."
-fi
+# Verify the archive against the published checksums before touching anything. A download that
+# cannot be verified is not installed: skipping the check quietly would hand whoever controls the
+# network exactly the window this product exists to close.
+download "$base/SHA256SUMS" "$tmp/SHA256SUMS" 2>/dev/null \
+	|| die "could not download the checksums for $version; refusing to install unverified"
+want=$(grep " ${archive}\$" "$tmp/SHA256SUMS" | awk '{print $1}')
+[ -n "$want" ] || die "no checksum published for $archive; refusing to install unverified"
+if have sha256sum; then got=$(sha256sum "$tmp/$archive" | awk '{print $1}');
+elif have shasum; then got=$(shasum -a 256 "$tmp/$archive" | awk '{print $1}');
+else die "need sha256sum or shasum to verify the download; install one and re-run"; fi
+[ "$got" = "$want" ] || die "checksum mismatch for $archive; refusing to install"
+say "Checksum verified."
 
 tar -xzf "$tmp/$archive" -C "$tmp" || die "could not extract $archive"
 [ -f "$tmp/$BIN" ] || die "the archive did not contain $BIN"
