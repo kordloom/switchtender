@@ -48,7 +48,7 @@ func proposeTool(t *testing.T, rec *launchRecorder) Tool {
 	t.Helper()
 	srv := httptest.NewServer(rec.handler())
 	t.Cleanup(srv.Close)
-	c, err := NewClient(srv.URL, "ymt_test", 5*time.Second)
+	c, err := NewClient(srv.URL, "swt_test", 5*time.Second)
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}

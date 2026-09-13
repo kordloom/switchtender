@@ -34,9 +34,9 @@ func gatedPlan(t *testing.T, policies ...*policy.Policy) (*Client, run.Store) {
 	if err := store.Save(ctx, plan); err != nil {
 		t.Fatalf("Save run: %v", err)
 	}
-	srv := httptest.NewServer(NewHandler(store, SinglePool("ymt_worker"), zap.NewNop(), rules, nil))
+	srv := httptest.NewServer(NewHandler(store, SinglePool("swt_worker"), zap.NewNop(), rules, nil))
 	t.Cleanup(srv.Close)
-	tr := NewHTTPTransport(srv.URL, "ymt_worker", nil)
+	tr := NewHTTPTransport(srv.URL, "swt_worker", nil)
 	if _, err := tr.Claim(ctx, "worker-1", []string{"default"}); err != nil {
 		t.Fatalf("Claim: %v", err)
 	}

@@ -45,7 +45,7 @@ test("issuing a token shows the secret once and reloads the list", async () => {
 	const page = tokensPage([], {
 		"/v1/tokens": sequence(
 			reply({ tokens: [], count: 0 }),
-			reply({ id: "tok_9", name: "deploy-bot", token: "ymt_secret_value", kind: "agent" },
+			reply({ id: "tok_9", name: "deploy-bot", token: "swt_secret_value", kind: "agent" },
 				{ status: 201 }),
 			reply({ tokens: [{ id: "tok_9", name: "deploy-bot", kind: "agent", user_id: "usr_1" }], count: 1 }),
 		),
@@ -70,11 +70,11 @@ test("issuing a token shows the secret once and reloads the list", async () => {
 
 	const reveal = page.document.getElementById("token-secret");
 	assert.equal(reveal.hidden, false, "the minted token was never shown, so it is lost");
-	assert.equal(page.document.getElementById("token-value").textContent, "ymt_secret_value");
+	assert.equal(page.document.getElementById("token-value").textContent, "swt_secret_value");
 
 	fire(page.document.getElementById("token-copy"), "click");
 	await page.clock.flush();
-	assert.deepEqual(sandboxOf(page.app).navigator.clipboard.copied, ["ymt_secret_value"]);
+	assert.deepEqual(sandboxOf(page.app).navigator.clipboard.copied, ["swt_secret_value"]);
 });
 
 test("an unreadable lifetime is refused before anything is minted", async () => {

@@ -19,8 +19,8 @@ func TestNewToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
-	if !strings.HasPrefix(plain, "ymt_") {
-		t.Errorf("plaintext = %q, want ymt_ prefix", plain)
+	if !strings.HasPrefix(plain, "swt_") {
+		t.Errorf("plaintext = %q, want swt_ prefix", plain)
 	}
 	if tok.Hash != auth.HashToken(plain) {
 		t.Error("stored hash does not match the plaintext hash")
@@ -36,11 +36,11 @@ func TestFromHeader(t *testing.T) {
 		In   string
 		Want string
 	}{
-		{In: "Bearer ymt_abc", Want: "ymt_abc"},   // Test 0: Standard bearer.
-		{In: "bearer ymt_abc", Want: "ymt_abc"},   // Test 1: Case-insensitive scheme.
+		{In: "Bearer swt_abc", Want: "swt_abc"},   // Test 0: Standard bearer.
+		{In: "bearer swt_abc", Want: "swt_abc"},   // Test 1: Case-insensitive scheme.
 		{In: "Basic dXNlcg==", Want: ""},          // Test 2: Wrong scheme.
 		{In: "", Want: ""},                        // Test 3: Absent header.
-		{In: "Bearer  ymt_abc ", Want: "ymt_abc"}, // Test 4: Padding trimmed.
+		{In: "Bearer  swt_abc ", Want: "swt_abc"}, // Test 4: Padding trimmed.
 	}
 	for i, test := range tests {
 		if got := auth.FromHeader(test.In); got != test.Want {

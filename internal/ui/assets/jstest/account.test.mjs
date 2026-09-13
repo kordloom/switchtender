@@ -12,7 +12,7 @@ import { fire } from "./dom.mjs";
 test("the navigation names the signed-in account and signs it out", async () => {
 	const page = loadPage("overview");
 	const win = sandboxOf(page.app);
-	win.localStorage.setItem("st_token", "ymt_abc");
+	win.localStorage.setItem("st_token", "swt_abc");
 	win.localStorage.setItem("st_role", "operator");
 	win.localStorage.setItem("st_user", "casey");
 	page.app.buildNav();
@@ -51,7 +51,7 @@ test("a signed-out session is offered sign-in rather than an account", () => {
 test("the sign-in page offers a way back when a session is already stored", () => {
 	const page = loadPage("login");
 	const win = sandboxOf(page.app);
-	win.localStorage.setItem("st_token", "ymt_abc");
+	win.localStorage.setItem("st_token", "swt_abc");
 	win.localStorage.setItem("st_user", "casey");
 	page.app.offerStoredSession();
 
