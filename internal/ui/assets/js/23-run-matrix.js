@@ -472,9 +472,11 @@ function showDrill(info) {
 		note.textContent = "Output truncated.";
 		body.appendChild(note);
 	}
-	// A failure that carried nothing but its return code explains itself in the run log, so the
-	// pane says so and takes the reader there instead of ending the story at a bare number.
-	if (info.outcome === "failed" && !info.message && !info.stdout && !info.stderr) {
+	// A failure that carried no captured output explains itself in the run log, so the pane
+	// says so and takes the reader there instead of ending the story at a bare number. The
+	// stock runner message alone does not count as an explanation: Ansible attaches one to
+	// every command failure, so gating on it left this branch unreachable in practice.
+	if (info.outcome === "failed" && !info.stdout && !info.stderr) {
 		const note = document.createElement("div");
 		note.className = "drill-note";
 		note.textContent = "This task reported only its return code. The full run log usually carries the reason. ";
