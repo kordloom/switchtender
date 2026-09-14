@@ -54,6 +54,38 @@ func TestUnknownPathIsNotFound(t *testing.T) {
 	}
 }
 
+// TestNotFoundIsAPageNotBareText pins that a refused path still answers with the app. Go's stock
+// handler returns bare text on a blank page: no nav, no way back, and nothing naming what went
+// wrong. A mistyped or stale address is exactly when a reader needs a way onward, and a shared
+// link that lands on bare text reads as a broken product rather than a wrong URL.
+func TestNotFoundIsAPageNotBareText(t *testing.T) {
+	t.Parallel()
+	handler := ui.New(zap.NewNop(), nil, false, 50000, false, false, false, "").Handler()
+
+	req := httptest.NewRequest(http.MethodGet, "/ui/workflow", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, "404 page not found") {
+		t.Error("the refused path answered with Go's stock bare text rather than the app's page")
+	}
+	for _, want := range []string{
+		"/ui/runs",     // a way onward
+		"/ui/audit",    // and another
+		"/ui/docs",     // and somewhere to learn what the reader wanted
+		"app.css",      // rendered with the app's chrome, not naked markup
+		"/ui/workflow", // the path that was refused, named back to the reader
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the not-found page is missing %q, so it is not a way onward", want)
+		}
+	}
+}
+
 // TestEveryNavLinkResolves walks every page the navigation offers and follows
 // each in-app link it carries, so a route renamed on one side of the app and not
 // the other fails the build instead of shipping.

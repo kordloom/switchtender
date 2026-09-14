@@ -126,10 +126,19 @@ func (u *UI) Handler() http.Handler {
 // something plausible.
 func (u *UI) index(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/ui/" {
-		http.NotFound(w, r)
+		u.notFound(w, r)
 		return
 	}
 	u.render(w, "overview.html", map[string]any{"ReadOnly": u.readOnly, "AIOff": !u.aiEnabled})
+}
+
+// notFound answers a path under /ui/ that no route owns. Go's stock handler answers with bare
+// text on a blank page: no nav, no way back, and nothing naming what went wrong. A mistyped or
+// stale address is the one moment a reader most needs a way onward, so this renders the real
+// chrome and points at the pages they probably wanted.
+func (u *UI) notFound(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotFound)
+	u.render(w, "notfound.html", map[string]any{"ReadOnly": u.readOnly, "Path": r.URL.Path})
 }
 
 // runs renders the run history page.
