@@ -473,28 +473,50 @@ function showDrill(info) {
 		body.appendChild(note);
 	}
 	// A failure that carried no captured output explains itself in the run log, so the pane
-	// says so and takes the reader there instead of ending the story at a bare number. The
-	// stock runner message alone does not count as an explanation: Ansible attaches one to
-	// every command failure, so gating on it left this branch unreachable in practice.
+	// says so instead of ending the story at a bare number. The stock runner message alone
+	// does not count as an explanation: Ansible attaches one to every command failure, so
+	// gating on it left this note unreachable in practice.
 	if (info.outcome === "failed" && !info.stdout && !info.stderr) {
 		const note = document.createElement("div");
 		note.className = "drill-note";
-		note.textContent = "This task reported only its return code. The full run log usually carries the reason. ";
-		const jump = document.createElement("button");
-		jump.type = "button";
-		jump.className = "linkish";
-		jump.textContent = "Open the log";
-		jump.addEventListener("click", () => {
+		note.textContent =
+			"This task reported only its return code. The full run log usually carries the reason.";
+		body.appendChild(note);
+	}
+
+	// Every drill ends with somewhere to go. The cell names a host and a moment; these carry
+	// the reader to the full log, the clipboard, the host, or its history, so the sharpest
+	// view in the product is a junction rather than a dead end.
+	const actions = document.createElement("div");
+	actions.className = "drill-actions";
+	if (document.getElementById("log-panel")) {
+		actions.appendChild(drillAction("Open the log", () => {
 			closeDrill();
 			const panel = document.getElementById("log-panel");
 			if (panel) {
 				panel.hidden = false;
 				if (panel.scrollIntoView) panel.scrollIntoView();
 			}
-		});
-		note.appendChild(jump);
-		body.appendChild(note);
+		}));
 	}
+	const captured = [
+		info.message ? "message: " + info.message : "",
+		info.stdout ? "stdout:\n" + info.stdout : "",
+		info.stderr ? "stderr:\n" + info.stderr : "",
+	].filter(Boolean).join("\n");
+	if (captured) {
+		actions.appendChild(drillAction("Copy output", async (btn) => {
+			try { await navigator.clipboard.writeText(captured); } catch { return; }
+			btn.textContent = "Copied";
+			window.setTimeout(() => { btn.textContent = "Copy output"; }, 1200);
+		}));
+	}
+	if (info.host) {
+		actions.appendChild(drillLink("Host page", "/ui/hosts/" + encodeURIComponent(info.host)));
+		actions.appendChild(drillLink("Runs on this host",
+			"/ui/runs?q=" + encodeURIComponent("host:" + info.host)));
+	}
+	if (actions.childNodes.length > 0) body.appendChild(actions);
 
 	const panel = document.getElementById("drill");
 	panel.hidden = false;
@@ -510,6 +532,26 @@ function showDrill(info) {
 
 // drillOpener is what had focus when the inspect panel opened, so closing can return it.
 let drillOpener = null;
+
+// drillAction builds one action in the drill's closing row: a plain text button, since the row
+// is navigation rather than chrome.
+function drillAction(label, onClick) {
+	const btn = document.createElement("button");
+	btn.type = "button";
+	btn.className = "linkish";
+	btn.textContent = label;
+	btn.addEventListener("click", () => onClick(btn));
+	return btn;
+}
+
+// drillLink builds one navigation link in the drill's closing row.
+function drillLink(label, href) {
+	const a = document.createElement("a");
+	a.className = "linkish";
+	a.href = href;
+	a.textContent = label;
+	return a;
+}
 
 // drillBlock builds a labeled monospace block for multi line output.
 function drillBlock(label, value) {
