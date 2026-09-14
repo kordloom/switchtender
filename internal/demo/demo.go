@@ -882,9 +882,18 @@ func seedConfig(ctx context.Context, d Deps, log *zap.Logger) {
 	// relationship rather than an empty list. The script is never executed by seeding; it stands
 	// as the configuration a refresh would run.
 	if d.InvSources != nil {
+		// The content is what a refresh would have written. An empty group read as a source that
+		// syncs and finds nothing, which on the one page selling dynamic inventory is the feature
+		// looking broken rather than seeded thin.
+		//
+		// It names hosts the demo already fills, so every row clicks through to a host page with
+		// facts and a drift row behind it. Inventing cloud-shaped names instead would have put
+		// four hosts on the page whose own pages open empty, which is the dead end this seed is
+		// supposed to avoid, and the fleet test refuses it for that reason.
 		dynamic := &inventory.Inventory{
 			ID: inventory.NewID(), Name: "cloud-discovered",
-			Content:   "[all]\n# Refreshed from the cloud-hosts source.\n",
+			Content: "# Refreshed from the cloud-hosts source.\n" +
+				"[web]\nweb01\nweb02\nweb03\n\n[edge]\nedge01\n",
 			CreatedAt: ago(20),
 		}
 		if err := d.Inventories.Save(ctx, dynamic); err != nil {
@@ -1031,13 +1040,21 @@ func seedConfig(ctx context.Context, d Deps, log *zap.Logger) {
 	}
 
 	if d.Users != nil {
+		// Each account carries the name and address a real one does. Seeding only usernames left
+		// the Name and Contact columns showing an em dash on every row, so two columns of the
+		// access page read as fields the product does not keep. The service account has no
+		// person's name on purpose: that is what an operator token looks like, and the contrast
+		// with the two humans is the point of the column.
 		accounts := []struct {
-			Name string
-			Role user.Role
+			Name     string
+			FullName string
+			Email    string
+			Title    string
+			Role     user.Role
 		}{
-			{"admin", user.RoleAdmin},
-			{"deploy-bot", user.RoleOperator},
-			{"auditor", user.RoleViewer},
+			{"admin", "Dana Okonkwo", "dana@example.com", "Platform lead", user.RoleAdmin},
+			{"deploy-bot", "", "platform@example.com", "Deployment service account", user.RoleOperator},
+			{"auditor", "Priya Raman", "priya@example.com", "Compliance", user.RoleViewer},
 		}
 		for _, a := range accounts {
 			u, err := user.New(a.Name, "demo-password", a.Role)
@@ -1045,6 +1062,9 @@ func seedConfig(ctx context.Context, d Deps, log *zap.Logger) {
 				log.Warn("demo: build user: " + err.Error())
 				continue
 			}
+			u.FullName = a.FullName
+			u.Email = a.Email
+			u.Title = a.Title
 			if err := d.Users.Save(ctx, u); err != nil {
 				log.Warn("demo: seed user: " + err.Error())
 			}
