@@ -229,15 +229,15 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 	// variables, locals, and outputs, so either plans offline with no provider download.
 	tfDir := filepath.Join(dir, "repos", "database-ops", "infra", "network")
 
-	seedConfig(ctx, d, log)
+	ids := seedConfig(ctx, d, log)
 
 	// Plain runs where db01 flaps between failing and passing, so fleet memory marks it flaky.
 	failByRun := []string{"", "db01", "", "db01", ""}
 	for i, failHost := range failByRun {
 		// Alternate origins so the runs list shows the full provenance vocabulary.
-		source, sourceID, actor := "schedule", "sch_nightly", "deploy-bot"
+		source, sourceID, actor := "schedule", ids.id(ids.Schedules, "Nightly audit", "sch_nightly"), "deploy-bot"
 		if i%2 == 1 {
-			source, sourceID, actor = "template", "tpl_deploy_web", "admin"
+			source, sourceID, actor = "template", ids.id(ids.Templates, "Deploy web", "tpl_deploy_web"), "admin"
 		}
 		opts := seedOpts(ctx, d, source, sourceID, actor,
 			map[string]string{"env": "prod", "team": "platform"}, failVars(failHost)...)
@@ -250,7 +250,7 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 
 	// A split where one shard fails, showing the merged matrix and failed-shard isolation.
 	split, err := d.Submitter.SubmitSplit(ctx, playbook, inv, 3,
-		seedOpts(ctx, d, "template", "tpl_deploy_web", "admin",
+		seedOpts(ctx, d, "template", ids.id(ids.Templates, "Deploy web", "tpl_deploy_web"), "admin",
 			map[string]string{"env": "prod", "ticket": "OPS-482"}, failVars("db01")...)...)
 	if err != nil {
 		return fmt.Errorf("seed split: %w", err)
@@ -301,11 +301,11 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 		log.Warn("demo: seed drift check: " + err.Error())
 	}
 
-	if err := seedMultiTool(ctx, d, tfDir, playbook, inv, log); err != nil {
+	if err := seedMultiTool(ctx, d, tfDir, playbook, inv, ids, log); err != nil {
 		return err
 	}
 
-	seedGovernance(ctx, d, playbook, inv, tfDir, log)
+	seedGovernance(ctx, d, playbook, inv, tfDir, ids, log)
 
 	normalizeClaimStamps(ctx, d, log)
 
@@ -371,7 +371,8 @@ func seedAnchors(ctx context.Context, d Deps, log *zap.Logger) {
 // showed the evidence but never the gate between them. A visitor reading that this is the boundary
 // every change comes through found the rules listed as configuration and not one run any of them had
 // ever stopped, which left the product's central claim as the one thing the demo could not show.
-func seedGovernance(ctx context.Context, d Deps, playbook, inv, tfDir string, log *zap.Logger) {
+func seedGovernance(ctx context.Context, d Deps, playbook, inv, tfDir string, ids seededIDs,
+	log *zap.Logger) {
 	// A production destroy, held and left that way, so the runs list always has a change the gate is
 	// refusing right now. It never executes, so it needs no terraform on the host.
 	held := seedOpts(ctx, d, "api", "", "deploy-bot",
@@ -393,7 +394,7 @@ func seedGovernance(ctx context.Context, d Deps, playbook, inv, tfDir string, lo
 	// The same gate carried all the way through: held by the production rule, released by somebody
 	// other than the person who asked for it, then executed. This is the run whose evidence carries a
 	// decision and the digest of the exact spec that decision released.
-	opts := seedOpts(ctx, d, "template", "tpl_deploy_web", "deploy-bot",
+	opts := seedOpts(ctx, d, "template", ids.id(ids.Templates, "Deploy web", "tpl_deploy_web"), "deploy-bot",
 		map[string]string{"env": "prod", "ticket": "OPS-512"},
 		run.WithRequireApproval(true), run.WithRequireDistinctApprover(true),
 		run.WithHeldByPolicy("any production run"))
@@ -469,12 +470,13 @@ func normalizeOneClaim(ctx context.Context, d Deps, r *run.Run, log *zap.Logger)
 // an exec-not-found failure. The mixed pipeline provisions with whichever infra tool is available,
 // then configures with Ansible and verifies with Bash, so it is always a real multi-tool graph that
 // finishes cleanly on whatever host serves the demo.
-func seedMultiTool(ctx context.Context, d Deps, tfDir, playbook, inv string, log *zap.Logger) error {
+func seedMultiTool(ctx context.Context, d Deps, tfDir, playbook, inv string, ids seededIDs,
+	log *zap.Logger) error {
 	// The tools this host cannot run, so the end of seeding can say what the demo will not show
 	// rather than leaving three skips in the log for somebody to notice.
 	var missing []string
 	bash, err := d.Submitter.Submit(ctx, "", "",
-		seedOpts(ctx, d, "schedule", "sch_log_rotate", "deploy-bot", map[string]string{"env": "prod"},
+		seedOpts(ctx, d, "schedule", ids.id(ids.Schedules, "Rotate logs", "sch_log_rotate"), "deploy-bot", map[string]string{"env": "prod"},
 			run.WithTool(run.ToolBash), run.WithCommand(scriptLogRotate))...)
 	if err != nil {
 		return fmt.Errorf("seed bash run: %w", err)
@@ -483,7 +485,7 @@ func seedMultiTool(ctx context.Context, d Deps, tfDir, playbook, inv string, log
 
 	if have("python3") {
 		py, err := d.Submitter.Submit(ctx, "", "",
-			seedOpts(ctx, d, "template", "tpl_reconcile", "admin", map[string]string{"env": "prod"},
+			seedOpts(ctx, d, "template", ids.id(ids.Templates, "Reconcile inventory", "tpl_reconcile"), "admin", map[string]string{"env": "prod"},
 				run.WithTool(run.ToolPython), run.WithCommand(scriptReconcile))...)
 		if err != nil {
 			return fmt.Errorf("seed python run: %w", err)
@@ -507,7 +509,7 @@ func seedMultiTool(ctx context.Context, d Deps, tfDir, playbook, inv string, log
 
 	if have("go") {
 		gorun, err := d.Submitter.Submit(ctx, "", "",
-			seedOpts(ctx, d, "template", "tpl_capacity", "admin", map[string]string{"env": "prod"},
+			seedOpts(ctx, d, "template", ids.id(ids.Templates, "Fleet capacity report", "tpl_capacity"), "admin", map[string]string{"env": "prod"},
 				run.WithTool(run.ToolGo), run.WithCommand(scriptFleetGo))...)
 		if err != nil {
 			return fmt.Errorf("seed go run: %w", err)
@@ -523,7 +525,7 @@ func seedMultiTool(ctx context.Context, d Deps, tfDir, playbook, inv string, log
 		{Name: "smoke-test", Tool: run.ToolBash, Command: scriptSmoke},
 	}
 	pipe, err := d.Submitter.SubmitPipeline(ctx, "Provision and deploy", inv, steps,
-		seedOpts(ctx, d, "template", "tpl_provision", "admin",
+		seedOpts(ctx, d, "template", ids.id(ids.Templates, "Provision network", "tpl_provision"), "admin",
 			map[string]string{"env": "prod", "ticket": "OPS-503"})...)
 	if err != nil {
 		return fmt.Errorf("seed mixed pipeline: %w", err)
@@ -831,11 +833,35 @@ func initDemoRepos(dir string) error {
 	return nil
 }
 
+// seededIDs carries the identifiers seedConfig minted, keyed by the object's name, so the runs
+// seeded afterward can record the template or schedule that really fired them.
+//
+// Runs used to record hand-written strings like "tpl_deploy_web" while the template beside them
+// held a generated id. Nothing compared the two until the Templates page grew a History button,
+// which searches runs by the template's real id and so found nothing, on every row, while its
+// tooltip promised "See every run this template has produced".
+type seededIDs struct {
+	// Templates maps a template's name to the id it was stored under.
+	Templates map[string]string
+	// Schedules maps a schedule's name to the id it was stored under.
+	Schedules map[string]string
+}
+
+// id returns the stored identifier for name, or the fallback when nothing by that name was seeded,
+// so a store that refused one object does not leave a run with an empty origin.
+func (s seededIDs) id(m map[string]string, name, fallback string) string {
+	if got, ok := m[name]; ok && got != "" {
+		return got
+	}
+	return fallback
+}
+
 // seedConfig stores browsable sample projects, inventories, credentials, and templates. The templates
 // cover the main tools the engine drives, so the Templates list shows Ansible, Bash, Terraform, Python,
 // and Go presets even on a host that lacks a given tool's binary. It is best effort: a store error is
 // logged and skipped so the runs still seed.
-func seedConfig(ctx context.Context, d Deps, log *zap.Logger) {
+func seedConfig(ctx context.Context, d Deps, log *zap.Logger) seededIDs {
+	ids := seededIDs{Templates: map[string]string{}, Schedules: map[string]string{}}
 	now := time.Now()
 	ago := func(h int) time.Time { return now.Add(-time.Duration(h) * time.Hour) }
 
@@ -981,7 +1007,9 @@ func seedConfig(ctx context.Context, d Deps, log *zap.Logger) {
 	for _, t := range templates {
 		if err := d.Templates.Save(ctx, t); err != nil {
 			log.Warn("demo: seed template: " + err.Error())
+			continue
 		}
+		ids.Templates[t.Name] = t.ID
 	}
 
 	// Cron entries against the seeded templates, so the schedules page shows real cadences and
@@ -1020,7 +1048,9 @@ func seedConfig(ctx context.Context, d Deps, log *zap.Logger) {
 			}
 			if err := d.Schedules.Save(ctx, sc); err != nil {
 				log.Warn("demo: seed schedule: " + err.Error())
+				continue
 			}
+			ids.Schedules[sc.Name] = sc.ID
 		}
 	}
 
@@ -1070,6 +1100,7 @@ func seedConfig(ctx context.Context, d Deps, log *zap.Logger) {
 			}
 		}
 	}
+	return ids
 }
 
 // scriptLogRotate is the Bash job for the standalone bash run and the Rotate logs template. It runs
