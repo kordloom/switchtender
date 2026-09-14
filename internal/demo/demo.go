@@ -937,8 +937,13 @@ func seedConfig(ctx context.Context, d Deps, log *zap.Logger) {
 	}
 
 	// Each carries placeholder sealed material: the doctor flags a credential with no secret, and
-	// a demo full of warnings reads as misconfigured. Nothing seeded references these, and the
-	// instance is read-only, so the placeholder is never decrypted or injected.
+	// a demo full of warnings reads as misconfigured. The instance is read-only and nothing here
+	// ever launches, so a placeholder is never decrypted or injected.
+	//
+	// Two are referenced by templates below. Referencing none left the credentials page showing an
+	// em dash under Used by on every row, which reads as a column that does not work rather than
+	// as the delete guard it feeds: the server computes that field with the same reading that
+	// refuses to delete a credential something still depends on.
 	//
 	// No two share a creation time. The list is ordered oldest first and ties break on the
 	// identifier, which every seed mints afresh, so a shared timestamp would make the page reorder
@@ -956,8 +961,8 @@ func seedConfig(ctx context.Context, d Deps, log *zap.Logger) {
 	}
 
 	templates := []*template.Template{
-		{ID: template.NewID(), Name: "Deploy web", ProjectID: projects[0].ID, Playbook: "site.yml", InventoryID: inventories[0].ID, Shards: 3, CreatedAt: ago(72)},
-		{ID: template.NewID(), Name: "Migrate database", ProjectID: projects[1].ID, Playbook: "migrate.yml", InventoryID: inventories[0].ID, CreatedAt: ago(48)},
+		{ID: template.NewID(), Name: "Deploy web", ProjectID: projects[0].ID, Playbook: "site.yml", InventoryID: inventories[0].ID, Shards: 3, CredentialIDs: []string{creds[0].ID}, CreatedAt: ago(72)},
+		{ID: template.NewID(), Name: "Migrate database", ProjectID: projects[1].ID, Playbook: "migrate.yml", InventoryID: inventories[0].ID, CredentialIDs: []string{creds[1].ID}, CreatedAt: ago(48)},
 		{ID: template.NewID(), Name: "Nightly audit", ProjectID: projects[0].ID, Playbook: "audit.yml", InventoryID: inventories[0].ID, CreatedAt: ago(24)},
 		{ID: template.NewID(), Name: "Rotate logs", ProjectID: projects[0].ID, Tool: run.ToolBash, Command: scriptLogRotate, CreatedAt: ago(36)},
 		{ID: template.NewID(), Name: "Provision network", ProjectID: projects[1].ID, Tool: run.ToolTerraform, Command: "infra/network", DryRun: true, CreatedAt: ago(30)},
