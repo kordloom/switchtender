@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -30,6 +31,12 @@ func withTrustedProxy(t *testing.T, cidr string) {
 
 // floodUsers returns a login handler over one real account, plus a poster that sends an attempt from
 // a given peer address carrying a given forwarded client address.
+//
+// The handler runs on a frozen clock. Each attempt in a flood pays a full password hash, so a burst
+// that takes seconds on a developer's machine took over a minute on a loaded CI runner: the fixed
+// window rolled over midway, the budget reset, and the flooding client was correctly allowed
+// through while the test still asserted it had been cut off. That is a test asserting on how fast
+// the machine happened to be. Freezing the clock is what loginHandlerWithClock exists for.
 func floodUsers(t *testing.T) func(peer, forwarded, username, password string) int {
 	t.Helper()
 	ctx := context.Background()
@@ -41,7 +48,9 @@ func floodUsers(t *testing.T) func(peer, forwarded, username, password string) i
 	if err := users.Save(ctx, u); err != nil {
 		t.Fatalf("Save user: %v", err)
 	}
-	handler := loginHandler(users, auth.NewMemStore(), nil, zap.NewNop())
+	frozen := time.Now()
+	handler := loginHandlerWithClock(users, auth.NewMemStore(), nil, zap.NewNop(),
+		func() time.Time { return frozen })
 	return func(peer, forwarded, username, password string) int {
 		body := `{"username":"` + username + `","password":"` + password + `"}`
 		r := httptest.NewRequest(http.MethodPost, "/v1/auth/login", strings.NewReader(body))
