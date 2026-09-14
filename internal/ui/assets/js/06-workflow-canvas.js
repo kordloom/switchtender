@@ -258,12 +258,15 @@ function exportWorkflow(format) {
 	}
 	const doc = workflowDocument();
 	const name = (doc.name || "workflow").replace(/\s+/g, "-").toLowerCase();
+	const file = format === "yaml" ? name + ".yaml" : name + ".json";
 	if (format === "yaml") {
-		downloadBlob(name + ".yaml", "text/yaml", toYAML(doc));
+		downloadBlob(file, "text/yaml", toYAML(doc));
 	} else {
-		downloadBlob(name + ".json", "application/json", JSON.stringify(doc, null, 2) + "\n");
+		downloadBlob(file, "application/json", JSON.stringify(doc, null, 2) + "\n");
 	}
-	wfSetStatus("Exported " + doc.steps.length + " steps.", "");
+	// The filename is the whole message. A browser that saves without prompting leaves "Exported 3
+	// steps." as the only sign anything happened, which reads as a button that did nothing.
+	wfSetStatus("Exported " + doc.steps.length + " steps to " + file + ".", "");
 }
 
 async function runWorkflow() {
