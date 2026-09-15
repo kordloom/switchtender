@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -68,6 +70,17 @@ func init() {
 	demoCmd.Flags().StringVar(&demoAnchorTSA, "anchor-tsa", defaultTSA,
 		"RFC 3161 authority that anchors the seeded chain, so the demo shows a real anchor. "+
 			"Empty seeds without anchoring; an unreachable authority is skipped with a warning.")
+	// The demo is the one build that actually sits behind a reverse proxy on the public internet,
+	// and it had no way to be told so. Every per-client bound then keyed on the proxy's own address,
+	// which is one address: the 32-stream-per-caller cap became a cap of 32 for every visitor at
+	// once, and the held run at the centre of the approvals story is non-terminal, so each visitor
+	// who opens it and walks away holds a slot until they close the tab.
+	demoCmd.Flags().StringSliceVar(&serveTrustedProxy, "trusted-proxy", nil,
+		"CIDR of a reverse proxy whose client IP header to believe, repeatable. Required behind a "+
+			"proxy: without it every visitor shares one per-client budget.")
+	demoCmd.Flags().StringVar(&serveClientIPHeader, "client-ip-header", "",
+		"Header carrying the real client address from a trusted proxy. Defaults to the leftmost "+
+			"X-Forwarded-For entry.")
 	demoCmd.Flags().DurationVar(&demoSpanCadence, "span-cadence", 0,
 		"Append a span beat to the audit chain this often, for example 60s. Whole seconds only. "+
 			"Zero leaves beats off.")
@@ -108,6 +121,20 @@ func runDemo(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
+
+	// Behind a reverse proxy, every per-client budget has to key on the client rather than on the
+	// proxy. Without this the demo's own 32-stream-per-caller cap applied to all visitors together,
+	// so the thirty-third open run page anywhere in the world was refused.
+	var proxies []*net.IPNet
+	for _, c := range serveTrustedProxy {
+		_, n, perr := net.ParseCIDR(strings.TrimSpace(c))
+		if perr != nil {
+			return fmt.Errorf("--trusted-proxy %q is not a CIDR: %w", c, perr)
+		}
+		proxies = append(proxies, n)
+	}
+	server.SetTrustedProxies(proxies)
+	server.SetClientIPHeader(serveClientIPHeader)
 
 	bundle, err := openBundle(db)
 	if err != nil {

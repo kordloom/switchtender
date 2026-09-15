@@ -9,6 +9,17 @@
 # The box must already be provisioned: the switchtender-demo service, Caddy, and reseed.sh are
 # assumed present. This script only swaps the binary and reseeds; it never touches packages or
 # service configuration.
+#
+# ONE-TIME CHANGE NEEDED ON THE BOX, and this script cannot make it because it does not edit the
+# unit: the demo runs behind Caddy, so its ExecStart needs
+#
+#   --trusted-proxy 127.0.0.1/32 --client-ip-header X-Forwarded-For
+#
+# Without it every per-client budget resolves every visitor to Caddy's own address, so the
+# 32-live-streams-per-caller cap applies to all visitors together rather than to each of them. The
+# held terraform destroy at the centre of the approvals story never reaches a terminal state, so
+# each visitor who opens it and leaves the tab open holds a slot until they close it, and the
+# thirty-third concurrent reader anywhere gets a 429 and a run view that never connects.
 set -euo pipefail
 
 BIN_DIR=/opt/switchtender/bin

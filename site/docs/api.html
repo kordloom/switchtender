@@ -550,7 +550,7 @@ either licensed or absent.</li>
 <tr>
 <td>POST</td>
 <td><code>/v1/orgs/{id}/members</code></td>
-<td>Add a user to an organization with an organization role. Organization admin grants manage over that organization's projects, templates, inventories and credentials whatever the account's global role is, so do not give it to a read-only auditor. See <a href="/docs/concepts">concepts</a>.</td>
+<td>Add a user to an organization with an organization role. Organization admin grants manage over that organization's projects, templates, inventories and credentials, bounded by the account's global role: on a viewer account it confers use, not manage. See <a href="/docs/concepts">concepts</a>.</td>
 </tr>
 <tr>
 <td>GET</td>

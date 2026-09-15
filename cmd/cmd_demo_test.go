@@ -68,3 +68,24 @@ func TestDemoPathsKeepIdentityBesideTheResolvedDatabase(t *testing.T) {
 			demoID.InstallID, demoID.KeyID())
 	}
 }
+
+// TestDemoTakesTheProxyFlagsServeTakes covers the one build that is actually exposed to the public
+// internet behind a reverse proxy, and had no way to be told so.
+//
+// Every per-client budget resolves the caller through clientAddr, which believes a forwarding header
+// only from a proxy the operator named. The demo never had the flag, so trustedProxies was always
+// empty and every visitor resolved to the proxy's own address: the 32-stream-per-caller cap became a
+// cap of 32 across all visitors at once. The run at the centre of the approvals story is held, so it
+// is non-terminal, and each visitor who opens it and leaves the tab open holds a slot until they
+// close it.
+func TestDemoTakesTheProxyFlagsServeTakes(t *testing.T) {
+	for _, name := range []string{"trusted-proxy", "client-ip-header"} {
+		if demoCmd.Flags().Lookup(name) == nil {
+			t.Errorf("demo has no --%s, so behind a proxy every visitor shares one per-client "+
+				"budget and the cap stops describing a caller", name)
+		}
+		if serveCmd.Flags().Lookup(name) == nil {
+			t.Errorf("serve has no --%s, which this test assumed as the reference", name)
+		}
+	}
+}

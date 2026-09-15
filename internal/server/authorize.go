@@ -136,16 +136,23 @@ func (a *authorizer) orgAccess(ctx context.Context, actor Actor, object string) 
 		if m.OrgID != orgID {
 			continue
 		}
-		// Organization admin confers manage over that organization's objects regardless of the
-		// account's global role, which is deliberate and pinned by TestAuthorizeOrgOwnership and
-		// TestAuthorizeOrgManageDelegation: membership is how a tenant administers itself without
-		// needing install-wide admin.
+		// Organization admin confers manage over that organization's objects, but never above what
+		// the account's own global role allows.
 		//
-		// It is worth being explicit because the name invites the opposite reading. A global viewer
-		// added to an organization as "admin" can edit and delete that organization's projects,
-		// templates, inventories and credentials. An operator setting up a read-only auditor must
-		// therefore not give them org admin, and docs/concepts.md says so.
-		if m.Role == org.RoleAdmin {
+		// The ceiling is the point. Without it, an operator who created a read-only auditor and
+		// added it to an organization as "admin", meaning "let them see all of this", handed that
+		// account write on the organization's credentials, templates, projects and inventories. The
+		// name invites exactly that mistake, and nothing in the product corrected it.
+		//
+		// The global role is the account's ceiling everywhere else, including for agents one file
+		// away in authmw: an agent gets its role and nothing more. Membership is delegation within
+		// what an account may already do, not a promotion past it. An organization still administers
+		// itself without install-wide admin, because its admins are operators.
+		//
+		// An explicit per-object manage grant is deliberately left alone: that is an admin choosing
+		// to delegate one named object to one named subject, which is a decision somebody made,
+		// rather than a role name meaning more than it says.
+		if m.Role == org.RoleAdmin && roleAllows(actor.Role, user.RoleOperator) {
 			return grant.AccessManage, true, nil
 		}
 		return grant.AccessUse, true, nil

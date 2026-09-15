@@ -85,7 +85,19 @@ func TestAuthorizeOrgOwnership(t *testing.T) {
 	}{ // Test 0: A global admin bypasses object checks entirely.
 		{"admin bypass", Actor{UserID: "user_x", Role: user.RoleAdmin}, "proj_solo", grant.AccessManage, true, true},
 		// Test 1: An admin of the owning org manages its objects.
-		{"org admin manages", Actor{UserID: "user_admin_a", Role: user.RoleViewer}, "proj_solo", grant.AccessManage, true, true},
+		// An organization admin whose account is an operator manages the organization's objects.
+		{"org admin manages", Actor{UserID: "user_admin_a", Role: user.RoleOperator}, "proj_solo", grant.AccessManage, true, true},
+		// The same membership on a read-only account confers no manage, because the global role is
+		// the ceiling. This is the read-only auditor an operator adds to an organization as "admin"
+		// meaning "let them see all of this", who used to gain edit and delete on its credentials.
+		//
+		// Under strict grants, because that is the layer where this decision is final: without
+		// strict grants an ungranted object defers to the role gate in authmw, which is what stops
+		// a viewer there. The delegation path is covered by TestAuthorizeOrgManageDelegation.
+		{"org admin cannot exceed a viewer account", Actor{UserID: "user_admin_a", Role: user.RoleViewer}, "proj_solo", grant.AccessManage, true, false},
+		// A viewer in the organization still reads and uses its objects, which is the point of
+		// membership and must not be lost to the ceiling.
+		{"org admin still uses", Actor{UserID: "user_admin_a", Role: user.RoleViewer}, "proj_solo", grant.AccessUse, true, true},
 		// Test 2: A plain member of the owning org may use its objects.
 		{"member uses", Actor{UserID: "user_member_a", Role: user.RoleViewer}, "proj_solo", grant.AccessUse, true, true},
 		// Test 3: A plain member gets use, not manage.
@@ -124,7 +136,10 @@ func TestAuthorizeOrgManageDelegation(t *testing.T) {
 		Object string
 		WantOK bool
 	}{ // Test 0: An admin of the owning org may manage its object.
-		{"org admin", Actor{UserID: "user_admin_a", Role: user.RoleViewer}, "proj_solo", true},
+		// Manage delegation follows the same ceiling: an operator who is an organization admin
+		// manages, a viewer with the same membership does not.
+		{"org admin as operator", Actor{UserID: "user_admin_a", Role: user.RoleOperator}, "proj_solo", true},
+		{"org admin as viewer", Actor{UserID: "user_admin_a", Role: user.RoleViewer}, "proj_solo", false},
 		// Test 1: A plain member may not manage, so the gate falls back to the role.
 		{"org member", Actor{UserID: "user_member_a", Role: user.RoleViewer}, "proj_solo", false},
 		// Test 2: A member of another org may not manage.
@@ -250,33 +265,4 @@ func TestAuthorizeOrgStrictWrongfulDeny(t *testing.T) {
 			t.Errorf("visible mismatch (-want +got):\n%s", diff)
 		}
 	})
-}
-
-// TestOrgAdminEscalatesAGlobalViewerOnPurpose records a behavior whose name invites the opposite
-// reading, so that changing it is a decision somebody makes rather than an accident.
-//
-// Organization admin confers manage over that organization's objects regardless of the account's
-// global role. A global viewer added to an organization as admin can edit and delete that
-// organization's projects, templates, inventories and credentials. That is deliberate: it is how a
-// tenant administers itself without anyone needing install-wide admin.
-//
-// It is also the opposite of what an operator setting up a read-only auditor expects from the word
-// "admin", and it was documented nowhere. docs/concepts.md and the members row of docs/api.md now
-// say it plainly. This test exists so the documentation and the behavior cannot drift apart: if the
-// ceiling is ever added, this test fails and the docs get corrected in the same change.
-func TestOrgAdminEscalatesAGlobalViewerOnPurpose(t *testing.T) {
-	t.Parallel()
-	authz := orgOwnedFixture(t)(false)
-
-	// A global viewer who is an admin of the organization owning proj_solo.
-	viewer := Actor{UserID: "user_admin_a", Role: user.RoleViewer}
-	got, err := authz.manages(context.Background(), viewer, "proj_solo")
-	if err != nil {
-		t.Fatalf("manages() error = %v", err)
-	}
-	if !got {
-		t.Error("a global viewer with organization admin no longer manages that organization's " +
-			"objects. That may be the right call, but docs/concepts.md and docs/api.md both " +
-			"state the current behavior and must be corrected in the same change.")
-	}
 }

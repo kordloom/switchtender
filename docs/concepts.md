@@ -88,14 +88,14 @@ An organization owns objects, and membership in it carries its own role, separat
 global one. Read this part carefully, because the names invite the wrong reading.
 
 A member with organization role **admin** can manage that organization's projects, templates,
-inventories and credentials: edit them and delete them. That holds **whatever the account's global
-role is**, including viewer. It is how a tenant administers itself without anyone needing
-install-wide admin.
+inventories and credentials: edit them and delete them. That is how a tenant administers itself
+without anyone needing install-wide admin.
 
-The consequence is worth stating plainly rather than leaving to be discovered. If you create a
-read-only auditor account with the global viewer role and then add it to an organization as admin,
-meaning "let them see all of this", you have given that account write access to everything that
-organization owns. Add an auditor as a **member**, not an admin.
+The account's global role is still the ceiling. Organization admin on an account whose global role is
+viewer confers use, not manage: it can read and launch the organization's objects but not change
+them. So a read-only auditor stays read-only however you add them to an organization, and an
+organization's admins are operators. Membership is delegation inside what an account may already do,
+never a promotion past it, which is the same rule agent tokens follow.
 
 Organization admin also confers nothing over the organization *record* itself. Managing members, and
 the organization's own settings, is the install's global admin role, not this one. So an
