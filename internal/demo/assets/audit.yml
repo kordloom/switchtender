@@ -1,0 +1,19 @@
+---
+# The Nightly audit template and its schedule run this. It changes nothing, which is what an audit
+# should do, so every task reports ok rather than changed.
+- name: Nightly audit
+  hosts: all
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Collect installed package versions
+      command: "sleep {{ work | default(1) }}"
+      changed_when: false
+    - name: Check file permissions on secrets
+      shell: |
+        echo "0600 /etc/switchtender/license.jwt"
+        echo "0600 /etc/ssl/private/site.key"
+      changed_when: false
+    - name: Check for unattended reboots pending
+      debug:
+        msg: "no reboot pending on {{ inventory_hostname }}"

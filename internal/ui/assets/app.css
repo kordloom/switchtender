@@ -507,6 +507,7 @@ table.runs td.mono { max-width: 118px; overflow: hidden; text-overflow: ellipsis
 .chip.warn { background: var(--changed); }
 /* A paid feature says so on the control itself, before the click, wherever the control is
    offered. A gate a reader only meets as a refusal reads as breakage. */
+.picker-row { display: flex; align-items: center; gap: 10px; padding: 4px 0; }
 .tier-tag { font-size: 10px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface-2); color: var(--muted); margin-left: 6px; line-height: 1.6; }
 .spark { display: inline-flex; gap: 2px; align-items: center; }
 .tick { display: inline-block; width: 7px; height: 17px; border-radius: 3px; background: var(--surface-3); }

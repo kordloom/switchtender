@@ -144,9 +144,90 @@ async function loadCompare() {
 		status.hidden = true;
 	} catch (e) {
 		status.hidden = false;
+		// Only the server saying there is no baseline earns the picker. A truncated body, an HTML
+		// error page behind a 200, or any other broken response is a failure, and dressing it as
+		// "no baseline was picked" would hide the one case a reader needs to see plainly.
+		if (noBaseline(e.message)) {
+			status.textContent = "No baseline was picked automatically: " + e.message + ".";
+			await renderBaselinePicker(runId);
+			return;
+		}
 		status.textContent = "Comparison unavailable: " + e.message +
 			". A run needs an earlier run of the same template to compare against.";
 	}
+}
+
+// noBaseline reports whether the refusal was the server saying this run has nothing to be compared
+// against, rather than the response being unreadable.
+function noBaseline(message) {
+	const m = String(message || "");
+	return m.includes("no earlier run of the same source") || m.includes("baseline run not found");
+}
+
+// renderBaselinePicker offers the runs this one can actually be compared against, since the default
+// baseline, the previous run of the same template or schedule, does not exist for a run that is the
+// first of its kind.
+//
+// The page ended here: one sentence, no table, no control, only "Back to run", for 10 of the 17 runs
+// on the demo. Worse, the standing description directly above promised the baseline could be chosen,
+// which nothing on the page let a reader do, while the loader had supported ?with=<id> all along.
+async function renderBaselinePicker(runId) {
+	const panel = document.getElementById("compare-picker");
+	const body = document.getElementById("compare-picker-body");
+	if (!panel || !body) return;
+	body.textContent = "";
+	let candidates = [];
+	let mine = null;
+	try {
+		mine = await getJSON("/runs/" + encodeURIComponent(runId));
+		const list = await getJSON("/runs?limit=100");
+		candidates = (list.runs || []).filter((r) => r.id !== runId && comparableTo(mine, r));
+	} catch (_) { /* the picker is a courtesy; the links below still give a way on */ }
+
+	const lead = document.createElement("p");
+	lead.className = "muted";
+	lead.textContent = candidates.length
+		? "This run has no earlier run of the same template or schedule. These ran the same work, so any of them can stand in as the baseline."
+		: "Nothing else in this install ran the same work, so there is nothing to compare this run against yet. The next run of it will have this one as its baseline.";
+	body.appendChild(lead);
+
+	for (const r of candidates.slice(0, 10)) {
+		const row = document.createElement("div");
+		row.className = "picker-row";
+		const link = document.createElement("a");
+		link.className = "button";
+		link.href = "/ui/runs/" + encodeURIComponent(runId) + "/compare?with=" + encodeURIComponent(r.id);
+		link.textContent = "Compare against " + shortId(r.id);
+		row.appendChild(link);
+		const when = document.createElement("span");
+		when.className = "muted";
+		when.textContent = " " + (r.status || "") + (r.created_at ? " \u00b7 " + fmtTime(r.created_at) : "");
+		row.appendChild(when);
+		body.appendChild(row);
+	}
+
+	const outs = document.createElement("p");
+	outs.className = "muted";
+	const all = document.createElement("a");
+	all.href = "/ui/runs";
+	all.textContent = "All runs";
+	outs.appendChild(all);
+	outs.appendChild(document.createTextNode(" \u00b7 "));
+	const back = document.createElement("a");
+	back.href = "/ui/runs/" + encodeURIComponent(runId);
+	back.textContent = "Back to this run";
+	outs.appendChild(back);
+	body.appendChild(outs);
+	panel.hidden = false;
+}
+
+// comparableTo reports whether another run did the same work as this one, which is what makes it a
+// usable baseline: the same playbook for Ansible, the same command for every other tool.
+function comparableTo(mine, other) {
+	if (!mine) return false;
+	if (mine.playbook) return other.playbook === mine.playbook;
+	if (mine.command) return other.command === mine.command;
+	return false;
 }
 
 if (document.body.dataset.page === "compare") {

@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -1206,7 +1207,7 @@ func TestSeededRunsNameTheTemplatesThatFiredThem(t *testing.T) {
 	// Asking by a name nothing was seeded under silently falls back to the old placeholder, which
 	// is the defect: the fallback keeps the demo running and leaves History empty.
 	for _, name := range []string{"Deploy web", "Reconcile inventory", "Fleet capacity report",
-		"Provision network"} {
+		"Provision network", "Rotate logs", "Migrate database", "Nightly audit"} {
 		got := ids.id(ids.Templates, name, "tpl_placeholder")
 		if got == "tpl_placeholder" {
 			t.Errorf("no template was seeded under %q, so runs claiming it fall back to a "+
@@ -1261,6 +1262,48 @@ func TestSeededOriginsNameRecordsThatExist(t *testing.T) {
 		if got == "" {
 			t.Errorf("no %s named %q was seeded, so a run claiming it names a record nothing "+
 				"holds", c.Kind, c.Name)
+		}
+	}
+}
+
+// TestEverySeededTemplateHasARunBehindIt pins the other half of the History button.
+//
+// Attributing runs correctly is not enough. A template no seeded run names at all still lands its
+// History on "no runs match your search", and on a read-only demo the visitor cannot launch one to
+// fix it, so the row is a dead end. Three of seven templates were in that state while a run of one
+// of their exact scripts sat in the runs list one page away.
+//
+// The check reads the seeder's source rather than executing it, because seeding runs real playbooks
+// and takes about a minute. That is the right granularity anyway: it proves the seeder intends a run
+// for every template, which is what a reviewer adding the eighth template needs told.
+func TestEverySeededTemplateHasARunBehindIt(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	stores := newSeedStores()
+	seedConfig(ctx, stores.deps(), zap.NewNop())
+
+	templates, err := stores.Templates.List(ctx)
+	if err != nil {
+		t.Fatalf("Templates.List() error = %v", err)
+	}
+	if len(templates) == 0 {
+		t.Fatal("seedConfig() stored no templates")
+	}
+
+	source, err := os.ReadFile("demo.go")
+	if err != nil {
+		t.Fatalf("read demo.go: %v", err)
+	}
+	attributed := make(map[string]bool)
+	for _, m := range regexp.MustCompile(`ids\.id\(ids\.Templates, "([^"]+)"`).
+		FindAllStringSubmatch(string(source), -1) {
+		attributed[m[1]] = true
+	}
+
+	for _, tpl := range templates {
+		if !attributed[tpl.Name] {
+			t.Errorf("template %q is seeded but no seeded run names it, so its History button "+
+				"opens on an empty list with nothing a demo visitor can do about it", tpl.Name)
 		}
 	}
 }

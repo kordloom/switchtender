@@ -15,10 +15,14 @@
 	<main class="content">
 		<a class="back" href="/ui/runs/{{.RunID}}">Back to run</a>
 		<h1>Compare runs</h1>
-		<p class="muted">What changed between this run and its baseline, host by host and task by task. The baseline is the previous run fired by the same template or schedule unless another run is chosen.</p>
+		<p class="muted">What changed between this run and its baseline, host by host and task by task. The baseline is the previous run fired by the same template or schedule. A run that has no earlier one offers a picker instead.</p>
 		<div id="compare-header" class="muted"></div>
 		<div id="compare-summary" class="summary" hidden></div>
 		<div id="status" class="muted">Loading comparison.</div>
+		<section id="compare-picker" class="panel" hidden>
+			<div class="panel-head"><h2>Pick a baseline</h2></div>
+			<div id="compare-picker-body" class="stack"></div>
+		</section>
 		<section id="compare-hosts-section" hidden>
 			<h2>Hosts</h2>
 			<div class="list-scroll">

@@ -295,6 +295,27 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 	}
 	settle(ctx, d, last.ID)
 
+	// A run behind each of the two remaining templates. Every seeded template now has history, so
+	// no History button lands on "no runs match your search" on a read-only demo where a visitor
+	// cannot launch one. Each runs the playbook its own template names, rather than being pointed at
+	// site.yml to make the count work: a template whose history shows a run of something else is
+	// the same lie in a quieter voice.
+	migrate, err := d.Submitter.Submit(ctx, filepath.Join(dir, "migrate.yml"), inv,
+		seedOpts(ctx, d, "template", ids.id(ids.Templates, "Migrate database", "tpl_migrate"), "admin",
+			map[string]string{"env": "prod", "team": "data"})...)
+	if err != nil {
+		return fmt.Errorf("seed migrate run: %w", err)
+	}
+	settle(ctx, d, migrate.ID)
+
+	audit, err := d.Submitter.Submit(ctx, filepath.Join(dir, "audit.yml"), inv,
+		seedOpts(ctx, d, "template", ids.id(ids.Templates, "Nightly audit", "tpl_nightly"), "deploy-bot",
+			map[string]string{"env": "prod", "team": "platform"})...)
+	if err != nil {
+		return fmt.Errorf("seed audit run: %w", err)
+	}
+	settle(ctx, d, audit.ID)
+
 	// One fact-gathering play, so every host page shows its distribution, kernel, and the rest
 	// rather than an empty panel.
 	factsPlay := filepath.Join(dir, "facts.yml")
@@ -495,9 +516,12 @@ func seedMultiTool(ctx context.Context, d Deps, tfDir, playbook, inv string, ids
 	// rather than leaving three skips in the log for somebody to notice.
 	var missing []string
 	bash, err := d.Submitter.Submit(ctx, "", "",
-		// No schedule is seeded for log rotation, so the origin is the API rather than a schedule
-		// id nothing answers to. The Rotate logs template exists; the cron entry does not.
-		seedOpts(ctx, d, "api", "", "deploy-bot", map[string]string{"env": "prod"},
+		// Attributed to the template whose command this run is executing. It used to be an API run,
+		// so the Rotate logs template's History opened on "no runs match your search" while a run
+		// of exactly that script sat in the runs list one page away, on a read-only demo where a
+		// visitor cannot launch one to fix it.
+		seedOpts(ctx, d, "template", ids.id(ids.Templates, "Rotate logs", "tpl_rotate"), "deploy-bot",
+			map[string]string{"env": "prod"},
 			run.WithTool(run.ToolBash), run.WithCommand(scriptLogRotate))...)
 	if err != nil {
 		return fmt.Errorf("seed bash run: %w", err)
