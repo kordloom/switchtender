@@ -170,6 +170,11 @@ const EMPTY_HINTS = {
 	jobtemplates: {
 		text: "Seed a few starter templates that run with no project, inventory, or credential:",
 		command: "switchtender examples",
+		// The command defaults to the database in the working directory. A server started with
+		// --db, which is every container, chart and unit file, is not that one, and seeding the
+		// wrong database succeeds: four cheerful lines, a new file nobody asked for, and this page
+		// still empty. The command now says so when it creates one, and so does this.
+		note: "Pass the same --db your server runs with, or they land in a different database.",
 	},
 	runs: { text: "Launch one from a template, or press Launch run above to compose one." },
 	inventories: {
@@ -210,6 +215,12 @@ function showEmpty(msg, keepControls) {
 			line.appendChild(copyButton(hint.command, "Copy this command"));
 		}
 		el.appendChild(line);
+		if (hint.note) {
+			const note = document.createElement("p");
+			note.className = "muted";
+			note.textContent = hint.note;
+			el.appendChild(note);
+		}
 	}
 	if (keepControls) return;
 	// Controls that filter, page, or export an empty list are noise, so they hide with it.

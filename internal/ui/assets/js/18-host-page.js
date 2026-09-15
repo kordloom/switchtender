@@ -165,6 +165,8 @@ async function loadDrift() {
 				btn.className = "button";
 				btn.dataset.mutates = "true";
 				btn.textContent = "Propose reconcile";
+				markTier(btn, "Team", "Drift detection is free. Turning a drift into a proposed, " +
+					"approvable run is Team.");
 				if (!isReadOnly() && canOperate()) {
 					btn.addEventListener("click", () => proposeReconcile(h.host, btn));
 				}

@@ -274,6 +274,21 @@ function mountDocsChrome() {
 // table cell now offers one and a cell is on every page. A helper reached from a shared
 // component belongs with the shared components.
 // copyButton returns a small clipboard control that copies text and confirms with a checkmark.
+// markTier labels a control with the tier its feature needs, so a reader learns the gate from the
+// control rather than from a refusal after the click. It is a no-op on a control that already
+// carries a tag, so a re-render cannot stack them.
+//
+// Every paid feature the UI offers is marked the same way. A gate stated on the pricing page and
+// nowhere in the product is the version of paid gating that reads as a bug.
+function markTier(el, tier, why) {
+	if (!el || el.querySelector(".tier-tag")) return;
+	const tag = document.createElement("span");
+	tag.className = "tier-tag";
+	tag.textContent = tier;
+	el.appendChild(tag);
+	if (why) el.dataset.tip = why;
+}
+
 function copyButton(text, tip) {
 	const btn = document.createElement("button");
 	btn.type = "button";

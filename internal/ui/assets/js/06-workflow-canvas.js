@@ -272,6 +272,15 @@ function exportWorkflow(format) {
 async function runWorkflow() {
 	if (wfState.submitting) return;
 	if (wfState.nodes.length === 0) { wfSetStatus("Add at least one step.", "err"); return; }
+	// The canvas opens on a seeded example so a first visit has something to read and drag. Running
+	// it unchanged executes terraform against infra/network, two playbooks, and a curl at a
+	// hostname that does not exist, on the reader's own machine, and writes the failure into their
+	// first runs and their new chain. Editing any step clears this.
+	if (wfIsUntouchedSample()) {
+		wfSetStatus("This is the sample pipeline, not yours. Point a step at a real playbook or " +
+			"command first, or clear the canvas and build your own.", "err");
+		return;
+	}
 	const steps = workflowSteps();
 	const body = {
 		name: document.getElementById("wf-name").value.trim() || "workflow",

@@ -164,6 +164,15 @@ function mountListFilter() {
 	}
 }
 
+// closingBody picks a tour's last words for the install it is running on. The tours shipped with
+// demo copy only, so a self-hosted operator's one piece of onboarding ended by telling them they
+// were exploring a demo where nothing can be broken, on their own server wired to their own hosts.
+// The script tag sits at the end of the body, so the flag the server stamped there is readable
+// here.
+function closingBody(demo, own) {
+	return isReadOnly() ? demo : own;
+}
+
 // TOURS is the guided-tour registry. Each tour runs on one page and walks a sequence of steps; a
 // step with a selector spotlights that element, and a step without one shows a centered card. The
 // launcher in the top bar lists them, and the welcome tour also runs on a first visit.
@@ -180,7 +189,9 @@ const TOURS = [
 			{ sel: "#tiles a[href='/ui/migrate']", title: "Bring your work with you", body: "Migrating from another tool? Import projects, inventories, templates, and schedules in a few clicks." },
 			{ sel: ".tile-search", title: "Find anything fast", body: "This search filters instantly, and every list in SwitchTender is searchable the same way." },
 			{ sel: ".side|.nav-toggle", title: "The rest of the yard", body: "Job templates, credentials with external secrets, schedules, and fleet analytics all live in the navigation." },
-			{ title: "You are set", body: "Explore the demo freely. Nothing here can be broken. Replay this tour anytime from Tour in the top bar." },
+			{ title: "You are set", body: closingBody(
+				"Explore the demo freely. Nothing here can be broken. Replay this tour anytime from Tour in the top bar.",
+				"This install is yours, and the runs it starts are real. Replay this tour anytime from Tour in the top bar.") },
 		],
 	},
 	{
@@ -194,7 +205,9 @@ const TOURS = [
 			{ page: "policies", path: "/ui/policies", sel: "#policy-open", title: "The gate nobody skips", body: "Policy holds a prod terraform destroy for an admin's sign-off, automatically. Approvals are enforced, not suggested.", hold: 7000 },
 			{ page: "audit", path: "/ui/audit", sel: "#audit-verify", title: "Prove every change", body: "Every change links into a tamper-evident hash chain. One click verifies it here, and a signed bundle verifies offline with an open verifier.", hold: 7000 },
 			{ page: "overview", path: "/ui/", sel: "#tiles a[href='/ui/migrate']", title: "Switching is one command", body: "Import from AWX, Semaphore, Rundeck, Jenkins, or a crontab in a single pass. AWX and Semaphore bring projects, inventories, templates, surveys, and schedules.", hold: 6500 },
-			{ title: "That is the moat", body: "Running many tools is table stakes. A control plane that proves itself is not. Press Explore and try anything, nothing here can break.", hold: 8000 },
+			{ title: "That is the moat", body: closingBody(
+				"Running many tools is table stakes. A control plane that proves itself is not. Press Explore and try anything, nothing here can break.",
+				"Running many tools is table stakes. A control plane that proves itself is not. Press Explore and start with a dry run."), hold: 8000 },
 		],
 	},
 	{

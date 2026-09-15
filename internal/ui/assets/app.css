@@ -505,6 +505,9 @@ table.runs td.mono { max-width: 118px; overflow: hidden; text-overflow: ellipsis
 /* An intact but unanchored chain is neither a pass nor a failure, and it must not wear the same
    badge as an anchored one: it reads as a caution, the same weight as a changed result. */
 .chip.warn { background: var(--changed); }
+/* A paid feature says so on the control itself, before the click, wherever the control is
+   offered. A gate a reader only meets as a refusal reads as breakage. */
+.tier-tag { font-size: 10px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface-2); color: var(--muted); margin-left: 6px; line-height: 1.6; }
 .spark { display: inline-flex; gap: 2px; align-items: center; }
 .tick { display: inline-block; width: 7px; height: 17px; border-radius: 3px; background: var(--surface-3); }
 a.tick { cursor: pointer; transition: transform 0.1s ease, box-shadow 0.1s ease; }

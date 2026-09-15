@@ -2,8 +2,10 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -69,6 +71,13 @@ func starterTemplates(now time.Time) []*template.Template {
 
 // runExamples writes the starter templates, skipping any whose name already exists.
 func runExamples(cmd *cobra.Command, _ []string) error {
+	// Seeding into a database that is not there creates one, silently, and then reports four
+	// templates added while the server's own database stays empty. The templates page offers this
+	// command with no --db, so a reader whose server runs with one, or who runs it from another
+	// directory, gets four success lines and a page that never changes. Serve says the same thing
+	// for the same reason.
+	fresh := newDatabase(examplesDB)
+
 	bundle, err := openBundle(examplesDB)
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
@@ -84,7 +93,23 @@ func runExamples(cmd *cobra.Command, _ []string) error {
 		return nil
 	}
 	fmt.Fprintf(os.Stderr, "added %d starter template(s). Launch one from the templates page or the API.\n", added)
+	if fresh {
+		fmt.Fprintf(os.Stderr,
+			"these went into a new database at %s, which was not there before. If your server runs "+
+				"with a different --db, it will not see them: rerun with the same --db the server "+
+				"uses.\n", examplesDB)
+	}
 	return nil
+}
+
+// newDatabase reports whether the given store is a local file that does not exist yet, so a command
+// about to create one can say so. A Postgres DSN is never a fresh file.
+func newDatabase(db string) bool {
+	if strings.HasPrefix(db, "postgres://") || strings.HasPrefix(db, "postgresql://") {
+		return false
+	}
+	_, err := os.Stat(db)
+	return errors.Is(err, os.ErrNotExist)
 }
 
 // seedExamples saves each starter template whose name is not already in the store, returning how many
