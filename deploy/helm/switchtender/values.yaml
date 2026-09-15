@@ -38,6 +38,12 @@ encryptionKey: ""
 encryptionSalt: ""
 existingSecret: ""
 
+# license is the signed license file a paid tier is turned on with, pasted whole. Leave it empty for
+# Community, which needs no license and never expires. With existingSecret, put the same content
+# under a license.jwt key in that secret instead. Without this the chart could install only
+# Community, so the deployment the quickstart recommends had no way to apply a purchase.
+license: ""
+
 service:
   type: ClusterIP
   port: 8080

@@ -54,6 +54,41 @@ jobs:
       # as free for a week, and a corrected pricing claim lived only in generated output. The
       # generator's own source says editing the output "gets clobbered on the next run, which is
       # how one card was lost once", which is a warning a person can read and CI can enforce.
+      # The chart is a shipped install path with no compiler behind it, and it has been wrong four
+      # separate ways: an image name Kubernetes resolved to Docker Hub, an appVersion a release
+      # behind, a readiness probe that kept a pod with an unreachable database in the Service, and
+      # no way at all to supply a license, which made the Team worker it deploys a pod that could
+      # never start. Rendering it in CI catches the shape; nothing catches it today.
+      - name: Helm chart renders
+        run: |
+          set -euo pipefail
+          curl -sSL https://get.helm.sh/helm-v3.16.3-linux-amd64.tar.gz | tar -xz -C /tmp
+          helm=/tmp/linux-amd64/helm
+          "$helm" lint deploy/helm/switchtender --set encryptionKey=k --set encryptionSalt=s
+          # Community, then a paid install with a worker: both have to render.
+          "$helm" template t deploy/helm/switchtender --set encryptionKey=k --set encryptionSalt=s > /tmp/community.yaml
+          "$helm" template t deploy/helm/switchtender --set encryptionKey=k --set encryptionSalt=s \
+            --set license=LIC --set worker.enabled=true > /tmp/team.yaml
+          # The chart must name the published image, not a bare name Kubernetes reads as Docker Hub.
+          grep -q 'image: "ghcr.io/kordloom/switchtender:' /tmp/community.yaml
+          # Readiness must ask whether the store is reachable, not merely whether the process is up.
+          grep -q 'path: /readyz' /tmp/community.yaml
+          # A Team install must carry its license to the server AND the worker, which refuses to
+          # start without one.
+          test "$(grep -c 'SWITCHTENDER_LICENSE' /tmp/team.yaml)" = "2"
+          # A Community install must carry none of that plumbing.
+          ! grep -q 'SWITCHTENDER_LICENSE' /tmp/community.yaml
+          # The chart's appVersion must not fall BEHIND the newest release. Ahead is fine and normal:
+          # the chart is bumped while the next version is being prepared. Behind is the defect, and
+          # it shipped a chart pinned a release back while the demo and README advertised the new one.
+          chart="$(grep -m1 '^appVersion:' deploy/helm/switchtender/Chart.yaml | tr -d '\"' | awk '{print $2}')"
+          latest="$(git tag --list 'v*' --sort=-v:refname | head -1 | sed 's/^v//')"
+          if [ -n "$latest" ] && [ "$(printf '%s\n%s\n' "$chart" "$latest" | sort -V | head -1)" = "$chart" ] \
+             && [ "$chart" != "$latest" ]; then
+            echo "::error title=Helm chart is stale::Chart.yaml appVersion is $chart, behind release $latest"
+            exit 1
+          fi
+
       - name: Generated site content is current
         run: |
           set -euo pipefail

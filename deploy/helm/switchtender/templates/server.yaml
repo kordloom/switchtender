@@ -41,6 +41,13 @@ spec:
                 secretKeyRef:
                   name: {{ include "switchtender.secretName" . }}
                   key: SWITCHTENDER_ENCRYPTION_SALT
+            {{- if or .Values.license .Values.existingSecret }}
+            # A paid license is a signed file the binary reads from this path. Without it the chart
+            # could install only Community, so the deployment the quickstart recommends had no way
+            # to apply a Team purchase at all.
+            - name: SWITCHTENDER_LICENSE
+              value: /etc/switchtender/license/license.jwt
+            {{- end }}
           ports:
             - name: http
               containerPort: 8080
@@ -50,14 +57,34 @@ spec:
               port: http
             initialDelaySeconds: 5
             periodSeconds: 10
+          # Readiness asks whether this pod can serve, which is what decides if it stays in the
+          # Service's endpoints. /healthz answers as long as the process is up, so a pod whose
+          # database had become unreachable kept taking traffic and answering 5xx forever. /readyz
+          # reads the run store and fails closed, which is the question a readiness probe asks.
           readinessProbe:
             httpGet:
-              path: /healthz
+              path: /readyz
               port: http
             initialDelaySeconds: 2
             periodSeconds: 5
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+          {{- if or .Values.license .Values.existingSecret }}
+          volumeMounts:
+            - name: license
+              mountPath: /etc/switchtender/license
+              readOnly: true
+          {{- end }}
+      {{- if or .Values.license .Values.existingSecret }}
+      volumes:
+        - name: license
+          secret:
+            secretName: {{ include "switchtender.secretName" . }}
+            items:
+              - key: license.jwt
+                path: license.jwt
+            optional: true
+      {{- end }}
 ---
 apiVersion: v1
 kind: Service

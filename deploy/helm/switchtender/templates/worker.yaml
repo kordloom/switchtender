@@ -46,6 +46,29 @@ spec:
                 secretKeyRef:
                   name: {{ include "switchtender.secretName" . }}
                   key: SWITCHTENDER_ENCRYPTION_SALT
+            {{- if or .Values.license .Values.existingSecret }}
+            # A worker is distributed execution, which is Team, so it refuses to start without a
+            # license. The chart deployed one regardless and had no way to supply one, which is a
+            # pod that can never come up.
+            - name: SWITCHTENDER_LICENSE
+              value: /etc/switchtender/license/license.jwt
+            {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+          {{- if or .Values.license .Values.existingSecret }}
+          volumeMounts:
+            - name: license
+              mountPath: /etc/switchtender/license
+              readOnly: true
+          {{- end }}
+      {{- if or .Values.license .Values.existingSecret }}
+      volumes:
+        - name: license
+          secret:
+            secretName: {{ include "switchtender.secretName" . }}
+            items:
+              - key: license.jwt
+                path: license.jwt
+            optional: true
+      {{- end }}
 {{- end }}
