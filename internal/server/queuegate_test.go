@@ -3,7 +3,6 @@ package server
 import (
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/kordloom/switchtender/internal/license"
 )
@@ -16,49 +15,36 @@ import (
 // pending forever with no error on any surface to say why. Every other gate in this product refuses
 // and names the tier; this one produced a silently stranded run, which is the worst shape a gate can
 // take because the operator has no way to learn what happened.
+//
+// Not parallel, and it goes through asCommunity: the license is process state, and this package runs
+// under a Team license from TestMain.
 func TestANamedQueueIsRefusedWithoutAWorkerLicense(t *testing.T) {
-	tests := []struct {
-		// Name says which install and queue is being tested.
-		Name string
-		// Licensed is whether a Team license is present.
-		Licensed bool
-		// Queue is the requested queue.
-		Queue string
-		// WantRefused is whether the request should be refused.
-		WantRefused bool
-	}{{ // Test 0: Community plus a named queue is the stranding case.
-		Name: "community named queue", Licensed: false, Queue: "prod", WantRefused: true,
-	}, { // Test 1: The default queue is the server's own pool and needs no worker.
-		Name: "community default queue", Licensed: false, Queue: "", WantRefused: false,
-	}, { // Test 2: Whitespace is the default queue, not a name.
-		Name: "community blank queue", Licensed: false, Queue: "   ", WantRefused: false,
-	}, { // Test 3: With Team, a named queue is exactly what was bought.
-		Name: "team named queue", Licensed: true, Queue: "prod", WantRefused: false,
-	}}
-
-	for _, test := range tests {
-		t.Run(test.Name, func(t *testing.T) {
-			t.Cleanup(func() { license.Set(nil) })
-			if test.Licensed {
-				lic := &license.License{}
-				lic.Claims.Tier = "team"
-				lic.Claims.Org = "acme"
-				lic.Claims.Expires = time.Now().Add(24 * time.Hour).Format(time.RFC3339)
-				license.Set(lic)
-			} else {
-				license.Set(nil)
-			}
-
-			err := allowQueue(test.Queue)
-			if (err != nil) != test.WantRefused {
-				t.Fatalf("%s: allowQueue(%q) error = %v, want refused: %v",
-					test.Name, test.Queue, err, test.WantRefused)
-			}
-			// A refusal has to name the tier and where to go, the same as every other gate, rather
-			// than leaving the operator to discover a run that never ran.
-			if test.WantRefused && !strings.Contains(err.Error(), "switchtender.com/pricing") {
-				t.Errorf("%s: refusal does not point anywhere: %v", test.Name, err)
-			}
-		})
+	// Under Team, which is what TestMain installs, a named queue is exactly what was bought.
+	if err := allowQueue("prod"); err != nil {
+		t.Errorf("a Team install was refused its own queue: %v", err)
 	}
+
+	asCommunity(t, func() {
+		// The default queue is the server's own pool and needs no worker, at any tier.
+		for _, free := range []string{"", "   "} {
+			if err := allowQueue(free); err != nil {
+				t.Errorf("allowQueue(%q) = %v, want allowed: the default pool needs no worker",
+					free, err)
+			}
+		}
+		err := allowQueue("prod")
+		if err == nil {
+			t.Fatal("a Community install accepted a named queue, so the run it routes can never " +
+				"be claimed and sits pending with nothing to explain it")
+		}
+		// A refusal has to name the tier and where to go, the same as every other gate, rather than
+		// leaving the operator to discover a run that never ran.
+		if !strings.Contains(err.Error(), "switchtender.com/pricing") {
+			t.Errorf("refusal does not point anywhere: %v", err)
+		}
+		if !strings.Contains(err.Error(), string(license.FeatureWorkers)) &&
+			!strings.Contains(strings.ToLower(err.Error()), "worker") {
+			t.Errorf("refusal does not name the feature: %v", err)
+		}
+	})
 }
