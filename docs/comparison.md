@@ -97,7 +97,7 @@ than "structured versus scrollback".
 | Surveys and prompts | All three collect typed values at launch. |
 | Inbound webhooks | All three launch on a git push. |
 | Metrics | SwitchTender exposes Prometheus metrics for scraping. |
-| Directory sign-in | SwitchTender, AWX, and Semaphore all sign in with LDAP and OpenID Connect. SwitchTender and Semaphore both price SSO at $490 a year, flat per organization; SwitchTender's Pro tier adds five approval policies to it, and AWX ships it free inside a Kubernetes-sized install. |
+| Directory sign-in | SwitchTender, AWX, and Semaphore all sign in with LDAP and OpenID Connect. SwitchTender and Semaphore both price SSO at $490 a year, though the unit differs: SwitchTender's Pro is flat per organization, while Semaphore's pricing page lists Pro as a per-instance subscription and reserves a multi-instance license for its enterprise tier, so an estate running several Semaphore instances pays per instance. SwitchTender's Pro tier adds five approval policies to it, and AWX ships it free inside a Kubernetes-sized install. |
 | Paid tiers | SwitchTender: Community free, Pro $490 a year to 250 hosts (SSO and five approval policies), Team $4,800 to $30,000 by fleet band (full policy engine, PostgreSQL active-active HA, distributed workers, drift reconcile, change register), Enterprise from $50,000. AWX: free, no paid tier; the paid product is Ansible Automation Platform. Semaphore: Community free, Pro $490 a year, Enterprise by contract. |
 
 ## Where SwitchTender is behind

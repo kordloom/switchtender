@@ -181,3 +181,50 @@ func TestRedactAssignmentsKeepsAQuotedCompositeIntact(t *testing.T) {
 		})
 	}
 }
+
+// TestRedactAssignmentsLeavesAnAdjacentQuoteAlone covers a quote that closes one opened before the
+// value, which is what a shell command looks like: psql "host=db password=hunter2".
+//
+// The unquoted alternative runs to the next whitespace, so it captured `hunter2"` and masked the
+// quote along with the secret. Both halves were wrong. The text came back missing the quote that
+// closed the string, and the captured secret carried one the run's output never had, so the log
+// scrubber searched for a string that was not there and left the real password in the log.
+func TestRedactAssignmentsLeavesAnAdjacentQuoteAlone(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Name       string
+		In         string
+		WantText   string
+		WantSecret string
+	}{{ // Test 0: The shell shape, where the quote opened before the assignment.
+		Name: "double quote closing earlier", In: `psql "host=db password=hunter2"`,
+		WantText: `psql "host=db password=[redacted]"`, WantSecret: "hunter2",
+	}, { // Test 1: Single quotes, with text after, so the quote is plainly not part of the value.
+		Name: "single quote closing earlier", In: `echo 'password=abc' && ls`,
+		WantText: `echo 'password=[redacted]' && ls`, WantSecret: "abc",
+	}, { // Test 2: A bare assignment is untouched by any of this.
+		Name: "no quotes at all", In: `password=plain`,
+		WantText: `password=[redacted]`, WantSecret: "plain",
+	}}
+
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			text, found := RedactAssignments(test.In, "[redacted]")
+			if diff := cmp.Diff(test.WantText, text); diff != "" {
+				t.Errorf("%s: redacted text mismatch (-want +got):\n%s", test.Name, diff)
+			}
+			var got string
+			for _, f := range found {
+				if f.Name == "password" {
+					got = f.Value
+				}
+			}
+			if diff := cmp.Diff(test.WantSecret, got); diff != "" {
+				t.Errorf("%s: captured secret mismatch (-want +got):\n%s\nThe captured value is what "+
+					"scrubs the run's own output, so one carrying a stray quote scrubs nothing.",
+					test.Name, diff)
+			}
+		})
+	}
+}

@@ -156,14 +156,68 @@ func parseRegisterTime(raw string) (time.Time, error) {
 // redactRunCommand returns rn with any secret assigned inside its script masked, copied so the stored
 // record is left alone. A run whose script carries nothing to mask is returned untouched.
 func redactRunCommand(rn *run.Run) *run.Run {
-	if rn == nil || rn.Command == "" {
+	if rn == nil {
 		return rn
 	}
-	masked, _ := util.RedactAssignments(rn.Command, "[redacted]")
-	if masked == rn.Command {
+	masked := rn.Command
+	if masked != "" {
+		masked, _ = util.RedactAssignments(masked, "[redacted]")
+	}
+	vars := redactVars(rn.ExtraVars)
+	if masked == rn.Command && vars == nil {
 		return rn
 	}
 	cp := *rn
 	cp.Command = masked
+	if vars != nil {
+		cp.ExtraVars = vars
+	}
 	return &cp
+}
+
+// redactVars masks secret-shaped assignments in the string leaves of a run's launch variables,
+// returning nil when nothing changed so the caller can skip the copy.
+//
+// A run carries its variables verbatim, and an operator who passes -e "db_password=..." has put a
+// secret in one. The receipt, the dossier, the change register and the webhook notification all
+// scrub it; the run record itself did not, so the surface that scrubs least was the one every role
+// reads most.
+func redactVars(in map[string]any) map[string]any {
+	if len(in) == 0 {
+		return nil
+	}
+	var out map[string]any
+	for k, v := range in {
+		text, ok := v.(string)
+		if !ok {
+			continue
+		}
+		// The key alone can name a secret, as it does for -e db_password=x, and then the whole
+		// value is the secret rather than an assignment inside it.
+		if util.SecretKey(k) {
+			if out == nil {
+				out = cloneVars(in)
+			}
+			out[k] = "[redacted]"
+			continue
+		}
+		masked, _ := util.RedactAssignments(text, "[redacted]")
+		if masked != text {
+			if out == nil {
+				out = cloneVars(in)
+			}
+			out[k] = masked
+		}
+	}
+	return out
+}
+
+// cloneVars copies a variable map so a redaction never mutates what the store handed back, which a
+// memory-backed store returns by pointer.
+func cloneVars(in map[string]any) map[string]any {
+	out := make(map[string]any, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }

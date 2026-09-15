@@ -1,14 +1,17 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/kordloom/switchtender/internal/event"
 	"github.com/kordloom/switchtender/internal/run"
-	"go.uber.org/zap"
+	"github.com/kordloom/switchtender/internal/user"
 )
 
 // listRunsResponse wraps a run list. The envelope leaves room for pagination fields later.
@@ -257,7 +260,7 @@ func listRunsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.H
 			summary = summarize(counts)
 		}
 		respondJSON(w, log, http.StatusOK, listRunsResponse{
-			Runs:       maskRuns(runs),
+			Runs:       scrubbedRuns(r.Context(), maskRuns(runs)),
 			Count:      len(runs),
 			Summary:    summary,
 			HasMore:    storeFullPage,
@@ -288,7 +291,7 @@ func getRunHandler(store run.Store, authz *authorizer, log *zap.Logger) http.Han
 		// Grade the run's blast radius so an approver sees the risk without opening the log.
 		risk := run.AssessRisk(got)
 		got.Risk = &risk
-		respondJSON(w, log, http.StatusOK, maskRun(got), wantsPretty(r))
+		respondJSON(w, log, http.StatusOK, scrubbedRun(r.Context(), maskRun(got)), wantsPretty(r))
 	}
 }
 
@@ -319,7 +322,8 @@ func runShardsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.
 			return
 		}
 		respondJSON(w, log, http.StatusOK,
-			shardsResponse{Shards: maskRuns(shards), Count: len(shards)}, wantsPretty(r))
+			shardsResponse{Shards: scrubbedRuns(r.Context(), maskRuns(shards)), Count: len(shards)},
+			wantsPretty(r))
 	}
 }
 
@@ -350,7 +354,8 @@ func runStepsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.H
 			return
 		}
 		respondJSON(w, log, http.StatusOK,
-			stepsResponse{Steps: maskRuns(steps), Count: len(steps)}, wantsPretty(r))
+			stepsResponse{Steps: scrubbedRuns(r.Context(), maskRuns(steps)), Count: len(steps)},
+			wantsPretty(r))
 	}
 }
 
@@ -414,4 +419,32 @@ func runLogsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.Ha
 			}
 		}
 	}
+}
+
+// scrubbedRun masks secret-shaped assignments in a run's command and launch variables for any caller
+// below admin, the same rule the inventory list already follows.
+//
+// A run carried both verbatim on every read. The receipt scrubs them, the dossier scrubs them, the
+// change register scrubs them, the webhook notification scrubs them, and the inventory list scrubs
+// its own equivalents, so an operator reasonably concluded the product scrubs inline secrets. The
+// run record did not, which made the read-only viewer role, the one an outside auditor is given,
+// the single surface that showed a password in the clear.
+//
+// Only the assignments are masked, not the command, so an operator still reads what a run did. An
+// admin sees the original: they hold every credential on the install already, and redacting for the
+// person who maintains it only obstructs them, which is the reasoning redactInventories records.
+func scrubbedRun(ctx context.Context, rn *run.Run) *run.Run {
+	if actor, ok := actorFrom(ctx); ok && actor.Role == user.RoleAdmin {
+		return rn
+	}
+	return redactRunCommand(rn)
+}
+
+// scrubbedRuns applies scrubbedRun across a list response.
+func scrubbedRuns(ctx context.Context, list []*run.Run) []*run.Run {
+	out := make([]*run.Run, len(list))
+	for i, rn := range list {
+		out[i] = scrubbedRun(ctx, rn)
+	}
+	return out
 }

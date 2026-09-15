@@ -161,3 +161,29 @@ test("a run with a hundred thousand log lines does not render one node per line"
 			`the log built ${log.children.length} elements, one per line`);
 	}
 });
+
+// TestOverCapMatrixOffersSomethingThePageCanDo pins that the refusal names real actions.
+//
+// The old text read "Filter to fewer hosts or tasks, or open a shard, to see the grid." There is no
+// host filter and no task filter anywhere on the run detail page, and a run that was not split has
+// no shards to open, so on the very run that trips the cap every instruction it gave was impossible.
+// The view the product is sold on became a dead end with three suggestions, none of them available.
+test("a matrix past its cap suggests only things the page actually offers", async () => {
+	const model = { hosts: [], tasks: [], cells: {} };
+	for (let h = 0; h < 300; h++) model.hosts.push("host" + h + ".example");
+	for (let t = 0; t < 30; t++) model.tasks.push("task " + t);
+
+	const { app, document } = await drive(pageEntry("detail"), reply({ events: [] }));
+	document.body.dataset.matrixCap = "2000";
+	app.renderMatrix(model);
+
+	const text = document.querySelector(".matrix-too-large").textContent;
+	assert.doesNotMatch(text, /filter to fewer/i,
+		"the refusal still tells the reader to use a filter this page does not have: " + text);
+	assert.match(text, /Export events/,
+		"the refusal names no control the page actually carries: " + text);
+	// A run with no shards panel showing must not be told to open a shard.
+	assert.doesNotMatch(text, /shards below/i,
+		"a run with no shards was told to open one: " + text);
+	assert.match(text, /300 hosts/, "the refusal did not say how large the run is: " + text);
+});
