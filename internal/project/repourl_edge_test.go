@@ -339,3 +339,50 @@ func TestParseLooseIPHonorsOctalAndHexOctets(t *testing.T) {
 		})
 	}
 }
+
+// TestValidateRepoURLRefusesSchemesWearingHostnames covers a value that is a URI scheme being read
+// as an scp-shorthand hostname.
+//
+// The shorthand is [user@]host:path and carries no scheme, so anything shaped like word:rest reached
+// that branch, and a URI scheme is shaped exactly like that. "javascript:alert(1)" was read as host
+// "javascript" over ssh and accepted: the scheme allowlist never saw it, because the parser had
+// already concluded the value had no scheme. A repository URL is stored and rendered, so one that
+// gets through here becomes an active link somewhere later.
+func TestValidateRepoURLRefusesSchemesWearingHostnames(t *testing.T) {
+	t.Parallel()
+	refused := []string{
+		"javascript:alert(1)",
+		"JavaScript:alert(document.domain)",
+		"data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==",
+		"vbscript:msgbox(1)",
+		"blob:https://example.com/abc",
+		"view-source:https://example.com",
+		// Not a scheme, but not a hostname either: characters no host may carry.
+		"host name:path/repo.git",
+		"host(1):repo.git",
+	}
+	for _, raw := range refused {
+		t.Run(raw, func(t *testing.T) {
+			t.Parallel()
+			if err := ValidateRepoURL(raw); !errors.Is(err, ErrBadRepoURL) {
+				t.Errorf("ValidateRepoURL(%q) = %v, want it refused: a value the parser reads as "+
+					"a host is handed to a transport as one", raw, err)
+			}
+		})
+	}
+
+	// The ordinary shorthand must keep working, which is the whole reason that branch exists.
+	allowed := []string{
+		"git@github.com:kordloom/switchtender.git",
+		"github.com:kordloom/switchtender.git",
+		"git@my-host_1.example.com:team/repo.git",
+	}
+	for _, raw := range allowed {
+		t.Run(raw, func(t *testing.T) {
+			t.Parallel()
+			if err := ValidateRepoURL(raw); err != nil {
+				t.Errorf("ValidateRepoURL(%q) = %v, want allowed", raw, err)
+			}
+		})
+	}
+}

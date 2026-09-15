@@ -13,6 +13,7 @@ import (
 	"github.com/kordloom/switchtender/internal/credential"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/util"
 	"github.com/kordloom/switchtender/internal/secretsource"
 )
 
@@ -350,6 +351,15 @@ func (d *Dispatcher) materializeCredentials(ctx context.Context, r *run.Run, spe
 					return cleanup, secrets, fmt.Errorf("materialize credential %s: %w", id, err)
 				}
 				secrets = append(secrets, file.Content)
+				// The decoded fields are registered as well as the stored blob.
+				//
+				// A GCP service-account file is JSON, and its private_key is a PEM whose line breaks
+				// are escaped inside that JSON. Registering only the stored form meant the masker
+				// held the escaped spelling, so the moment a playbook decoded the file and printed
+				// the key, the real PEM with real newlines matched nothing and went into the stored
+				// log verbatim. The ssh_key path learned this already, for the same reason: the form
+				// that reaches the output is not always the form that was stored.
+				secrets = append(secrets, decodedJSONSecrets(file.Content)...)
 				// The container plan mounts these, so the path the variable names resolves inside the
 				// container as well as on the host.
 				spec.CredentialFiles = append(spec.CredentialFiles, ff.Name())
@@ -537,6 +547,32 @@ func (d *Dispatcher) effectiveCredentialIDs(ctx context.Context, r *run.Run) []s
 		}
 		seen[id] = true
 		out = append(out, id)
+	}
+	return out
+}
+
+// decodedJSONSecrets returns the string values of a credential file that is a JSON object, so the
+// masker holds each field in the form a run will actually print rather than only the escaped form
+// they were stored in. A file that is not a JSON object yields nothing.
+//
+// A field is registered when its NAME classifies as a secret, by the one classifier the rest of the
+// product uses, or when its value is plainly key material. Registering every long string instead
+// would hand the masker ordinary identifiers, such as a service account's type or project, and turn
+// redaction into a search for common words that scribbles over legitimate output.
+func decodedJSONSecrets(content string) []string {
+	var obj map[string]any
+	if err := json.Unmarshal([]byte(content), &obj); err != nil {
+		return nil
+	}
+	out := make([]string, 0, len(obj))
+	for name, v := range obj {
+		text, ok := v.(string)
+		if !ok || text == "" || text == content {
+			continue
+		}
+		if util.SecretKey(name) || strings.Contains(text, "PRIVATE KEY-----") {
+			out = append(out, text)
+		}
 	}
 	return out
 }
