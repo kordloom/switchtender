@@ -102,13 +102,30 @@ async function getJSON(url) {
 		requireLogin();
 		throw new Error("authentication required");
 	}
-	if (res.status === 403) {
-		throw new Error("this view needs a higher role than this session holds");
-	}
 	if (!res.ok) {
-		throw new Error(url + " returned " + res.status);
+		// The server writes a sentence a person can act on: "project files are not enabled", "no
+		// facts gathered for this host yet", the licensing explanation with its pricing link.
+		// Throwing the internal path and a status code instead put developer strings in front of
+		// readers on a dozen surfaces and discarded the only text that said what to do next.
+		const data = await res.json().catch(() => ({}));
+		if (explains(data.error)) throw new Error(data.error);
+		if (res.status === 403) {
+			throw new Error("this view needs a higher role than this session holds");
+		}
+		throw new Error("the server refused with HTTP " + res.status);
 	}
 	return res.json();
+}
+
+// explains reports whether a server error is worth showing a reader instead of the phrasing this
+// client would write itself.
+//
+// A bare token like "forbidden" is not: the role sentence says more about what to do about it. A
+// phrase is, and on a 403 it is usually about something other than role, such as the licensing
+// refusal that carries its own pricing link. Substituting the role sentence there would be a
+// confident wrong answer.
+function explains(message) {
+	return typeof message === "string" && message.trim().includes(" ");
 }
 
 // authedDelete deletes a resource with the session's credentials, translating the failures a

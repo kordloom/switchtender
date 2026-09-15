@@ -239,7 +239,13 @@ async function fetchAuthed(path) {
 		requireLogin();
 		throw new Error("authentication required");
 	}
-	if (!res.ok) throw new Error("HTTP " + res.status);
+	if (!res.ok) {
+		// Same reason getJSON reads the body: a 403 here is the licensing explanation with its
+		// pricing link, and "HTTP 403" threw away both the reason and the one upsell this page
+		// exists to make.
+		const data = await res.clone().json().catch(() => ({}));
+		throw new Error(data.error || ("the server refused with HTTP " + res.status));
+	}
 	return res;
 }
 
@@ -262,8 +268,17 @@ function wireRunDownloads(runId) {
 				const text = await (await fetchAuthed("/runs/" + runId + "/logs")).text();
 				const url = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
 				// A blocked popup would otherwise swallow the log silently, so it is saved instead.
-				if (!window.open(url, "_blank", "noopener")) {
+				//
+				// The handle is what decides, not its truthiness. window.open returns null whenever
+				// noopener is set, per the spec, so testing the handle fired the fallback on every
+				// successful open too: the tab appeared AND an unrequested .log landed in Downloads,
+				// silently, on every click. Opening without noopener keeps a usable handle; the blob
+				// URL is same-origin and carries no token, so there is nothing for the opened
+				// document to reach back for.
+				const opened = window.open(url, "_blank");
+				if (!opened) {
 					downloadBlob("switchtender-" + runId + ".log", "text/plain", text);
+					setStatus("The log opened as a download: your browser blocked the new tab.");
 				}
 				// The new tab reads the blob synchronously on open, so the handle is released on the
 				// next turn rather than held for the life of the page.
