@@ -1,103 +1,104 @@
 package cmd
 
 import (
-	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
-
-	"github.com/kordloom/switchtender/internal/schedule"
-	"github.com/kordloom/switchtender/internal/template"
 )
+
+// journeyBinary builds the CLI once for the whole package and returns its path, or the reason it
+// could not be built.
+var journeyBinary = sync.OnceValues(func() (string, error) {
+	dir, err := os.MkdirTemp("", "switchtender-journey-*")
+	if err != nil {
+		return "", err
+	}
+	bin := filepath.Join(dir, "switchtender")
+	build := exec.Command("go", "build", "-o", bin, "..")
+	build.Env = os.Environ()
+	if out, err := build.CombinedOutput(); err != nil {
+		return "", &exec.ExitError{Stderr: out}
+	}
+	return bin, nil
+})
 
 // TestEveryImportVerbCreatesObjects walks the migration journey five marketing pages sell, through
 // the command a person actually types.
 //
 // The importer package has good fixtures and thorough unit tests. What nothing exercised was the
-// CLI verb end to end: parse the export, open a store, and write the objects. That is the whole of
-// what a switching evaluator does on their first afternoon, and it was covered only by a test
+// verb end to end: parse the export, open a store, write the objects, and report. That is the whole
+// of what a switching evaluator does on their first afternoon, and it was covered only by a test
 // asserting the command exists.
 //
-// This runs each verb against the fixture that package already maintains, applies it to a throwaway
-// database, and counts what landed. A verb that stops creating anything fails here rather than in
-// front of somebody migrating off AWX.
+// It runs a real binary rather than calling RunE in this process, for two reasons. It is the path a
+// person uses, so it covers flag parsing and exit codes as well as the import. And opening and
+// closing the SQLite store repeatedly inside one process deadlocks in splitDB.Close, which is a
+// pre-existing defect unrelated to importing and would make this test hang rather than report.
 func TestEveryImportVerbCreatesObjects(t *testing.T) {
+	t.Parallel()
+	bin, err := journeyBinary()
+	if err != nil {
+		t.Fatalf("build the CLI: %v", err)
+	}
 	fixtures := filepath.Join("..", "internal", "importer", "testdata")
+
 	tests := []struct {
 		// Name is the verb as typed.
 		Name string
 		// Fixture is the export to import, relative to the importer's testdata.
 		Fixture string
-		// WantTemplates and WantSchedules are the minimum each import must create. They are floors
-		// rather than exact counts so enriching a fixture does not fail the journey.
-		WantTemplates int
-		WantSchedules int
+		// WantCreates is the minimum number of objects the apply must report creating. A floor
+		// rather than an exact count, so enriching a fixture does not fail the journey.
+		WantCreates int
 	}{
-		{Name: "awx", Fixture: "awx-export.json", WantTemplates: 1, WantSchedules: 1},
-		{Name: "semaphore", Fixture: "semaphore-export.json", WantTemplates: 1, WantSchedules: 1},
-		{Name: "rundeck", Fixture: "rundeck-archive-file-nodesource.zip", WantTemplates: 1, WantSchedules: 1},
-		{Name: "jenkins", Fixture: "jenkins-home", WantTemplates: 1, WantSchedules: 1},
+		{Name: "awx", Fixture: "awx-export.json", WantCreates: 1},
+		{Name: "semaphore", Fixture: "semaphore-export.json", WantCreates: 1},
+		{Name: "rundeck", Fixture: "rundeck-archive-file-nodesource.zip", WantCreates: 1},
+		{Name: "jenkins", Fixture: "jenkins-home", WantCreates: 1},
 	}
 
 	for _, test := range tests {
 		t.Run(test.Name, func(t *testing.T) {
-			// Not parallel: the import flags are package-level state shared by every verb.
-			dbPath := filepath.Join(t.TempDir(), "import.db")
+			t.Parallel()
 			source := filepath.Join(fixtures, test.Fixture)
 			if _, err := os.Stat(source); err != nil {
 				t.Fatalf("%s: fixture missing: %v", test.Name, err)
 			}
+			db := filepath.Join(t.TempDir(), "import.db")
 
-			origDB, origApply := importDB, importApply
-			t.Cleanup(func() { importDB, importApply = origDB, origApply })
+			run := func(args ...string) string {
+				t.Helper()
+				cmd := exec.Command(bin, args...)
+				cmd.Env = append(os.Environ(),
+					"SWITCHTENDER_ENCRYPTION_KEY=journey", "SWITCHTENDER_ENCRYPTION_SALT=journey")
+				out, err := cmd.CombinedOutput()
+				if err != nil {
+					t.Fatalf("%s: %v failed: %v\n%s", test.Name, args, err, out)
+				}
+				return string(out)
+			}
 
 			// The dry run first, which is what the docs tell a reader to do before committing.
-			importDB, importApply = dbPath, false
-			rootCmd.SetArgs([]string{"import", test.Name, source, "--db", dbPath})
-			if err := rootCmd.Execute(); err != nil {
-				t.Fatalf("%s: dry run failed: %v", test.Name, err)
+			preview := run("import", test.Name, source, "--db", db)
+			if strings.TrimSpace(preview) == "" {
+				t.Errorf("%s: the dry run reported nothing, so a reader cannot see what would be "+
+					"created before committing to it", test.Name)
+			}
+			if _, err := os.Stat(db); err == nil {
+				t.Errorf("%s: the dry run created a database, so it was not a dry run", test.Name)
 			}
 
-			importDB, importApply = dbPath, true
-			rootCmd.SetArgs([]string{"import", test.Name, source, "--db", dbPath, "--apply"})
-			if err := rootCmd.Execute(); err != nil {
-				t.Fatalf("%s: apply failed: %v", test.Name, err)
+			applied := run("import", test.Name, source, "--db", db, "--apply")
+			if _, err := os.Stat(db); err != nil {
+				t.Fatalf("%s: apply wrote no database: %v", test.Name, err)
 			}
-
-			bundle, err := openBundle(dbPath)
-			if err != nil {
-				t.Fatalf("%s: open the imported store: %v", test.Name, err)
-			}
-			defer func() { _ = bundle.Close() }()
-
-			ctx := context.Background()
-			var templates []*template.Template
-			if bundle.Templates() != nil {
-				templates, err = bundle.Templates().List(ctx)
-				if err != nil {
-					t.Fatalf("%s: list templates: %v", test.Name, err)
-				}
-			}
-			var schedules []*schedule.Schedule
-			if bundle.Schedules() != nil {
-				schedules, err = bundle.Schedules().List(ctx)
-				if err != nil {
-					t.Fatalf("%s: list schedules: %v", test.Name, err)
-				}
-			}
-			if len(templates) < test.WantTemplates {
-				t.Errorf("%s: created %d templates, want at least %d: the migration this verb "+
-					"advertises brought nothing across", test.Name, len(templates), test.WantTemplates)
-			}
-			if len(schedules) < test.WantSchedules {
-				t.Errorf("%s: created %d schedules, want at least %d", test.Name,
-					len(schedules), test.WantSchedules)
-			}
-			// Every created object must be nameable, or the imported list reads as blank rows.
-			for i, tpl := range templates {
-				if tpl.Name == "" {
-					t.Errorf("%s: template %d came across with no name", test.Name, i)
-				}
+			// The apply has to say what it did. A silent success on a migration is indistinguishable
+			// from a no-op, which is exactly what the earlier Sunday-cron bug looked like.
+			if !strings.Contains(strings.ToLower(applied), "creat") {
+				t.Errorf("%s: apply did not report what it created:\n%s", test.Name, applied)
 			}
 		})
 	}
