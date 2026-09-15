@@ -68,6 +68,12 @@ async function loadFleet() {
 			showEmpty("No host history yet. Run a playbook to build fleet health.");
 			return;
 		}
+		// The server ranks worst first and caps what it sends, so a large estate is told which
+		// part of itself it is looking at rather than being left to assume it sees everything.
+		if (typeof data.total === "number" && data.total > hosts.length) {
+			setStatus("Showing the " + hosts.length.toLocaleString() + " hosts with the most recent " +
+				"failures, of " + data.total.toLocaleString() + " this account can read.");
+		}
 		const tbody = document.getElementById("fleet");
 		for (const h of hosts) {
 			const tr = document.createElement("tr");

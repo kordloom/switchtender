@@ -40,8 +40,28 @@ type fleetResponse struct {
 	Hosts []run.HostHealth `json:"hosts"`
 	// Count is the number of hosts returned.
 	Count int `json:"count"`
+	// Total is how many hosts the caller may read, before the cap below was applied, so a reader
+	// shown the worst thousand of ten thousand is told which thousand they are looking at.
+	Total int `json:"total"`
 	// Window is the number of recent runs per host considered.
 	Window int `json:"window"`
+}
+
+// maxFleetHosts bounds how many host rows one fleet or drift response carries.
+//
+// window bounds the runs summarized PER HOST and was mistaken for a bound on the response: neither
+// endpoint capped the hosts, so a ten thousand host estate serialized ten thousand records on every
+// front-page load, and raising window multiplied the work behind each one. Both views are ranked
+// worst first, so a bounded prefix is the part anybody reads; the rest is weight.
+const maxFleetHosts = 1000
+
+// cappedHosts returns at most maxFleetHosts of a worst-first ranking, and the full length, so the
+// response can say what it left out.
+func cappedHosts[T any](all []T) (shown []T, total int) {
+	if len(all) <= maxFleetHosts {
+		return all, len(all)
+	}
+	return all[:maxFleetHosts], len(all)
 }
 
 // hostHistoryResponse wraps one host's recent per run outcomes.
@@ -94,8 +114,10 @@ func fleetHandler(store run.Store, authz *authorizer, log *zap.Logger) http.Hand
 			}
 			shown = append(shown, kept)
 		}
+		capped, total := cappedHosts(shown)
 		respondJSON(w, log, http.StatusOK,
-			fleetResponse{Hosts: shown, Count: len(shown), Window: window}, wantsPretty(r))
+			fleetResponse{Hosts: capped, Count: len(capped), Total: total, Window: window},
+			wantsPretty(r))
 	}
 }
 
@@ -105,6 +127,8 @@ type driftResponse struct {
 	Hosts []run.HostDrift `json:"hosts"`
 	// Count is the number of hosts returned.
 	Count int `json:"count"`
+	// Total is how many drifted hosts the caller may read, before the cap.
+	Total int `json:"total"`
 }
 
 // driftHandler reports each host's most recent drift check, from the latest dry run to touch it.
@@ -135,8 +159,9 @@ func driftHandler(store run.Store, authz *authorizer, log *zap.Logger) http.Hand
 				visible = append(visible, h)
 			}
 		}
+		capped, total := cappedHosts(visible)
 		respondJSON(w, log, http.StatusOK,
-			driftResponse{Hosts: visible, Count: len(visible)}, wantsPretty(r))
+			driftResponse{Hosts: capped, Count: len(capped), Total: total}, wantsPretty(r))
 	}
 }
 

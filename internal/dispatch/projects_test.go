@@ -411,3 +411,62 @@ func TestHeldGitRunIsPinnedToTheCommitTheApproverSaw(t *testing.T) {
 			free.PinnedCommit)
 	}
 }
+
+// TestAStoredInventorySurvivesAGitBackedProject covers two answers to "which hosts did this run
+// touch", where the durable one was wrong.
+//
+// materializeInventory runs before resolveProject and writes the stored inventory the operator
+// picked to a file, pointing the spec at it. resolveProject then rewrote spec.Inventory from the
+// checkout whenever the run also carried an inventory path, which a git-backed template normally
+// does. The run executed against the repository's inventory file while the run record, the detail
+// page and the receipt all named the stored inventory, and nothing anywhere reported a conflict.
+func TestAStoredInventorySurvivesAGitBackedProject(t *testing.T) {
+	t.Parallel()
+	repo := newEscapeRepo(t)
+	cache := t.TempDir()
+	syncer, err := project.NewSyncer(cache)
+	if err != nil {
+		t.Fatalf("NewSyncer() error = %v", err)
+	}
+	projects := project.NewMemStore()
+	p := &project.Project{ID: "proj_inv", Name: "infra", RepoURL: repo, Branch: "main"}
+	if err := projects.Save(context.Background(), p); err != nil {
+		t.Fatalf("Save(project) error = %v", err)
+	}
+	d := New(run.NewMemStore(), okRunner(), zap.NewNop(), WithProjects(projects, syncer),
+		WithNoJanitor())
+	defer d.Close()
+
+	// What materializeInventory leaves behind: the spec already points at the stored inventory it
+	// wrote out, and the run carries both the stored id and the template's checkout-relative path.
+	const materialized = "/tmp/switchtender-stored-inventory.ini"
+	r := &run.Run{
+		ID: "run_inv", ProjectID: p.ID, Playbook: escapeRepoPlaybook,
+		Inventory: escapeRepoInventory, InventoryID: "inv_stored",
+	}
+	spec := roundhouse.Spec{Playbook: r.Playbook, Inventory: materialized}
+	cleanup, err := d.resolveProject(r, &spec)
+	defer cleanup()
+	if err != nil {
+		t.Fatalf("resolveProject() error = %v", err)
+	}
+	if spec.Inventory != materialized {
+		t.Errorf("spec.Inventory = %q, want the stored inventory at %q: the run executed against "+
+			"the checkout's file while its own record named the stored one",
+			spec.Inventory, materialized)
+	}
+
+	// Without a stored inventory, the checkout path is still what resolves, which is the ordinary
+	// case and must not change.
+	plain := &run.Run{ID: "run_plain", ProjectID: p.ID, Playbook: escapeRepoPlaybook,
+		Inventory: escapeRepoInventory}
+	plainSpec := roundhouse.Spec{Playbook: plain.Playbook}
+	cleanup2, err := d.resolveProject(plain, &plainSpec)
+	defer cleanup2()
+	if err != nil {
+		t.Fatalf("resolveProject() plain error = %v", err)
+	}
+	if plainSpec.Inventory == "" || plainSpec.Inventory == materialized {
+		t.Errorf("plain spec.Inventory = %q, want the checkout's inventory path", plainSpec.Inventory)
+	}
+}

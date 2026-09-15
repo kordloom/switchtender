@@ -84,7 +84,14 @@ func (d *Dispatcher) resolveProject(r *run.Run, spec *roundhouse.Spec) (cleanup 
 		return cleanup, fmt.Errorf("playbook %q: %w", r.Playbook, err)
 	}
 	spec.Playbook = playbook
-	if r.Inventory != "" {
+	// A stored inventory chosen at launch wins over a path inside the checkout.
+	//
+	// materializeInventory runs before this and writes the stored inventory to a file, setting
+	// spec.Inventory to it. Rewriting that from the project discarded it silently: the run executed
+	// against the repository's inventory file while its own record, the run detail page and the
+	// receipt all named the stored inventory the operator picked. Two answers to "which hosts did
+	// this run touch", and the durable one was wrong.
+	if r.Inventory != "" && r.InventoryID == "" {
 		inventory, err := project.WithinRepo(wt.Dir, r.Inventory)
 		if err != nil {
 			return cleanup, fmt.Errorf("inventory %q: %w", r.Inventory, err)
