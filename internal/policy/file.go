@@ -11,6 +11,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/kordloom/switchtender/internal/license"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -195,12 +196,44 @@ func (s *FileStore) List(_ context.Context) ([]*Policy, error) {
 	if err != nil {
 		return nil, err
 	}
+	// The licence is checked on every read, not only at startup.
+	//
+	// The file hot-reloads, and the check lived in serve's startup path alone, so a Community
+	// install started with a plain file and then had deny rules, risk floors and actor scoping
+	// added to it afterward ran the full policy engine, uncapped, for as long as the process
+	// lived. The gate was one edit away from not existing.
+	//
+	// It returns an error rather than quietly dropping the rules it cannot license. Dropping them
+	// would ungate runs those rules were written to hold, which is the one direction this must
+	// never fail: the dispatcher already treats an unreadable policy set as a refusal to run,
+	// which is disruptive once and in the safe direction.
+	if lerr := s.allowed(cached); lerr != nil {
+		return nil, lerr
+	}
 	out := make([]*Policy, len(cached))
 	for i, p := range cached {
 		cp := *p
 		out[i] = &cp
 	}
 	return out, nil
+}
+
+// allowed reports whether the current licence covers this policy set, by count and by the features
+// the rules use. It is the same pair of checks serve makes at startup, applied to what the file says
+// now rather than to what it said then.
+func (s *FileStore) allowed(set []*Policy) error {
+	for _, p := range set {
+		if p.Advanced() {
+			if err := license.Allow(license.FeaturePolicyFull); err != nil {
+				return fmt.Errorf("the policy file needs a licence it does not have: %w", err)
+			}
+			break
+		}
+	}
+	if err := license.AllowPolicies(len(set)); err != nil {
+		return fmt.Errorf("the policy file needs a licence it does not have: %w", err)
+	}
+	return nil
 }
 
 // Get returns the policy with the given id, or ErrNotFound.
