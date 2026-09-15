@@ -371,8 +371,11 @@ async function loadDetail(runId) {
 	if (auditLink && !roleAtLeast("admin")) {
 		auditLink.hidden = true;
 	} else if (auditLink) {
+		// The receipt is added once the run is read, below. The id alone cannot find the run's own
+		// creation entry: that entry is written in middleware before the handler runs, so the path
+		// it commits is the collection, /v1/runs, without an id the server does not yet know.
 		auditLink.href = "/ui/audit?q=" + encodeURIComponent(runId);
-		auditLink.dataset.tip = "Click to see every audited change that mentions this run";
+		auditLink.dataset.tip = "Click to see this run's chain entries, its creation included";
 	}
 	const copyLink = document.getElementById("copy-link");
 	if (copyLink) {
@@ -414,6 +417,14 @@ async function loadDetail(runId) {
 	}, 1000);
 	try {
 		const run = await getJSON("/runs/" + runId);
+		// Filtering the trail by the run id matched only entries written after the run existed, so
+		// a run still held for approval matched none of them and its Audit trail button opened an
+		// empty table while the header beside it named the very chain entry that created it. The
+		// receipt carries that sequence, so the link passes both and the page keeps either.
+		if (auditLink && !auditLink.hidden && run.audit_receipt) {
+			auditLink.href = "/ui/audit?q=" + encodeURIComponent(runId) +
+				"&seq=" + encodeURIComponent(String(run.audit_receipt).split(":")[0]);
+		}
 		const rerun = document.getElementById("rerun-run");
 		// A rejected run, and one canceled before it ever started, are decisions not to run it. The
 		// API refuses to replay either, so the button is not offered for them.

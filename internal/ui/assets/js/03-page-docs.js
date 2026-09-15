@@ -131,7 +131,11 @@ function mountListFilter() {
 		const q = input.value.trim().toLowerCase();
 		let shown = 0;
 		for (const row of tbody.rows) {
-			const match = q === "" || row.textContent.toLowerCase().includes(q);
+			// A row the page marked as wanted survives the filter whatever its text says. The
+			// audit page uses it for a run's creation entry, whose committed path names the
+			// collection rather than the run, so no text in the row can ever match the run id.
+			const match = q === "" || row.dataset.keep === "1" ||
+				row.textContent.toLowerCase().includes(q);
 			if (match) row.dataset.fhide = "";
 			else row.dataset.fhide = "1";
 			applyRowVisibility(row);
