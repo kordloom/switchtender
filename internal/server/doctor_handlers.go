@@ -100,7 +100,7 @@ func doctorHandler(templates template.Store, schedules schedule.Store, creds cre
 				add := func(severity, problem string) {
 					report.Findings = append(report.Findings, doctorFinding{
 						Severity: severity, ObjectType: "template", ObjectID: t.ID,
-						ObjectName: t.Name, Problem: problem, FixPath: "/ui/templates",
+						ObjectName: namedOr(t.Name, t.ID), Problem: problem, FixPath: "/ui/templates",
 					})
 				}
 				if t.InventoryID != "" && invs != nil {
@@ -141,7 +141,7 @@ func doctorHandler(templates template.Store, schedules schedule.Store, creds cre
 				add := func(severity, problem string) {
 					report.Findings = append(report.Findings, doctorFinding{
 						Severity: severity, ObjectType: "schedule", ObjectID: s.ID,
-						ObjectName: s.Name, Problem: problem, FixPath: "/ui/schedules",
+						ObjectName: namedOr(s.Name, s.ID), Problem: problem, FixPath: "/ui/schedules",
 					})
 				}
 				if _, err := s.NextFire(time.Now()); err != nil {
@@ -167,7 +167,7 @@ func doctorHandler(templates template.Store, schedules schedule.Store, creds cre
 				if c.Secret == "" {
 					report.Findings = append(report.Findings, doctorFinding{
 						Severity: "warning", ObjectType: "credential", ObjectID: c.ID,
-						ObjectName: c.Name,
+						ObjectName: namedOr(c.Name, c.ID),
 						Problem:    "Has no secret yet, so any run that uses it fails.",
 						FixPath:    "/ui/credentials",
 					})
@@ -183,4 +183,18 @@ func doctorHandler(templates template.Store, schedules schedule.Store, creds cre
 		})
 		respondJSON(w, log, http.StatusOK, report, wantsPretty(r))
 	}
+}
+
+// namedOr returns an object's name, falling back to its id when it has none.
+//
+// A name is optional on a template, a schedule and a credential, and the API creates unnamed ones
+// without complaint: the tutorial's own copyable schedule command produces one. The doctor then
+// reported "schedule  | Fires template tpl_abc123, which no longer exists" with an empty space where
+// the identity should be, twice, and an operator reading a list of problems could not tell which
+// object to open. A finding nobody can act on is not a finding.
+func namedOr(name, id string) string {
+	if name != "" {
+		return name
+	}
+	return id
 }
