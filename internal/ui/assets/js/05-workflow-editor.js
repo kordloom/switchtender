@@ -310,7 +310,10 @@ function wfIsUntouchedSample() {
 		wfState = real;
 		if (nameEl) nameEl.value = named;
 	}
-	if (named && named !== "Release pipeline") return false;
+	// The verdict is the step content alone. Naming the graph used to clear it, and naming it is the
+	// first thing anyone does on this page, so the guard came off before a single step had been
+	// pointed at anything real: typing "my deploy" over the placeholder ran terraform against
+	// infra/network, two playbooks, and a curl at a host that does not exist. A title is not work.
 	return wfSampleShape(wfState.nodes, wfState.edges) === wfSampleShape(seeded.nodes, seeded.edges);
 }
 

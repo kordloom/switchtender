@@ -28,6 +28,9 @@ var (
 	ErrNotFound = errors.New("schedule not found")
 	// ErrNoTarget is returned when a schedule names neither a playbook nor pipeline steps.
 	ErrNoTarget = errors.New("no playbook or steps")
+	// ErrBadTimezone is a timezone this system does not know, kept distinct from ErrBadCron so a
+	// typo in the zone is never reported as a fault in the expression.
+	ErrBadTimezone = errors.New("bad timezone")
 )
 
 // Schedule is a recurring run definition. It fires a pipeline when Steps is set, a split when Shards
@@ -143,10 +146,11 @@ func (s *Schedule) validTimezone() error {
 	}
 	if strings.ContainsAny(s.Timezone, " \t\r\n=") {
 		return fmt.Errorf("%w: a timezone is a zone name such as America/New_York, not %q",
-			ErrBadCron, s.Timezone)
+			ErrBadTimezone, s.Timezone)
 	}
 	if _, err := time.LoadLocation(s.Timezone); err != nil {
-		return fmt.Errorf("%w: timezone %q cannot be resolved on this system", ErrBadCron, s.Timezone)
+		return fmt.Errorf("%w: unknown timezone %q, use an IANA name such as America/New_York",
+			ErrBadTimezone, s.Timezone)
 	}
 	return nil
 }
@@ -161,9 +165,18 @@ func (s *Schedule) effectiveCron() string {
 	return "CRON_TZ=" + s.Timezone + " " + s.Cron
 }
 
-// NextFire returns the next time this schedule fires after the given time, in its own timezone. A
-// bad timezone is reported here rather than stored, since the cron parser rejects an unknown zone.
+// NextFire returns the next time this schedule fires after the given time, in its own timezone.
+//
+// The zone is checked before the expression, so a typo in one is not reported as a fault in the
+// other. The cron parser rejects an unknown zone with its own generic message, which every caller
+// then rendered as "invalid cron expression": an operator who typed America/New_york was told their
+// perfectly good "0 2 * * *" was wrong, and had no reason to look at the field that actually was.
 func (s *Schedule) NextFire(after time.Time) (time.Time, error) {
+	// The preview endpoint builds a Schedule and calls this directly without Validate, so the zone
+	// is checked here too rather than only on the save path. validTimezone is the one definition.
+	if err := s.validTimezone(); err != nil {
+		return time.Time{}, err
+	}
 	return NextFire(s.effectiveCron(), after)
 }
 

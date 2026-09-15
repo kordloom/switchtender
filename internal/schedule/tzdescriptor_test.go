@@ -68,8 +68,10 @@ func TestTimezoneIsRefusedAsAZoneNameNotADescriptor(t *testing.T) {
 				t.Fatalf("Validate() accepted timezone %q: a descriptor in the zone field lets a "+
 					"schedule display one cadence and run another", test.Timezone)
 			}
-			if !errors.Is(err, ErrBadCron) {
-				t.Errorf("Validate() with timezone %q error = %v, want ErrBadCron",
+			// A fault in the zone field carries ErrBadTimezone. It used to carry ErrBadCron, which is
+			// why every caller rendered a zone mistake as "invalid cron expression".
+			if !errors.Is(err, ErrBadTimezone) {
+				t.Errorf("Validate() with timezone %q error = %v, want ErrBadTimezone",
 					test.Timezone, err)
 			}
 			// The shape refusal names what a timezone is; the resolution refusal says it cannot be

@@ -126,7 +126,13 @@ function applyRunsURLFilters() {
 	for (const id of ["runs-status", "runs-tool", "runs-order", "runs-pagesize"]) {
 		const el = document.getElementById(id);
 		const v = url.get(id.replace("runs-", ""));
-		if (el && v) el.value = v;
+		if (!el || !v) continue;
+		// Only a value the control actually offers. Assigning an unknown one to a select leaves it
+		// with nothing selected, so ?status=bogus rendered an empty box next to a full list and the
+		// reader could not tell whether the filter was off or broken. An unrecognized value now
+		// leaves the default showing, which is what the list is actually doing.
+		if (el.tagName === "SELECT" && !Array.from(el.options).some((o) => o.value === v)) continue;
+		el.value = v;
 	}
 }
 

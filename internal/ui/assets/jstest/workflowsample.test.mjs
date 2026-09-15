@@ -39,15 +39,35 @@ test("running the untouched sample is refused, and posts nothing", async () => {
 });
 
 // TestEditingClearsTheSample pins that the notice and the guard both let go once the graph is the
-// reader's own work.
+// reader's own work: a step pointed at something real, not merely a title typed over the
+// placeholder.
 test("changing a step clears the sample notice and allows the run", async () => {
 	const { app, document } = mountWorkflows();
 	app.mountWorkflow();
-	document.getElementById("wf-name").value = "deploy api";
+	app.wfState.nodes[0].command = "infra/my-own-network";
 	app.renderWorkflow();
 	assert.equal(document.getElementById("wf-sample-note").hidden, true,
 		"the sample notice outlived the edit that replaced the sample");
 	await app.runWorkflow();
 	assert.doesNotMatch(document.getElementById("status").textContent, /sample pipeline/i,
 		"an edited graph was still refused as the sample");
+});
+
+// TestNamingTheSampleDoesNotClearIt pins the hole the name check left.
+//
+// Typing a name was the first thing anyone did on this page, and it cleared the verdict on its own,
+// so the guard came off before a single step had been pointed at anything real. Pressing Run then
+// executed terraform against infra/network, two playbooks nobody wrote, and a curl at a host that
+// does not exist, on the reader's own machine. A title is not work.
+test("naming the graph does not by itself clear the sample guard", async () => {
+	const { app, document, net } = mountWorkflows();
+	app.mountWorkflow();
+	document.getElementById("wf-name").value = "my deploy";
+	app.renderWorkflow();
+	assert.equal(document.getElementById("wf-sample-note").hidden, false,
+		"naming the sample cleared the notice without any step being changed");
+	await app.runWorkflow();
+	assert.match(document.getElementById("status").textContent, /sample pipeline, not yours/i,
+		"a renamed but otherwise untouched sample was allowed to run");
+	net.assertClean();
 });

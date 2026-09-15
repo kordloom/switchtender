@@ -120,6 +120,8 @@ func createScheduleHandler(store schedule.Store, authz *authorizer, log *zap.Log
 		if err := sc.Validate(); err != nil {
 			msg := "invalid schedule"
 			switch {
+			case errors.Is(err, schedule.ErrBadTimezone):
+				msg = err.Error()
 			case errors.Is(err, schedule.ErrBadCron):
 				msg = "invalid cron expression"
 			case errors.Is(err, schedule.ErrNoTarget):
@@ -130,7 +132,9 @@ func createScheduleHandler(store schedule.Store, authz *authorizer, log *zap.Log
 		}
 		next, err := sc.NextFire(time.Now())
 		if err != nil {
-			respondError(w, log, http.StatusBadRequest, "invalid cron expression")
+			// A bad zone and a bad expression are different mistakes, and reporting one as the
+			// other sent operators to check a field that was correct.
+			respondError(w, log, http.StatusBadRequest, scheduleTimeError(err))
 			return
 		}
 		sc.NextRunAt = &next
@@ -211,6 +215,8 @@ func updateScheduleHandler(store schedule.Store, authz *authorizer, log *zap.Log
 		if err := sc.Validate(); err != nil {
 			msg := "invalid schedule"
 			switch {
+			case errors.Is(err, schedule.ErrBadTimezone):
+				msg = err.Error()
 			case errors.Is(err, schedule.ErrBadCron):
 				msg = "invalid cron expression"
 			case errors.Is(err, schedule.ErrNoTarget):
@@ -221,7 +227,9 @@ func updateScheduleHandler(store schedule.Store, authz *authorizer, log *zap.Log
 		}
 		next, err := sc.NextFire(time.Now())
 		if err != nil {
-			respondError(w, log, http.StatusBadRequest, "invalid cron expression")
+			// A bad zone and a bad expression are different mistakes, and reporting one as the
+			// other sent operators to check a field that was correct.
+			respondError(w, log, http.StatusBadRequest, scheduleTimeError(err))
 			return
 		}
 		sc.NextRunAt = &next
@@ -361,7 +369,7 @@ func previewScheduleHandler(log *zap.Logger) http.HandlerFunc {
 		for range 5 {
 			fire, err := preview.NextFire(after)
 			if err != nil {
-				respondError(w, log, http.StatusBadRequest, "invalid cron expression")
+				respondError(w, log, http.StatusBadRequest, scheduleTimeError(err))
 				return
 			}
 			next = append(next, fire)
@@ -369,4 +377,14 @@ func previewScheduleHandler(log *zap.Logger) http.HandlerFunc {
 		}
 		respondJSON(w, log, http.StatusOK, map[string]any{"next": next}, wantsPretty(r))
 	}
+}
+
+// scheduleTimeError picks the message for a failure to compute a schedule's next firing. A bad
+// timezone and a bad expression are different mistakes made in different fields, and reporting the
+// first as the second sent an operator to check the one thing that was correct.
+func scheduleTimeError(err error) string {
+	if errors.Is(err, schedule.ErrBadTimezone) {
+		return err.Error()
+	}
+	return "invalid cron expression"
 }
