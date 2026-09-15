@@ -115,7 +115,7 @@
 					<a class="btn big" href="https://demo.switchtender.com">Open the live demo</a>
 					<a class="ghost big" href="/get-started">Install</a>
 				</div>
-				<p class="hero-note hero-dare">Don't take the receipts on faith. Pull the live demo's signed history with <code>curl</code> and check it with the open LoomSeal verifier: Apache-2.0, a published format with conformance vectors, and an independent Python reference, so you are not taking our binary's word for it. <a href="#proof">Try to refute it &rarr;</a></p>
+				<p class="hero-note hero-dare">Don't take the receipts on faith. Pull the live demo's signed history with <code>curl</code> and check it with LoomSeal: Apache-2.0, a published format with conformance vectors, and a second implementation in Python. We publish LoomSeal too, so what you are trusting is the format and the vectors, not our word. <a href="#proof">Try to refute it &rarr;</a></p>
 				<p class="hero-note">Already on AWX? <code>switchtender import awx</code> brings your projects, inventories, templates, surveys, and schedules across in one command. Preview the plan, then apply.</p>
 				<p class="hero-note">Source-available. BSL 1.1. Go SDK with drop-in plugins. One file to back up.</p>
 			</div>
@@ -202,7 +202,7 @@
 				<article class="card reveal">
 					<div class="ic ic-secret"></div>
 					<h3>Verified without trusting the server</h3>
-					<p>Export the chain as a signed <a href="https://loomseal.com" rel="noopener">LoomSeal</a> bundle and verify it on a machine with no network, using an open verifier that isn't SwitchTender. Or <a href="/verify">drop it into your browser</a> and watch the same verifier check it, offline, with nothing uploaded. A checker anchors the signing key without taking the server's word for it: each install publishes its key at <code>/.well-known/loomseal.json</code>, you can pin a fingerprint handed over out of band, and the hosted witness countersigns it, so the key's authenticity is checked independently, not asserted by the same box. The binary proves itself the same way: <code>switchtender version --verify</code> hashes the running build against the <code>BINARY_SHA256SUMS</code> published with its GitHub release.</p>
+					<p>Export the chain as a signed <a href="https://loomseal.com" rel="noopener">LoomSeal</a> bundle and verify it on a machine with no network, with a verifier that is not this binary. LoomSeal is Apache-2.0 and we publish it as well, so the thing standing behind the check is a specified format with conformance vectors and a second implementation, which anyone can reimplement without us. Or <a href="/verify">drop it into your browser</a> and watch the same verifier check it, offline, with nothing uploaded. A checker anchors the signing key without taking the server's word for it: each install publishes its key at <code>/.well-known/loomseal.json</code>, and you can pin a fingerprint handed over out of band, so the key is checked against something other than the bundle that carries it. The binary proves itself the same way: <code>switchtender version --verify</code> hashes the running build against the <code>BINARY_SHA256SUMS</code> published with its GitHub release.</p>
 				</article>
 			</div>
 			<div class="section-head reveal" style="margin-top:48px">
@@ -218,7 +218,7 @@ curl -s https://demo.switchtender.com/v1/audit/verify
 curl -s https://demo.switchtender.com/v1/audit/bundle &gt; demo-bundle.json
 
 <span class="c"># 3. verify that bundle offline against the key the demo publishes,
-#    with an open verifier this project doesn't control (install: loomseal.com,
+#    with LoomSeal, a verifier that is not this binary (install: loomseal.com,
 #    or skip the install and drop the file on switchtender.com/verify)</span>
 loomseal verify demo-bundle.json --fingerprint "$(curl -s \
   https://demo.switchtender.com/.well-known/loomseal.json | jq -r .key_id)"
@@ -232,7 +232,7 @@ switchtender witness --server https://demo.switchtender.com --once</code></pre>
 		<section class="section wrap" id="features">
 			<div class="section-head reveal">
 				<h2>Every feature below is free.</h2>
-				<p>All of it ships in the binary you already deployed, no caps, no time limit. Paid tiers only add what never shipped free, and nothing on this page ever moves behind a paywall. If it's on this page, it's in the box.</p>
+				<p>All of it ships in the binary you already deployed, no host caps, no seat caps, no run caps, no time limit. Paid tiers only add what never shipped free, and nothing on this page ever moves behind a paywall. Where a card names a Team line, it is named on the card.</p>
 			</div>
 			<div class="cards cards-3">
 				<article class="card reveal">
@@ -289,7 +289,7 @@ switchtender witness --server https://demo.switchtender.com --once</code></pre>
 				<article class="card reveal">
 					<div class="ic ic-shards"></div>
 					<h3>Reach isolated networks</h3>
-					<p>A worker dials out to the control node with a token and opens no inbound port, so it runs jobs inside an air-gapped segment, a DMZ, or a customer network the control node can't reach. One binary, one outbound connection. The mesh relay needs Team. A worker that shares the database is free.</p>
+					<p>A worker dials out to the control node with a token and opens no inbound port, so it runs jobs inside an air-gapped segment, a DMZ, or a customer network the control node can't reach. One binary, one outbound connection. Running any worker process needs Team.</p>
 				</article>
 				<article class="card reveal">
 					<div class="ic ic-ai"></div>
@@ -434,8 +434,8 @@ func main() {
 						<tr><td>Container execution for every tool</td><td class="us"><i class="y"></i></td><td><span class="muted">Ansible only</span></td><td><span class="muted">Ansible only</span></td><td><i class="n"></i></td><td><i class="n"></i></td></tr>
 						<tr><td>Typed cloud credentials, pluggable types</td><td class="us"><i class="y"></i></td><td><span class="muted">typed, not pluggable</span></td><td><span class="muted">typed, not pluggable</span></td><td><i class="n"></i></td><td><i class="n"></i></td></tr>
 						<tr><td>Organizations, teams, per-object grants</td><td class="us"><i class="y"></i></td><td><i class="y"></i></td><td><i class="y"></i></td><td><span class="muted">teams, four fixed roles</span></td><td><span class="muted">policy files, no GUI editor</span></td></tr>
-						<tr><td>Instance groups: pin work to worker pools</td><td class="us"><i class="y"></i></td><td><i class="y"></i></td><td><i class="y"></i></td><td><i class="n"></i></td><td><span class="muted">enterprise</span></td></tr>
-						<tr><td>Active-active HA on PostgreSQL</td><td class="us"><i class="y"></i> <span class="muted">creating the schema is Team; opening an existing one is never gated</span></td><td><span class="muted">via Kubernetes</span></td><td><span class="muted">via Kubernetes</span></td><td><i class="n"></i></td><td><span class="muted">enterprise</span></td></tr>
+						<tr><td>Instance groups: pin work to worker pools</td><td class="us"><i class="y"></i> <span class="muted">Team</span></td><td><i class="y"></i></td><td><i class="y"></i></td><td><span class="muted">Pro</span></td><td><span class="muted">enterprise</span></td></tr>
+						<tr><td>Active-active HA on PostgreSQL</td><td class="us"><i class="y"></i> <span class="muted">creating the schema is Team; opening an existing one is never gated</span></td><td><span class="muted">via Kubernetes</span></td><td><span class="muted">via Kubernetes</span></td><td><span class="muted">enterprise</span></td><td><span class="muted">enterprise</span></td></tr>
 					</tbody>
 				</table>
 				<p class="compare-note">Every row was checked against each vendor's own documentation on 10 August 2026, at AWX 24.6.1, Ansible Automation Platform 2.7, Semaphore 2.19.7, Ascender 25.4.0, and Rundeck 6.0.1. Versions were re-checked on 7 September 2026: AWX is unchanged, Semaphore is now 2.19.12, Ascender 25.6.1, and Rundeck 6.1.0. All five of these products keep shipping, so a table like this starts going stale the day it's written. If a row is wrong, <a href="https://github.com/kordloom/switchtender/issues">open an issue</a> and we'll fix it.</p>
