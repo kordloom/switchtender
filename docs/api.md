@@ -23,9 +23,9 @@ with a message naming the feature rather than failing in some subtler way:
 
 | Endpoint | Tier | Note |
 |----------|------|------|
-| `GET /v1/audit/register` | Team | The period change register. Per-run dossiers, receipts, bundles, and `GET /v1/audit/verify` are free. |
+| `GET /v1/audit/register` | Team | The period change register, covering the last 90 days unless `from` and `to` name another period, each a date or an RFC 3339 timestamp. Per-run dossiers, receipts, bundles, and `GET /v1/audit/verify` are free. |
 | `POST /v1/drift/reconcile` | Team | One-click reconcile. Drift detection is free. |
-| `POST` and `PATCH /v1/policies` | Team, past the free set | Deny rules, risk floors, actor scoping, and distinct-approver separation of duties. One require-approval policy is Community, Pro holds five, Team is uncapped. |
+| `POST` and `PUT /v1/policies` | Team, past the free set | Deny rules, risk floors, actor scoping, and distinct-approver separation of duties. One require-approval policy is Community, Pro holds five, Team is uncapped. |
 
 Two more are enforced somewhere other than the request:
 
@@ -38,7 +38,7 @@ Two more are enforced somewhere other than the request:
 | Method | Path                    | What                                                    |
 |--------|-------------------------|---------------------------------------------------------|
 | POST   | `/v1/runs`                 | Submit a run. `shards` of two or more splits it.        |
-| GET    | `/v1/runs`                 | Run history, newest first.                              |
+| GET    | `/v1/runs`                 | Run history, newest first. Pages with `limit` (default 200, maximum 1000) and `offset`; the response carries `has_more` and `next_offset`. Filters: `status`, `tool`, `order`, `task`, `after`, `before`, and `q` for a text search over the run. |
 | GET    | `/v1/runs/{id}`            | One run.                                                |
 | POST   | `/v1/runs/{id}/cancel`     | Cancel a pending or running run.                        |
 | POST   | `/v1/runs/{id}/retry`      | New split from only the failed shards of a finished one.|
@@ -49,10 +49,10 @@ Two more are enforced somewhere other than the request:
 | GET    | `/v1/runs/{id}/steps`      | Step runs of a pipeline.                                |
 | GET    | `/v1/runs/{id}/logs`       | Captured output as plain text.                          |
 | GET    | `/v1/runs/{id}/evidence`   | Self-contained HTML evidence document for one run. `?format=json` returns the same content as JSON. |
-| GET    | `/v1/runs/{id}/receipt`    | Signed LoomSeal receipt proving what this run did.      |
+| GET    | `/v1/runs/{id}/receipt`    | Signed LoomSeal receipt proving what this run did. `?sparse` discloses only this run's own entries, each proved to belong to the whole chain; `?from=<size>` adds a consistency proof that the log only appended since that size. The response carries the signing key's id in a `Switchtender-Key-Id` header. |
 | POST   | `/v1/runs/{id}/rerun`      | Submit a fresh run with this run's execution settings.  |
 | POST   | `/v1/runs/{id}/stream-ticket` | Mint a short-lived, single-use ticket for opening this run's event stream. |
-| GET    | `/v1/runs/{id}/events`     | Structured events as JSON.                              |
+| GET    | `/v1/runs/{id}/events`     | Structured events as JSON. `?after=<seq>` and `?limit` page them, and the response carries `next_after` to continue. `?download=1` streams the same events as newline-delimited JSON with a filename attachment. |
 | GET    | `/v1/runs/{id}/compare`    | What changed against a baseline run: host verdicts, task timing, duration. `with=` names the baseline or `prev` for the previous run of the same source. |
 | GET    | `/v1/runs/{id}/stream`     | Live events and log over Server-Sent Events. Opened with `?ticket=` from the endpoint above, since EventSource cannot set a header. |
 | POST   | `/v1/runs/{id}/explain`    | Advisory AI explanation of a run, when a provider is configured. |
@@ -337,6 +337,29 @@ an extra var. A field also takes an optional `help` string shown beneath its pro
 | `choice` | The answer must be one of `choices`. |
 
 A launch that violates a constraint is refused with the field it failed, and no run is submitted.
+
+The shape itself, which strict decoding refuses to guess at:
+
+```json
+{
+  "survey": [
+    {"var": "release", "label": "Release tag", "type": "text",
+     "required": true, "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$",
+     "help": "The tag to deploy, such as v2.1.0"},
+    {"var": "batch", "label": "Hosts per batch", "type": "int",
+     "default": 5, "min": 1, "max": 50},
+    {"var": "environment", "label": "Environment", "type": "choice",
+     "required": true, "choices": ["staging", "production"]},
+    {"var": "notes", "label": "Change notes", "type": "multiline",
+     "max_length": 2000}
+  ]
+}
+```
+
+`type` is one of `text`, `multiline`, `int`, `choice`, or `bool`. `var` names the extra var the
+answer becomes, and it is the only field besides `type` that every entry must carry. An unknown key
+is refused rather than ignored, so a survey that almost parses is reported instead of silently
+losing a field.
 
 ## Per-template notifications
 

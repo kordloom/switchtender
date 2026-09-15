@@ -106,7 +106,7 @@
 						<h3>Install</h3>
 						<p>One line downloads the right binary for your machine, verifies it against the published checksums, and installs it:</p>
 						<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>curl -fsSL https://switchtender.com/install.sh | sh</code></pre></div>
-						<p class="gs-note">Prefer not to pipe to a shell? Every release ships cosign-signed checksums and SBOMs: <a href="/verify">verify a release in your browser</a> or with <code>cosign</code>, then run the binary you checked.</p>
+						<p class="gs-note">Prefer not to pipe to a shell? Every release ships cosign-signed checksums and SBOMs: verify them with <a href="https://github.com/kordloom/switchtender/blob/main/SECURITY.md#verifying-a-release"><code>cosign</code></a>, then run the binary you checked. The <a href="/verify">in-browser verifier</a> checks a LoomSeal evidence bundle, which is a different artifact.</p>
 						<p>Or grab a prebuilt binary yourself. No toolchain required. Every release ships macOS, Linux, and Windows builds you can download and run.</p>
 						<div class="hero-cta">
 							<a class="btn" href="https://github.com/kordloom/switchtender/releases/latest">Download the latest release</a>

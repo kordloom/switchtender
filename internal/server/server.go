@@ -614,9 +614,15 @@ func (s *Server) Handler() http.Handler {
 			Credentials: s.credentials, Templates: s.templates, Schedules: s.schedules,
 		}, true
 	}, s.log))
+	// Every refusal this API makes is a JSON object with an "error" string, except the two the mux
+	// writes itself: an unrouted path and a wrong method came back as Go's plain-text "404 page not
+	// found" and "Method Not Allowed". A client that parses errors, which is every client, then met
+	// two responses it could not read, on the two mistakes a caller is most likely to make while
+	// learning the API. The shim below gives them the same shape as everything else.
+	handler := jsonNotFound(mux)
 	// Compression sits under the gate, so a refusal is written by the gate itself and only a
 	// response the handlers produced is ever encoded.
-	handler := compress(mux)
+	handler = compress(handler)
 	if s.tokens != nil {
 		gate := &authGate{tokens: s.tokens, users: s.users, jwt: s.jwt, audits: s.audits, log: s.log,
 			authz: authz, alwaysEnforce: s.enforceAuth, tickets: tickets}

@@ -87,7 +87,7 @@ with a message naming the feature rather than failing in some subtler way:</p>
 <tr>
 <td><code>GET /v1/audit/register</code></td>
 <td>Team</td>
-<td>The period change register. Per-run dossiers, receipts, bundles, and <code>GET /v1/audit/verify</code> are free.</td>
+<td>The period change register, covering the last 90 days unless <code>from</code> and <code>to</code> name another period, each a date or an RFC 3339 timestamp. Per-run dossiers, receipts, bundles, and <code>GET /v1/audit/verify</code> are free.</td>
 </tr>
 <tr>
 <td><code>POST /v1/drift/reconcile</code></td>
@@ -95,7 +95,7 @@ with a message naming the feature rather than failing in some subtler way:</p>
 <td>One-click reconcile. Drift detection is free.</td>
 </tr>
 <tr>
-<td><code>POST</code> and <code>PATCH /v1/policies</code></td>
+<td><code>POST</code> and <code>PUT /v1/policies</code></td>
 <td>Team, past the free set</td>
 <td>Deny rules, risk floors, actor scoping, and distinct-approver separation of duties. One require-approval policy is Community, Pro holds five, Team is uncapped.</td>
 </tr>
@@ -125,7 +125,7 @@ either licensed or absent.</li>
 <tr>
 <td>GET</td>
 <td><code>/v1/runs</code></td>
-<td>Run history, newest first.</td>
+<td>Run history, newest first. Pages with <code>limit</code> (default 200, maximum 1000) and <code>offset</code>; the response carries <code>has_more</code> and <code>next_offset</code>. Filters: <code>status</code>, <code>tool</code>, <code>order</code>, <code>task</code>, <code>after</code>, <code>before</code>, and <code>q</code> for a text search over the run.</td>
 </tr>
 <tr>
 <td>GET</td>
@@ -180,7 +180,7 @@ either licensed or absent.</li>
 <tr>
 <td>GET</td>
 <td><code>/v1/runs/{id}/receipt</code></td>
-<td>Signed LoomSeal receipt proving what this run did.</td>
+<td>Signed LoomSeal receipt proving what this run did. <code>?sparse</code> discloses only this run's own entries, each proved to belong to the whole chain; <code>?from=&lt;size&gt;</code> adds a consistency proof that the log only appended since that size. The response carries the signing key's id in a <code>Switchtender-Key-Id</code> header.</td>
 </tr>
 <tr>
 <td>POST</td>
@@ -195,7 +195,7 @@ either licensed or absent.</li>
 <tr>
 <td>GET</td>
 <td><code>/v1/runs/{id}/events</code></td>
-<td>Structured events as JSON.</td>
+<td>Structured events as JSON. <code>?after=&lt;seq&gt;</code> and <code>?limit</code> page them, and the response carries <code>next_after</code> to continue. <code>?download=1</code> streams the same events as newline-delimited JSON with a filename attachment.</td>
 </tr>
 <tr>
 <td>GET</td>
@@ -906,6 +906,25 @@ an extra var. A field also takes an optional <code>help</code> string shown bene
 </tbody>
 </table>
 <p>A launch that violates a constraint is refused with the field it failed, and no run is submitted.</p>
+<p>The shape itself, which strict decoding refuses to guess at:</p>
+<pre><code class="language-json">{
+  &quot;survey&quot;: [
+    {&quot;var&quot;: &quot;release&quot;, &quot;label&quot;: &quot;Release tag&quot;, &quot;type&quot;: &quot;text&quot;,
+     &quot;required&quot;: true, &quot;pattern&quot;: &quot;^v[0-9]+\\.[0-9]+\\.[0-9]+$&quot;,
+     &quot;help&quot;: &quot;The tag to deploy, such as v2.1.0&quot;},
+    {&quot;var&quot;: &quot;batch&quot;, &quot;label&quot;: &quot;Hosts per batch&quot;, &quot;type&quot;: &quot;int&quot;,
+     &quot;default&quot;: 5, &quot;min&quot;: 1, &quot;max&quot;: 50},
+    {&quot;var&quot;: &quot;environment&quot;, &quot;label&quot;: &quot;Environment&quot;, &quot;type&quot;: &quot;choice&quot;,
+     &quot;required&quot;: true, &quot;choices&quot;: [&quot;staging&quot;, &quot;production&quot;]},
+    {&quot;var&quot;: &quot;notes&quot;, &quot;label&quot;: &quot;Change notes&quot;, &quot;type&quot;: &quot;multiline&quot;,
+     &quot;max_length&quot;: 2000}
+  ]
+}
+</code></pre>
+<p><code>type</code> is one of <code>text</code>, <code>multiline</code>, <code>int</code>, <code>choice</code>, or <code>bool</code>. <code>var</code> names the extra var the
+answer becomes, and it is the only field besides <code>type</code> that every entry must carry. An unknown key
+is refused rather than ignored, so a survey that almost parses is reported instead of silently
+losing a field.</p>
 <h2 id="per-template-notifications">Per-template notifications</h2>
 <p>A template or a run submission may carry <code>notifications</code>, a list of targets that receive its
 terminal state in addition to the server-wide channels. Each target names a <code>kind</code> and the field
