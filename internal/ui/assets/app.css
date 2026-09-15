@@ -1524,6 +1524,26 @@ td.col-labels .label-wrap { flex-wrap: nowrap; }
    right edge. The zero-height break sits between the two order groups; the chevron goes, since a
    full-width tappable row already says it opens. Scoped to the recent-runs list: the fleet rows
    hold one line fine. */
+/* Phones. About half the traffic an announcement brings arrives on one, and below 520px the app had
+   a single rule, for the overview's recent rows. Nothing here changes a desktop layout: each rule
+   only relaxes a fixed width that a narrow screen cannot afford.
+
+   The page padding is the largest of them. 36px a side is 72px of a 390px screen, 18% of the width,
+   spent on margin before any content is drawn. The dialogs are the other: a grid with a fixed 130px
+   label column plus fields has nowhere to go at that width, so the rows stack instead. */
+@media (max-width: 560px) {
+	.content { padding: 18px 14px 32px; }
+	.page-head h1 { font-size: 20px; }
+	.notify-row { grid-template-columns: 1fr; gap: 6px; }
+	.notify-fields { flex-wrap: wrap; }
+	.notify-fail { white-space: normal; }
+	.runs-toolbar { flex-wrap: wrap; row-gap: 8px; }
+	.runs-toolbar .list-filter { flex: 1 1 100%; min-width: 0; }
+	.list-filter-input { max-width: none; }
+	/* The toolbar's buttons wrap rather than pushing the row wider than the screen. */
+	.table-foot { flex-wrap: wrap; row-gap: 8px; }
+}
+
 @media (max-width: 520px) {
 	#recent .ov-row { flex-wrap: wrap; row-gap: 5px; }
 	#recent .ov-row::after { content: ""; flex-basis: 100%; height: 0; order: 1; }
