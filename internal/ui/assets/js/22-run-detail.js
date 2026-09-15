@@ -501,14 +501,27 @@ function wireLogDownload(runId) {
 // run's log can be far larger than that.
 async function loadStoredLog(runId) {
 	try {
-		const res = await fetchAuthed("/runs/" + runId + "/logs");
+		// Ask for the tail rather than the whole log. The pane caps itself at logCap anyway, and it
+		// used to get there by pulling the entire log into the browser and slicing it: a 213 MB log
+		// crossed the network and went through the tab to display a quarter of a megabyte of it.
+		const res = await fetchAuthed("/runs/" + runId + "/logs?tail=" + logCap);
 		if (!res.ok) return;
 		const text = await res.text();
 		if (!text.trim()) return;
 		detailState.logRaw = text.slice(-logCap);
+		// Say so when this is a tail, or the reader takes the first line on screen for the first
+		// line of the run.
+		const omitted = parseInt(res.headers && res.headers.get
+			? res.headers.get("Switchtender-Log-Omitted-Bytes") || "0" : "0", 10);
+		detailState.logOmitted = Number.isFinite(omitted) ? omitted : 0;
 		renderLogView();
 		const head = document.querySelector("#log-panel h2");
-		if (head) head.textContent = "Output";
+		if (head) {
+			head.textContent = detailState.logOmitted > 0
+				? "Output, last " + fmtBytes(detailState.logRaw.length) + " of " +
+					fmtBytes(detailState.logOmitted + detailState.logRaw.length)
+				: "Output";
+		}
 		document.getElementById("log-panel").hidden = false;
 		// A finished run is not live, so the pane opens at the end, where a failure is.
 		const pre = document.getElementById("log");

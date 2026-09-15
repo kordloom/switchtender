@@ -53,7 +53,7 @@ function statusOf(document) {
 test("an ordinary run loads its header, matrix, and downloads", async () => {
 	const { app, document, net, clock } = openDetail("run_1", [
 		[/^\/v1\/runs\/run_1\/events\?/, reply({ events: EVENTS })],
-		[/^\/v1\/runs\/run_1\/logs$/, textReply("ok: web01\nfailed: web02\n")],
+		[/^\/v1\/runs\/run_1\/logs(\?|$)/, textReply("ok: web01\nfailed: web02\n")],
 		[/^\/v1\/runs\/run_1$/, reply(runOf("run_1"))],
 	]);
 
@@ -93,7 +93,7 @@ test("a split parent loads its shards and hides the links it has no bytes for", 
 			events: req.url.includes("/s0/") ? EVENTS : [],
 		})],
 		[/^\/v1\/runs\/p1\/shards$/, reply({ shards })],
-		[/^\/v1\/runs\/p1\/logs$/, textReply("")],
+		[/^\/v1\/runs\/p1\/logs(\?|$)/, textReply("")],
 		[/^\/v1\/runs\/p1$/, reply(runOf("p1", { kind: "split", shard_count: 2, playbook: "plays/site.yml" }))],
 	]);
 

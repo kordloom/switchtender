@@ -1,108 +1,83 @@
 package server
 
 import (
-	"context"
-	"errors"
-	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"go.uber.org/zap"
-
-	"github.com/kordloom/switchtender/internal/ai"
-	"github.com/kordloom/switchtender/internal/run"
 )
 
-// wholeLogRefused is a run store that refuses the whole-log read and serves the chunked one, so a test
-// can prove which path a caller took. A store cannot tell a caller how much memory it just cost them;
-// refusing the expensive call is how that becomes visible in a test.
-type wholeLogRefused struct {
-	run.Store
-	// reads counts how many times the whole log was asked for.
-	reads int
-}
-
-// Log refuses, standing in for a run whose log is far too large to hold.
-func (w *wholeLogRefused) Log(context.Context, string) ([]byte, error) {
-	w.reads++
-	return nil, errors.New("the whole log was read into memory")
-}
-
-// TestExplainReadsOnlyTheLogTail covers a read whose cost scales with the wrong thing. Explaining a
-// failure sends the model the last few kilobytes of output, and the handler got them by reading the
-// entire log into memory and slicing the end off. A run that fails after producing a gigabyte of output,
-// which is exactly the kind of run somebody asks for an explanation of, allocated that gigabyte on the
-// control node to use six kilobytes of it, and any viewer could ask.
-func TestExplainReadsOnlyTheLogTail(t *testing.T) {
+// TestLogTailKeepsOnlyTheEnd covers the run detail pane pulling an entire log across the network to
+// display the last quarter of a megabyte of it.
+//
+// The pane caps itself at 256 KB and got there by downloading the whole log into the browser and
+// slicing it, so a 213 MB log meant 213 MB over the wire and through the tab. The tail is
+// accumulated here in a bounded buffer, which keeps the control plane's memory bounded too: that is
+// the property the chunked read was written for, and materializing the log to slice it would have
+// thrown it away.
+func TestLogTailKeepsOnlyTheEnd(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
-	backing := run.NewMemStore()
-	// The run is saved as running first: the store fences appends to a terminal run, which is right for
-	// a reclaimed worker and means a test has to write the log while the run is still open.
-	failing := &run.Run{ID: "run_1", Status: run.StatusRunning, Tool: "ansible", Playbook: "site.yml"}
-	if err := backing.Save(ctx, failing); err != nil {
-		t.Fatalf("Save run: %v", err)
-	}
-	// Many chunks, as a long run produces: the tail is spread over the last few of them.
-	for i := 0; i < 500; i++ {
-		line := fmt.Sprintf("line %04d %s\n", i, strings.Repeat("x", 100))
-		if err := backing.AppendLog(ctx, "run_1", []byte(line)); err != nil {
-			t.Fatalf("AppendLog: %v", err)
+
+	t.Run("keeps the last n bytes across many writes", func(t *testing.T) {
+		t.Parallel()
+		ring := newTailBuffer(10)
+		for i := range 100 {
+			ring.write([]byte(string(rune('a' + i%26))))
 		}
-	}
-	failing.Status = run.StatusFailed
-	if err := backing.Save(ctx, failing); err != nil {
-		t.Fatalf("Save run: %v", err)
-	}
-	store := &wholeLogRefused{Store: backing}
-
-	tail := logTail(ctx, store, "run_1", explainLogTail)
-	if store.reads != 0 {
-		t.Errorf("the whole log was read %d time(s), so the cost of an explanation scales with the "+
-			"size of the log rather than with the size of the tail", store.reads)
-	}
-	if len(tail) == 0 {
-		t.Fatal("no log tail was read at all, so an explanation would carry no output")
-	}
-	if len(tail) > explainLogTail {
-		t.Errorf("tail is %d bytes, want at most %d", len(tail), explainLogTail)
-	}
-	// It is the end of the log, which is the part that says how the run failed.
-	if !strings.Contains(string(tail), "line 0499") {
-		t.Errorf("the tail does not hold the last line written:\n%s", tail)
-	}
-	if strings.Contains(string(tail), "line 0000") {
-		t.Error("the tail reaches back to the first line, so it is not a tail")
-	}
-
-	// The handler takes that path too, not only this helper. A whole-log read here is the actual
-	// regression: the tail reader existing while the handler ignores it fixes nothing.
-	var prompt string
-	provider := ai.ProviderFunc(func(_ context.Context, _, user string) (string, error) {
-		prompt = user
-		return "the play failed on web-1.", nil
+		if got := len(ring.bytes()); got != 10 {
+			t.Errorf("kept %d bytes, want the cap of 10", got)
+		}
+		if ring.omitted() != 90 {
+			t.Errorf("omitted = %d, want 90, or the reader is told the wrong size", ring.omitted())
+		}
 	})
-	handler := New(store, &fakeSubmitter{}, zap.NewNop(), WithAI(provider)).Handler()
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/runs/run_1/explain", nil))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("explain status = %d, want 200 (body %s)", rec.Code, rec.Body.String())
-	}
-	if store.reads != 0 {
-		t.Errorf("explaining a run read the whole log %d time(s), so the handler does not use the "+
-			"bounded tail read", store.reads)
-	}
-	if !strings.Contains(prompt, "line 0499") {
-		t.Errorf("the prompt carries no log tail:\n%s", prompt)
-	}
 
-	// A run with no log at all is not an error, since plenty of runs fail before writing anything.
-	if err := backing.Save(ctx, &run.Run{ID: "run_2", Status: run.StatusFailed}); err != nil {
-		t.Fatalf("Save run: %v", err)
-	}
-	if got := logTail(ctx, store, "run_2", explainLogTail); len(got) != 0 {
-		t.Errorf("a run with no log produced %d bytes of tail", len(got))
-	}
+	t.Run("a single write larger than the cap keeps its end", func(t *testing.T) {
+		t.Parallel()
+		ring := newTailBuffer(8)
+		ring.write([]byte("0123456789abcdef"))
+		if got := string(ring.bytes()); got != "89abcdef" {
+			t.Errorf("kept %q, want the last 8 bytes", got)
+		}
+		if ring.omitted() != 8 {
+			t.Errorf("omitted = %d, want 8", ring.omitted())
+		}
+	})
+
+	t.Run("a log under the cap is whole and reports nothing omitted", func(t *testing.T) {
+		t.Parallel()
+		ring := newTailBuffer(1024)
+		ring.write([]byte("line one\nline two\n"))
+		if got := string(ring.bytes()); got != "line one\nline two\n" {
+			t.Errorf("kept %q, want the whole log", got)
+		}
+		if ring.omitted() != 0 {
+			t.Errorf("omitted = %d, want 0: a whole log must not be labeled a tail", ring.omitted())
+		}
+	})
+
+	t.Run("the request cannot ask for unbounded memory", func(t *testing.T) {
+		t.Parallel()
+		if got := tailBytes("999999999"); got != maxLogTail {
+			t.Errorf("tailBytes(huge) = %d, want it capped at %d", got, maxLogTail)
+		}
+		// No parameter means the whole log, streamed, which is what a download wants.
+		for _, raw := range []string{"", "0", "-5", "abc"} {
+			if got := tailBytes(raw); got != 0 {
+				t.Errorf("tailBytes(%q) = %d, want 0 so the full log still streams", raw, got)
+			}
+		}
+	})
+
+	t.Run("the kept tail never exceeds the cap however it is filled", func(t *testing.T) {
+		t.Parallel()
+		ring := newTailBuffer(16)
+		ring.write([]byte(strings.Repeat("x", 10)))
+		ring.write([]byte(strings.Repeat("y", 10)))
+		ring.write([]byte(strings.Repeat("z", 3)))
+		if got := len(ring.bytes()); got > 16 {
+			t.Errorf("kept %d bytes past a cap of 16", got)
+		}
+		if got := string(ring.bytes()); !strings.HasSuffix(got, "zzz") {
+			t.Errorf("kept %q, want it to end at the end of the log", got)
+		}
+	})
 }

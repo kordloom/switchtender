@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -397,14 +398,26 @@ func runLogsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.Ha
 		if authorizeRunAccess(w, r, authz, log, rn) {
 			return
 		}
-		// The log streams to the client in chunk pages, so a multi-gigabyte log download never
-		// materializes in the control plane's memory.
+		// A caller that only wants the end of the log says so, and only the end crosses the network.
+		//
+		// The run detail pane shows the last 256 KB and got there by downloading the whole log into
+		// the browser and slicing it: a 213 MB log meant 213 MB over the wire and through the tab to
+		// display a quarter of a megabyte of it. The tail is accumulated in a bounded buffer here, so
+		// the control plane's memory stays bounded too, which is the property the chunked read was
+		// written for in the first place.
+		tail := tailBytes(r.URL.Query().Get("tail"))
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
+		if tail == 0 {
+			w.WriteHeader(http.StatusOK)
+		}
 		var (
 			after     int64
 			atLineEnd = true
+			ring      *tailBuffer
 		)
+		if tail > 0 {
+			ring = newTailBuffer(tail)
+		}
 		for {
 			chunks, err := store.LogAfter(r.Context(), id, after, streamBatch)
 			if err != nil {
@@ -424,7 +437,9 @@ func runLogsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.Ha
 			}
 			for _, c := range chunks {
 				after = c.Seq
-				if _, err := w.Write(c.Data); err != nil {
+				if ring != nil {
+					ring.write(c.Data)
+				} else if _, err := w.Write(c.Data); err != nil {
 					log.Error("server: write run log: " + err.Error())
 					return
 				}
@@ -433,6 +448,18 @@ func runLogsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.Ha
 				}
 			}
 			if len(chunks) < streamBatch {
+				if ring != nil {
+					// The reader is told what they are looking at rather than left to assume the
+					// log begins where the pane does.
+					if omitted := ring.omitted(); omitted > 0 {
+						w.Header().Set("Switchtender-Log-Truncated", "1")
+						w.Header().Set("Switchtender-Log-Omitted-Bytes", strconv.FormatInt(omitted, 10))
+					}
+					w.WriteHeader(http.StatusOK)
+					if _, err := w.Write(ring.bytes()); err != nil {
+						log.Error("server: write run log tail: " + err.Error())
+					}
+				}
 				return
 			}
 		}
@@ -466,3 +493,54 @@ func scrubbedRuns(ctx context.Context, list []*run.Run) []*run.Run {
 	}
 	return out
 }
+
+// maxLogTail bounds what one request may ask to keep in memory while it finds the end of a log.
+const maxLogTail = 4 << 20
+
+// tailBytes reads the tail parameter, returning zero for a request that wants the whole log.
+func tailBytes(raw string) int {
+	if raw == "" {
+		return 0
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return 0
+	}
+	return min(n, maxLogTail)
+}
+
+// tailBuffer keeps the last n bytes written to it and counts what it dropped, so a caller asking
+// for the end of a very long log never holds more than n bytes anywhere.
+type tailBuffer struct {
+	// buf holds at most n bytes, the most recent ones.
+	buf []byte
+	// n is the cap.
+	n int
+	// dropped counts bytes discarded from the front.
+	dropped int64
+}
+
+// newTailBuffer returns a buffer keeping the last n bytes.
+func newTailBuffer(n int) *tailBuffer {
+	return &tailBuffer{buf: make([]byte, 0, n), n: n}
+}
+
+// write appends data, discarding from the front once the cap is reached.
+func (t *tailBuffer) write(data []byte) {
+	if len(data) >= t.n {
+		t.dropped += int64(len(t.buf)) + int64(len(data)-t.n)
+		t.buf = append(t.buf[:0], data[len(data)-t.n:]...)
+		return
+	}
+	if over := len(t.buf) + len(data) - t.n; over > 0 {
+		t.dropped += int64(over)
+		t.buf = append(t.buf[:0], t.buf[over:]...)
+	}
+	t.buf = append(t.buf, data...)
+}
+
+// bytes returns the kept tail.
+func (t *tailBuffer) bytes() []byte { return t.buf }
+
+// omitted reports how many bytes were dropped from the front.
+func (t *tailBuffer) omitted() int64 { return t.dropped }

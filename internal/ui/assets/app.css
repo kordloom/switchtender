@@ -414,6 +414,12 @@ table.runs tbody tr.row-nav, table.runs tbody tr.row-inspect { cursor: pointer; 
 table.runs tbody tr.row-nav:hover, table.runs tbody tr.row-inspect:hover { background: var(--surface-2); }
 table.runs td button + button { margin-left: 8px; }
 table.runs td.mono { max-width: 118px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Every list table bounds its widest text cell the same way. Only the runs table did, so an
+   ordinary long name, a template called after a service and an environment or a host with a
+   full cloud DNS name, pushed the Edit, Delete and History buttons off the right edge and
+   there was no way to reach them. The full value stays in title= on the cell. */
+main.content table td.col-name, main.content table td.col-title,
+main.content table th[scope="row"] { max-width: 34ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Status badges */
 .badge { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 2px 9px; min-width: 96px; border-radius: 999px; font-size: 11.5px; font-weight: 600; letter-spacing: 0.01em; line-height: 1.6; white-space: nowrap; border: 1px solid transparent; }

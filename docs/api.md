@@ -47,7 +47,7 @@ Two more are enforced somewhere other than the request:
 | POST   | `/v1/runs/{id}/reject`     | Deny a run held for approval.                           |
 | GET    | `/v1/runs/{id}/shards`     | Shard runs of a split.                                  |
 | GET    | `/v1/runs/{id}/steps`      | Step runs of a pipeline.                                |
-| GET    | `/v1/runs/{id}/logs`       | Captured output as plain text.                          |
+| GET    | `/v1/runs/{id}/logs`       | Captured output as plain text, streamed. `?tail=<bytes>` returns only the end, capped at 4 MiB; when anything was dropped the response carries `Switchtender-Log-Truncated: 1` and `Switchtender-Log-Omitted-Bytes`. |
 | GET    | `/v1/runs/{id}/evidence`   | Self-contained HTML evidence document for one run. `?format=json` returns the same content as JSON. |
 | GET    | `/v1/runs/{id}/receipt`    | Signed LoomSeal receipt proving what this run did. `?sparse` discloses only this run's own entries, each proved to belong to the whole chain; `?from=<size>` adds a consistency proof that the log only appended since that size. The response carries the signing key's id in a `Switchtender-Key-Id` header. |
 | POST   | `/v1/runs/{id}/rerun`      | Submit a fresh run with this run's execution settings.  |

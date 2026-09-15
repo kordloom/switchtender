@@ -170,7 +170,7 @@ either licensed or absent.</li>
 <tr>
 <td>GET</td>
 <td><code>/v1/runs/{id}/logs</code></td>
-<td>Captured output as plain text.</td>
+<td>Captured output as plain text, streamed. <code>?tail=&lt;bytes&gt;</code> returns only the end, capped at 4 MiB; when anything was dropped the response carries <code>Switchtender-Log-Truncated: 1</code> and <code>Switchtender-Log-Omitted-Bytes</code>.</td>
 </tr>
 <tr>
 <td>GET</td>

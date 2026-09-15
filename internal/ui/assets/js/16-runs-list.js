@@ -305,6 +305,10 @@ function originCellEl(r) {
 		return cell;
 	}
 	const label = SOURCE_LABELS[source] || source;
+	// A chip reads as one word on screen and exported as the label alone, losing which template or
+	// schedule fired the run. The export carries both, separated, so a column of them can be sorted
+	// and grouped.
+	cell.dataset.export = r.source_id ? source + ":" + r.source_id : source;
 	let chip;
 	const href = originHref(r);
 	if (href) {
@@ -381,6 +385,10 @@ function labelCellEl(labels) {
 		cell.textContent = "\u2014";
 		return cell;
 	}
+	// Two chips are shown and the rest collapse into a "+3" button, which exported literally as the
+	// string "+3": the file then held a count where the labels should be. The export carries every
+	// label in a form another tool can split.
+	cell.dataset.export = keys.map((k) => k + "=" + labels[k]).join(";");
 	const wrap = document.createElement("span");
 	wrap.className = "label-wrap";
 	const shown = keys.slice(0, 2);
@@ -472,6 +480,9 @@ function appendRunRows(tbody, runs) {
 
 		const runCell = td(shortId(r.id), "mono");
 		runCell.title = r.id;
+		// The cell shows an abbreviation, so the export carries the id. A CSV of truncated run ids
+		// cannot be joined against anything, which is most of what an export is for.
+		runCell.dataset.export = r.id;
 		runCell.dataset.tip = "Open run details";
 		tr.appendChild(runCell);
 

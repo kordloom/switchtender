@@ -278,6 +278,21 @@ function fmtMs(ms) {
 	return m + "m " + sec + "s";
 }
 
+// fmtBytes renders a byte count in the largest unit that reads cleanly, so a log pane can say it is
+// showing the last 256 KB of 213 MB rather than two long strings of digits.
+function fmtBytes(n) {
+	if (!isFinite(n) || n < 0) return "";
+	if (n < 1024) return n + " B";
+	const units = ["KB", "MB", "GB", "TB"];
+	let v = n / 1024;
+	let i = 0;
+	while (v >= 1024 && i < units.length - 1) {
+		v /= 1024;
+		i++;
+	}
+	return (v >= 10 ? Math.round(v) : v.toFixed(1)) + " " + units[i];
+}
+
 // fmtTime renders an ISO time in the local locale.
 function fmtTime(iso) {
 	if (!iso) return "";
