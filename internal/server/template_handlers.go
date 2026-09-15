@@ -183,6 +183,12 @@ func createTemplateHandler(store template.Store, authz *authorizer, log *zap.Log
 			respondError(w, log, http.StatusBadRequest, err.Error())
 			return
 		}
+		// A template that targets a queue launches runs only a worker serving it can claim, and every
+		// worker is Team. Saved on Community it produced a template whose every launch stranded.
+		if qerr := allowQueue(req.Queue); qerr != nil {
+			respondError(w, log, http.StatusForbidden, qerr.Error())
+			return
+		}
 		t := &template.Template{
 			ID: template.NewID(), Name: req.Name, ProjectID: req.ProjectID,
 			Playbook: req.Playbook, Inventory: req.Inventory, InventoryID: req.InventoryID,
@@ -288,6 +294,11 @@ func updateTemplateHandler(store template.Store, authz *authorizer, log *zap.Log
 						"create a single-run template in its place")
 				return
 			}
+		}
+		// Same gate on update, or the queue a create refuses can be added afterward.
+		if qerr := allowQueue(req.Queue); qerr != nil {
+			respondError(w, log, http.StatusForbidden, qerr.Error())
+			return
 		}
 		t := &template.Template{
 			ID: id, Name: req.Name, ProjectID: req.ProjectID,

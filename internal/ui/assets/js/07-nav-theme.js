@@ -274,6 +274,23 @@ function mountDocsChrome() {
 // table cell now offers one and a cell is on every page. A helper reached from a shared
 // component belongs with the shared components.
 // copyButton returns a small clipboard control that copies text and confirms with a checkmark.
+// TEAM_QUEUE_INPUTS are the controls that route work to a named worker queue. A queue only means
+// anything if a worker serves it, and every worker is Team, so setting one on Community produces a
+// run nothing can ever claim. The policy dialog's queue box is deliberately absent: there it is a
+// matcher against runs, not a routing target, and matching is free.
+const TEAM_QUEUE_INPUTS = ["launch-queue", "tpl-queue", "inv-queue"];
+
+// markQueueTiers marks every queue routing control, wherever the page happens to carry one.
+function markQueueTiers() {
+	for (const id of TEAM_QUEUE_INPUTS) {
+		const el = document.getElementById(id);
+		if (!el) continue;
+		markTier(el.closest(".field-label") || el.parentElement, "Team",
+			"A queue routes work to a worker serving that name, and workers are Team. Left empty, " +
+			"the run goes to the server's own pool.");
+	}
+}
+
 // markTier labels a control with the tier its feature needs, so a reader learns the gate from the
 // control rather than from a refusal after the click. It is a no-op on a control that already
 // carries a tag, so a re-render cannot stack them.

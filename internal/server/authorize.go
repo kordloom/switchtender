@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/grant"
+	"github.com/kordloom/switchtender/internal/license"
 	"github.com/kordloom/switchtender/internal/org"
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/schedule"
@@ -379,6 +380,22 @@ func queueObject(queue string) string {
 		return ""
 	}
 	return grant.QueueObject(queue)
+}
+
+// allowQueue refuses a named queue on an install that cannot run a worker to serve it.
+//
+// A queue restricts a run to workers serving that name, and every worker is Team. On Community
+// nothing can ever claim such a run: the field saved cleanly, the run was accepted, and it sat
+// pending forever with no error anywhere to explain it. The product sells queues as Team and did
+// not gate them, so the failure mode was a silently stranded run rather than a refusal naming the
+// tier, which is the opposite of how every other gate here behaves.
+//
+// The default queue is always allowed: that is the server's own pool, which needs no worker.
+func allowQueue(queue string) error {
+	if strings.TrimSpace(queue) == "" {
+		return nil
+	}
+	return license.Allow(license.FeatureWorkers)
 }
 
 // denyOnAuthzError writes the response for an authorization failure and reports whether the request

@@ -130,6 +130,12 @@ func createInventoryHandler(store inventory.Store, authz *authorizer, sealer *cr
 			append([]string{queueObject(req.Queue)}, req.CredentialIDs...)...)) {
 			return
 		}
+		// A queue only means anything if a worker serves it, and every worker is Team. Saving one
+		// on Community stored a source whose refreshes could never be claimed.
+		if qerr := allowQueue(req.Queue); qerr != nil {
+			respondError(w, log, http.StatusForbidden, qerr.Error())
+			return
+		}
 		// Putting an inventory in an organization gives every member of it use, and taking it out
 		// takes that away. Both directions are checked, the same as a template.
 		if authz.denyForeignOrg(w, r, log, orgForCreate(req.OrgID)) {
@@ -191,6 +197,12 @@ func updateInventoryHandler(store inventory.Store, authz *authorizer, sealer *cr
 		// naming the queue directly would.
 		if denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse,
 			append([]string{queueObject(req.Queue)}, req.CredentialIDs...)...)) {
+			return
+		}
+		// A queue only means anything if a worker serves it, and every worker is Team. Saving one
+		// on Community stored a source whose refreshes could never be claimed.
+		if qerr := allowQueue(req.Queue); qerr != nil {
+			respondError(w, log, http.StatusForbidden, qerr.Error())
 			return
 		}
 		// Both directions of an organization change are checked: entering one gives every member
