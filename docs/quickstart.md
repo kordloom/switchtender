@@ -13,7 +13,7 @@ No install needed to look around. The [live demo](https://demo.switchtender.com)
 
 Ansible on the PATH: `ansible-playbook` and `ansible-inventory`. Nothing else for the default
 SQLite setup. Building from source instead of installing the release binary needs Go 1.26, and
-Docker Compose is an alternative, where `docker compose up --build` builds the image from this
+Docker Compose is an alternative, where `docker compose --profile stack up --build` builds the image from this
 repository.
 
 ## Install
@@ -91,7 +91,7 @@ Create user accounts with roles for sign-in:
 
     export SWITCHTENDER_ENCRYPTION_KEY=change-me
     export SWITCHTENDER_ENCRYPTION_SALT=change-me-too
-    docker compose up --build
+    docker compose --profile stack up --build
 
 This starts a server, a PostgreSQL database, and a worker. The server listens on port 8080. Set
 `SWITCHTENDER_PORT` to change the host port.
@@ -117,7 +117,14 @@ Serve HTTPS directly, with no reverse proxy in front, by pointing the server at 
 SwitchTender needs no operator. A Helm chart installs the server and a worker as ordinary pods sharing a
 database:
 
-    helm install switchtender ./deploy/helm/switchtender
+    helm install switchtender ./deploy/helm/switchtender \
+      --set encryptionKey=$(openssl rand -hex 32) \
+      --set encryptionSalt=$(openssl rand -hex 16)
+
+Both values are required, and the salt has to stay the same across upgrades: it is what every
+stored secret was sealed against, so a new salt makes the old ones unreadable. Keep them in a
+secret manager and pass `--set existingSecret=<name>` instead once you have one. The chart pulls
+`ghcr.io/kordloom/switchtender`.
 
 ## Try the demo
 

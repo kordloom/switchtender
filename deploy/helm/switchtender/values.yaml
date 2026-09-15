@@ -1,8 +1,11 @@
 # Default values for the SwitchTender chart.
 
 image:
-  # repository is the SwitchTender image, built from the repository Dockerfile.
-  repository: switchtender
+  # repository is the published multi-arch image. A bare name here is not a shorthand for this
+  # project: Kubernetes resolves "switchtender" to docker.io/library/switchtender, a Docker Hub
+  # official-images name that belongs to nobody, so every pod went ImagePullBackOff while the real
+  # image sat published on ghcr.
+  repository: ghcr.io/kordloom/switchtender
   # tag defaults to the chart appVersion when empty.
   tag: ""
   pullPolicy: IfNotPresent

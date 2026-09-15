@@ -394,10 +394,22 @@ jobs:
             -f content="$(base64 -i "$cask" | tr -d '\n')")
           if [ -n "$sha" ]; then args+=(-f sha="$sha"); fi
           if ! GH_TOKEN="$TAP_TOKEN" gh api "${args[@]}" > /dev/null; then
-            echo "::warning title=Homebrew cask not published::the tap push was refused; give HOMEBREW_TAP_GITHUB_TOKEN Contents read and write on kordloom/homebrew-tap"
-            exit 0
+            echo "::error title=Homebrew cask not published::the tap push was refused; give HOMEBREW_TAP_GITHUB_TOKEN Contents read and write on kordloom/homebrew-tap"
+            exit 1
           fi
           echo "cask updated on kordloom/homebrew-tap"
+
+          # Read the tap back and refuse a release that left it behind. A warning here was silent
+          # enough that the cask sat seven releases stale while brew install kept handing people an
+          # old binary, and two pages advertise that command.
+          want="${GITHUB_REF_NAME#v}"
+          published=$(curl -fsSL "https://raw.githubusercontent.com/kordloom/homebrew-tap/main/Casks/switchtender.rb" |
+            sed -n 's/^[[:space:]]*version "\(.*\)"/\1/p' | head -1)
+          if [ "$published" != "$want" ]; then
+            echo "::error title=Homebrew cask stale::the tap still serves ${published:-nothing} after publishing $want"
+            exit 1
+          fi
+          echo "tap verified at $published"
 
   # Multi-arch container images on ghcr.io. A separate Linux job because the release job runs on
   # macOS for the desktop bundle, and Docker is unavailable there.
