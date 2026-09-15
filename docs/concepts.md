@@ -82,6 +82,25 @@ upgrade until grants are added. Under strict grants a read grant also scopes wha
 a listing returns only the objects they are granted, closing the gap where the only way to give read
 access was the global viewer role over everything.
 
+### Organization roles are not global roles
+
+An organization owns objects, and membership in it carries its own role, separate from the account's
+global one. Read this part carefully, because the names invite the wrong reading.
+
+A member with organization role **admin** can manage that organization's projects, templates,
+inventories and credentials: edit them and delete them. That holds **whatever the account's global
+role is**, including viewer. It is how a tenant administers itself without anyone needing
+install-wide admin.
+
+The consequence is worth stating plainly rather than leaving to be discovered. If you create a
+read-only auditor account with the global viewer role and then add it to an organization as admin,
+meaning "let them see all of this", you have given that account write access to everything that
+organization owns. Add an auditor as a **member**, not an admin.
+
+Organization admin also confers nothing over the organization *record* itself. Managing members, and
+the organization's own settings, is the install's global admin role, not this one. So an
+organization admin can rewrite that organization's credentials but cannot list its members.
+
 ## Queues and workers
 
 A worker is any process running the executor against the shared store. Every process, the server

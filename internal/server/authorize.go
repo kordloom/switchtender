@@ -136,6 +136,15 @@ func (a *authorizer) orgAccess(ctx context.Context, actor Actor, object string) 
 		if m.OrgID != orgID {
 			continue
 		}
+		// Organization admin confers manage over that organization's objects regardless of the
+		// account's global role, which is deliberate and pinned by TestAuthorizeOrgOwnership and
+		// TestAuthorizeOrgManageDelegation: membership is how a tenant administers itself without
+		// needing install-wide admin.
+		//
+		// It is worth being explicit because the name invites the opposite reading. A global viewer
+		// added to an organization as "admin" can edit and delete that organization's projects,
+		// templates, inventories and credentials. An operator setting up a read-only auditor must
+		// therefore not give them org admin, and docs/concepts.md says so.
 		if m.Role == org.RoleAdmin {
 			return grant.AccessManage, true, nil
 		}

@@ -251,3 +251,32 @@ func TestAuthorizeOrgStrictWrongfulDeny(t *testing.T) {
 		}
 	})
 }
+
+// TestOrgAdminEscalatesAGlobalViewerOnPurpose records a behavior whose name invites the opposite
+// reading, so that changing it is a decision somebody makes rather than an accident.
+//
+// Organization admin confers manage over that organization's objects regardless of the account's
+// global role. A global viewer added to an organization as admin can edit and delete that
+// organization's projects, templates, inventories and credentials. That is deliberate: it is how a
+// tenant administers itself without anyone needing install-wide admin.
+//
+// It is also the opposite of what an operator setting up a read-only auditor expects from the word
+// "admin", and it was documented nowhere. docs/concepts.md and the members row of docs/api.md now
+// say it plainly. This test exists so the documentation and the behavior cannot drift apart: if the
+// ceiling is ever added, this test fails and the docs get corrected in the same change.
+func TestOrgAdminEscalatesAGlobalViewerOnPurpose(t *testing.T) {
+	t.Parallel()
+	authz := orgOwnedFixture(t)(false)
+
+	// A global viewer who is an admin of the organization owning proj_solo.
+	viewer := Actor{UserID: "user_admin_a", Role: user.RoleViewer}
+	got, err := authz.manages(context.Background(), viewer, "proj_solo")
+	if err != nil {
+		t.Fatalf("manages() error = %v", err)
+	}
+	if !got {
+		t.Error("a global viewer with organization admin no longer manages that organization's " +
+			"objects. That may be the right call, but docs/concepts.md and docs/api.md both " +
+			"state the current behavior and must be corrected in the same change.")
+	}
+}

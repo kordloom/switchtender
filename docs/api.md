@@ -123,7 +123,7 @@ Two more are enforced somewhere other than the request:
 | POST   | `/v1/orgs`                 | Create an organization.                                 |
 | GET    | `/v1/orgs`                 | List organizations.                                     |
 | DELETE | `/v1/orgs/{id}`            | Delete an organization and its memberships.             |
-| POST   | `/v1/orgs/{id}/members`    | Add a user to an organization with an organization role.|
+| POST   | `/v1/orgs/{id}/members`    | Add a user to an organization with an organization role. Organization admin grants manage over that organization's projects, templates, inventories and credentials whatever the account's global role is, so do not give it to a read-only auditor. See [concepts](concepts.md). |
 | GET    | `/v1/orgs/{id}/members`    | List an organization's members and their roles.         |
 | DELETE | `/v1/orgs/{id}/members/{userID}` | Remove a user from an organization.               |
 | POST   | `/v1/grants`               | Grant a user or team read, use, or manage on an object: a project, template, inventory, or credential id, or a worker queue as `queue:<name>`. |
