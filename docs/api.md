@@ -30,7 +30,7 @@ with a message naming the feature rather than failing in some subtler way:
 Two more are enforced somewhere other than the request:
 
 - `/relay` is served whatever the license. The gate is on the other end: `switchtender worker
-  --server` refuses to start without Team. A worker sharing the database is not gated at all.
+  --server` refuses to start without Team, and so does a worker sharing the database: every worker process is gated.
 - The directory sign-in routes need Pro, enforced at startup rather than per request. Configuring any
   of OIDC, SAML, LDAP, or JWT without a license refuses the server at startup, so those routes are
   either licensed or absent.

@@ -69,13 +69,16 @@
 <h2 id="requirements">Requirements</h2>
 <p>Ansible on the PATH: <code>ansible-playbook</code> and <code>ansible-inventory</code>. Nothing else for the default
 SQLite setup. Building from source instead of installing the release binary needs Go 1.26, and
-Docker Compose is an alternative, where <code>docker compose up --build</code> builds the image from this
+Docker Compose is an alternative, where <code>docker compose --profile stack up --build</code> builds the image from this
 repository.</p>
 <h2 id="install">Install</h2>
 <pre><code>curl -fsSL https://switchtender.com/install.sh | sh
 </code></pre>
 <p>The script downloads the release binary for your platform, checks it against the published
-checksums, and puts <code>switchtender</code> on your PATH. Running in about a minute. Prefer to build it
+checksums, and installs it. It writes to <code>/usr/local/bin</code> when it can and to <code>~/.local/bin</code>
+otherwise, which is what happens on a stock Mac and on any Linux install without root. That second
+directory is often not on PATH, so the script says so and prints its closing commands with the full
+path; add the line it gives you to run <code>switchtender</code> by name. Running in about a minute. Prefer to build it
 yourself, or want to hack on it? <code>go build -o switchtender .</code> from a clone produces the same
 binary; the commands below assume it is on your PATH, so prefix a locally built binary with <code>./</code>.</p>
 <h2 id="run-the-server">Run the server</h2>
@@ -97,6 +100,15 @@ launch works on the spot. It skips a template whose name is already present, so 
 loopback port, keeps its data in a per-user directory, and opens the UI. The
 <a href="/docs/desktop">desktop guide</a> covers it, including packaging.</p>
 <h2 id="submit-a-run">Submit a run</h2>
+<p>The first one needs nothing on disk, so it succeeds on an install that is minutes old:</p>
+<pre><code>curl -X POST localhost:8080/v1/runs \
+  -H &quot;Authorization: Bearer $ST_TOKEN&quot; \
+  -d '{&quot;tool&quot;: &quot;bash&quot;, &quot;command&quot;: &quot;echo hello from switchtender&quot;}'
+</code></pre>
+<p>An Ansible run takes a playbook and an inventory. The server resolves both relative to its own
+working directory, so <code>site.yml</code> and <code>hosts.ini</code> have to exist there, or the run names a
+<a href="/docs/concepts">project</a> and they are resolved inside that checkout instead. Without either the run
+is submitted, accepted, and then fails with &quot;the playbook: site.yml could not be found&quot;:</p>
 <pre><code>curl -X POST localhost:8080/v1/runs \
   -H &quot;Authorization: Bearer $ST_TOKEN&quot; \
   -d '{&quot;playbook&quot;: &quot;site.yml&quot;, &quot;inventory&quot;: &quot;hosts.ini&quot;}'
@@ -125,9 +137,13 @@ unauthenticated API to the network.</p>
 <pre><code>SWITCHTENDER_PASSWORD=secret switchtender user new operator-jane --role operator --db switchtender.db
 </code></pre>
 <h2 id="run-with-docker">Run with Docker</h2>
-<pre><code>export SWITCHTENDER_ENCRYPTION_KEY=change-me
+<p>The compose file lives in the repository, so this one needs a checkout rather than the installed
+binary:</p>
+<pre><code>git clone https://github.com/kordloom/switchtender
+cd switchtender
+export SWITCHTENDER_ENCRYPTION_KEY=change-me
 export SWITCHTENDER_ENCRYPTION_SALT=change-me-too
-docker compose up --build
+docker compose --profile stack up --build
 </code></pre>
 <p>This starts a server, a PostgreSQL database, and a worker. The server listens on port 8080. Set
 <code>SWITCHTENDER_PORT</code> to change the host port.</p>
@@ -146,15 +162,24 @@ sudo systemctl enable --now switchtender
 <h2 id="run-on-kubernetes">Run on Kubernetes</h2>
 <p>SwitchTender needs no operator. A Helm chart installs the server and a worker as ordinary pods sharing a
 database:</p>
-<pre><code>helm install switchtender ./deploy/helm/switchtender
+<p>The chart is in the repository too, so clone it first if you installed the binary alone:</p>
+<pre><code>git clone https://github.com/kordloom/switchtender
+cd switchtender
+helm install switchtender ./deploy/helm/switchtender \
+  --set encryptionKey=$(openssl rand -hex 32) \
+  --set encryptionSalt=$(openssl rand -hex 16)
 </code></pre>
+<p>Both values are required, and the salt has to stay the same across upgrades: it is what every
+stored secret was sealed against, so a new salt makes the old ones unreadable. Keep them in a
+secret manager and pass <code>--set existingSecret=&lt;name&gt;</code> instead once you have one. The chart pulls
+<code>ghcr.io/kordloom/switchtender</code>.</p>
 <h2 id="try-the-demo">Try the demo</h2>
 <p>To look around without setting anything up, run the seeded demo. It fills a fresh database with
 sample projects, templates, inventories, and real runs, including a flaky host, a split, and a
 pipeline, then serves it read-only so it is safe to expose:</p>
 <pre><code>switchtender demo --addr :8080
 </code></pre>
-<p>Or with Docker: <code>docker compose --profile demo up --build</code>.</p>
+<p>Or with Docker, from a checkout: <code>docker compose --profile demo up --build</code>.</p>
 
 		</main>
 	</div>

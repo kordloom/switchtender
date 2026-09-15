@@ -46,6 +46,24 @@ jobs:
       - name: JS unit tests
         run: node --test internal/ui/assets/jstest/*.test.mjs
 
+      # site/ is partly generated: sitegen renders docs/*.md into site/docs/ and refreshes shared
+      # regions inside the hand-written landing pages. Nothing checked that the committed output
+      # matched its source, so an edit to the markdown left the published page stale, and an edit
+      # made directly to the generated HTML was silently reverted the next time anyone ran the
+      # generator. Both happened: switchtender.com/docs/features published five Team-only features
+      # as free for a week, and a corrected pricing claim lived only in generated output. The
+      # generator's own source says editing the output "gets clobbered on the next run, which is
+      # how one card was lost once", which is a warning a person can read and CI can enforce.
+      - name: Generated site content is current
+        run: |
+          set -euo pipefail
+          go run ./cmd/sitegen
+          if ! git diff --quiet -- site/; then
+            echo "::error title=Generated site content is stale::run 'go run ./cmd/sitegen' and commit the result. Never edit the generated output by hand: sitegen rewrites it."
+            git --no-pager diff --stat -- site/
+            exit 1
+          fi
+
       # A product selling evidence should scan clean, and a stranger will run this. History rather
       # than the working tree: the config allowlists the redaction tests, whose fixtures must look
       # like secrets, one file at a time rather than exempting every _test.go, so a real credential

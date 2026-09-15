@@ -23,7 +23,7 @@ believes it has a control it does not have.
 | The full policy engine: deny rules, risk floors, actor scoping, distinct-approver separation of duties | Team | Creating a policy that uses one. A single require-approval policy stays Community. |
 | More approval policies at once | Pro holds five, Team is uncapped | Creating policies. Community holds one. |
 | The period change register | Team | `audit report`, and `GET /v1/audit/register`. |
-| Distributed workers | Team | `worker --server`, the mesh relay. A worker sharing the database is not gated. |
+| Distributed workers | Team | Every `switchtender worker`, whether it shares the database or reaches the server over the mesh relay with `--server`. |
 | Initializing a new PostgreSQL database | Team | The first `serve` against a `postgres://` DSN. Opening a schema that already exists is never gated. |
 | One-click drift reconcile | Team | `POST /v1/drift/reconcile`. Drift detection itself is free. |
 

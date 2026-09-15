@@ -701,20 +701,29 @@ function renderFailureCallout(run) {
 		host.hidden = true;
 		return;
 	}
+	// run.error carries two different situations and they must not be described the same way. A
+	// launch failure means nothing ran, so the empty timeline and empty log need explaining. An
+	// interrupted, abandoned or orphaned run DID execute and does have output, and telling that
+	// reader "this run did not start" and "there is no log" contradicts the log sitting below it.
+	// The record already answers this, so no guessing from the error text: a run that was claimed or
+	// has a start time executed, whatever went wrong afterward.
+	const started = !!(run.started_at || run.claimed_by);
 	const head = document.createElement("div");
 	head.className = "risk-callout-head";
 	const label = document.createElement("strong");
-	label.textContent = "This run did not start";
+	label.textContent = started ? "This run did not finish" : "This run did not start";
 	head.appendChild(label);
 	host.appendChild(head);
 	const why = document.createElement("pre");
 	why.className = "drill-pre";
 	why.textContent = run.error;
 	host.appendChild(why);
-	const note = document.createElement("div");
-	note.className = "muted";
-	note.textContent = "Nothing executed, so there is no log or event stream for this run.";
-	host.appendChild(note);
+	if (!started) {
+		const note = document.createElement("div");
+		note.className = "muted";
+		note.textContent = "Nothing executed, so there is no log or event stream for this run.";
+		host.appendChild(note);
+	}
 	host.hidden = false;
 }
 

@@ -168,3 +168,38 @@ test("a run with no recorded reason shows no failure callout", () => {
 	assert.equal(document.getElementById("run-failure").hidden, true,
 		"a succeeded run should not carry a failure callout");
 });
+
+// TestInterruptedRunIsNotCalledUnstarted pins the two situations run.error covers apart.
+//
+// The store finishes an abandoned or reclaimed run with a sentence of its own, so run.error is set
+// on runs that very much did execute. The callout described every one of them as "This run did not
+// start" and added "Nothing executed, so there is no log or event stream" directly above the log
+// the run produced.
+test("a run that started and was cut short is not described as never having started", () => {
+	const app = loadParts(ALL_PARTS);
+	const document = mountPage(app, "detail", { vars: { RunID: "run_1", MatrixCap: 20000 } });
+	app.renderHeader({
+		id: "run_1", status: "failed", tool: "ansible", playbook: "site.yml",
+		started_at: "2026-09-15T10:00:00Z", claimed_by: "worker-2",
+		error: "interrupted: executor lease expired",
+	});
+	const host = document.getElementById("run-failure");
+	assert.equal(host.hidden, false, "the reason was not shown at all");
+	assert.match(host.textContent, /did not finish/,
+		"a run that executed was described as never having started");
+	assert.doesNotMatch(host.textContent, /no log or event stream/,
+		"the page denied the existence of a log the run produced");
+});
+
+// TestNeverStartedStillSaysSo pins that the original case is unchanged.
+test("a run that never started still says so, and why the log is empty", () => {
+	const app = loadParts(ALL_PARTS);
+	const document = mountPage(app, "detail", { vars: { RunID: "run_1", MatrixCap: 20000 } });
+	app.renderHeader({
+		id: "run_1", status: "failed", tool: "terraform",
+		error: 'launch error: exec: "terraform": executable file not found in $PATH',
+	});
+	const host = document.getElementById("run-failure");
+	assert.match(host.textContent, /did not start/);
+	assert.match(host.textContent, /no log or event stream/);
+});

@@ -127,7 +127,7 @@ creating a new PostgreSQL schema, and one-click drift reconcile are Team. Tiers 
 <td>A drag-and-drop canvas at Workflows builds the dependency graph in the browser: draft persistence, undo and redo, full keyboard editing, cycle refusal, and a pan, zoom, and fit-to-view viewport that stays smooth on a large graph, submitted as a pipeline.</td>
 </tr>
 <tr>
-<td>Workers</td>
+<td>Workers (Team)</td>
 <td>Point <code>switchtender worker</code> at the same database and it competes for queued runs. Leases, heartbeats, and a janitor make dead workers safe.</td>
 </tr>
 <tr>
@@ -160,7 +160,7 @@ creating a new PostgreSQL schema, and one-click drift reconcile are Team. Tiers 
 </tr>
 <tr>
 <td>Approvals</td>
-<td>Mark a run to require sign-off, or require it automatically by policy on tool, command, target, assessed risk, or who is asking. A held run never executes until an admin approves or rejects it. The decision is a chain entry committing a digest of the exact spec released, the executor refuses a spec that changed after the decision, and the receipt proves the approved and executed change are the same.</td>
+<td>Mark a run to require sign-off, or require it automatically by policy on tool, command, target, assessed risk, or who is asking. Community holds one such policy, and matching on risk or on who is asking is part of the full engine, which is Team. A held run never executes until an admin approves or rejects it. The decision is a chain entry committing a digest of the exact spec released, the executor refuses a spec that changed after the decision, and the receipt proves the approved and executed change are the same.</td>
 </tr>
 <tr>
 <td>Policy as code (Team past one plain rule)</td>
@@ -199,11 +199,11 @@ creating a new PostgreSQL schema, and one-click drift reconcile are Team. Tiers 
 <td>A run held for approval records which rule held it, by the name that rule carried at the hold, so the register answers &quot;what stopped this change&quot; even after the policy is renamed or deleted. A plan held for destroying too much records the threshold it crossed.</td>
 </tr>
 <tr>
-<td>Scheduled evidence packs</td>
+<td>Scheduled evidence packs (Team)</td>
 <td><code>--evidence-dir</code> with <code>--evidence-cadence</code> writes a change register covering each elapsed period, named for the period to the second, so an archive sorts chronologically and a missing period is a missing file. Progress lives in the archive rather than in memory, so a restart resumes where the last pack ended and a period that failed to write is covered by the next attempt instead of being skipped. The evidence a review samples from exists before it is asked for.</td>
 </tr>
 <tr>
-<td>Change register</td>
+<td>Change register (Team)</td>
 <td><code>switchtender audit report --from --to</code>, or the audit page's Evidence pack button, renders every change in the period with its actor, chain-recorded decision, risk grade, and outcome. That is the change-management sample a SOC 2 CC8.1 or ISO/IEC 27001 A.8.32 review asks for.</td>
 </tr>
 <tr>
@@ -267,7 +267,7 @@ creating a new PostgreSQL schema, and one-click drift reconcile are Team. Tiers 
 <td>One action re-runs only the hosts a finished run left failed or unreachable, targeted at exactly that set, so a partial outage is closed without repeating the hosts that already succeeded.</td>
 </tr>
 <tr>
-<td>Worker queues</td>
+<td>Worker queues (Team)</td>
 <td>Target a run at a named queue. A worker serving that queue runs it and default workers leave it alone. Pin a queue on a run, a template, or an inventory, most specific wins, so queues work like AWX instance groups. A queue is grantable as <code>queue:&lt;name&gt;</code> and matchable in a policy, so choosing one is access-controlled on both sides rather than only on the worker's.</td>
 </tr>
 <tr>
@@ -339,7 +339,7 @@ creating a new PostgreSQL schema, and one-click drift reconcile are Team. Tiers 
 <td>Describe a bash, python, powershell, or go step in the workflow editor and the provider drafts the script into the command field for you to review, edit, and save. The draft never executes on its own.</td>
 </tr>
 <tr>
-<td>Drift reconcile</td>
+<td>Drift reconcile (Team)</td>
 <td>One click on a drifted target builds the fix, run for real and born held for approval: an Ansible host reruns its playbook limited to that host, a Terraform directory applies. A machine proposes, a person releases, and the audit trail records both.</td>
 </tr>
 <tr>

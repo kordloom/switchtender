@@ -137,6 +137,25 @@ function wireLaunchForm() {
 	});
 }
 
+// renderSealingNotice puts one line above the credentials table saying this server cannot store a
+// new secret, without hiding the ones it already holds.
+//
+// The wording differs by install because the remedy does. On a read-only demo the reader does not
+// run the server, so instructions to set environment variables on it are noise aimed at the wrong
+// person.
+function renderSealingNotice() {
+	const table = document.querySelector("main.content table");
+	if (!table) return;
+	const anchor = table.closest(".list-scroll") || table;
+	if (!anchor.parentNode || anchor.parentNode.querySelector(".seal-notice")) return;
+	const note = document.createElement("div");
+	note.className = "ro-banner seal-notice";
+	note.textContent = isReadOnly()
+		? "This demo holds no encryption key, so no new credential can be stored here. The ones below are seeded, and templates reference them the way a real install would."
+		: "This server has no encryption key, so a new credential cannot be sealed and saved. Set SWITCHTENDER_ENCRYPTION_KEY and SWITCHTENDER_ENCRYPTION_SALT and restart, keeping the salt stable, since it is what every stored secret is sealed against.";
+	anchor.parentNode.insertBefore(note, anchor);
+}
+
 // fillCredentialPicker loads stored credentials into the launch multiselect.
 async function fillCredentialPicker() {
 	const picker = document.getElementById("launch-credentials");
@@ -497,23 +516,24 @@ async function loadCredentials() {
 		const data = await getJSON("/credentials");
 		const creds = data.credentials || [];
 		// An install without the encryption key and salt lists credentials fine and refuses every
-		// write. The page invited a reader to add one anyway, and said so only after they had named
-		// it, chosen SSH private key, and pasted a private key into a form that could never save it.
-		const sealing = data.sealing !== false;
-		if (!sealing) {
-			showEmpty("Credentials are switched off on this server. Storing one needs an encryption " +
-				"key and salt: set SWITCHTENDER_ENCRYPTION_KEY and SWITCHTENDER_ENCRYPTION_SALT and " +
-				"restart. Keep the salt stable, since it is what every stored secret is sealed against.");
+		// write. Saying so is worth doing, but it is a fact about WRITING, and gating the render on
+		// it hid four real rows on the public demo while the launch dialog two clicks away listed
+		// the same four by name. The notice is a banner over the table now, not a replacement for
+		// it, and only the control that would write is disabled.
+		if (data.sealing === false) {
+			renderSealingNotice();
 			const add = document.querySelector(".page-head .button.primary");
 			if (add) {
 				add.disabled = true;
-				add.dataset.tip = "Set SWITCHTENDER_ENCRYPTION_KEY and SWITCHTENDER_ENCRYPTION_SALT " +
-					"on the server to store credentials.";
+				add.dataset.tip = isReadOnly()
+					? "This demo is read-only, and it stores no encryption key, so nothing can be saved here."
+					: "Set SWITCHTENDER_ENCRYPTION_KEY and SWITCHTENDER_ENCRYPTION_SALT on the server to store credentials.";
 			}
-			return;
 		}
 		if (creds.length === 0) {
-			showEmpty("No credentials yet. Add one and templates can reach hosts with it, sealed at rest and injected only at execution.");
+			showEmpty(data.sealing === false
+				? "No credentials are stored, and this server could not seal one anyway until it has an encryption key and salt."
+				: "No credentials yet. Add one and templates can reach hosts with it, sealed at rest and injected only at execution.");
 			return;
 		}
 		renderNeedsSecret(creds);
