@@ -407,8 +407,23 @@ func New(store run.Store, submitter Submitter, log *zap.Logger, opts ...Option) 
 	if srv.oidc != nil {
 		oidcBrand = srv.oidc.Brand()
 	}
-	srv.web = ui.New(srv.log, srv.docs, srv.readOnly, srv.matrixCap, srv.oidc != nil, srv.saml != nil, srv.ai != nil, oidcBrand)
+	srv.web = ui.New(srv.log, srv.docs, srv.readOnly, srv.matrixCap, srv.oidc != nil, srv.saml != nil,
+		srv.ai != nil, oidcBrand, ui.WithAccountCheck(srv.anyAccount))
 	return srv
+}
+
+// anyAccount reports whether this install holds a user account, for the sign-in page. An unreadable
+// user store counts as having one, so a database problem cannot make the page tell a reader their
+// accounts are gone.
+func (s *Server) anyAccount() bool {
+	if s.users == nil {
+		return false
+	}
+	accounts, err := s.users.List(context.Background())
+	if err != nil {
+		return true
+	}
+	return len(accounts) > 0
 }
 
 // Handler returns the HTTP handler serving the SwitchTender API and web interface.
@@ -528,7 +543,7 @@ func (s *Server) Handler() http.Handler {
 		projects: s.projects, invSources: s.invSources, schedules: s.schedules,
 		policies: s.policies,
 	}
-	mux.Handle("GET /v1/credentials", listCredentialsHandler(s.credentials, refs, authz, s.log))
+	mux.Handle("GET /v1/credentials", listCredentialsHandler(s.credentials, s.sealer, refs, authz, s.log))
 	mux.Handle("DELETE /v1/credentials/{id}", deleteCredentialHandler(s.credentials, refs, s.log))
 	mux.Handle("POST /v1/projects", createProjectHandler(s.projects, authz, s.log))
 	mux.Handle("PUT /v1/projects/{id}", updateProjectHandler(s.projects, authz, s.log))

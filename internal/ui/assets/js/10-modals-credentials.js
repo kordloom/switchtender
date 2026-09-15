@@ -143,13 +143,31 @@ async function fillCredentialPicker() {
 	if (!picker) return;
 	try {
 		const data = await getJSON("/credentials");
-		for (const c of data.credentials || []) {
+		const creds = data.credentials || [];
+		for (const c of creds) {
 			const opt = document.createElement("option");
 			opt.value = c.id;
 			opt.textContent = c.name + " (" + c.kind + ")";
 			picker.appendChild(opt);
 		}
-	} catch (_) { /* credentials disabled or unauthorized; picker stays empty */ }
+		// A labeled box with nothing in it reads as broken. The Project and Stored inventory selects
+		// beside it both carry a placeholder saying what empty means, and this one did not: the first
+		// form a stranger opens showed CREDENTIALS above a blank well.
+		if (creds.length === 0) placeholderOption(picker, data.sealing === false
+			? "Credentials are switched off on this server"
+			: "None stored yet");
+	} catch (_) {
+		placeholderOption(picker, "Credentials are unavailable on this server");
+	}
+}
+
+// placeholderOption puts one unselectable line in an empty picker, saying what empty means.
+function placeholderOption(picker, text) {
+	if (picker.options.length) return;
+	const opt = document.createElement("option");
+	opt.textContent = text;
+	opt.disabled = true;
+	picker.appendChild(opt);
 }
 
 // CRED_KINDS describes every credential kind the server can materialize: the shape its secret takes
@@ -478,6 +496,22 @@ async function loadCredentials() {
 	try {
 		const data = await getJSON("/credentials");
 		const creds = data.credentials || [];
+		// An install without the encryption key and salt lists credentials fine and refuses every
+		// write. The page invited a reader to add one anyway, and said so only after they had named
+		// it, chosen SSH private key, and pasted a private key into a form that could never save it.
+		const sealing = data.sealing !== false;
+		if (!sealing) {
+			showEmpty("Credentials are switched off on this server. Storing one needs an encryption " +
+				"key and salt: set SWITCHTENDER_ENCRYPTION_KEY and SWITCHTENDER_ENCRYPTION_SALT and " +
+				"restart. Keep the salt stable, since it is what every stored secret is sealed against.");
+			const add = document.querySelector(".page-head .button.primary");
+			if (add) {
+				add.disabled = true;
+				add.dataset.tip = "Set SWITCHTENDER_ENCRYPTION_KEY and SWITCHTENDER_ENCRYPTION_SALT " +
+					"on the server to store credentials.";
+			}
+			return;
+		}
 		if (creds.length === 0) {
 			showEmpty("No credentials yet. Add one and templates can reach hosts with it, sealed at rest and injected only at execution.");
 			return;

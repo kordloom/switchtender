@@ -237,7 +237,13 @@ func runDemo(cmd *cobra.Command, _ []string) error {
 			server.WithApprover(disp),
 			server.WithDocs(docsFS),
 			server.WithReadOnly(true)).Handler(),
+		// The same timeouts serve sets. The demo is the one process actually exposed to the public
+		// internet, and it was the one without them: Go falls an unset IdleTimeout back to
+		// ReadTimeout, and an unset ReadTimeout means no timeout, so abandoned keep-alive
+		// connections were never closed.
 		ReadHeaderTimeout: readHeaderTimeout,
+		ReadTimeout:       readTimeout,
+		IdleTimeout:       idleTimeout,
 	}
 
 	ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)

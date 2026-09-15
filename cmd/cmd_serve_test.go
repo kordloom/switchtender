@@ -18,6 +18,7 @@ func TestTokenCountGuard(t *testing.T) {
 	tests := []struct {
 		Name         string
 		Count        int
+		Accounts     int
 		CountErr     error
 		ReadOnly     bool
 		ExternalAuth bool
@@ -57,11 +58,27 @@ func TestTokenCountGuard(t *testing.T) {
 			Name: "empty read-only public", Count: 0, ReadOnly: true, Addr: "0.0.0.0:8080",
 			WantPosture: postureWarn,
 		},
+		{ // Test 7: No tokens but an account exists, which is what the documented production path
+			// leaves behind: switchtender init then serve. An account turns authentication on
+			// exactly as a token does, so there is nothing to warn about and nothing to mint. This
+			// used to warn that the API was unauthenticated about an install answering 401 to
+			// every request.
+			Name: "account no token loopback", Count: 0, Accounts: 1, Loopback: true,
+			Addr: "127.0.0.1:8080",
+		},
+		{ // Test 8: The same on a public bind, where the old reading minted an admin token the
+			// operator never asked for and did not need.
+			Name: "account no token public", Count: 0, Accounts: 1, Addr: "0.0.0.0:8080",
+		},
+		{ // Test 9: A count error still fails closed, whatever the accounts say.
+			Name: "count error with accounts", Count: 0, Accounts: 2, CountErr: errors.New("db locked"),
+			Addr: "0.0.0.0:8080", WantErr: true,
+		},
 	}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
-			posture, err := tokenCountGuard(test.Count, test.CountErr, test.ReadOnly,
+			posture, err := tokenCountGuard(test.Count, test.CountErr, test.Accounts, test.ReadOnly,
 				test.ExternalAuth, test.Loopback, test.Addr)
 			if (err != nil) != test.WantErr {
 				t.Errorf("%s: err = %v, want error: %v", test.Name, err, test.WantErr)

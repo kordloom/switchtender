@@ -94,8 +94,8 @@ function stubDOM(ids) {
 	for (const id of ids) {
 		registry[id] = {
 			id, value: "", checked: false, hidden: true, disabled: false, textContent: "",
-			innerHTML: "", selectedOptions: [], dataset: {}, style: {}, attrs: {},
-			appendChild(child) { return child; },
+			innerHTML: "", selectedOptions: [], options: [], dataset: {}, style: {}, attrs: {},
+			appendChild(child) { this.options.push(child); return child; },
 			addEventListener() {},
 			// A dialog announces itself and takes focus when it opens, so the double has to answer
 			// those the way an element does; without them this stub only proves the code never

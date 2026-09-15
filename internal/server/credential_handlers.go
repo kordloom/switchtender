@@ -95,6 +95,11 @@ type listCredentialsResponse struct {
 	Credentials []credentialView `json:"credentials"`
 	// Count is the number returned.
 	Count int `json:"count"`
+	// Sealing reports whether this install can store a secret at all, which needs the encryption
+	// key and salt. An install without them lists fine and refuses every write, so a reader saw an
+	// ordinary empty list, a New credential button, and an invitation to add one, and learned the
+	// truth only after naming a credential, choosing a kind, and pasting a private key.
+	Sealing bool `json:"sealing"`
 }
 
 // credentialView is a credential in a list response, adding whether it still needs a secret so the
@@ -466,7 +471,8 @@ func updateCredentialHandler(store credential.Store, sealer *credential.Sealer, 
 }
 
 // listCredentialsHandler returns all credentials without secret material.
-func listCredentialsHandler(store credential.Store, refs *refChecker, authz *authorizer, log *zap.Logger) http.HandlerFunc {
+func listCredentialsHandler(store credential.Store, sealer *credential.Sealer, refs *refChecker,
+	authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil {
 			respondError(w, log, http.StatusNotFound, "credentials not enabled")
@@ -505,7 +511,9 @@ func listCredentialsHandler(store credential.Store, refs *refChecker, authz *aut
 			views = append(views, v)
 		}
 		respondJSON(w, log, http.StatusOK,
-			listCredentialsResponse{Credentials: views, Count: len(views)}, wantsPretty(r))
+			listCredentialsResponse{
+				Credentials: views, Count: len(views), Sealing: sealer != nil && sealer.Enabled(),
+			}, wantsPretty(r))
 	}
 }
 

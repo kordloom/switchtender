@@ -103,6 +103,11 @@ Create user accounts with roles for sign-in:
 
 ## Run with Docker
 
+The compose file lives in the repository, so this one needs a checkout rather than the installed
+binary:
+
+    git clone https://github.com/kordloom/switchtender
+    cd switchtender
     export SWITCHTENDER_ENCRYPTION_KEY=change-me
     export SWITCHTENDER_ENCRYPTION_SALT=change-me-too
     docker compose --profile stack up --build
@@ -131,6 +136,10 @@ Serve HTTPS directly, with no reverse proxy in front, by pointing the server at 
 SwitchTender needs no operator. A Helm chart installs the server and a worker as ordinary pods sharing a
 database:
 
+The chart is in the repository too, so clone it first if you installed the binary alone:
+
+    git clone https://github.com/kordloom/switchtender
+    cd switchtender
     helm install switchtender ./deploy/helm/switchtender \
       --set encryptionKey=$(openssl rand -hex 32) \
       --set encryptionSalt=$(openssl rand -hex 16)
@@ -148,4 +157,4 @@ pipeline, then serves it read-only so it is safe to expose:
 
     switchtender demo --addr :8080
 
-Or with Docker: `docker compose --profile demo up --build`.
+Or with Docker, from a checkout: `docker compose --profile demo up --build`.
