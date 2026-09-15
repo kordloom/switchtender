@@ -951,6 +951,9 @@ func runServe(cmd *cobra.Command, _ []string) error {
 				serveDB)
 		}
 	}
+	if err := checkWorkers(serveWorkers, serveWorkersHint); err != nil {
+		return err
+	}
 	var proxies []*net.IPNet
 	for _, c := range serveTrustedProxy {
 		_, n, perr := net.ParseCIDR(strings.TrimSpace(c))

@@ -106,7 +106,7 @@ Runs the HTTP API, the in-process executor, the scheduler, the retention sweeper
 | `--ai-model` | provider default | Model name for the AI provider. Required for `openai`, which has no universal default. |
 | `--ai-url` | provider default | Base URL for the AI provider, for a self-hosted Ollama, an OpenAI-compatible server, or a proxy. |
 | `--schedule-interval` | `15s` | How often the scheduler checks for due schedules. |
-| `--workers` | `4` | Concurrent runs this process executes at once. |
+| `--workers` | `4` | Concurrent runs this process executes at once. At least 1: the server executes its own runs, so there is no value that makes it execute none. |
 | `--max-shards` | `512` | Most groups a split fans out into. A split is always bounded by the host count. |
 | `--run-timeout` | `0` | Default cap on how long a run may execute before it is canceled and failed, for example `1h`. A run may set a shorter timeout. Zero leaves runs uncapped. |
 | `--notify-webhook` | none | URL that receives a JSON notification when a run finishes. Repeatable. |
@@ -193,7 +193,7 @@ node over the mesh relay, with no database access of its own.
 | `--server` | none | Control node base URL to lease runs from over the mesh relay, for example `https://switchtender.example.com`. When set, the worker needs no database and dials one outbound connection. Token from `SWITCHTENDER_WORKER_TOKEN`. |
 | `--name` | host and pid | Worker name stamped on the runs it executes. |
 | `--queue` | none | Queue this worker serves. Repeatable. Without any, it serves the default pool. |
-| `--workers` | `4` | Concurrent runs this process executes at once. |
+| `--workers` | `4` | Concurrent runs this process executes at once. At least 1: a worker with no slots would lease nothing and sit idle. |
 | `--run-timeout` | `0` | Default cap on how long a run may execute before it is canceled and failed, for example `1h`. Zero leaves runs uncapped. |
 | `--allow-container-ee` | `false` | Allow container execution environments on this worker. Needs Docker. |
 | `--default-image` | none | Fallback execution image for runs that pin none at the run, template, or project level. |

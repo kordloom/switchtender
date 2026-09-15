@@ -118,6 +118,9 @@ func init() {
 
 // runWorker leases and executes runs until interrupted.
 func runWorker(cmd *cobra.Command, _ []string) error {
+	if err := checkWorkers(workerWorkers, workerWorkersHint); err != nil {
+		return err
+	}
 	// A worker is distributed execution, which is Team. The license sits beside the shared
 	// database the worker points at, so the worker and the server read the same answer.
 	if lic, lerr := license.Load(license.PathFor(workerDB)); lerr == nil && lic != nil {

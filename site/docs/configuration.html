@@ -432,7 +432,7 @@ that variable is unset.</p>
 <tr>
 <td><code>--workers</code></td>
 <td><code>4</code></td>
-<td>Concurrent runs this process executes at once.</td>
+<td>Concurrent runs this process executes at once. At least 1: the server executes its own runs, so there is no value that makes it execute none.</td>
 </tr>
 <tr>
 <td><code>--max-shards</code></td>
@@ -739,7 +739,7 @@ node over the mesh relay, with no database access of its own.</p>
 <tr>
 <td><code>--workers</code></td>
 <td><code>4</code></td>
-<td>Concurrent runs this process executes at once.</td>
+<td>Concurrent runs this process executes at once. At least 1: a worker with no slots would lease nothing and sit idle.</td>
 </tr>
 <tr>
 <td><code>--run-timeout</code></td>
