@@ -460,7 +460,46 @@ async function loadDetail(runId) {
 		}
 	} catch (e) {
 		setStatus("Failed to load run: " + e.message);
+		// Nothing loaded, so every action on this page acts on nothing. They used to stay enabled:
+		// eight live buttons under one grey line, one of which produced no download, no message,
+		// and no change at all when clicked, because the state they read was never populated. A
+		// run id that does not exist is reachable by an ordinary click, so the page says so and
+		// offers the way back rather than a row of controls that cannot work.
+		const actions = document.querySelector("main.content .actions");
+		if (actions) actions.hidden = true;
+		const header = document.getElementById("run-header");
+		if (header) header.hidden = true;
+		showRunDeadEnd(runId);
 	}
+}
+
+// showRunDeadEnd explains an unreadable run and offers somewhere to go, since the page it replaces
+// has no other exit.
+function showRunDeadEnd(runId) {
+	if (document.getElementById("run-deadend")) return;
+	const host = document.querySelector("main.content");
+	if (!host) return;
+	const box = document.createElement("div");
+	box.id = "run-deadend";
+	box.className = "empty";
+	const p = document.createElement("p");
+	p.textContent = "There is no run " + runId + " on this install. A link to it may be stale, or " +
+		"the run may have been removed with the history it belonged to.";
+	box.appendChild(p);
+	const ways = document.createElement("p");
+	const runs = document.createElement("a");
+	runs.href = "/ui/runs";
+	runs.textContent = "All runs";
+	const audit = document.createElement("a");
+	audit.href = "/ui/audit";
+	audit.textContent = "the audit trail";
+	ways.appendChild(document.createTextNode("Try "));
+	ways.appendChild(runs);
+	ways.appendChild(document.createTextNode(", or "));
+	ways.appendChild(audit);
+	ways.appendChild(document.createTextNode(", which records runs that no longer exist."));
+	box.appendChild(ways);
+	host.appendChild(box);
 }
 
 // postAction sends a POST to the API and returns the parsed JSON body, throwing on an error reply.

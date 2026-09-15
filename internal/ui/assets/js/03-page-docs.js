@@ -118,6 +118,15 @@ function mountListFilter() {
 	const preset = new URLSearchParams(location.search).get("q");
 	// Filtering walks every row's text and then repaginates, so a burst of keystrokes is debounced
 	// into one pass, the same way the runs search batches its requests.
+	// A filter that matches nothing leaves the header row and an empty body. "0 shown" in small
+	// grey type beside the box was the only signal, and a deep link carrying ?q= lands there
+	// without anyone typing: the Audit trail button on a run opens exactly that view. So the table
+	// says so in words, and says what was searched for.
+	const none = document.createElement("div");
+	none.className = "empty list-filter-empty";
+	none.hidden = true;
+	table.parentNode.insertBefore(none, table.nextSibling);
+
 	const filter = () => {
 		const q = input.value.trim().toLowerCase();
 		let shown = 0;
@@ -129,6 +138,12 @@ function mountListFilter() {
 			if (match) shown++;
 		}
 		count.textContent = q ? shown + " shown" : "";
+		const empty = q !== "" && shown === 0 && tbody.rows.length > 0;
+		none.hidden = !empty;
+		if (empty) {
+			none.textContent = "Nothing on this page matches " + JSON.stringify(input.value.trim()) +
+				". Clear the filter to see all " + tbody.rows.length + ".";
+		}
 		table.dispatchEvent(new CustomEvent("rowsfiltered"));
 	};
 	let filterTimer;

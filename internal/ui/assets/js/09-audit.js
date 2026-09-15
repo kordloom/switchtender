@@ -60,6 +60,15 @@ function auditChange(method, path) {
 	if (method === "SCHEDULE") {
 		return "Schedule " + (parts[1] || "") + " fired";
 	}
+	// A span beat is the chain attesting that it was alive and unbroken across an interval, which
+	// is why the newest rows on a quiet install are all beats. The generic fallthrough rendered
+	// them "SPAN on span", so the first three rows of the tamper-evident page read as a bug.
+	if (method === "SPAN") {
+		const beat = parts[1] || "";
+		const cadence = /cadence_s=(\d+)/.exec(String(path || ""));
+		const every = cadence ? " covering the previous " + fmtSeconds(Number(cadence[1])) : "";
+		return "Attested the chain was unbroken through beat " + beat + every;
+	}
 	if (method === "RUN") {
 		return "Run " + (parts[1] || "") + " finished " +
 			String(parts[parts.length - 1] || "").replace(/_/g, " ");
