@@ -3,6 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { loadParts, ALL_PARTS } from "./loader.mjs";
 import { mountPage } from "./pages.mjs";
+import { fire } from "./dom.mjs";
 
 // mountRuns puts the given duration strings into the runs table, one row each, and returns the
 // page with the sort controls mounted.
@@ -54,4 +55,36 @@ test("a plain number column still sorts as numbers", () => {
 	const header = document.querySelectorAll("main.content table thead th")[durationIndex];
 	header.click();
 	assert.deepEqual(readColumn(tbody, durationIndex), ["2", "9", "10"], "counts stopped sorting numerically");
+});
+
+// TestAppendedRowsJoinTheSort pins that Load more does not leave the table contradicting its header.
+//
+// Rows arriving later were appended in server order while the sorted header kept its arrow, so two
+// clicks, sort then Load more, produced a visibly unsorted table claiming to be sorted, with the row
+// numbers renumbered straight down the wrong order.
+test("rows appended after a sort join it rather than landing at the bottom", () => {
+	const { document, tbody, durationIndex } = mountRuns(["4.2s", "980ms"]);
+	const header = document.querySelectorAll("main.content table thead th")[durationIndex];
+	header.click();
+	assert.deepEqual(readColumn(tbody, durationIndex), ["980ms", "4.2s"]);
+	assert.equal(header.getAttribute("aria-sort"), "ascending",
+		"the sorted header did not say so to a screen reader");
+
+	// What Load more does: append in server order, then announce it.
+	const columns = document.querySelectorAll("main.content table thead th").length;
+	for (const text of ["2h", "30ms"]) {
+		const tr = document.createElement("tr");
+		for (let i = 0; i < columns; i++) {
+			const cell = document.createElement("td");
+			if (i === durationIndex) cell.textContent = text;
+			tr.appendChild(cell);
+		}
+		tbody.appendChild(tr);
+	}
+	fire(document.querySelector("main.content table"), "rowsappended");
+
+	assert.deepEqual(readColumn(tbody, durationIndex), ["30ms", "980ms", "4.2s", "2h"],
+		"appended rows did not join the active sort");
+	assert.equal(header.getAttribute("aria-sort"), "ascending",
+		"re-sorting flipped the direction the header was showing");
 });

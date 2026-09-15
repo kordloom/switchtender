@@ -439,7 +439,13 @@ async function loadSchedules() {
 			enabled.appendChild(chip);
 			tr.appendChild(enabled);
 
-			tr.appendChild(td(fmtTime(s.next_run_at)));
+			// A blank cell in a table whose other rows are filled reads as a rendering failure
+			// rather than as an absence, so both columns say what nothing means: a disabled
+			// schedule has no next run because it is paused, and a schedule that has not fired yet
+			// has never run.
+			const next = td(fmtTime(s.next_run_at) || (s.enabled ? "\u2014" : "paused"));
+			if (!fmtTime(s.next_run_at)) next.className = "muted";
+			tr.appendChild(next);
 
 			const last = document.createElement("td");
 			if (s.last_run_id) {
@@ -447,6 +453,9 @@ async function loadSchedules() {
 				link.href = "/ui/runs/" + s.last_run_id;
 				link.textContent = fmtTime(s.last_run_at) || "view run";
 				last.appendChild(link);
+			} else {
+				last.className = "muted";
+				last.textContent = "never";
 			}
 			tr.appendChild(last);
 

@@ -320,12 +320,16 @@ function mountTableSort() {
 		th.tabIndex = 0;
 		th.setAttribute("role", "button");
 		th.dataset.tip = "Click to sort by " + (th.textContent.trim() || "this column");
-		const sort = () => {
-			const desc = th.dataset.dir === "asc";
+		const sort = (keepDirection) => {
+			const desc = keepDirection ? th.dataset.dir === "desc" : th.dataset.dir === "asc";
 			for (const other of table.tHead.rows[0].cells) {
-				if (other !== th) delete other.dataset.dir;
+				if (other !== th) {
+					delete other.dataset.dir;
+					other.removeAttribute("aria-sort");
+				}
 			}
 			th.dataset.dir = desc ? "desc" : "asc";
+			th.setAttribute("aria-sort", desc ? "descending" : "ascending");
 			const rows = Array.from(tbody.rows).filter((r) => !r.classList.contains("skeleton-row"));
 			rows.sort((a, b) => {
 				const av = cellSortValue(a.cells[index]);
@@ -344,9 +348,17 @@ function mountTableSort() {
 			}
 			table.dispatchEvent(new CustomEvent("rowsfiltered"));
 		};
-		th.addEventListener("click", sort);
+		// The listener drops its event argument: a click Event is truthy and would read as "keep the
+		// direction", turning every click into a no-op on the second press.
+		th.addEventListener("click", () => sort(false));
 		th.addEventListener("keydown", (e) => {
-			if (e.key === "Enter" || e.key === " ") { e.preventDefault(); sort(); }
+			if (e.key === "Enter" || e.key === " ") { e.preventDefault(); sort(false); }
+		});
+		// Rows arriving later, from Load more, were appended in server order under a header still
+		// showing its sort arrow, so the table contradicted its own heading after two clicks. The
+		// active column re-sorts in the direction it already shows.
+		table.addEventListener("rowsappended", () => {
+			if (th.dataset.dir) sort(true);
 		});
 	});
 }

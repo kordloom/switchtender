@@ -62,12 +62,26 @@ func TestDesktopListener(t *testing.T) {
 	_ = l.Close()
 
 	// Test 1: The saved port is reused when free.
+	//
+	// "When free" is the whole claim, and the port stopped being this test's the moment it closed
+	// the listener above. Eight other tests in this package bind ports and all of them run in
+	// parallel, so one can take the freed port in between and the reuse would correctly fall back.
+	// Asserting the port outright made this test fail for a reason that is not a defect, which is
+	// worse than useless in a gate that blocks releases. So a different port is accepted only on
+	// proof that the saved one really was occupied.
 	l2, err := desktopListener(dir)
 	if err != nil {
 		t.Fatalf("desktopListener() reuse error = %v", err)
 	}
 	if got := l2.Addr().(*net.TCPAddr).Port; got != first {
-		t.Errorf("reused port = %d, want %d", got, first)
+		probe, perr := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(first))
+		if perr == nil {
+			_ = probe.Close()
+			t.Errorf("reused port = %d, want %d, and %d was free", got, first, first)
+		} else {
+			t.Logf("port %d was taken by something else between the close and the reuse, so the "+
+				"fallback to %d is the documented behavior rather than a failure", first, got)
+		}
 	}
 	_ = l2.Close()
 

@@ -396,7 +396,10 @@ switchtender witness --server https://demo.switchtender.com --once</code></pre>
 			<div class="code reveal">
 				<button class="copy" aria-label="Copy">Copy</button>
 				<pre><code><span class="c">// build once, drop into --plugins-dir, no recompile of switchtender</span>
-import "github.com/kordloom/switchtender/sdk/plugin"
+import (
+	"github.com/kordloom/switchtender/sdk"
+	"github.com/kordloom/switchtender/sdk/plugin"
+)
 
 func main() {
 	plugin.Serve(&amp;plugin.Extension{

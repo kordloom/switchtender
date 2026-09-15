@@ -80,6 +80,9 @@ function makeLocation() {
 		assign(url) { location.href = url; },
 		replace(url) { location.href = url; },
 		reload() { location.navigations.push("reload"); },
+		// setHrefQuietly moves the address bar without recording a navigation, which is what
+		// history.replaceState and history.pushState do.
+		setHrefQuietly(v) { href = String(v); },
 		toString() { return href; },
 	};
 	Object.defineProperty(location, "href", {
@@ -102,13 +105,29 @@ function makeSandbox() {
 	ObjectURL.createObjectURL = () => "blob:jstest/" + (++blobSeq);
 	ObjectURL.revokeObjectURL = () => {};
 
+	// applyURL moves a stub location to a same-origin path, the way a real browser does on a
+	// history call.
+	const applyURL = (loc, url) => {
+		if (!url) return;
+		const raw = String(url);
+		const q = raw.indexOf("?");
+		loc.pathname = q === -1 ? raw : raw.slice(0, q);
+		loc.search = q === -1 ? "" : raw.slice(q);
+		// A history call is not a navigation and must not be recorded as one, or a page that keeps
+		// its filters in the address bar would read as a page that navigated away on its own.
+		loc.setHrefQuietly(loc.origin + loc.pathname + loc.search);
+	};
 	const sandbox = {
 		document,
 		location: makeLocation(),
+		// replaceState and pushState move the address bar, which is the whole point of the code that
+		// calls them, so the stub applies the new URL to location rather than discarding it. Without
+		// that a test could not tell a page that syncs its filters into the URL from one that does
+		// not, which is exactly the defect these exist to pin.
 		history: {
 			state: null,
-			replaceState(state) { this.state = state; },
-			pushState(state) { this.state = state; },
+			replaceState(state, _title, url) { this.state = state; applyURL(sandbox.location, url); },
+			pushState(state, _title, url) { this.state = state; applyURL(sandbox.location, url); },
 			back() {},
 		},
 		matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }),
