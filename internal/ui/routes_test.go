@@ -169,28 +169,48 @@ func TestLoginPageAnswersAnInstallWithNoAccounts(t *testing.T) {
 	tests := []struct {
 		Name        string
 		HasAccounts bool
+		HasTokens   bool
 		WantSays    bool
-	}{{ // Test 0: No accounts, so the page explains itself and opens the token field.
-		Name: "no accounts", HasAccounts: false, WantSays: true,
-	}, { // Test 1: Accounts exist, so the page is the ordinary sign-in form.
-		Name: "accounts exist", HasAccounts: true, WantSays: false,
+		// WantPhrase is a distinctive fragment the explanation must carry, so the two account-less
+		// shapes cannot be told apart only by the presence of some paragraph.
+		WantPhrase string
+	}{{ // Test 0: No accounts and no tokens: genuinely open, and the link to the interface works.
+		Name: "no accounts, no tokens", HasAccounts: false, HasTokens: false, WantSays: true,
+		WantPhrase: "no accounts and no API tokens",
+	}, { // Test 1: No accounts but tokens exist. The install authenticates, so it is not open, and
+		// the old copy said it was and offered a link to /ui/ that bounced straight back here: the
+		// only advice on the page was a loop.
+		Name: "token only", HasAccounts: false, HasTokens: true, WantSays: true,
+		WantPhrase: "authenticates with an API token",
+	}, { // Test 2: Accounts exist, so the page is the ordinary sign-in form.
+		Name: "accounts exist", HasAccounts: true, HasTokens: true, WantSays: false,
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
 			handler := ui.New(zap.NewNop(), nil, false, 50000, false, false, false, "",
-				ui.WithAccountCheck(func() bool { return test.HasAccounts })).Handler()
+				ui.WithAccountCheck(func() bool { return test.HasAccounts }),
+				ui.WithTokenCheck(func() bool { return test.HasTokens })).Handler()
 			rec := httptest.NewRecorder()
 			handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/ui/login", nil))
 			if rec.Code != http.StatusOK {
 				t.Fatalf("%s: GET /ui/login = %d, want 200", test.Name, rec.Code)
 			}
 			body := rec.Body.String()
-			if got := strings.Contains(body, "no accounts yet"); got != test.WantSays {
-				t.Errorf("%s: page explains the empty install = %v, want %v", test.Name, got, test.WantSays)
-			}
+			// The token field being open by default is the signal that the page knows the account
+			// form cannot work here. The wording is checked separately, below, because the two
+			// account-less shapes need different sentences.
 			if got := strings.Contains(body, `<details class="alt-auth" open>`); got != test.WantSays {
 				t.Errorf("%s: token field open by default = %v, want %v", test.Name, got, test.WantSays)
+			}
+			if test.WantPhrase != "" && !strings.Contains(body, test.WantPhrase) {
+				t.Errorf("%s: explanation does not say %q, so it describes the wrong kind of install",
+					test.Name, test.WantPhrase)
+			}
+			// A token-only install must not be told it runs open, nor offered a link that returns
+			// to this page.
+			if test.HasTokens && !test.HasAccounts && strings.Contains(body, "not asking anyone to") {
+				t.Errorf("%s: an install that authenticates was described as open", test.Name)
 			}
 		})
 	}

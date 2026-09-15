@@ -408,7 +408,7 @@ func New(store run.Store, submitter Submitter, log *zap.Logger, opts ...Option) 
 		oidcBrand = srv.oidc.Brand()
 	}
 	srv.web = ui.New(srv.log, srv.docs, srv.readOnly, srv.matrixCap, srv.oidc != nil, srv.saml != nil,
-		srv.ai != nil, oidcBrand, ui.WithAccountCheck(srv.anyAccount))
+		srv.ai != nil, oidcBrand, ui.WithAccountCheck(srv.anyAccount), ui.WithTokenCheck(srv.anyToken))
 	return srv
 }
 
@@ -424,6 +424,20 @@ func (s *Server) anyAccount() bool {
 		return true
 	}
 	return len(accounts) > 0
+}
+
+// anyToken reports whether this install holds an API token, for the sign-in page. An unreadable
+// token store counts as holding one, so a database problem never produces the claim that the install
+// is open.
+func (s *Server) anyToken() bool {
+	if s.tokens == nil {
+		return false
+	}
+	n, err := s.tokens.Count(context.Background())
+	if err != nil {
+		return true
+	}
+	return n > 0
 }
 
 // Handler returns the HTTP handler serving the SwitchTender API and web interface.

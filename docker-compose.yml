@@ -41,7 +41,10 @@ services:
         condition: service_healthy
 
   worker:
-    profiles: ["stack"]
+    # Its own profile, not "stack". A worker is distributed execution, which is Team, so it refuses
+    # to start without a licence: including it in the default stack meant the documented command
+    # brought up a container that exited immediately on every Community install.
+    profiles: ["workers"]
     build: .
     command: ["worker", "--db", "postgres://switchtender:switchtender@postgres:5432/switchtender?sslmode=disable", "--name", "worker-1"]
     environment:

@@ -19,8 +19,11 @@ server:
   extraArgs: []
 
 worker:
-  # enabled deploys dedicated workers alongside the server.
-  enabled: true
+  # enabled deploys dedicated workers alongside the server. Off by default, because a worker is
+  # distributed execution, which is Team: without a licence the process refuses to start, so the
+  # chart's own default produced a pod that crash-looped on a Community install. The server runs
+  # everything itself, which is what Community is for. Turn this on with a licence set.
+  enabled: false
   # replicas runs this many workers.
   replicas: 1
   # extraArgs are appended to the worker command, for example ["--queue", "dmz"].

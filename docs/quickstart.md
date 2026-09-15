@@ -78,7 +78,11 @@ The response carries a run id. Fetch its status, its structured events, or its l
 Add `"shards": 4` to the body to split the run across four slices of the inventory, balanced by
 each host's measured duration in recent runs.
 
-## Add a worker
+## Add a worker (Team)
+
+Distributed execution is a Team feature, so every `switchtender worker` needs a licence and refuses
+to start without one. Community runs everything on the server itself, which is the default and needs
+no extra process: this section is for when one machine is no longer enough.
 
 Point a worker at the same database and it competes for queued runs:
 
@@ -86,6 +90,10 @@ Point a worker at the same database and it competes for queued runs:
       switchtender worker --db switchtender.db --name laptop
 
 For more than one machine, use a PostgreSQL DSN as the `--db` value on every process.
+
+Queues are part of the same feature: naming one on a run, a template, or an inventory source routes
+it to a worker serving that name, so it is refused on Community rather than accepted and left with
+nothing able to claim it.
 
 ## Lock down the API
 
@@ -112,8 +120,11 @@ binary:
     export SWITCHTENDER_ENCRYPTION_SALT=change-me-too
     docker compose --profile stack up --build
 
-This starts a server, a PostgreSQL database, and a worker. The server listens on port 8080. Set
+This starts a server and a PostgreSQL database. The server listens on port 8080. Set
 `SWITCHTENDER_PORT` to change the host port.
+
+Workers are a separate profile because they are Team: `docker compose --profile stack --profile
+workers up --build` adds one, and it needs a licence to start.
 
 ## Set up a production server
 

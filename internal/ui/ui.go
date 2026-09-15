@@ -60,6 +60,9 @@ type UI struct {
 	// an install gains its first account while the server is running. Nil counts as having them, so
 	// nothing changes where the caller said nothing.
 	hasAccounts func() bool
+	// hasTokens reports whether any API token exists. An install with tokens and no accounts is
+	// authenticated, not open, and the sign-in page said the opposite. Nil counts as having them.
+	hasTokens func() bool
 	// aiEnabled reports whether an advisory AI provider is configured, so the overview can make the
 	// ask panel clearly unavailable rather than looking usable and failing on the first question.
 	aiEnabled bool
@@ -118,6 +121,25 @@ func (u *UI) accountsExist() bool {
 		return true
 	}
 	return u.hasAccounts()
+}
+
+// WithTokenCheck tells the sign-in page whether this install holds any API token.
+//
+// Without it the page could not tell an install that is genuinely open from one that authenticates
+// with tokens and simply has no user accounts. It told the second kind it "runs open" and offered a
+// link straight to the interface, which bounced back to this same page, so the only advice on the
+// screen was a loop.
+func WithTokenCheck(f func() bool) Option {
+	return func(u *UI) { u.hasTokens = f }
+}
+
+// tokensExist reports whether any API token is present. Unknown counts as present, so a caller that
+// said nothing never produces the "runs open" claim.
+func (u *UI) tokensExist() bool {
+	if u.hasTokens == nil {
+		return true
+	}
+	return u.hasTokens()
 }
 
 // Handler returns the HTTP handler for the web interface, served under /ui/.
@@ -278,7 +300,8 @@ func (u *UI) sources(w http.ResponseWriter, _ *http.Request) {
 // login renders the token sign in page.
 func (u *UI) login(w http.ResponseWriter, _ *http.Request) {
 	u.render(w, "login.html", map[string]any{"OIDCEnabled": u.oidcEnabled, "OIDCBrand": u.oidcBrand,
-		"SAMLEnabled": u.samlEnabled, "ReadOnly": u.readOnly, "NoAccounts": !u.accountsExist()})
+		"SAMLEnabled": u.samlEnabled, "ReadOnly": u.readOnly,
+		"NoAccounts": !u.accountsExist(), "TokenOnly": !u.accountsExist() && u.tokensExist()})
 }
 
 // schedules renders the schedules page.

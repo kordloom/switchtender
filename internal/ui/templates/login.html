@@ -19,11 +19,14 @@
 			is nothing an account would unlock here. <a href="/ui/">Back to the demo</a>, or self-host
 			to get accounts.</p>
 		{{end}}
-		{{if .NoAccounts}}
-		<p class="muted">This install has no accounts yet, so there is nothing to sign in as. It runs
-			open until the first account or API token exists. <a href="/ui/">Go straight to the
-			interface</a>, or create an account with <code>switchtender user new</code> and sign in
-			here afterward. An API token works below either way.</p>
+		{{if .TokenOnly}}
+		<p class="muted">This install has no user accounts yet and authenticates with an API token,
+			so the username and password below cannot work. Paste your token instead. To sign in by
+			name, create an account with <code>switchtender user new</code> and come back.</p>
+		{{else if .NoAccounts}}
+		<p class="muted">This install has no accounts and no API tokens, so it is not asking anyone to
+			sign in yet. <a href="/ui/">Go straight to the interface</a>, or create an account with
+			<code>switchtender user new</code> and sign in here afterward.</p>
 		{{end}}
 		<div id="signed-in-return" class="signed-in-return" hidden>
 			<span>This browser is already signed in <span id="signed-in-name"></span>.</span>
