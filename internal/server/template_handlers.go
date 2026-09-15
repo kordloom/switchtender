@@ -515,6 +515,19 @@ func launchTemplateHandler(store template.Store, submitter Submitter, authz *aut
 
 		vars := map[string]any{}
 		maps.Copy(vars, t.ExtraVars)
+		// Answers to a template that asks nothing are refused rather than dropped.
+		//
+		// The branch below only runs for a template carrying a survey, so answers sent to one
+		// without became a silent no-op: the launch returned 201, the run started, and the values
+		// the caller believed they were passing were nowhere. A caller who mistakes answers for
+		// extra_vars, which is the natural mistake given both end up in the same place, got no
+		// signal at all. The message names the field that would have carried it.
+		if len(t.Survey) == 0 && len(launchReq.Answers) > 0 {
+			respondError(w, log, http.StatusBadRequest,
+				"this template asks no survey questions, so answers has nothing to fill. Send the "+
+					"values under extra_vars instead.")
+			return
+		}
 		if len(t.Survey) > 0 {
 			// A launch may not set a survey variable through extra vars. Overrides are merged last
 			// so a launch can add a variable the template does not set, which meant an extra var
