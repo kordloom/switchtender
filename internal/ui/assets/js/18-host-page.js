@@ -275,9 +275,14 @@ async function loadTasks() {
 			const taskActions = document.createElement("td");
 			const runsLink = document.createElement("a");
 			runsLink.className = "button";
-			runsLink.href = "/ui/runs?q=" + encodeURIComponent(t.task);
+			// task: resolves through the stored task summaries. A plain text search cannot: the
+			// task name is not on the run row, so this link returned nothing on every row while
+			// promising the opposite.
+			// Quoted, because task names are prose: "Apply configuration" would otherwise split on
+			// the space and fall back to free text, which is the failure this link is fixing.
+			runsLink.href = "/ui/runs?q=" + encodeURIComponent('task:"' + t.task + '"');
 			runsLink.textContent = "Runs";
-			runsLink.dataset.tip = "Click to search runs mentioning this task";
+			runsLink.dataset.tip = "Click to open the runs that ran this task";
 			taskActions.appendChild(runsLink);
 			tr.appendChild(taskActions);
 			tbody.appendChild(tr);

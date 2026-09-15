@@ -116,7 +116,7 @@ func fieldedTokens(q string) []string {
 }
 
 // parseFieldedQuery splits a search string into fielded terms and free text. status:, tool:,
-// source:, actor:, host:, worker:, and held_by: fill their filters, label:key=value matches a run
+// source:, actor:, host:, task:, worker:, and held_by: fill their filters, label:key=value matches a run
 // label, and everything else stays free text. A value holding spaces is double-quoted. Explicit
 // query parameters win over fielded terms.
 func parseFieldedQuery(q string, filter *run.ListFilter) {
@@ -145,6 +145,11 @@ func parseFieldedQuery(q string, filter *run.ListFilter) {
 			filter.SourceID = value
 		case "host":
 			filter.Host = value
+		case "task":
+			// The task a run ran, resolved through its stored task summaries. Task names are not
+			// on the run row, so free text cannot reach them: the Task trends page linked a plain
+			// search and got nothing back on every row.
+			filter.Task = value
 		case "worker":
 			// The executor that claimed the run, so a worker's row opens the work it did.
 			filter.ClaimedBy = value

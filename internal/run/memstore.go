@@ -171,6 +171,9 @@ func (m *memStore) ListPage(ctx context.Context, filter ListFilter, limit, offse
 		if filter.Host != "" && !m.runTouchedHost(r.ID, filter.Host) {
 			continue
 		}
+		if filter.Task != "" && !m.runRanTask(r.ID, filter.Task) {
+			continue
+		}
 		matched = append(matched, r)
 	}
 	all = matched
@@ -204,6 +207,19 @@ func (m *memStore) runTouchedHost(runID, host string) bool {
 	defer m.mu.RUnlock()
 	for _, hs := range m.summaries[runID] {
 		if hs.Host == host {
+			return true
+		}
+	}
+	return false
+}
+
+// runRanTask reports whether the run's stored task summaries include the task. It takes the read
+// lock for the same reason runTouchedHost does.
+func (m *memStore) runRanTask(runID, task string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, ts := range m.tasks[runID] {
+		if ts.Task == task {
 			return true
 		}
 	}

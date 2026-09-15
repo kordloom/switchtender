@@ -773,6 +773,12 @@ func testListPage(t *testing.T, store run.Store) {
 	if err := store.SaveHostSummary(ctx, "e", []run.HostSummary{{Host: "web09", Worst: "ok", RanAt: base}}); err != nil {
 		t.Fatalf("SaveHostSummary() error = %v", err)
 	}
+	// A task name is stored here and nowhere on the run row, so every backend has to resolve the
+	// task filter through these summaries or the Task trends page's per-row link opens empty.
+	if err := store.SaveTaskSummary(ctx, "e",
+		[]run.TaskSummary{{Task: "Apply configuration", Seconds: 2, RanAt: base}}); err != nil {
+		t.Fatalf("SaveTaskSummary() error = %v", err)
+	}
 	live.Status = run.StatusSucceeded
 	if err := store.Save(ctx, live); err != nil {
 		t.Fatalf("Save() error = %v", err)
@@ -791,6 +797,13 @@ func testListPage(t *testing.T, store run.Store) {
 	}
 	if hit, _ := store.ListPage(ctx, run.ListFilter{Host: "web09"}, 0, 0); len(hit) != 1 || hit[0].ID != "e" {
 		t.Errorf("host filter = %v, want [e]", ids(hit))
+	}
+	if hit, _ := store.ListPage(ctx, run.ListFilter{Task: "Apply configuration"}, 0, 0); len(hit) != 1 ||
+		hit[0].ID != "e" {
+		t.Errorf("task filter = %v, want [e]", ids(hit))
+	}
+	if hit, _ := store.ListPage(ctx, run.ListFilter{Task: "Apply"}, 0, 0); len(hit) != 0 {
+		t.Errorf("task filter matched a prefix: %v, want none", ids(hit))
 	}
 
 	// The audit receipt ties a run to the chain entry that recorded the request creating it. It is
