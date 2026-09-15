@@ -47,6 +47,20 @@ existingSecret: ""
 # Community, so the deployment the quickstart recommends had no way to apply a purchase.
 license: ""
 
+# auditKey is the producer signing seed, shared by every process in this install.
+#
+# A chart install shares one PostgreSQL database, and a shared-database install will not mint a
+# signing key of its own: every process has to sign as the same install, and a key created inside one
+# pod would be that pod's alone. So it has to be supplied, and until it was there was no way to. A
+# chart install could not produce a receipt, a bundle, or a trust document, which is the entire
+# feature the product is sold on, while the interface went on offering a Download receipt button.
+#
+# It is a 32 byte ed25519 seed written as hex: `openssl rand -hex 32`. Keep it somewhere you can
+# restore from. Losing it does not invalidate the chain already written, but nothing signed
+# afterward verifies against the old key, and a relying party who pinned that key has to be told.
+# With existingSecret, put the same value under a SWITCHTENDER_AUDIT_KEY key in that secret.
+auditKey: ""
+
 service:
   type: ClusterIP
   port: 8080

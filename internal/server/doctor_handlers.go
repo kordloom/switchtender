@@ -8,6 +8,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kordloom/switchtender/identity"
 	"github.com/kordloom/switchtender/internal/credential"
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/project"
@@ -51,10 +52,33 @@ type doctorReport struct {
 // expressions, and credentials still waiting for a secret. Stores that are not configured are
 // skipped rather than reported.
 func doctorHandler(templates template.Store, schedules schedule.Store, creds credential.Store,
-	invs inventory.Store, projs project.Store, log *zap.Logger) http.HandlerFunc {
+	invs inventory.Store, projs project.Store, canSign func() bool, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		report := doctorReport{Findings: []doctorFinding{}}
+
+		// An install that cannot sign is the doctor's most important finding, and it reported
+		// nothing at all.
+		//
+		// A shared-database install will not mint a signing key: every process must sign as the same
+		// install, so a key created by one of them would be that host's alone. That is deliberate and
+		// documented. What was not handled is the consequence: such an install serves no receipt, no
+		// bundle and no trust document, which is the whole artifact this product is sold on, and the
+		// interface goes on offering a Download receipt button. The health check whose job is to say
+		// what is wrong with an install said nothing, so the first sign of it was an error message
+		// after a click.
+		if canSign != nil && !canSign() {
+			report.Findings = append(report.Findings, doctorFinding{
+				Severity: "broken", ObjectType: "install", ObjectID: "identity",
+				ObjectName: "signing identity",
+				Problem: "This install has no signing identity, so it cannot produce a receipt, a " +
+					"signed bundle, or a trust document. An install sharing one database will not " +
+					"create a key by itself, because every process has to sign as the same install. " +
+					"Generate one seed and set " + identity.KeyEnv + " on every server and worker, " +
+					"or place " + identity.File + " beside the database for each of them.",
+				FixPath: "/ui/docs/configuration",
+			})
+		}
 
 		credExists := func(id string) bool {
 			if creds == nil || id == "" {

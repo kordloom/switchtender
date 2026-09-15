@@ -345,6 +345,25 @@ function wireRunDownloads(runId) {
 				// A run still going, or one the scheduler started before its fire was recorded, has
 				// nothing to attest yet. That is the ordinary case, so it reads as a state rather
 				// than as a failure.
+				// An install that cannot sign is a fact about the install, not a failed download.
+				//
+				// A shared-database install will not mint a signing key, deliberately: every process
+				// has to sign as the same install, so a key made by one pod would be that pod's
+				// alone. Such an install serves no receipt at all, and this read "Could not download
+				// the receipt", which describes a transient failure and sends the reader to retry.
+				// It is a configuration gap with a name and a fix, so it says both, and the control
+				// stops offering what this install cannot do.
+				if (String(err.message).includes("no signing identity")) {
+					receiptBtn.disabled = true;
+					receiptBtn.dataset.tip = "This install has no signing identity, so it cannot " +
+						"sign a receipt.";
+					setStatus("This install has no signing identity, so it cannot sign a receipt. " +
+						"An install that shares one database will not create a key by itself, " +
+						"because every process has to sign as the same install: generate one seed " +
+						"and set SWITCHTENDER_AUDIT_KEY on every server and worker. The " +
+						"configuration guide covers it.");
+					return;
+				}
 				setStatus(err.message === "HTTP 409"
 					? "This run has nothing to attest yet: a receipt covers a run that has finished."
 					: "Could not download the receipt: " + err.message);
@@ -684,4 +703,3 @@ function loadLogin() {
 		setStatus("That token was not accepted.");
 	});
 }
-

@@ -41,6 +41,16 @@ spec:
                 secretKeyRef:
                   name: {{ include "switchtender.secretName" . }}
                   key: SWITCHTENDER_ENCRYPTION_SALT
+            {{- if or .Values.auditKey .Values.existingSecret }}
+            # Every process in a shared-database install signs as the same install, so they all read
+            # the same seed. Without it this deployment cannot sign a receipt at all.
+            - name: SWITCHTENDER_AUDIT_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "switchtender.secretName" . }}
+                  key: SWITCHTENDER_AUDIT_KEY
+                  optional: true
+            {{- end }}
             {{- if or .Values.license .Values.existingSecret }}
             # A paid license is a signed file the binary reads from this path. Without it the chart
             # could install only Community, so the deployment the quickstart recommends had no way

@@ -46,6 +46,16 @@ spec:
                 secretKeyRef:
                   name: {{ include "switchtender.secretName" . }}
                   key: SWITCHTENDER_ENCRYPTION_SALT
+            {{- if or .Values.auditKey .Values.existingSecret }}
+            # Every process in a shared-database install signs as the same install, so they all read
+            # the same seed. Without it this deployment cannot sign a receipt at all.
+            - name: SWITCHTENDER_AUDIT_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "switchtender.secretName" . }}
+                  key: SWITCHTENDER_AUDIT_KEY
+                  optional: true
+            {{- end }}
             {{- if or .Values.license .Values.existingSecret }}
             # A worker is distributed execution, which is Team, so it refuses to start without a
             # license. The chart deployed one regardless and had no way to supply one, which is a

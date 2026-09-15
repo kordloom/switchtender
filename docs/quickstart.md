@@ -155,6 +155,13 @@ The chart is in the repository too, so clone it first if you installed the binar
       --set encryptionKey=$(openssl rand -hex 32) \
       --set encryptionSalt=$(openssl rand -hex 16)
 
+Add `--set auditKey=$(openssl rand -hex 32)` too, a 32 byte ed25519 seed as hex, or that install
+cannot sign a receipt. A deployment that shares one database will not create a signing key by itself, because
+every server and worker has to sign as the same install, and a key minted inside one pod would be
+that pod's alone. Without it the chain still records and still verifies, but no receipt, signed
+bundle or trust document can be produced, which is most of why anyone runs this. Keep the seed where
+you can restore it.
+
 Both values are required, and the salt has to stay the same across upgrades: it is what every
 stored secret was sealed against, so a new salt makes the old ones unreadable. Keep them in a
 secret manager and pass `--set existingSecret=<name>` instead once you have one. The chart pulls

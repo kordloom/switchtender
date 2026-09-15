@@ -426,6 +426,11 @@ func (s *Server) anyAccount() bool {
 	return len(accounts) > 0
 }
 
+// canSign reports whether this install holds a producer identity, which is what a receipt, a signed
+// bundle and the trust document all require. A shared-database install without one is the case the
+// doctor exists to surface.
+func (s *Server) canSign() bool { return s.producer != nil }
+
 // anyToken reports whether this install holds an API token, for the sign-in page. An unreadable
 // token store counts as holding one, so a database problem never produces the claim that the install
 // is open.
@@ -511,7 +516,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /v1/runs/{id}/stream",
 		runStreamHandler(s.streamer, s.store, authz, s.log, s.shutdown))
 	mux.Handle("GET /v1/schedules/preview", previewScheduleHandler(s.log))
-	mux.Handle("GET /v1/doctor", doctorHandler(s.templates, s.schedules, s.credentials, s.inventories, s.projects, s.log))
+	mux.Handle("GET /v1/doctor", doctorHandler(s.templates, s.schedules, s.credentials, s.inventories, s.projects,
+		s.canSign, s.log))
 	mux.Handle("POST /v1/schedules", createScheduleHandler(s.schedules, authz, s.log))
 	mux.Handle("GET /v1/schedules", listSchedulesHandler(s.schedules, authz, s.log))
 	mux.Handle("GET /v1/schedules/{id}", getScheduleHandler(s.schedules, authz, s.log))
