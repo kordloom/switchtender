@@ -92,6 +92,9 @@ type listTemplatesResponse struct {
 	Templates []*template.Template `json:"templates"`
 	// Count is the number returned.
 	Count int `json:"count"`
+	// Total is how many rows exist before the response cap, so a caller shown a prefix knows it is
+	// one. Equal to Count for every ordinary install.
+	Total int `json:"total"`
 }
 
 // templateToolError returns a client message when a template request lacks the input its tool
@@ -356,8 +359,9 @@ func listTemplatesHandler(store template.Store, authz *authorizer, log *zap.Logg
 			respondError(w, log, http.StatusInternalServerError, "could not list templates")
 			return
 		}
+		capped, total := cappedList(maskTemplates(visible))
 		respondJSON(w, log, http.StatusOK,
-			listTemplatesResponse{Templates: maskTemplates(visible), Count: len(visible)}, wantsPretty(r))
+			listTemplatesResponse{Templates: capped, Count: len(capped), Total: total}, wantsPretty(r))
 	}
 }
 

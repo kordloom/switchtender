@@ -22,6 +22,9 @@ type listOrgsResponse struct {
 	Orgs []*org.Org `json:"orgs"`
 	// Count is the number returned.
 	Count int `json:"count"`
+	// Total is how many rows exist before the response cap, so a caller shown a prefix knows it is
+	// one. Equal to Count for every ordinary install.
+	Total int `json:"total"`
 }
 
 // orgMemberRequest is the JSON body accepted by POST /orgs/{id}/members.
@@ -38,6 +41,9 @@ type orgMembersResponse struct {
 	Members []org.Member `json:"members"`
 	// Count is the number returned.
 	Count int `json:"count"`
+	// Total is how many rows exist before the response cap, so a caller shown a prefix knows it is
+	// one. Equal to Count for every ordinary install.
+	Total int `json:"total"`
 }
 
 // createOrgHandler stores a new organization.
@@ -78,8 +84,9 @@ func listOrgsHandler(store org.Store, log *zap.Logger) http.HandlerFunc {
 			respondError(w, log, http.StatusInternalServerError, "could not list organizations")
 			return
 		}
+		capped, total := cappedList(list)
 		respondJSON(w, log, http.StatusOK,
-			listOrgsResponse{Orgs: list, Count: len(list)}, wantsPretty(r))
+			listOrgsResponse{Orgs: capped, Count: len(capped), Total: total}, wantsPretty(r))
 	}
 }
 
@@ -150,8 +157,9 @@ func listOrgMembersHandler(store org.Store, log *zap.Logger) http.HandlerFunc {
 			respondError(w, log, http.StatusInternalServerError, "could not list members")
 			return
 		}
+		capped, total := cappedList(members)
 		respondJSON(w, log, http.StatusOK,
-			orgMembersResponse{Members: members, Count: len(members)}, wantsPretty(r))
+			orgMembersResponse{Members: capped, Count: len(capped), Total: total}, wantsPretty(r))
 	}
 }
 

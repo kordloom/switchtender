@@ -879,6 +879,14 @@ cycle or an unknown dependency is refused then rather than on every launch.</p>
     ]
   }'
 </code></pre>
+<h2 id="list-responses">List responses</h2>
+<p>Every list response is an envelope: the rows under a name, <code>count</code> for how many were returned, and
+<code>total</code> for how many exist. They agree on any ordinary install.</p>
+<p>The run list pages, because run history grows without bound: <code>limit</code> (default 200, maximum 1000) and
+<code>offset</code>, with <code>has_more</code> and <code>next_offset</code> to continue. The configuration lists, users, tokens,
+templates, schedules, triggers and organizations, return at most 1000 rows in one response. Past
+that, <code>total</code> exceeds <code>count</code> and the response is the first 1000. An install with more configuration
+than that should read it through the object endpoints rather than the list.</p>
 <h2 id="survey-field-constraints">Survey field constraints</h2>
 <p>A template survey field accepts bounds beyond its type, checked at launch before any answer becomes
 an extra var. A field also takes an optional <code>help</code> string shown beneath its prompt, and a

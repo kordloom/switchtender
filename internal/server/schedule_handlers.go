@@ -78,6 +78,9 @@ type schedulesResponse struct {
 	Schedules []*schedule.Schedule `json:"schedules"`
 	// Count is the number of schedules returned.
 	Count int `json:"count"`
+	// Total is how many rows exist before the response cap, so a caller shown a prefix knows it is
+	// one. Equal to Count for every ordinary install.
+	Total int `json:"total"`
 }
 
 // createScheduleHandler creates a recurring schedule.
@@ -280,8 +283,9 @@ func listSchedulesHandler(store schedule.Store, authz *authorizer, log *zap.Logg
 			}
 			list = kept
 		}
+		capped, total := cappedList(list)
 		respondJSON(w, log, http.StatusOK,
-			schedulesResponse{Schedules: list, Count: len(list)}, wantsPretty(r))
+			schedulesResponse{Schedules: capped, Count: len(capped), Total: total}, wantsPretty(r))
 	}
 }
 

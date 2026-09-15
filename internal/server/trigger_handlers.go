@@ -53,6 +53,9 @@ type listTriggersResponse struct {
 	Triggers []*trigger.Trigger `json:"triggers"`
 	// Count is the number returned.
 	Count int `json:"count"`
+	// Total is how many rows exist before the response cap, so a caller shown a prefix knows it is
+	// one. Equal to Count for every ordinary install.
+	Total int `json:"total"`
 }
 
 // createTriggerHandler mints a trigger and returns its webhook path once. When the server has an
@@ -282,8 +285,9 @@ func listTriggersHandler(triggers trigger.Store, authz *authorizer, log *zap.Log
 			}
 			list = kept
 		}
+		capped, total := cappedList(list)
 		respondJSON(w, log, http.StatusOK,
-			listTriggersResponse{Triggers: list, Count: len(list)}, wantsPretty(r))
+			listTriggersResponse{Triggers: capped, Count: len(capped), Total: total}, wantsPretty(r))
 	}
 }
 

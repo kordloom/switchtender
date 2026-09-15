@@ -324,6 +324,17 @@ curl -X POST https://switchtender.example.com/v1/templates   -H "Authorization: 
   }'
 ```
 
+## List responses
+
+Every list response is an envelope: the rows under a name, `count` for how many were returned, and
+`total` for how many exist. They agree on any ordinary install.
+
+The run list pages, because run history grows without bound: `limit` (default 200, maximum 1000) and
+`offset`, with `has_more` and `next_offset` to continue. The configuration lists, users, tokens,
+templates, schedules, triggers and organizations, return at most 1000 rows in one response. Past
+that, `total` exceeds `count` and the response is the first 1000. An install with more configuration
+than that should read it through the object endpoints rather than the list.
+
 ## Survey field constraints
 
 A template survey field accepts bounds beyond its type, checked at launch before any answer becomes
