@@ -306,6 +306,31 @@ class STElement {
 		throw new Error("insertAdjacentHTML: unknown position " + position);
 	}
 
+	// insertAdjacentElement splices an existing element in at one of the four standard positions.
+	// The page footer mounts this way, so without it every test that boots a page through
+	// DOMContentLoaded threw before any page wiring ran.
+	insertAdjacentElement(position, element) {
+		const where = String(position).toLowerCase();
+		if (where === "beforeend") {
+			this.appendChild(element);
+			return element;
+		}
+		if (where === "afterbegin") {
+			this.insertBefore(element, this.childNodes[0] || null);
+			return element;
+		}
+		if (!this.parentNode) throw new Error("insertAdjacentElement " + where + ": node has no parent");
+		if (where === "beforebegin") {
+			this.parentNode.insertBefore(element, this);
+			return element;
+		}
+		if (where === "afterend") {
+			this.parentNode.insertBefore(element, this.nextSibling);
+			return element;
+		}
+		throw new Error("insertAdjacentElement: unknown position " + position);
+	}
+
 	// rows lists a table section's rows, which the row removal helper counts to spot an empty list.
 	get rows() {
 		return TABLE_TAGS.has(this.tagName) ? this.querySelectorAll("tr") : undefined;

@@ -161,14 +161,28 @@ func runDemo(cmd *cobra.Command, _ []string) error {
 		Clock:      seedClock,
 		AnchorTSA:  demoAnchorTSA,
 	}
-	// The anchor binds to the install identity the demo publishes, so a fetched bundle names the
-	// same install the anchor does. No identity is not fatal: the seed continues unanchored.
-	if demoAnchorTSA != "" {
-		if id, ierr := loadProducerIdentity(db); ierr == nil {
-			seedDeps.InstallID = id.InstallID
+	// The demo's chain commits to the install that produced it, the same binding serve makes, and it
+	// has to be in place before seeding so every seeded entry carries it. Without it the demo's
+	// published receipts name no producer, which is exactly the lift the threat model says the
+	// binding prevents: keep the claims and the genuine anchor, rewrite the producer, re-sign, and a
+	// relying party pinning that second key reads the demo's history as its own. The demo is the one
+	// install whose bundles strangers actually fetch, so it is the worst one to leave unbound.
+	//
+	// The anchor binds to the same identity, so a fetched bundle names the install the anchor does.
+	// No identity is not fatal: the seed continues unbound and unanchored.
+	if id, ierr := loadProducerIdentity(db); ierr == nil {
+		if binder, ok := bundle.Audits().(audit.InstallBinder); ok {
+			binder.BindInstall(id.InstallID)
 		} else {
-			log.Warn("demo: anchoring skipped, no producer identity: " + ierr.Error())
+			log.Warn("demo: audit store cannot be bound to this install, so its entries will not " +
+				"commit to who produced them")
 		}
+		if demoAnchorTSA != "" {
+			seedDeps.InstallID = id.InstallID
+		}
+	} else {
+		log.Warn("demo: no producer identity, so entries are not bound to this install and " +
+			"anchoring is skipped: " + ierr.Error())
 	}
 	if !demoNoSeed {
 		if err := demo.Seed(cmd.Context(), seedDeps, log); err != nil {

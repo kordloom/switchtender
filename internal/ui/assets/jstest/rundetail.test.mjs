@@ -2,7 +2,7 @@
 // opens with, and the split parent's reconcile when its stream ends.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { loadParts } from "./loader.mjs";
+import { loadParts, ALL_PARTS } from "./loader.mjs";
 import { mountPage } from "./pages.mjs";
 
 // mountDetail loads the run detail parts against a stubbed page: the stream is a recorder rather
@@ -138,4 +138,33 @@ test("a run still going is left to the live stream rather than loaded from stora
 	assert.ok(opened, "a live run should open its stream");
 	assert.equal(document.getElementById("log-panel").hidden, true,
 		"a live run's pane is filled by the stream, not by a stored copy");
+});
+
+// TestFailureReasonIsShown pins that a run which never started says why on the page.
+//
+// A run that dies before launch produces no events and a zero-byte log, so the page showed STATUS
+// failed, an empty timeline, and a row of buttons that opened nothing. The sentence naming the
+// cause was on the run object the page had already fetched and was the one field never painted,
+// so someone who submitted a terraform run without terraform on PATH had to read server logs to
+// learn that.
+test("a run that never started says why on the page", () => {
+	const app = loadParts(ALL_PARTS);
+	const document = mountPage(app, "detail", { vars: { RunID: "run_1", MatrixCap: 20000 } });
+	const reason = 'launch error: exec: "terraform": executable file not found in $PATH';
+	app.renderHeader({ id: "run_1", status: "failed", tool: "terraform", error: reason });
+	const host = document.getElementById("run-failure");
+	assert.equal(host.hidden, false, "the reason stayed hidden on a run that never started");
+	assert.match(host.textContent, /terraform/,
+		"the callout did not carry the reason the server recorded");
+	assert.match(host.textContent, /no log or event stream/,
+		"the page should say why the timeline and log are empty");
+});
+
+// TestNoFailureCalloutWithoutAReason pins that the callout stays out of the way of a normal run.
+test("a run with no recorded reason shows no failure callout", () => {
+	const app = loadParts(ALL_PARTS);
+	const document = mountPage(app, "detail", { vars: { RunID: "run_1", MatrixCap: 20000 } });
+	app.renderHeader({ id: "run_1", status: "succeeded", tool: "ansible", playbook: "site.yml" });
+	assert.equal(document.getElementById("run-failure").hidden, true,
+		"a succeeded run should not carry a failure callout");
 });

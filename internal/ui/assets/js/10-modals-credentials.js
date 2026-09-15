@@ -81,6 +81,22 @@ function wireLaunchForm() {
 	syncTool();
 
 	const status = document.getElementById("launch-status");
+	// A read-only install fills the form and refuses the submit, so a visitor sees what launching a
+	// run asks for and gets a reason instead of a server refusal. The server refuses this too; the
+	// button says so before the request rather than after it.
+	if (isReadOnly()) {
+		const go = form.querySelector('button[type="submit"]');
+		if (go) {
+			go.disabled = true;
+			go.title = "Disabled in this read-only demo. Self-host to launch runs.";
+		}
+		if (status) {
+			status.textContent = "This demo is read-only. The form is here to show what a launch " +
+				"asks for. Self-host to run one.";
+		}
+		form.addEventListener("submit", (e) => e.preventDefault());
+		return;
+	}
 	const submit = guardedSubmit(form.querySelector('button[type="submit"]'), async () => {
 		const tool = toolSel.value;
 		const payload = {};

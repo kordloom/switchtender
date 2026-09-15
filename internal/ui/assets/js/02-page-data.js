@@ -268,6 +268,21 @@ function mountExportsForTable(page, table, index) {
 // SORT_SKIP names headers that hold controls rather than comparable values.
 const SORT_SKIP = new Set(["", "actions", "fix", "recent", "history"]);
 
+// DURATION_MS scales each duration suffix the pages render to milliseconds.
+const DURATION_MS = { ms: 1, s: 1000, m: 60000, h: 3600000 };
+
+// durationMs reads a whole cell that is one duration, such as 980ms or 4.2s, in milliseconds, and
+// returns null for anything else so ordinary numbers keep sorting as numbers.
+//
+// Durations are rendered in whichever unit reads best, so a fast run says 980ms and a slow one says
+// 4.2s. Comparing the leading number alone put 980 above 4.2 and ranked the three fastest runs on
+// the page as the three slowest, in a column an operator sorts precisely to find the slow ones.
+function durationMs(text) {
+	const m = /^(\d+(?:\.\d+)?)(ms|s|m|h)$/.exec(text);
+	if (!m) return null;
+	return parseFloat(m[1]) * DURATION_MS[m[2]];
+}
+
 // cellSortValue reads a cell for comparison: a timestamp when the cell carries one, a number when
 // the text is numeric, and lowercased text otherwise, so each column sorts the way it reads.
 function cellSortValue(cell) {
@@ -277,7 +292,9 @@ function cellSortValue(cell) {
 		if (!isNaN(t)) return { n: t };
 	}
 	const text = cell.textContent.trim();
-	// A leading number covers counts, durations, sizes, and ratios such as 1 / 10.
+	const span = durationMs(text);
+	if (span !== null) return { n: span };
+	// A leading number covers counts, sizes, and ratios such as 1 / 10.
 	const num = text.match(/^-?[\d,]+(\.\d+)?/);
 	if (num && num[0].length >= text.replace(/[^\d.,\-].*$/, "").length && num[0] !== "") {
 		const parsed = parseFloat(num[0].replace(/,/g, ""));

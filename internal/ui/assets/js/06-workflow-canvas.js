@@ -344,7 +344,11 @@ document.addEventListener("DOMContentLoaded", () => {
 		wireAsk();
 	} else if (page === "runs") {
 		wireModal("launch");
-		if (!isReadOnly()) wireLaunchForm();
+		// Read-only skipped this entirely, so the demo opened the launch dialog on empty
+		// selects: no project, no inventory, no credential, on an install that holds all
+		// three. Everything the form does before submit is a read, and the submit refuses on
+		// its own, so the dialog is wired either way.
+		wireLaunchForm();
 		wirePropose();
 		wireRunsSearch();
 		wireRunsFilters();
