@@ -21,7 +21,10 @@ repository.
     curl -fsSL https://switchtender.com/install.sh | sh
 
 The script downloads the release binary for your platform, checks it against the published
-checksums, and puts `switchtender` on your PATH. Running in about a minute. Prefer to build it
+checksums, and installs it. It writes to `/usr/local/bin` when it can and to `~/.local/bin`
+otherwise, which is what happens on a stock Mac and on any Linux install without root. That second
+directory is often not on PATH, so the script says so and prints its closing commands with the full
+path; add the line it gives you to run `switchtender` by name. Running in about a minute. Prefer to build it
 yourself, or want to hack on it? `go build -o switchtender .` from a clone produces the same
 binary; the commands below assume it is on your PATH, so prefix a locally built binary with `./`.
 
@@ -50,6 +53,17 @@ loopback port, keeps its data in a per-user directory, and opens the UI. The
 [desktop guide](desktop.md) covers it, including packaging.
 
 ## Submit a run
+
+The first one needs nothing on disk, so it succeeds on an install that is minutes old:
+
+    curl -X POST localhost:8080/v1/runs \
+      -H "Authorization: Bearer $ST_TOKEN" \
+      -d '{"tool": "bash", "command": "echo hello from switchtender"}'
+
+An Ansible run takes a playbook and an inventory. The server resolves both relative to its own
+working directory, so `site.yml` and `hosts.ini` have to exist there, or the run names a
+[project](concepts.md) and they are resolved inside that checkout instead. Without either the run
+is submitted, accepted, and then fails with "the playbook: site.yml could not be found":
 
     curl -X POST localhost:8080/v1/runs \
       -H "Authorization: Bearer $ST_TOKEN" \

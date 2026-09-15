@@ -548,7 +548,13 @@ function renderPalette(query) {
 	if (!st.shown.length) {
 		const none = document.createElement("div");
 		none.className = "cmdk-empty";
-		none.textContent = "No matches.";
+		// A bare "No matches." left a visitor who typed a host name or a run id with nothing: both
+		// are findable, just not here. This says where.
+		none.textContent = "No page matches. ";
+		const where = document.createElement("a");
+		where.href = "/ui/runs";
+		where.textContent = "Search runs and hosts on the Runs page";
+		none.appendChild(where);
 		st.list.appendChild(none);
 		return;
 	}

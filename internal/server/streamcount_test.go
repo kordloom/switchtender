@@ -2,6 +2,8 @@ package server
 
 import (
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"sync"
 	"testing"
 )
@@ -106,4 +108,38 @@ func TestLiveStreamsAreBoundedPerCallerAndInTotal(t *testing.T) {
 			t.Errorf("byActor still holds %d callers after every stream closed", len(live.byActor))
 		}
 	})
+}
+
+// TestAnonymousStreamsAreCountedPerClientNotPerConnection covers the fallback key an install with no
+// authentication uses.
+//
+// The key was the remote address, which carries the ephemeral source port. A stream is one TCP
+// connection, so every stream from one client produced a different key: the per-caller bound counted
+// to one and never refused anything, and a single client could take every slot in the install while
+// the comment on the function said it could not.
+func TestAnonymousStreamsAreCountedPerClientNotPerConnection(t *testing.T) {
+	t.Parallel()
+
+	// One client opening many connections, which is what many ports from one address means.
+	var live streamCount
+	opened := 0
+	for port := 40000; port < 40000+maxStreamsPerActor+8; port++ {
+		r := httptest.NewRequest(http.MethodGet, "/v1/runs/run_1/stream", nil)
+		r.RemoteAddr = fmt.Sprintf("198.51.100.7:%d", port)
+		if _, ok := live.admit(actorKeyFor(r)); !ok {
+			break
+		}
+		opened++
+	}
+	if opened > maxStreamsPerActor {
+		t.Errorf("one client held %d live streams against a per-caller limit of %d, so the limit "+
+			"bounds a connection rather than a caller", opened, maxStreamsPerActor)
+	}
+
+	// A different client is unaffected, or the bound would be a global one wearing a per-caller name.
+	other := httptest.NewRequest(http.MethodGet, "/v1/runs/run_1/stream", nil)
+	other.RemoteAddr = "203.0.113.9:51000"
+	if _, ok := live.admit(actorKeyFor(other)); !ok {
+		t.Error("a second client was refused because the first one was at its limit")
+	}
 }

@@ -41,8 +41,12 @@ function mountTopbar() {
 		search.className = "search-btn";
 		const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 		search.innerHTML = svgIcon('<circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>') +
-			"<span>Search</span>" + '<span class="kbd">' + (mac ? "⌘K" : "Ctrl K") + "</span>";
-		search.setAttribute("aria-label", "Search pages and actions");
+			"<span>Jump to</span>" + '<span class="kbd">' + (mac ? "⌘K" : "Ctrl K") + "</span>";
+		// Labeled "Search", the most prominent control in the header invited a visitor to type a
+		// host name or a run id. Both are real objects with their own pages, and both came back
+		// "No matches.", because this is a page jumper and always was: its own placeholder and
+		// its aria-label both said so, and only the visible label disagreed.
+		search.setAttribute("aria-label", "Jump to a page or action");
 		search.setAttribute("aria-haspopup", "dialog");
 		search.addEventListener("click", openPalette);
 		const brand = bar.querySelector(".brand");

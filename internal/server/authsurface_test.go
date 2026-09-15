@@ -583,6 +583,10 @@ func TestUploadPathAllowsOnlyTheLargerCapRoutes(t *testing.T) {
 // the same caller. The two bounds are documented as describing one caller, so if they keyed
 // differently a caller could hold its ticket budget under one identity and its stream budget under
 // another, and neither bound would mean what it says.
+//
+// The anonymous stream key is the client host with no port. It used to be the whole remote address,
+// and since a stream is one TCP connection, every stream from one client counted under a different
+// key: the per-caller bound never refused anything and one client could take every slot.
 func TestActorKeysIdentifyTheSameCaller(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -601,11 +605,11 @@ func TestActorKeysIdentifyTheSameCaller(t *testing.T) {
 	}, { // Test 2: An authenticated actor with neither is counted per client address by the stream
 		// limiter and as one anonymous bucket by the ticket store.
 		Name: "empty actor", Actor: Actor{}, HasActor: true, RemoteAddr: "10.0.0.5:9000",
-		WantStream: "addr:10.0.0.5:9000", WantTicket: "anon",
+		WantStream: "addr:10.0.0.5", WantTicket: "anon",
 	}, { // Test 3: An install serving without authentication is still bounded per client rather
 		// than only in total.
 		Name: "no actor", HasActor: false, RemoteAddr: "192.0.2.9:443",
-		WantStream: "addr:192.0.2.9:443", WantTicket: "anon",
+		WantStream: "addr:192.0.2.9", WantTicket: "anon",
 	}}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
