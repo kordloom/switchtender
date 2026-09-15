@@ -237,7 +237,7 @@ async function loadHost(host) {
 			tr.appendChild(td(String(r.changed)));
 			tr.appendChild(td(String(r.failures)));
 			tr.appendChild(td(String(r.unreachable)));
-			tr.appendChild(td(r.duration_seconds ? r.duration_seconds.toFixed(1) + "s" : "0s"));
+			tr.appendChild(td(r.duration_seconds ? fmtSeconds(r.duration_seconds) : "0s"));
 			tr.appendChild(tdTime(r.ran_at));
 			tbody.appendChild(tr);
 		}
@@ -386,9 +386,10 @@ function trendChip(avg, last, runs) {
 	return chip;
 }
 
-// fmtSeconds renders a duration in seconds with one decimal.
+// fmtSeconds renders a duration given in seconds, sharing fmtMs so a task average and a run
+// duration cannot disagree about what "long" looks like. Task trends read "1234567.9s" before this.
 function fmtSeconds(s) {
-	return (s || 0).toFixed(1) + "s";
+	return fmtMs((s || 0) * 1000);
 }
 
 // loadSchedules populates the schedules table.

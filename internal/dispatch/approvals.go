@@ -40,6 +40,18 @@ func (d *Dispatcher) Approve(ctx context.Context, id, by, byType string) (*run.R
 		return nil, fmt.Errorf("%w: %q asked for this run, and the rule that held it requires a "+
 			"different person to approve it", ErrSelfApproval, by)
 	}
+	// A decision is only recordable while the run is actually awaiting one. The CAS below is what
+	// makes the release happen at most once, but it runs AFTER the chain entry, so a decision
+	// arriving late was refused to the caller and written to the chain anyway.
+	//
+	// That is not a cosmetic duplicate. The chain then holds an approval stamped after the run's own
+	// outcome entry, and verifyTimeOrder reads an approval that postdates the execution it authorized
+	// as the signature of a gate bypass: an honest install's whole-fleet bundle reported NOT VERIFIED
+	// after nothing worse than an approver double-clicking, or clicking Reject a moment too late.
+	// The product's sharpest claim, broken by its own record of a refused request.
+	if r.Status != run.StatusPendingApproval {
+		return nil, fmt.Errorf("%w: this run is %s", ErrNotPendingApproval, r.Status)
+	}
 	// The decision entry is appended before the run is released, fail-closed, matching the gate's
 	// rule that a change which cannot be recorded is refused. If the release below then fails, the
 	// chain truthfully holds a decision for a run that stayed held, and a second attempt appends a
@@ -186,6 +198,12 @@ func (d *Dispatcher) Reject(ctx context.Context, id, reason, by, byType string) 
 	// alone leaves the rest of the fan-out to run without it, which is not a decision anyone made.
 	if r.ParentID != nil {
 		return nil, ErrChildNotApprovable
+	}
+	// Same precondition as Approve, and the same reason. A reject arriving after the run had already
+	// been approved and succeeded was refused with 409 and still wrote DECISION .../rejected into the
+	// chain, so the permanent record said an approver rejected a run that ran and succeeded.
+	if r.Status != run.StatusPendingApproval {
+		return nil, fmt.Errorf("%w: this run is %s", ErrNotPendingApproval, r.Status)
 	}
 	if d.audits != nil {
 		if _, derr := outcome.CommitDecision(ctx, d.audits, r, "rejected", by, byType, d.now); derr != nil {

@@ -4,7 +4,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { loadParts } from "./loader.mjs";
 
-const app = loadParts(["01-boot.js", "16-runs-list.js", "18-host-page.js"]);
+// 08-auth-status.js carries the shared duration formatter that fmtSeconds delegates to, so the
+// host page cannot be evaluated without it. The shipped app.js concatenates every part.
+const app = loadParts(["01-boot.js", "08-auth-status.js", "16-runs-list.js", "18-host-page.js"]);
 
 test("badge builds a status span with underscores read as spaces", () => {
 	const tests = [

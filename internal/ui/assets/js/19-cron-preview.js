@@ -5,15 +5,33 @@ function wireCronPreview() {
 	const input = document.getElementById("schedule-cron");
 	const out = document.getElementById("cron-preview");
 	if (!input || !out) return;
+	const zoneEl = document.getElementById("schedule-timezone");
 	let timer = 0;
 	const update = async () => {
 		const spec = input.value.trim();
 		if (!spec) { out.textContent = ""; return; }
 		try {
-			const data = await getJSON("/schedules/preview?cron=" + encodeURIComponent(spec));
-			const times = (data.next || []).slice(0, 3).map((t) =>
-				new Date(t).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }));
-			out.textContent = times.length ? "Next: " + times.join("  ·  ") : "";
+			// The zone was never sent, so a schedule the operator had just set to America/New_York
+			// previewed in UTC and the times under the box were the wrong times. The server has
+			// always accepted this parameter; only the caller omitted it.
+			const zone = zoneEl ? zoneEl.value.trim() : "";
+			const data = await getJSON("/schedules/preview?cron=" + encodeURIComponent(spec) +
+				(zone ? "&timezone=" + encodeURIComponent(zone) : ""));
+			// Rendered on the schedule's own clock and labeled with it. Showing a New York schedule
+			// in the reader's local zone is a different wrong answer: right instant, wrong clock face.
+			const shown = zone || "UTC";
+			const fmt = { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" };
+			const times = (data.next || []).slice(0, 3).map((t) => {
+				try {
+					return new Date(t).toLocaleString(undefined, Object.assign({ timeZone: shown }, fmt));
+				} catch {
+					// An unknown zone is the operator's typo, not a reason to show nothing.
+					return new Date(t).toLocaleString(undefined, fmt);
+				}
+			});
+			out.textContent = times.length
+				? "Next: " + times.join("  ·  ") + "  (" + shown + ")"
+				: "";
 			out.classList.remove("error-text");
 		} catch {
 			out.textContent = "Invalid cron expression";
@@ -24,6 +42,14 @@ function wireCronPreview() {
 		window.clearTimeout(timer);
 		timer = window.setTimeout(update, 350);
 	});
+	// Changing the zone has to re-ask, or the preview keeps showing the previous zone's times.
+	if (zoneEl) {
+		zoneEl.addEventListener("change", update);
+		zoneEl.addEventListener("input", () => {
+			window.clearTimeout(timer);
+			timer = window.setTimeout(update, 350);
+		});
+	}
 	update();
 }
 

@@ -63,7 +63,10 @@ test("the comparison renders verdicts and a hostile name stays text", () => {
 	const summary = document.getElementById("compare-summary");
 	assert.equal(summary.hidden, false);
 	assert.ok(summary.textContent.includes("Broke"));
-	assert.ok(summary.textContent.includes("+60.0s"));
+	// A 60 second swing rolls up like every other duration in the app, rather than reading 60.0s
+	// beside a task column that rolls up.
+	assert.ok(summary.textContent.includes("+1m 0s"),
+		"the duration swing did not use the shared duration format: " + summary.textContent);
 });
 
 test("runs from different sources carry the apples-to-apples warning", () => {

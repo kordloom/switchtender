@@ -22,10 +22,11 @@ test("fmtDuration renders the span between two ISO times", () => {
 		{ Start: iso(0), End: iso(1000), Want: "1.0s" },
 		// Test 4: Sub-minute.
 		{ Start: iso(0), End: iso(42_500), Want: "42.5s" },
-		// Test 5: A minute and a half still reads in seconds; there is no minute unit.
-		{ Start: iso(0), End: iso(90_000), Want: "90.0s" },
-		// Test 6: Hours read in seconds too.
-		{ Start: iso(0), End: iso(2 * 3600_000), Want: "7200.0s" },
+		// Test 5: Past a minute it rolls up, or a half-hour run reads "1800.0s" and the reader
+		// counts digits to tell ten minutes from three hours.
+		{ Start: iso(0), End: iso(90_000), Want: "1m 30s" },
+		// Test 6: Past an hour the seconds are dropped rather than carried.
+		{ Start: iso(0), End: iso(2 * 3600_000), Want: "2h 0m" },
 		// Test 7: A negative span is nonsense and renders empty.
 		{ Start: iso(1000), End: iso(0), Want: "" },
 		// Test 8: A missing start renders empty.
@@ -47,7 +48,15 @@ test("fmtMs renders a millisecond count", () => {
 		{ In: 500.4, Want: "500ms" }, // Test 2: Fractional milliseconds round.
 		{ In: 1000, Want: "1.0s" }, // Test 3: Seconds floor.
 		{ In: 1250, Want: "1.3s" }, // Test 4: One decimal, rounded.
-		{ In: 61_000, Want: "61.0s" }, // Test 5: Over a minute stays seconds.
+		{ In: 61_000, Want: "1m 1s" }, // Test 5: Over a minute rolls up.
+		{ In: 59_900, Want: "59.9s" }, // Test 6: Just under a minute keeps its decimal.
+		{ In: 1800_000, Want: "30m 0s" }, // Test 7: The half-hour fleet run that read 1800.0s.
+		{ In: 2718_300, Want: "45m 18s" }, // Test 8: The 45-minute run that read 2718.3s.
+		{ In: 3_600_000, Want: "1h 0m" }, // Test 9: Exactly an hour.
+		{ In: 1_234_567_900, Want: "342h 56m" }, // Test 10: The task average that read 1234567.9s.
+		// Test 11: A minute whose seconds round to 60 carries rather than reading "4m 60s".
+		{ In: 299_600, Want: "5m 0s" },
+		{ In: -1, Want: "" }, // Test 12: A negative span is nonsense.
 	];
 	for (const [i, tc] of tests.entries()) {
 		assert.equal(app.fmtMs(tc.In), tc.Want, "test " + i);
