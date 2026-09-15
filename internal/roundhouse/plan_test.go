@@ -3,6 +3,7 @@ package roundhouse
 import (
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 
@@ -44,14 +45,33 @@ func TestBuildContainerPlanBash(t *testing.T) {
 		t.Fatalf("buildContainerPlan() error = %v", err)
 	}
 	defer cleanup()
-	if diff := cmp.Diff([]string{"bash", "-c", "echo hi"}, plan.argv); diff != "" {
-		t.Errorf("argv mismatch (-want +got):\n%s", diff)
+	// Bash takes a mounted script path like the other three script tools. It used to put the whole
+	// script body in argv, which lands in the container's recorded Config.Cmd, where docker inspect
+	// reads it back long after the run ended and the temp file is gone.
+	if len(plan.argv) != 2 || plan.argv[0] != "bash" {
+		t.Fatalf("argv = %v, want bash plus one script path", plan.argv)
 	}
-	if len(plan.mounts) != 1 || plan.mounts[0].path != "/co" || plan.mounts[0].writable {
-		t.Errorf("mounts = %+v, want /co read-only", plan.mounts)
+	if strings.Contains(strings.Join(plan.argv, " "), "echo hi") {
+		t.Errorf("argv = %v, still carries the script body rather than a path to it", plan.argv)
+	}
+	if len(plan.mounts) != 2 || plan.mounts[0].path != plan.argv[1] || plan.mounts[1].path != "/co" {
+		t.Errorf("mounts = %+v, want the script and /co read-only", plan.mounts)
+	}
+	for _, m := range plan.mounts {
+		if m.writable {
+			t.Errorf("mount %q is writable, want read-only", m.path)
+		}
 	}
 	if plan.extraEnv != nil {
 		t.Errorf("extraEnv = %v, want nil", plan.extraEnv)
+	}
+	// The script is written where the runner can mount it, and holds exactly what was submitted.
+	body, rerr := os.ReadFile(plan.argv[1])
+	if rerr != nil {
+		t.Fatalf("the plan named a script file that is not there: %v", rerr)
+	}
+	if string(body) != "echo hi" {
+		t.Errorf("script file holds %q, want the submitted command", body)
 	}
 
 	dry := Spec{Tool: "bash", Command: "echo hi", Dir: "/co", DryRun: true, ExtraVars: map[string]any{"k": "v"}}
@@ -60,8 +80,8 @@ func TestBuildContainerPlanBash(t *testing.T) {
 		t.Fatalf("buildContainerPlan() error = %v", err)
 	}
 	defer cleanup2()
-	if diff := cmp.Diff([]string{"bash", "-n", "-c", "echo hi"}, plan2.argv); diff != "" {
-		t.Errorf("dry-run argv mismatch (-want +got):\n%s", diff)
+	if len(plan2.argv) != 3 || plan2.argv[0] != "bash" || plan2.argv[1] != "-n" {
+		t.Errorf("dry-run argv = %v, want bash -n plus a script path", plan2.argv)
 	}
 	if len(plan2.extraEnv) != 1 || !strings.HasPrefix(plan2.extraEnv[0], "SWITCHTENDER_VARS=") {
 		t.Errorf("extraEnv = %v, want a SWITCHTENDER_VARS entry", plan2.extraEnv)
@@ -192,5 +212,46 @@ func TestNewContainerRunnerRuntime(t *testing.T) {
 	if c := newContainerRunner("", "missing", false, nil, &pluginCache{},
 		DefaultContainerLimits()); c.runtime != "docker" {
 		t.Errorf("empty runtime = %q, want docker default", c.runtime)
+	}
+}
+
+// TestNoScriptToolPutsItsScriptOnArgv pins the property that keeps an inline secret out of ps and
+// out of a container's recorded command line.
+//
+// bash was the only one of the four script engines that ran the script body as an argument, via
+// bash -c "<script>". On Linux the process argument list is world-readable, so any other account on
+// the executor could read a running job's script out of ps, and a containerized run kept the same
+// bytes in Config.Cmd where docker inspect returns them long after the run finished and the temp
+// file was gone. An operator who writes a password inline is doing something the docs warn against,
+// but three of the four tools did not punish it this way, and the odd one out was not a decision
+// anyone made.
+func TestNoScriptToolPutsItsScriptOnArgv(t *testing.T) {
+	t.Parallel()
+	const marker = "hunter2_do_not_leak_this"
+	for _, tool := range []string{"bash", "python", "go", "powershell"} {
+		t.Run(tool, func(t *testing.T) {
+			t.Parallel()
+			spec := Spec{Tool: tool, Command: "echo " + marker, Dir: "/co"}
+			plan, cleanup, err := buildContainerPlan(spec)
+			if err != nil {
+				t.Fatalf("buildContainerPlan(%s) error = %v", tool, err)
+			}
+			defer cleanup()
+			if joined := strings.Join(plan.argv, " "); strings.Contains(joined, marker) {
+				t.Errorf("%s: the script body is on argv, readable from ps and kept in the "+
+					"container's Config.Cmd: %s", tool, joined)
+			}
+			// The script still has to reach the container, as a mounted file.
+			var mounted bool
+			for _, m := range plan.mounts {
+				if body, rerr := os.ReadFile(m.path); rerr == nil && strings.Contains(string(body), marker) {
+					mounted = true
+				}
+			}
+			if !mounted {
+				t.Errorf("%s: the script is neither on argv nor in a mounted file, so the run "+
+					"would execute nothing", tool)
+			}
+		})
 	}
 }

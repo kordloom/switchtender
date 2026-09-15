@@ -116,7 +116,19 @@ func redactPatternDepth(pattern *regexp.Regexp, text, mask string, found *[]Assi
 			// The value may be a secret joined onto this one, like a=psql;password=x or a yaml line
 			// note: ... ansible_ssh_pass: x, so it can hold either separator. Scan it once, spending a
 			// level of the budget, instead of rewinding the outer scan into it.
-			out.WriteString(redactPatternDepth(pattern, value, mask, found, depth-1))
+			//
+			// The quote pair is peeled off before recursing and put back afterward. Left on, the
+			// nested scan's unquoted alternative ran to the next whitespace and swallowed the
+			// closing quote, which broke both outputs at once: the redacted text lost its quote
+			// (CONN="a password=*** with nothing closing it), and the captured secret came back as
+			// `hunter2"` rather than `hunter2`. That second one is the dangerous half. The captured
+			// values are what scrubs a run's own output, so the scrubber searched the log for a
+			// string with a trailing quote, never matched, and left the real secret in the log, the
+			// events, and the live stream while the receipt showed it redacted.
+			open, inner, close := splitQuoted(value)
+			out.WriteString(open)
+			out.WriteString(redactPatternDepth(pattern, inner, mask, found, depth-1))
+			out.WriteString(close)
 		default:
 			out.WriteString(value)
 		}
@@ -128,6 +140,16 @@ func redactPatternDepth(pattern *regexp.Regexp, text, mask string, found *[]Assi
 
 // Unquote strips one matching pair of surrounding quotes, so a caller holds the bare value and matches
 // it literally in output. Keeping the quotes would mask a string the output never contains.
+// splitQuoted separates a value's surrounding quote pair from its contents, returning empty
+// delimiters for a value that is not quoted. It is the inverse of leaving the quotes on, which is
+// what let a nested scan run past the closing one.
+func splitQuoted(value string) (open, inner, close string) {
+	if len(value) >= 2 && (value[0] == '"' || value[0] == '\'') && value[len(value)-1] == value[0] {
+		return value[:1], value[1 : len(value)-1], value[len(value)-1:]
+	}
+	return "", value, ""
+}
+
 func Unquote(value string) string {
 	if len(value) >= 2 && (value[0] == '"' || value[0] == '\'') && value[len(value)-1] == value[0] {
 		return value[1 : len(value)-1]

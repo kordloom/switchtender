@@ -5,6 +5,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 )
 
 // TestRedactAssignmentsNested pins that a secret is still masked when it is joined onto another
@@ -117,6 +119,64 @@ func TestRedactAssignmentsMasksURLCredentials(t *testing.T) {
 			if !slices.Contains(vals, test.WantVal) {
 				t.Errorf("found = %v, want the password %q reported so the masker can match it",
 					vals, test.WantVal)
+			}
+		})
+	}
+}
+
+// TestRedactAssignmentsKeepsAQuotedCompositeIntact covers a secret nested inside a quoted value, the
+// most ordinary shape a connection string takes.
+//
+// The nested scan ran with the quotes still attached, so its unquoted alternative ran to the next
+// whitespace and swallowed the closing quote. That broke both outputs at once. The redacted text
+// came back missing its quote, and the captured secret came back as `hunter2"` rather than
+// `hunter2`, which is the half that mattered: the captured values are what scrub a run's own output,
+// so the scrubber searched the log for a string that was never in it, found nothing, and left the
+// real secret in the stored log, the events endpoint and the live stream, while the receipt built
+// from the same classifier showed it correctly redacted. One install, two answers, and the wrong one
+// on the surface a person actually reads.
+func TestRedactAssignmentsKeepsAQuotedCompositeIntact(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		// Name says which shape is being redacted.
+		Name string
+		// In is the raw text.
+		In string
+		// WantText is the text with the secret masked, quotes intact.
+		WantText string
+		// WantSecret is the secret exactly as it appears in the run's own output, since that is
+		// what the scrubber searches for.
+		WantSecret string
+	}{{ // Test 0: The ordinary double-quoted connection string.
+		Name: "double quoted composite", In: `CONN="host=db user=app password=hunter2"`,
+		WantText: `CONN="host=db user=app password=***"`, WantSecret: "hunter2",
+	}, { // Test 1: Single quotes behave the same.
+		Name: "single quoted composite", In: `CONN='host=db password=hunter2'`,
+		WantText: `CONN='host=db password=***'`, WantSecret: "hunter2",
+	}, { // Test 2: The secret is the whole quoted value's only assignment.
+		Name: "sole nested assignment", In: `CONN="password=abc"`,
+		WantText: `CONN="password=***"`, WantSecret: "abc",
+	}, { // Test 3: Unquoted is unchanged by this, and still correct.
+		Name: "unquoted composite", In: `CONN=host=db;password=hunter2`,
+		WantText: `CONN=host=db;password=***`, WantSecret: "hunter2",
+	}}
+
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			text, found := RedactAssignments(test.In, "***")
+			if diff := cmp.Diff(test.WantText, text); diff != "" {
+				t.Errorf("%s: redacted text mismatch (-want +got):\n%s", test.Name, diff)
+			}
+			var got string
+			for _, f := range found {
+				if f.Name == "password" {
+					got = f.Value
+				}
+			}
+			if diff := cmp.Diff(test.WantSecret, got); diff != "" {
+				t.Errorf("%s: captured secret mismatch (-want +got):\n%s\nA captured value that is "+
+					"not the string in the run's output cannot scrub it.", test.Name, diff)
 			}
 		})
 	}

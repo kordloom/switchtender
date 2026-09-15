@@ -379,13 +379,24 @@ CREATE INDEX IF NOT EXISTS idx_grants_object ON grants(object);
 
 // Open opens the SQLite database at path, applies the schema, and returns the bundled stores.
 func Open(path string) (*DB, error) {
-	db, err := sql.Open("sqlite", path)
+	// Every transaction takes the write lock when it begins rather than upgrading into it.
+	//
+	// SetMaxOpenConns(1) below serializes this process, but a SQLite install is one FILE, not one
+	// process: the quickstart has the operator run a CLI command against the database the server is
+	// serving, and `switchtender examples`, `token new`, `audit anchor` and `import` all write it.
+	// A deferred transaction reads first and upgrades to a write, and when another process advanced
+	// the WAL in between, SQLite answers SQLITE_BUSY_SNAPSHOT (261), which busy_timeout is
+	// documented NOT to retry because retrying could not produce a consistent read. The server then
+	// answered 503 on every mutation and the CLI exited non-zero with "database is locked", which is
+	// a database-corruption message for what is ordinary two-process use.
+	//
+	// An immediate transaction takes the lock up front, so there is no upgrade to lose, and
+	// busy_timeout does apply to acquiring it: the second writer waits its turn instead of failing.
+	db, err := sql.Open("sqlite", "file:"+path+"?_txlock=immediate")
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
-	// One connection serializes every reader and writer. Concurrent deferred transactions on
-	// separate connections deadlock on SQLite's read to write upgrade with an immediate
-	// SQLITE_BUSY that busy_timeout never retries, which silently drops writes under load.
+	// One connection serializes every reader and writer inside this process.
 	db.SetMaxOpenConns(1)
 	pragmas := []string{
 		"PRAGMA journal_mode=WAL",
