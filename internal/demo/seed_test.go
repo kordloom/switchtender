@@ -1218,3 +1218,49 @@ func TestSeededRunsNameTheTemplatesThatFiredThem(t *testing.T) {
 		}
 	}
 }
+
+// TestSeededOriginsNameRecordsThatExist widens the previous test to every origin, not just
+// templates.
+//
+// The rule is simple and the History button is what taught it: a run may name the record that
+// fired it, or name nothing, but it may never name a record the store does not hold. A fabricated
+// id is invisible until some feature joins on it, and then that feature is wrong every time.
+func TestSeededOriginsNameRecordsThatExist(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	stores := newSeedStores()
+	ids := seedConfig(ctx, stores.deps(), zap.NewNop())
+
+	templates, err := stores.Templates.List(ctx)
+	if err != nil {
+		t.Fatalf("Templates.List() error = %v", err)
+	}
+	schedules, err := stores.Schedules.List(ctx)
+	if err != nil {
+		t.Fatalf("Schedules.List() error = %v", err)
+	}
+	if len(templates) == 0 || len(schedules) == 0 {
+		t.Fatal("seedConfig() stored no templates or no schedules")
+	}
+
+	// Every name the run seeding resolves must be one seedConfig actually minted. A name that is
+	// not there falls back to a literal, which is exactly the defect.
+	for _, c := range []struct {
+		Kind string
+		Have map[string]string
+		Name string
+	}{
+		{"template", ids.Templates, "Deploy web"},
+		{"template", ids.Templates, "Reconcile inventory"},
+		{"template", ids.Templates, "Fleet capacity report"},
+		{"template", ids.Templates, "Provision network"},
+		{"schedule", ids.Schedules, "Nightly audit"},
+		{"schedule", ids.Schedules, "Hourly drift check"},
+	} {
+		got := ids.id(c.Have, c.Name, "")
+		if got == "" {
+			t.Errorf("no %s named %q was seeded, so a run claiming it names a record nothing "+
+				"holds", c.Kind, c.Name)
+		}
+	}
+}
