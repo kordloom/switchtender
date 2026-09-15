@@ -536,8 +536,12 @@ func (g *authGate) record(w http.ResponseWriter, who recordedActor, r *http.Requ
 	if !ok {
 		return "", false
 	}
+	// At is left zero deliberately: the store stamps it under the same lock that assigns the
+	// sequence. Reading the clock here and sequencing there let two concurrent requests be stamped
+	// in one order and sequenced in the other, which put entries in the trail whose recorded time
+	// preceded the entry before them with nothing wrong on the install.
 	entry := &audit.Entry{
-		ID: audit.NewID(), At: time.Now(), Actor: who.Name,
+		ID: audit.NewID(), Actor: who.Name,
 		ActorType: who.Type, OnBehalfOf: who.OnBehalfOf,
 		Method: r.Method, Path: auditPath(r), ContentDigest: digest, Nonce: nonce,
 	}

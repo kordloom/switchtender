@@ -411,6 +411,20 @@ var derivedReadScan = 2000
 // governs these too; rows carrying a run id are checked against it, and an aggregate that names no
 // run is shown only to a caller who can read something, because otherwise it is a summary of work
 // they are not allowed to know about.
+// unrestrictedReader reports whether grants place no read restriction on this caller, using the same
+// probe derivedReadFilter opens with and costing nothing beyond it.
+//
+// It is what decides whether an install-wide aggregate may be shown. A restricted caller who can
+// read some runs still must not be told how many runs the whole install has, because that total is
+// every other organization's volume in one number.
+func unrestrictedReader(ctx context.Context, authz *authorizer) (bool, error) {
+	filter, err := authz.readFilter(ctx)
+	if err != nil {
+		return false, err
+	}
+	return filter("proj_probe", "") && filter("cred_probe", ""), nil
+}
+
 func derivedReadFilter(ctx context.Context, authz *authorizer,
 	store run.Store) (keep func(runID string) bool, anyReadable bool, err error) {
 	filter, err := authz.readFilter(ctx)

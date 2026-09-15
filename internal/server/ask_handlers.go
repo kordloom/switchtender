@@ -128,19 +128,6 @@ func buildFleetSnapshot(ctx context.Context, store run.Store,
 	var b strings.Builder
 	b.WriteString("Fleet snapshot.\n")
 
-	if counts, err := store.RunStatusCounts(ctx); err == nil && len(counts) > 0 {
-		b.WriteString("\nRun counts by status:\n")
-		for _, status := range []run.Status{
-			run.StatusPending, run.StatusRunning, run.StatusPendingApproval,
-			run.StatusSucceeded, run.StatusFailed, run.StatusCanceled,
-			run.StatusInterrupted, run.StatusRejected,
-		} {
-			if n := counts[status]; n > 0 {
-				fmt.Fprintf(&b, "- %s: %d\n", status, n)
-			}
-		}
-	}
-
 	// Read a wider page than is shown, because filtering removes rows and a caller granted a few
 	// runs should still see their most recent ones rather than whatever survived the first page.
 	page, err := store.ListPage(ctx, run.ListFilter{}, askSnapshotRuns*8, 0)
@@ -150,6 +137,33 @@ func buildFleetSnapshot(ctx context.Context, store run.Store,
 	runs, err := readableRuns(ctx, authz, page)
 	if err != nil {
 		return "", err
+	}
+
+	// The counts come from the runs this caller may read, not from store.RunStatusCounts, which
+	// counts the whole install.
+	//
+	// That call sat directly under the comment above explaining that the snapshot is built from what
+	// the caller may read, and it was the one section that was not: a viewer in one organization got
+	// every organization's run counts, and the model repeated them in prose. The comment describes
+	// the leak path exactly, four lines above the line that opened it.
+	//
+	// Counting the readable page rather than the install means these are counts over a window, so
+	// the label says so. A number presented as a total when it is a sample is its own defect.
+	if len(runs) > 0 {
+		counts := make(map[run.Status]int, len(runs))
+		for _, r := range runs {
+			counts[r.Status]++
+		}
+		fmt.Fprintf(&b, "\nStatus counts among the %d most recent runs you can read:\n", len(runs))
+		for _, status := range []run.Status{
+			run.StatusPending, run.StatusRunning, run.StatusPendingApproval,
+			run.StatusSucceeded, run.StatusFailed, run.StatusCanceled,
+			run.StatusInterrupted, run.StatusRejected,
+		} {
+			if n := counts[status]; n > 0 {
+				fmt.Fprintf(&b, "- %s: %d\n", status, n)
+			}
+		}
 	}
 	if len(runs) > askSnapshotRuns {
 		runs = runs[:askSnapshotRuns]

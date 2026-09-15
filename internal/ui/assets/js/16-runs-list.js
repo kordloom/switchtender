@@ -554,7 +554,12 @@ function wireRunsMore(tbody, offset, hasMore) {
 function renderSummary(summary) {
 	const el = document.getElementById("summary");
 	el.innerHTML = "";
-	el.appendChild(statCard(summary.total || 0, "Total runs", ""));
+	// The server says what its counts cover. Grants can restrict a caller to one organization's
+	// runs, and quoting the install's totals to them published every other tenant's volume in one
+	// number, so the counts are now over what they can see and the card has to say so rather than
+	// calling a subset a total.
+	const scoped = summary.scope === "visible";
+	el.appendChild(statCard(summary.total || 0, scoped ? "Runs you can see" : "Total runs", ""));
 	el.appendChild(statCard(summary.succeeded || 0, "Succeeded", "ok"));
 	el.appendChild(statCard(summary.failed || 0, "Failed", "failed"));
 	el.appendChild(statCard(summary.active || 0, "Active", "running"));

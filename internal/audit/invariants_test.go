@@ -1,9 +1,12 @@
 package audit_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -259,5 +262,69 @@ func TestAReceiptFromAnotherInstallDoesNotVerifyHere(t *testing.T) {
 	}
 	if !strings.Contains(fmt.Sprint(rep.SignatureOK), "false") && rep.SignatureOK {
 		t.Error("the signature check passed for a key that did not sign it")
+	}
+}
+
+// TestRecordedTimeNeverGoesBackwardAgainstSequence covers an audit trail that reads as edited when
+// nothing was edited.
+//
+// The recorded time was read in the request handler and the sequence was assigned later, inside the
+// store's lock, so two concurrent requests could be stamped in one order and sequenced in the other.
+// The chain still recomputed, because a link commits to whatever time it was handed, so this never
+// appeared as a break. It appeared as entries whose recorded time precedes the entry before them,
+// which is exactly what a reader is taught to treat as tampering.
+func TestRecordedTimeNeverGoesBackwardAgainstSequence(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := audit.NewMemStore()
+
+	// Many appends at once, the shape an install under load produces.
+	var wg sync.WaitGroup
+	for i := range 200 {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			e := &audit.Entry{
+				ID: fmt.Sprintf("e%03d", n), Actor: "admin", ActorType: "session",
+				Method: audit.MethodRun, Path: "/v1/runs",
+			}
+			if err := store.Append(ctx, e); err != nil {
+				t.Errorf("Append() error = %v", err)
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	entries, err := store.List(ctx, 1000)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Seq < entries[j].Seq })
+	for i := 1; i < len(entries); i++ {
+		if entries[i].At.Before(entries[i-1].At) {
+			t.Fatalf("entry %d is recorded at %s, before entry %d at %s: the trail reads as edited "+
+				"on an install where no clock moved and nothing was tampered with",
+				entries[i].Seq, entries[i].At, entries[i-1].Seq, entries[i-1].At)
+		}
+	}
+}
+
+// TestADeliberateTimeIsKept covers the other half: a caller that chose a time keeps it. The demo
+// backdates a whole seeded history on purpose, and a span beat's time is a signed claim about when
+// the clock was actually read, so neither may be silently rewritten to now.
+func TestADeliberateTimeIsKept(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := audit.NewMemStore()
+	backdated := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	e := &audit.Entry{
+		ID: "seeded", At: backdated, Actor: "deploy-bot", ActorType: "system",
+		Method: audit.MethodRun, Path: "/v1/runs",
+	}
+	if err := store.Append(ctx, e); err != nil {
+		t.Fatalf("Append() error = %v", err)
+	}
+	if !e.At.Equal(backdated) {
+		t.Errorf("At = %s, want the time the caller chose, %s", e.At, backdated)
 	}
 }

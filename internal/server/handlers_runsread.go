@@ -43,6 +43,10 @@ type runSummary struct {
 	// AwaitingApproval is how many are held at the approval gate, the number the overview leads
 	// with: it is the governance story in one figure.
 	AwaitingApproval int `json:"awaiting_approval"`
+	// Scope says what these numbers cover: "install" for every run on the install, "visible" when
+	// grants restrict this caller and the counts cover only the runs on this page. A caller who is
+	// shown a subset must not read it as a total, and the interface labels the cards from this.
+	Scope string `json:"scope,omitempty"`
 }
 
 // summarize folds status counts into the summary the runs view shows.
@@ -240,24 +244,38 @@ func listRunsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.H
 			respondError(w, log, http.StatusInternalServerError, "could not list runs")
 			return
 		}
-		// The status totals are an install-wide aggregate, so they are withheld from a caller who may
-		// read no runs at all, the same aggregate-withholding the drift and task views do. Otherwise
-		// a strict-grants viewer refused every run by name still learned how much activity the install
-		// had. A visible run on this page already proves the caller reads something, so the scan only
-		// runs when the page is empty of readable runs.
-		anyReadable := len(runs) > 0
-		if !anyReadable {
-			_, ar, ferr := derivedReadFilter(r.Context(), authz, store)
-			if ferr != nil {
-				log.Error("server: read filter: " + ferr.Error())
-				respondError(w, log, http.StatusInternalServerError, "could not list runs")
-				return
-			}
-			anyReadable = ar
+		// The status totals are an install-wide aggregate, so they go only to a caller grants place
+		// no read restriction on.
+		//
+		// Withholding them from a caller who can read NOTHING was the old rule, and it left the
+		// leak it was written to close: a viewer restricted to one organization could read some runs,
+		// which satisfied the test, and then received counts covering every organization on the
+		// install. One number is enough to publish another tenant's volume.
+		//
+		// The probe is the same one derivedReadFilter opens with, so this costs nothing: it asks
+		// whether grants restrict this caller at all, rather than walking rows through a filter,
+		// which at a thousand rows and ten thousand grants is the cost the filter's own comment
+		// warns about.
+		unrestricted, ferr := unrestrictedReader(r.Context(), authz)
+		if ferr != nil {
+			log.Error("server: read filter: " + ferr.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not list runs")
+			return
 		}
 		summary := runSummary{}
-		if anyReadable {
+		switch {
+		case unrestricted:
 			summary = summarize(counts)
+			summary.Scope = "install"
+		case len(runs) > 0:
+			// Restricted, but reading something. The cards stay populated from what this caller can
+			// actually see, rather than going blank or quoting the install's totals.
+			visible := make(map[run.Status]int, len(runs))
+			for _, rn := range runs {
+				visible[rn.Status]++
+			}
+			summary = summarize(visible)
+			summary.Scope = "visible"
 		}
 		respondJSON(w, log, http.StatusOK, listRunsResponse{
 			Runs:       scrubbedRuns(r.Context(), maskRuns(runs)),

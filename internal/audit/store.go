@@ -84,6 +84,9 @@ func (m *memStore) Append(_ context.Context, e *Entry) error {
 		prev = m.entries[n-1]
 	}
 	cp := *e
+	// Same rule as the persistent stores: the recorded time is assigned under the lock that assigns
+	// the sequence, so the trail cannot hold an entry whose time precedes the one before it.
+	StampAppendTime(prev, &cp, time.Now())
 	Link(prev, &cp)
 	m.entries = append(m.entries, &cp)
 	*e = cp

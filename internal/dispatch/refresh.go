@@ -140,10 +140,48 @@ func validateBareSource(source string) error {
 		// A missing or unreadable path is not an execution surface; let ansible-inventory report it.
 		return nil //nolint:nilerr // Absence is handled downstream, not a validation failure.
 	}
-	if info.Mode().IsRegular() && info.Mode().Perm()&0o111 != 0 {
+	// The rule is stated positively: accept a non-executable regular file, refuse everything else.
+	//
+	// Testing only "regular AND executable" let everything that is not a regular file through, and
+	// the one that matters is a directory. ansible-inventory treats a directory as an inventory
+	// directory and executes every executable file inside it, so naming the parent of the script
+	// this guard refuses ran that same script as the executor. The guard's own comment says it
+	// exists so "a stored source cannot run arbitrary code as the executor", which is exactly what
+	// the gap allowed.
+	if info.IsDir() {
+		if exe, derr := firstExecutableIn(source); derr == nil && exe != "" {
+			return fmt.Errorf("%w: %q is a directory holding the executable %q, which "+
+				"ansible-inventory would run", invsource.ErrInvalidSource, source, exe)
+		}
+		return nil
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("%w: %q is not a regular file", invsource.ErrInvalidSource, source)
+	}
+	if info.Mode().Perm()&0o111 != 0 {
 		return fmt.Errorf("%w: %q is executable", invsource.ErrInvalidSource, source)
 	}
 	return nil
+}
+
+// firstExecutableIn returns the name of the first executable regular file directly inside dir, or
+// empty when there is none. It does not descend: ansible-inventory reads an inventory directory's
+// own entries, and a bounded check keeps a large directory from turning one validation into a walk.
+func firstExecutableIn(dir string) (string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", err
+	}
+	for _, e := range entries {
+		info, ierr := e.Info()
+		if ierr != nil {
+			continue
+		}
+		if info.Mode().IsRegular() && info.Mode().Perm()&0o111 != 0 {
+			return e.Name(), nil
+		}
+	}
+	return "", nil
 }
 
 // sourceSyncInterval is how often the sync loop checks which sources are due, bounding how late a
