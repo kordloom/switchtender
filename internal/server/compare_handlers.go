@@ -68,23 +68,99 @@ func runCompareHandler(store run.Store, authz *authorizer, log *zap.Logger) http
 			return
 		}
 
-		hostsA, err := store.RunHostSummaries(r.Context(), a.ID)
+		hostsA, tasksA, err := rolledSummaries(r.Context(), store, a)
 		if err == nil {
 			var hostsB []run.HostSummary
-			var tasksA, tasksB []run.TaskSummary
-			if hostsB, err = store.RunHostSummaries(r.Context(), b.ID); err == nil {
-				if tasksA, err = store.RunTaskSummaries(r.Context(), a.ID); err == nil {
-					if tasksB, err = store.RunTaskSummaries(r.Context(), b.ID); err == nil {
-						respondJSON(w, log, http.StatusOK,
-							run.Compare(a, b, hostsA, hostsB, tasksA, tasksB), wantsPretty(r))
-						return
-					}
-				}
+			var tasksB []run.TaskSummary
+			if hostsB, tasksB, err = rolledSummaries(r.Context(), store, b); err == nil {
+				respondJSON(w, log, http.StatusOK,
+					run.Compare(a, b, hostsA, hostsB, tasksA, tasksB), wantsPretty(r))
+				return
 			}
 		}
 		log.Error("server: compare: " + err.Error())
 		respondError(w, log, http.StatusInternalServerError, "could not compare runs")
 	}
+}
+
+// rolledSummaries returns a run's per host and per task summaries, gathering them from its children
+// when the run is a split or a pipeline.
+//
+// A parent run stores no summaries of its own: the work happened in its shards or steps, and each
+// child holds the rows for the hosts it covered. Reading the parent alone returned nothing, so a
+// comparison against a split baseline reported every host as new in this run and every task with a
+// dash for its baseline, on the newest run in the demo, two clicks from the front page. The run
+// detail page never had the bug because it builds its matrix by merging the children's events.
+func rolledSummaries(ctx context.Context, store run.Store, r *run.Run) ([]run.HostSummary,
+	[]run.TaskSummary, error) {
+	hosts, err := store.RunHostSummaries(ctx, r.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+	tasks, err := store.RunTaskSummaries(ctx, r.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+	children, err := childRuns(ctx, store, r)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, child := range children {
+		ch, err := store.RunHostSummaries(ctx, child.ID)
+		if err != nil {
+			return nil, nil, err
+		}
+		hosts = append(hosts, ch...)
+		ct, err := store.RunTaskSummaries(ctx, child.ID)
+		if err != nil {
+			return nil, nil, err
+		}
+		tasks = append(tasks, ct...)
+	}
+	return hosts, mergeTasks(tasks), nil
+}
+
+// childRuns returns the shards or steps of a parent run, and nothing for a plain run.
+func childRuns(ctx context.Context, store run.Store, r *run.Run) ([]*run.Run, error) {
+	switch r.Kind {
+	case run.KindSplit:
+		return store.Shards(ctx, r.ID)
+	case run.KindPipeline:
+		return store.Steps(ctx, r.ID)
+	default:
+		return nil, nil
+	}
+}
+
+// mergeTasks folds task rows carrying the same name into one, summing their seconds.
+//
+// Shards run the same tasks against different hosts, so a three way split reports each task three
+// times. Left unmerged the comparison listed one task per shard and its timing read as a third of
+// the work. Hosts need no such fold: a host belongs to exactly one shard.
+func mergeTasks(tasks []run.TaskSummary) []run.TaskSummary {
+	if len(tasks) < 2 {
+		return tasks
+	}
+	order := make([]string, 0, len(tasks))
+	byTask := make(map[string]run.TaskSummary, len(tasks))
+	for _, t := range tasks {
+		existing, seen := byTask[t.Task]
+		if !seen {
+			order = append(order, t.Task)
+			byTask[t.Task] = t
+			continue
+		}
+		existing.Seconds += t.Seconds
+		if t.RanAt.After(existing.RanAt) {
+			existing.RanAt = t.RanAt
+		}
+		byTask[t.Task] = existing
+	}
+	out := make([]run.TaskSummary, 0, len(order))
+	for _, name := range order {
+		out = append(out, byTask[name])
+	}
+	return out
 }
 
 // previousRun returns the most recent run fired by the same source before a, or empty when there
