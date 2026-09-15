@@ -574,7 +574,13 @@ table.matrix { border-collapse: separate; border-spacing: 0; }
 table.matrix thead th { position: sticky; top: 0; z-index: 3; background: var(--surface-2); padding: 9px 12px; font-size: 12px; font-weight: 600; white-space: nowrap; text-align: left; color: var(--muted); border-bottom: 1px solid var(--border-muted); }
 table.matrix tbody th a { color: inherit; }
 table.matrix tbody th a:hover { color: var(--accent); text-decoration: none; }
-table.matrix tbody th { position: sticky; left: 0; z-index: 2; background: var(--surface-2); padding: 7px 14px; font-family: var(--mono); font-size: 12.5px; white-space: nowrap; text-align: left; border-right: 1px solid var(--border-muted); border-bottom: 1px solid var(--border-muted); }
+/* The host column is sticky and was unbounded, so one long host name, which is ordinary in a
+   cloud estate (ip-10-0-14-22.eu-west-1.compute.internal and longer), widened it until it
+   covered the grid it is a label for. The matrix is the view this product is sold on, and it
+   became permanently unreadable because of one row. Bounded and truncated, with the full name
+   still on the cell for hover and for a screen reader. */
+table.matrix tbody th { position: sticky; left: 0; z-index: 2; background: var(--surface-2); padding: 7px 14px; font-family: var(--mono); font-size: 12.5px; white-space: nowrap; text-align: left; border-right: 1px solid var(--border-muted); border-bottom: 1px solid var(--border-muted); max-width: 22ch; overflow: hidden; text-overflow: ellipsis; }
+table.matrix thead th.corner { max-width: 22ch; }
 table.matrix thead th.corner { position: sticky; left: 0; z-index: 4; border-right: 1px solid var(--border-muted); }
 table.matrix td { padding: 3px; text-align: center; }
 .cell { margin: 0 auto; }

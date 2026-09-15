@@ -306,6 +306,13 @@ function relTime(iso) {
 	const d = new Date(iso);
 	if (isNaN(d)) return iso;
 	const s = Math.round((Date.now() - d.getTime()) / 1000);
+	// A future time is not an age.
+	//
+	// Every case below assumed the instant had already passed, so a negative difference fell into
+	// "s < 5" and read "just now". That is where every unexpired token and every live browser
+	// session landed: an Expires column on the access page reading "just now" for a credential good
+	// for another thirty days, which is the opposite of what it says.
+	if (s < 0) return relAhead(-s, d);
 	if (s < 5) return "just now";
 	if (s < 60) return s + "s ago";
 	const m = Math.round(s / 60);
@@ -314,6 +321,19 @@ function relTime(iso) {
 	if (h < 24) return h + "h ago";
 	const days = Math.round(h / 24);
 	if (days < 30) return days + "d ago";
+	return d.toLocaleDateString();
+}
+
+// relAhead renders a time that has not arrived yet, in the same units and shape relTime uses for one
+// that has, so an Expires column reads the way a Created column does.
+function relAhead(s, d) {
+	if (s < 60) return "in " + s + "s";
+	const m = Math.round(s / 60);
+	if (m < 60) return "in " + m + "m";
+	const h = Math.round(m / 60);
+	if (h < 24) return "in " + h + "h";
+	const days = Math.round(h / 24);
+	if (days < 30) return "in " + days + "d";
 	return d.toLocaleDateString();
 }
 

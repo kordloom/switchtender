@@ -186,6 +186,11 @@ function renderMatrix(model) {
 		const hostLink = document.createElement("a");
 		hostLink.href = "/ui/hosts/" + encodeURIComponent(host);
 		hostLink.textContent = host;
+		// The column is bounded in CSS so one long name cannot cover the grid, so the full name has
+		// to stay reachable: title for hover, and the accessible name for a screen reader, which
+		// would otherwise read only the truncated text.
+		hostLink.title = host;
+		hostLink.setAttribute("aria-label", host);
 		hostLink.dataset.tip = "Open this host's history";
 		rowTh.appendChild(hostLink);
 		rowTh.dataset.ri = ri;

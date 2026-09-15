@@ -572,7 +572,11 @@ function statCard(value, label, cls) {
 	card.className = "stat-card";
 	const v = document.createElement("div");
 	v.className = "stat-value" + (cls ? " " + cls : "");
-	v.textContent = value;
+	// Grouped, the way every other number in this interface is written. The card set the raw value
+	// and countUp finished by restoring that same raw text, so a five-figure run count read 12345
+	// here and 12,345 in the table underneath it, and with reduced motion the animation never ran
+	// to disagree with itself.
+	v.textContent = groupDigits(value);
 	countUp(v, value);
 	const l = document.createElement("div");
 	l.className = "stat-label";
@@ -585,6 +589,17 @@ function statCard(value, label, cls) {
 // countUp animates a metric from zero to its value, preserving any suffix such as a percent
 // sign. A value that is not a plain number, and a reader who asked for reduced motion, get the
 // final text immediately.
+// groupDigits writes a number with thousands separators, leaving anything that is not a plain
+// count, such as a percentage or a duration, exactly as it came.
+function groupDigits(value) {
+	const text = String(value);
+	const match = text.match(/^(\d[\d,]*)(\D*)$/);
+	if (!match) return text;
+	const n = parseInt(match[1].replace(/,/g, ""), 10);
+	if (!Number.isFinite(n)) return text;
+	return n.toLocaleString() + (match[2] || "");
+}
+
 function countUp(el, value) {
 	const text = String(value);
 	const match = text.match(/^(\d[\d,]*)(\D*)$/);
@@ -601,7 +616,7 @@ function countUp(el, value) {
 		const eased = 1 - Math.pow(1 - t, 3);
 		el.textContent = Math.round(target * eased).toLocaleString() + suffix;
 		if (t < 1) requestAnimationFrame(step);
-		else el.textContent = text;
+		else el.textContent = groupDigits(text);
 	};
 	requestAnimationFrame(step);
 }

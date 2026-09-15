@@ -13,12 +13,22 @@ function describeCron(spec) {
 		const h12 = hh % 12 === 0 ? 12 : hh % 12;
 		return h12 + ":" + mm + suffix;
 	};
-	if (min === "*" && hour === "*") return "Every minute";
-	if (hour === "*" && /^\*\/\d+$/.test(min)) return "Every " + min.slice(2) + " minutes";
+	// The frequency shapes below describe how OFTEN a rule fires, and they used to ignore the three
+	// fields that say WHEN it may. "*/15 * * * 1-5" read "Every 15 minutes" on the schedules page,
+	// for a rule that does not fire at all on a Saturday. The scope is appended, and an expression
+	// whose scope cannot be named in words falls through to "Custom schedule" rather than being
+	// described as something it is not.
+	// scope is empty when the rule may fire any day, a clause like " on weekdays" when the
+	// restriction can be named, and null when it is real but cannot be. Only the frequency shapes
+	// consult it: the timed shapes further down read the day fields themselves.
+	const scope = cronScope(dom, mon, dow);
+	const freq = (text) => (scope === null ? "Custom schedule" : text + scope);
+	if (min === "*" && hour === "*") return freq("Every minute");
+	if (hour === "*" && /^\*\/\d+$/.test(min)) return freq("Every " + min.slice(2) + " minutes");
 	if (hour === "*" && /^\d+$/.test(min) && dom === "*" && mon === "*" && dow === "*") {
 		return parseInt(min, 10) === 0 ? "Hourly, on the hour" : "Hourly at :" + String(min).padStart(2, "0");
 	}
-	if (/^\*\/\d+$/.test(hour) && /^\d+$/.test(min)) return "Every " + hour.slice(2) + " hours";
+	if (/^\*\/\d+$/.test(hour) && /^\d+$/.test(min)) return freq("Every " + hour.slice(2) + " hours");
 	// The named shapes below all read a clock time, so both fields must be plain numbers: a step
 	// or wildcard in either belongs to a cadence no sentence here describes.
 	const timed = /^\d+$/.test(min) && /^\d+$/.test(hour);
@@ -28,6 +38,23 @@ function describeCron(spec) {
 	if (dow === "1-5" && timed) return "Weekdays at " + at(hour, min);
 	if ((dow === "6,0" || dow === "0,6") && timed) return "Weekends at " + at(hour, min);
 	return "Custom schedule";
+}
+
+// cronScope renders the restriction the day-of-month, month and day-of-week fields place on a
+// frequency, as a clause to append: empty when a rule may fire on any day, and null when the
+// restriction is real but cannot be said in words, which is the caller's signal to give up and call
+// the expression custom rather than describe it wrongly.
+function cronScope(dom, mon, dow) {
+	if (dom === "*" && mon === "*" && dow === "*") return "";
+	// A month or day-of-month restriction has too many shapes to name here, and naming one wrongly
+	// is the defect this exists to prevent.
+	if (mon !== "*" || dom !== "*") return null;
+	const days = { "0": "Sunday", "1": "Monday", "2": "Tuesday", "3": "Wednesday", "4": "Thursday",
+		"5": "Friday", "6": "Saturday", "7": "Sunday" };
+	if (dow === "1-5") return " on weekdays";
+	if (dow === "6,0" || dow === "0,6" || dow === "0,6" || dow === "6-7") return " at weekends";
+	if (days[dow]) return " on " + days[dow] + "s";
+	return null;
 }
 
 // CRON_MONTHS and CRON_DAYS name the values of the two cron fields that read as words rather than
