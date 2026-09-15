@@ -26,7 +26,11 @@ jobs:
     env:
       SWITCHTENDER_TEST_POSTGRES_DSN: postgres://switchtender:switchtender@localhost:5432/switchtender?sslmode=disable
     steps:
+      # Full depth: the secret scan below reads every commit, and a shallow clone
+      # would report a clean history it never looked at.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -41,6 +45,21 @@ jobs:
         run: go test -race ./...
       - name: JS unit tests
         run: node --test internal/ui/assets/jstest/*.test.mjs
+
+      # A product selling evidence should scan clean, and a stranger will run this. History rather
+      # than the working tree: the config allowlists the redaction tests, whose fixtures must look
+      # like secrets, one file at a time rather than exempting every _test.go, so a real credential
+      # pasted into a future test still fails here.
+      # The binary rather than gitleaks-action, whose v2 asks an organization account for a
+      # license key. The scan is the point; the wrapper is not.
+      - name: Secret scan
+        run: |
+          set -euo pipefail
+          version=8.28.0
+          curl -sSfL -o /tmp/gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${version}/gitleaks_${version}_linux_x64.tar.gz"
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          /tmp/gitleaks detect --source . --log-opts="--all" --redact --no-banner
 
   # The audit package cross-checks every bundle shape this product emits against the loomseal
   # verifier a relying party would actually run, and requires both to reach the same verdict. That
