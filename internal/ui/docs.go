@@ -63,15 +63,18 @@ func (u *UI) docsPage(w http.ResponseWriter, r *http.Request) {
 	if slug == "" {
 		slug = "README"
 	}
+	// Both refusals render the app's own not-found page. Go's stock handler answers with bare text
+	// on a blank page, and Docs is linked from the topbar and the drawer, so a stale or guessed
+	// docs address was the likeliest way for a reader to fall out of the product entirely.
 	if !validSlug(slug) {
-		http.NotFound(w, r)
+		u.notFound(w, r)
 		return
 	}
 	cached, ok := u.docCache.Load(slug)
 	if !ok {
 		data, err := fs.ReadFile(u.docs, slug+".md")
 		if err != nil {
-			http.NotFound(w, r)
+			u.notFound(w, r)
 			return
 		}
 		var body bytes.Buffer
