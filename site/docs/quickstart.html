@@ -121,7 +121,7 @@ curl -H &quot;Authorization: Bearer $ST_TOKEN&quot; localhost:8080/v1/runs/&lt;i
 <p>Add <code>&quot;shards&quot;: 4</code> to the body to split the run across four slices of the inventory, balanced by
 each host's measured duration in recent runs.</p>
 <h2 id="add-a-worker-team">Add a worker (Team)</h2>
-<p>Distributed execution is a Team feature, so every <code>switchtender worker</code> needs a licence and refuses
+<p>Distributed execution is a Team feature, so every <code>switchtender worker</code> needs a license and refuses
 to start without one. Community runs everything on the server itself, which is the default and needs
 no extra process: this section is for when one machine is no longer enough.</p>
 <p>Point a worker at the same database and it competes for queued runs:</p>
@@ -153,7 +153,7 @@ docker compose --profile stack up --build
 </code></pre>
 <p>This starts a server and a PostgreSQL database. The server listens on port 8080. Set
 <code>SWITCHTENDER_PORT</code> to change the host port.</p>
-<p>Workers are a separate profile because they are Team: <code>docker compose --profile stack --profile workers up --build</code> adds one, and it needs a licence to start.</p>
+<p>Workers are a separate profile because they are Team: <code>docker compose --profile stack --profile workers up --build</code> adds one, and it needs a license to start.</p>
 <h2 id="set-up-a-production-server">Set up a production server</h2>
 <p>For a real install, <code>init</code> generates the encryption key and salt, creates the first admin account, and
 writes a config file in one step. It can also write a systemd unit:</p>

@@ -73,7 +73,7 @@ func init() {
 	// The demo is the one build that actually sits behind a reverse proxy on the public internet,
 	// and it had no way to be told so. Every per-client bound then keyed on the proxy's own address,
 	// which is one address: the 32-stream-per-caller cap became a cap of 32 for every visitor at
-	// once, and the held run at the centre of the approvals story is non-terminal, so each visitor
+	// once, and the held run at the center of the approvals story is non-terminal, so each visitor
 	// who opens it and walks away holds a slot until they close the tab.
 	demoCmd.Flags().StringSliceVar(&serveTrustedProxy, "trusted-proxy", nil,
 		"CIDR of a reverse proxy whose client IP header to believe, repeatable. Required behind a "+

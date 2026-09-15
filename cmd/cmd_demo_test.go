@@ -75,7 +75,7 @@ func TestDemoPathsKeepIdentityBesideTheResolvedDatabase(t *testing.T) {
 // Every per-client budget resolves the caller through clientAddr, which believes a forwarding header
 // only from a proxy the operator named. The demo never had the flag, so trustedProxies was always
 // empty and every visitor resolved to the proxy's own address: the 32-stream-per-caller cap became a
-// cap of 32 across all visitors at once. The run at the centre of the approvals story is held, so it
+// cap of 32 across all visitors at once. The run at the center of the approvals story is held, so it
 // is non-terminal, and each visitor who opens it and leaves the tab open holds a slot until they
 // close it.
 func TestDemoTakesTheProxyFlagsServeTakes(t *testing.T) {

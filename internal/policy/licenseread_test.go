@@ -13,10 +13,10 @@ import (
 // TestFileStoreRefusesRulesTheLicenceDoesNotCover covers a gate that was one file edit away from not
 // existing.
 //
-// The policy file hot-reloads, and the licence check lived only in serve's startup path. So a
+// The policy file hot-reloads, and the license check lived only in serve's startup path. So a
 // Community install could start with a plain file, have deny rules, risk floors and actor scoping
 // appended to it afterward, and run the full policy engine uncapped for as long as the process
-// lived. Nothing re-read the licence because nothing re-checked it.
+// lived. Nothing re-read the license because nothing re-checked it.
 //
 // The refusal is an error rather than a quiet drop of the rules it cannot license. Dropping them
 // would ungate the runs those rules exist to hold, and the dispatcher already treats an unreadable
@@ -44,7 +44,7 @@ func TestFileStoreRefusesRulesTheLicenceDoesNotCover(t *testing.T) {
 		t.Fatalf("NewFileStore() error = %v", err)
 	}
 
-	// Drop to Community for the rest, restoring the package licence whatever happens.
+	// Drop to Community for the rest, restoring the package license whatever happens.
 	team := license.Current()
 	license.Set(nil)
 	t.Cleanup(func() { license.Set(team) })

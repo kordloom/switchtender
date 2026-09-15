@@ -13,8 +13,8 @@ import (
 	"github.com/kordloom/switchtender/internal/credential"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
-	"github.com/kordloom/switchtender/internal/util"
 	"github.com/kordloom/switchtender/internal/secretsource"
+	"github.com/kordloom/switchtender/internal/util"
 )
 
 // revokeTimeout bounds a single ephemeral secret revocation so a slow or unreachable secrets engine

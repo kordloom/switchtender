@@ -7,12 +7,12 @@ import (
 	"github.com/kordloom/switchtender/internal/license"
 )
 
-// TestMain runs this package under a Team licence.
+// TestMain runs this package under a Team license.
 //
-// The file store checks the licence on every read, because the file hot-reloads and a startup-only
+// The file store checks the license on every read, because the file hot-reloads and a startup-only
 // check was one edit away from not existing. These tests are about parsing and reload behavior, so
-// they need a licence that covers the rules they parse. The refusal itself is proven by
-// TestFileStoreRefusesRulesTheLicenceDoesNotCover, which drops the licence around itself.
+// they need a license that covers the rules they parse. The refusal itself is proven by
+// TestFileStoreRefusesRulesTheLicenceDoesNotCover, which drops the license around itself.
 func TestMain(m *testing.M) {
 	license.Set(&license.License{Claims: license.Claims{
 		V: 1, ID: "lic_test", Org: "test", Tier: license.TierTeam,

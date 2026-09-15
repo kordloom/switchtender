@@ -25,11 +25,11 @@ func TestWorkersBelowOneIsRefusedRatherThanDefaulted(t *testing.T) {
 		Want bool
 		In   int
 	}{
-		{In: 0, Hint: serveWorkersHint, Want: true},    // Test 0: The value that silently became four.
-		{In: -3, Hint: serveWorkersHint, Want: true},   // Test 1: Negatives took the same branch.
-		{In: 1, Hint: serveWorkersHint, Want: false},   // Test 2: The smallest honest pool is allowed.
+		{In: 0, Hint: serveWorkersHint, Want: true},                        // Test 0: The value that silently became four.
+		{In: -3, Hint: serveWorkersHint, Want: true},                       // Test 1: Negatives took the same branch.
+		{In: 1, Hint: serveWorkersHint, Want: false},                       // Test 2: The smallest honest pool is allowed.
 		{In: dispatch.DefaultWorkers, Hint: serveWorkersHint, Want: false}, // Test 3: The default.
-		{In: 0, Hint: workerWorkersHint, Want: true},   // Test 4: A worker asked to take no runs.
+		{In: 0, Hint: workerWorkersHint, Want: true},                       // Test 4: A worker asked to take no runs.
 	}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {

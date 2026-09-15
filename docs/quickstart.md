@@ -80,7 +80,7 @@ each host's measured duration in recent runs.
 
 ## Add a worker (Team)
 
-Distributed execution is a Team feature, so every `switchtender worker` needs a licence and refuses
+Distributed execution is a Team feature, so every `switchtender worker` needs a license and refuses
 to start without one. Community runs everything on the server itself, which is the default and needs
 no extra process: this section is for when one machine is no longer enough.
 
@@ -124,7 +124,7 @@ This starts a server and a PostgreSQL database. The server listens on port 8080.
 `SWITCHTENDER_PORT` to change the host port.
 
 Workers are a separate profile because they are Team: `docker compose --profile stack --profile
-workers up --build` adds one, and it needs a licence to start.
+workers up --build` adds one, and it needs a license to start.
 
 ## Set up a production server
 

@@ -196,7 +196,7 @@ func (s *FileStore) List(_ context.Context) ([]*Policy, error) {
 	if err != nil {
 		return nil, err
 	}
-	// The licence is checked on every read, not only at startup.
+	// The license is checked on every read, not only at startup.
 	//
 	// The file hot-reloads, and the check lived in serve's startup path alone, so a Community
 	// install started with a plain file and then had deny rules, risk floors and actor scoping
@@ -218,20 +218,20 @@ func (s *FileStore) List(_ context.Context) ([]*Policy, error) {
 	return out, nil
 }
 
-// allowed reports whether the current licence covers this policy set, by count and by the features
+// allowed reports whether the current license covers this policy set, by count and by the features
 // the rules use. It is the same pair of checks serve makes at startup, applied to what the file says
 // now rather than to what it said then.
 func (s *FileStore) allowed(set []*Policy) error {
 	for _, p := range set {
 		if p.Advanced() {
 			if err := license.Allow(license.FeaturePolicyFull); err != nil {
-				return fmt.Errorf("the policy file needs a licence it does not have: %w", err)
+				return fmt.Errorf("the policy file needs a license it does not have: %w", err)
 			}
 			break
 		}
 	}
 	if err := license.AllowPolicies(len(set)); err != nil {
-		return fmt.Errorf("the policy file needs a licence it does not have: %w", err)
+		return fmt.Errorf("the policy file needs a license it does not have: %w", err)
 	}
 	return nil
 }

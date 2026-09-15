@@ -73,7 +73,7 @@ func FromCron(inventory string, system bool) func([]byte, time.Time) (*Plan, err
 			// dropped with a warning that did not say a weekly backup had not come across.
 			p.addSchedule(&schedule.Schedule{
 				ID: schedule.NewID(), Name: fmt.Sprintf("cron line %d", lineNo),
-				Cron: StandardizeCron(expr),
+				Cron:      StandardizeCron(expr),
 				Inventory: inventory, Enabled: true, CreatedAt: now,
 				Steps: []run.PipelineStep{{Name: "cron", Tool: run.ToolBash, Command: command}},
 			}, "the crontab", now)
