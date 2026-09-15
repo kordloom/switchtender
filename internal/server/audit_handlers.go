@@ -207,7 +207,21 @@ func auditVerifyHandler(store audit.Store, installID string, log *zap.Logger) ht
 // per webhook fire, and per span beat, so on a long-lived install an unwindowed export assembles the
 // whole history in memory, several times its stored size, on every request. Past this the caller is
 // asked to name a window instead, which the command has always offered.
-const maxBundleEntries = 250_000
+//
+// The number is what a small box survives, not what the format tolerates. Measured on this code:
+// 250,000 entries peak at about 1.7 GB resident and produce an 89 MB artifact, which is an
+// out-of-memory kill on the 1 and 2 GB instances this product is sold as running on, reachable by
+// one GET. The homepage teaches that exact curl as the thing to run against any install, so the
+// ceiling has to be a size the advertised install can actually serve. 25,000 peaks around 243 MB
+// and still produces a 12.7 MB document, which is a real evidence artifact by any measure.
+//
+// A chain longer than this is not refused, only windowed: the caller names limit=<count> and takes
+// the newest slice, and the CLI has always offered that.
+const maxBundleEntries = 25_000
+
+// suggestedBundleWindow is the window the refusal message recommends: under the ceiling, so a caller
+// who pastes it succeeds rather than meeting the limit from the other direction.
+const suggestedBundleWindow = 10_000
 
 // bundleWindow decides how many of the chain's newest entries a bundle may assemble, from the chain's
 // size rather than a materialized slice, and reports the message to answer with when the request
@@ -215,9 +229,11 @@ const maxBundleEntries = 250_000
 func bundleWindow(count int, limit string) (int, string) {
 	if limit == "" {
 		if count > maxBundleEntries {
+			// The suggestion names a window comfortably under the ceiling rather than at it, so
+			// following the advice cannot land on the same refusal from the other side.
 			return 0, fmt.Sprintf("this chain holds %d entries, more than the %d one bundle "+
-				"assembles at once. Ask for a window with limit=<count>, which bundles that many of "+
-				"the newest entries", count, maxBundleEntries)
+				"assembles at once. Ask for a window with limit=<count>, such as limit=%d, which "+
+				"bundles that many of the newest entries", count, maxBundleEntries, suggestedBundleWindow)
 		}
 		return count, ""
 	}

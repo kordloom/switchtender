@@ -406,6 +406,10 @@ func verifySpecConsistency(claims []BundleClaim, rep *BundleReport) {
 			outcomeSpec = rec.SpecDigest
 		}
 	}
+	// Every disclosed spec is compared, not the first. Breaking at the first one let a second,
+	// different spec_body sit in the same document unexamined while the report called the document
+	// consistent: two disclosures that disagree about what was approved is exactly the state this
+	// check exists to catch.
 	var disclosed string
 	for _, c := range claims {
 		specVal, has := c.Payload["spec_body"]
@@ -422,10 +426,16 @@ func verifySpecConsistency(claims []BundleClaim, rep *BundleReport) {
 			return
 		}
 		body := []byte(text)
-		rep.SpecPresent = true
-		rep.SpecBody = body
-		disclosed = UnkeyedDigestOf(body)
-		break
+		got := UnkeyedDigestOf(body)
+		if !rep.SpecPresent {
+			rep.SpecPresent = true
+			rep.SpecBody = body
+			disclosed = got
+			continue
+		}
+		if got != disclosed {
+			rep.SpecConsistent = false
+		}
 	}
 	if disclosed != "" && outcomeSpec != "" && disclosed != outcomeSpec {
 		rep.SpecConsistent = false
@@ -446,6 +456,14 @@ func verifySpecConsistency(claims []BundleClaim, rep *BundleReport) {
 // trust what it reads about the run, not only that the chain is intact. A receipt without a
 // disclosure leaves OutcomePresent false and is judged on its chain alone.
 func verifyOutcomeDisclosure(claims []BundleClaim, rep *BundleReport) {
+	// Every disclosed outcome is checked, not the first one.
+	//
+	// Returning at the first claim carrying a body meant a document disclosing two outcomes was
+	// judged on one of them: the first genuine, the second fabricated and not matching the digest
+	// its own chain entry committed, and the report still said the disclosed outcome matches what
+	// the chain committed, under a VERIFIED verdict. OutcomeDigestOK is an assertion about what the
+	// reader is being shown, so it has to hold for all of it. The decision disclosures next door
+	// already work this way.
 	for _, c := range claims {
 		method, _ := c.Payload["method"].(string)
 		path, _ := c.Payload["path"].(string)
@@ -460,12 +478,24 @@ func verifyOutcomeDisclosure(claims []BundleClaim, rep *BundleReport) {
 		nonce, _ := c.Payload["outcome_nonce"].(string)
 		body, err := json.Marshal(bodyVal)
 		if err != nil {
-			return
+			// An unmarshalable disclosure is a disclosure that cannot be checked, which is a
+			// failure rather than a reason to stop looking.
+			rep.OutcomePresent = true
+			rep.OutcomeDigestOK = false
+			continue
 		}
-		rep.OutcomePresent = true
-		rep.OutcomeBody = body
-		rep.OutcomeDigestOK = VerifyContentDigest(digest, nonce, body)
-		return
+		ok := VerifyContentDigest(digest, nonce, body)
+		if !rep.OutcomePresent {
+			// The first disclosure is the one the report shows, so the body a reader sees is
+			// unchanged; what changes is that a later bad one can no longer be vouched for.
+			rep.OutcomePresent = true
+			rep.OutcomeBody = body
+			rep.OutcomeDigestOK = ok
+			continue
+		}
+		if !ok {
+			rep.OutcomeDigestOK = false
+		}
 	}
 }
 
@@ -681,22 +711,20 @@ func verifyBundleChain(claims []BundleClaim, head BundleCoord) (bool, int64) {
 
 // linearInstallMatches reports whether every claim that names an install names the signer's.
 //
-// A claim that names one is bound: the id is folded into its link, so a copier who rewrites the
-// producer breaks this equality, and one who rewrites the claim's id too breaks the link. A claim
-// that names none predates the binding and is left alone, which is what lets a chain spanning the
-// upgrade verify rather than forcing a re-anchor. Those entries stay liftable and nothing here can
-// change that: a link already written commits to what it committed to.
+// A claim that names one is bound, and the binding is load-bearing rather than cosmetic: the
+// install id is one of the fields the chain link is computed over, in entryClaim, so rewriting it
+// changes the link and the chain stops recomputing. That closes the lift where a second install
+// republishes somebody else's history under its own key: keep the claims and the genuine anchor,
+// rewrite the producer, re-sign, and a relying party pinning the second key would otherwise read
+// the first install's record as the second's. Rewriting only the producer block fails this
+// equality; rewriting the claims too fails the chain.
 //
-// A bundle from before the binding existed carries no install id at all. Those are refused rather
-// than grandfathered: the whole value of the check is that a receipt names its origin, and an
-// exception for documents that omit it is an exception any forger would take.
-//
-// This is a partial defense and it is worth being exact about what it does not do. Both values it
-// compares are restatable, and the link preimage for this profile commits to neither, so a copier
-// who rewrites the producer block and the chain params together passes it with every link still
-// recomputing. It catches the careless case and costs nothing. The complete fix is to hash the
-// install into the link, as the format's other two profiles do, which is a change to the shared
-// format and the reference verifier rather than to this file alone.
+// A claim that names no install is grandfathered and continues, which is what lets a chain written
+// across the upgrade verify rather than forcing a re-anchor. That is also the residual risk, stated
+// plainly: an unbound entry is liftable, nothing here can retroactively bind it, because a link
+// already written commits to what it committed to. The remedy is on the producing side, not this
+// one. Every process that appends must bind its install, which is why serve and the demo both do it
+// before their first write and warn loudly when they cannot.
 func linearInstallMatches(b *Bundle) bool {
 	for i := range b.Claims {
 		named, _ := b.Claims[i].Payload["install_id"].(string)
