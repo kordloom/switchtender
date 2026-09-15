@@ -269,11 +269,36 @@ function openPolicyEdit(p) {
 	document.getElementById("policy-modal").hidden = false;
 }
 
+// ADVANCED_POLICY_FIELDS are the five inputs whose use makes a rule Team, matching exactly what
+// policy.Advanced() tests: a deny effect, a risk floor, distinct-approver separation of duties, and
+// either form of actor scoping. Marking them is not decoration. A Community reader filled the
+// dialog, pressed Save, and met a 403 explaining the tier after composing the whole rule, which is
+// the same shape as the evidence-pack refusal and just as avoidable.
+const ADVANCED_POLICY_FIELDS = [
+	["policy-effect", "A rule that denies outright, rather than holding for a person, is Team."],
+	["policy-actor-kind", "Scoping a rule to who is asking, such as agents as a class, is Team."],
+	["policy-actor", "Scoping a rule to one named actor is Team."],
+	["policy-min-risk", "A risk floor, so a rule applies only above a grade, is Team."],
+	["policy-distinct-approver", "Requiring a different person to approve than asked is Team."],
+];
+
+// markPolicyTiers tags each advanced field's label, so the gate is read from the control rather
+// than met as a refusal after the rule is composed.
+function markPolicyTiers() {
+	for (const [id, why] of ADVANCED_POLICY_FIELDS) {
+		const el = document.getElementById(id);
+		if (!el) continue;
+		const label = el.closest(".field-label") || el.parentElement;
+		markTier(label, "Team", why);
+	}
+}
+
 // wirePolicyForm hooks the policy dialog up to POST /policies for a new rule and PUT /policies/{id}
 // when editing. The New button resets the dialog to add mode.
 function wirePolicyForm() {
 	const form = document.getElementById("policy-form");
 	fillInventorySelect(document.getElementById("policy-inventory"));
+	markPolicyTiers();
 	const resetToCreate = () => {
 		delete form.dataset.editId;
 		document.getElementById("policy-name").value = "";

@@ -805,6 +805,17 @@ func externalAuthConfigured() bool {
 		serveSAMLIDPMetadataURL != "" || serveJWTJWKSURL != ""
 }
 
+// disableExternalAuth clears every directory sign-in setting, so the server comes up on local
+// accounts instead of refusing to start. It is called only for a license that lapsed, never for one
+// that was never there: an install that never had SSO and configured it anyway is a misconfiguration
+// the operator should see at startup rather than have silently ignored.
+func disableExternalAuth() {
+	serveOIDCIssuer = ""
+	serveLDAPURL = ""
+	serveSAMLIDPMetadataURL = ""
+	serveJWTJWKSURL = ""
+}
+
 // isLoopbackAddr reports whether addr binds only the loopback interface. An empty or wildcard host
 // binds every interface and is not loopback, so exposing an unauthenticated API on it is refused.
 func isLoopbackAddr(addr string) bool {
@@ -962,9 +973,25 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	}
 	// SSO is configured explicitly by flag, so a missing license here is a misconfiguration worth
 	// refusing at startup with one line, not a silently unauthenticated directory.
+	//
+	// A LAPSED license is the other case, and it is the one the pricing page makes a promise about:
+	// "a lapsed license takes nothing: sign-in falls back to local accounts". Refusing to start
+	// broke that promise in the worst possible way, by taking a working install offline on the day
+	// its renewal slipped. Falling back is not a loosening either: local accounts are how every
+	// Community install authenticates, so the install keeps enforcing, just not through the
+	// directory. It is said loudly, once, because an operator has to know why their users are
+	// suddenly signing in differently.
 	if externalAuthConfigured() {
 		if aerr := license.Allow(license.FeatureSSO); aerr != nil {
-			return aerr
+			lic := license.Current()
+			if lic == nil || !lic.Expired(time.Now()) {
+				return aerr
+			}
+			log.Warn("the license for directory sign-in lapsed on " + lic.Claims.Expires +
+				", so single sign-on is off and this install is signing in with local accounts. " +
+				"Everything else keeps working. Renew to turn the directory back on: " +
+				"https://switchtender.com/pricing")
+			disableExternalAuth()
 		}
 	}
 	store, schedules := bundle.Runs(), bundle.Schedules()
