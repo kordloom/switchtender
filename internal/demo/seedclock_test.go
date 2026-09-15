@@ -200,3 +200,38 @@ func TestSeedClockIsSafeForConcurrentUse(t *testing.T) {
 		t.Errorf("the clock handed out %d distinct times across %d reads", len(unique), len(seen))
 	}
 }
+
+// TestSeedClockHasRoomForEverySeededRun covers the demo's governance story losing its own timeline.
+//
+// The clock hands out times inside a window that closes seedRunMargin before now, and the seeder
+// steps it seedRunGap between runs. Sixteen runs at that gap need 640 minutes and the window offered
+// 645, so the last runs seeded arrived at the ceiling with nothing left to spend. Once there, every
+// later read returns the ceiling itself, so the held terraform destroy, the approval that released
+// it, and the outcome all carried one timestamp: an audit trail where the gate appears never to have
+// been open, which is exactly the shape the chain's own time-order check treats as a bypass.
+func TestSeedClockHasRoomForEverySeededRun(t *testing.T) {
+	t.Parallel()
+
+	// The seeder's own budget: the window it opens in, less the margin it must stay behind.
+	available := seedRunWindow - seedRunMargin
+	// Every gap the seeder spends. Counted generously: more runs may be added, and the headroom is
+	// what keeps a new one from silently pushing the last into the ceiling.
+	const seededRuns = 16
+	spent := seedRunGap * seededRuns
+	if spent >= available {
+		t.Fatalf("the seeder spends %v of a %v budget, so the last runs land on the ceiling and "+
+			"share one timestamp", spent, available)
+	}
+	// Room for at least a few more runs, so adding one is not a silent regression.
+	if headroom := available - spent; headroom < 4*seedRunGap {
+		t.Errorf("headroom is %v, under four more gaps: adding a seeded run would saturate the "+
+			"clock again with nothing to catch it", headroom)
+	}
+
+	// The seeded change history has to stay older than the window, or the chain's times stop
+	// descending with its sequence. The two were independent constants nothing tied together.
+	if float64(seedHistoryBackshiftHours) <= seedRunWindow.Hours() {
+		t.Errorf("history backshift is %dh but the run window is %v, so seeded history lands "+
+			"inside the window", seedHistoryBackshiftHours, seedRunWindow)
+	}
+}
