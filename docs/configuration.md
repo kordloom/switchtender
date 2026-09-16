@@ -143,6 +143,8 @@ Runs the HTTP API, the in-process executor, the scheduler, the retention sweeper
 | `--retain-runs` | none | Delete terminal runs older than this, for example `90d`. Empty keeps them forever. |
 | `--retain-events` | none | Drop run events and logs older than this, for example `30d`. Empty keeps them forever. |
 | `--retain-history` | none | Keep only this many per-host and per-task summaries for each host and each task, for example `500`. Summaries outlive the runs they came from, so this is the only bound on them. Zero keeps every summary forever. A smaller value is raised to 500, the deepest window the fleet views will answer. |
+| `--facts-interval` | `24h` | Minimum spacing between retained host state snapshots. The estate history keeps the newest gather in each period, which is what answers what a host looked like on a date. Zero keeps every gather, at roughly a hundred times the disk. |
+| `--retain-facts` | `400` | Keep only this many host state snapshots for each host. A fact set is hundreds of kilobytes, so unlike summaries this is bounded by default. Zero keeps every snapshot forever. |
 | `--retention-interval` | `1h` | How often the retention sweeper runs. |
 | `--evidence-dir` | none | Directory for periodic change registers. Set together with `--evidence-cadence`. |
 | `--evidence-cadence` | none | How long each change register covers and how often one is written, for example `2160h` for a quarter. Minimum `1h`. Zero writes none. Progress is read from the archive, so a restart resumes from the newest pack rather than starting the period again. |

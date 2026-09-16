@@ -615,6 +615,16 @@ that variable is unset.</p>
 <td>Keep only this many per-host and per-task summaries for each host and each task, for example <code>500</code>. Summaries outlive the runs they came from, so this is the only bound on them. Zero keeps every summary forever. A smaller value is raised to 500, the deepest window the fleet views will answer.</td>
 </tr>
 <tr>
+<td><code>--facts-interval</code></td>
+<td><code>24h</code></td>
+<td>Minimum spacing between retained host state snapshots. The estate history keeps the newest gather in each period, which is what answers what a host looked like on a date. Zero keeps every gather, at roughly a hundred times the disk.</td>
+</tr>
+<tr>
+<td><code>--retain-facts</code></td>
+<td><code>400</code></td>
+<td>Keep only this many host state snapshots for each host. A fact set is hundreds of kilobytes, so unlike summaries this is bounded by default. Zero keeps every snapshot forever.</td>
+</tr>
+<tr>
 <td><code>--retention-interval</code></td>
 <td><code>1h</code></td>
 <td>How often the retention sweeper runs.</td>

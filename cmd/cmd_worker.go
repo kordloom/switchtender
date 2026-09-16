@@ -67,6 +67,12 @@ var workerPluginsDir string
 // workerWorkers holds the value of the worker --workers flag.
 var workerWorkers int
 
+// workerFactsInterval holds the value of the worker --facts-interval flag.
+var workerFactsInterval time.Duration
+
+// workerRetainFacts holds the value of the worker --retain-facts flag.
+var workerRetainFacts int
+
 // workerRunTimeout holds the value of the worker --run-timeout flag, the default cap on how long a
 // run may execute. Zero disables the cap.
 var workerRunTimeout time.Duration
@@ -100,6 +106,12 @@ func init() {
 			"Empty leaves an unpinned run on the host.")
 	workerCmd.Flags().BoolVar(&workerRequireImageDigest, "require-image-digest", false,
 		"Reject a container run whose image is not pinned to an @sha256: digest.")
+	workerCmd.Flags().DurationVar(&workerFactsInterval, "facts-interval", run.DefaultFactsInterval,
+		"Minimum spacing between retained host state snapshots, for example 24h. Zero keeps every "+
+			"gather. A worker gathers facts like the server does, so this must match the control "+
+			"node's setting or the estate history is recorded at two granularities.")
+	workerCmd.Flags().IntVar(&workerRetainFacts, "retain-facts", run.DefaultFactsDepth,
+		"Keep only this many host state snapshots for each host. Zero keeps every snapshot forever.")
 	workerCmd.Flags().IntVar(&workerWorkers, "workers", dispatch.DefaultWorkers,
 		"Concurrent runs this process executes at once.")
 	workerCmd.Flags().DurationVar(&workerRunTimeout, "run-timeout", 0,
@@ -121,6 +133,8 @@ func runWorker(cmd *cobra.Command, _ []string) error {
 	if err := checkWorkers(workerWorkers, workerWorkersHint); err != nil {
 		return err
 	}
+	run.SetFactsInterval(workerFactsInterval)
+	run.SetFactsDepth(workerRetainFacts)
 	// A worker is distributed execution, which is Team. The license sits beside the shared
 	// database the worker points at, so the worker and the server read the same answer.
 	if lic, lerr := license.Load(license.PathFor(workerDB)); lerr == nil && lic != nil {

@@ -244,6 +244,24 @@ INSERT INTO host_facts (host, run_id, facts, gathered_at)
 VALUES ($1, $2, $3, $4)
 ON CONFLICT(host) DO UPDATE SET
 	run_id=excluded.run_id, facts=excluded.facts, gathered_at=excluded.gathered_at`
+	// The same reading, kept rather than replaced. The statement above answers what a host is now
+	// and overwrites to do it, so before this table existed a gather destroyed the only copy of the
+	// previous one and no estate history accumulated anywhere.
+	const histQ = `
+INSERT INTO host_facts_history (host, bucket, run_id, facts, gathered_at)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT(host, bucket) DO UPDATE SET
+	run_id=excluded.run_id, facts=excluded.facts, gathered_at=excluded.gathered_at`
+	// Bounded here, at the moment of growth, rather than by the retention sweeper. The sweeper only
+	// trims summaries when --retain-history is set, and it defaults to unset, so a sweeper-based cap
+	// would leave this table unbounded on most installs. A fact set is hundreds of kilobytes.
+	const pruneQ = `
+DELETE FROM host_facts_history WHERE host = $1 AND bucket NOT IN (
+	SELECT bucket FROM host_facts_history WHERE host = $1
+	ORDER BY ` + sqlutil.GatheredOrder + ` DESC, bucket COLLATE "C" DESC LIMIT $2
+)`
+	interval := run.FactsInterval()
+	depth := run.FactsDepth()
 	for _, f := range facts {
 		if f.Host == "" || len(f.Facts) == 0 {
 			continue
@@ -255,6 +273,15 @@ ON CONFLICT(host) DO UPDATE SET
 		blob, err := json.Marshal(f.Facts)
 		if err != nil {
 			return fmt.Errorf("save host facts: %w", err)
+		}
+		if _, err := s.db.ExecContext(ctx, histQ, f.Host, run.FactsBucket(at, runID, interval),
+			runID, string(blob), sqlutil.FormatTime(at)); err != nil {
+			return fmt.Errorf("save host facts history: %w", err)
+		}
+		if depth > 0 {
+			if _, err := s.db.ExecContext(ctx, pruneQ, f.Host, depth); err != nil {
+				return fmt.Errorf("trim host facts history: %w", err)
+			}
 		}
 		if _, err := s.db.ExecContext(ctx, q, f.Host, runID, string(blob),
 			sqlutil.FormatTime(at)); err != nil {

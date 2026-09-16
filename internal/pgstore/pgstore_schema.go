@@ -143,6 +143,21 @@ CREATE TABLE IF NOT EXISTS host_facts (
 	facts       TEXT NOT NULL,
 	gathered_at TEXT NOT NULL
 );
+-- host_facts above holds only the newest reading per host, because it answers "what is this host
+-- now". This table is the same readings kept over time, which is what answers "what did the estate
+-- look like on the audit date". Keyed by bucket rather than by run so a second gather inside the
+-- same period replaces the first: see run.FactsBucket for how a bucket is chosen and why changing
+-- the spacing later is safe.
+CREATE TABLE IF NOT EXISTS host_facts_history (
+	host        TEXT NOT NULL,
+	bucket      TEXT NOT NULL,
+	run_id      TEXT NOT NULL,
+	facts       TEXT NOT NULL,
+	gathered_at TEXT NOT NULL,
+	PRIMARY KEY (host, bucket)
+);
+CREATE INDEX IF NOT EXISTS idx_host_facts_history_host_time
+	ON host_facts_history (host, gathered_at DESC);
 CREATE TABLE IF NOT EXISTS run_task_summary (
 	run_id  TEXT NOT NULL,
 	task    TEXT NOT NULL,
