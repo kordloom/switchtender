@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/kordloom/switchtender/internal/run"
@@ -59,5 +60,35 @@ func TestTheDiffAnswersWhatMovedSinceTheLastReview(t *testing.T) {
 		if got.Hosts[i-1].Host > got.Hosts[i].Host {
 			t.Fatalf("hosts are not ordered: %v", got.Hosts)
 		}
+	}
+}
+
+// TestTheDiffIsBoundedByTheRequest covers a bug this endpoint was born with, of a class already
+// fixed everywhere else in the product.
+//
+// Every list response is bounded by the request rather than by the size of the install. This one
+// was not, and the window where it matters most is the one an operator is most likely to ask for:
+// a fleet-wide upgrade differs on every host, so the response is largest exactly when reading a
+// prefix as the whole answer is worst.
+func TestTheDiffIsBoundedByTheRequest(t *testing.T) {
+	t.Parallel()
+	earlier := map[string]run.HostFacts{}
+	later := map[string]run.HostFacts{}
+	for i := 0; i < maxListRows+50; i++ {
+		host := fmt.Sprintf("host%05d", i)
+		earlier[host] = run.HostFacts{Host: host, Facts: map[string]string{"kernel": "5.15.0"}}
+		later[host] = run.HostFacts{Host: host, Facts: map[string]string{"kernel": "6.8.0"}}
+	}
+	got := diffEstates(earlier, later)
+	shown, total := cappedList(got.Hosts)
+	if total != maxListRows+50 {
+		t.Fatalf("total = %d, want every differing host counted", total)
+	}
+	if len(shown) != maxListRows {
+		t.Errorf("response carries %d hosts, want it capped at %d", len(shown), maxListRows)
+	}
+	if len(shown) >= total {
+		t.Error("a capped response would not be reported as truncated, so a prefix reads as the " +
+			"whole set of differences")
 	}
 }

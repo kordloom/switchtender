@@ -867,6 +867,14 @@ button.topbar-link { background: none; border: none; padding: 0; font: inherit; 
 .risk-medium { color: var(--changed); background: color-mix(in srgb, var(--changed) 14%, transparent); border-color: color-mix(in srgb, var(--changed) 34%, transparent); }
 .risk-high { color: var(--failed); background: color-mix(in srgb, var(--failed) 14%, transparent); border-color: color-mix(in srgb, var(--failed) 38%, transparent); }
 
+/* Reversibility: whether a run can be taken back, shown beside the risk grade because the two answer
+   different questions. Irreversible borrows the failure color because it is the one an approver must
+   not miss; costly is neutral, since most real work is recoverable by doing more work and coloring
+   that as a warning would make the signal meaningless. */
+.undo-reversible { color: var(--ok); background: color-mix(in srgb, var(--ok) 13%, transparent); border-color: color-mix(in srgb, var(--ok) 32%, transparent); }
+.undo-costly { color: var(--muted); background: color-mix(in srgb, var(--muted) 12%, transparent); border-color: color-mix(in srgb, var(--muted) 30%, transparent); }
+.undo-irreversible { color: var(--failed); background: color-mix(in srgb, var(--failed) 16%, transparent); border-color: color-mix(in srgb, var(--failed) 42%, transparent); }
+
 /* The callout states the grade and its reasons where the approve and reject controls are, so the
    decision is made with the blast radius in view rather than a hover away. */
 .risk-callout { margin: 0 0 18px; padding: 13px 16px; background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--muted); border-radius: var(--radius); }

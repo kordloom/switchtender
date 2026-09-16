@@ -461,7 +461,7 @@ type estateResponse struct {
 	// about predates it. Without them an empty estate is ambiguous: it looks the same whether the
 	// fleet did not exist yet or the records simply do not reach that far, and an auditor reading
 	// the wrong one concludes something false about the estate.
-	Horizon time.Time `json:"horizon,omitempty"`
+	Horizon *time.Time `json:"horizon,omitempty"`
 	// BeforeHistory reports that the instant asked about is older than any retained reading.
 	BeforeHistory bool `json:"before_history,omitempty"`
 	// Withheld counts hosts left out because the run that gathered them could not be read, which
@@ -522,7 +522,7 @@ func estateHandler(store run.Store, authz *authorizer, log *zap.Logger) http.Han
 		// failure to read it leaves both absent rather than failing the request: the estate is the
 		// answer, and this only says how far back the answer can be trusted.
 		if horizon, herr := store.EstateHorizon(r.Context()); herr == nil && !horizon.IsZero() {
-			resp.Horizon = horizon
+			resp.Horizon = &horizon
 			resp.BeforeHistory = at.Before(horizon)
 		}
 		respondJSON(w, log, http.StatusOK, resp, wantsPretty(r))

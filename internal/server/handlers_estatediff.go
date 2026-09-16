@@ -53,13 +53,19 @@ type estateDiffResponse struct {
 	// Unchanged counts hosts present at both ends with identical facts, so a small list of
 	// differences is read as a quiet estate rather than as a query that found nothing.
 	Unchanged int `json:"unchanged"`
+	// Total is how many hosts differ before the response was capped.
+	Total int `json:"total"`
+	// Truncated reports that Hosts holds fewer than Total, so a prefix is never read as the whole
+	// set of differences. A window across a fleet-wide upgrade differs on every host, which is
+	// exactly when this response is largest and when reading a prefix as the answer is worst.
+	Truncated bool `json:"truncated,omitempty"`
 	// Withheld counts hosts left out at either end because the run that gathered them cannot be
 	// read, which includes runs deleted by retention.
 	Withheld int `json:"withheld,omitempty"`
 	// Horizon is the oldest retained reading, and BeforeHistory reports that the window opens
 	// before it. A window that starts before the records do reports everything as added, which
 	// reads as an estate that appeared out of nothing.
-	Horizon time.Time `json:"horizon,omitempty"`
+	Horizon *time.Time `json:"horizon,omitempty"`
 	// BeforeHistory reports that from predates the oldest retained reading.
 	BeforeHistory bool `json:"before_history,omitempty"`
 }
@@ -117,10 +123,12 @@ func estateDiffHandler(store run.Store, authz *authorizer, log *zap.Logger) http
 		}
 
 		resp := diffEstates(earlier, later)
+		resp.Hosts, resp.Total = cappedList(resp.Hosts)
+		resp.Truncated = len(resp.Hosts) < resp.Total
 		resp.From, resp.To = from, to
 		resp.Withheld = withheldFrom + withheldTo
 		if horizon, herr := store.EstateHorizon(r.Context()); herr == nil && !horizon.IsZero() {
-			resp.Horizon = horizon
+			resp.Horizon = &horizon
 			resp.BeforeHistory = from.Before(horizon)
 		}
 		respondJSON(w, log, http.StatusOK, resp, wantsPretty(r))
@@ -149,7 +157,7 @@ func readableEstate(ctx context.Context, store run.Store, at time.Time,
 
 // diffEstates compares two estates, ordered by host.
 func diffEstates(earlier, later map[string]run.HostFacts) estateDiffResponse {
-	var out estateDiffResponse
+	out := estateDiffResponse{Hosts: []hostDiff{}}
 	for host, now := range later {
 		before, existed := earlier[host]
 		if !existed {

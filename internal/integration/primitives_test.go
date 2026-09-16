@@ -45,9 +45,11 @@ func TestEstateAtAgainstARealFleet(t *testing.T) {
 	}
 
 	type estate struct {
-		At    time.Time       `json:"at"`
-		Hosts []run.HostFacts `json:"hosts"`
-		Total int             `json:"total"`
+		At            time.Time       `json:"at"`
+		Hosts         []run.HostFacts `json:"hosts"`
+		Total         int             `json:"total"`
+		Horizon       *time.Time      `json:"horizon"`
+		BeforeHistory bool            `json:"before_history"`
 	}
 
 	// Now: every host the run touched is in the estate, carrying facts the machine reported.
@@ -79,6 +81,54 @@ func TestEstateAtAgainstARealFleet(t *testing.T) {
 	if len(past.Hosts) != 0 {
 		t.Errorf("estate an hour before the gather holds %d hosts, want none. A reading is being "+
 			"projected backwards to a time it was not taken: %+v", len(past.Hosts), past.Hosts)
+	}
+	// And it says why it is empty. Without this an auditor cannot tell an estate that held nothing
+	// from records that do not reach back that far, and the two look identical.
+	if past.Horizon == nil || past.Horizon.IsZero() {
+		t.Error("the estate does not report its horizon, so an empty answer is unexplained")
+	}
+	if !past.BeforeHistory {
+		t.Error("an instant before the oldest reading is not flagged, so an empty estate reads as " +
+			"a fleet that did not exist")
+	}
+	if now.BeforeHistory {
+		t.Error("the present is flagged as before the history began")
+	}
+
+	// The diff across the gather: every host arrives, because none had been observed before it.
+	var diff struct {
+		Hosts []struct {
+			Host  string `json:"host"`
+			State string `json:"state"`
+		} `json:"hosts"`
+		Unchanged int `json:"unchanged"`
+		Total     int `json:"total"`
+	}
+	getJSON(t, base+"/v1/estate/diff?from="+before.UTC().Format(time.RFC3339), &diff)
+	if diff.Total != len(hosts) {
+		t.Fatalf("diff reports %d hosts differing, want the %d that were gathered", diff.Total,
+			len(hosts))
+	}
+	for _, h := range diff.Hosts {
+		if h.State != "added" {
+			t.Errorf("host %s is %q across a window that opens before any gather, want added",
+				h.Host, h.State)
+		}
+	}
+
+	// A window with no gather in it: every host is present at both ends and identical, so nothing
+	// differs and the count says the estate was quiet rather than the query finding nothing.
+	var quiet struct {
+		Hosts     []any `json:"hosts"`
+		Unchanged int   `json:"unchanged"`
+	}
+	getJSON(t, base+"/v1/estate/diff?from="+time.Now().UTC().Format(time.RFC3339), &quiet)
+	if len(quiet.Hosts) != 0 {
+		t.Errorf("a window with no gather in it reports %d differences, want none", len(quiet.Hosts))
+	}
+	if quiet.Unchanged != len(hosts) {
+		t.Errorf("unchanged = %d, want the %d hosts that sat still. Without it a short list reads "+
+			"as a query that found nothing", quiet.Unchanged, len(hosts))
 	}
 }
 

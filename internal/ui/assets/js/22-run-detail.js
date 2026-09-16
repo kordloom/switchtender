@@ -151,6 +151,21 @@ function riskBadge(risk) {
 	return span;
 }
 
+// undoBadge renders whether a run can be taken back. It sits beside the risk badge because the two
+// answer different questions and an approver needs both: risk says how bad the outcome is, this says
+// whether there is a second chance. A fleet restart is high risk and undoes itself; deleting a
+// backup set reads quietly and is permanent.
+function undoBadge(undo) {
+	const span = document.createElement("span");
+	const cls = undo.class || "costly";
+	span.className = "risk undo-" + cls;
+	span.textContent = cls === "costly" ? "undo costs" : cls;
+	if (undo.reasons && undo.reasons.length) {
+		span.dataset.tip = undo.reasons.join("\n");
+	}
+	return span;
+}
+
 // renderRiskCallout spells out why a held run is graded as it is, in the place the decision is made.
 // A tooltip is enough for a run that is only being read, but an approver deciding whether to let a
 // change through should not have to hover to find out that it destroys infrastructure. It shows only
@@ -174,10 +189,15 @@ function renderRiskCallout(run) {
 		: "Held for approval";
 	head.appendChild(label);
 	head.appendChild(riskBadge(risk));
+	if (run.reversibility) head.appendChild(undoBadge(run.reversibility));
 	host.appendChild(head);
 	const why = document.createElement("ul");
 	why.className = "risk-reasons";
-	for (const reason of risk.reasons || []) {
+	// Both gradings' reasons, because the approver is deciding once and the two answer different
+	// halves of the same question.
+	const reasons = (risk.reasons || []).concat(
+		(run.reversibility && run.reversibility.reasons) || []);
+	for (const reason of reasons) {
 		const li = document.createElement("li");
 		li.textContent = reason;
 		why.appendChild(li);
@@ -832,6 +852,9 @@ function renderHeader(run) {
 	}
 	if (run.risk) {
 		el.appendChild(field("Risk", null, riskBadge(run.risk)));
+	}
+	if (run.reversibility) {
+		el.appendChild(field("Undo", null, undoBadge(run.reversibility)));
 	}
 	renderRiskCallout(run);
 	renderWarningCallout(run);
