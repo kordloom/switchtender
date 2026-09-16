@@ -166,11 +166,13 @@ func TestProjectFileHandlerErrors(t *testing.T) {
 			rec.Code, rec.Body.String())
 	}
 
-	// Without a syncer the endpoints report that browsing is not enabled.
+	// Without a syncer there is no checkout, and the endpoints say so. The wording matters and is
+	// asserted in projectfiles_message_test.go: "not enabled" read as a switch somebody left off and
+	// sent a visitor hunting for a setting that does not exist.
 	off := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(), WithProjects(projects)).Handler()
 	rec = httptest.NewRecorder()
 	off.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/projects/proj_2/files", nil))
-	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "not enabled") {
+	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "no project checkouts") {
 		t.Errorf("browsing disabled = %d %s, want 404 saying it is off", rec.Code, rec.Body.String())
 	}
 }
