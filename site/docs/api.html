@@ -289,6 +289,11 @@ either licensed or absent.</li>
 </tr>
 <tr>
 <td>GET</td>
+<td><code>/v1/changes/{change}</code></td>
+<td>One change: every run carrying the <code>change</code> label with that value, as one thing. Carries the span, who acted, and an outcome derived from the member runs rather than declared, so it cannot disagree with what happened. A change is what an auditor asks about; a run is what an executor produces.</td>
+</tr>
+<tr>
+<td>GET</td>
 <td><code>/v1/tasks</code></td>
 <td>Per-task duration trends over recent runs.</td>
 </tr>

@@ -858,3 +858,14 @@ func NewClaimSecret() string {
 	}
 	return hex.EncodeToString(b[:])
 }
+
+// ChangeLabel is the reserved label key that groups runs into one change.
+//
+// A change is the unit a person means and an auditor asks about: one intent, however many runs it
+// took, including the rollback and the fix-forward. Runs are the atom every tool in this category
+// models, and they are the wrong size for that question.
+//
+// It is a label rather than a column so that a change costs no schema, no migration, and no change
+// to what a run receipt commits to. Labels already travel with the run, already filter, and already
+// appear in the evidence.
+const ChangeLabel = "change"
