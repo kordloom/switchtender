@@ -68,6 +68,7 @@ const NAV_GROUPS = [
 		{ key: "fleet", href: "/ui/fleet", label: "Fleet health", desc: "Flaky host detection" },
 		{ key: "drift", href: "/ui/drift", label: "Drift", desc: "Divergence from desired state" },
 		{ key: "estate", href: "/ui/estate", label: "Estate", desc: "The fleet on a date, and what moved" },
+		{ key: "changes", href: "/ui/changes", label: "Changes", desc: "What was meant, and every run it took" },
 		{ key: "tasks", href: "/ui/tasks", label: "Task trends", desc: "Duration trends per task" },
 		{ key: "workers", href: "/ui/workers", label: "Workers", desc: "Executor fleet status" },
 	] },

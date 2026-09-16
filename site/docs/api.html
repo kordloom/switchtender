@@ -294,6 +294,11 @@ either licensed or absent.</li>
 </tr>
 <tr>
 <td>GET</td>
+<td><code>/v1/changes</code></td>
+<td>Every change the caller can see, newest first, each summarized without its member runs. Built by scanning recent runs for the label, so <code>scanned</code> reports how many were read and <code>partial</code> reports that the scan was capped: a change whose runs are all older than that is not listed. The period change register answers a date range exhaustively.</td>
+</tr>
+<tr>
+<td>GET</td>
 <td><code>/v1/changes/{change}</code></td>
 <td>One change: every run carrying the <code>change</code> label with that value, as one thing. Carries the span, who acted, and an outcome derived from the member runs rather than declared, so it cannot disagree with what happened. A change is what an auditor asks about; a run is what an executor produces. <code>withheld</code> counts members the caller may not read, so a partial change is never mistaken for the whole one.</td>
 </tr>

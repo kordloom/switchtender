@@ -126,10 +126,16 @@ func TestListPageFiltersReadTheFieldTheyName(t *testing.T) {
 	}, { // Test 22: A label pair.
 		Name: "label pair", Filter: ListFilter{LabelKey: "env", LabelValue: "prod"},
 		WantIDs: []string{"run_a"},
-	}, { // Test 23: A label key a run does not carry does not match it against an empty value.
-		// Comparing the map lookup directly matched every run with no such label, which neither SQL
-		// store does, so the same filter answered differently depending on the backend.
-		Name: "label key with an empty value", Filter: ListFilter{LabelKey: "env"}, WantIDs: nil,
+	}, { // Test 23: A label key with no value matches every run carrying that key, whatever its
+		// value, and no run that lacks it.
+		//
+		// An empty value used to mean "the value is the empty string", which matched nothing in SQL
+		// and every unlabeled run in memory: the same filter answered differently per backend. It
+		// now means "any value", which all three stores agree on and which is what lets a caller
+		// discover the values that exist. Nobody can open a list of changes if they have to name a
+		// change first.
+		Name: "label key with an empty value", Filter: ListFilter{LabelKey: "env"},
+		WantIDs: []string{"run_b", "run_a"},
 	}, { // Test 24: A label key nothing carries matches nothing.
 		Name: "unknown label key", Filter: ListFilter{LabelKey: "nope", LabelValue: "x"},
 		WantIDs: nil,

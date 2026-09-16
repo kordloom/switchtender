@@ -158,6 +158,7 @@ func (u *UI) Handler() http.Handler {
 	mux.HandleFunc("GET /ui/doctor", u.doctor)
 	mux.HandleFunc("GET /ui/drift", u.drift)
 	mux.HandleFunc("GET /ui/estate", u.estate)
+	mux.HandleFunc("GET /ui/changes", u.changes)
 	mux.HandleFunc("GET /ui/hosts/{host}", u.host)
 	mux.HandleFunc("GET /ui/tasks", u.tasks)
 	mux.HandleFunc("GET /ui/login", u.login)
@@ -242,6 +243,13 @@ func (u *UI) drift(w http.ResponseWriter, _ *http.Request) {
 // two: an operator asking the second almost always wants the first in front of them.
 func (u *UI) estate(w http.ResponseWriter, _ *http.Request) {
 	u.render(w, "estate.html", map[string]any{"ReadOnly": u.readOnly})
+}
+
+// changes renders the change index, which is the unit a person means rather than the unit an
+// executor produces. One change is read through its runs list, filtered by its label, so this page
+// is the way in rather than a second detail view.
+func (u *UI) changes(w http.ResponseWriter, _ *http.Request) {
+	u.render(w, "changes.html", map[string]any{"ReadOnly": u.readOnly})
 }
 
 // host renders one host's run history page.

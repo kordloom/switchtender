@@ -440,9 +440,14 @@ type ListFilter struct {
 	// task name lives nowhere on the run row, so free text search can never find it: the Task
 	// trends page's per-row link promised exactly that search and returned nothing on every row.
 	Task string
-	// LabelKey with LabelValue keeps only runs carrying that label pair.
+	// LabelKey keeps only runs carrying that label. With LabelValue set it matches the pair; with
+	// LabelValue empty it matches any run carrying the key at all, whatever its value.
+	//
+	// Matching on the key alone is what lets a caller ask which values exist, rather than having to
+	// know one to look for. A browsing surface needs that: nobody can open the list of changes if
+	// they must name a change first.
 	LabelKey string
-	// LabelValue is the value LabelKey must hold.
+	// LabelValue is the value LabelKey must hold. Empty matches any value.
 	LabelValue string
 	// ClaimedBy keeps only runs executed by this worker when set, so a worker's row can open the
 	// work it actually did instead of being a dead end.
