@@ -207,3 +207,61 @@ func testEstateDepthCap(t *testing.T, store run.Store) {
 		t.Fatalf("estate = %+v, want web01 on the newest kernel 6.5.0", now)
 	}
 }
+
+// testEstateSurvivesARunPurge holds every backend to the property the whole point-in-time estate
+// rests on: history outlives the runs that gathered it.
+//
+// Retention deletes terminal runs after a configured age, and the estate's entire purpose is old
+// dates, so the two meet by definition. If a purge took the readings with it, the feature would
+// work in a demo and quietly stop answering at exactly the depth an audit asks about. That is a
+// failure nobody would notice until an auditor did.
+func testEstateSurvivesARunPurge(t *testing.T, store run.Store) {
+	t.Helper()
+	ctx := context.Background()
+	run.SetFactsInterval(0)
+	run.SetFactsDepth(0)
+	t.Cleanup(func() {
+		run.SetFactsInterval(run.DefaultFactsInterval)
+		run.SetFactsDepth(run.DefaultFactsDepth)
+	})
+
+	old := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	gathered := &run.Run{
+		ID: "run_old", Status: run.StatusSucceeded, CreatedAt: old,
+		Playbook: "site.yml", Inventory: "hosts.ini",
+	}
+	if err := store.Save(ctx, gathered); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	if err := store.SaveHostFacts(ctx, gathered.ID, []run.HostFacts{{
+		Host: "web01", Facts: map[string]string{"kernel": "5.15.0"}, GatheredAt: old,
+	}}); err != nil {
+		t.Fatalf("SaveHostFacts() error = %v", err)
+	}
+
+	// Retention removes the run itself, the way it would after --retain-runs elapses.
+	if _, err := store.PurgeRunsBefore(ctx, old.Add(24*time.Hour)); err != nil {
+		t.Fatalf("PurgeRunsBefore() error = %v", err)
+	}
+	if _, err := store.Get(ctx, gathered.ID); err == nil {
+		t.Fatal("the run survived the purge, so this test is not exercising what it claims")
+	}
+
+	// The reading is still there, and still names the run that took it even though that run is
+	// gone. The name is what an access check resolves against, so keeping it is what lets a caller
+	// be told the row was withheld rather than being handed it or shown nothing.
+	at, err := store.EstateAt(ctx, old.Add(time.Hour), 0)
+	if err != nil {
+		t.Fatalf("EstateAt() error = %v", err)
+	}
+	if len(at) != 1 {
+		t.Fatalf("estate holds %d hosts after the run was purged, want 1. The history went with "+
+			"the run, so the estate stops answering at exactly the depth an audit asks about", len(at))
+	}
+	if at[0].Facts["kernel"] != "5.15.0" || at[0].RunID != "run_old" {
+		t.Errorf("reading = %+v, want the 5.15.0 gather still naming run_old", at[0])
+	}
+	if horizon, herr := store.EstateHorizon(ctx); herr != nil || !horizon.Equal(old) {
+		t.Errorf("EstateHorizon() = %v, %v, want the purged run's gather time %v", horizon, herr, old)
+	}
+}
