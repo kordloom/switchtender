@@ -10,6 +10,42 @@ import (
 	"time"
 )
 
+// scalarText is a string that also accepts the other JSON scalars.
+//
+// A play or task name is not always written as text. YAML reads an unquoted True, No, Off, or 1.0
+// as a boolean or a number, so a task written as "- name: No" reaches the callback named with a
+// boolean and is emitted as one. Decoding that into a string failed, and because a decode failure
+// rejects the whole line, every event for that task was discarded: the run lost those rows from its
+// host-by-task matrix and the only trace was a parse error in the server's log.
+//
+// The plugin now renders names as text at the source, so this is the belt to that suspenders. It
+// matters because the failure is silent and total, and because the plugin materialized on a host is
+// not guaranteed to be the one this build embeds.
+type scalarText string
+
+// UnmarshalJSON accepts a JSON string, number, boolean, or null, and renders it as text.
+func (s *scalarText) UnmarshalJSON(raw []byte) error {
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		*s = ""
+		return nil
+	}
+	if raw[0] == '"' {
+		var text string
+		if err := json.Unmarshal(raw, &text); err != nil {
+			return err
+		}
+		*s = scalarText(text)
+		return nil
+	}
+	// A bare true, false, or number is rendered as written. An object or an array is not a name
+	// under any reading, so it is still refused.
+	if raw[0] == '{' || raw[0] == '[' {
+		return fmt.Errorf("name is a %s, not a scalar", string(raw[:1]))
+	}
+	*s = scalarText(raw)
+	return nil
+}
+
 // wireEvent is the on disk shape the callback plugin writes, one JSON object per line.
 type wireEvent struct {
 	// Type identifies the event.
@@ -17,9 +53,9 @@ type wireEvent struct {
 	// Ts is the event time as fractional Unix seconds.
 	Ts float64 `json:"ts"`
 	// Play is the play name.
-	Play string `json:"play"`
+	Play scalarText `json:"play"`
 	// Task is the task name.
-	Task string `json:"task"`
+	Task scalarText `json:"task"`
 	// Host is the target host.
 	Host string `json:"host"`
 	// Changed reports a state change on the host.
@@ -49,8 +85,8 @@ func (w wireEvent) event() Event {
 	return Event{
 		Type:      Type(w.Type),
 		Time:      unixFloat(w.Ts),
-		Play:      w.Play,
-		Task:      w.Task,
+		Play:      string(w.Play),
+		Task:      string(w.Task),
 		Host:      w.Host,
 		Changed:   w.Changed,
 		Message:   w.Message,

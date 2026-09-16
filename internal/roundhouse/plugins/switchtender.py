@@ -75,12 +75,25 @@ class CallbackModule(CallbackBase):
             out["truncated"] = True
         return out
 
+    @staticmethod
+    def _name(obj):
+        """Return a play or task name as text, whatever YAML turned it into.
+
+        A name is not always a string. YAML reads an unquoted True, No, Off, or 1.0 as a bool or a
+        number, so a task written as "- name: No" is named with the boolean False and get_name()
+        returns it faithfully. The event then carried a non-string name, the reader refused the whole
+        line, and every event for that task vanished from the run: the host-by-task matrix lost its
+        rows and the only trace was a parse error in the server's log that no user sees.
+        """
+        name = obj.get_name()
+        return name if isinstance(name, str) else str(name)
+
     def v2_playbook_on_play_start(self, play):
-        self._play = play.get_name()
+        self._play = self._name(play)
         self._emit("play_start", play=self._play)
 
     def v2_playbook_on_task_start(self, task, is_conditional):
-        self._task = task.get_name()
+        self._task = self._name(task)
         self._emit("task_start", play=self._play, task=self._task)
 
     # FACT_KEYS are the gathered facts worth keeping: enough to answer what a host is without
