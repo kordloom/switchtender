@@ -602,7 +602,7 @@ that variable is unset.</p>
 <tr>
 <td><code>--retain-runs</code></td>
 <td>none</td>
-<td>Delete terminal runs older than this, for example <code>90d</code>. Empty keeps them forever.</td>
+<td>Delete terminal runs older than this, for example <code>90d</code>. Empty keeps them forever. Deleting a run does not make what it left behind unreadable: summaries, drift, and host state history outlive it, and the purge retains the record of who could read the run so those rows stay readable to exactly the same people. That record is dropped automatically once nothing references it.</td>
 </tr>
 <tr>
 <td><code>--retain-events</code></td>

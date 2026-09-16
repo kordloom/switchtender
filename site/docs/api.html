@@ -285,7 +285,7 @@ either licensed or absent.</li>
 <tr>
 <td>GET</td>
 <td><code>/v1/estate</code></td>
-<td>The estate as it stood at an instant. <code>at</code> is RFC 3339 and defaults to now, so the current estate is the same query with no argument. Each host carries the newest facts gathered at or before that instant, so a host holds its last observed state until something newer was seen, and a host first gathered afterward is absent rather than invented. <code>withheld</code> counts hosts left out because the run that gathered them cannot be read, which includes runs deleted by retention: facts outlive their runs, so a far enough back date reaches readings whose run is gone. <code>horizon</code> is the oldest retained reading and <code>before_history</code> reports that the instant predates it, which separates an estate that was empty from records that do not reach that far.</td>
+<td>The estate as it stood at an instant. <code>at</code> is RFC 3339 and defaults to now, so the current estate is the same query with no argument. Each host carries the newest facts gathered at or before that instant, so a host holds its last observed state until something newer was seen, and a host first gathered afterward is absent rather than invented. <code>withheld</code> counts hosts left out because the caller may not read the run that gathered them. Retention deleting that run does not withhold it: the purge retains what decided readability, so a reading stays readable to whoever could always read it. <code>horizon</code> is the oldest retained reading and <code>before_history</code> reports that the instant predates it, which separates an estate that was empty from records that do not reach that far.</td>
 </tr>
 <tr>
 <td>GET</td>
