@@ -245,6 +245,10 @@ type Store interface {
 	// purged. Two lookups meant to agree would eventually disagree, silently, in the direction of
 	// showing somebody something.
 	RunAuthFor(ctx context.Context, id string) (*RunAuth, error)
+	// PurgeRunAuth drops retained readability decisions that no longer govern anything, returning
+	// how many were removed. One is written for every run retention deletes, and a busy fleet
+	// deletes runs forever, so without this the decisions are a table that only grows.
+	PurgeRunAuth(ctx context.Context) (int, error)
 	// EstateHorizon returns the oldest retained host state reading, zero when none is held.
 	//
 	// It is what separates "the estate was empty then" from "our records do not reach that far".

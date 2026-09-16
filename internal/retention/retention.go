@@ -148,6 +148,19 @@ func (s *Sweeper) sweep(now time.Time) {
 			s.log.Info("retention: trimmed host and task summaries", zap.Int("rows", n))
 		}
 	}
+	// Always, and last. A readability decision is retained for every run a purge deletes, so the
+	// decisions only ever accumulate, and they are worth dropping exactly when nothing they govern
+	// is left. Running after the trims above means anything those just removed is collectable on
+	// this pass rather than the next.
+	//
+	// Unconditional because it is not configurable: keeping a decision no row references buys
+	// nothing, and dropping one that is still referenced is what the sweep is written to avoid.
+	if n, err := s.store.PurgeRunAuth(s.ctx); err != nil {
+		s.log.Error("retention: purge run authorization: " + err.Error())
+	} else if n > 0 {
+		s.log.Info("retention: dropped authorization for runs nothing references anymore",
+			zap.Int("rows", n))
+	}
 }
 
 // Close stops the sweep loop and waits for it to finish.

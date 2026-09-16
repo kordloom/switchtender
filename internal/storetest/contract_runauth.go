@@ -95,3 +95,66 @@ func assertRunAuth(t *testing.T, when string, got *run.RunAuth, want *run.Run) {
 			"names", when, got.Objects())
 	}
 }
+
+// testRunAuthIsCollectedOnlyWhenNothingNeedsIt holds every backend to both halves of the cleanup.
+//
+// A decision is written for every run retention deletes, and a busy fleet deletes runs forever, so
+// they have to be collectable. But dropping one that still governs something is the failure the
+// retaining exists to prevent, reintroduced from the other side: the rows do not error, they go
+// quietly unreadable to every grant-restricted caller.
+//
+// So both directions are checked. Keeping too long costs a little disk. Dropping too early costs
+// an audit answer.
+func testRunAuthIsCollectedOnlyWhenNothingNeedsIt(t *testing.T, store run.Store) {
+	t.Helper()
+	ctx := context.Background()
+	run.SetFactsInterval(0)
+	run.SetFactsDepth(0)
+	t.Cleanup(func() {
+		run.SetFactsInterval(run.DefaultFactsInterval)
+		run.SetFactsDepth(run.DefaultFactsDepth)
+	})
+
+	old := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	// One run leaves a reading behind; the other leaves nothing at all.
+	watched := &run.Run{ID: "run_watched", Status: run.StatusSucceeded, CreatedAt: old,
+		Playbook: "site.yml", ProjectID: "proj_1"}
+	forgotten := &run.Run{ID: "run_forgotten", Status: run.StatusSucceeded, CreatedAt: old,
+		Playbook: "site.yml", ProjectID: "proj_1"}
+	for _, r := range []*run.Run{watched, forgotten} {
+		if err := store.Save(ctx, r); err != nil {
+			t.Fatalf("save %s: %v", r.ID, err)
+		}
+	}
+	if err := store.SaveHostFacts(ctx, watched.ID, []run.HostFacts{{
+		Host: "web01", Facts: map[string]string{"kernel": "6.1.0"}, GatheredAt: old,
+	}}); err != nil {
+		t.Fatalf("SaveHostFacts() error = %v", err)
+	}
+
+	if _, err := store.PurgeRunsBefore(ctx, old.Add(24*time.Hour)); err != nil {
+		t.Fatalf("PurgeRunsBefore() error = %v", err)
+	}
+	// Both decisions exist now, because both runs were purged.
+	for _, id := range []string{watched.ID, forgotten.ID} {
+		if _, err := store.RunAuthFor(ctx, id); err != nil {
+			t.Fatalf("RunAuthFor(%s) after the purge error = %v", id, err)
+		}
+	}
+
+	if _, err := store.PurgeRunAuth(ctx); err != nil {
+		t.Fatalf("PurgeRunAuth() error = %v", err)
+	}
+
+	// The watched run's reading is still held, so its decision must survive. Dropping it would make
+	// that reading invisible to exactly the callers the decision was kept for.
+	if _, err := store.RunAuthFor(ctx, watched.ID); err != nil {
+		t.Errorf("RunAuthFor(%s) error = %v after collection, but a host reading still names that "+
+			"run. The reading is now unreadable to every grant-restricted caller", watched.ID, err)
+	}
+	// The forgotten run governs nothing, so its decision is collectable.
+	if _, err := store.RunAuthFor(ctx, forgotten.ID); !errors.Is(err, run.ErrNotFound) {
+		t.Errorf("RunAuthFor(%s) error = %v, want ErrNotFound: a decision nothing references is "+
+			"kept forever and the table only grows", forgotten.ID, err)
+	}
+}

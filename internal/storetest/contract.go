@@ -25,6 +25,7 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Run("estate depth cap bounds history", func(t *testing.T) { testEstateDepthCap(t, newStore()) })
 	t.Run("estate survives a run purge", func(t *testing.T) { testEstateSurvivesARunPurge(t, newStore()) })
 	t.Run("run authorization outlives the run", func(t *testing.T) { testRunAuthOutlivesTheRun(t, newStore()) })
+	t.Run("run authorization is collected when unreferenced", func(t *testing.T) { testRunAuthIsCollectedOnlyWhenNothingNeedsIt(t, newStore()) })
 	t.Run("pipeline steps round trip", func(t *testing.T) { testPipelineSteps(t, newStore()) })
 	t.Run("get missing", func(t *testing.T) { testGetNotFound(t, newStore()) })
 	t.Run("idempotency key dedup", func(t *testing.T) { testByIdempotencyKey(t, newStore()) })

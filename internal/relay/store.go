@@ -199,6 +199,9 @@ func (c *Client) RunAuthFor(context.Context, string) (*run.RunAuth, error) {
 	return nil, ErrUnsupported
 }
 
+// PurgeRunAuth is control-node retention and is not served to workers.
+func (c *Client) PurgeRunAuth(context.Context) (int, error) { return 0, ErrUnsupported }
+
 // EstateHorizon is a control-node read and is not served to workers.
 func (c *Client) EstateHorizon(context.Context) (time.Time, error) {
 	return time.Time{}, ErrUnsupported
