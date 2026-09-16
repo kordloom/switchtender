@@ -193,6 +193,11 @@ func (c *Client) HostFactsFor(context.Context, string) (*run.HostFacts, error) {
 	return nil, ErrUnsupported
 }
 
+// EstateHorizon is a control-node read and is not served to workers.
+func (c *Client) EstateHorizon(context.Context) (time.Time, error) {
+	return time.Time{}, ErrUnsupported
+}
+
 // EstateAt is a control-node read and is not served to workers. A worker executes runs and reports
 // what it saw; reconstructing the estate at a past instant is the control node's question, and it
 // holds the history to answer it.

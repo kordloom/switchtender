@@ -707,3 +707,21 @@ ORDER BY h.host`
 	}
 	return out, nil
 }
+
+// EstateHorizon returns the oldest retained host state reading, zero when none is held.
+func (s *store) EstateHorizon(ctx context.Context) (time.Time, error) {
+	const q = "SELECT MIN(" + sqlutil.GatheredOrder + ") FROM host_facts_history"
+	var oldest sql.NullString
+	if err := s.db.r.QueryRowContext(ctx, q).Scan(&oldest); err != nil {
+		return time.Time{}, fmt.Errorf("estate horizon: %w", err)
+	}
+	if !oldest.Valid || oldest.String == "" {
+		return time.Time{}, nil
+	}
+	// The stored form is trimmed of its trailing Z for ordering, so it is put back before parsing.
+	at, err := sqlutil.ParseTime(oldest.String + "Z")
+	if err != nil {
+		return time.Time{}, fmt.Errorf("estate horizon: %w", err)
+	}
+	return at, nil
+}

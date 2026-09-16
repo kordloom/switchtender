@@ -565,3 +565,18 @@ func trimNewestPerKey[T any](byRun map[string][]T, keep int, key func(T) string,
 	}
 	return removed
 }
+
+// EstateHorizon returns the oldest retained host state reading, zero when none is held.
+func (m *memStore) EstateHorizon(_ context.Context) (time.Time, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var oldest time.Time
+	for _, kept := range m.factsHistory {
+		for _, f := range kept {
+			if oldest.IsZero() || f.GatheredAt.Before(oldest) {
+				oldest = f.GatheredAt
+			}
+		}
+	}
+	return oldest, nil
+}

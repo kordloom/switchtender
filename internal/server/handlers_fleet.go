@@ -457,6 +457,13 @@ type estateResponse struct {
 	// Truncated reports that Hosts holds fewer than Total, so a caller does not read a prefix as
 	// the whole estate.
 	Truncated bool `json:"truncated,omitempty"`
+	// Horizon is the oldest retained reading, and BeforeHistory reports that the instant asked
+	// about predates it. Without them an empty estate is ambiguous: it looks the same whether the
+	// fleet did not exist yet or the records simply do not reach that far, and an auditor reading
+	// the wrong one concludes something false about the estate.
+	Horizon time.Time `json:"horizon,omitempty"`
+	// BeforeHistory reports that the instant asked about is older than any retained reading.
+	BeforeHistory bool `json:"before_history,omitempty"`
 	// Withheld counts hosts left out because the run that gathered them could not be read, which
 	// includes the case where that run has been deleted by retention. It is reported rather than
 	// left silent: facts outlive the runs that gathered them on purpose, so asking about a date far
@@ -478,15 +485,9 @@ func estateHandler(store run.Store, authz *authorizer, log *zap.Logger) http.Han
 		panic("server: estateHandler: Store required")
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
-		at := time.Now()
-		if raw := r.URL.Query().Get("at"); raw != "" {
-			parsed, perr := time.Parse(time.RFC3339, raw)
-			if perr != nil {
-				respondError(w, log, http.StatusBadRequest,
-					"at must be an RFC 3339 instant, for example 2026-03-01T00:00:00Z")
-				return
-			}
-			at = parsed
+		at, ok := instantParam(w, log, r, "at", time.Now())
+		if !ok {
+			return
 		}
 		keep, _, ferr := derivedReadFilter(r.Context(), authz, store)
 		if ferr != nil {
@@ -514,8 +515,16 @@ func estateHandler(store run.Store, authz *authorizer, log *zap.Logger) http.Han
 			withheld++
 		}
 		shown, total := cappedList(visible)
-		respondJSON(w, log, http.StatusOK, estateResponse{
+		resp := estateResponse{
 			At: at, Hosts: shown, Total: total, Truncated: len(shown) < total, Withheld: withheld,
-		}, wantsPretty(r))
+		}
+		// The horizon is reported whenever it is known, and an instant before it is called out. A
+		// failure to read it leaves both absent rather than failing the request: the estate is the
+		// answer, and this only says how far back the answer can be trusted.
+		if horizon, herr := store.EstateHorizon(r.Context()); herr == nil && !horizon.IsZero() {
+			resp.Horizon = horizon
+			resp.BeforeHistory = at.Before(horizon)
+		}
+		respondJSON(w, log, http.StatusOK, resp, wantsPretty(r))
 	}
 }

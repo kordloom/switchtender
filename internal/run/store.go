@@ -236,6 +236,14 @@ type Store interface {
 	// HostFactsFor returns a host's most recently gathered facts, or ErrNotFound when a host has
 	// never been gathered.
 	HostFactsFor(ctx context.Context, host string) (*HostFacts, error)
+	// EstateHorizon returns the oldest retained host state reading, zero when none is held.
+	//
+	// It is what separates "the estate was empty then" from "our records do not reach that far".
+	// Readings are capped per host and gathers only began when the history did, so an instant
+	// before the horizon yields an empty estate for a reason that has nothing to do with what was
+	// running. Reported rather than left to inference, because the two answers look identical and
+	// an auditor reading the wrong one concludes the fleet did not exist.
+	EstateHorizon(ctx context.Context) (time.Time, error)
 	// EstateAt returns the facts in effect for every host at an instant, ordered by host.
 	//
 	// In effect means the newest gather at or before at, so a host keeps its last known state until

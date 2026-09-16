@@ -285,7 +285,12 @@ either licensed or absent.</li>
 <tr>
 <td>GET</td>
 <td><code>/v1/estate</code></td>
-<td>The estate as it stood at an instant. <code>at</code> is RFC 3339 and defaults to now, so the current estate is the same query with no argument. Each host carries the newest facts gathered at or before that instant, so a host holds its last observed state until something newer was seen, and a host first gathered afterward is absent rather than invented. <code>withheld</code> counts hosts left out because the run that gathered them cannot be read, which includes runs deleted by retention: facts outlive their runs, so a far enough back date reaches readings whose run is gone.</td>
+<td>The estate as it stood at an instant. <code>at</code> is RFC 3339 and defaults to now, so the current estate is the same query with no argument. Each host carries the newest facts gathered at or before that instant, so a host holds its last observed state until something newer was seen, and a host first gathered afterward is absent rather than invented. <code>withheld</code> counts hosts left out because the run that gathered them cannot be read, which includes runs deleted by retention: facts outlive their runs, so a far enough back date reaches readings whose run is gone. <code>horizon</code> is the oldest retained reading and <code>before_history</code> reports that the instant predates it, which separates an estate that was empty from records that do not reach that far.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/v1/estate/diff</code></td>
+<td>What changed between two instants. <code>from</code> is required, <code>to</code> defaults to now. Each host is added, removed, or changed, and a changed host names the fact keys that differ with the value at each end. <code>unchanged</code> counts hosts identical at both ends, so a short list reads as a quiet estate rather than a query that found nothing. A removed host means no reading survives at the later end, which is not the same as the machine being gone.</td>
 </tr>
 <tr>
 <td>GET</td>
