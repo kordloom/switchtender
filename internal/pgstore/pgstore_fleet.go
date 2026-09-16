@@ -632,13 +632,13 @@ ORDER BY last_seen DESC, claimed_by COLLATE "C"`
 // The comparison runs on the trimmed text, not the raw column, for the reason sqlutil.GatheredOrder
 // documents: the stored form drops a trailing zero fraction, so raw text ordering puts a later
 // instant ahead of an earlier one inside the same second and would pick the wrong reading.
-func (s *store) EstateAt(ctx context.Context, at time.Time) ([]run.HostFacts, error) {
+func (s *store) EstateAt(ctx context.Context, at time.Time, limit int) ([]run.HostFacts, error) {
 	// One bucket is chosen per host, not one timestamp. Grouping by host on the maximum time and
 	// joining back on equality returns a row per match rather than per host, so two readings sharing
 	// an instant put the same host in the estate twice. An estate that double counts a host is not
 	// an answer an audit can use. The bucket is half the primary key, so ordering on it after the
 	// time makes the pick a single row whatever the timestamps collide on.
-	const q = `
+	q := `
 SELECT h.host, h.run_id, h.facts, h.gathered_at
 FROM host_facts_history h
 WHERE h.bucket = (
@@ -648,7 +648,12 @@ WHERE h.bucket = (
 	LIMIT 1
 )
 ORDER BY h.host`
-	rows, err := s.db.QueryContext(ctx, q, sqlutil.FormatTime(at))
+	args := []any{sqlutil.FormatTime(at)}
+	if limit > 0 {
+		q += " LIMIT $2"
+		args = append(args, limit)
+	}
+	rows, err := s.db.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("estate at: %w", err)
 	}

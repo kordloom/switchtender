@@ -250,7 +250,12 @@ type Store interface {
 	// something newer was observed, and a host first gathered afterward is absent rather than
 	// invented. This is the question an audit asks and the one a live view cannot answer, because a
 	// live view holds only what is true now.
-	EstateAt(ctx context.Context, at time.Time) ([]HostFacts, error)
+	// The limit bounds the query rather than only the response, because a caller cannot cap what
+	// has already been read: an estate is one row per host with its fact set, and the diff reads
+	// two of them, so an unbounded read scales with the fleet and multiplies by concurrency. A
+	// limit at or below zero reads everything, which is for a caller that genuinely needs the whole
+	// estate and knows what it is asking for.
+	EstateAt(ctx context.Context, at time.Time, limit int) ([]HostFacts, error)
 	// SaveTaskSummary replaces the stored per task summaries for a run.
 	SaveTaskSummary(ctx context.Context, runID string, summaries []TaskSummary) error
 	// RunTaskSummaries returns one run's stored per task summaries, ordered by task.

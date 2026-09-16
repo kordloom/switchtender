@@ -495,7 +495,7 @@ func estateHandler(store run.Store, authz *authorizer, log *zap.Logger) http.Han
 			respondError(w, log, http.StatusInternalServerError, "could not read the estate")
 			return
 		}
-		hosts, err := store.EstateAt(r.Context(), at)
+		hosts, err := store.EstateAt(r.Context(), at, maxListRows+1)
 		if err != nil {
 			log.Error("server: estate at: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not read the estate")

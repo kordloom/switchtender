@@ -137,9 +137,13 @@ func estateDiffHandler(store run.Store, authz *authorizer, log *zap.Logger) http
 
 // readableEstate returns the estate at an instant, filtered to what the caller may read, and how
 // many rows were withheld.
+//
+// It reads one row past the cap rather than the whole estate. A diff reads two of these, and an
+// estate is one fact set per host, so an unbounded read scales with the fleet and multiplies by
+// however many callers ask at once. Capping only the response would already have paid that cost.
 func readableEstate(ctx context.Context, store run.Store, at time.Time,
 	keep func(string) bool) (map[string]run.HostFacts, int, error) {
-	rows, err := store.EstateAt(ctx, at)
+	rows, err := store.EstateAt(ctx, at, maxListRows+1)
 	if err != nil {
 		return nil, 0, err
 	}

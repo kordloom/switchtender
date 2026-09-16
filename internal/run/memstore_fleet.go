@@ -294,7 +294,7 @@ func (m *memStore) SaveHostFacts(_ context.Context, runID string, facts []HostFa
 }
 
 // EstateAt returns the facts in effect for every host at an instant, ordered by host.
-func (m *memStore) EstateAt(_ context.Context, at time.Time) ([]HostFacts, error) {
+func (m *memStore) EstateAt(_ context.Context, at time.Time, limit int) ([]HostFacts, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	var out []HostFacts
@@ -320,6 +320,9 @@ func (m *memStore) EstateAt(_ context.Context, at time.Time) ([]HostFacts, error
 		out = append(out, cp)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Host < out[j].Host })
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
 	return out, nil
 }
 

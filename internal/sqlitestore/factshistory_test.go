@@ -2,6 +2,7 @@ package sqlitestore
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -108,7 +109,7 @@ func TestEstateAtAnswersWhatWasTrueThen(t *testing.T) {
 	// db01 joins the estate only in April, so it did not exist on the audit date.
 	save("db01", "6.1.0", march.AddDate(0, 1, 0))
 
-	at, err := s.EstateAt(ctx, march.Add(time.Hour))
+	at, err := s.EstateAt(ctx, march.Add(time.Hour), 0)
 	if err != nil {
 		t.Fatalf("estate at: %v", err)
 	}
@@ -123,7 +124,7 @@ func TestEstateAtAnswersWhatWasTrueThen(t *testing.T) {
 	}
 
 	// And now, where both hosts exist and web01 carries its newer kernel.
-	now, err := s.EstateAt(ctx, march.AddDate(0, 2, 0))
+	now, err := s.EstateAt(ctx, march.AddDate(0, 2, 0), 0)
 	if err != nil {
 		t.Fatalf("estate now: %v", err)
 	}
@@ -170,7 +171,7 @@ func TestEstateAtReturnsEachHostOnce(t *testing.T) {
 		}
 	}
 
-	got, err := s.EstateAt(ctx, same.Add(time.Hour))
+	got, err := s.EstateAt(ctx, same.Add(time.Hour), 0)
 	if err != nil {
 		t.Fatalf("estate at: %v", err)
 	}
@@ -180,12 +181,70 @@ func TestEstateAtReturnsEachHostOnce(t *testing.T) {
 	}
 	// Whichever reading wins, the pick has to be stable rather than whatever the engine returns
 	// first, or two identical requests can disagree about the estate.
-	second, err := s.EstateAt(ctx, same.Add(time.Hour))
+	second, err := s.EstateAt(ctx, same.Add(time.Hour), 0)
 	if err != nil {
 		t.Fatalf("estate at, again: %v", err)
 	}
 	if len(second) != 1 || second[0].RunID != got[0].RunID {
 		t.Errorf("two identical requests picked %q then %q, want the same reading both times",
 			got[0].RunID, second[0].RunID)
+	}
+}
+
+// TestEstateAtIsBoundedByTheQuery covers memory rather than correctness.
+//
+// An estate is one fact set per host, and the diff reads two of them. Capping only the response
+// would already have paid the cost of reading the whole fleet, and that cost scales with the fleet
+// and multiplies by however many callers ask at once. The bound has to be in the query.
+func TestEstateAtIsBoundedByTheQuery(t *testing.T) {
+	run.SetFactsInterval(0)
+	run.SetFactsDepth(0)
+	t.Cleanup(func() {
+		run.SetFactsInterval(run.DefaultFactsInterval)
+		run.SetFactsDepth(run.DefaultFactsDepth)
+	})
+
+	ctx := context.Background()
+	d, err := Open(filepath.Join(t.TempDir(), "bound.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() { _ = d.Close() })
+	s := d.Runs()
+
+	at := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
+	facts := make([]run.HostFacts, 0, 50)
+	for i := 0; i < 50; i++ {
+		facts = append(facts, run.HostFacts{
+			Host: fmt.Sprintf("host%03d", i), GatheredAt: at,
+			Facts: map[string]string{"kernel": "6.8.0"},
+		})
+	}
+	if err := s.SaveHostFacts(ctx, "run_1", facts); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	got, err := s.EstateAt(ctx, at.Add(time.Hour), 10)
+	if err != nil {
+		t.Fatalf("estate at: %v", err)
+	}
+	if len(got) != 10 {
+		t.Fatalf("EstateAt with a limit of 10 returned %d rows, so the whole fleet was read and "+
+			"the cap only trimmed what had already been paid for", len(got))
+	}
+	// Ordered by host, so the bound is the first N rather than an arbitrary slice. Two identical
+	// requests must agree about which hosts a capped answer shows.
+	if got[0].Host != "host000" || got[9].Host != "host009" {
+		t.Errorf("a capped estate returned %s..%s, want the first ten hosts in order",
+			got[0].Host, got[9].Host)
+	}
+
+	// Zero reads everything, for a caller that genuinely needs the whole estate.
+	all, err := s.EstateAt(ctx, at.Add(time.Hour), 0)
+	if err != nil {
+		t.Fatalf("estate at, unbounded: %v", err)
+	}
+	if len(all) != 50 {
+		t.Errorf("an unbounded read returned %d rows, want all 50", len(all))
 	}
 }

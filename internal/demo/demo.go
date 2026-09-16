@@ -275,20 +275,25 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 	// A split where one shard fails, showing the merged matrix and failed-shard isolation.
 	split, err := d.Submitter.SubmitSplit(ctx, playbook, inv, 3,
 		seedOpts(ctx, d, "template", ids.id(ids.Templates, "Deploy web", "tpl_deploy_web"), "admin",
-			map[string]string{"env": "prod", "ticket": "OPS-482"}, failVars("db01")...)...)
+			map[string]string{"env": "prod", "ticket": "OPS-482", "change": "OPS-482-web-rollout"},
+			failVars("db01")...)...)
 	if err != nil {
 		return fmt.Errorf("seed split: %w", err)
 	}
 	settle(ctx, d, split.ID)
 
-	// A clean three-step Ansible pipeline.
+	// A clean three-step Ansible pipeline. It carries the same change label as the split above, so
+	// the demo holds a change that failed and was then put right. That mixed outcome is the shape a
+	// real change takes and the one a single run can never show, and a demo where every change is
+	// one green run demonstrates nothing.
 	steps := []run.PipelineStep{
 		{Name: "prepare", Playbook: playbook},
 		{Name: "migrate", Playbook: playbook},
 		{Name: "verify", Playbook: playbook},
 	}
 	pipe, err := d.Submitter.SubmitPipeline(ctx, "Release 4.2", inv, steps,
-		seedOpts(ctx, d, "api", "", "deploy-bot", map[string]string{"env": "prod", "ticket": "REL-42"})...)
+		seedOpts(ctx, d, "api", "", "deploy-bot",
+			map[string]string{"env": "prod", "ticket": "REL-42", "change": "OPS-482-web-rollout"})...)
 	if err != nil {
 		return fmt.Errorf("seed pipeline: %w", err)
 	}
