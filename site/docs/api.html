@@ -290,7 +290,7 @@ either licensed or absent.</li>
 <tr>
 <td>GET</td>
 <td><code>/v1/estate/diff</code></td>
-<td>What changed between two instants. <code>from</code> is required, <code>to</code> defaults to now. Each host is added, removed, or changed, and a changed host names the fact keys that differ with the value at each end. <code>unchanged</code> counts hosts identical at both ends, so a short list reads as a quiet estate rather than a query that found nothing. A removed host means no reading survives at the later end, which is not the same as the machine being gone.</td>
+<td>What changed between two instants. <code>from</code> is required, <code>to</code> defaults to now. Each host is added, changed, or unobserved, and a changed host names the fact keys that differ with the value at each end. <code>unobserved</code> means nothing gathered that host inside the window, so its state is carried forward rather than confirmed: not known to have changed, and not known not to have. <code>unchanged</code> counts hosts gathered in the window and found identical, which is a different and stronger statement.</td>
 </tr>
 <tr>
 <td>GET</td>

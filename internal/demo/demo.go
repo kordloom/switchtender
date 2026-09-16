@@ -367,6 +367,10 @@ func Seed(ctx context.Context, d Deps, log *zap.Logger) error {
 
 	seedAnchors(ctx, d, log)
 
+	// After the runs, so it backdates readings beside the ones those gathers just wrote rather than
+	// being overwritten by them.
+	seedEstateHistory(ctx, d)
+
 	log.Info("demo: seeded sample projects, templates, inventories, and runs")
 	return nil
 }

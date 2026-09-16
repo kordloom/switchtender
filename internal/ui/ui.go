@@ -157,6 +157,7 @@ func (u *UI) Handler() http.Handler {
 	mux.HandleFunc("GET /ui/activity", u.activity)
 	mux.HandleFunc("GET /ui/doctor", u.doctor)
 	mux.HandleFunc("GET /ui/drift", u.drift)
+	mux.HandleFunc("GET /ui/estate", u.estate)
 	mux.HandleFunc("GET /ui/hosts/{host}", u.host)
 	mux.HandleFunc("GET /ui/tasks", u.tasks)
 	mux.HandleFunc("GET /ui/login", u.login)
@@ -234,6 +235,13 @@ func (u *UI) doctor(w http.ResponseWriter, _ *http.Request) {
 // drift renders the fleet drift page.
 func (u *UI) drift(w http.ResponseWriter, _ *http.Request) {
 	u.render(w, "drift.html", map[string]any{"ReadOnly": u.readOnly})
+}
+
+// estate renders the point-in-time estate page, which answers what the fleet looked like on a date
+// and what has moved since. Both questions read the same history, so they are one page rather than
+// two: an operator asking the second almost always wants the first in front of them.
+func (u *UI) estate(w http.ResponseWriter, _ *http.Request) {
+	u.render(w, "estate.html", map[string]any{"ReadOnly": u.readOnly})
 }
 
 // host renders one host's run history page.

@@ -1560,3 +1560,13 @@ td.col-labels .label-wrap { flex-wrap: nowrap; }
 	#recent .ov-row .ov-row-meta.reltime { margin-left: auto; }
 	#recent .ov-row .ov-row-go { display: none; }
 }
+
+/* Estate controls: two dates and a button. Laid out inline because the second date is optional and
+   the pair reads as one question, "as of this, compared with that", rather than as two settings. */
+.estate-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 0 0 14px; }
+.estate-controls label { font-size: 12.5px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.estate-controls input[type="date"] { padding: 5px 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: inherit; }
+
+/* The horizon note when a question predates the records. It is information, not a failure: the
+   answer is correct and the limit is the data's, so it is colored as a caution rather than an error. */
+.warn-note { margin: 0 0 12px; padding: 9px 12px; border-left: 3px solid var(--changed); background: var(--surface); border-radius: var(--radius); font-size: 13.5px; }

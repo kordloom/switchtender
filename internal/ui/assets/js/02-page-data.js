@@ -1,7 +1,7 @@
 // PAGE_NAV maps a page identifier to the nav key it should highlight.
 const PAGE_NAV = {
 	overview: "overview", runs: "runs", detail: "runs", fleet: "fleet", host: "fleet",
-	tasks: "tasks", workers: "workers", drift: "drift", projects: "projects", inventories: "inventories",
+	tasks: "tasks", workers: "workers", drift: "drift", estate: "estate", projects: "projects", inventories: "inventories",
 	sources: "sources", jobtemplates: "templates", schedules: "schedules", workflows: "workflows",
 	migrate: "migrate", credentials: "credentials", users: "users", audit: "audit",
 	policies: "policies", doctor: "doctor", docs: "docs",
@@ -13,6 +13,7 @@ const NAV_ICONS = {
 	runs: '<circle cx="12" cy="12" r="9"/><polygon points="10 8 16 12 10 16"/>',
 	fleet: '<path d="M3 12h4l2 6 4-12 2 6h6"/>',
 	drift: '<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>',
+	estate: '<circle cx="12" cy="10" r="6"/><path d="M12 7v3l2 1.5"/><line x1="3" y1="20" x2="21" y2="20"/>',
 	tasks: '<path d="M3 17l6-6 4 4 8-8"/><path d="M17 7h4v4"/>',
 	workers: '<rect x="3" y="4" width="18" height="7" rx="1"/><rect x="3" y="13" width="18" height="7" rx="1"/><line x1="7" y1="7.5" x2="7.01" y2="7.5"/><line x1="7" y1="16.5" x2="7.01" y2="16.5"/>',
 	projects: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
@@ -92,7 +93,7 @@ function mountTopbar() {
 // by accident, and it sat directly above a list containing them. Whichever was written first, a
 // comment that contradicts itself is worse than no comment: a reader cannot tell which half is the
 // rule and which is the leftover.
-const EXPORT_PAGES = ["runs", "fleet", "drift", "tasks", "compare", "workers", "schedules", "jobtemplates",
+const EXPORT_PAGES = ["runs", "fleet", "drift", "estate", "tasks", "compare", "workers", "schedules", "jobtemplates",
 	"users", "audit", "host", "projects", "inventories", "sources", "policies", "doctor",
 	"credentials"];
 
@@ -379,6 +380,7 @@ const FACET_COLUMNS = {
 	schedules: ["Enabled"],
 	fleet: ["Last outcome"],
 	drift: ["State"],
+	estate: ["Change"],
 	workers: ["Health"],
 	sources: ["Status"],
 	inventories: ["Format"],

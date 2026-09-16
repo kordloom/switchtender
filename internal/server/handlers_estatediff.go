@@ -35,9 +35,18 @@ type factChange struct {
 const (
 	// diffAdded is a host observed at the later instant and not at the earlier one.
 	diffAdded = "added"
-	// diffRemoved is a host observed at the earlier instant and not at the later one. It means no
-	// reading survives at the later end, which is not the same as the machine being gone.
-	diffRemoved = "removed"
+	// diffUnobserved is a host nothing gathered anywhere in the window: the reading in effect at
+	// the later instant is the same one that was in effect at the earlier one.
+	//
+	// This replaced a "removed" state that could never occur. A host holds its last observed state
+	// until something newer is seen, so the estate at the earlier instant is always a subset of the
+	// estate at the later one and nothing can leave it. The state was unreachable, and it described
+	// a decommission the data cannot show.
+	//
+	// What the data can show is more useful anyway. A host re-gathered and found identical is
+	// confirmed unchanged; a host nobody looked at is unknown, and reading the second as the first
+	// is how a fleet quietly stops being monitored without anybody noticing.
+	diffUnobserved = "unobserved"
 	// diffChanged is a host observed at both ends whose facts differ.
 	diffChanged = "changed"
 )
@@ -122,7 +131,7 @@ func estateDiffHandler(store run.Store, authz *authorizer, log *zap.Logger) http
 			return
 		}
 
-		resp := diffEstates(earlier, later)
+		resp := diffEstates(from, earlier, later)
 		resp.Hosts, resp.Total = cappedList(resp.Hosts)
 		resp.Truncated = len(resp.Hosts) < resp.Total
 		resp.From, resp.To = from, to
@@ -160,12 +169,20 @@ func readableEstate(ctx context.Context, store run.Store, at time.Time,
 }
 
 // diffEstates compares two estates, ordered by host.
-func diffEstates(earlier, later map[string]run.HostFacts) estateDiffResponse {
+func diffEstates(from time.Time, earlier, later map[string]run.HostFacts) estateDiffResponse {
 	out := estateDiffResponse{Hosts: []hostDiff{}}
 	for host, now := range later {
 		before, existed := earlier[host]
 		if !existed {
 			out.Hosts = append(out.Hosts, hostDiff{Host: host, State: diffAdded})
+			continue
+		}
+		// Nothing was gathered for this host inside the window: the reading in effect at the end is
+		// the one that was already in effect at the start. Its facts are identical by construction,
+		// so without this it would be counted as unchanged, which claims somebody looked and found
+		// it the same.
+		if !now.GatheredAt.After(from) {
+			out.Hosts = append(out.Hosts, hostDiff{Host: host, State: diffUnobserved})
 			continue
 		}
 		changes := map[string]factChange{}
@@ -187,11 +204,6 @@ func diffEstates(earlier, later map[string]run.HostFacts) estateDiffResponse {
 			continue
 		}
 		out.Hosts = append(out.Hosts, hostDiff{Host: host, State: diffChanged, Facts: changes})
-	}
-	for host := range earlier {
-		if _, still := later[host]; !still {
-			out.Hosts = append(out.Hosts, hostDiff{Host: host, State: diffRemoved})
-		}
 	}
 	sort.Slice(out.Hosts, func(i, j int) bool { return out.Hosts[i].Host < out.Hosts[j].Host })
 	return out

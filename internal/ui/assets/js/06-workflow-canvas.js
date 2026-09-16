@@ -374,6 +374,8 @@ document.addEventListener("DOMContentLoaded", () => {
 		loadActivityPage();
 	} else if (page === "drift") {
 		loadDrift();
+	} else if (page === "estate") {
+		wireEstate();
 	} else if (page === "host") {
 		loadHost(document.body.dataset.host);
 	} else if (page === "tasks") {
