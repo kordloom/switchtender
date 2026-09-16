@@ -72,6 +72,24 @@ func AssessReversibility(r *Run) Reversibility {
 	if len(reasons) > 0 {
 		return Reversibility{Class: Irreversible, Reasons: reasons}
 	}
+	if r.Command == "" {
+		// Nothing to read. An Ansible run carries a playbook path, and what the playbook does is
+		// inside a file this never opens: the content lives in a project, and may be fetched from
+		// Vault or produced by a command at launch, so it is not available to a grade computed on
+		// read. A playbook that drops every database grades exactly like one that restarts a
+		// service.
+		//
+		// The class stays costly rather than climbing, because guessing from a file name would be
+		// worse than saying nothing: it would put false confidence behind the word irreversible.
+		// The reason carries the limit instead, so an approver knows what the grade rests on.
+		return Reversibility{
+			Class: ReversibleCostly,
+			Reasons: []string{
+				"changes state, so undoing it means running something else",
+				"graded from what the run declares: the playbook's own contents were not examined",
+			},
+		}
+	}
 	return Reversibility{
 		Class:   ReversibleCostly,
 		Reasons: []string{"changes state, so undoing it means running something else"},

@@ -135,3 +135,57 @@ func TestEstateAtAnswersWhatWasTrueThen(t *testing.T) {
 		t.Errorf("estate today = %+v, want db01 then web01 on 6.8.0", now)
 	}
 }
+
+// TestEstateAtReturnsEachHostOnce covers a query shape that quietly double counted.
+//
+// The first version grouped by host on the maximum gather time and joined back on equality. That
+// returns a row per matching row rather than per host, so two readings of one host sharing an
+// instant put it in the estate twice. An estate view that reports more hosts than an estate has is
+// not an answer an audit can use, and the miscount is invisible unless somebody counts.
+//
+// Collisions are possible whenever the interval is zero, which is the documented opt-in for keeping
+// every gather, and two runs touch the same host at the same recorded instant.
+func TestEstateAtReturnsEachHostOnce(t *testing.T) {
+	run.SetFactsInterval(0)
+	run.SetFactsDepth(0)
+	t.Cleanup(func() {
+		run.SetFactsInterval(run.DefaultFactsInterval)
+		run.SetFactsDepth(run.DefaultFactsDepth)
+	})
+
+	ctx := context.Background()
+	d, err := Open(filepath.Join(t.TempDir(), "once.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() { _ = d.Close() })
+	s := d.Runs()
+
+	same := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
+	for _, id := range []string{"run_a", "run_b"} {
+		if err := s.SaveHostFacts(ctx, id, []run.HostFacts{{
+			Host: "web01", Facts: map[string]string{"from": id}, GatheredAt: same,
+		}}); err != nil {
+			t.Fatalf("save %s: %v", id, err)
+		}
+	}
+
+	got, err := s.EstateAt(ctx, same.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("estate at: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("estate holds %d rows for one host, want 1. The host is counted once per reading "+
+			"rather than once: %+v", len(got), got)
+	}
+	// Whichever reading wins, the pick has to be stable rather than whatever the engine returns
+	// first, or two identical requests can disagree about the estate.
+	second, err := s.EstateAt(ctx, same.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("estate at, again: %v", err)
+	}
+	if len(second) != 1 || second[0].RunID != got[0].RunID {
+		t.Errorf("two identical requests picked %q then %q, want the same reading both times",
+			got[0].RunID, second[0].RunID)
+	}
+}

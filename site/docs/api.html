@@ -285,12 +285,12 @@ either licensed or absent.</li>
 <tr>
 <td>GET</td>
 <td><code>/v1/estate</code></td>
-<td>The estate as it stood at an instant. <code>at</code> is RFC 3339 and defaults to now, so the current estate is the same query with no argument. Each host carries the newest facts gathered at or before that instant, so a host holds its last observed state until something newer was seen, and a host first gathered afterward is absent rather than invented.</td>
+<td>The estate as it stood at an instant. <code>at</code> is RFC 3339 and defaults to now, so the current estate is the same query with no argument. Each host carries the newest facts gathered at or before that instant, so a host holds its last observed state until something newer was seen, and a host first gathered afterward is absent rather than invented. <code>withheld</code> counts hosts left out because the run that gathered them cannot be read, which includes runs deleted by retention: facts outlive their runs, so a far enough back date reaches readings whose run is gone.</td>
 </tr>
 <tr>
 <td>GET</td>
 <td><code>/v1/changes/{change}</code></td>
-<td>One change: every run carrying the <code>change</code> label with that value, as one thing. Carries the span, who acted, and an outcome derived from the member runs rather than declared, so it cannot disagree with what happened. A change is what an auditor asks about; a run is what an executor produces.</td>
+<td>One change: every run carrying the <code>change</code> label with that value, as one thing. Carries the span, who acted, and an outcome derived from the member runs rather than declared, so it cannot disagree with what happened. A change is what an auditor asks about; a run is what an executor produces. <code>withheld</code> counts members the caller may not read, so a partial change is never mistaken for the whole one.</td>
 </tr>
 <tr>
 <td>GET</td>

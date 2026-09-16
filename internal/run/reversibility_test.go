@@ -2,6 +2,7 @@ package run
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -73,5 +74,33 @@ func TestAReversibilityFloorCoversEverythingHarderToUndo(t *testing.T) {
 					test.Class, test.Floor, got, test.Want)
 			}
 		})
+	}
+}
+
+// TestAPlaybookGradeSaysWhatItLookedAt covers the limit an approver has to be told about.
+//
+// Reversibility reads the command. An Ansible run carries a playbook path and the destructive work
+// is inside a file this never opens, so a playbook that drops every database grades the same as one
+// that restarts a service. That is the flagship tool, so the blindness sits exactly where the
+// product is used most.
+//
+// The class stays costly rather than climbing on a guess, because inferring from a file name would
+// put false confidence behind the word irreversible. The reason carries the limit instead. If the
+// class is ever made to climb, this test should be the thing that stops it being done by guessing.
+func TestAPlaybookGradeSaysWhatItLookedAt(t *testing.T) {
+	t.Parallel()
+	got := AssessReversibility(&Run{Tool: ToolAnsible, Playbook: "/srv/wipe-all-databases.yml"})
+	if got.Class != ReversibleCostly {
+		t.Errorf("class = %q, want %q", got.Class, ReversibleCostly)
+	}
+	var said bool
+	for _, reason := range got.Reasons {
+		if strings.Contains(reason, "were not examined") {
+			said = true
+		}
+	}
+	if !said {
+		t.Errorf("the grade does not say the playbook was not read, so an approver cannot tell "+
+			"the grade is blind to what the playbook does: %v", got.Reasons)
 	}
 }

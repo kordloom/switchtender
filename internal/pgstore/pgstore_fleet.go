@@ -633,15 +633,20 @@ ORDER BY last_seen DESC, claimed_by COLLATE "C"`
 // documents: the stored form drops a trailing zero fraction, so raw text ordering puts a later
 // instant ahead of an earlier one inside the same second and would pick the wrong reading.
 func (s *store) EstateAt(ctx context.Context, at time.Time) ([]run.HostFacts, error) {
+	// One bucket is chosen per host, not one timestamp. Grouping by host on the maximum time and
+	// joining back on equality returns a row per match rather than per host, so two readings sharing
+	// an instant put the same host in the estate twice. An estate that double counts a host is not
+	// an answer an audit can use. The bucket is half the primary key, so ordering on it after the
+	// time makes the pick a single row whatever the timestamps collide on.
 	const q = `
 SELECT h.host, h.run_id, h.facts, h.gathered_at
 FROM host_facts_history h
-JOIN (
-	SELECT host, MAX(` + sqlutil.GatheredOrder + `) AS newest
-	FROM host_facts_history
-	WHERE ` + sqlutil.GatheredOrder + ` <= rtrim($1, 'Z')
-	GROUP BY host
-) pick ON pick.host = h.host AND ` + sqlutil.GatheredOrder + ` = pick.newest
+WHERE h.bucket = (
+	SELECT b.bucket FROM host_facts_history b
+	WHERE b.host = h.host AND rtrim(b.gathered_at, 'Z') <= rtrim($1, 'Z')
+	ORDER BY rtrim(b.gathered_at, 'Z') DESC, b.bucket COLLATE "C" DESC
+	LIMIT 1
+)
 ORDER BY h.host`
 	rows, err := s.db.QueryContext(ctx, q, sqlutil.FormatTime(at))
 	if err != nil {

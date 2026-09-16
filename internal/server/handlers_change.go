@@ -29,6 +29,10 @@ type changeResponse struct {
 	Total int `json:"total"`
 	// Truncated reports that Runs holds fewer than Total.
 	Truncated bool `json:"truncated,omitempty"`
+	// Withheld counts member runs left out because the caller may not read them. Reported rather
+	// than left silent, so a partial change is never mistaken for the whole one: an outcome derived
+	// from half a change can say succeeded about work that failed.
+	Withheld int `json:"withheld,omitempty"`
 }
 
 // Change outcomes, derived from the member runs.
@@ -83,10 +87,13 @@ func changeHandler(store run.Store, authz *authorizer, log *zap.Logger) http.Han
 			return
 		}
 		visible := make([]*run.Run, 0, len(runs))
+		withheld := 0
 		for _, rn := range runs {
 			if keep(rn.ID) {
 				visible = append(visible, rn)
+				continue
 			}
+			withheld++
 		}
 		if len(visible) == 0 {
 			respondError(w, log, http.StatusNotFound, "no runs carry this change")
@@ -95,6 +102,7 @@ func changeHandler(store run.Store, authz *authorizer, log *zap.Logger) http.Han
 		shown, total := cappedList(visible)
 		resp := summarizeChange(name, visible)
 		resp.Runs, resp.Total, resp.Truncated = shown, total, len(shown) < total
+		resp.Withheld = withheld
 		respondJSON(w, log, http.StatusOK, resp, wantsPretty(r))
 	}
 }

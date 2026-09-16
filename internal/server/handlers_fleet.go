@@ -457,6 +457,12 @@ type estateResponse struct {
 	// Truncated reports that Hosts holds fewer than Total, so a caller does not read a prefix as
 	// the whole estate.
 	Truncated bool `json:"truncated,omitempty"`
+	// Withheld counts hosts left out because the run that gathered them could not be read, which
+	// includes the case where that run has been deleted by retention. It is reported rather than
+	// left silent: facts outlive the runs that gathered them on purpose, so asking about a date far
+	// enough back reaches readings whose run is gone, and a grant-restricted caller would otherwise
+	// be handed an empty estate with nothing to say why.
+	Withheld int `json:"withheld,omitempty"`
 }
 
 // estateHandler answers what the estate looked like at an instant.
@@ -499,14 +505,17 @@ func estateHandler(store run.Store, authz *authorizer, log *zap.Logger) http.Han
 		// the way one host's facts already are: an estate view that skipped this would be the
 		// widest read in the product and the easiest way around every grant on it.
 		visible := make([]run.HostFacts, 0, len(hosts))
+		withheld := 0
 		for _, f := range hosts {
 			if keep(f.RunID) {
 				visible = append(visible, f)
+				continue
 			}
+			withheld++
 		}
 		shown, total := cappedList(visible)
 		respondJSON(w, log, http.StatusOK, estateResponse{
-			At: at, Hosts: shown, Total: total, Truncated: len(shown) < total,
+			At: at, Hosts: shown, Total: total, Truncated: len(shown) < total, Withheld: withheld,
 		}, wantsPretty(r))
 	}
 }
