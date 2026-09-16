@@ -15,17 +15,19 @@ import (
 	"github.com/kordloom/switchtender/internal/user"
 )
 
-// TestTheEstateSaysWhatItWithheldWhenTheRunIsGone covers the exact collision this feature has with
+// TestTheEstateStillAnswersAfterItsRunsArePurged covers the exact collision this feature has with
 // retention, with both halves real rather than reasoned about.
 //
 // Facts outlive the runs that gathered them, on purpose, and the estate's whole point is old dates.
-// So the two meet by definition: ask far enough back and the governing run has been deleted. Access
-// is decided by resolving that run, and a deleted run resolves to nothing, so the row is withheld.
+// So the two meet by definition: ask far enough back and the governing run has been deleted.
 //
-// Withholding is right. Silence is not. Without the count a grant-restricted caller asking about
-// last year is handed an empty estate and told nothing, and the obvious reading is that the fleet
-// did not exist.
-func TestTheEstateSaysWhatItWithheldWhenTheRunIsGone(t *testing.T) {
+// Readability used to be decided by resolving that run, and a deleted run resolves to nothing, so
+// every reading it governed was withheld: a grant-restricted caller asking about last year got an
+// empty estate, and the obvious reading of that is that the fleet did not exist. The purge now
+// retains what decided readability, so the answer survives the run.
+//
+// The other half matters as much: retaining the decision must not widen what anybody can read.
+func TestTheEstateStillAnswersAfterItsRunsArePurged(t *testing.T) {
 	t.Parallel()
 	run.SetFactsInterval(0)
 	run.SetFactsDepth(0)
@@ -82,20 +84,31 @@ func TestTheEstateSaysWhatItWithheldWhenTheRunIsGone(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 
-	// Both readings survived the purge, and neither is readable now: resolving a deleted run to
-	// decide access can only fail. So the estate is empty, and the count is the only thing that
-	// says why.
-	if got.Withheld == 0 {
-		t.Errorf("the estate withheld nothing and returned %d hosts. Either the readings did not "+
-			"survive the purge, or rows were dropped with nothing to say so: %+v", got.Total, got)
+	// Both readings survived the purge, and the granted one is still readable, because the purge
+	// retained what decided readability rather than only the run. This assertion read the other way
+	// until it did: the estate came back empty, and the count was the only thing saying why.
+	if len(got.Hosts) != 1 {
+		t.Fatalf("estate holds %d hosts after the purge, want the one the caller is granted. "+
+			"Readability is being decided by resolving a run that no longer exists: %+v",
+			len(got.Hosts), got)
+	}
+	if got.Hosts[0].Host != "web01" {
+		t.Errorf("estate shows %s, want web01, the host gathered by the granted run",
+			got.Hosts[0].Host)
 	}
 	if got.Total != len(got.Hosts) {
 		t.Errorf("total %d does not match the %d hosts shown", got.Total, len(got.Hosts))
 	}
-	// And a withheld row is genuinely absent rather than leaked.
+	// The ungranted one is still withheld, and still counted. Retaining the decision must not have
+	// widened what anybody can read: it restores the answer the caller always should have got.
+	if got.Withheld != 1 {
+		t.Errorf("withheld = %d, want 1. The reading gathered by a run this caller was never "+
+			"granted is either leaking or vanishing without a count", got.Withheld)
+	}
 	for _, h := range got.Hosts {
 		if h.Host == "db01" {
-			t.Error("a host gathered by an ungranted run was returned")
+			t.Error("a host gathered by an ungranted run was returned: retaining the authorization " +
+				"decision widened what a caller can read, which is the one thing it must not do")
 		}
 	}
 }

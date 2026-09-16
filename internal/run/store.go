@@ -236,6 +236,15 @@ type Store interface {
 	// HostFactsFor returns a host's most recently gathered facts, or ErrNotFound when a host has
 	// never been gathered.
 	HostFactsFor(ctx context.Context, host string) (*HostFacts, error)
+	// RunAuthFor returns what decides a run's readability, from the run while it exists and from
+	// the retained decision once retention has deleted it. It returns ErrNotFound when neither is
+	// held.
+	//
+	// One accessor on purpose. Derived rows outlive their runs, so whether somebody may read a
+	// summary, a drift row, or a state reading has to answer the same before and after the run is
+	// purged. Two lookups meant to agree would eventually disagree, silently, in the direction of
+	// showing somebody something.
+	RunAuthFor(ctx context.Context, id string) (*RunAuth, error)
 	// EstateHorizon returns the oldest retained host state reading, zero when none is held.
 	//
 	// It is what separates "the estate was empty then" from "our records do not reach that far".

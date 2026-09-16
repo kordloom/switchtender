@@ -146,6 +146,23 @@ CREATE TABLE IF NOT EXISTS host_facts (
 -- now". This table is the same readings kept over time, which is what answers "what did the estate
 -- look like on the audit date". Keyed by bucket rather than by run so a second gather inside the
 -- same period replaces the first: see run.FactsBucket for how a bucket is chosen and why changing
+-- run_auth is what decides who may read a run, kept after the run itself is deleted.
+--
+-- Derived rows outlive their runs on purpose: summaries, drift, and host state history answer
+-- questions about a fleet over time. Readability is decided by resolving the governing run, so a
+-- purged run made every derived row it governs unreadable to a grant-restricted caller, silently.
+-- Retaining the decision rather than the run closes that without creating a second authorization
+-- rule: see run.RunAuth.
+--
+-- It is small by construction, a handful of ids, so it can be kept for far longer than a run.
+CREATE TABLE IF NOT EXISTS run_auth (
+	run_id             TEXT PRIMARY KEY,
+	org_id             TEXT NOT NULL DEFAULT '',
+	project_id         TEXT NOT NULL DEFAULT '',
+	inventory_id       TEXT NOT NULL DEFAULT '',
+	pull_credential_id TEXT NOT NULL DEFAULT '',
+	credential_ids     TEXT NOT NULL DEFAULT ''
+);
 -- the spacing later is safe.
 CREATE TABLE IF NOT EXISTS host_facts_history (
 	host        TEXT NOT NULL,

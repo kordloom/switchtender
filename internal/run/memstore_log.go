@@ -168,6 +168,13 @@ func (m *memStore) PurgeRunsBefore(_ context.Context, cutoff time.Time) (int, er
 		if r.IdempotencyKey != "" && m.byKey[r.IdempotencyKey] == id {
 			delete(m.byKey, r.IdempotencyKey)
 		}
+		// The readability decision is kept before the run goes, because the derived rows it governs
+		// outlive it. Without this a purge silently made every summary, drift row, and state
+		// reading it governs unreadable to a grant-restricted caller.
+		if m.runAuth == nil {
+			m.runAuth = make(map[string]RunAuth)
+		}
+		m.runAuth[id] = *AuthOf(r)
 		delete(m.runs, id)
 		delete(m.events, id)
 		delete(m.logs, id)

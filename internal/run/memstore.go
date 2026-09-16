@@ -17,6 +17,9 @@ type memStore struct {
 	mu sync.RWMutex
 	// runs maps run id to the stored run.
 	runs map[string]*Run
+	// runAuth retains what decided a purged run's readability, so the derived rows that outlive it
+	// stay readable to whoever could always read them.
+	runAuth map[string]RunAuth
 	// byKey maps a non-empty idempotency key to the id of the run that holds it, mirroring the
 	// partial unique index the SQL backends use to dedupe submissions.
 	byKey map[string]string

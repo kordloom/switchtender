@@ -193,6 +193,12 @@ func (c *Client) HostFactsFor(context.Context, string) (*run.HostFacts, error) {
 	return nil, ErrUnsupported
 }
 
+// RunAuthFor is a control-node read and is not served to workers. A worker executes what it is
+// leased and never decides who may read anything.
+func (c *Client) RunAuthFor(context.Context, string) (*run.RunAuth, error) {
+	return nil, ErrUnsupported
+}
+
 // EstateHorizon is a control-node read and is not served to workers.
 func (c *Client) EstateHorizon(context.Context) (time.Time, error) {
 	return time.Time{}, ErrUnsupported
