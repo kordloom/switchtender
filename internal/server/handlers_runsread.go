@@ -13,6 +13,8 @@ import (
 	"github.com/kordloom/switchtender/internal/event"
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/user"
+	"io"
+	"os"
 )
 
 // listRunsResponse wraps a run list. The envelope leaves room for pagination fields later.
@@ -311,7 +313,7 @@ func getRunHandler(store run.Store, authz *authorizer, log *zap.Logger) http.Han
 		// grade whether it can be taken back, which risk does not answer.
 		risk := run.AssessRisk(got)
 		got.Risk = &risk
-		undo := run.AssessReversibility(got)
+		undo := run.AssessReversibilityFrom(got, reversibilityEvidence(r.Context(), store, got))
 		got.Reversibility = &undo
 		respondJSON(w, log, http.StatusOK, scrubbedRun(r.Context(), maskRun(got)), wantsPretty(r))
 	}
@@ -547,3 +549,36 @@ func (t *tailBuffer) bytes() []byte { return t.buf }
 
 // omitted reports how many bytes were dropped from the front.
 func (t *tailBuffer) omitted() int64 { return t.dropped }
+
+// maxPlaybookScanBytes caps how much of a playbook is read to grade a run. A playbook this large is
+// not one a person wrote, and the grade is a convenience on a read path rather than a reason to
+// pull an arbitrary amount of a file into memory on every view of a run.
+const maxPlaybookScanBytes = 1 << 20
+
+// reversibilityEvidence gathers what can be known about whether a run can be taken back.
+//
+// Two sources, both optional. The per host outcome of a finished run answers whether anything
+// actually changed, which no prediction can. The playbook's own text answers what an Ansible run
+// would do, which the command line cannot because an Ansible run has no command.
+//
+// Reading the playbook is not a new capability: the server already hands that exact path to
+// ansible-playbook when the run executes. Every failure here is silent on purpose, because a grade
+// is an aid to an approver and a missing file is a reason to grade with less rather than to refuse
+// to answer.
+func reversibilityEvidence(ctx context.Context, store run.Store, r *run.Run) run.ReversibilityEvidence {
+	var ev run.ReversibilityEvidence
+	if r.Status.Terminal() {
+		if hosts, err := store.RunHostSummaries(ctx, r.ID); err == nil {
+			ev.Hosts = hosts
+		}
+	}
+	if run.NormalizeTool(r.Tool) == run.ToolAnsible && r.Playbook != "" {
+		if f, err := os.Open(r.Playbook); err == nil {
+			defer func() { _ = f.Close() }()
+			if content, rerr := io.ReadAll(io.LimitReader(f, maxPlaybookScanBytes)); rerr == nil {
+				ev.Playbook = content
+			}
+		}
+	}
+	return ev
+}

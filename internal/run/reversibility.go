@@ -55,11 +55,46 @@ func reversibilityRank(class string) int {
 // always be walked back by doing more work, and almost never for free, so costly is the honest
 // middle. Reversible is reserved for a run that changed nothing at all.
 func AssessReversibility(r *Run) Reversibility {
+	return AssessReversibilityFrom(r, ReversibilityEvidence{})
+}
+
+// ReversibilityEvidence carries what a caller was able to gather, so a grade can be as true as the
+// information available allows. Every field is optional and an absent one only ever leaves the
+// grade less certain, never wrong in the safe direction.
+type ReversibilityEvidence struct {
+	// Playbook is the playbook's own text, when it could be read. It is what closes the gap for
+	// Ansible, whose destructive work lives in a file rather than in a command.
+	Playbook []byte
+	// Hosts are the per host outcomes of a finished run. They answer the question no prediction
+	// can: whether anything actually changed.
+	Hosts []HostSummary
+}
+
+// AssessReversibilityFrom grades r using whatever evidence the caller could gather.
+//
+// The order matters and runs from strongest evidence to weakest. What actually happened beats what
+// a file says will happen, which beats what a command line looks like.
+func AssessReversibilityFrom(r *Run, ev ReversibilityEvidence) Reversibility {
 	if r == nil {
 		return Reversibility{Class: Reversible}
 	}
 	if r.DryRun {
 		return Reversibility{Class: Reversible, Reasons: []string{"dry run, changes nothing to undo"}}
+	}
+	// Ansible is idempotent, and a finished run says how many tasks actually changed a host. None
+	// means nothing happened, and nothing that happened can need undoing. This is the strongest
+	// evidence there is, because it is the outcome rather than a prediction about it, and it is the
+	// one case where a run that could have been destructive provably was not.
+	if r.Status.Terminal() && len(ev.Hosts) > 0 {
+		changed := 0
+		for _, h := range ev.Hosts {
+			changed += h.Changed
+		}
+		if changed == 0 {
+			return Reversibility{Class: Reversible, Reasons: []string{
+				"finished with no host reporting a change, so there is nothing to undo",
+			}}
+		}
 	}
 
 	cmd := strings.ToLower(r.Command)
@@ -71,6 +106,28 @@ func AssessReversibility(r *Run) Reversibility {
 	}
 	if len(reasons) > 0 {
 		return Reversibility{Class: Irreversible, Reasons: reasons}
+	}
+	// The playbook's own text, which is where an Ansible run keeps the work that a command line
+	// would otherwise show. Only ever raises the grade, so a file that could not be read or an
+	// include that was not followed leaves it where it was.
+	if len(ev.Playbook) > 0 {
+		signals, perr := ScanPlaybook(ev.Playbook)
+		if perr == nil && len(signals.Permanent) > 0 {
+			if signals.Deferred {
+				signals.Permanent = append(signals.Permanent,
+					"roles and includes were not followed, so there may be more")
+			}
+			return Reversibility{Class: Irreversible, Reasons: signals.Permanent}
+		}
+		if perr == nil {
+			reasons := []string{"changes state, so undoing it means running something else",
+				"the playbook was read and holds nothing this grades as permanent"}
+			if signals.Deferred {
+				reasons = append(reasons,
+					"roles and includes were not followed, so this covers the playbook only")
+			}
+			return Reversibility{Class: ReversibleCostly, Reasons: reasons}
+		}
 	}
 	if r.Command == "" {
 		// Nothing to read. An Ansible run carries a playbook path, and what the playbook does is

@@ -159,11 +159,101 @@ func TestAChangeAndItsReversibilityAgainstARealFleet(t *testing.T) {
 	if one.Reversibility == nil {
 		t.Fatal("a run read back carries no reversibility grade, so an approver sees only risk")
 	}
-	if one.Reversibility.Class != run.ReversibleCostly {
-		t.Errorf("a playbook run graded %q, want %q: it changed state and undoing it means "+
-			"running something else", one.Reversibility.Class, run.ReversibleCostly)
+	// The newest member ran /bin/true with changed_when false, so Ansible reported no change on any
+	// host. Nothing happened, so there is nothing to undo, and the outcome is what says so: this
+	// assertion read costly until the grade learned to use the run's own result.
+	if one.Reversibility.Class != run.Reversible {
+		t.Errorf("a run that changed nothing graded %q, want %q: %v",
+			one.Reversibility.Class, run.Reversible, one.Reversibility.Reasons)
 	}
 	if one.Risk == nil {
 		t.Error("the risk grade went missing when reversibility was added beside it")
+	}
+}
+
+// TestReversibilityReadsTheRealPlaybook proves the grade is no longer blind to Ansible.
+//
+// Reversibility reads a command, and an Ansible run has none, so a playbook that destroys data used
+// to grade exactly like one that restarts a service. This runs a genuinely destructive playbook
+// against real hosts and checks the grade an approver would have seen.
+//
+// It also covers the idempotency case, which is the strongest evidence there is: the same playbook
+// run a second time changes nothing, because the file is already gone, and a run that provably
+// changed nothing has nothing to undo.
+func TestReversibilityReadsTheRealPlaybook(t *testing.T) {
+	requireStack(t)
+	buildImage(t)
+	key, pub := keypair(t)
+	hosts := startHosts(t, 2, pub)
+	inventory := writeInventory(t, hosts, key)
+	base := startServer(t)
+
+	// Create a file, then a second playbook that removes it. Removal is the permanent one.
+	seed := writePlaybook(t, `
+---
+- name: Seed
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Wait for ssh readiness
+      ansible.builtin.wait_for_connection:
+        timeout: 60
+    - name: Place the archive
+      ansible.builtin.copy:
+        content: "irreplaceable\n"
+        dest: /tmp/switchtender-archive
+`)
+	wipe := writePlaybook(t, `
+---
+- name: Wipe
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Remove the archive
+      ansible.builtin.file:
+        path: /tmp/switchtender-archive
+        state: absent
+`)
+
+	var seeded run.Run
+	postJSON(t, base+"/v1/runs",
+		fmt.Sprintf(`{"playbook":%q,"inventory":%q}`, seed, inventory), &seeded)
+	if got := waitTerminal(t, base, seeded.ID); got.Status != run.StatusSucceeded {
+		t.Fatalf("seed run status = %q, want succeeded", got.Status)
+	}
+
+	// First wipe: the archive exists, so the run removes it and something changed.
+	var first run.Run
+	postJSON(t, base+"/v1/runs",
+		fmt.Sprintf(`{"playbook":%q,"inventory":%q}`, wipe, inventory), &first)
+	waitTerminal(t, base, first.ID)
+
+	var read run.Run
+	getJSON(t, base+"/v1/runs/"+first.ID, &read)
+	if read.Reversibility == nil {
+		t.Fatal("no reversibility grade on a finished run")
+	}
+	if read.Reversibility.Class != run.Irreversible {
+		t.Errorf("a playbook that removed a file graded %q, want %q. The grade is still blind to "+
+			"what the playbook does: %v", read.Reversibility.Class, run.Irreversible,
+			read.Reversibility.Reasons)
+	}
+
+	// Second wipe: the archive is already gone, so Ansible changes nothing. Nothing happened, so
+	// nothing needs undoing, and that is knowable only from the outcome.
+	var second run.Run
+	postJSON(t, base+"/v1/runs",
+		fmt.Sprintf(`{"playbook":%q,"inventory":%q}`, wipe, inventory), &second)
+	waitTerminal(t, base, second.ID)
+
+	var again run.Run
+	getJSON(t, base+"/v1/runs/"+second.ID, &again)
+	if again.Reversibility == nil {
+		t.Fatal("no reversibility grade on the second run")
+	}
+	if again.Reversibility.Class != run.Reversible {
+		t.Errorf("a run that changed nothing graded %q, want %q. The same playbook that destroyed "+
+			"something the first time destroyed nothing this time, and the outcome says so: %v",
+			again.Reversibility.Class, run.Reversible, again.Reversibility.Reasons)
 	}
 }

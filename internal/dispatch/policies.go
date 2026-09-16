@@ -43,11 +43,12 @@ func (d *Dispatcher) requiresApproval(ctx context.Context, r *run.Run) (bool, er
 	// The rule that held the run is recorded on it here, while the rule is in hand. Looking it up
 	// when the evidence is read would answer with today's policies rather than the one that
 	// actually stopped the change, and would answer with nothing at all once it is deleted.
-	if p := policy.Requiring(policies, r); p != nil {
+	gr := graded(r)
+	if p := policy.Requiring(policies, gr); p != nil {
 		r.HeldByPolicy = p.Label()
 		// The label names the first rule for the evidence; the flag is the OR of every matching
 		// rule, and an explicitly requested distinct approver is never lowered by a policy.
-		r.RequireDistinctApprover = r.RequireDistinctApprover || policy.RequireDistinct(policies, r)
+		r.RequireDistinctApprover = r.RequireDistinctApprover || policy.RequireDistinct(policies, gr)
 		return true, nil
 	}
 	return false, nil
@@ -84,7 +85,7 @@ func (d *Dispatcher) denied(ctx context.Context, r *run.Run) error {
 	// read again. Every submit path passes through this check, including a run born held, which is what
 	// makes the record complete rather than a property of the gated ones.
 	stampPolicySet(r, policies)
-	if p := policy.Denying(policies, r); p != nil {
+	if p := policy.Denying(policies, graded(r)); p != nil {
 		return fmt.Errorf("%w: policy %q refuses this submission", ErrPolicyDenied, p.Label())
 	}
 	return nil
@@ -109,11 +110,11 @@ func (d *Dispatcher) pipelineDenied(ctx context.Context, parent *run.Run, steps 
 		return fmt.Errorf("%w: approval policies could not be read, so the pipeline is refused "+
 			"rather than run past a gate that could not be checked: %w", ErrPolicyUnavailable, err)
 	}
-	if p := policy.Denying(policies, parent); p != nil {
+	if p := policy.Denying(policies, graded(parent)); p != nil {
 		return fmt.Errorf("%w: policy %q refuses this submission", ErrPolicyDenied, p.Label())
 	}
 	for i, step := range steps {
-		if p := policy.Denying(policies, stepRun(parent, step, i, 0, baseStepVars(parent))); p != nil {
+		if p := policy.Denying(policies, graded(stepRun(parent, step, i, 0, baseStepVars(parent)))); p != nil {
 			return fmt.Errorf("%w: policy %q refuses step %q", ErrPolicyDenied, p.Label(), step.Name)
 		}
 	}
@@ -138,16 +139,17 @@ func (d *Dispatcher) pipelineRequiresApproval(ctx context.Context, parent *run.R
 			"refused rather than run past a gate that could not be checked: %w",
 			ErrPolicyUnavailable, err)
 	}
-	if p := policy.Requiring(policies, parent); p != nil {
+	gp := graded(parent)
+	if p := policy.Requiring(policies, gp); p != nil {
 		parent.HeldByPolicy = p.Label()
 		parent.RequireDistinctApprover = parent.RequireDistinctApprover ||
-			policy.RequireDistinct(policies, parent)
+			policy.RequireDistinct(policies, gp)
 		return true, nil
 	}
 	for i, step := range steps {
 		// A pipeline held because one of its steps matches records that rule too: the whole graph
 		// is held, so the evidence has to say which step's rule stopped it.
-		if p := policy.Requiring(policies, stepRun(parent, step, i, 0, baseStepVars(parent))); p != nil {
+		if p := policy.Requiring(policies, graded(stepRun(parent, step, i, 0, baseStepVars(parent)))); p != nil {
 			parent.HeldByPolicy = p.Label()
 			parent.RequireDistinctApprover = parent.RequireDistinctApprover ||
 				policy.RequireDistinct(policies, stepRun(parent, step, i, 0, baseStepVars(parent)))

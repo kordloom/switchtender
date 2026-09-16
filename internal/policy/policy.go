@@ -127,8 +127,7 @@ func (p *Policy) Matches(r *run.Run) bool {
 	if p.MinRisk != "" && !meetsRiskFloor(run.AssessRisk(r).Level, p.MinRisk) {
 		return false
 	}
-	if p.Reversibility != "" &&
-		!run.MeetsReversibilityFloor(run.AssessReversibility(r).Class, p.Reversibility) {
+	if p.Reversibility != "" && !run.MeetsReversibilityFloor(reversibilityOf(r), p.Reversibility) {
 		return false
 	}
 	return true
@@ -363,4 +362,17 @@ func NewPolicy(name string) *Policy {
 // NewID returns a random policy identifier prefixed with "pol_".
 func NewID() string {
 	return idgen.New("pol_", 6)
+}
+
+// reversibilityOf reads the grade already attached to a run, falling back to grading it here.
+//
+// A grade computed from the run alone is blind to an Ansible playbook, because the work is inside a
+// file and the run carries only its path. A caller that could read the playbook attaches the richer
+// grade first, and this prefers it: without that, a rule written to hold anything that cannot be
+// undone would never fire on the tool this product exists to run.
+func reversibilityOf(r *run.Run) string {
+	if r.Reversibility != nil {
+		return r.Reversibility.Class
+	}
+	return run.AssessReversibility(r).Class
 }
