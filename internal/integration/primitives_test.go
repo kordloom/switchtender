@@ -320,3 +320,63 @@ func TestReversibilityReadsTheRealPlaybook(t *testing.T) {
 			again.Reversibility.Class, run.Reversible, again.Reversibility.Reasons)
 	}
 }
+
+// TestARelaunchStaysInsideItsChange covers the Change's core value on a real fleet.
+//
+// A change is a label, and the point of it is holding a failure together with the fix that followed.
+// The most natural fix is relaunching the hosts a run left failed, and that path built its new run
+// from the execution spec alone, which carries how a run executes and not what it is. So the fix
+// dropped out of the change it was fixing, and the change reported failed rather than mixed: the
+// one shape it exists to show, missing from the one sequence that produces it.
+func TestARelaunchStaysInsideItsChange(t *testing.T) {
+	requireStack(t)
+	buildImage(t)
+	key, pub := keypair(t)
+	hosts := startHosts(t, 2, pub)
+	inventory := writeInventory(t, hosts, key)
+	base := startServer(t)
+
+	// Fails on the first host only, so a relaunch of the failed hosts is a real, partial fix.
+	playbook := writePlaybook(t, `
+---
+- name: Partial
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Wait for ssh readiness
+      ansible.builtin.wait_for_connection:
+        timeout: 60
+    - name: Fail on one host
+      ansible.builtin.command: /bin/false
+      when: inventory_hostname == fail_host
+`)
+	const change = "OPS-900-partial-rollout"
+	var first run.Run
+	postJSON(t, base+"/v1/runs", fmt.Sprintf(
+		`{"playbook":%q,"inventory":%q,"labels":{"change":%q},"extra_vars":{"fail_host":%q}}`,
+		playbook, inventory, change, hosts[0].Name), &first)
+	if got := waitTerminal(t, base, first.ID); got.Status == run.StatusSucceeded {
+		t.Fatalf("the seeding run succeeded, so there is nothing to relaunch")
+	}
+
+	// Relaunch only the hosts it left failed, which is the fix.
+	var fix run.Run
+	postJSON(t, base+"/v1/runs/"+first.ID+"/relaunch-failed", `{}`, &fix)
+	waitTerminal(t, base, fix.ID)
+
+	var got struct {
+		Outcome string     `json:"outcome"`
+		Total   int        `json:"total"`
+		Runs    []*run.Run `json:"runs"`
+	}
+	getJSON(t, base+"/v1/changes/"+change, &got)
+	if got.Total != 2 {
+		t.Fatalf("the change holds %d runs, want 2. The relaunch dropped the change label, so the "+
+			"fix is not part of the change it fixes", got.Total)
+	}
+	for _, r := range got.Runs {
+		if r.Labels["change"] != change {
+			t.Errorf("run %s carries change %q, want %q", r.ID, r.Labels["change"], change)
+		}
+	}
+}

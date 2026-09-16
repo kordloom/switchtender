@@ -338,6 +338,18 @@ func inheritExecution(child, parent *run.Run) {
 	for _, opt := range parent.ExecutionOptions() {
 		opt(child)
 	}
+	// Labels as well, which ExecutionOptions leaves out on purpose: it carries how a run executes,
+	// and a label is what the run is. A derived run is still the same work, so it belongs to the
+	// same change, the same ticket, and the same environment as the one it came from.
+	//
+	// Without this the change label was dropped by exactly the paths that produce a fix. A split
+	// fails, its failed shards are retried, and the retry is not part of the change it fixes: the
+	// change reports failed rather than mixed, which is the one shape it exists to show. The rerun
+	// path added labels by hand and the other two did not, which is the same loss a comment two
+	// functions away already records costing a rerun its timeout and its notifications.
+	if len(parent.Labels) > 0 {
+		run.WithLabels(parent.Labels)(child)
+	}
 }
 
 // RetryFailedShards creates and starts a new split run that re-runs only the failed shards of a
@@ -515,6 +527,10 @@ func (d *Dispatcher) RelaunchFailedHosts(ctx context.Context, runID, actor, acto
 		return nil, ErrNoFailedHosts
 	}
 	opts := append(src.ExecutionOptions(),
+		// The same work, so the same labels: a relaunch of the hosts a run left failed belongs to
+		// the change that run belonged to. ExecutionOptions carries how a run executes and not what
+		// it is, so without this the fix drops out of the change it is fixing.
+		run.WithLabels(src.Labels),
 		run.WithLimit(strings.Join(failed, ",")),
 		run.WithSource("relaunch", runID),
 		run.WithRetryOf(runID),
