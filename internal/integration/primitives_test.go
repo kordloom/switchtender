@@ -116,19 +116,32 @@ func TestEstateAtAgainstARealFleet(t *testing.T) {
 		}
 	}
 
-	// A window with no gather in it: every host is present at both ends and identical, so nothing
-	// differs and the count says the estate was quiet rather than the query finding nothing.
+	// A window that opens after the gather: nothing was observed inside it, so every host is
+	// carried forward rather than confirmed. This is the distinction the diff exists to draw, and
+	// the assertion read the other way until it could be drawn: nobody looked is not the same as
+	// looked and found unchanged, and folding the first into the second is how a fleet quietly
+	// stops being monitored.
 	var quiet struct {
-		Hosts     []any `json:"hosts"`
-		Unchanged int   `json:"unchanged"`
+		Hosts []struct {
+			Host  string `json:"host"`
+			State string `json:"state"`
+		} `json:"hosts"`
+		Unchanged int `json:"unchanged"`
 	}
 	getJSON(t, base+"/v1/estate/diff?from="+time.Now().UTC().Format(time.RFC3339), &quiet)
-	if len(quiet.Hosts) != 0 {
-		t.Errorf("a window with no gather in it reports %d differences, want none", len(quiet.Hosts))
+	if len(quiet.Hosts) != len(hosts) {
+		t.Fatalf("a window with no gather in it reports %d hosts, want all %d carried forward",
+			len(quiet.Hosts), len(hosts))
 	}
-	if quiet.Unchanged != len(hosts) {
-		t.Errorf("unchanged = %d, want the %d hosts that sat still. Without it a short list reads "+
-			"as a query that found nothing", quiet.Unchanged, len(hosts))
+	for _, h := range quiet.Hosts {
+		if h.State != "unobserved" {
+			t.Errorf("host %s is %q across a window nothing gathered in, want unobserved",
+				h.Host, h.State)
+		}
+	}
+	if quiet.Unchanged != 0 {
+		t.Errorf("unchanged = %d, want none: unchanged means gathered and found identical, which "+
+			"is a stronger claim than anything this window supports", quiet.Unchanged)
 	}
 }
 
