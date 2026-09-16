@@ -757,6 +757,16 @@ node over the mesh relay, with no database access of its own.</p>
 <td>Default cap on how long a run may execute before it is canceled and failed, for example <code>1h</code>. Zero leaves runs uncapped.</td>
 </tr>
 <tr>
+<td><code>--facts-interval</code></td>
+<td><code>24h</code></td>
+<td>Minimum spacing between retained host state snapshots. Applies only with <code>--db</code>: a worker using <code>--server</code> reports what it gathered to the control node, which spaces the history with its own setting.</td>
+</tr>
+<tr>
+<td><code>--retain-facts</code></td>
+<td><code>400</code></td>
+<td>Snapshots kept per host. Applies only with <code>--db</code>, for the same reason.</td>
+</tr>
+<tr>
 <td><code>--allow-container-ee</code></td>
 <td><code>false</code></td>
 <td>Allow container execution environments on this worker. Needs Docker.</td>

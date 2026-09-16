@@ -197,6 +197,8 @@ node over the mesh relay, with no database access of its own.
 | `--queue` | none | Queue this worker serves. Repeatable. Without any, it serves the default pool. |
 | `--workers` | `4` | Concurrent runs this process executes at once. At least 1: a worker with no slots would lease nothing and sit idle. |
 | `--run-timeout` | `0` | Default cap on how long a run may execute before it is canceled and failed, for example `1h`. Zero leaves runs uncapped. |
+| `--facts-interval` | `24h` | Minimum spacing between retained host state snapshots. Applies only with `--db`: a worker using `--server` reports what it gathered to the control node, which spaces the history with its own setting. |
+| `--retain-facts` | `400` | Snapshots kept per host. Applies only with `--db`, for the same reason. |
 | `--allow-container-ee` | `false` | Allow container execution environments on this worker. Needs Docker. |
 | `--default-image` | none | Fallback execution image for runs that pin none at the run, template, or project level. |
 | `--require-image-digest` | `false` | Reject a container run whose image is not pinned to an `@sha256:` digest. |

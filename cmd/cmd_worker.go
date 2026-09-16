@@ -108,8 +108,9 @@ func init() {
 		"Reject a container run whose image is not pinned to an @sha256: digest.")
 	workerCmd.Flags().DurationVar(&workerFactsInterval, "facts-interval", run.DefaultFactsInterval,
 		"Minimum spacing between retained host state snapshots, for example 24h. Zero keeps every "+
-			"gather. A worker gathers facts like the server does, so this must match the control "+
-			"node's setting or the estate history is recorded at two granularities.")
+			"gather. Applies only to a worker holding its own database with --db: a worker using "+
+			"--server reports what it gathered to the control node, which spaces and bounds the "+
+			"history with its own setting.")
 	workerCmd.Flags().IntVar(&workerRetainFacts, "retain-facts", run.DefaultFactsDepth,
 		"Keep only this many host state snapshots for each host. Zero keeps every snapshot forever.")
 	workerCmd.Flags().IntVar(&workerWorkers, "workers", dispatch.DefaultWorkers,
