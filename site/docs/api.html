@@ -284,6 +284,11 @@ either licensed or absent.</li>
 </tr>
 <tr>
 <td>GET</td>
+<td><code>/v1/estate</code></td>
+<td>The estate as it stood at an instant. <code>at</code> is RFC 3339 and defaults to now, so the current estate is the same query with no argument. Each host carries the newest facts gathered at or before that instant, so a host holds its last observed state until something newer was seen, and a host first gathered afterward is absent rather than invented.</td>
+</tr>
+<tr>
+<td>GET</td>
 <td><code>/v1/tasks</code></td>
 <td>Per-task duration trends over recent runs.</td>
 </tr>

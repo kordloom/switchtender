@@ -70,6 +70,7 @@ Two more are enforced somewhere other than the request:
 | GET    | `/v1/fleet`                | Hosts ranked by failures over recent runs, flaky flags. |
 | GET    | `/v1/hosts/{host}/runs`    | One host's recent per-run outcomes.                     |
 | GET    | `/v1/hosts/{host}/facts`   | The most recent Ansible facts gathered for one host.    |
+| GET    | `/v1/estate`               | The estate as it stood at an instant. `at` is RFC 3339 and defaults to now, so the current estate is the same query with no argument. Each host carries the newest facts gathered at or before that instant, so a host holds its last observed state until something newer was seen, and a host first gathered afterward is absent rather than invented. |
 | GET    | `/v1/tasks`                | Per-task duration trends over recent runs.              |
 | GET    | `/v1/drift`                | Resources drifting from desired state, from dry runs.   |
 | POST   | `/v1/projects`             | Register a git project. Runs record their commit.       |

@@ -307,6 +307,11 @@ type Run struct {
 	// Risk grades the run's blast radius for an approver. It is computed on read, never stored, so
 	// it is nil unless a handler filled it in.
 	Risk *Risk `json:"risk,omitempty"`
+	// Reversibility grades whether the run can be taken back, beside the risk grade and for the
+	// same reader. It is computed on read, never stored, so it is nil unless a handler filled it
+	// in. An approver weighing a hold needs both: risk says how bad, this says whether there is a
+	// second chance.
+	Reversibility *Reversibility `json:"reversibility,omitempty"`
 	// Notifications are per-run notification targets, copied from the launching template, that
 	// receive this run's terminal state in addition to the server-wide channels.
 	Notifications []NotifyTarget `json:"notifications,omitempty"`

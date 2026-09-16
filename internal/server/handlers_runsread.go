@@ -307,9 +307,12 @@ func getRunHandler(store run.Store, authz *authorizer, log *zap.Logger) http.Han
 		if authorizeRunAccess(w, r, authz, log, got) {
 			return
 		}
-		// Grade the run's blast radius so an approver sees the risk without opening the log.
+		// Grade the run's blast radius so an approver sees the risk without opening the log, and
+		// grade whether it can be taken back, which risk does not answer.
 		risk := run.AssessRisk(got)
 		got.Risk = &risk
+		undo := run.AssessReversibility(got)
+		got.Reversibility = &undo
 		respondJSON(w, log, http.StatusOK, scrubbedRun(r.Context(), maskRun(got)), wantsPretty(r))
 	}
 }

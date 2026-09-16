@@ -10,6 +10,7 @@ import (
 	"github.com/kordloom/switchtender/internal/grant"
 	"github.com/kordloom/switchtender/internal/run"
 	"go.uber.org/zap"
+	"time"
 )
 
 // defaultFleetWindow is the number of recent runs per host considered when no window is given.
@@ -443,4 +444,69 @@ func filterHostHealth(h run.HostHealth, keep func(string) bool) (run.HostHealth,
 		h.LastOutcome = outcomes[0]
 	}
 	return h, true
+}
+
+// estateResponse carries the estate as it stood at an instant.
+type estateResponse struct {
+	// At is the instant asked about, echoed so a stored answer says what question it answers.
+	At time.Time `json:"at"`
+	// Hosts are the facts in effect at that instant, ordered by host.
+	Hosts []run.HostFacts `json:"hosts"`
+	// Total is how many hosts were in effect before the response was capped.
+	Total int `json:"total"`
+	// Truncated reports that Hosts holds fewer than Total, so a caller does not read a prefix as
+	// the whole estate.
+	Truncated bool `json:"truncated,omitempty"`
+}
+
+// estateHandler answers what the estate looked like at an instant.
+//
+// This is the question a live view cannot answer, because a live view holds only what is true now.
+// An auditor asks what was running on the date of the last review, and until the state history
+// existed the honest answer was that nobody could say: each gather overwrote the one before it.
+//
+// The ?at= parameter is RFC 3339 and defaults to now, which makes the current estate the zero
+// argument case of the same query rather than a separate endpoint.
+func estateHandler(store run.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
+	if store == nil {
+		panic("server: estateHandler: Store required")
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		at := time.Now()
+		if raw := r.URL.Query().Get("at"); raw != "" {
+			parsed, perr := time.Parse(time.RFC3339, raw)
+			if perr != nil {
+				respondError(w, log, http.StatusBadRequest,
+					"at must be an RFC 3339 instant, for example 2026-03-01T00:00:00Z")
+				return
+			}
+			at = parsed
+		}
+		keep, _, ferr := derivedReadFilter(r.Context(), authz, store)
+		if ferr != nil {
+			log.Error("server: read filter: " + ferr.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not read the estate")
+			return
+		}
+		hosts, err := store.EstateAt(r.Context(), at)
+		if err != nil {
+			log.Error("server: estate at: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not read the estate")
+			return
+		}
+		// Facts carry the run that gathered them, so a caller who may not read that run may not
+		// read what it learned about the host. Filtered per row rather than on the whole answer,
+		// the way one host's facts already are: an estate view that skipped this would be the
+		// widest read in the product and the easiest way around every grant on it.
+		visible := make([]run.HostFacts, 0, len(hosts))
+		for _, f := range hosts {
+			if keep(f.RunID) {
+				visible = append(visible, f)
+			}
+		}
+		shown, total := cappedList(visible)
+		respondJSON(w, log, http.StatusOK, estateResponse{
+			At: at, Hosts: shown, Total: total, Truncated: len(shown) < total,
+		}, wantsPretty(r))
+	}
 }

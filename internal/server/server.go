@@ -474,6 +474,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /v1/drift/reconcile", reconcileDriftHandler(s.store, s.submitter, authz, s.log))
 	mux.Handle("GET /v1/hosts/{host}/runs", hostHistoryHandler(s.store, authz, s.log))
 	mux.Handle("GET /v1/hosts/{host}/facts", hostFactsHandler(s.store, authz, s.log))
+	mux.Handle("GET /v1/estate", estateHandler(s.store, authz, s.log))
 	mux.Handle("GET /v1/tasks", taskTrendsHandler(s.store, authz, s.log))
 	mux.Handle("GET /v1/workers", workersHandler(s.store, authz, s.log))
 	mux.Handle("GET /v1/audit", auditHandler(s.audits, s.log))

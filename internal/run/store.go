@@ -236,6 +236,13 @@ type Store interface {
 	// HostFactsFor returns a host's most recently gathered facts, or ErrNotFound when a host has
 	// never been gathered.
 	HostFactsFor(ctx context.Context, host string) (*HostFacts, error)
+	// EstateAt returns the facts in effect for every host at an instant, ordered by host.
+	//
+	// In effect means the newest gather at or before at, so a host keeps its last known state until
+	// something newer was observed, and a host first gathered afterward is absent rather than
+	// invented. This is the question an audit asks and the one a live view cannot answer, because a
+	// live view holds only what is true now.
+	EstateAt(ctx context.Context, at time.Time) ([]HostFacts, error)
 	// SaveTaskSummary replaces the stored per task summaries for a run.
 	SaveTaskSummary(ctx context.Context, runID string, summaries []TaskSummary) error
 	// RunTaskSummaries returns one run's stored per task summaries, ordered by task.

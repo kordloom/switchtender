@@ -62,6 +62,9 @@ type filePolicy struct {
 	Actor string `yaml:"actor,omitempty" json:"actor,omitempty"`
 	// MinRisk matches only runs assessed at least this risky: low, medium, or high. Omit for any.
 	MinRisk string `yaml:"min_risk,omitempty" json:"min_risk,omitempty"`
+	// Reversibility matches only runs at least as hard to undo as this class: reversible, costly,
+	// or irreversible. It is a floor, so costly covers costly and irreversible. Omit for any.
+	Reversibility string `yaml:"reversibility,omitempty" json:"reversibility,omitempty"`
 	// Effect is what a match does: require_approval, the default, or deny.
 	Effect string `yaml:"effect,omitempty" json:"effect,omitempty"`
 }
@@ -169,6 +172,7 @@ func (s *FileStore) load() ([]*Policy, error) {
 			RequireDistinctApprover: fp.RequireDistinctApprover,
 			Actor:                   fp.Actor,
 			MinRisk:                 fp.MinRisk,
+			Reversibility:           fp.Reversibility,
 			Effect:                  fp.Effect,
 			CreatedAt:               info.ModTime().UTC(),
 		}

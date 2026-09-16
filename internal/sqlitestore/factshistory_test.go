@@ -74,3 +74,64 @@ WHERE host = ? ORDER BY `+"rtrim(gathered_at, 'Z')"+` ASC LIMIT 1`, "web01").Sca
 		t.Errorf("oldest retained kernel = %q, want 5.15.0", kernel)
 	}
 }
+
+// TestEstateAtAnswersWhatWasTrueThen is the question the whole state history exists to serve.
+//
+// A live view holds what is true now, so before this the only answer to "what was running on the
+// audit date" was that nobody could say. Each gather overwrote the one before it, and the evidence
+// was destroyed by the ordinary operation of the product.
+func TestEstateAtAnswersWhatWasTrueThen(t *testing.T) {
+	run.SetFactsInterval(0)
+	run.SetFactsDepth(run.DefaultFactsDepth)
+	t.Cleanup(func() { run.SetFactsInterval(run.DefaultFactsInterval) })
+
+	ctx := context.Background()
+	d, err := Open(filepath.Join(t.TempDir(), "estate.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() { _ = d.Close() })
+	s := d.Runs()
+
+	march := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
+	// web01 is upgraded in April, after the audit date.
+	save := func(host, kernel string, at time.Time) {
+		t.Helper()
+		if err := s.SaveHostFacts(ctx, "run_"+host+kernel, []run.HostFacts{{
+			Host: host, Facts: map[string]string{"kernel": kernel}, GatheredAt: at,
+		}}); err != nil {
+			t.Fatalf("save %s: %v", host, err)
+		}
+	}
+	save("web01", "5.15.0", march)
+	save("web01", "6.8.0", march.AddDate(0, 1, 0))
+	// db01 joins the estate only in April, so it did not exist on the audit date.
+	save("db01", "6.1.0", march.AddDate(0, 1, 0))
+
+	at, err := s.EstateAt(ctx, march.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("estate at: %v", err)
+	}
+	if len(at) != 1 {
+		t.Fatalf("estate held %d hosts on the audit date, want 1. A host gathered only afterward "+
+			"must be absent rather than invented, or the estate describes machines nobody had seen",
+			len(at))
+	}
+	if at[0].Host != "web01" || at[0].Facts["kernel"] != "5.15.0" {
+		t.Errorf("estate = %s on %s, want web01 on 5.15.0, the reading in effect then",
+			at[0].Host, at[0].Facts["kernel"])
+	}
+
+	// And now, where both hosts exist and web01 carries its newer kernel.
+	now, err := s.EstateAt(ctx, march.AddDate(0, 2, 0))
+	if err != nil {
+		t.Fatalf("estate now: %v", err)
+	}
+	if len(now) != 2 {
+		t.Fatalf("estate holds %d hosts today, want 2", len(now))
+	}
+	// Ordered by host, so db01 comes first.
+	if now[0].Host != "db01" || now[1].Facts["kernel"] != "6.8.0" {
+		t.Errorf("estate today = %+v, want db01 then web01 on 6.8.0", now)
+	}
+}

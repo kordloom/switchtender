@@ -651,3 +651,54 @@ ORDER BY last_seen DESC, claimed_by`
 	}
 	return out, nil
 }
+
+// EstateAt returns the facts in effect for every host at an instant, ordered by host.
+//
+// In effect is the newest gather at or before the instant, so a host keeps its last observed state
+// until something newer was seen. A host whose every reading is later is omitted rather than
+// invented: it had not been observed yet, and reporting it would describe an estate that held
+// machines nobody had looked at.
+//
+// The comparison runs on the trimmed text, not the raw column, for the reason sqlutil.GatheredOrder
+// documents: the stored form drops a trailing zero fraction, so raw text ordering puts a later
+// instant ahead of an earlier one inside the same second and would pick the wrong reading.
+func (s *store) EstateAt(ctx context.Context, at time.Time) ([]run.HostFacts, error) {
+	const q = `
+SELECT h.host, h.run_id, h.facts, h.gathered_at
+FROM host_facts_history h
+JOIN (
+	SELECT host, MAX(` + sqlutil.GatheredOrder + `) AS newest
+	FROM host_facts_history
+	WHERE ` + sqlutil.GatheredOrder + ` <= rtrim(?, 'Z')
+	GROUP BY host
+) pick ON pick.host = h.host AND ` + sqlutil.GatheredOrder + ` = pick.newest
+ORDER BY h.host`
+	rows, err := s.db.r.QueryContext(ctx, q, sqlutil.FormatTime(at))
+	if err != nil {
+		return nil, fmt.Errorf("estate at: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []run.HostFacts
+	for rows.Next() {
+		var (
+			f        run.HostFacts
+			blob     string
+			gathered string
+		)
+		if err := rows.Scan(&f.Host, &f.RunID, &blob, &gathered); err != nil {
+			return nil, fmt.Errorf("estate at: %w", err)
+		}
+		if err := json.Unmarshal([]byte(blob), &f.Facts); err != nil {
+			return nil, fmt.Errorf("estate at: %w", err)
+		}
+		if f.GatheredAt, err = sqlutil.ParseTime(gathered); err != nil {
+			return nil, fmt.Errorf("estate at: %w", err)
+		}
+		out = append(out, f)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("estate at: %w", err)
+	}
+	return out, nil
+}

@@ -264,8 +264,63 @@ func (m *memStore) SaveHostFacts(_ context.Context, runID string, facts []HostFa
 			cp.GatheredAt = time.Now()
 		}
 		m.facts[f.Host] = cp
+		// Kept as well as replaced, the same way the SQL backends do it. The map above answers what
+		// a host is now and overwrites to do it, so without this the memory store would be the one
+		// backend where estate history silently does not exist and every test against it would
+		// agree that the feature works.
+		if m.factsHistory == nil {
+			m.factsHistory = make(map[string][]HostFacts)
+		}
+		bucket := FactsBucket(cp.GatheredAt, runID, FactsInterval())
+		kept := m.factsHistory[f.Host]
+		replaced := false
+		for i := range kept {
+			if FactsBucket(kept[i].GatheredAt, kept[i].RunID, FactsInterval()) == bucket {
+				kept[i] = cp
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			kept = append(kept, cp)
+		}
+		sort.Slice(kept, func(i, j int) bool { return kept[i].GatheredAt.Before(kept[j].GatheredAt) })
+		if depth := FactsDepth(); depth > 0 && len(kept) > depth {
+			kept = kept[len(kept)-depth:]
+		}
+		m.factsHistory[f.Host] = kept
 	}
 	return nil
+}
+
+// EstateAt returns the facts in effect for every host at an instant, ordered by host.
+func (m *memStore) EstateAt(_ context.Context, at time.Time) ([]HostFacts, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var out []HostFacts
+	for host, kept := range m.factsHistory {
+		// The newest gather at or before the instant. Ordered oldest first above, so the last one
+		// that qualifies is the one in effect.
+		idx := -1
+		for i := range kept {
+			if kept[i].GatheredAt.After(at) {
+				break
+			}
+			idx = i
+		}
+		if idx < 0 {
+			// Every reading of this host is newer than the instant asked about, so it was not yet
+			// observed. Absent is the honest answer; inventing a first reading backwards would make
+			// the estate look like it held hosts it had never seen.
+			continue
+		}
+		cp := kept[idx]
+		cp.Host = host
+		cp.Facts = maps.Clone(cp.Facts)
+		out = append(out, cp)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Host < out[j].Host })
+	return out, nil
 }
 
 // HostFactsFor returns a host's stored facts, or ErrNotFound when it has never been gathered.

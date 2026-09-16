@@ -28,6 +28,9 @@ type memStore struct {
 	summaries map[string][]HostSummary
 	// facts holds the most recently gathered system facts per host.
 	facts map[string]HostFacts
+	// factsHistory holds every retained gather per host, oldest first, so the store can answer what
+	// a host looked like at a past instant. facts above holds only the newest.
+	factsHistory map[string][]HostFacts
 	// tasks maps run id to its per task duration summaries.
 	tasks map[string][]TaskSummary
 }
