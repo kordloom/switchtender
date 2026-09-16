@@ -71,7 +71,11 @@ func truncateAll(t *testing.T, dsn string) {
 		t.Fatalf("open postgres: %v", err)
 	}
 	defer func() { _ = db.Close() }()
-	const q = `TRUNCATE runs, run_logs, run_events, run_host_summary, run_task_summary, schedules`
+	// host_facts and host_facts_history belong here for the same reason as the summary tables:
+	// they outlive the runs that wrote them, so leaving them behind carries one subtest's state
+	// into the next and the estate contract's empty-store assertions see another test's gathers.
+	const q = `TRUNCATE runs, run_logs, run_events, run_host_summary, run_task_summary, schedules,
+		host_facts, host_facts_history`
 	if _, err := db.Exec(q); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}

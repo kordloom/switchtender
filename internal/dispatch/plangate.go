@@ -160,14 +160,18 @@ func ProposeApplyFor(ctx context.Context, store run.Store, policies []*policy.Po
 	// it when a worker did. The plan-content threshold applyOptions weighs is one rule among them, not
 	// the only one.
 	stampPolicySet(proposal, policies)
-	if p := policy.Denying(policies, proposal); p != nil {
+	// Graded like every other submission, for the reason above: this path faces the same rules, so
+	// it has to see what they see. A rule written on whether a change can be taken back would
+	// otherwise apply everywhere except here.
+	gp := graded(proposal)
+	if p := policy.Denying(policies, gp); p != nil {
 		return nil, fmt.Errorf("%w: policy %q refuses this apply", ErrPolicyDenied, p.Label())
 	}
-	if p := policy.Requiring(policies, proposal); p != nil {
+	if p := policy.Requiring(policies, gp); p != nil {
 		proposal.Status = run.StatusPendingApproval
 		proposal.HeldByPolicy = p.Label()
 		proposal.RequireDistinctApprover = proposal.RequireDistinctApprover ||
-			policy.RequireDistinct(policies, proposal)
+			policy.RequireDistinct(policies, gp)
 	}
 
 	err := store.Save(ctx, proposal)
