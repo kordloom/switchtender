@@ -23,6 +23,11 @@ backup does not fire the whole estate's nightly work at once.
 Run history and the audit chain are not included. The audit chain has its own signed, self-verifying
 export through `switchtender audit`, which keeps its integrity guarantees intact.
 
+The estate's state history is not included either, for the same reason: it is the record of what runs
+observed rather than configuration, so it belongs with the history a restore does not carry. A restored
+install answers the estate from the point it starts gathering, not from before the backup. Move the
+database itself if that history has to travel.
+
 The signing identity is not included either, and it is the one thing to copy by hand. `producer-key.json`
 sits in the state directory beside the database and is what makes a bundle attributable to this install:
 a tree anchor's Merkle leaves are bound to the install id derived from that key, so a deployment restored

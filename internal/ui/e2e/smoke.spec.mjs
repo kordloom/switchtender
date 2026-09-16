@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { readFileSync } from "node:fs";
 
 // These run the real web UI in a real browser against a seeded demo server, which is the one thing the
 // node --test suite in ../assets/jstest cannot do: that suite drives the same production JavaScript
@@ -113,12 +114,21 @@ test("navigation and browser history move between pages", async ({ page }) => {
 
 // Every page the navigation offers, so a page nobody wrote a spec for cannot render broken unnoticed.
 // The tests above cover four pages; the rest were reachable in one click and checked by nobody.
+// PAGES is read from the routes the server registers rather than written out here.
+//
+// A written list drifts the moment somebody adds a page: the page ships, the suite goes on passing,
+// and nothing ever loads it in a real browser. That is the one thing this suite exists to do, so a
+// page missing from it is a page with no browser coverage at all. The estate page was added and sat
+// outside this list until it was read from the source instead.
+//
+// Routes taking a path parameter are skipped. They need a real object to be worth loading, and the
+// interactive suite covers them by creating one.
 const PAGES = [
-  "/ui/", "/ui/runs", "/ui/fleet", "/ui/activity", "/ui/doctor", "/ui/drift",
-  "/ui/tasks", "/ui/login", "/ui/users", "/ui/workers", "/ui/inventories",
-  "/ui/sources", "/ui/credentials", "/ui/audit", "/ui/policies", "/ui/projects",
-  "/ui/templates", "/ui/schedules", "/ui/workflows", "/ui/migrate", "/ui/docs",
-];
+  ...new Set(
+    readFileSync(new URL("../ui.go", import.meta.url), "utf8")
+      .matchAll(/mux\.HandleFunc\("GET (\/ui\/[^"{]*)"/g)
+  ),
+].map((m) => m[1]).sort();
 
 // The demo serves no token store, so the users page asks for /v1/tokens, is told no, and says so in
 // its own words. The browser still logs the 404 it saw, and no script can unlog it, so the guard

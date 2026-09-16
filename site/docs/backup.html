@@ -84,6 +84,10 @@ finishes. Missed occurrences are skipped the way cron skips them, so recovering 
 backup does not fire the whole estate's nightly work at once.</p>
 <p>Run history and the audit chain are not included. The audit chain has its own signed, self-verifying
 export through <code>switchtender audit</code>, which keeps its integrity guarantees intact.</p>
+<p>The estate's state history is not included either, for the same reason: it is the record of what runs
+observed rather than configuration, so it belongs with the history a restore does not carry. A restored
+install answers the estate from the point it starts gathering, not from before the backup. Move the
+database itself if that history has to travel.</p>
 <p>The signing identity is not included either, and it is the one thing to copy by hand. <code>producer-key.json</code>
 sits in the state directory beside the database and is what makes a bundle attributable to this install:
 a tree anchor's Merkle leaves are bound to the install id derived from that key, so a deployment restored
