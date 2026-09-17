@@ -376,6 +376,8 @@ jobs:
           # Either secret name works, newest-set first: the token was pasted under both names while
           # it was being fixed, and a release should not fail its cask over which one stuck.
           TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN != '' && secrets.HOMEBREW_TAP_TOKEN || secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          # Which secret supplied it, so a refusal names the one to fix rather than the other one.
+          TAP_TOKEN_NAME: ${{ secrets.HOMEBREW_TAP_TOKEN != '' && 'HOMEBREW_TAP_TOKEN' || 'HOMEBREW_TAP_GITHUB_TOKEN' }}
         run: |
           set -euo pipefail
           if [ -z "${TAP_TOKEN:-}" ]; then
@@ -394,7 +396,7 @@ jobs:
             -f content="$(base64 -i "$cask" | tr -d '\n')")
           if [ -n "$sha" ]; then args+=(-f sha="$sha"); fi
           if ! GH_TOKEN="$TAP_TOKEN" gh api "${args[@]}" > /dev/null; then
-            echo "::error title=Homebrew cask not published::the tap push was refused; give HOMEBREW_TAP_GITHUB_TOKEN Contents read and write on kordloom/homebrew-tap"
+            echo "::error title=Homebrew cask not published::the tap push was refused; give the token in ${TAP_TOKEN_NAME} Contents read and write on kordloom/homebrew-tap"
             exit 1
           fi
           echo "cask updated on kordloom/homebrew-tap"
