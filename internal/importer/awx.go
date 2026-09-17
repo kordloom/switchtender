@@ -453,6 +453,9 @@ func FromAWX(data []byte, now time.Time) (*Plan, error) {
 	// of the template it points at.
 	plan.addWorkflows(export, now, projectIDs, inventoryIDs, credentialIDs)
 	reportUnmapped(plan, export)
+	// What the struct never had a field for, which reportUnmapped cannot see: it names the kinds this
+	// importer knows it drops, and a field it does not know about is exactly the one nobody wrote down.
+	reportUnread(plan, data, export)
 	if err := plan.requireObjects("projects, inventories, credentials, job templates, or " +
 		"schedules"); err != nil {
 		return nil, err

@@ -161,6 +161,9 @@ func FromSemaphore(data []byte, now time.Time) (*Plan, error) {
 	for _, proj := range export.projects() {
 		plan.addSemaphoreProject(proj, now)
 	}
+	// A field this importer has no struct member for was dropped without a decision and without a
+	// warning, which is the one import result an operator acts on without reading.
+	reportUnread(plan, data, export)
 	if err := plan.requireObjects("repositories, inventories, keys, or templates"); err != nil {
 		return nil, err
 	}
