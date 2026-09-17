@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -422,5 +424,62 @@ func TestTokenNewRefusesAStrayPositionalArgument(t *testing.T) {
 		t.Errorf("switchtender token new alice exited 0 and printed %q; the word was discarded and "+
 			"the token minted unscoped, which the help says acts as admin. stderr:\n%s",
 			strings.TrimSpace(stdout), stderr)
+	}
+}
+
+// TestEveryImporterTheCliOffersIsDocumented is the guard on a gap that is invisible from the code.
+//
+// Chef and Puppet shipped working, wired into the CLI, the API, and the Migrate page, and twenty
+// documentation surfaces went on enumerating five importers. Nothing failed: every test passed,
+// every page rendered, and the feature simply did not exist to anyone who read about it rather than
+// ran it. A reader who checks the docs for Chef support concludes there is none, which is the same
+// outcome as not having built it.
+//
+// So the list of importers is taken from the commands themselves, and the pages that enumerate them
+// are required to name every one. Adding an importer without documenting it fails here, by name.
+func TestEveryImporterTheCliOffersIsDocumented(t *testing.T) {
+	t.Parallel()
+	var formats []string
+	for _, c := range importCmd.Commands() {
+		formats = append(formats, c.Name())
+	}
+	if len(formats) < 5 {
+		t.Fatalf("found only %d import subcommands, which cannot be right: %v", len(formats), formats)
+	}
+
+	// Each page here enumerates the sources somewhere. A page that merely mentions one importer in
+	// an example is not on this list; these are the ones that answer "what can it import".
+	root := ".."
+	pages := []string{
+		"README.md",
+		"docs/README.md",
+		"docs/api.md",
+		"docs/comparison.md",
+		"docs/configuration.md",
+		"docs/features.md",
+		"docs/migration.md",
+		"docs/tutorial-migrate.md",
+		"site/index.html",
+		"site/get-started.html",
+		"internal/ui/templates/migrate.html",
+	}
+	for _, page := range pages {
+		body, err := os.ReadFile(filepath.Join(root, page))
+		if err != nil {
+			t.Errorf("read %s: %v", page, err)
+			continue
+		}
+		lower := strings.ToLower(string(body))
+		for _, format := range formats {
+			// cron imports from the command line only and is deliberately absent from the API and
+			// the page, which both say so rather than leaving a reader to guess.
+			if format == "cron" {
+				continue
+			}
+			if !strings.Contains(lower, format) {
+				t.Errorf("%s enumerates importers and never names %q, so the feature does not "+
+					"exist to anyone who reads this page", page, format)
+			}
+		}
 	}
 }

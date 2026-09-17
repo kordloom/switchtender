@@ -862,13 +862,22 @@ each tier covers is listed at <a href="https://switchtender.com/pricing">https:/
 directory as the database. A license this install cannot parse or that has lapsed reads as
 Community rather than failing the server, so an expiry never takes an install down.</p>
 <h2 id="import">import</h2>
-<p>Migrates from AWX, Semaphore, Rundeck, Jenkins, or cron. Which objects each one carries across is in
+<p>Migrates from AWX, Semaphore, Chef, Puppet, Rundeck, Jenkins, or cron. Which objects each one carries across is in
 <a href="/docs/migration#what-each-source-brings-over">what each source brings over</a>.</p>
 <ul>
 <li><code>import awx &lt;export.json&gt; [--apply]</code> brings projects, inventories static and dynamic, credential
 shells, job templates and workflows, surveys, and schedules.</li>
 <li><code>import semaphore &lt;export.json&gt; [--apply]</code> brings the same kinds from a Semaphore export, apart
 from the dynamic inventory sources AWX alone carries.</li>
+<li><code>import chef &lt;nodes.json&gt; [--apply]</code> brings one inventory of the fleet: every node a host,
+grouped by its <code>chef_environment</code> and by every <code>role[...]</code> in its run list, carrying the ohai
+facts that identify a machine, with <code>ipaddress</code> also set as <code>ansible_host</code>. Accepts an array of
+node documents, a single node, or an object keyed by node name. Cookbooks and recipes are not
+imported and the recipes seen are named in the report.</li>
+<li><code>import puppet &lt;nodes.json|facts.json|nodes.txt&gt; [--apply]</code> brings one inventory of the fleet,
+grouped by environment, from a PuppetDB nodes query, a PuppetDB facts query, or the plain
+certname list <code>puppet node list</code> prints. Deactivated and expired nodes are left out and counted.
+Manifests and modules are not imported.</li>
 <li><code>import rundeck &lt;jobs.yaml|project-archive.zip&gt; [--inventory &lt;name&gt;] [--apply]</code> brings templates,
 surveys, and schedules from either a job export or a project archive, told apart by content. An
 archive brings one project as well, but only when its source control configuration names a

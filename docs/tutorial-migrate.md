@@ -7,7 +7,7 @@
 
 # Migrate your setup
 
-You do not rebuild your automation by hand. SwitchTender reads an AWX, Semaphore, Rundeck, or
+You do not rebuild your automation by hand. SwitchTender reads an AWX, Semaphore, Chef, Puppet, Rundeck, or
 Jenkins export, a Rundeck project archive, or a plain crontab, and creates the equivalent objects in
 one pass.
 
@@ -27,7 +27,7 @@ inventory. A crontab brings schedules alone. The table is in
    project as an archive from Project Settings; either one uploads and the importer tells them apart
    by content. Jenkins has no export file at all, so zip its `jobs` directory and upload that.
 2. Open Migrate from the top of the overview, or go to `/ui/migrate`.
-3. Choose the format: AWX, Semaphore, Rundeck, or Jenkins. Rundeck and Jenkins ask for the inventory
+3. Choose the format: AWX, Semaphore, Chef, Puppet, Rundeck, or Jenkins. Rundeck and Jenkins ask for the inventory
    their templates should target, since neither names hosts of its own.
 4. Paste the export, or choose the file, and select Preview. Nothing is written yet. You get a
    report of exactly what would be created, with every warning.

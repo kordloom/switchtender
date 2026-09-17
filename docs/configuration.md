@@ -257,13 +257,22 @@ Community rather than failing the server, so an expiry never takes an install do
 
 ## import
 
-Migrates from AWX, Semaphore, Rundeck, Jenkins, or cron. Which objects each one carries across is in
+Migrates from AWX, Semaphore, Chef, Puppet, Rundeck, Jenkins, or cron. Which objects each one carries across is in
 [what each source brings over](migration.md#what-each-source-brings-over).
 
 - `import awx <export.json> [--apply]` brings projects, inventories static and dynamic, credential
   shells, job templates and workflows, surveys, and schedules.
 - `import semaphore <export.json> [--apply]` brings the same kinds from a Semaphore export, apart
   from the dynamic inventory sources AWX alone carries.
+- `import chef <nodes.json> [--apply]` brings one inventory of the fleet: every node a host,
+  grouped by its `chef_environment` and by every `role[...]` in its run list, carrying the ohai
+  facts that identify a machine, with `ipaddress` also set as `ansible_host`. Accepts an array of
+  node documents, a single node, or an object keyed by node name. Cookbooks and recipes are not
+  imported and the recipes seen are named in the report.
+- `import puppet <nodes.json|facts.json|nodes.txt> [--apply]` brings one inventory of the fleet,
+  grouped by environment, from a PuppetDB nodes query, a PuppetDB facts query, or the plain
+  certname list `puppet node list` prints. Deactivated and expired nodes are left out and counted.
+  Manifests and modules are not imported.
 - `import rundeck <jobs.yaml|project-archive.zip> [--inventory <name>] [--apply]` brings templates,
   surveys, and schedules from either a job export or a project archive, told apart by content. An
   archive brings one project as well, but only when its source control configuration names a

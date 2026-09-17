@@ -30,7 +30,7 @@ the app at `/ui/docs`.
 | [AI agents](agents.md) | Run an AI agent through the gate: one token, gated, chained, provable.|
 | [Extend in Go](sdk.md) | The SDK: add tools, AI providers, secret engines, and notifiers.|
 | [HTTP API](api.md) | Every endpoint the server exposes.|
-| [Migration](migration.md) | Moving off AWX, Semaphore, Rundeck, Jenkins, or cron in detail, with the table of what each source brings over.|
+| [Migration](migration.md) | Moving off AWX, Semaphore, Chef, Puppet, Rundeck, Jenkins, or cron in detail, with the table of what each source brings over.|
 | [Comparison](comparison.md) | How SwitchTender compares to AWX, AAP, Semaphore, Ascender, and Rundeck.|
 
 For deployment, the repository root holds a `docker-compose.yml` for a server, a database, and a
