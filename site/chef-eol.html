@@ -3,13 +3,13 @@
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
-	<title>Rundeck alternative without the JVM | SwitchTender</title>
-	<meta name="description" content="SwitchTender is a source-available alternative to Rundeck: one Go binary instead of a JVM and an external database, seven tools including Terraform and OpenTofu, enforced approval policies, a free drag-and-drop workflow editor, and a tamper-evident audit trail you can verify offline.">
-	<link rel="canonical" href="https://switchtender.com/rundeck-alternative">
-	<meta property="og:title" content="Rundeck alternative without the JVM | SwitchTender">
-	<meta property="og:description" content="Runbook automation from one Go binary: seven tools including Terraform and OpenTofu, enforced approvals, a free visual workflow editor, and a hash-chained audit you can prove offline.">
+	<title>Moving off Chef: bring the fleet, not the cookbooks | SwitchTender</title>
+	<meta name="description" content="Chef&#39;s open source line has no supported path forward. SwitchTender is not a configuration management engine and your cookbooks do not convert. It imports the fleet in one command: every node grouped by environment and run-list role, governed and audited from day one.">
+	<link rel="canonical" href="https://switchtender.com/chef-eol">
+	<meta property="og:title" content="Moving off Chef: bring the fleet, not the cookbooks | SwitchTender">
+	<meta property="og:description" content="SwitchTender does not replace Chef Infra and does not convert cookbooks. It takes the fleet: every node, grouped by environment and run-list role, governed from the day it lands.">
 	<meta property="og:type" content="website">
-	<meta property="og:url" content="https://switchtender.com/rundeck-alternative">
+	<meta property="og:url" content="https://switchtender.com/chef-eol">
 	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
 	<meta name="twitter:card" content="summary_large_image">
 	<link rel="icon" href="/favicon.ico" sizes="any">
@@ -93,99 +93,52 @@
 
 	<main>
 		<section class="wrap gs-hero reveal">
-			<span class="eyebrow">Rundeck alternative</span>
-			<h1>Runbook automation.<br><span class="grad">Without the JVM.</span></h1>
-			<p class="lede">Rundeck earned its place: node-targeted jobs, a live per-node monitor, and finely grained access control. SwitchTender delivers that job from one static Go binary instead of a JVM with an external database behind it. Terraform and OpenTofu run as first-class steps alongside Ansible, Bash, PowerShell, Python, and Go. Approval gates are enforced by policy in the core, the drag-and-drop workflow editor is free rather than commercial, and every run lands in a hash-chained audit trail a third party can verify offline. State is one SQLite file, with Postgres optional.</p>
+			<span class="eyebrow">Moving off Chef</span>
+			<h1>Chef's open source line has no road ahead.<br><span class="grad">Your fleet still does.</span></h1>
+			<p class="lede">Start with what this is not. SwitchTender is not a configuration management engine. It has no resource model, it does not converge state, and <strong>your cookbooks do not convert</strong>. Nothing here will read a recipe and produce a working equivalent, and anything that claimed to would hand you something that reads like the original and behaves differently. What SwitchTender takes is the fleet: every node, grouped by its environment and by every role in its run list, governed and audited from the day it lands, while you deal with the recipes on your own schedule.</p>
 			<div class="hero-cta">
 				<a class="btn big" href="/get-started">Get started</a>
-				<a class="ghost big" href="/docs/comparison">Read the full comparison</a>
+				<a class="ghost big" href="/docs/migration">Read the migration guide</a>
 			</div>
 		</section>
 
 		<section class="section wrap">
-			<div class="section-head reveal">
-				<h2>Where Rundeck stops</h2>
-				<p>Rundeck is a capable runbook engine. These are the walls teams hit as governance and tooling needs grow.</p>
-			</div>
-			<div class="cards cards-3">
-				<article class="card reveal">
-					<h3>A JVM, then a database</h3>
-					<p>Rundeck runs on a Java virtual machine, and its bundled H2 datastore is documented as unsuitable for production, so a real deployment adds an external database. Its published minimum is 8 GB of RAM and 2 CPUs. SwitchTender is one static Go binary and one SQLite file, and Postgres is optional rather than required.</p>
-				</article>
-				<article class="card reveal">
-					<h3>No native Terraform step</h3>
-					<p>Rundeck runs Ansible and generic scripts, but has no Terraform or OpenTofu step type, so infrastructure changes live outside the runbook. SwitchTender runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go as first-class tools in one plan, with drift detected from a dry run.</p>
-				</article>
-				<article class="card reveal">
-					<h3>Governance is split across tiers</h3>
-					<p>Rundeck's workflow visualization and its ACL GUI editor sit in the commercial tier, and approval gates are not documented in the free one. SwitchTender ships the drag-and-drop workflow editor, policy-enforced approvals, and a tamper-evident, signed audit trail in the core, free to self-host.</p>
-				</article>
+			<div class="reveal">
+				<h2>What is actually ending</h2>
+				<p>Chef moved to commercial licensing under Progress, and the open source line no longer has a supported path forward. That leaves a large installed base in a specific position: the machines are still there, still grouped by environment and run list, still doing their jobs, and the thing that manages them is no longer somewhere you can stay for free.</p>
+				<p>This is a different problem from the one AWX users have. AWX went quiet, and quiet is something you can ignore for years. A licensing change is not quiet. It arrives with a renewal conversation attached.</p>
 			</div>
 		</section>
 
 		<section class="section wrap">
-			<div class="section-head reveal">
-				<h2>Feature for feature</h2>
-				<p>Every claim below was checked against Rundeck's own documentation at version 6.0.1, on 10 August 2026. Rundeck's current release is 6.1.0, which these claims have not been re-checked against. The full six-way table with sources is on the <a href="/docs/comparison">comparison page</a>.</p>
-			</div>
-			<div class="table-wrap reveal">
-				<table class="compare">
-					<thead>
-						<tr><th>Capability</th><th class="us">SwitchTender</th><th>Rundeck</th></tr>
-					</thead>
-					<tbody>
-						<tr><td>Runs without a JVM</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
-						<tr><td>Production datastore built in</td><td class="us">SQLite, Postgres optional</td><td><span class="muted">H2, not for production</span></td></tr>
-						<tr><td>Live per-host view</td><td class="us">Host-by-task matrix</td><td>Per-node, per-step monitor</td></tr>
-						<tr><td>Tools</td><td class="us">Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, Go</td><td><span class="muted">Ansible and scripts, no Terraform step</span></td></tr>
-						<tr><td>Tamper-evident, signed audit</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
-						<tr><td>Verifiable offline by a third party</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
-						<tr><td>Enforced approval policies</td><td class="us"><i class="y"></i></td><td><span class="muted">Commercial Runbook Automation only</span></td></tr>
-						<tr><td>Visual workflow editor in the free tier</td><td class="us"><i class="y"></i></td><td><span class="muted">Engine free, visualization commercial</span></td></tr>
-						<tr><td>Fine-grained access control</td><td class="us">Per-object grants</td><td>ACL policy files; GUI editor commercial</td></tr>
-						<tr><td>Fleet memory: flaky hosts, trends</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
-						<tr><td>Drift detection from a dry run</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
-						<tr><td>Duration-balanced job splitting</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
-						<tr><td>Minimum published footprint</td><td class="us">One binary, one file</td><td><span class="muted">8 GB RAM, 2 CPU</span></td></tr>
-					</tbody>
-				</table>
-			</div>
-			<p class="gs-note reveal">Checked against Rundeck&rsquo;s own documentation on 2026-08-10, for Rundeck 6.0.1. Rundeck was at 6.1.0 on 2026-09-07. A comparison decays the day it is written, so check a row against the current release before you rely on it. <a href="/docs/comparison">Full table and sources</a>.</p>
-		</section>
-
-		<section class="section wrap">
-			<div class="section-head reveal">
-				<h2>Where Rundeck is still ahead</h2>
-				<p>Honesty first. Rundeck's live per-node, per-step monitor is a peer capability it has shipped for years, not a gap. Its file-based ACL model applies regex-matched, deny-first policy to authorization as a whole, which is more granular than SwitchTender's approval policy files in that one respect. It has more than a decade of production history, a large plugin ecosystem, and a commercial vendor behind it. <code>switchtender import rundeck</code> reads a job export and creates the equivalent templates, surveys, and schedules, converting the Quartz recurrence as it goes, but a job arrives as a Bash template rather than an Ansible one, so a job you want fanned across an inventory is rewritten by hand afterward.</p>
+			<div class="reveal">
+				<h2>What SwitchTender does not do</h2>
+				<p>Said plainly, because the useful version of this page is the one that does not waste your afternoon.</p>
+				<ul class="ticks">
+					<li><strong>It does not replace Chef Infra.</strong> Desired state, idempotent resources, and convergence are not what this is. If you need those, you need Ansible, Salt, or a supported Chef.</li>
+					<li><strong>It does not convert cookbooks.</strong> A recipe is a program in another language against another model. A partial translation would look right and do something else, so nothing here attempts one.</li>
+					<li><strong>It does not import your Chef run history.</strong> The estate history in SwitchTender starts the day you install it.</li>
+				</ul>
 			</div>
 		</section>
 
 		<section class="section wrap">
-			<div class="section-head reveal">
-				<h2>See it beside Rundeck in an afternoon</h2>
-				<p>One binary, no JVM, nothing else to install. Point it at the same hosts your Rundeck jobs target and compare the run views side by side.</p>
+			<div class="reveal">
+				<h2>What comes across, in one command</h2>
+				<pre class="code"><code>knife node list | xargs -I{} knife node show {} -F json &gt; chef-nodes.json
+switchtender import chef chef-nodes.json</code></pre>
+				<p>Every node becomes a host. Its <code>chef_environment</code> becomes a group, and every <code>role[...]</code> in its run list becomes a group as well, so a play can target <code>[webserver]</code> on the day of the import rather than after somebody rebuilds the grouping by hand. The ohai facts that identify a machine come across as host variables, and <code>ipaddress</code> is also set as <code>ansible_host</code>, because a Chef estate addresses machines by node name and has no reason to have kept DNS in step.</p>
+				<p>The preview runs before anything is created, and it names what it left behind: every recipe it saw, and every field in the export this importer does not read. A clean report means clean, which is the only way a report is worth reading.</p>
 			</div>
-			<div class="gs-steps">
-				<ol>
-					<li class="gs-step reveal">
-						<div class="gs-num">1</div>
-						<div class="gs-body">
-							<h3>Install it</h3>
-							<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>brew install kordloom/tap/switchtender</code></pre></div>
-						</div>
-					</li>
-					<li class="gs-step reveal">
-						<div class="gs-num">2</div>
-						<div class="gs-body">
-							<h3>Run it</h3>
-							<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>switchtender serve</code></pre></div>
-						</div>
-					</li>
-				</ol>
-			</div>
-			<p class="gs-note reveal">The <a href="/get-started">get started guide</a> covers prebuilt binaries for Linux, macOS, and Windows with published checksums, and <code>go install</code>.</p>
 		</section>
 
+		<section class="section wrap">
+			<div class="reveal">
+				<h2>Why do this before you have finished deciding</h2>
+				<p>Because the fleet is the part that transfers honestly, and it is the part you need first. The moment those nodes are in SwitchTender, every command run against them goes through one path: request, policy, approval. Each run leaves a signed receipt that verifies offline without us. You get an audited record of everything done to those machines during the migration, which is exactly the window where an estate is touched most and recorded least.</p>
+				<p>The recipes can then be rewritten at whatever pace the work actually takes, against a fleet that is already governed rather than one nobody is watching.</p>
+			</div>
+		</section>
 		<!-- st:faq -->
 		<section class="section wrap">
 			<div class="section-head reveal">
@@ -241,10 +194,10 @@
 		</section>
 		<!-- /st:faq -->
 		<section class="cta wrap reveal">
-			<h2>Keep the runbooks. Drop the JVM.</h2>
+			<h2>Take the fleet first. Decide about the recipes after.</h2>
 			<div class="hero-cta">
 				<a class="btn big" href="/get-started">Get started</a>
-				<a class="ghost big" href="https://github.com/kordloom/switchtender">View on GitHub</a>
+				<a class="ghost big" href="https://demo.switchtender.com/ui/migrate">Try it on the demo</a>
 			</div>
 		</section>
 	</main>
@@ -259,13 +212,12 @@
 				<a href="/agents">Agents</a>
 				<a href="/docs/comparison">Compare</a>
 				<a href="/awx-alternative">vs AWX</a>
-				<a href="/ascender-alternative">vs Ascender</a>
 				<a href="/aap-alternative">vs AAP</a>
 				<a href="/semaphore-alternative">vs Semaphore</a>
+				<a href="/jenkins-alternative">vs Jenkins</a>
 				<a href="/rundeck-alternative">vs Rundeck</a>
 				<a href="/chef-eol">Off Chef</a>
 				<a href="/puppet-eol">Off Puppet</a>
-				<a href="/jenkins-alternative">vs Jenkins</a>
 				<a href="/privacy">Privacy</a>
 				<a href="/terms">Terms</a>
 				<a href="/refund">Refunds</a>

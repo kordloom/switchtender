@@ -3,13 +3,13 @@
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
-	<title>Rundeck alternative without the JVM | SwitchTender</title>
-	<meta name="description" content="SwitchTender is a source-available alternative to Rundeck: one Go binary instead of a JVM and an external database, seven tools including Terraform and OpenTofu, enforced approval policies, a free drag-and-drop workflow editor, and a tamper-evident audit trail you can verify offline.">
-	<link rel="canonical" href="https://switchtender.com/rundeck-alternative">
-	<meta property="og:title" content="Rundeck alternative without the JVM | SwitchTender">
-	<meta property="og:description" content="Runbook automation from one Go binary: seven tools including Terraform and OpenTofu, enforced approvals, a free visual workflow editor, and a hash-chained audit you can prove offline.">
+	<title>Moving off Puppet: bring the fleet, not the manifests | SwitchTender</title>
+	<meta name="description" content="Puppet Core went proprietary and OpenVox forked because of it. SwitchTender is not a configuration management engine and your manifests do not convert. It imports the fleet in one command: every node grouped by environment, governed and audited from day one.">
+	<link rel="canonical" href="https://switchtender.com/puppet-eol">
+	<meta property="og:title" content="Moving off Puppet: bring the fleet, not the manifests | SwitchTender">
+	<meta property="og:description" content="SwitchTender does not replace Puppet and does not convert manifests. It takes the fleet: every node PuppetDB knows, grouped by environment, governed from the day it lands.">
 	<meta property="og:type" content="website">
-	<meta property="og:url" content="https://switchtender.com/rundeck-alternative">
+	<meta property="og:url" content="https://switchtender.com/puppet-eol">
 	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
 	<meta name="twitter:card" content="summary_large_image">
 	<link rel="icon" href="/favicon.ico" sizes="any">
@@ -93,99 +93,50 @@
 
 	<main>
 		<section class="wrap gs-hero reveal">
-			<span class="eyebrow">Rundeck alternative</span>
-			<h1>Runbook automation.<br><span class="grad">Without the JVM.</span></h1>
-			<p class="lede">Rundeck earned its place: node-targeted jobs, a live per-node monitor, and finely grained access control. SwitchTender delivers that job from one static Go binary instead of a JVM with an external database behind it. Terraform and OpenTofu run as first-class steps alongside Ansible, Bash, PowerShell, Python, and Go. Approval gates are enforced by policy in the core, the drag-and-drop workflow editor is free rather than commercial, and every run lands in a hash-chained audit trail a third party can verify offline. State is one SQLite file, with Postgres optional.</p>
+			<span class="eyebrow">Moving off Puppet</span>
+			<h1>Puppet Core went proprietary.<br><span class="grad">OpenVox exists because of it.</span></h1>
+			<p class="lede">Start with what this is not. SwitchTender is not a configuration management engine. It has no resource model, it does not converge state, and <strong>your manifests do not convert</strong>. Nothing here will read a manifest and produce a working equivalent. What SwitchTender takes is the fleet: every node PuppetDB knows about, grouped by environment, carrying the facts that identify it, governed and audited from the day it lands.</p>
 			<div class="hero-cta">
 				<a class="btn big" href="/get-started">Get started</a>
-				<a class="ghost big" href="/docs/comparison">Read the full comparison</a>
+				<a class="ghost big" href="/docs/migration">Read the migration guide</a>
 			</div>
 		</section>
 
 		<section class="section wrap">
-			<div class="section-head reveal">
-				<h2>Where Rundeck stops</h2>
-				<p>Rundeck is a capable runbook engine. These are the walls teams hit as governance and tooling needs grow.</p>
-			</div>
-			<div class="cards cards-3">
-				<article class="card reveal">
-					<h3>A JVM, then a database</h3>
-					<p>Rundeck runs on a Java virtual machine, and its bundled H2 datastore is documented as unsuitable for production, so a real deployment adds an external database. Its published minimum is 8 GB of RAM and 2 CPUs. SwitchTender is one static Go binary and one SQLite file, and Postgres is optional rather than required.</p>
-				</article>
-				<article class="card reveal">
-					<h3>No native Terraform step</h3>
-					<p>Rundeck runs Ansible and generic scripts, but has no Terraform or OpenTofu step type, so infrastructure changes live outside the runbook. SwitchTender runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go as first-class tools in one plan, with drift detected from a dry run.</p>
-				</article>
-				<article class="card reveal">
-					<h3>Governance is split across tiers</h3>
-					<p>Rundeck's workflow visualization and its ACL GUI editor sit in the commercial tier, and approval gates are not documented in the free one. SwitchTender ships the drag-and-drop workflow editor, policy-enforced approvals, and a tamper-evident, signed audit trail in the core, free to self-host.</p>
-				</article>
+			<div class="reveal">
+				<h2>What is actually ending</h2>
+				<p>Perforce moved Puppet Core under a proprietary licence. The community answer was OpenVox, a fork that exists precisely because the open line stopped being open. That fork is real and it is the right home for a lot of estates.</p>
+				<p>It also does not solve the other half of the problem. Whichever engine converges your state, something still has to decide who may change production, hold the change until somebody agrees to it, and leave a record an auditor can check. Puppet never did that part, and neither does the fork.</p>
 			</div>
 		</section>
 
 		<section class="section wrap">
-			<div class="section-head reveal">
-				<h2>Feature for feature</h2>
-				<p>Every claim below was checked against Rundeck's own documentation at version 6.0.1, on 10 August 2026. Rundeck's current release is 6.1.0, which these claims have not been re-checked against. The full six-way table with sources is on the <a href="/docs/comparison">comparison page</a>.</p>
-			</div>
-			<div class="table-wrap reveal">
-				<table class="compare">
-					<thead>
-						<tr><th>Capability</th><th class="us">SwitchTender</th><th>Rundeck</th></tr>
-					</thead>
-					<tbody>
-						<tr><td>Runs without a JVM</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
-						<tr><td>Production datastore built in</td><td class="us">SQLite, Postgres optional</td><td><span class="muted">H2, not for production</span></td></tr>
-						<tr><td>Live per-host view</td><td class="us">Host-by-task matrix</td><td>Per-node, per-step monitor</td></tr>
-						<tr><td>Tools</td><td class="us">Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, Go</td><td><span class="muted">Ansible and scripts, no Terraform step</span></td></tr>
-						<tr><td>Tamper-evident, signed audit</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
-						<tr><td>Verifiable offline by a third party</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
-						<tr><td>Enforced approval policies</td><td class="us"><i class="y"></i></td><td><span class="muted">Commercial Runbook Automation only</span></td></tr>
-						<tr><td>Visual workflow editor in the free tier</td><td class="us"><i class="y"></i></td><td><span class="muted">Engine free, visualization commercial</span></td></tr>
-						<tr><td>Fine-grained access control</td><td class="us">Per-object grants</td><td>ACL policy files; GUI editor commercial</td></tr>
-						<tr><td>Fleet memory: flaky hosts, trends</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
-						<tr><td>Drift detection from a dry run</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
-						<tr><td>Duration-balanced job splitting</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td></tr>
-						<tr><td>Minimum published footprint</td><td class="us">One binary, one file</td><td><span class="muted">8 GB RAM, 2 CPU</span></td></tr>
-					</tbody>
-				</table>
-			</div>
-			<p class="gs-note reveal">Checked against Rundeck&rsquo;s own documentation on 2026-08-10, for Rundeck 6.0.1. Rundeck was at 6.1.0 on 2026-09-07. A comparison decays the day it is written, so check a row against the current release before you rely on it. <a href="/docs/comparison">Full table and sources</a>.</p>
-		</section>
-
-		<section class="section wrap">
-			<div class="section-head reveal">
-				<h2>Where Rundeck is still ahead</h2>
-				<p>Honesty first. Rundeck's live per-node, per-step monitor is a peer capability it has shipped for years, not a gap. Its file-based ACL model applies regex-matched, deny-first policy to authorization as a whole, which is more granular than SwitchTender's approval policy files in that one respect. It has more than a decade of production history, a large plugin ecosystem, and a commercial vendor behind it. <code>switchtender import rundeck</code> reads a job export and creates the equivalent templates, surveys, and schedules, converting the Quartz recurrence as it goes, but a job arrives as a Bash template rather than an Ansible one, so a job you want fanned across an inventory is rewritten by hand afterward.</p>
+			<div class="reveal">
+				<h2>What SwitchTender does not do</h2>
+				<ul class="ticks">
+					<li><strong>It does not replace Puppet.</strong> Catalogs, resources, and convergence are not what this is.</li>
+					<li><strong>It does not convert manifests or modules.</strong> A partial translation of a program in another language would read like the original and behave differently, so nothing here attempts one.</li>
+					<li><strong>It does not yet ingest Puppet reports or classify nodes.</strong> That work is on the roadmap as the OpenVox engine, and importing a fleet is not the same as running it.</li>
+				</ul>
 			</div>
 		</section>
 
 		<section class="section wrap">
-			<div class="section-head reveal">
-				<h2>See it beside Rundeck in an afternoon</h2>
-				<p>One binary, no JVM, nothing else to install. Point it at the same hosts your Rundeck jobs target and compare the run views side by side.</p>
+			<div class="reveal">
+				<h2>What comes across, in one command</h2>
+				<pre class="code"><code>curl -s "$PUPPETDB/pdb/query/v4/nodes" &gt; puppet-nodes.json
+switchtender import puppet puppet-nodes.json</code></pre>
+				<p>Nodes group by environment. Deactivated and expired nodes are left out and counted, because Puppet itself stopped managing them and a play targeting everything would otherwise reach for machines nothing owns. Export a facts query alongside the nodes and each host carries the facts that identify it, with <code>ipaddress</code> also set as <code>ansible_host</code>.</p>
+				<p>No PuppetDB? The plain certname list that <code>puppet node list</code> prints imports too, because which artifact you have depends on what you can still reach.</p>
 			</div>
-			<div class="gs-steps">
-				<ol>
-					<li class="gs-step reveal">
-						<div class="gs-num">1</div>
-						<div class="gs-body">
-							<h3>Install it</h3>
-							<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>brew install kordloom/tap/switchtender</code></pre></div>
-						</div>
-					</li>
-					<li class="gs-step reveal">
-						<div class="gs-num">2</div>
-						<div class="gs-body">
-							<h3>Run it</h3>
-							<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>switchtender serve</code></pre></div>
-						</div>
-					</li>
-				</ol>
-			</div>
-			<p class="gs-note reveal">The <a href="/get-started">get started guide</a> covers prebuilt binaries for Linux, macOS, and Windows with published checksums, and <code>go install</code>.</p>
 		</section>
 
+		<section class="section wrap">
+			<div class="reveal">
+				<h2>Why do this while you are still deciding</h2>
+				<p>Because the fleet transfers honestly and it transfers today, whatever you eventually pick as the engine. Once those nodes are in SwitchTender, everything run against them goes through one path: request, policy, approval, with a signed receipt that verifies offline without us. A migration is the window where an estate gets touched the most and recorded the least. This closes that window without waiting for the rest of the decision.</p>
+			</div>
+		</section>
 		<!-- st:faq -->
 		<section class="section wrap">
 			<div class="section-head reveal">
@@ -241,10 +192,10 @@
 		</section>
 		<!-- /st:faq -->
 		<section class="cta wrap reveal">
-			<h2>Keep the runbooks. Drop the JVM.</h2>
+			<h2>Govern the fleet now. Pick the engine after.</h2>
 			<div class="hero-cta">
 				<a class="btn big" href="/get-started">Get started</a>
-				<a class="ghost big" href="https://github.com/kordloom/switchtender">View on GitHub</a>
+				<a class="ghost big" href="https://demo.switchtender.com/ui/migrate">Try it on the demo</a>
 			</div>
 		</section>
 	</main>
@@ -259,13 +210,12 @@
 				<a href="/agents">Agents</a>
 				<a href="/docs/comparison">Compare</a>
 				<a href="/awx-alternative">vs AWX</a>
-				<a href="/ascender-alternative">vs Ascender</a>
 				<a href="/aap-alternative">vs AAP</a>
 				<a href="/semaphore-alternative">vs Semaphore</a>
+				<a href="/jenkins-alternative">vs Jenkins</a>
 				<a href="/rundeck-alternative">vs Rundeck</a>
 				<a href="/chef-eol">Off Chef</a>
 				<a href="/puppet-eol">Off Puppet</a>
-				<a href="/jenkins-alternative">vs Jenkins</a>
 				<a href="/privacy">Privacy</a>
 				<a href="/terms">Terms</a>
 				<a href="/refund">Refunds</a>
