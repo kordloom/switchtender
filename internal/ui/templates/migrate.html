@@ -16,7 +16,7 @@
 		<div class="page-head">
 			<div class="page-head-text">
 				<h1>Migrate</h1>
-				<p class="muted">Import from AWX, Semaphore, Rundeck, or Jenkins. AWX and Semaphore bring their projects, inventories, and credential shells across with their templates, surveys, and schedules, and an AWX workflow arrives as a workflow template keeping its own schedules, or is reported and skipped whole where its graph is one a pipeline cannot express. Rundeck and Jenkins bring no inventory and no credential shells, so their jobs arrive as templates with their surveys and schedules and you name the inventory those templates target. A Rundeck project archive brings one project as well, but only when its source control configuration names a repository this can reach. An upload here is capped at 25 MiB; a larger project archive imports from the command line. Preview first. Nothing is created until you import.</p>
+				<p class="muted">Import from AWX, Semaphore, Chef, Puppet, Rundeck, or Jenkins. AWX and Semaphore bring their projects, inventories, and credential shells across with their templates, surveys, and schedules, and an AWX workflow arrives as a workflow template keeping its own schedules, or is reported and skipped whole where its graph is one a pipeline cannot express. Rundeck and Jenkins bring no inventory and no credential shells, so their jobs arrive as templates with their surveys and schedules and you name the inventory those templates target. A Rundeck project archive brings one project as well, but only when its source control configuration names a repository this can reach. An upload here is capped at 25 MiB; a larger project archive imports from the command line. Chef and Puppet are desired-state systems rather than control planes, so they bring the fleet instead of job definitions: every node, grouped by environment and, for Chef, by every role in its run list, with the facts that identify a machine. Their cookbooks and manifests do not come across, because a partial translation of one would read like the original without doing what it does. Preview first. Nothing is created until you import.</p>
 			</div>
 			<div class="head-actions"></div>
 		</div>
@@ -26,6 +26,8 @@
 				<select id="migrate-format" class="input">
 					<option value="awx">AWX</option>
 					<option value="semaphore">Semaphore</option>
+					<option value="chef">Chef</option>
+					<option value="puppet">Puppet</option>
 					<option value="rundeck">Rundeck</option>
 					<option value="jenkins">Jenkins</option>
 				</select>
@@ -42,7 +44,7 @@
 			</label>
 			<label class="field-label">Export
 				<textarea id="migrate-export" class="input mono" rows="12"
-					placeholder="Paste your AWX, Semaphore, Rundeck, or Jenkins export here"></textarea>
+					placeholder="Paste your AWX, Semaphore, Chef, Puppet, Rundeck, or Jenkins export here"></textarea>
 			</label>
 			<div class="launch-actions">
 				<button id="migrate-sample" type="button" class="button" data-demo-safe="true" data-tip="Click to fill the box with a sample AWX export so you can try the import">Load a sample export</button>

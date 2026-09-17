@@ -44,12 +44,22 @@ was only long.
 
 ## What each source brings over
 
-There are five importers, and they do not all carry the same objects. AWX and Semaphore export a
+There are seven importers, and they do not all carry the same objects. AWX and Semaphore export a
 whole control plane, so they bring projects, inventories, credential shells, templates, surveys, and
 schedules. Jenkins exports jobs and nothing else, so it brings templates, surveys, and schedules
 only, and you name the inventory yourself. Rundeck brings the same three, plus one project when you
 hand it a project archive whose source control configuration names a repository this can reach. A
 crontab is a list of timed commands, so it brings schedules alone.
+
+Chef and Puppet sit the other way round from all of those. They are not control planes with job
+definitions to carry; they are desired-state systems whose work lives in cookbooks and manifests.
+So they bring the fleet: every node, grouped by its environment and, for Chef, by every role in its
+run list, carrying the facts that identify a machine and the address a play connects on. The
+cookbooks and manifests do not come across, and that is not a gap left for later. A recipe is a
+program in another language against another model, and a converter that half-translated one would
+produce something that reads like the original and does not do what it does. The fleet is the part
+that transfers honestly, and it is what you need on day one to put governed runs in front of those
+machines while the recipes are dealt with separately.
 
 | Command | Projects | Inventories | Credential shells | Templates | Surveys | Schedules |
 |---------|----------|-------------|-------------------|-----------|---------|-----------|
@@ -57,6 +67,8 @@ crontab is a list of timed commands, so it brings schedules alone.
 | `import semaphore` | Yes | Yes | Yes | Yes | Yes | Yes|
 | `import rundeck` | From a project archive whose source control names a reachable repository | No, name one with `--inventory` | No | Yes | Yes | Yes|
 | `import jenkins` | No | No, name one with `--inventory` | No | Yes | Yes | Yes|
+| `import chef` | No | Yes, the fleet grouped by environment and role | No | No | No | No|
+| `import puppet` | No | Yes, the fleet grouped by environment | No | No | No | No|
 | `import cron` | No | No, name one with `--inventory` | No | No | No | Yes|
 
 A Rundeck, Jenkins, or crontab import therefore creates no credentials at all. A Rundeck or Jenkins
@@ -224,6 +236,39 @@ Two smaller ones: a Windows batch step is skipped, since the rest of the job imp
 job whose source control checkout mattered has its repository named rather than attached, because
 attaching a project changes the directory every relative path in the script resolves against.
 
+## Import a Chef or Puppet fleet
+
+Both of these answer the same question: the machines are managed by something whose open source line
+has no supported road ahead, and the fleet needs to be somewhere else before that matters.
+
+Chef reads what the server stores about its nodes. Any of the three shapes the tooling emits works:
+an array of node documents, a single node, or an object keyed by node name.
+
+    knife node list | xargs -I{} knife node show {} -F json > chef-nodes.json
+    switchtender import chef chef-nodes.json --db switchtender.db
+
+Each node becomes a host. Its `chef_environment` becomes a group, and every `role[...]` in its run
+list becomes a group as well, so a play can target `[webserver]` on the day of the import. The ohai
+attributes that identify a machine come across as host variables, and `ipaddress` also becomes
+`ansible_host`, because a Chef estate addresses machines by certname and has no reason to have kept
+DNS in step. The rest of a node's automatic attributes are left out on purpose: they run to hundreds
+of keys per host, and copying them produces an inventory nobody can read.
+
+Puppet reads a PuppetDB query, or the plain certname list when PuppetDB is not reachable.
+
+    curl -s "$PUPPETDB/pdb/query/v4/nodes" > puppet-nodes.json
+    switchtender import puppet puppet-nodes.json --db switchtender.db
+
+Nodes group by environment. Deactivated and expired nodes are left out and counted, because Puppet
+itself stopped managing them and a play targeting everything would otherwise reach for machines
+nothing owns. Export a facts query as well to carry addresses:
+
+    curl -s "$PUPPETDB/pdb/query/v4/facts" > puppet-facts.json
+    switchtender import puppet puppet-facts.json --db switchtender.db
+
+Without facts the hosts import as names with no address, and the preview says so rather than letting
+an inventory that reaches nothing look complete.
+
 ## Import a crontab
 
 Fleets that still schedule work from a crontab can bring it under governance in one step. Point the
@@ -243,8 +288,8 @@ the schedules first, then re-run with `--apply` to create them.
 
 No template is created by a crontab import. Each imported schedule carries its own one-step bash
 pipeline, so the plan shows schedules and nothing else. This importer is command line only: the
-`/v1/import/{format}` endpoint and the Migrate page in the UI take awx, semaphore, rundeck, and
-jenkins, not cron. Both cap a body at 25 MiB, which the command line does not, so a Rundeck project
+`/v1/import/{format}` endpoint and the Migrate page in the UI take awx, semaphore, chef, puppet,
+rundeck, and jenkins, not cron. Both cap a body at 25 MiB, which the command line does not, so a Rundeck project
 archive over that size imports from the CLI alone.
 
 ## What maps to what

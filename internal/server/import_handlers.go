@@ -94,6 +94,10 @@ func importHandler(stores importStoresFunc, log *zap.Logger) http.HandlerFunc {
 			mapper = importer.FromAWX
 		case "semaphore":
 			mapper = importer.FromSemaphore
+		case "chef":
+			mapper = importer.FromChef
+		case "puppet":
+			mapper = importer.FromPuppet
 		case "rundeck":
 			mapper = importer.FromRundeck(r.URL.Query().Get("inventory"))
 		case "jenkins":
@@ -108,7 +112,7 @@ func importHandler(stores importStoresFunc, log *zap.Logger) http.HandlerFunc {
 			return
 		default:
 			respondError(w, log, http.StatusBadRequest,
-				"format must be awx, semaphore, rundeck, or jenkins")
+				"format must be awx, semaphore, chef, puppet, rundeck, or jenkins")
 			return
 		}
 		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxImportBody))

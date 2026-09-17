@@ -321,7 +321,7 @@ function wireMigrateFile() {
 		if (box.value.trim() && migrateFileBytes) {
 			migrateFileBytes = null;
 			input.value = "";
-			box.placeholder = "Paste your AWX, Semaphore, Rundeck, or Jenkins export here";
+			box.placeholder = "Paste your AWX, Semaphore, Chef, Puppet, Rundeck, or Jenkins export here";
 		}
 	});
 }
