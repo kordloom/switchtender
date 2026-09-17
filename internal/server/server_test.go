@@ -2455,3 +2455,63 @@ func TestLaunchRefusesAMalformedBody(t *testing.T) {
 		})
 	}
 }
+
+// TestTheDemoAnswersWhetherAnExportComesAcrossWithoutAcceptingOne holds the one exception the
+// read-only gate makes, from both sides.
+//
+// The demo exists to answer whether the product fits, and the most expensive question a visitor
+// brings to it is whether their AWX export survives the move. That answer is a POST, because an
+// export is a body rather than a query, so refusing on the method alone made the migration page a
+// wall: the visitor most worth convincing got "this is a read-only demo" and no answer.
+//
+// The failure this guards is the exception widening. A preview reads the uploaded bytes and touches
+// no store; apply is the write. If those two ever stop being told apart by the same parameter the
+// handler reads, a read-only deployment starts accepting imports, and nothing else would say so.
+func TestTheDemoAnswersWhetherAnExportComesAcrossWithoutAcceptingOne(t *testing.T) {
+	t.Parallel()
+	store := run.NewMemStore()
+	handler := New(store, &fakeSubmitter{}, zap.NewNop(), WithReadOnly(true)).Handler()
+
+	const export = `{"projects":[{"name":"web","scm_type":"git","scm_url":"https://example.invalid/w.git"}]}`
+	post := func(target string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, target, strings.NewReader(export))
+		handler.ServeHTTP(rec, req)
+		return rec
+	}
+
+	// Test 0: A preview is answered, and answers with the report a migration decision rests on.
+	rec := post("/v1/import/awx")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("preview status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	var resp importResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode preview: %v", err)
+	}
+	if resp.Report == nil {
+		t.Error("preview carried no report, so the demo cannot say what comes across")
+	}
+	if resp.Applied {
+		t.Error("a preview reported itself as applied")
+	}
+
+	// Test 1: Every spelling of an apply is refused, and none of them writes.
+	for _, target := range []string{
+		"/v1/import/awx?apply=true",
+		"/v1/import/semaphore?apply=true",
+		"/v1/import/rundeck?apply=true",
+		"/v1/import/jenkins?apply=true",
+	} {
+		if rec := post(target); rec.Code != http.StatusForbidden {
+			t.Errorf("%s status = %d, want 403", target, rec.Code)
+		}
+	}
+
+	// Test 2: The exception is scoped to importing. No other POST slipped through with it.
+	for _, target := range []string{"/v1/runs", "/v1/projects", "/v1/templates", "/v1/credentials"} {
+		if rec := post(target); rec.Code != http.StatusForbidden {
+			t.Errorf("POST %s status = %d, want 403", target, rec.Code)
+		}
+	}
+}

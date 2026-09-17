@@ -747,6 +747,16 @@ func readOnlyGate(next http.Handler) http.Handler {
 		case http.MethodGet, http.MethodHead, http.MethodOptions:
 			next.ServeHTTP(w, r)
 		default:
+			// An import preview is a read written as a POST, because an export is a body rather than
+			// a query. Refusing it on the method alone turned the migration page into a wall in the
+			// demo, which is where the most expensive question a visitor brings gets answered: does
+			// my export come across. The preview parses the uploaded bytes and touches no store, and
+			// the write lives behind apply, so that parameter is the whole line between the two.
+			if r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/v1/import/") &&
+				!applyRequested(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			w.WriteHeader(http.StatusForbidden)
 			_, _ = w.Write([]byte(`{"error":"this is a read-only demo"}`))

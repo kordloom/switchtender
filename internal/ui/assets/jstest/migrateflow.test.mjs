@@ -161,3 +161,93 @@ test("typing over a loaded archive sends what was typed", async () => {
 	assert.equal(bodies.length, 1);
 	assert.equal(bodies[0], "<project/>", "the pasted export was not what got sent");
 });
+
+// REPORT is the shape the server returns alongside a preview: what comes across, what needs a secret
+// entered once, and the two classified warning lists.
+const REPORT = {
+	created: [{ kind: "templates", n: 3 }, { kind: "projects", n: 1 }],
+	created_total: 4,
+	needs_secret: 2,
+	left_out: ['job "nightly" is a Pipeline job, whose script has no equivalent here. It was not imported.'],
+	needs_review: ['workflow "Release" imported with 2 steps. Check the graph before you run it.'],
+};
+
+// summaryFigures reads the summary block back as a label to count map, the way a reader sees it.
+function summaryFigures(document) {
+	const out = {};
+	for (const cell of document.querySelectorAll(".migrate-figure")) {
+		const label = cell.querySelector(".migrate-figure-label").textContent;
+		out[label] = cell.querySelector(".migrate-figure-n").textContent;
+	}
+	return out;
+}
+
+// groupTitles reads the headings of the itemized lists under the summary.
+function groupTitles(document) {
+	return [...document.querySelectorAll(".migrate-group h2")].map((h) => h.textContent);
+}
+
+// previewWith runs a preview that returns the given body and hands back the rendered page.
+async function previewWith(body) {
+	const routes = { "/v1/import/awx": () => reply(body) };
+	const { app, document, clock } = loadPage("migrate", { parts: ALL_PARTS, routes });
+	app.wireMigrate();
+	document.getElementById("migrate-format").value = "awx";
+	document.getElementById("migrate-export").value = EXPORT;
+	fire(document.getElementById("migrate-preview"), "click");
+	await clock.flush();
+	return document;
+}
+
+test("the migration summary says what comes across and what does not", async () => {
+	const document = await previewWith({ report: REPORT, templates: ["build", "test", "deploy"], projects: ["web"] });
+
+	const figures = summaryFigures(document);
+	assert.equal(figures["Comes across"], "4");
+	assert.equal(figures["Needs a secret"], "2");
+	assert.equal(figures["Does not come across"], "1");
+	assert.equal(figures["Worth reviewing"], "1");
+
+	// The count on its own is not actionable. A dropped object has to be named where it was dropped.
+	const titles = groupTitles(document);
+	assert.ok(titles.includes("Does not come across (1)"), "the dropped object was not itemized: " + titles);
+	assert.ok(titles.includes("Worth reviewing (1)"), "review items were not itemized: " + titles);
+	assert.ok(!titles.includes("Warnings (2)"), "the warnings were left unclassified in one flat list");
+
+	const page = document.getElementById("migrate-plan").textContent;
+	assert.ok(page.includes("Pipeline job"), "the reason an object did not come across was not shown");
+	assert.ok(page.includes("an export never carries secret values") ||
+		page.includes("An export never carries secret values"),
+	"the page did not say why a credential needs a secret, so the count reads as a failure");
+});
+
+test("the summary figure for what does not come across can never exceed what the page lists", async () => {
+	// The failure this guards is a headline that disagrees with the list beneath it: a summary saying
+	// four objects were dropped above a list naming one is worse than no summary, because the reader
+	// has no way to find the other three and no reason to doubt the number.
+	const document = await previewWith({
+		report: { ...REPORT, left_out: ["a was not imported", "b was not imported", "c was not imported"] },
+		templates: ["build"],
+	});
+	const figures = summaryFigures(document);
+	const listed = [...document.querySelectorAll(".migrate-group")]
+		.filter((g) => g.querySelector("h2").textContent.startsWith("Does not come across"))
+		.flatMap((g) => [...g.querySelectorAll("li")]).length;
+	assert.equal(Number(figures["Does not come across"]), listed,
+		"the summary count and the itemized list disagree about what was dropped");
+});
+
+test("a report the export outgrew says so rather than reading as complete", async () => {
+	const document = await previewWith({ report: { ...REPORT, suppressed: 12 }, templates: ["build"] });
+	const page = document.getElementById("migrate-plan").textContent;
+	assert.ok(page.includes("12 further warning(s) are not listed"),
+		"a capped report presented itself as the whole answer");
+});
+
+test("a preview with no report still shows its warnings rather than none", async () => {
+	// The classified lists come from the report. If one is ever absent, the warnings still have to
+	// reach the page: showing nothing would read as a clean import.
+	const document = await previewWith({ warnings: ["something was skipped"], templates: ["build"] });
+	assert.deepEqual(groupTitles(document), ["Templates (1)", "Warnings (1)"]);
+	assert.ok(document.getElementById("migrate-plan").textContent.includes("something was skipped"));
+});

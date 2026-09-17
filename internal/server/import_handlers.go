@@ -58,6 +58,15 @@ type importResponse struct {
 // importStoresFunc returns the stores an import writes to, and whether all are enabled.
 type importStoresFunc func() (importer.ApplyStores, bool)
 
+// applyRequested reports whether an import request asks to write, rather than to preview.
+//
+// Read here to decide whether to apply, and by the read-only gate to decide whether to let the
+// request through at all. One accessor rather than the same comparison written twice, because those
+// two readings disagreeing is a read-only deployment that quietly accepts a write.
+func applyRequested(r *http.Request) bool {
+	return r.URL.Query().Get("apply") == "true"
+}
+
 // importHandler previews or applies an AWX, Semaphore, Rundeck, or Jenkins export. POST
 // /import/{format} with the export as the body returns the plan; add ?apply=true to write it.
 // Preview needs no stores; apply needs projects, inventories, credentials, templates, and schedules
@@ -151,7 +160,7 @@ func importHandler(stores importStoresFunc, log *zap.Logger) http.HandlerFunc {
 			resp.Schedules = append(resp.Schedules, s.Name)
 		}
 
-		if r.URL.Query().Get("apply") == "true" {
+		if applyRequested(r) {
 			applyStores, ok := stores()
 			if !ok {
 				respondError(w, log, http.StatusConflict,
