@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -195,5 +196,60 @@ func TestAuditBeatsFeedWithoutBeats(t *testing.T) {
 	}
 	if len(beats) != 0 {
 		t.Errorf("beats = %+v, want an empty array for a chain with no span entries", beats)
+	}
+}
+
+// TestVerifySaysHowFarTheTrailReachesRatherThanJustOk is the guard on the field an integrator
+// actually asserts on.
+//
+// A trail with no anchors verifies perfectly: every hash recomputes, every link holds, and the
+// endpoint answered ok:true. That is the producer's record agreeing with itself, which is worth
+// something against a corrupted database and nothing against the producer. The two installs that
+// deserve different answers, one anchored outside itself and one not, both returned green, with the
+// difference parked in a count nobody reads.
+func TestVerifySaysHowFarTheTrailReachesRatherThanJustOk(t *testing.T) {
+	t.Parallel()
+	store := run.NewMemStore()
+	handler := New(store, &fakeSubmitter{}, zap.NewNop(),
+		WithAudit(audit.NewMemStore())).Handler()
+
+	// Write something worth chaining, so the trail is not trivially empty.
+	for range 3 {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/runs",
+			strings.NewReader(`{"tool":"bash","command":"true","hosts":["h1"]}`)))
+	}
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/audit/verify", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("verify status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	var resp auditVerifyResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode verify: %v", err)
+	}
+
+	// Test 0: An unanchored trail is chained and says so, rather than reporting a bare ok.
+	if resp.Anchored != 0 {
+		t.Fatalf("expected an unanchored store, got %d anchors", resp.Anchored)
+	}
+	if resp.Level != 2 || resp.LevelName != "chained" {
+		t.Errorf("unanchored trail reported level %d %q, want 2 chained",
+			resp.Level, resp.LevelName)
+	}
+
+	// Test 1: The level never claims a property this endpoint did not check. Level 1 is a signature
+	// over an exported bundle and level 4 needs every span check to verify; neither happens here, so
+	// reporting either would be asserting something nobody measured.
+	if resp.Level == 1 || resp.Level == 4 {
+		t.Errorf("verify reported level %d, which this endpoint does not evaluate", resp.Level)
+	}
+
+	// Test 2: The name and the number never disagree, since a reader will quote whichever they saw.
+	byNumber := map[int]string{0: "", 2: "chained", 3: "anchored"}
+	if want, ok := byNumber[resp.Level]; !ok || want != resp.LevelName {
+		t.Errorf("level %d carries name %q, which is not the name for that level",
+			resp.Level, resp.LevelName)
 	}
 }

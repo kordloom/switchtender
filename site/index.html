@@ -108,7 +108,7 @@
 					all go through the same path: request, policy, approval, whether a person or an
 					AI agent asked. Nothing runs until it clears. Then watch every task land on
 					every host, live. Every run leaves behind a
-					cryptographically signed receipt anyone can verify offline against our published key, with no server of ours involved.
+					cryptographically signed receipt anyone can verify offline against the key your own install publishes, with no server of ours involved.
 					An agent holding only a SwitchTender token has no path around that gate at all;
 					for people it is the keys you stop handing out. We say which is which.
 					<strong>One binary. Starts in seconds.</strong>
@@ -260,7 +260,7 @@ switchtender import semaphore export.json --db switchtender.db --apply</code></p
 					<div class="ic ic-audit"></div>
 					<h3>Provable audit</h3>
 					<p>Every change links into a tamper-evident SHA-256 hash chain; a change that can't be recorded is refused rather than made quietly. Export the chain as a signed <a href="https://loomseal.com" rel="noopener">LoomSeal</a> bundle and verify it offline with an open, independent verifier, without trusting the server.</p>
-					<p class="card-bound">What it doesn't claim: the chain proves the record wasn't altered after writing, not that a compromised controller recorded everything. The full boundary statement is in <a href="/docs/concepts#provable-audit">the docs</a>.</p>
+					<p class="card-bound">What it doesn't claim: the chain proves the record wasn't altered after writing, not that a compromised controller recorded everything, and not that every change went through us. Anyone holding their own SSH key can still change a host behind it. The full boundary statement is in <a href="/docs/concepts#provable-audit">the docs</a>.</p>
 				</article>
 				<article class="card reveal">
 					<div class="ic ic-gate"></div>

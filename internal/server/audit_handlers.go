@@ -129,6 +129,23 @@ type auditVerifyResponse struct {
 	BrokeAt int `json:"broke_at,omitempty"`
 	// Anchored is the number of anchors the chain was held against.
 	Anchored int `json:"anchored"`
+	// Level is the conformance level this check reached, in the receipt format's own numbering:
+	// 2 chained, 3 anchored. Zero when the chain itself did not verify.
+	//
+	// It exists because OK alone is not an answer. A trail with no anchors verifies perfectly and
+	// proves only that the producer's own record is internally consistent, which is the producer's
+	// word about itself. OK is the field an integrator asserts on and Anchored is the field they
+	// skip, so the two together let a install that proves the least report the same green as one
+	// that proves the most. A level cannot be read that way.
+	//
+	// This never reports 1 or 4, by construction rather than by accident. Level 1 is a signature
+	// over an exported bundle, which this endpoint does not build, and level 4 additionally
+	// requires every span check to verify, which the bundle export is what evaluates. So this is a
+	// floor: the trail reaches at least this far, and the bundle is where the ceiling is measured.
+	Level int `json:"level"`
+	// LevelName is that level in the format's own vocabulary, so a reader never has to hold a
+	// number-to-word mapping in their head: chained, or anchored.
+	LevelName string `json:"level_name,omitempty"`
 	// AnchorProblems describes each anchor the chain no longer satisfies, empty when it satisfies
 	// all of them. A chain can hash-verify perfectly and still have lost its tail, because a prefix
 	// of a valid chain is itself a valid chain. This is the part that catches that.
@@ -194,6 +211,15 @@ func auditVerifyHandler(store audit.Store, installID string, log *zap.Logger) ht
 						resp.AnchorProblems = append(resp.AnchorProblems, res.Problem)
 					}
 				}
+			}
+		}
+		// Graded from the chain scanner's own verdict rather than from resp.OK, which a failed
+		// anchor has already lowered: a chain that hashes correctly is chained even when an anchor
+		// it no longer satisfies means the trail as a whole cannot be trusted.
+		if ok {
+			resp.Level, resp.LevelName = 2, "chained"
+			if len(anchors) > 0 && len(resp.AnchorProblems) == 0 {
+				resp.Level, resp.LevelName = 3, "anchored"
 			}
 		}
 		respondJSON(w, log, http.StatusOK, resp, wantsPretty(r))

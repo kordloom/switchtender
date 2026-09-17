@@ -366,9 +366,14 @@ func TestAuditVerifyHandlerReportsATamperAsAnAnswer(t *testing.T) {
 		WantBrokeAt int
 		// WantCount is the number of entries the report must say it checked.
 		WantCount int
+		// WantLevel is the conformance level the report must reach. A broken chain reaches none,
+		// and an intact but unanchored one reaches chained and no further.
+		WantLevel int
+		// WantLevelName is that level in the format's own vocabulary.
+		WantLevelName string
 	}{{ // Test 0: An intact chain verifies, which is the control.
 		Edit:   func(e *audit.Entry) *audit.Entry { return e },
-		WantOK: true, WantCount: 5,
+		WantOK: true, WantCount: 5, WantLevel: 2, WantLevelName: "chained",
 	}, { // Test 1: A rewritten payload is located rather than raised as a fault.
 		Edit: func(e *audit.Entry) *audit.Entry {
 			if e.Seq == 4 {
@@ -409,7 +414,8 @@ func TestAuditVerifyHandlerReportsATamperAsAnAnswer(t *testing.T) {
 			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 				t.Fatalf("decode report: %v (body %s)", err, rec.Body.String())
 			}
-			want := auditVerifyResponse{OK: test.WantOK, BrokeAt: test.WantBrokeAt, Count: test.WantCount}
+			want := auditVerifyResponse{OK: test.WantOK, BrokeAt: test.WantBrokeAt,
+				Count: test.WantCount, Level: test.WantLevel, LevelName: test.WantLevelName}
 			if diff := cmp.Diff(want, got, cmpopts.EquateEmpty()); diff != "" {
 				t.Errorf("report mismatch (-want +got):\n%s", diff)
 			}
