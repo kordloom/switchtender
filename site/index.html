@@ -3,9 +3,9 @@
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
-	<title>SwitchTender: run everything, watch every host, prove every change</title>
+	<title>SwitchTender: one gate for every change to production, and proof it held</title>
 	<meta name="description" content="The boundary every infrastructure change comes through, human operator or AI agent. Nothing runs until it clears request, policy, and approval, and every run leaves a signed receipt anyone can verify offline without us. Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go in one self-hosted Go binary. Import from AWX, Ansible Automation Platform, Semaphore, Rundeck, or Jenkins in one command.">
-	<meta property="og:title" content="SwitchTender: run everything, watch every host, prove every change">
+	<meta property="og:title" content="SwitchTender: one gate for every change to production, and proof it held">
 	<meta property="og:description" content="The boundary every infrastructure change comes through, human operator or AI agent. Nothing runs until it clears policy and approval, and every run leaves a receipt anyone can verify without us.">
 	<meta property="og:type" content="website">
 	<meta property="og:url" content="https://switchtender.com/">
@@ -79,6 +79,7 @@
 			<nav class="nav-links">
 				<a href="#governance">Governance</a>
 				<a href="#proof">Proof</a>
+				<a href="#migrate">Migrate</a>
 				<a href="#features">Features</a>
 				<a href="#ai">AI</a>
 				<a href="#sdk">SDK</a>
@@ -101,11 +102,12 @@
 		<section class="hero wrap">
 			<div class="hero-copy reveal">
 				<span class="eyebrow">Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, Go</span>
-				<h1>Run everything.<br>Watch every host.<br><span class="grad">Prove every change.</span></h1>
+				<h1>One gate for every change to production.<br><span class="grad">And proof it held.</span></h1>
 				<p class="lede">
-					SwitchTender is the boundary you put every change through, human operator or AI
-					agent. Nothing runs until it clears one path: request, policy, approval. Then
-					watch every task land on every host, live. Every run leaves behind a
+					Run everything. Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go
+					all go through the same path: request, policy, approval, whether a person or an
+					AI agent asked. Nothing runs until it clears. Then watch every task land on
+					every host, live. Every run leaves behind a
 					cryptographically signed receipt anyone can verify offline against our published key, with no server of ours involved.
 					An agent holding only a SwitchTender token has no path around that gate at all;
 					for people it is the keys you stop handing out. We say which is which.
@@ -115,8 +117,8 @@
 					<a class="btn big" href="https://demo.switchtender.com">Open the live demo</a>
 					<a class="ghost big" href="/get-started">Install</a>
 				</div>
-				<p class="hero-note hero-dare">Don't take the receipts on faith. Pull the live demo's signed history with <code>curl</code> and check it with LoomSeal: Apache-2.0, a published format with conformance vectors, and a second implementation in Python. We publish LoomSeal too, so what you are trusting is the format and the vectors, not our word. <a href="#proof">Try to refute it &rarr;</a></p>
 				<p class="hero-note">Already on AWX? <code>switchtender import awx</code> brings your projects, inventories, templates, surveys, and schedules across in one command. Preview the plan, then apply.</p>
+				<p class="hero-note hero-dare">Don't take the receipts on faith. Pull the live demo's signed history with <code>curl</code> and check it with LoomSeal: Apache-2.0, a published format with conformance vectors, and a second implementation in Python. We publish LoomSeal too, so what you are trusting is the format and the vectors, not our word. <a href="#proof">Try to refute it &rarr;</a></p>
 				<p class="hero-note">Source-available. BSL 1.1. Go SDK with drop-in plugins. One file to back up.</p>
 			</div>
 			<div class="hero-shot reveal">
@@ -227,6 +229,25 @@ loomseal verify demo-bundle.json --fingerprint "$(curl -s \
 #    Run it again after tonight's reseed and watch it catch the rewrite.</span>
 switchtender witness --server https://demo.switchtender.com --once</code></pre>
 			</div>
+		</section>
+
+		<section class="section wrap" id="migrate">
+			<div class="section-head reveal">
+				<h2>Bring the whole thing<br>with you.</h2>
+				<p>A migration is one command, not a rebuild. AWX, Semaphore, Rundeck, and Jenkins each have an importer, and Ansible Automation Platform, Tower, and Ascender export through the same awxkit command with the same top-level keys, so the AWX importer reads them too. Even a crontab imports, line by line, into governed schedules. Export, preview exactly what will land, then apply. Projects, inventories with their hosts and groups, dynamic inventory sources, job templates, surveys, schedules, and credential shells all come across in one pass. A malformed asset is skipped with a warning instead of failing the import, so even a partial export migrates everything it can.</p>
+			</div>
+			<div class="code reveal">
+				<button class="copy" aria-label="Copy">Copy</button>
+				<pre><code><span class="c"># 1. preview: read the AWX export, print the plan, write nothing</span>
+switchtender import awx awx-export.json --db switchtender.db
+
+<span class="c"># 2. apply: create every project, inventory, template, survey, and schedule</span>
+switchtender import awx awx-export.json --db switchtender.db --apply
+
+<span class="c"># on Semaphore instead? swap one word:</span>
+switchtender import semaphore export.json --db switchtender.db --apply</code></pre>
+			</div>
+			<p class="reveal" style="margin-top: 20px; text-align: center;">Credentials arrive as named shells, since these exports omit secret material by design. Re-enter each secret once and every template that references it works. The <a href="/docs/switching-from-awx">switching guide</a> maps every AWX concept to its SwitchTender equivalent, and the <a href="/awx-alternative">AWX alternative page</a> makes the full case.</p>
 		</section>
 
 		<section class="section wrap" id="features">
@@ -461,25 +482,6 @@ func main() {
 				</table>
 				<p class="compare-note">Every row was checked against each vendor's own documentation on 10 August 2026, at AWX 24.6.1, Ansible Automation Platform 2.7, Semaphore 2.19.7, Ascender 25.4.0, and Rundeck 6.0.1. Versions were re-checked on 7 September 2026: AWX is unchanged, Semaphore is now 2.19.12, Ascender 25.6.1, and Rundeck 6.1.0. All five of these products keep shipping, so a table like this starts going stale the day it's written. If a row is wrong, <a href="https://github.com/kordloom/switchtender/issues">open an issue</a> and we'll fix it.</p>
 			</div>
-		</section>
-
-		<section class="section wrap" id="migrate">
-			<div class="section-head reveal">
-				<h2>Bring the whole thing<br>with you.</h2>
-				<p>A migration is one command, not a rebuild. AWX, Semaphore, Rundeck, and Jenkins each have an importer, and Ansible Automation Platform, Tower, and Ascender export through the same awxkit command with the same top-level keys, so the AWX importer reads them too. Even a crontab imports, line by line, into governed schedules. Export, preview exactly what will land, then apply. Projects, inventories with their hosts and groups, dynamic inventory sources, job templates, surveys, schedules, and credential shells all come across in one pass. A malformed asset is skipped with a warning instead of failing the import, so even a partial export migrates everything it can.</p>
-			</div>
-			<div class="code reveal">
-				<button class="copy" aria-label="Copy">Copy</button>
-				<pre><code><span class="c"># 1. preview: read the AWX export, print the plan, write nothing</span>
-switchtender import awx awx-export.json --db switchtender.db
-
-<span class="c"># 2. apply: create every project, inventory, template, survey, and schedule</span>
-switchtender import awx awx-export.json --db switchtender.db --apply
-
-<span class="c"># on Semaphore instead? swap one word:</span>
-switchtender import semaphore export.json --db switchtender.db --apply</code></pre>
-			</div>
-			<p class="reveal" style="margin-top: 20px; text-align: center;">Credentials arrive as named shells, since these exports omit secret material by design. Re-enter each secret once and every template that references it works. The <a href="/docs/switching-from-awx">switching guide</a> maps every AWX concept to its SwitchTender equivalent, and the <a href="/awx-alternative">AWX alternative page</a> makes the full case.</p>
 		</section>
 
 		<section class="section start wrap" id="start">
