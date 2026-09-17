@@ -221,7 +221,7 @@ func (p *Plan) addSemaphoreProject(proj semaphoreProject, now time.Time) {
 		}
 		p.Credentials = append(p.Credentials,
 			&credential.Credential{ID: credential.NewID(), Name: key.Name, Kind: kind, CreatedAt: now})
-		p.warn("key %q needs its secret re-entered; exports omit secrets by design", key.Name)
+		p.warn("key %q needs its secret re-entered; an export never carries secret values", key.Name)
 	}
 
 	templateIDs := map[string]string{}

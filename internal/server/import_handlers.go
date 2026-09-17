@@ -33,6 +33,9 @@ type importResponse struct {
 	Credentials []string `json:"credentials"`
 	// Templates names the job templates the import creates.
 	Templates []string `json:"templates"`
+	// Report summarizes what comes across, what needs a secret, and what does not transfer. The
+	// itemized lists below answer what an import did; this answers whether to attempt one.
+	Report *importer.Report `json:"report,omitempty"`
 	// Schedules names the schedules the import creates.
 	Schedules []string `json:"schedules"`
 	// InventoryContent maps an inventory's name to the content the import would write.
@@ -118,7 +121,11 @@ func importHandler(stores importStoresFunc, log *zap.Logger) http.HandlerFunc {
 			return
 		}
 
-		resp := importResponse{Warnings: plan.Warnings, SuppressedWarnings: plan.Suppressed()}
+		// The same summary the command line prints, so a migration decision made through the page
+		// rests on the same numbers as one made from a terminal.
+		report := plan.Report()
+		resp := importResponse{Warnings: plan.Warnings, SuppressedWarnings: plan.Suppressed(),
+			Report: &report}
 		for _, p := range plan.Projects {
 			resp.Projects = append(resp.Projects, p.Name)
 		}
