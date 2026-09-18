@@ -5,6 +5,8 @@ package policytest
 import (
 	"context"
 	"errors"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,6 +17,7 @@ import (
 func Contract(t *testing.T, newStore func() policy.Store) {
 	t.Helper()
 	t.Run("save list delete", func(t *testing.T) { testSaveListDelete(t, newStore()) })
+	everyFieldSurvivesARoundTrip(t, newStore)
 	t.Run("get", func(t *testing.T) { testGet(t, newStore()) })
 	t.Run("empty list is non-nil", func(t *testing.T) {
 		got, err := newStore().List(context.Background())
@@ -105,5 +108,108 @@ func testSaveListDelete(t *testing.T, store policy.Store) {
 	}
 	if err := store.Delete(ctx, "pol_missing"); !errors.Is(err, policy.ErrNotFound) {
 		t.Errorf("Delete(missing) = %v, want ErrNotFound", err)
+	}
+}
+
+// everyFieldSurvivesARoundTrip holds every backend to keeping the whole of a policy.
+//
+// It exists because one field was not kept, and nothing anywhere said so. Reversibility was added to
+// the policy, evaluated by the engine, accepted by the API, listed on the page, and never written to
+// a column, so a rule saved as "hold anything that cannot be undone" loaded back holding nothing. The
+// API answered 200. The page rendered the rule. The only way to find out was to submit a destructive
+// run and watch it execute.
+//
+// A store that silently drops a field is the worst shape a bug can take in this product, because
+// every surface above it keeps reporting success. So rather than listing the fields somebody
+// remembers, this sets every one by reflection and requires the store to give them all back. A new
+// field on a policy is covered the moment it exists.
+func everyFieldSurvivesARoundTrip(t *testing.T, newStore func() policy.Store) {
+	t.Helper()
+	t.Run("every field of a policy survives a round trip", func(t *testing.T) {
+		t.Parallel()
+		store := newStore()
+		ctx := context.Background()
+
+		// Fields the store assigns or that carry their own meaning, filled deliberately below.
+		fixed := map[string]bool{"id": true, "name": true, "created_at": true}
+
+		want := &policy.Policy{
+			ID:        "pol_roundtrip",
+			Name:      "round trip",
+			CreatedAt: time.Now().UTC().Truncate(time.Second),
+		}
+		rv := reflect.ValueOf(want).Elem()
+		rt := rv.Type()
+		var set []string
+		for i := range rt.NumField() {
+			name, _, _ := strings.Cut(rt.Field(i).Tag.Get("json"), ",")
+			if name == "" || name == "-" || fixed[name] {
+				continue
+			}
+			// Values are chosen only to be distinguishable from a zero value, since what is being
+			// tested is whether the store keeps them rather than whether they are meaningful.
+			switch f := rv.Field(i); f.Kind() {
+			case reflect.String:
+				f.SetString(policyProbeString(name))
+			case reflect.Bool:
+				f.SetBool(true)
+			case reflect.Int:
+				f.SetInt(3)
+			default:
+				t.Fatalf("policy field %q has kind %s, which this contract cannot set; teach it "+
+					"that kind rather than leaving the field unchecked", name, f.Kind())
+			}
+			set = append(set, name)
+		}
+		if len(set) < 5 {
+			t.Fatalf("only %d policy fields were exercised, which cannot be right: %v", len(set), set)
+		}
+
+		if err := store.Save(ctx, want); err != nil {
+			t.Fatalf("save policy: %v", err)
+		}
+		all, err := store.List(ctx)
+		if err != nil {
+			t.Fatalf("list policies: %v", err)
+		}
+		var got *policy.Policy
+		for _, p := range all {
+			if p.ID == want.ID {
+				got = p
+			}
+		}
+		if got == nil {
+			t.Fatalf("the saved policy was not listed back")
+		}
+
+		gv := reflect.ValueOf(got).Elem()
+		for i := range rt.NumField() {
+			name, _, _ := strings.Cut(rt.Field(i).Tag.Get("json"), ",")
+			if name == "" || name == "-" || fixed[name] {
+				continue
+			}
+			if !reflect.DeepEqual(rv.Field(i).Interface(), gv.Field(i).Interface()) {
+				t.Errorf("policy field %q was saved as %v and came back %v, so a rule using it is "+
+					"stored, listed, and enforced as though it were never set",
+					name, rv.Field(i).Interface(), gv.Field(i).Interface())
+			}
+		}
+	})
+}
+
+// policyProbeString returns a value valid for the field it is filling, since some are validated on
+// the way in and an arbitrary string would be rejected rather than round tripped.
+func policyProbeString(field string) string {
+	switch field {
+	case "min_risk":
+		return "high"
+	case "reversibility":
+		return "irreversible"
+	case "effect":
+		return policy.EffectDeny
+	case "actor_kind":
+		return "agent"
+	default:
+		return "probe-" + field
 	}
 }
