@@ -87,6 +87,7 @@
 				<a href="/pricing">Pricing</a>
 				<a href="/agents">Agents</a>
 				<a href="/docs/">Docs</a>
+				<a href="mailto:hello@switchtender.com">Contact</a>
 			</nav>
 			<div class="nav-cta">
 				<a class="ghost" href="https://github.com/kordloom/switchtender">GitHub</a>
@@ -104,21 +105,21 @@
 				<span class="eyebrow">Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, Go</span>
 				<h1>Gate every change.<br>Watch every host.<br><span class="grad">Prove every run.</span></h1>
 				<p class="lede">
-					Run everything. Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go
-					all go through the same path: request, policy, approval, whether a person or an
-					AI agent asked. Nothing runs until it clears. Then watch every task land on
-					every host, live. Every run leaves behind a
-					cryptographically signed receipt anyone can verify offline against the key your own install publishes, with no server of ours involved.
-					An agent holding only a SwitchTender token has no path around that gate at all;
-					for people it is the keys you stop handing out. We say which is which.
+					Right now several people and a few scripts can change production, and afterward
+					you cannot prove which of them did. If the thing holding that together is AWX,
+					the free one hasn't shipped a release in over two years and the supported way
+					off it is priced per managed node.
+					SwitchTender is the one path every change goes through: request, policy,
+					approval, whether a person or an AI agent asked. Ansible, Terraform, OpenTofu,
+					Bash, PowerShell, Python, and Go, all through the same gate.
 					<strong>One binary. Starts in seconds.</strong>
 				</p>
 				<div class="hero-cta">
 					<a class="btn big" href="https://demo.switchtender.com">Open the live demo</a>
 					<a class="ghost big" href="/get-started">Install</a>
 				</div>
-				<p class="hero-note">Already on AWX? <code>switchtender import awx</code> brings your projects, inventories, templates, surveys, and schedules across in one command. Preview the plan, then apply.</p>
-				<p class="hero-note hero-dare">Don't take the receipts on faith. Pull the live demo's signed history with <code>curl</code> and check it with LoomSeal: Apache-2.0, a published format with conformance vectors, and a second implementation in Python. We publish LoomSeal too, so what you are trusting is the format and the vectors, not our word. <a href="#proof">Try to refute it &rarr;</a></p>
+				<p class="hero-note">Already on AWX? <code>switchtender assess awx export.json</code> tells you what comes across, what does not, and which of your templates nobody currently has to approve. Then <code>switchtender import awx</code> brings projects, inventories, templates, surveys, and schedules over in one command.</p>
+				<p class="hero-note hero-offer">Would rather not do it yourself? The <a href="/pricing#sprint">Migration Program</a> is $25,000 fixed price, four milestones, about six weeks, first year of Team included. Founder-led, and it covers the part that actually goes wrong: cutting over without a window where neither system is authoritative.</p>
 				<p class="hero-note">Source-available. BSL 1.1. Go SDK with drop-in plugins. One file to back up.</p>
 			</div>
 			<div class="hero-shot reveal">
@@ -173,6 +174,7 @@
 		<section class="section wrap" id="proof">
 			<div class="section-head reveal">
 				<h2>Evidence you can <span class="grad">hand to an auditor.</span></h2>
+				<p class="proof-dare">Don't take the receipts on faith. Pull the live demo's signed history with <code>curl</code> and check it with LoomSeal: Apache-2.0, a published format with conformance vectors, and a second implementation in Python. We publish LoomSeal too, so what you are trusting is the format and the vectors, not our word.</p>
 				<p>Most controllers keep an activity log: rows in their own database, editable by whoever holds the database. SwitchTender writes every change into a hash chain, then gives you six ways to carry the proof out of the building. What changed, who asked, and who approved it become things you show, not things you say. Every claim on this page is defended adversary by adversary, limits included, in the <a href="/docs/threat-model">threat model</a>.</p>
 			</div>
 			<div class="cards cards-3">
@@ -563,6 +565,7 @@ open http://localhost:8080/ui/</code></pre>
 				<a href="/rundeck-alternative">vs Rundeck</a>
 				<a href="/chef-eol">Off Chef</a>
 				<a href="/puppet-eol">Off Puppet</a>
+				<a href="mailto:hello@switchtender.com">Email us</a>
 				<a href="/privacy">Privacy</a>
 				<a href="/terms">Terms</a>
 				<a href="/refund">Refunds</a>

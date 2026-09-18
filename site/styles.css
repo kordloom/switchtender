@@ -508,3 +508,11 @@ h1 {
 
 /* The legal line: the common-law trademark claim, publicly dated, on every page. */
 .foot-legal { text-align: center; margin: 18px auto 0; font-size: 12px; color: var(--muted, #8a93a6); opacity: .8; }
+
+/* The offer in the hero: the one line on this page a buyer can act on without reading further, so
+   it is set apart from the notes around it rather than reading as one more caveat. */
+.hero-offer { border-left: 2px solid var(--accent); padding-left: 12px; }
+.hero-offer a { color: var(--accent); }
+/* The verification dare, moved out of the hero. It answers an objection a reader only has once they
+   are convinced enough to have one, so it sits with the evidence rather than ahead of it. */
+.proof-dare { font-size: 14px; color: var(--muted); margin: 0 0 12px; }
