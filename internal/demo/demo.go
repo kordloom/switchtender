@@ -439,7 +439,7 @@ func seedGovernance(ctx context.Context, d Deps, playbook, inv, tfDir string, id
 		map[string]string{"env": "prod", "ticket": "OPS-511"},
 		run.WithTool(run.ToolTerraform), run.WithCommand(tfDir),
 		run.WithRequireApproval(true), run.WithRequireDistinctApprover(true),
-		run.WithHeldByPolicy("prod terraform destroy"))
+		run.WithHeldByPolicy("anything that cannot be undone"))
 	if _, err := d.Submitter.Submit(ctx, "", "", held...); err != nil {
 		log.Warn("demo: seed held run: " + err.Error())
 	} else if d.Clock != nil {
@@ -1159,9 +1159,18 @@ func seedConfig(ctx context.Context, d Deps, log *zap.Logger) seededIDs {
 		// linked from that same row carried require_distinct_approver. The page told a stranger
 		// that no rule here enforces separation of duties, which is the compliance story the
 		// Policies page exists to tell.
-		tfDestroy := policy.NewPolicy("prod terraform destroy")
-		tfDestroy.Tool, tfDestroy.CommandContains, tfDestroy.ExcludeDryRun, tfDestroy.CreatedAt =
-			run.ToolTerraform, "destroy", true, ago(40)
+		// Holds on the grade rather than on the word "destroy" in a command line. The string
+		// match was the wrong thing to show a visitor twice over: it misses the spelling a
+		// destroy usually reaches production as, which is an apply replaying a plan file, and it
+		// teaches that governing this product means keeping a list of dangerous words current.
+		// Grading is the answer to both, and it is the feature this page exists to demonstrate.
+		tfDestroy := policy.NewPolicy("anything that cannot be undone")
+		tfDestroy.Tool, tfDestroy.Reversibility, tfDestroy.ExcludeDryRun, tfDestroy.CreatedAt =
+			run.ToolTerraform, run.Irreversible, true, ago(40)
+		// Zero holds a plan that would destroy anything at all. The default disables the check,
+		// which is safe for availability and not for change control, and leaving it disabled on
+		// the one policy demonstrating change control said the opposite of what was intended.
+		tfDestroy.MaxDestroy = 0
 		tfDestroy.RequireDistinctApprover = true
 		anyProd := policy.NewPolicy("any production run")
 		anyProd.InventoryID, anyProd.CreatedAt = inventories[0].ID, ago(22)

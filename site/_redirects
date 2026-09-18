@@ -1,0 +1,12 @@
+# Plausible URLs that are not the ones these pages live at.
+#
+# None of these is linked from anywhere on the site, which is why nothing caught them: they are what
+# somebody types, or what a model cites when it half-remembers a slug. A reviewer hit all four in one
+# sitting. A 404 from a security page reads as the page having been taken down, which is the worst
+# possible impression for the part of the product that is asking to be trusted.
+/docs/ai-agents     /docs/agents        301
+/docs/advisory-ai   /docs/ai            301
+/security           /docs/threat-model  301
+/docs/security      /docs/threat-model  301
+/docs/threatmodel   /docs/threat-model  301
+/threat-model       /docs/threat-model  301

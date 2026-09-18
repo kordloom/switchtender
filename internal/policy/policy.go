@@ -189,9 +189,14 @@ func (p *Policy) matchesActor(r *run.Run) bool {
 //
 // Actor scoping belongs here because it is the criterion that turns a blanket hold into an
 // authorization boundary around a machine principal, which is the thing being sold.
+// Reversibility belongs here for the same reason MinRisk does, and it drifted the same way: the
+// grade was added, the engine evaluated it, and this was not updated, so a rule holding on
+// irreversibility was free through --policy-file while the identical rule through the API was
+// refused as Team. The feature this product sells hardest was the one leaking.
 func (p *Policy) Advanced() bool {
 	return p.Effect == EffectDeny ||
 		p.MinRisk != "" ||
+		p.Reversibility != "" ||
 		p.RequireDistinctApprover ||
 		p.ActorKind != "" ||
 		p.Actor != ""

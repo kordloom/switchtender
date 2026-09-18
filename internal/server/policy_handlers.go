@@ -62,12 +62,15 @@ type createPolicyRequest struct {
 // difference between one blanket gate and an authorization boundary around agents, which is the
 // thing being sold, so it belongs here and both handlers now read the same answer.
 func usesFullPolicyEngine(req createPolicyRequest) bool {
-	return req.Effect == policy.EffectDeny ||
-		req.MinRisk != "" ||
-		req.Reversibility != "" ||
-		req.RequireDistinctApprover ||
-		req.ActorKind != "" ||
-		req.Actor != ""
+	// Delegates rather than repeating the condition. Three copies of this rule existed once and
+	// disagreed, which is how actor scoping shipped free; a fourth copy here would be the same
+	// mistake with the same consequence. Building the policy the request describes and asking it
+	// is the only form that cannot drift.
+	return (&policy.Policy{
+		Effect: req.Effect, MinRisk: req.MinRisk, Reversibility: req.Reversibility,
+		RequireDistinctApprover: req.RequireDistinctApprover,
+		ActorKind:               req.ActorKind, Actor: req.Actor,
+	}).Advanced()
 }
 
 // resolveMaxDestroy returns the request's max_destroy, defaulting a missing value to the disabled

@@ -17,7 +17,9 @@ verifier are Community features and always will be. The period change register t
 `switchtender audit report` renders over a date range is a Team feature, so the evidence is
 yours for nothing and the report that assembles it for an auditor is what a license pays for. The paid Assurance service (design partners) adds
 control-mapped evidence packs and auditor-facing attestation reports, assembled for you on the same
-cadence the free `--evidence-dir` registers already run on.
+cadence the `--evidence-dir` registers run on, which is itself a Team feature: the server refuses
+to start with `--evidence-cadence` set on a Community license rather than quietly writing a paid
+artifact every period.
 
 ## What the record holds
 

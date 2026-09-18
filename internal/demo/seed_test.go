@@ -617,12 +617,25 @@ func TestSeedConfigStoresPoliciesTheGovernanceSeedNames(t *testing.T) {
 	for _, p := range policies {
 		byName[p.Name] = p
 	}
-	tfDestroy, ok := byName["prod terraform destroy"]
+	tfDestroy, ok := byName["anything that cannot be undone"]
 	if !ok {
 		t.Fatal("the rule the held run cites was not seeded")
 	}
-	if tfDestroy.Tool != run.ToolTerraform || tfDestroy.CommandContains != "destroy" {
-		t.Errorf("the terraform rule = %+v, want it matching a terraform destroy", tfDestroy)
+	// Graded rather than string matched. A rule keyed on the word "destroy" misses the spelling a
+	// destroy usually reaches production as, an apply replaying a plan file, and it teaches a
+	// visitor that governing this means maintaining a list of dangerous words.
+	if tfDestroy.Tool != run.ToolTerraform || tfDestroy.Reversibility != run.Irreversible {
+		t.Errorf("the terraform rule = %+v, want it holding on an irreversible grade", tfDestroy)
+	}
+	if tfDestroy.CommandContains != "" {
+		t.Errorf("the terraform rule still matches on a command string (%q), which is the brittle "+
+			"form this demo should not be teaching", tfDestroy.CommandContains)
+	}
+	// Zero holds a plan that would destroy anything. The default disables the check, and leaving
+	// it disabled on the one rule demonstrating change control said the opposite of the point.
+	if tfDestroy.MaxDestroy != 0 {
+		t.Errorf("the terraform rule has max_destroy %d, so the plan-content gate is off on the "+
+			"policy that exists to show it on", tfDestroy.MaxDestroy)
 	}
 	if !tfDestroy.ExcludeDryRun {
 		t.Error("the terraform rule holds plans as well as destroys, so every seeded plan would be gated")
@@ -1150,7 +1163,7 @@ func TestSeedGovernanceHoldsATerraformDestroyWithoutRunningIt(t *testing.T) {
 	if held.Command != "/srv/infra/network" {
 		t.Errorf("the held run's working directory = %q, want the seeded terraform root", held.Command)
 	}
-	if held.HeldByPolicy != "prod terraform destroy" {
+	if held.HeldByPolicy != "anything that cannot be undone" {
 		t.Errorf("the held run cites %q, want the seeded terraform rule", held.HeldByPolicy)
 	}
 	if !held.RequireDistinctApprover {
