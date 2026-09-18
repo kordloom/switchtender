@@ -172,6 +172,17 @@
 			</div>
 		</section>
 
+		<section class="section demo wrap" id="demo">
+			<div class="section-head reveal">
+				<h2>See it in action</h2>
+				<p>A run painted live as a host-by-task matrix, not a wall of scrollback. The colors speak Ansible: <span class="lg-ok">green</span> means ok, <span class="lg-changed">amber</span> means the task changed the host, <span class="lg-failed">red</span> means failed, gray means skipped.</p>
+			</div>
+			<figure class="window demo-frame reveal">
+				<div class="window-bar"><span></span><span></span><span></span><em>switchtender: run</em></div>
+				<video src="/assets/demo-run.mp4?v=4" poster="/assets/demo-run-poster.png?v=3" autoplay muted loop playsinline preload="auto" aria-label="A SwitchTender run streaming live as a host-by-task matrix"></video>
+			</figure>
+		</section>
+
 		<section class="section wrap" id="proof">
 			<div class="section-head reveal">
 				<h2>Evidence you can <span class="grad">hand to an auditor.</span></h2>
@@ -372,17 +383,6 @@ switchtender import semaphore export.json --db switchtender.db --apply</code></p
 			</div>
 		</section>
 
-		<section class="section demo wrap" id="demo">
-			<div class="section-head reveal">
-				<h2>See it in action</h2>
-				<p>A run painted live as a host-by-task matrix, not a wall of scrollback. The colors speak Ansible: <span class="lg-ok">green</span> means ok, <span class="lg-changed">amber</span> means the task changed the host, <span class="lg-failed">red</span> means failed, gray means skipped.</p>
-			</div>
-			<figure class="window demo-frame reveal">
-				<div class="window-bar"><span></span><span></span><span></span><em>switchtender: run</em></div>
-				<video src="/assets/demo-run.mp4?v=4" poster="/assets/demo-run-poster.png?v=3" autoplay muted loop playsinline preload="auto" aria-label="A SwitchTender run streaming live as a host-by-task matrix"></video>
-			</figure>
-		</section>
-
 		<section class="section wrap" id="editor">
 			<div class="section-head reveal">
 				<h2>Design pipelines by dragging, not by YAML</h2>
@@ -432,8 +432,8 @@ switchtender import semaphore export.json --db switchtender.db --apply</code></p
 		<section class="section wrap" id="sdk">
 			<div class="section-head reveal">
 				<span class="eyebrow">Extensibility: SDK + drop-in plugins</span>
-				<h2>Seven tools in the box.<br>Add more in Go.</h2>
-				<p>Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go all run out of the box, no plugins required. When you need an eighth tool, a custom secret backend, a new AI provider, or your own notification channel, you write it in Go against a stable SDK. Compile it into the binary, or build it once and drop it into <code>--plugins-dir</code>, where a stock release loads it at startup over gRPC with mutual TLS and treats it as its own. A plugged-in tool submits, validates, and audits like a built-in. A plugged-in channel gets every terminal run with secret-carrying vars already redacted. The <a href="/docs/sdk">SDK guide</a> walks both paths and carries a complete extension you can build and drop in.</p>
+				<h2>A gate one tool can walk around<br><span class="grad">is not a gate.</span></h2>
+				<p>Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go all run out of the box, no plugins required, and that is the point rather than the boast: a boundary that only Ansible respects is one somebody leaves by writing a shell script. When you need an eighth tool, a custom secret backend, a new AI provider, or your own notification channel, you write it in Go against a stable SDK. Compile it into the binary, or build it once and drop it into <code>--plugins-dir</code>, where a stock release loads it at startup over gRPC with mutual TLS and treats it as its own. A plugged-in tool submits, validates, and audits like a built-in. A plugged-in channel gets every terminal run with secret-carrying vars already redacted. The <a href="/docs/sdk">SDK guide</a> walks both paths and carries a complete extension you can build and drop in.</p>
 			</div>
 			<div class="code reveal">
 				<button class="copy" aria-label="Copy">Copy</button>
