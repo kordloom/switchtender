@@ -255,6 +255,29 @@ A license is read from `SWITCHTENDER_LICENSE`, or from `switchtender-license.jso
 directory as the database. A license this install cannot parse or that has lapsed reads as
 Community rather than failing the server, so an expiry never takes an install down.
 
+## assess
+
+Reports what an automation export holds and what governing it would change, without writing
+anything and without a database. It reads an export the same way `import` does, then grades every
+template it found through the same risk and reversibility graders the product uses at run time, so
+a number in an assessment cannot disagree with what a run would later say.
+
+    switchtender assess awx awx-export.json
+    switchtender assess chef chef-nodes.json
+
+Formats are `awx`, `semaphore`, `chef`, and `puppet`. An AWX-format export also covers Ansible
+Automation Platform, Tower, and Ascender.
+
+The output has three parts: what is in the export, what survives the move, and what changes about
+how it is governed. The third part names the templates that cannot be undone, the ones carrying a
+destructive signal, the credentials more than one template shares, and the templates targeting no
+stored inventory.
+
+Grades are a floor rather than a measurement. An Ansible template keeps its work in a playbook, and
+at assessment time that playbook is in a repository nothing has fetched, so reading one can only
+ever raise a grade. The report says how many templates that applies to rather than leaving the
+numbers looking more settled than they are.
+
 ## import
 
 Migrates from AWX, Semaphore, Chef, Puppet, Rundeck, Jenkins, or cron. Which objects each one carries across is in

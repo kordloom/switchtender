@@ -64,7 +64,8 @@ var commands = sync.OnceValue(func() commandTree {
 func TestTheCommandSurfaceIsWhatItSaysItIs(t *testing.T) {
 	t.Parallel()
 	want := []string{
-		"audit", "backup", "demo", "desktop", "examples", "import", "init", "license", "mcp",
+		"assess", "audit", "backup", "demo", "desktop", "examples", "import", "init",
+		"license", "mcp",
 		"receipt", "restore", "serve", "token", "user", "verify", "version", "witness", "worker",
 	}
 	var got []string

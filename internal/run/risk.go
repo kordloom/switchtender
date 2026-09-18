@@ -23,11 +23,15 @@ const (
 
 // destructiveMarkers are command fragments that signal a run can delete or disrupt, matched case
 // insensitively against the run's command. They are advisory signals for an approver, not a policy.
-var destructiveMarkers = []string{
-	"terraform destroy", "tofu destroy", "destroy -", "rm -rf", "rm -fr", "mkfs", "dd if=",
-	"drop table", "drop database", "truncate ", "reboot", "shutdown", "halt", "--force", "-force",
-	"del /f", "remove-item", "format-volume",
-}
+// destructiveMarkers is every permanent marker plus the ones that are destructive and recoverable.
+//
+// Built from permanentMarkers rather than repeating it, because the two lists drifted: a command
+// that could not be undone has to be destructive, and keeping that true depended on somebody
+// remembering to edit both. Dropping a schema reached the risk list and never reached the
+// reversibility list, so the same statement was high risk and fully reversible at once.
+var destructiveMarkers = append([]string{
+	"reboot", "shutdown", "halt", "--force", "-force",
+}, permanentMarkers...)
 
 // AssessRisk grades r from its tool, command, and blast radius. A dry run is always low since it
 // changes nothing. A destructive marker or a Terraform apply that is not a dry run is high; a state
@@ -52,6 +56,10 @@ func AssessRisk(r *Run) Risk {
 	var vars strings.Builder
 	writeVarText(&vars, r.ExtraVars, maxVarScanDepth)
 	lower := strings.ToLower(r.Command + " " + r.Playbook + vars.String())
+	if recursiveForceRemove(lower) {
+		reasons = append(reasons, "destructive command: recursive forced remove")
+		level = RiskHigh
+	}
 	for _, m := range destructiveMarkers {
 		if strings.Contains(lower, m) {
 			reasons = append(reasons, "destructive command: "+strings.TrimSpace(m))
