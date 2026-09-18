@@ -305,7 +305,7 @@ func TestSeedOptsLetsExtrasWin(t *testing.T) {
 		run.WithCommand("/srv/infra"),
 		run.WithRequireApproval(true),
 		run.WithRequireDistinctApprover(true),
-		run.WithHeldByPolicy("anything that cannot be undone"))
+		run.WithHeldByPolicy("irreversible needs a second approver"))
 	for _, o := range opts {
 		o(r)
 	}

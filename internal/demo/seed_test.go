@@ -617,7 +617,7 @@ func TestSeedConfigStoresPoliciesTheGovernanceSeedNames(t *testing.T) {
 	for _, p := range policies {
 		byName[p.Name] = p
 	}
-	tfDestroy, ok := byName["anything that cannot be undone"]
+	tfDestroy, ok := byName["irreversible needs a second approver"]
 	if !ok {
 		t.Fatal("the rule the held run cites was not seeded")
 	}
@@ -1163,7 +1163,7 @@ func TestSeedGovernanceHoldsATerraformDestroyWithoutRunningIt(t *testing.T) {
 	if held.Command != "/srv/infra/network" {
 		t.Errorf("the held run's working directory = %q, want the seeded terraform root", held.Command)
 	}
-	if held.HeldByPolicy != "anything that cannot be undone" {
+	if held.HeldByPolicy != "irreversible needs a second approver" {
 		t.Errorf("the held run cites %q, want the seeded terraform rule", held.HeldByPolicy)
 	}
 	if !held.RequireDistinctApprover {
