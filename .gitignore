@@ -79,3 +79,4 @@ campaigns/
 # for exactly that reason.
 site/verify/loomseal.wasm
 site/verify/wasm_exec.js
+/supertest
