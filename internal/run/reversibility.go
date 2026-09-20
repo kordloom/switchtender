@@ -1,9 +1,6 @@
 package run
 
-import (
-	"regexp"
-	"strings"
-)
+import "strings"
 
 // Reversibility grades whether a run can be taken back, so a policy can demand more of a change
 // that cannot be undone than of one that can. It is computed from the run and never stored, the way
@@ -109,14 +106,7 @@ func AssessReversibilityFrom(r *Run, ev ReversibilityEvidence) Reversibility {
 	writeVarText(&vars, r.ExtraVars, maxVarScanDepth)
 	cmd := strings.ToLower(r.Command + " " + r.Playbook + vars.String())
 	var reasons []string
-	for _, marker := range permanentMarkers {
-		if strings.Contains(cmd, marker) {
-			reasons = append(reasons, "command contains "+marker+", which cannot be undone from here")
-		}
-	}
-	if recursiveForceRemove(cmd) {
-		reasons = append(reasons, "command removes recursively and forcibly, which cannot be undone from here")
-	}
+	reasons = append(reasons, permanentCommandFindings(cmd)...)
 	if len(reasons) > 0 {
 		return Reversibility{Class: Irreversible, Reasons: reasons}
 	}
@@ -174,15 +164,13 @@ func AssessReversibilityFrom(r *Run, ev ReversibilityEvidence) Reversibility {
 // table is destructive and permanent. Grading both the same way would make an irreversibility rule
 // fire on every restart and get switched off.
 var permanentMarkers = []string{
-	// Infrastructure teardown. Both spellings: the subcommand, and the flag on apply, which is
-	// how a destroy usually reaches production because it is what a plan file replays.
-	"terraform destroy", "tofu destroy", "destroy -", "-destroy",
+	// Infrastructure teardown by subcommand. The -destroy flag on apply is a token predicate
+	// below, because as a substring it also matched "terraform plan -destroy", which is the
+	// read-only preview of a destroy and the exact command an operator runs to be careful.
+	"terraform destroy", "tofu destroy",
 	// Filesystem and block device.
-	"rm -rf", "rm -fr", "mkfs", "dd if=", "wipefs", "shred ", "blkdiscard", "sgdisk",
-	"lvremove", "vgremove", "pvremove", "del /f", "remove-item", "format-volume",
-	// A find that deletes what it matched, and an rsync that deletes what the source lacks. Both
-	// remove files chosen by a pattern, which is the shape that surprises people most.
-	"-delete",
+	"mkfs", "dd if=", "wipefs", "shred ", "blkdiscard", "sgdisk",
+	"lvremove", "vgremove", "pvremove", "remove-item", "format-volume",
 	// Databases. Dropping a schema loses what it held exactly as dropping a table does; it was
 	// absent here while the narrower two were present, so an estate's worst statement graded safe.
 	"drop table", "drop database", "drop schema", "drop keyspace", "truncate ", "flushall",
@@ -196,31 +184,140 @@ var permanentMarkers = []string{
 	"helm uninstall", "helm delete",
 }
 
-// rmFlags matches an rm invocation and the run of flag tokens that follows it, stopping at the
-// first argument that is not a flag.
-var rmFlags = regexp.MustCompile(`(?:^|[;&|]|\s)rm((?:\s+-{1,2}[a-zA-Z-]+)+)`)
+// permanentCommandFindings returns every reason cmd holds work this product cannot undo. cmd must
+// already be lowercased. It is the one scanner all three graders share: reversibility, risk, and
+// the playbook scan each used to keep their own copy of this judgment, and the copies drifted in
+// whichever direction was worst for the grader that held them.
+func permanentCommandFindings(cmd string) []string {
+	var reasons []string
+	for _, marker := range permanentMarkers {
+		if strings.Contains(cmd, marker) {
+			reasons = append(reasons, "command contains "+strings.TrimSpace(marker)+
+				", which cannot be undone from here")
+		}
+	}
+	for _, segment := range commandSegments(cmd) {
+		reasons = append(reasons, segmentFindings(segment)...)
+	}
+	return reasons
+}
 
-// recursiveForceRemove reports whether a command runs rm recursively and forcibly, however the
-// flags were spelled.
-//
-// Matching the literal "rm -rf" caught the common spelling and missed every other one. "rm -r -f",
-// "rm -f -r", and "rm --recursive --force" do exactly the same thing and graded fully reversible,
-// which is the worst direction for this grade to be wrong in. The flags are read rather than the
-// string compared, so the arrangement stops mattering.
-func recursiveForceRemove(cmd string) bool {
-	for _, m := range rmFlags.FindAllStringSubmatch(cmd, -1) {
+// commandSegments splits a command line into the token lists of its simple commands, so a
+// predicate reads one command at a time. Splitting on the shell's sequencing characters is
+// deliberate: a destructive command hidden behind && or | is still a destructive command.
+func commandSegments(cmd string) [][]string {
+	parts := strings.FieldsFunc(cmd, func(r rune) bool {
+		switch r {
+		case ';', '|', '&', '(', ')', '\n', '`':
+			return true
+		}
+		return false
+	})
+	segments := make([][]string, 0, len(parts))
+	for _, part := range parts {
+		if fields := strings.Fields(part); len(fields) > 0 {
+			segments = append(segments, fields)
+		}
+	}
+	return segments
+}
+
+// segmentFindings grades one simple command by its tokens: the judgments substring matching gets
+// wrong in both directions. /bin/rm and sudo rm are rm; "predelete-hook" is not -delete; and
+// "terraform plan -destroy" is somebody previewing a destroy, not running one.
+func segmentFindings(fields []string) []string {
+	var reasons []string
+	if removesRecursivelyByForce(fields) {
+		reasons = append(reasons,
+			"command removes recursively and forcibly, which cannot be undone from here")
+	}
+	if hasCommand(fields, "find") && hasToken(fields, "-delete") {
+		reasons = append(reasons,
+			"command runs find -delete, which removes what it matched and cannot be undone from here")
+	}
+	if hasCommand(fields, "rsync") && hasTokenPrefix(fields, "--delete") {
+		reasons = append(reasons,
+			"command runs rsync --delete, which removes what the source lacks and cannot be undone from here")
+	}
+	if (hasCommand(fields, "terraform") || hasCommand(fields, "tofu")) &&
+		hasToken(fields, "apply") &&
+		(hasToken(fields, "-destroy") || hasTokenPrefix(fields, "-destroy=") ||
+			hasToken(fields, "--destroy")) {
+		reasons = append(reasons,
+			"command applies a destroy plan, which cannot be undone from here")
+	}
+	if hasCommand(fields, "del") && (hasToken(fields, "/f") || hasToken(fields, "/q")) {
+		reasons = append(reasons,
+			"command runs del with a force flag, which cannot be undone from here")
+	}
+	return reasons
+}
+
+// removesRecursivelyByForce reports whether this command runs rm both recursively and forcibly,
+// however the flags are spelled or split. Any token whose base name is rm counts as the command,
+// so /bin/rm, busybox rm, sudo rm, and xargs rm are all seen; flag reading stops at --, after
+// which everything is a path.
+func removesRecursivelyByForce(fields []string) bool {
+	for i, field := range fields {
+		if baseName(field) != "rm" {
+			continue
+		}
 		var recursive, force bool
-		for _, flag := range strings.Fields(m[1]) {
+		for _, arg := range fields[i+1:] {
+			if arg == "--" {
+				break
+			}
 			switch {
-			case strings.HasPrefix(flag, "--"):
-				recursive = recursive || flag == "--recursive"
-				force = force || flag == "--force"
-			default:
-				recursive = recursive || strings.ContainsAny(flag, "rR")
-				force = force || strings.Contains(flag, "f")
+			case arg == "--recursive":
+				recursive = true
+			case arg == "--force":
+				force = true
+			case strings.HasPrefix(arg, "--"):
+			case strings.HasPrefix(arg, "-") && len(arg) > 1:
+				recursive = recursive || strings.ContainsAny(arg, "rR")
+				force = force || strings.Contains(arg, "f")
 			}
 		}
 		if recursive && force {
+			return true
+		}
+	}
+	return false
+}
+
+// baseName strips any path prefix from a token, so /bin/rm and rm read the same.
+func baseName(token string) string {
+	if i := strings.LastIndexByte(token, '/'); i >= 0 {
+		return token[i+1:]
+	}
+	return token
+}
+
+// hasCommand reports whether any token's base name is name, which covers the command itself and
+// the common prefixes that wrap one: sudo, env assignments, busybox, xargs.
+func hasCommand(fields []string, name string) bool {
+	for _, f := range fields {
+		if baseName(f) == name {
+			return true
+		}
+	}
+	return false
+}
+
+// hasToken reports whether any token equals want exactly.
+func hasToken(fields []string, want string) bool {
+	for _, f := range fields {
+		if f == want {
+			return true
+		}
+	}
+	return false
+}
+
+// hasTokenPrefix reports whether any token starts with want.
+func hasTokenPrefix(fields []string, want string) bool {
+	for _, f := range fields {
+		if strings.HasPrefix(f, want) {
 			return true
 		}
 	}
