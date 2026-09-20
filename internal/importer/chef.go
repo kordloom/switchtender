@@ -25,9 +25,12 @@ type chefNode struct {
 	// Automatic holds the facts ohai collected. Read as a unit and selected from, because a node's
 	// automatic attributes run to hundreds of keys and carrying them all would bury the inventory.
 	Automatic map[string]any `json:"automatic"`
-	// Normal holds attributes set on the node itself.
-	Normal map[string]any `json:"normal"`
 }
+
+// A node's normal, default, and override attributes are deliberately NOT fields here. A field on
+// this struct counts as read to the unread scan, and normal was declared, never consumed, and so
+// dropped in the one way this importer promises not to: silently. Leaving them out means the scan
+// names them on any export that carries them, which is the truth: they do not come across.
 
 // chefFacts are the ohai attributes carried onto a host, and the only ones.
 //

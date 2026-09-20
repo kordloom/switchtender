@@ -217,8 +217,9 @@ func TestEveryChefFormReportsWhatItDoesNotRead(t *testing.T) {
 		// Doc is the export in one of the three shapes, each carrying policy_group, which this
 		// importer does not read.
 		Doc string
-	}{{ // Test 0: An array of node documents.
-		Doc: `[{"name":"a.prod","chef_environment":"production","run_list":["role[web]"],"policy_group":"x"}]`,
+	}{{ // Test 0: An array of node documents, carrying normal attributes as well, which are real
+		// configuration and deliberately not a struct field so this scan is what names them.
+		Doc: `[{"name":"a.prod","chef_environment":"production","run_list":["role[web]"],"policy_group":"x","normal":{"app":{"port":8080}}}]`,
 	}, { // Test 1: An object keyed by node name.
 		Doc: `{"a.prod":{"chef_environment":"production","run_list":["role[web]"],"policy_group":"x"}}`,
 	}, { // Test 2: One node document.
@@ -234,6 +235,9 @@ func TestEveryChefFormReportsWhatItDoesNotRead(t *testing.T) {
 			joined := strings.Join(plan.Warnings, "\n")
 			if !strings.Contains(joined, "policy_group") {
 				t.Errorf("policy_group was dropped without a warning in this form:\n%s", joined)
+			}
+			if strings.Contains(test.Doc, `"normal"`) && !strings.Contains(joined, "normal") {
+				t.Errorf("normal attributes were dropped without a warning:\n%s", joined)
 			}
 		})
 	}

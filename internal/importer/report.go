@@ -52,13 +52,13 @@ type Count struct {
 // are fifty-odd such sites across five importers, and tagging each by hand is a change where
 // missing one is invisible: the object silently stops being counted while the report still claims
 // to be complete. Reading the text moves that risk into a test that fails by name instead.
-var leftOutPhrases = regexp.MustCompile(`(?i)\b(skipped|was dropped|were dropped|left out|not imported|did not import|refused|unsupported|has no equivalent|could not be read|was ignored|ignored)\b`)
+var leftOutPhrases = regexp.MustCompile(`(?i)\b(skipped|was dropped|were dropped|left out|not imported|did not import|refused|unsupported|has no equivalent|could not be read|was ignored|ignored|not copied|were not copied|does not read)\b`)
 
 // dropVocabulary is every word that suggests an object did not come across. It is deliberately
 // wider than leftOutPhrases: anything here that the classifier does not already catch is a new way
 // of saying "dropped", and the guard in the tests fails on it rather than letting the item be
 // counted as something that merely needs a look.
-var dropVocabulary = regexp.MustCompile(`(?i)\b(skip|skipped|drop|dropped|discard|discarded|omit|omitted|exclude|excluded|left out|not imported|did not import|refus|unsupported|no equivalent|ignored|lost|removed)\b`)
+var dropVocabulary = regexp.MustCompile(`(?i)\b(skip|skipped|drop|dropped|discard|discarded|omit|omitted|exclude|excluded|left out|not imported|did not import|refus|unsupported|no equivalent|ignored|lost|removed|not copied|not carried)\b`)
 
 // Report summarizes what this plan would do.
 func (p *Plan) Report() Report {
