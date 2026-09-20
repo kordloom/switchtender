@@ -29,7 +29,7 @@ ON CONFLICT(id) DO UPDATE SET
 	inventory_id=excluded.inventory_id, queue=excluded.queue,
 	exclude_dry_run=excluded.exclude_dry_run,
 	max_destroy=excluded.max_destroy, actor_kind=excluded.actor_kind, actor=excluded.actor,
-	min_risk=excluded.min_risk, effect=excluded.effect,
+	min_risk=excluded.min_risk, reversibility=excluded.reversibility, effect=excluded.effect,
 	distinct_approver=excluded.distinct_approver`
 	_, err := s.db.ExecContext(ctx, q,
 		p.ID, p.Name, p.Tool, p.CommandContains, p.InventoryID, p.Queue,
