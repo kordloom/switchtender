@@ -2,9 +2,12 @@ package main
 
 import (
 	"bytes"
+	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -48,6 +51,15 @@ type harness struct {
 	agent actor
 	// seed is the shared signing identity the Team install runs with, minted per run.
 	seed string
+	// httpc is the one HTTP client every call shares. A timeout is not optional: kubectl
+	// port-forward has a known half-dead state where the listener accepts and the stream stalls,
+	// and a client without a deadline turns that into a run that hangs forever, skips teardown,
+	// and leaks the cluster.
+	httpc *http.Client
+	// created is set once this run has actually created its Kind cluster, and is what entitles
+	// teardown to delete it. Without it, a run that failed before creating anything deleted
+	// whatever cluster happened to share the name, including one kept deliberately for debugging.
+	created bool
 	// keep leaves the cluster running after the run, for poking at a failure.
 	keep bool
 }
@@ -214,7 +226,7 @@ func (h *harness) forwardTo(namespace, service string, localPort int) error {
 	h.forward = cmd
 	h.api = fmt.Sprintf("http://127.0.0.1:%d", localPort)
 	return h.waitFor(fmt.Sprintf("%s/healthz answers", h.api), 60*time.Second, func() error {
-		resp, err := http.Get(h.api + "/healthz")
+		resp, err := h.httpc.Get(h.api + "/healthz")
 		if err != nil {
 			return err
 		}
@@ -289,7 +301,7 @@ func (h *harness) apiCall(method, path string, who *actor, body any, out any) er
 			req.Header.Set("Authorization", "Bearer "+who.Token)
 		}
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := h.httpc.Do(req)
 	if err != nil {
 		return fmt.Errorf("%s %s: %w", method, path, err)
 	}
@@ -299,8 +311,8 @@ func (h *harness) apiCall(method, path string, who *actor, body any, out any) er
 		return fmt.Errorf("read %s %s: %w", method, path, err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return fmt.Errorf("%s %s answered %d: %s", method, path, resp.StatusCode,
-			strings.TrimSpace(string(raw)))
+		return &apiError{Method: method, Path: path, Status: resp.StatusCode,
+			Body: strings.TrimSpace(string(raw))}
 	}
 	if out != nil {
 		if err := json.Unmarshal(raw, out); err != nil {
@@ -308,6 +320,57 @@ func (h *harness) apiCall(method, path string, who *actor, body any, out any) er
 		}
 	}
 	return nil
+}
+
+// apiError is a non-2xx answer, carrying the status so a check can tell a refusal from a crash.
+// When every error was one opaque string, a 500, a 404, and a dropped connection all counted as
+// proof that a security gate held, which is the exact opposite of proof.
+type apiError struct {
+	// Method and Path name the request.
+	Method, Path string
+	// Status is the HTTP status the server answered.
+	Status int
+	// Body is the response body, which for a refusal is the sentence worth showing.
+	Body string
+}
+
+// Error renders the answer the way the checks report it.
+func (e *apiError) Error() string {
+	return fmt.Sprintf("%s %s answered %d: %s", e.Method, e.Path, e.Status, e.Body)
+}
+
+// mustRefuse sends a request that the authorization model must refuse, and accepts nothing except
+// an actual ruling: 401 or 403. Success means the gate is open; any other status or a transport
+// failure means the gate was never tested, and a check that treats either as a pass certifies
+// separation of duties it never exercised.
+func (h *harness) mustRefuse(who *actor, method, path string, body any) (string, error) {
+	err := h.apiCall(method, path, who, body, nil)
+	if err == nil {
+		return "", fmt.Errorf("%s %s was allowed", method, path)
+	}
+	var api *apiError
+	if !errors.As(err, &api) {
+		return "", fmt.Errorf("the gate was never reached: %w", err)
+	}
+	if api.Status != http.StatusUnauthorized && api.Status != http.StatusForbidden {
+		return "", fmt.Errorf("answered %d, which is a malfunction rather than a refusal: %s",
+			api.Status, api.Body)
+	}
+	return oneLine(api.Error()), nil
+}
+
+// auditFingerprint derives the sha256: fingerprint of the public key behind this run's signing
+// seed, entirely locally: hex seed to ed25519 key to hashed public key, the same derivation the
+// product's own trust page performs. Pinning it on verification is what makes the receipt checks
+// mean "signed by the identity this run configured" rather than "signed by whoever signed it".
+func (h *harness) auditFingerprint() string {
+	raw, err := hex.DecodeString(h.auditSeed())
+	if err != nil {
+		panic(err)
+	}
+	pub := ed25519.NewKeyFromSeed(raw).Public().(ed25519.PublicKey)
+	sum := sha256.Sum256(pub)
+	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
 // serverPod returns the name of the single server pod in a namespace, discovered rather than

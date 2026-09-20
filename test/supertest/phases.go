@@ -73,6 +73,7 @@ func (h *harness) phaseCluster() error {
 		"--kubeconfig", h.kubeconfig, "--wait", "120s"); err != nil {
 		return fmt.Errorf("create kind cluster: %w\n%s", err, out)
 	}
+	h.created = true
 	h.pass(phase, "a fresh Kind cluster is up", "nothing in it has ever seen this product")
 
 	// PostgreSQL is pulled on the host and loaded like the built images, so the node never dials
@@ -191,7 +192,7 @@ func (h *harness) phaseCommunity() error {
 			"the proof owes nothing to the product's own reporting")
 	}
 
-	if err := h.verifyReceiptOffline(phase, runID); err != nil {
+	if err := h.verifyReceiptOffline(phase, runID, ""); err != nil {
 		return err
 	}
 	return nil
@@ -210,6 +211,10 @@ func (h *harness) phaseTeam(license string) error {
 	if err := h.apply(mustManifest("postgres.yaml")); err != nil {
 		return err
 	}
+	seedPath := filepath.Join(h.work, "audit-seed")
+	if err := os.WriteFile(seedPath, []byte(h.auditSeed()), 0o600); err != nil {
+		return err
+	}
 	if _, err := h.kubectl("rollout", "status", "deploy/postgres", "-n", "team",
 		"--timeout=180s"); err != nil {
 		return err
@@ -226,8 +231,10 @@ func (h *harness) phaseTeam(license string) error {
 		"--set", "database.dsn=postgres://switchtender:supertest-not-a-secret@postgres:5432/switchtender?sslmode=disable",
 		// The shared signing identity every process in a PostgreSQL install signs with. The chart
 		// refuses to render without one, because the supertest caught an install that looked
-		// healthy and answered 404 for every receipt it should have signed.
-		"--set", "auditKey="+h.auditSeed(),
+		// healthy and answered 404 for every receipt it should have signed. It travels by file
+		// rather than on the argv: a failed helm command prints its arguments into a public CI
+		// log, and a signing seed in a public log is a forged history waiting to happen.
+		"--set-file", "auditKey="+seedPath,
 		"--set-file", "license="+license,
 		"--set", "worker.enabled=true",
 		"--set", "worker.extraArgs={--queue,supertest}",
@@ -303,12 +310,11 @@ func (h *harness) phaseTeam(license string) error {
 		h.pass(phase, "the data still exists while the run is held", "checked via kubectl exec")
 	}
 
-	selfErr := h.apiCall("POST", "/v1/runs/"+destroyID+"/approve", &h.agent, map[string]any{}, nil)
-	if selfErr == nil {
-		h.fail(phase, "the agent cannot release its own hold",
-			fmt.Errorf("the agent approved its own run"))
+	if detail, err := h.mustRefuse(&h.agent, "POST", "/v1/runs/"+destroyID+"/approve",
+		map[string]any{}); err != nil {
+		h.fail(phase, "the agent cannot release its own hold", err)
 	} else {
-		h.pass(phase, "the agent cannot release its own hold", oneLine(selfErr.Error()))
+		h.pass(phase, "the agent cannot release its own hold", detail)
 	}
 
 	if err := h.apiCall("POST", "/v1/runs/"+destroyID+"/approve", &h.human,
@@ -327,7 +333,7 @@ func (h *harness) phaseTeam(license string) error {
 			"the deletion was real, confirmed via kubectl exec")
 	}
 
-	if err := h.verifyReceiptOffline(phase, destroyID); err != nil {
+	if err := h.verifyReceiptOffline(phase, destroyID, h.auditFingerprint()); err != nil {
 		return err
 	}
 	if err := h.tamperCheck(phase, destroyID); err != nil {
@@ -523,7 +529,7 @@ func (h *harness) runEventTail(id string) string {
 
 // verifyReceiptOffline downloads a run's receipt and verifies it with the locally built binary:
 // no cluster, no database, no network, which is the property being sold.
-func (h *harness) verifyReceiptOffline(phase, runID string) error {
+func (h *harness) verifyReceiptOffline(phase, runID, pin string) error {
 	path := filepath.Join(h.work, phase+"-"+runID+"-receipt.json")
 	var receipt json.RawMessage
 	if err := h.apiCall("GET", "/v1/runs/"+runID+"/receipt", &h.human, nil, &receipt); err != nil {
@@ -532,12 +538,23 @@ func (h *harness) verifyReceiptOffline(phase, runID string) error {
 	if err := os.WriteFile(path, receipt, 0o644); err != nil {
 		return err
 	}
-	if out, err := h.run(h.bin, "verify", path); err != nil {
-		h.fail(phase, "the run's receipt verifies offline", fmt.Errorf("%w\n%s", err, out))
+	// The pin is what upgrades "this receipt is internally consistent" into "this receipt was
+	// signed by the identity this run configured". Unpinned, a server that ignored its auditKey
+	// and minted an ephemeral identity would still verify green, which is the one silent failure
+	// the paid tier's shared-identity story cannot afford.
+	args := []string{"verify", path}
+	claim := "the run's receipt verifies offline"
+	detail := "checked by a local binary that never spoke to the cluster"
+	if pin != "" {
+		args = append(args, "--pubkey", pin)
+		claim = "the run's receipt verifies offline against the configured key"
+		detail = "pinned to the fingerprint derived from the seed this run minted"
+	}
+	if out, err := h.run(h.bin, args...); err != nil {
+		h.fail(phase, claim, fmt.Errorf("%w\n%s", err, out))
 		return nil
 	}
-	h.pass(phase, "the run's receipt verifies offline",
-		"checked by a local binary that never spoke to the cluster")
+	h.pass(phase, claim, detail)
 	return nil
 }
 
@@ -601,29 +618,26 @@ func oneLine(s string) string {
 func (h *harness) phaseRBAC(phase string) {
 	// The agent token is capped below identity and access management no matter what account it is
 	// bound to. An agent that can mint accounts or tokens can mint its own approver.
-	if err := h.apiCall("POST", "/v1/users", &h.agent, map[string]any{
+	if detail, err := h.mustRefuse(&h.agent, "POST", "/v1/users", map[string]any{
 		"username": "sneaky", "password": "x", "role": "admin",
-	}, nil); err == nil {
-		h.fail(phase, "an agent token cannot create accounts",
-			fmt.Errorf("the agent minted an admin account"))
+	}); err != nil {
+		h.fail(phase, "an agent token cannot create accounts", err)
 	} else {
-		h.pass(phase, "an agent token cannot create accounts", oneLine(err.Error()))
+		h.pass(phase, "an agent token cannot create accounts", detail)
 	}
-	if err := h.apiCall("POST", "/v1/tokens", &h.agent, map[string]any{
+	if detail, err := h.mustRefuse(&h.agent, "POST", "/v1/tokens", map[string]any{
 		"name": "sneaky", "username": "casey",
-	}, nil); err == nil {
-		h.fail(phase, "an agent token cannot mint tokens",
-			fmt.Errorf("the agent minted a token bound to the human"))
+	}); err != nil {
+		h.fail(phase, "an agent token cannot mint tokens", err)
 	} else {
-		h.pass(phase, "an agent token cannot mint tokens", oneLine(err.Error()))
+		h.pass(phase, "an agent token cannot mint tokens", detail)
 	}
-	if err := h.apiCall("POST", "/v1/credentials", &h.agent, map[string]any{
+	if detail, err := h.mustRefuse(&h.agent, "POST", "/v1/credentials", map[string]any{
 		"name": "sneaky", "kind": "ssh_key", "secret": "not-a-real-key",
-	}, nil); err == nil {
-		h.fail(phase, "an agent token cannot write secrets",
-			fmt.Errorf("the agent stored a credential"))
+	}); err != nil {
+		h.fail(phase, "an agent token cannot write secrets", err)
 	} else {
-		h.pass(phase, "an agent token cannot write secrets", oneLine(err.Error()))
+		h.pass(phase, "an agent token cannot write secrets", detail)
 	}
 
 	// A viewer reads and does nothing else. The account and its token are created here as the
@@ -652,18 +666,17 @@ func (h *harness) phaseRBAC(phase string) {
 	} else {
 		h.pass(phase, "the viewer can read the run history", "")
 	}
-	if err := h.apiCall("POST", "/v1/runs", &viewer, map[string]any{
+	if detail, err := h.mustRefuse(&viewer, "POST", "/v1/runs", map[string]any{
 		"tool": "bash", "command": "id",
-	}, nil); err == nil {
-		h.fail(phase, "the viewer cannot launch a run", fmt.Errorf("the viewer launched a run"))
+	}); err != nil {
+		h.fail(phase, "the viewer cannot launch a run", err)
 	} else {
-		h.pass(phase, "the viewer cannot launch a run", oneLine(err.Error()))
+		h.pass(phase, "the viewer cannot launch a run", detail)
 	}
-	if err := h.apiCall("POST", "/v1/runs/"+h.mustID("team-destroy-run")+"/approve", &viewer,
-		map[string]any{}, nil); err == nil {
-		h.fail(phase, "the viewer cannot approve a held run",
-			fmt.Errorf("the viewer approved a run"))
+	if detail, err := h.mustRefuse(&viewer, "POST",
+		"/v1/runs/"+h.mustID("team-destroy-run")+"/approve", map[string]any{}); err != nil {
+		h.fail(phase, "the viewer cannot approve a held run", err)
 	} else {
-		h.pass(phase, "the viewer cannot approve a held run", oneLine(err.Error()))
+		h.pass(phase, "the viewer cannot approve a held run", detail)
 	}
 }

@@ -19,9 +19,11 @@ package main
 import (
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 func main() {
@@ -58,6 +60,7 @@ func run() int {
 		kubeconfig: filepath.Join(work, "kubeconfig"),
 		bin:        filepath.Join(work, "switchtender"),
 		ids:        map[string]string{},
+		httpc:      &http.Client{Timeout: 60 * time.Second},
 		keep:       *keep,
 	}
 	defer h.teardown()
@@ -146,8 +149,15 @@ func (h *harness) teardown() {
 			h.cluster, h.cluster)
 		return
 	}
-	if out, err := h.run("kind", "delete", "cluster", "--name", h.cluster); err != nil {
-		fmt.Fprintf(os.Stderr, "delete cluster: %v\n%s\n", err, out)
+	// Only a cluster this run created is this run's to delete. A run that failed before creating
+	// one, or that found the name already taken, must not reach for whatever cluster is standing
+	// there: that is a kept debugging cluster or a concurrent run's live one.
+	if h.created {
+		if out, err := h.run("kind", "delete", "cluster", "--name", h.cluster); err != nil {
+			fmt.Fprintf(os.Stderr, "delete cluster: %v\n%s\n", err, out)
+		}
+	} else {
+		fmt.Printf("\ncluster %q was not created by this run; leaving it alone\n", h.cluster)
 	}
 	_ = os.RemoveAll(h.work)
 }
