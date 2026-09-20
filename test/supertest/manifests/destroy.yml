@@ -1,0 +1,11 @@
+# The destructive run. Removing a path with the file module destroys what it held, which the
+# playbook scanner grades irreversible, which the policy holds for a second person. Nothing in
+# this file announces itself as dangerous: that is the point of grading it instead of trusting
+# the author to say so.
+- hosts: all
+  gather_facts: false
+  tasks:
+    - name: Remove the precious data
+      file:
+        path: /home/ops/precious
+        state: absent

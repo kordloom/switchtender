@@ -30,8 +30,22 @@ worker:
   extraArgs: []
 
 database:
-  # dsn is the PostgreSQL connection string every server and worker shares.
-  dsn: "postgres://switchtender:switchtender@postgres:5432/switchtender?sslmode=disable"
+  # dsn is the PostgreSQL connection string every server and worker shares. Empty runs the server
+  # on its own SQLite file on the persistent volume below, which is the Community shape: one
+  # server, no license, complete. Point it at PostgreSQL for multiple servers and dedicated
+  # workers, and know that initializing a NEW PostgreSQL schema takes a Team license: the old
+  # default here sent a Community install straight into that refusal on first boot, which read as
+  # the chart being broken rather than as a tier boundary.
+  dsn: ""
+
+persistence:
+  # SQLite mode only: the volume the database file lives on. With a dsn set, no volume is created
+  # and this block is ignored.
+  enabled: true
+  # size of the volume. Runs, events, facts history, and the audit chain all live here.
+  size: 2Gi
+  # storageClass, empty for the cluster default.
+  storageClass: ""
 
 # encryptionKey and encryptionSalt seal credentials at rest with argon2id and AES-256-GCM. Both are
 # required; set them with --set encryptionKey=... --set encryptionSalt=... or point existingSecret

@@ -1,3 +1,9 @@
+{{- if and .Values.database.dsn (not .Values.auditKey) (not .Values.existingSecret) }}
+{{- fail "A PostgreSQL install signs its audit chain with one shared identity, and this one has none: every receipt it should produce would answer 404. Set auditKey to a hex seed (openssl rand -hex 32), or point existingSecret at a Secret carrying SWITCHTENDER_AUDIT_KEY." }}
+{{- end }}
+{{- if and (not .Values.database.dsn) (gt (int .Values.server.replicas) 1) }}
+{{- fail "SQLite mode (empty database.dsn) runs exactly one server: two replicas sharing one file corrupt it. Set database.dsn to PostgreSQL for more than one." }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -7,6 +13,12 @@ metadata:
     app.kubernetes.io/component: server
 spec:
   replicas: {{ .Values.server.replicas }}
+  {{- if not .Values.database.dsn }}
+  # SQLite holds one writer. A rolling update briefly runs two pods against the same file on the
+  # same volume, so the update strategy has to stop the old server before the new one opens it.
+  strategy:
+    type: Recreate
+  {{- end }}
   selector:
     matchLabels:
       {{- include "switchtender.selectorLabels" . | nindent 6 }}
@@ -17,6 +29,12 @@ spec:
         {{- include "switchtender.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: server
     spec:
+      {{- if not .Values.database.dsn }}
+      # The image runs as uid 10001, and a freshly provisioned volume is owned by root. fsGroup is
+      # what makes the mounted /data writable without an init container doing a chown.
+      securityContext:
+        fsGroup: 10001
+      {{- end }}
       containers:
         - name: server
           image: {{ include "switchtender.image" . | quote }}
@@ -26,7 +44,7 @@ spec:
             - --addr
             - {{ .Values.server.addr | quote }}
             - --db
-            - {{ .Values.database.dsn | quote }}
+            - {{ .Values.database.dsn | default "/data/switchtender.db" | quote }}
             {{- range .Values.server.extraArgs }}
             - {{ . | quote }}
             {{- end }}
@@ -79,14 +97,30 @@ spec:
             periodSeconds: 5
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
-          {{- if or .Values.license .Values.existingSecret }}
+          {{- if or .Values.license .Values.existingSecret (not .Values.database.dsn) }}
           volumeMounts:
+            {{- if not .Values.database.dsn }}
+            - name: data
+              mountPath: /data
+            {{- end }}
+            {{- if or .Values.license .Values.existingSecret }}
             - name: license
               mountPath: /etc/switchtender/license
               readOnly: true
+            {{- end }}
           {{- end }}
-      {{- if or .Values.license .Values.existingSecret }}
+      {{- if or .Values.license .Values.existingSecret (not .Values.database.dsn) }}
       volumes:
+        {{- if not .Values.database.dsn }}
+        - name: data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "switchtender.fullname" . }}-data
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        {{- end }}
+        {{- if or .Values.license .Values.existingSecret }}
         - name: license
           secret:
             secretName: {{ include "switchtender.secretName" . }}
@@ -94,6 +128,7 @@ spec:
               - key: license.jwt
                 path: license.jwt
             optional: true
+        {{- end }}
       {{- end }}
 ---
 apiVersion: v1

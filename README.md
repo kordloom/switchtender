@@ -14,6 +14,9 @@
   <a href="https://github.com/kordloom/switchtender/actions/workflows/ci.yml"><img
     src="https://github.com/kordloom/switchtender/actions/workflows/ci.yml/badge.svg?branch=main"
     alt="CI status"></a>
+  <a href="https://github.com/kordloom/switchtender/actions/workflows/supertest.yml"><img
+    src="https://github.com/kordloom/switchtender/actions/workflows/supertest.yml/badge.svg?branch=main"
+    alt="supertest"></a>
   <a href="https://github.com/kordloom/switchtender/releases"><img
     src="https://img.shields.io/github/v/release/kordloom/switchtender"
     alt="Latest release"></a>
@@ -167,6 +170,20 @@ The MCP server (`switchtender mcp`) is how an agent talks to the gate: it can li
 propose runs, and read results, and it deliberately has no approve tool, no credential access, and
 refuses to start on an admin token. The full walkthrough is in
 [Run an AI agent through the gate](docs/agents.md).
+
+## Proven against a real cluster on every push
+
+Every push to main deploys this repository's own Helm chart into a fresh Kind cluster and proves
+the product against three real SSH machines: the free tier runs a playbook across the fleet, and
+the paid tier walks the whole governed arc, from a destructive playbook graded irreversible by its
+own text, through a hold an AI agent cannot release on its own request, to a real deletion
+verified over `kubectl exec` and a receipt verified offline by a binary that never spoke to the
+cluster. Altering one recorded byte makes verification refuse. Every claim and its evidence lands
+in the run's summary, with screenshots of the deployed UI in the artifacts.
+
+[How to read a run, and what it has already caught](docs/supertest.md). Run it yourself:
+
+    go run ./test/supertest -skip-team
 
 ## See it
 

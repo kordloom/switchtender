@@ -21,7 +21,7 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath \
 # 3.20 left support on 2026-04-01, so the image stopped receiving security patches while it was
 # still being built and published. Track a supported branch and move it on before the next lapses.
 FROM alpine:3.22
-RUN apk add --no-cache ansible-core openssh-client ca-certificates
+RUN apk add --no-cache ansible-core bash python3 openssh-client ca-certificates
 
 # The control plane executes other people's playbooks, so it does not run them as root. The image ran
 # as root because nothing said otherwise, which meant a container escape, a mounted socket, or a tool

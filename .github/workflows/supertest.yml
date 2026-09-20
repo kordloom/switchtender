@@ -1,0 +1,71 @@
+# The supertest: a fresh Kind cluster, both install tiers, three real SSH machines, and no
+# assertion that trusts the product's own word for what happened. test/supertest is the harness;
+# docs/supertest.md is the guide to reading a run. The report lands in the job summary and the UI
+# screenshots in the artifacts, so an evaluator reads the evidence without cloning anything.
+name: supertest
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supertest-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  supertest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install kind and helm
+        run: |
+          set -euo pipefail
+          curl -sSLo /usr/local/bin/kind \
+            https://kind.sigs.k8s.io/dl/v0.24.0/kind-linux-amd64
+          chmod +x /usr/local/bin/kind
+          curl -sSL https://get.helm.sh/helm-v3.16.3-linux-amd64.tar.gz | tar -xz -C /tmp
+          sudo mv /tmp/linux-amd64/helm /usr/local/bin/helm
+
+      - name: Install the browser the screenshots use
+        working-directory: internal/ui/e2e
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Write the Team license
+        env:
+          SUPERTEST_LICENSE: ${{ secrets.SUPERTEST_LICENSE }}
+        run: |
+          set -euo pipefail
+          if [ -z "$SUPERTEST_LICENSE" ]; then
+            echo "::error title=No Team license::the SUPERTEST_LICENSE secret is empty, and a \
+          supertest that quietly skips the paid tier would report less than it claims"
+            exit 1
+          fi
+          printf '%s' "$SUPERTEST_LICENSE" > /tmp/supertest-license.json
+
+      - name: Run the supertest
+        run: |
+          set -euo pipefail
+          go run ./test/supertest \
+            -license /tmp/supertest-license.json \
+            -shots /tmp/supertest-shots \
+            -report "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the evidence
+        if: always()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee28f014d3b # v4
+        with:
+          name: supertest-evidence
+          path: /tmp/supertest-shots
+          if-no-files-found: ignore
