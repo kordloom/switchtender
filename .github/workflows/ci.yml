@@ -97,6 +97,12 @@ jobs:
             --set worker.enabled=true >/dev/null 2>&1
           ! "$helm" template t deploy/helm/switchtender --set encryptionKey=k --set encryptionSalt=s \
             --set database.dsn=postgres://u:p@postgres/db >/dev/null 2>&1
+          ! "$helm" template t deploy/helm/switchtender --set encryptionKey=k --set encryptionSalt=s \
+            --set database.dsn=postgres://u:p@postgres/db --set auditKey=aa \
+            --set worker.enabled=true >/dev/null 2>&1
+          # SQLite mode's Recreate must null the rolling parameters, or an upgrade from a
+          # RollingUpdate deployment is refused by the API server.
+          grep -q 'rollingUpdate: null' /tmp/community.yaml
           # The chart's appVersion must not fall BEHIND the newest release. Ahead is fine and normal:
           # the chart is bumped while the next version is being prepared. Behind is the defect, and
           # it shipped a chart pinned a release back while the demo and README advertised the new one.

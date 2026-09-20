@@ -16,8 +16,12 @@ spec:
   {{- if not .Values.database.dsn }}
   # SQLite holds one writer. A rolling update briefly runs two pods against the same file on the
   # same volume, so the update strategy has to stop the old server before the new one opens it.
+  # rollingUpdate is nulled explicitly: on an upgrade from a RollingUpdate deployment the old
+  # parameters otherwise survive the strategic merge, and the API refuses Recreate alongside them,
+  # which failed the exact helm upgrade this stanza exists to make safe.
   strategy:
     type: Recreate
+    rollingUpdate: null
   {{- end }}
   selector:
     matchLabels:

@@ -36,6 +36,11 @@ database:
   # workers, and know that initializing a NEW PostgreSQL schema takes a Team license: the old
   # default here sent a Community install straight into that refusal on first boot, which read as
   # the chart being broken rather than as a tier boundary.
+  #
+  # UPGRADING from a chart older than 0.8.0: the default used to be a PostgreSQL DSN. If your
+  # install relied on that default rather than setting its own, keep your values file explicit
+  # about the dsn when you upgrade, or this default quietly reboots the server onto a fresh,
+  # empty SQLite file while your data sits untouched in PostgreSQL.
   dsn: ""
 
 persistence:

@@ -2,6 +2,9 @@
 {{- if not .Values.database.dsn }}
 {{- fail "Dedicated workers coordinate through a shared PostgreSQL database. Set database.dsn, or leave worker.enabled false and let the server run everything itself." }}
 {{- end }}
+{{- if and (not .Values.license) (not .Values.existingSecret) }}
+{{- fail "Dedicated workers are distributed execution, which is Team: without a license the worker process refuses to start and the pod crash-loops. Set license, or point existingSecret at a Secret carrying license.jwt." }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
