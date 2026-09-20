@@ -1,6 +1,7 @@
 package importer
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -203,5 +204,37 @@ func TestPuppetRefusesADocumentThatNamesNoNode(t *testing.T) {
 		if _, err := FromPuppet([]byte(doc), time.Now()); err == nil {
 			t.Errorf("FromPuppet(%q) succeeded, want a refusal", doc)
 		}
+	}
+}
+
+// TestEveryChefFormReportsWhatItDoesNotRead pins the unread scan to all three shapes the tooling
+// emits. It was true only of the array form: a keyed or single-node dump was compared against the
+// array shape, matched nothing, and so was never scanned, which dropped fields with no warning in
+// exactly the forms where the summary still claimed nothing had been.
+func TestEveryChefFormReportsWhatItDoesNotRead(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		// Doc is the export in one of the three shapes, each carrying policy_group, which this
+		// importer does not read.
+		Doc string
+	}{{ // Test 0: An array of node documents.
+		Doc: `[{"name":"a.prod","chef_environment":"production","run_list":["role[web]"],"policy_group":"x"}]`,
+	}, { // Test 1: An object keyed by node name.
+		Doc: `{"a.prod":{"chef_environment":"production","run_list":["role[web]"],"policy_group":"x"}}`,
+	}, { // Test 2: One node document.
+		Doc: `{"name":"a.prod","chef_environment":"production","run_list":["role[web]"],"policy_group":"x"}`,
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
+			t.Parallel()
+			plan, err := FromChef([]byte(test.Doc), time.Now())
+			if err != nil {
+				t.Fatalf("FromChef: %v", err)
+			}
+			joined := strings.Join(plan.Warnings, "\n")
+			if !strings.Contains(joined, "policy_group") {
+				t.Errorf("policy_group was dropped without a warning in this form:\n%s", joined)
+			}
+		})
 	}
 }

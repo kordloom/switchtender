@@ -54,7 +54,7 @@ var chefFacts = []string{"fqdn", "ipaddress", "platform", "platform_version", "o
 // Accepts what the Chef tools actually emit: an array of node documents, a single node document, or
 // an object keyed by node name.
 func FromChef(data []byte, now time.Time) (*Plan, error) {
-	nodes, err := decodeChefNodes(data)
+	nodes, shape, err := decodeChefNodes(data)
 	if err != nil {
 		return nil, err
 	}
@@ -123,15 +123,9 @@ func FromChef(data []byte, now time.Time) (*Plan, error) {
 		"other automatic attributes were not copied, since they run to hundreds of keys per host.",
 		len(hosts), plural(len(hosts)), strings.Join(chefFacts, ", "))
 
-	reportUnread(plan, data, chefDocumentShape{})
+	reportUnread(plan, data, shape)
 	return plan, nil
 }
-
-// chefDocumentShape is the shape the unread scan compares an export against.
-//
-// The document arrives in three forms and the scan needs the one that is a list of nodes, since that
-// is where an unread field would hide. A single node or a name-keyed object walks the same members.
-type chefDocumentShape []chefNode
 
 // chefHostVars selects the facts carried onto a host line, including the address a play connects to.
 func chefHostVars(n chefNode) map[string]any {
@@ -167,10 +161,14 @@ func splitRunListEntry(entry string) (kind, value string) {
 // decodeChefNodes reads the three shapes the Chef tooling emits: an array of nodes, one node, or an
 // object keyed by node name. Accepting all three matters because which one somebody has depends on
 // how they dumped it, and refusing two of them reads as the importer not supporting Chef.
-func decodeChefNodes(data []byte) ([]chefNode, error) {
+//
+// The second return is the shape that decoded, for the unread scan. Comparing every form against
+// the array shape meant a keyed or single-node dump was never scanned at all, so a field this
+// importer does not read vanished with no warning exactly when the summary claimed nothing had.
+func decodeChefNodes(data []byte) ([]chefNode, any, error) {
 	var list []chefNode
 	if err := json.Unmarshal(data, &list); err == nil {
-		return list, nil
+		return list, []chefNode{}, nil
 	}
 	var keyed map[string]chefNode
 	if err := json.Unmarshal(data, &keyed); err == nil {
@@ -191,18 +189,18 @@ func decodeChefNodes(data []byte) ([]chefNode, error) {
 		// A single node document also unmarshals into a map, and every key would become a node with
 		// no run list and no environment. Telling them apart by whether anything looks like a node.
 		if looksLikeChefNodes(out) {
-			return out, nil
+			return out, map[string]chefNode{}, nil
 		}
 	}
 	var one chefNode
 	if err := json.Unmarshal(data, &one); err != nil {
-		return nil, fmt.Errorf("parse chef export: %w", err)
+		return nil, nil, fmt.Errorf("parse chef export: %w", err)
 	}
 	if one.Name == "" && one.ChefEnvironment == "" && len(one.RunList) == 0 {
-		return nil, fmt.Errorf("%w: this does not look like a chef node export",
+		return nil, nil, fmt.Errorf("%w: this does not look like a chef node export",
 			ErrNothingRecognized)
 	}
-	return []chefNode{one}, nil
+	return []chefNode{one}, chefNode{}, nil
 }
 
 // looksLikeChefNodes reports whether a name-keyed decode produced anything with a node's shape,
