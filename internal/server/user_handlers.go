@@ -243,7 +243,13 @@ func fromTrustedProxy(peer net.IP) bool {
 }
 
 // forwardedClient reads the client address a trusted proxy forwarded, preferring the operator's
-// named header and falling back to the leftmost X-Forwarded-For entry, which is the original client.
+// named header and otherwise reading X-Forwarded-For from the right.
+//
+// The leftmost X-Forwarded-For entry is written by the original client, so trusting it let a caller
+// put a fresh address there on every request and mint an unbounded set of limiter keys, walking
+// straight around the per-client rate limit the header exists to key. The real client is the last
+// entry not written by a proxy this install trusts: walking from the right, past the trusted hops,
+// the first untrusted address is the furthest one this install can actually vouch for.
 func forwardedClient(r *http.Request) string {
 	if clientIPHeader != "" {
 		if v := strings.TrimSpace(r.Header.Get(clientIPHeader)); v != "" {
@@ -257,9 +263,17 @@ func forwardedClient(r *http.Request) string {
 	if xff == "" {
 		return ""
 	}
-	first, _, _ := strings.Cut(xff, ",")
-	if ip := net.ParseIP(strings.TrimSpace(first)); ip != nil {
-		return ip.String()
+	entries := strings.Split(xff, ",")
+	for i := len(entries) - 1; i >= 0; i-- {
+		ip := net.ParseIP(strings.TrimSpace(entries[i]))
+		if ip == nil {
+			// A malformed entry breaks the chain of trust: everything left of it is unverifiable,
+			// so the closest trusted address is as far as this install can honestly reach.
+			return ""
+		}
+		if !fromTrustedProxy(ip) {
+			return ip.String()
+		}
 	}
 	return ""
 }
