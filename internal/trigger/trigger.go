@@ -67,6 +67,11 @@ type Store interface {
 	Delete(ctx context.Context, id string) error
 	// FindByTokenHash returns the trigger with the given token hash, or ErrNotFound.
 	FindByTokenHash(ctx context.Context, hash string) (*Trigger, error)
+	// TouchFired stamps when the trigger last fired, updating that column alone. A deleted
+	// trigger is a no-op, never a resurrection: the fire path used to write its whole stale
+	// snapshot back through Save, so a webhook in flight while an admin revoked the trigger
+	// re-inserted it, token and all, and a fire racing a secret rotation reverted the rotation.
+	TouchFired(ctx context.Context, id string, at time.Time) error
 }
 
 // New mints a trigger for a template: the plaintext token to embed in the webhook URL exactly

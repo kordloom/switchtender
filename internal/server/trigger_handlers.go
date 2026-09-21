@@ -450,9 +450,11 @@ func hookHandler(triggers trigger.Store, templates template.Store, submitter Sub
 			respondError(w, log, http.StatusBadGateway, "could not launch the template")
 			return
 		}
-		now := time.Now()
-		tg.LastFiredAt = &now
-		if err := triggers.Save(r.Context(), tg); err != nil {
+		// The stamp is an update by id, never a whole-row save. This handler holds a snapshot
+		// loaded before the launch, and writing it back resurrected triggers deleted mid-flight
+		// and reverted secret rotations that raced a fire: deletion is revocation, and a
+		// revocation a stale fire can undo is not one.
+		if err := triggers.TouchFired(r.Context(), tg.ID, time.Now()); err != nil {
 			log.Error("server: stamp trigger: " + err.Error())
 		}
 		respondJSON(w, log, http.StatusAccepted,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"sort"
 	"sync"
+	"time"
 )
 
 // memStore is an in-memory trigger Store guarded by a mutex.
@@ -34,6 +35,18 @@ func (m *memStore) Save(_ context.Context, t *Trigger) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.triggers[t.ID] = clone(t)
+	return nil
+}
+
+// TouchFired stamps the fire time on a trigger that still exists, and quietly does nothing for
+// one that does not: a fire that outlives its trigger's deletion must not bring it back.
+func (m *memStore) TouchFired(_ context.Context, id string, at time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if t, ok := m.triggers[id]; ok {
+		v := at
+		t.LastFiredAt = &v
+	}
 	return nil
 }
 

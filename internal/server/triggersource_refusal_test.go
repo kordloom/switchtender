@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/invsource"
@@ -28,6 +29,10 @@ type stubTriggers struct {
 
 // Save reports the configured save failure.
 func (s *stubTriggers) Save(context.Context, *trigger.Trigger) error { return s.saveErr }
+
+// TouchFired satisfies the store the way the stub satisfies everything else: with the configured
+// save error, since a stamp is a write.
+func (s *stubTriggers) TouchFired(context.Context, string, time.Time) error { return s.saveErr }
 
 // Get answers with the fixed trigger, its configured error, or trigger.ErrNotFound.
 func (s *stubTriggers) Get(context.Context, string) (*trigger.Trigger, error) {
