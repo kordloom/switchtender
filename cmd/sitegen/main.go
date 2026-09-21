@@ -357,8 +357,9 @@ func faqSchema(src []byte) template.HTML {
 var switchtenderFeatures = []string{
 	"Agentless: reaches managed hosts over SSH with nothing installed on them",
 	"Runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go",
-	"Reads secrets from HashiCorp Vault KV v1 and v2, Vault dynamic secrets minted per run and " +
-		"revoked when it ends, AWS Secrets Manager, and Azure Key Vault",
+	"Reads secrets from HashiCorp Vault (KV v1 and v2, and dynamic secrets minted per run and " +
+		"revoked when it ends), AWS Secrets Manager, Azure Key Vault, Google Secret Manager, " +
+		"CyberArk (Conjur and CCP), and 1Password",
 	"Per-object access grants: read, use, or manage on one project, template, inventory, or " +
 		"credential, layered over global roles",
 	"Single sign-on through OIDC, SAML, LDAP, and JWT",
@@ -368,7 +369,8 @@ var switchtenderFeatures = []string{
 	"Live host-by-task matrix and per-host history across runs",
 	"Drift detection from a dry run",
 	"One static Go binary and one SQLite file, with PostgreSQL optional",
-	"One-command import from AWX, Semaphore UI, Rundeck, Jenkins, and crontab",
+	"One-command import from AWX, Ansible Automation Platform, Semaphore UI, Chef, Puppet, " +
+		"Rundeck, Jenkins, and crontab",
 }
 
 // entitySlugs are the docs pages that carry the full application entity rather than only an article

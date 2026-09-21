@@ -83,8 +83,7 @@ it at the template.</li>
   -d '{&quot;cron&quot;:&quot;0 2 * * *&quot;,&quot;template_id&quot;:&quot;tpl_abc123&quot;}'
 </code></pre>
 <p>Use a real template id: the API stores the schedule either way, and one naming a template that does
-not exist fires nothing. <code>switchtender doctor</code>, and the Doctor panel on the overview, report a
-schedule in that state by id. A <code>name</code> is optional and worth setting, since it is what that report
+not exist fires nothing. The Doctor panel on the overview, and <code>GET /v1/doctor</code>, report a schedule in that state by id. A <code>name</code> is optional and worth setting, since it is what that report
 and the schedules list call it.</p>
 <p>To schedule without a template, send <code>playbook</code> and <code>inventory</code> inline, add <code>shards</code> for a split, or
 <code>steps</code> for a pipeline. A worker or the server must be running for a schedule to fire. Add capacity

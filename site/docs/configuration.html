@@ -909,7 +909,7 @@ per crontab line, each carrying its own one-step bash pipeline rather than a tem
 parses the six-field <code>/etc/crontab</code> form, whose user column sits before the command. That step
 runs on the SwitchTender host, not on the machine the crontab came from.</li>
 </ul>
-<p>All five take <code>--db</code> for the target database. Without <code>--apply</code> the command only reports what it
+<p>All seven take <code>--db</code> for the target database. Without <code>--apply</code> the command only reports what it
 would create. Rundeck, Jenkins, and cron import no credentials, so a job that needed a login needs
 one built by hand afterward.</p>
 <h2 id="audit">audit</h2>

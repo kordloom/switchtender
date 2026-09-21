@@ -112,7 +112,7 @@ another, painted as it happens.</li>
 <p>When a replica dies, its leases go stale and any survivor's janitor requeues the work, which the
 integration suite proves with two replicas on one PostgreSQL: shared claiming with no double-claim,
 a single fire for a schedule two replicas race for, and a dead replica's run finished by the
-survivor. Kill a replica mid-run and the run fails clean and requeues.</p>
+survivor. Kill a replica mid-run and the run fails clean: it is marked interrupted, a terminal state ready for an explicit rerun, never silently re-executed. Only work still leased and unstarted requeues automatically.</p>
 <p>To run it: point every replica at the same PostgreSQL with <code>--db</code>, share the same
 <code>SWITCHTENDER_ENCRYPTION_KEY</code> and <code>SWITCHTENDER_ENCRYPTION_SALT</code> so sealed credentials decrypt everywhere, and
 health-check <code>/healthz</code> at the balancer. SQLite has no server to share, so it stays a single-node

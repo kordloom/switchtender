@@ -63,7 +63,7 @@ cross-process decision already happens in the store:
 When a replica dies, its leases go stale and any survivor's janitor requeues the work, which the
 integration suite proves with two replicas on one PostgreSQL: shared claiming with no double-claim,
 a single fire for a schedule two replicas race for, and a dead replica's run finished by the
-survivor. Kill a replica mid-run and the run fails clean and requeues.
+survivor. Kill a replica mid-run and the run fails clean: it is marked interrupted, a terminal state ready for an explicit rerun, never silently re-executed. Only work still leased and unstarted requeues automatically.
 
 To run it: point every replica at the same PostgreSQL with `--db`, share the same
 `SWITCHTENDER_ENCRYPTION_KEY` and `SWITCHTENDER_ENCRYPTION_SALT` so sealed credentials decrypt everywhere, and

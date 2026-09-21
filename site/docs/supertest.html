@@ -105,6 +105,38 @@ the cluster</strong>. Then one recorded name is rewritten and verification is re
 change whose outcome was derived rather than typed.</li>
 <li>A queue-pinned run is claimed by the dedicated worker, not the server.</li>
 </ol>
+<p><strong>The previous published release upgrades in place with nothing lost.</strong> The harness installs the
+last tagged release exactly as the chart installs it, does real recorded work on it, and then
+helm-upgrades the same release in place to the image built from the commit under test. The old
+token must still authenticate, the old run must read back with its history, the audit chain must
+verify across the version boundary with every pre-upgrade link recomputed by the new binary, the
+old run's receipt must still verify offline, and a new run must execute with the old credentials.
+Then the same release is rolled back in place, on the volume the newer binary already wrote: the
+chain must verify with the newer binary's entries included, the newer binary's runs must read
+back, and the rolled-back install must execute new work, because an upgrade an operator cannot
+walk back is a one-way door sold as a swap. The licensed PostgreSQL shape gets its own upgrade
+proof: schema initialized by the old binary under license, real work through the dedicated
+worker, then server and worker rolled together in place with the schema reused, the license
+carried, and the chain verifying across the boundary.</p>
+<p><strong>A worker killed mid-run costs a retry, never the work, and never a lie.</strong> The dedicated worker
+is deleted while it holds an executing run. The run must be reclaimed to a terminal interrupted
+state with a stated reason, never silently re-run, because re-applying a half-applied change can
+double-act. The chain must verify across the crash, and a rerun of the interrupted run must
+complete on a live worker.</p>
+<p><strong>Two servers share one database, and killing one mid-run does not blink.</strong> The Team shape is
+installed with two server replicas on one PostgreSQL and one signing identity. A run is started, a
+second run is held by policy, and one replica is deleted while the first run executes. The survivor,
+dialed by name while the deployment provably has one ready replica, still serves authenticated
+reads, the held run is approved on it and executes, the mid-flight run completes exactly once, and
+when both replicas are back the chain verifies as one unforked history. Active-active HA is the word
+the Team tier prices, and this is the phase that keeps it from being only a word.</p>
+<p><strong>A destroyed install comes back from its backup, and the evidence outlives the install.</strong> A sealed
+backup is taken with the product's own command, then the install is destroyed for real, namespace
+and volume together. A fresh install restores it, reports what it wrote kind by kind, and serves the
+dead install's configuration through the token minted before the disaster, which proves the accounts
+and credential hashes crossed inside the backup. The new install's chain is its own: history
+deliberately does not travel, and the first install's receipt still verifies offline afterward, with
+no server anywhere, which is the whole point of proof you can carry out of the building.</p>
 <p><strong>The authorization model holds against the credentials that would abuse it.</strong> An agent token is
 refused account creation, token minting, and credential writes. A viewer reads history and is
 refused launching and approving. Every refusal is an HTTP request a real overreaching credential

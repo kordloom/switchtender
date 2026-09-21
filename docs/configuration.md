@@ -309,7 +309,7 @@ Migrates from AWX, Semaphore, Chef, Puppet, Rundeck, Jenkins, or cron. Which obj
   parses the six-field `/etc/crontab` form, whose user column sits before the command. That step
   runs on the SwitchTender host, not on the machine the crontab came from.
 
-All five take `--db` for the target database. Without `--apply` the command only reports what it
+All seven take `--db` for the target database. Without `--apply` the command only reports what it
 would create. Rundeck, Jenkins, and cron import no credentials, so a job that needed a login needs
 one built by hand afterward.
 
