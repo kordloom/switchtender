@@ -784,5 +784,5 @@ func scopedReader(ctx context.Context, authz *authorizer) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return !(filter("proj_probe", "") && filter("cred_probe", "")), nil
+	return !filter("proj_probe", "") || !filter("cred_probe", ""), nil
 }
