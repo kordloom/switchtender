@@ -91,15 +91,22 @@ func TestNewSAMLAuthValidation(t *testing.T) {
 		Cert        string
 		Key         string
 		Role        user.Role
+		// WantErr is the fragment of the refusal that names THIS defect. Any-error acceptance let
+		// a case pass on the wrong refusal, so removing one validation kept every case green.
+		WantErr string
 	}{{ // Test 0: A missing metadata URL is refused.
 		Name: "no metadata", BaseURL: "https://x", Cert: certFile, Key: keyFile, Role: user.RoleViewer,
+		WantErr: "are required",
 	}, { // Test 1: A missing base URL is refused.
 		Name: "no base", MetadataURL: "https://idp/md", Cert: certFile, Key: keyFile, Role: user.RoleViewer,
+		WantErr: "are required",
 	}, { // Test 2: A missing keypair is refused.
 		Name: "no keypair", MetadataURL: "https://idp/md", BaseURL: "https://x", Role: user.RoleViewer,
+		WantErr: "are required",
 	}, { // Test 3: An invalid default role is refused.
 		Name: "bad role", MetadataURL: "https://idp/md", BaseURL: "https://x",
 		Cert: certFile, Key: keyFile, Role: user.Role("boss"),
+		WantErr: "invalid default role",
 	}}
 	for _, test := range tests {
 		t.Run(test.Name, func(t *testing.T) {
@@ -109,6 +116,10 @@ func TestNewSAMLAuthValidation(t *testing.T) {
 				user.NewMemStore(), auth.NewMemStore(), zap.NewNop())
 			if err == nil {
 				t.Fatal("NewSAMLAuth() error = nil, want error")
+			}
+			if !strings.Contains(err.Error(), test.WantErr) {
+				t.Fatalf("NewSAMLAuth() error = %q, want the refusal for this case (%q): the "+
+					"wrong refusal means the validation under test is gone", err, test.WantErr)
 			}
 		})
 	}

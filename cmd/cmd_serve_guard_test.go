@@ -87,13 +87,12 @@ func TestSelectiveRunnerFromFlagsAppliesContainerFlags(t *testing.T) {
 	const pinned = "quay.io/ansible/creator-ee@sha256:abc123"
 
 	tests := []struct {
-		Name        string
-		Image       string
-		Want        error
-		WantArgs    []string
-		WantLaunch  bool
-		WantExit    int
-		WantRuntime string
+		Name       string
+		Image      string
+		Want       error
+		WantArgs   []string
+		WantLaunch bool
+		WantExit   int
 	}{
 		{ // Test 0: A digest-pinned image launches with every flag-configured cap on the argv.
 			Name: "pinned image carries the caps", Image: pinned, WantLaunch: true,
