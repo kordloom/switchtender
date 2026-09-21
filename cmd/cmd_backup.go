@@ -94,6 +94,12 @@ func backupStores(bundle storeBundle) backup.Stores {
 		CredentialTypes:  bundle.CredentialTypes(),
 		Policies:         bundle.Policies(),
 	}
+	// Only a backend that can pin one consistent read snapshot advertises it. SQLite can, on its
+	// serialized read connection. Postgres does not: its reads run over a connection pool, and
+	// pinning a snapshot across the fourteen table reads would mean threading one transaction
+	// through every store read method, which pgx's pool cannot fake and which is a larger change
+	// than a backup wants to carry. A Postgres backup runs unpinned, the way every backup did
+	// before, rather than behind a snapshot that quietly did not hold.
 	if sb, ok := bundle.(backup.SnapshotBeginner); ok {
 		stores.Snapshot = sb
 	}
