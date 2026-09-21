@@ -215,9 +215,20 @@ func recordRestoreProvenance(ctx context.Context, audits audit.Store, sum backup
 
 // reportBackup writes the object counts to stderr so they never mix with a backup written to stdout.
 func reportBackup(s backup.Summary) {
-	fmt.Fprintf(os.Stderr,
-		"credentials %d, projects %d, templates %d, inventories %d, inventory sources %d, "+
-			"schedules %d, triggers %d, users %d, tokens %d, teams %d, orgs %d, grants %d\n",
-		s.Credentials, s.Projects, s.Templates, s.Inventories, s.InventorySources,
-		s.Schedules, s.Triggers, s.Users, s.Tokens, s.Teams, s.Orgs, s.Grants)
+	fmt.Fprintln(os.Stderr, summaryLine(s))
+}
+
+// summaryLine renders every count the Summary carries. Every one: this line is what an operator
+// reads to know what a backup holds or a restore wrote, and a count left off it is an object kind
+// that restores with no word said, which is how policies and credential types were restored
+// invisibly. A guard test holds this line to the Summary's fields, so a new kind cannot be added
+// to the backup without being added here.
+func summaryLine(s backup.Summary) string {
+	return fmt.Sprintf(
+		"credentials %d, credential types %d, projects %d, templates %d, inventories %d, "+
+			"inventory sources %d, schedules %d, triggers %d, users %d, tokens %d, teams %d, "+
+			"orgs %d, memberships %d, grants %d, policies %d",
+		s.Credentials, s.CredentialTypes, s.Projects, s.Templates, s.Inventories,
+		s.InventorySources, s.Schedules, s.Triggers, s.Users, s.Tokens, s.Teams,
+		s.Orgs, s.Memberships, s.Grants, s.Policies)
 }
