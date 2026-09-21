@@ -168,6 +168,7 @@ var landingURLs = []string{
 	"https://switchtender.com/chef-eol", "https://switchtender.com/puppet-eol",
 	"https://switchtender.com/privacy",
 	"https://switchtender.com/terms",
+	"https://switchtender.com/procurement",
 	"https://switchtender.com/refund",
 	"https://switchtender.com/verify",
 }
