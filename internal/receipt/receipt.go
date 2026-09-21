@@ -304,7 +304,7 @@ func discloseDecisions(doc *audit.Bundle, entries []*audit.Entry, r *run.Run) {
 		if json.Unmarshal(body, &bodyObj) != nil {
 			continue
 		}
-		if claim := claimFor(doc, audit.MethodDecision, e.Path); claim != nil {
+		if claim := claimForEntry(doc, audit.MethodDecision, e.Path, e.Seq); claim != nil {
 			claim.Payload["decision_body"] = bodyObj
 			claim.Payload["decision_nonce"] = e.Nonce
 		}
@@ -329,14 +329,41 @@ func outcomeClaim(doc *audit.Bundle, path string) *audit.BundleClaim {
 // a tree claim by its leaf index, so matching on the coordinate attached a disclosure to whichever
 // claim happened to share the number. It returns nil when the entry is withheld.
 func claimFor(doc *audit.Bundle, method, path string) *audit.BundleClaim {
+	return claimForEntry(doc, method, path, 0)
+}
+
+// claimForEntry is claimFor narrowed by the entry's own chain sequence, for entries that can
+// legitimately share a path. A retried approval leaves two decision entries at the identical
+// path with different nonces, and matching on path alone attached the second entry's nonce to
+// the first entry's claim: the digest, keyed by the first nonce, then refused the disclosure,
+// and every receipt for that run verified as tampered forever, on an honest install.
+//
+// The sequence only narrows among path matches and only when the claim carries one, so the tree
+// shape, whose coordinates are leaf indexes rather than sequences, keeps the path-only behavior
+// this function's caller was written for.
+func claimForEntry(doc *audit.Bundle, method, path string, seq int64) *audit.BundleClaim {
+	var pathMatch *audit.BundleClaim
 	for i := range doc.Claims {
 		gotMethod, _ := doc.Claims[i].Payload["method"].(string)
 		gotPath, _ := doc.Claims[i].Payload["path"].(string)
-		if gotMethod == method && gotPath == path {
+		if gotMethod != method || gotPath != path {
+			continue
+		}
+		if pathMatch == nil {
+			pathMatch = &doc.Claims[i]
+		}
+		if seq > 0 && doc.Claims[i].Chain.Seq == seq {
 			return &doc.Claims[i]
 		}
 	}
-	return nil
+	if seq > 0 {
+		// The caller knows exactly which entry this is, and no claim carries it: the entry lies
+		// outside the receipt's segment. Falling back to the path match here is how a retried
+		// decision past the outcome overwrote the real decision's nonce and poisoned the receipt.
+		// Outside the segment means not disclosed, full stop.
+		return nil
+	}
+	return pathMatch
 }
 
 // parseReceipt splits a seq:link audit receipt into its parts.

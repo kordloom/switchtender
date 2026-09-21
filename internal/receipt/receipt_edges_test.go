@@ -754,3 +754,47 @@ func TestReceiptOmitsADecisionRecordedAfterTheOutcome(t *testing.T) {
 		t.Errorf("decision = %+v, want the approval the segment covers", rep.Decisions[0])
 	}
 }
+
+// TestAReceiptSurvivesARetriedApproval reproduces the honest-install failure a duplicate decision
+// used to cause, permanently.
+//
+// Approve appends its decision entry before the release, and its own comment admits a failed
+// release leaves a second attempt appending a second decision: two chain entries at the identical
+// path with different nonces. Disclosure matched claims by path alone, so the second entry's nonce
+// landed on the first entry's claim, whose digest was keyed by the first nonce, and every receipt
+// for that run verified as TAMPERED forever. Chain entries are immutable, so there was no way
+// back: the flagship evidence artifact permanently accusing an honest install of forgery because
+// somebody's approval RPC was retried.
+func TestAReceiptSurvivesARetriedApproval(t *testing.T) {
+	ctx := context.Background()
+	runs, audits, id, r := held(t, "approved")
+
+	// The retry: a second, identical verdict lands on the chain at the same path.
+	if _, err := outcome.CommitDecision(ctx, audits, r, "approved", "dana", "session",
+		time.Now); err != nil {
+		t.Fatalf("CommitDecision retry: %v", err)
+	}
+	// Recommit the outcome so the receipt's segment reaches past the late decision; the fixture
+	// committed the first outcome before the retry existed.
+	if err := runs.Save(ctx, r); err != nil {
+		t.Fatalf("save run: %v", err)
+	}
+
+	res, err := receipt.Build(ctx, runs, audits, id, "test", r.ID, receipt.Options{})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	rep, err := audit.VerifyBundle(res.Signed, id.KeyID())
+	if err != nil {
+		t.Fatalf("VerifyBundle: %v", err)
+	}
+	if !rep.DecisionsOK {
+		t.Fatalf("a retried approval left the receipt permanently unverifiable: %+v", rep)
+	}
+	if !rep.OK() {
+		t.Fatalf("receipt does not verify after a retried approval: %+v", rep)
+	}
+	if rep.DecisionsPresent < 1 {
+		t.Errorf("DecisionsPresent = %d, want the decisions disclosed", rep.DecisionsPresent)
+	}
+}
