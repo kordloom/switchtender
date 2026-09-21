@@ -148,7 +148,10 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 	mask := &masker{}
 	// The fold accumulates the run's summaries as its events go by, so finishing needs no second
 	// read of them. Only the tail goroutine writes to it, and it has exited before finish reads it.
-	fold := run.NewSummaryFold(r.CreatedAt)
+	// The fold is stamped with execution time, not creation time. A run can sit held or queued
+	// long past its submission, and every summary this fold produces describes what execution
+	// observed, which happened now.
+	fold := run.NewSummaryFold(d.now())
 	go func() {
 		defer close(tailed)
 		d.tailEvents(r.ID, parent, eventsPath, stop, mask, fold)

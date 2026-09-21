@@ -261,7 +261,15 @@ func (f *SummaryFold) Add(events []event.Event) {
 		switch e.Type {
 		case event.TypeFacts:
 			if e.Host != "" && len(e.Facts) > 0 {
-				f.facts[e.Host] = HostFacts{Host: e.Host, Facts: e.Facts, GatheredAt: f.ranAt}
+				// The event's own time, not the fold's. ranAt is the run's creation, and a run
+				// held for approval executes days later: stamping facts with submission time
+				// backdated the estate's history into buckets whose retention had already run,
+				// quietly rewriting what the fleet looked like on a date nothing touched it.
+				gathered := e.Time
+				if gathered.IsZero() {
+					gathered = f.ranAt
+				}
+				f.facts[e.Host] = HostFacts{Host: e.Host, Facts: e.Facts, GatheredAt: gathered}
 			}
 		case event.TypeStats:
 			if e.Stats != nil {
