@@ -411,7 +411,7 @@ func hookHandler(triggers trigger.Store, templates template.Store, submitter Sub
 		ctx := r.Context()
 		if audits != nil {
 			entry := &audit.Entry{
-				ID: audit.NewID(), At: time.Now(), Actor: "webhook:" + tg.ID,
+				ID: audit.NewID(), Actor: "webhook:" + tg.ID,
 				Method: http.MethodPost, Path: "/hooks/" + tg.ID + "/fired",
 			}
 			if aerr := audits.Append(ctx, entry); aerr != nil {

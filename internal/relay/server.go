@@ -167,7 +167,7 @@ func (s *relayServer) record(ctx context.Context, pool *Pool, owner, path string
 		actor = "pool:" + pool.Name + " " + actor
 	}
 	entry := &audit.Entry{
-		ID: audit.NewID(), At: time.Now(), Actor: actor, ActorType: actorTypeWorker,
+		ID: audit.NewID(), Actor: actor, ActorType: actorTypeWorker,
 		Method: relayMethod, Path: path,
 	}
 	if err := s.audits.Append(ctx, entry); err != nil {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	osuser "os/user"
-	"time"
 
 	"github.com/kordloom/switchtender/internal/audit"
 )
@@ -49,7 +48,7 @@ func recordCLIChange(ctx context.Context, audits audit.Store, command string, bo
 		return nil
 	}
 	entry := &audit.Entry{
-		ID: audit.NewID(), At: time.Now(), Actor: cliActor(),
+		ID: audit.NewID(), Actor: cliActor(),
 		// A command-line mutation is made by whoever holds the host account, which is the closest
 		// thing to an observed identity here: no token and no session is involved. The type says so
 		// rather than claiming a person or a service, either of which would be a guess.
