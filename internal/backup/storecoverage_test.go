@@ -66,3 +66,50 @@ func TestEveryStoreIsBackedUpOrDeliberatelyNot(t *testing.T) {
 		}
 	}
 }
+
+// summaryExtras are Summary count fields with no same-named Stores field, each with its reason.
+// Memberships counts rows carried inside teams and orgs rather than a store of their own.
+var summaryExtras = map[string]string{
+	"Memberships": "team and org membership rows ride inside their parents",
+}
+
+// TestEveryStoreFieldIsCountedBySummary pins the next link of the chain storecoverage starts.
+//
+// storecoverage forces a store onto backup.Stores. This forces the Summary to count it, by name,
+// and the report guard in cmd forces every Summary count into the operator-facing line. Without
+// this link a store could sit on the struct, be gathered or not, and no count would ever say,
+// which is how policies and credential types were restored invisibly.
+func TestEveryStoreFieldIsCountedBySummary(t *testing.T) {
+	t.Parallel()
+	counts := map[string]bool{}
+	sum := reflect.TypeOf(backup.Summary{})
+	for i := 0; i < sum.NumField(); i++ {
+		if sum.Field(i).Type.Kind() == reflect.Int {
+			counts[sum.Field(i).Name] = true
+		}
+	}
+	stores := reflect.TypeOf(backup.Stores{})
+	for i := 0; i < stores.NumField(); i++ {
+		name := stores.Field(i).Name
+		if name == "Snapshot" {
+			continue // The snapshot seam, not a store; storecoverage documents it.
+		}
+		if !counts[name] {
+			t.Errorf("Stores.%s has no matching Summary count: whatever it holds is backed up "+
+				"and restored with no number ever reported for it", name)
+		}
+	}
+	for name := range summaryExtras {
+		if !counts[name] {
+			t.Errorf("summaryExtras names %s but Summary has no such count", name)
+		}
+	}
+	for name := range counts {
+		if _, ok := stores.FieldByName(name); !ok {
+			if _, deliberate := summaryExtras[name]; !deliberate {
+				t.Errorf("Summary.%s counts nothing on Stores and is not a named extra: a count "+
+					"with no source drifts into a lie", name)
+			}
+		}
+	}
+}
