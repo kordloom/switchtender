@@ -181,6 +181,7 @@ func TestRegisterInstallsTheResolverItWasGiven(t *testing.T) {
 	if Registered(kind) {
 		t.Fatalf("precondition: %q is already registered", kind)
 	}
+	t.Cleanup(func() { unregisterForTest(kind) })
 
 	var gotConfig string
 	Register(kind, func(_ context.Context, config string) (string, error) {
@@ -230,6 +231,7 @@ func TestRegisterDynamicInstallsTheMinterItWasGiven(t *testing.T) {
 	if Registered(kind) {
 		t.Fatalf("precondition: %q is already registered", kind)
 	}
+	t.Cleanup(func() { unregisterForTest(kind) })
 
 	revoked := 0
 	RegisterDynamic(kind, func(_ context.Context, config string) (string, *Lease, error) {
@@ -281,6 +283,8 @@ func TestRegisterDynamicInstallsTheMinterItWasGiven(t *testing.T) {
 func TestRegisterRefusesAReservedOrClaimedKind(t *testing.T) {
 	const takenResolver = "registry-test-taken-resolver"
 	const takenMinter = "registry-test-taken-minter"
+	t.Cleanup(func() { unregisterForTest(takenResolver) })
+	t.Cleanup(func() { unregisterForTest(takenMinter) })
 	Register(takenResolver, func(context.Context, string) (string, error) { return "", nil })
 	RegisterDynamic(takenMinter, func(context.Context, string) (string, *Lease, error) {
 		return "", nil, nil

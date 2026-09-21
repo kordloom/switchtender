@@ -431,9 +431,10 @@ func denyOnAuthzError(w http.ResponseWriter, log *zap.Logger, err error) bool {
 }
 
 // derivedReadScan bounds how many recent runs are consulted when deciding what a derived view may
-// show. The views themselves are already windowed, so this only has to cover the same ground.
-// It is a var, not a const, only so a test can shrink it to force the aged-out-of-window case.
-var derivedReadScan = 2000
+// show. The views themselves are already windowed, so this only has to cover the same ground. A
+// test that needs a smaller window passes one to derivedReadFilterIn rather than bending this: it
+// was a var once, and a test shrinking it raced every parallel test on the derived-read path.
+const derivedReadScan = 2000
 
 // derivedReadFilter returns a predicate deciding whether a row derived from a run may be shown, and
 // whether the caller may see fleet-wide aggregates at all.
@@ -460,6 +461,13 @@ func unrestrictedReader(ctx context.Context, authz *authorizer) (bool, error) {
 
 func derivedReadFilter(ctx context.Context, authz *authorizer,
 	store run.Store) (keep func(runID string) bool, anyReadable bool, err error) {
+	return derivedReadFilterIn(ctx, authz, store, derivedReadScan)
+}
+
+// derivedReadFilterIn is derivedReadFilter with the scan window passed in, so the aged-out-of-window
+// case is testable without touching shared state.
+func derivedReadFilterIn(ctx context.Context, authz *authorizer, store run.Store,
+	scan int) (keep func(runID string) bool, anyReadable bool, err error) {
 	filter, err := authz.readFilter(ctx)
 	if err != nil {
 		return nil, false, err
@@ -483,7 +491,7 @@ func derivedReadFilter(ctx context.Context, authz *authorizer,
 	// Whether the caller can read anything decides only whether estate-wide aggregates that name no
 	// run are shown at all, so a bounded probe of recent runs answers it. Which individual rows show
 	// is decided per run below, not from this scan.
-	anyReadable, err = probeAnyReadable(ctx, store, runKeep, orgOf)
+	anyReadable, err = probeAnyReadable(ctx, store, runKeep, orgOf, scan)
 	if err != nil {
 		return nil, false, err
 	}
@@ -530,9 +538,9 @@ const derivedReadProbeHead = 100
 // and only widens to the full derivedReadScan window when that head holds nothing readable, so the
 // answer matches the full scan while the usual request pays for a fraction of it.
 func probeAnyReadable(ctx context.Context, store run.Store, keep func(id, orgID string) bool,
-	orgOf func(string) string) (bool, error) {
-	head := min(derivedReadProbeHead, derivedReadScan)
-	for _, limit := range [2]int{head, derivedReadScan} {
+	orgOf func(string) string, scan int) (bool, error) {
+	head := min(derivedReadProbeHead, scan)
+	for _, limit := range [2]int{head, scan} {
 		page, err := store.ListPage(ctx, run.ListFilter{}, limit, 0)
 		if err != nil {
 			return false, err
@@ -544,7 +552,7 @@ func probeAnyReadable(ctx context.Context, store run.Store, keep func(id, orgID 
 		}
 		// A short head means the install holds fewer runs than the head asked for, so the wider window
 		// would read exactly the same rows again and reach the same answer.
-		if limit == derivedReadScan || len(page) < limit {
+		if limit == scan || len(page) < limit {
 			break
 		}
 	}

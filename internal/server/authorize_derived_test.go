@@ -22,9 +22,6 @@ func actorCtx(a Actor) context.Context {
 // callers the feature is for. The predicate now consults the actual governing run on demand.
 func TestDerivedReadFilterConsultsAgedRuns(t *testing.T) {
 	t.Parallel()
-	orig := derivedReadScan
-	derivedReadScan = 2
-	t.Cleanup(func() { derivedReadScan = orig })
 
 	authz := &authorizer{strict: true, grants: &fakeGrants{byObject: map[string][]*grant.Grant{
 		"proj_granted": {{Subject: "u1", Access: grant.AccessUse}},
@@ -47,7 +44,9 @@ func TestDerivedReadFilterConsultsAgedRuns(t *testing.T) {
 	}
 
 	ctx := actorCtx(Actor{UserID: "u1", Role: user.RoleViewer})
-	keep, _, err := derivedReadFilter(ctx, authz, store)
+	// The window is passed in, two runs wide, so the governing run has aged out of it; mutating
+	// the package const's old var form from a parallel test raced every derived-read test.
+	keep, _, err := derivedReadFilterIn(ctx, authz, store, 2)
 	if err != nil {
 		t.Fatalf("derivedReadFilter: %v", err)
 	}

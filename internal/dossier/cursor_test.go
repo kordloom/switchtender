@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/sqlitestore"
 )
 
@@ -37,18 +36,18 @@ func TestDossierPagingCursorUsesSeqNotCount(t *testing.T) {
 	// The target run has no stored per-host summaries, so the dossier folds its events, and it holds more
 	// events than one page so the cursor has to advance across pages.
 	const targetHosts = 10 // 10 host events + 1 stats recap = 11 events
-	old := eventPage
-	eventPage = 4
-	t.Cleanup(func() { eventPage = old })
+	// The window is passed to the paging seam rather than written into the package const's old var
+	// form, which a parallel test mutating raced every other test that folds events.
+	const page = 4
 	seedRunWithEvents(t, base, "run_target", at, targetHosts, false)
 
 	store := &countingEvents{Store: base}
-	in, err := Collect(ctx, store, audit.NewMemStore(), "", "run_target", at)
+	hosts, err := hostSummariesPaged(ctx, store, "run_target", at, page)
 	if err != nil {
-		t.Fatalf("Collect() error = %v", err)
+		t.Fatalf("hostSummariesPaged() error = %v", err)
 	}
-	if len(in.Hosts) != targetHosts {
-		t.Fatalf("dossier reported %d hosts, want %d", len(in.Hosts), targetHosts)
+	if len(hosts) != targetHosts {
+		t.Fatalf("dossier reported %d hosts, want %d", len(hosts), targetHosts)
 	}
 
 	// 11 events at a page of 4 fold in exactly three reads (4, 4, 3) when the cursor advances by the last
@@ -58,7 +57,7 @@ func TestDossierPagingCursorUsesSeqNotCount(t *testing.T) {
 		t.Errorf("folded the event stream in %d paged reads, want %d; a higher count means the cursor "+
 			"re-read pages instead of advancing by the last Seq", store.pagedReads, wantReads)
 	}
-	if store.largestPage > eventPage {
-		t.Errorf("a page held %d events, above the %d window", store.largestPage, eventPage)
+	if store.largestPage > page {
+		t.Errorf("a page held %d events, above the %d window", store.largestPage, page)
 	}
 }
