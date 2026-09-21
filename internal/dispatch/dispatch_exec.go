@@ -610,6 +610,19 @@ func (d *Dispatcher) recordTerminal(r *run.Run, fin run.Finalization) (run.Statu
 			zap.String("attempted", string(fin.Status)))
 		return cur.Status, false
 	}
+	// The stored run may be live under somebody else. The guard above only refused terminal
+	// states, so a run the janitor requeued and another worker re-claimed, which reads as running
+	// under the new owner, fell through to the unfenced save below: this worker's late cancel
+	// clobbered the other worker's live run, the other worker's next heartbeat found itself
+	// disowned and killed its own tool, and both executions died partway on real hosts while the
+	// record said a person canceled it. A run held by a different owner is not this worker's to
+	// finalize, live or otherwise.
+	if fin.Owner != "" && cur.ClaimedBy != "" && cur.ClaimedBy != fin.Owner {
+		d.log.Warn("dispatch: run is held by another owner, not overwriting",
+			zap.String("run_id", r.ID), zap.String("holder", cur.ClaimedBy),
+			zap.String("this", fin.Owner), zap.String("attempted", string(fin.Status)))
+		return cur.Status, false
+	}
 	// Save writes the whole run, so the terminal fields go on a copy: a save that fails must leave
 	// the caller's run reading the way the store still does.
 	next := *r

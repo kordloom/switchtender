@@ -113,3 +113,46 @@ func TestFinalizeRejectFromPendingApproval(t *testing.T) {
 		t.Errorf("error = %q, want the rejection reason recorded", got.Error)
 	}
 }
+
+// TestALostWorkerCannotTerminalizeARunAnotherWorkerReclaimed is the live-run half of the fence,
+// which the terminal-state guard above never covered.
+//
+// Worker A's lease lapses mid-execution, the janitor requeues the run, and worker B claims it and
+// is running it. A's late finalize is refused by the owner-fenced FinalizeRunning and falls into
+// the fallback, which used to refuse only stored TERMINAL states: B's run is running, so A's
+// whole-row save went through, recording canceled with A as the holder. B's next heartbeat found
+// itself disowned and killed its own tool, so both executions died partway on real hosts and the
+// record read as a person canceling. A run held by a different owner is not this worker's to
+// finalize, live or otherwise.
+func TestALostWorkerCannotTerminalizeARunAnotherWorkerReclaimed(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := run.NewMemStore()
+	d := New(store, okRunner(), nil)
+
+	started := time.Now()
+	reclaimed := &run.Run{
+		ID: "run_x", Playbook: "p", Status: run.StatusRunning,
+		CreatedAt: time.Now(), StartedAt: &started, ClaimedBy: "worker-b",
+	}
+	if err := store.Save(ctx, reclaimed); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	// Worker A's stale view: it believes it still owns the run it started.
+	stale := reclaimed.Clone()
+	stale.ClaimedBy = "worker-a"
+	d.finalize(stale, run.StatusCanceled, nil, "")
+
+	got, err := store.Get(ctx, "run_x")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.Status != run.StatusRunning {
+		t.Errorf("status = %q, want running: a disowned worker terminalized the run its "+
+			"replacement is live inside", got.Status)
+	}
+	if got.ClaimedBy != "worker-b" {
+		t.Errorf("claimed_by = %q, want worker-b: the stale worker took the lease back", got.ClaimedBy)
+	}
+}
