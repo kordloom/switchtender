@@ -120,7 +120,12 @@ func (d *Dispatcher) Approve(ctx context.Context, id, by, byType string) (*run.R
 	case run.KindPipeline:
 		d.startPipeline(r)
 	case run.KindSplit:
-		d.startSplit(ctx, r)
+		// The dispatcher's own context, not the request's. The approval is committed by the time
+		// this runs, and releasing the shards is the coordinator's work, not the HTTP caller's: on
+		// the request context the shard release was canceled the instant the approve response was
+		// written, so a large split lost every shard the release had not yet reached, stranded
+		// under a parent that would never run them.
+		d.startSplit(d.ctx, r)
 	default:
 		// A plain run just became claimable, so the claim loop is nudged rather than left to
 		// finish an idle backoff while an approved run waits.

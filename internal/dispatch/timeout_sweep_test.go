@@ -130,6 +130,9 @@ func TestSettleOverrunningBoundaries(t *testing.T) {
 		Started *time.Time
 		// WantStatus is the status the sweep should leave the run in.
 		WantStatus run.Status
+		// ServerCap is the dispatcher-wide run timeout in seconds, zero for none. It is the
+		// fallback the sweep applies to a run that set no timeout of its own.
+		ServerCap int
 	}{{ // Test 0: Exactly at the deadline the run has overrun, so the sweep ends it.
 		Name: "exactly at the deadline", Timeout: 60,
 		Started: ptr(now.Add(-(60*time.Second + overrunGrace))), WantStatus: run.StatusFailed,
@@ -145,6 +148,13 @@ func TestSettleOverrunningBoundaries(t *testing.T) {
 	}, { // Test 4: A one-second timeout overrun by a day is ended, however small the bound was.
 		Name: "the smallest real timeout", Timeout: 1, Started: ptr(now.Add(-24 * time.Hour)),
 		WantStatus: run.StatusFailed,
+	}, { // Test 5: A run with no timeout of its own is ended by the server-wide cap. This is the
+		// common install, and consulting only the per-run timeout made the whole sweep dead for it.
+		Name: "server cap, no per-run timeout", Timeout: 0, ServerCap: 60,
+		Started: ptr(now.Add(-(60*time.Second + overrunGrace))), WantStatus: run.StatusFailed,
+	}, { // Test 6: No per-run timeout and no server cap leaves the run to its executor.
+		Name: "no timeout anywhere", Timeout: 0, ServerCap: 0,
+		Started: ptr(now.Add(-24 * time.Hour)), WantStatus: run.StatusRunning,
 	}}
 
 	for testNum, test := range tests {
@@ -164,7 +174,8 @@ func TestSettleOverrunningBoundaries(t *testing.T) {
 
 			d := &Dispatcher{
 				store: store, log: zap.NewNop(), ctx: ctx,
-				now: func() time.Time { return now },
+				runTimeout: time.Duration(test.ServerCap) * time.Second,
+				now:        func() time.Time { return now },
 			}
 			d.settleOverrunning()
 
