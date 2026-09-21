@@ -206,25 +206,31 @@ func (h *harness) phaseCrash() error {
 	h.pass(phase, "the worker was killed while it held the run",
 		fmt.Sprintf("pod %s deleted mid-execution of %s", pod, runID))
 
-	// Lease 30s, sweep every 10s, pod respawn, then a full re-execution: generous ceiling, no
-	// floor. The run must SUCCEED, on a different claimant, with the attempt counter saying a
-	// retry happened, or the reclaim story is a comment rather than a behavior.
-	done, err := h.awaitRunStatus(runID, "succeeded", 240*time.Second)
+	// Lease 30s, sweep every 10s: the janitor reclaims a run whose executor died. A run that was
+	// mid-execution is NOT silently re-run, deliberately, because re-applying a half-applied
+	// change could double-act; it is reclaimed to a terminal interrupted state with a stated
+	// reason, which is the state a person or a rerun resumes from. Proving it silently completed
+	// would be proving the wrong, more dangerous thing.
+	reclaimed, err := h.awaitRunStatus(runID, "interrupted", 180*time.Second)
 	if err != nil {
-		return fmt.Errorf("the run its executor died under never completed: %w", err)
+		return fmt.Errorf("the run its executor died under was not reclaimed: %w", err)
 	}
-	claimedBy, _ := done["claimed_by"].(string)
-	if claimedBy == victim {
-		h.fail(phase, "the run finished on the replacement worker",
-			fmt.Errorf("claimed_by is still %q, the pod that was deleted", victim))
-	} else if !strings.Contains(claimedBy, "worker") {
-		h.fail(phase, "the run finished on the replacement worker",
-			fmt.Errorf("claimed_by is %q, not a worker", claimedBy))
+	// Either honest reason is right, and which one depends on how the worker died. A kubectl
+	// delete lets the process shut down gracefully, so it marks its own in-flight run interrupted
+	// on the way out ("the server stopped while this run was executing"); a hard kill leaves the
+	// janitor to reclaim the stale lease instead ("executor lease expired"). What must never
+	// appear is a blank reason or a silent success.
+	reason, _ := reclaimed["error"].(string)
+	if !strings.Contains(reason, "lease expired") &&
+		!strings.Contains(reason, "server stopped while this run was executing") {
+		h.fail(phase, "the abandoned run is reclaimed with a stated reason",
+			fmt.Errorf("error = %q, want it to name the crash", reason))
 	} else {
-		h.pass(phase, "the run finished on the replacement worker",
-			fmt.Sprintf("reclaimed from %s, completed by %s", victim, claimedBy))
+		h.pass(phase, "the abandoned run is reclaimed to interrupted with a stated reason",
+			"a mid-flight change is never silently re-run; "+reason)
 	}
 
+	// The chain must survive a crash mid-run: a dead executor forges nothing.
 	var verify struct {
 		OK bool `json:"ok"`
 	}
@@ -235,6 +241,26 @@ func (h *harness) phaseCrash() error {
 		h.fail(phase, "the chain survived the crash intact", fmt.Errorf("audit verify says not ok"))
 	} else {
 		h.pass(phase, "the chain survived the crash intact", "a dead executor forged nothing")
+	}
+
+	// And the interrupted run is resumable: a rerun replays its spec and finishes on a live
+	// worker, so a crash costs a retry, never the work.
+	var again map[string]any
+	if err := h.apiCall("POST", "/v1/runs/"+runID+"/rerun", &human, map[string]any{}, &again); err != nil {
+		return fmt.Errorf("rerun the interrupted run: %w", err)
+	}
+	rerunID, _ := again["id"].(string)
+	done, err := h.awaitRunStatus(rerunID, "succeeded", 180*time.Second)
+	if err != nil {
+		return fmt.Errorf("the rerun of the interrupted run never completed: %w", err)
+	}
+	claimedBy, _ := done["claimed_by"].(string)
+	if !strings.Contains(claimedBy, "worker") {
+		h.fail(phase, "the rerun completed on a live worker",
+			fmt.Errorf("claimed_by is %q, not a worker", claimedBy))
+	} else {
+		h.pass(phase, "a rerun of the interrupted run completed on a live worker",
+			"a crash costs a retry, never the work: "+rerunID+" on "+claimedBy)
 	}
 	return nil
 }
