@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"path"
@@ -59,6 +60,35 @@ type authGate struct {
 	checkedAt time.Time
 }
 
+// reboundWrite reports whether a browser sent this state-changing request for a host name that no
+// loopback install answers to, with no declared proxy in front. Only requests carrying the
+// browser's own fetch metadata count: curl, the CLI, and server-to-server senders name no
+// Sec-Fetch-Site and are unaffected.
+func reboundWrite(r *http.Request) bool {
+	switch r.Method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		return false
+	}
+	if r.Header.Get("Sec-Fetch-Site") == "" {
+		return false
+	}
+	if len(trustedProxies) > 0 {
+		return false
+	}
+	host := r.Host
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	host = strings.Trim(strings.ToLower(host), "[]")
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return false
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+		return false
+	}
+	return true
+}
+
 // crossSiteWrite reports whether a request is a state-changing one a browser sent from another site.
 //
 // Nothing in the stack looked at Origin or Sec-Fetch-Site, and the JSON decoder accepts any body
@@ -111,6 +141,20 @@ func (g *authGate) wrap(next http.Handler) http.Handler {
 		if crossSiteWrite(r) {
 			respondError(w, g.log, http.StatusForbidden,
 				"a state-changing request from another site is refused")
+			return
+		}
+		if reboundWrite(r) && !g.enforcing(r.Context()) {
+			// DNS rebinding walks around the cross-site check: the attacker's page flips its own
+			// hostname's A record to 127.0.0.1, so the browser sends Sec-Fetch-Site: same-origin
+			// and a matching Origin, and every header lies in unison. What cannot lie is the Host
+			// itself, which necessarily names the attacker's domain. A writable install that runs
+			// open is loopback-bound by construction, so a browser write whose Host is not a
+			// loopback name did not come from the operator's own machine, unless a declared
+			// reverse proxy fronts the install, which is what --trusted-proxy states.
+			respondError(w, g.log, http.StatusForbidden,
+				"refused a browser write for host "+r.Host+" on an open install: a loopback "+
+					"server answers loopback names. Fronting it with a proxy? Declare it with "+
+					"--trusted-proxy.")
 			return
 		}
 		if !g.protects(r) || !g.enforcing(r.Context()) {
