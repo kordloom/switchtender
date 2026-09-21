@@ -77,6 +77,10 @@ type hostHistoryResponse struct {
 
 // taskTrendsResponse wraps the task duration trends.
 type taskTrendsResponse struct {
+	// Withheld reports that the install-wide aggregate was not served because this caller's reads
+	// are grant-scoped and these rows carry no run ids to scope by. Absent it, an empty list is
+	// indistinguishable from an install that has simply run nothing.
+	Withheld bool `json:"withheld,omitempty"`
 	// Tasks is the per task aggregate over recent runs.
 	Tasks []run.TaskTrend `json:"tasks"`
 	// Count is the number of tasks returned.
@@ -322,13 +326,25 @@ func taskTrendsHandler(store run.Store, authz *authorizer, log *zap.Logger) http
 			respondError(w, log, http.StatusInternalServerError, "could not compute task trends")
 			return
 		}
-		// Task names and their durations describe work, with no run id to check, so the view is
-		// withheld from a caller who can read none of it.
-		if !anyReadable {
-			tasks = nil
+		// This aggregate is install-wide and carries no run ids to filter, so it is only safe to
+		// serve whole to a caller who may read everything. A grant-scoped caller used to receive
+		// it anyway: task names, counts, and durations from every other tenant's runs, on the
+		// strength of being able to read one run of their own. Withheld beats leaked, and the
+		// response says which it is doing rather than serving an empty list that reads as a quiet
+		// install.
+		scoped, serr := scopedReader(r.Context(), authz)
+		if serr != nil {
+			log.Error("server: read filter: " + serr.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not read runs")
+			return
+		}
+		withheld := false
+		if scoped || !anyReadable {
+			tasks, withheld = nil, scoped
 		}
 		respondJSON(w, log, http.StatusOK,
-			taskTrendsResponse{Tasks: tasks, Count: len(tasks), Window: window}, wantsPretty(r))
+			taskTrendsResponse{Tasks: tasks, Count: len(tasks), Window: window,
+				Withheld: withheld}, wantsPretty(r))
 	}
 }
 

@@ -77,6 +77,12 @@ type estateDiffResponse struct {
 	Horizon *time.Time `json:"horizon,omitempty"`
 	// BeforeHistory reports that from predates the oldest retained reading.
 	BeforeHistory bool `json:"before_history,omitempty"`
+	// Partial reports that the fleet is larger than the estate read at either end, so hosts past
+	// the cap were never compared at all. Without it a diff over a big fleet reported itself
+	// complete while whole hosts, changes and all, sat unexamined past row one thousand: a
+	// partial answer presented as the whole one, which is the exact failure this product tells
+	// other tools off for.
+	Partial bool `json:"partial,omitempty"`
 }
 
 // estateDiffHandler answers what changed between two instants.
@@ -118,13 +124,13 @@ func estateDiffHandler(store run.Store, authz *authorizer, log *zap.Logger) http
 			return
 		}
 
-		earlier, withheldFrom, err := readableEstate(r.Context(), store, from, keep)
+		earlier, withheldFrom, partialFrom, err := readableEstate(r.Context(), store, from, keep)
 		if err != nil {
 			log.Error("server: estate diff: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not read the estate")
 			return
 		}
-		later, withheldTo, err := readableEstate(r.Context(), store, to, keep)
+		later, withheldTo, partialTo, err := readableEstate(r.Context(), store, to, keep)
 		if err != nil {
 			log.Error("server: estate diff: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not read the estate")
@@ -136,6 +142,7 @@ func estateDiffHandler(store run.Store, authz *authorizer, log *zap.Logger) http
 		resp.Truncated = len(resp.Hosts) < resp.Total
 		resp.From, resp.To = from, to
 		resp.Withheld = withheldFrom + withheldTo
+		resp.Partial = partialFrom || partialTo
 		if horizon, herr := store.EstateHorizon(r.Context()); herr == nil && !horizon.IsZero() {
 			resp.Horizon = &horizon
 			resp.BeforeHistory = from.Before(horizon)
@@ -151,10 +158,17 @@ func estateDiffHandler(store run.Store, authz *authorizer, log *zap.Logger) http
 // estate is one fact set per host, so an unbounded read scales with the fleet and multiplies by
 // however many callers ask at once. Capping only the response would already have paid that cost.
 func readableEstate(ctx context.Context, store run.Store, at time.Time,
-	keep func(string) bool) (map[string]run.HostFacts, int, error) {
+	keep func(string) bool) (map[string]run.HostFacts, int, bool, error) {
 	rows, err := store.EstateAt(ctx, at, maxListRows+1)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, false, err
+	}
+	// The sentinel row past the cap is how overflow is detected, and it is dropped rather than
+	// compared: a host seen at one end only because the other end's read stopped a row earlier
+	// would diff as added or unobserved when the truth is that nobody looked.
+	partial := len(rows) > maxListRows
+	if partial {
+		rows = rows[:maxListRows]
 	}
 	out := make(map[string]run.HostFacts, len(rows))
 	withheld := 0
@@ -165,7 +179,7 @@ func readableEstate(ctx context.Context, store run.Store, at time.Time,
 		}
 		out[f.Host] = f
 	}
-	return out, withheld, nil
+	return out, withheld, partial, nil
 }
 
 // diffEstates compares two estates, ordered by host.

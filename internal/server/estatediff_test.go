@@ -1,9 +1,16 @@
 package server
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
+
+	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/run"
 )
@@ -97,5 +104,50 @@ func TestTheDiffIsBoundedByTheRequest(t *testing.T) {
 	if len(shown) >= total {
 		t.Error("a capped response would not be reported as truncated, so a prefix reads as the " +
 			"whole set of differences")
+	}
+}
+
+// TestADiffOverAFleetLargerThanTheReadSaysSo pins the boundary at the estate read cap.
+//
+// Both ends of a diff read at most maxListRows hosts, ordered by name. On a fleet one host
+// larger, the last host was never fetched at either end, so its changes were invisible, and the
+// response reported itself complete: Truncated false, Withheld zero. A partial answer presented
+// as the whole one is the exact failure this product's own copy tells other tools off for.
+func TestADiffOverAFleetLargerThanTheReadSaysSo(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := run.NewMemStore()
+	seedRun := &run.Run{ID: "run_seed", Status: run.StatusSucceeded, CreatedAt: time.Now()}
+	if err := store.Save(ctx, seedRun); err != nil {
+		t.Fatalf("save run: %v", err)
+	}
+	gathered := time.Now().Add(-time.Hour)
+	facts := make([]run.HostFacts, 0, maxListRows+1)
+	for i := 0; i <= maxListRows; i++ {
+		facts = append(facts, run.HostFacts{
+			Host: fmt.Sprintf("host-%05d", i), RunID: seedRun.ID, GatheredAt: gathered,
+			Facts: map[string]string{"os": "linux"},
+		})
+	}
+	if err := store.SaveHostFacts(ctx, seedRun.ID, facts); err != nil {
+		t.Fatalf("save facts: %v", err)
+	}
+
+	handler := New(store, &fakeSubmitter{}, zap.NewNop()).Handler()
+	rec := httptest.NewRecorder()
+	target := "/v1/estate/diff?from=" + url.QueryEscape(gathered.Add(-time.Hour).Format(time.RFC3339)) +
+		"&to=" + url.QueryEscape(time.Now().Format(time.RFC3339))
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, target, nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Partial bool `json:"partial"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !resp.Partial {
+		t.Error("a fleet larger than the estate read produced a diff that claims to be complete")
 	}
 }

@@ -774,3 +774,15 @@ func intOrZero(v *int) int {
 	}
 	return *v
 }
+
+// scopedReader reports whether this caller's reads are grant-scoped, meaning a keep-all filter
+// does not apply and install-wide aggregates that carry no per-row ids cannot be safely served
+// whole. It asks the same probes derivedReadFilter asks, so the two can never disagree about
+// which callers are unrestricted.
+func scopedReader(ctx context.Context, authz *authorizer) (bool, error) {
+	filter, err := authz.readFilter(ctx)
+	if err != nil {
+		return false, err
+	}
+	return !(filter("proj_probe", "") && filter("cred_probe", "")), nil
+}
