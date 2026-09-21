@@ -75,7 +75,8 @@ func hasDependencies(steps []run.PipelineStep) bool {
 // with continue on failure set; otherwise the step is skipped and creates no run. Each step
 // receives the merged outputs of its transitive dependencies as extra vars. It returns whether
 // any step failed and whether execution was canceled.
-func (d *Dispatcher) runStepsDAG(ctx context.Context, parent *run.Run, steps []run.PipelineStep) (failed, canceled bool) {
+func (d *Dispatcher) runStepsDAG(ctx context.Context, parent *run.Run, steps []run.PipelineStep) stepsResult {
+	var res stepsResult
 	byName := make(map[string]int, len(steps))
 	for i, s := range steps {
 		byName[s.Name] = i
@@ -138,7 +139,7 @@ func (d *Dispatcher) runStepsDAG(ctx context.Context, parent *run.Run, steps []r
 				}
 				if ctx.Err() != nil {
 					states[i] = stepSkipped
-					canceled = true
+					res.canceled = true
 					progress = true
 					continue
 				}
@@ -168,20 +169,23 @@ func (d *Dispatcher) runStepsDAG(ctx context.Context, parent *run.Run, steps []r
 		if running == 0 {
 			break
 		}
-		res := <-done
+		res2 := <-done
 		running--
-		states[res.idx] = stepDone
-		results[res.idx] = res.status
-		outputs[res.idx] = res.outputs
-		switch res.status {
-		// A step the server stopped ends the graph the same way a canceled one does, rather than
-		// counting as a failure the run never actually reached.
-		case run.StatusCanceled, run.StatusInterrupted:
-			canceled = true
+		states[res2.idx] = stepDone
+		results[res2.idx] = res2.status
+		outputs[res2.idx] = res2.outputs
+		switch stepStatus := res2.status; stepStatus {
+		// A step the coordinator stopped is a cancel; a step whose executor died is an interrupt,
+		// the state a rerun resumes from. Folding both into canceled recorded a crashed pipeline
+		// as withdrawn and lost the recovery signal, so they are kept apart.
+		case run.StatusInterrupted:
+			res.interrupted = true
+		case run.StatusCanceled:
+			res.canceled = true
 		case run.StatusSucceeded:
 		default:
-			failed = true
+			res.failed = true
 		}
 	}
-	return failed, canceled
+	return res
 }
