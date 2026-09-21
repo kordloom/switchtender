@@ -695,7 +695,12 @@ func requiredRole(r *http.Request) user.Role {
 	if r.Method == http.MethodGet || r.Method == http.MethodHead {
 		if p == "/schedules" || strings.HasPrefix(p, "/schedules/") ||
 			p == "/triggers" || strings.HasPrefix(p, "/triggers/") ||
-			p == "/inventory-sources" || strings.HasPrefix(p, "/inventory-sources/") {
+			p == "/inventory-sources" || strings.HasPrefix(p, "/inventory-sources/") ||
+			p == "/credentials" || strings.HasPrefix(p, "/credentials/") {
+			// Credentials belong to the same family: their secrets never serialize, but which
+			// stored keys exist and what they are named is launch configuration, and it was
+			// reachable by every viewer through the fallthrough below while the token and
+			// credential-type lists sat behind admin.
 			return user.RoleOperator
 		}
 		return user.RoleViewer
@@ -733,7 +738,10 @@ func requiredRole(r *http.Request) user.Role {
 		return user.RoleViewer
 	case strings.HasPrefix(p, "/runs/") &&
 		(strings.HasSuffix(p, "/cancel") || strings.HasSuffix(p, "/retry") ||
-			strings.HasSuffix(p, "/relaunch-failed")):
+			strings.HasSuffix(p, "/rerun") || strings.HasSuffix(p, "/relaunch-failed")):
+		// Rerun sits with retry, where the docs put it: replaying a finished run's spec is
+		// launching work, and the admin default it fell to refused the exact operator the
+		// crash-recovery story tells to rerun the interrupted run.
 		return user.RoleOperator
 	case strings.HasPrefix(p, "/templates/") && strings.HasSuffix(p, "/launch"):
 		return user.RoleOperator
