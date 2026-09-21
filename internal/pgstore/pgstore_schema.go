@@ -489,6 +489,9 @@ CREATE INDEX IF NOT EXISTS idx_runs_source ON runs(source, source_id, created_at
 
 // Open connects to the PostgreSQL database at dsn, applies the schema, and returns the bundled
 // stores.
+// maxPoolConns bounds the connection pool, and is what a released read snapshot restores.
+const maxPoolConns = 24
+
 func Open(dsn string) (*DB, error) {
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
@@ -514,7 +517,7 @@ func Open(dsn string) (*DB, error) {
 			return nil, aerr
 		}
 	}
-	db.SetMaxOpenConns(24)
+	db.SetMaxOpenConns(maxPoolConns)
 	db.SetMaxIdleConns(8)
 	db.SetConnMaxLifetime(30 * time.Minute)
 	db.SetConnMaxIdleTime(5 * time.Minute)

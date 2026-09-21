@@ -18,6 +18,8 @@ var notBackedUp = map[string]string{
 	"Runs":   "run history is out of scope; it is operational data, not configuration",
 	"Audits": "the audit chain has its own signed export and must not be restored under a new identity",
 	"Close":  "not a store",
+	"BeginReadSnapshot": "not a store; it is the seam a backup pins its one consistent instant with, " +
+		"carried on Stores as the Snapshot field",
 }
 
 // TestEveryStoreIsBackedUpOrDeliberatelyNot pins that a store the database exposes is either carried

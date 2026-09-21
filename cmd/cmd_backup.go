@@ -74,9 +74,11 @@ func init() {
 	rootCmd.AddCommand(backupCmd, restoreCmd)
 }
 
-// backupStores wires the backup store set from an open database bundle.
+// backupStores wires the backup store set from an open database bundle. A bundle that can pin one
+// consistent read snapshot carries that too, so the backup is a picture of one instant rather than
+// of fourteen.
 func backupStores(bundle storeBundle) backup.Stores {
-	return backup.Stores{
+	stores := backup.Stores{
 		Credentials:      bundle.Credentials(),
 		Projects:         bundle.Projects(),
 		Templates:        bundle.Templates(),
@@ -92,6 +94,10 @@ func backupStores(bundle storeBundle) backup.Stores {
 		CredentialTypes:  bundle.CredentialTypes(),
 		Policies:         bundle.Policies(),
 	}
+	if sb, ok := bundle.(backup.SnapshotBeginner); ok {
+		stores.Snapshot = sb
+	}
+	return stores
 }
 
 // runBackup opens the store, writes the sealed snapshot to the output, and reports the counts. When

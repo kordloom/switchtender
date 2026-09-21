@@ -75,6 +75,15 @@ type Sealer interface {
 
 // Stores is the set of control-plane stores a backup reads from and a restore writes to. A caller
 // wires these from whichever database backend is open.
+// SnapshotBeginner is a store bundle that can pin every read that follows inside one consistent
+// snapshot of the database, until the returned release is called. The release's error is real: it
+// reports that the snapshot did not hold for the whole read, and the caller must treat what it read
+// as suspect rather than ship it.
+type SnapshotBeginner interface {
+	// BeginReadSnapshot opens the snapshot and returns the release that ends it.
+	BeginReadSnapshot(ctx context.Context) (func() error, error)
+}
+
 type Stores struct {
 	// Credentials holds execution secrets, sealed.
 	Credentials credential.Store
@@ -106,6 +115,12 @@ type Stores struct {
 	// Policies holds the approval policies that decide which runs wait for a person. Nil when the
 	// install pins them from a file, which is its own source of truth and is backed up with the file.
 	Policies policy.Store
+	// Snapshot pins every read below inside one consistent view of the database, when the backend
+	// can provide one. Nil means the reads run unpinned, which is what the in-memory stores do and
+	// is safe there because nothing else holds them. For a database another process is writing, a
+	// backup gathered table by table without this can hold a state the database never was in: an
+	// object read from one table referring to an object created after its own table was read.
+	Snapshot SnapshotBeginner
 }
 
 // Summary reports how many objects of each kind a backup or restore moved, so the operator sees what
@@ -261,7 +276,20 @@ func Write(ctx context.Context, s Stores, sealer Sealer, w io.Writer) (Summary, 
 	if sealer == nil || !sealer.Enabled() {
 		return Summary{}, ErrDisabled
 	}
+	release := func() error { return nil }
+	if s.Snapshot != nil {
+		var err error
+		if release, err = s.Snapshot.BeginReadSnapshot(ctx); err != nil {
+			return Summary{}, fmt.Errorf("backup: begin read snapshot: %w", err)
+		}
+	}
 	p, sum, err := gather(ctx, s)
+	// Released before sealing, and its error fails the backup: a snapshot that broke mid-gather
+	// means some tables were read outside it, and a backup that might be inconsistent must say so
+	// rather than seal itself as though it were whole.
+	if rerr := release(); rerr != nil {
+		return Summary{}, fmt.Errorf("backup: %w", rerr)
+	}
 	if err != nil {
 		return Summary{}, err
 	}
