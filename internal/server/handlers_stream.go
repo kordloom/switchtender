@@ -274,7 +274,15 @@ func runStreamHandler(streamer Streamer, store run.Store, authz *authorizer, log
 			lastSeq = seq
 		}
 		var logSeq int64
-		if seq, err := store.LastLogSeq(r.Context(), id); err == nil {
+		if _, ok := r.URL.Query()["logafter"]; ok {
+			// The explicit log cursor, for the reconnect a browser cannot make automatically.
+			// On a secured install the ticket in the URL is single-use, so the browser's retry
+			// gets 401 and the page opens a brand-new EventSource, which never sends
+			// Last-Event-ID. That new stream started from LastLogSeq, the current end, so every
+			// log line written during the outage was silently skipped: the operator watching a
+			// destructive run had a hole in the log exactly where the interesting part happened.
+			logSeq = queryInt64(r, "logafter")
+		} else if seq, err := store.LastLogSeq(r.Context(), id); err == nil {
 			logSeq = seq
 		}
 		if ev, lg, ok := parseStreamCursor(r.Header.Get("Last-Event-ID")); ok {
