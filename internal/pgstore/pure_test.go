@@ -465,11 +465,9 @@ func TestMarshalTypeEncodesEveryColumnAsJSON(t *testing.T) {
 // pending_approval.
 func TestTerminalPredicatesAgreeWithTheStatusType(t *testing.T) {
 	t.Parallel()
-	statuses := []run.Status{
-		run.StatusPending, run.StatusPendingApproval, run.StatusRunning, run.StatusSucceeded,
-		run.StatusFailed, run.StatusCanceled, run.StatusInterrupted, run.StatusRejected,
-	}
-	for testNum, st := range statuses {
+	// Derived from the declared set rather than restated: a ninth status walks straight into this
+	// loop and fails until the SQL predicates say what happens to it.
+	for testNum, st := range run.AllStatuses() {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
 			quoted := "'" + string(st) + "'"

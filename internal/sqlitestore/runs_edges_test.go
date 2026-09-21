@@ -1055,21 +1055,18 @@ func TestClaimIsExclusiveUnderConcurrency(t *testing.T) {
 }
 
 // TestNonTerminalReturnsExactlyTheUnfinishedStatuses pins the status set the SQL predicate names.
-// It is written out as literals rather than derived from the Go helper, so a status added to one
-// and not the other is what this catches: a new terminal status missing from the list would make
-// finished runs look unfinished to the resume path, which restarts them.
+// It walks every declared status through the store and compares the answer with the Go rule, so a
+// new terminal status missing from the SQL list is caught the day the status exists: finished runs
+// looking unfinished to the resume path is what restarts completed work.
 func TestNonTerminalReturnsExactlyTheUnfinishedStatuses(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	store := openStore(t).Runs()
 
-	statuses := []run.Status{
-		run.StatusPending, run.StatusRunning, run.StatusPendingApproval,
-		run.StatusSucceeded, run.StatusFailed, run.StatusCanceled, run.StatusInterrupted,
-		run.StatusRejected,
-	}
+	// Derived from the declared set rather than restated: a ninth status is seeded here the day it
+	// is declared, and the NOT IN predicate must classify it or this fails.
 	var want []string
-	for i, s := range statuses {
+	for i, s := range run.AllStatuses() {
 		id := fmt.Sprintf("run_%s", s)
 		saveRuns(t, store, &run.Run{ID: id, Status: s,
 			CreatedAt: baseTime.Add(time.Duration(i) * time.Second)})

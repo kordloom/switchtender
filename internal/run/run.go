@@ -116,6 +116,15 @@ func ExtraToolNames() []string {
 	return names
 }
 
+// AllStatuses returns every declared run status, in declaration order. It is the enumerator the
+// guards derive from: the SQL predicates in the stores restate the terminal rule as text, and each
+// guard walks this set so a status added to the type forces a decision at every restatement. A
+// source-scan test pins this list to the const block above, so it cannot itself drift.
+func AllStatuses() []Status {
+	return []Status{StatusPending, StatusRunning, StatusSucceeded, StatusFailed, StatusCanceled,
+		StatusInterrupted, StatusPendingApproval, StatusRejected}
+}
+
 // Terminal reports whether the status is a final state.
 func (s Status) Terminal() bool {
 	switch s {

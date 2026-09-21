@@ -278,8 +278,7 @@ func (s *store) Steps(ctx context.Context, parentID string) ([]*run.Run, error) 
 
 // NonTerminal returns all runs, including shards, that are not in a terminal state.
 func (s *store) NonTerminal(ctx context.Context) ([]*run.Run, error) {
-	const q = "SELECT " + runColumns +
-		" FROM runs WHERE status NOT IN ('succeeded', 'failed', 'canceled', 'interrupted', 'rejected')"
+	const q = "SELECT " + runColumns + " FROM runs WHERE " + nonTerminalRun
 	return s.queryRuns(ctx, "list non-terminal runs", q)
 }
 

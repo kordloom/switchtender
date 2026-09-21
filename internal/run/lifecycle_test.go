@@ -55,6 +55,20 @@ func TestStatusTerminalCoversEveryDeclaredStatus(t *testing.T) {
 		{In: Status("PENDING"), WantTerminal: false},     // Test 9: The match is exact, not folded.
 		{In: Status("succeeded "), WantTerminal: false},  // Test 10: A stray space is not succeeded.
 	}
+	// The table is the spec: each declared status's terminality is a decision recorded here. This
+	// check makes the table complete against the declared set, so a ninth status fails until its
+	// row, and therefore its decision, is added.
+	covered := map[Status]bool{}
+	for _, test := range tests {
+		covered[test.In] = true
+	}
+	for _, st := range AllStatuses() {
+		if !covered[st] {
+			t.Errorf("declared status %q has no row in this table: its terminality was never "+
+				"decided here, and the sweep treats an undecided status as claimable", st)
+		}
+	}
+
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
