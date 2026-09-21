@@ -21,14 +21,15 @@ func TestForwardedClientReadsFromTheRightPastTrustedHops(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse cidr: %v", err)
 	}
-	orig := trustedProxies
-	trustedProxies = []*net.IPNet{proxyNet}
-	t.Cleanup(func() { trustedProxies = orig })
+	// The proxy list is passed in rather than installed in the package globals: those are boot-set
+	// configuration shared by every request, and a test that mutates them races every parallel
+	// test in the package, which is its own copy of the defect this file guards against.
+	proxies := []*net.IPNet{proxyNet}
 
 	get := func(xff string) string {
 		r := httptest.NewRequest(http.MethodPost, "/v1/auth/login", nil)
 		r.Header.Set("X-Forwarded-For", xff)
-		return forwardedClient(r)
+		return forwardedClientIn(r, "", proxies)
 	}
 
 	tests := []struct {

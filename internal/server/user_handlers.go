@@ -234,25 +234,37 @@ func clientAddr(r *http.Request) string {
 
 // fromTrustedProxy reports whether the immediate peer sits in a network the operator trusts.
 func fromTrustedProxy(peer net.IP) bool {
-	for _, n := range trustedProxies {
-		if n.Contains(peer) {
+	return ipInAny(peer, trustedProxies)
+}
+
+// ipInAny reports whether ip sits inside any of the given networks.
+func ipInAny(ip net.IP, nets []*net.IPNet) bool {
+	for _, n := range nets {
+		if n.Contains(ip) {
 			return true
 		}
 	}
 	return false
 }
 
-// forwardedClient reads the client address a trusted proxy forwarded, preferring the operator's
-// named header and otherwise reading X-Forwarded-For from the right.
+// forwardedClient reads the client address a trusted proxy forwarded, using the operator's
+// configured header and trusted networks. The globals it reads are set once at boot and never
+// after, which is what lets every request read them without a lock.
+func forwardedClient(r *http.Request) string {
+	return forwardedClientIn(r, clientIPHeader, trustedProxies)
+}
+
+// forwardedClientIn is the parsing itself, free of package state so it can be held to its contract
+// directly: the operator's named header wins, and otherwise X-Forwarded-For is read from the right.
 //
 // The leftmost X-Forwarded-For entry is written by the original client, so trusting it let a caller
 // put a fresh address there on every request and mint an unbounded set of limiter keys, walking
 // straight around the per-client rate limit the header exists to key. The real client is the last
 // entry not written by a proxy this install trusts: walking from the right, past the trusted hops,
 // the first untrusted address is the furthest one this install can actually vouch for.
-func forwardedClient(r *http.Request) string {
-	if clientIPHeader != "" {
-		if v := strings.TrimSpace(r.Header.Get(clientIPHeader)); v != "" {
+func forwardedClientIn(r *http.Request, header string, proxies []*net.IPNet) string {
+	if header != "" {
+		if v := strings.TrimSpace(r.Header.Get(header)); v != "" {
 			if ip := net.ParseIP(v); ip != nil {
 				return ip.String()
 			}
@@ -271,7 +283,7 @@ func forwardedClient(r *http.Request) string {
 			// so the closest trusted address is as far as this install can honestly reach.
 			return ""
 		}
-		if !fromTrustedProxy(ip) {
+		if !ipInAny(ip, proxies) {
 			return ip.String()
 		}
 	}
