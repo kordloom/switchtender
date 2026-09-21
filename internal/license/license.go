@@ -65,7 +65,7 @@ type Claims struct {
 	// Tier is pro, team, or enterprise. Licenses minted before Pro existed carry team, and an
 	// empty tier is read as team so no issued license is ever downgraded by a build upgrade.
 	Tier string `json:"tier"`
-	// Hosts is the self-reported band: "250", "1000", or "unlimited". Informational; nothing counts.
+	// Hosts is the self-reported band: "250", "500", "1000", or "unlimited". Informational; nothing counts.
 	Hosts string `json:"hosts,omitempty"`
 	// Issued and Expires bound the term, RFC 3339.
 	Issued  string `json:"issued"`

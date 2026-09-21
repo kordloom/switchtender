@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Procurement | SwitchTender</title>
+	<meta name="description" content="The vendor-risk answers a procurement or security review needs before approving SwitchTender: continuity, support, security response, release verification, and what data ever reaches us.">
+	<meta name="robots" content="index, follow">
+	<meta property="og:title" content="Procurement | SwitchTender">
+	<meta property="og:description" content="Continuity, support clocks, security response, release verification, and what data ever reaches us: the vendor-risk answers, written down.">
+	<meta property="og:type" content="website">
+	<meta property="og:url" content="https://switchtender.com/procurement">
+	<link rel="canonical" href="https://switchtender.com/procurement">
+	<link rel="icon" href="/favicon.ico" sizes="any">
+	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
+	<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="/styles.css?v=35">
+	<style>
+		/* Legal prose. styles.css resets every margin and carries no rules for bare headings or
+		   paragraphs, so a long text page defines its own spacing here, the way pricing and 404 do. */
+		.legal h2 { font-family: "Space Grotesk", sans-serif; font-size: 19px; margin: 34px 0 10px; }
+		.legal h2:first-child { margin-top: 0; }
+		.legal p { color: var(--muted); margin-bottom: 14px; }
+		.legal a { color: var(--accent); }
+		.legal code { font-size: 13.5px; color: var(--text); }
+		.legal .foot-note { color: #63707d; margin-bottom: 0; }
+		/* Conspicuous disclaimer. UCC 2-316 wants the implied-warranty disclaimer to stand out
+		   from the prose around it, so it gets a box, full contrast text, and a capitalized line. */
+		.legal .disclaimer {
+			color: var(--text); background: var(--surface); border: 1px solid var(--border);
+			border-radius: 10px; padding: 14px 16px;
+		}
+		.legal .disclaimer strong {
+			display: block; margin: 8px 0; font-weight: 700; letter-spacing: 0.3px;
+		}
+	</style>
+	<noscript><style>.reveal{opacity:1 !important;transform:none !important}</style></noscript>
+</head>
+<body>
+	<div class="bg-mesh" aria-hidden="true"></div>
+	<div class="bg-grid" aria-hidden="true"></div>
+
+	<header class="nav" id="nav">
+		<div class="wrap nav-inner">
+			<a class="brand" href="/" aria-label="SwitchTender"><img src="/assets/logo-train-tracks-dark.png" alt="SwitchTender" class="brand-train"><span class="brand-word">SwitchTender</span></a>
+			<nav class="nav-links">
+				<a href="/#features">Features</a>
+				<a href="/#compare">Compare</a>
+				<a href="/pricing">Pricing</a>
+				<a href="/agents">Agents</a>
+				<a href="/docs/">Docs</a>
+				<a href="mailto:hello@switchtender.com">Contact</a>
+			</nav>
+			<div class="nav-cta">
+				<a class="ghost" href="https://github.com/kordloom/switchtender">GitHub</a>
+				<a class="btn" href="/get-started">Install</a>
+			</div>
+			<button class="nav-toggle" id="nav-toggle" aria-label="Menu">
+				<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="7" x2="21" y2="7"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="17" x2="21" y2="17"/></svg>
+			</button>
+		</div>
+	</header>
+
+	<main>
+		<section class="wrap gs-hero reveal">
+			<span class="eyebrow">For your review</span>
+			<h1>Procurement answers, <span class="grad">written down.</span></h1>
+			<p class="lede">The questions a vendor-risk, security, or procurement review asks about SwitchTender, answered plainly and in one place. Where a promise is contractual, this page links to the exact section of the <a href="/terms">terms</a> that makes it one.</p>
+		</section>
+
+		<section class="wrap reveal legal" style="max-width:760px">
+			<h2>Who the vendor is</h2>
+			<p>KordLoom LLC, a Texas limited liability company. SwitchTender is founder-led and the company has no outside investors to answer to, which cuts both ways and we say so: decisions are fast and nothing is committee-washed, and the continuity questions a small vendor raises are answered below in writing rather than waved away.</p>
+
+			<h2>What happens if the vendor disappears</h2>
+			<p>This is the right first question for a company our size, so it has the strongest answer we can give: one that does not require trusting us. The license file verifies offline against a key compiled into the binary, so nothing stops working when our servers do. A lapsed or unrenewable license drops the install to Community and takes nothing: your data, run history, audit chain, receipts, and every Community feature keep working, enforced in the source rather than promised in a slide. The source is public today under BSL 1.1, every release converts to Apache 2.0 two years after it ships, and the <a href="/terms#continuity">continuity section of the terms</a> accelerates that conversion to immediate if KordLoom ceases business or ships nothing for 120 consecutive days during your paid term. Your receipts verify forever with the open verifier, which is a separate tool precisely so that proof of what your infrastructure did never depends on this company existing.</p>
+
+			<h2>Who supports it, and on what clock</h2>
+			<p>Team support is email support from engineering with defined severities and one clock that matters: a Severity 1 report, production runs blocked with no workaround, gets a first response within 12 hours, every day of the year, weekends and holidays included. That beats business-hours incumbent support on a Saturday, and it is set where a founder-led vendor can honor it every single time rather than where a brochure would like it. Enterprise puts an SLA on the order form, up to 24x7 with tighter clocks. The definitions are <a href="/terms#support">in the terms</a>, so the commitment is checkable. Self-rescue is deliberately the strongest line: offline verification, one-command backup and restore, and an upgrade path proven in public CI mean the product needs us as little as possible.</p>
+
+			<h2>How a security report is handled</h2>
+			<p>Reports go to <a href="mailto:security@switchtender.com">security@switchtender.com</a> and are acknowledged within two business days, a commitment made in the <a href="/terms#support">terms</a>. A confirmed vulnerability is fixed in a tagged release and described in the release notes; we do not sit on fixes to batch them, because a known-vulnerable install that thinks it is current is the worst state a security tool can put a customer in.</p>
+
+			<h2>How you know the binary is ours</h2>
+			<p>Releases are built in public CI from the public repository, signed, and published with checksum manifests and build provenance attestations, so you can verify that the artifact you downloaded was built by the release workflow from the tagged source, not on somebody's laptop. The verification commands are in the release notes of each release. A software bill of materials for any release is available on request while automated SBOM publication is being finished; the dependency list is public in the repository today.</p>
+
+			<h2>How it is tested</h2>
+			<p>Every commit runs the full suite under the race detector, against both storage backends, SQLite and PostgreSQL, plus continuous fuzzing of the parsers. Beyond unit and integration suites, a public end-to-end supertest stands up a real Kubernetes cluster in CI and proves the claims a customer actually relies on: install, RBAC, approvals, evidence, crash recovery with a worker killed mid-run, and an in-place upgrade from the previous published release with all data surviving. It runs on every push and its badge is on the <a href="https://github.com/kordloom/switchtender">repository</a>, so the current answer to "does it still hold" is public, not archival.</p>
+
+			<h2>Upgrades, backups, and getting out</h2>
+			<p>An upgrade is a binary swap or a Helm upgrade, and the supertest proves the previous release upgrades in place with tokens, history, chain, and receipts intact before we publish. Backup is one command producing a single sealed file; restore is one command, and the restore reports exactly what it wrote, kind by kind. Getting out is the same honest answer: your data is in SQLite or PostgreSQL you host, exports are open formats, receipts verify with an open tool, and nothing about leaving needs our permission or our uptime.</p>
+
+			<h2>What data ever reaches the vendor</h2>
+			<p>Nothing, by architecture rather than policy: no telemetry, no license server, no phone-home, no usage reporting, and the <a href="/terms">terms</a> forbid us adding one to a running agreement. What we ever hold is what you email us: a licensing conversation, a support thread, an invoice contact. The deliberate exception is Enterprise services that only work because data reaches us, a hosted witness or evidence custody, and what those receive is written on the order form before you send anything. For a data-processing review: there is no processing of your infrastructure data to review, and we will complete your DPA or privacy questionnaire on request to say so formally.</p>
+
+			<h2>Questionnaires, paperwork, and certifications</h2>
+			<p>We complete security questionnaires and vendor-onboarding paperwork for Team and Enterprise purchases, and a W-9 and standard invoice terms, net 30, are available on request. We are not SOC 2 certified today and do not pretend to be: SwitchTender is self-hosted, we hold none of your operational data, and the audit trail the product produces is independently verifiable, which is the control most questionnaires are actually asking about. Where your process needs a document we do not have yet, ask: the honest current answer, in writing, is what this page is for.</p>
+
+			<h2>The limits, stated plainly</h2>
+			<p>SwitchTender does not claim every change to your infrastructure went through it: anyone holding their own SSH key can change a host behind it, and the receipts prove what SwitchTender ran, not what it never saw. The product documentation states its trust boundaries explicitly rather than rounding them up, because a control whose limits are hidden is not a control. If your review needs those boundaries in detail, start with the <a href="/docs/">docs</a> and ask us the hard version directly.</p>
+
+			<p class="foot-note" style="margin-top:26px">Questions from a review go to <a href="mailto:hello@switchtender.com">hello@switchtender.com</a>, and we answer them in writing so your file has something to hold.</p>
+		</section>
+		</main>
+
+	<footer class="footer">
+		<div class="wrap footer-inner">
+			<img src="/assets/logo-train-tracks-dark.png" alt="SwitchTender" class="foot-logo">
+			<nav>
+				<a href="https://github.com/kordloom/switchtender">GitHub</a>
+				<a href="/docs/">Docs</a>
+				<a href="/agents">Agents</a>
+				<a href="/docs/comparison">Compare</a>
+				<a href="/pricing">Pricing</a>
+				<a href="mailto:hello@switchtender.com">Email us</a>
+				<a href="/privacy">Privacy</a>
+				<a href="/terms">Terms</a>
+				<a href="/refund">Refunds</a>
+				<a href="https://github.com/kordloom/switchtender/blob/main/LICENSE">License</a>
+			</nav>
+			<span class="foot-note">Source-available. BSL 1.1. Self-host free.</span>
+		</div>
+		<div style="text-align:center;margin:20px auto 0;font-size:11px;letter-spacing:1.6px;text-transform:uppercase;opacity:.5">A <a href="https://kordloom.com" style="color:inherit;text-decoration:none">KordLoom</a> product</div>
+			<div class="foot-legal">SwitchTender&trade; is a trademark of KordLoom LLC. Copyright 2026 KordLoom LLC.</div>
+	</footer>
+
+	<script src="/app.js?v=7"></script>
+</body>
+</html>
