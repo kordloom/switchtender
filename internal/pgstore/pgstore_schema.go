@@ -113,6 +113,17 @@ CREATE TABLE IF NOT EXISTS run_logs (
 	chunk  BYTEA NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_run_logs_run ON run_logs(run_id, seq);
+-- Stream tickets live here so a ticket minted on one replica redeems on any other. Only the
+-- ticket's hash is stored: a leaked table holds no live credentials.
+CREATE TABLE IF NOT EXISTS stream_tickets (
+	secret_hash TEXT PRIMARY KEY,
+	run_id      TEXT NOT NULL,
+	actor_key   TEXT NOT NULL,
+	actor       TEXT NOT NULL,
+	expires_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS stream_tickets_actor ON stream_tickets (actor_key, expires_at);
+
 CREATE TABLE IF NOT EXISTS run_events (
 	seq    BIGSERIAL PRIMARY KEY,
 	run_id TEXT NOT NULL,

@@ -731,7 +731,7 @@ func TestTransitionStatusAndClaimRefusesACanceledRun(t *testing.T) {
 			saveRuns(t, store, &run.Run{ID: id, Status: test.Status, CreatedAt: baseTime,
 				CancelRequested: test.Cancel, Kind: run.KindPipeline})
 			moved, err := store.TransitionStatusAndClaim(ctx, id, test.From, run.StatusRunning,
-				"coordinator-1")
+				"coordinator-1", time.Now())
 			if err != nil {
 				t.Fatalf("TransitionStatusAndClaim(%s) error = %v", test.Name, err)
 			}
@@ -775,7 +775,7 @@ func TestTransitionStatusAndClaimNeverMovesAStartBackward(t *testing.T) {
 		StartedAt: &started,
 	})
 	moved, err := store.TransitionStatusAndClaim(ctx, "run_1", run.StatusPending,
-		run.StatusRunning, "worker-1")
+		run.StatusRunning, "worker-1", time.Now())
 	if err != nil || !moved {
 		t.Fatalf("TransitionStatusAndClaim() = (%v, %v), want the move to happen", moved, err)
 	}

@@ -619,8 +619,9 @@ RETURNING ` + runColumns
 // Heartbeat renews owner's lease on a run.
 func (s *store) Heartbeat(ctx context.Context, id, owner string) error {
 	res, err := s.db.ExecContext(ctx,
-		"UPDATE runs SET claimed_at=? WHERE id=? AND claimed_by=?",
-		sqlutil.FormatTime(time.Now()), id, owner)
+		"UPDATE runs SET claimed_at=? WHERE id=? AND claimed_by=? AND status IN (?,?)",
+		sqlutil.FormatTime(time.Now()), id, owner,
+		string(run.StatusPending), string(run.StatusRunning))
 	if err != nil {
 		return fmt.Errorf("heartbeat: %w", err)
 	}
@@ -836,13 +837,17 @@ WHERE id=? AND claimed_by='' AND status IN ('pending', 'pending_approval')`,
 // the compare-and-swap, and executed on real hosts. Checking the flag first and swapping second
 // leaves the same gap one scheduling delay wide, so it belongs in the predicate.
 func (s *store) TransitionStatusAndClaim(ctx context.Context, id string, from, to run.Status,
-	owner string) (bool, error) {
+	owner string, startedAt time.Time) (bool, error) {
 	now := sqlutil.FormatTime(time.Now())
+	started := ""
+	if !startedAt.IsZero() {
+		started = sqlutil.FormatTime(startedAt)
+	}
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE runs SET status=?, claimed_by=?, claimed_at=?,
-started_at=COALESCE(NULLIF(started_at,''), ?)
+started_at=COALESCE(NULLIF(started_at,''), NULLIF(?,''))
 WHERE id=? AND status=? AND cancel_requested=0`,
-		string(to), owner, now, now, id, string(from))
+		string(to), owner, now, started, id, string(from))
 	if err != nil {
 		return false, fmt.Errorf("transition status and claim: %w", err)
 	}
@@ -892,7 +897,7 @@ func (s *store) FinalizeRunning(ctx context.Context, id string, fin run.Finaliza
 	fin.SanitizeText()
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE runs SET status=?, exit_code=?, error=?, image=?, commit_sha=?,
-pull_credential_id=?, outputs=?, warning=?, ended_at=?
+pull_credential_id=?, outputs=?, warning=?, ended_at=?, claim_secret=''
 WHERE id=? AND status=? AND (?='' OR claimed_by=?)`,
 		string(fin.Status), sqlutil.NullInt(fin.ExitCode), fin.Error, fin.Image,
 		fin.CommitSHA, fin.PullCredentialID, sqlutil.JSONMap(fin.Outputs), fin.Warning,

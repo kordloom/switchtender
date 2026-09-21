@@ -309,7 +309,7 @@ func TestStreamTicketHandler(t *testing.T) {
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
-			tickets := newStreamTickets()
+			tickets := newStreamTickets(run.NewMemStore())
 			req := httptest.NewRequest(http.MethodPost, "/v1/runs/"+test.RunID+"/stream-ticket", nil)
 			if test.HasActor {
 				req = req.WithContext(context.WithValue(req.Context(), actorKey{}, test.Actor))
@@ -365,7 +365,7 @@ func TestStreamTicketHandler(t *testing.T) {
 // legitimate holder simply mints another.
 func TestTicketForOneRunOpensNoOther(t *testing.T) {
 	t.Parallel()
-	tickets := newStreamTickets()
+	tickets := newStreamTickets(run.NewMemStore())
 	actor := Actor{UserID: "user_1", Role: user.RoleViewer}
 	value, err := tickets.mint(actor, "run_mine")
 	if err != nil {
@@ -404,7 +404,7 @@ func TestTicketForOneRunOpensNoOther(t *testing.T) {
 // log is almost always already dead, and that is the whole reason it may travel in a URL.
 func TestExpiredTicketIsRefused(t *testing.T) {
 	t.Parallel()
-	tickets := newStreamTickets()
+	tickets := newStreamTickets(run.NewMemStore())
 	now := time.Now()
 	tickets.now = func() time.Time { return now }
 	inside, err := tickets.mint(Actor{UserID: "user_1"}, "run_mine")

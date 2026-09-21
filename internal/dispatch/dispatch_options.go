@@ -231,7 +231,7 @@ func New(store run.Store, runner roundhouse.Runner, log *zap.Logger, opts ...Opt
 		publisher:          cfg.publisher,
 		hostLister:         lister,
 		dumper:             dumper,
-		cancels:            make(map[string]context.CancelFunc),
+		cancels:            make(map[string]context.CancelCauseFunc),
 		owner:              cfg.owner,
 		claimInterval:      cfg.claimInterval,
 		wakeCh:             make(chan struct{}, 1),

@@ -215,6 +215,12 @@ func (d *Dispatcher) syncDueSources(ctx context.Context) {
 	}
 	now := time.Now()
 	for _, src := range srcs {
+		// A stop mid-sweep ends the sweep, not just its logging: without this a shutdown still
+		// walked the rest of the list, calling out to cloud inventory sources on a context the
+		// dispatcher had already given up on.
+		if ctx.Err() != nil {
+			return
+		}
 		if !sourceDue(src, now) {
 			continue
 		}

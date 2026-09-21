@@ -274,13 +274,14 @@ func TestSyncDueSourcesRefreshesOnlyWhatIsDue(t *testing.T) {
 	}
 }
 
-// TestSyncDueSourcesStopsWithACanceledContext pins the sweep's behavior during a shutdown. The loop
-// runs on the dispatcher's own context, so a stop mid-sweep must end quietly rather than logging an
-// error per source about a store that is closing.
+// TestSyncDueSourcesStopsWithACanceledContext pins the sweep's behavior during a shutdown: a
+// canceled context refreshes nothing. The test used to call the sweep and assert nothing, which
+// asserted nothing; now the dumper is the witness, and a refresh reaching a cloud API after the
+// dispatcher began stopping is what fails.
 func TestSyncDueSourcesStopsWithACanceledContext(t *testing.T) {
 	t.Parallel()
 	now := time.Now()
-	d, _ := launchSetup(t, &invsource.Source{
+	d, dumper := launchSetup(t, &invsource.Source{
 		ID: "src_due", InventoryID: "inv_dyn", Source: "due.yml",
 		SyncIntervalSeconds: 1, SyncedAt: ptr(now.Add(-time.Hour)), CreatedAt: now,
 	})
@@ -288,6 +289,14 @@ func TestSyncDueSourcesStopsWithACanceledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	d.syncDueSources(ctx)
+
+	dumper.mu.Lock()
+	got := len(dumper.sources)
+	dumper.mu.Unlock()
+	if got != 0 {
+		t.Fatalf("%d source(s) were refreshed on a canceled context: a shutdown mid-sweep is "+
+			"still calling out to inventory sources", got)
+	}
 }
 
 // TestWithSourceSyncStartsTheScheduledLoop pins the wiring between the option and the goroutine it

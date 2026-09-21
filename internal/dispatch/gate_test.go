@@ -272,9 +272,9 @@ type pausedStore struct {
 
 // TransitionStatusAndClaim waits for the gate the first time, then behaves normally.
 func (p *pausedStore) TransitionStatusAndClaim(ctx context.Context, id string, from, to run.Status,
-	owner string) (bool, error) {
+	owner string, startedAt time.Time) (bool, error) {
 	p.once.Do(func() { <-p.gate })
-	return p.Store.TransitionStatusAndClaim(ctx, id, from, to, owner)
+	return p.Store.TransitionStatusAndClaim(ctx, id, from, to, owner, startedAt)
 }
 
 // TestPlanGateFailsClosedWhereItCannotBeChecked pins that a process which cannot read the policies

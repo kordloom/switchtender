@@ -15,6 +15,7 @@ package relay
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/kordloom/switchtender/internal/event"
 	"github.com/kordloom/switchtender/internal/policy"
@@ -34,6 +35,11 @@ type Transport interface {
 	Claim(ctx context.Context, owner string, queues []string) (*run.Run, error)
 	// Heartbeat renews the owner's lease on a run.
 	Heartbeat(ctx context.Context, id, owner string) error
+	// Start is the fenced move from pending to running that begins execution: it succeeds only
+	// while the run is still pending, so a worker that stalled past its lease and woke to a
+	// requeued run learns it lost instead of starting a second tool. The blind save this replaced
+	// let exactly that double execution happen on relay workers.
+	Start(ctx context.Context, id, owner string, startedAt time.Time) (bool, error)
 	// Get returns the run with the given id, so a worker reads the claimed run and its cancel flag.
 	Get(ctx context.Context, id string) (*run.Run, error)
 	// Policies returns the approval policies in force on the control node.
@@ -98,6 +104,12 @@ func (l loopback) Claim(ctx context.Context, owner string, queues []string) (*ru
 // Heartbeat delegates to the backing store.
 func (l loopback) Heartbeat(ctx context.Context, id, owner string) error {
 	return l.store.Heartbeat(ctx, id, owner)
+}
+
+// Start delegates the fenced pending-to-running move to the backing store.
+func (l loopback) Start(ctx context.Context, id, owner string, startedAt time.Time) (bool, error) {
+	return l.store.TransitionStatusAndClaim(ctx, id, run.StatusPending, run.StatusRunning,
+		owner, startedAt)
 }
 
 // Get delegates to the backing store.

@@ -1,67 +1,55 @@
 package server
 
 import (
+	"context"
 	"crypto/rand"
-	"crypto/subtle"
+	"crypto/sha256"
 	"encoding/hex"
-	"net/http"
-	"sync"
+	"encoding/json"
 	"time"
 
+	"net/http"
+
 	"go.uber.org/zap"
+
+	"github.com/kordloom/switchtender/internal/run"
 )
 
 const (
 	// streamTicketTTL is how long a ticket is good for. It only has to survive the moment between
-	// asking for it and the browser opening the stream, so it is short enough that one captured from
-	// a log is almost always already dead.
+	// asking for it and the browser opening the stream, so it is short enough that one captured
+	// from a log is almost always already dead.
 	streamTicketTTL = 30 * time.Second
 	// streamTicketMax bounds how many live tickets are held, so a caller looping the mint endpoint
-	// cannot grow the map without limit. The oldest are dropped once the bound is passed.
+	// cannot grow the table without limit.
 	streamTicketMax = 4096
-	// streamTicketPerActor bounds how many one caller may hold, so filling the table is not something
-	// a single caller can do. Without it the eviction below is reachable by one account: a viewer,
-	// the lowest role that can read a run, could loop the mint endpoint and drop tickets belonging to
-	// everyone else, in any organization. A caller at this bound evicts only its own oldest ticket,
-	// which keeps the reason the eviction exists, that a caller who cannot get a ticket cannot watch
-	// its own run, without letting one caller spend everybody else's.
+	// streamTicketPerActor bounds how many one caller may hold, so filling the table is not
+	// something a single caller can do. A caller at this bound gives up its own oldest ticket,
+	// never anyone else's, which keeps the reason the bound exists (a caller who cannot get a
+	// ticket cannot watch its own run) without letting one caller spend everybody else's.
 	streamTicketPerActor = 64
 )
 
-// streamTicket is one minted permission to open one run's event stream.
-type streamTicket struct {
-	// actor is who asked for it, replayed onto the stream request so authorization is unchanged.
-	actor Actor
-	// runID is the single run this ticket opens. A ticket for one run opens no other.
-	runID string
-	// expires is when it stops working.
-	expires time.Time
-}
-
-// streamTickets mints and redeems short-lived permissions to open one run's event stream.
+// streamTickets mints and redeems short-lived permissions to open one run's event stream, backed
+// by the shared store so a ticket minted on one replica is redeemable on any other.
 //
-// EventSource cannot set headers, so the stream endpoint used to accept the caller's own bearer
-// token as a query parameter. The application never wrote that URL into an href and the audit chain
-// records only the path, but a URL is not private: nginx, Traefik, and an ALB all log the full
-// request line by default, so a thirty-day session credential ended up in access logs, log
-// shippers, and whatever holds them. A ticket in the same position is worth almost nothing: it opens
-// one run, it is single use, and it is dead within thirty seconds.
+// EventSource cannot set headers, so the stream endpoint takes a ticket in the query instead of a
+// bearer token. A URL is not private: nginx, Traefik, and an ALB all log the full request line, so
+// a long-lived session credential in that position ends up in access logs and everything
+// downstream of them. A ticket in the same position is worth almost nothing: it opens one run, it
+// is single use across every replica because redemption deletes the row, and it dies within
+// thirty seconds. The store holds only the ticket's hash, so a leaked table is a list of spent and
+// spendable hashes rather than credentials.
 type streamTickets struct {
-	// mu guards live.
-	mu sync.Mutex
-	// live holds unredeemed tickets by their secret value.
-	live map[string]streamTicket
-	// byActor is how many live tickets each caller holds, keyed the way the stream limiter keys one.
-	byActor map[string]int
+	// store is the shared backing the tickets live in.
+	store run.Store
 	// now reads the clock, replaced in tests.
 	now func() time.Time
 }
 
-// newStreamTickets returns an empty ticket store.
-func newStreamTickets() *streamTickets {
-	return &streamTickets{
-		live: make(map[string]streamTicket), byActor: make(map[string]int), now: time.Now,
-	}
+// newStreamTickets returns a ticket service backed by store.
+func newStreamTickets(store run.Store) *streamTickets {
+	return &streamTickets{store: store, now: time.Now}
 }
 
 // ticketActorKey identifies the caller a ticket is counted against, on the same terms the live
@@ -77,20 +65,10 @@ func ticketActorKey(a Actor) string {
 	}
 }
 
-// drop removes one ticket and keeps the per-caller count with it. Every removal goes through here,
-// so the count cannot drift from the table it describes.
-func (s *streamTickets) drop(value string) {
-	t, ok := s.live[value]
-	if !ok {
-		return
-	}
-	delete(s.live, value)
-	key := ticketActorKey(t.actor)
-	if s.byActor[key] <= 1 {
-		delete(s.byActor, key)
-		return
-	}
-	s.byActor[key]--
+// hashTicket is the row key: the secret never lands in the store, only its digest.
+func hashTicket(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:])
 }
 
 // mint records a ticket for actor to open runID and returns its secret.
@@ -100,70 +78,41 @@ func (s *streamTickets) mint(actor Actor, runID string) (string, error) {
 		return "", err
 	}
 	value := hex.EncodeToString(raw)
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	now := s.now()
-	key := ticketActorKey(actor)
-	if len(s.live) >= streamTicketMax || s.byActor[key] >= streamTicketPerActor {
-		for k, t := range s.live {
-			if now.After(t.expires) {
-				s.drop(k)
-			}
-		}
+	payload, err := json.Marshal(actor)
+	if err != nil {
+		return "", err
 	}
-	// A caller at its own bound gives up its oldest rather than anyone else's, so looping the
-	// endpoint costs the caller its own tickets and nobody else theirs.
-	for s.byActor[key] >= streamTicketPerActor {
-		oldest, found := "", time.Time{}
-		for k, t := range s.live {
-			if ticketActorKey(t.actor) != key {
-				continue
-			}
-			if found.IsZero() || t.expires.Before(found) {
-				oldest, found = k, t.expires
-			}
-		}
-		if oldest == "" {
-			break
-		}
-		s.drop(oldest)
+	t := run.StreamTicket{
+		SecretHash: hashTicket(value), RunID: runID, ActorKey: ticketActorKey(actor),
+		Actor: payload, ExpiresAt: s.now().Add(streamTicketTTL),
 	}
-	// The table as a whole can still fill when many callers each hold a legitimate share, and a
-	// caller who cannot get a ticket cannot watch their own run, so the last resort is unchanged.
-	for k := range s.live {
-		if len(s.live) < streamTicketMax {
-			break
-		}
-		s.drop(k)
+	if err := s.store.SaveStreamTicket(context.Background(), t,
+		streamTicketPerActor, streamTicketMax); err != nil {
+		return "", err
 	}
-	s.live[value] = streamTicket{actor: actor, runID: runID, expires: now.Add(streamTicketTTL)}
-	s.byActor[key]++
 	return value, nil
 }
 
-// redeem consumes a ticket for runID and returns who minted it. A ticket is good once: redeeming it
-// removes it, so one captured in a log cannot be replayed even inside its lifetime.
+// redeem consumes a ticket for runID and returns who minted it. A ticket is good once: the store
+// deletes it as it is read, so one captured in a log cannot be replayed on any replica even inside
+// its lifetime.
 func (s *streamTickets) redeem(value, runID string) (Actor, bool) {
 	if value == "" || runID == "" {
 		return Actor{}, false
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	t, ok := s.live[value]
-	if !ok {
+	payload, ok, err := s.store.RedeemStreamTicket(context.Background(),
+		hashTicket(value), runID, s.now())
+	if err != nil || !ok {
 		return Actor{}, false
 	}
-	s.drop(value)
-	if s.now().After(t.expires) {
+	var actor Actor
+	// decodeForeign, not strict: during a rolling upgrade the replica that minted this ticket and
+	// the one redeeming it can be different versions, so the redeemer must tolerate a field a newer
+	// minter added rather than reject a live session's stream for thirty seconds mid-deploy.
+	if err := decodeForeign(payload, &actor); err != nil {
 		return Actor{}, false
 	}
-	// Compared in constant time and against the run in the path, so a ticket for one run cannot be
-	// presented on another.
-	if subtle.ConstantTimeCompare([]byte(t.runID), []byte(runID)) != 1 {
-		return Actor{}, false
-	}
-	return t.actor, true
+	return actor, true
 }
 
 // streamTicketHandler mints a ticket for the run named in the path, for a caller who has already

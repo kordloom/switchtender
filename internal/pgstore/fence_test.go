@@ -275,7 +275,7 @@ func TestTransitionStatusAndClaimRefusesACanceledRun(t *testing.T) {
 			r.Status = test.Stored
 			r.CancelRequested = test.Cancel
 			saveRun(t, ctx, s, r)
-			moved, err := s.TransitionStatusAndClaim(ctx, r.ID, test.From, run.StatusRunning, "w1")
+			moved, err := s.TransitionStatusAndClaim(ctx, r.ID, test.From, run.StatusRunning, "w1", time.Now())
 			if err != nil {
 				t.Fatalf("TransitionStatusAndClaim() error = %v", err)
 			}

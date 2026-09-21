@@ -101,6 +101,7 @@ func NewHandler(store run.Store, pools *Pools, log *zap.Logger,
 	mux.HandleFunc("GET /relay/v1/policies", s.listPolicies)
 	mux.HandleFunc("POST /relay/v1/claim", s.claim)
 	mux.HandleFunc("POST /relay/v1/heartbeat", s.heartbeat)
+	mux.HandleFunc("POST /relay/v1/runs/{id}/start", s.start)
 	mux.HandleFunc("GET /relay/v1/runs/{id}", s.get)
 	mux.HandleFunc("POST /relay/v1/runs/{id}/save", s.save)
 	mux.HandleFunc("POST /relay/v1/runs/{id}/log", s.appendLog)
@@ -282,6 +283,38 @@ func (s *relayServer) heartbeat(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, "heartbeat", err)
 	default:
 		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// start performs the fenced pending-to-running move for a worker beginning execution. The same
+// guards as a heartbeat apply: the pool must serve the run's queue and the lease capability must
+// hold. The fence itself is the store's compare-and-swap from pending, so a run another worker
+// already owns answers moved=false and the caller walks away without starting a tool.
+func (s *relayServer) start(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var body startRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad start request")
+		return
+	}
+	stored := s.servesRun(w, r)
+	if stored == nil {
+		return
+	}
+	if !leaseHeld(stored, r) {
+		writeErr(w, http.StatusNotFound, "run not found")
+		return
+	}
+	moved, err := s.store.TransitionStatusAndClaim(r.Context(), id, run.StatusPending,
+		run.StatusRunning, normalizeOwner(body.Owner), body.StartedAt)
+	switch {
+	case errors.Is(err, run.ErrNotFound):
+		writeErr(w, http.StatusNotFound, "run not found")
+	case err != nil:
+		s.internal(w, "start", err)
+	default:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_ = json.NewEncoder(w).Encode(startResponse{Moved: moved})
 	}
 }
 

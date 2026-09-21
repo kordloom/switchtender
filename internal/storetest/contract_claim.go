@@ -850,7 +850,8 @@ func testRunRacesUnderConcurrency(t *testing.T, store run.Store) {
 		var released atomic.Int64
 		race(racers, func(i int) {
 			ok, err := store.TransitionStatusAndClaim(ctx, tid,
-				run.StatusPendingApproval, run.StatusRunning, fmt.Sprintf("coordinator-%d", i))
+				run.StatusPendingApproval, run.StatusRunning, fmt.Sprintf("coordinator-%d", i),
+				time.Now())
 			if err != nil {
 				t.Errorf("TransitionStatusAndClaim() error = %v", err)
 				return

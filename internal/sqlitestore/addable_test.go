@@ -117,6 +117,13 @@ func TestEveryLaterColumnIsHealable(t *testing.T) {
 		"schedules.cron (TEXT NOT NULL)",
 		"team_members.user_id (TEXT NOT NULL)",
 		"teams.created_at (TEXT NOT NULL)",
+		// stream_tickets is created whole by the schema's CREATE, never healed column by column:
+		// it is new in this version, so every existing database gets the entire table at once
+		// rather than these columns ALTER-added into an older shape. Ephemeral rows, 30s life.
+		"stream_tickets.actor (TEXT NOT NULL)",
+		"stream_tickets.actor_key (TEXT NOT NULL)",
+		"stream_tickets.expires_at (TEXT NOT NULL)",
+		"stream_tickets.run_id (TEXT NOT NULL)",
 		"templates.created_at (TEXT NOT NULL)",
 		"templates.playbook (TEXT NOT NULL)",
 		"tokens.created_at (TEXT NOT NULL)",

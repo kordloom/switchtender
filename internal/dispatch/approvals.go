@@ -93,7 +93,7 @@ func (d *Dispatcher) Approve(ctx context.Context, id, by, byType string) (*run.R
 	// leave an approved run that nothing ever executes.
 	var ok bool
 	if target == run.StatusRunning {
-		ok, err = d.store.TransitionStatusAndClaim(ctx, id, run.StatusPendingApproval, target, d.owner)
+		ok, err = d.store.TransitionStatusAndClaim(ctx, id, run.StatusPendingApproval, target, d.owner, time.Time{})
 	} else {
 		ok, err = d.store.TransitionStatus(ctx, id, run.StatusPendingApproval, target)
 	}

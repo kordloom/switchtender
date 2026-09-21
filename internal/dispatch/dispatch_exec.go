@@ -26,10 +26,10 @@ func (d *Dispatcher) Close() {
 
 // executeLeased runs a claimed run on the worker slot the claim loop already holds.
 func (d *Dispatcher) executeLeased(base context.Context, r *run.Run) run.Status {
-	runCtx, cancel := context.WithCancel(base)
+	runCtx, cancel := context.WithCancelCause(base)
 	d.register(r.ID, cancel)
 	defer d.unregister(r.ID)
-	defer cancel()
+	defer cancel(nil)
 
 	// A run timeout stops a hung tool from holding this worker slot forever. The cause lets the
 	// outcome tell a timeout apart from a user cancel. A per-run timeout overrides the dispatcher
@@ -116,15 +116,32 @@ func (d *Dispatcher) executeRun(ctx context.Context, r *run.Run) run.Status {
 func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, tee io.Writer,
 	finish func(res roundhouse.Result, runErr error, mask *masker, fold *run.SummaryFold) run.Status,
 ) run.Status {
+	// The move from pending to running is the store's fenced transition, never a whole-row save.
+	// A claimant that stalled past its lease wakes up holding a run the janitor requeued and
+	// another worker may already be executing; the blind save it used to make wrote its own claim
+	// over the live one and started a second tool against the same hosts. The fence matches only
+	// a run still pending, so the woken worker learns it lost and walks away without a write,
+	// without a tool, and without a finalize to stomp the real owner's outcome. The lease time is
+	// stamped by the store's own clock inside the transition, for the same reason heartbeats are.
 	started := d.now()
+	moved, terr := d.store.TransitionStatusAndClaim(ctx, r.ID, run.StatusPending,
+		run.StatusRunning, d.owner, started)
+	if terr != nil || !moved {
+		if terr != nil {
+			d.log.Error("dispatch: transition to running: "+terr.Error(),
+				zap.String("run_id", r.ID))
+		} else {
+			d.log.Warn("dispatch: run was no longer pending at start; abandoning without a write",
+				zap.String("run_id", r.ID), zap.String("owner", d.owner))
+		}
+		if current, gerr := d.store.Get(ctx, r.ID); gerr == nil {
+			return current.Status
+		}
+		return run.StatusPending
+	}
 	r.Status = run.StatusRunning
 	r.StartedAt = &started
 	r.ClaimedBy = d.owner
-	// The lease time is not written from here. The store stamps it when it grants the claim and again on
-	// every renewal, and Postgres ages leases against that same clock, so writing this process's time
-	// over it recorded a lease already expired on any worker whose clock trails the database and the next
-	// sweep interrupted a run that had just started.
-	_ = d.save(r)
 
 	watchCtx, stopWatch := context.WithCancel(ctx)
 	defer stopWatch()
@@ -320,7 +337,7 @@ func (d *Dispatcher) watch(ctx context.Context, id string) {
 			lastRenewed = time.Now()
 		case errors.Is(err, run.ErrNotFound):
 			d.log.Warn("dispatch: lease is no longer ours: "+err.Error(), zap.String("run_id", id))
-			d.Cancel(id)
+			d.cancelWithCause(id, errLeaseLost)
 			return
 		default:
 			if expired := time.Since(lastRenewed); expired < leaseTTL {
@@ -329,7 +346,7 @@ func (d *Dispatcher) watch(ctx context.Context, id string) {
 				continue
 			}
 			d.log.Warn("dispatch: lease expired unrenewed: "+err.Error(), zap.String("run_id", id))
-			d.Cancel(id)
+			d.cancelWithCause(id, errLeaseLost)
 			return
 		}
 		r, err := d.store.Get(context.Background(), id)
@@ -431,6 +448,12 @@ func (d *Dispatcher) outcome(
 	case err != nil && errors.Is(context.Cause(ctx), errRunTimeout):
 		d.finalize(r, run.StatusFailed, nil, "run canceled: exceeded its timeout")
 		return run.StatusFailed
+	case err != nil && errors.Is(context.Cause(ctx), errLeaseLost):
+		// The executor lost its lease mid-run. Recording that as a cancel wrote a decision nobody
+		// made over what is an interruption: the state a person or a rerun resumes from, and the
+		// same status the janitor's reclaim records for the same event seen from the other side.
+		d.finalize(r, run.StatusInterrupted, nil, errLeaseLost.Error())
+		return run.StatusInterrupted
 	case err != nil && errors.Is(context.Cause(ctx), errShuttingDown):
 		// The server stopped mid-run. That is interrupted, the status whose meaning is exactly this and
 		// which a partial retry accepts, not the cancel a person asks for.
@@ -517,7 +540,7 @@ func touchedNoHost(r *run.Run, fold *run.SummaryFold) bool {
 }
 
 // register records a cancel func for a run so it can be stopped by id.
-func (d *Dispatcher) register(id string, cancel context.CancelFunc) {
+func (d *Dispatcher) register(id string, cancel context.CancelCauseFunc) {
 	d.cmu.Lock()
 	d.cancels[id] = cancel
 	d.cmu.Unlock()
@@ -537,7 +560,7 @@ func (d *Dispatcher) Cancel(id string) bool {
 	cancel, ok := d.cancels[id]
 	d.cmu.Unlock()
 	if ok {
-		cancel()
+		cancel(nil)
 	}
 	return ok
 }
@@ -604,8 +627,15 @@ func (d *Dispatcher) recordTerminal(r *run.Run, fin run.Finalization) (run.Statu
 			zap.String("run_id", r.ID))
 		return r.Status, false
 	}
-	if cur.Status.Terminal() && cur.Status != fin.Status {
-		d.log.Warn("dispatch: run already finalized by another actor, not overwriting",
+	if cur.Status.Terminal() && (cur.Status != fin.Status || cur.EndedAt != nil) {
+		// A terminal state refuses, including an equal one that is already complete. The old
+		// equal-status carve-out was meant for writes completing fields on a status another step
+		// pre-set, the reject flow's shape, and what it also permitted was a late executor
+		// re-finalizing a run the overrun settle had closed and minting a second outcome entry.
+		// EndedAt is the discriminator: a settle stamps it, so an equal status with an end time
+		// is a finished record this caller must not touch, while an equal status with no end
+		// time is the half-written rejection this fallback exists to complete, exactly once.
+		d.log.Warn("dispatch: run already finalized, not overwriting",
 			zap.String("run_id", r.ID), zap.String("stored", string(cur.Status)),
 			zap.String("attempted", string(fin.Status)))
 		return cur.Status, false
@@ -621,6 +651,16 @@ func (d *Dispatcher) recordTerminal(r *run.Run, fin run.Finalization) (run.Statu
 		d.log.Warn("dispatch: run is held by another owner, not overwriting",
 			zap.String("run_id", r.ID), zap.String("holder", cur.ClaimedBy),
 			zap.String("this", fin.Owner), zap.String("attempted", string(fin.Status)))
+		return cur.Status, false
+	}
+	// A requeued run belongs to nobody, and nobody's runs are not this worker's to finalize. The
+	// owner guard above cannot catch this shape because the janitor cleared the claim: a worker
+	// that lost its lease mid-run and finalized canceled late used to land that cancel on the
+	// pending, unclaimed row and end the retry the requeue had already promised.
+	if fin.Owner != "" && cur.ClaimedBy == "" && !cur.Status.Terminal() {
+		d.log.Warn("dispatch: run was requeued and is unclaimed, not overwriting",
+			zap.String("run_id", r.ID), zap.String("this", fin.Owner),
+			zap.String("attempted", string(fin.Status)))
 		return cur.Status, false
 	}
 	// Save writes the whole run, so the terminal fields go on a copy: a save that fails must leave
@@ -797,5 +837,16 @@ func (d *Dispatcher) flushEventLines(id, parent string, lines [][]byte, mask *ma
 	d.publisher.PublishEvents(id, events)
 	if parent != "" {
 		d.publisher.PublishEvents(parent, events)
+	}
+}
+
+// cancelWithCause ends a run's execution carrying why, so the finish path can record the truth of
+// what stopped it instead of dressing every stop as a cancel somebody asked for.
+func (d *Dispatcher) cancelWithCause(id string, cause error) {
+	d.cmu.Lock()
+	cancel, ok := d.cancels[id]
+	d.cmu.Unlock()
+	if ok {
+		cancel(cause)
 	}
 }

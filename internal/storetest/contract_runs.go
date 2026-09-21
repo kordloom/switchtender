@@ -1276,7 +1276,7 @@ func testTransitionStatusAndClaim(t *testing.T, store run.Store) {
 	}
 
 	ok, err := store.TransitionStatusAndClaim(ctx, held.ID,
-		run.StatusPendingApproval, run.StatusRunning, "coordinator-a")
+		run.StatusPendingApproval, run.StatusRunning, "coordinator-a", time.Now())
 	if err != nil {
 		t.Fatalf("TransitionStatusAndClaim() error = %v", err)
 	}
@@ -1311,7 +1311,7 @@ func testTransitionStatusAndClaim(t *testing.T, store run.Store) {
 
 	// Only one caller wins, so two approvals cannot both release the same run.
 	second, err := store.TransitionStatusAndClaim(ctx, held.ID,
-		run.StatusPendingApproval, run.StatusRunning, "coordinator-b")
+		run.StatusPendingApproval, run.StatusRunning, "coordinator-b", time.Now())
 	if err != nil {
 		t.Fatalf("second TransitionStatusAndClaim() error = %v", err)
 	}
@@ -1319,7 +1319,7 @@ func testTransitionStatusAndClaim(t *testing.T, store run.Store) {
 		t.Error("a second transition from a status the run no longer holds reported a change")
 	}
 	if missing, err := store.TransitionStatusAndClaim(ctx, "run_nope",
-		run.StatusPendingApproval, run.StatusRunning, "x"); err != nil || missing {
+		run.StatusPendingApproval, run.StatusRunning, "x", time.Now()); err != nil || missing {
 		t.Errorf("transition on a missing run = (%v, %v), want (false, nil)", missing, err)
 	}
 
@@ -1335,7 +1335,7 @@ func testTransitionStatusAndClaim(t *testing.T, store run.Store) {
 		t.Fatalf("Save() canceled error = %v", err)
 	}
 	started, err := store.TransitionStatusAndClaim(ctx, canceled.ID,
-		run.StatusPendingApproval, run.StatusRunning, "coordinator-c")
+		run.StatusPendingApproval, run.StatusRunning, "coordinator-c", time.Now())
 	if err != nil {
 		t.Fatalf("TransitionStatusAndClaim() canceled error = %v", err)
 	}
@@ -1490,4 +1490,104 @@ func runIDs(runs []*run.Run) []string {
 		out = append(out, r.ID)
 	}
 	return out
+}
+
+// testFinalizeRevokesTheLease pins the settle's second effect: a finished run keeps its
+// attribution and loses its lease. claimed_by survives as the record of which process executed,
+// and the claim secret dies so the capability minted at claim stops working, but the part a wedged
+// executor actually feels is the heartbeat: renewing a settled run's lease answers ErrNotFound,
+// which is how a worker whose run the overrun settle closed learns to kill its tool and stand
+// down instead of finishing against a record that is already final.
+func testFinalizeRevokesTheLease(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	r := sampleRun("run_revoke")
+	r.Status = run.StatusRunning
+	r.ClaimedBy = "worker-alive"
+	r.EndedAt = nil
+	if err := store.Save(ctx, r); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	if err := store.Heartbeat(ctx, "run_revoke", "worker-alive"); err != nil {
+		t.Fatalf("Heartbeat() before settle error = %v", err)
+	}
+
+	ended := time.Date(2026, 2, 3, 4, 5, 6, 0, time.UTC)
+	moved, err := store.FinalizeRunning(ctx, "run_revoke", run.Finalization{
+		Status: run.StatusFailed, Error: "timed out", EndedAt: ended,
+	})
+	if err != nil || !moved {
+		t.Fatalf("FinalizeRunning() = (%v, %v), want the settle to land", moved, err)
+	}
+
+	if err := store.Heartbeat(ctx, "run_revoke", "worker-alive"); !errors.Is(err, run.ErrNotFound) {
+		t.Fatalf("Heartbeat() after settle = %v, want ErrNotFound: a settled run has no lease, "+
+			"and a wedged executor that can still renew never learns it lost", err)
+	}
+	got, err := store.Get(ctx, "run_revoke")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.ClaimedBy != "worker-alive" {
+		t.Fatalf("claimed_by = %q after settle, want the attribution preserved: who executed is "+
+			"part of the record", got.ClaimedBy)
+	}
+	if got.ClaimSecret != "" {
+		t.Fatal("claim secret survived the settle; the claim capability must die with the run")
+	}
+}
+
+// testStreamTicketCrossesReplicas pins the property tickets moved into the store to get: a ticket
+// minted through one handle is redeemed, exactly once, through another handle on the same
+// database. Two store handles stand in for two server replicas behind a load balancer. Held in
+// process memory, a ticket minted on one replica was invisible to the other, so live run tailing
+// 401ed at random behind the active-active shape the paid tier sells.
+// StreamTicketCrossesReplicas is exported so a store package can supply two handles on one
+// database, which a single newStore factory cannot express.
+func StreamTicketCrossesReplicas(t *testing.T, a, b run.Store) {
+	ctx := context.Background()
+	ends := time.Now().Add(time.Minute)
+	tk := run.StreamTicket{
+		SecretHash: "hash_cross", RunID: "run_cross", ActorKey: "user:ada",
+		Actor: []byte(`{"user_id":"ada"}`), ExpiresAt: ends,
+	}
+	if err := a.SaveStreamTicket(ctx, tk, 64, 4096); err != nil {
+		t.Fatalf("mint through handle a: %v", err)
+	}
+	payload, ok, err := b.RedeemStreamTicket(ctx, "hash_cross", "run_cross", time.Now())
+	if err != nil || !ok {
+		t.Fatalf("redeem through handle b: ok=%v err=%v; a ticket minted on one replica must "+
+			"redeem on another", ok, err)
+	}
+	if string(payload) != `{"user_id":"ada"}` {
+		t.Fatalf("redeemed actor = %q, want the payload minted", payload)
+	}
+	// Single use, across replicas: the second redemption, on either handle, finds nothing.
+	if _, ok, _ := a.RedeemStreamTicket(ctx, "hash_cross", "run_cross", time.Now()); ok {
+		t.Fatal("a ticket redeemed on one replica was still spendable on another")
+	}
+}
+
+// testStreamTicketRefusesWrongRunAndExpiry pins the two ways a ticket is not good: presented on a
+// run it was not minted for, or presented after it expired. Either way the redemption burns it.
+func testStreamTicketRefusesWrongRunAndExpiry(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	if err := store.SaveStreamTicket(ctx, run.StreamTicket{
+		SecretHash: "hash_wrong", RunID: "run_right", ActorKey: "user:x",
+		Actor: []byte("{}"), ExpiresAt: time.Now().Add(time.Minute),
+	}, 64, 4096); err != nil {
+		t.Fatalf("mint: %v", err)
+	}
+	if _, ok, _ := store.RedeemStreamTicket(ctx, "hash_wrong", "run_other", time.Now()); ok {
+		t.Fatal("a ticket redeemed on a run it was not minted for")
+	}
+
+	if err := store.SaveStreamTicket(ctx, run.StreamTicket{
+		SecretHash: "hash_old", RunID: "run_old", ActorKey: "user:x",
+		Actor: []byte("{}"), ExpiresAt: time.Now().Add(-time.Minute),
+	}, 64, 4096); err != nil {
+		t.Fatalf("mint expired: %v", err)
+	}
+	if _, ok, _ := store.RedeemStreamTicket(ctx, "hash_old", "run_old", time.Now()); ok {
+		t.Fatal("an expired ticket redeemed")
+	}
 }

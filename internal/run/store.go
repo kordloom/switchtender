@@ -121,6 +121,22 @@ type Finalization struct {
 	EndedAt time.Time
 }
 
+// StreamTicket is one minted permission to open one run's event stream, held in the store so any
+// replica can redeem it. The secret itself never lands in a row: the store holds its hash, so a
+// leaked table is a list of spent and spendable hashes, not credentials.
+type StreamTicket struct {
+	// SecretHash is the hex SHA-256 of the ticket value the caller holds.
+	SecretHash string
+	// RunID is the single run this ticket opens.
+	RunID string
+	// ActorKey identifies the caller for the per-caller bound, on the minting gate's terms.
+	ActorKey string
+	// Actor is the opaque caller payload the server records at mint and replays at redeem.
+	Actor []byte
+	// ExpiresAt is when the ticket stops working.
+	ExpiresAt time.Time
+}
+
 // Store persists runs, their captured log output, and their structured events.
 // Implementations must be safe for concurrent use.
 type Store interface {
@@ -177,12 +193,30 @@ type Store interface {
 	// by whichever process holds them.
 	CancelPending(ctx context.Context, id string) (bool, error)
 	// TransitionStatusAndClaim atomically moves the run from the from status to the to status and
+	// stamps startedAt as the run's start when it is non-zero and no start is recorded yet; zero
+	// leaves the start alone, which is what a release-to-pending wants. The lease time is always
+	// the store's own clock, never the caller's, for the same reason heartbeats are.
 	// stamps owner's lease in the same operation, reporting whether it changed a row. It exists so a
 	// run can never be observed in the to status without an owner: a parent released by an approval
 	// goes straight to running, and a running parent with no lease is what the abandoned-parent
 	// sweep settles, so two separate writes would let a janitor tick cancel a run an approver had
 	// just released.
-	TransitionStatusAndClaim(ctx context.Context, id string, from, to Status, owner string) (bool, error)
+	TransitionStatusAndClaim(ctx context.Context, id string, from, to Status, owner string, startedAt time.Time) (bool, error)
+	// Now returns the store's own clock, the one leases are stamped and aged with. Every sweep
+	// that ages rows must measure with this clock rather than the process's: two replicas each
+	// trusting their own wall clock is how a healthy run got settled as timed out.
+	Now(ctx context.Context) (time.Time, error)
+
+	// SaveStreamTicket records a minted stream ticket, sweeping expired rows and holding the
+	// per-caller and total bounds by evicting the caller's own oldest first. Tickets live in the
+	// store because a ticket minted on one replica is redeemed through whichever replica the load
+	// balancer picks; held in process memory, live run tailing 401ed at random behind the
+	// active-active shape the paid tier sells.
+	SaveStreamTicket(ctx context.Context, t StreamTicket, perActorCap, totalCap int) error
+	// RedeemStreamTicket consumes the ticket with this secret hash for this run, exactly once
+	// across every replica, returning the opaque actor payload recorded at mint. A missing,
+	// expired, or wrong-run ticket answers ok=false with no error.
+	RedeemStreamTicket(ctx context.Context, secretHash, runID string, now time.Time) (actor []byte, ok bool, err error)
 	// TransitionStatus atomically moves the run from the from status to the to status and reports
 	// whether it changed a row. It changes nothing and returns false when the run is missing or is
 	// not in the from status, so two callers racing to approve or reject the same run cannot both win.

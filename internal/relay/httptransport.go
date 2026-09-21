@@ -180,6 +180,44 @@ func (t *httpTransport) Heartbeat(ctx context.Context, id, owner string) error {
 	return noContentOr404("heartbeat", resp)
 }
 
+// Start performs the fenced pending-to-running move on the control node, mapping 404 to
+// ErrNotFound. The answer says whether the move happened: false means the run is no longer
+// pending, somebody else owns it, and the worker must walk away without starting a tool.
+func (t *httpTransport) Start(ctx context.Context, id, owner string, startedAt time.Time) (bool, error) {
+	resp, err := t.sendJSON(ctx, http.MethodPost, "/relay/v1/runs/"+id+"/start",
+		startRequest{Owner: owner, StartedAt: startedAt}, t.leaseFor(id))
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	switch resp.StatusCode {
+	case http.StatusOK:
+		var out startResponse
+		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+			return false, fmt.Errorf("decode start: %w", err)
+		}
+		return out.Moved, nil
+	case http.StatusNotFound:
+		return false, run.ErrNotFound
+	default:
+		return false, statusErr("start", resp)
+	}
+}
+
+// startRequest asks for the fenced move to running.
+type startRequest struct {
+	// Owner is the worker taking the run.
+	Owner string `json:"owner"`
+	// StartedAt is the caller's clock reading for the run's start.
+	StartedAt time.Time `json:"started_at"`
+}
+
+// startResponse answers whether the move happened.
+type startResponse struct {
+	// Moved reports the fence outcome: false means the run was no longer pending.
+	Moved bool `json:"moved"`
+}
+
 // Policies reads the approval policies in force on the control node.
 func (t *httpTransport) Policies(ctx context.Context) ([]*policy.Policy, error) {
 	resp, err := t.do(ctx, http.MethodGet, "/relay/v1/policies", "", nil, "")

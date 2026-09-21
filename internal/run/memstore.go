@@ -13,6 +13,8 @@ import (
 
 // memStore is an in-memory Store backed by maps guarded by a read-write mutex.
 type memStore struct {
+	// tickets holds live stream tickets by secret hash.
+	tickets map[string]StreamTicket
 	// mu guards runs, logs, and events.
 	mu sync.RWMutex
 	// runs maps run id to the stored run.
@@ -422,7 +424,10 @@ func (m *memStore) Heartbeat(_ context.Context, id, owner string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	r, ok := m.runs[id]
-	if !ok || r.ClaimedBy != owner {
+	// A settled run has no lease to renew: refusing the heartbeat is how a wedged executor whose
+	// run the overrun settle closed finally learns, kills its tool, and stands down, instead of
+	// running to completion against a record already finished.
+	if !ok || r.ClaimedBy != owner || (r.Status != StatusPending && r.Status != StatusRunning) {
 		return ErrNotFound
 	}
 	now := time.Now()
@@ -589,7 +594,7 @@ func (m *memStore) CancelPending(_ context.Context, id string) (bool, error) {
 // the compare-and-swap, and executed on real hosts. Checking the flag first and swapping second
 // leaves the same gap one scheduling delay wide, so it belongs in the predicate.
 func (m *memStore) TransitionStatusAndClaim(_ context.Context, id string, from, to Status,
-	owner string) (bool, error) {
+	owner string, startedAt time.Time) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	r, ok := m.runs[id]
@@ -600,8 +605,9 @@ func (m *memStore) TransitionStatusAndClaim(_ context.Context, id string, from, 
 	r.Status = to
 	r.ClaimedBy = owner
 	r.ClaimedAt = &now
-	if r.StartedAt == nil {
-		r.StartedAt = &now
+	if r.StartedAt == nil && !startedAt.IsZero() {
+		at := startedAt
+		r.StartedAt = &at
 	}
 	return true, nil
 }
@@ -644,7 +650,11 @@ func (m *memStore) FinalizeRunning(_ context.Context, id string, fin Finalizatio
 		return false, nil
 	}
 	ended := fin.EndedAt
+	// A terminal run holds no lease, but it keeps its attribution: claimed_by stays as the record
+	// of which process executed, while the claim secret dies with the settle so the capability
+	// minted at claim stops working the moment the run is closed.
 	r.Status = fin.Status
+	r.ClaimSecret = ""
 	r.ExitCode = fin.ExitCode
 	r.Error = fin.Error
 	r.Image = fin.Image
@@ -676,4 +686,74 @@ func (m *memStore) ApplyRunningProgress(_ context.Context, id, owner string, p P
 		r.Outputs = p.Outputs
 	}
 	return true, nil
+}
+
+// Now returns the process clock; the in-memory store has no other.
+func (m *memStore) Now(context.Context) (time.Time, error) { return time.Now(), nil }
+
+// SaveStreamTicket records a ticket, sweeping expired rows and holding the bounds by evicting the
+// caller's own oldest first, then anyone's oldest as the last resort, the same fairness the
+// in-process table kept: looping the mint endpoint costs the caller its own tickets first.
+func (m *memStore) SaveStreamTicket(_ context.Context, t StreamTicket, perActorCap, totalCap int) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.tickets == nil {
+		m.tickets = map[string]StreamTicket{}
+	}
+	now := time.Now()
+	for k, ex := range m.tickets {
+		if now.After(ex.ExpiresAt) {
+			delete(m.tickets, k)
+		}
+	}
+	evictOldest := func(key string) bool {
+		oldest, at := "", time.Time{}
+		for k, ex := range m.tickets {
+			if key != "" && ex.ActorKey != key {
+				continue
+			}
+			if at.IsZero() || ex.ExpiresAt.Before(at) {
+				oldest, at = k, ex.ExpiresAt
+			}
+		}
+		if oldest == "" {
+			return false
+		}
+		delete(m.tickets, oldest)
+		return true
+	}
+	for perActorCap > 0 {
+		n := 0
+		for _, ex := range m.tickets {
+			if ex.ActorKey == t.ActorKey {
+				n++
+			}
+		}
+		if n < perActorCap || !evictOldest(t.ActorKey) {
+			break
+		}
+	}
+	for totalCap > 0 && len(m.tickets) >= totalCap {
+		if !evictOldest("") {
+			break
+		}
+	}
+	m.tickets[t.SecretHash] = t
+	return nil
+}
+
+// RedeemStreamTicket consumes the ticket exactly once, checking expiry and the run it was minted
+// for. A wrong run burns the ticket rather than leaving it live for a second guess.
+func (m *memStore) RedeemStreamTicket(_ context.Context, secretHash, runID string, now time.Time) ([]byte, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	t, ok := m.tickets[secretHash]
+	if !ok {
+		return nil, false, nil
+	}
+	delete(m.tickets, secretHash)
+	if now.After(t.ExpiresAt) || t.RunID != runID {
+		return nil, false, nil
+	}
+	return t.Actor, true, nil
 }

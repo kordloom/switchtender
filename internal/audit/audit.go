@@ -473,12 +473,17 @@ func Link(prev, e *Entry) {
 // the link commits to the time it was given, so this never showed as a break. It showed as an audit
 // trail that reads as though it were edited.
 func StampAppendTime(prev, e *Entry, now time.Time) {
-	if !e.At.IsZero() {
-		return
+	if e.At.IsZero() {
+		e.At = now
 	}
-	e.At = now
-	// Equal times are fine and ordinary at clock granularity. Earlier is not, so it is pinned to the
-	// entry before rather than allowed to invert.
+	// The pin applies to every entry, a caller-chosen time included. Two servers appending to one
+	// chain each read their own wall clock, and a decision stamped on a fast replica followed by
+	// an outcome stamped on a slow one recorded an approval that postdates the run it released:
+	// verification then reports the gate as bypassed, permanently, over an honest approval. A
+	// chosen time earlier than the head is exactly that inversion, so it is pinned forward; the
+	// one writer whose time is a signed claim that must never be adjusted, the span beat, refuses
+	// behind-clock appends before reaching here and is never clamped. Equal times are fine and
+	// ordinary at clock granularity.
 	if prev != nil && e.At.Before(prev.At) {
 		e.At = prev.At
 	}

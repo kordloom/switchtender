@@ -114,7 +114,7 @@ type Dispatcher struct {
 	// cmu guards cancels.
 	cmu sync.Mutex
 	// cancels maps a pending or executing run id to its cancel func.
-	cancels map[string]context.CancelFunc
+	cancels map[string]context.CancelCauseFunc
 	// owner identifies this process on the leases it takes.
 	owner string
 	// claimInterval is how often the claim loop polls when idle.

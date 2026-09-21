@@ -173,7 +173,7 @@ func TestSettleOverrunningBoundaries(t *testing.T) {
 			}
 
 			d := &Dispatcher{
-				store: store, log: zap.NewNop(), ctx: ctx,
+				store: clockedStore{store, now}, log: zap.NewNop(), ctx: ctx,
 				runTimeout: time.Duration(test.ServerCap) * time.Second,
 				now:        func() time.Time { return now },
 			}
@@ -258,7 +258,7 @@ func TestSettleOverrunningSurvivesAStoreFailure(t *testing.T) {
 			t.Fatalf("Save() error = %v", err)
 		}
 		store := &listFailStore{Store: base}
-		d := &Dispatcher{store: store, log: zap.NewNop(), ctx: ctx,
+		d := &Dispatcher{store: clockedStore{store, now}, log: zap.NewNop(), ctx: ctx,
 			now: func() time.Time { return now }}
 		d.settleOverrunning()
 
@@ -283,7 +283,7 @@ func TestSettleOverrunningSurvivesAStoreFailure(t *testing.T) {
 			t.Fatalf("Save() error = %v", err)
 		}
 		store := &finalizeFailStore{Store: base}
-		d := &Dispatcher{store: store, log: zap.NewNop(), ctx: ctx,
+		d := &Dispatcher{store: clockedStore{store, now}, log: zap.NewNop(), ctx: ctx,
 			now: func() time.Time { return now }}
 		d.settleOverrunning()
 
@@ -331,7 +331,7 @@ func TestSettleOverrunningEndsOnlyWhatOverran(t *testing.T) {
 		}
 	}
 
-	d := &Dispatcher{store: store, log: zap.NewNop(), ctx: ctx, now: func() time.Time { return now }}
+	d := &Dispatcher{store: clockedStore{store, now}, log: zap.NewNop(), ctx: ctx, now: func() time.Time { return now }}
 	d.settleOverrunning()
 
 	want := map[string]run.Status{

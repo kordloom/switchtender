@@ -169,13 +169,20 @@ ORDER BY seq DESC`
 // head returns the current chain head, the entry with the highest sequence, or nil when empty. It
 // reads through the given querier so the caller can scope it to the append transaction.
 func (s *auditStore) head(ctx context.Context, q rowQuerier) (*audit.Entry, error) {
-	const query = "SELECT seq, hash FROM audit_entries ORDER BY seq DESC LIMIT 1"
+	const query = "SELECT seq, hash, at FROM audit_entries ORDER BY seq DESC LIMIT 1"
 	var e audit.Entry
-	switch err := q.QueryRowContext(ctx, query).Scan(&e.Seq, &e.Hash); {
+	var at string
+	switch err := q.QueryRowContext(ctx, query).Scan(&e.Seq, &e.Hash, &at); {
 	case errors.Is(err, sql.ErrNoRows):
 		return nil, nil
 	case err != nil:
 		return nil, fmt.Errorf("audit head: %w", err)
+	}
+	// The head's time rides along so the append can pin the next entry against it: a chain whose
+	// recorded times invert reads as edited, and with two servers on one chain the writer's own
+	// clock is not enough to prevent that.
+	if parsed, perr := sqlutil.ParseTime(at); perr == nil {
+		e.At = parsed
 	}
 	return &e, nil
 }

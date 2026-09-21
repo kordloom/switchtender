@@ -145,7 +145,17 @@ func (d *Dispatcher) settleOverrunning() {
 		}
 		return
 	}
-	now := d.now()
+	// Aged with the store's clock, the same one start times and leases are stamped with. This
+	// server's wall clock is not that clock: on two replicas, a fast server measuring rows a slow
+	// server stamped settled healthy runs as timed out, and a restored server whose clock jumped
+	// forward settled everything at once.
+	now, nerr := d.store.Now(d.ctx)
+	if nerr != nil {
+		if d.ctx.Err() == nil {
+			d.log.Error("dispatch: read store clock for overrun sweep: " + nerr.Error())
+		}
+		return
+	}
 	for _, r := range running {
 		// A split or pipeline parent's running spans the whole fan-out, and it inherits the request
 		// timeout the same as any run, so a fan-out that runs longer than one child's timeout used to
