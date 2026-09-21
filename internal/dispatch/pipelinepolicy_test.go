@@ -2,6 +2,7 @@ package dispatch
 
 import (
 	"context"
+	"errors"
 	"io"
 	"sync/atomic"
 	"testing"
@@ -371,5 +372,66 @@ func TestRejectSettlesHeldSplitShards(t *testing.T) {
 	}
 	if got := runner.executions.Load(); got != 0 {
 		t.Errorf("the rejected playbook executed %d times", got)
+	}
+}
+
+// TestPipelineDistinctApproverComesFromAnyUnit pins the separation-of-duties flag against the
+// pipeline's shape.
+//
+// Approving the parent releases every step, so the flag on the parent is the only one that can
+// enforce anything, and it has to be the strictest answer across the parent and all steps. It was
+// computed from whichever unit happened to match first: a pipeline held by a plain rule on the
+// parent never asked the steps, so a step whose own rule demanded a second person released on the
+// requester's say-so, and the separation-of-duties refusal became an allow. The policy package
+// fixed this exact drop at the rule-list level; this holds the pipeline wiring to the same rule.
+func TestPipelineDistinctApproverComesFromAnyUnit(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	policies := policy.NewMemStore()
+	// Rule A holds every bash run and asks nothing about who approves.
+	if err := policies.Save(ctx, &policy.Policy{
+		ID: policy.NewID(), Name: "hold-bash", Tool: "bash",
+		MaxDestroy: policy.DisabledMaxDestroy,
+	}); err != nil {
+		t.Fatalf("Save(hold-bash) error = %v", err)
+	}
+	// Rule B demands a second person wherever a destroy appears.
+	if err := policies.Save(ctx, &policy.Policy{
+		ID: policy.NewID(), Name: "destroy-needs-two", CommandContains: "destroy",
+		RequireDistinctApprover: true, MaxDestroy: policy.DisabledMaxDestroy,
+	}); err != nil {
+		t.Fatalf("Save(destroy-needs-two) error = %v", err)
+	}
+
+	store := run.NewMemStore()
+	executions := 0
+	d := New(store, countingRunner(&executions), nil, WithPolicies(policies))
+	defer d.Close()
+
+	// The parent is bash, so rule A holds the pipeline before the steps are ever consulted. The
+	// second step is the one rule B governs.
+	steps := []run.PipelineStep{
+		{Name: "plan", Tool: "bash", Command: "echo plan"},
+		{Name: "wreck", Tool: "bash", Command: "terraform destroy prod"},
+	}
+	parent, err := d.SubmitPipeline(ctx, "release", "hosts.ini", steps,
+		run.WithActor("requester"))
+	if err != nil {
+		t.Fatalf("SubmitPipeline() error = %v", err)
+	}
+	if parent.Status != run.StatusPendingApproval {
+		t.Fatalf("pipeline status = %q, want pending_approval", parent.Status)
+	}
+	if !parent.RequireDistinctApprover {
+		t.Fatal("the parent does not carry the distinct-approver requirement of its step's rule, " +
+			"so the requester can release their own destroy")
+	}
+
+	// The end of the story, not just the flag: the requester's own approval must be refused.
+	if _, err := d.Approve(ctx, parent.ID, "requester", "user"); !errors.Is(err, ErrSelfApproval) {
+		t.Fatalf("Approve by the requester = %v, want ErrSelfApproval", err)
+	}
+	if executions != 0 {
+		t.Fatalf("%d steps executed while the pipeline was held", executions)
 	}
 }

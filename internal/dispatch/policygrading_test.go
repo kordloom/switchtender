@@ -66,7 +66,7 @@ func TestEveryPolicyEvaluationSeesTheGradedRun(t *testing.T) {
 
 // gradedLocals are the local variable names this package uses to hold a graded run. Naming them is
 // deliberate: a new name has to be added here, which is a moment to check it really is graded.
-var gradedLocals = map[string]bool{"gr": true, "gp": true, "gs": true}
+var gradedLocals = map[string]bool{"gr": true, "gp": true, "gs": true, "gu": true}
 
 // isGradedLocal reports whether an argument names a local already holding a graded run.
 func isGradedLocal(arg string) bool { return gradedLocals[arg] }

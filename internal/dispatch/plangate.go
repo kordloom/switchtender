@@ -218,15 +218,22 @@ func applyOptions(r *run.Run, policies []*policy.Policy, destroys int, read bool
 	if !read {
 		opts = append(opts, run.WithRequireApproval(true), run.WithHeldByPolicy(
 			"plan summary unreadable, so the destroy count was never weighed against the limit"))
-	} else if p := policy.Exceeding(policies, r, destroys); p != nil {
-		// The rule's own second-approver requirement travels with the hold. policy.Requiring, which
-		// the dispatcher's pass consults, only considers rules with no destroy limit, so the rule
-		// that held this apply is the one rule that pass excludes: without copying it here nothing
-		// would, and whoever asked for the destroy could release it themselves.
-		opts = append(opts, run.WithRequireApproval(true),
-			run.WithRequireDistinctApprover(p.RequireDistinctApprover),
-			run.WithHeldByPolicy(fmt.Sprintf(
-				"%s (plan destroys %d, limit %d)", p.Label(), destroys, p.MaxDestroy)))
+	} else {
+		// Graded like every other evaluation: the hold decision and the release decision must see
+		// the same run, or a rule with a risk or reversibility floor can hold an apply whose
+		// second-approver requirement was computed blind to that floor.
+		gr := graded(r)
+		if p := policy.Exceeding(policies, gr, destroys); p != nil {
+			// The second-approver requirement travels with the hold, and it is the strictest
+			// answer across every rule the count exceeded, not the first one's. policy.Requiring,
+			// which the dispatcher's pass consults, only considers rules with no destroy limit, so
+			// the rules that held this apply are exactly the ones that pass excludes: without
+			// deciding here nothing would, and whoever asked for the destroy could release it.
+			opts = append(opts, run.WithRequireApproval(true),
+				run.WithRequireDistinctApprover(policy.ExceedingDistinct(policies, gr, destroys)),
+				run.WithHeldByPolicy(fmt.Sprintf(
+					"%s (plan destroys %d, limit %d)", p.Label(), destroys, p.MaxDestroy)))
+		}
 	}
 	if r.ProjectID != "" {
 		opts = append(opts, run.WithProject(r.ProjectID))

@@ -140,22 +140,39 @@ func (d *Dispatcher) pipelineRequiresApproval(ctx context.Context, parent *run.R
 			ErrPolicyUnavailable, err)
 	}
 	gp := graded(parent)
+	units := make([]*run.Run, 0, len(steps)+1)
+	units = append(units, gp)
+	held := false
 	if p := policy.Requiring(policies, gp); p != nil {
 		parent.HeldByPolicy = p.Label()
-		parent.RequireDistinctApprover = parent.RequireDistinctApprover ||
-			policy.RequireDistinct(policies, gp)
-		return true, nil
+		held = true
 	}
 	for i, step := range steps {
 		// A pipeline held because one of its steps matches records that rule too: the whole graph
 		// is held, so the evidence has to say which step's rule stopped it.
 		gs := graded(stepRun(parent, step, i, 0, baseStepVars(parent)))
-		if p := policy.Requiring(policies, gs); p != nil {
-			parent.HeldByPolicy = p.Label()
-			parent.RequireDistinctApprover = parent.RequireDistinctApprover ||
-				policy.RequireDistinct(policies, gs)
-			return true, nil
+		units = append(units, gs)
+		if !held {
+			if p := policy.Requiring(policies, gs); p != nil {
+				parent.HeldByPolicy = p.Label()
+				held = true
+			}
 		}
 	}
-	return false, nil
+	if !held {
+		return false, nil
+	}
+	// Approving the parent releases every step, so the separation-of-duties answer must be the
+	// strictest across the parent and all steps, not the answer of whichever unit happened to
+	// match first. Computed from the first match, a pipeline held by a plain rule on the parent
+	// never asked its steps, and a step whose own rule demanded a second person released on the
+	// requester's say-so. The policy package holds this property across its rule list; this holds
+	// it across the pipeline's units.
+	for _, gu := range units {
+		if policy.RequireDistinct(policies, gu) {
+			parent.RequireDistinctApprover = true
+			break
+		}
+	}
+	return true, nil
 }
