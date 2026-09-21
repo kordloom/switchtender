@@ -138,3 +138,60 @@ func FuzzFromJenkins(f *testing.F) {
 		_, _ = FromJenkins("inv")(data, fuzzNow)
 	})
 }
+
+// FuzzFromChef feeds arbitrary bytes to the Chef importer to prove it never panics on a malformed
+// or hostile node export.
+//
+// The importer accepts three shapes, an array of node documents, one node document, and an object
+// keyed by node name, and chooses between them by what decodes rather than by what the caller
+// says. That branching is exactly what a fuzzer is good at surprising, and the run-list parser
+// splits on brackets by index, which is the other place a hostile export gets to pick the offsets.
+func FuzzFromChef(f *testing.F) {
+	f.Add([]byte(`[{"name":"web01","chef_environment":"production","run_list":["role[base]"]}]`))
+	f.Add([]byte(`{"web01":{"chef_environment":"production","run_list":["recipe[nginx]"]}}`))
+	f.Add([]byte(`{"name":"solo","automatic":{"ipaddress":"10.0.0.1","fqdn":"solo.prod"}}`))
+	f.Add([]byte(`[{"name":"a","run_list":["role["]}]`))
+	f.Add([]byte(`[{"name":"a","run_list":["]"]}]`))
+	f.Add([]byte(`{`))
+	f.Add([]byte(``))
+	f.Fuzz(func(_ *testing.T, data []byte) {
+		_, _ = FromChef(data, fuzzNow)
+	})
+}
+
+// FuzzFromPuppet feeds arbitrary bytes to the Puppet importer to prove it never panics.
+//
+// It reads three shapes as well: a PuppetDB nodes query, a facts query that names its nodes one
+// fact row at a time, and the plain certname list `puppet node list` prints, which is not JSON at
+// all. A fuzzer gets to hand it something that is almost each of those.
+func FuzzFromPuppet(f *testing.F) {
+	f.Add([]byte(`[{"certname":"a.prod","catalog_environment":"production"}]`))
+	f.Add([]byte(`[{"certname":"b.prod","name":"ipaddress","value":"10.0.0.2"}]`))
+	f.Add([]byte("c.prod\nd.prod\n\n# comment\n"))
+	f.Add([]byte(`[{"certname":"x","deactivated":"2026-08-01T00:00:00Z"}]`))
+	f.Add([]byte(`{`))
+	f.Add([]byte(``))
+	f.Fuzz(func(_ *testing.T, data []byte) {
+		_, _ = FromPuppet(data, fuzzNow)
+	})
+}
+
+// FuzzFromCron feeds arbitrary bytes to the crontab importer to prove it never panics.
+//
+// Both forms are exercised, because the six-field `/etc/crontab` shape carries a user column
+// before the command and is parsed by position: a short line is the obvious way to walk off the
+// end of the fields, and only the system form looks that far.
+func FuzzFromCron(f *testing.F) {
+	f.Add([]byte("0 3 * * * /usr/bin/backup.sh\n"))
+	f.Add([]byte("0 3 * * * root /usr/bin/backup.sh\n"))
+	f.Add([]byte("* * * * *\n"))
+	f.Add([]byte("@reboot /bin/true\n"))
+	f.Add([]byte("MAILTO=ops\n0 1 * * 1-5 /bin/thing\n"))
+	f.Add([]byte("* * * *\n"))
+	f.Add([]byte(""))
+	f.Fuzz(func(_ *testing.T, data []byte) {
+		for _, system := range []bool{false, true} {
+			_, _ = FromCron("hosts.ini", system)(data, fuzzNow)
+		}
+	})
+}
