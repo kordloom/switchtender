@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -36,6 +37,11 @@ type harness struct {
 	// bin is the locally built switchtender binary, used to verify receipts offline. Verification
 	// deliberately runs outside the cluster: evidence a server checks about itself proves nothing.
 	bin string
+	// portSeq numbers local forward ports so every forward binds a port nothing has touched.
+	portSeq int
+	// skipTeam records that the Team tier was not exercised, so the report says what ran rather
+	// than what usually runs.
+	skipTeam bool
 	// api is the base URL of whichever install is currently port-forwarded.
 	api string
 	// forward is the running port-forward process, ended before the next one starts.
@@ -72,17 +78,33 @@ type harness struct {
 // pod's log rather than being handed a token out of band: adopting the real first credential is
 // more faithful than minting one past the gate, and it proves the bootstrap path itself works.
 func (h *harness) bootstrap(namespace string) error {
-	pod, err := h.serverPod(namespace)
+	// The initial admin token prints on whichever server pod won first-boot initialization, so
+	// every server pod's logs are scanned: an active-active install has two, and reading only the
+	// first found the loser's logs about half the time.
+	pods, err := h.kubectl("get", "pod", "-n", namespace,
+		"-l", "app.kubernetes.io/component=server", "-o", "jsonpath={.items[*].metadata.name}")
 	if err != nil {
 		return err
 	}
-	logs, err := h.kubectl("logs", "-n", namespace, pod)
-	if err != nil {
-		return fmt.Errorf("read server logs for the initial token: %w", err)
+	names := strings.Fields(pods)
+	if len(names) == 0 {
+		return fmt.Errorf("no server pod found in %s", namespace)
 	}
-	adminToken := parseInitialToken(logs)
+	adminToken := ""
+	var allLogs strings.Builder
+	for _, pod := range names {
+		logs, lerr := h.kubectl("logs", "-n", namespace, pod)
+		if lerr != nil {
+			return fmt.Errorf("read server logs for the initial token: %w", lerr)
+		}
+		allLogs.WriteString(logs)
+		if adminToken == "" {
+			adminToken = parseInitialToken(logs)
+		}
+	}
 	if adminToken == "" {
-		return fmt.Errorf("the server did not print an initial admin token; logs:\n%s", logs)
+		return fmt.Errorf("no server pod printed an initial admin token; logs:\n%s",
+			allLogs.String())
 	}
 	admin := &actor{Name: "initial", Type: "user", Token: adminToken}
 
@@ -201,6 +223,44 @@ func (h *harness) runIn(stdin string, name string, args ...string) (string, erro
 	return string(out), nil
 }
 
+// runOut runs a command and returns stdout alone, with stderr carried only inside the error. The
+// ordinary helpers combine the streams, which is right for forensics and wrong for capture: a
+// sealed backup taken through the combined helper came back with the human count report stitched
+// into the envelope bytes.
+func (h *harness) runOut(name string, args ...string) (string, error) {
+	cmd := exec.Command(name, args...)
+	cmd.Env = append(os.Environ(), "KUBECONFIG="+h.kubeconfig)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return stdout.String(), fmt.Errorf("%s %s: %w\n%s", name, strings.Join(args, " "), err,
+			stderr.String())
+	}
+	return stdout.String(), nil
+}
+
+// writePodFile lands content at path inside a pod and proves it landed whole. It carries the
+// bytes on the argv as base64 rather than on stdin, because kubectl exec -i can drop stdin while
+// the far command exits zero: cat wrote an empty playbook about half the time under load, ansible
+// answered "Empty playbook, nothing to do", and the flake wore the face of a product failure. The
+// byte count is verified after the write, so a landing that was not whole is an error here, named,
+// rather than a mystery two phases later.
+func (h *harness) writePodFile(namespace, pod, path, content string) error {
+	encoded := base64.StdEncoding.EncodeToString([]byte(content))
+	script := fmt.Sprintf("printf %%s %s | base64 -d > %s && wc -c < %s", encoded, path, path)
+	out, err := h.kubectl("exec", "-n", namespace, pod, "--", "sh", "-c", script)
+	if err != nil {
+		return fmt.Errorf("write %s into %s: %w", path, pod, err)
+	}
+	got := strings.TrimSpace(out)
+	want := fmt.Sprintf("%d", len(content))
+	if got != want {
+		return fmt.Errorf("write %s into %s: %s bytes landed, want %s", path, pod, got, want)
+	}
+	return nil
+}
+
 // kubectl runs kubectl against the supertest cluster.
 func (h *harness) kubectl(args ...string) (string, error) {
 	return h.run("kubectl", args...)
@@ -213,19 +273,42 @@ func (h *harness) apply(manifest string) error {
 }
 
 // forwardTo ends any current port-forward and starts one to the named service, waiting until the
-// API answers. Each install gets its own local port so a stale forward can never answer for the
-// wrong one.
-func (h *harness) forwardTo(namespace, service string, localPort int) error {
+// API answers. Every call gets a fresh local port, never a reused one: a port that just carried a
+// killed forward is a bind race the kernel sometimes loses, and losing it looked like sixty
+// seconds of connection refused with nothing to blame. Fresh ports also keep the original
+// property, that a stale forward can never answer for the wrong install.
+func (h *harness) forwardTo(namespace, service string) error {
+	return h.forwardTarget(namespace, "svc/"+service)
+}
+
+// forwardToPod forwards to one named pod, for the moments where WHICH endpoint answers is the
+// claim itself: proving the surviving replica serves alone means dialing the survivor by name,
+// because a service-routed forward can resolve to the dying pod's sandbox and burn the whole
+// window on an endpoint that no longer exists.
+func (h *harness) forwardToPod(namespace, pod string) error {
+	return h.forwardTarget(namespace, "pod/"+pod)
+}
+
+// forwardTarget ends any current port-forward and starts one to the named target, waiting until
+// the API answers.
+func (h *harness) forwardTarget(namespace, target string) error {
 	h.stopForward()
-	cmd := exec.Command("kubectl", "port-forward", "-n", namespace, "svc/"+service,
+	h.portSeq++
+	localPort := 18900 + h.portSeq
+	cmd := exec.Command("kubectl", "port-forward", "-n", namespace, target,
 		fmt.Sprintf("%d:8080", localPort))
 	cmd.Env = append(os.Environ(), "KUBECONFIG="+h.kubeconfig)
+	// The child's stderr is kept: a forward that dies at birth used to fail as sixty seconds of
+	// connection refused with the actual reason discarded, which is the least useful failure
+	// there is.
+	var forwardErr bytes.Buffer
+	cmd.Stderr = &forwardErr
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start port-forward: %w", err)
 	}
 	h.forward = cmd
 	h.api = fmt.Sprintf("http://127.0.0.1:%d", localPort)
-	return h.waitFor(fmt.Sprintf("%s/healthz answers", h.api), 60*time.Second, func() error {
+	err := h.waitFor(fmt.Sprintf("%s/healthz answers", h.api), 60*time.Second, func() error {
 		resp, err := h.httpc.Get(h.api + "/healthz")
 		if err != nil {
 			return err
@@ -236,6 +319,10 @@ func (h *harness) forwardTo(namespace, service string, localPort int) error {
 		}
 		return nil
 	})
+	if err != nil && forwardErr.Len() > 0 {
+		return fmt.Errorf("%w; kubectl port-forward said: %s", err, forwardErr.String())
+	}
+	return err
 }
 
 // stopForward ends the current port-forward, if one is running.
