@@ -160,7 +160,14 @@ func TestAFreshLeaseIsNotAgedByClockSkew(t *testing.T) {
 			return roundhouse.Result{ExitCode: 0}, nil
 		})
 
-	d := New(store, runner, zap.NewNop())
+	// The sweeps below are driven explicitly, so the background janitor is not needed and is not
+	// harmless: the real stores stamp the lease inside the same statement that moves the status,
+	// while this fake has to transition and then correct the timestamp in a second step. A janitor
+	// tick landing between those two reads a lease stamped by the inner store's own clock, which
+	// under this fake's skew looks three lifetimes old, and interrupts a run that just started.
+	// That window exists only in the fake, so letting it decide the verdict would be this test
+	// reporting on its own scaffolding rather than on the product.
+	d := New(store, runner, zap.NewNop(), WithNoJanitor())
 	defer d.Close()
 
 	created, err := d.Submit(ctx, "", "", run.WithTool(run.ToolBash), run.WithCommand("deploy"),

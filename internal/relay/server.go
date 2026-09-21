@@ -305,8 +305,33 @@ func (s *relayServer) start(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "run not found")
 		return
 	}
+	// A worker's clock does not get to write the evidence this node signs. The report path has
+	// held reported times inside the window this node observed since before this endpoint
+	// existed, and a start time is evidence of the same kind: it is digested into the run's
+	// outcome entry, it travels in the receipt, and the overrun sweep measures the run's lifetime
+	// against it, so an unclamped start both backdates an attested execution window and buys an
+	// unbounded one. Same bounds as clampReportTimes, and for the reason stated there.
+	//
+	// There is no run-level warning here the way a report gets one: the fenced transition writes
+	// the status and the lease in one statement and carries no warning column, and a second write
+	// to add one would be exactly the unfenced whole-row save this endpoint replaced. The moved
+	// time is logged instead, and the value that reaches the chain is still one this node can
+	// stand behind.
+	startedAt := body.StartedAt
+	switch {
+	case startedAt.IsZero():
+		startedAt = time.Now()
+	default:
+		if bounded, moved := clampTime(startedAt, stored.CreatedAt, time.Now()); moved {
+			s.log.Warn("relay: a worker reported a start time outside the window this control "+
+				"node observed, so the recorded start was held to that window",
+				zap.String("run_id", id), zap.Time("reported", startedAt),
+				zap.Time("recorded", bounded))
+			startedAt = bounded
+		}
+	}
 	moved, err := s.store.TransitionStatusAndClaim(r.Context(), id, run.StatusPending,
-		run.StatusRunning, normalizeOwner(body.Owner), body.StartedAt)
+		run.StatusRunning, normalizeOwner(body.Owner), startedAt)
 	switch {
 	case errors.Is(err, run.ErrNotFound):
 		writeErr(w, http.StatusNotFound, "run not found")
