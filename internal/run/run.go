@@ -70,14 +70,29 @@ func NormalizeTool(tool string) string {
 	return tool
 }
 
+// BuiltinTools returns every compiled-in execution tool, in declaration order. It is the one
+// statement of the set: validation gates on it here, and roundhouse classifies and dispatches from
+// it, so a tool added to the product cannot pass submission while the executor has never heard of
+// it. A guard test in roundhouse walks this set against the dispatcher.
+func BuiltinTools() []string {
+	return []string{ToolAnsible, ToolBash, ToolTerraform, ToolOpenTofu, ToolPython,
+		ToolPowerShell, ToolGo}
+}
+
+// IsBuiltinTool reports whether tool names a compiled-in execution tool, after normalization.
+func IsBuiltinTool(tool string) bool {
+	return builtinTool(tool)
+}
+
 // builtinTool reports whether tool is one of the compiled-in execution tools.
 func builtinTool(tool string) bool {
-	switch NormalizeTool(tool) {
-	case ToolAnsible, ToolBash, ToolTerraform, ToolOpenTofu, ToolPython, ToolPowerShell, ToolGo:
-		return true
-	default:
-		return false
+	normalized := NormalizeTool(tool)
+	for _, t := range BuiltinTools() {
+		if normalized == t {
+			return true
+		}
 	}
+	return false
 }
 
 // extraTools holds tool names added by an extension so ValidTool accepts them alongside the
