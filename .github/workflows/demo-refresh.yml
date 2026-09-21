@@ -13,6 +13,12 @@ permissions:
 jobs:
   refresh:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # One refresh at a time, finishing what it starts: two dispatches racing the same droplet is
+    # the one way this could leave the demo half-upgraded.
+    concurrency:
+      group: demo-refresh
+      cancel-in-progress: false
     steps:
       - name: Refuse without the deploy key
         env:

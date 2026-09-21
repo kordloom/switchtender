@@ -14,6 +14,13 @@ import (
 func TestOpenRefusesANewSchemaOnCommunity(t *testing.T) {
 	dsn := os.Getenv("SWITCHTENDER_TEST_POSTGRES_DSN")
 	if dsn == "" {
+		// The same ratchet as the store contract: the release gate demands the full suite, and a
+		// licensing gate that quietly skipped there would green-light a release the paid tier's
+		// own refusal never ran on.
+		if os.Getenv("SWITCHTENDER_REQUIRE_FULL_SUITE") == "1" {
+			t.Fatal("SWITCHTENDER_REQUIRE_FULL_SUITE is set and SWITCHTENDER_TEST_POSTGRES_DSN " +
+				"is not: the full suite was demanded and the license gate cannot run")
+		}
 		t.Skip("SWITCHTENDER_TEST_POSTGRES_DSN not set")
 	}
 	team := license.Current()

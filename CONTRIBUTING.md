@@ -26,7 +26,10 @@ Project's license. Add a trailer to your commit message with your legal name and
 
 - Open an issue first for anything substantial, so the design is agreed before you build it.
 - Keep each pull request focused on one change.
-- Build and run the tests before you push.
+- Run `./scripts/ci-local.sh` before you push. It is the exact suite CI runs, including the
+  PostgreSQL contract and the loomseal cross-checks that plain `go test ./...` silently skips,
+  so passing it locally and passing CI are the same fact. `./scripts/ci-local.sh fast` is the
+  inner loop: build, vet, and the race suite only.
 - Match the surrounding code style.
 
 Questions about licensing or a larger contribution: licensing@switchtender.com
