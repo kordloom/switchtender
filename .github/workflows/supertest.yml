@@ -23,7 +23,9 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          # The upgrade phase resolves the previous release from the repository's own tags.
+          # The upgrade phase resolves the previous release from the repository's own tags, and
+          # fetch-tags quietly fetches nothing at the default shallow depth.
+          fetch-depth: 0
           fetch-tags: true
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
