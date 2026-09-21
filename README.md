@@ -185,6 +185,17 @@ in the run's summary, with screenshots of the deployed UI in the artifacts.
 
     go run ./test/supertest -skip-team
 
+Two smaller proofs travel with the repository. `scripts/prove.sh` walks the whole claim in about a
+minute against a server it starts itself: an agent proposes a destructive change, policy holds it,
+the agent is refused its own approval, a person approves the exact content, the deletion really
+happens, and the receipt verifies offline until one recorded byte is altered. And before you
+migrate anything:
+
+    switchtender assess awx export.json
+
+reads your existing estate and reports what comes across, what does not, and which of your
+templates nobody currently has to approve, without writing a thing.
+
 ## See it
 
 Poke at the [live demo](https://demo.switchtender.com), read-only and seeded with real runs, nothing to install.
