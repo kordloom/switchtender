@@ -48,6 +48,11 @@ archives:
         formats: [zip]
     files:
       - LICENSE
+      # Beside LICENSE, because it changes one of its parameters for the versions released before
+      # LICENSE carried the two-year wording. Somebody auditing an archive offline reads what is in
+      # their hand, so the grant travels with the artifact rather than living only in a repository
+      # they would have to know to go and find.
+      - LICENSE-GRANT.md
       - README.md
 
 checksum:
