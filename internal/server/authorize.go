@@ -305,8 +305,13 @@ func (a *authorizer) objectsFor(ctx context.Context, subjects map[string]bool,
 // A run is not an object somebody was granted; it is a record of what was done to hosts through the
 // objects it names. Fetching one by id asks for use on each of them, so a list of runs has to ask the
 // same question or the list discloses what the fetch withholds.
+// It filters in both grant modes, which is where it parts company with readFilter. The by-id fetch
+// denies on an object that carries grants the caller does not match whether or not strict grants are
+// on, because that check runs before the strict one. A list that kept everything on an open install
+// therefore returned the very runs the fetch refused, with their command, project, inventory and
+// owning org, on the default configuration.
 func (a *authorizer) runReadFilter(ctx context.Context) (func(id, orgID string) bool, error) {
-	return a.objectFilter(ctx, grant.AccessUse)
+	return a.objectFilter(ctx, grant.AccessUse, filterInEveryMode)
 }
 
 // readFilter returns a predicate reporting whether the request actor may see an object, given its id
@@ -316,16 +321,33 @@ func (a *authorizer) runReadFilter(ctx context.Context) (func(id, orgID string) 
 // or they are a member of its owning organization, so another org's objects are excluded; an admin
 // still sees all. A nil authorizer or grant store keeps everything. The error surfaces a grant-store
 // failure so the caller can fail closed.
+// It keeps everything on an open install, unlike runReadFilter, and that difference is deliberate
+// rather than an oversight. None of the objects it filters has a by-id read, so there is no second
+// answer for a listing to disagree with, and the documented rule is that a read grant scopes a
+// listing under strict grants. Scoping them always would hide objects an operator granted in order
+// to delegate, not in order to conceal.
 func (a *authorizer) readFilter(ctx context.Context) (func(id, orgID string) bool, error) {
-	return a.objectFilter(ctx, grant.AccessRead)
+	return a.objectFilter(ctx, grant.AccessRead, filterUnderStrictOnly)
 }
 
+// Whether a list is filtered on an install that has not turned strict grants on. A list with a
+// matching by-id read must be, or it discloses what that read refuses; a list with none need not be,
+// and the documented rule for those is that a read grant scopes them under strict grants.
+const (
+	filterInEveryMode     = true
+	filterUnderStrictOnly = false
+)
+
 // objectFilter is the shared body of readFilter and runReadFilter, deciding visibility at the given
-// access level so the two cannot drift apart in anything but that level.
-func (a *authorizer) objectFilter(ctx context.Context,
-	want grant.Access) (func(id, orgID string) bool, error) {
+// access level so the two cannot drift apart in anything but that level and in whether an open
+// install filters at all.
+func (a *authorizer) objectFilter(ctx context.Context, want grant.Access,
+	whenOpen bool) (func(id, orgID string) bool, error) {
 	keepAll := func(_, _ string) bool { return true }
-	if a == nil || a.grants == nil || !a.strict {
+	if a == nil || a.grants == nil {
+		return keepAll, nil
+	}
+	if !a.strict && !whenOpen {
 		return keepAll, nil
 	}
 	actor, ok := actorFrom(ctx)
