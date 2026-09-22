@@ -172,10 +172,16 @@ func Build(ctx context.Context, runs run.Store, audits audit.Store, id audit.Ide
 				"the chain committed, usually because retention has pruned this run's logs or "+
 				"summaries, so the receipt proves the chain but does not show what the run did")
 		default:
-			var bodyObj any
-			if json.Unmarshal(body, &bodyObj) == nil {
+			// Disclosed as the exact bytes the content digest was taken over, the same as spec_body.
+			// It used to be disclosed as a re-parsed tree, which a verifier had to marshal again to
+			// re-digest. That re-marshal does not reproduce the committed bytes: above the canonical
+			// size cap the digest is taken over the struct's field order while a tree re-marshals in
+			// key order, and a number wider than a float does not survive the round trip at any
+			// size. Either one made an honest receipt for a large or wide outcome report NOT
+			// VERIFIED. The exact bytes have neither problem.
+			if len(body) > 0 {
 				if claim := outcomeClaim(doc, outcomeEntry.Path); claim != nil {
-					claim.Payload["outcome_body"] = bodyObj
+					claim.Payload["outcome_body"] = string(body)
 					claim.Payload["outcome_nonce"] = outcomeEntry.Nonce
 					// A spec that will not reduce to redacted bytes is withheld, never disclosed raw, and
 					// the receipt says so. Dropping it in silence shipped a signed receipt that looked

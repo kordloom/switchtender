@@ -325,6 +325,22 @@ func UnkeyedDigestOf(body []byte) string {
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
+// UnkeyedDigestOfReduced returns "sha256:" plus the hex SHA-256 of body exactly as given. It is for
+// a body that is already the canonical redacted form CanonicalRedacted produces and is disclosed in
+// that same form, such as a run's spec: the digest then covers exactly the bytes a reader is shown.
+//
+// It exists because UnkeyedDigestOf reduces its input, and reducing an already-reduced body redacts
+// it a second time. Redaction is not idempotent: a value the first pass masks to a marker can leave
+// the second pass matching from the marker to the end of the line, so R2 = redact(redact(raw))
+// drops text that R1 = redact(raw) kept. Digesting R2 while disclosing R1 meant the digest did not
+// cover the disclosed bytes and, worse, two specs differing only in that dropped tail collapsed
+// onto one digest. That is a tamper gate a changed command walks straight through, so the spec is
+// digested by this function over the exact bytes it discloses instead.
+func UnkeyedDigestOfReduced(body []byte) string {
+	sum := sha256.Sum256(body)
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
 // canonicalForDigest reduces a request body to the bytes the digest commits to: the redacted,
 // canonical JSON when it parses, or the raw body when it is too large to canonicalize economically.
 // A body that parses is never digested raw, so a secret the redaction removed is not committed by a

@@ -426,7 +426,11 @@ func verifySpecConsistency(claims []BundleClaim, rep *BundleReport) {
 			return
 		}
 		body := []byte(text)
-		got := UnkeyedDigestOf(body)
+		// Hashed exactly as disclosed, the same as the producer stamps it. UnkeyedDigestOf would
+		// reduce these already-reduced bytes a second time, which is not idempotent, so a genuine
+		// spec could hash to a value the chain never committed while a tampered one collided with
+		// the value it did.
+		got := UnkeyedDigestOfReduced(body)
 		if !rep.SpecPresent {
 			rep.SpecPresent = true
 			rep.SpecBody = body
@@ -476,14 +480,19 @@ func verifyOutcomeDisclosure(claims []BundleClaim, rep *BundleReport) {
 			continue
 		}
 		nonce, _ := c.Payload["outcome_nonce"].(string)
-		body, err := json.Marshal(bodyVal)
-		if err != nil {
-			// An unmarshalable disclosure is a disclosure that cannot be checked, which is a
-			// failure rather than a reason to stop looking.
+		// Read as the exact bytes disclosed, the same as the spec. Marshaling a re-parsed tree back
+		// to bytes cannot reproduce what the digest committed, above the size cap where key order
+		// diverges from field order and at any size for a number wider than a float, so an honest
+		// receipt for a large outcome read as tampered.
+		text, isText := bodyVal.(string)
+		if !isText {
+			// A disclosure that is not the exact-bytes form cannot be checked, which is a failure
+			// rather than a reason to stop looking.
 			rep.OutcomePresent = true
 			rep.OutcomeDigestOK = false
 			continue
 		}
+		body := []byte(text)
 		ok := VerifyContentDigest(digest, nonce, body)
 		if !rep.OutcomePresent {
 			// The first disclosure is the one the report shows, so the body a reader sees is

@@ -86,7 +86,11 @@ func SpecDigest(r *run.Run) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return audit.UnkeyedDigestOf(body), nil
+	// Digested over the exact bytes Spec returns, which are the exact bytes a receipt discloses as
+	// spec_body. Reducing them again here redacted a second time, and redaction is not idempotent,
+	// so the digest stopped covering the disclosed spec and two different commands could share one
+	// digest, walking through the approved-spec gate.
+	return audit.UnkeyedDigestOfReduced(body), nil
 }
 
 // DecisionRecord is the canonical body an approval decision commits: which run, which verdict, and
