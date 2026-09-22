@@ -621,16 +621,11 @@ func rerunRunHandler(store run.Store, submitter Submitter, authz *authorizer, lo
 			respondError(w, log, http.StatusConflict, reason)
 			return
 		}
-		// Access to the run is not enough to fire its spec again. Authorize every object the new
-		// run touches, mirroring a template launch, so a rerun cannot borrow a project, inventory,
-		// credential, or worker queue the actor was never granted. The queue is added here rather
-		// than in runObjects because it scopes execution, not readability.
-		reexecObjects := runObjects(rn)
-		if rn.Queue != "" {
-			reexecObjects = append(reexecObjects, grant.QueueObject(rn.Queue))
-		}
-		if denyOnAuthzError(w, log,
-			authz.authorizeAll(r.Context(), grant.AccessUse, reexecObjects...)) {
+		// Access to the run is not enough to fire its spec again, and what re-execution requires is
+		// decided in one place so the four paths that do it cannot answer differently. Composing
+		// the pieces here instead is how the registry pull credential came to be authorized on some
+		// of them and not others.
+		if authorizeReexecute(w, r, authz, log, rn) {
 			return
 		}
 		// Rerunning the same run twice inside the dedupe window is one request, not two, so a

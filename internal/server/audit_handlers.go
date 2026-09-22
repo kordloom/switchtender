@@ -226,24 +226,10 @@ func auditVerifyHandler(store audit.Store, installID string, log *zap.Logger) ht
 	}
 }
 
-// maxBundleEntries is how many entries an unwindowed bundle export will assemble.
-//
-// A bundle is one signed document over every claim it carries, so unlike the streaming verify it has to
-// hold them all at once. An audit chain grows for the life of an install, a row per mutating request,
-// per webhook fire, and per span beat, so on a long-lived install an unwindowed export assembles the
-// whole history in memory, several times its stored size, on every request. Past this the caller is
-// asked to name a window instead, which the command has always offered.
-//
-// The number is what a small box survives, not what the format tolerates. Measured on this code:
-// 250,000 entries peak at about 1.7 GB resident and produce an 89 MB artifact, which is an
-// out-of-memory kill on the 1 and 2 GB instances this product is sold as running on, reachable by
-// one GET. The homepage teaches that exact curl as the thing to run against any install, so the
-// ceiling has to be a size the advertised install can actually serve. 25,000 peaks around 243 MB
-// and still produces a 12.7 MB document, which is a real evidence artifact by any measure.
-//
-// A chain longer than this is not refused, only windowed: the caller names limit=<count> and takes
-// the newest slice, and the CLI has always offered that.
-const maxBundleEntries = 25_000
+// maxBundleEntries is how many entries an unwindowed bundle export will assemble. It reads the one
+// ceiling both signed documents are bound by, which carries the measurement that chose it; the
+// receipt endpoint is held to the same number for the same reason.
+const maxBundleEntries = audit.MaxAssembledClaims
 
 // suggestedBundleWindow is the window the refusal message recommends: under the ceiling, so a caller
 // who pastes it succeeds rather than meeting the limit from the other direction.
