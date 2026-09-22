@@ -17,6 +17,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/dossier"
+	"github.com/kordloom/switchtender/internal/license"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -63,6 +64,9 @@ type Emitter struct {
 	cancel context.CancelFunc
 	// wg waits for the loop to finish.
 	wg sync.WaitGroup
+	// lapsed makes the warning about a lapsed register license print once rather than on every
+	// tick, since the condition persists until somebody renews.
+	lapsed sync.Once
 }
 
 // Option configures an Emitter.
@@ -155,7 +159,22 @@ func (e *Emitter) Start() error {
 }
 
 // emitDue writes a pack when a full cadence has elapsed since the archive's newest one.
+//
+// The license is checked on every tick, not only when the emitter was started. The register is a
+// paid feature and serve refuses to start one for an install that never bought it, but the gate ran
+// once at startup and this loop is a goroutine that outlives it, so a term that lapsed while the
+// process ran kept writing paid artifacts every cadence. That is the mirror of the bricking the
+// startup path was fixed to stop, and it is the same rule either way: the clock is read on every
+// call. Packs already written stay valid and keep verifying offline.
 func (e *Emitter) emitDue() {
+	if err := license.Allow(license.FeatureRegister); err != nil {
+		e.lapsed.Do(func() {
+			e.log.Warn("evidence: the license for the period change register is no longer valid, " +
+				"so no further packs are written. Every pack already written stays valid and " +
+				"verifies offline: " + err.Error())
+		})
+		return
+	}
 	now := e.now()
 	last, err := e.resume(now)
 	if err != nil {
