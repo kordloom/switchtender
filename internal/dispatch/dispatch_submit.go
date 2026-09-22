@@ -75,6 +75,15 @@ func requireToolInput(r *run.Run) error {
 	if !run.ValidTool(r.Tool) {
 		return ErrUnknownTool
 	}
+	// An image is only honored for a tool the container runner can execute. A tool registered
+	// through the SDK or a plugin is run on the host by design, so accepting an image for one
+	// produced a run whose record, signed outcome and dossier all named a container it never
+	// entered. Refusing here says so at submit, where an operator can act on it, rather than
+	// leaving a false environment in the evidence.
+	if r.Image != "" && !run.IsBuiltinTool(r.Tool) {
+		return fmt.Errorf("%w: the %s tool is provided by a plugin and runs on the host, so it "+
+			"cannot execute in the image %q", ErrToolImage, run.NormalizeTool(r.Tool), r.Image)
+	}
 	if run.NormalizeTool(r.Tool) == run.ToolAnsible {
 		if r.Playbook == "" {
 			return ErrNoPlaybook

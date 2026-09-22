@@ -282,7 +282,12 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 	// ever filled when it was empty, so a run that pinned its own image sees no change, a run that
 	// took a project or server default now has that image on its record, and a host run stays empty.
 	// The evidence a run leaves must show which environment ran it, not only the one it asked for.
-	r.Image = spec.Image
+	// Stamped only for a tool the container runner can actually execute. A plugin tool runs on the
+	// host whatever the spec carries, so recording a server or project default image on one would
+	// put an environment in the evidence that the run never entered, and that record is signed.
+	if run.IsBuiltinTool(r.Tool) {
+		r.Image = spec.Image
+	}
 
 	credCleanup, secrets, err := d.materializeCredentials(ctx, r, &spec)
 	if err != nil {

@@ -79,3 +79,8 @@ var errLeaseLost = errors.New("this executor lost its lease while the run execut
 // cannot run a worker to serve it. Nothing can ever claim such a run, so it is refused at submit
 // rather than accepted and left pending forever with no error anywhere to explain it.
 var ErrQueueUnlicensed = errors.New("named queues need a license this install does not have")
+
+// ErrToolImage is returned when a run names an execution image for a tool that cannot run inside
+// one. A tool registered through the SDK or a plugin executes on the host, so an image on such a run
+// would be recorded as an environment the run never entered.
+var ErrToolImage = errors.New("this tool cannot execute in an image")
