@@ -17,6 +17,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/scrub"
 	"github.com/kordloom/switchtender/internal/util"
 )
 
@@ -583,7 +584,7 @@ func runMeta(r *run.Run) []metaRow {
 	// go run stores its whole script here, which can carry an inline token or a connection string.
 	// The receipt path already runs the same field through a redactor before disclosing it; this one
 	// rendered it verbatim, so exporting a run and mailing it published whatever the script held.
-	redactedCommand, _ := util.RedactAssignments(r.Command, "[redacted]")
+	redactedCommand, _ := util.RedactAssignments(r.Command, scrub.Marker)
 	add("Command", redactedCommand)
 	add("Inventory", r.Inventory)
 	add("Inventory id", r.InventoryID)

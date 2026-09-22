@@ -16,8 +16,6 @@ import (
 	"github.com/kordloom/switchtender/internal/run"
 	"github.com/kordloom/switchtender/internal/schedule"
 	"github.com/kordloom/switchtender/internal/template"
-	"github.com/kordloom/switchtender/internal/user"
-	"github.com/kordloom/switchtender/internal/util"
 )
 
 // listRunsResponse wraps a run list. The envelope leaves room for pagination fields later.
@@ -487,7 +485,7 @@ func runLogsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.Ha
 // admin sees the original: they hold every credential on the install already, and redacting for the
 // person who maintains it only obstructs them, which is the reasoning redactInventories records.
 func scrubbedRun(ctx context.Context, rn *run.Run) *run.Run {
-	if actor, ok := actorFrom(ctx); ok && actor.Role == user.RoleAdmin {
+	if isAdmin(ctx) {
 		return rn
 	}
 	return redactRunCommand(rn)
@@ -505,26 +503,13 @@ func scrubbedTemplate(ctx context.Context, t *template.Template) *template.Templ
 	if t == nil {
 		return nil
 	}
-	if actor, ok := actorFrom(ctx); ok && actor.Role == user.RoleAdmin {
-		return t
-	}
-	masked := t.Command
-	if masked != "" {
-		masked, _ = util.RedactAssignments(masked, "[redacted]")
-	}
-	vars := redactVars(t.ExtraVars)
-	steps := redactSteps(t.Steps)
-	if masked == t.Command && vars == nil && steps == nil {
+	if t == nil || isAdmin(ctx) {
 		return t
 	}
 	cp := *t
-	cp.Command = masked
-	if vars != nil {
-		cp.ExtraVars = vars
-	}
-	if steps != nil {
-		cp.Steps = steps
-	}
+	cp.Command = templateCommandScrubber(ctx).Scrub(t.Command)
+	cp.ExtraVars = templateVarsScrubber(ctx).Scrub(t.ExtraVars)
+	cp.Steps = stepsScrubber(ctx).Scrub(t.Steps)
 	return &cp
 }
 
@@ -554,15 +539,11 @@ func scrubbedSchedule(ctx context.Context, sc *schedule.Schedule) *schedule.Sche
 	if sc == nil {
 		return nil
 	}
-	if actor, ok := actorFrom(ctx); ok && actor.Role == user.RoleAdmin {
-		return sc
-	}
-	steps := redactSteps(sc.Steps)
-	if steps == nil {
+	if sc == nil || isAdmin(ctx) {
 		return sc
 	}
 	cp := *sc
-	cp.Steps = steps
+	cp.Steps = stepsScrubber(ctx).Scrub(sc.Steps)
 	return &cp
 }
 

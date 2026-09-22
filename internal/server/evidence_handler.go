@@ -11,6 +11,7 @@ import (
 	"github.com/kordloom/switchtender/internal/dossier"
 	"github.com/kordloom/switchtender/internal/license"
 	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/scrub"
 	"github.com/kordloom/switchtender/internal/util"
 )
 
@@ -167,7 +168,7 @@ func redactRunCommand(rn *run.Run) *run.Run {
 	}
 	masked := rn.Command
 	if masked != "" {
-		masked, _ = util.RedactAssignments(masked, "[redacted]")
+		masked, _ = util.RedactAssignments(masked, scrub.Marker)
 	}
 	vars := redactVars(rn.ExtraVars)
 	steps := redactSteps(rn.Steps)
@@ -199,7 +200,7 @@ func redactSteps(in []run.PipelineStep) []run.PipelineStep {
 		if out[i].Command == "" {
 			continue
 		}
-		masked, _ := util.RedactAssignments(out[i].Command, "[redacted]")
+		masked, _ := util.RedactAssignments(out[i].Command, scrub.Marker)
 		if masked != out[i].Command {
 			out[i].Command = masked
 			changed = true
@@ -227,7 +228,7 @@ func redactVars(in map[string]any) map[string]any {
 	// an array, and a secret-named key holding a number all traveled intact through the surface
 	// every role reads most. It also copied shallowly, so recursing through the old copy would
 	// have edited the live record it was protecting.
-	out, changed := util.RedactDeep(in, "[redacted]")
+	out, changed := util.RedactDeep(in, scrub.Marker)
 	if !changed {
 		return nil
 	}

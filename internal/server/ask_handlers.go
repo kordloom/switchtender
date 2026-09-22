@@ -13,6 +13,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/ai"
 	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/scrub"
 	"github.com/kordloom/switchtender/internal/util"
 )
 
@@ -175,7 +176,7 @@ func buildFleetSnapshot(ctx context.Context, store run.Store,
 			if run.NormalizeTool(r.Tool) != run.ToolAnsible {
 				// The fleet snapshot carries one line of each recent run's script into the same
 				// third-party prompt, so it gets the same scrub the explain path does.
-				scrubbed, _ := util.RedactAssignments(r.Command, "[redacted]")
+				scrubbed, _ := util.RedactAssignments(r.Command, scrub.Marker)
 				target = util.Clip(strings.SplitN(scrubbed, "\n", 2)[0], 60)
 			}
 			line := fmt.Sprintf("- %s %s %s %s", r.ID, run.NormalizeTool(r.Tool), r.Status, target)

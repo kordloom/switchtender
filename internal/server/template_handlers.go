@@ -15,6 +15,7 @@ import (
 	"github.com/kordloom/switchtender/internal/inventory"
 	"github.com/kordloom/switchtender/internal/project"
 	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/scrub"
 	"github.com/kordloom/switchtender/internal/template"
 )
 
@@ -277,6 +278,26 @@ func updateTemplateHandler(store template.Store, authz *authorizer, log *zap.Log
 				return
 			}
 			notifications = restored
+			// The read of a template scrubs its command, its launch variables and its steps for
+			// anyone below admin, and the only read of a template is that scrubbed list, so an
+			// ordinary edit from the UI submits the scrubbed form back. Without this the mask was
+			// stored over the real credential and every later launch ran the mask.
+			ctx := r.Context()
+			if req.Command, rerr = scrub.Restore(templateCommandScrubber(ctx), req.Command,
+				existing.Command, "command"); rerr != nil {
+				respondError(w, log, http.StatusConflict, rerr.Error())
+				return
+			}
+			if req.ExtraVars, rerr = scrub.Restore(templateVarsScrubber(ctx), req.ExtraVars,
+				existing.ExtraVars, "extra vars"); rerr != nil {
+				respondError(w, log, http.StatusConflict, rerr.Error())
+				return
+			}
+			if req.Steps, rerr = scrub.Restore(stepsScrubber(ctx), req.Steps, existing.Steps,
+				"steps"); rerr != nil {
+				respondError(w, log, http.StatusConflict, rerr.Error())
+				return
+			}
 			// Moving a template out of an organization is as much a change of who controls it as
 			// moving one in, and it is the direction a caller with a manage grant would take: clear
 			// the org and the org's admins lose management of it while its members lose sight of

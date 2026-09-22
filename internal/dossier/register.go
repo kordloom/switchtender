@@ -12,6 +12,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/scrub"
 	"github.com/kordloom/switchtender/internal/util"
 )
 
@@ -337,7 +338,7 @@ func changeOf(r *run.Run) string {
 		// already runs this same field through the same redactor for the same reason; this is the
 		// derived document that skipped it. Redacted before the truncation, so a secret cannot
 		// survive as a fragment of a cut line.
-		what, _ = util.RedactAssignments(r.Command, "[redacted]")
+		what, _ = util.RedactAssignments(r.Command, scrub.Marker)
 	}
 	// The cut is counted in runes, not bytes. A byte cut split the last character of a script
 	// written in any non-ASCII alphabet, so the Change column and the CSV export beside it carried
