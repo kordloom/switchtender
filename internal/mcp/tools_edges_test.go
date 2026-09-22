@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -194,9 +195,11 @@ func TestEveryToolCallIsOneAuthenticatedRequestOnItsOwnEndpoint(t *testing.T) {
 			Tool: "get_run", Args: `{"run_id":"run_1"}`, WantMethod: http.MethodGet,
 			WantPath: "/v1/runs/run_1",
 		},
-		{ // Test 2: Reading a log reads the log endpoint, which serves text.
+		{ // Test 2: Reading a log reads the log endpoint, which serves text, and asks for the end
+			// of it. The reply is bounded, and a run's failure and its recap are at the end, so a
+			// bounded read from the front returns the least useful part of a long run.
 			Tool: "get_run_log", Args: `{"run_id":"run_1"}`, WantMethod: http.MethodGet,
-			WantPath: "/v1/runs/run_1/logs",
+			WantPath: "/v1/runs/run_1/logs", WantQuery: "tail=1048576",
 		},
 		{ // Test 3: Evidence is asked for as data, because the reader is a model rather than a person
 			// and the same endpoint otherwise answers with a page of markup.
@@ -254,8 +257,10 @@ func TestProposeRunReadsTheTemplateBeforeLaunchingWithALimit(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("requests = %d, want the template read then the launch: %+v", len(got), got)
 	}
-	if got[0].Method != http.MethodGet || got[0].Path != "/v1/templates/tpl_1" {
-		t.Errorf("first request = %s %s, want the template read", got[0].Method, got[0].Path)
+	// The listing, not a per-id read: the API registers no GET on a single template, so asking for
+	// one answered 405 and every narrowing launch failed before it reached the check.
+	if got[0].Method != http.MethodGet || got[0].Path != "/v1/templates" {
+		t.Errorf("first request = %s %s, want the template listing", got[0].Method, got[0].Path)
 	}
 	if got[1].Method != http.MethodPost || got[1].Path != "/v1/templates/tpl_1/launch" {
 		t.Errorf("second request = %s %s, want the launch", got[1].Method, got[1].Path)
@@ -594,6 +599,13 @@ func TestAHostileIdentifierStaysInsideItsOwnEndpoint(t *testing.T) {
 		{Tool: "get_run_evidence", Key: "run_id", Prefix: "/v1/runs/"},
 		{Tool: "propose_run", Key: "template_id", Prefix: "/v1/templates/"},
 	}
+	// The query each tool composes for itself, empty for the ones that send none. get_run_log asks
+	// for the end of the log because the reply is bounded, and get_run_evidence asks for data
+	// rather than a page of markup.
+	ownQuery := map[string]string{
+		"get_run_log":      "tail=" + strconv.Itoa(maxResponseBytes),
+		"get_run_evidence": "format=json",
+	}
 	for testNum, target := range targets {
 		t.Run(fmt.Sprintf("test %d %s", testNum, target.Tool), func(t *testing.T) {
 			t.Parallel()
@@ -615,8 +627,15 @@ func TestAHostileIdentifierStaysInsideItsOwnEndpoint(t *testing.T) {
 						t.Errorf("%s(%q) reached the admin-only account list at %q",
 							target.Tool, id, got.Path)
 					}
-					if got.Query != "" && target.Tool != "get_run_evidence" {
-						t.Errorf("%s(%q) smuggled a query string %q", target.Tool, id, got.Query)
+					// A tool that sends no query of its own must still send none for a hostile id.
+					// Two do send one, and for those the query has to be exactly what the tool
+					// composes: an id that adds to it, or changes it, is the smuggling this looks
+					// for. Comparing against the tool's own query rather than the empty string
+					// keeps that check exact instead of relaxing it to "some query is fine".
+					if got.Query != ownQuery[target.Tool] {
+						t.Errorf("%s(%q) sent the query %q, want exactly %q: an id that changes "+
+							"the query reaches a different request than the tool composed",
+							target.Tool, id, got.Query, ownQuery[target.Tool])
 					}
 				}
 			}

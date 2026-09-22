@@ -31,6 +31,11 @@ import (
 // context is not, so a reply is capped here rather than after it has been buffered.
 const maxResponseBytes = 1 << 20
 
+// truncationNotice is appended to a text reply that was cut, so a model reading it knows it is
+// holding the end of something longer rather than the whole of it.
+const truncationNotice = "\n\n[this output was cut off: it is longer than this tool can return, " +
+	"and what is above is the end of it, not the whole of it]"
+
 // ErrAdminToken is returned when the configured token carries admin rights. An agent must hold a
 // scoped operator token, so the server refuses to start rather than lending an agent admin authority.
 var ErrAdminToken = errors.New("the token has admin rights")
@@ -93,18 +98,18 @@ func NewClient(base, token string, timeout time.Duration) (*Client, error) {
 // doRaw performs one API call and returns the raw response body. A non-2xx reply becomes an error
 // carrying the server's message, so an agent is told why it was refused rather than being handed a
 // bare status code.
-func (c *Client) doRaw(ctx context.Context, method, path string, body any) ([]byte, error) {
+func (c *Client) doRaw(ctx context.Context, method, path string, body any) (data []byte, truncated bool, err error) {
 	var reader io.Reader
 	if body != nil {
 		encoded, err := json.Marshal(body)
 		if err != nil {
-			return nil, fmt.Errorf("encode request: %w", err)
+			return nil, false, fmt.Errorf("encode request: %w", err)
 		}
 		reader = bytes.NewReader(encoded)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, c.base+path, reader)
 	if err != nil {
-		return nil, fmt.Errorf("build request: %w", err)
+		return nil, false, fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+c.token)
 	req.Header.Set("Accept", "application/json")
@@ -113,23 +118,30 @@ func (c *Client) doRaw(ctx context.Context, method, path string, body any) ([]by
 	}
 	res, err := c.http.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("call %s: %w", path, err)
+		return nil, false, fmt.Errorf("call %s: %w", path, err)
 	}
 	defer func() { _ = res.Body.Close() }()
 
-	data, err := io.ReadAll(io.LimitReader(res.Body, maxResponseBytes))
+	// One byte past the cap, so a body that was cut can be told from one that merely reached it.
+	// Returning the prefix silently let a model read the first megabyte of a long log as though it
+	// were the whole log, and conclude a run succeeded from output that stops before it failed.
+	data, err = io.ReadAll(io.LimitReader(res.Body, maxResponseBytes+1))
 	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", path, err)
+		return nil, false, fmt.Errorf("read %s: %w", path, err)
+	}
+	if len(data) > maxResponseBytes {
+		data = data[:maxResponseBytes]
+		truncated = true
 	}
 	if res.StatusCode < 200 || res.StatusCode > 299 {
-		return nil, fmt.Errorf("%s: %s", res.Status, serverMessage(data))
+		return nil, false, fmt.Errorf("%s: %s", res.Status, serverMessage(data))
 	}
-	return data, nil
+	return data, truncated, nil
 }
 
 // do performs one API call and decodes the JSON reply into out, which may be nil to discard it.
 func (c *Client) do(ctx context.Context, method, path string, body, out any) error {
-	data, err := c.doRaw(ctx, method, path, body)
+	data, _, err := c.doRaw(ctx, method, path, body)
 	if err != nil {
 		return err
 	}
@@ -146,9 +158,25 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 // text/plain rather than JSON, such as a run's log. Decoding that body as JSON, as do would, fails
 // on the first character.
 func (c *Client) doText(ctx context.Context, method, path string) (string, error) {
-	data, err := c.doRaw(ctx, method, path, nil)
+	data, truncated, err := c.doRaw(ctx, method, path, nil)
 	if err != nil {
 		return "", err
+	}
+	if truncated {
+		// Said in the body rather than returned separately, because the caller hands this straight
+		// to a model and a flag it does not render is a flag the model never sees. A reader that
+		// believes it has the whole log reads the absence of a failure as the absence of a problem.
+		//
+		// The notice is counted against the bound rather than added to it, so the reply a caller
+		// receives is still the size this client promises to return.
+		room := maxResponseBytes - len(truncationNotice)
+		if room < 0 {
+			room = 0
+		}
+		if len(data) > room {
+			data = data[:room]
+		}
+		return string(data) + truncationNotice, nil
 	}
 	return string(data), nil
 }

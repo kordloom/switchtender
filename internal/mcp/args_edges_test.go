@@ -578,7 +578,7 @@ func TestCheckLimitAllowsOnlyANarrowingPattern(t *testing.T) {
 			var reads int
 			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				reads++
-				_, _ = fmt.Fprintf(w, `{"id":"tpl_1","limit":%q}`, test.Pinned)
+				_, _ = fmt.Fprintf(w, `{"templates":[{"id":"tpl_1","limit":%q}]}`, test.Pinned)
 			}))
 			defer ts.Close()
 			c, err := NewClient(ts.URL, "st_test_token", 5*time.Second)

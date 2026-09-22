@@ -117,13 +117,27 @@ func checkLimit(ctx context.Context, c *Client, templateID, limit string) error 
 			"name the hosts this run should touch, or leave limit out to use the template's own target",
 			limit)
 	}
-	var tpl struct {
-		Limit string `json:"limit"`
+	// Read from the listing rather than a per-id GET. There is no GET on a single template: the
+	// path has PUT and DELETE registered, so the mux answers 405 and every attempt to narrow a
+	// launch failed with a method error that named nothing an agent could act on. The listing is a
+	// route the agent is already entitled to and carries each template's pinned limit.
+	var listing struct {
+		Templates []struct {
+			ID    string `json:"id"`
+			Limit string `json:"limit"`
+		} `json:"templates"`
 	}
-	if err := c.do(ctx, "GET", "/v1/templates/"+escapeID(templateID), nil, &tpl); err != nil {
+	if err := c.do(ctx, "GET", "/v1/templates", nil, &listing); err != nil {
 		return err
 	}
-	if pinned := strings.TrimSpace(tpl.Limit); pinned != "" && pinned != limit {
+	var pinnedLimit string
+	for _, t := range listing.Templates {
+		if t.ID == templateID {
+			pinnedLimit = t.Limit
+			break
+		}
+	}
+	if pinned := strings.TrimSpace(pinnedLimit); pinned != "" && pinned != limit {
 		return fmt.Errorf("this template pins its target to %q, so limit cannot be changed: launch it "+
 			"as defined, or ask an operator for a template that targets %q", pinned, limit)
 	}

@@ -1,9 +1,11 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -417,5 +419,58 @@ func TestARedirectIsARefusalRatherThanAReply(t *testing.T) {
 				t.Errorf("get_run error = %v, want the %d status named", err, test.Status)
 			}
 		})
+	}
+}
+
+// TestALongLogSaysItWasCutOff covers the difference between a bounded reply and a misleading one.
+//
+// A run log can be far larger than a model's context, so the client bounds what it returns. Bounding
+// it silently is the problem: the model receives the first part of a long log as though it were the
+// whole log, and a run whose failure and recap are at the end reads as a run that did nothing wrong.
+// An agent triaging an incident then reports success.
+//
+// The reply says it was cut, and the bound still holds, because a notice that pushes the body past
+// the limit defeats the reason the limit exists.
+func TestALongLogSaysItWasCutOff(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		for written := 0; written < maxResponseBytes+(1<<16); written += 1 << 12 {
+			_, _ = w.Write(bytes.Repeat([]byte("x"), 1<<12))
+		}
+	}))
+	defer ts.Close()
+
+	c, err := NewClient(ts.URL, "st_test_token", 5*time.Second)
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	got, err := c.doText(context.Background(), http.MethodGet, "/v1/runs/run_1/logs")
+	if err != nil {
+		t.Fatalf("doText() error = %v", err)
+	}
+	if !strings.Contains(got, "cut off") {
+		t.Error("a log longer than the bound came back with nothing to say it was cut, so a model " +
+			"reads the part it was given as the whole run")
+	}
+	if len(got) > maxResponseBytes {
+		t.Errorf("the reply is %d bytes, above the %d bound: the notice has to fit inside the "+
+			"limit rather than be added on top of it", len(got), maxResponseBytes)
+	}
+
+	// A short reply is returned as it is, with nothing appended.
+	short := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "all done\n")
+	}))
+	defer short.Close()
+	sc, err := NewClient(short.URL, "st_test_token", 5*time.Second)
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	plain, err := sc.doText(context.Background(), http.MethodGet, "/v1/runs/run_1/logs")
+	if err != nil {
+		t.Fatalf("doText() error = %v", err)
+	}
+	if plain != "all done\n" {
+		t.Errorf("a short log came back as %q, want it untouched", plain)
 	}
 }
