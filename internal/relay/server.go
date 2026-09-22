@@ -279,6 +279,13 @@ func (s *relayServer) heartbeat(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// A shard inherits its parent's queue, so a worker holding a shard is served its parent here and
+	// could renew the coordinator's lease from outside, keeping a parent alive or covering for a
+	// coordinator that has stopped. The not-found answer is reused so a caller learns nothing.
+	if coordinatedByControlNode(stored) {
+		writeErr(w, http.StatusNotFound, "run not found")
+		return
+	}
 	// The capability minted at claim renews the lease, the same proof the reports carry. A run
 	// claimed before it existed has no secret and falls back to the owner match the store applies.
 	if !leaseHeld(stored, r) {
@@ -309,6 +316,11 @@ func (s *relayServer) start(w http.ResponseWriter, r *http.Request) {
 	}
 	stored := s.servesRun(w, r)
 	if stored == nil {
+		return
+	}
+	// A parent is moved to running by its own coordinator, not by a worker announcing a start.
+	if coordinatedByControlNode(stored) {
+		writeErr(w, http.StatusNotFound, "run not found")
 		return
 	}
 	if !leaseHeld(stored, r) {
@@ -599,7 +611,7 @@ func checkWorkerReport(stored, reported *run.Run, leaseVerified bool) error {
 	// holder is the control node's own coordinator, so without this a worker that learned the
 	// parent's id, which its own claim response gives it, could terminalize the coordinator's run and
 	// strand every shard beneath it. A report on one is a report on work this worker did not do.
-	if stored.Kind != "" {
+	if coordinatedByControlNode(stored) {
 		return fmt.Errorf("run is coordinated by the control node and is not a worker's to report on")
 	}
 	// A run awaiting a decision was never claimable in the first place.
@@ -648,6 +660,42 @@ func applyWorkerReport(stored, reported *run.Run) {
 	if len(reported.Outputs) > 0 {
 		stored.Outputs = reported.Outputs
 	}
+}
+
+// clampFactsTimes holds each reported gather time to the window between the run's creation and now,
+// so a worker cannot choose which history bucket its report lands in. It mirrors clampReportTimes,
+// which does the same for a run's own start and end, and a time it moves is reported rather than
+// silently corrected.
+func clampFactsTimes(stored *run.Run, facts []run.HostFacts, now time.Time) {
+	if stored == nil {
+		return
+	}
+	for i := range facts {
+		if facts[i].GatheredAt.IsZero() {
+			facts[i].GatheredAt = now
+			continue
+		}
+		if bounded, moved := clampTime(facts[i].GatheredAt, stored.CreatedAt, now); moved {
+			facts[i].GatheredAt = bounded
+		}
+	}
+}
+
+// coordinatedByControlNode reports whether a run is the control node's to drive rather than a
+// worker's to touch.
+//
+// A split or pipeline parent is coordinated here and executed by nobody. The claim loop skips any
+// run carrying a kind, so no worker was ever handed one, but a worker learns its parent's id from
+// its own claim response, which is enough to address it. Every worker-facing call therefore asks
+// this before acting: reporting on one writes a record of work the worker did not do, appending to
+// one writes output into the rollup of its children, and renewing its lease keeps the coordinator's
+// own claim alive from outside, which lets a worker hold a parent open or mask a coordinator that
+// has stopped.
+//
+// It is one function because it was two copies, and the two calls that needed it most did not have
+// either of them.
+func coordinatedByControlNode(stored *run.Run) bool {
+	return stored != nil && stored.Kind != ""
 }
 
 // clampReportTimes holds a worker's reported timing inside the window the control node observed,
@@ -745,7 +793,7 @@ func (s *relayServer) heldForReport(w http.ResponseWriter, r *http.Request) bool
 	// worker has output to add to it. Its captured log and events are the rollup of its children, and
 	// letting a worker append to it would write output into the record of work it did not do. This is
 	// the same boundary the report check draws, applied to the writers that carry the evidence.
-	if stored.Kind != "" {
+	if coordinatedByControlNode(stored) {
 		writeErr(w, http.StatusConflict,
 			"run is coordinated by the control node and is not a worker's to add to")
 		return false
@@ -930,6 +978,15 @@ func (s *relayServer) saveHostFacts(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusForbidden, "this run has recorded no result for host "+bad+
 			", so facts for it are refused: report the run's per-host results first")
 		return
+	}
+	// The reported gather time is held to the window this control node observed, the same way a
+	// reported start and end already are. It is not only a label: the history table is keyed on a
+	// bucket derived from it, so a worker choosing the time chooses which stored reading its report
+	// replaces. A time far in the past overwrites an old bucket, and enough of them push a host's
+	// real history past the retained depth and out, which is a worker deleting evidence about
+	// machines rather than adding it.
+	if stored, gerr := s.store.Get(r.Context(), r.PathValue("id")); gerr == nil {
+		clampFactsTimes(stored, facts, time.Now())
 	}
 	if err := s.store.SaveHostFacts(r.Context(), r.PathValue("id"), facts); err != nil {
 		s.internal(w, "save host facts", err)
