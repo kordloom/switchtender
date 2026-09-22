@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"context"
+	"crypto/ed25519"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/kordloom/loomseal/seal"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 
@@ -76,9 +79,10 @@ var witnessVerifyCmd = &cobra.Command{
 	Short: "Verify a witness attestation offline against a pinned witness key.",
 	Long: `Verify a witness attestation offline.
 
-Reads a JSON attestation, recomputes its signature, and prints the verdict with the signer's key.
-Pass --pubkey with the witness key you have pinned; without it the check proves only that the
-document is internally consistent, which a forger with their own key satisfies trivially.`,
+Reads a JSON attestation, recomputes its signature, and prints the verdict with the signer's key in
+both published forms: the raw hex public key and the sha256 key id. Pass --pubkey with the witness
+key you have pinned, in either form; without it the check proves only that the document is
+internally consistent, which a forger with their own key satisfies trivially.`,
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE:         runWitnessVerify,
@@ -106,7 +110,8 @@ func init() {
 			"visible in the process list. Required when --listen is not loopback, so a public witness "+
 			"does not hand anyone the list of watched servers or the cross-server findings feed.")
 	witnessVerifyCmd.Flags().StringVar(&witnessVerifyPubkey, "pubkey", "",
-		"Pinned witness public key in hex; verification fails when the signer differs.")
+		"Pinned witness key, either the sha256 key id the witness publishes or the raw hex public "+
+			"key; verification fails when the signer is neither.")
 	witnessCmd.AddCommand(witnessServeCmd, witnessVerifyCmd)
 }
 
@@ -252,13 +257,26 @@ func runWitnessVerify(_ *cobra.Command, args []string) error {
 		"blind":          a.Blind,
 		"signed_by":      signer,
 	}
+	// Both names for the signing key, because both are published and a relying party may hold
+	// either. The attestation carries the raw hex key; the witness prints, and this command's own
+	// help tells an operator to publish, the sha256 key id.
+	keyID := witnessKeyIDOf(signer)
+	if keyID != "" {
+		verdict["signed_by_key_id"] = keyID
+	}
 	if err != nil {
 		verdict["problem"] = err.Error()
 	}
 	// The pin is what turns a self-consistent document into one from the witness you trust.
-	if err == nil && witnessVerifyPubkey != "" && signer != witnessVerifyPubkey {
+	//
+	// It accepts either form. The pin was compared against the raw hex key alone, so a relying
+	// party who pinned exactly what they were told to publish got a refusal on a sound attestation,
+	// which is the one path the whole witness exists to make work.
+	if err == nil && witnessVerifyPubkey != "" &&
+		signer != witnessVerifyPubkey && keyID != witnessVerifyPubkey {
 		verdict["ok"] = false
-		verdict["problem"] = "signed by " + signer + ", not by the pinned witness key"
+		verdict["problem"] = "signed by " + signer + " (key id " + keyID +
+			"), not by the pinned witness key"
 	}
 	out, jerr := jsonutil.Marshal(verdict, true)
 	if jerr != nil {
@@ -269,4 +287,17 @@ func runWitnessVerify(_ *cobra.Command, args []string) error {
 		return fmt.Errorf("attestation did not verify")
 	}
 	return nil
+}
+
+// witnessKeyIDOf returns the sha256 key id of a hex-encoded public key, or empty when it is not one.
+//
+// The witness publishes two names for one key: the attestation carries the raw hex key, and the
+// witness API, the startup line, and this command's help all name the key id. A relying party holds
+// whichever they were given, so the pin is compared against both.
+func witnessKeyIDOf(publicKeyHex string) string {
+	raw, err := hex.DecodeString(publicKeyHex)
+	if err != nil || len(raw) != ed25519.PublicKeySize {
+		return ""
+	}
+	return seal.KeyID(raw)
 }
