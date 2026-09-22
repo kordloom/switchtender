@@ -25,6 +25,26 @@ func (d *Dispatcher) claimLoop() {
 			return
 		}
 
+		// Asked before every claim, not once at startup. A process whose claiming is the licensed
+		// feature runs for months, so a gate it passes on the morning it starts says nothing about
+		// the term a year later. Refusing stops new work and leaves what is running alone.
+		if d.claimGate != nil {
+			if gerr := d.claimGate(); gerr != nil {
+				<-d.sem
+				d.claimGateSaid.Do(func() {
+					d.log.Warn("dispatch: no longer claiming work: " + gerr.Error())
+				})
+				idle++
+				timer := time.NewTimer(d.idleWait(idle))
+				select {
+				case <-timer.C:
+				case <-d.ctx.Done():
+				}
+				timer.Stop()
+				continue
+			}
+		}
+
 		r, err := d.store.Claim(d.ctx, d.owner, d.queues)
 		if err != nil {
 			<-d.sem

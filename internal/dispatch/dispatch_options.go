@@ -98,6 +98,9 @@ type config struct {
 	// noJanitor disables the stale-lease janitor. A relay worker sets it because the store it runs
 	// against cannot reclaim leases; that stays the control node's job.
 	noJanitor bool
+	// claimGate refuses new claims while it returns an error, for a process whose claiming is a
+	// licensed feature. Nil on a single node install, where claiming is not.
+	claimGate func() error
 	// now reads the wall clock for the timestamps a run carries on its record and its outcome entry:
 	// created, started, ended. Nil defaults to time.Now. It exists so the demo can seed a run as of a
 	// past instant, with its record, chain entry, and receipt all agreeing on that time. It never
@@ -167,6 +170,26 @@ func WithQueues(queues []string) Option {
 // reclaim leases, so it turns the sweep off and leaves stale-lease recovery to the control node.
 func WithNoJanitor() Option {
 	return func(c *config) { c.noJanitor = true }
+}
+
+// WithClaimGate sets a check the claim loop makes before leasing each run, and stops it claiming
+// while the check refuses.
+//
+// It exists for the relay worker, whose whole reason to run is a paid feature. That feature was
+// gated once at startup, and the process then blocks on a signal for as long as the operator leaves
+// it up, so a term that lapsed a year ago still had a fleet of workers draining the queue. The
+// evidence emitter had the same shape and now reads its license on every tick; this is that, for a
+// loop rather than a ticker.
+//
+// It is an option rather than a check inside the loop because the same loop runs on a single node
+// install, where claiming is not a paid feature and gating it would stop an unlicensed install from
+// running anything at all. Only the worker passes one.
+//
+// A refusal stops new claims and nothing else. Runs already executing finish, the process stays up,
+// and the operator's daemon is not killed underneath them, which is the same rule every other lapse
+// follows.
+func WithClaimGate(gate func() error) Option {
+	return func(c *config) { c.claimGate = gate }
 }
 
 // WithNotifyClient replaces the client that delivers notifications.
@@ -268,6 +291,7 @@ func New(store run.Store, runner roundhouse.Runner, log *zap.Logger, opts ...Opt
 		syncSources:        cfg.syncSources,
 		policies:           cfg.policies,
 		defaultImage:       cfg.defaultImage,
+		claimGate:          cfg.claimGate,
 	}
 	d.wg.Add(1)
 	go d.claimLoop()

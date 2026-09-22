@@ -241,7 +241,12 @@ func TestApprovedPlainRunIsReleasedUnleased(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	store := run.NewMemStore()
-	d := New(store, okRunner(), nil, WithNoJanitor())
+	// Claiming is suppressed for the length of this test. The assertion below is about what Approve
+	// writes, and this dispatcher's own claim loop is entitled to lease the run the instant approval
+	// makes it pending, which is the loop working rather than a defect. Without this the test reads
+	// the row in a window the loop is racing it for, and loses that race under load.
+	d := New(store, okRunner(), nil, WithNoJanitor(),
+		WithClaimGate(func() error { return errNoClaimingInThisTest }))
 	defer d.Close()
 
 	held := &run.Run{
@@ -301,3 +306,7 @@ func TestApproveIsNotAppliedTwice(t *testing.T) {
 		t.Errorf("Reject after approve: error = %v, want %v", err, ErrNotPendingApproval)
 	}
 }
+
+// errNoClaimingInThisTest suppresses a dispatcher's claim loop where a test asserts on a row the
+// loop would otherwise be free to lease out from under it.
+var errNoClaimingInThisTest = errors.New("claiming suppressed for this test")
