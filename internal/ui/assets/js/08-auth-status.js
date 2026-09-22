@@ -1,14 +1,40 @@
 // SSO_PENDING_KEY holds the marker proving this tab is the one that started a sign-in.
 const SSO_PENDING_KEY = "st_sso_pending";
 
+// SSO_PENDING_TTL_MS bounds how long a started sign-in stays answerable. A round trip through a
+// directory takes seconds; a marker older than this belongs to an attempt nobody finished.
+const SSO_PENDING_TTL_MS = 10 * 60 * 1000;
+
 // beginSSO marks this tab as having started a sign-in, so the token that comes back is answered to
-// a request this browser actually made.
+// a request this browser actually made. The time is stored rather than a flag, so the marker can
+// expire on its own.
 function beginSSO() {
 	try {
-		sessionStorage.setItem(SSO_PENDING_KEY, "1");
+		sessionStorage.setItem(SSO_PENDING_KEY, String(Date.now()));
 	} catch (e) {
 		// A browser refusing session storage still signs in; it just cannot prove the round trip.
 	}
+}
+
+// takeSSOPending removes the marker and reports whether this tab started a sign-in recently enough
+// for an answer to belong to it.
+//
+// It is taken on any sign-on reply, not only a successful one. The marker used to be cleared only
+// on the path that carried a token, so a sign-in that came back an error, or that the reader
+// abandoned, left the tab marked forever: every later page load in that tab would accept a planted
+// access_token fragment, which is the one thing the marker exists to stop. Expiring it covers the
+// attempt that never comes back at all.
+function takeSSOPending() {
+	let raw = null;
+	try {
+		raw = sessionStorage.getItem(SSO_PENDING_KEY);
+		sessionStorage.removeItem(SSO_PENDING_KEY);
+	} catch (e) {
+		return false;
+	}
+	if (!raw) return false;
+	const started = Number(raw);
+	return Number.isFinite(started) && started > 0 && Date.now() - started < SSO_PENDING_TTL_MS;
 }
 
 // consumeSSOFragment stores the session token handed back in the URL fragment after single
@@ -22,16 +48,21 @@ function beginSSO() {
 // sender's account. The marker is per-tab and same-origin, so a link opened from outside carries
 // nothing that can satisfy it.
 function consumeSSOFragment() {
-	if (!location.hash || location.hash.indexOf("access_token=") === -1) return;
+	const hash = location.hash || "";
+	const hasToken = hash.indexOf("access_token=") !== -1;
+	const hasError = hash.indexOf("error=") !== -1;
+	if (!hasToken && !hasError) return;
+	// A sign-on reply is either a token or an error, and both end the attempt, so both consume the
+	// marker. Consuming it only on the token path left a tab whose sign-in failed marked forever,
+	// and a marked tab accepts the next planted access_token link, which is the one thing the
+	// marker exists to stop.
+	const started = takeSSOPending();
+	// An error fragment is left where it is. The login page reads it to tell the reader why the
+	// sign-in failed and strips it itself, so stripping it here would replace that sentence with
+	// silence.
+	if (!hasToken) return;
 	// Read the fragment before stripping it, since replaceState clears it.
-	const raw = location.hash.slice(1);
-	let started = false;
-	try {
-		started = sessionStorage.getItem(SSO_PENDING_KEY) === "1";
-		sessionStorage.removeItem(SSO_PENDING_KEY);
-	} catch (e) {
-		started = false;
-	}
+	const raw = hash.slice(1);
 	// Strip the fragment either way, so a rejected one is not left in the address bar to be
 	// copied, shared, or retried.
 	history.replaceState(null, "", location.pathname + location.search);
