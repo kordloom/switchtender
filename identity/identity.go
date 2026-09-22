@@ -7,6 +7,7 @@ package identity
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -284,6 +285,22 @@ func InstallIDFromKey(pub ed25519.PublicKey) string { return installIDFromKey(pu
 
 // installIDFromKey derives a stable install id from the public key, so the id needs no separate
 // management and always corresponds to the key that signs the bundles carrying it.
+//
+// It is a 128-bit hash of the whole key rather than a prefix of the key itself. The id is what ties
+// a bundle's claims to the key that signed them: a verifier accepts a bundle whose producer names
+// an install equal to this value for the signing key, which is what stops one install's history
+// being re-signed and presented as another's. Six raw key bytes made that binding 48 bits, so an
+// attacker could grind keypairs until one was born to a chosen install id and then lift an anchored
+// history onto their own key. Hashing the full key makes the id collision resistant to the same
+// degree the rest of the format assumes.
 func installIDFromKey(pub ed25519.PublicKey) string {
-	return "in_" + hex.EncodeToString(pub[:6])
+	// A key that is not one refuses rather than deriving. The old form indexed the first six bytes
+	// with no check, so an out-of-tree verifier handing over whatever a bundle decoded to took a
+	// panic; hashing accepts any length, which would be worse, since a truncated or empty key would
+	// produce a plausible looking id. An empty answer can only ever fail the comparison it feeds.
+	if len(pub) != ed25519.PublicKeySize {
+		return ""
+	}
+	sum := sha256.Sum256(pub)
+	return "in_" + hex.EncodeToString(sum[:16])
 }
