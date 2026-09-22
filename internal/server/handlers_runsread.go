@@ -14,6 +14,7 @@ import (
 
 	"github.com/kordloom/switchtender/internal/event"
 	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/schedule"
 	"github.com/kordloom/switchtender/internal/template"
 	"github.com/kordloom/switchtender/internal/user"
 	"github.com/kordloom/switchtender/internal/util"
@@ -540,6 +541,44 @@ func scrubbedTemplates(ctx context.Context, list []*template.Template) []*templa
 func respondTemplate(w http.ResponseWriter, r *http.Request, log *zap.Logger, code int,
 	t *template.Template) {
 	respondJSON(w, log, code, scrubbedTemplate(r.Context(), maskTemplate(t)), wantsPretty(r))
+}
+
+// scrubbedSchedule masks secret-shaped assignments in a schedule's pipeline steps for any caller
+// below admin, the same rule scrubbedRun and scrubbedTemplate follow.
+//
+// A schedule that fires a pipeline carries each step's whole script, and a crontab import produces
+// these by the hundred, each holding a command line somebody wrote. The run scrub and the template
+// scrub both reach those bytes; the schedule read did not, so the operator refused a command in a
+// run read the same command in the schedule that fires it.
+func scrubbedSchedule(ctx context.Context, sc *schedule.Schedule) *schedule.Schedule {
+	if sc == nil {
+		return nil
+	}
+	if actor, ok := actorFrom(ctx); ok && actor.Role == user.RoleAdmin {
+		return sc
+	}
+	steps := redactSteps(sc.Steps)
+	if steps == nil {
+		return sc
+	}
+	cp := *sc
+	cp.Steps = steps
+	return &cp
+}
+
+// scrubbedSchedules applies scrubbedSchedule across a list response.
+func scrubbedSchedules(ctx context.Context, list []*schedule.Schedule) []*schedule.Schedule {
+	out := make([]*schedule.Schedule, len(list))
+	for i, sc := range list {
+		out[i] = scrubbedSchedule(ctx, sc)
+	}
+	return out
+}
+
+// respondSchedule writes one schedule back to a caller, scrubbed for who they are.
+func respondSchedule(w http.ResponseWriter, r *http.Request, log *zap.Logger, code int,
+	sc *schedule.Schedule) {
+	respondJSON(w, log, code, scrubbedSchedule(r.Context(), sc), wantsPretty(r))
 }
 
 // respondRun writes one run back to a caller, masked and scrubbed for who they are. Every handler

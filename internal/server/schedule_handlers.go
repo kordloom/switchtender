@@ -148,7 +148,7 @@ func createScheduleHandler(store schedule.Store, authz *authorizer, log *zap.Log
 			return
 		}
 		w.Header().Set("Location", "/v1/schedules/"+sc.ID)
-		respondJSON(w, log, http.StatusCreated, sc, wantsPretty(r))
+		respondSchedule(w, r, log, http.StatusCreated, sc)
 	}
 }
 
@@ -246,7 +246,7 @@ func updateScheduleHandler(store schedule.Store, authz *authorizer, log *zap.Log
 			respondError(w, log, http.StatusInternalServerError, "could not save schedule")
 			return
 		}
-		respondJSON(w, log, http.StatusOK, sc, wantsPretty(r))
+		respondSchedule(w, r, log, http.StatusOK, sc)
 	}
 }
 
@@ -285,7 +285,8 @@ func listSchedulesHandler(store schedule.Store, authz *authorizer, log *zap.Logg
 		}
 		capped, total := cappedList(list)
 		respondJSON(w, log, http.StatusOK,
-			schedulesResponse{Schedules: capped, Count: len(capped), Total: total}, wantsPretty(r))
+			schedulesResponse{Schedules: scrubbedSchedules(r.Context(), capped), Count: len(capped),
+				Total: total}, wantsPretty(r))
 	}
 }
 
@@ -312,7 +313,7 @@ func getScheduleHandler(store schedule.Store, authz *authorizer, log *zap.Logger
 		if denyOnAuthzError(w, log, authz.authorizeSchedule(r.Context(), grant.AccessUse, sc)) {
 			return
 		}
-		respondJSON(w, log, http.StatusOK, sc, wantsPretty(r))
+		respondSchedule(w, r, log, http.StatusOK, sc)
 	}
 }
 

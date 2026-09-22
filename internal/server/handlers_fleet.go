@@ -248,6 +248,17 @@ func reconcileDriftHandler(store run.Store, submitter Submitter, authz *authoriz
 		if denyOnAuthzError(w, log, authz.authorizeRun(r.Context(), grant.AccessUse, check)) {
 			return
 		}
+		// The reconcile inherits the check's worker queue along with the rest of its execution spec,
+		// and a queue is a grantable object precisely because it names where work lands. A run's
+		// readability does not cover it, so authorizing the check alone let an operator turn a
+		// check into a real change on a queue they hold no grant on, which is the same gap the
+		// retry, relaunch, and rerun paths close.
+		if check.Queue != "" {
+			if denyOnAuthzError(w, log,
+				authz.authorizeAll(r.Context(), grant.AccessUse, grant.QueueObject(check.Queue))) {
+				return
+			}
+		}
 
 		// The proposal reruns the check's own execution spec, so it carries the image, pull
 		// credential, and timeout the check ran under. Hand-building the options dropped those, so a
