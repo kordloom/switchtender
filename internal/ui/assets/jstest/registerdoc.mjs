@@ -174,6 +174,9 @@ export function view(overrides) {
 		// The register can be cut at the store boundary, so the document carries the fields that say
 		// so. A whole register is the default here; a test that wants the notice overrides them.
 		Truncated: false, Limit: 5000, CoveredTo: "",
+		// Retention can remove the runs a period held while the chain keeps their entries, so the
+		// document says how many it can no longer show. A complete period is the default here.
+		Pruned: 0,
 		GeneratedAt: "2026-07-08T00:00:00Z",
 	}, overrides);
 }
