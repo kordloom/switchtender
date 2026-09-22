@@ -326,6 +326,9 @@ func (d *Dispatcher) SubmitPipeline(ctx context.Context, name, inventory string,
 		return nil, err
 	}
 	d.resolveQueue(ctx, parent)
+	if err := d.allowResolvedQueue(parent); err != nil {
+		return nil, err
+	}
 	if err := d.pipelineDenied(ctx, parent, steps); err != nil {
 		return nil, err
 	}

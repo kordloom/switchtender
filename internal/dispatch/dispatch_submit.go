@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kordloom/switchtender/internal/license"
 	"github.com/kordloom/switchtender/internal/run"
 )
 
@@ -41,6 +42,31 @@ func (d *Dispatcher) resolveQueue(ctx context.Context, r *run.Run) {
 		return
 	}
 	r.Queue = inv.Queue
+}
+
+// allowResolvedQueue refuses a run pinned to a named queue on an install that cannot run a worker
+// to serve it. The default queue is the server's own pool and needs no worker, so it is always
+// allowed.
+//
+// The server gates the queue a request names, which is every door it can see. It is not every
+// door: a queue also arrives from the launched template and, after that, from the run's stored
+// inventory, and that last one is filled in here, after the handler has already looked at an empty
+// request field and waved it through. So a Community install with a queue on an inventory, or a
+// Team install that let its term lapse, accepted every run against that inventory and pinned each
+// one to a worker group that does not exist. Nothing could claim them and they sat pending
+// forever, which is the silently stranded run the request-side gate was written to stop.
+//
+// Refusing is the only safe answer of the three available. Dropping the queue and running the work
+// on the control node's own pool would quietly cross the boundary the queue was drawn for, and a
+// queue is usually drawn around a network somebody meant to keep separate.
+func (d *Dispatcher) allowResolvedQueue(r *run.Run) error {
+	if r.Queue == "" {
+		return nil
+	}
+	if err := license.Allow(license.FeatureWorkers); err != nil {
+		return fmt.Errorf("%w: %w", ErrQueueUnlicensed, err)
+	}
+	return nil
 }
 
 // requireToolInput checks that a run carries the input its tool needs: a playbook for Ansible, a
@@ -124,6 +150,9 @@ func (d *Dispatcher) Submit(ctx context.Context, playbook, inventory string, opt
 		return nil, err
 	}
 	d.resolveQueue(ctx, r)
+	if err := d.allowResolvedQueue(r); err != nil {
+		return nil, err
+	}
 	// Deny is checked before the hold, and even for a run born held: a rule that refuses a
 	// submission outright must not be satisfied by parking the run in front of an approver.
 	if err := d.denied(ctx, r); err != nil {
@@ -223,6 +252,9 @@ func (d *Dispatcher) SubmitSplit(ctx context.Context, playbook, inventory string
 		return nil, err
 	}
 	d.resolveQueue(ctx, parent)
+	if err := d.allowResolvedQueue(parent); err != nil {
+		return nil, err
+	}
 	// A split is submitted through a different path than a single run, so without this the same
 	// command an operator gated ran freely by being sharded: the identical playbook that Submit
 	// held for an approver executed on every host the moment it was split in two. A shard matches
@@ -431,6 +463,13 @@ func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string, opt
 	for _, opt := range opts {
 		opt(retry)
 	}
+	// The parent's queue comes down with the rest of the spec, so the retry faces the same gate
+	// Submit, SubmitSplit and SubmitPipeline face. Skipping it here let a retry do what a fresh
+	// submission could not: pin work to a queue no worker on this install can serve, and sit
+	// pending forever with nothing to explain it.
+	if err := d.allowResolvedQueue(retry); err != nil {
+		return nil, err
+	}
 	// A retry is authorized by the retry request, not by whatever authorized the parent weeks ago.
 	stampReceipt(ctx, retry)
 	// A retry is a fourth way to submit a run, and it inherits the parent's entire execution spec,
@@ -447,6 +486,13 @@ func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string, opt
 	if held {
 		retry.Status = run.StatusPendingApproval
 	}
+	recordHold(retry, holdRequested)
+	// Pinned while it is held, the same as the other submit paths. Without the pin, approving a
+	// retry released whatever the branch happened to hold when a claim finally picked it up, so
+	// the approver signed off on one change and a later one executed. A retry is exactly where
+	// that gap stays open longest, since it sits in front of an approver by the same rules that
+	// held the run it retries.
+	d.pinHeldRunCommit(retry)
 	saved, dup, err := d.idempotentSave(ctx, retry)
 	if err != nil {
 		return nil, err
@@ -473,6 +519,11 @@ func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string, opt
 			Limit: shard.Limit,
 		}
 		inheritExecution(child, retry)
+		// A held child was held by whatever held its parent, so it says the same thing rather than
+		// reading as a change nothing stopped. The split path already does this; leaving it out
+		// here stored every shard of a held retry at pending_approval naming no rule, so the
+		// register showed them held by nothing.
+		child.HeldByPolicy = retry.HeldByPolicy
 		child.AuditReceipt = retry.AuditReceipt
 		child.OrgID = retry.OrgID
 		if err := d.store.Save(ctx, child); err != nil {

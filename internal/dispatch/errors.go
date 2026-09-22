@@ -74,3 +74,8 @@ var ErrChildNotApprovable = errors.New("a shard or step is approved through its 
 // the run was requeued or settled elsewhere, and this process's job is to stop its tool and stand
 // down. It maps to interrupted, never canceled, because nobody decided anything.
 var errLeaseLost = errors.New("this executor lost its lease while the run executed")
+
+// ErrQueueUnlicensed is returned when a run would be pinned to a named queue on an install that
+// cannot run a worker to serve it. Nothing can ever claim such a run, so it is refused at submit
+// rather than accepted and left pending forever with no error anywhere to explain it.
+var ErrQueueUnlicensed = errors.New("named queues need a license this install does not have")
