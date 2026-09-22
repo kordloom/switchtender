@@ -3,7 +3,9 @@ package server
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -12,9 +14,9 @@ import (
 
 	"github.com/kordloom/switchtender/internal/event"
 	"github.com/kordloom/switchtender/internal/run"
+	"github.com/kordloom/switchtender/internal/template"
 	"github.com/kordloom/switchtender/internal/user"
-	"io"
-	"os"
+	"github.com/kordloom/switchtender/internal/util"
 )
 
 // listRunsResponse wraps a run list. The envelope leaves room for pagination fields later.
@@ -488,6 +490,56 @@ func scrubbedRun(ctx context.Context, rn *run.Run) *run.Run {
 		return rn
 	}
 	return redactRunCommand(rn)
+}
+
+// scrubbedTemplate masks secret-shaped assignments in a template's command, its launch variables
+// and each of its steps, for any caller below admin, the same rule scrubbedRun follows.
+//
+// A template is where a run's command comes from. LaunchOptions copies the command, the variables
+// and the steps verbatim onto every run it fires, so the bytes the run scrub hides were being
+// served unchanged from the template beside it: the viewer refused a password in a run read the
+// same password in the template that launches it, in the next request. Masking the notification
+// targets was the only scrub a template had.
+func scrubbedTemplate(ctx context.Context, t *template.Template) *template.Template {
+	if t == nil {
+		return nil
+	}
+	if actor, ok := actorFrom(ctx); ok && actor.Role == user.RoleAdmin {
+		return t
+	}
+	masked := t.Command
+	if masked != "" {
+		masked, _ = util.RedactAssignments(masked, "[redacted]")
+	}
+	vars := redactVars(t.ExtraVars)
+	steps := redactSteps(t.Steps)
+	if masked == t.Command && vars == nil && steps == nil {
+		return t
+	}
+	cp := *t
+	cp.Command = masked
+	if vars != nil {
+		cp.ExtraVars = vars
+	}
+	if steps != nil {
+		cp.Steps = steps
+	}
+	return &cp
+}
+
+// scrubbedTemplates applies scrubbedTemplate across a list response.
+func scrubbedTemplates(ctx context.Context, list []*template.Template) []*template.Template {
+	out := make([]*template.Template, len(list))
+	for i, t := range list {
+		out[i] = scrubbedTemplate(ctx, t)
+	}
+	return out
+}
+
+// respondTemplate writes one template back to a caller, masked and scrubbed for who they are.
+func respondTemplate(w http.ResponseWriter, r *http.Request, log *zap.Logger, code int,
+	t *template.Template) {
+	respondJSON(w, log, code, scrubbedTemplate(r.Context(), maskTemplate(t)), wantsPretty(r))
 }
 
 // respondRun writes one run back to a caller, masked and scrubbed for who they are. Every handler

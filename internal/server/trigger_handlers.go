@@ -441,7 +441,8 @@ func hookHandler(triggers trigger.Store, templates template.Store, submitter Sub
 		default:
 			created, err = submitter.Submit(ctx, t.Playbook, t.Inventory, opts...)
 		}
-		if errors.Is(err, dispatch.ErrPolicyDenied) {
+		if errors.Is(err, dispatch.ErrPolicyDenied) ||
+			errors.Is(err, dispatch.ErrQueueUnlicensed) {
 			respondError(w, log, http.StatusForbidden, err.Error())
 			return
 		}

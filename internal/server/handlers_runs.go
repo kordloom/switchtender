@@ -212,7 +212,8 @@ func createRunHandler(submitter Submitter, authz *authorizer, log *zap.Logger) h
 			errors.Is(err, dispatch.ErrUnknownTool), errors.Is(err, dispatch.ErrToolCredential):
 			respondError(w, log, http.StatusBadRequest, err.Error())
 			return
-		case errors.Is(err, dispatch.ErrPolicyDenied):
+		case errors.Is(err, dispatch.ErrPolicyDenied) ||
+			errors.Is(err, dispatch.ErrQueueUnlicensed):
 			respondError(w, log, http.StatusForbidden, err.Error())
 			return
 		case err != nil:
@@ -315,7 +316,8 @@ func createPipelineHandler(submitter Submitter, authz *authorizer, log *zap.Logg
 			errors.Is(err, dispatch.ErrUnknownTool), errors.Is(err, dispatch.ErrToolCredential):
 			respondError(w, log, http.StatusBadRequest, err.Error())
 			return
-		case errors.Is(err, dispatch.ErrPolicyDenied):
+		case errors.Is(err, dispatch.ErrPolicyDenied) ||
+			errors.Is(err, dispatch.ErrQueueUnlicensed):
 			respondError(w, log, http.StatusForbidden, err.Error())
 			return
 		case err != nil:
@@ -407,7 +409,7 @@ func retryRunHandler(store run.Store, retrier Retrier, authz *authorizer, log *z
 			respondError(w, log, http.StatusInternalServerError, "could not retry run")
 			return
 		}
-		if authorizeRunAccess(w, r, authz, log, rn) {
+		if authorizeReexecute(w, r, authz, log, rn) {
 			return
 		}
 		// The retry is submitted by whoever asked for it, and the policy gate inside reads that
@@ -428,7 +430,8 @@ func retryRunHandler(store run.Store, retrier Retrier, authz *authorizer, log *z
 		case errors.Is(err, dispatch.ErrNoFailedShards):
 			respondError(w, log, http.StatusConflict, "no failed shards to retry")
 			return
-		case errors.Is(err, dispatch.ErrPolicyDenied):
+		case errors.Is(err, dispatch.ErrPolicyDenied) ||
+			errors.Is(err, dispatch.ErrQueueUnlicensed):
 			respondError(w, log, http.StatusForbidden, err.Error())
 			return
 		case err != nil:
@@ -464,7 +467,7 @@ func relaunchFailedHandler(store run.Store, retrier Retrier, authz *authorizer, 
 			respondError(w, log, http.StatusInternalServerError, "could not relaunch run")
 			return
 		}
-		if authorizeRunAccess(w, r, authz, log, rn) {
+		if authorizeReexecute(w, r, authz, log, rn) {
 			return
 		}
 		// The account travels with the name. Distinct-approver falls back to matching names when a
@@ -486,7 +489,8 @@ func relaunchFailedHandler(store run.Store, retrier Retrier, authz *authorizer, 
 		case errors.Is(err, dispatch.ErrNoFailedHosts):
 			respondError(w, log, http.StatusConflict, "no hosts failed, so there is nothing to relaunch")
 			return
-		case errors.Is(err, dispatch.ErrPolicyDenied):
+		case errors.Is(err, dispatch.ErrPolicyDenied) ||
+			errors.Is(err, dispatch.ErrQueueUnlicensed):
 			respondError(w, log, http.StatusForbidden, err.Error())
 			return
 		case err != nil:
@@ -618,10 +622,15 @@ func rerunRunHandler(store run.Store, submitter Submitter, authz *authorizer, lo
 			return
 		}
 		// Access to the run is not enough to fire its spec again. Authorize every object the new
-		// run touches, mirroring a template launch, so a rerun cannot borrow a project,
-		// inventory, or credential the actor was never granted.
+		// run touches, mirroring a template launch, so a rerun cannot borrow a project, inventory,
+		// credential, or worker queue the actor was never granted. The queue is added here rather
+		// than in runObjects because it scopes execution, not readability.
+		reexecObjects := runObjects(rn)
+		if rn.Queue != "" {
+			reexecObjects = append(reexecObjects, grant.QueueObject(rn.Queue))
+		}
 		if denyOnAuthzError(w, log,
-			authz.authorizeAll(r.Context(), grant.AccessUse, runObjects(rn)...)) {
+			authz.authorizeAll(r.Context(), grant.AccessUse, reexecObjects...)) {
 			return
 		}
 		// Rerunning the same run twice inside the dedupe window is one request, not two, so a
@@ -647,7 +656,8 @@ func rerunRunHandler(store run.Store, submitter Submitter, authz *authorizer, lo
 		} else {
 			created, err = submitter.Submit(r.Context(), rn.Playbook, rn.Inventory, opts...)
 		}
-		if errors.Is(err, dispatch.ErrPolicyDenied) {
+		if errors.Is(err, dispatch.ErrPolicyDenied) ||
+			errors.Is(err, dispatch.ErrQueueUnlicensed) {
 			respondError(w, log, http.StatusForbidden, err.Error())
 			return
 		}

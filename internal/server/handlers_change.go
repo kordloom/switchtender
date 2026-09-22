@@ -113,7 +113,11 @@ func changeHandler(store run.Store, authz *authorizer, log *zap.Logger) http.Han
 		}
 		shown, total := cappedList(visible)
 		resp := summarizeChange(name, visible)
-		resp.Runs, resp.Total, resp.Truncated = shown, total, len(shown) < total
+		// Masked and scrubbed like every other run response. These are store rows, handed over as
+		// they were read, so this one view served a viewer every command, launch variable and
+		// notification target in the clear while the run list beside it masked all three.
+		resp.Runs, resp.Total, resp.Truncated =
+			scrubbedRuns(r.Context(), maskRuns(shown)), total, len(shown) < total
 		resp.Withheld = withheld
 		resp.Partial = partial
 		respondJSON(w, log, http.StatusOK, resp, wantsPretty(r))

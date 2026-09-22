@@ -155,6 +155,12 @@ func parseRegisterTime(raw string) (time.Time, error) {
 
 // redactRunCommand returns rn with any secret assigned inside its script masked, copied so the stored
 // record is left alone. A run whose script carries nothing to mask is returned untouched.
+//
+// A pipeline's steps are covered as well as the run's own command. Each step carries its own script
+// in Steps[].Command, which serializes beside the rest of the run, and the scrub read only the
+// top-level command: a pipeline was the shape that leaked through the very helper every response
+// now funnels through. The copy is shallow, so the steps have to be copied before they are edited,
+// or the scrub would rewrite the record it exists to protect.
 func redactRunCommand(rn *run.Run) *run.Run {
 	if rn == nil {
 		return rn
@@ -164,7 +170,8 @@ func redactRunCommand(rn *run.Run) *run.Run {
 		masked, _ = util.RedactAssignments(masked, "[redacted]")
 	}
 	vars := redactVars(rn.ExtraVars)
-	if masked == rn.Command && vars == nil {
+	steps := redactSteps(rn.Steps)
+	if masked == rn.Command && vars == nil && steps == nil {
 		return rn
 	}
 	cp := *rn
@@ -172,7 +179,36 @@ func redactRunCommand(rn *run.Run) *run.Run {
 	if vars != nil {
 		cp.ExtraVars = vars
 	}
+	if steps != nil {
+		cp.Steps = steps
+	}
 	return &cp
+}
+
+// redactSteps masks secret-shaped assignments in each pipeline step's script, returning nil when
+// nothing changed so the caller can skip the copy. The steps are redacted rather than dropped, so
+// an operator still reads what each step of the pipeline did.
+func redactSteps(in []run.PipelineStep) []run.PipelineStep {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]run.PipelineStep, len(in))
+	copy(out, in)
+	changed := false
+	for i := range out {
+		if out[i].Command == "" {
+			continue
+		}
+		masked, _ := util.RedactAssignments(out[i].Command, "[redacted]")
+		if masked != out[i].Command {
+			out[i].Command = masked
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	return out
 }
 
 // redactVars masks secret-shaped assignments in the string leaves of a run's launch variables,

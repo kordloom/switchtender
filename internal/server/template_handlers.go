@@ -212,7 +212,7 @@ func createTemplateHandler(store template.Store, authz *authorizer, log *zap.Log
 			respondError(w, log, http.StatusInternalServerError, "could not store template")
 			return
 		}
-		respondJSON(w, log, http.StatusCreated, maskTemplate(t), wantsPretty(r))
+		respondTemplate(w, r, log, http.StatusCreated, t)
 	}
 }
 
@@ -333,7 +333,7 @@ func updateTemplateHandler(store template.Store, authz *authorizer, log *zap.Log
 			respondError(w, log, http.StatusInternalServerError, "could not read template")
 			return
 		}
-		respondJSON(w, log, http.StatusOK, maskTemplate(updated), wantsPretty(r))
+		respondTemplate(w, r, log, http.StatusOK, updated)
 	}
 }
 
@@ -359,7 +359,7 @@ func listTemplatesHandler(store template.Store, authz *authorizer, log *zap.Logg
 			respondError(w, log, http.StatusInternalServerError, "could not list templates")
 			return
 		}
-		capped, total := cappedList(maskTemplates(visible))
+		capped, total := cappedList(scrubbedTemplates(r.Context(), maskTemplates(visible)))
 		respondJSON(w, log, http.StatusOK,
 			listTemplatesResponse{Templates: capped, Count: len(capped), Total: total}, wantsPretty(r))
 	}
@@ -596,7 +596,8 @@ func launchTemplateHandler(store template.Store, submitter Submitter, authz *aut
 			errors.Is(err, dispatch.ErrUnknownDependency), errors.Is(err, dispatch.ErrDependencyCycle):
 			respondError(w, log, http.StatusBadRequest, err.Error())
 			return
-		case errors.Is(err, dispatch.ErrPolicyDenied):
+		case errors.Is(err, dispatch.ErrPolicyDenied) ||
+			errors.Is(err, dispatch.ErrQueueUnlicensed):
 			respondError(w, log, http.StatusForbidden, err.Error())
 			return
 		case err != nil:

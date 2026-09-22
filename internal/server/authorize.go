@@ -751,6 +751,27 @@ func authorizeRunAccess(w http.ResponseWriter, r *http.Request, authz *authorize
 	return denyOnAuthzError(w, log, authz.authorizeRun(r.Context(), grant.AccessUse, rn))
 }
 
+// authorizeReexecute authorizes re-running rn's spec: the objects reading it needs, and then the
+// worker queue, which only a re-execution reaches.
+//
+// The direct launch authorizes the queue with AccessUse alongside the project, inventory and
+// credentials before it submits. Retry and relaunch re-run the same spec against the same queue and
+// authorized everything except the queue, so an operator who could touch a run but held no grant on
+// its queue executed on that queue by retrying. The queue is not folded into authorizeRunAccess
+// because it is not part of a run's readability: reading a run's record is not running work on the
+// network its queue names, and reads must not start requiring a queue grant.
+func authorizeReexecute(w http.ResponseWriter, r *http.Request, authz *authorizer,
+	log *zap.Logger, rn *run.Run) bool {
+	if authorizeRunAccess(w, r, authz, log, rn) {
+		return true
+	}
+	if rn.Queue == "" {
+		return false
+	}
+	return denyOnAuthzError(w, log,
+		authz.authorizeAll(r.Context(), grant.AccessUse, grant.QueueObject(rn.Queue)))
+}
+
 // orgForUpdate resolves the owning organization an update should store: the one the request names,
 // or the stored owner when the request names none at all.
 //
