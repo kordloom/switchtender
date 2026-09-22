@@ -96,3 +96,35 @@ func TestALapsedPolicyCapIsOnlyALapseUpToWhatTheTierHeld(t *testing.T) {
 			"never held", over, proPolicyCap)
 	}
 }
+
+// TestAMalformedTermRefusesRatherThanRecursing pins that a license file nobody can parse cannot take
+// the process down.
+//
+// Deciding whether a refusal counts as a lapse means asking what this license held while it was
+// live. Asking that by calling back in with a time inside the term looked right and was not: a term
+// whose Expires does not parse reads as expired at every instant, including the one chosen to be
+// inside it, so the call recursed on identical arguments until the stack ran out. A license file is
+// operator-supplied and a malformed one is ordinary, so that is a crash anybody could trigger by
+// mistyping a date.
+func TestAMalformedTermRefusesRatherThanRecursing(t *testing.T) {
+	t.Parallel()
+	broken := &License{Claims: Claims{
+		V: 1, ID: "lic_broken", Org: "Example", Tier: TierPro,
+		Issued: "not a date", Expires: "also not a date",
+	}}
+	now := time.Now()
+
+	// Well past what any tier below Team holds, which is the branch that used to recurse.
+	if err := allowPoliciesAt(broken, proPolicyCap+40, now); err == nil {
+		t.Error("a license whose term does not parse was allowed an uncapped policy set")
+	}
+	// And the ordinary feature gate on the same license.
+	if err := allowAt(broken, FeaturePolicyFull, now); err == nil {
+		t.Error("a license whose term does not parse was allowed a paid feature")
+	}
+	// A count every tier holds is still fine, so the refusal is about the cap and not about the
+	// license being unreadable.
+	if err := allowPoliciesAt(broken, 1, now); err != nil {
+		t.Errorf("one policy was refused on a malformed license: %v", err)
+	}
+}

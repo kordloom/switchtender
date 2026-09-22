@@ -314,10 +314,15 @@ func allowPoliciesAt(l *License, total int, now time.Time) error {
 	// A lapse is named as a lapse. A caller that must keep an install running needs to tell a term
 	// that ran out from a tier that never covered this, because only one of the two is something
 	// the customer had working yesterday.
-	// Named a lapse only when this license, while live, would have held this many. A lapsed Pro
-	// asked to hold fifty policies never had that, so it gets the plain refusal: ErrLapsed means
-	// the term ran out on something the install actually had.
-	if lapsed && allowPoliciesAt(l, total, issuedAt(l)) == nil {
+	// Named a lapse only when this license's tier, while live, would have held this many. A lapsed
+	// Pro asked to hold fifty policies never had that, so it gets the plain refusal: ErrLapsed
+	// means the term ran out on something the install actually had.
+	//
+	// The tier is asked directly rather than by calling back in with a time inside the term. A
+	// license whose Expires does not parse reads as expired at every instant, including that one,
+	// so the recursive form never reached a base case and a malformed license file took the process
+	// down with a stack overflow instead of refusing.
+	if lapsed && tierHoldsPolicies(l, total) {
 		return fmt.Errorf("%w: this install's license for %s lapsed on %s, and the Community tier "+
 			"holds one approval policy rather than %d. https://switchtender.com/pricing",
 			ErrLapsed, l.Claims.Org, l.Claims.Expires, total)
@@ -355,14 +360,20 @@ func PathFor(db string) string {
 	return dir + "/switchtender-license.json"
 }
 
-// issuedAt returns a time inside the license's own term, for asking what this license allowed while
-// it was live. It is the issue date, which is inside the term by construction. An unparseable one
-// falls back to the zero time, which reads as not expired, so the question still resolves to what
-// the tier allows rather than to an error, and that is the answer being asked for here.
-func issuedAt(l *License) time.Time {
-	issued, err := time.Parse(time.RFC3339, l.Claims.Issued)
-	if err != nil {
-		return time.Time{}
+// tierHoldsPolicies reports whether this license's tier holds total approval policies, ignoring the
+// clock entirely. It answers "would this license have allowed this while it was live", which is what
+// decides whether a refusal counts as a lapse, without consulting the term that has already run out.
+func tierHoldsPolicies(l *License, total int) bool {
+	if l == nil {
+		return total <= 1
 	}
-	return issued
+	tier := normalizeTier(l.Claims.Tier)
+	switch {
+	case tierRank(tier) >= tierRank(TierTeam):
+		return true
+	case tier == TierPro:
+		return total <= proPolicyCap
+	default:
+		return total <= 1
+	}
 }
