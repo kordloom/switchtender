@@ -126,16 +126,33 @@ func checkLimit(ctx context.Context, c *Client, templateID, limit string) error 
 			ID    string `json:"id"`
 			Limit string `json:"limit"`
 		} `json:"templates"`
+		Count int `json:"count"`
+		Total int `json:"total"`
 	}
 	if err := c.do(ctx, "GET", "/v1/templates", nil, &listing); err != nil {
 		return err
 	}
+	var found bool
 	var pinnedLimit string
 	for _, t := range listing.Templates {
 		if t.ID == templateID {
-			pinnedLimit = t.Limit
+			pinnedLimit, found = t.Limit, true
 			break
 		}
+	}
+	// Not finding the template refuses the launch rather than allowing it. The listing is capped,
+	// so on an install holding more templates than one page carries this is the ordinary case, not
+	// an exotic one, and treating a pin it could not read as no pin at all let an agent aim a
+	// template pinned to one canary host at whatever it liked. A guard that cannot see the answer
+	// has to say so.
+	if !found {
+		return fmt.Errorf("this template's own target could not be read, so narrowing it to %q is "+
+			"refused: launch it as defined, or ask an operator to confirm what it targets", limit)
+	}
+	if listing.Total > listing.Count {
+		return fmt.Errorf("the template list is longer than one page, so this template's own "+
+			"target cannot be confirmed and narrowing it to %q is refused: launch it as defined",
+			limit)
 	}
 	if pinned := strings.TrimSpace(pinnedLimit); pinned != "" && pinned != limit {
 		return fmt.Errorf("this template pins its target to %q, so limit cannot be changed: launch it "+

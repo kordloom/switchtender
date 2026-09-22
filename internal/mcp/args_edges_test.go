@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -614,5 +615,48 @@ func TestRenderIndentsTheReplyForAModel(t *testing.T) {
 	}
 	if _, err := render(make(chan int)); err == nil {
 		t.Error("render() encoded a value JSON cannot carry")
+	}
+}
+
+// TestCheckLimitRefusesWhenItCannotReadThePin covers the direction this guard must fail in.
+//
+// The pin is the operator's statement of which hosts a template may touch, and an agent narrowing a
+// launch is checked against it. The template is read from the listing, and the listing is capped, so
+// on an install holding more templates than one page carries the template simply is not there. A
+// missing row was read as no pin at all and the agent's limit went through, which is the opposite of
+// what a guard does: the case it cannot see is exactly the case it exists for.
+func TestCheckLimitRefusesWhenItCannotReadThePin(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Name  string
+		Reply string
+	}{{ // Test 0: The template is not on the page at all.
+		Name:  "template absent from the listing",
+		Reply: `{"templates":[{"id":"tpl_other","limit":""}],"count":1,"total":1}`,
+	}, { // Test 1: An empty page, which is what a listing an agent cannot read returns.
+		Name: "empty listing", Reply: `{"templates":[],"count":0,"total":0}`,
+	}, { // Test 2: The template is on the page, but the page is not the whole list, so another
+		// template with this id could sit further down.
+		Name:  "page is not the whole list",
+		Reply: `{"templates":[{"id":"tpl_1","limit":""}],"count":1,"total":4000}`,
+	}}
+
+	for testNum, test := range tests {
+		t.Run(test.Name, func(t *testing.T) {
+			t.Parallel()
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = io.WriteString(w, test.Reply)
+			}))
+			defer ts.Close()
+			c, err := NewClient(ts.URL, "st_test_token", 5*time.Second)
+			if err != nil {
+				t.Fatalf("test %d: NewClient() error = %v", testNum, err)
+			}
+			if err := checkLimit(context.Background(), c, "tpl_1", "web01"); err == nil {
+				t.Errorf("test %d: checkLimit allowed a narrowing launch while it could not read "+
+					"the template's own target, so an agent can aim a template pinned to one "+
+					"canary host wherever it likes", testNum)
+			}
+		})
 	}
 }

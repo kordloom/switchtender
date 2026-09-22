@@ -418,17 +418,32 @@ func (p *Plan) addWorkflow(wf awxWorkflow, jobs map[string]awxJobTemplate, now t
 // the tasks tagged "config" imported as a node running the whole playbook, and a node skipping the
 // tasks tagged "destroy" imported as a node that runs them. It is the same class as the limit, and
 // it is refused the same way rather than planned and quietly widened.
+// sameTagSet reports whether two AWX tag fields name the same tags. The field is an unordered,
+// comma separated list somebody typed, so "deploy,config" and "config, deploy" are one set written
+// two ways, and comparing the raw strings refused a workflow whose nodes agree.
+func sameTagSet(a, b string) bool {
+	left, right := splitAWXTags(a), splitAWXTags(b)
+	if len(left) != len(right) {
+		return false
+	}
+	sorted := append([]string(nil), left...)
+	other := append([]string(nil), right...)
+	sort.Strings(sorted)
+	sort.Strings(other)
+	return slices.Equal(sorted, other)
+}
+
 func workflowTags(nodes []awxWorkflowNode, jobs map[string]awxJobTemplate) (tags, skip string, err error) {
 	first := jobs[string(nodes[0].UnifiedJobTemplate)]
 	tags, skip = first.JobTags, first.SkipTags
 	for _, n := range nodes[1:] {
 		jt := jobs[string(n.UnifiedJobTemplate)]
-		if jt.JobTags != tags {
+		if !sameTagSet(jt.JobTags, tags) {
 			return "", "", fmt.Errorf("node %s runs the tags %q while another runs %q, and a "+
 				"workflow template applies one set of tags to every step",
 				nodeLabel(n), oneLine(jt.JobTags), oneLine(tags))
 		}
-		if jt.SkipTags != skip {
+		if !sameTagSet(jt.SkipTags, skip) {
 			return "", "", fmt.Errorf("node %s skips the tags %q while another skips %q, and a "+
 				"workflow template applies one set of skipped tags to every step",
 				nodeLabel(n), oneLine(jt.SkipTags), oneLine(skip))

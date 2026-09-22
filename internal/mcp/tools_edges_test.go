@@ -56,6 +56,12 @@ func (a *apiRecorder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if reply == "" {
 		reply = `{"id":"run_1","status":"pending_approval"}`
 	}
+	// The template listing answers as a listing. A narrowing launch reads it to learn the
+	// template's own target, and a read it cannot answer refuses the launch, so a recorder that
+	// replied with a run to every path made that refusal look like a defect in the tool.
+	if r.URL.EscapedPath() == "/v1/templates" {
+		reply = `{"templates":[{"id":"tpl_1","limit":""}],"count":1,"total":1}`
+	}
 	_, _ = io.WriteString(w, reply)
 }
 
