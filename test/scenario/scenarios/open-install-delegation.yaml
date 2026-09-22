@@ -1,0 +1,94 @@
+name: one project delegated on an install that never turned strict grants on
+why: |
+  This is the shape of every install that has not opted into strict grants, which is the default
+  and what cmd serve wires unconditionally. One project is delegated to a contractor and the caller
+  is an unrelated operator, so exactly one run is theirs to lose and the other two are not.
+
+  It exists because both halves of that have shipped. The run list was unfiltered here and returned
+  runs whose by-id fetch answered 403, with their command, their variables and the credentials they
+  named. The fix filtered the list on "the caller holds a grant", which is a different question from
+  the one the fetch answers, and an install with an empty grant table then showed every non-admin an
+  empty run list while every one of those runs still fetched 200. The fleet, drift and host views
+  kept naming the refused run through both.
+
+environment:
+  grants: both
+  store: memory
+
+fixtures:
+  users:
+    - {id: user_ops, name: ops, role: operator}
+    - {id: user_contractor, name: contractor, role: operator}
+    - {id: user_admin, name: admin, role: admin}
+  projects:
+    - {id: proj_ops, name: ops}
+    - {id: proj_delegated, name: delegated}
+  grants:
+    - {subject: user_contractor, object: proj_delegated, access: use}
+  runs:
+    # Each run carries what one of the run-derived views is built from, so the invariants that hold
+    # those views to the by-id fetch have a row to decide rather than an empty body to agree with.
+    - id: run_ops_one
+      project: proj_ops
+      host: web1
+      change: CHG-1001
+      extra_vars: {db_password: SURVEY-ANSWER-NOT-FOR-LISTS}
+      facts: {os: debian, kernel: "6.1.0"}
+      tasks: {"gather facts": 1.5}
+    - id: run_delegated
+      project: proj_delegated
+      host: web1
+      change: CHG-1002
+      facts: {os: rhel, kernel: "5.14.0"}
+      tasks: {"rotate keys": 4.25}
+    - id: run_ops_two
+      project: proj_ops
+      host: web1
+      change: CHG-1001
+      facts: {os: debian, kernel: "6.1.0"}
+      tasks: {"gather facts": 1.25}
+  credentials:
+    - id: cred_fleet
+      name: prod fleet key
+      kind: ssh_key
+      secret: PRIVATE-KEY-MATERIAL-ENTITLED-TO-NOBODY
+  secrets:
+    - {name: survey answer, value: SURVEY-ANSWER-NOT-FOR-LISTS, on_run: run_ops_one}
+
+cases:
+  - name: the contractor sees the project delegated to them
+    why: |
+      A grant is written to delegate, so the person it was written to has to be able to use what it
+      names. A grant that hides the object from its own grantee is not access control, it is an
+      outage with an access-control-shaped explanation.
+    steps:
+      - note: the delegated run fetches
+        as: user_contractor
+        get: /v1/runs/run_delegated
+        expect: {status: 200}
+
+  - name: the credential list never carries the material
+    why: |
+      A credential's sealed value is entitled to nobody: not an admin, not its own grantee, not
+      through any endpoint. The list is where that is easiest to get wrong, because the object it
+      returns is the same struct the store holds and one forgotten tag would carry the secret out.
+    steps:
+      - note: an admin lists credentials
+        as: user_admin
+        get: /v1/credentials
+        expect:
+          status: 200
+          excludes: ["PRIVATE-KEY-MATERIAL-ENTITLED-TO-NOBODY"]
+
+  - name: an admin still sees the whole install
+    why: |
+      Object grants add access on top of the global role and never take it away, so the admin role
+      is unaffected by anything written here. An admin who lost rows would mean the filter had
+      stopped being additive.
+    steps:
+      - note: every run is listed
+        as: user_admin
+        get: /v1/runs?limit=500
+        expect:
+          status: 200
+          includes: ["run_ops_one", "run_delegated", "run_ops_two"]

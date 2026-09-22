@@ -1,0 +1,99 @@
+name: input the write path must refuse rather than half accept
+why: |
+  Every refusal here is easy to get right and easy to get subtly wrong. The shapes that hurt are the
+  ones a typed client cannot produce and a hand-rolled request can: a field one character off a real
+  one, a value of the wrong type, a body that is not JSON at all. A submission asking for dry_run by
+  a name one character off was once accepted, executed without it, and answered with a body
+  indistinguishable from the run that was asked for.
+
+  What must be true of all of them is the same: a refusal, with a reason, and nothing recorded. A
+  400 with an empty body is a dead end, and a 500 is the install admitting it broke without saying
+  where.
+
+environment:
+  grants: open
+  store: memory
+
+fixtures:
+  users:
+    - {id: user_ops, name: ops, role: operator}
+  projects:
+    - {id: proj_ops, name: ops}
+
+cases:
+  - name: a body that is not JSON
+    why: The parser is the first thing an untrusted request meets, and it must refuse rather than panic.
+    steps:
+      - note: a truncated document
+        as: user_ops
+        post: /v1/runs
+        raw_body: "{"
+        expect:
+          status: 400
+          state:
+            - runs: {count: 0}
+
+  - name: a field one character off a real one
+    why: |
+      This is the shape that caused real harm. An unrecognized key was dropped, so a run asking for
+      a safety control by a slightly wrong name executed without it and answered as though it had
+      one. The decoder is strict now, and this is what holds it that way.
+    steps:
+      - note: dry_runn instead of dry_run
+        as: user_ops
+        post: /v1/runs
+        body:
+          tool: ansible
+          playbook: site.yml
+          inventory: prod
+          project_id: proj_ops
+          dry_runn: true
+        expect:
+          status: 400
+          state:
+            - runs: {count: 0}
+
+  - name: a value of the wrong type
+    why: A field that exists with a value it cannot hold is a refusal, not a coercion.
+    steps:
+      - note: a numeric playbook
+        as: user_ops
+        post: /v1/runs
+        raw_body: '{"tool":"ansible","playbook":123,"inventory":"prod"}'
+        expect:
+          status: 400
+          state:
+            - runs: {count: 0}
+
+  - name: a required field left out
+    why: |
+      The refusal has to name the field, because an operator reading it is usually assembling the
+      request by hand and has nothing else to go on.
+    steps:
+      - note: no playbook for the ansible tool
+        as: user_ops
+        post: /v1/runs
+        body:
+          tool: ansible
+          inventory: prod
+        expect:
+          status: 400
+          includes: ["playbook"]
+
+  - name: a tool nobody implements
+    why: |
+      The set of tools is closed. An unknown one must be refused by name rather than defaulting to
+      whichever one happens to be first, which would run something other than what was asked for.
+    steps:
+      - note: a made-up tool
+        as: user_ops
+        post: /v1/runs
+        body:
+          tool: definitely-not-a-tool
+          playbook: site.yml
+          inventory: prod
+        expect:
+          status: 400
+          includes: ["tool"]
+          state:
+            - runs: {count: 0}

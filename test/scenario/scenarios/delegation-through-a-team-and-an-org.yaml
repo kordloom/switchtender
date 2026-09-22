@@ -1,0 +1,84 @@
+name: access reaching a person through a team and through an organization
+why: |
+  A grant is rarely written to a person. It is written to a team, so the access follows the group as
+  people join and leave it, or it is not written at all and access comes from membership in the
+  organization that owns the object. Both are the shapes a real install uses, and both reach the
+  authorizer through the same set of subjects a caller acts as: their own id, their teams, their
+  organizations.
+
+  That subject set is what every listing is filtered with. A defect in how it is assembled shows up
+  as a person losing access they were granted through their team, or keeping access after leaving
+  it, and neither is visible from a test that grants everything directly to a user id.
+
+environment:
+  grants: both
+  store: memory
+
+fixtures:
+  orgs:
+    - {id: org_payments, members: {user_owner: admin, user_member: member}}
+  teams:
+    - {id: team_sre, members: [user_sre]}
+  users:
+    - {id: user_sre, name: sre, role: operator}
+    - {id: user_owner, name: owner, role: operator}
+    - {id: user_member, name: member, role: operator}
+    - {id: user_outsider, name: outsider, role: operator}
+    - {id: user_admin, name: admin, role: admin}
+  projects:
+    # Granted to a team, owned by nobody.
+    - {id: proj_team, name: team project}
+    # Owned by an organization, granted to nobody.
+    - {id: proj_owned, name: owned project, org: org_payments}
+  runs:
+    - {id: run_by_team, project: proj_team, host: web1, change: CHG-3001, facts: {os: debian}, tasks: {"deploy": 1.0}}
+    - {id: run_by_org, project: proj_owned, org: org_payments, host: web1, change: CHG-3002, facts: {os: debian}, tasks: {"deploy": 1.0}}
+  grants:
+    - {subject: team_sre, object: proj_team, access: use}
+
+cases:
+  - name: a grant to a team reaches its members
+    why: |
+      This is the delegation an operator actually writes. If a team grant does not reach the people
+      in the team, the feature is decorative and every install ends up granting to individuals,
+      which is the thing teams exist to stop.
+    steps:
+      - note: the team member reads the run
+        as: user_sre
+        get: /v1/runs/run_by_team
+        expect: {status: 200}
+
+  - name: and reaches nobody else
+    why: |
+      A grant written to a team must confer access to that team and to nothing else. Someone in a
+      different organization, holding no grant, must be refused, or the grant is an announcement
+      rather than a boundary.
+    steps:
+      - note: an outsider is refused
+        as: user_outsider
+        get: /v1/runs/run_by_team
+        expect:
+          status: 403
+          includes: ["grant"]
+
+  - name: an admin of the owning organization reaches its objects
+    why: |
+      Organization ownership adds access on top of grants, and an org admin exercises it as
+      management. Nothing is granted on this project at all, so this is the only path to it short
+      of the global admin role, and it is what makes delegating a whole organization possible.
+    steps:
+      - note: the org admin reads the run
+        as: user_owner
+        get: /v1/runs/run_by_org
+        expect: {status: 200}
+
+  - name: a plain member of the owning organization reaches them too
+    why: |
+      A member uses their organization's objects; only management is reserved to its admins. A
+      member refused here would mean org ownership had stopped being additive, which is the same
+      failure as a filter that denies what it was asked to allow.
+    steps:
+      - note: the org member reads the run
+        as: user_member
+        get: /v1/runs/run_by_org
+        expect: {status: 200}

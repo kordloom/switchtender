@@ -1,0 +1,90 @@
+name: a template with a pasted value, and the schedule that fires it
+why: |
+  A job template is where an operator pastes things. Its extra variables are free text that somebody
+  typed once and nobody looks at again, and the template list returns every template on the install,
+  so a value pasted into one is a value handed to everybody who can list them. The same is true of a
+  schedule: it names the template it fires, which is the launch point for whatever that template
+  does.
+
+  Schedules also have a by-id read, so they are the second resource where a listing and a fetch can
+  disagree about the same row. That pair is where the run list and the run fetch drifted apart twice,
+  and nothing was holding any other pair to the same standard.
+
+environment:
+  grants: both
+  store: memory
+
+fixtures:
+  orgs:
+    - {id: org_platform, members: {user_platform: member}}
+    - {id: org_apps, members: {user_apps: member}}
+  users:
+    - {id: user_platform, name: platform, role: operator}
+    - {id: user_apps, name: apps, role: operator}
+    - {id: user_admin, name: admin, role: admin}
+  projects:
+    - {id: proj_platform, name: platform, org: org_platform}
+  templates:
+    - id: tpl_rotate
+      name: rotate the fleet keys
+      project: proj_platform
+      org: org_platform
+      extra_vars:
+        bootstrap_token: PASTED-INTO-A-TEMPLATE-AND-FORGOTTEN
+  schedules:
+    - {id: sched_nightly, name: nightly rotate, cron: "0 2 * * *", template: tpl_rotate, org: org_platform}
+    - {id: sched_inline, name: inline hourly, cron: "0 * * * *", org: org_apps}
+  secrets:
+    - name: token-shaped template variable
+      value: PASTED-INTO-A-TEMPLATE-AND-FORGOTTEN
+      # The template's own content to an administrator, and masked for everybody else. Declaring
+      # both halves is the point: asserting only that it is hidden would pass on an install that
+      # hid it from everyone, which would be a template nobody can maintain.
+      to_roles: [admin]
+
+cases:
+  - name: a token-shaped template variable is masked for an operator and kept for an admin
+    why: |
+      The install redacts variables whose names look like secrets, because a template's extra
+      variables are free text an operator pasted and the template list returns every template on the
+      install. The redaction has to hold for the audience it is for and stop short of the audience
+      that maintains the template, or it is either a leak or an unusable form.
+    steps:
+      - note: an operator sees the mask, not the value
+        as: user_platform
+        get: /v1/templates
+        expect:
+          status: 200
+          includes: ["tpl_rotate", "[redacted]"]
+          excludes: ["PASTED-INTO-A-TEMPLATE-AND-FORGOTTEN"]
+      - note: an admin sees what they have to edit
+        as: user_admin
+        get: /v1/templates
+        expect:
+          status: 200
+          includes: ["PASTED-INTO-A-TEMPLATE-AND-FORGOTTEN"]
+
+  - name: an admin can read the schedule by id
+    why: |
+      The parity invariant compares a listing against the by-id read behind it, so the by-id read has
+      to work at all for the comparison to mean anything. This is the step that proves the standard
+      the invariant holds every actor to is a real answer and not a 404.
+    steps:
+      - note: the nightly schedule fetches
+        as: user_admin
+        get: /v1/schedules/sched_nightly
+        expect:
+          status: 200
+          includes: ["sched_nightly"]
+
+  - name: a schedule that does not exist is a refusal, not an empty success
+    why: |
+      A by-id read that answers 200 with nothing is indistinguishable from one that answers with a
+      row, which would let the parity invariant pass over a resource whose fetch never refuses
+      anything. Bad input belongs in the declared cases, not only in the happy ones.
+    steps:
+      - note: an id nobody minted
+        as: user_admin
+        get: /v1/schedules/sched_does_not_exist
+        expect:
+          status: 404

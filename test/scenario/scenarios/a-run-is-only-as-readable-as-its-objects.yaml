@@ -1,0 +1,112 @@
+name: a run naming several objects, and a run naming none
+why: |
+  A run is readable when every object it touched is readable, which is the rule fetching one by id
+  applies and therefore the rule every listing and every derived view has to apply too. A run that
+  names only a project never exercises it: one object passing is the same as all of them passing.
+
+  The cases that do exercise it are a run that names a project, an inventory and credentials, where
+  exactly one of them is delegated elsewhere, and a run that names nothing at all. The second is
+  decided under the empty object id, which is not an object anybody can grant, so it falls to the
+  organization it was stamped with. A grant row with an empty object would have marked that id
+  access controlled and hidden every objectless run from every non-admin on the install at once,
+  silently, on the strength of one malformed row an import can leave behind.
+
+environment:
+  grants: both
+  store: memory
+
+fixtures:
+  orgs:
+    - {id: org_platform, members: {user_platform: member}}
+  users:
+    - {id: user_platform, name: platform, role: operator}
+    - {id: user_other, name: other, role: operator}
+    - {id: user_contractor, name: contractor, role: operator}
+    - {id: user_partial, name: partial, role: operator}
+    - {id: user_admin, name: admin, role: admin}
+  projects:
+    - {id: proj_shared, name: shared}
+  inventories:
+    - {id: inv_prod, name: production fleet}
+  credentials:
+    - id: cred_fleet
+      name: fleet key
+      kind: ssh_key
+      secret: RUN-CREDENTIAL-ENTITLED-TO-NOBODY
+  grants:
+    # The contractor is delegated every object the run names, so they can read the whole run in
+    # either grant mode. That is the delegation working.
+    - {subject: user_contractor, object: proj_shared, access: use}
+    - {subject: user_contractor, object: inv_prod, access: use}
+    - {subject: user_contractor, object: cred_fleet, access: use}
+    # The partial holder is delegated two of the three. Every object has to pass, so two is not
+    # enough, and this is the only shape that tells "all of them" apart from "any of them".
+    - {subject: user_partial, object: proj_shared, access: use}
+    - {subject: user_partial, object: cred_fleet, access: use}
+  runs:
+    # Names three objects, exactly one of which is delegated away.
+    - id: run_three_objects
+      project: proj_shared
+      inventory: inv_prod
+      credentials: [cred_fleet]
+      host: web1
+      change: CHG-2001
+      facts: {os: debian}
+      tasks: {"deploy": 3.0}
+    # Names nothing, and is stamped with an organization instead.
+    - id: run_objectless
+      org: org_platform
+      host: web1
+      change: CHG-2002
+      facts: {os: debian}
+      tasks: {"deploy": 2.0}
+  secrets:
+    - name: run credential material
+      value: RUN-CREDENTIAL-ENTITLED-TO-NOBODY
+
+cases:
+  - name: holding two of the three objects is not enough
+    why: |
+      A run is readable only when every object it names is. This is the only fixture shape that can
+      tell that rule apart from "any object will do": the partial holder is granted the project and
+      the credential and refused the inventory, so a filter that checked any one object rather than
+      all of them would let this run through, and the run carries what it did on hosts.
+    steps:
+      - note: two grants out of three still refuse
+        as: user_partial
+        get: /v1/runs/run_three_objects
+        expect:
+          status: 403
+          includes: ["grant"]
+      - note: and an operator holding none is refused too
+        as: user_other
+        get: /v1/runs/run_three_objects
+        expect:
+          status: 403
+          includes: ["grant"]
+
+  - name: the inventory's grantee reads it
+    why: |
+      The grant exists to delegate, so its holder must be able to read what they were delegated. A
+      rule that hides the run from its own grantee would be an outage wearing an access-control
+      explanation, and it is the failure mode a filter written as "deny unless granted" produces.
+    steps:
+      - note: the contractor reads the run
+        as: user_contractor
+        get: /v1/runs/run_three_objects
+        expect: {status: 200}
+
+  - name: an admin reads both runs whatever they name
+    why: |
+      Grants add access on top of the global role and never remove it, so nothing written here can
+      take a run away from an administrator. An admin losing the objectless run is the signature of
+      the empty id being treated as an object.
+    steps:
+      - note: the run naming three objects
+        as: user_admin
+        get: /v1/runs/run_three_objects
+        expect: {status: 200}
+      - note: and the run naming none
+        as: user_admin
+        get: /v1/runs/run_objectless
+        expect: {status: 200}

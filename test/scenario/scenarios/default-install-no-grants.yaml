@@ -1,0 +1,81 @@
+name: the default install, where nobody has written a grant
+why: |
+  This is what almost every install looks like on its first day and many on their last: a grant
+  store wired, because cmd serve always wires one, and nothing in it. It is the configuration the
+  documentation promises will not get in anyone's way, and it is the one a change to the grant logic
+  is least likely to be tested against, because a grant table with no grants looks like nothing to
+  test.
+
+  It is also the configuration that broke worst. A filter written as "the caller holds a grant"
+  denies every object on an install where nobody holds anything, so every non-admin was handed an
+  empty run list while every one of those runs still fetched 200. The response even said so on its
+  face: a count of zero beside a summary total of three.
+
+environment:
+  grants: open
+  store: memory
+
+fixtures:
+  users:
+    - {id: user_viewer, name: viewer, role: viewer}
+    - {id: user_ops, name: ops, role: operator}
+    - {id: user_admin, name: admin, role: admin}
+  projects:
+    - {id: proj_one, name: one}
+    - {id: proj_two, name: two}
+  runs:
+    - {id: run_first, project: proj_one, host: web1}
+    - {id: run_second, project: proj_two, host: web2}
+    - {id: run_third, project: proj_one, host: web1}
+
+cases:
+  - name: an operator sees the install they are working in
+    why: |
+      With no grant written, an object falls back to the caller's global role, and every role reads
+      runs. The list and its own summary have to agree with each other as well as with the fetch: a
+      list reporting no rows beside a total of three is the shape the regression took, and reading
+      as an empty install is worse than an error because nobody investigates it.
+    steps:
+      - note: all three runs are listed
+        as: user_ops
+        get: /v1/runs?limit=500
+        expect:
+          status: 200
+          includes: ["run_first", "run_second", "run_third"]
+      - note: and the fleet view is theirs to see
+        as: user_ops
+        get: /v1/fleet
+        expect:
+          status: 200
+          includes: ["web1", "web2"]
+
+  - name: a viewer sees them too
+    why: |
+      The lowest role is where a filter that denies too much shows up first, and a viewer is exactly
+      who an operator hands an account to when they want somebody to be able to look without being
+      able to act.
+    steps:
+      - note: the viewer reads a run by id
+        as: user_viewer
+        get: /v1/runs/run_second
+        expect: {status: 200}
+      - note: and sees all three in the list
+        as: user_viewer
+        get: /v1/runs?limit=500
+        expect:
+          status: 200
+          includes: ["run_first", "run_second", "run_third"]
+
+  - name: install-wide totals are served whole when nothing is hidden
+    why: |
+      The run summary is withheld from a caller something is hidden from, because an install-wide
+      total is every other group's volume in one number. On an install with no grants nothing is
+      hidden from anybody, so withholding here would be the fix for that disclosure overshooting
+      into the common case and making the cards read empty for everyone.
+    steps:
+      - note: the summary is scoped to the whole install
+        as: user_ops
+        get: /v1/runs?limit=500
+        expect:
+          status: 200
+          includes: ['"scope":"install"']

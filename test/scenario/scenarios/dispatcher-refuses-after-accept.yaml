@@ -1,0 +1,70 @@
+name: the dispatcher refuses a run the API already accepted
+why: |
+  A submission that fails at the boundary is an ordinary refusal and easy to get right. The
+  dangerous shape is the one where the API accepts the request, authorizes it, and the thing that
+  actually executes then refuses: that is where a run can be reported to the caller and never exist,
+  or exist and never be reported. Which of those happens is not visible from any single handler, so
+  it is declared here instead, with the dispatcher standing in and told exactly when to fail.
+
+  The stand-in is the point. Waiting for a real dispatcher to have a bad day is not a test strategy,
+  and a failure path nobody exercises is a failure path nobody has ever seen work.
+
+environment:
+  grants: open
+  store: memory
+
+dependencies:
+  submitter:
+    mode: broken
+    behavior:
+      fail_after: 1
+      message: the executor refused this run
+
+fixtures:
+  users:
+    - {id: user_ops, name: ops, role: operator}
+  projects:
+    - {id: proj_ops, name: ops}
+
+cases:
+  - name: the first submission is accepted and recorded
+    why: |
+      The gate has to let one through before it starts refusing, or the case below proves only that
+      a dependency which never works never works.
+    steps:
+      - note: a run the dispatcher accepts
+        as: user_ops
+        post: /v1/runs
+        body:
+          tool: ansible
+          playbook: site.yml
+          inventory: prod
+          project_id: proj_ops
+        expect:
+          status: 202
+          state:
+            # The API layer does not write the run record itself; the executor does. That is what
+            # makes a refusing executor leave nothing behind, and it is worth pinning here so the
+            # next case's empty store means something rather than being true by construction.
+            - runs: {count: 0}
+
+  - name: the refused submission is refused to the caller too
+    why: |
+      The caller must not be told a run exists when the dispatcher would not take it. A 2xx here
+      would be the API reporting work that was never queued, which is the one answer an execution
+      boundary must never give, and the run store must hold nothing new to match.
+    steps:
+      - note: the dispatcher now refuses
+        as: user_ops
+        post: /v1/runs
+        body:
+          tool: ansible
+          playbook: site.yml
+          inventory: prod
+          project_id: proj_ops
+        expect:
+          status: 500
+          excludes: ["run_submitted_2"]
+          state:
+            - runs: {count: 0}
+
