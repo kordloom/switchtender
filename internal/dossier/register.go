@@ -60,7 +60,8 @@ type RegisterInput struct {
 	// from here, since the changes at this instant are the ones the page cut through.
 	CoveredTo time.Time
 	// Pruned counts changes the chain records in this period that the run store no longer holds,
-	// because retention removed them.
+	// because retention removed them. It is zero on a truncated register, which cannot tell a
+	// change the cap dropped from one retention removed, and which already says it is partial.
 	//
 	// It exists because their absence is otherwise indistinguishable from their never having
 	// happened. A register is read as the account of a period, and retention deletes runs while
@@ -172,7 +173,19 @@ func CollectRegister(ctx context.Context, runs run.Store, audits audit.Store, in
 	holding, problems := foldAnchors(anchorScan, 1)
 	in.Anchored = len(holding)
 	in.AnchorProblems = problems
-	in.Pruned = len(pruned)
+	// Counted only when this document is the whole period. The membership set is built from the
+	// page the cap already cut, so on a truncated register every change the cap dropped looks
+	// exactly like one retention removed, and the banner then tells an auditor that runs still
+	// sitting in the store were destroyed. Distinguishing the two would mean asking the store about
+	// every change beyond the cap, which on the period that reaches the cap is the whole point of
+	// having one.
+	//
+	// So a truncated register says nothing here and says on its face that it is not the whole
+	// period, which is the honest pair. Under-reporting a pruned period is silence; over-reporting
+	// one is an accusation of data destruction that the store itself contradicts.
+	if !in.Truncated {
+		in.Pruned = len(pruned)
+	}
 	return in, nil
 }
 
