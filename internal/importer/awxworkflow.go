@@ -368,9 +368,15 @@ func (p *Plan) addWorkflow(wf awxWorkflow, jobs map[string]awxJobTemplate, now t
 		p.warn("workflow %q was not imported: %v", name, err)
 		return ""
 	}
+	tags, skipTags, err := workflowTags(nodes, jobs)
+	if err != nil {
+		p.warn("workflow %q was not imported: %v", name, err)
+		return ""
+	}
 
 	tpl := &template.Template{
 		ID: template.NewID(), Name: name, Steps: steps, ProjectID: projectID, CreatedAt: now,
+		Tags: splitAWXTags(tags), SkipTags: splitAWXTags(skipTags),
 	}
 	if inv := string(wf.Inventory); inv != "" {
 		if id, ok := inventoryIDs[inv]; ok {
@@ -403,6 +409,34 @@ func (p *Plan) addWorkflow(wf awxWorkflow, jobs map[string]awxJobTemplate, now t
 // So nodes limited differently, or a limit on some nodes and not others, cannot be expressed. Both
 // are refused rather than resolved, because every way of resolving them runs some node against hosts
 // its operator had excluded.
+// workflowTags returns the tags and skip tags every node in the workflow shares, refusing when they
+// disagree.
+//
+// A pipeline step carries no tags of its own, and the template holds one set for the whole workflow,
+// so per-node tags either agree or the workflow cannot be expressed. They were read from each job
+// template and then dropped, which is the change that does not look like one: a node running only
+// the tasks tagged "config" imported as a node running the whole playbook, and a node skipping the
+// tasks tagged "destroy" imported as a node that runs them. It is the same class as the limit, and
+// it is refused the same way rather than planned and quietly widened.
+func workflowTags(nodes []awxWorkflowNode, jobs map[string]awxJobTemplate) (tags, skip string, err error) {
+	first := jobs[string(nodes[0].UnifiedJobTemplate)]
+	tags, skip = first.JobTags, first.SkipTags
+	for _, n := range nodes[1:] {
+		jt := jobs[string(n.UnifiedJobTemplate)]
+		if jt.JobTags != tags {
+			return "", "", fmt.Errorf("node %s runs the tags %q while another runs %q, and a "+
+				"workflow template applies one set of tags to every step",
+				nodeLabel(n), oneLine(jt.JobTags), oneLine(tags))
+		}
+		if jt.SkipTags != skip {
+			return "", "", fmt.Errorf("node %s skips the tags %q while another skips %q, and a "+
+				"workflow template applies one set of skipped tags to every step",
+				nodeLabel(n), oneLine(jt.SkipTags), oneLine(skip))
+		}
+	}
+	return tags, skip, nil
+}
+
 func workflowLimit(nodes []awxWorkflowNode, jobs map[string]awxJobTemplate) (string, error) {
 	limit := jobs[string(nodes[0].UnifiedJobTemplate)].Limit
 	for _, n := range nodes[1:] {

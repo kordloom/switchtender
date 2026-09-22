@@ -560,12 +560,27 @@ func (p *Plan) convertQuartzDOW(field, name string) (string, bool) {
 	}
 	var out strings.Builder
 	token := strings.Builder{}
+	// The number after a slash is how many days to skip, not which day, so it is the one numeric
+	// token in the field that must not be renumbered. Shifting it turned "every second day starting
+	// Sunday" into "from Sunday, every day", and an alternate-day job imported as a daily one with
+	// nothing to show it had changed. The Jenkins dialect already splits on the slash for the same
+	// reason.
+	isStep := false
 	flush := func() bool {
 		if token.Len() == 0 {
 			return true
 		}
 		t := token.String()
 		token.Reset()
+		if isStep {
+			if n, err := strconv.Atoi(t); err != nil || n < 1 {
+				p.warn("job %q has the weekday step %q, which is not a positive interval, so the "+
+					"schedule was not imported", name, oneLine(field))
+				return false
+			}
+			out.WriteString(t)
+			return true
+		}
 		n, err := strconv.Atoi(t)
 		if err != nil {
 			// A day name, which both spellings share.
@@ -589,6 +604,13 @@ func (p *Plan) convertQuartzDOW(field, name string) (string, bool) {
 			return "", false
 		}
 		out.WriteRune(r)
+		switch r {
+		case '/':
+			isStep = true
+		case ',':
+			// A comma starts a fresh term, so the next number is a weekday again.
+			isStep = false
+		}
 	}
 	if !flush() {
 		return "", false

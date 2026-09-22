@@ -250,3 +250,70 @@ func TestWorkflowSharedCredentialIsNotAWidening(t *testing.T) {
 		t.Errorf("a shared credential was reported as a widening: %v", plan.Warnings)
 	}
 }
+
+// TestWorkflowTagsAreCarriedOrRefused checks the job tags, which a pipeline holds once the same way
+// it holds the host limit.
+//
+// A node's tags decide which plays and tasks of its playbook actually run, so dropping them is not a
+// cosmetic loss. A node running only the tasks tagged "config" imports as a node running the whole
+// playbook, and a node skipping the tasks tagged "destroy" imports as one that runs them. They were
+// read from each job template and then never used, with nothing in the plan to say so, which is the
+// worst shape a migration defect takes: the import reports success and the first run does more than
+// the job it replaced.
+func TestWorkflowTagsAreCarriedOrRefused(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Name         string
+		A, B         string
+		WantTags     []string
+		WantSkipTags []string
+		Refused      bool
+	}{
+		{Name: "no tags anywhere", A: "", B: ""},
+		{
+			Name: "both nodes agree", A: `, "job_tags": "config"`, B: `, "job_tags": "config"`,
+			WantTags: []string{"config"},
+		},
+		{
+			Name: "both nodes skip the same", A: `, "skip_tags": "destroy"`,
+			B:            `, "skip_tags": "destroy"`,
+			WantSkipTags: []string{"destroy"},
+		},
+		{
+			Name: "nodes run different tags", A: `, "job_tags": "config"`,
+			B: `, "job_tags": "deploy"`, Refused: true,
+		},
+		{
+			Name: "one node is untagged", A: `, "job_tags": "config"`, B: "", Refused: true,
+		},
+		{
+			Name: "nodes skip different tags", A: `, "skip_tags": "destroy"`,
+			B: `, "skip_tags": "migrate"`, Refused: true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.Name, func(t *testing.T) {
+			t.Parallel()
+			plan := workflowExport(t, jobTemplate("a", test.A), jobTemplate("b", test.B), "")
+			if test.Refused {
+				for _, tpl := range plan.Templates {
+					if tpl.Name == "rollout" {
+						t.Fatalf("a workflow whose nodes carry different tags imported anyway, "+
+							"with tags %v and skip tags %v", tpl.Tags, tpl.SkipTags)
+					}
+				}
+				if !strings.Contains(strings.Join(plan.Warnings, "\n"), "tags") {
+					t.Errorf("no warning said why it was refused: %v", plan.Warnings)
+				}
+				return
+			}
+			tpl := workflowTemplate(t, plan)
+			if diff := cmp.Diff(test.WantTags, tpl.Tags, cmpopts.EquateEmpty()); diff != "" {
+				t.Errorf("tags mismatch (-want +got):\n%s", diff)
+			}
+			if diff := cmp.Diff(test.WantSkipTags, tpl.SkipTags, cmpopts.EquateEmpty()); diff != "" {
+				t.Errorf("skip tags mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
