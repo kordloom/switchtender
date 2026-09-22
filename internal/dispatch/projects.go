@@ -120,8 +120,16 @@ func (d *Dispatcher) resolveProject(ctx context.Context, r *run.Run, spec *round
 		// proposed-apply reconstructs the spec from the run with the image set but the login gone,
 		// since the image is no longer empty for resolveProject to re-resolve the credential from.
 		r.PullCredentialID = p.PullCredentialID
-		if err := d.resolvePullCredential(ctx, p.PullCredentialID, spec); err != nil {
-			return cleanup, err
+		// Chained onto this function's cleanup, which the caller defers for the length of the run,
+		// so the minted login outlives the pull that uses it.
+		pullCleanup, perr := d.resolvePullCredential(ctx, p.PullCredentialID, spec)
+		checkout := cleanup
+		cleanup = func() {
+			pullCleanup()
+			checkout()
+		}
+		if perr != nil {
+			return cleanup, perr
 		}
 	}
 	return cleanup, nil
@@ -220,9 +228,18 @@ func (d *Dispatcher) applyDefaultImage(spec *roundhouse.Spec) {
 
 // resolvePullCredential decrypts the named registry credential, when set, onto the spec so the
 // container runner can pull a private execution environment image.
-func (d *Dispatcher) resolvePullCredential(ctx context.Context, id string, spec *roundhouse.Spec) error {
+// The lease is handed back rather than released here. A dynamic engine mints a login that lives for
+// the length of its lease, and these values are read by the container runner when it pulls, which is
+// after this returns: releasing on the way out killed the credential before anything used it, so a
+// registry login from Vault or its peers failed on every containerized run. Every other credential
+// on the execute path already works this way, with one cleanup the caller defers beside the run.
+//
+// The returned cleanup is always safe to call, including on the error paths.
+func (d *Dispatcher) resolvePullCredential(ctx context.Context, id string,
+	spec *roundhouse.Spec) (cleanup func(), err error) {
+	cleanup = func() {}
 	if id == "" {
-		return nil
+		return cleanup, nil
 	}
 	// Opened through the same path a run credential takes, so a credential whose source is an
 	// external engine is resolved rather than used as its own config. Unsealing alone returned the
@@ -231,13 +248,13 @@ func (d *Dispatcher) resolvePullCredential(ctx context.Context, id string, spec 
 	// it was entitled to.
 	_, plain, lease, err := d.openCredential(ctx, id)
 	if err != nil {
-		return fmt.Errorf("pull credential %s: %w", id, err)
+		return cleanup, fmt.Errorf("pull credential %s: %w", id, err)
 	}
-	// The login is read out here and the lease handed straight back: the value is copied into the
-	// spec, so nothing needs the minted secret to stay live for the length of the run.
-	defer d.revokeLease(lease)
+	if lease != nil {
+		cleanup = func() { d.revokeLease(lease) }
+	}
 	spec.RegistryUsername, spec.RegistryPassword = credential.RegistryLogin(plain)
-	return nil
+	return cleanup, nil
 }
 
 // registrySecrets returns the registry pull login values that must be masked from run output. The

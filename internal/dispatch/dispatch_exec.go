@@ -253,7 +253,12 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 		DiffMode: r.DiffMode, Image: r.Image,
 	}
 	if r.Image != "" {
-		if err := d.resolvePullCredential(ctx, r.PullCredentialID, &spec); err != nil {
+		pullCleanup, perr := d.resolvePullCredential(ctx, r.PullCredentialID, &spec)
+		// Deferred here, beside the other execution credentials, so a minted login is live for the
+		// pull and released once the run is over. It is deferred before the error is checked, so a
+		// resolve that failed partway still hands back whatever it minted.
+		defer pullCleanup()
+		if err := perr; err != nil {
 			return fail(err)
 		}
 	}
