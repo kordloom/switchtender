@@ -368,3 +368,40 @@ func testLogCap(t *testing.T, store run.Store) {
 			"incomplete", after.Warning)
 	}
 }
+
+// testLogAfterTerminalIsNotCalledTruncated pins that a late write to a finished run does not accuse
+// its log of being incomplete.
+//
+// The append is fenced on the run still being live and on the accumulated size, in one statement so
+// two writers cannot both slip past the cap. When that fence refuses, only one of the two reasons
+// means the log was cut short. The SQL backends read a refusal as the cap without re-checking, so a
+// chunk arriving from a worker a moment after the run finished, which is ordinary on a reclaimed
+// lease, stamped a permanent warning saying output was dropped. Nothing was dropped and the run was
+// complete, and the warning sits on the run where an operator reads it as evidence of a problem.
+// The memory store said nothing, so the two backends also disagreed.
+func testLogAfterTerminalIsNotCalledTruncated(t *testing.T, store run.Store) {
+	t.Helper()
+	ctx := context.Background()
+	ended := time.Now()
+	code := 0
+	r := &run.Run{
+		ID: "run_done", Playbook: "p.yml", Status: run.StatusSucceeded,
+		CreatedAt: ended.Add(-time.Minute), EndedAt: &ended, ExitCode: &code,
+	}
+	if err := store.Save(ctx, r); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	// A short write, nowhere near the cap, to a run that has already finished.
+	if err := store.AppendLog(ctx, "run_done", []byte("a late line\n")); err != nil {
+		t.Fatalf("AppendLog() to a terminal run error = %v, want a silent no-op", err)
+	}
+	after, err := store.Get(ctx, "run_done")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if after.Warning == run.LogTruncatedWarning {
+		t.Errorf("a finished run was marked %q after a late write of twelve bytes: the fence "+
+			"refused because the run had ended, not because the log hit its cap, and an operator "+
+			"reads that warning as output having been lost", after.Warning)
+	}
+}

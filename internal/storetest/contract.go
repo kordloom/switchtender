@@ -43,6 +43,9 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Run("log stops at the capture limit and says so", func(t *testing.T) {
 		testLogCap(t, newStore())
 	})
+	t.Run("a late write to a finished run is not called truncated", func(t *testing.T) {
+		testLogAfterTerminalIsNotCalledTruncated(t, newStore())
+	})
 	t.Run("events append and read", func(t *testing.T) { testEvents(t, newStore()) })
 	t.Run("events after cursor", func(t *testing.T) { testEventsAfter(t, newStore()) })
 	t.Run("shards excluded from list", func(t *testing.T) { testShards(t, newStore()) })
