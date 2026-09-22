@@ -32,7 +32,7 @@ func TestStampApprovedSpecTouchesNothingElse(t *testing.T) {
 		ClaimedBy: "coordinator-1", ClaimedAt: &claimed, CancelRequested: true,
 		HeldByPolicy: "prod gate",
 	})
-	if err := store.StampApprovedSpec(ctx, "run_1", "sha256:abc"); err != nil {
+	if err := store.StampApprovedSpec(ctx, "run_1", "sha256:abc", "sha256:bind"); err != nil {
 		t.Fatalf("StampApprovedSpec() error = %v", err)
 	}
 	got := getRun(t, store, "run_1")
@@ -47,7 +47,7 @@ func TestStampApprovedSpecTouchesNothingElse(t *testing.T) {
 
 	// A run that is gone is reported rather than silently created, so an approval of a purged run
 	// cannot look like it landed.
-	if err := store.StampApprovedSpec(ctx, "run_gone", "sha256:abc"); !errors.Is(err, ErrNotFound) {
+	if err := store.StampApprovedSpec(ctx, "run_gone", "sha256:abc", "sha256:bind"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("StampApprovedSpec(missing) error = %v, want ErrNotFound", err)
 	}
 }

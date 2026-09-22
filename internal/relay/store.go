@@ -163,7 +163,7 @@ func (c *Client) TransitionStatus(context.Context, string, run.Status, run.Statu
 
 // StampApprovedSpec is a control-node write and is not served to workers: decisions are made where
 // the approver is, never on the far side of the relay.
-func (c *Client) StampApprovedSpec(context.Context, string, string) error {
+func (c *Client) StampApprovedSpec(context.Context, string, string, string) error {
 	return ErrUnsupported
 }
 

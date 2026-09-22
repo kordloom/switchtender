@@ -2,6 +2,8 @@ package outcome
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"time"
 
@@ -58,6 +60,20 @@ type SpecRecord struct {
 // Spec assembles the canonical redacted spec bytes for r. Redaction happens here, before the bytes
 // leave this function, so no caller ever holds a disclosable spec the redaction did not pass over.
 func Spec(r *run.Run) ([]byte, error) {
+	raw, err := json.Marshal(specRecordOf(r))
+	if err != nil {
+		return nil, err
+	}
+	// A spec that will not redact is withheld rather than disclosed raw: this body is published
+	// beside its digest in a receipt, so bytes no redaction passed over are bytes handed to an
+	// outside reader in the clear.
+	return audit.CanonicalRedacted(raw)
+}
+
+// specRecordOf reduces a run to the fields that decide what it executes. It is the one place that
+// list lives, so the digest a receipt discloses and the binding the executor checks are built from
+// exactly the same fields and cannot drift apart.
+func specRecordOf(r *run.Run) SpecRecord {
 	rec := SpecRecord{
 		Tool: r.Tool, Playbook: r.Playbook, Command: r.Command,
 		Inventory: r.Inventory, InventoryID: r.InventoryID, ProjectID: r.ProjectID,
@@ -69,14 +85,35 @@ func Spec(r *run.Run) ([]byte, error) {
 	if r.ShardCount != nil {
 		rec.ShardCount = *r.ShardCount
 	}
-	raw, err := json.Marshal(rec)
+	return rec
+}
+
+// specRaw returns the run's spec as written, with nothing redacted. It is the input to the binding
+// the executor checks and never leaves this process.
+//
+// json.Marshal is deterministic for this record: the struct fixes field order and the encoder sorts
+// the keys of the one map in it, so the same run reduces to the same bytes on every call, which is
+// what a digest compared across two moments needs.
+func specRaw(r *run.Run) ([]byte, error) {
+	rec := specRecordOf(r)
+	return json.Marshal(rec)
+}
+
+// SpecBinding returns the digest the executor holds an approved run to. It covers the unredacted
+// spec, so any change to what will execute moves it.
+//
+// SpecDigest cannot serve here. It is taken over the redacted spec because that is what a receipt
+// discloses, and redaction is lossy: an unquoted secret assignment is masked to the end of its line,
+// so two commands differing only after the secret reduce to the same bytes and share one digest. A
+// gate built on that value let an approved run be rewritten past its own approval, which is the one
+// thing the gate exists to stop.
+func SpecBinding(r *run.Run) (string, error) {
+	raw, err := specRaw(r)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-	// A spec that will not redact is withheld rather than disclosed raw: this body is published
-	// beside its digest in a receipt, so bytes no redaction passed over are bytes handed to an
-	// outside reader in the clear.
-	return audit.CanonicalRedacted(raw)
+	sum := sha256.Sum256(raw)
+	return "sha256:" + hex.EncodeToString(sum[:]), nil
 }
 
 // SpecDigest returns the unkeyed digest of r's canonical redacted spec. It is unkeyed because the

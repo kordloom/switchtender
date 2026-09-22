@@ -667,7 +667,7 @@ func TestStampApprovedSpecIsNarrowAndReportsAMissingRun(t *testing.T) {
 	}
 	saveRuns(t, store, before)
 
-	if err := store.StampApprovedSpec(ctx, "run_held", "sha256:abc"); err != nil {
+	if err := store.StampApprovedSpec(ctx, "run_held", "sha256:abc", "sha256:bind"); err != nil {
 		t.Fatalf("StampApprovedSpec() error = %v", err)
 	}
 	after, err := store.Get(ctx, "run_held")
@@ -678,19 +678,27 @@ func TestStampApprovedSpecIsNarrowAndReportsAMissingRun(t *testing.T) {
 		t.Errorf("ApprovedSpecDigest = %q, want the digest the approver decided on",
 			after.ApprovedSpecDigest)
 	}
+	// The binding is written by the same narrow statement, because the executor is held to it and
+	// a decision that recorded one without the other would leave the gate judging a different
+	// moment than the approval.
+	if after.ApprovedSpecBinding != "sha256:bind" {
+		t.Errorf("ApprovedSpecBinding = %q, want the binding stamped beside the digest",
+			after.ApprovedSpecBinding)
+	}
 	// Everything else the run carried is untouched, so the stamp cannot clobber a concurrent
 	// claim, cancel, or the separation-of-duties requirement it is being checked against.
 	stamped := *after
 	stamped.ApprovedSpecDigest = ""
+	stamped.ApprovedSpecBinding = ""
 	if diff := cmp.Diff(before, &stamped, cmpopts.EquateEmpty()); diff != "" {
 		t.Errorf("the stamp changed columns it does not own (-before +after):\n%s", diff)
 	}
 
-	if err := store.StampApprovedSpec(ctx, "run_ghost", "sha256:abc"); !errors.Is(err, run.ErrNotFound) {
+	if err := store.StampApprovedSpec(ctx, "run_ghost", "sha256:abc", "sha256:bind"); !errors.Is(err, run.ErrNotFound) {
 		t.Errorf("StampApprovedSpec(missing run) = %v, want ErrNotFound", err)
 	}
 	// An empty digest is a real value here, not a no-op, so clearing one is reported as done.
-	if err := store.StampApprovedSpec(ctx, "run_held", ""); err != nil {
+	if err := store.StampApprovedSpec(ctx, "run_held", "", "sha256:bind"); err != nil {
 		t.Errorf("StampApprovedSpec(empty digest) = %v, want the clear to be accepted", err)
 	}
 }

@@ -29,6 +29,13 @@ import (
 // log, cache, or forward, and a header is read once into memory instead.
 const leaseHeader = "X-Switchtender-Lease"
 
+// bindingHeader carries the approved spec binding to the worker that will execute the run. The
+// field is json:"-", because it is a digest of the unredacted spec and anyone shown it can grind
+// candidates against it, so it travels on the claim response the same way the lease capability does
+// rather than in a body a worker could log or forward. Without it a relay worker executed with no
+// binding to check and the approved-spec gate silently did nothing.
+const bindingHeader = "X-Switchtender-Spec-Binding"
+
 // claimRequest is the body of a relay claim: the owner leasing work and the queues it serves.
 type claimRequest struct {
 	// Owner is the lease name the worker stamps on the run it claims.
@@ -243,6 +250,9 @@ func (s *relayServer) claim(w http.ResponseWriter, r *http.Request) {
 		// crosses the wire. The transport reads it once and keeps it only in memory, presenting it on
 		// the reports it makes for this run.
 		w.Header().Set(leaseHeader, leased.ClaimSecret)
+		if leased.ApprovedSpecBinding != "" {
+			w.Header().Set(bindingHeader, leased.ApprovedSpecBinding)
+		}
 		s.writeJSON(w, leased)
 	}
 }
