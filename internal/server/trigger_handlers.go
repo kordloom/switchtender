@@ -147,7 +147,10 @@ type updateTriggerRequest struct {
 	Name string `json:"name"`
 	// RequireSignature toggles HMAC enforcement. Enabling it needs a signing secret to already
 	// exist on the trigger, so rotate one first if the trigger was created without encryption.
-	RequireSignature bool `json:"require_signature"`
+	// It is a pointer because an update that omits it must leave the setting alone. As a plain
+	// bool, a client doing the rename the API documents sent a body with no require_signature and
+	// turned webhook signature verification off, silently, on a trigger that had it on.
+	RequireSignature *bool `json:"require_signature,omitempty"`
 }
 
 // updateTriggerHandler renames a trigger and toggles signature enforcement.
@@ -184,13 +187,15 @@ func updateTriggerHandler(triggers trigger.Store, templates template.Store, auth
 			authz.authorizeAll(r.Context(), grant.AccessUse, tg.TemplateID)) {
 			return
 		}
-		if req.RequireSignature && tg.SigningSecret == "" {
+		if req.RequireSignature != nil && *req.RequireSignature && tg.SigningSecret == "" {
 			respondError(w, log, http.StatusConflict,
 				"cannot require signatures without a signing secret: rotate one first")
 			return
 		}
 		tg.Name = req.Name
-		tg.RequireSignature = req.RequireSignature
+		if req.RequireSignature != nil {
+			tg.RequireSignature = *req.RequireSignature
+		}
 		if err := triggers.Save(r.Context(), tg); err != nil {
 			log.Error("server: update trigger: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not update trigger")
@@ -369,6 +374,13 @@ func hookHandler(triggers trigger.Store, templates template.Store, submitter Sub
 		}
 
 		opts := t.LaunchOptions()
+		// The run belongs to the template's organization. A hook is unauthenticated, so there is no
+		// actor to stamp the org from the way an authenticated launch does, and a run left with no
+		// org is scoped by nothing: under strict grants the tenant that owns the trigger cannot see
+		// the runs their own webhook fired, while nothing else can either.
+		if t.OrgID != "" {
+			opts = append(opts, run.WithOrgID(t.OrgID))
+		}
 		// A webhook is delivered at least once. GitHub and its peers redeliver on a timeout or a
 		// non-2xx, and without a key a redelivery of the same event fires a second real run.
 		//
