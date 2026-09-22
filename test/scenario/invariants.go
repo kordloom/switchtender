@@ -11,6 +11,12 @@ import (
 // Invariant is a property every install must satisfy, checked after every scenario whatever that
 // scenario was written for.
 //
+// These properties are also asked of a real deployment, by the invariants phase in
+// test/supertest/phases_invariants.go, which reimplements them rather than importing them: that
+// harness imports nothing from the product on purpose, so that a defect in what it imported cannot
+// mask itself there. The two lists therefore have to be kept together by hand. A property added
+// here belongs there too unless it needs state only a fixture can seed.
+//
 // This is the part that catches what unit tests do not. A defect that survives a package's own
 // tests is rarely a wrong handler; it is handlers that are each right and together inconsistent. A
 // list that shows what a fetch refuses. A derived view that names a run both of them hid. A
