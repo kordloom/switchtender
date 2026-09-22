@@ -222,7 +222,7 @@ func createRunHandler(submitter Submitter, authz *authorizer, log *zap.Logger) h
 		}
 
 		w.Header().Set("Location", "/v1/runs/"+created.ID)
-		respondJSON(w, log, http.StatusAccepted, maskRun(created), wantsPretty(r))
+		respondRun(w, r, log, http.StatusAccepted, created)
 	}
 }
 
@@ -324,7 +324,7 @@ func createPipelineHandler(submitter Submitter, authz *authorizer, log *zap.Logg
 			return
 		}
 		w.Header().Set("Location", "/v1/runs/"+created.ID)
-		respondJSON(w, log, http.StatusAccepted, maskRun(created), wantsPretty(r))
+		respondRun(w, r, log, http.StatusAccepted, created)
 	}
 }
 
@@ -410,7 +410,11 @@ func retryRunHandler(store run.Store, retrier Retrier, authz *authorizer, log *z
 		if authorizeRunAccess(w, r, authz, log, rn) {
 			return
 		}
-		created, err := retrier.RetryFailedShards(r.Context(), id)
+		// The retry is submitted by whoever asked for it, and the policy gate inside reads that
+		// actor, so a rule scoped to an agent matches the retry the same way it matched the run.
+		created, err := retrier.RetryFailedShards(r.Context(), id,
+			run.WithActor(actorName(r)), run.WithActorAccount(actorAccount(r)),
+			run.WithActorType(actorType(r)))
 		switch {
 		case errors.Is(err, run.ErrNotFound):
 			respondError(w, log, http.StatusNotFound, "run not found")
@@ -433,7 +437,7 @@ func retryRunHandler(store run.Store, retrier Retrier, authz *authorizer, log *z
 			return
 		}
 		w.Header().Set("Location", "/v1/runs/"+created.ID)
-		respondJSON(w, log, http.StatusAccepted, maskRun(created), wantsPretty(r))
+		respondRun(w, r, log, http.StatusAccepted, created)
 	}
 }
 
@@ -463,7 +467,11 @@ func relaunchFailedHandler(store run.Store, retrier Retrier, authz *authorizer, 
 		if authorizeRunAccess(w, r, authz, log, rn) {
 			return
 		}
-		created, err := retrier.RelaunchFailedHosts(r.Context(), id, actorName(r), actorType(r))
+		// The account travels with the name. Distinct-approver falls back to matching names when a
+		// run carries no account, and a token and a session for one person record different names.
+		created, err := retrier.RelaunchFailedHosts(r.Context(), id,
+			run.WithActor(actorName(r)), run.WithActorAccount(actorAccount(r)),
+			run.WithActorType(actorType(r)))
 		switch {
 		case errors.Is(err, run.ErrNotFound):
 			respondError(w, log, http.StatusNotFound, "run not found")
@@ -487,7 +495,7 @@ func relaunchFailedHandler(store run.Store, retrier Retrier, authz *authorizer, 
 			return
 		}
 		w.Header().Set("Location", "/v1/runs/"+created.ID)
-		respondJSON(w, log, http.StatusAccepted, maskRun(created), wantsPretty(r))
+		respondRun(w, r, log, http.StatusAccepted, created)
 	}
 }
 
@@ -626,7 +634,7 @@ func rerunRunHandler(store run.Store, submitter Submitter, authz *authorizer, lo
 		}
 		if existing != nil {
 			w.Header().Set("Location", "/v1/runs/"+existing.ID)
-			respondJSON(w, log, http.StatusAccepted, maskRun(existing), wantsPretty(r))
+			respondRun(w, r, log, http.StatusAccepted, existing)
 			return
 		}
 		opts := append(rerunOptions(rn), run.WithSource("rerun", rn.ID), run.WithRerunOf(rn.ID),
@@ -649,6 +657,6 @@ func rerunRunHandler(store run.Store, submitter Submitter, authz *authorizer, lo
 			return
 		}
 		w.Header().Set("Location", "/v1/runs/"+created.ID)
-		respondJSON(w, log, http.StatusAccepted, maskRun(created), wantsPretty(r))
+		respondRun(w, r, log, http.StatusAccepted, created)
 	}
 }

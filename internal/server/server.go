@@ -53,8 +53,8 @@ type Canceler interface {
 // Retrier starts a new split run from the failed shards of a finished one. The dispatcher
 // satisfies it.
 type Retrier interface {
-	RetryFailedShards(ctx context.Context, parentID string) (*run.Run, error)
-	RelaunchFailedHosts(ctx context.Context, runID, actor, actorType string) (*run.Run, error)
+	RetryFailedShards(ctx context.Context, parentID string, opts ...run.SubmitOption) (*run.Run, error)
+	RelaunchFailedHosts(ctx context.Context, runID string, opts ...run.SubmitOption) (*run.Run, error)
 }
 
 // Approver releases or denies a run held for approval, naming the deciding actor so the decision

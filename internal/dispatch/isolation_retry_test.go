@@ -387,7 +387,7 @@ func TestRelaunchFailedHostsRefusals(t *testing.T) {
 				CreatedAt: time.Now(),
 			}, test.Summaries)
 
-			got, err := d.RelaunchFailedHosts(ctx, id, "casey", "session")
+			got, err := d.RelaunchFailedHosts(ctx, id, run.WithActor("casey"), run.WithActorType("session"))
 			if !errors.Is(err, test.Want) {
 				t.Fatalf("RelaunchFailedHosts() error = %v, want %v", err, test.Want)
 			}
@@ -403,8 +403,7 @@ func TestRelaunchFailedHostsRefusals(t *testing.T) {
 		store := run.NewMemStore()
 		d := New(store, okRunner(), nil, WithNoJanitor())
 		defer d.Close()
-		if _, err := d.RelaunchFailedHosts(context.Background(), "run_absent", "casey",
-			"session"); !errors.Is(err, run.ErrNotFound) {
+		if _, err := d.RelaunchFailedHosts(context.Background(), "run_absent", run.WithActor("casey"), run.WithActorType("session")); !errors.Is(err, run.ErrNotFound) {
 			t.Errorf("RelaunchFailedHosts() error = %v, want %v", err, run.ErrNotFound)
 		}
 	})
@@ -432,7 +431,7 @@ func TestRelaunchFailedHostsTargetsOnlyTheHostsThatBroke(t *testing.T) {
 		{Host: "web04", OK: 2, Skipped: 1},
 	})
 
-	got, err := d.RelaunchFailedHosts(ctx, src.ID, "repair-operator", "token")
+	got, err := d.RelaunchFailedHosts(ctx, src.ID, run.WithActor("repair-operator"), run.WithActorType("token"))
 	if err != nil {
 		t.Fatalf("RelaunchFailedHosts() error = %v", err)
 	}
@@ -475,11 +474,11 @@ func TestRelaunchFailedHostsDedupesADoubleClick(t *testing.T) {
 	}
 	saveFinishedRun(t, store, src, []run.HostSummary{{Host: "web02", Failures: 1}})
 
-	first, err := d.RelaunchFailedHosts(ctx, src.ID, "casey", "session")
+	first, err := d.RelaunchFailedHosts(ctx, src.ID, run.WithActor("casey"), run.WithActorType("session"))
 	if err != nil {
 		t.Fatalf("RelaunchFailedHosts(first) error = %v", err)
 	}
-	second, err := d.RelaunchFailedHosts(ctx, src.ID, "casey", "session")
+	second, err := d.RelaunchFailedHosts(ctx, src.ID, run.WithActor("casey"), run.WithActorType("session"))
 	if err != nil {
 		t.Fatalf("RelaunchFailedHosts(second) error = %v", err)
 	}

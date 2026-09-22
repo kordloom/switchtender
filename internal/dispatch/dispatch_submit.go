@@ -356,7 +356,11 @@ func inheritExecution(child, parent *run.Run) {
 // finished split parent, keeping each failed shard's host group. Shards that succeeded do not run
 // again. The new parent links back to the run it retries through RetryOf. Retrying the same parent
 // twice inside the dedupe window returns the first retry, so a double click cannot fire two.
-func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string) (*run.Run, error) {
+//
+// The options carry who asked for the retry. Without them the new run had no actor at all, so a
+// policy scoped to an actor could not match it and a rule written to hold a named agent's runs let
+// the retry of exactly such a run straight through.
+func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string, opts ...run.SubmitOption) (*run.Run, error) {
 	existing, key, err := run.ResolveDedupe(ctx, d.store, dedupeRetryShards, parentID, time.Now())
 	if err != nil {
 		return nil, err
@@ -422,6 +426,11 @@ func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string) (*r
 	}
 	inheritExecution(retry, parent)
 	retry.OrgID = parent.OrgID
+	// The caller's options are applied before the gate below, not after it, because the actor they
+	// carry is part of what the policy is deciding about.
+	for _, opt := range opts {
+		opt(retry)
+	}
 	// A retry is authorized by the retry request, not by whatever authorized the parent weeks ago.
 	stampReceipt(ctx, retry)
 	// A retry is a fourth way to submit a run, and it inherits the parent's entire execution spec,
@@ -494,8 +503,13 @@ func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string) (*r
 // twice inside the dedupe window returns the first relaunch, so a double click cannot fire two.
 //
 // The actor is whoever asked for the relaunch, which is not necessarily whoever launched the run it
-// is built from.
-func (d *Dispatcher) RelaunchFailedHosts(ctx context.Context, runID, actor, actorType string) (*run.Run, error) {
+// is built from, and it arrives as options so the whole identity travels rather than part of it.
+// Taking the name and the authentication type as two loose strings meant the account behind the
+// credential was simply not passed, and the distinct-approver rule falls back to comparing names
+// when a run carries no account. A person's token and their browser session record different names,
+// so that fallback answers "is this the same person" wrongly in the direction that lets one of them
+// approve the other's run.
+func (d *Dispatcher) RelaunchFailedHosts(ctx context.Context, runID string, opts ...run.SubmitOption) (*run.Run, error) {
 	existing, key, err := run.ResolveDedupe(ctx, d.store, dedupeRelaunchHosts, runID, time.Now())
 	if err != nil {
 		return nil, err
@@ -526,7 +540,7 @@ func (d *Dispatcher) RelaunchFailedHosts(ctx context.Context, runID, actor, acto
 	if len(failed) == 0 {
 		return nil, ErrNoFailedHosts
 	}
-	opts := append(src.ExecutionOptions(),
+	launch := append(src.ExecutionOptions(),
 		// The same work, so the same labels: a relaunch of the hosts a run left failed belongs to
 		// the change that run belonged to. ExecutionOptions carries how a run executes and not what
 		// it is, so without this the fix drops out of the change it is fixing.
@@ -535,15 +549,15 @@ func (d *Dispatcher) RelaunchFailedHosts(ctx context.Context, runID, actor, acto
 		run.WithSource("relaunch", runID),
 		run.WithRetryOf(runID),
 		run.WithIdempotencyKey(key),
-		// The relaunch is a new launch by whoever asked for it, not by whoever ran the original.
-		// Stamping the source run's actor credited the relaunch to the wrong person, so asking
-		// what a given operator started missed the runs they started this way.
-		run.WithActor(actor),
-		run.WithActorType(actorType),
 		// The relaunch belongs to the same tenant as the run it fixes. A relaunch of an objectless
 		// run names no stored object, so without the source run's org it would be readable across
 		// every tenant.
 		run.WithOrgID(src.OrgID),
 	)
-	return d.Submit(ctx, src.Playbook, src.Inventory, opts...)
+	// Last, so the caller's identity wins over anything inherited from the run being fixed. The
+	// relaunch is a new launch by whoever asked for it, not by whoever ran the original: stamping
+	// the source run's actor credited the relaunch to the wrong person, so asking what a given
+	// operator started missed the runs they started this way.
+	launch = append(launch, opts...)
+	return d.Submit(ctx, src.Playbook, src.Inventory, launch...)
 }

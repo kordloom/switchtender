@@ -94,7 +94,7 @@ func TestNoExecutionPathGoesAroundTheBoundary(t *testing.T) {
 		// fine and is the reason this test drives the entry point instead of reading the code.
 		Name: "a relaunch of failed hosts",
 		Fire: func() error {
-			_, err := d.RelaunchFailedHosts(ctx, "run_failed", "ops", "human")
+			_, err := d.RelaunchFailedHosts(ctx, "run_failed", run.WithActor("ops"), run.WithActorType("human"))
 			return err
 		},
 	}}
