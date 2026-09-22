@@ -253,7 +253,7 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 		DiffMode: r.DiffMode, Image: r.Image,
 	}
 	if r.Image != "" {
-		if err := d.resolvePullCredential(r.PullCredentialID, &spec); err != nil {
+		if err := d.resolvePullCredential(ctx, r.PullCredentialID, &spec); err != nil {
 			return fail(err)
 		}
 	}
@@ -272,7 +272,7 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 	early = append(early, ownSecrets...)
 	mask.set(early)
 
-	projectCleanup, err := d.resolveProject(r, &spec)
+	projectCleanup, err := d.resolveProject(ctx, r, &spec)
 	defer projectCleanup()
 	if err != nil {
 		return fail(err)

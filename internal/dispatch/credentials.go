@@ -529,6 +529,36 @@ func (d *Dispatcher) openCredential(ctx context.Context, id string) (*credential
 	return c, value, lease, nil
 }
 
+// revokeLease hands a dynamic source's minted secret back, on its own timeout so a slow engine
+// cannot hold a run open. Every caller that opens a credential outside run materialization uses it,
+// since a lease that is never revoked leaves live credentials behind on the engine.
+func (d *Dispatcher) revokeLease(lease *secretsource.Lease) {
+	if lease == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), revokeTimeout)
+	defer cancel()
+	if err := lease.Revoke(ctx); err != nil {
+		d.log.Warn("dispatch: revoke ephemeral secret failed: "+err.Error(),
+			zap.String("engine", lease.Kind()))
+	}
+}
+
+// sshKeyFrom turns a credential's resolved value into a usable private key, decrypting a
+// passphrase-protected one in process so the passphrase never reaches disk or argv.
+//
+// It is shared with run materialization rather than repeated, because a caller that skips it hands
+// the SSH parser the stored JSON wrapper instead of a key, and the failure reads as a bad key rather
+// than as a step that was left out.
+func sshKeyFrom(plain string) (key, passphrase string, err error) {
+	material := credential.ParseSSHKey(plain)
+	unlocked, err := credential.UnlockSSHKey(material.PrivateKey, material.Passphrase)
+	if err != nil {
+		return "", material.Passphrase, err
+	}
+	return unlocked, material.Passphrase, nil
+}
+
 // effectiveCredentialIDs returns the run's own credentials plus any attached to the stored inventory
 // it targets, deduplicated and in order, so an inventory can carry secret variables that every run
 // against it receives.

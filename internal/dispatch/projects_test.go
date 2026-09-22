@@ -270,7 +270,7 @@ func TestResolveProjectRefusesPathsThatEscapeTheCheckout(t *testing.T) {
 				ID: "run_1", ProjectID: p.ID, Playbook: test.Playbook, Inventory: test.Inventory,
 			}
 			var spec roundhouse.Spec
-			cleanup, err := d.resolveProject(r, &spec)
+			cleanup, err := d.resolveProject(t.Context(), r, &spec)
 
 			// The doc comment promises a cleanup that is always safe to call, error paths included.
 			// A caller that defers it on every return would panic exactly when a run was refused.
@@ -445,7 +445,7 @@ func TestAStoredInventorySurvivesAGitBackedProject(t *testing.T) {
 		Inventory: escapeRepoInventory, InventoryID: "inv_stored",
 	}
 	spec := roundhouse.Spec{Playbook: r.Playbook, Inventory: materialized}
-	cleanup, err := d.resolveProject(r, &spec)
+	cleanup, err := d.resolveProject(t.Context(), r, &spec)
 	defer cleanup()
 	if err != nil {
 		t.Fatalf("resolveProject() error = %v", err)
@@ -461,7 +461,7 @@ func TestAStoredInventorySurvivesAGitBackedProject(t *testing.T) {
 	plain := &run.Run{ID: "run_plain", ProjectID: p.ID, Playbook: escapeRepoPlaybook,
 		Inventory: escapeRepoInventory}
 	plainSpec := roundhouse.Spec{Playbook: plain.Playbook}
-	cleanup2, err := d.resolveProject(plain, &plainSpec)
+	cleanup2, err := d.resolveProject(t.Context(), plain, &plainSpec)
 	defer cleanup2()
 	if err != nil {
 		t.Fatalf("resolveProject() plain error = %v", err)

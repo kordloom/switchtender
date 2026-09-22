@@ -779,7 +779,7 @@ func TestRegistrySecretsMasked(t *testing.T) {
 	}
 	d := &Dispatcher{credentials: store, sealer: sealer}
 	spec := &roundhouse.Spec{}
-	if err := d.resolvePullCredential("pull_1", spec); err != nil {
+	if err := d.resolvePullCredential(t.Context(), "pull_1", spec); err != nil {
 		t.Fatalf("resolvePullCredential() error = %v", err)
 	}
 	got := registrySecrets(spec)

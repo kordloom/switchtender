@@ -43,7 +43,7 @@ func (d *Dispatcher) validateProject(ctx context.Context, id string) error {
 // resolve inside an isolated per-run checkout. It stamps the commit the run executes on and returns
 // a cleanup that removes the checkout, which the caller defers so the copy does not outlive the run.
 // The returned cleanup is always safe to call, including on the error paths.
-func (d *Dispatcher) resolveProject(r *run.Run, spec *roundhouse.Spec) (cleanup func(), err error) {
+func (d *Dispatcher) resolveProject(ctx context.Context, r *run.Run, spec *roundhouse.Spec) (cleanup func(), err error) {
 	cleanup = func() {}
 	if r.ProjectID == "" {
 		return cleanup, nil
@@ -61,13 +61,20 @@ func (d *Dispatcher) resolveProject(r *run.Run, spec *roundhouse.Spec) (cleanup 
 		if d.credentials == nil || d.sealer == nil {
 			return cleanup, credential.ErrNoKey
 		}
-		c, err := d.credentials.Get(context.Background(), p.CredentialID)
-		if err != nil {
-			return cleanup, fmt.Errorf("project credential %s: %w", p.CredentialID, err)
+		// The same two steps run materialization applies to this kind: resolve through the
+		// credential's source, then unlock the key. Handing the stored value straight to the SSH
+		// parser meant a passphrase-protected key arrived as the JSON wrapper it is stored in, and
+		// every sync of that project failed with an error naming the key rather than the omission.
+		_, plain, lease, cerr := d.openCredential(ctx, p.CredentialID)
+		if cerr != nil {
+			return cleanup, fmt.Errorf("project credential %s: %w", p.CredentialID, cerr)
 		}
-		if sshKey, err = d.sealer.Open(c.Secret); err != nil {
-			return cleanup, fmt.Errorf("decrypt project credential: %w", err)
+		defer d.revokeLease(lease)
+		unlocked, _, kerr := sshKeyFrom(plain)
+		if kerr != nil {
+			return cleanup, fmt.Errorf("project credential %s: %w", p.CredentialID, kerr)
 		}
+		sshKey = unlocked
 	}
 
 	wt, err := d.syncer.Sync(p, sshKey)
@@ -113,7 +120,7 @@ func (d *Dispatcher) resolveProject(r *run.Run, spec *roundhouse.Spec) (cleanup 
 		// proposed-apply reconstructs the spec from the run with the image set but the login gone,
 		// since the image is no longer empty for resolveProject to re-resolve the credential from.
 		r.PullCredentialID = p.PullCredentialID
-		if err := d.resolvePullCredential(p.PullCredentialID, spec); err != nil {
+		if err := d.resolvePullCredential(ctx, p.PullCredentialID, spec); err != nil {
 			return cleanup, err
 		}
 	}
@@ -153,15 +160,21 @@ func (d *Dispatcher) pinHeldRunCommit(r *run.Run) {
 			fail(credential.ErrNoKey)
 			return
 		}
-		c, err := d.credentials.Get(context.Background(), p.CredentialID)
-		if err != nil {
-			fail(err)
+		// Resolved and unlocked the same way the sync during execution does. Pinning the commit
+		// runs the identical git operation, so a credential that works for one and not the other
+		// would hold a run at approval time for a reason that disappears by execution.
+		_, plain, lease, cerr := d.openCredential(context.Background(), p.CredentialID)
+		if cerr != nil {
+			fail(cerr)
 			return
 		}
-		if sshKey, err = d.sealer.Open(c.Secret); err != nil {
-			fail(err)
+		defer d.revokeLease(lease)
+		unlocked, _, kerr := sshKeyFrom(plain)
+		if kerr != nil {
+			fail(kerr)
 			return
 		}
+		sshKey = unlocked
 	}
 	wt, err := d.syncer.Sync(p, sshKey)
 	if err != nil {
@@ -207,21 +220,22 @@ func (d *Dispatcher) applyDefaultImage(spec *roundhouse.Spec) {
 
 // resolvePullCredential decrypts the named registry credential, when set, onto the spec so the
 // container runner can pull a private execution environment image.
-func (d *Dispatcher) resolvePullCredential(id string, spec *roundhouse.Spec) error {
+func (d *Dispatcher) resolvePullCredential(ctx context.Context, id string, spec *roundhouse.Spec) error {
 	if id == "" {
 		return nil
 	}
-	if d.credentials == nil || d.sealer == nil {
-		return credential.ErrNoKey
-	}
-	c, err := d.credentials.Get(context.Background(), id)
+	// Opened through the same path a run credential takes, so a credential whose source is an
+	// external engine is resolved rather than used as its own config. Unsealing alone returned the
+	// source configuration, and RegistryLogin read that JSON as a username, so an install keeping
+	// registry logins in a secret store pulled with a garbage login and the run failed on an image
+	// it was entitled to.
+	_, plain, lease, err := d.openCredential(ctx, id)
 	if err != nil {
 		return fmt.Errorf("pull credential %s: %w", id, err)
 	}
-	plain, err := d.sealer.Open(c.Secret)
-	if err != nil {
-		return fmt.Errorf("decrypt pull credential: %w", err)
-	}
+	// The login is read out here and the lease handed straight back: the value is copied into the
+	// spec, so nothing needs the minted secret to stay live for the length of the run.
+	defer d.revokeLease(lease)
 	spec.RegistryUsername, spec.RegistryPassword = credential.RegistryLogin(plain)
 	return nil
 }
