@@ -1121,13 +1121,32 @@ func runServe(cmd *cobra.Command, _ []string) error {
 				needsFull = true
 			}
 		}
+		// A lapse is not a misconfiguration and must not stop the server from starting. Returning
+		// here meant a paid install with a policy file could not restart once its term ran out,
+		// and the same refusal on every read stopped its runs, so the install went dark rather
+		// than dropping to Community. The terms rule that out: a lapsed license takes nothing and
+		// a running install is not bricked over a billing dispute. The rules stay in force either
+		// way, because dropping them would silently ungate the runs they were written to hold.
+		var lapse error
 		if needsFull {
 			if aerr := license.Allow(license.FeaturePolicyFull); aerr != nil {
-				return aerr
+				if !errors.Is(aerr, license.ErrLapsed) {
+					return aerr
+				}
+				lapse = aerr
 			}
 		}
 		if aerr := license.AllowPolicies(len(count)); aerr != nil {
-			return aerr
+			if !errors.Is(aerr, license.ErrLapsed) {
+				return aerr
+			}
+			lapse = aerr
+		}
+		if lapse != nil {
+			log.Warn("serve: the license term has lapsed and the policy file stays in force, "+
+				"because a lapse takes nothing that was already holding runs. Renewing is what "+
+				"allows new paid policy to be authored",
+				zap.String("detail", lapse.Error()))
 		}
 		log.Info("serve: approval policies read from file",
 			zap.String("path", policyFile), zap.Int("policies", len(count)))

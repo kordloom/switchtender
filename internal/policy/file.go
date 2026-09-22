@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -225,16 +226,33 @@ func (s *FileStore) List(_ context.Context) ([]*Policy, error) {
 // allowed reports whether the current license covers this policy set, by count and by the features
 // the rules use. It is the same pair of checks serve makes at startup, applied to what the file says
 // now rather than to what it said then.
+//
+// A lapse is not a refusal. Refusing here stops every run, because the dispatcher reads an
+// unreadable policy set as a reason not to run, and the server will not start either. Applied to an
+// expired term that meant a paid install went completely dark at midnight: not degraded, not capped,
+// dark. The terms promise the opposite in as many words, that a lapsed license takes nothing and
+// that a running install is not bricked over a billing dispute, and it is one of the seven
+// commitments written as contractual.
+//
+// So a lapsed term keeps serving the rules it was already serving. That is the only option of the
+// three that is safe in both directions at once: refusing takes the install down, dropping the
+// advanced rules silently ungates the runs those rules exist to hold, and continuing to enforce
+// them takes nothing from anybody. Enforcing a constraint the customer wrote is not a feature being
+// given away, it is their own safety rule still working. What a lapse does stop is authoring new
+// paid policy, which serve still gates at startup, and status names the lapse.
 func (s *FileStore) allowed(set []*Policy) error {
 	for _, p := range set {
 		if p.Advanced() {
 			if err := license.Allow(license.FeaturePolicyFull); err != nil {
+				if errors.Is(err, license.ErrLapsed) {
+					break
+				}
 				return fmt.Errorf("the policy file needs a license it does not have: %w", err)
 			}
 			break
 		}
 	}
-	if err := license.AllowPolicies(len(set)); err != nil {
+	if err := license.AllowPolicies(len(set)); err != nil && !errors.Is(err, license.ErrLapsed) {
 		return fmt.Errorf("the policy file needs a license it does not have: %w", err)
 	}
 	return nil

@@ -262,9 +262,9 @@ func allowAt(l *License, f Feature, now time.Time) error {
 			"https://switchtender.com/pricing", name, need)
 	}
 	if l.Expired(now) {
-		return fmt.Errorf("%s requires a %s license and this install's license for %s lapsed "+
-			"on %s; everything Community keeps working. https://switchtender.com/pricing",
-			name, need, l.Claims.Org, l.Claims.Expires)
+		return fmt.Errorf("%w: %s requires a %s license and this install's license for %s "+
+			"lapsed on %s; everything Community keeps working. https://switchtender.com/pricing",
+			ErrLapsed, name, need, l.Claims.Org, l.Claims.Expires)
 	}
 	if !l.covers(f) {
 		return fmt.Errorf("%s requires a %s license; this install's %s license does not "+
@@ -286,7 +286,8 @@ func AllowPolicies(total int) error {
 
 // allowPoliciesAt is AllowPolicies against an explicit license and clock, which makes it testable.
 func allowPoliciesAt(l *License, total int, now time.Time) error {
-	if l != nil && !l.Expired(now) {
+	lapsed := l != nil && l.Expired(now)
+	if l != nil && !lapsed {
 		tier := normalizeTier(l.Claims.Tier)
 		if tierRank(tier) >= tierRank(TierTeam) {
 			return nil
@@ -301,6 +302,14 @@ func allowPoliciesAt(l *License, total int, now time.Time) error {
 	}
 	if total <= 1 {
 		return nil
+	}
+	// A lapse is named as a lapse. A caller that must keep an install running needs to tell a term
+	// that ran out from a tier that never covered this, because only one of the two is something
+	// the customer had working yesterday.
+	if lapsed {
+		return fmt.Errorf("%w: this install's license for %s lapsed on %s, and the Community tier "+
+			"holds one approval policy rather than %d. https://switchtender.com/pricing",
+			ErrLapsed, l.Claims.Org, l.Claims.Expires, total)
 	}
 	return fmt.Errorf("the Community tier holds one approval policy and this would make %d; "+
 		"Pro holds %d and Team removes the cap. https://switchtender.com/pricing",
