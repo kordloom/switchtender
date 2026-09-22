@@ -605,6 +605,6 @@ func launchTemplateHandler(store template.Store, submitter Submitter, authz *aut
 			return
 		}
 		w.Header().Set("Location", "/v1/runs/"+created.ID)
-		respondJSON(w, log, http.StatusAccepted, maskRun(created), wantsPretty(r))
+		respondRun(w, r, log, http.StatusAccepted, created)
 	}
 }

@@ -315,7 +315,7 @@ func getRunHandler(store run.Store, authz *authorizer, log *zap.Logger) http.Han
 		got.Risk = &risk
 		undo := run.AssessReversibilityFrom(got, reversibilityEvidence(r.Context(), store, got))
 		got.Reversibility = &undo
-		respondJSON(w, log, http.StatusOK, scrubbedRun(r.Context(), maskRun(got)), wantsPretty(r))
+		respondRun(w, r, log, http.StatusOK, got)
 	}
 }
 
@@ -488,6 +488,20 @@ func scrubbedRun(ctx context.Context, rn *run.Run) *run.Run {
 		return rn
 	}
 	return redactRunCommand(rn)
+}
+
+// respondRun writes one run back to a caller, masked and scrubbed for who they are. Every handler
+// that returns a single run goes through it.
+//
+// The scrub reached the read handlers only. Every handler that creates a run returns the run as
+// well, and those returned it verbatim, so one run came back masked from a GET and in the clear
+// from the button that made it, to the same caller in the same session. Wherever the spec was not
+// the caller's to begin with that is the disclosure the scrub exists to stop: a retry, a relaunch,
+// a rerun, a template launch, a trigger fire and an approval all hand back a run somebody else
+// composed. It is one helper rather than a rule to remember, so the handler written next cannot be
+// the one that forgets.
+func respondRun(w http.ResponseWriter, r *http.Request, log *zap.Logger, code int, rn *run.Run) {
+	respondJSON(w, log, code, scrubbedRun(r.Context(), maskRun(rn)), wantsPretty(r))
 }
 
 // scrubbedRuns applies scrubbedRun across a list response.

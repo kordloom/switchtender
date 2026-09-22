@@ -111,7 +111,7 @@ func proposeRunHandler(submitter Submitter, provider ai.Provider, log *zap.Logge
 			respondError(w, log, http.StatusInternalServerError, "could not create the proposal")
 			return
 		}
-		respondJSON(w, log, http.StatusAccepted, maskRun(created), wantsPretty(r))
+		respondRun(w, r, log, http.StatusAccepted, created)
 	}
 }
 
