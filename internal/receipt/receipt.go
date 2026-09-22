@@ -22,13 +22,10 @@ import (
 	"github.com/kordloom/switchtender/internal/run"
 )
 
-// maxReceiptEntries is how many chain entries one receipt will assemble at once. It matches the
-// bundle export's ceiling and moved down with it: a receipt is one signed document over the claims
-// it carries, so unlike a streamed verification it has to hold them together, and the endpoint that
-// serves it is reachable below admin. The old ceiling was a number the format tolerates rather than
-// one a 1 or 2 GB instance survives, which made a single request an out-of-memory kill on the box
-// this product is sold as running on. It is a var only so a test can shrink it to force the refusal.
-var maxReceiptEntries = 25_000
+// maxReceiptEntries is how many chain entries one receipt will assemble at once. It reads the one
+// ceiling both signed documents are bound by rather than restating it, so a re-measurement moves
+// both. It is a var only so a test can shrink it to force the refusal.
+var maxReceiptEntries = audit.MaxAssembledClaims
 
 // Options are the shapes a receipt can take.
 type Options struct {

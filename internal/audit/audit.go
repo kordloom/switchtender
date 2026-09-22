@@ -223,6 +223,29 @@ func checkedLinkOf(claim map[string]any) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
+// MaxAssembledClaims is how many chain entries one signed document will assemble at once.
+//
+// A bundle and a receipt are each one signature over every claim they carry, so unlike a streamed
+// verification they hold them all in memory together. An audit chain grows for the life of an
+// install, a row per mutating request, per webhook fire and per span beat, so an unwindowed export
+// assembles the whole history, several times its stored size, on a single request.
+//
+// The number is what a small box survives, not what the format tolerates. Measured on this code:
+// 250,000 entries peak at about 1.7 GB resident and produce an 89 MB artifact, which is an
+// out-of-memory kill on the 1 and 2 GB instances this product is sold as running on, reachable by
+// one GET. The homepage teaches that exact request as the thing to run against any install, so the
+// ceiling has to be a size the advertised install can serve. 25,000 peaks around 243 MB and still
+// produces a 12.7 MB document, which is a real evidence artifact by any measure.
+//
+// It lives here, beside the format, because both documents are bound by it for the same reason and
+// both are reachable by a caller below admin. It was a literal retyped in each of them, held
+// together by a comment saying they matched, so a re-measurement that moved one would have left the
+// other where it was and the endpoint that kept the higher number would still be the kill.
+//
+// A chain longer than this is not refused, only windowed: the caller names a limit and takes the
+// newest slice.
+const MaxAssembledClaims = 25_000
+
 // MaxCanonicalDigestBytes is the largest body canonicalized before digesting. A larger body is
 // digested as its exact bytes, since parsing a multi-megabyte upload to normalize its key order
 // costs more than the comparison it buys.
