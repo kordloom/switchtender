@@ -91,10 +91,11 @@ type RegisterInput struct {
 
 // CollectRegister gathers the period's change register: the window's top-level runs, the
 // chain-recorded decision over each, and the chain's own verdict, in one streaming pass.
-// installID is the install the tree profile's leaves bind to, which checking a tree anchor
+// producer is the install identity the tree profile's leaves bind to, which checking a tree anchor
 // requires. limit caps how many changes the document carries, defaulting to MaxRegisterRuns when
 // it is not positive, and a period holding more than that comes back marked truncated.
-func CollectRegister(ctx context.Context, runs run.Store, audits audit.Store, installID string,
+func CollectRegister(ctx context.Context, runs run.Store, audits audit.Store,
+	producer audit.Identity,
 	from, to, now time.Time, limit int) (*RegisterInput, error) {
 	if limit <= 0 {
 		limit = MaxRegisterRuns
@@ -144,7 +145,7 @@ func CollectRegister(ctx context.Context, runs run.Store, audits audit.Store, in
 	pruned := map[string]bool{}
 
 	scan := audit.NewChainScanner(true)
-	anchorScan := audit.NewAnchorScanner(anchors, installID)
+	anchorScan := audit.NewAnchorScanner(anchors, producer)
 	err = audits.ChainScan(ctx, 0, func(e *audit.Entry) error {
 		scan.Feed(e)
 		anchorScan.Feed(e)

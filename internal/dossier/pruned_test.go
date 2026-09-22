@@ -64,7 +64,7 @@ func TestARegisterSaysWhenItsPeriodWasPruned(t *testing.T) {
 		t.Fatal("retention removed nothing, so this test is not exercising a pruned period")
 	}
 
-	in, cerr := dossier.CollectRegister(ctx, runs, audits, "in_test", from, to, time.Now(), 0)
+	in, cerr := dossier.CollectRegister(ctx, runs, audits, audit.Identity{InstallID: "in_test"}, from, to, time.Now(), 0)
 	if cerr != nil {
 		t.Fatalf("CollectRegister: %v", cerr)
 	}
@@ -125,7 +125,7 @@ func TestATruncatedRegisterDoesNotBlameRetention(t *testing.T) {
 	}
 
 	// A cap below the number of changes, which is what a real period past the bound reaches.
-	in, err := dossier.CollectRegister(ctx, runs, audits, "in_test", from, to, time.Now(), 2)
+	in, err := dossier.CollectRegister(ctx, runs, audits, audit.Identity{InstallID: "in_test"}, from, to, time.Now(), 2)
 	if err != nil {
 		t.Fatalf("CollectRegister: %v", err)
 	}

@@ -364,7 +364,7 @@ func TestDossierFoldsChildOutcomesWhenTheParentRecordsNone(t *testing.T) {
 				store.shards = children
 			}
 
-			in, err := Collect(ctx, store, audit.NewMemStore(), "", "run_parent", evidenceTime)
+			in, err := Collect(ctx, store, audit.NewMemStore(), audit.Identity{}, "run_parent", evidenceTime)
 			if err != nil {
 				t.Fatalf("Collect() error = %v", err)
 			}
@@ -491,7 +491,7 @@ func TestCollectFailsRatherThanAssertingByOmission(t *testing.T) {
 			if test.Audits != nil {
 				audits = test.Audits(audits)
 			}
-			in, err := Collect(context.Background(), runs, audits, "", id, evidenceTime)
+			in, err := Collect(context.Background(), runs, audits, audit.Identity{}, id, evidenceTime)
 			if err == nil {
 				t.Fatalf("Collect over %s returned evidence, want a refusal", test.Name)
 			}
@@ -519,7 +519,7 @@ func TestDossierRedactsAnInlineSecretInAScript(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
-	in, err := Collect(ctx, runs, audit.NewMemStore(), "", "run_secret", evidenceTime)
+	in, err := Collect(ctx, runs, audit.NewMemStore(), audit.Identity{}, "run_secret", evidenceTime)
 	if err != nil {
 		t.Fatalf("Collect() error = %v", err)
 	}
@@ -566,7 +566,7 @@ func TestDossierEscapesEveryValueThatCameFromOutside(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Append() error = %v", err)
 	}
-	in, err := Collect(ctx, runs, audits, "", "run_"+payload, evidenceTime)
+	in, err := Collect(ctx, runs, audits, audit.Identity{}, "run_"+payload, evidenceTime)
 	if err != nil {
 		t.Fatalf("Collect() error = %v", err)
 	}
@@ -591,7 +591,7 @@ func TestDossierEscapesEveryValueThatCameFromOutside(t *testing.T) {
 func TestDossierIsSelfContained(t *testing.T) {
 	t.Parallel()
 	runs, audits, id := seedEvidence(t)
-	in, err := Collect(context.Background(), runs, audits, "", id, evidenceTime)
+	in, err := Collect(context.Background(), runs, audits, audit.Identity{}, id, evidenceTime)
 	if err != nil {
 		t.Fatalf("Collect() error = %v", err)
 	}
@@ -908,7 +908,7 @@ func TestCollectGradesTheRiskAnApproverSaw(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
-	in, err := Collect(ctx, runs, audit.NewMemStore(), "", "run_wide", evidenceTime)
+	in, err := Collect(ctx, runs, audit.NewMemStore(), audit.Identity{}, "run_wide", evidenceTime)
 	if err != nil {
 		t.Fatalf("Collect() error = %v", err)
 	}
@@ -975,7 +975,7 @@ func TestCollectResolvesTheReceiptOnlyOnAnExactMatch(t *testing.T) {
 			}); err != nil {
 				t.Fatalf("Save() error = %v", err)
 			}
-			in, err := Collect(ctx, runs, audits, "", "run_1", evidenceTime)
+			in, err := Collect(ctx, runs, audits, audit.Identity{}, "run_1", evidenceTime)
 			if err != nil {
 				t.Fatalf("Collect() error = %v", err)
 			}
@@ -1010,7 +1010,7 @@ func TestCollectOnAMissingRunReportsNotFound(t *testing.T) {
 	for testNum, id := range []string{"run_ghost", "", "   ", "run_dossier1x"} {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
-			in, err := Collect(context.Background(), runs, audits, "", id, evidenceTime)
+			in, err := Collect(context.Background(), runs, audits, audit.Identity{}, id, evidenceTime)
 			if !errors.Is(err, run.ErrNotFound) {
 				t.Errorf("Collect(%q) error = %v, want run.ErrNotFound", id, err)
 			}
@@ -1075,7 +1075,7 @@ func TestCollectFailsOnAChildsOwnReadFault(t *testing.T) {
 	store := &childRuns{Store: &summaryFail{Store: base, failFor: "run_child0"},
 		shards: []*run.Run{child}}
 
-	in, cerr := Collect(ctx, store, audit.NewMemStore(), "", "run_parent", evidenceTime)
+	in, cerr := Collect(ctx, store, audit.NewMemStore(), audit.Identity{}, "run_parent", evidenceTime)
 	if cerr == nil {
 		t.Fatalf("Collect over a failed child read returned evidence with %d hosts", len(in.Hosts))
 	}
@@ -1088,7 +1088,7 @@ func TestCollectFailsOnAChildsOwnReadFault(t *testing.T) {
 func TestCollectFailsWhenTheEventFoldCannotBeRead(t *testing.T) {
 	t.Parallel()
 	runs, audits, id := seedEvidence(t)
-	in, err := Collect(context.Background(), eventPageFail{Store: runs}, audits, "", id, evidenceTime)
+	in, err := Collect(context.Background(), eventPageFail{Store: runs}, audits, audit.Identity{}, id, evidenceTime)
 	if err == nil {
 		t.Fatalf("Collect over a failed event page returned evidence with %d hosts", len(in.Hosts))
 	}
@@ -1133,7 +1133,7 @@ func TestCoverageReachesTheLaunchEntryEvenWhenItIsTheOnlyThingNamingTheRun(t *te
 		t.Fatalf("SaveAnchor() error = %v", err)
 	}
 
-	in, err := Collect(ctx, runs, audits, "", "run_skewed", evidenceTime.Add(3*time.Hour))
+	in, err := Collect(ctx, runs, audits, audit.Identity{}, "run_skewed", evidenceTime.Add(3*time.Hour))
 	if err != nil {
 		t.Fatalf("Collect() error = %v", err)
 	}
@@ -1163,7 +1163,7 @@ func TestDossierRendersTheHostTableItCollected(t *testing.T) {
 	base := run.NewMemStore()
 	seedHostRun(t, base, "run_hosts", evidenceTime, []string{"web-01", "db-01"})
 
-	in, err := Collect(ctx, base, audit.NewMemStore(), "", "run_hosts", evidenceTime)
+	in, err := Collect(ctx, base, audit.NewMemStore(), audit.Identity{}, "run_hosts", evidenceTime)
 	if err != nil {
 		t.Fatalf("Collect() error = %v", err)
 	}

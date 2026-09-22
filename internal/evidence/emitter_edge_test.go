@@ -105,7 +105,7 @@ func TestNewEmitterRefusesEveryDependencyItCannotWorkWithout(t *testing.T) {
 					t.Errorf("panic = %q, want it to mention %q", msg, test.WantWord)
 				}
 			}()
-			NewEmitter(test.Runs, test.Audits, "", test.Dir, test.Cadence, nil)
+			NewEmitter(test.Runs, test.Audits, audit.Identity{}, test.Dir, test.Cadence, nil)
 		})
 	}
 }
@@ -115,7 +115,7 @@ func TestNewEmitterRefusesEveryDependencyItCannotWorkWithout(t *testing.T) {
 func TestNewEmitterAcceptsExactlyAnHour(t *testing.T) {
 	t.Parallel()
 	runs, audits, _ := seedPeriod(t)
-	e := NewEmitter(runs, audits, "", t.TempDir(), time.Hour, nil)
+	e := NewEmitter(runs, audits, audit.Identity{}, t.TempDir(), time.Hour, nil)
 	defer e.Close()
 	if e.cadence != time.Hour {
 		t.Errorf("cadence = %s, want an hour", e.cadence)
@@ -134,7 +134,7 @@ func TestNewEmitterInstallsTheOptionsItWasGiven(t *testing.T) {
 	var notified []string
 	fixed := base.Add(99 * time.Hour)
 
-	e := NewEmitter(runs, audits, "in_test", t.TempDir(), 2*time.Hour, nil,
+	e := NewEmitter(runs, audits, audit.Identity{InstallID: "in_test"}, t.TempDir(), 2*time.Hour, nil,
 		WithClock(func() time.Time { return fixed }),
 		WithMaxChanges(7),
 		WithNotify(func(p string, _, _ time.Time) { notified = append(notified, p) }))
@@ -153,8 +153,8 @@ func TestNewEmitterInstallsTheOptionsItWasGiven(t *testing.T) {
 	if diff := cmp.Diff([]string{"path"}, notified, cmpopts.EquateEmpty()); diff != "" {
 		t.Errorf("the installed notify is not the one given (-want +got):\n%s", diff)
 	}
-	if e.installID != "in_test" {
-		t.Errorf("installID = %q, want in_test", e.installID)
+	if e.producer.InstallID != "in_test" {
+		t.Errorf("producer install = %q, want in_test", e.producer.InstallID)
 	}
 	if e.cadence != 2*time.Hour {
 		t.Errorf("cadence = %s, want 2h", e.cadence)
@@ -165,7 +165,7 @@ func TestNewEmitterInstallsTheOptionsItWasGiven(t *testing.T) {
 	}
 	// A supplied logger is kept as given.
 	log := zap.NewNop()
-	withLog := NewEmitter(runs, audits, "", t.TempDir(), time.Hour, log)
+	withLog := NewEmitter(runs, audits, audit.Identity{}, t.TempDir(), time.Hour, log)
 	defer withLog.Close()
 	if withLog.log != log {
 		t.Error("the supplied logger was replaced")
@@ -201,7 +201,7 @@ func TestMaxChangesFallsBackToTheDefaultRatherThanToZero(t *testing.T) {
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
 			t.Parallel()
-			e := NewEmitter(runs, audits, "", t.TempDir(), time.Hour, nil,
+			e := NewEmitter(runs, audits, audit.Identity{}, t.TempDir(), time.Hour, nil,
 				WithMaxChanges(test.Limit))
 			defer e.Close()
 			if e.limit != test.WantLimit {
@@ -210,7 +210,7 @@ func TestMaxChangesFallsBackToTheDefaultRatherThanToZero(t *testing.T) {
 		})
 	}
 	// With no option at all the default is in place, so the fallback is not the only thing setting it.
-	plain := NewEmitter(runs, audits, "", t.TempDir(), time.Hour, nil)
+	plain := NewEmitter(runs, audits, audit.Identity{}, t.TempDir(), time.Hour, nil)
 	defer plain.Close()
 	if plain.limit != dossier.MaxRegisterRuns {
 		t.Errorf("limit with no option = %d, want the default %d", plain.limit,
@@ -340,7 +340,7 @@ func TestResumeReadsOnlyPacksAndAnswersWithTheNewest(t *testing.T) {
 	t.Parallel()
 	runs, audits, base := seedPeriod(t)
 	dir := t.TempDir()
-	e := NewEmitter(runs, audits, "", dir, time.Hour, nil)
+	e := NewEmitter(runs, audits, audit.Identity{}, dir, time.Hour, nil)
 	defer e.Close()
 
 	// Packs written out of order, so the answer cannot come from directory order.
@@ -387,7 +387,7 @@ func TestResumeReportsAnUnreadableArchiveRatherThanGuessing(t *testing.T) {
 	t.Parallel()
 	runs, audits, base := seedPeriod(t)
 	dir := t.TempDir()
-	e := NewEmitter(runs, audits, "", filepath.Join(dir, "gone"), time.Hour, nil)
+	e := NewEmitter(runs, audits, audit.Identity{}, filepath.Join(dir, "gone"), time.Hour, nil)
 	defer e.Close()
 
 	got, err := e.resume(base)
@@ -434,7 +434,7 @@ func TestEmitDueDoesNothingUntilAWholeCadenceHasPassed(t *testing.T) {
 				defer mu.Unlock()
 				return clock
 			}
-			e := NewEmitter(runs, audits, "", dir, time.Hour, nil, WithClock(now))
+			e := NewEmitter(runs, audits, audit.Identity{}, dir, time.Hour, nil, WithClock(now))
 			defer e.Close()
 			// started is what an empty archive measures the first period from, and Start is what
 			// stamps it. Setting it here drives emitDue without the loop goroutine racing the test.
@@ -477,7 +477,7 @@ func TestEmitDueSurvivesAnArchiveItCannotRead(t *testing.T) {
 	t.Parallel()
 	runs, audits, base := seedPeriod(t)
 	missing := filepath.Join(t.TempDir(), "never-created")
-	e := NewEmitter(runs, audits, "", missing, time.Hour, nil,
+	e := NewEmitter(runs, audits, audit.Identity{}, missing, time.Hour, nil,
 		WithClock(func() time.Time { return base.Add(10 * time.Hour) }))
 	defer e.Close()
 	e.started = base
@@ -502,7 +502,7 @@ func TestEmitDueSurvivesAFailingCollectAndDoesNotAdvance(t *testing.T) {
 	broken := failingRuns{Store: runs, err: errListRuns}
 	var mu sync.Mutex
 	clock := base.Add(2 * time.Hour)
-	e := NewEmitter(broken, audits, "", dir, time.Hour, nil, WithClock(func() time.Time {
+	e := NewEmitter(broken, audits, audit.Identity{}, dir, time.Hour, nil, WithClock(func() time.Time {
 		mu.Lock()
 		defer mu.Unlock()
 		return clock
@@ -555,7 +555,7 @@ func TestEmitReportsACollectFailureRatherThanWritingAnEmptyPack(t *testing.T) {
 	t.Parallel()
 	runs, audits, base := seedPeriod(t)
 	dir := t.TempDir()
-	e := NewEmitter(failingRuns{Store: runs, err: errListRuns}, audits, "", dir, time.Hour, nil)
+	e := NewEmitter(failingRuns{Store: runs, err: errListRuns}, audits, audit.Identity{}, dir, time.Hour, nil)
 	defer e.Close()
 
 	err := e.Emit(context.Background(), base, base.Add(time.Hour))
@@ -592,7 +592,7 @@ func TestEmitHonorsACanceledContext(t *testing.T) {
 	t.Parallel()
 	runs, audits, base := seedPeriod(t)
 	dir := t.TempDir()
-	e := NewEmitter(runs, audits, "", dir, time.Hour, nil)
+	e := NewEmitter(runs, audits, audit.Identity{}, dir, time.Hour, nil)
 	defer e.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -625,7 +625,7 @@ func TestEmitWritesAPackForAPeriodWithNoChanges(t *testing.T) {
 	audits := audit.NewMemStore()
 	dir := t.TempDir()
 	var gotFrom, gotTo time.Time
-	e := NewEmitter(runs, audits, "", dir, time.Hour, nil,
+	e := NewEmitter(runs, audits, audit.Identity{}, dir, time.Hour, nil,
 		WithNotify(func(_ string, from, to time.Time) { gotFrom, gotTo = from, to }))
 	defer e.Close()
 
@@ -672,7 +672,7 @@ func TestEmitRefusesToLeaveAGapWhenAPeriodCannotBeSplit(t *testing.T) {
 		}
 	}
 	dir := t.TempDir()
-	e := NewEmitter(runs, audit.NewMemStore(), "", dir, time.Hour, nil, WithMaxChanges(2))
+	e := NewEmitter(runs, audit.NewMemStore(), audit.Identity{}, dir, time.Hour, nil, WithMaxChanges(2))
 	defer e.Close()
 
 	to := base.Add(6 * time.Hour)
@@ -723,7 +723,7 @@ func TestEmitNamesEachPackForWhatItActuallyCovers(t *testing.T) {
 	runs, audits := seedSpread(t, base, 0, hour, 2*hour, 3*hour, 4*hour, 5*hour, 6*hour)
 	dir := t.TempDir()
 	var notified [][2]time.Time
-	e := NewEmitter(runs, audits, "", dir, hour, nil, WithMaxChanges(2),
+	e := NewEmitter(runs, audits, audit.Identity{}, dir, hour, nil, WithMaxChanges(2),
 		WithNotify(func(_ string, from, to time.Time) {
 			notified = append(notified, [2]time.Time{from, to})
 		}))
@@ -791,7 +791,7 @@ func TestEmitKeepsThePacksThatLandedWhenALaterOneFails(t *testing.T) {
 	hour := time.Hour
 	runs, audits := seedSpread(t, base, 0, hour, 2*hour, 3*hour, 4*hour, 5*hour)
 	dir := t.TempDir()
-	e := NewEmitter(runs, audits, "", dir, hour, nil, WithMaxChanges(2))
+	e := NewEmitter(runs, audits, audit.Identity{}, dir, hour, nil, WithMaxChanges(2))
 	defer e.Close()
 
 	// The first pack lands, then the store fails, so the rest of the split cannot be built.
@@ -849,7 +849,7 @@ func TestWritePackLeavesNoTemporaryFileBehind(t *testing.T) {
 	t.Parallel()
 	runs, audits, base := seedPeriod(t)
 	dir := t.TempDir()
-	e := NewEmitter(runs, audits, "", dir, time.Hour, nil)
+	e := NewEmitter(runs, audits, audit.Identity{}, dir, time.Hour, nil)
 	defer e.Close()
 
 	for i := range 4 {
@@ -888,7 +888,7 @@ func TestWritePackReportsAndCleansUpWhenTheRenameCannotHappen(t *testing.T) {
 	t.Parallel()
 	runs, audits, base := seedPeriod(t)
 	dir := t.TempDir()
-	e := NewEmitter(runs, audits, "", dir, time.Hour, nil)
+	e := NewEmitter(runs, audits, audit.Identity{}, dir, time.Hour, nil)
 	defer e.Close()
 
 	from, to := base, base.Add(time.Hour)
@@ -930,7 +930,7 @@ func TestEmitCreatesTheArchiveDirectoryItWasGiven(t *testing.T) {
 	t.Parallel()
 	runs, audits, base := seedPeriod(t)
 	dir := filepath.Join(t.TempDir(), "nested", "evidence")
-	e := NewEmitter(runs, audits, "", dir, time.Hour, nil)
+	e := NewEmitter(runs, audits, audit.Identity{}, dir, time.Hour, nil)
 	defer e.Close()
 
 	if err := e.Emit(context.Background(), base, base.Add(time.Hour)); err != nil {
@@ -967,12 +967,12 @@ func TestCloseIsSafeToCallMoreThanOnceAndWithoutStart(t *testing.T) {
 	runs, audits, _ := seedPeriod(t)
 
 	// Never started.
-	never := NewEmitter(runs, audits, "", t.TempDir(), time.Hour, nil)
+	never := NewEmitter(runs, audits, audit.Identity{}, t.TempDir(), time.Hour, nil)
 	never.Close()
 	never.Close()
 
 	// Started, then closed twice.
-	started := NewEmitter(runs, audits, "", t.TempDir(), time.Hour, nil)
+	started := NewEmitter(runs, audits, audit.Identity{}, t.TempDir(), time.Hour, nil)
 	if err := started.Start(); err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
@@ -1000,7 +1000,7 @@ func TestStartStampsTheOriginBeforeTheLoopCanTick(t *testing.T) {
 	t.Parallel()
 	runs, audits, base := seedPeriod(t)
 	dir := t.TempDir()
-	e := NewEmitter(runs, audits, "", dir, time.Hour, nil,
+	e := NewEmitter(runs, audits, audit.Identity{}, dir, time.Hour, nil,
 		WithClock(func() time.Time { return base }))
 	defer e.Close()
 
@@ -1050,7 +1050,7 @@ func TestStartCreatesTheArchiveDirectoryAndReportsOneItCannotUse(t *testing.T) {
 	t.Parallel()
 	runs, audits, _ := seedPeriod(t)
 	dir := filepath.Join(t.TempDir(), "nested", "evidence")
-	e := NewEmitter(runs, audits, "", dir, time.Hour, nil)
+	e := NewEmitter(runs, audits, audit.Identity{}, dir, time.Hour, nil)
 	defer e.Close()
 	if err := e.Start(); err != nil {
 		t.Fatalf("Start() error = %v", err)
@@ -1079,7 +1079,7 @@ func TestEmitterIsSafeWhileItsLoopRuns(t *testing.T) {
 	dir := t.TempDir()
 	var mu sync.Mutex
 	clock := base
-	e := NewEmitter(runs, audits, "", dir, time.Hour, nil, WithClock(func() time.Time {
+	e := NewEmitter(runs, audits, audit.Identity{}, dir, time.Hour, nil, WithClock(func() time.Time {
 		mu.Lock()
 		defer mu.Unlock()
 		return clock
@@ -1138,7 +1138,7 @@ func TestNotifyFailureDoesNotUnwriteThePack(t *testing.T) {
 	t.Parallel()
 	runs, audits, base := seedPeriod(t)
 	dir := t.TempDir()
-	e := NewEmitter(runs, audits, "", dir, time.Hour, nil,
+	e := NewEmitter(runs, audits, audit.Identity{}, dir, time.Hour, nil,
 		WithNotify(func(path string, _, _ time.Time) {
 			// The pack is already in place by the time anyone is told about it.
 			if _, err := os.Stat(path); err != nil {
@@ -1173,7 +1173,7 @@ func TestPeriodBoundariesAreHalfOpenSoNoChangeIsCountedTwice(t *testing.T) {
 	// One change exactly on each boundary, plus one strictly inside the first period.
 	runs, audits := seedSpread(t, base, 0, 30*time.Minute, hour, 2*hour)
 	dir := t.TempDir()
-	e := NewEmitter(runs, audits, "", dir, hour, nil)
+	e := NewEmitter(runs, audits, audit.Identity{}, dir, hour, nil)
 	defer e.Close()
 
 	ctx := context.Background()

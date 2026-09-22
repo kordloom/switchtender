@@ -166,9 +166,9 @@ func anchorsFor(ctx context.Context, store audit.Store) ([]*audit.Anchor, error)
 }
 
 // auditVerifyHandler recomputes the audit hash chain and reports whether it is intact, so an
-// operator can prove the trail has not been altered. installID is the install the tree profile's
+// operator can prove the trail has not been altered. producer is the install identity the tree profile's
 // leaves bind to, which checking a tree anchor requires.
-func auditVerifyHandler(store audit.Store, installID string, log *zap.Logger) http.HandlerFunc {
+func auditVerifyHandler(store audit.Store, producer audit.Identity, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil {
 			respondError(w, log, http.StatusNotFound, "audit trail not enabled")
@@ -188,7 +188,7 @@ func auditVerifyHandler(store audit.Store, installID string, log *zap.Logger) ht
 		// The chain streams past both scanners one entry at a time, so verifying years of trail
 		// holds one entry in memory rather than all of them, however many clients ask at once.
 		chainScan := audit.NewChainScanner(true)
-		anchorScan := audit.NewAnchorScanner(anchors, installID)
+		anchorScan := audit.NewAnchorScanner(anchors, producer)
 		err := store.ChainScan(r.Context(), 0, func(e *audit.Entry) error {
 			chainScan.Feed(e)
 			anchorScan.Feed(e)
@@ -439,7 +439,7 @@ func auditBundleHandler(store audit.Store, producer *audit.Identity, version str
 		// over the tail of a chain it could see was broken. And the builder reports a break by
 		// failing, which arrived as a bare 500: indistinguishable from a crashed server, on the one
 		// question this endpoint exists to answer.
-		anchorScan := audit.NewAnchorScanner(recorded, producer.InstallID)
+		anchorScan := audit.NewAnchorScanner(recorded, *producer)
 		verdict, err := walkChain(r.Context(), store, anchorScan)
 		if err != nil {
 			log.Error("server: chain audit entries: " + err.Error())

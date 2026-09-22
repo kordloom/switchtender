@@ -91,7 +91,7 @@ func Build(ctx context.Context, runs run.Store, audits audit.Store, id audit.Ide
 		if recorded, aerr = anchorStore.Anchors(ctx, 0); aerr != nil {
 			return nil, fmt.Errorf("read anchors: %w", aerr)
 		}
-		anchorScan = audit.NewAnchorScanner(recorded, id.InstallID)
+		anchorScan = audit.NewAnchorScanner(recorded, id)
 	}
 	collectFrom := creationSeq
 	if opts.Sparse {

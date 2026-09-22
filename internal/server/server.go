@@ -457,16 +457,17 @@ func (s *Server) Handler() http.Handler {
 	}
 	mux.Handle("GET /healthz", healthHandler())
 	mux.Handle("GET /readyz", readyHandler(s.store))
-	// The producer identity's install id binds the tree profile's leaves, so every anchor check
-	// that may meet a tree anchor carries it. Without a producer it stays empty and tree anchors
-	// are reported uncheckable rather than silently passed.
-	var installID string
+	// The producer identity binds the tree profile's leaves, so every anchor check that may meet a
+	// tree anchor carries it. The key travels with the name, so an anchor taken under this
+	// install's earlier name recomputes rather than refusing. Without a producer it stays zero and
+	// tree anchors are reported uncheckable rather than silently passed.
+	var producer audit.Identity
 	if s.producer != nil {
-		installID = s.producer.InstallID
+		producer = *s.producer
 	}
 	var health *chainHealth
 	if s.audits != nil {
-		health = newChainHealth(s.audits, installID)
+		health = newChainHealth(s.audits, producer)
 	}
 	mux.Handle("GET /metrics", metricsHandler(s.store, health, authz, s.log))
 	mux.Handle("GET /v1/fleet", fleetHandler(s.store, authz, s.log))
@@ -481,9 +482,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /v1/tasks", taskTrendsHandler(s.store, authz, s.log))
 	mux.Handle("GET /v1/workers", workersHandler(s.store, authz, s.log))
 	mux.Handle("GET /v1/audit", auditHandler(s.audits, s.log))
-	mux.Handle("GET /v1/audit/verify", auditVerifyHandler(s.audits, installID, s.log))
+	mux.Handle("GET /v1/audit/verify", auditVerifyHandler(s.audits, producer, s.log))
 	mux.Handle("GET /v1/audit/bundle", auditBundleHandler(s.audits, s.producer, s.productVersion, s.log))
-	mux.Handle("GET /v1/audit/register", auditRegisterHandler(s.store, s.audits, installID, s.log))
+	mux.Handle("GET /v1/audit/register", auditRegisterHandler(s.store, s.audits, producer, s.log))
 	// Served unauthenticated: the beat feed exists so an outside watcher can see the chain is
 	// alive and whole, and that watcher has no account here.
 	mux.Handle("GET "+beatfeed.APIPath, auditBeatsHandler(s.audits, s.log))
@@ -506,7 +507,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /v1/runs/{id}/logs", runLogsHandler(s.store, authz, s.log))
 	mux.Handle("GET /v1/runs/{id}/events", runEventsHandler(s.store, authz, s.log))
 	mux.Handle("GET /v1/runs/{id}/evidence",
-		runEvidenceHandler(s.store, s.audits, installID, authz, s.log))
+		runEvidenceHandler(s.store, s.audits, producer, authz, s.log))
 	mux.Handle("GET /v1/runs/{id}/receipt",
 		runReceiptHandler(s.store, s.audits, s.producer, s.productVersion, authz, s.log))
 	mux.Handle("POST /v1/runs/{id}/explain", explainRunHandler(s.store, s.ai, authz, s.log))

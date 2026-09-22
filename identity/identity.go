@@ -278,6 +278,25 @@ func identityFromSeed(hexSeed, installID string) (Identity, error) {
 	return id, nil
 }
 
+// LegacyInstallIDFromKey returns the install id a key was born to before the id was widened: the
+// first six bytes of the public key.
+//
+// It exists for verification only, and only for a bundle that already carries that form. A receipt
+// is evidence, and the promise attached to it is that it verifies offline for as long as anybody
+// keeps it, so upgrading the binary that reads one must not stop it verifying. Widening the
+// derivation without this turned every receipt issued by an earlier release into a failure naming a
+// rotated install, which is the accusation of tampering the format exists to make meaningful.
+//
+// Minting still uses the wide form, so an install created from here on is bound at the full width
+// and cannot be ground out. What this accepts is only what was already issued, at the width it was
+// issued under, which is where that exposure already existed.
+func LegacyInstallIDFromKey(pub ed25519.PublicKey) string {
+	if len(pub) != ed25519.PublicKeySize {
+		return ""
+	}
+	return "in_" + hex.EncodeToString(pub[:6])
+}
+
 // InstallIDFromKey returns the install id that belongs to a public key. A verifier needs it to check
 // that a bundle naming an install was signed by that install's key rather than by whoever re-signed
 // it, which is the tie the id alone does not make.

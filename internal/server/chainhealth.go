@@ -17,10 +17,10 @@ import (
 type chainHealth struct {
 	// audits is the chain being verified.
 	audits audit.Store
-	// installID is the install the tree profile's leaves bind to, needed to check a tree anchor.
-	// Empty when the producer identity is unavailable, which leaves tree anchors uncheckable and
-	// reported as problems rather than silently passed.
-	installID string
+	// producer is the install identity the tree profile's leaves bind to, needed to check a tree
+	// anchor under the name it was taken with. Zero when the producer identity is unavailable,
+	// which leaves tree anchors uncheckable and reported as problems rather than silently passed.
+	producer audit.Identity
 	// mu guards everything below.
 	mu sync.Mutex
 	// clock reads the time, replaced in tests.
@@ -49,15 +49,15 @@ type chainHealth struct {
 // bounds both the cost of a scrape storm and how long a tamper can sit unreported.
 const chainHealthInterval = 15 * time.Second
 
-// newChainHealth returns a tracker over the given chain. installID is the install the tree
+// newChainHealth returns a tracker over the given chain. producer is the install identity the tree
 // profile's leaves bind to. It panics on a nil store, a programming error: the caller decides
 // whether the audit trail is configured, not this.
-func newChainHealth(audits audit.Store, installID string) *chainHealth {
+func newChainHealth(audits audit.Store, producer audit.Identity) *chainHealth {
 	if audits == nil {
 		panic("server: newChainHealth: audit store required")
 	}
 	return &chainHealth{
-		audits: audits, installID: installID, clock: time.Now, minInterval: chainHealthInterval,
+		audits: audits, producer: producer, clock: time.Now, minInterval: chainHealthInterval,
 	}
 }
 
@@ -81,7 +81,7 @@ func (h *chainHealth) refresh(ctx context.Context) {
 		return
 	}
 	chainScan := audit.NewChainScanner(true)
-	anchorScan := audit.NewAnchorScanner(anchors, h.installID)
+	anchorScan := audit.NewAnchorScanner(anchors, h.producer)
 	err = h.audits.ChainScan(ctx, 0, func(e *audit.Entry) error {
 		chainScan.Feed(e)
 		anchorScan.Feed(e)

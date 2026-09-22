@@ -83,7 +83,7 @@ func runAuditReceipt(cmd *cobra.Command, args []string) error {
 		if ierr != nil {
 			return ierr
 		}
-		if reached, results := audit.CheckAnchors(chain, recorded, id.InstallID); !reached {
+		if reached, results := audit.CheckAnchors(chain, recorded, id); !reached {
 			for _, res := range results {
 				if !res.Reached {
 					fmt.Fprintln(os.Stderr, "anchor "+res.Anchor.ID+": "+res.Problem)

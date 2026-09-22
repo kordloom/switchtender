@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/license"
 )
 
@@ -56,7 +57,7 @@ func TestALapsedRegisterStopsWritingPacks(t *testing.T) {
 		return n
 	}
 
-	e := NewEmitter(runs, audits, "", dir, time.Hour, nil, WithClock(now))
+	e := NewEmitter(runs, audits, audit.Identity{}, dir, time.Hour, nil, WithClock(now))
 	defer e.Close()
 	if err := e.Start(); err != nil {
 		t.Fatalf("Start() error = %v", err)

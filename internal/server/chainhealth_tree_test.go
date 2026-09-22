@@ -53,7 +53,7 @@ func TestChainHealthAcceptsATreeAnchor(t *testing.T) {
 	const installID = "inst_health"
 	audits := seedTreeAnchoredChain(t, installID, 4)
 
-	health := newChainHealth(audits, installID)
+	health := newChainHealth(audits, audit.Identity{InstallID: installID})
 	g := health.snapshot(context.Background())
 	if !g.Verified || g.Stale {
 		t.Fatalf("snapshot verified=%v stale=%v, want a verified fresh reading", g.Verified, g.Stale)
@@ -100,7 +100,7 @@ func TestAuditVerifyHandlerAcceptsATreeAnchor(t *testing.T) {
 	const installID = "inst_verify"
 	audits := seedTreeAnchoredChain(t, installID, 5)
 
-	h := auditVerifyHandler(audits, installID, zap.NewNop())
+	h := auditVerifyHandler(audits, audit.Identity{InstallID: installID}, zap.NewNop())
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/audit/verify", nil))
 	if rec.Code != http.StatusOK {

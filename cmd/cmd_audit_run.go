@@ -58,7 +58,7 @@ func runAuditRunDossier(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	in, err := dossier.Collect(cmd.Context(), store.Runs(), store.Audits(), id.InstallID, args[0],
+	in, err := dossier.Collect(cmd.Context(), store.Runs(), store.Audits(), id, args[0],
 		time.Now())
 	if errors.Is(err, run.ErrNotFound) {
 		return fmt.Errorf("run %s is not in this database", args[0])

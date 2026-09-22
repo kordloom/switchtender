@@ -170,8 +170,13 @@ func verifyBundle(signed []byte, pinnedKeyID, acceptedInstall string) (*BundleRe
 	//
 	// A bundle naming no install predates the binding and is left alone, which is the same
 	// grandfathering the per-claim check applies.
+	// The id a bundle was issued under is accepted at the width it was issued under. The derivation
+	// was widened so an install id could not be ground out, and a receipt keeps verifying for as
+	// long as somebody holds it, so reading one issued before that change must not report it as a
+	// rotated install. New installs are minted at the full width either way.
 	if b.Producer.InstallID != "" && b.Producer.InstallID != acceptedInstall &&
-		b.Producer.InstallID != identity.InstallIDFromKey(pub) {
+		b.Producer.InstallID != identity.InstallIDFromKey(pub) &&
+		b.Producer.InstallID != identity.LegacyInstallIDFromKey(pub) {
 		return rep, fmt.Errorf("%w: bundle names install %s, which is not the install key %s was born"+
 			" to; a rotated install verifies only with its install id explicitly accepted for the"+
 			" pinned key", ErrVerify, b.Producer.InstallID, b.Producer.KeyID)
@@ -180,6 +185,10 @@ func verifyBundle(signed []byte, pinnedKeyID, acceptedInstall string) (*BundleRe
 		return rep, fmt.Errorf("%w: bundle is signed by %s, not the pinned key %s",
 			ErrVerify, b.Producer.KeyID, pinnedKeyID)
 	}
+	// The names this key may have written entries under. Accepting the widened id for the producer
+	// block alone repaired the header and left every entry beneath it failing, so a chain spanning
+	// the upgrade still read as tampered.
+	names := producerNames(pub, b.Producer.InstallID)
 
 	sigOK, err := verifyBundleSignature(signed, pub, b.Producer.KeyID)
 	if err != nil {
@@ -240,7 +249,7 @@ func verifyBundle(signed []byte, pinnedKeyID, acceptedInstall string) (*BundleRe
 		// otherwise lift a published receipt whole, keep its claims and its genuine third-party
 		// anchor, rewrite the producer block, and re-sign as itself.
 		rep.ChainOK, rep.BrokeAtSeq = verifyBundleChain(b.Claims, head)
-		if rep.ChainOK && !linearInstallMatches(&b) {
+		if rep.ChainOK && !linearInstallMatches(&b, names) {
 			rep.ChainOK, rep.BrokeAtSeq = false, head.Seq
 		}
 	}
@@ -734,7 +743,7 @@ func verifyBundleChain(claims []BundleClaim, head BundleCoord) (bool, int64) {
 // already written commits to what it committed to. The remedy is on the producing side, not this
 // one. Every process that appends must bind its install, which is why serve and the demo both do it
 // before their first write and warn loudly when they cannot.
-func linearInstallMatches(b *Bundle) bool {
+func linearInstallMatches(b *Bundle, names installNames) bool {
 	for i := range b.Claims {
 		named, _ := b.Claims[i].Payload["install_id"].(string)
 		if named == "" {
@@ -742,7 +751,9 @@ func linearInstallMatches(b *Bundle) bool {
 			// bound, which is a fact about that entry rather than a fault in this document.
 			continue
 		}
-		if b.Producer.InstallID == "" || named != b.Producer.InstallID {
+		// Either name this key has written under. An entry written before the id derivation was
+		// widened names the install by its old width, and no later change can rewrite it.
+		if !names.matches(named) {
 			return false
 		}
 	}

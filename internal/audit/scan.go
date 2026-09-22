@@ -89,6 +89,11 @@ type AnchorScanner struct {
 	// installID is the install the tree's leaves bind to, the same value TreeHead hashes. It is
 	// only consulted when a tree anchor is present.
 	installID string
+	// names are the install ids this producer key has written under, so an anchor taken under this
+	// install's own earlier name is recomputed rather than reported as unrecomputable.
+	names installNames
+	// alt folds the same chain under the earlier name, built only when an anchor names it.
+	alt *treeFold
 	// wanted marks the linear anchored sequences still worth capturing.
 	wanted map[int64]struct{}
 	// atSeq is the link found at each linear anchored sequence.
@@ -111,10 +116,12 @@ type AnchorScanner struct {
 
 // NewAnchorScanner returns a scanner over the given anchors. installID is the install the tree
 // profile's leaves bind to; it matters only when a tree anchor is among them.
-func NewAnchorScanner(anchors []*Anchor, installID string) *AnchorScanner {
+func NewAnchorScanner(anchors []*Anchor, id Identity) *AnchorScanner {
+	names := installNamesOf(id)
 	s := &AnchorScanner{
 		anchors:   anchors,
-		installID: installID,
+		installID: id.InstallID,
+		names:     names,
 		wanted:    make(map[int64]struct{}, len(anchors)),
 		atSeq:     make(map[int64]string, len(anchors)),
 		treeSizes: make(map[int64]struct{}),
@@ -123,6 +130,22 @@ func NewAnchorScanner(anchors []*Anchor, installID string) *AnchorScanner {
 	for _, a := range anchors {
 		if a.Shape == AnchorShapeTree {
 			s.treeSizes[a.Seq] = struct{}{}
+			// An anchor taken under this key's other name is recomputed under that name. A tree
+			// leaf commits to the install id, so the same untouched chain under a different name
+			// produces a different root, and the id derivation was widened underneath installs
+			// that re-derive it every boot. Only this key's own earlier name is folded: an anchor
+			// naming some other install is still reported as unrecomputable, because a process
+			// that cannot reproduce an identity cannot vouch for a root computed under it.
+			//
+			// An anchor naming no install at all is folded the same way. Those were written before
+			// anchors recorded the identity, which is the same releases that carried the narrow
+			// derivation, so the narrow name is the one they were taken under. Everything else in
+			// this codebase grandfathers a pre-binding record rather than reading it as a fault,
+			// and leaving this one out made it the single shape that read as a rewrite.
+			if names.alias != "" && s.alt == nil &&
+				(a.InstallID == names.alias || a.InstallID == "") {
+				s.alt = newTreeFold(names.alias)
+			}
 			continue
 		}
 		s.wanted[a.Seq] = struct{}{}
@@ -132,6 +155,20 @@ func NewAnchorScanner(anchors []*Anchor, installID string) *AnchorScanner {
 
 // Feed records what the entry proves about the anchors: the link at a linear anchored position,
 // the tree root at an anchored size, and how far the chain reaches.
+// altRootAt returns the root the alternate fold recomputed at this anchor's size, and whether that
+// fold speaks for the identity the anchor names. It answers only for an anchor taken under this
+// key's earlier name, or under no name at all, which is the same set the fold was built for.
+func (s *AnchorScanner) altRootAt(a *Anchor) (string, bool) {
+	if s.alt == nil || s.names.alias == "" || s.alt.err != nil {
+		return "", false
+	}
+	if a.InstallID != "" && a.InstallID != s.names.alias {
+		return "", false
+	}
+	root, ok := s.alt.rootAt[a.Seq]
+	return root, ok
+}
+
 func (s *AnchorScanner) Feed(e *Entry) {
 	if e == nil {
 		return
@@ -141,6 +178,9 @@ func (s *AnchorScanner) Feed(e *Entry) {
 	}
 	if _, ok := s.wanted[e.Seq]; ok {
 		s.atSeq[e.Seq] = e.Hash
+	}
+	if s.alt != nil {
+		s.alt.feed(e, s.treeSizes)
 	}
 	if len(s.treeSizes) == 0 || s.treeErr != nil || s.installID == "" {
 		return

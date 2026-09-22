@@ -89,7 +89,7 @@ func TestTimestampRefusesAForgedTokenSoNothingIsStored(t *testing.T) {
 			if diff := cmp.Diff([]*Anchor(nil), stored, cmpopts.EquateEmpty()); diff != "" {
 				t.Errorf("stored anchors (-want +got):\n%s", diff)
 			}
-			_, results := CheckAnchors(chain, stored, "")
+			_, results := CheckAnchors(chain, stored, Identity{})
 			verified := 0
 			for _, r := range results {
 				if r.Reached {

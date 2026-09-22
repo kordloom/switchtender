@@ -35,8 +35,8 @@ type AnchorCheck struct {
 // A linear anchor's coordinate is an entry hash at a chain position. A tree anchor's is the Merkle
 // root over the first Seq entries, so it is checked by recomputing that tree with the leaves bound
 // to installID, exactly as TreeHead builds it, never against the linear hash map.
-func CheckAnchors(entries []*Entry, anchors []*Anchor, installID string) (ok bool, results []AnchorCheck) {
-	s := NewAnchorScanner(anchors, installID)
+func CheckAnchors(entries []*Entry, anchors []*Anchor, id Identity) (ok bool, results []AnchorCheck) {
+	s := NewAnchorScanner(anchors, id)
 	for _, e := range entries {
 		s.Feed(e)
 	}
@@ -102,21 +102,56 @@ func treeVerdict(s *AnchorScanner, a *Anchor) AnchorCheck {
 			s.fed, a.Seq, a.Seq-s.fed)
 	case !found:
 		res.Problem = fmt.Sprintf("no root could be recomputed at tree size %d", a.Seq)
-	case root != a.Link && a.InstallID != "" && a.InstallID != s.installID:
-		// A tree root is computed over leaves bound to the install's identity, so the same untouched
-		// chain under a different identity produces a different root. Two ordinary events cause that: a
-		// database restored without the key file that made it, and a deployment where each replica
-		// mints its own key. Calling either one a rewrite teaches an operator to disbelieve the message
-		// that matters.
+	case root == a.Link:
+		res.Reached = true
+	default:
+		res = disagreeingTreeVerdict(s, a, root)
+	}
+	return res
+}
+
+// disagreeingTreeVerdict decides what a root that does not match its anchor means.
+//
+// There are two different findings hiding behind one mismatch, and telling them apart is the whole
+// value of the message. Either the identity the root was computed under is not the one this process
+// can reproduce, in which case nothing has been shown about the history; or the process did
+// reproduce that identity and the roots still differ, in which case the history under the anchor was
+// rewritten and this is the one message that must never be softened.
+//
+// The order matters. Asking about the identity first, as this did, swallowed the second case whole:
+// a chain tampered with under an anchor taken by this install's own earlier name was reported as an
+// identity it could not reproduce, ending in the words "Nothing here says the history changed",
+// while the alternate fold sitting beside it held the proof that it had.
+func disagreeingTreeVerdict(s *AnchorScanner, a *Anchor, root string) AnchorCheck {
+	res := AnchorCheck{Anchor: a}
+	// The anchor's own identity, when it is one this key has written under. Whatever this fold
+	// says is the answer, because it was computed under the name the anchor names.
+	if alt, ok := s.altRootAt(a); ok {
+		if alt == a.Link {
+			// Recomputed under this key's earlier name, which is what the anchor was taken under.
+			// The id derivation was widened, and the path that re-derives it every boot renamed
+			// installs underneath chains they had already anchored. Nothing about the history
+			// changed, and only this key's other name is admitted here.
+			res.Reached = true
+			return res
+		}
+		res.Problem = fmt.Sprintf("the tree over the first %d entries has root %s under the identity "+
+			"this anchor names, and the anchor recorded %s, so the history under the anchor was "+
+			"rewritten", a.Seq, alt, a.Link)
+		return res
+	}
+	if a.InstallID != "" && a.InstallID != s.installID {
+		// The root was computed under an identity this process cannot reproduce, so the difference
+		// is not evidence about the history. Two ordinary events cause it: a database restored
+		// without the key file that made it, and a deployment where each replica mints its own key.
+		// Calling either one a rewrite teaches an operator to disbelieve the message that matters.
 		res.Problem = fmt.Sprintf("this anchor was taken by install %s and this process is install "+
 			"%s, so the tree it fixed a root of cannot be recomputed here: restore the producer key "+
 			"that made this chain, or point this process at it, and check again. Nothing here says "+
 			"the history changed", a.InstallID, s.installID)
-	case root != a.Link:
-		res.Problem = fmt.Sprintf("the tree over the first %d entries now has root %s, and this "+
-			"anchor recorded %s, so the history under the anchor was rewritten", a.Seq, root, a.Link)
-	default:
-		res.Reached = true
+		return res
 	}
+	res.Problem = fmt.Sprintf("the tree over the first %d entries now has root %s, and this anchor "+
+		"recorded %s, so the history under the anchor was rewritten", a.Seq, root, a.Link)
 	return res
 }

@@ -479,7 +479,7 @@ func TestAuditRegisterRefusesABadPeriod(t *testing.T) {
 				audits = audit.NewMemStore()
 			}
 			rec := httptest.NewRecorder()
-			auditRegisterHandler(run.NewMemStore(), audits, "install_1", zap.NewNop()).
+			auditRegisterHandler(run.NewMemStore(), audits, audit.Identity{InstallID: "install_1"}, zap.NewNop()).
 				ServeHTTP(rec, httptest.NewRequest(http.MethodGet,
 					"/v1/audit/register"+test.Query, nil))
 			if rec.Code != test.WantStatus {
@@ -499,7 +499,7 @@ func TestAuditRegisterHandlerPanicsWithoutAStore(t *testing.T) {
 			t.Error("auditRegisterHandler accepted a nil run store")
 		}
 	}()
-	auditRegisterHandler(nil, audit.NewMemStore(), "install_1", zap.NewNop())
+	auditRegisterHandler(nil, audit.NewMemStore(), audit.Identity{InstallID: "install_1"}, zap.NewNop())
 }
 
 // TestParseRegisterTime pins both accepted spellings of a period bound and the refusal of anything
@@ -585,7 +585,7 @@ func (u *unreadableAudits) ChainScan(context.Context, int64, func(*audit.Entry) 
 // verified false with stale false is a confirmed break, stale true is "could not check".
 func TestChainHealthReportsStaleRatherThanBroken(t *testing.T) {
 	t.Parallel()
-	health := newChainHealth(&unreadableAudits{err: errStore}, "install_1")
+	health := newChainHealth(&unreadableAudits{err: errStore}, audit.Identity{InstallID: "install_1"})
 	got := health.snapshot(context.Background())
 	if !got.Stale {
 		t.Error("an unreadable chain was not reported stale")
@@ -605,7 +605,7 @@ func TestChainHealthReportsStaleRatherThanBroken(t *testing.T) {
 // before the first walk from reading as an all-clear.
 func TestChainHealthNeverReportsAnUnwalkedChainSound(t *testing.T) {
 	t.Parallel()
-	health := newChainHealth(audit.NewMemStore(), "install_1")
+	health := newChainHealth(audit.NewMemStore(), audit.Identity{InstallID: "install_1"})
 	if health.verified {
 		t.Error("a chain that has never been walked starts out reported verified")
 	}
@@ -623,7 +623,7 @@ func TestChainHealthServesTheCacheInsideItsWindow(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	counting := &countingAudits{Store: audit.NewMemStore()}
-	health := newChainHealth(counting, "install_1")
+	health := newChainHealth(counting, audit.Identity{InstallID: "install_1"})
 	now := time.Now()
 	health.clock = func() time.Time { return now }
 
@@ -666,5 +666,5 @@ func TestNewChainHealthPanicsOnANilStore(t *testing.T) {
 			t.Error("newChainHealth accepted a nil audit store")
 		}
 	}()
-	newChainHealth(nil, "install_1")
+	newChainHealth(nil, audit.Identity{InstallID: "install_1"})
 }

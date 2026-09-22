@@ -62,7 +62,7 @@ func TestTheDossierDoesNotLoadEveryEvent(t *testing.T) {
 		at := time.Now()
 		seedRunWithEvents(t, base, "run_summarized", at, 5, true)
 
-		in, err := Collect(ctx, store, audit.NewMemStore(), "", "run_summarized", at)
+		in, err := Collect(ctx, store, audit.NewMemStore(), audit.Identity{}, "run_summarized", at)
 		if err != nil {
 			t.Fatalf("Collect() error = %v", err)
 		}
@@ -82,7 +82,7 @@ func TestTheDossierDoesNotLoadEveryEvent(t *testing.T) {
 		at := time.Now()
 		seedRunWithEvents(t, base, "run_unsummarized", at, 7, false)
 
-		in, err := Collect(ctx, store, audit.NewMemStore(), "", "run_unsummarized", at)
+		in, err := Collect(ctx, store, audit.NewMemStore(), audit.Identity{}, "run_unsummarized", at)
 		if err != nil {
 			t.Fatalf("Collect() error = %v", err)
 		}

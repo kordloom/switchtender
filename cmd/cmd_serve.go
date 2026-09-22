@@ -1280,11 +1280,11 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			licensed = false
 		}
 		if licensed {
-			var packInstallID string
+			var packProducer audit.Identity
 			if producer != nil {
-				packInstallID = producer.InstallID
+				packProducer = *producer
 			}
-			packs := evidence.NewEmitter(bundle.Runs(), bundle.Audits(), packInstallID, evidenceDir,
+			packs := evidence.NewEmitter(bundle.Runs(), bundle.Audits(), packProducer, evidenceDir,
 				evidenceCadence,
 				log, evidence.WithNotify(func(path string, from, to time.Time) {
 					log.Info("evidence pack ready", zap.String("path", path),

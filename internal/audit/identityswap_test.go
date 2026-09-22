@@ -32,14 +32,14 @@ func TestATreeAnchorNamesTheInstallItWasTakenUnder(t *testing.T) {
 	}
 
 	// Test 0: Checked under the identity that took it, the anchor is satisfied.
-	ok, results := CheckAnchors(entries, []*Anchor{anchor}, madeBy)
+	ok, results := CheckAnchors(entries, []*Anchor{anchor}, Identity{InstallID: madeBy})
 	if !ok {
 		t.Fatalf("the anchor does not verify under its own install: %+v", results)
 	}
 
 	// Test 1: Checked under a different identity, the same anchor is refused, and the refusal says why
 	// rather than claiming the history changed.
-	ok, results = CheckAnchors(entries, []*Anchor{anchor}, nowRunning)
+	ok, results = CheckAnchors(entries, []*Anchor{anchor}, Identity{InstallID: nowRunning})
 	if ok {
 		t.Fatal("the anchor verified under a different install identity, so the identity is not " +
 			"actually bound into the tree")
@@ -61,7 +61,7 @@ func TestATreeAnchorNamesTheInstallItWasTakenUnder(t *testing.T) {
 		ID: "anc_0", Type: AnchorHTTPS, Shape: AnchorShapeTree, Seq: size, Link: root,
 		At: time.Now(), Ref: "https://example.com/head",
 	}
-	_, results = CheckAnchors(entries, []*Anchor{older}, nowRunning)
+	_, results = CheckAnchors(entries, []*Anchor{older}, Identity{InstallID: nowRunning})
 	if !strings.Contains(results[0].Problem, "rewritten") {
 		t.Errorf("verdict for an anchor with no recorded install = %q, want the original wording",
 			results[0].Problem)
