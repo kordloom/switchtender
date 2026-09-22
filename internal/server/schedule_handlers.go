@@ -278,7 +278,7 @@ func listSchedulesHandler(store schedule.Store, authz *authorizer, log *zap.Logg
 			respondError(w, log, http.StatusInternalServerError, "could not list schedules")
 			return
 		}
-		restricted, err := grantsEnforced(r.Context(), authz)
+		restricted, err := restrictedReader(r.Context(), authz)
 		if err != nil {
 			log.Error("server: read filter: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not list schedules")

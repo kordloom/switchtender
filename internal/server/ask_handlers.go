@@ -196,7 +196,7 @@ func buildFleetSnapshot(ctx context.Context, store run.Store,
 	// the run ids suppressed a few paragraphs earlier. There is no per-host grant to filter these
 	// by, since a host is not an object grants are written against, so a restricted caller is given
 	// the runs they may read and no estate-wide summary at all.
-	restricted, err := grantsEnforced(ctx, authz)
+	restricted, err := restrictedReader(ctx, authz)
 	if err != nil {
 		return "", err
 	}

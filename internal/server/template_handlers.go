@@ -466,13 +466,10 @@ func launchTemplateHandler(store template.Store, submitter Submitter, authz *aut
 			return
 		}
 		id := r.PathValue("id")
-		if err := authz.authorize(r.Context(), id, grant.AccessUse); err != nil {
-			if errors.Is(err, errForbiddenGrant) {
-				forbidden(w)
-				return
-			}
-			log.Error("server: authorize launch: " + err.Error())
-			respondError(w, log, http.StatusInternalServerError, "could not authorize launch")
+		// Through the shared responder, so a launch refused for want of a grant says the same thing
+		// every other grant refusal says. It answered the bare one-word body while the rest of the
+		// product named the grant, and the interface shows that body to the operator verbatim.
+		if denyOnAuthzError(w, log, authz.authorize(r.Context(), id, grant.AccessUse)) {
 			return
 		}
 		t, err := store.Get(r.Context(), id)

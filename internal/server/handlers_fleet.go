@@ -344,7 +344,7 @@ func taskTrendsHandler(store run.Store, authz *authorizer, log *zap.Logger) http
 		// strength of being able to read one run of their own. Withheld beats leaked, and the
 		// response says which it is doing rather than serving an empty list that reads as a quiet
 		// install.
-		scoped, serr := scopedReader(r.Context(), authz)
+		scoped, serr := restrictedReader(r.Context(), authz)
 		if serr != nil {
 			log.Error("server: read filter: " + serr.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not read runs")

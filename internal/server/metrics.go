@@ -56,13 +56,13 @@ func metricsHandler(store run.Store, chain *chainHealth, authz *authorizer, log 
 		//
 		// A restricted caller gets a valid, empty exposition rather than an error, because a
 		// scraper reads a 500 as the install being down and pages somebody.
-		unrestricted, ferr := unrestrictedReader(r.Context(), authz)
+		restricted, ferr := restrictedReader(r.Context(), authz)
 		if ferr != nil {
 			log.Error("server: metrics read filter: " + ferr.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not compute metrics")
 			return
 		}
-		if !unrestricted {
+		if restricted {
 			w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 			w.WriteHeader(http.StatusOK)
 			return

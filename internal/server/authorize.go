@@ -20,6 +20,16 @@ import (
 // errForbiddenGrant is returned by authorize when the actor lacks a grant the object requires.
 var errForbiddenGrant = errors.New("forbidden: no grant for this object")
 
+// errForbiddenOrg is returned when an object carrying nothing grantable is denied because the actor
+// does not belong to the organization that owns it.
+//
+// It is a separate sentinel from errForbiddenGrant because the two have different remedies and the
+// refusal names one. An inline schedule and a run naming no project are scoped by their owning
+// organization alone, and grant.ValidObject refuses a grant written on either of them, so telling
+// that operator to obtain a grant sends them to an API that answers "object must be a proj_, tpl_,
+// inv_, or cred_ id". A refusal that names an impossible remedy is worse than one that names none.
+var errForbiddenOrg = errors.New("forbidden: not a member of the organization that owns this")
+
 // OrgResolver resolves the owning organization of a grantable object by its id, so the authorizer can
 // extend access to that organization's members. A resolver reads the object's stored org id from
 // whichever store owns the object kind.
@@ -80,39 +90,40 @@ func (a *authorizer) authorize(ctx context.Context, object string, want grant.Ac
 	if err != nil {
 		return err
 	}
+	held := false
 	if len(grants) > 0 {
-		subjects, err := a.subjectsFor(ctx, actor)
-		if err != nil {
-			return err
+		subjects, serr := a.subjectsFor(ctx, actor)
+		if serr != nil {
+			return serr
 		}
 		for _, g := range grants {
 			if subjects[g.Subject] && grant.Satisfies(g.Access, want) {
-				return nil
+				held = true
+				break
 			}
 		}
 	}
 
 	// Owning-organization membership adds access on top of grants: a member gains their org role's
-	// access, which never denies what a grant or the role already allows.
-	have, member, err := a.orgAccess(ctx, actor, object)
-	if err != nil {
-		return err
-	}
-	if member && grant.Satisfies(have, want) {
-		return nil
+	// access, which never denies what a grant or the role already allows. An explicit grant already
+	// decided the answer, so it short circuits the owner lookup, which costs a store read.
+	if !held {
+		have, member, oerr := a.orgAccess(ctx, actor, object)
+		if oerr != nil {
+			return oerr
+		}
+		held = member && grant.Satisfies(have, want)
 	}
 
-	// Nothing granted access. An object carrying grants is access-controlled, so an unmatched actor is
-	// denied. An ungranted object defers to the role, unless strict grants deny it: under strict grants
-	// an org-owned object seen here belongs to an org the actor is not a member of, so isolation denies
-	// it, and an unowned object is denied for want of a grant, the unchanged strict behavior.
-	if len(grants) > 0 {
-		return errForbiddenGrant
+	// grantRule finishes it, and finishes the same question for every listing on the install. An
+	// object carrying grants is access-controlled, so an unmatched actor is denied; an ungranted
+	// object defers to the role unless strict grants deny it. Under strict grants an org-owned object
+	// seen here belongs to an org the actor is not a member of, so isolation denies it, and an unowned
+	// object is denied for want of a grant, the unchanged strict behavior.
+	if grantRule(held, len(grants) > 0, a.strict) {
+		return nil
 	}
-	if a.strict {
-		return errForbiddenGrant
-	}
-	return nil
+	return errForbiddenGrant
 }
 
 // orgAccess reports the access level object's owning organization confers on actor, and whether the
@@ -278,56 +289,41 @@ func (a *authorizer) manages(ctx context.Context, actor Actor, object string) (b
 	return false, nil
 }
 
-// objectsFor returns the set of object ids the given subjects hold want on through a grant, so a list
-// can be filtered to what the actor is allowed to see. The caller passes the actor's subjects so the org
-// membership they carry is computed once and reused for the org-ownership check.
+// objectsFor reduces the whole grant list to the two facts a listing decides rows with: the objects
+// the given subjects hold want on, and the objects carrying any grant at all. The caller passes the
+// actor's subjects so the org membership they carry is computed once and reused.
 //
-// The level is a parameter because a list of objects and a list of runs ask different questions: any
-// grant satisfies read, which is right for seeing that a project exists, and wrong for reading the
-// record of a change made through it.
-func (a *authorizer) objectsFor(ctx context.Context, subjects map[string]bool,
-	want grant.Access) (map[string]bool, error) {
+// Both sets come from one pass because both are needed for every row and they answer different
+// halves of the rule: held says the caller may see it, controlled says the object is access
+// controlled and so denies everyone else. Returning only the first is what made a list disagree with
+// the fetch, since an object nobody has granted is absent from it for a reason that has nothing to
+// do with the caller.
+func (a *authorizer) objectsFor(ctx context.Context, subjects map[string]bool, want grant.Access,
+	scope objectScope) (held, controlled map[string]bool, err error) {
 	grants, err := a.grants.List(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	out := make(map[string]bool)
+	held, controlled = make(map[string]bool), make(map[string]bool)
 	for _, g := range grants {
+		// A grant naming no object is not a grant on everything, and it must not become one here.
+		// The API refuses to write one, but an import, a migration, or a hand-edited row can leave
+		// one behind, and the empty id is the one a run with no objects is decided under: marking
+		// it access controlled would hide every objectless run from every non-admin, silently and
+		// install-wide, on the strength of a single malformed row.
+		if g.Object == "" {
+			continue
+		}
+		// An object kind the asking view can never meet is not a restriction on it.
+		if !scope(g.Object) {
+			continue
+		}
+		controlled[g.Object] = true
 		if subjects[g.Subject] && grant.Satisfies(g.Access, want) {
-			out[g.Object] = true
+			held[g.Object] = true
 		}
 	}
-	return out, nil
-}
-
-// runReadFilter is readFilter at use rather than read, for the views built out of runs.
-//
-// A run is not an object somebody was granted; it is a record of what was done to hosts through the
-// objects it names. Fetching one by id asks for use on each of them, so a list of runs has to ask the
-// same question or the list discloses what the fetch withholds.
-// It filters in both grant modes, which is where it parts company with readFilter. The by-id fetch
-// denies on an object that carries grants the caller does not match whether or not strict grants are
-// on, because that check runs before the strict one. A list that kept everything on an open install
-// therefore returned the very runs the fetch refused, with their command, project, inventory and
-// owning org, on the default configuration.
-func (a *authorizer) runReadFilter(ctx context.Context) (func(id, orgID string) bool, error) {
-	return a.objectFilter(ctx, grant.AccessUse, filterInEveryMode)
-}
-
-// readFilter returns a predicate reporting whether the request actor may see an object, given its id
-// and owning organization, in a list. It keeps everything unless strict grants are on, since without
-// strict mode reads defer to the global role and every role reads everything, and org ownership only
-// ever adds access. Under strict grants a non-admin sees an object only when a grant lets them read it
-// or they are a member of its owning organization, so another org's objects are excluded; an admin
-// still sees all. A nil authorizer or grant store keeps everything. The error surfaces a grant-store
-// failure so the caller can fail closed.
-// It keeps everything on an open install, unlike runReadFilter, and that difference is deliberate
-// rather than an oversight. None of the objects it filters has a by-id read, so there is no second
-// answer for a listing to disagree with, and the documented rule is that a read grant scopes a
-// listing under strict grants. Scoping them always would hide objects an operator granted in order
-// to delegate, not in order to conceal.
-func (a *authorizer) readFilter(ctx context.Context) (func(id, orgID string) bool, error) {
-	return a.objectFilter(ctx, grant.AccessRead, filterUnderStrictOnly)
+	return held, controlled, nil
 }
 
 // Whether a list is filtered on an install that has not turned strict grants on. A list with a
@@ -338,36 +334,29 @@ const (
 	filterUnderStrictOnly = false
 )
 
-// objectFilter is the shared body of readFilter and runReadFilter, deciding visibility at the given
-// access level so the two cannot drift apart in anything but that level and in whether an open
-// install filters at all.
-func (a *authorizer) objectFilter(ctx context.Context, want grant.Access,
-	whenOpen bool) (func(id, orgID string) bool, error) {
-	keepAll := func(_, _ string) bool { return true }
-	if a == nil || a.grants == nil {
-		return keepAll, nil
-	}
-	if !a.strict && !whenOpen {
-		return keepAll, nil
-	}
-	actor, ok := actorFrom(ctx)
-	if !ok || actor.Role == user.RoleAdmin {
-		return keepAll, nil
-	}
-	subjects, err := a.subjectsFor(ctx, actor)
+// readFilter returns a predicate reporting whether the request actor may see an object, given its id
+// and owning organization, in a list of objects. Under strict grants a non-admin sees an object only
+// when a grant lets them read it or they are a member of its owning organization, so another org's
+// objects are excluded; an admin still sees all. A nil authorizer or grant store keeps everything.
+// The error surfaces a grant-store failure so the caller can fail closed.
+//
+// It keeps everything on an open install, and that is deliberate rather than an oversight. None of
+// the objects it filters has a by-id read, so there is no second answer for a listing to disagree
+// with, and the documented rule for them is that a read grant scopes a listing under strict grants.
+// Scoping them always would hide objects an operator granted in order to delegate, not in order to
+// conceal.
+//
+// The views built out of runs do the opposite, and ask at use rather than read: a run is not an
+// object somebody was granted, it is a record of what was done to hosts through the objects it
+// names, so fetching one asks for use on each of them and a listing has to ask the same question or
+// it discloses what the fetch withholds. Those resolve a visibility directly, since they need to
+// know whether the caller is restricted at all as well as which rows they may see.
+func (a *authorizer) readFilter(ctx context.Context) (func(id, orgID string) bool, error) {
+	vis, err := a.visibilityFor(ctx, grant.AccessRead, filterUnderStrictOnly, everyObject)
 	if err != nil {
 		return nil, err
 	}
-	readable, err := a.objectsFor(ctx, subjects, want)
-	if err != nil {
-		return nil, err
-	}
-	// The subjects set carries every organization the actor belongs to, so subjects[orgID] reports
-	// membership in the object's owning org. A read (or higher) grant makes an object visible; so does
-	// membership in the org that owns it.
-	return func(id, orgID string) bool {
-		return readable[id] || (orgID != "" && subjects[orgID])
-	}, nil
+	return vis.allows, nil
 }
 
 // filterReadable returns the items the request actor may see, dropping any object a strict-grants
@@ -444,12 +433,45 @@ func denyOnAuthzError(w http.ResponseWriter, log *zap.Logger, err error) bool {
 		return false
 	}
 	if errors.Is(err, errForbiddenGrant) {
-		forbidden(w)
+		forbiddenGrant(w)
+		return true
+	}
+	if errors.Is(err, errForbiddenOrg) {
+		forbiddenOrg(w)
 		return true
 	}
 	log.Error("server: authorize: " + err.Error())
 	respondError(w, log, http.StatusInternalServerError, "could not authorize request")
 	return true
+}
+
+// forbiddenGrant refuses a request the object-level rules denied, saying that the grants stopped it
+// rather than the role.
+//
+// The generic refusal is one word, which is the right answer to a caller who has no business here
+// at all and the wrong one to an operator with a valid account. An install that turns on strict
+// grants denies every object nobody has granted yet, which is documented and correct and, answered
+// with "forbidden", is indistinguishable from a broken account, a wrong role, or an install with
+// nothing in it. The operator has no way to tell which, and the one that is true is the only one
+// they can fix.
+//
+// It says nothing the caller does not already know. It does not report whether the object exists,
+// whether anyone else holds a grant on it, or which of the object-level rules denied it: a
+// nonexistent object and a delegated one refuse identically, with this same sentence. What it adds
+// is the one fact that turns a stop into a next step, which is that a grant is what is missing.
+func forbiddenGrant(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusForbidden)
+	_, _ = w.Write([]byte(`{"error":"forbidden: this object requires a grant you do not hold"}`))
+}
+
+// forbiddenOrg refuses a request denied by organization ownership, naming membership as what is
+// missing rather than a grant that cannot be written.
+func forbiddenOrg(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusForbidden)
+	_, _ = w.Write([]byte(
+		`{"error":"forbidden: this belongs to an organization you are not a member of"}`))
 }
 
 // derivedReadScan bounds how many recent runs are consulted when deciding what a derived view may
@@ -467,20 +489,6 @@ const derivedReadScan = 2000
 // governs these too; rows carrying a run id are checked against it, and an aggregate that names no
 // run is shown only to a caller who can read something, because otherwise it is a summary of work
 // they are not allowed to know about.
-// unrestrictedReader reports whether grants place no read restriction on this caller, using the same
-// probe derivedReadFilter opens with and costing nothing beyond it.
-//
-// It is what decides whether an install-wide aggregate may be shown. A restricted caller who can
-// read some runs still must not be told how many runs the whole install has, because that total is
-// every other organization's volume in one number.
-func unrestrictedReader(ctx context.Context, authz *authorizer) (bool, error) {
-	filter, err := authz.readFilter(ctx)
-	if err != nil {
-		return false, err
-	}
-	return filter("proj_probe", "") && filter("cred_probe", ""), nil
-}
-
 func derivedReadFilter(ctx context.Context, authz *authorizer,
 	store run.Store) (keep func(runID string) bool, anyReadable bool, err error) {
 	return derivedReadFilterIn(ctx, authz, store, derivedReadScan)
@@ -490,25 +498,28 @@ func derivedReadFilter(ctx context.Context, authz *authorizer,
 // case is testable without touching shared state.
 func derivedReadFilterIn(ctx context.Context, authz *authorizer, store run.Store,
 	scan int) (keep func(runID string) bool, anyReadable bool, err error) {
-	filter, err := authz.readFilter(ctx)
+	// The view is built out of runs, so it is decided at the access level reading a run takes, and
+	// the same visibility answers both questions below. Asking the object-read filter instead left
+	// these views unfiltered on every install that had not turned strict grants on: the run list and
+	// the by-id fetch both refused a run while fleet health, drift, and host history went on naming
+	// it, its host, and its outcome.
+	//
+	// It is resolved once for the whole request and shared by every row. It is assembled from the
+	// entire grant table, so rebuilding it per row made one fleet or drift read cost rows times
+	// grants: at a thousand rows and ten thousand grants a single request took seconds and allocated
+	// a gigabyte. It does not depend on which run is being decided, so hoisting it changes no answer.
+	// A grant-store failure is reported here instead of quietly hiding one row, which still refuses
+	// rather than discloses.
+	vis, err := authz.visibilityFor(ctx, grant.AccessUse, filterInEveryMode, runScopedObjects)
 	if err != nil {
 		return nil, false, err
 	}
-	// A keep-all filter means grants are not being enforced for this caller, so nothing changes and
-	// the scan below is skipped entirely.
-	if filter("proj_probe", "") && filter("cred_probe", "") {
+	// Grants restrict nothing for this caller, so every row is theirs to see and the scan below is
+	// skipped entirely.
+	if !vis.restricted() {
 		return func(string) bool { return true }, true, nil
 	}
-	// The run filter and the org resolver are built once for the whole request and shared by every
-	// row decided below. They are assembled from the entire grant table, so rebuilding them per row
-	// made one fleet or drift read cost rows times grants: at a thousand rows and ten thousand grants
-	// a single request took seconds and allocated a gigabyte. Neither depends on which run is being
-	// decided, so hoisting them changes no answer. A grant-store failure is reported here instead of
-	// quietly hiding one row, which still refuses rather than discloses.
-	runKeep, err := authz.runReadFilter(ctx)
-	if err != nil {
-		return nil, false, err
-	}
+	runKeep := vis.allows
 	orgOf := authz.orgResolverMemo(ctx)
 	// Whether the caller can read anything decides only whether estate-wide aggregates that name no
 	// run are shown at all, so a bounded probe of recent runs answers it. Which individual rows show
@@ -581,59 +592,34 @@ func probeAnyReadable(ctx context.Context, store run.Store, keep func(id, orgID 
 	return false, nil
 }
 
-// grantsEnforced reports whether object grants actually restrict what this caller may read.
-//
-// It answers with the same probe readableRuns uses, so the two cannot disagree about whether a
-// caller is filtered. A caller who is filtered must not be handed estate-wide aggregates: a fleet
-// health table or a drift list is derived from every run on the install, including the ones their
-// filter just removed, so passing one through would return exactly the rows the filter existed to
-// withhold.
-func grantsEnforced(ctx context.Context, authz *authorizer) (bool, error) {
-	keep, err := authz.readFilter(ctx)
-	if err != nil {
-		return false, err
-	}
-	return !keep("proj_probe", "") || !keep("cred_probe", ""), nil
-}
-
 // readableRuns drops any run the caller may not read. A run is readable when every object it uses is,
 // which is the same rule fetching one run applies, so listing and fetching cannot disagree.
 func readableRuns(ctx context.Context, authz *authorizer, runs []*run.Run) ([]*run.Run, error) {
-	// Filtered at use, which is what fetching a run by id requires, rather than at read. Any grant
+	// Decided at use, which is what fetching a run by id requires, rather than at read. Any grant
 	// satisfies read, so filtering there put a run in the list whose by-id fetch answered 403: an
 	// explicit read grant on one of its objects disclosed the whole run, its command, its extra vars
 	// and the credentials it named, and a run's extra vars carry whatever a survey filled in. Reading a
 	// run means reading what it did on hosts, so it takes the same access as using those objects.
-	keep, err := authz.runReadFilter(ctx)
+	//
+	// The visibility is resolved once for the whole list. It is assembled from every grant on the
+	// install, so resolving it per run made a run list cost the whole grant table once per row.
+	vis, err := authz.visibilityFor(ctx, grant.AccessUse, filterInEveryMode, runScopedObjects)
 	if err != nil {
 		return nil, err
 	}
-	return readableRunsWith(runs, keep, authz.orgResolverMemo(ctx)), nil
-}
-
-// readableRunsWith is readableRuns over a filter and an org resolver the caller has already built,
-// for a view that decides one run at a time.
-//
-// Building them is not cheap: the filter is assembled from every grant on the install and the
-// resolver caches an object's owning organization. Rebuilding both per run made a fleet, drift, or
-// host-history read cost the whole grant table once for every row it showed, so the request grew
-// as rows times grants and allocated proportionally. Hoisting the construction to the request
-// keeps the answer identical, since neither depends on which run is being decided.
-func readableRunsWith(runs []*run.Run, keep func(id, orgID string) bool,
-	orgOf func(string) string) []*run.Run {
-	// When the filter keeps everything, grants are not being enforced for this caller, so no object
-	// needs its owning organization resolved and the list passes through untouched. Only a
-	// strict-grants non-admin reaches the per-object resolution below.
-	if keep("proj_probe", "") && keep("cred_probe", "") {
-		return runs
+	// Grants restrict nothing for this caller, so no object needs its owning organization resolved
+	// and the list passes through untouched.
+	if !vis.restricted() {
+		return runs, nil
 	}
+	orgOf := authz.orgResolverMemo(ctx)
 	out := make([]*run.Run, 0, len(runs))
 	for _, rn := range runs {
-		if runReadable(run.AuthOf(rn), keep, orgOf) {
+		if runReadable(run.AuthOf(rn), vis.allows, orgOf) {
 			out = append(out, rn)
 		}
 	}
-	return out
+	return out, nil
 }
 
 // runReadable reports whether one run passes the read filter.
@@ -762,7 +748,7 @@ func (a *authorizer) authorizeOwningOrg(ctx context.Context, orgID string) error
 			return nil
 		}
 	}
-	return errForbiddenGrant
+	return errForbiddenOrg
 }
 
 // authorizeRunAccess confirms the request actor may use the project, inventory, and credentials a
@@ -824,16 +810,4 @@ func intOrZero(v *int) int {
 		return 0
 	}
 	return *v
-}
-
-// scopedReader reports whether this caller's reads are grant-scoped, meaning a keep-all filter
-// does not apply and install-wide aggregates that carry no per-row ids cannot be safely served
-// whole. It asks the same probes derivedReadFilter asks, so the two can never disagree about
-// which callers are unrestricted.
-func scopedReader(ctx context.Context, authz *authorizer) (bool, error) {
-	filter, err := authz.readFilter(ctx)
-	if err != nil {
-		return false, err
-	}
-	return !filter("proj_probe", "") || !filter("cred_probe", ""), nil
 }

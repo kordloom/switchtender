@@ -50,6 +50,22 @@ func QueueObject(queue string) string { return QueuePrefix + queue }
 // objectPrefixes are the id prefixes a grant object may carry.
 var objectPrefixes = []string{"proj_", "tpl_", "inv_", "cred_", QueuePrefix}
 
+// runObjectPrefixes are the id prefixes a run can name, which is a strict subset of the objects a
+// grant may be written on. A run references a project, an inventory, and credentials; it does not
+// reference the template it was launched from or the queue it was submitted to in a way that
+// governs reading it back.
+var runObjectPrefixes = []string{"proj_", "inv_", "cred_"}
+
+// ScopesARun reports whether a grant on this object can decide whether a run is readable.
+//
+// It exists because the two sets are not the same and treating them as one has a cost. A grant on a
+// template or a worker queue is an ordinary delegation that cannot hide a single run from anybody,
+// so counting it when deciding whether a caller is restricted reports a restriction that does not
+// exist. The consequence of that is not a smaller list: it is every install-wide total withheld,
+// including a Prometheus exposition that then answers with no series at all rather than with
+// different numbers, which reads to a scraper as a healthy install with nothing happening.
+func ScopesARun(object string) bool { return hasAnyPrefix(object, runObjectPrefixes) }
+
 // Grant ties a subject to an object at an access level.
 type Grant struct {
 	// ID is the unique grant identifier.

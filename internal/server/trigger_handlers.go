@@ -275,7 +275,7 @@ func listTriggersHandler(triggers trigger.Store, authz *authorizer, log *zap.Log
 		// A trigger is visible on the same test that governs writing and deleting one, its template.
 		// Reading was unauthorized, so any operator could enumerate every webhook launch point on
 		// the install and the template each one fires.
-		restricted, err := grantsEnforced(r.Context(), authz)
+		restricted, err := restrictedReader(r.Context(), authz)
 		if err != nil {
 			log.Error("server: read filter: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not list triggers")

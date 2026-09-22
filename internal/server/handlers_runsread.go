@@ -256,11 +256,11 @@ func listRunsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.H
 		// which satisfied the test, and then received counts covering every organization on the
 		// install. One number is enough to publish another tenant's volume.
 		//
-		// The probe is the same one derivedReadFilter opens with, so this costs nothing: it asks
+		// This is the same question derivedReadFilter opens with, so it costs nothing: it asks
 		// whether grants restrict this caller at all, rather than walking rows through a filter,
 		// which at a thousand rows and ten thousand grants is the cost the filter's own comment
 		// warns about.
-		unrestricted, ferr := unrestrictedReader(r.Context(), authz)
+		restricted, ferr := restrictedReader(r.Context(), authz)
 		if ferr != nil {
 			log.Error("server: read filter: " + ferr.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not list runs")
@@ -268,7 +268,7 @@ func listRunsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.H
 		}
 		summary := runSummary{}
 		switch {
-		case unrestricted:
+		case !restricted:
 			summary = summarize(counts)
 			summary.Scope = "install"
 		case len(runs) > 0:
