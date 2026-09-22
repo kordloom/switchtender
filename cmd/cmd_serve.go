@@ -1260,27 +1260,43 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		if evidenceCadence < time.Hour {
 			return fmt.Errorf("--evidence-cadence must be at least 1h, got %s", evidenceCadence)
 		}
-		// The register is what Team buys, so refusing to start matches how the SSO flags behave
-		// rather than starting and quietly writing a paid artifact every cadence.
+		// The register is what Team buys, so an install that never bought it is refused at startup
+		// rather than started to quietly write a paid artifact every cadence.
+		//
+		// A lapse is not that install. This said it matched how the SSO flags behave, and it did
+		// not: SSO turns itself off, says so once, and keeps serving, because a lapsed license
+		// takes nothing and a running install is not bricked over a billing dispute. Here it
+		// returned, so a lapsed Team install running with an evidence cadence exited before it
+		// bound a listener. Dark at midnight, which is the outcome the terms name.
+		licensed := true
 		if aerr := license.Allow(license.FeatureRegister); aerr != nil {
-			return aerr
+			if !errors.Is(aerr, license.ErrLapsed) {
+				return aerr
+			}
+			log.Warn("serve: the license for the period change register lapsed, so the register " +
+				"is off and no evidence packs are written. Everything else keeps working, and " +
+				"every pack already written stays valid and verifies offline. Renew to turn it " +
+				"back on: https://switchtender.com/pricing")
+			licensed = false
 		}
-		var packInstallID string
-		if producer != nil {
-			packInstallID = producer.InstallID
+		if licensed {
+			var packInstallID string
+			if producer != nil {
+				packInstallID = producer.InstallID
+			}
+			packs := evidence.NewEmitter(bundle.Runs(), bundle.Audits(), packInstallID, evidenceDir,
+				evidenceCadence,
+				log, evidence.WithNotify(func(path string, from, to time.Time) {
+					log.Info("evidence pack ready", zap.String("path", path),
+						zap.Time("from", from), zap.Time("to", to))
+				}))
+			if err := packs.Start(); err != nil {
+				return err
+			}
+			defer packs.Close()
+			log.Info("periodic change registers enabled",
+				zap.String("dir", evidenceDir), zap.Duration("cadence", evidenceCadence))
 		}
-		packs := evidence.NewEmitter(bundle.Runs(), bundle.Audits(), packInstallID, evidenceDir,
-			evidenceCadence,
-			log, evidence.WithNotify(func(path string, from, to time.Time) {
-				log.Info("evidence pack ready", zap.String("path", path),
-					zap.Time("from", from), zap.Time("to", to))
-			}))
-		if err := packs.Start(); err != nil {
-			return err
-		}
-		defer packs.Close()
-		log.Info("periodic change registers enabled",
-			zap.String("dir", evidenceDir), zap.Duration("cadence", evidenceCadence))
 	}
 
 	// The SIEM is where operators already look; a receipt on every forwarded event means any

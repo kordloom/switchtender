@@ -261,15 +261,23 @@ func allowAt(l *License, f Feature, now time.Time) error {
 		return fmt.Errorf("%s requires a %s license; this install runs Community. "+
 			"https://switchtender.com/pricing", name, need)
 	}
-	if l.Expired(now) {
-		return fmt.Errorf("%w: %s requires a %s license and this install's license for %s "+
-			"lapsed on %s; everything Community keeps working. https://switchtender.com/pricing",
-			ErrLapsed, name, need, l.Claims.Org, l.Claims.Expires)
-	}
+	// Coverage is settled before the clock, and the order is the whole meaning of ErrLapsed.
+	//
+	// ErrLapsed tells a caller that this install had the feature working yesterday, and callers
+	// act on that: the policy file keeps serving rules rather than taking the install offline.
+	// Reporting the lapse first made an expired license say "lapsed" about a feature its tier
+	// never included, so an expired Pro license was read as having lapsed out of the Team-only
+	// policy engine and was handed it. An expired license would then buy strictly more than the
+	// same license bought while it was live.
 	if !l.covers(f) {
 		return fmt.Errorf("%s requires a %s license; this install's %s license does not "+
 			"include it. https://switchtender.com/pricing",
 			name, need, tierLabel(normalizeTier(l.Claims.Tier)))
+	}
+	if l.Expired(now) {
+		return fmt.Errorf("%w: %s requires a %s license and this install's license for %s "+
+			"lapsed on %s; everything Community keeps working. https://switchtender.com/pricing",
+			ErrLapsed, name, need, l.Claims.Org, l.Claims.Expires)
 	}
 	return nil
 }
@@ -306,7 +314,10 @@ func allowPoliciesAt(l *License, total int, now time.Time) error {
 	// A lapse is named as a lapse. A caller that must keep an install running needs to tell a term
 	// that ran out from a tier that never covered this, because only one of the two is something
 	// the customer had working yesterday.
-	if lapsed {
+	// Named a lapse only when this license, while live, would have held this many. A lapsed Pro
+	// asked to hold fifty policies never had that, so it gets the plain refusal: ErrLapsed means
+	// the term ran out on something the install actually had.
+	if lapsed && allowPoliciesAt(l, total, issuedAt(l)) == nil {
 		return fmt.Errorf("%w: this install's license for %s lapsed on %s, and the Community tier "+
 			"holds one approval policy rather than %d. https://switchtender.com/pricing",
 			ErrLapsed, l.Claims.Org, l.Claims.Expires, total)
@@ -342,4 +353,16 @@ func PathFor(db string) string {
 		dir = db[:i]
 	}
 	return dir + "/switchtender-license.json"
+}
+
+// issuedAt returns a time inside the license's own term, for asking what this license allowed while
+// it was live. It is the issue date, which is inside the term by construction. An unparseable one
+// falls back to the zero time, which reads as not expired, so the question still resolves to what
+// the tier allows rather than to an error, and that is the answer being asked for here.
+func issuedAt(l *License) time.Time {
+	issued, err := time.Parse(time.RFC3339, l.Claims.Issued)
+	if err != nil {
+		return time.Time{}
+	}
+	return issued
 }

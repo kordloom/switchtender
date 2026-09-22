@@ -238,8 +238,15 @@ func (s *FileStore) List(_ context.Context) ([]*Policy, error) {
 // three that is safe in both directions at once: refusing takes the install down, dropping the
 // advanced rules silently ungates the runs those rules exist to hold, and continuing to enforce
 // them takes nothing from anybody. Enforcing a constraint the customer wrote is not a feature being
-// given away, it is their own safety rule still working. What a lapse does stop is authoring new
-// paid policy, which serve still gates at startup, and status names the lapse.
+// given away, it is their own safety rule still working.
+//
+// What a lapse stops is authoring new paid policy through the API, which the create and update
+// handlers still refuse. It does not stop it through the file, because the file hot-reloads and
+// this check is what reads it: a lapsed install can add a deny rule by editing the file, and it
+// takes effect. That is deliberate rather than overlooked. The alternative is to remember the set
+// in force at the moment the lapse was noticed and refuse anything larger, which means refusing to
+// load a file whose only change was to tighten a rule, on an install that is already paying no
+// attention to the term. Status names the lapse.
 func (s *FileStore) allowed(set []*Policy) error {
 	for _, p := range set {
 		if p.Advanced() {
