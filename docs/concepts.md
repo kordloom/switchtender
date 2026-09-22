@@ -179,8 +179,8 @@ append-only trail will notice sign-in attempts are absent, so here is why. A sig
 probe are reachable by anyone on the network, and the audit append is fail-closed: recording every
 attempt would let a stranger fill the chain with entries, and once the store filled, the fail-closed
 append would refuse every real change and lock the install, including sign-in itself on a fresh
-install with no token yet. So authentication attempts live in the server log instead; from the next
-release the log records each attempt by username and outcome, success, failure, and rate-limited,
+install with no token yet. So authentication attempts live in the server log instead, which
+records each attempt by username and outcome, success, failure, and rate-limited,
 and never the password or a token. A successful single sign-on arrival is recorded as a chain entry,
 since the identity provider already vouched for it, and every local sign-in leaves a durable mark
 indirectly: it mints a session, and every change that session then makes is recorded with that
@@ -233,7 +233,8 @@ sink accepted, so delivery is at least once and an outage delays events rather t
 them. Deduplicate on the receipt.
 
 **Receipts make an omission detectable by the party it happened to.** Every mutation returns an
-`Audit-Receipt: seq:link` header naming where it was recorded. Keep them. `switchtender audit
+`Audit-Receipt: seq:link` header naming where it was recorded, with sign-in and webhook delivery
+excluded because neither carries an authenticated actor to record it against. Keep them. `switchtender audit
 receipt 41:9f2c...` confirms the chain still holds that exact link at that exact position, and a
 server that omitted the entry cannot produce a chain containing the receipt.
 

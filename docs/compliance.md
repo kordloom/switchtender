@@ -75,7 +75,7 @@ protected health information.
 | The record cannot be silently altered | The SHA-256 chain and its offline verification; a change that cannot be recorded is refused. |
 | The record can be examined | The change register and per-change dossier render as self-contained HTML a reviewer reads without tooling. |
 | The record is retained and its integrity demonstrable over a period | Scheduled evidence packs write a register per period to an archive, and an anchor fixes the chain in time so a lost tail is detectable. |
-| Access to the audit trail is itself controlled | Reading the trail and the run evidence is an admin-role operation, not open to every viewer. |
+| Access to the audit trail is itself controlled | Reading the trail is an admin-role operation. A run's evidence and its signed receipt need the operator role, and the actor who launched a run may read that run's own evidence. |
 
 ## The boundary, stated plainly
 

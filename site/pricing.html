@@ -458,8 +458,9 @@
 				<details>
 					<summary>What happens when a license lapses?</summary>
 					<p>Paid features stop; nothing else changes. Your data, your evidence, your receipts,
-					and every Community feature keep working, the running server drops to Community
-					without a restart, and a database you initialized on PostgreSQL stays fully usable
+					and every Community feature keep working, every paid gate on the running server stops at its next check with no
+					restart, and directory sign-in falls back to local accounts when the server is next
+					started, and a database you initialized on PostgreSQL stays fully usable
 					forever. We built the gate so that it cannot hold your data hostage even if we
 					wanted it to.</p>
 				</details>

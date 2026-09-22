@@ -200,8 +200,8 @@ append-only trail will notice sign-in attempts are absent, so here is why. A sig
 probe are reachable by anyone on the network, and the audit append is fail-closed: recording every
 attempt would let a stranger fill the chain with entries, and once the store filled, the fail-closed
 append would refuse every real change and lock the install, including sign-in itself on a fresh
-install with no token yet. So authentication attempts live in the server log instead; from the next
-release the log records each attempt by username and outcome, success, failure, and rate-limited,
+install with no token yet. So authentication attempts live in the server log instead, which
+records each attempt by username and outcome, success, failure, and rate-limited,
 and never the password or a token. A successful single sign-on arrival is recorded as a chain entry,
 since the identity provider already vouched for it, and every local sign-in leaves a durable mark
 indirectly: it mints a session, and every change that session then makes is recorded with that
@@ -248,7 +248,8 @@ entry still stands at that exact position. The cursor is durable and advances on
 sink accepted, so delivery is at least once and an outage delays events rather than dropping
 them. Deduplicate on the receipt.</p>
 <p><strong>Receipts make an omission detectable by the party it happened to.</strong> Every mutation returns an
-<code>Audit-Receipt: seq:link</code> header naming where it was recorded. Keep them. <code>switchtender audit receipt 41:9f2c...</code> confirms the chain still holds that exact link at that exact position, and a
+<code>Audit-Receipt: seq:link</code> header naming where it was recorded, with sign-in and webhook delivery
+excluded because neither carries an authenticated actor to record it against. Keep them. <code>switchtender audit receipt 41:9f2c...</code> confirms the chain still holds that exact link at that exact position, and a
 server that omitted the entry cannot produce a chain containing the receipt.</p>
 <p>What none of this defends against is an operator running modified code on the machine itself. That
 is the boundary of every audit system, it costs an attacker the whole controller to reach, and it

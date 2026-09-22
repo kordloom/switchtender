@@ -41,7 +41,14 @@ var awsEndpoint = ""
 
 // awsConfig is the JSON an aws source stores: which secret to read and the credentials to read it
 // with. Empty credential fields fall back to the standard AWS environment variables, so a
-// SwitchTender running with an instance role or an injected key reads with no stored secret.
+// SwitchTender handed a key through the environment reads with no secret stored here.
+//
+// An instance role is not one of those paths, and this comment used to say it was. The key and
+// secret are required, from the config or the environment, and nothing here asks the instance
+// metadata service or walks the SDK's credential chain, so neither an EC2 instance role nor a
+// web-identity role on Kubernetes supplies anything this can use. Azure's source does query the
+// metadata service and does work from a managed identity; this one does not, and the site said
+// otherwise until it was checked.
 type awsConfig struct {
 	// SecretID is the secret's name or full ARN.
 	SecretID string `json:"secret_id"`

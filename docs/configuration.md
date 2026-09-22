@@ -159,6 +159,11 @@ Runs the HTTP API, the in-process executor, the scheduler, the retention sweeper
 | `--smtp-to` | none | Recipient address for notification emails. Repeatable. |
 | `--smtp-username` | none | SMTP username. The password comes from `SWITCHTENDER_SMTP_PASSWORD`. |
 | `--notify-on` | `failure` | When to email: `failure` for failed runs only, or `finish` for every terminal run. |
+| `--policy-file` | none | YAML file holding the approval policies. When set, the file is the source of truth and the API refuses policy edits. |
+| `--trusted-proxy` | none | CIDR of a reverse proxy whose client IP header to believe, repeatable. Required behind a proxy: without it every request appears to come from the proxy itself, so the failed sign-in budget, the webhook rate limit, and the per-client stream budget all become one budget shared by everyone behind it, and one stranger's failed guesses can lock sign-in for the whole install. |
+| `--client-ip-header` | none | Header carrying the real client address from a trusted proxy. Defaults to the leftmost `X-Forwarded-For` entry. |
+| `--span-cadence` | `0` | Append a span beat to the audit chain this often, for example `60s`. Whole seconds only. Zero appends none. |
+| `--anchor-tsa-url` | none | RFC 3161 timestamp authority the chain anchors against. Empty anchors nothing. |
 
 Retention windows accept a whole number of days with a `d` suffix, such as `30d`, or Go duration
 syntax such as `720h`.
@@ -210,6 +215,7 @@ node over the mesh relay, with no database access of its own.
 | `--container-runtime` | `docker` | Container CLI for containerized runs: docker or podman. |
 | `--container-pull-policy` | `missing` | Image pull policy for containerized runs, as docker `--pull`: always, missing, or never. |
 | `--galaxy-server` | none | Private Ansible Galaxy or Automation Hub URL for project collection installs. Token from `SWITCHTENDER_GALAXY_TOKEN`. |
+| `--policy-file` | none | YAML file holding the approval policies, the same file the control node reads. |
 
 ## token
 
@@ -326,6 +332,16 @@ Audit trail tools.
 - `audit report` renders the period's change register as a self-contained HTML evidence report.
 - `audit run <id>` emits one run's evidence dossier as a self-contained HTML document.
 
+Flags on the subcommands:
+
+- `audit bundle --limit <n>` carries only the newest N entries. The default carries the whole chain.
+- `audit anchor --type <kind>` picks the anchor: `rfc3161` for a signed timestamp, or `git` or
+  `https` for one checked by fetching it. `--ref` is the authority URL for `rfc3161`, otherwise the
+  URL a verifier fetches. `--tree` anchors the Merkle root over the whole chain, which is the
+  coordinate a sparse receipt proves membership against.
+- `audit report --from <when> --to <when>` bounds the change register's period. `--from` defaults to
+  ninety days before `--to`, and `--to` defaults to now and is exclusive.
+
 ## receipt
 
 Writes a signed receipt for one finished run, which a third party verifies offline with `verify`. A
@@ -376,6 +392,35 @@ back rewritten, or the head regresses. Run it where the server's operator has no
   attestations.
 - `witness verify-attestation` verifies an attestation offline against a pinned witness key.
 
+## witness serve
+
+Runs the witness. Its flags are checked against that subcommand rather than `witness` itself.
+
+| Flag | Default | Purpose |
+|------|---------|---------|
+| `--listen` | `127.0.0.1:9440` | Address the witness API serves on. |
+| `--state-dir` | `switchtender-witness` | Directory holding the signed checkpoints and the findings record. |
+| `--api-token` | none | Bearer token the witness API requires. |
+| `--watch` | none | Span beat feed to watch, repeatable. |
+
+## witness verify-attestation
+
+Verifies one attestation offline, for the relying party. It reads the JSON, recomputes the signature,
+and prints the verdict with the signer named in both published forms: `signed_by` is the raw hex
+public key the attestation carries, and `signed_by_key_id` is the sha256 key id the witness prints at
+startup and serves from its API.
+
+    switchtender witness verify-attestation attestation.json --pubkey sha256:...
+
+| Flag | Default | Purpose |
+|------|---------|---------|
+| `--pubkey` | none | Pinned witness key, as either the sha256 key id or the raw hex public key. |
+
+Pass `--pubkey` with the key you pinned out of band. Either form is accepted, since the key id is
+what the witness tells operators to publish and the hex key is what the document carries. Without it
+the check proves only that the attestation is internally consistent, which a forger with their own
+key satisfies trivially.
+
 ## mcp
 
 Serves the Model Context Protocol over stdio, so an agent can list templates, propose a run, and read
@@ -395,6 +440,9 @@ reach.
 | Flag | Default | Purpose |
 |------|---------|---------|
 | `--allow-adhoc` | off | Also expose the ad-hoc run tool, letting the agent compose a run rather than launch a template an operator defined. Approval policy still applies. |
+| `--token` | none | API token the agent presents. |
+| `--timeout` | `1m0s` | Bounds one API call. |
+| `--allow-admin-token` | `false` | Start even when the token has admin rights. An agent should hold an operator-bound token, so this is a deliberate override. |
 
 ## demo
 
@@ -407,6 +455,10 @@ instance is safe to expose. It needs ansible on the PATH to run the sample playb
 | `--db` | temporary file | Database to seed and serve. Empty uses a fresh temporary SQLite file. |
 | `--seed-only` | off | Seed the database and exit without serving. |
 | `--no-seed` | off | Serve the database as it already stands instead of seeding it. |
+| `--anchor-tsa` | a public authority | RFC 3161 authority that anchors the seeded chain, so the demo shows a real anchor. Empty anchors nothing. |
+| `--trusted-proxy` | none | As `serve`. |
+| `--client-ip-header` | none | As `serve`. |
+| `--span-cadence` | `0` | As `serve`. |
 
 Seeding runs real playbooks and takes a couple of minutes, which is a visible gap if a public
 demo reseeds in place. The two flags split that work in half so it can happen off to the side:
@@ -455,6 +507,8 @@ backup was written with, and it never deletes objects absent from the file.
 
 Prints the SwitchTender version.
 
+`--verify` fetches this version's published binary hashes and verifies the running executable.
+
 ## help and completion
 
 Both are the standard Cobra built-ins. `help` prints usage for any command, and `completion` emits a
@@ -482,6 +536,38 @@ It does mean an install with several organizations on it is not separated until 
 on. If you are running work for more than one team, more than one customer, or anything where one
 group must not reach another's credentials, turn it on and grant deliberately. Objects created
 before you do carry no grants, so plan to assign them.
+
+A refusal from these rules says so: the body reads `forbidden: this object requires a grant you do
+not hold`, which is the same sentence whether the object is delegated elsewhere, ungranted under
+strict grants, or does not exist. It tells you a grant is what is missing rather than a role or an
+account, and nothing about the object itself.
+
+What `--strict-grants` decides is only the default for an object nobody has granted. An object that
+carries a grant is access-controlled in both modes: writing a grant on it is what declares it so,
+and a caller who does not hold one is denied whether or not strict grants are on. Every listing
+answers the same rule the by-id read does, so a run you are refused by name is also absent from the
+run list, the fleet and drift views, the host pages, and the change log.
+
+One consequence is worth knowing before you write your first grant. Install-wide figures that carry
+no per-row id are served whole only to a caller nothing is hidden from, because such a total is
+every other group's volume in one number. On an install with no grants at all that is everybody,
+which is the common case and is unaffected. It stays unaffected by a grant on a template or a worker
+queue, since neither can hide a run; what changes it is a grant on a project, an inventory, or a
+credential that the caller does not hold.
+
+For a caller in that position each surface answers differently, and the difference is worth knowing
+before you point a dashboard at one:
+
+| Surface | What a restricted caller gets |
+|---------|-------------------------------|
+| The run-count cards on the run list | Their own visible totals, with `summary.scope` reading `visible` rather than `install`. |
+| The task-duration table at `/v1/tasks` | No rows, and `withheld: true` beside them, so an empty table is not mistaken for a quiet install. |
+| The Prometheus exposition at `/metrics` | An empty body with status 200. Every series is absent rather than zero, so give the scrape an admin token if you want the install's counters. |
+
+The empty `/metrics` body is deliberate: a scraper reads a 5xx as the install being down and pages
+somebody. It does mean an alert written against a series going to zero will not fire for a scrape
+token that has become restricted, because the series is gone rather than zero. Scrape with a token
+that holds everything, or alert on the scrape's own staleness as well as its values.
 
 ## Directory sign-in and existing accounts
 

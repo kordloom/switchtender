@@ -129,7 +129,7 @@
 				<pre class="code"><code>knife node list | xargs -I{} knife node show {} -F json &gt; chef-nodes.json
 switchtender import chef chef-nodes.json</code></pre>
 				<p>Every node becomes a host. Its <code>chef_environment</code> becomes a group, and every <code>role[...]</code> in its run list becomes a group as well, so a play can target <code>[webserver]</code> on the day of the import rather than after somebody rebuilds the grouping by hand. The ohai facts that identify a machine come across as host variables, and <code>ipaddress</code> is also set as <code>ansible_host</code>, because a Chef estate addresses machines by node name and has no reason to have kept DNS in step.</p>
-				<p>The preview runs before anything is created, and it names what it left behind: every recipe it saw, and every field in the export this importer does not read. A clean report means clean, which is the only way a report is worth reading.</p>
+				<p>The preview runs before anything is created, and it names what it left behind: how many recipes it saw and how many fields in the export this importer does not read, with the first several of each listed by name. A clean report means clean, which is the only way a report is worth reading.</p>
 			</div>
 		</section>
 
@@ -153,7 +153,7 @@ switchtender import chef chef-nodes.json</code></pre>
 				</article>
 				<article class="card reveal">
 					<h3>Can it read secrets from AWS Secrets Manager, Azure Key Vault, or Vault?</h3>
-					<p>All three, resolved at launch rather than copied into this database. Vault dynamic secrets go further: a short-lived credential is minted for each run and revoked when the run ends. AWS and Azure both authenticate from an instance role or managed identity with no stored key, and anything else resolves through a command whose output is the secret.</p>
+					<p>All three, resolved at launch rather than copied into this database. Vault dynamic secrets go further: a short-lived credential is minted for each run and revoked when the run ends. Azure authenticates from the attached managed identity with no stored key, AWS takes an access key from the credential or the standard AWS environment variables, and anything else resolves through a command whose output is the secret.</p>
 				</article>
 				<article class="card reveal">
 					<h3>Can I run a Terraform plan, hold it for approval, then run Ansible?</h3>
@@ -178,7 +178,7 @@ switchtender import chef chef-nodes.json</code></pre>
    "name": "Can it read secrets from AWS Secrets Manager, Azure Key Vault, or Vault?",
    "acceptedAnswer": {
     "@type": "Answer",
-    "text": "All three, resolved at launch rather than copied into this database. Vault dynamic secrets go further: a short-lived credential is minted for each run and revoked when the run ends. AWS and Azure both authenticate from an instance role or managed identity with no stored key, and anything else resolves through a command whose output is the secret."
+    "text": "All three, resolved at launch rather than copied into this database. Vault dynamic secrets go further: a short-lived credential is minted for each run and revoked when the run ends. Azure authenticates from the attached managed identity with no stored key, AWS takes an access key from the credential or the standard AWS environment variables, and anything else resolves through a command whose output is the secret."
    }
   },
   {

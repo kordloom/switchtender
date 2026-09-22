@@ -213,7 +213,7 @@
 		<section class="section wrap">
 			<div class="section-head reveal">
 				<h2>Move in one command</h2>
-				<p>Export from AWX, import into SwitchTender. Projects, inventories, templates, surveys, and schedules come across, with a dry run first so you see the plan before anything is written. Credential secrets are the one thing that does not: AWX will not export a vault password, SSH key, or cloud secret in the clear, which is the behavior you want, so you re-enter those once against the imported credential shells. The import lists exactly which ones need it.</p>
+				<p>Export from AWX, import into SwitchTender. Projects, inventories, templates, surveys, and schedules come across, with a dry run first so you see the plan before anything is written. Credential secrets never come across, because AWX will not export a vault password, SSH key, or cloud secret in the clear. Organizations, teams, notification templates, projects on anything but git, and password survey fields are named in the plan as not imported, which is the behavior you want, so you re-enter those once against the imported credential shells. The import lists exactly which ones need it.</p>
 			</div>
 			<div class="gs-steps">
 				<ol>
@@ -249,7 +249,7 @@
 				</article>
 				<article class="card reveal">
 					<h3>Can it read secrets from AWS Secrets Manager, Azure Key Vault, or Vault?</h3>
-					<p>All three, resolved at launch rather than copied into this database. Vault dynamic secrets go further: a short-lived credential is minted for each run and revoked when the run ends. AWS and Azure both authenticate from an instance role or managed identity with no stored key, and anything else resolves through a command whose output is the secret.</p>
+					<p>All three, resolved at launch rather than copied into this database. Vault dynamic secrets go further: a short-lived credential is minted for each run and revoked when the run ends. Azure authenticates from the attached managed identity with no stored key, AWS takes an access key from the credential or the standard AWS environment variables, and anything else resolves through a command whose output is the secret.</p>
 				</article>
 				<article class="card reveal">
 					<h3>Can I run a Terraform plan, hold it for approval, then run Ansible?</h3>
@@ -274,7 +274,7 @@
    "name": "Can it read secrets from AWS Secrets Manager, Azure Key Vault, or Vault?",
    "acceptedAnswer": {
     "@type": "Answer",
-    "text": "All three, resolved at launch rather than copied into this database. Vault dynamic secrets go further: a short-lived credential is minted for each run and revoked when the run ends. AWS and Azure both authenticate from an instance role or managed identity with no stored key, and anything else resolves through a command whose output is the secret."
+    "text": "All three, resolved at launch rather than copied into this database. Vault dynamic secrets go further: a short-lived credential is minted for each run and revoked when the run ends. Azure authenticates from the attached managed identity with no stored key, AWS takes an access key from the credential or the standard AWS environment variables, and anything else resolves through a command whose output is the secret."
    }
   },
   {

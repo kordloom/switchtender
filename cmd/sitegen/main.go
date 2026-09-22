@@ -438,8 +438,9 @@ var landingFAQ = []landingQA{{
 	Question: "Can it read secrets from AWS Secrets Manager, Azure Key Vault, or Vault?",
 	Answer: "All three, resolved at launch rather than copied into this database. Vault dynamic " +
 		"secrets go further: a short-lived credential is minted for each run and revoked when the " +
-		"run ends. AWS and Azure both authenticate from an instance role or managed identity with " +
-		"no stored key, and anything else resolves through a command whose output is the secret.",
+		"run ends. Azure authenticates from the attached managed identity with no stored key, AWS " +
+		"takes an access key from the credential or the standard AWS environment variables, and " +
+		"anything else resolves through a command whose output is the secret.",
 }, {
 	Question: "Can I run a Terraform plan, hold it for approval, then run Ansible?",
 	Answer: "Yes, and it is what pipelines are for here. Steps mix tools freely on a dependency " +

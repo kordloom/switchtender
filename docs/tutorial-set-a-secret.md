@@ -61,9 +61,12 @@ account through the metadata server, so no key is stored. Off GCP, put an access
     {"project":"my-project","secret":"ci-token","version":"latest"}
 
 AWS Secrets Manager and Azure Key Vault work the same way. For AWS, give the secret id and region as
-JSON; credentials fall back to the standard AWS environment, so an instance role needs no stored key.
+JSON, along with an access key. The key comes from the config or from `AWS_ACCESS_KEY_ID` and
+`AWS_SECRET_ACCESS_KEY` in the server's environment; the instance metadata service is not read, so an
+EC2 instance role alone does not authenticate it.
 
-    {"secret_id":"prod/db-password","region":"us-east-1"}
+    {"secret_id":"prod/db-password","region":"us-east-1",
+     "access_key_id":"AKIA...","secret_access_key":"..."}
 
 For Azure, give the vault name and secret as JSON. On Azure it reads as the attached managed identity
 with no stored key. Off Azure, add a service principal's `tenant_id`, `client_id`, and `client_secret`,

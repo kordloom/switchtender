@@ -123,7 +123,7 @@
 					<div class="gs-num">2</div>
 					<div class="gs-body">
 						<h3>Serve</h3>
-						<p>Start the server. SQLite is the default. Point <code>--db</code> at a Postgres DSN when you want more than one instance. Set the encryption pair if you plan to store credentials. On a public address with no tokens yet, serve mints your initial admin token and prints it once, so the API requires auth from its very first request; only loopback may run open, and it says so.</p>
+						<p>Start the server. SQLite is the default. Point <code>--db</code> at a Postgres DSN when you want more than one instance. Creating a new PostgreSQL schema needs a Team license; opening one that already exists is never gated, in any licence state. Set the encryption pair if you plan to store credentials. On a public address with no tokens yet, serve mints your initial admin token and prints it once, so the API requires auth from its very first request; only loopback and <code>--read-only</code> may run open, and it says so.</p>
 						<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code><span class="c"># optional, only needed for stored secrets</span>
 export SWITCHTENDER_ENCRYPTION_KEY=change-me
 export SWITCHTENDER_ENCRYPTION_SALT=change-me-too
@@ -164,7 +164,7 @@ switchtender token revoke &lt;initial-token-id&gt; --db switchtender.db</code></
 				</li>
 			</ol>
 			<div class="gs-callout reveal">
-				<p><strong>Moving from another controller?</strong> Start with <code>switchtender assess awx export.json</code>, which reads the estate and says what comes across, what does not, and which templates nobody currently has to approve, before anything is written. Then AWX, Semaphore, Chef, Puppet, Rundeck, and Jenkins each import in one command: projects, inventories, templates, surveys, and schedules. Ansible Automation Platform, Tower, and Ascender share the AWX export format, and even a crontab imports into governed schedules.</p>
+				<p><strong>Moving from another controller?</strong> Start with <code>switchtender assess awx export.json</code>, which reads the estate and says what comes across, what does not, and which templates nobody currently has to approve, before anything is written. Then each source imports in one command. AWX and Semaphore bring projects, inventories, credential shells, templates, surveys, and schedules. Rundeck and Jenkins bring jobs as templates and their triggers as schedules. Chef and Puppet bring the node list as an inventory, and nothing else: a cookbook or a manifest is a program in another language, and a partial translation would look right and do something else. The command is the same shape for all of them: projects, inventories, templates, surveys, and schedules. Ansible Automation Platform, Tower, and Ascender share the AWX export format, and even a crontab imports into governed schedules.</p>
 				<a class="btn" href="/docs/switching-from-awx">Migration guide</a>
 			</div>
 		</section>
