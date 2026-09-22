@@ -177,7 +177,14 @@ func Build(ctx context.Context, runs run.Store, audits audit.Store, id audit.Ide
 				if claim := outcomeClaim(doc, outcomeEntry.Path); claim != nil {
 					claim.Payload["outcome_body"] = bodyObj
 					claim.Payload["outcome_nonce"] = outcomeEntry.Nonce
-					discloseSpec(claim, r)
+					// A spec that will not reduce to redacted bytes is withheld, never disclosed raw, and
+					// the receipt says so. Dropping it in silence shipped a signed receipt that looked
+					// whole while the section naming what was approved was simply absent.
+					if serr := discloseSpec(claim, r); serr != nil {
+						res.Notes = append(res.Notes, "the run's spec could not be reduced to "+
+							"redacted bytes, so the receipt proves the chain and shows what the run "+
+							"did but does not show what was approved: "+serr.Error())
+					}
 				}
 			}
 		}
@@ -277,12 +284,13 @@ func pathNamesRun(path, runID string) bool {
 // too wide for a float came back a different number, so the disclosed spec stopped matching the digest
 // the chain committed and the receipt read as tampered. The bytes have neither problem: a string is
 // representable whatever it holds, and it is what the digest already covers.
-func discloseSpec(claim *audit.BundleClaim, r *run.Run) {
+func discloseSpec(claim *audit.BundleClaim, r *run.Run) error {
 	spec, err := outcome.Spec(r)
 	if err != nil {
-		return
+		return err
 	}
 	claim.Payload["spec_body"] = string(spec)
+	return nil
 }
 
 // discloseDecisions attaches each approval decision's body and nonce to its claim, the same way the

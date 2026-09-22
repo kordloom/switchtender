@@ -11,6 +11,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -294,8 +295,26 @@ func ContentDigestOf(body []byte) (digest, nonce string, err error) {
 // digest in this package commits to. It is exported for values that are disclosed beside their
 // digest, such as a run's spec in a receipt, so the discloser can never hand out bytes the
 // redaction did not pass over.
-func CanonicalRedacted(body []byte) []byte {
-	return canonicalForDigest(body)
+//
+// It carries no size bailout, and that is what separates it from the digest path below. Digesting
+// can afford one: committing to an enormous body whole discloses nothing about it. Disclosure
+// cannot. A body too large to canonicalize is a body the redaction never read, so handing it back
+// publishes in the clear the exact values the caller asked to have removed. Every failure here is
+// an error instead, and a caller that cannot prove a body was redacted withholds it.
+func CanonicalRedacted(body []byte) ([]byte, error) {
+	value, err := jcs.Parse(body)
+	if err != nil {
+		return nil, fmt.Errorf("%w: this body is not JSON, so no redaction passed over it", ErrRedactParse)
+	}
+	value = redactSecrets(value)
+	if canonical, err := jcs.Serialize(value); err == nil {
+		return canonical, nil
+	}
+	marshaled, err := json.Marshal(value)
+	if err != nil {
+		return nil, fmt.Errorf("%w: the redacted body will not re-encode", ErrRedactEncode)
+	}
+	return marshaled, nil
 }
 
 // UnkeyedDigestOf returns "sha256:" plus the hex SHA-256 of the canonical redacted body. It is for
@@ -312,21 +331,24 @@ func UnkeyedDigestOf(body []byte) string {
 // re-encoding failure falling back to the original bytes. A value JCS cannot canonicalize falls back
 // to a plain deterministic JSON encoding of the same redacted tree, and a tree that will not encode
 // at all reduces to the marker.
+//
+// The size bailout is safe here and only here: a digest of an oversized body discloses nothing,
+// while CanonicalRedacted, whose bytes are published, refuses rather than skipping the redaction.
 func canonicalForDigest(body []byte) []byte {
-	input := body
-	if len(body) <= MaxCanonicalDigestBytes {
-		if value, err := jcs.Parse(body); err == nil {
-			value = redactSecrets(value)
-			if canonical, err := jcs.Serialize(value); err == nil {
-				input = canonical
-			} else if marshaled, merr := json.Marshal(value); merr == nil {
-				input = marshaled
-			} else {
-				input = []byte(redactedMarker)
-			}
-		}
+	if len(body) > MaxCanonicalDigestBytes {
+		return body
 	}
-	return input
+	canonical, err := CanonicalRedacted(body)
+	switch {
+	case err == nil:
+		return canonical
+	case errors.Is(err, ErrRedactEncode):
+		// The tree was redacted and then would not encode. Falling back to the body it was parsed
+		// from would commit the secrets the redaction had just removed, so the marker stands in.
+		return []byte(redactedMarker)
+	default:
+		return body // Not JSON: there is no tree to redact and the digest discloses nothing.
+	}
 }
 
 // VerifyContentDigest reports whether body, under nonce, is the change committed by digest. It is how

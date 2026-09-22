@@ -73,7 +73,10 @@ func Spec(r *run.Run) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return audit.CanonicalRedacted(raw), nil
+	// A spec that will not redact is withheld rather than disclosed raw: this body is published
+	// beside its digest in a receipt, so bytes no redaction passed over are bytes handed to an
+	// outside reader in the clear.
+	return audit.CanonicalRedacted(raw)
 }
 
 // SpecDigest returns the unkeyed digest of r's canonical redacted spec. It is unkeyed because the
