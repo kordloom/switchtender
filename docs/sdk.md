@@ -141,8 +141,16 @@ TLS, supervised by the server. It starts with the server and exits with it. The 
 takes the same flag, so a plugged-in tool runs wherever runs execute.
 
 A plugin that fails to launch or describe itself is logged and skipped, so one broken binary does
-not take the server down. A name that collides with a built-in or another plugin stops the server
-at startup with a clear message. Compiling in and plugging in register the same way and behave the
+not take the server down. A name that collides with a built-in or with a plugin already loaded is
+refused the same way: the plugin is skipped whole, nothing it declared is registered, its process is
+ended rather than left holding a socket, and the reason is logged as a warning naming the file. The
+server starts. A dropped-in binary claiming `bash` would otherwise receive every bash run on the
+fleet, and refusing it is not a reason to take the control plane down with it.
+
+Plugins are read in filename order, so where two declare the same name the first one loaded keeps it
+and the second is the one refused. Check the startup log after adding a plugin: a skipped one is a
+warning, not a failure, so the server running is not by itself proof that everything you installed
+is loaded. Compiling in and plugging in register the same way and behave the
 same at run time. Pick per extension: compile in for one static artifact, plug in for extending a
 release binary you did not build.
 
