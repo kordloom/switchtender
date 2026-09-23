@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -106,7 +108,7 @@ func (h *harness) phaseInvariants() error {
 	h.checkNoInternalErrors(phase, actors)
 	h.checkRefusalsExplainThemselves(phase, actors, refusedPaths)
 	h.checkUnauthenticatedReadsNothing(phase)
-	h.checkNoSigningSeedEchoed(phase, actors)
+	h.checkNoCredentialMaterialEchoed(phase, actors)
 	return nil
 }
 
@@ -289,38 +291,75 @@ func (h *harness) checkUnauthenticatedReadsNothing(phase string) {
 		fmt.Sprintf("%d path(s)", len(invariantPaths)))
 }
 
-// checkNoSigningSeedEchoed requires no response to carry the install's audit signing seed.
+// checkNoCredentialMaterialEchoed requires no response to carry the private key the install was
+// given to keep.
 //
-// This replaced a hunt for the bearer tokens the install had minted, which could not fail: a token
-// is returned once when it is minted and only its hash is stored, so no read can return one and the
-// property passed over a string the install does not possess. A check that cannot fail is worse
-// than a missing one, because it reads as coverage.
+// This is the third shape of this property, and the first that is about a secret this install
+// actually holds. It hunted bearer tokens, which are returned once at mint and only hashed
+// afterward, so it scanned for a string the install does not possess and could never fail. It then
+// hunted the audit signing seed, which only the Team, HA and disaster-recovery installs are
+// configured with, so at this point in the run it was scanning for a string that install has never
+// seen either. Both read as coverage and were none.
 //
-// The seed is a secret the install does hold, in its environment and in its identity file, and it
-// is the one whose disclosure would be worst: whoever has it can sign a chain that verifies as this
-// install's. A configuration or diagnostic endpoint returning it is exactly the accident this
-// watches for.
-func (h *harness) checkNoSigningSeedEchoed(phase string, actors []*actor) {
-	seed := h.auditSeed()
-	if strings.TrimSpace(seed) == "" {
-		h.fail(phase, "the install has a signing seed to hunt for",
-			fmt.Errorf("no seed is configured, so this property would hold over nothing"))
+// The SSH private key is different: the harness wrote it, handed it over as a credential, and the
+// install sealed and kept it. Every run the fleet executes uses it. It is exactly the material the
+// product exists to hold without ever handing back, and the harness holds the plaintext to compare
+// against, which is what makes the question answerable at all.
+func (h *harness) checkNoCredentialMaterialEchoed(phase string, actors []*actor) {
+	key, err := os.ReadFile(filepath.Join(h.work, "fleet_ed25519"))
+	if err != nil {
+		h.fail(phase, "the install holds credential material to hunt for",
+			fmt.Errorf("the fleet key this install was given is unreadable here, so there is "+
+				"nothing to compare a response against: %w", err))
 		return
 	}
+	// The body of the key, without the armour lines every key shares.
+	material := ""
+	for _, line := range strings.Split(strings.TrimSpace(string(key)), "\n") {
+		if len(line) > len(material) && !strings.HasPrefix(line, "-----") {
+			material = line
+		}
+	}
+	if len(material) < 32 {
+		h.fail(phase, "the install holds credential material to hunt for",
+			fmt.Errorf("no key body long enough to be distinctive was found, so a scan for it "+
+				"would prove nothing"))
+		return
+	}
+
+	// A detector is shown to detect before it is believed about an absence. The credential's own id
+	// is returned by the listing on purpose, so a scan that cannot find it in that response would
+	// not have found the key body either, and every pass below would be an artifact of the scan
+	// rather than a fact about the install.
+	credentials, cerr := h.objectIDs("/v1/credentials", "credentials")
+	if cerr != nil || len(credentials) == 0 {
+		h.fail(phase, "the credential hunt can see what a response holds",
+			fmt.Errorf("no credential is listed, so this scan has nothing to prove itself against"))
+		return
+	}
+	if _, body := h.rawGet(&h.human, "/v1/credentials"); !strings.Contains(body, credentials[0]) {
+		h.fail(phase, "the credential hunt can see what a response holds",
+			fmt.Errorf("the listing does not carry %s, so this scan cannot see a response's "+
+				"contents and an absence it reports proves nothing", credentials[0]))
+		return
+	}
+	h.pass(phase, "the credential hunt can see what a response holds", credentials[0])
+
 	for _, who := range actors {
 		echoed := ""
 		for _, path := range invariantPaths {
-			if _, body := h.rawGet(who, path); strings.Contains(body, seed) {
-				echoed = fmt.Sprintf("%s returns the audit signing seed to %s", path, who.Name)
+			if _, body := h.rawGet(who, path); strings.Contains(body, material) {
+				echoed = fmt.Sprintf("%s returns the fleet key's private material to %s",
+					path, who.Name)
 				break
 			}
 		}
 		if echoed != "" {
-			h.fail(phase, "no response carries the signing seed to "+who.Name,
+			h.fail(phase, "no response carries credential material to "+who.Name,
 				fmt.Errorf("%s", echoed))
 			continue
 		}
-		h.pass(phase, "no response carries the signing seed to "+who.Name,
+		h.pass(phase, "no response carries credential material to "+who.Name,
 			fmt.Sprintf("%d path(s)", len(invariantPaths)))
 	}
 }
