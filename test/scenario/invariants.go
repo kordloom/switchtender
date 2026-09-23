@@ -188,8 +188,10 @@ var derivedViews = []string{
 var derivedAggregates = map[string]string{
 	"/v1/tasks": "aggregated by task name over runs, with no run id in a row",
 	"/v1/drift": "aggregated by host, with no run id in a row",
-	"/v1/changes": "rows are changes, not runs; checked by checkChangesAgree below, which asks " +
-		"whether a change whose every member run is refused still appears",
+	"/v1/changes": "the index rows are changes, not runs, and carry no member ids; checked by " +
+		"checkChangesAgree, which asks whether a change whose every member run is refused still " +
+		"appears. The by-id view at /v1/changes/{change} does carry its members and is probed by " +
+		"checkDerivedViewsAgree",
 }
 
 // checkListFetchParity holds every listing against the by-id read behind it, for every actor.
@@ -248,7 +250,16 @@ func checkDerivedViewsAgree(in *Install) []string {
 	paths := append([]string{}, derivedViews...)
 	for _, r := range in.Scenario.Fixtures.Runs {
 		if r.Host != "" {
-			paths = append(paths, "/v1/hosts/"+r.Host+"/runs")
+			// Both of a host's views. The facts view was omitted and carries the run id that
+			// gathered them plus the facts themselves, which are text read off a target machine,
+			// so dropping its filter disclosed a refused run's reading with nothing noticing.
+			paths = append(paths, "/v1/hosts/"+r.Host+"/runs", "/v1/hosts/"+r.Host+"/facts")
+		}
+		if r.Change != "" {
+			// One change, which carries its member runs in full rather than the summary the index
+			// carries. Nothing probed it, and dropping its filter handed a caller the whole record
+			// of a run whose by-id fetch refuses them.
+			paths = append(paths, "/v1/changes/"+r.Change)
 		}
 	}
 	sort.Strings(paths)
@@ -345,7 +356,9 @@ func checkNoSecretLeak(in *Install) []string {
 	for _, r := range in.Scenario.Fixtures.Runs {
 		paths = append(paths, "/v1/runs/"+r.ID)
 		if r.Host != "" {
-			paths = append(paths, "/v1/hosts/"+r.Host+"/runs")
+			// Host facts are text gathered off a target machine, which is one of the places a value
+			// somebody pasted ends up, so they are hunted like any other response.
+			paths = append(paths, "/v1/hosts/"+r.Host+"/runs", "/v1/hosts/"+r.Host+"/facts")
 		}
 	}
 	sort.Strings(paths)

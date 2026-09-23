@@ -225,7 +225,15 @@ func (h *harness) checkNoInternalErrors(phase string, actors []*actor) {
 	for _, who := range actors {
 		broke := ""
 		for _, path := range invariantPaths {
-			if status, body := h.rawGet(who, path); status >= 500 {
+			status, body := h.rawGet(who, path)
+			// Zero is not a status. It is the request never arriving, which the port forward this
+			// harness runs over can produce at any moment, and reading it as "not a server error"
+			// made this and three properties beside it report green over an install nobody reached.
+			if status == 0 {
+				broke = fmt.Sprintf("%s could not be reached at all: %s", path, oneLine(body))
+				break
+			}
+			if status >= 500 {
 				broke = fmt.Sprintf("%s answered %d: %s", path, status, oneLine(body))
 				break
 			}
@@ -252,6 +260,10 @@ func (h *harness) checkRefusalsExplainThemselves(phase string, actors []*actor, 
 		paths := append(append([]string{}, invariantPaths...), refused[who.Name]...)
 		for _, path := range paths {
 			status, body := h.rawGet(who, path)
+			if status == 0 {
+				silent = fmt.Sprintf("%s could not be reached at all: %s", path, oneLine(body))
+				break
+			}
 			if status < 400 || status >= 500 {
 				continue
 			}
@@ -278,7 +290,13 @@ func (h *harness) checkRefusalsExplainThemselves(phase string, actors []*actor, 
 func (h *harness) checkUnauthenticatedReadsNothing(phase string) {
 	served := ""
 	for _, path := range invariantPaths {
-		if status, body := h.rawGet(nil, path); status == http.StatusOK {
+		status, body := h.rawGet(nil, path)
+		if status == 0 {
+			served = fmt.Sprintf("%s could not be reached at all, so a refusal was never "+
+				"observed: %s", path, oneLine(body))
+			break
+		}
+		if status == http.StatusOK {
 			served = fmt.Sprintf("%s answered 200 with no credentials: %s", path, oneLine(body))
 			break
 		}
@@ -313,42 +331,64 @@ func (h *harness) checkNoCredentialMaterialEchoed(phase string, actors []*actor)
 				"nothing to compare a response against: %w", err))
 		return
 	}
-	// The body of the key, without the armour lines every key shares.
-	material := ""
+	// The key's own base64 body, armour and line breaks removed, and a needle taken from its tail.
+	//
+	// The first attempt took "the longest non-armour line", which is wrong in a way that reads as
+	// right. Every base64 line of an unencrypted ed25519 key is exactly seventy characters, so a
+	// strict greater-than never advances past the first one, and that line is the OpenSSH container
+	// header: byte for byte identical in every such key ever generated, carrying nothing of this
+	// one. The check would have reported the same verdict whichever key the install held.
+	//
+	// The tail is past the header and the public half both, so it is this key's private scalar and
+	// its comment. Hunting the joined body as well as the file as written means a response that
+	// re-wraps the key at a different width, which is what any re-encoding produces, cannot slip
+	// through a line-oriented comparison.
+	var body strings.Builder
 	for _, line := range strings.Split(strings.TrimSpace(string(key)), "\n") {
-		if len(line) > len(material) && !strings.HasPrefix(line, "-----") {
-			material = line
+		if !strings.HasPrefix(line, "-----") {
+			body.WriteString(strings.TrimSpace(line))
 		}
 	}
-	if len(material) < 32 {
+	joined := body.String()
+	const headerAndPublic = 160
+	if len(joined) < headerAndPublic+64 {
 		h.fail(phase, "the install holds credential material to hunt for",
-			fmt.Errorf("no key body long enough to be distinctive was found, so a scan for it "+
-				"would prove nothing"))
+			fmt.Errorf("the key body is %d characters, too short to take a needle from past its "+
+				"container header, so a scan for it would prove nothing", len(joined)))
 		return
 	}
+	needle := joined[len(joined)-64:]
 
-	// A detector is shown to detect before it is believed about an absence. The credential's own id
-	// is returned by the listing on purpose, so a scan that cannot find it in that response would
-	// not have found the key body either, and every pass below would be an artifact of the scan
-	// rather than a fact about the install.
-	credentials, cerr := h.objectIDs("/v1/credentials", "credentials")
-	if cerr != nil || len(credentials) == 0 {
-		h.fail(phase, "the credential hunt can see what a response holds",
-			fmt.Errorf("no credential is listed, so this scan has nothing to prove itself against"))
-		return
+	// A detector is shown to detect, against a leak this builds itself rather than against a value
+	// it just read out of the response it is testing. The proof this replaced asked whether a
+	// listing contained an id parsed out of that same listing, which it always does.
+	for _, shape := range []struct {
+		name string
+		body string
+	}{
+		{"the key verbatim", `{"secret":"` + string(key) + `"}`},
+		{"the key re-wrapped", `{"secret":"` + joined + `"}`},
+	} {
+		if !strings.Contains(shape.body, needle) {
+			h.fail(phase, "the credential hunt can see a leak it is shown",
+				fmt.Errorf("a response carrying %s is not detected, so an absence this reports "+
+					"proves nothing", shape.name))
+			return
+		}
 	}
-	if _, body := h.rawGet(&h.human, "/v1/credentials"); !strings.Contains(body, credentials[0]) {
-		h.fail(phase, "the credential hunt can see what a response holds",
-			fmt.Errorf("the listing does not carry %s, so this scan cannot see a response's "+
-				"contents and an absence it reports proves nothing", credentials[0]))
-		return
-	}
-	h.pass(phase, "the credential hunt can see what a response holds", credentials[0])
+	h.pass(phase, "the credential hunt can see a leak it is shown",
+		"verbatim and re-wrapped, 64 characters from past the container header")
 
 	for _, who := range actors {
 		echoed := ""
 		for _, path := range invariantPaths {
-			if _, body := h.rawGet(who, path); strings.Contains(body, material) {
+			status, body := h.rawGet(who, path)
+			if status == 0 {
+				echoed = fmt.Sprintf("%s could not be reached at all (%s), so this reports an "+
+					"absence over a response nobody received", path, oneLine(body))
+				break
+			}
+			if strings.Contains(body, needle) {
 				echoed = fmt.Sprintf("%s returns the fleet key's private material to %s",
 					path, who.Name)
 				break

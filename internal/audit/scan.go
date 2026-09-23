@@ -153,8 +153,6 @@ func NewAnchorScanner(anchors []*Anchor, id Identity) *AnchorScanner {
 	return s
 }
 
-// Feed records what the entry proves about the anchors: the link at a linear anchored position,
-// the tree root at an anchored size, and how far the chain reaches.
 // altRootAt returns the root the alternate fold recomputed at this anchor's size, and whether that
 // fold speaks for the identity the anchor names. It answers only for an anchor taken under this
 // key's earlier name, or under no name at all, which is the same set the fold was built for.
@@ -169,6 +167,8 @@ func (s *AnchorScanner) altRootAt(a *Anchor) (string, bool) {
 	return root, ok
 }
 
+// Feed records what the entry proves about the anchors: the link at a linear anchored position,
+// the tree root at an anchored size, and how far the chain reaches.
 func (s *AnchorScanner) Feed(e *Entry) {
 	if e == nil {
 		return

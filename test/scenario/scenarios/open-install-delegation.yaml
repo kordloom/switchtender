@@ -35,9 +35,13 @@ fixtures:
       extra_vars: {db_password: SURVEY-ANSWER-NOT-FOR-LISTS}
       facts: {os: debian, kernel: "6.1.0"}
       tasks: {"gather facts": 1.5}
+    # On a host of its own, deliberately. A host's facts view returns only the newest reading for
+    # that host, so a refused run sharing a host with a readable one is never the reading served and
+    # the view has nothing to disclose. This run is the only one that has touched web2, which is the
+    # single arrangement under which that view can leak.
     - id: run_delegated
       project: proj_delegated
-      host: web1
+      host: web2
       change: CHG-1002
       facts: {os: rhel, kernel: "5.14.0"}
       tasks: {"rotate keys": 4.25}

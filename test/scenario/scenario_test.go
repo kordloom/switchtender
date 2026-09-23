@@ -342,8 +342,12 @@ func TestEveryDerivedViewIsActuallyExercised(t *testing.T) {
 		if berr != nil {
 			t.Fatalf("building %s: %v", s.Path(), berr)
 		}
+		probed := append([]string{}, derivedViews...)
+		for path := range derivedAggregates {
+			probed = append(probed, path)
+		}
 		for _, actor := range in.Users {
-			for _, path := range derivedViews {
+			for _, path := range probed {
 				body := in.Get(path, actor).Body
 				for _, r := range s.Fixtures.Runs {
 					if mentions(body, r.ID) {
