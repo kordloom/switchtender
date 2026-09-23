@@ -74,6 +74,26 @@ jobs:
       # toolchain into a failure, so this install is load-bearing, not a convenience.
       - name: Install ansible for the drift contract
         run: pipx install ansible-core==2.18.1
+      - name: The chart must name the version being released
+        run: |
+          set -euo pipefail
+          # The chart's appVersion is what an install without an explicit image tag deploys, so a
+          # tag whose chart names an older version ships a release that quietly runs the previous
+          # one. The ci workflow already refuses a chart that has fallen behind the newest release,
+          # but that runs on push, which is after the tag exists: it reported the mistake rather
+          # than preventing it, and v1.95.0 went out with its chart still naming v1.94.0.
+          #
+          # Here the comparison is against the tag being released, so the release stops instead.
+          chart="$(grep -m1 '^appVersion:' deploy/helm/switchtender/Chart.yaml | tr -d '"' | awk '{print $2}')"
+          want="${GITHUB_REF_NAME#v}"
+          if [ "$chart" != "$want" ]; then
+            echo "::error title=Chart does not name this release::Chart.yaml appVersion is \
+          $chart and this release is $want. Bump the chart and tag again; a published tag is \
+          not moved."
+            exit 1
+          fi
+          echo "chart appVersion $chart matches the release"
+
       - name: Build
         run: go build ./...
       - name: Vet
