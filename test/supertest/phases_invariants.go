@@ -92,12 +92,21 @@ func (h *harness) phaseInvariants() error {
 	}
 
 	actors := []*actor{&h.human, alpha, beta}
+	// The by-id reads each caller is refused, which is where an object-level refusal is written.
+	refusedPaths := map[string][]string{}
+	for _, who := range actors {
+		for _, id := range runs {
+			if !h.canRead(who, "/v1/runs/"+id) {
+				refusedPaths[who.Name] = append(refusedPaths[who.Name], "/v1/runs/"+id)
+			}
+		}
+	}
 	h.checkListFetchParity(phase, actors, runs)
 	h.checkDerivedViewsAgree(phase, actors, runs)
 	h.checkNoInternalErrors(phase, actors)
-	h.checkRefusalsExplainThemselves(phase, actors)
+	h.checkRefusalsExplainThemselves(phase, actors, refusedPaths)
 	h.checkUnauthenticatedReadsNothing(phase)
-	h.checkNoTokenEchoed(phase, actors)
+	h.checkNoSigningSeedEchoed(phase, actors)
 	return nil
 }
 
@@ -231,10 +240,15 @@ func (h *harness) checkNoInternalErrors(phase string, actors []*actor) {
 // checkRefusalsExplainThemselves requires every refusal to carry a reason. A 4xx with an empty body
 // is a dead end: the caller learns they were stopped and not what to do about it, and the one
 // explanation that is true is the only one they can act on.
-func (h *harness) checkRefusalsExplainThemselves(phase string, actors []*actor) {
+func (h *harness) checkRefusalsExplainThemselves(phase string, actors []*actor, refused map[string][]string) {
 	for _, who := range actors {
 		silent := ""
-		for _, path := range invariantPaths {
+		// The listings above are refused by the role gate. An object-level refusal happens on the
+		// by-id read of something delegated elsewhere, and that is a different responder writing a
+		// different body, so a check that never reaches one is a check that cannot see it. Breaking
+		// that responder deliberately left this property green until these paths were added.
+		paths := append(append([]string{}, invariantPaths...), refused[who.Name]...)
+		for _, path := range paths {
 			status, body := h.rawGet(who, path)
 			if status < 400 || status >= 500 {
 				continue
@@ -275,44 +289,39 @@ func (h *harness) checkUnauthenticatedReadsNothing(phase string) {
 		fmt.Sprintf("%d path(s)", len(invariantPaths)))
 }
 
-// checkNoTokenEchoed requires no response to carry any bearer token the install has minted.
+// checkNoSigningSeedEchoed requires no response to carry the install's audit signing seed.
 //
-// A token in a response body is a credential handed to whoever can read that body, and the run
-// history is the most likely place for one to land: a token pasted into a variable, a command line,
-// or an error message travels with the record of the run that carried it.
-func (h *harness) checkNoTokenEchoed(phase string, actors []*actor) {
-	var secrets []string
-	for _, who := range actors {
-		if who.Token != "" {
-			secrets = append(secrets, who.Token)
-		}
-	}
-	if len(secrets) == 0 {
-		h.fail(phase, "the install minted tokens to hunt for",
-			fmt.Errorf("no actor carries a token, so this property holds over nothing"))
+// This replaced a hunt for the bearer tokens the install had minted, which could not fail: a token
+// is returned once when it is minted and only its hash is stored, so no read can return one and the
+// property passed over a string the install does not possess. A check that cannot fail is worse
+// than a missing one, because it reads as coverage.
+//
+// The seed is a secret the install does hold, in its environment and in its identity file, and it
+// is the one whose disclosure would be worst: whoever has it can sign a chain that verifies as this
+// install's. A configuration or diagnostic endpoint returning it is exactly the accident this
+// watches for.
+func (h *harness) checkNoSigningSeedEchoed(phase string, actors []*actor) {
+	seed := h.auditSeed()
+	if strings.TrimSpace(seed) == "" {
+		h.fail(phase, "the install has a signing seed to hunt for",
+			fmt.Errorf("no seed is configured, so this property would hold over nothing"))
 		return
 	}
 	for _, who := range actors {
 		echoed := ""
 		for _, path := range invariantPaths {
-			_, body := h.rawGet(who, path)
-			for _, secret := range secrets {
-				if strings.Contains(body, secret) {
-					echoed = fmt.Sprintf("%s returns a bearer token to %s", path, who.Name)
-					break
-				}
-			}
-			if echoed != "" {
+			if _, body := h.rawGet(who, path); strings.Contains(body, seed) {
+				echoed = fmt.Sprintf("%s returns the audit signing seed to %s", path, who.Name)
 				break
 			}
 		}
 		if echoed != "" {
-			h.fail(phase, "no response carries a bearer token to "+who.Name,
+			h.fail(phase, "no response carries the signing seed to "+who.Name,
 				fmt.Errorf("%s", echoed))
 			continue
 		}
-		h.pass(phase, "no response carries a bearer token to "+who.Name,
-			fmt.Sprintf("%d token(s) hunted", len(secrets)))
+		h.pass(phase, "no response carries the signing seed to "+who.Name,
+			fmt.Sprintf("%d path(s)", len(invariantPaths)))
 	}
 }
 
