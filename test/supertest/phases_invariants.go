@@ -343,41 +343,60 @@ func (h *harness) checkNoCredentialMaterialEchoed(phase string, actors []*actor)
 	// its comment. Hunting the joined body as well as the file as written means a response that
 	// re-wraps the key at a different width, which is what any re-encoding produces, cannot slip
 	// through a line-oriented comparison.
-	var body strings.Builder
+	// Two needles, because a leak can arrive in more than one shape and one needle cannot see both.
+	//
+	// The joined body, armour and line breaks removed, catches a response that re-encodes the key at
+	// a different wrapping. A whole line of that body, taken from past the container header, catches
+	// a response that carries the file verbatim, which is the likelier disclosure and is exactly
+	// what a single joined needle misses: the key's last body line is short, so a tail taken from
+	// the joined form spans a line break and appears nowhere in the file as written.
+	//
+	// The version before this used only the joined tail and its own self test caught that in CI.
+	var lines []string
 	for _, line := range strings.Split(strings.TrimSpace(string(key)), "\n") {
-		if !strings.HasPrefix(line, "-----") {
-			body.WriteString(strings.TrimSpace(line))
+		if line = strings.TrimSpace(line); line != "" && !strings.HasPrefix(line, "-----") {
+			lines = append(lines, line)
 		}
 	}
-	joined := body.String()
-	const headerAndPublic = 160
-	if len(joined) < headerAndPublic+64 {
+	joined := strings.Join(lines, "")
+	// The container header and the public half occupy the first line and part of the second, so a
+	// needle taken from the last full-width line is this key's private material.
+	var lineNeedle string
+	for _, line := range lines[1:] {
+		if len(line) >= 64 {
+			lineNeedle = line
+		}
+	}
+	if len(joined) < 224 || lineNeedle == "" {
 		h.fail(phase, "the install holds credential material to hunt for",
-			fmt.Errorf("the key body is %d characters, too short to take a needle from past its "+
-				"container header, so a scan for it would prove nothing", len(joined)))
+			fmt.Errorf("the key body is %d characters with no full-width line past its header, so "+
+				"no needle taken from it would be distinctive", len(joined)))
 		return
 	}
-	needle := joined[len(joined)-64:]
+	needles := []string{joined[len(joined)-64:], lineNeedle}
 
-	// A detector is shown to detect, against a leak this builds itself rather than against a value
-	// it just read out of the response it is testing. The proof this replaced asked whether a
-	// listing contained an id parsed out of that same listing, which it always does.
-	for _, shape := range []struct {
-		name string
-		body string
-	}{
+	// A detector is shown to detect, against leaks this builds itself rather than against a value it
+	// read out of the response under test. Each shape must be caught by at least one needle.
+	for _, shape := range []struct{ name, body string }{
 		{"the key verbatim", `{"secret":"` + string(key) + `"}`},
-		{"the key re-wrapped", `{"secret":"` + joined + `"}`},
+		{"the key with its line breaks removed", `{"secret":"` + joined + `"}`},
 	} {
-		if !strings.Contains(shape.body, needle) {
+		seen := false
+		for _, needle := range needles {
+			if strings.Contains(shape.body, needle) {
+				seen = true
+				break
+			}
+		}
+		if !seen {
 			h.fail(phase, "the credential hunt can see a leak it is shown",
-				fmt.Errorf("a response carrying %s is not detected, so an absence this reports "+
-					"proves nothing", shape.name))
+				fmt.Errorf("a response carrying %s is not detected by any needle, so an absence "+
+					"this reports proves nothing", shape.name))
 			return
 		}
 	}
 	h.pass(phase, "the credential hunt can see a leak it is shown",
-		"verbatim and re-wrapped, 64 characters from past the container header")
+		"verbatim and unwrapped, two needles from past the container header")
 
 	for _, who := range actors {
 		echoed := ""
@@ -388,9 +407,14 @@ func (h *harness) checkNoCredentialMaterialEchoed(phase string, actors []*actor)
 					"absence over a response nobody received", path, oneLine(body))
 				break
 			}
-			if strings.Contains(body, needle) {
-				echoed = fmt.Sprintf("%s returns the fleet key's private material to %s",
-					path, who.Name)
+			for _, needle := range needles {
+				if strings.Contains(body, needle) {
+					echoed = fmt.Sprintf("%s returns the fleet key's private material to %s",
+						path, who.Name)
+					break
+				}
+			}
+			if echoed != "" {
 				break
 			}
 		}
