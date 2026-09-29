@@ -285,7 +285,7 @@ func main() {
 					</thead>
 					<tbody>
 						<tr><td>Deploy without Kubernetes</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td><td><span class="muted">VM installer</span></td><td><i class="y"></i></td><td><i class="y"></i></td></tr>
-						<tr><td>Live host-by-task matrix</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td><td><i class="n"></i></td><td><i class="n"></i></td><td><i class="n"></i></td></tr>
+						<tr><td>Live host-by-task matrix</td><td class="us"><i class="y"></i></td><td><span class="muted">per-host summary</span></td><td><span class="muted">per-host summary</span></td><td><i class="n"></i></td><td><span class="muted">per-node, per-step</span></td></tr>
 						<tr><td>Ansible · Terraform · OpenTofu · Bash · PowerShell · Python · Go</td><td class="us"><i class="y"></i></td><td><span class="muted">Ansible only</span></td><td><span class="muted">Ansible only</span></td><td><span class="muted">no Python or Go</span></td><td><span class="muted">scripts, no native IaC</span></td></tr>
 						<tr><td>Duration-balanced job splitting</td><td class="us"><i class="y"></i></td><td><span class="muted">round-robin</span></td><td><span class="muted">round-robin</span></td><td><i class="n"></i></td><td><i class="n"></i></td></tr>
 						<tr><td>Fleet memory: flaky hosts, trends</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td><td><i class="n"></i></td><td><i class="n"></i></td><td><i class="n"></i></td></tr>
@@ -299,18 +299,19 @@ func main() {
 						<tr><td>Drop-in Go plugins: tools, secrets, AI, notifiers</td><td class="us"><i class="y"></i></td><td><i class="n"></i></td><td><i class="n"></i></td><td><i class="n"></i></td><td><span class="muted">Java plugins</span></td></tr>
 						<tr><td>Container execution for every tool</td><td class="us"><i class="y"></i></td><td><span class="muted">Ansible only</span></td><td><span class="muted">Ansible only</span></td><td><i class="n"></i></td><td><i class="n"></i></td></tr>
 						<tr><td>Typed cloud credentials, pluggable types</td><td class="us"><i class="y"></i></td><td><span class="muted">typed, not pluggable</span></td><td><span class="muted">typed, not pluggable</span></td><td><i class="n"></i></td><td><i class="n"></i></td></tr>
-						<tr><td>Organizations, teams, per-object grants</td><td class="us"><i class="y"></i></td><td><i class="y"></i></td><td><i class="y"></i></td><td><span class="muted">paid tier</span></td><td><span class="muted">enterprise</span></td></tr>
+						<tr><td>Organizations, teams, per-object grants</td><td class="us"><i class="y"></i></td><td><i class="y"></i></td><td><i class="y"></i></td><td><span class="muted">teams, four fixed roles</span></td><td><span class="muted">policy files, no GUI editor</span></td></tr>
 						<tr><td>Instance groups: pin work to worker pools</td><td class="us"><i class="y"></i></td><td><i class="y"></i></td><td><i class="y"></i></td><td><i class="n"></i></td><td><span class="muted">enterprise</span></td></tr>
 						<tr><td>Active-active HA on PostgreSQL</td><td class="us"><i class="y"></i></td><td><span class="muted">via Kubernetes</span></td><td><span class="muted">via Kubernetes</span></td><td><i class="n"></i></td><td><span class="muted">enterprise</span></td></tr>
 					</tbody>
 				</table>
+				<p class="compare-note">Checked against each vendor's own documentation on 31 July 2026: AWX 24.6.1, Ansible Automation Platform 2.7, Semaphore 2.18.29, Ascender 25.4.0, and Rundeck 6.0.1. Every one of these products ships, and a table like this decays the day it is written. If a row has gone stale, <a href="https://github.com/kordloom/switchtender/issues">open an issue</a> and it gets corrected.</p>
 			</div>
 		</section>
 
 		<section class="section wrap" id="migrate">
 			<div class="section-head reveal">
 				<h2>Bring the whole thing<br>with you.</h2>
-				<p>A migration is one command, not a rebuild. AWX and Semaphore each have an importer, and Ansible Automation Platform, Tower, and Ascender share the AWX export format, so the same one reads them. Rundeck has no importer yet, so that move is still by hand. Export, preview exactly what will land, then apply. Projects, inventories with their hosts and groups, dynamic inventory sources, job templates, surveys, schedules, and credential shells all come across in one pass. A malformed asset is warned and skipped, never fatal, so even a partial export migrates everything it can.</p>
+				<p>A migration is one command, not a rebuild. AWX and Semaphore each have an importer, and Ansible Automation Platform, Tower, and Ascender export through the same awxkit command with the same top-level keys, so the same importer reads them. Rundeck has no importer yet, so that move is still by hand. Export, preview exactly what will land, then apply. Projects, inventories with their hosts and groups, dynamic inventory sources, job templates, surveys, schedules, and credential shells all come across in one pass. A malformed asset is warned and skipped, never fatal, so even a partial export migrates everything it can.</p>
 			</div>
 			<div class="code reveal">
 				<button class="copy" aria-label="Copy">Copy</button>

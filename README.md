@@ -55,7 +55,7 @@ instead of scrollback.
 |                                      | SwitchTender                                                                        | AWX                                             | Semaphore                |
 |--------------------------------------|-----------------------------------------------------------------------------------|-------------------------------------------------|--------------------------|
 | Deploy                               | One binary and one SQLite file, running in seconds.                               | A Kubernetes operator, Postgres, Redis, and Receptor first. | One binary.              |
-| Every&nbsp;run                       | A live host-by-task matrix you read like a dashboard, with per-task drill-down.   | A text log you scroll.                          | A text log you scroll.   |
+| Every&nbsp;run                       | A live host-by-task matrix you read like a dashboard, with per-task drill-down.   | A host status bar over a streamed log, with per-event host drill-down. | A status and a streamed log. |
 | Big&nbsp;jobs                        | Sharded across hosts, balanced by their measured duration, only failed shards retried. | Sliced round-robin, with no balancing.     | No splitting at all.     |
 | Memory&nbsp;across&nbsp;runs         | Flaky hosts flagged, durations trended, every host's history kept.               | Forgotten the moment a run ends.                | Forgotten the moment a run ends. |
 | Pipelines                            | A dependency graph with a drag-and-drop editor, passing typed outputs from one step to the next. | A visual workflow builder.       | Basic chaining.          |
@@ -63,6 +63,10 @@ instead of scrollback.
 
 The full head-to-head, including where SwitchTender is behind, is in the
 [comparison](docs/comparison.md).
+
+Checked against vendor documentation on 2026-07-31, for AWX 24.6.1 and Semaphore 2.18.29. These
+products ship, and a table like this decays. If a row is out of date, open an issue and it gets
+corrected.
 
 ## See it
 

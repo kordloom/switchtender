@@ -85,6 +85,11 @@ func Link(prev, e *Entry) {
 	//
 	// Microseconds are ample for an audit timestamp, and truncating here rather than at emit keeps
 	// the stored entry and any bundle built from it committing to the same instant.
+	//
+	// LoomSeal v0.2.1 made this defensive rather than load-bearing: the profile now hashes the
+	// stored time bytes instead of parsing and re-serializing them, so a nanosecond entry verifies
+	// too. It stays because a relying party may be holding an older copy of the reference verifier,
+	// and because a microsecond timestamp survives every language a third party might check it in.
 	e.At = e.At.Truncate(time.Microsecond)
 	if prev != nil {
 		e.Seq = prev.Seq + 1
