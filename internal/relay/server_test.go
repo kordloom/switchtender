@@ -44,8 +44,8 @@ func TestServerRoundTrip(t *testing.T) {
 	c, backing := newRelay(t)
 
 	r := &run.Run{ID: "run_mesh", Playbook: "site.yml", Status: run.StatusPending, CreatedAt: time.Now()}
-	if err := c.Save(ctx, r); err != nil {
-		t.Fatalf("Save() error = %v", err)
+	if err := backing.Save(ctx, r); err != nil {
+		t.Fatalf("seed Save() error = %v", err)
 	}
 	claimed, err := c.Claim(ctx, "worker-a", []string{""})
 	if err != nil {
@@ -141,8 +141,8 @@ func TestAppendLogCoalesces(t *testing.T) {
 	c, backing, posts := countingRelay(t)
 
 	r := &run.Run{ID: "run_chatty", Playbook: "site.yml", Status: run.StatusRunning, CreatedAt: time.Now()}
-	if err := c.Save(ctx, r); err != nil {
-		t.Fatalf("Save() error = %v", err)
+	if err := backing.Save(ctx, r); err != nil {
+		t.Fatalf("seed Save() error = %v", err)
 	}
 
 	const writes = 500
@@ -184,8 +184,8 @@ func TestAppendLogFlushesOnDelay(t *testing.T) {
 	c, backing, posts := countingRelay(t)
 
 	r := &run.Run{ID: "run_quiet", Playbook: "site.yml", Status: run.StatusRunning, CreatedAt: time.Now()}
-	if err := c.Save(ctx, r); err != nil {
-		t.Fatalf("Save() error = %v", err)
+	if err := backing.Save(ctx, r); err != nil {
+		t.Fatalf("seed Save() error = %v", err)
 	}
 	if err := c.AppendLog(ctx, "run_quiet", []byte("one line\n")); err != nil {
 		t.Fatalf("AppendLog() error = %v", err)
@@ -215,8 +215,8 @@ func TestAppendLogFlushesOnSize(t *testing.T) {
 	c, backing, posts := countingRelay(t)
 
 	r := &run.Run{ID: "run_loud", Playbook: "site.yml", Status: run.StatusRunning, CreatedAt: time.Now()}
-	if err := c.Save(ctx, r); err != nil {
-		t.Fatalf("Save() error = %v", err)
+	if err := backing.Save(ctx, r); err != nil {
+		t.Fatalf("seed Save() error = %v", err)
 	}
 	big := bytes.Repeat([]byte("x"), 128<<10)
 	if err := c.AppendLog(ctx, "run_loud", big); err != nil {
@@ -242,8 +242,8 @@ func TestAppendLogOrderUnderConcurrency(t *testing.T) {
 	c, backing, _ := countingRelay(t)
 
 	r := &run.Run{ID: "run_order", Playbook: "site.yml", Status: run.StatusRunning, CreatedAt: time.Now()}
-	if err := c.Save(ctx, r); err != nil {
-		t.Fatalf("Save() error = %v", err)
+	if err := backing.Save(ctx, r); err != nil {
+		t.Fatalf("seed Save() error = %v", err)
 	}
 	var want strings.Builder
 	for i := range 200 {

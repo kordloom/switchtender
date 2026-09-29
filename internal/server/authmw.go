@@ -47,6 +47,14 @@ type authGate struct {
 func (g *authGate) wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !g.protects(r) || !g.enforcing(r.Context()) {
+			// A path outside the token gate still changes things. A webhook trigger starts real
+			// runs, a login mints a session, and a SAML assertion can create an account, and none
+			// of them appeared in the audit trail because recording lived behind the gate they
+			// skip. Recording here means the exceptions are covered by construction, so a path
+			// added to protects() later cannot quietly become invisible.
+			if !g.record(w, unauthenticatedActor(r), r) {
+				return
+			}
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -126,6 +134,22 @@ type Actor struct {
 func actorFrom(ctx context.Context) (Actor, bool) {
 	a, ok := ctx.Value(actorKey{}).(Actor)
 	return a, ok
+}
+
+// unauthenticatedActor names the caller on a path that does not carry a token, so the trail says
+// what kind of thing acted rather than leaving the actor blank. The specific webhook, user, or
+// assertion is identified by the handler's own logging and by the run's provenance; what the chain
+// needs is that the change happened and through which door.
+func unauthenticatedActor(r *http.Request) string {
+	p := strings.TrimPrefix(r.URL.Path, "/v1")
+	switch {
+	case strings.HasPrefix(p, "/hooks/"), strings.HasPrefix(r.URL.Path, "/hooks/"):
+		return "webhook"
+	case strings.HasSuffix(p, "/auth/saml/acs"), strings.HasSuffix(r.URL.Path, "/auth/saml/acs"):
+		return "saml"
+	default:
+		return "unauthenticated"
+	}
 }
 
 // AuditReceiptHeader carries the chain position of the entry recorded for a mutation, as

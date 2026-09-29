@@ -164,8 +164,21 @@ func (s *FileStore) load() ([]*Policy, error) {
 }
 
 // List returns every policy the file declares, in the order it declares them.
+//
+// The cached parse is copied out rather than shared. Handing callers the cached slice and its
+// pointers meant a caller mutating a policy changed what the store served to everyone afterwards,
+// and concurrent readers alongside any such caller were a data race on shared values.
 func (s *FileStore) List(_ context.Context) ([]*Policy, error) {
-	return s.load()
+	cached, err := s.load()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*Policy, len(cached))
+	for i, p := range cached {
+		cp := *p
+		out[i] = &cp
+	}
+	return out, nil
 }
 
 // Get returns the policy with the given id, or ErrNotFound.

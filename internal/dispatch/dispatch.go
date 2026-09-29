@@ -902,6 +902,15 @@ func (d *Dispatcher) RetryFailedShards(ctx context.Context, parentID string) (*r
 	return retry, nil
 }
 
+// idsOf returns the ids of a set of runs.
+func idsOf(runs []*run.Run) []string {
+	out := make([]string, len(runs))
+	for i, r := range runs {
+		out[i] = r.ID
+	}
+	return out
+}
+
 // coordinate waits for the parent's shards, which execute wherever a claim loop picks them up,
 // and finalizes the parent from their stored results. The parent carries this process's lease so
 // a dead coordinator is swept, and canceling the parent propagates through the store to every
@@ -913,6 +922,28 @@ func (d *Dispatcher) coordinate(parent *run.Run, children []*run.Run) {
 	d.register(parent.ID, cancelParent)
 	defer d.unregister(parent.ID)
 	defer cancelParent()
+
+	// A parent that already reached a terminal state is not started.
+	//
+	// This save was unconditional, and it is an upsert, so a parent canceled between submit and
+	// this line came back running and the whole fan-out proceeded. finalize goes through a fence for
+	// exactly this reason; the start had none. Reading the stored status first is the fence: it
+	// costs one point read per parent and closes the window where a cancel is silently undone.
+	if current, err := d.store.Get(context.Background(), parent.ID); err == nil {
+		if current.Status.Terminal() {
+			d.log.Info("dispatch: parent already finished, not starting its coordination",
+				zap.String("run_id", parent.ID), zap.String("status", string(current.Status)))
+			d.cancelChildren(idsOf(children))
+			return
+		}
+		if current.CancelRequested {
+			d.log.Info("dispatch: parent was canceled before it started",
+				zap.String("run_id", parent.ID))
+			d.cancelChildren(idsOf(children))
+			d.finalize(parent, run.StatusCanceled, nil, "")
+			return
+		}
+	}
 
 	started := time.Now()
 	parent.Status = run.StatusRunning

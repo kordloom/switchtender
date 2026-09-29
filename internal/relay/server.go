@@ -138,18 +138,67 @@ func (s *relayServer) get(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// save writes the run in the body back to the store, recording its status transitions.
+// save records a worker's report about a run it is executing.
+//
+// A worker reports an outcome, never a spec. This used to decode a whole run.Run and hand it
+// straight to Save, which is an upsert, so a holder of the worker token could post a run that did
+// not exist with any playbook, command, and credential ids it liked, and the control node's claim
+// loop would lease and execute it. That path answered to no approval policy, no object grant, and
+// no audit entry, because it never went through the API gate at all.
+//
+// Now the stored run is authoritative for everything that decides what executes, and only the
+// fields a worker learns by running it are taken from the body.
 func (s *relayServer) save(w http.ResponseWriter, r *http.Request) {
 	var body run.Run
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid run body")
 		return
 	}
-	if err := s.store.Save(r.Context(), &body); err != nil {
+	id := r.PathValue("id")
+	// A report has to be about the run it was addressed to.
+	if body.ID != "" && body.ID != id {
+		writeErr(w, http.StatusBadRequest, "run id does not match the path")
+		return
+	}
+	stored, err := s.store.Get(r.Context(), id)
+	switch {
+	case errors.Is(err, run.ErrNotFound):
+		// A worker only ever reports on a run it claimed, so an unknown id is not a run to create.
+		writeErr(w, http.StatusNotFound, "run not found")
+		return
+	case err != nil:
+		s.internal(w, "save", err)
+		return
+	}
+	applyWorkerReport(stored, &body)
+	if err := s.store.Save(r.Context(), stored); err != nil {
 		s.internal(w, "save", err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// applyWorkerReport copies onto stored the fields a worker learns by executing a run, and leaves
+// every field that decides what executes alone.
+//
+// The split is the security boundary. Status, timing, exit code, failure text, the lease, and the
+// values a playbook published are things only the executing process knows. The playbook, command,
+// tool, credentials, project, inventory, image, extra vars, host limit, and queue are things the
+// control node decided when it accepted the run, after checking policy and grants, and a worker
+// that could change them could change what it was authorized to do.
+func applyWorkerReport(stored, reported *run.Run) {
+	stored.Status = reported.Status
+	stored.ExitCode = reported.ExitCode
+	stored.Error = reported.Error
+	stored.Warning = reported.Warning
+	stored.StartedAt = reported.StartedAt
+	stored.EndedAt = reported.EndedAt
+	stored.ClaimedBy = reported.ClaimedBy
+	stored.ClaimedAt = reported.ClaimedAt
+	stored.CommitSHA = reported.CommitSHA
+	if len(reported.Outputs) > 0 {
+		stored.Outputs = reported.Outputs
+	}
 }
 
 // appendLog appends the raw request body to the run's captured output, or 404 when the run is gone.

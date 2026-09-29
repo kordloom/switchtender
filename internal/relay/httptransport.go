@@ -26,6 +26,13 @@ const (
 	// logBatchLimit caps the output held for one run while posts are failing, past which the oldest
 	// is dropped rather than grown against a relay that is not coming back.
 	logBatchLimit = 8 * logBatchBytes
+	// logAbandonAfter is how long a finished run's batch keeps retrying before it is dropped.
+	//
+	// A terminal run only released its batch when the final flush succeeded, and a failed flush
+	// re-armed the retry timer, so a relay that stayed down left every finished run holding a live
+	// timer and up to logBatchLimit of output, forever. A run that ended a quarter of an hour ago is
+	// not going to deliver its tail, and holding it costs a long-lived worker unbounded memory.
+	logAbandonAfter = 15 * time.Minute
 	// logRetryBase is how long a batch waits after a failed post before another is attempted.
 	//
 	// Without it a relay that is down is asked once per write. A batch sitting at or above
@@ -67,6 +74,8 @@ type logBatch struct {
 	// nextRetry is when another post may be attempted after one failed. Zero means no failure is
 	// outstanding.
 	nextRetry time.Time
+	// doneAt is when the run this batch belongs to reached a terminal state. Zero while it runs.
+	doneAt time.Time
 	// fails counts consecutive failed posts, which sets how long nextRetry waits.
 	fails int
 }
@@ -149,13 +158,25 @@ func (t *httpTransport) Save(ctx context.Context, r *run.Run) error {
 	// A terminal run drops its batch, but only once there is nothing left in it. A failed final
 	// flush puts its bytes back, and deleting the batch then would throw away the end of the run's
 	// output even though the relay might recover a moment later.
-	if r.Status.Terminal() && flushErr == nil {
+	if r.Status.Terminal() {
 		t.mu.Lock()
-		if b := t.batches[r.ID]; b == nil || len(b.buf) == 0 {
-			delete(t.batches, r.ID)
+		if b := t.batches[r.ID]; b != nil {
+			if b.doneAt.IsZero() {
+				b.doneAt = time.Now()
+			}
+			// Drop the batch once it is empty, or once a finished run has spent long enough failing
+			// to deliver its tail that holding it is only costing memory.
+			if len(b.buf) == 0 || time.Since(b.doneAt) > logAbandonAfter {
+				if b.timer != nil {
+					b.timer.Stop()
+					b.timer = nil
+				}
+				delete(t.batches, r.ID)
+			}
 		}
 		t.mu.Unlock()
 	}
+	_ = flushErr
 	resp, err := t.sendJSON(ctx, http.MethodPost, runPath(r.ID, "/save"), r)
 	if err != nil {
 		return err
@@ -260,6 +281,16 @@ func (t *httpTransport) postFailed(id string) {
 		return
 	}
 	b.fails++
+	// A finished run stops retrying once it is clear the tail is not going to land. Re-arming
+	// forever is what kept a dead relay's batches and their timers alive for the life of the worker.
+	if !b.doneAt.IsZero() && time.Since(b.doneAt) > logAbandonAfter {
+		if b.timer != nil {
+			b.timer.Stop()
+			b.timer = nil
+		}
+		delete(t.batches, id)
+		return
+	}
 	wait := logRetryBase << min(b.fails-1, logRetryShift)
 	b.nextRetry = time.Now().Add(wait)
 	if b.timer == nil {

@@ -151,7 +151,12 @@ func (b *Bundle) AttachAnchors(anchors []*Anchor) int {
 	}
 	out := make([]BundleAnchor, 0, len(anchors))
 	for _, a := range anchors {
-		if a == nil || links[a.Seq] != a.Link {
+		if a == nil || a.Link == "" {
+			continue
+		}
+		// The two-value read matters: comparing against a map miss let an anchor name a sequence the
+		// bundle does not hold, which is the export-rejected-by-the-auditor case this prevents.
+		if link, ok := links[a.Seq]; !ok || link != a.Link {
 			continue
 		}
 		out = append(out, BundleAnchor{

@@ -1735,8 +1735,12 @@ WHERE status='running' AND claimed_by!=''
 	// by the status test, since one awaiting approval is resting rather than abandoned. See
 	// run.AbandonedParent for the rule this expresses.
 	//
-	// The age test is against the database clock, matching the lease sweeps above, so a control node
-	// whose own clock drifts cannot declare a freshly submitted parent abandoned.
+	// created_at is written by the submitting node, not by the database, so this one comparison does
+	// cross clocks where the lease sweeps above do not. A node running behind the database would see
+	// its own freshly submitted parents as old. The margin is the sweep ttl, which is minutes, and
+	// the alternative is a stored server-side timestamp on every run for the sake of one predicate.
+	// Keep the nodes disciplined, and note that a parent is only ever swept when it is also pending
+	// and unclaimed, which a live coordinator makes false within milliseconds of the save.
 	res, err = tx.ExecContext(ctx, `
 UPDATE runs SET status='interrupted', ended_at=`+pgNowText+`,
 error=CASE WHEN error='' THEN '`+run.AbandonedParentError()+`' ELSE error END
