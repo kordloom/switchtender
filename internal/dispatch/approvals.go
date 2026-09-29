@@ -27,7 +27,23 @@ func (d *Dispatcher) Approve(ctx context.Context, id string) (*run.Run, error) {
 	if r.Kind == run.KindSplit || r.Kind == run.KindPipeline {
 		target = run.StatusRunning
 	}
-	ok, err := d.store.TransitionStatus(ctx, id, run.StatusPendingApproval, target)
+	// The status change and the lease are one operation.
+	//
+	// Doing them in sequence leaves a window either way. Transition first and the parent is running,
+	// unleased, and instantly eligible for the sweep that settles parents nothing will finish, since
+	// that measures age from CreatedAt and a run held for a person is old by definition. Lease first
+	// and a process that dies before the transition leaves the run held with an owner, which
+	// CancelPending refuses to touch, so it can never be canceled either. One atomic step has
+	// neither state: the parent is pending_approval, then it is running and owned.
+	// Only a parent is claimed here. A plain run is released to pending precisely so the claim loop
+	// can take it, and the loop skips anything already leased, so stamping an owner on one would
+	// leave an approved run that nothing ever executes.
+	var ok bool
+	if target == run.StatusRunning {
+		ok, err = d.store.TransitionStatusAndClaim(ctx, id, run.StatusPendingApproval, target, d.owner)
+	} else {
+		ok, err = d.store.TransitionStatus(ctx, id, run.StatusPendingApproval, target)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -35,18 +51,6 @@ func (d *Dispatcher) Approve(ctx context.Context, id string) (*run.Run, error) {
 		return nil, ErrNotPendingApproval
 	}
 	r.Status = target
-	if target == run.StatusRunning {
-		// The approving process takes the lease before returning, so the parent is never running
-		// without an owner. That is what hands it to the lease sweep, which already interrupts a
-		// run whose owner stopped renewing and resolves its children in the same pass. Leaving it
-		// unleased instead meant relying on age to decide it was abandoned, and a run held for a
-		// person is old by definition, so the sweep would settle it the moment it was released.
-		claimed := time.Now()
-		r.ClaimedBy = d.owner
-		r.ClaimedAt = &claimed
-		r.StartedAt = &claimed
-		d.save(r)
-	}
 	// No claim loop picks up a parent run of either kind, so an approved one starts here or never
 	// runs at all.
 	switch r.Kind {

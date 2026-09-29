@@ -115,6 +115,13 @@ type Store interface {
 	// claimed, executing, or terminal run; those are canceled cooperatively through RequestCancel
 	// by whichever process holds them.
 	CancelPending(ctx context.Context, id string) (bool, error)
+	// TransitionStatusAndClaim atomically moves the run from the from status to the to status and
+	// stamps owner's lease in the same operation, reporting whether it changed a row. It exists so a
+	// run can never be observed in the to status without an owner: a parent released by an approval
+	// goes straight to running, and a running parent with no lease is what the abandoned-parent
+	// sweep settles, so two separate writes would let a janitor tick cancel a run an approver had
+	// just released.
+	TransitionStatusAndClaim(ctx context.Context, id string, from, to Status, owner string) (bool, error)
 	// TransitionStatus atomically moves the run from the from status to the to status and reports
 	// whether it changed a row. It changes nothing and returns false when the run is missing or is
 	// not in the from status, so two callers racing to approve or reject the same run cannot both win.
@@ -641,6 +648,25 @@ func (m *memStore) CancelPending(_ context.Context, id string) (bool, error) {
 	now := time.Now()
 	r.Status = StatusCanceled
 	r.EndedAt = &now
+	return true, nil
+}
+
+// TransitionStatusAndClaim moves the run between statuses and takes owner's lease in one step.
+func (m *memStore) TransitionStatusAndClaim(_ context.Context, id string, from, to Status,
+	owner string) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r, ok := m.runs[id]
+	if !ok || r.Status != from {
+		return false, nil
+	}
+	now := time.Now()
+	r.Status = to
+	r.ClaimedBy = owner
+	r.ClaimedAt = &now
+	if r.StartedAt == nil {
+		r.StartedAt = &now
+	}
 	return true, nil
 }
 

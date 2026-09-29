@@ -47,6 +47,7 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Run("claim respects queue", func(t *testing.T) { testClaimQueue(t, newStore()) })
 	t.Run("heartbeat and reclaim", func(t *testing.T) { testLeaseLifecycle(t, newStore()) })
 	t.Run("reclaim resolves orphaned children", func(t *testing.T) { testReclaimOrphans(t, newStore()) })
+	t.Run("transition and claim are one step", func(t *testing.T) { testTransitionStatusAndClaim(t, newStore()) })
 	t.Run("reclaim settles abandoned parents", func(t *testing.T) { testReclaimAbandonedParents(t, newStore()) })
 	t.Run("reclaim settles an approved parent with no coordinator", func(t *testing.T) {
 		testReclaimApprovedParentWithNoCoordinator(t, newStore())
@@ -1918,5 +1919,71 @@ func testReclaimLeavesACoordinatedParentAlone(t *testing.T, store run.Store) {
 	if got.Status != run.StatusRunning {
 		t.Errorf("a coordinated parent was swept: status = %q. Its lease is fresh, so it is being "+
 			"actively coordinated", got.Status)
+	}
+}
+
+// testTransitionStatusAndClaim verifies a run moves status and gains an owner in one step.
+//
+// Two separate writes leave a window either way. Transition first and a parent is running with no
+// lease, which is exactly what the abandoned-parent sweep settles, so a janitor tick landing there
+// cancels a run an approver just released. Lease first and a process that dies before the
+// transition leaves the run held with an owner, which CancelPending refuses to touch, so it can
+// never be canceled either. Neither state exists if the store does both at once.
+func testTransitionStatusAndClaim(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	held := &run.Run{
+		ID: "run_atomic", Playbook: "site.yml", Kind: run.KindSplit,
+		Status: run.StatusPendingApproval, CreatedAt: time.Now().Add(-time.Hour),
+	}
+	if err := store.Save(ctx, held); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	ok, err := store.TransitionStatusAndClaim(ctx, held.ID,
+		run.StatusPendingApproval, run.StatusRunning, "coordinator-a")
+	if err != nil {
+		t.Fatalf("TransitionStatusAndClaim() error = %v", err)
+	}
+	if !ok {
+		t.Fatal("the transition reported no change on a run in the expected status")
+	}
+	got, err := store.Get(ctx, held.ID)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.Status != run.StatusRunning {
+		t.Errorf("status = %q, want running", got.Status)
+	}
+	if got.ClaimedBy != "coordinator-a" || got.ClaimedAt == nil {
+		t.Errorf("run is %q with no owner recorded, which is the state the sweep settles",
+			got.Status)
+	}
+	if got.StartedAt == nil {
+		t.Error("no start time recorded, so nothing can tell how long it has been running")
+	}
+
+	// A sweep landing immediately afterwards must leave it alone, because it is owned.
+	if _, err := store.ReclaimStale(ctx, 30*time.Minute); err != nil {
+		t.Fatalf("ReclaimStale() error = %v", err)
+	}
+	if after, err := store.Get(ctx, held.ID); err != nil {
+		t.Fatalf("Get() after sweep error = %v", err)
+	} else if after.Status != run.StatusRunning {
+		t.Errorf("status after sweep = %q, want running: a freshly leased run is being coordinated",
+			after.Status)
+	}
+
+	// Only one caller wins, so two approvals cannot both release the same run.
+	second, err := store.TransitionStatusAndClaim(ctx, held.ID,
+		run.StatusPendingApproval, run.StatusRunning, "coordinator-b")
+	if err != nil {
+		t.Fatalf("second TransitionStatusAndClaim() error = %v", err)
+	}
+	if second {
+		t.Error("a second transition from a status the run no longer holds reported a change")
+	}
+	if missing, err := store.TransitionStatusAndClaim(ctx, "run_nope",
+		run.StatusPendingApproval, run.StatusRunning, "x"); err != nil || missing {
+		t.Errorf("transition on a missing run = (%v, %v), want (false, nil)", missing, err)
 	}
 }

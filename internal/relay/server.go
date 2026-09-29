@@ -171,7 +171,7 @@ func (s *relayServer) save(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, "save", err)
 		return
 	}
-	if err := checkWorkerStatus(stored.Status, body.Status); err != nil {
+	if err := checkWorkerReport(stored, &body); err != nil {
 		writeErr(w, http.StatusConflict, err.Error())
 		return
 	}
@@ -193,23 +193,33 @@ var workerStatuses = map[run.Status]bool{
 	run.StatusInterrupted: true,
 }
 
-// checkWorkerStatus rejects a reported status a worker has no business setting.
+// checkWorkerReport rejects a report a worker has no business making.
 //
-// Constraining the spec was not enough, because the status is what decides whether a run executes at
-// all. A report of "pending" moved a run awaiting an approver into the queue, where the claim loop
-// ran it past the policy, the approver, and the audit gate. A second report rewound a finished run
-// and ran it again. One shared worker token is all that was needed for either.
-func checkWorkerStatus(stored, reported run.Status) error {
-	if !workerStatuses[reported] {
-		return fmt.Errorf("a worker may not set status %q", reported)
+// Constraining the spec was not enough, and constraining the status was not enough either. There is
+// one shared worker token, so the question is not only what may be reported but which runs may be
+// reported on at all. Without that, a token holder could mark a queued run succeeded so its
+// playbook never ran, cancel a run another worker was executing, or report on a run nobody had
+// claimed and take it out of band, bypassing the queue that decides order.
+func checkWorkerReport(stored, reported *run.Run) error {
+	if !workerStatuses[reported.Status] {
+		return fmt.Errorf("a worker may not set status %q", reported.Status)
 	}
-	if stored.Terminal() {
-		return fmt.Errorf("run already finished as %q and cannot be reopened", stored)
+	if stored.Status.Terminal() {
+		return fmt.Errorf("run already finished as %q and cannot be reopened", stored.Status)
 	}
-	// A worker only ever reports on a run it claimed, and claiming is what moves a run out of
-	// pending. A run still awaiting an approver was never claimable.
-	if stored == run.StatusPendingApproval || stored == run.StatusRejected {
+	// Claiming is what hands a run to a worker, and it happens through the claim endpoint. A run
+	// with no holder has not been handed to anyone, so there is nothing for a worker to report.
+	if stored.ClaimedBy == "" {
+		return fmt.Errorf("run is not claimed, so there is nothing for a worker to report on")
+	}
+	// A run awaiting a decision was never claimable in the first place.
+	if stored.Status == run.StatusPendingApproval || stored.Status == run.StatusRejected {
 		return fmt.Errorf("run is awaiting a decision and is not a worker's to report on")
+	}
+	// A report has to come from the holder. The lease is the only identity available here, since
+	// every worker presents the same token.
+	if reported.ClaimedBy != "" && reported.ClaimedBy != stored.ClaimedBy {
+		return fmt.Errorf("run is held by another executor")
 	}
 	return nil
 }
@@ -229,8 +239,10 @@ func applyWorkerReport(stored, reported *run.Run) {
 	stored.Warning = reported.Warning
 	stored.StartedAt = reported.StartedAt
 	stored.EndedAt = reported.EndedAt
-	stored.ClaimedBy = reported.ClaimedBy
-	stored.ClaimedAt = reported.ClaimedAt
+	// The lease is not taken from the wire. Copying it let a worker clear a live parent's holder,
+	// and a parent that is running with no holder is exactly what the abandoned-parent sweep
+	// settles, so one request turned into a remote kill switch on any long-running split or
+	// pipeline. The control node already knows who holds a run, because it granted the claim.
 	stored.CommitSHA = reported.CommitSHA
 	if len(reported.Outputs) > 0 {
 		stored.Outputs = reported.Outputs

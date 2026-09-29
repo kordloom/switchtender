@@ -298,13 +298,26 @@ func (t *httpTransport) postFailed(id string) {
 }
 
 // postSucceeded clears the retry backoff, so a relay that comes back is not held off by the failures
-// that preceded it.
+// that preceded it, and drops the batch when a finished run has nothing left to send.
+//
+// Dropping it here matters because Save is the only other place that deletes, and Save has already
+// run by the time a retry finally lands. A run that ended while the relay was briefly down left one
+// map entry per run alive for the life of the worker.
 func (t *httpTransport) postSucceeded(id string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if b := t.batches[id]; b != nil {
-		b.fails = 0
-		b.nextRetry = time.Time{}
+	b := t.batches[id]
+	if b == nil {
+		return
+	}
+	b.fails = 0
+	b.nextRetry = time.Time{}
+	if !b.doneAt.IsZero() && len(b.buf) == 0 {
+		if b.timer != nil {
+			b.timer.Stop()
+			b.timer = nil
+		}
+		delete(t.batches, id)
 	}
 }
 

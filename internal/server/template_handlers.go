@@ -118,10 +118,11 @@ func createTemplateHandler(store template.Store, authz *authorizer, log *zap.Log
 		// template could point it at a project, inventory, or credential they were never granted,
 		// and a schedule or webhook already attached to that template then fires it with no
 		// authorization at all.
-		// OrgID is included because under strict grants it decides who may read and use the
-		// template, so a caller who could set it freely could re-home a template into an
-		// organization they do not manage.
-		objects := append([]string{req.ProjectID, req.InventoryID, req.PullCredentialID, req.OrgID},
+		// The organization is checked by membership rather than as an object, because it is not one.
+		if authz.denyForeignOrg(w, r, log, req.OrgID) {
+			return
+		}
+		objects := append([]string{req.ProjectID, req.InventoryID, req.PullCredentialID},
 			req.CredentialIDs...)
 		if denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse, objects...)) {
 			return
@@ -170,10 +171,11 @@ func updateTemplateHandler(store template.Store, authz *authorizer, log *zap.Log
 		// template could point it at a project, inventory, or credential they were never granted,
 		// and a schedule or webhook already attached to that template then fires it with no
 		// authorization at all.
-		// OrgID is included because under strict grants it decides who may read and use the
-		// template, so a caller who could set it freely could re-home a template into an
-		// organization they do not manage.
-		objects := append([]string{req.ProjectID, req.InventoryID, req.PullCredentialID, req.OrgID},
+		// The organization is checked by membership rather than as an object, because it is not one.
+		if authz.denyForeignOrg(w, r, log, req.OrgID) {
+			return
+		}
+		objects := append([]string{req.ProjectID, req.InventoryID, req.PullCredentialID},
 			req.CredentialIDs...)
 		if denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse, objects...)) {
 			return
@@ -189,6 +191,13 @@ func updateTemplateHandler(store template.Store, authz *authorizer, log *zap.Log
 		notifications := req.Notifications
 		if existing, err := store.Get(r.Context(), id); err == nil {
 			notifications = restoreMaskedNotifications(req.Notifications, existing.Notifications)
+			// Moving a template out of an organization is as much a change of who controls it as
+			// moving one in, and it is the direction a caller with a manage grant would take: clear
+			// the org and the org's admins lose management of it while its members lose sight of
+			// it. Both directions are checked, so the org it leaves is checked too.
+			if existing.OrgID != req.OrgID && authz.denyForeignOrg(w, r, log, existing.OrgID) {
+				return
+			}
 		}
 		t := &template.Template{
 			ID: id, Name: req.Name, ProjectID: req.ProjectID,
