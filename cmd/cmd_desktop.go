@@ -24,6 +24,7 @@ var desktopCmd = &cobra.Command{
 	Long: "Run SwitchTender as a local desktop app. It serves on a private loopback port, keeps its " +
 		"database in a per-user data directory, and opens the web UI in your default browser. No " +
 		"flags to set. It is the one-command way to run SwitchTender on your own machine.",
+	Args:          cobra.NoArgs,
 	RunE:          runDesktop,
 	SilenceUsage:  true,
 	SilenceErrors: true,

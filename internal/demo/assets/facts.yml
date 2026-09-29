@@ -1,12 +1,96 @@
 ---
-# Gathers facts for the demo fleet so the host pages show what each host is. Every host is the
-# demo machine over a local connection, so the facts are real but describe one box; the fleet
-# shape comes from the inventory rather than from separate hardware.
-- name: Gather fleet facts
+# Publishes what each host in the demo fleet is, so the fleet, host, and drift pages read as an
+# estate rather than as one machine listed six times.
+#
+# Every host in this inventory is the single box serving the demo, reached over a local connection.
+# A gather therefore reports that box once per host: the same distribution, kernel, memory, and
+# processor count on every row, plus the demo server's own hostname and private address published
+# on a page anyone can read. Each host's identity is declared here instead and published through
+# the same facts channel a gather uses, so what the pages show is the fleet the inventory
+# describes: a web tier across two Ubuntu releases with one host rebuilt on arm64, a Rocky database
+# pair whose primary carries twice the memory of its replica, and an edge host a kernel behind.
+- name: Publish fleet facts
   hosts: all
   connection: local
-  gather_facts: true
+  gather_facts: false
+  vars:
+    fleet:
+      web01:
+        distribution: Ubuntu
+        distribution_version: "22.04"
+        kernel: 5.15.0-119-generic
+        architecture: x86_64
+        vcpus: "4"
+        memtotal_mb: "8192"
+        ip: 10.42.10.11
+        python_version: 3.10.12
+        virtualization_type: kvm
+      web02:
+        distribution: Ubuntu
+        distribution_version: "22.04"
+        kernel: 5.15.0-119-generic
+        architecture: x86_64
+        vcpus: "4"
+        memtotal_mb: "8192"
+        ip: 10.42.10.12
+        python_version: 3.10.12
+        virtualization_type: kvm
+      web03:
+        distribution: Ubuntu
+        distribution_version: "24.04"
+        kernel: 6.8.0-45-generic
+        architecture: aarch64
+        vcpus: "8"
+        memtotal_mb: "16384"
+        ip: 10.42.10.13
+        python_version: 3.12.3
+        virtualization_type: kvm
+      db01:
+        distribution: Rocky
+        distribution_version: "9.4"
+        kernel: 5.14.0-427.13.1.el9_4.x86_64
+        architecture: x86_64
+        vcpus: "16"
+        memtotal_mb: "65536"
+        ip: 10.42.20.11
+        python_version: 3.9.18
+        virtualization_type: kvm
+      db02:
+        distribution: Rocky
+        distribution_version: "9.4"
+        kernel: 5.14.0-427.13.1.el9_4.x86_64
+        architecture: x86_64
+        vcpus: "16"
+        memtotal_mb: "32768"
+        ip: 10.42.20.12
+        python_version: 3.9.18
+        virtualization_type: kvm
+      edge01:
+        distribution: Ubuntu
+        distribution_version: "22.04"
+        kernel: 5.15.0-107-generic
+        architecture: x86_64
+        vcpus: "2"
+        memtotal_mb: "4096"
+        ip: 10.42.30.10
+        python_version: 3.10.12
+        virtualization_type: VMware
   tasks:
-    - name: Note the gather
-      debug:
-        msg: "facts gathered for {{ inventory_hostname }}"
+    - name: Record what this host is
+      set_fact:
+        ansible_distribution: "{{ fleet[inventory_hostname].distribution }}"
+        ansible_distribution_version: "{{ fleet[inventory_hostname].distribution_version }}"
+        ansible_kernel: "{{ fleet[inventory_hostname].kernel }}"
+        ansible_architecture: "{{ fleet[inventory_hostname].architecture }}"
+        ansible_processor_vcpus: "{{ fleet[inventory_hostname].vcpus }}"
+        ansible_memtotal_mb: "{{ fleet[inventory_hostname].memtotal_mb }}"
+        ansible_default_ipv4:
+          address: "{{ fleet[inventory_hostname].ip }}"
+        ansible_fqdn: "{{ inventory_hostname }}.prod.example.com"
+        ansible_python_version: "{{ fleet[inventory_hostname].python_version }}"
+        ansible_service_mgr: systemd
+        ansible_virtualization_type: "{{ fleet[inventory_hostname].virtualization_type }}"
+      # A host this play does not describe is left with no facts rather than failing on an undefined
+      # key, so pointing the play at another inventory reports nothing instead of breaking. Every
+      # host in the demo's own inventory is described here, which a test pins.
+      when: inventory_hostname in fleet

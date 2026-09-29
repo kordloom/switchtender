@@ -6,7 +6,7 @@
 #   curl -fsSL https://switchtender.com/install.sh | sh
 #
 # Override where it lands with PREFIX (default /usr/local/bin, falling back to ~/.local/bin when that
-# is not writable), or pin a version with VERSION=v1.62.0.
+# is not writable), or pin a version with VERSION=v1.76.0.
 set -eu
 
 REPO="kordloom/switchtender"

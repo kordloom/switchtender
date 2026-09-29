@@ -422,6 +422,7 @@ func parseRoleMap(entries []string) map[string]user.Role {
 var serveCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "Run the SwitchTender server.",
+	Args:  cobra.NoArgs,
 	RunE:  runServe,
 }
 
@@ -1121,6 +1122,11 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	if evidenceCadence > 0 {
 		if evidenceCadence < time.Hour {
 			return fmt.Errorf("--evidence-cadence must be at least 1h, got %s", evidenceCadence)
+		}
+		// The register is what Team buys, so refusing to start matches how the SSO flags behave
+		// rather than starting and quietly writing a paid artifact every cadence.
+		if aerr := license.Allow(license.FeatureRegister); aerr != nil {
+			return aerr
 		}
 		var packInstallID string
 		if producer != nil {

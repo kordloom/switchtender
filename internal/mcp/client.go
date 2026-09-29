@@ -49,8 +49,15 @@ type Client struct {
 // NewClient returns a Client for the server at base, authenticating with token. The base may be
 // given with or without a scheme; a bare host is treated as https, since a token crossing a plain
 // connection would be readable in transit.
+//
+// Trailing slashes are trimmed only after the address has been read, not before. Trimming first ate
+// the "//" out of an address whose host the operator left off, so "https://" became "https:", no
+// longer looked like it carried a scheme, and was prefixed again into a base of "https://https:".
+// The typo was then accepted at startup and every tool call was aimed at a host named "https:",
+// where an operator sees a connection failure per call instead of a refusal at the one moment the
+// address can still be corrected.
 func NewClient(base, token string, timeout time.Duration) (*Client, error) {
-	base = strings.TrimRight(strings.TrimSpace(base), "/")
+	base = strings.TrimSpace(base)
 	if base == "" {
 		return nil, errors.New("server address is required")
 	}
@@ -64,6 +71,10 @@ func NewClient(base, token string, timeout time.Duration) (*Client, error) {
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return nil, fmt.Errorf("server address %q must be http or https", base)
 	}
+	if u.Host == "" {
+		return nil, fmt.Errorf("server address %q names no host", base)
+	}
+	base = strings.TrimRight(base, "/")
 	if strings.TrimSpace(token) == "" {
 		return nil, errors.New("an API token is required")
 	}

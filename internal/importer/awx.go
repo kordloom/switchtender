@@ -280,14 +280,28 @@ type awxCredential struct {
 }
 
 // awxRef is an AWX natural-key reference that decodes from a name string, a natural-key array whose
-// last element is the name, or an object with a name field.
+// last element is the name, or an object with a name field. The REST API writes the same reference
+// as the target's integer id, which decodes into the id-N spelling the workflow node reference
+// already uses, since no natural key resolves it.
 type awxRef string
 
 // UnmarshalJSON decodes the several shapes AWX uses for a natural-key reference into the name.
+//
+// An integer id keeps a name of its own rather than decoding to the empty string, because the empty
+// name means "no reference was given" and an id means "this reference could not be resolved". Read
+// as absent, a numeric project and inventory slipped past the fail-closed refusal in addTemplate and
+// the template imported with neither, silently: dispatch skips its containment check when a template
+// has no project, so an export taken from the REST API rather than through awxkit converted every
+// contained playbook path into one resolved against the server's own directory, with no warning.
 func (r *awxRef) UnmarshalJSON(b []byte) error {
 	var s string
 	if json.Unmarshal(b, &s) == nil {
 		*r = awxRef(s)
+		return nil
+	}
+	var id json.Number
+	if json.Unmarshal(b, &id) == nil {
+		*r = awxRef("id-" + id.String())
 		return nil
 	}
 	var arr []string
@@ -392,10 +406,12 @@ func FromAWX(data []byte, now time.Time) (*Plan, error) {
 		}
 		obj := &credential.Credential{ID: credential.NewID(), Name: c.Name, Kind: kind, CreatedAt: now}
 		// AWX keeps the vault label as a non-secret input; carrying it means a multi-vault setup
-		// imports with its --vault-id labels intact instead of every password turning unlabeled.
+		// imports with its --vault-id labels intact instead of every password turning unlabeled. The
+		// label is rendered by jsonScalarString, which reads a JSON null as empty, so an absent label
+		// no longer has to be told apart from a real one by the "<nil>" text Go prints for it.
 		if kind == credential.KindVaultPassword {
-			if label := strings.TrimSpace(fmt.Sprint(c.Inputs["vault_id"])); label != "" &&
-				label != "<nil>" && credential.ValidVaultID(label) {
+			if label := strings.TrimSpace(jsonScalarString(c.Inputs["vault_id"])); label != "" &&
+				credential.ValidVaultID(label) {
 				obj.VaultID = label
 			}
 		}
@@ -545,7 +561,9 @@ func (p *Plan) addTemplate(jt awxJobTemplate, now time.Time,
 	tpl.Survey = p.mapSurvey(jt)
 
 	p.Templates = append(p.Templates, tpl)
-	p.addSchedules(jt, tpl.ID, now)
+	if jt.Related != nil {
+		p.addSchedules(fmt.Sprintf("template %q", jt.Name), jt.Related.Schedules, tpl.ID, now)
+	}
 }
 
 // mapSurvey converts a job template's survey, whether top level or nested under related, into
@@ -584,20 +602,20 @@ func (p *Plan) mapSurvey(jt awxJobTemplate) []template.SurveyField {
 	return fields
 }
 
-// addSchedules maps a job template's schedules into the plan, converting each RRULE to cron and
-// warning on any that cron cannot express.
-func (p *Plan) addSchedules(jt awxJobTemplate, templateID string, now time.Time) {
-	if jt.Related == nil {
-		return
-	}
-	for _, s := range jt.Related.Schedules {
+// addSchedules maps the schedules of one imported object into the plan, converting each RRULE to
+// cron and warning on any that cron cannot express.
+//
+// owner names the thing the schedules belong to, already quoted, such as template "patch" or
+// workflow "rollout". Both kinds arrive here so the two paths cannot drift apart on which rules
+// they accept or how they report a refusal, and the report says which object lost its cadence.
+func (p *Plan) addSchedules(owner string, schedules []awxSchedule, templateID string, now time.Time) {
+	for _, s := range schedules {
 		cron, ok := RRULEToCron(s.RRule)
 		if !ok {
 			// A rule that bounds itself is the common case here, and its remedy is different from a
 			// cadence cron cannot express, so it says so: a cron entry has no end, and creating one
 			// from a rule that was meant to stop would leave a job firing forever.
-			p.warn("schedule %q of template %q skipped: %s (%q)", s.Name, jt.Name, rruleProblem(s.RRule),
-				s.RRule)
+			p.warn("schedule %q of %s skipped: %s (%q)", s.Name, owner, rruleProblem(s.RRule), s.RRule)
 			continue
 		}
 		enabled := s.Enabled == nil || *s.Enabled
@@ -609,9 +627,9 @@ func (p *Plan) addSchedules(jt awxJobTemplate, templateID string, now time.Time)
 		zone := dtstartZone(s.RRule)
 		if zone != "" {
 			if _, err := time.LoadLocation(zone); err != nil {
-				p.warn("schedule %q of template %q names the timezone %q, which this system cannot "+
+				p.warn("schedule %q of %s names the timezone %q, which this system cannot "+
 					"resolve, so it imports in the server's local time: %v",
-					s.Name, jt.Name, oneLine(zone), err)
+					s.Name, owner, oneLine(zone), err)
 				zone = ""
 			}
 		}
@@ -685,13 +703,17 @@ func reportUnmapped(plan *Plan, export awxExport) {
 		if item.Count == 0 {
 			continue
 		}
-		plural := "s"
-		if item.Count == 1 {
-			plural = ""
-		}
 		plan.warn("this export holds %d %s%s, which are not imported: %s",
-			item.Count, item.What, plural, item.Why)
+			item.Count, item.What, plural(item.Count), item.Why)
 	}
+}
+
+// plural returns the "s" a count needs, so a report reads one schedule and two schedules.
+func plural(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
 }
 
 // splitAWXTags turns AWX's comma separated tag string into the list a template holds, dropping the

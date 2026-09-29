@@ -37,6 +37,7 @@ var initCmd = &cobra.Command{
 	Long: "Init generates the encryption key and salt that seal credentials, creates the first admin " +
 		"account, and writes an environment file the server reads. It can also write a systemd unit. " +
 		"Run it once on a fresh install, then start the server.",
+	Args: cobra.NoArgs,
 	RunE: runInit,
 }
 

@@ -66,11 +66,17 @@ func InForce(policies []*Policy) InForceSet {
 // does, and nothing that does not. The id, the name, and the creation time are left out on purpose, so
 // renaming a rule is not reported as a change to what it enforces, while every criterion and every
 // effect is.
+//
+// The queue is one of those criteria. It decides which segment of the estate a rule covers, so a
+// rule repointed from the production queue to a staging one is a production gate turned off with
+// nothing deleted. Leaving it out let an operator narrow a gate, put a change through, and widen it
+// again, and the record reported the same rule set on both sides of the change.
 func canonicalRule(p *Policy) string {
 	shape := struct {
 		Tool            string `json:"tool,omitempty"`
 		CommandContains string `json:"command_contains,omitempty"`
 		InventoryID     string `json:"inventory_id,omitempty"`
+		Queue           string `json:"queue,omitempty"`
 		ActorKind       string `json:"actor_kind,omitempty"`
 		Actor           string `json:"actor,omitempty"`
 		MinRisk         string `json:"min_risk,omitempty"`
@@ -80,7 +86,7 @@ func canonicalRule(p *Policy) string {
 		DistinctApprove bool   `json:"require_distinct_approver,omitempty"`
 	}{
 		Tool: p.Tool, CommandContains: p.CommandContains, InventoryID: p.InventoryID,
-		ActorKind: p.ActorKind, Actor: p.Actor, MinRisk: p.MinRisk, Effect: p.Effect,
+		Queue: p.Queue, ActorKind: p.ActorKind, Actor: p.Actor, MinRisk: p.MinRisk, Effect: p.Effect,
 		ExcludeDryRun: p.ExcludeDryRun, MaxDestroy: p.MaxDestroy,
 		DistinctApprove: p.RequireDistinctApprover,
 	}

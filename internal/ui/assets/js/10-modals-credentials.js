@@ -531,7 +531,7 @@ async function loadCredentials() {
 				const pages = { templates: "/ui/templates", inventories: "/ui/inventories",
 					projects: "/ui/projects", inventory_sources: "/ui/sources" };
 				const link = document.createElement("a");
-				const firstPage = pages[kinds[0][0]] || "/ui/jobtemplates";
+				const firstPage = pages[kinds[0][0]] || "/ui/templates";
 				link.href = total === 1
 					? firstPage + "?q=" + encodeURIComponent(kinds[0][1][0])
 					: firstPage;

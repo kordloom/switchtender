@@ -393,7 +393,11 @@ func scanRun(s scanner) (*run.Run, error) {
 		return nil, err
 	}
 	r.RequireDistinctApprover = distinctApprover != 0
-	r.PolicySet = unmarshalPolicySet(policySet)
+	set, err := unmarshalPolicySet(policySet)
+	if err != nil {
+		return nil, err
+	}
+	r.PolicySet = set
 	r.CancelRequested = cancelI != 0
 	r.DryRun = dryRun != 0
 	r.DiffMode = diffMode != 0
@@ -499,15 +503,21 @@ func marshalPolicySet(set *run.PolicySet) string {
 
 // unmarshalPolicySet decodes a stored rule set. An empty column is a run from before the set was
 // recorded, which is nil rather than an empty set: "no rules" and "not recorded" are different facts.
-func unmarshalPolicySet(s string) *run.PolicySet {
+//
+// A column holding bytes that are not JSON is a third fact, and it is reported rather than folded
+// into either of the other two. The set is evidence: answering nil for it would present a run whose
+// recorded rules were corrupted or edited as a run from before rules were recorded, so tampering
+// with the column would erase the evidence instead of exposing it. The labels and steps columns
+// beside it report a decode failure the same way.
+func unmarshalPolicySet(s string) (*run.PolicySet, error) {
 	if s == "" {
-		return nil
+		return nil, nil
 	}
 	var set run.PolicySet
 	if err := json.Unmarshal([]byte(s), &set); err != nil {
-		return nil
+		return nil, fmt.Errorf("parse policy set: %w", err)
 	}
-	return &set
+	return &set, nil
 }
 
 // marshalSteps encodes a pipeline's step graph for storage, returning empty for no steps so an

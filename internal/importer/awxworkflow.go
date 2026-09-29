@@ -24,9 +24,13 @@ type awxWorkflow struct {
 	Inventory awxRef `json:"inventory"`
 	// SurveySpec is the workflow survey when exported at the top level.
 	SurveySpec *awxSurvey `json:"survey_spec"`
+	// Schedules are the workflow's own schedules when the export carries them at the top level. A
+	// workflow job template is scheduled in AWX exactly as a job template is, and these are what make
+	// the graph fire at all.
+	Schedules []awxSchedule `json:"schedules"`
 	// Nodes are the graph's nodes when the export carries them at the top level.
 	Nodes []awxWorkflowNode `json:"workflow_nodes"`
-	// Related carries the nodes and survey when the export nests them instead.
+	// Related carries the nodes, survey, and schedules when the export nests them instead.
 	Related *awxWorkflowRelated `json:"related"`
 }
 
@@ -36,6 +40,8 @@ type awxWorkflowRelated struct {
 	WorkflowNodes []awxWorkflowNode `json:"workflow_nodes"`
 	// SurveySpec is the workflow survey.
 	SurveySpec *awxSurvey `json:"survey_spec"`
+	// Schedules are the workflow's own schedules, which awxkit writes here.
+	Schedules []awxSchedule `json:"schedules"`
 }
 
 // awxWorkflowNode is one node of a workflow graph. AWX identifies a node by an id and wires the
@@ -164,6 +170,21 @@ func (w awxWorkflow) nodes() []awxWorkflowNode {
 	return nil
 }
 
+// schedules returns the workflow's own schedules from whichever place the export carried them.
+//
+// The struct read neither place, so a workflow's schedules were dropped without a word: the
+// workflow imported, its steps and graph were right, and it never fired again. Every other thing
+// this importer declines to carry is named in the report, and this one decided when the work ran.
+func (w awxWorkflow) schedules() []awxSchedule {
+	if len(w.Schedules) > 0 {
+		return w.Schedules
+	}
+	if w.Related != nil {
+		return w.Related.Schedules
+	}
+	return nil
+}
+
 // survey returns the workflow's survey from whichever place the export carried it.
 func (w awxWorkflow) survey() *awxSurvey {
 	if w.SurveySpec != nil {
@@ -193,22 +214,50 @@ func (p *Plan) addWorkflows(export awxExport, now time.Time,
 		jobs[jt.Name] = jt
 	}
 	for _, wf := range export.Workflows {
-		p.addWorkflow(wf, jobs, now, projectIDs, inventoryIDs, credentialIDs)
+		id := p.addWorkflow(wf, jobs, now, projectIDs, inventoryIDs, credentialIDs)
+		p.addWorkflowSchedules(wf, id, now)
 	}
 }
 
-// addWorkflow maps one workflow, or reports why it could not be mapped.
+// addWorkflowSchedules maps a workflow's own schedules onto the template it imported as.
+//
+// A schedule fires a stored template, and a workflow template is one, so the cadence carries across
+// whole rather than being reported as unmappable. The schedules are read here rather than inside
+// addWorkflow because a refused workflow has no template for them to fire, and that outcome has to
+// be reported rather than left as a second silent loss on top of the first.
+func (p *Plan) addWorkflowSchedules(wf awxWorkflow, templateID string, now time.Time) {
+	scheds := wf.schedules()
+	if len(scheds) == 0 {
+		return
+	}
+	// A nameless workflow is refused before it reaches here, and quoting the name it does not have
+	// would print workflow "" at the operator, naming nothing they can find in the export.
+	owner := fmt.Sprintf("workflow %q", wf.Name)
+	if wf.Name == "" {
+		owner = "the workflow job template without a name"
+	}
+	if templateID == "" {
+		p.warn("%s was not imported, so its %d schedule%s did not import either. The cadence it ran "+
+			"on goes with it: set it again on the workflow you rebuild.",
+			owner, len(scheds), plural(len(scheds)))
+		return
+	}
+	p.addSchedules(owner, scheds, templateID, now)
+}
+
+// addWorkflow maps one workflow and returns the id of the template it created, or reports why it
+// could not be mapped and returns the empty string.
 func (p *Plan) addWorkflow(wf awxWorkflow, jobs map[string]awxJobTemplate, now time.Time,
-	projectIDs, inventoryIDs, credentialIDs map[string]string) {
+	projectIDs, inventoryIDs, credentialIDs map[string]string) string {
 	name := wf.Name
 	if name == "" {
 		p.warn("a workflow job template without a name was skipped")
-		return
+		return ""
 	}
 	nodes := wf.nodes()
 	if len(nodes) == 0 {
 		p.warn("workflow %q carries no nodes, so there is nothing to import", name)
-		return
+		return ""
 	}
 
 	// A failure edge runs work precisely because something failed. A pipeline step runs when its
@@ -219,7 +268,7 @@ func (p *Plan) addWorkflow(wf awxWorkflow, jobs map[string]awxJobTemplate, now t
 			p.warn("workflow %q was not imported: node %s runs other nodes on failure, which a "+
 				"pipeline cannot express. Rebuild it on the Workflows page, where a step can be set "+
 				"to continue on failure.", name, nodeLabel(n))
-			return
+			return ""
 		}
 	}
 
@@ -233,12 +282,12 @@ func (p *Plan) addWorkflow(wf awxWorkflow, jobs map[string]awxJobTemplate, now t
 			p.warn("workflow %q was not imported: node %s runs %q, which is not a job template in "+
 				"this export, so the step would have no work to do.",
 				name, nodeLabel(n), oneLine(string(n.UnifiedJobTemplate)))
-			return
+			return ""
 		}
 		if jt.Playbook == "" {
 			p.warn("workflow %q was not imported: the job template %q it runs has no playbook",
 				name, jt.Name)
-			return
+			return ""
 		}
 		// A pipeline sources every step from one project, so a workflow spanning two of them cannot
 		// be expressed as one template.
@@ -246,7 +295,7 @@ func (p *Plan) addWorkflow(wf awxWorkflow, jobs map[string]awxJobTemplate, now t
 			if projectID != "" && projectID != id {
 				p.warn("workflow %q was not imported: its nodes span more than one project, and a "+
 					"workflow template sources every step from one.", name)
-				return
+				return ""
 			}
 			projectID = id
 		}
@@ -255,12 +304,12 @@ func (p *Plan) addWorkflow(wf awxWorkflow, jobs map[string]awxJobTemplate, now t
 		if len(keys) == 0 {
 			p.warn("workflow %q was not imported: a node carries neither an id nor an identifier, "+
 				"so its place in the graph cannot be resolved", name)
-			return
+			return ""
 		}
 		for _, k := range keys {
 			if _, taken := stepName[k]; taken {
 				p.warn("workflow %q was not imported: two nodes share the key %q", name, k)
-				return
+				return ""
 			}
 			stepName[k] = label
 		}
@@ -286,7 +335,7 @@ func (p *Plan) addWorkflow(wf awxWorkflow, jobs map[string]awxJobTemplate, now t
 			if !ok {
 				p.warn("workflow %q was not imported: node %s points at node %q, which is not in "+
 					"the workflow", name, nodeLabel(n), oneLine(string(next)))
-				return
+				return ""
 			}
 			steps[j].DependsOn = append(steps[j].DependsOn, steps[i].Name)
 		}
@@ -303,7 +352,7 @@ func (p *Plan) addWorkflow(wf awxWorkflow, jobs map[string]awxJobTemplate, now t
 	// never create a template that refuses to launch.
 	if err := run.ValidatePipeline(steps); err != nil {
 		p.warn("workflow %q was not imported: %v", name, err)
-		return
+		return ""
 	}
 
 	// What a pipeline holds once but AWX scoped per node. Each is resolved before the template
@@ -312,12 +361,12 @@ func (p *Plan) addWorkflow(wf awxWorkflow, jobs map[string]awxJobTemplate, now t
 	limit, err := workflowLimit(nodes, jobs)
 	if err != nil {
 		p.warn("workflow %q was not imported: %v", name, err)
-		return
+		return ""
 	}
 	vars, err := p.workflowVars(wf, nodes, jobs)
 	if err != nil {
 		p.warn("workflow %q was not imported: %v", name, err)
-		return
+		return ""
 	}
 
 	tpl := &template.Template{
@@ -345,6 +394,7 @@ func (p *Plan) addWorkflow(wf awxWorkflow, jobs map[string]awxJobTemplate, now t
 	p.Templates = append(p.Templates, tpl)
 	p.warn("workflow %q imported as a workflow template with %d steps. Check the graph before you "+
 		"run it: AWX node convergence and per-node prompts do not carry across.", name, len(steps))
+	return tpl.ID
 }
 
 // workflowLimit returns the one host limit a workflow's nodes agree on.

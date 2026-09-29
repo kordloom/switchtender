@@ -1,11 +1,14 @@
 package cmd
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
 
+	"github.com/kordloom/switchtender/internal/audit"
 	"github.com/kordloom/switchtender/internal/receipt"
 )
 
@@ -66,9 +69,27 @@ func runReceipt(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	// The whole chain is held before anything is signed, the way GET /v1/runs/{id}/receipt holds it,
+	// and refused with the same reason codes and the same coordinates so an operator who asked both
+	// gets one answer rather than two.
+	//
+	// The contiguous shape only ever showed its builder the segment between the run's creation and
+	// its outcome, so a break outside that segment was never looked at: this command wrote a signed
+	// receipt and printed success while the endpoint was refusing the same database and GET
+	// /v1/audit/verify was reporting where the chain broke. The command is what an operator reaches
+	// for when they suspect something is wrong, so it was the worse of the two places to be silent.
+	if err := refuseUnpublishableReceipt(cmd.Context(), store.Audits(), id.InstallID); err != nil {
+		return err
+	}
 	res, err := receipt.Build(cmd.Context(), store.Runs(), store.Audits(), id, resolveVersion(),
 		runID, receipt.Options{Sparse: receiptSparse, From: receiptFrom})
 	if err != nil {
+		// A refusal from the builder is a statement about the chain, not about this run. The walk
+		// above catches the ordinary tamper; this catches what it does not cover, such as an entry
+		// recorded at nanosecond precision or a span beat that does not advance.
+		if errors.Is(err, audit.ErrExport) {
+			return unbundlableRefusal(err)
+		}
 		return err
 	}
 	for _, note := range res.Notes {
@@ -100,4 +121,21 @@ func runReceipt(cmd *cobra.Command, args []string) error {
 			"Publish this fingerprint so a verifier can pin it:\n  %s\n",
 		runID, receiptRunOut, res.Claims, receiptRunOut, res.KeyID)
 	return nil
+}
+
+// refuseUnpublishableReceipt reads the whole chain and refuses a receipt drawn from one that does
+// not hold, whether the break is inside the run's own entries or anywhere else in the trail.
+//
+// The chain is read here and released when this returns, before the builder makes its own streaming
+// pass, so the command holds one copy of it at a time rather than one beside the builder's.
+func refuseUnpublishableReceipt(ctx context.Context, audits audit.Store, installID string) error {
+	entries, err := audits.Chain(ctx)
+	if err != nil {
+		return fmt.Errorf("read audit chain: %w", err)
+	}
+	recorded, err := storedAnchors(ctx, audits)
+	if err != nil {
+		return err
+	}
+	return refuseUnpublishableChain(entries, recorded, installID, "a receipt")
 }

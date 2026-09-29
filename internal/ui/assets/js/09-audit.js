@@ -265,6 +265,41 @@ function renderVerifyVerdict(badge, r) {
 		"tail shows up: " + (problems.length ? problems.join("; ") : "the server gave no detail") + ".");
 }
 
+// renderBundleRefusal states why no bundle could be published, in the words the verify verdict
+// already uses.
+//
+// A refusal here is not a download that failed. It is this install reporting that its own chain does
+// not hold, which is the one finding the audit page exists to be able to surface. Rendering it as
+// "Could not build the bundle" filed the product's central alarm under the same sentence as a
+// dropped connection, and dropped the server's coordinates for where the break is. The server sends
+// the same coordinates GET /v1/audit/verify reports, so the two answers say the same thing.
+function renderBundleRefusal(badge, r) {
+	if (badge) {
+		badge.hidden = false;
+		badge.className = "chip failed";
+		badge.textContent = r.broke_at > 0
+			? "Tampered at entry " + r.broke_at
+			: "The chain no longer satisfies its anchors";
+	}
+	if (r.reason === "chain_break") {
+		setStatus("No bundle was published. Entry " + r.broke_at + " does not recompute" +
+			(r.broke_seq ? " (sequence " + r.broke_seq + ")" : "") + ", so the trail was altered at " +
+			"or before it and every entry after it is unreliable. Signing a bundle over it would " +
+			"attest to entries this install cannot stand behind. Preserve the database and compare " +
+			"it against the most recent signed bundle or anchor.");
+		return;
+	}
+	if (r.reason === "anchor_unsatisfied") {
+		const problems = r.anchor_problems || [];
+		setStatus("No bundle was published. Every entry recomputes, but the chain no longer satisfies " +
+			(problems.length === 1 ? "an anchor" : "anchors") + " recorded over it, which is how a " +
+			"missing tail shows up: " +
+			(problems.length ? problems.join("; ") : "the server gave no detail") + ".");
+		return;
+	}
+	setStatus("No bundle was published: " + (r.error || "the chain could not be bundled") + ".");
+}
+
 // wireAudit hooks the audit page's three buttons. Verify recomputes the chain and shows a badge,
 // the evidence pack renders the period's change register, and bundle downloads a signed LoomSeal
 // bundle anyone can verify offline with an open verifier.
@@ -318,6 +353,12 @@ function wireAudit() {
 				const res = await fetch(API + "/audit/bundle", { headers: authHeaders() });
 				if (res.status === 401) {
 					requireLogin();
+					return;
+				}
+				if (res.status === 409) {
+					// The chain itself is why there is no bundle. That is a finding, not a failed
+					// download, so it is reported where the verdict lives instead of as an error.
+					renderBundleRefusal(badge, await res.json());
 					return;
 				}
 				if (!res.ok) {

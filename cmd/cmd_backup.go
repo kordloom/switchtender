@@ -26,7 +26,9 @@ var (
 	restoreIn string
 )
 
-// backupCmd writes an encrypted snapshot of the control plane.
+// backupCmd writes an encrypted snapshot of the control plane. The destination is named by --out
+// and never by a positional argument, so "backup out.st" is refused rather than writing the sealed
+// snapshot to the terminal and reporting success.
 var backupCmd = &cobra.Command{
 	Use:   "backup",
 	Short: "Write an encrypted backup of credentials, projects, templates, inventories, schedules, triggers, tokens, and access.",
@@ -34,16 +36,20 @@ var backupCmd = &cobra.Command{
 		"file is sealed with the deployment encryption key, so it stays confidential and tamper-evident, and " +
 		"it restores into either the SQLite or the PostgreSQL backend. Run history and the audit chain are " +
 		"not included; the audit chain has its own signed export.",
+	Args:         cobra.NoArgs,
 	SilenceUsage: true,
 	RunE:         runBackup,
 }
 
-// restoreCmd reads a backup and upserts its objects into the store.
+// restoreCmd reads a backup and upserts its objects into the store. The source is named by --in and
+// never by a positional argument, so "restore mybackup.st" is refused rather than ignoring the file
+// and hanging on standard input.
 var restoreCmd = &cobra.Command{
 	Use:   "restore",
 	Short: "Restore an encrypted backup, upserting its objects by id.",
 	Long: "Read a backup written by the backup command and upsert its objects into the store by id. It needs " +
 		"the same encryption key the backup was written with, and it never deletes objects absent from the file.",
+	Args:         cobra.NoArgs,
 	SilenceUsage: true,
 	RunE:         runRestore,
 }

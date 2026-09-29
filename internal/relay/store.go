@@ -17,7 +17,15 @@ type Client struct {
 }
 
 // NewClient returns a run.Store backed by the Transport, ready to hand to dispatch.New in a worker.
+//
+// A nil Transport is a wiring error, and it panics here for the same reason NewPolicyClient does.
+// Every execution-path method forwards straight to the Transport, so a Client built without one
+// survives startup and then dereferences nil inside the dispatcher's claim loop, where the failure
+// reads as a crash in the middle of a run rather than as the misconfiguration it is.
 func NewClient(t Transport) *Client {
+	if t == nil {
+		panic("relay: Transport required")
+	}
 	return &Client{t: t}
 }
 

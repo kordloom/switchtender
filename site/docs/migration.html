@@ -3,16 +3,16 @@
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
-	<title>Migrate off AWX, Semaphore, Rundeck, or Jenkins | SwitchTender docs</title>
+	<title>Migration | SwitchTender docs</title>
 	<meta name="description" content="SwitchTender imports an AWX, Semaphore, Rundeck, or Jenkins export, or a plain crontab, and creates the equivalent objects, so moving over is one command rather than a rebuild.">
 	<link rel="canonical" href="https://switchtender.com/docs/migration">
-	<meta property="og:title" content="Migrate off AWX, Semaphore, Rundeck, or Jenkins | SwitchTender docs">
+	<meta property="og:title" content="Migration | SwitchTender docs">
 	<meta property="og:description" content="SwitchTender imports an AWX, Semaphore, Rundeck, or Jenkins export, or a plain crontab, and creates the equivalent objects, so moving over is one command rather than a rebuild.">
 	<meta property="og:type" content="article">
 	<meta property="og:url" content="https://switchtender.com/docs/migration">
 	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
 	<meta name="twitter:card" content="summary_large_image">
-	<meta name="twitter:title" content="Migrate off AWX, Semaphore, Rundeck, or Jenkins | SwitchTender docs">
+	<meta name="twitter:title" content="Migration | SwitchTender docs">
 	<meta name="twitter:description" content="SwitchTender imports an AWX, Semaphore, Rundeck, or Jenkins export, or a plain crontab, and creates the equivalent objects, so moving over is one command rather than a rebuild.">
 	<meta name="twitter:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
 	<script type="application/ld+json">
@@ -25,7 +25,7 @@
   "url": "https://switchtender.com/"
  },
  "description": "SwitchTender imports an AWX, Semaphore, Rundeck, or Jenkins export, or a plain crontab, and creates the equivalent objects, so moving over is one command rather than a rebuild.",
- "headline": "Migrate off AWX, Semaphore, Rundeck, or Jenkins",
+ "headline": "Migration",
  "isPartOf": {
   "@type": "WebSite",
   "name": "SwitchTender docs",
@@ -60,38 +60,136 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration" class="active">Migrate off AWX, Semaphore, Rundeck, or Jenkins</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/continuity">Continuity</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/vendor-risk">Vendor risk review</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration" class="active">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks">Benchmarks</a><a href="/docs/continuity">Continuity</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/vendor-risk">Vendor risk review</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
-			<h1 id="migrate-off-awx-semaphore-rundeck-or-jenkins">Migrate off AWX, Semaphore, Rundeck, or Jenkins</h1>
+			<h1 id="migrate-off-awx-semaphore-rundeck-jenkins-or-cron">Migrate off AWX, Semaphore, Rundeck, Jenkins, or cron</h1>
 <p>SwitchTender imports an AWX, Semaphore, Rundeck, or Jenkins export, or a plain crontab, and creates
 the equivalent objects, so moving over is one command rather than a rebuild.</p>
+<h2 id="what-each-source-brings-over">What each source brings over</h2>
+<p>There are five importers, and they do not all carry the same objects. AWX and Semaphore export a
+whole control plane, so they bring projects, inventories, credential shells, templates, surveys, and
+schedules. Jenkins exports jobs and nothing else, so it brings templates, surveys, and schedules
+only, and you name the inventory yourself. Rundeck brings the same three, plus one project when you
+hand it a project archive whose source control configuration names a repository this can reach. A
+crontab is a list of timed commands, so it brings schedules alone.</p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>Projects</th>
+<th>Inventories</th>
+<th>Credential shells</th>
+<th>Templates</th>
+<th>Surveys</th>
+<th>Schedules</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>import awx</code></td>
+<td>Yes</td>
+<td>Yes, static and dynamic</td>
+<td>Yes</td>
+<td>Yes, job templates and workflows</td>
+<td>Yes</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td><code>import semaphore</code></td>
+<td>Yes</td>
+<td>Yes</td>
+<td>Yes</td>
+<td>Yes</td>
+<td>Yes</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td><code>import rundeck</code></td>
+<td>From a project archive whose source control names a reachable repository</td>
+<td>No, name one with <code>--inventory</code></td>
+<td>No</td>
+<td>Yes</td>
+<td>Yes</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td><code>import jenkins</code></td>
+<td>No</td>
+<td>No, name one with <code>--inventory</code></td>
+<td>No</td>
+<td>Yes</td>
+<td>Yes</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td><code>import cron</code></td>
+<td>No</td>
+<td>No, name one with <code>--inventory</code></td>
+<td>No</td>
+<td>No</td>
+<td>No</td>
+<td>Yes</td>
+</tr>
+</tbody>
+</table>
+<p>A Rundeck, Jenkins, or crontab import therefore creates no credentials at all. A Rundeck or Jenkins
+job that needed a login needs a credential built by hand and attached to its template afterward. A
+crontab import creates no template either, so an imported cron line has nothing to attach one to.</p>
 <h2 id="get-an-export">Get an export</h2>
 <ul>
-<li>AWX: <code>awx export</code> produces a JSON document of organizations, projects, inventories, job
-templates, credentials without secrets, schedules, and surveys.</li>
+<li>AWX: <code>awx export</code> produces a JSON document of organizations, projects, inventories, inventory
+sources, job templates, credentials without secrets, schedules, and surveys. Organizations, teams,
+and notification templates are counted in the report rather than imported.</li>
 <li>Semaphore: export the project's repositories, inventories, keys, templates, and schedules as
-JSON.</li>
-<li>Rundeck: export a project's jobs as YAML or JSON, from the project's job list or the API.</li>
+JSON. Semaphore's own single-project backup file and the multi-project wrapper are both read.</li>
+<li>Rundeck: either export a project's jobs as YAML or JSON from the project's job list or the API, or
+export the whole project as an archive, which is the zip Project Settings hands back. The importer
+tells the two apart by content, so there is no flag to set and nothing to get wrong.</li>
+<li>Jenkins: there is no export file to fetch. Point the importer at a <code>JENKINS_HOME</code>, at its <code>jobs</code>
+directory, at one job's <code>config.xml</code>, or at a zip of any of those.</li>
+<li>cron: the crontab file itself, either a user tab or, with <code>--system</code>, <code>/etc/crontab</code> and the
+system tabs.</li>
 </ul>
 <h2 id="preview-then-apply">Preview, then apply</h2>
 <p>Run the import without <code>--apply</code> first to see exactly what it would create, along with every
 warning:</p>
 <pre><code>switchtender import awx awx-export.json --db switchtender.db
 </code></pre>
-<p>The report lists the projects, inventories, credentials, templates, and schedules that will be
-created, and calls out anything that could not be mapped cleanly. Apply it when the report looks
-right:</p>
+<p>The report lists the projects, inventories, dynamic inventory sources, credentials, templates, and
+schedules that will be created, prints the content of every inventory it would write rather than
+only its name, and calls out anything that could not be mapped cleanly. Apply it when the report
+looks right:</p>
 <pre><code>switchtender import awx awx-export.json --db switchtender.db --apply
 </code></pre>
 <p>Semaphore works the same way with <code>import semaphore</code>. The importer is proven against a real
 backup taken from a live current Semaphore release, unknown newer fields included, not only
 against hand-built samples.</p>
-<h2 id="import-rundeck-jobs">Import Rundeck jobs</h2>
-<p>Export the jobs from a Rundeck project, in YAML or JSON, and point the importer at the file.</p>
+<h2 id="awx-dynamic-inventory-comes-across-too">AWX dynamic inventory comes across too</h2>
+<p>An AWX inventory source imports as well, whether the export carries it at the top level or nests it
+under the inventory it belongs to. Each one becomes a dynamic inventory source plus the stored
+inventory it maintains, named after the source with <code>(dynamic)</code> appended. Its project and credential
+are wired by id when the same export carried them, and the report names either one it could not
+resolve.</p>
+<p>A source pointing at a file in a project keeps that path. A cloud plugin source such as <code>ec2</code> has no
+file to point at, so it imports carrying the plugin name and the report tells you to point it at a
+plugin config file before it can refresh. The backing inventory arrives empty either way, since its
+hosts come from running the plugin rather than from the export.</p>
+<p>Semaphore has no equivalent. An inventory of any type other than static imports holding whatever its
+export's inventory field held, and the report names the type it was. For a file inventory that field
+is a path rather than a host list, so read each one the report names before relying on it.</p>
+<h2 id="import-rundeck-jobs-or-a-project-archive">Import Rundeck jobs or a project archive</h2>
+<p>Two artifacts import and the importer tells them apart by content, so point it at whichever one you
+have.</p>
 <pre><code>switchtender import rundeck jobs.yaml --inventory prod --db switchtender.db
+switchtender import rundeck rundeck-payments-batch.zip --inventory prod --db switchtender.db
 </code></pre>
+<p>The first is a job export, the YAML or JSON list Rundeck writes from a project's job list or from
+its API. The second is a project archive, the zip Project Settings hands back for a whole project,
+which is what most people leaving Rundeck reach for. The same job produces the same template either
+way. The archive writes jobs as XML and the export writes them as YAML, and both are mapped through
+one path, so the two artifacts cannot drift into importing the same job differently.</p>
 <p>Each job becomes a Bash template carrying its step sequence in order, its options become a survey,
 and its schedule becomes a cron schedule. Rundeck dispatches by node filter rather than by inventory
 file, so <code>--inventory</code> records which hosts the jobs are meant for and the report names any job whose
@@ -100,6 +198,33 @@ node filter you should check against it.</p>
 tool runs the script where the worker runs it; the inventory is carried on the template for you to
 act on, not used to fan the script out across those hosts. Rewrite the job as an Ansible template
 when you want it to run against the inventory.</p>
+<p><strong>A project archive brings no inventory, and none can be built from it.</strong> The archive carries the
+configuration of where Rundeck fetched its nodes from and not one node definition, at any path. A
+<code>file</code> source names a path on the Rundeck server, a <code>url</code> source names an endpoint, and neither
+travels in the zip. The report names each source it saw, with its path or its URL, so you can fetch
+the same list and create the inventory yourself. Rebuilding hosts out of the archive's execution
+history would be worse than not trying: it holds bare node names, only for the nodes that happened
+to run, with no address, login, or connection attributes, so the result would be a fleet of machines
+nobody could reach. A path carrying <code>%PROJECT_BASEDIR%</code> is left as it stands, because that token is
+the project's own directory on the server that exported it and expanding it here would be a guess.</p>
+<p><strong>A project archive brings one project only when its source control configuration names a repository
+this can reach.</strong> A Rundeck project is a job store rather than a git repository, so there is nothing
+to make a project out of unless the SCM plugin was mirroring the jobs into one. Where it was, the
+repository and its branch come across. A <code>file:///</code> URL does not: it names a directory on the
+Rundeck server, which is a different machine, so a project built from it either fails on its sync or
+finds an unrelated directory of that name on this host and clones that instead. The report names the
+path so you can push that repository somewhere reachable and create the project yourself. Where a
+project is created, know what is in it: the repository holds the job definitions Rundeck exported
+into it, not Ansible playbooks, so point your templates at your own playbook repository if that is a
+different one.</p>
+<p>An archive also carries execution logs, run state, reports, ACL policies, webhooks, and the project
+readme. None of them import. Approvals and access here come from policies and grants you write, not
+from a Rundeck ACL, and a webhook is a trigger you create against this server.</p>
+<p>That freight is why a busy project's archive can be too large to upload. <code>/v1/import/{format}</code> and
+the Migrate page cap a body at 25 MiB and answer a larger one with 413. The command line applies no
+such cap: it reads the file whole, and only the archive reader's own ceilings bound it at 20,000
+archive members, 4 MiB for any one member it reads, and 64 MiB of definitions read in total. So an
+archive over 25 MiB imports with <code>switchtender import rundeck</code> rather than through the page.</p>
 <p>Two details are worth knowing before you run it. A Rundeck schedule is a Quartz expression, which
 counts Sunday as one where cron counts Sunday as zero, so the weekday is renumbered rather than
 copied; a Quartz-only form such as the third Friday of the month has no cron equivalent and is
@@ -111,7 +236,9 @@ names each one so you can store it as a credential instead.</p>
 single export file to fetch. Point the importer at the directory and it reads the tree.</p>
 <pre><code>switchtender import jenkins /var/jenkins_home --inventory prod --db switchtender.db
 </code></pre>
-<p>A <code>JENKINS_HOME</code>, its <code>jobs</code> directory, one job's <code>config.xml</code>, or a zip of any of those all work.
+<p>A <code>JENKINS_HOME</code>, its <code>jobs</code> directory, one job's <code>config.xml</code>, or a zip of a <code>JENKINS_HOME</code> or a
+<code>jobs</code> directory all work. A job is named by the directory holding its <code>config.xml</code>, so a zip whose
+only entry is a bare <code>config.xml</code> is refused with the reason rather than imported unnamed.
 Folders are followed and each job keeps its full name, so a job in the <code>platform</code> folder imports as
 <code>platform/db-vacuum</code>. To import from the web page instead, zip the <code>jobs</code> directory and upload it;
 zip that directory rather than the whole <code>JENKINS_HOME</code>, which also holds every build log and
@@ -156,6 +283,11 @@ import wires the object by id; anything else is used as a path on the server and
 <code>/etc/crontab</code> and the system tabs, which carry a user column the report calls out. Comments and
 environment lines are noted and skipped. As with the other imports, leave off <code>--apply</code> to preview
 the schedules first, then re-run with <code>--apply</code> to create them.</p>
+<p>No template is created by a crontab import. Each imported schedule carries its own one-step bash
+pipeline, so the plan shows schedules and nothing else. This importer is command line only: the
+<code>/v1/import/{format}</code> endpoint and the Migrate page in the UI take awx, semaphore, rundeck, and
+jenkins, not cron. Both cap a body at 25 MiB, which the command line does not, so a Rundeck project
+archive over that size imports from the CLI alone.</p>
 <h2 id="what-maps-to-what">What maps to what</h2>
 <table>
 <thead>
@@ -172,6 +304,10 @@ the schedules first, then re-run with <code>--apply</code> to create them.</p>
 <tr>
 <td>AWX inventory</td>
 <td>Stored inventory, rendered as INI from its hosts and groups.</td>
+</tr>
+<tr>
+<td>AWX inventory source</td>
+<td>Dynamic inventory source, plus the stored inventory it maintains, named <code>&lt;source&gt; (dynamic)</code>. A file source keeps its path; a cloud plugin source imports carrying the plugin name and is reported, since it needs a config file before it can refresh.</td>
 </tr>
 <tr>
 <td>AWX job template</td>
@@ -194,12 +330,20 @@ the schedules first, then re-run with <code>--apply</code> to create them.</p>
 <td>Workflow template carrying the graph, with each node's job template inlined as a step and the success and always edges becoming dependencies. Imported whole or reported and skipped, never partially.</td>
 </tr>
 <tr>
-<td>AWX schedule</td>
-<td>Schedule, with the recurrence rule converted to cron.</td>
+<td>AWX job template schedule</td>
+<td>Schedule, with the recurrence rule converted to cron and its timezone kept.</td>
+</tr>
+<tr>
+<td>AWX workflow schedule</td>
+<td>Schedule on the imported workflow template, read from whichever place the export carried it. A workflow that was refused has no template to fire, so its schedules are named in the report as not imported rather than dropped silently.</td>
 </tr>
 <tr>
 <td>AWX credential</td>
 <td>Credential shell with its kind mapped from its type and its configured inputs, secret omitted.</td>
+</tr>
+<tr>
+<td>AWX organization, team, or notification template</td>
+<td>Counted in the report, not imported. The report names what to create by hand in their place.</td>
 </tr>
 <tr>
 <td>Semaphore repository</td>
@@ -208,6 +352,10 @@ the schedules first, then re-run with <code>--apply</code> to create them.</p>
 <tr>
 <td>Semaphore static inventory</td>
 <td>Stored inventory.</td>
+</tr>
+<tr>
+<td>Semaphore inventory of any other type</td>
+<td>Stored inventory holding whatever the export's inventory field carried, which for a file inventory is a path rather than hosts, and reported. Only static content travels in the export.</td>
 </tr>
 <tr>
 <td>Semaphore template</td>
@@ -223,19 +371,39 @@ the schedules first, then re-run with <code>--apply</code> to create them.</p>
 </tr>
 <tr>
 <td>Rundeck job</td>
-<td>Template running the job's step sequence as one Bash script.</td>
+<td>Template running the job's step sequence as one Bash script. The same job from a job export and from a project archive produces the same template.</td>
 </tr>
 <tr>
 <td>Rundeck option</td>
 <td>Survey field. An enforced value list becomes a choice; a secure option is refused, not downgraded.</td>
 </tr>
 <tr>
+<td>Rundeck script step naming an interpreter</td>
+<td>Kept when the interpreter is a shell. Anything else, a Python interpreter or a command such as <code>sudo -u deploy /bin/bash</code>, is refused and named: a template runs one Bash script, so the step body would not be run by what the job ran it with.</td>
+</tr>
+<tr>
+<td>Rundeck project archive <code>resources.source.N</code></td>
+<td>Reported, never imported. The archive carries the node source's configuration and no node definitions, so the report names the file path or the endpoint and you attach an inventory of your own.</td>
+</tr>
+<tr>
+<td>Rundeck project archive SCM configuration</td>
+<td>Project, when it names a repository this can reach, carrying the repository and its branch. A <code>file:///</code> URL is refused and named, since it is a path on the Rundeck server. The export's path template, format, and committer identity have no equivalent and do not carry.</td>
+</tr>
+<tr>
+<td>Rundeck project archive ACL policy, webhook, execution, or report</td>
+<td>Not imported. Access here comes from policies and grants, a webhook is a trigger created against this server, and the execution history is not a source of hosts.</td>
+</tr>
+<tr>
 <td>Rundeck schedule</td>
 <td>Schedule, with the Quartz expression converted and its weekday renumbered.</td>
 </tr>
 <tr>
+<td>Rundeck job timeout</td>
+<td>Template timeout, converted to whole seconds from a duration such as <code>30m</code> or from a plain number of seconds. One that cannot be read is reported and the template imports with no timeout.</td>
+</tr>
+<tr>
 <td>Rundeck dispatch thread count</td>
-<td>Recorded on the template, and reported. It paces Ansible runs; a Bash template, which is what a Rundeck job imports as, does not read it.</td>
+<td>Recorded on the template as its fork count. It paces Ansible runs; a Bash template, which is what a Rundeck job imports as, does not read it. The report does not name it, so check it yourself if it mattered.</td>
 </tr>
 <tr>
 <td>Jenkins freestyle job</td>
@@ -269,12 +437,30 @@ the schedules first, then re-run with <code>--apply</code> to create them.</p>
 <td>Jenkins agent label</td>
 <td>Reported, not imported. SwitchTender targets an inventory, so check the one you attached covers the same machines.</td>
 </tr>
+<tr>
+<td>Crontab job line</td>
+<td>Schedule carrying its own one-step bash pipeline. No template is created.</td>
+</tr>
+<tr>
+<td>Crontab <code>@reboot</code> line</td>
+<td>Refused and named. It has no time-based cadence to convert.</td>
+</tr>
+<tr>
+<td>Crontab comment or environment assignment</td>
+<td>Skipped. A comment goes quietly; an environment line is named, since an imported schedule does not carry it.</td>
+</tr>
+<tr>
+<td><code>/etc/crontab</code> user column</td>
+<td>Reported, not imported. The schedule runs under the server's execution account, so confirm that is equivalent.</td>
+</tr>
 </tbody>
 </table>
 <h2 id="re-enter-secrets">Re-enter secrets</h2>
 <p>Exports never contain secrets by design, so credentials import as named shells with their kind set
-but no material. The report lists which secrets to re-enter. Everything else, projects,
-inventories, templates, and schedules, is in place and ready to run once the secrets are restored.</p>
+but no material. The report lists which secrets to re-enter. Everything else, projects, inventories,
+dynamic inventory sources, templates, and schedules, is in place and ready to run once the secrets
+are restored. Only AWX and Semaphore carry credentials at all, so a Rundeck, Jenkins, or crontab
+import has none to re-enter and none to attach.</p>
 <h2 id="limits-to-expect">Limits to expect</h2>
 <ul>
 <li>A schedule whose cadence a cron expression cannot represent, such as every third day, is reported
@@ -283,12 +469,28 @@ and skipped rather than converted to a wrong cadence.</li>
 failure edge, which runs work precisely because something failed, has no pipeline equivalent, and a
 node pointing at a job template the export does not carry has no work to do. A partial graph would
 keep the workflow's name and run a subset of it, which is worse than not importing it.</li>
+<li>A workflow's own schedules import onto the workflow template, so a graph that fired nightly in AWX
+keeps firing nightly here. The one case that does not carry is a workflow the import refused: with
+no template to fire, its schedules cannot import either, and the report says so by name and count
+rather than leaving the loss to be discovered later.</li>
+<li>An AWX export's organizations, teams, and notification templates are counted in the report and not
+imported. The report names what to create in their place.</li>
 <li>Non-git projects are skipped, since there is no repository to source playbooks from.</li>
+<li>A Rundeck project archive never produces an inventory. It carries no node definitions, so the node
+sources it named are reported and you attach an inventory yourself. Every imported template lands
+against the inventory you named with <code>--inventory</code>, the same as from a job export.</li>
+<li>A Rundeck archive whose source control points at a <code>file:///</code> path produces no project, since the
+path is on the Rundeck server rather than on a machine this can clone from. It is reported by
+path, so you can push the repository somewhere reachable and create the project yourself.</li>
+<li>An archive whose members would escape where they are unpacked, by an absolute path, a parent
+segment, or a symbolic link, is refused whole rather than read down to the members that looked
+reasonable. No Rundeck export writes one.</li>
 <li>A credential type without an exact match maps to the environment kind and is flagged for review.</li>
-<li>A survey field that prompts for a secret, an AWX password question or a Rundeck secure option, is
-reported and left out rather than imported. A survey answer is stored in plain text on the run, so
-importing one would quietly make the secret less protected than it was in the tool you left. Store
-those values as credentials and reference them from the template.</li>
+<li>A survey field that prompts for a secret, an AWX password question, a Semaphore secret variable, a
+Rundeck secure option, or a Jenkins password parameter, is reported and left out rather than
+imported. A survey answer is stored in plain text on the run, so importing one would quietly make
+the secret less protected than it was in the tool you left. Store those values as credentials and
+reference them from the template.</li>
 <li>Secrets are never in an export, so every credential is created as a shell and its secret has to be
 re-entered. The non-secret settings AWX did export, such as the user to connect as and how to
 become root, are stored on the credential itself and take effect at injection, so a machine

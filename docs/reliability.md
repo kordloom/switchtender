@@ -132,7 +132,9 @@ The audit trail is a SHA-256 hash chain. Every recorded mutation carries the pre
 and its own hash over its content, so altering, reordering, or dropping an entry breaks the chain,
 which `GET /v1/audit/verify` detects. The chain is tamper-evident with no key configured. `GET /v1/audit/bundle`
 seals the chain into a signed LoomSeal bundle, and the open `loomseal` verifier confirms the trail
-offline, without trusting the server that produced it. `switchtender audit report` renders the
+offline, without trusting the server that produced it. A chain that does not verify is refused
+rather than sealed: the endpoint answers 409 naming what failed and where, so a broken chain is
+never signed over. `switchtender audit report`, a Team feature, renders the
 period's changes as a self-contained HTML evidence report a compliance or vendor-security reviewer
 reads without any tooling, and the bundle proves the chain behind it independently. The append is serialized by an in-process
 lock on SQLite and a transaction-level advisory

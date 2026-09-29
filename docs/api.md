@@ -16,6 +16,25 @@ unversioned. The root redirects to the UI.
 signing key and identifiers so a relying party can pin the key from a channel independent of any
 bundle it is handed.
 
+## Licensed endpoints
+
+Almost every endpoint below runs on Community, which needs no license. Three answer `403` without one,
+with a message naming the feature rather than failing in some subtler way:
+
+| Endpoint | Tier | Note |
+|----------|------|------|
+| `GET /v1/audit/register` | Team | The period change register. Per-run dossiers, receipts, bundles, and `GET /v1/audit/verify` are free. |
+| `POST /v1/drift/reconcile` | Team | One-click reconcile. Drift detection is free. |
+| `POST` and `PATCH /v1/policies` | Team, past the free set | Deny rules, risk floors, actor scoping, and distinct-approver separation of duties. One require-approval policy is Community, Pro holds five, Team is uncapped. |
+
+Two more are enforced somewhere other than the request:
+
+- `/relay` is served whatever the license. The gate is on the other end: `switchtender worker
+  --server` refuses to start without Team. A worker sharing the database is not gated at all.
+- The directory sign-in routes need Pro, enforced at startup rather than per request. Configuring any
+  of OIDC, SAML, LDAP, or JWT without a license refuses the server at startup, so those routes are
+  either licensed or absent.
+
 | Method | Path                    | What                                                    |
 |--------|-------------------------|---------------------------------------------------------|
 | POST   | `/v1/runs`                 | Submit a run. `shards` of two or more splits it.        |
@@ -124,7 +143,7 @@ bundle it is handed.
 | GET    | `/v1/policies`             | List approval policies.                                 |
 | PUT    | `/v1/policies/{id}`        | Update an approval policy.                              |
 | DELETE | `/v1/policies/{id}`        | Delete an approval policy.                              |
-| POST   | `/v1/import/{format}`      | Import an AWX, Semaphore, or Rundeck export. Format is awx, semaphore, or rundeck. Rundeck takes `?inventory=` to say which hosts its jobs target.|
+| POST   | `/v1/import/{format}`      | Import an AWX, Semaphore, Rundeck, or Jenkins export. Format is awx, semaphore, rundeck, or jenkins; any other format is refused. Rundeck and Jenkins take `?inventory=` to say which hosts their jobs target, since neither brings an inventory. Two formats accept a zip: the Jenkins body is one `config.xml` or a zip of a jobs directory, and the Rundeck body is a job export or a project archive, each told apart by content. The body is capped at 25 MiB and a larger one is refused with 413, which is lower than the CLI, where a project archive is bounded only by the archive reader's own limits. Previews by default; `?apply=true` writes the plan. A crontab imports from the CLI only, with `switchtender import cron`. Which objects each format carries is in [what each source brings over](migration.md#what-each-source-brings-over).|
 | GET    | `/v1/audit`                | A page of the mutation trail, admin only. `?limit=` up to 1000, default 100; `has_more` reports whether older entries remain. |
 | GET    | `/v1/audit/register`       | The change register as a self-contained HTML document, admin only. |
 | GET    | `/v1/doctor`               | Install health checks and their findings, admin only.   |
@@ -138,6 +157,32 @@ A streamed export whose status line has already been sent cannot report a later 
 status code. The run event NDJSON download and the run log download therefore end with a
 `{"export_incomplete":true,"reason":"..."}` line when they stop early, so a short file is never
 mistaken for a whole one.
+
+### When the chain itself refuses a bundle
+
+`GET /v1/audit/bundle` recomputes the whole chain and holds it against every anchor recorded over it
+before any window is applied. A chain this server checked and rejected is a finding, not a fault, so
+it answers `409` rather than `500`, and a caller can tell the two apart without reading prose. A
+`500` is left to a real fault here, such as a store that will not read, and a `limit` that is not a
+count stays a `400`.
+
+    {
+      "error":  "entry 3 does not recompute (sequence 3)",
+      "reason": "chain_break",
+      "broke_at": 3,
+      "broke_seq": 3,
+      "count": 9
+    }
+
+| `reason` | Meaning |
+|----------|---------|
+| `chain_break` | An entry does not recompute. `broke_at` is its one-based position and `broke_seq` its chain sequence, both zero when the entry carries no readable sequence, which is itself a shape tampering takes. |
+| `anchor_unsatisfied` | Every entry recomputes, but the chain no longer satisfies an anchor recorded over it, which is how a missing tail shows up. `anchor_problems` names each one. |
+| `chain_unbundlable` | The chain verifies but no bundle can be formed over it. |
+
+The coordinates are the same ones `GET /v1/audit/verify` reports, so the two answers agree. A
+windowed request is refused for a break anywhere in the chain, not only inside the window: a bundle
+signed over a window sitting past a break would attest to entries this install cannot stand behind.
 
 
 ## Opening a live stream
@@ -209,6 +254,18 @@ Zero, or the field omitted, leaves launches on the server default set by `--run-
 template saved before this field existed is unchanged. A run that exceeds its timeout is canceled
 and finalized as failed. A launch cannot raise the cap; the template's value is what applies.
 
+## Naming what a run targets
+
+Two fields name a target and they are not interchangeable.
+
+`inventory_id` names a stored inventory, the kind the UI creates and the one almost every
+caller wants. `inventory` is a path to an inventory file already on the server, for a run whose
+inventory is managed outside this product.
+
+Sending a stored inventory's name in `inventory` is read as a path. Ansible exits zero when a
+host pattern matches nothing, so a run aimed at a path that does not exist is recorded as
+succeeded having touched no host at all.
+
 ## Ansible run controls
 
 A run submission and a template both accept the Ansible controls that used to require a hand-built
@@ -230,7 +287,7 @@ curl -X POST https://switchtender.example.com/v1/runs \
   -H 'Content-Type: application/json' \
   -d '{
     "playbook": "plays/deploy.yml",
-    "inventory": "prod",
+    "inventory_id": "inv_3f9c1b7a2e04",
     "limit": "canary01",
     "tags": ["web", "config"],
     "skip_tags": ["reboot"],
@@ -259,7 +316,7 @@ cycle or an unknown dependency is refused then rather than on every launch.
 ```bash
 curl -X POST https://switchtender.example.com/v1/templates   -H "Authorization: Bearer $SWITCHTENDER_TOKEN"   -H 'Content-Type: application/json'   -d '{
     "name": "build and ship",
-    "inventory": "prod",
+    "inventory_id": "inv_3f9c1b7a2e04",
     "steps": [
       {"name": "build", "tool": "bash", "command": "make release"},
       {"name": "deploy", "playbook": "deploy.yml", "depends_on": ["build"]}

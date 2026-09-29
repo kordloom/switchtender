@@ -202,11 +202,28 @@ func (s *store) SaveHostFacts(ctx context.Context, runID string, facts []run.Hos
 	if len(facts) == 0 {
 		return nil
 	}
-	const q = `
+	// One transaction and one prepared statement for the whole gather, the way the summary writers
+	// beside this one work. Each host used to be its own statement on the shared write connection,
+	// so a gather committed once per host: an inventory of a few hundred hosts paid a few hundred
+	// commits, and every one of them held the single writer off the run that was reporting them. It
+	// also means a gather that fails partway leaves no half-written fact set behind, which matters
+	// because a host's facts are replaced whole and a partial set reads as the current truth.
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("save host facts: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	stmt, err := tx.PrepareContext(ctx, `
 INSERT INTO host_facts (host, run_id, facts, gathered_at)
 VALUES (?, ?, ?, ?)
 ON CONFLICT(host) DO UPDATE SET
-	run_id=excluded.run_id, facts=excluded.facts, gathered_at=excluded.gathered_at`
+	run_id=excluded.run_id, facts=excluded.facts, gathered_at=excluded.gathered_at`)
+	if err != nil {
+		return fmt.Errorf("save host facts: %w", err)
+	}
+	defer func() { _ = stmt.Close() }()
+
 	for _, f := range facts {
 		if f.Host == "" || len(f.Facts) == 0 {
 			continue
@@ -219,10 +236,13 @@ ON CONFLICT(host) DO UPDATE SET
 		if err != nil {
 			return fmt.Errorf("save host facts: %w", err)
 		}
-		if _, err := s.db.ExecContext(ctx, q, f.Host, runID, string(blob),
+		if _, err := stmt.ExecContext(ctx, f.Host, runID, string(blob),
 			sqlutil.FormatTime(at)); err != nil {
 			return fmt.Errorf("save host facts: %w", err)
 		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("save host facts: %w", err)
 	}
 	return nil
 }

@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -44,6 +45,27 @@ type fakeStreamer struct {
 // Subscribe returns the fixed channel and a no-op cancel.
 func (f *fakeStreamer) Subscribe(string) (<-chan live.Message, func()) {
 	return f.ch, func() {}
+}
+
+// gatedStreamer holds a stream at its subscription point until a test lets it through, which fixes
+// the order of what the handler and the test each do next instead of leaving it to the scheduler.
+type gatedStreamer struct {
+	// ch is handed to every subscriber once the gate opens.
+	ch chan live.Message
+	// entered closes when a stream first reaches Subscribe.
+	entered chan struct{}
+	// gate blocks Subscribe until the test closes it.
+	gate chan struct{}
+	// once guards the close of entered, since more than one stream may subscribe.
+	once sync.Once
+}
+
+// Subscribe reports that a stream reached the subscription point, waits for the gate, then returns
+// the fixed channel and a no-op cancel.
+func (g *gatedStreamer) Subscribe(string) (<-chan live.Message, func()) {
+	g.once.Do(func() { close(g.entered) })
+	<-g.gate
+	return g.ch, func() {}
 }
 
 // fakeCanceler records the canceled id and returns a fixed result.
@@ -685,6 +707,104 @@ func TestRunStreamResumesAfterCursor(t *testing.T) {
 	}
 }
 
+// TestRunStreamResumesFromTheCursorItWasGiven pins that a stream opened at a named cursor delivers
+// the rows that were written before the handler read its own position. It is the guarantee a
+// browser depends on when it reconnects with Last-Event-ID after a dropped connection: what landed
+// while it was away still arrives.
+//
+// The ordering is forced rather than waited for. The streamer holds the handler at its subscription
+// point until the rows are in the store, so the handler reads its position after the writes, which
+// is the interleaving a loaded machine produces by accident and an idle one almost never does.
+func TestRunStreamResumesFromTheCursorItWasGiven(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := run.NewMemStore()
+	if err := store.Save(ctx,
+		&run.Run{ID: "run_live", Status: run.StatusRunning, CreatedAt: time.Now()}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	streamer := &gatedStreamer{
+		ch:      make(chan live.Message, 4),
+		entered: make(chan struct{}),
+		gate:    make(chan struct{}),
+	}
+	srv := httptest.NewServer(New(store, &fakeSubmitter{}, zap.NewNop(),
+		WithStreamer(streamer)).Handler())
+	defer srv.Close()
+
+	// The request blocks in the handler's subscription until the gate opens, so it is issued from a
+	// goroutine and its result collected after.
+	type opened struct {
+		// res is the streaming response, once the handler has written its header.
+		res *http.Response
+		// err is what the request failed with, if it did.
+		err error
+	}
+	streamOpen := make(chan opened, 1)
+	go func() {
+		req, err := http.NewRequest(http.MethodGet, srv.URL+"/v1/runs/run_live/stream", nil)
+		if err != nil {
+			streamOpen <- opened{err: err}
+			return
+		}
+		req.Header.Set("Last-Event-ID", "0:0")
+		res, err := http.DefaultClient.Do(req)
+		streamOpen <- opened{res: res, err: err}
+	}()
+
+	<-streamer.entered
+	// Both rows land while the handler is still held at the subscription point, so the position it
+	// reads next already includes them.
+	at := time.Date(2026, 7, 6, 0, 0, 0, 0, time.UTC)
+	if err := store.AppendEvents(ctx, "run_live",
+		[]event.Event{{Type: event.TypeTaskStart, Time: at, Task: "deploy"}}); err != nil {
+		t.Fatalf("AppendEvents() error = %v", err)
+	}
+	if err := store.AppendLog(ctx, "run_live", []byte("remote says hello")); err != nil {
+		t.Fatalf("AppendLog() error = %v", err)
+	}
+	close(streamer.gate)
+
+	stream := <-streamOpen
+	if stream.err != nil {
+		t.Fatalf("GET stream: %v", stream.err)
+	}
+	defer func() { _ = stream.res.Body.Close() }()
+	// A stream that sends nothing blocks the read below rather than ending it, so closing the body
+	// from a timer is what turns a silent stream into a reported failure instead of a hung package.
+	stopReading := time.AfterFunc(30*time.Second, func() { _ = stream.res.Body.Close() })
+	defer stopReading.Stop()
+
+	reader := bufio.NewReader(stream.res.Body)
+	var sawEvent, sawLog bool
+	for !sawEvent || !sawLog {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			t.Fatalf("the stream skipped rows written before it read its cursor: "+
+				"event=%v log=%v, read: %v", sawEvent, sawLog, err)
+		}
+		if strings.Contains(line, "deploy") {
+			sawEvent = true
+		}
+		if strings.Contains(line, "remote says hello") {
+			sawLog = true
+		}
+	}
+}
+
+// TestRunStreamDrainsStore pins that rows landing in the store reach an open stream, whichever
+// process wrote them, and that a terminal run ends the stream. The hub message only wakes the drain
+// early, so the store is the source either way.
+//
+// The request names its cursor instead of letting the handler pick one, and that is what makes the
+// result independent of scheduling. A stream that names no cursor starts from the store's current
+// end, which the handler reads after the response header is already on the wire. The writes below
+// raced that read: whenever they landed first, the handler took them for history the client already
+// had and sent nothing, and every drain that followed found nothing new. Twelve copies of the old
+// test running at once reproduced it, sitting through twenty seconds of one-second drain ticks with
+// neither row delivered, which reads as a slow stream and is not one. Last-Event-ID fixes both
+// cursors at zero, the same header a browser sends to resume, so the rows are new to this stream
+// whichever side of the header they land on.
 func TestRunStreamDrainsStore(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -699,14 +819,18 @@ func TestRunStreamDrainsStore(t *testing.T) {
 
 	srv := httptest.NewServer(handler)
 	defer srv.Close()
-	res, err := http.Get(srv.URL + "/v1/runs/run_live/stream")
+	req, err := http.NewRequest(http.MethodGet, srv.URL+"/v1/runs/run_live/stream", nil)
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	req.Header.Set("Last-Event-ID", "0:0")
+	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("GET stream: %v", err)
 	}
 	defer func() { _ = res.Body.Close() }()
 
-	// New store rows stream out, whether written by this process or any other; the hub message
-	// only wakes the drain early.
+	// New store rows stream out, whether written by this process or any other.
 	at := time.Date(2026, 7, 6, 0, 0, 0, 0, time.UTC)
 	if err := store.AppendEvents(ctx, "run_live",
 		[]event.Event{{Type: event.TypeTaskStart, Time: at, Task: "deploy"}}); err != nil {
@@ -717,33 +841,20 @@ func TestRunStreamDrainsStore(t *testing.T) {
 	}
 	wake <- live.Message{Type: "event"}
 
-	// The deadline below is checked between reads, and a read on a stream that never delivers
-	// blocks rather than returning, so the check alone cannot end the test. Closing the body when
-	// the deadline passes makes the blocked read fail, which turns a hung test into a reported one.
-	// Left unbounded this ran until the package timeout and took the whole suite down with it.
-	reader := bufio.NewReader(res.Body)
-	// What is being asserted is that store rows reach the stream at all, not that they arrive within
-	// any particular second. The drain ticks once a second, and under the full suite with the race
-	// detector on and a database engine running beside it, five seconds is a handful of ticks on a
-	// saturated machine: this failed there while passing ten times out of ten on its own, which is a
-	// flaky test rather than a slow stream. The bound is generous enough to survive a loaded run and
-	// still far short of the reader timeout below, so a stream that genuinely never delivers is still
-	// reported here rather than hanging.
-	deadline := time.Now().Add(20 * time.Second)
-	// Well above the five second deadline that is the real assertion. This only has to stop a
-	// stream that never delivers from hanging the whole suite, which it used to do for fifteen
-	// minutes. Set close to the deadline it fired on a stream that was merely slow, because the
-	// drain ticks once a second and the race detector under a full suite is not fast.
-	stopReading := time.AfterFunc(60*time.Second, func() { _ = res.Body.Close() })
+	// A read on a stream that delivers nothing blocks rather than returning, so something has to
+	// end the test other than the package timeout, which took the whole suite down with it. Closing
+	// the body from a timer is what makes a blocked read return an error, and the error is then
+	// reported as the failure it is. This is a guard against a hang, not a latency assertion: what
+	// is asserted is that the rows arrive at all, and they arrive on the wake or a drain tick.
+	stopReading := time.AfterFunc(30*time.Second, func() { _ = res.Body.Close() })
 	defer stopReading.Stop()
+	reader := bufio.NewReader(res.Body)
 	var sawEvent, sawLog bool
 	for !sawEvent || !sawLog {
-		if time.Now().After(deadline) {
-			t.Fatalf("stream never delivered store rows: event=%v log=%v", sawEvent, sawLog)
-		}
 		line, err := reader.ReadString('\n')
 		if err != nil {
-			t.Fatalf("read stream: %v", err)
+			t.Fatalf("stream never delivered store rows: event=%v log=%v, read: %v",
+				sawEvent, sawLog, err)
 		}
 		if strings.Contains(line, "deploy") {
 			sawEvent = true
@@ -754,13 +865,14 @@ func TestRunStreamDrainsStore(t *testing.T) {
 	}
 
 	// A terminal store state ends the stream on the next drain.
+	stopReading.Reset(30 * time.Second)
 	done := &run.Run{ID: "run_live", Status: run.StatusSucceeded, CreatedAt: time.Now()}
 	if err := store.Save(ctx, done); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
 	wake <- live.Message{Type: "event"}
 	sawEnd := false
-	for time.Now().Before(deadline) {
+	for {
 		line, err := reader.ReadString('\n')
 		if err != nil {
 			break

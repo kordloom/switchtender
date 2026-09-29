@@ -93,6 +93,22 @@ func TestVerifyBundleAcceptsConsistencyRootAnchor(t *testing.T) {
 	}
 }
 
+// flipFirstHexDigit returns a hex string whose first digit differs from the input's, so the result
+// is never the value handed in. Every entry carries a fresh random identifier, so a tree root is a
+// different string on every run: forging one by writing fixed digits over its front changes nothing
+// on the roots that already start with those digits, and the test then signs a genuine bundle,
+// verifies it, and reports the honest acceptance as a failure. A forgery has to be unconditional.
+func flipFirstHexDigit(t *testing.T, value string) string {
+	t.Helper()
+	if value == "" {
+		t.Fatal("the bundle carries no root to forge")
+	}
+	if value[0] == '0' {
+		return "1" + value[1:]
+	}
+	return "0" + value[1:]
+}
+
 // TestVerifyBundleRejectsForgedConsistency proves the consistency proof is verified, not merely
 // carried. Admitting the from-root as an anchor coordinate is only sound because a proof that does
 // not fold from it to the head fails the chain check.
@@ -109,7 +125,11 @@ func TestVerifyBundleRejectsForgedConsistency(t *testing.T) {
 	}
 	// The producer swaps in a from-root the log never had, keeping the proof path. An anchor over
 	// that root would then read as independent evidence for a fabricated history.
-	doc.Chain.Consistency.FromRoot = "00" + doc.Chain.Consistency.FromRoot[2:]
+	genuine := doc.Chain.Consistency.FromRoot
+	doc.Chain.Consistency.FromRoot = flipFirstHexDigit(t, genuine)
+	if doc.Chain.Consistency.FromRoot == genuine {
+		t.Fatal("the forgery left the from-root unchanged, so the checks below would prove nothing")
+	}
 	signed, err := audit.SignBundleDoc(doc, id.Private())
 	if err != nil {
 		t.Fatalf("SignBundleDoc() error = %v", err)

@@ -247,9 +247,13 @@ func createNamed(dir, name string) (Identity, error) {
 		if !errors.Is(err, fs.ErrExist) {
 			return Identity{}, fmt.Errorf("producer identity: install: %w", err)
 		}
-		winner, readErr := readIdentityFile(dir)
+		// Adopt from the file this call was asked to create, never from a fixed name. A witness
+		// losing the race in a directory that also holds producer-key.json would otherwise be
+		// handed the key of the server it watches, and in a witness-only directory the read would
+		// fail and the witness would not start.
+		winner, readErr := readNamed(dir, name)
 		if readErr != nil {
-			return Identity{}, fmt.Errorf("producer identity: adopt: %w", readErr)
+			return Identity{}, fmt.Errorf("producer identity: adopt %s: %w", name, readErr)
 		}
 		return identityFromSeed(winner.Seed, winner.InstallID)
 	}

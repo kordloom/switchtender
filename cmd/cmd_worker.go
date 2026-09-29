@@ -77,6 +77,7 @@ var workerRunTimeout time.Duration
 var workerCmd = &cobra.Command{
 	Use:   "worker",
 	Short: "Run a SwitchTender worker that executes runs from the shared store.",
+	Args:  cobra.NoArgs,
 	RunE:  runWorker,
 }
 

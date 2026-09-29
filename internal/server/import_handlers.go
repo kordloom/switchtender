@@ -12,6 +12,12 @@ import (
 )
 
 // maxImportBody caps an uploaded export document, generous enough for a large AWX export.
+//
+// It is not generous enough for every Rundeck project archive. An archive carries the project's
+// execution logs, run state, and reports alongside the definitions the importer reads, so one from
+// a busy project can exceed this while staying well inside the 64 MiB the archive reader bounds
+// the definitions it reads by. Such an archive imports from the CLI, which applies no body limit,
+// and is refused here with 413.
 const maxImportBody = 25 << 20
 
 // importResponse summarizes an import plan, and the result when it is applied.
@@ -59,8 +65,15 @@ type importStoresFunc func() (importer.ApplyStores, bool)
 // parameter, and the plan reports its absence rather than refusing, so a preview still shows what
 // the export holds.
 //
-// Jenkins has no single-file export the way the others do, so its body may be a zip of a jobs
-// directory as well as one config.xml. The importer tells them apart by content.
+// Two formats accept a zip body. Jenkins has no single-file export the way the others do, so its
+// body may be a zip of a jobs directory as well as one config.xml. Rundeck accepts a project
+// archive, which is a zip, as well as a job export. Each importer tells its artifacts apart by
+// content, so the format in the path is all a caller sets.
+//
+// A body over maxImportBody is refused with 413, which is a lower ceiling than the CLI applies: the
+// CLI reads the file whole and only the archive readers' own limits bound it. A Rundeck project
+// archive from a busy project carries every execution log alongside the definitions this reads, so
+// one can exceed this limit and still import from the command line.
 func importHandler(stores importStoresFunc, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var mapper func([]byte, time.Time) (*importer.Plan, error)

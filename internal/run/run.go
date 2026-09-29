@@ -21,9 +21,11 @@ const (
 	StatusPending Status = "pending"
 	// StatusRunning means the run is executing.
 	StatusRunning Status = "running"
-	// StatusSucceeded means the run finished with a zero exit code.
+	// StatusSucceeded means the run finished with a zero exit code and did the work it claimed.
 	StatusSucceeded Status = "succeeded"
-	// StatusFailed means the run finished with a non-zero exit code or could not start.
+	// StatusFailed means the run finished with a non-zero exit code, could not start, or exited
+	// zero without doing anything. Ansible exits zero when a host pattern matches nothing, so a
+	// clean exit alone is not a success.
 	StatusFailed Status = "failed"
 	// StatusCanceled means the run was stopped before completion.
 	StatusCanceled Status = "canceled"
@@ -424,6 +426,11 @@ func ValidNotifyKind(k string) bool {
 }
 
 // Clone returns a deep copy so callers cannot mutate stored state through shared pointers.
+//
+// Every pointer, slice, and map field has to be copied here, without exception. The store hands
+// Clone's output to every reader and keeps Clone's output itself, so a field left shared is a page
+// handler, an export, or a plugin editing the run the executor will run, or the evidence a review
+// reads, with no write path involved and nothing in the audit chain to show it.
 func (r *Run) Clone() *Run {
 	if r == nil {
 		return nil
@@ -470,6 +477,18 @@ func (r *Run) Clone() *Run {
 	out.CredentialIDs = append([]string(nil), r.CredentialIDs...)
 	out.Notifications = append([]NotifyTarget(nil), r.Notifications...)
 	out.Labels = maps.Clone(r.Labels)
+	out.Tags = append([]string(nil), r.Tags...)
+	out.SkipTags = append([]string(nil), r.SkipTags...)
+	if r.PolicySet != nil {
+		set := *r.PolicySet
+		set.Rules = append([]string(nil), r.PolicySet.Rules...)
+		out.PolicySet = &set
+	}
+	if r.Risk != nil {
+		risk := *r.Risk
+		risk.Reasons = append([]string(nil), r.Risk.Reasons...)
+		out.Risk = &risk
+	}
 	if r.Steps != nil {
 		out.Steps = make([]PipelineStep, len(r.Steps))
 		for i, s := range r.Steps {

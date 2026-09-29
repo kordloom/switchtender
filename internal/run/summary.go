@@ -314,6 +314,14 @@ func (f *SummaryFold) HostSummaries() []HostSummary {
 	return out
 }
 
+// Recap reports how many hosts the run's final recap named and whether the run reported a recap at
+// all. The two answers are different evidence and must not be collapsed: a recap naming no host is
+// proof the run touched none, while no recap at all proves nothing either way, which is what a run
+// with event capture unavailable leaves behind.
+func (f *SummaryFold) Recap() (hosts int, reported bool) {
+	return len(f.stats), f.stats != nil
+}
+
 // HostFacts returns the gathered facts per host, or nil when none were gathered.
 func (f *SummaryFold) HostFacts() []HostFacts {
 	if len(f.facts) == 0 {

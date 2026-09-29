@@ -2,9 +2,11 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -233,10 +235,156 @@ func bundleWindow(count int, limit string) (int, string) {
 	return n, ""
 }
 
+// The reasons a bundle download refuses. Each names a state of the stored chain, never a fault in
+// this server, so a caller branches on the code without reading the message.
+const (
+	// reasonChainBreak means the stored chain does not recompute: an entry was altered, reordered,
+	// or removed. This is the tamper the audit trail exists to surface.
+	reasonChainBreak = "chain_break"
+	// reasonAnchorUnsatisfied means the chain no longer reaches an anchor recorded over it, which is
+	// how a chain that hash-verifies but has lost its tail is caught.
+	reasonAnchorUnsatisfied = "anchor_unsatisfied"
+	// reasonChainUnbundlable means the builder refused the chain for a state the chain walk does not
+	// cover, such as an entry recorded at nanosecond precision or a span beat that does not advance.
+	reasonChainUnbundlable = "chain_unbundlable"
+)
+
+// bundleRefusal is the body an endpoint answers with when the chain itself is why no signed
+// artifact can be published. The bundle download and the run receipt both answer with it.
+//
+// It is deliberately more than an error string. A detected tamper is the one answer these endpoints
+// exist to be able to give, and an operator holding it has to be able to tell a chain this server
+// checked and rejected from this server having faulted, without reading prose. The coordinates are
+// the same ones GET /v1/audit/verify reports, so all three answers line up. One type rather than
+// one per endpoint is what keeps them lined up: a caller parses a refusal without knowing which
+// signed artifact it asked for.
+type bundleRefusal struct {
+	// Error is the human-readable refusal, naming what failed and where in the chain.
+	Error string `json:"error"`
+	// Reason is the stable code for the refusal: chain_break, anchor_unsatisfied, or
+	// chain_unbundlable.
+	Reason string `json:"reason"`
+	// BrokeAt is the one-based position of the first entry that does not verify, zero when the
+	// refusal is not a chain break.
+	BrokeAt int `json:"broke_at,omitempty"`
+	// BrokeSeq is the chain sequence number of that entry, zero when the refusal is not a chain
+	// break or the entry carries no readable sequence, which is itself a shape tampering takes.
+	BrokeSeq int64 `json:"broke_seq,omitempty"`
+	// Count is the number of entries walked.
+	Count int `json:"count"`
+	// AnchorProblems describes each anchor the chain no longer satisfies, empty for other refusals.
+	AnchorProblems []string `json:"anchor_problems,omitempty"`
+}
+
+// chainBreakMessage states where a walk of the stored chain found it broken. artifact names what
+// could not be published as a result, so the same coordinates read correctly for a bundle and for a
+// receipt.
+//
+// The sequence is named only when the breaking entry carried a readable one, since a row blanked
+// out is exactly the tamper that leaves none, and "sequence 0" would read as a fact, not a gap.
+func chainBreakMessage(artifact string, brokeAt, count int, seq int64) string {
+	where := fmt.Sprintf("at entry %d of %d", brokeAt, count)
+	if seq > 0 {
+		where += fmt.Sprintf(", sequence %d", seq)
+	}
+	return "the audit chain does not verify " + where + ", so it cannot be published as " + artifact +
+		" any verifier would accept. An entry was altered, reordered, or removed. This is a break " +
+		"detected in the stored chain, not a fault in this server. GET /v1/audit/verify reports " +
+		"the same position"
+}
+
+// chainVerdict is what one full walk of the stored chain found: whether every link recomputes, and
+// where the walk stopped believing it if not.
+type chainVerdict struct {
+	// OK reports that every entry's hash and link recomputed from genesis.
+	OK bool
+	// BrokeAt is the one-based position of the first entry that does not verify, zero when OK.
+	BrokeAt int
+	// BrokeSeq is the chain sequence number of that entry, zero when OK or when the entry carries no
+	// readable sequence, which is itself a shape tampering takes.
+	BrokeSeq int64
+	// Count is how many entries the walk fed.
+	Count int
+	// Highest is the largest sequence the walk saw, which is the chain's head position.
+	Highest int64
+}
+
+// walkChain streams the whole stored chain once, feeding the link scanner and, when one is given,
+// the anchor scanner, and reports what the link walk found.
+//
+// Every endpoint that signs something drawn from the chain has to hold the whole chain first, and
+// has to name a break at a coordinate in the trail rather than at an offset into a walk the caller
+// cannot see. Both the bundle export and the run receipt need that, so the walk lives here once. It
+// streams rather than materializing: an audit chain grows for the life of an install and these
+// endpoints are reachable from a browser.
+func walkChain(ctx context.Context, store audit.Store,
+	anchorScan *audit.AnchorScanner) (chainVerdict, error) {
+	chainScan := audit.NewChainScanner(true)
+	var v chainVerdict
+	err := store.ChainScan(ctx, 0, func(e *audit.Entry) error {
+		chainScan.Feed(e)
+		if anchorScan != nil {
+			anchorScan.Feed(e)
+		}
+		if e == nil {
+			return nil
+		}
+		v.Highest = e.Seq
+		// The scanner marks a break at the position it was fed, and never moves it, so the one entry
+		// whose position equals the count fed so far is the entry that broke the chain. Capturing its
+		// sequence here is what lets the refusal name a coordinate in the trail.
+		if _, at, walked := chainScan.Result(); at != 0 && at == walked {
+			v.BrokeSeq = e.Seq
+		}
+		return nil
+	})
+	if err != nil {
+		return chainVerdict{}, err
+	}
+	v.OK, v.BrokeAt, v.Count = chainScan.Result()
+	return v, nil
+}
+
+// unsatisfiedAnchors returns the problem text for each anchor the chain no longer satisfies, and
+// whether any were found. A chain can hash-verify perfectly and still have lost its tail, because a
+// prefix of a valid chain is itself a valid chain, so this is the half of the check the link walk
+// cannot answer.
+func unsatisfiedAnchors(scan *audit.AnchorScanner, recorded int) ([]string, bool) {
+	if scan == nil || recorded == 0 {
+		return nil, false
+	}
+	reachedAll, results := scan.Results()
+	if reachedAll {
+		return nil, false
+	}
+	problems := make([]string, 0, len(results))
+	for _, res := range results {
+		if !res.Reached {
+			problems = append(problems, res.Problem)
+		}
+	}
+	return problems, true
+}
+
+// exportRefusal returns the builder's own words for why the chain could not be bundled, without the
+// sentinel prefix that names the operation rather than the problem.
+func exportRefusal(err error) string {
+	return strings.TrimPrefix(err.Error(), audit.ErrExport.Error()+": ")
+}
+
 // auditBundleHandler assembles and serves the signed LoomSeal bundle the CLI produces, so the
 // offline-verifiable artifact no rival emits is one click from the audit view rather than only in a
-// terminal. It mirrors the bundle command exactly: build over the whole chain, hold it against every
-// anchor recorded over it and refuse a chain that cannot reach one, attach the anchors, and sign.
+// terminal. It assembles the document the bundle command assembles: hold the whole chain against
+// every anchor recorded over it and refuse a chain that cannot reach one, attach the anchors, and
+// sign. It is stricter than the command in one place, and deliberately: the hash chain is
+// recomputed in full before any window is applied, so a break older than a windowed range is
+// refused here rather than signed over.
+//
+// A chain this endpoint checked and rejected is answered with a 409 and a bundleRefusal naming what
+// failed and where, never a 500. A broken chain is the answer this endpoint exists to be able to
+// give, and an operator who cannot tell it from a crashed server has been told nothing. A 500 is
+// left to what is a fault here, such as a store that will not read or a signature that will not
+// form, and a limit that is not a count stays a 400.
 //
 // The signed bytes are written exactly as SignBundleDoc produced them and never re-marshaled. A
 // re-encode would change the bytes the signature covers, so an offline verifier would then reject a
@@ -257,30 +405,45 @@ func auditBundleHandler(store audit.Store, producer *audit.Identity, version str
 			respondError(w, log, http.StatusInternalServerError, "could not read the anchors")
 			return
 		}
+		// The hash chain rides the same pass as the anchors. It has to be walked here rather than
+		// left to the builder for two reasons. The builder only ever sees the window, so a break
+		// before a windowed range was never looked at and the endpoint signed a clean-looking bundle
+		// over the tail of a chain it could see was broken. And the builder reports a break by
+		// failing, which arrived as a bare 500: indistinguishable from a crashed server, on the one
+		// question this endpoint exists to answer.
 		anchorScan := audit.NewAnchorScanner(recorded, producer.InstallID)
-		count := 0
-		var highest int64
-		err := store.ChainScan(r.Context(), 0, func(e *audit.Entry) error {
-			anchorScan.Feed(e)
-			count++
-			highest = e.Seq
-			return nil
-		})
+		verdict, err := walkChain(r.Context(), store, anchorScan)
 		if err != nil {
 			log.Error("server: chain audit entries: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not read the audit trail")
 			return
 		}
+		count, highest := verdict.Count, verdict.Highest
 		if count == 0 {
 			respondError(w, log, http.StatusConflict, "the audit chain is empty, there is nothing to bundle")
 			return
 		}
-		if len(recorded) > 0 {
-			if reachedAll, _ := anchorScan.Results(); !reachedAll {
-				respondError(w, log, http.StatusConflict, "the chain does not satisfy every anchor "+
-					"recorded over it, so it cannot be published as a bundle that does")
-				return
-			}
+		if !verdict.OK {
+			log.Error("server: audit bundle refused: the stored audit chain does not verify",
+				zap.Int("broke_at", verdict.BrokeAt), zap.Int64("broke_seq", verdict.BrokeSeq),
+				zap.Int("entries", count))
+			respondJSON(w, log, http.StatusConflict, bundleRefusal{
+				Error:  chainBreakMessage("a bundle", verdict.BrokeAt, count, verdict.BrokeSeq),
+				Reason: reasonChainBreak, BrokeAt: verdict.BrokeAt, BrokeSeq: verdict.BrokeSeq,
+				Count: count,
+			}, wantsPretty(r))
+			return
+		}
+		if problems, unsatisfied := unsatisfiedAnchors(anchorScan, len(recorded)); unsatisfied {
+			log.Error("server: audit bundle refused: the chain does not satisfy every anchor "+
+				"recorded over it", zap.Strings("anchor_problems", problems))
+			respondJSON(w, log, http.StatusConflict, bundleRefusal{
+				Error: "the chain does not satisfy every anchor recorded over it, so it cannot " +
+					"be published as a bundle that does. This is a problem detected in the " +
+					"stored chain, not a fault in this server",
+				Reason: reasonAnchorUnsatisfied, Count: count, AnchorProblems: problems,
+			}, wantsPretty(r))
+			return
 		}
 		window, msg := bundleWindow(count, r.URL.Query().Get("limit"))
 		if msg != "" {
@@ -299,6 +462,18 @@ func auditBundleHandler(store audit.Store, producer *audit.Identity, version str
 		}
 		doc, err := audit.BuildBundle(entries, *producer, version, time.Now())
 		if err != nil {
+			// A refusal from the builder is a statement about the chain, not a fault in this server.
+			// The walk above catches the ordinary tamper; this catches the rest, such as an entry
+			// recorded before times were truncated or a span beat that does not advance past the one
+			// before it. Both mean the stored entries would be rejected by a verifier, and both used
+			// to arrive as a 500 telling the operator this server had crashed.
+			if errors.Is(err, audit.ErrExport) {
+				log.Error("server: audit bundle refused: " + err.Error())
+				respondJSON(w, log, http.StatusConflict, bundleRefusal{
+					Error: exportRefusal(err), Reason: reasonChainUnbundlable, Count: count,
+				}, wantsPretty(r))
+				return
+			}
 			log.Error("server: build bundle: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not assemble the bundle")
 			return

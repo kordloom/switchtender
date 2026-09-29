@@ -19,12 +19,15 @@ var licenseDB string
 var licenseCmd = &cobra.Command{
 	Use:   "license",
 	Short: "Show or install this install's license. No license means Community, which is complete.",
+	Args:  cobra.NoArgs,
+	RunE:  runGroupHelp,
 }
 
 // licenseStatusCmd prints what the install is running under.
 var licenseStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show the tier this install runs, and when a license lapses.",
+	Args:  cobra.NoArgs,
 	RunE: func(_ *cobra.Command, _ []string) error {
 		path := license.PathFor(licenseDB)
 		lic, err := license.Load(path)
@@ -34,8 +37,9 @@ var licenseStatusCmd = &cobra.Command{
 		}
 		if lic == nil {
 			fmt.Println("Community. Everything here is free to run, forever.")
-			fmt.Println("Team unlocks SSO, the full policy engine, distributed workers, and the")
-			fmt.Println("period change register: https://switchtender.com/pricing")
+			fmt.Println("Pro unlocks directory sign-in and five approval policies. Team adds the")
+			fmt.Println("full policy engine, distributed workers, and the period change register:")
+			fmt.Println("https://switchtender.com/pricing")
 			return nil
 		}
 		state := "valid"
@@ -88,6 +92,7 @@ var licenseMintCmd = &cobra.Command{
 	Use:    "mint",
 	Hidden: true,
 	Short:  "Sign a license file with the issuer key.",
+	Args:   cobra.NoArgs,
 	RunE: func(_ *cobra.Command, _ []string) error {
 		keyHex, err := os.ReadFile(mintKey)
 		if err != nil {

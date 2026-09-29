@@ -1,0 +1,11 @@
+[Unit]
+Description=Platform worker
+After=network.target
+
+[Service]
+Environment=RELEASE=4.1
+ExecStart=/usr/local/bin/worker --queue v1 --concurrency 6
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

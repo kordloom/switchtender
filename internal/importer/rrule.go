@@ -299,17 +299,32 @@ func cronDays(byday string) (string, bool) {
 // window in the other direction.
 func dtstartZone(rrule string) string {
 	for field := range strings.FieldsSeq(strings.ReplaceAll(rrule, "\n", " ")) {
-		upper := strings.ToUpper(field)
-		if !strings.HasPrefix(upper, "DTSTART") {
+		if !strings.HasPrefix(strings.ToUpper(field), "DTSTART") {
 			continue
 		}
-		if idx := strings.Index(upper, "TZID="); idx >= 0 {
-			zone := field[idx+len("TZID="):]
-			// The parameter ends at the value separator: DTSTART;TZID=America/New_York:20260101T020000.
-			if colon := strings.Index(zone, ":"); colon >= 0 {
-				zone = zone[:colon]
+		// The parameters sit between the keyword and the value separator, semicolon separated:
+		// DTSTART;TZID=America/New_York:20260101T020000. Every index is taken on the field itself and
+		// never on an uppercased copy of it, because uppercasing is not length preserving in UTF-8: a
+		// keyword carrying runes that grow when folded pushed the index past the end of the original
+		// and the slice panicked, on a document a stranger hands to the import endpoint.
+		params, value, separated := strings.Cut(field, ":")
+		if !separated {
+			// A field with no separator is all value as far as the Zulu reading below is concerned.
+			value = field
+		}
+		zone, named := "", false
+		for _, param := range strings.Split(params, ";")[1:] {
+			name, argument, ok := strings.Cut(param, "=")
+			if !ok || !strings.EqualFold(strings.TrimSpace(name), "TZID") {
+				continue
 			}
-			if zone = strings.TrimSpace(zone); zone != "" {
+			zone, named = strings.TrimSpace(argument), true
+			break
+		}
+		if named {
+			// A parameter that names no zone is not a floating time, so the Zulu reading below is not
+			// applied to it: the field said which zone it was in and the answer was unusable.
+			if zone != "" {
 				return zone
 			}
 			continue
@@ -317,11 +332,7 @@ func dtstartZone(rrule string) string {
 		// No parameter: the value itself says whether it is UTC. The Z belongs to the timestamp, so it
 		// is read from the value after the separator rather than from the whole field, which a zone name
 		// ending in Z would otherwise satisfy.
-		value := upper
-		if colon := strings.Index(value, ":"); colon >= 0 {
-			value = value[colon+1:]
-		}
-		if strings.HasSuffix(strings.TrimSpace(value), "Z") {
+		if strings.HasSuffix(strings.ToUpper(strings.TrimSpace(value)), "Z") {
 			return "UTC"
 		}
 	}

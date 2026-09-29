@@ -148,8 +148,13 @@ func (s *Server) dispatch(ctx context.Context, req request) (any, *rpcError) {
 		}, nil
 	// The cancellation notification's name is spelled the way the protocol spells it. It is a wire
 	// value, not prose, so it cannot be Americanized without ceasing to match what clients send.
+	//
+	// An empty object is returned rather than nil because several clients send these methods with an
+	// id, which makes them requests owed a reply. A nil result is dropped by the response encoder, so
+	// the reply carried neither result nor error, which JSON-RPC 2.0 forbids and a strict client
+	// rejects, failing the session on the very first message after initialize.
 	case "notifications/initialized", "notifications/cancelled": //nolint:misspell // Protocol method name.
-		return nil, nil
+		return map[string]any{}, nil
 	case "ping":
 		return map[string]any{}, nil
 	case "tools/list":

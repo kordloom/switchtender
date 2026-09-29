@@ -183,6 +183,12 @@ func decodeJenkins(data []byte) ([]jenkinsBundledJob, error) {
 		}
 		data = bundle
 	}
+	// A bare config.xml arrives with the declaration Jenkins wrote, which the decoder will not read.
+	// A bundle has already had its jobs' declarations taken off, so this is a no-op for one.
+	data, err := jenkinsDocumentBody(data)
+	if err != nil {
+		return nil, err
+	}
 	root, err := jenkinsRootElement(data)
 	if err != nil {
 		return nil, err
@@ -334,7 +340,7 @@ func (p *Plan) jenkinsCommand(name string, proj jenkinsProject) (string, bool) {
 				"the job imports as Bash. Recreate it as a PowerShell template if the job ran on "+
 				"Windows.", name, i+1)
 		default:
-			p.warn("job %q step %d is a %s step%s, which has no equivalent and was left out",
+			p.warn("job %q step %d is %s step%s, which has no equivalent and was left out",
 				name, i+1, jenkinsStepLabel(item.XMLName.Local), jenkinsTargets(item.Targets))
 		}
 	}
@@ -438,6 +444,12 @@ func jenkinsNameByte(c byte) bool {
 }
 
 // jenkinsStepLabel renders a build step's class as something readable for a warning.
+//
+// The label carries its own article, because the one an export earns depends on the class: "an Ant"
+// and "a Maven" cannot both be produced by a fixed article in the sentence. Every caller therefore
+// leaves the article to this function. When they supplied one as well the report read "is a a Maven
+// step", and a line that reads as generated rather than checked is the one an operator stops reading,
+// which is the report they decide from what is safe to run.
 func jenkinsStepLabel(class string) string {
 	switch class {
 	case "hudson.tasks.Ant":
@@ -452,7 +464,7 @@ func jenkinsStepLabel(class string) string {
 		return "a JUnit"
 	}
 	// XStream writes a literal underscore in a class name as two, so one reads oddly in a message.
-	return strconv.Quote(oneLine(strings.ReplaceAll(class, "__", "_")))
+	return "a " + strconv.Quote(oneLine(strings.ReplaceAll(class, "__", "_")))
 }
 
 // jenkinsTargets renders an Ant or Maven step's goals for a warning, when the export named any.
@@ -533,7 +545,7 @@ func (p *Plan) jenkinsField(name string, param jenkinsParam) (template.SurveyFie
 		field.Type = template.FieldMultiline
 	case "hudson.model.StringParameterDefinition":
 	default:
-		p.warn("job %q parameter %q is a %s parameter, which imports as free text",
+		p.warn("job %q parameter %q is %s parameter, which imports as free text",
 			name, param.Name, jenkinsStepLabel(param.XMLName.Local))
 	}
 	return field, true
@@ -621,7 +633,7 @@ func (p *Plan) jenkinsSchedules(name string, proj jenkinsProject) []string {
 			p.warn("job %q ran after another job finished, which was left out. Chain them with a "+
 				"pipeline once both templates exist.", name)
 		default:
-			p.warn("job %q has a %s trigger, which has no equivalent and was left out",
+			p.warn("job %q has %s trigger, which has no equivalent and was left out",
 				name, jenkinsStepLabel(item.XMLName.Local))
 		}
 	}

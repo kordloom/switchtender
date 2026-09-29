@@ -12,6 +12,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -171,7 +172,7 @@ func Build(ctx context.Context, runs run.Store, audits audit.Store, id audit.Ide
 		default:
 			var bodyObj any
 			if json.Unmarshal(body, &bodyObj) == nil {
-				if claim := outcomeClaim(doc); claim != nil {
+				if claim := outcomeClaim(doc, outcomeEntry.Path); claim != nil {
 					claim.Payload["outcome_body"] = bodyObj
 					claim.Payload["outcome_nonce"] = outcomeEntry.Nonce
 					discloseSpec(claim, r)
@@ -234,7 +235,7 @@ func sparseBundle(entries []*audit.Entry, runID string, creationSeq, outcomeSeq 
 	// path names it: an approval, a rejection, a cancellation, and its outcome.
 	disclose := map[int64]bool{creationSeq: true, outcomeSeq: true}
 	for _, e := range entries {
-		if e.Seq > creationSeq && strings.Contains(e.Path, runID) {
+		if e.Seq > creationSeq && pathNamesRun(e.Path, runID) {
 			disclose[e.Seq] = true
 		}
 	}
@@ -248,6 +249,19 @@ func sparseBundle(entries []*audit.Entry, runID string, creationSeq, outcomeSeq 
 		}
 	}
 	return doc, nil
+}
+
+// pathNamesRun reports whether an entry's path names the run, matching the identifier as a whole
+// path segment rather than as a substring.
+//
+// The whole point of the sparse shape is that nothing about other runs travels, and a substring
+// match disclosed a neighbor whose identifier merely contains this one, such as run_12 beside
+// run_1: its actor, its command, and its decisions went out inside a receipt about somebody else's
+// change. Minted identifiers are a fixed width today, which is what keeps that latent rather than
+// live, but nothing here rests on that width and an identifier arriving from an import, a
+// migration, or a later format is enough to make it live.
+func pathNamesRun(path, runID string) bool {
+	return slices.Contains(strings.Split(path, "/"), runID)
 }
 
 // discloseSpec attaches the run's redacted spec to the outcome claim, so a verifier can read what
@@ -295,17 +309,17 @@ func discloseDecisions(doc *audit.Bundle, entries []*audit.Entry, r *run.Run) {
 	}
 }
 
-// outcomeClaim returns the claim carrying the run's outcome entry, or nil when the bundle discloses
-// none.
-func outcomeClaim(doc *audit.Bundle) *audit.BundleClaim {
-	for i := range doc.Claims {
-		method, _ := doc.Claims[i].Payload["method"].(string)
-		path, _ := doc.Claims[i].Payload["path"].(string)
-		if method == audit.MethodRun && strings.Contains(path, "/outcome/") {
-			return &doc.Claims[i]
-		}
-	}
-	return nil
+// outcomeClaim returns the claim carrying this run's own outcome entry, matched on that entry's
+// exact path, or nil when the bundle discloses none.
+//
+// It is the exact path rather than any path that mentions an outcome because the contiguous receipt
+// covers a segment of the chain, and on a busy install any second run that finished between this
+// run's request and its outcome puts its own outcome entry inside that segment. Matching loosely
+// attached this run's body, nonce, and redacted spec to the other run's claim, so the verifier
+// checked this body against an entry that committed a different digest and reported the disclosure
+// as not matching the chain: the evidence artifact accusing itself of tampering.
+func outcomeClaim(doc *audit.Bundle, path string) *audit.BundleClaim {
+	return claimFor(doc, audit.MethodRun, path)
 }
 
 // claimFor returns the disclosed claim for one entry, matched on what the claim says rather than on a

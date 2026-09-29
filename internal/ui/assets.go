@@ -120,7 +120,16 @@ func (h *assetHandler) assembleAppJS() {
 		panic("ui: no js/ source parts embedded for app.js")
 	}
 	sort.Strings(names)
-	var body []byte
+	// The joined size is counted before anything is copied, so the bundle is allocated once.
+	// Growing the buffer with append instead reallocated and recopied it at nearly every part, and
+	// for a bundle this size that cost several times the bundle itself in garbage, on the boot path
+	// ahead of the listener opening. One spare byte per part covers the newline a part that ends
+	// without its own terminator needs.
+	size := 0
+	for _, p := range names {
+		size += len(h.assets[p].body) + 1
+	}
+	body := make([]byte, 0, size)
 	for _, p := range names {
 		body = append(body, h.assets[p].body...)
 		if len(body) > 0 && body[len(body)-1] != '\n' {

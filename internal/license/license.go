@@ -36,7 +36,7 @@ const (
 type Feature string
 
 const (
-	// FeatureSSO is directory sign-in: OIDC, SAML, and LDAP.
+	// FeatureSSO is directory sign-in: OIDC, SAML, LDAP, and JWT.
 	FeatureSSO Feature = "sso"
 	// FeaturePolicyFull is the full policy engine: deny rules, risk floors, actor scoping, and
 	// distinct-approver separation of duties. One require-approval policy stays Community.
@@ -302,14 +302,14 @@ func allowPoliciesAt(l *License, total int, now time.Time) error {
 	if total <= 1 {
 		return nil
 	}
-	return fmt.Errorf("Community holds one approval policy and this would make %d; "+
+	return fmt.Errorf("the Community tier holds one approval policy and this would make %d; "+
 		"Pro holds %d and Team removes the cap. https://switchtender.com/pricing",
 		total, proPolicyCap)
 }
 
 // featureNames are the human names gates print.
 var featureNames = map[Feature]string{
-	FeatureSSO:          "Directory sign-in (OIDC, SAML, LDAP)",
+	FeatureSSO:          "Directory sign-in (OIDC, SAML, LDAP, JWT)",
 	FeaturePolicyFull:   "The full policy engine",
 	FeatureRegister:     "The period change register",
 	FeatureWorkers:      "Distributed workers",

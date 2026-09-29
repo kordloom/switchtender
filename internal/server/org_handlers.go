@@ -130,8 +130,18 @@ func listOrgMembersHandler(store org.Store, log *zap.Logger) http.HandlerFunc {
 			respondError(w, log, http.StatusNotFound, "organizations not enabled")
 			return
 		}
-		if _, err := store.Get(r.Context(), r.PathValue("id")); errors.Is(err, org.ErrNotFound) {
-			respondError(w, log, http.StatusNotFound, "organization not found")
+		// A store failure that is not a missing record stops the read rather than falling through it.
+		// Only the not-found case means the organization is not there; every other error means
+		// nobody can tell. Carrying on answered 200 with an empty list, so an administrator running
+		// an access review read "this organization has nobody in it" when the truth was "the roster
+		// is unreadable", and those are opposite answers with only one of them safe to act on.
+		if _, err := store.Get(r.Context(), r.PathValue("id")); err != nil {
+			if errors.Is(err, org.ErrNotFound) {
+				respondError(w, log, http.StatusNotFound, "organization not found")
+				return
+			}
+			log.Error("server: read org: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not read organization")
 			return
 		}
 		members, err := store.Members(r.Context(), r.PathValue("id"))
@@ -153,8 +163,16 @@ func addOrgMemberHandler(store org.Store, log *zap.Logger) http.HandlerFunc {
 			return
 		}
 		id := r.PathValue("id")
-		if _, err := store.Get(r.Context(), id); errors.Is(err, org.ErrNotFound) {
-			respondError(w, log, http.StatusNotFound, "organization not found")
+		// An unreadable store is not a confirmation that the organization exists. Treating it as one
+		// answered 201 for a membership nobody had checked, so the reply said the person was added
+		// to an organization the server never managed to look at.
+		if _, err := store.Get(r.Context(), id); err != nil {
+			if errors.Is(err, org.ErrNotFound) {
+				respondError(w, log, http.StatusNotFound, "organization not found")
+				return
+			}
+			log.Error("server: read org: " + err.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not read organization")
 			return
 		}
 		var req orgMemberRequest

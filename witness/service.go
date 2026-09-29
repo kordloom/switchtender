@@ -42,7 +42,15 @@ const (
 // clip shortens s to at most limit bytes without splitting a UTF-8 rune, appending an ellipsis when
 // the value was cut. It is kept here rather than shared because a public package cannot import the
 // product's internal utilities, and a witness is meant to be embeddable on its own.
+//
+// A negative limit clips to nothing rather than panicking. This is the one bound standing between
+// an untrusted feed's text and the findings record, and a caller computing a budget as a cap minus
+// a prefix already written hands it a negative number: slicing at a negative index panics, and a
+// witness that panics is a witness that stops watching.
 func clip(s string, limit int) string {
+	if limit < 0 {
+		limit = 0
+	}
 	if len(s) <= limit {
 		return s
 	}

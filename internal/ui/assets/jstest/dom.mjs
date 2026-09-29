@@ -414,6 +414,27 @@ class STElement {
 		if (this.parentNode) this.parentNode.removeChild(this);
 	}
 
+	// after inserts nodes and strings as this element's next siblings, a no-op when detached. The
+	// overview builds its no-matches line this way, so without it loadOverview threw before it
+	// reached the network and the whole dashboard was undrivable here.
+	after(...nodes) {
+		const parent = this.parentNode;
+		if (!parent) return;
+		const next = this.nextSibling;
+		for (const n of nodes) {
+			parent.insertBefore(typeof n === "string" ? new STText(n, this.ownerDocument) : n, next);
+		}
+	}
+
+	// before inserts nodes and strings as this element's previous siblings, the mirror of after.
+	before(...nodes) {
+		const parent = this.parentNode;
+		if (!parent) return;
+		for (const n of nodes) {
+			parent.insertBefore(typeof n === "string" ? new STText(n, this.ownerDocument) : n, this);
+		}
+	}
+
 	// replaceWith swaps this element for the given nodes in its parent, a no-op when detached.
 	replaceWith(...nodes) {
 		const parent = this.parentNode;

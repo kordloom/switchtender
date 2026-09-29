@@ -9,7 +9,9 @@ import (
 
 // secretKeyStems are the substrings that mark a variable or field name as secret-bearing. They
 // match anywhere in the name, so ansible_become_password, secret_value, and token_id are all
-// caught, not only the bare names.
+// caught, not only the bare names. They are written lowercase and underscore-separated because the
+// classifier folds case and hyphens before matching, so api_key alone covers apiKey, API-KEY, and
+// x-api-key.
 var secretKeyStems = []string{
 	"password", "passwd", "passphrase", "secret", "token", "apikey", "api_key",
 	"private_key", "privatekey",
@@ -24,12 +26,21 @@ var secretKeyStems = []string{
 // and the bare pass stem only as a whole key or a terminal _pass, so ansible_ssh_pass matches while
 // bypass and passthrough, whose values are ordinary, do not.
 //
+// The key is lowercased and its hyphens are folded to underscores before any stem is tried, because
+// a hyphen and an underscore are the same separator to everyone who writes these names. An HTTP
+// header is conventionally hyphenated, and both assignment patterns accept a hyphen in a name, so
+// X-Api-Key: SECRET on a curl line, in an inventory, or as a YAML key was read as an ordinary
+// assignment: its value went into the audit content digest, was served by the inventory reader,
+// was disclosed in a receipt, and was never handed to the run-log masker, so a set -x echoed it
+// into the stored log. The authorization stem exists for exactly that shape, which is what puts
+// hyphenated header names in scope.
+//
 // This is the single classifier for secret-bearing names. The audit chain uses it to keep a secret
 // out of the digest it publishes, and the inventory redactor uses it to keep one out of the content
 // it serves and to hand it to the run-log masker. Two classifiers would drift, and a name only one
 // of them recognized would be redacted in one place and served in the other.
 func SecretKey(key string) bool {
-	k := strings.ToLower(key)
+	k := strings.ReplaceAll(strings.ToLower(key), "-", "_")
 	if k == "fields" || k == "pass" || strings.HasSuffix(k, "_pass") {
 		return true
 	}
@@ -52,8 +63,14 @@ func FirstNonEmpty(values ...string) string {
 }
 
 // Clip shortens s to at most limit bytes without splitting a UTF-8 rune, appending an ellipsis when
-// the value was cut.
+// the value was cut. A negative limit clips to nothing rather than panicking: this is the one
+// implementation everybody shares, and the next caller to compute a budget as a cap minus a prefix
+// already written hands it a negative number, which would slice at a negative index and take down
+// whatever goroutine it is on instead of shortening a string.
 func Clip(s string, limit int) string {
+	if limit < 0 {
+		limit = 0
+	}
 	if len(s) <= limit {
 		return s
 	}

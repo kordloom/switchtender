@@ -24,10 +24,19 @@ import (
 	"github.com/kordloom/switchtender/internal/run"
 )
 
+// waitBudget bounds how long the polling helpers below wait for a run to settle.
+//
+// A fixed wall-clock budget has to cover the slowest machine the suite runs on, not this one. Ten
+// seconds was enough locally and not enough for the largest plan buffer under -race on a loaded
+// two-core runner, so the release gate failed on timing rather than on behavior. The budget only
+// bounds how long a genuinely stuck run takes to report, so setting it well clear of the slow case
+// costs nothing.
+const waitBudget = 60 * time.Second
+
 // waitTerminal polls the store until the run reaches a terminal state or the deadline passes.
 func waitTerminal(t *testing.T, store run.Store, id string) *run.Run {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(waitBudget)
 	for {
 		r, err := store.Get(context.Background(), id)
 		if err == nil && r.Status.Terminal() {
@@ -45,7 +54,7 @@ func waitTerminal(t *testing.T, store run.Store, id string) *run.Run {
 // echo has landed; asserting immediately made this a flaky check under runner load.
 func waitPublished(t *testing.T, pub *capturingPublisher, id string, want int) {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(waitBudget)
 	for {
 		if pub.eventCount(id) >= want {
 			return
@@ -751,7 +760,7 @@ func TestDispatcherEchoesChildEventsToParent(t *testing.T) {
 	waitTerminal(t, store, parent.ID)
 	waitPublished(t, pub, parent.ID, 2)
 
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(waitBudget)
 	for {
 		parentClosed := false
 		for _, id := range pub.closedIDs() {

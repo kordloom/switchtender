@@ -12,14 +12,15 @@ where it is behind, because credibility comes from being straight about all thre
 
 Every claim about another product was checked against that vendor's own documentation on
 2026-08-10, for AWX 24.6.1, Ansible Automation Platform 2.7, Semaphore 2.19.7, Ascender 25.4.0,
-and Rundeck 6.0.1. Release state re-verified 2026-09-06: AWX is still 24.6.1 and Semaphore is at
-2.19.12, whose releases since 2.19.7 are bugfix-only and change no row. All of these ship, and a
+and Rundeck 6.0.1. Versions re-checked 2026-09-07: AWX is unchanged at 24.6.1, Semaphore is
+at 2.19.12, whose releases since 2.19.7 are bugfix-only and change no row, Ascender is at
+25.6.1, and Rundeck is at 6.1.0. All of these ship, and a
 comparison decays the day it is written. Check a row
 against the current release before relying on it, and open an issue if one has gone stale.
 
 ## The field, side by side
 
-Six controllers, eleven capabilities, every cell checked against that vendor's own documentation.
+Six controllers, thirteen capabilities, every cell checked against that vendor's own documentation.
 Sources are numbered and listed at the bottom. A cell reading "not documented" means the vendor's
 documentation does not describe the capability, established by searching their whole documentation
 set rather than by not finding it.
@@ -79,7 +80,7 @@ than "structured versus scrollback".
 | High availability | Active-active replicas on PostgreSQL behind any load balancer: store-claimed work, compare-and-set schedules and approvals, automatic failover through stale-lease reclaim, proven by a two-replica integration suite. | Via Kubernetes replicas. | Not documented. |
 | Per-run provenance | Every run records the exact commit it executed. | Partial. | Partial. |
 | Provable audit | A tamper-evident SHA-256 hash chain, exported as a signed LoomSeal bundle and verified offline by an open verifier. | An activity stream. | An activity log. |
-| Migration in | One command imports an AWX or Semaphore export. | Not applicable. | Not applicable. |
+| Migration in | One command imports an AWX, Semaphore, Rundeck, or Jenkins export, a Rundeck project archive, or a plain crontab. AWX and Semaphore bring projects, inventories, and credential shells across with their templates, surveys, and schedules; Rundeck and Jenkins bring templates, surveys, and schedules against an inventory you name, and a Rundeck project archive brings one project as well when its source control configuration names a repository this can reach; a crontab brings schedules. Neither Rundeck artifact brings an inventory. See [what each source brings over](migration.md#what-each-source-brings-over). | Not applicable. | Not applicable. |
 | Drift detection | A dry run reports what has diverged from the desired state, across Ansible hosts and Terraform working directories, with a one-click approval-gated reconcile to fix it. | No. | No. |
 | Directory-driven roles | A directory or token group sets a user's role on every sign-in, over LDAP, SAML, or a bearer JWT. OIDC provisions every account at one configurable default role instead. | Organization mapping, complex. | No. Every user is assigned a role by hand. |
 | Notification channels | Eleven server-wide: webhook, email, Slack, Mattermost, Rocket.Chat, Discord, Teams, ntfy, PagerDuty, Grafana, and Twilio. All eleven take a per-template target, so a team pages its own channel; a Twilio or email target names only a recipient and sends through the server-held account, so the account secret never lives in a template. | A similar set plus IRC, without Discord or ntfy, attached per job template. | Fewer, some in a paid tier. |
@@ -106,7 +107,7 @@ than "structured versus scrollback".
 | Maturity | AWX and Semaphore have years of production use and large communities. SwitchTender is young. AWX's years now cut both ways: its last release was July 2024, and [mid-refactor development builds have moved external authentication out of core](https://forum.ansible.com/t/awx-modernization-moving-forward/45134) into a shared library. |
 | Approval steps inside a workflow | A whole run is held for approval. AWX places an approval node at a point in the graph, so the first half runs, waits, and continues. |
 | Recurrence beyond cron | AWX schedules take an RRULE, so "the last Friday of the quarter" is expressible. SwitchTender takes a cron expression with a timezone, and a cadence cron cannot say is reported and skipped on import rather than converted wrongly. |
-| Secret survey answers | AWX offers a password survey field whose answer is stored encrypted. A survey answer here is stored in plain text on the run, so a secret belongs in a credential instead, and both importers refuse to downgrade one rather than accept it quietly. |
+| Secret survey answers | AWX offers a password survey field whose answer is stored encrypted. A survey answer here is stored in plain text on the run, so a secret belongs in a credential instead, and every importer that carries surveys refuses to downgrade one rather than accept it quietly: an AWX password field, a Semaphore secret variable, a Rundeck secure option, and a Jenkins password parameter are each named in the report and left out. |
 | Constructed and smart inventories | An inventory is static content or a refreshed dynamic source. AWX composes one inventory from others by filter. |
 | Credential file injectors | A custom credential type contributes environment variables and extra vars. AWX also writes a templated file and hands the play its path, which is how a kubeconfig or a cloud config is delivered. |
 | Fact caching | AWX caches gathered facts between runs and can serve them to later plays. |

@@ -2,12 +2,13 @@
 // page mounts. A harness whose own behavior is untested can hand every test built on it a false
 // pass, which is the failure this whole thing exists to stop, so the pieces the flow tests lean on
 // are checked here rather than assumed.
-import { readdirSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { fire } from "./dom.mjs";
-import { clockOf, loadParts, sandboxOf } from "./loader.mjs";
+import { ALL_PARTS, clockOf, loadParts, sandboxOf } from "./loader.mjs";
+import { PLACEHOLDER_PAGES } from "./failures.mjs";
 import { delayed, failWith, installFetch, reply, sequence } from "./net.mjs";
 import { loadPage, mountPage } from "./pages.mjs";
 
@@ -220,4 +221,37 @@ test("the stream recorder keeps the URL the page opened and feeds events back", 
 	assert.deepEqual(seen, ['{"seq":4}'], "the payload did not arrive in wire form");
 	source.close();
 	assert.equal(source.closed, true);
+});
+
+test("ALL_PARTS is every source part the server assembles, in the same order", () => {
+	// assembleAppJS concatenates every .js file under js/ in name order. A part missing from
+	// ALL_PARTS is a part no page test ever evaluates, so the code in it ships untested while the
+	// suite goes on passing: 24-run-compare.js was in exactly that state, and the whole comparison
+	// page was unreachable through loadPage.
+	const onDisk = readdirSync(new URL("../js", import.meta.url))
+		.filter((n) => n.endsWith(".js"))
+		.sort();
+	assert.deepEqual(ALL_PARTS, onDisk,
+		"ALL_PARTS has drifted from js/, so some shipped part is never loaded by any test");
+});
+
+test("every placeholder the templates prefill has a page driving it", () => {
+	// A status line that ships with words in it is a promise that something replaces them. The
+	// failure suites drive one loader per entry in PLACEHOLDER_PAGES; a placeholder with no entry
+	// is a spinner nobody has proven ever stops, on success or on failure.
+	const covered = new Set(PLACEHOLDER_PAGES.map((e) => e.page));
+	// users.html carries a second one, driven by its own case in failstates.test.mjs.
+	const extra = new Set(["users"]);
+	const missing = [];
+	for (const file of readdirSync(new URL("../../templates", import.meta.url))) {
+		if (!file.endsWith(".html")) continue;
+		const page = file.slice(0, -5);
+		const markup = readFileSync(new URL("../../templates/" + file, import.meta.url), "utf8");
+		const prefilled = [...markup.matchAll(/<div id="[\w-]*status"[^>]*>([^<]+)<\/div>/g)]
+			.map((m) => m[1].trim())
+			.filter(Boolean);
+		if (prefilled.length && !covered.has(page) && !extra.has(page)) missing.push(page);
+	}
+	assert.deepEqual(missing, [],
+		"these templates prefill a status line no failure test drives: " + missing.join(", "));
 });

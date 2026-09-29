@@ -35,7 +35,8 @@ type conjurConfig struct {
 // resolveConjur reads a secret variable from CyberArk Conjur over HTTP and returns its value, so a
 // source resolves from Conjur at run time with no CyberArk CLI or SDK on the runner. It reads the
 // JSON config, obtains an access token from the config or by exchanging the API key, and reads the
-// variable.
+// variable. A variable whose value does not fit the response cap is a refusal, since half a
+// credential is not a credential.
 func resolveConjur(ctx context.Context, config string) (string, error) {
 	var cfg conjurConfig
 	if err := json.Unmarshal([]byte(config), &cfg); err != nil {
@@ -70,12 +71,21 @@ func resolveConjur(ctx context.Context, config string) (string, error) {
 		return "", fmt.Errorf("%w: conjur request failed: %s", ErrResolve, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, httpMaxBody))
+	// One byte past the cap, so a body that reaches the cap is recognized as oversize rather than
+	// handed back trimmed to it. The other resolvers read a JSON document, which stops parsing when
+	// it is cut short, so the cap fails them closed on its own. Conjur's body is the secret itself,
+	// so a truncated read looks like a whole certificate or key and the run authenticates with its
+	// first mebibyte, failing somewhere far from here while the audit trail records a good resolve.
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, httpMaxBody+1))
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("%w: conjur returned %s", ErrResolve, resp.Status)
 	}
 	if len(body) == 0 {
 		return "", fmt.Errorf("%w: conjur secret has no value", ErrResolve)
+	}
+	if len(body) > httpMaxBody {
+		return "", fmt.Errorf("%w: conjur secret is larger than the %d byte response cap",
+			ErrResolve, httpMaxBody)
 	}
 	return string(body), nil
 }

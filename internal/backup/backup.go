@@ -493,6 +493,11 @@ func gather(ctx context.Context, s Stores) (*payload, Summary, error) {
 // script URL. The role and grant cases fail closed, but the profile link is rendered as an anchor in
 // the users page on the strength of the server having validated it.
 func check(ctx context.Context, s Stores, p *payload) error {
+	// Usernames already taken in the file itself. A username belongs to one account and both SQL
+	// backends enforce that with a unique index, so a file carrying one twice passed the check
+	// against the install and then failed on the second account's insert, which is the partway
+	// failure this function exists to prevent: orgs, teams, and the earlier accounts are in by then.
+	byUsername := make(map[string]string, len(p.Users))
 	for i := range p.Users {
 		// Point at the payload element so NormalizeProfile mutates the value that apply then stores.
 		// Copying it here normalized a throwaway and let the raw, un-normalized profile reach the
@@ -518,6 +523,30 @@ func check(ctx context.Context, s Stores, p *payload) error {
 			return fmt.Errorf("%w: this backup holds an account named %q with id %s, and this "+
 				"install already has one with that name under id %s, so restoring would collide",
 				ErrFormat, acct.Username, acct.ID, existing.ID)
+		}
+		if first, dup := byUsername[acct.Username]; dup {
+			return fmt.Errorf("%w: this backup holds two accounts named %q, under ids %s and %s, "+
+				"and a username belongs to one account, so restoring would collide",
+				ErrFormat, acct.Username, first, acct.ID)
+		}
+		byUsername[acct.Username] = acct.ID
+	}
+	for _, m := range p.OrgMembers {
+		// The organization handler checks the role before it adds a member. Restore wrote the
+		// membership straight through, so a file could store a role no path would ever accept and
+		// have it listed back as that account's role in the organization.
+		if !org.ValidRole(m.Role) {
+			return fmt.Errorf("%w: %s holds role %q in organization %s, which is not a role",
+				ErrFormat, m.UserID, m.Role, m.OrgID)
+		}
+	}
+	// Policies are validated the way every other path that writes one validates them. A rule naming
+	// a vocabulary this build does not know matches no run at all, so restoring it puts an inert
+	// gate in the database, counts it in the summary as recovered, and lets every change the rule
+	// was written to hold run unapproved while the operator reads a healthy recovery.
+	for _, pol := range p.Policies {
+		if err := pol.Validate(); err != nil {
+			return fmt.Errorf("%w: policy %s (%s): %v", ErrFormat, pol.ID, pol.Name, err)
 		}
 	}
 	for _, g := range p.Grants {

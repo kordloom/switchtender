@@ -3,6 +3,7 @@ package secretsource
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -90,7 +91,17 @@ func blockUnsafeDial(_, address string, _ syscall.RawConn) error {
 func checkResolveURL(rawURL string) error {
 	u, err := url.Parse(rawURL)
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrResolve, err)
+		// url.Parse reports its reason inside a *url.Error that quotes the whole address back, and a
+		// source address is exactly where an operator puts HTTP basic credentials to reach a store
+		// behind a proxy. Rendering that error would put the password in the run's stored error in
+		// the clear, where the masker has nothing registered yet and could not redact it. Only the
+		// underlying reason is reported: it names the malformed piece, such as a bad escape or port,
+		// and never the userinfo.
+		var perr *url.Error
+		if errors.As(err, &perr) {
+			return fmt.Errorf("%w: address is not a valid URL: %v", ErrResolve, perr.Err)
+		}
+		return fmt.Errorf("%w: address is not a valid URL", ErrResolve)
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return fmt.Errorf("%w: address must be http or https", ErrResolve)

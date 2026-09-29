@@ -6,9 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/kordloom/switchtender/internal/credential"
+	"github.com/kordloom/switchtender/internal/sqlutil"
 )
 
 // credTypeColumns is the shared select list for credential-type reads.
@@ -22,6 +22,11 @@ type credTypeStore struct {
 }
 
 // Save inserts or replaces the credential type.
+//
+// The creation time is stored in the shared text form every other table uses. It was an integer of
+// UnixNano, which is undefined for an instant far from the epoch: a type saved with no creation
+// time overflowed to the eighteenth century rather than staying zero, sorted ahead of every real
+// type in List, and could not be corrected because the upsert left created_at out of its SET list.
 func (s *credTypeStore) Save(ctx context.Context, t *credential.CredentialType) error {
 	fields, env, extra, err := marshalType(t)
 	if err != nil {
@@ -31,8 +36,10 @@ func (s *credTypeStore) Save(ctx context.Context, t *credential.CredentialType) 
 INSERT INTO credential_types (id, name, fields, env, extra_vars, created_at)
 VALUES (?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
-	name=excluded.name, fields=excluded.fields, env=excluded.env, extra_vars=excluded.extra_vars`
-	if _, err := s.db.ExecContext(ctx, q, t.ID, t.Name, fields, env, extra, t.CreatedAt.UnixNano()); err != nil {
+	name=excluded.name, fields=excluded.fields, env=excluded.env, extra_vars=excluded.extra_vars,
+	created_at=excluded.created_at`
+	if _, err := s.db.ExecContext(ctx, q, t.ID, t.Name, fields, env, extra,
+		sqlutil.FormatTime(t.CreatedAt)); err != nil {
 		return fmt.Errorf("save credential type: %w", err)
 	}
 	return nil
@@ -119,12 +126,16 @@ func scanCredType(sc scanner) (*credential.CredentialType, error) {
 	var (
 		t                  credential.CredentialType
 		fields, env, extra string
-		createdNanos       int64
+		created            string
 	)
-	if err := sc.Scan(&t.ID, &t.Name, &fields, &env, &extra, &createdNanos); err != nil {
+	if err := sc.Scan(&t.ID, &t.Name, &fields, &env, &extra, &created); err != nil {
 		return nil, err
 	}
-	t.CreatedAt = time.Unix(0, createdNanos).UTC()
+	at, err := sqlutil.ParseTime(created)
+	if err != nil {
+		return nil, fmt.Errorf("decode credential type created_at: %w", err)
+	}
+	t.CreatedAt = at
 	if err := json.Unmarshal([]byte(fields), &t.Fields); err != nil {
 		return nil, fmt.Errorf("decode credential type fields: %w", err)
 	}

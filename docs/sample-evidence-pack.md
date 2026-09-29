@@ -8,7 +8,9 @@
 # Sample evidence pack
 
 This is what the change-management evidence a reviewer samples looks like, produced by
-`switchtender audit report` over a real chain. It is the artifact you hand an auditor or a
+`switchtender audit report` over a real chain, which is a Team feature. The chain, the per-run
+dossier, the signed receipts, and offline verification behind it are free. It is the artifact you
+hand an auditor or a
 prospect's security team. See [Compliance mapping](compliance.md) for which control clauses each
 column answers.
 

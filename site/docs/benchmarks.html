@@ -4,16 +4,16 @@
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>Benchmarks | SwitchTender docs</title>
-	<meta name="description" content="Measured numbers for the questions people actually ask: how fast does it start, how much memory does it hold at idle, and how big is the binary.">
+	<meta name="description" content="Measured numbers for the questions people actually ask: how fast it starts, how much memory it holds at idle, how big the binary is, and how big the container image is.">
 	<link rel="canonical" href="https://switchtender.com/docs/benchmarks">
 	<meta property="og:title" content="Benchmarks | SwitchTender docs">
-	<meta property="og:description" content="Measured numbers for the questions people actually ask: how fast does it start, how much memory does it hold at idle, and how big is the binary.">
+	<meta property="og:description" content="Measured numbers for the questions people actually ask: how fast it starts, how much memory it holds at idle, how big the binary is, and how big the container image is.">
 	<meta property="og:type" content="article">
 	<meta property="og:url" content="https://switchtender.com/docs/benchmarks">
 	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
 	<meta name="twitter:card" content="summary_large_image">
 	<meta name="twitter:title" content="Benchmarks | SwitchTender docs">
-	<meta name="twitter:description" content="Measured numbers for the questions people actually ask: how fast does it start, how much memory does it hold at idle, and how big is the binary.">
+	<meta name="twitter:description" content="Measured numbers for the questions people actually ask: how fast it starts, how much memory it holds at idle, how big the binary is, and how big the container image is.">
 	<meta name="twitter:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
 	<script type="application/ld+json">
 {
@@ -24,7 +24,7 @@
   "name": "SwitchTender",
   "url": "https://switchtender.com/"
  },
- "description": "Measured numbers for the questions people actually ask: how fast does it start, how much memory does it hold at idle, and how big is the binary.",
+ "description": "Measured numbers for the questions people actually ask: how fast it starts, how much memory it holds at idle, how big the binary is, and how big the container image is.",
  "headline": "Benchmarks",
  "isPartOf": {
   "@type": "WebSite",
@@ -60,135 +60,174 @@
 	<div class="dshell">
 		<aside class="dside">
 			<nav>
-				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migrate off AWX, Semaphore, Rundeck, or Jenkins</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks" class="active">Benchmarks</a><a href="/docs/continuity">Continuity</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/vendor-risk">Vendor risk review</a>
+				<a href="/docs/">Overview</a><a href="/docs/quickstart">Quickstart</a><a href="/docs/faq">FAQ</a><a href="/docs/switching-from-awx">Switching from AWX</a><a href="/docs/migration">Migration</a><a href="/docs/tutorials">Tutorials</a><a href="/docs/tutorial-run-a-job">Run a job</a><a href="/docs/tutorial-save-a-template">Save a template</a><a href="/docs/tutorial-schedule-a-job">Schedule a job</a><a href="/docs/tutorial-set-a-secret">Set a secret</a><a href="/docs/tutorial-migrate">Migrate your setup</a><a href="/docs/tool-ansible">Ansible runs</a><a href="/docs/tool-bash">Bash runs</a><a href="/docs/tool-terraform">Terraform runs</a><a href="/docs/tool-opentofu">OpenTofu runs</a><a href="/docs/tool-python">Python runs</a><a href="/docs/tool-powershell">PowerShell runs</a><a href="/docs/tool-go">Go runs</a><a href="/docs/concepts">Concepts</a><a href="/docs/reliability">Reliability</a><a href="/docs/configuration">Configuration</a><a href="/docs/desktop">Desktop</a><a href="/docs/features">Features</a><a href="/docs/secrets">Secrets</a><a href="/docs/drift">Drift detection</a><a href="/docs/compliance">Compliance mapping</a><a href="/docs/threat-model">Threat model</a><a href="/docs/agent-red-team">Red team: can an agent get a change past the gate?</a><a href="/docs/sample-evidence-pack">Sample evidence pack</a><a href="/docs/api">HTTP API</a><a href="/docs/comparison">SwitchTender compared to the field</a><a href="/docs/agents">Run an AI agent through the gate</a><a href="/docs/ai">Advisory AI</a><a href="/docs/backup">Backup and restore</a><a href="/docs/benchmarks" class="active">Benchmarks</a><a href="/docs/continuity">Continuity</a><a href="/docs/roadmap">Roadmap</a><a href="/docs/sdk">Extend SwitchTender in Go</a><a href="/docs/vendor-risk">Vendor risk review</a>
 			</nav>
 		</aside>
 		<main class="dcontent prose">
 			<h1 id="benchmarks">Benchmarks</h1>
-<p>Measured numbers for the questions people actually ask: how fast does it start, how much memory does
-it hold at idle, and how big is the binary. Every number below was measured on a release-flag build,
-the method is shown so you can reproduce it on your own hardware, and nothing here is a projection.</p>
-<p>The boot, memory, and binary figures here were re-measured on 2026-08-18 against v1.66.1, on a ten-core
-Apple Silicon laptop and inside an Alpine Linux container on the same machine. The container head to
-head further down is a 2026-08-10 snapshot; its competitor images were re-confirmed unchanged on
-2026-08-18. Memory and binary sizes are mebibytes, the unit <code>ps</code> and <code>/proc</code> report. Your hardware will
+<p>Measured numbers for the questions people actually ask: how fast it starts, how much memory it holds
+at idle, how big the binary is, and how big the container image is. Every figure on this page was
+measured on 2026-09-08 against the v1.76.0 tag, except where a line carries its own date. Figures
+that vary from run to run say how many trials they came from and how far apart those trials fell.
+Nothing here is a projection, and no measured cell is arithmetic on another cell. Where the page
+does divide or add published figures, for a ratio or a total, it says which figures it used.</p>
+<p>The machine is a ten-core Apple Silicon laptop. Boot times are timed in process on macOS. The memory
+and container figures come from Docker Desktop's Linux virtual machine on the same laptop, five vCPU
+and 8 GiB, because Linux is where servers run. Sizes are mebibytes throughout, computed from exact
+byte counts rather than from the decimal megabytes <code>docker image ls</code> prints. Your hardware will
 differ; the method will not.</p>
-<p>These boot and memory figures were measured on v1.66.1. They hold steady from one release to the
-next, which is the point below, so they are not re-timed for every tag. The lower no-encryption boot
-comes from UI asset compression moving off the startup path; a build older than that change comes up
-slower.</p>
-<p>The point of re-measuring: across dozens of releases, a full security-hardening pass, custom credential
-types, and new governance features, the binary moved only from about 29 to 31 mebibytes and the idle
-memory held flat. That stability is the number worth watching over time, not any single reading.</p>
 <h2 id="boot-and-memory">Boot and memory</h2>
 <table>
 <thead>
 <tr>
 <th>Measurement</th>
-<th>Value</th>
+<th>Median</th>
+<th>Spread</th>
+<th>Trials</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td>Cold boot to serving, no encryption key</td>
-<td>28 ms</td>
+<td>30 ms</td>
+<td>27-48 ms</td>
+<td>15</td>
 </tr>
 <tr>
 <td>Cold boot to serving, credential encryption on</td>
-<td>77 ms</td>
+<td>83 ms</td>
+<td>73-201 ms</td>
+<td>15</td>
 </tr>
 <tr>
-<td>Resident memory at idle, Linux</td>
-<td>32 MiB</td>
+<td>Resident memory at idle, Linux, no encryption key</td>
+<td>35.1 MiB</td>
+<td>34.9-35.1 MiB</td>
+<td>5</td>
 </tr>
 <tr>
-<td>Stripped binary, arm64</td>
-<td>31.4 MiB</td>
+<td>Resident memory at idle, Linux, credential encryption on</td>
+<td>34.6 MiB</td>
+<td>34.5-35.6 MiB</td>
+<td>5</td>
 </tr>
 </tbody>
 </table>
-<p>Boot times are the median of five trials after a warm-up run, timed in process from launch to a
-served <code>/healthz</code>, so no shell or subprocess overhead is counted. Memory is resident size three
-seconds after serving begins, read from <code>/proc</code> inside the container, because Linux is where servers
-actually run.</p>
-<p>The gap between the two boot rows is credential key derivation: argon2id at 64 MiB memory cost, a
-deliberate security parameter, paid once at startup. It is CPU-bound, which is why it costs about
-35 ms on a laptop and substantially more on one slow shared vCPU. That cost buys a key that is
-expensive to attack offline, and it is paid once per process, not per run. If you do not store
-credentials in SwitchTender, do not set the encryption pair and you do not pay it at all.</p>
-<p>Idle memory does not rise with encryption on because the derivation arena is handed back to the
-operating system as soon as the key exists. On macOS the same measurement reads near 99 MiB, because
-<code>ps</code> there keeps reclaimable pages in the resident count even though the memory has been released.
-The Linux figures above are the ones to plan against.</p>
+<p>Boot is timed in process, from launch to a served <code>/healthz</code>, so no shell or subprocess overhead is
+counted. The harness runs a warm-up and five timed trials per path, and it was run three times. The
+median column is the middle of those three five-trial medians, and the spread column is the lowest
+and the highest single trial across all fifteen. The three medians were 29, 30 and 30 ms without
+encryption, and 73, 83 and 88 ms with it.</p>
+<p>On the encryption path the spread matters more than the midpoint. Earlier versions of this table
+published one number from a smaller sample, most recently 73 ms taken from two end to end runs that
+returned 74 ms and 72 ms. Three runs put the tail at 201 ms, which two runs never saw. Read the
+range, not one reading.</p>
+<p>Memory is <code>VmRSS</code> read from <code>/proc</code> inside the container, three seconds after the server began
+serving, on five freshly started containers per path. Turning encryption on does not raise it,
+because the argon2id arena is handed back to the operating system as soon as the key exists.</p>
+<p>The gap between the two boot rows is credential key derivation. Timed on its own, with the
+parameters the code ships (argon2id, three passes, 64 MiB memory cost, four lanes), the derivation
+takes 38 ms on this laptop. Two runs of fifteen timed derivations gave medians of 37.7 and 38.5 ms,
+with individual trials from 35 to 43 ms apart from one 109 ms outlier. Subtracting one boot row from
+the other would instead put the gap at 53 ms, but that difference also absorbs arena allocation and
+run-to-run noise, so the directly timed figure is the one published here and the subtraction is not.
+The cost is CPU-bound, which is why it stays small on a laptop and grows on one slow shared vCPU. It
+buys a key that is expensive to attack offline, and it is paid once per process, not per run. If you
+store no credentials in SwitchTender, leave the encryption pair unset and you never pay it.</p>
+<p>On macOS the same idle measurement reads as high as 101 MiB with encryption on, because <code>ps</code> there
+keeps reclaimable pages in the resident count even after the memory has been released. The Linux
+figures above are the ones to plan against.</p>
 <h2 id="binary-size">Binary size</h2>
-<p>A stripped release build, <code>go build -trimpath -ldflags &quot;-s -w&quot;</code>:</p>
+<p>A stripped release build from the v1.76.0 tag, with the flags the release uses:</p>
+<pre><code>CGO_ENABLED=0 go build -trimpath \
+  -ldflags &quot;-s -w -X github.com/kordloom/switchtender/cmd.Version=1.76.0&quot;
+</code></pre>
 <table>
 <thead>
 <tr>
 <th>Platform</th>
 <th>Size</th>
+<th>Bytes</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td>linux/arm64</td>
-<td>30.4 MiB</td>
+<td>30.9 MiB</td>
+<td>32,374,946</td>
 </tr>
 <tr>
 <td>darwin/arm64</td>
-<td>31.4 MiB</td>
+<td>31.9 MiB</td>
+<td>33,450,818</td>
 </tr>
 <tr>
 <td>linux/amd64</td>
-<td>32.4 MiB</td>
+<td>32.9 MiB</td>
+<td>34,521,250</td>
 </tr>
 </tbody>
 </table>
-<p>That single file is the whole control plane: server, workers, UI, importers, and the CLI.</p>
+<p>That single file is the whole control plane: server, workers, UI, importers, and the CLI. The build
+is reproducible. Built twice from the tag with the same toolchain, the darwin/arm64 binary came out
+byte for byte identical, SHA-256 <code>6975b605fb3ee42e...</code>.</p>
+<p>Growth over time is the figure worth watching, and it is small. Building four tags today with one
+toolchain and one set of flags, the darwin/arm64 binary measures 29.7 MiB at v1.30.0, 30.2 MiB at
+v1.53.0, 30.7 MiB at v1.62.0 and 31.9 MiB at v1.76.0. That is 2.2 MiB across the eighty-seven
+releases after v1.30.0, which included a security-hardening pass, custom credential types, and new
+governance features.</p>
 <h2 id="reproduce-it">Reproduce it</h2>
-<p>The repository carries the harness the boot and memory rows came from, and the 2026-08-18 figures
-above are its output:</p>
+<p>The repository carries the harness the two boot rows came from:</p>
 <pre><code>go run ./cmd/bench
 </code></pre>
-<p>It builds a release binary, runs the warm-up and five timed trials for both boot paths, and prints
-the boot, memory, and binary size rows. Run it on your own hardware and you should get your machine's
-version of the table rather than ours.</p>
+<p>It builds a release binary, runs a warm-up and five timed trials for both boot paths, and prints the
+boot rows with their medians and ranges alongside the size of the binary it just built for your
+platform. Its memory readings come from <code>ps</code> on the host, so on macOS they read high for the reason
+given above. The Linux memory rows in the table come from <code>/proc</code> inside a container instead, and
+the per-platform sizes come from the release build shown under Binary size. Run it on your own
+hardware and you should get your machine's version of the boot rows rather than ours.</p>
 <h2 id="pending-re-measurement">Pending re-measurement</h2>
-<p>An earlier round measured a $6/month cloud VM with one shared vCPU at 189 ms cold boot without
-encryption and 937 ms with it, showing that argon2id dominates startup on a slow core. Those figures
-came from an earlier release and are not re-derived here, so treat them as indicative of the shape
-rather than as current numbers. This row is due a re-run.</p>
+<p>An earlier round, measured on 2026-07-29 against v1.30.0, put a $6/month cloud VM with one shared
+vCPU at 189 ms cold boot without encryption and 937 ms with it, showing that argon2id dominates
+startup on a slow core. Those figures are eighty-seven releases old and are not re-derived here, so
+treat them as the shape of the thing rather than as current numbers. This row is due a re-run.</p>
 <h2 id="head-to-head">Head to head</h2>
-<p>Numbers we quote from a competitor's own marketing are not a benchmark. These were measured, on one
-machine, on 2026-08-10: SwitchTender at v1.62.0, Ansible Semaphore v2.19.7, and Ansible AWX 24.6.1,
-each in its own container on the same Docker Desktop Linux VM (five vCPU, 8 GiB) on an Apple Silicon
-laptop. Method for the timed rows: each server's binary is baked into its image, never bind-mounted
-from the host, because a mounted binary faults across the virtual-machine file boundary on every cold
-start and would flatter or punish a program for where its file sits rather than what it does. Boot is
-<code>docker start</code> to the first successful health response, the median of five after a warm-up. Resident
-memory is the server process's <code>VmRSS</code> three seconds after it began serving. Image size is what
-<code>docker image ls</code> reports.</p>
+<p>Numbers we quote from a competitor's own marketing are not a benchmark. Every measured cell in the
+table below was taken here, on 2026-09-08, on the machine described at the top of the page. The
+cells that carry no number say why below rather than guessing.</p>
+<p>The version of this table that stood before mixed its dates: a freshly measured SwitchTender column
+beside competitor figures from 2026-08-10. Freezing the whole table at 2026-08-10 was the other
+option, and it was not available honestly, because the SwitchTender image size published for that
+date was wrong on that date too and no correct reading exists for it. So every cell was re-measured
+instead. Semaphore is a single container and re-measures cleanly at its current release. AWX could
+not be re-timed here, because it needs Kubernetes and this machine does not have a cluster, but
+<code>docker pull</code> on 2026-09-08 reports that the 24.6.1 tag still resolves to the same digest that was
+weighed before, so its size is a current reading of the same artifact rather than a stale one.</p>
+<p>Method for the sizes: each image's exact byte count from <code>docker image inspect</code>, divided by 1024
+twice. The SwitchTender image is built from this repository's Dockerfile at the v1.76.0 tag. Method
+for resident memory: the server process's <code>VmRSS</code>, three seconds after it began serving, on five
+freshly started containers.</p>
 <table>
 <thead>
 <tr>
 <th>Measurement</th>
-<th>SwitchTender</th>
-<th>Semaphore</th>
-<th>AWX</th>
+<th>SwitchTender v1.76.0</th>
+<th>Semaphore v2.19.12</th>
+<th>AWX 24.6.1</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td>Container image</td>
-<td>40 MiB</td>
-<td>984 MiB</td>
-<td>996 MiB, plus PostgreSQL 467 MiB and Redis 136 MiB</td>
+<td>110.5 MiB</td>
+<td>939.2 MiB</td>
+<td>950.3 MiB</td>
 </tr>
 <tr>
 <td>Processes to run it</td>
 <td>one binary, or one container</td>
 <td>one container</td>
-<td>four or more containers under Kubernetes</td>
+<td>two container roles, plus a database and a cache</td>
 </tr>
 <tr>
 <td>External services required</td>
@@ -198,37 +237,57 @@ memory is the server process's <code>VmRSS</code> three seconds after it began s
 </tr>
 <tr>
 <td>Cold boot to serving</td>
-<td>24 ms</td>
-<td>45 ms</td>
-<td>not a single number; see below</td>
+<td>not published, see below</td>
+<td>not published, see below</td>
+<td>not a single number, see below</td>
 </tr>
 <tr>
 <td>Idle resident memory</td>
-<td>32 MiB</td>
-<td>42 MiB</td>
-<td>the sum of web, task, database, and Redis</td>
+<td>35.1 MiB</td>
+<td>43.6 MiB</td>
+<td>not measured here</td>
 </tr>
 </tbody>
 </table>
-<p>The boot row is close to the first table's in-process figure: after asset compression moved off the
-startup path, the process comes up fast enough that <code>docker start</code> overhead is most of what is left,
-so the container figure and the in-process figure converge. Both are ours, measured on different
-builds (v1.62.0 in this head to head, v1.66.1 in the boot table above) and days, so read the small
-gap between 24 ms and 28 ms as build and method, not a contradiction.</p>
-<p><strong>Semaphore is a genuinely light one-binary competitor, and we boot faster than it.</strong> In its
-single-container mode with an embedded SQLite database, the configuration measured here, it comes up
-in 45 ms against our 24 ms. The two part company further on footprint and what comes in the box: our
-image is a twenty-fifth the size, holds a lower resident set, and the single file is the whole control
-plane, while a production Semaphore adds an external MySQL or PostgreSQL, and RBAC, enforced approvals,
-a provable audit trail, and the extra runtimes are ours rather than theirs. The <a href="/docs/comparison">comparison
-page</a> has that feature picture, including where SwitchTender is still young.</p>
+<p><strong>The container image was published on this page as 40 MiB. That was wrong, and it was wrong on the
+dates it was published, not merely stale.</strong> Built from this repository's Dockerfile, the image
+measures 110.5 MiB at the v1.76.0 tag and 109.8 MiB rebuilt from the v1.62.0 tag. No release this
+page has covered ever produced an image of 40 MiB. The layers say where the weight goes: 71.5 MiB is
+the Alpine runtime layer carrying <code>ansible-core</code>, OpenSSH and CA certificates, 30.9 MiB is the
+SwitchTender binary, and 8.1 MiB is the Alpine base. The static binary is the small part. The
+Ansible runtime next to it is not.</p>
+<p><strong>The container cold-boot row is withdrawn rather than restated.</strong> By the method that row described,
+<code>docker start</code> to the first successful health response, ten timings on this machine ran from 401 ms
+to 3.5 seconds, and the <code>docker start</code> client call alone accounted for 355 ms to 2.6 seconds of
+that, before the container's first instruction runs. The 24 ms reading that once stood here is not
+reachable by that method, and the 45 ms Semaphore figure beside it was taken the same way, so
+neither is republished. The in-process boot table at the top of this page comes from a harness in
+this repository, reproduces on demand, and stands.</p>
+<p><strong>Semaphore is a genuinely light one-binary competitor.</strong> Measured in its single-container mode with
+the embedded SQLite database its own entrypoint supports, its image measures 939.2 MiB where ours
+measures 110.5 MiB, a ratio of about 8.5 to 1, and it holds a higher resident set at 43.6 MiB
+against our 35.1 MiB. Size and memory are what this page can speak to, and they are not a feature
+comparison: Semaphore's own image describes it as covering Terraform, OpenTofu, Terragrunt and
+PowerShell alongside Ansible. What each product does and does not carry is the <a href="/docs/comparison">comparison
+page</a>, including where SwitchTender is still young. We publish no boot comparison
+against it, for the reason above.</p>
 <p><strong>AWX is not shaped for a boot-time row, and pretending otherwise would be the dishonest thing.</strong> It
-has no single-process mode. The AWX Operator reconciles a set of pods, web and task from the 996 MiB
-application image, PostgreSQL, and Redis, and pulls a separate execution-environment image before it
-runs a playbook, so &quot;time to serving&quot; is a cluster reconciling over minutes, not a process starting in
-milliseconds. What is comparable is the standing cost: roughly 1.6 GiB of images across four or more
-long-lived containers, on top of a Kubernetes cluster, before the first job. That is the architecture
-difference the whole product is built around, stated in the units that actually compare.</p>
+has no single-process mode. Its own image ships two supervisor configurations: the web set runs
+nginx, uwsgi, daphne and two helpers, and the task set runs the dispatcher, the websocket relay and
+the callback receiver. Its default settings point the message broker, the cache and the websocket
+channel layer at Redis, and its dispatcher listens on PostgreSQL <code>pg_notify</code>, so a database and a
+cache are not optional extras. The same defaults schedule a receptor work-unit reaper every sixty
+seconds and set a receptor service advertisement period, so a Receptor mesh stands alongside them;
+the <code>receptor</code> binary is not in this image, so whatever carries it is not weighed below. The AWX
+Operator reconciles that set of pods and pulls a separate execution-environment image before it
+runs a playbook, so &quot;time to serving&quot; there is a cluster reconciling over minutes, not a process
+starting in milliseconds. What compares is the standing cost. Weighed on 2026-09-08, the
+application image at 950.3 MiB, <code>postgres:15</code> at 445.8 MiB and <code>redis:7</code> at 129.3 MiB come to
+1,599,467,678 bytes, about 1.5 GiB of images across the four long-lived containers those three
+images produce, on top of a Kubernetes cluster and before the Receptor mesh, before the first job
+runs. That total is a floor, not a ceiling. Earlier versions of this page put it at 1.6 GiB, which
+was the decimal-gigabyte figure labeled as gibibytes. The architecture difference is what the whole
+product is built around, and this is it in units that compare.</p>
 <p>Run these yourself and get materially different numbers, and open an issue with your hardware and
 method; we will look, and we will correct the table if it is wrong.</p>
 

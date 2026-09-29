@@ -33,11 +33,19 @@ var tokenAgent bool
 var tokenCmd = &cobra.Command{
 	Use:   "token",
 	Short: "Manage API tokens. Creating the first token turns authentication on.",
+	Args:  cobra.NoArgs,
+	RunE:  runGroupHelp,
 }
 
 // tokenNewCmd mints a token and prints it once. Without --user the token is unscoped and acts as
 // admin; bound to an account it carries that account's role, which is what an automation or an AI
 // agent should hold.
+//
+// The account is named by --user and never by a positional argument, so a bare word is refused
+// rather than dropped. "token new alice" reads as binding the token to alice; with no validator the
+// word was discarded and the token minted unscoped, so the operator handed out administrator on the
+// control plane believing they had handed out an operator-bound credential, and nothing in the
+// output said otherwise.
 var tokenNewCmd = &cobra.Command{
 	Use:   "new",
 	Short: "Create an API token and print it. The value is shown only this once.",
@@ -45,6 +53,7 @@ var tokenNewCmd = &cobra.Command{
 		"Without --user the token is unscoped and acts as admin. With --user it is bound to that\n" +
 		"account and carries the account's role, so an automation or an AI agent given an\n" +
 		"operator-bound token can submit runs but cannot approve them or change configuration.",
+	Args: cobra.NoArgs,
 	RunE: runTokenNew,
 }
 
@@ -52,6 +61,7 @@ var tokenNewCmd = &cobra.Command{
 var tokenListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List API tokens.",
+	Args:  cobra.NoArgs,
 	RunE:  runTokenList,
 }
 

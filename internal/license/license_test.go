@@ -250,15 +250,15 @@ func TestAllowPoliciesPerTier(t *testing.T) {
 		Total   int
 		WantErr string
 	}{
-		{License: nil, Total: 1},                                                   // Test 0: Community holds one.
-		{License: nil, Total: 2, WantErr: "Community holds one"},                   // Test 1.
-		{License: lic(TierPro, live), Total: 5},                                    // Test 2: Pro holds five.
-		{License: lic(TierPro, live), Total: 6, WantErr: "Team removes the cap"},   // Test 3.
-		{License: lic(TierTeam, live), Total: 60},                                  // Test 4: Team is uncapped.
-		{License: lic(TierEnterprise, live), Total: 600},                           // Test 5.
-		{License: lic("", live), Total: 60},                                        // Test 6: pre-Pro licenses are Team.
-		{License: lic(TierPro, lapsed), Total: 2, WantErr: "Community holds one"},  // Test 7: lapsed caps free.
-		{License: lic(TierTeam, lapsed), Total: 2, WantErr: "Community holds one"}, // Test 8.
+		{License: nil, Total: 1}, // Test 0: Community holds one.
+		{License: nil, Total: 2, WantErr: "Community tier holds one"},                   // Test 1.
+		{License: lic(TierPro, live), Total: 5},                                         // Test 2: Pro holds five.
+		{License: lic(TierPro, live), Total: 6, WantErr: "Team removes the cap"},        // Test 3.
+		{License: lic(TierTeam, live), Total: 60},                                       // Test 4: Team is uncapped.
+		{License: lic(TierEnterprise, live), Total: 600},                                // Test 5.
+		{License: lic("", live), Total: 60},                                             // Test 6: pre-Pro licenses are Team.
+		{License: lic(TierPro, lapsed), Total: 2, WantErr: "Community tier holds one"},  // Test 7: lapsed caps free.
+		{License: lic(TierTeam, lapsed), Total: 2, WantErr: "Community tier holds one"}, // Test 8.
 	}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d", testNum), func(t *testing.T) {
