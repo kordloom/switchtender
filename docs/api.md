@@ -66,9 +66,9 @@ Every endpoint the server exposes. The API is served under the `/v1` base path. 
 | GET    | `/auth/saml/login`      | Start the SAML sign-in handshake.                       |
 | POST   | `/auth/saml/acs`        | Consume the IdP assertion and issue a token.            |
 | GET    | `/auth/saml/metadata`   | Service provider metadata for IdP registration.         |
-| POST   | `/v1/users`                | Create an account with a role.                          |
-| GET    | `/v1/users`                | List accounts.                                          |
-| PUT    | `/v1/users/{id}`           | Update an account's role or password.                   |
+| POST   | `/v1/users`                | Create an account with a role and an optional profile.  |
+| GET    | `/v1/users`                | List accounts with their profiles, admin only.          |
+| PUT    | `/v1/users/{id}`           | Update an account's role, password, or profile.         |
 | DELETE | `/v1/users/{id}`           | Delete an account. Its tokens stop working.             |
 | POST   | `/v1/teams`                | Create a team of users.                                 |
 | GET    | `/v1/teams`                | List teams.                                             |
@@ -105,6 +105,38 @@ Every endpoint the server exposes. The API is served under the `/v1` base path. 
 | GET    | `/v1/audit/export`         | Signed, self-verifying snapshot of the audit chain.     |
 | GET    | `/metrics`              | Prometheus series: run, fleet, queue-depth, and worker gauges, plus a run-duration histogram. |
 | GET    | `/healthz`              | Liveness.                                               |
+
+## Account profiles
+
+An account carries an optional profile alongside its role: `full_name`, `email`, `phone`, `title`,
+`links`, and `notes`. All of them are optional, so an account created by the CLI or provisioned over
+single sign-on stays valid with none of them set. `title` is descriptive and grants nothing; `role`
+alone decides what an account may do.
+
+```bash
+curl -X PUT https://switchtender.example.com/v1/users/user_9f2c \
+  -H "Authorization: Bearer $SWITCHTENDER_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "username": "ada",
+    "role": "operator",
+    "full_name": "Ada Lovelace",
+    "email": "ada@example.com",
+    "phone": "+1 555 0100",
+    "title": "Platform Engineer",
+    "links": ["https://wiki.example.com/people/ada"],
+    "notes": "review each quarter"
+  }'
+```
+
+The profile is replaced wholesale on update, so send the profile you want to end up with rather than
+only the parts that changed. An omitted field clears.
+
+A profile is personal data and is treated as such. Only an admin may read it: `/v1/users` requires
+the admin role and is not delegable by a manage grant. The values are never written to the logs, and
+a rejection names the offending field without echoing it. Each single-line field is capped at 320
+characters, `notes` at 2000, and an account may carry at most eight links. A link must be an `http`
+or `https` address; any other scheme is refused, because the admin page renders links as anchors.
 
 ## Relay endpoints
 

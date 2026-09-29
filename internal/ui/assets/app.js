@@ -367,9 +367,198 @@ function mountTableSort() {
 	});
 }
 
-// applyRowVisibility shows a row only when neither the filter nor the pager hides it.
+// applyRowVisibility shows a row only when none of the text filter, the facets, or the pager hides
+// it, so the three compose instead of fighting over the same flag.
 function applyRowVisibility(row) {
-	row.hidden = row.dataset.fhide === "1" || row.dataset.phide === "1";
+	row.hidden = row.dataset.fhide === "1" || row.dataset.xhide === "1" || row.dataset.phide === "1";
+}
+
+// FACET_COLUMNS names the categorical column of each list that is worth checking off rather than
+// typing at: the tool a template runs, what a credential holds, the role an account carries. The
+// runs page is absent because it filters on the server, across every run rather than the loaded page.
+const FACET_COLUMNS = {
+	jobtemplates: ["Type"],
+	credentials: ["Kind", "Source", "Secret"],
+	users: ["Role"],
+	schedules: ["Enabled"],
+	fleet: ["Last outcome"],
+	drift: ["State"],
+	workers: ["Health"],
+	sources: ["Status"],
+	inventories: ["Format"],
+	policies: ["Tool", "Holding"],
+	audit: ["Method"],
+	doctor: ["Severity"],
+};
+
+// CHIP_SELECTOR matches the small labels a cell shows instead of plain text. A cell built from chips
+// is really a set of values, so each chip is faceted separately and a template tagged both TERRAFORM
+// and DRY is found under either.
+const CHIP_SELECTOR = ".tool-badge, .run-kind, .chip, .badge, .origin-chip, .cred-kind";
+
+// cellFacetValues reads the values a cell contributes to a facet: one per chip when it holds chips,
+// otherwise its text as a single value. A blank cell contributes nothing, so an empty column never
+// grows a meaningless checkbox.
+function cellFacetValues(cell) {
+	if (!cell) return [];
+	const chips = cell.querySelectorAll(CHIP_SELECTOR);
+	if (chips.length) {
+		return Array.from(chips).map((c) => c.textContent.trim()).filter(Boolean);
+	}
+	const text = cell.textContent.trim();
+	return text && text !== "—" ? [text] : [];
+}
+
+// mountFacetFilters adds a checkbox menu per categorical column beside the list filter, so a list is
+// narrowed by ticking the types wanted rather than by typing one of them. Values are discovered from
+// the rendered rows, so a column gains a checkbox the moment a row uses it and the control needs no
+// per-page vocabulary to maintain.
+function mountFacetFilters() {
+	const columns = FACET_COLUMNS[document.body.dataset.page];
+	const wrap = document.querySelector(".list-filter");
+	const table = document.querySelector("main.content table");
+	if (!columns || !wrap || !table || !table.tHead || !table.tBodies[0]) return;
+	const tbody = table.tBodies[0];
+	const headers = Array.from(table.tHead.rows[0].cells).map((th) => th.textContent.trim().toLowerCase());
+	const facets = [];
+	for (const name of columns) {
+		const index = headers.indexOf(name.toLowerCase());
+		if (index !== -1) facets.push(mountFacet(wrap, table, tbody, name, index, () => applyFacets(facets, tbody, table)));
+	}
+	if (!facets.length) return;
+	// Rows arrive after the mount on every page, and a sort reorders them, so the value lists and the
+	// counts are rebuilt whenever the body changes.
+	const refresh = () => {
+		for (const f of facets) f.refresh();
+		applyFacets(facets, tbody, table);
+	};
+	new MutationObserver(refresh).observe(tbody, { childList: true });
+	refresh();
+}
+
+// applyFacets hides any row that fails a facet, leaving the text filter's and the pager's own flags
+// alone, then tells the table its visible set changed.
+function applyFacets(facets, tbody, table) {
+	const active = facets.filter((f) => f.selected.size > 0);
+	for (const row of tbody.rows) {
+		if (row.classList.contains("skeleton-row")) continue;
+		const pass = active.every((f) =>
+			cellFacetValues(row.cells[f.index]).some((v) => f.selected.has(v)));
+		row.dataset.xhide = pass ? "" : "1";
+		applyRowVisibility(row);
+	}
+	table.dispatchEvent(new CustomEvent("rowsfiltered"));
+}
+
+// mountFacet builds one column's checkbox menu: a labeled button that opens a panel of the values
+// present in that column, each with how many rows carry it. It returns the facet's state so the
+// mount can rebuild its values and apply the whole set together.
+function mountFacet(wrap, table, tbody, name, index, onChange) {
+	const facet = { name, index, selected: new Set(), refresh: null };
+	const host = document.createElement("div");
+	host.className = "facet";
+	const button = document.createElement("button");
+	button.type = "button";
+	button.className = "button facet-btn";
+	button.setAttribute("aria-expanded", "false");
+	button.dataset.tip = "Click to filter this list by " + name.toLowerCase();
+	const label = document.createElement("span");
+	label.textContent = name;
+	const count = document.createElement("span");
+	count.className = "facet-count";
+	count.hidden = true;
+	button.appendChild(label);
+	button.appendChild(count);
+	button.insertAdjacentHTML("beforeend",
+		'<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" ' +
+		'stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+		'<polyline points="6 9 12 15 18 9"/></svg>');
+	const panel = document.createElement("div");
+	panel.className = "facet-panel";
+	panel.hidden = true;
+	panel.setAttribute("role", "group");
+	panel.setAttribute("aria-label", name + " filter");
+	host.appendChild(button);
+	host.appendChild(panel);
+	wrap.appendChild(host);
+
+	const syncButton = () => {
+		count.textContent = String(facet.selected.size);
+		count.hidden = facet.selected.size === 0;
+		host.classList.toggle("facet-on", facet.selected.size > 0);
+	};
+	// refresh rebuilds the value list from the rows that are in the table now, keeping any tick whose
+	// value is still present and dropping the control entirely for a column with nothing to choose.
+	facet.refresh = () => {
+		const counts = new Map();
+		for (const row of tbody.rows) {
+			if (row.classList.contains("skeleton-row")) continue;
+			for (const v of cellFacetValues(row.cells[index])) {
+				counts.set(v, (counts.get(v) || 0) + 1);
+			}
+		}
+		for (const v of Array.from(facet.selected)) {
+			if (!counts.has(v)) facet.selected.delete(v);
+		}
+		host.hidden = counts.size < 2;
+		panel.textContent = "";
+		const values = Array.from(counts.keys()).sort((a, b) => a.localeCompare(b));
+		for (const value of values) {
+			const row = document.createElement("label");
+			row.className = "facet-item";
+			const box = document.createElement("input");
+			box.type = "checkbox";
+			box.checked = facet.selected.has(value);
+			box.addEventListener("change", () => {
+				if (box.checked) facet.selected.add(value);
+				else facet.selected.delete(value);
+				syncButton();
+				onChange();
+			});
+			const text = document.createElement("span");
+			text.className = "facet-item-label";
+			text.textContent = value;
+			const n = document.createElement("span");
+			n.className = "facet-item-count";
+			n.textContent = String(counts.get(value));
+			row.appendChild(box);
+			row.appendChild(text);
+			row.appendChild(n);
+			panel.appendChild(row);
+		}
+		const clear = document.createElement("button");
+		clear.type = "button";
+		clear.className = "facet-clear";
+		clear.textContent = "Clear";
+		clear.addEventListener("click", () => {
+			facet.selected.clear();
+			for (const box of panel.querySelectorAll("input")) box.checked = false;
+			syncButton();
+			onChange();
+		});
+		panel.appendChild(clear);
+		syncButton();
+	};
+
+	const setOpen = (open) => {
+		panel.hidden = !open;
+		button.setAttribute("aria-expanded", open ? "true" : "false");
+	};
+	button.addEventListener("click", (e) => {
+		e.stopPropagation();
+		const opening = panel.hidden;
+		for (const other of document.querySelectorAll(".facet-panel")) other.hidden = true;
+		for (const other of document.querySelectorAll(".facet-btn")) {
+			other.setAttribute("aria-expanded", "false");
+		}
+		setOpen(opening);
+	});
+	panel.addEventListener("click", (e) => e.stopPropagation());
+	document.addEventListener("click", () => setOpen(false));
+	host.addEventListener("keydown", (e) => {
+		if (e.key === "Escape" && !panel.hidden) { setOpen(false); button.focus(); }
+	});
+	return facet;
 }
 
 // mountTablePager caps how many rows a list shows at once, with a footer for paging: a count, a
@@ -432,11 +621,15 @@ function mountTablePager() {
 	apply();
 }
 
-// PAGE_DOCS maps each page to its most relevant guide, linked from the page header.
+// PAGE_DOCS maps each page to the guide that explains that page's subject. Every page but sign in
+// has an entry, so the same help chip appears in the same place everywhere and becomes something a
+// reader learns to look for.
 const PAGE_DOCS = {
 	overview: { slug: "quickstart", label: "Quickstart" },
 	runs: { slug: "tutorial-run-a-job", label: "Run a job" },
+	detail: { slug: "tutorial-run-a-job", label: "Run a job" },
 	fleet: { slug: "reliability", label: "Reliability" },
+	host: { slug: "drift", label: "Drift detection" },
 	drift: { slug: "drift", label: "Drift detection" },
 	tasks: { slug: "concepts", label: "Concepts" },
 	workers: { slug: "reliability", label: "Reliability" },
@@ -447,34 +640,77 @@ const PAGE_DOCS = {
 	workflows: { slug: "concepts", label: "Concepts" },
 	schedules: { slug: "tutorial-schedule-a-job", label: "Schedule a job" },
 	migrate: { slug: "tutorial-migrate", label: "Migrate your setup" },
-	credentials: { slug: "tutorial-set-a-secret", label: "Set a secret" },
+	credentials: { slug: "secrets", label: "Secrets" },
 	users: { slug: "configuration", label: "Configuration" },
 	audit: { slug: "features", label: "Features" },
 	policies: { slug: "features", label: "Features" },
 	doctor: { slug: "concepts", label: "Concepts" },
+	docs: { slug: "", label: "All guides" },
 };
 
-// mountPageDocs adds a small guide link to the page header, so every page points at its docs.
-function mountPageDocs() {
-	const ref = PAGE_DOCS[document.body.dataset.page];
-	const head = document.querySelector(".page-head");
-	if (!ref || !head) return;
+// docsChip builds the page's help control: one book mark and the guide's name, in the same tinted
+// pill on every page so it reads as help rather than as another action.
+function docsChip(ref) {
 	const a = document.createElement("a");
 	a.className = "docs-link";
-	a.href = "/ui/docs/" + ref.slug;
-	a.dataset.tip = "Open the " + ref.label + " guide";
+	a.href = "/ui/docs" + (ref.slug ? "/" + ref.slug : "");
+	a.dataset.tip = ref.slug
+		? "Open the " + ref.label + " guide, the documentation for this page"
+		: "Open the guide index";
 	a.innerHTML = svgIcon(NAV_ICONS.docs);
 	a.appendChild(document.createTextNode(ref.label));
-	let actions = head.querySelector(".head-actions");
-	if (!actions) {
-		actions = document.createElement("div");
-		actions.className = "head-actions";
-		for (const child of Array.from(head.children)) {
-			if (!child.classList.contains("page-head-text")) actions.appendChild(child);
+	return a;
+}
+
+// pageHeadActions returns the page header's action row, building the header when the page has none.
+// A page that opens on a bare heading is promoted to the standard header so its help chip sits
+// where every other page's does; a page with no heading at all gets a lone right-aligned row.
+function pageHeadActions(main) {
+	const head = main.querySelector(".page-head");
+	if (head) {
+		let actions = head.querySelector(".head-actions");
+		if (!actions) {
+			actions = document.createElement("div");
+			actions.className = "head-actions";
+			for (const child of Array.from(head.children)) {
+				if (!child.classList.contains("page-head-text")) actions.appendChild(child);
+			}
+			head.appendChild(actions);
 		}
-		head.appendChild(actions);
+		return actions;
 	}
-	actions.appendChild(a);
+	const built = document.createElement("div");
+	built.className = "page-head";
+	const actions = document.createElement("div");
+	actions.className = "head-actions";
+	const h1 = main.querySelector(":scope > h1");
+	if (h1) {
+		const text = document.createElement("div");
+		text.className = "page-head-text";
+		const sub = h1.nextElementSibling;
+		h1.replaceWith(built);
+		text.appendChild(h1);
+		if (sub && sub.tagName === "P" && sub.classList.contains("muted")) text.appendChild(sub);
+		built.appendChild(text);
+	} else {
+		// No heading to promote, so the row stands alone at the top of the content, after the back
+		// link when the page opens on one.
+		built.classList.add("page-head-bare");
+		const back = main.querySelector(":scope > .back");
+		if (back) back.insertAdjacentElement("afterend", built);
+		else main.insertBefore(built, main.firstChild);
+	}
+	built.appendChild(actions);
+	return actions;
+}
+
+// mountPageDocs puts the guide chip on the page, so every screen points at the documentation for
+// the subject it is showing.
+function mountPageDocs() {
+	const ref = PAGE_DOCS[document.body.dataset.page];
+	const main = document.querySelector("main.content");
+	if (!ref || !main) return;
+	pageHeadActions(main).appendChild(docsChip(ref));
 }
 
 // LIST_PAGES are the pages whose main table is a searchable list.
@@ -1070,6 +1306,7 @@ function mountWorkflow() {
 		}
 	});
 	window.addEventListener("resize", renderEdges);
+	mountWizard();
 	let hadViewport = wfRestore();
 	if (!wfState.nodes.length) {
 		wfSeedExample();
@@ -1217,6 +1454,201 @@ function wfSeedExample() {
 	wfState.seq = 4;
 	const name = document.getElementById("wf-name");
 	if (name && !name.value) name.value = "Release pipeline";
+}
+
+// WF_PATTERNS are the shapes a real pipeline usually takes. A blank canvas asks the reader to know
+// both what they want and how this editor expresses it; a pattern answers the second half, laying out
+// named steps and their dependencies for them to rename and point at their own playbooks. Each step
+// is (name, tool or null to take the chosen one, column, row), where null means the pattern has no
+// opinion. Columns and rows are grid slots, turned into coordinates by wfApplyPattern.
+const WF_PATTERNS = [
+	{
+		id: "linear",
+		title: "One after another",
+		summary: "Each step waits for the one before it.",
+		detail: "The safe default. Nothing overlaps, so a failure stops the rest.",
+		diagram: [[1], [1], [1]],
+		steps: [
+			["build", null, 0, 0],
+			["test", null, 1, 0],
+			["deploy", null, 2, 0],
+		],
+		links: [[0, 1], [1, 2]],
+	},
+	{
+		id: "fanout",
+		title: "Fan out, then gate",
+		summary: "One step opens, several run at once, a last step waits for all of them.",
+		detail: "Use it when independent work can overlap but nothing after it should start early.",
+		diagram: [[1], [1, 1, 1], [1]],
+		steps: [
+			["prepare", null, 0, 1],
+			["web", null, 1, 0],
+			["workers", null, 1, 1],
+			["database", null, 1, 2],
+			["verify", null, 2, 1],
+		],
+		links: [[0, 1], [0, 2], [0, 3], [1, 4], [2, 4], [3, 4]],
+	},
+	{
+		id: "provision",
+		title: "Provision, then configure",
+		summary: "Terraform builds the infrastructure, Ansible configures it, a check proves it.",
+		detail: "The two-tool pipeline AWX cannot express without a second system.",
+		diagram: [[1], [1, 1], [1]],
+		steps: [
+			["provision", "terraform", 0, 1],
+			["configure", "ansible", 1, 0],
+			["migrate-db", "ansible", 1, 1],
+			["smoke-test", "bash", 2, 1],
+		],
+		links: [[0, 1], [0, 2], [1, 3], [2, 3]],
+	},
+	{
+		id: "canary",
+		title: "Canary, then the fleet",
+		summary: "Ship to one host, verify it, then roll to the rest.",
+		detail: "Stops a bad change after one host instead of across the fleet.",
+		diagram: [[1], [1], [1], [1]],
+		steps: [
+			["deploy-canary", null, 0, 0],
+			["verify-canary", "bash", 1, 0],
+			["deploy-fleet", null, 2, 0],
+			["verify-fleet", "bash", 3, 0],
+		],
+		links: [[0, 1], [1, 2], [2, 3]],
+	},
+];
+
+// WF_PATTERN_COL and WF_PATTERN_ROW are the grid pitch a pattern lays out on, wide enough that cards
+// never touch and their links read as curves rather than as creases.
+const WF_PATTERN_COL = 270;
+const WF_PATTERN_ROW = 130;
+
+// patternByID returns the pattern with the given id, or null.
+function patternByID(id) {
+	return WF_PATTERNS.find((p) => p.id === id) || null;
+}
+
+// wfApplyPattern replaces the graph with the named pattern, in the chosen tool where the pattern has
+// no opinion of its own. It goes through the undo stack, so a pattern dropped onto work in progress is
+// one Cmd-Z away from being taken back.
+function wfApplyPattern(id, tool) {
+	const pattern = patternByID(id);
+	if (!pattern) return;
+	wfSnapshot();
+	const target = (t) => (t === "ansible" ? "site.yml" : "");
+	wfState.nodes = pattern.steps.map(([name, stepTool, col, row], i) => {
+		const chosen = stepTool || tool;
+		return {
+			id: "n" + (wfState.seq + i),
+			name,
+			tool: chosen,
+			x: 60 + col * WF_PATTERN_COL,
+			y: 60 + row * WF_PATTERN_ROW,
+			playbook: chosen === "ansible" ? target(chosen) : "",
+			command: chosen === "ansible" ? "" : "echo " + name,
+			inventory: "",
+			dryRun: false,
+			continueOnFailure: false,
+			retries: 0,
+		};
+	});
+	wfState.edges = pattern.links.map(([from, to]) => ({
+		from: wfState.nodes[from].id, to: wfState.nodes[to].id,
+	}));
+	wfState.seq += pattern.steps.length;
+	wfState.selectedEdge = null;
+	renderWorkflow();
+	fitView();
+	wfSave();
+	wfSetStatus("Laid out " + pattern.steps.length + " steps. Open each one to point it at your own " +
+		"playbook or script. Undo takes it back.", "");
+}
+
+// patternDiagram draws a pattern's shape as a small grid of dots, so the shape is picked by looking
+// rather than by reading a description of it.
+function patternDiagram(pattern) {
+	const wrap = document.createElement("span");
+	wrap.className = "wf-pattern-shape";
+	wrap.setAttribute("aria-hidden", "true");
+	for (const column of pattern.diagram) {
+		const col = document.createElement("span");
+		col.className = "wf-pattern-col";
+		for (let i = 0; i < column.length; i++) col.appendChild(document.createElement("i"));
+		wrap.appendChild(col);
+	}
+	return wrap;
+}
+
+// mountWizard builds the pattern chooser and wires the controls that open it. Choosing a pattern
+// replaces the graph, so a canvas that already holds work says so before it is overwritten.
+function mountWizard() {
+	const modal = document.getElementById("wf-wizard-modal");
+	const list = document.getElementById("wf-wizard-list");
+	if (!modal || !list) return;
+	const warn = document.getElementById("wf-wizard-warn");
+	const toolPick = document.getElementById("wf-wizard-tool");
+	const card = modal.querySelector(".modal-card");
+	card.setAttribute("role", "dialog");
+	card.setAttribute("aria-modal", "true");
+
+	const close = () => {
+		modal.hidden = true;
+		if (wfState.opener && wfState.opener.focus) wfState.opener.focus();
+		wfState.opener = null;
+	};
+	const open = () => {
+		wfState.opener = document.activeElement;
+		if (warn) {
+			warn.hidden = wfState.nodes.length === 0;
+			warn.textContent = "This canvas already holds " + wfState.nodes.length +
+				(wfState.nodes.length === 1 ? " step" : " steps") +
+				". Choosing a pattern replaces them, and undo brings them back.";
+		}
+		modal.hidden = false;
+		const first = list.querySelector(".wf-pattern");
+		if (first) first.focus();
+	};
+
+	for (const pattern of WF_PATTERNS) {
+		const item = document.createElement("button");
+		item.type = "button";
+		item.className = "wf-pattern";
+		item.appendChild(patternDiagram(pattern));
+		const text = document.createElement("span");
+		text.className = "wf-pattern-text";
+		const title = document.createElement("span");
+		title.className = "wf-pattern-title";
+		title.textContent = pattern.title;
+		const summary = document.createElement("span");
+		summary.className = "wf-pattern-summary";
+		summary.textContent = pattern.summary;
+		const detail = document.createElement("span");
+		detail.className = "wf-pattern-detail";
+		detail.textContent = pattern.detail;
+		text.appendChild(title);
+		text.appendChild(summary);
+		text.appendChild(detail);
+		item.appendChild(text);
+		item.addEventListener("click", () => {
+			wfApplyPattern(pattern.id, toolPick ? toolPick.value : "ansible");
+			close();
+		});
+		list.appendChild(item);
+	}
+
+	document.getElementById("wf-wizard-close").addEventListener("click", close);
+	modal.addEventListener("click", (e) => { if (e.target === modal) close(); });
+	document.addEventListener("keydown", (e) => {
+		if (e.key === "Escape" && !modal.hidden) close();
+	});
+	for (const id of ["wf-wizard-open", "wf-hint-wizard"]) {
+		const btn = document.getElementById(id);
+		if (btn) btn.addEventListener("click", open);
+	}
+	const hintAdd = document.getElementById("wf-hint-add");
+	if (hintAdd) hintAdd.addEventListener("click", () => openStepModal(null));
 }
 
 // wfRestore loads the saved draft into the editor state, ignoring anything malformed. It reports
@@ -1449,21 +1881,26 @@ function removeNode(id) {
 	wfSave();
 }
 
-// renderWorkflow redraws the nodes and the edges and toggles the empty hint.
+// renderWorkflow redraws the nodes and the edges, refreshes the color key, and toggles the empty
+// state.
 function renderWorkflow() {
 	renderNodes();
 	renderEdges();
+	renderLegend();
 	if (wfState.hint) wfState.hint.hidden = wfState.nodes.length > 0;
 }
 
 // renderNodes reconciles the node cards with the model, positioning each and wiring its handles.
-// Cards are focusable: Enter edits, arrows move, L starts a link, and Delete removes.
+// Cards are focusable: Enter edits, arrows move, L starts a link, and Delete removes. Every card
+// carries its tool on a data attribute, which is what tints the card, its badge, and its handles, so
+// a graph reads as a set of distinct steps under the flat themes as much as the signature one.
 function renderNodes() {
 	const layer = wfState.nodesLayer;
 	layer.textContent = "";
 	for (const node of wfState.nodes) {
 		const el = document.createElement("div");
 		el.className = "wf-node";
+		el.dataset.tool = node.tool;
 		el.style.left = node.x + "px";
 		el.style.top = node.y + "px";
 		el.dataset.id = node.id;
@@ -1476,16 +1913,60 @@ function renderNodes() {
 			'<div class="wf-node-head"><span class="wf-node-name"></span>' +
 			'<button type="button" class="wf-node-del" aria-label="Delete step">&times;</button></div>' +
 			'<div class="wf-node-meta"><span class="wf-tool"></span><span class="wf-node-target mono"></span></div>' +
+			'<div class="wf-node-flags"></div>' +
 			'<span class="wf-handle wf-in" aria-hidden="true"></span>' +
-			'<span class="wf-handle wf-out" aria-hidden="true"></span>';
+			'<span class="wf-handle wf-out" data-tip="Drag onto another step to make it wait for this one"></span>';
 		el.querySelector(".wf-node-name").textContent = node.name;
 		el.querySelector(".wf-tool").textContent = node.tool;
 		el.querySelector(".wf-node-target").textContent = target || "";
+		// The settings that change how a step behaves are marked on the card, so a dry run or a step
+		// that swallows its own failure is visible without opening it.
+		const flags = el.querySelector(".wf-node-flags");
+		const flag = (text, cls, tip) => {
+			const span = document.createElement("span");
+			span.className = "wf-flag " + cls;
+			span.textContent = text;
+			span.dataset.tip = tip;
+			flags.appendChild(span);
+		};
+		if (node.dryRun) flag("dry", "dry", "Reports what would change without changing anything");
+		if (node.continueOnFailure) {
+			flag("continues", "warn", "A failure here does not stop the steps after it");
+		}
+		if (node.retries > 0) {
+			flag("retry " + node.retries, "retry",
+				"Retried up to " + node.retries + " more " + (node.retries === 1 ? "time" : "times") +
+				" before it counts as failed");
+		}
+		flags.hidden = !flags.children.length;
 		el.querySelector(".wf-node-del").addEventListener("click", (ev) => { ev.stopPropagation(); removeNode(node.id); });
 		el.querySelector(".wf-out").addEventListener("pointerdown", (ev) => startLink(ev, node.id));
 		el.addEventListener("pointerdown", (ev) => startDrag(ev, node.id));
 		el.addEventListener("keydown", (ev) => nodeKey(ev, node.id));
 		layer.appendChild(el);
+	}
+}
+
+// renderLegend names the tool colors the current graph actually uses, so the hues on the canvas are
+// decoded without a trip to the docs. A single-tool graph needs no key, so it does not get one.
+function renderLegend() {
+	const legend = document.getElementById("wf-legend");
+	if (!legend) return;
+	const tools = [];
+	for (const node of wfState.nodes) {
+		if (!tools.includes(node.tool)) tools.push(node.tool);
+	}
+	legend.textContent = "";
+	legend.hidden = tools.length < 2;
+	if (legend.hidden) return;
+	for (const tool of tools.sort()) {
+		const item = document.createElement("span");
+		item.className = "wf-legend-item";
+		item.dataset.tool = tool;
+		const dot = document.createElement("i");
+		item.appendChild(dot);
+		item.appendChild(document.createTextNode(tool));
+		legend.appendChild(item);
 	}
 }
 
@@ -1557,19 +2038,31 @@ function renderEdges() {
 		const sel = wfState.selectedEdge &&
 			wfState.selectedEdge.from === e.from && wfState.selectedEdge.to === e.to;
 		const d = edgeD(a.x + WF_CARD_W, a.y + WF_HANDLE_Y, b.x, b.y + WF_HANDLE_Y);
-		paths += '<path class="wf-edge' + (sel ? " wf-edge-selected" : "") + '" d="' + d + '"/>';
+		// A link takes the color of the step it leaves, so a fan-out is traceable back to its source
+		// at a glance instead of resolving into one flat tangle.
+		paths += '<path class="wf-edge' + (sel ? " wf-edge-selected" : "") + '" data-tool="' +
+			esc(a.tool) + '" d="' + d + '"/>';
 		paths += '<path class="wf-edge-hit" d="' + d + '" tabindex="0" role="button" ' +
-			'data-from="' + e.from + '" data-to="' + e.to + '" ' +
-			'aria-label="Dependency link. Press Delete to remove it."/>';
+			'data-from="' + esc(e.from) + '" data-to="' + esc(e.to) + '" ' +
+			'aria-label="Dependency link, ' + esc(a.name) + ' into ' + esc(b.name) +
+			'. Press Delete to remove it."/>';
 	}
 	if (wfState.link && wfState.link.cursor) {
 		const a = wfState.nodes.find((n) => n.id === wfState.link.from);
 		if (a) {
-			paths += '<path class="wf-edge wf-edge-live" d="' +
+			paths += '<path class="wf-edge wf-edge-live" data-tool="' + esc(a.tool) + '" d="' +
 				edgeD(a.x + WF_CARD_W, a.y + WF_HANDLE_Y, wfState.link.cursor.x, wfState.link.cursor.y) + '"/>';
 		}
 	}
 	svg.innerHTML = paths;
+}
+
+// esc escapes a value for interpolation into an attribute of markup built as a string, so a step name
+// carrying a quote or an angle bracket cannot break out of the attribute it sits in.
+function esc(value) {
+	return String(value == null ? "" : value)
+		.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
+		.replaceAll('"', "&quot;").replaceAll("'", "&#39;");
 }
 
 // edgeD returns the SVG cubic path data between two points, curving horizontally so edges read as
@@ -1921,7 +2414,10 @@ document.addEventListener("DOMContentLoaded", () => {
 	mountTopbar();
 	mountLiveRegions();
 	explainReadOnly();
-	if (LIST_PAGES.includes(document.body.dataset.page)) mountListFilter();
+	if (LIST_PAGES.includes(document.body.dataset.page)) {
+		mountListFilter();
+		mountFacetFilters();
+	}
 	const close = document.getElementById("drill-close");
 	if (close) {
 		close.addEventListener("click", () => { document.getElementById("drill").hidden = true; });
@@ -2175,13 +2671,17 @@ function buildNav() {
 }
 
 // mountFooter closes every page with a slim bar, so scrolling ends on a deliberate edge rather
-// than on the last row of content.
+// than on the last row of content. It is a sibling of the main column rather than its last child,
+// so a short page such as Migrate rests it on the bottom of the viewport instead of floating it up
+// under the content with dead space beneath.
 function mountFooter() {
 	if (document.body.dataset.page === "login" || document.querySelector(".app-foot")) return;
 	const main = document.querySelector("main.content");
 	if (!main) return;
 	const foot = document.createElement("footer");
 	foot.className = "app-foot";
+	const inner = document.createElement("div");
+	inner.className = "app-foot-inner";
 	const left = document.createElement("span");
 	left.className = "app-foot-brand";
 	left.textContent = "SwitchTender";
@@ -2206,9 +2706,10 @@ function mountFooter() {
 	top.dataset.tip = "Click to return to the top of this page";
 	top.addEventListener("click", () => window.scrollTo({ top: 0, behavior: "smooth" }));
 	links.appendChild(top);
-	foot.appendChild(left);
-	foot.appendChild(links);
-	main.appendChild(foot);
+	inner.appendChild(left);
+	inner.appendChild(links);
+	foot.appendChild(inner);
+	main.insertAdjacentElement("afterend", foot);
 }
 
 // mountDocsChrome adds the reading aids a documentation page needs: a filter over the guide list,
@@ -2584,6 +3085,9 @@ function wireHinttips() {
 	let linkTimer = 0;
 	const place = (target, text) => {
 		tip.textContent = text;
+		// A tip carrying newlines is a small block of explanation rather than a label, so it wraps on
+		// its own lines instead of running off the edge of the viewport.
+		tip.classList.toggle("hinttip-block", text.includes("\n"));
 		tip.hidden = false;
 		tip.style.left = "0px";
 		tip.style.top = "0px";
@@ -3084,6 +3588,153 @@ async function fillCredentialPicker() {
 	} catch (_) { /* credentials disabled or unauthorized; picker stays empty */ }
 }
 
+// CRED_KINDS describes every credential kind the server can materialize: the shape its secret takes
+// and what a run does with it. A typed kind's secret is KEY=VALUE lines, so the placeholder shows the
+// exact field names its injector reads and the hint names which of them are required. Kinds marked
+// ansibleOnly are delivered through Ansible flags or extra vars and are rejected on any other tool,
+// which is worth saying before the secret is pasted rather than at submit.
+const CRED_KINDS = {
+	ssh_key: {
+		placeholder: "-----BEGIN OPENSSH PRIVATE KEY-----",
+		hint: "The private key itself, passed to the run as --private-key.", ansibleOnly: true,
+	},
+	ssh_password: {
+		placeholder: "user=deploy\npassword=the password",
+		hint: "Fields: user and password, both required. Becomes ansible_user and ansible_password.",
+		ansibleOnly: true,
+	},
+	network: {
+		placeholder: "user=admin\npassword=the password\nnetwork_os=ios\nconnection=network_cli",
+		hint: "Fields: user and password required, network_os and connection optional. Connection " +
+			"defaults to network_cli.",
+		ansibleOnly: true,
+	},
+	vault_password: {
+		placeholder: "the vault password",
+		hint: "Passed to the run as --vault-password-file.", ansibleOnly: true,
+	},
+	become_password: {
+		placeholder: "the privilege escalation password",
+		hint: "Becomes ansible_become_password, delivered through a file so it stays off the command " +
+			"line.",
+		ansibleOnly: true,
+	},
+	become: {
+		placeholder: "password=the password\nmethod=sudo\nuser=root",
+		hint: "Fields: password required, method and user optional.", ansibleOnly: true,
+	},
+	env: {
+		placeholder: "AWS_PROFILE=prod\nTF_VAR_region=us-east-1",
+		hint: "One KEY=VALUE per line, injected into the run's environment. Blank lines and # comments " +
+			"are ignored.",
+	},
+	token: {
+		placeholder: "the token or JWT",
+		hint: "Exposed to the run as the SWITCHTENDER_TOKEN environment variable.",
+	},
+	registry: {
+		placeholder: "username\nthe password or access token",
+		hint: "Username on the first line, password on every line after it. Used to pull execution " +
+			"images.",
+	},
+	aws: {
+		placeholder: "access_key=AKIAEXAMPLE\nsecret_key=the secret\nregion=us-east-1",
+		hint: "Fields: access_key and secret_key required, session_token and region optional. Injects " +
+			"the standard AWS_ variables.",
+	},
+	azure: {
+		placeholder: "client_id=the id\nsecret=the secret\nsubscription_id=the id\ntenant_id=the id",
+		hint: "All four fields are required. Injects both the ARM_ variables Terraform reads and the " +
+			"AZURE_ variables Ansible reads.",
+	},
+	gcp: {
+		placeholder: '{"type": "service_account", "project_id": "…", "private_key": "…"}',
+		hint: "The service account JSON, written to a private file and bound to " +
+			"GOOGLE_APPLICATION_CREDENTIALS.",
+	},
+	vmware: {
+		placeholder: "host=vcenter.example.com\nuser=administrator@vsphere.local\npassword=the password",
+		hint: "Fields: host, user, and password required, validate_certs optional. Injects the VMWARE_ " +
+			"variables.",
+	},
+};
+
+// CRED_SOURCES describes where a secret comes from. A source other than local means the stored value
+// is a lookup rather than the secret, so its placeholder shows the lookup's shape and the kind's own
+// placeholder no longer applies.
+const CRED_SOURCES = {
+	local: { hint: "The value below is the secret, sealed and stored here." },
+	command: {
+		placeholder: "vault kv get -field=password secret/prod-fleet",
+		hint: "The command runs on the executor at launch and its standard output is the secret.",
+	},
+	vault: {
+		placeholder: '{"addr":"https://vault:8200","path":"secret/data/ci","field":"token"}',
+		hint: "Read from HashiCorp Vault over HTTP at launch.",
+	},
+	vault_dynamic: {
+		placeholder: '{"addr":"https://vault:8200","path":"database/creds/app","field":"password"}',
+		hint: "Vault mints a short-lived credential for each run and it is revoked when the run ends.",
+	},
+	gsm: {
+		placeholder: '{"project":"my-project","secret":"ci-token","version":"latest"}',
+		hint: "Read from Google Secret Manager at launch.",
+	},
+	aws: {
+		placeholder: '{"secret_id":"prod/db-password","region":"us-east-1"}',
+		hint: "Read from AWS Secrets Manager at launch with a signed request.",
+	},
+	aws_sts: {
+		placeholder: '{"role_arn":"arn:aws:iam::123456789012:role/deploy","region":"us-east-1"}',
+		hint: "AWS STS mints short-lived role credentials for each run.",
+	},
+	azure: {
+		placeholder: '{"vault":"prod-kv","secret":"db-password"}',
+		hint: "Read from Azure Key Vault at launch.",
+	},
+	conjur: {
+		placeholder: '{"url":"https://conjur.example.com","account":"prod","login":"host/app",' +
+			'"api_key":"…","variable":"db/password"}',
+		hint: "Read from CyberArk Conjur at launch.",
+	},
+	ccp: {
+		placeholder: '{"url":"https://ccp.example.com","app_id":"switchtender","safe":"Prod",' +
+			'"object":"db-password"}',
+		hint: "Read from the CyberArk Central Credential Provider at launch.",
+	},
+	onepassword: {
+		placeholder: '{"url":"https://connect.example.com","token":"…","vault":"Prod",' +
+			'"item":"db","field":"password"}',
+		hint: "Read from 1Password Connect at launch, with no op CLI on the runner.",
+	},
+};
+
+// syncCredFields matches the secret field to the kind and source chosen, so the box always shows the
+// shape of the thing being pasted into it and says what the run will do with it.
+function syncCredFields() {
+	const kind = document.getElementById("cred-kind").value;
+	const source = document.getElementById("cred-source").value || "local";
+	const kindSpec = CRED_KINDS[kind] || {};
+	const sourceSpec = CRED_SOURCES[source] || {};
+	const secret = document.getElementById("cred-secret");
+	// On edit the placeholder explains that a blank keeps what is stored, which outranks either shape.
+	if (!secret.required) {
+		secret.placeholder = "Leave blank to keep the current secret";
+	} else {
+		secret.placeholder = source === "local"
+			? (kindSpec.placeholder || "")
+			: (sourceSpec.placeholder || "");
+	}
+	const hint = document.getElementById("cred-kind-hint");
+	if (hint) {
+		hint.textContent = (kindSpec.hint || "") +
+			(kindSpec.ansibleOnly ? " Takes effect under Ansible only." : "");
+	}
+	const sourceHint = document.getElementById("cred-source-hint");
+	if (sourceHint) sourceHint.textContent = sourceSpec.hint || "";
+	toggleCredPassphrase();
+}
+
 // openCredentialEdit fills the credential dialog with an existing record and switches it to edit
 // mode. The secret field becomes optional, so a blank keeps the stored secret; the list never
 // returns secret material, so the field always starts empty.
@@ -3096,9 +3747,8 @@ function openCredentialEdit(c) {
 	const sec = document.getElementById("cred-secret");
 	sec.value = "";
 	sec.required = false;
-	sec.placeholder = "Leave blank to keep the current secret";
 	document.getElementById("cred-passphrase").value = "";
-	toggleCredPassphrase();
+	syncCredFields();
 	document.getElementById("cred-status").textContent = "";
 	setModalTitle("cred", "Edit credential");
 	document.getElementById("cred-modal").hidden = false;
@@ -3120,22 +3770,8 @@ function toggleCredPassphrase() {
 // required; on edit the secret is only sent when changed.
 function wireCredentialForm() {
 	const form = document.getElementById("cred-form");
-	const secPlaceholder = document.getElementById("cred-secret").placeholder;
-	const source = document.getElementById("cred-source");
-	const sourcePlaceholders = {
-		command: "vault kv get -field=password secret/prod-fleet",
-		vault: '{"addr":"https://vault:8200","path":"secret/data/ci","field":"token"}',
-		vault_dynamic: '{"addr":"https://vault:8200","path":"database/creds/app","field":"password"}',
-		gsm: '{"project":"my-project","secret":"ci-token","version":"latest"}',
-		aws: '{"secret_id":"prod/db-password","region":"us-east-1"}',
-		azure: '{"vault":"prod-kv","secret":"db-password"}',
-		conjur: '{"url":"https://conjur.example.com","account":"prod","login":"host/app","api_key":"...","variable":"db/password"}',
-	};
-	source.addEventListener("change", () => {
-		document.getElementById("cred-secret").placeholder = sourcePlaceholders[source.value] || secPlaceholder;
-		toggleCredPassphrase();
-	});
-	document.getElementById("cred-kind").addEventListener("change", toggleCredPassphrase);
+	document.getElementById("cred-source").addEventListener("change", syncCredFields);
+	document.getElementById("cred-kind").addEventListener("change", syncCredFields);
 	const resetToCreate = () => {
 		delete form.dataset.editId;
 		document.getElementById("cred-name").value = "";
@@ -3143,12 +3779,12 @@ function wireCredentialForm() {
 		const sec = document.getElementById("cred-secret");
 		sec.value = "";
 		sec.required = true;
-		sec.placeholder = secPlaceholder;
 		document.getElementById("cred-passphrase").value = "";
-		toggleCredPassphrase();
+		syncCredFields();
 		document.getElementById("cred-status").textContent = "";
 		setModalTitle("cred", "Add a credential");
 	};
+	syncCredFields();
 	const openBtn = document.getElementById("cred-open");
 	if (openBtn) openBtn.addEventListener("click", resetToCreate);
 
@@ -3217,7 +3853,30 @@ async function loadCredentials() {
 		for (const c of creds) {
 			const tr = document.createElement("tr");
 			tr.appendChild(td(c.name));
-			tr.appendChild(td(c.kind, "mono"));
+			// Kind and source are chips rather than bare text, so the column reads at a glance and the
+			// facet menus can offer them as values to tick.
+			const kind = td("");
+			const kindChip = document.createElement("span");
+			kindChip.className = "cred-kind";
+			kindChip.textContent = c.kind;
+			const kindSpec = CRED_KINDS[c.kind];
+			if (kindSpec) {
+				kindChip.dataset.tip = kindSpec.hint +
+					(kindSpec.ansibleOnly ? " Takes effect under Ansible only." : "");
+			}
+			kind.appendChild(kindChip);
+			tr.appendChild(kind);
+			// Where the secret comes from is set on the form but was never shown here, so a credential
+			// that resolves out of Vault looked identical to one stored locally.
+			const source = td("");
+			const sourceName = c.source || "local";
+			const sourceChip = document.createElement("span");
+			sourceChip.className = "cred-kind cred-source" + (sourceName === "local" ? "" : " external");
+			sourceChip.textContent = sourceName;
+			const sourceSpec = CRED_SOURCES[sourceName];
+			if (sourceSpec) sourceChip.dataset.tip = sourceSpec.hint;
+			source.appendChild(sourceChip);
+			tr.appendChild(source);
 			const secret = td("");
 			const secretChip = document.createElement("span");
 			secretChip.className = c.needs_secret ? "chip flaky" : "chip ok";
@@ -5538,6 +6197,7 @@ function typeCellEl(r) {
 	const tool = (r.tool || "ansible").toLowerCase();
 	const chip = document.createElement("span");
 	chip.className = "tool-badge " + tool;
+	chip.dataset.tool = tool;
 	chip.textContent = tool;
 	if (KIND_TIPS[tool]) chip.dataset.tip = KIND_TIPS[tool];
 	cell.appendChild(chip);
@@ -5559,6 +6219,7 @@ function toolBadgeEl(r) {
 	if (!r.tool || r.tool === "ansible") return null;
 	const badge = document.createElement("span");
 	badge.className = "tool-badge " + r.tool;
+	badge.dataset.tool = r.tool;
 	badge.textContent = r.tool;
 	return badge;
 }
@@ -5704,7 +6365,86 @@ function describeCron(spec) {
 	if (dom === "*" && mon === "*" && days[dow] && /^\d+$/.test(hour)) return days[dow] + "s at " + at(hour, min);
 	if (dow === "*" && mon === "*" && /^\d+$/.test(dom) && /^\d+$/.test(hour)) return "Monthly on day " + dom + " at " + at(hour, min);
 	if (dow === "1-5" && /^\d+$/.test(hour)) return "Weekdays at " + at(hour, min);
+	if (dow === "6,0" || dow === "0,6") return "Weekends at " + at(hour, min);
 	return "Custom schedule";
+}
+
+// CRON_MONTHS and CRON_DAYS name the values of the two cron fields that read as words rather than
+// numbers, so a breakdown says December rather than 12.
+const CRON_MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August",
+	"September", "October", "November", "December"];
+const CRON_DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+// CRON_FIELDS describes each position of a five-field expression: what it is called, what a wildcard
+// means there, the unit a step counts in, and the names its values carry when they have any.
+const CRON_FIELDS = [
+	{ label: "Minute", any: "every minute", unit: "minutes", offset: 0 },
+	{ label: "Hour", any: "every hour", unit: "hours", offset: 0 },
+	{ label: "Day of month", any: "every day", unit: "days", offset: 0 },
+	{ label: "Month", any: "every month", unit: "months", offset: 1, names: CRON_MONTHS },
+	{ label: "Day of week", any: "every day", unit: "days", offset: 0, names: CRON_DAYS },
+];
+
+// cronValue names one value inside a cron field, using the field's vocabulary where it has one. A
+// day-of-week 7 is Sunday, the same as 0, which is how cron itself reads it.
+function cronValue(token, field) {
+	const n = parseInt(token, 10);
+	if (isNaN(n)) return token;
+	if (!field.names) return token;
+	const idx = n - field.offset;
+	return field.names[idx % field.names.length] || token;
+}
+
+// describeCronField reads one field of a cron expression in plain words, covering wildcards, steps,
+// ranges, and lists. An expression it cannot read comes back verbatim rather than guessed at.
+function describeCronField(spec, field) {
+	if (spec === "*" || spec === "?") return field.any;
+	const step = spec.match(/^(.+)\/(\d+)$/);
+	if (step) {
+		const every = "every " + step[2] + " " + field.unit;
+		if (step[1] === "*") return every;
+		const range = step[1].match(/^(\d+)-(\d+)$/);
+		if (range) {
+			return every + " from " + cronValue(range[1], field) + " to " + cronValue(range[2], field);
+		}
+		return every + " from " + cronValue(step[1], field);
+	}
+	const range = spec.match(/^(\d+)-(\d+)$/);
+	if (range) return cronValue(range[1], field) + " to " + cronValue(range[2], field);
+	if (spec.includes(",")) {
+		return spec.split(",").map((part) => describeCronField(part.trim(), field)).join(", ");
+	}
+	return cronValue(spec, field);
+}
+
+// cronBreakdown reads a cron expression field by field, so a reader who does not hold the five
+// positions in their head can see which number means what.
+function cronBreakdown(spec) {
+	const parts = String(spec || "").trim().split(/\s+/);
+	if (parts.length !== 5) return "";
+	return parts.map((part, i) =>
+		CRON_FIELDS[i].label + ": " + describeCronField(part, CRON_FIELDS[i])).join("\n");
+}
+
+// cronTip is the hover text for a cron expression: its cadence in one line, then the field-by-field
+// reading, so hovering the syntax anywhere in the product explains it.
+function cronTip(spec) {
+	const breakdown = cronBreakdown(spec);
+	if (!breakdown) return "Five fields: minute, hour, day of month, month, day of week";
+	return describeCron(spec) + "\n" + breakdown;
+}
+
+// wireCronTips explains every cron expression on the page on hover, and keeps explaining the one
+// being typed in a form field as it changes.
+function wireCronTips(root) {
+	for (const el of (root || document).querySelectorAll("[data-cron]")) {
+		el.dataset.tip = cronTip(el.dataset.cron);
+	}
+	for (const input of (root || document).querySelectorAll("input[data-cron-input]")) {
+		const sync = () => { input.dataset.tip = cronTip(input.value.trim()); };
+		input.addEventListener("input", sync);
+		sync();
+	}
 }
 
 // mountHostActions fills the host page's action bar: the things an operator wants to do to one
@@ -6183,9 +6923,13 @@ async function loadSchedules() {
 		for (const s of schedules) {
 			const tr = document.createElement("tr");
 			tr.appendChild(td(s.name || "(unnamed)"));
-			tr.appendChild(td(s.cron, "mono"));
+			// Hovering the expression reads it back in words, field by field, so the syntax explains
+			// itself wherever it appears rather than only in the neighboring column.
+			const cron = td(s.cron, "mono");
+			cron.dataset.cron = s.cron || "";
+			tr.appendChild(cron);
 			const cadence = td(describeCron(s.cron));
-			cadence.dataset.tip = "Plain reading of the cron expression " + s.cron;
+			cadence.dataset.cron = s.cron || "";
 			tr.appendChild(cadence);
 			const target = document.createElement("td");
 			if (s.template_id) {
@@ -6243,6 +6987,7 @@ async function loadSchedules() {
 		setStatus("");
 		document.querySelector("table.runs").hidden = false;
 		showListControls();
+		wireCronTips();
 	} catch (e) {
 		setStatus("Failed to load schedules: " + e.message);
 	}
@@ -6489,6 +7234,7 @@ async function loadPolicies() {
 			if (p.tool) {
 				const badge = document.createElement("span");
 				badge.className = "tool-badge " + p.tool;
+				badge.dataset.tool = p.tool;
 				badge.textContent = p.tool;
 				toolCell.appendChild(badge);
 			} else {
@@ -6817,6 +7563,41 @@ function loadLogin() {
 
 // openUserEdit fills the user dialog with an existing account and switches it to edit mode. The
 // password field becomes optional, so a blank leaves the current password unchanged.
+// USER_PROFILE_FIELDS maps each profile input to the account field it edits, so the dialog fills and
+// collects the profile in one place instead of naming every field twice.
+const USER_PROFILE_FIELDS = {
+	"user-fullname": "full_name",
+	"user-email": "email",
+	"user-phone": "phone",
+	"user-title": "title",
+	"user-notes": "notes",
+};
+
+// fillUserProfile writes an account's profile into the dialog, or clears it when given none.
+function fillUserProfile(u) {
+	for (const [id, key] of Object.entries(USER_PROFILE_FIELDS)) {
+		const el = document.getElementById(id);
+		if (el) el.value = (u && u[key]) || "";
+	}
+	const links = document.getElementById("user-links");
+	if (links) links.value = ((u && u.links) || []).join("\n");
+}
+
+// collectUserProfile reads the profile out of the dialog. The whole profile is sent on every save, so
+// clearing a field clears it on the account. The server validates and bounds each value.
+function collectUserProfile() {
+	const payload = {};
+	for (const [id, key] of Object.entries(USER_PROFILE_FIELDS)) {
+		const el = document.getElementById(id);
+		payload[key] = el ? el.value.trim() : "";
+	}
+	const links = document.getElementById("user-links");
+	payload.links = links
+		? links.value.split("\n").map((l) => l.trim()).filter(Boolean)
+		: [];
+	return payload;
+}
+
 function openUserEdit(u) {
 	const form = document.getElementById("user-form");
 	form.dataset.editId = u.id;
@@ -6826,6 +7607,7 @@ function openUserEdit(u) {
 	pw.required = false;
 	pw.placeholder = "Leave blank to keep current";
 	document.getElementById("user-role").value = u.role;
+	fillUserProfile(u);
 	document.getElementById("user-status").textContent = "";
 	setModalTitle("user", "Edit user");
 	document.getElementById("user-modal").hidden = false;
@@ -6843,6 +7625,7 @@ function wireUserForm() {
 		pw.required = true;
 		pw.placeholder = "";
 		document.getElementById("user-role").value = "operator";
+		fillUserProfile(null);
 		document.getElementById("user-status").textContent = "";
 		setModalTitle("user", "Add a user");
 	};
@@ -6853,10 +7636,10 @@ function wireUserForm() {
 		e.preventDefault();
 		const status = document.getElementById("user-status");
 		const editId = form.dataset.editId;
-		const payload = {
+		const payload = Object.assign({
 			username: document.getElementById("user-name").value.trim(),
 			role: document.getElementById("user-role").value,
-		};
+		}, collectUserProfile());
 		const pw = document.getElementById("user-password").value;
 		if (pw) payload.password = pw;
 		try {
@@ -6908,6 +7691,24 @@ async function loadUsers() {
 		for (const u of users) {
 			const tr = document.createElement("tr");
 			tr.appendChild(td(u.username));
+			// Who the account belongs to, with their title under the name. Phone, notes, and links stay
+			// out of the table: it exports to CSV in one click, and a roster of names and addresses is
+			// what an access review needs without also spilling everyone's contact number into a file.
+			const who = td("");
+			if (u.full_name) {
+				const name = document.createElement("span");
+				name.textContent = u.full_name;
+				who.appendChild(name);
+			} else {
+				who.appendChild(document.createTextNode("—"));
+			}
+			if (u.title) {
+				const title = document.createElement("span");
+				title.className = "user-title";
+				title.textContent = u.title;
+				who.appendChild(title);
+			}
+			tr.appendChild(who);
 			const role = td("");
 			const roleChip = document.createElement("span");
 			roleChip.className = "run-kind" + (u.role === "admin" ? " split" : "");
@@ -6917,6 +7718,29 @@ async function loadUsers() {
 				: "Can run and read what they are granted";
 			role.appendChild(roleChip);
 			tr.appendChild(role);
+			const contact = td("");
+			if (u.email) {
+				const mail = document.createElement("a");
+				mail.href = "mailto:" + u.email;
+				mail.textContent = u.email;
+				mail.dataset.tip = "Click to write to this address";
+				contact.appendChild(mail);
+			} else {
+				contact.textContent = "—";
+			}
+			// Links open in a new tab and never carry a referrer. The server accepts only http and
+			// https, so a stored link cannot be a script URL.
+			for (const link of u.links || []) {
+				const chip = document.createElement("a");
+				chip.className = "user-link";
+				chip.href = link;
+				chip.target = "_blank";
+				chip.rel = "noopener noreferrer";
+				chip.textContent = linkHost(link);
+				chip.dataset.tip = "Opens " + link;
+				contact.appendChild(chip);
+			}
+			tr.appendChild(contact);
 			const act = activity.get(u.username) || { runs: 0, last: null };
 			const fired = td("");
 			if (act.runs) {
@@ -6941,6 +7765,16 @@ async function loadUsers() {
 		showListControls();
 	} catch (e) {
 		setStatus("Failed to load users: " + e.message);
+	}
+}
+
+// linkHost labels a profile link by its host, so a column of links reads as the places they lead
+// rather than as a row of full addresses. A value that will not parse is shown as given.
+function linkHost(link) {
+	try {
+		return new URL(link).hostname.replace(/^www\./, "");
+	} catch {
+		return link;
 	}
 }
 

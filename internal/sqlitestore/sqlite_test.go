@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
 	_ "modernc.org/sqlite"
 
 	"github.com/kordloom/switchtender/internal/audit"
@@ -334,7 +335,7 @@ func TestStoreMigratesProvenance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open raw db: %v", err)
 	}
-	for _, column := range []string{"source", "source_id", "actor", "rerun_of", "labels"} {
+	for _, column := range []string{"source", "source_id", "actor", "rerun_of", "labels", "steps"} {
 		if _, err := raw.Exec("ALTER TABLE runs DROP COLUMN " + column); err != nil {
 			t.Fatalf("simulate old schema, drop %s: %v", column, err)
 		}
@@ -354,6 +355,10 @@ func TestStoreMigratesProvenance(t *testing.T) {
 		ID: "run_1", Playbook: "site.yml", Status: run.StatusSucceeded, CreatedAt: time.Now(),
 		Source: "schedule", SourceID: "sch_1", Actor: "deploy-bot", RerunOf: "run_0",
 		Labels: map[string]string{"env": "prod"},
+		Steps: []run.PipelineStep{
+			{Name: "plan", Tool: "terraform", Command: "terraform plan"},
+			{Name: "apply", Tool: "terraform", DependsOn: []string{"plan"}},
+		},
 	}
 	if err := store.Save(ctx, saved); err != nil {
 		t.Fatalf("Save() after migration error = %v", err)
@@ -365,6 +370,11 @@ func TestStoreMigratesProvenance(t *testing.T) {
 	if got.Source != "schedule" || got.SourceID != "sch_1" || got.Actor != "deploy-bot" ||
 		got.RerunOf != "run_0" || got.Labels["env"] != "prod" {
 		t.Errorf("provenance after migration = %+v, want the saved values", got)
+	}
+	// A workflow held for approval is run from its stored graph, so an upgraded database has to
+	// carry it or an approval that arrives after the upgrade would have nothing left to run.
+	if diff := cmp.Diff(saved.Steps, got.Steps); diff != "" {
+		t.Errorf("steps after migration mismatch (-want +got):\n%s", diff)
 	}
 
 	// The filters that read those columns must work against the healed schema.

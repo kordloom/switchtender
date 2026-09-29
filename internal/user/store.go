@@ -2,6 +2,7 @@ package user
 
 import (
 	"context"
+	"slices"
 	"sort"
 	"sync"
 )
@@ -19,17 +20,24 @@ func NewMemStore() Store {
 	return &memStore{users: make(map[string]*User)}
 }
 
+// clone returns a deep copy of u, so the store never hands out a slice a caller could mutate in
+// place and never adopts one a caller keeps a reference to.
+func clone(u *User) *User {
+	cp := *u
+	cp.Links = slices.Clone(u.Links)
+	return &cp
+}
+
 // Save inserts or replaces the user identified by u.ID.
 func (m *memStore) Save(_ context.Context, u *User) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	cp := *u
-	m.users[u.ID] = &cp
+	m.users[u.ID] = clone(u)
 	return nil
 }
 
-// Update changes an existing user's username, role, and password hash, preserving the creation
-// time, or returns ErrNotFound.
+// Update changes an existing user's username, role, password hash, and profile, preserving the
+// creation time, or returns ErrNotFound.
 func (m *memStore) Update(_ context.Context, u *User) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -40,6 +48,12 @@ func (m *memStore) Update(_ context.Context, u *User) error {
 	existing.Username = u.Username
 	existing.Role = u.Role
 	existing.PasswordHash = u.PasswordHash
+	existing.FullName = u.FullName
+	existing.Email = u.Email
+	existing.Phone = u.Phone
+	existing.Title = u.Title
+	existing.Links = slices.Clone(u.Links)
+	existing.Notes = u.Notes
 	return nil
 }
 
@@ -51,8 +65,7 @@ func (m *memStore) Get(_ context.Context, id string) (*User, error) {
 	if !ok {
 		return nil, ErrNotFound
 	}
-	cp := *u
-	return &cp, nil
+	return clone(u), nil
 }
 
 // FindByUsername returns the user with the given username, or ErrNotFound.
@@ -61,8 +74,7 @@ func (m *memStore) FindByUsername(_ context.Context, username string) (*User, er
 	defer m.mu.RUnlock()
 	for _, u := range m.users {
 		if u.Username == username {
-			cp := *u
-			return &cp, nil
+			return clone(u), nil
 		}
 	}
 	return nil, ErrNotFound
@@ -74,8 +86,7 @@ func (m *memStore) List(_ context.Context) ([]*User, error) {
 	defer m.mu.RUnlock()
 	out := make([]*User, 0, len(m.users))
 	for _, u := range m.users {
-		cp := *u
-		out = append(out, &cp)
+		out = append(out, clone(u))
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].CreatedAt.Equal(out[j].CreatedAt) {

@@ -36,6 +36,35 @@ type loginResponse struct {
 	Role user.Role `json:"role"`
 }
 
+// userProfileRequest is the optional profile an account may carry, shared by create and update. The
+// fields are personal data: they are stored, returned only to an admin, and never logged.
+type userProfileRequest struct {
+	// FullName is the person's name.
+	FullName string `json:"full_name"`
+	// Email is the address to reach the account.
+	Email string `json:"email"`
+	// Phone is a contact number for the account.
+	Phone string `json:"phone"`
+	// Title is what the person does. It carries no permission; Role decides that.
+	Title string `json:"title"`
+	// Links are http or https addresses that say more about the account.
+	Links []string `json:"links"`
+	// Notes is free text about the account.
+	Notes string `json:"notes"`
+}
+
+// applyTo copies the profile onto a user and normalizes it, so the same validation runs on create and
+// on update.
+func (p userProfileRequest) applyTo(u *user.User) error {
+	u.FullName = p.FullName
+	u.Email = p.Email
+	u.Phone = p.Phone
+	u.Title = p.Title
+	u.Links = p.Links
+	u.Notes = p.Notes
+	return u.NormalizeProfile()
+}
+
 // createUserRequest is the JSON body accepted by POST /users.
 type createUserRequest struct {
 	// Username is the unique sign in name. Required.
@@ -44,6 +73,8 @@ type createUserRequest struct {
 	Password string `json:"password"`
 	// Role is admin, operator, or viewer. Required.
 	Role user.Role `json:"role"`
+	// userProfileRequest carries the optional profile fields.
+	userProfileRequest
 }
 
 // listUsersResponse wraps the user list, password hashes excluded by the model's json tags.
@@ -188,6 +219,11 @@ func createUserHandler(users user.Store, log *zap.Logger) http.HandlerFunc {
 			respondError(w, log, http.StatusInternalServerError, "could not create user")
 			return
 		}
+		// The error names the offending field but never its value, since the profile is personal data.
+		if err := req.applyTo(u); err != nil {
+			respondError(w, log, http.StatusBadRequest, err.Error())
+			return
+		}
 		u.CreatedAt = time.Now()
 		if err := users.Save(r.Context(), u); err != nil {
 			log.Error("server: save user: " + err.Error())
@@ -207,6 +243,9 @@ type updateUserRequest struct {
 	Password string `json:"password,omitempty"`
 	// Role is admin, operator, or viewer. Required.
 	Role user.Role `json:"role"`
+	// userProfileRequest carries the profile fields. They are replaced wholesale, so an update sends
+	// the profile it wants to end up with rather than only the parts that changed.
+	userProfileRequest
 }
 
 // updateUserHandler changes an account's username, role, and optionally its password, keeping the
@@ -263,6 +302,10 @@ func updateUserHandler(users user.Store, log *zap.Logger) http.HandlerFunc {
 
 		u.Username = req.Username
 		u.Role = req.Role
+		if err := req.applyTo(u); err != nil {
+			respondError(w, log, http.StatusBadRequest, err.Error())
+			return
+		}
 		if password != "" {
 			if err := u.SetPassword(password); err != nil {
 				log.Error("server: hash password: " + err.Error())

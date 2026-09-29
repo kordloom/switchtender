@@ -3,6 +3,7 @@ package sqlitestore
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -11,7 +12,7 @@ import (
 )
 
 // userColumns is the shared select list for user reads.
-const userColumns = `id, username, password_hash, role, created_at`
+const userColumns = `id, username, password_hash, role, created_at, full_name, email, phone, title, links, notes`
 
 // userStore is a user.Store backed by the shared SQLite database.
 type userStore struct {
@@ -21,25 +22,39 @@ type userStore struct {
 
 // Save inserts or replaces the user.
 func (s *userStore) Save(ctx context.Context, u *user.User) error {
+	links, err := marshalLinks(u.Links)
+	if err != nil {
+		return fmt.Errorf("save user: %w", err)
+	}
 	const q = `
-INSERT INTO users (id, username, password_hash, role, created_at)
-VALUES (?, ?, ?, ?, ?)
+INSERT INTO users (id, username, password_hash, role, created_at,
+	full_name, email, phone, title, links, notes)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
 	username=excluded.username, password_hash=excluded.password_hash,
-	role=excluded.role, created_at=excluded.created_at`
-	_, err := s.db.ExecContext(ctx, q,
-		u.ID, u.Username, u.PasswordHash, string(u.Role), sqlutil.FormatTime(u.CreatedAt))
-	if err != nil {
+	role=excluded.role, created_at=excluded.created_at, full_name=excluded.full_name,
+	email=excluded.email, phone=excluded.phone, title=excluded.title, links=excluded.links,
+	notes=excluded.notes`
+	if _, err := s.db.ExecContext(ctx, q,
+		u.ID, u.Username, u.PasswordHash, string(u.Role), sqlutil.FormatTime(u.CreatedAt),
+		u.FullName, u.Email, u.Phone, u.Title, links, u.Notes); err != nil {
 		return fmt.Errorf("save user: %w", err)
 	}
 	return nil
 }
 
-// Update changes an existing user's username, role, and password hash, or returns user.ErrNotFound.
+// Update changes an existing user's username, role, password hash, and profile, or returns
+// user.ErrNotFound.
 func (s *userStore) Update(ctx context.Context, u *user.User) error {
+	links, err := marshalLinks(u.Links)
+	if err != nil {
+		return fmt.Errorf("update user: %w", err)
+	}
 	res, err := s.db.ExecContext(ctx,
-		"UPDATE users SET username=?, password_hash=?, role=? WHERE id=?",
-		u.Username, u.PasswordHash, string(u.Role), u.ID)
+		"UPDATE users SET username=?, password_hash=?, role=?, full_name=?, email=?, phone=?, "+
+			"title=?, links=?, notes=? WHERE id=?",
+		u.Username, u.PasswordHash, string(u.Role), u.FullName, u.Email, u.Phone, u.Title, links,
+		u.Notes, u.ID)
 	if err != nil {
 		return fmt.Errorf("update user: %w", err)
 	}
@@ -124,8 +139,10 @@ func scanUser(sc scanner) (*user.User, error) {
 		u       user.User
 		role    string
 		created string
+		links   string
 	)
-	if err := sc.Scan(&u.ID, &u.Username, &u.PasswordHash, &role, &created); err != nil {
+	if err := sc.Scan(&u.ID, &u.Username, &u.PasswordHash, &role, &created,
+		&u.FullName, &u.Email, &u.Phone, &u.Title, &links, &u.Notes); err != nil {
 		return nil, err
 	}
 	u.Role = user.Role(role)
@@ -134,5 +151,34 @@ func scanUser(sc scanner) (*user.User, error) {
 		return nil, err
 	}
 	u.CreatedAt = at
+	u.Links, err = unmarshalLinks(links)
+	if err != nil {
+		return nil, err
+	}
 	return &u, nil
+}
+
+// marshalLinks encodes a user's profile links for storage. Links are held as a JSON array rather than
+// a joined string because a URL may legally contain any separator a join would pick.
+func marshalLinks(links []string) (string, error) {
+	if len(links) == 0 {
+		return "", nil
+	}
+	out, err := json.Marshal(links)
+	if err != nil {
+		return "", fmt.Errorf("encode links: %w", err)
+	}
+	return string(out), nil
+}
+
+// unmarshalLinks decodes stored profile links, treating an empty column as none.
+func unmarshalLinks(stored string) ([]string, error) {
+	if stored == "" {
+		return nil, nil
+	}
+	var links []string
+	if err := json.Unmarshal([]byte(stored), &links); err != nil {
+		return nil, fmt.Errorf("decode links: %w", err)
+	}
+	return links, nil
 }

@@ -321,17 +321,17 @@
 <tr>
 <td>POST</td>
 <td><code>/v1/users</code></td>
-<td>Create an account with a role.</td>
+<td>Create an account with a role and an optional profile.</td>
 </tr>
 <tr>
 <td>GET</td>
 <td><code>/v1/users</code></td>
-<td>List accounts.</td>
+<td>List accounts with their profiles, admin only.</td>
 </tr>
 <tr>
 <td>PUT</td>
 <td><code>/v1/users/{id}</code></td>
-<td>Update an account's role or password.</td>
+<td>Update an account's role, password, or profile.</td>
 </tr>
 <tr>
 <td>DELETE</td>
@@ -515,6 +515,32 @@
 </tr>
 </tbody>
 </table>
+<h2 id="account-profiles">Account profiles</h2>
+<p>An account carries an optional profile alongside its role: <code>full_name</code>, <code>email</code>, <code>phone</code>, <code>title</code>,
+<code>links</code>, and <code>notes</code>. All of them are optional, so an account created by the CLI or provisioned over
+single sign-on stays valid with none of them set. <code>title</code> is descriptive and grants nothing; <code>role</code>
+alone decides what an account may do.</p>
+<pre><code class="language-bash">curl -X PUT https://switchtender.example.com/v1/users/user_9f2c \
+  -H &quot;Authorization: Bearer $SWITCHTENDER_TOKEN&quot; \
+  -H 'Content-Type: application/json' \
+  -d '{
+    &quot;username&quot;: &quot;ada&quot;,
+    &quot;role&quot;: &quot;operator&quot;,
+    &quot;full_name&quot;: &quot;Ada Lovelace&quot;,
+    &quot;email&quot;: &quot;ada@example.com&quot;,
+    &quot;phone&quot;: &quot;+1 555 0100&quot;,
+    &quot;title&quot;: &quot;Platform Engineer&quot;,
+    &quot;links&quot;: [&quot;https://wiki.example.com/people/ada&quot;],
+    &quot;notes&quot;: &quot;review each quarter&quot;
+  }'
+</code></pre>
+<p>The profile is replaced wholesale on update, so send the profile you want to end up with rather than
+only the parts that changed. An omitted field clears.</p>
+<p>A profile is personal data and is treated as such. Only an admin may read it: <code>/v1/users</code> requires
+the admin role and is not delegable by a manage grant. The values are never written to the logs, and
+a rejection names the offending field without echoing it. Each single-line field is capped at 320
+characters, <code>notes</code> at 2000, and an account may carry at most eight links. A link must be an <code>http</code>
+or <code>https</code> address; any other scheme is refused, because the admin page renders links as anchors.</p>
 <h2 id="relay-endpoints">Relay endpoints</h2>
 <p>With <code>--worker-token</code> set, the server also serves the mesh relay under <code>/relay</code>: the execution
 path an outbound worker started with <code>--server</code> uses instead of a database connection. Every call

@@ -35,7 +35,8 @@
 					<input id="schedule-name" class="input" placeholder="nightly deploy" required>
 				</label>
 				<label class="field-label">Cron
-					<input id="schedule-cron" class="input mono" placeholder="0 2 * * *" required>
+					<input id="schedule-cron" class="input mono" placeholder="0 2 * * *" data-cron-input required>
+					<span class="field-hint">Five fields: minute, hour, day of month, month, day of week. Hover the box to read it back.</span>
 					<span id="cron-preview" class="field-hint"></span>
 				</label>
 				<label class="field-label">Template

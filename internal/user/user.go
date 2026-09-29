@@ -7,6 +7,9 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
+	"net/url"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -31,14 +34,79 @@ var (
 	ErrBadRole = errors.New("unknown role")
 	// ErrBadCredentials is returned when a username and password pair does not authenticate.
 	ErrBadCredentials = errors.New("bad credentials")
+	// ErrBadProfile is returned when a profile field is unusable: too long, or a link that is not an
+	// ordinary web address.
+	ErrBadProfile = errors.New("invalid profile field")
 )
+
+// Profile field bounds. They are generous for real names, addresses, and notes, and exist so an
+// account cannot be used to store unbounded text in a column an admin page renders.
+const (
+	// maxProfileField bounds a single-line profile value such as a name, address, or link.
+	maxProfileField = 320
+	// maxNotes bounds the free-text note on an account.
+	maxNotes = 2000
+	// maxLinks bounds how many addresses one account may carry.
+	maxLinks = 8
+)
+
+// NormalizeProfile trims the profile fields, drops blank links, and checks what is left. It rejects a
+// link that is not http or https: profile links are rendered as anchors in the admin UI, so allowing
+// another scheme would let an account with edit rights plant a javascript: or data: URL for the next
+// admin to click. Personal fields are never logged, so a rejection names the field and not its value.
+func (u *User) NormalizeProfile() error {
+	u.FullName = strings.TrimSpace(u.FullName)
+	u.Email = strings.TrimSpace(u.Email)
+	u.Phone = strings.TrimSpace(u.Phone)
+	u.Title = strings.TrimSpace(u.Title)
+	u.Notes = strings.TrimSpace(u.Notes)
+	for name, value := range map[string]string{
+		"full_name": u.FullName, "email": u.Email, "phone": u.Phone, "title": u.Title,
+	} {
+		if len(value) > maxProfileField {
+			return fmt.Errorf("%w: %s is longer than %d characters", ErrBadProfile, name, maxProfileField)
+		}
+	}
+	if u.Email != "" && !strings.Contains(u.Email, "@") {
+		return fmt.Errorf("%w: email needs an @", ErrBadProfile)
+	}
+	if len(u.Notes) > maxNotes {
+		return fmt.Errorf("%w: notes is longer than %d characters", ErrBadProfile, maxNotes)
+	}
+	links := make([]string, 0, len(u.Links))
+	for _, link := range u.Links {
+		link = strings.TrimSpace(link)
+		if link == "" {
+			continue
+		}
+		if len(link) > maxProfileField {
+			return fmt.Errorf("%w: a link is longer than %d characters", ErrBadProfile, maxProfileField)
+		}
+		parsed, err := url.Parse(link)
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+			return fmt.Errorf("%w: a link must be an http or https address", ErrBadProfile)
+		}
+		links = append(links, link)
+	}
+	if len(links) > maxLinks {
+		return fmt.Errorf("%w: more than %d links", ErrBadProfile, maxLinks)
+	}
+	if len(links) == 0 {
+		links = nil
+	}
+	u.Links = links
+	return nil
+}
 
 // ValidRole reports whether r names a supported role.
 func ValidRole(r Role) bool {
 	return r == RoleAdmin || r == RoleOperator || r == RoleViewer
 }
 
-// User is one account. The password hash never serializes to JSON.
+// User is one account. The password hash never serializes to JSON. The profile fields carry who the
+// account belongs to and how to reach them, which is what an on-call rotation and an access review
+// both need and a username alone cannot answer. All of them are optional, so an account created by
+// the CLI or provisioned over single sign-on stays valid with none of them set.
 type User struct {
 	// ID is the unique user identifier.
 	ID string `json:"id"`
@@ -48,6 +116,21 @@ type User struct {
 	PasswordHash string `json:"-"`
 	// Role is the user's permission level.
 	Role Role `json:"role"`
+	// FullName is the person's name as they write it, for display beside the username.
+	FullName string `json:"full_name,omitempty"`
+	// Email is the address to reach the account, and the target a notification routed to a person
+	// resolves to.
+	Email string `json:"email,omitempty"`
+	// Phone is a contact number for the account, for an escalation that cannot wait on email.
+	Phone string `json:"phone,omitempty"`
+	// Title is what the person does, for example Platform Engineer. It is descriptive only and
+	// carries no permission of its own; Role decides what the account may do.
+	Title string `json:"title,omitempty"`
+	// Links are addresses that say more about the account: a directory entry, an on-call schedule,
+	// a chat handle.
+	Links []string `json:"links,omitempty"`
+	// Notes is free text about the account, such as why it exists or when it should be reviewed.
+	Notes string `json:"notes,omitempty"`
 	// CreatedAt is when the user was created.
 	CreatedAt time.Time `json:"created_at"`
 }
