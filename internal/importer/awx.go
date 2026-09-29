@@ -270,14 +270,27 @@ func FromAWX(data []byte, now time.Time) (*Plan, error) {
 				obj.VaultID = label
 			}
 		}
+		// The export's non-secret inputs land as settings on the credential itself, so a machine
+		// credential arrives knowing its connection user and become method and only the secret needs
+		// entering. They used to survive only as warning text an operator had to copy by hand.
+		settings, refused := credentialSettings(kind, c.Inputs)
+		obj.Settings = settings
 		plan.Credentials = append(plan.Credentials, obj)
 		credentialIDs[c.Name] = obj.ID
-		if settings := publicInputs(c.Inputs); len(settings) > 0 {
-			plan.warn("credential %q needs its secret re-entered; exports omit secrets by design. "+
-				"AWX also recorded %s, which the secret should carry",
-				c.Name, strings.Join(settings, ", "))
-		} else {
-			plan.warn("credential %q needs its secret re-entered; exports omit secrets by design", c.Name)
+		const base = "credential %q needs its secret re-entered; exports omit secrets by design"
+		switch {
+		case len(settings) > 0 && len(refused) > 0:
+			plan.warn(base+". Its non-secret settings (%s) were stored on the credential; these AWX "+
+				"inputs could not be stored and must be set by hand: %s",
+				c.Name, settingsList(settings), strings.Join(refused, ", "))
+		case len(settings) > 0:
+			plan.warn(base+". Its non-secret settings (%s) were stored on the credential",
+				c.Name, settingsList(settings))
+		case len(refused) > 0:
+			plan.warn(base+". These AWX inputs could not be stored and must be set by hand: %s",
+				c.Name, strings.Join(refused, ", "))
+		default:
+			plan.warn(base, c.Name)
 		}
 	}
 

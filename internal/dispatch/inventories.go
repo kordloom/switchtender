@@ -99,10 +99,16 @@ func (d *Dispatcher) inventoryContent(ctx context.Context, inv *inventory.Invent
 	return content, nil
 }
 
-// inventorySecretPattern matches an inventory variable assignment whose name suggests a secret, in the
-// ini form key=value or the yaml form key: value. The captured group is the value.
+// inventorySecretPattern matches an inventory variable assignment whose name suggests a secret, in
+// the ini form key=value or the yaml form key: value. The captured group is the value. The password,
+// passwd, passphrase, secret, token, and api_key stems may carry trailing name parts, so
+// secret_value and token_id still match. The bare pass stem is deliberately narrower: it matches
+// only as a terminal _pass component, which catches ansible_ssh_pass and ansible_become_pass without
+// swallowing bypass, passive, or passthrough, whose values are often booleans the masker would then
+// black out everywhere in a run's output. Key-file paths and access-key IDs are not secret and are
+// intentionally left unmatched.
 var inventorySecretPattern = regexp.MustCompile(
-	`(?i)[a-z0-9_]*(?:password|passwd|secret|token|api[_-]?key)[a-z0-9_]*\s*[:=]\s*["']?([^"'\s]+)`)
+	`(?i)[a-z0-9_]*(?:(?:password|passwd|passphrase|secret|token|api[_-]?key)[a-z0-9_]*|_pass)\s*[:=]\s*["']?([^"'\s]+)`)
 
 // inventorySecrets returns the values of secret-looking variables in inventory content, so a host list
 // that carries an ansible_password or an API token does not leak it into the run's log or events.

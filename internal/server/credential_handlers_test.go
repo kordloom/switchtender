@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/credential"
@@ -172,6 +174,174 @@ func TestCreateCredentialVaultID(t *testing.T) {
 				t.Errorf("stored vault_id = %q, want %q", list[0].VaultID, test.WantVaultID)
 			}
 		})
+	}
+}
+
+// TestCreateCredentialSettings proves settings store on create, are refused when malformed, and are
+// refused on a typed credential, whose type declares its own non-secret fields.
+func TestCreateCredentialSettings(t *testing.T) {
+	t.Parallel()
+	sealer := credential.NewSealer("pass", "salt")
+	tests := []struct {
+		// Name says what the case proves.
+		Name string
+		// Body is the request JSON.
+		Body string
+		// WantCode is the expected status.
+		WantCode int
+		// WantSettings is the stored map on a created credential.
+		WantSettings map[string]string
+	}{{ // Test 0: Settings store and echo back.
+		Name: "stored",
+		Body: `{"name":"m","kind":"ssh_password","secret":"password=pw",` +
+			`"settings":{"user":"deploy","become_method":"sudo"}}`,
+		WantCode:     http.StatusCreated,
+		WantSettings: map[string]string{"user": "deploy", "become_method": "sudo"},
+	}, { // Test 1: A newline value is refused before it can smuggle a line into an injection.
+		Name:     "newline value",
+		Body:     `{"name":"m","kind":"ssh_password","secret":"password=pw","settings":{"user":"a\nb"}}`,
+		WantCode: http.StatusBadRequest,
+	}, { // Test 2: A malformed key is refused.
+		Name:     "bad key",
+		Body:     `{"name":"m","kind":"ssh_password","secret":"password=pw","settings":{"user name":"x"}}`,
+		WantCode: http.StatusBadRequest,
+	}, { // Test 3: A typed credential's non-secret fields belong to its type, not to settings.
+		Name:     "typed refuses settings",
+		Body:     `{"name":"t","type_id":"ct_1","fields":{"host":"h"},"settings":{"user":"x"}}`,
+		WantCode: http.StatusBadRequest,
+	}}
+	for i, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", i, test.Name), func(t *testing.T) {
+			t.Parallel()
+			store := credential.NewMemStore()
+			types := credential.NewMemTypeStore()
+			if err := types.Save(context.Background(), &credential.CredentialType{
+				ID: "ct_1", Name: "custom",
+				Fields: []credential.Field{{Name: "host", Label: "Host"}},
+			}); err != nil {
+				t.Fatalf("Save type error = %v", err)
+			}
+			handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(),
+				WithCredentials(store, sealer), WithCredentialTypes(types)).Handler()
+			req := httptest.NewRequest(http.MethodPost, "/v1/credentials", strings.NewReader(test.Body))
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if rec.Code != test.WantCode {
+				t.Fatalf("status = %d, want %d (body %s)", rec.Code, test.WantCode, rec.Body.String())
+			}
+			if rec.Code != http.StatusCreated {
+				return
+			}
+			list, err := store.List(context.Background())
+			if err != nil || len(list) != 1 {
+				t.Fatalf("List() = %v, %v, want one credential", list, err)
+			}
+			if diff := cmp.Diff(test.WantSettings, list[0].Settings); diff != "" {
+				t.Errorf("stored settings mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+// TestUpdateCredentialSettings proves the update semantics: an omitted field keeps stored settings,
+// a present map replaces them, a present empty object clears them, and malformed settings are
+// refused.
+func TestUpdateCredentialSettings(t *testing.T) {
+	t.Parallel()
+	sealer := credential.NewSealer("pass", "salt")
+	tests := []struct {
+		// Name says what the case proves.
+		Name string
+		// Body is the request JSON.
+		Body string
+		// WantCode is the expected status.
+		WantCode int
+		// WantSettings is the stored map after the update.
+		WantSettings map[string]string
+	}{{ // Test 0: Omitted settings keep the stored map.
+		Name: "omitted keeps", Body: `{"name":"renamed"}`,
+		WantCode: http.StatusOK, WantSettings: map[string]string{"user": "deploy"},
+	}, { // Test 1: A present map replaces the stored one.
+		Name: "replaces", Body: `{"name":"m","settings":{"user":"other","become_user":"root"}}`,
+		WantCode: http.StatusOK, WantSettings: map[string]string{"user": "other", "become_user": "root"},
+	}, { // Test 2: A present empty object clears deliberately.
+		Name: "clears", Body: `{"name":"m","settings":{}}`,
+		WantCode: http.StatusOK, WantSettings: nil,
+	}, { // Test 3: Malformed settings are refused and nothing changes.
+		Name: "bad value", Body: `{"name":"m","settings":{"user":"a\tb"}}`,
+		WantCode: http.StatusBadRequest, WantSettings: map[string]string{"user": "deploy"},
+	}}
+	for i, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", i, test.Name), func(t *testing.T) {
+			t.Parallel()
+			store := credential.NewMemStore()
+			sealed, err := sealer.Seal("user=deploy\npassword=pw")
+			if err != nil {
+				t.Fatalf("Seal() error = %v", err)
+			}
+			if err := store.Save(context.Background(), &credential.Credential{
+				ID: "cred_1", Name: "m", Kind: credential.KindSSHPassword, Secret: sealed,
+				Settings: map[string]string{"user": "deploy"}, CreatedAt: time.Now(),
+			}); err != nil {
+				t.Fatalf("Save() error = %v", err)
+			}
+			handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(),
+				WithCredentials(store, sealer)).Handler()
+			req := httptest.NewRequest(http.MethodPut, "/v1/credentials/cred_1",
+				strings.NewReader(test.Body))
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if rec.Code != test.WantCode {
+				t.Fatalf("status = %d, want %d (body %s)", rec.Code, test.WantCode, rec.Body.String())
+			}
+			got, err := store.Get(context.Background(), "cred_1")
+			if err != nil {
+				t.Fatalf("Get() error = %v", err)
+			}
+			if diff := cmp.Diff(test.WantSettings, got.Settings, cmpopts.EquateEmpty()); diff != "" {
+				t.Errorf("stored settings mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+// TestUpdateCredentialKindChangeClearsSettings proves a kind change that carries no new settings
+// drops the stored ones, so a setting keyed "user" on ssh_password is not silently reread as the
+// become user after the credential is re-sealed as the become kind.
+func TestUpdateCredentialKindChangeClearsSettings(t *testing.T) {
+	t.Parallel()
+	sealer := credential.NewSealer("pass", "salt")
+	store := credential.NewMemStore()
+	sealed, err := sealer.Seal("user=deploy\npassword=pw")
+	if err != nil {
+		t.Fatalf("Seal() error = %v", err)
+	}
+	if err := store.Save(context.Background(), &credential.Credential{
+		ID: "cred_1", Name: "m", Kind: credential.KindSSHPassword, Secret: sealed,
+		Settings: map[string]string{"user": "deploy"}, CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(),
+		WithCredentials(store, sealer)).Handler()
+	// Re-seal as the become kind with a new secret, sending no settings.
+	body := `{"name":"m","kind":"become","secret":"password=rootpw"}`
+	req := httptest.NewRequest(http.MethodPut, "/v1/credentials/cred_1", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", rec.Code, rec.Body.String())
+	}
+	got, err := store.Get(context.Background(), "cred_1")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.Kind != credential.KindBecome {
+		t.Errorf("kind = %q, want become", got.Kind)
+	}
+	if len(got.Settings) != 0 {
+		t.Errorf("settings = %v after a kind change, want cleared so 'user' is not reread as the "+
+			"become user", got.Settings)
 	}
 }
 

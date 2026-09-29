@@ -2,6 +2,7 @@ package credential
 
 import (
 	"context"
+	"maps"
 	"sort"
 	"sync"
 )
@@ -24,6 +25,7 @@ func (m *memStore) Save(_ context.Context, c *Credential) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	cp := *c
+	cp.Settings = copySettings(c.Settings)
 	m.creds[c.ID] = &cp
 	return nil
 }
@@ -44,6 +46,7 @@ func (m *memStore) Update(_ context.Context, c *Credential) error {
 	existing.OrgID = c.OrgID
 	existing.TypeID = c.TypeID
 	existing.VaultID = c.VaultID
+	existing.Settings = copySettings(c.Settings)
 	return nil
 }
 
@@ -56,6 +59,7 @@ func (m *memStore) Get(_ context.Context, id string) (*Credential, error) {
 		return nil, ErrNotFound
 	}
 	cp := *c
+	cp.Settings = copySettings(c.Settings)
 	return &cp, nil
 }
 
@@ -66,6 +70,7 @@ func (m *memStore) List(_ context.Context) ([]*Credential, error) {
 	out := make([]*Credential, 0, len(m.creds))
 	for _, c := range m.creds {
 		cp := *c
+		cp.Settings = copySettings(c.Settings)
 		out = append(out, &cp)
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -86,4 +91,13 @@ func (m *memStore) Delete(_ context.Context, id string) error {
 	}
 	delete(m.creds, id)
 	return nil
+}
+
+// copySettings returns an independent copy of a settings map, nil for empty, so a stored credential
+// never shares map memory with a caller's value.
+func copySettings(settings map[string]string) map[string]string {
+	if len(settings) == 0 {
+		return nil
+	}
+	return maps.Clone(settings)
 }

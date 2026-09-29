@@ -17,6 +17,66 @@ func Contract(t *testing.T, newStore func() credential.Store) {
 	t.Run("lifecycle", func(t *testing.T) { testLifecycle(t, newStore()) })
 	t.Run("list ordered", func(t *testing.T) { testList(t, newStore()) })
 	t.Run("update", func(t *testing.T) { testUpdate(t, newStore()) })
+	t.Run("settings", func(t *testing.T) { testSettings(t, newStore()) })
+}
+
+// testSettings verifies the non-secret settings map round trips, replaces on update, clears when
+// updated away, and stays absent for a credential that never had any.
+func testSettings(t *testing.T, store credential.Store) {
+	ctx := context.Background()
+	if err := store.Save(ctx, &credential.Credential{
+		ID: "cred_s", Name: "machine", Kind: credential.KindSSHPassword, Secret: "sealed",
+		Settings:  map[string]string{"user": "deploy", "become_method": "sudo"},
+		CreatedAt: time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	got, err := store.Get(ctx, "cred_s")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.Settings["user"] != "deploy" || got.Settings["become_method"] != "sudo" ||
+		len(got.Settings) != 2 {
+		t.Errorf("Settings = %v, want the saved two-entry map", got.Settings)
+	}
+
+	got.Settings = map[string]string{"user": "other"}
+	if err := store.Update(ctx, got); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	updated, err := store.Get(ctx, "cred_s")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if updated.Settings["user"] != "other" || len(updated.Settings) != 1 {
+		t.Errorf("Settings after update = %v, want the replacement map", updated.Settings)
+	}
+
+	updated.Settings = nil
+	if err := store.Update(ctx, updated); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	cleared, err := store.Get(ctx, "cred_s")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if len(cleared.Settings) != 0 {
+		t.Errorf("Settings after clearing = %v, want none", cleared.Settings)
+	}
+
+	if err := store.Save(ctx, &credential.Credential{
+		ID: "cred_plain", Name: "plain", Kind: credential.KindEnv, Secret: "sealed",
+		CreatedAt: time.Date(2026, 7, 2, 0, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	plain, err := store.Get(ctx, "cred_plain")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if plain.Settings != nil {
+		t.Errorf("Settings on a plain credential = %v, want nil", plain.Settings)
+	}
 }
 
 // testUpdate verifies an update changes the name, kind, and sealed secret, preserves the creation

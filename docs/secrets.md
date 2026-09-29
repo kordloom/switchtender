@@ -63,6 +63,37 @@ still expires on the lease's own TTL. This is a control-plane capability neither
 Attach a credential to a run, a template, a project, or a stored inventory. A credential attached to an
 inventory reaches every run that targets it, so a fleet carries its own secret variables in one place.
 
+## Settings
+
+A credential can carry non-secret fields beside its sealed secret: the user to connect as, a become
+method, a region. Unlike the secret, settings return from the API and show in the interface, so an
+operator can see and edit them and an AWX import lands them automatically. On the connection kinds,
+`ssh_key`, `ssh_password`, `become`, and `network`, settings inject as the matching Ansible
+variables, merged beneath the sealed fields so a sealed value wins on a shared name; a machine
+credential whose settings carry `become_method` or `become_user` injects the matching
+`ansible_become_*` variables. On every other kind, including `env`, settings are reference metadata
+only and are not injected, so a non-secret pair can never shadow another credential's sealed value.
+Settings values are never added to the run's mask list, which is the point: masking a username like
+`deploy` would black out ordinary output everywhere it appears.
+
+## What masking does not cover
+
+Masking redacts known values: everything a credential injects, and any inventory variable whose name
+looks secret, such as `ansible_password`, `ansible_become_pass`, or `api_token`. Two things sit
+outside that. A dynamic inventory source saves whatever its script emits into the inventory it
+maintains, because the synced host list is the data later runs depend on, so anyone who can read
+that inventory reads it as stored. And a secret under an ordinary name, say a `connection_string`
+holding a password, is invisible to the name heuristic. Keep real secrets in credentials or an
+external source and let inventories carry references; a credential attached to the inventory reaches
+every run that targets it, sealed at rest and masked in output.
+
+While a run executes, its working material lives in files created mode 0600 and removed when the
+run ends: materialized credentials, the inventory, and, for Ansible, the structured event sidecar
+the callback writes before the server masks it at read time. The exposure window is the run and the
+reader is the executing user, but a hard crash can leave those files until the temp directory
+clears. On a shared or long-lived executor, point `TMPDIR` at a tmpfs so run scratch lives in
+memory and dies with the machine instead of landing on disk.
+
 ## Encryption
 
 Sealing needs a key. Set `SWITCHTENDER_ENCRYPTION_KEY` and a stable `SWITCHTENDER_ENCRYPTION_SALT` before

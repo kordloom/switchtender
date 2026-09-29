@@ -359,6 +359,213 @@ func TestMaterializeConnectionCredentials(t *testing.T) {
 	}
 }
 
+// TestMaterializeCredentialSettings proves the non-secret settings carrier: absent fields fill from
+// settings, sealed fields win on conflict, become settings ride a machine credential, and settings
+// values never enter the mask list, since masking a username would black out ordinary output.
+func TestMaterializeCredentialSettings(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		Name          string
+		Kind          credential.Kind
+		Secret        string
+		Settings      map[string]string
+		WantVars      map[string]string
+		WantNotMasked []string
+		WantMasked    []string
+	}{{ // Test 0: Settings fill the user and become fields a password-only secret omits.
+		Name:   "ssh_password fills from settings",
+		Kind:   credential.KindSSHPassword,
+		Secret: "user=\npassword=s3cret",
+		Settings: map[string]string{
+			"user": "deploy", "become_method": "sudo", "become_user": "root",
+		},
+		WantVars: map[string]string{
+			"ansible_user":          "deploy",
+			"ansible_password":      "s3cret",
+			"ansible_become_method": "sudo",
+			"ansible_become_user":   "root",
+		},
+		WantNotMasked: []string{"deploy", "sudo", "root"},
+		WantMasked:    []string{"s3cret"},
+	}, { // Test 1: A sealed field beats the settings value under the same name.
+		Name:     "sealed wins",
+		Kind:     credential.KindSSHPassword,
+		Secret:   "user=alpha\npassword=s3cret",
+		Settings: map[string]string{"user": "beta"},
+		WantVars: map[string]string{
+			"ansible_user":     "alpha",
+			"ansible_password": "s3cret",
+		},
+		WantNotMasked: []string{"beta"},
+		WantMasked:    []string{"s3cret"},
+	}, { // Test 2: Become fills its optional method and user from settings.
+		Name:     "become fills from settings",
+		Kind:     credential.KindBecome,
+		Secret:   "password=rootpw",
+		Settings: map[string]string{"method": "doas", "user": "svc"},
+		WantVars: map[string]string{
+			"ansible_become_password": "rootpw",
+			"ansible_become_method":   "doas",
+			"ansible_become_user":     "svc",
+		},
+		WantNotMasked: []string{"doas"},
+		WantMasked:    []string{"rootpw"},
+	}, { // Test 3: Network fills its device fields from settings.
+		Name:     "network fills from settings",
+		Kind:     credential.KindNetwork,
+		Secret:   "user=admin\npassword=netpw",
+		Settings: map[string]string{"network_os": "ios", "connection": "netconf"},
+		WantVars: map[string]string{
+			"ansible_user":       "admin",
+			"ansible_password":   "netpw",
+			"ansible_network_os": "ios",
+			"ansible_connection": "netconf",
+		},
+		WantNotMasked: []string{"ios"},
+		WantMasked:    []string{"netpw"},
+	}}
+	for testNum, test := range tests {
+		t.Run(fmt.Sprintf("test %d %s", testNum, test.Name), func(t *testing.T) {
+			t.Parallel()
+			sealer := credential.NewSealer("pass", "salt")
+			sealed, err := sealer.Seal(test.Secret)
+			if err != nil {
+				t.Fatalf("Seal() error = %v", err)
+			}
+			store := credential.NewMemStore()
+			if err := store.Save(context.Background(), &credential.Credential{
+				ID: "cred_1", Name: test.Name, Kind: test.Kind, Secret: sealed,
+				Settings: test.Settings,
+			}); err != nil {
+				t.Fatalf("Save() error = %v", err)
+			}
+
+			d := &Dispatcher{credentials: store, sealer: sealer}
+			spec := &roundhouse.Spec{}
+			cleanup, secrets, err := d.materializeCredentials(context.Background(),
+				&run.Run{ID: "run_1", CredentialIDs: []string{"cred_1"}}, spec)
+			defer cleanup()
+			if err != nil {
+				t.Fatalf("materializeCredentials() error = %v", err)
+			}
+
+			if len(spec.ExtraVarsFiles) != 1 {
+				t.Fatalf("spec.ExtraVarsFiles = %v, want exactly one file", spec.ExtraVarsFiles)
+			}
+			data, err := os.ReadFile(spec.ExtraVarsFiles[0])
+			if err != nil {
+				t.Fatalf("ReadFile() error = %v", err)
+			}
+			var gotVars map[string]string
+			if err := json.Unmarshal(data, &gotVars); err != nil {
+				t.Fatalf("Unmarshal() error = %v", err)
+			}
+			if diff := cmp.Diff(test.WantVars, gotVars, cmpopts.EquateEmpty()); diff != "" {
+				t.Errorf("ansible vars mismatch (-want +got):\n%s", diff)
+			}
+			for _, v := range test.WantMasked {
+				if !containsString(secrets, v) {
+					t.Errorf("secrets = %v, want %q tracked for masking", secrets, v)
+				}
+			}
+			for _, v := range test.WantNotMasked {
+				if containsString(secrets, v) {
+					t.Errorf("secrets = %v carries non-secret setting %q, which would mask "+
+						"ordinary output", secrets, v)
+				}
+			}
+		})
+	}
+}
+
+// TestMaterializeSSHKeySettings proves a key credential's settings reach the play as connection and
+// become vars beside the key file, so an imported AWX machine credential lands runnable.
+func TestMaterializeSSHKeySettings(t *testing.T) {
+	t.Parallel()
+	raw := "-----BEGIN OPENSSH PRIVATE KEY-----\nunencrypted-body\n-----END OPENSSH PRIVATE KEY-----\n"
+	sealer := credential.NewSealer("pass", "salt")
+	sealed, err := sealer.Seal(raw)
+	if err != nil {
+		t.Fatalf("Seal() error = %v", err)
+	}
+	store := credential.NewMemStore()
+	if err := store.Save(context.Background(), &credential.Credential{
+		ID: "cred_1", Name: "machine key", Kind: credential.KindSSHKey, Secret: sealed,
+		Settings: map[string]string{"user": "keydeploy", "become_method": "sudo"},
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	d := &Dispatcher{credentials: store, sealer: sealer}
+	spec := &roundhouse.Spec{}
+	cleanup, secrets, err := d.materializeCredentials(context.Background(),
+		&run.Run{ID: "run_1", CredentialIDs: []string{"cred_1"}}, spec)
+	defer cleanup()
+	if err != nil {
+		t.Fatalf("materializeCredentials() error = %v", err)
+	}
+	if spec.PrivateKeyPath == "" {
+		t.Fatal("spec.PrivateKeyPath is empty, want the materialized key path")
+	}
+	if len(spec.ExtraVarsFiles) != 1 {
+		t.Fatalf("spec.ExtraVarsFiles = %v, want the settings vars file", spec.ExtraVarsFiles)
+	}
+	data, err := os.ReadFile(spec.ExtraVarsFiles[0])
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	var gotVars map[string]string
+	if err := json.Unmarshal(data, &gotVars); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	want := map[string]string{"ansible_user": "keydeploy", "ansible_become_method": "sudo"}
+	if diff := cmp.Diff(want, gotVars); diff != "" {
+		t.Errorf("ansible vars mismatch (-want +got):\n%s", diff)
+	}
+	if containsString(secrets, "keydeploy") {
+		t.Errorf("secrets = %v carries the non-secret user, which would mask ordinary output", secrets)
+	}
+}
+
+// TestMaterializeEnvSettingsNotInjected proves an env credential's settings are reference metadata
+// only: the sealed pairs reach the environment, but a settings pair does not, so it can neither
+// shadow another credential's sealed value of the same name nor spill an imported input into the run.
+func TestMaterializeEnvSettingsNotInjected(t *testing.T) {
+	t.Parallel()
+	sealer := credential.NewSealer("pass", "salt")
+	sealed, err := sealer.Seal("FOO=sealedvalue")
+	if err != nil {
+		t.Fatalf("Seal() error = %v", err)
+	}
+	store := credential.NewMemStore()
+	if err := store.Save(context.Background(), &credential.Credential{
+		ID: "cred_1", Name: "cloud env", Kind: credential.KindEnv, Secret: sealed,
+		Settings: map[string]string{"AWS_REGION": "us-east-1", "FOO": "clobber"},
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	d := &Dispatcher{credentials: store, sealer: sealer}
+	spec := &roundhouse.Spec{}
+	cleanup, secrets, err := d.materializeCredentials(context.Background(),
+		&run.Run{ID: "run_1", CredentialIDs: []string{"cred_1"}}, spec)
+	defer cleanup()
+	if err != nil {
+		t.Fatalf("materializeCredentials() error = %v", err)
+	}
+	// Only the sealed pair is injected. The settings never appear, so FOO is not clobbered and the
+	// region does not spill into the environment.
+	if diff := cmp.Diff([]string{"FOO=sealedvalue"}, spec.Env); diff != "" {
+		t.Errorf("spec.Env mismatch (-want +got):\n%s", diff)
+	}
+	if !containsString(secrets, "sealedvalue") {
+		t.Error("secrets does not track the sealed env value for masking")
+	}
+	if containsString(secrets, "us-east-1") {
+		t.Errorf("secrets = %v carries the non-secret region, which would mask ordinary output", secrets)
+	}
+}
+
 // TestMaterializeConnectionCredentialsMissingFields proves each connection kind rejects material that
 // omits a required field, so a bad credential fails materialization instead of running with empty
 // authentication vars.

@@ -54,6 +54,10 @@ type createCredentialRequest struct {
 	// Fields holds a typed credential's field values, sealed together as one object. Every value is
 	// secret at rest; whether it is masked in run output is decided by the type's field definitions.
 	Fields map[string]string `json:"fields,omitempty"`
+	// Settings carries the credential's non-secret fields, such as the connection user or a become
+	// method. Unlike the secret they return from the API and show in the interface. Optional, and
+	// only for built-in kinds; a custom type declares its own non-secret fields.
+	Settings map[string]string `json:"settings,omitempty"`
 }
 
 // listCredentialsResponse wraps the credential list, secrets excluded by the model's json tags.
@@ -130,6 +134,10 @@ func createCredentialHandler(store credential.Store, types credential.TypeStore,
 			return
 		}
 
+		if err := credential.ValidateSettings(req.Settings); err != nil {
+			respondError(w, log, http.StatusBadRequest, err.Error())
+			return
+		}
 		secretPlain, err := sealableSecret(req.Kind, req.Source, req.Secret, req.Passphrase)
 		if err != nil {
 			respondError(w, log, http.StatusBadRequest, err.Error())
@@ -152,7 +160,7 @@ func createCredentialHandler(store credential.Store, types credential.TypeStore,
 		c := &credential.Credential{
 			ID: credential.NewID(), Name: req.Name, Kind: req.Kind,
 			Source: credential.NormalizeSource(req.Source), Secret: sealed, OrgID: req.OrgID,
-			VaultID: vaultLabel, CreatedAt: time.Now(),
+			VaultID: vaultLabel, Settings: req.Settings, CreatedAt: time.Now(),
 		}
 		if err := store.Save(r.Context(), c); err != nil {
 			log.Error("server: save credential: " + err.Error())
@@ -186,6 +194,9 @@ type updateCredentialRequest struct {
 	// sends only the name must not wipe the vault id a multi-vault run depends on. A present empty
 	// string clears the label.
 	VaultID *string `json:"vault_id"`
+	// Settings replaces the credential's non-secret fields when present. An omitted field keeps the
+	// stored settings, and a present empty object clears them. Optional.
+	Settings map[string]string `json:"settings,omitempty"`
 }
 
 // createTypedCredential stores a credential of a custom type: its field values are validated against
@@ -195,6 +206,11 @@ func createTypedCredential(w http.ResponseWriter, r *http.Request, store credent
 	req *createCredentialRequest, log *zap.Logger) {
 	if types == nil {
 		respondError(w, log, http.StatusNotFound, "credential types not enabled")
+		return
+	}
+	if len(req.Settings) > 0 {
+		respondError(w, log, http.StatusBadRequest,
+			"settings apply to built-in credential kinds; a custom type declares its own non-secret fields")
 		return
 	}
 	typ, err := types.Get(r.Context(), req.TypeID)
@@ -330,6 +346,24 @@ func updateCredentialHandler(store credential.Store, sealer *credential.Sealer, 
 		// kind drops the now meaningless label rather than storing the state create forbids.
 		if finalKind != credential.KindVaultPassword {
 			c.VaultID = ""
+		}
+		// A nil map means the field was omitted and the stored settings stay; a present map, empty
+		// included, replaces them, so clearing is a deliberate act rather than a side effect.
+		if req.Settings != nil {
+			if err := credential.ValidateSettings(req.Settings); err != nil {
+				respondError(w, log, http.StatusBadRequest, err.Error())
+				return
+			}
+			c.Settings = req.Settings
+			if len(c.Settings) == 0 {
+				c.Settings = nil
+			}
+		} else if finalKind != c.Kind {
+			// The same settings key means different things across kinds: user is the connection user
+			// on ssh_password but the escalation target on become. So a kind change that carries no
+			// new settings drops the stored ones rather than silently reinterpreting them, the same
+			// way the vault label is dropped when the kind leaves vault_password.
+			c.Settings = nil
 		}
 		c.Name = req.Name
 		c.OrgID = req.OrgID
