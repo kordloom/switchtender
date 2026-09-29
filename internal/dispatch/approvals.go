@@ -35,6 +35,18 @@ func (d *Dispatcher) Approve(ctx context.Context, id string) (*run.Run, error) {
 		return nil, ErrNotPendingApproval
 	}
 	r.Status = target
+	if target == run.StatusRunning {
+		// The approving process takes the lease before returning, so the parent is never running
+		// without an owner. That is what hands it to the lease sweep, which already interrupts a
+		// run whose owner stopped renewing and resolves its children in the same pass. Leaving it
+		// unleased instead meant relying on age to decide it was abandoned, and a run held for a
+		// person is old by definition, so the sweep would settle it the moment it was released.
+		claimed := time.Now()
+		r.ClaimedBy = d.owner
+		r.ClaimedAt = &claimed
+		r.StartedAt = &claimed
+		d.save(r)
+	}
 	// No claim loop picks up a parent run of either kind, so an approved one starts here or never
 	// runs at all.
 	switch r.Kind {

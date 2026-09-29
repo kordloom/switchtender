@@ -47,12 +47,17 @@ type authGate struct {
 func (g *authGate) wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !g.protects(r) || !g.enforcing(r.Context()) {
-			// A path outside the token gate still changes things. A webhook trigger starts real
-			// runs, a login mints a session, and a SAML assertion can create an account, and none
-			// of them appeared in the audit trail because recording lived behind the gate they
-			// skip. Recording here means the exceptions are covered by construction, so a path
-			// added to protects() later cannot quietly become invisible.
-			if !g.record(w, unauthenticatedActor(r), r) {
+			// A webhook trigger starts real runs without a token, so it is recorded. Sign-in is
+			// not.
+			//
+			// Recording every unauthenticated request was worse than the gap it closed. Sign-in and
+			// SAML mint no run and change no configuration, but they are reachable by anyone on the
+			// network, so each failed attempt appended a permanent, hash-linked entry: an unbounded
+			// append by strangers into the structure the product's integrity story rests on. And
+			// because the append is fail-closed, an unhealthy audit store then locked every account
+			// out of signing in, including on a fresh install with no token yet. Authentication
+			// attempts belong in the log, which already carries them.
+			if isHook(r) && !g.record(w, "webhook", r) {
 				return
 			}
 			next.ServeHTTP(w, r)
@@ -136,20 +141,28 @@ func actorFrom(ctx context.Context) (Actor, bool) {
 	return a, ok
 }
 
-// unauthenticatedActor names the caller on a path that does not carry a token, so the trail says
-// what kind of thing acted rather than leaving the actor blank. The specific webhook, user, or
-// assertion is identified by the handler's own logging and by the run's provenance; what the chain
-// needs is that the change happened and through which door.
-func unauthenticatedActor(r *http.Request) string {
-	p := strings.TrimPrefix(r.URL.Path, "/v1")
-	switch {
-	case strings.HasPrefix(p, "/hooks/"), strings.HasPrefix(r.URL.Path, "/hooks/"):
-		return "webhook"
-	case strings.HasSuffix(p, "/auth/saml/acs"), strings.HasSuffix(r.URL.Path, "/auth/saml/acs"):
-		return "saml"
-	default:
-		return "unauthenticated"
+// isHook reports whether the request is a webhook trigger, which authenticates by a secret in its
+// path rather than by a token header.
+func isHook(r *http.Request) bool {
+	return r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/hooks/")
+}
+
+// auditPath returns the request path with anything secret removed, which is what the chain records.
+//
+// A webhook authenticates by a secret in its path, and the trigger store deliberately keeps only
+// that secret's SHA-256 because the token itself must never persist. Recording the raw path put it
+// back: hash-linked, unredactable without breaking the chain, and carried into every bundle handed
+// to a third party. A failed probe of a guessed path would have been written down just as
+// permanently.
+func auditPath(r *http.Request) string {
+	if !isHook(r) {
+		return r.URL.Path
 	}
+	rest := strings.TrimPrefix(r.URL.Path, "/hooks/")
+	if i := strings.IndexByte(rest, '/'); i >= 0 {
+		return "/hooks/[redacted]" + rest[i:]
+	}
+	return "/hooks/[redacted]"
 }
 
 // AuditReceiptHeader carries the chain position of the entry recorded for a mutation, as
@@ -180,7 +193,7 @@ func (g *authGate) record(w http.ResponseWriter, actor string, r *http.Request) 
 	}
 	entry := &audit.Entry{
 		ID: audit.NewID(), At: time.Now(), Actor: actor,
-		Method: r.Method, Path: r.URL.Path,
+		Method: r.Method, Path: auditPath(r),
 	}
 	if err := g.audits.Append(r.Context(), entry); err != nil {
 		g.log.Error("server: append audit entry: "+err.Error(),

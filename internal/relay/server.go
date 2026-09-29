@@ -4,6 +4,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 
@@ -170,12 +171,47 @@ func (s *relayServer) save(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, "save", err)
 		return
 	}
+	if err := checkWorkerStatus(stored.Status, body.Status); err != nil {
+		writeErr(w, http.StatusConflict, err.Error())
+		return
+	}
 	applyWorkerReport(stored, &body)
 	if err := s.store.Save(r.Context(), stored); err != nil {
 		s.internal(w, "save", err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// workerStatuses are the states a worker may report. A worker claims a run, executes it, and says
+// how it ended; it never puts a run back in the queue and never reopens one that finished.
+var workerStatuses = map[run.Status]bool{
+	run.StatusRunning:     true,
+	run.StatusSucceeded:   true,
+	run.StatusFailed:      true,
+	run.StatusCanceled:    true,
+	run.StatusInterrupted: true,
+}
+
+// checkWorkerStatus rejects a reported status a worker has no business setting.
+//
+// Constraining the spec was not enough, because the status is what decides whether a run executes at
+// all. A report of "pending" moved a run awaiting an approver into the queue, where the claim loop
+// ran it past the policy, the approver, and the audit gate. A second report rewound a finished run
+// and ran it again. One shared worker token is all that was needed for either.
+func checkWorkerStatus(stored, reported run.Status) error {
+	if !workerStatuses[reported] {
+		return fmt.Errorf("a worker may not set status %q", reported)
+	}
+	if stored.Terminal() {
+		return fmt.Errorf("run already finished as %q and cannot be reopened", stored)
+	}
+	// A worker only ever reports on a run it claimed, and claiming is what moves a run out of
+	// pending. A run still awaiting an approver was never claimable.
+	if stored == run.StatusPendingApproval || stored == run.StatusRejected {
+		return fmt.Errorf("run is awaiting a decision and is not a worker's to report on")
+	}
+	return nil
 }
 
 // applyWorkerReport copies onto stored the fields a worker learns by executing a run, and leaves

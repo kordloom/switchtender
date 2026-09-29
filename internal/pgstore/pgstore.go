@@ -1744,7 +1744,7 @@ WHERE status='running' AND claimed_by!=''
 	res, err = tx.ExecContext(ctx, `
 UPDATE runs SET status='interrupted', ended_at=`+pgNowText+`,
 error=CASE WHEN error='' THEN '`+run.AbandonedParentError()+`' ELSE error END
-WHERE status='pending' AND claimed_by='' AND kind IN ('split','pipeline')
+WHERE status IN ('pending','running') AND claimed_by='' AND kind IN ('split','pipeline')
   AND created_at::timestamptz < now() - make_interval(secs => $1)`, age)
 	if err != nil {
 		return 0, fmt.Errorf("reclaim stale: %w", err)

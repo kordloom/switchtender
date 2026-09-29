@@ -48,6 +48,12 @@ func Contract(t *testing.T, newStore func() run.Store) {
 	t.Run("heartbeat and reclaim", func(t *testing.T) { testLeaseLifecycle(t, newStore()) })
 	t.Run("reclaim resolves orphaned children", func(t *testing.T) { testReclaimOrphans(t, newStore()) })
 	t.Run("reclaim settles abandoned parents", func(t *testing.T) { testReclaimAbandonedParents(t, newStore()) })
+	t.Run("reclaim settles an approved parent with no coordinator", func(t *testing.T) {
+		testReclaimApprovedParentWithNoCoordinator(t, newStore())
+	})
+	t.Run("reclaim leaves a coordinated parent alone", func(t *testing.T) {
+		testReclaimLeavesACoordinatedParentAlone(t, newStore())
+	})
 	t.Run("cancel request", func(t *testing.T) { testRequestCancel(t, newStore()) })
 	t.Run("cancel pending", func(t *testing.T) { testCancelPending(t, newStore()) })
 	t.Run("save keeps cancel sticky", func(t *testing.T) { testSaveKeepsCancel(t, newStore()) })
@@ -1840,5 +1846,77 @@ func testReclaimAbandonedParents(t *testing.T, store run.Store) {
 	if gotFresh.Status != run.StatusPending {
 		t.Errorf("freshly submitted parent status = %q, want pending: its coordinator was still "+
 			"starting", gotFresh.Status)
+	}
+}
+
+// testReclaimApprovedParentWithNoCoordinator verifies a parent released by an approval, whose
+// coordinator never arrived, is still settled.
+//
+// An approved parent goes straight to running so the sweep cannot catch it in the instant before its
+// coordinator claims it. That leaves running-and-unclaimed as the state meaning the coordinator
+// never arrived, and neither the lease sweep, which only looks at leased runs, nor a pending-only
+// abandoned rule covers it. Without this the fix for one race created a parent nothing would finish.
+func testReclaimApprovedParentWithNoCoordinator(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	stale := time.Now().Add(-time.Hour)
+	parentID := "run_approved_no_coordinator"
+	idx, count := 0, 1
+	child := parentID
+	saved := []*run.Run{
+		// Released by an approval, then the process handling it went away.
+		{ID: parentID, Playbook: "site.yml", Kind: run.KindSplit, Status: run.StatusRunning,
+			CreatedAt: stale},
+		{ID: "run_approved_shard", Playbook: "site.yml", Status: run.StatusPending,
+			ParentID: &child, ShardIndex: &idx, ShardCount: &count, CreatedAt: stale},
+	}
+	for _, r := range saved {
+		if err := store.Save(ctx, r); err != nil {
+			t.Fatalf("Save(%s) error = %v", r.ID, err)
+		}
+	}
+	if _, err := store.ReclaimStale(ctx, 30*time.Minute); err != nil {
+		t.Fatalf("ReclaimStale() error = %v", err)
+	}
+	got, err := store.Get(ctx, parentID)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.Status != run.StatusInterrupted {
+		t.Errorf("parent status = %q, want interrupted: running with no lease means no coordinator "+
+			"ever claimed it, and nothing else sweeps that state", got.Status)
+	}
+	shard, err := store.Get(ctx, "run_approved_shard")
+	if err != nil {
+		t.Fatalf("Get(shard) error = %v", err)
+	}
+	if shard.Status != run.StatusCanceled {
+		t.Errorf("shard status = %q, want canceled: it is claimable under a parent with no "+
+			"coordinator", shard.Status)
+	}
+}
+
+// testReclaimLeavesACoordinatedParentAlone verifies the widened rule does not touch a parent whose
+// coordinator holds it, which is every healthy split and pipeline.
+func testReclaimLeavesACoordinatedParentAlone(t *testing.T, store run.Store) {
+	ctx := context.Background()
+	old := time.Now().Add(-time.Hour)
+	now := time.Now()
+	healthy := &run.Run{
+		ID: "run_coordinated", Playbook: "site.yml", Kind: run.KindSplit,
+		Status: run.StatusRunning, CreatedAt: old, ClaimedBy: "coordinator-a", ClaimedAt: &now,
+	}
+	if err := store.Save(ctx, healthy); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	if _, err := store.ReclaimStale(ctx, 30*time.Minute); err != nil {
+		t.Fatalf("ReclaimStale() error = %v", err)
+	}
+	got, err := store.Get(ctx, "run_coordinated")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.Status != run.StatusRunning {
+		t.Errorf("a coordinated parent was swept: status = %q. Its lease is fresh, so it is being "+
+			"actively coordinated", got.Status)
 	}
 }

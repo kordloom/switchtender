@@ -2012,3 +2012,106 @@ func TestMutationReturnsAnAuditReceipt(t *testing.T) {
 		t.Errorf("a read returned receipt %q, want none", got)
 	}
 }
+
+// TestWebhookSecretNeverReachesTheAuditChain pins that a webhook's token stays out of the audit
+// trail.
+//
+// A webhook authenticates by a secret in its path, and the trigger store keeps only that secret's
+// SHA-256 precisely because the token itself must never persist. Recording the raw path put it
+// back, hash-linked into a chain that cannot be redacted without breaking verification, and carried
+// into every bundle handed to a third party. A failed probe of a guessed path would have been
+// written down just as permanently.
+func TestWebhookSecretNeverReachesTheAuditChain(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	audits := audit.NewMemStore()
+	users := user.NewMemStore()
+	tokens := auth.NewMemStore()
+
+	// An install with at least one token is enforcing, which is when unauthenticated paths matter.
+	admin, err := user.New("admin", "pw", user.RoleAdmin)
+	if err != nil {
+		t.Fatalf("user.New() error = %v", err)
+	}
+	if err := users.Save(ctx, admin); err != nil {
+		t.Fatalf("users.Save() error = %v", err)
+	}
+	_, tok, err := auth.New("t-admin")
+	if err != nil {
+		t.Fatalf("auth.New() error = %v", err)
+	}
+	tok.UserID = admin.ID
+	if err := tokens.Save(ctx, tok); err != nil {
+		t.Fatalf("tokens.Save() error = %v", err)
+	}
+
+	handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(),
+		WithTokens(tokens), WithUsers(users), WithAudit(audits)).Handler()
+
+	const secret = "whsec_super_secret_value"
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/hooks/"+secret, nil))
+
+	chain, err := audits.Chain(ctx)
+	if err != nil {
+		t.Fatalf("Chain() error = %v", err)
+	}
+	if len(chain) == 0 {
+		t.Fatal("a webhook trigger left no audit entry, so a run can start with no record")
+	}
+	for _, e := range chain {
+		if strings.Contains(e.Path, secret) {
+			t.Errorf("the webhook secret is in the audit chain at seq %d: %q. It is hash-linked, "+
+				"so it cannot be removed without breaking verification, and it travels in every "+
+				"bundle handed to a third party", e.Seq, e.Path)
+		}
+	}
+	if got := chain[0].Actor; got != "webhook" {
+		t.Errorf("actor = %q, want webhook", got)
+	}
+}
+
+// TestSignInDoesNotAppendToTheAuditChain pins that authentication attempts stay out of the chain.
+//
+// Sign-in mints no run and changes no configuration, but it is reachable by anyone on the network.
+// Recording each attempt let a stranger append without bound to the structure the integrity story
+// rests on, and because the append is fail-closed, an unhealthy audit store then locked every
+// account out of signing in.
+func TestSignInDoesNotAppendToTheAuditChain(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	audits := audit.NewMemStore()
+	users := user.NewMemStore()
+	tokens := auth.NewMemStore()
+	admin, err := user.New("admin", "pw", user.RoleAdmin)
+	if err != nil {
+		t.Fatalf("user.New() error = %v", err)
+	}
+	if err := users.Save(ctx, admin); err != nil {
+		t.Fatalf("users.Save() error = %v", err)
+	}
+	_, tok, err := auth.New("t-admin")
+	if err != nil {
+		t.Fatalf("auth.New() error = %v", err)
+	}
+	tok.UserID = admin.ID
+	if err := tokens.Save(ctx, tok); err != nil {
+		t.Fatalf("tokens.Save() error = %v", err)
+	}
+	handler := New(run.NewMemStore(), &fakeSubmitter{}, zap.NewNop(),
+		WithTokens(tokens), WithUsers(users), WithAudit(audits)).Handler()
+
+	for i := 0; i < 25; i++ {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/auth/login",
+			strings.NewReader(`{"username":"admin","password":"wrong"}`)))
+	}
+	chain, err := audits.Chain(ctx)
+	if err != nil {
+		t.Fatalf("Chain() error = %v", err)
+	}
+	if len(chain) != 0 {
+		t.Errorf("25 failed sign-ins appended %d entries, so anyone reachable on the network can "+
+			"grow the audit chain without bound", len(chain))
+	}
+}

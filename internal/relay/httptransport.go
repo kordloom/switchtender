@@ -164,9 +164,9 @@ func (t *httpTransport) Save(ctx context.Context, r *run.Run) error {
 			if b.doneAt.IsZero() {
 				b.doneAt = time.Now()
 			}
-			// Drop the batch once it is empty, or once a finished run has spent long enough failing
-			// to deliver its tail that holding it is only costing memory.
-			if len(b.buf) == 0 || time.Since(b.doneAt) > logAbandonAfter {
+			// Drop the batch once it is empty. A finished run that is still failing to deliver its
+			// tail is dropped by postFailed, once it has been trying for logAbandonAfter.
+			if len(b.buf) == 0 {
 				if b.timer != nil {
 					b.timer.Stop()
 					b.timer = nil
@@ -176,7 +176,6 @@ func (t *httpTransport) Save(ctx context.Context, r *run.Run) error {
 		}
 		t.mu.Unlock()
 	}
-	_ = flushErr
 	resp, err := t.sendJSON(ctx, http.MethodPost, runPath(r.ID, "/save"), r)
 	if err != nil {
 		return err
