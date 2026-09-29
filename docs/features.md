@@ -94,3 +94,10 @@ What SwitchTender does today.
   source:schedule, actor:alice, host:web01, and label:env=prod, all resolved by the server across
   the whole history rather than the loaded page.
 - Playbook names open the file itself, read only, from the project's cached checkout.
+
+## Running a public demo
+
+- `switchtender demo` seeds a database with sample projects, templates, inventories, and real
+  runs, then serves it with every change rejected, so it is safe to expose.
+- `--seed-only` and `--no-seed` split seeding from serving, so a public instance can build its
+  next database off to the side and swap it in without a gap in service.

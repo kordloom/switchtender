@@ -26,6 +26,12 @@ var demoAddr string
 // demoDB holds the value of the demo --db flag.
 var demoDB string
 
+// demoNoSeed holds the value of the demo --no-seed flag.
+var demoNoSeed bool
+
+// demoSeedOnly holds the value of the demo --seed-only flag.
+var demoSeedOnly bool
+
 // demoCmd runs a seeded, read-only SwitchTender instance for evaluation. It fills a fresh database
 // with sample projects, templates, inventories, and real runs, then serves it with every mutating
 // request rejected, so it is safe to expose publicly.
@@ -40,6 +46,12 @@ func init() {
 	demoCmd.Flags().StringVar(&demoAddr, "addr", defaultServeAddr, "Address the demo listens on.")
 	demoCmd.Flags().StringVar(&demoDB, "db", "",
 		"Database to seed and serve. Empty uses a fresh temporary SQLite file.")
+	demoCmd.Flags().BoolVar(&demoNoSeed, "no-seed", false,
+		"Serve the database as it already stands instead of seeding it. Use with a database a "+
+			"previous --seed-only run prepared, so a public demo can swap in fresh data without "+
+			"a gap in service.")
+	demoCmd.Flags().BoolVar(&demoSeedOnly, "seed-only", false,
+		"Seed the database and exit without serving, so the result can be swapped in later.")
 }
 
 // runDemo seeds a database and serves it read-only until interrupted.
@@ -71,7 +83,14 @@ func runDemo(cmd *cobra.Command, _ []string) error {
 	disp := dispatch.New(store, roundhouse.NewAnsibleRunner(), log, dispatch.WithPublisher(hub))
 	defer disp.Close()
 
-	log.Info("demo: seeding sample data, this runs a few playbooks and takes a moment")
+	if demoNoSeed && demoSeedOnly {
+		return errors.New("--no-seed and --seed-only are opposites; pass at most one")
+	}
+	if demoNoSeed {
+		log.Info("demo: serving the database as it stands, no seeding")
+	} else {
+		log.Info("demo: seeding sample data, this runs a few playbooks and takes a moment")
+	}
 	seedDeps := demo.Deps{
 		Submitter: disp, Runs: store, Projects: bundle.Projects(),
 		Inventories: bundle.Inventories(), Templates: bundle.Templates(),
@@ -81,8 +100,14 @@ func runDemo(cmd *cobra.Command, _ []string) error {
 		Audit:      bundle.Audits(),
 		Schedules:  bundle.Schedules(),
 	}
-	if err := demo.Seed(cmd.Context(), seedDeps, log); err != nil {
-		return fmt.Errorf("seed demo: %w", err)
+	if !demoNoSeed {
+		if err := demo.Seed(cmd.Context(), seedDeps, log); err != nil {
+			return fmt.Errorf("seed demo: %w", err)
+		}
+	}
+	if demoSeedOnly {
+		log.Info("demo: seeded, exiting without serving")
+		return nil
 	}
 
 	sealer := newSealerFromEnv(log)
