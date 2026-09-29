@@ -44,6 +44,9 @@ const (
 	watchInterval = 3 * time.Second
 	// leaseTTL is how stale a lease may grow before the janitor treats its holder as dead.
 	leaseTTL = 30 * time.Second
+	// summaryPageSize is how many events are read at a time when folding a finished run's summaries.
+	// It bounds peak memory at completion, which is when several runs tend to finish at once.
+	summaryPageSize = 5000
 	// janitorInterval is how often stale leases are swept.
 	janitorInterval = 10 * time.Second
 )
@@ -440,7 +443,7 @@ func (d *Dispatcher) claimLoop() {
 func (d *Dispatcher) janitor() {
 	defer d.wg.Done()
 	sweep := func() {
-		n, err := d.store.ReclaimStale(d.ctx, time.Now().Add(-leaseTTL))
+		n, err := d.store.ReclaimStale(d.ctx, leaseTTL)
 		if err != nil {
 			if d.ctx.Err() == nil {
 				d.log.Error("dispatch: reclaim stale: " + err.Error())
@@ -1111,12 +1114,24 @@ func (d *Dispatcher) runStepAttempts(ctx context.Context, parent *run.Run, step 
 // saving that stale snapshot would flip the finished step back to pending and a claim loop would
 // execute it a second time.
 func (d *Dispatcher) stepOutputs(child *run.Run) map[string]any {
-	events, err := d.store.Events(context.Background(), child.ID)
-	if err != nil {
-		d.log.Error("dispatch: read events for outputs: "+err.Error(), zap.String("run_id", child.ID))
-		return nil
+	fold := run.NewSummaryFold(child.CreatedAt)
+	var after int64
+	for {
+		batch, err := d.store.EventsAfter(context.Background(), child.ID, after, summaryPageSize)
+		if err != nil {
+			d.log.Error("dispatch: read events for outputs: "+err.Error(), zap.String("run_id", child.ID))
+			return nil
+		}
+		if len(batch) == 0 {
+			break
+		}
+		fold.Add(batch)
+		after = batch[len(batch)-1].Seq
+		if len(batch) < summaryPageSize {
+			break
+		}
 	}
-	outputs := run.OutputsFromEvents(events)
+	outputs := fold.Outputs()
 	if len(outputs) == 0 {
 		return nil
 	}
@@ -1312,7 +1327,8 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 		return run.StatusCanceled
 	}
 
-	var sink io.Writer = &logSink{store: d.store, id: r.ID, log: d.log, publisher: d.publisher, mask: mask}
+	logs := &logSink{store: d.store, id: r.ID, log: d.log, publisher: d.publisher, mask: mask}
+	var sink io.Writer = logs
 	if tee != nil {
 		sink = io.MultiWriter(sink, tee)
 	}
@@ -1348,6 +1364,10 @@ func (d *Dispatcher) streamSpec(ctx context.Context, r *run.Run, dryRun bool, te
 	mask.set(append(secrets, invSecrets...))
 
 	res, runErr := d.runner.Run(ctx, spec, sink)
+	// The masker holds back the end of each chunk so a secret split across two of them is caught
+	// before either half is emitted. The process can write no more, so the withheld tail is released
+	// now, while the run is still live: an append to a finalized run is fenced and would be dropped.
+	logs.flush()
 
 	close(stop)
 	<-tailed
@@ -1396,28 +1416,45 @@ func (d *Dispatcher) watch(ctx context.Context, id string) {
 }
 
 // summarize computes the run's per host and per task summaries from its events and stores them for
-// cross run queries. It is best effort; a failure is logged and does not affect the run result.
+// summarize folds the run's events into its per-host, per-task, and facts summaries.
+//
+// The events are paged rather than loaded whole. A long run can carry hundreds of thousands of them,
+// and unmarshaling the list at once cost hundreds of megabytes at the exact moment several runs tend
+// to finish together, which is how a small control node ran out of memory. The fold keeps state
+// proportional to hosts and tasks, so peak memory is now one page.
 func (d *Dispatcher) summarize(r *run.Run) {
-	events, err := d.store.Events(context.Background(), r.ID)
-	if err != nil {
-		d.log.Error("dispatch: read events for summary: "+err.Error(), zap.String("run_id", r.ID))
-		return
+	fold := run.NewSummaryFold(r.CreatedAt)
+	var after int64
+	for {
+		batch, err := d.store.EventsAfter(context.Background(), r.ID, after, summaryPageSize)
+		if err != nil {
+			d.log.Error("dispatch: read events for summary: "+err.Error(), zap.String("run_id", r.ID))
+			return
+		}
+		if len(batch) == 0 {
+			break
+		}
+		fold.Add(batch)
+		after = batch[len(batch)-1].Seq
+		if len(batch) < summaryPageSize {
+			break
+		}
 	}
-	if summaries := run.HostSummariesFromStats(events, r.CreatedAt); len(summaries) > 0 {
+	if summaries := fold.HostSummaries(); len(summaries) > 0 {
 		if err := withRetries(func() error {
 			return d.store.SaveHostSummary(context.Background(), r.ID, summaries)
 		}); err != nil {
 			d.log.Error("dispatch: save host summary: "+err.Error(), zap.String("run_id", r.ID))
 		}
 	}
-	if facts := run.HostFactsFromEvents(events, r.CreatedAt); len(facts) > 0 {
+	if facts := fold.HostFacts(); len(facts) > 0 {
 		if err := withRetries(func() error {
 			return d.store.SaveHostFacts(context.Background(), r.ID, facts)
 		}); err != nil {
 			d.log.Error("dispatch: save host facts: "+err.Error(), zap.String("run_id", r.ID))
 		}
 	}
-	if tasks := run.TaskSummariesFromEvents(events, r.CreatedAt); len(tasks) > 0 {
+	if tasks := fold.TaskSummaries(); len(tasks) > 0 {
 		if err := withRetries(func() error {
 			return d.store.SaveTaskSummary(context.Background(), r.ID, tasks)
 		}); err != nil {

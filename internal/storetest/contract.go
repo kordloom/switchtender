@@ -1048,8 +1048,8 @@ func testLeaseLifecycle(t *testing.T, store run.Store) {
 		t.Errorf("Heartbeat() wrong owner error = %v, want ErrNotFound", err)
 	}
 
-	// A fresh lease survives a sweep with an old cutoff.
-	n, err := store.ReclaimStale(ctx, time.Now().Add(-time.Minute))
+	// A fresh lease survives a sweep that only reclaims leases older than a minute.
+	n, err := store.ReclaimStale(ctx, time.Minute)
 	if err != nil {
 		t.Fatalf("ReclaimStale() error = %v", err)
 	}
@@ -1057,8 +1057,8 @@ func testLeaseLifecycle(t *testing.T, store run.Store) {
 		t.Errorf("ReclaimStale() = %d, want 0 while the lease is fresh", n)
 	}
 
-	// A future cutoff makes the lease stale: the pending run goes back in the queue.
-	n, err = store.ReclaimStale(ctx, time.Now().Add(time.Minute))
+	// A zero age makes every held lease stale: the pending run goes back in the queue.
+	n, err = store.ReclaimStale(ctx, 0)
 	if err != nil {
 		t.Fatalf("ReclaimStale() error = %v", err)
 	}
@@ -1082,7 +1082,7 @@ func testLeaseLifecycle(t *testing.T, store run.Store) {
 	if err := store.Save(ctx, reclaimed); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
-	if n, err = store.ReclaimStale(ctx, time.Now().Add(time.Minute)); err != nil || n != 1 {
+	if n, err = store.ReclaimStale(ctx, 0); err != nil || n != 1 {
 		t.Fatalf("ReclaimStale() = %d, %v, want 1 interrupted", n, err)
 	}
 	gone, err := store.Get(ctx, reclaimed.ID)
@@ -1416,6 +1416,14 @@ func testPurge(t *testing.T, store run.Store) {
 	if err := store.Save(ctx, &run.Run{ID: "running", Status: run.StatusRunning, CreatedAt: old}); err != nil {
 		t.Fatalf("Save(running) error = %v", err)
 	}
+	// An old run waiting for an approver. It is not terminal, so retention must leave it alone: a
+	// hold can outlive any window, and deleting one silently discards work someone still has to
+	// decide on.
+	if err := store.Save(ctx, &run.Run{
+		ID: "held", Status: run.StatusPendingApproval, CreatedAt: old,
+	}); err != nil {
+		t.Fatalf("Save(held) error = %v", err)
+	}
 
 	// Trimming events keeps the run record but drops its events.
 	trimmed, err := store.PurgeEventsBefore(ctx, cutoff)
@@ -1445,6 +1453,9 @@ func testPurge(t *testing.T, store run.Store) {
 	}
 	if _, err := store.Get(ctx, "old"); !errors.Is(err, run.ErrNotFound) {
 		t.Errorf("Get(old) error = %v, want ErrNotFound", err)
+	}
+	if _, err := store.Get(ctx, "held"); err != nil {
+		t.Errorf("run awaiting approval was purged: %v", err)
 	}
 	if _, err := store.Get(ctx, "recent"); err != nil {
 		t.Errorf("recent run deleted: %v", err)

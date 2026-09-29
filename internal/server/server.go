@@ -160,6 +160,13 @@ func WithReadOnly(readOnly bool) Option {
 	return func(srv *Server) { srv.readOnly = readOnly }
 }
 
+// WithShutdown gives the server the context that is canceled when the process begins draining. A
+// live event stream ends on it instead of holding the graceful shutdown open for its whole timeout,
+// since a stream only finishes when its run does. Without it, shutdown waits out every open stream.
+func WithShutdown(ctx context.Context) Option {
+	return func(srv *Server) { srv.shutdown = ctx }
+}
+
 // WithRelay mounts the phase-1 mesh relay worker endpoints, backed by the given run store and
 // guarded by the worker token. A relay worker in an isolated segment dials them over one outbound
 // connection to lease and execute runs without a path to the database. An empty token leaves the
@@ -321,6 +328,9 @@ type Server struct {
 	relayStore run.Store
 	// workerToken guards the mesh relay worker endpoints, empty when the relay is off.
 	workerToken string
+	// shutdown is canceled when the process begins draining, ending live streams. Nil when unset,
+	// which leaves a stream running until its run ends or its client goes away.
+	shutdown context.Context
 }
 
 // New returns a Server. It panics if store or submitter is nil; a nil logger becomes a no-op.
@@ -378,7 +388,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /v1/ai/draft", draftStepHandler(s.ai, s.log))
 	mux.Handle("POST /v1/ai/ask", askFleetHandler(s.store, s.ai, s.log))
 	mux.Handle("POST /v1/ai/propose-run", proposeRunHandler(s.submitter, s.ai, s.log))
-	mux.Handle("GET /v1/runs/{id}/stream", runStreamHandler(s.streamer, s.store, authz, s.log))
+	mux.Handle("GET /v1/runs/{id}/stream",
+		runStreamHandler(s.streamer, s.store, authz, s.log, s.shutdown))
 	mux.Handle("GET /v1/schedules/preview", previewScheduleHandler(s.log))
 	mux.Handle("GET /v1/doctor", doctorHandler(s.templates, s.schedules, s.credentials, s.inventories, s.projects, s.log))
 	mux.Handle("POST /v1/schedules", createScheduleHandler(s.schedules, s.log))

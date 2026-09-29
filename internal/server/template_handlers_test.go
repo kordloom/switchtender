@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -69,6 +70,54 @@ func TestLaunchTemplateCredentialSelection(t *testing.T) {
 				t.Errorf("submitted credential IDs mismatch (-want +got):\n%s", diff)
 			}
 		})
+	}
+}
+
+// TestTemplateTimeoutRoundTrip covers the per-template run timeout end to end: it survives create
+// and update through the API, and a launch carries it onto the submitted run so the template, not
+// the server default, decides how long its work may take.
+func TestTemplateTimeoutRoundTrip(t *testing.T) {
+	t.Parallel()
+	store := template.NewMemStore()
+	sub := &fakeSubmitter{run: &run.Run{ID: "run_x"}}
+	handler := New(run.NewMemStore(), sub, zap.NewNop(), WithTemplates(store)).Handler()
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/templates",
+		strings.NewReader(`{"name":"deploy","playbook":"site.yml","timeout":900}`)))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, want 201 (body %s)", rec.Code, rec.Body.String())
+	}
+	var created template.Template
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode created template: %v", err)
+	}
+	if created.Timeout != 900 {
+		t.Errorf("created Timeout = %d, want 900", created.Timeout)
+	}
+
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPut, "/v1/templates/"+created.ID,
+		strings.NewReader(`{"name":"deploy","playbook":"site.yml","timeout":120}`)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("update status = %d, want 200 (body %s)", rec.Code, rec.Body.String())
+	}
+	stored, err := store.Get(context.Background(), created.ID)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if stored.Timeout != 120 {
+		t.Errorf("stored Timeout after update = %d, want 120", stored.Timeout)
+	}
+
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec,
+		httptest.NewRequest(http.MethodPost, "/v1/templates/"+created.ID+"/launch", nil))
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("launch status = %d, want 202 (body %s)", rec.Code, rec.Body.String())
+	}
+	if sub.gotRun.Timeout != 120 {
+		t.Errorf("launched run Timeout = %d, want the template's 120", sub.gotRun.Timeout)
 	}
 }
 

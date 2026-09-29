@@ -64,6 +64,10 @@
 				<label class="field-label">Queue
 					<input id="tpl-queue" class="input mono" placeholder="default">
 				</label>
+				<label class="field-label">Timeout, seconds
+					<input id="tpl-timeout" class="input" type="number" min="0" placeholder="0">
+					<span class="field-hint">Caps how long a launch may run before it is canceled and failed. Zero uses the server default.</span>
+				</label>
 				<label class="field-label" id="tpl-field-image">Execution image
 					<input id="tpl-image" class="input mono" placeholder="optional, for example ghcr.io/acme/ee:9">
 					<span class="field-hint">Launches the run inside this container image. Works for every tool.</span>

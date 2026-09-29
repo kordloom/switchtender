@@ -95,7 +95,9 @@ func (c *Client) Steps(context.Context, string) ([]*run.Run, error) { return nil
 func (c *Client) NonTerminal(context.Context) ([]*run.Run, error) { return nil, ErrUnsupported }
 
 // ReclaimStale is a control-node sweep and is not served to workers.
-func (c *Client) ReclaimStale(context.Context, time.Time) (int, error) { return 0, ErrUnsupported }
+func (c *Client) ReclaimStale(context.Context, time.Duration) (int, error) {
+	return 0, ErrUnsupported
+}
 
 // RequestCancel is issued by the control node's API, not a worker.
 func (c *Client) RequestCancel(context.Context, string) error { return ErrUnsupported }

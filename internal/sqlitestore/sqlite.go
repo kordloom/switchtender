@@ -196,7 +196,8 @@ CREATE TABLE IF NOT EXISTS templates (
 	pull_credential_id TEXT NOT NULL DEFAULT '',
 	org_id         TEXT NOT NULL DEFAULT '',
 	notifications  TEXT NOT NULL DEFAULT '',
-	selectable_credential_ids TEXT NOT NULL DEFAULT ''
+	selectable_credential_ids TEXT NOT NULL DEFAULT '',
+	timeout        INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS inventory_sources (
 	id            TEXT PRIMARY KEY,
@@ -600,14 +601,17 @@ func migrateProjects(db *sql.DB) error {
 	return nil
 }
 
-// migrateTemplates adds the owning-organization column to a templates table created before object
-// tenancy. Empty is the unowned default, so a template made before this column stays global. Adding a
-// column that already exists is the ordinary case for a current database and is treated as success.
+// migrateTemplates adds the columns a templates table created before them lacks: the owning
+// organization, notification targets, the selectable credential set, and the run timeout. Every one
+// defaults to unset, so a template made before a migration keeps its previous behavior, global and
+// on the server default timeout. Adding a column that already exists is the ordinary case for a
+// current database and is treated as success.
 func migrateTemplates(db *sql.DB) error {
 	for _, stmt := range []string{
 		"ALTER TABLE templates ADD COLUMN org_id TEXT NOT NULL DEFAULT ''",
 		"ALTER TABLE templates ADD COLUMN notifications TEXT NOT NULL DEFAULT ''",
 		"ALTER TABLE templates ADD COLUMN selectable_credential_ids TEXT NOT NULL DEFAULT ''",
+		"ALTER TABLE templates ADD COLUMN timeout INTEGER NOT NULL DEFAULT 0",
 	} {
 		if _, err := db.Exec(stmt); err != nil &&
 			!strings.Contains(err.Error(), "duplicate column name") {
@@ -1407,6 +1411,12 @@ func (s *store) queryRuns(ctx context.Context, label, query string, args ...any)
 // AppendLog appends raw output bytes to the run's log. Returns run.ErrNotFound if absent. The
 // insert-select folds the missing-run check into the write so the per-chunk output path costs one
 // statement instead of two.
+// terminalRun is the SQL predicate for a run that has finished and may be purged. It mirrors
+// run.Status.Terminal(). It is stated as the set of terminal statuses rather than as "not pending or
+// running", which silently treated pending_approval as finished and deleted runs that were waiting
+// for an approver.
+const terminalRun = "status IN ('succeeded', 'failed', 'canceled', 'interrupted', 'rejected')"
+
 // nonTerminalRun is the SQL predicate for a run that still accepts auxiliary writes. It mirrors
 // run.Status.Terminal, and fences a terminal run so a reclaimed-but-alive worker cannot append logs or
 // events to a run that has already ended.
@@ -1844,7 +1854,7 @@ func parseNotifications(s string) []run.NotifyTarget {
 // Claim leases the oldest unclaimed pending top-level plain run to owner and returns it. A run
 // whose cancel was requested while it waited is skipped; the cancel handler terminalizes it.
 func (s *store) Claim(ctx context.Context, owner string, queues []string) (*run.Run, error) {
-	placeholders, args := sqlutil.QueuePlaceholders(queues, "?")
+	placeholders, args := sqlutil.QueuePlaceholders(queues, "?", 0)
 	q := `
 UPDATE runs SET claimed_by=?, claimed_at=?
 WHERE id = (
@@ -1885,8 +1895,12 @@ func (s *store) Heartbeat(ctx context.Context, id, owner string) error {
 }
 
 // ReclaimStale requeues stale claimed pending runs and interrupts stale running runs.
-func (s *store) ReclaimStale(ctx context.Context, cutoff time.Time) (int, error) {
-	cut := sqlutil.FormatTime(cutoff)
+func (s *store) ReclaimStale(ctx context.Context, ttl time.Duration) (int, error) {
+	// A SQLite deployment is one node: the process that stamps a lease is the process that sweeps it,
+	// so the local clock is the authoritative one and there is no skew to reconcile. The comparison
+	// below is on text, which is sound because stored timestamps are a fixed width, so their
+	// lexicographic order matches their chronological order.
+	cut := sqlutil.FormatTime(time.Now().Add(-ttl))
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, fmt.Errorf("reclaim stale: %w", err)

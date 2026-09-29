@@ -56,9 +56,22 @@ func ParseMap(s string) (map[string]any, error) {
 	return m, nil
 }
 
-// FormatTime renders a time as a sortable UTC string.
+// storedTimeLayout is the fixed width UTC layout every stored timestamp uses.
+//
+// The width is the point. RFC 3339 trims trailing zeros from the fractional second, so a time on an
+// exact second renders shorter than one just after it and compares as the larger string: comparing
+// stored timestamps as text then disagreed with comparing them as times. Columns are text and are
+// compared and ordered as text, so a lease could look older than a cutoff it was actually newer
+// than, and the janitor interrupted healthy runs.
+//
+// Nine fractional digits, always present, preserves the nanosecond precision callers round-trip
+// through the stores. The PostgreSQL store pads its own stamps to the same width, so a value written
+// by SQL and one written by Go land in a column the same width and sort together.
+const storedTimeLayout = "2006-01-02T15:04:05.000000000Z"
+
+// FormatTime renders a time as a fixed width, lexicographically sortable UTC string.
 func FormatTime(t time.Time) string {
-	return t.UTC().Format(time.RFC3339Nano)
+	return t.UTC().Format(storedTimeLayout)
 }
 
 // ParseTime parses a stored time string.
@@ -104,9 +117,11 @@ func ParseNullTime(s sql.NullString) (*time.Time, error) {
 
 // QueuePlaceholders builds a comma separated placeholder list and the matching queue args. The
 // default queue is always included so an executor never overlooks unqueued work when it serves
-// named queues. Style "?" emits SQLite placeholders; anything else emits PostgreSQL $n
-// placeholders starting at $3, after the two claim parameters.
-func QueuePlaceholders(queues []string, style string) (string, []any) {
+// named queues. Style "?" emits SQLite placeholders and ignores first; anything else emits
+// PostgreSQL $n placeholders numbered from first, which the caller sets to one past its own
+// parameters. It is a parameter rather than a constant because a caller that stops passing a value
+// of its own would otherwise silently produce a query numbered for arguments it no longer sends.
+func QueuePlaceholders(queues []string, style string, first int) (string, []any) {
 	if len(queues) == 0 {
 		queues = []string{""}
 	}
@@ -116,7 +131,7 @@ func QueuePlaceholders(queues []string, style string) (string, []any) {
 		if style == "?" {
 			parts[i] = "?"
 		} else {
-			parts[i] = fmt.Sprintf("$%d", i+3)
+			parts[i] = fmt.Sprintf("$%d", i+first)
 		}
 		args[i] = q
 	}

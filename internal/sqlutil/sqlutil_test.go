@@ -94,20 +94,58 @@ func TestQueuePlaceholders(t *testing.T) {
 		Name      string
 		Queues    []string
 		Style     string
+		First     int
 		WantList  string
 		WantCount int
 	}{{ // Test 0: No queues still binds the default queue.
 		Name: "default only", Queues: nil, Style: "?", WantList: "?", WantCount: 1,
-	}, { // Test 1: SQLite style repeats question marks.
-		Name: "sqlite", Queues: []string{"", "gpu"}, Style: "?", WantList: "?, ?", WantCount: 2,
-	}, { // Test 2: Postgres style numbers from three.
-		Name: "postgres", Queues: []string{"", "gpu"}, Style: "$", WantList: "$3, $4", WantCount: 2,
+	}, { // Test 1: SQLite style repeats question marks and ignores the offset.
+		Name: "sqlite", Queues: []string{"", "gpu"}, Style: "?", First: 7, WantList: "?, ?", WantCount: 2,
+	}, { // Test 2: Postgres style numbers from the offset the caller gives.
+		Name: "postgres", Queues: []string{"", "gpu"}, Style: "$", First: 2, WantList: "$2, $3", WantCount: 2,
+	}, { // Test 3: A different offset renumbers the whole list.
+		Name: "postgres offset", Queues: []string{"a"}, Style: "$", First: 5, WantList: "$5", WantCount: 1,
 	}}
 	for i, test := range tests {
-		list, args := sqlutil.QueuePlaceholders(test.Queues, test.Style)
+		list, args := sqlutil.QueuePlaceholders(test.Queues, test.Style, test.First)
 		if list != test.WantList || len(args) != test.WantCount {
 			t.Errorf("test %d (%s): QueuePlaceholders() = %q with %d args, want %q with %d",
 				i, test.Name, list, len(args), test.WantList, test.WantCount)
+		}
+	}
+}
+
+// TestFormatTimeSortsAsText pins the property the stores depend on: timestamps are stored as text and
+// compared as text, so their lexicographic order has to match their chronological order. RFC 3339
+// trims trailing zeros from the fractional second, which made the width vary and the two orders
+// disagree, and a lease then compared as older than a cutoff it was newer than.
+func TestFormatTimeSortsAsText(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2026, 7, 30, 6, 0, 0, 0, time.UTC)
+	offsets := []time.Duration{
+		0, time.Nanosecond, time.Microsecond, 100 * time.Microsecond,
+		time.Millisecond, 500 * time.Millisecond, time.Second, time.Minute,
+	}
+	width := len(sqlutil.FormatTime(base))
+	for _, a := range offsets {
+		for _, b := range offsets {
+			ta, tb := base.Add(a), base.Add(b)
+			sa, sb := sqlutil.FormatTime(ta), sqlutil.FormatTime(tb)
+			if len(sa) != width || len(sb) != width {
+				t.Fatalf("width varies: %q (%d) and %q (%d), want %d", sa, len(sa), sb, len(sb), width)
+			}
+			// Sub-microsecond differences round to the same stored value, so compare what was stored.
+			pa, err := sqlutil.ParseTime(sa)
+			if err != nil {
+				t.Fatalf("ParseTime(%q) error = %v", sa, err)
+			}
+			pb, err := sqlutil.ParseTime(sb)
+			if err != nil {
+				t.Fatalf("ParseTime(%q) error = %v", sb, err)
+			}
+			if want, got := !pa.After(pb), sa <= sb; want != got {
+				t.Errorf("text order disagrees with time order: %q vs %q", sa, sb)
+			}
 		}
 	}
 }

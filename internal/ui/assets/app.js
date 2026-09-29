@@ -4423,6 +4423,7 @@ function openTemplateEdit(t) {
 	document.getElementById("tpl-inventory").value = t.inventory || "";
 	document.getElementById("tpl-shards").value = t.shards ? String(t.shards) : "";
 	document.getElementById("tpl-queue").value = t.queue || "";
+	document.getElementById("tpl-timeout").value = t.timeout ? String(t.timeout) : "";
 	document.getElementById("tpl-image").value = t.image || "";
 	document.getElementById("tpl-pull-credential").value = t.pull_credential_id || "";
 	const chosen = new Set(t.credential_ids || []);
@@ -4497,6 +4498,8 @@ function wireTemplateForm() {
 		if (document.getElementById("tpl-dry-run").checked) payload.dry_run = true;
 		const tqueue = document.getElementById("tpl-queue").value.trim();
 		if (tqueue) payload.queue = tqueue;
+		const ttimeout = parseInt(document.getElementById("tpl-timeout").value, 10);
+		if (ttimeout > 0) payload.timeout = ttimeout;
 		const picked = Array.from(document.getElementById("tpl-credentials").selectedOptions)
 			.map((o) => o.value);
 		if (picked.length) payload.credential_ids = picked;
@@ -4653,6 +4656,7 @@ function openTemplateView(t) {
 	addRow("Inventory", t.inventory);
 	addRow("Shards", t.shards && t.shards > 1 ? t.shards : "");
 	addRow("Limit", t.limit);
+	addRow("Timeout", t.timeout ? t.timeout + "s" : "");
 	addRow("Created", t.created_at ? fmtTime(t.created_at) : "");
 	const code = document.getElementById("view-code");
 	code.hidden = !t.command;
@@ -7395,14 +7399,16 @@ async function loadDetail(runId) {
 		exportResults.dataset.tip = "Click to download this run and its per-host results as JSON";
 		exportResults.addEventListener("click", () => {
 			if (!detailState || !detailState.run) return;
+			// Read the folded model rather than the raw events: it already carries every host, task,
+			// and outcome, and it is the only copy the page keeps once a run is loaded.
 			const results = {};
-			for (const e of detailState.events || []) {
-				if (!e.host || !e.task || !e.type || e.type.indexOf("runner_") !== 0) continue;
-				const outcome = e.type === "runner_ok"
-					? (e.changed ? "changed" : "ok")
-					: e.type.slice("runner_".length);
-				if (!results[e.host]) results[e.host] = {};
-				results[e.host][e.task] = { outcome, rc: e.rc ?? undefined };
+			const cells = (detailState.model && detailState.model.cells) || {};
+			for (const host of Object.keys(cells)) {
+				for (const task of Object.keys(cells[host])) {
+					const cell = cells[host][task];
+					if (!results[host]) results[host] = {};
+					results[host][task] = { outcome: cell.outcome, rc: cell.rc ?? undefined };
+				}
 			}
 			const payload = { run: detailState.run, results, exported_at: new Date().toISOString() };
 			downloadBlob("switchtender-" + detailState.runId + ".json", "application/json",
@@ -7883,6 +7889,52 @@ function updateActions(run) {
 	}
 }
 
+// riskBadge renders a run's graded blast radius. The server computes the grade from the run's tool,
+// command, and how wide it targets; it is advisory, so it reads as information rather than as a
+// verdict the approver has to argue with.
+function riskBadge(risk) {
+	const span = document.createElement("span");
+	span.className = "risk risk-" + (risk.level || "low");
+	span.textContent = risk.level || "low";
+	if (risk.reasons && risk.reasons.length) {
+		span.dataset.tip = risk.reasons.join("\n");
+	}
+	return span;
+}
+
+// renderRiskCallout spells out why a held run is graded as it is, in the place the decision is made.
+// A tooltip is enough for a run that is only being read, but an approver deciding whether to let a
+// change through should not have to hover to find out that it destroys infrastructure. It shows only
+// while the run is held, and disappears once the decision is taken.
+function renderRiskCallout(run) {
+	const host = document.getElementById("risk-callout");
+	if (!host) return;
+	const risk = run.risk;
+	if (!risk || run.status !== "pending_approval") {
+		host.hidden = true;
+		host.textContent = "";
+		return;
+	}
+	host.textContent = "";
+	host.className = "risk-callout risk-" + (risk.level || "low");
+	const head = document.createElement("div");
+	head.className = "risk-callout-head";
+	const label = document.createElement("strong");
+	label.textContent = "Held for approval";
+	head.appendChild(label);
+	head.appendChild(riskBadge(risk));
+	host.appendChild(head);
+	const why = document.createElement("ul");
+	why.className = "risk-reasons";
+	for (const reason of risk.reasons || []) {
+		const li = document.createElement("li");
+		li.textContent = reason;
+		why.appendChild(li);
+	}
+	if (why.children.length) host.appendChild(why);
+	host.hidden = false;
+}
+
 // loadPipeline renders a pipeline run as an ordered list of step runs, refreshed live over the
 // pipeline's event stream while it is active.
 async function loadPipeline(pipelineId) {
@@ -8006,7 +8058,6 @@ function openParentStream(parentId) {
 	source.addEventListener("event", (e) => {
 		try {
 			const ev = JSON.parse(e.data);
-			detailState.events.push(ev);
 			applyLiveEvent(ev);
 			if (ev.type === "stats") {
 				refreshShards();
@@ -8054,12 +8105,40 @@ function isTerminal(status) {
 		status === "canceled" || status === "interrupted";
 }
 
-// renderDetail redraws the header, matrix, and timeline from the current state.
+// renderDetail redraws the header, matrix, and timeline from the current state. The model is folded
+// from the loaded events once and is authoritative from then on, so the raw array is released rather
+// than kept alongside a structure that already holds everything read from it. Live events are applied
+// to the model in place, which is what keeps a long run from growing the tab without bound.
 function renderDetail() {
 	renderHeader(detailState.run);
-	detailState.model = buildModel(detailState.events);
+	if (!detailState.model) {
+		detailState.model = buildModel(detailState.events || []);
+		detailState.events = null;
+	}
 	renderMatrix(detailState.model);
 	renderTimeline(detailState.model);
+}
+
+// GRID_COALESCE_MS is how long a burst of structural events is allowed to gather before the grid is
+// redrawn. Adding a host or a task changes the shape of the matrix, so it cannot be patched in place
+// the way a single cell can; redrawing per event costs hosts times tasks each time, and a run that
+// discovers a hundred hosts in a second would spend the burst rebuilding the same grid. One frame's
+// worth of delay is imperceptible and collapses the burst into a single redraw.
+const GRID_COALESCE_MS = 120;
+
+// gridTimer holds the pending coalesced redraw, or null when none is scheduled.
+let gridTimer = null;
+
+// scheduleGrid redraws the matrix and the timeline once the current burst of structural changes
+// settles. Repeated calls inside the window collapse into one redraw of the model's latest state.
+function scheduleGrid() {
+	if (gridTimer !== null) return;
+	gridTimer = window.setTimeout(() => {
+		gridTimer = null;
+		if (!detailState || !detailState.model) return;
+		renderMatrix(detailState.model);
+		renderTimeline(detailState.model);
+	}, GRID_COALESCE_MS);
 }
 
 // openStream subscribes to the run's live output and applies events, logs, and the end signal.
@@ -8078,7 +8157,6 @@ function openStream(runId, afterSeq) {
 		try {
 			const ev = JSON.parse(e.data);
 			if (ev.seq && ev.seq <= (detailState.lastSeq || 0)) return;
-			detailState.events.push(ev);
 			if (ev.seq) detailState.lastSeq = ev.seq;
 			applyLiveEvent(ev);
 		} catch (_) { /* ignore a malformed event */ }
@@ -8182,6 +8260,10 @@ function renderHeader(run) {
 	if (run.dry_run) {
 		el.appendChild(field("Mode", "dry run"));
 	}
+	if (run.risk) {
+		el.appendChild(field("Risk", null, riskBadge(run.risk)));
+	}
+	renderRiskCallout(run);
 	if (run.source) {
 		const origin = originCellEl(run);
 		origin.className = "";
@@ -8527,12 +8609,12 @@ function applyLiveEvent(ev) {
 	}
 	const change = applyEvent(detailState.model, ev);
 	if (change.structural) {
-		renderMatrix(detailState.model);
-		renderTimeline(detailState.model);
+		// The grid's shape changed, so it is rebuilt rather than patched. The redraw is coalesced
+		// because hosts and tasks arrive in bursts and each rebuild costs hosts times tasks.
+		scheduleGrid();
 	} else if (!detailState.overCap && change.host && change.task) {
 		if (!updateCell(change.host, change.task)) {
-			renderMatrix(detailState.model);
-			renderTimeline(detailState.model);
+			scheduleGrid();
 			return;
 		}
 		updateTimelineBar(change.task);

@@ -23,7 +23,9 @@ type auditStore struct {
 	// db is the open database handle shared with the run store.
 	db *splitDB
 	// mu serializes appends within this process so the hash chain reads its head and inserts
-	// atomically. A UNIQUE index on seq is the cross-process backstop.
+	// atomically. A UNIQUE index on seq is the cross-process backstop. It is not what limits append
+	// throughput: the write pool is a single connection, so a transaction already holds every other
+	// writer off for its whole life, and dropping the mutex measures the same either way.
 	mu sync.Mutex
 }
 

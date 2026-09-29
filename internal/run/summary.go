@@ -45,25 +45,12 @@ type HostFacts struct {
 	GatheredAt time.Time `json:"gathered_at"`
 }
 
-// HostFactsFromEvents collects the facts a run gathered, one entry per host, keeping the last
-// gather when a play gathers more than once.
+// HostFactsFromEvents returns the facts gathered per host. It folds the whole list at once; a caller
+// finishing a long run should stream through SummaryFold instead of holding every event in memory.
 func HostFactsFromEvents(events []event.Event, at time.Time) []HostFacts {
-	byHost := make(map[string]HostFacts)
-	for _, e := range events {
-		if e.Type != event.TypeFacts || e.Host == "" || len(e.Facts) == 0 {
-			continue
-		}
-		byHost[e.Host] = HostFacts{Host: e.Host, Facts: e.Facts, GatheredAt: at}
-	}
-	if len(byHost) == 0 {
-		return nil
-	}
-	out := make([]HostFacts, 0, len(byHost))
-	for _, f := range byHost {
-		out = append(out, f)
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Host < out[j].Host })
-	return out
+	f := NewSummaryFold(at)
+	f.Add(events)
+	return f.HostFacts()
 }
 
 // HostHealth summarizes a host's recent reliability across the most recent runs it appeared in.
@@ -151,53 +138,12 @@ type TaskTrend struct {
 	Recent []float64 `json:"recent,omitempty"`
 }
 
-// HostSummariesFromStats builds per host summaries from the recap stats event. It returns nil when
-// the run has no stats event, for example a run that never reached Ansible.
+// HostSummariesFromStats returns the per-host rollup from a run's final stats event. It folds the
+// whole list at once; a caller finishing a long run should stream through SummaryFold instead.
 func HostSummariesFromStats(events []event.Event, ranAt time.Time) []HostSummary {
-	var stats map[string]event.HostStats
-	for _, e := range events {
-		if e.Type == event.TypeStats && e.Stats != nil {
-			stats = e.Stats
-		}
-	}
-	if stats == nil {
-		return nil
-	}
-
-	durations := hostDurations(events)
-	out := make([]HostSummary, 0, len(stats))
-	for host, s := range stats {
-		out = append(out, HostSummary{
-			Host: host, OK: s.OK, Changed: s.Changed, Failures: s.Failures,
-			Unreachable: s.Unreachable, Skipped: s.Skipped, Worst: worstFromStats(s),
-			DurationSeconds: durations[host], RanAt: ranAt,
-		})
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Host < out[j].Host })
-	return out
-}
-
-// hostDurations estimates each host's busy seconds by attributing the gap between a task start and
-// the host's result for that task to the host. Parallel strategies overlap hosts, so the estimate
-// is not wall clock, but it preserves the relative weight between hosts that split balancing needs.
-func hostDurations(events []event.Event) map[string]float64 {
-	out := make(map[string]float64)
-	var taskStart time.Time
-	for _, e := range events {
-		switch e.Type {
-		case event.TypeTaskStart:
-			taskStart = e.Time
-		case event.TypeRunnerOK, event.TypeRunnerFailed, event.TypeRunnerSkipped,
-			event.TypeRunnerUnreachable:
-			if e.Host == "" || taskStart.IsZero() {
-				continue
-			}
-			if gap := e.Time.Sub(taskStart).Seconds(); gap > 0 {
-				out[e.Host] += gap
-			}
-		}
-	}
-	return out
+	f := NewSummaryFold(ranAt)
+	f.Add(events)
+	return f.HostSummaries()
 }
 
 // worstFromStats reduces a host's recap counts to its most severe outcome.
@@ -216,16 +162,12 @@ func worstFromStats(s event.HostStats) string {
 	}
 }
 
-// OutputsFromEvents returns the values the playbook published with set_stats, taken from the
-// last stats event, or nil when the run published nothing.
+// OutputsFromEvents returns what a run published through its final stats event. It folds the whole
+// list at once; a caller finishing a long run should stream through SummaryFold instead.
 func OutputsFromEvents(events []event.Event) map[string]any {
-	var out map[string]any
-	for _, e := range events {
-		if e.Type == event.TypeStats && len(e.Outputs) > 0 {
-			out = e.Outputs
-		}
-	}
-	return out
+	f := NewSummaryFold(time.Time{})
+	f.Add(events)
+	return f.Outputs()
 }
 
 // FailedOutcome reports whether a worst outcome counts as a failure for reliability ranking.
@@ -245,40 +187,149 @@ func FlipCount(summaries []HostSummary) int {
 	return flips
 }
 
-// TaskSummariesFromEvents builds per task wall clock costs from the event stream. Each task start
-// opens a block that closes at its last host result, and repeated task names accumulate. It
-// returns nil when the run produced no timed task results.
+// TaskSummariesFromEvents returns how long each task took. It folds the whole list at once; a caller
+// finishing a long run should stream through SummaryFold instead.
 func TaskSummariesFromEvents(events []event.Event, ranAt time.Time) []TaskSummary {
-	totals := make(map[string]float64)
-	var task string
-	var taskStart, lastResult time.Time
+	f := NewSummaryFold(ranAt)
+	f.Add(events)
+	return f.TaskSummaries()
+}
 
-	flush := func() {
-		if task != "" && lastResult.After(taskStart) {
-			totals[task] += lastResult.Sub(taskStart).Seconds()
-		}
+// SummaryFold accumulates a run's summaries while its events stream past, so finishing a run never
+// has to hold its whole event list in memory. A long run can carry hundreds of thousands of events;
+// unmarshaling all of them at once cost hundreds of megabytes, and several runs completing together
+// could exhaust a small control node. The state kept here is proportional to the number of hosts and
+// tasks, not to the number of events.
+//
+// Every fold it replaces reduced over the events in one pass, so the results are identical to
+// computing them from the full list. The batch functions are implemented on top of it, which keeps
+// the two paths from drifting.
+type SummaryFold struct {
+	// ranAt stamps every summary the fold produces.
+	ranAt time.Time
+	// facts holds the most recent gathered facts per host.
+	facts map[string]HostFacts
+	// stats holds the most recent stats event's per-host counters.
+	stats map[string]event.HostStats
+	// outputs holds the most recent stats event's published outputs.
+	outputs map[string]any
+	// hostSeconds accumulates execution time per host.
+	hostSeconds map[string]float64
+	// taskSeconds accumulates execution time per task.
+	taskSeconds map[string]float64
+	// hostTaskStart is when the task currently running started, used for per-host timing.
+	hostTaskStart time.Time
+	// task is the task currently running, and taskStart when it began.
+	task      string
+	taskStart time.Time
+	// lastResult is the latest result seen for the current task.
+	lastResult time.Time
+}
+
+// NewSummaryFold returns an empty fold that stamps its summaries with ranAt.
+func NewSummaryFold(ranAt time.Time) *SummaryFold {
+	return &SummaryFold{
+		ranAt:       ranAt,
+		facts:       make(map[string]HostFacts),
+		hostSeconds: make(map[string]float64),
+		taskSeconds: make(map[string]float64),
 	}
+}
+
+// Add folds a batch of events in order. Batches must arrive in the order the run produced them,
+// since task timing depends on a start preceding its results.
+func (f *SummaryFold) Add(events []event.Event) {
 	for _, e := range events {
 		switch e.Type {
+		case event.TypeFacts:
+			if e.Host != "" && len(e.Facts) > 0 {
+				f.facts[e.Host] = HostFacts{Host: e.Host, Facts: e.Facts, GatheredAt: f.ranAt}
+			}
+		case event.TypeStats:
+			if e.Stats != nil {
+				f.stats = e.Stats
+			}
+			if len(e.Outputs) > 0 {
+				f.outputs = e.Outputs
+			}
 		case event.TypeTaskStart:
-			flush()
-			task, taskStart, lastResult = e.Task, e.Time, time.Time{}
+			f.closeTask()
+			f.task, f.taskStart, f.lastResult = e.Task, e.Time, time.Time{}
+			f.hostTaskStart = e.Time
 		case event.TypeRunnerOK, event.TypeRunnerFailed, event.TypeRunnerSkipped,
 			event.TypeRunnerUnreachable:
-			if e.Time.After(lastResult) {
-				lastResult = e.Time
+			if e.Time.After(f.lastResult) {
+				f.lastResult = e.Time
+			}
+			if e.Host == "" || f.hostTaskStart.IsZero() {
+				continue
+			}
+			if gap := e.Time.Sub(f.hostTaskStart).Seconds(); gap > 0 {
+				f.hostSeconds[e.Host] += gap
 			}
 		}
 	}
-	flush()
+}
 
+// closeTask banks the current task's elapsed time. It runs when a new task starts.
+func (f *SummaryFold) closeTask() {
+	if f.task != "" && f.lastResult.After(f.taskStart) {
+		f.taskSeconds[f.task] += f.lastResult.Sub(f.taskStart).Seconds()
+	}
+}
+
+// HostSummaries returns the per-host rollup from the run's final stats event, or nil when it never
+// reported one.
+func (f *SummaryFold) HostSummaries() []HostSummary {
+	if f.stats == nil {
+		return nil
+	}
+	out := make([]HostSummary, 0, len(f.stats))
+	for host, s := range f.stats {
+		out = append(out, HostSummary{
+			Host: host, OK: s.OK, Changed: s.Changed, Failures: s.Failures,
+			Unreachable: s.Unreachable, Skipped: s.Skipped, Worst: worstFromStats(s),
+			DurationSeconds: f.hostSeconds[host], RanAt: f.ranAt,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Host < out[j].Host })
+	return out
+}
+
+// HostFacts returns the gathered facts per host, or nil when none were gathered.
+func (f *SummaryFold) HostFacts() []HostFacts {
+	if len(f.facts) == 0 {
+		return nil
+	}
+	out := make([]HostFacts, 0, len(f.facts))
+	for _, hf := range f.facts {
+		out = append(out, hf)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Host < out[j].Host })
+	return out
+}
+
+// TaskSummaries returns the per-task durations, banking the task still open. It does not mutate the
+// fold, so calling it more than once returns the same answer and folding may continue afterwards.
+func (f *SummaryFold) TaskSummaries() []TaskSummary {
+	totals := f.taskSeconds
+	if f.task != "" && f.lastResult.After(f.taskStart) {
+		totals = make(map[string]float64, len(f.taskSeconds)+1)
+		for k, v := range f.taskSeconds {
+			totals[k] = v
+		}
+		totals[f.task] += f.lastResult.Sub(f.taskStart).Seconds()
+	}
 	if len(totals) == 0 {
 		return nil
 	}
 	out := make([]TaskSummary, 0, len(totals))
 	for name, seconds := range totals {
-		out = append(out, TaskSummary{Task: name, Seconds: seconds, RanAt: ranAt})
+		out = append(out, TaskSummary{Task: name, Seconds: seconds, RanAt: f.ranAt})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Task < out[j].Task })
 	return out
 }
+
+// Outputs returns what the run published through its final stats event.
+func (f *SummaryFold) Outputs() map[string]any { return f.outputs }

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -755,6 +756,68 @@ func TestRunStreamWithoutHub(t *testing.T) {
 	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/runs/ghost/stream", nil))
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("unknown run = %d, want 404", rec.Code)
+	}
+}
+
+// TestRunStreamEndsOnShutdown checks a live stream releases the server when draining starts.
+// Graceful shutdown waits for handlers to return and does not cancel a request's context, so a
+// stream that only watches its request would keep an exiting process alive until the shutdown
+// timeout expired. The run here never turns terminal, so nothing but the shutdown signal can end it.
+func TestRunStreamEndsOnShutdown(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := run.NewMemStore()
+	if err := store.Save(ctx,
+		&run.Run{ID: "run_live", Status: run.StatusRunning, CreatedAt: time.Now()}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	shutdownCtx, drain := context.WithCancel(ctx)
+	defer drain()
+	handler := New(store, &fakeSubmitter{}, zap.NewNop(), WithShutdown(shutdownCtx)).Handler()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen() error = %v", err)
+	}
+	httpServer := &http.Server{Handler: handler, ReadHeaderTimeout: time.Second}
+	served := make(chan error, 1)
+	go func() { served <- httpServer.Serve(ln) }()
+
+	res, err := http.Get("http://" + ln.Addr().String() + "/v1/runs/run_live/stream")
+	if err != nil {
+		t.Fatalf("GET stream: %v", err)
+	}
+	defer func() { _ = res.Body.Close() }()
+	// Read the first bytes so the handler is provably inside its loop before shutdown begins.
+	if err := store.AppendLog(ctx, "run_live", []byte("streaming\n")); err != nil {
+		t.Fatalf("AppendLog() error = %v", err)
+	}
+	reader := bufio.NewReader(res.Body)
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			t.Fatalf("read stream: %v", err)
+		}
+		if strings.Contains(line, "streaming") {
+			break
+		}
+	}
+
+	// The real shutdown timeout is fifteen seconds. Five is long enough that a slow machine will not
+	// trip it and short enough that a stream ignoring the signal fails the test rather than hanging.
+	const graceLimit = 5 * time.Second
+	start := time.Now()
+	drain()
+	shutdownDone, cancel := context.WithTimeout(ctx, graceLimit)
+	defer cancel()
+	if err := httpServer.Shutdown(shutdownDone); err != nil {
+		t.Fatalf("Shutdown() waited out its timeout with a stream open: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > graceLimit/2 {
+		t.Errorf("Shutdown() took %v with a stream open, want prompt release", elapsed)
+	}
+	if err := <-served; err != nil && !errors.Is(err, http.ErrServerClosed) {
+		t.Fatalf("Serve() error = %v", err)
 	}
 }
 

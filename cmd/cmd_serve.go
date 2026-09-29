@@ -790,9 +790,15 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		log.Info("mesh relay worker endpoints enabled")
 	}
 
+	// The signal context is established before the server is built so live streams can watch it and
+	// end themselves the moment draining starts, rather than holding shutdown open to its timeout.
+	ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
 	httpServer := &http.Server{
 		Addr: serveAddr,
 		Handler: server.New(store, disp, log, server.WithStreamer(hub),
+			server.WithShutdown(ctx),
 			server.WithCanceler(disp), server.WithRetrier(disp), server.WithApprover(disp),
 			server.WithSchedules(schedules), server.WithTokens(bundle.Tokens()),
 			server.WithCredentials(bundle.Credentials(), sealer),
@@ -822,9 +828,6 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		ReadTimeout:       readTimeout,
 		IdleTimeout:       idleTimeout,
 	}
-
-	ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
 
 	if (serveTLSCert == "") != (serveTLSKey == "") {
 		return fmt.Errorf("both --tls-cert and --tls-key are required to serve HTTPS")

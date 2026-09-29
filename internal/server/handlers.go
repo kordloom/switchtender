@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1210,9 +1211,20 @@ func queryInt64(r *http.Request, name string) int64 {
 // source of truth: new rows beyond what the client has seen are emitted on a poll tick, and hub
 // messages from a local executor only wake the drain early. Runs executing on any process in the
 // fleet therefore stream the same way, and the stream ends when the stored run turns terminal.
-func runStreamHandler(streamer Streamer, store run.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
+//
+// A stream also ends when shutdown is canceled. Graceful shutdown waits for handlers to return and
+// does not cancel a request's context, so without this a draining process would sit out its whole
+// shutdown timeout for every stream still open. The stream closes without an end event, so the
+// browser reconnects and resumes from its cursor once the process is back.
+func runStreamHandler(streamer Streamer, store run.Store, authz *authorizer, log *zap.Logger,
+	shutdown context.Context) http.HandlerFunc {
 	if store == nil {
 		panic("server: runStreamHandler: Store required")
+	}
+	// A nil channel blocks forever in a select, which is what an unset shutdown context should do.
+	var draining <-chan struct{}
+	if shutdown != nil {
+		draining = shutdown.Done()
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		flusher, ok := w.(http.Flusher)
@@ -1313,6 +1325,11 @@ func runStreamHandler(streamer Streamer, store run.Store, authz *authorizer, log
 		ticker := time.NewTicker(streamPollInterval)
 		defer ticker.Stop()
 		for {
+			select {
+			case <-draining:
+				return
+			default:
+			}
 			if drain() {
 				writeSSE(w, "end", streamCursor(lastSeq, logSeq), nil)
 				flusher.Flush()
@@ -1320,6 +1337,8 @@ func runStreamHandler(streamer Streamer, store run.Store, authz *authorizer, log
 			}
 			select {
 			case <-r.Context().Done():
+				return
+			case <-draining:
 				return
 			case <-wake:
 			case <-ticker.C:

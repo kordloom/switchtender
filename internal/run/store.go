@@ -49,9 +49,12 @@ type Store interface {
 	// Heartbeat renews owner's lease on a run. It returns ErrNotFound when the run is gone or the
 	// lease is no longer held by owner.
 	Heartbeat(ctx context.Context, id, owner string) error
-	// ReclaimStale requeues pending runs whose lease renewal is older than cutoff and marks stale
-	// running runs interrupted, returning how many rows changed. It sweeps up after dead workers.
-	ReclaimStale(ctx context.Context, cutoff time.Time) (int, error)
+	// ReclaimStale requeues pending runs whose lease has gone unrenewed for longer than ttl and marks
+	// stale running runs interrupted, returning how many rows changed. It sweeps up after dead
+	// workers. It takes an age rather than an absolute cutoff so the store resolves it against the
+	// same clock that stamped the lease: a caller computing the cutoff from its own clock would
+	// interrupt healthy runs whenever the two clocks disagreed by more than ttl.
+	ReclaimStale(ctx context.Context, ttl time.Duration) (int, error)
 	// RequestCancel marks the run so whichever process holds it stops it, or ErrNotFound.
 	RequestCancel(ctx context.Context, id string) error
 	// CancelPending atomically cancels a run that is waiting unclaimed in pending or
@@ -474,10 +477,12 @@ func (m *memStore) Heartbeat(_ context.Context, id, owner string) error {
 	return nil
 }
 
-// ReclaimStale requeues stale claimed pending runs and interrupts stale running runs.
-func (m *memStore) ReclaimStale(_ context.Context, cutoff time.Time) (int, error) {
+// ReclaimStale requeues stale claimed pending runs and interrupts stale running runs. The lease was
+// stamped by this same process, so its own clock is the authoritative one.
+func (m *memStore) ReclaimStale(_ context.Context, ttl time.Duration) (int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	cutoff := time.Now().Add(-ttl)
 	changed := 0
 	for _, r := range m.runs {
 		if r.ClaimedBy == "" || r.ClaimedAt == nil || !r.ClaimedAt.Before(cutoff) {
