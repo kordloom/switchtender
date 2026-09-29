@@ -225,27 +225,6 @@ function outcomeChip(outcome) {
 }
 
 // detailState holds the current run and its accumulated events for incremental rendering.
-// copyButton returns a small clipboard control that copies text and confirms with a checkmark.
-function copyButton(text, tip) {
-	const btn = document.createElement("button");
-	btn.type = "button";
-	btn.className = "copy-btn";
-	btn.dataset.tip = tip;
-	btn.setAttribute("aria-label", tip);
-	const glyph = '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>';
-	btn.innerHTML = svgIcon(glyph);
-	btn.addEventListener("click", async () => {
-		try { await navigator.clipboard.writeText(text); } catch { return; }
-		btn.innerHTML = svgIcon('<polyline points="20 6 9 17 4 12"/>');
-		btn.classList.add("copied");
-		window.setTimeout(() => {
-			btn.innerHTML = svgIcon(glyph);
-			btn.classList.remove("copied");
-		}, 1200);
-	});
-	return btn;
-}
-
 let detailState = null;
 
 // fetchAuthed requests one of the run's own byte streams with the token in an Authorization header
@@ -408,6 +387,7 @@ async function loadDetail(runId) {
 	}
 	wireActions(runId);
 	wireLogFilter();
+	wireLogDownload(runId);
 	window.setInterval(() => {
 		for (const el of document.querySelectorAll(".value.ticking")) {
 			el.textContent = fmtDuration(el.dataset.started, new Date().toISOString());

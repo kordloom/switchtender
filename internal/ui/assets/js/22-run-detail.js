@@ -455,6 +455,28 @@ function renderDetail() {
 	renderTimeline(detailState.model);
 }
 
+// wireLogDownload saves the whole run log as a file.
+//
+// The pane shows the tail and can be filtered, and "View full log" opens the whole thing in a tab,
+// which a browser may block and which is not a file anybody can attach to a ticket. Every table on
+// every page can leave as CSV or JSON; the output of a run is the one body of data on this page
+// that could only be read on screen. It fetches the whole log rather than the shown tail, since a
+// file is wanted for what is not on screen.
+function wireLogDownload(runId) {
+	const btn = document.getElementById("log-download");
+	if (!btn) return;
+	btn.dataset.tip = "Click to save this run's full output as a file";
+	btn.addEventListener("click", async () => {
+		try {
+			const res = await fetchAuthed("/runs/" + runId + "/logs");
+			if (!res.ok) throw new Error("HTTP " + res.status);
+			downloadBlob("switchtender-" + runId + ".log", "text/plain", await res.text());
+		} catch (err) {
+			setStatus("Could not download the log: " + err.message);
+		}
+	});
+}
+
 // loadStoredLog fills the log pane for a run that has already finished.
 //
 // The pane, its filter, and its cap were only ever fed by the live stream, so a run still going

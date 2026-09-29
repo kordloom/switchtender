@@ -336,9 +336,12 @@ function wireAudit() {
 function tdTime(iso, empty) {
 	const el = td(iso ? relTime(iso) : (empty || ""));
 	if (iso) {
-		el.title = fmtTime(iso);
+		// The hover carries the exact value, and the cell carries a control that copies it, because
+		// a reader who wants a timestamp wants to put it somewhere else.
+		el.dataset.tip = exactTime(iso);
 		el.dataset.time = iso;
 		el.classList.add("reltime");
+		el.appendChild(copyButton(new Date(iso).toISOString(), "Copy this timestamp"));
 	}
 	return el;
 }
