@@ -503,7 +503,13 @@ function applyReadOnly() {
 		e.stopImmediatePropagation();
 	}, true);
 	for (const form of document.querySelectorAll("form")) {
-		for (const btn of form.querySelectorAll("button")) btn.disabled = true;
+		for (const btn of form.querySelectorAll("button")) {
+			// A helper that changes nothing on the server stays live, so the demo can still show what
+			// it does. Loading a sample export fills a text box from a constant and calls no endpoint;
+			// disabling it left a button whose tip promised to fill the box doing nothing at all.
+			if (btn.dataset.demoSafe) continue;
+			btn.disabled = true;
+		}
 		const actions = form.querySelector(".launch-actions") || form;
 		if (!actions.querySelector(".ro-note")) {
 			const note = document.createElement("span");

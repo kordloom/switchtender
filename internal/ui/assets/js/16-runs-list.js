@@ -405,7 +405,15 @@ function appendRunRows(tbody, runs) {
 		tr.className = "row-nav";
 		tr.tabIndex = 0;
 		tr.setAttribute("role", "link");
-		const openRun = () => { location.href = "/ui/runs/" + r.id; };
+		const openRun = (e) => {
+			// A chip in the row is its own link: the origin chip opens templates or schedules, a label
+			// chip filters the list. Clicking one used to fire both the chip's navigation and this
+			// handler, and the two raced, so clicking a run's origin chip could land on the run or on
+			// templates depending on which won. Let an interactive child handle its own click; only a
+			// click on the row itself opens the run.
+			if (e && e.target.closest("a, button")) return;
+			location.href = "/ui/runs/" + r.id;
+		};
 		tr.addEventListener("click", openRun);
 		tr.addEventListener("keydown", (e) => {
 			if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openRun(); }

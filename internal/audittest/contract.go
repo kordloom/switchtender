@@ -16,8 +16,20 @@ import (
 )
 
 // Contract runs the audit.Store contract against a fresh store from newStore.
-func Contract(t *testing.T, newStore func() audit.Store) {
+func Contract(t *testing.T, rawStore func() audit.Store) {
 	t.Helper()
+	// The backends hand out one store struct for the whole contract and truncate the table between
+	// subtests, so install binding, which lives on the struct rather than the table, would leak from
+	// one subtest into the next. A subtest that binds an install would then leave every later store
+	// bound, and one that expected the unbound default would silently append bound entries. Reset the
+	// binding on every handout so each subtest starts from the state a fresh install has.
+	newStore := func() audit.Store {
+		s := rawStore()
+		if b, ok := s.(audit.InstallBinder); ok {
+			b.BindInstall("")
+		}
+		return s
+	}
 	t.Run("append and list", func(t *testing.T) { testAppendList(t, newStore()) })
 	t.Run("chain verifies", func(t *testing.T) { testChain(t, newStore()) })
 	t.Run("anchors round trip and scope", func(t *testing.T) { testAnchors(t, newStore()) })
