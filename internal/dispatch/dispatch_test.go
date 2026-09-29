@@ -1233,3 +1233,37 @@ func TestDispatcherPerRunTimeout(t *testing.T) {
 		t.Errorf("status = %q, want failed from the per-run timeout", got.Status)
 	}
 }
+
+// TestDispatcherPerRunNotification verifies a run carrying a webhook target posts its terminal
+// state to that target, on top of any server-wide channels.
+func TestDispatcherPerRunNotification(t *testing.T) {
+	t.Parallel()
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	store := run.NewMemStore()
+	d := New(store, roundhouse.RunnerFunc(
+		func(_ context.Context, _ roundhouse.Spec, _ io.Writer) (roundhouse.Result, error) {
+			return roundhouse.Result{ExitCode: 0}, nil
+		}), nil)
+	defer d.Close()
+
+	created, err := d.Submit(context.Background(), "play.yml", "inv",
+		run.WithNotifications([]run.NotifyTarget{{Kind: run.NotifyWebhook, URL: srv.URL}}))
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+	waitTerminal(t, store, created.ID)
+
+	deadline := time.Now().Add(3 * time.Second)
+	for atomic.LoadInt32(&hits) == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if atomic.LoadInt32(&hits) == 0 {
+		t.Error("per-run webhook target was not notified")
+	}
+}

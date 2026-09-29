@@ -51,6 +51,9 @@ type createTemplateRequest struct {
 	ExtraVars map[string]any `json:"extra_vars,omitempty"`
 	// Survey prompts the launcher for typed values that become extra vars.
 	Survey []template.SurveyField `json:"survey,omitempty"`
+	// Notifications route every launch's terminal state to specific channels beyond the server-wide
+	// ones. Optional.
+	Notifications []run.NotifyTarget `json:"notifications,omitempty"`
 	// OrgID names the owning organization. Empty leaves the template unowned and global. Optional.
 	OrgID string `json:"org_id,omitempty"`
 }
@@ -72,6 +75,12 @@ func templateToolError(req createTemplateRequest) string {
 	}
 	if !run.ValidTool(req.Tool) {
 		return "tool must be ansible, bash, terraform, opentofu, python, powershell, or go"
+	}
+	for _, n := range req.Notifications {
+		if !run.ValidNotifyKind(n.Kind) || n.URL == "" {
+			return "each notification needs a url and a kind of webhook, slack, mattermost, " +
+				"rocketchat, discord, teams, or ntfy"
+		}
 	}
 	if run.NormalizeTool(req.Tool) == run.ToolAnsible {
 		if req.Playbook == "" {
@@ -107,7 +116,8 @@ func createTemplateHandler(store template.Store, log *zap.Logger) http.HandlerFu
 			Tool: req.Tool, Command: req.Command, DryRun: req.DryRun,
 			Shards:        req.Shards,
 			CredentialIDs: req.CredentialIDs, ExtraVars: req.ExtraVars, Survey: req.Survey,
-			Queue: req.Queue, Image: req.Image, PullCredentialID: req.PullCredentialID,
+			Notifications: req.Notifications,
+			Queue:         req.Queue, Image: req.Image, PullCredentialID: req.PullCredentialID,
 			OrgID:     req.OrgID,
 			CreatedAt: time.Now(),
 		}
@@ -143,7 +153,8 @@ func updateTemplateHandler(store template.Store, log *zap.Logger) http.HandlerFu
 			Tool: req.Tool, Command: req.Command, DryRun: req.DryRun,
 			Shards:        req.Shards,
 			CredentialIDs: req.CredentialIDs, ExtraVars: req.ExtraVars, Survey: req.Survey,
-			Queue: req.Queue, Image: req.Image, PullCredentialID: req.PullCredentialID,
+			Notifications: req.Notifications,
+			Queue:         req.Queue, Image: req.Image, PullCredentialID: req.PullCredentialID,
 			OrgID: req.OrgID,
 		}
 		err := store.Update(r.Context(), t)
@@ -284,6 +295,9 @@ func launchTemplateHandler(store template.Store, submitter Submitter, authz *aut
 		}
 		if t.Image != "" {
 			opts = append(opts, run.WithImage(t.Image, t.PullCredentialID))
+		}
+		if len(t.Notifications) > 0 {
+			opts = append(opts, run.WithNotifications(t.Notifications))
 		}
 		var created *run.Run
 		if t.Shards >= 2 {

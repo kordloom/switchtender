@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"slices"
 	"time"
+
+	"github.com/kordloom/switchtender/internal/run"
 )
 
 var (
@@ -87,6 +89,9 @@ type Template struct {
 	ExtraVars map[string]any `json:"extra_vars,omitempty"`
 	// Survey prompts the launcher for typed values that become extra vars.
 	Survey []SurveyField `json:"survey,omitempty"`
+	// Notifications route every launch's terminal state to specific channels, beyond the server-wide
+	// ones, so a template pages its own team.
+	Notifications []run.NotifyTarget `json:"notifications,omitempty"`
 	// OrgID is the owning organization. Empty means unowned, a global object that follows the role.
 	// When set, members of the organization gain access to the template and, under strict grants, it
 	// is hidden from non-members who lack an explicit grant.

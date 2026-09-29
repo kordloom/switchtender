@@ -47,6 +47,7 @@ func (d *Dispatcher) notify(r *run.Run) {
 	d.notifyTwilio(r)
 	d.notifyEmail(r)
 	d.notifyExtra(r)
+	d.notifyRunTargets(r)
 }
 
 // notifyExtra fans a terminal top-level run out to every registered Notifier, off the executor

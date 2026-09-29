@@ -74,6 +74,7 @@ type sidebar struct {
 	Active bool
 }
 
+// main renders the documentation site and exits non-zero on failure.
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "sitegen:", err)

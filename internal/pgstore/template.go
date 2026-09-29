@@ -13,7 +13,7 @@ import (
 // templateColumns is the shared select list for template reads.
 const templateColumns = `id, name, project_id, playbook, inventory, inventory_id, shards,
 	credential_ids, extra_vars, survey, queue, created_at, tool, command, dry_run, image,
-	pull_credential_id, org_id`
+	pull_credential_id, org_id, notifications`
 
 // templateStore is a template.Store backed by the shared SQLite database.
 type templateStore struct {
@@ -31,22 +31,28 @@ func (s *templateStore) Save(ctx context.Context, t *template.Template) error {
 	if err != nil {
 		return fmt.Errorf("save template: %w", err)
 	}
+	notifs, err := json.Marshal(t.Notifications)
+	if err != nil {
+		return fmt.Errorf("save template: %w", err)
+	}
 	const q = `
 INSERT INTO templates
 	(id, name, project_id, playbook, inventory, inventory_id, shards, credential_ids, extra_vars,
-	 survey, queue, created_at, tool, command, dry_run, image, pull_credential_id, org_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+	 survey, queue, created_at, tool, command, dry_run, image, pull_credential_id, org_id,
+	 notifications)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
 ON CONFLICT(id) DO UPDATE SET
 	name=excluded.name, project_id=excluded.project_id, playbook=excluded.playbook,
 	inventory=excluded.inventory, inventory_id=excluded.inventory_id, shards=excluded.shards,
 	credential_ids=excluded.credential_ids, extra_vars=excluded.extra_vars,
 	survey=excluded.survey, queue=excluded.queue, created_at=excluded.created_at,
 	tool=excluded.tool, command=excluded.command, dry_run=excluded.dry_run,
-	image=excluded.image, pull_credential_id=excluded.pull_credential_id, org_id=excluded.org_id`
+	image=excluded.image, pull_credential_id=excluded.pull_credential_id, org_id=excluded.org_id,
+	notifications=excluded.notifications`
 	_, err = s.db.ExecContext(ctx, q,
 		t.ID, t.Name, t.ProjectID, t.Playbook, t.Inventory, t.InventoryID, t.Shards,
 		joinIDs(t.CredentialIDs), string(vars), string(survey), t.Queue, formatTime(t.CreatedAt),
-		t.Tool, t.Command, boolToInt(t.DryRun), t.Image, t.PullCredentialID, t.OrgID)
+		t.Tool, t.Command, boolToInt(t.DryRun), t.Image, t.PullCredentialID, t.OrgID, string(notifs))
 	if err != nil {
 		return fmt.Errorf("save template: %w", err)
 	}
@@ -63,15 +69,19 @@ func (s *templateStore) Update(ctx context.Context, t *template.Template) error 
 	if err != nil {
 		return fmt.Errorf("update template: %w", err)
 	}
+	notifs, err := json.Marshal(t.Notifications)
+	if err != nil {
+		return fmt.Errorf("update template: %w", err)
+	}
 	const q = `UPDATE templates SET
 	name=$1, project_id=$2, playbook=$3, inventory=$4, inventory_id=$5, shards=$6,
 	credential_ids=$7, extra_vars=$8, survey=$9, queue=$10, tool=$11, command=$12, dry_run=$13,
-	image=$14, pull_credential_id=$15, org_id=$16
-	WHERE id=$17`
+	image=$14, pull_credential_id=$15, org_id=$16, notifications=$17
+	WHERE id=$18`
 	res, err := s.db.ExecContext(ctx, q,
 		t.Name, t.ProjectID, t.Playbook, t.Inventory, t.InventoryID, t.Shards,
 		joinIDs(t.CredentialIDs), string(vars), string(survey), t.Queue, t.Tool, t.Command,
-		boolToInt(t.DryRun), t.Image, t.PullCredentialID, t.OrgID, t.ID)
+		boolToInt(t.DryRun), t.Image, t.PullCredentialID, t.OrgID, string(notifs), t.ID)
 	if err != nil {
 		return fmt.Errorf("update template: %w", err)
 	}
@@ -146,10 +156,11 @@ func scanTemplate(sc scanner) (*template.Template, error) {
 		survey  string
 		created string
 		dryRun  int
+		notifs  string
 	)
 	if err := sc.Scan(&t.ID, &t.Name, &t.ProjectID, &t.Playbook, &t.Inventory, &t.InventoryID,
 		&t.Shards, &creds, &vars, &survey, &t.Queue, &created, &t.Tool, &t.Command,
-		&dryRun, &t.Image, &t.PullCredentialID, &t.OrgID); err != nil {
+		&dryRun, &t.Image, &t.PullCredentialID, &t.OrgID, &notifs); err != nil {
 		return nil, err
 	}
 	t.DryRun = dryRun != 0
@@ -161,6 +172,11 @@ func scanTemplate(sc scanner) (*template.Template, error) {
 	}
 	if survey != "" && survey != "null" {
 		if err := json.Unmarshal([]byte(survey), &t.Survey); err != nil {
+			return nil, err
+		}
+	}
+	if notifs != "" && notifs != "null" {
+		if err := json.Unmarshal([]byte(notifs), &t.Notifications); err != nil {
 			return nil, err
 		}
 	}

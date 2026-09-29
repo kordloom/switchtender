@@ -164,11 +164,6 @@ func WithBinary(binary string) Option {
 	return func(a *ansibleRunner) { a.binary = binary }
 }
 
-// WithBaseEnv overrides the environment inherited by every execution.
-func WithBaseEnv(env []string) Option {
-	return func(a *ansibleRunner) { a.baseEnv = env }
-}
-
 // NewAnsibleRunner returns a Runner that executes each Spec by its Tool: ansible-playbook for
 // Ansible and bash for bash. By default it resolves the tool binaries from PATH and inherits the
 // process environment. Container execution is off, so an image-bound Spec fails clearly.

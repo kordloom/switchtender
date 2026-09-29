@@ -72,7 +72,8 @@ CREATE TABLE IF NOT EXISTS runs (
 	image         TEXT NOT NULL DEFAULT '',
 	pull_credential_id TEXT NOT NULL DEFAULT '',
 	idempotency_key TEXT NOT NULL DEFAULT '',
-	timeout       INTEGER NOT NULL DEFAULT 0
+	timeout       INTEGER NOT NULL DEFAULT 0,
+	notifications TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_runs_created_at ON runs(created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_parent ON runs(parent_id, shard_index);
@@ -81,6 +82,7 @@ CREATE INDEX IF NOT EXISTS idx_runs_parent ON runs(parent_id, shard_index);
 -- after an upgrade. Every statement is idempotent, so a fresh database and an existing one converge.
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS idempotency_key TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS timeout INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS notifications TEXT NOT NULL DEFAULT '';
 CREATE UNIQUE INDEX IF NOT EXISTS idx_runs_idempotency_key ON runs(idempotency_key) WHERE idempotency_key <> '';
 CREATE TABLE IF NOT EXISTS run_logs (
 	seq    BIGSERIAL PRIMARY KEY,
@@ -181,9 +183,11 @@ CREATE TABLE IF NOT EXISTS templates (
 	dry_run        INTEGER NOT NULL DEFAULT 0,
 	image          TEXT NOT NULL DEFAULT '',
 	pull_credential_id TEXT NOT NULL DEFAULT '',
-	org_id         TEXT NOT NULL DEFAULT ''
+	org_id         TEXT NOT NULL DEFAULT '',
+	notifications  TEXT NOT NULL DEFAULT ''
 );
 ALTER TABLE templates ADD COLUMN IF NOT EXISTS org_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE templates ADD COLUMN IF NOT EXISTS notifications TEXT NOT NULL DEFAULT '';
 CREATE TABLE IF NOT EXISTS inventory_sources (
 	id            TEXT PRIMARY KEY,
 	name          TEXT NOT NULL DEFAULT '',
@@ -483,7 +487,7 @@ const runColumns = `id, playbook, inventory, status, exit_code, error, created_a
 	ended_at, parent_id, shard_index, shard_count, limit_pattern, kind, step_name, step_index,
 	retry_of, attempt, extra_vars, outputs, claimed_by, claimed_at, cancel_requested,
 	credential_ids, project_id, commit_sha, inventory_id, queue, tool, command, dry_run,
-	proposed_from, intent, image, pull_credential_id, idempotency_key, timeout`
+	proposed_from, intent, image, pull_credential_id, idempotency_key, timeout, notifications`
 
 // Save inserts or replaces the run identified by r.ID. The cancel flag merges with GREATEST so a
 // replace from a stale snapshot cannot erase a cancel another process just requested.
@@ -494,9 +498,9 @@ INSERT INTO runs
 	 parent_id, shard_index, shard_count, limit_pattern, kind, step_name, step_index, retry_of,
 	 attempt, extra_vars, outputs, claimed_by, claimed_at, cancel_requested, credential_ids,
 	 project_id, commit_sha, inventory_id, queue, tool, command, dry_run, proposed_from, intent,
-	 image, pull_credential_id, idempotency_key, timeout)
+	 image, pull_credential_id, idempotency_key, timeout, notifications)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
-	$21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37)
+	$21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38)
 ON CONFLICT(id) DO UPDATE SET
 	playbook=excluded.playbook, inventory=excluded.inventory, status=excluded.status,
 	exit_code=excluded.exit_code, error=excluded.error, created_at=excluded.created_at,
@@ -512,7 +516,8 @@ ON CONFLICT(id) DO UPDATE SET
 	inventory_id=excluded.inventory_id, queue=excluded.queue, tool=excluded.tool,
 	command=excluded.command, dry_run=excluded.dry_run, proposed_from=excluded.proposed_from,
 	intent=excluded.intent, image=excluded.image, pull_credential_id=excluded.pull_credential_id,
-	idempotency_key=excluded.idempotency_key, timeout=excluded.timeout`
+	idempotency_key=excluded.idempotency_key, timeout=excluded.timeout,
+	notifications=excluded.notifications`
 	_, err := s.db.ExecContext(ctx, q,
 		r.ID, r.Playbook, r.Inventory, string(r.Status), nullInt(r.ExitCode), r.Error,
 		formatTime(r.CreatedAt), nullTime(r.StartedAt), nullTime(r.EndedAt),
@@ -521,7 +526,7 @@ ON CONFLICT(id) DO UPDATE SET
 		jsonMap(r.ExtraVars), jsonMap(r.Outputs), r.ClaimedBy, nullTime(r.ClaimedAt),
 		boolToInt(r.CancelRequested), joinIDs(r.CredentialIDs), r.ProjectID, r.CommitSHA,
 		r.InventoryID, r.Queue, r.Tool, r.Command, boolToInt(r.DryRun), r.ProposedFrom, r.Intent,
-		r.Image, r.PullCredentialID, r.IdempotencyKey, r.Timeout,
+		r.Image, r.PullCredentialID, r.IdempotencyKey, r.Timeout, marshalNotifications(r.Notifications),
 	)
 	if err != nil {
 		if r.IdempotencyKey != "" && isKeyConflict(err) {
@@ -1268,13 +1273,14 @@ func scanRun(s scanner) (*run.Run, error) {
 		cancelI  int
 		credIDs  string
 		dryRun   int
+		notifs   string
 	)
 	if err := s.Scan(&r.ID, &r.Playbook, &r.Inventory, &status, &exit, &r.Error,
 		&created, &started, &ended, &parent, &shardIdx, &shardCnt, &r.Limit,
 		&r.Kind, &r.StepName, &stepIdx, &retryOf, &r.Attempt, &extra, &outputs,
 		&r.ClaimedBy, &claimed, &cancelI, &credIDs, &r.ProjectID, &r.CommitSHA,
 		&r.InventoryID, &r.Queue, &r.Tool, &r.Command, &dryRun, &r.ProposedFrom, &r.Intent,
-		&r.Image, &r.PullCredentialID, &r.IdempotencyKey, &r.Timeout); err != nil {
+		&r.Image, &r.PullCredentialID, &r.IdempotencyKey, &r.Timeout, &notifs); err != nil {
 		return nil, err
 	}
 	r.CancelRequested = cancelI != 0
@@ -1325,7 +1331,32 @@ func scanRun(s scanner) (*run.Run, error) {
 	if r.ClaimedAt, err = parseNullTime(claimed); err != nil {
 		return nil, err
 	}
+	r.Notifications = parseNotifications(notifs)
 	return &r, nil
+}
+
+// marshalNotifications encodes per-run notification targets for storage, empty for none.
+func marshalNotifications(targets []run.NotifyTarget) string {
+	if len(targets) == 0 {
+		return ""
+	}
+	b, err := json.Marshal(targets)
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
+// parseNotifications decodes stored notification targets, nil for an empty or invalid value.
+func parseNotifications(s string) []run.NotifyTarget {
+	if s == "" {
+		return nil
+	}
+	var targets []run.NotifyTarget
+	if err := json.Unmarshal([]byte(s), &targets); err != nil {
+		return nil
+	}
+	return targets
 }
 
 // joinIDs renders an id list for storage, empty string for none.
