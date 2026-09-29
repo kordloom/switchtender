@@ -111,7 +111,7 @@ footer { margin-top: 40px; color: var(--muted); font-size: 13px; }
 	<p class="sub">Each anchor still holds against the chain and fixed the head at or after the position this run was recorded by, somewhere this install cannot rewrite.</p>
 	<div class="scroll"><table>
 		<tr><th>Type</th><th>Seq</th><th>When</th><th>Where</th><th>Proof</th></tr>
-		{{range .Anchors}}<tr><td>{{.Type}}</td><td class="mono">{{.Seq}}</td><td>{{.At}}</td><td class="mono">{{.Ref}}</td><td>{{if .Offline}}embedded, verifies offline{{else}}by reference{{end}}</td></tr>
+		{{range .Anchors}}<tr><td>{{.Type}}</td><td class="mono">{{.Seq}}</td><td>{{.At}}</td><td class="mono">{{.Ref}}</td><td>{{if .Offline}}timestamp token checked here: it fixes this link{{else if .ProofProblem}}timestamp token REFUSED: {{.ProofProblem}}{{else}}by reference, so its position rests on where it was published{{end}}</td></tr>
 		{{end}}
 	</table></div>
 	{{end}}

@@ -48,9 +48,13 @@ func TestReadRolesBoundManagementData(t *testing.T) {
 		{"/v1/orgs/org_1/members", user.RoleAdmin},
 		{"/v1/teams", user.RoleAdmin},
 		{"/v1/doctor", user.RoleAdmin},
-		// Test 18 and 19: The evidence documents quote the audit trail, so they take its role. The
-		// run's ordinary read stays open to viewers.
-		{"/v1/runs/run_1/evidence", user.RoleAdmin},
+		// Test 18 and 19: The evidence documents quote the audit trail, so they take its role, with one
+		// exception the handler enforces rather than the gate: the actor who asked for a run may read
+		// the evidence for it, so the gate lets an operator reach the handler and the handler decides
+		// whether this is their own run. A viewer is stopped here. The run's ordinary read stays open to
+		// viewers.
+		{"/v1/runs/run_1/evidence", user.RoleOperator},
+		{"/v1/runs/run_1/receipt", user.RoleOperator},
 		{"/v1/audit/register", user.RoleAdmin},
 	}
 	for testNum, test := range tests {

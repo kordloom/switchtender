@@ -102,6 +102,16 @@ func treeVerdict(s *AnchorScanner, a *Anchor) AnchorCheck {
 			s.fed, a.Seq, a.Seq-s.fed)
 	case !found:
 		res.Problem = fmt.Sprintf("no root could be recomputed at tree size %d", a.Seq)
+	case root != a.Link && a.InstallID != "" && a.InstallID != s.installID:
+		// A tree root is computed over leaves bound to the install's identity, so the same untouched
+		// chain under a different identity produces a different root. Two ordinary events cause that: a
+		// database restored without the key file that made it, and a deployment where each replica
+		// mints its own key. Calling either one a rewrite teaches an operator to disbelieve the message
+		// that matters.
+		res.Problem = fmt.Sprintf("this anchor was taken by install %s and this process is install "+
+			"%s, so the tree it fixed a root of cannot be recomputed here: restore the producer key "+
+			"that made this chain, or point this process at it, and check again. Nothing here says "+
+			"the history changed", a.InstallID, s.installID)
 	case root != a.Link:
 		res.Problem = fmt.Sprintf("the tree over the first %d entries now has root %s, and this "+
 			"anchor recorded %s, so the history under the anchor was rewritten", a.Seq, root, a.Link)

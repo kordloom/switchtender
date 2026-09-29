@@ -67,6 +67,11 @@ webhook `/hooks` path, and the `/relay` worker path, is unversioned. The root re
 | DELETE | `/v1/credentials/{id}`     | Delete a credential. 409 while an object still uses it. |
 | POST   | `/v1/auth/login`           | Sign in with username and password, returns a token.    |
 | POST   | `/v1/auth/check`           | Verify an API token.                                    |
+| GET    | `/v1/auth/me`              | Who the server resolved the caller to be.               |
+| POST   | `/v1/auth/logout`          | End the caller's own session, revoking its token.       |
+| POST   | `/v1/tokens`               | Mint a token bound to an account. Returns it once.      |
+| GET    | `/v1/tokens`               | List tokens without secrets. Admin only.                |
+| DELETE | `/v1/tokens/{id}`          | Revoke a token everywhere at once. Admin only.          |
 | GET    | `/auth/oidc/login`      | Start the OpenID Connect sign-in handshake.             |
 | GET    | `/auth/oidc/callback`   | Complete the OIDC handshake and issue a token.          |
 | GET    | `/auth/saml/login`      | Start the SAML sign-in handshake.                       |
@@ -330,6 +335,18 @@ presents the worker bearer token.
 | POST   | `/relay/v1/runs/{id}/save`         | Save the run's state.                         |
 | POST   | `/relay/v1/runs/{id}/log`          | Append captured output.                       |
 | POST   | `/relay/v1/runs/{id}/events`       | Append structured events.                     |
+| POST   | `/relay/v1/runs/{id}/propose-apply`| Report a plan's findings so the control node holds its apply. |
 | POST   | `/relay/v1/runs/{id}/host-summary` | Save the run's per-host summaries.            |
 | POST   | `/relay/v1/runs/{id}/host-facts`   | Save the facts the run gathered per host.     |
 | POST   | `/relay/v1/runs/{id}/task-summary` | Save the run's per-task summaries.            |
+
+Each report call is bounded twice. It presents the per-claim capability the claim response issued, so it
+can only write to the run this worker holds, and one call carries at most a few thousand items, so a
+worker cannot force an unbounded decode on the control node; the worker sends a wide run's evidence in
+several calls rather than losing it to that cap. Host facts are bounded further: a worker may write
+facts only for hosts its run has already reported results for, so nothing can be recorded about a
+machine no run claims to have touched.
+
+What that does and does not give you: a worker authors its own results, so a worker you do not trust can
+still describe its own run untruthfully. What it cannot do is reach past that run into the recorded state
+of the rest of the fleet. Give a queue only to workers you would let touch the hosts that queue targets.

@@ -53,6 +53,7 @@ function buildNav() {
 		}
 	};
 	fillGroups(drawer);
+	drawer.appendChild(accountGroup());
 	drawer.appendChild(themeGroup());
 
 	const side = document.createElement("aside");
@@ -66,6 +67,7 @@ function buildNav() {
 	sideNav.setAttribute("aria-label", "Primary navigation");
 	fillGroups(sideNav);
 	side.appendChild(sideNav);
+	side.appendChild(accountGroup());
 	side.appendChild(themeGroup());
 
 	document.body.appendChild(backdrop);
@@ -300,6 +302,77 @@ function themeGroup() {
 	}
 	g.appendChild(row);
 	return g;
+}
+
+// accountGroup builds the who-am-I block that sits above the theme switcher: the signed-in name and
+// role, and the control that ends the session. A signed-out browser is offered the way in instead.
+//
+// Nothing in the interface used to say who you were or let you stop being them. Sign-in was reachable
+// only by being thrown at it by a 401, so an install shared by an operator and an auditor had no way
+// to hand the browser over, and a session left open on a shared machine could not be ended from the
+// interface it was open in.
+function accountGroup() {
+	const g = document.createElement("div");
+	g.className = "account-group";
+	const who = document.createElement("div");
+	who.className = "account-who";
+	g.appendChild(who);
+
+	const name = localStorage.getItem("st_user") || "";
+	if (!apiToken()) {
+		who.textContent = "Not signed in";
+		const link = document.createElement("a");
+		link.className = "account-link";
+		link.href = "/ui/login";
+		link.textContent = "Sign in";
+		g.appendChild(link);
+		return g;
+	}
+
+	const label = document.createElement("span");
+	label.className = "account-name";
+	// A token session has no username to show, so it is named for what it is rather than left blank.
+	label.textContent = name || "API token session";
+	who.appendChild(label);
+	const role = uiRole();
+	if (role) {
+		const badge = document.createElement("span");
+		badge.className = "account-role";
+		badge.textContent = role;
+		who.appendChild(badge);
+	}
+
+	const out = document.createElement("button");
+	out.type = "button";
+	out.className = "account-signout";
+	out.textContent = "Sign out";
+	out.dataset.tip = "Click to end this session on the server and return to sign in";
+	out.addEventListener("click", () => signOut());
+	g.appendChild(out);
+	return g;
+}
+
+// signOut ends the session on the server, then clears what this browser remembers and returns to
+// sign in. The server call is what actually revokes the credential; clearing storage alone left a
+// token that stayed valid for the rest of its thirty days in anyone's hands. The local clear happens
+// even when the call fails, because a browser that cannot reach the server must still be able to
+// stop presenting the session.
+async function signOut() {
+	window.ymRedirecting = true;
+	try {
+		await fetch(API + "/auth/logout", { method: "POST", headers: authHeaders() });
+	} catch (e) {
+		// An unreachable server does not keep a person signed in on this machine.
+	}
+	localStorage.removeItem("st_token");
+	localStorage.removeItem("st_role");
+	localStorage.removeItem("st_user");
+	try {
+		sessionStorage.removeItem("st_return");
+	} catch (e) {
+		// A browser refusing session storage has nothing to clear.
+	}
+	location.href = "/ui/login";
 }
 
 // paletteState holds the command palette's elements once built, plus the filtered entries and the

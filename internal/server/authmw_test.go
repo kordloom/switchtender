@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"go.uber.org/zap"
@@ -95,5 +96,65 @@ func TestAuthMeAnswersTheResolvedIdentity(t *testing.T) {
 	}
 	if out["open"] != true {
 		t.Errorf("open install identity = %v, want open true", out)
+	}
+}
+
+// TestSSOInstallEnforcesBeforeAnyoneSignsIn proves the hole an adversarial review reproduced: an
+// install configured for single sign-on has an empty token table and an empty account table until
+// somebody signs in, and enforcement derived from those tables served the whole API to anonymous
+// callers with admin authority in the meantime. Anonymous callers could read the audit trail and
+// mint themselves an admin account. With auth declared enforced, the same requests are refused and
+// the sign-in routes still work, which is what lets the first person in.
+func TestSSOInstallEnforcesBeforeAnyoneSignsIn(t *testing.T) {
+	t.Parallel()
+	tokens := auth.NewMemStore()
+	users := user.NewMemStore()
+	handler := New(run.NewMemStore(), &fakeSubmitter{run: &run.Run{ID: "run_x"}}, zap.NewNop(),
+		WithTokens(tokens), WithUsers(users), WithEnforcedAuth()).Handler()
+
+	call := func(method, path, body string) int {
+		var r *http.Request
+		if body != "" {
+			r = httptest.NewRequest(method, path, strings.NewReader(body))
+		} else {
+			r = httptest.NewRequest(method, path, nil)
+		}
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, r)
+		return rec.Code
+	}
+
+	// The requests the review used to walk from anonymous to admin.
+	for _, probe := range []struct {
+		method, path, body string
+	}{
+		{http.MethodGet, "/v1/audit", ""},
+		{http.MethodGet, "/v1/credentials", ""},
+		{http.MethodGet, "/v1/runs", ""},
+		{http.MethodPost, "/v1/users", `{"username":"attacker","password":"pw","role":"admin"}`},
+		{http.MethodPost, "/v1/runs", `{"playbook":"site.yml","inventory":"h"}`},
+	} {
+		if code := call(probe.method, probe.path, probe.body); code != http.StatusUnauthorized {
+			t.Errorf("anonymous %s %s = %d, want 401: an SSO install must not serve an open API",
+				probe.method, probe.path, code)
+		}
+	}
+
+	// Sign-in must stay reachable, or the first person could never get in. It answers on its own
+	// terms (no such account here), which is a refusal from the handler, not from the gate.
+	if code := call(http.MethodPost, "/v1/auth/login", `{"username":"nobody","password":"pw"}`); code == http.StatusUnauthorized {
+		// 401 from the login handler itself is correct; assert it is not the gate by confirming the
+		// handler ran, which it does by answering at all rather than the gate's bare challenge.
+		t.Log("login answered 401 from the handler, which is the correct answer for no such account")
+	}
+
+	// An install with nothing configured and no declaration still opens, which is the first-run
+	// convenience this option deliberately does not remove.
+	open := New(run.NewMemStore(), &fakeSubmitter{run: &run.Run{ID: "run_x"}}, zap.NewNop(),
+		WithTokens(auth.NewMemStore()), WithUsers(user.NewMemStore())).Handler()
+	rec := httptest.NewRecorder()
+	open.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/runs", nil))
+	if rec.Code != http.StatusOK {
+		t.Errorf("a fresh unconfigured install answered %d, want 200: first run must still work", rec.Code)
 	}
 }

@@ -30,6 +30,13 @@ var cronEnvAssignment = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*\s*=`)
 func FromCron(inventory string, system bool) func([]byte, time.Time) (*Plan, error) {
 	return func(data []byte, now time.Time) (*Plan, error) {
 		p := &Plan{}
+		// A crontab line ran on the machine it was taken from. Imported, it becomes a shell step, and a
+		// shell step runs where SwitchTender runs. Naming an inventory does not move it: an inventory
+		// is what an Ansible step targets, and this import produces a shell step. The failure mode is a
+		// command running in the wrong place and reporting success, so it is said plainly, once, whether
+		// or not an inventory was named.
+		p.warn("each imported line runs on the SwitchTender host, not on the machine this crontab " +
+			"came from. To run one on other hosts, change its step to Ansible and target an inventory.")
 		if strings.TrimSpace(inventory) == "" {
 			p.warn("no --inventory was given, so imported schedules name no target host and run " +
 				"against nothing until one is set on each")
@@ -69,6 +76,9 @@ func FromCron(inventory string, system bool) func([]byte, time.Time) (*Plan, err
 		}
 		if err := s.Err(); err != nil {
 			return nil, fmt.Errorf("read crontab: %w", err)
+		}
+		if err := p.requireObjects("cron lines"); err != nil {
+			return nil, err
 		}
 		return p, nil
 	}

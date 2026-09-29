@@ -86,7 +86,11 @@ importer at a crontab file and it turns each cron line into a governed schedule,
 approved, recorded, and provable like any other run instead of running unseen on one box.</p>
 <pre><code>switchtender import cron /var/spool/cron/crontabs/deploy --inventory prod --db switchtender.db
 </code></pre>
-<p>A crontab names no target host, so <code>--inventory</code> says where the jobs run. Add <code>--system</code> to read
+<p>A crontab names no target host, so <code>--inventory</code> records which inventory the jobs belong to. It does
+not move where they run: each line imports as a shell step, and a shell step runs on the SwitchTender
+host, not on the machine the crontab came from. The report says so on every cron import. Change a step
+to Ansible when you want it to run against the inventory. When the name matches a stored inventory, the
+import wires the object by id; anything else is used as a path on the server and the report says which. Add <code>--system</code> to read
 <code>/etc/crontab</code> and the system tabs, which carry a user column the report calls out. Comments and
 environment lines are noted and skipped. As with the other imports, leave off <code>--apply</code> to preview
 the schedules first, then re-run with <code>--apply</code> to create them.</p>
@@ -114,6 +118,14 @@ the schedules first, then re-run with <code>--apply</code> to create them.</p>
 <tr>
 <td>AWX survey</td>
 <td>Template survey, field for field, with the field types translated. A password prompt is refused, not downgraded to plain text.</td>
+</tr>
+<tr>
+<td>Semaphore survey</td>
+<td>Template survey, field for field. A secret variable is refused, not downgraded to plain text: store its value as a credential.</td>
+</tr>
+<tr>
+<td>AWX schedule that stops</td>
+<td>Refused and named. A rule with <code>COUNT</code> or <code>UNTIL</code> bounds itself, a cron entry never stops, and importing one would leave a job firing forever.</td>
 </tr>
 <tr>
 <td>AWX workflow job template</td>

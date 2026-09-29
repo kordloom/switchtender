@@ -46,3 +46,53 @@ func TestWitnessIdentityIgnoresTheProducerKeyEnvironment(t *testing.T) {
 			got.KeyID(), witnessOwn.KeyID())
 	}
 }
+
+// TestWitnessKeyIsItsOwnFile pins the other half of the same problem. Ignoring the environment stops a
+// witness picking up a key an operator exported, and it does nothing about the file: the witness read
+// producer-key.json, under that name, out of whatever directory it was pointed at, which defaults to the
+// directory its checkpoint lives in. A witness run on the host it watches, or pointed at the server's
+// state directory for convenience, signed its attestations with the watched server's producer key. A
+// relying party pinning that key was pinning the operator's own, and the operator could mint the
+// statement the witness exists to make unforgeable.
+func TestWitnessKeyIsItsOwnFile(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	// The server's identity, created where a server would create it.
+	producer, err := identity.LoadFile(dir)
+	if err != nil {
+		t.Fatalf("LoadFile() error = %v", err)
+	}
+
+	// The witness, pointed at the very same directory.
+	witnessKey, err := identity.LoadWitnessFile(dir)
+	if err != nil {
+		t.Fatalf("LoadWitnessFile() error = %v", err)
+	}
+	if witnessKey.KeyID() == producer.KeyID() {
+		t.Error("the witness signed with the watched server's producer key, so its attestation is " +
+			"one the watched operator can forge")
+	}
+	if witnessKey.InstallID == producer.InstallID {
+		t.Error("the witness carries the watched install's id, so its attestation reads as the " +
+			"server's own statement")
+	}
+
+	// It is stable across restarts, or every restart strands the checkpoints the previous key signed.
+	again, err := identity.LoadWitnessFile(dir)
+	if err != nil {
+		t.Fatalf("second LoadWitnessFile() error = %v", err)
+	}
+	if again.KeyID() != witnessKey.KeyID() {
+		t.Errorf("witness key changed to %s, want %s", again.KeyID(), witnessKey.KeyID())
+	}
+
+	// And a witness in a directory of its own, which is the ordinary case, still gets one.
+	alone, err := identity.LoadWitnessFile(t.TempDir())
+	if err != nil {
+		t.Fatalf("LoadWitnessFile() in a fresh directory error = %v", err)
+	}
+	if alone.KeyID() == witnessKey.KeyID() {
+		t.Error("two witnesses in different directories share a key")
+	}
+}

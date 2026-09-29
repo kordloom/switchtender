@@ -14,6 +14,11 @@
 
 	<main class="content narrow">
 		<h1>Sign in</h1>
+		<div id="signed-in-return" class="signed-in-return" hidden>
+			<span>This browser is already signed in <span id="signed-in-name"></span>.</span>
+			<a class="button" href="/ui/">Back to SwitchTender</a>
+			<button id="signed-in-out" class="button" type="button">Sign out</button>
+		</div>
 		{{if .OIDCEnabled}}
 		<a class="button primary sso" data-sso href="/auth/oidc/login">Sign in with SSO</a>
 		{{end}}

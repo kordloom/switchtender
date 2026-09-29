@@ -442,6 +442,17 @@ table.runs td.mono { max-width: 380px; overflow: hidden; text-overflow: ellipsis
 .chip.skipped { background: var(--skipped); }
 .chip.none { background: var(--surface-3); color: var(--muted); }
 .chip.flaky { background: var(--changed); }
+/* A second page section, such as the tokens beside the accounts: the same head layout with air above
+   it so the two do not read as one list. */
+.section-head { margin-top: 34px; }
+/* A minted secret shown exactly once. It reads as something to act on now, not as a result. */
+.secret-reveal { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 4px; padding: 12px 14px; background: var(--accent-soft); border: 1px solid var(--border); border-radius: 10px; }
+.secret-reveal p { flex: 1 1 100%; margin: 0; color: var(--text); font-size: 13px; font-weight: 600; }
+.secret-reveal code { overflow-x: auto; flex: 1 1 260px; min-width: 0; padding: 8px 10px; background: var(--surface); border: 1px solid var(--border-muted); border-radius: 7px; font-size: 12.5px; white-space: nowrap; }
+
+/* An intact but unanchored chain is neither a pass nor a failure, and it must not wear the same
+   badge as an anchored one: it reads as a caution, the same weight as a changed result. */
+.chip.warn { background: var(--changed); }
 .spark { display: inline-flex; gap: 2px; align-items: center; }
 .tick { display: inline-block; width: 7px; height: 17px; border-radius: 3px; background: var(--surface-3); }
 a.tick { cursor: pointer; transition: transform 0.1s ease, box-shadow 0.1s ease; }
@@ -452,7 +463,7 @@ a.tick:hover { transform: scaleY(1.18); box-shadow: 0 0 0 2px var(--surface), 0 
 .tick.unreachable { background: var(--unreachable); }
 .tick.skipped { background: var(--skipped); }
 
-.chip.changed, .chip.unreachable, .chip.flaky { color: var(--on-warn); }
+.chip.changed, .chip.unreachable, .chip.flaky, .chip.warn { color: var(--on-warn); }
 
 /* Forms */
 .content.narrow { max-width: 460px; }
@@ -522,6 +533,10 @@ table.matrix td { padding: 3px; text-align: center; }
 .cell.none { background: var(--none); cursor: default; opacity: 0.45; }
 .cell.col-hi:not(.none), .cell.row-hi:not(.none) { box-shadow: inset 0 0 0 100px rgba(150, 150, 150, 0.18); }
 .cell:hover:not(.none) { transform: scale(1.14); box-shadow: 0 0 0 2px var(--surface), 0 0 0 3px var(--text); }
+/* A keyboard walking the grid needs the same "you are here" the mouse gets from hover, and the ring
+   has to sit outside the cell so a dark outcome color does not swallow it. */
+.cell:focus-visible { transform: scale(1.14); outline: 2px solid var(--accent); outline-offset: 2px; }
+.tl-bar:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* Timeline */
 .timeline { display: flex; flex-direction: column; gap: 6px; }
@@ -879,8 +894,21 @@ body[data-page="login"] .topbar { background: transparent; backdrop-filter: none
 @media (max-width: 980px) { .docs-layout { grid-template-columns: 1fr; } .docs-nav { position: static; max-height: none; } }
 
 /* Theme switcher: a quiet icon row at the bottom of the sidebar and the drawer. */
+/* The account block sits directly above the theme switcher in both the drawer and the docked
+   sidebar, so who you are and how to stop being them live where the appearance controls already are.
+   In the sidebar it takes the auto margin, pinning the pair to the bottom of the rail. */
+.account-group { margin-top: 10px; padding: 10px 8px 0; border-top: 1px solid var(--border-muted); }
+.side .account-group { margin-top: auto; }
+.account-who { display: flex; align-items: center; gap: 6px; min-width: 0; margin-bottom: 6px; }
+.account-name { overflow: hidden; flex: 1; min-width: 0; color: var(--text); font-size: 12px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.account-role { flex: none; padding: 1px 6px; background: var(--surface-2); border: 1px solid var(--border-muted); border-radius: 999px; color: var(--muted); font-size: 10px; font-weight: 600; text-transform: capitalize; }
+.account-signout, .account-link { display: block; width: 100%; height: 26px; padding: 0 8px; background: var(--surface-2); border: 1px solid var(--border-muted); border-radius: 7px; color: var(--muted); font: inherit; font-size: 11.5px; font-weight: 600; line-height: 24px; text-align: center; text-decoration: none; cursor: pointer; transition: color 0.12s ease, background 0.12s ease; }
+.account-signout:hover, .account-link:hover { background: var(--surface); color: var(--text); }
+
 .theme-group { margin-top: 10px; padding: 0 8px; }
-.side .theme-group { margin-top: auto; padding-top: 14px; }
+.side .theme-group { margin-top: 10px; padding-top: 0; }
+/* Sign in already holds a session: the way back out, rather than a form with no exit. */
+.signed-in-return { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 18px; padding: 12px 14px; background: var(--surface-2); border: 1px solid var(--border-muted); border-radius: 10px; color: var(--muted); font-size: 13px; }
 .theme-hint { display: block; margin-bottom: 6px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
 /* A segmented control: three equal cells in one track, the active one lit. */
 .theme-row { display: flex; padding: 3px; gap: 2px; background: var(--surface-2); border: 1px solid var(--border-muted); border-radius: 9px; }

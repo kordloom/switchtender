@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -67,35 +68,109 @@ func runVerify(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(out, "chain        FAILED (does not recompute at seq %d)\n", rep.BrokeAtSeq)
 	}
 	if rep.AnchorCount > 0 {
-		fmt.Fprintf(out, "anchors      %s (%d)\n", mark(rep.AnchorsOK), rep.AnchorCount)
+		// The count of anchors was the whole line, which said nothing about the one part of an anchor
+		// that does not come from the producer: the authority's own token. A reader has to be able to
+		// tell an anchor this tool actually read from one it merely counted.
+		detail := fmt.Sprintf("%d", rep.AnchorCount)
+		switch {
+		case rep.TimestampsVerified > 0:
+			detail += fmt.Sprintf(", %d with a timestamp token that fixes this chain",
+				rep.TimestampsVerified)
+		case len(rep.TimestampProblems) == 0:
+			detail += ", none carrying a timestamp token, so their positions rest on where they " +
+				"were published"
+		}
+		fmt.Fprintf(out, "anchors      %s (%s)\n", mark(rep.AnchorsOK), detail)
+		for _, p := range rep.TimestampProblems {
+			fmt.Fprintf(out, "  %s\n", p)
+		}
 	} else {
 		fmt.Fprintln(out, "anchors      none (nothing outside this install fixes its position)")
 	}
+	// A caption states what the result means, so it has to follow the result. The parenthetical
+	// used to assert the passing case beside a FAILED, which read as a verifier contradicting
+	// itself on the one line a reader looks at hardest.
 	if rep.OutcomePresent {
-		fmt.Fprintf(out, "outcome      %s (matches what the chain committed)\n", mark(rep.OutcomeDigestOK))
+		fmt.Fprintf(out, "outcome      %s (%s what the chain committed)\n",
+			mark(rep.OutcomeDigestOK), matchWord(rep.OutcomeDigestOK))
 		if rep.OutcomeDigestOK {
 			printOutcome(out, rep.OutcomeBody)
 		}
 	}
 	if rep.DecisionsPresent > 0 {
-		fmt.Fprintf(out, "decisions    %s (%d, each matches what the chain committed)\n",
-			mark(rep.DecisionsOK), rep.DecisionsPresent)
+		fmt.Fprintf(out, "decisions    %s (%d, each %s what the chain committed)\n",
+			mark(rep.DecisionsOK), rep.DecisionsPresent, matchWord(rep.DecisionsOK))
 		for _, d := range rep.Decisions {
 			fmt.Fprintf(out, "  %s by %s (%s), binding spec %s\n",
 				d.Verdict, d.Actor, d.ActorType, d.SpecDigest)
 		}
 	}
 	if rep.SpecPresent || rep.DecisionsPresent > 0 {
-		fmt.Fprintf(out, "spec         %s (approved, executed, and disclosed digests agree)\n",
-			mark(rep.SpecConsistent))
+		agree := "agree"
+		if !rep.SpecConsistent {
+			agree = "do not agree, so the change that was approved is not the change that ran"
+		}
+		fmt.Fprintf(out, "spec         %s (approved, executed, and disclosed digests %s)\n",
+			mark(rep.SpecConsistent), agree)
 	}
 
 	if !rep.OK() {
-		fmt.Fprintln(out, "\nNOT VERIFIED")
-		return fmt.Errorf("receipt did not verify")
+		fmt.Fprintln(out, "\nNOT VERIFIED: "+failedChecks(rep))
+		return fmt.Errorf("receipt did not verify: %s", failedChecks(rep))
 	}
 	fmt.Fprintln(out, "\nVERIFIED: nothing has been altered since this receipt was signed")
 	return nil
+}
+
+// shortDigest renders a digest at a length a person can compare across two receipts by eye, which is
+// what a reader actually does with it: the full value is in the record either way.
+func shortDigest(d string) string {
+	if len(d) > 12 {
+		return d[:12]
+	}
+	return d
+}
+
+// matchWord is the caption verb for a digest comparison, in the tense the result calls for.
+func matchWord(ok bool) string {
+	if ok {
+		return "matches"
+	}
+	return "does not match"
+}
+
+// failedChecks names the checks that did not pass, so a refusal says what is wrong rather than only
+// that something is. A reader holding a refused receipt needs to know whether the signature failed,
+// the chain broke, or the approved change is not the change that ran; those are different problems
+// with different owners.
+func failedChecks(rep *audit.BundleReport) string {
+	var failed []string
+	if !rep.SignatureOK {
+		failed = append(failed, "the signature does not cover these bytes")
+	}
+	if !rep.ChainOK {
+		failed = append(failed, fmt.Sprintf("the chain does not recompute at seq %d", rep.BrokeAtSeq))
+	}
+	if !rep.AnchorsOK {
+		if len(rep.TimestampProblems) > 0 {
+			failed = append(failed, "a timestamp token does not fix the link its anchor names")
+		} else {
+			failed = append(failed, "an anchor names a position this receipt does not prove")
+		}
+	}
+	if rep.OutcomePresent && !rep.OutcomeDigestOK {
+		failed = append(failed, "the disclosed outcome is not what the chain committed")
+	}
+	if !rep.DecisionsOK {
+		failed = append(failed, "a disclosed decision is not what the chain committed")
+	}
+	if !rep.SpecConsistent {
+		failed = append(failed, "the approved and the executed change are not the same")
+	}
+	if len(failed) == 0 {
+		return "a check did not pass"
+	}
+	return strings.Join(failed, "; ")
 }
 
 // printOutcome renders what the run did from the disclosed, digest-verified outcome, so a reader sees
@@ -110,6 +185,30 @@ func printOutcome(out io.Writer, body []byte) {
 		exit = fmt.Sprintf("%d", *rec.ExitCode)
 	}
 	fmt.Fprintf(out, "  what happened  run %s %s (exit %s)\n", rec.RunID, rec.Status, exit)
+	// A no-change preview and the change itself are the two things a reader must never confuse, and
+	// the record distinguishes them. Leaving the mode out made a receipt for a dry run read exactly
+	// like a receipt for the real thing. The commit is the content that actually ran.
+	if rec.DryRun {
+		fmt.Fprintln(out, "  mode           check mode, so nothing was changed")
+	}
+	if rec.CommitSHA != "" {
+		fmt.Fprintf(out, "  commit         %s\n", rec.CommitSHA)
+	}
+	if rec.SpecDigest != "" {
+		fmt.Fprintf(out, "  spec digest    %s\n", rec.SpecDigest)
+	}
+	// The rules that were in force, which is what makes "nothing stopped this" a statement rather than
+	// an absence. A receipt from an install with no rules says so in as many words.
+	if set := rec.PolicySet; set != nil {
+		if set.Count == 0 {
+			fmt.Fprintf(out, "  rules in force none recorded at submit (%s)\n", shortDigest(set.Digest))
+		} else {
+			fmt.Fprintf(out, "  rules in force %d (%s)\n", set.Count, shortDigest(set.Digest))
+			for _, rule := range set.Rules {
+				fmt.Fprintf(out, "    - %s\n", rule)
+			}
+		}
+	}
 	if rec.Image != "" {
 		fmt.Fprintf(out, "  image          %s\n", rec.Image)
 	}

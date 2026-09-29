@@ -35,6 +35,8 @@ type createPolicyRequest struct {
 	MinRisk string `json:"min_risk,omitempty"`
 	// Effect is what a match does: require_approval (the default) or deny.
 	Effect string `json:"effect,omitempty"`
+	// RequireDistinctApprover refuses a decision by the person who asked for the change.
+	RequireDistinctApprover bool `json:"require_distinct_approver,omitempty"`
 }
 
 // resolveMaxDestroy returns the request's max_destroy, defaulting a missing value to the disabled
@@ -79,7 +81,8 @@ func createPolicyHandler(store policy.Store, log *zap.Logger) http.HandlerFunc {
 			CommandContains: req.CommandContains, InventoryID: req.InventoryID,
 			ExcludeDryRun: req.ExcludeDryRun, MaxDestroy: resolveMaxDestroy(req.MaxDestroy),
 			ActorKind: req.ActorKind, Actor: req.Actor, MinRisk: req.MinRisk, Effect: req.Effect,
-			CreatedAt: time.Now(),
+			RequireDistinctApprover: req.RequireDistinctApprover,
+			CreatedAt:               time.Now(),
 		}
 		if err := p.Validate(); err != nil {
 			respondError(w, log, http.StatusBadRequest, err.Error())
@@ -132,7 +135,8 @@ func updatePolicyHandler(store policy.Store, log *zap.Logger) http.HandlerFunc {
 			CommandContains: req.CommandContains, InventoryID: req.InventoryID,
 			ExcludeDryRun: req.ExcludeDryRun, MaxDestroy: resolveMaxDestroy(req.MaxDestroy),
 			ActorKind: req.ActorKind, Actor: req.Actor, MinRisk: req.MinRisk, Effect: req.Effect,
-			CreatedAt: existing.CreatedAt,
+			RequireDistinctApprover: req.RequireDistinctApprover,
+			CreatedAt:               existing.CreatedAt,
 		}
 		if err := p.Validate(); err != nil {
 			respondError(w, log, http.StatusBadRequest, err.Error())

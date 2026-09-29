@@ -81,7 +81,7 @@ func runAuditBundle(cmd *cobra.Command, _ []string) error {
 		entries = entries[len(entries)-bundleLimit:]
 	}
 
-	id, err := audit.LoadIdentity(keyDir())
+	id, err := audit.LoadIdentityForStore(bundleDB, keyDir())
 	if err != nil {
 		return err
 	}

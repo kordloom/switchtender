@@ -325,6 +325,31 @@ webhook <code>/hooks</code> path, and the <code>/relay</code> worker path, is un
 </tr>
 <tr>
 <td>GET</td>
+<td><code>/v1/auth/me</code></td>
+<td>Who the server resolved the caller to be.</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/v1/auth/logout</code></td>
+<td>End the caller's own session, revoking its token.</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/v1/tokens</code></td>
+<td>Mint a token bound to an account. Returns it once.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/v1/tokens</code></td>
+<td>List tokens without secrets. Admin only.</td>
+</tr>
+<tr>
+<td>DELETE</td>
+<td><code>/v1/tokens/{id}</code></td>
+<td>Revoke a token everywhere at once. Admin only.</td>
+</tr>
+<tr>
+<td>GET</td>
 <td><code>/auth/oidc/login</code></td>
 <td>Start the OpenID Connect sign-in handshake.</td>
 </tr>
@@ -850,6 +875,11 @@ presents the worker bearer token.</p>
 </tr>
 <tr>
 <td>POST</td>
+<td><code>/relay/v1/runs/{id}/propose-apply</code></td>
+<td>Report a plan's findings so the control node holds its apply.</td>
+</tr>
+<tr>
+<td>POST</td>
 <td><code>/relay/v1/runs/{id}/host-summary</code></td>
 <td>Save the run's per-host summaries.</td>
 </tr>
@@ -865,6 +895,15 @@ presents the worker bearer token.</p>
 </tr>
 </tbody>
 </table>
+<p>Each report call is bounded twice. It presents the per-claim capability the claim response issued, so it
+can only write to the run this worker holds, and one call carries at most a few thousand items, so a
+worker cannot force an unbounded decode on the control node; the worker sends a wide run's evidence in
+several calls rather than losing it to that cap. Host facts are bounded further: a worker may write
+facts only for hosts its run has already reported results for, so nothing can be recorded about a
+machine no run claims to have touched.</p>
+<p>What that does and does not give you: a worker authors its own results, so a worker you do not trust can
+still describe its own run untruthfully. What it cannot do is reach past that run into the recorded state
+of the rest of the fleet. Give a queue only to workers you would let touch the hosts that queue targets.</p>
 
 		</main>
 	</div>

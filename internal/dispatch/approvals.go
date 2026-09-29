@@ -31,6 +31,15 @@ func (d *Dispatcher) Approve(ctx context.Context, id, by, byType string) (*run.R
 		return nil, fmt.Errorf("%w: this run was canceled while it waited for a decision",
 			ErrNotPendingApproval)
 	}
+	// Separation of duties, checked before anything is recorded: a refused decision must leave no
+	// decision entry behind, or the chain would show an approval for a run that stayed held.
+	//
+	// Only an approval is checked. Rejecting a change you asked for needs no second person, and
+	// refusing it would leave a requester unable to withdraw their own request.
+	if r.RequireDistinctApprover && by != "" && by == r.Actor {
+		return nil, fmt.Errorf("%w: %q asked for this run, and the rule that held it requires a "+
+			"different person to approve it", ErrSelfApproval, by)
+	}
 	// The decision entry is appended before the run is released, fail-closed, matching the gate's
 	// rule that a change which cannot be recorded is refused. If the release below then fails, the
 	// chain truthfully holds a decision for a run that stayed held, and a second attempt appends a

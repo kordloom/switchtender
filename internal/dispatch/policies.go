@@ -45,6 +45,7 @@ func (d *Dispatcher) requiresApproval(ctx context.Context, r *run.Run) (bool, er
 	// actually stopped the change, and would answer with nothing at all once it is deleted.
 	if p := policy.Requiring(policies, r); p != nil {
 		r.HeldByPolicy = p.Label()
+		r.RequireDistinctApprover = p.RequireDistinctApprover
 		return true, nil
 	}
 	return false, nil
@@ -66,6 +67,9 @@ func recordHold(r *run.Run, reason string) {
 // exactly as requiresApproval does: a gate that cannot be evaluated is not a gate that passed.
 func (d *Dispatcher) denied(ctx context.Context, r *run.Run) error {
 	if d.policies == nil {
+		// An install with no policy store has no rules, and the run says so: recording nothing would
+		// leave a run under no rules indistinguishable from one whose rules were never captured.
+		stampPolicySet(r, nil)
 		return nil
 	}
 	policies, err := d.policies.List(ctx)
@@ -74,10 +78,20 @@ func (d *Dispatcher) denied(ctx context.Context, r *run.Run) error {
 		return fmt.Errorf("%w: approval policies could not be read, so the run is refused "+
 			"rather than run past a gate that could not be checked: %w", ErrPolicyUnavailable, err)
 	}
+	// The list just read is the set in force for this submission, so it is recorded here rather than
+	// read again. Every submit path passes through this check, including a run born held, which is what
+	// makes the record complete rather than a property of the gated ones.
+	stampPolicySet(r, policies)
 	if p := policy.Denying(policies, r); p != nil {
 		return fmt.Errorf("%w: policy %q refuses this submission", ErrPolicyDenied, p.Label())
 	}
 	return nil
+}
+
+// stampPolicySet records the rule set in force on the run.
+func stampPolicySet(r *run.Run, policies []*policy.Policy) {
+	set := policy.InForce(policies)
+	r.PolicySet = &run.PolicySet{Digest: set.Digest, Count: set.Count, Rules: set.Rules}
 }
 
 // pipelineDenied refuses a pipeline when a deny policy matches the parent or any of its steps, for
@@ -124,6 +138,7 @@ func (d *Dispatcher) pipelineRequiresApproval(ctx context.Context, parent *run.R
 	}
 	if p := policy.Requiring(policies, parent); p != nil {
 		parent.HeldByPolicy = p.Label()
+		parent.RequireDistinctApprover = p.RequireDistinctApprover
 		return true, nil
 	}
 	for i, step := range steps {
@@ -131,6 +146,7 @@ func (d *Dispatcher) pipelineRequiresApproval(ctx context.Context, parent *run.R
 		// is held, so the evidence has to say which step's rule stopped it.
 		if p := policy.Requiring(policies, stepRun(parent, step, i, 0, baseStepVars(parent))); p != nil {
 			parent.HeldByPolicy = p.Label()
+			parent.RequireDistinctApprover = p.RequireDistinctApprover
 			return true, nil
 		}
 	}

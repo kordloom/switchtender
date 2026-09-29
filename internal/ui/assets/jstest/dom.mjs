@@ -111,7 +111,14 @@ class STElement {
 		this.parentNode = null;
 		this.childNodes = [];
 		this.attrs = new Map();
-		this.style = {};
+		// Style is a plain bag of properties a test can read, plus the two custom-property methods
+		// real code uses to drive layout variables. Those write into the same bag under their own
+		// name, so a test asserts on style["--topbar-h"] the way it asserts on style.width.
+		this.style = {
+			setProperty: (name, value) => { this.style[name] = String(value); },
+			getPropertyValue: (name) => this.style[name] || "",
+			removeProperty: (name) => { delete this.style[name]; },
+		};
 		this.listeners = new Map();
 		// Layout is not simulated, so every geometry read is a plain number a test can overwrite.
 		this.scrollTop = 0;
@@ -120,7 +127,6 @@ class STElement {
 		this.offsetWidth = 0;
 		this.offsetHeight = 0;
 		this.title = "";
-		this.tabIndex = -1;
 		this._classList = null;
 		this._dataset = null;
 	}
@@ -472,6 +478,19 @@ class STElement {
 	// click dispatches a bubbling click, which is how a test presses a control.
 	click() { return this.dispatchEvent(makeEvent("click")); }
 
+	// reset clears the controls inside a form, the way a browser does. Without it a page that
+	// resets its dialog after a successful save threw inside the success path, so a test could not
+	// tell a refused submit from one that worked and then tripped over the harness.
+	reset() {
+		for (const el of this.querySelectorAll("input, textarea, select")) {
+			if (el.type === "checkbox" || el.type === "radio") {
+				el.checked = false;
+				continue;
+			}
+			el.value = "";
+		}
+	}
+
 	// focus and blur are recorded rather than simulated, since nothing here has a focus ring.
 	focus() { if (this.ownerDocument) this.ownerDocument.activeElement = this; }
 	blur() {
@@ -497,6 +516,17 @@ for (const [prop, attr] of Object.entries(STRING_ATTRS)) {
 		set(v) { this.setAttribute(attr, v); },
 	});
 }
+// tabIndex is a number in both directions, and an element with no tabindex attribute reports -1,
+// which is what a real element does and what focus order depends on.
+Object.defineProperty(STElement.prototype, "tabIndex", {
+	configurable: true,
+	get() {
+		const raw = this.attrs.get("tabindex");
+		const n = parseInt(raw, 10);
+		return Number.isNaN(n) ? -1 : n;
+	},
+	set(v) { this.setAttribute("tabindex", String(parseInt(v, 10) || 0)); },
+});
 for (const prop of BOOL_ATTRS) {
 	const attr = prop.toLowerCase();
 	Object.defineProperty(STElement.prototype, prop, {

@@ -104,6 +104,10 @@ the chain receipts and anchors behind them.</p>
 <td>The actor on every entry, with <code>actor_type</code> saying whether a person, an agent, or the system acted and <code>on_behalf_of</code> naming whose authority it used, all committed by the entry hash; the change register lists every change in the period.</td>
 </tr>
 <tr>
+<td>The rules in force are known for every change</td>
+<td>Every run records the approval rule set that was in force when it was submitted: a digest over the set, how many rules it covered, and how each read. That is what lets a review tell &quot;no rule applied to this change&quot; from &quot;there were no rules&quot;, so a gate deleted or loosened shortly before a change is visible afterward rather than leaving the same trace as a change nothing gated. It appears in the run's dossier and in the signed receipt, so a relying party reads it offline.</td>
+</tr>
+<tr>
 <td>The change record is complete and unaltered</td>
 <td>The hash chain: a change that cannot be recorded is refused rather than made, and altering or deleting an entry breaks verification, provable offline from a signed bundle with the open <code>loomseal</code> verifier.</td>
 </tr>
@@ -113,7 +117,7 @@ the chain receipts and anchors behind them.</p>
 </tr>
 <tr>
 <td>Segregation between requester and approver</td>
-<td>Approve and reject are admin-only, so an operator or agent can never release its own change; for machine changes the separation holds by construction. An admin who submits a run can still approve it, so keep admin accounts for people whose changes your process allows to self-approve, and put day-to-day submitters at operator.</td>
+<td>Approve and reject are admin-only, so an operator or agent can never release its own change; for machine changes the separation holds by construction. For admins, set <code>require_distinct_approver</code> on the approval rule and the server refuses a decision made by the person who asked for the change. The requirement is copied onto each run the rule holds, so editing or deleting the rule afterward cannot weaken a decision already pending, and the run's dossier records that it applied.</td>
 </tr>
 </tbody>
 </table>
@@ -145,7 +149,7 @@ the chain receipts and anchors behind them.</p>
 </tr>
 <tr>
 <td>The change log is protected from tampering</td>
-<td>The hash chain, its offline verification, and an RFC 3161 anchor that bounds how much history could vanish unnoticed.</td>
+<td>The hash chain, its offline verification, and an RFC 3161 anchor that bounds how much history could vanish unnoticed. <code>switchtender verify</code> reads the anchor's timestamp token and refuses a receipt whose token commits to a different link, so the anchor is the authority's statement rather than another of ours. Which authorities to believe is the relying party's decision: the token travels with the receipt for their own tooling to check against their own trust store.</td>
 </tr>
 </tbody>
 </table>

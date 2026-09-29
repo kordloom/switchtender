@@ -3,6 +3,7 @@ package importer
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/kordloom/switchtender/internal/credential"
@@ -113,6 +114,9 @@ func FromSemaphore(data []byte, now time.Time) (*Plan, error) {
 	for _, proj := range export.Projects {
 		plan.addSemaphoreProject(proj, now)
 	}
+	if err := plan.requireObjects("projects with repositories, inventories, keys, or templates"); err != nil {
+		return nil, err
+	}
 	return plan, nil
 }
 
@@ -208,6 +212,17 @@ func (p *Plan) semaphoreTemplate(tmpl semaphoreTemplate,
 		}
 	}
 	for _, v := range tmpl.SurveyVars {
+		// Semaphore prompts for a secret variable and stores it obscured. A survey field here is plain
+		// text whose answer is kept on the run and injected as an extra var, so importing one would
+		// turn a secret prompt into a value stored in the clear on every run of this template, in its
+		// record, its exports, and the evidence drawn from it. The AWX importer refuses its equivalent
+		// for the same reason; this one silently did the downgrade.
+		if strings.EqualFold(v.Type, "secret") {
+			p.warn("survey variable %q of template %q prompts for a secret and was NOT imported. "+
+				"Store its value as a credential instead: importing it as a survey field would keep "+
+				"the answer in plain text on every run.", v.Name, tmpl.Name)
+			continue
+		}
 		obj.Survey = append(obj.Survey, template.SurveyField{
 			Var: v.Name, Label: v.Title, Type: mapSemaphoreVarType(v.Type),
 			Required: v.Required, Choices: v.Values,

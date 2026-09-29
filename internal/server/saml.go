@@ -103,6 +103,14 @@ func NewSAMLAuth(ctx context.Context, idpMetadataURL, baseURL, certFile, keyFile
 	}
 	metadataURL, _ := url.Parse(base + "/auth/saml/metadata")
 	sigKey := sha256.Sum256(append([]byte("switchtender-saml\x00"), x509.MarshalPKCS1PrivateKey(key)...))
+	// A SAML deployment on plain http cannot complete a sign-in: the assertion arrives as a cross-site
+	// POST, the cookie that binds the round trip has to be SameSite=None to ride it, and no browser
+	// stores a None cookie that is not also Secure. Saying so at startup beats an operator debugging
+	// "sign-in this browser did not start" against a correct server.
+	if !strings.HasPrefix(strings.ToLower(base), "https") {
+		log.Warn("saml: the base URL is not https, so the browser will not store the cookie that " +
+			"binds the sign-in round trip and assertions will be refused: serve over https")
+	}
 	return &SAMLAuth{
 		sp: saml.ServiceProvider{
 			EntityID:    base + "/auth/saml/metadata",
@@ -247,14 +255,32 @@ func (s *SAMLAuth) fail(w http.ResponseWriter, r *http.Request, msg string) {
 }
 
 // setRequestID writes the signed, short-lived cookie carrying the authentication request id.
+//
+// The cookie has to survive a cross-site POST: the identity provider returns its assertion as a form
+// submission from its own origin to /auth/saml/acs. A SameSite=Lax cookie is not sent on that
+// request, so the whole handshake used to fail at the last step, every time, with the server
+// correctly reporting a sign-in this browser did not start. SameSite=None is what a SAML service
+// provider cookie needs, and browsers accept None only on a Secure cookie, so an http deployment
+// keeps Lax rather than writing a cookie no browser will store. The value is signed, scoped to the
+// SAML paths, and lives for minutes, so riding a cross-site request costs nothing: it carries a
+// request id, not a session.
 func (s *SAMLAuth) setRequestID(w http.ResponseWriter, id string) {
 	exp := strconv.FormatInt(time.Now().Add(samlStateTTL).Unix(), 10)
 	payload := id + "|" + exp
 	value := base64.RawURLEncoding.EncodeToString([]byte(payload)) + "." + s.sign([]byte(payload))
 	http.SetCookie(w, &http.Cookie{
 		Name: samlCookie, Value: value, Path: "/auth/saml", HttpOnly: true,
-		Secure: s.secureCookie, SameSite: http.SameSiteLaxMode, MaxAge: int(samlStateTTL.Seconds()),
+		Secure: s.secureCookie, SameSite: s.cookieSameSite(), MaxAge: int(samlStateTTL.Seconds()),
 	})
+}
+
+// cookieSameSite returns None on an https deployment, so the cookie rides the identity provider's
+// cross-site POST, and Lax on http, where a Secure cookie would not be stored at all.
+func (s *SAMLAuth) cookieSameSite() http.SameSite {
+	if s.secureCookie {
+		return http.SameSiteNoneMode
+	}
+	return http.SameSiteLaxMode
 }
 
 // readRequestID verifies the cookie signature and expiry and returns the request id it carries.

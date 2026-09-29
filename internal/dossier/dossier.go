@@ -28,40 +28,43 @@ var templateSource string
 var dossierTemplate = template.Must(template.New("dossier").Parse(templateSource))
 
 // Input is everything the renderer needs, gathered by Collect.
+// The fields carry JSON names because the same collected record is served as data, not only rendered
+// as a page: a program reading a run's evidence, an AI agent above all, needs the record rather than
+// the markup.
 type Input struct {
 	// Run is the run the dossier is about.
-	Run *run.Run
+	Run *run.Run `json:"run"`
 	// Hosts is the run's per-host outcome, derived from its recorded events.
-	Hosts []run.HostSummary
+	Hosts []run.HostSummary `json:"hosts,omitempty"`
 	// Entries are the chain entries that recorded this run: its creation, its approval or
 	// rejection, its cancellation, in chain order.
-	Entries []*audit.Entry
+	Entries []*audit.Entry `json:"entries,omitempty"`
 	// ChainOK reports whether the whole chain verified during collection.
-	ChainOK bool
+	ChainOK bool `json:"chain_ok"`
 	// ChainBrokeAt is the one-based position of the first break when ChainOK is false.
-	ChainBrokeAt int
+	ChainBrokeAt int `json:"chain_broke_at,omitempty"`
 	// ChainCount is how many entries the chain holds.
-	ChainCount int
+	ChainCount int `json:"chain_count"`
 	// Head is the chain head at collection, the receipt the document carries.
-	Head *audit.Entry
+	Head *audit.Entry `json:"head,omitempty"`
 	// Covering are the anchors that still hold against the chain and sit at or after the position
 	// the run was recorded by, each one an independent fixation of history containing the run.
-	Covering []*audit.Anchor
+	Covering []*audit.Anchor `json:"covering_anchors,omitempty"`
 	// AnchorProblems describes each anchor the chain no longer satisfies. A chain can hash-verify
 	// perfectly and still have been rewritten wholesale or lost its tail; this is what catches it.
-	AnchorProblems []string
+	AnchorProblems []string `json:"anchor_problems,omitempty"`
 	// Launch is the chain entry that recorded the request which created this run, resolved by
 	// redeeming the run's receipt against the chain. Nil when the run carries no receipt, as a
 	// seeded or pre-upgrade run does, or when the chain no longer holds it.
-	Launch *audit.Entry
+	Launch *audit.Entry `json:"launch,omitempty"`
 	// ReceiptMissing is true when the run carries a receipt the chain does not hold, which is what
 	// a dropped or rewritten creation entry looks like.
-	ReceiptMissing bool
+	ReceiptMissing bool `json:"receipt_missing,omitempty"`
 	// RecordedBy is the highest chain position reached by the run's own time, the position an
 	// anchor must reach to fix history that already held the run.
-	RecordedBy int64
+	RecordedBy int64 `json:"recorded_by,omitempty"`
 	// GeneratedAt is when the dossier was collected.
-	GeneratedAt time.Time
+	GeneratedAt time.Time `json:"generated_at"`
 }
 
 // Collect gathers a run's evidence from the stores in one streaming pass over the chain. It
@@ -281,8 +284,12 @@ type anchorRow struct {
 	At string
 	// Ref locates it.
 	Ref string
-	// Offline is true when the anchor embeds its own proof.
+	// Offline is true when the anchor embeds a timestamp token that was read here and found to fix
+	// this anchor's link.
 	Offline bool
+	// ProofProblem says why an embedded token does not fix the link, empty when there is none or when
+	// it verified.
+	ProofProblem string
 }
 
 // hostRow is one host outcome as rendered.
@@ -389,10 +396,20 @@ func Render(in *Input) ([]byte, error) {
 		})
 	}
 	for _, a := range in.Covering {
-		v.Anchors = append(v.Anchors, anchorRow{
+		// An embedded token is read here rather than described. The row used to say an anchor
+		// "verifies offline" on the strength of a proof string being present, which is a claim about
+		// the authority's statement made without looking at it.
+		row := anchorRow{
 			Type: a.Type, Seq: a.Seq, At: a.At.UTC().Format(time.RFC3339),
 			Ref: a.Ref, Offline: a.Proof != "",
-		})
+		}
+		if a.Proof != "" {
+			if err := audit.VerifyTimestampProof(a.Link, a.Proof); err != nil {
+				row.Offline = false
+				row.ProofProblem = err.Error()
+			}
+		}
+		v.Anchors = append(v.Anchors, row)
 	}
 	v.AnchorProblems = in.AnchorProblems
 	switch {
@@ -490,6 +507,28 @@ func runMeta(r *run.Run) []metaRow {
 	add("Queue", r.Queue)
 	add("Image", r.Image)
 	add("Held by", r.HeldByPolicy)
+	// Separation of duties is the control a change-management review asks about first, so the evidence
+	// says whether it applied to this run rather than leaving the reader to infer it from the names.
+	if r.RequireDistinctApprover {
+		add("Approver rule", "a different person than the requester was required")
+	}
+	// A pinned run could only execute one revision, which is what ties an approved plan to the apply
+	// that followed it. The evidence says so rather than leaving a reader to compare two commits and
+	// hope the match was enforced.
+	if r.PinnedCommit != "" {
+		add("Pinned to commit", r.PinnedCommit)
+	}
+	// What the rules were, not only which one fired. A run nothing stopped has no rule to name, and
+	// without this the record could not tell that from an install that had no rules at the time.
+	if set := r.PolicySet; set != nil {
+		if set.Count == 0 {
+			add("Rules in force", "none: no approval rule existed when this run was submitted ("+
+				set.Digest[:min(12, len(set.Digest))]+")")
+		} else {
+			add("Rules in force", fmt.Sprintf("%d (%s): %s", set.Count,
+				set.Digest[:min(12, len(set.Digest))], strings.Join(set.Rules, "; ")))
+		}
+	}
 	if r.Risk != nil {
 		add("Risk", strings.TrimSpace(r.Risk.Level+" "+strings.Join(r.Risk.Reasons, "; ")))
 	}

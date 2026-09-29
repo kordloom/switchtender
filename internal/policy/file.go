@@ -53,6 +53,8 @@ type filePolicy struct {
 	MaxDestroy *int `yaml:"max_destroy,omitempty" json:"max_destroy,omitempty"`
 	// ActorKind matches who fired the run: agent or human. Omit to match any actor.
 	ActorKind string `yaml:"actor_kind,omitempty" json:"actor_kind,omitempty"`
+	// RequireDistinctApprover refuses a decision by the person who asked for the change.
+	RequireDistinctApprover bool `yaml:"require_distinct_approver,omitempty" json:"require_distinct_approver,omitempty"`
 	// Actor matches the exact requesting actor recorded on the run. Omit to match any.
 	Actor string `yaml:"actor,omitempty" json:"actor,omitempty"`
 	// MinRisk matches only runs assessed at least this risky: low, medium, or high. Omit for any.
@@ -152,18 +154,19 @@ func (s *FileStore) load() ([]*Policy, error) {
 		p := &Policy{
 			// The id is derived from the name so it is stable across reloads and across installs
 			// reading the same file, and so an approval recorded against a policy still resolves.
-			ID:              filePolicyID(fp.Name),
-			Name:            fp.Name,
-			Tool:            fp.Tool,
-			CommandContains: fp.CommandContains,
-			InventoryID:     fp.InventoryID,
-			ExcludeDryRun:   fp.ExcludeDryRun,
-			MaxDestroy:      maxDestroy,
-			ActorKind:       fp.ActorKind,
-			Actor:           fp.Actor,
-			MinRisk:         fp.MinRisk,
-			Effect:          fp.Effect,
-			CreatedAt:       info.ModTime().UTC(),
+			ID:                      filePolicyID(fp.Name),
+			Name:                    fp.Name,
+			Tool:                    fp.Tool,
+			CommandContains:         fp.CommandContains,
+			InventoryID:             fp.InventoryID,
+			ExcludeDryRun:           fp.ExcludeDryRun,
+			MaxDestroy:              maxDestroy,
+			ActorKind:               fp.ActorKind,
+			RequireDistinctApprover: fp.RequireDistinctApprover,
+			Actor:                   fp.Actor,
+			MinRisk:                 fp.MinRisk,
+			Effect:                  fp.Effect,
+			CreatedAt:               info.ModTime().UTC(),
 		}
 		if err := p.Validate(); err != nil {
 			return nil, fmt.Errorf("policy file %s: policy %q: %w", s.path, fp.Name, err)

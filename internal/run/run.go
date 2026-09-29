@@ -213,6 +213,18 @@ type Run struct {
 	ProjectID string `json:"project_id,omitempty"`
 	// CommitSHA is the exact commit the run executed, stamped after the project sync.
 	CommitSHA string `json:"commit_sha,omitempty"`
+	// PolicySet describes the approval rules that were in force when this run was submitted. It is
+	// recorded on every run, gated or not, because the boundary could otherwise only prove what it
+	// stopped: for a run nothing stopped, "no rule applied" and "there were no rules" left the same
+	// trace, so a gate deleted shortly before a change was invisible afterward. Nil on a run submitted
+	// before this was recorded.
+	PolicySet *PolicySet `json:"policy_set,omitempty"`
+	// PinnedCommit is the commit this run is only allowed to execute. It is set when a run stands in
+	// for work already judged at a known revision, which today means the apply a plan gate proposes:
+	// the approver read that plan, so releasing an apply of different code would be a substitution
+	// nothing in the record shows. The executor compares it against what the project sync produced and
+	// refuses a mismatch. Empty on an ordinary run, which runs whatever the branch holds.
+	PinnedCommit string `json:"pinned_commit,omitempty"`
 	// InventoryID names a stored inventory materialized for this run instead of a file path.
 	InventoryID string `json:"inventory_id,omitempty"`
 	// OrgID is the owning organization stamped from the submitting actor at creation. It is what
@@ -239,6 +251,11 @@ type Run struct {
 	// renamed or deleted long before anyone reads the evidence, and "which rule stopped this
 	// change" is the question a change-management review asks. Empty when nothing held the run.
 	HeldByPolicy string `json:"held_by_policy,omitempty"`
+	// RequireDistinctApprover refuses a decision on this run by the person who asked for it. It is
+	// copied from the rule that held the run, at the moment of the hold, rather than read from the
+	// rule when the decision is made: an admin who edits or deletes the rule afterward must not be
+	// able to weaken a decision already pending, and an admin is who this control constrains.
+	RequireDistinctApprover bool `json:"require_distinct_approver,omitempty"`
 	// AuditReceipt is the seq:link of the chain entry that recorded the request which created this
 	// run. The entry is written before the handler runs, at a path naming the template or the
 	// collection rather than the run it goes on to create, so this is the only thing that ties a
@@ -262,6 +279,12 @@ type Run struct {
 	SourceID string `json:"source_id,omitempty"`
 	// Actor is the authenticated user who fired the run, when the server knows one.
 	Actor string `json:"actor,omitempty"`
+	// ActorUserID is the account behind the credential that fired the run, empty for an unscoped
+	// command-line token or an unattributed source. Actor is the credential's name, which differs
+	// between a token and a browser session for the same person, so any rule about who a person is
+	// compares this: separation of duties keyed on the name alone let the same person submit with a
+	// token and approve in a browser.
+	ActorUserID string `json:"actor_user_id,omitempty"`
 	// ActorType is how the requesting actor authenticated, in the audit chain's vocabulary: agent
 	// for an AI agent's token, session for a signed-in person, token for an owner-held API token,
 	// cli for the command line, webhook for a trigger. Empty when the server does not know. It is
@@ -535,6 +558,32 @@ func WithSource(source, sourceID string) SubmitOption {
 // WithActor stamps the authenticated user who fired the run.
 func WithActor(actor string) SubmitOption {
 	return func(r *Run) { r.Actor = actor }
+}
+
+// PolicySet is the approval rule set in force at one moment, as recorded on a run. The rules are
+// rendered rather than referenced so the evidence reads without asking any server what a digest meant.
+type PolicySet struct {
+	// Digest is the hex SHA-256 over the canonical form of every rule in the set, order-independent.
+	Digest string `json:"digest"`
+	// Count is how many rules the digest covers.
+	Count int `json:"count"`
+	// Rules names each rule and what it does, sorted, capped by the producer.
+	Rules []string `json:"rules,omitempty"`
+}
+
+// WithPolicySet records the rule set in force at submit. See Run.PolicySet.
+func WithPolicySet(digest string, count int, rules []string) SubmitOption {
+	return func(r *Run) { r.PolicySet = &PolicySet{Digest: digest, Count: count, Rules: rules} }
+}
+
+// WithPinnedCommit binds the run to one commit, refusing to execute any other. See Run.PinnedCommit.
+func WithPinnedCommit(sha string) SubmitOption {
+	return func(r *Run) { r.PinnedCommit = sha }
+}
+
+// WithActorAccount records the account behind the credential that fired the run. See Run.ActorUserID.
+func WithActorAccount(userID string) SubmitOption {
+	return func(r *Run) { r.ActorUserID = userID }
 }
 
 // WithActorType stamps how the requesting actor authenticated, so a policy can tell an agent's

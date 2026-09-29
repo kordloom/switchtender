@@ -51,6 +51,16 @@ held run is admin-only, so an operator-bound agent can never approve its own wor
 
        switchtender token new --user agent-bot --name agent-bot --agent --ttl 720h
 
+   Or from the interface, on the Users page under API tokens, or over the API when you have no shell
+   on the server:
+
+       curl -X POST https://switchtender.example.com/v1/tokens \
+         -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
+         -d '{"name":"agent-bot","username":"agent-bot","kind":"agent","ttl_hours":720}'
+
+   The API refuses a token bound to no account, so a credential minted over the network always names
+   the account it acts as and can never exceed that account's role.
+
    The `--agent` flag is what makes the record precise. It marks the token as held by an agent, so
    every chain entry it produces carries `actor_type: agent` alongside its label and the human it
    acts for, set when the token is minted rather than guessed from how a request looks. It also caps
@@ -97,6 +107,9 @@ held run is admin-only, so an operator-bound agent can never approve its own wor
    `min_risk` matches on the run's assessed risk grade, so "destructive operations need a person"
    is one line. `effect: deny` refuses the submission outright; the refused request is still on the
    chain, because the gate records every mutation before anything acts on it.
+   `require_distinct_approver: true` refuses a decision made by whoever asked for the change, which
+   matters for admins, since an agent or operator can never approve anything. The requirement is
+   copied onto each run the rule holds, so editing the rule later cannot weaken a pending decision.
 
 4. Pin the policies by starting the server with `serve --policy-file policies.yml`. The file is the
    source of truth and the API refuses policy writes, so even an admin API caller cannot rewrite
@@ -125,6 +138,21 @@ however it is prompted, and no credential, account, token, grant, or policy tool
 its own reach. The command refuses to start on an admin token. Ad-hoc runs, where the agent composes
 a command instead of launching a template a person defined, stay off unless you pass `--allow-adhoc`,
 and the approval policy still covers them when they are on.
+
+The narrowness holds inside a template launch too, which is where it would otherwise leak:
+
+- An agent cannot supply extra vars. Extra vars sit at Ansible's highest precedence, above everything
+  the template and the inventory set, so an agent that could send them could rewrite what a vetted
+  template does while the audit trail recorded the template's name. Survey answers are the supported
+  channel: the operator declares which fields a caller may fill, and the template says so.
+- A `limit` can only narrow. A template that pins its own target refuses a different one, and a
+  pattern meaning every host is refused outright, because the risk grade approval policies key on is
+  computed partly from how wide a run reaches.
+- An argument the tool does not define is refused rather than dropped. A model writing `check_mode`
+  instead of `dry_run` is told so, rather than having the flag silently ignored and a real change
+  reported back as a preview.
+- An agent can read the evidence and the signed receipt for runs it proposed. Another actor's
+  evidence needs an admin.
 
 ## What the record shows
 

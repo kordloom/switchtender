@@ -15,6 +15,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kordloom/switchtender/internal/auth"
+	"github.com/kordloom/switchtender/internal/dispatch"
 	"github.com/kordloom/switchtender/internal/event"
 	"github.com/kordloom/switchtender/internal/outcome"
 	"github.com/kordloom/switchtender/internal/policy"
@@ -91,6 +92,7 @@ func NewHandler(store run.Store, pools *Pools, log *zap.Logger,
 	mux.HandleFunc("POST /relay/v1/runs/{id}/save", s.save)
 	mux.HandleFunc("POST /relay/v1/runs/{id}/log", s.appendLog)
 	mux.HandleFunc("POST /relay/v1/runs/{id}/events", s.appendEvents)
+	mux.HandleFunc("POST /relay/v1/runs/{id}/propose-apply", s.proposeApply)
 	mux.HandleFunc("POST /relay/v1/runs/{id}/host-summary", s.saveHostSummary)
 	mux.HandleFunc("POST /relay/v1/runs/{id}/host-facts", s.saveHostFacts)
 	mux.HandleFunc("POST /relay/v1/runs/{id}/task-summary", s.saveTaskSummary)
@@ -636,11 +638,119 @@ func (s *relayServer) saveHostFacts(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid host facts body")
 		return
 	}
+	// Facts are bounded by the hosts this run has recorded results for. The table is keyed on the host
+	// alone, so without this a worker leased one run could replace the recorded facts for any machine in
+	// the fleet, or invent machines outright, and the control node would store it as gathered evidence.
+	//
+	// A worker also authors those results, so this does not make one trustworthy; it makes a fabrication
+	// attributable. To write facts about a machine, a worker must first say on its own run's record that
+	// the run touched it, which shows up in that run's dossier and on the fleet page.
+	if bad := s.unrecordedHost(r.Context(), r.PathValue("id"), factHosts(facts)); bad != "" {
+		writeErr(w, http.StatusForbidden, "this run has recorded no result for host "+bad+
+			", so facts for it are refused: report the run's per-host results first")
+		return
+	}
 	if err := s.store.SaveHostFacts(r.Context(), r.PathValue("id"), facts); err != nil {
 		s.internal(w, "save host facts", err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// factHosts lists the hosts a facts body names, in order.
+func factHosts(facts []run.HostFacts) []string {
+	out := make([]string, 0, len(facts))
+	for _, f := range facts {
+		out = append(out, f.Host)
+	}
+	return out
+}
+
+// unrecordedHost returns the first host in want that the run has no recorded result for, or empty when
+// every one of them is accounted for. A host named as empty is skipped, since the store drops those
+// anyway.
+//
+// The comparison is against the run's stored per-host summaries, which the executor writes before it
+// writes facts, so an ordinary report passes and one arriving out of order is told to send its results
+// first rather than being silently trusted.
+func (s *relayServer) unrecordedHost(ctx context.Context, runID string, want []string) string {
+	need := make(map[string]bool, len(want))
+	for _, h := range want {
+		if h != "" {
+			need[h] = true
+		}
+	}
+	if len(need) == 0 {
+		return ""
+	}
+	summaries, err := s.store.RunHostSummaries(ctx, runID)
+	if err != nil {
+		// A store that cannot answer is not a store that said yes.
+		s.log.Error("relay: read host summaries: " + err.Error())
+		return want[0]
+	}
+	for _, hs := range summaries {
+		delete(need, hs.Host)
+	}
+	for _, h := range want {
+		if need[h] {
+			return h
+		}
+	}
+	return ""
+}
+
+// proposeApply creates the apply a worker's plan gated, from the plan run the control node holds.
+//
+// A worker has no path to create a run, on purpose, so the plan-content gate could not complete on one:
+// the proposal failed with a 404 and the plan failed with it, leaving a gated terraform apply neither
+// held nor run. The worker reports what its plan found and nothing else. Every field of the apply, its
+// command, target, credentials, image, organization, requester, and the commit it is pinned to, comes
+// from the stored plan, so a worker cannot use this to propose an apply of something it was not asked
+// to plan.
+func (s *relayServer) proposeApply(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		// Destroys is how many resources the plan said it would destroy.
+		Destroys int `json:"destroys"`
+		// Read reports whether that count came from a summary the parser found.
+		Read bool `json:"read"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid propose body")
+		return
+	}
+	plan := s.servesRun(w, r)
+	if plan == nil {
+		return
+	}
+	if !leaseHeld(plan, r) {
+		writeErr(w, http.StatusForbidden, "the run's lease was not presented or did not match")
+		return
+	}
+	// The policies are read here rather than taken from the worker, so the rule that decides the hold is
+	// the control node's. A store that cannot answer holds the apply instead of queueing it, the same
+	// fail-closed rule the in-process gate follows: a gate that could not be evaluated has not passed.
+	var policies []*policy.Policy
+	read := body.Read
+	if s.policies == nil {
+		read = false
+	} else {
+		list, err := s.policies.List(r.Context())
+		if err != nil {
+			s.log.Error("relay: list policies: " + err.Error())
+			read = false
+		} else {
+			policies = list
+		}
+	}
+	proposal, err := dispatch.ProposeApplyFor(r.Context(), s.store, policies, plan, body.Destroys, read)
+	if err != nil {
+		s.internal(w, "propose apply", err)
+		return
+	}
+	s.record(r.Context(), poolFrom(r.Context()), plan.ClaimedBy,
+		"/relay/proposed/"+plan.ID+"/"+proposal.ID)
+	s.writeJSONStatus(w, http.StatusCreated, proposal)
 }
 
 // saveTaskSummary replaces the run's per-task summaries with those in the body.
@@ -666,13 +776,19 @@ func (s *relayServer) saveTaskSummary(w http.ResponseWriter, r *http.Request) {
 
 // writeJSON writes v as a 200 JSON response.
 func (s *relayServer) writeJSON(w http.ResponseWriter, v any) {
+	s.writeJSONStatus(w, http.StatusOK, v)
+}
+
+// writeJSONStatus writes v as a JSON response with the given status, for the one call that creates
+// something and answers 201.
+func (s *relayServer) writeJSONStatus(w http.ResponseWriter, status int, v any) {
 	body, err := json.Marshal(v)
 	if err != nil {
 		s.internal(w, "marshal response", err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
+	w.WriteHeader(status)
 	if _, err := w.Write(body); err != nil {
 		s.log.Error("relay: write response: " + err.Error())
 	}

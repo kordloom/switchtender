@@ -710,6 +710,16 @@ func projectCacheDir() string {
 	return filepath.Join(base, "switchtender", "projects")
 }
 
+// producerInstallID returns the install id an anchor should record, empty when this install has no
+// identity. An anchor records it so a later check can tell a chain read under a different identity, the
+// shape a restore without its key file takes, from a chain that was rewritten.
+func producerInstallID(id *audit.Identity) string {
+	if id == nil {
+		return ""
+	}
+	return id.InstallID
+}
+
 // identityDir returns the directory holding the producer signing identity for a database target.
 // serve, which signs the bundles it serves, and the bundle command, which signs the bundle it
 // emits, both derive it here so one install mints a single key and every tool reads that same key. A
@@ -757,6 +767,15 @@ func isLoopbackAddr(addr string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
+// enforcedAuthOption turns external auth into the server option that keeps the gate enforcing, or a
+// no-op when there is none, so the call site reads as one decision.
+func enforcedAuthOption(externalAuth bool) server.Option {
+	if !externalAuth {
+		return func(*server.Server) {}
+	}
+	return server.WithEnforcedAuth()
+}
+
 // tokenCountGuard decides whether the server may start given the API token count and reports whether
 // the caller should warn that the API is unauthenticated.
 //
@@ -774,7 +793,12 @@ func tokenCountGuard(count int, countErr error, readOnly, externalAuth, loopback
 	if count > 0 {
 		return false, nil
 	}
-	if !readOnly && !externalAuth && !loopback {
+	// An install with external auth enforces from the first request, so there is nothing
+	// unauthenticated to warn about even with an empty token table.
+	if externalAuth {
+		return false, nil
+	}
+	if !readOnly && !loopback {
 		return false, fmt.Errorf("refusing to serve an unauthenticated API on %s: no tokens and no "+
 			"SSO configured. Create a token with 'switchtender token new', configure SSO, "+
 			"bind a loopback address, or pass --read-only", addr)
@@ -813,7 +837,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	// it is not fatal: the server still runs and still records the audit chain, it just cannot
 	// attribute a bundle, which is better than refusing to start over an export feature.
 	var producer *audit.Identity
-	if id, err := audit.LoadIdentity(identityDir(serveDB)); err != nil {
+	if id, err := audit.LoadIdentityForStore(serveDB, identityDir(serveDB)); err != nil {
 		log.Warn("producer identity unavailable, bundles cannot be attributed: " + err.Error())
 	} else {
 		producer = &id
@@ -912,7 +936,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 					ctx, cancel := context.WithTimeout(ctx, anchorTimeout)
 					defer cancel()
 					a, err := audit.NewAnchor(ctx, client, audit.AnchorRFC3161, serveAnchorTSAURL,
-						audit.AnchorShapeLinear, b.Seq, b.Hash, time.Now())
+						audit.AnchorShapeLinear, producerInstallID(producer), b.Seq, b.Hash, time.Now())
 					if err != nil {
 						return err
 					}
@@ -1099,7 +1123,11 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		server.WithLDAP(ldapAuth),
 		server.WithJWT(jwtAuth),
 		server.WithAI(aiProvider),
-		server.WithDocs(docsFS))
+		server.WithDocs(docsFS),
+		// An install whose way in is single sign-on authenticates from the first request. Its
+		// token and account tables are empty until somebody signs in, and deriving enforcement
+		// from them served the whole API to anonymous callers as admin in the meantime.
+		enforcedAuthOption(externalAuthConfigured()))
 	httpServer := &http.Server{
 		Addr:              serveAddr,
 		Handler:           srv.Handler(),

@@ -509,3 +509,106 @@ func TestStoreMigratesProvenance(t *testing.T) {
 		t.Errorf("ListPage(label) = %d runs, err %v, want 1 run", len(labeled), err)
 	}
 }
+
+// TestDistinctApproverSurvivesTheStore proves the separation-of-duties requirement is durable. It is
+// recorded on the run when the rule holds it, and the run then lives in the database until a person
+// decides on it, which is usually a different process from the one that held it. A field the store
+// drops is a control that works in memory and disappears the moment the server is restarted or the
+// decision is made through another replica.
+func TestDistinctApproverSurvivesTheStore(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "switchtender.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	store := db.Runs()
+
+	held := &run.Run{
+		ID: "run_held", Playbook: "site.yml", Status: run.StatusPendingApproval,
+		CreatedAt: time.Now(), Actor: "casey", ActorType: "session",
+		HeldByPolicy: "production apply", RequireDistinctApprover: true,
+	}
+	if err := store.Save(ctx, held); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	got, err := store.Get(ctx, "run_held")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if !got.RequireDistinctApprover {
+		t.Errorf("the stored run lost its distinct-approver requirement, so the requester can " +
+			"approve their own change through any process that reads it back")
+	}
+
+	// A run nothing gated does not acquire the requirement on the way through the store.
+	open := &run.Run{ID: "run_open", Playbook: "site.yml", Status: run.StatusPending,
+		CreatedAt: time.Now(), Actor: "casey"}
+	if err := store.Save(ctx, open); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	got, err = store.Get(ctx, "run_open")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.RequireDistinctApprover {
+		t.Errorf("an ungated run came back requiring a distinct approver")
+	}
+}
+
+// TestPinnedCommitSurvivesTheStore proves the plan gate's guarantee is durable. An apply proposed from
+// an approved plan waits in the database, often for hours, and is executed by whichever process claims
+// it. A pin the store drops is a guarantee that holds until the moment it matters.
+func TestPinnedCommitSurvivesTheStore(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	db, err := sqlitestore.Open(filepath.Join(t.TempDir(), "switchtender.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	store := db.Runs()
+
+	apply := &run.Run{
+		ID: "run_apply", Status: run.StatusPendingApproval, CreatedAt: time.Now(),
+		Tool: "terraform", Command: "infra/prod", ProposedFrom: "run_plan",
+		PinnedCommit: "abc123def456", Actor: "casey", ActorType: "session",
+		ActorUserID: "user_casey",
+		PolicySet: &run.PolicySet{
+			Digest: "d1e2f3a4b5c6", Count: 1, Rules: []string{"prod apply: requires approval"},
+		},
+	}
+	if err := store.Save(ctx, apply); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	got, err := store.Get(ctx, "run_apply")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.PinnedCommit != "abc123def456" {
+		t.Errorf("stored PinnedCommit = %q, want the commit the approver read: the apply would run "+
+			"whatever the branch holds when it is released", got.PinnedCommit)
+	}
+	// The rule set in force is evidence read long after the submit, by a process that was not there for
+	// it. A set the store drops leaves the same gap it was added to close.
+	if got.PolicySet == nil {
+		t.Fatal("the stored run lost the rule set in force at submit, so the evidence cannot say " +
+			"whether a rule should have stopped it")
+	}
+	if got.PolicySet.Digest != apply.PolicySet.Digest || got.PolicySet.Count != 1 {
+		t.Errorf("stored rule set = %+v, want the one recorded at submit", got.PolicySet)
+	}
+	if len(got.PolicySet.Rules) != 1 || got.PolicySet.Rules[0] != "prod apply: requires approval" {
+		t.Errorf("stored rules = %v, want them readable without asking the server", got.PolicySet.Rules)
+	}
+	// The account behind the requester, which is what separation of duties compares: the credential's
+	// name differs between a person's token and their browser session, so a store that keeps only the
+	// name lets the same person approve their own change from the other credential.
+	if got.ActorUserID != "user_casey" {
+		t.Errorf("stored actor account = %q, want user_casey", got.ActorUserID)
+	}
+	if got.Actor != "casey" || got.ActorType != "session" {
+		t.Errorf("stored actor = %q/%q, want casey/session", got.Actor, got.ActorType)
+	}
+}

@@ -55,7 +55,7 @@ func runAuditRunDossier(cmd *cobra.Command, args []string) error {
 
 	// The install identity binds the tree profile's leaves, so a tree anchor cannot be checked
 	// without it.
-	id, err := audit.LoadIdentity(identityDir(dossierDB))
+	id, err := audit.LoadIdentityForStore(dossierDB, identityDir(dossierDB))
 	if err != nil {
 		return err
 	}

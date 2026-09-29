@@ -102,11 +102,15 @@ func runAuditAnchor(cmd *cobra.Command, _ []string) error {
 	// prefix of the log there is now".
 	shape := audit.AnchorShapeLinear
 	anchorSeq, anchorLink := chain[len(chain)-1].Seq, chain[len(chain)-1].Hash
+	// The identity is read whatever the shape, because every anchor records which install computed the
+	// value it fixes. For a tree anchor that is what makes the root recomputable at all; for a linear
+	// one it says which install's chain the link belongs to, which is the same question asked of a
+	// restored copy.
+	id, ierr := audit.LoadIdentityForStore(anchorDB, identityDir(anchorDB))
+	if ierr != nil {
+		return ierr
+	}
 	if anchorTree {
-		id, ierr := audit.LoadIdentity(identityDir(anchorDB))
-		if ierr != nil {
-			return ierr
-		}
 		size, root, terr := audit.TreeHead(chain, id.InstallID)
 		if terr != nil {
 			return terr
@@ -121,7 +125,7 @@ func runAuditAnchor(cmd *cobra.Command, _ []string) error {
 	ctx, cancel := context.WithTimeout(cmd.Context(), anchorTimeout)
 	defer cancel()
 	a, err := audit.NewAnchor(ctx, &http.Client{Timeout: anchorTimeout},
-		anchorType, ref, shape, anchorSeq, anchorLink, time.Now())
+		anchorType, ref, shape, id.InstallID, anchorSeq, anchorLink, time.Now())
 	if err != nil {
 		return err
 	}

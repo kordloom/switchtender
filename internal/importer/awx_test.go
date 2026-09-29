@@ -160,7 +160,7 @@ func TestFromAWX(t *testing.T) {
 		t.Errorf("schedule template id = %q, want %q", sch.TemplateID, tpl.ID)
 	}
 
-	assertWarns(t, plan.Warnings, "Manual", "needs its secret re-entered", "cannot express",
+	assertWarns(t, plan.Warnings, "Manual", "needs its secret re-entered", "cannot be expressed as cron",
 		"point it at a plugin config file")
 }
 

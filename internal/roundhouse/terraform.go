@@ -3,7 +3,10 @@ package roundhouse
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
+	"io/fs"
 	"os/exec"
 	"path/filepath"
 	"sort"
@@ -97,8 +100,16 @@ func terraformVars(vars map[string]any) []string {
 }
 
 // toolWorkDir resolves a tool's working directory from a base checkout and a subdirectory, rejecting
-// a subdirectory that escapes the base with .. so a run cannot reach outside its project. With no
-// base the subdirectory is used as given, relative to the process working directory.
+// one that escapes the base so a run cannot reach outside its project. With no base the subdirectory
+// is used as given, relative to the process working directory, which is the command-line case where
+// the operator names the directory themselves.
+//
+// Containment is checked against the resolved paths, not the spelling. The lexical check alone was
+// satisfied by a subdirectory whose name is a symlink pointing out of the checkout: the string sits
+// under the base, the directory does not. A project's own repository is enough to place one, so
+// whoever could commit to a repository a template runs could aim terraform at any directory the
+// server can read, and the container path builds its mount from this same value, so the same link
+// mounted it into the container past the blocklist.
 func toolWorkDir(base, sub string) (string, error) {
 	if base == "" {
 		return sub, nil
@@ -108,5 +119,46 @@ func toolWorkDir(base, sub string) (string, error) {
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return "", ErrBadWorkDir
 	}
+	if err := checkResolvedUnder(base, joined); err != nil {
+		return "", err
+	}
 	return joined, nil
+}
+
+// checkResolvedUnder reports whether target, with every symlink along it followed, still sits under
+// base. A target that does not exist yet is judged by its nearest existing ancestor, because a run
+// may legitimately create the directory it works in, and the part of the path that does exist is
+// where a link can be hiding.
+func checkResolvedUnder(base, target string) error {
+	realBase, err := filepath.EvalSymlinks(base)
+	if errors.Is(err, fs.ErrNotExist) {
+		// A base that is not on this filesystem has no links to follow, so the lexical check is all
+		// there is to check. That is the container plan built before a checkout exists, and the
+		// command line naming a directory that will be created.
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrBadWorkDir, err)
+	}
+	probe := target
+	for {
+		resolved, err := filepath.EvalSymlinks(probe)
+		if err == nil {
+			rel, relErr := filepath.Rel(realBase, resolved)
+			if relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+				return ErrBadWorkDir
+			}
+			return nil
+		}
+		if !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("%w: %w", ErrBadWorkDir, err)
+		}
+		parent := filepath.Dir(probe)
+		if parent == probe {
+			// Walked to the filesystem root without finding anything that exists, which cannot be
+			// under the checkout.
+			return ErrBadWorkDir
+		}
+		probe = parent
+	}
 }

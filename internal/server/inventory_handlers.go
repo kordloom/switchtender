@@ -33,8 +33,10 @@ type createInventoryRequest struct {
 	// Queue pins every run that targets this inventory to workers serving the queue, unless the run
 	// or its template names its own. Empty uses the default pool.
 	Queue string `json:"queue,omitempty"`
-	// OrgID names the owning organization. Empty leaves the inventory unowned and global. Optional.
-	OrgID string `json:"org_id,omitempty"`
+	// OrgID names the owning organization. A pointer so an omitted field keeps the stored owner on
+	// an update rather than un-owning the record, and leaves a create unowned. A present empty
+	// string is the explicit "move this out of its organization".
+	OrgID *string `json:"org_id,omitempty"`
 }
 
 // inventorySource validates a request's content source and returns the normalized source and the
@@ -100,12 +102,12 @@ func createInventoryHandler(store inventory.Store, authz *authorizer, sealer *cr
 		}
 		// Putting an inventory in an organization gives every member of it use, and taking it out
 		// takes that away. Both directions are checked, the same as a template.
-		if authz.denyForeignOrg(w, r, log, req.OrgID) {
+		if authz.denyForeignOrg(w, r, log, orgForCreate(req.OrgID)) {
 			return
 		}
 		i := &inventory.Inventory{
 			ID: inventory.NewID(), Name: req.Name, Content: req.Content,
-			CredentialIDs: req.CredentialIDs, Queue: req.Queue, OrgID: req.OrgID, CreatedAt: time.Now(),
+			CredentialIDs: req.CredentialIDs, Queue: req.Queue, OrgID: orgForCreate(req.OrgID), CreatedAt: time.Now(),
 		}
 		if source != credential.SourceLocal {
 			i.ContentSource, i.ContentConfig = source, sealed
@@ -156,15 +158,16 @@ func updateInventoryHandler(store inventory.Store, authz *authorizer, sealer *cr
 		}
 		// Both directions of an organization change are checked: entering one gives every member
 		// use of this inventory, and leaving one takes it away from the members it had.
-		if authz.denyForeignOrg(w, r, log, req.OrgID) {
+		orgID := orgForUpdate(req.OrgID, existing.OrgID)
+		if authz.denyForeignOrg(w, r, log, orgID) {
 			return
 		}
-		if existing.OrgID != req.OrgID && authz.denyForeignOrg(w, r, log, existing.OrgID) {
+		if existing.OrgID != orgID && authz.denyForeignOrg(w, r, log, existing.OrgID) {
 			return
 		}
 		inv := &inventory.Inventory{
 			ID: id, Name: req.Name, Content: req.Content, CredentialIDs: req.CredentialIDs,
-			Queue: req.Queue, OrgID: req.OrgID,
+			Queue: req.Queue, OrgID: orgID,
 		}
 		if source != credential.SourceLocal {
 			inv.ContentSource, inv.ContentConfig = source, sealed

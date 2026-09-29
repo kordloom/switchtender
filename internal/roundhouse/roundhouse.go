@@ -149,17 +149,32 @@ func (f RunnerFunc) Run(ctx context.Context, spec Spec, out io.Writer) (Result, 
 	return f(ctx, spec, out)
 }
 
-// pluginCache materializes the embedded callback plugin to a temp directory once and reuses it.
+// pluginCache materializes the embedded callback plugin to a temp directory and keeps that copy
+// honest.
 type pluginCache struct {
-	// once guards one time materialization of the callback plugin.
+	// once guards one time creation of the directory.
 	once sync.Once
+	// mu serializes the integrity check, so two runs starting at the same moment cannot both be
+	// halfway through rewriting the file.
+	mu sync.Mutex
 	// dir is the temp directory holding the materialized callback plugin.
 	dir string
 	// err records a failure to materialize the callback plugin.
 	err error
 }
 
-// ensure materializes the embedded callback plugin to a temp directory once and returns it.
+// ensure returns the directory holding the callback plugin, creating it on first use and restoring
+// the plugin whenever what is on disk is not what is embedded here.
+//
+// The path is handed to Ansible as ANSIBLE_CALLBACK_PLUGINS, so Ansible imports that file on every
+// Ansible run. A host run executes as the server's own user, the same user that owns this directory,
+// so a playbook, a bash script, or a python step can write to it. Materializing once and trusting the
+// copy forever meant one run could leave code there that every later run on the host then imported,
+// silently and for good. The file mode was never the obstacle, because the uid was the same.
+//
+// Checking before each use does not isolate one run from another, which needs a separate user or a
+// container. It removes the persistent implant, which is the version of this that survives restarts
+// and shows up in no log.
 func (p *pluginCache) ensure() (string, error) {
 	p.once.Do(func() {
 		dir, err := os.MkdirTemp("", "switchtender-plugin-")
@@ -167,13 +182,36 @@ func (p *pluginCache) ensure() (string, error) {
 			p.err = err
 			return
 		}
-		if err := os.WriteFile(filepath.Join(dir, pluginName+".py"), []byte(callbackPlugin), 0o600); err != nil {
-			p.err = err
-			return
-		}
 		p.dir = dir
 	})
-	return p.dir, p.err
+	if p.err != nil {
+		return "", p.err
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	path := filepath.Join(p.dir, pluginName+".py")
+	current, err := os.ReadFile(path)
+	switch {
+	case err == nil && string(current) == callbackPlugin:
+		return p.dir, nil
+	case err == nil:
+		// Something rewrote it. That is either tampering or a broken deploy, and both are worth a line
+		// somebody can find later; the run continues on the restored copy rather than failing, because
+		// refusing to run would hand a denial of service to whoever wrote the file.
+		p.log("roundhouse: the callback plugin on disk did not match the embedded copy and was " +
+			"restored; a process running as this user modified " + path)
+	}
+	if err := os.WriteFile(path, []byte(callbackPlugin), 0o600); err != nil {
+		return "", err
+	}
+	return p.dir, nil
+}
+
+// log writes a line about the plugin copy. It goes to standard error rather than through a logger
+// because the cache is shared by both runners and holds no logger of its own, and this is a line an
+// operator greps for after the fact rather than something a caller handles.
+func (p *pluginCache) log(msg string) {
+	fmt.Fprintln(os.Stderr, msg)
 }
 
 // ansibleRunner runs ansible-playbook as a child process.

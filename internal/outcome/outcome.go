@@ -59,6 +59,11 @@ type Record struct {
 	// DryRun reports the run executed in its tool's no-change mode, so a preview cannot later be
 	// presented as the change itself.
 	DryRun bool `json:"dry_run,omitempty"`
+	// PolicySet is the approval rule set that was in force when this run was submitted: a digest, how
+	// many rules it covers, and how those rules read. Without it the record could show what a gate
+	// stopped and never that nothing should have stopped a run that went straight through, so a rule
+	// deleted shortly beforehand left no trace. Absent on a run submitted before this was recorded.
+	PolicySet *run.PolicySet `json:"policy_set,omitempty"`
 	// Hosts are the per-host outcomes, sorted by host.
 	Hosts []RecordHost `json:"hosts,omitempty"`
 	// Tasks are the per-task durations, sorted by task.
@@ -136,8 +141,8 @@ func Body(ctx context.Context, store run.Store, r *run.Run) ([]byte, error) {
 	out := Record{
 		RunID: r.ID, Status: string(r.Status), ExitCode: r.ExitCode,
 		Tool: r.Tool, Playbook: r.Playbook, Inventory: r.Inventory, Image: r.Image,
-		StartedAt: r.StartedAt, EndedAt: r.EndedAt, LogSHA256: logSHA,
-		SpecDigest: specDigest, CommitSHA: r.CommitSHA, DryRun: r.DryRun,
+		StartedAt: utcOrNil(r.StartedAt), EndedAt: utcOrNil(r.EndedAt), LogSHA256: logSHA,
+		SpecDigest: specDigest, CommitSHA: r.CommitSHA, DryRun: r.DryRun, PolicySet: r.PolicySet,
 	}
 	for _, h := range hosts {
 		out.Hosts = append(out.Hosts, RecordHost{
@@ -152,6 +157,22 @@ func Body(ctx context.Context, store run.Store, r *run.Run) ([]byte, error) {
 	sort.Slice(out.Tasks, func(i, j int) bool { return out.Tasks[i].Task < out.Tasks[j].Task })
 
 	return json.Marshal(out)
+}
+
+// utcOrNil normalizes a timestamp to UTC, keeping nil as nil.
+//
+// The record has to reduce to the same bytes whichever copy of the run it is built from. A run in
+// memory carries the server's local offset, and the store writes and reads every timestamp as UTC,
+// so a record built at commit time and the same record rebuilt from the stored run differed by an
+// offset on every install outside UTC. The digest is over these bytes, so the receipt that discloses
+// the outcome reported it as not matching the chain: the flagship artifact failed to verify
+// everywhere except one time zone, and every test built its timestamps in that zone.
+func utcOrNil(t *time.Time) *time.Time {
+	if t == nil {
+		return nil
+	}
+	u := t.UTC()
+	return &u
 }
 
 // logDigest streams a run's log in order and returns the hex SHA-256 of its bytes. Paging keeps the

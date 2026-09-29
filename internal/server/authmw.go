@@ -40,6 +40,10 @@ type authGate struct {
 	// authz enforces object grants so a manage grant can delegate editing a specific object beyond
 	// the global role. Nil leaves only the global role gate in force.
 	authz *authorizer
+	// alwaysEnforce declares this install authenticates whatever the tables hold, so open mode is
+	// never entered. It is set for an install configured with single sign-on, whose tables are
+	// legitimately empty until the first person signs in.
+	alwaysEnforce bool
 	// mu guards enforced and checkedAt.
 	mu sync.Mutex
 	// enforced caches whether the install is configured and so must authenticate.
@@ -137,12 +141,19 @@ func (g *authGate) wrap(next http.Handler) http.Handler {
 		// whole surface at the door. Capping here, before decide, means the guarantee holds however
 		// the agent reaches the API, not only through the MCP client that also restricts it.
 		actorType := actorTypeToken
-		if tok.IsAgent() {
+		switch {
+		case tok.IsAgent():
 			actorType = actorTypeAgent
 			role = capAgentRole(role)
+		case tok.IsSession():
+			// A person at a browser is a session, not a script. The chain recorded every interactive
+			// change as actor_type "token", which is exactly the distinction the identity stage of the
+			// boundary exists to make, and it made the session indistinguishable from a job's token in
+			// every entry, dossier, and receipt.
+			actorType = actorTypeSession
 		}
 		actor := Actor{UserID: tok.UserID, Role: role, Name: tok.Name, Agent: tok.IsAgent(),
-			Type: actorType}
+			Type: actorType, TokenID: tok.ID}
 		if !g.decide(w, r, actor) {
 			return
 		}
@@ -276,6 +287,10 @@ type Actor struct {
 	// Type is how the caller authenticated, in the audit chain's vocabulary: session, token, or
 	// agent. It is stamped onto submitted runs so policies can tell who is asking.
 	Type string
+	// TokenID identifies the credential that authenticated this request, so a handler can revoke
+	// exactly it. Empty for a sign-in that carries no stored token, such as a bearer JWT verified
+	// against an issuer.
+	TokenID string
 }
 
 // capAgentRole lowers an admin role to operator for an agent, and leaves any lower role unchanged.
@@ -332,6 +347,39 @@ func isSignIn(r *http.Request) bool {
 	p := strings.TrimPrefix(r.URL.Path, "/v1")
 	return p == "/auth/login" || p == "/auth/logout" ||
 		strings.HasPrefix(p, "/auth/oidc/") || strings.HasPrefix(p, "/auth/saml/")
+}
+
+// denyUnlessAdminOrActor refuses a caller who is neither an admin nor the actor recorded on this run,
+// writing the refusal and reporting that the handler should stop. It is what makes a run's evidence
+// readable by whoever asked for that run and by nobody else below admin.
+//
+// An install with authentication off has no actor to compare against and no roles to speak of, so
+// everything is allowed there, exactly as every other check behaves.
+func denyUnlessAdminOrActor(w http.ResponseWriter, r *http.Request, log *zap.Logger, rn *run.Run) bool {
+	actor, ok := actorFrom(r.Context())
+	if !ok {
+		return false
+	}
+	if roleAllows(actor.Role, user.RoleAdmin) {
+		return false
+	}
+	if rn != nil && sameActor(actor, rn) {
+		return false
+	}
+	respondError(w, log, http.StatusForbidden,
+		"reading a run's evidence needs the admin role, or that you are the actor who asked for it")
+	return true
+}
+
+// sameActor reports whether the caller is the actor recorded on the run. The account is compared first
+// and the credential's name only when one side has no account: a person's token and their browser
+// session record different names, so a name comparison alone answers "same person" wrongly in the
+// direction that matters.
+func sameActor(actor Actor, rn *run.Run) bool {
+	if actor.UserID != "" && rn.ActorUserID != "" {
+		return actor.UserID == rn.ActorUserID
+	}
+	return actor.Name != "" && actor.Name == rn.Actor
 }
 
 // unauthenticatedActor names the kind of caller on a path that carries no token.
@@ -449,13 +497,30 @@ func requiredRole(r *http.Request) user.Role {
 	// The audit trail is management data even to read. A run's evidence dossier embeds a slice of
 	// it, the approver identities and chain entries over that run, so it takes the same role as
 	// the trail it quotes rather than the viewer read its path shape suggests.
-	if p == "/audit" || strings.HasPrefix(p, "/audit/") ||
-		(strings.HasPrefix(p, "/runs/") && strings.HasSuffix(p, "/evidence")) {
+	// A signed receipt is drawn from the same trail: it carries the chain entries over that run,
+	// the approver identities that decided it, and, on the contiguous shape, the entries recorded
+	// between them. It takes the trail's role for the same reason the dossier does.
+	if p == "/audit" || strings.HasPrefix(p, "/audit/") {
 		return user.RoleAdmin
+	}
+	// A run's evidence and its signed receipt quote the trail, so they are management data, with one
+	// exception the handlers enforce themselves: the actor who asked for that run may read the evidence
+	// for it. Without that exception the whole point of an accountable machine principal was
+	// unreachable, since the MCP server refuses an admin token by design and so could never call the
+	// evidence tool it advertises. The gate lets an operator through and the handler decides whether
+	// this is their own run; a viewer is stopped here.
+	if strings.HasPrefix(p, "/runs/") &&
+		(strings.HasSuffix(p, "/evidence") || strings.HasSuffix(p, "/receipt")) {
+		return user.RoleOperator
 	}
 	// An account carries a profile of personal data, so listing accounts is management data even
 	// to read. Without this a viewer could read every user's name, email, phone, and notes.
-	if p == "/users" || strings.HasPrefix(p, "/users/") {
+	// Tokens belong here for the same reason and more sharply: the list names every credential that
+	// holds access to this install, which account each acts as, and when each was last used. It
+	// carries no secret, but it is a map of what is worth stealing, and reading it is not a viewer's
+	// business. Without this the GET fallback below would have made it one.
+	if p == "/users" || strings.HasPrefix(p, "/users/") ||
+		p == "/tokens" || strings.HasPrefix(p, "/tokens/") {
 		return user.RoleAdmin
 	}
 	// Grants and approval policies decide who may do what, so they are management data even to
@@ -494,7 +559,10 @@ func requiredRole(r *http.Request) user.Role {
 		return user.RoleViewer
 	}
 	switch {
-	case p == "/auth/check":
+	case p == "/auth/check", p == "/auth/logout":
+		// Ending your own session is not management: it acts on the credential the caller already
+		// holds and on nothing else, so every role may do it. Requiring admin here left a viewer
+		// signed in with no way out.
 		return user.RoleViewer
 	case p == "/runs", p == "/pipelines":
 		return user.RoleOperator
@@ -554,6 +622,14 @@ func (g *authGate) decide(w http.ResponseWriter, r *http.Request, actor Actor) b
 func (g *authGate) allowed(ctx context.Context, actor Actor, r *http.Request) (bool, error) {
 	if roleAllows(actor.Role, requiredRole(r)) {
 		return true, nil
+	}
+	// An agent gets its role and nothing more. The cap lowers an agent to operator so it can never
+	// manage identity, access, or secrets, and the manage-grant path walked straight around it: an
+	// agent token inherited whatever object grants its human held, which let it replace the secret
+	// inside a credential and delete the credential a schedule depended on. Delegation is a person
+	// lending authority to another person; it is not a channel an agent operates through.
+	if actor.Agent {
+		return false, nil
 	}
 	object := delegatedObject(r)
 	if object == "" {
@@ -685,6 +761,12 @@ func (g *authGate) enforcing(ctx context.Context) bool {
 // and authentication applies. An unreadable store counts as configured, so a database problem cannot
 // open the API.
 func (g *authGate) configured(ctx context.Context) bool {
+	// An install told it authenticates does, from the first request, before any table has a row.
+	// Deriving this from the tables alone is what served an SSO install's whole API to anonymous
+	// callers as admin until somebody happened to sign in.
+	if g.alwaysEnforce {
+		return true
+	}
 	n, err := g.tokens.Count(ctx)
 	if err != nil {
 		g.log.Error("server: count tokens: " + err.Error())
@@ -741,6 +823,40 @@ func unauthorized(w http.ResponseWriter) {
 // time it runs, so it only needs to answer.
 func authCheckHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// authLogoutHandler ends the caller's own session by revoking the token that authenticated the
+// request, so the credential stops working everywhere rather than only in the tab that dropped it.
+//
+// A session token lives for thirty days. Before this there was no way to end one at all: signing out
+// could only clear the browser's copy, and anyone who had obtained the token, from a shared machine,
+// a synced profile, or a copied header, kept full use of the account for the rest of that month. A
+// person who suspects they left a session somewhere needs the credential itself invalidated.
+//
+// Only a session is revoked. An API token used to browse belongs to whatever else holds it, a
+// scheduled job most likely, and a browser tab closing must not take that down. The response is the
+// same either way, because from the caller's side the session is over regardless.
+func authLogoutHandler(tokens auth.Store, log *zap.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		actor, ok := actorFrom(r.Context())
+		if !ok {
+			// An install running without authentication has no session to end, and no caller to
+			// identify. Saying so is more honest than reporting a sign out that did nothing.
+			respondError(w, log, http.StatusConflict,
+				"this install runs without authentication, so there is no session to end")
+			return
+		}
+		if actor.Type == actorTypeSession && actor.TokenID != "" && tokens != nil {
+			if err := tokens.Delete(r.Context(), actor.TokenID); err != nil &&
+				!errors.Is(err, auth.ErrNotFound) {
+				log.Error("server: revoke session: " + err.Error())
+				respondError(w, log, http.StatusInternalServerError, "could not end the session")
+				return
+			}
+			log.Info("server: sign-out", zap.String("username", actor.Name))
+		}
 		w.WriteHeader(http.StatusNoContent)
 	}
 }

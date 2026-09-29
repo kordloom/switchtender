@@ -39,9 +39,25 @@
 					<span class="field-hint">Five fields: minute, hour, day of month, month, day of week. Hover the box to read it back.</span>
 					<span id="cron-preview" class="field-hint"></span>
 				</label>
+				<label class="field-label">Timezone
+					<input id="schedule-timezone" class="input" placeholder="UTC" list="tz-list">
+					<datalist id="tz-list"></datalist>
+					<span class="field-hint">The IANA zone the cron is read in, such as America/New_York. Empty means the server's local time.</span>
+				</label>
 				<label class="field-label">Template
 					<select id="schedule-template" class="input"><option value="">Select a template</option></select>
 				</label>
+				<details id="schedule-inline" class="alt-auth">
+					<summary class="muted">Or run something directly, with no template</summary>
+					<label class="field-label">Playbook or command
+						<input id="schedule-playbook" class="input mono" placeholder="site.yml">
+					</label>
+					<label class="field-label">Inventory
+						<input id="schedule-inventory" class="input mono" placeholder="production.ini">
+					</label>
+					<span class="field-hint">An imported crontab or Rundeck job fires one of these rather than a stored template. Leave both empty when a template is selected.</span>
+				</details>
+				<div id="schedule-graph-notice" class="field-hint" hidden></div>
 				<div class="launch-actions">
 					<button type="submit" class="button primary">Save</button>
 					<span id="schedule-status" class="muted"></span>

@@ -19,14 +19,22 @@ func TestImportHandler(t *testing.T) {
 		Body       string
 		WantStatus int
 	}{
-		{ // Test 0: An empty AWX export previews as an empty plan.
-			Target: "/v1/import/awx", Body: "{}", WantStatus: http.StatusOK,
+		{ // Test 0: An export holding nothing this importer reads is refused rather than previewed as
+			// a plan of zeros, which used to read as a migration that had succeeded.
+			Target: "/v1/import/awx", Body: "{}", WantStatus: http.StatusUnprocessableEntity,
 		},
 		{ // Test 1: An unknown format is rejected.
 			Target: "/v1/import/cobol", Body: "{}", WantStatus: http.StatusBadRequest,
 		},
-		{ // Test 2: Applying with no stores enabled is a conflict, not a crash.
-			Target: "/v1/import/awx?apply=true", Body: "{}", WantStatus: http.StatusConflict,
+		{ // Test 2: An apply of a document holding nothing is refused for the same reason, before it
+			// ever reaches the question of which stores are enabled.
+			Target: "/v1/import/awx?apply=true", Body: "{}", WantStatus: http.StatusUnprocessableEntity,
+		},
+		{ // Test 4: A real export with no stores enabled is a conflict, not a crash.
+			Target: "/v1/import/semaphore?apply=true",
+			Body: `{"projects":[{"name":"acme","templates":[{"name":"deploy",` +
+				`"playbook":"site.yml"}]}]}`,
+			WantStatus: http.StatusConflict,
 		},
 		{ // Test 3: Malformed export is rejected.
 			Target: "/v1/import/awx", Body: "{not json", WantStatus: http.StatusBadRequest,

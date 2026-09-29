@@ -17,22 +17,23 @@ type policyStore struct {
 }
 
 // policyColumns lists the policy columns in a stable order for reads and writes.
-const policyColumns = `id, name, tool, command_contains, inventory_id, exclude_dry_run, max_destroy, actor_kind, actor, min_risk, effect, created_at`
+const policyColumns = `id, name, tool, command_contains, inventory_id, exclude_dry_run, max_destroy, actor_kind, actor, min_risk, effect, distinct_approver, created_at`
 
 // Save stores a policy, inserting or replacing by id.
 func (s *policyStore) Save(ctx context.Context, p *policy.Policy) error {
 	const q = `
-INSERT INTO policies (id, name, tool, command_contains, inventory_id, exclude_dry_run, max_destroy, actor_kind, actor, min_risk, effect, created_at)
+INSERT INTO policies (id, name, tool, command_contains, inventory_id, exclude_dry_run, max_destroy, actor_kind, actor, min_risk, effect, distinct_approver, created_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 ON CONFLICT (id) DO UPDATE SET
 	name=EXCLUDED.name, tool=EXCLUDED.tool, command_contains=EXCLUDED.command_contains,
 	inventory_id=EXCLUDED.inventory_id, exclude_dry_run=EXCLUDED.exclude_dry_run,
 	max_destroy=EXCLUDED.max_destroy, actor_kind=EXCLUDED.actor_kind, actor=EXCLUDED.actor,
-	min_risk=EXCLUDED.min_risk, effect=EXCLUDED.effect`
+	min_risk=EXCLUDED.min_risk, effect=EXCLUDED.effect,
+	distinct_approver=EXCLUDED.distinct_approver`
 	_, err := s.db.ExecContext(ctx, q,
 		p.ID, p.Name, p.Tool, p.CommandContains, p.InventoryID,
 		sqlutil.BoolToInt(p.ExcludeDryRun), p.MaxDestroy, p.ActorKind, p.Actor, p.MinRisk,
-		p.Effect, sqlutil.FormatTime(p.CreatedAt))
+		p.Effect, sqlutil.BoolToInt(p.RequireDistinctApprover), sqlutil.FormatTime(p.CreatedAt))
 	if err != nil {
 		return fmt.Errorf("save policy: %w", err)
 	}
@@ -93,15 +94,19 @@ func (s *policyStore) Delete(ctx context.Context, id string) error {
 // scanPolicy reads one policy row.
 func scanPolicy(sc scanner) (*policy.Policy, error) {
 	var (
-		p       policy.Policy
-		dry     int
-		created string
+		p policy.Policy
+		// dry and distinct are the two booleans, stored as integers like every other boolean here.
+		dry      int
+		distinct int
+		created  string
 	)
 	if err := sc.Scan(&p.ID, &p.Name, &p.Tool, &p.CommandContains, &p.InventoryID, &dry,
-		&p.MaxDestroy, &p.ActorKind, &p.Actor, &p.MinRisk, &p.Effect, &created); err != nil {
+		&p.MaxDestroy, &p.ActorKind, &p.Actor, &p.MinRisk, &p.Effect, &distinct,
+		&created); err != nil {
 		return nil, err
 	}
 	p.ExcludeDryRun = dry != 0
+	p.RequireDistinctApprover = distinct != 0
 	at, err := sqlutil.ParseTime(created)
 	if err != nil {
 		return nil, err

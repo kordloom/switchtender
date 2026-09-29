@@ -201,8 +201,11 @@ func newWiringFixture(t *testing.T) *wiringFixture {
 			Status: run.StatusPendingApproval, CreatedAt: time.Now(),
 		},
 		{
+			// The actor is the fixture's own caller, so this is their run in both senses that matter:
+			// the grants reach its objects, and they are the one who asked for it, which is what lets a
+			// non-admin read its evidence.
 			ID: "run_mine", Playbook: "mine.yml", Inventory: "my-hosts",
-			ProjectID: "proj_mine", InventoryID: "inv_mine",
+			ProjectID: "proj_mine", InventoryID: "inv_mine", Actor: "intruder",
 			Status: run.StatusPendingApproval, CreatedAt: time.Now(),
 		},
 		// The objectless runs of B3: an inline script that names no project, inventory, or

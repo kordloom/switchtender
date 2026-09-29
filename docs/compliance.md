@@ -42,9 +42,10 @@ CC8.1 asks that changes are authorized, tested, and tracked before they reach pr
 |---------------------|-----------------------------|
 | Changes are authorized before they take effect | The approval decision on each register row, recorded in the chain; an empty approval policy holds every run for a person, and approve is admin-only so an operator or agent cannot release its own change. |
 | Change activity is tracked and attributable | The actor on every entry, with `actor_type` saying whether a person, an agent, or the system acted and `on_behalf_of` naming whose authority it used, all committed by the entry hash; the change register lists every change in the period. |
+| The rules in force are known for every change | Every run records the approval rule set that was in force when it was submitted: a digest over the set, how many rules it covered, and how each read. That is what lets a review tell "no rule applied to this change" from "there were no rules", so a gate deleted or loosened shortly before a change is visible afterward rather than leaving the same trace as a change nothing gated. It appears in the run's dossier and in the signed receipt, so a relying party reads it offline. |
 | The change record is complete and unaltered | The hash chain: a change that cannot be recorded is refused rather than made, and altering or deleting an entry breaks verification, provable offline from a signed bundle with the open `loomseal` verifier. |
 | A dry run or test preceded the change | A run's dossier records whether it ran in the tool's no-change mode; drift is shown from a dry run before the fix is built. |
-| Segregation between requester and approver | Approve and reject are admin-only, so an operator or agent can never release its own change; for machine changes the separation holds by construction. An admin who submits a run can still approve it, so keep admin accounts for people whose changes your process allows to self-approve, and put day-to-day submitters at operator. |
+| Segregation between requester and approver | Approve and reject are admin-only, so an operator or agent can never release its own change; for machine changes the separation holds by construction. For admins, set `require_distinct_approver` on the approval rule and the server refuses a decision made by the person who asked for the change. The requirement is copied onto each run the rule holds, so editing or deleting the rule afterward cannot weaken a decision already pending, and the run's dossier records that it applied. |
 
 ## ISO/IEC 27001:2022 A.8.32 (change management)
 
@@ -56,7 +57,7 @@ A.8.32 asks that changes to information processing facilities are controlled thr
 | Changes are documented | The change register for the period and the per-change dossier, both self-contained and re-verifiable. |
 | Changes are approved by an appropriate authority | The chain-recorded approve or reject decision, with the approver's identity, on each change. |
 | Changes can be traced and, where needed, reversed | Each run records what fired it and what it was a rerun or drift-fix of; the register and dossier trace the lineage. |
-| The change log is protected from tampering | The hash chain, its offline verification, and an RFC 3161 anchor that bounds how much history could vanish unnoticed. |
+| The change log is protected from tampering | The hash chain, its offline verification, and an RFC 3161 anchor that bounds how much history could vanish unnoticed. `switchtender verify` reads the anchor's timestamp token and refuses a receipt whose token commits to a different link, so the anchor is the authority's statement rather than another of ours. Which authorities to believe is the relying party's decision: the token travels with the receipt for their own tooling to check against their own trust store. |
 
 ## HIPAA 45 CFR 164.312(b) (audit controls)
 

@@ -27,7 +27,11 @@ func TestReceiptProduceAndVerifyOffline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("openBundle() error = %v", err)
 	}
-	at := time.Date(2026, 8, 11, 12, 0, 0, 0, time.UTC)
+	// Deliberately not UTC: a server's clock carries a local offset, the store writes every
+	// timestamp as UTC, and a receipt rebuilds the outcome from the stored run. Building this
+	// fixture in UTC was why the suite agreed the receipt verified while it failed on every
+	// install west or east of Greenwich.
+	at := time.Date(2026, 8, 11, 12, 0, 0, 0, time.FixedZone("CST", -6*60*60))
 	creation := &audit.Entry{
 		ID: audit.NewID(), At: at, Actor: "alice", ActorType: "session",
 		Method: "POST", Path: "/v1/runs",

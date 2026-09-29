@@ -372,6 +372,10 @@ func FromAWX(data []byte, now time.Time) (*Plan, error) {
 	// of the template it points at.
 	plan.addWorkflows(export, now, projectIDs, inventoryIDs, credentialIDs)
 	reportUnmapped(plan, export)
+	if err := plan.requireObjects("projects, inventories, credentials, job templates, or " +
+		"schedules"); err != nil {
+		return nil, err
+	}
 	return plan, nil
 }
 
@@ -524,8 +528,11 @@ func (p *Plan) addSchedules(jt awxJobTemplate, templateID string, now time.Time)
 	for _, s := range jt.Related.Schedules {
 		cron, ok := RRULEToCron(s.RRule)
 		if !ok {
-			p.warn("schedule %q of template %q skipped: cannot express %q as cron",
-				s.Name, jt.Name, s.RRule)
+			// A rule that bounds itself is the common case here, and its remedy is different from a
+			// cadence cron cannot express, so it says so: a cron entry has no end, and creating one
+			// from a rule that was meant to stop would leave a job firing forever.
+			p.warn("schedule %q of template %q skipped: %s (%q)", s.Name, jt.Name, rruleProblem(s.RRule),
+				s.RRule)
 			continue
 		}
 		enabled := s.Enabled == nil || *s.Enabled

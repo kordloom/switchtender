@@ -164,8 +164,8 @@ func FromRundeck(inventory string) func([]byte, time.Time) (*Plan, error) {
 		for _, job := range jobs {
 			plan.addRundeckJob(job, inventory, now)
 		}
-		if len(plan.Templates) == 0 && len(plan.Warnings) == 0 {
-			plan.warn("the export held no jobs")
+		if err := plan.requireObjects("jobs"); err != nil {
+			return nil, err
 		}
 		return plan, nil
 	}

@@ -27,10 +27,32 @@ type createScheduleRequest struct {
 	TemplateID string `json:"template_id,omitempty"`
 	// Inventory is the inventory to target.
 	Inventory string `json:"inventory"`
-	// Shards, when two or more, fires a split.
-	Shards int `json:"shards"`
-	// Steps, when set, fires a pipeline of these steps.
-	Steps []run.PipelineStep `json:"steps"`
+	// Shards, when two or more, fires a split. A pointer so an update that omits it keeps the stored
+	// shard count rather than collapsing a fleet-wide split onto one worker, while a caller that
+	// means to flatten one sends zero explicitly.
+	Shards *int `json:"shards,omitempty"`
+	// Steps, when set, fires a pipeline of these steps. A pointer for the same reason as Shards: an
+	// edit dialog that cannot express a graph must not erase one, while an empty array explicitly
+	// replaces the pipeline with whatever the other fields name.
+	Steps *[]run.PipelineStep `json:"steps,omitempty"`
+}
+
+// scheduleShards resolves the shard count for a write: what the request says, or what is stored when
+// the request says nothing.
+func scheduleShards(requested *int, stored int) int {
+	if requested == nil {
+		return stored
+	}
+	return *requested
+}
+
+// scheduleSteps resolves the pipeline for a write, on the same rule as scheduleShards. An empty array
+// is a real value and clears the pipeline; a missing field keeps it.
+func scheduleSteps(requested *[]run.PipelineStep, stored []run.PipelineStep) []run.PipelineStep {
+	if requested == nil {
+		return stored
+	}
+	return *requested
 }
 
 // schedulesResponse wraps a schedule list.
@@ -68,7 +90,8 @@ func createScheduleHandler(store schedule.Store, authz *authorizer, log *zap.Log
 		// stamped with the same tenant.
 		sc := &schedule.Schedule{
 			ID: schedule.NewID(), Name: req.Name, Cron: req.Cron, Timezone: req.Timezone, Playbook: req.Playbook,
-			Inventory: req.Inventory, Shards: req.Shards, Steps: req.Steps,
+			Inventory: req.Inventory, Shards: scheduleShards(req.Shards, 0),
+			Steps:      scheduleSteps(req.Steps, nil),
 			TemplateID: req.TemplateID, OrgID: run.SubmitterOrgFrom(r.Context()),
 			Enabled: true, CreatedAt: time.Now(),
 		}
@@ -142,9 +165,19 @@ func updateScheduleHandler(store schedule.Store, authz *authorizer, log *zap.Log
 		}
 		// The owning organization is the schedule's, not the editor's, so an edit cannot move a
 		// schedule into the editor's tenant or strand it as unowned.
+		// A cron expression means nothing without the zone it is read in, and no edit dialog in the
+		// product renders one, so an edit that named no zone silently moved when the schedule fires:
+		// an imported schedule pinned to America/New_York began firing in the server's local time,
+		// hours off, with nothing on screen to show it. An empty zone from an editor means "leave it
+		// as it is"; a caller that wants server-local time can send it explicitly as UTC.
+		zone := req.Timezone
+		if zone == "" {
+			zone = existing.Timezone
+		}
 		sc := &schedule.Schedule{
-			ID: id, Name: req.Name, Cron: req.Cron, Timezone: req.Timezone, Playbook: req.Playbook,
-			Inventory: req.Inventory, Shards: req.Shards, Steps: req.Steps,
+			ID: id, Name: req.Name, Cron: req.Cron, Timezone: zone, Playbook: req.Playbook,
+			Inventory: req.Inventory, Shards: scheduleShards(req.Shards, existing.Shards),
+			Steps:      scheduleSteps(req.Steps, existing.Steps),
 			TemplateID: req.TemplateID, OrgID: existing.OrgID,
 			Enabled: existing.Enabled, CreatedAt: existing.CreatedAt,
 			LastRunAt: existing.LastRunAt, LastRunID: existing.LastRunID,

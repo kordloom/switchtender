@@ -128,6 +128,21 @@ async function loadPolicies() {
 				dry.appendChild(span);
 			}
 			tr.appendChild(dry);
+			// Separation of duties reads at a glance, beside the other thing a rule does to a match.
+			const distinct = document.createElement("td");
+			if (p.require_distinct_approver) {
+				const chip = document.createElement("span");
+				chip.className = "chip ok";
+				chip.textContent = "required";
+				chip.dataset.tip = "The person who asks for a matching run cannot approve it";
+				distinct.appendChild(chip);
+			} else {
+				const span = document.createElement("span");
+				span.className = "muted";
+				span.textContent = "any approver";
+				distinct.appendChild(span);
+			}
+			tr.appendChild(distinct);
 			const holding = document.createElement("td");
 			const ruleHeld = heldByRule(held, p);
 			if (ruleHeld > 0) {
@@ -305,6 +320,36 @@ function wireRunDownloads(runId) {
 			}
 		});
 	}
+	// The signed receipt is the artifact the whole claim rests on, and it was reachable only from a
+	// shell on the server: the run on screen could be read and exported as a dossier, but not turned
+	// into the one file a third party checks without trusting this install. It reads the same trail
+	// the dossier does, so it shows where the dossier does.
+	const receiptBtn = document.getElementById("download-receipt");
+	if (receiptBtn && roleAtLeast("admin")) {
+		receiptBtn.hidden = false;
+		receiptBtn.dataset.tip =
+			"Click to download this run's signed receipt, verifiable offline with switchtender verify";
+		receiptBtn.addEventListener("click", async () => {
+			receiptBtn.disabled = true;
+			try {
+				const res = await fetchAuthed("/runs/" + runId + "/receipt");
+				const key = res.headers.get("Switchtender-Key-Id") || "";
+				downloadBlob("switchtender-" + runId + ".receipt", "application/json", await res.text());
+				setStatus(key
+					? "Receipt downloaded. Verify it with: switchtender verify the file --pubkey " + key
+					: "Receipt downloaded. Verify it with: switchtender verify the file");
+			} catch (err) {
+				// A run still going, or one the scheduler started before its fire was recorded, has
+				// nothing to attest yet. That is the ordinary case, so it reads as a state rather
+				// than as a failure.
+				setStatus(err.message === "HTTP 409"
+					? "This run has nothing to attest yet: a receipt covers a run that has finished."
+					: "Could not download the receipt: " + err.message);
+			} finally {
+				receiptBtn.disabled = false;
+			}
+		});
+	}
 	const exportEvents = document.getElementById("export-events");
 	if (exportEvents) {
 		exportEvents.dataset.tip = "Click to download every event as newline-delimited JSON";
@@ -477,9 +522,29 @@ async function loadAllEvents(runId) {
 	return events;
 }
 
+// offerStoredSession shows the way back when this browser already holds a session, so arriving at
+// sign in is not a dead end. A reader who followed a link here, or whose one expired call sent them
+// here while the rest of the session still works, had no route back to the page they came from and no
+// indication which account the browser was holding.
+function offerStoredSession() {
+	const back = document.getElementById("signed-in-return");
+	if (!back) return;
+	if (!apiToken()) {
+		back.hidden = true;
+		return;
+	}
+	const name = localStorage.getItem("st_user") || "";
+	const label = document.getElementById("signed-in-name");
+	if (label) label.textContent = name ? "as " + name : "with a token";
+	back.hidden = false;
+	const leave = document.getElementById("signed-in-out");
+	if (leave) leave.addEventListener("click", () => signOut());
+}
+
 // loadLogin wires both sign in forms: account login mints a session token, and the raw token
 // form verifies a pasted token against the API.
 function loadLogin() {
+	offerStoredSession();
 	const ssoErr = ssoError();
 	if (ssoErr) {
 		setStatus(ssoErr);

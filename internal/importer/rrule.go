@@ -21,6 +21,14 @@ func RRULEToCron(rrule string) (string, bool) {
 	if interval == "" {
 		interval = "1"
 	}
+	// A cron expression has no way to stop. A rule that bounds its own recurrence, by a count of
+	// occurrences or by an end date, therefore cannot be expressed here, and both fields used to be
+	// read past: AWX writes FREQ=MINUTELY;COUNT=1 for "run this once", which imported as a job firing
+	// every minute forever, and a rule with UNTIL imported as one that keeps firing past its own end.
+	// Refusing lets the caller name the schedule it skipped.
+	if parts["COUNT"] != "" || parts["UNTIL"] != "" {
+		return "", false
+	}
 	// AWX usually carries the time of day in DTSTART rather than BYHOUR and BYMINUTE, so fall
 	// back to it. Defaulting straight to midnight would silently move a nightly job.
 	startHour, startMinute := dtstartTime(rrule)
@@ -78,6 +86,22 @@ func RRULEToCron(rrule string) (string, bool) {
 		return fmt.Sprintf("%s %s %s * *", minute, hour, day), true
 	default:
 		return "", false
+	}
+}
+
+// rruleProblem says why a rule could not become a cron expression, so a skipped schedule tells the
+// operator what to do rather than only that something failed.
+func rruleProblem(rrule string) string {
+	parts := parseRRULE(rrule)
+	switch {
+	case parts["COUNT"] != "":
+		return "it runs a fixed number of times and a cron entry never stops, so set it by hand " +
+			"if it is still needed"
+	case parts["UNTIL"] != "":
+		return "it stops on a date and a cron entry never stops, so set it by hand and remove it " +
+			"when that date passes"
+	default:
+		return "its cadence cannot be expressed as cron"
 	}
 }
 

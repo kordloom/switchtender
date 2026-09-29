@@ -69,6 +69,11 @@ type Anchor struct {
 	// Proof is an embedded offline proof, base64, carried only by rfc3161 anchors. Empty means a
 	// relying party checks the anchor by fetching Ref instead.
 	Proof string `json:"proof,omitempty"`
+	// InstallID is the install whose identity the anchored value was computed under. A tree anchor
+	// fixes a Merkle root whose leaves are bound to that identity, so the same chain under a different
+	// identity recomputes a different root, and the check has no way to tell that apart from a rewrite
+	// without knowing which install took the anchor. Empty on an anchor recorded before this was kept.
+	InstallID string `json:"install_id,omitempty"`
 }
 
 // AnchorStore persists anchors. Implementations must be safe for concurrent use.

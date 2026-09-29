@@ -43,6 +43,14 @@
 				<label class="field-label">Project
 					<select id="src-project" class="input"><option value="">None, local path</option></select>
 				</label>
+				<label class="field-label">Refresh every
+					<input id="src-interval" class="input mono" placeholder="15m">
+					<span class="field-hint">How often to re-read the source: 30s, 15m, or 2h. Empty means only when asked.</span>
+				</label>
+				<label class="field-label check-label">
+					<input id="src-update-on-launch" type="checkbox">
+					Refresh before each launch, so a run targets the fleet as it is now
+				</label>
 				<div class="launch-actions">
 					<button type="submit" class="button primary">Save</button>
 					<span id="src-status" class="muted"></span>

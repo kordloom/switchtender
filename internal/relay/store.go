@@ -44,6 +44,13 @@ func (c *Client) Save(ctx context.Context, r *run.Run) error {
 	return c.t.Save(ctx, r)
 }
 
+// ProposeApply asks the control node to create the apply this worker's plan gated. It is what makes the
+// plan-content gate complete on a worker at all: a worker cannot create a run, so the dispatcher hands
+// the decision inputs to the control node, which builds the apply from the plan it already holds.
+func (c *Client) ProposeApply(ctx context.Context, planID string, destroys int, read bool) (*run.Run, error) {
+	return c.t.ProposeApply(ctx, planID, destroys, read)
+}
+
 // AppendLog streams captured output to the control node.
 func (c *Client) AppendLog(ctx context.Context, id string, p []byte) error {
 	return c.t.AppendLog(ctx, id, p)

@@ -84,6 +84,15 @@ function roleAtLeast(need) {
 	return (rank[role] || 3) >= (rank[need] || 3);
 }
 
+// signedInAs reports whether the named actor is the person holding this session. It compares against
+// the identity the server resolved at sign-in, so it is the same name the chain records on the run and
+// the same one the approval check compares. An unknown session matches nobody, which errs toward
+// drawing a control the server may refuse rather than hiding one the reader is entitled to.
+function signedInAs(actor) {
+	const me = localStorage.getItem("st_user") || "";
+	return !!actor && !!me && actor === me;
+}
+
 // getJSON fetches and decodes a JSON endpoint, redirecting to sign in on a 401. A 403 explains
 // itself in role terms instead of surfacing the request path and a bare status code, which read
 // as breakage rather than as policy.

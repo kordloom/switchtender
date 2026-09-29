@@ -164,6 +164,41 @@ func Timestamp(ctx context.Context, client *http.Client, tsaURL, link string) (s
 	return base64.StdEncoding.EncodeToString(parsed.Token.FullBytes), nil
 }
 
+// VerifyTimestampProof checks a stored RFC 3161 token against the link it claims to fix, offline.
+//
+// The token was verified once, when it was obtained, and then stored. Nothing read it again: a verifier
+// reported an anchor as satisfied because the chain reached the recorded link, and the dossier told the
+// auditor the anchor "verifies offline" because a proof string was present. That left the third-party
+// half of the claim resting on our own database row, which is the one thing an anchor exists not to rest
+// on. Anyone who could edit the anchors table could rewrite the link and leave a proof that commits to
+// something else, and every artifact still read as timestamped by an authority.
+//
+// What this checks is what the token itself says: that an authority's token commits to the digest of
+// this link, in the right shape, with a SHA-256 imprint. What it deliberately does not check is the
+// authority's signing certificate: the trust decision about which authority to believe belongs to the
+// relying party, who has the token and can hold it against the chain their own tooling trusts. Saying so
+// is the point; claiming a check we do not perform is what the finding was about.
+func VerifyTimestampProof(link, proof string) error {
+	if proof == "" {
+		return fmt.Errorf("this anchor carries no embedded proof, so there is nothing to verify offline")
+	}
+	token, err := base64.StdEncoding.DecodeString(proof)
+	if err != nil {
+		return fmt.Errorf("anchor proof is not base64: %w", err)
+	}
+	raw, err := hex.DecodeString(link)
+	if err != nil {
+		return fmt.Errorf("anchor link is not hex: %w", err)
+	}
+	sum := sha256.Sum256(raw)
+	// The nonce is not checked here. It bound one live request to one reply; a stored token is read
+	// long afterward, by someone who never made that request.
+	if err := checkTimestampToken(token, sum[:], nil); err != nil {
+		return fmt.Errorf("anchor proof does not fix this link: %w", err)
+	}
+	return nil
+}
+
 // tsaContentInfo is the CMS wrapper a timestamp token arrives in.
 type tsaContentInfo struct {
 	// ContentType names the wrapped structure, which for a token is SignedData.
@@ -319,7 +354,12 @@ func randomNonce() (*big.Int, error) {
 // NewAnchor builds an anchor record for a chain coordinate, timestamping it when the type calls
 // for one. shape names the coordinate space seq and link live in, linear or tree. The clock is
 // passed in so the recorded time is the caller's, matching every other audit time.
-func NewAnchor(ctx context.Context, client *http.Client, kind, ref, shape string,
+//
+// installID is the install whose identity the anchored value was computed under. A tree root is
+// computed over leaves bound to that identity, so without it a check has no way to tell a chain read
+// under a different identity, which is what a restore without its key file and a replica with its own
+// key both produce, from a chain that was actually rewritten.
+func NewAnchor(ctx context.Context, client *http.Client, kind, ref, shape, installID string,
 	seq int64, link string, now time.Time) (*Anchor, error) {
 	if !ValidAnchorType(kind) {
 		return nil, fmt.Errorf("%w: %q", ErrAnchorType, kind)
@@ -332,7 +372,7 @@ func NewAnchor(ctx context.Context, client *http.Client, kind, ref, shape string
 	}
 	a := &Anchor{
 		ID: NewAnchorID(), Type: kind, Shape: shape, Seq: seq, Link: link,
-		At: now.UTC().Truncate(time.Microsecond), Ref: ref,
+		At: now.UTC().Truncate(time.Microsecond), Ref: ref, InstallID: installID,
 	}
 	if kind != AnchorRFC3161 {
 		if ref == "" {

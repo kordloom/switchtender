@@ -94,6 +94,25 @@ reader is the executing user, but a hard crash can leave those files until the t
 clears. On a shared or long-lived executor, point `TMPDIR` at a tmpfs so run scratch lives in
 memory and dies with the machine instead of landing on disk.
 
+## What a run can reach on the host
+
+A run without an execution image runs as the SwitchTender server's own user. That user owns the
+scratch files of every other run on that host, so the 0600 mode above stops other accounts, not other
+runs: while two runs overlap, either one's code can read the other's materialized credentials, and a
+run can write to the directory the Ansible callback plugin lives in. SwitchTender checks that plugin
+against its embedded copy before every Ansible run and restores it when it differs, so nothing a run
+leaves behind survives to be imported by later runs, but that is repair, not isolation.
+
+Treat a run's content as trusted code, at the level of the host it runs on. Where that is not true,
+separate them:
+
+- Pin an execution image on the template. A containerized run gets its own filesystem, the plugin
+  directory is mounted read-only, and the run's environment is sourced from a file the container
+  cannot reach outside its own mount.
+- Give each trust domain its own worker. Workers are separate processes with their own queue, so
+  production and a team's ad-hoc work need not share a user or a temp directory.
+- Point `TMPDIR` at a per-worker tmpfs, so scratch dies with the process rather than accumulating.
+
 ## Encryption
 
 Sealing needs a key. Set `SWITCHTENDER_ENCRYPTION_KEY` and a stable `SWITCHTENDER_ENCRYPTION_SALT` before

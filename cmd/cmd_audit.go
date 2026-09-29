@@ -94,7 +94,7 @@ func runChangeRegister(cmd *cobra.Command) error {
 	defer func() { _ = store.Close() }()
 	// The install identity binds the tree profile's leaves, so a tree anchor cannot be checked
 	// without it.
-	id, err := audit.LoadIdentity(identityDir(auditReportDB))
+	id, err := audit.LoadIdentityForStore(auditReportDB, identityDir(auditReportDB))
 	if err != nil {
 		return err
 	}

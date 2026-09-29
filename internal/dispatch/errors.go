@@ -57,6 +57,15 @@ var ErrPolicyDenied = errors.New("submission denied by policy")
 // cannot be evaluated has not been passed.
 var ErrPolicyUnavailable = errors.New("approval policies unavailable")
 
+// ErrCommitMoved is returned when a run pinned to a commit finds the project on a different one. It
+// is the plan gate's guarantee that the code an approver read is the code that runs.
+var ErrCommitMoved = errors.New("the project moved to a different commit since this run was approved")
+
+// ErrSelfApproval is returned when the person who asked for a run tries to approve it and the rule
+// that held it requires a different approver. It is separation of duties: a gate the requester can
+// release themselves records a signature but stops nothing.
+var ErrSelfApproval = errors.New("the requester cannot approve their own run")
+
 // ErrChildNotApprovable is returned when a shard or pipeline step is approved on its own. The
 // parent carries the decision; a child released by itself would run outside it.
 var ErrChildNotApprovable = errors.New("a shard or step is approved through its parent")
