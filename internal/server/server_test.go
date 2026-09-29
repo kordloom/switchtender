@@ -711,7 +711,11 @@ func TestRunStreamDrainsStore(t *testing.T) {
 	// Left unbounded this ran until the package timeout and took the whole suite down with it.
 	reader := bufio.NewReader(res.Body)
 	deadline := time.Now().Add(5 * time.Second)
-	stopReading := time.AfterFunc(10*time.Second, func() { _ = res.Body.Close() })
+	// Well above the five second deadline that is the real assertion. This only has to stop a
+	// stream that never delivers from hanging the whole suite, which it used to do for fifteen
+	// minutes. Set close to the deadline it fired on a stream that was merely slow, because the
+	// drain ticks once a second and the race detector under a full suite is not fast.
+	stopReading := time.AfterFunc(60*time.Second, func() { _ = res.Body.Close() })
 	defer stopReading.Stop()
 	var sawEvent, sawLog bool
 	for !sawEvent || !sawLog {

@@ -92,6 +92,33 @@ func createSourceHandler(sources invsource.Store, inventories inventory.Store, a
 
 // updateSourceHandler changes an existing source's editable fields, keeping its backing inventory
 // and sync state. Like create, it authorizes the referenced project and credential.
+// authorizeStoredSource reads the source named in the path and confirms the caller may use it and
+// everything it reaches. It writes the response and returns nil when access is refused.
+//
+// The rule these three handlers kept breaking is that a handler acting on a stored object must
+// authorize the stored object, not the request body. Checking only the body meant a caller could
+// take over somebody else's source by omitting its references: nothing was named, so nothing was
+// checked. A source decides which hosts a run targets and carries the credential used to fetch
+// them, so taking one over redirects production work and borrows a secret in the same step.
+func authorizeStoredSource(w http.ResponseWriter, r *http.Request, sources invsource.Store,
+	authz *authorizer, log *zap.Logger) *invsource.Source {
+	src, err := sources.Get(r.Context(), r.PathValue("id"))
+	if errors.Is(err, invsource.ErrNotFound) {
+		respondError(w, log, http.StatusNotFound, "source not found")
+		return nil
+	}
+	if err != nil {
+		log.Error("server: read inventory source: " + err.Error())
+		respondError(w, log, http.StatusInternalServerError, "could not read inventory source")
+		return nil
+	}
+	if denyOnAuthzError(w, log, authz.authorizeAll(r.Context(), grant.AccessUse,
+		src.ProjectID, src.CredentialID, src.InventoryID)) {
+		return nil
+	}
+	return src
+}
+
 func updateSourceHandler(sources invsource.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if sources == nil {
@@ -109,6 +136,10 @@ func updateSourceHandler(sources invsource.Store, authz *authorizer, log *zap.Lo
 		}
 		if denyOnAuthzError(w, log,
 			authz.authorizeAll(r.Context(), grant.AccessUse, req.ProjectID, req.CredentialID)) {
+			return
+		}
+		// The stored source is authorized too, so omitting the references cannot skip the check.
+		if authorizeStoredSource(w, r, sources, authz, log) == nil {
 			return
 		}
 		id := r.PathValue("id")
@@ -155,10 +186,15 @@ func listSourcesHandler(sources invsource.Store, log *zap.Logger) http.HandlerFu
 }
 
 // deleteSourceHandler removes a source. Its backing inventory is left in place.
-func deleteSourceHandler(sources invsource.Store, log *zap.Logger) http.HandlerFunc {
+func deleteSourceHandler(sources invsource.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if sources == nil {
 			respondError(w, log, http.StatusNotFound, "inventory sources not enabled")
+			return
+		}
+		// Deleting a source stops the refresh that keeps an inventory current, which quietly leaves
+		// runs targeting a stale host list, so it asks the same question editing one does.
+		if authorizeStoredSource(w, r, sources, authz, log) == nil {
 			return
 		}
 		err := sources.Delete(r.Context(), r.PathValue("id"))
@@ -176,10 +212,16 @@ func deleteSourceHandler(sources invsource.Store, log *zap.Logger) http.HandlerF
 }
 
 // refreshSourceHandler runs the source now and returns its updated sync state.
-func refreshSourceHandler(refresher SourceRefresher, log *zap.Logger) http.HandlerFunc {
+func refreshSourceHandler(refresher SourceRefresher, sources invsource.Store, authz *authorizer,
+	log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if refresher == nil {
 			respondError(w, log, http.StatusNotFound, "inventory sources not enabled")
+			return
+		}
+		// A refresh runs the source's plugin, decrypts its credential, and rewrites the hosts the
+		// backing inventory names, so it is at least as consequential as editing one.
+		if authorizeStoredSource(w, r, sources, authz, log) == nil {
 			return
 		}
 		src, err := refresher.RefreshSource(r.Context(), r.PathValue("id"))

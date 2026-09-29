@@ -133,61 +133,93 @@ func (s *userStore) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
+// adminLockKey serializes every change that could remove the last administrator. Postgres readers do
+// not block writers, so a predicate alone cannot make two such changes see each other.
+const adminLockKey = 7973821003
+
 // DeleteUnlessLastAdmin removes the user unless doing so would leave no administrator.
 //
-// The guard is part of the statement rather than a count taken beforehand. Counting first left a gap
-// another request could pass the same count in: two concurrent deletes of the last two admins both
-// saw a survivor and both went through, leaving an install nobody can administer and no way back in
-// except a shell on the host. Several control nodes share one database, so a lock in one process
-// would not have closed it either.
+// The count and the delete are one statement, and that statement runs while an advisory lock is
+// held. The predicate alone was not enough: two deletes of the last two admins target different
+// rows, so they never contend for a row lock, and under read committed each subquery reads its own
+// snapshot and still sees the other administrator. Both then succeed. Measured on Postgres before
+// this lock, 291 of 300 concurrent pairs left the install with no administrator at all, which means
+// no admin-gated route is reachable and the only way back is a shell on the host. SQLite happened to
+// hold because it admits one writer at a time, which is luck rather than a design.
 func (s *userStore) DeleteUnlessLastAdmin(ctx context.Context, id string) (bool, error) {
-	res, err := s.db.ExecContext(ctx,
-		`DELETE FROM users WHERE id=$1 AND (role<>'admin'
+	return s.guardedAdminChange(ctx, id, func(ctx context.Context, tx *sql.Tx) (bool, error) {
+		res, err := tx.ExecContext(ctx,
+			`DELETE FROM users WHERE id=$1 AND (role<>'admin'
 OR EXISTS (SELECT 1 FROM users others WHERE others.role='admin' AND others.id<>$1))`, id)
+		if err != nil {
+			return false, fmt.Errorf("delete user: %w", err)
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return false, fmt.Errorf("delete user: %w", err)
+		}
+		return n > 0, nil
+	})
+}
+
+// guardedAdminChange runs change inside a transaction holding the administrator lock, and answers
+// ErrNotFound rather than a bare refusal when the account is simply absent.
+func (s *userStore) guardedAdminChange(ctx context.Context, id string,
+	change func(context.Context, *sql.Tx) (bool, error)) (bool, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return false, fmt.Errorf("delete user: %w", err)
+		return false, fmt.Errorf("admin change: %w", err)
 	}
-	n, err := res.RowsAffected()
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock($1)", adminLockKey); err != nil {
+		return false, fmt.Errorf("admin change: %w", err)
+	}
+	changed, err := change(ctx, tx)
 	if err != nil {
-		return false, fmt.Errorf("delete user: %w", err)
+		return false, err
 	}
-	if n > 0 {
-		return true, nil
+	if !changed {
+		// Nothing happened for one of two reasons, and they are different answers to the caller.
+		var exists bool
+		if err := tx.QueryRowContext(ctx,
+			"SELECT EXISTS (SELECT 1 FROM users WHERE id=$1)", id).Scan(&exists); err != nil {
+			return false, fmt.Errorf("admin change: %w", err)
+		}
+		if !exists {
+			return false, user.ErrNotFound
+		}
 	}
-	// Nothing changed for one of two reasons, and they are different answers to the caller.
-	if _, gerr := s.Get(ctx, id); gerr != nil {
-		return false, gerr
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("admin change: %w", err)
 	}
-	return false, nil
+	return changed, nil
 }
 
 // UpdateUnlessLastAdmin applies the update unless it would demote the only administrator. Demoting
-// is the other way to reach zero admins, and it is guarded in the statement for the same reason.
+// is the other way to reach zero admins, and it runs under the same lock as the delete for the same
+// reason: two demotions of the last two administrators touch different rows and never see each
+// other without one.
 func (s *userStore) UpdateUnlessLastAdmin(ctx context.Context, u *user.User) (bool, error) {
 	links, err := marshalLinks(u.Links)
 	if err != nil {
 		return false, fmt.Errorf("update user: %w", err)
 	}
-	res, err := s.db.ExecContext(ctx,
-		`UPDATE users SET username=$1, password_hash=$2, role=$3, full_name=$4, email=$5, phone=$6,
+	return s.guardedAdminChange(ctx, u.ID, func(ctx context.Context, tx *sql.Tx) (bool, error) {
+		res, xerr := tx.ExecContext(ctx,
+			`UPDATE users SET username=$1, password_hash=$2, role=$3, full_name=$4, email=$5, phone=$6,
 title=$7, links=$8, notes=$9 WHERE id=$10 AND ($3='admin' OR role<>'admin'
 OR EXISTS (SELECT 1 FROM users others WHERE others.role='admin' AND others.id<>$10))`,
-		u.Username, u.PasswordHash, string(u.Role), u.FullName, u.Email, u.Phone, u.Title, links,
-		u.Notes, u.ID)
-	if err != nil {
-		return false, fmt.Errorf("update user: %w", err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return false, fmt.Errorf("update user: %w", err)
-	}
-	if n > 0 {
-		return true, nil
-	}
-	if _, gerr := s.Get(ctx, u.ID); gerr != nil {
-		return false, gerr
-	}
-	return false, nil
+			u.Username, u.PasswordHash, string(u.Role), u.FullName, u.Email, u.Phone, u.Title, links,
+			u.Notes, u.ID)
+		if xerr != nil {
+			return false, fmt.Errorf("update user: %w", xerr)
+		}
+		n, xerr := res.RowsAffected()
+		if xerr != nil {
+			return false, fmt.Errorf("update user: %w", xerr)
+		}
+		return n > 0, nil
+	})
 }
 
 // scanUser reads one user row from a scanner.

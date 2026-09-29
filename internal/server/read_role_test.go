@@ -42,6 +42,12 @@ func TestReadRolesBoundManagementData(t *testing.T) {
 		// Test 12 and 13: The two that were already bounded stay bounded.
 		{"/v1/audit", user.RoleAdmin},
 		{"/v1/users", user.RoleAdmin},
+		// Test 14 to 17: The subject side of the access map, and the view that enumerates every
+		// object in the install, are management data too.
+		{"/v1/orgs", user.RoleAdmin},
+		{"/v1/orgs/org_1/members", user.RoleAdmin},
+		{"/v1/teams", user.RoleAdmin},
+		{"/v1/doctor", user.RoleAdmin},
 	}
 	for testNum, test := range tests {
 		t.Run(fmt.Sprintf("test %d %s", testNum, test.Path), func(t *testing.T) {

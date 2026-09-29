@@ -122,8 +122,12 @@ func updateScheduleHandler(store schedule.Store, authz *authorizer, log *zap.Log
 		// template it will fire. Of the four ways to launch, run submission and template launch both
 		// check, and a webhook trigger is covered when the trigger is written. A schedule checked at
 		// no point in the chain, so it was the way to run a template a caller could not launch.
+		// Both the template being named and the one already stored are authorized. Checking only the
+		// body let a caller take over somebody else's schedule by leaving template_id out: nothing
+		// was named, so nothing was checked, and the schedule was rewritten to run a playbook of
+		// the caller's choosing on the original owner's timetable.
 		if denyOnAuthzError(w, log,
-			authz.authorizeAll(r.Context(), grant.AccessUse, req.TemplateID)) {
+			authz.authorizeAll(r.Context(), grant.AccessUse, req.TemplateID, existing.TemplateID)) {
 			return
 		}
 		sc := &schedule.Schedule{
@@ -198,13 +202,29 @@ func getScheduleHandler(store schedule.Store, log *zap.Logger) http.HandlerFunc 
 }
 
 // deleteScheduleHandler removes a schedule.
-func deleteScheduleHandler(store schedule.Store, log *zap.Logger) http.HandlerFunc {
+func deleteScheduleHandler(store schedule.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if store == nil {
 			respondError(w, log, http.StatusNotFound, "scheduling not enabled")
 			return
 		}
 		id := r.PathValue("id")
+		// Deleting a schedule silently stops work somebody relies on, so it asks the same question
+		// writing one does: may this caller use the template behind it.
+		existing, gerr := store.Get(r.Context(), r.PathValue("id"))
+		if errors.Is(gerr, schedule.ErrNotFound) {
+			respondError(w, log, http.StatusNotFound, "schedule not found")
+			return
+		}
+		if gerr != nil {
+			log.Error("server: read schedule: " + gerr.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not read schedule")
+			return
+		}
+		if denyOnAuthzError(w, log,
+			authz.authorizeAll(r.Context(), grant.AccessUse, existing.TemplateID)) {
+			return
+		}
 		err := store.Delete(r.Context(), id)
 		if errors.Is(err, schedule.ErrNotFound) {
 			respondError(w, log, http.StatusNotFound, "schedule not found")

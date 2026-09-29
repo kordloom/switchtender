@@ -191,7 +191,7 @@ type taskTrendsResponse struct {
 }
 
 // fleetHandler ranks hosts by recent failures across runs.
-func fleetHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
+func fleetHandler(store run.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	if store == nil {
 		panic("server: fleetHandler: Store required")
 	}
@@ -202,14 +202,37 @@ func fleetHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
 				window = n
 			}
 		}
+		keep, _, ferr := derivedReadFilter(r.Context(), authz, store)
+		if ferr != nil {
+			log.Error("server: read filter: " + ferr.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not read runs")
+			return
+		}
 		hosts, err := store.FleetHealth(r.Context(), window)
 		if err != nil {
 			log.Error("server: fleet health: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not compute fleet health")
 			return
 		}
+		// A host is shown when the caller can read at least one of the runs that put it here, and
+		// only those run ids are listed. Otherwise the view reported work the same caller is
+		// refused a 403 on by name.
+		shown := make([]run.HostHealth, 0, len(hosts))
+		for _, h := range hosts {
+			visible := make([]string, 0, len(h.RecentRuns))
+			for _, id := range h.RecentRuns {
+				if keep(id) {
+					visible = append(visible, id)
+				}
+			}
+			if len(visible) == 0 && len(h.RecentRuns) > 0 {
+				continue
+			}
+			h.RecentRuns = visible
+			shown = append(shown, h)
+		}
 		respondJSON(w, log, http.StatusOK,
-			fleetResponse{Hosts: hosts, Count: len(hosts), Window: window}, wantsPretty(r))
+			fleetResponse{Hosts: shown, Count: len(shown), Window: window}, wantsPretty(r))
 	}
 }
 
@@ -222,19 +245,32 @@ type driftResponse struct {
 }
 
 // driftHandler reports each host's most recent drift check, from the latest dry run to touch it.
-func driftHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
+func driftHandler(store run.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	if store == nil {
 		panic("server: driftHandler: Store required")
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
+		_, anyReadable, ferr := derivedReadFilter(r.Context(), authz, store)
+		if ferr != nil {
+			log.Error("server: read filter: " + ferr.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not read runs")
+			return
+		}
 		hosts, err := store.DriftStatus(r.Context())
 		if err != nil {
 			log.Error("server: drift status: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not compute drift status")
 			return
 		}
+		// Drift rows name a host and the tasks that keep changing on it, with no run id to check
+		// against, so the whole view is withheld from a caller who can read no runs at all. Showing
+		// it would be a summary of work they are not allowed to know happened.
+		visible := hosts
+		if !anyReadable {
+			visible = nil
+		}
 		respondJSON(w, log, http.StatusOK,
-			driftResponse{Hosts: hosts, Count: len(hosts)}, wantsPretty(r))
+			driftResponse{Hosts: visible, Count: len(visible)}, wantsPretty(r))
 	}
 }
 
@@ -347,7 +383,7 @@ func reconcileDriftHandler(store run.Store, submitter Submitter, authz *authoriz
 }
 
 // hostHistoryHandler returns one host's recent per run outcomes, newest first.
-func hostHistoryHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
+func hostHistoryHandler(store run.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	if store == nil {
 		panic("server: hostHistoryHandler: Store required")
 	}
@@ -359,19 +395,31 @@ func hostHistoryHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
 				limit = n
 			}
 		}
+		keep, _, ferr := derivedReadFilter(r.Context(), authz, store)
+		if ferr != nil {
+			log.Error("server: read filter: " + ferr.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not read runs")
+			return
+		}
 		history, err := store.HostHistory(r.Context(), host, limit)
 		if err != nil {
 			log.Error("server: host history: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not read host history")
 			return
 		}
+		visible := make([]run.HostSummary, 0, len(history))
+		for _, h := range history {
+			if keep(h.RunID) {
+				visible = append(visible, h)
+			}
+		}
 		respondJSON(w, log, http.StatusOK,
-			hostHistoryResponse{Host: host, Runs: history, Count: len(history)}, wantsPretty(r))
+			hostHistoryResponse{Host: host, Runs: visible, Count: len(visible)}, wantsPretty(r))
 	}
 }
 
 // taskTrendsHandler returns per task duration aggregates over recent runs.
-func taskTrendsHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
+func taskTrendsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	if store == nil {
 		panic("server: taskTrendsHandler: Store required")
 	}
@@ -382,11 +430,22 @@ func taskTrendsHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
 				window = n
 			}
 		}
+		_, anyReadable, ferr := derivedReadFilter(r.Context(), authz, store)
+		if ferr != nil {
+			log.Error("server: read filter: " + ferr.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not read runs")
+			return
+		}
 		tasks, err := store.TaskTrends(r.Context(), window)
 		if err != nil {
 			log.Error("server: task trends: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not compute task trends")
 			return
+		}
+		// Task names and their durations describe work, with no run id to check, so the view is
+		// withheld from a caller who can read none of it.
+		if !anyReadable {
+			tasks = nil
 		}
 		respondJSON(w, log, http.StatusOK,
 			taskTrendsResponse{Tasks: tasks, Count: len(tasks), Window: window}, wantsPretty(r))
@@ -402,16 +461,27 @@ type workersResponse struct {
 }
 
 // workersHandler lists the fleet's executors from the leases they hold.
-func workersHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
+func workersHandler(store run.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	if store == nil {
 		panic("server: workersHandler: Store required")
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
+		_, anyReadable, ferr := derivedReadFilter(r.Context(), authz, store)
+		if ferr != nil {
+			log.Error("server: read filter: " + ferr.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not read runs")
+			return
+		}
 		workers, err := store.Workers(r.Context())
 		if err != nil {
 			log.Error("server: list workers: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not list workers")
 			return
+		}
+		// The executor list names who is running what, so it is withheld from a caller who may read
+		// none of that work.
+		if !anyReadable {
+			workers = nil
 		}
 		respondJSON(w, log, http.StatusOK,
 			workersResponse{Workers: workers, Count: len(workers)}, wantsPretty(r))
@@ -755,8 +825,14 @@ func parseFieldedQuery(q string, filter *run.ListFilter) {
 // hostFactsHandler returns a host's most recently gathered system facts. A host that has never
 // been through a fact-gathering play reports not found rather than an empty object, so the
 // interface can say so plainly.
-func hostFactsHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
+func hostFactsHandler(store run.Store, authz *authorizer, log *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		keep, _, ferr := derivedReadFilter(r.Context(), authz, store)
+		if ferr != nil {
+			log.Error("server: read filter: " + ferr.Error())
+			respondError(w, log, http.StatusInternalServerError, "could not read runs")
+			return
+		}
 		facts, err := store.HostFactsFor(r.Context(), r.PathValue("host"))
 		if errors.Is(err, run.ErrNotFound) {
 			respondError(w, log, http.StatusNotFound, "no facts gathered for this host yet")
@@ -765,6 +841,12 @@ func hostFactsHandler(store run.Store, log *zap.Logger) http.HandlerFunc {
 		if err != nil {
 			log.Error("server: host facts: " + err.Error())
 			respondError(w, log, http.StatusInternalServerError, "could not read host facts")
+			return
+		}
+		// Facts are gathered by a run, and the run they came from is named on them, so a caller who
+		// may not read that run may not read what it learned about the host either.
+		if !keep(facts.RunID) {
+			respondError(w, log, http.StatusNotFound, "no facts gathered for this host yet")
 			return
 		}
 		respondJSON(w, log, http.StatusOK, facts, wantsPretty(r))
