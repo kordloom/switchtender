@@ -497,7 +497,8 @@ func Render(in *Input) ([]byte, error) {
 	case len(v.Anchors) == 0:
 		v.Status = "unanchored"
 		v.StatusText = "The chain verifies, but no anchor covers this run yet, so the record " +
-			"rests on this install alone. The next anchor fixes it."
+			"rests on this install alone. The next anchor fixes it: switchtender audit anchor " +
+			"records the head at a public timestamp authority in one command."
 	case in.Launch == nil && len(in.Entries) == 0:
 		// The anchors hold, but over a chain that names this run nowhere. Saying they "fix history
 		// containing this run" would assert a record that does not exist: what they actually fix is

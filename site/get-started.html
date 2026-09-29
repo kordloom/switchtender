@@ -19,6 +19,52 @@
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 	<link rel="stylesheet" href="/styles.css?v=34">
+	<!-- st:entity -->
+	<script type="application/ld+json">
+{
+ "@context": "https://schema.org",
+ "@type": "SoftwareApplication",
+ "applicationCategory": "DeveloperApplication",
+ "description": "An agentless, single-binary automation controller for Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go, with enforced approval policies and a tamper-evident audit trail that can be verified offline.",
+ "featureList": [
+  "Agentless: reaches managed hosts over SSH with nothing installed on them",
+  "Runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go",
+  "Reads secrets from HashiCorp Vault KV v1 and v2, Vault dynamic secrets minted per run and revoked when it ends, AWS Secrets Manager, and Azure Key Vault",
+  "Per-object access grants: read, use, or manage on one project, template, inventory, or credential, layered over global roles",
+  "Single sign-on through OIDC and LDAP",
+  "Pipelines with a dependency graph and parallel branches, built in a drag-and-drop editor",
+  "Approval gates enforced by policy before a run executes",
+  "Tamper-evident hash-chained audit trail a third party can verify offline",
+  "Live host-by-task matrix and per-host history across runs",
+  "Drift detection from a dry run",
+  "One static Go binary and one SQLite file, with PostgreSQL optional",
+  "One-command import from AWX, Semaphore UI, Rundeck, Jenkins, and crontab"
+ ],
+ "license": "https://mariadb.com/bsl11/",
+ "name": "SwitchTender",
+ "offers": {
+  "@type": "Offer",
+  "price": "0",
+  "priceCurrency": "USD"
+ },
+ "operatingSystem": "Linux, macOS, Windows",
+ "publisher": {
+  "@type": "Organization",
+  "name": "KordLoom LLC",
+  "sameAs": [
+   "https://github.com/kordloom",
+   "https://www.linkedin.com/company/kordloom",
+   "https://x.com/kordloom"
+  ],
+  "url": "https://kordloom.com"
+ },
+ "sameAs": [
+  "https://github.com/kordloom/switchtender"
+ ],
+ "url": "https://switchtender.com/"
+}
+</script>
+	<!-- /st:entity -->
 </head>
 <body>
 	<div class="bg-mesh" aria-hidden="true"></div>
@@ -59,6 +105,7 @@
 						<h3>Install</h3>
 						<p>One line downloads the right binary for your machine, verifies it against the published checksums, and installs it:</p>
 						<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>curl -fsSL https://switchtender.com/install.sh | sh</code></pre></div>
+						<p class="gs-note">Prefer not to pipe to a shell? Every release ships cosign-signed checksums and SBOMs: <a href="/verify">verify a release in your browser</a> or with <code>cosign</code>, then run the binary you checked.</p>
 						<p>Or grab a prebuilt binary yourself. No toolchain required. Every release ships macOS, Linux, and Windows builds you can download and run.</p>
 						<div class="hero-cta">
 							<a class="btn" href="https://github.com/kordloom/switchtender/releases/latest">Download the latest release</a>
@@ -74,7 +121,7 @@
 					<div class="gs-num">2</div>
 					<div class="gs-body">
 						<h3>Serve</h3>
-						<p>Start the server. SQLite is the default. Point <code>--db</code> at a Postgres DSN when you want more than one instance. Set the encryption pair if you plan to store credentials.</p>
+						<p>Start the server. SQLite is the default. Point <code>--db</code> at a Postgres DSN when you want more than one instance. Set the encryption pair if you plan to store credentials. On a public address with no tokens yet, serve mints your initial admin token and prints it once, so the API requires auth from its very first request; only loopback may run open, and it says so.</p>
 						<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code><span class="c"># optional, only needed for stored secrets</span>
 export SWITCHTENDER_ENCRYPTION_KEY=change-me
 export SWITCHTENDER_ENCRYPTION_SALT=change-me-too
@@ -103,14 +150,15 @@ switchtender serve --addr :8080 --db switchtender.db</code></pre></div>
 				<li class="gs-step reveal">
 					<div class="gs-num">5</div>
 					<div class="gs-body">
-						<h3>Lock it down</h3>
-						<p>Mint an admin token. The moment the first token exists, the API requires auth, so create one before you expose the server, then send it as a bearer token.</p>
-						<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>switchtender token new --name admin --db switchtender.db</code></pre></div>
+						<h3>Name your tokens</h3>
+						<p>The server never listens openly on a network interface: step 2 already minted your initial admin token. Now mint named tokens for each person and each CI job, send them as bearer tokens, and retire the initial one so every credential in the audit trail names its owner.</p>
+						<div class="code"><button class="copy" aria-label="Copy">Copy</button><pre><code>switchtender token new --name admin --db switchtender.db
+switchtender token revoke &lt;initial-token-id&gt; --db switchtender.db</code></pre></div>
 					</div>
 				</li>
 			</ol>
 			<div class="gs-callout reveal">
-				<p><strong>Moving from another controller?</strong> AWX and Semaphore exports import your projects, inventories, templates, and schedules in one command. Ansible Automation Platform, Tower, and Ascender share the AWX export format. Rundeck is by hand for now.</p>
+				<p><strong>Moving from another controller?</strong> AWX, Semaphore, Rundeck, and Jenkins each import in one command: projects, inventories, templates, surveys, and schedules. Ansible Automation Platform, Tower, and Ascender share the AWX export format, and even a crontab imports into governed schedules.</p>
 				<a class="btn" href="/docs/switching-from-awx">Migration guide</a>
 			</div>
 		</section>

@@ -19,6 +19,52 @@
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 	<link rel="stylesheet" href="/styles.css?v=34">
+	<!-- st:entity -->
+	<script type="application/ld+json">
+{
+ "@context": "https://schema.org",
+ "@type": "SoftwareApplication",
+ "applicationCategory": "DeveloperApplication",
+ "description": "An agentless, single-binary automation controller for Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go, with enforced approval policies and a tamper-evident audit trail that can be verified offline.",
+ "featureList": [
+  "Agentless: reaches managed hosts over SSH with nothing installed on them",
+  "Runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go",
+  "Reads secrets from HashiCorp Vault KV v1 and v2, Vault dynamic secrets minted per run and revoked when it ends, AWS Secrets Manager, and Azure Key Vault",
+  "Per-object access grants: read, use, or manage on one project, template, inventory, or credential, layered over global roles",
+  "Single sign-on through OIDC and LDAP",
+  "Pipelines with a dependency graph and parallel branches, built in a drag-and-drop editor",
+  "Approval gates enforced by policy before a run executes",
+  "Tamper-evident hash-chained audit trail a third party can verify offline",
+  "Live host-by-task matrix and per-host history across runs",
+  "Drift detection from a dry run",
+  "One static Go binary and one SQLite file, with PostgreSQL optional",
+  "One-command import from AWX, Semaphore UI, Rundeck, Jenkins, and crontab"
+ ],
+ "license": "https://mariadb.com/bsl11/",
+ "name": "SwitchTender",
+ "offers": {
+  "@type": "Offer",
+  "price": "0",
+  "priceCurrency": "USD"
+ },
+ "operatingSystem": "Linux, macOS, Windows",
+ "publisher": {
+  "@type": "Organization",
+  "name": "KordLoom LLC",
+  "sameAs": [
+   "https://github.com/kordloom",
+   "https://www.linkedin.com/company/kordloom",
+   "https://x.com/kordloom"
+  ],
+  "url": "https://kordloom.com"
+ },
+ "sameAs": [
+  "https://github.com/kordloom/switchtender"
+ ],
+ "url": "https://switchtender.com/"
+}
+</script>
+	<!-- /st:entity -->
 </head>
 <body>
 	<div class="bg-mesh" aria-hidden="true"></div>
@@ -184,6 +230,60 @@
 			<p class="gs-note reveal">The <a href="/docs/switching-from-awx">switching guide</a> maps every AWX concept to its SwitchTender equivalent, and the <a href="/docs/migration">migration reference</a> covers the details.</p>
 		</section>
 
+		<!-- st:faq -->
+		<section class="section wrap">
+			<div class="section-head reveal">
+				<h2>Common questions</h2>
+				<p>The three asked most often when somebody is comparing this against what they already run.</p>
+			</div>
+			<div class="cards cards-3">
+				<article class="card reveal">
+					<h3>Does it need an agent on each host?</h3>
+					<p>No. It reaches the machines it manages over SSH, the same way Ansible does, and installs nothing on them. There is no per-host daemon to deploy, patch, or account for. You run the one server binary, and optionally a few more worker processes against the same store for throughput, which are pool members rather than agents belonging to a host.</p>
+				</article>
+				<article class="card reveal">
+					<h3>Can it read secrets from AWS Secrets Manager, Azure Key Vault, or Vault?</h3>
+					<p>All three, resolved at launch rather than copied into this database. Vault dynamic secrets go further: a short-lived credential is minted for each run and revoked when the run ends. AWS and Azure both authenticate from an instance role or managed identity with no stored key, and anything else resolves through a command whose output is the secret.</p>
+				</article>
+				<article class="card reveal">
+					<h3>Can I run a Terraform plan, hold it for approval, then run Ansible?</h3>
+					<p>Yes, and it is what pipelines are for here. Steps mix tools freely on a dependency graph with parallel branches, built on a drag-and-drop canvas. The approval is not a convention somebody can skip: a policy decides which runs are held, the core enforces the hold, and the approval binds to the exact plan reviewed, so a run cannot be approved as one thing and executed as another.</p>
+				</article>
+			</div>
+			<script type="application/ld+json">
+{
+ "@context": "https://schema.org",
+ "@type": "FAQPage",
+ "mainEntity": [
+  {
+   "@type": "Question",
+   "name": "Does it need an agent on each host?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "No. It reaches the machines it manages over SSH, the same way Ansible does, and installs nothing on them. There is no per-host daemon to deploy, patch, or account for. You run the one server binary, and optionally a few more worker processes against the same store for throughput, which are pool members rather than agents belonging to a host."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "Can it read secrets from AWS Secrets Manager, Azure Key Vault, or Vault?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "All three, resolved at launch rather than copied into this database. Vault dynamic secrets go further: a short-lived credential is minted for each run and revoked when the run ends. AWS and Azure both authenticate from an instance role or managed identity with no stored key, and anything else resolves through a command whose output is the secret."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "Can I run a Terraform plan, hold it for approval, then run Ansible?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "Yes, and it is what pipelines are for here. Steps mix tools freely on a dependency graph with parallel branches, built on a drag-and-drop canvas. The approval is not a convention somebody can skip: a policy decides which runs are held, the core enforces the hold, and the approval binds to the exact plan reviewed, so a run cannot be approved as one thing and executed as another."
+   }
+  }
+ ]
+}
+</script>
+		</section>
+		<!-- /st:faq -->
 		<section class="cta wrap reveal">
 			<h2>Time to make the switch.</h2>
 			<div class="hero-cta">

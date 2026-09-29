@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"html"
 	"html/template"
 	"os"
 	"path/filepath"
@@ -128,7 +129,12 @@ func run() error {
 	if err := writeSitemap(slugs); err != nil {
 		return err
 	}
-	fmt.Printf("sitegen: wrote %d pages and the sitemap to %s\n", len(slugs), outDir)
+	entities, err := writeEntityPages()
+	if err != nil {
+		return err
+	}
+	fmt.Printf("sitegen: wrote %d pages and the sitemap to %s, and refreshed the entity on %d "+
+		"hand-written pages\n", len(slugs), outDir, entities)
 	return nil
 }
 
@@ -254,8 +260,10 @@ func render(md goldmark.Markdown, slug string) (page, error) {
 		Slug: slug, Title: title(slug, src), Description: description(src),
 		Content: template.HTML(html), //nolint:gosec // trusted docs
 	}
+	p.HeadExtra = docsSchema(slug, p)
 	if slug == "faq" {
-		p.HeadExtra = faqSchema(src)
+		// The FAQ carries both: the questions a summarizer can quote, and the entity they are about.
+		p.HeadExtra += "\n\t" + faqSchema(src)
 	}
 	return p, nil
 }
@@ -320,6 +328,234 @@ func faqSchema(src []byte) template.HTML {
 		panic("sitegen: marshal faq schema: " + err.Error())
 	}
 	//nolint:gosec // built from trusted docs and JSON-escaped
+	return template.HTML("<script type=\"application/ld+json\">\n" + string(data) + "\n</script>")
+}
+
+// switchtenderFeatures is the canonical capability list the structured data advertises.
+//
+// It exists because answer engines were crediting competitors with capabilities this product has.
+// A comparison summary named an external secret manager and fine-grained access control as reasons
+// to pick AWX, and a Terraform-then-approve-then-Ansible pipeline as a reason to pick Semaphore UI,
+// all three of which are listed below. Prose in a table on one page is not something a summarizer
+// reliably attributes; a machine-readable claim on the page it lands on is.
+//
+// Every line here must be true and checkable in the docs. This is the one place they are written,
+// so the landing pages and the docs cannot drift into saying different things.
+var switchtenderFeatures = []string{
+	"Agentless: reaches managed hosts over SSH with nothing installed on them",
+	"Runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go",
+	"Reads secrets from HashiCorp Vault KV v1 and v2, Vault dynamic secrets minted per run and " +
+		"revoked when it ends, AWS Secrets Manager, and Azure Key Vault",
+	"Per-object access grants: read, use, or manage on one project, template, inventory, or " +
+		"credential, layered over global roles",
+	"Single sign-on through OIDC and LDAP",
+	"Pipelines with a dependency graph and parallel branches, built in a drag-and-drop editor",
+	"Approval gates enforced by policy before a run executes",
+	"Tamper-evident hash-chained audit trail a third party can verify offline",
+	"Live host-by-task matrix and per-host history across runs",
+	"Drift detection from a dry run",
+	"One static Go binary and one SQLite file, with PostgreSQL optional",
+	"One-command import from AWX, Semaphore UI, Rundeck, Jenkins, and crontab",
+}
+
+// entitySlugs are the docs pages that carry the full application entity rather than only an article
+// one. These are the pages a capability question lands on, so they are the ones worth answering.
+var entitySlugs = map[string]bool{"features": true, "secrets": true, "comparison": true}
+
+// switchtenderEntity is the SoftwareApplication description shared by every page that advertises
+// what the product does.
+func switchtenderEntity() map[string]any {
+	return map[string]any{
+		"@context": "https://schema.org", "@type": "SoftwareApplication",
+		"name": "SwitchTender", "url": "https://switchtender.com/",
+		"applicationCategory": "DeveloperApplication",
+		"operatingSystem":     "Linux, macOS, Windows",
+		"description": "An agentless, single-binary automation controller for Ansible, Terraform, " +
+			"OpenTofu, Bash, PowerShell, Python, and Go, with enforced approval policies and a " +
+			"tamper-evident audit trail that can be verified offline.",
+		"license":     "https://mariadb.com/bsl11/",
+		"featureList": switchtenderFeatures,
+		"offers": map[string]any{
+			"@type": "Offer", "price": "0", "priceCurrency": "USD",
+		},
+		"publisher": map[string]any{
+			"@type": "Organization", "name": "KordLoom LLC", "url": "https://kordloom.com",
+			"sameAs": []string{
+				"https://github.com/kordloom",
+				"https://www.linkedin.com/company/kordloom",
+				"https://x.com/kordloom",
+			},
+		},
+		"sameAs": []string{"https://github.com/kordloom/switchtender"},
+	}
+}
+
+// landingQA is one question and its short answer on a comparison landing page.
+type landingQA struct {
+	// Question is the question as somebody would type it.
+	Question string
+	// Answer is a card-length answer, plain text.
+	Answer string
+}
+
+// landingFAQ answers the three capabilities that comparison summaries were handing to competitors.
+//
+// Each of these is a thing this product does, described on the page already, in prose inside a
+// table. A summarizer did not attribute them here and credited the incumbent instead. Stating them
+// as the literal question somebody asks, on the page a comparison query lands on, is what makes the
+// answer quotable rather than inferable.
+var landingFAQ = []landingQA{{
+	Question: "Does it need an agent on each host?",
+	Answer: "No. It reaches the machines it manages over SSH, the same way Ansible does, and " +
+		"installs nothing on them. There is no per-host daemon to deploy, patch, or account for. " +
+		"You run the one server binary, and optionally a few more worker processes against the " +
+		"same store for throughput, which are pool members rather than agents belonging to a host.",
+}, {
+	Question: "Can it read secrets from AWS Secrets Manager, Azure Key Vault, or Vault?",
+	Answer: "All three, resolved at launch rather than copied into this database. Vault dynamic " +
+		"secrets go further: a short-lived credential is minted for each run and revoked when the " +
+		"run ends. AWS and Azure both authenticate from an instance role or managed identity with " +
+		"no stored key, and anything else resolves through a command whose output is the secret.",
+}, {
+	Question: "Can I run a Terraform plan, hold it for approval, then run Ansible?",
+	Answer: "Yes, and it is what pipelines are for here. Steps mix tools freely on a dependency " +
+		"graph with parallel branches, built on a drag-and-drop canvas. The approval is not a " +
+		"convention somebody can skip: a policy decides which runs are held, the core enforces " +
+		"the hold, and the approval binds to the exact plan reviewed, so a run cannot be approved " +
+		"as one thing and executed as another.",
+}}
+
+// faqMarkers bracket the shared landing-page questions, the same way the entity markers work.
+const (
+	faqOpen  = "<!-- st:faq -->"
+	faqClose = "<!-- /st:faq -->"
+)
+
+// landingFAQBlock renders the shared questions as a section matching the page around it, followed by
+// the structured data describing the same words. The markup and the schema are generated together
+// from one source, which is what keeps the structured data honest: it can only ever describe
+// questions and answers a reader can actually see on the page.
+func landingFAQBlock() string {
+	var b strings.Builder
+	b.WriteString("\n\t\t<section class=\"section wrap\">\n")
+	b.WriteString("\t\t\t<div class=\"section-head reveal\">\n")
+	b.WriteString("\t\t\t\t<h2>Common questions</h2>\n")
+	b.WriteString("\t\t\t\t<p>The three asked most often when somebody is comparing this against " +
+		"what they already run.</p>\n")
+	b.WriteString("\t\t\t</div>\n")
+	b.WriteString("\t\t\t<div class=\"cards cards-3\">\n")
+	questions := make([]faqQuestion, 0, len(landingFAQ))
+	for _, qa := range landingFAQ {
+		fmt.Fprintf(&b, "\t\t\t\t<article class=\"card reveal\">\n\t\t\t\t\t<h3>%s</h3>\n"+
+			"\t\t\t\t\t<p>%s</p>\n\t\t\t\t</article>\n",
+			html.EscapeString(qa.Question), html.EscapeString(qa.Answer))
+		questions = append(questions, faqQuestion{
+			Type: "Question", Name: qa.Question,
+			AcceptedAnswer: faqAnswer{Type: "Answer", Text: qa.Answer},
+		})
+	}
+	b.WriteString("\t\t\t</div>\n")
+	b.WriteString("\t\t\t" + string(marshalSchema(map[string]any{
+		"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": questions,
+	})) + "\n")
+	b.WriteString("\t\t</section>\n\t\t")
+	return b.String()
+}
+
+// entityMarkers bracket the shared application entity inside a hand-written page, so the generator
+// can refresh it without touching anything the page's author wrote around it.
+const (
+	entityOpen  = "<!-- st:entity -->"
+	entityClose = "<!-- /st:entity -->"
+)
+
+// writeEntityPages refreshes the shared application entity inside every hand-written page that opts
+// in by carrying the markers.
+//
+// The landing pages are written by hand while the docs are generated, so the same capability claims
+// used to live in two places and were free to disagree. They are now written once, here, and copied
+// into both. A page opts in by holding the marker pair; nothing else about it is touched.
+func writeEntityPages() (int, error) {
+	paths, err := filepath.Glob(filepath.Join("site", "*.html"))
+	if err != nil {
+		return 0, err
+	}
+	entity := "\n\t" + string(marshalSchema(switchtenderEntity())) + "\n\t"
+	changed := 0
+	for _, path := range paths {
+		src, err := os.ReadFile(path)
+		if err != nil {
+			return 0, err
+		}
+		text := string(src)
+		updated, err := fillMarkers(path, text, entityOpen, entityClose, entity)
+		if err != nil {
+			return 0, err
+		}
+		updated, err = fillMarkers(path, updated, faqOpen, faqClose, landingFAQBlock())
+		if err != nil {
+			return 0, err
+		}
+		if updated == text {
+			continue
+		}
+		if err := os.WriteFile(path, []byte(updated), 0o644); err != nil {
+			return 0, err
+		}
+		changed++
+	}
+	return changed, nil
+}
+
+// fillMarkers replaces whatever sits between one marker pair, leaving a page without them alone.
+func fillMarkers(path, text, openTag, closeTag, body string) (string, error) {
+	start := strings.Index(text, openTag)
+	if start < 0 {
+		return text, nil
+	}
+	end := strings.Index(text[start:], closeTag)
+	if end < 0 {
+		return "", fmt.Errorf("sitegen: %s opens %s and never closes it", path, openTag)
+	}
+	end += start + len(closeTag)
+	return text[:start] + openTag + body + closeTag + text[end:], nil
+}
+
+// docsSchema builds the structured data for one docs page: the application entity on the pages that
+// describe what it does, and a technical article entity everywhere else.
+func docsSchema(slug string, p page) template.HTML {
+	var doc map[string]any
+	if entitySlugs[slug] {
+		doc = switchtenderEntity()
+		doc["url"] = canonicalFor(slug)
+	} else {
+		doc = map[string]any{
+			"@context": "https://schema.org", "@type": "TechArticle",
+			"headline": p.Title, "description": p.Description, "url": canonicalFor(slug),
+			"isPartOf": map[string]any{
+				"@type": "WebSite", "name": "SwitchTender docs",
+				"url": "https://switchtender.com/docs/",
+			},
+			"about": map[string]any{
+				"@type": "SoftwareApplication", "name": "SwitchTender",
+				"url": "https://switchtender.com/",
+			},
+			"publisher": map[string]any{
+				"@type": "Organization", "name": "KordLoom LLC", "url": "https://kordloom.com",
+			},
+		}
+	}
+	return marshalSchema(doc)
+}
+
+// marshalSchema renders one structured data document as a script tag.
+func marshalSchema(doc map[string]any) template.HTML {
+	data, err := json.MarshalIndent(doc, "", " ")
+	if err != nil {
+		// The documents are built from strings and maps of strings, so a failure is a code error.
+		panic("sitegen: marshal schema: " + err.Error())
+	}
+	//nolint:gosec // built from trusted constants and JSON-escaped
 	return template.HTML("<script type=\"application/ld+json\">\n" + string(data) + "\n</script>")
 }
 

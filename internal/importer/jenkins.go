@@ -768,30 +768,56 @@ func jenkinsRange(s string) (int, int, bool) {
 	return a, b, true
 }
 
-// jenkinsWeekday renumbers a weekday token where Jenkins and standard cron disagree.
+// jenkinsWeekday renumbers a weekday term where Jenkins and standard cron disagree.
 //
-// Jenkins accepts both 0 and 7 for Sunday. The parser here rejects 7 outright, so a weekly job
-// written the second way would have been dropped as invalid rather than scheduled.
+// Jenkins numbers Sunday as both 0 and 7; the scheduler here accepts only 0 and rejects 7 outright,
+// so a term written the second way has to be rewritten or the schedule is dropped as invalid.
+//
+// Rewriting the digit in place is not enough, and quietly produced the wrong answer for the most
+// ordinary weekday term there is. Jenkins spells Monday through Sunday "1-7", and moving the seven
+// to a zero makes "1-0", a range that runs backwards. The scheduler refused it, the schedule was
+// dropped, and a job that ran every weekday plus the weekend simply stopped existing. A range
+// touching Sunday is split instead, because Sunday sits at the far end of the week in one numbering
+// and the near end in the other, and no single range spans both.
 func jenkinsWeekday(term string, idx int) string {
 	if idx != 4 {
 		return term
 	}
-	var b strings.Builder
-	for i := 0; i < len(term); i++ {
-		c := term[i]
-		// Only a 7 standing alone is Sunday; one inside 17 or 7-7 is a different number.
-		if c == '7' && !jenkinsDigitAt(term, i-1) && !jenkinsDigitAt(term, i+1) {
-			b.WriteByte('0')
+	body, step, hasStep := strings.Cut(term, "/")
+	lo, hi, isRange := strings.Cut(body, "-")
+	if !isRange {
+		if body == "7" && !hasStep {
+			return "0"
+		}
+		return term
+	}
+	a, errA := strconv.Atoi(strings.TrimSpace(lo))
+	b, errB := strconv.Atoi(strings.TrimSpace(hi))
+	if errA != nil || errB != nil || b != 7 {
+		// Names such as MON-FRI, and any range not reaching Sunday, are the same in both dialects.
+		return term
+	}
+	// The range reaches Sunday. Everything below it keeps its numbering; Sunday is listed separately.
+	if a >= 7 {
+		return "0"
+	}
+	days := make([]string, 0, 8)
+	stride := 1
+	if hasStep {
+		n, err := strconv.Atoi(strings.TrimSpace(step))
+		if err != nil || n < 1 {
+			return term
+		}
+		stride = n
+	}
+	for d := a; d <= 7; d += stride {
+		if d == 7 {
+			days = append(days, "0")
 			continue
 		}
-		b.WriteByte(c)
+		days = append(days, strconv.Itoa(d))
 	}
-	return b.String()
-}
-
-// jenkinsDigitAt reports whether the byte at i is a digit, treating out of range as not one.
-func jenkinsDigitAt(s string, i int) bool {
-	return i >= 0 && i < len(s) && s[i] >= '0' && s[i] <= '9'
+	return strings.Join(days, ",")
 }
 
 // jenkinsHash derives the value H stands for, from the job name and which field is being filled.

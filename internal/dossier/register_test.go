@@ -159,3 +159,27 @@ func TestRegisterRedactsAnInlineSecretInAScript(t *testing.T) {
 		t.Error("the rendered change register publishes a secret from the run's script")
 	}
 }
+
+// TestUnanchoredBannerNamesTheRemedy pins that the warning state teaches the one-command fix.
+//
+// The unanchored banner used to state the problem and stop: the record rests on this install
+// alone. A reader holding an evidence document is exactly the person who should learn that fixing
+// it is one command, and which command, or the warning is a shrug. The remedy is the product's own
+// free command, deliberately not a link: this document is handed to auditors, and evidence that
+// advertises is evidence that reads as marketing.
+func TestUnanchoredBannerNamesTheRemedy(t *testing.T) {
+	t.Parallel()
+	in := &RegisterInput{ChainOK: true, ChainCount: 3, Anchored: 0}
+	doc, err := RenderRegister(in)
+	if err != nil {
+		t.Fatalf("RenderRegister() error = %v", err)
+	}
+	for _, want := range []string{"unanchored", "switchtender audit anchor", "switchtender witness"} {
+		if !strings.Contains(string(doc), want) {
+			t.Errorf("the unanchored register does not mention %q", want)
+		}
+	}
+	if strings.Contains(string(doc), "switchtender.com/pricing") {
+		t.Error("an evidence document links to pricing, which turns evidence into marketing")
+	}
+}

@@ -3,7 +3,9 @@ package demo
 import (
 	"context"
 	"fmt"
+	"github.com/kordloom/switchtender/internal/audit"
 	"testing"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -117,5 +119,52 @@ func TestSeedGovernanceShowsTheGateHoldingAndReleasing(t *testing.T) {
 	if approver.approvedBy == released.Actor {
 		t.Errorf("run requested by %q and released by the same account, which the rule forbids",
 			released.Actor)
+	}
+}
+
+// TestSeedAnchorsDegradesToUnanchoredOffline covers the seeder's anchoring step when the authority
+// cannot be reached, and when none is configured at all.
+//
+// The demo seeds on laptops with no network and in tests that must stay hermetic, so an anchoring
+// failure has to leave a seeded, unanchored demo behind rather than a failed seed. The anchored
+// demo is proven the other way, by the live droplet reseeding nightly against a real authority; what
+// this pins is that the graceful path stays graceful, because an error return added here would take
+// every offline seed down with it.
+func TestSeedAnchorsDegradesToUnanchoredOffline(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := audit.NewMemStore()
+	anchorStore, ok := store.(audit.AnchorStore)
+	if !ok {
+		t.Fatal("the memory audit store no longer keeps anchors")
+	}
+	if err := store.Append(ctx, &audit.Entry{
+		Actor: "seed", Method: "POST", Path: "/api/demo", At: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+
+	// Test 0: an unreachable authority is a warning, not a failure, and saves nothing.
+	seedAnchors(ctx, Deps{
+		Audit: store, AnchorTSA: "http://127.0.0.1:1", InstallID: "install-demo",
+	}, zap.NewNop())
+	anchors, err := anchorStore.Anchors(ctx, 0)
+	if err != nil {
+		t.Fatalf("anchors: %v", err)
+	}
+	if len(anchors) != 0 {
+		t.Fatalf("anchors = %d, want none from an unreachable authority", len(anchors))
+	}
+
+	// Test 1: no authority configured skips silently, which is what hermetic seeds rely on.
+	seedAnchors(ctx, Deps{Audit: store, InstallID: "install-demo"}, zap.NewNop())
+	// Test 2: no install identity skips too, rather than minting an anchor bound to nothing.
+	seedAnchors(ctx, Deps{Audit: store, AnchorTSA: "http://127.0.0.1:1"}, zap.NewNop())
+	anchors, err = anchorStore.Anchors(ctx, 0)
+	if err != nil {
+		t.Fatalf("anchors: %v", err)
+	}
+	if len(anchors) != 0 {
+		t.Fatalf("anchors = %d, want none", len(anchors))
 	}
 }

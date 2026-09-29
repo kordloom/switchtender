@@ -1,0 +1,21 @@
+<?xml version='1.1' encoding='UTF-8'?>
+<project>
+  <description>Ünïcödé &lt;tag&gt; &amp; &quot;quotes&quot; &apos;single&apos; éè 中文 emoji ok</description>
+  <keepDependencies>false</keepDependencies>
+  <properties/>
+  <scm class="hudson.scm.NullSCM"/>
+  <canRoam>false</canRoam>
+  <disabled>false</disabled>
+  <blockBuildWhenDownstreamBuilding>false</blockBuildWhenDownstreamBuilding>
+  <blockBuildWhenUpstreamBuilding>false</blockBuildWhenUpstreamBuilding>
+  <triggers/>
+  <concurrentBuild>false</concurrentBuild>
+  <builders>
+    <hudson.tasks.Shell>
+      <command>echo &apos;&lt;xml&gt;&amp;amp;&lt;/xml&gt;&apos; &amp;&amp; echo &quot;中文&quot;</command>
+      <configuredLocalRules/>
+    </hudson.tasks.Shell>
+  </builders>
+  <publishers/>
+  <buildWrappers/>
+</project>

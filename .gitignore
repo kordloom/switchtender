@@ -61,3 +61,5 @@ witness-key.json
 # Built binaries
 /switchtender
 /sitegen
+/bench
+/embedded-witness

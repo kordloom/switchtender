@@ -3,6 +3,7 @@ package audit
 import (
 	"bytes"
 	"context"
+	"crypto"
 	cryptorand "crypto/rand"
 	"crypto/sha256"
 	"encoding/asn1"
@@ -36,6 +37,12 @@ var (
 	// key spelling that names its digest separately.
 	oidRSAEncryption   = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 1, 1}
 	oidSHA256WithRSA   = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 1, 11}
+	oidSHA384WithRSA   = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 1, 12}
+	oidSHA512WithRSA   = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 1, 13}
+	oidECDSAWithSHA384 = asn1.ObjectIdentifier{1, 2, 840, 10045, 4, 3, 3}
+	oidECDSAWithSHA512 = asn1.ObjectIdentifier{1, 2, 840, 10045, 4, 3, 4}
+	sha384OID          = asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 2, 2}
+	sha512OID          = asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 2, 3}
 	oidRSAPSS          = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 1, 10}
 	oidECPublicKey     = asn1.ObjectIdentifier{1, 2, 840, 10045, 2, 1}
 	oidECDSAWithSHA256 = asn1.ObjectIdentifier{1, 2, 840, 10045, 4, 3, 2}
@@ -469,7 +476,9 @@ type tsaSignerInfo struct {
 	// Version is 1 for an issuer-and-serial signer identifier.
 	Version int
 	// SID identifies the signing certificate. Only issuer and serial is read; a token identifying
-	// its signer by subject key identifier is refused rather than guessed at.
+	// its signer by subject key identifier is refused rather than guessed at. That is narrower than
+	// the format allows, and it fails closed, so a conforming token using the other form is reported
+	// as unreadable rather than accepted against the wrong certificate.
 	SID issuerAndSerial
 	// DigestAlgorithm is the hash the signed attributes were taken with.
 	DigestAlgorithm pkix.AlgorithmIdentifier
@@ -607,8 +616,13 @@ func checkSignedAttrs(info tsaSignerInfo, sd tsaSignedData) error {
 			if _, err := asn1.Unmarshal(attr.Values.Bytes, &got); err != nil {
 				return fmt.Errorf("decode the signed message digest: %w", err)
 			}
-			sum := sha256.Sum256(sd.EncapContentInfo.EContent)
-			if !bytes.Equal(got, sum[:]) {
+			hashFn, err := digestHash(info.DigestAlgorithm.Algorithm)
+			if err != nil {
+				return err
+			}
+			h := hashFn.New()
+			h.Write(sd.EncapContentInfo.EContent)
+			if !bytes.Equal(got, h.Sum(nil)) {
 				return fmt.Errorf("the signature covers a different payload than the token carries")
 			}
 			sawDigest = true
@@ -621,47 +635,131 @@ func checkSignedAttrs(info tsaSignerInfo, sd tsaSignedData) error {
 	return nil
 }
 
+// digestHash resolves the hash a signer declared for the payload it signed.
+//
+// This used to be hardcoded to SHA-256, on the reasoning that SHA-256 is what this product asks an
+// authority for. An authority is under no obligation to answer in the digest it was asked in, and
+// the default authority answers in SHA-512, so every token it returned was rejected as covering a
+// different payload. The digest is read from the token because the token is what has to verify.
+func digestHash(oid asn1.ObjectIdentifier) (crypto.Hash, error) {
+	switch {
+	case oid.Equal(sha256OID):
+		return crypto.SHA256, nil
+	case oid.Equal(sha384OID):
+		return crypto.SHA384, nil
+	case oid.Equal(sha512OID):
+		return crypto.SHA512, nil
+	default:
+		return 0, fmt.Errorf("the token is signed with digest %v, which is not one this reads", oid)
+	}
+}
+
 // signatureAlgorithm maps a signer's algorithm identifiers onto the algorithm x509 verifies with.
 //
 // A signature algorithm is either spelled out whole, or given as the bare key algorithm with the
-// digest named separately, so both spellings are resolved here. Only SHA-256 digests are accepted,
-// which is the digest this product requests and the only one the imprint check allows.
+// digest named separately, so both spellings are resolved here.
+//
+// SHA-384 and SHA-512 are accepted alongside SHA-256. Restricting this to SHA-256, on the reasoning
+// that SHA-256 is what this product asks for, meant the default authority could not be used at all:
+// it answers a SHA-256 request with a SHA-512 signature, which is its prerogative and which this
+// refused as unreadable.
 func signatureAlgorithm(info tsaSignerInfo) (x509.SignatureAlgorithm, error) {
 	switch {
 	case info.SignatureAlgorithm.Algorithm.Equal(oidSHA256WithRSA):
 		return x509.SHA256WithRSA, nil
+	case info.SignatureAlgorithm.Algorithm.Equal(oidSHA384WithRSA):
+		return x509.SHA384WithRSA, nil
+	case info.SignatureAlgorithm.Algorithm.Equal(oidSHA512WithRSA):
+		return x509.SHA512WithRSA, nil
 	case info.SignatureAlgorithm.Algorithm.Equal(oidECDSAWithSHA256):
 		return x509.ECDSAWithSHA256, nil
+	case info.SignatureAlgorithm.Algorithm.Equal(oidECDSAWithSHA384):
+		return x509.ECDSAWithSHA384, nil
+	case info.SignatureAlgorithm.Algorithm.Equal(oidECDSAWithSHA512):
+		return x509.ECDSAWithSHA512, nil
 	case info.SignatureAlgorithm.Algorithm.Equal(oidEd25519):
 		return x509.PureEd25519, nil
 	case info.SignatureAlgorithm.Algorithm.Equal(oidRSAPSS):
-		return x509.SHA256WithRSAPSS, nil
+		return rsaPSSFor(info.DigestAlgorithm.Algorithm)
 	case info.SignatureAlgorithm.Algorithm.Equal(oidRSAEncryption):
-		if !info.DigestAlgorithm.Algorithm.Equal(sha256OID) {
-			return 0, fmt.Errorf("the token is signed with digest %v, and only SHA-256 is accepted",
-				info.DigestAlgorithm.Algorithm)
-		}
-		return x509.SHA256WithRSA, nil
+		return rsaFor(info.DigestAlgorithm.Algorithm)
 	case info.SignatureAlgorithm.Algorithm.Equal(oidECPublicKey):
-		if !info.DigestAlgorithm.Algorithm.Equal(sha256OID) {
-			return 0, fmt.Errorf("the token is signed with digest %v, and only SHA-256 is accepted",
-				info.DigestAlgorithm.Algorithm)
-		}
-		return x509.ECDSAWithSHA256, nil
+		return ecdsaFor(info.DigestAlgorithm.Algorithm)
 	default:
 		return 0, fmt.Errorf("the token is signed with algorithm %v, which is not one this reads",
 			info.SignatureAlgorithm.Algorithm)
 	}
 }
 
+// rsaFor pairs a bare RSA key algorithm with the digest the signer declared.
+func rsaFor(digest asn1.ObjectIdentifier) (x509.SignatureAlgorithm, error) {
+	switch {
+	case digest.Equal(sha256OID):
+		return x509.SHA256WithRSA, nil
+	case digest.Equal(sha384OID):
+		return x509.SHA384WithRSA, nil
+	case digest.Equal(sha512OID):
+		return x509.SHA512WithRSA, nil
+	}
+	return 0, fmt.Errorf("the token is signed with digest %v, which is not one this reads", digest)
+}
+
+// rsaPSSFor pairs RSA-PSS with the digest the signer declared.
+func rsaPSSFor(digest asn1.ObjectIdentifier) (x509.SignatureAlgorithm, error) {
+	switch {
+	case digest.Equal(sha256OID):
+		return x509.SHA256WithRSAPSS, nil
+	case digest.Equal(sha384OID):
+		return x509.SHA384WithRSAPSS, nil
+	case digest.Equal(sha512OID):
+		return x509.SHA512WithRSAPSS, nil
+	}
+	return 0, fmt.Errorf("the token is signed with digest %v, which is not one this reads", digest)
+}
+
+// ecdsaFor pairs a bare EC key algorithm with the digest the signer declared.
+func ecdsaFor(digest asn1.ObjectIdentifier) (x509.SignatureAlgorithm, error) {
+	switch {
+	case digest.Equal(sha256OID):
+		return x509.ECDSAWithSHA256, nil
+	case digest.Equal(sha384OID):
+		return x509.ECDSAWithSHA384, nil
+	case digest.Equal(sha512OID):
+		return x509.ECDSAWithSHA512, nil
+	}
+	return 0, fmt.Errorf("the token is signed with digest %v, which is not one this reads", digest)
+}
+
 // findSigner returns the carried certificate the signer identifier names, or nil when it is absent.
 func findSigner(sid issuerAndSerial, certs []*x509.Certificate) *x509.Certificate {
 	for _, cert := range certs {
 		if cert.SerialNumber.Cmp(sid.Serial) == 0 && bytes.Equal(cert.RawIssuer, sid.Issuer.FullBytes) {
+			if !hasTimestamping(cert) {
+				return nil
+			}
 			return cert
 		}
 	}
+	// No fallback. The format states that a token whose named signer certificate is absent fails
+	// rather than being graded against another certificate the token happens to carry, because
+	// certificate order inside a token carries no meaning and the signer identifier is the only
+	// thing that says which certificate the authority signed with.
 	return nil
+}
+
+// hasTimestamping reports whether a certificate is authorized to sign timestamps.
+//
+// RFC 3161 requires a timestamp authority's certificate to carry the timestamping extended key
+// usage, and to mark it critical. Without this check any certificate a token happens to carry could
+// sign it, so a token could be signed by a certificate its issuer never authorized for the purpose,
+// and this would report it as a valid third-party attestation of time.
+func hasTimestamping(cert *x509.Certificate) bool {
+	for _, eku := range cert.ExtKeyUsage {
+		if eku == x509.ExtKeyUsageTimeStamping {
+			return true
+		}
+	}
+	return false
 }
 
 // tokenCertificates parses the certificate set a token carries.

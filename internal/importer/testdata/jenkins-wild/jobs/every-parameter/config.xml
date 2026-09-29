@@ -1,0 +1,66 @@
+<?xml version='1.1' encoding='UTF-8'?>
+<project>
+  <keepDependencies>false</keepDependencies>
+  <properties>
+    <hudson.model.ParametersDefinitionProperty>
+      <parameterDefinitions>
+        <hudson.model.StringParameterDefinition>
+          <name>STR</name>
+          <description>a string</description>
+          <defaultValue>s</defaultValue>
+          <trim>false</trim>
+        </hudson.model.StringParameterDefinition>
+        <hudson.model.TextParameterDefinition>
+          <name>TXT</name>
+          <description>multiline</description>
+          <defaultValue>line1
+line2</defaultValue>
+          <trim>false</trim>
+        </hudson.model.TextParameterDefinition>
+        <hudson.model.BooleanParameterDefinition>
+          <name>BOOL</name>
+          <description>a toggle</description>
+          <defaultValue>false</defaultValue>
+        </hudson.model.BooleanParameterDefinition>
+        <hudson.model.ChoiceParameterDefinition>
+          <name>CH</name>
+          <description>choices</description>
+          <choices>
+            <string>a</string>
+            <string>b</string>
+            <string>c</string>
+          </choices>
+        </hudson.model.ChoiceParameterDefinition>
+        <hudson.model.PasswordParameterDefinition>
+          <name>PW</name>
+          <description>secret</description>
+          <defaultValue>{AQAAABAAAAAQgBClf5H3C9YHFeI8Ogc5icfb5fKJT+dzBZU3QX9Sjjs=}</defaultValue>
+        </hudson.model.PasswordParameterDefinition>
+        <hudson.model.FileParameterDefinition>
+          <name>FILE</name>
+          <description>an upload</description>
+        </hudson.model.FileParameterDefinition>
+        <hudson.model.RunParameterDefinition>
+          <name>RUN</name>
+          <description>a build</description>
+          <projectName>many-timers</projectName>
+        </hudson.model.RunParameterDefinition>
+      </parameterDefinitions>
+    </hudson.model.ParametersDefinitionProperty>
+  </properties>
+  <scm class="hudson.scm.NullSCM"/>
+  <canRoam>false</canRoam>
+  <disabled>false</disabled>
+  <blockBuildWhenDownstreamBuilding>false</blockBuildWhenDownstreamBuilding>
+  <blockBuildWhenUpstreamBuilding>false</blockBuildWhenUpstreamBuilding>
+  <triggers/>
+  <concurrentBuild>false</concurrentBuild>
+  <builders>
+    <hudson.tasks.Shell>
+      <command>echo $STR</command>
+      <configuredLocalRules/>
+    </hudson.tasks.Shell>
+  </builders>
+  <publishers/>
+  <buildWrappers/>
+</project>

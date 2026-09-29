@@ -142,6 +142,10 @@ type BundleClaim struct {
 	// Inclusion is the audit path proving this claim belongs to the tree the head names. Tree
 	// profile only, and required on every claim there.
 	Inclusion *BundleInclusion `json:"inclusion,omitempty"`
+	// source is the bytes this claim was decoded from, when it came from a document rather than
+	// being built here. A leaf commits to every member a claim carries, and a typed struct silently
+	// drops members it does not declare, so the bytes are kept to build the leaf from.
+	source []byte
 }
 
 // BundleCoordLink is a claim's chain coordinates.
@@ -399,4 +403,21 @@ func SignBundleDoc(b *Bundle, priv ed25519.PrivateKey) ([]byte, error) {
 		return nil, fmt.Errorf("%w: sign bundle: %w", ErrExport, err)
 	}
 	return signed, nil
+}
+
+// UnmarshalJSON decodes a claim and keeps the bytes it came from.
+//
+// The leaf a claim commits to is defined by removing a fixed set of members, not by listing the ones
+// this build happens to know. Decoding into the struct and rebuilding from its fields silently drops
+// anything else the claim carried, so a claim holding a member this version does not model hashed to
+// a different leaf here than at the reference, and its receipt stopped verifying.
+func (c *BundleClaim) UnmarshalJSON(data []byte) error {
+	type plain BundleClaim
+	var p plain
+	if err := json.Unmarshal(data, &p); err != nil {
+		return err
+	}
+	*c = BundleClaim(p)
+	c.source = append([]byte(nil), data...)
+	return nil
 }

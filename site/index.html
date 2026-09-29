@@ -12,21 +12,52 @@
 	<meta property="og:image" content="https://switchtender.com/assets/switchtender-social-preview.png?v=9">
 	<meta name="twitter:card" content="summary_large_image">
 	<link rel="canonical" href="https://switchtender.com/">
+	<!-- st:entity -->
 	<script type="application/ld+json">
-	{
-		"@context": "https://schema.org",
-		"@type": "SoftwareApplication",
-		"name": "SwitchTender",
-		"url": "https://switchtender.com/",
-		"applicationCategory": "DeveloperApplication",
-		"operatingSystem": "Linux, macOS, Windows",
-		"description": "Run everything, watch every host, prove every change. Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go in one Go binary with a live host-by-task matrix, a tamper-evident audit trail, and enforced approval policies.",
-		"license": "https://mariadb.com/bsl11/",
-		"offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
-		"publisher": { "@type": "Organization", "name": "KordLoom LLC", "url": "https://kordloom.com", "sameAs": ["https://github.com/kordloom", "https://www.linkedin.com/company/kordloom", "https://x.com/kordloom"] },
-		"sameAs": ["https://github.com/kordloom/switchtender"]
-	}
-	</script>
+{
+ "@context": "https://schema.org",
+ "@type": "SoftwareApplication",
+ "applicationCategory": "DeveloperApplication",
+ "description": "An agentless, single-binary automation controller for Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go, with enforced approval policies and a tamper-evident audit trail that can be verified offline.",
+ "featureList": [
+  "Agentless: reaches managed hosts over SSH with nothing installed on them",
+  "Runs Ansible, Terraform, OpenTofu, Bash, PowerShell, Python, and Go",
+  "Reads secrets from HashiCorp Vault KV v1 and v2, Vault dynamic secrets minted per run and revoked when it ends, AWS Secrets Manager, and Azure Key Vault",
+  "Per-object access grants: read, use, or manage on one project, template, inventory, or credential, layered over global roles",
+  "Single sign-on through OIDC and LDAP",
+  "Pipelines with a dependency graph and parallel branches, built in a drag-and-drop editor",
+  "Approval gates enforced by policy before a run executes",
+  "Tamper-evident hash-chained audit trail a third party can verify offline",
+  "Live host-by-task matrix and per-host history across runs",
+  "Drift detection from a dry run",
+  "One static Go binary and one SQLite file, with PostgreSQL optional",
+  "One-command import from AWX, Semaphore UI, Rundeck, Jenkins, and crontab"
+ ],
+ "license": "https://mariadb.com/bsl11/",
+ "name": "SwitchTender",
+ "offers": {
+  "@type": "Offer",
+  "price": "0",
+  "priceCurrency": "USD"
+ },
+ "operatingSystem": "Linux, macOS, Windows",
+ "publisher": {
+  "@type": "Organization",
+  "name": "KordLoom LLC",
+  "sameAs": [
+   "https://github.com/kordloom",
+   "https://www.linkedin.com/company/kordloom",
+   "https://x.com/kordloom"
+  ],
+  "url": "https://kordloom.com"
+ },
+ "sameAs": [
+  "https://github.com/kordloom/switchtender"
+ ],
+ "url": "https://switchtender.com/"
+}
+</script>
+	<!-- /st:entity -->
 	<link rel="icon" href="/favicon.ico" sizes="any">
 	<link rel="icon" type="image/png" href="/assets/favicon.png?v=2">
 	<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
@@ -74,14 +105,14 @@
 					SwitchTender is the boundary every change comes through, human operator or AI
 					agent. Nothing runs until it clears one path: request, policy, approval. Then
 					watch every task land on every host, live. Every run leaves behind a
-					cryptographically signed receipt anyone can verify offline, without us.
+					cryptographically signed receipt anyone can verify offline against our published key, with no server of ours involved.
 					<strong>One binary. Starts in seconds.</strong>
 				</p>
 				<div class="hero-cta">
 					<a class="btn big" href="https://demo.switchtender.com">Open the live demo</a>
 					<a class="ghost big" href="/get-started">Install</a>
 				</div>
-				<p class="hero-note hero-dare">Don't take the receipts on faith. Pull the live demo's signed history with <code>curl</code> and check it with a verifier that isn't ours. <a href="#proof">Try to refute it &rarr;</a></p>
+				<p class="hero-note hero-dare">Don't take the receipts on faith. Pull the live demo's signed history with <code>curl</code> and check it with the open LoomSeal verifier: Apache-2.0, a published format with conformance vectors, and an independent Python reference, so you are not taking our binary's word for it. <a href="#proof">Try to refute it &rarr;</a></p>
 				<p class="hero-note">Already on AWX? <code>switchtender import awx</code> brings your projects, inventories, templates, surveys, and schedules across in one command. Preview the plan, then apply.</p>
 				<p class="hero-note">Source-available. BSL 1.1. Go SDK with drop-in plugins. One file to back up.</p>
 			</div>
@@ -158,7 +189,7 @@
 				<article class="card reveal">
 					<div class="ic ic-drift"></div>
 					<h3>Drift detection</h3>
-					<p>A dry run shows exactly what has drifted, across Ansible hosts and Terraform directories, before you touch a thing. One click builds the fix, held for approval. No other Ansible controller does either, and the Terraform control planes that do detect drift do not govern your Ansible fleet beside it.</p>
+					<p>A dry run shows exactly what has drifted, across Ansible hosts and Terraform directories, before you touch a thing. One click builds the fix, held for approval. None of the controllers in our comparison document it, and the Terraform control planes that do detect drift do not govern your Ansible fleet beside it.</p>
 				</article>
 				<article class="card reveal">
 					<div class="ic ic-gate"></div>
@@ -404,7 +435,7 @@ func main() {
 		<section class="section wrap" id="migrate">
 			<div class="section-head reveal">
 				<h2>Bring the whole thing<br>with you.</h2>
-				<p>A migration is one command, not a rebuild. AWX and Semaphore each have an importer, and Ansible Automation Platform, Tower, and Ascender export through the same awxkit command with the same top-level keys, so the same importer reads them. Rundeck has no importer yet, so that move is still by hand. Export, preview exactly what will land, then apply. Projects, inventories with their hosts and groups, dynamic inventory sources, job templates, surveys, schedules, and credential shells all come across in one pass. A malformed asset is skipped with a warning instead of failing the import, so even a partial export migrates everything it can.</p>
+				<p>A migration is one command, not a rebuild. AWX, Semaphore, Rundeck, and Jenkins each have an importer, and Ansible Automation Platform, Tower, and Ascender export through the same awxkit command with the same top-level keys, so the AWX importer reads them too. Even a crontab imports, line by line, into governed schedules. Export, preview exactly what will land, then apply. Projects, inventories with their hosts and groups, dynamic inventory sources, job templates, surveys, schedules, and credential shells all come across in one pass. A malformed asset is skipped with a warning instead of failing the import, so even a partial export migrates everything it can.</p>
 			</div>
 			<div class="code reveal">
 				<button class="copy" aria-label="Copy">Copy</button>
