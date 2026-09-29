@@ -180,6 +180,15 @@ func WithShutdown(ctx context.Context) Option {
 // guarded by the worker token. A relay worker in an isolated segment dials them over one outbound
 // connection to lease and execute runs without a path to the database. An empty token leaves the
 // endpoints off, so the mesh is opt-in.
+// WithWorkerPools confines each worker token to the queues it may lease from.
+//
+// A queue routes work to the segment that can reach it, so the queues a token may claim are that
+// token's blast radius. One shared token made the least trusted worker in the estate a path to the
+// most trusted queue. Set this and a token that serves the DMZ cannot lease a production run.
+func WithWorkerPools(pools *relay.Pools) Option {
+	return func(srv *Server) { srv.workerPools = pools }
+}
+
 func WithRelay(store run.Store, workerToken string) Option {
 	return func(srv *Server) {
 		srv.relayStore = store
@@ -340,8 +349,12 @@ type Server struct {
 	// relayStore backs the mesh relay worker endpoints when a worker token is set, nil when the
 	// relay is off.
 	relayStore run.Store
-	// workerToken guards the mesh relay worker endpoints, empty when the relay is off.
+	// workerToken guards the mesh relay worker endpoints, empty when the relay is off. It is the
+	// single-pool form: one token, every queue.
 	workerToken string
+	// workerPools confines each worker token to the queues it may lease from, nil when the install
+	// uses the single-token form.
+	workerPools *relay.Pools
 	// shutdown is canceled when the process begins draining, ending live streams. Nil when unset,
 	// which leaves a stream running until its run ends or its client goes away.
 	shutdown context.Context
@@ -514,8 +527,12 @@ func (s *Server) Handler() http.Handler {
 	if s.readOnly {
 		handler = readOnlyGate(handler)
 	}
-	if s.relayStore != nil && s.workerToken != "" {
-		handler = relayGate(relay.NewHandler(s.relayStore, s.workerToken, s.log, s.policies), handler)
+	if s.relayStore != nil && (s.workerToken != "" || s.workerPools != nil) {
+		pools := s.workerPools
+		if pools == nil {
+			pools = relay.SinglePool(s.workerToken)
+		}
+		handler = relayGate(relay.NewHandler(s.relayStore, pools, s.log, s.policies), handler)
 	}
 	return securityHeaders(bodyLimit(handler))
 }

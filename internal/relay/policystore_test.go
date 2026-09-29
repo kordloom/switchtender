@@ -15,7 +15,7 @@ import (
 // dialing it, so a test reads policies the way a relay worker does.
 func newPolicyRelay(t *testing.T, policies policy.Store) *relay.PolicyClient {
 	t.Helper()
-	ts := httptest.NewServer(relay.NewHandler(run.NewMemStore(), testWorkerToken, nil, policies))
+	ts := httptest.NewServer(relay.NewHandler(run.NewMemStore(), relay.SinglePool(testWorkerToken), nil, policies))
 	t.Cleanup(ts.Close)
 	return relay.NewPolicyClient(relay.NewHTTPTransport(ts.URL, testWorkerToken, ts.Client()))
 }
@@ -67,7 +67,7 @@ func TestRelayWorkerReadsTheRealPolicies(t *testing.T) {
 // passed, so the caller must be able to tell the two apart.
 func TestRelayPolicyClientFailsClosedWhenItCannotAsk(t *testing.T) {
 	t.Parallel()
-	ts := httptest.NewServer(relay.NewHandler(run.NewMemStore(), testWorkerToken, nil, nil))
+	ts := httptest.NewServer(relay.NewHandler(run.NewMemStore(), relay.SinglePool(testWorkerToken), nil, nil))
 	ts.Close() // Nothing is listening, which is what a severed segment looks like.
 
 	c := relay.NewPolicyClient(relay.NewHTTPTransport(ts.URL, testWorkerToken, ts.Client()))

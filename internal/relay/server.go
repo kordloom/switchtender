@@ -1,12 +1,12 @@
 package relay
 
 import (
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 
 	"go.uber.org/zap"
 
@@ -48,28 +48,28 @@ type relayServer struct {
 	policies policy.Store
 	// store is the shared run store the worker's calls read and write.
 	store run.Store
-	// token is the worker bearer token every call must present.
-	token string
+	// pools maps a presented token to the worker pool it belongs to and the queues that pool may
+	// lease from.
+	pools *Pools
 	// log records server-side faults, never token material.
 	log *zap.Logger
 }
 
 // NewHandler returns an http.Handler that serves the Transport methods over the run store, guarded
-// by the worker bearer token. Mount it on the control node so relay workers have a path to the
-// shared store. It panics on a nil store or an empty token, both wiring errors; a nil logger becomes
-// a no-op.
-func NewHandler(store run.Store, token string, log *zap.Logger,
+// by the worker pools. Mount it on the control node so relay workers have a path to the shared
+// store. It panics on a nil store or no pools, both wiring errors; a nil logger becomes a no-op.
+func NewHandler(store run.Store, pools *Pools, log *zap.Logger,
 	policies policy.Store) http.Handler {
 	if store == nil {
 		panic("relay: Store required")
 	}
-	if token == "" {
-		panic("relay: worker token required")
+	if pools == nil || len(pools.pools) == 0 {
+		panic("relay: at least one worker pool required")
 	}
 	if log == nil {
 		log = zap.NewNop()
 	}
-	s := &relayServer{store: store, token: token, log: log, policies: policies}
+	s := &relayServer{store: store, pools: pools, log: log, policies: policies}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /relay/v1/policies", s.listPolicies)
 	mux.HandleFunc("POST /relay/v1/claim", s.claim)
@@ -88,11 +88,14 @@ func NewHandler(store run.Store, token string, log *zap.Logger,
 func (s *relayServer) authed(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		presented := auth.FromHeader(r.Header.Get("Authorization"))
-		if subtle.ConstantTimeCompare([]byte(presented), []byte(s.token)) != 1 {
+		pool := s.pools.resolve(presented)
+		if pool == nil {
 			writeErr(w, http.StatusUnauthorized, "unauthorized")
 			return
 		}
-		next.ServeHTTP(w, r)
+		// The pool travels with the request so the claim can hold the queues asked for against the
+		// queues this token may lease from.
+		next.ServeHTTP(w, r.WithContext(withPool(r.Context(), pool)))
 	})
 }
 
@@ -103,6 +106,17 @@ func (s *relayServer) claim(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid claim body")
 		return
+	}
+	// A worker names the queues it serves, and the token decides which of those it may have. Serving
+	// whatever was asked for made a queue a routing hint rather than a boundary: any worker holding
+	// the shared token could lease from any queue, so the least trusted machine in the estate could
+	// take a production run and execute it with production credentials.
+	if pool := poolFrom(r.Context()); pool != nil {
+		if q, ok := pool.allows(body.Queues); !ok {
+			writeErr(w, http.StatusForbidden,
+				"this worker token does not serve queue "+strconv.Quote(q))
+			return
+		}
 	}
 	leased, err := s.store.Claim(r.Context(), body.Owner, body.Queues)
 	switch {

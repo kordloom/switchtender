@@ -117,7 +117,8 @@ Runs the HTTP API, the in-process executor, the scheduler, the retention sweeper
 | `--read-only` | `false` | Reject every mutating request, for a safely exposable instance. |
 | `--matrix-cap` | `50000` | Largest host matrix, in cells, the UI draws before showing a notice. 0 means no limit. |
 | `--plugins-dir` | none | Directory of extension plugin binaries loaded at startup. Also `SWITCHTENDER_PLUGINS_DIR`. See [Extend in Go](sdk.md). |
-| `--worker-token` | none | Bearer token that authenticates mesh relay workers and enables the relay endpoints. Also `SWITCHTENDER_WORKER_TOKEN`. Keep it secret. |
+| `--worker-token` | none | Bearer token that authenticates mesh relay workers and enables the relay endpoints. Also `SWITCHTENDER_WORKER_TOKEN`. Keep it secret. On its own, every worker holding it may lease from every queue. |
+| `--worker-pools` | none | YAML file binding each worker token to the queues it may lease from, so a queue is a boundary rather than a routing hint. |
 | `--retain-runs` | none | Delete terminal runs older than this, for example `90d`. Empty keeps them forever. |
 | `--retain-events` | none | Drop run events and logs older than this, for example `30d`. Empty keeps them forever. |
 | `--retention-interval` | `1h` | How often the retention sweeper runs. |
@@ -248,3 +249,30 @@ Prints the SwitchTender version.
 | Flag | Purpose |
 |------|---------|
 | `--pretty` | Indent JSON output instead of the compact default. |
+
+
+## Confining relay workers to their queues
+
+A relay worker runs in a segment the control node cannot reach, which means the least trusted machine
+in the estate holds a worker token. With a single `--worker-token`, that machine may name any queue
+it likes and lease from it, so a compromised host in a DMZ can take a production run and execute it
+with production credentials.
+
+`--worker-pools` binds each token to the queues it may serve. The file stores the SHA-256 of each
+token, never the token itself, the same way a webhook secret is stored:
+
+    workers:
+      - name: dmz
+        token_sha256: 9f2c...           # sha256 of that pool's bearer token
+        queues: [dmz]
+      - name: production
+        token_sha256: 41ab...
+        queues: [prod, canary]
+
+A pool that declares no queues may lease from all of them, which is the single-token shape stated
+out loud. A pool that declares queues is refused anything else, including the default queue when it
+names none, so confinement cannot be escaped by omission.
+
+Generate a digest with `printf %s "$TOKEN" | shasum -a 256`. A malformed file stops the server rather
+than falling back to no confinement, because an install that believes it is segmented and is not is
+worse than one that refuses to start.

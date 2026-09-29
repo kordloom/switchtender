@@ -34,6 +34,7 @@ import (
 	"github.com/kordloom/switchtender/internal/pgstore"
 	"github.com/kordloom/switchtender/internal/policy"
 	"github.com/kordloom/switchtender/internal/project"
+	"github.com/kordloom/switchtender/internal/relay"
 	"github.com/kordloom/switchtender/internal/retention"
 	"github.com/kordloom/switchtender/internal/roundhouse"
 	"github.com/kordloom/switchtender/internal/run"
@@ -153,6 +154,10 @@ var serveStrictGrants bool
 
 // serveReadOnly holds the value of the --read-only flag.
 var serveReadOnly bool
+
+// serveWorkerPools holds the value of the --worker-pools flag. It confines each worker token to the
+// queues it may lease from, which is what turns a queue from a routing hint into a boundary.
+var serveWorkerPools string
 
 // serveWorkerToken holds the value of the --worker-token flag. The mesh relay worker endpoints turn
 // on when it or SWITCHTENDER_WORKER_TOKEN is set.
@@ -425,6 +430,9 @@ func init() {
 		"Deny non-admins access to an object that has no grants, instead of deferring to the role.")
 	serveCmd.Flags().BoolVar(&serveReadOnly, "read-only", false,
 		"Reject every mutating request, for a safely exposable instance.")
+	serveCmd.Flags().StringVar(&serveWorkerPools, "worker-pools", "",
+		"YAML file binding each worker token to the queues it may lease from. Without it every "+
+			"worker token may lease from every queue.")
 	serveCmd.Flags().StringVar(&serveWorkerToken, "worker-token", "",
 		"Bearer token that authenticates mesh relay workers and enables the relay endpoints. "+
 			"Also SWITCHTENDER_WORKER_TOKEN. Keep it secret.")
@@ -822,8 +830,22 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	if workerToken() != "" {
-		log.Info("mesh relay worker endpoints enabled")
+	// Worker pools are loaded before the server is built, so a malformed file refuses to start
+	// rather than quietly falling back to one token that may lease from every queue.
+	var workerPools *relay.Pools
+	if serveWorkerPools != "" {
+		workerPools, err = relay.LoadPools(serveWorkerPools)
+		if err != nil {
+			return err
+		}
+	}
+	switch {
+	case workerPools != nil:
+		log.Info("mesh relay worker endpoints enabled, each token confined to its own queues",
+			zap.String("pools", serveWorkerPools))
+	case workerToken() != "":
+		log.Info("mesh relay worker endpoints enabled; every worker token may lease from every " +
+			"queue, so set --worker-pools to confine them")
 	}
 
 	// The signal context is established before the server is built so live streams can watch it and
@@ -854,6 +876,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			server.WithGrants(bundle.Grants(), serveStrictGrants),
 			server.WithReadOnly(serveReadOnly),
 			server.WithRelay(store, workerToken()),
+			server.WithWorkerPools(workerPools),
 			server.WithMatrixCap(serveMatrixCap),
 			server.WithOIDC(oidcAuth),
 			server.WithSAML(samlAuth),
