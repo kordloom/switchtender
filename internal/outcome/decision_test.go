@@ -419,9 +419,9 @@ func TestCommitDecisionRecordsTheDecidingActorAndTheBody(t *testing.T) {
 			before := time.Now().Add(-time.Second)
 
 			specDigest, err := CommitDecision(ctx, audits, r, test.Verdict, test.Actor,
-				test.ActorType)
+				test.ActorType, time.Now)
 			if err != nil {
-				t.Fatalf("CommitDecision() error = %v", err)
+				t.Fatalf("CommitDecision(, time.Now) error = %v", err)
 			}
 
 			chain, err := audits.Chain(ctx)
@@ -478,12 +478,12 @@ func TestCommitDecisionFailsClosedWhenTheChainRefuses(t *testing.T) {
 	t.Parallel()
 	audits := &failingAudits{Store: audit.NewMemStore()}
 	specDigest, err := CommitDecision(context.Background(), audits, decisionRun(), "approved",
-		"operator-jane", "session")
+		"operator-jane", "session", time.Now)
 	if !errors.Is(err, errAppend) {
-		t.Fatalf("CommitDecision() error = %v, want the store's refusal reported", err)
+		t.Fatalf("CommitDecision(, time.Now) error = %v, want the store's refusal reported", err)
 	}
 	if specDigest != "" {
-		t.Errorf("CommitDecision() returned the spec digest %q beside its error, which a caller "+
+		t.Errorf("CommitDecision(, time.Now) returned the spec digest %q beside its error, which a caller "+
 			"would stamp on the run as though the decision were recorded", specDigest)
 	}
 	if audits.appends != 1 {
@@ -501,12 +501,12 @@ func TestCommitDecisionWritesNothingWhenTheSpecWillNotEncode(t *testing.T) {
 	r := decisionRun()
 	r.ExtraVars = map[string]any{"ratio": math.Inf(1)}
 
-	specDigest, err := CommitDecision(ctx, audits, r, "approved", "operator-jane", "session")
+	specDigest, err := CommitDecision(ctx, audits, r, "approved", "operator-jane", "session", time.Now)
 	if err == nil {
-		t.Fatal("CommitDecision() on an unencodable spec = nil error")
+		t.Fatal("CommitDecision(, time.Now) on an unencodable spec = nil error")
 	}
 	if specDigest != "" {
-		t.Errorf("CommitDecision() returned the spec digest %q beside its error", specDigest)
+		t.Errorf("CommitDecision(, time.Now) returned the spec digest %q beside its error", specDigest)
 	}
 	chain, err := audits.Chain(ctx)
 	if err != nil {
@@ -552,8 +552,8 @@ func TestCommitDecisionKeepsUnusualRunIdentifiersOutOfTheChainPathVerbatim(t *te
 			r := decisionRun()
 			r.ID = test.RunID
 
-			if _, err := CommitDecision(ctx, audits, r, test.Verdict, "op", "session"); err != nil {
-				t.Fatalf("CommitDecision() error = %v", err)
+			if _, err := CommitDecision(ctx, audits, r, test.Verdict, "op", "session", time.Now); err != nil {
+				t.Fatalf("CommitDecision(, time.Now) error = %v", err)
 			}
 			chain, err := audits.Chain(ctx)
 			if err != nil {
@@ -594,7 +594,7 @@ func TestCommitDecisionIsSafeUnderConcurrentApprovals(t *testing.T) {
 			r := decisionRun()
 			r.ID = fmt.Sprintf("run_%02d", n)
 			if _, err := CommitDecision(ctx, audits, r, "approved",
-				fmt.Sprintf("operator-%02d", n), "session"); err != nil {
+				fmt.Sprintf("operator-%02d", n), "session", time.Now); err != nil {
 				errs <- err
 			}
 		}(i)
@@ -602,7 +602,7 @@ func TestCommitDecisionIsSafeUnderConcurrentApprovals(t *testing.T) {
 	wg.Wait()
 	close(errs)
 	for err := range errs {
-		t.Errorf("CommitDecision() error = %v", err)
+		t.Errorf("CommitDecision(, time.Now) error = %v", err)
 	}
 
 	chain, err := audits.Chain(ctx)

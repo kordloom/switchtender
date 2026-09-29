@@ -117,7 +117,7 @@ func DecisionBody(r *run.Run, verdict string) (body []byte, specDigest string, e
 // appends it before releasing the run, fail-closed: a decision that cannot be recorded is not a
 // decision this system acts on.
 func CommitDecision(ctx context.Context, audits audit.Store, r *run.Run, verdict, actor,
-	actorType string) (string, error) {
+	actorType string, now func() time.Time) (string, error) {
 	body, specDigest, err := DecisionBody(r, verdict)
 	if err != nil {
 		return "", err
@@ -127,7 +127,7 @@ func CommitDecision(ctx context.Context, audits audit.Store, r *run.Run, verdict
 		return "", err
 	}
 	entry := &audit.Entry{
-		ID: audit.NewID(), At: time.Now(),
+		ID: audit.NewID(), At: now(),
 		Actor: actor, ActorType: actorType,
 		Method: audit.MethodDecision, Path: "/runs/" + r.ID + "/decision/" + verdict,
 		ContentDigest: digest, Nonce: nonce,

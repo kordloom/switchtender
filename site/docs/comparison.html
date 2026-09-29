@@ -128,7 +128,7 @@ set rather than by not finding it.</p>
 <td>PostgreSQL 15 [2]</td>
 <td>SQLite, MySQL or Postgres [3]</td>
 <td>PostgreSQL [4]</td>
-<td>H2, not for production [5]</td>
+<td>H2 by default; MySQL, MariaDB, Postgres, MSSQL, Oracle [5]</td>
 </tr>
 <tr>
 <td>Other runtime services</td>
@@ -375,7 +375,7 @@ than &quot;structured versus scrollback&quot;.</p>
 </tr>
 <tr>
 <td>Credentials</td>
-<td>Sealed with AES-256-GCM under a key derived by Argon2id, decrypted only at execution into the run's environment or a temporary file created mode 0600, kept off the command line either way, and deleted when the run ends. Fourteen credential kinds and eleven sources, nine of them external secret managers: HashiCorp Vault static and dynamic, AWS Secrets Manager and STS, Azure Key Vault, GCP Secret Manager, CyberArk Conjur and CCP, and 1Password. Several credentials of different kinds attach to one run. AWX matches this through credential plugins. Semaphore's built-in key store holds an SSH key or a username and password; HashiCorp Vault support is in its paid Pro tier, and no other external manager is offered.</td>
+<td>Sealed with AES-256-GCM under a key derived by Argon2id, decrypted only at execution into the run's environment or a temporary file created mode 0600, kept off the command line either way, and deleted when the run ends. Fourteen credential kinds and eleven sources, nine of them external secret managers: HashiCorp Vault static and dynamic, AWS Secrets Manager and STS, Azure Key Vault, GCP Secret Manager, CyberArk Conjur and CCP, and 1Password. Several credentials of different kinds attach to one run. AWX matches this through credential plugins. Semaphore's built-in key store holds an SSH key or a username and password, and secrets can instead live in an external HashiCorp Vault, OpenBao, AWS Secrets Manager, Azure Key Vault, or Devolutions Server.</td>
 </tr>
 <tr>
 <td>Scheduling</td>

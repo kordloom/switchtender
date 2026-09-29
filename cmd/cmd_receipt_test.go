@@ -57,8 +57,8 @@ func TestReceiptProduceAndVerifyOffline(t *testing.T) {
 	// The approval decision lands on the chain between creation and outcome, binding the approver
 	// to the spec digest, exactly as the dispatcher commits it.
 	if _, err := outcome.CommitDecision(ctx, store.Audits(), r, "approved",
-		"approver-pat", "session"); err != nil {
-		t.Fatalf("CommitDecision() error = %v", err)
+		"approver-pat", "session", time.Now); err != nil {
+		t.Fatalf("CommitDecision(, time.Now) error = %v", err)
 	}
 	if err := store.Runs().AppendLog(ctx, "run_demo", []byte("PLAY RECAP\nweb01 : ok=5 changed=1\n")); err != nil {
 		t.Fatalf("AppendLog() error = %v", err)
