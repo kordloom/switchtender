@@ -205,7 +205,11 @@ jobs:
           set -euo pipefail
           version="$(go list -m -f '{{.Version}}' github.com/kordloom/loomseal)"
           git clone --quiet https://github.com/kordloom/loomseal.git "$RUNNER_TEMP/loomseal"
-          git -C "$RUNNER_TEMP/loomseal" checkout --quiet "$version"
+          # A LoomSeal release made before its public repository began is tagged snapshot/<version>
+          # rather than <version>, so the pinned version is looked up under either.
+          ref="$version"
+          git -C "$RUNNER_TEMP/loomseal" rev-parse --verify --quiet "refs/tags/$ref" >/dev/null || ref="snapshot/$version"
+          git -C "$RUNNER_TEMP/loomseal" checkout --quiet "$ref"
           echo "SWITCHTENDER_LOOMSEAL_REPO=$RUNNER_TEMP/loomseal" >> "$GITHUB_ENV"
       - name: Install ansible for the drift contract
         run: pipx install ansible-core==2.18.1
@@ -276,7 +280,11 @@ jobs:
           version="$(go list -m -f '{{.Version}}' github.com/kordloom/loomseal)"
           echo "cross-checking against loomseal $version"
           git clone --quiet https://github.com/kordloom/loomseal.git ../loomseal
-          git -C ../loomseal checkout --quiet "$version"
+          # A LoomSeal release made before its public repository began is tagged snapshot/<version>
+          # rather than <version>, so the pinned version is looked up under either.
+          ref="$version"
+          git -C ../loomseal rev-parse --verify --quiet "refs/tags/$ref" >/dev/null || ref="snapshot/$version"
+          git -C ../loomseal checkout --quiet "$ref"
       # The ratchet turns a silent skip into a failure: if the checkout detection ever breaks,
       # this job must go red, not green over a suite that quietly did not run. The outcome
       # package's receipt-reason cross-check runs here too, because it needs the same checkout and
